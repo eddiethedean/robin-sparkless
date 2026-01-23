@@ -1,0 +1,24 @@
+[package]
+name = "robin-sparkless"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "robin_sparkless"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+pyo3 = { version = "0.21", features = ["abi3-py38", "auto-initialize"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+arrow = "52"
+arrow-csv = "52"
+parquet = "52"
+datafusion = "42"
+tokio = { version = "1", features = ["full"] }
+anyhow = "1.0"
+thiserror = "1.0"
+lazy_static = "1.4"
+
+[dev-dependencies]
+pyo3 = { version = "0.21", features = ["abi3-py38"] }
