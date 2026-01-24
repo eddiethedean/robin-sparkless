@@ -1,6 +1,7 @@
 use pyo3::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::sync::Arc;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum DataType {
@@ -131,11 +132,12 @@ fn data_type_to_arrow_type(data_type: &DataType) -> arrow::datatypes::DataType {
         DataType::Date => arrow::datatypes::DataType::Date32,
         DataType::Timestamp => arrow::datatypes::DataType::Timestamp(arrow::datatypes::TimeUnit::Microsecond, None),
         DataType::Array(inner) => {
-            arrow::datatypes::DataType::List(Box::new(arrow::datatypes::Field::new(
+            let item_field = arrow::datatypes::Field::new(
                 "item",
                 data_type_to_arrow_type(inner),
                 true,
-            )))
+            );
+            arrow::datatypes::DataType::List(Arc::new(item_field))
         }
         _ => arrow::datatypes::DataType::Utf8, // Default fallback
     }

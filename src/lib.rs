@@ -8,6 +8,7 @@ mod execution;
 mod functions;
 mod expression;
 mod lazy;
+mod arrow_conversion;
 
 use session::{SparkSession, SparkSessionBuilder, DataFrameReader};
 use dataframe::{DataFrame, GroupedData};

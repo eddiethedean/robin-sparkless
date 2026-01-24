@@ -1,4 +1,5 @@
 use pyo3::prelude::*;
+use pyo3::types::{PyDict, PyList};
 use arrow::record_batch::RecordBatch;
 use arrow::datatypes::Schema as ArrowSchema;
 use std::sync::Arc;
@@ -26,36 +27,19 @@ pub struct DataFrame {
 #[pymethods]
 impl DataFrame {
     #[new]
-    fn new(data: Vec<RecordBatch>, schema: ArrowSchema) -> PyResult<Self> {
-        let batch = data.first()
-            .ok_or_else(|| PyErr::new::<pyo3::exceptions::PyValueError, _>("No data provided"))?
-            .clone();
-        
-        let schema = Arc::new(schema);
+    fn new(_data: &PyAny, _schema: &PyAny) -> PyResult<Self> {
+        // Note: This constructor is for internal use only
+        // DataFrames should be created via SparkSession.createDataFrame()
+        // For now, create an empty DataFrame as a placeholder
+        let schema = Arc::new(ArrowSchema::new(vec![] as Vec<arrow::datatypes::Field>));
         let ctx = Arc::new(SessionContext::new());
         let runtime = Arc::new(Runtime::new().map_err(|e| {
             PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!("Failed to create runtime: {}", e))
         })?);
         
-        // Create a DataFrame from the RecordBatch using DataFusion
-        // Use read_batch to create a DataFrame from a single RecordBatch
-        let runtime = Runtime::new().map_err(|e| {
-            PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!("Failed to create runtime: {}", e))
-        })?;
-        
-        let df = runtime.block_on(async {
-            ctx.read_batch(batch.clone()).await
-        }).map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
-            format!("Failed to read batch: {}", e)
-        ))?;
-        
-        // Create logical plan from the DataFrame
-        let plan = df.logical_plan().clone();
-        let lazy_frame = LazyFrame::new(plan, ctx.clone());
-        
         Ok(DataFrame {
-            lazy_frame: Some(lazy_frame),
-            materialized: Some(Arc::new(batch)),
+            lazy_frame: None,
+            materialized: None,
             schema,
             ctx,
             runtime,
@@ -77,11 +61,11 @@ impl DataFrame {
         } else if let Some(lazy) = &self.lazy_frame {
             // Execute lazy plan to get count
             let result = self.runtime.block_on(async {
-                let df = self.ctx.read_logical_plan(lazy.plan().clone())?;
-                df.count().await
+                let batches = lazy.clone().collect().await?;
+                Ok::<usize, datafusion::error::DataFusionError>(batches.iter().map(|b| b.num_rows()).sum())
             });
             match result {
-                Ok(count) => Ok(count as usize),
+                Ok(count) => Ok(count),
                 Err(e) => Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
                     format!("Failed to count: {}", e)
                 )),
@@ -132,28 +116,46 @@ impl DataFrame {
         Ok(())
     }
     
-    fn collect(&self) -> PyResult<Vec<HashMap<String, Value>>> {
+    fn collect(&self, py: Python) -> PyResult<PyObject> {
         // Materialize if needed
         let batch = self.materialize_if_needed()?;
         
         let rows = record_batch_to_python_dicts(&batch);
-        let result: Vec<HashMap<String, Value>> = rows.into_iter()
-            .filter_map(|v| {
-                if let Value::Object(map) = v {
-                    Some(map.into_iter().collect())
-                } else {
-                    None
+        // Convert to Python list of dicts
+        let py_list = PyList::empty(py);
+        for row in rows {
+            if let Value::Object(map) = row {
+                let py_dict = PyDict::new(py);
+                for (k, v) in map {
+                    // Convert serde_json::Value to Python object
+                    let py_val: PyObject = match v {
+                        Value::String(s) => s.to_object(py),
+                        Value::Number(n) => {
+                            if let Some(i) = n.as_i64() {
+                                i.to_object(py)
+                            } else if let Some(f) = n.as_f64() {
+                                f.to_object(py)
+                            } else {
+                                n.to_string().to_object(py)
+                            }
+                        }
+                        Value::Bool(b) => b.to_object(py),
+                        Value::Null => py.None(),
+                        _ => v.to_string().to_object(py),
+                    };
+                    py_dict.set_item(k, py_val)?;
                 }
-            })
-            .collect();
-        Ok(result)
+                py_list.append(py_dict)?;
+            }
+        }
+        Ok(py_list.to_object(py))
     }
     
-    fn select(&self, cols: Vec<&str>) -> PyResult<DataFrame> {
+    fn select(&self, cols: Vec<String>) -> PyResult<DataFrame> {
         // Build lazy plan - this is a transformation
         if let Some(lazy) = &self.lazy_frame {
             let exprs: Vec<Expr> = cols.iter()
-                .map(|name| col(name))
+                .map(|name| datafusion::prelude::col(name.as_str()))
                 .collect();
             
             let new_lazy = lazy.clone().select(exprs);
@@ -161,7 +163,7 @@ impl DataFrame {
             // Infer new schema
             let new_fields: Vec<_> = cols.iter()
                 .filter_map(|name| {
-                    self.schema.fields().iter().find(|f| f.name() == *name)
+                    self.schema.fields().iter().find(|f| f.name() == name.as_str())
                 })
                 .cloned()
                 .collect();
@@ -198,7 +200,7 @@ impl DataFrame {
         }
     }
     
-    fn groupBy(&self, cols: Vec<&str>) -> PyResult<GroupedData> {
+    fn groupBy(&self, cols: Vec<String>) -> PyResult<GroupedData> {
         Python::with_gil(|py| {
             Ok(GroupedData {
                 df: Py::new(py, self.clone())?,
@@ -217,8 +219,8 @@ impl DataFrame {
         };
         
         if let (Some(left_lazy), Some(right_lazy)) = (&self.lazy_frame, &other.lazy_frame) {
-            let left_key = col(on);
-            let right_key = col(on);
+            let left_key = datafusion::prelude::col(on);
+            let right_key = datafusion::prelude::col(on);
             
             let new_lazy = left_lazy.clone().join(
                 right_lazy.clone(),
@@ -245,17 +247,18 @@ impl DataFrame {
         }
     }
     
-    fn sort(&self, cols: Vec<&str>, ascending: Option<bool>) -> PyResult<DataFrame> {
+    fn sort(&self, cols: Vec<String>, ascending: Option<bool>) -> PyResult<DataFrame> {
         let asc = ascending.unwrap_or(true);
         
         if let Some(lazy) = &self.lazy_frame {
-            let exprs: Vec<Expr> = cols.iter()
+            use datafusion::logical_expr::SortExpr;
+            let exprs: Vec<SortExpr> = cols.iter()
                 .map(|name| {
-                    let expr = col(name);
-                    if asc {
-                        expr
-                    } else {
-                        expr.sort(false, false) // descending
+                    let expr = datafusion::prelude::col(name.as_str());
+                    SortExpr {
+                        expr,
+                        asc,
+                        nulls_first: true,
                     }
                 })
                 .collect();
@@ -286,7 +289,7 @@ impl DataFrame {
     
     fn __getitem__(&self, key: &str) -> PyResult<Column> {
         if self.schema.fields().iter().any(|f| f.name() == key) {
-            Ok(Column::new(key.to_string()))
+            Ok(Column::from_name(key.to_string()))
         } else {
             Err(PyErr::new::<pyo3::exceptions::PyKeyError, _>(
                 format!("Column '{}' not found", key)
@@ -296,20 +299,86 @@ impl DataFrame {
 }
 
 impl DataFrame {
-    /// Create DataFrame from a logical plan (for internal use)
-    pub fn from_logical_plan(plan: LogicalPlan, ctx: Arc<SessionContext>) -> DataFrame {
-        let runtime = Arc::new(Runtime::new().expect("Failed to create runtime"));
+    /// Create an empty DataFrame (internal use)
+    pub fn empty() -> PyResult<Self> {
+        let schema = Arc::new(ArrowSchema::new(vec![] as Vec<arrow::datatypes::Field>));
+        let ctx = Arc::new(SessionContext::new());
+        let runtime = Arc::new(Runtime::new().map_err(|e| {
+            PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!("Failed to create runtime: {}", e))
+        })?);
         
-        // Get schema from plan
-        let schema = plan.schema();
-        
-        DataFrame {
-            lazy_frame: Some(LazyFrame::new(plan, ctx.clone())),
+        Ok(DataFrame {
+            lazy_frame: None,
             materialized: None,
-            schema: Arc::new(schema.as_ref().to_owned()),
+            schema,
             ctx,
             runtime,
-        }
+        })
+    }
+    
+    /// Create DataFrame from RecordBatch (internal use)
+    pub fn from_record_batch(batch: RecordBatch, schema: Arc<ArrowSchema>) -> PyResult<Self> {
+        let ctx = Arc::new(SessionContext::new());
+        let runtime = Arc::new(Runtime::new().map_err(|e| {
+            PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!("Failed to create runtime: {}", e))
+        })?);
+        
+        // Register the batch as a table using MemTable
+        let table_name = format!("table_{}", std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos());
+        
+        use datafusion::datasource::MemTable;
+        use crate::arrow_conversion::arrow_to_df_record_batch;
+        
+        // Convert Arrow RecordBatch to DataFusion RecordBatch using conversion utility
+        let df_batch = arrow_to_df_record_batch(&batch)
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
+                format!("Failed to convert RecordBatch: {}", e)
+            ))?;
+        
+        let df_schema = df_batch.schema();
+        
+        // MemTable::try_new expects Arc<Schema> (DataFusion's Schema type)
+        let mem_table = MemTable::try_new(df_schema.clone(), vec![vec![df_batch]])
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
+                format!("Failed to create MemTable: {}", e)
+            ))?;
+        
+        // Register table and get logical plan
+        let plan = runtime.block_on(async {
+            ctx.register_table(&table_name, Arc::new(mem_table))
+                .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
+                    format!("Failed to register table: {}", e)
+                ))?;
+            
+            // Create DataFrame from table and get its logical plan
+            let df = ctx.table(&table_name).await
+                .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
+                    format!("Failed to create table DataFrame: {}", e)
+                ))?;
+            
+            Ok::<LogicalPlan, PyErr>(df.logical_plan().clone())
+        })?;
+        
+        let lazy_frame = LazyFrame::new(plan, ctx.clone());
+        
+        Ok(DataFrame {
+            lazy_frame: Some(lazy_frame),
+            materialized: Some(Arc::new(batch)),
+            schema,
+            ctx,
+            runtime,
+        })
+    }
+    
+    /// Create DataFusion DataFrame from a logical plan (for internal use)
+    /// Note: This is a helper that executes the plan - actual execution happens in LazyFrame
+    pub fn from_logical_plan(_plan: LogicalPlan, _ctx: Arc<SessionContext>) -> datafusion::error::Result<datafusion::dataframe::DataFrame> {
+        // This method is not actually used - LazyFrame handles execution directly
+        // Keeping for API compatibility but it won't be called
+        Err(datafusion::error::DataFusionError::NotImplemented("Use LazyFrame.collect() instead".to_string()))
     }
     
     /// Materialize the lazy frame if needed
@@ -354,9 +423,24 @@ impl GroupedData {
         
         if let Some(lazy) = &df.lazy_frame {
             let group_expr: Vec<Expr> = self.grouping_cols.iter()
-                .map(|name| col(name))
+                .map(|name| datafusion::prelude::col(name.as_str()))
                 .collect();
-            let aggr_expr: Vec<Expr> = vec![count(lit(1))];
+            // Use count aggregation - count all rows
+            // Create count expression using DataFusion's aggregation functions
+            use datafusion::logical_expr::expr::AggregateFunction;
+            use std::sync::Arc;
+            use crate::functions::get_builtin_aggregate;
+            
+            let count_udf = get_builtin_aggregate("count");
+            let count_expr = Expr::AggregateFunction(AggregateFunction {
+                func: count_udf,
+                distinct: false,
+                args: vec![datafusion::prelude::lit(1i64)],
+                filter: None,
+                order_by: None,
+                null_treatment: None,
+            });
+            let aggr_expr: Vec<Expr> = vec![count_expr];
             
             let new_lazy = lazy.clone().aggregate(group_expr, aggr_expr);
             
@@ -377,7 +461,7 @@ impl GroupedData {
         
         if let Some(lazy) = &df.lazy_frame {
             let group_expr: Vec<Expr> = self.grouping_cols.iter()
-                .map(|name| col(name))
+                .map(|name| datafusion::prelude::col(name.as_str()))
                 .collect();
             
             // Parse aggregation expressions from dict

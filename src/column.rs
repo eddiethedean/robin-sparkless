@@ -17,7 +17,7 @@ impl Column {
     fn new(name: String) -> Self {
         Column {
             name: name.clone(),
-            expr: col(&name),
+            expr: datafusion::prelude::col(&name),
         }
     }
     
@@ -32,54 +32,60 @@ impl Column {
     // Comparison operators
     fn __lt__(&self, other: &PyAny) -> PyResult<Column> {
         let other_expr = pyany_to_expr(other, None)?;
+        let other_display = get_expr_display_name(&other_expr);
         let expr = build_comparison(self.expr.clone(), "<", other_expr)?;
         Ok(Column {
-            name: format!("({} < {})", self.name, get_expr_display_name(&other_expr)),
+            name: format!("({} < {})", self.name, other_display),
             expr,
         })
     }
     
     fn __le__(&self, other: &PyAny) -> PyResult<Column> {
         let other_expr = pyany_to_expr(other, None)?;
+        let other_display = get_expr_display_name(&other_expr);
         let expr = build_comparison(self.expr.clone(), "<=", other_expr)?;
         Ok(Column {
-            name: format!("({} <= {})", self.name, get_expr_display_name(&other_expr)),
+            name: format!("({} <= {})", self.name, other_display),
             expr,
         })
     }
     
     fn __gt__(&self, other: &PyAny) -> PyResult<Column> {
         let other_expr = pyany_to_expr(other, None)?;
+        let other_display = get_expr_display_name(&other_expr);
         let expr = build_comparison(self.expr.clone(), ">", other_expr)?;
         Ok(Column {
-            name: format!("({} > {})", self.name, get_expr_display_name(&other_expr)),
+            name: format!("({} > {})", self.name, other_display),
             expr,
         })
     }
     
     fn __ge__(&self, other: &PyAny) -> PyResult<Column> {
         let other_expr = pyany_to_expr(other, None)?;
+        let other_display = get_expr_display_name(&other_expr);
         let expr = build_comparison(self.expr.clone(), ">=", other_expr)?;
         Ok(Column {
-            name: format!("({} >= {})", self.name, get_expr_display_name(&other_expr)),
+            name: format!("({} >= {})", self.name, other_display),
             expr,
         })
     }
     
     fn __eq__(&self, other: &PyAny) -> PyResult<Column> {
         let other_expr = pyany_to_expr(other, None)?;
+        let other_display = get_expr_display_name(&other_expr);
         let expr = build_comparison(self.expr.clone(), "=", other_expr)?;
         Ok(Column {
-            name: format!("({} = {})", self.name, get_expr_display_name(&other_expr)),
+            name: format!("({} = {})", self.name, other_display),
             expr,
         })
     }
     
     fn __ne__(&self, other: &PyAny) -> PyResult<Column> {
         let other_expr = pyany_to_expr(other, None)?;
+        let other_display = get_expr_display_name(&other_expr);
         let expr = build_comparison(self.expr.clone(), "!=", other_expr)?;
         Ok(Column {
-            name: format!("({} != {})", self.name, get_expr_display_name(&other_expr)),
+            name: format!("({} != {})", self.name, other_display),
             expr,
         })
     }
@@ -87,36 +93,40 @@ impl Column {
     // Arithmetic operators
     fn __add__(&self, other: &PyAny) -> PyResult<Column> {
         let other_expr = pyany_to_expr(other, None)?;
+        let other_display = get_expr_display_name(&other_expr);
         let expr = build_arithmetic(self.expr.clone(), "+", other_expr)?;
         Ok(Column {
-            name: format!("({} + {})", self.name, get_expr_display_name(&other_expr)),
+            name: format!("({} + {})", self.name, other_display),
             expr,
         })
     }
     
     fn __sub__(&self, other: &PyAny) -> PyResult<Column> {
         let other_expr = pyany_to_expr(other, None)?;
+        let other_display = get_expr_display_name(&other_expr);
         let expr = build_arithmetic(self.expr.clone(), "-", other_expr)?;
         Ok(Column {
-            name: format!("({} - {})", self.name, get_expr_display_name(&other_expr)),
+            name: format!("({} - {})", self.name, other_display),
             expr,
         })
     }
     
     fn __mul__(&self, other: &PyAny) -> PyResult<Column> {
         let other_expr = pyany_to_expr(other, None)?;
+        let other_display = get_expr_display_name(&other_expr);
         let expr = build_arithmetic(self.expr.clone(), "*", other_expr)?;
         Ok(Column {
-            name: format!("({} * {})", self.name, get_expr_display_name(&other_expr)),
+            name: format!("({} * {})", self.name, other_display),
             expr,
         })
     }
     
     fn __truediv__(&self, other: &PyAny) -> PyResult<Column> {
         let other_expr = pyany_to_expr(other, None)?;
+        let other_display = get_expr_display_name(&other_expr);
         let expr = build_arithmetic(self.expr.clone(), "/", other_expr)?;
         Ok(Column {
-            name: format!("({} / {})", self.name, get_expr_display_name(&other_expr)),
+            name: format!("({} / {})", self.name, other_display),
             expr,
         })
     }
@@ -146,7 +156,7 @@ impl Column {
     }
     
     fn like(&self, pattern: &str) -> PyResult<Column> {
-        let pattern_expr = lit(pattern);
+        let pattern_expr = datafusion::prelude::lit(pattern);
         let expr = self.expr.clone().like(pattern_expr);
         Ok(Column {
             name: format!("({} LIKE '{}')", self.name, pattern),
@@ -156,6 +166,14 @@ impl Column {
 }
 
 impl Column {
+    /// Create a new Column from a name (internal use)
+    pub fn from_name(name: String) -> Self {
+        Column {
+            name: name.clone(),
+            expr: datafusion::prelude::col(&name),
+        }
+    }
+    
     pub fn from_expr(expr: Expr, name: Option<String>) -> Self {
         let display_name = name.unwrap_or_else(|| get_expr_display_name(&expr));
         Column {
@@ -178,13 +196,16 @@ fn get_expr_display_name(expr: &Expr) -> String {
     match expr {
         Expr::Column(col) => col.name.clone(),
         Expr::Literal(lit) => format!("{:?}", lit),
-        Expr::BinaryExpr { left, op, right } => {
+        Expr::BinaryExpr(binary_expr) => {
             format!("({} {:?} {})", 
-                get_expr_display_name(left), 
-                op, 
-                get_expr_display_name(right))
+                get_expr_display_name(&binary_expr.left), 
+                binary_expr.op, 
+                get_expr_display_name(&binary_expr.right))
         }
-        Expr::Alias(expr, alias) => alias.clone(),
+        Expr::Alias(alias_expr) => {
+            // Alias has expr and name fields
+            format!("{}", alias_expr.name)
+        }
         _ => format!("{:?}", expr),
     }
 }

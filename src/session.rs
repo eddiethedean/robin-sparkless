@@ -1,9 +1,13 @@
 use pyo3::prelude::*;
+use pyo3::types::{PyType, PyDict};
+use pyo3::IntoPy;
 use arrow::record_batch::RecordBatch;
 use arrow::array::*;
 use arrow::datatypes::*;
 use std::sync::Arc;
 use std::collections::HashMap;
+use datafusion::execution::context::SessionContext;
+use tokio::runtime::Runtime;
 use crate::dataframe::DataFrame;
 use crate::execution::ExecutionEngine;
 use serde_json::Value;
@@ -26,19 +30,19 @@ impl SparkSessionBuilder {
         }
     }
     
-    fn appName(&mut self, name: &str) -> PyResult<&mut Self> {
+    fn appName(&mut self, name: &str) -> PyResult<()> {
         self.app_name = Some(name.to_string());
-        Ok(self)
+        Ok(())
     }
     
-    fn master(&mut self, master: &str) -> PyResult<&mut Self> {
+    fn master(&mut self, master: &str) -> PyResult<()> {
         self.master = Some(master.to_string());
-        Ok(self)
+        Ok(())
     }
     
-    fn config(&mut self, key: &str, value: &str) -> PyResult<&mut Self> {
+    fn config(&mut self, key: &str, value: &str) -> PyResult<()> {
         self.config.insert(key.to_string(), value.to_string());
-        Ok(self)
+        Ok(())
     }
     
     fn getOrCreate(&self) -> PyResult<SparkSession> {
@@ -61,6 +65,7 @@ pub struct SparkSession {
 #[pymethods]
 impl SparkSession {
     #[new]
+    #[pyo3(signature = (app_name=None, master=None, config=HashMap::new()))]
     fn new(
         app_name: Option<String>,
         master: Option<String>,
@@ -74,13 +79,13 @@ impl SparkSession {
         }
     }
     
-    #[staticmethod]
-    fn builder() -> SparkSessionBuilder {
-        SparkSessionBuilder::new()
+    #[classmethod]
+    fn builder(_cls: &PyType) -> PyResult<SparkSessionBuilder> {
+        Ok(SparkSessionBuilder::new())
     }
     
-    #[staticmethod]
-    fn getActiveSession() -> PyResult<Option<SparkSession>> {
+    #[classmethod]
+    fn getActiveSession(_cls: &PyType) -> PyResult<Option<SparkSession>> {
         // In a real implementation, you'd maintain a global session
         // For now, return None
         Ok(None)
@@ -121,8 +126,10 @@ impl SparkSession {
     }
     
     fn read(&self) -> PyResult<DataFrameReader> {
-        Ok(DataFrameReader {
-            session: Python::with_gil(|py| Py::new(py, self.clone())?),
+        Python::with_gil(|py| {
+            Ok(DataFrameReader {
+                session: Py::new(py, self.clone())?,
+            })
         })
     }
     
@@ -131,7 +138,10 @@ impl SparkSession {
         // This is simplified - in production, you'd properly execute the query
         Python::with_gil(|py| {
             py.allow_threads(|| {
-                let rt = tokio::runtime::Runtime::new().unwrap();
+                let rt = tokio::runtime::Runtime::new()
+                    .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
+                        format!("Failed to create runtime: {}", e)
+                    ))?;
                 rt.block_on(async {
                     // Placeholder - would execute actual SQL
                     self.create_empty_dataframe()
@@ -230,7 +240,7 @@ impl SparkSession {
                 format!("Failed to create RecordBatch: {}", e)
             ))?;
         
-        Ok(DataFrame::new(vec![batch], (*schema).clone())?)
+        DataFrame::from_record_batch(batch, schema)
     }
     
     fn create_dataframe_from_list(
@@ -264,7 +274,7 @@ impl SparkSession {
                 format!("Failed to create RecordBatch: {}", e)
             ))?;
         
-        Ok(DataFrame::new(vec![batch], (*schema).clone())?)
+        DataFrame::from_record_batch(batch, schema)
     }
     
     fn create_dataframe_from_dict_list(
@@ -324,7 +334,7 @@ impl SparkSession {
                 format!("Failed to create RecordBatch: {}", e)
             ))?;
         
-        Ok(DataFrame::new(vec![batch], (*schema).clone())?)
+        DataFrame::from_record_batch(batch, schema)
     }
     
     fn infer_schema_from_row(&self, row: &PyAny) -> PyResult<arrow::datatypes::Schema> {
@@ -358,7 +368,7 @@ impl SparkSession {
         sample: &PyAny,
     ) -> PyResult<(Field, ColumnBuilder)> {
         // Infer type from sample value
-        if sample.is_instance_of::<pyo3::types::PyLong>()? {
+        if sample.is_instance_of::<pyo3::types::PyLong>() {
             if let Ok(val) = sample.extract::<i64>() {
                 if val >= i32::MIN as i64 && val <= i32::MAX as i64 {
                     Ok((
@@ -377,12 +387,12 @@ impl SparkSession {
                     ColumnBuilder::Int64(Int64Builder::new()),
                 ))
             }
-        } else if sample.is_instance_of::<pyo3::types::PyFloat>()? {
+        } else if sample.is_instance_of::<pyo3::types::PyFloat>() {
             Ok((
                 Field::new(name, DataType::Float64, true),
                 ColumnBuilder::Float64(Float64Builder::new()),
             ))
-        } else if sample.is_instance_of::<pyo3::types::PyBool>()? {
+        } else if sample.is_instance_of::<pyo3::types::PyBool>() {
             Ok((
                 Field::new(name, DataType::Boolean, true),
                 ColumnBuilder::Boolean(BooleanBuilder::new()),
@@ -438,8 +448,8 @@ impl SparkSession {
         Ok(())
     }
     
-    fn finish_builder(&self, builder: ColumnBuilder) -> Arc<dyn Array> {
-        match builder {
+    fn finish_builder(&self, mut builder: ColumnBuilder) -> Arc<dyn Array> {
+        match &mut builder {
             ColumnBuilder::String(b) => Arc::new(b.finish()),
             ColumnBuilder::Int32(b) => Arc::new(b.finish()),
             ColumnBuilder::Int64(b) => Arc::new(b.finish()),
@@ -447,11 +457,10 @@ impl SparkSession {
             ColumnBuilder::Boolean(b) => Arc::new(b.finish()),
         }
     }
-}
-
-    fn create_empty_dataframe(&self) -> DataFrame {
-        let schema = Arc::new(arrow::datatypes::Schema::new(vec![]));
-        DataFrame::new(vec![], (*schema).clone()).unwrap()
+    
+    fn create_empty_dataframe(&self) -> PyResult<DataFrame> {
+        // Create empty DataFrame using the internal constructor
+        DataFrame::empty()
     }
 }
 
@@ -476,15 +485,15 @@ impl DataFrameReader {
             let session = self.session.borrow(py);
             // In production, use arrow-csv to read the file
             // For now, return empty DataFrame
-            Ok(session.create_empty_dataframe())
+            session.create_empty_dataframe()
         })
     }
     
-    fn parquet(&self, path: &str) -> PyResult<DataFrame> {
+        fn parquet(&self, path: &str) -> PyResult<DataFrame> {
         // Read Parquet file
         Python::with_gil(|py| {
             let session = self.session.borrow(py);
-            Ok(session.create_empty_dataframe())
+            session.create_empty_dataframe()
         })
     }
     
@@ -492,7 +501,7 @@ impl DataFrameReader {
         // Read JSON file
         Python::with_gil(|py| {
             let session = self.session.borrow(py);
-            Ok(session.create_empty_dataframe())
+            session.create_empty_dataframe()
         })
     }
 }

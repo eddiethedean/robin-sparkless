@@ -6,6 +6,13 @@ use datafusion::execution::context::SessionContext;
 use std::sync::Arc;
 use anyhow::Result;
 
+use crate::arrow_conversion::df_to_arrow_record_batch;
+
+// Helper to convert DataFusion RecordBatch to Arrow RecordBatch
+fn convert_record_batch(df_batch: datafusion::arrow::record_batch::RecordBatch) -> RecordBatch {
+    df_to_arrow_record_batch(&df_batch).unwrap()
+}
+
 pub struct ExecutionEngine {
     ctx: SessionContext,
 }
@@ -20,7 +27,11 @@ impl ExecutionEngine {
     pub async fn execute_query(&self, sql: &str) -> Result<Vec<RecordBatch>> {
         let df = self.ctx.sql(sql).await?;
         let results = df.collect().await?;
-        Ok(results)
+        // Convert DataFusion RecordBatch to Arrow RecordBatch
+        let converted: Vec<RecordBatch> = results.into_iter()
+            .map(|b| convert_record_batch(b))
+            .collect();
+        Ok(converted)
     }
     
     pub fn register_table(&self, name: &str, batch: RecordBatch) -> Result<()> {

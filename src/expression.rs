@@ -65,11 +65,13 @@ pub fn pyany_to_expr(value: &PyAny, schema: Option<&arrow::datatypes::Schema>) -
 
 /// Build binary expression from operator and operands
 pub fn build_binary_expr(left: Expr, op: Operator, right: Expr) -> Expr {
-    Expr::BinaryExpr {
-        left: Box::new(left),
-        op,
-        right: Box::new(right),
-    }
+    Expr::BinaryExpr(
+        datafusion::logical_expr::BinaryExpr {
+            left: Box::new(left),
+            op,
+            right: Box::new(right),
+        }
+    )
 }
 
 /// Build comparison operators
