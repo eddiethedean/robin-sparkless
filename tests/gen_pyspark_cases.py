@@ -56,6 +56,70 @@ def case_filter_age_gt_30(spark: SparkSession) -> Dict[str, Any]:
     }
 
 
+def case_groupby_count(spark: SparkSession) -> Dict[str, Any]:
+    data = [
+        (1, "Alice", "Sales"),
+        (2, "Bob", "Sales"),
+        (3, "Charlie", "Engineering"),
+        (4, "David", "Engineering"),
+        (5, "Eve", "Sales"),
+    ]
+    df = spark.createDataFrame(data, ["id", "name", "department"])
+
+    out_df = df.groupBy("department").count().orderBy("department")
+
+    input_schema = schema_to_json(df.schema)
+    input_rows = df_to_rows(df)
+
+    expected_schema = schema_to_json(out_df.schema)
+    expected_rows = df_to_rows(out_df)
+
+    return {
+        "name": "groupby_count",
+        "pyspark_version": spark.version,
+        "input": {"schema": input_schema, "rows": input_rows},
+        "operations": [
+            {"op": "groupBy", "columns": ["department"]},
+            {"op": "agg", "aggregations": [{"func": "count", "alias": "count"}]},
+            {"op": "orderBy", "columns": ["department"], "ascending": [True]},
+        ],
+        "expected": {"schema": expected_schema, "rows": expected_rows},
+    }
+
+
+def case_groupby_with_nulls(spark: SparkSession) -> Dict[str, Any]:
+    from pyspark.sql.types import StructType, StructField, StringType, IntegerType
+
+    schema = StructType(
+        [
+            StructField("id", IntegerType(), True),
+            StructField("category", StringType(), True),
+        ]
+    )
+    data = [(1, "A"), (2, "A"), (3, None), (4, "B"), (5, None)]
+    df = spark.createDataFrame(data, schema=schema)
+
+    out_df = df.groupBy("category").count().orderBy("category")
+
+    input_schema = schema_to_json(df.schema)
+    input_rows = df_to_rows(df)
+
+    expected_schema = schema_to_json(out_df.schema)
+    expected_rows = df_to_rows(out_df)
+
+    return {
+        "name": "groupby_with_nulls",
+        "pyspark_version": spark.version,
+        "input": {"schema": input_schema, "rows": input_rows},
+        "operations": [
+            {"op": "groupBy", "columns": ["category"]},
+            {"op": "agg", "aggregations": [{"func": "count", "alias": "count"}]},
+            {"op": "orderBy", "columns": ["category"], "ascending": [True]},
+        ],
+        "expected": {"schema": expected_schema, "rows": expected_rows},
+    }
+
+
 def main() -> None:
     spark = SparkSession.builder.appName("robin_sparkless_parity_gen").getOrCreate()
 
@@ -64,7 +128,8 @@ def main() -> None:
 
     fixtures: List[Dict[str, Any]] = [
         case_filter_age_gt_30(spark),
-        # Add more scenarios here over time.
+        case_groupby_count(spark),
+        case_groupby_with_nulls(spark),
     ]
 
     for fx in fixtures:

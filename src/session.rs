@@ -1,4 +1,4 @@
-use polars::prelude::{DataFrame as PlDataFrame, PolarsError};
+use polars::prelude::{DataFrame as PlDataFrame, NamedFrom, PolarsError, Series};
 use std::collections::HashMap;
 use crate::dataframe::DataFrame;
 use crate::schema::StructType;
@@ -64,7 +64,7 @@ impl SparkSession {
         SparkSessionBuilder::new()
     }
 
-    /// Create a DataFrame from a vector of tuples
+    /// Create a DataFrame from a vector of tuples (i64, i64, String)
     /// 
     /// # Example
     /// ```
@@ -72,22 +72,41 @@ impl SparkSession {
     /// 
     /// let spark = SparkSession::builder().app_name("test").get_or_create();
     /// let df = spark.create_dataframe(vec![
-    ///     (1, "Alice"),
-    ///     (2, "Bob"),
-    /// ], vec!["id", "name"]);
+    ///     (1, 25, "Alice".to_string()),
+    ///     (2, 30, "Bob".to_string()),
+    /// ], vec!["id", "age", "name"])?;
     /// ```
-    pub fn create_dataframe<T>(
+    pub fn create_dataframe(
         &self,
-        data: Vec<T>,
+        data: Vec<(i64, i64, String)>,
         column_names: Vec<&str>,
-    ) -> Result<DataFrame, PolarsError>
-    where
-        T: Clone,
-        DataFrame: FromIterator<T>,
-    {
-        // For now, we'll use a simpler approach with Polars
-        // This is a placeholder - full implementation would handle various tuple types
-        todo!("Implement create_dataframe for tuples")
+    ) -> Result<DataFrame, PolarsError> {
+        if column_names.len() != 3 {
+            return Err(PolarsError::ComputeError(
+                format!(
+                    "Expected 3 column names for (i64, i64, String) tuples, got {}",
+                    column_names.len()
+                )
+                .into(),
+            ));
+        }
+
+        let mut cols: Vec<Series> = Vec::with_capacity(3);
+
+        // First column: i64
+        let col0: Vec<i64> = data.iter().map(|t| t.0).collect();
+        cols.push(Series::new(column_names[0].into(), col0));
+
+        // Second column: i64
+        let col1: Vec<i64> = data.iter().map(|t| t.1).collect();
+        cols.push(Series::new(column_names[1].into(), col1));
+
+        // Third column: String
+        let col2: Vec<String> = data.iter().map(|t| t.2.clone()).collect();
+        cols.push(Series::new(column_names[2].into(), col2));
+
+        let pl_df = PlDataFrame::new(cols.iter().map(|s| s.clone().into()).collect())?;
+        Ok(DataFrame::from_polars(pl_df))
     }
 
     /// Create a DataFrame from a Polars DataFrame

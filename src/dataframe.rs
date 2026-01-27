@@ -1,4 +1,4 @@
-use polars::prelude::{col, DataFrame as PlDataFrame, Expr, PolarsError};
+use polars::prelude::{col, DataFrame as PlDataFrame, Expr, IntoLazy, PolarsError};
 use crate::column::Column;
 use crate::schema::StructType;
 use std::sync::Arc;
@@ -71,6 +71,62 @@ impl DataFrame {
             return Err(PolarsError::ColumnNotFound(name.to_string().into()));
         }
         Ok(Column::new(name.to_string()))
+    }
+
+    /// Group by columns (returns GroupedData for aggregation)
+    pub fn group_by(&self, column_names: Vec<&str>) -> Result<GroupedData, PolarsError> {
+        use polars::prelude::*;
+        let exprs: Vec<Expr> = column_names.iter().map(|name| col(*name)).collect();
+        let lazy_grouped = self.df.as_ref().clone().lazy().group_by(exprs);
+        Ok(GroupedData {
+            lazy_grouped,
+            grouping_cols: column_names.iter().map(|s| s.to_string()).collect(),
+        })
+    }
+
+    /// Order by columns (sort)
+    pub fn order_by(
+        &self,
+        column_names: Vec<&str>,
+        ascending: Vec<bool>,
+    ) -> Result<DataFrame, PolarsError> {
+        use polars::prelude::*;
+        // Ensure ascending vec matches column_names length, defaulting to true
+        let mut asc = ascending;
+        while asc.len() < column_names.len() {
+            asc.push(true);
+        }
+        asc.truncate(column_names.len());
+
+        // Use lazy sort for consistency with other operations
+        let lf = self.df.as_ref().clone().lazy();
+        let exprs: Vec<Expr> = column_names.iter().map(|name| col(*name)).collect();
+        let sorted = lf.sort_by_exprs(exprs, SortMultipleOptions::new().with_order_descending_multi(asc));
+        let pl_df = sorted.collect()?;
+        Ok(crate::dataframe::DataFrame::from_polars(pl_df))
+    }
+}
+
+/// GroupedData - represents a DataFrame grouped by certain columns
+/// Similar to PySpark's GroupedData
+pub struct GroupedData {
+    lazy_grouped: polars::prelude::LazyGroupBy,
+    grouping_cols: Vec<String>,
+}
+
+impl GroupedData {
+    /// Count rows in each group
+    pub fn count(&self) -> Result<DataFrame, PolarsError> {
+        use polars::prelude::*;
+        let agg_expr = vec![len().alias("count")];
+        let lf = self.lazy_grouped.clone().agg(agg_expr);
+        let pl_df = lf.collect()?;
+        Ok(crate::dataframe::DataFrame::from_polars(pl_df))
+    }
+
+    /// Get grouping columns
+    pub fn grouping_columns(&self) -> &[String] {
+        &self.grouping_cols
     }
 }
 

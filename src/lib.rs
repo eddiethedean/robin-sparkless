@@ -11,7 +11,7 @@ pub mod functions;
 pub mod expression;
 
 pub use session::{SparkSession, SparkSessionBuilder, DataFrameReader};
-pub use dataframe::DataFrame;
+pub use dataframe::{DataFrame, GroupedData};
 pub use column::Column;
 pub use schema::{StructType, StructField};
 pub use functions::*;

@@ -1,0 +1,95 @@
+{
+  "name": "groupby_count",
+  "pyspark_version": "3.5.0",
+  "input": {
+    "schema": [
+      {
+        "name": "id",
+        "type": "bigint"
+      },
+      {
+        "name": "name",
+        "type": "string"
+      },
+      {
+        "name": "department",
+        "type": "string"
+      }
+    ],
+    "rows": [
+      [
+        1,
+        "Alice",
+        "Sales"
+      ],
+      [
+        2,
+        "Bob",
+        "Sales"
+      ],
+      [
+        3,
+        "Charlie",
+        "Engineering"
+      ],
+      [
+        4,
+        "David",
+        "Engineering"
+      ],
+      [
+        5,
+        "Eve",
+        "Sales"
+      ]
+    ]
+  },
+  "operations": [
+    {
+      "op": "groupBy",
+      "columns": [
+        "department"
+      ]
+    },
+    {
+      "op": "agg",
+      "aggregations": [
+        {
+          "func": "count",
+          "alias": "count"
+        }
+      ]
+    },
+    {
+      "op": "orderBy",
+      "columns": [
+        "department"
+      ],
+      "ascending": [
+        true
+      ]
+    }
+  ],
+  "expected": {
+    "schema": [
+      {
+        "name": "department",
+        "type": "string"
+      },
+      {
+        "name": "count",
+        "type": "bigint"
+      }
+    ],
+    "rows": [
+      [
+        "Engineering",
+        2
+      ],
+      [
+        "Sales",
+        3
+      ]
+    ]
+  }
+}
