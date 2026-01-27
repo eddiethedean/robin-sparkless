@@ -1,0 +1,81 @@
+{
+  "name": "read_json",
+  "pyspark_version": "3.5.0",
+  "input": {
+    "schema": [
+      {
+        "name": "age",
+        "type": "bigint"
+      },
+      {
+        "name": "id",
+        "type": "bigint"
+      },
+      {
+        "name": "name",
+        "type": "string"
+      }
+    ],
+    "rows": [
+      [
+        25,
+        1,
+        "Alice"
+      ],
+      [
+        30,
+        2,
+        "Bob"
+      ],
+      [
+        35,
+        3,
+        "Charlie"
+      ]
+    ],
+    "file_source": {
+      "format": "json",
+      "content": "{\"id\":1,\"age\":25,\"name\":\"Alice\"}\n{\"id\":2,\"age\":30,\"name\":\"Bob\"}\n{\"id\":3,\"age\":35,\"name\":\"Charlie\"}\n"
+    }
+  },
+  "operations": [
+    {
+      "op": "filter",
+      "expr": "col('age') > 30"
+    },
+    {
+      "op": "select",
+      "columns": [
+        "name",
+        "age"
+      ]
+    },
+    {
+      "op": "orderBy",
+      "columns": [
+        "name"
+      ],
+      "ascending": [
+        true
+      ]
+    }
+  ],
+  "expected": {
+    "schema": [
+      {
+        "name": "name",
+        "type": "string"
+      },
+      {
+        "name": "age",
+        "type": "bigint"
+      }
+    ],
+    "rows": [
+      [
+        "Charlie",
+        35
+      ]
+    ]
+  }
+}

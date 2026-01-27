@@ -1,7 +1,7 @@
-use polars::prelude::{DataFrame as PlDataFrame, NamedFrom, PolarsError, Series};
+use polars::prelude::{DataFrame as PlDataFrame, LazyCsvReader, LazyFrame, LazyJsonLineReader, NamedFrom, PolarsError, ScanArgsParquet, Series};
 use std::collections::HashMap;
+use std::path::Path;
 use crate::dataframe::DataFrame;
-use crate::schema::StructType;
 
 /// Builder for creating a SparkSession with configuration options
 pub struct SparkSessionBuilder {
@@ -116,22 +116,72 @@ impl SparkSession {
 
     /// Read a CSV file.
     ///
-    /// NOTE: IO helpers are placeholders; hook up Polars readers as needed.
-    pub fn read_csv(&self, path: impl AsRef<std::path::Path>) -> Result<DataFrame, PolarsError> {
-        let _ = path;
-        Err(PolarsError::InvalidOperation("read_csv not implemented".into()))
+    /// Uses Polars' CSV reader with default options:
+    /// - Header row is inferred (default: true)
+    /// - Schema is inferred from first 100 rows
+    ///
+    /// # Example
+    /// ```
+    /// use robin_sparkless::SparkSession;
+    ///
+    /// let spark = SparkSession::builder().app_name("test").get_or_create();
+    /// let df = spark.read_csv("data.csv")?;
+    /// ```
+    pub fn read_csv(&self, path: impl AsRef<Path>) -> Result<DataFrame, PolarsError> {
+        use polars::prelude::*;
+        let path = path.as_ref();
+        // Use LazyCsvReader - call finish() to get LazyFrame, then collect
+        let lf = LazyCsvReader::new(path)
+            .with_has_header(true)
+            .with_infer_schema_length(Some(100))
+            .finish()?;
+        let pl_df = lf.collect()?;
+        Ok(crate::dataframe::DataFrame::from_polars(pl_df))
     }
 
-    /// Read a Parquet file
-    pub fn read_parquet(&self, path: impl AsRef<std::path::Path>) -> Result<DataFrame, PolarsError> {
-        let _ = path;
-        Err(PolarsError::InvalidOperation("read_parquet not implemented".into()))
+    /// Read a Parquet file.
+    ///
+    /// Uses Polars' Parquet reader. Parquet files have embedded schema, so
+    /// schema inference is automatic.
+    ///
+    /// # Example
+    /// ```
+    /// use robin_sparkless::SparkSession;
+    ///
+    /// let spark = SparkSession::builder().app_name("test").get_or_create();
+    /// let df = spark.read_parquet("data.parquet")?;
+    /// ```
+    pub fn read_parquet(&self, path: impl AsRef<Path>) -> Result<DataFrame, PolarsError> {
+        use polars::prelude::*;
+        let path = path.as_ref();
+        // Use LazyFrame::scan_parquet
+        let lf = LazyFrame::scan_parquet(path, ScanArgsParquet::default())?;
+        let pl_df = lf.collect()?;
+        Ok(crate::dataframe::DataFrame::from_polars(pl_df))
     }
 
-    /// Read a JSON file
-    pub fn read_json(&self, path: impl AsRef<std::path::Path>) -> Result<DataFrame, PolarsError> {
-        let _ = path;
-        Err(PolarsError::InvalidOperation("read_json not implemented".into()))
+    /// Read a JSON file (JSONL format - one JSON object per line).
+    ///
+    /// Uses Polars' JSONL reader with default options:
+    /// - Schema is inferred from first 100 rows
+    ///
+    /// # Example
+    /// ```
+    /// use robin_sparkless::SparkSession;
+    ///
+    /// let spark = SparkSession::builder().app_name("test").get_or_create();
+    /// let df = spark.read_json("data.json")?;
+    /// ```
+    pub fn read_json(&self, path: impl AsRef<Path>) -> Result<DataFrame, PolarsError> {
+        use polars::prelude::*;
+        use std::num::NonZeroUsize;
+        let path = path.as_ref();
+        // Use LazyJsonLineReader - call finish() to get LazyFrame, then collect
+        let lf = LazyJsonLineReader::new(path)
+            .with_infer_schema_length(NonZeroUsize::new(100))
+            .finish()?;
+        let pl_df = lf.collect()?;
+        Ok(crate::dataframe::DataFrame::from_polars(pl_df))
     }
 
     /// Execute a SQL query (placeholder - Polars doesn't have built-in SQL)

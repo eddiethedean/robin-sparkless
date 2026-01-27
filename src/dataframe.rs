@@ -101,7 +101,10 @@ impl DataFrame {
         // Use lazy sort for consistency with other operations
         let lf = self.df.as_ref().clone().lazy();
         let exprs: Vec<Expr> = column_names.iter().map(|name| col(*name)).collect();
-        let sorted = lf.sort_by_exprs(exprs, SortMultipleOptions::new().with_order_descending_multi(asc));
+        // with_order_descending_multi expects descending flags (true = descending),
+        // but we have ascending flags (true = ascending), so invert them
+        let descending: Vec<bool> = asc.iter().map(|&a| !a).collect();
+        let sorted = lf.sort_by_exprs(exprs, SortMultipleOptions::new().with_order_descending_multi(descending));
         let pl_df = sorted.collect()?;
         Ok(crate::dataframe::DataFrame::from_polars(pl_df))
     }

@@ -1,0 +1,81 @@
+{
+  "name": "read_csv",
+  "pyspark_version": "3.5.0",
+  "input": {
+    "schema": [
+      {
+        "name": "id",
+        "type": "int"
+      },
+      {
+        "name": "age",
+        "type": "int"
+      },
+      {
+        "name": "name",
+        "type": "string"
+      }
+    ],
+    "rows": [
+      [
+        1,
+        25,
+        "Alice"
+      ],
+      [
+        2,
+        30,
+        "Bob"
+      ],
+      [
+        3,
+        35,
+        "Charlie"
+      ]
+    ],
+    "file_source": {
+      "format": "csv",
+      "content": "id,age,name\n1,25,Alice\n2,30,Bob\n3,35,Charlie\n"
+    }
+  },
+  "operations": [
+    {
+      "op": "filter",
+      "expr": "col('age') > 30"
+    },
+    {
+      "op": "select",
+      "columns": [
+        "name",
+        "age"
+      ]
+    },
+    {
+      "op": "orderBy",
+      "columns": [
+        "name"
+      ],
+      "ascending": [
+        true
+      ]
+    }
+  ],
+  "expected": {
+    "schema": [
+      {
+        "name": "name",
+        "type": "string"
+      },
+      {
+        "name": "age",
+        "type": "int"
+      }
+    ],
+    "rows": [
+      [
+        "Charlie",
+        35
+      ]
+    ]
+  }
+}

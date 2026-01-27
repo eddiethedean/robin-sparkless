@@ -23,6 +23,14 @@ struct Fixture {
 struct InputSection {
     schema: Vec<ColumnSpec>,
     rows: Vec<Vec<Value>>,
+    #[serde(default)]
+    file_source: Option<FileSource>,
+}
+
+#[derive(Debug, Deserialize)]
+struct FileSource {
+    format: String, // "csv", "parquet", "json"
+    content: String, // file content as string
 }
 
 #[derive(Debug, Deserialize)]
@@ -129,10 +137,17 @@ fn run_fixture(fixture: &Fixture) -> Result<(), PolarsError> {
 /// For the first parity slice we support only a small subset of types:
 /// - `int` / `bigint` → `i64`
 /// - `string`         → UTF-8
+///
+/// If `file_source` is present, reads from a temporary file instead of in-memory data.
 fn create_df_from_input(
     spark: &SparkSession,
     input: &InputSection,
 ) -> Result<DataFrame, PolarsError> {
+    // Check if we have a file source
+    if let Some(ref file_source) = input.file_source {
+        return create_df_from_file_source(spark, file_source, input);
+    }
+
     // Convert input to (i64, i64, String) tuples for create_dataframe
     // This assumes the first two columns are int-like and third is string
     if input.schema.len() != 3 {
@@ -154,6 +169,84 @@ fn create_df_from_input(
 
     let col_names: Vec<&str> = input.schema.iter().map(|s| s.name.as_str()).collect();
     spark.create_dataframe(tuples, col_names)
+}
+
+/// Create a DataFrame from a file source by writing content to a temp file and reading it.
+fn create_df_from_file_source(
+    spark: &SparkSession,
+    file_source: &FileSource,
+    input: &InputSection,
+) -> Result<DataFrame, PolarsError> {
+    use std::io::Write;
+    
+    // Create a temporary file
+    let temp_dir = std::env::temp_dir();
+    let extension = match file_source.format.as_str() {
+        "csv" => "csv",
+        "parquet" => "parquet",
+        "json" => "json",
+        _ => return Err(PolarsError::ComputeError(
+            format!("unsupported file format: {}", file_source.format).into(),
+        )),
+    };
+    let temp_path = temp_dir.join(format!("robin_sparkless_test_{}.{}", 
+        std::process::id(), extension));
+    
+    // Write content to temp file
+    {
+        let mut file = std::fs::File::create(&temp_path)
+            .map_err(|e| PolarsError::ComputeError(
+                format!("failed to create temp file: {}", e).into(),
+            ))?;
+        file.write_all(file_source.content.as_bytes())
+            .map_err(|e| PolarsError::ComputeError(
+                format!("failed to write temp file: {}", e).into(),
+            ))?;
+    }
+    
+    // Read the file using the appropriate reader
+    let df = match file_source.format.as_str() {
+        "csv" => spark.read_csv(&temp_path)?,
+        "parquet" => {
+            // For Parquet, use the input.rows data (what PySpark actually read) to create
+            // a DataFrame, write it as Parquet, then read it back.
+            // This ensures we test the Parquet reader with the same data PySpark saw.
+            use polars::prelude::*;
+            
+            // Create DataFrame from input.rows (this is what PySpark read from Parquet)
+            let input_df = create_df_from_input_direct(input)?;
+            let pl_df = input_df.collect()?;
+            
+            // Write to Parquet using Polars ParquetWriter
+            let mut df_to_write = (*pl_df).clone();
+            {
+                let mut file = std::fs::File::create(&temp_path)
+                    .map_err(|e| PolarsError::ComputeError(
+                        format!("failed to create Parquet file: {}", e).into(),
+                    ))?;
+                
+                // Use ParquetWriter from prelude
+                use polars::prelude::ParquetWriter;
+                ParquetWriter::new(&mut file)
+                    .finish(&mut df_to_write)
+                    .map_err(|e| PolarsError::ComputeError(
+                        format!("failed to write Parquet: {}", e).into(),
+                    ))?;
+            }
+            
+            // Now read the Parquet file we just created
+            spark.read_parquet(&temp_path)?
+        }
+        "json" => spark.read_json(&temp_path)?,
+        _ => return Err(PolarsError::ComputeError(
+            format!("unsupported file format: {}", file_source.format).into(),
+        )),
+    };
+    
+    // Clean up temp file
+    std::fs::remove_file(&temp_path).ok();
+    
+    Ok(df)
 }
 
 /// Fallback: Build a Polars-backed `DataFrame` directly from the JSON input section.
@@ -314,21 +407,48 @@ fn parse_simple_filter_expr(src: &str) -> Result<Expr, String> {
 
     let col_name = &s[quote1 + 1..quote2];
 
-    // After the closing paren, expect an operator and a literal integer.
-    let after_col = &s[quote2 + 1..];
-    let tokens: Vec<&str> = after_col.split_whitespace().collect();
-    if tokens.len() < 2 {
-        return Err("expected operator and literal".to_string());
-    }
-
-    let op = tokens[0];
-    let lit_str = tokens[1];
-    let lit_val: i64 = lit_str
-        .parse()
-        .map_err(|_| format!("unable to parse literal '{}'", lit_str))?;
-
+    // After the closing quote, find the closing paren, then expect an operator and a literal.
+    let after_quote = &s[quote2 + 1..];
+    let paren_end = after_quote.find(')').ok_or("missing closing paren after column")?;
+    let after_col = &after_quote[paren_end + 1..].trim();
+    
+    // Find the operator - could be ==, !=, >=, <=, >, <, =
+    let op = if after_col.starts_with("==") {
+        "=="
+    } else if after_col.starts_with("!=") {
+        "!="
+    } else if after_col.starts_with(">=") {
+        ">="
+    } else if after_col.starts_with("<=") {
+        "<="
+    } else if after_col.starts_with(">") {
+        ">"
+    } else if after_col.starts_with("<") {
+        "<"
+    } else if after_col.starts_with("=") {
+        "="
+    } else {
+        return Err(format!("unable to find operator in '{}'", after_col));
+    };
+    
+    // Extract the literal after the operator
+    let lit_str = after_col[op.len()..].trim();
+    
     let c = col(col_name);
-    let lit_e = lit(lit_val);
+    
+    // Check if literal is a string (quoted) or number
+    let lit_e = if (lit_str.starts_with('\'') && lit_str.ends_with('\'')) ||
+                   (lit_str.starts_with('"') && lit_str.ends_with('"')) {
+        // String literal - remove quotes
+        let str_val = &lit_str[1..lit_str.len()-1];
+        lit(str_val)
+    } else {
+        // Try to parse as integer
+        let lit_val: i64 = lit_str
+            .parse()
+            .map_err(|_| format!("unable to parse literal '{}'", lit_str))?;
+        lit(lit_val)
+    };
 
     let expr = match op {
         ">" => c.gt(lit_e),
@@ -336,7 +456,7 @@ fn parse_simple_filter_expr(src: &str) -> Result<Expr, String> {
         "<" => c.lt(lit_e),
         "<=" => c.lt_eq(lit_e),
         "==" | "=" => c.eq(lit_e),
-        "!=" => c.neq(lit_e),
+        "!=" | "<>" => c.neq(lit_e),
         other => return Err(format!("unsupported operator '{}'", other)),
     };
 
@@ -370,13 +490,62 @@ fn collect_to_simple_format(df: &DataFrame) -> Result<(Vec<ColumnSpec>, Vec<Vec<
                 PolarsError::ComputeError(format!("column index {} out of range", col_idx).into())
             })?;
             let json_val = match series.get(row_idx) {
-                Ok(av) => match av {
-                    polars::prelude::AnyValue::Null => Value::Null,
-                    polars::prelude::AnyValue::Int64(v) => Value::Number(v.into()),
-                    polars::prelude::AnyValue::Int32(v) => Value::Number(v.into()),
-                    polars::prelude::AnyValue::String(v) => Value::String(v.to_string()),
-                    _ => Value::String(format!("{:?}", av)),
-                },
+                Ok(av) => {
+                    // Check for null first
+                    if matches!(av, polars::prelude::AnyValue::Null) {
+                        Value::Null
+                    } else if matches!(series.dtype(), polars::prelude::DataType::String) {
+                        // For String type, extract the actual string value
+                        let debug_str = format!("{:?}", av);
+                        // Handle "StringOwned(\"value\")" format
+                        if debug_str.starts_with("StringOwned(") && debug_str.ends_with(")") {
+                            let inner = &debug_str[12..debug_str.len()-1];
+                            // Remove outer quotes if present
+                            let cleaned = inner.trim_matches('"');
+                            Value::String(cleaned.to_string())
+                        } else if debug_str.starts_with('"') && debug_str.ends_with('"') {
+                            // Handle quoted strings
+                            Value::String(debug_str[1..debug_str.len()-1].to_string())
+                        } else {
+                            // Try to match known variants
+                            match av {
+                                polars::prelude::AnyValue::String(v) => Value::String(v.to_string()),
+                                _ => Value::String(debug_str),
+                            }
+                        }
+                    } else {
+                        // For non-string types, use standard matching
+                        match av {
+                            polars::prelude::AnyValue::Null => Value::Null,
+                            polars::prelude::AnyValue::Int64(v) => Value::Number(v.into()),
+                            polars::prelude::AnyValue::Int32(v) => Value::Number(v.into()),
+                            polars::prelude::AnyValue::UInt32(v) => Value::Number(v.into()),
+                            polars::prelude::AnyValue::String(v) => Value::String(v.to_string()),
+                            _ => {
+                                // For unknown types, try to extract as number if dtype suggests it
+                                if matches!(series.dtype(), polars::prelude::DataType::UInt32) {
+                                    // Try to get the value as u32 from debug format
+                                    let debug_str = format!("{:?}", av);
+                                    if let Some(start) = debug_str.find('(') {
+                                        if let Some(end) = debug_str.rfind(')') {
+                                            if let Ok(num) = debug_str[start+1..end].parse::<u32>() {
+                                                Value::Number(num.into())
+                                            } else {
+                                                Value::String(debug_str)
+                                            }
+                                        } else {
+                                            Value::String(debug_str)
+                                        }
+                                    } else {
+                                        Value::String(debug_str)
+                                    }
+                                } else {
+                                    Value::String(format!("{:?}", av))
+                                }
+                            }
+                        }
+                    }
+                }
                 Err(_) => Value::Null,
             };
             row.push(json_val);
@@ -392,6 +561,7 @@ fn dtype_to_string(dtype: &polars::prelude::DataType) -> String {
     match dtype {
         polars::prelude::DataType::Int64 => "bigint".to_string(),
         polars::prelude::DataType::Int32 => "int".to_string(),
+        polars::prelude::DataType::UInt32 => "UInt32".to_string(),
         polars::prelude::DataType::String => "string".to_string(),
         _ => format!("{:?}", dtype),
     }
@@ -446,6 +616,13 @@ fn types_compatible(actual: &str, expected: &str) -> bool {
     // Allow int/bigint/long to match
     let int_types = ["int", "bigint", "long"];
     if int_types.contains(&actual) && int_types.contains(&expected) {
+        return true;
+    }
+    // Allow UInt32/uint32 to match with bigint (common for count operations)
+    if (actual == "UInt32" || actual == "uint32") && int_types.contains(&expected) {
+        return true;
+    }
+    if (expected == "UInt32" || expected == "uint32") && int_types.contains(&actual) {
         return true;
     }
     // Allow string/str/varchar to match

@@ -1,0 +1,85 @@
+{
+  "name": "read_parquet",
+  "pyspark_version": "3.5.0",
+  "input": {
+    "schema": [
+      {
+        "name": "id",
+        "type": "bigint"
+      },
+      {
+        "name": "name",
+        "type": "string"
+      },
+      {
+        "name": "department",
+        "type": "string"
+      }
+    ],
+    "rows": [
+      [
+        2,
+        "Bob",
+        "Engineering"
+      ],
+      [
+        3,
+        "Charlie",
+        "Sales"
+      ],
+      [
+        1,
+        "Alice",
+        "Sales"
+      ]
+    ],
+    "file_source": {
+      "format": "parquet",
+      "content": "id,name,department\n1,Alice,Sales\n2,Bob,Engineering\n3,Charlie,Sales\n"
+    }
+  },
+  "operations": [
+    {
+      "op": "filter",
+      "expr": "col('department') == 'Sales'"
+    },
+    {
+      "op": "select",
+      "columns": [
+        "name",
+        "department"
+      ]
+    },
+    {
+      "op": "orderBy",
+      "columns": [
+        "name"
+      ],
+      "ascending": [
+        true
+      ]
+    }
+  ],
+  "expected": {
+    "schema": [
+      {
+        "name": "name",
+        "type": "string"
+      },
+      {
+        "name": "department",
+        "type": "string"
+      }
+    ],
+    "rows": [
+      [
+        "Alice",
+        "Sales"
+      ],
+      [
+        "Charlie",
+        "Sales"
+      ]
+    ]
+  }
+}
