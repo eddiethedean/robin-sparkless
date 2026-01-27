@@ -1,7 +1,5 @@
-use pyo3::prelude::*;
+use polars::prelude::{DataType as PlDataType, Schema, TimeUnit};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-use std::sync::Arc;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum DataType {
@@ -17,128 +15,88 @@ pub enum DataType {
     Struct(Vec<StructField>),
 }
 
-#[pyclass]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StructField {
-    #[pyo3(get, set)]
-    name: String,
-    data_type: DataType,
-    #[pyo3(get, set)]
-    nullable: bool,
+    pub name: String,
+    pub data_type: DataType,
+    pub nullable: bool,
 }
 
-#[pymethods]
 impl StructField {
-    #[new]
-    fn new(name: String, data_type: String, nullable: bool) -> Self {
-        let dt = match data_type.as_str() {
-            "string" => DataType::String,
-            "int" | "integer" => DataType::Integer,
-            "long" => DataType::Long,
-            "double" => DataType::Double,
-            "boolean" => DataType::Boolean,
-            "date" => DataType::Date,
-            "timestamp" => DataType::Timestamp,
-            _ => DataType::String,
-        };
+    pub fn new(name: String, data_type: DataType, nullable: bool) -> Self {
         StructField {
             name,
-            data_type: dt,
+            data_type,
             nullable,
         }
     }
 }
 
-#[pyclass]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StructType {
     fields: Vec<StructField>,
 }
 
-#[pymethods]
 impl StructType {
-    #[new]
-    fn new(fields: Vec<StructField>) -> Self {
+    pub fn new(fields: Vec<StructField>) -> Self {
         StructType { fields }
     }
-    
-    fn __len__(&self) -> usize {
-        self.fields.len()
-    }
-    
-    fn __getitem__(&self, idx: isize) -> PyResult<StructField> {
-        let idx = if idx < 0 {
-            (self.fields.len() as isize + idx) as usize
-        } else {
-            idx as usize
-        };
-        self.fields.get(idx)
-            .cloned()
-            .ok_or_else(|| PyErr::new::<pyo3::exceptions::PyIndexError, _>("Index out of range"))
-    }
-}
 
-impl StructType {
-    pub fn from_arrow_schema(schema: &arrow::datatypes::Schema) -> Self {
+    pub fn from_polars_schema(schema: &Schema) -> Self {
         let fields = schema
-            .fields()
             .iter()
-            .map(|f| StructField {
-                name: f.name().clone(),
-                data_type: arrow_type_to_data_type(f.data_type()),
-                nullable: f.is_nullable(),
+            .map(|(name, dtype)| StructField {
+                name: name.to_string(),
+                data_type: polars_type_to_data_type(dtype),
+                nullable: true, // Polars doesn't expose nullability in the same way
             })
             .collect();
         StructType { fields }
     }
-    
-    pub fn to_arrow_schema(&self) -> arrow::datatypes::Schema {
-        let fields: Vec<arrow::datatypes::Field> = self
+
+    pub fn to_polars_schema(&self) -> Schema {
+        use polars::prelude::Field;
+        let fields: Vec<Field> = self
             .fields
             .iter()
-            .map(|f| arrow::datatypes::Field::new(
-                &f.name,
-                data_type_to_arrow_type(&f.data_type),
-                f.nullable,
-            ))
+            .map(|f| Field::new(f.name.as_str().into(), data_type_to_polars_type(&f.data_type)))
             .collect();
-        arrow::datatypes::Schema::new(fields)
+        Schema::from_iter(fields)
+    }
+
+    pub fn fields(&self) -> &[StructField] {
+        &self.fields
     }
 }
 
-fn arrow_type_to_data_type(arrow_type: &arrow::datatypes::DataType) -> DataType {
-    match arrow_type {
-        arrow::datatypes::DataType::Utf8 | arrow::datatypes::DataType::LargeUtf8 => DataType::String,
-        arrow::datatypes::DataType::Int32 => DataType::Integer,
-        arrow::datatypes::DataType::Int64 => DataType::Long,
-        arrow::datatypes::DataType::Float64 => DataType::Double,
-        arrow::datatypes::DataType::Boolean => DataType::Boolean,
-        arrow::datatypes::DataType::Date32 | arrow::datatypes::DataType::Date64 => DataType::Date,
-        arrow::datatypes::DataType::Timestamp(_, _) => DataType::Timestamp,
-        arrow::datatypes::DataType::List(field) => {
-            DataType::Array(Box::new(arrow_type_to_data_type(field.data_type())))
+fn polars_type_to_data_type(polars_type: &PlDataType) -> DataType {
+    match polars_type {
+        PlDataType::String => DataType::String,
+        PlDataType::Int32 => DataType::Integer,
+        PlDataType::Int64 => DataType::Long,
+        PlDataType::Float64 => DataType::Double,
+        PlDataType::Boolean => DataType::Boolean,
+        PlDataType::Date => DataType::Date,
+        PlDataType::Datetime(_, _) => DataType::Timestamp,
+        PlDataType::List(inner) => {
+            DataType::Array(Box::new(polars_type_to_data_type(inner)))
         }
         _ => DataType::String, // Default fallback
     }
 }
 
-fn data_type_to_arrow_type(data_type: &DataType) -> arrow::datatypes::DataType {
+fn data_type_to_polars_type(data_type: &DataType) -> PlDataType {
     match data_type {
-        DataType::String => arrow::datatypes::DataType::Utf8,
-        DataType::Integer => arrow::datatypes::DataType::Int32,
-        DataType::Long => arrow::datatypes::DataType::Int64,
-        DataType::Double => arrow::datatypes::DataType::Float64,
-        DataType::Boolean => arrow::datatypes::DataType::Boolean,
-        DataType::Date => arrow::datatypes::DataType::Date32,
-        DataType::Timestamp => arrow::datatypes::DataType::Timestamp(arrow::datatypes::TimeUnit::Microsecond, None),
+        DataType::String => PlDataType::String,
+        DataType::Integer => PlDataType::Int32,
+        DataType::Long => PlDataType::Int64,
+        DataType::Double => PlDataType::Float64,
+        DataType::Boolean => PlDataType::Boolean,
+        DataType::Date => PlDataType::Date,
+        DataType::Timestamp => PlDataType::Datetime(TimeUnit::Microseconds, None),
         DataType::Array(inner) => {
-            let item_field = arrow::datatypes::Field::new(
-                "item",
-                data_type_to_arrow_type(inner),
-                true,
-            );
-            arrow::datatypes::DataType::List(Arc::new(item_field))
+            PlDataType::List(Box::new(data_type_to_polars_type(inner)))
         }
-        _ => arrow::datatypes::DataType::Utf8, // Default fallback
+        _ => PlDataType::String, // Default fallback
     }
 }

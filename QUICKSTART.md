@@ -1,97 +1,55 @@
-# Quick Start Guide
+# Quick Start Guide (Rust)
 
 ## Building the Project
 
 ### Prerequisites
 - Rust (latest stable)
-- Python 3.8+
-- maturin (`pip install maturin`)
 
-### Development Build
+### Build
 
 ```bash
-# Install in development mode
-maturin develop
-
-# Or use the Makefile
-make dev
+cargo build
 ```
 
-### Release Build
+### Add as a dependency
 
-```bash
-maturin build --release
+In your own crate:
+
+```toml
+[dependencies]
+robin-sparkless = "0.1.0"
 ```
 
-## Usage
+## Basic Usage
 
-```python
-from robin_sparkless import SparkSession, functions as F
+The current API is intentionally small and focused on wrapping Polars types.
 
-# Create SparkSession
-spark = SparkSession.builder.appName("MyApp").getOrCreate()
+```rust
+use polars::prelude::*;
+use robin_sparkless::{DataFrame, Column};
 
-# Create DataFrame from Python data
-data = [(1, "Alice", 25), (2, "Bob", 30), (3, "Charlie", 35)]
-df = spark.createDataFrame(data, ["id", "name", "age"])
+fn main() -> polars::prelude::PolarsResult<()> {
+    // Build a Polars DataFrame
+    let polars_df = df!(
+        "id" => &[1, 2, 3],
+        "age" => &[25, 30, 35],
+        "name" => &["Alice", "Bob", "Charlie"],
+    )?;
 
-# Transformations
-df_filtered = df.filter(df["age"] > 25)
-df_selected = df.select(["name", "age"])
-df_grouped = df.groupBy(["name"]).count()
+    // Wrap it
+    let df = DataFrame::from_polars(polars_df);
 
-# Actions
-df.show()
-print(df.count())
-results = df.collect()
+    // Introspect
+    println!("{:?}", df.columns()?);
 
-# Column operations
-from robin_sparkless import col, lit
-df_with_expr = df.select([col("name"), (col("age") + lit(1)).alias("age_plus_one")])
+    // Use a Column wrapper around a Polars expression
+    let age_col: Column = df.column("age")?;
+    let adults = df.filter(age_col.expr().clone().gt(lit(18)))?;
+
+    adults.show(Some(10))?;
+
+    Ok(())
+}
 ```
 
-## API Compatibility
-
-This package aims for PySpark API parity. Most PySpark code should work with minimal changes:
-
-### Differences from PySpark
-
-1. **No Cluster Support**: This is a single-machine implementation
-2. **No Java/Spark**: Pure Rust backend, no JVM required
-3. **Simplified Execution**: Uses DataFusion for query execution
-
-### Supported Operations
-
-- ✅ DataFrame creation from Python data
-- ✅ Column operations (filtering, selection, arithmetic)
-- ✅ GroupBy and aggregations
-- ✅ Joins (basic support)
-- ✅ SQL functions (col, lit, count, sum, avg, etc.)
-- ✅ Schema inference
-- ⚠️ Data source readers (CSV, Parquet, JSON) - basic structure, needs implementation
-- ⚠️ SQL queries - basic structure, needs full DataFusion integration
-
-## Testing
-
-```bash
-pytest tests/ -v
-```
-
-## Architecture
-
-- **Rust Core**: High-performance data processing using Arrow and DataFusion
-- **PyO3 Bindings**: Python bindings for Rust code
-- **Python API**: PySpark-compatible interface
-
-## Next Steps
-
-To achieve full PySpark parity, consider implementing:
-
-1. Full DataFusion integration for query execution
-2. Complete data source readers (CSV, Parquet, JSON)
-3. More SQL functions
-4. Window functions
-5. UDF (User Defined Functions) support
-6. Caching and persistence
-7. Broadcast variables
-8. More join types and optimizations
+As more APIs are added (constructors from Rust data, IO helpers, richer expressions), this guide can be expanded with additional examples.
