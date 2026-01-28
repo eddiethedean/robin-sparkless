@@ -265,3 +265,191 @@ impl Column {
         Self::from_expr(self.expr().clone().neq(other), None)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::Column;
+    use polars::prelude::{col, lit, df, IntoLazy};
+
+    /// Helper to create a simple DataFrame for testing
+    fn test_df() -> polars::prelude::DataFrame {
+        df!(
+            "a" => &[1, 2, 3, 4, 5],
+            "b" => &[10, 20, 30, 40, 50]
+        ).unwrap()
+    }
+
+    /// Helper to create a DataFrame with nulls for testing
+    fn test_df_with_nulls() -> polars::prelude::DataFrame {
+        df!(
+            "a" => &[Some(1), Some(2), None, Some(4), None],
+            "b" => &[Some(10), None, Some(30), None, None]
+        ).unwrap()
+    }
+
+    #[test]
+    fn test_column_new() {
+        let column = Column::new("age".to_string());
+        assert_eq!(column.name(), "age");
+    }
+
+    #[test]
+    fn test_column_from_expr() {
+        let expr = col("test");
+        let column = Column::from_expr(expr, Some("test".to_string()));
+        assert_eq!(column.name(), "test");
+    }
+
+    #[test]
+    fn test_column_from_expr_default_name() {
+        let expr = col("test").gt(lit(5));
+        let column = Column::from_expr(expr, None);
+        assert_eq!(column.name(), "<expr>");
+    }
+
+    #[test]
+    fn test_column_alias() {
+        let column = Column::new("original".to_string());
+        let aliased = column.alias("new_name");
+        assert_eq!(aliased.name(), "new_name");
+    }
+
+    #[test]
+    fn test_column_gt() {
+        let df = test_df();
+        let column = Column::new("a".to_string());
+        let result = column.gt(lit(3));
+        
+        // Apply the expression to filter the DataFrame
+        let filtered = df.lazy().filter(result.into_expr()).collect().unwrap();
+        assert_eq!(filtered.height(), 2); // rows with a > 3: 4, 5
+    }
+
+    #[test]
+    fn test_column_lt() {
+        let df = test_df();
+        let column = Column::new("a".to_string());
+        let result = column.lt(lit(3));
+        
+        let filtered = df.lazy().filter(result.into_expr()).collect().unwrap();
+        assert_eq!(filtered.height(), 2); // rows with a < 3: 1, 2
+    }
+
+    #[test]
+    fn test_column_eq() {
+        let df = test_df();
+        let column = Column::new("a".to_string());
+        let result = column.eq(lit(3));
+        
+        let filtered = df.lazy().filter(result.into_expr()).collect().unwrap();
+        assert_eq!(filtered.height(), 1); // only row with a == 3
+    }
+
+    #[test]
+    fn test_column_neq() {
+        let df = test_df();
+        let column = Column::new("a".to_string());
+        let result = column.neq(lit(3));
+        
+        let filtered = df.lazy().filter(result.into_expr()).collect().unwrap();
+        assert_eq!(filtered.height(), 4); // rows with a != 3
+    }
+
+    #[test]
+    fn test_column_gt_eq() {
+        let df = test_df();
+        let column = Column::new("a".to_string());
+        let result = column.gt_eq(lit(3));
+        
+        let filtered = df.lazy().filter(result.into_expr()).collect().unwrap();
+        assert_eq!(filtered.height(), 3); // rows with a >= 3: 3, 4, 5
+    }
+
+    #[test]
+    fn test_column_lt_eq() {
+        let df = test_df();
+        let column = Column::new("a".to_string());
+        let result = column.lt_eq(lit(3));
+        
+        let filtered = df.lazy().filter(result.into_expr()).collect().unwrap();
+        assert_eq!(filtered.height(), 3); // rows with a <= 3: 1, 2, 3
+    }
+
+    #[test]
+    fn test_column_is_null() {
+        let df = test_df_with_nulls();
+        let column = Column::new("a".to_string());
+        let result = column.is_null();
+        
+        let filtered = df.lazy().filter(result.into_expr()).collect().unwrap();
+        assert_eq!(filtered.height(), 2); // 2 null values in column 'a'
+    }
+
+    #[test]
+    fn test_column_is_not_null() {
+        let df = test_df_with_nulls();
+        let column = Column::new("a".to_string());
+        let result = column.is_not_null();
+        
+        let filtered = df.lazy().filter(result.into_expr()).collect().unwrap();
+        assert_eq!(filtered.height(), 3); // 3 non-null values in column 'a'
+    }
+
+    #[test]
+    fn test_eq_null_safe_both_null() {
+        // Create a DataFrame where both columns have NULL at the same row
+        let df = df!(
+            "a" => &[Some(1), None, Some(3)],
+            "b" => &[Some(1), None, Some(4)]
+        ).unwrap();
+        
+        let col_a = Column::new("a".to_string());
+        let col_b = Column::new("b".to_string());
+        let result = col_a.eq_null_safe(&col_b);
+        
+        // Apply the expression and collect
+        let result_df = df.lazy()
+            .with_column(result.into_expr().alias("eq_null_safe"))
+            .collect()
+            .unwrap();
+        
+        // Get the result column
+        let eq_col = result_df.column("eq_null_safe").unwrap();
+        let values: Vec<Option<bool>> = eq_col.bool().unwrap().into_iter().collect();
+        
+        // Row 0: 1 == 1 -> true
+        // Row 1: NULL <=> NULL -> true
+        // Row 2: 3 == 4 -> false
+        assert_eq!(values[0], Some(true));
+        assert_eq!(values[1], Some(true)); // NULL-safe: both NULL = true
+        assert_eq!(values[2], Some(false));
+    }
+
+    #[test]
+    fn test_eq_null_safe_one_null() {
+        // Create a DataFrame where only one column has NULL
+        let df = df!(
+            "a" => &[Some(1), None, Some(3)],
+            "b" => &[Some(1), Some(2), None]
+        ).unwrap();
+        
+        let col_a = Column::new("a".to_string());
+        let col_b = Column::new("b".to_string());
+        let result = col_a.eq_null_safe(&col_b);
+        
+        let result_df = df.lazy()
+            .with_column(result.into_expr().alias("eq_null_safe"))
+            .collect()
+            .unwrap();
+        
+        let eq_col = result_df.column("eq_null_safe").unwrap();
+        let values: Vec<Option<bool>> = eq_col.bool().unwrap().into_iter().collect();
+        
+        // Row 0: 1 == 1 -> true
+        // Row 1: NULL <=> 2 -> false (one is null, not both)
+        // Row 2: 3 <=> NULL -> false (one is null, not both)
+        assert_eq!(values[0], Some(true));
+        assert_eq!(values[1], Some(false));
+        assert_eq!(values[2], Some(false));
+    }
+}

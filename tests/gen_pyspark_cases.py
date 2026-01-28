@@ -418,6 +418,112 @@ def case_groupby_avg(spark: SparkSession) -> Dict[str, Any]:
     }
 
 
+def case_groupby_min(spark: SparkSession) -> Dict[str, Any]:
+    """Test groupBy().min() aggregation."""
+    data = [
+        (1, "Sales", 1000),
+        (2, "Sales", 1500),
+        (3, "Engineering", 2000),
+        (4, "Engineering", 2500),
+        (5, "Sales", 1200),
+    ]
+    df = spark.createDataFrame(data, ["id", "department", "salary"])
+    
+    out_df = df.groupBy("department").min("salary").orderBy("department")
+    
+    input_schema = schema_to_json(df.schema)
+    input_rows = df_to_rows(df)
+    
+    expected_schema = schema_to_json(out_df.schema)
+    expected_rows = df_to_rows(out_df)
+    
+    return {
+        "name": "groupby_min",
+        "pyspark_version": spark.version,
+        "input": {"schema": input_schema, "rows": input_rows},
+        "operations": [
+            {"op": "groupBy", "columns": ["department"]},
+            {"op": "agg", "aggregations": [{"func": "min", "alias": "min", "column": "salary"}]},
+            {"op": "orderBy", "columns": ["department"], "ascending": [True]},
+        ],
+        "expected": {"schema": expected_schema, "rows": expected_rows},
+    }
+
+
+def case_groupby_max(spark: SparkSession) -> Dict[str, Any]:
+    """Test groupBy().max() aggregation."""
+    data = [
+        (1, "Sales", 1000),
+        (2, "Sales", 1500),
+        (3, "Engineering", 2000),
+        (4, "Engineering", 2500),
+        (5, "Sales", 1200),
+    ]
+    df = spark.createDataFrame(data, ["id", "department", "salary"])
+    
+    out_df = df.groupBy("department").max("salary").orderBy("department")
+    
+    input_schema = schema_to_json(df.schema)
+    input_rows = df_to_rows(df)
+    
+    expected_schema = schema_to_json(out_df.schema)
+    expected_rows = df_to_rows(out_df)
+    
+    return {
+        "name": "groupby_max",
+        "pyspark_version": spark.version,
+        "input": {"schema": input_schema, "rows": input_rows},
+        "operations": [
+            {"op": "groupBy", "columns": ["department"]},
+            {"op": "agg", "aggregations": [{"func": "max", "alias": "max", "column": "salary"}]},
+            {"op": "orderBy", "columns": ["department"], "ascending": [True]},
+        ],
+        "expected": {"schema": expected_schema, "rows": expected_rows},
+    }
+
+
+def case_groupby_null_keys(spark: SparkSession) -> Dict[str, Any]:
+    """Test groupBy with NULL values as grouping keys."""
+    from pyspark.sql.types import StructType, StructField, StringType, IntegerType
+
+    schema = StructType(
+        [
+            StructField("id", IntegerType(), True),
+            StructField("category", StringType(), True),
+            StructField("value", IntegerType(), True),
+        ]
+    )
+    data = [
+        (1, "A", 10),
+        (2, "A", 20),
+        (3, None, 30),
+        (4, "B", 40),
+        (5, None, 50),
+        (6, "B", 60),
+    ]
+    df = spark.createDataFrame(data, schema=schema)
+
+    out_df = df.groupBy("category").sum("value").orderBy("category")
+
+    input_schema = schema_to_json(df.schema)
+    input_rows = df_to_rows(df)
+
+    expected_schema = schema_to_json(out_df.schema)
+    expected_rows = df_to_rows(out_df)
+
+    return {
+        "name": "groupby_null_keys",
+        "pyspark_version": spark.version,
+        "input": {"schema": input_schema, "rows": input_rows},
+        "operations": [
+            {"op": "groupBy", "columns": ["category"]},
+            {"op": "agg", "aggregations": [{"func": "sum", "alias": "sum", "column": "value"}]},
+            {"op": "orderBy", "columns": ["category"], "ascending": [True]},
+        ],
+        "expected": {"schema": expected_schema, "rows": expected_rows},
+    }
+
+
 def case_null_comparison_equality(spark: SparkSession) -> Dict[str, Any]:
     """Test null comparison semantics: col == NULL, col != NULL return NULL."""
     from pyspark.sql.types import StructType, StructField, IntegerType, StringType
@@ -980,6 +1086,9 @@ def main() -> None:
         case_coalesce(spark),
         case_groupby_sum(spark),
         case_groupby_avg(spark),
+        case_groupby_min(spark),
+        case_groupby_max(spark),
+        case_groupby_null_keys(spark),
         case_null_comparison_equality(spark),
         case_null_comparison_ordering(spark),
         case_null_safe_equality(spark),

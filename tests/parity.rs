@@ -66,6 +66,7 @@ enum Operation {
 #[derive(Debug, Deserialize)]
 struct AggregationSpec {
     func: String,
+    #[allow(dead_code)]
     alias: String,
     #[serde(default)]
     column: Option<String>, // Column name for sum/avg/min/max (not needed for count)
@@ -120,14 +121,6 @@ fn run_fixture(fixture: &Fixture) -> Result<(), PolarsError> {
     // Create SparkSession and DataFrame from input
     let spark = SparkSession::builder().app_name("parity_test").get_or_create();
     let df = create_df_from_input(&spark, &fixture.input)?;
-    
-    // Debug: print input schema for groupby_sum
-    if fixture.name == "groupby_sum" {
-        let input_schema = df.schema()?;
-        eprintln!("Input DataFrame schema: {:?}", input_schema);
-        let cols = df.columns()?;
-        eprintln!("Input DataFrame columns: {:?}", cols);
-    }
 
     // Apply operations
     let result_df = apply_operations(df, &fixture.operations)?;
@@ -137,20 +130,6 @@ fn run_fixture(fixture: &Fixture) -> Result<(), PolarsError> {
     
     // Check if operations include orderBy (for comparison strategy)
     let has_order_by = fixture.operations.iter().any(|op| matches!(op, Operation::OrderBy { .. }));
-    
-    // Debug: print schema mismatch for groupby_sum
-    if fixture.name == "groupby_sum" {
-        eprintln!("Actual schema: {:?}", actual_schema);
-        eprintln!("Expected schema: {:?}", fixture.expected.schema);
-    }
-    
-    // Debug: print rows for failing filter tests
-    if fixture.name.contains("filter") && actual_rows.len() != fixture.expected.rows.len() {
-        eprintln!("Fixture {}: actual {} rows, expected {} rows", fixture.name, actual_rows.len(), fixture.expected.rows.len());
-        eprintln!("Actual rows: {:?}", actual_rows);
-        eprintln!("Expected rows: {:?}", fixture.expected.rows);
-    }
-
     
     assert_schema_eq(&actual_schema, &fixture.expected.schema, &fixture.name)?;
     assert_rows_eq(&actual_rows, &fixture.expected.rows, has_order_by, &fixture.name)?;
@@ -479,187 +458,6 @@ fn apply_operations(
     }
     
     Ok(df)
-}
-
-/// Token types for the expression parser
-#[derive(Debug, Clone, PartialEq)]
-enum Token {
-    Identifier(String),
-    Operator(String),
-    LogicalOp(String), // AND, OR, &&, ||
-    NotOp,             // NOT, !
-    Literal(String),
-    LParen,
-    RParen,
-    ComparisonOp(String), // >, <, >=, <=, ==, !=, =
-}
-
-/// Simple tokenizer for filter expressions
-/// Recognizes identifiers, operators, logical operators, literals, and parentheses
-fn tokenize_expr(src: &str) -> Result<Vec<Token>, String> {
-    let mut tokens = Vec::new();
-    let mut chars = src.char_indices().peekable();
-    let mut in_single_quote = false;
-    let mut in_double_quote = false;
-    let mut current_ident = String::new();
-
-    while let Some((i, ch)) = chars.next() {
-        match ch {
-            '\'' if !in_double_quote => {
-                if in_single_quote {
-                    // End of string literal
-                    if !current_ident.is_empty() {
-                        tokens.push(Token::Literal(current_ident.clone()));
-                        current_ident.clear();
-                    }
-                } else {
-                    // Start of string literal
-                    if !current_ident.is_empty() {
-                        tokens.push(Token::Identifier(current_ident.clone()));
-                        current_ident.clear();
-                    }
-                }
-                in_single_quote = !in_single_quote;
-            }
-            '"' if !in_single_quote => {
-                if in_double_quote {
-                    // End of string literal
-                    if !current_ident.is_empty() {
-                        tokens.push(Token::Literal(current_ident.clone()));
-                        current_ident.clear();
-                    }
-                } else {
-                    // Start of string literal
-                    if !current_ident.is_empty() {
-                        tokens.push(Token::Identifier(current_ident.clone()));
-                        current_ident.clear();
-                    }
-                }
-                in_double_quote = !in_double_quote;
-            }
-            '(' if !in_single_quote && !in_double_quote => {
-                if !current_ident.is_empty() {
-                    tokens.push(Token::Identifier(current_ident.clone()));
-                    current_ident.clear();
-                }
-                tokens.push(Token::LParen);
-            }
-            ')' if !in_single_quote && !in_double_quote => {
-                if !current_ident.is_empty() {
-                    tokens.push(Token::Identifier(current_ident.clone()));
-                    current_ident.clear();
-                }
-                tokens.push(Token::RParen);
-            }
-            '!' if !in_single_quote && !in_double_quote => {
-                if !current_ident.is_empty() {
-                    tokens.push(Token::Identifier(current_ident.clone()));
-                    current_ident.clear();
-                }
-                // Check if it's != or just !
-                if let Some((_, '=')) = chars.peek() {
-                    chars.next();
-                    tokens.push(Token::ComparisonOp("!=".to_string()));
-                } else {
-                    tokens.push(Token::NotOp);
-                }
-            }
-            '&' if !in_single_quote && !in_double_quote => {
-                if !current_ident.is_empty() {
-                    tokens.push(Token::Identifier(current_ident.clone()));
-                    current_ident.clear();
-                }
-                // Check if it's && or just &
-                if let Some((_, '&')) = chars.peek() {
-                    chars.next();
-                    tokens.push(Token::LogicalOp("&&".to_string()));
-                } else {
-                    tokens.push(Token::Operator("&".to_string()));
-                }
-            }
-            '|' if !in_single_quote && !in_double_quote => {
-                if !current_ident.is_empty() {
-                    tokens.push(Token::Identifier(current_ident.clone()));
-                    current_ident.clear();
-                }
-                // Check if it's || or just |
-                if let Some((_, '|')) = chars.peek() {
-                    chars.next();
-                    tokens.push(Token::LogicalOp("||".to_string()));
-                } else {
-                    tokens.push(Token::Operator("|".to_string()));
-                }
-            }
-            '>' if !in_single_quote && !in_double_quote => {
-                if !current_ident.is_empty() {
-                    tokens.push(Token::Identifier(current_ident.clone()));
-                    current_ident.clear();
-                }
-                // Check if it's >= or just >
-                if let Some((_, '=')) = chars.peek() {
-                    chars.next();
-                    tokens.push(Token::ComparisonOp(">=".to_string()));
-                } else {
-                    tokens.push(Token::ComparisonOp(">".to_string()));
-                }
-            }
-            '<' if !in_single_quote && !in_double_quote => {
-                if !current_ident.is_empty() {
-                    tokens.push(Token::Identifier(current_ident.clone()));
-                    current_ident.clear();
-                }
-                // Check if it's <= or just <
-                if let Some((_, '=')) = chars.peek() {
-                    chars.next();
-                    tokens.push(Token::ComparisonOp("<=".to_string()));
-                } else {
-                    tokens.push(Token::ComparisonOp("<".to_string()));
-                }
-            }
-            '=' if !in_single_quote && !in_double_quote => {
-                if !current_ident.is_empty() {
-                    tokens.push(Token::Identifier(current_ident.clone()));
-                    current_ident.clear();
-                }
-                // Check if it's == or just =
-                if let Some((_, '=')) = chars.peek() {
-                    chars.next();
-                    tokens.push(Token::ComparisonOp("==".to_string()));
-                } else {
-                    tokens.push(Token::ComparisonOp("=".to_string()));
-                }
-            }
-            ch if ch.is_whitespace() && !in_single_quote && !in_double_quote => {
-                if !current_ident.is_empty() {
-                    // Check if it's a keyword
-                    let ident_lower = current_ident.to_ascii_lowercase();
-                    match ident_lower.as_str() {
-                        "and" => tokens.push(Token::LogicalOp("AND".to_string())),
-                        "or" => tokens.push(Token::LogicalOp("OR".to_string())),
-                        "not" => tokens.push(Token::NotOp),
-                        _ => tokens.push(Token::Identifier(current_ident.clone())),
-                    }
-                    current_ident.clear();
-                }
-            }
-            _ => {
-                current_ident.push(ch);
-            }
-        }
-    }
-
-    // Handle remaining identifier
-    if !current_ident.is_empty() {
-        let ident_lower = current_ident.to_ascii_lowercase();
-        match ident_lower.as_str() {
-            "and" => tokens.push(Token::LogicalOp("AND".to_string())),
-            "or" => tokens.push(Token::LogicalOp("OR".to_string())),
-            "not" => tokens.push(Token::NotOp),
-            _ => tokens.push(Token::Identifier(current_ident)),
-        }
-    }
-
-    Ok(tokens)
 }
 
 /// Parse a boolean filter expression composed of comparisons combined with
@@ -1319,18 +1117,8 @@ fn parse_with_column_expr(src: &str) -> Result<Expr, String> {
     Err(format!("unsupported withColumn expression: {}", s))
 }
 
-/// Parse a comparison expression that may include lit(None)
-/// e.g., "col('value') > lit(None)"
-/// Note: Currently just delegates to parse_simple_filter_expr since lit(None) handling is complex
-fn parse_comparison_with_null(src: &str) -> Result<Expr, String> {
-    // For now, just use the standard parser
-    // It will handle column-to-column comparisons
-    parse_simple_filter_expr(src)
-}
-
 /// Parse a column reference or literal value
 fn parse_column_or_literal(s: &str) -> Result<Expr, String> {
-    use polars::prelude::*;
     use robin_sparkless::{col, lit_i64, lit_str};
     let s = s.trim();
     

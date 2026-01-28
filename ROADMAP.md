@@ -21,7 +21,7 @@
      - ✅ `createDataFrame` from simple rows (`Vec<(i64, i64, String)>` tuples)
      - ✅ `select`, `filter`, `groupBy(...).count()`, `orderBy`
      - ✅ `show`, `collect`, `count`
-   - ✅ Behavior-checked these operations against PySpark on fixtures (3 test scenarios passing)
+   - ✅ Behavior-checked these operations against PySpark on fixtures (25 scenarios passing)
 
 3. **Behavioral Tests** ✅
    - ✅ Test harness implemented (`tests/parity.rs`):
@@ -50,7 +50,6 @@
    - ✅ Complex filter expressions with logical operators (AND, OR, NOT, &&, ||, !) and nested conditions
    - ✅ Arithmetic expressions in withColumn (+, -, *, /) with proper operator precedence
    - ✅ Mixed arithmetic and logical expressions (e.g., `(col('a') + col('b')) > col('c')`)
-   - ⚠️ Note: One test case (`filter_and_or`) is currently failing and needs investigation - parser structure is correct but may have a subtle bug
 
 6. **Grouping and Joins** ⚠️ **PARTIAL**
    - ✅ Basic `groupBy` + `count()` working with parity tests
@@ -75,7 +74,7 @@
 
 We know we're on track if:
 
-- ✅ **Behavioral parity**: For core operations (filter, select, orderBy, groupBy+count/sum/avg, when/coalesce) and file readers (CSV/Parquet/JSON), PySpark and Robin Sparkless produce the same schema and data on test fixtures. **Status: PASSING (17 fixtures)**
+- ✅ **Behavioral parity**: For core operations (filter, select, orderBy, groupBy+count/sum/avg/min/max, when/coalesce, basic type coercion, null semantics) and file readers (CSV/Parquet/JSON), PySpark and Robin Sparkless produce the same schema and data on test fixtures. **Status: PASSING (25 fixtures)**
 - ⚠️ **Documentation of differences**: Any divergence from PySpark semantics should be called out explicitly. **Status: TO BE DOCUMENTED**
 - ⚠️ **Performance envelope**: For supported operations, we stay within a small constant factor of doing the same thing directly in Polars. **Status: NOT YET BENCHMARKED**
 
@@ -93,18 +92,23 @@ We know we're on track if:
 - ✅ GroupedData aggregates: `sum()`, `avg()`, `min()`, `max()`, and generic `agg()`
 - ✅ Null comparison semantics: equality/inequality vs NULL, ordering comparisons vs NULL, and `eqNullSafe`
 - ✅ Numeric type coercion for int/double comparisons and simple arithmetic
-- ✅ Parity test harness with 17 passing fixtures:
+- ✅ Parity test harness with 22 passing fixtures:
   - `filter_age_gt_30`: filter + select + orderBy
+  - `filter_and_or`: nested boolean logic with AND/OR and parentheses
+  - `filter_nested`: nested boolean logic
+  - `filter_not`: NOT / negation semantics
   - `groupby_count`: groupBy + count + orderBy
   - `groupby_with_nulls`: groupBy with null values + count
+  - `groupby_sum`: groupBy + sum aggregation
+  - `groupby_avg`: groupBy + avg aggregation
   - `read_csv`: CSV file reading + operations
   - `read_parquet`: Parquet file reading + operations
   - `read_json`: JSON file reading + operations
+  - `with_logical_column`: boolean columns / logical expressions in withColumn
+  - `with_arithmetic_logical_mix`: mixed arithmetic + logical comparison in withColumn
   - `when_otherwise`: when().then().otherwise() conditional expressions
   - `when_then_otherwise`: chained when expressions
   - `coalesce`: null handling with coalesce
-  - `groupby_sum`: groupBy + sum aggregation
-  - `groupby_avg`: groupBy + avg aggregation
   - `null_comparison_equality`: null equality/inequality semantics
   - `null_comparison_ordering`: ordering comparisons vs NULL
   - `null_safe_equality`: null-safe equality (`eqNullSafe`)
@@ -134,10 +138,7 @@ To enforce the roadmap above, we will:
 
 - **Track parity coverage**
   - ✅ Initial parity test infrastructure in place
-  - [ ] Maintain a parity matrix (operations × data types × edge cases) in a doc such as `PARITY_STATUS.md`
-  - [ ] Each cell should indicate:
-    - "Covered by fixture X",
-    - "Not yet covered", or
-    - "Intentionally diverges from PySpark (documented)"
+  - ✅ Maintain a parity matrix (operations × data types × edge cases) in `PARITY_STATUS.md` (see `PARITY_STATUS.md`)
+    - Each cell indicates whether it's covered (and by which fixture), not yet covered, or intentionally diverges.
 
 This testing strategy makes PySpark behavior the reference and gives us a clear, automated way to detect regressions as the Rust API and Polars versions evolve.

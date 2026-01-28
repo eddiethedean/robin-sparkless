@@ -27,39 +27,13 @@
 
 ## 🔧 Remaining Work
 
-The code structure is in place, but there are compilation errors due to Polars API mismatches. The following need to be fixed:
+The migration itself is complete (Rust-only + Polars backend, build/test green). Remaining work is now parity and feature expansion:
 
-### API Fixes Needed
-
-1. **Session/File Reading** (`src/session.rs`)
-   - Fix `LazyCsvReader` API usage
-   - Fix `LazyJsonLineReader` API usage  
-   - Fix `LazyFrame::scan_parquet` API usage
-
-2. **DataFrame Operations** (`src/dataframe.rs`)
-   - Fix `join()` method - Polars join API may differ
-   - Fix `sort()` method - check sort_by_exprs signature
-   - Fix `group_by()` and aggregation expressions
-   - Fix column name comparison (PlSmallStr vs str)
-
-3. **Column Operations** (`src/column.rs`)
-   - Fix `contains()` method for string operations
-   - Verify all comparison/arithmetic operators work with Polars Expr
-
-4. **Functions** (`src/functions.rs`)
-   - Fix `when().then().otherwise()` API usage
-   - Verify aggregation functions (count, sum, etc.)
-
-5. **Expression Conversions** (`src/expression.rs`)
-   - Remove trait implementations for foreign types (can't implement From<Expr> for foreign types)
-   - Use helper functions instead
-
-### Next Steps
-
-1. Review Polars 0.45 documentation for exact API signatures
-2. Fix each compilation error systematically
-3. Create Rust tests to replace Python tests
-4. Verify all operations work correctly
+- Joins (inner/left/right/outer)
+- Window functions
+- SQL support (or explicit deferral with documentation)
+- Broader function coverage + additional edge-case parity fixtures
+- Benchmarks/performance envelope work
 
 ## Architecture
 
@@ -71,3 +45,7 @@ The new architecture:
 - **Schema**: Converts between Polars schemas and custom schema types
 
 All operations are lazy by default (using Polars LazyFrame) and execute when actions like `collect()` or `show()` are called.
+
+## Historical Notes (archived)
+
+Earlier versions of this doc tracked Polars API mismatches and compilation errors during the migration. Those items are no longer current; parity coverage is tracked in `PARITY_STATUS.md` and future work in `ROADMAP.md`.

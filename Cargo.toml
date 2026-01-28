@@ -16,3 +16,4 @@ thiserror = "1.0"
 
 [dev-dependencies]
 polars = { version = "0.45", features = ["lazy", "csv", "parquet", "json", "temporal", "strings", "dtype-categorical", "dtype-date", "dtype-datetime", "dtype-duration", "dtype-time", "test"] }
+tempfile = "3"

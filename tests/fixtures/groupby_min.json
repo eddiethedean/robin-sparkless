@@ -1,0 +1,64 @@
+{
+  "name": "groupby_min",
+  "pyspark_version": "3.5.0",
+  "input": {
+    "schema": [
+      {
+        "name": "id",
+        "type": "bigint"
+      },
+      {
+        "name": "department",
+        "type": "string"
+      },
+      {
+        "name": "salary",
+        "type": "bigint"
+      }
+    ],
+    "rows": [
+      [1, "Sales", 1000],
+      [2, "Sales", 1500],
+      [3, "Engineering", 2000],
+      [4, "Engineering", 2500],
+      [5, "Sales", 1200]
+    ]
+  },
+  "operations": [
+    {
+      "op": "groupBy",
+      "columns": ["department"]
+    },
+    {
+      "op": "agg",
+      "aggregations": [
+        {
+          "func": "min",
+          "alias": "min",
+          "column": "salary"
+        }
+      ]
+    },
+    {
+      "op": "orderBy",
+      "columns": ["department"],
+      "ascending": [true]
+    }
+  ],
+  "expected": {
+    "schema": [
+      {
+        "name": "department",
+        "type": "string"
+      },
+      {
+        "name": "min(salary)",
+        "type": "bigint"
+      }
+    ],
+    "rows": [
+      ["Engineering", 2000],
+      ["Sales", 1000]
+    ]
+  }
+}

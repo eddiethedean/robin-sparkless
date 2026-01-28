@@ -3,6 +3,7 @@ use polars::prelude::*;
 /// Type precedence for ANSI SQL type coercion
 /// Higher precedence types can be coerced to, lower precedence types are coerced from
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[allow(dead_code)] // Decimal reserved for future use
 enum TypePrecedence {
     Int = 1,
     Long = 2,

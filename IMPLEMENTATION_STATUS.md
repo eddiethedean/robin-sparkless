@@ -12,27 +12,36 @@
 - `Column` is a thin wrapper around Polars `Expr`.
 - Basic helpers implemented in `functions.rs` for literals and aggregates.
 
-### 3. Session API Skeleton
-- `SparkSession` and `SparkSessionBuilder` kept as a Rust-facing entry point.
-- `DataFrameReader` still exists but IO helpers are currently stubs.
+### 3. Session API + IO
+- `SparkSession` and `SparkSessionBuilder` are the Rust-facing entry point.
+- File readers are implemented via Polars IO:
+  - `SparkSession::read_csv`
+  - `SparkSession::read_parquet`
+  - `SparkSession::read_json`
 
-## ⚙️ In Progress / Planned (toward PySpark parity)
+### 4. PySpark Parity Harness
+- `tests/gen_pyspark_cases.py` generates JSON fixtures from PySpark.
+- `tests/parity.rs` runs the fixtures through robin-sparkless and asserts parity.
+- Parity coverage is tracked in `PARITY_STATUS.md`.
+
+## ⚙️ In Progress / Planned (toward broader PySpark parity)
 
 1. **PySpark-inspired API surface**
    - Clarify which PySpark methods we intend to emulate first.
    - Align naming and signatures (adapted to Rust) for `SparkSession`, `DataFrame`, `Column`.
 
 2. **Behavioral Parity Slice**
-   - Implement and verify a small but representative set of operations:
-     - `createDataFrame` from simple Rust rows.
-     - `select`, `filter`, `groupBy(...).count()`.
-     - `show`, `collect`, `count`.
-   - Compare behavior against PySpark on fixtures (schemas, nulls, types).
+   - Continue expanding parity coverage by adding fixtures for new capabilities and edge cases.
+   - Current fixture coverage and status lives in `PARITY_STATUS.md`.
 
-3. **IO and Schema**
-   - Implement CSV/Parquet/JSON readers through Polars.
-   - Aim for PySpark-like schema inference and option handling where feasible.
+3. **Joins**
+   - Implement common join types (inner, left, right, outer) and compare behavior against PySpark.
+   - Add parity fixtures for join edge cases (null keys, duplicate keys, column naming).
 
-4. **Testing & Tooling**
-   - Rust test suite that encodes PySpark vs Robin Sparkless parity expectations.
-   - Scripts or notes for running equivalent PySpark pipelines for comparison.
+4. **Broader expression & function coverage**
+   - Expand built-in functions (string/date/math) with explicit PySpark semantics.
+   - Add additional type coercion and null-handling edge cases as fixtures.
+
+5. **Window functions and SQL**
+   - Add window functions parity slice.
+   - Implement (or explicitly defer) `SparkSession::sql()` with clear documentation.

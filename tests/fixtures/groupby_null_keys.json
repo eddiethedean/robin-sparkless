@@ -1,0 +1,66 @@
+{
+  "name": "groupby_null_keys",
+  "pyspark_version": "3.5.0",
+  "input": {
+    "schema": [
+      {
+        "name": "id",
+        "type": "int"
+      },
+      {
+        "name": "category",
+        "type": "string"
+      },
+      {
+        "name": "value",
+        "type": "int"
+      }
+    ],
+    "rows": [
+      [1, "A", 10],
+      [2, "A", 20],
+      [3, null, 30],
+      [4, "B", 40],
+      [5, null, 50],
+      [6, "B", 60]
+    ]
+  },
+  "operations": [
+    {
+      "op": "groupBy",
+      "columns": ["category"]
+    },
+    {
+      "op": "agg",
+      "aggregations": [
+        {
+          "func": "sum",
+          "alias": "sum",
+          "column": "value"
+        }
+      ]
+    },
+    {
+      "op": "orderBy",
+      "columns": ["category"],
+      "ascending": [true]
+    }
+  ],
+  "expected": {
+    "schema": [
+      {
+        "name": "category",
+        "type": "string"
+      },
+      {
+        "name": "sum(value)",
+        "type": "bigint"
+      }
+    ],
+    "rows": [
+      [null, 80],
+      ["A", 30],
+      ["B", 100]
+    ]
+  }
+}

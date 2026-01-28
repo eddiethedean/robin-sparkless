@@ -144,3 +144,173 @@ pub fn coalesce(columns: &[&Column]) -> Column {
     let expr = coalesce(&exprs);
     crate::column::Column::from_expr(expr, None)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use polars::prelude::{df, IntoLazy};
+
+    #[test]
+    fn test_col_creates_column() {
+        let column = col("test");
+        assert_eq!(column.name(), "test");
+    }
+
+    #[test]
+    fn test_lit_i32() {
+        let column = lit_i32(42);
+        // The column should have a default name since it's a literal
+        assert_eq!(column.name(), "<expr>");
+    }
+
+    #[test]
+    fn test_lit_i64() {
+        let column = lit_i64(123456789012345i64);
+        assert_eq!(column.name(), "<expr>");
+    }
+
+    #[test]
+    fn test_lit_f64() {
+        let column = lit_f64(3.14159);
+        assert_eq!(column.name(), "<expr>");
+    }
+
+    #[test]
+    fn test_lit_bool() {
+        let column = lit_bool(true);
+        assert_eq!(column.name(), "<expr>");
+    }
+
+    #[test]
+    fn test_lit_str() {
+        let column = lit_str("hello");
+        assert_eq!(column.name(), "<expr>");
+    }
+
+    #[test]
+    fn test_count_aggregation() {
+        let column = col("value");
+        let result = count(&column);
+        assert_eq!(result.name(), "count");
+    }
+
+    #[test]
+    fn test_sum_aggregation() {
+        let column = col("value");
+        let result = sum(&column);
+        assert_eq!(result.name(), "sum");
+    }
+
+    #[test]
+    fn test_avg_aggregation() {
+        let column = col("value");
+        let result = avg(&column);
+        assert_eq!(result.name(), "avg");
+    }
+
+    #[test]
+    fn test_max_aggregation() {
+        let column = col("value");
+        let result = max(&column);
+        assert_eq!(result.name(), "max");
+    }
+
+    #[test]
+    fn test_min_aggregation() {
+        let column = col("value");
+        let result = min(&column);
+        assert_eq!(result.name(), "min");
+    }
+
+    #[test]
+    fn test_when_then_otherwise() {
+        // Create a simple DataFrame
+        let df = df!(
+            "age" => &[15, 25, 35]
+        ).unwrap();
+
+        // Build a when-then-otherwise expression
+        let age_col = col("age");
+        let condition = age_col.gt(polars::prelude::lit(18));
+        let result = when(&condition)
+            .then(&lit_str("adult"))
+            .otherwise(&lit_str("minor"));
+
+        // Apply the expression
+        let result_df = df.lazy()
+            .with_column(result.into_expr().alias("status"))
+            .collect()
+            .unwrap();
+
+        // Verify the result
+        let status_col = result_df.column("status").unwrap();
+        let values: Vec<Option<&str>> = status_col.str().unwrap().into_iter().collect();
+        
+        assert_eq!(values[0], Some("minor")); // age 15 < 18
+        assert_eq!(values[1], Some("adult")); // age 25 > 18
+        assert_eq!(values[2], Some("adult")); // age 35 > 18
+    }
+
+    #[test]
+    fn test_coalesce_returns_first_non_null() {
+        // Create a DataFrame with some nulls
+        let df = df!(
+            "a" => &[Some(1), None, None],
+            "b" => &[None, Some(2), None],
+            "c" => &[None, None, Some(3)]
+        ).unwrap();
+
+        let col_a = col("a");
+        let col_b = col("b");
+        let col_c = col("c");
+        let result = coalesce(&[&col_a, &col_b, &col_c]);
+
+        // Apply the expression
+        let result_df = df.lazy()
+            .with_column(result.into_expr().alias("coalesced"))
+            .collect()
+            .unwrap();
+
+        // Verify the result
+        let coalesced_col = result_df.column("coalesced").unwrap();
+        let values: Vec<Option<i32>> = coalesced_col.i32().unwrap().into_iter().collect();
+        
+        assert_eq!(values[0], Some(1)); // First non-null is 'a'
+        assert_eq!(values[1], Some(2)); // First non-null is 'b'
+        assert_eq!(values[2], Some(3)); // First non-null is 'c'
+    }
+
+    #[test]
+    fn test_coalesce_with_literal_fallback() {
+        // Create a DataFrame with all nulls in one row
+        let df = df!(
+            "a" => &[Some(1), None],
+            "b" => &[None::<i32>, None::<i32>]
+        ).unwrap();
+
+        let col_a = col("a");
+        let col_b = col("b");
+        let fallback = lit_i32(0);
+        let result = coalesce(&[&col_a, &col_b, &fallback]);
+
+        // Apply the expression
+        let result_df = df.lazy()
+            .with_column(result.into_expr().alias("coalesced"))
+            .collect()
+            .unwrap();
+
+        // Verify the result
+        let coalesced_col = result_df.column("coalesced").unwrap();
+        let values: Vec<Option<i32>> = coalesced_col.i32().unwrap().into_iter().collect();
+        
+        assert_eq!(values[0], Some(1)); // First non-null is 'a'
+        assert_eq!(values[1], Some(0)); // All nulls, use fallback
+    }
+
+    #[test]
+    #[should_panic(expected = "coalesce requires at least one column")]
+    fn test_coalesce_empty_panics() {
+        let columns: [&Column; 0] = [];
+        let _ = coalesce(&columns);
+    }
+}
