@@ -1,0 +1,113 @@
+{
+  "name": "coalesce",
+  "pyspark_version": "3.5.0",
+  "input": {
+    "schema": [
+      {
+        "name": "id",
+        "type": "int"
+      },
+      {
+        "name": "col1",
+        "type": "string"
+      },
+      {
+        "name": "col2",
+        "type": "string"
+      }
+    ],
+    "rows": [
+      [
+        1,
+        "A",
+        "X"
+      ],
+      [
+        2,
+        null,
+        "Y"
+      ],
+      [
+        3,
+        "C",
+        null
+      ],
+      [
+        4,
+        null,
+        null
+      ]
+    ]
+  },
+  "operations": [
+    {
+      "op": "withColumn",
+      "column": "result",
+      "expr": "coalesce(col('col1'), col('col2'), lit('default'))"
+    },
+    {
+      "op": "select",
+      "columns": [
+        "id",
+        "col1",
+        "col2",
+        "result"
+      ]
+    },
+    {
+      "op": "orderBy",
+      "columns": [
+        "id"
+      ],
+      "ascending": [
+        true
+      ]
+    }
+  ],
+  "expected": {
+    "schema": [
+      {
+        "name": "id",
+        "type": "int"
+      },
+      {
+        "name": "col1",
+        "type": "string"
+      },
+      {
+        "name": "col2",
+        "type": "string"
+      },
+      {
+        "name": "result",
+        "type": "string"
+      }
+    ],
+    "rows": [
+      [
+        1,
+        "A",
+        "X",
+        "A"
+      ],
+      [
+        2,
+        null,
+        "Y",
+        "Y"
+      ],
+      [
+        3,
+        "C",
+        null,
+        "C"
+      ],
+      [
+        4,
+        null,
+        null,
+        "default"
+      ]
+    ]
+  }
+}

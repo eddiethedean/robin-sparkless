@@ -1,0 +1,124 @@
+{
+  "name": "null_safe_equality",
+  "pyspark_version": "3.5.0",
+  "input": {
+    "schema": [
+      {
+        "name": "id",
+        "type": "int"
+      },
+      {
+        "name": "value1",
+        "type": "int"
+      },
+      {
+        "name": "value2",
+        "type": "int"
+      }
+    ],
+    "rows": [
+      [
+        1,
+        10,
+        10
+      ],
+      [
+        2,
+        null,
+        null
+      ],
+      [
+        3,
+        20,
+        null
+      ],
+      [
+        4,
+        null,
+        30
+      ],
+      [
+        5,
+        40,
+        40
+      ]
+    ]
+  },
+  "operations": [
+    {
+      "op": "withColumn",
+      "column": "null_safe_eq",
+      "expr": "col('value1').eqNullSafe(col('value2'))"
+    },
+    {
+      "op": "select",
+      "columns": [
+        "id",
+        "value1",
+        "value2",
+        "null_safe_eq"
+      ]
+    },
+    {
+      "op": "orderBy",
+      "columns": [
+        "id"
+      ],
+      "ascending": [
+        true
+      ]
+    }
+  ],
+  "expected": {
+    "schema": [
+      {
+        "name": "id",
+        "type": "int"
+      },
+      {
+        "name": "value1",
+        "type": "int"
+      },
+      {
+        "name": "value2",
+        "type": "int"
+      },
+      {
+        "name": "null_safe_eq",
+        "type": "boolean"
+      }
+    ],
+    "rows": [
+      [
+        1,
+        10,
+        10,
+        true
+      ],
+      [
+        2,
+        null,
+        null,
+        true
+      ],
+      [
+        3,
+        20,
+        null,
+        false
+      ],
+      [
+        4,
+        null,
+        30,
+        false
+      ],
+      [
+        5,
+        40,
+        40,
+        true
+      ]
+    ]
+  }
+}

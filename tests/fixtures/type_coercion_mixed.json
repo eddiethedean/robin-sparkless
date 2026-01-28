@@ -1,0 +1,102 @@
+{
+  "name": "type_coercion_mixed",
+  "pyspark_version": "3.5.0",
+  "input": {
+    "schema": [
+      {
+        "name": "id",
+        "type": "int"
+      },
+      {
+        "name": "int_val",
+        "type": "int"
+      },
+      {
+        "name": "double_val",
+        "type": "double"
+      }
+    ],
+    "rows": [
+      [
+        1,
+        10,
+        2.5
+      ],
+      [
+        2,
+        20,
+        3.5
+      ],
+      [
+        3,
+        30,
+        4.5
+      ]
+    ]
+  },
+  "operations": [
+    {
+      "op": "withColumn",
+      "column": "sum",
+      "expr": "col('int_val') + col('double_val')"
+    },
+    {
+      "op": "select",
+      "columns": [
+        "id",
+        "int_val",
+        "double_val",
+        "sum"
+      ]
+    },
+    {
+      "op": "orderBy",
+      "columns": [
+        "id"
+      ],
+      "ascending": [
+        true
+      ]
+    }
+  ],
+  "expected": {
+    "schema": [
+      {
+        "name": "id",
+        "type": "int"
+      },
+      {
+        "name": "int_val",
+        "type": "int"
+      },
+      {
+        "name": "double_val",
+        "type": "double"
+      },
+      {
+        "name": "sum",
+        "type": "double"
+      }
+    ],
+    "rows": [
+      [
+        1,
+        10,
+        2.5,
+        12.5
+      ],
+      [
+        2,
+        20,
+        3.5,
+        23.5
+      ],
+      [
+        3,
+        30,
+        4.5,
+        34.5
+      ]
+    ]
+  }
+}

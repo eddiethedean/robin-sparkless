@@ -1,4 +1,4 @@
-use polars::prelude::{col, DataFrame as PlDataFrame, Expr, IntoLazy, PolarsError};
+use polars::prelude::{DataFrame as PlDataFrame, Expr, PolarsError};
 use crate::column::Column;
 use crate::schema::StructType;
 use std::sync::Arc;
@@ -73,6 +73,15 @@ impl DataFrame {
         Ok(Column::new(name.to_string()))
     }
 
+    /// Add or replace a column using an expression
+    pub fn with_column(&self, column_name: &str, expr: Expr) -> Result<DataFrame, PolarsError> {
+        use polars::prelude::*;
+        let lf = self.df.as_ref().clone().lazy();
+        let lf_with_col = lf.with_column(expr.alias(column_name));
+        let pl_df = lf_with_col.collect()?;
+        Ok(crate::dataframe::DataFrame::from_polars(pl_df))
+    }
+
     /// Group by columns (returns GroupedData for aggregation)
     pub fn group_by(&self, column_names: Vec<&str>) -> Result<GroupedData, PolarsError> {
         use polars::prelude::*;
@@ -123,6 +132,97 @@ impl GroupedData {
         use polars::prelude::*;
         let agg_expr = vec![len().alias("count")];
         let lf = self.lazy_grouped.clone().agg(agg_expr);
+        let mut pl_df = lf.collect()?;
+        pl_df = reorder_groupby_columns(&mut pl_df, &self.grouping_cols)?;
+        Ok(crate::dataframe::DataFrame::from_polars(pl_df))
+    }
+
+    /// Sum a column in each group
+    pub fn sum(&self, column: &str) -> Result<DataFrame, PolarsError> {
+        use polars::prelude::*;
+        // Use the column name with sum() to match PySpark's sum(column) behavior
+        // PySpark returns "sum(column)" as the alias
+        let agg_expr = vec![col(column).sum().alias(&format!("sum({})", column))];
+        let lf = self.lazy_grouped.clone().agg(agg_expr);
+        let mut pl_df = lf.collect()?;
+        
+        // Polars returns columns in a different order than PySpark
+        // PySpark: [grouping_cols..., agg_cols...]
+        // Polars: might be [agg_cols..., grouping_cols...] or different
+        // Reorder to match PySpark: grouping columns first, then aggregations
+        let all_cols: Vec<String> = pl_df.get_column_names().iter().map(|s| s.to_string()).collect();
+        let grouping_cols: Vec<&str> = self.grouping_cols.iter().map(|s| s.as_str()).collect();
+        let mut reordered_cols: Vec<&str> = Vec::new();
+        
+        // Add grouping columns first
+        for gc in &grouping_cols {
+            if all_cols.iter().any(|c| c == gc) {
+                reordered_cols.push(gc);
+            }
+        }
+        
+        // Then add aggregation columns
+        for col_name in &all_cols {
+            if !grouping_cols.iter().any(|gc| *gc == col_name) {
+                reordered_cols.push(col_name);
+            }
+        }
+        
+        if !reordered_cols.is_empty() {
+            pl_df = pl_df.select(reordered_cols)?;
+        }
+        
+        Ok(crate::dataframe::DataFrame::from_polars(pl_df))
+    }
+
+    /// Average (mean) of a column in each group
+    pub fn avg(&self, column: &str) -> Result<DataFrame, PolarsError> {
+        use polars::prelude::*;
+        let agg_expr = vec![col(column).mean().alias(&format!("avg({})", column))];
+        let lf = self.lazy_grouped.clone().agg(agg_expr);
+        let mut pl_df = lf.collect()?;
+        pl_df = reorder_groupby_columns(&mut pl_df, &self.grouping_cols)?;
+        Ok(crate::dataframe::DataFrame::from_polars(pl_df))
+    }
+
+    /// Minimum value of a column in each group
+    pub fn min(&self, column: &str) -> Result<DataFrame, PolarsError> {
+        use polars::prelude::*;
+        let agg_expr = vec![col(column).min().alias(&format!("min({})", column))];
+        let lf = self.lazy_grouped.clone().agg(agg_expr);
+        let mut pl_df = lf.collect()?;
+        pl_df = reorder_groupby_columns(&mut pl_df, &self.grouping_cols)?;
+        Ok(crate::dataframe::DataFrame::from_polars(pl_df))
+    }
+
+    /// Maximum value of a column in each group
+    pub fn max(&self, column: &str) -> Result<DataFrame, PolarsError> {
+        use polars::prelude::*;
+        let agg_expr = vec![col(column).max().alias(&format!("max({})", column))];
+        let lf = self.lazy_grouped.clone().agg(agg_expr);
+        let mut pl_df = lf.collect()?;
+        pl_df = reorder_groupby_columns(&mut pl_df, &self.grouping_cols)?;
+        Ok(crate::dataframe::DataFrame::from_polars(pl_df))
+    }
+
+    /// Apply multiple aggregations at once (generic agg method)
+    /// 
+    /// # Example
+    /// ```
+    /// use polars::prelude::*;
+    /// use robin_sparkless::{DataFrame, GroupedData};
+    ///
+    /// # fn example(grouped_data: &GroupedData) -> Result<DataFrame, polars::prelude::PolarsError> {
+    /// // Apply multiple aggregations
+    /// let df = grouped_data.agg(vec![
+    ///     col("salary").sum().alias("total_salary"),
+    ///     col("salary").mean().alias("avg_salary"),
+    /// ])?;
+    /// #     Ok(df)
+    /// # }
+    /// ```
+    pub fn agg(&self, aggregations: Vec<Expr>) -> Result<DataFrame, PolarsError> {
+        let lf = self.lazy_grouped.clone().agg(aggregations);
         let pl_df = lf.collect()?;
         Ok(crate::dataframe::DataFrame::from_polars(pl_df))
     }
@@ -130,6 +230,35 @@ impl GroupedData {
     /// Get grouping columns
     pub fn grouping_columns(&self) -> &[String] {
         &self.grouping_cols
+    }
+}
+
+/// Reorder columns after groupBy to match PySpark order: grouping columns first, then aggregations
+fn reorder_groupby_columns(
+    pl_df: &mut PlDataFrame,
+    grouping_cols: &[String],
+) -> Result<PlDataFrame, PolarsError> {
+    let all_cols: Vec<String> = pl_df.get_column_names().iter().map(|s| s.to_string()).collect();
+    let mut reordered_cols: Vec<&str> = Vec::new();
+    
+    // Add grouping columns first (in their original order)
+    for gc in grouping_cols {
+        if all_cols.iter().any(|c| c == gc) {
+            reordered_cols.push(gc);
+        }
+    }
+    
+    // Then add aggregation columns (in their original order)
+    for col_name in &all_cols {
+        if !grouping_cols.iter().any(|gc| gc == col_name) {
+            reordered_cols.push(col_name);
+        }
+    }
+    
+    if !reordered_cols.is_empty() && reordered_cols.len() == all_cols.len() {
+        pl_df.select(reordered_cols)
+    } else {
+        Ok(pl_df.clone())
     }
 }
 

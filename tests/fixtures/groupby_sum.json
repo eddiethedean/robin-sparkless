@@ -1,0 +1,96 @@
+{
+  "name": "groupby_sum",
+  "pyspark_version": "3.5.0",
+  "input": {
+    "schema": [
+      {
+        "name": "id",
+        "type": "bigint"
+      },
+      {
+        "name": "department",
+        "type": "string"
+      },
+      {
+        "name": "salary",
+        "type": "bigint"
+      }
+    ],
+    "rows": [
+      [
+        1,
+        "Sales",
+        1000
+      ],
+      [
+        2,
+        "Sales",
+        1500
+      ],
+      [
+        3,
+        "Engineering",
+        2000
+      ],
+      [
+        4,
+        "Engineering",
+        2500
+      ],
+      [
+        5,
+        "Sales",
+        1200
+      ]
+    ]
+  },
+  "operations": [
+    {
+      "op": "groupBy",
+      "columns": [
+        "department"
+      ]
+    },
+    {
+      "op": "agg",
+      "aggregations": [
+        {
+          "func": "sum",
+          "alias": "sum",
+          "column": "salary"
+        }
+      ]
+    },
+    {
+      "op": "orderBy",
+      "columns": [
+        "department"
+      ],
+      "ascending": [
+        true
+      ]
+    }
+  ],
+  "expected": {
+    "schema": [
+      {
+        "name": "department",
+        "type": "string"
+      },
+      {
+        "name": "sum(salary)",
+        "type": "bigint"
+      }
+    ],
+    "rows": [
+      [
+        "Engineering",
+        4500
+      ],
+      [
+        "Sales",
+        3700
+      ]
+    ]
+  }
+}

@@ -1,0 +1,96 @@
+{
+  "name": "when_then_otherwise",
+  "pyspark_version": "3.5.0",
+  "input": {
+    "schema": [
+      {
+        "name": "id",
+        "type": "bigint"
+      },
+      {
+        "name": "age",
+        "type": "bigint"
+      }
+    ],
+    "rows": [
+      [
+        1,
+        25
+      ],
+      [
+        2,
+        17
+      ],
+      [
+        3,
+        30
+      ],
+      [
+        4,
+        16
+      ]
+    ]
+  },
+  "operations": [
+    {
+      "op": "withColumn",
+      "column": "status",
+      "expr": "when(col('age') >= 18).then('adult').otherwise('minor')"
+    },
+    {
+      "op": "select",
+      "columns": [
+        "id",
+        "age",
+        "status"
+      ]
+    },
+    {
+      "op": "orderBy",
+      "columns": [
+        "id"
+      ],
+      "ascending": [
+        true
+      ]
+    }
+  ],
+  "expected": {
+    "schema": [
+      {
+        "name": "id",
+        "type": "bigint"
+      },
+      {
+        "name": "age",
+        "type": "bigint"
+      },
+      {
+        "name": "status",
+        "type": "string"
+      }
+    ],
+    "rows": [
+      [
+        1,
+        25,
+        "adult"
+      ],
+      [
+        2,
+        17,
+        "minor"
+      ],
+      [
+        3,
+        30,
+        "adult"
+      ],
+      [
+        4,
+        16,
+        "minor"
+      ]
+    ]
+  }
+}

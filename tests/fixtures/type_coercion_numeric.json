@@ -1,0 +1,93 @@
+{
+  "name": "type_coercion_numeric",
+  "pyspark_version": "3.5.0",
+  "input": {
+    "schema": [
+      {
+        "name": "id",
+        "type": "int"
+      },
+      {
+        "name": "int_col",
+        "type": "int"
+      },
+      {
+        "name": "double_col",
+        "type": "double"
+      }
+    ],
+    "rows": [
+      [
+        1,
+        10,
+        5.5
+      ],
+      [
+        2,
+        20,
+        15.7
+      ],
+      [
+        3,
+        30,
+        25.3
+      ]
+    ]
+  },
+  "operations": [
+    {
+      "op": "filter",
+      "expr": "col('int_col') > 5.5"
+    },
+    {
+      "op": "select",
+      "columns": [
+        "id",
+        "int_col",
+        "double_col"
+      ]
+    },
+    {
+      "op": "orderBy",
+      "columns": [
+        "id"
+      ],
+      "ascending": [
+        true
+      ]
+    }
+  ],
+  "expected": {
+    "schema": [
+      {
+        "name": "id",
+        "type": "int"
+      },
+      {
+        "name": "int_col",
+        "type": "int"
+      },
+      {
+        "name": "double_col",
+        "type": "double"
+      }
+    ],
+    "rows": [
+      [
+        1,
+        10,
+        5.5
+      ],
+      [
+        2,
+        20,
+        15.7
+      ],
+      [
+        3,
+        30,
+        25.3
+      ]
+    ]
+  }
+}

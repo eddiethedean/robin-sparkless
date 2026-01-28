@@ -1,4 +1,4 @@
-use polars::prelude::{DataFrame as PlDataFrame, LazyCsvReader, LazyFrame, LazyJsonLineReader, NamedFrom, PolarsError, ScanArgsParquet, Series};
+use polars::prelude::{DataFrame as PlDataFrame, NamedFrom, PolarsError, Series};
 use std::collections::HashMap;
 use std::path::Path;
 use crate::dataframe::DataFrame;
@@ -69,12 +69,19 @@ impl SparkSession {
     /// # Example
     /// ```
     /// use robin_sparkless::session::SparkSession;
-    /// 
+    ///
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// let spark = SparkSession::builder().app_name("test").get_or_create();
-    /// let df = spark.create_dataframe(vec![
-    ///     (1, 25, "Alice".to_string()),
-    ///     (2, 30, "Bob".to_string()),
-    /// ], vec!["id", "age", "name"])?;
+    /// let df = spark.create_dataframe(
+    ///     vec![
+    ///         (1, 25, "Alice".to_string()),
+    ///         (2, 30, "Bob".to_string()),
+    ///     ],
+    ///     vec!["id", "age", "name"],
+    /// )?;
+    /// #     let _ = df;
+    /// #     Ok(())
+    /// # }
     /// ```
     pub fn create_dataframe(
         &self,
@@ -125,7 +132,8 @@ impl SparkSession {
     /// use robin_sparkless::SparkSession;
     ///
     /// let spark = SparkSession::builder().app_name("test").get_or_create();
-    /// let df = spark.read_csv("data.csv")?;
+    /// let df_result = spark.read_csv("data.csv");
+    /// // Handle the Result as appropriate in your application
     /// ```
     pub fn read_csv(&self, path: impl AsRef<Path>) -> Result<DataFrame, PolarsError> {
         use polars::prelude::*;
@@ -149,7 +157,8 @@ impl SparkSession {
     /// use robin_sparkless::SparkSession;
     ///
     /// let spark = SparkSession::builder().app_name("test").get_or_create();
-    /// let df = spark.read_parquet("data.parquet")?;
+    /// let df_result = spark.read_parquet("data.parquet");
+    /// // Handle the Result as appropriate in your application
     /// ```
     pub fn read_parquet(&self, path: impl AsRef<Path>) -> Result<DataFrame, PolarsError> {
         use polars::prelude::*;
@@ -170,7 +179,8 @@ impl SparkSession {
     /// use robin_sparkless::SparkSession;
     ///
     /// let spark = SparkSession::builder().app_name("test").get_or_create();
-    /// let df = spark.read_json("data.json")?;
+    /// let df_result = spark.read_json("data.json");
+    /// // Handle the Result as appropriate in your application
     /// ```
     pub fn read_json(&self, path: impl AsRef<Path>) -> Result<DataFrame, PolarsError> {
         use polars::prelude::*;

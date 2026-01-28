@@ -1,0 +1,115 @@
+{
+  "name": "null_comparison_equality",
+  "pyspark_version": "3.5.0",
+  "input": {
+    "schema": [
+      {
+        "name": "id",
+        "type": "int"
+      },
+      {
+        "name": "value",
+        "type": "int"
+      }
+    ],
+    "rows": [
+      [
+        1,
+        10
+      ],
+      [
+        2,
+        null
+      ],
+      [
+        3,
+        20
+      ],
+      [
+        4,
+        null
+      ]
+    ]
+  },
+  "operations": [
+    {
+      "op": "withColumn",
+      "column": "null_col",
+      "expr": "lit(None)"
+    },
+    {
+      "op": "withColumn",
+      "column": "eq_null",
+      "expr": "when(col('value') == col('null_col')).then('NULL').otherwise('NOT_NULL')"
+    },
+    {
+      "op": "withColumn",
+      "column": "ne_null",
+      "expr": "when(col('value') != col('null_col')).then('NOT_NULL').otherwise('NULL')"
+    },
+    {
+      "op": "select",
+      "columns": [
+        "id",
+        "value",
+        "eq_null",
+        "ne_null"
+      ]
+    },
+    {
+      "op": "orderBy",
+      "columns": [
+        "id"
+      ],
+      "ascending": [
+        true
+      ]
+    }
+  ],
+  "expected": {
+    "schema": [
+      {
+        "name": "id",
+        "type": "int"
+      },
+      {
+        "name": "value",
+        "type": "int"
+      },
+      {
+        "name": "eq_null",
+        "type": "string"
+      },
+      {
+        "name": "ne_null",
+        "type": "string"
+      }
+    ],
+    "rows": [
+      [
+        1,
+        10,
+        "NOT_NULL",
+        "NULL"
+      ],
+      [
+        2,
+        null,
+        "NOT_NULL",
+        "NULL"
+      ],
+      [
+        3,
+        20,
+        "NOT_NULL",
+        "NULL"
+      ],
+      [
+        4,
+        null,
+        "NOT_NULL",
+        "NULL"
+      ]
+    ]
+  }
+}

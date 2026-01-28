@@ -33,9 +33,9 @@ use robin_sparkless::{DataFrame, Column, SparkSession};
 // For now, we start from a Polars DataFrame:
 
 let polars_df = df!(
-    "id" => &[1, 2, 3],
-    "age" => &[25, 30, 35],
-    "name" => &["Alice", "Bob", "Charlie"],
+    "id" => &[1, 2, 3, 4],
+    "age" => &[25, 35, 45, 55],
+    "score" => &[50, 60, 110, 70],
 )?;
 
 let df = DataFrame::from_polars(polars_df);
@@ -46,9 +46,28 @@ let columns = df.columns()?;
 
 // Build expressions using a Column wrapper (similar to PySpark Column)
 let age_col: Column = df.column("age")?;
-let adults = df.filter(age_col.expr().clone().gt(lit(18)))?;
+let adults = df.filter(age_col.expr().clone().gt(lit(30)))?;
+
+// More complex boolean logic, similar to PySpark:
+// df.filter((col("age") > 30) & ((col("score") < 100) | (col("age") > 50)))
+let complex = df.filter(
+    (df.column("age")?.expr().clone().gt(lit(30)))
+        .and(
+            df.column("score")?.expr().clone().lt(lit(100))
+                .or(df.column("age")?.expr().clone().gt(lit(50))),
+        ),
+)?;
+
+// Complex expressions in withColumn (arithmetic and logical):
+use robin_sparkless::{col, lit_i64};
+let df_with_computed = df.with_column(
+    "above_threshold",
+    (col("age").into_expr() + col("score").into_expr()).gt(lit(100))
+)?;
 
 adults.show(Some(10))?;
+complex.show(Some(10))?;
+df_with_computed.show(Some(10))?;
 ```
 
 As the library evolves, higher-level constructors (for Rust tuples/records) and IO helpers (CSV/Parquet/JSON readers) will be added on top of this core.

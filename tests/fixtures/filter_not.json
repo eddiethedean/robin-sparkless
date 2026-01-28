@@ -1,0 +1,71 @@
+{
+  "name": "filter_not",
+  "pyspark_version": "3.5.0",
+  "input": {
+    "schema": [
+      {
+        "name": "id",
+        "type": "int"
+      },
+      {
+        "name": "flag",
+        "type": "string"
+      }
+    ],
+    "rows": [
+      [
+        1,
+        "Y"
+      ],
+      [
+        2,
+        "N"
+      ],
+      [
+        3,
+        "Y"
+      ],
+      [
+        4,
+        "N"
+      ]
+    ]
+  },
+  "operations": [
+    {
+      "op": "filter",
+      "expr": "NOT col('flag') == 'N'"
+    },
+    {
+      "op": "orderBy",
+      "columns": [
+        "id"
+      ],
+      "ascending": [
+        true
+      ]
+    }
+  ],
+  "expected": {
+    "schema": [
+      {
+        "name": "id",
+        "type": "int"
+      },
+      {
+        "name": "flag",
+        "type": "string"
+      }
+    ],
+    "rows": [
+      [
+        1,
+        "Y"
+      ],
+      [
+        3,
+        "Y"
+      ]
+    ]
+  }
+}

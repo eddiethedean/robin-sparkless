@@ -1,0 +1,113 @@
+{
+  "name": "with_logical_column",
+  "pyspark_version": "3.5.0",
+  "input": {
+    "schema": [
+      {
+        "name": "id",
+        "type": "int"
+      },
+      {
+        "name": "age",
+        "type": "int"
+      },
+      {
+        "name": "score",
+        "type": "int"
+      }
+    ],
+    "rows": [
+      [
+        1,
+        25,
+        50
+      ],
+      [
+        2,
+        35,
+        60
+      ],
+      [
+        3,
+        45,
+        110
+      ],
+      [
+        4,
+        55,
+        70
+      ]
+    ]
+  },
+  "operations": [
+    {
+      "op": "withColumn",
+      "column": "is_target",
+      "expr": "col('age') > 30 AND col('score') < 100"
+    },
+    {
+      "op": "select",
+      "columns": [
+        "id",
+        "age",
+        "score",
+        "is_target"
+      ]
+    },
+    {
+      "op": "orderBy",
+      "columns": [
+        "id"
+      ],
+      "ascending": [
+        true
+      ]
+    }
+  ],
+  "expected": {
+    "schema": [
+      {
+        "name": "id",
+        "type": "int"
+      },
+      {
+        "name": "age",
+        "type": "int"
+      },
+      {
+        "name": "score",
+        "type": "int"
+      },
+      {
+        "name": "is_target",
+        "type": "boolean"
+      }
+    ],
+    "rows": [
+      [
+        1,
+        25,
+        50,
+        false
+      ],
+      [
+        2,
+        35,
+        60,
+        true
+      ],
+      [
+        3,
+        45,
+        110,
+        false
+      ],
+      [
+        4,
+        55,
+        70,
+        true
+      ]
+    ]
+  }
+}

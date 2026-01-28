@@ -1,0 +1,130 @@
+{
+  "name": "with_arithmetic_logical_mix",
+  "pyspark_version": "3.5.0",
+  "input": {
+    "schema": [
+      {
+        "name": "id",
+        "type": "int"
+      },
+      {
+        "name": "int_val",
+        "type": "int"
+      },
+      {
+        "name": "double_val",
+        "type": "double"
+      },
+      {
+        "name": "threshold",
+        "type": "double"
+      }
+    ],
+    "rows": [
+      [
+        1,
+        10,
+        2.5,
+        5.0
+      ],
+      [
+        2,
+        20,
+        3.5,
+        10.0
+      ],
+      [
+        3,
+        30,
+        4.5,
+        15.0
+      ],
+      [
+        4,
+        15,
+        1.5,
+        8.0
+      ]
+    ]
+  },
+  "operations": [
+    {
+      "op": "withColumn",
+      "column": "above_threshold",
+      "expr": "(col('int_val') + col('double_val')) > col('threshold')"
+    },
+    {
+      "op": "select",
+      "columns": [
+        "id",
+        "int_val",
+        "double_val",
+        "threshold",
+        "above_threshold"
+      ]
+    },
+    {
+      "op": "orderBy",
+      "columns": [
+        "id"
+      ],
+      "ascending": [
+        true
+      ]
+    }
+  ],
+  "expected": {
+    "schema": [
+      {
+        "name": "id",
+        "type": "int"
+      },
+      {
+        "name": "int_val",
+        "type": "int"
+      },
+      {
+        "name": "double_val",
+        "type": "double"
+      },
+      {
+        "name": "threshold",
+        "type": "double"
+      },
+      {
+        "name": "above_threshold",
+        "type": "boolean"
+      }
+    ],
+    "rows": [
+      [
+        1,
+        10,
+        2.5,
+        5.0,
+        true
+      ],
+      [
+        2,
+        20,
+        3.5,
+        10.0,
+        true
+      ],
+      [
+        3,
+        30,
+        4.5,
+        15.0,
+        true
+      ],
+      [
+        4,
+        15,
+        1.5,
+        8.0,
+        true
+      ]
+    ]
+  }
+}

@@ -1,0 +1,115 @@
+{
+  "name": "null_comparison_ordering",
+  "pyspark_version": "3.5.0",
+  "input": {
+    "schema": [
+      {
+        "name": "id",
+        "type": "int"
+      },
+      {
+        "name": "value",
+        "type": "int"
+      }
+    ],
+    "rows": [
+      [
+        1,
+        10
+      ],
+      [
+        2,
+        null
+      ],
+      [
+        3,
+        20
+      ],
+      [
+        4,
+        null
+      ]
+    ]
+  },
+  "operations": [
+    {
+      "op": "withColumn",
+      "column": "null_col",
+      "expr": "lit(None)"
+    },
+    {
+      "op": "withColumn",
+      "column": "gt_null",
+      "expr": "when(col('value') > col('null_col')).then('TRUE').otherwise('FALSE_OR_NULL')"
+    },
+    {
+      "op": "withColumn",
+      "column": "lt_null",
+      "expr": "when(col('value') < col('null_col')).then('TRUE').otherwise('FALSE_OR_NULL')"
+    },
+    {
+      "op": "select",
+      "columns": [
+        "id",
+        "value",
+        "gt_null",
+        "lt_null"
+      ]
+    },
+    {
+      "op": "orderBy",
+      "columns": [
+        "id"
+      ],
+      "ascending": [
+        true
+      ]
+    }
+  ],
+  "expected": {
+    "schema": [
+      {
+        "name": "id",
+        "type": "int"
+      },
+      {
+        "name": "value",
+        "type": "int"
+      },
+      {
+        "name": "gt_null",
+        "type": "string"
+      },
+      {
+        "name": "lt_null",
+        "type": "string"
+      }
+    ],
+    "rows": [
+      [
+        1,
+        10,
+        "FALSE_OR_NULL",
+        "FALSE_OR_NULL"
+      ],
+      [
+        2,
+        null,
+        "FALSE_OR_NULL",
+        "FALSE_OR_NULL"
+      ],
+      [
+        3,
+        20,
+        "FALSE_OR_NULL",
+        "FALSE_OR_NULL"
+      ],
+      [
+        4,
+        null,
+        "FALSE_OR_NULL",
+        "FALSE_OR_NULL"
+      ]
+    ]
+  }
+}

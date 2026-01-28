@@ -1,0 +1,111 @@
+{
+  "name": "filter_nested",
+  "pyspark_version": "3.5.0",
+  "input": {
+    "schema": [
+      {
+        "name": "id",
+        "type": "int"
+      },
+      {
+        "name": "age",
+        "type": "int"
+      },
+      {
+        "name": "score",
+        "type": "int"
+      },
+      {
+        "name": "vip",
+        "type": "int"
+      }
+    ],
+    "rows": [
+      [
+        1,
+        25,
+        50,
+        0
+      ],
+      [
+        2,
+        35,
+        60,
+        0
+      ],
+      [
+        3,
+        45,
+        110,
+        1
+      ],
+      [
+        4,
+        55,
+        70,
+        0
+      ],
+      [
+        5,
+        30,
+        80,
+        1
+      ]
+    ]
+  },
+  "operations": [
+    {
+      "op": "filter",
+      "expr": "(col('age') > 30 AND (col('score') < 100 OR col('vip') == 1))"
+    },
+    {
+      "op": "orderBy",
+      "columns": [
+        "id"
+      ],
+      "ascending": [
+        true
+      ]
+    }
+  ],
+  "expected": {
+    "schema": [
+      {
+        "name": "id",
+        "type": "int"
+      },
+      {
+        "name": "age",
+        "type": "int"
+      },
+      {
+        "name": "score",
+        "type": "int"
+      },
+      {
+        "name": "vip",
+        "type": "int"
+      }
+    ],
+    "rows": [
+      [
+        2,
+        35,
+        60,
+        0
+      ],
+      [
+        3,
+        45,
+        110,
+        1
+      ],
+      [
+        4,
+        55,
+        70,
+        0
+      ]
+    ]
+  }
+}

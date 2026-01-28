@@ -1,0 +1,96 @@
+{
+  "name": "groupby_avg",
+  "pyspark_version": "3.5.0",
+  "input": {
+    "schema": [
+      {
+        "name": "id",
+        "type": "bigint"
+      },
+      {
+        "name": "department",
+        "type": "string"
+      },
+      {
+        "name": "salary",
+        "type": "bigint"
+      }
+    ],
+    "rows": [
+      [
+        1,
+        "Sales",
+        1000
+      ],
+      [
+        2,
+        "Sales",
+        1500
+      ],
+      [
+        3,
+        "Engineering",
+        2000
+      ],
+      [
+        4,
+        "Engineering",
+        2500
+      ],
+      [
+        5,
+        "Sales",
+        1200
+      ]
+    ]
+  },
+  "operations": [
+    {
+      "op": "groupBy",
+      "columns": [
+        "department"
+      ]
+    },
+    {
+      "op": "agg",
+      "aggregations": [
+        {
+          "func": "avg",
+          "alias": "avg",
+          "column": "salary"
+        }
+      ]
+    },
+    {
+      "op": "orderBy",
+      "columns": [
+        "department"
+      ],
+      "ascending": [
+        true
+      ]
+    }
+  ],
+  "expected": {
+    "schema": [
+      {
+        "name": "department",
+        "type": "string"
+      },
+      {
+        "name": "avg(salary)",
+        "type": "double"
+      }
+    ],
+    "rows": [
+      [
+        "Engineering",
+        2250.0
+      ],
+      [
+        "Sales",
+        1233.3333333333333
+      ]
+    ]
+  }
+}

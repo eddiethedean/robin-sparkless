@@ -1,0 +1,78 @@
+{
+  "name": "null_in_filter",
+  "pyspark_version": "3.5.0",
+  "input": {
+    "schema": [
+      {
+        "name": "id",
+        "type": "int"
+      },
+      {
+        "name": "value",
+        "type": "int"
+      }
+    ],
+    "rows": [
+      [
+        1,
+        1
+      ],
+      [
+        2,
+        2
+      ],
+      [
+        3,
+        null
+      ],
+      [
+        4,
+        1
+      ],
+      [
+        5,
+        null
+      ]
+    ]
+  },
+  "operations": [
+    {
+      "op": "filter",
+      "expr": "col('value') != 1"
+    },
+    {
+      "op": "select",
+      "columns": [
+        "id",
+        "value"
+      ]
+    },
+    {
+      "op": "orderBy",
+      "columns": [
+        "id"
+      ],
+      "ascending": [
+        true
+      ]
+    }
+  ],
+  "expected": {
+    "schema": [
+      {
+        "name": "id",
+        "type": "int"
+      },
+      {
+        "name": "value",
+        "type": "int"
+      }
+    ],
+    "rows": [
+      [
+        2,
+        2
+      ]
+    ]
+  }
+}

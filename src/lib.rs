@@ -9,6 +9,7 @@ pub mod column;
 pub mod schema;
 pub mod functions;
 pub mod expression;
+pub mod type_coercion;
 
 pub use session::{SparkSession, SparkSessionBuilder, DataFrameReader};
 pub use dataframe::{DataFrame, GroupedData};
