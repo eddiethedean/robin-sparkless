@@ -35,6 +35,8 @@ The migration itself is complete (Rust-only + Polars backend, build/test green).
 - Broader function coverage + additional edge-case parity fixtures
 - Benchmarks/performance envelope work
 
+**Sparkless integration**: Robin-sparkless is designed to replace the backend of [Sparkless](https://github.com/eddiethedean/sparkless). See [SPARKLESS_INTEGRATION_ANALYSIS.md](SPARKLESS_INTEGRATION_ANALYSIS.md) for phases: fixture converter, structural alignment, function parity, and test conversion.
+
 ## Architecture
 
 The new architecture:

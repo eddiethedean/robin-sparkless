@@ -1,5 +1,9 @@
 # Implementation Status: Polars Migration
 
+## Strategic Direction: Sparkless Backend Replacement
+
+Robin-sparkless is designed to **replace the backend logic** of [Sparkless](https://github.com/eddiethedean/sparkless)—the Python PySpark drop-in replacement. Sparkless would call robin-sparkless via PyO3/FFI for DataFrame execution. See [SPARKLESS_INTEGRATION_ANALYSIS.md](SPARKLESS_INTEGRATION_ANALYSIS.md) for architecture mapping, structural learnings, and test conversion strategy.
+
 ## ✅ Completed
 
 ### 1. Rust-only Core
@@ -45,3 +49,8 @@
 5. **Window functions and SQL**
    - Add window functions parity slice.
    - Implement (or explicitly defer) `SparkSession::sql()` with clear documentation.
+
+6. **Sparkless integration**
+   - Fixture converter: Sparkless `expected_outputs/` JSON → robin-sparkless fixtures
+   - Structural alignment: service-style modules, trait-based backends, case sensitivity
+   - Function parity: use [PYSPARK_FUNCTION_MATRIX](https://github.com/eddiethedean/sparkless/blob/main/PYSPARK_FUNCTION_MATRIX.md) as checklist

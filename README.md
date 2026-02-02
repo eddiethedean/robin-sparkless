@@ -2,12 +2,15 @@
 
 A Rust DataFrame library that aims to **emulate PySpark’s DataFrame behavior and semantics without requiring the JVM**, using Polars as the execution engine under the hood.
 
+**Long-term goal**: Robin-sparkless is designed to **replace the backend logic** of [Sparkless](https://github.com/eddiethedean/sparkless)—the Python PySpark drop-in replacement—so Sparkless can call robin-sparkless via PyO3/FFI for DataFrame execution. See [docs/SPARKLESS_INTEGRATION_ANALYSIS.md](docs/SPARKLESS_INTEGRATION_ANALYSIS.md) for architecture, structural learnings, and test conversion strategy.
+
 ## Features
 
 - **PySpark-inspired API**: `SparkSession`, `DataFrame`, `Column` modeled after PySpark concepts
 - **PySpark-like behavior**: Semantics (null handling, groupBy, joins, etc.) should match PySpark as closely as practical
 - **Polars-backed**: Uses Polars `DataFrame`/`Expr` internally for performance
 - **Pure Rust**: No Python runtime, no PyO3, no JVM
+- **Sparkless backend target**: Intended to power Sparkless's execution engine; aligns with its 403+ PySpark functions and 270+ test fixtures
 
 ## Installation
 
@@ -101,6 +104,13 @@ Robin Sparkless aims to provide a **PySpark-like API layer** on top of Polars:
 - **Functions**: Helper functions like `col()`, `lit_*()`, `count()`, etc., modeled after PySpark’s `pyspark.sql.functions`.
 
 Over time, more of PySpark’s behavior (null handling, grouping semantics, joins, expression behavior) will be matched, while still running entirely in Rust on top of Polars.
+
+## Related Documentation
+
+- [docs/](docs/README.md) – Documentation index
+- [docs/SPARKLESS_INTEGRATION_ANALYSIS.md](docs/SPARKLESS_INTEGRATION_ANALYSIS.md) – Sparkless backend replacement strategy, architecture learnings, test conversion
+- [docs/ROADMAP.md](docs/ROADMAP.md) – Development roadmap including Sparkless integration phases
+- [docs/PARITY_STATUS.md](docs/PARITY_STATUS.md) – PySpark parity coverage matrix
 
 ## License
 

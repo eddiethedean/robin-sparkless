@@ -8,6 +8,7 @@
 
 ## Remaining Work (Non-Compiler)
 
+- **Strategic direction**: Robin-sparkless will replace the backend of [Sparkless](https://github.com/eddiethedean/sparkless). See [SPARKLESS_INTEGRATION_ANALYSIS](SPARKLESS_INTEGRATION_ANALYSIS.md).
 - Core missing/partial areas are functional gaps rather than compiler issues:
   - Join operations (inner/left/right/outer)
   - Window functions

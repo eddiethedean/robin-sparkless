@@ -8,7 +8,7 @@ This script is not used by the Rust build; it is a helper to produce
 - A sequence of PySpark-style operations
 - Expected schema + rows
 
-See `TEST_CREATION_GUIDE.md` for the full workflow.
+See `docs/TEST_CREATION_GUIDE.md` for the full workflow.
 """
 
 from __future__ import annotations

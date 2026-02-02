@@ -4,6 +4,8 @@
 
 **Primary Goal**: Implement a Rust crate whose behavior closely emulates PySpark's `SparkSession` / `DataFrame` / `Column` semantics, but runs entirely in Rust with Polars as the execution engine (no JVM, no Python runtime).
 
+**Sparkless Integration Goal**: Robin-sparkless is designed to **replace the backend logic** of [Sparkless](https://github.com/eddiethedean/sparkless) (the Python PySpark drop-in). Sparkless would call robin-sparkless via PyO3/FFI for DataFrame execution. See [SPARKLESS_INTEGRATION_ANALYSIS.md](SPARKLESS_INTEGRATION_ANALYSIS.md) for architecture mapping, structural learnings, and test conversion strategy.
+
 **Constraints**:
 - Use Polars as the underlying dataframe/expressions engine.
 - Match PySpark behavior where practical (null handling, grouping, joins, expression semantics).
@@ -64,11 +66,19 @@
 7. **Broader API Coverage**
    - Window functions, more SQL/math/string/date functions.
    - UDF story (likely pure-Rust UDFs, with a clear note that Python UDFs are out of scope).
+   - Function parity with Sparkless (403+ PySpark functions); use [PYSPARK_FUNCTION_MATRIX](https://github.com/eddiethedean/sparkless/blob/main/PYSPARK_FUNCTION_MATRIX.md) as checklist.
 
 8. **Performance & Robustness**
    - Benchmark against both PySpark and "plain Polars".
    - Ensure we stay within a reasonable performance factor of Polars for supported operations.
    - Harden error handling and diagnostics.
+
+### Sparkless Integration Phases (see SPARKLESS_INTEGRATION_ANALYSIS.md)
+
+- **Phase 1 – Structural Alignment**: Service-style modules (transformations, aggregations, joins), trait-based backends, case sensitivity config
+- **Phase 2 – Function Parity**: String, datetime, aggregates (stddev, variance); fixtures aligned with Sparkless expected_outputs
+- **Phase 3 – Test Conversion**: Fixture converter (Sparkless JSON → robin-sparkless JSON); convert 10–20 high-value tests; CI integration
+- **Phase 4 – Joins & Windows**: Implement joins and window functions; convert Sparkless join/window parity tests
 
 ## Success Metrics
 
@@ -129,6 +139,7 @@ To enforce the roadmap above, we will:
     - ✅ Runs pipelines in PySpark.
     - ✅ Emits JSON fixtures describing inputs, operations, and expected outputs.
   - ✅ Fixtures live under `tests/fixtures/` and are versioned with the repo.
+  - **Sparkless test conversion**: Build a fixture converter to reuse Sparkless's 270+ expected_outputs; see [SPARKLESS_INTEGRATION_ANALYSIS.md](SPARKLESS_INTEGRATION_ANALYSIS.md) §4.
 
 - **Drive Rust tests from fixtures**
   - ✅ `tests/parity.rs`:

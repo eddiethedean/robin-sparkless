@@ -2,6 +2,8 @@
 
 This document explains how to create and maintain **behavioral parity tests** between PySpark and `robin-sparkless`.
 
+**Sparkless integration**: Robin-sparkless is designed to replace the backend of [Sparkless](https://github.com/eddiethedean/sparkless). Sparkless has 270+ expected_outputs that can be converted to robin-sparkless fixtures. See [SPARKLESS_INTEGRATION_ANALYSIS.md](SPARKLESS_INTEGRATION_ANALYSIS.md) §4 for fixture format comparison and conversion strategy.
+
 The goal is to:
 - Use **PySpark as the oracle** for correct behavior.
 - Generate **JSON fixtures** from PySpark runs.
@@ -216,4 +218,18 @@ Maintain a simple matrix (e.g. in `PARITY_STATUS.md` or `ROADMAP.md`) with:
 - Cell values: “covered by fixture X”, “not yet covered”, or “intentionally diverges from PySpark”.
 
 This makes it clear where Robin Sparkless truly emulates PySpark today and where work remains.
+
+---
+
+## 7. Sparkless Fixture Conversion
+
+Sparkless uses a different fixture format (`input_data` as dict rows, `expected_output` with `schema`/`data`). A converter can:
+
+1. Read Sparkless `tests/expected_outputs/*.json`
+2. Map `input_data` → `input.schema` + `input.rows`
+3. Infer or annotate `operations` from the test name/category
+4. Map `expected_output` → `expected.schema` + `expected.rows`
+5. Write robin-sparkless fixtures to `tests/fixtures/`
+
+This lets both projects validate against the same logical test cases. See [SPARKLESS_INTEGRATION_ANALYSIS.md](SPARKLESS_INTEGRATION_ANALYSIS.md) §4.1–4.4 for details.
 
