@@ -106,7 +106,7 @@ The path to full backend replacement is planned in [FULL_BACKEND_ROADMAP.md](FUL
 - **Phase 2 – High-Value Functions**: String (length, trim, regexp_*), datetime (to_date, date_add), math (stddev, variance)
 - **Phase 3 – DataFrame Methods**: union, unionByName, distinct, drop, dropna, fillna, limit, withColumnRenamed ✅ **COMPLETED**
 - **Phase 4 – PyO3 Bridge**: Python bindings for Sparkless to call robin-sparkless ✅ **COMPLETED** (see [PYTHON_API.md](PYTHON_API.md))
-- **Phase 5 – Test Conversion**: Fixture converter; convert 50+ Sparkless tests; CI integration
+- **Phase 5 – Test Conversion**: Converter extended (join, window, withColumn, union, distinct, drop, dropna, fillna, limit, withColumnRenamed); parity discovers `tests/fixtures/` + `tests/fixtures/converted/`; `make sparkless-parity` (set SPARKLESS_EXPECTED_OUTPUTS); [SPARKLESS_PARITY_STATUS.md](SPARKLESS_PARITY_STATUS.md) for pass/fail; **51 passing** (50+ target met) ✅ **COMPLETED**
 - **Phase 6 – Broad Parity**: Array, Map, JSON, remaining functions (~200)
 - **Phase 7 – SQL & Advanced**: SQL executor, Delta Lake, performance
 

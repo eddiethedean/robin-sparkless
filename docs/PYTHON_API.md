@@ -4,7 +4,7 @@ This document describes the **Python API contract** exposed by the `robin_sparkl
 
 ## Building and installing
 
-**Prerequisites**: Rust (stable), Python 3.8+, [maturin](https://www.maturin.rs/) (`pip install maturin`).
+**Prerequisites**: Rust (stable), Python 3.8+, [maturin](https://www.maturin.rs/) (`pip install maturin`). The extension is built with **PyO3 0.24**.
 
 ```bash
 # From the repo root

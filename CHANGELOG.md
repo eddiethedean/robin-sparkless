@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Phase 5 Test Conversion**: Fixture converter and parity over converted fixtures.
+  - Converter (`tests/convert_sparkless_fixtures.py`) maps Sparkless `expected_outputs` to robin-sparkless format: join, window, withColumn, union, unionByName, distinct, drop, dropna, fillna, limit, withColumnRenamed (in addition to filter, select, groupBy, orderBy).
+  - Parity test discovers `tests/fixtures/*.json` and `tests/fixtures/converted/*.json`; optional `skip: true` / `skip_reason` in fixtures to skip known gaps.
+  - `make sparkless-parity`: when `SPARKLESS_EXPECTED_OUTPUTS` is set, runs converter then `cargo test pyspark_parity_fixtures`; see [docs/CONVERTER_STATUS.md](docs/CONVERTER_STATUS.md) and [docs/SPARKLESS_PARITY_STATUS.md](docs/SPARKLESS_PARITY_STATUS.md).
+  - 51 hand-written fixtures passing; target 50+ met.
 - **Phase 4 PyO3 Bridge**: Optional Python bindings when built with `--features pyo3`.
   - Python module `robin_sparkless` with PySpark-like API: `SparkSession`, `SparkSessionBuilder`, `DataFrame`, `Column`, `GroupedData`, `WhenBuilder`, `ThenBuilder`.
   - Session: `builder()`, `get_or_create()`, `create_dataframe`, `read_csv`, `read_parquet`, `read_json`, `is_case_sensitive()`.
@@ -31,6 +36,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **PyO3 0.24**: Upgraded optional `pyo3` dependency from 0.22 to 0.24 (addresses RUSTSEC-2025-0020). Python bindings use non-deprecated APIs: `PyList::empty`, `PyDict::new`, `IntoPyObjectExt::into_bound_py_any` for collect.
 - Parity harness now accepts optional `right_input` for multi-DataFrame fixtures
 - Schema comparison allows Polars `_right` suffix for duplicate join column names
 - `GroupedData::agg()` with multiple expressions now reorders columns to match PySpark (grouping cols first)

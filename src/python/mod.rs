@@ -1,9 +1,9 @@
 //! Python bindings for robin-sparkless (PyO3).
 //! Compiled only when the `pyo3` feature is enabled.
 
+use crate::column::Column as RsColumn;
 use crate::dataframe::JoinType;
 use crate::functions::{avg, coalesce, col as rs_col, count, max, min, sum as rs_sum};
-use crate::column::Column as RsColumn;
 use crate::{DataFrame, GroupedData, SparkSession};
 use polars::prelude::Expr;
 use pyo3::prelude::*;
@@ -219,7 +219,8 @@ struct PyWhenBuilder {
 #[pymethods]
 impl PyWhenBuilder {
     fn then(&self, value: &PyColumn) -> PyThenBuilder {
-        let when_then = polars::prelude::when(self.condition.clone()).then(value.inner.expr().clone());
+        let when_then =
+            polars::prelude::when(self.condition.clone()).then(value.inner.expr().clone());
         PyThenBuilder { when_then }
     }
 }
@@ -343,11 +344,7 @@ impl PySparkSessionBuilder {
         for (k, v) in &slf.config {
             config.insert(k.clone(), v.clone());
         }
-        let inner = SparkSession::new(
-            slf.app_name.clone(),
-            slf.master.clone(),
-            config,
-        );
+        let inner = SparkSession::new(slf.app_name.clone(), slf.master.clone(), config);
         PySparkSession { inner }
     }
 }
@@ -382,22 +379,22 @@ impl PyDataFrame {
         let df = pl_df.as_ref();
         let names = df.get_column_names();
         let nrows = df.height();
-        let rows = pyo3::types::PyList::empty_bound(py);
+        let rows = pyo3::types::PyList::empty(py);
         for i in 0..nrows {
-            let row_dict = PyDict::new_bound(py);
+            let row_dict = PyDict::new(py);
             for (col_idx, name) in names.iter().enumerate() {
                 let s = df.get_columns().get(col_idx).ok_or_else(|| {
                     pyo3::exceptions::PyRuntimeError::new_err("column index out of range")
                 })?;
-                let av = s.get(i).map_err(|e| {
-                    pyo3::exceptions::PyRuntimeError::new_err(e.to_string())
-                })?;
+                let av = s
+                    .get(i)
+                    .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
                 let py_val = any_value_to_py(py, av)?;
                 row_dict.set_item(name.as_str(), py_val)?;
             }
             rows.append(&*row_dict)?;
         }
-        Ok(rows.to_object(py))
+        Ok(rows.into())
     }
 
     fn filter(&self, condition: &PyColumn) -> PyResult<PyDataFrame> {
@@ -430,10 +427,7 @@ impl PyDataFrame {
         let asc = ascending.unwrap_or_else(|| vec![true; cols.len()]);
         let df = self
             .inner
-            .order_by(
-                cols.iter().map(|s| s.as_str()).collect::<Vec<_>>(),
-                asc,
-            )
+            .order_by(cols.iter().map(|s| s.as_str()).collect::<Vec<_>>(), asc)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
         Ok(PyDataFrame { inner: df })
     }
@@ -604,22 +598,20 @@ impl PyGroupedData {
 /// Convert Polars AnyValue to a Python object.
 fn any_value_to_py(py: Python<'_>, av: polars::prelude::AnyValue<'_>) -> PyResult<PyObject> {
     use polars::prelude::AnyValue;
-    let obj: Py<pyo3::types::PyAny> = match av {
-        AnyValue::Null => py.None().into_py(py),
-        AnyValue::Boolean(b) => b.into_py(py),
-        AnyValue::Int32(i) => i.into_py(py),
-        AnyValue::Int64(i) => i.into_py(py),
-        AnyValue::UInt32(u) => u.into_py(py),
-        AnyValue::UInt64(u) => u.into_py(py),
-        AnyValue::Float32(f) => f.into_py(py),
-        AnyValue::Float64(f) => f.into_py(py),
-        AnyValue::String(s) => s.to_string().into_py(py),
-        other => {
-            return Err(pyo3::exceptions::PyRuntimeError::new_err(format!(
-                "unsupported type for collect: {:?}",
-                other
-            )))
-        }
-    };
-    Ok(obj.to_object(py))
+    use pyo3::conversion::IntoPyObjectExt;
+    match av {
+        AnyValue::Null => py.None().into_bound_py_any(py).map(Into::into),
+        AnyValue::Boolean(b) => b.into_bound_py_any(py).map(Into::into),
+        AnyValue::Int32(i) => i.into_bound_py_any(py).map(Into::into),
+        AnyValue::Int64(i) => i.into_bound_py_any(py).map(Into::into),
+        AnyValue::UInt32(u) => u.into_bound_py_any(py).map(Into::into),
+        AnyValue::UInt64(u) => u.into_bound_py_any(py).map(Into::into),
+        AnyValue::Float32(f) => f.into_bound_py_any(py).map(Into::into),
+        AnyValue::Float64(f) => f.into_bound_py_any(py).map(Into::into),
+        AnyValue::String(s) => s.to_string().into_bound_py_any(py).map(Into::into),
+        other => Err(pyo3::exceptions::PyRuntimeError::new_err(format!(
+            "unsupported type for collect: {:?}",
+            other
+        ))),
+    }
 }

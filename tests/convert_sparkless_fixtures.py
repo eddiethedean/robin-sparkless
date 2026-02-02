@@ -120,15 +120,34 @@ def convert_sparkless_to_robin(
     # Build operations list from Sparkless operation type
     operations = _map_operation_to_robin(operation, sparkless, input_schema_names, exp_schema)
 
+    # Optional right_input for join / union / unionByName
+    right_input = _build_right_input(sparkless)
+
     name = fixture_name or sparkless.get("name") or operation or "converted"
 
-    return {
+    out: dict[str, Any] = {
         "name": name.replace(" ", "_").lower(),
         "pyspark_version": sparkless.get("pyspark_version", "3.5.0"),
         "input": {"schema": input_schema, "rows": input_rows},
         "operations": operations,
         "expected": {"schema": exp_schema, "rows": expected_rows},
     }
+    if right_input is not None:
+        out["right_input"] = right_input
+    return out
+
+
+def _build_right_input(sparkless: dict) -> dict | None:
+    """Build right_input section from Sparkless right_input_data / second_input_data."""
+    right_data = sparkless.get("right_input_data") or sparkless.get("second_input_data") or sparkless.get("right_input")
+    if not right_data or not isinstance(right_data, list):
+        return None
+    if not right_data:
+        return {"schema": [], "rows": []}
+    names = list(right_data[0].keys()) if right_data else []
+    right_schema = [{"name": n, "type": "string"} for n in names]
+    right_rows = dict_rows_to_column_rows(right_data, right_schema)
+    return {"schema": right_schema, "rows": right_rows}
 
 
 def _map_operation_to_robin(
@@ -138,11 +157,10 @@ def _map_operation_to_robin(
     exp_schema: list[dict],
 ) -> list[dict]:
     """Map Sparkless operation string and context to robin-sparkless operations list."""
-    op_lower = operation.lower().strip()
+    op_lower = operation.lower().strip().replace("-", "_").replace(" ", "_")
     operations: list[dict] = []
 
     if "filter" in op_lower:
-        # Default filter: use first numeric column > 0 or similar; caller can override via metadata
         filter_expr = sparkless.get("filter_expr") or "col('" + (input_schema_names[1] if len(input_schema_names) > 1 else input_schema_names[0]) + "') > 0"
         operations.append({"op": "filter", "expr": filter_expr})
     if "select" in op_lower:
@@ -161,9 +179,79 @@ def _map_operation_to_robin(
         order_cols = sparkless.get("order_by_columns") or [exp_schema[0]["name"]] if exp_schema else []
         operations.append({"op": "orderBy", "columns": order_cols, "ascending": [True] * len(order_cols)})
 
-    if not operations:
-        # Minimal: no op (just input -> expected)
-        pass
+    # Join: needs right_input from _build_right_input; emit join op
+    if "join" in op_lower:
+        on = sparkless.get("join_on") or sparkless.get("on") or (input_schema_names[:1] if input_schema_names else [])
+        how = (sparkless.get("join_how") or sparkless.get("how") or "inner").lower()
+        if how not in ("inner", "left", "right", "outer"):
+            how = "inner"
+        operations.append({"op": "join", "on": on if isinstance(on, list) else [on], "how": how})
+
+    # Window: partition_by, order_by, func, value_column (for lag/lead)
+    if "window" in op_lower:
+        part = sparkless.get("partition_by") or sparkless.get("partition_cols") or (input_schema_names[:1] if input_schema_names else [])
+        order = sparkless.get("order_by") or sparkless.get("order_cols")
+        if isinstance(order, list) and order and isinstance(order[0], dict):
+            order_specs = [{"col": o.get("col", o.get("column", "")), "asc": o.get("asc", True)} for o in order]
+        elif isinstance(order, list):
+            order_specs = [{"col": c, "asc": True} for c in order]
+        else:
+            order_specs = []
+        func = (sparkless.get("window_func") or sparkless.get("func") or "row_number").lower()
+        value_col = sparkless.get("value_column") or (input_schema_names[-1] if input_schema_names else None)
+        op_payload: dict[str, Any] = {
+            "op": "window",
+            "column": sparkless.get("output_column") or "rn",
+            "func": func,
+            "partition_by": part if isinstance(part, list) else [part],
+            "order_by": order_specs,
+        }
+        if value_col is not None:
+            op_payload["value_column"] = value_col
+        operations.append(op_payload)
+
+    # WithColumn / transformations
+    if "with_column" in op_lower or "withcolumn" in op_lower or "transformation" in op_lower:
+        col_name = sparkless.get("with_column_name") or sparkless.get("column_name") or "computed"
+        expr = sparkless.get("with_column_expr") or sparkless.get("expr") or "col('" + (input_schema_names[0] if input_schema_names else "id") + "')"
+        operations.append({"op": "withColumn", "column": col_name, "expr": expr})
+
+    # Union / unionAll
+    if "union" in op_lower and "name" not in op_lower:
+        operations.append({"op": "union"})
+    if "union_by_name" in op_lower or "unionbyname" in op_lower:
+        operations.append({"op": "unionByName"})
+
+    # Distinct
+    if "distinct" in op_lower or "drop_duplicate" in op_lower:
+        subset = sparkless.get("subset") or sparkless.get("columns")
+        operations.append({"op": "distinct", "subset": subset if isinstance(subset, list) else None})
+
+    # Drop
+    if "drop" in op_lower and "dropna" not in op_lower and "drop_duplicate" not in op_lower:
+        cols = sparkless.get("columns") or sparkless.get("drop_columns") or []
+        operations.append({"op": "drop", "columns": cols if isinstance(cols, list) else [cols]})
+
+    # Dropna
+    if "dropna" in op_lower or "drop_null" in op_lower:
+        subset = sparkless.get("subset") or sparkless.get("columns")
+        operations.append({"op": "dropna", "subset": subset if isinstance(subset, list) else None})
+
+    # Fillna
+    if "fillna" in op_lower or "fill_null" in op_lower:
+        value = sparkless.get("value") or sparkless.get("fill_value") or 0
+        operations.append({"op": "fillna", "value": value})
+
+    # Limit
+    if "limit" in op_lower or "head" in op_lower:
+        n = sparkless.get("n") or sparkless.get("limit") or 10
+        operations.append({"op": "limit", "n": int(n)})
+
+    # WithColumnRenamed
+    if "with_column_renamed" in op_lower or "withcolumnrenamed" in op_lower or "rename" in op_lower:
+        existing = sparkless.get("existing") or sparkless.get("old_name") or (input_schema_names[0] if input_schema_names else "old")
+        new = sparkless.get("new") or sparkless.get("new_name") or "new"
+        operations.append({"op": "withColumnRenamed", "existing": existing, "new": new})
 
     return operations
 
@@ -173,6 +261,7 @@ def main() -> int:
     parser.add_argument("input_path", nargs="?", help="Path to a Sparkless JSON file")
     parser.add_argument("output_dir", nargs="?", default="tests/fixtures", help="Output directory for robin-sparkless fixtures")
     parser.add_argument("--batch", metavar="DIR", help="Convert all JSON files in DIR (Sparkless expected_outputs dir)")
+    parser.add_argument("--output-subdir", metavar="DIR", help="When using --batch, write into output_dir/DIR (e.g. converted)")
     parser.add_argument("--name", help="Fixture name (default: from file or operation)")
     args = parser.parse_args()
 
@@ -181,7 +270,8 @@ def main() -> int:
         if not in_dir.is_dir():
             print(f"Error: not a directory: {in_dir}", file=sys.stderr)
             return 1
-        out_dir = Path(args.output_dir or "tests/fixtures")
+        base_out = Path(args.output_dir or "tests/fixtures")
+        out_dir = base_out / args.output_subdir if args.output_subdir else base_out
         out_dir.mkdir(parents=True, exist_ok=True)
         count = 0
         for path in sorted(in_dir.glob("*.json")):

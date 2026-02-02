@@ -5,7 +5,7 @@
 - `cargo check` passes for the Rust-only, Polars-backed implementation.
 - `cargo build --features pyo3` builds the Python extension (optional).
 - There are no outstanding Rust compiler errors.
-- `cargo test` passes (unit/integration/doc tests). `make test` runs Rust tests plus Python smoke tests (creates `.venv`, installs extension via maturin, runs `pytest tests/python/`).
+- `cargo test` passes (unit/integration/doc tests). `make test` runs Rust tests plus Python smoke tests (creates `.venv`, installs extension via maturin, runs `pytest tests/python/`). `make sparkless-parity` runs parity over hand-written and (if present) converted fixtures; set `SPARKLESS_EXPECTED_OUTPUTS` to convert from Sparkless first.
 
 ## Remaining Work (Non-Compiler)
 

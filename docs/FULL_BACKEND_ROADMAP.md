@@ -179,11 +179,11 @@ See [PYTHON_API.md](PYTHON_API.md) for the API contract Sparkless maintainers ne
 
 **Goal**: Run Sparkless parity tests against robin-sparkless backend.
 
-- [ ] Fixture converter produces robin-sparkless fixtures from Sparkless expected_outputs
-- [ ] Identify tests that use only supported ops; run those first
-- [ ] CI: `make sparkless-parity` runs converted tests
-- [ ] Target: 50+ tests passing on robin-sparkless
-- [ ] Document which tests fail and why (missing function, semantic difference)
+- [x] Fixture converter produces robin-sparkless fixtures from Sparkless expected_outputs (join, window, withColumn, union, distinct, drop, dropna, fillna, limit, withColumnRenamed; output to `tests/fixtures/converted/` with `--output-subdir`)
+- [x] Identify tests that use only supported ops; run those first (run `make sparkless-parity` with `SPARKLESS_EXPECTED_OUTPUTS` set when Sparkless repo available)
+- [x] CI: `make sparkless-parity` runs converted tests (converter when path set, then `cargo test pyspark_parity_fixtures`; parity discovers `tests/fixtures/` and `tests/fixtures/converted/`)
+- [x] Target: 50+ tests passing on robin-sparkless (51 hand-written passing; document in [SPARKLESS_PARITY_STATUS.md](SPARKLESS_PARITY_STATUS.md); add converted when Sparkless expected_outputs used)
+- [x] Document which tests fail and why (missing function, semantic difference) in [SPARKLESS_PARITY_STATUS.md](SPARKLESS_PARITY_STATUS.md); fixtures can use `skip: true` + `skip_reason`
 
 ---
 

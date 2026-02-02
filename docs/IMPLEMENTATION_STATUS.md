@@ -53,12 +53,18 @@ Robin-sparkless is designed to **replace the backend logic** of [Sparkless](http
    - Implement (or explicitly defer) `SparkSession::sql()` with clear documentation.
 
 6. **PyO3 Bridge** ✅ **COMPLETED** (Phase 4)
-   - Optional `pyo3` feature; `src/python/mod.rs` exposes `robin_sparkless` Python module.
+   - Optional `pyo3` feature (PyO3 0.24); `src/python/mod.rs` exposes `robin_sparkless` Python module.
    - SparkSession, DataFrame, Column, GroupedData; create_dataframe, filter, select, join, group_by, collect (list of dicts), read_csv/parquet/json, etc.
    - `maturin develop --features pyo3`; Python smoke tests in `tests/python/`; `make test` runs Rust + Python tests.
    - API contract: [PYTHON_API.md](PYTHON_API.md).
 
-7. **Sparkless integration** (in Sparkless repo)
+7. **Phase 5 Test Conversion** ✅ **COMPLETED**
+   - Fixture converter maps Sparkless `expected_outputs` to robin-sparkless format (join, window, withColumn, union, distinct, drop, dropna, fillna, limit, withColumnRenamed, etc.).
+   - Parity discovers `tests/fixtures/` and `tests/fixtures/converted/`; optional `skip: true` in fixtures.
+   - `make sparkless-parity` (set `SPARKLESS_EXPECTED_OUTPUTS` to run converter first); 51 hand-written fixtures passing.
+   - See [CONVERTER_STATUS.md](CONVERTER_STATUS.md), [SPARKLESS_PARITY_STATUS.md](SPARKLESS_PARITY_STATUS.md).
+
+8. **Sparkless integration** (in Sparkless repo)
    - Fixture converter: Sparkless `expected_outputs/` JSON → robin-sparkless fixtures
    - Structural alignment: service-style modules, trait-based backends, case sensitivity
    - Function parity: use [PYSPARK_FUNCTION_MATRIX](https://github.com/eddiethedean/sparkless/blob/main/PYSPARK_FUNCTION_MATRIX.md) as checklist

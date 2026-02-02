@@ -125,6 +125,10 @@ make test
 make check
 # Or: RUSTUP_TOOLCHAIN=stable make check
 
+# Sparkless parity (optional: convert from Sparkless expected_outputs, then run parity)
+# export SPARKLESS_EXPECTED_OUTPUTS=/path/to/sparkless/tests/expected_outputs
+# make sparkless-parity
+
 # Build documentation
 cargo doc --open
 ```
@@ -158,6 +162,8 @@ Core behavior (null handling, grouping semantics, joins, window functions, strin
 - [docs/FULL_BACKEND_ROADMAP.md](docs/FULL_BACKEND_ROADMAP.md) – Phased plan to full Sparkless backend replacement (400+ functions, PyO3 bridge)
 - [docs/PYTHON_API.md](docs/PYTHON_API.md) – Python API contract (Phase 4 PyO3 bridge): build, install, method signatures, data transfer
 - [docs/PARITY_STATUS.md](docs/PARITY_STATUS.md) – PySpark parity coverage matrix (51 fixtures)
+- [docs/CONVERTER_STATUS.md](docs/CONVERTER_STATUS.md) – Sparkless → robin-sparkless fixture converter and operation mapping
+- [docs/SPARKLESS_PARITY_STATUS.md](docs/SPARKLESS_PARITY_STATUS.md) – Phase 5: pass/fail and failure reasons for converted fixtures; `make sparkless-parity`
 
 ## License
 

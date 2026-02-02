@@ -1,4 +1,4 @@
-.PHONY: build test test-rust test-python clean check fmt clippy audit outdated deny all
+.PHONY: build test test-rust test-python sparkless-parity clean check fmt clippy audit outdated deny all
 
 # Set RUSTUP_TOOLCHAIN=stable if not configured. Run: RUSTUP_TOOLCHAIN=stable make check
 
@@ -21,6 +21,15 @@ test-python:
 
 # Run all tests (Rust + Python)
 test: test-rust test-python
+
+# Run parity tests (optionally convert from Sparkless expected_outputs first).
+# Set SPARKLESS_EXPECTED_OUTPUTS=/path/to/sparkless/tests/expected_outputs to run converter.
+sparkless-parity:
+	@if [ -n "$$SPARKLESS_EXPECTED_OUTPUTS" ]; then \
+		mkdir -p tests/fixtures/converted; \
+		python3 tests/convert_sparkless_fixtures.py --batch "$$SPARKLESS_EXPECTED_OUTPUTS" tests/fixtures --output-subdir converted; \
+	fi
+	cargo test pyspark_parity_fixtures
 
 # Run all checks (lint, format, security, deny, tests)
 check: fmt clippy audit deny test
