@@ -57,6 +57,25 @@ pub fn min(col: &Column) -> Column {
     Column::from_expr(col.expr().clone().min(), Some("min".to_string()))
 }
 
+/// Standard deviation (sample) aggregation (PySpark stddev / stddev_samp)
+pub fn stddev(col: &Column) -> Column {
+    Column::from_expr(col.expr().clone().std(1), Some("stddev".to_string()))
+}
+
+/// Variance (sample) aggregation (PySpark variance / var_samp)
+pub fn variance(col: &Column) -> Column {
+    Column::from_expr(col.expr().clone().var(1), Some("variance".to_string()))
+}
+
+/// Count distinct aggregation (PySpark countDistinct)
+pub fn count_distinct(col: &Column) -> Column {
+    use polars::prelude::DataType;
+    Column::from_expr(
+        col.expr().clone().n_unique().cast(DataType::Int64),
+        Some("count_distinct".to_string()),
+    )
+}
+
 /// PySpark-style conditional expression builder.
 ///
 /// # Example
@@ -139,6 +158,81 @@ pub fn lower(column: &Column) -> Column {
 /// Substring with 1-based start (PySpark substring semantics)
 pub fn substring(column: &Column, start: i64, length: Option<i64>) -> Column {
     column.clone().substr(start, length)
+}
+
+/// String length in characters (PySpark length)
+pub fn length(column: &Column) -> Column {
+    column.clone().length()
+}
+
+/// Trim leading and trailing whitespace (PySpark trim)
+pub fn trim(column: &Column) -> Column {
+    column.clone().trim()
+}
+
+/// Trim leading whitespace (PySpark ltrim)
+pub fn ltrim(column: &Column) -> Column {
+    column.clone().ltrim()
+}
+
+/// Trim trailing whitespace (PySpark rtrim)
+pub fn rtrim(column: &Column) -> Column {
+    column.clone().rtrim()
+}
+
+/// Extract first match of regex (PySpark regexp_extract). group_index 0 = full match.
+pub fn regexp_extract(column: &Column, pattern: &str, group_index: usize) -> Column {
+    column.clone().regexp_extract(pattern, group_index)
+}
+
+/// Replace first match of regex (PySpark regexp_replace)
+pub fn regexp_replace(column: &Column, pattern: &str, replacement: &str) -> Column {
+    column.clone().regexp_replace(pattern, replacement)
+}
+
+/// Split string by delimiter (PySpark split)
+pub fn split(column: &Column, delimiter: &str) -> Column {
+    column.clone().split(delimiter)
+}
+
+/// Title case (PySpark initcap)
+pub fn initcap(column: &Column) -> Column {
+    column.clone().initcap()
+}
+
+/// Absolute value (PySpark abs)
+pub fn abs(column: &Column) -> Column {
+    column.clone().abs()
+}
+
+/// Ceiling (PySpark ceil)
+pub fn ceil(column: &Column) -> Column {
+    column.clone().ceil()
+}
+
+/// Floor (PySpark floor)
+pub fn floor(column: &Column) -> Column {
+    column.clone().floor()
+}
+
+/// Round (PySpark round)
+pub fn round(column: &Column, decimals: u32) -> Column {
+    column.clone().round(decimals)
+}
+
+/// Extract year from datetime column (PySpark year)
+pub fn year(column: &Column) -> Column {
+    column.clone().year()
+}
+
+/// Extract month from datetime column (PySpark month)
+pub fn month(column: &Column) -> Column {
+    column.clone().month()
+}
+
+/// Extract day of month from datetime column (PySpark day)
+pub fn day(column: &Column) -> Column {
+    column.clone().day()
 }
 
 /// Concatenate string columns without separator (PySpark concat)

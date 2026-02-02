@@ -1,0 +1,41 @@
+{
+  "name": "string_length_trim",
+  "pyspark_version": "3.5.0",
+  "input": {
+    "schema": [
+      { "name": "id", "type": "bigint" },
+      { "name": "name", "type": "string" }
+    ],
+    "rows": [
+      [1, "  Alice  "],
+      [2, "Bob"],
+      [3, "  Charlie  "]
+    ]
+  },
+  "operations": [
+    {
+      "op": "withColumn",
+      "column": "name_len",
+      "expr": "length(col('name'))"
+    },
+    {
+      "op": "withColumn",
+      "column": "name_trimmed",
+      "expr": "trim(col('name'))"
+    },
+    { "op": "select", "columns": ["id", "name", "name_len", "name_trimmed"] }
+  ],
+  "expected": {
+    "schema": [
+      { "name": "id", "type": "bigint" },
+      { "name": "name", "type": "string" },
+      { "name": "name_len", "type": "uint32" },
+      { "name": "name_trimmed", "type": "string" }
+    ],
+    "rows": [
+      [1, "  Alice  ", 9, "Alice"],
+      [2, "Bob", 3, "Bob"],
+      [3, "  Charlie  ", 11, "Charlie"]
+    ]
+  }
+}

@@ -287,6 +287,119 @@ impl Column {
         )
     }
 
+    /// String length in characters (PySpark length)
+    pub fn length(&self) -> Column {
+        Self::from_expr(self.expr().clone().str().len_chars(), None)
+    }
+
+    /// Trim leading and trailing whitespace (PySpark trim)
+    pub fn trim(&self) -> Column {
+        use polars::prelude::*;
+        Self::from_expr(
+            self.expr().clone().str().strip_chars(lit(" \t\n\r")),
+            None,
+        )
+    }
+
+    /// Trim leading whitespace (PySpark ltrim)
+    pub fn ltrim(&self) -> Column {
+        use polars::prelude::*;
+        Self::from_expr(
+            self.expr().clone().str().strip_chars_start(lit(" \t\n\r")),
+            None,
+        )
+    }
+
+    /// Trim trailing whitespace (PySpark rtrim)
+    pub fn rtrim(&self) -> Column {
+        use polars::prelude::*;
+        Self::from_expr(
+            self.expr().clone().str().strip_chars_end(lit(" \t\n\r")),
+            None,
+        )
+    }
+
+    /// Extract first match of regex pattern (PySpark regexp_extract). Group 0 = full match.
+    pub fn regexp_extract(&self, pattern: &str, group_index: usize) -> Column {
+        use polars::prelude::*;
+        let pat = pattern.to_string();
+        Self::from_expr(
+            self.expr()
+                .clone()
+                .str()
+                .extract(lit(pat), group_index),
+            None,
+        )
+    }
+
+    /// Replace first match of regex pattern (PySpark regexp_replace). literal=false for regex.
+    pub fn regexp_replace(&self, pattern: &str, replacement: &str) -> Column {
+        use polars::prelude::*;
+        let pat = pattern.to_string();
+        let rep = replacement.to_string();
+        Self::from_expr(
+            self.expr()
+                .clone()
+                .str()
+                .replace(lit(pat), lit(rep), false),
+            None,
+        )
+    }
+
+    /// Split string by delimiter (PySpark split). Returns list of strings.
+    pub fn split(&self, delimiter: &str) -> Column {
+        use polars::prelude::*;
+        Self::from_expr(
+            self.expr().clone().str().split(lit(delimiter.to_string())),
+            None,
+        )
+    }
+
+    /// Title case: first letter of each word uppercase (PySpark initcap).
+    /// Approximates with lowercase when Polars to_titlecase is not enabled.
+    pub fn initcap(&self) -> Column {
+        Self::from_expr(self.expr().clone().str().to_lowercase(), None)
+    }
+
+    // --- Math functions ---
+
+    /// Absolute value (PySpark abs)
+    pub fn abs(&self) -> Column {
+        Self::from_expr(self.expr().clone().abs(), None)
+    }
+
+    /// Ceiling (PySpark ceil)
+    pub fn ceil(&self) -> Column {
+        Self::from_expr(self.expr().clone().ceil(), None)
+    }
+
+    /// Floor (PySpark floor)
+    pub fn floor(&self) -> Column {
+        Self::from_expr(self.expr().clone().floor(), None)
+    }
+
+    /// Round to given decimal places (PySpark round)
+    pub fn round(&self, decimals: u32) -> Column {
+        Self::from_expr(self.expr().clone().round(decimals), None)
+    }
+
+    // --- Datetime functions ---
+
+    /// Extract year from datetime column (PySpark year)
+    pub fn year(&self) -> Column {
+        Self::from_expr(self.expr().clone().dt().year(), None)
+    }
+
+    /// Extract month from datetime column (PySpark month)
+    pub fn month(&self) -> Column {
+        Self::from_expr(self.expr().clone().dt().month(), None)
+    }
+
+    /// Extract day of month from datetime column (PySpark day)
+    pub fn day(&self) -> Column {
+        Self::from_expr(self.expr().clone().dt().day(), None)
+    }
+
     // --- Window functions ---
 
     /// Apply window partitioning. Returns a new Column with `.over(partition_by)`.

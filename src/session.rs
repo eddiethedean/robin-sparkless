@@ -70,6 +70,15 @@ impl SparkSession {
         SparkSessionBuilder::new()
     }
 
+    /// Whether column names are case-sensitive (PySpark: spark.sql.caseSensitive).
+    /// Default is false (case-insensitive matching).
+    pub fn is_case_sensitive(&self) -> bool {
+        self.config
+            .get("spark.sql.caseSensitive")
+            .map(|v| v.eq_ignore_ascii_case("true"))
+            .unwrap_or(false)
+    }
+
     /// Create a DataFrame from a vector of tuples (i64, i64, String)
     ///
     /// # Example
@@ -119,12 +128,12 @@ impl SparkSession {
         cols.push(Series::new(column_names[2].into(), col2));
 
         let pl_df = PlDataFrame::new(cols.iter().map(|s| s.clone().into()).collect())?;
-        Ok(DataFrame::from_polars(pl_df))
+        Ok(DataFrame::from_polars_with_options(pl_df, self.is_case_sensitive()))
     }
 
     /// Create a DataFrame from a Polars DataFrame
     pub fn create_dataframe_from_polars(&self, df: PlDataFrame) -> DataFrame {
-        DataFrame::from_polars(df)
+        DataFrame::from_polars_with_options(df, self.is_case_sensitive())
     }
 
     /// Read a CSV file.
@@ -150,7 +159,10 @@ impl SparkSession {
             .with_infer_schema_length(Some(100))
             .finish()?;
         let pl_df = lf.collect()?;
-        Ok(crate::dataframe::DataFrame::from_polars(pl_df))
+        Ok(crate::dataframe::DataFrame::from_polars_with_options(
+            pl_df,
+            self.is_case_sensitive(),
+        ))
     }
 
     /// Read a Parquet file.
@@ -172,7 +184,10 @@ impl SparkSession {
         // Use LazyFrame::scan_parquet
         let lf = LazyFrame::scan_parquet(path, ScanArgsParquet::default())?;
         let pl_df = lf.collect()?;
-        Ok(crate::dataframe::DataFrame::from_polars(pl_df))
+        Ok(crate::dataframe::DataFrame::from_polars_with_options(
+            pl_df,
+            self.is_case_sensitive(),
+        ))
     }
 
     /// Read a JSON file (JSONL format - one JSON object per line).
@@ -197,7 +212,10 @@ impl SparkSession {
             .with_infer_schema_length(NonZeroUsize::new(100))
             .finish()?;
         let pl_df = lf.collect()?;
-        Ok(crate::dataframe::DataFrame::from_polars(pl_df))
+        Ok(crate::dataframe::DataFrame::from_polars_with_options(
+            pl_df,
+            self.is_case_sensitive(),
+        ))
     }
 
     /// Execute a SQL query (placeholder - Polars doesn't have built-in SQL)

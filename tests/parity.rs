@@ -403,7 +403,8 @@ fn apply_operations(
                         "filter cannot be applied after groupBy".into(),
                     ));
                 }
-                let predicate = parse_simple_filter_expr(expr).map_err(|e| {
+                // Pass df so column names in the expression can be resolved (case-insensitive)
+                let predicate = parse_simple_filter_expr(expr, Some(&df)).map_err(|e| {
                     PolarsError::ComputeError(
                         format!("failed to parse filter expr '{}': {}", expr, e).into(),
                     )
@@ -512,6 +513,45 @@ fn apply_operations(
                                 .filter(|a| *a != "max")
                                 .map(String::from)
                                 .unwrap_or_else(|| format!("max({})", col_name));
+                            e.alias(&name)
+                        }
+                        "stddev" | "stddev_samp" => {
+                            let col_name = agg_spec.column.as_ref().ok_or_else(|| {
+                                PolarsError::ComputeError(
+                                    "stddev aggregation requires column name".into(),
+                                )
+                            })?;
+                            let e = col(col_name).std(1);
+                            let name: String = alias
+                                .filter(|a| *a != "stddev")
+                                .map(String::from)
+                                .unwrap_or_else(|| format!("stddev({})", col_name));
+                            e.alias(&name)
+                        }
+                        "variance" | "var_samp" => {
+                            let col_name = agg_spec.column.as_ref().ok_or_else(|| {
+                                PolarsError::ComputeError(
+                                    "variance aggregation requires column name".into(),
+                                )
+                            })?;
+                            let e = col(col_name).var(1);
+                            let name: String = alias
+                                .filter(|a| *a != "variance")
+                                .map(String::from)
+                                .unwrap_or_else(|| format!("variance({})", col_name));
+                            e.alias(&name)
+                        }
+                        "count_distinct" | "countDistinct" => {
+                            let col_name = agg_spec.column.as_ref().ok_or_else(|| {
+                                PolarsError::ComputeError(
+                                    "count_distinct aggregation requires column name".into(),
+                                )
+                            })?;
+                            let e = col(col_name).n_unique().cast(polars::prelude::DataType::Int64);
+                            let name: String = alias
+                                .filter(|a| *a != "count_distinct")
+                                .map(String::from)
+                                .unwrap_or_else(|| format!("count_distinct({})", col_name));
                             e.alias(&name)
                         }
                         other => {
@@ -629,7 +669,10 @@ fn apply_operations(
 /// - `(col('age') > 30 AND col('score') < 100) OR col('vip') = 1`
 /// - `col('age') > 30 && col('score') < 100`
 /// - `!col('flag') == 'N'`
-fn parse_simple_filter_expr(src: &str) -> Result<Expr, String> {
+fn parse_simple_filter_expr(
+    src: &str,
+    df_opt: Option<&robin_sparkless::DataFrame>,
+) -> Result<Expr, String> {
     // For now, use the improved string-based parser that supports && and ||
     // The tokenizer above is available for future use if needed
     fn trim_outer_parens(s: &str) -> &str {
@@ -736,7 +779,10 @@ fn parse_simple_filter_expr(src: &str) -> Result<Expr, String> {
         None
     }
 
-    fn parse_bool_expr(src: &str) -> Result<Expr, String> {
+    fn parse_bool_expr(
+        src: &str,
+        df_opt: Option<&robin_sparkless::DataFrame>,
+    ) -> Result<Expr, String> {
         let s = trim_outer_parens(src);
         let s_trimmed = s.trim();
         if s_trimmed.is_empty() {
@@ -747,12 +793,12 @@ fn parse_simple_filter_expr(src: &str) -> Result<Expr, String> {
         let lower = s_trimmed.to_ascii_lowercase();
         if lower.starts_with("not ") && s_trimmed.len() >= 4 {
             let rest = &s_trimmed[4..].trim_start();
-            let inner = parse_bool_expr(rest)?;
+            let inner = parse_bool_expr(rest, df_opt)?;
             return Ok(inner.not());
         }
         if s_trimmed.starts_with('!') && !s_trimmed[1..].starts_with('=') {
             let rest = &s_trimmed[1..].trim_start();
-            let inner = parse_bool_expr(rest)?;
+            let inner = parse_bool_expr(rest, df_opt)?;
             return Ok(inner.not());
         }
 
@@ -762,8 +808,8 @@ fn parse_simple_filter_expr(src: &str) -> Result<Expr, String> {
         if let Some((idx, len)) = find_logical_op(s_trimmed, &["||", " or ", "OR"]) {
             let left_str = s_trimmed[..idx].trim();
             let right_str = s_trimmed[idx + len..].trim();
-            let lhs = parse_bool_expr(left_str)?;
-            let rhs = parse_bool_expr(right_str)?;
+            let lhs = parse_bool_expr(left_str, df_opt)?;
+            let rhs = parse_bool_expr(right_str, df_opt)?;
             return Ok(lhs.or(rhs));
         }
 
@@ -772,20 +818,24 @@ fn parse_simple_filter_expr(src: &str) -> Result<Expr, String> {
         if let Some((idx, len)) = find_logical_op(s_trimmed, &["&&", " and ", "AND"]) {
             let left_str = s_trimmed[..idx].trim();
             let right_str = s_trimmed[idx + len..].trim();
-            let lhs = parse_bool_expr(left_str)?;
-            let rhs = parse_bool_expr(right_str)?;
+            let lhs = parse_bool_expr(left_str, df_opt)?;
+            let rhs = parse_bool_expr(right_str, df_opt)?;
             return Ok(lhs.and(rhs));
         }
 
         // No logical operators at top level: treat as a single comparison
-        parse_comparison_expr(s_trimmed)
+        parse_comparison_expr(s_trimmed, df_opt)
     }
 
-    parse_bool_expr(src.trim())
+    parse_bool_expr(src.trim(), df_opt)
 }
 
 /// Parser for a single comparison expression like `col('age') > 30`.
-fn parse_comparison_expr(src: &str) -> Result<Expr, String> {
+/// When df_opt is Some, column names are resolved (case-insensitive) using the DataFrame schema.
+fn parse_comparison_expr(
+    src: &str,
+    df_opt: Option<&robin_sparkless::DataFrame>,
+) -> Result<Expr, String> {
     let s = src.trim();
 
     // Expect something like: col('age') > 30
@@ -801,7 +851,12 @@ fn parse_comparison_expr(src: &str) -> Result<Expr, String> {
         + quote1
         + 1;
 
-    let col_name = &s[quote1 + 1..quote2];
+    let col_name_raw = &s[quote1 + 1..quote2];
+    let col_name: String = if let Some(df) = df_opt {
+        df.resolve_column_name(col_name_raw).map_err(|e| e.to_string())?
+    } else {
+        col_name_raw.to_string()
+    };
 
     // After the closing quote, find the closing paren, then expect an operator and a literal.
     let after_quote = &s[quote2 + 1..];
@@ -871,7 +926,7 @@ fn parse_comparison_expr(src: &str) -> Result<Expr, String> {
 
     let right_side = right_side_full[..right_side_end].trim();
 
-    let c = col(col_name);
+    let c = col(col_name.as_str());
 
     // Check if right side is a column (col('name')) or a literal
     let right_expr_is_column = right_side.starts_with("col(");
@@ -883,10 +938,15 @@ fn parse_comparison_expr(src: &str) -> Result<Expr, String> {
         let right_quote_end = right_side[right_quote_start + 1..]
             .find(['\'', '"'])
             .ok_or("missing closing quote")?;
-        let right_col_name =
+        let right_col_name_raw =
             &right_side[right_quote_start + 1..right_quote_start + 1 + right_quote_end];
+        let right_col_name: String = if let Some(df) = df_opt {
+            df.resolve_column_name(right_col_name_raw).map_err(|e| e.to_string())?
+        } else {
+            right_col_name_raw.to_string()
+        };
         use robin_sparkless::col as robin_col;
-        robin_col(right_col_name).into_expr()
+        robin_col(right_col_name.as_str()).into_expr()
     } else if (right_side.starts_with('\'') && right_side.ends_with('\''))
         || (right_side.starts_with('"') && right_side.ends_with('"'))
     {
@@ -915,7 +975,7 @@ fn parse_comparison_expr(src: &str) -> Result<Expr, String> {
         // Column-to-column comparison: use null-aware _pyspark methods
         use polars::prelude::DataType;
         use robin_sparkless::col as robin_col;
-        let left_col = robin_col(col_name);
+        let left_col = robin_col(col_name.as_str());
         let right_col = robin_sparkless::Column::from_expr(right_expr, None);
 
         // Pilot usage of type_coercion: coerce both sides to a common numeric type.
@@ -1038,7 +1098,8 @@ fn parse_column_or_literal_for_concat(part: &str) -> Result<robin_sparkless::Col
 /// Parse expressions for withColumn operations (when, coalesce, string funcs, etc.)
 fn parse_with_column_expr(src: &str) -> Result<Expr, String> {
     use robin_sparkless::{
-        coalesce, col, concat, concat_ws, lit_str, lower, substring, upper, when,
+        coalesce, col, concat, concat_ws, initcap, length, lit_str, lower, regexp_extract,
+        regexp_replace, split, substring, trim, upper, when,
     };
 
     let s = src.trim();
@@ -1051,7 +1112,7 @@ fn parse_with_column_expr(src: &str) -> Result<Expr, String> {
         let cond_str = &s[5..cond_end]; // Skip "when("
 
         // Parse condition - could be a filter expression or a comparison with columns
-        let condition_expr = parse_simple_filter_expr(cond_str)?;
+        let condition_expr = parse_simple_filter_expr(cond_str, None)?;
         let condition_col = robin_sparkless::Column::from_expr(condition_expr, None);
 
         // Check if we have .then() or just .otherwise()
@@ -1159,6 +1220,91 @@ fn parse_with_column_expr(src: &str) -> Result<Expr, String> {
         let col_name = extract_col_name(inner)?;
         let c = col(col_name);
         return Ok(lower(&c).into_expr());
+    }
+
+    // Handle length(col('name'))
+    if s.starts_with("length(") {
+        let inner = extract_first_arg(s, "length(")?;
+        let col_name = extract_col_name(inner)?;
+        let c = col(col_name);
+        return Ok(length(&c).into_expr());
+    }
+
+    // Handle trim(col('name')), ltrim(...), rtrim(...)
+    if s.starts_with("trim(") {
+        let inner = extract_first_arg(s, "trim(")?;
+        let col_name = extract_col_name(inner)?;
+        let c = col(col_name);
+        return Ok(trim(&c).into_expr());
+    }
+    if s.starts_with("ltrim(") {
+        let inner = extract_first_arg(s, "ltrim(")?;
+        let col_name = extract_col_name(inner)?;
+        let c = col(col_name);
+        return Ok(robin_sparkless::ltrim(&c).into_expr());
+    }
+    if s.starts_with("rtrim(") {
+        let inner = extract_first_arg(s, "rtrim(")?;
+        let col_name = extract_col_name(inner)?;
+        let c = col(col_name);
+        return Ok(robin_sparkless::rtrim(&c).into_expr());
+    }
+
+    // Handle initcap(col('name'))
+    if s.starts_with("initcap(") {
+        let inner = extract_first_arg(s, "initcap(")?;
+        let col_name = extract_col_name(inner)?;
+        let c = col(col_name);
+        return Ok(initcap(&c).into_expr());
+    }
+
+    // Handle regexp_extract(col('name'), pattern, groupIndex)
+    if s.starts_with("regexp_extract(") {
+        let inner = extract_first_arg(s, "regexp_extract(")?;
+        let parts = parse_comma_separated_args(inner);
+        let col_name = extract_col_name(parts.first().ok_or("regexp_extract needs column")?)?;
+        let pattern = parts
+            .get(1)
+            .ok_or("regexp_extract needs pattern")?
+            .trim_matches(['\'', '"']);
+        let group_index: usize = parts
+            .get(2)
+            .ok_or("regexp_extract needs group index")?
+            .trim()
+            .parse()
+            .map_err(|e: std::num::ParseIntError| e.to_string())?;
+        let c = col(col_name);
+        return Ok(regexp_extract(&c, pattern, group_index).into_expr());
+    }
+
+    // Handle regexp_replace(col('name'), pattern, replacement)
+    if s.starts_with("regexp_replace(") {
+        let inner = extract_first_arg(s, "regexp_replace(")?;
+        let parts = parse_comma_separated_args(inner);
+        let col_name = extract_col_name(parts.first().ok_or("regexp_replace needs column")?)?;
+        let pattern = parts
+            .get(1)
+            .ok_or("regexp_replace needs pattern")?
+            .trim_matches(['\'', '"']);
+        let replacement = parts
+            .get(2)
+            .ok_or("regexp_replace needs replacement")?
+            .trim_matches(['\'', '"']);
+        let c = col(col_name);
+        return Ok(regexp_replace(&c, pattern, replacement).into_expr());
+    }
+
+    // Handle split(col('name'), delimiter)
+    if s.starts_with("split(") {
+        let inner = extract_first_arg(s, "split(")?;
+        let parts = parse_comma_separated_args(inner);
+        let col_name = extract_col_name(parts.first().ok_or("split needs column")?)?;
+        let delimiter = parts
+            .get(1)
+            .ok_or("split needs delimiter")?
+            .trim_matches(['\'', '"']);
+        let c = col(col_name);
+        return Ok(split(&c, delimiter).into_expr());
     }
 
     // Handle substring(col('name'), start, length) - 1-based start
@@ -1389,7 +1535,7 @@ fn parse_with_column_expr(src: &str) -> Result<Expr, String> {
         let s_trimmed = s.trim();
 
         // First, try to parse as a boolean/logical expression (reuse existing parser)
-        if let Ok(expr) = parse_simple_filter_expr(s_trimmed) {
+        if let Ok(expr) = parse_simple_filter_expr(s_trimmed, None) {
             return Ok(expr);
         }
 
@@ -1728,7 +1874,10 @@ fn types_compatible(actual: &str, expected: &str) -> bool {
     if int_types.contains(&actual) && int_types.contains(&expected) {
         return true;
     }
-    // Allow UInt32/uint32 to match with bigint (common for count operations)
+    // Allow UInt32/uint32 to match with each other or with bigint (common for count/length)
+    if (actual == "UInt32" || actual == "uint32") && (expected == "UInt32" || expected == "uint32") {
+        return true;
+    }
     if (actual == "UInt32" || actual == "uint32") && int_types.contains(&expected) {
         return true;
     }

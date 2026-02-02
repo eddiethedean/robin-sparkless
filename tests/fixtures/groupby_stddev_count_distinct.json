@@ -1,0 +1,39 @@
+{
+  "name": "groupby_stddev_count_distinct",
+  "pyspark_version": "3.5.0",
+  "input": {
+    "schema": [
+      { "name": "category", "type": "string" },
+      { "name": "value", "type": "double" }
+    ],
+    "rows": [
+      ["A", 10.0],
+      ["A", 20.0],
+      ["A", 30.0],
+      ["B", 5.0],
+      ["B", 15.0]
+    ]
+  },
+  "operations": [
+    { "op": "groupBy", "columns": ["category"] },
+    {
+      "op": "agg",
+      "aggregations": [
+        { "func": "stddev", "alias": "stddev", "column": "value" },
+        { "func": "count_distinct", "alias": "count_distinct", "column": "value" }
+      ]
+    },
+    { "op": "orderBy", "columns": ["category"], "ascending": [true] }
+  ],
+  "expected": {
+    "schema": [
+      { "name": "category", "type": "string" },
+      { "name": "stddev(value)", "type": "double" },
+      { "name": "count_distinct(value)", "type": "bigint" }
+    ],
+    "rows": [
+      ["A", 10.0, 3],
+      ["B", 7.0710678118654755, 2]
+    ]
+  }
+}

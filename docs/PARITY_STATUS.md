@@ -7,7 +7,7 @@ This doc is the **living parity matrix** for `robin-sparkless`.
 - **Fixtures**: `tests/fixtures/*.json`
 - **Sparkless integration**: Robin-sparkless is designed to replace Sparkless's backend. Sparkless has 270+ expected_outputs; a fixture converter can convert those to robin-sparkless format. See [SPARKLESS_INTEGRATION_ANALYSIS.md](SPARKLESS_INTEGRATION_ANALYSIS.md) §4.
 
-Status as of **February 2026**: **PASSING (36 fixtures)**.
+Status as of **February 2026**: **PASSING (43 fixtures)**.
 
 ## Legend
 
@@ -34,7 +34,9 @@ Status as of **February 2026**: **PASSING (36 fixtures)**.
 | GroupBy | `groupBy(...).min()` | ✅ Covered | `groupby_min` |
 | GroupBy | `groupBy(...).max()` | ✅ Covered | `groupby_max` |
 | GroupBy | groupBy with NULL keys | ✅ Covered | `groupby_null_keys` |
+| GroupBy | groupBy single-row groups / single group | ✅ Covered | `groupby_single_row_groups`, `groupby_single_group` |
 | GroupBy | multi-agg `agg([..])` | ✅ Covered | `groupby_multi_agg` |
+| GroupBy | stddev, variance, count_distinct in agg | ✅ Covered | `groupby_stddev_count_distinct` |
 | DataFrame | `withColumn` (arithmetic) | ✅ Covered | `type_coercion_mixed` |
 | DataFrame | `withColumn` (logical/boolean) | ✅ Covered | `with_logical_column` |
 | DataFrame | `withColumn` (mixed arithmetic + comparison) | ✅ Covered | `with_arithmetic_logical_mix` |
@@ -47,8 +49,12 @@ Status as of **February 2026**: **PASSING (36 fixtures)**.
 | Type coercion | numeric comparison coercion (int vs double) | ✅ Covered | `type_coercion_numeric` |
 | Type coercion | numeric arithmetic coercion (int + double) | ✅ Covered | `type_coercion_mixed` |
 | Joins | inner/left/right/outer joins | ✅ Covered | `inner_join`, `left_join`, `right_join`, `outer_join` |
+| Joins | join with NULL keys (inner: nulls excluded) | ✅ Covered | `join_null_keys` |
+| Joins | join with duplicate keys (cartesian match) | ✅ Covered | `join_duplicate_keys` |
 | Windows | row_number, rank, dense_rank, lag, lead | ✅ Covered | `row_number_window`, `rank_window`, `lag_lead_window` |
 | Strings | upper, lower, substring, concat, concat_ws | ✅ Covered | `string_upper_lower`, `string_substring`, `string_concat` |
+| Strings | length, trim, ltrim, rtrim, regexp_extract, regexp_replace, split, initcap | ✅ Covered | `string_length_trim` |
+| Config | `spark.sql.caseSensitive` (case-insensitive column resolution) | ✅ Covered | `case_insensitive_columns` |
 | SQL | `SparkSession::sql()` | ❌ Not implemented | — |
 
 ## Fixture Index
@@ -66,6 +72,11 @@ Status as of **February 2026**: **PASSING (36 fixtures)**.
 | `groupby_min` | groupBy + min |
 | `groupby_max` | groupBy + max |
 | `groupby_null_keys` | groupBy with NULL keys |
+| `groupby_single_row_groups` | groupBy with single-row groups (each key once) |
+| `groupby_single_group` | groupBy with single group (all same key) |
+| `join_null_keys` | inner join with NULL join keys (nulls excluded) |
+| `join_duplicate_keys` | inner join with duplicate keys (multiple matches) |
+| `case_insensitive_columns` | case-insensitive column resolution (filter/select/orderBy with mixed-case names) |
 | `read_csv` | CSV read path + operations |
 | `read_parquet` | Parquet read path + operations |
 | `read_json` | JSON read path + operations |
@@ -85,16 +96,18 @@ Status as of **February 2026**: **PASSING (36 fixtures)**.
 | `right_join` | right join + orderBy |
 | `outer_join` | outer join + orderBy |
 | `groupby_multi_agg` | groupBy + multiple aggregations in one agg() |
+| `groupby_stddev_count_distinct` | groupBy + stddev and count_distinct in agg |
 | `row_number_window` | row_number() over partition by dept order by salary desc |
 | `rank_window` | rank() over partition with ties |
 | `lag_lead_window` | lag and lead over partition |
 | `string_upper_lower` | upper(), lower() |
 | `string_substring` | substring() 1-based |
 | `string_concat` | concat(), concat_ws() |
+| `string_length_trim` | length(), trim() in withColumn |
 
 ## Next additions to the matrix (recommended)
 
-- Add join edge-case fixtures (null keys, duplicate keys).
+- Add more join edge-case fixtures (e.g. left/outer with null keys) if needed.
 
 ## Sparkless Test Conversion
 
