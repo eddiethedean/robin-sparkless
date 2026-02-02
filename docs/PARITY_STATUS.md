@@ -7,7 +7,7 @@ This doc is the **living parity matrix** for `robin-sparkless`.
 - **Fixtures**: `tests/fixtures/*.json`
 - **Sparkless integration**: Robin-sparkless is designed to replace Sparkless's backend. Sparkless has 270+ expected_outputs; a fixture converter can convert those to robin-sparkless format. See [SPARKLESS_INTEGRATION_ANALYSIS.md](SPARKLESS_INTEGRATION_ANALYSIS.md) §4.
 
-Status as of **January 2026**: **PASSING (25 fixtures)**.
+Status as of **February 2026**: **PASSING (29 fixtures)**.
 
 ## Legend
 
@@ -46,7 +46,7 @@ Status as of **January 2026**: **PASSING (25 fixtures)**.
 | Null semantics | NULLs inside filter predicates | ✅ Covered | `null_in_filter` |
 | Type coercion | numeric comparison coercion (int vs double) | ✅ Covered | `type_coercion_numeric` |
 | Type coercion | numeric arithmetic coercion (int + double) | ✅ Covered | `type_coercion_mixed` |
-| Joins | inner/left/right/outer joins | ❌ Not implemented | — |
+| Joins | inner/left/right/outer joins | ✅ Covered | `inner_join`, `left_join`, `right_join`, `outer_join` |
 | Windows | window functions | ❌ Not implemented | — |
 | SQL | `SparkSession::sql()` | ❌ Not implemented | — |
 
@@ -79,11 +79,15 @@ Status as of **January 2026**: **PASSING (25 fixtures)**.
 | `null_in_filter` | NULLs in filter predicates |
 | `type_coercion_numeric` | int/double comparison coercion |
 | `type_coercion_mixed` | int+double arithmetic coercion |
+| `inner_join` | inner join on dept_id |
+| `left_join` | left join + orderBy |
+| `right_join` | right join + orderBy |
+| `outer_join` | outer join + orderBy |
 
 ## Next additions to the matrix (recommended)
 
 - Update test harness to support **multiple aggregations** in one `agg` call, then add fixture.
-- Once joins land, add a join parity slice (inner/left/right/full + null key behavior).
+- Add join edge-case fixtures (null keys, duplicate keys).
 - Add string function fixtures (`concat`, `substring`, `lower`, `upper`, etc.).
 
 ## Sparkless Test Conversion

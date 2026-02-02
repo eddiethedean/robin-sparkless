@@ -17,18 +17,44 @@
       }
     ],
     "rows": [
-      [1, "A", 10],
-      [2, "A", 20],
-      [3, null, 30],
-      [4, "B", 40],
-      [5, null, 50],
-      [6, "B", 60]
+      [
+        1,
+        "A",
+        10
+      ],
+      [
+        2,
+        "A",
+        20
+      ],
+      [
+        3,
+        null,
+        30
+      ],
+      [
+        4,
+        "B",
+        40
+      ],
+      [
+        5,
+        null,
+        50
+      ],
+      [
+        6,
+        "B",
+        60
+      ]
     ]
   },
   "operations": [
     {
       "op": "groupBy",
-      "columns": ["category"]
+      "columns": [
+        "category"
+      ]
     },
     {
       "op": "agg",
@@ -42,8 +68,12 @@
     },
     {
       "op": "orderBy",
-      "columns": ["category"],
-      "ascending": [true]
+      "columns": [
+        "category"
+      ],
+      "ascending": [
+        true
+      ]
     }
   ],
   "expected": {
@@ -58,9 +88,18 @@
       }
     ],
     "rows": [
-      [null, 80],
-      ["A", 30],
-      ["B", 100]
+      [
+        null,
+        80
+      ],
+      [
+        "A",
+        30
+      ],
+      [
+        "B",
+        100
+      ]
     ]
   }
 }

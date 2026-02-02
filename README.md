@@ -73,7 +73,7 @@ complex.show(Some(10))?;
 df_with_computed.show(Some(10))?;
 ```
 
-As the library evolves, higher-level constructors (for Rust tuples/records) and IO helpers (CSV/Parquet/JSON readers) will be added on top of this core.
+The library supports IO (CSV/Parquet/JSON via `SparkSession::read_*`), joins (`DataFrame::join` with Inner/Left/Right/Outer), and groupBy aggregates. See [docs/QUICKSTART.md](docs/QUICKSTART.md) for more examples.
 
 ## Development
 
@@ -98,19 +98,20 @@ cargo doc --open
 
 Robin Sparkless aims to provide a **PySpark-like API layer** on top of Polars:
 
-- **SparkSession**: Entry point for creating `DataFrame`s and (eventually) reading data sources.
-- **DataFrame**: Main tabular data structure; behavior should mirror PySpark’s DataFrame where possible.
+- **SparkSession**: Entry point for creating `DataFrame`s and reading data sources (CSV, Parquet, JSON).
+- **DataFrame**: Main tabular data structure; operations include `filter`, `select`, `order_by`, `group_by`, `with_column`, `join`.
 - **Column**: Represents expressions over columns, similar to PySpark’s `Column`.
-- **Functions**: Helper functions like `col()`, `lit_*()`, `count()`, etc., modeled after PySpark’s `pyspark.sql.functions`.
+- **Functions**: Helper functions like `col()`, `lit_*()`, `count()`, `when`, `coalesce`, etc., modeled after PySpark’s `pyspark.sql.functions`.
 
-Over time, more of PySpark’s behavior (null handling, grouping semantics, joins, expression behavior) will be matched, while still running entirely in Rust on top of Polars.
+Core behavior (null handling, grouping semantics, joins, expression behavior) matches PySpark on 29 parity fixtures, with more coverage planned.
 
 ## Related Documentation
 
 - [docs/](docs/README.md) – Documentation index
+- [CHANGELOG.md](CHANGELOG.md) – Version history and release notes
 - [docs/SPARKLESS_INTEGRATION_ANALYSIS.md](docs/SPARKLESS_INTEGRATION_ANALYSIS.md) – Sparkless backend replacement strategy, architecture learnings, test conversion
 - [docs/ROADMAP.md](docs/ROADMAP.md) – Development roadmap including Sparkless integration phases
-- [docs/PARITY_STATUS.md](docs/PARITY_STATUS.md) – PySpark parity coverage matrix
+- [docs/PARITY_STATUS.md](docs/PARITY_STATUS.md) – PySpark parity coverage matrix (29 fixtures)
 
 ## License
 

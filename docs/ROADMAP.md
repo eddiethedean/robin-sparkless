@@ -23,7 +23,7 @@
      - ✅ `createDataFrame` from simple rows (`Vec<(i64, i64, String)>` tuples)
      - ✅ `select`, `filter`, `groupBy(...).count()`, `orderBy`
      - ✅ `show`, `collect`, `count`
-   - ✅ Behavior-checked these operations against PySpark on fixtures (25 scenarios passing)
+   - ✅ Behavior-checked these operations against PySpark on fixtures (29 scenarios passing)
 
 3. **Behavioral Tests** ✅
    - ✅ Test harness implemented (`tests/parity.rs`):
@@ -53,13 +53,13 @@
    - ✅ Arithmetic expressions in withColumn (+, -, *, /) with proper operator precedence
    - ✅ Mixed arithmetic and logical expressions (e.g., `(col('a') + col('b')) > col('c')`)
 
-6. **Grouping and Joins** ⚠️ **PARTIAL**
+6. **Grouping and Joins** ✅ **COMPLETE**
    - ✅ Basic `groupBy` + `count()` working with parity tests
    - ✅ Additional aggregates: `sum`, `avg`, `min`, `max` on GroupedData
    - ✅ Generic `agg()` method for multiple aggregations
    - ✅ Column reordering after groupBy to match PySpark order (grouping columns first)
    - [ ] Ensure `groupBy` + aggregates behave like PySpark (especially null/grouping edge cases)
-   - [ ] Implement common join types (inner, left, right, outer) and compare behavior against PySpark
+   - ✅ Implement common join types (inner, left, right, outer) with parity fixtures
 
 ### Longer-Term Objectives (3+ months)
 
@@ -78,17 +78,17 @@
 - **Phase 1 – Structural Alignment**: Service-style modules (transformations, aggregations, joins), trait-based backends, case sensitivity config
 - **Phase 2 – Function Parity**: String, datetime, aggregates (stddev, variance); fixtures aligned with Sparkless expected_outputs
 - **Phase 3 – Test Conversion**: Fixture converter (Sparkless JSON → robin-sparkless JSON); convert 10–20 high-value tests; CI integration
-- **Phase 4 – Joins & Windows**: Implement joins and window functions; convert Sparkless join/window parity tests
+- **Phase 4 – Windows**: Implement window functions; convert Sparkless window parity tests (joins ✅ complete)
 
 ## Success Metrics
 
 We know we're on track if:
 
-- ✅ **Behavioral parity**: For core operations (filter, select, orderBy, groupBy+count/sum/avg/min/max, when/coalesce, basic type coercion, null semantics) and file readers (CSV/Parquet/JSON), PySpark and Robin Sparkless produce the same schema and data on test fixtures. **Status: PASSING (25 fixtures)**
+- ✅ **Behavioral parity**: For core operations (filter, select, orderBy, groupBy+count/sum/avg/min/max, when/coalesce, basic type coercion, null semantics, joins) and file readers (CSV/Parquet/JSON), PySpark and Robin Sparkless produce the same schema and data on test fixtures. **Status: PASSING (29 fixtures)**
 - ⚠️ **Documentation of differences**: Any divergence from PySpark semantics should be called out explicitly. **Status: TO BE DOCUMENTED**
 - ⚠️ **Performance envelope**: For supported operations, we stay within a small constant factor of doing the same thing directly in Polars. **Status: NOT YET BENCHMARKED**
 
-## Current Status (January 2026)
+## Current Status (February 2026)
 
 **Completed Core Parity Slice:**
 - ✅ `SparkSession::create_dataframe` for simple tuples
@@ -97,12 +97,13 @@ We know we're on track if:
 - ✅ `DataFrame::order_by` / `sort`
 - ✅ `DataFrame::group_by` → `GroupedData::count()`
 - ✅ `DataFrame::with_column` for adding computed columns
+- ✅ `DataFrame::join()` for inner, left, right, outer joins
 - ✅ File readers: `read_csv()`, `read_parquet()`, `read_json()` with schema inference
 - ✅ Expression functions: `when().then().otherwise()`, `coalesce()`
 - ✅ GroupedData aggregates: `sum()`, `avg()`, `min()`, `max()`, and generic `agg()`
 - ✅ Null comparison semantics: equality/inequality vs NULL, ordering comparisons vs NULL, and `eqNullSafe`
 - ✅ Numeric type coercion for int/double comparisons and simple arithmetic
-- ✅ Parity test harness with 22 passing fixtures:
+- ✅ Parity test harness with 29 passing fixtures:
   - `filter_age_gt_30`: filter + select + orderBy
   - `filter_and_or`: nested boolean logic with AND/OR and parentheses
   - `filter_nested`: nested boolean logic
@@ -125,10 +126,10 @@ We know we're on track if:
   - `null_in_filter`: null handling in filter predicates
   - `type_coercion_numeric`: int vs double comparison coercion
   - `type_coercion_mixed`: int + double arithmetic coercion
+  - `inner_join`, `left_join`, `right_join`, `outer_join`: join operations
 
 **Next Priority:**
 - Additional GroupedData aggregates edge cases (null handling, multiple aggregations)
-- Join operations (inner, left, right, outer)
 
 ## Testing Strategy
 

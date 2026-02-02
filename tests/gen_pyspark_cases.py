@@ -1065,6 +1065,157 @@ def case_with_arithmetic_logical_mix(spark: SparkSession) -> Dict[str, Any]:
         "expected": {"schema": expected_schema, "rows": expected_rows},
     }
 
+
+def case_inner_join(spark: SparkSession) -> Dict[str, Any]:
+    """Test inner join between employees and departments."""
+    employees_data = [
+        {"id": 1, "name": "Alice", "dept_id": 10, "salary": 50000},
+        {"id": 2, "name": "Bob", "dept_id": 20, "salary": 60000},
+        {"id": 3, "name": "Charlie", "dept_id": 10, "salary": 70000},
+        {"id": 4, "name": "David", "dept_id": 30, "salary": 55000},
+    ]
+    departments_data = [
+        {"dept_id": 10, "name": "IT", "location": "NYC"},
+        {"dept_id": 20, "name": "HR", "location": "LA"},
+        {"dept_id": 40, "name": "Finance", "location": "Chicago"},
+    ]
+    emp_df = spark.createDataFrame(employees_data)
+    dept_df = spark.createDataFrame(departments_data)
+    out_df = emp_df.join(dept_df, emp_df.dept_id == dept_df.dept_id, "inner")
+
+    input_schema = schema_to_json(emp_df.schema)
+    input_rows = df_to_rows(emp_df)
+    right_schema = schema_to_json(dept_df.schema)
+    right_rows = df_to_rows(dept_df)
+    expected_schema = schema_to_json(out_df.schema)
+    expected_rows = df_to_rows(out_df)
+
+    return {
+        "name": "inner_join",
+        "pyspark_version": spark.version,
+        "input": {"schema": input_schema, "rows": input_rows},
+        "right_input": {"schema": right_schema, "rows": right_rows},
+        "operations": [
+            {"op": "join", "on": ["dept_id"], "how": "inner"},
+        ],
+        "expected": {"schema": expected_schema, "rows": expected_rows},
+    }
+
+
+def case_left_join(spark: SparkSession) -> Dict[str, Any]:
+    """Test left join between employees and departments."""
+    employees_data = [
+        {"id": 1, "name": "Alice", "dept_id": 10, "salary": 50000},
+        {"id": 2, "name": "Bob", "dept_id": 20, "salary": 60000},
+        {"id": 3, "name": "Charlie", "dept_id": 10, "salary": 70000},
+        {"id": 4, "name": "David", "dept_id": 30, "salary": 55000},
+    ]
+    departments_data = [
+        {"dept_id": 10, "name": "IT", "location": "NYC"},
+        {"dept_id": 20, "name": "HR", "location": "LA"},
+        {"dept_id": 40, "name": "Finance", "location": "Chicago"},
+    ]
+    emp_df = spark.createDataFrame(employees_data)
+    dept_df = spark.createDataFrame(departments_data)
+    out_df = emp_df.join(dept_df, emp_df.dept_id == dept_df.dept_id, "left")
+    out_df = out_df.orderBy("id")
+
+    input_schema = schema_to_json(emp_df.schema)
+    input_rows = df_to_rows(emp_df)
+    right_schema = schema_to_json(dept_df.schema)
+    right_rows = df_to_rows(dept_df)
+    expected_schema = schema_to_json(out_df.schema)
+    expected_rows = df_to_rows(out_df)
+
+    return {
+        "name": "left_join",
+        "pyspark_version": spark.version,
+        "input": {"schema": input_schema, "rows": input_rows},
+        "right_input": {"schema": right_schema, "rows": right_rows},
+        "operations": [
+            {"op": "join", "on": ["dept_id"], "how": "left"},
+            {"op": "orderBy", "columns": ["id"], "ascending": [True]},
+        ],
+        "expected": {"schema": expected_schema, "rows": expected_rows},
+    }
+
+
+def case_right_join(spark: SparkSession) -> Dict[str, Any]:
+    """Test right join between employees and departments."""
+    employees_data = [
+        {"id": 1, "name": "Alice", "dept_id": 10, "salary": 50000},
+        {"id": 2, "name": "Bob", "dept_id": 20, "salary": 60000},
+        {"id": 3, "name": "Charlie", "dept_id": 10, "salary": 70000},
+        {"id": 4, "name": "David", "dept_id": 30, "salary": 55000},
+    ]
+    departments_data = [
+        {"dept_id": 10, "name": "IT", "location": "NYC"},
+        {"dept_id": 20, "name": "HR", "location": "LA"},
+        {"dept_id": 40, "name": "Finance", "location": "Chicago"},
+    ]
+    emp_df = spark.createDataFrame(employees_data)
+    dept_df = spark.createDataFrame(departments_data)
+    out_df = emp_df.join(dept_df, emp_df.dept_id == dept_df.dept_id, "right")
+    out_df = out_df.orderBy("id")
+
+    input_schema = schema_to_json(emp_df.schema)
+    input_rows = df_to_rows(emp_df)
+    right_schema = schema_to_json(dept_df.schema)
+    right_rows = df_to_rows(dept_df)
+    expected_schema = schema_to_json(out_df.schema)
+    expected_rows = df_to_rows(out_df)
+
+    return {
+        "name": "right_join",
+        "pyspark_version": spark.version,
+        "input": {"schema": input_schema, "rows": input_rows},
+        "right_input": {"schema": right_schema, "rows": right_rows},
+        "operations": [
+            {"op": "join", "on": ["dept_id"], "how": "right"},
+            {"op": "orderBy", "columns": ["id"], "ascending": [True]},
+        ],
+        "expected": {"schema": expected_schema, "rows": expected_rows},
+    }
+
+
+def case_outer_join(spark: SparkSession) -> Dict[str, Any]:
+    """Test outer join between employees and departments."""
+    employees_data = [
+        {"id": 1, "name": "Alice", "dept_id": 10, "salary": 50000},
+        {"id": 2, "name": "Bob", "dept_id": 20, "salary": 60000},
+        {"id": 3, "name": "Charlie", "dept_id": 10, "salary": 70000},
+        {"id": 4, "name": "David", "dept_id": 30, "salary": 55000},
+    ]
+    departments_data = [
+        {"dept_id": 10, "name": "IT", "location": "NYC"},
+        {"dept_id": 20, "name": "HR", "location": "LA"},
+        {"dept_id": 40, "name": "Finance", "location": "Chicago"},
+    ]
+    emp_df = spark.createDataFrame(employees_data)
+    dept_df = spark.createDataFrame(departments_data)
+    out_df = emp_df.join(dept_df, emp_df.dept_id == dept_df.dept_id, "outer")
+    out_df = out_df.orderBy("id")
+
+    input_schema = schema_to_json(emp_df.schema)
+    input_rows = df_to_rows(emp_df)
+    right_schema = schema_to_json(dept_df.schema)
+    right_rows = df_to_rows(dept_df)
+    expected_schema = schema_to_json(out_df.schema)
+    expected_rows = df_to_rows(out_df)
+
+    return {
+        "name": "outer_join",
+        "pyspark_version": spark.version,
+        "input": {"schema": input_schema, "rows": input_rows},
+        "right_input": {"schema": right_schema, "rows": right_rows},
+        "operations": [
+            {"op": "join", "on": ["dept_id"], "how": "outer"},
+            {"op": "orderBy", "columns": ["id"], "ascending": [True]},
+        ],
+        "expected": {"schema": expected_schema, "rows": expected_rows},
+    }
+
+
 def main() -> None:
     spark = SparkSession.builder.appName("robin_sparkless_parity_gen").getOrCreate()
 
@@ -1097,6 +1248,10 @@ def main() -> None:
         case_type_coercion_mixed(spark),
         case_with_logical_column(spark),
         case_with_arithmetic_logical_mix(spark),
+        case_inner_join(spark),
+        case_left_join(spark),
+        case_right_join(spark),
+        case_outer_join(spark),
     ]
 
     for fx in fixtures:

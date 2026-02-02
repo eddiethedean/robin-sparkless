@@ -3,6 +3,15 @@ use crate::column::Column;
 use crate::schema::StructType;
 use std::sync::Arc;
 
+/// Join type for DataFrame joins (PySpark-compatible)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum JoinType {
+    Inner,
+    Left,
+    Right,
+    Outer,
+}
+
 /// DataFrame - main tabular data structure.
 /// Thin wrapper around an eager Polars `DataFrame`.
 pub struct DataFrame {
@@ -91,6 +100,44 @@ impl DataFrame {
             lazy_grouped,
             grouping_cols: column_names.iter().map(|s| s.to_string()).collect(),
         })
+    }
+
+    /// Join with another DataFrame on the given columns
+    ///
+    /// # Example
+    /// ```
+    /// use robin_sparkless::{DataFrame, JoinType};
+    /// # fn example(left: DataFrame, right: DataFrame) -> Result<DataFrame, polars::prelude::PolarsError> {
+    /// let joined = left.join(&right, vec!["dept_id"], JoinType::Inner)?;
+    /// # Ok(joined)
+    /// # }
+    /// ```
+    pub fn join(
+        &self,
+        other: &DataFrame,
+        on: Vec<&str>,
+        how: JoinType,
+    ) -> Result<DataFrame, PolarsError> {
+        use polars::prelude::*;
+        let left_lf = self.df.as_ref().clone().lazy();
+        let right_lf = other.df.as_ref().clone().lazy();
+        let on_exprs: Vec<Expr> = on.iter().map(|name| col(*name)).collect();
+        use polars::prelude::JoinType as PlJoinType;
+        let polars_how = match how {
+            crate::JoinType::Inner => PlJoinType::Inner,
+            crate::JoinType::Left => PlJoinType::Left,
+            crate::JoinType::Right => PlJoinType::Right,
+            crate::JoinType::Outer => PlJoinType::Full,
+        };
+        use polars::prelude::JoinCoalesce;
+        let joined = JoinBuilder::new(left_lf)
+            .with(right_lf)
+            .how(polars_how)
+            .on(&on_exprs)
+            .coalesce(JoinCoalesce::KeepColumns)
+            .finish();
+        let pl_df = joined.collect()?;
+        Ok(Self::from_polars(pl_df))
     }
 
     /// Order by columns (sort)

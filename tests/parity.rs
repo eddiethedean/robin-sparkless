@@ -4,7 +4,7 @@ use std::path::Path;
 use polars::prelude::{
     DataFrame as PlDataFrame, Expr, NamedFrom, PolarsError, Series, col, lit,
 };
-use robin_sparkless::{DataFrame, SparkSession};
+use robin_sparkless::{DataFrame, JoinType, SparkSession};
 use serde::Deserialize;
 use serde_json::Value;
 
@@ -15,6 +15,8 @@ struct Fixture {
     #[allow(dead_code)]
     pyspark_version: Option<String>,
     input: InputSection,
+    #[serde(default)]
+    right_input: Option<InputSection>,
     operations: Vec<Operation>,
     expected: ExpectedSection,
 }
@@ -61,6 +63,8 @@ enum Operation {
     Agg { aggregations: Vec<AggregationSpec> },
     #[serde(rename = "withColumn")]
     WithColumn { column: String, expr: String },
+    #[serde(rename = "join")]
+    Join { on: Vec<String>, how: String },
 }
 
 #[derive(Debug, Deserialize)]
@@ -122,16 +126,24 @@ fn run_fixture(fixture: &Fixture) -> Result<(), PolarsError> {
     let spark = SparkSession::builder().app_name("parity_test").get_or_create();
     let df = create_df_from_input(&spark, &fixture.input)?;
 
+    // Create right DataFrame for join fixtures
+    let right_df = fixture
+        .right_input
+        .as_ref()
+        .map(|ri| create_df_from_input(&spark, ri))
+        .transpose()?;
+
     // Apply operations
-    let result_df = apply_operations(df, &fixture.operations)?;
+    let result_df = apply_operations(df, right_df, &fixture.operations)?;
 
     // Collect and compare results
     let (actual_schema, actual_rows) = collect_to_simple_format(&result_df)?;
     
     // Check if operations include orderBy (for comparison strategy)
     let has_order_by = fixture.operations.iter().any(|op| matches!(op, Operation::OrderBy { .. }));
+    let is_join_fixture = fixture.right_input.is_some();
     
-    assert_schema_eq(&actual_schema, &fixture.expected.schema, &fixture.name)?;
+    assert_schema_eq(&actual_schema, &fixture.expected.schema, &fixture.name, is_join_fixture)?;
     assert_rows_eq(&actual_rows, &fixture.expected.rows, has_order_by, &fixture.name)?;
 
     Ok(())
@@ -328,7 +340,7 @@ fn create_df_from_input_direct(input: &InputSection) -> Result<DataFrame, Polars
     Ok(DataFrame::from_polars(pl_df))
 }
 
-/// Apply the first parity-slice operations (filter + select + orderBy + groupBy + agg).
+/// Apply the first parity-slice operations (filter + select + orderBy + groupBy + agg + join).
 ///
 /// - `filter` supports very simple expressions of the form:
 ///   - `col('age') > 30`
@@ -337,8 +349,10 @@ fn create_df_from_input_direct(input: &InputSection) -> Result<DataFrame, Polars
 /// - `orderBy` sorts by columns.
 /// - `groupBy` creates a GroupedData (must be followed by `agg`).
 /// - `agg` applies aggregations to GroupedData and returns a DataFrame.
+/// - `join` joins with the right DataFrame (requires right_input in fixture).
 fn apply_operations(
     mut df: DataFrame,
+    mut right: Option<DataFrame>,
     ops: &[Operation],
 ) -> Result<DataFrame, PolarsError> {
     use robin_sparkless::GroupedData;
@@ -437,6 +451,31 @@ fn apply_operations(
                     }
                 };
                 grouped = None; // Aggregation consumes the GroupedData
+            }
+            Operation::Join { on, how } => {
+                if grouped.is_some() {
+                    return Err(PolarsError::ComputeError(
+                        "join cannot be applied after groupBy".into(),
+                    ));
+                }
+                let right_df = right.take().ok_or_else(|| {
+                    PolarsError::ComputeError(
+                        "join requires right_input in fixture".into(),
+                    )
+                })?;
+                let join_type = match how.as_str() {
+                    "inner" => JoinType::Inner,
+                    "left" => JoinType::Left,
+                    "right" => JoinType::Right,
+                    "outer" | "full" => JoinType::Outer,
+                    other => {
+                        return Err(PolarsError::ComputeError(
+                            format!("unsupported join type: {}", other).into(),
+                        ));
+                    }
+                };
+                let on_refs: Vec<&str> = on.iter().map(|s| s.as_str()).collect();
+                df = df.join(&right_df, on_refs, join_type)?;
             }
             Operation::WithColumn { column, expr } => {
                 // Parse the expression and apply withColumn
@@ -1310,10 +1349,13 @@ fn dtype_to_string(dtype: &polars::prelude::DataType) -> String {
 }
 
 /// Assert that schemas match (column names and types).
+/// When `join_fixture` is true, allows actual names with "_right" suffix to match expected
+/// duplicate names (PySpark keeps duplicate column names; Polars uses "_right" suffix).
 fn assert_schema_eq(
     actual: &[ColumnSpec],
     expected: &[ColumnSpec],
     fixture_name: &str,
+    join_fixture: bool,
 ) -> Result<(), PolarsError> {
     if actual.len() != expected.len() {
         return Err(PolarsError::ComputeError(
@@ -1325,8 +1367,20 @@ fn assert_schema_eq(
         ));
     }
     
+    let mut expected_name_occurrence: std::collections::HashMap<String, usize> =
+        std::collections::HashMap::new();
+
     for (i, (act, exp)) in actual.iter().zip(expected.iter()).enumerate() {
-        if act.name != exp.name {
+        let occurrence = expected_name_occurrence.entry(exp.name.clone()).or_insert(0);
+        *occurrence += 1;
+        let is_duplicate = *occurrence > 1;
+
+        let names_match = if join_fixture && is_duplicate {
+            act.name == format!("{}_right", exp.name) || act.name == exp.name
+        } else {
+            act.name == exp.name
+        };
+        if !names_match {
             return Err(PolarsError::ComputeError(
                 format!(
                     "fixture {}: column {} name mismatch: actual '{}', expected '{}'",

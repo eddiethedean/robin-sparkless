@@ -54,4 +54,14 @@ fn main() -> polars::prelude::PolarsResult<()> {
 }
 ```
 
-As more APIs are added (constructors from Rust data, IO helpers, richer expressions), this guide can be expanded with additional examples. For roadmap and Sparkless integration phases, see [ROADMAP.md](ROADMAP.md).
+### Joins
+
+```rust
+use robin_sparkless::{DataFrame, JoinType};
+
+let joined = left_df.join(&right_df, vec!["dept_id"], JoinType::Inner)?;
+```
+
+Supported join types: `Inner`, `Left`, `Right`, `Outer`.
+
+As more APIs are added (window functions, broader expressions), this guide will expand. For roadmap and Sparkless integration phases, see [ROADMAP.md](ROADMAP.md).

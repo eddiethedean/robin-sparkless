@@ -29,7 +29,6 @@
 
 The migration itself is complete (Rust-only + Polars backend, build/test green). Remaining work is now parity and feature expansion:
 
-- Joins (inner/left/right/outer)
 - Window functions
 - SQL support (or explicit deferral with documentation)
 - Broader function coverage + additional edge-case parity fixtures

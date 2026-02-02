@@ -17,17 +17,39 @@
       }
     ],
     "rows": [
-      [1, "Sales", 1000],
-      [2, "Sales", 1500],
-      [3, "Engineering", 2000],
-      [4, "Engineering", 2500],
-      [5, "Sales", 1200]
+      [
+        1,
+        "Sales",
+        1000
+      ],
+      [
+        2,
+        "Sales",
+        1500
+      ],
+      [
+        3,
+        "Engineering",
+        2000
+      ],
+      [
+        4,
+        "Engineering",
+        2500
+      ],
+      [
+        5,
+        "Sales",
+        1200
+      ]
     ]
   },
   "operations": [
     {
       "op": "groupBy",
-      "columns": ["department"]
+      "columns": [
+        "department"
+      ]
     },
     {
       "op": "agg",
@@ -41,8 +63,12 @@
     },
     {
       "op": "orderBy",
-      "columns": ["department"],
-      "ascending": [true]
+      "columns": [
+        "department"
+      ],
+      "ascending": [
+        true
+      ]
     }
   ],
   "expected": {
@@ -57,8 +83,14 @@
       }
     ],
     "rows": [
-      ["Engineering", 2000],
-      ["Sales", 1000]
+      [
+        "Engineering",
+        2000
+      ],
+      [
+        "Sales",
+        1000
+      ]
     ]
   }
 }

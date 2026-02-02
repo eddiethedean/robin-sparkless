@@ -12,7 +12,7 @@ pub mod expression;
 pub mod type_coercion;
 
 pub use session::{SparkSession, SparkSessionBuilder, DataFrameReader};
-pub use dataframe::{DataFrame, GroupedData};
+pub use dataframe::{DataFrame, GroupedData, JoinType};
 pub use column::Column;
 pub use schema::{StructType, StructField};
 pub use functions::*;

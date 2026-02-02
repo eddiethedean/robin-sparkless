@@ -38,9 +38,9 @@ Robin-sparkless is designed to **replace the backend logic** of [Sparkless](http
    - Continue expanding parity coverage by adding fixtures for new capabilities and edge cases.
    - Current fixture coverage and status lives in `PARITY_STATUS.md`.
 
-3. **Joins**
-   - Implement common join types (inner, left, right, outer) and compare behavior against PySpark.
-   - Add parity fixtures for join edge cases (null keys, duplicate keys, column naming).
+3. **Joins** ✅ **COMPLETED**
+   - ✅ Implemented common join types (inner, left, right, outer) via `DataFrame::join()`
+   - ✅ Parity fixtures for inner, left, right, outer joins
 
 4. **Broader expression & function coverage**
    - Expand built-in functions (string/date/math) with explicit PySpark semantics.

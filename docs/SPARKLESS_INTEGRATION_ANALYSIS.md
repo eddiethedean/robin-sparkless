@@ -152,7 +152,7 @@ Sparkless implements **403+ PySpark functions** ([PYSPARK_FUNCTION_MATRIX.md](ht
 
 | Sparkless Test Dir | Tests | Conversion Priority | Notes |
 |--------------------|-------|---------------------|-------|
-| `parity/dataframe/` | filter, select, groupby, join, transformations, window | High | Core DataFrame ops; join/window need implementation first |
+| `parity/dataframe/` | filter, select, groupby, join, transformations, window | High | Core DataFrame ops; joins ✅ implemented; window needs implementation |
 | `parity/functions/` | aggregate, array, datetime, string, math, null_handling | High | Many map 1:1 to robin-sparkless `functions` |
 | `parity/sql/` | queries, DDL, DML | Medium | Robin-sparkless has no SQL yet |
 | `unit/` | 47+ unit tests | Medium | Good for isolated behavior |
@@ -190,10 +190,10 @@ Sparkless implements **403+ PySpark functions** ([PYSPARK_FUNCTION_MATRIX.md](ht
 2. Convert 10–20 high-value Sparkless tests (filter, select, groupby, basic aggregates)
 3. Integrate into CI so both projects validate against the same logical fixtures
 
-### Phase 4: Joins & Windows
-1. Implement joins (inner, left, right, outer) in robin-sparkless
+### Phase 4: Windows
+1. ✅ Joins (inner, left, right, outer) implemented in robin-sparkless
 2. Implement window functions (row_number, rank, lag, lead)
-3. Add parity fixtures; convert Sparkless join/window tests
+3. Add parity fixtures; convert Sparkless window tests
 
 ---
 
@@ -214,7 +214,7 @@ Sparkless implements **403+ PySpark functions** ([PYSPARK_FUNCTION_MATRIX.md](ht
 ### Robin-Sparkless
 - `tests/parity.rs` – run_fixture, create_df_from_input, apply_operations, assert_schema_eq, assert_rows_eq
 - `src/expression.rs` – expression parsing for fixture `expr` strings
-- `tests/fixtures/` – 22 JSON fixtures
+- `tests/fixtures/` – 29 JSON fixtures
 
 ---
 
@@ -236,4 +236,4 @@ Sparkless implements **403+ PySpark functions** ([PYSPARK_FUNCTION_MATRIX.md](ht
 | **Convert tests** | Build fixture converter; reuse Sparkless expected_outputs; run robin-sparkless parity on converted fixtures |
 | **Function coverage** | Use PYSPARK_FUNCTION_MATRIX.md; prioritize aggregates, string, datetime, window |
 
-Robin-sparkless is well-positioned as the Rust engine. The main gaps are joins, windows, and broad function coverage. Aligning fixture formats and converting Sparkless tests will accelerate parity and ensure both projects stay consistent.
+Robin-sparkless is well-positioned as the Rust engine. The main gaps are windows and broad function coverage (joins ✅ implemented). Aligning fixture formats and converting Sparkless tests will accelerate parity and ensure both projects stay consistent.
