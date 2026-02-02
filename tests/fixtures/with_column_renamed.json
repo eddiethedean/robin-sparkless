@@ -1,0 +1,29 @@
+{
+  "name": "with_column_renamed",
+  "pyspark_version": "3.5.0",
+  "input": {
+    "schema": [
+      { "name": "id", "type": "bigint" },
+      { "name": "age", "type": "bigint" },
+      { "name": "name", "type": "string" }
+    ],
+    "rows": [
+      [1, 25, "Alice"],
+      [2, 30, "Bob"]
+    ]
+  },
+  "operations": [
+    { "op": "withColumnRenamed", "existing": "age", "new": "years" }
+  ],
+  "expected": {
+    "schema": [
+      { "name": "id", "type": "bigint" },
+      { "name": "years", "type": "bigint" },
+      { "name": "name", "type": "string" }
+    ],
+    "rows": [
+      [1, 25, "Alice"],
+      [2, 30, "Bob"]
+    ]
+  }
+}

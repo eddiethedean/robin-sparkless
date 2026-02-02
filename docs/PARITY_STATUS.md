@@ -7,7 +7,7 @@ This doc is the **living parity matrix** for `robin-sparkless`.
 - **Fixtures**: `tests/fixtures/*.json`
 - **Sparkless integration**: Robin-sparkless is designed to replace Sparkless's backend. Sparkless has 270+ expected_outputs; a fixture converter can convert those to robin-sparkless format. See [SPARKLESS_INTEGRATION_ANALYSIS.md](SPARKLESS_INTEGRATION_ANALYSIS.md) §4.
 
-Status as of **February 2026**: **PASSING (43 fixtures)**.
+Status as of **February 2026**: **PASSING (51 fixtures)**.
 
 ## Legend
 
@@ -55,6 +55,14 @@ Status as of **February 2026**: **PASSING (43 fixtures)**.
 | Strings | upper, lower, substring, concat, concat_ws | ✅ Covered | `string_upper_lower`, `string_substring`, `string_concat` |
 | Strings | length, trim, ltrim, rtrim, regexp_extract, regexp_replace, split, initcap | ✅ Covered | `string_length_trim` |
 | Config | `spark.sql.caseSensitive` (case-insensitive column resolution) | ✅ Covered | `case_insensitive_columns` |
+| DataFrame | `union` / `unionAll` | ✅ Covered | `union_all` |
+| DataFrame | `unionByName` | ✅ Covered | `union_by_name` |
+| DataFrame | `distinct` / `dropDuplicates` | ✅ Covered | `distinct` |
+| DataFrame | `drop` (columns) | ✅ Covered | `drop_columns` |
+| DataFrame | `dropna` | ✅ Covered | `dropna` |
+| DataFrame | `fillna` (single value) | ✅ Covered | `fillna` |
+| DataFrame | `limit` | ✅ Covered | `limit` |
+| DataFrame | `withColumnRenamed` | ✅ Covered | `with_column_renamed` |
 | SQL | `SparkSession::sql()` | ❌ Not implemented | — |
 
 ## Fixture Index
@@ -104,6 +112,14 @@ Status as of **February 2026**: **PASSING (43 fixtures)**.
 | `string_substring` | substring() 1-based |
 | `string_concat` | concat(), concat_ws() |
 | `string_length_trim` | length(), trim() in withColumn |
+| `union_all` | union (vertical stack, same schema) |
+| `union_by_name` | unionByName (align columns by name) |
+| `distinct` | distinct (drop duplicate rows) |
+| `drop_columns` | drop(columns) |
+| `dropna` | dropna (drop rows with nulls) |
+| `fillna` | fillna (fill nulls with value) |
+| `limit` | limit(n) |
+| `with_column_renamed` | withColumnRenamed(old, new) |
 
 ## Next additions to the matrix (recommended)
 

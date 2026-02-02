@@ -128,7 +128,10 @@ impl SparkSession {
         cols.push(Series::new(column_names[2].into(), col2));
 
         let pl_df = PlDataFrame::new(cols.iter().map(|s| s.clone().into()).collect())?;
-        Ok(DataFrame::from_polars_with_options(pl_df, self.is_case_sensitive()))
+        Ok(DataFrame::from_polars_with_options(
+            pl_df,
+            self.is_case_sensitive(),
+        ))
     }
 
     /// Create a DataFrame from a Polars DataFrame

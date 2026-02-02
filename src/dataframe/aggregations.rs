@@ -1,7 +1,7 @@
 //! GroupBy and aggregation operations.
 
 use super::DataFrame;
-use polars::prelude::{col, len, DataFrame as PlDataFrame, Expr, LazyGroupBy, PolarsError};
+use polars::prelude::{DataFrame as PlDataFrame, Expr, LazyGroupBy, PolarsError};
 
 /// GroupedData - represents a DataFrame grouped by certain columns.
 /// Similar to PySpark's GroupedData
@@ -19,7 +19,10 @@ impl GroupedData {
         let lf = self.lazy_grouped.clone().agg(agg_expr);
         let mut pl_df = lf.collect()?;
         pl_df = reorder_groupby_columns(&mut pl_df, &self.grouping_cols)?;
-        Ok(super::DataFrame::from_polars_with_options(pl_df, self.case_sensitive))
+        Ok(super::DataFrame::from_polars_with_options(
+            pl_df,
+            self.case_sensitive,
+        ))
     }
 
     /// Sum a column in each group
@@ -48,7 +51,10 @@ impl GroupedData {
         if !reordered_cols.is_empty() {
             pl_df = pl_df.select(reordered_cols)?;
         }
-        Ok(super::DataFrame::from_polars_with_options(pl_df, self.case_sensitive))
+        Ok(super::DataFrame::from_polars_with_options(
+            pl_df,
+            self.case_sensitive,
+        ))
     }
 
     /// Average (mean) of a column in each group
@@ -58,7 +64,10 @@ impl GroupedData {
         let lf = self.lazy_grouped.clone().agg(agg_expr);
         let mut pl_df = lf.collect()?;
         pl_df = reorder_groupby_columns(&mut pl_df, &self.grouping_cols)?;
-        Ok(super::DataFrame::from_polars_with_options(pl_df, self.case_sensitive))
+        Ok(super::DataFrame::from_polars_with_options(
+            pl_df,
+            self.case_sensitive,
+        ))
     }
 
     /// Minimum value of a column in each group
@@ -68,7 +77,10 @@ impl GroupedData {
         let lf = self.lazy_grouped.clone().agg(agg_expr);
         let mut pl_df = lf.collect()?;
         pl_df = reorder_groupby_columns(&mut pl_df, &self.grouping_cols)?;
-        Ok(super::DataFrame::from_polars_with_options(pl_df, self.case_sensitive))
+        Ok(super::DataFrame::from_polars_with_options(
+            pl_df,
+            self.case_sensitive,
+        ))
     }
 
     /// Maximum value of a column in each group
@@ -78,7 +90,10 @@ impl GroupedData {
         let lf = self.lazy_grouped.clone().agg(agg_expr);
         let mut pl_df = lf.collect()?;
         pl_df = reorder_groupby_columns(&mut pl_df, &self.grouping_cols)?;
-        Ok(super::DataFrame::from_polars_with_options(pl_df, self.case_sensitive))
+        Ok(super::DataFrame::from_polars_with_options(
+            pl_df,
+            self.case_sensitive,
+        ))
     }
 
     /// Apply multiple aggregations at once (generic agg method)
@@ -86,7 +101,10 @@ impl GroupedData {
         let lf = self.lazy_grouped.clone().agg(aggregations);
         let mut pl_df = lf.collect()?;
         pl_df = reorder_groupby_columns(&mut pl_df, &self.grouping_cols)?;
-        Ok(super::DataFrame::from_polars_with_options(pl_df, self.case_sensitive))
+        Ok(super::DataFrame::from_polars_with_options(
+            pl_df,
+            self.case_sensitive,
+        ))
     }
 
     /// Get grouping columns

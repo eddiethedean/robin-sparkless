@@ -103,7 +103,7 @@ The path to full backend replacement is planned in [FULL_BACKEND_ROADMAP.md](FUL
 
 - **Phase 1 – Foundation**: Structural alignment (split dataframe.rs), case sensitivity, fixture converter. *Prereqs done: joins, windows, strings.*
 - **Phase 2 – High-Value Functions**: String (length, trim, regexp_*), datetime (to_date, date_add), math (stddev, variance)
-- **Phase 3 – DataFrame Methods**: union, distinct, drop, fillna, limit
+- **Phase 3 – DataFrame Methods**: union, unionByName, distinct, drop, dropna, fillna, limit, withColumnRenamed ✅ **COMPLETED**
 - **Phase 4 – PyO3 Bridge**: Python bindings for Sparkless to call robin-sparkless
 - **Phase 5 – Test Conversion**: Fixture converter; convert 50+ Sparkless tests; CI integration
 - **Phase 6 – Broad Parity**: Array, Map, JSON, remaining functions (~200)
@@ -113,7 +113,7 @@ The path to full backend replacement is planned in [FULL_BACKEND_ROADMAP.md](FUL
 
 We know we're on track if:
 
-- ✅ **Behavioral parity**: For core operations (filter, select, orderBy, groupBy+count/sum/avg/min/max/agg, when/coalesce, basic type coercion, null semantics, joins, window functions, string functions) and file readers (CSV/Parquet/JSON), PySpark and Robin Sparkless produce the same schema and data on test fixtures. **Status: PASSING (36 fixtures)**
+- ✅ **Behavioral parity**: For core operations (filter, select, orderBy, groupBy+count/sum/avg/min/max/agg, when/coalesce, basic type coercion, null semantics, joins, window functions, string functions), DataFrame methods (union, distinct, drop, dropna, fillna, limit, withColumnRenamed), and file readers (CSV/Parquet/JSON), PySpark and Robin Sparkless produce the same schema and data on test fixtures. **Status: PASSING (51 fixtures)**
 - ⚠️ **Documentation of differences**: Any divergence from PySpark semantics should be called out explicitly. **Status: TO BE DOCUMENTED**
 - ⚠️ **Performance envelope**: For supported operations, we stay within a small constant factor of doing the same thing directly in Polars. **Status: NOT YET BENCHMARKED**
 
@@ -121,9 +121,9 @@ We know we're on track if:
 
 | Metric | Current | Phase 5 | Full Backend |
 |--------|---------|---------|--------------|
-| Parity fixtures | 36 | 80+ | 150+ |
+| Parity fixtures | 51 | 80+ | 150+ |
 | Functions | ~25 | ~120 | 250+ |
-| DataFrame methods | ~15 | ~40 | 60+ |
+| DataFrame methods | ~25 | ~40 | 60+ |
 | Sparkless tests passing (robin backend) | 0 | 50+ | 200+ |
 | PyO3 bridge | No | Yes | Yes |
 
@@ -144,7 +144,8 @@ We know we're on track if:
 - ✅ Numeric type coercion for int/double comparisons and simple arithmetic
 - ✅ Window functions: `Column::rank()`, `row_number()`, `dense_rank()`, `lag()`, `lead()` with `.over(partition_by)`
 - ✅ String functions: `upper()`, `lower()`, `substring()`, `concat()`, `concat_ws()`
-- ✅ Parity test harness with 36 passing fixtures:
+- ✅ DataFrame methods: `union`, `union_by_name`, `distinct`, `drop`, `dropna`, `fillna`, `limit`, `with_column_renamed`
+- ✅ Parity test harness with 51 passing fixtures:
   - `filter_age_gt_30`: filter + select + orderBy
   - `filter_and_or`: nested boolean logic with AND/OR and parentheses
   - `filter_nested`: nested boolean logic
@@ -171,10 +172,11 @@ We know we're on track if:
   - `groupby_multi_agg`: multiple aggregations in one agg() call
   - `row_number_window`, `rank_window`, `lag_lead_window`: window functions
   - `string_upper_lower`, `string_substring`, `string_concat`: string functions
+  - `union_all`, `union_by_name`, `distinct`, `drop_columns`, `dropna`, `fillna`, `limit`, `with_column_renamed`: DataFrame methods
 
 **Next Priority** (per [FULL_BACKEND_ROADMAP.md](FULL_BACKEND_ROADMAP.md)):
-- Phase 1: Structural alignment (split dataframe.rs), case sensitivity, fixture converter
-- Phase 2: High-value functions (length, trim, regexp_extract, to_date, date_add, stddev, variance)
+- Phase 4: PyO3 bridge (Python bindings for Sparkless)
+- Phase 5: Test conversion (convert 50+ Sparkless tests)
 
 ## Testing Strategy
 

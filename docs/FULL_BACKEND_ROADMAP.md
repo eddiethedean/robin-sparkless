@@ -11,8 +11,8 @@ This document plans the path for **robin-sparkless** to become a complete backen
 | Area | Robin-Sparkless | Sparkless | Gap |
 |------|-----------------|-----------|-----|
 | **Functions** | ~25 (col, lit, count, sum, avg, min, max, when, coalesce, upper, lower, substring, concat, concat_ws, row_number, rank, dense_rank, lag, lead) | 403 | ~378 |
-| **DataFrame methods** | ~15 (filter, select, orderBy, groupBy, withColumn, join, collect, count, show, read_csv, read_parquet, read_json) | 85 | ~70 |
-| **Parity fixtures** | 36 passing | 270+ expected_outputs | 234+ |
+| **DataFrame methods** | ~25 (filter, select, orderBy, groupBy, withColumn, join, union, unionByName, distinct, drop, dropna, fillna, limit, withColumnRenamed, collect, count, show, read_csv, read_parquet, read_json) | 85 | ~60 |
+| **Parity fixtures** | 51 passing | 270+ expected_outputs | 219+ |
 | **SQL** | Not implemented | Full DDL/DML support | Full |
 
 ---
@@ -118,20 +118,20 @@ This document plans the path for **robin-sparkless** to become a complete backen
 
 ---
 
-## Phase 3: DataFrame Methods (3–4 weeks)
+## Phase 3: DataFrame Methods (3–4 weeks) ✅ **COMPLETED**
 
 **Goal**: Implement methods needed for Sparkless DataFrame pipelines.
 
-| Method | Polars API | Priority |
-|--------|------------|----------|
-| `union` / `unionAll` | `LazyFrame.vstack()` | High |
-| `unionByName` | `concat` with schema alignment | High |
-| `distinct` / `dropDuplicates` | `LazyFrame.unique()` | High |
-| `drop` | `LazyFrame.drop()` | High |
-| `dropna` | `LazyFrame.drop_nulls()` | High |
-| `fillna` | `LazyFrame.fill_null()` | High |
-| `limit` | `LazyFrame.fetch()` / `slice()` | High |
-| `withColumnRenamed` | `LazyFrame.rename()` | High |
+| Method | Polars API | Status |
+|--------|------------|--------|
+| `union` / `unionAll` | `concat` (LazyFrame) | ✅ Done |
+| `unionByName` | `concat` with schema alignment by name | ✅ Done |
+| `distinct` / `dropDuplicates` | `LazyFrame.unique()` | ✅ Done |
+| `drop` | `DataFrame.select()` (exclude columns) | ✅ Done |
+| `dropna` | `LazyFrame.drop_nulls()` | ✅ Done |
+| `fillna` | `LazyFrame.with_columns` + `fill_null` | ✅ Done |
+| `limit` | `DataFrame.head(n)` | ✅ Done |
+| `withColumnRenamed` | `DataFrame.rename()` | ✅ Done |
 | `replace` | `LazyFrame.replace()` | Medium |
 | `crossJoin` | `LazyFrame.join(..., how=Cross)` | Medium |
 | `describe` | `LazyFrame.describe()` | Medium |
@@ -255,9 +255,9 @@ This document plans the path for **robin-sparkless** to become a complete backen
 
 | Metric | Current | Phase 2 | Phase 5 | Full Backend |
 |--------|---------|---------|---------|--------------|
-| Parity fixtures | 36 | 60+ | 80+ | 150+ |
+| Parity fixtures | 51 | 60+ | 80+ | 150+ |
 | Functions implemented | ~25 | ~85 | ~120 | 250+ |
-| DataFrame methods | ~15 | ~25 | ~40 | 60+ |
+| DataFrame methods | ~25 | ~25 | ~40 | 60+ |
 | Sparkless tests passing (robin backend) | 0 | — | 50+ | 200+ |
 | PyO3 bridge | No | No | Yes | Yes |
 
@@ -265,9 +265,9 @@ This document plans the path for **robin-sparkless** to become a complete backen
 
 ## Implementation Order (Summary)
 
-1. **Phase 1**: Fixture converter, case sensitivity, structural split
-2. **Phase 2**: String (length, trim, regexp_*), datetime (to_date, date_add, etc.), math (stddev, variance)
-3. **Phase 3**: union, distinct, drop, fillna, limit
+1. **Phase 1**: Fixture converter, case sensitivity, structural split ✅
+2. **Phase 2**: String (length, trim, regexp_*), datetime (to_date, date_add, etc.), math (stddev, variance) ✅
+3. **Phase 3**: union, unionByName, distinct, drop, dropna, fillna, limit, withColumnRenamed ✅
 4. **Phase 4**: PyO3 bridge (can start in parallel with Phase 2/3)
 5. **Phase 5**: Convert Sparkless tests, CI integration
 6. **Phase 6**: Array, Map, JSON, remaining string/window

@@ -295,10 +295,7 @@ impl Column {
     /// Trim leading and trailing whitespace (PySpark trim)
     pub fn trim(&self) -> Column {
         use polars::prelude::*;
-        Self::from_expr(
-            self.expr().clone().str().strip_chars(lit(" \t\n\r")),
-            None,
-        )
+        Self::from_expr(self.expr().clone().str().strip_chars(lit(" \t\n\r")), None)
     }
 
     /// Trim leading whitespace (PySpark ltrim)
@@ -324,10 +321,7 @@ impl Column {
         use polars::prelude::*;
         let pat = pattern.to_string();
         Self::from_expr(
-            self.expr()
-                .clone()
-                .str()
-                .extract(lit(pat), group_index),
+            self.expr().clone().str().extract(lit(pat), group_index),
             None,
         )
     }
@@ -338,10 +332,7 @@ impl Column {
         let pat = pattern.to_string();
         let rep = replacement.to_string();
         Self::from_expr(
-            self.expr()
-                .clone()
-                .str()
-                .replace(lit(pat), lit(rep), false),
+            self.expr().clone().str().replace(lit(pat), lit(rep), false),
             None,
         )
     }

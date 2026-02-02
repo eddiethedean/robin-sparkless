@@ -79,6 +79,28 @@ enum Operation {
         #[serde(default)]
         value_column: Option<String>, // for lag/lead: column to shift
     },
+    #[serde(rename = "union")]
+    Union {},
+    #[serde(rename = "unionByName")]
+    UnionByName {},
+    #[serde(rename = "distinct")]
+    Distinct {
+        #[serde(default)]
+        subset: Option<Vec<String>>,
+    },
+    #[serde(rename = "drop")]
+    Drop { columns: Vec<String> },
+    #[serde(rename = "dropna")]
+    Dropna {
+        #[serde(default)]
+        subset: Option<Vec<String>>,
+    },
+    #[serde(rename = "fillna")]
+    Fillna { value: serde_json::Value },
+    #[serde(rename = "limit")]
+    Limit { n: u64 },
+    #[serde(rename = "withColumnRenamed")]
+    WithColumnRenamed { existing: String, new: String },
 }
 
 #[derive(Debug, Deserialize)]
@@ -547,7 +569,9 @@ fn apply_operations(
                                     "count_distinct aggregation requires column name".into(),
                                 )
                             })?;
-                            let e = col(col_name).n_unique().cast(polars::prelude::DataType::Int64);
+                            let e = col(col_name)
+                                .n_unique()
+                                .cast(polars::prelude::DataType::Int64);
                             let name: String = alias
                                 .filter(|a| *a != "count_distinct")
                                 .map(String::from)
@@ -646,6 +670,86 @@ fn apply_operations(
                     }
                 };
                 df = df.with_column(col_name, window_expr.into_expr())?;
+            }
+            Operation::Union {} => {
+                if grouped.is_some() {
+                    return Err(PolarsError::ComputeError(
+                        "union cannot be applied after groupBy".into(),
+                    ));
+                }
+                let right_df = right.take().ok_or_else(|| {
+                    PolarsError::ComputeError("union requires right_input in fixture".into())
+                })?;
+                df = df.union(&right_df)?;
+            }
+            Operation::UnionByName {} => {
+                if grouped.is_some() {
+                    return Err(PolarsError::ComputeError(
+                        "unionByName cannot be applied after groupBy".into(),
+                    ));
+                }
+                let right_df = right.take().ok_or_else(|| {
+                    PolarsError::ComputeError("unionByName requires right_input in fixture".into())
+                })?;
+                df = df.union_by_name(&right_df)?;
+            }
+            Operation::Distinct { subset } => {
+                if grouped.is_some() {
+                    return Err(PolarsError::ComputeError(
+                        "distinct cannot be applied after groupBy".into(),
+                    ));
+                }
+                let subset_refs: Option<Vec<&str>> = subset
+                    .as_ref()
+                    .map(|s| s.iter().map(|x| x.as_str()).collect());
+                df = df.distinct(subset_refs)?;
+            }
+            Operation::Drop { columns } => {
+                if grouped.is_some() {
+                    return Err(PolarsError::ComputeError(
+                        "drop cannot be applied after groupBy".into(),
+                    ));
+                }
+                let cols: Vec<&str> = columns.iter().map(|s| s.as_str()).collect();
+                df = df.drop(cols)?;
+            }
+            Operation::Dropna { subset } => {
+                if grouped.is_some() {
+                    return Err(PolarsError::ComputeError(
+                        "dropna cannot be applied after groupBy".into(),
+                    ));
+                }
+                let subset_refs: Option<Vec<&str>> = subset
+                    .as_ref()
+                    .map(|s| s.iter().map(|x| x.as_str()).collect());
+                df = df.dropna(subset_refs)?;
+            }
+            Operation::Fillna { value } => {
+                if grouped.is_some() {
+                    return Err(PolarsError::ComputeError(
+                        "fillna cannot be applied after groupBy".into(),
+                    ));
+                }
+                let fill_expr = json_value_to_lit(value).map_err(|e| {
+                    PolarsError::ComputeError(format!("fillna value not supported: {}", e).into())
+                })?;
+                df = df.fillna(fill_expr)?;
+            }
+            Operation::Limit { n } => {
+                if grouped.is_some() {
+                    return Err(PolarsError::ComputeError(
+                        "limit cannot be applied after groupBy".into(),
+                    ));
+                }
+                df = df.limit(*n as usize)?;
+            }
+            Operation::WithColumnRenamed { existing, new } => {
+                if grouped.is_some() {
+                    return Err(PolarsError::ComputeError(
+                        "withColumnRenamed cannot be applied after groupBy".into(),
+                    ));
+                }
+                df = df.with_column_renamed(existing, new)?;
             }
         }
     }
@@ -853,7 +957,8 @@ fn parse_comparison_expr(
 
     let col_name_raw = &s[quote1 + 1..quote2];
     let col_name: String = if let Some(df) = df_opt {
-        df.resolve_column_name(col_name_raw).map_err(|e| e.to_string())?
+        df.resolve_column_name(col_name_raw)
+            .map_err(|e| e.to_string())?
     } else {
         col_name_raw.to_string()
     };
@@ -941,7 +1046,8 @@ fn parse_comparison_expr(
         let right_col_name_raw =
             &right_side[right_quote_start + 1..right_quote_start + 1 + right_quote_end];
         let right_col_name: String = if let Some(df) = df_opt {
-            df.resolve_column_name(right_col_name_raw).map_err(|e| e.to_string())?
+            df.resolve_column_name(right_col_name_raw)
+                .map_err(|e| e.to_string())?
         } else {
             right_col_name_raw.to_string()
         };
@@ -1092,6 +1198,26 @@ fn parse_column_or_literal_for_concat(part: &str) -> Result<robin_sparkless::Col
         Ok(lit_i64(num))
     } else {
         Err(format!("unexpected part: {}", part))
+    }
+}
+
+/// Convert a JSON value to a Polars literal Expr for fillna.
+fn json_value_to_lit(v: &serde_json::Value) -> Result<Expr, String> {
+    use polars::prelude::LiteralValue;
+    match v {
+        serde_json::Value::Number(n) => {
+            if let Some(i) = n.as_i64() {
+                Ok(lit(i))
+            } else if let Some(f) = n.as_f64() {
+                Ok(lit(f))
+            } else {
+                Err("unsupported number for fillna".to_string())
+            }
+        }
+        serde_json::Value::String(s) => Ok(lit(s.as_str())),
+        serde_json::Value::Bool(b) => Ok(lit(*b)),
+        serde_json::Value::Null => Ok(Expr::Literal(LiteralValue::Null)),
+        _ => Err("unsupported type for fillna (array/object)".to_string()),
     }
 }
 
@@ -1875,7 +2001,8 @@ fn types_compatible(actual: &str, expected: &str) -> bool {
         return true;
     }
     // Allow UInt32/uint32 to match with each other or with bigint (common for count/length)
-    if (actual == "UInt32" || actual == "uint32") && (expected == "UInt32" || expected == "uint32") {
+    if (actual == "UInt32" || actual == "uint32") && (expected == "UInt32" || expected == "uint32")
+    {
         return true;
     }
     if (actual == "UInt32" || actual == "uint32") && int_types.contains(&expected) {

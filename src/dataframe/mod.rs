@@ -176,6 +176,50 @@ impl DataFrame {
         let refs: Vec<&str> = resolved.iter().map(|s| s.as_str()).collect();
         transformations::order_by(self, refs, ascending, self.case_sensitive)
     }
+
+    /// Union (unionAll): stack another DataFrame vertically. Schemas must match (same columns, same order).
+    pub fn union(&self, other: &DataFrame) -> Result<DataFrame, PolarsError> {
+        transformations::union(self, other, self.case_sensitive)
+    }
+
+    /// Union by name: stack vertically, aligning columns by name.
+    pub fn union_by_name(&self, other: &DataFrame) -> Result<DataFrame, PolarsError> {
+        transformations::union_by_name(self, other, self.case_sensitive)
+    }
+
+    /// Distinct: drop duplicate rows (all columns or optional subset).
+    pub fn distinct(&self, subset: Option<Vec<&str>>) -> Result<DataFrame, PolarsError> {
+        transformations::distinct(self, subset, self.case_sensitive)
+    }
+
+    /// Drop one or more columns.
+    pub fn drop(&self, columns: Vec<&str>) -> Result<DataFrame, PolarsError> {
+        transformations::drop(self, columns, self.case_sensitive)
+    }
+
+    /// Drop rows with nulls (all columns or optional subset).
+    pub fn dropna(&self, subset: Option<Vec<&str>>) -> Result<DataFrame, PolarsError> {
+        transformations::dropna(self, subset, self.case_sensitive)
+    }
+
+    /// Fill nulls with a literal expression (applied to all columns).
+    pub fn fillna(&self, value: Expr) -> Result<DataFrame, PolarsError> {
+        transformations::fillna(self, value, self.case_sensitive)
+    }
+
+    /// Limit: return first n rows.
+    pub fn limit(&self, n: usize) -> Result<DataFrame, PolarsError> {
+        transformations::limit(self, n, self.case_sensitive)
+    }
+
+    /// Rename a column (old_name -> new_name).
+    pub fn with_column_renamed(
+        &self,
+        old_name: &str,
+        new_name: &str,
+    ) -> Result<DataFrame, PolarsError> {
+        transformations::with_column_renamed(self, old_name, new_name, self.case_sensitive)
+    }
 }
 
 impl Clone for DataFrame {
