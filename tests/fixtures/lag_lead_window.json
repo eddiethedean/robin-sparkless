@@ -1,0 +1,158 @@
+{
+  "name": "lag_lead_window",
+  "pyspark_version": "3.5.0",
+  "input": {
+    "schema": [
+      {
+        "name": "id",
+        "type": "bigint"
+      },
+      {
+        "name": "dept",
+        "type": "string"
+      },
+      {
+        "name": "val",
+        "type": "bigint"
+      }
+    ],
+    "rows": [
+      [
+        1,
+        "A",
+        10
+      ],
+      [
+        2,
+        "A",
+        20
+      ],
+      [
+        3,
+        "A",
+        30
+      ],
+      [
+        4,
+        "B",
+        40
+      ],
+      [
+        5,
+        "B",
+        50
+      ]
+    ]
+  },
+  "operations": [
+    {
+      "op": "orderBy",
+      "columns": [
+        "id"
+      ],
+      "ascending": [
+        true
+      ]
+    },
+    {
+      "op": "window",
+      "column": "lag_val",
+      "func": "lag",
+      "partition_by": [
+        "dept"
+      ],
+      "order_by": [
+        {
+          "col": "id",
+          "asc": true
+        }
+      ],
+      "value_column": "val"
+    },
+    {
+      "op": "window",
+      "column": "lead_val",
+      "func": "lead",
+      "partition_by": [
+        "dept"
+      ],
+      "order_by": [
+        {
+          "col": "id",
+          "asc": true
+        }
+      ],
+      "value_column": "val"
+    },
+    {
+      "op": "orderBy",
+      "columns": [
+        "id"
+      ],
+      "ascending": [
+        true
+      ]
+    }
+  ],
+  "expected": {
+    "schema": [
+      {
+        "name": "id",
+        "type": "bigint"
+      },
+      {
+        "name": "dept",
+        "type": "string"
+      },
+      {
+        "name": "val",
+        "type": "bigint"
+      },
+      {
+        "name": "lag_val",
+        "type": "bigint"
+      },
+      {
+        "name": "lead_val",
+        "type": "bigint"
+      }
+    ],
+    "rows": [
+      [
+        1,
+        "A",
+        10,
+        null,
+        20
+      ],
+      [
+        2,
+        "A",
+        20,
+        10,
+        30
+      ],
+      [
+        3,
+        "A",
+        30,
+        20,
+        null
+      ],
+      [
+        4,
+        "B",
+        40,
+        null,
+        50
+      ],
+      [
+        5,
+        "B",
+        50,
+        40,
+        null
+      ]
+    ]
+  }
+}

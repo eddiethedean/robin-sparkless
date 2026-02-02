@@ -1,7 +1,9 @@
 use std::fs;
 use std::path::Path;
 
-use polars::prelude::{col, lit, DataFrame as PlDataFrame, Expr, NamedFrom, PolarsError, Series};
+use polars::prelude::{
+    col, len, lit, DataFrame as PlDataFrame, Expr, NamedFrom, PolarsError, Series,
+};
 use robin_sparkless::{DataFrame, JoinType, SparkSession};
 use serde::Deserialize;
 use serde_json::Value;
@@ -67,6 +69,23 @@ enum Operation {
     WithColumn { column: String, expr: String },
     #[serde(rename = "join")]
     Join { on: Vec<String>, how: String },
+    #[serde(rename = "window")]
+    Window {
+        column: String, // output column name
+        func: String,
+        partition_by: Vec<String>,
+        #[serde(default)]
+        order_by: Option<Vec<OrderBySpec>>,
+        #[serde(default)]
+        value_column: Option<String>, // for lag/lead: column to shift
+    },
+}
+
+#[derive(Debug, Deserialize)]
+struct OrderBySpec {
+    col: String,
+    #[serde(default)]
+    asc: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -426,47 +445,84 @@ fn apply_operations(
                     PolarsError::ComputeError("agg requires a preceding groupBy".into())
                 })?;
 
-                // Support count, sum, avg, min, max aggregations
-                if aggregations.len() != 1 {
-                    return Err(PolarsError::ComputeError(
-                        format!("only single aggregation supported, got: {:?}", aggregations)
-                            .into(),
-                    ));
+                // Build Vec<Expr> for count, sum, avg, min, max (single or multiple)
+                let mut agg_exprs: Vec<Expr> = Vec::with_capacity(aggregations.len());
+                for agg_spec in aggregations {
+                    let alias = if agg_spec.alias.is_empty() {
+                        None
+                    } else {
+                        Some(agg_spec.alias.as_str())
+                    };
+                    let expr = match agg_spec.func.as_str() {
+                        "count" => {
+                            let e = len();
+                            match alias {
+                                Some(a) => e.alias(a),
+                                None => e.alias("count"),
+                            }
+                        }
+                        "sum" => {
+                            let col_name = agg_spec.column.as_ref().ok_or_else(|| {
+                                PolarsError::ComputeError(
+                                    "sum aggregation requires column name".into(),
+                                )
+                            })?;
+                            let e = col(col_name).sum();
+                            // PySpark sum(col) returns "sum(col)"; use alias only if custom
+                            let name: String = alias
+                                .filter(|a| *a != "sum")
+                                .map(String::from)
+                                .unwrap_or_else(|| format!("sum({})", col_name));
+                            e.alias(&name)
+                        }
+                        "avg" => {
+                            let col_name = agg_spec.column.as_ref().ok_or_else(|| {
+                                PolarsError::ComputeError(
+                                    "avg aggregation requires column name".into(),
+                                )
+                            })?;
+                            let e = col(col_name).mean();
+                            let name: String = alias
+                                .filter(|a| *a != "avg")
+                                .map(String::from)
+                                .unwrap_or_else(|| format!("avg({})", col_name));
+                            e.alias(&name)
+                        }
+                        "min" => {
+                            let col_name = agg_spec.column.as_ref().ok_or_else(|| {
+                                PolarsError::ComputeError(
+                                    "min aggregation requires column name".into(),
+                                )
+                            })?;
+                            let e = col(col_name).min();
+                            let name: String = alias
+                                .filter(|a| *a != "min")
+                                .map(String::from)
+                                .unwrap_or_else(|| format!("min({})", col_name));
+                            e.alias(&name)
+                        }
+                        "max" => {
+                            let col_name = agg_spec.column.as_ref().ok_or_else(|| {
+                                PolarsError::ComputeError(
+                                    "max aggregation requires column name".into(),
+                                )
+                            })?;
+                            let e = col(col_name).max();
+                            let name: String = alias
+                                .filter(|a| *a != "max")
+                                .map(String::from)
+                                .unwrap_or_else(|| format!("max({})", col_name));
+                            e.alias(&name)
+                        }
+                        other => {
+                            return Err(PolarsError::ComputeError(
+                                format!("unsupported aggregation function: {}", other).into(),
+                            ));
+                        }
+                    };
+                    agg_exprs.push(expr);
                 }
-
-                let agg_spec = &aggregations[0];
-                df = match agg_spec.func.as_str() {
-                    "count" => gd.count()?,
-                    "sum" => {
-                        let col_name = agg_spec.column.as_ref().ok_or_else(|| {
-                            PolarsError::ComputeError("sum aggregation requires column name".into())
-                        })?;
-                        gd.sum(col_name)?
-                    }
-                    "avg" => {
-                        let col_name = agg_spec.column.as_ref().ok_or_else(|| {
-                            PolarsError::ComputeError("avg aggregation requires column name".into())
-                        })?;
-                        gd.avg(col_name)?
-                    }
-                    "min" => {
-                        let col_name = agg_spec.column.as_ref().ok_or_else(|| {
-                            PolarsError::ComputeError("min aggregation requires column name".into())
-                        })?;
-                        gd.min(col_name)?
-                    }
-                    "max" => {
-                        let col_name = agg_spec.column.as_ref().ok_or_else(|| {
-                            PolarsError::ComputeError("max aggregation requires column name".into())
-                        })?;
-                        gd.max(col_name)?
-                    }
-                    other => {
-                        return Err(PolarsError::ComputeError(
-                            format!("unsupported aggregation function: {}", other).into(),
-                        ));
-                    }
-                };
+                df = gd.agg(agg_exprs)?;
                 grouped = None; // Aggregation consumes the GroupedData
             }
             Operation::Join { on, how } => {
@@ -501,6 +557,55 @@ fn apply_operations(
                     )
                 })?;
                 df = df.with_column(&column, parsed_expr)?;
+            }
+            Operation::Window {
+                column: col_name,
+                func,
+                partition_by,
+                order_by,
+                value_column,
+            } => {
+                if grouped.is_some() {
+                    return Err(PolarsError::ComputeError(
+                        "window cannot be applied after groupBy".into(),
+                    ));
+                }
+                let partition_refs: Vec<&str> = partition_by.iter().map(|s| s.as_str()).collect();
+                let order_col = order_by
+                    .as_ref()
+                    .and_then(|ob| ob.first())
+                    .map(|o| o.col.as_str())
+                    .unwrap_or_else(|| partition_refs.first().copied().unwrap_or(""));
+                let descending = order_by
+                    .as_ref()
+                    .and_then(|ob| ob.first())
+                    .map(|o| !o.asc)
+                    .unwrap_or(false);
+                let window_expr = match func.as_str() {
+                    "row_number" => robin_sparkless::col(order_col)
+                        .row_number(descending)
+                        .over(&partition_refs),
+                    "rank" => robin_sparkless::col(order_col)
+                        .rank(descending)
+                        .over(&partition_refs),
+                    "dense_rank" => robin_sparkless::col(order_col)
+                        .dense_rank(descending)
+                        .over(&partition_refs),
+                    "lag" => {
+                        let val_col = value_column.as_deref().unwrap_or(order_col);
+                        robin_sparkless::col(val_col).lag(1).over(&partition_refs)
+                    }
+                    "lead" => {
+                        let val_col = value_column.as_deref().unwrap_or(order_col);
+                        robin_sparkless::col(val_col).lead(1).over(&partition_refs)
+                    }
+                    other => {
+                        return Err(PolarsError::ComputeError(
+                            format!("unsupported window function: {}", other).into(),
+                        ));
+                    }
+                };
+                df = df.with_column(col_name, window_expr.into_expr())?;
             }
         }
     }

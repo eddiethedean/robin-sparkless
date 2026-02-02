@@ -1,4 +1,4 @@
-use polars::prelude::{col, Expr};
+use polars::prelude::{col, Expr, RankMethod, RankOptions};
 
 /// Column - represents a column in a DataFrame, used for building expressions
 /// Thin wrapper around Polars `Expr`.
@@ -261,6 +261,52 @@ impl Column {
     /// Inequality comparison
     pub fn neq(&self, other: Expr) -> Column {
         Self::from_expr(self.expr().clone().neq(other), None)
+    }
+
+    // --- Window functions ---
+
+    /// Apply window partitioning. Returns a new Column with `.over(partition_by)`.
+    /// Use after rank(), dense_rank(), row_number(), lag(), lead().
+    pub fn over(&self, partition_by: &[&str]) -> Column {
+        let partition_exprs: Vec<Expr> = partition_by.iter().map(|s| col(*s)).collect();
+        Self::from_expr(self.expr().clone().over(partition_exprs), None)
+    }
+
+    /// Rank (with ties, gaps). Use with `.over(partition_by)`.
+    pub fn rank(&self, descending: bool) -> Column {
+        let opts = RankOptions {
+            method: RankMethod::Min,
+            descending,
+        };
+        Self::from_expr(self.expr().clone().rank(opts, None), None)
+    }
+
+    /// Dense rank (no gaps). Use with `.over(partition_by)`.
+    pub fn dense_rank(&self, descending: bool) -> Column {
+        let opts = RankOptions {
+            method: RankMethod::Dense,
+            descending,
+        };
+        Self::from_expr(self.expr().clone().rank(opts, None), None)
+    }
+
+    /// Row number (1, 2, 3 by this column's order). Use with `.over(partition_by)`.
+    pub fn row_number(&self, descending: bool) -> Column {
+        let opts = RankOptions {
+            method: RankMethod::Ordinal,
+            descending,
+        };
+        Self::from_expr(self.expr().clone().rank(opts, None), None)
+    }
+
+    /// Lag: value from n rows before. Use with `.over(partition_by)`.
+    pub fn lag(&self, n: i64) -> Column {
+        Self::from_expr(self.expr().clone().shift(polars::prelude::lit(n)), None)
+    }
+
+    /// Lead: value from n rows after. Use with `.over(partition_by)`.
+    pub fn lead(&self, n: i64) -> Column {
+        Self::from_expr(self.expr().clone().shift(polars::prelude::lit(-n)), None)
     }
 }
 

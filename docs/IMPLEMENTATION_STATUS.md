@@ -46,8 +46,9 @@ Robin-sparkless is designed to **replace the backend logic** of [Sparkless](http
    - Expand built-in functions (string/date/math) with explicit PySpark semantics.
    - Add additional type coercion and null-handling edge cases as fixtures.
 
-5. **Window functions and SQL**
-   - Add window functions parity slice.
+5. **Window functions** ✅ **COMPLETED**
+   - ✅ `Column::rank()`, `row_number()`, `dense_rank()`, `lag()`, `lead()` with `.over(partition_by)`
+   - ✅ Parity fixtures: `row_number_window`, `rank_window`, `lag_lead_window`
    - Implement (or explicitly defer) `SparkSession::sql()` with clear documentation.
 
 6. **Sparkless integration**

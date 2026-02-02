@@ -13,11 +13,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `JoinType` enum – Inner, Left, Right, Outer (exported from crate root)
 - Parity test support for join fixtures via `right_input` and `Operation::Join`
 - Four join parity fixtures: `inner_join`, `left_join`, `right_join`, `outer_join`
+- **Multi-aggregation**: `GroupedData::agg()` supports multiple aggregations in one call; `groupby_multi_agg` fixture
+- **Window functions**: `Column::rank()`, `row_number()`, `dense_rank()`, `lag()`, `lead()` with `.over(partition_by)`
+- Parity support for `Operation::Window` with row_number, rank, dense_rank, lag, lead
+- Window fixtures: `row_number_window`, `rank_window`, `lag_lead_window`
 
 ### Changed
 
 - Parity harness now accepts optional `right_input` for multi-DataFrame fixtures
 - Schema comparison allows Polars `_right` suffix for duplicate join column names
+- `GroupedData::agg()` with multiple expressions now reorders columns to match PySpark (grouping cols first)
 
 ### Tooling
 

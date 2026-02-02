@@ -7,7 +7,7 @@ This doc is the **living parity matrix** for `robin-sparkless`.
 - **Fixtures**: `tests/fixtures/*.json`
 - **Sparkless integration**: Robin-sparkless is designed to replace Sparkless's backend. Sparkless has 270+ expected_outputs; a fixture converter can convert those to robin-sparkless format. See [SPARKLESS_INTEGRATION_ANALYSIS.md](SPARKLESS_INTEGRATION_ANALYSIS.md) §4.
 
-Status as of **February 2026**: **PASSING (29 fixtures)**.
+Status as of **February 2026**: **PASSING (33 fixtures)**.
 
 ## Legend
 
@@ -34,7 +34,7 @@ Status as of **February 2026**: **PASSING (29 fixtures)**.
 | GroupBy | `groupBy(...).min()` | ✅ Covered | `groupby_min` |
 | GroupBy | `groupBy(...).max()` | ✅ Covered | `groupby_max` |
 | GroupBy | groupBy with NULL keys | ✅ Covered | `groupby_null_keys` |
-| GroupBy | multi-agg `agg([..])` | 🚧 Not yet covered | (test harness needs update) |
+| GroupBy | multi-agg `agg([..])` | ✅ Covered | `groupby_multi_agg` |
 | DataFrame | `withColumn` (arithmetic) | ✅ Covered | `type_coercion_mixed` |
 | DataFrame | `withColumn` (logical/boolean) | ✅ Covered | `with_logical_column` |
 | DataFrame | `withColumn` (mixed arithmetic + comparison) | ✅ Covered | `with_arithmetic_logical_mix` |
@@ -47,7 +47,7 @@ Status as of **February 2026**: **PASSING (29 fixtures)**.
 | Type coercion | numeric comparison coercion (int vs double) | ✅ Covered | `type_coercion_numeric` |
 | Type coercion | numeric arithmetic coercion (int + double) | ✅ Covered | `type_coercion_mixed` |
 | Joins | inner/left/right/outer joins | ✅ Covered | `inner_join`, `left_join`, `right_join`, `outer_join` |
-| Windows | window functions | ❌ Not implemented | — |
+| Windows | row_number, rank, dense_rank, lag, lead | ✅ Covered | `row_number_window`, `rank_window`, `lag_lead_window` |
 | SQL | `SparkSession::sql()` | ❌ Not implemented | — |
 
 ## Fixture Index
@@ -83,10 +83,13 @@ Status as of **February 2026**: **PASSING (29 fixtures)**.
 | `left_join` | left join + orderBy |
 | `right_join` | right join + orderBy |
 | `outer_join` | outer join + orderBy |
+| `groupby_multi_agg` | groupBy + multiple aggregations in one agg() |
+| `row_number_window` | row_number() over partition by dept order by salary desc |
+| `rank_window` | rank() over partition with ties |
+| `lag_lead_window` | lag and lead over partition |
 
 ## Next additions to the matrix (recommended)
 
-- Update test harness to support **multiple aggregations** in one `agg` call, then add fixture.
 - Add join edge-case fixtures (null keys, duplicate keys).
 - Add string function fixtures (`concat`, `substring`, `lower`, `upper`, etc.).
 

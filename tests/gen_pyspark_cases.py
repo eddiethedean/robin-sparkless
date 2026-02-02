@@ -482,6 +482,54 @@ def case_groupby_max(spark: SparkSession) -> Dict[str, Any]:
     }
 
 
+def case_groupby_multi_agg(spark: SparkSession) -> Dict[str, Any]:
+    """Test groupBy with multiple aggregations in one agg() call."""
+    from pyspark.sql.functions import count, sum as spark_sum, avg
+
+    data = [
+        (1, "Sales", 1000),
+        (2, "Sales", 1500),
+        (3, "Engineering", 2000),
+        (4, "Engineering", 2500),
+        (5, "Sales", 1200),
+    ]
+    df = spark.createDataFrame(data, ["id", "department", "salary"])
+
+    out_df = (
+        df.groupBy("department")
+        .agg(
+            count("*").alias("count"),
+            spark_sum("salary").alias("sum(salary)"),
+            avg("salary").alias("avg(salary)"),
+        )
+        .orderBy("department")
+    )
+
+    input_schema = schema_to_json(df.schema)
+    input_rows = df_to_rows(df)
+    expected_schema = schema_to_json(out_df.schema)
+    expected_rows = df_to_rows(out_df)
+
+    return {
+        "name": "groupby_multi_agg",
+        "pyspark_version": spark.version,
+        "input": {"schema": input_schema, "rows": input_rows},
+        "operations": [
+            {"op": "groupBy", "columns": ["department"]},
+            {
+                "op": "agg",
+                "aggregations": [
+                    {"func": "count", "alias": "count"},
+                    {"func": "sum", "alias": "sum(salary)", "column": "salary"},
+                    {"func": "avg", "alias": "avg(salary)", "column": "salary"},
+                ],
+            },
+            {"op": "orderBy", "columns": ["department"], "ascending": [True]},
+        ],
+        "expected": {"schema": expected_schema, "rows": expected_rows},
+    }
+
+
 def case_groupby_null_keys(spark: SparkSession) -> Dict[str, Any]:
     """Test groupBy with NULL values as grouping keys."""
     from pyspark.sql.types import StructType, StructField, StringType, IntegerType
@@ -1216,6 +1264,106 @@ def case_outer_join(spark: SparkSession) -> Dict[str, Any]:
     }
 
 
+def case_row_number_window(spark: SparkSession) -> Dict[str, Any]:
+    """Test row_number() window: partition by dept, order by salary desc."""
+    from pyspark.sql.functions import col, row_number
+    from pyspark.sql.window import Window
+
+    data = [
+        (1, "Alice", "Sales", 1000),
+        (2, "Bob", "Sales", 1500),
+        (3, "Charlie", "Engineering", 2000),
+        (4, "David", "Engineering", 2500),
+        (5, "Eve", "Sales", 1200),
+    ]
+    df = spark.createDataFrame(data, ["id", "name", "dept", "salary"])
+    window = Window.partitionBy("dept").orderBy(col("salary").desc())
+    out_df = df.withColumn("rn", row_number().over(window)).orderBy("dept", "rn")
+
+    input_schema = schema_to_json(df.schema)
+    input_rows = df_to_rows(df)
+    expected_schema = schema_to_json(out_df.schema)
+    expected_rows = df_to_rows(out_df)
+
+    return {
+        "name": "row_number_window",
+        "pyspark_version": spark.version,
+        "input": {"schema": input_schema, "rows": input_rows},
+        "operations": [
+            {"op": "orderBy", "columns": ["dept", "salary"], "ascending": [True, False]},
+            {"op": "window", "column": "rn", "func": "row_number", "partition_by": ["dept"], "order_by": [{"col": "salary", "asc": False}]},
+            {"op": "orderBy", "columns": ["dept", "rn"], "ascending": [True, True]},
+        ],
+        "expected": {"schema": expected_schema, "rows": expected_rows},
+    }
+
+
+def case_rank_window(spark: SparkSession) -> Dict[str, Any]:
+    """Test rank() window: partition by dept, order by salary desc."""
+    from pyspark.sql.functions import col, rank
+    from pyspark.sql.window import Window
+
+    data = [
+        (1, "Alice", "Sales", 1000),
+        (2, "Bob", "Sales", 1500),
+        (3, "Charlie", "Sales", 1500),
+        (4, "David", "Engineering", 2000),
+    ]
+    df = spark.createDataFrame(data, ["id", "name", "dept", "salary"])
+    window = Window.partitionBy("dept").orderBy(col("salary").desc())
+    out_df = df.withColumn("rank", rank().over(window)).orderBy("dept", "rank")
+
+    input_schema = schema_to_json(df.schema)
+    input_rows = df_to_rows(df)
+    expected_schema = schema_to_json(out_df.schema)
+    expected_rows = df_to_rows(out_df)
+
+    return {
+        "name": "rank_window",
+        "pyspark_version": spark.version,
+        "input": {"schema": input_schema, "rows": input_rows},
+        "operations": [
+            {"op": "orderBy", "columns": ["dept", "salary"], "ascending": [True, False]},
+            {"op": "window", "column": "rank", "func": "rank", "partition_by": ["dept"], "order_by": [{"col": "salary", "asc": False}]},
+            {"op": "orderBy", "columns": ["dept", "rank"], "ascending": [True, True]},
+        ],
+        "expected": {"schema": expected_schema, "rows": expected_rows},
+    }
+
+
+def case_lag_lead_window(spark: SparkSession) -> Dict[str, Any]:
+    """Test lag and lead window functions."""
+    from pyspark.sql.functions import col, lag, lead
+    from pyspark.sql.window import Window
+
+    data = [(1, "A", 10), (2, "A", 20), (3, "A", 30), (4, "B", 40), (5, "B", 50)]
+    df = spark.createDataFrame(data, ["id", "dept", "val"])
+    window = Window.partitionBy("dept").orderBy("id")
+    out_df = (
+        df.withColumn("lag_val", lag(col("val"), 1).over(window))
+        .withColumn("lead_val", lead(col("val"), 1).over(window))
+        .orderBy("id")
+    )
+
+    input_schema = schema_to_json(df.schema)
+    input_rows = df_to_rows(df)
+    expected_schema = schema_to_json(out_df.schema)
+    expected_rows = df_to_rows(out_df)
+
+    return {
+        "name": "lag_lead_window",
+        "pyspark_version": spark.version,
+        "input": {"schema": input_schema, "rows": input_rows},
+        "operations": [
+            {"op": "orderBy", "columns": ["id"], "ascending": [True]},
+            {"op": "window", "column": "lag_val", "func": "lag", "partition_by": ["dept"], "order_by": [{"col": "id", "asc": True}], "value_column": "val"},
+            {"op": "window", "column": "lead_val", "func": "lead", "partition_by": ["dept"], "order_by": [{"col": "id", "asc": True}], "value_column": "val"},
+            {"op": "orderBy", "columns": ["id"], "ascending": [True]},
+        ],
+        "expected": {"schema": expected_schema, "rows": expected_rows},
+    }
+
+
 def main() -> None:
     spark = SparkSession.builder.appName("robin_sparkless_parity_gen").getOrCreate()
 
@@ -1239,6 +1387,7 @@ def main() -> None:
         case_groupby_avg(spark),
         case_groupby_min(spark),
         case_groupby_max(spark),
+        case_groupby_multi_agg(spark),
         case_groupby_null_keys(spark),
         case_null_comparison_equality(spark),
         case_null_comparison_ordering(spark),
@@ -1252,6 +1401,9 @@ def main() -> None:
         case_left_join(spark),
         case_right_join(spark),
         case_outer_join(spark),
+        case_row_number_window(spark),
+        case_rank_window(spark),
+        case_lag_lead_window(spark),
     ]
 
     for fx in fixtures:

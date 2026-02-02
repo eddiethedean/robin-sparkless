@@ -1,0 +1,117 @@
+{
+  "name": "groupby_multi_agg",
+  "pyspark_version": "3.5.0",
+  "input": {
+    "schema": [
+      {
+        "name": "id",
+        "type": "bigint"
+      },
+      {
+        "name": "department",
+        "type": "string"
+      },
+      {
+        "name": "salary",
+        "type": "bigint"
+      }
+    ],
+    "rows": [
+      [
+        1,
+        "Sales",
+        1000
+      ],
+      [
+        2,
+        "Sales",
+        1500
+      ],
+      [
+        3,
+        "Engineering",
+        2000
+      ],
+      [
+        4,
+        "Engineering",
+        2500
+      ],
+      [
+        5,
+        "Sales",
+        1200
+      ]
+    ]
+  },
+  "operations": [
+    {
+      "op": "groupBy",
+      "columns": [
+        "department"
+      ]
+    },
+    {
+      "op": "agg",
+      "aggregations": [
+        {
+          "func": "count",
+          "alias": "count"
+        },
+        {
+          "func": "sum",
+          "alias": "sum(salary)",
+          "column": "salary"
+        },
+        {
+          "func": "avg",
+          "alias": "avg(salary)",
+          "column": "salary"
+        }
+      ]
+    },
+    {
+      "op": "orderBy",
+      "columns": [
+        "department"
+      ],
+      "ascending": [
+        true
+      ]
+    }
+  ],
+  "expected": {
+    "schema": [
+      {
+        "name": "department",
+        "type": "string"
+      },
+      {
+        "name": "count",
+        "type": "bigint"
+      },
+      {
+        "name": "sum(salary)",
+        "type": "bigint"
+      },
+      {
+        "name": "avg(salary)",
+        "type": "double"
+      }
+    ],
+    "rows": [
+      [
+        "Engineering",
+        2,
+        4500,
+        2250.0
+      ],
+      [
+        "Sales",
+        3,
+        3700,
+        1233.3333333333333
+      ]
+    ]
+  }
+}

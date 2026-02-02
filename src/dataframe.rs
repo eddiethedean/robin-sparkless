@@ -284,7 +284,8 @@ impl GroupedData {
     /// ```
     pub fn agg(&self, aggregations: Vec<Expr>) -> Result<DataFrame, PolarsError> {
         let lf = self.lazy_grouped.clone().agg(aggregations);
-        let pl_df = lf.collect()?;
+        let mut pl_df = lf.collect()?;
+        pl_df = reorder_groupby_columns(&mut pl_df, &self.grouping_cols)?;
         Ok(crate::dataframe::DataFrame::from_polars(pl_df))
     }
 

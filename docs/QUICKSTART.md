@@ -64,4 +64,24 @@ let joined = left_df.join(&right_df, vec!["dept_id"], JoinType::Inner)?;
 
 Supported join types: `Inner`, `Left`, `Right`, `Outer`.
 
-As more APIs are added (window functions, broader expressions), this guide will expand. For roadmap and Sparkless integration phases, see [ROADMAP.md](ROADMAP.md).
+### Window Functions
+
+```rust
+use robin_sparkless::{col, DataFrame};
+
+// row_number, rank, dense_rank over partition
+let df_with_rn = df.with_column(
+    "rn",
+    col("salary").row_number(true).over(&["dept"]).into_expr(),
+)?;
+
+// lag and lead
+let df_with_lag = df.with_column(
+    "prev_salary",
+    col("salary").lag(1).over(&["dept"]).into_expr(),
+)?;
+```
+
+Supported window functions: `row_number()`, `rank()`, `dense_rank()`, `lag(n)`, `lead(n)` — each used with `.over(&["col1", "col2"])` for partitioning.
+
+For roadmap and Sparkless integration phases, see [ROADMAP.md](ROADMAP.md).

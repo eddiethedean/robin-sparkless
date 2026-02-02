@@ -1,0 +1,155 @@
+{
+  "name": "row_number_window",
+  "pyspark_version": "3.5.0",
+  "input": {
+    "schema": [
+      {
+        "name": "id",
+        "type": "bigint"
+      },
+      {
+        "name": "name",
+        "type": "string"
+      },
+      {
+        "name": "dept",
+        "type": "string"
+      },
+      {
+        "name": "salary",
+        "type": "bigint"
+      }
+    ],
+    "rows": [
+      [
+        1,
+        "Alice",
+        "Sales",
+        1000
+      ],
+      [
+        2,
+        "Bob",
+        "Sales",
+        1500
+      ],
+      [
+        3,
+        "Charlie",
+        "Engineering",
+        2000
+      ],
+      [
+        4,
+        "David",
+        "Engineering",
+        2500
+      ],
+      [
+        5,
+        "Eve",
+        "Sales",
+        1200
+      ]
+    ]
+  },
+  "operations": [
+    {
+      "op": "orderBy",
+      "columns": [
+        "dept",
+        "salary"
+      ],
+      "ascending": [
+        true,
+        false
+      ]
+    },
+    {
+      "op": "window",
+      "column": "rn",
+      "func": "row_number",
+      "partition_by": [
+        "dept"
+      ],
+      "order_by": [
+        {
+          "col": "salary",
+          "asc": false
+        }
+      ]
+    },
+    {
+      "op": "orderBy",
+      "columns": [
+        "dept",
+        "rn"
+      ],
+      "ascending": [
+        true,
+        true
+      ]
+    }
+  ],
+  "expected": {
+    "schema": [
+      {
+        "name": "id",
+        "type": "bigint"
+      },
+      {
+        "name": "name",
+        "type": "string"
+      },
+      {
+        "name": "dept",
+        "type": "string"
+      },
+      {
+        "name": "salary",
+        "type": "bigint"
+      },
+      {
+        "name": "rn",
+        "type": "int"
+      }
+    ],
+    "rows": [
+      [
+        4,
+        "David",
+        "Engineering",
+        2500,
+        1
+      ],
+      [
+        3,
+        "Charlie",
+        "Engineering",
+        2000,
+        2
+      ],
+      [
+        2,
+        "Bob",
+        "Sales",
+        1500,
+        1
+      ],
+      [
+        5,
+        "Eve",
+        "Sales",
+        1200,
+        2
+      ],
+      [
+        1,
+        "Alice",
+        "Sales",
+        1000,
+        3
+      ]
+    ]
+  }
+}

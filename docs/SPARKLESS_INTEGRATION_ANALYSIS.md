@@ -46,7 +46,7 @@ sparkless/backend/
 |------------------|------------------------|--------|
 | `expression_translator` | `expression.rs`, `column.rs`, `functions.rs` | Partial – expression parsing exists; many functions missing |
 | `operation_executor` | `dataframe.rs`, `session.rs` | Partial – filter, select, orderBy, groupBy, withColumn done |
-| `window_handler` | — | Not implemented |
+| `window_handler` | `column.rs`, `functions.rs` (rank, row_number, dense_rank, lag, lead + over) | Done |
 | `type_mapper` | `type_coercion.rs`, `schema.rs` | Partial |
 | Parquet/CSV/JSON | `session.rs` (DataFrameReader) | Done |
 

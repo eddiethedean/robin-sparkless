@@ -126,6 +126,39 @@ impl ThenBuilder {
     }
 }
 
+/// Row number window function (1, 2, 3 by order within partition).
+/// Use with `.over(partition_by)` after ranking by an order column.
+///
+/// # Example
+/// ```
+/// use robin_sparkless::{col, Column};
+/// let salary_col = col("salary");
+/// let rn = salary_col.row_number(true).over(&["dept"]);
+/// ```
+pub fn row_number(column: &Column) -> Column {
+    column.clone().row_number(false)
+}
+
+/// Rank window function (ties same rank, gaps). Use with `.over(partition_by)`.
+pub fn rank(column: &Column, descending: bool) -> Column {
+    column.clone().rank(descending)
+}
+
+/// Dense rank window function (no gaps). Use with `.over(partition_by)`.
+pub fn dense_rank(column: &Column, descending: bool) -> Column {
+    column.clone().dense_rank(descending)
+}
+
+/// Lag: value from n rows before in partition. Use with `.over(partition_by)`.
+pub fn lag(column: &Column, n: i64) -> Column {
+    column.clone().lag(n)
+}
+
+/// Lead: value from n rows after in partition. Use with `.over(partition_by)`.
+pub fn lead(column: &Column, n: i64) -> Column {
+    column.clone().lead(n)
+}
+
 /// Coalesce - returns the first non-null value from multiple columns.
 ///
 /// # Example
