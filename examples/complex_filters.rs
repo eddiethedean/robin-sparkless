@@ -1,9 +1,9 @@
 /// Example demonstrating complex filter expressions and logical operators
-/// 
+///
 /// This example shows how to use complex boolean expressions with AND, OR, NOT
 /// operators, nested conditions, and arithmetic expressions in filters and withColumn.
 use polars::prelude::*;
-use robin_sparkless::{SparkSession, col};
+use robin_sparkless::{col, SparkSession};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Note: SparkSession is created but not used in this example
@@ -28,8 +28,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Example 1: Simple filter with AND
     // Filter: age > 30 AND score < 100
     let filtered1 = df.filter(
-        col("age").into_expr().gt(lit(30))
-            .and(col("score").into_expr().lt(lit(100)))
+        col("age")
+            .into_expr()
+            .gt(lit(30))
+            .and(col("score").into_expr().lt(lit(100))),
     )?;
     println!("\nFiltered: age > 30 AND score < 100");
     filtered1.show(Some(10))?;
@@ -37,20 +39,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Example 2: Complex filter with nested OR
     // Filter: age > 30 AND (score < 100 OR vip == 1)
     let filtered2 = df.filter(
-        col("age").into_expr().gt(lit(30))
-            .and(
-                col("score").into_expr().lt(lit(100))
-                    .or(col("vip").into_expr().eq(lit(1)))
-            )
+        col("age").into_expr().gt(lit(30)).and(
+            col("score")
+                .into_expr()
+                .lt(lit(100))
+                .or(col("vip").into_expr().eq(lit(1))),
+        ),
     )?;
     println!("\nFiltered: age > 30 AND (score < 100 OR vip == 1)");
     filtered2.show(Some(10))?;
 
     // Example 3: Using NOT operator
     // Filter: NOT (vip == 0)
-    let filtered3 = df.filter(
-        col("vip").into_expr().eq(lit(0)).not()
-    )?;
+    let filtered3 = df.filter(col("vip").into_expr().eq(lit(0)).not())?;
     println!("\nFiltered: NOT (vip == 0)");
     filtered3.show(Some(10))?;
 
@@ -58,8 +59,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Add a boolean column: age > 30 AND score < 100
     let df_with_flag = df.with_column(
         "is_target",
-        col("age").into_expr().gt(lit(30))
-            .and(col("score").into_expr().lt(lit(100)))
+        col("age")
+            .into_expr()
+            .gt(lit(30))
+            .and(col("score").into_expr().lt(lit(100))),
     )?;
     println!("\nWith column 'is_target': age > 30 AND score < 100");
     df_with_flag.show(Some(10))?;
@@ -68,7 +71,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Add a column: (age + score) > 100
     let df_with_sum = df.with_column(
         "above_threshold",
-        (col("age").into_expr() + col("score").into_expr()).gt(lit(100))
+        (col("age").into_expr() + col("score").into_expr()).gt(lit(100)),
     )?;
     println!("\nWith column 'above_threshold': (age + score) > 100");
     df_with_sum.show(Some(10))?;

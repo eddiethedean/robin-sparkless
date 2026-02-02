@@ -1,9 +1,7 @@
 use std::fs;
 use std::path::Path;
 
-use polars::prelude::{
-    DataFrame as PlDataFrame, Expr, NamedFrom, PolarsError, Series, col, lit,
-};
+use polars::prelude::{col, lit, DataFrame as PlDataFrame, Expr, NamedFrom, PolarsError, Series};
 use robin_sparkless::{DataFrame, JoinType, SparkSession};
 use serde::Deserialize;
 use serde_json::Value;
@@ -31,7 +29,7 @@ struct InputSection {
 
 #[derive(Debug, Deserialize)]
 struct FileSource {
-    format: String, // "csv", "parquet", "json"
+    format: String,  // "csv", "parquet", "json"
     content: String, // file content as string
 }
 
@@ -56,7 +54,11 @@ enum Operation {
     #[serde(rename = "select")]
     Select { columns: Vec<String> },
     #[serde(rename = "orderBy")]
-    OrderBy { columns: Vec<String>, #[serde(default)] ascending: Vec<bool> },
+    OrderBy {
+        columns: Vec<String>,
+        #[serde(default)]
+        ascending: Vec<bool>,
+    },
     #[serde(rename = "groupBy")]
     GroupBy { columns: Vec<String> },
     #[serde(rename = "agg")]
@@ -95,8 +97,7 @@ fn pyspark_parity_fixtures() {
         }
 
         let text = fs::read_to_string(&path).expect("read fixture");
-        let fixture: Fixture =
-            serde_json::from_str(&text).expect("parse fixture json");
+        let fixture: Fixture = serde_json::from_str(&text).expect("parse fixture json");
 
         // Run the full parity test: create DataFrame, apply operations, compare results
         run_fixture(&fixture).unwrap();
@@ -112,18 +113,15 @@ fn run_fixture(fixture: &Fixture) -> Result<(), PolarsError> {
     );
     assert_eq!(
         fixture.expected.schema.len(),
-        fixture
-            .expected
-            .rows
-            .first()
-            .map(|r| r.len())
-            .unwrap_or(0),
+        fixture.expected.rows.first().map(|r| r.len()).unwrap_or(0),
         "fixture {} expected schema/row length mismatch",
         fixture.name
     );
 
     // Create SparkSession and DataFrame from input
-    let spark = SparkSession::builder().app_name("parity_test").get_or_create();
+    let spark = SparkSession::builder()
+        .app_name("parity_test")
+        .get_or_create();
     let df = create_df_from_input(&spark, &fixture.input)?;
 
     // Create right DataFrame for join fixtures
@@ -138,13 +136,26 @@ fn run_fixture(fixture: &Fixture) -> Result<(), PolarsError> {
 
     // Collect and compare results
     let (actual_schema, actual_rows) = collect_to_simple_format(&result_df)?;
-    
+
     // Check if operations include orderBy (for comparison strategy)
-    let has_order_by = fixture.operations.iter().any(|op| matches!(op, Operation::OrderBy { .. }));
+    let has_order_by = fixture
+        .operations
+        .iter()
+        .any(|op| matches!(op, Operation::OrderBy { .. }));
     let is_join_fixture = fixture.right_input.is_some();
-    
-    assert_schema_eq(&actual_schema, &fixture.expected.schema, &fixture.name, is_join_fixture)?;
-    assert_rows_eq(&actual_rows, &fixture.expected.rows, has_order_by, &fixture.name)?;
+
+    assert_schema_eq(
+        &actual_schema,
+        &fixture.expected.schema,
+        &fixture.name,
+        is_join_fixture,
+    )?;
+    assert_rows_eq(
+        &actual_rows,
+        &fixture.expected.rows,
+        has_order_by,
+        &fixture.name,
+    )?;
 
     Ok(())
 }
@@ -172,13 +183,12 @@ fn create_df_from_input(
         let type0 = input.schema[0].r#type.as_str();
         let type1 = input.schema[1].r#type.as_str();
         let type2 = input.schema[2].r#type.as_str();
-        
+
         // Check if pattern matches (int, int, string)
-        let is_int_int_string = 
-            (type0 == "int" || type0 == "bigint" || type0 == "long") &&
-            (type1 == "int" || type1 == "bigint" || type1 == "long") &&
-            (type2 == "string" || type2 == "str" || type2 == "varchar");
-        
+        let is_int_int_string = (type0 == "int" || type0 == "bigint" || type0 == "long")
+            && (type1 == "int" || type1 == "bigint" || type1 == "long")
+            && (type2 == "string" || type2 == "str" || type2 == "varchar");
+
         if is_int_int_string {
             let mut tuples: Vec<(i64, i64, String)> = Vec::new();
             for row in &input.rows {
@@ -195,7 +205,7 @@ fn create_df_from_input(
             return spark.create_dataframe(tuples, col_names);
         }
     }
-    
+
     // Fallback to direct Polars construction for non-matching patterns
     create_df_from_input_direct(input)
 }
@@ -207,32 +217,36 @@ fn create_df_from_file_source(
     input: &InputSection,
 ) -> Result<DataFrame, PolarsError> {
     use std::io::Write;
-    
+
     // Create a temporary file
     let temp_dir = std::env::temp_dir();
     let extension = match file_source.format.as_str() {
         "csv" => "csv",
         "parquet" => "parquet",
         "json" => "json",
-        _ => return Err(PolarsError::ComputeError(
-            format!("unsupported file format: {}", file_source.format).into(),
-        )),
+        _ => {
+            return Err(PolarsError::ComputeError(
+                format!("unsupported file format: {}", file_source.format).into(),
+            ))
+        }
     };
-    let temp_path = temp_dir.join(format!("robin_sparkless_test_{}.{}", 
-        std::process::id(), extension));
-    
+    let temp_path = temp_dir.join(format!(
+        "robin_sparkless_test_{}.{}",
+        std::process::id(),
+        extension
+    ));
+
     // Write content to temp file
     {
-        let mut file = std::fs::File::create(&temp_path)
-            .map_err(|e| PolarsError::ComputeError(
-                format!("failed to create temp file: {}", e).into(),
-            ))?;
+        let mut file = std::fs::File::create(&temp_path).map_err(|e| {
+            PolarsError::ComputeError(format!("failed to create temp file: {}", e).into())
+        })?;
         file.write_all(file_source.content.as_bytes())
-            .map_err(|e| PolarsError::ComputeError(
-                format!("failed to write temp file: {}", e).into(),
-            ))?;
+            .map_err(|e| {
+                PolarsError::ComputeError(format!("failed to write temp file: {}", e).into())
+            })?;
     }
-    
+
     // Read the file using the appropriate reader
     let df = match file_source.format.as_str() {
         "csv" => spark.read_csv(&temp_path)?,
@@ -241,40 +255,43 @@ fn create_df_from_file_source(
             // a DataFrame, write it as Parquet, then read it back.
             // This ensures we test the Parquet reader with the same data PySpark saw.
             use polars::prelude::*;
-            
+
             // Create DataFrame from input.rows (this is what PySpark read from Parquet)
             let input_df = create_df_from_input_direct(input)?;
             let pl_df = input_df.collect()?;
-            
+
             // Write to Parquet using Polars ParquetWriter
             let mut df_to_write = (*pl_df).clone();
             {
-                let mut file = std::fs::File::create(&temp_path)
-                    .map_err(|e| PolarsError::ComputeError(
+                let mut file = std::fs::File::create(&temp_path).map_err(|e| {
+                    PolarsError::ComputeError(
                         format!("failed to create Parquet file: {}", e).into(),
-                    ))?;
-                
+                    )
+                })?;
+
                 // Use ParquetWriter from prelude
                 use polars::prelude::ParquetWriter;
                 ParquetWriter::new(&mut file)
                     .finish(&mut df_to_write)
-                    .map_err(|e| PolarsError::ComputeError(
-                        format!("failed to write Parquet: {}", e).into(),
-                    ))?;
+                    .map_err(|e| {
+                        PolarsError::ComputeError(format!("failed to write Parquet: {}", e).into())
+                    })?;
             }
-            
+
             // Now read the Parquet file we just created
             spark.read_parquet(&temp_path)?
         }
         "json" => spark.read_json(&temp_path)?,
-        _ => return Err(PolarsError::ComputeError(
-            format!("unsupported file format: {}", file_source.format).into(),
-        )),
+        _ => {
+            return Err(PolarsError::ComputeError(
+                format!("unsupported file format: {}", file_source.format).into(),
+            ))
+        }
     };
-    
+
     // Clean up temp file
     std::fs::remove_file(&temp_path).ok();
-    
+
     Ok(df)
 }
 
@@ -311,8 +328,7 @@ fn create_df_from_input_direct(input: &InputSection) -> Result<DataFrame, Polars
                 cols.push(Series::new(spec.name.clone().into(), vals));
             }
             "string" | "str" | "varchar" => {
-                let mut vals: Vec<Option<String>> =
-                    Vec::with_capacity(input.rows.len());
+                let mut vals: Vec<Option<String>> = Vec::with_capacity(input.rows.len());
                 for row in &input.rows {
                     let v = row.get(col_idx).cloned().unwrap_or(Value::Null);
                     let opt = match v {
@@ -356,9 +372,9 @@ fn apply_operations(
     ops: &[Operation],
 ) -> Result<DataFrame, PolarsError> {
     use robin_sparkless::GroupedData;
-    
+
     let mut grouped: Option<GroupedData> = None;
-    
+
     for op in ops {
         match op {
             Operation::Filter { expr } => {
@@ -409,14 +425,15 @@ fn apply_operations(
                 let gd = grouped.take().ok_or_else(|| {
                     PolarsError::ComputeError("agg requires a preceding groupBy".into())
                 })?;
-                
+
                 // Support count, sum, avg, min, max aggregations
                 if aggregations.len() != 1 {
                     return Err(PolarsError::ComputeError(
-                        format!("only single aggregation supported, got: {:?}", aggregations).into(),
+                        format!("only single aggregation supported, got: {:?}", aggregations)
+                            .into(),
                     ));
                 }
-                
+
                 let agg_spec = &aggregations[0];
                 df = match agg_spec.func.as_str() {
                     "count" => gd.count()?,
@@ -459,9 +476,7 @@ fn apply_operations(
                     ));
                 }
                 let right_df = right.take().ok_or_else(|| {
-                    PolarsError::ComputeError(
-                        "join requires right_input in fixture".into(),
-                    )
+                    PolarsError::ComputeError("join requires right_input in fixture".into())
                 })?;
                 let join_type = match how.as_str() {
                     "inner" => JoinType::Inner,
@@ -489,13 +504,13 @@ fn apply_operations(
             }
         }
     }
-    
+
     if grouped.is_some() {
         return Err(PolarsError::ComputeError(
             "groupBy must be followed by agg".into(),
         ));
     }
-    
+
     Ok(df)
 }
 
@@ -585,18 +600,20 @@ fn parse_simple_filter_expr(src: &str) -> Result<Expr, String> {
                     // Check if we match the pattern
                     let matches = if *pattern == "AND" || *pattern == "OR" {
                         // For "AND" and "OR", require word boundaries (whitespace, parentheses, or start/end)
-                        let char_before_ok = i == 0 
-                            || bytes[i - 1].is_ascii_whitespace() 
-                            || bytes[i - 1] == b'(' 
+                        let char_before_ok = i == 0
+                            || bytes[i - 1].is_ascii_whitespace()
+                            || bytes[i - 1] == b'('
                             || bytes[i - 1] == b')';
-                        let char_after = if i + nlen < slen { bytes[i + nlen] as char } else { ' ' };
-                        let char_after_ok = char_after.is_ascii_whitespace() 
-                            || char_after == '(' 
-                            || char_after == ')' 
+                        let char_after = if i + nlen < slen {
+                            bytes[i + nlen] as char
+                        } else {
+                            ' '
+                        };
+                        let char_after_ok = char_after.is_ascii_whitespace()
+                            || char_after == '('
+                            || char_after == ')'
                             || i + nlen >= slen;
-                        char_before_ok 
-                            && &lbytes[i..i + nlen] == needle.as_bytes()
-                            && char_after_ok
+                        char_before_ok && &lbytes[i..i + nlen] == needle.as_bytes() && char_after_ok
                     } else if *pattern == " and " || *pattern == " or " {
                         // For " and " and " or " (with spaces), exact match
                         &lbytes[i..i + nlen] == needle.as_bytes()
@@ -683,9 +700,11 @@ fn parse_comparison_expr(src: &str) -> Result<Expr, String> {
 
     // After the closing quote, find the closing paren, then expect an operator and a literal.
     let after_quote = &s[quote2 + 1..];
-    let paren_end = after_quote.find(')').ok_or("missing closing paren after column")?;
+    let paren_end = after_quote
+        .find(')')
+        .ok_or("missing closing paren after column")?;
     let after_col = &after_quote[paren_end + 1..].trim();
-    
+
     // Find the operator - could be ==, !=, >=, <=, >, <, =
     let op = if after_col.starts_with("==") {
         "=="
@@ -704,22 +723,23 @@ fn parse_comparison_expr(src: &str) -> Result<Expr, String> {
     } else {
         return Err(format!("unable to find operator in '{}'", after_col));
     };
-    
+
     // Extract the right side after the operator, but stop at logical operators
     let right_side_full = after_col[op.len()..].trim();
-    
+
     // Find where the right side ends (stop at logical operators: AND, OR, &&, ||)
     // Simple check: find the first occurrence of these patterns (case-insensitive, with word boundaries)
     let lower = right_side_full.to_ascii_lowercase();
     let mut right_side_end = right_side_full.len();
-    
+
     // Check for " and ", "AND", "&&" (with word boundaries)
     for pattern in &[" and ", " and", "and ", "&&"] {
         if let Some(pos) = lower.find(pattern) {
             // Check word boundaries
-            let char_before_ok = pos == 0 || right_side_full.as_bytes()[pos - 1].is_ascii_whitespace();
+            let char_before_ok =
+                pos == 0 || right_side_full.as_bytes()[pos - 1].is_ascii_whitespace();
             let char_after_pos = pos + pattern.len();
-            let char_after_ok = char_after_pos >= right_side_full.len() 
+            let char_after_ok = char_after_pos >= right_side_full.len()
                 || right_side_full.as_bytes()[char_after_pos].is_ascii_whitespace()
                 || right_side_full.as_bytes()[char_after_pos] == b'(';
             if char_before_ok && char_after_ok {
@@ -727,14 +747,15 @@ fn parse_comparison_expr(src: &str) -> Result<Expr, String> {
             }
         }
     }
-    
+
     // Check for " or ", "OR", "||" (with word boundaries)
     for pattern in &[" or ", " or", "or ", "||"] {
         if let Some(pos) = lower.find(pattern) {
             // Check word boundaries
-            let char_before_ok = pos == 0 || right_side_full.as_bytes()[pos - 1].is_ascii_whitespace();
+            let char_before_ok =
+                pos == 0 || right_side_full.as_bytes()[pos - 1].is_ascii_whitespace();
             let char_after_pos = pos + pattern.len();
-            let char_after_ok = char_after_pos >= right_side_full.len() 
+            let char_after_ok = char_after_pos >= right_side_full.len()
                 || right_side_full.as_bytes()[char_after_pos].is_ascii_whitespace()
                 || right_side_full.as_bytes()[char_after_pos] == b'(';
             if char_before_ok && char_after_ok {
@@ -742,24 +763,30 @@ fn parse_comparison_expr(src: &str) -> Result<Expr, String> {
             }
         }
     }
-    
+
     let right_side = right_side_full[..right_side_end].trim();
-    
+
     let c = col(col_name);
-    
+
     // Check if right side is a column (col('name')) or a literal
     let right_expr_is_column = right_side.starts_with("col(");
     let right_expr = if right_expr_is_column {
         // Column-to-column comparison - will use null-aware methods
-        let right_quote_start = right_side.find(['\'', '"']).ok_or("missing quote in right column")?;
-        let right_quote_end = right_side[right_quote_start + 1..].find(['\'', '"']).ok_or("missing closing quote")?;
-        let right_col_name = &right_side[right_quote_start + 1..right_quote_start + 1 + right_quote_end];
+        let right_quote_start = right_side
+            .find(['\'', '"'])
+            .ok_or("missing quote in right column")?;
+        let right_quote_end = right_side[right_quote_start + 1..]
+            .find(['\'', '"'])
+            .ok_or("missing closing quote")?;
+        let right_col_name =
+            &right_side[right_quote_start + 1..right_quote_start + 1 + right_quote_end];
         use robin_sparkless::col as robin_col;
         robin_col(right_col_name).into_expr()
-    } else if (right_side.starts_with('\'') && right_side.ends_with('\'')) ||
-              (right_side.starts_with('"') && right_side.ends_with('"')) {
+    } else if (right_side.starts_with('\'') && right_side.ends_with('\''))
+        || (right_side.starts_with('"') && right_side.ends_with('"'))
+    {
         // String literal - remove quotes
-        let str_val = &right_side[1..right_side.len()-1];
+        let str_val = &right_side[1..right_side.len() - 1];
         lit(str_val)
     } else {
         // Try to parse as integer or float
@@ -768,14 +795,17 @@ fn parse_comparison_expr(src: &str) -> Result<Expr, String> {
         } else if let Ok(lit_val) = right_side.parse::<f64>() {
             lit(lit_val)
         } else {
-            return Err(format!("unable to parse right side '{}' as column or literal", right_side));
+            return Err(format!(
+                "unable to parse right side '{}' as column or literal",
+                right_side
+            ));
         }
     };
 
     // For type coercion, we'd need to know the column's actual type
     // For now, use Polars comparisons directly - they should handle basic type coercion
     // TODO: Add explicit type coercion using type_coercion module when column schema is available
-    
+
     let expr = if right_expr_is_column {
         // Column-to-column comparison: use null-aware _pyspark methods
         use polars::prelude::DataType;
@@ -825,55 +855,60 @@ fn parse_comparison_expr(src: &str) -> Result<Expr, String> {
 
 /// Parse expressions for withColumn operations (when, coalesce, etc.)
 fn parse_with_column_expr(src: &str) -> Result<Expr, String> {
-    use robin_sparkless::{col, lit_str, when, coalesce};
-    
+    use robin_sparkless::{coalesce, col, lit_str, when};
+
     let s = src.trim();
-    
+
     // Handle when().then().otherwise() or when().otherwise() expressions
     if s.starts_with("when(") {
         // Find the condition part: when(col('age') >= 18)...
-        // The condition ends at the first ")." 
+        // The condition ends at the first ")."
         let cond_end = s.find(").").ok_or("missing ). in when expression")?;
         let cond_str = &s[5..cond_end]; // Skip "when("
-        
+
         // Parse condition - could be a filter expression or a comparison with columns
         let condition_expr = parse_simple_filter_expr(cond_str)?;
         let condition_col = robin_sparkless::Column::from_expr(condition_expr, None);
-        
+
         // Check if we have .then() or just .otherwise()
         if let Some(then_pos) = s.find(").then(") {
             // when(cond).then(val).otherwise(fallback)
             let after_then = &s[then_pos + 7..]; // Skip ").then("
-            let otherwise_pos = after_then.find(").otherwise(")
+            let otherwise_pos = after_then
+                .find(").otherwise(")
                 .ok_or("missing ).otherwise() after .then()")?;
-            
+
             let then_str = &after_then[..otherwise_pos];
             let after_otherwise = &after_then[otherwise_pos + 11..]; // Skip ").otherwise("
-            // The otherwise value should be a simple literal or column, find the closing paren
-            // For simple cases like otherwise('minor'), just find the last )
-            let otherwise_end = after_otherwise.rfind(')')
+                                                                     // The otherwise value should be a simple literal or column, find the closing paren
+                                                                     // For simple cases like otherwise('minor'), just find the last )
+            let otherwise_end = after_otherwise
+                .rfind(')')
                 .ok_or("missing closing ) in otherwise()")?;
             let otherwise_str = &after_otherwise[..otherwise_end].trim();
-            
+
             // Parse then and otherwise values
             let then_val = parse_column_or_literal(then_str.trim())?;
             let otherwise_val = parse_column_or_literal(otherwise_str)?;
-            
+
             // Build when expression
             let then_col = robin_sparkless::Column::from_expr(then_val, None);
             let otherwise_col = robin_sparkless::Column::from_expr(otherwise_val, None);
-            let when_expr = when(&condition_col).then(&then_col).otherwise(&otherwise_col);
+            let when_expr = when(&condition_col)
+                .then(&then_col)
+                .otherwise(&otherwise_col);
             return Ok(when_expr.into_expr());
         } else if let Some(otherwise_pos) = s.find(").otherwise(") {
             // when(cond).otherwise(val) - use condition as the "then" value
             let after_otherwise = &s[otherwise_pos + 11..]; // Skip ").otherwise("
-            let otherwise_end = after_otherwise.rfind(')')
+            let otherwise_end = after_otherwise
+                .rfind(')')
                 .ok_or("missing closing ) in otherwise()")?;
             let otherwise_str = &after_otherwise[..otherwise_end];
-            
+
             let otherwise_val = parse_column_or_literal(otherwise_str)?;
             let otherwise_col = robin_sparkless::Column::from_expr(otherwise_val, None);
-            
+
             // For when(cond).otherwise(val), use condition as both condition and "then"
             // This is a simplified interpretation
             let when_expr = when(&condition_col).otherwise(&otherwise_col);
@@ -882,52 +917,62 @@ fn parse_with_column_expr(src: &str) -> Result<Expr, String> {
             return Err("when expression must have .then() or .otherwise()".to_string());
         }
     }
-    
+
     // Handle eqNullSafe() expressions: col('a').eqNullSafe(col('b'))
     if s.contains(".eqNullSafe(") {
         // Parse: col('value1').eqNullSafe(col('value2'))
         let eq_null_safe_pos = s.find(".eqNullSafe(").ok_or("missing .eqNullSafe(")?;
         let left_part = &s[..eq_null_safe_pos];
         let after_eq = &s[eq_null_safe_pos + 12..]; // Skip ".eqNullSafe("
-        
+
         // Parse left column: col('value1')
         let left_col_name = if left_part.starts_with("col(") {
-            let quote_start = left_part.find(['\'', '"']).ok_or("missing quote in left column")?;
-            let quote_end = left_part[quote_start + 1..].find(['\'', '"']).ok_or("missing closing quote")?;
+            let quote_start = left_part
+                .find(['\'', '"'])
+                .ok_or("missing quote in left column")?;
+            let quote_end = left_part[quote_start + 1..]
+                .find(['\'', '"'])
+                .ok_or("missing closing quote")?;
             &left_part[quote_start + 1..quote_start + 1 + quote_end]
         } else {
             return Err("left side of eqNullSafe must be col(...)".to_string());
         };
-        
+
         // Parse right column: col('value2')
-        let right_part_end = after_eq.rfind(')').ok_or("missing closing ) in eqNullSafe")?;
+        let right_part_end = after_eq
+            .rfind(')')
+            .ok_or("missing closing ) in eqNullSafe")?;
         let right_part = &after_eq[..right_part_end];
         let right_col_name = if right_part.starts_with("col(") {
-            let quote_start = right_part.find(['\'', '"']).ok_or("missing quote in right column")?;
-            let quote_end = right_part[quote_start + 1..].find(['\'', '"']).ok_or("missing closing quote")?;
+            let quote_start = right_part
+                .find(['\'', '"'])
+                .ok_or("missing quote in right column")?;
+            let quote_end = right_part[quote_start + 1..]
+                .find(['\'', '"'])
+                .ok_or("missing closing quote")?;
             &right_part[quote_start + 1..quote_start + 1 + quote_end]
         } else {
             return Err("right side of eqNullSafe must be col(...)".to_string());
         };
-        
+
         let left_col = col(left_col_name);
         let right_col = col(right_col_name);
         let eq_null_safe_col = left_col.eq_null_safe(&right_col);
         return Ok(eq_null_safe_col.into_expr());
     }
-    
+
     // Handle standalone lit(None) - create a null column
     if s.trim() == "lit(None)" {
         use polars::prelude::*;
         // Create an expression that is always a null Int64 value
         return Ok(lit(NULL).cast(DataType::Int64));
     }
-    
+
     // Handle coalesce() expressions
     if s.starts_with("coalesce(") {
         // Parse: coalesce(col('col1'), col('col2'), lit('default'))
-        let inner = &s[9..s.len()-1]; // Skip "coalesce(" and final ")"
-        
+        let inner = &s[9..s.len() - 1]; // Skip "coalesce(" and final ")"
+
         // Split by comma, but be careful with nested parentheses
         let mut parts: Vec<&str> = Vec::new();
         let mut start = 0;
@@ -944,24 +989,25 @@ fn parse_with_column_expr(src: &str) -> Result<Expr, String> {
             }
         }
         parts.push(inner[start..].trim());
-        
+
         let mut columns: Vec<robin_sparkless::Column> = Vec::new();
         for part in parts {
             let part = part.trim();
             if part.starts_with("col(") {
                 // Extract column name: col('name') or col("name")
-                let content = &part[4..part.len()-1]; // Skip "col(" and ")"
+                let content = &part[4..part.len() - 1]; // Skip "col(" and ")"
                 let col_name = content.trim_matches(['\'', '"']);
                 columns.push(col(col_name));
             } else if part.starts_with("lit(") {
                 // Extract literal value: lit('value') or lit("value")
-                let content = &part[4..part.len()-1]; // Skip "lit(" and ")"
+                let content = &part[4..part.len() - 1]; // Skip "lit(" and ")"
                 let lit_val = content.trim_matches(['\'', '"']);
                 columns.push(lit_str(lit_val));
             } else {
                 // Try as a bare literal (quoted string or number)
-                if (part.starts_with('\'') && part.ends_with('\'')) ||
-                   (part.starts_with('"') && part.ends_with('"')) {
+                if (part.starts_with('\'') && part.ends_with('\''))
+                    || (part.starts_with('"') && part.ends_with('"'))
+                {
                     let lit_val = part.trim_matches(['\'', '"']);
                     columns.push(lit_str(lit_val));
                 } else if let Ok(num) = part.parse::<i64>() {
@@ -973,11 +1019,11 @@ fn parse_with_column_expr(src: &str) -> Result<Expr, String> {
                 }
             }
         }
-        
+
         if columns.is_empty() {
             return Err("coalesce requires at least one argument".to_string());
         }
-        
+
         let col_refs: Vec<&robin_sparkless::Column> = columns.iter().collect();
         let coalesce_col = coalesce(&col_refs);
         return Ok(coalesce_col.into_expr());
@@ -1136,7 +1182,7 @@ fn parse_with_column_expr(src: &str) -> Result<Expr, String> {
         if let Some((left, op, right)) = split_on_ops(s_trimmed, &['*', '/']) {
             let lhs = parse_general_expr(&left)?;
             let rhs = parse_general_expr(&right)?;
-            use std::ops::{Mul, Div};
+            use std::ops::{Div, Mul};
             return Ok(match op {
                 '*' => lhs.mul(rhs),
                 '/' => lhs.div(rhs),
@@ -1160,7 +1206,7 @@ fn parse_with_column_expr(src: &str) -> Result<Expr, String> {
 fn parse_column_or_literal(s: &str) -> Result<Expr, String> {
     use robin_sparkless::{col, lit_i64, lit_str};
     let s = s.trim();
-    
+
     if s.starts_with("col(") {
         // Only accept *exactly* `col('name')` / `col("name")` here.
         // If the matching ')' for the first '(' isn't at the end, this is not a simple column ref.
@@ -1188,18 +1234,26 @@ fn parse_column_or_literal(s: &str) -> Result<Expr, String> {
 
         let close_idx = close_idx.ok_or_else(|| format!("invalid col(...) expression: {}", s))?;
         if close_idx != s.len() - 1 {
-            return Err(format!("invalid col(...) reference (trailing tokens): {}", s));
+            return Err(format!(
+                "invalid col(...) reference (trailing tokens): {}",
+                s
+            ));
         }
 
         let inner = s[4..s.len() - 1].trim();
-        if (inner.starts_with('\'') && inner.ends_with('\'')) || (inner.starts_with('"') && inner.ends_with('"')) {
+        if (inner.starts_with('\'') && inner.ends_with('\''))
+            || (inner.starts_with('"') && inner.ends_with('"'))
+        {
             let col_name = inner.trim_matches(['\'', '"']);
             Ok(col(col_name).into_expr())
         } else {
-            Err(format!("col(...) must wrap a quoted column name, got: {}", s))
+            Err(format!(
+                "col(...) must wrap a quoted column name, got: {}",
+                s
+            ))
         }
     } else if s.starts_with("lit(") {
-        let lit_content = s[4..s.len()-1].trim();
+        let lit_content = s[4..s.len() - 1].trim();
         // Handle lit(None) for null literals
         if lit_content == "None" {
             use polars::prelude::*;
@@ -1214,8 +1268,8 @@ fn parse_column_or_literal(s: &str) -> Result<Expr, String> {
                 Ok(lit_str(lit_val).into_expr())
             }
         }
-    } else if (s.starts_with('\'') && s.ends_with('\'')) ||
-              (s.starts_with('"') && s.ends_with('"')) {
+    } else if (s.starts_with('\'') && s.ends_with('\'')) || (s.starts_with('"') && s.ends_with('"'))
+    {
         // Quoted string literal - remove outer quotes
         let val = s.trim_matches(['\'', '"']);
         Ok(lit_str(val).into_expr())
@@ -1233,10 +1287,12 @@ fn parse_column_or_literal(s: &str) -> Result<Expr, String> {
 }
 
 /// Collect a DataFrame to a simple (schema, rows) representation for comparison.
-fn collect_to_simple_format(df: &DataFrame) -> Result<(Vec<ColumnSpec>, Vec<Vec<Value>>), PolarsError> {
+fn collect_to_simple_format(
+    df: &DataFrame,
+) -> Result<(Vec<ColumnSpec>, Vec<Vec<Value>>), PolarsError> {
     let pl_df = df.collect()?;
     let schema = pl_df.schema();
-    
+
     // Build schema
     let col_specs: Vec<ColumnSpec> = schema
         .iter()
@@ -1245,12 +1301,12 @@ fn collect_to_simple_format(df: &DataFrame) -> Result<(Vec<ColumnSpec>, Vec<Vec<
             r#type: dtype_to_string(dtype),
         })
         .collect();
-    
+
     // Build rows
     let num_rows = pl_df.height();
     let num_cols = schema.len();
     let mut rows: Vec<Vec<Value>> = Vec::with_capacity(num_rows);
-    
+
     // Extract rows by iterating through each column
     for row_idx in 0..num_rows {
         let mut row: Vec<Value> = Vec::with_capacity(num_cols);
@@ -1268,17 +1324,19 @@ fn collect_to_simple_format(df: &DataFrame) -> Result<(Vec<ColumnSpec>, Vec<Vec<
                         let debug_str = format!("{:?}", av);
                         // Handle "StringOwned(\"value\")" format
                         if debug_str.starts_with("StringOwned(") && debug_str.ends_with(")") {
-                            let inner = &debug_str[12..debug_str.len()-1];
+                            let inner = &debug_str[12..debug_str.len() - 1];
                             // Remove outer quotes if present
                             let cleaned = inner.trim_matches('"');
                             Value::String(cleaned.to_string())
                         } else if debug_str.starts_with('"') && debug_str.ends_with('"') {
                             // Handle quoted strings
-                            Value::String(debug_str[1..debug_str.len()-1].to_string())
+                            Value::String(debug_str[1..debug_str.len() - 1].to_string())
                         } else {
                             // Try to match known variants
                             match av {
-                                polars::prelude::AnyValue::String(v) => Value::String(v.to_string()),
+                                polars::prelude::AnyValue::String(v) => {
+                                    Value::String(v.to_string())
+                                }
                                 _ => Value::String(debug_str),
                             }
                         }
@@ -1307,7 +1365,9 @@ fn collect_to_simple_format(df: &DataFrame) -> Result<(Vec<ColumnSpec>, Vec<Vec<
                                     let debug_str = format!("{:?}", av);
                                     if let Some(start) = debug_str.find('(') {
                                         if let Some(end) = debug_str.rfind(')') {
-                                            if let Ok(num) = debug_str[start+1..end].parse::<u32>() {
+                                            if let Ok(num) =
+                                                debug_str[start + 1..end].parse::<u32>()
+                                            {
                                                 Value::Number(num.into())
                                             } else {
                                                 Value::String(debug_str)
@@ -1331,7 +1391,7 @@ fn collect_to_simple_format(df: &DataFrame) -> Result<(Vec<ColumnSpec>, Vec<Vec<
         }
         rows.push(row);
     }
-    
+
     Ok((col_specs, rows))
 }
 
@@ -1361,17 +1421,21 @@ fn assert_schema_eq(
         return Err(PolarsError::ComputeError(
             format!(
                 "fixture {}: schema length mismatch: actual {} columns, expected {}",
-                fixture_name, actual.len(), expected.len()
+                fixture_name,
+                actual.len(),
+                expected.len()
             )
             .into(),
         ));
     }
-    
+
     let mut expected_name_occurrence: std::collections::HashMap<String, usize> =
         std::collections::HashMap::new();
 
     for (i, (act, exp)) in actual.iter().zip(expected.iter()).enumerate() {
-        let occurrence = expected_name_occurrence.entry(exp.name.clone()).or_insert(0);
+        let occurrence = expected_name_occurrence
+            .entry(exp.name.clone())
+            .or_insert(0);
         *occurrence += 1;
         let is_duplicate = *occurrence > 1;
 
@@ -1400,7 +1464,7 @@ fn assert_schema_eq(
             ));
         }
     }
-    
+
     Ok(())
 }
 
@@ -1445,32 +1509,37 @@ fn assert_rows_eq(
         return Err(PolarsError::ComputeError(
             format!(
                 "fixture {}: row count mismatch: actual {} rows, expected {}",
-                fixture_name, actual.len(), expected.len()
+                fixture_name,
+                actual.len(),
+                expected.len()
             )
             .into(),
         ));
     }
-    
+
     let mut actual_sorted = actual.to_vec();
     let mut expected_sorted = expected.to_vec();
-    
+
     if !ordered {
         // Sort both for comparison (convert rows to comparable format)
         actual_sorted.sort_by(|a, b| compare_rows(a, b));
         expected_sorted.sort_by(|a, b| compare_rows(a, b));
     }
-    
+
     for (i, (act_row, exp_row)) in actual_sorted.iter().zip(expected_sorted.iter()).enumerate() {
         if act_row.len() != exp_row.len() {
             return Err(PolarsError::ComputeError(
                 format!(
                     "fixture {}: row {} length mismatch: actual {} values, expected {}",
-                    fixture_name, i, act_row.len(), exp_row.len()
+                    fixture_name,
+                    i,
+                    act_row.len(),
+                    exp_row.len()
                 )
                 .into(),
             ));
         }
-        
+
         for (j, (act_val, exp_val)) in act_row.iter().zip(exp_row.iter()).enumerate() {
             if !values_equal(act_val, exp_val) {
                 return Err(PolarsError::ComputeError(
@@ -1483,7 +1552,7 @@ fn assert_rows_eq(
             }
         }
     }
-    
+
     Ok(())
 }
 
@@ -1539,4 +1608,3 @@ fn values_equal(a: &Value, b: &Value) -> bool {
         _ => false,
     }
 }
-

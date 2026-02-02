@@ -31,7 +31,7 @@ fn dtype_to_precedence(dtype: &DataType) -> Option<TypePrecedence> {
 pub fn find_common_type(left: &DataType, right: &DataType) -> Result<DataType, PolarsError> {
     let left_prec = dtype_to_precedence(left);
     let right_prec = dtype_to_precedence(right);
-    
+
     match (left_prec, right_prec) {
         (Some(l), Some(r)) => {
             // Return the type with higher precedence
@@ -87,25 +87,30 @@ pub fn coerce_to_type(expr: Expr, target_type: DataType) -> Expr {
 }
 
 /// Coerce two expressions to their common type for comparison
-pub fn coerce_for_comparison(left: Expr, right: Expr, left_type: &DataType, right_type: &DataType) -> Result<(Expr, Expr), PolarsError> {
+pub fn coerce_for_comparison(
+    left: Expr,
+    right: Expr,
+    left_type: &DataType,
+    right_type: &DataType,
+) -> Result<(Expr, Expr), PolarsError> {
     if left_type == right_type {
         // Same type, no coercion needed
         return Ok((left, right));
     }
-    
+
     let common_type = find_common_type(left_type, right_type)?;
-    
+
     let left_coerced = if left_type == &common_type {
         left
     } else {
         coerce_to_type(left, common_type.clone())
     };
-    
+
     let right_coerced = if right_type == &common_type {
         right
     } else {
         coerce_to_type(right, common_type)
     };
-    
+
     Ok((left_coerced, right_coerced))
 }

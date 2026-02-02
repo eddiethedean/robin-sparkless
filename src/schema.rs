@@ -59,7 +59,12 @@ impl StructType {
         let fields: Vec<Field> = self
             .fields
             .iter()
-            .map(|f| Field::new(f.name.as_str().into(), data_type_to_polars_type(&f.data_type)))
+            .map(|f| {
+                Field::new(
+                    f.name.as_str().into(),
+                    data_type_to_polars_type(&f.data_type),
+                )
+            })
             .collect();
         Schema::from_iter(fields)
     }
@@ -78,9 +83,7 @@ fn polars_type_to_data_type(polars_type: &PlDataType) -> DataType {
         PlDataType::Boolean => DataType::Boolean,
         PlDataType::Date => DataType::Date,
         PlDataType::Datetime(_, _) => DataType::Timestamp,
-        PlDataType::List(inner) => {
-            DataType::Array(Box::new(polars_type_to_data_type(inner)))
-        }
+        PlDataType::List(inner) => DataType::Array(Box::new(polars_type_to_data_type(inner))),
         _ => DataType::String, // Default fallback
     }
 }
@@ -94,9 +97,7 @@ fn data_type_to_polars_type(data_type: &DataType) -> PlDataType {
         DataType::Boolean => PlDataType::Boolean,
         DataType::Date => PlDataType::Date,
         DataType::Timestamp => PlDataType::Datetime(TimeUnit::Microseconds, None),
-        DataType::Array(inner) => {
-            PlDataType::List(Box::new(data_type_to_polars_type(inner)))
-        }
+        DataType::Array(inner) => PlDataType::List(Box::new(data_type_to_polars_type(inner))),
         _ => PlDataType::String, // Default fallback
     }
 }
@@ -137,16 +138,25 @@ mod tests {
         ]);
 
         let struct_type = StructType::from_polars_schema(&polars_schema);
-        
+
         assert_eq!(struct_type.fields().len(), 4);
         assert_eq!(struct_type.fields()[0].name, "id");
         assert!(matches!(struct_type.fields()[0].data_type, DataType::Long));
         assert_eq!(struct_type.fields()[1].name, "name");
-        assert!(matches!(struct_type.fields()[1].data_type, DataType::String));
+        assert!(matches!(
+            struct_type.fields()[1].data_type,
+            DataType::String
+        ));
         assert_eq!(struct_type.fields()[2].name, "score");
-        assert!(matches!(struct_type.fields()[2].data_type, DataType::Double));
+        assert!(matches!(
+            struct_type.fields()[2].data_type,
+            DataType::Double
+        ));
         assert_eq!(struct_type.fields()[3].name, "active");
-        assert!(matches!(struct_type.fields()[3].data_type, DataType::Boolean));
+        assert!(matches!(
+            struct_type.fields()[3].data_type,
+            DataType::Boolean
+        ));
     }
 
     #[test]
@@ -157,9 +167,9 @@ mod tests {
             StructField::new("score".to_string(), DataType::Double, true),
         ];
         let struct_type = StructType::new(fields);
-        
+
         let polars_schema = struct_type.to_polars_schema();
-        
+
         assert_eq!(polars_schema.len(), 3);
         assert_eq!(polars_schema.get("id"), Some(&PlDataType::Int64));
         assert_eq!(polars_schema.get("name"), Some(&PlDataType::String));
@@ -188,18 +198,39 @@ mod tests {
 
     #[test]
     fn test_polars_type_to_data_type_basic() {
-        assert!(matches!(polars_type_to_data_type(&PlDataType::String), DataType::String));
-        assert!(matches!(polars_type_to_data_type(&PlDataType::Int32), DataType::Integer));
-        assert!(matches!(polars_type_to_data_type(&PlDataType::Int64), DataType::Long));
-        assert!(matches!(polars_type_to_data_type(&PlDataType::Float64), DataType::Double));
-        assert!(matches!(polars_type_to_data_type(&PlDataType::Boolean), DataType::Boolean));
-        assert!(matches!(polars_type_to_data_type(&PlDataType::Date), DataType::Date));
+        assert!(matches!(
+            polars_type_to_data_type(&PlDataType::String),
+            DataType::String
+        ));
+        assert!(matches!(
+            polars_type_to_data_type(&PlDataType::Int32),
+            DataType::Integer
+        ));
+        assert!(matches!(
+            polars_type_to_data_type(&PlDataType::Int64),
+            DataType::Long
+        ));
+        assert!(matches!(
+            polars_type_to_data_type(&PlDataType::Float64),
+            DataType::Double
+        ));
+        assert!(matches!(
+            polars_type_to_data_type(&PlDataType::Boolean),
+            DataType::Boolean
+        ));
+        assert!(matches!(
+            polars_type_to_data_type(&PlDataType::Date),
+            DataType::Date
+        ));
     }
 
     #[test]
     fn test_polars_type_to_data_type_datetime() {
         let datetime_type = PlDataType::Datetime(TimeUnit::Microseconds, None);
-        assert!(matches!(polars_type_to_data_type(&datetime_type), DataType::Timestamp));
+        assert!(matches!(
+            polars_type_to_data_type(&datetime_type),
+            DataType::Timestamp
+        ));
     }
 
     #[test]
@@ -217,23 +248,41 @@ mod tests {
     fn test_polars_type_to_data_type_fallback() {
         // Unknown type should fall back to String
         let unknown_type = PlDataType::UInt8;
-        assert!(matches!(polars_type_to_data_type(&unknown_type), DataType::String));
+        assert!(matches!(
+            polars_type_to_data_type(&unknown_type),
+            DataType::String
+        ));
     }
 
     #[test]
     fn test_data_type_to_polars_type_basic() {
-        assert_eq!(data_type_to_polars_type(&DataType::String), PlDataType::String);
-        assert_eq!(data_type_to_polars_type(&DataType::Integer), PlDataType::Int32);
+        assert_eq!(
+            data_type_to_polars_type(&DataType::String),
+            PlDataType::String
+        );
+        assert_eq!(
+            data_type_to_polars_type(&DataType::Integer),
+            PlDataType::Int32
+        );
         assert_eq!(data_type_to_polars_type(&DataType::Long), PlDataType::Int64);
-        assert_eq!(data_type_to_polars_type(&DataType::Double), PlDataType::Float64);
-        assert_eq!(data_type_to_polars_type(&DataType::Boolean), PlDataType::Boolean);
+        assert_eq!(
+            data_type_to_polars_type(&DataType::Double),
+            PlDataType::Float64
+        );
+        assert_eq!(
+            data_type_to_polars_type(&DataType::Boolean),
+            PlDataType::Boolean
+        );
         assert_eq!(data_type_to_polars_type(&DataType::Date), PlDataType::Date);
     }
 
     #[test]
     fn test_data_type_to_polars_type_timestamp() {
         let result = data_type_to_polars_type(&DataType::Timestamp);
-        assert!(matches!(result, PlDataType::Datetime(TimeUnit::Microseconds, None)));
+        assert!(matches!(
+            result,
+            PlDataType::Datetime(TimeUnit::Microseconds, None)
+        ));
     }
 
     #[test]
@@ -258,9 +307,11 @@ mod tests {
     #[test]
     fn test_data_type_to_polars_type_struct_fallback() {
         // Nested Struct falls back to String
-        let struct_type = DataType::Struct(vec![
-            StructField::new("nested".to_string(), DataType::Integer, true),
-        ]);
+        let struct_type = DataType::Struct(vec![StructField::new(
+            "nested".to_string(),
+            DataType::Integer,
+            true,
+        )]);
         assert_eq!(data_type_to_polars_type(&struct_type), PlDataType::String);
     }
 
@@ -268,7 +319,7 @@ mod tests {
     fn test_empty_struct_type() {
         let empty = StructType::new(vec![]);
         assert!(empty.fields().is_empty());
-        
+
         let polars_schema = empty.to_polars_schema();
         assert!(polars_schema.is_empty());
     }

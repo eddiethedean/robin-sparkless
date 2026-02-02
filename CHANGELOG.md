@@ -19,6 +19,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Parity harness now accepts optional `right_input` for multi-DataFrame fixtures
 - Schema comparison allows Polars `_right` suffix for duplicate join column names
 
+### Tooling
+
+- Added `deny.toml` for cargo-deny (advisories, bans, sources; licenses need per-crate config)
+- Updated Makefile with Rust targets: build, test, check, fmt, clippy, audit, outdated, deny, all
+
 ## [0.1.0] - (Initial release)
 
 ### Added

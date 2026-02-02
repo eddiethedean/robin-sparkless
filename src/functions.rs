@@ -1,5 +1,5 @@
-use polars::prelude::*;
 use crate::column::Column;
+use polars::prelude::*;
 
 /// Get a column by name
 pub fn col(name: &str) -> Column {
@@ -227,7 +227,8 @@ mod tests {
         // Create a simple DataFrame
         let df = df!(
             "age" => &[15, 25, 35]
-        ).unwrap();
+        )
+        .unwrap();
 
         // Build a when-then-otherwise expression
         let age_col = col("age");
@@ -237,7 +238,8 @@ mod tests {
             .otherwise(&lit_str("minor"));
 
         // Apply the expression
-        let result_df = df.lazy()
+        let result_df = df
+            .lazy()
             .with_column(result.into_expr().alias("status"))
             .collect()
             .unwrap();
@@ -245,7 +247,7 @@ mod tests {
         // Verify the result
         let status_col = result_df.column("status").unwrap();
         let values: Vec<Option<&str>> = status_col.str().unwrap().into_iter().collect();
-        
+
         assert_eq!(values[0], Some("minor")); // age 15 < 18
         assert_eq!(values[1], Some("adult")); // age 25 > 18
         assert_eq!(values[2], Some("adult")); // age 35 > 18
@@ -258,7 +260,8 @@ mod tests {
             "a" => &[Some(1), None, None],
             "b" => &[None, Some(2), None],
             "c" => &[None, None, Some(3)]
-        ).unwrap();
+        )
+        .unwrap();
 
         let col_a = col("a");
         let col_b = col("b");
@@ -266,7 +269,8 @@ mod tests {
         let result = coalesce(&[&col_a, &col_b, &col_c]);
 
         // Apply the expression
-        let result_df = df.lazy()
+        let result_df = df
+            .lazy()
             .with_column(result.into_expr().alias("coalesced"))
             .collect()
             .unwrap();
@@ -274,7 +278,7 @@ mod tests {
         // Verify the result
         let coalesced_col = result_df.column("coalesced").unwrap();
         let values: Vec<Option<i32>> = coalesced_col.i32().unwrap().into_iter().collect();
-        
+
         assert_eq!(values[0], Some(1)); // First non-null is 'a'
         assert_eq!(values[1], Some(2)); // First non-null is 'b'
         assert_eq!(values[2], Some(3)); // First non-null is 'c'
@@ -286,7 +290,8 @@ mod tests {
         let df = df!(
             "a" => &[Some(1), None],
             "b" => &[None::<i32>, None::<i32>]
-        ).unwrap();
+        )
+        .unwrap();
 
         let col_a = col("a");
         let col_b = col("b");
@@ -294,7 +299,8 @@ mod tests {
         let result = coalesce(&[&col_a, &col_b, &fallback]);
 
         // Apply the expression
-        let result_df = df.lazy()
+        let result_df = df
+            .lazy()
             .with_column(result.into_expr().alias("coalesced"))
             .collect()
             .unwrap();
@@ -302,7 +308,7 @@ mod tests {
         // Verify the result
         let coalesced_col = result_df.column("coalesced").unwrap();
         let values: Vec<Option<i32>> = coalesced_col.i32().unwrap().into_iter().collect();
-        
+
         assert_eq!(values[0], Some(1)); // First non-null is 'a'
         assert_eq!(values[1], Some(0)); // All nulls, use fallback
     }

@@ -1,6 +1,6 @@
-use polars::prelude::{DataFrame as PlDataFrame, Expr, PolarsError};
 use crate::column::Column;
 use crate::schema::StructType;
+use polars::prelude::{DataFrame as PlDataFrame, Expr, PolarsError};
 use std::sync::Arc;
 
 /// Join type for DataFrame joins (PySpark-compatible)
@@ -26,7 +26,9 @@ impl DataFrame {
 
     /// Create an empty DataFrame
     pub fn empty() -> Self {
-        DataFrame { df: Arc::new(PlDataFrame::empty()) }
+        DataFrame {
+            df: Arc::new(PlDataFrame::empty()),
+        }
     }
 
     /// Get the schema of the DataFrame
@@ -36,7 +38,12 @@ impl DataFrame {
 
     /// Get column names
     pub fn columns(&self) -> Result<Vec<String>, PolarsError> {
-        Ok(self.df.get_column_names().iter().map(|s| s.to_string()).collect())
+        Ok(self
+            .df
+            .get_column_names()
+            .iter()
+            .map(|s| s.to_string())
+            .collect())
     }
 
     /// Count the number of rows (action - triggers execution)
@@ -160,7 +167,10 @@ impl DataFrame {
         // with_order_descending_multi expects descending flags (true = descending),
         // but we have ascending flags (true = ascending), so invert them
         let descending: Vec<bool> = asc.iter().map(|&a| !a).collect();
-        let sorted = lf.sort_by_exprs(exprs, SortMultipleOptions::new().with_order_descending_multi(descending));
+        let sorted = lf.sort_by_exprs(
+            exprs,
+            SortMultipleOptions::new().with_order_descending_multi(descending),
+        );
         let pl_df = sorted.collect()?;
         Ok(crate::dataframe::DataFrame::from_polars(pl_df))
     }
@@ -189,43 +199,47 @@ impl GroupedData {
         use polars::prelude::*;
         // Use the column name with sum() to match PySpark's sum(column) behavior
         // PySpark returns "sum(column)" as the alias
-        let agg_expr = vec![col(column).sum().alias(&format!("sum({})", column))];
+        let agg_expr = vec![col(column).sum().alias(format!("sum({})", column))];
         let lf = self.lazy_grouped.clone().agg(agg_expr);
         let mut pl_df = lf.collect()?;
-        
+
         // Polars returns columns in a different order than PySpark
         // PySpark: [grouping_cols..., agg_cols...]
         // Polars: might be [agg_cols..., grouping_cols...] or different
         // Reorder to match PySpark: grouping columns first, then aggregations
-        let all_cols: Vec<String> = pl_df.get_column_names().iter().map(|s| s.to_string()).collect();
+        let all_cols: Vec<String> = pl_df
+            .get_column_names()
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
         let grouping_cols: Vec<&str> = self.grouping_cols.iter().map(|s| s.as_str()).collect();
         let mut reordered_cols: Vec<&str> = Vec::new();
-        
+
         // Add grouping columns first
         for gc in &grouping_cols {
             if all_cols.iter().any(|c| c == gc) {
                 reordered_cols.push(gc);
             }
         }
-        
+
         // Then add aggregation columns
         for col_name in &all_cols {
             if !grouping_cols.iter().any(|gc| *gc == col_name) {
                 reordered_cols.push(col_name);
             }
         }
-        
+
         if !reordered_cols.is_empty() {
             pl_df = pl_df.select(reordered_cols)?;
         }
-        
+
         Ok(crate::dataframe::DataFrame::from_polars(pl_df))
     }
 
     /// Average (mean) of a column in each group
     pub fn avg(&self, column: &str) -> Result<DataFrame, PolarsError> {
         use polars::prelude::*;
-        let agg_expr = vec![col(column).mean().alias(&format!("avg({})", column))];
+        let agg_expr = vec![col(column).mean().alias(format!("avg({})", column))];
         let lf = self.lazy_grouped.clone().agg(agg_expr);
         let mut pl_df = lf.collect()?;
         pl_df = reorder_groupby_columns(&mut pl_df, &self.grouping_cols)?;
@@ -235,7 +249,7 @@ impl GroupedData {
     /// Minimum value of a column in each group
     pub fn min(&self, column: &str) -> Result<DataFrame, PolarsError> {
         use polars::prelude::*;
-        let agg_expr = vec![col(column).min().alias(&format!("min({})", column))];
+        let agg_expr = vec![col(column).min().alias(format!("min({})", column))];
         let lf = self.lazy_grouped.clone().agg(agg_expr);
         let mut pl_df = lf.collect()?;
         pl_df = reorder_groupby_columns(&mut pl_df, &self.grouping_cols)?;
@@ -245,7 +259,7 @@ impl GroupedData {
     /// Maximum value of a column in each group
     pub fn max(&self, column: &str) -> Result<DataFrame, PolarsError> {
         use polars::prelude::*;
-        let agg_expr = vec![col(column).max().alias(&format!("max({})", column))];
+        let agg_expr = vec![col(column).max().alias(format!("max({})", column))];
         let lf = self.lazy_grouped.clone().agg(agg_expr);
         let mut pl_df = lf.collect()?;
         pl_df = reorder_groupby_columns(&mut pl_df, &self.grouping_cols)?;
@@ -253,7 +267,7 @@ impl GroupedData {
     }
 
     /// Apply multiple aggregations at once (generic agg method)
-    /// 
+    ///
     /// # Example
     /// ```
     /// use polars::prelude::*;
@@ -285,23 +299,27 @@ fn reorder_groupby_columns(
     pl_df: &mut PlDataFrame,
     grouping_cols: &[String],
 ) -> Result<PlDataFrame, PolarsError> {
-    let all_cols: Vec<String> = pl_df.get_column_names().iter().map(|s| s.to_string()).collect();
+    let all_cols: Vec<String> = pl_df
+        .get_column_names()
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
     let mut reordered_cols: Vec<&str> = Vec::new();
-    
+
     // Add grouping columns first (in their original order)
     for gc in grouping_cols {
         if all_cols.iter().any(|c| c == gc) {
             reordered_cols.push(gc);
         }
     }
-    
+
     // Then add aggregation columns (in their original order)
     for col_name in &all_cols {
         if !grouping_cols.iter().any(|gc| gc == col_name) {
             reordered_cols.push(col_name);
         }
     }
-    
+
     if !reordered_cols.is_empty() && reordered_cols.len() == all_cols.len() {
         pl_df.select(reordered_cols)
     } else {
@@ -311,6 +329,8 @@ fn reorder_groupby_columns(
 
 impl Clone for DataFrame {
     fn clone(&self) -> Self {
-        DataFrame { df: self.df.clone() }
+        DataFrame {
+            df: self.df.clone(),
+        }
     }
 }

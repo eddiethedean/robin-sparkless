@@ -90,6 +90,10 @@ cargo build
 # Run tests
 cargo test
 
+# Run all checks (format, clippy, audit, deny, tests)
+make check
+# Or: RUSTUP_TOOLCHAIN=stable make check
+
 # Build documentation
 cargo doc --open
 ```

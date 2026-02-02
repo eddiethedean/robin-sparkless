@@ -1,5 +1,5 @@
-use polars::prelude::*;
 use crate::column::Column;
+use polars::prelude::*;
 
 /// Convert a Column to a Polars Expr
 pub fn column_to_expr(col: &Column) -> Expr {

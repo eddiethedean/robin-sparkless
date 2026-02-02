@@ -1,13 +1,19 @@
+use crate::dataframe::DataFrame;
 use polars::prelude::{DataFrame as PlDataFrame, NamedFrom, PolarsError, Series};
 use std::collections::HashMap;
 use std::path::Path;
-use crate::dataframe::DataFrame;
 
 /// Builder for creating a SparkSession with configuration options
 pub struct SparkSessionBuilder {
     app_name: Option<String>,
     master: Option<String>,
     config: HashMap<String, String>,
+}
+
+impl Default for SparkSessionBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl SparkSessionBuilder {
@@ -65,7 +71,7 @@ impl SparkSession {
     }
 
     /// Create a DataFrame from a vector of tuples (i64, i64, String)
-    /// 
+    ///
     /// # Example
     /// ```
     /// use robin_sparkless::session::SparkSession;
@@ -257,10 +263,8 @@ mod tests {
 
     #[test]
     fn test_spark_session_builder_basic() {
-        let spark = SparkSession::builder()
-            .app_name("test_app")
-            .get_or_create();
-        
+        let spark = SparkSession::builder().app_name("test_app").get_or_create();
+
         assert_eq!(spark.app_name, Some("test_app".to_string()));
     }
 
@@ -270,7 +274,7 @@ mod tests {
             .app_name("test_app")
             .master("local[*]")
             .get_or_create();
-        
+
         assert_eq!(spark.app_name, Some("test_app".to_string()));
         assert_eq!(spark.master, Some("local[*]".to_string()));
     }
@@ -282,9 +286,15 @@ mod tests {
             .config("spark.executor.memory", "4g")
             .config("spark.driver.memory", "2g")
             .get_or_create();
-        
-        assert_eq!(spark.config.get("spark.executor.memory"), Some(&"4g".to_string()));
-        assert_eq!(spark.config.get("spark.driver.memory"), Some(&"2g".to_string()));
+
+        assert_eq!(
+            spark.config.get("spark.executor.memory"),
+            Some(&"4g".to_string())
+        );
+        assert_eq!(
+            spark.config.get("spark.driver.memory"),
+            Some(&"2g".to_string())
+        );
     }
 
     #[test]
@@ -302,13 +312,13 @@ mod tests {
             (1i64, 25i64, "Alice".to_string()),
             (2i64, 30i64, "Bob".to_string()),
         ];
-        
+
         let result = spark.create_dataframe(data, vec!["id", "age", "name"]);
-        
+
         assert!(result.is_ok());
         let df = result.unwrap();
         assert_eq!(df.count().unwrap(), 2);
-        
+
         let columns = df.columns().unwrap();
         assert!(columns.contains(&"id".to_string()));
         assert!(columns.contains(&"age".to_string()));
@@ -319,11 +329,11 @@ mod tests {
     fn test_create_dataframe_wrong_column_count() {
         let spark = SparkSession::builder().app_name("test").get_or_create();
         let data = vec![(1i64, 25i64, "Alice".to_string())];
-        
+
         // Too few columns
         let result = spark.create_dataframe(data.clone(), vec!["id", "age"]);
         assert!(result.is_err());
-        
+
         // Too many columns
         let result = spark.create_dataframe(data, vec!["id", "age", "name", "extra"]);
         assert!(result.is_err());
@@ -333,9 +343,9 @@ mod tests {
     fn test_create_dataframe_empty() {
         let spark = SparkSession::builder().app_name("test").get_or_create();
         let data: Vec<(i64, i64, String)> = vec![];
-        
+
         let result = spark.create_dataframe(data, vec!["id", "age", "name"]);
-        
+
         assert!(result.is_ok());
         let df = result.unwrap();
         assert_eq!(df.count().unwrap(), 0);
@@ -344,15 +354,16 @@ mod tests {
     #[test]
     fn test_create_dataframe_from_polars() {
         use polars::prelude::df;
-        
+
         let spark = SparkSession::builder().app_name("test").get_or_create();
         let polars_df = df!(
             "x" => &[1, 2, 3],
             "y" => &[4, 5, 6]
-        ).unwrap();
-        
+        )
+        .unwrap();
+
         let df = spark.create_dataframe_from_polars(polars_df);
-        
+
         assert_eq!(df.count().unwrap(), 3);
         let columns = df.columns().unwrap();
         assert!(columns.contains(&"x".to_string()));
@@ -362,36 +373,36 @@ mod tests {
     #[test]
     fn test_read_csv_file_not_found() {
         let spark = SparkSession::builder().app_name("test").get_or_create();
-        
+
         let result = spark.read_csv("nonexistent_file.csv");
-        
+
         assert!(result.is_err());
     }
 
     #[test]
     fn test_read_parquet_file_not_found() {
         let spark = SparkSession::builder().app_name("test").get_or_create();
-        
+
         let result = spark.read_parquet("nonexistent_file.parquet");
-        
+
         assert!(result.is_err());
     }
 
     #[test]
     fn test_read_json_file_not_found() {
         let spark = SparkSession::builder().app_name("test").get_or_create();
-        
+
         let result = spark.read_json("nonexistent_file.json");
-        
+
         assert!(result.is_err());
     }
 
     #[test]
     fn test_sql_not_implemented() {
         let spark = SparkSession::builder().app_name("test").get_or_create();
-        
+
         let result = spark.sql("SELECT * FROM table");
-        
+
         assert!(result.is_err());
         match result {
             Err(PolarsError::InvalidOperation(msg)) => {
@@ -404,7 +415,7 @@ mod tests {
     #[test]
     fn test_spark_session_stop() {
         let spark = SparkSession::builder().app_name("test").get_or_create();
-        
+
         // stop() should complete without error
         spark.stop();
     }
@@ -413,7 +424,7 @@ mod tests {
     fn test_dataframe_reader_api() {
         let spark = SparkSession::builder().app_name("test").get_or_create();
         let reader = spark.read();
-        
+
         // All readers should return errors for non-existent files
         assert!(reader.csv("nonexistent.csv").is_err());
         assert!(reader.parquet("nonexistent.parquet").is_err());
@@ -424,22 +435,22 @@ mod tests {
     fn test_read_csv_with_valid_file() {
         use std::io::Write;
         use tempfile::NamedTempFile;
-        
+
         let spark = SparkSession::builder().app_name("test").get_or_create();
-        
+
         // Create a temporary CSV file
         let mut temp_file = NamedTempFile::new().unwrap();
         writeln!(temp_file, "id,name,age").unwrap();
         writeln!(temp_file, "1,Alice,25").unwrap();
         writeln!(temp_file, "2,Bob,30").unwrap();
         temp_file.flush().unwrap();
-        
+
         let result = spark.read_csv(temp_file.path());
-        
+
         assert!(result.is_ok());
         let df = result.unwrap();
         assert_eq!(df.count().unwrap(), 2);
-        
+
         let columns = df.columns().unwrap();
         assert!(columns.contains(&"id".to_string()));
         assert!(columns.contains(&"name".to_string()));
@@ -450,17 +461,17 @@ mod tests {
     fn test_read_json_with_valid_file() {
         use std::io::Write;
         use tempfile::NamedTempFile;
-        
+
         let spark = SparkSession::builder().app_name("test").get_or_create();
-        
+
         // Create a temporary JSONL file
         let mut temp_file = NamedTempFile::new().unwrap();
         writeln!(temp_file, r#"{{"id":1,"name":"Alice"}}"#).unwrap();
         writeln!(temp_file, r#"{{"id":2,"name":"Bob"}}"#).unwrap();
         temp_file.flush().unwrap();
-        
+
         let result = spark.read_json(temp_file.path());
-        
+
         assert!(result.is_ok());
         let df = result.unwrap();
         assert_eq!(df.count().unwrap(), 2);
@@ -470,16 +481,16 @@ mod tests {
     fn test_read_csv_empty_file() {
         use std::io::Write;
         use tempfile::NamedTempFile;
-        
+
         let spark = SparkSession::builder().app_name("test").get_or_create();
-        
+
         // Create an empty CSV file (just header)
         let mut temp_file = NamedTempFile::new().unwrap();
         writeln!(temp_file, "id,name").unwrap();
         temp_file.flush().unwrap();
-        
+
         let result = spark.read_csv(temp_file.path());
-        
+
         assert!(result.is_ok());
         let df = result.unwrap();
         assert_eq!(df.count().unwrap(), 0);
