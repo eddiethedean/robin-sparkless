@@ -84,4 +84,18 @@ let df_with_lag = df.with_column(
 
 Supported window functions: `row_number()`, `rank()`, `dense_rank()`, `lag(n)`, `lead(n)` — each used with `.over(&["col1", "col2"])` for partitioning.
 
+### String Functions
+
+```rust
+use robin_sparkless::{col, concat, concat_ws, DataFrame};
+
+// upper, lower, substring (1-based start) - via Column methods
+let df = df.with_column("name_upper", col("name").upper().into_expr())?;
+let df = df.with_column("prefix", col("name").substr(1, Some(3)).into_expr())?;
+
+// concat and concat_ws
+let df = df.with_column("full", concat(&[&col("first"), &col("last")]).into_expr())?;
+let df = df.with_column("joined", concat_ws("-", &[&col("a"), &col("b")]).into_expr())?;
+```
+
 For roadmap and Sparkless integration phases, see [ROADMAP.md](ROADMAP.md).

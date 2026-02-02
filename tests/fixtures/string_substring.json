@@ -1,0 +1,79 @@
+{
+  "name": "string_substring",
+  "pyspark_version": "3.5.0",
+  "input": {
+    "schema": [
+      {
+        "name": "id",
+        "type": "bigint"
+      },
+      {
+        "name": "name",
+        "type": "string"
+      }
+    ],
+    "rows": [
+      [
+        1,
+        "Alice"
+      ],
+      [
+        2,
+        "Bob"
+      ],
+      [
+        3,
+        "Charlie"
+      ]
+    ]
+  },
+  "operations": [
+    {
+      "op": "withColumn",
+      "column": "name_prefix",
+      "expr": "substring(col('name'), 1, 3)"
+    },
+    {
+      "op": "orderBy",
+      "columns": [
+        "id"
+      ],
+      "ascending": [
+        true
+      ]
+    }
+  ],
+  "expected": {
+    "schema": [
+      {
+        "name": "id",
+        "type": "bigint"
+      },
+      {
+        "name": "name",
+        "type": "string"
+      },
+      {
+        "name": "name_prefix",
+        "type": "string"
+      }
+    ],
+    "rows": [
+      [
+        1,
+        "Alice",
+        "Ali"
+      ],
+      [
+        2,
+        "Bob",
+        "Bob"
+      ],
+      [
+        3,
+        "Charlie",
+        "Cha"
+      ]
+    ]
+  }
+}

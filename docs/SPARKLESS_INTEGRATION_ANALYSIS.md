@@ -100,7 +100,7 @@ Sparkless has `spark.sql.caseSensitive` (default: false). Robin-sparkless does n
 Sparkless implements **403+ PySpark functions** ([PYSPARK_FUNCTION_MATRIX.md](https://github.com/eddiethedean/sparkless/blob/main/PYSPARK_FUNCTION_MATRIX.md)). Robin-sparkless has a small subset. Priority for backend replacement:
 1. **Aggregates**: count, sum, avg, min, max ✓; extend with stddev, variance, etc.
 2. **Conditional**: when/then/otherwise ✓, coalesce ✓
-3. **String**: concat, upper, lower, substring, regexp_extract, etc.
+3. **String**: concat, upper, lower, substring ✓; regexp_extract, etc.
 4. **Datetime**: date_add, to_date, date_format, etc.
 5. **Window**: row_number, rank, lag, lead
 

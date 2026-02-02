@@ -263,6 +263,30 @@ impl Column {
         Self::from_expr(self.expr().clone().neq(other), None)
     }
 
+    // --- String functions ---
+
+    /// Convert string column to uppercase (PySpark upper)
+    pub fn upper(&self) -> Column {
+        Self::from_expr(self.expr().clone().str().to_uppercase(), None)
+    }
+
+    /// Convert string column to lowercase (PySpark lower)
+    pub fn lower(&self) -> Column {
+        Self::from_expr(self.expr().clone().str().to_lowercase(), None)
+    }
+
+    /// Substring with 1-based start (PySpark substring semantics)
+    pub fn substr(&self, start: i64, length: Option<i64>) -> Column {
+        use polars::prelude::*;
+        let offset = (start - 1).max(0);
+        let offset_expr = lit(offset);
+        let length_expr = length.map(lit).unwrap_or_else(|| lit(i64::MAX)); // No length = rest of string
+        Self::from_expr(
+            self.expr().clone().str().slice(offset_expr, length_expr),
+            None,
+        )
+    }
+
     // --- Window functions ---
 
     /// Apply window partitioning. Returns a new Column with `.over(partition_by)`.

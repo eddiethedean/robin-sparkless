@@ -1,0 +1,105 @@
+{
+  "name": "string_upper_lower",
+  "pyspark_version": "3.5.0",
+  "input": {
+    "schema": [
+      {
+        "name": "id",
+        "type": "bigint"
+      },
+      {
+        "name": "name",
+        "type": "string"
+      },
+      {
+        "name": "dept",
+        "type": "string"
+      }
+    ],
+    "rows": [
+      [
+        1,
+        "Alice",
+        "Sales"
+      ],
+      [
+        2,
+        "Bob",
+        "Engineering"
+      ],
+      [
+        3,
+        "Charlie",
+        "SALES"
+      ]
+    ]
+  },
+  "operations": [
+    {
+      "op": "withColumn",
+      "column": "name_upper",
+      "expr": "upper(col('name'))"
+    },
+    {
+      "op": "withColumn",
+      "column": "dept_lower",
+      "expr": "lower(col('dept'))"
+    },
+    {
+      "op": "orderBy",
+      "columns": [
+        "id"
+      ],
+      "ascending": [
+        true
+      ]
+    }
+  ],
+  "expected": {
+    "schema": [
+      {
+        "name": "id",
+        "type": "bigint"
+      },
+      {
+        "name": "name",
+        "type": "string"
+      },
+      {
+        "name": "dept",
+        "type": "string"
+      },
+      {
+        "name": "name_upper",
+        "type": "string"
+      },
+      {
+        "name": "dept_lower",
+        "type": "string"
+      }
+    ],
+    "rows": [
+      [
+        1,
+        "Alice",
+        "Sales",
+        "ALICE",
+        "sales"
+      ],
+      [
+        2,
+        "Bob",
+        "Engineering",
+        "BOB",
+        "engineering"
+      ],
+      [
+        3,
+        "Charlie",
+        "SALES",
+        "CHARLIE",
+        "sales"
+      ]
+    ]
+  }
+}

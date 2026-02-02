@@ -126,6 +126,41 @@ impl ThenBuilder {
     }
 }
 
+/// Convert string column to uppercase (PySpark upper)
+pub fn upper(column: &Column) -> Column {
+    column.clone().upper()
+}
+
+/// Convert string column to lowercase (PySpark lower)
+pub fn lower(column: &Column) -> Column {
+    column.clone().lower()
+}
+
+/// Substring with 1-based start (PySpark substring semantics)
+pub fn substring(column: &Column, start: i64, length: Option<i64>) -> Column {
+    column.clone().substr(start, length)
+}
+
+/// Concatenate string columns without separator (PySpark concat)
+pub fn concat(columns: &[&Column]) -> Column {
+    use polars::prelude::*;
+    if columns.is_empty() {
+        panic!("concat requires at least one column");
+    }
+    let exprs: Vec<Expr> = columns.iter().map(|c| c.expr().clone()).collect();
+    crate::column::Column::from_expr(concat_str(&exprs, "", false), None)
+}
+
+/// Concatenate string columns with separator (PySpark concat_ws)
+pub fn concat_ws(separator: &str, columns: &[&Column]) -> Column {
+    use polars::prelude::*;
+    if columns.is_empty() {
+        panic!("concat_ws requires at least one column");
+    }
+    let exprs: Vec<Expr> = columns.iter().map(|c| c.expr().clone()).collect();
+    crate::column::Column::from_expr(concat_str(&exprs, separator, false), None)
+}
+
 /// Row number window function (1, 2, 3 by order within partition).
 /// Use with `.over(partition_by)` after ranking by an order column.
 ///

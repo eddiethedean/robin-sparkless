@@ -1,0 +1,93 @@
+{
+  "name": "string_concat",
+  "pyspark_version": "3.5.0",
+  "input": {
+    "schema": [
+      {
+        "name": "id",
+        "type": "bigint"
+      },
+      {
+        "name": "first",
+        "type": "string"
+      },
+      {
+        "name": "last",
+        "type": "string"
+      }
+    ],
+    "rows": [
+      [
+        1,
+        "Alice",
+        "Smith"
+      ],
+      [
+        2,
+        "Bob",
+        "Jones"
+      ]
+    ]
+  },
+  "operations": [
+    {
+      "op": "withColumn",
+      "column": "full_name",
+      "expr": "concat(col('first'), lit(' '), col('last'))"
+    },
+    {
+      "op": "withColumn",
+      "column": "initials",
+      "expr": "concat_ws('.', col('first'), col('last'))"
+    },
+    {
+      "op": "orderBy",
+      "columns": [
+        "id"
+      ],
+      "ascending": [
+        true
+      ]
+    }
+  ],
+  "expected": {
+    "schema": [
+      {
+        "name": "id",
+        "type": "bigint"
+      },
+      {
+        "name": "first",
+        "type": "string"
+      },
+      {
+        "name": "last",
+        "type": "string"
+      },
+      {
+        "name": "full_name",
+        "type": "string"
+      },
+      {
+        "name": "initials",
+        "type": "string"
+      }
+    ],
+    "rows": [
+      [
+        1,
+        "Alice",
+        "Smith",
+        "Alice Smith",
+        "Alice.Smith"
+      ],
+      [
+        2,
+        "Bob",
+        "Jones",
+        "Bob Jones",
+        "Bob.Jones"
+      ]
+    ]
+  }
+}

@@ -42,8 +42,10 @@ Robin-sparkless is designed to **replace the backend logic** of [Sparkless](http
    - ✅ Implemented common join types (inner, left, right, outer) via `DataFrame::join()`
    - ✅ Parity fixtures for inner, left, right, outer joins
 
-4. **Broader expression & function coverage**
-   - Expand built-in functions (string/date/math) with explicit PySpark semantics.
+4. **String functions** ✅ **COMPLETED**
+   - ✅ `upper()`, `lower()`, `substring()` (1-based), `concat()`, `concat_ws()`
+   - ✅ Parity fixtures: `string_upper_lower`, `string_substring`, `string_concat`
+   - Expand built-in functions (date/math) with explicit PySpark semantics.
    - Add additional type coercion and null-handling edge cases as fixtures.
 
 5. **Window functions** ✅ **COMPLETED**

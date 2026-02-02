@@ -958,9 +958,88 @@ fn parse_comparison_expr(src: &str) -> Result<Expr, String> {
     Ok(expr)
 }
 
-/// Parse expressions for withColumn operations (when, coalesce, etc.)
+/// Extract the first argument of func_name(arg, ...) by matching parens
+fn extract_first_arg<'a>(s: &'a str, prefix: &str) -> Result<&'a str, String> {
+    let rest = s.strip_prefix(prefix).ok_or("prefix mismatch")?;
+    let mut depth = 0u32;
+    for (i, ch) in rest.char_indices() {
+        match ch {
+            '(' => depth += 1,
+            ')' => {
+                if depth == 0 {
+                    return Ok(rest[..i].trim());
+                }
+                depth -= 1;
+            }
+            _ => {}
+        }
+    }
+    Err("unmatched parentheses".to_string())
+}
+
+/// Extract column name from col('name') or col("name")
+fn extract_col_name(s: &str) -> Result<&str, String> {
+    let s = s.trim();
+    if !s.starts_with("col(") {
+        return Err(format!("expected col(...), got {}", s));
+    }
+    let content = &s[4..s.len() - 1];
+    let quote = content.find(['\'', '"']).ok_or("missing quote in col()")?;
+    let qchar = content.as_bytes()[quote] as char;
+    let rest = &content[quote + 1..];
+    let end = rest.find(qchar).ok_or("missing closing quote")?;
+    Ok(&content[quote + 1..quote + 1 + end])
+}
+
+/// Helper to parse comma-separated args (respecting nested parens)
+fn parse_comma_separated_args(inner: &str) -> Vec<&str> {
+    let mut parts: Vec<&str> = Vec::new();
+    let mut start = 0;
+    let mut depth = 0;
+    for (i, ch) in inner.char_indices() {
+        match ch {
+            '(' => depth += 1,
+            ')' => depth -= 1,
+            ',' if depth == 0 => {
+                parts.push(inner[start..i].trim());
+                start = i + 1;
+            }
+            _ => {}
+        }
+    }
+    parts.push(inner[start..].trim());
+    parts
+}
+
+/// Parse col/lit from a part string
+fn parse_column_or_literal_for_concat(part: &str) -> Result<robin_sparkless::Column, String> {
+    use robin_sparkless::{col, lit_i64, lit_str};
+    let part = part.trim();
+    if part.starts_with("col(") {
+        let content = &part[4..part.len() - 1];
+        let col_name = content.trim_matches(['\'', '"']);
+        Ok(col(col_name))
+    } else if part.starts_with("lit(") {
+        let content = &part[4..part.len() - 1];
+        let lit_val = content.trim_matches(['\'', '"']);
+        Ok(lit_str(lit_val))
+    } else if (part.starts_with('\'') && part.ends_with('\''))
+        || (part.starts_with('"') && part.ends_with('"'))
+    {
+        let lit_val = part.trim_matches(['\'', '"']);
+        Ok(lit_str(lit_val))
+    } else if let Ok(num) = part.parse::<i64>() {
+        Ok(lit_i64(num))
+    } else {
+        Err(format!("unexpected part: {}", part))
+    }
+}
+
+/// Parse expressions for withColumn operations (when, coalesce, string funcs, etc.)
 fn parse_with_column_expr(src: &str) -> Result<Expr, String> {
-    use robin_sparkless::{coalesce, col, lit_str, when};
+    use robin_sparkless::{
+        coalesce, col, concat, concat_ws, lit_str, lower, substring, upper, when,
+    };
 
     let s = src.trim();
 
@@ -1064,6 +1143,72 @@ fn parse_with_column_expr(src: &str) -> Result<Expr, String> {
         let right_col = col(right_col_name);
         let eq_null_safe_col = left_col.eq_null_safe(&right_col);
         return Ok(eq_null_safe_col.into_expr());
+    }
+
+    // Handle upper(col('name')) - extract arg by matching parens
+    if s.starts_with("upper(") {
+        let inner = extract_first_arg(s, "upper(")?;
+        let col_name = extract_col_name(inner)?;
+        let c = col(col_name);
+        return Ok(upper(&c).into_expr());
+    }
+
+    // Handle lower(col('name'))
+    if s.starts_with("lower(") {
+        let inner = extract_first_arg(s, "lower(")?;
+        let col_name = extract_col_name(inner)?;
+        let c = col(col_name);
+        return Ok(lower(&c).into_expr());
+    }
+
+    // Handle substring(col('name'), start, length) - 1-based start
+    if s.starts_with("substring(") {
+        let inner = extract_first_arg(s, "substring(")?;
+        let parts = parse_comma_separated_args(inner);
+        let col_name = extract_col_name(parts.first().ok_or("substring needs column")?)?;
+        let start: i64 = parts
+            .get(1)
+            .ok_or("substring needs start")?
+            .trim()
+            .parse()
+            .map_err(|e: std::num::ParseIntError| e.to_string())?;
+        let length: Option<i64> = parts.get(2).and_then(|a| a.trim().parse().ok());
+        let c = col(col_name);
+        return Ok(substring(&c, start, length).into_expr());
+    }
+
+    // Handle concat(col('a'), col('b'), lit(' '), ...)
+    if s.starts_with("concat(") {
+        let inner = &s[7..s.len() - 1];
+        let parts = parse_comma_separated_args(inner);
+        let mut columns: Vec<robin_sparkless::Column> = Vec::new();
+        for part in parts {
+            columns.push(parse_column_or_literal_for_concat(part)?);
+        }
+        if columns.is_empty() {
+            return Err("concat requires at least one argument".to_string());
+        }
+        let col_refs: Vec<&robin_sparkless::Column> = columns.iter().collect();
+        return Ok(concat(&col_refs).into_expr());
+    }
+
+    // Handle concat_ws('-', col('a'), col('b'), ...)
+    if s.starts_with("concat_ws(") {
+        let inner = &s[10..s.len() - 1];
+        let parts = parse_comma_separated_args(inner);
+        let separator = parts
+            .first()
+            .ok_or("concat_ws needs separator")?
+            .trim_matches(['\'', '"']);
+        let mut columns: Vec<robin_sparkless::Column> = Vec::new();
+        for part in parts.iter().skip(1) {
+            columns.push(parse_column_or_literal_for_concat(part)?);
+        }
+        if columns.is_empty() {
+            return Err("concat_ws requires at least one column".to_string());
+        }
+        let col_refs: Vec<&robin_sparkless::Column> = columns.iter().collect();
+        return Ok(concat_ws(separator, &col_refs).into_expr());
     }
 
     // Handle standalone lit(None) - create a null column

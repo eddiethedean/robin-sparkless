@@ -17,6 +17,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Window functions**: `Column::rank()`, `row_number()`, `dense_rank()`, `lag()`, `lead()` with `.over(partition_by)`
 - Parity support for `Operation::Window` with row_number, rank, dense_rank, lag, lead
 - Window fixtures: `row_number_window`, `rank_window`, `lag_lead_window`
+- **String functions**: `upper()`, `lower()`, `substring()` (1-based), `concat()`, `concat_ws()`
+- String fixtures: `string_upper_lower`, `string_substring`, `string_concat`
 
 ### Changed
 

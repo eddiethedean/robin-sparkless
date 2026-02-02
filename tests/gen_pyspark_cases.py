@@ -1264,6 +1264,91 @@ def case_outer_join(spark: SparkSession) -> Dict[str, Any]:
     }
 
 
+def case_string_upper_lower(spark: SparkSession) -> Dict[str, Any]:
+    """Test upper() and lower() string functions."""
+    from pyspark.sql.functions import col, lower, upper
+
+    data = [(1, "Alice", "Sales"), (2, "Bob", "Engineering"), (3, "Charlie", "SALES")]
+    df = spark.createDataFrame(data, ["id", "name", "dept"])
+    out_df = (
+        df.withColumn("name_upper", upper(col("name")))
+        .withColumn("dept_lower", lower(col("dept")))
+        .orderBy("id")
+    )
+
+    input_schema = schema_to_json(df.schema)
+    input_rows = df_to_rows(df)
+    expected_schema = schema_to_json(out_df.schema)
+    expected_rows = df_to_rows(out_df)
+
+    return {
+        "name": "string_upper_lower",
+        "pyspark_version": spark.version,
+        "input": {"schema": input_schema, "rows": input_rows},
+        "operations": [
+            {"op": "withColumn", "column": "name_upper", "expr": "upper(col('name'))"},
+            {"op": "withColumn", "column": "dept_lower", "expr": "lower(col('dept'))"},
+            {"op": "orderBy", "columns": ["id"], "ascending": [True]},
+        ],
+        "expected": {"schema": expected_schema, "rows": expected_rows},
+    }
+
+
+def case_string_substring(spark: SparkSession) -> Dict[str, Any]:
+    """Test substring() string function."""
+    from pyspark.sql.functions import col, substring
+
+    data = [(1, "Alice"), (2, "Bob"), (3, "Charlie")]
+    df = spark.createDataFrame(data, ["id", "name"])
+    out_df = df.withColumn("name_prefix", substring(col("name"), 1, 3)).orderBy("id")
+
+    input_schema = schema_to_json(df.schema)
+    input_rows = df_to_rows(df)
+    expected_schema = schema_to_json(out_df.schema)
+    expected_rows = df_to_rows(out_df)
+
+    return {
+        "name": "string_substring",
+        "pyspark_version": spark.version,
+        "input": {"schema": input_schema, "rows": input_rows},
+        "operations": [
+            {"op": "withColumn", "column": "name_prefix", "expr": "substring(col('name'), 1, 3)"},
+            {"op": "orderBy", "columns": ["id"], "ascending": [True]},
+        ],
+        "expected": {"schema": expected_schema, "rows": expected_rows},
+    }
+
+
+def case_string_concat(spark: SparkSession) -> Dict[str, Any]:
+    """Test concat() and concat_ws() string functions."""
+    from pyspark.sql.functions import col, concat, concat_ws, lit
+
+    data = [(1, "Alice", "Smith"), (2, "Bob", "Jones")]
+    df = spark.createDataFrame(data, ["id", "first", "last"])
+    out_df = (
+        df.withColumn("full_name", concat(col("first"), lit(" "), col("last")))
+        .withColumn("initials", concat_ws(".", col("first"), col("last")))
+        .orderBy("id")
+    )
+
+    input_schema = schema_to_json(df.schema)
+    input_rows = df_to_rows(df)
+    expected_schema = schema_to_json(out_df.schema)
+    expected_rows = df_to_rows(out_df)
+
+    return {
+        "name": "string_concat",
+        "pyspark_version": spark.version,
+        "input": {"schema": input_schema, "rows": input_rows},
+        "operations": [
+            {"op": "withColumn", "column": "full_name", "expr": "concat(col('first'), lit(' '), col('last'))"},
+            {"op": "withColumn", "column": "initials", "expr": "concat_ws('.', col('first'), col('last'))"},
+            {"op": "orderBy", "columns": ["id"], "ascending": [True]},
+        ],
+        "expected": {"schema": expected_schema, "rows": expected_rows},
+    }
+
+
 def case_row_number_window(spark: SparkSession) -> Dict[str, Any]:
     """Test row_number() window: partition by dept, order by salary desc."""
     from pyspark.sql.functions import col, row_number
@@ -1401,6 +1486,9 @@ def main() -> None:
         case_left_join(spark),
         case_right_join(spark),
         case_outer_join(spark),
+        case_string_upper_lower(spark),
+        case_string_substring(spark),
+        case_string_concat(spark),
         case_row_number_window(spark),
         case_rank_window(spark),
         case_lag_lead_window(spark),

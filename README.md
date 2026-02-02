@@ -73,7 +73,7 @@ complex.show(Some(10))?;
 df_with_computed.show(Some(10))?;
 ```
 
-The library supports IO (CSV/Parquet/JSON via `SparkSession::read_*`), joins (`DataFrame::join` with Inner/Left/Right/Outer), groupBy aggregates (including multi-agg), and window functions (`row_number`, `rank`, `dense_rank`, `lag`, `lead` with `.over()`). See [docs/QUICKSTART.md](docs/QUICKSTART.md) for more examples.
+The library supports IO (CSV/Parquet/JSON via `SparkSession::read_*`), joins (`DataFrame::join` with Inner/Left/Right/Outer), groupBy aggregates (including multi-agg), window functions (`row_number`, `rank`, `dense_rank`, `lag`, `lead` with `.over()`), and string functions (`upper`, `lower`, `substring`, `concat`, `concat_ws`). See [docs/QUICKSTART.md](docs/QUICKSTART.md) for more examples.
 
 ## Development
 
@@ -107,7 +107,7 @@ Robin Sparkless aims to provide a **PySpark-like API layer** on top of Polars:
 - **Column**: Represents expressions over columns, similar to PySpark’s `Column`; includes window methods (`rank`, `row_number`, `dense_rank`, `lag`, `lead`) with `.over()`.
 - **Functions**: Helper functions like `col()`, `lit_*()`, `count()`, `when`, `coalesce`, window functions, etc., modeled after PySpark’s `pyspark.sql.functions`.
 
-Core behavior (null handling, grouping semantics, joins, window functions, expression behavior) matches PySpark on 33 parity fixtures, with more coverage planned.
+Core behavior (null handling, grouping semantics, joins, window functions, string functions, expression behavior) matches PySpark on 36 parity fixtures, with more coverage planned.
 
 ## Related Documentation
 
@@ -115,7 +115,7 @@ Core behavior (null handling, grouping semantics, joins, window functions, expre
 - [CHANGELOG.md](CHANGELOG.md) – Version history and release notes
 - [docs/SPARKLESS_INTEGRATION_ANALYSIS.md](docs/SPARKLESS_INTEGRATION_ANALYSIS.md) – Sparkless backend replacement strategy, architecture learnings, test conversion
 - [docs/ROADMAP.md](docs/ROADMAP.md) – Development roadmap including Sparkless integration phases
-- [docs/PARITY_STATUS.md](docs/PARITY_STATUS.md) – PySpark parity coverage matrix (33 fixtures)
+- [docs/PARITY_STATUS.md](docs/PARITY_STATUS.md) – PySpark parity coverage matrix (36 fixtures)
 
 ## License
 

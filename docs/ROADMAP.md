@@ -23,7 +23,7 @@
      - ✅ `createDataFrame` from simple rows (`Vec<(i64, i64, String)>` tuples)
      - ✅ `select`, `filter`, `groupBy(...).count()`, `orderBy`
      - ✅ `show`, `collect`, `count`
-   - ✅ Behavior-checked these operations against PySpark on fixtures (33 scenarios passing)
+   - ✅ Behavior-checked these operations against PySpark on fixtures (36 scenarios passing)
 
 3. **Behavioral Tests** ✅
    - ✅ Test harness implemented (`tests/parity.rs`):
@@ -62,11 +62,12 @@
    - ✅ Implement common join types (inner, left, right, outer) with parity fixtures
    - ✅ Multi-agg support in `GroupedData::agg()` with parity fixture
    - ✅ Window functions: row_number, rank, dense_rank, lag, lead with `.over(partition_by)` parity fixtures
+- ✅ String functions: upper, lower, substring, concat, concat_ws with parity fixtures
 
 ### Longer-Term Objectives (3+ months)
 
 7. **Broader API Coverage**
-   - More SQL/math/string/date functions.
+   - More SQL/math/date functions (string basics done).
    - UDF story (likely pure-Rust UDFs, with a clear note that Python UDFs are out of scope).
    - Function parity with Sparkless (403+ PySpark functions); use [PYSPARK_FUNCTION_MATRIX](https://github.com/eddiethedean/sparkless/blob/main/PYSPARK_FUNCTION_MATRIX.md) as checklist.
 
@@ -86,7 +87,7 @@
 
 We know we're on track if:
 
-- ✅ **Behavioral parity**: For core operations (filter, select, orderBy, groupBy+count/sum/avg/min/max/agg, when/coalesce, basic type coercion, null semantics, joins, window functions) and file readers (CSV/Parquet/JSON), PySpark and Robin Sparkless produce the same schema and data on test fixtures. **Status: PASSING (33 fixtures)**
+- ✅ **Behavioral parity**: For core operations (filter, select, orderBy, groupBy+count/sum/avg/min/max/agg, when/coalesce, basic type coercion, null semantics, joins, window functions) and file readers (CSV/Parquet/JSON), PySpark and Robin Sparkless produce the same schema and data on test fixtures. **Status: PASSING (36 fixtures)**
 - ⚠️ **Documentation of differences**: Any divergence from PySpark semantics should be called out explicitly. **Status: TO BE DOCUMENTED**
 - ⚠️ **Performance envelope**: For supported operations, we stay within a small constant factor of doing the same thing directly in Polars. **Status: NOT YET BENCHMARKED**
 
@@ -106,7 +107,8 @@ We know we're on track if:
 - ✅ Null comparison semantics: equality/inequality vs NULL, ordering comparisons vs NULL, and `eqNullSafe`
 - ✅ Numeric type coercion for int/double comparisons and simple arithmetic
 - ✅ Window functions: `Column::rank()`, `row_number()`, `dense_rank()`, `lag()`, `lead()` with `.over(partition_by)`
-- ✅ Parity test harness with 33 passing fixtures:
+- ✅ String functions: `upper()`, `lower()`, `substring()`, `concat()`, `concat_ws()`
+- ✅ Parity test harness with 36 passing fixtures:
   - `filter_age_gt_30`: filter + select + orderBy
   - `filter_and_or`: nested boolean logic with AND/OR and parentheses
   - `filter_nested`: nested boolean logic
@@ -132,6 +134,7 @@ We know we're on track if:
   - `inner_join`, `left_join`, `right_join`, `outer_join`: join operations
   - `groupby_multi_agg`: multiple aggregations in one agg() call
   - `row_number_window`, `rank_window`, `lag_lead_window`: window functions
+  - `string_upper_lower`, `string_substring`, `string_concat`: string functions
 
 **Next Priority:**
 - Additional GroupedData aggregates edge cases (null handling)
