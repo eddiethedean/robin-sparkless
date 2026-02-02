@@ -3,8 +3,9 @@
 ## Current State
 
 - `cargo check` passes for the Rust-only, Polars-backed implementation.
+- `cargo build --features pyo3` builds the Python extension (optional).
 - There are no outstanding Rust compiler errors.
-- `cargo test` passes (unit/integration/doc tests).
+- `cargo test` passes (unit/integration/doc tests). `make test` runs Rust tests plus Python smoke tests (creates `.venv`, installs extension via maturin, runs `pytest tests/python/`).
 
 ## Remaining Work (Non-Compiler)
 

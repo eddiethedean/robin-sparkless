@@ -90,9 +90,10 @@ The path to full backend replacement is planned in [FULL_BACKEND_ROADMAP.md](FUL
    - union, unionByName, distinct, drop, dropna, fillna, limit, withColumnRenamed.
    - crossJoin, replace, describe, cache/persist.
 
-9. **PyO3 Bridge** (Phase 4)
-   - Expose SparkSession, DataFrame, Column to Python.
-   - Sparkless BackendFactory "robin" option.
+9. **PyO3 Bridge** (Phase 4) ✅ **COMPLETED**
+   - Optional `pyo3` feature; `robin_sparkless` Python module with SparkSession, DataFrame, Column, GroupedData.
+   - `create_dataframe`, `read_csv`/`read_parquet`/`read_json`, filter, select, join, group_by, collect (list of dicts), etc.
+   - See [PYTHON_API.md](PYTHON_API.md). Sparkless BackendFactory "robin" option lives in Sparkless repo.
 
 10. **Performance & Robustness** (Phase 7)
     - Benchmark against PySpark and plain Polars.
@@ -104,7 +105,7 @@ The path to full backend replacement is planned in [FULL_BACKEND_ROADMAP.md](FUL
 - **Phase 1 – Foundation**: Structural alignment (split dataframe.rs), case sensitivity, fixture converter. *Prereqs done: joins, windows, strings.*
 - **Phase 2 – High-Value Functions**: String (length, trim, regexp_*), datetime (to_date, date_add), math (stddev, variance)
 - **Phase 3 – DataFrame Methods**: union, unionByName, distinct, drop, dropna, fillna, limit, withColumnRenamed ✅ **COMPLETED**
-- **Phase 4 – PyO3 Bridge**: Python bindings for Sparkless to call robin-sparkless
+- **Phase 4 – PyO3 Bridge**: Python bindings for Sparkless to call robin-sparkless ✅ **COMPLETED** (see [PYTHON_API.md](PYTHON_API.md))
 - **Phase 5 – Test Conversion**: Fixture converter; convert 50+ Sparkless tests; CI integration
 - **Phase 6 – Broad Parity**: Array, Map, JSON, remaining functions (~200)
 - **Phase 7 – SQL & Advanced**: SQL executor, Delta Lake, performance
@@ -125,7 +126,7 @@ We know we're on track if:
 | Functions | ~25 | ~120 | 250+ |
 | DataFrame methods | ~25 | ~40 | 60+ |
 | Sparkless tests passing (robin backend) | 0 | 50+ | 200+ |
-| PyO3 bridge | No | Yes | Yes |
+| PyO3 bridge | ✅ Yes (optional) | Yes | Yes |
 
 ## Current Status (February 2026)
 
@@ -145,6 +146,7 @@ We know we're on track if:
 - ✅ Window functions: `Column::rank()`, `row_number()`, `dense_rank()`, `lag()`, `lead()` with `.over(partition_by)`
 - ✅ String functions: `upper()`, `lower()`, `substring()`, `concat()`, `concat_ws()`
 - ✅ DataFrame methods: `union`, `union_by_name`, `distinct`, `drop`, `dropna`, `fillna`, `limit`, `with_column_renamed`
+- ✅ **PyO3 bridge** (optional `pyo3` feature): Python module `robin_sparkless` with SparkSession, DataFrame, Column, GroupedData; `create_dataframe`, filter, select, join, group_by, collect (list of dicts), etc. Build: `maturin develop --features pyo3`. Tests: `make test` runs Rust + Python smoke tests. See [PYTHON_API.md](PYTHON_API.md).
 - ✅ Parity test harness with 51 passing fixtures:
   - `filter_age_gt_30`: filter + select + orderBy
   - `filter_and_or`: nested boolean logic with AND/OR and parentheses
@@ -175,8 +177,8 @@ We know we're on track if:
   - `union_all`, `union_by_name`, `distinct`, `drop_columns`, `dropna`, `fillna`, `limit`, `with_column_renamed`: DataFrame methods
 
 **Next Priority** (per [FULL_BACKEND_ROADMAP.md](FULL_BACKEND_ROADMAP.md)):
-- Phase 4: PyO3 bridge (Python bindings for Sparkless)
 - Phase 5: Test conversion (convert 50+ Sparkless tests)
+- Phase 6: Broad function parity (array, map, JSON, remaining string/window)
 
 ## Testing Strategy
 

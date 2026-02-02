@@ -11,6 +11,9 @@ pub mod schema;
 pub mod session;
 pub mod type_coercion;
 
+#[cfg(feature = "pyo3")]
+pub mod python;
+
 pub use column::Column;
 pub use dataframe::{DataFrame, GroupedData, JoinType};
 pub use functions::*;

@@ -1,4 +1,4 @@
-.PHONY: build test clean check fmt clippy audit outdated deny all
+.PHONY: build test test-rust test-python clean check fmt clippy audit outdated deny all
 
 # Set RUSTUP_TOOLCHAIN=stable if not configured. Run: RUSTUP_TOOLCHAIN=stable make check
 
@@ -9,9 +9,18 @@ build:
 build-release:
 	cargo build --release
 
-# Run all tests
-test:
+# Run Rust tests only
+test-rust:
 	cargo test
+
+# Run Python tests (creates .venv, installs extension with maturin, runs pytest)
+test-python:
+	@if [ ! -d .venv ]; then python3 -m venv .venv; fi
+	. .venv/bin/activate && pip install -q maturin pytest && maturin develop --features pyo3
+	. .venv/bin/activate && pytest tests/python/ -v
+
+# Run all tests (Rust + Python)
+test: test-rust test-python
 
 # Run all checks (lint, format, security, deny, tests)
 check: fmt clippy audit deny test

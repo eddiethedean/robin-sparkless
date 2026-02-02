@@ -6,10 +6,9 @@ Robin-sparkless is designed to **replace the backend logic** of [Sparkless](http
 
 ## ✅ Completed
 
-### 1. Rust-only Core
-- Removed all PyO3 bindings and Python packaging.
-- Removed DataFusion and Arrow-specific glue.
-- Library now builds as a pure Rust crate exposing a Rust API.
+### 1. Rust Core (default build)
+- Default build is pure Rust (no Python). Library exposes a Rust API.
+- Optional **PyO3 bridge**: `pyo3` feature adds Python bindings; see [PYTHON_API.md](PYTHON_API.md).
 
 ### 2. Polars Integration
 - `DataFrame` wraps a Polars `DataFrame` internally.
@@ -53,7 +52,13 @@ Robin-sparkless is designed to **replace the backend logic** of [Sparkless](http
    - ✅ Parity fixtures: `row_number_window`, `rank_window`, `lag_lead_window`
    - Implement (or explicitly defer) `SparkSession::sql()` with clear documentation.
 
-6. **Sparkless integration**
+6. **PyO3 Bridge** ✅ **COMPLETED** (Phase 4)
+   - Optional `pyo3` feature; `src/python/mod.rs` exposes `robin_sparkless` Python module.
+   - SparkSession, DataFrame, Column, GroupedData; create_dataframe, filter, select, join, group_by, collect (list of dicts), read_csv/parquet/json, etc.
+   - `maturin develop --features pyo3`; Python smoke tests in `tests/python/`; `make test` runs Rust + Python tests.
+   - API contract: [PYTHON_API.md](PYTHON_API.md).
+
+7. **Sparkless integration** (in Sparkless repo)
    - Fixture converter: Sparkless `expected_outputs/` JSON → robin-sparkless fixtures
    - Structural alignment: service-style modules, trait-based backends, case sensitivity
    - Function parity: use [PYSPARK_FUNCTION_MATRIX](https://github.com/eddiethedean/sparkless/blob/main/PYSPARK_FUNCTION_MATRIX.md) as checklist

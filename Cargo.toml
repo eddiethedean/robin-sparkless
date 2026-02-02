@@ -5,7 +5,12 @@ edition = "2021"
 
 [lib]
 name = "robin_sparkless"
+# When building the Python wheel, maturin adds cdylib and sets extension-module linker flags.
 crate-type = ["rlib"]
+
+[features]
+default = []
+pyo3 = ["dep:pyo3"]
 
 [dependencies]
 polars = { version = "0.45", features = ["lazy", "csv", "parquet", "json", "temporal", "strings", "concat_str", "regex", "round_series", "abs", "dtype-categorical", "dtype-date", "dtype-datetime", "dtype-duration", "dtype-time", "rank"] }
@@ -13,6 +18,7 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 anyhow = "1.0"
 thiserror = "1.0"
+pyo3 = { version = "0.22", optional = true, features = ["extension-module"] }
 
 [dev-dependencies]
 polars = { version = "0.45", features = ["lazy", "csv", "parquet", "json", "temporal", "strings", "concat_str", "regex", "round_series", "abs", "dtype-categorical", "dtype-date", "dtype-datetime", "dtype-duration", "dtype-time", "test", "rank"] }

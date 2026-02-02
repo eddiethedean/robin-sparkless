@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Phase 4 PyO3 Bridge**: Optional Python bindings when built with `--features pyo3`.
+  - Python module `robin_sparkless` with PySpark-like API: `SparkSession`, `SparkSessionBuilder`, `DataFrame`, `Column`, `GroupedData`, `WhenBuilder`, `ThenBuilder`.
+  - Session: `builder()`, `get_or_create()`, `create_dataframe`, `read_csv`, `read_parquet`, `read_json`, `is_case_sensitive()`.
+  - DataFrame: `filter`, `select`, `with_column`, `order_by`, `group_by`, `join`, `union`, `union_by_name`, `distinct`, `drop`, `dropna`, `fillna`, `limit`, `with_column_renamed`, `count`, `show`, `collect` (returns list of dicts).
+  - Column/expressions: `col`, `lit`, `when().then().otherwise()`, `coalesce`, `sum`, `avg`, `min`, `max`, `count`; column methods `gt`, `ge`, `lt`, `le`, `eq`, `ne`, `and_`, `or_`, `alias`, `is_null`, `is_not_null`, `upper`, `lower`, `substr`.
+  - GroupedData: `count()`, `sum(column)`, `avg(column)`, `min(column)`, `max(column)`, `agg(exprs)`.
+  - Build/install: `maturin develop --features pyo3` or `maturin build --features pyo3`; `pyproject.toml` for maturin.
+  - Python smoke tests in `tests/python/`; `make test` runs Rust + Python tests (creates `.venv`, installs extension, runs pytest).
+  - API contract documented in [docs/PYTHON_API.md](docs/PYTHON_API.md).
 - `DataFrame::join()` – Join two DataFrames on specified columns
 - `JoinType` enum – Inner, Left, Right, Outer (exported from crate root)
 - Parity test support for join fixtures via `right_input` and `Operation::Join`

@@ -7,7 +7,7 @@ This doc is the **living parity matrix** for `robin-sparkless`.
 - **Fixtures**: `tests/fixtures/*.json`
 - **Sparkless integration**: Robin-sparkless is designed to replace Sparkless's backend. Sparkless has 270+ expected_outputs; a fixture converter can convert those to robin-sparkless format. See [SPARKLESS_INTEGRATION_ANALYSIS.md](SPARKLESS_INTEGRATION_ANALYSIS.md) §4.
 
-Status as of **February 2026**: **PASSING (51 fixtures)**.
+Status as of **February 2026**: **PASSING (51 fixtures)**. Python smoke tests for the PyO3 bridge live in `tests/python/` (run via `make test` or `make test-python`); see [PYTHON_API.md](PYTHON_API.md).
 
 ## Legend
 

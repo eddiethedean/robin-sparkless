@@ -1,4 +1,4 @@
-# Quick Start Guide (Rust)
+# Quick Start Guide
 
 Robin-sparkless is a PySpark-like DataFrame library in Rust, with Polars as the engine. Long-term, it is designed to replace the backend of [Sparkless](https://github.com/eddiethedean/sparkless). See [SPARKLESS_INTEGRATION_ANALYSIS.md](SPARKLESS_INTEGRATION_ANALYSIS.md) for integration details.
 
@@ -7,11 +7,20 @@ Robin-sparkless is a PySpark-like DataFrame library in Rust, with Polars as the 
 ### Prerequisites
 - Rust (latest stable)
 
-### Build
+### Build (Rust only)
 
 ```bash
 cargo build
 ```
+
+### Build with Python extension (optional)
+
+```bash
+pip install maturin
+maturin develop --features pyo3   # Editable install into current env
+```
+
+Then use the `robin_sparkless` Python module; see [PYTHON_API.md](PYTHON_API.md).
 
 ### Add as a dependency
 

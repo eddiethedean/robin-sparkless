@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use std::path::Path;
 
 /// Builder for creating a SparkSession with configuration options
+#[derive(Clone)]
 pub struct SparkSessionBuilder {
     app_name: Option<String>,
     master: Option<String>,
@@ -47,6 +48,7 @@ impl SparkSessionBuilder {
 
 /// Main entry point for creating DataFrames and executing queries
 /// Similar to PySpark's SparkSession but using Polars as the backend
+#[derive(Clone)]
 pub struct SparkSession {
     app_name: Option<String>,
     master: Option<String>,

@@ -13,7 +13,7 @@ This document analyzes the [Sparkless](https://github.com/eddiethedean/sparkless
 | **API** | `from sparkless.sql import SparkSession` | `robin_sparkless::{SparkSession, DataFrame}` |
 | **Goal** | Run existing PySpark tests 10x faster | **Become the execution backend** for Sparkless |
 
-**Integration path**: Sparkless (Python) would use PyO3 or FFI to call robin-sparkless for DataFrame execution. Robin-sparkless implements the Polars-backed engine; Sparkless keeps the PySpark API surface, schema parsing, and Python compatibility.
+**Integration path**: Sparkless (Python) would use PyO3 or FFI to call robin-sparkless for DataFrame execution. Robin-sparkless implements the Polars-backed engine; Sparkless keeps the PySpark API surface, schema parsing, and Python compatibility. The **PyO3 bridge** (Phase 4) is implemented: optional `pyo3` feature exposes the `robin_sparkless` Python module; see [PYTHON_API.md](PYTHON_API.md) for the API contract.
 
 ---
 

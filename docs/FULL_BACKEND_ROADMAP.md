@@ -13,6 +13,7 @@ This document plans the path for **robin-sparkless** to become a complete backen
 | **Functions** | ~25 (col, lit, count, sum, avg, min, max, when, coalesce, upper, lower, substring, concat, concat_ws, row_number, rank, dense_rank, lag, lead) | 403 | ~378 |
 | **DataFrame methods** | ~25 (filter, select, orderBy, groupBy, withColumn, join, union, unionByName, distinct, drop, dropna, fillna, limit, withColumnRenamed, collect, count, show, read_csv, read_parquet, read_json) | 85 | ~60 |
 | **Parity fixtures** | 51 passing | 270+ expected_outputs | 219+ |
+| **PyO3 bridge** | ✅ Optional `pyo3` feature; `robin_sparkless` Python module | — | — |
 | **SQL** | Not implemented | Full DDL/DML support | Full |
 
 ---
@@ -141,28 +142,30 @@ This document plans the path for **robin-sparkless** to become a complete backen
 
 ---
 
-## Phase 4: PyO3 Bridge (4–6 weeks)
+## Phase 4: PyO3 Bridge (4–6 weeks) ✅ **COMPLETED**
 
 **Goal**: Enable Sparkless (Python) to call robin-sparkless (Rust) for execution.
 
 ### 4.1 Crate Layout
 
-- [ ] Create `robin-sparkless-pyo3` (or `robin_sparkless` with `pyo3` feature)
-- [ ] Expose `SparkSession`, `DataFrame`, `Column` as Python classes
-- [ ] Map Polars → PyArrow for data transfer (Sparkless uses Polars Python; may need Arrow intermediate)
+- [x] Optional `pyo3` feature in main crate; `src/python/mod.rs` compiled when `pyo3` enabled
+- [x] Expose `SparkSession`, `SparkSessionBuilder`, `DataFrame`, `Column`, `GroupedData` as Python classes (PySpark-like names)
+- [x] Data transfer: `create_dataframe` (list of 3-tuples); `collect` → list of dicts
 
 ### 4.2 API Surface
 
-- [ ] `SparkSession::create_dataframe(py, data, schema)` → Python
-- [ ] `DataFrame::filter`, `select`, `with_column`, `join`, `group_by`, etc.
-- [ ] `Column` and functions: `col`, `lit`, aggregates, string, datetime
-- [ ] Actions: `collect` → list of dicts or Row objects; `count`, `show`
+- [x] `SparkSession.builder().app_name(...).get_or_create()`, `create_dataframe`, `read_csv`, `read_parquet`, `read_json`
+- [x] `DataFrame`: `filter`, `select`, `with_column`, `order_by`, `group_by`, `join`, `union`, `union_by_name`, `distinct`, `drop`, `dropna`, `fillna`, `limit`, `with_column_renamed`, `count`, `show`, `collect`
+- [x] `Column` and module-level: `col`, `lit`, `when().then().otherwise()`, `coalesce`, `sum`, `avg`, `min`, `max`, `count`
+- [x] `GroupedData`: `count()`, `sum(column)`, `avg(column)`, `min(column)`, `max(column)`, `agg(exprs)`
 
-### 4.3 Sparkless Integration
+### 4.3 Sparkless Integration (out of scope in this repo)
 
-- [ ] Sparkless `BackendFactory` adds "robin" backend option
+- [ ] Sparkless `BackendFactory` adds "robin" backend option (implemented in Sparkless repo)
 - [ ] When "robin" selected, Sparkless delegates to robin-sparkless via PyO3
 - [ ] Fallback: if robin-sparkless doesn't support an op, raise or fall back to Python Polars
+
+See [PYTHON_API.md](PYTHON_API.md) for the API contract Sparkless maintainers need.
 
 ### 4.4 Risks
 
@@ -259,7 +262,7 @@ This document plans the path for **robin-sparkless** to become a complete backen
 | Functions implemented | ~25 | ~85 | ~120 | 250+ |
 | DataFrame methods | ~25 | ~25 | ~40 | 60+ |
 | Sparkless tests passing (robin backend) | 0 | — | 50+ | 200+ |
-| PyO3 bridge | No | No | Yes | Yes |
+| PyO3 bridge | ✅ Yes (optional) | — | Yes | Yes |
 
 ---
 
@@ -268,7 +271,7 @@ This document plans the path for **robin-sparkless** to become a complete backen
 1. **Phase 1**: Fixture converter, case sensitivity, structural split ✅
 2. **Phase 2**: String (length, trim, regexp_*), datetime (to_date, date_add, etc.), math (stddev, variance) ✅
 3. **Phase 3**: union, unionByName, distinct, drop, dropna, fillna, limit, withColumnRenamed ✅
-4. **Phase 4**: PyO3 bridge (can start in parallel with Phase 2/3)
+4. **Phase 4**: PyO3 bridge ✅ **COMPLETED**
 5. **Phase 5**: Convert Sparkless tests, CI integration
 6. **Phase 6**: Array, Map, JSON, remaining string/window
 7. **Phase 7**: SQL, Delta, performance (as needed)
