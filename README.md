@@ -115,6 +115,7 @@ Core behavior (null handling, grouping semantics, joins, window functions, strin
 - [CHANGELOG.md](CHANGELOG.md) – Version history and release notes
 - [docs/SPARKLESS_INTEGRATION_ANALYSIS.md](docs/SPARKLESS_INTEGRATION_ANALYSIS.md) – Sparkless backend replacement strategy, architecture learnings, test conversion
 - [docs/ROADMAP.md](docs/ROADMAP.md) – Development roadmap including Sparkless integration phases
+- [docs/FULL_BACKEND_ROADMAP.md](docs/FULL_BACKEND_ROADMAP.md) – Phased plan to full Sparkless backend replacement (400+ functions, PyO3 bridge)
 - [docs/PARITY_STATUS.md](docs/PARITY_STATUS.md) – PySpark parity coverage matrix (36 fixtures)
 
 ## License

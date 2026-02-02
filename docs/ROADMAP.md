@@ -64,32 +64,68 @@
    - ✅ Window functions: row_number, rank, dense_rank, lag, lead with `.over(partition_by)` parity fixtures
 - ✅ String functions: upper, lower, substring, concat, concat_ws with parity fixtures
 
-### Longer-Term Objectives (3+ months)
+### Longer-Term Objectives (3+ months) – Full Sparkless Backend
 
-7. **Broader API Coverage**
-   - More SQL/math/date functions (string basics done).
-   - UDF story (likely pure-Rust UDFs, with a clear note that Python UDFs are out of scope).
-   - Function parity with Sparkless (403+ PySpark functions); use [PYSPARK_FUNCTION_MATRIX](https://github.com/eddiethedean/sparkless/blob/main/PYSPARK_FUNCTION_MATRIX.md) as checklist.
+The path to full backend replacement is planned in [FULL_BACKEND_ROADMAP.md](FULL_BACKEND_ROADMAP.md). Summary:
 
-8. **Performance & Robustness**
-   - Benchmark against both PySpark and "plain Polars".
-   - Ensure we stay within a reasonable performance factor of Polars for supported operations.
-   - Harden error handling and diagnostics.
+| Phase | Goal | Est. Effort |
+|-------|------|-------------|
+| **1. Foundation** | Structural alignment, case sensitivity, fixture converter | 2–3 weeks |
+| **2. High-Value Functions** | String (length, trim, regexp_*), datetime (to_date, date_add), math (stddev, variance) | 4–6 weeks |
+| **3. DataFrame Methods** | union, distinct, drop, fillna, limit, withColumnRenamed | 3–4 weeks |
+| **4. PyO3 Bridge** | Python bindings so Sparkless can call robin-sparkless | 4–6 weeks |
+| **5. Test Conversion** | Convert 50+ Sparkless tests, CI integration | 2–3 weeks |
+| **6. Broad Function Parity** | Array, Map, JSON, remaining string/window (~200 functions) | 8–12 weeks |
+| **7. SQL & Advanced** | SQL executor, Delta Lake, performance | Ongoing |
 
-### Sparkless Integration Phases (see SPARKLESS_INTEGRATION_ANALYSIS.md)
+7. **Broader API Coverage** (Phases 2 & 6)
+   - String: length, trim, regexp_extract, regexp_replace, split, initcap (string basics ✅ done).
+   - Datetime: to_date, date_add, date_sub, date_format, year, month, day, etc.
+   - Math: abs, ceil, floor, sqrt, stddev, variance, count_distinct.
+   - Array/Map/JSON: array_*, map_*, get_json_object, from_json, to_json.
+   - Function parity with Sparkless (403+); use [PYSPARK_FUNCTION_MATRIX](https://github.com/eddiethedean/sparkless/blob/main/PYSPARK_FUNCTION_MATRIX.md) as checklist.
+   - UDF story: pure-Rust UDFs; Python UDFs out of scope.
 
-- **Phase 1 – Structural Alignment**: Service-style modules (transformations, aggregations, joins), trait-based backends, case sensitivity config
-- **Phase 2 – Function Parity**: String, datetime, aggregates (stddev, variance); fixtures aligned with Sparkless expected_outputs
-- **Phase 3 – Test Conversion**: Fixture converter (Sparkless JSON → robin-sparkless JSON); convert 10–20 high-value tests; CI integration
-- **Phase 4 – Windows**: ✅ Implement window functions (row_number, rank, dense_rank, lag, lead); convert Sparkless window parity tests (joins ✅ complete)
+8. **DataFrame Methods** (Phase 3)
+   - union, unionByName, distinct, drop, dropna, fillna, limit, withColumnRenamed.
+   - crossJoin, replace, describe, cache/persist.
+
+9. **PyO3 Bridge** (Phase 4)
+   - Expose SparkSession, DataFrame, Column to Python.
+   - Sparkless BackendFactory "robin" option.
+
+10. **Performance & Robustness** (Phase 7)
+    - Benchmark against PySpark and plain Polars.
+    - Ensure within 2x of Polars for supported ops.
+    - Harden error handling and diagnostics.
+
+### Sparkless Integration Phases (see SPARKLESS_INTEGRATION_ANALYSIS.md, FULL_BACKEND_ROADMAP.md)
+
+- **Phase 1 – Foundation**: Structural alignment (split dataframe.rs), case sensitivity, fixture converter. *Prereqs done: joins, windows, strings.*
+- **Phase 2 – High-Value Functions**: String (length, trim, regexp_*), datetime (to_date, date_add), math (stddev, variance)
+- **Phase 3 – DataFrame Methods**: union, distinct, drop, fillna, limit
+- **Phase 4 – PyO3 Bridge**: Python bindings for Sparkless to call robin-sparkless
+- **Phase 5 – Test Conversion**: Fixture converter; convert 50+ Sparkless tests; CI integration
+- **Phase 6 – Broad Parity**: Array, Map, JSON, remaining functions (~200)
+- **Phase 7 – SQL & Advanced**: SQL executor, Delta Lake, performance
 
 ## Success Metrics
 
 We know we're on track if:
 
-- ✅ **Behavioral parity**: For core operations (filter, select, orderBy, groupBy+count/sum/avg/min/max/agg, when/coalesce, basic type coercion, null semantics, joins, window functions) and file readers (CSV/Parquet/JSON), PySpark and Robin Sparkless produce the same schema and data on test fixtures. **Status: PASSING (36 fixtures)**
+- ✅ **Behavioral parity**: For core operations (filter, select, orderBy, groupBy+count/sum/avg/min/max/agg, when/coalesce, basic type coercion, null semantics, joins, window functions, string functions) and file readers (CSV/Parquet/JSON), PySpark and Robin Sparkless produce the same schema and data on test fixtures. **Status: PASSING (36 fixtures)**
 - ⚠️ **Documentation of differences**: Any divergence from PySpark semantics should be called out explicitly. **Status: TO BE DOCUMENTED**
 - ⚠️ **Performance envelope**: For supported operations, we stay within a small constant factor of doing the same thing directly in Polars. **Status: NOT YET BENCHMARKED**
+
+**Full backend targets** (see [FULL_BACKEND_ROADMAP.md](FULL_BACKEND_ROADMAP.md)):
+
+| Metric | Current | Phase 5 | Full Backend |
+|--------|---------|---------|--------------|
+| Parity fixtures | 36 | 80+ | 150+ |
+| Functions | ~25 | ~120 | 250+ |
+| DataFrame methods | ~15 | ~40 | 60+ |
+| Sparkless tests passing (robin backend) | 0 | 50+ | 200+ |
+| PyO3 bridge | No | Yes | Yes |
 
 ## Current Status (February 2026)
 
@@ -136,8 +172,9 @@ We know we're on track if:
   - `row_number_window`, `rank_window`, `lag_lead_window`: window functions
   - `string_upper_lower`, `string_substring`, `string_concat`: string functions
 
-**Next Priority:**
-- Additional GroupedData aggregates edge cases (null handling)
+**Next Priority** (per [FULL_BACKEND_ROADMAP.md](FULL_BACKEND_ROADMAP.md)):
+- Phase 1: Structural alignment (split dataframe.rs), case sensitivity, fixture converter
+- Phase 2: High-value functions (length, trim, regexp_extract, to_date, date_add, stddev, variance)
 
 ## Testing Strategy
 
