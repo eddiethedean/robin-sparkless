@@ -104,8 +104,8 @@ Robin Sparkless aims to provide a **PySpark-like API layer** on top of Polars:
 
 - **SparkSession**: Entry point for creating `DataFrame`s and reading data sources (CSV, Parquet, JSON).
 - **DataFrame**: Main tabular data structure; operations include `filter`, `select`, `order_by`, `group_by`, `with_column`, `join`.
-- **Column**: Represents expressions over columns, similar to PySpark’s `Column`.
-- **Functions**: Helper functions like `col()`, `lit_*()`, `count()`, `when`, `coalesce`, etc., modeled after PySpark’s `pyspark.sql.functions`.
+- **Column**: Represents expressions over columns, similar to PySpark’s `Column`; includes window methods (`rank`, `row_number`, `dense_rank`, `lag`, `lead`) with `.over()`.
+- **Functions**: Helper functions like `col()`, `lit_*()`, `count()`, `when`, `coalesce`, window functions, etc., modeled after PySpark’s `pyspark.sql.functions`.
 
 Core behavior (null handling, grouping semantics, joins, window functions, expression behavior) matches PySpark on 33 parity fixtures, with more coverage planned.
 

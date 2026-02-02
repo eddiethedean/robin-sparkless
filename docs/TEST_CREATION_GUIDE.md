@@ -174,7 +174,10 @@ As the Rust API stabilizes, replace the `run_fixture_smoke` body with:
      - `filter`: parse the simple `expr` and build an equivalent `Column` / `Expr` in Rust.
      - `select`: call your `DataFrame::select`.
      - `orderBy`: translate to sort calls.
-     - Add `groupBy` / `agg` / `join` as support lands.
+     - `groupBy` / `agg`: group by columns, apply single or multiple aggregations.
+     - `join`: join with right DataFrame (requires `right_input` in fixture).
+     - `withColumn`: add computed columns (when/coalesce, arithmetic, window expressions).
+     - `window`: add window function columns (row_number, rank, dense_rank, lag, lead).
 
 3. **Comparison**
    - Collect the final `DataFrame` to a simple schema + rows representation.

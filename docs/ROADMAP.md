@@ -23,7 +23,7 @@
      - ✅ `createDataFrame` from simple rows (`Vec<(i64, i64, String)>` tuples)
      - ✅ `select`, `filter`, `groupBy(...).count()`, `orderBy`
      - ✅ `show`, `collect`, `count`
-   - ✅ Behavior-checked these operations against PySpark on fixtures (29 scenarios passing)
+   - ✅ Behavior-checked these operations against PySpark on fixtures (33 scenarios passing)
 
 3. **Behavioral Tests** ✅
    - ✅ Test harness implemented (`tests/parity.rs`):
