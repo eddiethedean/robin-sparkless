@@ -216,6 +216,161 @@ pub fn apply_format_number(column: Column, decimals: u32) -> PolarsResult<Option
     Ok(Some(Column::new(name, out.into_series())))
 }
 
+/// Format columns with printf-style format string (PySpark format_string / printf).
+/// Supports %s, %d, %i, %f, %g, %%. Null in any column yields null result.
+pub fn apply_format_string(columns: &mut [Column], format: &str) -> PolarsResult<Option<Column>> {
+    let n = columns.len();
+    if n == 0 {
+        return Err(PolarsError::ComputeError(
+            "format_string needs at least one column".into(),
+        ));
+    }
+    let name = columns[0].field().into_owned().name;
+    let mut series_vec: Vec<Series> = Vec::with_capacity(n);
+    for col in columns.iter_mut() {
+        series_vec.push(std::mem::take(col).take_materialized_series());
+    }
+    let len = series_vec[0].len();
+    let mut result = Vec::with_capacity(len);
+    for i in 0..len {
+        let mut values: Vec<Option<String>> = Vec::with_capacity(n);
+        for s in &series_vec {
+            let v = match s.dtype() {
+                DataType::String => s.str().unwrap().get(i).map(|v| v.to_string()),
+                DataType::Int32 => s.i32().unwrap().get(i).map(|v| v.to_string()),
+                DataType::Int64 => s.i64().unwrap().get(i).map(|v| v.to_string()),
+                DataType::Float32 => s.f32().unwrap().get(i).map(|v| v.to_string()),
+                DataType::Float64 => s.f64().unwrap().get(i).map(|v| v.to_string()),
+                DataType::Boolean => s.bool().unwrap().get(i).map(|v| v.to_string()),
+                _ => s.get(i).ok().map(|av| av.to_string()),
+            };
+            values.push(v);
+        }
+        let out = format_string_row(format, &values);
+        result.push(out);
+    }
+    let out = StringChunked::from_iter_options(name.as_str().into(), result.into_iter());
+    Ok(Some(Column::new(name, out.into_series())))
+}
+
+fn format_string_row(format: &str, values: &[Option<String>]) -> Option<String> {
+    let mut out = String::new();
+    let mut idx = 0;
+    let mut chars = format.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '%' {
+            match chars.next() {
+                Some('%') => out.push('%'),
+                Some('s') => {
+                    if idx >= values.len() {
+                        return None;
+                    }
+                    match &values[idx] {
+                        Some(v) => out.push_str(v),
+                        None => return None,
+                    }
+                    idx += 1;
+                }
+                Some('d') | Some('i') => {
+                    if idx >= values.len() {
+                        return None;
+                    }
+                    match &values[idx] {
+                        Some(v) => out.push_str(v),
+                        None => return None,
+                    }
+                    idx += 1;
+                }
+                Some('f') | Some('g') | Some('e') => {
+                    if idx >= values.len() {
+                        return None;
+                    }
+                    match &values[idx] {
+                        Some(v) => out.push_str(v),
+                        None => return None,
+                    }
+                    idx += 1;
+                }
+                _ => return None,
+            }
+        } else {
+            out.push(c);
+        }
+    }
+    Some(out)
+}
+
+/// Find 1-based index of str in comma-delimited set (PySpark find_in_set).
+/// Returns 0 if not found or if str contains comma.
+/// map_many: columns[0]=str, columns[1]=set
+pub fn apply_find_in_set(columns: &mut [Column]) -> PolarsResult<Option<Column>> {
+    if columns.len() < 2 {
+        return Err(PolarsError::ComputeError(
+            "find_in_set needs two columns".into(),
+        ));
+    }
+    let name = columns[0].field().into_owned().name;
+    let str_series = std::mem::take(&mut columns[0]).take_materialized_series();
+    let set_series = std::mem::take(&mut columns[1]).take_materialized_series();
+    let str_ca = str_series
+        .str()
+        .map_err(|e| PolarsError::ComputeError(format!("find_in_set: {}", e).into()))?;
+    let set_ca = set_series
+        .str()
+        .map_err(|e| PolarsError::ComputeError(format!("find_in_set: {}", e).into()))?;
+    let out = Int64Chunked::from_iter_options(
+        name.as_str().into(),
+        str_ca
+            .into_iter()
+            .zip(set_ca)
+            .map(|(opt_str, opt_set)| match (opt_str, opt_set) {
+                (Some(s), Some(set_str)) => {
+                    if s.contains(',') {
+                        Some(0i64)
+                    } else {
+                        let parts: Vec<&str> = set_str.split(',').collect();
+                        let idx = parts.iter().position(|p| *p == s);
+                        Some(idx.map(|i| (i + 1) as i64).unwrap_or(0))
+                    }
+                }
+                _ => None,
+            }),
+    );
+    Ok(Some(Column::new(name, out.into_series())))
+}
+
+/// Regexp instr: 1-based position of first regex match (PySpark regexp_instr).
+/// group_idx: 0 = full match, 1+ = capture group. Returns null if no match.
+pub fn apply_regexp_instr(
+    column: Column,
+    pattern: String,
+    group_idx: usize,
+) -> PolarsResult<Option<Column>> {
+    use regex::Regex;
+    let name = column.field().into_owned().name;
+    let series = column.take_materialized_series();
+    let ca = series
+        .str()
+        .map_err(|e| PolarsError::ComputeError(format!("regexp_instr: {}", e).into()))?;
+    let re = Regex::new(&pattern).map_err(|e| {
+        PolarsError::ComputeError(format!("regexp_instr invalid regex '{}': {}", pattern, e).into())
+    })?;
+    let out = Int64Chunked::from_iter_options(
+        name.as_str().into(),
+        ca.into_iter().map(|opt_s| {
+            opt_s.and_then(|s| {
+                let m = if group_idx == 0 {
+                    re.find(s)
+                } else {
+                    re.captures(s).and_then(|cap| cap.get(group_idx))
+                };
+                m.map(|m| (m.start() + 1) as i64)
+            })
+        }),
+    );
+    Ok(Some(Column::new(name, out.into_series())))
+}
+
 /// Base64 encode string bytes (PySpark base64). Input string UTF-8, output base64 string.
 pub fn apply_base64(column: Column) -> PolarsResult<Option<Column>> {
     use base64::Engine;

@@ -310,13 +310,13 @@ To reach **full Sparkless parity** (robin-sparkless as a complete backend replac
 
 ---
 
-### Phase 16 – Remaining gaps 1: string and regex (2–3 weeks)
+### Phase 16 – Remaining gaps 1: string and regex (2–3 weeks) ✅ **COMPLETED**
 
 **Goal**: Implement remaining string/regex functions from [PHASE15_GAP_LIST.md](PHASE15_GAP_LIST.md) and [GAP_ANALYSIS_SPARKLESS_3.28.md](GAP_ANALYSIS_SPARKLESS_3.28.md).
 
-- **String/regex**: `regexp_count`, `regexp_instr`, `regexp_substr`, `split_part`, `find_in_set`, `format_string`, `printf`; optional `btrim`, `conv`.
-- **Parity**: Parser branches and fixtures for new functions.
-- **PyO3**: Expose on Column and module.
+- **String/regex**: `regexp_count`, `regexp_instr`, `regexp_substr`, `split_part`, `find_in_set`, `format_string`, `printf` — all implemented; optional `btrim`, `conv` deferred.
+- **Parity**: Parser branches and fixtures (`regexp_count`, `regexp_substr`, `regexp_instr`, `split_part`, `find_in_set`, `format_string`).
+- **PyO3**: Exposed on Column and module.
 - **Outcome**: String/regex gap closed; ready for Phase 17.
 
 ---

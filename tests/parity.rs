@@ -1633,14 +1633,15 @@ fn parse_with_column_expr(src: &str) -> Result<Expr, String> {
         array_sum, ascii, asin, asinh, atan, atan2, atanh, base64, cast, cbrt, ceiling,
         char as rs_char, chr, coalesce, col, concat, concat_ws, contains, cos, cosh, current_date,
         current_timestamp, date_add, date_sub, datediff, day, dayofmonth, dayofweek, dayofyear,
-        degrees, element_at, endswith, exp, expm1, format_number, greatest, hour, hypot, ilike,
-        initcap, instr, isnan, isnotnull, isnull, last_day, lcase, least, left, length, like,
-        lit_str, ln, log, log10, log1p, log2, lower, lpad, md5, minute, months_between, nanvl,
-        next_day, nullif, nvl, nvl2, overlay, position, pow, power, quarter, radians,
-        regexp_extract, regexp_extract_all, regexp_like, regexp_replace, repeat, replace, reverse,
-        right, rint, rlike, rpad, second, sha1, sha2, signum, sin, sinh, size, split, sqrt,
-        startswith, substr, substring, tan, tanh, to_degrees, to_radians, trim, trunc, try_cast,
-        ucase, unbase64, upper, weekofyear, when,
+        degrees, element_at, endswith, exp, expm1, find_in_set, format_number, format_string,
+        greatest, hour, hypot, ilike, initcap, instr, isnan, isnotnull, isnull, last_day, lcase,
+        least, left, length, like, lit_str, ln, log, log10, log1p, log2, lower, lpad, md5, minute,
+        months_between, nanvl, next_day, nullif, nvl, nvl2, overlay, position, pow, power, printf,
+        quarter, radians, regexp_count, regexp_extract, regexp_extract_all, regexp_instr,
+        regexp_like, regexp_replace, regexp_substr, repeat, replace, reverse, right, rint, rlike,
+        rpad, second, sha1, sha2, signum, sin, sinh, size, split, split_part, sqrt, startswith,
+        substr, substring, tan, tanh, to_degrees, to_radians, trim, trunc, try_cast, ucase,
+        unbase64, upper, weekofyear, when,
     };
 
     let s = src.trim();
@@ -1985,6 +1986,100 @@ fn parse_with_column_expr(src: &str) -> Result<Expr, String> {
             .trim_matches(['\'', '"']);
         let c = col(col_name);
         return Ok(regexp_like(&c, pattern).into_expr());
+    }
+
+    // Handle regexp_count(col('name'), pattern)
+    if s.starts_with("regexp_count(") {
+        let inner = extract_first_arg(s, "regexp_count(")?;
+        let parts = parse_comma_separated_args(inner);
+        let col_name = extract_col_name(parts.first().ok_or("regexp_count needs column")?)?;
+        let pattern = parts
+            .get(1)
+            .ok_or("regexp_count needs pattern")?
+            .trim_matches(['\'', '"']);
+        let c = col(col_name);
+        return Ok(regexp_count(&c, pattern).into_expr());
+    }
+
+    // Handle regexp_instr(col('name'), pattern) or regexp_instr(col('name'), pattern, idx)
+    if s.starts_with("regexp_instr(") {
+        let inner = extract_first_arg(s, "regexp_instr(")?;
+        let parts = parse_comma_separated_args(inner);
+        let col_name = extract_col_name(parts.first().ok_or("regexp_instr needs column")?)?;
+        let pattern = parts
+            .get(1)
+            .ok_or("regexp_instr needs pattern")?
+            .trim_matches(['\'', '"']);
+        let group_idx: Option<usize> = parts.get(2).and_then(|p| p.trim().parse().ok());
+        let c = col(col_name);
+        return Ok(regexp_instr(&c, pattern, group_idx).into_expr());
+    }
+
+    // Handle regexp_substr(col('name'), pattern)
+    if s.starts_with("regexp_substr(") {
+        let inner = extract_first_arg(s, "regexp_substr(")?;
+        let parts = parse_comma_separated_args(inner);
+        let col_name = extract_col_name(parts.first().ok_or("regexp_substr needs column")?)?;
+        let pattern = parts
+            .get(1)
+            .ok_or("regexp_substr needs pattern")?
+            .trim_matches(['\'', '"']);
+        let c = col(col_name);
+        return Ok(regexp_substr(&c, pattern).into_expr());
+    }
+
+    // Handle split_part(col('name'), delimiter, part_num)
+    if s.starts_with("split_part(") {
+        let inner = extract_first_arg(s, "split_part(")?;
+        let parts = parse_comma_separated_args(inner);
+        let col_name = extract_col_name(parts.first().ok_or("split_part needs column")?)?;
+        let delimiter = parts
+            .get(1)
+            .ok_or("split_part needs delimiter")?
+            .trim()
+            .trim_matches(['\'', '"']);
+        let part_num: i64 = parts
+            .get(2)
+            .ok_or("split_part needs part_num")?
+            .trim()
+            .parse()
+            .map_err(|e: std::num::ParseIntError| e.to_string())?;
+        let c = col(col_name);
+        return Ok(split_part(&c, delimiter, part_num).into_expr());
+    }
+
+    // Handle find_in_set(col('str'), col('set'))
+    if s.starts_with("find_in_set(") {
+        let inner = extract_first_arg(s, "find_in_set(")?;
+        let parts = parse_comma_separated_args(inner);
+        let str_col_name = extract_col_name(parts.first().ok_or("find_in_set needs str column")?)?;
+        let set_col_name = extract_col_name(parts.get(1).ok_or("find_in_set needs set column")?)?;
+        let str_c = col(str_col_name);
+        let set_c = col(set_col_name);
+        return Ok(find_in_set(&str_c, &set_c).into_expr());
+    }
+
+    // Handle format_string('%d %s', col('a'), col('b')) and printf(...)
+    if s.starts_with("format_string(") || s.starts_with("printf(") {
+        let prefix = if s.starts_with("format_string(") {
+            "format_string("
+        } else {
+            "printf("
+        };
+        let inner = extract_first_arg(s, prefix)?;
+        let parts = parse_comma_separated_args(inner);
+        let format_str = parts
+            .first()
+            .ok_or("format_string/printf needs format")?
+            .trim()
+            .trim_matches(['\'', '"']);
+        let mut cols: Vec<robin_sparkless::Column> = Vec::new();
+        for p in parts.iter().skip(1) {
+            let col_name = extract_col_name(p.trim())?;
+            cols.push(col(col_name));
+        }
+        let col_refs: Vec<&robin_sparkless::Column> = cols.iter().collect();
+        return Ok(format_string(format_str, &col_refs).into_expr());
     }
 
     // Handle split(col('name'), delimiter)

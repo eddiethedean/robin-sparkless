@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Phase 16 – Remaining gaps 1: string/regex** ✅ **COMPLETED**
+  - **String/regex**: `regexp_count`, `regexp_instr`, `regexp_substr`, `split_part`, `find_in_set`, `format_string`, `printf` (Rust + PyO3 + parity parser).
+  - **Implementation**: `regexp_count` via Polars `str().count_matches()`, `regexp_substr` as alias of `regexp_extract(0)`, `regexp_instr` and `find_in_set` via UDFs in udfs.rs, `format_string`/`printf` with printf-style %s/%d/%f/%g parsing, `split_part` via split + list.get.
+  - **Parity fixtures**: `regexp_count`, `regexp_substr`, `regexp_instr`, `split_part`, `find_in_set`, `format_string` (88 → 94 fixtures).
+
 - **Phase 15 – Functions batch 3** ✅ **COMPLETED**
   - **Batch 1 (aliases/simple)**: `nvl`, `ifnull`, `nvl2`, `substr`, `power`, `ln`, `ceiling`, `lcase`, `ucase`, `dayofmonth`, `to_degrees`, `to_radians`, `isnull`, `isnotnull` (Rust + PyO3 + parity parser). Fixture `phase15_aliases_nvl_isnull`.
   - **Batch 2 (string)**: `left`, `right`, `replace` (literal), `startswith`, `endswith`, `contains`, `like` (SQL LIKE → regex), `ilike`, `rlike`/`regexp`. Fixture `string_left_right_replace`.

@@ -487,6 +487,46 @@ impl Column {
         )
     }
 
+    /// Count of non-overlapping regex matches (PySpark regexp_count).
+    pub fn regexp_count(&self, pattern: &str) -> Column {
+        use polars::prelude::*;
+        Self::from_expr(
+            self.expr()
+                .clone()
+                .str()
+                .count_matches(lit(pattern.to_string()), false)
+                .cast(DataType::Int64),
+            None,
+        )
+    }
+
+    /// First substring matching regex (PySpark regexp_substr). Null if no match.
+    pub fn regexp_substr(&self, pattern: &str) -> Column {
+        self.regexp_extract(pattern, 0)
+    }
+
+    /// 1-based position of first regex match (PySpark regexp_instr). group_idx 0 = full match; null if no match.
+    pub fn regexp_instr(&self, pattern: &str, group_idx: Option<usize>) -> Column {
+        let idx = group_idx.unwrap_or(0);
+        let pattern = pattern.to_string();
+        let expr = self.expr().clone().map(
+            move |s| crate::udfs::apply_regexp_instr(s, pattern.clone(), idx),
+            GetOutput::from_type(DataType::Int64),
+        );
+        Self::from_expr(expr, None)
+    }
+
+    /// 1-based index of self in comma-delimited set column (PySpark find_in_set). 0 if not found or self contains comma.
+    pub fn find_in_set(&self, set_column: &Column) -> Column {
+        let args = [set_column.expr().clone()];
+        let expr = self.expr().clone().map_many(
+            crate::udfs::apply_find_in_set,
+            &args,
+            GetOutput::from_type(DataType::Int64),
+        );
+        Self::from_expr(expr, None)
+    }
+
     /// Repeat string column n times (PySpark repeat). Each element repeated n times.
     pub fn repeat(&self, n: i32) -> Column {
         use polars::prelude::*;
@@ -587,6 +627,29 @@ impl Column {
                 .replace_all(lit("[^A-Za-z0-9]".to_string()), lit(o), false);
         }
         Self::from_expr(e, None)
+    }
+
+    /// Split by delimiter and return 1-based part (PySpark split_part).
+    /// part_num > 0: from left; part_num < 0: from right; part_num = 0: null; out-of-range: empty string.
+    pub fn split_part(&self, delimiter: &str, part_num: i64) -> Column {
+        use polars::prelude::*;
+        if part_num == 0 {
+            return Self::from_expr(Expr::Literal(LiteralValue::Null), None);
+        }
+        let delim = delimiter.to_string();
+        let split_expr = self.expr().clone().str().split(lit(delim));
+        // Polars list.get: 0-based; -1 = last. part_num 1 -> index 0, part_num -1 -> index -1.
+        let index = if part_num > 0 {
+            lit(part_num - 1)
+        } else {
+            lit(part_num) // -1, -2, etc. work for list.get
+        };
+        let get_expr = split_expr.list().get(index, true).fill_null(lit(""));
+        // Preserve null when source string was null
+        let expr = when(self.expr().clone().is_null())
+            .then(Expr::Literal(LiteralValue::Null))
+            .otherwise(get_expr);
+        Self::from_expr(expr, None)
     }
 
     /// Substring before/after nth delimiter (PySpark substring_index). count > 0: before nth from left; count < 0: after nth from right.

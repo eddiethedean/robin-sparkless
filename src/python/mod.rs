@@ -6,12 +6,13 @@ use crate::dataframe::JoinType;
 use crate::functions::{
     acos, acosh, add_months, array_compact, array_distinct, ascii, asin, asinh, atan, atan2, atanh,
     base64, cast as rs_cast, cbrt, ceiling, chr, contains, cos, cosh, day, dayofmonth, dayofweek,
-    dayofyear, degrees, endswith, expm1, format_number, greatest as rs_greatest, hypot, ifnull,
-    ilike, isnan as rs_isnan, isnotnull, isnull, lcase, least as rs_least, left, like, ln, log10,
-    log1p, log2, md5, months_between, next_day, nvl, nvl2, overlay, position as rs_position, power,
-    quarter, radians, replace as rs_replace, right, rint, rlike, sha1, sha2, signum, sin, sinh,
-    startswith, substr, tan, tanh, to_degrees, to_radians, try_cast as rs_try_cast, ucase,
-    unbase64, weekofyear,
+    dayofyear, degrees, endswith, expm1, find_in_set, format_number, format_string,
+    greatest as rs_greatest, hypot, ifnull, ilike, isnan as rs_isnan, isnotnull, isnull, lcase,
+    least as rs_least, left, like, ln, log10, log1p, log2, md5, months_between, next_day, nvl,
+    nvl2, overlay, position as rs_position, power, quarter, radians, regexp_count, regexp_instr,
+    regexp_substr, replace as rs_replace, right, rint, rlike, sha1, sha2, signum, sin, sinh,
+    split_part, startswith, substr, tan, tanh, to_degrees, to_radians, try_cast as rs_try_cast,
+    ucase, unbase64, weekofyear,
 };
 use crate::functions::{avg, coalesce, col as rs_col, count, max, min, sum as rs_sum};
 use crate::{DataFrame, GroupedData, SparkSession};
@@ -103,6 +104,14 @@ fn robin_sparkless(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("like", wrap_pyfunction!(py_like, m)?)?;
     m.add("ilike", wrap_pyfunction!(py_ilike, m)?)?;
     m.add("rlike", wrap_pyfunction!(py_rlike, m)?)?;
+    // Phase 16: string/regex (regexp_count, regexp_instr, regexp_substr, split_part, find_in_set, format_string, printf)
+    m.add("regexp_count", wrap_pyfunction!(py_regexp_count, m)?)?;
+    m.add("regexp_instr", wrap_pyfunction!(py_regexp_instr, m)?)?;
+    m.add("regexp_substr", wrap_pyfunction!(py_regexp_substr, m)?)?;
+    m.add("split_part", wrap_pyfunction!(py_split_part, m)?)?;
+    m.add("find_in_set", wrap_pyfunction!(py_find_in_set, m)?)?;
+    m.add("format_string", wrap_pyfunction!(py_format_string, m)?)?;
+    m.add("printf", wrap_pyfunction!(py_printf, m)?)?;
     // Phase 15 Batch 3: math (cosh, sinh, tanh, acosh, asinh, atanh, cbrt, expm1, log1p, log10, log2, rint, hypot)
     m.add("cosh", wrap_pyfunction!(py_cosh, m)?)?;
     m.add("sinh", wrap_pyfunction!(py_sinh, m)?)?;
@@ -568,6 +577,54 @@ fn py_rlike(column: &PyColumn, pattern: &str) -> PyColumn {
     PyColumn {
         inner: rlike(&column.inner, pattern),
     }
+}
+
+#[pyfunction]
+fn py_regexp_count(column: &PyColumn, pattern: &str) -> PyColumn {
+    PyColumn {
+        inner: regexp_count(&column.inner, pattern),
+    }
+}
+
+#[pyfunction]
+fn py_regexp_instr(column: &PyColumn, pattern: &str, group_idx: Option<usize>) -> PyColumn {
+    PyColumn {
+        inner: regexp_instr(&column.inner, pattern, group_idx),
+    }
+}
+
+#[pyfunction]
+fn py_regexp_substr(column: &PyColumn, pattern: &str) -> PyColumn {
+    PyColumn {
+        inner: regexp_substr(&column.inner, pattern),
+    }
+}
+
+#[pyfunction]
+fn py_split_part(column: &PyColumn, delimiter: &str, part_num: i64) -> PyColumn {
+    PyColumn {
+        inner: split_part(&column.inner, delimiter, part_num),
+    }
+}
+
+#[pyfunction]
+fn py_find_in_set(str_column: &PyColumn, set_column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: find_in_set(&str_column.inner, &set_column.inner),
+    }
+}
+
+#[pyfunction]
+fn py_format_string(format: &str, columns: Vec<PyRef<PyColumn>>) -> PyColumn {
+    let refs: Vec<&RsColumn> = columns.iter().map(|c| &c.inner).collect();
+    PyColumn {
+        inner: format_string(format, &refs),
+    }
+}
+
+#[pyfunction]
+fn py_printf(format: &str, columns: Vec<PyRef<PyColumn>>) -> PyColumn {
+    py_format_string(format, columns)
 }
 
 #[pyfunction]
@@ -1193,6 +1250,41 @@ impl PyColumn {
     fn regexp_like(&self, pattern: &str) -> Self {
         PyColumn {
             inner: self.inner.regexp_like(pattern),
+        }
+    }
+
+    /// Count of non-overlapping regex matches (PySpark regexp_count).
+    fn regexp_count(&self, pattern: &str) -> Self {
+        PyColumn {
+            inner: regexp_count(&self.inner, pattern),
+        }
+    }
+
+    /// 1-based position of first regex match (PySpark regexp_instr).
+    fn regexp_instr(&self, pattern: &str, group_idx: Option<usize>) -> Self {
+        PyColumn {
+            inner: regexp_instr(&self.inner, pattern, group_idx),
+        }
+    }
+
+    /// First substring matching regex (PySpark regexp_substr).
+    fn regexp_substr(&self, pattern: &str) -> Self {
+        PyColumn {
+            inner: regexp_substr(&self.inner, pattern),
+        }
+    }
+
+    /// Split by delimiter and return 1-based part (PySpark split_part).
+    fn split_part(&self, delimiter: &str, part_num: i64) -> Self {
+        PyColumn {
+            inner: split_part(&self.inner, delimiter, part_num),
+        }
+    }
+
+    /// 1-based index in comma-delimited set (PySpark find_in_set).
+    fn find_in_set(&self, set_column: &PyColumn) -> Self {
+        PyColumn {
+            inner: find_in_set(&self.inner, &set_column.inner),
         }
     }
 }

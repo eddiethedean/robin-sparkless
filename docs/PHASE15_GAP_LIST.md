@@ -7,7 +7,7 @@ Source: [PYSPARK_FUNCTION_MATRIX](https://github.com/eddiethedean/sparkless/blob
 ## Already implemented (verified in src/functions.rs, src/column.rs, src/udfs.rs)
 
 Core: col, lit_*, count, sum, avg, min, max, stddev, variance, count_distinct, when, coalesce, nvl, ifnull, nullif, nanvl.
-String: upper, lower, substring, length, trim, ltrim, rtrim, regexp_extract, regexp_replace, split, initcap, regexp_extract_all, regexp_like, repeat, reverse, instr, position, ascii, format_number, overlay, char, chr, base64, unbase64, sha1, sha2, md5, lpad, rpad, translate, mask, substring_index, soundex, levenshtein, crc32, xxhash64.
+String: upper, lower, substring, length, trim, ltrim, rtrim, regexp_extract, regexp_replace, split, initcap, regexp_extract_all, regexp_like, repeat, reverse, instr, position, ascii, format_number, overlay, char, chr, base64, unbase64, sha1, sha2, md5, lpad, rpad, translate, mask, substring_index, soundex, levenshtein, crc32, xxhash64, regexp_count, regexp_instr, regexp_substr, split_part, find_in_set, format_string, printf.
 Math: abs, ceil, floor, round, sqrt, pow, exp, log, sin, cos, tan, asin, acos, atan, atan2, degrees, radians, signum.
 Type: cast, try_cast, isnan, greatest, least.
 Datetime: year, month, day, to_date, date_format, current_date, current_timestamp, hour, minute, second, date_add, date_sub, datediff, last_day, trunc, quarter, weekofyear, dayofweek, dayofyear, add_months, months_between, next_day.
@@ -34,8 +34,8 @@ Column: is_null, is_not_null (methods).
 
 ## Batch 2 – String and regex
 
-- left, right, replace, startswith, endswith, contains, like (implement properly), ilike, rlike, regexp (alias rlike)
-- regexp_count, regexp_instr, regexp_substr, split_part, find_in_set, format_string, printf
+- left, right, replace, startswith, endswith, contains, like (implement properly), ilike, rlike, regexp (alias rlike) — **DONE**
+- regexp_count, regexp_instr, regexp_substr, split_part, find_in_set, format_string, printf — **DONE (Phase 16)**
 
 ## Batch 3 – Math and datetime
 

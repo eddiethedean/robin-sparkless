@@ -20,6 +20,10 @@ This document lists **intentional or known divergences** from PySpark semantics 
 
 - **Deferred**: Schema evolution and MERGE are not implemented. Read by path/version, overwrite, and append are supported. See [FULL_BACKEND_ROADMAP.md](FULL_BACKEND_ROADMAP.md) §7.2.
 
+## Array
+
+- **array_distinct order**: Polars `list().unique()` may return distinct elements in a different order than PySpark `array_distinct`, which preserves first-occurrence order. The `array_distinct` parity fixture is skipped due to this ordering difference.
+
 ## Phase 10 & Phase 8 – Implemented
 
 **All previously stubbed Phase 8 items are now implemented (February 2026):**

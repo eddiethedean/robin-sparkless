@@ -124,14 +124,14 @@ Functions and aliases that exist in Sparkless 3.28.0 but are **not** implemented
 ### 2.12 String (additional)
 - `btrim`
 - `conv`
-- `format_string`, `printf`
-- `find_in_set`
-- `split_part`
+- ~~`format_string`, `printf`~~ — **implemented (Phase 16)**
+- ~~`find_in_set`~~ — **implemented (Phase 16)**
+- ~~`split_part`~~ — **implemented (Phase 16)**
 - `locate` (we have `instr` / `position`; semantics may differ slightly)
 
 ### 2.13 Regex (additional)
 - `regexp` — we have `rlike`
-- `regexp_count`, `regexp_instr`, `regexp_substr`
+- ~~`regexp_count`, `regexp_instr`, `regexp_substr`~~ — **implemented (Phase 16)**
 
 ### 2.14 Math / trig (additional)
 - `cot`, `csc`, `sec`

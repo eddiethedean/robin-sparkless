@@ -226,6 +226,52 @@ pub fn regexp_like(column: &Column, pattern: &str) -> Column {
     column.clone().regexp_like(pattern)
 }
 
+/// Count of non-overlapping regex matches (PySpark regexp_count).
+pub fn regexp_count(column: &Column, pattern: &str) -> Column {
+    column.clone().regexp_count(pattern)
+}
+
+/// First substring matching regex (PySpark regexp_substr). Null if no match.
+pub fn regexp_substr(column: &Column, pattern: &str) -> Column {
+    column.clone().regexp_substr(pattern)
+}
+
+/// Split by delimiter and return 1-based part (PySpark split_part).
+pub fn split_part(column: &Column, delimiter: &str, part_num: i64) -> Column {
+    column.clone().split_part(delimiter, part_num)
+}
+
+/// 1-based position of first regex match (PySpark regexp_instr).
+pub fn regexp_instr(column: &Column, pattern: &str, group_idx: Option<usize>) -> Column {
+    column.clone().regexp_instr(pattern, group_idx)
+}
+
+/// 1-based index of str in comma-delimited set (PySpark find_in_set). 0 if not found or str contains comma.
+pub fn find_in_set(str_column: &Column, set_column: &Column) -> Column {
+    str_column.clone().find_in_set(set_column)
+}
+
+/// Printf-style format (PySpark format_string). Supports %s, %d, %i, %f, %g, %%.
+pub fn format_string(format: &str, columns: &[&Column]) -> Column {
+    use polars::prelude::*;
+    if columns.is_empty() {
+        panic!("format_string needs at least one column");
+    }
+    let format_owned = format.to_string();
+    let args: Vec<Expr> = columns.iter().skip(1).map(|c| c.expr().clone()).collect();
+    let expr = columns[0].expr().clone().map_many(
+        move |cols| crate::udfs::apply_format_string(cols, &format_owned),
+        &args,
+        GetOutput::from_type(DataType::String),
+    );
+    crate::column::Column::from_expr(expr, None)
+}
+
+/// Alias for format_string (PySpark printf).
+pub fn printf(format: &str, columns: &[&Column]) -> Column {
+    format_string(format, columns)
+}
+
 /// Repeat string n times (PySpark repeat).
 pub fn repeat(column: &Column, n: i32) -> Column {
     column.clone().repeat(n)
