@@ -35,6 +35,7 @@ soundex = "0.2"
 bytes = "1.11.1"
 
 [dev-dependencies]
+chrono = "0.4"
 polars = { version = "0.45", features = ["lazy", "csv", "parquet", "json", "temporal", "strings", "concat_str", "regex", "round_series", "abs", "dtype-categorical", "dtype-date", "dtype-datetime", "dtype-duration", "dtype-time", "test", "rank", "is_in", "list_eval", "list_drop_nulls", "list_any_all", "cum_agg", "string_pad", "string_reverse", "repeat_by", "log", "month_end", "describe", "cross_join", "semi_anti_join", "extract_jsonpath", "dtype-struct"] }
 tempfile = "3"
 criterion = "0.5"

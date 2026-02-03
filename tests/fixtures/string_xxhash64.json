@@ -1,0 +1,29 @@
+{
+  "name": "string_xxhash64",
+  "pyspark_version": "3.5.0",
+  "input": {
+    "schema": [
+      { "name": "id", "type": "int" },
+      { "name": "s", "type": "string" }
+    ],
+    "rows": [
+      [1, "hello"],
+      [2, "world"]
+    ]
+  },
+  "operations": [
+    { "op": "withColumn", "column": "h", "expr": "xxhash64(col('s'))" },
+    { "op": "orderBy", "columns": ["id"], "ascending": [true] }
+  ],
+  "expected": {
+    "schema": [
+      { "name": "id", "type": "int" },
+      { "name": "s", "type": "string" },
+      { "name": "h", "type": "bigint" }
+    ],
+    "rows": [
+      [1, "hello", 2794345569481354659],
+      [2, "world", -1767385783675760145]
+    ]
+  }
+}

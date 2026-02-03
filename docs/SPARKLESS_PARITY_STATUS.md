@@ -19,10 +19,10 @@ cargo test pyspark_parity_fixtures
 
 | Source | Converted | Passing | Failing | Skipped |
 |--------|-----------|---------|--------|---------|
-| Hand-written (`tests/fixtures/*.json`) | — | 73 | 0 | 0 |
+| Hand-written (`tests/fixtures/*.json`) | — | 80 | 0 | 0 |
 | Sparkless converted (`tests/fixtures/converted/*.json`) | 0 (run converter when `SPARKLESS_EXPECTED_OUTPUTS` set) | — | — | — |
 
-**Target: 50+ tests passing** (hand-written + converted). **Current: 73 passing** (hand-written). Phase 10: window fixtures percent_rank, cume_dist, ntile, nth_value are now covered (multi-step workaround).
+**Target: 50+ tests passing** (hand-written + converted). **Current: 80 passing** (hand-written). Phase 11: date/datetime fixtures and String 6.4 (soundex, levenshtein, crc32, xxhash64) added. CI runs parity on hand-written (and optionally converted) fixtures; when Sparkless repo is available, run `make sparkless-parity` and update this doc.
 
 ### When Sparkless repo is available
 

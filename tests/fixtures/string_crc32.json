@@ -1,0 +1,31 @@
+{
+  "name": "string_crc32",
+  "pyspark_version": "3.5.0",
+  "input": {
+    "schema": [
+      { "name": "id", "type": "int" },
+      { "name": "s", "type": "string" }
+    ],
+    "rows": [
+      [1, "hello"],
+      [2, "world"],
+      [3, ""]
+    ]
+  },
+  "operations": [
+    { "op": "withColumn", "column": "checksum", "expr": "crc32(col('s'))" },
+    { "op": "orderBy", "columns": ["id"], "ascending": [true] }
+  ],
+  "expected": {
+    "schema": [
+      { "name": "id", "type": "int" },
+      { "name": "s", "type": "string" },
+      { "name": "checksum", "type": "bigint" }
+    ],
+    "rows": [
+      [1, "hello", 907060870],
+      [2, "world", 980881731],
+      [3, "", 0]
+    ]
+  }
+}

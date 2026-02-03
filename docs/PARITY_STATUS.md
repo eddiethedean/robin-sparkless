@@ -7,7 +7,7 @@ This doc is the **living parity matrix** for `robin-sparkless`.
 - **Fixtures**: `tests/fixtures/*.json`
 - **Sparkless integration**: Robin-sparkless is designed to replace Sparkless's backend. Sparkless has 270+ expected_outputs; a fixture converter can convert those to robin-sparkless format. See [SPARKLESS_INTEGRATION_ANALYSIS.md](SPARKLESS_INTEGRATION_ANALYSIS.md) §4.
 
-Status as of **February 2026**: **PASSING (73 fixtures)**. Window fixtures percent_rank, cume_dist, ntile, nth_value are covered (multi-step workaround in harness). Phase 6: array functions `array_position`, `array_remove`, `posexplode` are **implemented** (via Polars list.eval); array fixtures `array_contains`, `element_at`, `array_size`, `array_sum`; array extensions (exists, forall, filter, transform, array_sum, array_mean; **Phase 8**: array_flatten, array_repeat **implemented** via map UDFs). Phase 10: String 6.4 (mask, translate, substring_index; **Phase 8**: soundex, levenshtein, crc32, xxhash64 **implemented** via map UDFs). **Phase 8**: Map (create_map, map_keys, map_values, map_entries, map_from_arrays **implemented**; Map as List(Struct{key, value})). JSON (get_json_object, from_json, to_json implemented). Python smoke tests for the PyO3 bridge live in `tests/python/` (run via `make test` or `make test-python`); see [PYTHON_API.md](PYTHON_API.md).
+Status as of **February 2026**: **PASSING (80 fixtures)**. **Phase 11**: Parity harness supports date, timestamp, and boolean in fixture input; datetime fixtures `date_add_sub`, `datediff`, `datetime_hour_minute`; String 6.4 fixtures `string_soundex`, `string_levenshtein`, `string_crc32`, `string_xxhash64`. Window fixtures percent_rank, cume_dist, ntile, nth_value are covered (multi-step workaround in harness). Phase 6: array functions `array_position`, `array_remove`, `posexplode` are **implemented** (via Polars list.eval); array fixtures `array_contains`, `element_at`, `array_size`, `array_sum`; array extensions (exists, forall, filter, transform, array_sum, array_mean; **Phase 8**: array_flatten, array_repeat **implemented** via map UDFs). **Phase 8**: Map (create_map, map_keys, map_values, map_entries, map_from_arrays **implemented**; Map as List(Struct{key, value})). JSON (get_json_object, from_json, to_json implemented). CI runs format, clippy, audit, deny, and all tests (including parity). Python smoke tests in `tests/python/` (run via `make test` or `make test-python`); see [PYTHON_API.md](PYTHON_API.md).
 
 ## Legend
 
@@ -68,7 +68,7 @@ Status as of **February 2026**: **PASSING (73 fixtures)**. Window fixtures perce
 | Windows | cume_dist, ntile, nth_value | ✅ Covered | `cume_dist_window`, `ntile_window`, `nth_value_window` (multi-step workaround in harness) |
 | Strings | regexp_extract_all, regexp_like | ✅ Covered | `regexp_extract_all`, `regexp_like` |
 | Strings | repeat, reverse, instr, lpad, rpad | ✅ Covered | `string_repeat_reverse`, `string_lpad_rpad` |
-| Strings | mask, translate, substring_index; soundex, levenshtein, crc32, xxhash64 (Phase 8) | ✅ Implemented | `string_mask`, `string_translate`, `string_substring_index` |
+| Strings | mask, translate, substring_index; soundex, levenshtein, crc32, xxhash64 (Phase 8) | ✅ Covered | `string_mask`, `string_translate`, `string_substring_index`, `string_soundex`, `string_levenshtein`, `string_crc32`, `string_xxhash64` |
 | Array | array_sum, array_exists, forall, filter, transform; array_flatten, array_repeat (Phase 8) | ✅ Implemented | `array_sum` |
 | Map | create_map, map_keys, map_values, map_entries, map_from_arrays (Phase 8) | ✅ Implemented | No fixture yet |
 | JSON | get_json_object, from_json, to_json (Phase 10) | ✅ get_json_object covered | `json_get_json_object` |
@@ -76,7 +76,7 @@ Status as of **February 2026**: **PASSING (73 fixtures)**. Window fixtures perce
 | GroupBy | first, last, approx_count_distinct in agg | ✅ Covered | `groupby_first_last` |
 | DataFrame | replace, crossJoin, describe, subtract, intersect | ✅ Covered | `replace`, `cross_join`, `describe`, `subtract`, `intersect` |
 | SQL | `SparkSession::sql()` (optional `sql` feature) | ✅ Implemented | No fixture (SQL translated to DataFrame ops; parity via DataFrame fixtures) |
-| Datetime | year, month, day, to_date, date_format; current_date, date_add, hour, etc. | ✅ Implemented | No fixture yet (test harness does not yet build date/datetime columns from JSON) |
+| Datetime | year, month, day, to_date, date_format; current_date, date_add, hour, etc. | ✅ Covered | `date_add_sub`, `datediff`, `datetime_hour_minute` |
 
 ## Fixture Index
 
@@ -158,6 +158,13 @@ Status as of **February 2026**: **PASSING (73 fixtures)**. Window fixtures perce
 | `string_substring_index` | substring_index(col, delim, count) before/after nth delim |
 | `array_sum` | array(cols) + array_sum(col) |
 | `json_get_json_object` | get_json_object(col, '$.path') |
+| `date_add_sub` | date_add(col('d'), 7), date_sub(col('d'), 3) |
+| `datediff` | datediff(col('end'), col('start')) |
+| `datetime_hour_minute` | hour(col('ts')), minute(col('ts')) with timestamp input |
+| `string_soundex` | soundex(col('name')) |
+| `string_levenshtein` | levenshtein(col('a'), col('b')) |
+| `string_crc32` | crc32(col('s')) |
+| `string_xxhash64` | xxhash64(col('s')) |
 
 ## Next additions to the matrix (recommended)
 

@@ -205,7 +205,7 @@ To reach **full Sparkless parity** (robin-sparkless as a complete backend replac
 |-------|------|-------------|
 | **9** | High-value functions + DataFrame methods | 4–6 weeks |
 | **10** | Complex types (Map, JSON, array_repeat, string 6.4) + window fixture simplification | ✅ **COMPLETED** |
-| **11** | Parity scale (80+ → 150+ fixtures), harness date/datetime, converter + CI | 2–4 weeks |
+| **11** | Parity scale (80+ → 150+ fixtures), harness date/datetime, converter + CI | ✅ **COMPLETED** |
 | **12** | Sparkless integration (BackendFactory "robin", 200+ tests), PyO3 surface | 4–6 weeks |
 
 ---
@@ -240,16 +240,17 @@ To reach **full Sparkless parity** (robin-sparkless as a complete backend replac
 
 ---
 
-### Phase 11 – Parity scale & test conversion (2–4 weeks)
+### Phase 11 – Parity scale & test conversion ✅ **COMPLETED**
 
 **Goal**: Grow parity coverage and integrate Sparkless test conversion into CI.
 
-- **Parity harness**: Add date/datetime column support in fixture input so datetime fixtures can be added; add hand-written fixtures for Phase 9/10 functions.
-- **Fixture growth**: 73 → 80+ (intermediate) → 150+ (full backend target).
-- **Sparkless converter**: When Sparkless repo is available, run `make sparkless-parity` with `SPARKLESS_EXPECTED_OUTPUTS` set; update [SPARKLESS_PARITY_STATUS.md](SPARKLESS_PARITY_STATUS.md) with converted/passing/failing counts and failure reasons.
-- **CI**: Run converted fixtures in CI; classify failures (unsupported vs semantic); add `skip: true` + `skip_reason` where appropriate.
+- **Parity harness**: Date/datetime and boolean column support in fixture input ([tests/parity.rs](tests/parity.rs)); `dtype_to_string` and `collect_to_simple_format` for Date/Datetime/Int8; `types_compatible` for date/timestamp.
+- **Fixture growth**: 73 → **80** fixtures (date_add_sub, datediff, datetime_hour_minute, string_soundex, string_levenshtein, string_crc32, string_xxhash64).
+- **Converter**: Date/timestamp type mapping added in [tests/convert_sparkless_fixtures.py](tests/convert_sparkless_fixtures.py).
+- **CI**: [.github/workflows/ci.yml](.github/workflows/ci.yml) runs format, clippy, audit, deny, and all tests (including `pyspark_parity_fixtures`); separate job for Python (PyO3) tests.
+- **Docs**: [TEST_CREATION_GUIDE.md](TEST_CREATION_GUIDE.md) documents date/timestamp fixture format; [SPARKLESS_PARITY_STATUS.md](SPARKLESS_PARITY_STATUS.md) updated with CI note.
 
-**Outcome**: 80+ parity fixtures; converter and parity run in CI; SPARKLESS_PARITY_STATUS kept current.
+**Outcome**: 80 parity fixtures passing; CI runs parity; SPARKLESS_PARITY_STATUS kept current.
 
 ---
 
@@ -279,7 +280,7 @@ To reach **full Sparkless parity** (robin-sparkless as a complete backend replac
 
 | Metric | Current | After Phase 11 | Full Backend target |
 |--------|---------|----------------|---------------------|
-| Parity fixtures | 73 | 80+ | 150+ |
+| Parity fixtures | 80 | 80+ | 150+ |
 | Functions | ~120+ | ~120 | 250+ |
 | DataFrame methods | ~25 | ~40 | 60+ |
 | Sparkless tests passing (robin backend) | 0 | — | 200+ |

@@ -1,0 +1,31 @@
+{
+  "name": "string_soundex",
+  "pyspark_version": "3.5.0",
+  "input": {
+    "schema": [
+      { "name": "id", "type": "int" },
+      { "name": "name", "type": "string" }
+    ],
+    "rows": [
+      [1, "Robert"],
+      [2, "Rupert"],
+      [3, "Smith"]
+    ]
+  },
+  "operations": [
+    { "op": "withColumn", "column": "code", "expr": "soundex(col('name'))" },
+    { "op": "orderBy", "columns": ["id"], "ascending": [true] }
+  ],
+  "expected": {
+    "schema": [
+      { "name": "id", "type": "int" },
+      { "name": "name", "type": "string" },
+      { "name": "code", "type": "string" }
+    ],
+    "rows": [
+      [1, "Robert", "R163"],
+      [2, "Rupert", "R163"],
+      [3, "Smith", "S530"]
+    ]
+  }
+}

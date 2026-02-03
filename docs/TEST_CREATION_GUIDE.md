@@ -76,6 +76,16 @@ Fixtures live under `tests/fixtures/` and are plain JSON files.
 - `rows` are lists of JSON values; `null` is allowed.
 - `operations` are **descriptive**, not executable Python strings; we only embed simple PySpark-style expressions for `filter` to keep parity obvious.
 
+### Date and timestamp columns
+
+The parity harness supports **date** and **timestamp** (or **datetime**) column types so that datetime functions (e.g. `date_add`, `datediff`, `current_date`) can be tested with real date/datetime inputs.
+
+- **Schema**: Use `"type": "date"` or `"type": "timestamp"` (or `"datetime"`, `"timestamp_ntz"`) in `input.schema` and `expected.schema`.
+- **Row values**: Use JSON strings in ISO format:
+  - **Date**: `"YYYY-MM-DD"` (e.g. `"2024-01-15"`).
+  - **Timestamp**: `"YYYY-MM-DDTHH:MM:SS"` or `"YYYY-MM-DDTHH:MM:SS.ffffff"` (e.g. `"2024-01-15T12:00:00"`, `"2024-01-15T12:00:00.123456"`).
+- Timestamp can also be given as a numeric (epoch microseconds) in the JSON when building the column.
+
 ---
 
 ## 3. PySpark Generator Script

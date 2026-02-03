@@ -78,8 +78,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - [PYSPARK_DIFFERENCES.md](docs/PYSPARK_DIFFERENCES.md): Known divergences (window, SQL, Delta); Phase 8 stubs removed (all implemented). Linked from README and docs index.
   - FULL_BACKEND_ROADMAP Phase 8 marked completed; PARITY_STATUS, ROADMAP, FULL_BACKEND_ROADMAP, IMPLEMENTATION_STATUS, PYSPARK_DIFFERENCES, README, docs/README updated for Phase 8 completion and ~120+ functions.
 
+- **Phase 11 – Parity scale and test conversion** ✅
+  - **Parity harness**: Date, timestamp, and boolean column support in fixture input; `dtype_to_string` and `collect_to_simple_format` for Date, Datetime, Int8; `types_compatible` for date/timestamp/Int8.
+  - **New fixtures** (73 → 80): `date_add_sub`, `datediff`, `datetime_hour_minute`, `string_soundex`, `string_levenshtein`, `string_crc32`, `string_xxhash64`.
+  - **Expression parser**: soundex, levenshtein, crc32, xxhash64 in withColumn expressions.
+  - **Converter**: Date/timestamp type mapping in [tests/convert_sparkless_fixtures.py](tests/convert_sparkless_fixtures.py).
+  - **CI**: [.github/workflows/ci.yml](.github/workflows/ci.yml) runs format, clippy, audit, deny, and all tests (including `pyspark_parity_fixtures`); separate job for Python (PyO3) tests.
+  - **Docs**: [TEST_CREATION_GUIDE.md](docs/TEST_CREATION_GUIDE.md) date/timestamp format; [SPARKLESS_PARITY_STATUS.md](docs/SPARKLESS_PARITY_STATUS.md) CI note; ROADMAP, FULL_BACKEND_ROADMAP, PARITY_STATUS updated.
+
 ### Changed
 
+- **Phase 11**: Parity fixtures 73 → 80; harness date/datetime/boolean support; CI workflow; converter date/timestamp mapping; docs updated.
 - **Documentation**: README, ROADMAP, FULL_BACKEND_ROADMAP, MIGRATION_STATUS, COMPILATION_STATUS updated for Phase 8/10 completion; removed all "stubbed" references for array_repeat, array_flatten, Map, and string 6.4 (soundex, levenshtein, crc32, xxhash64).
 - **Phase 8**: All four previously stubbed areas are now implemented: array_repeat, array_flatten, map functions (create_map, map_keys, map_values, map_entries, map_from_arrays), and string 6.4 (soundex, levenshtein, crc32, xxhash64). PYSPARK_DIFFERENCES no longer lists these as stubbed.
 - **Phase 10**: Window fixtures (percent_rank, cume_dist, ntile, nth_value) documented as covered in PYSPARK_DIFFERENCES; `substring_index` fixed for negative count (no u32 underflow); `mask` uses `replace_all` for correct regex replacement.

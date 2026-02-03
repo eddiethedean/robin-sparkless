@@ -43,6 +43,10 @@ SPARKLESS_TYPE_TO_ROBIN = {
     "str": "string",
     "boolean": "boolean",
     "bool": "boolean",
+    "date": "date",
+    "timestamp": "timestamp",
+    "timestamp_ntz": "timestamp",
+    "datetime": "timestamp",
 }
 
 

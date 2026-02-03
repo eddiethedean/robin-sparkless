@@ -1,8 +1,10 @@
 use std::fs;
 use std::path::Path;
 
+use chrono::{NaiveDate, NaiveDateTime};
 use polars::prelude::{
     col, len, lit, DataFrame as PlDataFrame, DataType, Expr, NamedFrom, PolarsError, Series,
+    TimeUnit,
 };
 use robin_sparkless::{DataFrame, JoinType, SparkSession};
 use serde::Deserialize;
@@ -424,6 +426,70 @@ fn create_df_from_input_direct(input: &InputSection) -> Result<DataFrame, Polars
                     vals.push(opt);
                 }
                 cols.push(Series::new(spec.name.clone().into(), vals));
+            }
+            "boolean" | "bool" => {
+                let mut vals: Vec<Option<bool>> = Vec::with_capacity(input.rows.len());
+                for row in &input.rows {
+                    let v = row.get(col_idx).cloned().unwrap_or(Value::Null);
+                    let opt = match v {
+                        Value::Bool(b) => Some(b),
+                        Value::Null => None,
+                        _ => None,
+                    };
+                    vals.push(opt);
+                }
+                cols.push(Series::new(spec.name.clone().into(), vals));
+            }
+            "date" => {
+                let epoch = NaiveDate::from_ymd_opt(1970, 1, 1)
+                    .ok_or_else(|| PolarsError::ComputeError("invalid epoch date".into()))?;
+                let mut vals: Vec<Option<i32>> = Vec::with_capacity(input.rows.len());
+                for row in &input.rows {
+                    let v = row.get(col_idx).cloned().unwrap_or(Value::Null);
+                    let opt = match v {
+                        Value::String(s) => NaiveDate::parse_from_str(&s, "%Y-%m-%d")
+                            .ok()
+                            .map(|d| (d - epoch).num_days() as i32),
+                        Value::Null => None,
+                        _ => None,
+                    };
+                    vals.push(opt);
+                }
+                let s = Series::new(spec.name.clone().into(), vals);
+                cols.push(
+                    s.cast(&DataType::Date).map_err(|e| {
+                        PolarsError::ComputeError(format!("date cast: {}", e).into())
+                    })?,
+                );
+            }
+            "timestamp" | "datetime" | "timestamp_ntz" => {
+                let mut vals: Vec<Option<i64>> = Vec::with_capacity(input.rows.len());
+                for row in &input.rows {
+                    let v = row.get(col_idx).cloned().unwrap_or(Value::Null);
+                    let opt = match v {
+                        Value::String(s) => {
+                            // ISO 8601: allow with or without fractional seconds
+                            let parsed = NaiveDateTime::parse_from_str(&s, "%Y-%m-%dT%H:%M:%S%.f")
+                                .or_else(|_| NaiveDateTime::parse_from_str(&s, "%Y-%m-%dT%H:%M:%S"))
+                                .or_else(|_| {
+                                    NaiveDate::parse_from_str(&s, "%Y-%m-%d")
+                                        .map(|d| d.and_hms_opt(0, 0, 0).unwrap())
+                                });
+                            parsed.ok().map(|dt| dt.and_utc().timestamp_micros())
+                        }
+                        Value::Number(n) => n.as_i64(),
+                        Value::Null => None,
+                        _ => None,
+                    };
+                    vals.push(opt);
+                }
+                let s = Series::new(spec.name.clone().into(), vals);
+                cols.push(
+                    s.cast(&DataType::Datetime(TimeUnit::Microseconds, None))
+                        .map_err(|e| {
+                            PolarsError::ComputeError(format!("datetime cast: {}", e).into())
+                        })?,
+                );
             }
             other => {
                 return Err(PolarsError::ComputeError(
@@ -2018,6 +2084,33 @@ fn parse_with_column_expr(src: &str) -> Result<Expr, String> {
         let other = parse_char(4);
         return Ok(robin_sparkless::mask(&c, upper, lower, digit, other).into_expr());
     }
+    if s.starts_with("soundex(") {
+        let inner = extract_first_arg(s, "soundex(")?;
+        let col_name = extract_col_name(inner.trim())?;
+        let c = col(col_name);
+        return Ok(c.soundex().into_expr());
+    }
+    if s.starts_with("levenshtein(") {
+        let inner = extract_first_arg(s, "levenshtein(")?;
+        let parts = parse_comma_separated_args(inner);
+        let a_name = extract_col_name(parts.first().ok_or("levenshtein needs two columns")?)?;
+        let b_name = extract_col_name(parts.get(1).ok_or("levenshtein needs two columns")?)?;
+        let a_col = col(a_name);
+        let b_col = col(b_name);
+        return Ok(a_col.levenshtein(&b_col).into_expr());
+    }
+    if s.starts_with("crc32(") {
+        let inner = extract_first_arg(s, "crc32(")?;
+        let col_name = extract_col_name(inner.trim())?;
+        let c = col(col_name);
+        return Ok(c.crc32().into_expr());
+    }
+    if s.starts_with("xxhash64(") {
+        let inner = extract_first_arg(s, "xxhash64(")?;
+        let col_name = extract_col_name(inner.trim())?;
+        let c = col(col_name);
+        return Ok(c.xxhash64().into_expr());
+    }
     if s.starts_with("get_json_object(") {
         let inner = extract_first_arg(s, "get_json_object(")?;
         let parts = parse_comma_separated_args(inner);
@@ -2533,6 +2626,7 @@ fn collect_to_simple_format(
                             polars::prelude::AnyValue::Boolean(v) => Value::Bool(v),
                             polars::prelude::AnyValue::Int64(v) => Value::Number(v.into()),
                             polars::prelude::AnyValue::Int32(v) => Value::Number(v.into()),
+                            polars::prelude::AnyValue::Int8(v) => Value::Number((v as i64).into()),
                             polars::prelude::AnyValue::UInt32(v) => Value::Number(v.into()),
                             polars::prelude::AnyValue::Float64(v) => {
                                 // Convert f64 to JSON Number
@@ -2544,6 +2638,22 @@ fn collect_to_simple_format(
                                 }
                             }
                             polars::prelude::AnyValue::String(v) => Value::String(v.to_string()),
+                            polars::prelude::AnyValue::Date(days) => {
+                                let epoch = NaiveDate::from_ymd_opt(1970, 1, 1).unwrap();
+                                let d = epoch + chrono::TimeDelta::days(days as i64);
+                                Value::String(d.format("%Y-%m-%d").to_string())
+                            }
+                            polars::prelude::AnyValue::Datetime(us, tu, _)
+                            | polars::prelude::AnyValue::DatetimeOwned(us, tu, _) => {
+                                let micros = match tu {
+                                    TimeUnit::Microseconds => us,
+                                    TimeUnit::Milliseconds => us.saturating_mul(1000),
+                                    TimeUnit::Nanoseconds => us.saturating_div(1000),
+                                };
+                                let dt = chrono::DateTime::from_timestamp_micros(micros)
+                                    .unwrap_or_default();
+                                Value::String(dt.format("%Y-%m-%dT%H:%M:%S%.6f").to_string())
+                            }
                             _ => {
                                 // For unknown types, try to extract as number if dtype suggests it
                                 if matches!(series.dtype(), polars::prelude::DataType::UInt32) {
@@ -2586,10 +2696,13 @@ fn dtype_to_string(dtype: &polars::prelude::DataType) -> String {
     match dtype {
         polars::prelude::DataType::Int64 => "bigint".to_string(),
         polars::prelude::DataType::Int32 => "int".to_string(),
+        polars::prelude::DataType::Int8 => "Int8".to_string(),
         polars::prelude::DataType::UInt32 => "UInt32".to_string(),
         polars::prelude::DataType::String => "string".to_string(),
         polars::prelude::DataType::Float64 => "Float64".to_string(),
         polars::prelude::DataType::Boolean => "boolean".to_string(),
+        polars::prelude::DataType::Date => "date".to_string(),
+        polars::prelude::DataType::Datetime(_, _) => "timestamp".to_string(),
         polars::prelude::DataType::List(inner) => format!("array<{}>", dtype_to_string(inner)),
         _ => format!("{:?}", dtype),
     }
@@ -2660,8 +2773,8 @@ fn types_compatible(actual: &str, expected: &str) -> bool {
     if actual == expected {
         return true;
     }
-    // Allow int/bigint/long to match
-    let int_types = ["int", "bigint", "long"];
+    // Allow int/bigint/long/Int8 to match (hour/minute return Int8 in Polars)
+    let int_types = ["int", "bigint", "long", "Int8"];
     if int_types.contains(&actual) && int_types.contains(&expected) {
         return true;
     }
@@ -2693,6 +2806,16 @@ fn types_compatible(actual: &str, expected: &str) -> bool {
     // Allow boolean/bool to match
     let bool_types = ["boolean", "bool", "Boolean"];
     if bool_types.contains(&actual) && bool_types.contains(&expected) {
+        return true;
+    }
+    // Allow date/Date to match
+    let date_types = ["date", "Date"];
+    if date_types.contains(&actual) && date_types.contains(&expected) {
+        return true;
+    }
+    // Allow timestamp/datetime/timestamp_ntz to match
+    let ts_types = ["timestamp", "datetime", "timestamp_ntz", "TimestampType"];
+    if ts_types.contains(&actual) && ts_types.contains(&expected) {
         return true;
     }
     false

@@ -119,7 +119,7 @@ For date/datetime columns: `year()`, `month()`, `day()`, `to_date()` (cast to da
 
 ### Parity
 
-Behavior is validated against PySpark on **73 parity fixtures** (~120+ functions); see [PARITY_STATUS.md](PARITY_STATUS.md). Known differences are in [PYSPARK_DIFFERENCES.md](PYSPARK_DIFFERENCES.md).
+Behavior is validated against PySpark on **80 parity fixtures** (~120+ functions); see [PARITY_STATUS.md](PARITY_STATUS.md). Known differences are in [PYSPARK_DIFFERENCES.md](PYSPARK_DIFFERENCES.md). CI (GitHub Actions) runs format, clippy, audit, deny, and all tests (including parity) on every push/PR.
 
 For roadmap and Sparkless integration phases, see [ROADMAP.md](ROADMAP.md).
 

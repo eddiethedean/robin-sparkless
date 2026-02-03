@@ -1,0 +1,33 @@
+{
+  "name": "string_levenshtein",
+  "pyspark_version": "3.5.0",
+  "input": {
+    "schema": [
+      { "name": "id", "type": "int" },
+      { "name": "a", "type": "string" },
+      { "name": "b", "type": "string" }
+    ],
+    "rows": [
+      [1, "kitten", "sitting"],
+      [2, "hello", "hallo"],
+      [3, "abc", "abc"]
+    ]
+  },
+  "operations": [
+    { "op": "withColumn", "column": "dist", "expr": "levenshtein(col('a'), col('b'))" },
+    { "op": "orderBy", "columns": ["id"], "ascending": [true] }
+  ],
+  "expected": {
+    "schema": [
+      { "name": "id", "type": "int" },
+      { "name": "a", "type": "string" },
+      { "name": "b", "type": "string" },
+      { "name": "dist", "type": "bigint" }
+    ],
+    "rows": [
+      [1, "kitten", "sitting", 3],
+      [2, "hello", "hallo", 1],
+      [3, "abc", "abc", 0]
+    ]
+  }
+}
