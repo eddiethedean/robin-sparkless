@@ -111,6 +111,16 @@ let df = df.with_column("full", concat(&[&col("first"), &col("last")]).into_expr
 let df = df.with_column("joined", concat_ws("-", &[&col("a"), &col("b")]).into_expr())?;
 ```
 
+Additional string: `length`, `trim`, `ltrim`, `rtrim`, `regexp_extract`, `regexp_replace`, `regexp_extract_all`, `regexp_like`, `split`, `initcap`.
+
+### Datetime
+
+For date/datetime columns: `year()`, `month()`, `day()`, `to_date()` (cast to date), `date_format(format)` (chrono strftime, e.g. `"%Y-%m-%d"`).
+
+### Parity
+
+Behavior is validated against PySpark on **58 parity fixtures**; see [PARITY_STATUS.md](PARITY_STATUS.md). Known differences are in [PYSPARK_DIFFERENCES.md](PYSPARK_DIFFERENCES.md).
+
 For roadmap and Sparkless integration phases, see [ROADMAP.md](ROADMAP.md).
 
 ## Troubleshooting

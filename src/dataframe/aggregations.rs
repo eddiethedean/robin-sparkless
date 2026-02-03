@@ -96,6 +96,48 @@ impl GroupedData {
         ))
     }
 
+    /// First value of a column in each group (order not guaranteed unless explicitly sorted).
+    pub fn first(&self, column: &str) -> Result<DataFrame, PolarsError> {
+        use polars::prelude::*;
+        let agg_expr = vec![col(column).first().alias(format!("first({})", column))];
+        let lf = self.lazy_grouped.clone().agg(agg_expr);
+        let mut pl_df = lf.collect()?;
+        pl_df = reorder_groupby_columns(&mut pl_df, &self.grouping_cols)?;
+        Ok(super::DataFrame::from_polars_with_options(
+            pl_df,
+            self.case_sensitive,
+        ))
+    }
+
+    /// Last value of a column in each group (order not guaranteed unless explicitly sorted).
+    pub fn last(&self, column: &str) -> Result<DataFrame, PolarsError> {
+        use polars::prelude::*;
+        let agg_expr = vec![col(column).last().alias(format!("last({})", column))];
+        let lf = self.lazy_grouped.clone().agg(agg_expr);
+        let mut pl_df = lf.collect()?;
+        pl_df = reorder_groupby_columns(&mut pl_df, &self.grouping_cols)?;
+        Ok(super::DataFrame::from_polars_with_options(
+            pl_df,
+            self.case_sensitive,
+        ))
+    }
+
+    /// Approximate count of distinct values in each group (uses n_unique; same as count_distinct for exact).
+    pub fn approx_count_distinct(&self, column: &str) -> Result<DataFrame, PolarsError> {
+        use polars::prelude::{col, DataType};
+        let agg_expr = vec![col(column)
+            .n_unique()
+            .cast(DataType::Int64)
+            .alias(format!("approx_count_distinct({})", column))];
+        let lf = self.lazy_grouped.clone().agg(agg_expr);
+        let mut pl_df = lf.collect()?;
+        pl_df = reorder_groupby_columns(&mut pl_df, &self.grouping_cols)?;
+        Ok(super::DataFrame::from_polars_with_options(
+            pl_df,
+            self.case_sensitive,
+        ))
+    }
+
     /// Apply multiple aggregations at once (generic agg method)
     pub fn agg(&self, aggregations: Vec<Expr>) -> Result<DataFrame, PolarsError> {
         let lf = self.lazy_grouped.clone().agg(aggregations);

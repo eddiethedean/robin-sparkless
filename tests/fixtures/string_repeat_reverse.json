@@ -1,0 +1,31 @@
+{
+  "name": "string_repeat_reverse",
+  "pyspark_version": "3.5.0",
+  "input": {
+    "schema": [
+      { "name": "id", "type": "bigint" },
+      { "name": "s", "type": "string" }
+    ],
+    "rows": [
+      [1, "ab"],
+      [2, "xyz"]
+    ]
+  },
+  "operations": [
+    { "op": "withColumn", "column": "repeated", "expr": "repeat(col('s'), 2)" },
+    { "op": "withColumn", "column": "reversed", "expr": "reverse(col('s'))" },
+    { "op": "orderBy", "columns": ["id"], "ascending": [true] }
+  ],
+  "expected": {
+    "schema": [
+      { "name": "id", "type": "bigint" },
+      { "name": "s", "type": "string" },
+      { "name": "repeated", "type": "string" },
+      { "name": "reversed", "type": "string" }
+    ],
+    "rows": [
+      [1, "ab", "abab", "ba"],
+      [2, "xyz", "xyzxyz", "zyx"]
+    ]
+  }
+}

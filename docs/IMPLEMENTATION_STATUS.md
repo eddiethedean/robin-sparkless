@@ -61,7 +61,7 @@ Robin-sparkless is designed to **replace the backend logic** of [Sparkless](http
 7. **Phase 5 Test Conversion** ✅ **COMPLETED**
    - Fixture converter maps Sparkless `expected_outputs` to robin-sparkless format (join, window, withColumn, union, distinct, drop, dropna, fillna, limit, withColumnRenamed, etc.).
    - Parity discovers `tests/fixtures/` and `tests/fixtures/converted/`; optional `skip: true` in fixtures.
-   - `make sparkless-parity` (set `SPARKLESS_EXPECTED_OUTPUTS` to run converter first); 56 hand-written fixtures passing.
+   - `make sparkless-parity` (set `SPARKLESS_EXPECTED_OUTPUTS` to run converter first); 58 hand-written fixtures passing.
    - See [CONVERTER_STATUS.md](CONVERTER_STATUS.md), [SPARKLESS_PARITY_STATUS.md](SPARKLESS_PARITY_STATUS.md).
 
 8. **Phase 6 Broad Function Parity** (partial) ✅

@@ -1,5 +1,6 @@
 //! DataFrame transformation operations: filter, select, with_column, order_by,
-//! union, distinct, drop, dropna, fillna, limit, with_column_renamed.
+//! union, distinct, drop, dropna, fillna, limit, with_column_renamed,
+//! replace, cross_join, describe, subtract, intersect.
 
 use super::DataFrame;
 use polars::prelude::{col, Expr, IntoLazy, PolarsError, UnionArgs, UniqueKeepStrategy};
@@ -243,6 +244,141 @@ pub fn with_column_renamed(
     let resolved = df.resolve_column_name(old_name)?;
     let mut pl_df = df.df.as_ref().clone();
     pl_df.rename(resolved.as_str(), new_name.into())?;
+    Ok(super::DataFrame::from_polars_with_options(
+        pl_df,
+        case_sensitive,
+    ))
+}
+
+/// Replace values in a column: where column == old_value, use new_value. PySpark replace (single column).
+pub fn replace(
+    df: &DataFrame,
+    column_name: &str,
+    old_value: Expr,
+    new_value: Expr,
+    case_sensitive: bool,
+) -> Result<DataFrame, PolarsError> {
+    use polars::prelude::*;
+    let resolved = df.resolve_column_name(column_name)?;
+    let repl = when(col(resolved.as_str()).eq(old_value))
+        .then(new_value)
+        .otherwise(col(resolved.as_str()));
+    let pl_df = df
+        .df
+        .as_ref()
+        .clone()
+        .lazy()
+        .with_column(repl.alias(resolved.as_str()))
+        .collect()?;
+    Ok(super::DataFrame::from_polars_with_options(
+        pl_df,
+        case_sensitive,
+    ))
+}
+
+/// Cross join: cartesian product of two DataFrames. PySpark crossJoin.
+pub fn cross_join(
+    left: &DataFrame,
+    right: &DataFrame,
+    case_sensitive: bool,
+) -> Result<DataFrame, PolarsError> {
+    let lf_left = left.df.as_ref().clone().lazy();
+    let lf_right = right.df.as_ref().clone().lazy();
+    let out = lf_left.cross_join(lf_right, None);
+    let pl_df = out.collect()?;
+    Ok(super::DataFrame::from_polars_with_options(
+        pl_df,
+        case_sensitive,
+    ))
+}
+
+/// Summary statistics (count, mean, std, min, max). PySpark describe.
+/// Builds a summary DataFrame with a "statistic" column and one column per numeric input column.
+pub fn describe(df: &DataFrame, case_sensitive: bool) -> Result<DataFrame, PolarsError> {
+    use polars::prelude::*;
+    let pl_df = df.df.as_ref().clone();
+    let mut stat_values: Vec<Column> = Vec::new();
+    for col in pl_df.get_columns() {
+        let s = col.as_materialized_series();
+        let dtype = s.dtype();
+        if dtype.is_numeric() {
+            let name = s.name().clone();
+            let count = s.len() as i64 - s.null_count() as i64;
+            let mean_f = s.mean().unwrap_or(f64::NAN);
+            let std_f = s.std(1).unwrap_or(f64::NAN);
+            let s_f64 = s.cast(&DataType::Float64)?;
+            let ca = s_f64
+                .f64()
+                .map_err(|_| PolarsError::ComputeError("cast to f64 failed".into()))?;
+            let min_f = ca.min().unwrap_or(f64::NAN);
+            let max_f = ca.max().unwrap_or(f64::NAN);
+            let series = Series::new(name, [count as f64, mean_f, std_f, min_f, max_f]);
+            stat_values.push(series.into());
+        }
+    }
+    if stat_values.is_empty() {
+        // No numeric columns: return minimal describe with just statistic column
+        let stat_col = Series::new(
+            "statistic".into(),
+            &["count", "mean", "std", "min", "max" as &str],
+        )
+        .into();
+        let empty: Vec<f64> = Vec::new();
+        let empty_series = Series::new("placeholder".into(), empty).into();
+        let out_pl = polars::prelude::DataFrame::new(vec![stat_col, empty_series])?;
+        return Ok(super::DataFrame::from_polars_with_options(
+            out_pl,
+            case_sensitive,
+        ));
+    }
+    let statistic = Series::new(
+        "statistic".into(),
+        &["count", "mean", "std", "min", "max" as &str],
+    )
+    .into();
+    let mut cols: Vec<Column> = vec![statistic];
+    cols.extend(stat_values);
+    let out_pl = polars::prelude::DataFrame::new(cols)?;
+    Ok(super::DataFrame::from_polars_with_options(
+        out_pl,
+        case_sensitive,
+    ))
+}
+
+/// Set difference: rows in left that are not in right (by all columns). PySpark subtract / except.
+pub fn subtract(
+    left: &DataFrame,
+    right: &DataFrame,
+    case_sensitive: bool,
+) -> Result<DataFrame, PolarsError> {
+    use polars::prelude::*;
+    let left_names = left.df.get_column_names();
+    let left_on: Vec<Expr> = left_names.iter().map(|n| col(n.as_str())).collect();
+    let right_on: Vec<Expr> = left_names.iter().map(|n| col(n.as_str())).collect();
+    let right_lf = right.df.as_ref().clone().lazy();
+    let left_lf = left.df.as_ref().clone().lazy();
+    let anti = left_lf.join(right_lf, left_on, right_on, JoinArgs::new(JoinType::Anti));
+    let pl_df = anti.collect()?;
+    Ok(super::DataFrame::from_polars_with_options(
+        pl_df,
+        case_sensitive,
+    ))
+}
+
+/// Set intersection: rows that appear in both DataFrames (by all columns). PySpark intersect.
+pub fn intersect(
+    left: &DataFrame,
+    right: &DataFrame,
+    case_sensitive: bool,
+) -> Result<DataFrame, PolarsError> {
+    use polars::prelude::*;
+    let left_names = left.df.get_column_names();
+    let left_on: Vec<Expr> = left_names.iter().map(|n| col(n.as_str())).collect();
+    let right_on: Vec<Expr> = left_names.iter().map(|n| col(n.as_str())).collect();
+    let left_lf = left.df.as_ref().clone().lazy();
+    let right_lf = right.df.as_ref().clone().lazy();
+    let semi = left_lf.join(right_lf, left_on, right_on, JoinArgs::new(JoinType::Semi));
+    let pl_df = semi.collect()?;
     Ok(super::DataFrame::from_polars_with_options(
         pl_df,
         case_sensitive,

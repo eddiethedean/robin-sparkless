@@ -234,6 +234,51 @@ impl DataFrame {
         transformations::with_column_renamed(self, old_name, new_name, self.case_sensitive)
     }
 
+    /// Replace values in a column (old_value -> new_value). PySpark replace.
+    pub fn replace(
+        &self,
+        column_name: &str,
+        old_value: Expr,
+        new_value: Expr,
+    ) -> Result<DataFrame, PolarsError> {
+        transformations::replace(self, column_name, old_value, new_value, self.case_sensitive)
+    }
+
+    /// Cross join with another DataFrame (cartesian product). PySpark crossJoin.
+    pub fn cross_join(&self, other: &DataFrame) -> Result<DataFrame, PolarsError> {
+        transformations::cross_join(self, other, self.case_sensitive)
+    }
+
+    /// Summary statistics. PySpark describe.
+    pub fn describe(&self) -> Result<DataFrame, PolarsError> {
+        transformations::describe(self, self.case_sensitive)
+    }
+
+    /// No-op: execution is eager by default. PySpark cache.
+    pub fn cache(&self) -> Result<DataFrame, PolarsError> {
+        Ok(self.clone())
+    }
+
+    /// No-op: execution is eager by default. PySpark persist.
+    pub fn persist(&self) -> Result<DataFrame, PolarsError> {
+        Ok(self.clone())
+    }
+
+    /// No-op. PySpark unpersist.
+    pub fn unpersist(&self) -> Result<DataFrame, PolarsError> {
+        Ok(self.clone())
+    }
+
+    /// Set difference: rows in self not in other. PySpark subtract / except.
+    pub fn subtract(&self, other: &DataFrame) -> Result<DataFrame, PolarsError> {
+        transformations::subtract(self, other, self.case_sensitive)
+    }
+
+    /// Set intersection: rows in both self and other. PySpark intersect.
+    pub fn intersect(&self, other: &DataFrame) -> Result<DataFrame, PolarsError> {
+        transformations::intersect(self, other, self.case_sensitive)
+    }
+
     /// Write this DataFrame to a Delta table at the given path.
     /// Requires the `delta` feature. If `overwrite` is true, replaces the table; otherwise appends.
     #[cfg(feature = "delta")]

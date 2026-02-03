@@ -1,0 +1,35 @@
+{
+  "name": "regexp_extract_all",
+  "pyspark_version": "3.5.0",
+  "input": {
+    "schema": [
+      { "name": "id", "type": "bigint" },
+      { "name": "s", "type": "string" }
+    ],
+    "rows": [
+      [1, "a1b22c"],
+      [2, "x99y"],
+      [3, "no-digits"]
+    ]
+  },
+  "operations": [
+    {
+      "op": "withColumn",
+      "column": "nums",
+      "expr": "regexp_extract_all(col('s'), '[0-9]+')"
+    },
+    { "op": "select", "columns": ["id", "s", "nums"] }
+  ],
+  "expected": {
+    "schema": [
+      { "name": "id", "type": "bigint" },
+      { "name": "s", "type": "string" },
+      { "name": "nums", "type": "array<string>" }
+    ],
+    "rows": [
+      [1, "a1b22c", ["1", "22"]],
+      [2, "x99y", ["99"]],
+      [3, "no-digits", []]
+    ]
+  }
+}

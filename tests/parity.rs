@@ -109,6 +109,20 @@ enum Operation {
     Limit { n: u64 },
     #[serde(rename = "withColumnRenamed")]
     WithColumnRenamed { existing: String, new: String },
+    #[serde(rename = "replace")]
+    Replace {
+        column: String,
+        old_value: String,
+        new_value: String,
+    },
+    #[serde(rename = "crossJoin")]
+    CrossJoin {},
+    #[serde(rename = "describe")]
+    Describe {},
+    #[serde(rename = "subtract")]
+    Subtract {},
+    #[serde(rename = "intersect")]
+    Intersect {},
 }
 
 #[derive(Debug, Deserialize)]
@@ -608,6 +622,47 @@ fn apply_operations(
                                 .unwrap_or_else(|| format!("count_distinct({})", col_name));
                             e.alias(&name)
                         }
+                        "first" => {
+                            let col_name = agg_spec.column.as_ref().ok_or_else(|| {
+                                PolarsError::ComputeError(
+                                    "first aggregation requires column name".into(),
+                                )
+                            })?;
+                            let e = col(col_name).first();
+                            let name: String = alias
+                                .filter(|a| *a != "first")
+                                .map(String::from)
+                                .unwrap_or_else(|| format!("first({})", col_name));
+                            e.alias(&name)
+                        }
+                        "last" => {
+                            let col_name = agg_spec.column.as_ref().ok_or_else(|| {
+                                PolarsError::ComputeError(
+                                    "last aggregation requires column name".into(),
+                                )
+                            })?;
+                            let e = col(col_name).last();
+                            let name: String = alias
+                                .filter(|a| *a != "last")
+                                .map(String::from)
+                                .unwrap_or_else(|| format!("last({})", col_name));
+                            e.alias(&name)
+                        }
+                        "approx_count_distinct" => {
+                            let col_name = agg_spec.column.as_ref().ok_or_else(|| {
+                                PolarsError::ComputeError(
+                                    "approx_count_distinct aggregation requires column name".into(),
+                                )
+                            })?;
+                            let e = col(col_name)
+                                .n_unique()
+                                .cast(polars::prelude::DataType::Int64);
+                            let name: String = alias
+                                .filter(|a| *a != "approx_count_distinct")
+                                .map(String::from)
+                                .unwrap_or_else(|| format!("approx_count_distinct({})", col_name));
+                            e.alias(&name)
+                        }
                         other => {
                             return Err(PolarsError::ComputeError(
                                 format!("unsupported aggregation function: {}", other).into(),
@@ -880,6 +935,69 @@ fn apply_operations(
                     ));
                 }
                 df = df.with_column_renamed(existing, new)?;
+            }
+            Operation::Replace {
+                column: col_name,
+                old_value: old_val_str,
+                new_value: new_val_str,
+            } => {
+                if grouped.is_some() {
+                    return Err(PolarsError::ComputeError(
+                        "replace cannot be applied after groupBy".into(),
+                    ));
+                }
+                let old_expr = parse_column_or_literal(old_val_str).map_err(|e| {
+                    PolarsError::ComputeError(
+                        format!("replace old_value parse error: {}", e).into(),
+                    )
+                })?;
+                let new_expr = parse_column_or_literal(new_val_str).map_err(|e| {
+                    PolarsError::ComputeError(
+                        format!("replace new_value parse error: {}", e).into(),
+                    )
+                })?;
+                df = df.replace(col_name, old_expr, new_expr)?;
+            }
+            Operation::CrossJoin {} => {
+                if grouped.is_some() {
+                    return Err(PolarsError::ComputeError(
+                        "crossJoin cannot be applied after groupBy".into(),
+                    ));
+                }
+                let right_df = right.take().ok_or_else(|| {
+                    PolarsError::ComputeError("crossJoin requires right_input in fixture".into())
+                })?;
+                df = df.cross_join(&right_df)?;
+            }
+            Operation::Describe {} => {
+                if grouped.is_some() {
+                    return Err(PolarsError::ComputeError(
+                        "describe cannot be applied after groupBy".into(),
+                    ));
+                }
+                df = df.describe()?;
+            }
+            Operation::Subtract {} => {
+                if grouped.is_some() {
+                    return Err(PolarsError::ComputeError(
+                        "subtract cannot be applied after groupBy".into(),
+                    ));
+                }
+                let right_df = right.take().ok_or_else(|| {
+                    PolarsError::ComputeError("subtract requires right_input in fixture".into())
+                })?;
+                df = df.subtract(&right_df)?;
+            }
+            Operation::Intersect {} => {
+                if grouped.is_some() {
+                    return Err(PolarsError::ComputeError(
+                        "intersect cannot be applied after groupBy".into(),
+                    ));
+                }
+                let right_df = right.take().ok_or_else(|| {
+                    PolarsError::ComputeError("intersect requires right_input in fixture".into())
+                })?;
+                df = df.intersect(&right_df)?;
             }
         }
     }
@@ -1354,8 +1472,11 @@ fn json_value_to_lit(v: &serde_json::Value) -> Result<Expr, String> {
 /// Parse expressions for withColumn operations (when, coalesce, string funcs, array funcs, etc.)
 fn parse_with_column_expr(src: &str) -> Result<Expr, String> {
     use robin_sparkless::{
-        array_contains, array_size, coalesce, col, concat, concat_ws, element_at, initcap, length,
-        lit_str, lower, regexp_extract, regexp_replace, size, split, substring, trim, upper, when,
+        array_contains, array_size, coalesce, col, concat, concat_ws, current_date,
+        current_timestamp, date_add, date_sub, datediff, element_at, exp, hour, initcap, instr,
+        last_day, length, lit_str, log, lower, lpad, minute, nanvl, nullif, nvl, pow,
+        regexp_extract, regexp_extract_all, regexp_like, regexp_replace, repeat, reverse, rpad,
+        second, size, split, sqrt, substring, trim, trunc, upper, when,
     };
 
     let s = src.trim();
@@ -1550,6 +1671,32 @@ fn parse_with_column_expr(src: &str) -> Result<Expr, String> {
         return Ok(regexp_replace(&c, pattern, replacement).into_expr());
     }
 
+    // Handle regexp_extract_all(col('name'), pattern)
+    if s.starts_with("regexp_extract_all(") {
+        let inner = extract_first_arg(s, "regexp_extract_all(")?;
+        let parts = parse_comma_separated_args(inner);
+        let col_name = extract_col_name(parts.first().ok_or("regexp_extract_all needs column")?)?;
+        let pattern = parts
+            .get(1)
+            .ok_or("regexp_extract_all needs pattern")?
+            .trim_matches(['\'', '"']);
+        let c = col(col_name);
+        return Ok(regexp_extract_all(&c, pattern).into_expr());
+    }
+
+    // Handle regexp_like(col('name'), pattern)
+    if s.starts_with("regexp_like(") {
+        let inner = extract_first_arg(s, "regexp_like(")?;
+        let parts = parse_comma_separated_args(inner);
+        let col_name = extract_col_name(parts.first().ok_or("regexp_like needs column")?)?;
+        let pattern = parts
+            .get(1)
+            .ok_or("regexp_like needs pattern")?
+            .trim_matches(['\'', '"']);
+        let c = col(col_name);
+        return Ok(regexp_like(&c, pattern).into_expr());
+    }
+
     // Handle split(col('name'), delimiter)
     if s.starts_with("split(") {
         let inner = extract_first_arg(s, "split(")?;
@@ -1722,6 +1869,230 @@ fn parse_with_column_expr(src: &str) -> Result<Expr, String> {
         let col_refs: Vec<&robin_sparkless::Column> = columns.iter().collect();
         let coalesce_col = coalesce(&col_refs);
         return Ok(coalesce_col.into_expr());
+    }
+
+    // --- String: repeat, reverse, instr, locate, lpad, rpad ---
+    if s.starts_with("repeat(") {
+        let inner = extract_first_arg(s, "repeat(")?;
+        let parts = parse_comma_separated_args(inner);
+        let col_name = extract_col_name(parts.first().ok_or("repeat needs column")?)?;
+        let n: i32 = parts
+            .get(1)
+            .ok_or("repeat needs n")?
+            .trim()
+            .parse()
+            .map_err(|e: std::num::ParseIntError| e.to_string())?;
+        let c = col(col_name);
+        return Ok(repeat(&c, n).into_expr());
+    }
+    if s.starts_with("reverse(") {
+        let inner = extract_first_arg(s, "reverse(")?;
+        let col_name = extract_col_name(inner)?;
+        let c = col(col_name);
+        return Ok(reverse(&c).into_expr());
+    }
+    if s.starts_with("instr(") {
+        let inner = extract_first_arg(s, "instr(")?;
+        let parts = parse_comma_separated_args(inner);
+        let col_name = extract_col_name(parts.first().ok_or("instr needs column")?)?;
+        let substr = parts
+            .get(1)
+            .ok_or("instr needs substr")?
+            .trim_matches(['\'', '"']);
+        let c = col(col_name);
+        return Ok(instr(&c, substr).into_expr());
+    }
+    if s.starts_with("locate(") {
+        // locate(substr, col) - note argument order
+        let inner = extract_first_arg(s, "locate(")?;
+        let parts = parse_comma_separated_args(inner);
+        let substr = parts
+            .first()
+            .ok_or("locate needs substr")?
+            .trim_matches(['\'', '"']);
+        let col_name = extract_col_name(parts.get(1).ok_or("locate needs column")?)?;
+        let c = col(col_name);
+        return Ok(instr(&c, substr).into_expr());
+    }
+    if s.starts_with("lpad(") {
+        let inner = extract_first_arg(s, "lpad(")?;
+        let parts = parse_comma_separated_args(inner);
+        let col_name = extract_col_name(parts.first().ok_or("lpad needs column")?)?;
+        let len: i32 = parts
+            .get(1)
+            .ok_or("lpad needs length")?
+            .trim()
+            .parse()
+            .map_err(|e: std::num::ParseIntError| e.to_string())?;
+        let pad = parts
+            .get(2)
+            .ok_or("lpad needs pad")?
+            .trim_matches(['\'', '"']);
+        let c = col(col_name);
+        return Ok(lpad(&c, len, pad).into_expr());
+    }
+    if s.starts_with("rpad(") {
+        let inner = extract_first_arg(s, "rpad(")?;
+        let parts = parse_comma_separated_args(inner);
+        let col_name = extract_col_name(parts.first().ok_or("rpad needs column")?)?;
+        let len: i32 = parts
+            .get(1)
+            .ok_or("rpad needs length")?
+            .trim()
+            .parse()
+            .map_err(|e: std::num::ParseIntError| e.to_string())?;
+        let pad = parts
+            .get(2)
+            .ok_or("rpad needs pad")?
+            .trim_matches(['\'', '"']);
+        let c = col(col_name);
+        return Ok(rpad(&c, len, pad).into_expr());
+    }
+
+    // --- Math: sqrt, pow, exp, log ---
+    if s.starts_with("sqrt(") {
+        let inner = extract_first_arg(s, "sqrt(")?;
+        let col_name = extract_col_name(inner)?;
+        let c = col(col_name);
+        return Ok(sqrt(&c).into_expr());
+    }
+    if s.starts_with("pow(") {
+        let inner = extract_first_arg(s, "pow(")?;
+        let parts = parse_comma_separated_args(inner);
+        let col_name = extract_col_name(parts.first().ok_or("pow needs column")?)?;
+        let exp_val: i64 = parts
+            .get(1)
+            .ok_or("pow needs exponent")?
+            .trim()
+            .parse()
+            .map_err(|e: std::num::ParseIntError| e.to_string())?;
+        let c = col(col_name);
+        return Ok(pow(&c, exp_val).into_expr());
+    }
+    if s.starts_with("exp(") {
+        let inner = extract_first_arg(s, "exp(")?;
+        let col_name = extract_col_name(inner)?;
+        let c = col(col_name);
+        return Ok(exp(&c).into_expr());
+    }
+    if s.starts_with("log(") {
+        let inner = extract_first_arg(s, "log(")?;
+        let col_name = extract_col_name(inner)?;
+        let c = col(col_name);
+        return Ok(log(&c).into_expr());
+    }
+
+    // --- Conditional/null: nvl, ifnull, nullif, nanvl ---
+    if s.starts_with("nvl(") || s.starts_with("ifnull(") {
+        let prefix = if s.starts_with("nvl(") {
+            "nvl("
+        } else {
+            "ifnull("
+        };
+        let inner = extract_first_arg(s, prefix)?;
+        let parts = parse_comma_separated_args(inner);
+        let col_name = extract_col_name(parts.first().ok_or("nvl/ifnull needs column")?)?;
+        let col_expr =
+            parse_column_or_literal(parts.get(1).ok_or("nvl/ifnull needs value")?.trim())?;
+        let c = col(col_name);
+        let val_col = robin_sparkless::Column::from_expr(col_expr, None);
+        return Ok(nvl(&c, &val_col).into_expr());
+    }
+    if s.starts_with("nullif(") {
+        let inner = extract_first_arg(s, "nullif(")?;
+        let parts = parse_comma_separated_args(inner);
+        let col_name = extract_col_name(parts.first().ok_or("nullif needs column")?)?;
+        let value_expr = parse_column_or_literal(parts.get(1).ok_or("nullif needs value")?.trim())?;
+        let c = col(col_name);
+        let val_col = robin_sparkless::Column::from_expr(value_expr, None);
+        return Ok(nullif(&c, &val_col).into_expr());
+    }
+    if s.starts_with("nanvl(") {
+        let inner = extract_first_arg(s, "nanvl(")?;
+        let parts = parse_comma_separated_args(inner);
+        let col_name = extract_col_name(parts.first().ok_or("nanvl needs column")?)?;
+        let value_expr = parse_column_or_literal(parts.get(1).ok_or("nanvl needs value")?.trim())?;
+        let c = col(col_name);
+        let val_col = robin_sparkless::Column::from_expr(value_expr, None);
+        return Ok(nanvl(&c, &val_col).into_expr());
+    }
+
+    // --- Datetime: current_date, current_timestamp, date_add, date_sub, hour, minute, second, datediff, last_day, trunc ---
+    if s == "current_date()" {
+        return Ok(current_date().into_expr());
+    }
+    if s == "current_timestamp()" {
+        return Ok(current_timestamp().into_expr());
+    }
+    if s.starts_with("date_add(") {
+        let inner = extract_first_arg(s, "date_add(")?;
+        let parts = parse_comma_separated_args(inner);
+        let col_name = extract_col_name(parts.first().ok_or("date_add needs column")?)?;
+        let n: i32 = parts
+            .get(1)
+            .ok_or("date_add needs n")?
+            .trim()
+            .parse()
+            .map_err(|e: std::num::ParseIntError| e.to_string())?;
+        let c = col(col_name);
+        return Ok(date_add(&c, n).into_expr());
+    }
+    if s.starts_with("date_sub(") {
+        let inner = extract_first_arg(s, "date_sub(")?;
+        let parts = parse_comma_separated_args(inner);
+        let col_name = extract_col_name(parts.first().ok_or("date_sub needs column")?)?;
+        let n: i32 = parts
+            .get(1)
+            .ok_or("date_sub needs n")?
+            .trim()
+            .parse()
+            .map_err(|e: std::num::ParseIntError| e.to_string())?;
+        let c = col(col_name);
+        return Ok(date_sub(&c, n).into_expr());
+    }
+    if s.starts_with("hour(") {
+        let inner = extract_first_arg(s, "hour(")?;
+        let col_name = extract_col_name(inner)?;
+        let c = col(col_name);
+        return Ok(hour(&c).into_expr());
+    }
+    if s.starts_with("minute(") {
+        let inner = extract_first_arg(s, "minute(")?;
+        let col_name = extract_col_name(inner)?;
+        let c = col(col_name);
+        return Ok(minute(&c).into_expr());
+    }
+    if s.starts_with("second(") {
+        let inner = extract_first_arg(s, "second(")?;
+        let col_name = extract_col_name(inner)?;
+        let c = col(col_name);
+        return Ok(second(&c).into_expr());
+    }
+    if s.starts_with("datediff(") {
+        let inner = extract_first_arg(s, "datediff(")?;
+        let parts = parse_comma_separated_args(inner);
+        let end_name = extract_col_name(parts.first().ok_or("datediff needs end column")?)?;
+        let start_name = extract_col_name(parts.get(1).ok_or("datediff needs start column")?)?;
+        let end_c = col(end_name);
+        let start_c = col(start_name);
+        return Ok(datediff(&end_c, &start_c).into_expr());
+    }
+    if s.starts_with("last_day(") {
+        let inner = extract_first_arg(s, "last_day(")?;
+        let col_name = extract_col_name(inner)?;
+        let c = col(col_name);
+        return Ok(last_day(&c).into_expr());
+    }
+    if s.starts_with("trunc(") {
+        let inner = extract_first_arg(s, "trunc(")?;
+        let parts = parse_comma_separated_args(inner);
+        let col_name = extract_col_name(parts.first().ok_or("trunc needs column")?)?;
+        let format = parts
+            .get(1)
+            .ok_or("trunc needs format")?
+            .trim_matches(['\'', '"']);
+        let c = col(col_name);
+        return Ok(trunc(&c, format).into_expr());
     }
 
     // Try to parse as a general expression that can include arithmetic, comparisons, and logical operators.
@@ -2235,6 +2606,11 @@ fn types_compatible(actual: &str, expected: &str) -> bool {
     }
     // Allow array<...> types to match (Phase 6a list columns)
     if actual.starts_with("array<") && expected.starts_with("array<") {
+        return true;
+    }
+    // Allow boolean/bool to match
+    let bool_types = ["boolean", "bool", "Boolean"];
+    if bool_types.contains(&actual) && bool_types.contains(&expected) {
         return true;
     }
     false

@@ -15,8 +15,9 @@ sql = ["dep:sqlparser"]
 delta = ["dep:deltalake", "dep:tokio", "dep:url"]
 
 [dependencies]
-polars = { version = "0.45", features = ["lazy", "csv", "parquet", "json", "temporal", "strings", "concat_str", "regex", "round_series", "abs", "dtype-categorical", "dtype-date", "dtype-datetime", "dtype-duration", "dtype-time", "rank", "is_in", "list_eval", "list_drop_nulls", "cum_agg"] }
+polars = { version = "0.45", features = ["lazy", "csv", "parquet", "json", "temporal", "strings", "concat_str", "regex", "round_series", "abs", "dtype-categorical", "dtype-date", "dtype-datetime", "dtype-duration", "dtype-time", "rank", "is_in", "list_eval", "list_drop_nulls", "cum_agg", "string_pad", "string_reverse", "repeat_by", "log", "month_end", "describe", "cross_join", "semi_anti_join"] }
 serde = { version = "1.0", features = ["derive"] }
+chrono = "0.4"
 serde_json = "1.0"
 anyhow = "1.0"
 thiserror = "1.0"
@@ -27,7 +28,7 @@ tokio = { version = "1", optional = true, features = ["rt", "rt-multi-thread", "
 url = { version = "2", optional = true }
 
 [dev-dependencies]
-polars = { version = "0.45", features = ["lazy", "csv", "parquet", "json", "temporal", "strings", "concat_str", "regex", "round_series", "abs", "dtype-categorical", "dtype-date", "dtype-datetime", "dtype-duration", "dtype-time", "test", "rank", "is_in", "list_eval", "list_drop_nulls", "cum_agg"] }
+polars = { version = "0.45", features = ["lazy", "csv", "parquet", "json", "temporal", "strings", "concat_str", "regex", "round_series", "abs", "dtype-categorical", "dtype-date", "dtype-datetime", "dtype-duration", "dtype-time", "test", "rank", "is_in", "list_eval", "list_drop_nulls", "cum_agg", "string_pad", "string_reverse", "repeat_by", "log", "month_end", "describe", "cross_join", "semi_anti_join"] }
 tempfile = "3"
 criterion = "0.5"
 

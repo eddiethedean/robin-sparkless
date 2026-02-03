@@ -1,0 +1,32 @@
+{
+  "name": "cross_join",
+  "pyspark_version": "3.5.0",
+  "input": {
+    "schema": [
+      { "name": "a", "type": "bigint" }
+    ],
+    "rows": [[1], [2]]
+  },
+  "right_input": {
+    "schema": [
+      { "name": "b", "type": "string" }
+    ],
+    "rows": [["x"], ["y"]]
+  },
+  "operations": [
+    { "op": "crossJoin" },
+    { "op": "orderBy", "columns": ["a", "b"], "ascending": [true, true] }
+  ],
+  "expected": {
+    "schema": [
+      { "name": "a", "type": "bigint" },
+      { "name": "b", "type": "string" }
+    ],
+    "rows": [
+      [1, "x"],
+      [1, "y"],
+      [2, "x"],
+      [2, "y"]
+    ]
+  }
+}

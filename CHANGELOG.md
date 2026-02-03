@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Documentation and roadmap**:
+  - [PYSPARK_DIFFERENCES.md](docs/PYSPARK_DIFFERENCES.md): Known divergences from PySpark (window fixtures skipped, SQL/Delta limits, Phase 8 deferred). Linked from README and docs index.
+  - FULL_BACKEND_ROADMAP Phase 1: Marked completed items (dataframe split, case sensitivity, fixture converter); trait/expression doc left as Future.
+  - ROADMAP §6: groupBy null/edge cases marked verified via existing fixtures; success metric "Documentation of differences" marked done.
+- **Parity fixtures** (58 total, +2):
+  - `regexp_like`: `regexp_like(col, pattern)` → boolean; parity parser support for withColumn.
+  - `regexp_extract_all`: `regexp_extract_all(col, pattern)` → list of strings; parity parser support.
+- **Datetime**: `to_date()` (cast to Date), `date_format(format)` (chrono strftime) in Rust API; no parity fixture yet (test harness does not build date/datetime from JSON).
+- **Sparkless parity**: SPARKLESS_PARITY_STATUS "When Sparkless repo is available" steps for running converter and updating pass/fail table.
+
 - **Phase 6 remaining (window + array)**:
   - **Window**: `cume_dist(partition_by, descending)`, `ntile(n, partition_by, descending)`, `nth_value(n, partition_by, descending)` in Rust and Python; parity handler for `first_value`, `last_value`, `percent_rank`, `cume_dist`, `ntile`, `nth_value`; fixtures `first_value_window`, `last_value_window` (passing); `percent_rank_window`, `cume_dist_window`, `ntile_window`, `nth_value_window` (skipped: Polars does not allow combining rank().over() and count().over() in one expr). Fixture simplification planned for Phase 8.
   - **Array**: `array_position`, `array_remove`, `posexplode` **implemented** in Rust and Python (via Polars list.eval with col("") as element; requires polars features list_eval, list_drop_nulls, cum_agg). `array_repeat` not implemented (→ Phase 8). String (6.4) soundex, levenshtein, etc. and Map/JSON documented as Phase 8.
@@ -30,7 +40,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Converter (`tests/convert_sparkless_fixtures.py`) maps Sparkless `expected_outputs` to robin-sparkless format: join, window, withColumn, union, unionByName, distinct, drop, dropna, fillna, limit, withColumnRenamed (in addition to filter, select, groupBy, orderBy).
   - Parity test discovers `tests/fixtures/*.json` and `tests/fixtures/converted/*.json`; optional `skip: true` / `skip_reason` in fixtures to skip known gaps.
   - `make sparkless-parity`: when `SPARKLESS_EXPECTED_OUTPUTS` is set, runs converter then `cargo test pyspark_parity_fixtures`; see [docs/CONVERTER_STATUS.md](docs/CONVERTER_STATUS.md) and [docs/SPARKLESS_PARITY_STATUS.md](docs/SPARKLESS_PARITY_STATUS.md).
-  - 56 hand-written fixtures passing; target 50+ met.
+  - 58 hand-written fixtures passing; target 50+ met.
 - **Phase 4 PyO3 Bridge**: Optional Python bindings when built with `--features pyo3`.
   - Python module `robin_sparkless` with PySpark-like API: `SparkSession`, `SparkSessionBuilder`, `DataFrame`, `Column`, `GroupedData`, `WhenBuilder`, `ThenBuilder`.
   - Session: `builder()`, `get_or_create()`, `create_dataframe`, `read_csv`, `read_parquet`, `read_json`, `is_case_sensitive()`.

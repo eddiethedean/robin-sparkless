@@ -1,0 +1,31 @@
+{
+  "name": "string_lpad_rpad",
+  "pyspark_version": "3.5.0",
+  "input": {
+    "schema": [
+      { "name": "id", "type": "bigint" },
+      { "name": "s", "type": "string" }
+    ],
+    "rows": [
+      [1, "x"],
+      [2, "ab"]
+    ]
+  },
+  "operations": [
+    { "op": "withColumn", "column": "lp", "expr": "lpad(col('s'), 5, ' ')" },
+    { "op": "withColumn", "column": "rp", "expr": "rpad(col('s'), 5, '0')" },
+    { "op": "orderBy", "columns": ["id"], "ascending": [true] }
+  ],
+  "expected": {
+    "schema": [
+      { "name": "id", "type": "bigint" },
+      { "name": "s", "type": "string" },
+      { "name": "lp", "type": "string" },
+      { "name": "rp", "type": "string" }
+    ],
+    "rows": [
+      [1, "x", "    x", "x0000"],
+      [2, "ab", "   ab", "ab000"]
+    ]
+  }
+}

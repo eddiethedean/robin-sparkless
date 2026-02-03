@@ -1,0 +1,35 @@
+{
+  "name": "regexp_like",
+  "pyspark_version": "3.5.0",
+  "input": {
+    "schema": [
+      { "name": "id", "type": "bigint" },
+      { "name": "text", "type": "string" }
+    ],
+    "rows": [
+      [1, "hello"],
+      [2, "123"],
+      [3, "a1b"]
+    ]
+  },
+  "operations": [
+    {
+      "op": "withColumn",
+      "column": "matches",
+      "expr": "regexp_like(col('text'), '^[a-z]+$')"
+    },
+    { "op": "select", "columns": ["id", "text", "matches"] }
+  ],
+  "expected": {
+    "schema": [
+      { "name": "id", "type": "bigint" },
+      { "name": "text", "type": "string" },
+      { "name": "matches", "type": "boolean" }
+    ],
+    "rows": [
+      [1, "hello", true],
+      [2, "123", false],
+      [3, "a1b", false]
+    ]
+  }
+}

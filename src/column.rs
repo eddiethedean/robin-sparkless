@@ -376,6 +376,60 @@ impl Column {
         )
     }
 
+    /// Repeat string column n times (PySpark repeat). Each element repeated n times.
+    pub fn repeat(&self, n: i32) -> Column {
+        use polars::prelude::*;
+        // repeat_by yields List[str]; join to get a single string per row.
+        Self::from_expr(
+            self.expr()
+                .clone()
+                .repeat_by(lit(n as u32))
+                .list()
+                .join(lit(""), false),
+            None,
+        )
+    }
+
+    /// Reverse string (PySpark reverse).
+    pub fn reverse(&self) -> Column {
+        Self::from_expr(self.expr().clone().str().reverse(), None)
+    }
+
+    /// Find substring position (1-based; 0 if not found). PySpark instr(col, substr).
+    pub fn instr(&self, substr: &str) -> Column {
+        use polars::prelude::*;
+        let found = self
+            .expr()
+            .clone()
+            .str()
+            .find_literal(lit(substr.to_string()));
+        // Polars find_literal returns 0-based index (null if not found); PySpark is 1-based, 0 when not found.
+        Self::from_expr(
+            (found.cast(DataType::Int64) + lit(1i64)).fill_null(lit(0i64)),
+            None,
+        )
+    }
+
+    /// Left-pad string to length with pad character (PySpark lpad).
+    pub fn lpad(&self, length: i32, pad: &str) -> Column {
+        let pad_str = if pad.is_empty() { " " } else { pad };
+        let fill = pad_str.chars().next().unwrap_or(' ');
+        Self::from_expr(
+            self.expr().clone().str().pad_start(length as usize, fill),
+            None,
+        )
+    }
+
+    /// Right-pad string to length with pad character (PySpark rpad).
+    pub fn rpad(&self, length: i32, pad: &str) -> Column {
+        let pad_str = if pad.is_empty() { " " } else { pad };
+        let fill = pad_str.chars().next().unwrap_or(' ');
+        Self::from_expr(
+            self.expr().clone().str().pad_end(length as usize, fill),
+            None,
+        )
+    }
+
     // --- Math functions ---
 
     /// Absolute value (PySpark abs)
@@ -398,6 +452,27 @@ impl Column {
         Self::from_expr(self.expr().clone().round(decimals), None)
     }
 
+    /// Square root (PySpark sqrt)
+    pub fn sqrt(&self) -> Column {
+        Self::from_expr(self.expr().clone().sqrt(), None)
+    }
+
+    /// Power (PySpark pow). Exponent can be literal or expression.
+    pub fn pow(&self, exp: i64) -> Column {
+        use polars::prelude::*;
+        Self::from_expr(self.expr().clone().pow(lit(exp)), None)
+    }
+
+    /// Exponential (PySpark exp)
+    pub fn exp(&self) -> Column {
+        Self::from_expr(self.expr().clone().exp(), None)
+    }
+
+    /// Natural logarithm (PySpark log)
+    pub fn log(&self) -> Column {
+        Self::from_expr(self.expr().clone().log(std::f64::consts::E), None)
+    }
+
     // --- Datetime functions ---
 
     /// Extract year from datetime column (PySpark year)
@@ -413,6 +488,70 @@ impl Column {
     /// Extract day of month from datetime column (PySpark day)
     pub fn day(&self) -> Column {
         Self::from_expr(self.expr().clone().dt().day(), None)
+    }
+
+    /// Cast to date (PySpark to_date). Drops time component from datetime/timestamp.
+    pub fn to_date(&self) -> Column {
+        use polars::prelude::DataType;
+        Self::from_expr(self.expr().clone().cast(DataType::Date), None)
+    }
+
+    /// Format date/datetime as string (PySpark date_format). Uses chrono strftime format.
+    pub fn date_format(&self, format: &str) -> Column {
+        Self::from_expr(self.expr().clone().dt().strftime(format), None)
+    }
+
+    /// Extract hour from datetime column (PySpark hour).
+    pub fn hour(&self) -> Column {
+        Self::from_expr(self.expr().clone().dt().hour(), None)
+    }
+
+    /// Extract minute from datetime column (PySpark minute).
+    pub fn minute(&self) -> Column {
+        Self::from_expr(self.expr().clone().dt().minute(), None)
+    }
+
+    /// Extract second from datetime column (PySpark second).
+    pub fn second(&self) -> Column {
+        Self::from_expr(self.expr().clone().dt().second(), None)
+    }
+
+    /// Add n days to date/datetime column (PySpark date_add).
+    pub fn date_add(&self, n: i32) -> Column {
+        use polars::prelude::*;
+        let date_expr = self.expr().clone().cast(DataType::Date);
+        let dur = duration(DurationArgs::new().with_days(lit(n as i64)));
+        Self::from_expr(date_expr + dur, None)
+    }
+
+    /// Subtract n days from date/datetime column (PySpark date_sub).
+    pub fn date_sub(&self, n: i32) -> Column {
+        use polars::prelude::*;
+        let date_expr = self.expr().clone().cast(DataType::Date);
+        let dur = duration(DurationArgs::new().with_days(lit(n as i64)));
+        Self::from_expr(date_expr - dur, None)
+    }
+
+    /// Number of days between two date/datetime columns (PySpark datediff). (end - start).
+    pub fn datediff(&self, other: &Column) -> Column {
+        use polars::prelude::*;
+        let start = self.expr().clone().cast(DataType::Date);
+        let end = other.expr().clone().cast(DataType::Date);
+        Self::from_expr((end - start).dt().total_days(), None)
+    }
+
+    /// Last day of the month for date/datetime column (PySpark last_day).
+    pub fn last_day(&self) -> Column {
+        Self::from_expr(self.expr().clone().dt().month_end(), None)
+    }
+
+    /// Truncate date/datetime to unit (e.g. "mo", "wk", "day"). PySpark trunc.
+    pub fn trunc(&self, format: &str) -> Column {
+        use polars::prelude::*;
+        Self::from_expr(
+            self.expr().clone().dt().truncate(lit(format.to_string())),
+            None,
+        )
     }
 
     // --- Window functions ---

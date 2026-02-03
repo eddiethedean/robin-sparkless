@@ -7,7 +7,7 @@ This doc is the **living parity matrix** for `robin-sparkless`.
 - **Fixtures**: `tests/fixtures/*.json`
 - **Sparkless integration**: Robin-sparkless is designed to replace Sparkless's backend. Sparkless has 270+ expected_outputs; a fixture converter can convert those to robin-sparkless format. See [SPARKLESS_INTEGRATION_ANALYSIS.md](SPARKLESS_INTEGRATION_ANALYSIS.md) §4.
 
-Status as of **February 2026**: **PASSING (56 fixtures)**; 4 window fixtures skipped (percent_rank, cume_dist, ntile, nth_value; see skip_reason). Phase 6: array functions `array_position`, `array_remove`, `posexplode` are **implemented** (via Polars list.eval); array fixtures `array_contains`, `element_at`, `array_size`; window extensions (first_value, last_value, percent_rank) and string (regexp_extract_all, regexp_like). Remaining parity items (array_repeat, Map, JSON, string 6.4, window fixture simplification) planned for Phase 8. Python smoke tests for the PyO3 bridge live in `tests/python/` (run via `make test` or `make test-python`); see [PYTHON_API.md](PYTHON_API.md).
+Status as of **February 2026**: **PASSING (68 fixtures)**; 4 window fixtures skipped (percent_rank, cume_dist, ntile, nth_value; see skip_reason). Phase 6: array functions `array_position`, `array_remove`, `posexplode` are **implemented** (via Polars list.eval); array fixtures `array_contains`, `element_at`, `array_size`; window extensions (first_value, last_value, percent_rank) and string (regexp_extract_all, regexp_like). Remaining parity items (array_repeat, Map, JSON, string 6.4, window fixture simplification) planned for Phase 8. Python smoke tests for the PyO3 bridge live in `tests/python/` (run via `make test` or `make test-python`); see [PYTHON_API.md](PYTHON_API.md).
 
 ## Legend
 
@@ -66,8 +66,13 @@ Status as of **February 2026**: **PASSING (56 fixtures)**; 4 window fixtures ski
 | Array/List | array, array_contains, element_at, size/array_size, array_join, array_sort, array_slice, explode; array_position, array_remove, posexplode (implemented) | ✅ Covered | `array_contains`, `element_at`, `array_size` |
 | Windows | first_value, last_value, percent_rank | ✅ Covered | `first_value_window`, `last_value_window`; percent_rank usable in fixtures |
 | Windows | cume_dist, ntile, nth_value | ✅ API (fixtures skipped) | Polars limits combined window exprs; fixtures percent_rank_window, cume_dist_window, ntile_window, nth_value_window skipped |
-| Strings | regexp_extract_all, regexp_like | ✅ Implemented | (no dedicated fixture yet) |
+| Strings | regexp_extract_all, regexp_like | ✅ Covered | `regexp_extract_all`, `regexp_like` |
+| Strings | repeat, reverse, instr, lpad, rpad | ✅ Covered | `string_repeat_reverse`, `string_lpad_rpad` |
+| Math | sqrt, pow, exp, log | ✅ Covered | `math_sqrt_pow` |
+| GroupBy | first, last, approx_count_distinct in agg | ✅ Covered | `groupby_first_last` |
+| DataFrame | replace, crossJoin, describe, subtract, intersect | ✅ Covered | `replace`, `cross_join`, `describe`, `subtract`, `intersect` |
 | SQL | `SparkSession::sql()` (optional `sql` feature) | ✅ Implemented | No fixture (SQL translated to DataFrame ops; parity via DataFrame fixtures) |
+| Datetime | year, month, day, to_date, date_format; current_date, date_add, hour, etc. | ✅ Implemented | No fixture yet (test harness does not yet build date/datetime columns from JSON) |
 
 ## Fixture Index
 
@@ -129,6 +134,17 @@ Status as of **February 2026**: **PASSING (56 fixtures)**; 4 window fixtures ski
 | `array_size` | split + size(col) |
 | `first_value_window` | first_value over partition |
 | `last_value_window` | last_value over partition |
+| `regexp_like` | regexp_like(col, pattern) boolean match |
+| `regexp_extract_all` | regexp_extract_all(col, pattern) list of matches |
+| `string_repeat_reverse` | repeat(col, n), reverse(col) |
+| `string_lpad_rpad` | lpad(col, len, pad), rpad(col, len, pad) |
+| `math_sqrt_pow` | sqrt(col), pow(col, exp) |
+| `groupby_first_last` | groupBy + first(name), last(name) |
+| `cross_join` | crossJoin (cartesian product) |
+| `describe` | describe() summary statistics |
+| `replace` | replace(column, old_value, new_value) |
+| `subtract` | subtract (set difference) |
+| `intersect` | intersect (set intersection) |
 
 ## Next additions to the matrix (recommended)
 

@@ -19,10 +19,17 @@ cargo test pyspark_parity_fixtures
 
 | Source | Converted | Passing | Failing | Skipped |
 |--------|-----------|---------|--------|---------|
-| Hand-written (`tests/fixtures/*.json`) | — | 56 | 0 | 4 (window: percent_rank, cume_dist, ntile, nth_value) |
+| Hand-written (`tests/fixtures/*.json`) | — | 58 | 0 | 4 (window: percent_rank, cume_dist, ntile, nth_value) |
 | Sparkless converted (`tests/fixtures/converted/*.json`) | 0 (run converter when `SPARKLESS_EXPECTED_OUTPUTS` set) | — | — | — |
 
-**Target: 50+ tests passing** (hand-written + converted). **Current: 56 passing** (hand-written). When Sparkless `expected_outputs` is available, run `make sparkless-parity` to convert and run converted fixtures; update this table with converted counts.
+**Target: 50+ tests passing** (hand-written + converted). **Current: 58 passing** (hand-written).
+
+### When Sparkless repo is available
+
+1. Set `export SPARKLESS_EXPECTED_OUTPUTS=/path/to/sparkless/tests/expected_outputs`.
+2. Run `make sparkless-parity` (converts to `tests/fixtures/converted/`, then runs `cargo test pyspark_parity_fixtures`).
+3. Update the table above with converted count and passing/failing/skipped for `tests/fixtures/converted/*.json`.
+4. For any failing fixture, add a row under "Failure reasons" and use `skip: true` + `skip_reason` in the fixture if it is a known unsupported or semantic difference.
 
 ## Failure reasons (converted fixtures)
 

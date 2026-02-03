@@ -210,6 +210,31 @@ pub fn regexp_like(column: &Column, pattern: &str) -> Column {
     column.clone().regexp_like(pattern)
 }
 
+/// Repeat string n times (PySpark repeat).
+pub fn repeat(column: &Column, n: i32) -> Column {
+    column.clone().repeat(n)
+}
+
+/// Reverse string (PySpark reverse).
+pub fn reverse(column: &Column) -> Column {
+    column.clone().reverse()
+}
+
+/// Find substring position 1-based; 0 if not found (PySpark instr).
+pub fn instr(column: &Column, substr: &str) -> Column {
+    column.clone().instr(substr)
+}
+
+/// Left-pad string to length with pad char (PySpark lpad).
+pub fn lpad(column: &Column, length: i32, pad: &str) -> Column {
+    column.clone().lpad(length, pad)
+}
+
+/// Right-pad string to length with pad char (PySpark rpad).
+pub fn rpad(column: &Column, length: i32, pad: &str) -> Column {
+    column.clone().rpad(length, pad)
+}
+
 /// Absolute value (PySpark abs)
 pub fn abs(column: &Column) -> Column {
     column.clone().abs()
@@ -230,6 +255,26 @@ pub fn round(column: &Column, decimals: u32) -> Column {
     column.clone().round(decimals)
 }
 
+/// Square root (PySpark sqrt)
+pub fn sqrt(column: &Column) -> Column {
+    column.clone().sqrt()
+}
+
+/// Power (PySpark pow)
+pub fn pow(column: &Column, exp: i64) -> Column {
+    column.clone().pow(exp)
+}
+
+/// Exponential (PySpark exp)
+pub fn exp(column: &Column) -> Column {
+    column.clone().exp()
+}
+
+/// Natural logarithm (PySpark log)
+pub fn log(column: &Column) -> Column {
+    column.clone().log()
+}
+
 /// Extract year from datetime column (PySpark year)
 pub fn year(column: &Column) -> Column {
     column.clone().year()
@@ -243,6 +288,74 @@ pub fn month(column: &Column) -> Column {
 /// Extract day of month from datetime column (PySpark day)
 pub fn day(column: &Column) -> Column {
     column.clone().day()
+}
+
+/// Cast to date (PySpark to_date)
+pub fn to_date(column: &Column) -> Column {
+    column.clone().to_date()
+}
+
+/// Format date/datetime as string (PySpark date_format). Uses chrono strftime format (e.g. "%Y-%m-%d").
+pub fn date_format(column: &Column, format: &str) -> Column {
+    column.clone().date_format(format)
+}
+
+/// Current date (evaluation time). PySpark current_date.
+pub fn current_date() -> Column {
+    use polars::prelude::*;
+    let today = chrono::Utc::now().date_naive();
+    let days = (today - chrono::NaiveDate::from_ymd_opt(1970, 1, 1).unwrap()).num_days() as i32;
+    crate::column::Column::from_expr(Expr::Literal(LiteralValue::Date(days)), None)
+}
+
+/// Current timestamp (evaluation time). PySpark current_timestamp.
+pub fn current_timestamp() -> Column {
+    use polars::prelude::*;
+    let ts = chrono::Utc::now().timestamp_micros();
+    crate::column::Column::from_expr(
+        Expr::Literal(LiteralValue::DateTime(ts, TimeUnit::Microseconds, None)),
+        None,
+    )
+}
+
+/// Extract hour from datetime column (PySpark hour).
+pub fn hour(column: &Column) -> Column {
+    column.clone().hour()
+}
+
+/// Extract minute from datetime column (PySpark minute).
+pub fn minute(column: &Column) -> Column {
+    column.clone().minute()
+}
+
+/// Extract second from datetime column (PySpark second).
+pub fn second(column: &Column) -> Column {
+    column.clone().second()
+}
+
+/// Add n days to date column (PySpark date_add).
+pub fn date_add(column: &Column, n: i32) -> Column {
+    column.clone().date_add(n)
+}
+
+/// Subtract n days from date column (PySpark date_sub).
+pub fn date_sub(column: &Column, n: i32) -> Column {
+    column.clone().date_sub(n)
+}
+
+/// Number of days between two date columns (PySpark datediff).
+pub fn datediff(end: &Column, start: &Column) -> Column {
+    start.clone().datediff(end)
+}
+
+/// Last day of month for date column (PySpark last_day).
+pub fn last_day(column: &Column) -> Column {
+    column.clone().last_day()
+}
+
+/// Truncate date/datetime to unit (PySpark trunc).
+pub fn trunc(column: &Column, format: &str) -> Column {
+    column.clone().trunc(format)
 }
 
 /// Concatenate string columns without separator (PySpark concat)
@@ -344,6 +457,35 @@ pub fn coalesce(columns: &[&Column]) -> Column {
     }
     let exprs: Vec<Expr> = columns.iter().map(|c| c.expr().clone()).collect();
     let expr = coalesce(&exprs);
+    crate::column::Column::from_expr(expr, None)
+}
+
+/// Alias for coalesce(col, value). PySpark nvl / ifnull.
+pub fn nvl(column: &Column, value: &Column) -> Column {
+    coalesce(&[column, value])
+}
+
+/// Alias for nvl. PySpark ifnull.
+pub fn ifnull(column: &Column, value: &Column) -> Column {
+    nvl(column, value)
+}
+
+/// Return null if column equals value, else column. PySpark nullif.
+pub fn nullif(column: &Column, value: &Column) -> Column {
+    use polars::prelude::*;
+    let cond = column.expr().clone().eq(value.expr().clone());
+    let null_lit = Expr::Literal(LiteralValue::Null);
+    let expr = when(cond).then(null_lit).otherwise(column.expr().clone());
+    crate::column::Column::from_expr(expr, None)
+}
+
+/// Replace NaN with value. PySpark nanvl.
+pub fn nanvl(column: &Column, value: &Column) -> Column {
+    use polars::prelude::*;
+    let cond = column.expr().clone().is_nan();
+    let expr = when(cond)
+        .then(value.expr().clone())
+        .otherwise(column.expr().clone());
     crate::column::Column::from_expr(expr, None)
 }
 

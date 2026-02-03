@@ -5,7 +5,8 @@
 | [QUICKSTART](QUICKSTART.md) | Build, install, basic usage, optional features (SQL, Delta), troubleshooting, benchmarks |
 | [ROADMAP](ROADMAP.md) | Development roadmap and Sparkless integration phases |
 | [CHANGELOG](../CHANGELOG.md) | Version history and release notes |
-| [PARITY_STATUS](PARITY_STATUS.md) | PySpark parity coverage matrix (56 fixtures) |
+| [PARITY_STATUS](PARITY_STATUS.md) | PySpark parity coverage matrix (58 fixtures) |
+| [PYSPARK_DIFFERENCES](PYSPARK_DIFFERENCES.md) | Known divergences from PySpark (window, SQL, Delta, Phase 8) |
 | [PYTHON_API](PYTHON_API.md) | Python API contract (Phase 4 PyO3 bridge): build, install, signatures; optional SQL and Delta |
 | [CONVERTER_STATUS](CONVERTER_STATUS.md) | Sparkless → robin-sparkless fixture converter |
 | [SPARKLESS_PARITY_STATUS](SPARKLESS_PARITY_STATUS.md) | Phase 5: pass/fail and failure reasons for converted fixtures |

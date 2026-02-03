@@ -1,0 +1,26 @@
+{
+  "name": "subtract",
+  "pyspark_version": "3.5.0",
+  "input": {
+    "schema": [
+      { "name": "k", "type": "bigint" }
+    ],
+    "rows": [[1], [2], [3]]
+  },
+  "right_input": {
+    "schema": [
+      { "name": "k", "type": "bigint" }
+    ],
+    "rows": [[2]]
+  },
+  "operations": [
+    { "op": "subtract" },
+    { "op": "orderBy", "columns": ["k"], "ascending": [true] }
+  ],
+  "expected": {
+    "schema": [
+      { "name": "k", "type": "bigint" }
+    ],
+    "rows": [[1], [3]]
+  }
+}
