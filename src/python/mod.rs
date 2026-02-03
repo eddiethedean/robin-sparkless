@@ -230,6 +230,33 @@ impl PyColumn {
         }
     }
 
+    /// 1-based index of first occurrence of value in list, or 0 if not found (PySpark array_position).
+    fn array_position(&self, value: &PyColumn) -> Self {
+        PyColumn {
+            inner: self.inner.array_position(value.inner.expr().clone()),
+        }
+    }
+
+    /// New list with all elements equal to value removed (PySpark array_remove).
+    fn array_remove(&self, value: &PyColumn) -> Self {
+        PyColumn {
+            inner: self.inner.array_remove(value.inner.expr().clone()),
+        }
+    }
+
+    /// Repeat each element n times (PySpark array_repeat). Not implemented.
+    fn array_repeat(&self, n: i64) -> Self {
+        PyColumn {
+            inner: self.inner.array_repeat(n),
+        }
+    }
+
+    /// Explode list with position (PySpark posexplode). Returns (pos_column, value_column).
+    fn posexplode(&self) -> (Self, Self) {
+        let (pos, val) = self.inner.posexplode();
+        (PyColumn { inner: pos }, PyColumn { inner: val })
+    }
+
     /// First value in partition (PySpark first_value). Use with .over().
     fn first_value(&self) -> Self {
         PyColumn {
@@ -244,10 +271,35 @@ impl PyColumn {
         }
     }
 
-    /// Percent rank in partition. Use with .over().
-    fn percent_rank(&self, descending: bool) -> Self {
+    /// Percent rank in partition. Window is applied; pass partition_by.
+    fn percent_rank(&self, partition_by: Vec<String>, descending: bool) -> Self {
+        let refs: Vec<&str> = partition_by.iter().map(|s| s.as_str()).collect();
         PyColumn {
-            inner: self.inner.percent_rank(descending),
+            inner: self.inner.percent_rank(&refs, descending),
+        }
+    }
+
+    /// Cumulative distribution in partition. Window is applied; pass partition_by.
+    fn cume_dist(&self, partition_by: Vec<String>, descending: bool) -> Self {
+        let refs: Vec<&str> = partition_by.iter().map(|s| s.as_str()).collect();
+        PyColumn {
+            inner: self.inner.cume_dist(&refs, descending),
+        }
+    }
+
+    /// Ntile: bucket 1..n by rank within partition. Window is applied; pass partition_by.
+    fn ntile(&self, n: u32, partition_by: Vec<String>, descending: bool) -> Self {
+        let refs: Vec<&str> = partition_by.iter().map(|s| s.as_str()).collect();
+        PyColumn {
+            inner: self.inner.ntile(n, &refs, descending),
+        }
+    }
+
+    /// Nth value in partition by order (1-based n). Window is applied; pass partition_by, do not call .over() again.
+    fn nth_value(&self, n: i64, partition_by: Vec<String>, descending: bool) -> Self {
+        let refs: Vec<&str> = partition_by.iter().map(|s| s.as_str()).collect();
+        PyColumn {
+            inner: self.inner.nth_value(n, &refs, descending),
         }
     }
 

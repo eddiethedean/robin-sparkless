@@ -1,6 +1,6 @@
 # Full Sparkless Backend Roadmap
 
-This document plans the path for **robin-sparkless** to become a complete backend replacement for [Sparkless](https://github.com/eddiethedean/sparkless). Sparkless implements 403+ PySpark functions and 85+ DataFrame methods; robin-sparkless currently covers a core subset with 54 parity fixtures.
+This document plans the path for **robin-sparkless** to become a complete backend replacement for [Sparkless](https://github.com/eddiethedean/sparkless). Sparkless implements 403+ PySpark functions and 85+ DataFrame methods; robin-sparkless currently covers a core subset with 56 parity fixtures.
 
 **Reference**: [PYSPARK_FUNCTION_MATRIX](https://github.com/eddiethedean/sparkless/blob/main/PYSPARK_FUNCTION_MATRIX.md) catalogs all functions/methods; [SPARKLESS_INTEGRATION_ANALYSIS.md](SPARKLESS_INTEGRATION_ANALYSIS.md) describes architecture mapping.
 
@@ -12,7 +12,7 @@ This document plans the path for **robin-sparkless** to become a complete backen
 |------|-----------------|-----------|-----|
 | **Functions** | ~35+ (col, lit, count, sum, avg, min, max, when, coalesce, upper, lower, substring, concat, concat_ws, length, trim, regexp_*, row_number, rank, dense_rank, lag, lead, first_value, last_value, percent_rank, array_size, array_contains, element_at, explode, array_sort, array_join, array_slice, regexp_extract_all, regexp_like) | 403 | ~368 |
 | **DataFrame methods** | ~25 (filter, select, orderBy, groupBy, withColumn, join, union, unionByName, distinct, drop, dropna, fillna, limit, withColumnRenamed, collect, count, show, read_csv, read_parquet, read_json) | 85 | ~60 |
-| **Parity fixtures** | 54 passing | 270+ expected_outputs | 216+ |
+| **Parity fixtures** | 56 passing | 270+ expected_outputs | 216+ |
 | **PyO3 bridge** | ✅ Optional `pyo3` feature; `robin_sparkless` Python module | — | — |
 | **SQL** | Optional `sql` feature: SELECT, FROM, WHERE, JOIN, GROUP BY, ORDER BY, LIMIT; temp views | Full DDL/DML support | Subqueries, CTEs, DDL, HAVING |
 
@@ -27,8 +27,9 @@ This document plans the path for **robin-sparkless** to become a complete backen
 | **3. DataFrame Methods** | Core methods: union, distinct, drop, fillna, etc. | 3–4 weeks |
 | **4. PyO3 Bridge** | Python bindings so Sparkless can call robin-sparkless | 4–6 weeks |
 | **5. Test Conversion** | Convert 50+ Sparkless tests, run in CI | 2–3 weeks |
-| **6. Broad Function Parity** | Remaining ~300 functions, prioritized by usage | 8–12 weeks |
+| **6. Broad Function Parity** | Array (array_position, array_remove, posexplode ✅; array_repeat → Phase 8), Map/JSON/string 6.4/window → Phase 8 | 8–12 weeks |
 | **7. SQL & Advanced** | SQL executor, Delta Lake, performance & robustness | ✅ **Completed** (optional `sql` / `delta` features) |
+| **8. Remaining Parity (Later)** | array_repeat, Map (6b), JSON (6c), String 6.4 (soundex, levenshtein, translate), window fixture simplification, documentation of differences | TBD |
 
 ---
 
@@ -182,7 +183,7 @@ See [PYTHON_API.md](PYTHON_API.md) for the API contract Sparkless maintainers ne
 - [x] Fixture converter produces robin-sparkless fixtures from Sparkless expected_outputs (join, window, withColumn, union, distinct, drop, dropna, fillna, limit, withColumnRenamed; output to `tests/fixtures/converted/` with `--output-subdir`)
 - [x] Identify tests that use only supported ops; run those first (run `make sparkless-parity` with `SPARKLESS_EXPECTED_OUTPUTS` set when Sparkless repo available)
 - [x] CI: `make sparkless-parity` runs converted tests (converter when path set, then `cargo test pyspark_parity_fixtures`; parity discovers `tests/fixtures/` and `tests/fixtures/converted/`)
-- [x] Target: 50+ tests passing on robin-sparkless (54 hand-written passing; document in [SPARKLESS_PARITY_STATUS.md](SPARKLESS_PARITY_STATUS.md); add converted when Sparkless expected_outputs used)
+- [x] Target: 50+ tests passing on robin-sparkless (56 hand-written passing; document in [SPARKLESS_PARITY_STATUS.md](SPARKLESS_PARITY_STATUS.md); add converted when Sparkless expected_outputs used)
 - [x] Document which tests fail and why (missing function, semantic difference) in [SPARKLESS_PARITY_STATUS.md](SPARKLESS_PARITY_STATUS.md); fixtures can use `skip: true` + `skip_reason`
 
 ---
@@ -196,30 +197,32 @@ See [PYTHON_API.md](PYTHON_API.md) for the API contract Sparkless maintainers ne
 - [x] `array`, `array_contains`, `array_join`, `array_max`, `array_min`
 - [x] `array_size`, `array_sort`, `element_at`, `explode`
 - [x] `array_slice`, `size` (alias for array_size)
-- [ ] `array_position`, `array_remove`, `array_repeat`, `posexplode`
+- [x] `array_position`, `array_remove`, `posexplode` (implemented via Polars list.eval; Rust + Python)
+- [ ] `array_repeat` → **Phase 8** (blocked on list.eval with dynamic repeat/flatten)
 - [ ] `flatten`, `exists`, `forall`, `filter`, `transform`, `aggregate`
 
-### 6.2 Map Functions (Deferred)
+### 6.2 Map Functions → Phase 8
 
-- Map functions deferred: Polars represents maps as `List(Struct)`; PySpark MapType semantics and `list.eval()`-style transforms would require non-trivial mapping. Documented as out of scope for current Phase 6.
-- *If needed later*: `create_map`, `map_keys`, `map_values`, `map_entries`, `map_from_arrays`, etc.
+- Map functions deferred to **Phase 8**: Polars represents maps as `List(Struct)`; PySpark MapType semantics and `list.eval()`-style transforms would require non-trivial mapping.
+- *Phase 8*: `create_map`, `map_keys`, `map_values`, `map_entries`, `map_from_arrays`, etc.
 
-### 6.3 JSON & Binary (Deferred)
+### 6.3 JSON & Binary → Phase 8
 
-- JSON/binary deferred to prioritize array, window, and string extensions. Polars JSON support is behind optional features.
-- *If needed later*: `get_json_object`, `from_json`, `to_json`, `base64`, `unbase64`, etc.
+- JSON/binary deferred to **Phase 8**. Polars JSON support is behind optional features.
+- *Phase 8*: `get_json_object`, `from_json`, `to_json`, `base64`, `unbase64`, etc.
 
-### 6.4 Additional String (partial)
+### 6.4 Additional String (partial; remainder → Phase 8)
 
 - [x] `regexp_extract_all`, `regexp_like` (Phase 6e)
 - [x] `regexp_replace` (already present)
-- [ ] `soundex`, `levenshtein`, `crc32`, `xxhash64`
-- [ ] `mask`, `translate`, `substring_index`
+- [ ] `soundex`, `levenshtein`, `crc32`, `xxhash64` → **Phase 8**
+- [ ] `mask`, `translate`, `substring_index` → **Phase 8**
 
-### 6.5 Window Extensions (partial)
+### 6.5 Window Extensions (partial; fixture simplification → Phase 8)
 
 - [x] `percent_rank`, `first_value`, `last_value` (Phase 6d)
-- [ ] `cume_dist`, `ntile`, `nth_value`
+- [x] **API** `cume_dist`, `ntile`, `nth_value` (Rust + Python; parity fixtures skipped: Polars does not allow combining rank().over() and count().over() in one expr)
+- *Phase 8*: Enable percent_rank/cume_dist/ntile/nth_value parity fixtures when Polars allows, or keep multi-step workaround
 
 ### 6.6 Deferred / Out of Scope
 
@@ -257,11 +260,26 @@ See [PYTHON_API.md](PYTHON_API.md) for the API contract Sparkless maintainers ne
 
 ---
 
+## Phase 8: Remaining Parity (Later Phase)
+
+**Goal**: Implement or enable features deferred from Phase 6. To be scheduled in a later phase.
+
+| Item | Description |
+|------|-------------|
+| **array_repeat** | Repeat each list element n times; requires Polars list.eval with dynamic repeat/flatten (or equivalent). |
+| **Map (6b)** | `create_map`, `map_keys`, `map_values`, `map_entries`, `map_from_arrays`; Polars maps as `List(Struct)`. |
+| **JSON (6c)** | `get_json_object`, `from_json`, `to_json`; Polars JSON behind optional features. |
+| **String 6.4** | `soundex`, `levenshtein`, `crc32`, `xxhash64`, `mask`, `translate`, `substring_index`. |
+| **Window fixture simplification** | Enable percent_rank, cume_dist, ntile, nth_value parity fixtures when Polars supports combined window/aggregation expressions (or document multi-step workaround). |
+| **Documentation of differences** | Explicitly document any intentional divergences from PySpark semantics. |
+
+---
+
 ## Success Metrics
 
 | Metric | Current | Phase 2 | Phase 5 | Full Backend |
 |--------|---------|---------|---------|--------------|
-| Parity fixtures | 54 | 60+ | 80+ | 150+ |
+| Parity fixtures | 56 | 60+ | 80+ | 150+ |
 | Functions implemented | ~35+ | ~85 | ~120 | 250+ |
 | DataFrame methods | ~25 | ~25 | ~40 | 60+ |
 | Sparkless tests passing (robin backend) | 0 | — | 50+ | 200+ |
@@ -276,8 +294,9 @@ See [PYTHON_API.md](PYTHON_API.md) for the API contract Sparkless maintainers ne
 3. **Phase 3**: union, unionByName, distinct, drop, dropna, fillna, limit, withColumnRenamed ✅
 4. **Phase 4**: PyO3 bridge ✅ **COMPLETED**
 5. **Phase 5**: Convert Sparkless tests, CI integration
-6. **Phase 6**: Array (6a ✅), Map (6b deferred), JSON (6c deferred), additional string (6e ✅), window extensions (6d ✅); remaining: array_position, cume_dist, ntile, nth_value, etc.
+6. **Phase 6**: Array (6a ✅; array_position, array_remove, posexplode implemented; array_repeat → Phase 8), Map (6b → Phase 8), JSON (6c → Phase 8), additional string (6e ✅; 6.4 → Phase 8), window extensions (6d ✅; fixture simplification → Phase 8).
 7. **Phase 7**: SQL, Delta, performance ✅ **Completed** (optional features; see §7)
+8. **Phase 8**: array_repeat, Map (6b), JSON (6c), String 6.4, window fixture simplification, documentation of differences (see Phase 8 section above)
 
 ---
 

@@ -7,7 +7,7 @@ This doc is the **living parity matrix** for `robin-sparkless`.
 - **Fixtures**: `tests/fixtures/*.json`
 - **Sparkless integration**: Robin-sparkless is designed to replace Sparkless's backend. Sparkless has 270+ expected_outputs; a fixture converter can convert those to robin-sparkless format. See [SPARKLESS_INTEGRATION_ANALYSIS.md](SPARKLESS_INTEGRATION_ANALYSIS.md) §4.
 
-Status as of **February 2026**: **PASSING (54 fixtures)**. Phase 6 additions: array fixtures (`array_contains`, `element_at`, `array_size`); window extensions (first_value, last_value, percent_rank) and string (regexp_extract_all, regexp_like) are implemented and usable in fixtures. Python smoke tests for the PyO3 bridge live in `tests/python/` (run via `make test` or `make test-python`); see [PYTHON_API.md](PYTHON_API.md).
+Status as of **February 2026**: **PASSING (56 fixtures)**; 4 window fixtures skipped (percent_rank, cume_dist, ntile, nth_value; see skip_reason). Phase 6: array functions `array_position`, `array_remove`, `posexplode` are **implemented** (via Polars list.eval); array fixtures `array_contains`, `element_at`, `array_size`; window extensions (first_value, last_value, percent_rank) and string (regexp_extract_all, regexp_like). Remaining parity items (array_repeat, Map, JSON, string 6.4, window fixture simplification) planned for Phase 8. Python smoke tests for the PyO3 bridge live in `tests/python/` (run via `make test` or `make test-python`); see [PYTHON_API.md](PYTHON_API.md).
 
 ## Legend
 
@@ -63,8 +63,9 @@ Status as of **February 2026**: **PASSING (54 fixtures)**. Phase 6 additions: ar
 | DataFrame | `fillna` (single value) | ✅ Covered | `fillna` |
 | DataFrame | `limit` | ✅ Covered | `limit` |
 | DataFrame | `withColumnRenamed` | ✅ Covered | `with_column_renamed` |
-| Array/List | array, array_contains, element_at, size/array_size, array_join, array_sort, array_slice, explode | ✅ Covered | `array_contains`, `element_at`, `array_size` |
-| Windows | first_value, last_value, percent_rank | ✅ Implemented | (use with .over(); no dedicated fixture yet) |
+| Array/List | array, array_contains, element_at, size/array_size, array_join, array_sort, array_slice, explode; array_position, array_remove, posexplode (implemented) | ✅ Covered | `array_contains`, `element_at`, `array_size` |
+| Windows | first_value, last_value, percent_rank | ✅ Covered | `first_value_window`, `last_value_window`; percent_rank usable in fixtures |
+| Windows | cume_dist, ntile, nth_value | ✅ API (fixtures skipped) | Polars limits combined window exprs; fixtures percent_rank_window, cume_dist_window, ntile_window, nth_value_window skipped |
 | Strings | regexp_extract_all, regexp_like | ✅ Implemented | (no dedicated fixture yet) |
 | SQL | `SparkSession::sql()` (optional `sql` feature) | ✅ Implemented | No fixture (SQL translated to DataFrame ops; parity via DataFrame fixtures) |
 
@@ -126,6 +127,8 @@ Status as of **February 2026**: **PASSING (54 fixtures)**. Phase 6 additions: ar
 | `array_contains` | split + array_contains(col, lit) |
 | `element_at` | split + element_at(col, 1-based index) |
 | `array_size` | split + size(col) |
+| `first_value_window` | first_value over partition |
+| `last_value_window` | last_value over partition |
 
 ## Next additions to the matrix (recommended)
 

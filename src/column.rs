@@ -1,4 +1,4 @@
-use polars::prelude::{col, Expr, RankMethod, RankOptions};
+use polars::prelude::{col, lit, Expr, ListNameSpaceExtension, RankMethod, RankOptions};
 
 /// Column - represents a column in a DataFrame, used for building expressions
 /// Thin wrapper around Polars `Expr`.
@@ -471,17 +471,88 @@ impl Column {
         Self::from_expr(self.expr().clone().last(), None)
     }
 
-    /// Percent rank in partition: (rank - 1) / (count - 1). Use with `.over(partition_by)`.
-    pub fn percent_rank(&self, descending: bool) -> Column {
+    /// Percent rank in partition: (rank - 1) / (count - 1). Window is applied; do not call .over() again.
+    pub fn percent_rank(&self, partition_by: &[&str], descending: bool) -> Column {
         use polars::prelude::*;
+        let partition_exprs: Vec<Expr> = partition_by.iter().map(|s| col(*s)).collect();
         let opts = RankOptions {
             method: RankMethod::Min,
             descending,
         };
-        let rank_expr = self.expr().clone().rank(opts, None);
-        let count_expr = self.expr().clone().count();
-        let pct = (rank_expr - lit(1i64)) / (count_expr - lit(1i64));
-        Self::from_expr(pct.cast(DataType::Float64), None)
+        let rank_expr = self
+            .expr()
+            .clone()
+            .rank(opts, None)
+            .over(partition_exprs.clone());
+        let count_expr = self.expr().clone().count().over(partition_exprs.clone());
+        let rank_f = (rank_expr - lit(1i64)).cast(DataType::Float64);
+        let count_f = (count_expr - lit(1i64)).cast(DataType::Float64);
+        let pct = rank_f / count_f;
+        Self::from_expr(pct, None)
+    }
+
+    /// Cumulative distribution in partition: row_number / count. Window is applied; do not call .over() again.
+    pub fn cume_dist(&self, partition_by: &[&str], descending: bool) -> Column {
+        use polars::prelude::*;
+        let partition_exprs: Vec<Expr> = partition_by.iter().map(|s| col(*s)).collect();
+        let opts = RankOptions {
+            method: RankMethod::Ordinal,
+            descending,
+        };
+        let row_num = self
+            .expr()
+            .clone()
+            .rank(opts, None)
+            .over(partition_exprs.clone());
+        let count_expr = self.expr().clone().count().over(partition_exprs.clone());
+        let cume = row_num / count_expr;
+        Self::from_expr(cume.cast(DataType::Float64), None)
+    }
+
+    /// Ntile: bucket 1..n by rank within partition (ceil(rank * n / count)). Window is applied; do not call .over() again.
+    pub fn ntile(&self, n: u32, partition_by: &[&str], descending: bool) -> Column {
+        use polars::prelude::*;
+        let partition_exprs: Vec<Expr> = partition_by.iter().map(|s| col(*s)).collect();
+        let opts = RankOptions {
+            method: RankMethod::Ordinal,
+            descending,
+        };
+        let rank_expr = self
+            .expr()
+            .clone()
+            .rank(opts, None)
+            .over(partition_exprs.clone());
+        let count_expr = self.expr().clone().count().over(partition_exprs.clone());
+        let n_expr = lit(n as f64);
+        let rank_f = rank_expr.cast(DataType::Float64);
+        let count_f = count_expr.cast(DataType::Float64);
+        let bucket = (rank_f * n_expr / count_f).ceil();
+        let clamped = bucket.clip(lit(1.0), lit(n as f64));
+        Self::from_expr(clamped.cast(DataType::Int32), None)
+    }
+
+    /// Nth value in partition by order (1-based n). Returns a Column with window already applied; do not call .over() again.
+    pub fn nth_value(&self, n: i64, partition_by: &[&str], descending: bool) -> Column {
+        use polars::prelude::*;
+        let partition_exprs: Vec<Expr> = partition_by.iter().map(|s| col(*s)).collect();
+        let opts = RankOptions {
+            method: RankMethod::Ordinal,
+            descending,
+        };
+        let rank_expr = self
+            .expr()
+            .clone()
+            .rank(opts, None)
+            .over(partition_exprs.clone());
+        let cond_col = Self::from_expr(rank_expr.eq(lit(n)), None);
+        let null_col = Self::from_expr(Expr::Literal(LiteralValue::Null), None);
+        let value_col = Self::from_expr(self.expr().clone(), None);
+        let when_expr = crate::functions::when(&cond_col)
+            .then(&value_col)
+            .otherwise(&null_col)
+            .into_expr();
+        let windowed = when_expr.max().over(partition_exprs);
+        Self::from_expr(windowed, None)
     }
 
     // --- Array / List functions (Phase 6a) ---
@@ -555,6 +626,75 @@ impl Column {
     /// Explode list into one row per element (PySpark explode).
     pub fn explode(&self) -> Column {
         Self::from_expr(self.expr().clone().explode(), None)
+    }
+
+    /// 1-based index of first occurrence of value in list, or 0 if not found (PySpark array_position).
+    /// Uses Polars list.eval with col("") as element (requires polars list_eval feature).
+    pub fn array_position(&self, value: Expr) -> Column {
+        use polars::prelude::{DataType, NULL};
+        // In list.eval context, col("") refers to the current list element.
+        let cond = Self::from_expr(col("").eq(value), None);
+        let then_val = Self::from_expr(col("").cum_count(false), None);
+        let else_val = Self::from_expr(lit(NULL), None);
+        let idx_expr = crate::functions::when(&cond)
+            .then(&then_val)
+            .otherwise(&else_val)
+            .into_expr();
+        let list_expr = self
+            .expr()
+            .clone()
+            .list()
+            .eval(idx_expr, false)
+            .list()
+            .min()
+            .fill_null(lit(0i64))
+            .cast(DataType::Int64);
+        Self::from_expr(list_expr, Some("array_position".to_string()))
+    }
+
+    /// New list with all elements equal to value removed (PySpark array_remove).
+    /// Uses list.eval + drop_nulls (requires polars list_eval and list_drop_nulls).
+    pub fn array_remove(&self, value: Expr) -> Column {
+        use polars::prelude::NULL;
+        // when(element != value) then element else null; then drop_nulls.
+        let cond = Self::from_expr(col("").neq(value), None);
+        let then_val = Self::from_expr(col(""), None);
+        let else_val = Self::from_expr(lit(NULL), None);
+        let elem_neq = crate::functions::when(&cond)
+            .then(&then_val)
+            .otherwise(&else_val)
+            .into_expr();
+        let list_expr = self
+            .expr()
+            .clone()
+            .list()
+            .eval(elem_neq, false)
+            .list()
+            .drop_nulls();
+        Self::from_expr(list_expr, None)
+    }
+
+    /// Repeat each element n times (PySpark array_repeat). Not implemented: would require list.eval with dynamic repeat.
+    pub fn array_repeat(&self, _n: i64) -> Column {
+        unimplemented!(
+            "array_repeat: not implemented (would require list.eval with repeat/flatten)"
+        )
+    }
+
+    /// Explode list with position (PySpark posexplode). Returns (pos_col, value_col).
+    /// pos is 1-based; uses list.eval(cum_count()).explode() and explode().
+    pub fn posexplode(&self) -> (Column, Column) {
+        let pos_expr = self
+            .expr()
+            .clone()
+            .list()
+            .eval(col("").cum_count(false), false)
+            .explode();
+        let val_expr = self.expr().clone().explode();
+        (
+            Self::from_expr(pos_expr, Some("pos".to_string())),
+            Self::from_expr(val_expr, Some("col".to_string())),
+        )
     }
 }
 

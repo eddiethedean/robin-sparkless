@@ -13,7 +13,7 @@ A Rust DataFrame library that aims to **emulate PySpark’s DataFrame behavior a
 - **Optional SQL** (`--features sql`): `spark.sql("SELECT ...")` with temp views (`createOrReplaceTempView`, `table`); single SELECT, FROM/JOIN, WHERE, GROUP BY, ORDER BY, LIMIT
 - **Optional Delta Lake** (`--features delta`): `read_delta` / `read_delta_with_version` (time travel), `write_delta` (overwrite/append) via delta-rs
 - **Benchmarks**: `cargo bench` compares robin-sparkless vs plain Polars; target within ~2x for supported pipelines
-- **Sparkless backend target**: Intended to power Sparkless's execution engine; aligns with its 403+ PySpark functions and 270+ test fixtures; **54 parity fixtures** passing (array, window, string, joins, groupBy, etc.)
+- **Sparkless backend target**: Intended to power Sparkless's execution engine; aligns with its 403+ PySpark functions and 270+ test fixtures; **56 parity fixtures** passing (array, window, string, joins, groupBy, etc.)
 
 ## Installation
 
@@ -101,7 +101,7 @@ complex.show(Some(10))?;
 df_with_computed.show(Some(10))?;
 ```
 
-The library supports IO (CSV/Parquet/JSON via `SparkSession::read_*`), joins (`DataFrame::join` with Inner/Left/Right/Outer), groupBy aggregates (including multi-agg), window functions (`row_number`, `rank`, `dense_rank`, `lag`, `lead`, `first_value`, `last_value`, `percent_rank` with `.over()`), array functions (`array_size`, `array_contains`, `element_at`, `explode`, `array_sort`, `array_join`, `array_slice`), and string functions (`upper`, `lower`, `substring`, `concat`, `concat_ws`, `length`, `trim`, `regexp_extract`, `regexp_replace`, `regexp_extract_all`, `regexp_like`, `split`). See [docs/QUICKSTART.md](docs/QUICKSTART.md) for more examples.
+The library supports IO (CSV/Parquet/JSON via `SparkSession::read_*`), joins (`DataFrame::join` with Inner/Left/Right/Outer), groupBy aggregates (including multi-agg), window functions (`row_number`, `rank`, `dense_rank`, `lag`, `lead`, `first_value`, `last_value`, `percent_rank` with `.over()`), array functions (`array_size`, `array_contains`, `element_at`, `explode`, `array_sort`, `array_join`, `array_slice`, `array_position`, `array_remove`, `posexplode`; `array_repeat` not yet implemented), and string functions (`upper`, `lower`, `substring`, `concat`, `concat_ws`, `length`, `trim`, `regexp_extract`, `regexp_replace`, `regexp_extract_all`, `regexp_like`, `split`). See [docs/QUICKSTART.md](docs/QUICKSTART.md) for more examples.
 
 ## Development
 
@@ -162,7 +162,7 @@ Robin Sparkless aims to provide a **PySpark-like API layer** on top of Polars:
 - **Column**: Represents expressions over columns, similar to PySpark’s `Column`; includes window methods (`rank`, `row_number`, `dense_rank`, `lag`, `lead`) with `.over()`.
 - **Functions**: Helper functions like `col()`, `lit_*()`, `count()`, `when`, `coalesce`, window functions, etc., modeled after PySpark’s `pyspark.sql.functions`.
 
-Core behavior (null handling, grouping semantics, joins, window functions, array and string functions, expression behavior) matches PySpark on 54 parity fixtures, with more coverage planned.
+Core behavior (null handling, grouping semantics, joins, window functions, array and string functions, expression behavior) matches PySpark on 56 parity fixtures, with more coverage planned (Phase 8: array_repeat, Map, JSON, string 6.4, window fixture simplification).
 
 ## Related Documentation
 
@@ -172,7 +172,7 @@ Core behavior (null handling, grouping semantics, joins, window functions, array
 - [docs/ROADMAP.md](docs/ROADMAP.md) – Development roadmap including Sparkless integration phases
 - [docs/FULL_BACKEND_ROADMAP.md](docs/FULL_BACKEND_ROADMAP.md) – Phased plan to full Sparkless backend replacement (400+ functions, PyO3 bridge)
 - [docs/PYTHON_API.md](docs/PYTHON_API.md) – Python API contract (Phase 4 PyO3 bridge): build, install, method signatures, data transfer
-- [docs/PARITY_STATUS.md](docs/PARITY_STATUS.md) – PySpark parity coverage matrix (54 fixtures)
+- [docs/PARITY_STATUS.md](docs/PARITY_STATUS.md) – PySpark parity coverage matrix (56 fixtures)
 - [docs/CONVERTER_STATUS.md](docs/CONVERTER_STATUS.md) – Sparkless → robin-sparkless fixture converter and operation mapping
 - [docs/SPARKLESS_PARITY_STATUS.md](docs/SPARKLESS_PARITY_STATUS.md) – Phase 5: pass/fail and failure reasons for converted fixtures; `make sparkless-parity`
 

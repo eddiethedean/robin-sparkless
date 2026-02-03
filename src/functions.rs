@@ -308,9 +308,24 @@ pub fn last_value(column: &Column) -> Column {
     column.clone().last_value()
 }
 
-/// Percent rank in partition: (rank - 1) / (count - 1). Use with `.over(partition_by)`.
-pub fn percent_rank(column: &Column, descending: bool) -> Column {
-    column.clone().percent_rank(descending)
+/// Percent rank in partition: (rank - 1) / (count - 1). Window is applied.
+pub fn percent_rank(column: &Column, partition_by: &[&str], descending: bool) -> Column {
+    column.clone().percent_rank(partition_by, descending)
+}
+
+/// Cumulative distribution in partition: row_number / count. Window is applied.
+pub fn cume_dist(column: &Column, partition_by: &[&str], descending: bool) -> Column {
+    column.clone().cume_dist(partition_by, descending)
+}
+
+/// Ntile: bucket 1..n by rank within partition. Window is applied.
+pub fn ntile(column: &Column, n: u32, partition_by: &[&str], descending: bool) -> Column {
+    column.clone().ntile(n, partition_by, descending)
+}
+
+/// Nth value in partition by order (1-based n). Window is applied; do not call .over() again.
+pub fn nth_value(column: &Column, n: i64, partition_by: &[&str], descending: bool) -> Column {
+    column.clone().nth_value(n, partition_by, descending)
 }
 
 /// Coalesce - returns the first non-null value from multiple columns.
@@ -393,6 +408,29 @@ pub fn array_slice(column: &Column, start: i64, length: Option<i64>) -> Column {
 /// Explode list into one row per element (PySpark explode).
 pub fn explode(column: &Column) -> Column {
     column.clone().explode()
+}
+
+/// 1-based index of first occurrence of value in list, or 0 if not found (PySpark array_position).
+/// Implemented via Polars list.eval with col("") as element.
+pub fn array_position(column: &Column, value: &Column) -> Column {
+    column.clone().array_position(value.expr().clone())
+}
+
+/// New list with all elements equal to value removed (PySpark array_remove).
+/// Implemented via Polars list.eval + list.drop_nulls.
+pub fn array_remove(column: &Column, value: &Column) -> Column {
+    column.clone().array_remove(value.expr().clone())
+}
+
+/// Repeat each element n times (PySpark array_repeat). Not implemented: would require list.eval with dynamic repeat.
+pub fn array_repeat(column: &Column, n: i64) -> Column {
+    column.clone().array_repeat(n)
+}
+
+/// Explode list with position (PySpark posexplode). Returns (pos_column, value_column).
+/// pos is 1-based; implemented via list.eval(cum_count()).explode() and explode().
+pub fn posexplode(column: &Column) -> (Column, Column) {
+    column.clone().posexplode()
 }
 
 #[cfg(test)]

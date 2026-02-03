@@ -2,7 +2,7 @@ use std::fs;
 use std::path::Path;
 
 use polars::prelude::{
-    col, len, lit, DataFrame as PlDataFrame, Expr, NamedFrom, PolarsError, Series,
+    col, len, lit, DataFrame as PlDataFrame, DataType, Expr, NamedFrom, PolarsError, Series,
 };
 use robin_sparkless::{DataFrame, JoinType, SparkSession};
 use serde::Deserialize;
@@ -83,7 +83,9 @@ enum Operation {
         #[serde(default)]
         order_by: Option<Vec<OrderBySpec>>,
         #[serde(default)]
-        value_column: Option<String>, // for lag/lead: column to shift
+        value_column: Option<String>, // for lag/lead/nth_value: column to use
+        #[serde(default)]
+        n: Option<i64>, // for ntile: number of buckets; for nth_value: 1-based index
     },
     #[serde(rename = "union")]
     Union {},
@@ -656,6 +658,7 @@ fn apply_operations(
                 partition_by,
                 order_by,
                 value_column,
+                n,
             } => {
                 if grouped.is_some() {
                     return Err(PolarsError::ComputeError(
@@ -663,6 +666,7 @@ fn apply_operations(
                     ));
                 }
                 let partition_refs: Vec<&str> = partition_by.iter().map(|s| s.as_str()).collect();
+                let partition_exprs: Vec<Expr> = partition_refs.iter().map(|s| col(*s)).collect();
                 let order_col = order_by
                     .as_ref()
                     .and_then(|ob| ob.first())
@@ -673,31 +677,129 @@ fn apply_operations(
                     .and_then(|ob| ob.first())
                     .map(|o| !o.asc)
                     .unwrap_or(false);
-                let window_expr = match func.as_str() {
-                    "row_number" => robin_sparkless::col(order_col)
-                        .row_number(descending)
-                        .over(&partition_refs),
-                    "rank" => robin_sparkless::col(order_col)
-                        .rank(descending)
-                        .over(&partition_refs),
-                    "dense_rank" => robin_sparkless::col(order_col)
-                        .dense_rank(descending)
-                        .over(&partition_refs),
-                    "lag" => {
+
+                match func.as_str() {
+                    "percent_rank" => {
+                        df = df.with_column(
+                            "_pr_rank",
+                            robin_sparkless::col(order_col)
+                                .rank(descending)
+                                .over(&partition_refs)
+                                .into_expr(),
+                        )?;
+                        df = df.with_column(
+                            "_pr_count",
+                            col(order_col).count().over(partition_exprs.clone()),
+                        )?;
+                        df = df.with_column(
+                            col_name,
+                            (col("_pr_rank") - lit(1i64)).cast(DataType::Float64)
+                                / (col("_pr_count") - lit(1i64)).cast(DataType::Float64),
+                        )?;
+                        df = df.drop(vec!["_pr_rank", "_pr_count"])?;
+                    }
+                    "cume_dist" => {
+                        df = df.with_column(
+                            "_cd_rn",
+                            robin_sparkless::col(order_col)
+                                .row_number(descending)
+                                .over(&partition_refs)
+                                .into_expr(),
+                        )?;
+                        df = df.with_column(
+                            "_cd_count",
+                            col(order_col).count().over(partition_exprs.clone()),
+                        )?;
+                        df = df.with_column(
+                            col_name,
+                            col("_cd_rn").cast(DataType::Float64)
+                                / col("_cd_count").cast(DataType::Float64),
+                        )?;
+                        df = df.drop(vec!["_cd_rn", "_cd_count"])?;
+                    }
+                    "ntile" => {
+                        let n_buckets = n.unwrap_or(4) as u32;
+                        df = df.with_column(
+                            "_nt_rank",
+                            robin_sparkless::col(order_col)
+                                .row_number(descending)
+                                .over(&partition_refs)
+                                .into_expr(),
+                        )?;
+                        df = df.with_column(
+                            "_nt_count",
+                            col(order_col).count().over(partition_exprs.clone()),
+                        )?;
+                        df = df.with_column(
+                            col_name,
+                            (col("_nt_rank").cast(DataType::Float64) * lit(n_buckets as f64)
+                                / col("_nt_count").cast(DataType::Float64))
+                            .ceil()
+                            .clip(lit(1.0), lit(n_buckets as f64))
+                            .cast(DataType::Int32),
+                        )?;
+                        df = df.drop(vec!["_nt_rank", "_nt_count"])?;
+                    }
+                    "nth_value" => {
                         let val_col = value_column.as_deref().unwrap_or(order_col);
-                        robin_sparkless::col(val_col).lag(1).over(&partition_refs)
+                        let n_val = n.unwrap_or(1);
+                        df = df.with_column(
+                            "_nv_rn",
+                            robin_sparkless::col(order_col)
+                                .row_number(descending)
+                                .over(&partition_refs)
+                                .into_expr(),
+                        )?;
+                        df = df.with_column(
+                            col_name,
+                            polars::prelude::when(col("_nv_rn").eq(lit(n_val)))
+                                .then(robin_sparkless::col(val_col).into_expr())
+                                .otherwise(Expr::Literal(polars::prelude::LiteralValue::Null))
+                                .max()
+                                .over(partition_exprs.clone()),
+                        )?;
+                        df = df.drop(vec!["_nv_rn"])?;
                     }
-                    "lead" => {
-                        let val_col = value_column.as_deref().unwrap_or(order_col);
-                        robin_sparkless::col(val_col).lead(1).over(&partition_refs)
+                    _ => {
+                        let window_expr = match func.as_str() {
+                            "row_number" => robin_sparkless::col(order_col)
+                                .row_number(descending)
+                                .over(&partition_refs),
+                            "rank" => robin_sparkless::col(order_col)
+                                .rank(descending)
+                                .over(&partition_refs),
+                            "dense_rank" => robin_sparkless::col(order_col)
+                                .dense_rank(descending)
+                                .over(&partition_refs),
+                            "lag" => {
+                                let val_col = value_column.as_deref().unwrap_or(order_col);
+                                robin_sparkless::col(val_col).lag(1).over(&partition_refs)
+                            }
+                            "lead" => {
+                                let val_col = value_column.as_deref().unwrap_or(order_col);
+                                robin_sparkless::col(val_col).lead(1).over(&partition_refs)
+                            }
+                            "first_value" => {
+                                let val_col = value_column.as_deref().unwrap_or(order_col);
+                                robin_sparkless::col(val_col)
+                                    .first_value()
+                                    .over(&partition_refs)
+                            }
+                            "last_value" => {
+                                let val_col = value_column.as_deref().unwrap_or(order_col);
+                                robin_sparkless::col(val_col)
+                                    .last_value()
+                                    .over(&partition_refs)
+                            }
+                            other => {
+                                return Err(PolarsError::ComputeError(
+                                    format!("unsupported window function: {}", other).into(),
+                                ));
+                            }
+                        };
+                        df = df.with_column(col_name, window_expr.into_expr())?;
                     }
-                    other => {
-                        return Err(PolarsError::ComputeError(
-                            format!("unsupported window function: {}", other).into(),
-                        ));
-                    }
-                };
-                df = df.with_column(col_name, window_expr.into_expr())?;
+                }
             }
             Operation::Union {} => {
                 if grouped.is_some() {

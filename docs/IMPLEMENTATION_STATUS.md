@@ -61,13 +61,13 @@ Robin-sparkless is designed to **replace the backend logic** of [Sparkless](http
 7. **Phase 5 Test Conversion** ✅ **COMPLETED**
    - Fixture converter maps Sparkless `expected_outputs` to robin-sparkless format (join, window, withColumn, union, distinct, drop, dropna, fillna, limit, withColumnRenamed, etc.).
    - Parity discovers `tests/fixtures/` and `tests/fixtures/converted/`; optional `skip: true` in fixtures.
-   - `make sparkless-parity` (set `SPARKLESS_EXPECTED_OUTPUTS` to run converter first); 54 hand-written fixtures passing.
+   - `make sparkless-parity` (set `SPARKLESS_EXPECTED_OUTPUTS` to run converter first); 56 hand-written fixtures passing.
    - See [CONVERTER_STATUS.md](CONVERTER_STATUS.md), [SPARKLESS_PARITY_STATUS.md](SPARKLESS_PARITY_STATUS.md).
 
 8. **Phase 6 Broad Function Parity** (partial) ✅
-   - Array: `array_size`/`size`, `array_contains`, `element_at`, `explode`, `array_sort`, `array_join`, `array_slice`; parity fixtures: `array_contains`, `element_at`, `array_size`.
-   - Window: `first_value`, `last_value`, `percent_rank` with `.over()`.
-   - String: `regexp_extract_all`, `regexp_like`. Map and JSON phases deferred.
+   - Array: `array_size`/`size`, `array_contains`, `element_at`, `explode`, `array_sort`, `array_join`, `array_slice`; **implemented** (via Polars list.eval): `array_position`, `array_remove`, `posexplode`; parity fixtures: `array_contains`, `element_at`, `array_size`. `array_repeat` not implemented (→ Phase 8).
+   - Window: `first_value`, `last_value`, `percent_rank` with `.over()`; **API** `cume_dist`, `ntile`, `nth_value` (partition_by); parity fixtures: `first_value_window`, `last_value_window`; percent_rank/cume_dist/ntile/nth_value fixtures skipped (Polars window/aggregation limits; simplification → Phase 8).
+   - String: `regexp_extract_all`, `regexp_like`. Map, JSON, and additional string (soundex, translate, etc.) → Phase 8.
 
 9. **Phase 7 SQL & Advanced** ✅ **COMPLETED**
    - Optional **SQL** (`sql` feature): `SparkSession::sql(query)`, temp views (`create_or_replace_temp_view`, `table`); sqlparser → DataFrame ops (SELECT, FROM, WHERE, JOIN, GROUP BY, ORDER BY, LIMIT).
