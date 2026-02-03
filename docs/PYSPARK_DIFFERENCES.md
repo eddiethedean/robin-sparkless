@@ -33,5 +33,6 @@ This document lists **intentional or known divergences** from PySpark semantics 
 - **Map (6b)**: **`create_map`, `map_keys`, `map_values`, `map_entries`, `map_from_arrays`** (Map as List(Struct{key, value}); create_map via as_struct/concat_list; map_keys/map_values via list.eval + struct.field; map_from_arrays via UDF).
 - **JSON**: `get_json_object`, `from_json`, `to_json` (Polars extract_jsonpath / dtype-struct).
 - **Window fixtures**: percent_rank, cume_dist, ntile, nth_value covered via multi-step workaround.
+- **Phase 16 string/regex**: `regexp_count`, `regexp_instr`, `regexp_substr`, `split_part`, `find_in_set`, `format_string`, `printf` — all implemented.
 
 See [ROADMAP.md](ROADMAP.md) and [FULL_BACKEND_ROADMAP.md](FULL_BACKEND_ROADMAP.md) for the full list.

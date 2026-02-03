@@ -111,7 +111,7 @@ let df = df.with_column("full", concat(&[&col("first"), &col("last")]).into_expr
 let df = df.with_column("joined", concat_ws("-", &[&col("a"), &col("b")]).into_expr())?;
 ```
 
-Additional string: `length`, `trim`, `ltrim`, `rtrim`, `regexp_extract`, `regexp_replace`, `regexp_extract_all`, `regexp_like`, `split`, `initcap`, `mask`, `translate`, `substring_index` (Phase 10). DataFrame methods (Phase 12): `sample`, `random_split`, `first`, `head`, `tail`, `take`, `is_empty`, `to_json`, `to_pandas`, `explain`, `print_schema`, `summary`, `to_df`, `select_expr`, `col_regex`, `with_columns`, `with_columns_renamed`, `stat()` (cov/corr), `na()` (fill/drop), `freq_items`, `approx_quantile`, `crosstab`, `melt`, `sample_by`, etc. See [PYTHON_API.md](PYTHON_API.md) for the full Python API.
+Additional string: `length`, `trim`, `ltrim`, `rtrim`, `regexp_extract`, `regexp_replace`, `regexp_extract_all`, `regexp_like`, `split`, `initcap`, `mask`, `translate`, `substring_index` (Phase 10); **Phase 16**: `regexp_count`, `regexp_instr`, `regexp_substr`, `split_part`, `find_in_set`, `format_string`, `printf`. DataFrame methods (Phase 12): `sample`, `random_split`, `first`, `head`, `tail`, `take`, `is_empty`, `to_json`, `to_pandas`, `explain`, `print_schema`, `summary`, `to_df`, `select_expr`, `col_regex`, `with_columns`, `with_columns_renamed`, `stat()` (cov/corr), `na()` (fill/drop), `freq_items`, `approx_quantile`, `crosstab`, `melt`, `sample_by`, etc. See [PYTHON_API.md](PYTHON_API.md) for the full Python API.
 
 ### Datetime
 
@@ -123,9 +123,9 @@ Math (radians): `sin()`, `cos()`, `tan()`, `asin()`, `acos()`, `atan()`, `atan2(
 
 ### Parity
 
-Behavior is validated against PySpark on **88 parity fixtures** (~175+ functions); see [PARITY_STATUS.md](PARITY_STATUS.md). Known differences are in [PYSPARK_DIFFERENCES.md](PYSPARK_DIFFERENCES.md). CI (GitHub Actions) runs format, clippy, audit, deny, and all tests (including parity) on every push/PR.
+Behavior is validated against PySpark on **93 parity fixtures** (~182+ functions); see [PARITY_STATUS.md](PARITY_STATUS.md). Known differences are in [PYSPARK_DIFFERENCES.md](PYSPARK_DIFFERENCES.md). CI (GitHub Actions) runs format, clippy, audit, deny, and all tests (including parity) on every push/PR.
 
-For roadmap and Sparkless integration phases (including Phases 12–16: path to 100% before integration), see [ROADMAP.md](ROADMAP.md).
+For roadmap and Sparkless integration phases (Phases 12–16 completed; Phases 17–19 remaining), see [ROADMAP.md](ROADMAP.md).
 
 ## Troubleshooting
 
