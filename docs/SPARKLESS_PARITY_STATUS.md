@@ -19,10 +19,10 @@ cargo test pyspark_parity_fixtures
 
 | Source | Converted | Passing | Failing | Skipped |
 |--------|-----------|---------|--------|---------|
-| Hand-written (`tests/fixtures/*.json`) | — | 82 | 0 | 0 |
+| Hand-written (`tests/fixtures/*.json`) | — | 84 | 0 | 0 |
 | Sparkless converted (`tests/fixtures/converted/*.json`) | 0 (run converter when `SPARKLESS_EXPECTED_OUTPUTS` set) | — | — | — |
 
-**Target: 50+ tests passing** (hand-written + converted). **Current: 82 passing** (hand-written). Phase 12–13: DataFrame methods + string/binary/collection functions; Phase 11: date/datetime fixtures and String 6.4 (soundex, levenshtein, crc32, xxhash64) added. **Phase 17** (Sparkless integration) target: 200+ Sparkless tests passing with robin backend (after Phase 16: publish Rust crate). CI runs parity on hand-written (and optionally converted) fixtures; when Sparkless repo is available, run `make sparkless-parity` and update this doc.
+**Target: 50+ tests passing** (hand-written + converted). **Current: 84 passing** (hand-written). Phase 12–14: DataFrame methods, string/binary/collection (Phase 13), math/datetime/type/conditional (Phase 14); Phase 11: date/datetime fixtures and String 6.4 (soundex, levenshtein, crc32, xxhash64) added. **Phase 17** (Sparkless integration) target: 200+ Sparkless tests passing with robin backend (after Phase 16: publish Rust crate). CI runs parity on hand-written (and optionally converted) fixtures; when Sparkless repo is available, run `make sparkless-parity` and update this doc.
 
 ### When Sparkless repo is available
 

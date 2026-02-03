@@ -1,6 +1,22 @@
 use crate::column::Column;
 use polars::prelude::*;
 
+/// Parse PySpark-like type name to Polars DataType.
+pub fn parse_type_name(name: &str) -> Result<DataType, String> {
+    let s = name.trim().to_lowercase();
+    Ok(match s.as_str() {
+        "int" | "integer" => DataType::Int32,
+        "long" | "bigint" => DataType::Int64,
+        "float" => DataType::Float32,
+        "double" => DataType::Float64,
+        "string" | "str" => DataType::String,
+        "boolean" | "bool" => DataType::Boolean,
+        "date" => DataType::Date,
+        "timestamp" => DataType::Datetime(TimeUnit::Microseconds, None),
+        _ => return Err(format!("unknown type name: {}", name)),
+    })
+}
+
 /// Get a column by name
 pub fn col(name: &str) -> Column {
     Column::new(name.to_string())
@@ -373,6 +389,113 @@ pub fn log(column: &Column) -> Column {
     column.clone().log()
 }
 
+/// Sine in radians (PySpark sin)
+pub fn sin(column: &Column) -> Column {
+    column.clone().sin()
+}
+
+/// Cosine in radians (PySpark cos)
+pub fn cos(column: &Column) -> Column {
+    column.clone().cos()
+}
+
+/// Tangent in radians (PySpark tan)
+pub fn tan(column: &Column) -> Column {
+    column.clone().tan()
+}
+
+/// Arc sine (PySpark asin)
+pub fn asin(column: &Column) -> Column {
+    column.clone().asin()
+}
+
+/// Arc cosine (PySpark acos)
+pub fn acos(column: &Column) -> Column {
+    column.clone().acos()
+}
+
+/// Arc tangent (PySpark atan)
+pub fn atan(column: &Column) -> Column {
+    column.clone().atan()
+}
+
+/// Two-argument arc tangent atan2(y, x) in radians (PySpark atan2)
+pub fn atan2(y: &Column, x: &Column) -> Column {
+    y.clone().atan2(x)
+}
+
+/// Convert radians to degrees (PySpark degrees)
+pub fn degrees(column: &Column) -> Column {
+    column.clone().degrees()
+}
+
+/// Convert degrees to radians (PySpark radians)
+pub fn radians(column: &Column) -> Column {
+    column.clone().radians()
+}
+
+/// Sign of the number: -1, 0, or 1 (PySpark signum)
+pub fn signum(column: &Column) -> Column {
+    column.clone().signum()
+}
+
+/// Cast column to the given type (PySpark cast). Fails on invalid conversion.
+pub fn cast(column: &Column, type_name: &str) -> Result<Column, String> {
+    let dtype = parse_type_name(type_name)?;
+    Ok(Column::from_expr(column.expr().clone().strict_cast(dtype), None))
+}
+
+/// Cast column to the given type, returning null on invalid conversion (PySpark try_cast).
+pub fn try_cast(column: &Column, type_name: &str) -> Result<Column, String> {
+    let dtype = parse_type_name(type_name)?;
+    Ok(Column::from_expr(column.expr().clone().cast(dtype), None))
+}
+
+/// True where the float value is NaN (PySpark isnan).
+pub fn isnan(column: &Column) -> Column {
+    column.clone().is_nan()
+}
+
+/// Greatest of the given columns per row (PySpark greatest). Uses element-wise UDF.
+pub fn greatest(columns: &[&Column]) -> Result<Column, String> {
+    if columns.is_empty() {
+        return Err("greatest requires at least one column".to_string());
+    }
+    if columns.len() == 1 {
+        return Ok((*columns[0]).clone());
+    }
+    let mut expr = columns[0].expr().clone();
+    for c in columns.iter().skip(1) {
+        let args = [c.expr().clone()];
+        expr = expr.map_many(
+            crate::udfs::apply_greatest2,
+            &args,
+            GetOutput::same_type(),
+        );
+    }
+    Ok(Column::from_expr(expr, None))
+}
+
+/// Least of the given columns per row (PySpark least). Uses element-wise UDF.
+pub fn least(columns: &[&Column]) -> Result<Column, String> {
+    if columns.is_empty() {
+        return Err("least requires at least one column".to_string());
+    }
+    if columns.len() == 1 {
+        return Ok((*columns[0]).clone());
+    }
+    let mut expr = columns[0].expr().clone();
+    for c in columns.iter().skip(1) {
+        let args = [c.expr().clone()];
+        expr = expr.map_many(
+            crate::udfs::apply_least2,
+            &args,
+            GetOutput::same_type(),
+        );
+    }
+    Ok(Column::from_expr(expr, None))
+}
+
 /// Extract year from datetime column (PySpark year)
 pub fn year(column: &Column) -> Column {
     column.clone().year()
@@ -454,6 +577,41 @@ pub fn last_day(column: &Column) -> Column {
 /// Truncate date/datetime to unit (PySpark trunc).
 pub fn trunc(column: &Column, format: &str) -> Column {
     column.clone().trunc(format)
+}
+
+/// Extract quarter (1-4) from date/datetime (PySpark quarter).
+pub fn quarter(column: &Column) -> Column {
+    column.clone().quarter()
+}
+
+/// Extract ISO week of year (1-53) (PySpark weekofyear).
+pub fn weekofyear(column: &Column) -> Column {
+    column.clone().weekofyear()
+}
+
+/// Extract day of week: 1=Sunday..7=Saturday (PySpark dayofweek).
+pub fn dayofweek(column: &Column) -> Column {
+    column.clone().dayofweek()
+}
+
+/// Extract day of year (1-366) (PySpark dayofyear).
+pub fn dayofyear(column: &Column) -> Column {
+    column.clone().dayofyear()
+}
+
+/// Add n months to date column (PySpark add_months).
+pub fn add_months(column: &Column, n: i32) -> Column {
+    column.clone().add_months(n)
+}
+
+/// Months between end and start dates as fractional (PySpark months_between).
+pub fn months_between(end: &Column, start: &Column) -> Column {
+    end.clone().months_between(start)
+}
+
+/// Next date that is the given weekday (e.g. "Mon") (PySpark next_day).
+pub fn next_day(column: &Column, day_of_week: &str) -> Column {
+    column.clone().next_day(day_of_week)
 }
 
 /// Concatenate string columns without separator (PySpark concat)

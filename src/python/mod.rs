@@ -4,8 +4,10 @@
 use crate::column::Column as RsColumn;
 use crate::dataframe::JoinType;
 use crate::functions::{
-    array_compact, ascii, base64, chr, format_number, md5, overlay, position as rs_position, sha1,
-    sha2, unbase64,
+    acos, add_months, asin, atan, atan2, array_compact, ascii, base64, cast as rs_cast, chr, cos,
+    dayofweek, dayofyear, degrees, format_number, greatest as rs_greatest, isnan as rs_isnan, md5,
+    least as rs_least, months_between, next_day, overlay, position as rs_position, quarter, radians,
+    sha1, sha2, signum, sin, tan, try_cast as rs_try_cast, unbase64, weekofyear,
 };
 use crate::functions::{avg, coalesce, col as rs_col, count, max, min, sum as rs_sum};
 use crate::{DataFrame, GroupedData, SparkSession};
@@ -47,6 +49,29 @@ fn robin_sparkless(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("sha2", wrap_pyfunction!(py_sha2, m)?)?;
     m.add("md5", wrap_pyfunction!(py_md5, m)?)?;
     m.add("array_compact", wrap_pyfunction!(py_array_compact, m)?)?;
+    // Phase 14: math, datetime, type/conditional
+    m.add("sin", wrap_pyfunction!(py_sin, m)?)?;
+    m.add("cos", wrap_pyfunction!(py_cos, m)?)?;
+    m.add("tan", wrap_pyfunction!(py_tan, m)?)?;
+    m.add("asin", wrap_pyfunction!(py_asin, m)?)?;
+    m.add("acos", wrap_pyfunction!(py_acos, m)?)?;
+    m.add("atan", wrap_pyfunction!(py_atan, m)?)?;
+    m.add("atan2", wrap_pyfunction!(py_atan2, m)?)?;
+    m.add("degrees", wrap_pyfunction!(py_degrees, m)?)?;
+    m.add("radians", wrap_pyfunction!(py_radians, m)?)?;
+    m.add("signum", wrap_pyfunction!(py_signum, m)?)?;
+    m.add("quarter", wrap_pyfunction!(py_quarter, m)?)?;
+    m.add("weekofyear", wrap_pyfunction!(py_weekofyear, m)?)?;
+    m.add("dayofweek", wrap_pyfunction!(py_dayofweek, m)?)?;
+    m.add("dayofyear", wrap_pyfunction!(py_dayofyear, m)?)?;
+    m.add("add_months", wrap_pyfunction!(py_add_months, m)?)?;
+    m.add("months_between", wrap_pyfunction!(py_months_between, m)?)?;
+    m.add("next_day", wrap_pyfunction!(py_next_day, m)?)?;
+    m.add("cast", wrap_pyfunction!(py_cast, m)?)?;
+    m.add("try_cast", wrap_pyfunction!(py_try_cast, m)?)?;
+    m.add("isnan", wrap_pyfunction!(py_isnan, m)?)?;
+    m.add("greatest", wrap_pyfunction!(py_greatest, m)?)?;
+    m.add("least", wrap_pyfunction!(py_least, m)?)?;
     Ok(())
 }
 
@@ -212,6 +237,129 @@ fn py_array_compact(column: &PyColumn) -> PyColumn {
     }
 }
 
+#[pyfunction]
+fn py_sin(column: &PyColumn) -> PyColumn {
+    PyColumn { inner: sin(&column.inner) }
+}
+#[pyfunction]
+fn py_cos(column: &PyColumn) -> PyColumn {
+    PyColumn { inner: cos(&column.inner) }
+}
+#[pyfunction]
+fn py_tan(column: &PyColumn) -> PyColumn {
+    PyColumn { inner: tan(&column.inner) }
+}
+#[pyfunction]
+fn py_asin(column: &PyColumn) -> PyColumn {
+    PyColumn { inner: asin(&column.inner) }
+}
+#[pyfunction]
+fn py_acos(column: &PyColumn) -> PyColumn {
+    PyColumn { inner: acos(&column.inner) }
+}
+#[pyfunction]
+fn py_atan(column: &PyColumn) -> PyColumn {
+    PyColumn { inner: atan(&column.inner) }
+}
+#[pyfunction]
+fn py_atan2(y: &PyColumn, x: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: atan2(&y.inner, &x.inner),
+    }
+}
+#[pyfunction]
+fn py_degrees(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: degrees(&column.inner),
+    }
+}
+#[pyfunction]
+fn py_radians(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: radians(&column.inner),
+    }
+}
+#[pyfunction]
+fn py_signum(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: signum(&column.inner),
+    }
+}
+#[pyfunction]
+fn py_quarter(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: quarter(&column.inner),
+    }
+}
+#[pyfunction]
+fn py_weekofyear(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: weekofyear(&column.inner),
+    }
+}
+#[pyfunction]
+fn py_dayofweek(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: dayofweek(&column.inner),
+    }
+}
+#[pyfunction]
+fn py_dayofyear(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: dayofyear(&column.inner),
+    }
+}
+#[pyfunction]
+fn py_add_months(column: &PyColumn, n: i32) -> PyColumn {
+    PyColumn {
+        inner: add_months(&column.inner, n),
+    }
+}
+#[pyfunction]
+fn py_months_between(end: &PyColumn, start: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: months_between(&end.inner, &start.inner),
+    }
+}
+#[pyfunction]
+fn py_next_day(column: &PyColumn, day_of_week: &str) -> PyColumn {
+    PyColumn {
+        inner: next_day(&column.inner, day_of_week),
+    }
+}
+#[pyfunction]
+fn py_cast(column: &PyColumn, type_name: &str) -> PyResult<PyColumn> {
+    rs_cast(&column.inner, type_name).map(|inner| PyColumn { inner }).map_err(|e| {
+        pyo3::exceptions::PyValueError::new_err(e)
+    })
+}
+#[pyfunction]
+fn py_try_cast(column: &PyColumn, type_name: &str) -> PyResult<PyColumn> {
+    rs_try_cast(&column.inner, type_name).map(|inner| PyColumn { inner }).map_err(|e| {
+        pyo3::exceptions::PyValueError::new_err(e)
+    })
+}
+#[pyfunction]
+fn py_isnan(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: rs_isnan(&column.inner),
+    }
+}
+#[pyfunction]
+fn py_greatest(columns: Vec<PyRef<PyColumn>>) -> PyResult<PyColumn> {
+    let refs: Vec<&RsColumn> = columns.iter().map(|c| &c.inner).collect();
+    rs_greatest(&refs).map(|inner| PyColumn { inner }).map_err(|e| {
+        pyo3::exceptions::PyValueError::new_err(e)
+    })
+}
+#[pyfunction]
+fn py_least(columns: Vec<PyRef<PyColumn>>) -> PyResult<PyColumn> {
+    let refs: Vec<&RsColumn> = columns.iter().map(|c| &c.inner).collect();
+    rs_least(&refs).map(|inner| PyColumn { inner }).map_err(|e| {
+        pyo3::exceptions::PyValueError::new_err(e)
+    })
+}
+
 /// Python wrapper for Column (expression).
 #[pyclass(name = "Column")]
 struct PyColumn {
@@ -374,6 +522,95 @@ impl PyColumn {
     fn array_compact(&self) -> Self {
         PyColumn {
             inner: array_compact(&self.inner),
+        }
+    }
+
+    fn sin(&self) -> Self {
+        PyColumn { inner: sin(&self.inner) }
+    }
+    fn cos(&self) -> Self {
+        PyColumn { inner: cos(&self.inner) }
+    }
+    fn tan(&self) -> Self {
+        PyColumn { inner: tan(&self.inner) }
+    }
+    fn asin_(&self) -> Self {
+        PyColumn { inner: asin(&self.inner) }
+    }
+    fn acos_(&self) -> Self {
+        PyColumn { inner: acos(&self.inner) }
+    }
+    fn atan_(&self) -> Self {
+        PyColumn { inner: atan(&self.inner) }
+    }
+    fn atan2(&self, x: &PyColumn) -> Self {
+        PyColumn {
+            inner: atan2(&self.inner, &x.inner),
+        }
+    }
+    fn degrees_(&self) -> Self {
+        PyColumn {
+            inner: degrees(&self.inner),
+        }
+    }
+    fn radians_(&self) -> Self {
+        PyColumn {
+            inner: radians(&self.inner),
+        }
+    }
+    fn signum(&self) -> Self {
+        PyColumn {
+            inner: signum(&self.inner),
+        }
+    }
+    fn quarter(&self) -> Self {
+        PyColumn {
+            inner: quarter(&self.inner),
+        }
+    }
+    fn weekofyear(&self) -> Self {
+        PyColumn {
+            inner: weekofyear(&self.inner),
+        }
+    }
+    fn dayofweek(&self) -> Self {
+        PyColumn {
+            inner: dayofweek(&self.inner),
+        }
+    }
+    fn dayofyear(&self) -> Self {
+        PyColumn {
+            inner: dayofyear(&self.inner),
+        }
+    }
+    fn add_months(&self, n: i32) -> Self {
+        PyColumn {
+            inner: add_months(&self.inner, n),
+        }
+    }
+    fn months_between(&self, start: &PyColumn) -> Self {
+        PyColumn {
+            inner: self.inner.months_between(&start.inner),
+        }
+    }
+    fn next_day(&self, day_of_week: &str) -> Self {
+        PyColumn {
+            inner: next_day(&self.inner, day_of_week),
+        }
+    }
+    fn cast(&self, type_name: &str) -> PyResult<Self> {
+        rs_cast(&self.inner, type_name).map(|inner| PyColumn { inner }).map_err(|e| {
+            pyo3::exceptions::PyValueError::new_err(e)
+        })
+    }
+    fn try_cast(&self, type_name: &str) -> PyResult<Self> {
+        rs_try_cast(&self.inner, type_name).map(|inner| PyColumn { inner }).map_err(|e| {
+            pyo3::exceptions::PyValueError::new_err(e)
+        })
+    }
+    fn isnan(&self) -> Self {
+        PyColumn {
+            inner: rs_isnan(&self.inner),
         }
     }
 

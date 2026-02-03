@@ -124,7 +124,7 @@ The path to full backend replacement is planned in [FULL_BACKEND_ROADMAP.md](FUL
 
 We know we're on track if:
 
-- ✅ **Behavioral parity**: For core operations (filter, select, orderBy, groupBy+count/sum/avg/min/max/agg, when/coalesce, basic type coercion, null semantics, joins, window functions, array and string functions), DataFrame methods (union, distinct, drop, dropna, fillna, limit, withColumnRenamed), and file readers (CSV/Parquet/JSON), PySpark and Robin Sparkless produce the same schema and data on test fixtures. **Status: PASSING (82 fixtures)**
+- ✅ **Behavioral parity**: For core operations (filter, select, orderBy, groupBy+count/sum/avg/min/max/agg, when/coalesce, basic type coercion, null semantics, joins, window functions, array and string functions, math, datetime, type/conditional), DataFrame methods (union, distinct, drop, dropna, fillna, limit, withColumnRenamed), and file readers (CSV/Parquet/JSON), PySpark and Robin Sparkless produce the same schema and data on test fixtures. **Status: PASSING (84 fixtures)**
 - ✅ **Documentation of differences**: Any divergence from PySpark semantics is called out in [PYSPARK_DIFFERENCES.md](PYSPARK_DIFFERENCES.md) (window, SQL, Delta, Phase 8).
 - ✅ **Performance envelope**: For supported operations, we stay within ~2x of doing the same thing directly in Polars. **Status: BENCHMARKED** (`cargo bench`; see [QUICKSTART.md](QUICKSTART.md) § Benchmarks)
 
@@ -278,21 +278,21 @@ To reach **full Sparkless parity** (robin-sparkless as a complete backend replac
 - **String** ✅ (partial): `ascii`, `format_number`, `overlay`, `position`, `char`, `chr` implemented; `base64`, `unbase64` (base64 crate). Remaining: `format_string`, `encode`/`decode`, etc.
 - **Binary** ✅ (partial): `sha1`, `sha2(bit_length)`, `md5` (string in → hex string out; sha1, sha2, md5 crates). AES_* deferred.
 - **Collection** ✅ (partial): `array_compact` (drop nulls from list). Remaining: array_distinct, map extensions, etc.
-- **Parity**: Parser branches for all new functions; fixtures `string_ascii`, `string_format_number` (82 fixtures).
+- **Parity**: Parser branches for all new functions; fixtures `string_ascii`, `string_format_number` (82 fixtures at Phase 13 completion).
 - **PyO3**: Module and Column methods for ascii, format_number, overlay, position, char, chr, base64, unbase64, sha1, sha2, md5, array_compact.
-- **Outcome**: Functions ~120 → ~130+; 82 parity fixtures. Ready for Phase 14 (functions batch 2).
+- **Outcome**: Functions ~120 → ~130+; 82 parity fixtures. Phase 14 (functions batch 2) completed next (84 fixtures, ~200+ functions).
 
 ---
 
-### Phase 14 – Functions batch 2: math, datetime, type/conditional (4–6 weeks)
+### Phase 14 – Functions batch 2: math, datetime, type/conditional ✅ **COMPLETED**
 
 **Goal**: Add ~100 functions in math, datetime, type casting, and conditional logic toward ~300 total.
 
-- **Math**: Full math set (sin, cos, tan, acos, asin, atan, atan2, degrees, radians, signum, etc.) and remaining aggregates.
-- **Datetime**: Remaining date/timestamp functions (quarter, weekofyear, dayofweek, dayofyear, add_months, months_between, next_day, etc.).
-- **Type/conditional**: Cast family, `try_cast`, type testing; remaining conditional (e.g. `greatest`, `least`, `isnan`, `isnull` already done where applicable).
-- **Parity**: Fixtures for datetime edge cases and type coercion.
-- **Outcome**: Functions ~200 → ~300.
+- **Math** ✅: sin, cos, tan, asin, acos, atan, atan2, degrees, radians, signum (UDFs).
+- **Datetime** ✅: quarter, weekofyear, dayofweek, dayofyear, add_months, months_between, next_day (Polars dt + chrono UDFs).
+- **Type/conditional** ✅: cast, try_cast (PySpark-like type names), isnan, greatest, least.
+- **Parity** ✅: Parser branches for all; fixtures `math_sin_cos`, `datetime_quarter_week` (84 fixtures).
+- **PyO3** ✅: Module and Column methods for all Phase 14 functions. Docs updated.
 
 ---
 

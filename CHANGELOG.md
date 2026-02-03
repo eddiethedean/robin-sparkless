@@ -98,8 +98,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Parity**: `parse_with_column_expr` extended for all new functions; fixtures `string_ascii`, `string_format_number` (82 fixtures total).
   - **Docs**: PARITY_STATUS, IMPLEMENTATION_STATUS, PYTHON_API updated for Phase 13.
 
+- **Phase 14 – Functions batch 2 (math, datetime, type/conditional)** ✅
+  - **Math**: `sin`, `cos`, `tan`, `asin`, `acos`, `atan`, `atan2(y, x)`, `degrees`, `radians`, `signum` (UDFs in `udfs.rs`; Polars has no trig on `Expr`).
+  - **Datetime**: `quarter`, `weekofyear`/`week`, `dayofweek` (Sun=1..Sat=7), `dayofyear`; `add_months`, `months_between`, `next_day(day_of_week)` (chrono UDFs).
+  - **Type/conditional**: `cast(column, type_name)` (strict), `try_cast(column, type_name)` (null on failure), `parse_type_name()`; `isnan(column)`; `greatest`/`least` over columns (UDFs for Float64/Int64/String).
+  - **Parity**: Parser branches for all Phase 14 functions; fixtures `math_sin_cos`, `datetime_quarter_week` (84 fixtures total).
+  - **PyO3**: Module-level and Column methods for sin, cos, tan, asin, acos, atan, atan2, degrees, radians, signum, quarter, weekofyear, dayofweek, dayofyear, add_months, months_between, next_day, cast, try_cast, isnan, greatest, least.
+  - **Docs**: README, CHANGELOG, PARITY_STATUS, IMPLEMENTATION_STATUS, ROADMAP, PYTHON_API, FULL_BACKEND_ROADMAP, docs/README, QUICKSTART updated for Phase 14.
+
 ### Changed
 
+- **Phase 14**: Math (sin, cos, tan, degrees, radians, signum, etc.), datetime (quarter, weekofyear, add_months, months_between, next_day), type/conditional (cast, try_cast, isnan, greatest, least); 84 parity fixtures; PyO3 bindings; all docs and README updated.
 - **Phase 13**: String/binary/collection batch 1 (ascii, format_number, overlay, position, char, chr, base64, unbase64, sha1, sha2, md5, array_compact); 82 parity fixtures; PyO3 bindings; with_columns_renamed type fix in Python.
 - **Phase 12**: DataFrame methods ~55+ (freq_items, approx_quantile, crosstab, melt, sample_by, no-ops); PyO3 stat/na/to_pandas, random_split, with_columns, etc.; parity fixtures first_row, head_n, offset_n; all docs and README updated.
 - **Phase 11**: Parity fixtures 73 → 80; harness date/datetime/boolean support; CI workflow; converter date/timestamp mapping; docs updated.

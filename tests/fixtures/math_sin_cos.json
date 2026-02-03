@@ -1,0 +1,35 @@
+{
+  "name": "math_sin_cos",
+  "pyspark_version": "3.5.0",
+  "input": {
+    "schema": [
+      { "name": "id", "type": "bigint" },
+      { "name": "rad", "type": "double" }
+    ],
+    "rows": [
+      [1, 0.0],
+      [2, 1.5707963267948966],
+      [3, 3.141592653589793]
+    ]
+  },
+  "operations": [
+    { "op": "withColumn", "column": "s", "expr": "sin(col('rad'))" },
+    { "op": "withColumn", "column": "c", "expr": "cos(col('rad'))" },
+    { "op": "withColumn", "column": "deg", "expr": "degrees(col('rad'))" },
+    { "op": "orderBy", "columns": ["id"], "ascending": [true] }
+  ],
+  "expected": {
+    "schema": [
+      { "name": "id", "type": "bigint" },
+      { "name": "rad", "type": "double" },
+      { "name": "s", "type": "double" },
+      { "name": "c", "type": "double" },
+      { "name": "deg", "type": "double" }
+    ],
+    "rows": [
+      [1, 0.0, 0.0, 1.0, 0.0],
+      [2, 1.5707963267948966, 1.0, 6.123233995736766e-17, 90.0],
+      [3, 3.141592653589793, 1.2246467991473532e-16, -1.0, 180.0]
+    ]
+  }
+}

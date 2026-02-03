@@ -691,6 +691,113 @@ impl Column {
         Self::from_expr(self.expr().clone().log(std::f64::consts::E), None)
     }
 
+    /// Sine (radians). PySpark sin.
+    pub fn sin(&self) -> Column {
+        let expr = self.expr().clone().map(
+            crate::udfs::apply_sin,
+            GetOutput::from_type(DataType::Float64),
+        );
+        Self::from_expr(expr, None)
+    }
+
+    /// Cosine (radians). PySpark cos.
+    pub fn cos(&self) -> Column {
+        let expr = self.expr().clone().map(
+            crate::udfs::apply_cos,
+            GetOutput::from_type(DataType::Float64),
+        );
+        Self::from_expr(expr, None)
+    }
+
+    /// Tangent (radians). PySpark tan.
+    pub fn tan(&self) -> Column {
+        let expr = self.expr().clone().map(
+            crate::udfs::apply_tan,
+            GetOutput::from_type(DataType::Float64),
+        );
+        Self::from_expr(expr, None)
+    }
+
+    /// Arc sine. PySpark asin.
+    pub fn asin(&self) -> Column {
+        let expr = self.expr().clone().map(
+            crate::udfs::apply_asin,
+            GetOutput::from_type(DataType::Float64),
+        );
+        Self::from_expr(expr, None)
+    }
+
+    /// Arc cosine. PySpark acos.
+    pub fn acos(&self) -> Column {
+        let expr = self.expr().clone().map(
+            crate::udfs::apply_acos,
+            GetOutput::from_type(DataType::Float64),
+        );
+        Self::from_expr(expr, None)
+    }
+
+    /// Arc tangent. PySpark atan.
+    pub fn atan(&self) -> Column {
+        let expr = self.expr().clone().map(
+            crate::udfs::apply_atan,
+            GetOutput::from_type(DataType::Float64),
+        );
+        Self::from_expr(expr, None)
+    }
+
+    /// Two-argument arc tangent (y, x) -> angle in radians. PySpark atan2.
+    pub fn atan2(&self, x: &Column) -> Column {
+        let args = [x.expr().clone()];
+        let expr = self.expr().clone().map_many(
+            crate::udfs::apply_atan2,
+            &args,
+            GetOutput::from_type(DataType::Float64),
+        );
+        Self::from_expr(expr, None)
+    }
+
+    /// Convert radians to degrees. PySpark degrees.
+    pub fn degrees(&self) -> Column {
+        let expr = self.expr().clone().map(
+            crate::udfs::apply_degrees,
+            GetOutput::from_type(DataType::Float64),
+        );
+        Self::from_expr(expr, None)
+    }
+
+    /// Convert degrees to radians. PySpark radians.
+    pub fn radians(&self) -> Column {
+        let expr = self.expr().clone().map(
+            crate::udfs::apply_radians,
+            GetOutput::from_type(DataType::Float64),
+        );
+        Self::from_expr(expr, None)
+    }
+
+    /// Sign of the number (-1, 0, or 1). PySpark signum.
+    pub fn signum(&self) -> Column {
+        let expr = self.expr().clone().map(
+            crate::udfs::apply_signum,
+            GetOutput::from_type(DataType::Float64),
+        );
+        Self::from_expr(expr, None)
+    }
+
+    /// Cast to the given type (PySpark cast). Fails on invalid conversion.
+    pub fn cast_to(&self, type_name: &str) -> Result<Column, String> {
+        crate::functions::cast(self, type_name)
+    }
+
+    /// Cast to the given type, null on invalid conversion (PySpark try_cast).
+    pub fn try_cast_to(&self, type_name: &str) -> Result<Column, String> {
+        crate::functions::try_cast(self, type_name)
+    }
+
+    /// True where the float value is NaN (PySpark isnan).
+    pub fn is_nan(&self) -> Column {
+        Self::from_expr(self.expr().clone().is_nan(), None)
+    }
+
     // --- Datetime functions ---
 
     /// Extract year from datetime column (PySpark year)
@@ -706,6 +813,37 @@ impl Column {
     /// Extract day of month from datetime column (PySpark day)
     pub fn day(&self) -> Column {
         Self::from_expr(self.expr().clone().dt().day(), None)
+    }
+
+    /// Extract quarter (1-4) from date/datetime column (PySpark quarter).
+    pub fn quarter(&self) -> Column {
+        Self::from_expr(self.expr().clone().dt().quarter(), None)
+    }
+
+    /// Extract ISO week of year (1-53) (PySpark weekofyear / week).
+    pub fn weekofyear(&self) -> Column {
+        Self::from_expr(self.expr().clone().dt().week(), None)
+    }
+
+    /// Alias for weekofyear (PySpark week).
+    pub fn week(&self) -> Column {
+        self.weekofyear()
+    }
+
+    /// Day of week: 1 = Sunday, 2 = Monday, ..., 7 = Saturday (PySpark dayofweek).
+    /// Polars weekday is Mon=1..Sun=7; we convert to Sun=1..Sat=7.
+    pub fn dayofweek(&self) -> Column {
+        let w = self.expr().clone().dt().weekday();
+        let dayofweek = (w % lit(7i32)) + lit(1i32); // 7->1 (Sun), 1->2 (Mon), ..., 6->7 (Sat)
+        Self::from_expr(dayofweek, None)
+    }
+
+    /// Day of year (1-366) (PySpark dayofyear).
+    pub fn dayofyear(&self) -> Column {
+        Self::from_expr(
+            self.expr().clone().dt().ordinal_day().cast(DataType::Int32),
+            None,
+        )
     }
 
     /// Cast to date (PySpark to_date). Drops time component from datetime/timestamp.
@@ -770,6 +908,36 @@ impl Column {
             self.expr().clone().dt().truncate(lit(format.to_string())),
             None,
         )
+    }
+
+    /// Add n months to date/datetime column (PySpark add_months). Month-aware.
+    pub fn add_months(&self, n: i32) -> Column {
+        let expr = self.expr().clone().map(
+            move |col| crate::udfs::apply_add_months(col, n),
+            GetOutput::from_type(DataType::Date),
+        );
+        Self::from_expr(expr, None)
+    }
+
+    /// Number of months between end and start dates, as fractional (PySpark months_between).
+    pub fn months_between(&self, start: &Column) -> Column {
+        let args = [start.expr().clone()];
+        let expr = self.expr().clone().map_many(
+            crate::udfs::apply_months_between,
+            &args,
+            GetOutput::from_type(DataType::Float64),
+        );
+        Self::from_expr(expr, None)
+    }
+
+    /// Next date that is the given day of week (e.g. "Mon", "Tue") (PySpark next_day).
+    pub fn next_day(&self, day_of_week: &str) -> Column {
+        let day = day_of_week.to_string();
+        let expr = self.expr().clone().map(
+            move |col| crate::udfs::apply_next_day(col, &day),
+            GetOutput::from_type(DataType::Date),
+        );
+        Self::from_expr(expr, None)
     }
 
     // --- Window functions ---

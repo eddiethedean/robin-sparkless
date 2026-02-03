@@ -60,7 +60,7 @@ To run Phase 5 conversion, clone [Sparkless](https://github.com/eddiethedean/spa
 ## Converter status
 
 - **Script**: Implemented in `tests/convert_sparkless_fixtures.py`. Schema and row conversion, `right_input` for join/union, and operation mapping for filter, select, groupBy, agg, orderBy, join, window, withColumn, union, unionByName, distinct, drop, dropna, fillna, limit, withColumnRenamed are in place.
-- **Target**: Convert Sparkless `expected_outputs` with `--batch` and `--output-subdir converted`; run `make sparkless-parity` (set `SPARKLESS_EXPECTED_OUTPUTS` when Sparkless repo is available). Goal: 50+ tests passing (hand-written + converted). Current: 82 hand-written fixtures passing.
+- **Target**: Convert Sparkless `expected_outputs` with `--batch` and `--output-subdir converted`; run `make sparkless-parity` (set `SPARKLESS_EXPECTED_OUTPUTS` when Sparkless repo is available). Goal: 50+ tests passing (hand-written + converted). Current: 84 hand-written fixtures passing (Phase 14: math, datetime, type/conditional added).
 - **Tests that may fail after conversion**: Unsupported expressions, missing functions, or semantic differences. Fix converter where possible; add `skip: true` and document in [SPARKLESS_PARITY_STATUS.md](SPARKLESS_PARITY_STATUS.md).
 
 ## Related
