@@ -111,7 +111,7 @@ let df = df.with_column("full", concat(&[&col("first"), &col("last")]).into_expr
 let df = df.with_column("joined", concat_ws("-", &[&col("a"), &col("b")]).into_expr())?;
 ```
 
-Additional string: `length`, `trim`, `ltrim`, `rtrim`, `regexp_extract`, `regexp_replace`, `regexp_extract_all`, `regexp_like`, `split`, `initcap`, `mask`, `translate`, `substring_index` (Phase 10).
+Additional string: `length`, `trim`, `ltrim`, `rtrim`, `regexp_extract`, `regexp_replace`, `regexp_extract_all`, `regexp_like`, `split`, `initcap`, `mask`, `translate`, `substring_index` (Phase 10). DataFrame methods (Phase 12): `sample`, `random_split`, `first`, `head`, `tail`, `take`, `is_empty`, `to_json`, `to_pandas`, `explain`, `print_schema`, `summary`, `to_df`, `select_expr`, `col_regex`, `with_columns`, `with_columns_renamed`, `stat()` (cov/corr), `na()` (fill/drop), `freq_items`, `approx_quantile`, `crosstab`, `melt`, `sample_by`, etc. See [PYTHON_API.md](PYTHON_API.md) for the full Python API.
 
 ### Datetime
 

@@ -33,7 +33,9 @@ Python module is only compiled when the `pyo3` feature is enabled. Default `carg
 |-----------------|-------------------------|--------|
 | SparkSession    | `SparkSession`          | `builder()`, `get_or_create()`, `create_dataframe`, `read_csv`, `read_parquet`, `read_json`, `is_case_sensitive()`; with `sql`: `sql(query)`, `create_or_replace_temp_view(name, df)`, `table(name)`; with `delta`: `read_delta(path)`, `read_delta_version(path, version)` |
 | SparkSessionBuilder | `SparkSessionBuilder` | `app_name()`, `master()`, `config()`, `get_or_create()` |
-| DataFrame       | `DataFrame` | `filter`, `select`, `with_column`, `order_by`, `group_by`, `join`, `union`, `union_by_name`, `distinct`, `drop`, `dropna`, `fillna`, `limit`, `with_column_renamed`, `count`, `show`, `collect`; with `delta`: `write_delta(path, overwrite)` |
+| DataFrame       | `DataFrame` | `filter`, `select`, `with_column`, `order_by`, `group_by`, `join`, `union`, `union_by_name`, `distinct`, `drop`, `dropna`, `fillna`, `limit`, `with_column_renamed`, `count`, `show`, `collect`; **Phase 12**: `sample`, `random_split`, `first`, `head`, `tail`, `take`, `is_empty`, `to_json`, `to_pandas`, `explain`, `print_schema`, `checkpoint`, `local_checkpoint`, `repartition`, `coalesce`, `offset`, `summary`, `to_df`, `select_expr`, `col_regex`, `with_columns`, `with_columns_renamed`, `stat`, `na`; with `delta`: `write_delta(path, overwrite)` |
+| DataFrameStat   | `DataFrameStat` (returned by `df.stat()`) | `cov(col1, col2)` → `float`, `corr(col1, col2)` → `float` |
+| DataFrameNa     | `DataFrameNa` (returned by `df.na()`) | `fill(value: Column)` → `DataFrame`, `drop(subset=None)` → `DataFrame` |
 | Column          | `Column` | Built via `col(name)`, `lit(value)`; methods: `gt`, `ge`, `lt`, `le`, `eq`, `ne`, `and_`, `or_`, `alias`, `is_null`, `is_not_null`, `upper`, `lower`, `substr` |
 | GroupedData     | `GroupedData` | `count()`, `sum(column)`, `avg(column)`, `min(column)`, `max(column)`, `agg(exprs)` |
 | Functions       | Module-level            | `col`, `lit`, `when`, `coalesce`, `sum`, `avg`, `min`, `max`, `count` |
@@ -63,6 +65,9 @@ Python module is only compiled when the `pyo3` feature is enabled. Default `carg
   - `count()` → `int`
   - `show(n: int | None = None)` → `None`
   - `collect()` → `list[dict[str, Any]]` (list of row dicts)
+  - **Phase 12 (completed)**: `sample(with_replacement=False, fraction=1.0, seed=None)` → `DataFrame`; `random_split(weights: list[float], seed=None)` → `list[DataFrame]`; `first()`, `head(n)`, `tail(n)`, `take(n)` → `DataFrame`; `is_empty()` → `bool`; `to_json()` → `list[str]`; `to_pandas()` → `list[dict[str, Any]]` (same as `collect()`; use `pandas.DataFrame.from_records(df.to_pandas())` for a pandas DataFrame); `explain()` → `str`; `print_schema()` → `str`; `checkpoint()`, `local_checkpoint()`, `repartition(n)`, `coalesce(n)`, `offset(n)` → `DataFrame`; `summary()` → `DataFrame`; `to_df(names: list[str])` → `DataFrame`; `select_expr(exprs: list[str])` → `DataFrame`; `col_regex(pattern: str)` → `DataFrame`; `with_columns(mapping: dict[str, Column] | list[tuple[str, Column]])` → `DataFrame`; `with_columns_renamed(mapping: dict[str, str] | list[tuple[str, str]])` → `DataFrame`; `stat()` → `DataFrameStat`; `na()` → `DataFrameNa`.
+  - **DataFrameStat** (returned by `df.stat()`): `cov(col1: str, col2: str)` → `float`; `corr(col1: str, col2: str)` → `float`.
+  - **DataFrameNa** (returned by `df.na()`): `fill(value: Column)` → `DataFrame`; `drop(subset: list[str] | None = None)` → `DataFrame`.
   - **When `delta` feature enabled**: `write_delta(path: str, overwrite: bool)` → `None`
 
 - **Column / expressions**
@@ -80,7 +85,7 @@ Python module is only compiled when the `pyo3` feature is enabled. Default `carg
 ## Data transfer
 
 - **create_dataframe**: Python passes a list of 3-tuples `(int, int, str)` and three column names. Supported schema for this entry point is fixed (id-like, numeric, string). Other schemas may be added later.
-- **collect**: Returns a **list of Python dicts** (`list[dict[str, Any]]`), one dict per row (column name → value). Types: `None`, `int`, `float`, `bool`, `str` (and `int` for uint64). Unsupported Polars types raise a clear runtime error.
+- **collect** / **to_pandas**: Both return a **list of Python dicts** (`list[dict[str, Any]]`), one dict per row (column name → value). Types: `None`, `int`, `float`, `bool`, `str` (and `int` for uint64). Use `pandas.DataFrame.from_records(df.to_pandas())` to obtain a pandas DataFrame. Unsupported Polars types raise a clear runtime error.
 
 ## Errors
 

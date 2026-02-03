@@ -15,7 +15,7 @@ sql = ["dep:sqlparser"]
 delta = ["dep:deltalake", "dep:tokio", "dep:url"]
 
 [dependencies]
-polars = { version = "0.45", features = ["lazy", "csv", "parquet", "json", "temporal", "strings", "concat_str", "regex", "round_series", "abs", "dtype-categorical", "dtype-date", "dtype-datetime", "dtype-duration", "dtype-time", "rank", "is_in", "list_eval", "list_drop_nulls", "list_any_all", "cum_agg", "string_pad", "string_reverse", "repeat_by", "log", "month_end", "describe", "cross_join", "semi_anti_join", "extract_jsonpath", "dtype-struct"] }
+polars = { version = "0.45", features = ["lazy", "csv", "parquet", "json", "temporal", "strings", "concat_str", "regex", "round_series", "abs", "dtype-categorical", "dtype-date", "dtype-datetime", "dtype-duration", "dtype-time", "rank", "is_in", "list_eval", "list_drop_nulls", "list_any_all", "cum_agg", "string_pad", "string_reverse", "repeat_by", "log", "month_end", "describe", "cross_join", "semi_anti_join", "extract_jsonpath", "dtype-struct", "random"] }
 serde = { version = "1.0", features = ["derive"] }
 chrono = "0.4"
 serde_json = "1.0"
@@ -33,6 +33,8 @@ twox-hash = "1.6"
 soundex = "0.2"
 # Pin to address RUSTSEC-2026-0007 (integer overflow in BytesMut::reserve; transitive via polars/deltalake)
 bytes = "1.11.1"
+# Phase 12: colRegex (column name pattern matching)
+regex = "1.11"
 
 [dev-dependencies]
 chrono = "0.4"

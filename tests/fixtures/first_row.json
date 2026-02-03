@@ -1,0 +1,29 @@
+{
+  "name": "first_row",
+  "pyspark_version": "3.5.0",
+  "input": {
+    "schema": [
+      { "name": "id", "type": "bigint" },
+      { "name": "age", "type": "bigint" },
+      { "name": "name", "type": "string" }
+    ],
+    "rows": [
+      [1, 25, "Alice"],
+      [2, 30, "Bob"],
+      [3, 35, "Charlie"]
+    ]
+  },
+  "operations": [
+    { "op": "first" }
+  ],
+  "expected": {
+    "schema": [
+      { "name": "id", "type": "bigint" },
+      { "name": "age", "type": "bigint" },
+      { "name": "name", "type": "string" }
+    ],
+    "rows": [
+      [1, 25, "Alice"]
+    ]
+  }
+}

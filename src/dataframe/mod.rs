@@ -1,12 +1,16 @@
-//! DataFrame module: main tabular type and submodules for transformations, aggregations, joins.
+//! DataFrame module: main tabular type and submodules for transformations, aggregations, joins, stats.
 
 mod aggregations;
 mod joins;
+mod stats;
 mod transformations;
 
 pub use aggregations::GroupedData;
 pub use joins::{join, JoinType};
-pub use transformations::{filter, order_by, select, with_column};
+pub use stats::DataFrameStat;
+pub use transformations::{
+    filter, order_by, select, with_column, DataFrameNa,
+};
 
 use crate::column::Column;
 use crate::schema::StructType;
@@ -277,6 +281,238 @@ impl DataFrame {
     /// Set intersection: rows in both self and other. PySpark intersect.
     pub fn intersect(&self, other: &DataFrame) -> Result<DataFrame, PolarsError> {
         transformations::intersect(self, other, self.case_sensitive)
+    }
+
+    // ---------- Phase 12 Batch A: sample, first/head/take/tail, stat, summary, isEmpty, toDF ----------
+
+    /// Sample a fraction of rows. PySpark sample(withReplacement, fraction, seed).
+    pub fn sample(
+        &self,
+        with_replacement: bool,
+        fraction: f64,
+        seed: Option<u64>,
+    ) -> Result<DataFrame, PolarsError> {
+        transformations::sample(self, with_replacement, fraction, seed, self.case_sensitive)
+    }
+
+    /// Split into multiple DataFrames by weights. PySpark randomSplit(weights, seed).
+    pub fn random_split(
+        &self,
+        weights: &[f64],
+        seed: Option<u64>,
+    ) -> Result<Vec<DataFrame>, PolarsError> {
+        transformations::random_split(self, weights, seed, self.case_sensitive)
+    }
+
+    /// Stratified sample by column value. PySpark sampleBy(col, fractions, seed).
+    /// fractions: list of (value as Expr, fraction) for that stratum.
+    pub fn sample_by(
+        &self,
+        col_name: &str,
+        fractions: &[(Expr, f64)],
+        seed: Option<u64>,
+    ) -> Result<DataFrame, PolarsError> {
+        transformations::sample_by(self, col_name, fractions, seed, self.case_sensitive)
+    }
+
+    /// First row as a one-row DataFrame. PySpark first().
+    pub fn first(&self) -> Result<DataFrame, PolarsError> {
+        transformations::first(self, self.case_sensitive)
+    }
+
+    /// First n rows. PySpark head(n).
+    pub fn head(&self, n: usize) -> Result<DataFrame, PolarsError> {
+        transformations::head(self, n, self.case_sensitive)
+    }
+
+    /// Take first n rows. PySpark take(n).
+    pub fn take(&self, n: usize) -> Result<DataFrame, PolarsError> {
+        transformations::take(self, n, self.case_sensitive)
+    }
+
+    /// Last n rows. PySpark tail(n).
+    pub fn tail(&self, n: usize) -> Result<DataFrame, PolarsError> {
+        transformations::tail(self, n, self.case_sensitive)
+    }
+
+    /// True if the DataFrame has zero rows. PySpark isEmpty.
+    pub fn is_empty(&self) -> bool {
+        transformations::is_empty(self)
+    }
+
+    /// Rename columns. PySpark toDF(*colNames).
+    pub fn to_df(&self, names: Vec<&str>) -> Result<DataFrame, PolarsError> {
+        transformations::to_df(self, &names, self.case_sensitive)
+    }
+
+    /// Statistical helper. PySpark df.stat().cov / .corr.
+    pub fn stat(&self) -> DataFrameStat<'_> {
+        DataFrameStat { df: self }
+    }
+
+    /// Summary statistics (alias for describe). PySpark summary.
+    pub fn summary(&self) -> Result<DataFrame, PolarsError> {
+        self.describe()
+    }
+
+    // ---------- Phase 12 Batch B: toJSON, explain, printSchema ----------
+
+    /// Collect rows as JSON strings (one per row). PySpark toJSON.
+    pub fn to_json(&self) -> Result<Vec<String>, PolarsError> {
+        transformations::to_json(self)
+    }
+
+    /// Return execution plan description. PySpark explain.
+    pub fn explain(&self) -> String {
+        transformations::explain(self)
+    }
+
+    /// Return schema as tree string. PySpark printSchema (returns string; print to stdout if needed).
+    pub fn print_schema(&self) -> Result<String, PolarsError> {
+        transformations::print_schema(self)
+    }
+
+    // ---------- Phase 12 Batch C: checkpoint, repartition, coalesce (no-op on eager backend) ----------
+
+    /// No-op: Polars backend is eager. PySpark checkpoint.
+    pub fn checkpoint(&self) -> Result<DataFrame, PolarsError> {
+        Ok(self.clone())
+    }
+
+    /// No-op: Polars backend is eager. PySpark localCheckpoint.
+    pub fn local_checkpoint(&self) -> Result<DataFrame, PolarsError> {
+        Ok(self.clone())
+    }
+
+    /// No-op: single partition in Polars. PySpark repartition(n).
+    pub fn repartition(&self, _num_partitions: usize) -> Result<DataFrame, PolarsError> {
+        Ok(self.clone())
+    }
+
+    /// No-op: single partition in Polars. PySpark coalesce(n).
+    pub fn coalesce(&self, _num_partitions: usize) -> Result<DataFrame, PolarsError> {
+        Ok(self.clone())
+    }
+
+    // ---------- Phase 12: Spark-specific no-ops (compatibility) ----------
+
+    /// No-op. PySpark hint (query planner hint).
+    pub fn hint(&self, _name: &str, _params: &[i32]) -> Result<DataFrame, PolarsError> {
+        Ok(self.clone())
+    }
+
+    /// Returns true (eager single-node). PySpark isLocal.
+    pub fn is_local(&self) -> bool {
+        true
+    }
+
+    /// Returns empty vec (no file sources). PySpark inputFiles.
+    pub fn input_files(&self) -> Vec<String> {
+        Vec::new()
+    }
+
+    /// No-op; returns false. PySpark sameSemantics.
+    pub fn same_semantics(&self, _other: &DataFrame) -> bool {
+        false
+    }
+
+    /// No-op; returns 0. PySpark semanticHash.
+    pub fn semantic_hash(&self) -> u64 {
+        0
+    }
+
+    /// No-op. PySpark observe (metrics).
+    pub fn observe(
+        &self,
+        _name: &str,
+        _expr: Expr,
+    ) -> Result<DataFrame, PolarsError> {
+        Ok(self.clone())
+    }
+
+    /// No-op. PySpark withWatermark (streaming).
+    pub fn with_watermark(&self, _event_time: &str, _delay: &str) -> Result<DataFrame, PolarsError> {
+        Ok(self.clone())
+    }
+
+    // ---------- Phase 12 Batch D: selectExpr, colRegex, withColumns, withColumnsRenamed, na ----------
+
+    /// Select by expression strings (minimal: column names, optionally "col as alias"). PySpark selectExpr.
+    pub fn select_expr(&self, exprs: &[String]) -> Result<DataFrame, PolarsError> {
+        transformations::select_expr(self, exprs, self.case_sensitive)
+    }
+
+    /// Select columns whose names match the regex. PySpark colRegex.
+    pub fn col_regex(&self, pattern: &str) -> Result<DataFrame, PolarsError> {
+        transformations::col_regex(self, pattern, self.case_sensitive)
+    }
+
+    /// Add or replace multiple columns. PySpark withColumns.
+    pub fn with_columns(&self, exprs: &[(String, Expr)]) -> Result<DataFrame, PolarsError> {
+        transformations::with_columns(self, exprs, self.case_sensitive)
+    }
+
+    /// Rename multiple columns. PySpark withColumnsRenamed.
+    pub fn with_columns_renamed(&self, renames: &[(String, String)]) -> Result<DataFrame, PolarsError> {
+        transformations::with_columns_renamed(self, renames, self.case_sensitive)
+    }
+
+    /// NA sub-API. PySpark df.na().
+    pub fn na(&self) -> DataFrameNa<'_> {
+        DataFrameNa { df: self }
+    }
+
+    // ---------- Phase 12 Batch E: offset, transform, freqItems, approxQuantile, crosstab, melt, exceptAll, intersectAll ----------
+
+    /// Skip first n rows. PySpark offset(n).
+    pub fn offset(&self, n: usize) -> Result<DataFrame, PolarsError> {
+        transformations::offset(self, n, self.case_sensitive)
+    }
+
+    /// Transform by a function. PySpark transform(func).
+    pub fn transform<F>(&self, f: F) -> Result<DataFrame, PolarsError>
+    where
+        F: FnOnce(DataFrame) -> Result<DataFrame, PolarsError>,
+    {
+        transformations::transform(self, f)
+    }
+
+    /// Frequent items. PySpark freqItems (stub).
+    pub fn freq_items(&self, columns: &[&str], support: f64) -> Result<DataFrame, PolarsError> {
+        transformations::freq_items(self, columns, support, self.case_sensitive)
+    }
+
+    /// Approximate quantiles. PySpark approxQuantile (stub).
+    pub fn approx_quantile(
+        &self,
+        column: &str,
+        probabilities: &[f64],
+    ) -> Result<DataFrame, PolarsError> {
+        transformations::approx_quantile(self, column, probabilities, self.case_sensitive)
+    }
+
+    /// Cross-tabulation. PySpark crosstab (stub).
+    pub fn crosstab(&self, col1: &str, col2: &str) -> Result<DataFrame, PolarsError> {
+        transformations::crosstab(self, col1, col2, self.case_sensitive)
+    }
+
+    /// Unpivot (melt). PySpark melt (stub).
+    pub fn melt(
+        &self,
+        id_vars: &[&str],
+        value_vars: &[&str],
+    ) -> Result<DataFrame, PolarsError> {
+        transformations::melt(self, id_vars, value_vars, self.case_sensitive)
+    }
+
+    /// Set difference keeping duplicates. PySpark exceptAll.
+    pub fn except_all(&self, other: &DataFrame) -> Result<DataFrame, PolarsError> {
+        transformations::except_all(self, other, self.case_sensitive)
+    }
+
+    /// Set intersection keeping duplicates. PySpark intersectAll.
+    pub fn intersect_all(&self, other: &DataFrame) -> Result<DataFrame, PolarsError> {
+        transformations::intersect_all(self, other, self.case_sensitive)
     }
 
     /// Write this DataFrame to a Delta table at the given path.

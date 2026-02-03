@@ -11,7 +11,7 @@ This document plans the path for **robin-sparkless** to become a complete backen
 | Area | Robin-Sparkless | Sparkless | Gap |
 |------|-----------------|-----------|-----|
 | **Functions** | ~120+ (Phase 10: mask, translate, substring_index, get_json_object, from_json, to_json, array_exists, forall, filter, transform, array_sum, array_mean; Phase 8: Map/create_map/map_keys/map_values/map_entries/map_from_arrays, array_repeat, array_flatten, soundex, levenshtein, crc32, xxhash64 — all implemented) | 403 | ~283 |
-| **DataFrame methods** | ~25 (filter, select, orderBy, groupBy, withColumn, join, union, unionByName, distinct, drop, dropna, fillna, limit, withColumnRenamed, collect, count, show, read_csv, read_parquet, read_json) | 85 | ~60 |
+| **DataFrame methods** | ~55+ (Phase 12: filter, select, orderBy, groupBy, withColumn, join, union, unionByName, distinct, drop, dropna, fillna, limit, withColumnRenamed, collect, count, show, read_*; sample, random_split, first, head, tail, take, is_empty, to_json, to_pandas, explain, print_schema, checkpoint, repartition, coalesce, offset, summary, to_df, select_expr, col_regex, with_columns, with_columns_renamed, stat, na, freq_items, approx_quantile, crosstab, melt, except_all, intersect_all, sample_by, no-ops) | 85 | ~30 |
 | **Parity fixtures** | 80 passing | 270+ expected_outputs | 190+ |
 | **PyO3 bridge** | ✅ Optional `pyo3` feature; `robin_sparkless` Python module | — | — |
 | **SQL** | Optional `sql` feature: SELECT, FROM, WHERE, JOIN, GROUP BY, ORDER BY, LIMIT; temp views | Full DDL/DML support | Subqueries, CTEs, DDL, HAVING |
@@ -276,29 +276,31 @@ See [PYTHON_API.md](PYTHON_API.md) for the API contract Sparkless maintainers ne
 
 ## Success Metrics
 
-| Metric | Current | After Phase 12 | After Phase 15 | Full Backend (Phase 16) |
-|--------|---------|----------------|----------------|-------------------------|
-| Parity fixtures | 80 | 80+ | 150+ | 150+ |
-| Functions implemented | ~120+ | ~120 | 403 | 403 |
-| DataFrame methods | ~35+ | 85 | 85 | 85 |
-| Sparkless tests passing (robin backend) | 0 | — | — | 200+ |
-| PyO3 bridge | ✅ Yes (optional) | Yes | Yes | Yes |
+| Metric | Current | After Phase 12 | After Phase 15 | After Phase 16 (crate) | Full Backend (Phase 17) |
+|--------|---------|----------------|----------------|------------------------|-------------------------|
+| Parity fixtures | 80 | 80+ | 150+ | 150+ | 150+ |
+| Functions implemented | ~120+ | ~120 | 403 | 403 | 403 |
+| DataFrame methods | ~35+ | 85 | 85 | 85 | 85 |
+| Crate on crates.io | No | — | — | Yes | Yes |
+| Sparkless tests passing (robin backend) | 0 | — | — | — | 200+ |
+| PyO3 bridge | ✅ Yes (optional) | Yes | Yes | Yes | Yes |
 
 ---
 
-## Path to 100% Before Sparkless Integration (ROADMAP Phases 12–16)
+## Path to 100% Before Sparkless Integration (ROADMAP Phases 12–17)
 
-To reach **100% feature parity** before wiring the robin backend into Sparkless, [ROADMAP.md](ROADMAP.md) defines the following phases between Phase 11 (done) and integration:
+To reach **100% feature parity** and a published crate before wiring the robin backend into Sparkless, [ROADMAP.md](ROADMAP.md) defines the following phases between Phase 11 (done) and integration:
 
 | ROADMAP Phase | Goal | Est. Effort |
 |---------------|------|-------------|
-| **12** | **DataFrame methods parity**: Implement remaining ~50–60 methods (sample, randomSplit, stat, summary, write/saveAsTable, checkpoint, toJSON, na sub-API, etc.) → 85 total | 4–6 weeks |
+| **12** | **DataFrame methods parity**: Implement remaining ~50–60 methods (sample, randomSplit, stat, summary, checkpoint, toJSON, na sub-API, etc.) → 85 total | ✅ **COMPLETED** |
 | **13** | **Functions batch 1**: String, binary, collection (~80 new functions → ~200 total). String (ascii, base64, format_string, overlay, etc.), binary (sha1, sha2, md5, aes_*), collection fill-out | 4–6 weeks |
 | **14** | **Functions batch 2**: Math, datetime, type/conditional (~100 new → ~300 total). Full math (sin/cos/tan, degrees/radians, signum), datetime (quarter, weekofyear, add_months, months_between, next_day), casts and conditionals | 4–6 weeks |
 | **15** | **Functions batch 3 + fixture growth**: Remaining ~103 functions → 403; parity fixtures 80 → 150+; convert more Sparkless expected_outputs, extend harness for new types | 6–8 weeks |
-| **16** | **Sparkless integration**: BackendFactory "robin", 200+ tests passing, PyO3 surface updated for all new functions | 4–6 weeks |
+| **16** | **Publish Rust crate**: Prepare and publish robin-sparkless on crates.io; API stability, docs, release workflow; optional PyPI wheel | 2–3 weeks |
+| **17** | **Sparkless integration**: BackendFactory "robin", 200+ tests passing, PyO3 surface updated for all new functions | 4–6 weeks |
 
-Detail for each phase is in [ROADMAP.md](ROADMAP.md) (§ Phase 12–16).
+Detail for each phase is in [ROADMAP.md](ROADMAP.md) (§ Phase 12–17).
 
 ---
 
@@ -315,7 +317,7 @@ Detail for each phase is in [ROADMAP.md](ROADMAP.md) (§ Phase 12–16).
 9. **Phase 9**: High-value functions (datetime, string repeat/reverse/lpad/rpad, math sqrt/pow/exp/log, nvl/nullif/nanvl, first/last/approx_count_distinct) + DataFrame methods (replace, cross_join, describe, cache/persist/unpersist, subtract, intersect) ✅ **COMPLETED**
 10. **Phase 10**: Complex types (Map, JSON, array_repeat, string 6.4) + window fixture simplification ✅ **COMPLETED**
 11. **Phase 11**: Parity scale (80 fixtures), harness date/datetime/boolean, converter + CI ✅ **COMPLETED**
-12. **ROADMAP Phase 12–16**: Path to 100% before integration — DataFrame methods (85), functions in 3 batches (403), fixtures (150+), then Sparkless integration (see § Path to 100% above).
+12. **ROADMAP Phase 12–17**: Path to 100% before integration — **Phase 12 completed** (DataFrame methods ~55+). Remaining: DataFrame methods → 85, functions in 3 batches (403), fixtures (150+), **Phase 16: prepare and publish crate (crates.io, docs, release)**, then Phase 17: Sparkless integration (see § Path to 100% above).
 
 ---
 

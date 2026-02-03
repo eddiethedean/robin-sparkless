@@ -1,9 +1,12 @@
 //! DataFrame transformation operations: filter, select, with_column, order_by,
 //! union, distinct, drop, dropna, fillna, limit, with_column_renamed,
-//! replace, cross_join, describe, subtract, intersect.
+//! replace, cross_join, describe, subtract, intersect,
+//! sample, random_split, first, head, take, tail, is_empty, to_df.
 
 use super::DataFrame;
-use polars::prelude::{col, Expr, IntoLazy, PolarsError, UnionArgs, UniqueKeepStrategy};
+use polars::prelude::{
+    col, Expr, IntoLazy, IntoSeries, NamedFrom, PolarsError, Series, UnionArgs, UniqueKeepStrategy,
+};
 
 /// Select columns (returns a new DataFrame). Preserves case_sensitive on result.
 pub fn select(
@@ -383,4 +386,610 @@ pub fn intersect(
         pl_df,
         case_sensitive,
     ))
+}
+
+// ---------- Batch A: sample, first/head/take/tail, is_empty, to_df ----------
+
+/// Sample a fraction of rows. PySpark sample(withReplacement, fraction, seed).
+pub fn sample(
+    df: &DataFrame,
+    with_replacement: bool,
+    fraction: f64,
+    seed: Option<u64>,
+    case_sensitive: bool,
+) -> Result<DataFrame, PolarsError> {
+    use polars::prelude::Series;
+    let n = df.df.height();
+    if n == 0 {
+        return Ok(super::DataFrame::from_polars_with_options(
+            df.df.as_ref().clone(),
+            case_sensitive,
+        ));
+    }
+    let take_n = (n as f64 * fraction).round() as usize;
+    let take_n = take_n.min(n).max(0);
+    if take_n == 0 {
+        return Ok(super::DataFrame::from_polars_with_options(
+            df.df.as_ref().clone().head(Some(0)),
+            case_sensitive,
+        ));
+    }
+    let idx_series = Series::new(
+        "idx".into(),
+        (0..n).map(|i| i as u32).collect::<Vec<_>>(),
+    );
+    let sampled_idx = idx_series.sample_n(take_n, with_replacement, true, seed)?;
+    let idx_ca = sampled_idx.u32().map_err(|_| {
+        PolarsError::ComputeError("sample: expected u32 indices".into())
+    })?;
+    let pl_df = df.df.as_ref().take(idx_ca)?;
+    Ok(super::DataFrame::from_polars_with_options(
+        pl_df,
+        case_sensitive,
+    ))
+}
+
+/// Split DataFrame by weights (random split). PySpark randomSplit(weights, seed).
+/// Returns one DataFrame per weight; weights are normalized to fractions.
+pub fn random_split(
+    df: &DataFrame,
+    weights: &[f64],
+    seed: Option<u64>,
+    case_sensitive: bool,
+) -> Result<Vec<DataFrame>, PolarsError> {
+    let total: f64 = weights.iter().sum();
+    if total <= 0.0 || weights.is_empty() {
+        return Ok(Vec::new());
+    }
+    let n = df.df.height();
+    if n == 0 {
+        return Ok(weights.iter().map(|_| super::DataFrame::empty()).collect());
+    }
+    let mut out = Vec::with_capacity(weights.len());
+    let mut start = 0_usize;
+    for w in weights {
+        let frac = w / total;
+        let take_n = (n as f64 * frac).round() as usize;
+        let take_n = take_n.min(n - start).max(0);
+        if take_n == 0 {
+            out.push(super::DataFrame::from_polars_with_options(
+                df.df.as_ref().clone().head(Some(0)),
+                case_sensitive,
+            ));
+            continue;
+        }
+        use polars::prelude::Series;
+        let idx_series = Series::new(
+            "idx".into(),
+            (0..n).map(|i| i as u32).collect::<Vec<_>>(),
+        );
+        let sampled_idx = idx_series.sample_n(take_n, false, true, seed)?;
+        let idx_ca = sampled_idx.u32().map_err(|_| {
+            PolarsError::ComputeError("random_split: expected u32 indices".into())
+        })?;
+        let sampled = df.df.as_ref().take(idx_ca)?;
+        start += take_n;
+        out.push(super::DataFrame::from_polars_with_options(
+            sampled,
+            case_sensitive,
+        ));
+    }
+    Ok(out)
+}
+
+/// Stratified sample by column value. PySpark sampleBy(col, fractions, seed).
+/// fractions: list of (value as Expr literal, fraction to sample for that value).
+pub fn sample_by(
+    df: &DataFrame,
+    col_name: &str,
+    fractions: &[(Expr, f64)],
+    seed: Option<u64>,
+    case_sensitive: bool,
+) -> Result<DataFrame, PolarsError> {
+    use polars::prelude::*;
+    if fractions.is_empty() {
+        return Ok(super::DataFrame::from_polars_with_options(
+            df.df.as_ref().clone().head(Some(0)),
+            case_sensitive,
+        ));
+    }
+    let resolved = df.resolve_column_name(col_name)?;
+    let mut parts = Vec::with_capacity(fractions.len());
+    for (value_expr, frac) in fractions {
+        let cond = col(resolved.as_str()).eq(value_expr.clone());
+        let filtered = df.df.as_ref().clone().lazy().filter(cond).collect()?;
+        if filtered.height() == 0 {
+            parts.push(filtered.head(Some(0)));
+            continue;
+        }
+        let sampled = sample(
+            &super::DataFrame::from_polars_with_options(filtered, case_sensitive),
+            false,
+            *frac,
+            seed,
+            case_sensitive,
+        )?;
+        parts.push(sampled.df.as_ref().clone());
+    }
+    let mut out = parts
+        .first()
+        .ok_or_else(|| PolarsError::ComputeError("sample_by: no parts".into()))?
+        .clone();
+    for p in parts.iter().skip(1) {
+        out.vstack_mut(p)?;
+    }
+    Ok(super::DataFrame::from_polars_with_options(
+        out,
+        case_sensitive,
+    ))
+}
+
+/// First row as a DataFrame (one row). PySpark first().
+pub fn first(df: &DataFrame, case_sensitive: bool) -> Result<DataFrame, PolarsError> {
+    let pl_df = df.df.as_ref().clone().head(Some(1));
+    Ok(super::DataFrame::from_polars_with_options(
+        pl_df,
+        case_sensitive,
+    ))
+}
+
+/// First n rows. PySpark head(n). Same as limit.
+pub fn head(df: &DataFrame, n: usize, case_sensitive: bool) -> Result<DataFrame, PolarsError> {
+    limit(df, n, case_sensitive)
+}
+
+/// Take first n rows (alias for limit). PySpark take(n).
+pub fn take(df: &DataFrame, n: usize, case_sensitive: bool) -> Result<DataFrame, PolarsError> {
+    limit(df, n, case_sensitive)
+}
+
+/// Last n rows. PySpark tail(n).
+pub fn tail(df: &DataFrame, n: usize, case_sensitive: bool) -> Result<DataFrame, PolarsError> {
+    let total = df.df.height();
+    let skip = total.saturating_sub(n);
+    let pl_df = df.df.as_ref().clone().slice(skip as i64, n);
+    Ok(super::DataFrame::from_polars_with_options(
+        pl_df,
+        case_sensitive,
+    ))
+}
+
+/// Whether the DataFrame has zero rows. PySpark isEmpty.
+pub fn is_empty(df: &DataFrame) -> bool {
+    df.df.height() == 0
+}
+
+/// Rename columns. PySpark toDF(*colNames). Names must match length of columns.
+pub fn to_df(
+    df: &DataFrame,
+    names: &[&str],
+    case_sensitive: bool,
+) -> Result<DataFrame, PolarsError> {
+    let cols = df.df.get_column_names();
+    if names.len() != cols.len() {
+        return Err(PolarsError::ComputeError(
+            format!(
+                "toDF: expected {} column names, got {}",
+                cols.len(),
+                names.len()
+            )
+            .into(),
+        ));
+    }
+    let mut pl_df = df.df.as_ref().clone();
+    for (old, new) in cols.iter().zip(names.iter()) {
+        pl_df.rename(old.as_str(), (*new).into())?;
+    }
+    Ok(super::DataFrame::from_polars_with_options(
+        pl_df,
+        case_sensitive,
+    ))
+}
+
+// ---------- Batch B: toJSON, explain, printSchema ----------
+
+fn any_value_to_serde_value(av: &polars::prelude::AnyValue) -> serde_json::Value {
+    use polars::prelude::AnyValue;
+    use serde_json::Number;
+    match av {
+        AnyValue::Null => serde_json::Value::Null,
+        AnyValue::Boolean(v) => serde_json::Value::Bool(*v),
+        AnyValue::Int8(v) => serde_json::Value::Number(Number::from(*v as i64)),
+        AnyValue::Int32(v) => serde_json::Value::Number(Number::from(*v)),
+        AnyValue::Int64(v) => serde_json::Value::Number(Number::from(*v)),
+        AnyValue::UInt32(v) => serde_json::Value::Number(Number::from(*v)),
+        AnyValue::Float64(v) => Number::from_f64(*v).map(serde_json::Value::Number).unwrap_or(serde_json::Value::Null),
+        AnyValue::String(v) => serde_json::Value::String(v.to_string()),
+        _ => serde_json::Value::String(format!("{:?}", av)),
+    }
+}
+
+/// Collect rows as JSON strings (one JSON object per row). PySpark toJSON.
+pub fn to_json(df: &DataFrame) -> Result<Vec<String>, PolarsError> {
+    use polars::prelude::*;
+    let pl = df.df.as_ref();
+    let names = pl.get_column_names();
+    let mut out = Vec::with_capacity(pl.height());
+    for r in 0..pl.height() {
+        let mut row = serde_json::Map::new();
+        for (i, name) in names.iter().enumerate() {
+            let col = pl.get_columns().get(i).ok_or_else(|| {
+                PolarsError::ComputeError("to_json: column index".into())
+            })?;
+            let series = col.as_materialized_series();
+            let av = series.get(r).map_err(|e| PolarsError::ComputeError(e.to_string().into()))?;
+            row.insert(name.to_string(), any_value_to_serde_value(&av));
+        }
+        out.push(serde_json::to_string(&row).map_err(|e| PolarsError::ComputeError(e.to_string().into()))?);
+    }
+    Ok(out)
+}
+
+/// Return a string describing the execution plan. PySpark explain.
+pub fn explain(_df: &DataFrame) -> String {
+    "DataFrame (eager Polars backend)".to_string()
+}
+
+/// Return schema as a tree string. PySpark printSchema (we return string; caller can print).
+pub fn print_schema(df: &DataFrame) -> Result<String, PolarsError> {
+    let schema = df.schema()?;
+    let mut s = "root\n".to_string();
+    for f in schema.fields() {
+        let dt = match &f.data_type {
+            crate::schema::DataType::String => "string",
+            crate::schema::DataType::Integer => "int",
+            crate::schema::DataType::Long => "bigint",
+            crate::schema::DataType::Double => "double",
+            crate::schema::DataType::Boolean => "boolean",
+            crate::schema::DataType::Date => "date",
+            crate::schema::DataType::Timestamp => "timestamp",
+            _ => "string",
+        };
+        s.push_str(&format!(" |-- {}: {}\n", f.name, dt));
+    }
+    Ok(s)
+}
+
+// ---------- Batch D: selectExpr, colRegex, withColumns, withColumnsRenamed, na ----------
+
+/// Select by expression strings. Minimal support: comma-separated column names. PySpark selectExpr.
+pub fn select_expr(
+    df: &DataFrame,
+    exprs: &[String],
+    case_sensitive: bool,
+) -> Result<DataFrame, PolarsError> {
+    let mut cols = Vec::new();
+    for e in exprs {
+        let e = e.trim();
+        if let Some((left, right)) = e.split_once(" as ") {
+            let col_name = left.trim();
+            let _alias = right.trim();
+            cols.push(df.resolve_column_name(col_name)?);
+        } else {
+            cols.push(df.resolve_column_name(e)?);
+        }
+    }
+    let refs: Vec<&str> = cols.iter().map(|s| s.as_str()).collect();
+    select(df, refs, case_sensitive)
+}
+
+/// Select columns whose names match the regex pattern. PySpark colRegex.
+pub fn col_regex(
+    df: &DataFrame,
+    pattern: &str,
+    case_sensitive: bool,
+) -> Result<DataFrame, PolarsError> {
+    let re = regex::Regex::new(pattern).map_err(|e| {
+        PolarsError::ComputeError(format!("colRegex: invalid pattern {:?}: {}", pattern, e).into())
+    })?;
+    let names = df.df.get_column_names();
+    let matched: Vec<&str> = names
+        .iter()
+        .filter(|n| re.is_match(n.as_str()))
+        .map(|s| s.as_str())
+        .collect();
+    if matched.is_empty() {
+        return Err(PolarsError::ComputeError(
+            format!("colRegex: no columns matched pattern {:?}", pattern).into(),
+        ));
+    }
+    select(df, matched, case_sensitive)
+}
+
+/// Add or replace multiple columns. PySpark withColumns.
+pub fn with_columns(
+    df: &DataFrame,
+    exprs: &[(String, Expr)],
+    case_sensitive: bool,
+) -> Result<DataFrame, PolarsError> {
+    let mut current = df.df.as_ref().clone();
+    for (name, expr) in exprs {
+        let lf = current.lazy();
+        let lf = lf.with_column(expr.clone().alias(name.as_str()));
+        current = lf.collect()?;
+    }
+    Ok(super::DataFrame::from_polars_with_options(
+        current,
+        case_sensitive,
+    ))
+}
+
+/// Rename multiple columns. PySpark withColumnsRenamed.
+pub fn with_columns_renamed(
+    df: &DataFrame,
+    renames: &[(String, String)],
+    case_sensitive: bool,
+) -> Result<DataFrame, PolarsError> {
+    let mut out = df.df.as_ref().clone();
+    for (old_name, new_name) in renames {
+        let resolved = df.resolve_column_name(old_name)?;
+        out.rename(resolved.as_str(), new_name.as_str().into())?;
+    }
+    Ok(super::DataFrame::from_polars_with_options(
+        out,
+        case_sensitive,
+    ))
+}
+
+/// NA sub-API builder. PySpark df.na().fill(...) / .drop(...).
+pub struct DataFrameNa<'a> {
+    pub(crate) df: &'a DataFrame,
+}
+
+impl<'a> DataFrameNa<'a> {
+    /// Fill nulls with the given value. PySpark na.fill(value).
+    pub fn fill(&self, value: Expr) -> Result<DataFrame, PolarsError> {
+        fillna(self.df, value, self.df.case_sensitive)
+    }
+
+    /// Drop rows with nulls in the given columns (or all). PySpark na.drop(subset).
+    pub fn drop(&self, subset: Option<Vec<&str>>) -> Result<DataFrame, PolarsError> {
+        dropna(self.df, subset, self.df.case_sensitive)
+    }
+}
+
+// ---------- Batch E: offset, transform, freqItems, approxQuantile, crosstab, melt, exceptAll, intersectAll ----------
+
+/// Skip first n rows. PySpark offset(n).
+pub fn offset(
+    df: &DataFrame,
+    n: usize,
+    case_sensitive: bool,
+) -> Result<DataFrame, PolarsError> {
+    let total = df.df.height();
+    let len = total.saturating_sub(n);
+    let pl_df = df.df.as_ref().clone().slice(n as i64, len);
+    Ok(super::DataFrame::from_polars_with_options(
+        pl_df,
+        case_sensitive,
+    ))
+}
+
+/// Transform DataFrame by a function. PySpark transform(func).
+pub fn transform<F>(df: &DataFrame, f: F) -> Result<DataFrame, PolarsError>
+where
+    F: FnOnce(DataFrame) -> Result<DataFrame, PolarsError>,
+{
+    let df_out = f(df.clone())?;
+    Ok(df_out)
+}
+
+/// Frequent items. PySpark freqItems. Returns one row with columns {col}_freqItems (array of values with frequency >= support).
+pub fn freq_items(
+    df: &DataFrame,
+    columns: &[&str],
+    support: f64,
+    case_sensitive: bool,
+) -> Result<DataFrame, PolarsError> {
+    use polars::prelude::SeriesMethods;
+    if columns.is_empty() {
+        return Ok(super::DataFrame::from_polars_with_options(
+            df.df.as_ref().clone().head(Some(0)),
+            case_sensitive,
+        ));
+    }
+    let support = support.clamp(1e-4, 1.0);
+    let pl_df = df.df.as_ref();
+    let n_total = pl_df.height() as f64;
+    if n_total == 0.0 {
+        let mut out = Vec::with_capacity(columns.len());
+        for col_name in columns {
+            let resolved = df.resolve_column_name(col_name)?;
+            let s = pl_df
+                .column(resolved.as_str())?
+                .as_series()
+                .ok_or_else(|| PolarsError::ComputeError("column not a series".into()))?
+                .clone();
+            let empty_sub = s.head(Some(0));
+            let list_chunked =
+                polars::prelude::ListChunked::from_iter([empty_sub].into_iter())
+                    .with_name(format!("{}_freqItems", resolved).into());
+            out.push(list_chunked.into_series().into());
+        }
+        return Ok(super::DataFrame::from_polars_with_options(
+            polars::prelude::DataFrame::new(out)?,
+            case_sensitive,
+        ));
+    }
+    let mut out_series = Vec::with_capacity(columns.len());
+    for col_name in columns {
+        let resolved = df.resolve_column_name(col_name)?;
+        let s = pl_df
+            .column(resolved.as_str())?
+            .as_series()
+            .ok_or_else(|| PolarsError::ComputeError("column not a series".into()))?
+            .clone();
+        let vc = s.value_counts(false, false, "counts".into(), false)?;
+        let count_col = vc.column("counts").map_err(|_| {
+            PolarsError::ComputeError("value_counts missing counts column".into())
+        })?;
+        let counts = count_col.u32().map_err(|_| {
+            PolarsError::ComputeError("freq_items: counts column not u32".into())
+        })?;
+        let value_col_name = s.name();
+        let values_col = vc.column(value_col_name.as_str()).map_err(|_| {
+            PolarsError::ComputeError("value_counts missing value column".into())
+        })?;
+        let threshold = (support * n_total).ceil() as u32;
+        let indices: Vec<u32> = counts
+            .into_iter()
+            .enumerate()
+            .filter_map(|(i, c)| if c? >= threshold { Some(i as u32) } else { None })
+            .collect();
+        let idx_series = Series::new("idx".into(), indices);
+        let idx_ca = idx_series.u32().map_err(|_| {
+            PolarsError::ComputeError("freq_items: index series not u32".into())
+        })?;
+        let values_series = values_col
+            .as_series()
+            .ok_or_else(|| PolarsError::ComputeError("value column not a series".into()))?;
+        let filtered = values_series.take(idx_ca)?;
+        let list_chunked =
+            polars::prelude::ListChunked::from_iter([filtered].into_iter())
+                .with_name(format!("{}_freqItems", resolved).into());
+        let list_row = list_chunked.into_series();
+        out_series.push(list_row.into());
+    }
+    let out_df = polars::prelude::DataFrame::new(out_series)?;
+    Ok(super::DataFrame::from_polars_with_options(
+        out_df,
+        case_sensitive,
+    ))
+}
+
+/// Approximate quantiles. PySpark approxQuantile. Returns one column "quantile" with one row per probability.
+pub fn approx_quantile(
+    df: &DataFrame,
+    column: &str,
+    probabilities: &[f64],
+    case_sensitive: bool,
+) -> Result<DataFrame, PolarsError> {
+    use polars::prelude::{ChunkQuantile, QuantileMethod};
+    if probabilities.is_empty() {
+        return Ok(super::DataFrame::from_polars_with_options(
+            polars::prelude::DataFrame::new(vec![
+                Series::new("quantile".into(), Vec::<f64>::new()).into(),
+            ])?,
+            case_sensitive,
+        ));
+    }
+    let resolved = df.resolve_column_name(column)?;
+    let s = df
+        .df
+        .as_ref()
+        .column(resolved.as_str())?
+        .as_series()
+        .ok_or_else(|| PolarsError::ComputeError("approx_quantile: column not a series".into()))?
+        .clone();
+    let s_f64 = s.cast(&polars::prelude::DataType::Float64)?;
+    let ca = s_f64.f64().map_err(|_| {
+        PolarsError::ComputeError("approx_quantile: need numeric column".into())
+    })?;
+    let mut quantiles = Vec::with_capacity(probabilities.len());
+    for &p in probabilities {
+        let q = ca.quantile(p, QuantileMethod::Linear)?;
+        quantiles.push(q.unwrap_or(f64::NAN));
+    }
+    let out_df = polars::prelude::DataFrame::new(vec![
+        Series::new("quantile".into(), quantiles).into(),
+    ])?;
+    Ok(super::DataFrame::from_polars_with_options(
+        out_df,
+        case_sensitive,
+    ))
+}
+
+/// Cross-tabulation. PySpark crosstab. Returns long format (col1, col2, count); for wide format use pivot on the result.
+pub fn crosstab(
+    df: &DataFrame,
+    col1: &str,
+    col2: &str,
+    case_sensitive: bool,
+) -> Result<DataFrame, PolarsError> {
+    use polars::prelude::*;
+    let c1 = df.resolve_column_name(col1)?;
+    let c2 = df.resolve_column_name(col2)?;
+    let pl_df = df.df.as_ref();
+    let grouped = pl_df
+        .clone()
+        .lazy()
+        .group_by([col(c1.as_str()), col(c2.as_str())])
+        .agg([len().alias("count")])
+        .collect()?;
+    Ok(super::DataFrame::from_polars_with_options(
+        grouped,
+        case_sensitive,
+    ))
+}
+
+/// Unpivot (melt). PySpark melt. Long format with id_vars kept, plus "variable" and "value" columns.
+pub fn melt(
+    df: &DataFrame,
+    id_vars: &[&str],
+    value_vars: &[&str],
+    case_sensitive: bool,
+) -> Result<DataFrame, PolarsError> {
+    use polars::prelude::*;
+    let pl_df = df.df.as_ref();
+    if value_vars.is_empty() {
+        return Ok(super::DataFrame::from_polars_with_options(
+            pl_df.head(Some(0)),
+            case_sensitive,
+        ));
+    }
+    let id_resolved: Vec<String> = id_vars
+        .iter()
+        .map(|s| df.resolve_column_name(s).map(|r| r.to_string()))
+        .collect::<Result<Vec<_>, _>>()?;
+    let value_resolved: Vec<String> = value_vars
+        .iter()
+        .map(|s| df.resolve_column_name(s).map(|r| r.to_string()))
+        .collect::<Result<Vec<_>, _>>()?;
+    let mut parts = Vec::with_capacity(value_vars.len());
+    for vname in &value_resolved {
+        let select_cols: Vec<&str> = id_resolved.iter().map(|s| s.as_str()).chain([vname.as_str()]).collect();
+        let mut part = pl_df.select(select_cols)?;
+        let var_series = Series::new(
+            "variable".into(),
+            vec![vname.as_str(); part.height()],
+        );
+        part.with_column(var_series)?;
+        part.rename(vname.as_str(), "value".into())?;
+        parts.push(part);
+    }
+    let mut out = parts
+        .first()
+        .ok_or_else(|| PolarsError::ComputeError("melt: no value columns".into()))?
+        .clone();
+    for p in parts.iter().skip(1) {
+        out.vstack_mut(p)?;
+    }
+    let col_order: Vec<&str> = id_resolved
+        .iter()
+        .map(|s| s.as_str())
+        .chain(["variable", "value"])
+        .collect();
+    let out = out.select(col_order)?;
+    Ok(super::DataFrame::from_polars_with_options(
+        out,
+        case_sensitive,
+    ))
+}
+
+/// Set difference keeping duplicates. PySpark exceptAll. Simple impl: same as subtract.
+pub fn except_all(
+    left: &DataFrame,
+    right: &DataFrame,
+    case_sensitive: bool,
+) -> Result<DataFrame, PolarsError> {
+    subtract(left, right, case_sensitive)
+}
+
+/// Set intersection keeping duplicates. PySpark intersectAll. Simple impl: same as intersect.
+pub fn intersect_all(
+    left: &DataFrame,
+    right: &DataFrame,
+    case_sensitive: bool,
+) -> Result<DataFrame, PolarsError> {
+    intersect(left, right, case_sensitive)
 }

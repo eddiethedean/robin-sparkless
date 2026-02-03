@@ -16,6 +16,8 @@ fn robin_sparkless(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PySparkSession>()?;
     m.add_class::<PySparkSessionBuilder>()?;
     m.add_class::<PyDataFrame>()?;
+    m.add_class::<PyDataFrameStat>()?;
+    m.add_class::<PyDataFrameNa>()?;
     m.add_class::<PyColumn>()?;
     m.add_class::<PyWhenBuilder>()?;
     m.add_class::<PyThenBuilder>()?;
@@ -681,6 +683,276 @@ impl PyDataFrame {
         let df = self
             .inner
             .with_column_renamed(old, new)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        Ok(PyDataFrame { inner: df })
+    }
+
+    // Phase 12: sample, first, head, tail, take, is_empty, to_json, explain, print_schema, checkpoint, repartition, coalesce, offset
+    #[pyo3(signature = (with_replacement=false, fraction=1.0, seed=None))]
+    fn sample(
+        &self,
+        with_replacement: bool,
+        fraction: f64,
+        seed: Option<u64>,
+    ) -> PyResult<PyDataFrame> {
+        let df = self
+            .inner
+            .sample(with_replacement, fraction, seed)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        Ok(PyDataFrame { inner: df })
+    }
+
+    fn first(&self) -> PyResult<PyDataFrame> {
+        let df = self
+            .inner
+            .first()
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        Ok(PyDataFrame { inner: df })
+    }
+
+    fn head(&self, n: usize) -> PyResult<PyDataFrame> {
+        let df = self
+            .inner
+            .head(n)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        Ok(PyDataFrame { inner: df })
+    }
+
+    fn tail(&self, n: usize) -> PyResult<PyDataFrame> {
+        let df = self
+            .inner
+            .tail(n)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        Ok(PyDataFrame { inner: df })
+    }
+
+    fn take(&self, n: usize) -> PyResult<PyDataFrame> {
+        self.head(n)
+    }
+
+    fn is_empty(&self) -> PyResult<bool> {
+        Ok(self.inner.is_empty())
+    }
+
+    fn to_json(&self) -> PyResult<Vec<String>> {
+        self.inner
+            .to_json()
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
+    }
+
+    fn explain(&self) -> PyResult<String> {
+        Ok(self.inner.explain())
+    }
+
+    fn print_schema(&self) -> PyResult<String> {
+        self.inner
+            .print_schema()
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
+    }
+
+    fn checkpoint(&self) -> PyResult<PyDataFrame> {
+        let df = self
+            .inner
+            .checkpoint()
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        Ok(PyDataFrame { inner: df })
+    }
+
+    fn local_checkpoint(&self) -> PyResult<PyDataFrame> {
+        let df = self
+            .inner
+            .local_checkpoint()
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        Ok(PyDataFrame { inner: df })
+    }
+
+    fn repartition(&self, num_partitions: usize) -> PyResult<PyDataFrame> {
+        let df = self
+            .inner
+            .repartition(num_partitions)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        Ok(PyDataFrame { inner: df })
+    }
+
+    fn coalesce(&self, num_partitions: usize) -> PyResult<PyDataFrame> {
+        let df = self
+            .inner
+            .coalesce(num_partitions)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        Ok(PyDataFrame { inner: df })
+    }
+
+    fn offset(&self, n: usize) -> PyResult<PyDataFrame> {
+        let df = self
+            .inner
+            .offset(n)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        Ok(PyDataFrame { inner: df })
+    }
+
+    fn random_split(&self, weights: Vec<f64>, seed: Option<u64>) -> PyResult<Vec<PyDataFrame>> {
+        let dfs = self
+            .inner
+            .random_split(&weights, seed)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        Ok(dfs.into_iter().map(|df| PyDataFrame { inner: df }).collect())
+    }
+
+    fn summary(&self) -> PyResult<PyDataFrame> {
+        let df = self
+            .inner
+            .summary()
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        Ok(PyDataFrame { inner: df })
+    }
+
+    fn to_df(&self, names: Vec<String>) -> PyResult<PyDataFrame> {
+        let refs: Vec<&str> = names.iter().map(|s| s.as_str()).collect();
+        let df = self
+            .inner
+            .to_df(refs)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        Ok(PyDataFrame { inner: df })
+    }
+
+    fn select_expr(&self, exprs: Vec<String>) -> PyResult<PyDataFrame> {
+        let df = self
+            .inner
+            .select_expr(&exprs)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        Ok(PyDataFrame { inner: df })
+    }
+
+    fn col_regex(&self, pattern: &str) -> PyResult<PyDataFrame> {
+        let df = self
+            .inner
+            .col_regex(pattern)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        Ok(PyDataFrame { inner: df })
+    }
+
+    fn with_columns(&self, mapping: &Bound<'_, pyo3::types::PyAny>) -> PyResult<PyDataFrame> {
+        let mut exprs: Vec<(String, Expr)> = Vec::new();
+        if let Ok(dict) = mapping.downcast::<PyDict>() {
+            for (k, v) in dict.iter() {
+                let name: String = k.extract()?;
+                let col: PyRef<PyColumn> = v.extract()?;
+                exprs.push((name, col.inner.expr().clone()));
+            }
+        } else if let Ok(list) = mapping.downcast::<pyo3::types::PyList>() {
+            for item in list.iter() {
+                let tuple: (String, PyRef<PyColumn>) = item.extract()?;
+                exprs.push((tuple.0, tuple.1.inner.expr().clone()));
+            }
+        } else {
+            return Err(pyo3::exceptions::PyTypeError::new_err(
+                "with_columns expects dict[str, Column] or list[tuple[str, Column]]",
+            ));
+        }
+        let df = self
+            .inner
+            .with_columns(&exprs)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        Ok(PyDataFrame { inner: df })
+    }
+
+    fn with_columns_renamed(&self, mapping: &Bound<'_, pyo3::types::PyAny>) -> PyResult<PyDataFrame> {
+        let mut renames: Vec<(String, String)> = Vec::new();
+        if let Ok(dict) = mapping.downcast::<PyDict>() {
+            for (k, v) in dict.iter() {
+                let old_name: String = k.extract()?;
+                let new_name: String = v.extract()?;
+                renames.push((old_name, new_name));
+            }
+        } else if let Ok(list) = mapping.downcast::<pyo3::types::PyList>() {
+            for item in list.iter() {
+                let tuple: (String, String) = item.extract()?;
+                renames.push(tuple);
+            }
+        } else {
+            return Err(pyo3::exceptions::PyTypeError::new_err(
+                "with_columns_renamed expects dict[str, str] or list[tuple[str, str]]",
+            ));
+        }
+        let refs: Vec<(&str, &str)> = renames
+            .iter()
+            .map(|(a, b)| (a.as_str(), b.as_str()))
+            .collect();
+        let renames_ref: Vec<(String, String)> = renames;
+        let refs2: Vec<(String, String)> = renames_ref;
+        let df = self
+            .inner
+            .with_columns_renamed(
+                &refs2.iter().map(|(a, b)| (a.as_str(), b.as_str())).collect::<Vec<_>>(),
+            )
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        Ok(PyDataFrame { inner: df })
+    }
+
+    fn stat(&self) -> PyDataFrameStat {
+        PyDataFrameStat {
+            df: self.inner.clone(),
+        }
+    }
+
+    fn na(&self) -> PyDataFrameNa {
+        PyDataFrameNa {
+            df: self.inner.clone(),
+        }
+    }
+
+    fn to_pandas(&self, py: Python<'_>) -> PyResult<PyObject> {
+        self.collect(py)
+    }
+}
+
+/// Python wrapper for DataFrame.stat() (cov, corr).
+#[pyclass(name = "DataFrameStat")]
+struct PyDataFrameStat {
+    df: DataFrame,
+}
+
+#[pymethods]
+impl PyDataFrameStat {
+    fn cov(&self, col1: &str, col2: &str) -> PyResult<f64> {
+        self.df
+            .stat()
+            .cov(col1, col2)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
+    }
+
+    fn corr(&self, col1: &str, col2: &str) -> PyResult<f64> {
+        self.df
+            .stat()
+            .corr(col1, col2)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
+    }
+}
+
+/// Python wrapper for DataFrame.na() (fill, drop).
+#[pyclass(name = "DataFrameNa")]
+struct PyDataFrameNa {
+    df: DataFrame,
+}
+
+#[pymethods]
+impl PyDataFrameNa {
+    fn fill(&self, value: &PyColumn) -> PyResult<PyDataFrame> {
+        let df = self
+            .df
+            .na()
+            .fill(value.inner.expr().clone())
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        Ok(PyDataFrame { inner: df })
+    }
+
+    #[pyo3(signature = (subset=None))]
+    fn drop(&self, subset: Option<Vec<String>>) -> PyResult<PyDataFrame> {
+        let sub: Option<Vec<&str>> = subset.as_ref().map(|v| v.iter().map(|s| s.as_str()).collect());
+        let df = self
+            .df
+            .na()
+            .drop(sub)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
         Ok(PyDataFrame { inner: df })
     }

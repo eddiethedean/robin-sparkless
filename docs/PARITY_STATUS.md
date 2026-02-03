@@ -7,7 +7,7 @@ This doc is the **living parity matrix** for `robin-sparkless`.
 - **Fixtures**: `tests/fixtures/*.json`
 - **Sparkless integration**: Robin-sparkless is designed to replace Sparkless's backend. Sparkless has 270+ expected_outputs; a fixture converter can convert those to robin-sparkless format. See [SPARKLESS_INTEGRATION_ANALYSIS.md](SPARKLESS_INTEGRATION_ANALYSIS.md) §4.
 
-Status as of **February 2026**: **PASSING (80 fixtures)**. **Phase 11**: Parity harness supports date, timestamp, and boolean in fixture input; datetime fixtures `date_add_sub`, `datediff`, `datetime_hour_minute`; String 6.4 fixtures `string_soundex`, `string_levenshtein`, `string_crc32`, `string_xxhash64`. Window fixtures percent_rank, cume_dist, ntile, nth_value are covered (multi-step workaround in harness). Phase 6: array functions `array_position`, `array_remove`, `posexplode` are **implemented** (via Polars list.eval); array fixtures `array_contains`, `element_at`, `array_size`, `array_sum`; array extensions (exists, forall, filter, transform, array_sum, array_mean; **Phase 8**: array_flatten, array_repeat **implemented** via map UDFs). **Phase 8**: Map (create_map, map_keys, map_values, map_entries, map_from_arrays **implemented**; Map as List(Struct{key, value})). JSON (get_json_object, from_json, to_json implemented). CI runs format, clippy, audit, deny, and all tests (including parity). Python smoke tests in `tests/python/` (run via `make test` or `make test-python`); see [PYTHON_API.md](PYTHON_API.md).
+Status as of **February 2026**: **PASSING (80 fixtures)**. **Phase 12**: DataFrame methods implemented in Rust and exposed in Python: sample, random_split, first, head, tail, take, is_empty, to_json, to_pandas, explain, print_schema, checkpoint, repartition, coalesce, offset, summary, to_df, select_expr, col_regex, with_columns, with_columns_renamed, stat (cov/corr), na (fill/drop), freq_items, approx_quantile, crosstab, melt, except_all, intersect_all, sample_by, and Spark no-ops. Parity fixtures for first/head/offset: `first_row`, `head_n`, `offset_n`. **Phase 11**: Parity harness supports date, timestamp, and boolean in fixture input; datetime fixtures `date_add_sub`, `datediff`, `datetime_hour_minute`; String 6.4 fixtures `string_soundex`, `string_levenshtein`, `string_crc32`, `string_xxhash64`. Window fixtures percent_rank, cume_dist, ntile, nth_value are covered (multi-step workaround in harness). Phase 6: array functions `array_position`, `array_remove`, `posexplode` are **implemented** (via Polars list.eval); array fixtures `array_contains`, `element_at`, `array_size`, `array_sum`; array extensions (exists, forall, filter, transform, array_sum, array_mean; **Phase 8**: array_flatten, array_repeat **implemented** via map UDFs). **Phase 8**: Map (create_map, map_keys, map_values, map_entries, map_from_arrays **implemented**; Map as List(Struct{key, value})). JSON (get_json_object, from_json, to_json implemented). CI runs format, clippy, audit, deny, and all tests (including parity). Python smoke tests in `tests/python/` (run via `make test` or `make test-python`); see [PYTHON_API.md](PYTHON_API.md).
 
 ## Legend
 
@@ -77,6 +77,7 @@ Status as of **February 2026**: **PASSING (80 fixtures)**. **Phase 11**: Parity 
 | DataFrame | replace, crossJoin, describe, subtract, intersect | ✅ Covered | `replace`, `cross_join`, `describe`, `subtract`, `intersect` |
 | SQL | `SparkSession::sql()` (optional `sql` feature) | ✅ Implemented | No fixture (SQL translated to DataFrame ops; parity via DataFrame fixtures) |
 | Datetime | year, month, day, to_date, date_format; current_date, date_add, hour, etc. | ✅ Covered | `date_add_sub`, `datediff`, `datetime_hour_minute` |
+| DataFrame (Phase 12) | first, head, offset, sample, to_json, summary, stat, select_expr, freq_items, crosstab, melt, etc. (Rust + PyO3) | ✅ first/head/offset covered | `first_row`, `head_n`, `offset_n`; additional Phase 12 ops implemented, fixtures TBD |
 
 ## Fixture Index
 
@@ -153,6 +154,9 @@ Status as of **February 2026**: **PASSING (80 fixtures)**. **Phase 11**: Parity 
 | `replace` | replace(column, old_value, new_value) |
 | `subtract` | subtract (set difference) |
 | `intersect` | intersect (set intersection) |
+| `first_row` | first() – first row as one-row DataFrame |
+| `head_n` | head(n) – first n rows |
+| `offset_n` | offset(n) – skip first n rows |
 | `string_mask` | mask(col) – replace upper/lower/digit with X/x/n |
 | `string_translate` | translate(col, from_str, to_str) |
 | `string_substring_index` | substring_index(col, delim, count) before/after nth delim |
@@ -169,7 +173,7 @@ Status as of **February 2026**: **PASSING (80 fixtures)**. **Phase 11**: Parity 
 ## Next additions to the matrix (recommended)
 
 - Add more join edge-case fixtures (e.g. left/outer with null keys) if needed.
-- **ROADMAP Phases 12–16**: Path to 100% before Sparkless integration — Phase 12 (DataFrame methods → 85), Phase 13–15 (functions in three batches → 403, fixtures → 150+), Phase 16 (Sparkless integration, 200+ tests). See [ROADMAP.md](ROADMAP.md).
+- **ROADMAP Phases 13–17**: Path to 100% before Sparkless integration — Phase 12 completed (DataFrame methods ~55+); Phase 13–15 (functions in three batches → 403, fixtures → 150+), Phase 16 (prepare and publish Rust crate on crates.io), Phase 17 (Sparkless integration, 200+ tests). Optional: add parity fixtures for sample, random_split, summary, stat, to_json, to_df, select_expr, freq_items, crosstab, melt, except_all, intersect_all. See [ROADMAP.md](ROADMAP.md).
 
 ## Sparkless Test Conversion
 

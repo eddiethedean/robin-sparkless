@@ -75,12 +75,13 @@ Robin-sparkless is designed to **replace the backend logic** of [Sparkless](http
    - Optional **Delta Lake** (`delta` feature): `read_delta`, `read_delta_with_version` (time travel), `write_delta` (overwrite/append) via delta-rs.
    - **Performance**: `cargo bench` (criterion) compares robin-sparkless vs Polars; target within ~2x. Error messages improved; Troubleshooting in [QUICKSTART.md](QUICKSTART.md).
 
-10. **Path to 100% before Sparkless integration** ([ROADMAP.md](ROADMAP.md) Phases 12–16)
-   - **Phase 12**: DataFrame methods parity (remaining ~50–60 methods → 85 total).
+10. **Path to 100% before Sparkless integration** ([ROADMAP.md](ROADMAP.md) Phases 12–17)
+   - **Phase 12** ✅ **COMPLETED**: DataFrame methods parity — implemented sample, random_split, first, head, take, tail, is_empty, to_df, stat (cov/corr), summary, to_json, explain, print_schema, checkpoint, local_checkpoint, repartition, coalesce, select_expr, col_regex, with_columns, with_columns_renamed, na (fill/drop), to_pandas, offset, transform, except_all, intersect_all; **freq_items**, **approx_quantile**, **crosstab**, **melt** (full implementations in Rust); **sample_by** (stratified sampling); Spark no-ops (hint, is_local, input_files, same_semantics, semantic_hash, observe, with_watermark). Parity fixtures: first_row, head_n, offset_n. PyO3: all new DataFrame methods exposed including random_split, summary, to_df, select_expr, col_regex, with_columns, with_columns_renamed, stat(), na(), to_pandas; PyDataFrameStat (cov, corr) and PyDataFrameNa (fill, drop). See [PYTHON_API.md](PYTHON_API.md). Methods ~35 → ~55+.
    - **Phase 13–15**: Functions in three batches (string/binary/collection; math/datetime/type; remaining) → 403 functions; parity fixtures 80 → 150+.
-   - **Phase 16**: Sparkless integration (BackendFactory "robin", 200+ tests passing). See [FULL_BACKEND_ROADMAP.md](FULL_BACKEND_ROADMAP.md) § Path to 100%.
+   - **Phase 16**: Prepare and publish robin-sparkless as a Rust crate (crates.io, API stability, docs, release workflow; optional PyPI wheel). See [ROADMAP.md](ROADMAP.md) § Phase 16.
+   - **Phase 17**: Sparkless integration (BackendFactory "robin", 200+ tests passing). See [FULL_BACKEND_ROADMAP.md](FULL_BACKEND_ROADMAP.md) § Path to 100%.
 
-11. **Sparkless integration** (in Sparkless repo, after Phase 16)
+11. **Sparkless integration** (in Sparkless repo, after Phase 17)
    - Fixture converter: Sparkless `expected_outputs/` JSON → robin-sparkless fixtures
    - Structural alignment: service-style modules, trait-based backends, case sensitivity
    - Function parity: use [PYSPARK_FUNCTION_MATRIX](https://github.com/eddiethedean/sparkless/blob/main/PYSPARK_FUNCTION_MATRIX.md) as checklist

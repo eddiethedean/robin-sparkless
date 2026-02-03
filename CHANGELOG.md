@@ -86,8 +86,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **CI**: [.github/workflows/ci.yml](.github/workflows/ci.yml) runs format, clippy, audit, deny, and all tests (including `pyspark_parity_fixtures`); separate job for Python (PyO3) tests.
   - **Docs**: [TEST_CREATION_GUIDE.md](docs/TEST_CREATION_GUIDE.md) date/timestamp format; [SPARKLESS_PARITY_STATUS.md](docs/SPARKLESS_PARITY_STATUS.md) CI note; ROADMAP, FULL_BACKEND_ROADMAP, PARITY_STATUS updated.
 
+- **Phase 12 – DataFrame methods parity** ✅
+  - **Rust**: Implemented `freq_items`, `approx_quantile`, `crosstab`, `melt` (full implementations); `sample_by` (stratified sampling); Spark no-ops: `hint`, `is_local`, `input_files`, `same_semantics`, `semantic_hash`, `observe`, `with_watermark`. DataFrame methods count ~35 → ~55+.
+  - **PyO3**: Exposed `random_split`, `summary`, `to_df`, `select_expr`, `col_regex`, `with_columns`, `with_columns_renamed`, `stat()` (returns `DataFrameStat` with `cov`/`corr`), `na()` (returns `DataFrameNa` with `fill`/`drop`), `to_pandas` (same as collect; for use with `pandas.DataFrame.from_records`). Registered `PyDataFrameStat` and `PyDataFrameNa` in the module.
+  - **Parity**: Fixtures `first_row`, `head_n`, `offset_n` for first/head/offset operations.
+  - **Docs**: [PYTHON_API.md](docs/PYTHON_API.md), [PARITY_STATUS.md](docs/PARITY_STATUS.md), [IMPLEMENTATION_STATUS.md](docs/IMPLEMENTATION_STATUS.md), [ROADMAP.md](docs/ROADMAP.md), [FULL_BACKEND_ROADMAP.md](docs/FULL_BACKEND_ROADMAP.md), README, and docs index updated for Phase 12.
+
 ### Changed
 
+- **Phase 12**: DataFrame methods ~55+ (freq_items, approx_quantile, crosstab, melt, sample_by, no-ops); PyO3 stat/na/to_pandas, random_split, with_columns, etc.; parity fixtures first_row, head_n, offset_n; all docs and README updated.
 - **Phase 11**: Parity fixtures 73 → 80; harness date/datetime/boolean support; CI workflow; converter date/timestamp mapping; docs updated.
 - **Documentation**: README, ROADMAP, FULL_BACKEND_ROADMAP, MIGRATION_STATUS, COMPILATION_STATUS updated for Phase 8/10 completion; removed all "stubbed" references for array_repeat, array_flatten, Map, and string 6.4 (soundex, levenshtein, crc32, xxhash64).
 - **Phase 8**: All four previously stubbed areas are now implemented: array_repeat, array_flatten, map functions (create_map, map_keys, map_values, map_entries, map_from_arrays), and string 6.4 (soundex, levenshtein, crc32, xxhash64). PYSPARK_DIFFERENCES no longer lists these as stubbed.

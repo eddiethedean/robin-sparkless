@@ -134,7 +134,7 @@ We know we're on track if:
 |--------|---------|---------|--------------|
 | Parity fixtures | 80 | 80+ | 150+ |
 | Functions | ~120+ | ~120 | 403 |
-| DataFrame methods | ~35 | 85 | 85 |
+| DataFrame methods | ~55+ | 85 | 85 |
 | Sparkless tests passing (robin backend) | 0 | 50+ | 200+ |
 | PyO3 bridge | ✅ Yes (optional) | Yes | Yes |
 
@@ -194,10 +194,11 @@ We know we're on track if:
   - `math_sqrt_pow`: sqrt, pow
   - `groupby_first_last`: first, last aggregates
   - `cross_join`, `describe`, `replace`, `subtract`, `intersect`: DataFrame methods
+  - **Phase 12**: `first_row`, `head_n`, `offset_n`: first/head/offset DataFrame methods
 
 ## Next Steps to Full Sparkless Parity
 
-To reach **full Sparkless parity** (robin-sparkless as a complete backend replacement), the remaining work is organized into phases 12–16 below (phases 9–11 complete). Reference: [FULL_BACKEND_ROADMAP.md](FULL_BACKEND_ROADMAP.md), [PYSPARK_FUNCTION_MATRIX](https://github.com/eddiethedean/sparkless/blob/main/PYSPARK_FUNCTION_MATRIX.md).
+To reach **full Sparkless parity** (robin-sparkless as a complete backend replacement), the remaining work is organized into phases 12–17 below (phases 9–11 complete). Reference: [FULL_BACKEND_ROADMAP.md](FULL_BACKEND_ROADMAP.md), [PYSPARK_FUNCTION_MATRIX](https://github.com/eddiethedean/sparkless/blob/main/PYSPARK_FUNCTION_MATRIX.md).
 
 ### Phase overview
 
@@ -206,11 +207,12 @@ To reach **full Sparkless parity** (robin-sparkless as a complete backend replac
 | **9** | High-value functions + DataFrame methods | 4–6 weeks |
 | **10** | Complex types (Map, JSON, array_repeat, string 6.4) + window fixture simplification | ✅ **COMPLETED** |
 | **11** | Parity scale (80+ fixtures), harness date/datetime, converter + CI | ✅ **COMPLETED** |
-| **12** | DataFrame methods parity (~50–60 remaining → 85 total) | 4–6 weeks |
+| **12** | DataFrame methods parity (~55+ methods; freq_items, approx_quantile, crosstab, melt, sample_by, no-ops; PyO3 stat/na/to_pandas) | ✅ **COMPLETED** |
 | **13** | Functions batch 1: string, binary, collection (~80 new → ~200 total) | 4–6 weeks |
 | **14** | Functions batch 2: math, datetime, type/conditional (~100 new → ~300 total) | 4–6 weeks |
 | **15** | Functions batch 3: remaining functions + fixture growth (80 → 150+ fixtures, 403 functions) | 6–8 weeks |
-| **16** | Sparkless integration (BackendFactory "robin", 200+ tests), PyO3 surface | 4–6 weeks |
+| **16** | Prepare and publish robin-sparkless as a Rust crate (crates.io, API stability, docs, release) | 2–3 weeks |
+| **17** | Sparkless integration (BackendFactory "robin", 200+ tests), PyO3 surface | 4–6 weeks |
 
 ---
 
@@ -258,13 +260,14 @@ To reach **full Sparkless parity** (robin-sparkless as a complete backend replac
 
 ---
 
-### Phase 12 – DataFrame methods parity (4–6 weeks)
+### Phase 12 – DataFrame methods parity (4–6 weeks) ✅ **COMPLETED**
 
 **Goal**: Implement the remaining ~50–60 DataFrame methods so robin-sparkless reaches the 85-method target before integration.
 
-- **Methods**: Complete methods from [PYSPARK_FUNCTION_MATRIX](https://github.com/eddiethedean/sparkless/blob/main/PYSPARK_FUNCTION_MATRIX.md) DataFrame section: e.g. `sample`, `randomSplit`, `stat` (cov, corr), `summary`, `toPandas`/collect variants, `write`/`saveAsTable`, `checkpoint`, `localCheckpoint`, `toJSON`, `toDF`, column reordering, `na` sub-API, etc.
-- **Parity**: Add fixtures for any new methods that affect schema or row output.
-- **Outcome**: DataFrame methods ~35 → 85; ready for function batches.
+- **Implemented**: `sample`, `random_split`, `first`, `head`, `take`, `tail`, `is_empty`, `to_df`, `stat()` (cov, corr), `summary` (alias describe), `to_json`, `explain`, `print_schema`, `checkpoint`, `local_checkpoint`, `repartition`, `coalesce`, `select_expr`, `col_regex`, `with_columns`, `with_columns_renamed`, `na()` (fill, drop), `to_pandas`, `offset`, `transform`, `freq_items`, `approx_quantile`, `crosstab`, `melt`, `except_all`, `intersect_all`, `sample_by` (stratified sampling); Spark no-ops: `hint`, `is_local`, `input_files`, `same_semantics`, `semantic_hash`, `observe`, `with_watermark`.
+- **Parity**: Fixtures `first_row.json`, `head_n.json`, `offset_n.json` for first/head/offset.
+- **PyO3**: All of the above exposed on Python DataFrame where applicable; `random_split`, `summary`, `to_df`, `select_expr`, `col_regex`, `with_columns`, `with_columns_renamed`, `stat()` (returns `DataFrameStat` with cov/corr), `na()` (returns `DataFrameNa` with fill/drop), `to_pandas` (same as collect; for use with `pandas.DataFrame.from_records`).
+- **Outcome**: DataFrame methods ~35 → ~55+; ready for function batches (Phase 13).
 
 ---
 
@@ -299,15 +302,29 @@ To reach **full Sparkless parity** (robin-sparkless as a complete backend replac
 - **Functions**: Implement remaining ~103 functions from PYSPARK_FUNCTION_MATRIX (misc, ML helpers, struct/UDT, etc.) to hit 403.
 - **Fixtures**: Expand from 80 to 150+ parity fixtures; convert more Sparkless expected_outputs via `convert_sparkless_fixtures.py` and add hand-crafted fixtures for critical paths.
 - **Harness**: Extend for any new types or operations (e.g. struct columns, binary in fixtures if not already).
-- **Outcome**: 403 functions; 150+ parity fixtures; ready for Sparkless integration.
+- **Outcome**: 403 functions; 150+ parity fixtures; ready for crate publish (Phase 16).
 
 ---
 
-### Phase 16 – Sparkless integration & PyO3 surface (4–6 weeks)
+### Phase 16 – Prepare and publish robin-sparkless as a Rust crate (2–3 weeks)
+
+**Goal**: Make the library ready for public use as a Rust dependency and (optionally) a Python wheel before Sparkless integration.
+
+- **Crate metadata**: Finalize `Cargo.toml` (description, license, repository, keywords, categories); ensure semver and version are release-ready.
+- **API surface**: Review public API for stability; document breaking-change policy (e.g. semver for 0.x); consider `#[deprecated]` or feature flags for experimental APIs.
+- **Documentation**: `cargo doc` builds cleanly; add or expand crate-level and module docs; link from README to docs.rs (or hosted docs).
+- **Release workflow**: Tag releases; publish to [crates.io](https://crates.io) (`cargo publish`); optionally publish Python wheels to PyPI via maturin (e.g. `maturin publish --features pyo3`).
+- **CI**: Ensure CI runs full check (format, clippy, audit, deny, tests, benchmarks) on release branches/tags; document how to cut a release in CONTRIBUTING or README.
+
+**Outcome**: `robin-sparkless` is published on crates.io; consumers can add it as a dependency; optional PyPI wheel for Python users; clear release and versioning process.
+
+---
+
+### Phase 17 – Sparkless integration & PyO3 surface (4–6 weeks)
 
 **Goal**: Make robin-sparkless a runnable backend for Sparkless and keep the Python API in sync.
 
-- **Sparkless repo**: Add "robin" backend option to BackendFactory; when selected, delegate DataFrame execution to robin-sparkless via PyO3.
+- **Sparkless repo**: Add "robin" backend option to BackendFactory; when selected, delegate DataFrame execution to robin-sparkless via PyO3 (using the published crate or wheel from Phase 16).
 - **Fallback**: When an operation is not supported, raise a clear error or fall back to Python Polars; document behavior.
 - **Target**: 200+ Sparkless tests passing with robin backend (current: 0).
 - **PyO3**: Expose new Rust functions (Phases 12–15) on Python `Column` and module-level API; keep [PYTHON_API.md](PYTHON_API.md) updated.
@@ -327,12 +344,13 @@ To reach **full Sparkless parity** (robin-sparkless as a complete backend replac
 
 ### Summary metrics (full parity targets)
 
-| Metric | Current | After Phase 11 | After Phase 15 | Full Backend (Phase 16) |
-|--------|---------|----------------|----------------|-------------------------|
-| Parity fixtures | 80 | 80 | 150+ | 150+ |
-| Functions | ~120+ | ~120 | 403 | 403 |
-| DataFrame methods | ~35 | ~35 | 85 | 85 |
-| Sparkless tests passing (robin backend) | 0 | — | — | 200+ |
+| Metric | Current | After Phase 11 | After Phase 15 | After Phase 16 (crate published) | Full Backend (Phase 17) |
+|--------|---------|----------------|----------------|----------------------------------|-------------------------|
+| Parity fixtures | 80 | 80 | 150+ | 150+ | 150+ |
+| Functions | ~120+ | ~120 | 403 | 403 | 403 |
+| DataFrame methods | ~55+ | ~35 | 85 | 85 | 85 |
+| Crate on crates.io | No | — | — | Yes | Yes |
+| Sparkless tests passing (robin backend) | 0 | — | — | — | 200+ |
 
 ## Testing Strategy
 
