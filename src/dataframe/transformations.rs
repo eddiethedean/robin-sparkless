@@ -414,14 +414,11 @@ pub fn sample(
             case_sensitive,
         ));
     }
-    let idx_series = Series::new(
-        "idx".into(),
-        (0..n).map(|i| i as u32).collect::<Vec<_>>(),
-    );
+    let idx_series = Series::new("idx".into(), (0..n).map(|i| i as u32).collect::<Vec<_>>());
     let sampled_idx = idx_series.sample_n(take_n, with_replacement, true, seed)?;
-    let idx_ca = sampled_idx.u32().map_err(|_| {
-        PolarsError::ComputeError("sample: expected u32 indices".into())
-    })?;
+    let idx_ca = sampled_idx
+        .u32()
+        .map_err(|_| PolarsError::ComputeError("sample: expected u32 indices".into()))?;
     let pl_df = df.df.as_ref().take(idx_ca)?;
     Ok(super::DataFrame::from_polars_with_options(
         pl_df,
@@ -459,14 +456,11 @@ pub fn random_split(
             continue;
         }
         use polars::prelude::Series;
-        let idx_series = Series::new(
-            "idx".into(),
-            (0..n).map(|i| i as u32).collect::<Vec<_>>(),
-        );
+        let idx_series = Series::new("idx".into(), (0..n).map(|i| i as u32).collect::<Vec<_>>());
         let sampled_idx = idx_series.sample_n(take_n, false, true, seed)?;
-        let idx_ca = sampled_idx.u32().map_err(|_| {
-            PolarsError::ComputeError("random_split: expected u32 indices".into())
-        })?;
+        let idx_ca = sampled_idx
+            .u32()
+            .map_err(|_| PolarsError::ComputeError("random_split: expected u32 indices".into()))?;
         let sampled = df.df.as_ref().take(idx_ca)?;
         start += take_n;
         out.push(super::DataFrame::from_polars_with_options(
@@ -598,7 +592,9 @@ fn any_value_to_serde_value(av: &polars::prelude::AnyValue) -> serde_json::Value
         AnyValue::Int32(v) => serde_json::Value::Number(Number::from(*v)),
         AnyValue::Int64(v) => serde_json::Value::Number(Number::from(*v)),
         AnyValue::UInt32(v) => serde_json::Value::Number(Number::from(*v)),
-        AnyValue::Float64(v) => Number::from_f64(*v).map(serde_json::Value::Number).unwrap_or(serde_json::Value::Null),
+        AnyValue::Float64(v) => Number::from_f64(*v)
+            .map(serde_json::Value::Number)
+            .unwrap_or(serde_json::Value::Null),
         AnyValue::String(v) => serde_json::Value::String(v.to_string()),
         _ => serde_json::Value::String(format!("{:?}", av)),
     }
@@ -613,14 +609,20 @@ pub fn to_json(df: &DataFrame) -> Result<Vec<String>, PolarsError> {
     for r in 0..pl.height() {
         let mut row = serde_json::Map::new();
         for (i, name) in names.iter().enumerate() {
-            let col = pl.get_columns().get(i).ok_or_else(|| {
-                PolarsError::ComputeError("to_json: column index".into())
-            })?;
+            let col = pl
+                .get_columns()
+                .get(i)
+                .ok_or_else(|| PolarsError::ComputeError("to_json: column index".into()))?;
             let series = col.as_materialized_series();
-            let av = series.get(r).map_err(|e| PolarsError::ComputeError(e.to_string().into()))?;
+            let av = series
+                .get(r)
+                .map_err(|e| PolarsError::ComputeError(e.to_string().into()))?;
             row.insert(name.to_string(), any_value_to_serde_value(&av));
         }
-        out.push(serde_json::to_string(&row).map_err(|e| PolarsError::ComputeError(e.to_string().into()))?);
+        out.push(
+            serde_json::to_string(&row)
+                .map_err(|e| PolarsError::ComputeError(e.to_string().into()))?,
+        );
     }
     Ok(out)
 }
@@ -751,11 +753,7 @@ impl<'a> DataFrameNa<'a> {
 // ---------- Batch E: offset, transform, freqItems, approxQuantile, crosstab, melt, exceptAll, intersectAll ----------
 
 /// Skip first n rows. PySpark offset(n).
-pub fn offset(
-    df: &DataFrame,
-    n: usize,
-    case_sensitive: bool,
-) -> Result<DataFrame, PolarsError> {
+pub fn offset(df: &DataFrame, n: usize, case_sensitive: bool) -> Result<DataFrame, PolarsError> {
     let total = df.df.height();
     let len = total.saturating_sub(n);
     let pl_df = df.df.as_ref().clone().slice(n as i64, len);
@@ -801,9 +799,8 @@ pub fn freq_items(
                 .ok_or_else(|| PolarsError::ComputeError("column not a series".into()))?
                 .clone();
             let empty_sub = s.head(Some(0));
-            let list_chunked =
-                polars::prelude::ListChunked::from_iter([empty_sub].into_iter())
-                    .with_name(format!("{}_freqItems", resolved).into());
+            let list_chunked = polars::prelude::ListChunked::from_iter([empty_sub].into_iter())
+                .with_name(format!("{}_freqItems", resolved).into());
             out.push(list_chunked.into_series().into());
         }
         return Ok(super::DataFrame::from_polars_with_options(
@@ -820,33 +817,38 @@ pub fn freq_items(
             .ok_or_else(|| PolarsError::ComputeError("column not a series".into()))?
             .clone();
         let vc = s.value_counts(false, false, "counts".into(), false)?;
-        let count_col = vc.column("counts").map_err(|_| {
-            PolarsError::ComputeError("value_counts missing counts column".into())
-        })?;
-        let counts = count_col.u32().map_err(|_| {
-            PolarsError::ComputeError("freq_items: counts column not u32".into())
-        })?;
+        let count_col = vc
+            .column("counts")
+            .map_err(|_| PolarsError::ComputeError("value_counts missing counts column".into()))?;
+        let counts = count_col
+            .u32()
+            .map_err(|_| PolarsError::ComputeError("freq_items: counts column not u32".into()))?;
         let value_col_name = s.name();
-        let values_col = vc.column(value_col_name.as_str()).map_err(|_| {
-            PolarsError::ComputeError("value_counts missing value column".into())
-        })?;
+        let values_col = vc
+            .column(value_col_name.as_str())
+            .map_err(|_| PolarsError::ComputeError("value_counts missing value column".into()))?;
         let threshold = (support * n_total).ceil() as u32;
         let indices: Vec<u32> = counts
             .into_iter()
             .enumerate()
-            .filter_map(|(i, c)| if c? >= threshold { Some(i as u32) } else { None })
+            .filter_map(|(i, c)| {
+                if c? >= threshold {
+                    Some(i as u32)
+                } else {
+                    None
+                }
+            })
             .collect();
         let idx_series = Series::new("idx".into(), indices);
-        let idx_ca = idx_series.u32().map_err(|_| {
-            PolarsError::ComputeError("freq_items: index series not u32".into())
-        })?;
+        let idx_ca = idx_series
+            .u32()
+            .map_err(|_| PolarsError::ComputeError("freq_items: index series not u32".into()))?;
         let values_series = values_col
             .as_series()
             .ok_or_else(|| PolarsError::ComputeError("value column not a series".into()))?;
         let filtered = values_series.take(idx_ca)?;
-        let list_chunked =
-            polars::prelude::ListChunked::from_iter([filtered].into_iter())
-                .with_name(format!("{}_freqItems", resolved).into());
+        let list_chunked = polars::prelude::ListChunked::from_iter([filtered].into_iter())
+            .with_name(format!("{}_freqItems", resolved).into());
         let list_row = list_chunked.into_series();
         out_series.push(list_row.into());
     }
@@ -867,9 +869,11 @@ pub fn approx_quantile(
     use polars::prelude::{ChunkQuantile, QuantileMethod};
     if probabilities.is_empty() {
         return Ok(super::DataFrame::from_polars_with_options(
-            polars::prelude::DataFrame::new(vec![
-                Series::new("quantile".into(), Vec::<f64>::new()).into(),
-            ])?,
+            polars::prelude::DataFrame::new(vec![Series::new(
+                "quantile".into(),
+                Vec::<f64>::new(),
+            )
+            .into()])?,
             case_sensitive,
         ));
     }
@@ -882,17 +886,16 @@ pub fn approx_quantile(
         .ok_or_else(|| PolarsError::ComputeError("approx_quantile: column not a series".into()))?
         .clone();
     let s_f64 = s.cast(&polars::prelude::DataType::Float64)?;
-    let ca = s_f64.f64().map_err(|_| {
-        PolarsError::ComputeError("approx_quantile: need numeric column".into())
-    })?;
+    let ca = s_f64
+        .f64()
+        .map_err(|_| PolarsError::ComputeError("approx_quantile: need numeric column".into()))?;
     let mut quantiles = Vec::with_capacity(probabilities.len());
     for &p in probabilities {
         let q = ca.quantile(p, QuantileMethod::Linear)?;
         quantiles.push(q.unwrap_or(f64::NAN));
     }
-    let out_df = polars::prelude::DataFrame::new(vec![
-        Series::new("quantile".into(), quantiles).into(),
-    ])?;
+    let out_df =
+        polars::prelude::DataFrame::new(vec![Series::new("quantile".into(), quantiles).into()])?;
     Ok(super::DataFrame::from_polars_with_options(
         out_df,
         case_sensitive,
@@ -947,12 +950,13 @@ pub fn melt(
         .collect::<Result<Vec<_>, _>>()?;
     let mut parts = Vec::with_capacity(value_vars.len());
     for vname in &value_resolved {
-        let select_cols: Vec<&str> = id_resolved.iter().map(|s| s.as_str()).chain([vname.as_str()]).collect();
+        let select_cols: Vec<&str> = id_resolved
+            .iter()
+            .map(|s| s.as_str())
+            .chain([vname.as_str()])
+            .collect();
         let mut part = pl_df.select(select_cols)?;
-        let var_series = Series::new(
-            "variable".into(),
-            vec![vname.as_str(); part.height()],
-        );
+        let var_series = Series::new("variable".into(), vec![vname.as_str(); part.height()]);
         part.with_column(var_series)?;
         part.rename(vname.as_str(), "value".into())?;
         parts.push(part);

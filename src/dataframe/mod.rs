@@ -8,9 +8,7 @@ mod transformations;
 pub use aggregations::GroupedData;
 pub use joins::{join, JoinType};
 pub use stats::DataFrameStat;
-pub use transformations::{
-    filter, order_by, select, with_column, DataFrameNa,
-};
+pub use transformations::{filter, order_by, select, with_column, DataFrameNa};
 
 use crate::column::Column;
 use crate::schema::StructType;
@@ -422,16 +420,16 @@ impl DataFrame {
     }
 
     /// No-op. PySpark observe (metrics).
-    pub fn observe(
-        &self,
-        _name: &str,
-        _expr: Expr,
-    ) -> Result<DataFrame, PolarsError> {
+    pub fn observe(&self, _name: &str, _expr: Expr) -> Result<DataFrame, PolarsError> {
         Ok(self.clone())
     }
 
     /// No-op. PySpark withWatermark (streaming).
-    pub fn with_watermark(&self, _event_time: &str, _delay: &str) -> Result<DataFrame, PolarsError> {
+    pub fn with_watermark(
+        &self,
+        _event_time: &str,
+        _delay: &str,
+    ) -> Result<DataFrame, PolarsError> {
         Ok(self.clone())
     }
 
@@ -453,7 +451,10 @@ impl DataFrame {
     }
 
     /// Rename multiple columns. PySpark withColumnsRenamed.
-    pub fn with_columns_renamed(&self, renames: &[(String, String)]) -> Result<DataFrame, PolarsError> {
+    pub fn with_columns_renamed(
+        &self,
+        renames: &[(String, String)],
+    ) -> Result<DataFrame, PolarsError> {
         transformations::with_columns_renamed(self, renames, self.case_sensitive)
     }
 
@@ -497,11 +498,7 @@ impl DataFrame {
     }
 
     /// Unpivot (melt). PySpark melt (stub).
-    pub fn melt(
-        &self,
-        id_vars: &[&str],
-        value_vars: &[&str],
-    ) -> Result<DataFrame, PolarsError> {
+    pub fn melt(&self, id_vars: &[&str], value_vars: &[&str]) -> Result<DataFrame, PolarsError> {
         transformations::melt(self, id_vars, value_vars, self.case_sensitive)
     }
 

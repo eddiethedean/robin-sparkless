@@ -580,28 +580,28 @@ impl Column {
 
     /// Base64 encode string bytes (PySpark base64).
     pub fn base64(&self) -> Column {
-        let expr = self.expr().clone().map(
-            crate::udfs::apply_base64,
-            GetOutput::same_type(),
-        );
+        let expr = self
+            .expr()
+            .clone()
+            .map(crate::udfs::apply_base64, GetOutput::same_type());
         Self::from_expr(expr, None)
     }
 
     /// Base64 decode to string (PySpark unbase64). Invalid decode → null.
     pub fn unbase64(&self) -> Column {
-        let expr = self.expr().clone().map(
-            crate::udfs::apply_unbase64,
-            GetOutput::same_type(),
-        );
+        let expr = self
+            .expr()
+            .clone()
+            .map(crate::udfs::apply_unbase64, GetOutput::same_type());
         Self::from_expr(expr, None)
     }
 
     /// SHA1 hash of string bytes, return hex string (PySpark sha1).
     pub fn sha1(&self) -> Column {
-        let expr = self.expr().clone().map(
-            crate::udfs::apply_sha1,
-            GetOutput::same_type(),
-        );
+        let expr = self
+            .expr()
+            .clone()
+            .map(crate::udfs::apply_sha1, GetOutput::same_type());
         Self::from_expr(expr, None)
     }
 
@@ -616,10 +616,10 @@ impl Column {
 
     /// MD5 hash of string bytes, return hex string (PySpark md5).
     pub fn md5(&self) -> Column {
-        let expr = self.expr().clone().map(
-            crate::udfs::apply_md5,
-            GetOutput::same_type(),
-        );
+        let expr = self
+            .expr()
+            .clone()
+            .map(crate::udfs::apply_md5, GetOutput::same_type());
         Self::from_expr(expr, None)
     }
 
@@ -632,9 +632,17 @@ impl Column {
         let len_left = (pos - 1).max(0);
         let start_right = (pos - 1 + replace_len).max(0);
         let len_right = 1_000_000i64; // "rest of string"
-        let left = self.expr().clone().str().slice(lit(start_left), lit(len_left));
+        let left = self
+            .expr()
+            .clone()
+            .str()
+            .slice(lit(start_left), lit(len_left));
         let mid = lit(replace.to_string());
-        let right = self.expr().clone().str().slice(lit(start_right), lit(len_right));
+        let right = self
+            .expr()
+            .clone()
+            .str()
+            .slice(lit(start_right), lit(len_right));
         let exprs = [left, mid, right];
         let concat_expr = polars::prelude::concat_str(&exprs, "", false);
         Self::from_expr(concat_expr, None)

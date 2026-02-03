@@ -961,7 +961,10 @@ impl PyDataFrame {
             .inner
             .random_split(&weights, seed)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(dfs.into_iter().map(|df| PyDataFrame { inner: df }).collect())
+        Ok(dfs
+            .into_iter()
+            .map(|df| PyDataFrame { inner: df })
+            .collect())
     }
 
     fn summary(&self) -> PyResult<PyDataFrame> {
@@ -1022,7 +1025,10 @@ impl PyDataFrame {
         Ok(PyDataFrame { inner: df })
     }
 
-    fn with_columns_renamed(&self, mapping: &Bound<'_, pyo3::types::PyAny>) -> PyResult<PyDataFrame> {
+    fn with_columns_renamed(
+        &self,
+        mapping: &Bound<'_, pyo3::types::PyAny>,
+    ) -> PyResult<PyDataFrame> {
         let mut renames: Vec<(String, String)> = Vec::new();
         if let Ok(dict) = mapping.downcast::<PyDict>() {
             for (k, v) in dict.iter() {
@@ -1106,7 +1112,9 @@ impl PyDataFrameNa {
 
     #[pyo3(signature = (subset=None))]
     fn drop(&self, subset: Option<Vec<String>>) -> PyResult<PyDataFrame> {
-        let sub: Option<Vec<&str>> = subset.as_ref().map(|v| v.iter().map(|s| s.as_str()).collect());
+        let sub: Option<Vec<&str>> = subset
+            .as_ref()
+            .map(|v| v.iter().map(|s| s.as_str()).collect());
         let df = self
             .df
             .na()

@@ -166,11 +166,8 @@ pub fn apply_ascii(column: Column) -> PolarsResult<Option<Column>> {
         .map_err(|e| PolarsError::ComputeError(format!("ascii: {}", e).into()))?;
     let out = Int32Chunked::from_iter_options(
         name.as_str().into(),
-        ca.into_iter().map(|opt_s| {
-            opt_s.and_then(|s| {
-                s.chars().next().map(|c| c as i32)
-            })
-        }),
+        ca.into_iter()
+            .map(|opt_s| opt_s.and_then(|s| s.chars().next().map(|c| c as i32))),
     );
     Ok(Some(Column::new(name, out.into_series())))
 }
@@ -182,25 +179,36 @@ pub fn apply_format_number(column: Column, decimals: u32) -> PolarsResult<Option
     let prec = decimals as usize;
     let out: StringChunked = match series.dtype() {
         DataType::Float64 => {
-            let ca = series.f64().map_err(|e| PolarsError::ComputeError(format!("format_number: {}", e).into()))?;
+            let ca = series
+                .f64()
+                .map_err(|e| PolarsError::ComputeError(format!("format_number: {}", e).into()))?;
             StringChunked::from_iter_options(
                 name.as_str().into(),
-                ca.into_iter().map(|opt_v| opt_v.map(|v| format!("{:.prec$}", v, prec = prec))),
+                ca.into_iter()
+                    .map(|opt_v| opt_v.map(|v| format!("{:.prec$}", v, prec = prec))),
             )
         }
         DataType::Float32 => {
-            let ca = series.f32().map_err(|e| PolarsError::ComputeError(format!("format_number: {}", e).into()))?;
+            let ca = series
+                .f32()
+                .map_err(|e| PolarsError::ComputeError(format!("format_number: {}", e).into()))?;
             StringChunked::from_iter_options(
                 name.as_str().into(),
-                ca.into_iter().map(|opt_v| opt_v.map(|v| format!("{:.prec$}", v, prec = prec))),
+                ca.into_iter()
+                    .map(|opt_v| opt_v.map(|v| format!("{:.prec$}", v, prec = prec))),
             )
         }
         _ => {
-            let f64_series = series.cast(&DataType::Float64).map_err(|e| PolarsError::ComputeError(format!("format_number cast: {}", e).into()))?;
-            let ca = f64_series.f64().map_err(|e| PolarsError::ComputeError(format!("format_number: {}", e).into()))?;
+            let f64_series = series.cast(&DataType::Float64).map_err(|e| {
+                PolarsError::ComputeError(format!("format_number cast: {}", e).into())
+            })?;
+            let ca = f64_series
+                .f64()
+                .map_err(|e| PolarsError::ComputeError(format!("format_number: {}", e).into()))?;
             StringChunked::from_iter_options(
                 name.as_str().into(),
-                ca.into_iter().map(|opt_v| opt_v.map(|v| format!("{:.prec$}", v, prec = prec))),
+                ca.into_iter()
+                    .map(|opt_v| opt_v.map(|v| format!("{:.prec$}", v, prec = prec))),
             )
         }
     };
@@ -217,7 +225,9 @@ pub fn apply_base64(column: Column) -> PolarsResult<Option<Column>> {
         .map_err(|e| PolarsError::ComputeError(format!("base64: {}", e).into()))?;
     let out = StringChunked::from_iter_options(
         name.as_str().into(),
-        ca.into_iter().map(|opt_s| opt_s.map(|s| base64::engine::general_purpose::STANDARD.encode(s.as_bytes()))),
+        ca.into_iter().map(|opt_s| {
+            opt_s.map(|s| base64::engine::general_purpose::STANDARD.encode(s.as_bytes()))
+        }),
     );
     Ok(Some(Column::new(name, out.into_series())))
 }
@@ -234,7 +244,9 @@ pub fn apply_unbase64(column: Column) -> PolarsResult<Option<Column>> {
         name.as_str().into(),
         ca.into_iter().map(|opt_s| {
             opt_s.and_then(|s| {
-                let decoded = base64::engine::general_purpose::STANDARD.decode(s.as_bytes()).ok()?;
+                let decoded = base64::engine::general_purpose::STANDARD
+                    .decode(s.as_bytes())
+                    .ok()?;
                 String::from_utf8(decoded).ok()
             })
         }),
@@ -297,9 +309,8 @@ pub fn apply_md5(column: Column) -> PolarsResult<Option<Column>> {
         .map_err(|e| PolarsError::ComputeError(format!("md5: {}", e).into()))?;
     let out = StringChunked::from_iter_options(
         name.as_str().into(),
-        ca.into_iter().map(|opt_s| {
-            opt_s.map(|s| format!("{:x}", md5::compute(s.as_bytes())))
-        }),
+        ca.into_iter()
+            .map(|opt_s| opt_s.map(|s| format!("{:x}", md5::compute(s.as_bytes())))),
     );
     Ok(Some(Column::new(name, out.into_series())))
 }
@@ -318,22 +329,30 @@ pub fn apply_char(column: Column) -> PolarsResult<Option<Column>> {
     };
     let out: StringChunked = match series.dtype() {
         DataType::Int32 => {
-            let ca = series.i32().map_err(|e| PolarsError::ComputeError(format!("char: {}", e).into()))?;
+            let ca = series
+                .i32()
+                .map_err(|e| PolarsError::ComputeError(format!("char: {}", e).into()))?;
             StringChunked::from_iter_options(
                 name.as_str().into(),
                 ca.into_iter().map(|opt_v| opt_v.map(|v| to_char(v as i64))),
             )
         }
         DataType::Int64 => {
-            let ca = series.i64().map_err(|e| PolarsError::ComputeError(format!("char: {}", e).into()))?;
+            let ca = series
+                .i64()
+                .map_err(|e| PolarsError::ComputeError(format!("char: {}", e).into()))?;
             StringChunked::from_iter_options(
                 name.as_str().into(),
                 ca.into_iter().map(|opt_v| opt_v.map(to_char)),
             )
         }
         _ => {
-            let i64_series = series.cast(&DataType::Int64).map_err(|e| PolarsError::ComputeError(format!("char cast: {}", e).into()))?;
-            let ca = i64_series.i64().map_err(|e| PolarsError::ComputeError(format!("char: {}", e).into()))?;
+            let i64_series = series
+                .cast(&DataType::Int64)
+                .map_err(|e| PolarsError::ComputeError(format!("char cast: {}", e).into()))?;
+            let ca = i64_series
+                .i64()
+                .map_err(|e| PolarsError::ComputeError(format!("char: {}", e).into()))?;
             StringChunked::from_iter_options(
                 name.as_str().into(),
                 ca.into_iter().map(|opt_v| opt_v.map(to_char)),
