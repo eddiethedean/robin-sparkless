@@ -1,0 +1,31 @@
+{
+  "name": "struct_test",
+  "pyspark_version": "3.5.0",
+  "input": {
+    "schema": [
+      { "name": "id", "type": "bigint" },
+      { "name": "a", "type": "int" },
+      { "name": "b", "type": "string" }
+    ],
+    "rows": [
+      [1, 10, "x"],
+      [2, 20, "y"]
+    ]
+  },
+  "operations": [
+    { "op": "withColumn", "column": "st", "expr": "struct(col('a'), col('b'))" },
+    { "op": "select", "columns": ["id", "a", "b", "st"] }
+  ],
+  "expected": {
+    "schema": [
+      { "name": "id", "type": "bigint" },
+      { "name": "a", "type": "int" },
+      { "name": "b", "type": "string" },
+      { "name": "st", "type": "struct" }
+    ],
+    "rows": [
+      [1, 10, "x", {"a": 10, "b": "x"}],
+      [2, 20, "y", {"a": 20, "b": "y"}]
+    ]
+  }
+}

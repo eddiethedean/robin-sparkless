@@ -1,0 +1,28 @@
+{
+  "name": "map_zip_with",
+  "pyspark_version": "3.5.0",
+  "input": {
+    "schema": [
+      { "name": "id", "type": "bigint" }
+    ],
+    "rows": [[1], [2]]
+  },
+  "operations": [
+    { "op": "withColumn", "column": "m1", "expr": "create_map(lit('a'), lit(1), lit('b'), lit(2))" },
+    { "op": "withColumn", "column": "m2", "expr": "create_map(lit('b'), lit(30), lit('c'), lit(3))" },
+    { "op": "withColumn", "column": "merged", "expr": "map_zip_with(col('m1'), col('m2'), coalesce(col(\"\").struct_().field_by_name(\"value1\"), col(\"\").struct_().field_by_name(\"value2\")))" },
+    { "op": "select", "columns": ["id", "m1", "m2", "merged"] }
+  ],
+  "expected": {
+    "schema": [
+      { "name": "id", "type": "bigint" },
+      { "name": "m1", "type": "map" },
+      { "name": "m2", "type": "map" },
+      { "name": "merged", "type": "map" }
+    ],
+    "rows": [
+      [1, {"a": 1, "b": 2}, {"b": 30, "c": 3}, {"a": 1, "b": 2, "c": 3}],
+      [2, {"a": 1, "b": 2}, {"b": 30, "c": 3}, {"a": 1, "b": 2, "c": 3}]
+    ]
+  }
+}

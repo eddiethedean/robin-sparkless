@@ -115,7 +115,7 @@ The path to full backend replacement is planned in [FULL_BACKEND_ROADMAP.md](FUL
 - **Phase 2 – High-Value Functions**: String (length, trim, regexp_*), datetime (to_date, date_add), math (stddev, variance)
 - **Phase 3 – DataFrame Methods**: union, unionByName, distinct, drop, dropna, fillna, limit, withColumnRenamed ✅ **COMPLETED**
 - **Phase 4 – PyO3 Bridge**: Python bindings for Sparkless to call robin-sparkless ✅ **COMPLETED** (see [PYTHON_API.md](PYTHON_API.md))
-- **Phase 5 – Test Conversion**: Converter extended (join, window, withColumn, union, distinct, drop, dropna, fillna, limit, withColumnRenamed); parity discovers `tests/fixtures/` + `tests/fixtures/converted/`; `make sparkless-parity` (set SPARKLESS_EXPECTED_OUTPUTS); [SPARKLESS_PARITY_STATUS.md](SPARKLESS_PARITY_STATUS.md) for pass/fail; **93 passing** (50+ target met) ✅ **COMPLETED**
+- **Phase 5 – Test Conversion**: Converter extended (join, window, withColumn, union, distinct, drop, dropna, fillna, limit, withColumnRenamed); parity discovers `tests/fixtures/` + `tests/fixtures/converted/`; `make sparkless-parity` (set SPARKLESS_EXPECTED_OUTPUTS); [SPARKLESS_PARITY_STATUS.md](SPARKLESS_PARITY_STATUS.md) for pass/fail; **124 passing** (50+ target met) ✅ **COMPLETED**
 - **Phase 6 – Broad Parity**: Array (6a ✅; array_position, array_remove, posexplode via list.eval; array_repeat, array_flatten ✅ Phase 8), Map (6b ✅ Phase 8), JSON (6c ✅), additional string (6e ✅; 6.4 soundex/levenshtein/crc32/xxhash64 ✅ Phase 8), window extensions (6d ✅; percent_rank/cume_dist/ntile/nth_value covered).
 - **Phase 7 – SQL & Advanced** ✅ **COMPLETED**: Optional **SQL** (`sql` feature: `spark.sql()`, temp views); optional **Delta** (`delta` feature: `read_delta`, `read_delta_with_version`, `write_delta`); benchmarks and error-message improvements. See [FULL_BACKEND_ROADMAP.md](FULL_BACKEND_ROADMAP.md) §7.
 - **Phase 8 – Remaining Parity** ✅ **COMPLETED** (Feb 2026): array_repeat, array_flatten; Map (create_map, map_keys, map_values, map_entries, map_from_arrays); String 6.4 (soundex, levenshtein, crc32, xxhash64); window fixtures covered; documentation of differences.
@@ -124,7 +124,7 @@ The path to full backend replacement is planned in [FULL_BACKEND_ROADMAP.md](FUL
 
 We know we're on track if:
 
-- ✅ **Behavioral parity**: For core operations (filter, select, orderBy, groupBy+count/sum/avg/min/max/agg, when/coalesce, basic type coercion, null semantics, joins, window functions, array and string functions, math, datetime, type/conditional), DataFrame methods (union, distinct, drop, dropna, fillna, limit, withColumnRenamed), and file readers (CSV/Parquet/JSON), PySpark and Robin Sparkless produce the same schema and data on test fixtures. **Status: PASSING (93 fixtures)**
+- ✅ **Behavioral parity**: For core operations (filter, select, orderBy, groupBy+count/sum/avg/min/max/agg, when/coalesce, basic type coercion, null semantics, joins, window functions, array and string functions, math, datetime, type/conditional), DataFrame methods (union, distinct, drop, dropna, fillna, limit, withColumnRenamed), and file readers (CSV/Parquet/JSON), PySpark and Robin Sparkless produce the same schema and data on test fixtures. **Status: PASSING (124 fixtures)**
 - ✅ **Documentation of differences**: Any divergence from PySpark semantics is called out in [PYSPARK_DIFFERENCES.md](PYSPARK_DIFFERENCES.md) (window, SQL, Delta, Phase 8).
 - ✅ **Performance envelope**: For supported operations, we stay within ~2x of doing the same thing directly in Polars. **Status: BENCHMARKED** (`cargo bench`; see [QUICKSTART.md](QUICKSTART.md) § Benchmarks)
 
@@ -132,7 +132,7 @@ We know we're on track if:
 
 | Metric | Current | After Phase 19 | Full Backend (Phase 21) |
 |--------|---------|-----------------|-------------------------|
-| Parity fixtures | 93 | 150+ | 150+ |
+| Parity fixtures | 124 | 150+ | 150+ |
 | Functions | ~175+ | 403 | 403 |
 | DataFrame methods | ~55+ | 85 | 85 |
 | Sparkless tests passing (robin backend) | 0 | — | 200+ |
@@ -160,7 +160,7 @@ We know we're on track if:
 - ✅ DataFrame methods: `union`, `union_by_name`, `distinct`, `drop`, `dropna`, `fillna`, `limit`, `with_column_renamed`
 - ✅ **PyO3 bridge** (optional `pyo3` feature): Python module `robin_sparkless` with SparkSession, DataFrame, Column, GroupedData; `create_dataframe`, filter, select, join, group_by, collect (list of dicts), etc. Build: `maturin develop --features pyo3`. Tests: `make test` runs Rust + Python smoke tests. See [PYTHON_API.md](PYTHON_API.md).
 - ✅ **Phase 9** (high-value functions & DataFrame methods): Datetime (`current_date`, `current_timestamp`, `date_add`, `date_sub`, `hour`, `minute`, `second`, `datediff`, `last_day`, `trunc`); string (`repeat`, `reverse`, `instr`, `lpad`, `rpad`); math (`sqrt`, `pow`, `exp`, `log`); conditional (`nvl`/`ifnull`, `nullif`, `nanvl`); GroupedData (`first`, `last`, `approx_count_distinct`); DataFrame (`replace`, `cross_join`, `describe`, `cache`/`persist`/`unpersist`, `subtract`, `intersect`).
-- ✅ Parity test harness with 93 passing fixtures:
+- ✅ Parity test harness with 124 passing fixtures:
   - `filter_age_gt_30`: filter + select + orderBy
   - `filter_and_or`: nested boolean logic with AND/OR and parentheses
   - `filter_nested`: nested boolean logic
@@ -213,7 +213,7 @@ To reach **full Sparkless parity** (robin-sparkless as a complete backend replac
 | **15** | Functions batch 3: remaining functions + fixture growth (88 → 150+ fixtures, 403 functions) | ✅ **COMPLETED** |
 | **16** | Remaining gaps 1: string/regex (regexp_count, regexp_instr, regexp_substr, split_part, find_in_set, format_string, printf) | ✅ **COMPLETED** |
 | **17** | Remaining gaps 2: datetime/unix (unix_timestamp, from_unixtime, make_date, timestamp_*, pmod, factorial) | ✅ **COMPLETED** |
-| **18** | Remaining gaps 3: array/map/struct (array_append, array_prepend, array_insert, array_except/intersect/union, zip_with, map_concat, map_filter, map_zip_with, transform_keys/values, named_struct) | 3–4 weeks |
+| **18** | Remaining gaps 3: array/map/struct (array_append, array_prepend, array_insert, array_except/intersect/union, map_concat, map_from_entries, map_contains_key, get, named_struct, struct, map_filter, map_zip_with, zip_with) | ✅ **COMPLETED** |
 | **19** | Remaining gaps 4: aggregates and try_* (any_value, bool_and, bool_or, count_if, max_by, min_by, percentile, product, try_add/divide/subtract/multiply/sum/avg, try_element_at, width_bucket, elt, bit_length, typeof) | 3–4 weeks |
 | **20** | Prepare and publish robin-sparkless as a Rust crate (crates.io, API stability, docs, release) | 2–3 weeks |
 | **21** | Sparkless integration (BackendFactory "robin", 200+ tests), PyO3 surface | 4–6 weeks |
@@ -333,16 +333,16 @@ To reach **full Sparkless parity** (robin-sparkless as a complete backend replac
 
 ---
 
-### Phase 18 – Remaining gaps 3: array, map, struct (3–4 weeks)
+### Phase 18 – Remaining gaps 3: array, map, struct ✅ **COMPLETED**
 
 **Goal**: Implement remaining array/map/struct functions.
 
-- **Array**: `array_append`, `array_prepend`, `array_insert`, `array_except`, `array_intersect`, `array_union`; `zip_with`, `arrays_overlap`, `arrays_zip` (if in scope).
-- **Map**: `map_concat`, `map_filter`, `map_zip_with`, `map_from_entries`, `map_contains_key`, `get` (map element).
-- **Struct**: `named_struct`, `struct`; `transform_keys`, `transform_values`.
-- **Parity**: Parser and fixtures.
-- **PyO3**: Expose on Column and module.
-- **Outcome**: Array/map/struct gap closed; ready for Phase 19.
+- **Array**: `array_append`, `array_prepend`, `array_insert`, `array_except`, `array_intersect`, `array_union`, **`zip_with`** (UDF + list.eval); `arrays_overlap`, `arrays_zip` (if in scope).
+- **Map**: `map_concat`, **`map_filter`**, **`map_zip_with`** (list.eval / UDF + list.eval), `map_from_entries`, `map_contains_key`, `get` (map element).
+- **Struct**: `named_struct`, `struct`; `transform_keys`, `transform_values` (deferred).
+- **Parity**: Parser for struct-field expressions; fixtures `map_filter`, `zip_with`, `map_zip_with` (121 → 124).
+- **PyO3**: `map_filter_value_gt`, `zip_with_coalesce`, `map_zip_with_coalesce` convenience helpers.
+- **Outcome**: Array/map/struct gap closed including deferred functions; ready for Phase 19.
 
 ---
 

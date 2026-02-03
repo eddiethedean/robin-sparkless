@@ -1618,6 +1618,85 @@ impl Column {
         Self::from_expr(expr, None)
     }
 
+    /// Append element to end of list (PySpark array_append).
+    pub fn array_append(&self, elem: &Column) -> Column {
+        let args = [elem.expr().clone()];
+        let expr = self.expr().clone().map_many(
+            crate::udfs::apply_array_append,
+            &args,
+            GetOutput::same_type(),
+        );
+        Self::from_expr(expr, None)
+    }
+
+    /// Prepend element to start of list (PySpark array_prepend).
+    pub fn array_prepend(&self, elem: &Column) -> Column {
+        let args = [elem.expr().clone()];
+        let expr = self.expr().clone().map_many(
+            crate::udfs::apply_array_prepend,
+            &args,
+            GetOutput::same_type(),
+        );
+        Self::from_expr(expr, None)
+    }
+
+    /// Insert element at 1-based position (PySpark array_insert).
+    pub fn array_insert(&self, pos: &Column, elem: &Column) -> Column {
+        let args = [pos.expr().clone(), elem.expr().clone()];
+        let expr = self.expr().clone().map_many(
+            crate::udfs::apply_array_insert,
+            &args,
+            GetOutput::same_type(),
+        );
+        Self::from_expr(expr, None)
+    }
+
+    /// Elements in first array not in second (PySpark array_except).
+    pub fn array_except(&self, other: &Column) -> Column {
+        let args = [other.expr().clone()];
+        let expr = self.expr().clone().map_many(
+            crate::udfs::apply_array_except,
+            &args,
+            GetOutput::same_type(),
+        );
+        Self::from_expr(expr, None)
+    }
+
+    /// Elements in both arrays (PySpark array_intersect).
+    pub fn array_intersect(&self, other: &Column) -> Column {
+        let args = [other.expr().clone()];
+        let expr = self.expr().clone().map_many(
+            crate::udfs::apply_array_intersect,
+            &args,
+            GetOutput::same_type(),
+        );
+        Self::from_expr(expr, None)
+    }
+
+    /// Distinct elements from both arrays (PySpark array_union).
+    pub fn array_union(&self, other: &Column) -> Column {
+        let args = [other.expr().clone()];
+        let expr = self.expr().clone().map_many(
+            crate::udfs::apply_array_union,
+            &args,
+            GetOutput::same_type(),
+        );
+        Self::from_expr(expr, None)
+    }
+
+    /// Zip two arrays element-wise with merge function (PySpark zip_with). Shorter array padded with null.
+    /// Merge Expr uses col("").struct_().field_by_name("left") and field_by_name("right").
+    pub fn zip_with(&self, other: &Column, merge: Expr) -> Column {
+        let args = [other.expr().clone()];
+        let zip_expr = self.expr().clone().map_many(
+            crate::udfs::apply_zip_arrays_to_struct,
+            &args,
+            GetOutput::same_type(),
+        );
+        let list_expr = zip_expr.list().eval(merge, false);
+        Self::from_expr(list_expr, None)
+    }
+
     /// True if any list element satisfies the predicate (PySpark exists). Uses list.eval(pred).list().any().
     pub fn array_exists(&self, predicate: Expr) -> Column {
         let pred_expr = self
@@ -1722,6 +1801,80 @@ impl Column {
             &args,
             GetOutput::same_type(),
         );
+        Self::from_expr(expr, None)
+    }
+
+    /// Merge two map columns (PySpark map_concat). Last value wins for duplicate keys.
+    pub fn map_concat(&self, other: &Column) -> Column {
+        let args = [other.expr().clone()];
+        let expr = self.expr().clone().map_many(
+            crate::udfs::apply_map_concat,
+            &args,
+            GetOutput::same_type(),
+        );
+        Self::from_expr(expr, None)
+    }
+
+    /// Merge two maps by key with merge function (PySpark map_zip_with).
+    /// Merge Expr uses col("").struct_().field_by_name("value1") and field_by_name("value2").
+    pub fn map_zip_with(&self, other: &Column, merge: Expr) -> Column {
+        use polars::prelude::as_struct;
+        let args = [other.expr().clone()];
+        let zip_expr = self.expr().clone().map_many(
+            crate::udfs::apply_map_zip_to_struct,
+            &args,
+            GetOutput::same_type(),
+        );
+        let key_field = col("").struct_().field_by_name("key").alias("key");
+        let value_field = merge.alias("value");
+        let merge_expr = as_struct(vec![key_field, value_field]);
+        let list_expr = zip_expr.list().eval(merge_expr, false);
+        Self::from_expr(list_expr, None)
+    }
+
+    /// Filter map entries by predicate (PySpark map_filter). Keeps key-value pairs where predicate is true.
+    /// Predicate uses col("").struct_().field_by_name("key") and field_by_name("value") to reference key/value.
+    pub fn map_filter(&self, predicate: Expr) -> Column {
+        use polars::prelude::NULL;
+        let then_val = Self::from_expr(col(""), None);
+        let else_val = Self::from_expr(lit(NULL), None);
+        let elem_expr = crate::functions::when(&Self::from_expr(predicate, None))
+            .then(&then_val)
+            .otherwise(&else_val)
+            .into_expr();
+        let list_expr = self
+            .expr()
+            .clone()
+            .list()
+            .eval(elem_expr, false)
+            .list()
+            .drop_nulls();
+        Self::from_expr(list_expr, None)
+    }
+
+    /// Array of structs {key, value} to map (PySpark map_from_entries). Identity for List(Struct) format.
+    pub fn map_from_entries(&self) -> Column {
+        Self::from_expr(self.expr().clone(), None)
+    }
+
+    /// True if map contains key (PySpark map_contains_key).
+    pub fn map_contains_key(&self, key: &Column) -> Column {
+        let args = [key.expr().clone()];
+        let expr = self.expr().clone().map_many(
+            crate::udfs::apply_map_contains_key,
+            &args,
+            GetOutput::from_type(DataType::Boolean),
+        );
+        Self::from_expr(expr, None)
+    }
+
+    /// Get value for key from map, or null (PySpark get).
+    pub fn get(&self, key: &Column) -> Column {
+        let args = [key.expr().clone()];
+        let expr =
+            self.expr()
+                .clone()
+                .map_many(crate::udfs::apply_get, &args, GetOutput::same_type());
         Self::from_expr(expr, None)
     }
 

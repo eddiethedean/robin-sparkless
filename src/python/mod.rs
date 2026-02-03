@@ -4,9 +4,10 @@
 use crate::column::Column as RsColumn;
 use crate::dataframe::JoinType;
 use crate::functions::{
-    acos, acosh, add_months, array_compact, array_distinct, ascii, asin, asinh, atan, atan2, atanh,
-    base64, cast as rs_cast, cbrt, ceiling, chr, contains, cos, cosh, date_from_unix_date, day,
-    dayofmonth, dayofweek, dayofyear, degrees, endswith, expm1, factorial, find_in_set,
+    acos, acosh, add_months, array_append, array_compact, array_distinct, array_except,
+    array_insert, array_intersect, array_prepend, array_union, ascii, asin, asinh, atan, atan2,
+    atanh, base64, cast as rs_cast, cbrt, ceiling, chr, contains, cos, cosh, date_from_unix_date,
+    day, dayofmonth, dayofweek, dayofyear, degrees, endswith, expm1, factorial, find_in_set,
     format_number, format_string, from_unixtime, greatest as rs_greatest, hypot, ifnull, ilike,
     isnan as rs_isnan, isnotnull, isnull, lcase, least as rs_least, left, like, ln, log10, log1p,
     log2, make_date, md5, months_between, next_day, nvl, nvl2, overlay, pmod,
@@ -17,6 +18,10 @@ use crate::functions::{
     unix_timestamp, unix_timestamp_now, weekofyear,
 };
 use crate::functions::{avg, coalesce, col as rs_col, count, max, min, sum as rs_sum};
+use crate::functions::{
+    create_map, get, map_concat, map_contains_key, map_filter_value_gt, map_from_entries,
+    map_zip_with_coalesce, named_struct, struct_, zip_with_coalesce,
+};
 use crate::{DataFrame, GroupedData, SparkSession};
 use polars::prelude::Expr;
 use pyo3::prelude::*;
@@ -155,6 +160,38 @@ fn robin_sparkless(m: &Bound<'_, PyModule>) -> PyResult<()> {
     )?;
     m.add("pmod", wrap_pyfunction!(py_pmod, m)?)?;
     m.add("factorial", wrap_pyfunction!(py_factorial, m)?)?;
+    // Phase 18: array (append, prepend, insert, except, intersect, union), map (concat, from_entries, contains_key, get), struct
+    m.add("array_append", wrap_pyfunction!(py_array_append, m)?)?;
+    m.add("array_prepend", wrap_pyfunction!(py_array_prepend, m)?)?;
+    m.add("array_insert", wrap_pyfunction!(py_array_insert, m)?)?;
+    m.add("array_except", wrap_pyfunction!(py_array_except, m)?)?;
+    m.add("array_intersect", wrap_pyfunction!(py_array_intersect, m)?)?;
+    m.add("array_union", wrap_pyfunction!(py_array_union, m)?)?;
+    m.add(
+        "zip_with_coalesce",
+        wrap_pyfunction!(py_zip_with_coalesce, m)?,
+    )?;
+    m.add("map_concat", wrap_pyfunction!(py_map_concat, m)?)?;
+    m.add(
+        "map_filter_value_gt",
+        wrap_pyfunction!(py_map_filter_value_gt, m)?,
+    )?;
+    m.add(
+        "map_from_entries",
+        wrap_pyfunction!(py_map_from_entries, m)?,
+    )?;
+    m.add(
+        "map_contains_key",
+        wrap_pyfunction!(py_map_contains_key, m)?,
+    )?;
+    m.add(
+        "map_zip_with_coalesce",
+        wrap_pyfunction!(py_map_zip_with_coalesce, m)?,
+    )?;
+    m.add("create_map", wrap_pyfunction!(py_create_map, m)?)?;
+    m.add("get", wrap_pyfunction!(py_get, m)?)?;
+    m.add("struct", wrap_pyfunction!(py_struct, m)?)?;
+    m.add("named_struct", wrap_pyfunction!(py_named_struct, m)?)?;
     Ok(())
 }
 
@@ -739,6 +776,131 @@ fn py_factorial(column: &PyColumn) -> PyColumn {
     }
 }
 
+// Phase 18: array, map, struct
+#[pyfunction]
+fn py_array_append(array: &PyColumn, elem: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: array_append(&array.inner, &elem.inner),
+    }
+}
+
+#[pyfunction]
+fn py_array_prepend(array: &PyColumn, elem: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: array_prepend(&array.inner, &elem.inner),
+    }
+}
+
+#[pyfunction]
+fn py_array_insert(array: &PyColumn, pos: &PyColumn, elem: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: array_insert(&array.inner, &pos.inner, &elem.inner),
+    }
+}
+
+#[pyfunction]
+fn py_array_except(a: &PyColumn, b: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: array_except(&a.inner, &b.inner),
+    }
+}
+
+#[pyfunction]
+fn py_array_intersect(a: &PyColumn, b: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: array_intersect(&a.inner, &b.inner),
+    }
+}
+
+#[pyfunction]
+fn py_array_union(a: &PyColumn, b: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: array_union(&a.inner, &b.inner),
+    }
+}
+
+#[pyfunction]
+fn py_map_concat(a: &PyColumn, b: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: map_concat(&a.inner, &b.inner),
+    }
+}
+
+#[pyfunction]
+fn py_map_filter_value_gt(map_col: &PyColumn, threshold: f64) -> PyColumn {
+    PyColumn {
+        inner: map_filter_value_gt(&map_col.inner, threshold),
+    }
+}
+
+#[pyfunction]
+fn py_zip_with_coalesce(left: &PyColumn, right: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: zip_with_coalesce(&left.inner, &right.inner),
+    }
+}
+
+#[pyfunction]
+fn py_map_zip_with_coalesce(map1: &PyColumn, map2: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: map_zip_with_coalesce(&map1.inner, &map2.inner),
+    }
+}
+
+#[pyfunction]
+fn py_map_from_entries(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: map_from_entries(&column.inner),
+    }
+}
+
+#[pyfunction]
+fn py_map_contains_key(map_col: &PyColumn, key: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: map_contains_key(&map_col.inner, &key.inner),
+    }
+}
+
+#[pyfunction]
+fn py_create_map(columns: Vec<PyRef<PyColumn>>) -> PyColumn {
+    let refs: Vec<&RsColumn> = columns.iter().map(|c| &c.inner).collect();
+    PyColumn {
+        inner: create_map(&refs),
+    }
+}
+
+#[pyfunction]
+fn py_get(map_col: &PyColumn, key: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: get(&map_col.inner, &key.inner),
+    }
+}
+
+#[pyfunction]
+fn py_struct(columns: Vec<PyRef<PyColumn>>) -> PyColumn {
+    let refs: Vec<&RsColumn> = columns.iter().map(|c| &c.inner).collect();
+    PyColumn {
+        inner: struct_(&refs),
+    }
+}
+
+#[pyfunction]
+fn py_named_struct(names: Vec<String>, columns: Vec<PyRef<PyColumn>>) -> PyResult<PyColumn> {
+    if names.len() != columns.len() {
+        return Err(pyo3::exceptions::PyValueError::new_err(
+            "named_struct: names and columns must have same length",
+        ));
+    }
+    let pairs: Vec<(&str, &RsColumn)> = names
+        .iter()
+        .zip(columns.iter())
+        .map(|(n, c)| (n.as_str(), &c.inner))
+        .collect();
+    Ok(PyColumn {
+        inner: named_struct(&pairs),
+    })
+}
+
 #[pyfunction]
 fn py_cosh(column: &PyColumn) -> PyColumn {
     PyColumn {
@@ -985,6 +1147,84 @@ impl PyColumn {
     fn array_distinct(&self) -> Self {
         PyColumn {
             inner: array_distinct(&self.inner),
+        }
+    }
+
+    fn array_append(&self, elem: &PyColumn) -> Self {
+        PyColumn {
+            inner: array_append(&self.inner, &elem.inner),
+        }
+    }
+
+    fn array_prepend(&self, elem: &PyColumn) -> Self {
+        PyColumn {
+            inner: array_prepend(&self.inner, &elem.inner),
+        }
+    }
+
+    fn array_insert(&self, pos: &PyColumn, elem: &PyColumn) -> Self {
+        PyColumn {
+            inner: array_insert(&self.inner, &pos.inner, &elem.inner),
+        }
+    }
+
+    fn array_except(&self, other: &PyColumn) -> Self {
+        PyColumn {
+            inner: array_except(&self.inner, &other.inner),
+        }
+    }
+
+    fn array_intersect(&self, other: &PyColumn) -> Self {
+        PyColumn {
+            inner: array_intersect(&self.inner, &other.inner),
+        }
+    }
+
+    fn array_union(&self, other: &PyColumn) -> Self {
+        PyColumn {
+            inner: array_union(&self.inner, &other.inner),
+        }
+    }
+
+    fn map_concat(&self, other: &PyColumn) -> Self {
+        PyColumn {
+            inner: map_concat(&self.inner, &other.inner),
+        }
+    }
+
+    fn map_filter_value_gt(&self, threshold: f64) -> Self {
+        PyColumn {
+            inner: map_filter_value_gt(&self.inner, threshold),
+        }
+    }
+
+    fn zip_with_coalesce(&self, other: &PyColumn) -> Self {
+        PyColumn {
+            inner: zip_with_coalesce(&self.inner, &other.inner),
+        }
+    }
+
+    fn map_zip_with_coalesce(&self, other: &PyColumn) -> Self {
+        PyColumn {
+            inner: map_zip_with_coalesce(&self.inner, &other.inner),
+        }
+    }
+
+    fn map_from_entries(&self) -> Self {
+        PyColumn {
+            inner: map_from_entries(&self.inner),
+        }
+    }
+
+    fn map_contains_key(&self, key: &PyColumn) -> Self {
+        PyColumn {
+            inner: map_contains_key(&self.inner, &key.inner),
+        }
+    }
+
+    fn get(&self, key: &PyColumn) -> Self {
+        PyColumn {
+            inner: get(&self.inner, &key.inner),
         }
     }
 

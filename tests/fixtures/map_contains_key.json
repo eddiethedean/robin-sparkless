@@ -1,0 +1,27 @@
+{
+  "name": "map_contains_key",
+  "pyspark_version": "3.5.0",
+  "input": {
+    "schema": [
+      { "name": "id", "type": "bigint" }
+    ],
+    "rows": [[1], [2]]
+  },
+  "operations": [
+    { "op": "withColumn", "column": "m", "expr": "create_map(lit('a'), lit(1), lit('b'), lit(2))" },
+    { "op": "withColumn", "column": "has_a", "expr": "map_contains_key(col('m'), lit('a'))" },
+    { "op": "withColumn", "column": "has_c", "expr": "map_contains_key(col('m'), lit('c'))" },
+    { "op": "select", "columns": ["id", "has_a", "has_c"] }
+  ],
+  "expected": {
+    "schema": [
+      { "name": "id", "type": "bigint" },
+      { "name": "has_a", "type": "boolean" },
+      { "name": "has_c", "type": "boolean" }
+    ],
+    "rows": [
+      [1, true, false],
+      [2, true, false]
+    ]
+  }
+}

@@ -1561,6 +1561,91 @@ fn extract_col_name(s: &str) -> Result<&str, String> {
     Ok(&content[quote + 1..quote + 1 + end])
 }
 
+/// Parse struct field ref: col("").struct_().field_by_name("value") etc.
+fn parse_struct_field_expr(s: &str) -> Result<polars::prelude::Expr, String> {
+    let s = s.trim();
+    let prefix = "col(\"\").struct_().field_by_name(";
+    let prefix2 = "col('').struct_().field_by_name(";
+    let (rest, _) = if s.starts_with(prefix) {
+        (&s[prefix.len()..], prefix)
+    } else if s.starts_with(prefix2) {
+        (&s[prefix2.len()..], prefix2)
+    } else {
+        return Err(format!(
+            "expected col(\"\").struct_().field_by_name(...), got {}",
+            s
+        ));
+    };
+    let field_name = rest.trim_matches([')', '"', '\'', ' ']);
+    Ok(polars::prelude::col("").struct_().field_by_name(field_name))
+}
+
+/// Parse predicate for map_filter: col("").struct_().field_by_name("value") > lit(30) etc.
+fn parse_map_filter_predicate(s: &str) -> Result<polars::prelude::Expr, String> {
+    let s = s.trim();
+    for (op, cmp) in [
+        (" > ", "gt"),
+        (" < ", "lt"),
+        (" >= ", "gte"),
+        (" <= ", "lte"),
+    ] {
+        if let Some(pos) = s.find(op) {
+            let (left, right) = (&s[..pos], s[pos + op.len()..].trim());
+            if parse_struct_field_expr(left).is_ok() {
+                let field_expr = parse_struct_field_expr(left)?;
+                let right_expr = parse_column_or_literal(right)?;
+                let pred = match cmp {
+                    "gt" => field_expr.gt(right_expr),
+                    "lt" => field_expr.lt(right_expr),
+                    "gte" => field_expr.gt_eq(right_expr),
+                    "lte" => field_expr.lt_eq(right_expr),
+                    _ => continue,
+                };
+                return Ok(pred);
+            }
+        }
+    }
+    Err(format!("map_filter predicate not supported: {}", s))
+}
+
+/// Parse merge expr for zip_with: coalesce(col("").struct_().field_by_name("left"), col("").struct_().field_by_name("right"))
+fn parse_zip_with_merge(s: &str) -> Result<polars::prelude::Expr, String> {
+    let s = s.trim();
+    if s.starts_with("coalesce(") {
+        let inner = extract_first_arg(s, "coalesce(")?;
+        let parts = parse_comma_separated_args(inner);
+        if parts.len() >= 2 {
+            let left = parse_struct_field_expr(parts[0].trim())?;
+            let right = parse_struct_field_expr(parts[1].trim())?;
+            return Ok(robin_sparkless::coalesce(&[
+                &robin_sparkless::Column::from_expr(left, None),
+                &robin_sparkless::Column::from_expr(right, None),
+            ])
+            .into_expr());
+        }
+    }
+    Err(format!("zip_with merge expr not supported: {}", s))
+}
+
+/// Parse merge expr for map_zip_with: coalesce(col("").struct_().field_by_name("value1"), col("").struct_().field_by_name("value2"))
+fn parse_map_zip_with_merge(s: &str) -> Result<polars::prelude::Expr, String> {
+    let s = s.trim();
+    if s.starts_with("coalesce(") {
+        let inner = extract_first_arg(s, "coalesce(")?;
+        let parts = parse_comma_separated_args(inner);
+        if parts.len() >= 2 {
+            let v1 = parse_struct_field_expr(parts[0].trim())?;
+            let v2 = parse_struct_field_expr(parts[1].trim())?;
+            return Ok(robin_sparkless::coalesce(&[
+                &robin_sparkless::Column::from_expr(v1, None),
+                &robin_sparkless::Column::from_expr(v2, None),
+            ])
+            .into_expr());
+        }
+    }
+    Err(format!("map_zip_with merge expr not supported: {}", s))
+}
+
 /// Helper to parse comma-separated args (respecting nested parens)
 fn parse_comma_separated_args(inner: &str) -> Vec<&str> {
     let mut parts: Vec<&str> = Vec::new();
@@ -1629,21 +1714,23 @@ fn json_value_to_lit(v: &serde_json::Value) -> Result<Expr, String> {
 fn parse_with_column_expr(src: &str) -> Result<Expr, String> {
     use polars::prelude::concat_list;
     use robin_sparkless::{
-        acos, acosh, add_months, array_compact, array_contains, array_distinct, array_size,
-        array_sum, ascii, asin, asinh, atan, atan2, atanh, base64, cast, cbrt, ceiling,
-        char as rs_char, chr, coalesce, col, concat, concat_ws, contains, cos, cosh, current_date,
+        acos, add_months, array_append, array_compact, array_contains, array_distinct,
+        array_except, array_insert, array_intersect, array_prepend, array_size, array_sum,
+        array_union, ascii, asin, atan, atan2, base64, cast, cbrt, ceiling, char as rs_char, chr,
+        coalesce, col, concat, concat_ws, contains, cos, cosh, create_map, current_date,
         current_timestamp, date_add, date_from_unix_date, date_sub, datediff, day, dayofmonth,
-        dayofweek, dayofyear, degrees, element_at, endswith, exp, expm1, factorial, find_in_set,
-        format_number, format_string, from_unixtime, greatest, hour, hypot, ilike, initcap, instr,
-        isnan, isnotnull, isnull, last_day, lcase, least, left, length, like, lit_str, ln, log,
-        log10, log1p, log2, lower, lpad, make_date, md5, minute, months_between, nanvl, next_day,
-        nullif, nvl, nvl2, overlay, pmod, position, pow, power, printf, quarter, radians,
-        regexp_count, regexp_extract, regexp_extract_all, regexp_instr, regexp_like,
-        regexp_replace, regexp_substr, repeat, replace, reverse, right, rint, rlike, rpad, second,
-        sha1, sha2, signum, sin, sinh, size, split, split_part, sqrt, startswith, substr,
-        substring, tan, tanh, timestamp_micros, timestamp_millis, timestamp_seconds, to_degrees,
-        to_radians, to_unix_timestamp, trim, trunc, try_cast, ucase, unbase64, unix_date,
-        unix_timestamp, unix_timestamp_now, upper, weekofyear, when,
+        dayofweek, dayofyear, degrees, element_at, endswith, exp, factorial, find_in_set,
+        format_number, format_string, from_unixtime, get, greatest, hour, hypot, ilike, initcap,
+        instr, isnan, isnotnull, isnull, last_day, lcase, least, left, length, like, lit_str, ln,
+        log, log10, lower, lpad, make_date, map_concat, map_contains_key, map_filter,
+        map_from_entries, map_zip_with, md5, minute, months_between, named_struct, nanvl, next_day,
+        nullif, nvl, nvl2, overlay, pmod, position, pow, power, quarter, radians, regexp_count,
+        regexp_extract, regexp_extract_all, regexp_instr, regexp_like, regexp_replace,
+        regexp_substr, repeat, replace, reverse, right, rlike, rpad, second, sha1, sha2, signum,
+        sin, sinh, size, split, split_part, sqrt, startswith, struct_, substr, substring, tan,
+        tanh, timestamp_micros, timestamp_millis, timestamp_seconds, to_degrees, to_radians,
+        to_unix_timestamp, trim, trunc, try_cast, ucase, unbase64, unix_date, unix_timestamp,
+        unix_timestamp_now, upper, weekofyear, when, zip_with,
     };
 
     let s = src.trim();
@@ -2332,6 +2419,165 @@ fn parse_with_column_expr(src: &str) -> Result<Expr, String> {
             parse_column_or_literal(parts.get(1).ok_or("array_contains needs value")?.trim())?;
         let value_col = robin_sparkless::Column::from_expr(value_expr, None);
         return Ok(array_contains(&arr_col, &value_col).into_expr());
+    }
+    if s.starts_with("array_append(") {
+        let inner = extract_first_arg(s, "array_append(")?;
+        let parts = parse_comma_separated_args(inner);
+        let arr_name = extract_col_name(parts.first().ok_or("array_append needs array")?)?;
+        let elem_expr =
+            parse_column_or_literal(parts.get(1).ok_or("array_append needs element")?.trim())?;
+        let arr_col = col(arr_name);
+        let elem_col = robin_sparkless::Column::from_expr(elem_expr, None);
+        return Ok(array_append(&arr_col, &elem_col).into_expr());
+    }
+    if s.starts_with("array_prepend(") {
+        let inner = extract_first_arg(s, "array_prepend(")?;
+        let parts = parse_comma_separated_args(inner);
+        let arr_name = extract_col_name(parts.first().ok_or("array_prepend needs array")?)?;
+        let elem_expr =
+            parse_column_or_literal(parts.get(1).ok_or("array_prepend needs element")?.trim())?;
+        let arr_col = col(arr_name);
+        let elem_col = robin_sparkless::Column::from_expr(elem_expr, None);
+        return Ok(array_prepend(&arr_col, &elem_col).into_expr());
+    }
+    if s.starts_with("array_insert(") {
+        let inner = extract_first_arg(s, "array_insert(")?;
+        let parts = parse_comma_separated_args(inner);
+        let arr_name = extract_col_name(parts.first().ok_or("array_insert needs array")?)?;
+        let pos_expr =
+            parse_column_or_literal(parts.get(1).ok_or("array_insert needs position")?.trim())?;
+        let elem_expr =
+            parse_column_or_literal(parts.get(2).ok_or("array_insert needs element")?.trim())?;
+        let arr_col = col(arr_name);
+        let pos_col = robin_sparkless::Column::from_expr(pos_expr, None);
+        let elem_col = robin_sparkless::Column::from_expr(elem_expr, None);
+        return Ok(array_insert(&arr_col, &pos_col, &elem_col).into_expr());
+    }
+    if s.starts_with("array_except(") {
+        let inner = extract_first_arg(s, "array_except(")?;
+        let parts = parse_comma_separated_args(inner);
+        let a_name = extract_col_name(parts.first().ok_or("array_except needs first array")?)?;
+        let b_name = extract_col_name(parts.get(1).ok_or("array_except needs second array")?)?;
+        return Ok(array_except(&col(a_name), &col(b_name)).into_expr());
+    }
+    if s.starts_with("array_intersect(") {
+        let inner = extract_first_arg(s, "array_intersect(")?;
+        let parts = parse_comma_separated_args(inner);
+        let a_name = extract_col_name(parts.first().ok_or("array_intersect needs first array")?)?;
+        let b_name = extract_col_name(parts.get(1).ok_or("array_intersect needs second array")?)?;
+        return Ok(array_intersect(&col(a_name), &col(b_name)).into_expr());
+    }
+    if s.starts_with("array_union(") {
+        let inner = extract_first_arg(s, "array_union(")?;
+        let parts = parse_comma_separated_args(inner);
+        let a_name = extract_col_name(parts.first().ok_or("array_union needs first array")?)?;
+        let b_name = extract_col_name(parts.get(1).ok_or("array_union needs second array")?)?;
+        return Ok(array_union(&col(a_name), &col(b_name)).into_expr());
+    }
+    if s.starts_with("create_map(") {
+        let inner = extract_first_arg(s, "create_map(")?;
+        let parts = parse_comma_separated_args(inner);
+        if parts.len() < 2 || parts.len() % 2 != 0 {
+            return Err("create_map needs key-value pairs".to_string());
+        }
+        let mut cols: Vec<robin_sparkless::Column> = Vec::new();
+        for p in &parts {
+            let expr = parse_column_or_literal(p.trim())?;
+            cols.push(robin_sparkless::Column::from_expr(expr, None));
+        }
+        let col_refs: Vec<&robin_sparkless::Column> = cols.iter().collect();
+        return Ok(create_map(&col_refs).into_expr());
+    }
+    if s.starts_with("map_concat(") {
+        let inner = extract_first_arg(s, "map_concat(")?;
+        let parts = parse_comma_separated_args(inner);
+        let a_name = extract_col_name(parts.first().ok_or("map_concat needs first map")?)?;
+        let b_name = extract_col_name(parts.get(1).ok_or("map_concat needs second map")?)?;
+        return Ok(map_concat(&col(a_name), &col(b_name)).into_expr());
+    }
+    if s.starts_with("map_from_entries(") {
+        let inner = extract_first_arg(s, "map_from_entries(")?;
+        let col_name = extract_col_name(inner.trim())?;
+        return Ok(map_from_entries(&col(col_name)).into_expr());
+    }
+    if s.starts_with("map_contains_key(") {
+        let inner = extract_first_arg(s, "map_contains_key(")?;
+        let parts = parse_comma_separated_args(inner);
+        let map_name = extract_col_name(parts.first().ok_or("map_contains_key needs map")?)?;
+        let key_expr =
+            parse_column_or_literal(parts.get(1).ok_or("map_contains_key needs key")?.trim())?;
+        let key_col = robin_sparkless::Column::from_expr(key_expr, None);
+        return Ok(map_contains_key(&col(map_name), &key_col).into_expr());
+    }
+    if s.starts_with("get(") && !s.starts_with("get_json_object(") {
+        let inner = extract_first_arg(s, "get(")?;
+        let parts = parse_comma_separated_args(inner);
+        let map_name = extract_col_name(parts.first().ok_or("get needs map")?)?;
+        let key_expr = parse_column_or_literal(parts.get(1).ok_or("get needs key")?.trim())?;
+        let key_col = robin_sparkless::Column::from_expr(key_expr, None);
+        return Ok(get(&col(map_name), &key_col).into_expr());
+    }
+    if s.starts_with("map_filter(") {
+        let inner = extract_first_arg(s, "map_filter(")?;
+        let parts = parse_comma_separated_args(inner);
+        let map_name = extract_col_name(parts.first().ok_or("map_filter needs map")?)?;
+        let pred_str = parts.get(1).ok_or("map_filter needs predicate")?.trim();
+        let pred = parse_map_filter_predicate(pred_str)?;
+        return Ok(map_filter(&col(map_name), pred).into_expr());
+    }
+    if s.starts_with("zip_with(") {
+        let inner = extract_first_arg(s, "zip_with(")?;
+        let parts = parse_comma_separated_args(inner);
+        let a_name = extract_col_name(parts.first().ok_or("zip_with needs first array")?)?;
+        let b_name = extract_col_name(parts.get(1).ok_or("zip_with needs second array")?)?;
+        let merge_str = parts.get(2).ok_or("zip_with needs merge expr")?.trim();
+        let merge = parse_zip_with_merge(merge_str)?;
+        return Ok(zip_with(&col(a_name), &col(b_name), merge).into_expr());
+    }
+    if s.starts_with("map_zip_with(") {
+        let inner = extract_first_arg(s, "map_zip_with(")?;
+        let parts = parse_comma_separated_args(inner);
+        let m1_name = extract_col_name(parts.first().ok_or("map_zip_with needs first map")?)?;
+        let m2_name = extract_col_name(parts.get(1).ok_or("map_zip_with needs second map")?)?;
+        let merge_str = parts.get(2).ok_or("map_zip_with needs merge expr")?.trim();
+        let merge = parse_map_zip_with_merge(merge_str)?;
+        return Ok(map_zip_with(&col(m1_name), &col(m2_name), merge).into_expr());
+    }
+    if s.starts_with("struct(") {
+        let inner = extract_first_arg(s, "struct(")?;
+        let parts = parse_comma_separated_args(inner);
+        let mut cols: Vec<robin_sparkless::Column> = Vec::new();
+        for p in &parts {
+            let name = extract_col_name(p.trim())?;
+            cols.push(col(name));
+        }
+        let col_refs: Vec<&robin_sparkless::Column> = cols.iter().collect();
+        return Ok(struct_(&col_refs).into_expr());
+    }
+    if s.starts_with("named_struct(") {
+        let inner = extract_first_arg(s, "named_struct(")?;
+        let parts = parse_comma_separated_args(inner);
+        if parts.len() < 2 || parts.len() % 2 != 0 {
+            return Err("named_struct needs (name, column) pairs".to_string());
+        }
+        let mut pairs: Vec<(&str, robin_sparkless::Column)> = Vec::new();
+        for i in (0..parts.len()).step_by(2) {
+            let name_str = parts
+                .get(i)
+                .ok_or("named_struct: missing name")?
+                .trim()
+                .trim_matches(['\'', '"']);
+            let col_name = extract_col_name(
+                parts
+                    .get(i + 1)
+                    .ok_or("named_struct: missing column")?
+                    .trim(),
+            )?;
+            pairs.push((name_str, col(col_name)));
+        }
+        let pair_refs: Vec<(&str, &robin_sparkless::Column)> =
+            pairs.iter().map(|(n, c)| (*n, c)).collect();
+        return Ok(named_struct(pair_refs.as_slice()).into_expr());
     }
 
     // Handle element_at(col('arr'), 1) - 1-based index
@@ -3345,6 +3591,7 @@ fn parse_column_or_literal(s: &str) -> Result<Expr, String> {
             ))
         }
     } else if s.starts_with("lit(") {
+        use robin_sparkless::lit_f64;
         let lit_content = s[4..s.len() - 1].trim();
         // Handle lit(None) for null literals
         if lit_content == "None" {
@@ -3356,6 +3603,8 @@ fn parse_column_or_literal(s: &str) -> Result<Expr, String> {
             // Try to parse as number, otherwise treat as string
             if let Ok(num) = lit_val.parse::<i64>() {
                 Ok(lit_i64(num).into_expr())
+            } else if let Ok(num) = lit_val.parse::<f64>() {
+                Ok(lit_f64(num).into_expr())
             } else {
                 Ok(lit_str(lit_val).into_expr())
             }
@@ -3381,7 +3630,7 @@ fn parse_column_or_literal(s: &str) -> Result<Expr, String> {
 /// Convert Polars AnyValue to serde_json Value (for list elements and scalars).
 fn any_value_to_json(av: &polars::prelude::AnyValue, _dtype: &polars::prelude::DataType) -> Value {
     use polars::prelude::AnyValue;
-    use serde_json::Number;
+    use serde_json::{Map, Number};
     match av {
         AnyValue::Null => Value::Null,
         AnyValue::Boolean(v) => Value::Bool(*v),
@@ -3399,8 +3648,84 @@ fn any_value_to_json(av: &polars::prelude::AnyValue, _dtype: &polars::prelude::D
                 .collect();
             Value::Array(arr)
         }
+        AnyValue::Struct(_, _, fields) => {
+            let mut obj = Map::new();
+            for (fld_av, fld) in av._iter_struct_av().zip(fields.iter()) {
+                obj.insert(fld.name.to_string(), any_value_to_json(&fld_av, &fld.dtype));
+            }
+            Value::Object(obj)
+        }
+        AnyValue::StructOwned(payload) => {
+            let (values, fields) = &**payload;
+            let mut obj = Map::new();
+            for (av, fld) in values.iter().zip(fields.iter()) {
+                obj.insert(fld.name.to_string(), any_value_to_json(av, &fld.dtype));
+            }
+            Value::Object(obj)
+        }
         _ => Value::String(format!("{:?}", av)),
     }
+}
+
+/// Check if List inner dtype is Struct with "key" and "value" fields (map format).
+fn is_map_format(dtype: &polars::prelude::DataType) -> bool {
+    if let polars::prelude::DataType::List(inner) = dtype {
+        if let polars::prelude::DataType::Struct(fields) = inner.as_ref() {
+            let has_key = fields.iter().any(|f| f.name == "key");
+            let has_value = fields.iter().any(|f| f.name == "value");
+            return has_key && has_value;
+        }
+    }
+    false
+}
+
+/// Convert List(Struct{key, value}) to JSON object {key: value, ...}.
+fn list_of_key_value_struct_to_object(list_series: &polars::prelude::Series) -> serde_json::Value {
+    use polars::prelude::AnyValue;
+    use serde_json::Map;
+    let mut obj = Map::new();
+    for i in 0..list_series.len() {
+        if let Ok(av) = list_series.get(i) {
+            let (key_val, val_val) = match &av {
+                AnyValue::Struct(_, _, fields) => {
+                    let mut k = None;
+                    let mut v = None;
+                    for (fld_av, fld) in av._iter_struct_av().zip(fields.iter()) {
+                        if fld.name == "key" {
+                            k = fld_av
+                                .get_str()
+                                .map(|s| s.to_string())
+                                .or_else(|| Some(fld_av.to_string()));
+                        } else if fld.name == "value" {
+                            v = Some(any_value_to_json(&fld_av, &fld.dtype));
+                        }
+                    }
+                    (k, v)
+                }
+                AnyValue::StructOwned(payload) => {
+                    let (values, fields) = &**payload;
+                    let mut k = None;
+                    let mut v = None;
+                    for (fld_av, fld) in values.iter().zip(fields.iter()) {
+                        if fld.name == "key" {
+                            k = fld_av
+                                .get_str()
+                                .map(|s| s.to_string())
+                                .or_else(|| Some(fld_av.to_string()));
+                        } else if fld.name == "value" {
+                            v = Some(any_value_to_json(fld_av, &fld.dtype));
+                        }
+                    }
+                    (k, v)
+                }
+                _ => (None, None),
+            };
+            if let (Some(key), Some(val)) = (key_val, val_val) {
+                obj.insert(key, val);
+            }
+        }
+    }
+    Value::Object(obj)
 }
 
 /// Collect a DataFrame to a simple (schema, rows) representation for comparison.
@@ -3458,17 +3783,27 @@ fn collect_to_simple_format(
                             }
                         }
                     } else if matches!(series.dtype(), polars::prelude::DataType::List(_)) {
-                        // List/array column: convert to JSON array
+                        // List/array column: convert to JSON array, or object if map (List<Struct{key,value}>)
                         match av {
                             polars::prelude::AnyValue::Null => Value::Null,
                             polars::prelude::AnyValue::List(s) => {
-                                let arr: Vec<Value> = (0..s.len())
-                                    .filter_map(|i| s.get(i).ok())
-                                    .map(|av| any_value_to_json(&av, s.dtype()))
-                                    .collect();
-                                Value::Array(arr)
+                                if is_map_format(series.dtype()) {
+                                    list_of_key_value_struct_to_object(&s)
+                                } else {
+                                    let arr: Vec<Value> = (0..s.len())
+                                        .filter_map(|i| s.get(i).ok())
+                                        .map(|a| any_value_to_json(&a, s.dtype()))
+                                        .collect();
+                                    Value::Array(arr)
+                                }
                             }
                             _ => Value::Null,
+                        }
+                    } else if matches!(series.dtype(), polars::prelude::DataType::Struct(_)) {
+                        // Struct column: convert to JSON object
+                        match av {
+                            polars::prelude::AnyValue::Null => Value::Null,
+                            _ => any_value_to_json(&av, series.dtype()),
                         }
                     } else {
                         // For non-string types, use standard matching
@@ -3622,6 +3957,14 @@ fn assert_schema_eq(
 /// Check if two type strings are compatible (lenient matching).
 fn types_compatible(actual: &str, expected: &str) -> bool {
     if actual == expected {
+        return true;
+    }
+    // Struct: actual is "Struct([...])", expected may be "struct"
+    if actual.starts_with("Struct(") && (expected == "struct" || expected.starts_with("Struct(")) {
+        return true;
+    }
+    // Map: we use array<Struct([...])>, expected may be "map"
+    if actual.starts_with("array<Struct(") && expected == "map" {
         return true;
     }
     // Allow int/bigint/long/Int8 to match (hour/minute return Int8 in Polars)
@@ -3790,6 +4133,22 @@ fn values_equal(a: &Value, b: &Value) -> bool {
         (Value::Bool(b1), Value::Bool(b2)) => b1 == b2,
         (Value::Array(a1), Value::Array(a2)) => {
             a1.len() == a2.len() && a1.iter().zip(a2.iter()).all(|(x, y)| values_equal(x, y))
+        }
+        (Value::Object(o1), Value::Object(o2)) => {
+            if o1.len() != o2.len() {
+                return false;
+            }
+            for (k, v1) in o1 {
+                match o2.get(k) {
+                    Some(v2) => {
+                        if !values_equal(v1, v2) {
+                            return false;
+                        }
+                    }
+                    None => return false,
+                }
+            }
+            true
         }
         _ => false,
     }

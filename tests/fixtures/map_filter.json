@@ -1,0 +1,26 @@
+{
+  "name": "map_filter",
+  "pyspark_version": "3.5.0",
+  "input": {
+    "schema": [
+      { "name": "id", "type": "bigint" }
+    ],
+    "rows": [[1], [2]]
+  },
+  "operations": [
+    { "op": "withColumn", "column": "m", "expr": "create_map(lit('foo'), lit(42.0), lit('bar'), lit(1.0), lit('baz'), lit(32.0))" },
+    { "op": "withColumn", "column": "filtered", "expr": "map_filter(col('m'), col(\"\").struct_().field_by_name(\"value\") > lit(30.0))" },
+    { "op": "select", "columns": ["id", "m", "filtered"] }
+  ],
+  "expected": {
+    "schema": [
+      { "name": "id", "type": "bigint" },
+      { "name": "m", "type": "map" },
+      { "name": "filtered", "type": "map" }
+    ],
+    "rows": [
+      [1, {"foo": 42.0, "bar": 1.0, "baz": 32.0}, {"foo": 42.0, "baz": 32.0}],
+      [2, {"foo": 42.0, "bar": 1.0, "baz": 32.0}, {"foo": 42.0, "baz": 32.0}]
+    ]
+  }
+}

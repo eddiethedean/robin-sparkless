@@ -1,0 +1,31 @@
+{
+  "name": "array_append",
+  "pyspark_version": "3.5.0",
+  "input": {
+    "schema": [
+      { "name": "id", "type": "bigint" },
+      { "name": "s", "type": "string" }
+    ],
+    "rows": [
+      [1, "a|b|c"],
+      [2, "x"]
+    ]
+  },
+  "operations": [
+    { "op": "withColumn", "column": "arr", "expr": "split(col('s'), '|')" },
+    { "op": "withColumn", "column": "appended", "expr": "array_append(col('arr'), lit('z'))" },
+    { "op": "select", "columns": ["id", "s", "arr", "appended"] }
+  ],
+  "expected": {
+    "schema": [
+      { "name": "id", "type": "bigint" },
+      { "name": "s", "type": "string" },
+      { "name": "arr", "type": "array<string>" },
+      { "name": "appended", "type": "array<string>" }
+    ],
+    "rows": [
+      [1, "a|b|c", ["a", "b", "c"], ["a", "b", "c", "z"]],
+      [2, "x", ["x"], ["x", "z"]]
+    ]
+  }
+}

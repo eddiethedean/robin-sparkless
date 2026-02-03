@@ -158,6 +158,544 @@ pub fn apply_array_repeat(column: Column, n: i64) -> PolarsResult<Option<Column>
     Ok(Some(Column::new(name, out.into_series())))
 }
 
+// --- Phase 18: array_append, array_prepend, array_insert ---
+
+fn any_value_to_single_series(av: AnyValue, dtype: &DataType) -> PolarsResult<Series> {
+    Series::from_any_values_and_dtype(PlSmallStr::EMPTY, &[av], dtype, false)
+}
+
+/// Append element to end of each list (PySpark array_append).
+pub fn apply_array_append(columns: &mut [Column]) -> PolarsResult<Option<Column>> {
+    use std::cell::RefCell;
+    if columns.len() < 2 {
+        return Err(PolarsError::ComputeError(
+            "array_append needs two columns (array, element)".into(),
+        ));
+    }
+    let name = columns[0].field().into_owned().name;
+    let list_series = std::mem::take(&mut columns[0]).take_materialized_series();
+    let elem_series = std::mem::take(&mut columns[1]).take_materialized_series();
+    let list_ca = list_series
+        .list()
+        .map_err(|e| PolarsError::ComputeError(format!("array_append: {}", e).into()))?;
+    let inner_dtype = list_ca.inner_dtype().clone();
+    let elem_casted = elem_series.cast(&inner_dtype)?;
+    let elem_len = elem_casted.len();
+    let elem_vec: Vec<Option<AnyValue>> = (0..elem_len).map(|i| elem_casted.get(i).ok()).collect();
+    let idx = RefCell::new(0usize);
+    let out = list_ca.try_apply_amortized(|amort_s| {
+        let i = *idx.borrow();
+        *idx.borrow_mut() += 1;
+        let ei = if elem_len == 1 { 0 } else { i };
+        let list_s = amort_s.as_ref().as_list();
+        let mut acc: Vec<Series> = Vec::new();
+        for e in list_s.amortized_iter().flatten() {
+            acc.push(e.deep_clone());
+        }
+        if let Some(Some(av)) = elem_vec.get(ei) {
+            let single = any_value_to_single_series(av.clone(), &inner_dtype)?;
+            acc.push(single);
+        }
+        if acc.is_empty() {
+            Ok(Series::new_empty(PlSmallStr::EMPTY, &inner_dtype))
+        } else {
+            let mut result = acc.remove(0);
+            for s in acc {
+                result.extend(&s)?;
+            }
+            Ok(result)
+        }
+    })?;
+    Ok(Some(Column::new(name, out.into_series())))
+}
+
+/// Prepend element to start of each list (PySpark array_prepend).
+pub fn apply_array_prepend(columns: &mut [Column]) -> PolarsResult<Option<Column>> {
+    use std::cell::RefCell;
+    if columns.len() < 2 {
+        return Err(PolarsError::ComputeError(
+            "array_prepend needs two columns (array, element)".into(),
+        ));
+    }
+    let name = columns[0].field().into_owned().name;
+    let list_series = std::mem::take(&mut columns[0]).take_materialized_series();
+    let elem_series = std::mem::take(&mut columns[1]).take_materialized_series();
+    let list_ca = list_series
+        .list()
+        .map_err(|e| PolarsError::ComputeError(format!("array_prepend: {}", e).into()))?;
+    let inner_dtype = list_ca.inner_dtype().clone();
+    let elem_casted = elem_series.cast(&inner_dtype)?;
+    let elem_len = elem_casted.len();
+    let elem_vec: Vec<Option<AnyValue>> = (0..elem_len).map(|i| elem_casted.get(i).ok()).collect();
+    let idx = RefCell::new(0usize);
+    let out = list_ca.try_apply_amortized(|amort_s| {
+        let i = *idx.borrow();
+        *idx.borrow_mut() += 1;
+        let ei = if elem_len == 1 { 0 } else { i };
+        let list_s = amort_s.as_ref().as_list();
+        let mut acc: Vec<Series> = Vec::new();
+        if let Some(Some(av)) = elem_vec.get(ei) {
+            let single = any_value_to_single_series(av.clone(), &inner_dtype)?;
+            acc.push(single);
+        }
+        for e in list_s.amortized_iter().flatten() {
+            acc.push(e.deep_clone());
+        }
+        if acc.is_empty() {
+            Ok(Series::new_empty(PlSmallStr::EMPTY, &inner_dtype))
+        } else {
+            let mut result = acc.remove(0);
+            for s in acc {
+                result.extend(&s)?;
+            }
+            Ok(result)
+        }
+    })?;
+    Ok(Some(Column::new(name, out.into_series())))
+}
+
+/// Insert element at 1-based position (PySpark array_insert). Negative pos = from end.
+pub fn apply_array_insert(columns: &mut [Column]) -> PolarsResult<Option<Column>> {
+    use std::cell::RefCell;
+    if columns.len() < 3 {
+        return Err(PolarsError::ComputeError(
+            "array_insert needs three columns (array, position, element)".into(),
+        ));
+    }
+    let name = columns[0].field().into_owned().name;
+    let list_series = std::mem::take(&mut columns[0]).take_materialized_series();
+    let pos_series = std::mem::take(&mut columns[1]).take_materialized_series();
+    let elem_series = std::mem::take(&mut columns[2]).take_materialized_series();
+    let list_ca = list_series
+        .list()
+        .map_err(|e| PolarsError::ComputeError(format!("array_insert: {}", e).into()))?;
+    let inner_dtype = list_ca.inner_dtype().clone();
+    let pos_ca = pos_series.cast(&DataType::Int64)?.i64().unwrap().clone();
+    let elem_casted = elem_series.cast(&inner_dtype)?;
+    let pos_len = pos_ca.len();
+    let pos_vec: Vec<i64> = (0..pos_len).map(|i| pos_ca.get(i).unwrap_or(1)).collect();
+    let elem_len = elem_casted.len();
+    let elem_vec: Vec<Option<AnyValue>> = (0..elem_len).map(|i| elem_casted.get(i).ok()).collect();
+    let idx = RefCell::new(0usize);
+    let out = list_ca.try_apply_amortized(|amort_s| {
+        let i = *idx.borrow();
+        *idx.borrow_mut() += 1;
+        let pi = if pos_len == 1 { 0 } else { i };
+        let ei = if elem_len == 1 { 0 } else { i };
+        let list_s = amort_s.as_ref().as_list();
+        let pos_val = pos_vec.get(pi).copied().unwrap_or(1);
+        let mut acc: Vec<Series> = Vec::new();
+        for e in list_s.amortized_iter().flatten() {
+            acc.push(e.deep_clone());
+        }
+        let len = acc.len() as i64;
+        let pos = if pos_val < 0 {
+            (len + pos_val + 1).max(0).min(len) as usize
+        } else {
+            ((pos_val - 1).max(0)).min(len) as usize
+        };
+        let single = elem_vec
+            .get(ei)
+            .and_then(|o| o.as_ref())
+            .map(|av: &AnyValue| any_value_to_single_series(av.clone(), &inner_dtype));
+        if let Some(Ok(s)) = single {
+            acc.insert(pos, s);
+        }
+        if acc.is_empty() {
+            Ok(Series::new_empty(PlSmallStr::EMPTY, &inner_dtype))
+        } else {
+            let mut result = acc.remove(0);
+            for s in acc {
+                result.extend(&s)?;
+            }
+            Ok(result)
+        }
+    })?;
+    Ok(Some(Column::new(name, out.into_series())))
+}
+
+// --- Phase 18: array_except, array_intersect, array_union (set ops) ---
+
+fn series_to_set_key(s: &Series) -> String {
+    std::string::ToString::to_string(s)
+}
+
+/// Elements in first array not in second (PySpark array_except).
+pub fn apply_array_except(columns: &mut [Column]) -> PolarsResult<Option<Column>> {
+    if columns.len() < 2 {
+        return Err(PolarsError::ComputeError(
+            "array_except needs two columns (array1, array2)".into(),
+        ));
+    }
+    let name = columns[0].field().into_owned().name;
+    let a_series = std::mem::take(&mut columns[0]).take_materialized_series();
+    let b_series = std::mem::take(&mut columns[1]).take_materialized_series();
+    let a_ca = a_series
+        .list()
+        .map_err(|e| PolarsError::ComputeError(format!("array_except: {}", e).into()))?;
+    let b_ca = b_series
+        .list()
+        .map_err(|e| PolarsError::ComputeError(format!("array_except: {}", e).into()))?;
+    let inner_dtype = a_ca.inner_dtype().clone();
+    let mut builder = polars::chunked_array::builder::get_list_builder(
+        &inner_dtype,
+        64,
+        a_ca.len(),
+        name.as_str().into(),
+    );
+    for (opt_a, opt_b) in a_ca.amortized_iter().zip(b_ca.amortized_iter()) {
+        match (opt_a, opt_b) {
+            (Some(a_amort), Some(b_amort)) => {
+                let a_list = a_amort.as_ref().as_list();
+                let b_list = b_amort.as_ref().as_list();
+                let b_keys: std::collections::HashSet<String> = b_list
+                    .amortized_iter()
+                    .flatten()
+                    .map(|e| series_to_set_key(&e.deep_clone()))
+                    .collect();
+                let mut acc: Vec<Series> = Vec::new();
+                let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+                for e in a_list.amortized_iter().flatten() {
+                    let s = e.deep_clone();
+                    let key = series_to_set_key(&s);
+                    if !b_keys.contains(&key) && seen.insert(key) {
+                        acc.push(s);
+                    }
+                }
+                let result = if acc.is_empty() {
+                    Series::new_empty(PlSmallStr::EMPTY, &inner_dtype)
+                } else {
+                    let mut r = acc.remove(0);
+                    for s in acc {
+                        r.extend(&s)?;
+                    }
+                    r
+                };
+                builder.append_series(&result)?;
+            }
+            _ => builder.append_null(),
+        }
+    }
+    Ok(Some(Column::new(name, builder.finish().into_series())))
+}
+
+/// Elements in both arrays (PySpark array_intersect). Distinct.
+pub fn apply_array_intersect(columns: &mut [Column]) -> PolarsResult<Option<Column>> {
+    if columns.len() < 2 {
+        return Err(PolarsError::ComputeError(
+            "array_intersect needs two columns (array1, array2)".into(),
+        ));
+    }
+    let name = columns[0].field().into_owned().name;
+    let a_series = std::mem::take(&mut columns[0]).take_materialized_series();
+    let b_series = std::mem::take(&mut columns[1]).take_materialized_series();
+    let a_ca = a_series
+        .list()
+        .map_err(|e| PolarsError::ComputeError(format!("array_intersect: {}", e).into()))?;
+    let b_ca = b_series
+        .list()
+        .map_err(|e| PolarsError::ComputeError(format!("array_intersect: {}", e).into()))?;
+    let inner_dtype = a_ca.inner_dtype().clone();
+    let mut builder = polars::chunked_array::builder::get_list_builder(
+        &inner_dtype,
+        64,
+        a_ca.len(),
+        name.as_str().into(),
+    );
+    for (opt_a, opt_b) in a_ca.amortized_iter().zip(b_ca.amortized_iter()) {
+        match (opt_a, opt_b) {
+            (Some(a_amort), Some(b_amort)) => {
+                let a_list = a_amort.as_ref().as_list();
+                let b_list = b_amort.as_ref().as_list();
+                let b_keys: std::collections::HashSet<String> = b_list
+                    .amortized_iter()
+                    .flatten()
+                    .map(|e| series_to_set_key(&e.deep_clone()))
+                    .collect();
+                let mut acc: Vec<Series> = Vec::new();
+                let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+                for e in a_list.amortized_iter().flatten() {
+                    let s = e.deep_clone();
+                    let key = series_to_set_key(&s);
+                    if b_keys.contains(&key) && seen.insert(key) {
+                        acc.push(s);
+                    }
+                }
+                let result = if acc.is_empty() {
+                    Series::new_empty(PlSmallStr::EMPTY, &inner_dtype)
+                } else {
+                    let mut r = acc.remove(0);
+                    for s in acc {
+                        r.extend(&s)?;
+                    }
+                    r
+                };
+                builder.append_series(&result)?;
+            }
+            _ => builder.append_null(),
+        }
+    }
+    Ok(Some(Column::new(name, builder.finish().into_series())))
+}
+
+/// Distinct elements from both arrays (PySpark array_union).
+pub fn apply_array_union(columns: &mut [Column]) -> PolarsResult<Option<Column>> {
+    if columns.len() < 2 {
+        return Err(PolarsError::ComputeError(
+            "array_union needs two columns (array1, array2)".into(),
+        ));
+    }
+    let name = columns[0].field().into_owned().name;
+    let a_series = std::mem::take(&mut columns[0]).take_materialized_series();
+    let b_series = std::mem::take(&mut columns[1]).take_materialized_series();
+    let a_ca = a_series
+        .list()
+        .map_err(|e| PolarsError::ComputeError(format!("array_union: {}", e).into()))?;
+    let b_ca = b_series
+        .list()
+        .map_err(|e| PolarsError::ComputeError(format!("array_union: {}", e).into()))?;
+    let inner_dtype = a_ca.inner_dtype().clone();
+    let mut builder = polars::chunked_array::builder::get_list_builder(
+        &inner_dtype,
+        64,
+        a_ca.len(),
+        name.as_str().into(),
+    );
+    for (opt_a, opt_b) in a_ca.amortized_iter().zip(b_ca.amortized_iter()) {
+        match (opt_a, opt_b) {
+            (Some(a_amort), Some(b_amort)) => {
+                let a_list = a_amort.as_ref().as_list();
+                let b_list = b_amort.as_ref().as_list();
+                let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+                let mut acc: Vec<Series> = Vec::new();
+                for e in a_list.amortized_iter().flatten() {
+                    let s = e.deep_clone();
+                    let key = series_to_set_key(&s);
+                    if seen.insert(key) {
+                        acc.push(s);
+                    }
+                }
+                for e in b_list.amortized_iter().flatten() {
+                    let s = e.deep_clone();
+                    let key = series_to_set_key(&s);
+                    if seen.insert(key) {
+                        acc.push(s);
+                    }
+                }
+                let result = if acc.is_empty() {
+                    Series::new_empty(PlSmallStr::EMPTY, &inner_dtype)
+                } else {
+                    let mut r = acc.remove(0);
+                    for s in acc {
+                        r.extend(&s)?;
+                    }
+                    r
+                };
+                builder.append_series(&result)?;
+            }
+            _ => builder.append_null(),
+        }
+    }
+    Ok(Some(Column::new(name, builder.finish().into_series())))
+}
+
+// --- Phase 18: map_concat, map_from_entries, map_contains_key, get ---
+
+/// Merge two map columns (PySpark map_concat). Last value wins for duplicate keys.
+pub fn apply_map_concat(columns: &mut [Column]) -> PolarsResult<Option<Column>> {
+    use polars::chunked_array::builder::get_list_builder;
+    use polars::chunked_array::StructChunked;
+    use polars::datatypes::Field;
+    if columns.len() < 2 {
+        return Err(PolarsError::ComputeError(
+            "map_concat needs at least two columns".into(),
+        ));
+    }
+    let name = columns[0].field().into_owned().name;
+    let a_series = std::mem::take(&mut columns[0]).take_materialized_series();
+    let b_series = std::mem::take(&mut columns[1]).take_materialized_series();
+    let a_ca = a_series
+        .list()
+        .map_err(|e| PolarsError::ComputeError(format!("map_concat: {}", e).into()))?;
+    let b_ca = b_series
+        .list()
+        .map_err(|e| PolarsError::ComputeError(format!("map_concat: {}", e).into()))?;
+    let struct_dtype = a_ca.inner_dtype().clone();
+    let (key_dtype, value_dtype) = match &struct_dtype {
+        DataType::Struct(fields) => {
+            let k = fields
+                .iter()
+                .find(|f| f.name == "key")
+                .map(|f| f.dtype.clone())
+                .unwrap_or(DataType::String);
+            let v = fields
+                .iter()
+                .find(|f| f.name == "value")
+                .map(|f| f.dtype.clone())
+                .unwrap_or(DataType::String);
+            (k, v)
+        }
+        _ => (DataType::String, DataType::String),
+    };
+    let out_struct = DataType::Struct(vec![
+        Field::new("key".into(), key_dtype),
+        Field::new("value".into(), value_dtype),
+    ]);
+    let n = a_ca.len();
+    let mut builder = get_list_builder(&out_struct, 64, n, name.as_str().into());
+    for (opt_a, opt_b) in a_ca.amortized_iter().zip(b_ca.amortized_iter()) {
+        let mut merged: std::collections::BTreeMap<String, (Series, Series)> =
+            std::collections::BTreeMap::new();
+        for amort in [opt_a, opt_b].into_iter().flatten() {
+            let list_s = amort.as_ref().as_list();
+            for elem in list_s.amortized_iter().flatten() {
+                let s = elem.deep_clone();
+                let st = s.struct_().map_err(|e| {
+                    PolarsError::ComputeError(format!("map_concat struct: {}", e).into())
+                })?;
+                let k_s = st.field_by_name("key").map_err(|e| {
+                    PolarsError::ComputeError(format!("map_concat key: {}", e).into())
+                })?;
+                let v_s = st.field_by_name("value").map_err(|e| {
+                    PolarsError::ComputeError(format!("map_concat value: {}", e).into())
+                })?;
+                let key = std::string::ToString::to_string(&k_s);
+                merged.insert(key, (k_s, v_s));
+            }
+        }
+        if merged.is_empty() {
+            builder.append_null();
+        } else {
+            let mut row_structs: Vec<Series> = Vec::new();
+            for (_, (k_s, v_s)) in merged {
+                let len = k_s.len();
+                let fields: [&Series; 2] = [&k_s, &v_s];
+                let st = StructChunked::from_series(PlSmallStr::EMPTY, len, fields.iter().copied())
+                    .map_err(|e| {
+                        PolarsError::ComputeError(format!("map_concat build: {}", e).into())
+                    })?
+                    .into_series();
+                row_structs.push(st);
+            }
+            let mut combined = row_structs.remove(0);
+            for s in row_structs {
+                combined.extend(&s)?;
+            }
+            builder.append_series(&combined)?;
+        }
+    }
+    Ok(Some(Column::new(name, builder.finish().into_series())))
+}
+
+/// True if map contains key (PySpark map_contains_key).
+pub fn apply_map_contains_key(columns: &mut [Column]) -> PolarsResult<Option<Column>> {
+    if columns.len() < 2 {
+        return Err(PolarsError::ComputeError(
+            "map_contains_key needs two columns (map, key)".into(),
+        ));
+    }
+    let name = columns[0].field().into_owned().name;
+    let map_series = std::mem::take(&mut columns[0]).take_materialized_series();
+    let key_series = std::mem::take(&mut columns[1]).take_materialized_series();
+    let map_ca = map_series
+        .list()
+        .map_err(|e| PolarsError::ComputeError(format!("map_contains_key: {}", e).into()))?;
+    let key_str = key_series.cast(&DataType::String)?;
+    let key_vec: Vec<String> = (0..key_str.len())
+        .map(|i| key_str.get(i).map(|av| av.to_string()).unwrap_or_default())
+        .collect();
+    let key_len = key_vec.len();
+    let mut results: Vec<bool> = Vec::with_capacity(map_ca.len());
+    for (i, opt_amort) in map_ca.amortized_iter().enumerate() {
+        let target = key_vec
+            .get(if key_len == 1 { 0 } else { i })
+            .map(|s| s.as_str())
+            .unwrap_or("");
+        let mut found = false;
+        if let Some(amort) = opt_amort {
+            let list_s = amort.as_ref().as_list();
+            for elem in list_s.amortized_iter().flatten() {
+                let s = elem.deep_clone();
+                if let Ok(st) = s.struct_() {
+                    if let Ok(k) = st.field_by_name("key") {
+                        let k_str: String =
+                            k.get(0).ok().map(|av| av.to_string()).unwrap_or_default();
+                        if k_str == target {
+                            found = true;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        results.push(found);
+    }
+    let out =
+        BooleanChunked::from_iter_options(name.as_str().into(), results.into_iter().map(Some));
+    Ok(Some(Column::new(name, out.into_series())))
+}
+
+/// Get value for key from map, or null (PySpark get).
+pub fn apply_get(columns: &mut [Column]) -> PolarsResult<Option<Column>> {
+    if columns.len() < 2 {
+        return Err(PolarsError::ComputeError(
+            "get needs two columns (map, key)".into(),
+        ));
+    }
+    let name = columns[0].field().into_owned().name;
+    let map_series = std::mem::take(&mut columns[0]).take_materialized_series();
+    let key_series = std::mem::take(&mut columns[1]).take_materialized_series();
+    let map_ca = map_series
+        .list()
+        .map_err(|e| PolarsError::ComputeError(format!("get: {}", e).into()))?;
+    let key_str = key_series.cast(&DataType::String)?;
+    let key_vec: Vec<String> = (0..key_str.len())
+        .map(|i| key_str.get(i).map(|av| av.to_string()).unwrap_or_default())
+        .collect();
+    let key_len = key_vec.len();
+    let value_dtype = match map_ca.inner_dtype() {
+        DataType::Struct(fields) => fields
+            .iter()
+            .find(|f| f.name == "value")
+            .map(|f| f.dtype.clone())
+            .unwrap_or(DataType::String),
+        _ => DataType::String,
+    };
+    let mut result_series: Vec<Series> = Vec::with_capacity(map_ca.len());
+    for (i, opt_amort) in map_ca.amortized_iter().enumerate() {
+        let target = key_vec
+            .get(if key_len == 1 { 0 } else { i })
+            .map(|s| s.as_str())
+            .unwrap_or("");
+        let mut found: Option<Series> = None;
+        if let Some(amort) = opt_amort {
+            let list_s = amort.as_ref().as_list();
+            for elem in list_s.amortized_iter().flatten() {
+                let s = elem.deep_clone();
+                if let Ok(st) = s.struct_() {
+                    if let Ok(k) = st.field_by_name("key") {
+                        let k_str: String =
+                            k.get(0).ok().map(|av| av.to_string()).unwrap_or_default();
+                        if k_str == target {
+                            if let Ok(v) = st.field_by_name("value") {
+                                found = Some(v);
+                            }
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        result_series
+            .push(found.unwrap_or_else(|| Series::full_null(PlSmallStr::EMPTY, 1, &value_dtype)));
+    }
+    let mut out = result_series.remove(0);
+    for s in result_series {
+        out.extend(&s)?;
+    }
+    Ok(Some(Column::new(name, out)))
+}
+
 /// ASCII value of first character (PySpark ascii). Returns Int32.
 pub fn apply_ascii(column: Column) -> PolarsResult<Option<Column>> {
     let name = column.field().into_owned().name;
@@ -1061,6 +1599,270 @@ pub fn apply_map_from_arrays(columns: &mut [Column]) -> PolarsResult<Option<Colu
             _ => {
                 builder.append_null();
             }
+        }
+    }
+    let out = builder.finish().into_series();
+    Ok(Some(Column::new(name, out)))
+}
+
+/// Zip two array columns into List(Struct{left, right}) for zip_with. Shorter padded with null.
+pub fn apply_zip_arrays_to_struct(columns: &mut [Column]) -> PolarsResult<Option<Column>> {
+    use polars::chunked_array::builder::get_list_builder;
+    use polars::chunked_array::StructChunked;
+    use polars::datatypes::Field;
+    if columns.len() < 2 {
+        return Err(PolarsError::ComputeError(
+            "zip_arrays_to_struct needs two columns (left, right)".into(),
+        ));
+    }
+    let name = columns[0].field().into_owned().name;
+    let a_series = std::mem::take(&mut columns[0]).take_materialized_series();
+    let b_series = std::mem::take(&mut columns[1]).take_materialized_series();
+    let a_ca = a_series
+        .list()
+        .map_err(|e| PolarsError::ComputeError(format!("zip_with left: {}", e).into()))?;
+    let b_ca = b_series
+        .list()
+        .map_err(|e| PolarsError::ComputeError(format!("zip_with right: {}", e).into()))?;
+    let left_dtype = a_ca.inner_dtype().clone();
+    let right_dtype = b_ca.inner_dtype().clone();
+    let struct_dtype = DataType::Struct(vec![
+        Field::new("left".into(), left_dtype.clone()),
+        Field::new("right".into(), right_dtype.clone()),
+    ]);
+    let mut builder = get_list_builder(&struct_dtype, 64, a_ca.len(), name.as_str().into());
+    for (opt_a, opt_b) in a_ca.amortized_iter().zip(b_ca.amortized_iter()) {
+        match (opt_a, opt_b) {
+            (Some(a_amort), Some(b_amort)) => {
+                let a_list = a_amort.as_ref().as_list();
+                let b_list = b_amort.as_ref().as_list();
+                let a_elems: Vec<Series> = a_list
+                    .amortized_iter()
+                    .flatten()
+                    .map(|amort| amort.deep_clone())
+                    .collect();
+                let b_elems: Vec<Series> = b_list
+                    .amortized_iter()
+                    .flatten()
+                    .map(|amort| amort.deep_clone())
+                    .collect();
+                let max_len = a_elems.len().max(b_elems.len());
+                let mut row_structs: Vec<Series> = Vec::new();
+                for i in 0..max_len {
+                    let left_s = a_elems.get(i).cloned();
+                    let right_s = b_elems.get(i).cloned();
+                    let (mut left_series, mut right_series) = match (left_s, right_s) {
+                        (Some(l), Some(r)) => (l, r),
+                        (Some(l), None) => {
+                            let r = Series::from_any_values_and_dtype(
+                                PlSmallStr::EMPTY,
+                                &[AnyValue::Null],
+                                &right_dtype,
+                                false,
+                            )
+                            .map_err(|e| {
+                                PolarsError::ComputeError(format!("zip null: {}", e).into())
+                            })?;
+                            (l, r)
+                        }
+                        (None, Some(r)) => {
+                            let l = Series::from_any_values_and_dtype(
+                                PlSmallStr::EMPTY,
+                                &[AnyValue::Null],
+                                &left_dtype,
+                                false,
+                            )
+                            .map_err(|e| {
+                                PolarsError::ComputeError(format!("zip null: {}", e).into())
+                            })?;
+                            (l, r)
+                        }
+                        (None, None) => {
+                            let mut l = Series::from_any_values_and_dtype(
+                                PlSmallStr::EMPTY,
+                                &[AnyValue::Null],
+                                &left_dtype,
+                                false,
+                            )
+                            .map_err(|e| {
+                                PolarsError::ComputeError(format!("zip null: {}", e).into())
+                            })?;
+                            l.rename("left".into());
+                            let mut r = Series::from_any_values_and_dtype(
+                                PlSmallStr::EMPTY,
+                                &[AnyValue::Null],
+                                &right_dtype,
+                                false,
+                            )
+                            .map_err(|e| {
+                                PolarsError::ComputeError(format!("zip null: {}", e).into())
+                            })?;
+                            r.rename("right".into());
+                            (l, r)
+                        }
+                    };
+                    left_series.rename("left".into());
+                    right_series.rename("right".into());
+                    let len = left_series.len();
+                    let fields: [&Series; 2] = [&left_series, &right_series];
+                    let st =
+                        StructChunked::from_series(PlSmallStr::EMPTY, len, fields.iter().copied())
+                            .map_err(|e| {
+                                PolarsError::ComputeError(format!("zip struct: {}", e).into())
+                            })?
+                            .into_series();
+                    row_structs.push(st);
+                }
+                if row_structs.is_empty() {
+                    builder
+                        .append_series(&Series::new_empty(PlSmallStr::EMPTY, &struct_dtype))
+                        .map_err(|e| {
+                            PolarsError::ComputeError(format!("zip builder: {}", e).into())
+                        })?;
+                } else {
+                    let mut combined = row_structs.remove(0);
+                    for s in row_structs {
+                        combined.extend(&s)?;
+                    }
+                    builder.append_series(&combined).map_err(|e| {
+                        PolarsError::ComputeError(format!("zip builder: {}", e).into())
+                    })?;
+                }
+            }
+            _ => builder.append_null(),
+        }
+    }
+    let out = builder.finish().into_series();
+    Ok(Some(Column::new(name, out)))
+}
+
+/// Merge two maps into List(Struct{key, value1, value2}) for map_zip_with. Union of keys.
+pub fn apply_map_zip_to_struct(columns: &mut [Column]) -> PolarsResult<Option<Column>> {
+    use polars::chunked_array::builder::get_list_builder;
+    use polars::chunked_array::StructChunked;
+    use polars::datatypes::Field;
+    use std::collections::BTreeMap;
+    if columns.len() < 2 {
+        return Err(PolarsError::ComputeError(
+            "map_zip_to_struct needs two columns (map1, map2)".into(),
+        ));
+    }
+    let name = columns[0].field().into_owned().name;
+    let a_series = std::mem::take(&mut columns[0]).take_materialized_series();
+    let b_series = std::mem::take(&mut columns[1]).take_materialized_series();
+    let a_ca = a_series
+        .list()
+        .map_err(|e| PolarsError::ComputeError(format!("map_zip_with map1: {}", e).into()))?;
+    let b_ca = b_series
+        .list()
+        .map_err(|e| PolarsError::ComputeError(format!("map_zip_with map2: {}", e).into()))?;
+    let struct_dtype_in = a_ca.inner_dtype().clone();
+    let (key_dtype, value_dtype) = match &struct_dtype_in {
+        DataType::Struct(fields) => {
+            let k = fields
+                .iter()
+                .find(|f| f.name == "key")
+                .map(|f| f.dtype.clone())
+                .unwrap_or(DataType::String);
+            let v = fields
+                .iter()
+                .find(|f| f.name == "value")
+                .map(|f| f.dtype.clone())
+                .unwrap_or(DataType::String);
+            (k, v)
+        }
+        _ => (DataType::String, DataType::String),
+    };
+    let out_struct_dtype = DataType::Struct(vec![
+        Field::new("key".into(), key_dtype.clone()),
+        Field::new("value1".into(), value_dtype.clone()),
+        Field::new("value2".into(), value_dtype.clone()),
+    ]);
+    let mut builder = get_list_builder(&out_struct_dtype, 64, a_ca.len(), name.as_str().into());
+    for (opt_a, opt_b) in a_ca.amortized_iter().zip(b_ca.amortized_iter()) {
+        match (opt_a, opt_b) {
+            (Some(a_amort), Some(b_amort)) => {
+                let a_list = a_amort.as_ref().as_list();
+                let b_list = b_amort.as_ref().as_list();
+                let mut key_to_vals: BTreeMap<String, (Series, Option<Series>, Option<Series>)> =
+                    BTreeMap::new();
+                for elem in a_list.amortized_iter().flatten() {
+                    let s = elem.deep_clone();
+                    if let Ok(st) = s.struct_() {
+                        if let (Ok(k), Ok(v)) = (st.field_by_name("key"), st.field_by_name("value"))
+                        {
+                            let key_str: String = std::string::ToString::to_string(&k);
+                            key_to_vals
+                                .entry(key_str.clone())
+                                .or_insert_with(|| (k.clone(), None, None))
+                                .1 = Some(v);
+                        }
+                    }
+                }
+                for elem in b_list.amortized_iter().flatten() {
+                    let s = elem.deep_clone();
+                    if let Ok(st) = s.struct_() {
+                        if let (Ok(k), Ok(v)) = (st.field_by_name("key"), st.field_by_name("value"))
+                        {
+                            let key_str: String = std::string::ToString::to_string(&k);
+                            key_to_vals
+                                .entry(key_str.clone())
+                                .or_insert_with(|| (k.clone(), None, None))
+                                .2 = Some(v);
+                        }
+                    }
+                }
+                let mut row_structs: Vec<Series> = Vec::new();
+                for (_, (k_series, v1_opt, v2_opt)) in key_to_vals {
+                    let mut k_renamed = k_series;
+                    k_renamed.rename("key".into());
+                    let mut v1_series = v1_opt.unwrap_or_else(|| {
+                        Series::from_any_values_and_dtype(
+                            PlSmallStr::EMPTY,
+                            &[AnyValue::Null],
+                            &value_dtype,
+                            false,
+                        )
+                        .unwrap()
+                    });
+                    v1_series.rename("value1".into());
+                    let mut v2_series = v2_opt.unwrap_or_else(|| {
+                        Series::from_any_values_and_dtype(
+                            PlSmallStr::EMPTY,
+                            &[AnyValue::Null],
+                            &value_dtype,
+                            false,
+                        )
+                        .unwrap()
+                    });
+                    v2_series.rename("value2".into());
+                    let len = k_renamed.len();
+                    let fields: [&Series; 3] = [&k_renamed, &v1_series, &v2_series];
+                    let st =
+                        StructChunked::from_series(PlSmallStr::EMPTY, len, fields.iter().copied())
+                            .map_err(|e| {
+                                PolarsError::ComputeError(format!("map_zip struct: {}", e).into())
+                            })?
+                            .into_series();
+                    row_structs.push(st);
+                }
+                if row_structs.is_empty() {
+                    builder
+                        .append_series(&Series::new_empty(PlSmallStr::EMPTY, &out_struct_dtype))
+                        .map_err(|e| {
+                            PolarsError::ComputeError(format!("map_zip builder: {}", e).into())
+                        })?;
+                } else {
+                    let mut combined = row_structs.remove(0);
+                    for s in row_structs {
+                        combined.extend(&s)?;
+                    }
+                    builder.append_series(&combined).map_err(|e| {
+                        PolarsError::ComputeError(format!("map_zip builder: {}", e).into())
+                    })?;
+                }
+            }
+            _ => builder.append_null(),
         }
     }
     let out = builder.finish().into_series();

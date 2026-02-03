@@ -1196,6 +1196,134 @@ pub fn map_from_arrays(keys: &Column, values: &Column) -> Column {
     keys.clone().map_from_arrays(values)
 }
 
+/// Merge two map columns (PySpark map_concat). Last value wins for duplicate keys.
+pub fn map_concat(a: &Column, b: &Column) -> Column {
+    a.clone().map_concat(b)
+}
+
+/// Array of structs {key, value} to map (PySpark map_from_entries).
+pub fn map_from_entries(column: &Column) -> Column {
+    column.clone().map_from_entries()
+}
+
+/// True if map contains key (PySpark map_contains_key).
+pub fn map_contains_key(map_col: &Column, key: &Column) -> Column {
+    map_col.clone().map_contains_key(key)
+}
+
+/// Get value for key from map, or null (PySpark get).
+pub fn get(map_col: &Column, key: &Column) -> Column {
+    map_col.clone().get(key)
+}
+
+/// Filter map entries by predicate (PySpark map_filter).
+pub fn map_filter(map_col: &Column, predicate: Expr) -> Column {
+    map_col.clone().map_filter(predicate)
+}
+
+/// Merge two maps by key with merge function (PySpark map_zip_with).
+pub fn map_zip_with(map1: &Column, map2: &Column, merge: Expr) -> Column {
+    map1.clone().map_zip_with(map2, merge)
+}
+
+/// Convenience: zip_with with coalesce(left, right) merge.
+pub fn zip_with_coalesce(left: &Column, right: &Column) -> Column {
+    use polars::prelude::col;
+    let left_field = col("").struct_().field_by_name("left");
+    let right_field = col("").struct_().field_by_name("right");
+    let merge = crate::column::Column::from_expr(
+        coalesce(&[
+            &crate::column::Column::from_expr(left_field, None),
+            &crate::column::Column::from_expr(right_field, None),
+        ])
+        .into_expr(),
+        None,
+    );
+    left.clone().zip_with(right, merge.into_expr())
+}
+
+/// Convenience: map_zip_with with coalesce(value1, value2) merge.
+pub fn map_zip_with_coalesce(map1: &Column, map2: &Column) -> Column {
+    use polars::prelude::col;
+    let v1 = col("").struct_().field_by_name("value1");
+    let v2 = col("").struct_().field_by_name("value2");
+    let merge = coalesce(&[
+        &crate::column::Column::from_expr(v1, None),
+        &crate::column::Column::from_expr(v2, None),
+    ])
+    .into_expr();
+    map1.clone().map_zip_with(map2, merge)
+}
+
+/// Convenience: map_filter with value > threshold predicate.
+pub fn map_filter_value_gt(map_col: &Column, threshold: f64) -> Column {
+    use polars::prelude::{col, lit};
+    let pred = col("").struct_().field_by_name("value").gt(lit(threshold));
+    map_col.clone().map_filter(pred)
+}
+
+// --- Phase 18: struct, named_struct ---
+
+/// Create struct from columns using column names as field names (PySpark struct).
+pub fn struct_(columns: &[&Column]) -> Column {
+    use polars::prelude::as_struct;
+    if columns.is_empty() {
+        panic!("struct requires at least one column");
+    }
+    let exprs: Vec<Expr> = columns.iter().map(|c| c.expr().clone()).collect();
+    crate::column::Column::from_expr(as_struct(exprs), None)
+}
+
+/// Create struct with explicit field names (PySpark named_struct). Pairs of (name, column).
+pub fn named_struct(pairs: &[(&str, &Column)]) -> Column {
+    use polars::prelude::as_struct;
+    if pairs.is_empty() {
+        panic!("named_struct requires at least one (name, column) pair");
+    }
+    let exprs: Vec<Expr> = pairs
+        .iter()
+        .map(|(name, col)| col.expr().clone().alias(*name))
+        .collect();
+    crate::column::Column::from_expr(as_struct(exprs), None)
+}
+
+// --- Array Phase 18 ---
+
+/// Append element to end of list (PySpark array_append).
+pub fn array_append(array: &Column, elem: &Column) -> Column {
+    array.clone().array_append(elem)
+}
+
+/// Prepend element to start of list (PySpark array_prepend).
+pub fn array_prepend(array: &Column, elem: &Column) -> Column {
+    array.clone().array_prepend(elem)
+}
+
+/// Insert element at 1-based position (PySpark array_insert).
+pub fn array_insert(array: &Column, pos: &Column, elem: &Column) -> Column {
+    array.clone().array_insert(pos, elem)
+}
+
+/// Elements in first array not in second (PySpark array_except).
+pub fn array_except(a: &Column, b: &Column) -> Column {
+    a.clone().array_except(b)
+}
+
+/// Elements in both arrays (PySpark array_intersect).
+pub fn array_intersect(a: &Column, b: &Column) -> Column {
+    a.clone().array_intersect(b)
+}
+
+/// Distinct elements from both arrays (PySpark array_union).
+pub fn array_union(a: &Column, b: &Column) -> Column {
+    a.clone().array_union(b)
+}
+
+/// Zip two arrays element-wise with merge function (PySpark zip_with).
+pub fn zip_with(left: &Column, right: &Column, merge: Expr) -> Column {
+    left.clone().zip_with(right, merge)
+}
+
 // --- JSON functions (Phase 10) ---
 
 /// Extract JSON path from string column (PySpark get_json_object).

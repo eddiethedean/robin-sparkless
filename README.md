@@ -13,7 +13,7 @@ A Rust DataFrame library that aims to **emulate PySpark’s DataFrame behavior a
 - **Optional SQL** (`--features sql`): `spark.sql("SELECT ...")` with temp views (`createOrReplaceTempView`, `table`); single SELECT, FROM/JOIN, WHERE, GROUP BY, ORDER BY, LIMIT
 - **Optional Delta Lake** (`--features delta`): `read_delta` / `read_delta_with_version` (time travel), `write_delta` (overwrite/append) via delta-rs
 - **Benchmarks**: `cargo bench` compares robin-sparkless vs plain Polars; target within ~2x for supported pipelines
-- **Sparkless backend target**: Intended to power Sparkless's execution engine; aligns with its 403+ PySpark functions and 270+ test fixtures; **103 parity fixtures** passing (~192+ functions). **Phase 17 completed**: datetime/unix (unix_timestamp, from_unixtime, make_date, timestamp_seconds/millis/micros, unix_date, date_from_unix_date), math (pmod, factorial). Phase 16: string/regex. Phase 15: aliases, string, math, array_distinct. Path to 100%: ROADMAP Phases 18–19 (remaining gaps: array/map/struct, aggregates/try_*), Phase 20 (publish crate), Phase 21 (Sparkless integration).
+- **Sparkless backend target**: Intended to power Sparkless's execution engine; aligns with its 403+ PySpark functions and 270+ test fixtures; **124 parity fixtures** passing (~208+ functions). **Phase 18 completed**: array (array_append, array_prepend, array_insert, array_except, array_intersect, array_union, zip_with), map (map_concat, map_from_entries, map_contains_key, map_filter, map_zip_with, get), struct (named_struct, struct). Phase 17: datetime/unix, pmod, factorial. Phase 16: string/regex. Path to 100%: ROADMAP Phases 19–21 (aggregates/try_*, publish crate, Sparkless integration).
 
 ## Installation
 

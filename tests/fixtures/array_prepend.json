@@ -1,0 +1,31 @@
+{
+  "name": "array_prepend",
+  "pyspark_version": "3.5.0",
+  "input": {
+    "schema": [
+      { "name": "id", "type": "bigint" },
+      { "name": "s", "type": "string" }
+    ],
+    "rows": [
+      [1, "b|c"],
+      [2, "x"]
+    ]
+  },
+  "operations": [
+    { "op": "withColumn", "column": "arr", "expr": "split(col('s'), '|')" },
+    { "op": "withColumn", "column": "prepended", "expr": "array_prepend(col('arr'), lit('a'))" },
+    { "op": "select", "columns": ["id", "s", "arr", "prepended"] }
+  ],
+  "expected": {
+    "schema": [
+      { "name": "id", "type": "bigint" },
+      { "name": "s", "type": "string" },
+      { "name": "arr", "type": "array<string>" },
+      { "name": "prepended", "type": "array<string>" }
+    ],
+    "rows": [
+      [1, "b|c", ["b", "c"], ["a", "b", "c"]],
+      [2, "x", ["x"], ["a", "x"]]
+    ]
+  }
+}

@@ -35,5 +35,6 @@ This document lists **intentional or known divergences** from PySpark semantics 
 - **Window fixtures**: percent_rank, cume_dist, ntile, nth_value covered via multi-step workaround.
 - **Phase 16 string/regex**: `regexp_count`, `regexp_instr`, `regexp_substr`, `split_part`, `find_in_set`, `format_string`, `printf` — all implemented.
 - **Phase 17 datetime/unix**: `unix_timestamp`, `to_unix_timestamp`, `from_unixtime`, `make_date`, `timestamp_seconds`, `timestamp_millis`, `timestamp_micros`, `unix_date`, `date_from_unix_date`, `pmod`, `factorial` — all implemented. Note: `unix_timestamp` and `from_unixtime` use chrono; results may differ from PySpark when session timezone differs from system timezone.
+- **Phase 18 array/map/struct**: `array_append`, `array_prepend`, `array_insert`, `array_except`, `array_intersect`, `array_union`, `map_concat`, `map_from_entries`, `map_contains_key`, `get`, `struct`, `named_struct`, **`map_filter`**, **`map_zip_with`**, **`zip_with`** — all implemented. Uses Expr-based predicates/merge (e.g. `col("").struct_().field_by_name("value") > lit(30)`, `coalesce(left, right)`). Python: `map_filter_value_gt`, `zip_with_coalesce`, `map_zip_with_coalesce` convenience helpers.
 
 See [ROADMAP.md](ROADMAP.md) and [FULL_BACKEND_ROADMAP.md](FULL_BACKEND_ROADMAP.md) for the full list.

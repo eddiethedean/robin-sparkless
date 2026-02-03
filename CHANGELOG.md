@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Phase 18 – Remaining gaps 3: array, map, struct** ✅ **COMPLETED**
+  - **Array**: `array_append`, `array_prepend`, `array_insert`, `array_except`, `array_intersect`, `array_union` (UDFs in udfs.rs + Column/functions + PyO3 + parity parser).
+  - **Map**: `map_concat`, `map_from_entries`, `map_contains_key`, `get` (map element); `create_map` added to parity parser.
+  - **Struct**: `struct`, `named_struct` (Polars as_struct expr).
+  - **Parity fixtures**: `array_append`, `array_prepend`, `array_insert`, `array_except`, `array_intersect`, `array_union`, `map_contains_key`, `get_map`, `struct_test`, `named_struct_test`, `map_concat`, **`map_filter`**, **`zip_with`**, **`map_zip_with`** (103 → 124 fixtures).
+  - **Parity harness**: Added struct/map JSON conversion so struct columns and map (List(Struct{key,value})) columns compare correctly in fixtures.
+  - **Phase 18 deferred (now implemented)**: `map_filter`, `map_zip_with`, `zip_with` — implemented via UDF + list.eval with Expr-based predicates/merge. PyO3: `map_filter_value_gt`, `zip_with_coalesce`, `map_zip_with_coalesce`.
+
 - **Phase 17 – Remaining gaps 2: datetime/unix and math** ✅ **COMPLETED**
   - **Datetime/unix**: `unix_timestamp`, `to_unix_timestamp`, `from_unixtime`, `make_date`, `timestamp_seconds`, `timestamp_millis`, `timestamp_micros`, `unix_date`, `date_from_unix_date` (Rust + PyO3 + parity parser).
   - **Math**: `pmod`, `factorial` (positive modulus; n! for n in 0..=20).

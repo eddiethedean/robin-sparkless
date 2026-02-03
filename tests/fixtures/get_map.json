@@ -1,0 +1,27 @@
+{
+  "name": "get_map",
+  "pyspark_version": "3.5.0",
+  "input": {
+    "schema": [
+      { "name": "id", "type": "bigint" }
+    ],
+    "rows": [[1], [2]]
+  },
+  "operations": [
+    { "op": "withColumn", "column": "m", "expr": "create_map(lit('a'), lit(10), lit('b'), lit(20))" },
+    { "op": "withColumn", "column": "va", "expr": "get(col('m'), lit('a'))" },
+    { "op": "withColumn", "column": "vc", "expr": "get(col('m'), lit('c'))" },
+    { "op": "select", "columns": ["id", "va", "vc"] }
+  ],
+  "expected": {
+    "schema": [
+      { "name": "id", "type": "bigint" },
+      { "name": "va", "type": "int" },
+      { "name": "vc", "type": "int" }
+    ],
+    "rows": [
+      [1, 10, null],
+      [2, 10, null]
+    ]
+  }
+}
