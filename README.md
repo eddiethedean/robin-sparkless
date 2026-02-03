@@ -13,7 +13,7 @@ A Rust DataFrame library that aims to **emulate PySpark’s DataFrame behavior a
 - **Optional SQL** (`--features sql`): `spark.sql("SELECT ...")` with temp views (`createOrReplaceTempView`, `table`); single SELECT, FROM/JOIN, WHERE, GROUP BY, ORDER BY, LIMIT
 - **Optional Delta Lake** (`--features delta`): `read_delta` / `read_delta_with_version` (time travel), `write_delta` (overwrite/append) via delta-rs
 - **Benchmarks**: `cargo bench` compares robin-sparkless vs plain Polars; target within ~2x for supported pipelines
-- **Sparkless backend target**: Intended to power Sparkless's execution engine; aligns with its 403+ PySpark functions and 270+ test fixtures; **80 parity fixtures** passing (~120+ functions: array, array_flatten/array_repeat, window, string, String 6.4 including soundex/levenshtein/crc32/xxhash64, Map, JSON, groupBy, joins, etc.; Phase 8 completed Feb 2026)
+- **Sparkless backend target**: Intended to power Sparkless's execution engine; aligns with its 403+ PySpark functions and 270+ test fixtures; **80 parity fixtures** passing (~120+ functions: array, array_flatten/array_repeat, window, string, String 6.4 including soundex/levenshtein/crc32/xxhash64, Map, JSON, groupBy, joins, etc.; Phase 8–11 completed). Path to 100% before integration: ROADMAP Phases 12–16 (DataFrame methods 85, functions 403, fixtures 150+, then Sparkless integration).
 
 ## Installation
 
@@ -170,7 +170,7 @@ Core behavior (null handling, grouping semantics, joins, window functions, array
 - [docs/](docs/README.md) – Documentation index
 - [CHANGELOG.md](CHANGELOG.md) – Version history and release notes
 - [docs/SPARKLESS_INTEGRATION_ANALYSIS.md](docs/SPARKLESS_INTEGRATION_ANALYSIS.md) – Sparkless backend replacement strategy, architecture learnings, test conversion
-- [docs/ROADMAP.md](docs/ROADMAP.md) – Development roadmap including Sparkless integration phases
+- [docs/ROADMAP.md](docs/ROADMAP.md) – Development roadmap; Phases 12–16 path to 100% before Sparkless integration
 - [docs/FULL_BACKEND_ROADMAP.md](docs/FULL_BACKEND_ROADMAP.md) – Phased plan to full Sparkless backend replacement (400+ functions, PyO3 bridge)
 - [docs/PYTHON_API.md](docs/PYTHON_API.md) – Python API contract (Phase 4 PyO3 bridge): build, install, method signatures, data transfer
 - [docs/PARITY_STATUS.md](docs/PARITY_STATUS.md) – PySpark parity coverage matrix (80 fixtures)

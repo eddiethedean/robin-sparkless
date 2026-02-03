@@ -276,13 +276,29 @@ See [PYTHON_API.md](PYTHON_API.md) for the API contract Sparkless maintainers ne
 
 ## Success Metrics
 
-| Metric | Current | Phase 2 | Phase 5 | Full Backend |
-|--------|---------|---------|---------|--------------|
-| Parity fixtures | 80 | 60+ | 80+ | 150+ |
-| Functions implemented | ~120+ | ~85 | ~120 | 250+ |
-| DataFrame methods | ~35+ | ~35+ | ~40 | 60+ |
-| Sparkless tests passing (robin backend) | 0 | — | 50+ | 200+ |
-| PyO3 bridge | ✅ Yes (optional) | — | Yes | Yes |
+| Metric | Current | After Phase 12 | After Phase 15 | Full Backend (Phase 16) |
+|--------|---------|----------------|----------------|-------------------------|
+| Parity fixtures | 80 | 80+ | 150+ | 150+ |
+| Functions implemented | ~120+ | ~120 | 403 | 403 |
+| DataFrame methods | ~35+ | 85 | 85 | 85 |
+| Sparkless tests passing (robin backend) | 0 | — | — | 200+ |
+| PyO3 bridge | ✅ Yes (optional) | Yes | Yes | Yes |
+
+---
+
+## Path to 100% Before Sparkless Integration (ROADMAP Phases 12–16)
+
+To reach **100% feature parity** before wiring the robin backend into Sparkless, [ROADMAP.md](ROADMAP.md) defines the following phases between Phase 11 (done) and integration:
+
+| ROADMAP Phase | Goal | Est. Effort |
+|---------------|------|-------------|
+| **12** | **DataFrame methods parity**: Implement remaining ~50–60 methods (sample, randomSplit, stat, summary, write/saveAsTable, checkpoint, toJSON, na sub-API, etc.) → 85 total | 4–6 weeks |
+| **13** | **Functions batch 1**: String, binary, collection (~80 new functions → ~200 total). String (ascii, base64, format_string, overlay, etc.), binary (sha1, sha2, md5, aes_*), collection fill-out | 4–6 weeks |
+| **14** | **Functions batch 2**: Math, datetime, type/conditional (~100 new → ~300 total). Full math (sin/cos/tan, degrees/radians, signum), datetime (quarter, weekofyear, add_months, months_between, next_day), casts and conditionals | 4–6 weeks |
+| **15** | **Functions batch 3 + fixture growth**: Remaining ~103 functions → 403; parity fixtures 80 → 150+; convert more Sparkless expected_outputs, extend harness for new types | 6–8 weeks |
+| **16** | **Sparkless integration**: BackendFactory "robin", 200+ tests passing, PyO3 surface updated for all new functions | 4–6 weeks |
+
+Detail for each phase is in [ROADMAP.md](ROADMAP.md) (§ Phase 12–16).
 
 ---
 
@@ -297,6 +313,9 @@ See [PYTHON_API.md](PYTHON_API.md) for the API contract Sparkless maintainers ne
 7. **Phase 7**: SQL, Delta, performance ✅ **Completed** (optional features; see §7)
 8. **Phase 8**: ✅ **COMPLETED** – array_repeat, array_flatten, Map (6b), String 6.4 (soundex/levenshtein/crc32/xxhash64), window fixtures, documentation (see Phase 8 section above)
 9. **Phase 9**: High-value functions (datetime, string repeat/reverse/lpad/rpad, math sqrt/pow/exp/log, nvl/nullif/nanvl, first/last/approx_count_distinct) + DataFrame methods (replace, cross_join, describe, cache/persist/unpersist, subtract, intersect) ✅ **COMPLETED**
+10. **Phase 10**: Complex types (Map, JSON, array_repeat, string 6.4) + window fixture simplification ✅ **COMPLETED**
+11. **Phase 11**: Parity scale (80 fixtures), harness date/datetime/boolean, converter + CI ✅ **COMPLETED**
+12. **ROADMAP Phase 12–16**: Path to 100% before integration — DataFrame methods (85), functions in 3 batches (403), fixtures (150+), then Sparkless integration (see § Path to 100% above).
 
 ---
 

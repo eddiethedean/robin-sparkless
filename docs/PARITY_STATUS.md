@@ -169,6 +169,7 @@ Status as of **February 2026**: **PASSING (80 fixtures)**. **Phase 11**: Parity 
 ## Next additions to the matrix (recommended)
 
 - Add more join edge-case fixtures (e.g. left/outer with null keys) if needed.
+- **ROADMAP Phases 12–16**: Path to 100% before Sparkless integration — Phase 12 (DataFrame methods → 85), Phase 13–15 (functions in three batches → 403, fixtures → 150+), Phase 16 (Sparkless integration, 200+ tests). See [ROADMAP.md](ROADMAP.md).
 
 ## Sparkless Test Conversion
 

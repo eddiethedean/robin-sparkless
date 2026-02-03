@@ -115,7 +115,7 @@ The path to full backend replacement is planned in [FULL_BACKEND_ROADMAP.md](FUL
 - **Phase 2 – High-Value Functions**: String (length, trim, regexp_*), datetime (to_date, date_add), math (stddev, variance)
 - **Phase 3 – DataFrame Methods**: union, unionByName, distinct, drop, dropna, fillna, limit, withColumnRenamed ✅ **COMPLETED**
 - **Phase 4 – PyO3 Bridge**: Python bindings for Sparkless to call robin-sparkless ✅ **COMPLETED** (see [PYTHON_API.md](PYTHON_API.md))
-- **Phase 5 – Test Conversion**: Converter extended (join, window, withColumn, union, distinct, drop, dropna, fillna, limit, withColumnRenamed); parity discovers `tests/fixtures/` + `tests/fixtures/converted/`; `make sparkless-parity` (set SPARKLESS_EXPECTED_OUTPUTS); [SPARKLESS_PARITY_STATUS.md](SPARKLESS_PARITY_STATUS.md) for pass/fail; **73 passing** (50+ target met) ✅ **COMPLETED**
+- **Phase 5 – Test Conversion**: Converter extended (join, window, withColumn, union, distinct, drop, dropna, fillna, limit, withColumnRenamed); parity discovers `tests/fixtures/` + `tests/fixtures/converted/`; `make sparkless-parity` (set SPARKLESS_EXPECTED_OUTPUTS); [SPARKLESS_PARITY_STATUS.md](SPARKLESS_PARITY_STATUS.md) for pass/fail; **80 passing** (50+ target met) ✅ **COMPLETED**
 - **Phase 6 – Broad Parity**: Array (6a ✅; array_position, array_remove, posexplode via list.eval; array_repeat, array_flatten ✅ Phase 8), Map (6b ✅ Phase 8), JSON (6c ✅), additional string (6e ✅; 6.4 soundex/levenshtein/crc32/xxhash64 ✅ Phase 8), window extensions (6d ✅; percent_rank/cume_dist/ntile/nth_value covered).
 - **Phase 7 – SQL & Advanced** ✅ **COMPLETED**: Optional **SQL** (`sql` feature: `spark.sql()`, temp views); optional **Delta** (`delta` feature: `read_delta`, `read_delta_with_version`, `write_delta`); benchmarks and error-message improvements. See [FULL_BACKEND_ROADMAP.md](FULL_BACKEND_ROADMAP.md) §7.
 - **Phase 8 – Remaining Parity** ✅ **COMPLETED** (Feb 2026): array_repeat, array_flatten; Map (create_map, map_keys, map_values, map_entries, map_from_arrays); String 6.4 (soundex, levenshtein, crc32, xxhash64); window fixtures covered; documentation of differences.
@@ -124,7 +124,7 @@ The path to full backend replacement is planned in [FULL_BACKEND_ROADMAP.md](FUL
 
 We know we're on track if:
 
-- ✅ **Behavioral parity**: For core operations (filter, select, orderBy, groupBy+count/sum/avg/min/max/agg, when/coalesce, basic type coercion, null semantics, joins, window functions, array and string functions), DataFrame methods (union, distinct, drop, dropna, fillna, limit, withColumnRenamed), and file readers (CSV/Parquet/JSON), PySpark and Robin Sparkless produce the same schema and data on test fixtures. **Status: PASSING (73 fixtures)**
+- ✅ **Behavioral parity**: For core operations (filter, select, orderBy, groupBy+count/sum/avg/min/max/agg, when/coalesce, basic type coercion, null semantics, joins, window functions, array and string functions), DataFrame methods (union, distinct, drop, dropna, fillna, limit, withColumnRenamed), and file readers (CSV/Parquet/JSON), PySpark and Robin Sparkless produce the same schema and data on test fixtures. **Status: PASSING (80 fixtures)**
 - ✅ **Documentation of differences**: Any divergence from PySpark semantics is called out in [PYSPARK_DIFFERENCES.md](PYSPARK_DIFFERENCES.md) (window, SQL, Delta, Phase 8).
 - ✅ **Performance envelope**: For supported operations, we stay within ~2x of doing the same thing directly in Polars. **Status: BENCHMARKED** (`cargo bench`; see [QUICKSTART.md](QUICKSTART.md) § Benchmarks)
 
@@ -132,9 +132,9 @@ We know we're on track if:
 
 | Metric | Current | Phase 5 | Full Backend |
 |--------|---------|---------|--------------|
-| Parity fixtures | 73 | 80+ | 150+ |
-| Functions | ~120+ | ~120 | 250+ |
-| DataFrame methods | ~25 | ~40 | 60+ |
+| Parity fixtures | 80 | 80+ | 150+ |
+| Functions | ~120+ | ~120 | 403 |
+| DataFrame methods | ~35 | 85 | 85 |
 | Sparkless tests passing (robin backend) | 0 | 50+ | 200+ |
 | PyO3 bridge | ✅ Yes (optional) | Yes | Yes |
 
@@ -160,7 +160,7 @@ We know we're on track if:
 - ✅ DataFrame methods: `union`, `union_by_name`, `distinct`, `drop`, `dropna`, `fillna`, `limit`, `with_column_renamed`
 - ✅ **PyO3 bridge** (optional `pyo3` feature): Python module `robin_sparkless` with SparkSession, DataFrame, Column, GroupedData; `create_dataframe`, filter, select, join, group_by, collect (list of dicts), etc. Build: `maturin develop --features pyo3`. Tests: `make test` runs Rust + Python smoke tests. See [PYTHON_API.md](PYTHON_API.md).
 - ✅ **Phase 9** (high-value functions & DataFrame methods): Datetime (`current_date`, `current_timestamp`, `date_add`, `date_sub`, `hour`, `minute`, `second`, `datediff`, `last_day`, `trunc`); string (`repeat`, `reverse`, `instr`, `lpad`, `rpad`); math (`sqrt`, `pow`, `exp`, `log`); conditional (`nvl`/`ifnull`, `nullif`, `nanvl`); GroupedData (`first`, `last`, `approx_count_distinct`); DataFrame (`replace`, `cross_join`, `describe`, `cache`/`persist`/`unpersist`, `subtract`, `intersect`).
-- ✅ Parity test harness with 73 passing fixtures:
+- ✅ Parity test harness with 80 passing fixtures:
   - `filter_age_gt_30`: filter + select + orderBy
   - `filter_and_or`: nested boolean logic with AND/OR and parentheses
   - `filter_nested`: nested boolean logic
@@ -197,7 +197,7 @@ We know we're on track if:
 
 ## Next Steps to Full Sparkless Parity
 
-To reach **full Sparkless parity** (robin-sparkless as a complete backend replacement), the remaining work is organized into phases 9–12 below. Reference: [FULL_BACKEND_ROADMAP.md](FULL_BACKEND_ROADMAP.md), [PYSPARK_FUNCTION_MATRIX](https://github.com/eddiethedean/sparkless/blob/main/PYSPARK_FUNCTION_MATRIX.md).
+To reach **full Sparkless parity** (robin-sparkless as a complete backend replacement), the remaining work is organized into phases 12–16 below (phases 9–11 complete). Reference: [FULL_BACKEND_ROADMAP.md](FULL_BACKEND_ROADMAP.md), [PYSPARK_FUNCTION_MATRIX](https://github.com/eddiethedean/sparkless/blob/main/PYSPARK_FUNCTION_MATRIX.md).
 
 ### Phase overview
 
@@ -205,8 +205,12 @@ To reach **full Sparkless parity** (robin-sparkless as a complete backend replac
 |-------|------|-------------|
 | **9** | High-value functions + DataFrame methods | 4–6 weeks |
 | **10** | Complex types (Map, JSON, array_repeat, string 6.4) + window fixture simplification | ✅ **COMPLETED** |
-| **11** | Parity scale (80+ → 150+ fixtures), harness date/datetime, converter + CI | ✅ **COMPLETED** |
-| **12** | Sparkless integration (BackendFactory "robin", 200+ tests), PyO3 surface | 4–6 weeks |
+| **11** | Parity scale (80+ fixtures), harness date/datetime, converter + CI | ✅ **COMPLETED** |
+| **12** | DataFrame methods parity (~50–60 remaining → 85 total) | 4–6 weeks |
+| **13** | Functions batch 1: string, binary, collection (~80 new → ~200 total) | 4–6 weeks |
+| **14** | Functions batch 2: math, datetime, type/conditional (~100 new → ~300 total) | 4–6 weeks |
+| **15** | Functions batch 3: remaining functions + fixture growth (80 → 150+ fixtures, 403 functions) | 6–8 weeks |
+| **16** | Sparkless integration (BackendFactory "robin", 200+ tests), PyO3 surface | 4–6 weeks |
 
 ---
 
@@ -254,16 +258,61 @@ To reach **full Sparkless parity** (robin-sparkless as a complete backend replac
 
 ---
 
-### Phase 12 – Sparkless integration & PyO3 surface (4–6 weeks)
+### Phase 12 – DataFrame methods parity (4–6 weeks)
+
+**Goal**: Implement the remaining ~50–60 DataFrame methods so robin-sparkless reaches the 85-method target before integration.
+
+- **Methods**: Complete methods from [PYSPARK_FUNCTION_MATRIX](https://github.com/eddiethedean/sparkless/blob/main/PYSPARK_FUNCTION_MATRIX.md) DataFrame section: e.g. `sample`, `randomSplit`, `stat` (cov, corr), `summary`, `toPandas`/collect variants, `write`/`saveAsTable`, `checkpoint`, `localCheckpoint`, `toJSON`, `toDF`, column reordering, `na` sub-API, etc.
+- **Parity**: Add fixtures for any new methods that affect schema or row output.
+- **Outcome**: DataFrame methods ~35 → 85; ready for function batches.
+
+---
+
+### Phase 13 – Functions batch 1: string, binary, collection (4–6 weeks)
+
+**Goal**: Add ~80 functions in string, binary, and collection categories toward ~200 total functions.
+
+- **String**: Remaining string functions from PYSPARK_FUNCTION_MATRIX (e.g. `ascii`, `base64`, `unbase64`, `format_string`, `format_number`, `overlay`, `position`, `char`, `chr`, `encode`/`decode`, etc.).
+- **Binary**: `sha1`, `sha2`, `md5`, `aes_*`, binary length/concat.
+- **Collection**: Remaining array/map functions not yet implemented; ensure full coverage of list/map APIs.
+- **Parity**: New fixtures for high-impact functions; extend harness if new types (binary) are needed.
+- **Outcome**: Functions ~120 → ~200.
+
+---
+
+### Phase 14 – Functions batch 2: math, datetime, type/conditional (4–6 weeks)
+
+**Goal**: Add ~100 functions in math, datetime, type casting, and conditional logic toward ~300 total.
+
+- **Math**: Full math set (sin, cos, tan, acos, asin, atan, atan2, degrees, radians, signum, etc.) and remaining aggregates.
+- **Datetime**: Remaining date/timestamp functions (quarter, weekofyear, dayofweek, dayofyear, add_months, months_between, next_day, etc.).
+- **Type/conditional**: Cast family, `try_cast`, type testing; remaining conditional (e.g. `greatest`, `least`, `isnan`, `isnull` already done where applicable).
+- **Parity**: Fixtures for datetime edge cases and type coercion.
+- **Outcome**: Functions ~200 → ~300.
+
+---
+
+### Phase 15 – Functions batch 3: remaining + fixture growth (6–8 weeks)
+
+**Goal**: Reach 403-function parity and grow parity fixtures from 80 to 150+.
+
+- **Functions**: Implement remaining ~103 functions from PYSPARK_FUNCTION_MATRIX (misc, ML helpers, struct/UDT, etc.) to hit 403.
+- **Fixtures**: Expand from 80 to 150+ parity fixtures; convert more Sparkless expected_outputs via `convert_sparkless_fixtures.py` and add hand-crafted fixtures for critical paths.
+- **Harness**: Extend for any new types or operations (e.g. struct columns, binary in fixtures if not already).
+- **Outcome**: 403 functions; 150+ parity fixtures; ready for Sparkless integration.
+
+---
+
+### Phase 16 – Sparkless integration & PyO3 surface (4–6 weeks)
 
 **Goal**: Make robin-sparkless a runnable backend for Sparkless and keep the Python API in sync.
 
 - **Sparkless repo**: Add "robin" backend option to BackendFactory; when selected, delegate DataFrame execution to robin-sparkless via PyO3.
 - **Fallback**: When an operation is not supported, raise a clear error or fall back to Python Polars; document behavior.
 - **Target**: 200+ Sparkless tests passing with robin backend (current: 0).
-- **PyO3**: Expose new Rust functions (Phase 9/10) on Python `Column` and module-level API; keep [PYTHON_API.md](PYTHON_API.md) updated.
+- **PyO3**: Expose new Rust functions (Phases 12–15) on Python `Column` and module-level API; keep [PYTHON_API.md](PYTHON_API.md) updated.
 
-**Outcome**: Sparkless can run against robin-sparkless; 200+ tests passing; Python API matches new functions.
+**Outcome**: Sparkless can run against robin-sparkless; 200+ tests passing; Python API matches full function set.
 
 ---
 
@@ -278,12 +327,12 @@ To reach **full Sparkless parity** (robin-sparkless as a complete backend replac
 
 ### Summary metrics (full parity targets)
 
-| Metric | Current | After Phase 11 | Full Backend target |
-|--------|---------|----------------|---------------------|
-| Parity fixtures | 80 | 80+ | 150+ |
-| Functions | ~120+ | ~120 | 250+ |
-| DataFrame methods | ~25 | ~40 | 60+ |
-| Sparkless tests passing (robin backend) | 0 | — | 200+ |
+| Metric | Current | After Phase 11 | After Phase 15 | Full Backend (Phase 16) |
+|--------|---------|----------------|----------------|-------------------------|
+| Parity fixtures | 80 | 80 | 150+ | 150+ |
+| Functions | ~120+ | ~120 | 403 | 403 |
+| DataFrame methods | ~35 | ~35 | 85 | 85 |
+| Sparkless tests passing (robin backend) | 0 | — | — | 200+ |
 
 ## Testing Strategy
 

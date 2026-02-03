@@ -61,7 +61,7 @@ Robin-sparkless is designed to **replace the backend logic** of [Sparkless](http
 7. **Phase 5 Test Conversion** ✅ **COMPLETED**
    - Fixture converter maps Sparkless `expected_outputs` to robin-sparkless format (join, window, withColumn, union, distinct, drop, dropna, fillna, limit, withColumnRenamed, etc.).
    - Parity discovers `tests/fixtures/` and `tests/fixtures/converted/`; optional `skip: true` in fixtures.
-  - `make sparkless-parity` (set `SPARKLESS_EXPECTED_OUTPUTS` to run converter first); 73 hand-written fixtures passing.
+  - `make sparkless-parity` (set `SPARKLESS_EXPECTED_OUTPUTS` to run converter first); 80 hand-written fixtures passing.
   - See [CONVERTER_STATUS.md](CONVERTER_STATUS.md), [SPARKLESS_PARITY_STATUS.md](SPARKLESS_PARITY_STATUS.md).
 
 8. **Phase 6 Broad Function Parity** (partial) ✅
@@ -75,7 +75,12 @@ Robin-sparkless is designed to **replace the backend logic** of [Sparkless](http
    - Optional **Delta Lake** (`delta` feature): `read_delta`, `read_delta_with_version` (time travel), `write_delta` (overwrite/append) via delta-rs.
    - **Performance**: `cargo bench` (criterion) compares robin-sparkless vs Polars; target within ~2x. Error messages improved; Troubleshooting in [QUICKSTART.md](QUICKSTART.md).
 
-10. **Sparkless integration** (in Sparkless repo)
+10. **Path to 100% before Sparkless integration** ([ROADMAP.md](ROADMAP.md) Phases 12–16)
+   - **Phase 12**: DataFrame methods parity (remaining ~50–60 methods → 85 total).
+   - **Phase 13–15**: Functions in three batches (string/binary/collection; math/datetime/type; remaining) → 403 functions; parity fixtures 80 → 150+.
+   - **Phase 16**: Sparkless integration (BackendFactory "robin", 200+ tests passing). See [FULL_BACKEND_ROADMAP.md](FULL_BACKEND_ROADMAP.md) § Path to 100%.
+
+11. **Sparkless integration** (in Sparkless repo, after Phase 16)
    - Fixture converter: Sparkless `expected_outputs/` JSON → robin-sparkless fixtures
    - Structural alignment: service-style modules, trait-based backends, case sensitivity
    - Function parity: use [PYSPARK_FUNCTION_MATRIX](https://github.com/eddiethedean/sparkless/blob/main/PYSPARK_FUNCTION_MATRIX.md) as checklist
