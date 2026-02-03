@@ -115,17 +115,17 @@ Additional string: `length`, `trim`, `ltrim`, `rtrim`, `regexp_extract`, `regexp
 
 ### Datetime
 
-For date/datetime columns: `year()`, `month()`, `day()`, `to_date()` (cast to date), `date_format(format)` (chrono strftime, e.g. `"%Y-%m-%d"`), `hour()`, `minute()`, `second()`, `date_add(n)`, `date_sub(n)`, `datediff(end, start)`, `last_day()`, `trunc(format)`. **Phase 14**: `quarter()`, `weekofyear()`/`week()`, `dayofweek()` (1=Sun..7=Sat), `dayofyear()`, `add_months(n)`, `months_between(end, start)`, `next_day(day_of_week)` (e.g. `"Mon"`, `"Tue"`).
+For date/datetime columns: `year()`, `month()`, `day()`, `to_date()` (cast to date), `date_format(format)` (chrono strftime, e.g. `"%Y-%m-%d"`), `hour()`, `minute()`, `second()`, `date_add(n)`, `date_sub(n)`, `datediff(end, start)`, `last_day()`, `trunc(format)`. **Phase 14**: `quarter()`, `weekofyear()`/`week()`, `dayofweek()` (1=Sun..7=Sat), `dayofyear()`, `add_months(n)`, `months_between(end, start)`, `next_day(day_of_week)` (e.g. `"Mon"`, `"Tue"`). **Phase 17**: `unix_timestamp()`, `unix_timestamp(col, format)`, `from_unixtime(col, format)`, `make_date(year, month, day)`, `timestamp_seconds(col)`, `timestamp_millis(col)`, `timestamp_micros(col)`, `unix_date(col)`, `date_from_unix_date(col)`.
 
 ### Math and type (Phase 14)
 
-Math (radians): `sin()`, `cos()`, `tan()`, `asin()`, `acos()`, `atan()`, `atan2(y, x)`, `degrees()`, `radians()`, `signum()` (plus existing `sqrt`, `pow`, `exp`, `log`). Type: `cast(column, type_name)` (strict; use type names like `"int"`, `"long"`, `"double"`, `"string"`, `"date"`, `"timestamp"`), `try_cast(column, type_name)` (null on failure), `isnan(column)`; conditional: `greatest(columns...)`, `least(columns...)`.
+Math (radians): `sin()`, `cos()`, `tan()`, `asin()`, `acos()`, `atan()`, `atan2(y, x)`, `degrees()`, `radians()`, `signum()` (plus existing `sqrt`, `pow`, `exp`, `log`). **Phase 17**: `pmod(dividend, divisor)`, `factorial(n)`. Type: `cast(column, type_name)` (strict; use type names like `"int"`, `"long"`, `"double"`, `"string"`, `"date"`, `"timestamp"`), `try_cast(column, type_name)` (null on failure), `isnan(column)`; conditional: `greatest(columns...)`, `least(columns...)`.
 
 ### Parity
 
-Behavior is validated against PySpark on **93 parity fixtures** (~182+ functions); see [PARITY_STATUS.md](PARITY_STATUS.md). Known differences are in [PYSPARK_DIFFERENCES.md](PYSPARK_DIFFERENCES.md). CI (GitHub Actions) runs format, clippy, audit, deny, and all tests (including parity) on every push/PR.
+Behavior is validated against PySpark on **103 parity fixtures** (~192+ functions); see [PARITY_STATUS.md](PARITY_STATUS.md). Known differences are in [PYSPARK_DIFFERENCES.md](PYSPARK_DIFFERENCES.md). CI (GitHub Actions) runs format, clippy, audit, deny, and all tests (including parity) on every push/PR.
 
-For roadmap and Sparkless integration phases (Phases 12–16 completed; Phases 17–19 remaining), see [ROADMAP.md](ROADMAP.md).
+For roadmap and Sparkless integration phases (Phases 12–17 completed; Phases 18–19 remaining), see [ROADMAP.md](ROADMAP.md).
 
 ## Troubleshooting
 

@@ -1,0 +1,30 @@
+{
+  "name": "timestamp_millis",
+  "pyspark_version": "3.5.0",
+  "input": {
+    "schema": [
+      { "name": "id", "type": "bigint" },
+      { "name": "unix_millis", "type": "bigint" }
+    ],
+    "rows": [
+      [1, 1428495132000],
+      [2, 0]
+    ]
+  },
+  "operations": [
+    { "op": "withColumn", "column": "ts", "expr": "timestamp_millis(col('unix_millis'))" },
+    { "op": "select", "columns": ["id", "unix_millis", "ts"] },
+    { "op": "orderBy", "columns": ["id"], "ascending": [true] }
+  ],
+  "expected": {
+    "schema": [
+      { "name": "id", "type": "bigint" },
+      { "name": "unix_millis", "type": "bigint" },
+      { "name": "ts", "type": "timestamp" }
+    ],
+    "rows": [
+      [1, 1428495132000, "2015-04-08T12:12:12.000000"],
+      [2, 0, "1970-01-01T00:00:00.000000"]
+    ]
+  }
+}

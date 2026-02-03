@@ -39,8 +39,9 @@ Column: is_null, is_not_null (methods).
 
 ## Batch 3 – Math and datetime
 
-- acosh, asinh, atanh, cosh, sinh, tanh, cbrt, expm1, log1p, log2, log10, rint, pmod, factorial, hypot
-- unix_timestamp, to_unix_timestamp, from_unixtime, make_date, timestamp_seconds/millis/micros, unix_date, date_from_unix_date
+- acosh, asinh, atanh, cosh, sinh, tanh, cbrt, expm1, log1p, log2, log10, rint, hypot — **DONE (Phase 15)**
+- pmod, factorial — **DONE (Phase 17)**
+- unix_timestamp, to_unix_timestamp, from_unixtime, make_date, timestamp_seconds/millis/micros, unix_date, date_from_unix_date — **DONE (Phase 17)**
 
 ## Batch 4 – Array/map/struct
 

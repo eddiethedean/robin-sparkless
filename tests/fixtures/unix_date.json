@@ -1,0 +1,30 @@
+{
+  "name": "unix_date",
+  "pyspark_version": "3.5.0",
+  "input": {
+    "schema": [
+      { "name": "id", "type": "bigint" },
+      { "name": "dt", "type": "date" }
+    ],
+    "rows": [
+      [1, "2015-04-08"],
+      [2, "1970-01-01"]
+    ]
+  },
+  "operations": [
+    { "op": "withColumn", "column": "days", "expr": "unix_date(col('dt'))" },
+    { "op": "select", "columns": ["id", "dt", "days"] },
+    { "op": "orderBy", "columns": ["id"], "ascending": [true] }
+  ],
+  "expected": {
+    "schema": [
+      { "name": "id", "type": "bigint" },
+      { "name": "dt", "type": "date" },
+      { "name": "days", "type": "int" }
+    ],
+    "rows": [
+      [1, "2015-04-08", 16533],
+      [2, "1970-01-01", 0]
+    ]
+  }
+}

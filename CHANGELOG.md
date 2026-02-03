@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Phase 17 – Remaining gaps 2: datetime/unix and math** ✅ **COMPLETED**
+  - **Datetime/unix**: `unix_timestamp`, `to_unix_timestamp`, `from_unixtime`, `make_date`, `timestamp_seconds`, `timestamp_millis`, `timestamp_micros`, `unix_date`, `date_from_unix_date` (Rust + PyO3 + parity parser).
+  - **Math**: `pmod`, `factorial` (positive modulus; n! for n in 0..=20).
+  - **Implementation**: UDFs in udfs.rs for parsing/formatting (chrono), epoch conversion via Polars cast/mul for timestamp_*, date↔days via Polars Date/Int32 cast.
+  - **Parity fixtures**: `unix_timestamp`, `from_unixtime`, `make_date`, `timestamp_seconds`, `timestamp_millis`, `timestamp_micros`, `unix_date`, `date_from_unix_date`, `pmod`, `factorial` (93 → 103 fixtures).
+
 - **Phase 16 – Remaining gaps 1: string/regex** ✅ **COMPLETED**
   - **String/regex**: `regexp_count`, `regexp_instr`, `regexp_substr`, `split_part`, `find_in_set`, `format_string`, `printf` (Rust + PyO3 + parity parser).
   - **Implementation**: `regexp_count` via Polars `str().count_matches()`, `regexp_substr` as alias of `regexp_extract(0)`, `regexp_instr` and `find_in_set` via UDFs in udfs.rs, `format_string`/`printf` with printf-style %s/%d/%f/%g parsing, `split_part` via split + list.get.

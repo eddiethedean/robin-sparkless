@@ -1,0 +1,32 @@
+{
+  "name": "from_unixtime",
+  "pyspark_version": "3.5.0",
+  "input": {
+    "schema": [
+      { "name": "id", "type": "bigint" },
+      { "name": "unix_secs", "type": "bigint" }
+    ],
+    "rows": [
+      [1, 1428495132],
+      [2, 1428451200]
+    ]
+  },
+  "operations": [
+    { "op": "withColumn", "column": "ts_str", "expr": "from_unixtime(col('unix_secs'))" },
+    { "op": "withColumn", "column": "date_str", "expr": "from_unixtime(col('unix_secs'), 'yyyy-MM-dd')" },
+    { "op": "select", "columns": ["id", "unix_secs", "ts_str", "date_str"] },
+    { "op": "orderBy", "columns": ["id"], "ascending": [true] }
+  ],
+  "expected": {
+    "schema": [
+      { "name": "id", "type": "bigint" },
+      { "name": "unix_secs", "type": "bigint" },
+      { "name": "ts_str", "type": "string" },
+      { "name": "date_str", "type": "string" }
+    ],
+    "rows": [
+      [1, 1428495132, "2015-04-08 12:12:12", "2015-04-08"],
+      [2, 1428451200, "2015-04-08 00:00:00", "2015-04-08"]
+    ]
+  }
+}

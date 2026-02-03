@@ -198,7 +198,7 @@ We know we're on track if:
 
 ## Next Steps to Full Sparkless Parity
 
-To reach **full Sparkless parity** (robin-sparkless as a complete backend replacement), the remaining work is organized into phases 12–21 below (phases 9–16 complete). Reference: [FULL_BACKEND_ROADMAP.md](FULL_BACKEND_ROADMAP.md), [PYSPARK_FUNCTION_MATRIX](https://github.com/eddiethedean/sparkless/blob/main/PYSPARK_FUNCTION_MATRIX.md), [GAP_ANALYSIS_SPARKLESS_3.28.md](GAP_ANALYSIS_SPARKLESS_3.28.md).
+To reach **full Sparkless parity** (robin-sparkless as a complete backend replacement), the remaining work is organized into phases 12–21 below (phases 9–17 complete). Reference: [FULL_BACKEND_ROADMAP.md](FULL_BACKEND_ROADMAP.md), [PYSPARK_FUNCTION_MATRIX](https://github.com/eddiethedean/sparkless/blob/main/PYSPARK_FUNCTION_MATRIX.md), [GAP_ANALYSIS_SPARKLESS_3.28.md](GAP_ANALYSIS_SPARKLESS_3.28.md).
 
 ### Phase overview
 
@@ -212,7 +212,7 @@ To reach **full Sparkless parity** (robin-sparkless as a complete backend replac
 | **14** | Functions batch 2: math, datetime, type/conditional (~100 new → ~300 total) | 4–6 weeks |
 | **15** | Functions batch 3: remaining functions + fixture growth (88 → 150+ fixtures, 403 functions) | ✅ **COMPLETED** |
 | **16** | Remaining gaps 1: string/regex (regexp_count, regexp_instr, regexp_substr, split_part, find_in_set, format_string, printf) | ✅ **COMPLETED** |
-| **17** | Remaining gaps 2: datetime/unix (unix_timestamp, from_unixtime, make_date, timestamp_*, pmod, factorial) | 2–3 weeks |
+| **17** | Remaining gaps 2: datetime/unix (unix_timestamp, from_unixtime, make_date, timestamp_*, pmod, factorial) | ✅ **COMPLETED** |
 | **18** | Remaining gaps 3: array/map/struct (array_append, array_prepend, array_insert, array_except/intersect/union, zip_with, map_concat, map_filter, map_zip_with, transform_keys/values, named_struct) | 3–4 weeks |
 | **19** | Remaining gaps 4: aggregates and try_* (any_value, bool_and, bool_or, count_if, max_by, min_by, percentile, product, try_add/divide/subtract/multiply/sum/avg, try_element_at, width_bucket, elt, bit_length, typeof) | 3–4 weeks |
 | **20** | Prepare and publish robin-sparkless as a Rust crate (crates.io, API stability, docs, release) | 2–3 weeks |
@@ -321,14 +321,14 @@ To reach **full Sparkless parity** (robin-sparkless as a complete backend replac
 
 ---
 
-### Phase 17 – Remaining gaps 2: datetime and unix (2–3 weeks)
+### Phase 17 – Remaining gaps 2: datetime and unix (2–3 weeks) ✅ **COMPLETED**
 
 **Goal**: Implement datetime/unix and remaining math from the gap list.
 
-- **Datetime/unix**: `unix_timestamp`, `to_unix_timestamp`, `from_unixtime`, `make_date`, `timestamp_seconds`, `timestamp_millis`, `timestamp_micros`, `unix_date`, `date_from_unix_date`; optional `convert_timezone`, `current_timezone`, `now`, `curdate`, `localtimestamp`.
-- **Math**: `pmod`, `factorial`.
-- **Parity**: Parser and fixtures.
-- **PyO3**: Expose on Column and module.
+- **Datetime/unix**: `unix_timestamp`, `to_unix_timestamp`, `from_unixtime`, `make_date`, `timestamp_seconds`, `timestamp_millis`, `timestamp_micros`, `unix_date`, `date_from_unix_date` — all implemented; optional `convert_timezone`, `current_timezone`, `now`, `curdate`, `localtimestamp` deferred.
+- **Math**: `pmod`, `factorial` — implemented.
+- **Parity**: Parser branches and 10 fixtures.
+- **PyO3**: Exposed on Column and module.
 - **Outcome**: Datetime/unix gap closed; ready for Phase 18.
 
 ---
@@ -380,7 +380,7 @@ To reach **full Sparkless parity** (robin-sparkless as a complete backend replac
 - **Sparkless repo**: Add "robin" backend option to BackendFactory; when selected, delegate DataFrame execution to robin-sparkless via PyO3 (using the published crate or wheel from Phase 20).
 - **Fallback**: When an operation is not supported, raise a clear error or fall back to Python Polars; document behavior.
 - **Target**: 200+ Sparkless tests passing with robin backend (current: 0).
-- **PyO3**: Expose new Rust functions (Phases 12–16) on Python `Column` and module-level API; keep [PYTHON_API.md](PYTHON_API.md) updated.
+- **PyO3**: Expose new Rust functions (Phases 12–17) on Python `Column` and module-level API; keep [PYTHON_API.md](PYTHON_API.md) updated.
 
 **Outcome**: Sparkless can run against robin-sparkless; 200+ tests passing; Python API matches full function set.
 

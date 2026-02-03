@@ -1,0 +1,32 @@
+{
+  "name": "unix_timestamp",
+  "pyspark_version": "3.5.0",
+  "input": {
+    "schema": [
+      { "name": "id", "type": "bigint" },
+      { "name": "ts_str", "type": "string" }
+    ],
+    "rows": [
+      [1, "2015-04-08 12:12:12"],
+      [2, "2015-04-08 00:00:00"]
+    ]
+  },
+  "operations": [
+    { "op": "withColumn", "column": "unix_ts", "expr": "unix_timestamp(col('ts_str'))" },
+    { "op": "withColumn", "column": "unix_ts_date", "expr": "unix_timestamp(col('ts_str'), 'yyyy-MM-dd HH:mm:ss')" },
+    { "op": "select", "columns": ["id", "ts_str", "unix_ts", "unix_ts_date"] },
+    { "op": "orderBy", "columns": ["id"], "ascending": [true] }
+  ],
+  "expected": {
+    "schema": [
+      { "name": "id", "type": "bigint" },
+      { "name": "ts_str", "type": "string" },
+      { "name": "unix_ts", "type": "bigint" },
+      { "name": "unix_ts_date", "type": "bigint" }
+    ],
+    "rows": [
+      [1, "2015-04-08 12:12:12", 1428495132, 1428495132],
+      [2, "2015-04-08 00:00:00", 1428451200, 1428451200]
+    ]
+  }
+}

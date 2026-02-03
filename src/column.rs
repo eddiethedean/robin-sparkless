@@ -1,5 +1,5 @@
 use polars::prelude::{
-    col, lit, DataType, Expr, GetOutput, ListNameSpaceExtension, RankMethod, RankOptions,
+    col, lit, DataType, Expr, GetOutput, ListNameSpaceExtension, RankMethod, RankOptions, TimeUnit,
 };
 
 /// Convert SQL LIKE pattern (% = any sequence, _ = one char) to regex. Escapes regex specials.
@@ -1242,6 +1242,90 @@ impl Column {
         let expr = self.expr().clone().map(
             move |col| crate::udfs::apply_next_day(col, &day),
             GetOutput::from_type(DataType::Date),
+        );
+        Self::from_expr(expr, None)
+    }
+
+    // --- Phase 17: unix_timestamp, from_unixtime, timestamp_*, unix_date, date_from_unix_date ---
+
+    /// Parse string timestamp to seconds since epoch (PySpark unix_timestamp).
+    pub fn unix_timestamp(&self, format: Option<&str>) -> Column {
+        let fmt = format.map(String::from);
+        let expr = self.expr().clone().map(
+            move |col| crate::udfs::apply_unix_timestamp(col, fmt.as_deref()),
+            GetOutput::from_type(DataType::Int64),
+        );
+        Self::from_expr(expr, None)
+    }
+
+    /// Convert seconds since epoch to formatted string (PySpark from_unixtime).
+    pub fn from_unixtime(&self, format: Option<&str>) -> Column {
+        let fmt = format.map(String::from);
+        let expr = self.expr().clone().map(
+            move |col| crate::udfs::apply_from_unixtime(col, fmt.as_deref()),
+            GetOutput::from_type(DataType::String),
+        );
+        Self::from_expr(expr, None)
+    }
+
+    /// Convert seconds since epoch to timestamp (PySpark timestamp_seconds).
+    pub fn timestamp_seconds(&self) -> Column {
+        let expr = (self.expr().clone().cast(DataType::Int64) * lit(1_000_000i64))
+            .cast(DataType::Datetime(TimeUnit::Microseconds, None));
+        Self::from_expr(expr, None)
+    }
+
+    /// Convert milliseconds since epoch to timestamp (PySpark timestamp_millis).
+    pub fn timestamp_millis(&self) -> Column {
+        let expr = (self.expr().clone().cast(DataType::Int64) * lit(1000i64))
+            .cast(DataType::Datetime(TimeUnit::Microseconds, None));
+        Self::from_expr(expr, None)
+    }
+
+    /// Convert microseconds since epoch to timestamp (PySpark timestamp_micros).
+    pub fn timestamp_micros(&self) -> Column {
+        let expr = self
+            .expr()
+            .clone()
+            .cast(DataType::Int64)
+            .cast(DataType::Datetime(TimeUnit::Microseconds, None));
+        Self::from_expr(expr, None)
+    }
+
+    /// Date to days since 1970-01-01 (PySpark unix_date).
+    pub fn unix_date(&self) -> Column {
+        let expr = self.expr().clone().map(
+            crate::udfs::apply_unix_date,
+            GetOutput::from_type(DataType::Int32),
+        );
+        Self::from_expr(expr, None)
+    }
+
+    /// Days since epoch to date (PySpark date_from_unix_date).
+    pub fn date_from_unix_date(&self) -> Column {
+        let expr = self.expr().clone().map(
+            crate::udfs::apply_date_from_unix_date,
+            GetOutput::from_type(DataType::Date),
+        );
+        Self::from_expr(expr, None)
+    }
+
+    /// Positive modulus (PySpark pmod). Column method: pmod(self, other).
+    pub fn pmod(&self, divisor: &Column) -> Column {
+        let args = [divisor.expr().clone()];
+        let expr = self.expr().clone().map_many(
+            crate::udfs::apply_pmod,
+            &args,
+            GetOutput::from_type(DataType::Float64),
+        );
+        Self::from_expr(expr, None)
+    }
+
+    /// Factorial n! for n in 0..=20 (PySpark factorial).
+    pub fn factorial(&self) -> Column {
+        let expr = self.expr().clone().map(
+            crate::udfs::apply_factorial,
+            GetOutput::from_type(DataType::Int64),
         );
         Self::from_expr(expr, None)
     }

@@ -1,0 +1,34 @@
+{
+  "name": "factorial",
+  "pyspark_version": "3.5.0",
+  "input": {
+    "schema": [
+      { "name": "id", "type": "int" },
+      { "name": "n", "type": "bigint" }
+    ],
+    "rows": [
+      [1, 0],
+      [2, 5],
+      [3, 10],
+      [4, -1]
+    ]
+  },
+  "operations": [
+    { "op": "withColumn", "column": "f", "expr": "factorial(col('n'))" },
+    { "op": "select", "columns": ["id", "n", "f"] },
+    { "op": "orderBy", "columns": ["id"], "ascending": [true] }
+  ],
+  "expected": {
+    "schema": [
+      { "name": "id", "type": "int" },
+      { "name": "n", "type": "bigint" },
+      { "name": "f", "type": "bigint" }
+    ],
+    "rows": [
+      [1, 0, 1],
+      [2, 5, 120],
+      [3, 10, 3628800],
+      [4, -1, null]
+    ]
+  }
+}

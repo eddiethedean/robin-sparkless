@@ -700,6 +700,77 @@ pub fn next_day(column: &Column, day_of_week: &str) -> Column {
     column.clone().next_day(day_of_week)
 }
 
+// --- Phase 17: unix_timestamp, from_unixtime, make_date, timestamp_*, unix_date, date_from_unix_date, pmod, factorial ---
+
+/// Current Unix timestamp in seconds (PySpark unix_timestamp with no args).
+pub fn unix_timestamp_now() -> Column {
+    use polars::prelude::*;
+    let secs = chrono::Utc::now().timestamp();
+    crate::column::Column::from_expr(lit(secs), None)
+}
+
+/// Parse string timestamp to seconds since epoch (PySpark unix_timestamp). format defaults to yyyy-MM-dd HH:mm:ss.
+pub fn unix_timestamp(column: &Column, format: Option<&str>) -> Column {
+    column.clone().unix_timestamp(format)
+}
+
+/// Alias for unix_timestamp.
+pub fn to_unix_timestamp(column: &Column, format: Option<&str>) -> Column {
+    unix_timestamp(column, format)
+}
+
+/// Convert seconds since epoch to formatted string (PySpark from_unixtime).
+pub fn from_unixtime(column: &Column, format: Option<&str>) -> Column {
+    column.clone().from_unixtime(format)
+}
+
+/// Build date from year, month, day columns (PySpark make_date).
+pub fn make_date(year: &Column, month: &Column, day: &Column) -> Column {
+    use polars::prelude::*;
+    let args = [month.expr().clone(), day.expr().clone()];
+    let expr = year.expr().clone().map_many(
+        crate::udfs::apply_make_date,
+        &args,
+        GetOutput::from_type(DataType::Date),
+    );
+    crate::column::Column::from_expr(expr, None)
+}
+
+/// Convert seconds since epoch to timestamp (PySpark timestamp_seconds).
+pub fn timestamp_seconds(column: &Column) -> Column {
+    column.clone().timestamp_seconds()
+}
+
+/// Convert milliseconds since epoch to timestamp (PySpark timestamp_millis).
+pub fn timestamp_millis(column: &Column) -> Column {
+    column.clone().timestamp_millis()
+}
+
+/// Convert microseconds since epoch to timestamp (PySpark timestamp_micros).
+pub fn timestamp_micros(column: &Column) -> Column {
+    column.clone().timestamp_micros()
+}
+
+/// Date to days since 1970-01-01 (PySpark unix_date).
+pub fn unix_date(column: &Column) -> Column {
+    column.clone().unix_date()
+}
+
+/// Days since epoch to date (PySpark date_from_unix_date).
+pub fn date_from_unix_date(column: &Column) -> Column {
+    column.clone().date_from_unix_date()
+}
+
+/// Positive modulus (PySpark pmod).
+pub fn pmod(dividend: &Column, divisor: &Column) -> Column {
+    dividend.clone().pmod(divisor)
+}
+
+/// Factorial n! (PySpark factorial). n in 0..=20; null for negative or overflow.
+pub fn factorial(column: &Column) -> Column {
+    column.clone().factorial()
+}
+
 /// Concatenate string columns without separator (PySpark concat)
 pub fn concat(columns: &[&Column]) -> Column {
     use polars::prelude::*;

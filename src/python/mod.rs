@@ -5,14 +5,16 @@ use crate::column::Column as RsColumn;
 use crate::dataframe::JoinType;
 use crate::functions::{
     acos, acosh, add_months, array_compact, array_distinct, ascii, asin, asinh, atan, atan2, atanh,
-    base64, cast as rs_cast, cbrt, ceiling, chr, contains, cos, cosh, day, dayofmonth, dayofweek,
-    dayofyear, degrees, endswith, expm1, find_in_set, format_number, format_string,
-    greatest as rs_greatest, hypot, ifnull, ilike, isnan as rs_isnan, isnotnull, isnull, lcase,
-    least as rs_least, left, like, ln, log10, log1p, log2, md5, months_between, next_day, nvl,
-    nvl2, overlay, position as rs_position, power, quarter, radians, regexp_count, regexp_instr,
-    regexp_substr, replace as rs_replace, right, rint, rlike, sha1, sha2, signum, sin, sinh,
-    split_part, startswith, substr, tan, tanh, to_degrees, to_radians, try_cast as rs_try_cast,
-    ucase, unbase64, weekofyear,
+    base64, cast as rs_cast, cbrt, ceiling, chr, contains, cos, cosh, date_from_unix_date, day,
+    dayofmonth, dayofweek, dayofyear, degrees, endswith, expm1, factorial, find_in_set,
+    format_number, format_string, from_unixtime, greatest as rs_greatest, hypot, ifnull, ilike,
+    isnan as rs_isnan, isnotnull, isnull, lcase, least as rs_least, left, like, ln, log10, log1p,
+    log2, make_date, md5, months_between, next_day, nvl, nvl2, overlay, pmod,
+    position as rs_position, power, quarter, radians, regexp_count, regexp_instr, regexp_substr,
+    replace as rs_replace, right, rint, rlike, sha1, sha2, signum, sin, sinh, split_part,
+    startswith, substr, tan, tanh, timestamp_micros, timestamp_millis, timestamp_seconds,
+    to_degrees, to_radians, to_unix_timestamp, try_cast as rs_try_cast, ucase, unbase64, unix_date,
+    unix_timestamp, unix_timestamp_now, weekofyear,
 };
 use crate::functions::{avg, coalesce, col as rs_col, count, max, min, sum as rs_sum};
 use crate::{DataFrame, GroupedData, SparkSession};
@@ -126,6 +128,33 @@ fn robin_sparkless(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("log2", wrap_pyfunction!(py_log2, m)?)?;
     m.add("rint", wrap_pyfunction!(py_rint, m)?)?;
     m.add("hypot", wrap_pyfunction!(py_hypot, m)?)?;
+    // Phase 17: unix_timestamp, from_unixtime, make_date, timestamp_*, unix_date, date_from_unix_date, pmod, factorial
+    m.add("unix_timestamp", wrap_pyfunction!(py_unix_timestamp, m)?)?;
+    m.add(
+        "to_unix_timestamp",
+        wrap_pyfunction!(py_to_unix_timestamp, m)?,
+    )?;
+    m.add("from_unixtime", wrap_pyfunction!(py_from_unixtime, m)?)?;
+    m.add("make_date", wrap_pyfunction!(py_make_date, m)?)?;
+    m.add(
+        "timestamp_seconds",
+        wrap_pyfunction!(py_timestamp_seconds, m)?,
+    )?;
+    m.add(
+        "timestamp_millis",
+        wrap_pyfunction!(py_timestamp_millis, m)?,
+    )?;
+    m.add(
+        "timestamp_micros",
+        wrap_pyfunction!(py_timestamp_micros, m)?,
+    )?;
+    m.add("unix_date", wrap_pyfunction!(py_unix_date, m)?)?;
+    m.add(
+        "date_from_unix_date",
+        wrap_pyfunction!(py_date_from_unix_date, m)?,
+    )?;
+    m.add("pmod", wrap_pyfunction!(py_pmod, m)?)?;
+    m.add("factorial", wrap_pyfunction!(py_factorial, m)?)?;
     Ok(())
 }
 
@@ -625,6 +654,89 @@ fn py_format_string(format: &str, columns: Vec<PyRef<PyColumn>>) -> PyColumn {
 #[pyfunction]
 fn py_printf(format: &str, columns: Vec<PyRef<PyColumn>>) -> PyColumn {
     py_format_string(format, columns)
+}
+
+// Phase 17: datetime/unix and math
+#[pyfunction]
+fn py_unix_timestamp(column: Option<PyRef<PyColumn>>, format: Option<&str>) -> PyColumn {
+    match &column {
+        None => PyColumn {
+            inner: unix_timestamp_now(),
+        },
+        Some(c) => PyColumn {
+            inner: unix_timestamp(&c.inner, format),
+        },
+    }
+}
+
+#[pyfunction]
+fn py_to_unix_timestamp(column: PyRef<PyColumn>, format: Option<&str>) -> PyColumn {
+    PyColumn {
+        inner: to_unix_timestamp(&column.inner, format),
+    }
+}
+
+#[pyfunction]
+fn py_from_unixtime(column: &PyColumn, format: Option<&str>) -> PyColumn {
+    PyColumn {
+        inner: from_unixtime(&column.inner, format),
+    }
+}
+
+#[pyfunction]
+fn py_make_date(year: &PyColumn, month: &PyColumn, day: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: make_date(&year.inner, &month.inner, &day.inner),
+    }
+}
+
+#[pyfunction]
+fn py_timestamp_seconds(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: timestamp_seconds(&column.inner),
+    }
+}
+
+#[pyfunction]
+fn py_timestamp_millis(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: timestamp_millis(&column.inner),
+    }
+}
+
+#[pyfunction]
+fn py_timestamp_micros(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: timestamp_micros(&column.inner),
+    }
+}
+
+#[pyfunction]
+fn py_unix_date(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: unix_date(&column.inner),
+    }
+}
+
+#[pyfunction]
+fn py_date_from_unix_date(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: date_from_unix_date(&column.inner),
+    }
+}
+
+#[pyfunction]
+fn py_pmod(dividend: &PyColumn, divisor: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: pmod(&dividend.inner, &divisor.inner),
+    }
+}
+
+#[pyfunction]
+fn py_factorial(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: factorial(&column.inner),
+    }
 }
 
 #[pyfunction]
@@ -1285,6 +1397,53 @@ impl PyColumn {
     fn find_in_set(&self, set_column: &PyColumn) -> Self {
         PyColumn {
             inner: find_in_set(&self.inner, &set_column.inner),
+        }
+    }
+
+    // Phase 17: datetime/unix and math
+    fn unix_timestamp(&self, format: Option<&str>) -> Self {
+        PyColumn {
+            inner: unix_timestamp(&self.inner, format),
+        }
+    }
+    fn from_unixtime(&self, format: Option<&str>) -> Self {
+        PyColumn {
+            inner: from_unixtime(&self.inner, format),
+        }
+    }
+    fn timestamp_seconds(&self) -> Self {
+        PyColumn {
+            inner: timestamp_seconds(&self.inner),
+        }
+    }
+    fn timestamp_millis(&self) -> Self {
+        PyColumn {
+            inner: timestamp_millis(&self.inner),
+        }
+    }
+    fn timestamp_micros(&self) -> Self {
+        PyColumn {
+            inner: timestamp_micros(&self.inner),
+        }
+    }
+    fn unix_date(&self) -> Self {
+        PyColumn {
+            inner: unix_date(&self.inner),
+        }
+    }
+    fn date_from_unix_date(&self) -> Self {
+        PyColumn {
+            inner: date_from_unix_date(&self.inner),
+        }
+    }
+    fn pmod(&self, divisor: &PyColumn) -> Self {
+        PyColumn {
+            inner: pmod(&self.inner, &divisor.inner),
+        }
+    }
+    fn factorial(&self) -> Self {
+        PyColumn {
+            inner: factorial(&self.inner),
         }
     }
 }

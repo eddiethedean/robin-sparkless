@@ -1632,16 +1632,18 @@ fn parse_with_column_expr(src: &str) -> Result<Expr, String> {
         acos, acosh, add_months, array_compact, array_contains, array_distinct, array_size,
         array_sum, ascii, asin, asinh, atan, atan2, atanh, base64, cast, cbrt, ceiling,
         char as rs_char, chr, coalesce, col, concat, concat_ws, contains, cos, cosh, current_date,
-        current_timestamp, date_add, date_sub, datediff, day, dayofmonth, dayofweek, dayofyear,
-        degrees, element_at, endswith, exp, expm1, find_in_set, format_number, format_string,
-        greatest, hour, hypot, ilike, initcap, instr, isnan, isnotnull, isnull, last_day, lcase,
-        least, left, length, like, lit_str, ln, log, log10, log1p, log2, lower, lpad, md5, minute,
-        months_between, nanvl, next_day, nullif, nvl, nvl2, overlay, position, pow, power, printf,
-        quarter, radians, regexp_count, regexp_extract, regexp_extract_all, regexp_instr,
-        regexp_like, regexp_replace, regexp_substr, repeat, replace, reverse, right, rint, rlike,
-        rpad, second, sha1, sha2, signum, sin, sinh, size, split, split_part, sqrt, startswith,
-        substr, substring, tan, tanh, to_degrees, to_radians, trim, trunc, try_cast, ucase,
-        unbase64, upper, weekofyear, when,
+        current_timestamp, date_add, date_from_unix_date, date_sub, datediff, day, dayofmonth,
+        dayofweek, dayofyear, degrees, element_at, endswith, exp, expm1, factorial, find_in_set,
+        format_number, format_string, from_unixtime, greatest, hour, hypot, ilike, initcap, instr,
+        isnan, isnotnull, isnull, last_day, lcase, least, left, length, like, lit_str, ln, log,
+        log10, log1p, log2, lower, lpad, make_date, md5, minute, months_between, nanvl, next_day,
+        nullif, nvl, nvl2, overlay, pmod, position, pow, power, printf, quarter, radians,
+        regexp_count, regexp_extract, regexp_extract_all, regexp_instr, regexp_like,
+        regexp_replace, regexp_substr, repeat, replace, reverse, right, rint, rlike, rpad, second,
+        sha1, sha2, signum, sin, sinh, size, split, split_part, sqrt, startswith, substr,
+        substring, tan, tanh, timestamp_micros, timestamp_millis, timestamp_seconds, to_degrees,
+        to_radians, to_unix_timestamp, trim, trunc, try_cast, ucase, unbase64, unix_date,
+        unix_timestamp, unix_timestamp_now, upper, weekofyear, when,
     };
 
     let s = src.trim();
@@ -2080,6 +2082,101 @@ fn parse_with_column_expr(src: &str) -> Result<Expr, String> {
         }
         let col_refs: Vec<&robin_sparkless::Column> = cols.iter().collect();
         return Ok(format_string(format_str, &col_refs).into_expr());
+    }
+
+    // Handle unix_timestamp() - 0-arg
+    if s == "unix_timestamp()" {
+        return Ok(unix_timestamp_now().into_expr());
+    }
+
+    // Handle unix_timestamp(col('x')) or unix_timestamp(col('x'), 'yyyy-MM-dd')
+    if s.starts_with("unix_timestamp(") {
+        let inner = extract_first_arg(s, "unix_timestamp(")?;
+        let parts = parse_comma_separated_args(inner);
+        let col_name = extract_col_name(parts.first().ok_or("unix_timestamp needs column")?)?;
+        let format = parts.get(1).map(|p| p.trim().trim_matches(['\'', '"']));
+        let c = col(col_name);
+        return Ok(unix_timestamp(&c, format).into_expr());
+    }
+
+    // Handle to_unix_timestamp(col('x')) or to_unix_timestamp(col('x'), 'yyyy-MM-dd')
+    if s.starts_with("to_unix_timestamp(") {
+        let inner = extract_first_arg(s, "to_unix_timestamp(")?;
+        let parts = parse_comma_separated_args(inner);
+        let col_name = extract_col_name(parts.first().ok_or("to_unix_timestamp needs column")?)?;
+        let format = parts.get(1).map(|p| p.trim().trim_matches(['\'', '"']));
+        let c = col(col_name);
+        return Ok(to_unix_timestamp(&c, format).into_expr());
+    }
+
+    // Handle from_unixtime(col('x')) or from_unixtime(col('x'), 'yyyy-MM-dd')
+    if s.starts_with("from_unixtime(") {
+        let inner = extract_first_arg(s, "from_unixtime(")?;
+        let parts = parse_comma_separated_args(inner);
+        let col_name = extract_col_name(parts.first().ok_or("from_unixtime needs column")?)?;
+        let format = parts.get(1).map(|p| p.trim().trim_matches(['\'', '"']));
+        let c = col(col_name);
+        return Ok(from_unixtime(&c, format).into_expr());
+    }
+
+    // Handle make_date(col('y'), col('m'), col('d'))
+    if s.starts_with("make_date(") {
+        let inner = extract_first_arg(s, "make_date(")?;
+        let parts = parse_comma_separated_args(inner);
+        let y_name = extract_col_name(parts.get(0).ok_or("make_date needs year")?)?;
+        let m_name = extract_col_name(parts.get(1).ok_or("make_date needs month")?)?;
+        let d_name = extract_col_name(parts.get(2).ok_or("make_date needs day")?)?;
+        let yc = col(y_name);
+        let mc = col(m_name);
+        let dc = col(d_name);
+        return Ok(make_date(&yc, &mc, &dc).into_expr());
+    }
+
+    // Handle timestamp_seconds(col('x')), timestamp_millis(col('x')), timestamp_micros(col('x'))
+    if s.starts_with("timestamp_seconds(") {
+        let inner = extract_first_arg(s, "timestamp_seconds(")?;
+        let col_name = extract_col_name(inner.trim())?;
+        return Ok(timestamp_seconds(&col(col_name)).into_expr());
+    }
+    if s.starts_with("timestamp_millis(") {
+        let inner = extract_first_arg(s, "timestamp_millis(")?;
+        let col_name = extract_col_name(inner.trim())?;
+        return Ok(timestamp_millis(&col(col_name)).into_expr());
+    }
+    if s.starts_with("timestamp_micros(") {
+        let inner = extract_first_arg(s, "timestamp_micros(")?;
+        let col_name = extract_col_name(inner.trim())?;
+        return Ok(timestamp_micros(&col(col_name)).into_expr());
+    }
+
+    // Handle unix_date(col('d'))
+    if s.starts_with("unix_date(") {
+        let inner = extract_first_arg(s, "unix_date(")?;
+        let col_name = extract_col_name(inner.trim())?;
+        return Ok(unix_date(&col(col_name)).into_expr());
+    }
+
+    // Handle date_from_unix_date(col('d'))
+    if s.starts_with("date_from_unix_date(") {
+        let inner = extract_first_arg(s, "date_from_unix_date(")?;
+        let col_name = extract_col_name(inner.trim())?;
+        return Ok(date_from_unix_date(&col(col_name)).into_expr());
+    }
+
+    // Handle pmod(col('a'), col('b'))
+    if s.starts_with("pmod(") {
+        let inner = extract_first_arg(s, "pmod(")?;
+        let parts = parse_comma_separated_args(inner);
+        let a_name = extract_col_name(parts.first().ok_or("pmod needs dividend")?)?;
+        let b_name = extract_col_name(parts.get(1).ok_or("pmod needs divisor")?)?;
+        return Ok(pmod(&col(a_name), &col(b_name)).into_expr());
+    }
+
+    // Handle factorial(col('n'))
+    if s.starts_with("factorial(") {
+        let inner = extract_first_arg(s, "factorial(")?;
+        let col_name = extract_col_name(inner.trim())?;
+        return Ok(factorial(&col(col_name)).into_expr());
     }
 
     // Handle split(col('name'), delimiter)

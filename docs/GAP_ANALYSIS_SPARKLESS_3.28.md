@@ -117,8 +117,8 @@ Functions and aliases that exist in Sparkless 3.28.0 but are **not** implemented
 
 ### 2.11 Rounding / numeric
 - `bround`
-- `pmod`
-- `factorial`
+- ~~`pmod`~~ — **implemented (Phase 17)**
+- ~~`factorial`~~ — **implemented (Phase 17)**
 - `width_bucket`
 
 ### 2.12 String (additional)
@@ -164,18 +164,18 @@ Functions and aliases that exist in Sparkless 3.28.0 but are **not** implemented
 - `date_diff`, `date_part`
 - `date_trunc` — we have `trunc`
 - `dateadd`, `datepart`
-- `date_from_unix_date`
+- ~~`date_from_unix_date`~~ — **implemented (Phase 17)**
 - `dayname`
 - `days`, `hours`, `months`, `years`
 - `extract`
 - `localtimestamp`
-- `make_date`, `make_dt_interval`, `make_interval`, `make_timestamp`, `make_timestamp_ltz`, `make_timestamp_ntz`, `make_ym_interval`
+- ~~`make_date`~~ — **implemented (Phase 17)**; `make_dt_interval`, `make_interval`, `make_timestamp`, `make_timestamp_ltz`, `make_timestamp_ntz`, `make_ym_interval`
 - `now`
-- `timestamp_micros`, `timestamp_millis`, `timestamp_seconds`
+- ~~`timestamp_micros`, `timestamp_millis`, `timestamp_seconds`~~ — **implemented (Phase 17)**
 - `timestampadd`, `timestampdiff`
 - `to_timestamp`, `to_timestamp_ltz`, `to_timestamp_ntz`
-- `to_unix_timestamp`, `from_unixtime`
-- `unix_date`, `unix_micros`, `unix_millis`, `unix_seconds`
+- ~~`to_unix_timestamp`, `from_unixtime`~~ — **implemented (Phase 17)**
+- ~~`unix_date`~~ — **implemented (Phase 17)**; `unix_micros`, `unix_millis`, `unix_seconds`
 - `weekday`
 
 ### 2.18 JSON / XML

@@ -1066,3 +1066,169 @@ pub fn apply_map_from_arrays(columns: &mut [Column]) -> PolarsResult<Option<Colu
     let out = builder.finish().into_series();
     Ok(Some(Column::new(name, out)))
 }
+
+// --- Phase 17: unix_timestamp, from_unixtime, make_date, timestamp_*, unix_date, date_from_unix_date, pmod, factorial ---
+
+/// Map PySpark/Java SimpleDateFormat style to chrono strftime.
+fn pyspark_format_to_chrono(s: &str) -> String {
+    s.replace("yyyy", "%Y")
+        .replace("MM", "%m")
+        .replace("dd", "%d")
+        .replace("HH", "%H")
+        .replace("mm", "%M")
+        .replace("ss", "%S")
+}
+
+/// unix_timestamp(column, format?) - parse string to seconds since epoch.
+pub fn apply_unix_timestamp(column: Column, format: Option<&str>) -> PolarsResult<Option<Column>> {
+    use chrono::{DateTime, NaiveDateTime, Utc};
+    let chrono_fmt = format
+        .map(pyspark_format_to_chrono)
+        .unwrap_or_else(|| "%Y-%m-%d %H:%M:%S".to_string());
+    let name = column.field().into_owned().name;
+    let series = column.take_materialized_series();
+    let ca = series
+        .str()
+        .map_err(|e| PolarsError::ComputeError(format!("unix_timestamp: {}", e).into()))?;
+    let out = Int64Chunked::from_iter_options(
+        name.as_str().into(),
+        ca.into_iter().map(|opt_s| {
+            opt_s.and_then(|s| {
+                NaiveDateTime::parse_from_str(s, &chrono_fmt)
+                    .ok()
+                    .map(|ndt| DateTime::<Utc>::from_naive_utc_and_offset(ndt, Utc).timestamp())
+            })
+        }),
+    );
+    Ok(Some(Column::new(name, out.into_series())))
+}
+
+/// from_unixtime(column, format?) - seconds since epoch to formatted string.
+pub fn apply_from_unixtime(column: Column, format: Option<&str>) -> PolarsResult<Option<Column>> {
+    use chrono::{DateTime, Utc};
+    let chrono_fmt = format
+        .map(pyspark_format_to_chrono)
+        .unwrap_or_else(|| "%Y-%m-%d %H:%M:%S".to_string());
+    let name = column.field().into_owned().name;
+    let series = column.take_materialized_series();
+    let casted = series
+        .cast(&DataType::Int64)
+        .map_err(|e| PolarsError::ComputeError(format!("from_unixtime cast: {}", e).into()))?;
+    let ca = casted
+        .i64()
+        .map_err(|e| PolarsError::ComputeError(format!("from_unixtime: {}", e).into()))?;
+    let out = StringChunked::from_iter_options(
+        name.as_str().into(),
+        ca.into_iter().map(|opt_secs| {
+            opt_secs.and_then(|secs| {
+                DateTime::<Utc>::from_timestamp(secs, 0)
+                    .map(|dt| dt.format(&chrono_fmt).to_string())
+            })
+        }),
+    );
+    Ok(Some(Column::new(name, out.into_series())))
+}
+
+/// make_date(year, month, day) - three columns to date.
+pub fn apply_make_date(columns: &mut [Column]) -> PolarsResult<Option<Column>> {
+    use chrono::NaiveDate;
+    if columns.len() < 3 {
+        return Err(PolarsError::ComputeError(
+            "make_date needs three columns (year, month, day)".into(),
+        ));
+    }
+    let name = columns[0].field().into_owned().name;
+    let y_series = std::mem::take(&mut columns[0]).take_materialized_series();
+    let m_series = std::mem::take(&mut columns[1]).take_materialized_series();
+    let d_series = std::mem::take(&mut columns[2]).take_materialized_series();
+    let y_ca = y_series.cast(&DataType::Int32)?.i32().unwrap().clone();
+    let m_ca = m_series.cast(&DataType::Int32)?.i32().unwrap().clone();
+    let d_ca = d_series.cast(&DataType::Int32)?.i32().unwrap().clone();
+    let out = Int32Chunked::from_iter_options(
+        name.as_str().into(),
+        y_ca.into_iter()
+            .zip(&m_ca)
+            .zip(&d_ca)
+            .map(|((oy, om), od)| match (oy, om, od) {
+                (Some(y), Some(m), Some(d)) => {
+                    NaiveDate::from_ymd_opt(y, m as u32, d as u32).map(naivedate_to_days)
+                }
+                _ => None,
+            }),
+    );
+    let out_series = out.into_series().cast(&DataType::Date)?;
+    Ok(Some(Column::new(name, out_series)))
+}
+
+/// unix_date(column) - date to days since 1970-01-01.
+pub fn apply_unix_date(column: Column) -> PolarsResult<Option<Column>> {
+    let name = column.field().into_owned().name;
+    let series = column.take_materialized_series();
+    let casted = series.cast(&DataType::Date)?;
+    let days = casted.cast(&DataType::Int32)?;
+    Ok(Some(Column::new(name, days)))
+}
+
+/// date_from_unix_date(column) - days since epoch to date.
+pub fn apply_date_from_unix_date(column: Column) -> PolarsResult<Option<Column>> {
+    let name = column.field().into_owned().name;
+    let series = column.take_materialized_series();
+    let days = series.cast(&DataType::Int32)?;
+    let out = days.cast(&DataType::Date)?;
+    Ok(Some(Column::new(name, out)))
+}
+
+/// pmod(dividend, divisor) - positive modulus.
+pub fn apply_pmod(columns: &mut [Column]) -> PolarsResult<Option<Column>> {
+    if columns.len() < 2 {
+        return Err(PolarsError::ComputeError("pmod needs two columns".into()));
+    }
+    let name = columns[0].field().into_owned().name;
+    let a_series = std::mem::take(&mut columns[0]).take_materialized_series();
+    let b_series = std::mem::take(&mut columns[1]).take_materialized_series();
+    let a = float_series_to_f64(&a_series)?;
+    let b = float_series_to_f64(&b_series)?;
+    let out = Float64Chunked::from_iter_options(
+        name.as_str().into(),
+        a.into_iter().zip(&b).map(|(oa, ob)| match (oa, ob) {
+            (Some(x), Some(y)) if y != 0.0 => {
+                let r = x % y;
+                Some(if r >= 0.0 { r } else { r + y.abs() })
+            }
+            _ => None,
+        }),
+    );
+    Ok(Some(Column::new(name, out.into_series())))
+}
+
+/// factorial(n) - n! for n in 0..=20; null otherwise.
+fn factorial_u64(n: i64) -> Option<i64> {
+    if n < 0 {
+        return None;
+    }
+    if n > 20 {
+        return None; // 21! overflows i64
+    }
+    let mut acc: i64 = 1;
+    for i in 1..=n {
+        acc = acc.checked_mul(i)?;
+    }
+    Some(acc)
+}
+
+/// factorial(column) - element-wise factorial.
+pub fn apply_factorial(column: Column) -> PolarsResult<Option<Column>> {
+    let name = column.field().into_owned().name;
+    let series = column.take_materialized_series();
+    let casted = series
+        .cast(&DataType::Int64)
+        .map_err(|e| PolarsError::ComputeError(format!("factorial cast: {}", e).into()))?;
+    let ca = casted
+        .i64()
+        .map_err(|e| PolarsError::ComputeError(format!("factorial: {}", e).into()))?;
+    let out = Int64Chunked::from_iter_options(
+        name.as_str().into(),
+        ca.into_iter().map(|opt_n| opt_n.and_then(factorial_u64)),
+    );
+    Ok(Some(Column::new(name, out.into_series())))
+}

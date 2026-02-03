@@ -19,10 +19,10 @@ cargo test pyspark_parity_fixtures
 
 | Source | Converted | Passing | Failing | Skipped |
 |--------|-----------|---------|--------|---------|
-| Hand-written (`tests/fixtures/*.json`) | — | 93 | 0 | 1 (array_distinct) |
+| Hand-written (`tests/fixtures/*.json`) | — | 103 | 0 | 1 (array_distinct) |
 | Sparkless converted (`tests/fixtures/converted/*.json`) | 0 (run converter when `SPARKLESS_EXPECTED_OUTPUTS` set) | — | — | — |
 
-**Target: 50+ tests passing** (hand-written + converted). **Current: 93 passing** (hand-written; array_distinct skipped due to order divergence). Phase 16 completed (regexp_count, regexp_instr, regexp_substr, split_part, find_in_set, format_string, printf). Phase 15: aliases, string left/right/replace/like/ilike/rlike, math cosh/sinh/tanh/cbrt/etc., array_distinct. **Phase 21** (Sparkless integration) target: 200+ Sparkless tests passing with robin backend (after Phase 20: publish Rust crate). CI runs parity on hand-written (and optionally converted) fixtures; when Sparkless repo is available, run `make sparkless-parity` and update this doc.
+**Target: 50+ tests passing** (hand-written + converted). **Current: 103 passing** (hand-written; array_distinct skipped due to order divergence). Phase 17 completed (unix_timestamp, from_unixtime, make_date, timestamp_*, unix_date, date_from_unix_date, pmod, factorial). Phase 16: regexp_count, regexp_instr, regexp_substr, split_part, find_in_set, format_string, printf. Phase 15: aliases, string, math, array_distinct. **Phase 21** (Sparkless integration) target: 200+ Sparkless tests passing with robin backend (after Phase 20: publish Rust crate). CI runs parity on hand-written (and optionally converted) fixtures; when Sparkless repo is available, run `make sparkless-parity` and update this doc.
 
 ### When Sparkless repo is available
 
