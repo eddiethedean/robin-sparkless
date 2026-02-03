@@ -121,6 +121,8 @@ enum Operation {
     CrossJoin {},
     #[serde(rename = "describe")]
     Describe {},
+    #[serde(rename = "summary")]
+    Summary {},
     #[serde(rename = "subtract")]
     Subtract {},
     #[serde(rename = "intersect")]
@@ -157,8 +159,13 @@ struct AggregationSpec {
 /// This test reads JSON fixtures from `tests/fixtures/` and (if present)
 /// `tests/fixtures/converted/` (from Sparkless expected_outputs via convert_sparkless_fixtures.py),
 /// and verifies that robin-sparkless produces the same results as PySpark.
+///
+/// Set `PARITY_FIXTURE=<name>` (e.g. `PARITY_FIXTURE=groupby_count`) to run only the fixture
+/// whose `name` matches, for faster iteration.
 #[test]
 fn pyspark_parity_fixtures() {
+    let single = std::env::var("PARITY_FIXTURE").ok();
+
     let mut paths: Vec<std::path::PathBuf> = Vec::new();
 
     let fixtures_dir = Path::new("tests/fixtures");
@@ -187,17 +194,49 @@ fn pyspark_parity_fixtures() {
         }
     }
 
+    let mut failures: Vec<(String, String)> = Vec::new();
+    let mut ran_any = false;
+
     for path in paths {
         let text = fs::read_to_string(&path).expect("read fixture");
         let fixture: Fixture = serde_json::from_str(&text).expect("parse fixture json");
+
+        if let Some(ref name_filter) = single {
+            if &fixture.name != name_filter {
+                continue;
+            }
+        }
 
         if fixture.skip {
             continue;
         }
 
-        // Run the full parity test: create DataFrame, apply operations, compare results
-        run_fixture(&fixture).unwrap();
+        ran_any = true;
+        match run_fixture(&fixture) {
+            Ok(()) => {}
+            Err(e) => {
+                failures.push((fixture.name.clone(), e.to_string()));
+            }
+        }
     }
+
+    if let Some(ref name_filter) = single {
+        assert!(
+            ran_any,
+            "PARITY_FIXTURE={} but no matching fixture found (check fixture name)",
+            name_filter
+        );
+    }
+
+    assert!(
+        failures.is_empty(),
+        "{} fixture(s) failed: {:?}",
+        failures.len(),
+        failures
+            .iter()
+            .map(|(name, err)| format!("{}: {}", name, err))
+            .collect::<Vec<_>>()
+    );
 }
 
 fn run_fixture(fixture: &Fixture) -> Result<(), PolarsError> {
@@ -1051,6 +1090,14 @@ fn apply_operations(
                     ));
                 }
                 df = df.describe()?;
+            }
+            Operation::Summary {} => {
+                if grouped.is_some() {
+                    return Err(PolarsError::ComputeError(
+                        "summary cannot be applied after groupBy".into(),
+                    ));
+                }
+                df = df.summary()?;
             }
             Operation::Subtract {} => {
                 if grouped.is_some() {

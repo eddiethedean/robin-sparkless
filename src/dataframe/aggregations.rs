@@ -182,3 +182,70 @@ pub(super) fn reorder_groupby_columns(
         Ok(pl_df.clone())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::{DataFrame, SparkSession};
+
+    fn test_df() -> DataFrame {
+        let spark = SparkSession::builder()
+            .app_name("agg_tests")
+            .get_or_create();
+        let tuples = vec![
+            (1i64, 10i64, "a".to_string()),
+            (1i64, 20i64, "a".to_string()),
+            (2i64, 30i64, "b".to_string()),
+        ];
+        spark
+            .create_dataframe(tuples, vec!["k", "v", "label"])
+            .unwrap()
+    }
+
+    #[test]
+    fn group_by_count_single_group() {
+        let df = test_df();
+        let grouped = df.group_by(vec!["k"]).unwrap();
+        let out = grouped.count().unwrap();
+        assert_eq!(out.count().unwrap(), 2);
+        let cols = out.columns().unwrap();
+        assert!(cols.contains(&"k".to_string()));
+        assert!(cols.contains(&"count".to_string()));
+    }
+
+    #[test]
+    fn group_by_sum() {
+        let df = test_df();
+        let grouped = df.group_by(vec!["k"]).unwrap();
+        let out = grouped.sum("v").unwrap();
+        assert_eq!(out.count().unwrap(), 2);
+        let cols = out.columns().unwrap();
+        assert!(cols.iter().any(|c| c.starts_with("sum(")));
+    }
+
+    #[test]
+    fn group_by_empty_groups() {
+        let spark = SparkSession::builder()
+            .app_name("agg_tests")
+            .get_or_create();
+        let tuples: Vec<(i64, i64, String)> = vec![];
+        let df = spark.create_dataframe(tuples, vec!["a", "b", "c"]).unwrap();
+        let grouped = df.group_by(vec!["a"]).unwrap();
+        let out = grouped.count().unwrap();
+        assert_eq!(out.count().unwrap(), 0);
+    }
+
+    #[test]
+    fn group_by_agg_multi() {
+        use polars::prelude::*;
+        let df = test_df();
+        let grouped = df.group_by(vec!["k"]).unwrap();
+        let out = grouped
+            .agg(vec![len().alias("cnt"), col("v").sum().alias("total")])
+            .unwrap();
+        assert_eq!(out.count().unwrap(), 2);
+        let cols = out.columns().unwrap();
+        assert!(cols.contains(&"k".to_string()));
+        assert!(cols.contains(&"cnt".to_string()));
+        assert!(cols.contains(&"total".to_string()));
+    }
+}

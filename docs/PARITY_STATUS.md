@@ -78,7 +78,7 @@ Status as of **February 2026**: **PASSING (82 fixtures)**. **Phase 13**: String/
 | DataFrame | replace, crossJoin, describe, subtract, intersect | ✅ Covered | `replace`, `cross_join`, `describe`, `subtract`, `intersect` |
 | SQL | `SparkSession::sql()` (optional `sql` feature) | ✅ Implemented | No fixture (SQL translated to DataFrame ops; parity via DataFrame fixtures) |
 | Datetime | year, month, day, to_date, date_format; current_date, date_add, hour, etc. | ✅ Covered | `date_add_sub`, `datediff`, `datetime_hour_minute` |
-| DataFrame (Phase 12) | first, head, offset, sample, to_json, summary, stat, select_expr, freq_items, crosstab, melt, etc. (Rust + PyO3) | ✅ first/head/offset covered | `first_row`, `head_n`, `offset_n`; additional Phase 12 ops implemented, fixtures TBD |
+| DataFrame (Phase 12) | first, head, offset, sample, to_json, summary, stat, select_expr, freq_items, crosstab, melt, etc. (Rust + PyO3) | ✅ first/head/offset/summary covered | `first_row`, `head_n`, `offset_n`, `summary`; additional Phase 12 ops implemented, fixtures TBD |
 
 ## Fixture Index
 
@@ -152,6 +152,7 @@ Status as of **February 2026**: **PASSING (82 fixtures)**. **Phase 13**: String/
 | `groupby_first_last` | groupBy + first(name), last(name) |
 | `cross_join` | crossJoin (cartesian product) |
 | `describe` | describe() summary statistics |
+| `summary` | summary() (same as describe) |
 | `replace` | replace(column, old_value, new_value) |
 | `subtract` | subtract (set difference) |
 | `intersect` | intersect (set intersection) |

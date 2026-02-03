@@ -1197,6 +1197,7 @@ fn any_value_to_py(py: Python<'_>, av: polars::prelude::AnyValue<'_>) -> PyResul
         AnyValue::Float32(f) => f.into_bound_py_any(py).map(Into::into),
         AnyValue::Float64(f) => f.into_bound_py_any(py).map(Into::into),
         AnyValue::String(s) => s.to_string().into_bound_py_any(py).map(Into::into),
+        AnyValue::StringOwned(s) => s.to_string().into_bound_py_any(py).map(Into::into),
         other => Err(pyo3::exceptions::PyRuntimeError::new_err(format!(
             "unsupported type for collect: {:?}",
             other

@@ -997,3 +997,95 @@ pub fn intersect_all(
 ) -> Result<DataFrame, PolarsError> {
     intersect(left, right, case_sensitive)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{distinct, drop, dropna, first, head, limit, offset};
+    use crate::{DataFrame, SparkSession};
+
+    fn test_df() -> DataFrame {
+        let spark = SparkSession::builder()
+            .app_name("transform_tests")
+            .get_or_create();
+        spark
+            .create_dataframe(
+                vec![
+                    (1i64, 10i64, "a".to_string()),
+                    (2i64, 20i64, "b".to_string()),
+                    (3i64, 30i64, "c".to_string()),
+                ],
+                vec!["id", "v", "label"],
+            )
+            .unwrap()
+    }
+
+    #[test]
+    fn limit_zero() {
+        let df = test_df();
+        let out = limit(&df, 0, false).unwrap();
+        assert_eq!(out.count().unwrap(), 0);
+    }
+
+    #[test]
+    fn limit_more_than_rows() {
+        let df = test_df();
+        let out = limit(&df, 10, false).unwrap();
+        assert_eq!(out.count().unwrap(), 3);
+    }
+
+    #[test]
+    fn distinct_on_empty() {
+        let spark = SparkSession::builder()
+            .app_name("transform_tests")
+            .get_or_create();
+        let df = spark
+            .create_dataframe(vec![] as Vec<(i64, i64, String)>, vec!["a", "b", "c"])
+            .unwrap();
+        let out = distinct(&df, None, false).unwrap();
+        assert_eq!(out.count().unwrap(), 0);
+    }
+
+    #[test]
+    fn first_returns_one_row() {
+        let df = test_df();
+        let out = first(&df, false).unwrap();
+        assert_eq!(out.count().unwrap(), 1);
+    }
+
+    #[test]
+    fn head_n() {
+        let df = test_df();
+        let out = head(&df, 2, false).unwrap();
+        assert_eq!(out.count().unwrap(), 2);
+    }
+
+    #[test]
+    fn offset_skip_first() {
+        let df = test_df();
+        let out = offset(&df, 1, false).unwrap();
+        assert_eq!(out.count().unwrap(), 2);
+    }
+
+    #[test]
+    fn offset_beyond_length_returns_empty() {
+        let df = test_df();
+        let out = offset(&df, 10, false).unwrap();
+        assert_eq!(out.count().unwrap(), 0);
+    }
+
+    #[test]
+    fn drop_column() {
+        let df = test_df();
+        let out = drop(&df, vec!["v"], false).unwrap();
+        let cols = out.columns().unwrap();
+        assert!(!cols.contains(&"v".to_string()));
+        assert_eq!(out.count().unwrap(), 3);
+    }
+
+    #[test]
+    fn dropna_all_columns() {
+        let df = test_df();
+        let out = dropna(&df, None, false).unwrap();
+        assert_eq!(out.count().unwrap(), 3);
+    }
+}

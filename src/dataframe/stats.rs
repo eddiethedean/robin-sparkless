@@ -105,3 +105,68 @@ impl<'a> DataFrameStat<'a> {
         Ok(cov / (std_a * std_b))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::{DataFrame, SparkSession};
+
+    fn test_df() -> DataFrame {
+        let spark = SparkSession::builder()
+            .app_name("stat_tests")
+            .get_or_create();
+        let tuples = vec![
+            (1i64, 25i64, "a".to_string()),
+            (2i64, 30i64, "b".to_string()),
+            (3i64, 35i64, "c".to_string()),
+        ];
+        spark
+            .create_dataframe(tuples, vec!["id", "age", "name"])
+            .unwrap()
+    }
+
+    #[test]
+    fn stat_corr_two_columns() {
+        let df = test_df();
+        let stat = df.stat();
+        let r = stat.corr("id", "age").unwrap();
+        assert!(
+            r.is_nan() || (r >= -1.0 - 1e-10 && r <= 1.0 + 1e-10),
+            "corr should be in [-1,1] or NaN, got {}",
+            r
+        );
+    }
+
+    #[test]
+    fn stat_cov_two_columns() {
+        let df = test_df();
+        let stat = df.stat();
+        let c = stat.cov("id", "age").unwrap();
+        assert!(c.is_finite() || c.is_nan());
+    }
+
+    #[test]
+    fn stat_corr_less_than_two_rows_returns_nan() {
+        let spark = SparkSession::builder()
+            .app_name("stat_tests")
+            .get_or_create();
+        let tuples = vec![(1i64, 10i64, "x".to_string())];
+        let df = spark.create_dataframe(tuples, vec!["a", "b", "c"]).unwrap();
+        let stat = df.stat();
+        let r = stat.corr("a", "b").unwrap();
+        assert!(r.is_nan());
+    }
+
+    #[test]
+    fn stat_cov_constant_column() {
+        let spark = SparkSession::builder()
+            .app_name("stat_tests")
+            .get_or_create();
+        let tuples = vec![(1i64, 5i64, "a".to_string()), (1i64, 5i64, "b".to_string())];
+        let df = spark
+            .create_dataframe(tuples, vec!["k", "v", "label"])
+            .unwrap();
+        let stat = df.stat();
+        let c = stat.cov("k", "v").unwrap();
+        assert!(c.is_nan() || c == 0.0);
+    }
+}

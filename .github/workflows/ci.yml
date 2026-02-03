@@ -18,6 +18,9 @@ jobs:
         with:
           components: clippy
 
+      - name: Install cargo-nextest
+        run: cargo install cargo-nextest --locked
+
       - name: Cache cargo
         uses: actions/cache@v4
         with:
@@ -42,7 +45,7 @@ jobs:
         run: cargo deny check advisories bans sources
 
       - name: Test
-        run: cargo test
+        run: cargo nextest run
 
   python-tests:
     name: Python tests (PyO3)

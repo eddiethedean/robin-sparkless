@@ -126,3 +126,82 @@ def test_aggregate_functions():
     agg_df = grouped.agg([rs.sum(rs.col("val")), rs.count(rs.col("id"))])
     rows = agg_df.collect()
     assert len(rows) == 2
+
+
+def test_stat_cov_corr():
+    """df.stat().cov(col1, col2) and .corr(col1, col2) return float."""
+    import robin_sparkless as rs
+    spark = rs.SparkSession.builder().app_name("test").get_or_create()
+    df = spark.create_dataframe([(1, 10, "a"), (2, 20, "b"), (3, 30, "c")], ["id", "x", "name"])
+    stat = df.stat()
+    c = stat.cov("id", "x")
+    assert isinstance(c, (int, float))
+    r = stat.corr("id", "x")
+    assert isinstance(r, (int, float))
+    assert -1.0 - 1e-9 <= r <= 1.0 + 1e-9 or (r != r)  # NaN
+
+
+def test_na_fill_drop():
+    """df.na().fill(value) and df.na().drop() exist and run."""
+    import robin_sparkless as rs
+    spark = rs.SparkSession.builder().app_name("test").get_or_create()
+    df = spark.create_dataframe([(1, 10, "a"), (2, 20, "b"), (3, 30, "c")], ["id", "age", "name"])
+    filled = df.na().fill(rs.lit(0))
+    assert filled.count() == 3
+    dropped = df.na().drop()
+    assert dropped.count() == 3
+
+
+def test_with_columns_and_renamed():
+    """with_columns and with_columns_renamed work (dict or list of tuples)."""
+    import robin_sparkless as rs
+    spark = rs.SparkSession.builder().app_name("test").get_or_create()
+    df = spark.create_dataframe([(1, 25, "Alice")], ["id", "age", "name"])
+    out = df.with_columns({"extra": rs.lit(42)})
+    rows = out.collect()
+    assert rows[0]["extra"] == 42
+    renamed = df.with_columns_renamed({"name": "full_name"})
+    row = renamed.collect()[0]
+    assert "full_name" in row and "name" not in row
+
+
+def test_to_pandas():
+    """to_pandas returns list of dicts (same as collect)."""
+    import robin_sparkless as rs
+    spark = rs.SparkSession.builder().app_name("test").get_or_create()
+    df = spark.create_dataframe([(1, 25, "Alice")], ["id", "age", "name"])
+    result = df.to_pandas()
+    assert result is not None
+    assert isinstance(result, list)
+    assert len(result) == 1
+    assert result[0]["id"] == 1 and result[0]["age"] == 25 and result[0]["name"] == "Alice"
+
+
+def test_phase13_ascii_base64():
+    """Phase 13: ascii(column) and base64(column) exist and run."""
+    import robin_sparkless as rs
+    spark = rs.SparkSession.builder().app_name("test").get_or_create()
+    df = spark.create_dataframe([(1, 65, "A")], ["id", "code", "name"])
+    out = df.with_column("ascii_val", rs.ascii(rs.col("name")))
+    assert out.count() == 1
+    df2 = spark.create_dataframe([(1, 2, "hello")], ["id", "x", "msg"])
+    out2 = df2.with_column("enc", rs.base64(rs.col("msg")))
+    assert out2.count() == 1
+
+
+def test_filter_nonexistent_column_raises():
+    """Filter with non-existent column raises an error."""
+    import robin_sparkless as rs
+    spark = rs.SparkSession.builder().app_name("test").get_or_create()
+    df = spark.create_dataframe([(1, 25, "Alice")], ["id", "age", "name"])
+    with pytest.raises(Exception):
+        df.filter(rs.col("nonexistent").gt(rs.lit(0)))
+
+
+def test_select_nonexistent_column_raises():
+    """Select with non-existent column raises an error."""
+    import robin_sparkless as rs
+    spark = rs.SparkSession.builder().app_name("test").get_or_create()
+    df = spark.create_dataframe([(1, 25, "Alice")], ["id", "age", "name"])
+    with pytest.raises(Exception):
+        df.select(["id", "nonexistent"])

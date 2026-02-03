@@ -162,41 +162,31 @@ Run this script manually (or via a Makefile target) whenever you add or update s
 
 ## 4. Rust Test Harness (`tests/parity.rs`)
 
-The file `tests/parity.rs` already contains a **skeleton**:
+The file `tests/parity.rs` implements the full parity flow:
 
 - It defines `Fixture`, `InputSection`, `ColumnSpec`, `ExpectedSection`, and `Operation` to mirror the JSON format.
-- It has a `#[test] #[ignore] fn pyspark_parity_fixtures()` that:
-  - Scans `tests/fixtures/`.
-  - Deserializes each JSON fixture.
-  - Runs a small `run_fixture_smoke` check (currently just sanity-checks the fixture).
+- The test `pyspark_parity_fixtures`:
+  - Scans `tests/fixtures/` and (if present) `tests/fixtures/converted/`.
+  - Deserializes each JSON fixture, skips any with `"skip": true`.
+  - For each fixture, calls `run_fixture(&fixture)`, which:
+    1. **Input reconstruction**: Builds a `DataFrame` from `input.schema` and `input.rows` (or from `input.file_source` for read_csv/read_parquet/read_json).
+    2. **Operation dispatch**: Applies each `Operation` in sequence (filter, select, orderBy, groupBy, agg, join, withColumn, window, union, distinct, drop, dropna, fillna, limit, withColumnRenamed, replace, crossJoin, describe, subtract, intersect, first, head, offset, summary, etc.).
+    3. **Comparison**: Collects the result to schema + rows and compares to `expected` (schema equality and row equality with optional order handling).
+  - Collects all failures and reports them at the end with fixture names (so CI shows every failing fixture, not just the first).
 
-### Evolving the harness
+**Running a single fixture**: Set the `PARITY_FIXTURE` environment variable to the fixture `name` (e.g. `PARITY_FIXTURE=groupby_count`) to run only that fixture. Example:
 
-As the Rust API stabilizes, replace the `run_fixture_smoke` body with:
+```bash
+PARITY_FIXTURE=groupby_count cargo test pyspark_parity_fixtures
+```
 
-1. **Input reconstruction**
-   - Convert `input.schema` + `input.rows` into a `DataFrame`:
-     - Initially via a helper that uses `DataFrame::from_polars` on a Polars-built frame.
-     - Later via a proper `SparkSession::createDataFrame`.
+### Extending the harness
 
-2. **Operation dispatcher**
-   - For each `Operation`:
-     - `filter`: parse the simple `expr` and build an equivalent `Column` / `Expr` in Rust.
-     - `select`: call your `DataFrame::select`.
-     - `orderBy`: translate to sort calls.
-     - `groupBy` / `agg`: group by columns, apply single or multiple aggregations.
-     - `join`: join with right DataFrame (requires `right_input` in fixture).
-     - `withColumn`: add computed columns (when/coalesce, arithmetic, window expressions).
-     - `window`: add window function columns (row_number, rank, dense_rank, lag, lead).
+When adding new operations or expression forms:
 
-3. **Comparison**
-   - Collect the final `DataFrame` to a simple schema + rows representation.
-   - Compare against `expected`:
-     - Exact equality for now.
-     - Introduce tolerances and more nuanced checks later (e.g. for floats, order-insensitive cases).
-
-4. **Un-ignore the test**
-   - Once at least one end-to-end parity path works reliably, remove `#[ignore]` so CI runs it.
+1. **New operation type**: Add a variant to the `Operation` enum in `parity.rs`, deserialize it from the fixture JSON, and handle it in `apply_operations`.
+2. **New expression in filter/withColumn**: Extend `parse_with_column_expr` (and any related helpers) so the fixture `expr` string is parsed into the correct Rust `Expr`.
+3. **Comparison**: Schema and row comparison already support nulls, numbers, strings, arrays; extend `values_equal` / `compare_values` if new types need special handling.
 
 ---
 
@@ -217,8 +207,8 @@ As the Rust API stabilizes, replace the `run_fixture_smoke` body with:
    - If the new scenario uses an operation not yet supported by the dispatcher, update `Operation` and `apply_op` logic.
 
 5. **Run tests**
-   - `cargo test -- --ignored pyspark_parity_fixtures` (while the test is still `#[ignore]`).
-   - Once stable, remove `#[ignore]` to run in normal CI.
+   - `cargo test pyspark_parity_fixtures` (runs all fixtures).
+   - To run a single fixture: `PARITY_FIXTURE=<name> cargo test pyspark_parity_fixtures`.
 
 ---
 

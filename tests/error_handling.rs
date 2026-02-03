@@ -4,7 +4,7 @@
 //! for invalid operations and edge cases.
 
 use polars::prelude::PolarsError;
-use robin_sparkless::{col, DataFrame, SparkSession};
+use robin_sparkless::{col, DataFrame, JoinType, SparkSession};
 
 /// Helper to create a simple test DataFrame
 fn test_df() -> DataFrame {
@@ -139,4 +139,62 @@ fn test_multiple_operations_on_same_dataframe() {
     assert_eq!(filtered1.unwrap().count().unwrap(), 2); // age > 30: Bob, Charlie
     assert_eq!(filtered2.unwrap().count().unwrap(), 2); // age < 40: Alice, Bob
     assert_eq!(selected.unwrap().columns().unwrap().len(), 2); // id, name
+}
+
+#[test]
+fn test_join_nonexistent_column_error() {
+    let spark = SparkSession::builder()
+        .app_name("error_tests")
+        .get_or_create();
+    let left = spark
+        .create_dataframe(
+            vec![(1i64, 10i64, "a".to_string())],
+            vec!["id", "v", "label"],
+        )
+        .unwrap();
+    let right = spark
+        .create_dataframe(
+            vec![(1i64, 100i64, "x".to_string())],
+            vec!["id", "w", "tag"],
+        )
+        .unwrap();
+    let result = left.join(&right, vec!["nonexistent"], JoinType::Inner);
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_group_by_agg_nonexistent_column_error() {
+    let df = test_df();
+    let grouped = df.group_by(vec!["id"]).unwrap();
+    let result = grouped.sum("nonexistent");
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_limit_zero_returns_empty() {
+    let df = test_df();
+    let limited = df.limit(0).unwrap();
+    assert_eq!(limited.count().unwrap(), 0);
+}
+
+#[test]
+fn test_union_with_empty_dataframe() {
+    let spark = SparkSession::builder()
+        .app_name("error_tests")
+        .get_or_create();
+    let non_empty = spark
+        .create_dataframe(
+            vec![(1i64, 25i64, "Alice".to_string())],
+            vec!["id", "age", "name"],
+        )
+        .unwrap();
+    let empty = spark
+        .create_dataframe(vec![] as Vec<(i64, i64, String)>, vec!["id", "age", "name"])
+        .unwrap();
+    let result = non_empty.union(&empty);
+    assert!(result.is_ok());
+    assert_eq!(result.unwrap().count().unwrap(), 1);
+    let result2 = empty.union(&non_empty);
+    assert!(result2.is_ok());
+    assert_eq!(result2.unwrap().count().unwrap(), 1);
 }

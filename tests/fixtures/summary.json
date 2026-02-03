@@ -1,0 +1,32 @@
+{
+  "name": "summary",
+  "pyspark_version": "3.5.0",
+  "input": {
+    "schema": [
+      { "name": "id", "type": "bigint" },
+      { "name": "v", "type": "double" }
+    ],
+    "rows": [
+      [1, 1.0],
+      [2, 2.0],
+      [3, 3.0]
+    ]
+  },
+  "operations": [
+    { "op": "summary" }
+  ],
+  "expected": {
+    "schema": [
+      { "name": "statistic", "type": "string" },
+      { "name": "id", "type": "double" },
+      { "name": "v", "type": "double" }
+    ],
+    "rows": [
+      ["count", 3.0, 3.0],
+      ["mean", 2.0, 2.0],
+      ["std", 1.0, 1.0],
+      ["min", 1.0, 1.0],
+      ["max", 3.0, 3.0]
+    ]
+  }
+}
