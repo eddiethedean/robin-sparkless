@@ -433,8 +433,9 @@ fn chrono_weekday_to_dayofweek(w: chrono::Weekday) -> u32 {
 }
 
 pub fn apply_next_day(column: Column, day_of_week: &str) -> PolarsResult<Option<Column>> {
-    let target = parse_day_of_week(day_of_week)
-        .ok_or_else(|| PolarsError::ComputeError(format!("next_day: invalid day '{}'", day_of_week).into()))?;
+    let target = parse_day_of_week(day_of_week).ok_or_else(|| {
+        PolarsError::ComputeError(format!("next_day: invalid day '{}'", day_of_week).into())
+    })?;
     let name = column.field().into_owned().name;
     let series = column.take_materialized_series();
     let ca = date_series_to_days(&series)?;
@@ -442,7 +443,11 @@ pub fn apply_next_day(column: Column, day_of_week: &str) -> PolarsResult<Option<
         opt_d.and_then(|days| {
             let d = days_to_naive_date(days)?;
             let current = chrono_weekday_to_dayofweek(d.weekday());
-            let diff = if target >= current { (target - current) as i64 } else { (7 - (current - target)) as i64 };
+            let diff = if target >= current {
+                (target - current) as i64
+            } else {
+                (7 - (current - target)) as i64
+            };
             let days_to_add = if diff == 0 { 7 } else { diff }; // same day -> next week
             let next = d.checked_add_signed(chrono::TimeDelta::days(days_to_add))?;
             Some(naivedate_to_days(next))
@@ -465,18 +470,15 @@ pub fn apply_months_between(columns: &mut [Column]) -> PolarsResult<Option<Colum
     let start_series = std::mem::take(&mut columns[1]).take_materialized_series();
     let end_ca = date_series_to_days(&end_series)?;
     let start_ca = date_series_to_days(&start_series)?;
-    let out = end_ca
-        .into_iter()
-        .zip(start_ca.into_iter())
-        .map(|(oe, os)| {
-            match (oe, os) {
-                (Some(e), Some(s)) => {
-                    let days = (e - s) as f64;
-                    Some(days / 30.44) // approximate months
-                }
-                _ => None,
+    let out = end_ca.into_iter().zip(&start_ca).map(|(oe, os)| {
+        match (oe, os) {
+            (Some(e), Some(s)) => {
+                let days = (e - s) as f64;
+                Some(days / 30.44) // approximate months
             }
-        });
+            _ => None,
+        }
+    });
     let out = Float64Chunked::from_iter_options(name.as_str().into(), out);
     Ok(Some(Column::new(name, out.into_series())))
 }
@@ -554,13 +556,10 @@ pub fn apply_atan2(columns: &mut [Column]) -> PolarsResult<Option<Column>> {
     let x_series = std::mem::take(&mut columns[1]).take_materialized_series();
     let y_ca = float_series_to_f64(&y_series)?;
     let x_ca = float_series_to_f64(&x_series)?;
-    let out = y_ca
-        .into_iter()
-        .zip(x_ca.into_iter())
-        .map(|(oy, ox)| match (oy, ox) {
-            (Some(y), Some(x)) => Some(f64::atan2(y, x)),
-            _ => None,
-        });
+    let out = y_ca.into_iter().zip(&x_ca).map(|(oy, ox)| match (oy, ox) {
+        (Some(y), Some(x)) => Some(f64::atan2(y, x)),
+        _ => None,
+    });
     let out = Float64Chunked::from_iter_options(name.as_str().into(), out);
     Ok(Some(Column::new(name, out.into_series())))
 }
@@ -570,9 +569,7 @@ pub fn apply_degrees(column: Column) -> PolarsResult<Option<Column>> {
     let name = column.field().into_owned().name;
     let series = column.take_materialized_series();
     let ca = float_series_to_f64(&series)?;
-    let out = ca
-        .apply_values(|r| r.to_degrees())
-        .into_series();
+    let out = ca.apply_values(|r| r.to_degrees()).into_series();
     Ok(Some(Column::new(name, out)))
 }
 
@@ -581,9 +578,7 @@ pub fn apply_radians(column: Column) -> PolarsResult<Option<Column>> {
     let name = column.field().into_owned().name;
     let series = column.take_materialized_series();
     let ca = float_series_to_f64(&series)?;
-    let out = ca
-        .apply_values(|d| d.to_radians())
-        .into_series();
+    let out = ca.apply_values(|d| d.to_radians()).into_series();
     Ok(Some(Column::new(name, out)))
 }
 
@@ -622,7 +617,7 @@ pub fn apply_greatest2(columns: &mut [Column]) -> PolarsResult<Option<Column>> {
             let b = float_series_to_f64(&b_series)?;
             let out = Float64Chunked::from_iter_options(
                 name.as_str().into(),
-                a.into_iter().zip(b.into_iter()).map(|(oa, ob)| match (oa, ob) {
+                a.into_iter().zip(&b).map(|(oa, ob)| match (oa, ob) {
                     (Some(x), Some(y)) => Some(x.max(y)),
                     (Some(x), None) => Some(x),
                     (None, Some(y)) => Some(y),
@@ -631,14 +626,17 @@ pub fn apply_greatest2(columns: &mut [Column]) -> PolarsResult<Option<Column>> {
             );
             out.into_series()
         }
-        (DataType::Int64, _) | (DataType::Int32, _) | (_, DataType::Int64) | (_, DataType::Int32) => {
+        (DataType::Int64, _)
+        | (DataType::Int32, _)
+        | (_, DataType::Int64)
+        | (_, DataType::Int32) => {
             let a = a_series.cast(&DataType::Int64)?;
             let b = b_series.cast(&DataType::Int64)?;
             let ca_a = a.i64().unwrap();
             let ca_b = b.i64().unwrap();
             let out = Int64Chunked::from_iter_options(
                 name.as_str().into(),
-                ca_a.into_iter().zip(ca_b.into_iter()).map(|(oa, ob)| match (oa, ob) {
+                ca_a.into_iter().zip(ca_b).map(|(oa, ob)| match (oa, ob) {
                     (Some(x), Some(y)) => Some(x.max(y)),
                     (Some(x), None) => Some(x),
                     (None, Some(y)) => Some(y),
@@ -654,7 +652,7 @@ pub fn apply_greatest2(columns: &mut [Column]) -> PolarsResult<Option<Column>> {
             let ca_b = b.str().unwrap();
             let out = StringChunked::from_iter_options(
                 name.as_str().into(),
-                ca_a.into_iter().zip(ca_b.into_iter()).map(|(oa, ob)| match (oa, ob) {
+                ca_a.into_iter().zip(ca_b).map(|(oa, ob)| match (oa, ob) {
                     (Some(x), Some(y)) => Some(if x >= y { x } else { y }),
                     (Some(x), None) => Some(x),
                     (None, Some(y)) => Some(y),
@@ -668,7 +666,7 @@ pub fn apply_greatest2(columns: &mut [Column]) -> PolarsResult<Option<Column>> {
             let b = float_series_to_f64(&b_series)?;
             let out = Float64Chunked::from_iter_options(
                 name.as_str().into(),
-                a.into_iter().zip(b.into_iter()).map(|(oa, ob)| match (oa, ob) {
+                a.into_iter().zip(&b).map(|(oa, ob)| match (oa, ob) {
                     (Some(x), Some(y)) => Some(x.max(y)),
                     (Some(x), None) => Some(x),
                     (None, Some(y)) => Some(y),
@@ -695,7 +693,7 @@ pub fn apply_least2(columns: &mut [Column]) -> PolarsResult<Option<Column>> {
             let b = float_series_to_f64(&b_series)?;
             let out = Float64Chunked::from_iter_options(
                 name.as_str().into(),
-                a.into_iter().zip(b.into_iter()).map(|(oa, ob)| match (oa, ob) {
+                a.into_iter().zip(&b).map(|(oa, ob)| match (oa, ob) {
                     (Some(x), Some(y)) => Some(x.min(y)),
                     (Some(x), None) => Some(x),
                     (None, Some(y)) => Some(y),
@@ -704,14 +702,17 @@ pub fn apply_least2(columns: &mut [Column]) -> PolarsResult<Option<Column>> {
             );
             out.into_series()
         }
-        (DataType::Int64, _) | (DataType::Int32, _) | (_, DataType::Int64) | (_, DataType::Int32) => {
+        (DataType::Int64, _)
+        | (DataType::Int32, _)
+        | (_, DataType::Int64)
+        | (_, DataType::Int32) => {
             let a = a_series.cast(&DataType::Int64)?;
             let b = b_series.cast(&DataType::Int64)?;
             let ca_a = a.i64().unwrap();
             let ca_b = b.i64().unwrap();
             let out = Int64Chunked::from_iter_options(
                 name.as_str().into(),
-                ca_a.into_iter().zip(ca_b.into_iter()).map(|(oa, ob)| match (oa, ob) {
+                ca_a.into_iter().zip(ca_b).map(|(oa, ob)| match (oa, ob) {
                     (Some(x), Some(y)) => Some(x.min(y)),
                     (Some(x), None) => Some(x),
                     (None, Some(y)) => Some(y),
@@ -727,7 +728,7 @@ pub fn apply_least2(columns: &mut [Column]) -> PolarsResult<Option<Column>> {
             let ca_b = b.str().unwrap();
             let out = StringChunked::from_iter_options(
                 name.as_str().into(),
-                ca_a.into_iter().zip(ca_b.into_iter()).map(|(oa, ob)| match (oa, ob) {
+                ca_a.into_iter().zip(ca_b).map(|(oa, ob)| match (oa, ob) {
                     (Some(x), Some(y)) => Some(if x <= y { x } else { y }),
                     (Some(x), None) => Some(x),
                     (None, Some(y)) => Some(y),
@@ -741,7 +742,7 @@ pub fn apply_least2(columns: &mut [Column]) -> PolarsResult<Option<Column>> {
             let b = float_series_to_f64(&b_series)?;
             let out = Float64Chunked::from_iter_options(
                 name.as_str().into(),
-                a.into_iter().zip(b.into_iter()).map(|(oa, ob)| match (oa, ob) {
+                a.into_iter().zip(&b).map(|(oa, ob)| match (oa, ob) {
                     (Some(x), Some(y)) => Some(x.min(y)),
                     (Some(x), None) => Some(x),
                     (None, Some(y)) => Some(y),

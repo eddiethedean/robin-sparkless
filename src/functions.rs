@@ -442,7 +442,10 @@ pub fn signum(column: &Column) -> Column {
 /// Cast column to the given type (PySpark cast). Fails on invalid conversion.
 pub fn cast(column: &Column, type_name: &str) -> Result<Column, String> {
     let dtype = parse_type_name(type_name)?;
-    Ok(Column::from_expr(column.expr().clone().strict_cast(dtype), None))
+    Ok(Column::from_expr(
+        column.expr().clone().strict_cast(dtype),
+        None,
+    ))
 }
 
 /// Cast column to the given type, returning null on invalid conversion (PySpark try_cast).
@@ -467,11 +470,7 @@ pub fn greatest(columns: &[&Column]) -> Result<Column, String> {
     let mut expr = columns[0].expr().clone();
     for c in columns.iter().skip(1) {
         let args = [c.expr().clone()];
-        expr = expr.map_many(
-            crate::udfs::apply_greatest2,
-            &args,
-            GetOutput::same_type(),
-        );
+        expr = expr.map_many(crate::udfs::apply_greatest2, &args, GetOutput::same_type());
     }
     Ok(Column::from_expr(expr, None))
 }
@@ -487,11 +486,7 @@ pub fn least(columns: &[&Column]) -> Result<Column, String> {
     let mut expr = columns[0].expr().clone();
     for c in columns.iter().skip(1) {
         let args = [c.expr().clone()];
-        expr = expr.map_many(
-            crate::udfs::apply_least2,
-            &args,
-            GetOutput::same_type(),
-        );
+        expr = expr.map_many(crate::udfs::apply_least2, &args, GetOutput::same_type());
     }
     Ok(Column::from_expr(expr, None))
 }

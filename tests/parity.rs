@@ -1629,11 +1629,11 @@ fn json_value_to_lit(v: &serde_json::Value) -> Result<Expr, String> {
 fn parse_with_column_expr(src: &str) -> Result<Expr, String> {
     use polars::prelude::concat_list;
     use robin_sparkless::{
-        acos, add_months, asin, atan, atan2, array_compact, array_contains, array_size, array_sum,
-        ascii, base64, cast, char as rs_char, chr, coalesce, col, concat, concat_ws, cos,
+        acos, add_months, array_compact, array_contains, array_size, array_sum, ascii, asin, atan,
+        atan2, base64, cast, char as rs_char, chr, coalesce, col, concat, concat_ws, cos,
         current_date, current_timestamp, date_add, date_sub, datediff, dayofweek, dayofyear,
         degrees, element_at, exp, format_number, greatest, hour, initcap, instr, isnan, last_day,
-        length, least, lit_str, log, lower, lpad, md5, minute, months_between, nanvl, next_day,
+        least, length, lit_str, log, lower, lpad, md5, minute, months_between, nanvl, next_day,
         nullif, nvl, overlay, position, pow, quarter, radians, regexp_extract, regexp_extract_all,
         regexp_like, regexp_replace, repeat, reverse, rpad, second, sha1, sha2, signum, sin, size,
         split, sqrt, substring, tan, trim, trunc, try_cast, unbase64, upper, weekofyear, when,
@@ -2529,7 +2529,11 @@ fn parse_with_column_expr(src: &str) -> Result<Expr, String> {
         return Ok(quarter(&col(col_name)).into_expr());
     }
     if s.starts_with("weekofyear(") || s.starts_with("week(") {
-        let prefix = if s.starts_with("weekofyear(") { "weekofyear(" } else { "week(" };
+        let prefix = if s.starts_with("weekofyear(") {
+            "weekofyear("
+        } else {
+            "week("
+        };
         let inner = extract_first_arg(s, prefix)?;
         let col_name = extract_col_name(inner)?;
         return Ok(weekofyear(&col(col_name)).into_expr());
@@ -2560,7 +2564,8 @@ fn parse_with_column_expr(src: &str) -> Result<Expr, String> {
         let inner = extract_first_arg(s, "months_between(")?;
         let parts = parse_comma_separated_args(inner);
         let end_name = extract_col_name(parts.first().ok_or("months_between needs end column")?)?;
-        let start_name = extract_col_name(parts.get(1).ok_or("months_between needs start column")?)?;
+        let start_name =
+            extract_col_name(parts.get(1).ok_or("months_between needs start column")?)?;
         return Ok(months_between(&col(end_name), &col(start_name)).into_expr());
     }
     if s.starts_with("next_day(") {
@@ -2598,7 +2603,9 @@ fn parse_with_column_expr(src: &str) -> Result<Expr, String> {
             .trim()
             .trim_matches(['\'', '"']);
         let c = col(col_name);
-        return Ok(try_cast(&c, type_str).map_err(|e| e.to_string())?.into_expr());
+        return Ok(try_cast(&c, type_str)
+            .map_err(|e| e.to_string())?
+            .into_expr());
     }
     if s.starts_with("isnan(") {
         let inner = extract_first_arg(s, "isnan(")?;

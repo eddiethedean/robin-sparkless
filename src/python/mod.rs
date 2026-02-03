@@ -4,10 +4,10 @@
 use crate::column::Column as RsColumn;
 use crate::dataframe::JoinType;
 use crate::functions::{
-    acos, add_months, asin, atan, atan2, array_compact, ascii, base64, cast as rs_cast, chr, cos,
-    dayofweek, dayofyear, degrees, format_number, greatest as rs_greatest, isnan as rs_isnan, md5,
-    least as rs_least, months_between, next_day, overlay, position as rs_position, quarter, radians,
-    sha1, sha2, signum, sin, tan, try_cast as rs_try_cast, unbase64, weekofyear,
+    acos, add_months, array_compact, ascii, asin, atan, atan2, base64, cast as rs_cast, chr, cos,
+    dayofweek, dayofyear, degrees, format_number, greatest as rs_greatest, isnan as rs_isnan,
+    least as rs_least, md5, months_between, next_day, overlay, position as rs_position, quarter,
+    radians, sha1, sha2, signum, sin, tan, try_cast as rs_try_cast, unbase64, weekofyear,
 };
 use crate::functions::{avg, coalesce, col as rs_col, count, max, min, sum as rs_sum};
 use crate::{DataFrame, GroupedData, SparkSession};
@@ -239,27 +239,39 @@ fn py_array_compact(column: &PyColumn) -> PyColumn {
 
 #[pyfunction]
 fn py_sin(column: &PyColumn) -> PyColumn {
-    PyColumn { inner: sin(&column.inner) }
+    PyColumn {
+        inner: sin(&column.inner),
+    }
 }
 #[pyfunction]
 fn py_cos(column: &PyColumn) -> PyColumn {
-    PyColumn { inner: cos(&column.inner) }
+    PyColumn {
+        inner: cos(&column.inner),
+    }
 }
 #[pyfunction]
 fn py_tan(column: &PyColumn) -> PyColumn {
-    PyColumn { inner: tan(&column.inner) }
+    PyColumn {
+        inner: tan(&column.inner),
+    }
 }
 #[pyfunction]
 fn py_asin(column: &PyColumn) -> PyColumn {
-    PyColumn { inner: asin(&column.inner) }
+    PyColumn {
+        inner: asin(&column.inner),
+    }
 }
 #[pyfunction]
 fn py_acos(column: &PyColumn) -> PyColumn {
-    PyColumn { inner: acos(&column.inner) }
+    PyColumn {
+        inner: acos(&column.inner),
+    }
 }
 #[pyfunction]
 fn py_atan(column: &PyColumn) -> PyColumn {
-    PyColumn { inner: atan(&column.inner) }
+    PyColumn {
+        inner: atan(&column.inner),
+    }
 }
 #[pyfunction]
 fn py_atan2(y: &PyColumn, x: &PyColumn) -> PyColumn {
@@ -329,15 +341,15 @@ fn py_next_day(column: &PyColumn, day_of_week: &str) -> PyColumn {
 }
 #[pyfunction]
 fn py_cast(column: &PyColumn, type_name: &str) -> PyResult<PyColumn> {
-    rs_cast(&column.inner, type_name).map(|inner| PyColumn { inner }).map_err(|e| {
-        pyo3::exceptions::PyValueError::new_err(e)
-    })
+    rs_cast(&column.inner, type_name)
+        .map(|inner| PyColumn { inner })
+        .map_err(|e| pyo3::exceptions::PyValueError::new_err(e))
 }
 #[pyfunction]
 fn py_try_cast(column: &PyColumn, type_name: &str) -> PyResult<PyColumn> {
-    rs_try_cast(&column.inner, type_name).map(|inner| PyColumn { inner }).map_err(|e| {
-        pyo3::exceptions::PyValueError::new_err(e)
-    })
+    rs_try_cast(&column.inner, type_name)
+        .map(|inner| PyColumn { inner })
+        .map_err(|e| pyo3::exceptions::PyValueError::new_err(e))
 }
 #[pyfunction]
 fn py_isnan(column: &PyColumn) -> PyColumn {
@@ -348,16 +360,16 @@ fn py_isnan(column: &PyColumn) -> PyColumn {
 #[pyfunction]
 fn py_greatest(columns: Vec<PyRef<PyColumn>>) -> PyResult<PyColumn> {
     let refs: Vec<&RsColumn> = columns.iter().map(|c| &c.inner).collect();
-    rs_greatest(&refs).map(|inner| PyColumn { inner }).map_err(|e| {
-        pyo3::exceptions::PyValueError::new_err(e)
-    })
+    rs_greatest(&refs)
+        .map(|inner| PyColumn { inner })
+        .map_err(|e| pyo3::exceptions::PyValueError::new_err(e))
 }
 #[pyfunction]
 fn py_least(columns: Vec<PyRef<PyColumn>>) -> PyResult<PyColumn> {
     let refs: Vec<&RsColumn> = columns.iter().map(|c| &c.inner).collect();
-    rs_least(&refs).map(|inner| PyColumn { inner }).map_err(|e| {
-        pyo3::exceptions::PyValueError::new_err(e)
-    })
+    rs_least(&refs)
+        .map(|inner| PyColumn { inner })
+        .map_err(|e| pyo3::exceptions::PyValueError::new_err(e))
 }
 
 /// Python wrapper for Column (expression).
@@ -526,22 +538,34 @@ impl PyColumn {
     }
 
     fn sin(&self) -> Self {
-        PyColumn { inner: sin(&self.inner) }
+        PyColumn {
+            inner: sin(&self.inner),
+        }
     }
     fn cos(&self) -> Self {
-        PyColumn { inner: cos(&self.inner) }
+        PyColumn {
+            inner: cos(&self.inner),
+        }
     }
     fn tan(&self) -> Self {
-        PyColumn { inner: tan(&self.inner) }
+        PyColumn {
+            inner: tan(&self.inner),
+        }
     }
     fn asin_(&self) -> Self {
-        PyColumn { inner: asin(&self.inner) }
+        PyColumn {
+            inner: asin(&self.inner),
+        }
     }
     fn acos_(&self) -> Self {
-        PyColumn { inner: acos(&self.inner) }
+        PyColumn {
+            inner: acos(&self.inner),
+        }
     }
     fn atan_(&self) -> Self {
-        PyColumn { inner: atan(&self.inner) }
+        PyColumn {
+            inner: atan(&self.inner),
+        }
     }
     fn atan2(&self, x: &PyColumn) -> Self {
         PyColumn {
@@ -599,14 +623,14 @@ impl PyColumn {
         }
     }
     fn cast(&self, type_name: &str) -> PyResult<Self> {
-        rs_cast(&self.inner, type_name).map(|inner| PyColumn { inner }).map_err(|e| {
-            pyo3::exceptions::PyValueError::new_err(e)
-        })
+        rs_cast(&self.inner, type_name)
+            .map(|inner| PyColumn { inner })
+            .map_err(|e| pyo3::exceptions::PyValueError::new_err(e))
     }
     fn try_cast(&self, type_name: &str) -> PyResult<Self> {
-        rs_try_cast(&self.inner, type_name).map(|inner| PyColumn { inner }).map_err(|e| {
-            pyo3::exceptions::PyValueError::new_err(e)
-        })
+        rs_try_cast(&self.inner, type_name)
+            .map(|inner| PyColumn { inner })
+            .map_err(|e| pyo3::exceptions::PyValueError::new_err(e))
     }
     fn isnan(&self) -> Self {
         PyColumn {
