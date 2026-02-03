@@ -11,6 +11,12 @@ pub mod schema;
 pub mod session;
 pub mod type_coercion;
 
+#[cfg(feature = "sql")]
+pub mod sql;
+
+#[cfg(feature = "delta")]
+pub mod delta;
+
 #[cfg(feature = "pyo3")]
 pub mod python;
 

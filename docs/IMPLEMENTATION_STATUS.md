@@ -50,7 +50,7 @@ Robin-sparkless is designed to **replace the backend logic** of [Sparkless](http
 5. **Window functions** ✅ **COMPLETED**
    - ✅ `Column::rank()`, `row_number()`, `dense_rank()`, `lag()`, `lead()` with `.over(partition_by)`
    - ✅ Parity fixtures: `row_number_window`, `rank_window`, `lag_lead_window`
-   - Implement (or explicitly defer) `SparkSession::sql()` with clear documentation.
+   - ✅ `SparkSession::sql()` implemented (optional `sql` feature); temp views; see [QUICKSTART.md](QUICKSTART.md), [PYTHON_API.md](PYTHON_API.md).
 
 6. **PyO3 Bridge** ✅ **COMPLETED** (Phase 4)
    - Optional `pyo3` feature (PyO3 0.24); `src/python/mod.rs` exposes `robin_sparkless` Python module.
@@ -61,10 +61,20 @@ Robin-sparkless is designed to **replace the backend logic** of [Sparkless](http
 7. **Phase 5 Test Conversion** ✅ **COMPLETED**
    - Fixture converter maps Sparkless `expected_outputs` to robin-sparkless format (join, window, withColumn, union, distinct, drop, dropna, fillna, limit, withColumnRenamed, etc.).
    - Parity discovers `tests/fixtures/` and `tests/fixtures/converted/`; optional `skip: true` in fixtures.
-   - `make sparkless-parity` (set `SPARKLESS_EXPECTED_OUTPUTS` to run converter first); 51 hand-written fixtures passing.
+   - `make sparkless-parity` (set `SPARKLESS_EXPECTED_OUTPUTS` to run converter first); 54 hand-written fixtures passing.
    - See [CONVERTER_STATUS.md](CONVERTER_STATUS.md), [SPARKLESS_PARITY_STATUS.md](SPARKLESS_PARITY_STATUS.md).
 
-8. **Sparkless integration** (in Sparkless repo)
+8. **Phase 6 Broad Function Parity** (partial) ✅
+   - Array: `array_size`/`size`, `array_contains`, `element_at`, `explode`, `array_sort`, `array_join`, `array_slice`; parity fixtures: `array_contains`, `element_at`, `array_size`.
+   - Window: `first_value`, `last_value`, `percent_rank` with `.over()`.
+   - String: `regexp_extract_all`, `regexp_like`. Map and JSON phases deferred.
+
+9. **Phase 7 SQL & Advanced** ✅ **COMPLETED**
+   - Optional **SQL** (`sql` feature): `SparkSession::sql(query)`, temp views (`create_or_replace_temp_view`, `table`); sqlparser → DataFrame ops (SELECT, FROM, WHERE, JOIN, GROUP BY, ORDER BY, LIMIT).
+   - Optional **Delta Lake** (`delta` feature): `read_delta`, `read_delta_with_version` (time travel), `write_delta` (overwrite/append) via delta-rs.
+   - **Performance**: `cargo bench` (criterion) compares robin-sparkless vs Polars; target within ~2x. Error messages improved; Troubleshooting in [QUICKSTART.md](QUICKSTART.md).
+
+10. **Sparkless integration** (in Sparkless repo)
    - Fixture converter: Sparkless `expected_outputs/` JSON → robin-sparkless fixtures
    - Structural alignment: service-style modules, trait-based backends, case sensitivity
    - Function parity: use [PYSPARK_FUNCTION_MATRIX](https://github.com/eddiethedean/sparkless/blob/main/PYSPARK_FUNCTION_MATRIX.md) as checklist

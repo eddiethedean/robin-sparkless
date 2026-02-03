@@ -1,0 +1,41 @@
+{
+  "name": "array_contains",
+  "pyspark_version": "3.5.0",
+  "input": {
+    "schema": [
+      { "name": "id", "type": "bigint" },
+      { "name": "s", "type": "string" }
+    ],
+    "rows": [
+      [1, "a|b|c"],
+      [2, "x|y"],
+      [3, "a"]
+    ]
+  },
+  "operations": [
+    {
+      "op": "withColumn",
+      "column": "arr",
+      "expr": "split(col('s'), '|')"
+    },
+    {
+      "op": "withColumn",
+      "column": "has_a",
+      "expr": "array_contains(col('arr'), lit('a'))"
+    },
+    { "op": "select", "columns": ["id", "s", "arr", "has_a"] }
+  ],
+  "expected": {
+    "schema": [
+      { "name": "id", "type": "bigint" },
+      { "name": "s", "type": "string" },
+      { "name": "arr", "type": "array<string>" },
+      { "name": "has_a", "type": "boolean" }
+    ],
+    "rows": [
+      [1, "a|b|c", ["a", "b", "c"], true],
+      [2, "x|y", ["x", "y"], false],
+      [3, "a", ["a"], true]
+    ]
+  }
+}

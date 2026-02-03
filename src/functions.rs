@@ -200,6 +200,16 @@ pub fn initcap(column: &Column) -> Column {
     column.clone().initcap()
 }
 
+/// Extract all matches of regex (PySpark regexp_extract_all).
+pub fn regexp_extract_all(column: &Column, pattern: &str) -> Column {
+    column.clone().regexp_extract_all(pattern)
+}
+
+/// Check if string matches regex (PySpark regexp_like / rlike).
+pub fn regexp_like(column: &Column, pattern: &str) -> Column {
+    column.clone().regexp_like(pattern)
+}
+
 /// Absolute value (PySpark abs)
 pub fn abs(column: &Column) -> Column {
     column.clone().abs()
@@ -288,6 +298,21 @@ pub fn lead(column: &Column, n: i64) -> Column {
     column.clone().lead(n)
 }
 
+/// First value in partition (PySpark first_value). Use with `.over(partition_by)`.
+pub fn first_value(column: &Column) -> Column {
+    column.clone().first_value()
+}
+
+/// Last value in partition (PySpark last_value). Use with `.over(partition_by)`.
+pub fn last_value(column: &Column) -> Column {
+    column.clone().last_value()
+}
+
+/// Percent rank in partition: (rank - 1) / (count - 1). Use with `.over(partition_by)`.
+pub fn percent_rank(column: &Column, descending: bool) -> Column {
+    column.clone().percent_rank(descending)
+}
+
 /// Coalesce - returns the first non-null value from multiple columns.
 ///
 /// # Example
@@ -305,6 +330,69 @@ pub fn coalesce(columns: &[&Column]) -> Column {
     let exprs: Vec<Expr> = columns.iter().map(|c| c.expr().clone()).collect();
     let expr = coalesce(&exprs);
     crate::column::Column::from_expr(expr, None)
+}
+
+// --- Array / List functions (Phase 6a) ---
+
+/// Create an array column from multiple columns (PySpark array).
+pub fn array(columns: &[&Column]) -> crate::column::Column {
+    use polars::prelude::*;
+    if columns.is_empty() {
+        panic!("array requires at least one column");
+    }
+    let exprs: Vec<Expr> = columns.iter().map(|c| c.expr().clone()).collect();
+    let expr = concat_list(exprs).expect("concat_list");
+    crate::column::Column::from_expr(expr, None)
+}
+
+/// Number of elements in list (PySpark size / array_size). Returns Int32.
+pub fn array_size(column: &Column) -> Column {
+    column.clone().array_size()
+}
+
+/// Alias for array_size (PySpark size).
+pub fn size(column: &Column) -> Column {
+    column.clone().array_size()
+}
+
+/// Check if list contains value (PySpark array_contains).
+pub fn array_contains(column: &Column, value: &Column) -> Column {
+    column.clone().array_contains(value.expr().clone())
+}
+
+/// Join list of strings with separator (PySpark array_join).
+pub fn array_join(column: &Column, separator: &str) -> Column {
+    column.clone().array_join(separator)
+}
+
+/// Maximum element in list (PySpark array_max).
+pub fn array_max(column: &Column) -> Column {
+    column.clone().array_max()
+}
+
+/// Minimum element in list (PySpark array_min).
+pub fn array_min(column: &Column) -> Column {
+    column.clone().array_min()
+}
+
+/// Get element at 1-based index (PySpark element_at).
+pub fn element_at(column: &Column, index: i64) -> Column {
+    column.clone().element_at(index)
+}
+
+/// Sort list elements (PySpark array_sort).
+pub fn array_sort(column: &Column) -> Column {
+    column.clone().array_sort()
+}
+
+/// Slice list from 1-based start with optional length (PySpark slice).
+pub fn array_slice(column: &Column, start: i64, length: Option<i64>) -> Column {
+    column.clone().array_slice(start, length)
+}
+
+/// Explode list into one row per element (PySpark explode).
+pub fn explode(column: &Column) -> Column {
+    column.clone().explode()
 }
 
 #[cfg(test)]

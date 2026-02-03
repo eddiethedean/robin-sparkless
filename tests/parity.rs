@@ -1249,11 +1249,11 @@ fn json_value_to_lit(v: &serde_json::Value) -> Result<Expr, String> {
     }
 }
 
-/// Parse expressions for withColumn operations (when, coalesce, string funcs, etc.)
+/// Parse expressions for withColumn operations (when, coalesce, string funcs, array funcs, etc.)
 fn parse_with_column_expr(src: &str) -> Result<Expr, String> {
     use robin_sparkless::{
-        coalesce, col, concat, concat_ws, initcap, length, lit_str, lower, regexp_extract,
-        regexp_replace, split, substring, trim, upper, when,
+        array_contains, array_size, coalesce, col, concat, concat_ws, element_at, initcap, length,
+        lit_str, lower, regexp_extract, regexp_replace, size, split, substring, trim, upper, when,
     };
 
     let s = src.trim();
@@ -1456,9 +1456,52 @@ fn parse_with_column_expr(src: &str) -> Result<Expr, String> {
         let delimiter = parts
             .get(1)
             .ok_or("split needs delimiter")?
-            .trim_matches(['\'', '"']);
+            .trim()
+            .trim_matches(['\'', '"'])
+            .trim();
         let c = col(col_name);
         return Ok(split(&c, delimiter).into_expr());
+    }
+
+    // Handle array_contains(col('arr'), lit('x')) or array_contains(col('arr'), lit(1))
+    if s.starts_with("array_contains(") {
+        let inner = extract_first_arg(s, "array_contains(")?;
+        let parts = parse_comma_separated_args(inner);
+        let col_name = extract_col_name(parts.first().ok_or("array_contains needs column")?)?;
+        let arr_col = col(col_name);
+        let value_expr =
+            parse_column_or_literal(parts.get(1).ok_or("array_contains needs value")?.trim())?;
+        let value_col = robin_sparkless::Column::from_expr(value_expr, None);
+        return Ok(array_contains(&arr_col, &value_col).into_expr());
+    }
+
+    // Handle element_at(col('arr'), 1) - 1-based index
+    if s.starts_with("element_at(") {
+        let inner = extract_first_arg(s, "element_at(")?;
+        let parts = parse_comma_separated_args(inner);
+        let col_name = extract_col_name(parts.first().ok_or("element_at needs column")?)?;
+        let index: i64 = parts
+            .get(1)
+            .ok_or("element_at needs index")?
+            .trim()
+            .parse()
+            .map_err(|e: std::num::ParseIntError| e.to_string())?;
+        let c = col(col_name);
+        return Ok(element_at(&c, index).into_expr());
+    }
+
+    // Handle size(col('arr')) or array_size(col('arr'))
+    if s.starts_with("size(") {
+        let inner = extract_first_arg(s, "size(")?;
+        let col_name = extract_col_name(inner)?;
+        let c = col(col_name);
+        return Ok(size(&c).into_expr());
+    }
+    if s.starts_with("array_size(") {
+        let inner = extract_first_arg(s, "array_size(")?;
+        let col_name = extract_col_name(inner)?;
+        let c = col(col_name);
+        return Ok(array_size(&c).into_expr());
     }
 
     // Handle substring(col('name'), start, length) - 1-based start
@@ -1836,6 +1879,31 @@ fn parse_column_or_literal(s: &str) -> Result<Expr, String> {
     }
 }
 
+/// Convert Polars AnyValue to serde_json Value (for list elements and scalars).
+fn any_value_to_json(av: &polars::prelude::AnyValue, _dtype: &polars::prelude::DataType) -> Value {
+    use polars::prelude::AnyValue;
+    use serde_json::Number;
+    match av {
+        AnyValue::Null => Value::Null,
+        AnyValue::Boolean(v) => Value::Bool(*v),
+        AnyValue::Int32(v) => Value::Number((*v).into()),
+        AnyValue::Int64(v) => Value::Number((*v).into()),
+        AnyValue::UInt32(v) => Value::Number((*v).into()),
+        AnyValue::Float64(v) => Number::from_f64(*v)
+            .map(Value::Number)
+            .unwrap_or(Value::Null),
+        AnyValue::String(v) => Value::String(v.to_string()),
+        AnyValue::List(s) => {
+            let arr: Vec<Value> = (0..s.len())
+                .filter_map(|i| s.get(i).ok())
+                .map(|a| any_value_to_json(&a, s.dtype()))
+                .collect();
+            Value::Array(arr)
+        }
+        _ => Value::String(format!("{:?}", av)),
+    }
+}
+
 /// Collect a DataFrame to a simple (schema, rows) representation for comparison.
 fn collect_to_simple_format(
     df: &DataFrame,
@@ -1889,6 +1957,19 @@ fn collect_to_simple_format(
                                 }
                                 _ => Value::String(debug_str),
                             }
+                        }
+                    } else if matches!(series.dtype(), polars::prelude::DataType::List(_)) {
+                        // List/array column: convert to JSON array
+                        match av {
+                            polars::prelude::AnyValue::Null => Value::Null,
+                            polars::prelude::AnyValue::List(s) => {
+                                let arr: Vec<Value> = (0..s.len())
+                                    .filter_map(|i| s.get(i).ok())
+                                    .map(|av| any_value_to_json(&av, s.dtype()))
+                                    .collect();
+                                Value::Array(arr)
+                            }
+                            _ => Value::Null,
                         }
                     } else {
                         // For non-string types, use standard matching
@@ -1954,6 +2035,7 @@ fn dtype_to_string(dtype: &polars::prelude::DataType) -> String {
         polars::prelude::DataType::String => "string".to_string(),
         polars::prelude::DataType::Float64 => "Float64".to_string(),
         polars::prelude::DataType::Boolean => "boolean".to_string(),
+        polars::prelude::DataType::List(inner) => format!("array<{}>", dtype_to_string(inner)),
         _ => format!("{:?}", dtype),
     }
 }
@@ -2049,6 +2131,10 @@ fn types_compatible(actual: &str, expected: &str) -> bool {
     if float_types.contains(&actual) && float_types.contains(&expected) {
         return true;
     }
+    // Allow array<...> types to match (Phase 6a list columns)
+    if actual.starts_with("array<") && expected.starts_with("array<") {
+        return true;
+    }
     false
 }
 
@@ -2138,11 +2224,20 @@ fn compare_values(a: &Value, b: &Value) -> std::cmp::Ordering {
         }
         (Value::String(s1), Value::String(s2)) => s1.cmp(s2),
         (Value::Bool(b1), Value::Bool(b2)) => b1.cmp(b2),
+        (Value::Array(a1), Value::Array(a2)) => {
+            for (x, y) in a1.iter().zip(a2.iter()) {
+                let ord = compare_values(x, y);
+                if ord != std::cmp::Ordering::Equal {
+                    return ord;
+                }
+            }
+            a1.len().cmp(&a2.len())
+        }
         _ => format!("{:?}", a).cmp(&format!("{:?}", b)),
     }
 }
 
-/// Compare two JSON Values for equality (handles nulls, numbers, strings).
+/// Compare two JSON Values for equality (handles nulls, numbers, strings, arrays).
 fn values_equal(a: &Value, b: &Value) -> bool {
     match (a, b) {
         (Value::Null, Value::Null) => true,
@@ -2159,6 +2254,9 @@ fn values_equal(a: &Value, b: &Value) -> bool {
         }
         (Value::String(s1), Value::String(s2)) => s1 == s2,
         (Value::Bool(b1), Value::Bool(b2)) => b1 == b2,
+        (Value::Array(a1), Value::Array(a2)) => {
+            a1.len() == a2.len() && a1.iter().zip(a2.iter()).all(|(x, y)| values_equal(x, y))
+        }
         _ => false,
     }
 }

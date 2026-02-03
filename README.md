@@ -10,7 +10,10 @@ A Rust DataFrame library that aims to **emulate PySpark’s DataFrame behavior a
 - **PySpark-like behavior**: Semantics (null handling, groupBy, joins, etc.) should match PySpark as closely as practical
 - **Polars-backed**: Uses Polars `DataFrame`/`Expr` internally for performance
 - **Pure Rust**: Default build has no Python runtime; optional **PyO3** feature for Python bindings
-- **Sparkless backend target**: Intended to power Sparkless's execution engine; aligns with its 403+ PySpark functions and 270+ test fixtures
+- **Optional SQL** (`--features sql`): `spark.sql("SELECT ...")` with temp views (`createOrReplaceTempView`, `table`); single SELECT, FROM/JOIN, WHERE, GROUP BY, ORDER BY, LIMIT
+- **Optional Delta Lake** (`--features delta`): `read_delta` / `read_delta_with_version` (time travel), `write_delta` (overwrite/append) via delta-rs
+- **Benchmarks**: `cargo bench` compares robin-sparkless vs plain Polars; target within ~2x for supported pipelines
+- **Sparkless backend target**: Intended to power Sparkless's execution engine; aligns with its 403+ PySpark functions and 270+ test fixtures; **54 parity fixtures** passing (array, window, string, joins, groupBy, etc.)
 
 ## Installation
 
@@ -98,7 +101,7 @@ complex.show(Some(10))?;
 df_with_computed.show(Some(10))?;
 ```
 
-The library supports IO (CSV/Parquet/JSON via `SparkSession::read_*`), joins (`DataFrame::join` with Inner/Left/Right/Outer), groupBy aggregates (including multi-agg), window functions (`row_number`, `rank`, `dense_rank`, `lag`, `lead` with `.over()`), and string functions (`upper`, `lower`, `substring`, `concat`, `concat_ws`). See [docs/QUICKSTART.md](docs/QUICKSTART.md) for more examples.
+The library supports IO (CSV/Parquet/JSON via `SparkSession::read_*`), joins (`DataFrame::join` with Inner/Left/Right/Outer), groupBy aggregates (including multi-agg), window functions (`row_number`, `rank`, `dense_rank`, `lag`, `lead`, `first_value`, `last_value`, `percent_rank` with `.over()`), array functions (`array_size`, `array_contains`, `element_at`, `explode`, `array_sort`, `array_join`, `array_slice`), and string functions (`upper`, `lower`, `substring`, `concat`, `concat_ws`, `length`, `trim`, `regexp_extract`, `regexp_replace`, `regexp_extract_all`, `regexp_like`, `split`). See [docs/QUICKSTART.md](docs/QUICKSTART.md) for more examples.
 
 ## Development
 
@@ -115,6 +118,11 @@ cargo build
 # Build with Python extension (optional)
 cargo build --features pyo3
 
+# Optional: SQL support and/or Delta Lake
+cargo build --features "pyo3,sql"       # SQL: spark.sql(), temp views
+cargo build --features "pyo3,delta"      # Delta: read_delta, write_delta
+cargo build --features "pyo3,sql,delta"  # All optional features
+
 # Run tests (Rust only; PyO3 code is behind the feature)
 cargo test
 
@@ -124,6 +132,9 @@ make test
 # Run all checks (format, clippy, audit, deny, tests)
 make check
 # Or: RUSTUP_TOOLCHAIN=stable make check
+
+# Benchmarks (robin-sparkless vs Polars)
+cargo bench
 
 # Sparkless parity (optional: convert from Sparkless expected_outputs, then run parity)
 # export SPARKLESS_EXPECTED_OUTPUTS=/path/to/sparkless/tests/expected_outputs
@@ -146,12 +157,12 @@ Or manually (with virtualenv activated): `maturin develop --features pyo3` then 
 
 Robin Sparkless aims to provide a **PySpark-like API layer** on top of Polars:
 
-- **SparkSession**: Entry point for creating `DataFrame`s and reading data sources (CSV, Parquet, JSON).
-- **DataFrame**: Main tabular data structure; operations include `filter`, `select`, `order_by`, `group_by`, `with_column`, `join`.
+- **SparkSession**: Entry point for creating `DataFrame`s and reading data sources (CSV, Parquet, JSON); optional **SQL** (`sql()`, temp views) and **Delta** (`read_delta`, `read_delta_with_version`) when features are enabled.
+- **DataFrame**: Main tabular data structure; operations include `filter`, `select`, `order_by`, `group_by`, `with_column`, `join`; optional `write_delta` when the `delta` feature is enabled.
 - **Column**: Represents expressions over columns, similar to PySpark’s `Column`; includes window methods (`rank`, `row_number`, `dense_rank`, `lag`, `lead`) with `.over()`.
 - **Functions**: Helper functions like `col()`, `lit_*()`, `count()`, `when`, `coalesce`, window functions, etc., modeled after PySpark’s `pyspark.sql.functions`.
 
-Core behavior (null handling, grouping semantics, joins, window functions, string functions, expression behavior) matches PySpark on 51 parity fixtures, with more coverage planned.
+Core behavior (null handling, grouping semantics, joins, window functions, array and string functions, expression behavior) matches PySpark on 54 parity fixtures, with more coverage planned.
 
 ## Related Documentation
 
@@ -161,7 +172,7 @@ Core behavior (null handling, grouping semantics, joins, window functions, strin
 - [docs/ROADMAP.md](docs/ROADMAP.md) – Development roadmap including Sparkless integration phases
 - [docs/FULL_BACKEND_ROADMAP.md](docs/FULL_BACKEND_ROADMAP.md) – Phased plan to full Sparkless backend replacement (400+ functions, PyO3 bridge)
 - [docs/PYTHON_API.md](docs/PYTHON_API.md) – Python API contract (Phase 4 PyO3 bridge): build, install, method signatures, data transfer
-- [docs/PARITY_STATUS.md](docs/PARITY_STATUS.md) – PySpark parity coverage matrix (51 fixtures)
+- [docs/PARITY_STATUS.md](docs/PARITY_STATUS.md) – PySpark parity coverage matrix (54 fixtures)
 - [docs/CONVERTER_STATUS.md](docs/CONVERTER_STATUS.md) – Sparkless → robin-sparkless fixture converter and operation mapping
 - [docs/SPARKLESS_PARITY_STATUS.md](docs/SPARKLESS_PARITY_STATUS.md) – Phase 5: pass/fail and failure reasons for converted fixtures; `make sparkless-parity`
 

@@ -9,11 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Phase 7 SQL & Advanced**:
+  - **SQL** (optional `sql` feature): `SparkSession::sql(query)` with temp views (`create_or_replace_temp_view`, `table`). Parses single SELECT with FROM/JOIN, WHERE, GROUP BY, ORDER BY, LIMIT and translates to DataFrame ops. Python: `spark.sql(query)`, `spark.create_or_replace_temp_view(name, df)`, `spark.table(name)`.
+  - **Delta Lake** (optional `delta` feature): `read_delta(path)`, `read_delta_with_version(path, version)` (time travel), `write_delta(path, overwrite)` (overwrite/append). Python: `spark.read_delta(path)`, `spark.read_delta_version(path, version)`, `df.write_delta(path, overwrite)`.
+  - **Performance**: Criterion benchmarks (`cargo bench`) for filter/select/groupBy (robin vs Polars). Target within ~2x for supported pipelines.
+  - **Robustness**: Clearer error messages (column names, hints); Troubleshooting section in [docs/QUICKSTART.md](docs/QUICKSTART.md).
+
+- **Phase 6 Broad Function Parity** (partial):
+  - **Array functions**: `array_size`/`size`, `array_contains`, `element_at`, `explode`, `array_sort`, `array_join`, `array_slice`; parity fixtures: `array_contains`, `element_at`, `array_size`.
+  - **Window extensions**: `first_value`, `last_value`, `percent_rank` with `.over(partition_by)`.
+  - **String**: `regexp_extract_all`, `regexp_like`.
+  - **PyO3**: New functions exposed on `PyColumn` (e.g. `size`, `element_at`, `explode`, `first_value`, `last_value`, `percent_rank`, `regexp_like`).
+  - Map and JSON phases deferred (Polars MapType/JSON semantics; documented in [FULL_BACKEND_ROADMAP.md](docs/FULL_BACKEND_ROADMAP.md)).
+
 - **Phase 5 Test Conversion**: Fixture converter and parity over converted fixtures.
   - Converter (`tests/convert_sparkless_fixtures.py`) maps Sparkless `expected_outputs` to robin-sparkless format: join, window, withColumn, union, unionByName, distinct, drop, dropna, fillna, limit, withColumnRenamed (in addition to filter, select, groupBy, orderBy).
   - Parity test discovers `tests/fixtures/*.json` and `tests/fixtures/converted/*.json`; optional `skip: true` / `skip_reason` in fixtures to skip known gaps.
   - `make sparkless-parity`: when `SPARKLESS_EXPECTED_OUTPUTS` is set, runs converter then `cargo test pyspark_parity_fixtures`; see [docs/CONVERTER_STATUS.md](docs/CONVERTER_STATUS.md) and [docs/SPARKLESS_PARITY_STATUS.md](docs/SPARKLESS_PARITY_STATUS.md).
-  - 51 hand-written fixtures passing; target 50+ met.
+  - 54 hand-written fixtures passing; target 50+ met.
 - **Phase 4 PyO3 Bridge**: Optional Python bindings when built with `--features pyo3`.
   - Python module `robin_sparkless` with PySpark-like API: `SparkSession`, `SparkSessionBuilder`, `DataFrame`, `Column`, `GroupedData`, `WhenBuilder`, `ThenBuilder`.
   - Session: `builder()`, `get_or_create()`, `create_dataframe`, `read_csv`, `read_parquet`, `read_json`, `is_case_sensitive()`.

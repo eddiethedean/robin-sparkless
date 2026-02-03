@@ -18,6 +18,10 @@ cargo build
 ```bash
 pip install maturin
 maturin develop --features pyo3   # Editable install into current env
+# With optional SQL and/or Delta:
+maturin develop --features "pyo3,sql"       # spark.sql(), temp views
+maturin develop --features "pyo3,delta"      # read_delta, write_delta
+maturin develop --features "pyo3,sql,delta" # All optional features
 ```
 
 Then use the `robin_sparkless` Python module; see [PYTHON_API.md](PYTHON_API.md).
@@ -108,3 +112,24 @@ let df = df.with_column("joined", concat_ws("-", &[&col("a"), &col("b")]).into_e
 ```
 
 For roadmap and Sparkless integration phases, see [ROADMAP.md](ROADMAP.md).
+
+## Troubleshooting
+
+### Common errors
+
+- **Column 'X' not found** — The DataFrame has no column with that name (case-sensitive if `spark.sql.caseSensitive` is true). The error message lists available columns; check spelling and case.
+
+- **create_dataframe: expected 3 column names** — `create_dataframe` accepts only `(i64, i64, String)` rows and exactly three column names. Use `["id", "age", "name"]` or similar.
+
+- **Type coercion: cannot find common type** — A comparison or arithmetic involved incompatible types (e.g. string vs numeric). Cast one side with `.cast()` or use compatible types.
+
+- **read_csv(path): ...** — The path may not exist, not be readable, or the file may not be valid CSV. Ensure the path is correct and the file has a header row if using default options.
+
+### Optional features (Rust)
+
+- **SQL** (`--features sql`): `SparkSession::sql(query)` with temp views (`create_or_replace_temp_view`, `table`). Supports single SELECT, FROM/JOIN, WHERE, GROUP BY, ORDER BY, LIMIT.
+- **Delta Lake** (`--features delta`): `read_delta(path)`, `read_delta_with_version(path, version)` (time travel), `write_delta(path, overwrite)` on DataFrame. Requires `deltalake` + tokio.
+
+### Benchmarks
+
+Run `cargo bench` to compare robin-sparkless vs plain Polars on filter → select → groupBy pipelines. The goal is to stay within about 2x of Polars for supported operations.

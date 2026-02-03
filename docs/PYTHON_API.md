@@ -9,6 +9,10 @@ This document describes the **Python API contract** exposed by the `robin_sparkl
 ```bash
 # From the repo root
 maturin develop --features pyo3   # Editable install into current env
+# With optional SQL and/or Delta:
+maturin develop --features "pyo3,sql"       # SQL support
+maturin develop --features "pyo3,delta"    # Delta Lake read/write
+maturin develop --features "pyo3,sql,delta"  # Both
 # or
 maturin build --features pyo3     # Build wheel (e.g. target/wheels/)
 pip install target/wheels/robin_sparkless-*.whl
@@ -27,9 +31,9 @@ Python module is only compiled when the `pyo3` feature is enabled. Default `carg
 
 | Rust type       | Python class / function | Notes |
 |-----------------|-------------------------|--------|
-| SparkSession    | `SparkSession`          | `builder()`, `get_or_create()`, `create_dataframe`, `read_csv`, `read_parquet`, `read_json`, `is_case_sensitive()` |
+| SparkSession    | `SparkSession`          | `builder()`, `get_or_create()`, `create_dataframe`, `read_csv`, `read_parquet`, `read_json`, `is_case_sensitive()`; with `sql`: `sql(query)`, `create_or_replace_temp_view(name, df)`, `table(name)`; with `delta`: `read_delta(path)`, `read_delta_version(path, version)` |
 | SparkSessionBuilder | `SparkSessionBuilder` | `app_name()`, `master()`, `config()`, `get_or_create()` |
-| DataFrame       | `DataFrame` | `filter`, `select`, `with_column`, `order_by`, `group_by`, `join`, `union`, `union_by_name`, `distinct`, `drop`, `dropna`, `fillna`, `limit`, `with_column_renamed`, `count`, `show`, `collect` |
+| DataFrame       | `DataFrame` | `filter`, `select`, `with_column`, `order_by`, `group_by`, `join`, `union`, `union_by_name`, `distinct`, `drop`, `dropna`, `fillna`, `limit`, `with_column_renamed`, `count`, `show`, `collect`; with `delta`: `write_delta(path, overwrite)` |
 | Column          | `Column` | Built via `col(name)`, `lit(value)`; methods: `gt`, `ge`, `lt`, `le`, `eq`, `ne`, `and_`, `or_`, `alias`, `is_null`, `is_not_null`, `upper`, `lower`, `substr` |
 | GroupedData     | `GroupedData` | `count()`, `sum(column)`, `avg(column)`, `min(column)`, `max(column)`, `agg(exprs)` |
 | Functions       | Module-level            | `col`, `lit`, `when`, `coalesce`, `sum`, `avg`, `min`, `max`, `count` |
@@ -42,6 +46,7 @@ Python module is only compiled when the `pyo3` feature is enabled. Default `carg
   - `create_dataframe(data: list of (int, int, str), column_names: list of 3 str)` → `DataFrame`
   - `read_csv(path: str)`, `read_parquet(path: str)`, `read_json(path: str)` → `DataFrame`
   - `is_case_sensitive()` → `bool`
+  - **When `sql` feature enabled**: `sql(query: str)` → `DataFrame`; `create_or_replace_temp_view(name: str, df: DataFrame)` → `None`; `table(name: str)` → `DataFrame`
 
 - **DataFrame**
   - `filter(condition: Column)` → `DataFrame`
@@ -58,6 +63,7 @@ Python module is only compiled when the `pyo3` feature is enabled. Default `carg
   - `count()` → `int`
   - `show(n: int | None = None)` → `None`
   - `collect()` → `list[dict[str, Any]]` (list of row dicts)
+  - **When `delta` feature enabled**: `write_delta(path: str, overwrite: bool)` → `None`
 
 - **Column / expressions**
   - `col(name: str)` → `Column`
@@ -102,4 +108,4 @@ python -m pytest tests/python/
 
 - Full Sparkless backend implementation (lives in the Sparkless repo).
 - Supporting every Sparkless operation (only the subset implemented in Rust and covered by parity tests).
-- SQL execution, Delta Lake, UDFs.
+- Full SQL DDL/DML; UDFs. Delta Lake is optional (see `delta` feature).

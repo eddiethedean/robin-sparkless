@@ -43,7 +43,11 @@ pub fn find_common_type(left: &DataType, right: &DataType) -> Result<DataType, P
                 TypePrecedence::Double => Ok(DataType::Float64),
                 TypePrecedence::String => Ok(DataType::String),
                 _ => Err(PolarsError::ComputeError(
-                    format!("unsupported type precedence: {:?}", target_prec).into(),
+                    format!(
+                        "Type coercion: unsupported type precedence {:?}. Supported: Int32, Int64, Float32, Float64, String.",
+                        target_prec
+                    )
+                    .into(),
                 )),
             }
         }
@@ -57,7 +61,11 @@ pub fn find_common_type(left: &DataType, right: &DataType) -> Result<DataType, P
                 Ok(left.clone())
             } else {
                 Err(PolarsError::ComputeError(
-                    format!("cannot find common type for {:?} and {:?}", left, right).into(),
+                    format!(
+                        "Type coercion: cannot find common type for {:?} and {:?}. Hint: use cast() to align types, or ensure both are numeric or both are string.",
+                        left, right
+                    )
+                    .into(),
                 ))
             }
         }

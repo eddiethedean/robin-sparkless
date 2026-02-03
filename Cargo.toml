@@ -11,15 +11,26 @@ crate-type = ["rlib"]
 [features]
 default = []
 pyo3 = ["dep:pyo3"]
+sql = ["dep:sqlparser"]
+delta = ["dep:deltalake", "dep:tokio", "dep:url"]
 
 [dependencies]
-polars = { version = "0.45", features = ["lazy", "csv", "parquet", "json", "temporal", "strings", "concat_str", "regex", "round_series", "abs", "dtype-categorical", "dtype-date", "dtype-datetime", "dtype-duration", "dtype-time", "rank"] }
+polars = { version = "0.45", features = ["lazy", "csv", "parquet", "json", "temporal", "strings", "concat_str", "regex", "round_series", "abs", "dtype-categorical", "dtype-date", "dtype-datetime", "dtype-duration", "dtype-time", "rank", "is_in"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 anyhow = "1.0"
 thiserror = "1.0"
 pyo3 = { version = "0.24", optional = true, features = ["extension-module"] }
+sqlparser = { version = "0.45", optional = true }
+deltalake = { version = "0.30", optional = true }
+tokio = { version = "1", optional = true, features = ["rt", "rt-multi-thread", "fs", "io-util"] }
+url = { version = "2", optional = true }
 
 [dev-dependencies]
-polars = { version = "0.45", features = ["lazy", "csv", "parquet", "json", "temporal", "strings", "concat_str", "regex", "round_series", "abs", "dtype-categorical", "dtype-date", "dtype-datetime", "dtype-duration", "dtype-time", "test", "rank"] }
+polars = { version = "0.45", features = ["lazy", "csv", "parquet", "json", "temporal", "strings", "concat_str", "regex", "round_series", "abs", "dtype-categorical", "dtype-date", "dtype-datetime", "dtype-duration", "dtype-time", "test", "rank", "is_in"] }
 tempfile = "3"
+criterion = "0.5"
+
+[[bench]]
+name = "filter_select_groupby"
+harness = false

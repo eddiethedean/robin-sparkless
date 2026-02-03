@@ -352,6 +352,30 @@ impl Column {
         Self::from_expr(self.expr().clone().str().to_lowercase(), None)
     }
 
+    /// Extract all matches of regex (PySpark regexp_extract_all). Returns list of strings.
+    pub fn regexp_extract_all(&self, pattern: &str) -> Column {
+        use polars::prelude::*;
+        Self::from_expr(
+            self.expr()
+                .clone()
+                .str()
+                .extract_all(lit(pattern.to_string())),
+            None,
+        )
+    }
+
+    /// Check if string matches regex (PySpark regexp_like / rlike).
+    pub fn regexp_like(&self, pattern: &str) -> Column {
+        use polars::prelude::*;
+        Self::from_expr(
+            self.expr()
+                .clone()
+                .str()
+                .contains(lit(pattern.to_string()), false),
+            None,
+        )
+    }
+
     // --- Math functions ---
 
     /// Absolute value (PySpark abs)
@@ -435,6 +459,102 @@ impl Column {
     /// Lead: value from n rows after. Use with `.over(partition_by)`.
     pub fn lead(&self, n: i64) -> Column {
         Self::from_expr(self.expr().clone().shift(polars::prelude::lit(-n)), None)
+    }
+
+    /// First value in partition (PySpark first_value). Use with `.over(partition_by)`.
+    pub fn first_value(&self) -> Column {
+        Self::from_expr(self.expr().clone().first(), None)
+    }
+
+    /// Last value in partition (PySpark last_value). Use with `.over(partition_by)`.
+    pub fn last_value(&self) -> Column {
+        Self::from_expr(self.expr().clone().last(), None)
+    }
+
+    /// Percent rank in partition: (rank - 1) / (count - 1). Use with `.over(partition_by)`.
+    pub fn percent_rank(&self, descending: bool) -> Column {
+        use polars::prelude::*;
+        let opts = RankOptions {
+            method: RankMethod::Min,
+            descending,
+        };
+        let rank_expr = self.expr().clone().rank(opts, None);
+        let count_expr = self.expr().clone().count();
+        let pct = (rank_expr - lit(1i64)) / (count_expr - lit(1i64));
+        Self::from_expr(pct.cast(DataType::Float64), None)
+    }
+
+    // --- Array / List functions (Phase 6a) ---
+
+    /// Number of elements in list (PySpark size / array_size). Returns Int32.
+    pub fn array_size(&self) -> Column {
+        use polars::prelude::*;
+        Self::from_expr(
+            self.expr().clone().list().len().cast(DataType::Int32),
+            Some("size".to_string()),
+        )
+    }
+
+    /// Check if list contains value (PySpark array_contains).
+    pub fn array_contains(&self, value: Expr) -> Column {
+        Self::from_expr(self.expr().clone().list().contains(value), None)
+    }
+
+    /// Join list of strings with separator (PySpark array_join).
+    pub fn array_join(&self, separator: &str) -> Column {
+        use polars::prelude::*;
+        Self::from_expr(
+            self.expr()
+                .clone()
+                .list()
+                .join(lit(separator.to_string()), false),
+            None,
+        )
+    }
+
+    /// Maximum element in list (PySpark array_max).
+    pub fn array_max(&self) -> Column {
+        Self::from_expr(self.expr().clone().list().max(), None)
+    }
+
+    /// Minimum element in list (PySpark array_min).
+    pub fn array_min(&self) -> Column {
+        Self::from_expr(self.expr().clone().list().min(), None)
+    }
+
+    /// Get element at 1-based index (PySpark element_at). Returns null if out of bounds.
+    pub fn element_at(&self, index: i64) -> Column {
+        use polars::prelude::*;
+        // PySpark uses 1-based indexing; Polars uses 0-based. index 1 -> get(0).
+        let idx = if index >= 1 { index - 1 } else { index };
+        Self::from_expr(self.expr().clone().list().get(lit(idx), true), None)
+    }
+
+    /// Sort list elements (PySpark array_sort). Ascending, nulls last.
+    pub fn array_sort(&self) -> Column {
+        use polars::prelude::SortOptions;
+        let opts = SortOptions {
+            descending: false,
+            nulls_last: true,
+            ..Default::default()
+        };
+        Self::from_expr(self.expr().clone().list().sort(opts), None)
+    }
+
+    /// Slice list from start with optional length (PySpark slice). 1-based start.
+    pub fn array_slice(&self, start: i64, length: Option<i64>) -> Column {
+        use polars::prelude::*;
+        let start_expr = lit((start - 1).max(0)); // 1-based to 0-based
+        let length_expr = length.map(lit).unwrap_or_else(|| lit(i64::MAX));
+        Self::from_expr(
+            self.expr().clone().list().slice(start_expr, length_expr),
+            None,
+        )
+    }
+
+    /// Explode list into one row per element (PySpark explode).
+    pub fn explode(&self) -> Column {
+        Self::from_expr(self.expr().clone().explode(), None)
     }
 }
 

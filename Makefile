@@ -1,6 +1,7 @@
 .PHONY: build test test-rust test-python sparkless-parity clean check fmt clippy audit outdated deny all
 
-# Set RUSTUP_TOOLCHAIN=stable if not configured. Run: RUSTUP_TOOLCHAIN=stable make check
+# Use stable toolchain when no default is configured (override with RUSTUP_TOOLCHAIN=nightly etc.)
+export RUSTUP_TOOLCHAIN ?= stable
 
 # Build
 build:

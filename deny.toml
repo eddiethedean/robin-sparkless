@@ -3,6 +3,10 @@
 
 [advisories]
 version = 2
+# Unmaintained transitive deps (paste, rustls-pemfile) from deltalake; no fix available yet
+ignore = ["RUSTSEC-2024-0436", "RUSTSEC-2025-0134"]
+# Don't warn when ignored advisories aren't in the graph (e.g. when delta feature is off)
+unused-ignored-advisory = "allow"
 
 [licenses]
 version = 2
@@ -25,6 +29,16 @@ ignore = true
 [bans]
 multiple-versions = "warn"
 wildcards = "allow"
+# Duplicate versions from polars vs deltalake/other deps; cannot unify
+skip = [
+    "getrandom@0.2.17",
+    "hashbrown@0.14.5",
+    "hashbrown@0.15.5",
+    "syn@1.0.109",
+    "thiserror@1.0.69",
+    "thiserror-impl@1.0.69",
+    "windows-sys@0.59.0",
+]
 
 [sources]
 unknown-registry = "warn"

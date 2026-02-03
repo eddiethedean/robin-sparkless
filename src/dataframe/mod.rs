@@ -66,7 +66,20 @@ impl DataFrame {
                 }
             }
         }
-        Err(PolarsError::ColumnNotFound(name.to_string().into()))
+        let available: Vec<String> = self
+            .df
+            .get_column_names()
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        Err(PolarsError::ColumnNotFound(
+            format!(
+                "Column '{}' not found. Available columns: [{}]. Check spelling and case sensitivity (spark.sql.caseSensitive).",
+                name,
+                available.join(", ")
+            )
+            .into(),
+        ))
     }
 
     /// Get the schema of the DataFrame
@@ -219,6 +232,29 @@ impl DataFrame {
         new_name: &str,
     ) -> Result<DataFrame, PolarsError> {
         transformations::with_column_renamed(self, old_name, new_name, self.case_sensitive)
+    }
+
+    /// Write this DataFrame to a Delta table at the given path.
+    /// Requires the `delta` feature. If `overwrite` is true, replaces the table; otherwise appends.
+    #[cfg(feature = "delta")]
+    pub fn write_delta(
+        &self,
+        path: impl AsRef<std::path::Path>,
+        overwrite: bool,
+    ) -> Result<(), PolarsError> {
+        crate::delta::write_delta(self.df.as_ref(), path, overwrite)
+    }
+
+    /// Stub when `delta` feature is disabled.
+    #[cfg(not(feature = "delta"))]
+    pub fn write_delta(
+        &self,
+        _path: impl AsRef<std::path::Path>,
+        _overwrite: bool,
+    ) -> Result<(), PolarsError> {
+        Err(PolarsError::InvalidOperation(
+            "Delta Lake requires the 'delta' feature. Build with --features delta.".into(),
+        ))
     }
 }
 

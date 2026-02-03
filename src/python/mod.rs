@@ -208,6 +208,55 @@ impl PyColumn {
             inner: self.inner.substr(start, length),
         }
     }
+
+    /// Array/list size (PySpark size).
+    fn size(&self) -> Self {
+        PyColumn {
+            inner: self.inner.array_size(),
+        }
+    }
+
+    /// Element at 1-based index (PySpark element_at).
+    fn element_at(&self, index: i64) -> Self {
+        PyColumn {
+            inner: self.inner.element_at(index),
+        }
+    }
+
+    /// Explode list into one row per element (PySpark explode).
+    fn explode(&self) -> Self {
+        PyColumn {
+            inner: self.inner.explode(),
+        }
+    }
+
+    /// First value in partition (PySpark first_value). Use with .over().
+    fn first_value(&self) -> Self {
+        PyColumn {
+            inner: self.inner.first_value(),
+        }
+    }
+
+    /// Last value in partition (PySpark last_value). Use with .over().
+    fn last_value(&self) -> Self {
+        PyColumn {
+            inner: self.inner.last_value(),
+        }
+    }
+
+    /// Percent rank in partition. Use with .over().
+    fn percent_rank(&self, descending: bool) -> Self {
+        PyColumn {
+            inner: self.inner.percent_rank(descending),
+        }
+    }
+
+    /// Check if string matches regex (PySpark regexp_like).
+    fn regexp_like(&self, pattern: &str) -> Self {
+        PyColumn {
+            inner: self.inner.regexp_like(pattern),
+        }
+    }
 }
 
 /// Python wrapper for WhenBuilder (when(cond).then(val).otherwise(val)).
@@ -312,6 +361,48 @@ impl PySparkSession {
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
         Ok(PyDataFrame { inner: df })
     }
+
+    #[cfg(feature = "sql")]
+    fn create_or_replace_temp_view(&self, name: &str, df: &PyDataFrame) {
+        self.inner
+            .create_or_replace_temp_view(name, df.inner.clone());
+    }
+
+    #[cfg(feature = "sql")]
+    fn table(&self, name: &str) -> PyResult<PyDataFrame> {
+        let df = self
+            .inner
+            .table(name)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        Ok(PyDataFrame { inner: df })
+    }
+
+    #[cfg(feature = "sql")]
+    fn sql(&self, query: &str) -> PyResult<PyDataFrame> {
+        let df = self
+            .inner
+            .sql(query)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        Ok(PyDataFrame { inner: df })
+    }
+
+    #[cfg(feature = "delta")]
+    fn read_delta(&self, path: &str) -> PyResult<PyDataFrame> {
+        let df = self
+            .inner
+            .read_delta(Path::new(path))
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        Ok(PyDataFrame { inner: df })
+    }
+
+    #[cfg(feature = "delta")]
+    fn read_delta_version(&self, path: &str, version: Option<i64>) -> PyResult<PyDataFrame> {
+        let df = self
+            .inner
+            .read_delta_with_version(Path::new(path), version)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        Ok(PyDataFrame { inner: df })
+    }
 }
 
 /// Python wrapper for SparkSessionBuilder.
@@ -367,6 +458,13 @@ impl PyDataFrame {
     fn show(&self, n: Option<usize>) -> PyResult<()> {
         self.inner
             .show(n)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
+    }
+
+    #[cfg(feature = "delta")]
+    fn write_delta(&self, path: &str, overwrite: bool) -> PyResult<()> {
+        self.inner
+            .write_delta(Path::new(path), overwrite)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
     }
 

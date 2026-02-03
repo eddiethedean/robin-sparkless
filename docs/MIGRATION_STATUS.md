@@ -27,11 +27,15 @@
 
 ## 🔧 Remaining Work
 
-The migration itself is complete (Rust-only + Polars backend, build/test green). Remaining work is now parity and feature expansion:
+The migration itself is complete (Rust-only + Polars backend, build/test green). Optional features are implemented:
 
-- SQL support (or explicit deferral with documentation)
-- Broader function coverage + additional edge-case parity fixtures
-- Benchmarks/performance envelope work
+- **SQL** (optional `sql` feature): `SparkSession::sql()`, temp views; see [QUICKSTART.md](QUICKSTART.md).
+- **Delta Lake** (optional `delta` feature): `read_delta`, `read_delta_with_version`, `write_delta`.
+- **Benchmarks**: `cargo bench` (robin vs Polars); target within ~2x.
+
+Remaining work is parity and feature expansion:
+
+- Broader function coverage (Phase 6: array_position, cume_dist, ntile, nth_value; Map/JSON deferred) + additional edge-case parity fixtures
 
 **Sparkless integration**: Robin-sparkless is designed to replace the backend of [Sparkless](https://github.com/eddiethedean/sparkless). See [SPARKLESS_INTEGRATION_ANALYSIS.md](SPARKLESS_INTEGRATION_ANALYSIS.md) for phases: fixture converter, structural alignment, function parity, and test conversion.
 

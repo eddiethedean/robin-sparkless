@@ -2,6 +2,7 @@ use crate::dataframe::DataFrame;
 use polars::prelude::{DataFrame as PlDataFrame, NamedFrom, PolarsError, Series};
 use std::collections::HashMap;
 use std::path::Path;
+use std::sync::{Arc, Mutex};
 
 /// Builder for creating a SparkSession with configuration options
 #[derive(Clone)]
@@ -46,6 +47,9 @@ impl SparkSessionBuilder {
     }
 }
 
+/// Catalog of temporary view names to DataFrames (session-scoped). Uses Arc<Mutex<>> for Send+Sync (Python bindings).
+pub type TempViewCatalog = Arc<Mutex<HashMap<String, DataFrame>>>;
+
 /// Main entry point for creating DataFrames and executing queries
 /// Similar to PySpark's SparkSession but using Polars as the backend
 #[derive(Clone)]
@@ -53,6 +57,8 @@ pub struct SparkSession {
     app_name: Option<String>,
     master: Option<String>,
     config: HashMap<String, String>,
+    /// Temporary views: name -> DataFrame. Session-scoped; cleared when session is dropped.
+    pub(crate) catalog: TempViewCatalog,
 }
 
 impl SparkSession {
@@ -65,7 +71,36 @@ impl SparkSession {
             app_name,
             master,
             config,
+            catalog: Arc::new(Mutex::new(HashMap::new())),
         }
+    }
+
+    /// Register a DataFrame as a temporary view (PySpark: createOrReplaceTempView).
+    /// The view is session-scoped and is dropped when the session is dropped.
+    pub fn create_or_replace_temp_view(&self, name: &str, df: DataFrame) {
+        let _ = self
+            .catalog
+            .lock()
+            .map(|mut m| m.insert(name.to_string(), df));
+    }
+
+    /// Look up a temporary view by name (PySpark: table(name)).
+    /// Returns an error if the view does not exist.
+    pub fn table(&self, name: &str) -> Result<DataFrame, PolarsError> {
+        self.catalog
+            .lock()
+            .map_err(|_| PolarsError::InvalidOperation("catalog lock poisoned".into()))?
+            .get(name)
+            .cloned()
+            .ok_or_else(|| {
+                PolarsError::InvalidOperation(
+                    format!(
+                        "Table or view '{}' not found. Register it with create_or_replace_temp_view.",
+                        name
+                    )
+                    .into(),
+                )
+            })
     }
 
     pub fn builder() -> SparkSessionBuilder {
@@ -108,7 +143,7 @@ impl SparkSession {
         if column_names.len() != 3 {
             return Err(PolarsError::ComputeError(
                 format!(
-                    "Expected 3 column names for (i64, i64, String) tuples, got {}",
+                    "create_dataframe: expected 3 column names for (i64, i64, String) tuples, got {}. Hint: provide exactly 3 names, e.g. [\"id\", \"age\", \"name\"].",
                     column_names.len()
                 )
                 .into(),
@@ -158,12 +193,26 @@ impl SparkSession {
     pub fn read_csv(&self, path: impl AsRef<Path>) -> Result<DataFrame, PolarsError> {
         use polars::prelude::*;
         let path = path.as_ref();
+        let path_display = path.display();
         // Use LazyCsvReader - call finish() to get LazyFrame, then collect
         let lf = LazyCsvReader::new(path)
             .with_has_header(true)
             .with_infer_schema_length(Some(100))
-            .finish()?;
-        let pl_df = lf.collect()?;
+            .finish()
+            .map_err(|e| {
+                PolarsError::ComputeError(
+                    format!(
+                        "read_csv({}): {} Hint: check that the file exists and is valid CSV.",
+                        path_display, e
+                    )
+                    .into(),
+                )
+            })?;
+        let pl_df = lf.collect().map_err(|e| {
+            PolarsError::ComputeError(
+                format!("read_csv({}): collect failed: {}", path_display, e).into(),
+            )
+        })?;
         Ok(crate::dataframe::DataFrame::from_polars_with_options(
             pl_df,
             self.is_case_sensitive(),
@@ -223,13 +272,55 @@ impl SparkSession {
         ))
     }
 
-    /// Execute a SQL query (placeholder - Polars doesn't have built-in SQL)
-    /// This would require integrating a SQL parser or using DataFusion's SQL support
+    /// Execute a SQL query (SELECT only). Tables must be registered with `create_or_replace_temp_view`.
+    /// Requires the `sql` feature. Supports: SELECT (columns or *), FROM (single table or JOIN),
+    /// WHERE (basic predicates), GROUP BY + aggregates, ORDER BY, LIMIT.
+    #[cfg(feature = "sql")]
+    pub fn sql(&self, query: &str) -> Result<DataFrame, PolarsError> {
+        crate::sql::execute_sql(self, query)
+    }
+
+    /// Execute a SQL query (stub when `sql` feature is disabled).
+    #[cfg(not(feature = "sql"))]
     pub fn sql(&self, _query: &str) -> Result<DataFrame, PolarsError> {
-        // TODO: Implement SQL execution
-        // This could use Polars' expression system or integrate with a SQL parser
         Err(PolarsError::InvalidOperation(
-            "SQL queries not yet implemented".into(),
+            "SQL queries require the 'sql' feature. Build with --features sql.".into(),
+        ))
+    }
+
+    /// Read a Delta table at the given path (latest version).
+    /// Requires the `delta` feature. Path can be local (e.g. `/tmp/table`) or `file:///...`.
+    #[cfg(feature = "delta")]
+    pub fn read_delta(&self, path: impl AsRef<Path>) -> Result<DataFrame, PolarsError> {
+        crate::delta::read_delta(path, self.is_case_sensitive())
+    }
+
+    /// Read a Delta table at the given path, optionally at a specific version (time travel).
+    #[cfg(feature = "delta")]
+    pub fn read_delta_with_version(
+        &self,
+        path: impl AsRef<Path>,
+        version: Option<i64>,
+    ) -> Result<DataFrame, PolarsError> {
+        crate::delta::read_delta_with_version(path, version, self.is_case_sensitive())
+    }
+
+    /// Stub when `delta` feature is disabled.
+    #[cfg(not(feature = "delta"))]
+    pub fn read_delta(&self, _path: impl AsRef<Path>) -> Result<DataFrame, PolarsError> {
+        Err(PolarsError::InvalidOperation(
+            "Delta Lake requires the 'delta' feature. Build with --features delta.".into(),
+        ))
+    }
+
+    #[cfg(not(feature = "delta"))]
+    pub fn read_delta_with_version(
+        &self,
+        _path: impl AsRef<Path>,
+        _version: Option<i64>,
+    ) -> Result<DataFrame, PolarsError> {
+        Err(PolarsError::InvalidOperation(
+            "Delta Lake requires the 'delta' feature. Build with --features delta.".into(),
         ))
     }
 
@@ -261,6 +352,11 @@ impl DataFrameReader {
     pub fn json(&self, path: impl AsRef<std::path::Path>) -> Result<DataFrame, PolarsError> {
         self.session.read_json(path)
     }
+
+    #[cfg(feature = "delta")]
+    pub fn delta(&self, path: impl AsRef<std::path::Path>) -> Result<DataFrame, PolarsError> {
+        self.session.read_delta(path)
+    }
 }
 
 impl SparkSession {
@@ -270,6 +366,7 @@ impl SparkSession {
             app_name: self.app_name.clone(),
             master: self.master.clone(),
             config: self.config.clone(),
+            catalog: self.catalog.clone(),
         })
     }
 }
@@ -421,7 +518,7 @@ mod tests {
     }
 
     #[test]
-    fn test_sql_not_implemented() {
+    fn test_sql_returns_error_without_feature_or_unknown_table() {
         let spark = SparkSession::builder().app_name("test").get_or_create();
 
         let result = spark.sql("SELECT * FROM table");
@@ -429,7 +526,14 @@ mod tests {
         assert!(result.is_err());
         match result {
             Err(PolarsError::InvalidOperation(msg)) => {
-                assert!(msg.to_string().contains("not yet implemented"));
+                let s = msg.to_string();
+                // Without sql feature: "SQL queries require the 'sql' feature"
+                // With sql feature but no table: "Table or view 'table' not found" or parse error
+                assert!(
+                    s.contains("SQL") || s.contains("Table") || s.contains("feature"),
+                    "unexpected message: {}",
+                    s
+                );
             }
             _ => panic!("Expected InvalidOperation error"),
         }
