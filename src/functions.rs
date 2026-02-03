@@ -235,6 +235,49 @@ pub fn rpad(column: &Column, length: i32, pad: &str) -> Column {
     column.clone().rpad(length, pad)
 }
 
+/// Character-by-character translation (PySpark translate).
+pub fn translate(column: &Column, from_str: &str, to_str: &str) -> Column {
+    column.clone().translate(from_str, to_str)
+}
+
+/// Mask string: replace upper/lower/digit/other with given chars (PySpark mask).
+pub fn mask(
+    column: &Column,
+    upper_char: Option<char>,
+    lower_char: Option<char>,
+    digit_char: Option<char>,
+    other_char: Option<char>,
+) -> Column {
+    column
+        .clone()
+        .mask(upper_char, lower_char, digit_char, other_char)
+}
+
+/// Substring before/after nth delimiter (PySpark substring_index).
+pub fn substring_index(column: &Column, delimiter: &str, count: i64) -> Column {
+    column.clone().substring_index(delimiter, count)
+}
+
+/// Soundex code (PySpark soundex). Not implemented: requires element-wise UDF.
+pub fn soundex(column: &Column) -> Column {
+    column.clone().soundex()
+}
+
+/// Levenshtein distance (PySpark levenshtein). Not implemented: requires element-wise UDF.
+pub fn levenshtein(column: &Column, other: &Column) -> Column {
+    column.clone().levenshtein(other)
+}
+
+/// CRC32 of string bytes (PySpark crc32). Not implemented: requires element-wise UDF.
+pub fn crc32(column: &Column) -> Column {
+    column.clone().crc32()
+}
+
+/// XXH64 hash (PySpark xxhash64). Not implemented: requires element-wise UDF.
+pub fn xxhash64(column: &Column) -> Column {
+    column.clone().xxhash64()
+}
+
 /// Absolute value (PySpark abs)
 pub fn abs(column: &Column) -> Column {
     column.clone().abs()
@@ -569,10 +612,103 @@ pub fn array_repeat(column: &Column, n: i64) -> Column {
     column.clone().array_repeat(n)
 }
 
+/// Flatten list of lists to one list (PySpark flatten). Not implemented.
+pub fn array_flatten(column: &Column) -> Column {
+    column.clone().array_flatten()
+}
+
+/// True if any list element satisfies the predicate (PySpark exists).
+pub fn array_exists(column: &Column, predicate: Expr) -> Column {
+    column.clone().array_exists(predicate)
+}
+
+/// True if all list elements satisfy the predicate (PySpark forall).
+pub fn array_forall(column: &Column, predicate: Expr) -> Column {
+    column.clone().array_forall(predicate)
+}
+
+/// Filter list elements by predicate (PySpark filter).
+pub fn array_filter(column: &Column, predicate: Expr) -> Column {
+    column.clone().array_filter(predicate)
+}
+
+/// Transform list elements by expression (PySpark transform).
+pub fn array_transform(column: &Column, f: Expr) -> Column {
+    column.clone().array_transform(f)
+}
+
+/// Sum of list elements (PySpark aggregate sum).
+pub fn array_sum(column: &Column) -> Column {
+    column.clone().array_sum()
+}
+
+/// Mean of list elements (PySpark aggregate avg).
+pub fn array_mean(column: &Column) -> Column {
+    column.clone().array_mean()
+}
+
 /// Explode list with position (PySpark posexplode). Returns (pos_column, value_column).
 /// pos is 1-based; implemented via list.eval(cum_count()).explode() and explode().
 pub fn posexplode(column: &Column) -> (Column, Column) {
     column.clone().posexplode()
+}
+
+// --- Map functions (Phase 8) ---
+
+/// Build a map column from alternating key/value expressions (PySpark create_map).
+/// Returns List(Struct{key, value}) using Polars as_struct and concat_list.
+pub fn create_map(key_values: &[&Column]) -> Column {
+    use polars::prelude::{as_struct, concat_list};
+    if key_values.is_empty() {
+        panic!("create_map requires at least one key-value pair");
+    }
+    let mut struct_exprs: Vec<Expr> = Vec::new();
+    for i in (0..key_values.len()).step_by(2) {
+        if i + 1 < key_values.len() {
+            let k = key_values[i].expr().clone().alias("key");
+            let v = key_values[i + 1].expr().clone().alias("value");
+            struct_exprs.push(as_struct(vec![k, v]));
+        }
+    }
+    let expr = concat_list(struct_exprs).expect("create_map concat_list");
+    crate::column::Column::from_expr(expr, None)
+}
+
+/// Extract keys from a map column (PySpark map_keys). Map is List(Struct{key, value}).
+pub fn map_keys(column: &Column) -> Column {
+    column.clone().map_keys()
+}
+
+/// Extract values from a map column (PySpark map_values).
+pub fn map_values(column: &Column) -> Column {
+    column.clone().map_values()
+}
+
+/// Return map as list of structs {key, value} (PySpark map_entries).
+pub fn map_entries(column: &Column) -> Column {
+    column.clone().map_entries()
+}
+
+/// Build map from two array columns keys and values (PySpark map_from_arrays). Implemented via UDF.
+pub fn map_from_arrays(keys: &Column, values: &Column) -> Column {
+    keys.clone().map_from_arrays(values)
+}
+
+// --- JSON functions (Phase 10) ---
+
+/// Extract JSON path from string column (PySpark get_json_object).
+pub fn get_json_object(column: &Column, path: &str) -> Column {
+    column.clone().get_json_object(path)
+}
+
+/// Parse string column as JSON into struct (PySpark from_json).
+pub fn from_json(column: &Column, schema: Option<polars::datatypes::DataType>) -> Column {
+    column.clone().from_json(schema)
+}
+
+/// Serialize struct column to JSON string (PySpark to_json).
+pub fn to_json(column: &Column) -> Column {
+    column.clone().to_json()
 }
 
 #[cfg(test)]

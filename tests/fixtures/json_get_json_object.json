@@ -1,0 +1,31 @@
+{
+  "name": "json_get_json_object",
+  "pyspark_version": "3.5.0",
+  "input": {
+    "schema": [
+      { "name": "id", "type": "bigint" },
+      { "name": "payload", "type": "string" }
+    ],
+    "rows": [
+      [1, "{\"a\": 1, \"b\": \"hello\"}"],
+      [2, "{\"a\": 2, \"b\": \"world\"}"]
+    ]
+  },
+  "operations": [
+    { "op": "withColumn", "column": "a_val", "expr": "get_json_object(col('payload'), '$.a')" },
+    { "op": "withColumn", "column": "b_val", "expr": "get_json_object(col('payload'), '$.b')" },
+    { "op": "orderBy", "columns": ["id"], "ascending": [true] }
+  ],
+  "expected": {
+    "schema": [
+      { "name": "id", "type": "bigint" },
+      { "name": "payload", "type": "string" },
+      { "name": "a_val", "type": "string" },
+      { "name": "b_val", "type": "string" }
+    ],
+    "rows": [
+      [1, "{\"a\": 1, \"b\": \"hello\"}", "1", "hello"],
+      [2, "{\"a\": 2, \"b\": \"world\"}", "2", "world"]
+    ]
+  }
+}

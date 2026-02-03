@@ -13,7 +13,7 @@ A Rust DataFrame library that aims to **emulate PySpark’s DataFrame behavior a
 - **Optional SQL** (`--features sql`): `spark.sql("SELECT ...")` with temp views (`createOrReplaceTempView`, `table`); single SELECT, FROM/JOIN, WHERE, GROUP BY, ORDER BY, LIMIT
 - **Optional Delta Lake** (`--features delta`): `read_delta` / `read_delta_with_version` (time travel), `write_delta` (overwrite/append) via delta-rs
 - **Benchmarks**: `cargo bench` compares robin-sparkless vs plain Polars; target within ~2x for supported pipelines
-- **Sparkless backend target**: Intended to power Sparkless's execution engine; aligns with its 403+ PySpark functions and 270+ test fixtures; **58 parity fixtures** passing (array, window, string, joins, groupBy, etc.)
+- **Sparkless backend target**: Intended to power Sparkless's execution engine; aligns with its 403+ PySpark functions and 270+ test fixtures; **73 parity fixtures** passing (~120+ functions: array, array_flatten/array_repeat, window, string, String 6.4 including soundex/levenshtein/crc32/xxhash64, Map, JSON, groupBy, joins, etc.; Phase 8 completed Feb 2026)
 
 ## Installation
 
@@ -101,7 +101,7 @@ complex.show(Some(10))?;
 df_with_computed.show(Some(10))?;
 ```
 
-The library supports IO (CSV/Parquet/JSON via `SparkSession::read_*`), joins (`DataFrame::join` with Inner/Left/Right/Outer), groupBy aggregates (including multi-agg), window functions (`row_number`, `rank`, `dense_rank`, `lag`, `lead`, `first_value`, `last_value`, `percent_rank` with `.over()`), array functions (`array_size`, `array_contains`, `element_at`, `explode`, `array_sort`, `array_join`, `array_slice`, `array_position`, `array_remove`, `posexplode`; `array_repeat` not yet implemented), string functions (`upper`, `lower`, `substring`, `concat`, `concat_ws`, `length`, `trim`, `regexp_extract`, `regexp_replace`, `regexp_extract_all`, `regexp_like`, `split`), and datetime helpers (`year`, `month`, `day`, `to_date`, `date_format`). See [docs/QUICKSTART.md](docs/QUICKSTART.md) for more examples.
+The library supports IO (CSV/Parquet/JSON via `SparkSession::read_*`), joins (`DataFrame::join` with Inner/Left/Right/Outer), groupBy aggregates (including multi-agg), window functions (`row_number`, `rank`, `dense_rank`, `lag`, `lead`, `first_value`, `last_value`, `percent_rank`, `cume_dist`, `ntile`, `nth_value` with `.over()`), array functions (`array_size`, `array_contains`, `element_at`, `explode`, `array_sort`, `array_join`, `array_slice`, `array_position`, `array_remove`, `posexplode`, `array_exists`, `array_forall`, `array_filter`, `array_transform`, `array_sum`, `array_mean`, `array_repeat`, `array_flatten`), string functions (`upper`, `lower`, `substring`, `concat`, `concat_ws`, `length`, `trim`, `regexp_extract`, `regexp_replace`, `regexp_extract_all`, `regexp_like`, `split`, `mask`, `translate`, `substring_index`, `soundex`, `levenshtein`, `crc32`, `xxhash64`), JSON (`get_json_object`, `from_json`, `to_json`), Map (`create_map`, `map_keys`, `map_values`, `map_entries`, `map_from_arrays`), and datetime helpers (`year`, `month`, `day`, `to_date`, `date_format`, `current_date`, `date_add`, etc.). See [docs/QUICKSTART.md](docs/QUICKSTART.md) for more examples.
 
 ## Development
 
@@ -162,7 +162,7 @@ Robin Sparkless aims to provide a **PySpark-like API layer** on top of Polars:
 - **Column**: Represents expressions over columns, similar to PySpark’s `Column`; includes window methods (`rank`, `row_number`, `dense_rank`, `lag`, `lead`) with `.over()`.
 - **Functions**: Helper functions like `col()`, `lit_*()`, `count()`, `when`, `coalesce`, window functions, etc., modeled after PySpark’s `pyspark.sql.functions`.
 
-Core behavior (null handling, grouping semantics, joins, window functions, array and string functions, expression behavior) matches PySpark on 58 parity fixtures, with more coverage planned (Phase 8: array_repeat, Map, JSON, string 6.4, window fixture simplification). Known divergences are documented in [docs/PYSPARK_DIFFERENCES.md](docs/PYSPARK_DIFFERENCES.md).
+Core behavior (null handling, grouping semantics, joins, window functions, array and string functions, JSON, Map, expression behavior) matches PySpark on 73 parity fixtures (~120+ functions). Phase 10 added String 6.4 (mask, translate, substring_index), array extensions (exists, forall, filter, transform, sum, mean), and JSON; Phase 8 completed array_repeat, array_flatten, Map (create_map, map_keys, map_values, map_entries, map_from_arrays), and string 6.4 (soundex, levenshtein, crc32, xxhash64). Known divergences are documented in [docs/PYSPARK_DIFFERENCES.md](docs/PYSPARK_DIFFERENCES.md).
 
 ## Related Documentation
 
@@ -172,8 +172,8 @@ Core behavior (null handling, grouping semantics, joins, window functions, array
 - [docs/ROADMAP.md](docs/ROADMAP.md) – Development roadmap including Sparkless integration phases
 - [docs/FULL_BACKEND_ROADMAP.md](docs/FULL_BACKEND_ROADMAP.md) – Phased plan to full Sparkless backend replacement (400+ functions, PyO3 bridge)
 - [docs/PYTHON_API.md](docs/PYTHON_API.md) – Python API contract (Phase 4 PyO3 bridge): build, install, method signatures, data transfer
-- [docs/PARITY_STATUS.md](docs/PARITY_STATUS.md) – PySpark parity coverage matrix (58 fixtures)
-- [docs/PYSPARK_DIFFERENCES.md](docs/PYSPARK_DIFFERENCES.md) – Known divergences from PySpark (window, SQL, Delta, Phase 8)
+- [docs/PARITY_STATUS.md](docs/PARITY_STATUS.md) – PySpark parity coverage matrix (73 fixtures)
+- [docs/PYSPARK_DIFFERENCES.md](docs/PYSPARK_DIFFERENCES.md) – Known divergences from PySpark (window, SQL, Delta; Phase 8 completed)
 - [docs/CONVERTER_STATUS.md](docs/CONVERTER_STATUS.md) – Sparkless → robin-sparkless fixture converter and operation mapping
 - [docs/SPARKLESS_PARITY_STATUS.md](docs/SPARKLESS_PARITY_STATUS.md) – Phase 5: pass/fail and failure reasons for converted fixtures; `make sparkless-parity`
 

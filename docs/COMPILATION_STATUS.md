@@ -12,5 +12,5 @@
 - **Strategic direction**: Robin-sparkless will replace the backend of [Sparkless](https://github.com/eddiethedean/sparkless). See [SPARKLESS_INTEGRATION_ANALYSIS](SPARKLESS_INTEGRATION_ANALYSIS.md).
 - **Optional features (implemented)**: SQL (`SparkSession::sql()`, temp views) and Delta Lake (`read_delta`, `write_delta`, time travel) are available when building with `--features sql` and `--features delta` respectively. Benchmarks: `cargo bench` (robin vs Polars).
 - Remaining functional gaps (not compiler issues):
-  - Broader function coverage: Phase 6 array_position, array_remove, posexplode **implemented** (Polars list.eval); cume_dist, ntile, nth_value API present (fixtures skipped). array_repeat, Map, JSON → Phase 8. Additional type coercion edge cases.
+  - Broader function coverage: Phase 6 array_position, array_remove, posexplode **implemented** (Polars list.eval); cume_dist, ntile, nth_value fixtures covered (multi-step workaround). Phase 8 **completed**: array_repeat, array_flatten, Map, String 6.4 (soundex, levenshtein, crc32, xxhash64); JSON (get_json_object, from_json, to_json) implemented. Additional type coercion edge cases.
 - Documentation and examples should be kept in sync as the Rust API surface grows (see `ROADMAP.md` and `PARITY_STATUS.md`).

@@ -10,6 +10,7 @@ pub mod functions;
 pub mod schema;
 pub mod session;
 pub mod type_coercion;
+pub(crate) mod udfs;
 
 #[cfg(feature = "sql")]
 pub mod sql;

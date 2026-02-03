@@ -35,7 +35,7 @@ The migration itself is complete (Rust-only + Polars backend, build/test green).
 
 Remaining work is parity and feature expansion:
 
-- Broader function coverage: Phase 6 array_position, array_remove, posexplode **implemented**; cume_dist, ntile, nth_value API (fixtures skipped). array_repeat, Map, JSON → Phase 8. Additional edge-case parity fixtures.
+- Broader function coverage: Phase 6 array_position, array_remove, posexplode **implemented**; cume_dist, ntile, nth_value API (fixtures covered via multi-step workaround). **Phase 8 completed**: array_repeat, array_flatten, Map (create_map, map_keys, map_values, map_entries, map_from_arrays), String 6.4 (soundex, levenshtein, crc32, xxhash64). JSON (get_json_object, from_json, to_json) implemented. Additional edge-case parity fixtures.
 
 **Sparkless integration**: Robin-sparkless is designed to replace the backend of [Sparkless](https://github.com/eddiethedean/sparkless). See [SPARKLESS_INTEGRATION_ANALYSIS.md](SPARKLESS_INTEGRATION_ANALYSIS.md) for phases: fixture converter, structural alignment, function parity, and test conversion.
 

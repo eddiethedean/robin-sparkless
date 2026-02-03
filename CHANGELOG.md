@@ -9,60 +9,80 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Documentation and roadmap**:
-  - [PYSPARK_DIFFERENCES.md](docs/PYSPARK_DIFFERENCES.md): Known divergences from PySpark (window fixtures skipped, SQL/Delta limits, Phase 8 deferred). Linked from README and docs index.
-  - FULL_BACKEND_ROADMAP Phase 1: Marked completed items (dataframe split, case sensitivity, fixture converter); trait/expression doc left as Future.
-  - ROADMAP §6: groupBy null/edge cases marked verified via existing fixtures; success metric "Documentation of differences" marked done.
-- **Parity fixtures** (58 total, +2):
-  - `regexp_like`: `regexp_like(col, pattern)` → boolean; parity parser support for withColumn.
-  - `regexp_extract_all`: `regexp_extract_all(col, pattern)` → list of strings; parity parser support.
-- **Datetime**: `to_date()` (cast to Date), `date_format(format)` (chrono strftime) in Rust API; no parity fixture yet (test harness does not build date/datetime from JSON).
-- **Sparkless parity**: SPARKLESS_PARITY_STATUS "When Sparkless repo is available" steps for running converter and updating pass/fail table.
+- **Phase 1 – Foundation** ✅
+  - Structural alignment: split `dataframe.rs` into `transformations.rs`, `aggregations.rs`, `joins.rs`.
+  - Case sensitivity: `spark.sql.caseSensitive` (default false), centralized column resolution for filter, select, withColumn, join; fixture `case_insensitive_columns`.
+  - Fixture converter: `tests/convert_sparkless_fixtures.py` maps Sparkless `expected_outputs` → robin-sparkless format; operation mapping for filter, groupby, join, window, withColumn, union, distinct, drop, dropna, fillna, limit, withColumnRenamed.
 
-- **Phase 6 remaining (window + array)**:
-  - **Window**: `cume_dist(partition_by, descending)`, `ntile(n, partition_by, descending)`, `nth_value(n, partition_by, descending)` in Rust and Python; parity handler for `first_value`, `last_value`, `percent_rank`, `cume_dist`, `ntile`, `nth_value`; fixtures `first_value_window`, `last_value_window` (passing); `percent_rank_window`, `cume_dist_window`, `ntile_window`, `nth_value_window` (skipped: Polars does not allow combining rank().over() and count().over() in one expr). Fixture simplification planned for Phase 8.
-  - **Array**: `array_position`, `array_remove`, `posexplode` **implemented** in Rust and Python (via Polars list.eval with col("") as element; requires polars features list_eval, list_drop_nulls, cum_agg). `array_repeat` not implemented (→ Phase 8). String (6.4) soundex, levenshtein, etc. and Map/JSON documented as Phase 8.
+- **Phase 2 – High-Value Functions** (partial) ✅
+  - String: `length`, `trim`, `ltrim`, `rtrim`, `regexp_extract`, `regexp_replace`, `split`, `initcap`; parity fixture `string_length_trim`.
+  - Datetime: `to_date()`, `date_format(format)` (chrono strftime), `year`, `month`, `day` in Rust API (no date/datetime fixture yet; harness does not build date columns from JSON).
+  - Additional parity: `regexp_like`, `regexp_extract_all` (fixtures + parser support).
 
-- **Phase 7 SQL & Advanced**:
-  - **SQL** (optional `sql` feature): `SparkSession::sql(query)` with temp views (`create_or_replace_temp_view`, `table`). Parses single SELECT with FROM/JOIN, WHERE, GROUP BY, ORDER BY, LIMIT and translates to DataFrame ops. Python: `spark.sql(query)`, `spark.create_or_replace_temp_view(name, df)`, `spark.table(name)`.
-  - **Delta Lake** (optional `delta` feature): `read_delta(path)`, `read_delta_with_version(path, version)` (time travel), `write_delta(path, overwrite)` (overwrite/append). Python: `spark.read_delta(path)`, `spark.read_delta_version(path, version)`, `df.write_delta(path, overwrite)`.
-  - **Performance**: Criterion benchmarks (`cargo bench`) for filter/select/groupBy (robin vs Polars). Target within ~2x for supported pipelines.
-  - **Robustness**: Clearer error messages (column names, hints); Troubleshooting section in [docs/QUICKSTART.md](docs/QUICKSTART.md).
+- **Phase 3 – DataFrame Methods** ✅
+  - `union` / `unionAll`, `unionByName`, `distinct` / `dropDuplicates`, `drop`, `dropna`, `fillna`, `limit`, `withColumnRenamed`.
+  - Parity fixtures: `union_all`, `union_by_name`, `distinct`, `drop_columns`, `dropna`, `fillna`, `limit`, `with_column_renamed`.
 
-- **Phase 6 Broad Function Parity** (partial):
-  - **Array functions**: `array_size`/`size`, `array_contains`, `element_at`, `explode`, `array_sort`, `array_join`, `array_slice`; **implemented** (Polars list.eval): `array_position`, `array_remove`, `posexplode`; parity fixtures: `array_contains`, `element_at`, `array_size`.
-  - **Window extensions**: `first_value`, `last_value`, `percent_rank` with `.over(partition_by)`.
-  - **String**: `regexp_extract_all`, `regexp_like`.
-  - **PyO3**: New functions exposed on `PyColumn` (e.g. `size`, `element_at`, `explode`, `first_value`, `last_value`, `percent_rank`, `regexp_like`).
-  - Map and JSON phases deferred (Polars MapType/JSON semantics; documented in [FULL_BACKEND_ROADMAP.md](docs/FULL_BACKEND_ROADMAP.md)).
-
-- **Phase 5 Test Conversion**: Fixture converter and parity over converted fixtures.
-  - Converter (`tests/convert_sparkless_fixtures.py`) maps Sparkless `expected_outputs` to robin-sparkless format: join, window, withColumn, union, unionByName, distinct, drop, dropna, fillna, limit, withColumnRenamed (in addition to filter, select, groupBy, orderBy).
-  - Parity test discovers `tests/fixtures/*.json` and `tests/fixtures/converted/*.json`; optional `skip: true` / `skip_reason` in fixtures to skip known gaps.
-  - `make sparkless-parity`: when `SPARKLESS_EXPECTED_OUTPUTS` is set, runs converter then `cargo test pyspark_parity_fixtures`; see [docs/CONVERTER_STATUS.md](docs/CONVERTER_STATUS.md) and [docs/SPARKLESS_PARITY_STATUS.md](docs/SPARKLESS_PARITY_STATUS.md).
-  - 58 hand-written fixtures passing; target 50+ met.
-- **Phase 4 PyO3 Bridge**: Optional Python bindings when built with `--features pyo3`.
+- **Phase 4 – PyO3 Bridge** ✅
+  - Optional Python bindings when built with `--features pyo3`.
   - Python module `robin_sparkless` with PySpark-like API: `SparkSession`, `SparkSessionBuilder`, `DataFrame`, `Column`, `GroupedData`, `WhenBuilder`, `ThenBuilder`.
   - Session: `builder()`, `get_or_create()`, `create_dataframe`, `read_csv`, `read_parquet`, `read_json`, `is_case_sensitive()`.
-  - DataFrame: `filter`, `select`, `with_column`, `order_by`, `group_by`, `join`, `union`, `union_by_name`, `distinct`, `drop`, `dropna`, `fillna`, `limit`, `with_column_renamed`, `count`, `show`, `collect` (returns list of dicts).
-  - Column/expressions: `col`, `lit`, `when().then().otherwise()`, `coalesce`, `sum`, `avg`, `min`, `max`, `count`; column methods `gt`, `ge`, `lt`, `le`, `eq`, `ne`, `and_`, `or_`, `alias`, `is_null`, `is_not_null`, `upper`, `lower`, `substr`.
+  - DataFrame: `filter`, `select`, `with_column`, `order_by`, `group_by`, `join`, `union`, `union_by_name`, `distinct`, `drop`, `dropna`, `fillna`, `limit`, `with_column_renamed`, `count`, `show`, `collect` (list of dicts).
+  - Column/expressions: `col`, `lit`, `when().then().otherwise()`, `coalesce`, `sum`, `avg`, `min`, `max`, `count`; methods `gt`, `ge`, `lt`, `le`, `eq`, `ne`, `and_`, `or_`, `alias`, `is_null`, `is_not_null`, `upper`, `lower`, `substr`.
   - GroupedData: `count()`, `sum(column)`, `avg(column)`, `min(column)`, `max(column)`, `agg(exprs)`.
-  - Build/install: `maturin develop --features pyo3` or `maturin build --features pyo3`; `pyproject.toml` for maturin.
-  - Python smoke tests in `tests/python/`; `make test` runs Rust + Python tests (creates `.venv`, installs extension, runs pytest).
-  - API contract documented in [docs/PYTHON_API.md](docs/PYTHON_API.md).
-- `DataFrame::join()` – Join two DataFrames on specified columns
-- `JoinType` enum – Inner, Left, Right, Outer (exported from crate root)
-- Parity test support for join fixtures via `right_input` and `Operation::Join`
-- Four join parity fixtures: `inner_join`, `left_join`, `right_join`, `outer_join`
-- **Multi-aggregation**: `GroupedData::agg()` supports multiple aggregations in one call; `groupby_multi_agg` fixture
-- **Window functions**: `Column::rank()`, `row_number()`, `dense_rank()`, `lag()`, `lead()` with `.over(partition_by)`
-- Parity support for `Operation::Window` with row_number, rank, dense_rank, lag, lead
-- Window fixtures: `row_number_window`, `rank_window`, `lag_lead_window`
-- **String functions**: `upper()`, `lower()`, `substring()` (1-based), `concat()`, `concat_ws()`
-- String fixtures: `string_upper_lower`, `string_substring`, `string_concat`
+  - Build: `maturin develop --features pyo3`; API contract in [docs/PYTHON_API.md](docs/PYTHON_API.md). Python smoke tests in `tests/python/`; `make test` runs Rust + Python tests.
+
+- **Phase 5 – Test Conversion** ✅
+  - Parity test discovers `tests/fixtures/*.json` and `tests/fixtures/converted/*.json`; optional `skip: true` / `skip_reason`.
+  - `make sparkless-parity`: when `SPARKLESS_EXPECTED_OUTPUTS` is set, runs converter then `cargo test pyspark_parity_fixtures`.
+  - 58 hand-written fixtures at Phase 5 completion; target 50+ met. See [CONVERTER_STATUS.md](docs/CONVERTER_STATUS.md), [SPARKLESS_PARITY_STATUS.md](docs/SPARKLESS_PARITY_STATUS.md).
+
+- **Phase 6 – Broad Function Parity** (partial) ✅
+  - **Joins**: `DataFrame::join()` with `JoinType` (Inner, Left, Right, Outer); parity fixtures `inner_join`, `left_join`, `right_join`, `outer_join`; `right_input` and `Operation::Join` in harness.
+  - **Multi-aggregation**: `GroupedData::agg()` with multiple aggregations; fixture `groupby_multi_agg`.
+  - **Window**: `Column::rank()`, `row_number()`, `dense_rank()`, `lag()`, `lead()` with `.over(partition_by)`; `first_value`, `last_value`, `percent_rank`; fixtures `row_number_window`, `rank_window`, `lag_lead_window`, `first_value_window`, `last_value_window`, `percent_rank_window`. API for `cume_dist`, `ntile`, `nth_value` (partition_by).
+  - **Array**: `array_size`/`size`, `array_contains`, `element_at`, `explode`, `array_sort`, `array_join`, `array_slice`; **implemented** (Polars list.eval): `array_position`, `array_remove`, `posexplode`; fixtures `array_contains`, `element_at`, `array_size`.
+  - **String**: `regexp_extract_all`, `regexp_like`; PyColumn exposure for `size`, `element_at`, `explode`, `first_value`, `last_value`, `percent_rank`, `regexp_like`.
+  - **String (basics)**: `upper`, `lower`, `substring` (1-based), `concat`, `concat_ws`; fixtures `string_upper_lower`, `string_substring`, `string_concat`.
+
+- **Phase 7 – SQL & Advanced** ✅
+  - **SQL** (optional `sql` feature): `SparkSession::sql(query)` with temp views (`create_or_replace_temp_view`, `table`). Single SELECT, FROM/JOIN, WHERE, GROUP BY, ORDER BY, LIMIT → DataFrame ops. Python: `spark.sql()`, `spark.create_or_replace_temp_view()`, `spark.table()`.
+  - **Delta Lake** (optional `delta` feature): `read_delta(path)`, `read_delta_with_version(path, version)` (time travel), `write_delta(path, overwrite)`. Python bindings for read_delta, read_delta_version, write_delta.
+  - **Performance**: Criterion benchmarks `cargo bench` (filter/select/groupBy robin vs Polars); target within ~2x.
+  - **Robustness**: Clearer error messages (column names, hints); Troubleshooting in [QUICKSTART.md](docs/QUICKSTART.md).
+
+- **Phase 9 – High-Value Functions & DataFrame Methods** ✅
+  - Datetime: `current_date`, `current_timestamp`, `date_add`, `date_sub`, `hour`, `minute`, `second`, `datediff`, `last_day`, `trunc`.
+  - String: `repeat`, `reverse`, `instr`, `lpad`, `rpad`; fixtures `string_repeat_reverse`, `string_lpad_rpad`.
+  - Math: `sqrt`, `pow`, `exp`, `log`; fixture `math_sqrt_pow`.
+  - Conditional: `nvl`/`ifnull`, `nullif`, `nanvl`.
+  - GroupedData: `first`, `last`, `approx_count_distinct`; fixture `groupby_first_last`.
+  - DataFrame: `replace`, `cross_join`, `describe`, `cache`/`persist`/`unpersist`, `subtract`, `intersect`; fixtures `replace`, `cross_join`, `describe`, `subtract`, `intersect`.
+
+- **Phase 10 – Complex types & window parity** (February 2026) ✅
+  - **Window parity**: Fixtures `percent_rank_window`, `cume_dist_window`, `ntile_window`, `nth_value_window` now covered (multi-step workaround in harness); no longer skipped.
+  - **String 6.4**: `mask`, `translate`, `substring_index` implemented; fixtures `string_mask`, `string_translate`, `string_substring_index`. **Phase 8**: `soundex`, `levenshtein`, `crc32`, `xxhash64` now **implemented** via map UDFs (strsim, crc32fast, twox-hash, soundex crates).
+  - **Array extensions**: `array_exists`, `array_forall`, `array_filter`, `array_transform`, `array_sum`, `array_mean` (Polars `list_any_all`, `list_eval`); fixture `array_sum`. **Phase 8**: `array_flatten` and `array_repeat` now **implemented** via map UDFs.
+  - **Map functions**: **Phase 8** – `create_map`, `map_keys`, `map_values`, `map_entries`, `map_from_arrays` now **implemented** (Map as `List(Struct{key, value})`; create_map via as_struct/concat_list; map_keys/map_values via list.eval + struct.field; map_from_arrays via UDF).
+  - **JSON**: `get_json_object`, `from_json`, `to_json` (Polars `extract_jsonpath`, `dtype-struct`); fixture `json_get_json_object`.
+  - **Parity**: 73 fixtures passing (was 68); ~120+ functions; **no remaining Phase 8 stubs** for array_repeat, array_flatten, map, or string 6.4 (soundex/levenshtein/crc32/xxhash64).
+
+- **Phase 8 – Remaining parity completed** (February 2026) ✅
+  - **array_repeat**: Implemented via `Expr::map` UDF (list `try_apply_amortized` + extend).
+  - **array_flatten**: Implemented via `Expr::map` UDF (list-of-lists flatten per row).
+  - **Map**: `create_map` (as_struct + concat_list), `map_keys`/`map_values` (list.eval + struct.field_by_name), `map_entries` (identity), `map_from_arrays` (zip UDF with list builder).
+  - **String 6.4**: `soundex` (soundex crate), `levenshtein` (strsim), `crc32` (crc32fast), `xxhash64` (twox-hash) via `Expr::map` / `Expr::map_many` UDFs.
+  - New module `src/udfs.rs` for execution-time UDFs used by these expressions.
+
+- **Documentation and roadmap**:
+  - [PYSPARK_DIFFERENCES.md](docs/PYSPARK_DIFFERENCES.md): Known divergences (window, SQL, Delta); Phase 8 stubs removed (all implemented). Linked from README and docs index.
+  - FULL_BACKEND_ROADMAP Phase 8 marked completed; PARITY_STATUS, ROADMAP, FULL_BACKEND_ROADMAP, IMPLEMENTATION_STATUS, PYSPARK_DIFFERENCES, README, docs/README updated for Phase 8 completion and ~120+ functions.
 
 ### Changed
 
+- **Documentation**: README, ROADMAP, FULL_BACKEND_ROADMAP, MIGRATION_STATUS, COMPILATION_STATUS updated for Phase 8/10 completion; removed all "stubbed" references for array_repeat, array_flatten, Map, and string 6.4 (soundex, levenshtein, crc32, xxhash64).
+- **Phase 8**: All four previously stubbed areas are now implemented: array_repeat, array_flatten, map functions (create_map, map_keys, map_values, map_entries, map_from_arrays), and string 6.4 (soundex, levenshtein, crc32, xxhash64). PYSPARK_DIFFERENCES no longer lists these as stubbed.
+- **Phase 10**: Window fixtures (percent_rank, cume_dist, ntile, nth_value) documented as covered in PYSPARK_DIFFERENCES; `substring_index` fixed for negative count (no u32 underflow); `mask` uses `replace_all` for correct regex replacement.
 - **PyO3 0.24**: Upgraded optional `pyo3` dependency from 0.22 to 0.24 (addresses RUSTSEC-2025-0020). Python bindings use non-deprecated APIs: `PyList::empty`, `PyDict::new`, `IntoPyObjectExt::into_bound_py_any` for collect.
 - Parity harness now accepts optional `right_input` for multi-DataFrame fixtures
 - Schema comparison allows Polars `_right` suffix for duplicate join column names

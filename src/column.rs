@@ -1,4 +1,6 @@
-use polars::prelude::{col, lit, Expr, ListNameSpaceExtension, RankMethod, RankOptions};
+use polars::prelude::{
+    col, lit, DataType, Expr, GetOutput, ListNameSpaceExtension, RankMethod, RankOptions,
+};
 
 /// Column - represents a column in a DataFrame, used for building expressions
 /// Thin wrapper around Polars `Expr`.
@@ -430,6 +432,120 @@ impl Column {
         )
     }
 
+    /// Character-by-character translation (PySpark translate). Replaces each char in from_str with corresponding in to_str; if to_str is shorter, extra from chars are removed.
+    pub fn translate(&self, from_str: &str, to_str: &str) -> Column {
+        use polars::prelude::*;
+        let mut e = self.expr().clone();
+        let from_chars: Vec<char> = from_str.chars().collect();
+        let to_chars: Vec<char> = to_str.chars().collect();
+        for (i, fc) in from_chars.iter().enumerate() {
+            let f = fc.to_string();
+            let t = to_chars
+                .get(i)
+                .map(|c| c.to_string())
+                .unwrap_or_else(String::new); // PySpark: no replacement = drop char
+            e = e.str().replace_all(lit(f), lit(t), true);
+        }
+        Self::from_expr(e, None)
+    }
+
+    /// Mask string: replace uppercase with upper_char, lowercase with lower_char, digits with digit_char (PySpark mask).
+    /// Defaults: upper 'X', lower 'x', digit 'n'; other chars unchanged.
+    pub fn mask(
+        &self,
+        upper_char: Option<char>,
+        lower_char: Option<char>,
+        digit_char: Option<char>,
+        other_char: Option<char>,
+    ) -> Column {
+        use polars::prelude::*;
+        let upper = upper_char.unwrap_or('X').to_string();
+        let lower = lower_char.unwrap_or('x').to_string();
+        let digit = digit_char.unwrap_or('n').to_string();
+        let other = other_char.map(|c| c.to_string());
+        let mut e = self
+            .expr()
+            .clone()
+            .str()
+            .replace_all(lit("[A-Z]".to_string()), lit(upper), false)
+            .str()
+            .replace_all(lit("[a-z]".to_string()), lit(lower), false)
+            .str()
+            .replace_all(lit(r"\d".to_string()), lit(digit), false);
+        if let Some(o) = other {
+            e = e
+                .str()
+                .replace_all(lit("[^A-Za-z0-9]".to_string()), lit(o), false);
+        }
+        Self::from_expr(e, None)
+    }
+
+    /// Substring before/after nth delimiter (PySpark substring_index). count > 0: before nth from left; count < 0: after nth from right.
+    pub fn substring_index(&self, delimiter: &str, count: i64) -> Column {
+        use polars::prelude::*;
+        let delim = delimiter.to_string();
+        let split_expr = self.expr().clone().str().split(lit(delim.clone()));
+        let n = count.unsigned_abs() as i64;
+        let expr = if count > 0 {
+            split_expr
+                .clone()
+                .list()
+                .slice(lit(0i64), lit(n))
+                .list()
+                .join(lit(delim), false)
+        } else {
+            let len = split_expr.clone().list().len();
+            let start = when(len.clone().gt(lit(n)))
+                .then(len.clone() - lit(n))
+                .otherwise(lit(0i64));
+            let slice_len = when(len.clone().gt(lit(n))).then(lit(n)).otherwise(len);
+            split_expr
+                .list()
+                .slice(start, slice_len)
+                .list()
+                .join(lit(delim), false)
+        };
+        Self::from_expr(expr, None)
+    }
+
+    /// Soundex code (PySpark soundex). Implemented via map UDF (strsim/soundex crates).
+    pub fn soundex(&self) -> Column {
+        let expr = self
+            .expr()
+            .clone()
+            .map(crate::udfs::apply_soundex, GetOutput::same_type());
+        Self::from_expr(expr, None)
+    }
+
+    /// Levenshtein distance to another string (PySpark levenshtein). Implemented via map_many UDF (strsim).
+    pub fn levenshtein(&self, other: &Column) -> Column {
+        let args = [other.expr().clone()];
+        let expr = self.expr().clone().map_many(
+            crate::udfs::apply_levenshtein,
+            &args,
+            GetOutput::from_type(DataType::Int64),
+        );
+        Self::from_expr(expr, None)
+    }
+
+    /// CRC32 checksum of string bytes (PySpark crc32). Implemented via map UDF (crc32fast).
+    pub fn crc32(&self) -> Column {
+        let expr = self.expr().clone().map(
+            crate::udfs::apply_crc32,
+            GetOutput::from_type(DataType::Int64),
+        );
+        Self::from_expr(expr, None)
+    }
+
+    /// XXH64 hash of string (PySpark xxhash64). Implemented via map UDF (twox-hash).
+    pub fn xxhash64(&self) -> Column {
+        let expr = self.expr().clone().map(
+            crate::udfs::apply_xxhash64,
+            GetOutput::from_type(DataType::Int64),
+        );
+        Self::from_expr(expr, None)
+    }
+
     // --- Math functions ---
 
     /// Absolute value (PySpark abs)
@@ -813,11 +929,81 @@ impl Column {
         Self::from_expr(list_expr, None)
     }
 
-    /// Repeat each element n times (PySpark array_repeat). Not implemented: would require list.eval with dynamic repeat.
-    pub fn array_repeat(&self, _n: i64) -> Column {
-        unimplemented!(
-            "array_repeat: not implemented (would require list.eval with repeat/flatten)"
-        )
+    /// Repeat each element n times (PySpark array_repeat). Implemented via map UDF.
+    pub fn array_repeat(&self, n: i64) -> Column {
+        let expr = self.expr().clone().map(
+            move |c| crate::udfs::apply_array_repeat(c, n),
+            GetOutput::same_type(),
+        );
+        Self::from_expr(expr, None)
+    }
+
+    /// Flatten list of lists to one list (PySpark flatten). Implemented via map UDF.
+    pub fn array_flatten(&self) -> Column {
+        let expr = self
+            .expr()
+            .clone()
+            .map(crate::udfs::apply_array_flatten, GetOutput::same_type());
+        Self::from_expr(expr, None)
+    }
+
+    /// True if any list element satisfies the predicate (PySpark exists). Uses list.eval(pred).list().any().
+    pub fn array_exists(&self, predicate: Expr) -> Column {
+        let pred_expr = self
+            .expr()
+            .clone()
+            .list()
+            .eval(predicate, false)
+            .list()
+            .any();
+        Self::from_expr(pred_expr, Some("exists".to_string()))
+    }
+
+    /// True if all list elements satisfy the predicate (PySpark forall). Uses list.eval(pred).list().all().
+    pub fn array_forall(&self, predicate: Expr) -> Column {
+        let pred_expr = self
+            .expr()
+            .clone()
+            .list()
+            .eval(predicate, false)
+            .list()
+            .all();
+        Self::from_expr(pred_expr, Some("forall".to_string()))
+    }
+
+    /// Filter list elements by predicate (PySpark filter). Keeps elements where predicate is true.
+    pub fn array_filter(&self, predicate: Expr) -> Column {
+        use polars::prelude::NULL;
+        let then_val = Self::from_expr(col(""), None);
+        let else_val = Self::from_expr(lit(NULL), None);
+        let elem_expr = crate::functions::when(&Self::from_expr(predicate, None))
+            .then(&then_val)
+            .otherwise(&else_val)
+            .into_expr();
+        let list_expr = self
+            .expr()
+            .clone()
+            .list()
+            .eval(elem_expr, false)
+            .list()
+            .drop_nulls();
+        Self::from_expr(list_expr, None)
+    }
+
+    /// Transform list elements by expression (PySpark transform). list.eval(expr).
+    pub fn array_transform(&self, f: Expr) -> Column {
+        let list_expr = self.expr().clone().list().eval(f, false);
+        Self::from_expr(list_expr, None)
+    }
+
+    /// Sum of list elements (PySpark aggregate with sum). Uses list.sum().
+    pub fn array_sum(&self) -> Column {
+        Self::from_expr(self.expr().clone().list().sum(), None)
+    }
+
+    /// Mean of list elements (PySpark aggregate with avg). Uses list.mean().
+    pub fn array_mean(&self) -> Column {
+        Self::from_expr(self.expr().clone().list().mean(), None)
     }
 
     /// Explode list with position (PySpark posexplode). Returns (pos_col, value_col).
@@ -834,6 +1020,59 @@ impl Column {
             Self::from_expr(pos_expr, Some("pos".to_string())),
             Self::from_expr(val_expr, Some("col".to_string())),
         )
+    }
+
+    // --- Map functions (Phase 8) - Map as List(Struct{key, value}) ---
+
+    /// Extract keys from a map column (PySpark map_keys). Map column is List(Struct{key, value}).
+    pub fn map_keys(&self) -> Column {
+        let elem_key = col("").struct_().field_by_name("key");
+        let list_expr = self.expr().clone().list().eval(elem_key, false);
+        Self::from_expr(list_expr, None)
+    }
+
+    /// Extract values from a map column (PySpark map_values). Map column is List(Struct{key, value}).
+    pub fn map_values(&self) -> Column {
+        let elem_val = col("").struct_().field_by_name("value");
+        let list_expr = self.expr().clone().list().eval(elem_val, false);
+        Self::from_expr(list_expr, None)
+    }
+
+    /// Return map as list of structs {key, value} (PySpark map_entries). Identity for List(Struct) column.
+    pub fn map_entries(&self) -> Column {
+        Self::from_expr(self.expr().clone(), None)
+    }
+
+    /// Build map from two array columns (keys, values) (PySpark map_from_arrays). Implemented via map_many UDF.
+    pub fn map_from_arrays(&self, values: &Column) -> Column {
+        let args = [values.expr().clone()];
+        let expr = self.expr().clone().map_many(
+            crate::udfs::apply_map_from_arrays,
+            &args,
+            GetOutput::same_type(),
+        );
+        Self::from_expr(expr, None)
+    }
+
+    // --- JSON functions (Phase 10) ---
+
+    /// Extract JSON path from string column (PySpark get_json_object). Uses Polars str().json_path_match.
+    pub fn get_json_object(&self, path: &str) -> Column {
+        let path_expr = polars::prelude::lit(path.to_string());
+        let out = self.expr().clone().str().json_path_match(path_expr);
+        Self::from_expr(out, None)
+    }
+
+    /// Parse string column as JSON into struct (PySpark from_json). Uses Polars str().json_decode.
+    pub fn from_json(&self, schema: Option<polars::datatypes::DataType>) -> Column {
+        let out = self.expr().clone().str().json_decode(schema, None);
+        Self::from_expr(out, None)
+    }
+
+    /// Serialize struct column to JSON string (PySpark to_json). Uses Polars struct().json_encode.
+    pub fn to_json(&self) -> Column {
+        let out = self.expr().clone().struct_().json_encode();
+        Self::from_expr(out, None)
     }
 }
 

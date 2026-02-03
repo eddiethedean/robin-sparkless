@@ -19,10 +19,10 @@ cargo test pyspark_parity_fixtures
 
 | Source | Converted | Passing | Failing | Skipped |
 |--------|-----------|---------|--------|---------|
-| Hand-written (`tests/fixtures/*.json`) | — | 58 | 0 | 4 (window: percent_rank, cume_dist, ntile, nth_value) |
+| Hand-written (`tests/fixtures/*.json`) | — | 73 | 0 | 0 |
 | Sparkless converted (`tests/fixtures/converted/*.json`) | 0 (run converter when `SPARKLESS_EXPECTED_OUTPUTS` set) | — | — | — |
 
-**Target: 50+ tests passing** (hand-written + converted). **Current: 58 passing** (hand-written).
+**Target: 50+ tests passing** (hand-written + converted). **Current: 73 passing** (hand-written). Phase 10: window fixtures percent_rank, cume_dist, ntile, nth_value are now covered (multi-step workaround).
 
 ### When Sparkless repo is available
 

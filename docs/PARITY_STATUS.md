@@ -7,7 +7,7 @@ This doc is the **living parity matrix** for `robin-sparkless`.
 - **Fixtures**: `tests/fixtures/*.json`
 - **Sparkless integration**: Robin-sparkless is designed to replace Sparkless's backend. Sparkless has 270+ expected_outputs; a fixture converter can convert those to robin-sparkless format. See [SPARKLESS_INTEGRATION_ANALYSIS.md](SPARKLESS_INTEGRATION_ANALYSIS.md) §4.
 
-Status as of **February 2026**: **PASSING (68 fixtures)**; 4 window fixtures skipped (percent_rank, cume_dist, ntile, nth_value; see skip_reason). Phase 6: array functions `array_position`, `array_remove`, `posexplode` are **implemented** (via Polars list.eval); array fixtures `array_contains`, `element_at`, `array_size`; window extensions (first_value, last_value, percent_rank) and string (regexp_extract_all, regexp_like). Remaining parity items (array_repeat, Map, JSON, string 6.4, window fixture simplification) planned for Phase 8. Python smoke tests for the PyO3 bridge live in `tests/python/` (run via `make test` or `make test-python`); see [PYTHON_API.md](PYTHON_API.md).
+Status as of **February 2026**: **PASSING (73 fixtures)**. Window fixtures percent_rank, cume_dist, ntile, nth_value are covered (multi-step workaround in harness). Phase 6: array functions `array_position`, `array_remove`, `posexplode` are **implemented** (via Polars list.eval); array fixtures `array_contains`, `element_at`, `array_size`, `array_sum`; array extensions (exists, forall, filter, transform, array_sum, array_mean; **Phase 8**: array_flatten, array_repeat **implemented** via map UDFs). Phase 10: String 6.4 (mask, translate, substring_index; **Phase 8**: soundex, levenshtein, crc32, xxhash64 **implemented** via map UDFs). **Phase 8**: Map (create_map, map_keys, map_values, map_entries, map_from_arrays **implemented**; Map as List(Struct{key, value})). JSON (get_json_object, from_json, to_json implemented). Python smoke tests for the PyO3 bridge live in `tests/python/` (run via `make test` or `make test-python`); see [PYTHON_API.md](PYTHON_API.md).
 
 ## Legend
 
@@ -64,10 +64,14 @@ Status as of **February 2026**: **PASSING (68 fixtures)**; 4 window fixtures ski
 | DataFrame | `limit` | ✅ Covered | `limit` |
 | DataFrame | `withColumnRenamed` | ✅ Covered | `with_column_renamed` |
 | Array/List | array, array_contains, element_at, size/array_size, array_join, array_sort, array_slice, explode; array_position, array_remove, posexplode (implemented) | ✅ Covered | `array_contains`, `element_at`, `array_size` |
-| Windows | first_value, last_value, percent_rank | ✅ Covered | `first_value_window`, `last_value_window`; percent_rank usable in fixtures |
-| Windows | cume_dist, ntile, nth_value | ✅ API (fixtures skipped) | Polars limits combined window exprs; fixtures percent_rank_window, cume_dist_window, ntile_window, nth_value_window skipped |
+| Windows | first_value, last_value, percent_rank | ✅ Covered | `first_value_window`, `last_value_window`, `percent_rank_window` |
+| Windows | cume_dist, ntile, nth_value | ✅ Covered | `cume_dist_window`, `ntile_window`, `nth_value_window` (multi-step workaround in harness) |
 | Strings | regexp_extract_all, regexp_like | ✅ Covered | `regexp_extract_all`, `regexp_like` |
 | Strings | repeat, reverse, instr, lpad, rpad | ✅ Covered | `string_repeat_reverse`, `string_lpad_rpad` |
+| Strings | mask, translate, substring_index; soundex, levenshtein, crc32, xxhash64 (Phase 8) | ✅ Implemented | `string_mask`, `string_translate`, `string_substring_index` |
+| Array | array_sum, array_exists, forall, filter, transform; array_flatten, array_repeat (Phase 8) | ✅ Implemented | `array_sum` |
+| Map | create_map, map_keys, map_values, map_entries, map_from_arrays (Phase 8) | ✅ Implemented | No fixture yet |
+| JSON | get_json_object, from_json, to_json (Phase 10) | ✅ get_json_object covered | `json_get_json_object` |
 | Math | sqrt, pow, exp, log | ✅ Covered | `math_sqrt_pow` |
 | GroupBy | first, last, approx_count_distinct in agg | ✅ Covered | `groupby_first_last` |
 | DataFrame | replace, crossJoin, describe, subtract, intersect | ✅ Covered | `replace`, `cross_join`, `describe`, `subtract`, `intersect` |
@@ -134,6 +138,10 @@ Status as of **February 2026**: **PASSING (68 fixtures)**; 4 window fixtures ski
 | `array_size` | split + size(col) |
 | `first_value_window` | first_value over partition |
 | `last_value_window` | last_value over partition |
+| `percent_rank_window` | percent_rank over partition |
+| `cume_dist_window` | cume_dist over partition |
+| `ntile_window` | ntile(n) over partition |
+| `nth_value_window` | nth_value over partition |
 | `regexp_like` | regexp_like(col, pattern) boolean match |
 | `regexp_extract_all` | regexp_extract_all(col, pattern) list of matches |
 | `string_repeat_reverse` | repeat(col, n), reverse(col) |
@@ -145,6 +153,11 @@ Status as of **February 2026**: **PASSING (68 fixtures)**; 4 window fixtures ski
 | `replace` | replace(column, old_value, new_value) |
 | `subtract` | subtract (set difference) |
 | `intersect` | intersect (set intersection) |
+| `string_mask` | mask(col) – replace upper/lower/digit with X/x/n |
+| `string_translate` | translate(col, from_str, to_str) |
+| `string_substring_index` | substring_index(col, delim, count) before/after nth delim |
+| `array_sum` | array(cols) + array_sum(col) |
+| `json_get_json_object` | get_json_object(col, '$.path') |
 
 ## Next additions to the matrix (recommended)
 

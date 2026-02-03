@@ -1,0 +1,37 @@
+{
+  "name": "array_sum",
+  "pyspark_version": "3.5.0",
+  "input": {
+    "schema": [
+      { "name": "id", "type": "bigint" },
+      { "name": "a", "type": "bigint" },
+      { "name": "b", "type": "bigint" },
+      { "name": "c", "type": "bigint" }
+    ],
+    "rows": [
+      [1, 1, 2, 3],
+      [2, 10, 20, null],
+      [3, 5, null, null]
+    ]
+  },
+  "operations": [
+    { "op": "withColumn", "column": "vals", "expr": "array(col('a'), col('b'), col('c'))" },
+    { "op": "withColumn", "column": "total", "expr": "array_sum(col('vals'))" },
+    { "op": "orderBy", "columns": ["id"], "ascending": [true] }
+  ],
+  "expected": {
+    "schema": [
+      { "name": "id", "type": "bigint" },
+      { "name": "a", "type": "bigint" },
+      { "name": "b", "type": "bigint" },
+      { "name": "c", "type": "bigint" },
+      { "name": "vals", "type": "array<bigint>" },
+      { "name": "total", "type": "bigint" }
+    ],
+    "rows": [
+      [1, 1, 2, 3, [1, 2, 3], 6],
+      [2, 10, 20, null, [10, 20, null], 30],
+      [3, 5, null, null, [5, null, null], 5]
+    ]
+  }
+}

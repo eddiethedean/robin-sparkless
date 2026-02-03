@@ -1471,8 +1471,9 @@ fn json_value_to_lit(v: &serde_json::Value) -> Result<Expr, String> {
 
 /// Parse expressions for withColumn operations (when, coalesce, string funcs, array funcs, etc.)
 fn parse_with_column_expr(src: &str) -> Result<Expr, String> {
+    use polars::prelude::concat_list;
     use robin_sparkless::{
-        array_contains, array_size, coalesce, col, concat, concat_ws, current_date,
+        array_contains, array_size, array_sum, coalesce, col, concat, concat_ws, current_date,
         current_timestamp, date_add, date_sub, datediff, element_at, exp, hour, initcap, instr,
         last_day, length, lit_str, log, lower, lpad, minute, nanvl, nullif, nvl, pow,
         regexp_extract, regexp_extract_all, regexp_like, regexp_replace, repeat, reverse, rpad,
@@ -1752,6 +1753,22 @@ fn parse_with_column_expr(src: &str) -> Result<Expr, String> {
         let c = col(col_name);
         return Ok(array_size(&c).into_expr());
     }
+    if s.starts_with("array_sum(") {
+        let inner = extract_first_arg(s, "array_sum(")?;
+        let col_name = extract_col_name(inner)?;
+        let c = col(col_name);
+        return Ok(array_sum(&c).into_expr());
+    }
+    if s.starts_with("array(") {
+        let inner = extract_first_arg(s, "array(")?;
+        let parts = parse_comma_separated_args(inner);
+        let mut exprs: Vec<Expr> = Vec::with_capacity(parts.len());
+        for p in &parts {
+            let name = extract_col_name(p)?;
+            exprs.push(col(name).expr().clone());
+        }
+        return Ok(concat_list(exprs).expect("concat_list"));
+    }
 
     // Handle substring(col('name'), start, length) - 1-based start
     if s.starts_with("substring(") {
@@ -1947,6 +1964,71 @@ fn parse_with_column_expr(src: &str) -> Result<Expr, String> {
             .trim_matches(['\'', '"']);
         let c = col(col_name);
         return Ok(rpad(&c, len, pad).into_expr());
+    }
+    if s.starts_with("translate(") {
+        let inner = extract_first_arg(s, "translate(")?;
+        let parts = parse_comma_separated_args(inner);
+        let col_name = extract_col_name(parts.first().ok_or("translate needs column")?)?;
+        let from_str = parts
+            .get(1)
+            .ok_or("translate needs from_str")?
+            .trim_matches(['\'', '"']);
+        let to_str = parts
+            .get(2)
+            .ok_or("translate needs to_str")?
+            .trim_matches(['\'', '"']);
+        let c = col(col_name);
+        return Ok(robin_sparkless::translate(&c, from_str, to_str).into_expr());
+    }
+    if s.starts_with("substring_index(") {
+        let inner = extract_first_arg(s, "substring_index(")?;
+        let parts = parse_comma_separated_args(inner);
+        let col_name = extract_col_name(parts.first().ok_or("substring_index needs column")?)?;
+        let delim = parts
+            .get(1)
+            .ok_or("substring_index needs delimiter")?
+            .trim_matches(['\'', '"']);
+        let count: i64 = parts
+            .get(2)
+            .ok_or("substring_index needs count")?
+            .trim()
+            .parse()
+            .map_err(|e: std::num::ParseIntError| e.to_string())?;
+        let c = col(col_name);
+        return Ok(robin_sparkless::substring_index(&c, delim, count).into_expr());
+    }
+    if s.starts_with("mask(") {
+        let inner = extract_first_arg(s, "mask(")?;
+        let parts = parse_comma_separated_args(inner);
+        let col_name = extract_col_name(parts.first().ok_or("mask needs column")?)?;
+        let c = col(col_name);
+        let parse_char = |i: usize| -> Option<char> {
+            parts.get(i).and_then(|p| {
+                let t = p.trim().trim_matches(['\'', '"']);
+                if t.is_empty() {
+                    None
+                } else {
+                    t.chars().next()
+                }
+            })
+        };
+        let upper = parse_char(1);
+        let lower = parse_char(2);
+        let digit = parse_char(3);
+        let other = parse_char(4);
+        return Ok(robin_sparkless::mask(&c, upper, lower, digit, other).into_expr());
+    }
+    if s.starts_with("get_json_object(") {
+        let inner = extract_first_arg(s, "get_json_object(")?;
+        let parts = parse_comma_separated_args(inner);
+        let col_name = extract_col_name(parts.first().ok_or("get_json_object needs column")?)?;
+        let path = parts
+            .get(1)
+            .ok_or("get_json_object needs path")?
+            .trim()
+            .trim_matches(['\'', '"']);
+        let c = col(col_name);
+        return Ok(robin_sparkless::get_json_object(&c, path).into_expr());
     }
 
     // --- Math: sqrt, pow, exp, log ---

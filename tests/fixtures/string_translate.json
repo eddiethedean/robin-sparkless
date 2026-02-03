@@ -1,0 +1,29 @@
+{
+  "name": "string_translate",
+  "pyspark_version": "3.5.0",
+  "input": {
+    "schema": [
+      { "name": "id", "type": "bigint" },
+      { "name": "s", "type": "string" }
+    ],
+    "rows": [
+      [1, "hello"],
+      [2, "world"]
+    ]
+  },
+  "operations": [
+    { "op": "withColumn", "column": "t", "expr": "translate(col('s'), 'el', 'i')" },
+    { "op": "orderBy", "columns": ["id"], "ascending": [true] }
+  ],
+  "expected": {
+    "schema": [
+      { "name": "id", "type": "bigint" },
+      { "name": "s", "type": "string" },
+      { "name": "t", "type": "string" }
+    ],
+    "rows": [
+      [1, "hello", "hio"],
+      [2, "world", "word"]
+    ]
+  }
+}

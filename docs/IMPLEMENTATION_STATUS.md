@@ -61,13 +61,14 @@ Robin-sparkless is designed to **replace the backend logic** of [Sparkless](http
 7. **Phase 5 Test Conversion** ✅ **COMPLETED**
    - Fixture converter maps Sparkless `expected_outputs` to robin-sparkless format (join, window, withColumn, union, distinct, drop, dropna, fillna, limit, withColumnRenamed, etc.).
    - Parity discovers `tests/fixtures/` and `tests/fixtures/converted/`; optional `skip: true` in fixtures.
-   - `make sparkless-parity` (set `SPARKLESS_EXPECTED_OUTPUTS` to run converter first); 58 hand-written fixtures passing.
-   - See [CONVERTER_STATUS.md](CONVERTER_STATUS.md), [SPARKLESS_PARITY_STATUS.md](SPARKLESS_PARITY_STATUS.md).
+  - `make sparkless-parity` (set `SPARKLESS_EXPECTED_OUTPUTS` to run converter first); 73 hand-written fixtures passing.
+  - See [CONVERTER_STATUS.md](CONVERTER_STATUS.md), [SPARKLESS_PARITY_STATUS.md](SPARKLESS_PARITY_STATUS.md).
 
 8. **Phase 6 Broad Function Parity** (partial) ✅
-   - Array: `array_size`/`size`, `array_contains`, `element_at`, `explode`, `array_sort`, `array_join`, `array_slice`; **implemented** (via Polars list.eval): `array_position`, `array_remove`, `posexplode`; parity fixtures: `array_contains`, `element_at`, `array_size`. `array_repeat` not implemented (→ Phase 8).
-   - Window: `first_value`, `last_value`, `percent_rank` with `.over()`; **API** `cume_dist`, `ntile`, `nth_value` (partition_by); parity fixtures: `first_value_window`, `last_value_window`; percent_rank/cume_dist/ntile/nth_value fixtures skipped (Polars window/aggregation limits; simplification → Phase 8).
-   - String: `regexp_extract_all`, `regexp_like`. Map, JSON, and additional string (soundex, translate, etc.) → Phase 8.
+   - Array: `array_size`/`size`, `array_contains`, `element_at`, `explode`, `array_sort`, `array_join`, `array_slice`; **implemented** (via Polars list.eval): `array_position`, `array_remove`, `posexplode`, `array_exists`, `array_forall`, `array_filter`, `array_transform`, `array_sum`, `array_mean`; **Phase 8**: `array_repeat`, `array_flatten` **implemented** via map UDFs. Fixtures: `array_contains`, `element_at`, `array_size`, `array_sum`.
+   - Window: `first_value`, `last_value`, `percent_rank`, `cume_dist`, `ntile`, `nth_value` with `.over()`; parity fixtures for all (percent_rank/cume_dist/ntile/nth_value via multi-step workaround).
+   - String: `regexp_extract_all`, `regexp_like`; **Phase 10**: `mask`, `translate`, `substring_index`; **Phase 8**: `soundex`, `levenshtein`, `crc32`, `xxhash64` **implemented** via map UDFs.
+   - **Phase 10**: JSON `get_json_object`, `from_json`, `to_json`. **Phase 8**: Map `create_map`, `map_keys`, `map_values`, `map_entries`, `map_from_arrays` **implemented**. See [PYSPARK_DIFFERENCES.md](PYSPARK_DIFFERENCES.md).
 
 9. **Phase 7 SQL & Advanced** ✅ **COMPLETED**
    - Optional **SQL** (`sql` feature): `SparkSession::sql(query)`, temp views (`create_or_replace_temp_view`, `table`); sqlparser → DataFrame ops (SELECT, FROM, WHERE, JOIN, GROUP BY, ORDER BY, LIMIT).
