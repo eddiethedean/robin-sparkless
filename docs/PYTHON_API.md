@@ -36,9 +36,9 @@ Python module is only compiled when the `pyo3` feature is enabled. Default `carg
 | DataFrame       | `DataFrame` | `filter`, `select`, `with_column`, `order_by`, `group_by`, `join`, `union`, `union_by_name`, `distinct`, `drop`, `dropna`, `fillna`, `limit`, `with_column_renamed`, `count`, `show`, `collect`; **Phase 12**: `sample`, `random_split`, `first`, `head`, `tail`, `take`, `is_empty`, `to_json`, `to_pandas`, `explain`, `print_schema`, `checkpoint`, `local_checkpoint`, `repartition`, `coalesce`, `offset`, `summary`, `to_df`, `select_expr`, `col_regex`, `with_columns`, `with_columns_renamed`, `stat`, `na`; with `delta`: `write_delta(path, overwrite)` |
 | DataFrameStat   | `DataFrameStat` (returned by `df.stat()`) | `cov(col1, col2)` → `float`, `corr(col1, col2)` → `float` |
 | DataFrameNa     | `DataFrameNa` (returned by `df.na()`) | `fill(value: Column)` → `DataFrame`, `drop(subset=None)` → `DataFrame` |
-| Column          | `Column` | Built via `col(name)`, `lit(value)`; methods: `gt`, `ge`, `lt`, `le`, `eq`, `ne`, `and_`, `or_`, `alias`, `is_null`, `is_not_null`, `upper`, `lower`, `substr` |
+| Column          | `Column` | Built via `col(name)`, `lit(value)`; methods: `gt`, `ge`, `lt`, `le`, `eq`, `ne`, `and_`, `or_`, `alias`, `is_null`, `is_not_null`, `upper`, `lower`, `substr`; **Phase 13**: `ascii_`, `format_number(decimals)`, `overlay(replace, pos, length)`, `char_`, `chr_`, `base64_`, `unbase64_`, `sha1_`, `sha2_(bit_length)`, `md5_`, `array_compact` |
 | GroupedData     | `GroupedData` | `count()`, `sum(column)`, `avg(column)`, `min(column)`, `max(column)`, `agg(exprs)` |
-| Functions       | Module-level            | `col`, `lit`, `when`, `coalesce`, `sum`, `avg`, `min`, `max`, `count` |
+| Functions       | Module-level            | `col`, `lit`, `when`, `coalesce`, `sum`, `avg`, `min`, `max`, `count`; **Phase 13**: `ascii`, `format_number`, `overlay`, `position`, `char`, `chr`, `base64`, `unbase64`, `sha1`, `sha2`, `md5`, `array_compact` |
 
 ## Key signatures (Python)
 
@@ -76,6 +76,7 @@ Python module is only compiled when the `pyo3` feature is enabled. Default `carg
   - `when(condition: Column).then(value: Column).otherwise(value: Column)` → `Column`
   - `coalesce(columns: list[Column])` → `Column`
   - `sum(column: Column)`, `avg`, `min`, `max`, `count` → `Column` (aggregation expressions for use in `agg()`)
+  - **Phase 13**: `ascii(column)` → `Column` (Int32); `format_number(column, decimals)` → `Column`; `overlay(column, replace, pos, length)` → `Column`; `position(substr, column)` → `Column`; `char(column)` / `chr(column)` → `Column`; `base64(column)`, `unbase64(column)` → `Column`; `sha1(column)`, `sha2(column, bit_length)`, `md5(column)` → `Column` (hex string); `array_compact(column)` → `Column`. Column methods use trailing underscore where name clashes with Python built-in: `ascii_`, `char_`, `chr_`, `base64_`, `unbase64_`, `sha1_`, `sha2_`, `md5_`.
 
 - **GroupedData**
   - `count()` → `DataFrame`

@@ -225,6 +225,61 @@ pub fn instr(column: &Column, substr: &str) -> Column {
     column.clone().instr(substr)
 }
 
+/// Position of substring in column (PySpark position). Same as instr; (substr, col) argument order.
+pub fn position(substr: &str, column: &Column) -> Column {
+    column.clone().instr(substr)
+}
+
+/// ASCII value of first character (PySpark ascii). Returns Int32.
+pub fn ascii(column: &Column) -> Column {
+    column.clone().ascii()
+}
+
+/// Format numeric as string with fixed decimal places (PySpark format_number).
+pub fn format_number(column: &Column, decimals: u32) -> Column {
+    column.clone().format_number(decimals)
+}
+
+/// Replace substring at 1-based position (PySpark overlay). replace is literal.
+pub fn overlay(column: &Column, replace: &str, pos: i64, length: i64) -> Column {
+    column.clone().overlay(replace, pos, length)
+}
+
+/// Int to single-character string (PySpark char). Valid codepoint only.
+pub fn char(column: &Column) -> Column {
+    column.clone().char()
+}
+
+/// Alias for char (PySpark chr).
+pub fn chr(column: &Column) -> Column {
+    column.clone().chr()
+}
+
+/// Base64 encode string bytes (PySpark base64).
+pub fn base64(column: &Column) -> Column {
+    column.clone().base64()
+}
+
+/// Base64 decode to string (PySpark unbase64). Invalid decode → null.
+pub fn unbase64(column: &Column) -> Column {
+    column.clone().unbase64()
+}
+
+/// SHA1 hash of string bytes, return hex string (PySpark sha1).
+pub fn sha1(column: &Column) -> Column {
+    column.clone().sha1()
+}
+
+/// SHA2 hash; bit_length 256, 384, or 512 (PySpark sha2).
+pub fn sha2(column: &Column, bit_length: i32) -> Column {
+    column.clone().sha2(bit_length)
+}
+
+/// MD5 hash of string bytes, return hex string (PySpark md5).
+pub fn md5(column: &Column) -> Column {
+    column.clone().md5()
+}
+
 /// Left-pad string to length with pad char (PySpark lpad).
 pub fn lpad(column: &Column, length: i32, pad: &str) -> Column {
     column.clone().lpad(length, pad)
@@ -599,6 +654,11 @@ pub fn explode(column: &Column) -> Column {
 /// Implemented via Polars list.eval with col("") as element.
 pub fn array_position(column: &Column, value: &Column) -> Column {
     column.clone().array_position(value.expr().clone())
+}
+
+/// Remove null elements from list (PySpark array_compact).
+pub fn array_compact(column: &Column) -> Column {
+    column.clone().array_compact()
 }
 
 /// New list with all elements equal to value removed (PySpark array_remove).

@@ -157,6 +157,192 @@ pub fn apply_array_repeat(column: Column, n: i64) -> PolarsResult<Option<Column>
     Ok(Some(Column::new(name, out.into_series())))
 }
 
+/// ASCII value of first character (PySpark ascii). Returns Int32.
+pub fn apply_ascii(column: Column) -> PolarsResult<Option<Column>> {
+    let name = column.field().into_owned().name;
+    let series = column.take_materialized_series();
+    let ca = series
+        .str()
+        .map_err(|e| PolarsError::ComputeError(format!("ascii: {}", e).into()))?;
+    let out = Int32Chunked::from_iter_options(
+        name.as_str().into(),
+        ca.into_iter().map(|opt_s| {
+            opt_s.and_then(|s| {
+                s.chars().next().map(|c| c as i32)
+            })
+        }),
+    );
+    Ok(Some(Column::new(name, out.into_series())))
+}
+
+/// Format numeric column as string with fixed decimal places (PySpark format_number).
+pub fn apply_format_number(column: Column, decimals: u32) -> PolarsResult<Option<Column>> {
+    let name = column.field().into_owned().name;
+    let series = column.take_materialized_series();
+    let prec = decimals as usize;
+    let out: StringChunked = match series.dtype() {
+        DataType::Float64 => {
+            let ca = series.f64().map_err(|e| PolarsError::ComputeError(format!("format_number: {}", e).into()))?;
+            StringChunked::from_iter_options(
+                name.as_str().into(),
+                ca.into_iter().map(|opt_v| opt_v.map(|v| format!("{:.prec$}", v, prec = prec))),
+            )
+        }
+        DataType::Float32 => {
+            let ca = series.f32().map_err(|e| PolarsError::ComputeError(format!("format_number: {}", e).into()))?;
+            StringChunked::from_iter_options(
+                name.as_str().into(),
+                ca.into_iter().map(|opt_v| opt_v.map(|v| format!("{:.prec$}", v, prec = prec))),
+            )
+        }
+        _ => {
+            let f64_series = series.cast(&DataType::Float64).map_err(|e| PolarsError::ComputeError(format!("format_number cast: {}", e).into()))?;
+            let ca = f64_series.f64().map_err(|e| PolarsError::ComputeError(format!("format_number: {}", e).into()))?;
+            StringChunked::from_iter_options(
+                name.as_str().into(),
+                ca.into_iter().map(|opt_v| opt_v.map(|v| format!("{:.prec$}", v, prec = prec))),
+            )
+        }
+    };
+    Ok(Some(Column::new(name, out.into_series())))
+}
+
+/// Base64 encode string bytes (PySpark base64). Input string UTF-8, output base64 string.
+pub fn apply_base64(column: Column) -> PolarsResult<Option<Column>> {
+    use base64::Engine;
+    let name = column.field().into_owned().name;
+    let series = column.take_materialized_series();
+    let ca = series
+        .str()
+        .map_err(|e| PolarsError::ComputeError(format!("base64: {}", e).into()))?;
+    let out = StringChunked::from_iter_options(
+        name.as_str().into(),
+        ca.into_iter().map(|opt_s| opt_s.map(|s| base64::engine::general_purpose::STANDARD.encode(s.as_bytes()))),
+    );
+    Ok(Some(Column::new(name, out.into_series())))
+}
+
+/// Base64 decode to string (PySpark unbase64). Output UTF-8 string; invalid decode → null.
+pub fn apply_unbase64(column: Column) -> PolarsResult<Option<Column>> {
+    use base64::Engine;
+    let name = column.field().into_owned().name;
+    let series = column.take_materialized_series();
+    let ca = series
+        .str()
+        .map_err(|e| PolarsError::ComputeError(format!("unbase64: {}", e).into()))?;
+    let out = StringChunked::from_iter_options(
+        name.as_str().into(),
+        ca.into_iter().map(|opt_s| {
+            opt_s.and_then(|s| {
+                let decoded = base64::engine::general_purpose::STANDARD.decode(s.as_bytes()).ok()?;
+                String::from_utf8(decoded).ok()
+            })
+        }),
+    );
+    Ok(Some(Column::new(name, out.into_series())))
+}
+
+/// SHA1 hash of string bytes, return hex string (PySpark sha1).
+pub fn apply_sha1(column: Column) -> PolarsResult<Option<Column>> {
+    use sha1::Digest;
+    let name = column.field().into_owned().name;
+    let series = column.take_materialized_series();
+    let ca = series
+        .str()
+        .map_err(|e| PolarsError::ComputeError(format!("sha1: {}", e).into()))?;
+    let out = StringChunked::from_iter_options(
+        name.as_str().into(),
+        ca.into_iter().map(|opt_s| {
+            opt_s.map(|s| {
+                let mut hasher = sha1::Sha1::new();
+                hasher.update(s.as_bytes());
+                format!("{:x}", hasher.finalize())
+            })
+        }),
+    );
+    Ok(Some(Column::new(name, out.into_series())))
+}
+
+/// SHA2 hash of string bytes, return hex string (PySpark sha2). bit_length 256 or 384 or 512.
+pub fn apply_sha2(column: Column, bit_length: i32) -> PolarsResult<Option<Column>> {
+    let name = column.field().into_owned().name;
+    let series = column.take_materialized_series();
+    let ca = series
+        .str()
+        .map_err(|e| PolarsError::ComputeError(format!("sha2: {}", e).into()))?;
+    let out = StringChunked::from_iter_options(
+        name.as_str().into(),
+        ca.into_iter().map(|opt_s| {
+            opt_s.map(|s| {
+                let bytes = s.as_bytes();
+                use sha2::Digest;
+                match bit_length {
+                    256 => format!("{:x}", sha2::Sha256::digest(bytes)),
+                    384 => format!("{:x}", sha2::Sha384::digest(bytes)),
+                    512 => format!("{:x}", sha2::Sha512::digest(bytes)),
+                    _ => format!("{:x}", sha2::Sha256::digest(bytes)),
+                }
+            })
+        }),
+    );
+    Ok(Some(Column::new(name, out.into_series())))
+}
+
+/// MD5 hash of string bytes, return hex string (PySpark md5).
+pub fn apply_md5(column: Column) -> PolarsResult<Option<Column>> {
+    let name = column.field().into_owned().name;
+    let series = column.take_materialized_series();
+    let ca = series
+        .str()
+        .map_err(|e| PolarsError::ComputeError(format!("md5: {}", e).into()))?;
+    let out = StringChunked::from_iter_options(
+        name.as_str().into(),
+        ca.into_iter().map(|opt_s| {
+            opt_s.map(|s| format!("{:x}", md5::compute(s.as_bytes())))
+        }),
+    );
+    Ok(Some(Column::new(name, out.into_series())))
+}
+
+/// Int column to single-character string (PySpark char / chr). Valid codepoint only.
+pub fn apply_char(column: Column) -> PolarsResult<Option<Column>> {
+    let name = column.field().into_owned().name;
+    let series = column.take_materialized_series();
+    let to_char = |v: i64| -> String {
+        let u = v as u32;
+        if u <= 0x10FFFF {
+            char::from_u32(u).map(|c| c.to_string()).unwrap_or_default()
+        } else {
+            String::new()
+        }
+    };
+    let out: StringChunked = match series.dtype() {
+        DataType::Int32 => {
+            let ca = series.i32().map_err(|e| PolarsError::ComputeError(format!("char: {}", e).into()))?;
+            StringChunked::from_iter_options(
+                name.as_str().into(),
+                ca.into_iter().map(|opt_v| opt_v.map(|v| to_char(v as i64))),
+            )
+        }
+        DataType::Int64 => {
+            let ca = series.i64().map_err(|e| PolarsError::ComputeError(format!("char: {}", e).into()))?;
+            StringChunked::from_iter_options(
+                name.as_str().into(),
+                ca.into_iter().map(|opt_v| opt_v.map(to_char)),
+            )
+        }
+        _ => {
+            let i64_series = series.cast(&DataType::Int64).map_err(|e| PolarsError::ComputeError(format!("char cast: {}", e).into()))?;
+            let ca = i64_series.i64().map_err(|e| PolarsError::ComputeError(format!("char: {}", e).into()))?;
+            StringChunked::from_iter_options(
+                name.as_str().into(),
+                ca.into_iter().map(|opt_v| opt_v.map(to_char)),
+            )
+        }
+    };
+    Ok(Some(Column::new(name, out.into_series())))
+}
+
 /// Build map (list of structs {key, value}) from two list columns. PySpark map_from_arrays.
 pub fn apply_map_from_arrays(columns: &mut [Column]) -> PolarsResult<Option<Column>> {
     use polars::chunked_array::builder::get_list_builder;

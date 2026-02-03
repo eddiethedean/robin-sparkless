@@ -5,12 +5,12 @@
 | [QUICKSTART](QUICKSTART.md) | Build, install, basic usage, optional features (SQL, Delta), troubleshooting, benchmarks |
 | [ROADMAP](ROADMAP.md) | Development roadmap and Sparkless integration phases |
 | [CHANGELOG](../CHANGELOG.md) | Version history and release notes |
-| [PARITY_STATUS](PARITY_STATUS.md) | PySpark parity coverage matrix (80 fixtures; Phase 12 DataFrame methods covered) |
+| [PARITY_STATUS](PARITY_STATUS.md) | PySpark parity coverage matrix (82 fixtures; Phase 12–13 covered) |
 | [PYSPARK_DIFFERENCES](PYSPARK_DIFFERENCES.md) | Known divergences from PySpark (window, SQL, Delta; Phase 8 completed) |
 | [PYTHON_API](PYTHON_API.md) | Python API contract (Phase 4 PyO3 bridge): build, install, signatures; optional SQL and Delta |
 | [CONVERTER_STATUS](CONVERTER_STATUS.md) | Sparkless → robin-sparkless fixture converter |
 | [SPARKLESS_PARITY_STATUS](SPARKLESS_PARITY_STATUS.md) | Phase 5: pass/fail and failure reasons for converted fixtures |
-| [FULL_BACKEND_ROADMAP](FULL_BACKEND_ROADMAP.md) | Phased plan to full Sparkless backend replacement (Phase 12 done; ~55+ DataFrame methods, ~120+ functions, 80 fixtures; Phases 13–17: functions, Phase 16 crate publish, then Sparkless integration) |
+| [FULL_BACKEND_ROADMAP](FULL_BACKEND_ROADMAP.md) | Phased plan to full Sparkless backend replacement (Phase 12–13 done; ~55+ DataFrame methods, ~130+ functions, 82 fixtures; Phases 14–17: functions, Phase 16 crate publish, then Sparkless integration) |
 | [SPARKLESS_INTEGRATION_ANALYSIS](SPARKLESS_INTEGRATION_ANALYSIS.md) | Sparkless backend replacement strategy, architecture, test conversion |
 | [TEST_CREATION_GUIDE](TEST_CREATION_GUIDE.md) | How to add parity tests and convert Sparkless fixtures |
 | [IMPLEMENTATION_STATUS](IMPLEMENTATION_STATUS.md) | Polars migration status |

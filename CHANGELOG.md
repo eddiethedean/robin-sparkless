@@ -92,8 +92,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Parity**: Fixtures `first_row`, `head_n`, `offset_n` for first/head/offset operations.
   - **Docs**: [PYTHON_API.md](docs/PYTHON_API.md), [PARITY_STATUS.md](docs/PARITY_STATUS.md), [IMPLEMENTATION_STATUS.md](docs/IMPLEMENTATION_STATUS.md), [ROADMAP.md](docs/ROADMAP.md), [FULL_BACKEND_ROADMAP.md](docs/FULL_BACKEND_ROADMAP.md), README, and docs index updated for Phase 12.
 
+- **Phase 13 – Functions batch 1 (string, binary, collection)** ✅ (partial)
+  - **Rust**: String — `ascii`, `format_number`, `overlay`, `position`, `char`, `chr`; Base64 — `base64`, `unbase64` (base64 crate); Binary — `sha1`, `sha2(bit_length)`, `md5` (sha1, sha2, md5 crates; string in → hex out); Collection — `array_compact`. UDFs in `udfs.rs` for ascii, format_number, char, base64, unbase64, sha1, sha2, md5.
+  - **PyO3**: Module-level `ascii`, `format_number`, `overlay`, `position`, `char`, `chr`, `base64`, `unbase64`, `sha1`, `sha2`, `md5`, `array_compact`; Column methods `ascii_`, `format_number`, `overlay`, `char_`, `chr_`, `base64_`, `unbase64_`, `sha1_`, `sha2_`, `md5_`, `array_compact`.
+  - **Parity**: `parse_with_column_expr` extended for all new functions; fixtures `string_ascii`, `string_format_number` (82 fixtures total).
+  - **Docs**: PARITY_STATUS, IMPLEMENTATION_STATUS, PYTHON_API updated for Phase 13.
+
 ### Changed
 
+- **Phase 13**: String/binary/collection batch 1 (ascii, format_number, overlay, position, char, chr, base64, unbase64, sha1, sha2, md5, array_compact); 82 parity fixtures; PyO3 bindings; with_columns_renamed type fix in Python.
 - **Phase 12**: DataFrame methods ~55+ (freq_items, approx_quantile, crosstab, melt, sample_by, no-ops); PyO3 stat/na/to_pandas, random_split, with_columns, etc.; parity fixtures first_row, head_n, offset_n; all docs and README updated.
 - **Phase 11**: Parity fixtures 73 → 80; harness date/datetime/boolean support; CI workflow; converter date/timestamp mapping; docs updated.
 - **Documentation**: README, ROADMAP, FULL_BACKEND_ROADMAP, MIGRATION_STATUS, COMPILATION_STATUS updated for Phase 8/10 completion; removed all "stubbed" references for array_repeat, array_flatten, Map, and string 6.4 (soundex, levenshtein, crc32, xxhash64).

@@ -3,6 +3,10 @@
 
 use crate::column::Column as RsColumn;
 use crate::dataframe::JoinType;
+use crate::functions::{
+    array_compact, ascii, base64, chr, format_number, md5, overlay, position as rs_position, sha1,
+    sha2, unbase64,
+};
 use crate::functions::{avg, coalesce, col as rs_col, count, max, min, sum as rs_sum};
 use crate::{DataFrame, GroupedData, SparkSession};
 use polars::prelude::Expr;
@@ -31,6 +35,18 @@ fn robin_sparkless(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("min", wrap_pyfunction!(py_min, m)?)?;
     m.add("max", wrap_pyfunction!(py_max, m)?)?;
     m.add("count", wrap_pyfunction!(py_count, m)?)?;
+    m.add("ascii", wrap_pyfunction!(py_ascii, m)?)?;
+    m.add("format_number", wrap_pyfunction!(py_format_number, m)?)?;
+    m.add("overlay", wrap_pyfunction!(py_overlay, m)?)?;
+    m.add("position", wrap_pyfunction!(py_position, m)?)?;
+    m.add("char", wrap_pyfunction!(py_char, m)?)?;
+    m.add("chr", wrap_pyfunction!(py_chr, m)?)?;
+    m.add("base64", wrap_pyfunction!(py_base64, m)?)?;
+    m.add("unbase64", wrap_pyfunction!(py_unbase64, m)?)?;
+    m.add("sha1", wrap_pyfunction!(py_sha1, m)?)?;
+    m.add("sha2", wrap_pyfunction!(py_sha2, m)?)?;
+    m.add("md5", wrap_pyfunction!(py_md5, m)?)?;
+    m.add("array_compact", wrap_pyfunction!(py_array_compact, m)?)?;
     Ok(())
 }
 
@@ -109,6 +125,90 @@ fn py_max(column: &PyColumn) -> PyColumn {
 fn py_count(column: &PyColumn) -> PyColumn {
     PyColumn {
         inner: count(&column.inner),
+    }
+}
+
+#[pyfunction]
+fn py_ascii(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: ascii(&column.inner),
+    }
+}
+
+#[pyfunction]
+fn py_format_number(column: &PyColumn, decimals: u32) -> PyColumn {
+    PyColumn {
+        inner: format_number(&column.inner, decimals),
+    }
+}
+
+#[pyfunction]
+fn py_overlay(column: &PyColumn, replace: &str, pos: i64, length: i64) -> PyColumn {
+    PyColumn {
+        inner: overlay(&column.inner, replace, pos, length),
+    }
+}
+
+#[pyfunction]
+fn py_position(substr: &str, column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: rs_position(substr, &column.inner),
+    }
+}
+
+#[pyfunction]
+fn py_char(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: crate::functions::char(&column.inner),
+    }
+}
+
+#[pyfunction]
+fn py_chr(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: chr(&column.inner),
+    }
+}
+
+#[pyfunction]
+fn py_base64(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: base64(&column.inner),
+    }
+}
+
+#[pyfunction]
+fn py_unbase64(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: unbase64(&column.inner),
+    }
+}
+
+#[pyfunction]
+fn py_sha1(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: sha1(&column.inner),
+    }
+}
+
+#[pyfunction]
+fn py_sha2(column: &PyColumn, bit_length: i32) -> PyColumn {
+    PyColumn {
+        inner: sha2(&column.inner, bit_length),
+    }
+}
+
+#[pyfunction]
+fn py_md5(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: md5(&column.inner),
+    }
+}
+
+#[pyfunction]
+fn py_array_compact(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: array_compact(&column.inner),
     }
 }
 
@@ -208,6 +308,72 @@ impl PyColumn {
     fn substr(&self, start: i64, length: Option<i64>) -> Self {
         PyColumn {
             inner: self.inner.substr(start, length),
+        }
+    }
+
+    fn ascii_(&self) -> Self {
+        PyColumn {
+            inner: ascii(&self.inner),
+        }
+    }
+
+    fn format_number(&self, decimals: u32) -> Self {
+        PyColumn {
+            inner: format_number(&self.inner, decimals),
+        }
+    }
+
+    fn overlay(&self, replace: &str, pos: i64, length: i64) -> Self {
+        PyColumn {
+            inner: overlay(&self.inner, replace, pos, length),
+        }
+    }
+
+    fn char_(&self) -> Self {
+        PyColumn {
+            inner: crate::functions::char(&self.inner),
+        }
+    }
+
+    fn chr_(&self) -> Self {
+        PyColumn {
+            inner: chr(&self.inner),
+        }
+    }
+
+    fn base64_(&self) -> Self {
+        PyColumn {
+            inner: base64(&self.inner),
+        }
+    }
+
+    fn unbase64_(&self) -> Self {
+        PyColumn {
+            inner: unbase64(&self.inner),
+        }
+    }
+
+    fn sha1_(&self) -> Self {
+        PyColumn {
+            inner: sha1(&self.inner),
+        }
+    }
+
+    fn sha2_(&self, bit_length: i32) -> Self {
+        PyColumn {
+            inner: sha2(&self.inner, bit_length),
+        }
+    }
+
+    fn md5_(&self) -> Self {
+        PyColumn {
+            inner: md5(&self.inner),
+        }
+    }
+
+    fn array_compact(&self) -> Self {
+        PyColumn {
+            inner: array_compact(&self.inner),
         }
     }
 
@@ -874,17 +1040,9 @@ impl PyDataFrame {
                 "with_columns_renamed expects dict[str, str] or list[tuple[str, str]]",
             ));
         }
-        let refs: Vec<(&str, &str)> = renames
-            .iter()
-            .map(|(a, b)| (a.as_str(), b.as_str()))
-            .collect();
-        let renames_ref: Vec<(String, String)> = renames;
-        let refs2: Vec<(String, String)> = renames_ref;
         let df = self
             .inner
-            .with_columns_renamed(
-                &refs2.iter().map(|(a, b)| (a.as_str(), b.as_str())).collect::<Vec<_>>(),
-            )
+            .with_columns_renamed(&renames)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
         Ok(PyDataFrame { inner: df })
     }

@@ -1582,11 +1582,12 @@ fn json_value_to_lit(v: &serde_json::Value) -> Result<Expr, String> {
 fn parse_with_column_expr(src: &str) -> Result<Expr, String> {
     use polars::prelude::concat_list;
     use robin_sparkless::{
-        array_contains, array_size, array_sum, coalesce, col, concat, concat_ws, current_date,
-        current_timestamp, date_add, date_sub, datediff, element_at, exp, hour, initcap, instr,
-        last_day, length, lit_str, log, lower, lpad, minute, nanvl, nullif, nvl, pow,
-        regexp_extract, regexp_extract_all, regexp_like, regexp_replace, repeat, reverse, rpad,
-        second, size, split, sqrt, substring, trim, trunc, upper, when,
+        array_compact, array_contains, array_size, array_sum, ascii, base64, char as rs_char, chr,
+        coalesce, col, concat, concat_ws, current_date, current_timestamp, date_add, date_sub,
+        datediff, element_at, exp, format_number, hour, initcap, instr, last_day, length, lit_str,
+        log, lower, lpad, md5, minute, nanvl, nullif, nvl, overlay, position, pow, regexp_extract,
+        regexp_extract_all, regexp_like, regexp_replace, repeat, reverse, rpad, second, sha1, sha2,
+        size, split, sqrt, substring, trim, trunc, unbase64, upper, when,
     };
 
     let s = src.trim();
@@ -2073,6 +2074,114 @@ fn parse_with_column_expr(src: &str) -> Result<Expr, String> {
             .trim_matches(['\'', '"']);
         let c = col(col_name);
         return Ok(rpad(&c, len, pad).into_expr());
+    }
+    if s.starts_with("ascii(") {
+        let inner = extract_first_arg(s, "ascii(")?;
+        let col_name = extract_col_name(inner)?;
+        let c = col(col_name);
+        return Ok(ascii(&c).into_expr());
+    }
+    if s.starts_with("format_number(") {
+        let inner = extract_first_arg(s, "format_number(")?;
+        let parts = parse_comma_separated_args(inner);
+        let col_name = extract_col_name(parts.first().ok_or("format_number needs column")?)?;
+        let decimals: u32 = parts
+            .get(1)
+            .ok_or("format_number needs decimals")?
+            .trim()
+            .parse()
+            .map_err(|e: std::num::ParseIntError| e.to_string())?;
+        let c = col(col_name);
+        return Ok(format_number(&c, decimals).into_expr());
+    }
+    if s.starts_with("overlay(") {
+        let inner = extract_first_arg(s, "overlay(")?;
+        let parts = parse_comma_separated_args(inner);
+        let col_name = extract_col_name(parts.first().ok_or("overlay needs column")?)?;
+        let replace = parts
+            .get(1)
+            .ok_or("overlay needs replace")?
+            .trim_matches(['\'', '"']);
+        let pos: i64 = parts
+            .get(2)
+            .ok_or("overlay needs pos")?
+            .trim()
+            .parse()
+            .map_err(|e: std::num::ParseIntError| e.to_string())?;
+        let length: i64 = parts
+            .get(3)
+            .ok_or("overlay needs length")?
+            .trim()
+            .parse()
+            .map_err(|e: std::num::ParseIntError| e.to_string())?;
+        let c = col(col_name);
+        return Ok(overlay(&c, replace, pos, length).into_expr());
+    }
+    if s.starts_with("position(") {
+        let inner = extract_first_arg(s, "position(")?;
+        let parts = parse_comma_separated_args(inner);
+        let substr = parts
+            .first()
+            .ok_or("position needs substr")?
+            .trim_matches(['\'', '"']);
+        let col_name = extract_col_name(parts.get(1).ok_or("position needs column")?)?;
+        let c = col(col_name);
+        return Ok(position(substr, &c).into_expr());
+    }
+    if s.starts_with("char(") {
+        let inner = extract_first_arg(s, "char(")?;
+        let col_name = extract_col_name(inner)?;
+        let c = col(col_name);
+        return Ok(rs_char(&c).into_expr());
+    }
+    if s.starts_with("chr(") {
+        let inner = extract_first_arg(s, "chr(")?;
+        let col_name = extract_col_name(inner)?;
+        let c = col(col_name);
+        return Ok(chr(&c).into_expr());
+    }
+    if s.starts_with("base64(") {
+        let inner = extract_first_arg(s, "base64(")?;
+        let col_name = extract_col_name(inner)?;
+        let c = col(col_name);
+        return Ok(base64(&c).into_expr());
+    }
+    if s.starts_with("unbase64(") {
+        let inner = extract_first_arg(s, "unbase64(")?;
+        let col_name = extract_col_name(inner)?;
+        let c = col(col_name);
+        return Ok(unbase64(&c).into_expr());
+    }
+    if s.starts_with("sha1(") {
+        let inner = extract_first_arg(s, "sha1(")?;
+        let col_name = extract_col_name(inner)?;
+        let c = col(col_name);
+        return Ok(sha1(&c).into_expr());
+    }
+    if s.starts_with("sha2(") {
+        let inner = extract_first_arg(s, "sha2(")?;
+        let parts = parse_comma_separated_args(inner);
+        let col_name = extract_col_name(parts.first().ok_or("sha2 needs column")?)?;
+        let bit_length: i32 = parts
+            .get(1)
+            .ok_or("sha2 needs bit_length")?
+            .trim()
+            .parse()
+            .map_err(|e: std::num::ParseIntError| e.to_string())?;
+        let c = col(col_name);
+        return Ok(sha2(&c, bit_length).into_expr());
+    }
+    if s.starts_with("md5(") {
+        let inner = extract_first_arg(s, "md5(")?;
+        let col_name = extract_col_name(inner)?;
+        let c = col(col_name);
+        return Ok(md5(&c).into_expr());
+    }
+    if s.starts_with("array_compact(") {
+        let inner = extract_first_arg(s, "array_compact(")?;
+        let col_name = extract_col_name(inner)?;
+        let c = col(col_name);
+        return Ok(array_compact(&c).into_expr());
     }
     if s.starts_with("translate(") {
         let inner = extract_first_arg(s, "translate(")?;

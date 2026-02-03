@@ -1,0 +1,39 @@
+{
+  "name": "string_format_number",
+  "pyspark_version": "3.5.0",
+  "input": {
+    "schema": [
+      { "name": "id", "type": "bigint" },
+      { "name": "value", "type": "double" }
+    ],
+    "rows": [
+      [1, 3.14159],
+      [2, 2.5],
+      [3, 10.0]
+    ]
+  },
+  "operations": [
+    {
+      "op": "withColumn",
+      "column": "formatted",
+      "expr": "format_number(col('value'), 2)"
+    },
+    {
+      "op": "orderBy",
+      "columns": ["id"],
+      "ascending": [true]
+    }
+  ],
+  "expected": {
+    "schema": [
+      { "name": "id", "type": "bigint" },
+      { "name": "value", "type": "double" },
+      { "name": "formatted", "type": "string" }
+    ],
+    "rows": [
+      [1, 3.14159, "3.14"],
+      [2, 2.5, "2.50"],
+      [3, 10.0, "10.00"]
+    ]
+  }
+}

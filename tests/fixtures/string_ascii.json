@@ -1,0 +1,39 @@
+{
+  "name": "string_ascii",
+  "pyspark_version": "3.5.0",
+  "input": {
+    "schema": [
+      { "name": "id", "type": "bigint" },
+      { "name": "name", "type": "string" }
+    ],
+    "rows": [
+      [1, "Alice"],
+      [2, "Bob"],
+      [3, "Charlie"]
+    ]
+  },
+  "operations": [
+    {
+      "op": "withColumn",
+      "column": "ascii_val",
+      "expr": "ascii(col('name'))"
+    },
+    {
+      "op": "orderBy",
+      "columns": ["id"],
+      "ascending": [true]
+    }
+  ],
+  "expected": {
+    "schema": [
+      { "name": "id", "type": "bigint" },
+      { "name": "name", "type": "string" },
+      { "name": "ascii_val", "type": "int" }
+    ],
+    "rows": [
+      [1, "Alice", 65],
+      [2, "Bob", 66],
+      [3, "Charlie", 67]
+    ]
+  }
+}

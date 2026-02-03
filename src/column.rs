@@ -546,6 +546,100 @@ impl Column {
         Self::from_expr(expr, None)
     }
 
+    /// ASCII value of first character (PySpark ascii). Returns Int32.
+    pub fn ascii(&self) -> Column {
+        let expr = self.expr().clone().map(
+            crate::udfs::apply_ascii,
+            GetOutput::from_type(DataType::Int32),
+        );
+        Self::from_expr(expr, None)
+    }
+
+    /// Format numeric as string with fixed decimal places (PySpark format_number).
+    pub fn format_number(&self, decimals: u32) -> Column {
+        let expr = self.expr().clone().map(
+            move |s| crate::udfs::apply_format_number(s, decimals),
+            GetOutput::from_type(DataType::String),
+        );
+        Self::from_expr(expr, None)
+    }
+
+    /// Int to single-character string (PySpark char / chr). Valid codepoint only.
+    pub fn char(&self) -> Column {
+        let expr = self.expr().clone().map(
+            crate::udfs::apply_char,
+            GetOutput::from_type(DataType::String),
+        );
+        Self::from_expr(expr, None)
+    }
+
+    /// Alias for char (PySpark chr).
+    pub fn chr(&self) -> Column {
+        self.char()
+    }
+
+    /// Base64 encode string bytes (PySpark base64).
+    pub fn base64(&self) -> Column {
+        let expr = self.expr().clone().map(
+            crate::udfs::apply_base64,
+            GetOutput::same_type(),
+        );
+        Self::from_expr(expr, None)
+    }
+
+    /// Base64 decode to string (PySpark unbase64). Invalid decode → null.
+    pub fn unbase64(&self) -> Column {
+        let expr = self.expr().clone().map(
+            crate::udfs::apply_unbase64,
+            GetOutput::same_type(),
+        );
+        Self::from_expr(expr, None)
+    }
+
+    /// SHA1 hash of string bytes, return hex string (PySpark sha1).
+    pub fn sha1(&self) -> Column {
+        let expr = self.expr().clone().map(
+            crate::udfs::apply_sha1,
+            GetOutput::same_type(),
+        );
+        Self::from_expr(expr, None)
+    }
+
+    /// SHA2 hash; bit_length 256, 384, or 512 (PySpark sha2). Default 256.
+    pub fn sha2(&self, bit_length: i32) -> Column {
+        let expr = self.expr().clone().map(
+            move |s| crate::udfs::apply_sha2(s, bit_length),
+            GetOutput::same_type(),
+        );
+        Self::from_expr(expr, None)
+    }
+
+    /// MD5 hash of string bytes, return hex string (PySpark md5).
+    pub fn md5(&self) -> Column {
+        let expr = self.expr().clone().map(
+            crate::udfs::apply_md5,
+            GetOutput::same_type(),
+        );
+        Self::from_expr(expr, None)
+    }
+
+    /// Replace substring at 1-based position (PySpark overlay). replace is literal string.
+    pub fn overlay(&self, replace: &str, pos: i64, length: i64) -> Column {
+        use polars::prelude::*;
+        let pos = pos.max(1);
+        let replace_len = length.max(0);
+        let start_left = 0i64;
+        let len_left = (pos - 1).max(0);
+        let start_right = (pos - 1 + replace_len).max(0);
+        let len_right = 1_000_000i64; // "rest of string"
+        let left = self.expr().clone().str().slice(lit(start_left), lit(len_left));
+        let mid = lit(replace.to_string());
+        let right = self.expr().clone().str().slice(lit(start_right), lit(len_right));
+        let exprs = [left, mid, right];
+        let concat_expr = polars::prelude::concat_str(&exprs, "", false);
+        Self::from_expr(concat_expr, None)
+    }
+
     // --- Math functions ---
 
     /// Absolute value (PySpark abs)
@@ -905,6 +999,12 @@ impl Column {
             .fill_null(lit(0i64))
             .cast(DataType::Int64);
         Self::from_expr(list_expr, Some("array_position".to_string()))
+    }
+
+    /// Remove null elements from list (PySpark array_compact). Preserves order.
+    pub fn array_compact(&self) -> Column {
+        let list_expr = self.expr().clone().list().drop_nulls();
+        Self::from_expr(list_expr, None)
     }
 
     /// New list with all elements equal to value removed (PySpark array_remove).
