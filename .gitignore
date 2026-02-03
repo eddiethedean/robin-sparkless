@@ -1,5 +1,6 @@
 # Python
 .venv/
+.venv-sparkless/
 venv/
 __pycache__/
 *.py[cod]

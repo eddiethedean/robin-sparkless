@@ -1629,14 +1629,18 @@ fn json_value_to_lit(v: &serde_json::Value) -> Result<Expr, String> {
 fn parse_with_column_expr(src: &str) -> Result<Expr, String> {
     use polars::prelude::concat_list;
     use robin_sparkless::{
-        acos, add_months, array_compact, array_contains, array_size, array_sum, ascii, asin, atan,
-        atan2, base64, cast, char as rs_char, chr, coalesce, col, concat, concat_ws, cos,
-        current_date, current_timestamp, date_add, date_sub, datediff, dayofweek, dayofyear,
-        degrees, element_at, exp, format_number, greatest, hour, initcap, instr, isnan, last_day,
-        least, length, lit_str, log, lower, lpad, md5, minute, months_between, nanvl, next_day,
-        nullif, nvl, overlay, position, pow, quarter, radians, regexp_extract, regexp_extract_all,
-        regexp_like, regexp_replace, repeat, reverse, rpad, second, sha1, sha2, signum, sin, size,
-        split, sqrt, substring, tan, trim, trunc, try_cast, unbase64, upper, weekofyear, when,
+        acos, acosh, add_months, array_compact, array_contains, array_distinct, array_size,
+        array_sum, ascii, asin, asinh, atan, atan2, atanh, base64, cast, cbrt, ceiling,
+        char as rs_char, chr, coalesce, col, concat, concat_ws, contains, cos, cosh, current_date,
+        current_timestamp, date_add, date_sub, datediff, day, dayofmonth, dayofweek, dayofyear,
+        degrees, element_at, endswith, exp, expm1, format_number, greatest, hour, hypot, ilike,
+        initcap, instr, isnan, isnotnull, isnull, last_day, lcase, least, left, length, like,
+        lit_str, ln, log, log10, log1p, log2, lower, lpad, md5, minute, months_between, nanvl,
+        next_day, nullif, nvl, nvl2, overlay, position, pow, power, quarter, radians,
+        regexp_extract, regexp_extract_all, regexp_like, regexp_replace, repeat, replace, reverse,
+        right, rint, rlike, rpad, second, sha1, sha2, signum, sin, sinh, size, split, sqrt,
+        startswith, substr, substring, tan, tanh, to_degrees, to_radians, trim, trunc, try_cast,
+        ucase, unbase64, upper, weekofyear, when,
     };
 
     let s = src.trim();
@@ -1767,6 +1771,132 @@ fn parse_with_column_expr(src: &str) -> Result<Expr, String> {
         return Ok(length(&c).into_expr());
     }
 
+    // Handle isnull(col('name')), isnotnull(col('name'))
+    if s.starts_with("isnull(") {
+        let inner = extract_first_arg(s, "isnull(")?;
+        let col_name = extract_col_name(inner)?;
+        let c = col(col_name);
+        return Ok(isnull(&c).into_expr());
+    }
+    if s.starts_with("isnotnull(") {
+        let inner = extract_first_arg(s, "isnotnull(")?;
+        let col_name = extract_col_name(inner)?;
+        let c = col(col_name);
+        return Ok(isnotnull(&c).into_expr());
+    }
+
+    // Handle substr(col('name'), start, length) - alias for substring
+    if s.starts_with("substr(") {
+        let inner = extract_first_arg(s, "substr(")?;
+        let parts = parse_comma_separated_args(inner);
+        let col_name = extract_col_name(parts.first().ok_or("substr needs column")?)?;
+        let start: i64 = parts
+            .get(1)
+            .ok_or("substr needs start")?
+            .trim()
+            .parse()
+            .map_err(|e: std::num::ParseIntError| e.to_string())?;
+        let length: Option<i64> = parts.get(2).and_then(|a| a.trim().parse().ok());
+        let c = col(col_name);
+        return Ok(substr(&c, start, length).into_expr());
+    }
+
+    // Handle power(col('name'), exp)
+    if s.starts_with("power(") {
+        let inner = extract_first_arg(s, "power(")?;
+        let parts = parse_comma_separated_args(inner);
+        let col_name = extract_col_name(parts.first().ok_or("power needs column")?)?;
+        let exp: i64 = parts
+            .get(1)
+            .ok_or("power needs exp")?
+            .trim()
+            .parse()
+            .map_err(|e: std::num::ParseIntError| e.to_string())?;
+        let c = col(col_name);
+        return Ok(power(&c, exp).into_expr());
+    }
+
+    // Handle ln(col('name'))
+    if s.starts_with("ln(") {
+        let inner = extract_first_arg(s, "ln(")?;
+        let col_name = extract_col_name(inner)?;
+        let c = col(col_name);
+        return Ok(ln(&c).into_expr());
+    }
+
+    // Handle ceiling(col('name'))
+    if s.starts_with("ceiling(") {
+        let inner = extract_first_arg(s, "ceiling(")?;
+        let col_name = extract_col_name(inner)?;
+        let c = col(col_name);
+        return Ok(ceiling(&c).into_expr());
+    }
+
+    // Handle lcase(col('name')), ucase(col('name'))
+    if s.starts_with("lcase(") {
+        let inner = extract_first_arg(s, "lcase(")?;
+        let col_name = extract_col_name(inner)?;
+        let c = col(col_name);
+        return Ok(lcase(&c).into_expr());
+    }
+    if s.starts_with("ucase(") {
+        let inner = extract_first_arg(s, "ucase(")?;
+        let col_name = extract_col_name(inner)?;
+        let c = col(col_name);
+        return Ok(ucase(&c).into_expr());
+    }
+
+    // Handle dayofmonth(col('name')), day(col('name'))
+    if s.starts_with("dayofmonth(") {
+        let inner = extract_first_arg(s, "dayofmonth(")?;
+        let col_name = extract_col_name(inner)?;
+        let c = col(col_name);
+        return Ok(dayofmonth(&c).into_expr());
+    }
+    if s.starts_with("day(") && !s.starts_with("dayof") {
+        let inner = extract_first_arg(s, "day(")?;
+        let col_name = extract_col_name(inner)?;
+        let c = col(col_name);
+        return Ok(day(&c).into_expr());
+    }
+
+    // Handle to_degrees(col('name')), toRadians(col('name')) - to_degrees/to_radians in Rust
+    if s.starts_with("to_degrees(") || s.starts_with("toDegrees(") {
+        let prefix = if s.starts_with("to_degrees(") {
+            "to_degrees("
+        } else {
+            "toDegrees("
+        };
+        let inner = extract_first_arg(s, prefix)?;
+        let col_name = extract_col_name(inner)?;
+        let c = col(col_name);
+        return Ok(to_degrees(&c).into_expr());
+    }
+    if s.starts_with("to_radians(") || s.starts_with("toRadians(") {
+        let prefix = if s.starts_with("to_radians(") {
+            "to_radians("
+        } else {
+            "toRadians("
+        };
+        let inner = extract_first_arg(s, prefix)?;
+        let col_name = extract_col_name(inner)?;
+        let c = col(col_name);
+        return Ok(to_radians(&c).into_expr());
+    }
+
+    // Handle nvl2(col1, col2, col3)
+    if s.starts_with("nvl2(") {
+        let inner = &s[5..s.len() - 1];
+        let parts = parse_comma_separated_args(inner);
+        let col1 = parse_column_or_literal(parts.get(0).ok_or("nvl2 needs col1")?.trim())?;
+        let col2 = parse_column_or_literal(parts.get(1).ok_or("nvl2 needs col2")?.trim())?;
+        let col3 = parse_column_or_literal(parts.get(2).ok_or("nvl2 needs col3")?.trim())?;
+        let c1 = robin_sparkless::Column::from_expr(col1, None);
+        let c2 = robin_sparkless::Column::from_expr(col2, None);
+        let c3 = robin_sparkless::Column::from_expr(col3, None);
+        return Ok(nvl2(&c1, &c2, &c3).into_expr());
+    }
+
     // Handle trim(col('name')), ltrim(...), rtrim(...)
     if s.starts_with("trim(") {
         let inner = extract_first_arg(s, "trim(")?;
@@ -1870,6 +2000,134 @@ fn parse_with_column_expr(src: &str) -> Result<Expr, String> {
             .trim();
         let c = col(col_name);
         return Ok(split(&c, delimiter).into_expr());
+    }
+
+    // Handle left(col('name'), n), right(col('name'), n)
+    if s.starts_with("left(") {
+        let inner = extract_first_arg(s, "left(")?;
+        let parts = parse_comma_separated_args(inner);
+        let col_name = extract_col_name(parts.first().ok_or("left needs column")?)?;
+        let n: i64 = parts
+            .get(1)
+            .ok_or("left needs n")?
+            .trim()
+            .parse()
+            .map_err(|e: std::num::ParseIntError| e.to_string())?;
+        let c = col(col_name);
+        return Ok(left(&c, n).into_expr());
+    }
+    if s.starts_with("right(") {
+        let inner = extract_first_arg(s, "right(")?;
+        let parts = parse_comma_separated_args(inner);
+        let col_name = extract_col_name(parts.first().ok_or("right needs column")?)?;
+        let n: i64 = parts
+            .get(1)
+            .ok_or("right needs n")?
+            .trim()
+            .parse()
+            .map_err(|e: std::num::ParseIntError| e.to_string())?;
+        let c = col(col_name);
+        return Ok(right(&c, n).into_expr());
+    }
+
+    // Handle replace(col('name'), search, replacement)
+    if s.starts_with("replace(") {
+        let inner = extract_first_arg(s, "replace(")?;
+        let parts = parse_comma_separated_args(inner);
+        let col_name = extract_col_name(parts.first().ok_or("replace needs column")?)?;
+        let search = parts
+            .get(1)
+            .ok_or("replace needs search")?
+            .trim()
+            .trim_matches(['\'', '"']);
+        let replacement = parts
+            .get(2)
+            .ok_or("replace needs replacement")?
+            .trim()
+            .trim_matches(['\'', '"']);
+        let c = col(col_name);
+        return Ok(replace(&c, search, replacement).into_expr());
+    }
+
+    // Handle startswith(col('name'), prefix), endswith(col('name'), suffix), contains(col('name'), substr)
+    if s.starts_with("startswith(") {
+        let inner = extract_first_arg(s, "startswith(")?;
+        let parts = parse_comma_separated_args(inner);
+        let col_name = extract_col_name(parts.first().ok_or("startswith needs column")?)?;
+        let prefix = parts
+            .get(1)
+            .ok_or("startswith needs prefix")?
+            .trim()
+            .trim_matches(['\'', '"']);
+        let c = col(col_name);
+        return Ok(startswith(&c, prefix).into_expr());
+    }
+    if s.starts_with("endswith(") {
+        let inner = extract_first_arg(s, "endswith(")?;
+        let parts = parse_comma_separated_args(inner);
+        let col_name = extract_col_name(parts.first().ok_or("endswith needs column")?)?;
+        let suffix = parts
+            .get(1)
+            .ok_or("endswith needs suffix")?
+            .trim()
+            .trim_matches(['\'', '"']);
+        let c = col(col_name);
+        return Ok(endswith(&c, suffix).into_expr());
+    }
+    if s.starts_with("contains(") {
+        let inner = extract_first_arg(s, "contains(")?;
+        let parts = parse_comma_separated_args(inner);
+        let col_name = extract_col_name(parts.first().ok_or("contains needs column")?)?;
+        let substring = parts
+            .get(1)
+            .ok_or("contains needs substring")?
+            .trim()
+            .trim_matches(['\'', '"']);
+        let c = col(col_name);
+        return Ok(contains(&c, substring).into_expr());
+    }
+
+    // Handle like(col('name'), pattern), ilike(col('name'), pattern), rlike(col('name'), pattern)
+    if s.starts_with("like(") {
+        let inner = extract_first_arg(s, "like(")?;
+        let parts = parse_comma_separated_args(inner);
+        let col_name = extract_col_name(parts.first().ok_or("like needs column")?)?;
+        let pattern = parts
+            .get(1)
+            .ok_or("like needs pattern")?
+            .trim()
+            .trim_matches(['\'', '"']);
+        let c = col(col_name);
+        return Ok(like(&c, pattern).into_expr());
+    }
+    if s.starts_with("ilike(") {
+        let inner = extract_first_arg(s, "ilike(")?;
+        let parts = parse_comma_separated_args(inner);
+        let col_name = extract_col_name(parts.first().ok_or("ilike needs column")?)?;
+        let pattern = parts
+            .get(1)
+            .ok_or("ilike needs pattern")?
+            .trim()
+            .trim_matches(['\'', '"']);
+        let c = col(col_name);
+        return Ok(ilike(&c, pattern).into_expr());
+    }
+    if s.starts_with("rlike(") || s.starts_with("regexp(") {
+        let prefix = if s.starts_with("rlike(") {
+            "rlike("
+        } else {
+            "regexp("
+        };
+        let inner = extract_first_arg(s, prefix)?;
+        let parts = parse_comma_separated_args(inner);
+        let col_name = extract_col_name(parts.first().ok_or("rlike needs column")?)?;
+        let pattern = parts
+            .get(1)
+            .ok_or("rlike needs pattern")?
+            .trim()
+            .trim_matches(['\'', '"']);
+        let c = col(col_name);
+        return Ok(rlike(&c, pattern).into_expr());
     }
 
     // Handle array_contains(col('arr'), lit('x')) or array_contains(col('arr'), lit(1))
@@ -2232,6 +2490,12 @@ fn parse_with_column_expr(src: &str) -> Result<Expr, String> {
         let c = col(col_name);
         return Ok(array_compact(&c).into_expr());
     }
+    if s.starts_with("array_distinct(") {
+        let inner = extract_first_arg(s, "array_distinct(")?;
+        let col_name = extract_col_name(inner)?;
+        let c = col(col_name);
+        return Ok(array_distinct(&c).into_expr());
+    }
     if s.starts_with("translate(") {
         let inner = extract_first_arg(s, "translate(")?;
         let parts = parse_comma_separated_args(inner);
@@ -2409,6 +2673,38 @@ fn parse_with_column_expr(src: &str) -> Result<Expr, String> {
         let inner = extract_first_arg(s, "signum(")?;
         let col_name = extract_col_name(inner)?;
         return Ok(signum(&col(col_name)).into_expr());
+    }
+    if s.starts_with("cosh(") {
+        let inner = extract_first_arg(s, "cosh(")?;
+        let col_name = extract_col_name(inner)?;
+        return Ok(cosh(&col(col_name)).into_expr());
+    }
+    if s.starts_with("sinh(") {
+        let inner = extract_first_arg(s, "sinh(")?;
+        let col_name = extract_col_name(inner)?;
+        return Ok(sinh(&col(col_name)).into_expr());
+    }
+    if s.starts_with("tanh(") {
+        let inner = extract_first_arg(s, "tanh(")?;
+        let col_name = extract_col_name(inner)?;
+        return Ok(tanh(&col(col_name)).into_expr());
+    }
+    if s.starts_with("cbrt(") {
+        let inner = extract_first_arg(s, "cbrt(")?;
+        let col_name = extract_col_name(inner)?;
+        return Ok(cbrt(&col(col_name)).into_expr());
+    }
+    if s.starts_with("log10(") {
+        let inner = extract_first_arg(s, "log10(")?;
+        let col_name = extract_col_name(inner)?;
+        return Ok(log10(&col(col_name)).into_expr());
+    }
+    if s.starts_with("hypot(") {
+        let inner = extract_first_arg(s, "hypot(")?;
+        let parts = parse_comma_separated_args(inner);
+        let col_x = extract_col_name(parts.first().ok_or("hypot needs x")?)?;
+        let col_y = extract_col_name(parts.get(1).ok_or("hypot needs y")?)?;
+        return Ok(hypot(&col(col_x), &col(col_y)).into_expr());
     }
 
     // --- Conditional/null: nvl, ifnull, nullif, nanvl ---

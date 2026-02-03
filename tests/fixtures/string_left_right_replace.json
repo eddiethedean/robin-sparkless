@@ -1,0 +1,54 @@
+{
+  "name": "string_left_right_replace",
+  "input": {
+    "schema": [
+      {"name": "id", "type": "int"},
+      {"name": "s", "type": "string"}
+    ],
+    "rows": [
+      [1, "hello"],
+      [2, "world"],
+      [3, "ab"]
+    ]
+  },
+  "operations": [
+    {
+      "op": "withColumn",
+      "column": "left2",
+      "expr": "left(col('s'), 2)"
+    },
+    {
+      "op": "withColumn",
+      "column": "right2",
+      "expr": "right(col('s'), 2)"
+    },
+    {
+      "op": "withColumn",
+      "column": "repl",
+      "expr": "replace(col('s'), 'l', 'L')"
+    },
+    {
+      "op": "select",
+      "columns": ["id", "s", "left2", "right2", "repl"]
+    },
+    {
+      "op": "orderBy",
+      "columns": ["id"],
+      "ascending": [true]
+    }
+  ],
+  "expected": {
+    "schema": [
+      {"name": "id", "type": "int"},
+      {"name": "s", "type": "string"},
+      {"name": "left2", "type": "string"},
+      {"name": "right2", "type": "string"},
+      {"name": "repl", "type": "string"}
+    ],
+    "rows": [
+      [1, "hello", "he", "lo", "heLLo"],
+      [2, "world", "wo", "ld", "worLd"],
+      [3, "ab", "ab", "ab", "ab"]
+    ]
+  }
+}

@@ -601,6 +601,92 @@ pub fn apply_signum(column: Column) -> PolarsResult<Option<Column>> {
     Ok(Some(Column::new(name, out)))
 }
 
+/// Hyperbolic and inverse hyperbolic / extra math (Phase 15 Batch 3).
+pub fn apply_cosh(column: Column) -> PolarsResult<Option<Column>> {
+    let name = column.field().into_owned().name;
+    let series = column.take_materialized_series();
+    let ca = float_series_to_f64(&series)?;
+    let out = ca.apply_values(f64::cosh).into_series();
+    Ok(Some(Column::new(name, out)))
+}
+pub fn apply_sinh(column: Column) -> PolarsResult<Option<Column>> {
+    let name = column.field().into_owned().name;
+    let series = column.take_materialized_series();
+    let ca = float_series_to_f64(&series)?;
+    let out = ca.apply_values(f64::sinh).into_series();
+    Ok(Some(Column::new(name, out)))
+}
+pub fn apply_tanh(column: Column) -> PolarsResult<Option<Column>> {
+    let name = column.field().into_owned().name;
+    let series = column.take_materialized_series();
+    let ca = float_series_to_f64(&series)?;
+    let out = ca.apply_values(f64::tanh).into_series();
+    Ok(Some(Column::new(name, out)))
+}
+pub fn apply_acosh(column: Column) -> PolarsResult<Option<Column>> {
+    let name = column.field().into_owned().name;
+    let series = column.take_materialized_series();
+    let ca = float_series_to_f64(&series)?;
+    let out = ca.apply_values(f64::acosh).into_series();
+    Ok(Some(Column::new(name, out)))
+}
+pub fn apply_asinh(column: Column) -> PolarsResult<Option<Column>> {
+    let name = column.field().into_owned().name;
+    let series = column.take_materialized_series();
+    let ca = float_series_to_f64(&series)?;
+    let out = ca.apply_values(f64::asinh).into_series();
+    Ok(Some(Column::new(name, out)))
+}
+pub fn apply_atanh(column: Column) -> PolarsResult<Option<Column>> {
+    let name = column.field().into_owned().name;
+    let series = column.take_materialized_series();
+    let ca = float_series_to_f64(&series)?;
+    let out = ca.apply_values(f64::atanh).into_series();
+    Ok(Some(Column::new(name, out)))
+}
+pub fn apply_cbrt(column: Column) -> PolarsResult<Option<Column>> {
+    let name = column.field().into_owned().name;
+    let series = column.take_materialized_series();
+    let ca = float_series_to_f64(&series)?;
+    let out = ca.apply_values(f64::cbrt).into_series();
+    Ok(Some(Column::new(name, out)))
+}
+pub fn apply_expm1(column: Column) -> PolarsResult<Option<Column>> {
+    let name = column.field().into_owned().name;
+    let series = column.take_materialized_series();
+    let ca = float_series_to_f64(&series)?;
+    let out = ca.apply_values(f64::exp_m1).into_series();
+    Ok(Some(Column::new(name, out)))
+}
+pub fn apply_log1p(column: Column) -> PolarsResult<Option<Column>> {
+    let name = column.field().into_owned().name;
+    let series = column.take_materialized_series();
+    let ca = float_series_to_f64(&series)?;
+    let out = ca.apply_values(f64::ln_1p).into_series();
+    Ok(Some(Column::new(name, out)))
+}
+pub fn apply_log10(column: Column) -> PolarsResult<Option<Column>> {
+    let name = column.field().into_owned().name;
+    let series = column.take_materialized_series();
+    let ca = float_series_to_f64(&series)?;
+    let out = ca.apply_values(f64::log10).into_series();
+    Ok(Some(Column::new(name, out)))
+}
+pub fn apply_log2(column: Column) -> PolarsResult<Option<Column>> {
+    let name = column.field().into_owned().name;
+    let series = column.take_materialized_series();
+    let ca = float_series_to_f64(&series)?;
+    let out = ca.apply_values(f64::log2).into_series();
+    Ok(Some(Column::new(name, out)))
+}
+pub fn apply_rint(column: Column) -> PolarsResult<Option<Column>> {
+    let name = column.field().into_owned().name;
+    let series = column.take_materialized_series();
+    let ca = float_series_to_f64(&series)?;
+    let out = ca.apply_values(f64::round).into_series();
+    Ok(Some(Column::new(name, out)))
+}
+
 /// Element-wise max of two columns (for greatest). Supports Float64, Int64, String.
 pub fn apply_greatest2(columns: &mut [Column]) -> PolarsResult<Option<Column>> {
     if columns.len() < 2 {

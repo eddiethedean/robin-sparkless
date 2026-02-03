@@ -329,6 +329,51 @@ pub fn substring_index(column: &Column, delimiter: &str, count: i64) -> Column {
     column.clone().substring_index(delimiter, count)
 }
 
+/// Leftmost n characters (PySpark left).
+pub fn left(column: &Column, n: i64) -> Column {
+    column.clone().left(n)
+}
+
+/// Rightmost n characters (PySpark right).
+pub fn right(column: &Column, n: i64) -> Column {
+    column.clone().right(n)
+}
+
+/// Replace all occurrences of search with replacement (literal). PySpark replace.
+pub fn replace(column: &Column, search: &str, replacement: &str) -> Column {
+    column.clone().replace(search, replacement)
+}
+
+/// True if string starts with prefix (PySpark startswith).
+pub fn startswith(column: &Column, prefix: &str) -> Column {
+    column.clone().startswith(prefix)
+}
+
+/// True if string ends with suffix (PySpark endswith).
+pub fn endswith(column: &Column, suffix: &str) -> Column {
+    column.clone().endswith(suffix)
+}
+
+/// True if string contains substring (literal). PySpark contains.
+pub fn contains(column: &Column, substring: &str) -> Column {
+    column.clone().contains(substring)
+}
+
+/// SQL LIKE pattern (% any, _ one char). PySpark like.
+pub fn like(column: &Column, pattern: &str) -> Column {
+    column.clone().like(pattern)
+}
+
+/// Case-insensitive LIKE. PySpark ilike.
+pub fn ilike(column: &Column, pattern: &str) -> Column {
+    column.clone().ilike(pattern)
+}
+
+/// Alias for regexp_like. PySpark rlike / regexp.
+pub fn rlike(column: &Column, pattern: &str) -> Column {
+    column.clone().regexp_like(pattern)
+}
+
 /// Soundex code (PySpark soundex). Not implemented: requires element-wise UDF.
 pub fn soundex(column: &Column) -> Column {
     column.clone().soundex()
@@ -740,6 +785,128 @@ pub fn nanvl(column: &Column, value: &Column) -> Column {
     crate::column::Column::from_expr(expr, None)
 }
 
+/// Three-arg null replacement: if col1 is not null then col2 else col3. PySpark nvl2.
+pub fn nvl2(col1: &Column, col2: &Column, col3: &Column) -> Column {
+    use polars::prelude::*;
+    let cond = col1.expr().clone().is_not_null();
+    let expr = when(cond)
+        .then(col2.expr().clone())
+        .otherwise(col3.expr().clone());
+    crate::column::Column::from_expr(expr, None)
+}
+
+// --- Aliases (Phase 15 Batch 1) ---
+
+/// Alias for substring. PySpark substr.
+pub fn substr(column: &Column, start: i64, length: Option<i64>) -> Column {
+    substring(column, start, length)
+}
+
+/// Alias for pow. PySpark power.
+pub fn power(column: &Column, exp: i64) -> Column {
+    pow(column, exp)
+}
+
+/// Alias for log (natural log). PySpark ln.
+pub fn ln(column: &Column) -> Column {
+    log(column)
+}
+
+/// Alias for ceil. PySpark ceiling.
+pub fn ceiling(column: &Column) -> Column {
+    ceil(column)
+}
+
+/// Alias for lower. PySpark lcase.
+pub fn lcase(column: &Column) -> Column {
+    lower(column)
+}
+
+/// Alias for upper. PySpark ucase.
+pub fn ucase(column: &Column) -> Column {
+    upper(column)
+}
+
+/// Alias for day. PySpark dayofmonth.
+pub fn dayofmonth(column: &Column) -> Column {
+    day(column)
+}
+
+/// Alias for degrees. PySpark toDegrees.
+pub fn to_degrees(column: &Column) -> Column {
+    degrees(column)
+}
+
+/// Alias for radians. PySpark toRadians.
+pub fn to_radians(column: &Column) -> Column {
+    radians(column)
+}
+
+/// Hyperbolic cosine (PySpark cosh).
+pub fn cosh(column: &Column) -> Column {
+    column.clone().cosh()
+}
+/// Hyperbolic sine (PySpark sinh).
+pub fn sinh(column: &Column) -> Column {
+    column.clone().sinh()
+}
+/// Hyperbolic tangent (PySpark tanh).
+pub fn tanh(column: &Column) -> Column {
+    column.clone().tanh()
+}
+/// Inverse hyperbolic cosine (PySpark acosh).
+pub fn acosh(column: &Column) -> Column {
+    column.clone().acosh()
+}
+/// Inverse hyperbolic sine (PySpark asinh).
+pub fn asinh(column: &Column) -> Column {
+    column.clone().asinh()
+}
+/// Inverse hyperbolic tangent (PySpark atanh).
+pub fn atanh(column: &Column) -> Column {
+    column.clone().atanh()
+}
+/// Cube root (PySpark cbrt).
+pub fn cbrt(column: &Column) -> Column {
+    column.clone().cbrt()
+}
+/// exp(x) - 1 (PySpark expm1).
+pub fn expm1(column: &Column) -> Column {
+    column.clone().expm1()
+}
+/// log(1 + x) (PySpark log1p).
+pub fn log1p(column: &Column) -> Column {
+    column.clone().log1p()
+}
+/// Base-10 log (PySpark log10).
+pub fn log10(column: &Column) -> Column {
+    column.clone().log10()
+}
+/// Base-2 log (PySpark log2).
+pub fn log2(column: &Column) -> Column {
+    column.clone().log2()
+}
+/// Round to nearest integer (PySpark rint).
+pub fn rint(column: &Column) -> Column {
+    column.clone().rint()
+}
+/// sqrt(x*x + y*y) (PySpark hypot).
+pub fn hypot(x: &Column, y: &Column) -> Column {
+    let xx = x.expr().clone() * x.expr().clone();
+    let yy = y.expr().clone() * y.expr().clone();
+    crate::column::Column::from_expr((xx + yy).sqrt(), None)
+}
+
+/// True if column is null. PySpark isnull.
+pub fn isnull(column: &Column) -> Column {
+    column.clone().is_null()
+}
+
+/// True if column is not null. PySpark isnotnull.
+pub fn isnotnull(column: &Column) -> Column {
+    column.clone().is_not_null()
+}
+
 // --- Array / List functions (Phase 6a) ---
 
 /// Create an array column from multiple columns (PySpark array).
@@ -791,6 +958,11 @@ pub fn element_at(column: &Column, index: i64) -> Column {
 /// Sort list elements (PySpark array_sort).
 pub fn array_sort(column: &Column) -> Column {
     column.clone().array_sort()
+}
+
+/// Distinct elements in list (PySpark array_distinct).
+pub fn array_distinct(column: &Column) -> Column {
+    column.clone().array_distinct()
 }
 
 /// Slice list from 1-based start with optional length (PySpark slice).

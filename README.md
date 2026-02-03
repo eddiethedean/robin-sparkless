@@ -13,7 +13,7 @@ A Rust DataFrame library that aims to **emulate PySpark’s DataFrame behavior a
 - **Optional SQL** (`--features sql`): `spark.sql("SELECT ...")` with temp views (`createOrReplaceTempView`, `table`); single SELECT, FROM/JOIN, WHERE, GROUP BY, ORDER BY, LIMIT
 - **Optional Delta Lake** (`--features delta`): `read_delta` / `read_delta_with_version` (time travel), `write_delta` (overwrite/append) via delta-rs
 - **Benchmarks**: `cargo bench` compares robin-sparkless vs plain Polars; target within ~2x for supported pipelines
-- **Sparkless backend target**: Intended to power Sparkless's execution engine; aligns with its 403+ PySpark functions and 270+ test fixtures; **84 parity fixtures** passing (~200+ functions; Phase 12: DataFrame methods ~55+; Phase 13: string/binary/collection; **Phase 14**: math (sin, cos, tan, degrees, radians, signum, etc.), datetime (quarter, weekofyear, dayofweek, dayofyear, add_months, months_between, next_day), type/conditional (cast, try_cast, isnan, greatest, least)). Path to 100%: ROADMAP Phases 15–17 (functions → 403, fixtures 150+, Phase 16: publish crate, then Sparkless integration).
+- **Sparkless backend target**: Intended to power Sparkless's execution engine; aligns with its 403+ PySpark functions and 270+ test fixtures; **88 parity fixtures** passing (~175+ functions). **Phase 15 completed**: aliases (nvl, nvl2, substr, power, ln, ceiling, lcase, ucase, dayofmonth, to_degrees, to_radians, isnull, isnotnull), string (left, right, replace, startswith, endswith, contains, like, ilike, rlike), math (cosh, sinh, tanh, acosh, asinh, atanh, cbrt, expm1, log1p, log10, log2, rint, hypot), array_distinct. Path to 100%: ROADMAP Phases 16–19 (remaining gaps: string/regex, datetime/unix, array/map/struct, aggregates/try_*), Phase 20 (publish crate), Phase 21 (Sparkless integration).
 
 ## Installation
 
@@ -163,17 +163,17 @@ Robin Sparkless aims to provide a **PySpark-like API layer** on top of Polars:
 - **Column**: Represents expressions over columns, similar to PySpark’s `Column`; includes window methods (`rank`, `row_number`, `dense_rank`, `lag`, `lead`) with `.over()`.
 - **Functions**: Helper functions like `col()`, `lit_*()`, `count()`, `when`, `coalesce`, window functions, etc., modeled after PySpark’s `pyspark.sql.functions`.
 
-Core behavior (null handling, grouping semantics, joins, window functions, array and string functions, JSON, Map, math, datetime, type/conditional, expression behavior) matches PySpark on **84 parity fixtures** (~200+ functions). Phase 12 completed DataFrame methods parity; Phase 13 added string/binary/collection batch; **Phase 14** added math (sin, cos, tan, degrees, radians, signum, etc.), datetime (quarter, weekofyear, add_months, months_between, next_day), and type/conditional (cast, try_cast, isnan, greatest, least). Python bindings expose all of these via the `robin_sparkless` module; see [docs/PYTHON_API.md](docs/PYTHON_API.md). Known divergences are documented in [docs/PYSPARK_DIFFERENCES.md](docs/PYSPARK_DIFFERENCES.md).
+Core behavior (null handling, grouping semantics, joins, window functions, array and string functions, JSON, Map, math, datetime, type/conditional, expression behavior) matches PySpark on **88 parity fixtures** (~175+ functions). Phase 15 (completed) added aliases, string (left, right, replace, startswith, endswith, contains, like, ilike, rlike), math (cosh, sinh, tanh, acosh, asinh, atanh, cbrt, expm1, log1p, log10, log2, rint, hypot), and array_distinct. Remaining gaps are planned in ROADMAP Phases 16–19. Python bindings expose the full set via the `robin_sparkless` module; see [docs/PYTHON_API.md](docs/PYTHON_API.md). Known divergences are documented in [docs/PYSPARK_DIFFERENCES.md](docs/PYSPARK_DIFFERENCES.md).
 
 ## Related Documentation
 
 - [docs/](docs/README.md) – Documentation index
 - [CHANGELOG.md](CHANGELOG.md) – Version history and release notes
 - [docs/SPARKLESS_INTEGRATION_ANALYSIS.md](docs/SPARKLESS_INTEGRATION_ANALYSIS.md) – Sparkless backend replacement strategy, architecture learnings, test conversion
-- [docs/ROADMAP.md](docs/ROADMAP.md) – Development roadmap; Phases 12–14 completed; Phases 15–17 (functions batch 3, crate publish, then Sparkless integration)
+- [docs/ROADMAP.md](docs/ROADMAP.md) – Development roadmap; Phases 12–15 completed; Phases 16–19 (remaining gaps), Phase 20 (crate publish), Phase 21 (Sparkless integration)
 - [docs/FULL_BACKEND_ROADMAP.md](docs/FULL_BACKEND_ROADMAP.md) – Phased plan to full Sparkless backend replacement (400+ functions, PyO3 bridge)
 - [docs/PYTHON_API.md](docs/PYTHON_API.md) – Python API contract (Phase 4 PyO3 bridge): build, install, method signatures, data transfer
-- [docs/PARITY_STATUS.md](docs/PARITY_STATUS.md) – PySpark parity coverage matrix (84 fixtures)
+- [docs/PARITY_STATUS.md](docs/PARITY_STATUS.md) – PySpark parity coverage matrix (88 fixtures)
 - [docs/PYSPARK_DIFFERENCES.md](docs/PYSPARK_DIFFERENCES.md) – Known divergences from PySpark (window, SQL, Delta; Phase 8 completed)
 - [docs/CONVERTER_STATUS.md](docs/CONVERTER_STATUS.md) – Sparkless → robin-sparkless fixture converter and operation mapping
 - [docs/SPARKLESS_PARITY_STATUS.md](docs/SPARKLESS_PARITY_STATUS.md) – Phase 5: pass/fail and failure reasons for converted fixtures; `make sparkless-parity`

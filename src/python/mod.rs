@@ -4,10 +4,14 @@
 use crate::column::Column as RsColumn;
 use crate::dataframe::JoinType;
 use crate::functions::{
-    acos, add_months, array_compact, ascii, asin, atan, atan2, base64, cast as rs_cast, chr, cos,
-    dayofweek, dayofyear, degrees, format_number, greatest as rs_greatest, isnan as rs_isnan,
-    least as rs_least, md5, months_between, next_day, overlay, position as rs_position, quarter,
-    radians, sha1, sha2, signum, sin, tan, try_cast as rs_try_cast, unbase64, weekofyear,
+    acos, acosh, add_months, array_compact, array_distinct, ascii, asin, asinh, atan, atan2, atanh,
+    base64, cast as rs_cast, cbrt, ceiling, chr, contains, cos, cosh, day, dayofmonth, dayofweek,
+    dayofyear, degrees, endswith, expm1, format_number, greatest as rs_greatest, hypot, ifnull,
+    ilike, isnan as rs_isnan, isnotnull, isnull, lcase, least as rs_least, left, like, ln, log10,
+    log1p, log2, md5, months_between, next_day, nvl, nvl2, overlay, position as rs_position, power,
+    quarter, radians, replace as rs_replace, right, rint, rlike, sha1, sha2, signum, sin, sinh,
+    startswith, substr, tan, tanh, to_degrees, to_radians, try_cast as rs_try_cast, ucase,
+    unbase64, weekofyear,
 };
 use crate::functions::{avg, coalesce, col as rs_col, count, max, min, sum as rs_sum};
 use crate::{DataFrame, GroupedData, SparkSession};
@@ -49,6 +53,7 @@ fn robin_sparkless(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("sha2", wrap_pyfunction!(py_sha2, m)?)?;
     m.add("md5", wrap_pyfunction!(py_md5, m)?)?;
     m.add("array_compact", wrap_pyfunction!(py_array_compact, m)?)?;
+    m.add("array_distinct", wrap_pyfunction!(py_array_distinct, m)?)?;
     // Phase 14: math, datetime, type/conditional
     m.add("sin", wrap_pyfunction!(py_sin, m)?)?;
     m.add("cos", wrap_pyfunction!(py_cos, m)?)?;
@@ -72,6 +77,46 @@ fn robin_sparkless(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("isnan", wrap_pyfunction!(py_isnan, m)?)?;
     m.add("greatest", wrap_pyfunction!(py_greatest, m)?)?;
     m.add("least", wrap_pyfunction!(py_least, m)?)?;
+    // Phase 15 Batch 1: aliases and simple
+    m.add("nvl", wrap_pyfunction!(py_nvl, m)?)?;
+    m.add("ifnull", wrap_pyfunction!(py_ifnull, m)?)?;
+    m.add("nvl2", wrap_pyfunction!(py_nvl2, m)?)?;
+    m.add("substr", wrap_pyfunction!(py_substr, m)?)?;
+    m.add("power", wrap_pyfunction!(py_power, m)?)?;
+    m.add("ln", wrap_pyfunction!(py_ln, m)?)?;
+    m.add("ceiling", wrap_pyfunction!(py_ceiling, m)?)?;
+    m.add("lcase", wrap_pyfunction!(py_lcase, m)?)?;
+    m.add("ucase", wrap_pyfunction!(py_ucase, m)?)?;
+    m.add("day", wrap_pyfunction!(py_day, m)?)?;
+    m.add("dayofmonth", wrap_pyfunction!(py_dayofmonth, m)?)?;
+    m.add("to_degrees", wrap_pyfunction!(py_to_degrees, m)?)?;
+    m.add("to_radians", wrap_pyfunction!(py_to_radians, m)?)?;
+    m.add("isnull", wrap_pyfunction!(py_isnull, m)?)?;
+    m.add("isnotnull", wrap_pyfunction!(py_isnotnull, m)?)?;
+    // Phase 15 Batch 2: string (left, right, replace, startswith, endswith, contains, like, ilike, rlike)
+    m.add("left", wrap_pyfunction!(py_left, m)?)?;
+    m.add("right", wrap_pyfunction!(py_right, m)?)?;
+    m.add("replace", wrap_pyfunction!(py_replace, m)?)?;
+    m.add("startswith", wrap_pyfunction!(py_startswith, m)?)?;
+    m.add("endswith", wrap_pyfunction!(py_endswith, m)?)?;
+    m.add("contains", wrap_pyfunction!(py_contains, m)?)?;
+    m.add("like", wrap_pyfunction!(py_like, m)?)?;
+    m.add("ilike", wrap_pyfunction!(py_ilike, m)?)?;
+    m.add("rlike", wrap_pyfunction!(py_rlike, m)?)?;
+    // Phase 15 Batch 3: math (cosh, sinh, tanh, acosh, asinh, atanh, cbrt, expm1, log1p, log10, log2, rint, hypot)
+    m.add("cosh", wrap_pyfunction!(py_cosh, m)?)?;
+    m.add("sinh", wrap_pyfunction!(py_sinh, m)?)?;
+    m.add("tanh", wrap_pyfunction!(py_tanh, m)?)?;
+    m.add("acosh", wrap_pyfunction!(py_acosh, m)?)?;
+    m.add("asinh", wrap_pyfunction!(py_asinh, m)?)?;
+    m.add("atanh", wrap_pyfunction!(py_atanh, m)?)?;
+    m.add("cbrt", wrap_pyfunction!(py_cbrt, m)?)?;
+    m.add("expm1", wrap_pyfunction!(py_expm1, m)?)?;
+    m.add("log1p", wrap_pyfunction!(py_log1p, m)?)?;
+    m.add("log10", wrap_pyfunction!(py_log10, m)?)?;
+    m.add("log2", wrap_pyfunction!(py_log2, m)?)?;
+    m.add("rint", wrap_pyfunction!(py_rint, m)?)?;
+    m.add("hypot", wrap_pyfunction!(py_hypot, m)?)?;
     Ok(())
 }
 
@@ -238,6 +283,13 @@ fn py_array_compact(column: &PyColumn) -> PyColumn {
 }
 
 #[pyfunction]
+fn py_array_distinct(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: array_distinct(&column.inner),
+    }
+}
+
+#[pyfunction]
 fn py_sin(column: &PyColumn) -> PyColumn {
     PyColumn {
         inner: sin(&column.inner),
@@ -370,6 +422,231 @@ fn py_least(columns: Vec<PyRef<PyColumn>>) -> PyResult<PyColumn> {
     rs_least(&refs)
         .map(|inner| PyColumn { inner })
         .map_err(|e| pyo3::exceptions::PyValueError::new_err(e))
+}
+
+#[pyfunction]
+fn py_nvl(column: &PyColumn, value: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: nvl(&column.inner, &value.inner),
+    }
+}
+#[pyfunction]
+fn py_ifnull(column: &PyColumn, value: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: ifnull(&column.inner, &value.inner),
+    }
+}
+#[pyfunction]
+fn py_nvl2(col1: &PyColumn, col2: &PyColumn, col3: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: nvl2(&col1.inner, &col2.inner, &col3.inner),
+    }
+}
+#[pyfunction]
+fn py_substr(column: &PyColumn, start: i64, length: Option<i64>) -> PyColumn {
+    PyColumn {
+        inner: substr(&column.inner, start, length),
+    }
+}
+#[pyfunction]
+fn py_power(column: &PyColumn, exp: i64) -> PyColumn {
+    PyColumn {
+        inner: power(&column.inner, exp),
+    }
+}
+#[pyfunction]
+fn py_ln(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: ln(&column.inner),
+    }
+}
+#[pyfunction]
+fn py_ceiling(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: ceiling(&column.inner),
+    }
+}
+#[pyfunction]
+fn py_lcase(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: lcase(&column.inner),
+    }
+}
+#[pyfunction]
+fn py_ucase(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: ucase(&column.inner),
+    }
+}
+#[pyfunction]
+fn py_day(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: day(&column.inner),
+    }
+}
+#[pyfunction]
+fn py_dayofmonth(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: dayofmonth(&column.inner),
+    }
+}
+#[pyfunction]
+fn py_to_degrees(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: to_degrees(&column.inner),
+    }
+}
+#[pyfunction]
+fn py_to_radians(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: to_radians(&column.inner),
+    }
+}
+#[pyfunction]
+fn py_isnull(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: isnull(&column.inner),
+    }
+}
+#[pyfunction]
+fn py_isnotnull(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: isnotnull(&column.inner),
+    }
+}
+
+#[pyfunction]
+fn py_left(column: &PyColumn, n: i64) -> PyColumn {
+    PyColumn {
+        inner: left(&column.inner, n),
+    }
+}
+#[pyfunction]
+fn py_right(column: &PyColumn, n: i64) -> PyColumn {
+    PyColumn {
+        inner: right(&column.inner, n),
+    }
+}
+#[pyfunction]
+fn py_replace(column: &PyColumn, search: &str, replacement: &str) -> PyColumn {
+    PyColumn {
+        inner: rs_replace(&column.inner, search, replacement),
+    }
+}
+#[pyfunction]
+fn py_startswith(column: &PyColumn, prefix: &str) -> PyColumn {
+    PyColumn {
+        inner: startswith(&column.inner, prefix),
+    }
+}
+#[pyfunction]
+fn py_endswith(column: &PyColumn, suffix: &str) -> PyColumn {
+    PyColumn {
+        inner: endswith(&column.inner, suffix),
+    }
+}
+#[pyfunction]
+fn py_contains(column: &PyColumn, substring: &str) -> PyColumn {
+    PyColumn {
+        inner: contains(&column.inner, substring),
+    }
+}
+#[pyfunction]
+fn py_like(column: &PyColumn, pattern: &str) -> PyColumn {
+    PyColumn {
+        inner: like(&column.inner, pattern),
+    }
+}
+#[pyfunction]
+fn py_ilike(column: &PyColumn, pattern: &str) -> PyColumn {
+    PyColumn {
+        inner: ilike(&column.inner, pattern),
+    }
+}
+#[pyfunction]
+fn py_rlike(column: &PyColumn, pattern: &str) -> PyColumn {
+    PyColumn {
+        inner: rlike(&column.inner, pattern),
+    }
+}
+
+#[pyfunction]
+fn py_cosh(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: cosh(&column.inner),
+    }
+}
+#[pyfunction]
+fn py_sinh(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: sinh(&column.inner),
+    }
+}
+#[pyfunction]
+fn py_tanh(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: tanh(&column.inner),
+    }
+}
+#[pyfunction]
+fn py_acosh(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: acosh(&column.inner),
+    }
+}
+#[pyfunction]
+fn py_asinh(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: asinh(&column.inner),
+    }
+}
+#[pyfunction]
+fn py_atanh(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: atanh(&column.inner),
+    }
+}
+#[pyfunction]
+fn py_cbrt(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: cbrt(&column.inner),
+    }
+}
+#[pyfunction]
+fn py_expm1(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: expm1(&column.inner),
+    }
+}
+#[pyfunction]
+fn py_log1p(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: log1p(&column.inner),
+    }
+}
+#[pyfunction]
+fn py_log10(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: log10(&column.inner),
+    }
+}
+#[pyfunction]
+fn py_log2(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: log2(&column.inner),
+    }
+}
+#[pyfunction]
+fn py_rint(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: rint(&column.inner),
+    }
+}
+#[pyfunction]
+fn py_hypot(x: &PyColumn, y: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: hypot(&x.inner, &y.inner),
+    }
 }
 
 /// Python wrapper for Column (expression).
@@ -536,6 +813,11 @@ impl PyColumn {
             inner: array_compact(&self.inner),
         }
     }
+    fn array_distinct(&self) -> Self {
+        PyColumn {
+            inner: array_distinct(&self.inner),
+        }
+    }
 
     fn sin(&self) -> Self {
         PyColumn {
@@ -635,6 +917,181 @@ impl PyColumn {
     fn isnan(&self) -> Self {
         PyColumn {
             inner: rs_isnan(&self.inner),
+        }
+    }
+    fn nvl(&self, value: &PyColumn) -> Self {
+        PyColumn {
+            inner: nvl(&self.inner, &value.inner),
+        }
+    }
+    fn ifnull(&self, value: &PyColumn) -> Self {
+        PyColumn {
+            inner: ifnull(&self.inner, &value.inner),
+        }
+    }
+    fn power(&self, exp: i64) -> Self {
+        PyColumn {
+            inner: power(&self.inner, exp),
+        }
+    }
+    fn ln(&self) -> Self {
+        PyColumn {
+            inner: ln(&self.inner),
+        }
+    }
+    fn ceiling(&self) -> Self {
+        PyColumn {
+            inner: ceiling(&self.inner),
+        }
+    }
+    fn lcase(&self) -> Self {
+        PyColumn {
+            inner: lcase(&self.inner),
+        }
+    }
+    fn ucase(&self) -> Self {
+        PyColumn {
+            inner: ucase(&self.inner),
+        }
+    }
+    fn day(&self) -> Self {
+        PyColumn {
+            inner: day(&self.inner),
+        }
+    }
+    fn dayofmonth(&self) -> Self {
+        PyColumn {
+            inner: dayofmonth(&self.inner),
+        }
+    }
+    fn to_degrees(&self) -> Self {
+        PyColumn {
+            inner: to_degrees(&self.inner),
+        }
+    }
+    fn to_radians(&self) -> Self {
+        PyColumn {
+            inner: to_radians(&self.inner),
+        }
+    }
+    fn isnull(&self) -> Self {
+        PyColumn {
+            inner: isnull(&self.inner),
+        }
+    }
+    fn isnotnull(&self) -> Self {
+        PyColumn {
+            inner: isnotnull(&self.inner),
+        }
+    }
+    fn left(&self, n: i64) -> Self {
+        PyColumn {
+            inner: left(&self.inner, n),
+        }
+    }
+    fn right(&self, n: i64) -> Self {
+        PyColumn {
+            inner: right(&self.inner, n),
+        }
+    }
+    fn replace(&self, search: &str, replacement: &str) -> Self {
+        PyColumn {
+            inner: rs_replace(&self.inner, search, replacement),
+        }
+    }
+    fn startswith(&self, prefix: &str) -> Self {
+        PyColumn {
+            inner: startswith(&self.inner, prefix),
+        }
+    }
+    fn endswith(&self, suffix: &str) -> Self {
+        PyColumn {
+            inner: endswith(&self.inner, suffix),
+        }
+    }
+    fn contains(&self, substring: &str) -> Self {
+        PyColumn {
+            inner: contains(&self.inner, substring),
+        }
+    }
+    fn like(&self, pattern: &str) -> Self {
+        PyColumn {
+            inner: like(&self.inner, pattern),
+        }
+    }
+    fn ilike(&self, pattern: &str) -> Self {
+        PyColumn {
+            inner: ilike(&self.inner, pattern),
+        }
+    }
+    fn rlike(&self, pattern: &str) -> Self {
+        PyColumn {
+            inner: rlike(&self.inner, pattern),
+        }
+    }
+    fn cosh(&self) -> Self {
+        PyColumn {
+            inner: cosh(&self.inner),
+        }
+    }
+    fn sinh(&self) -> Self {
+        PyColumn {
+            inner: sinh(&self.inner),
+        }
+    }
+    fn tanh(&self) -> Self {
+        PyColumn {
+            inner: tanh(&self.inner),
+        }
+    }
+    fn acosh(&self) -> Self {
+        PyColumn {
+            inner: acosh(&self.inner),
+        }
+    }
+    fn asinh(&self) -> Self {
+        PyColumn {
+            inner: asinh(&self.inner),
+        }
+    }
+    fn atanh_(&self) -> Self {
+        PyColumn {
+            inner: atanh(&self.inner),
+        }
+    }
+    fn cbrt(&self) -> Self {
+        PyColumn {
+            inner: cbrt(&self.inner),
+        }
+    }
+    fn expm1(&self) -> Self {
+        PyColumn {
+            inner: expm1(&self.inner),
+        }
+    }
+    fn log1p(&self) -> Self {
+        PyColumn {
+            inner: log1p(&self.inner),
+        }
+    }
+    fn log10(&self) -> Self {
+        PyColumn {
+            inner: log10(&self.inner),
+        }
+    }
+    fn log2(&self) -> Self {
+        PyColumn {
+            inner: log2(&self.inner),
+        }
+    }
+    fn rint(&self) -> Self {
+        PyColumn {
+            inner: rint(&self.inner),
+        }
+    }
+    fn hypot(&self, other: &PyColumn) -> Self {
+        PyColumn {
+            inner: hypot(&self.inner, &other.inner),
         }
     }
 

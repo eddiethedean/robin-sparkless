@@ -2,6 +2,23 @@ use polars::prelude::{
     col, lit, DataType, Expr, GetOutput, ListNameSpaceExtension, RankMethod, RankOptions,
 };
 
+/// Convert SQL LIKE pattern (% = any sequence, _ = one char) to regex. Escapes regex specials.
+fn like_pattern_to_regex(pattern: &str) -> String {
+    let mut out = String::with_capacity(pattern.len() * 2);
+    for c in pattern.chars() {
+        match c {
+            '%' => out.push_str(".*"),
+            '_' => out.push('.'),
+            '\\' | '.' | '+' | '*' | '?' | '[' | ']' | '(' | ')' | '{' | '}' | '^' | '$' | '|' => {
+                out.push('\\');
+                out.push(c);
+            }
+            _ => out.push(c),
+        }
+    }
+    format!("^{}$", out)
+}
+
 /// Column - represents a column in a DataFrame, used for building expressions
 /// Thin wrapper around Polars `Expr`.
 #[derive(Debug, Clone)]
@@ -67,6 +84,16 @@ impl Column {
         }
     }
 
+    /// Alias for is_null. PySpark isnull.
+    pub fn isnull(&self) -> Column {
+        self.is_null()
+    }
+
+    /// Alias for is_not_null. PySpark isnotnull.
+    pub fn isnotnull(&self) -> Column {
+        self.is_not_null()
+    }
+
     /// Create a null boolean expression
     fn null_boolean_expr() -> Expr {
         use polars::prelude::*;
@@ -74,13 +101,17 @@ impl Column {
         lit(NULL).cast(DataType::Boolean)
     }
 
-    /// Like pattern matching (substring search). Currently a no-op placeholder.
+    /// SQL LIKE pattern matching (% = any chars, _ = one char). PySpark like.
     pub fn like(&self, pattern: &str) -> Column {
-        Column {
-            name: format!("({} LIKE '{}')", self.name, pattern),
-            // TODO: use Polars string contains when stabilized for this version
-            expr: self.expr.clone(),
-        }
+        let regex = like_pattern_to_regex(pattern);
+        self.regexp_like(&regex)
+    }
+
+    /// Case-insensitive LIKE. PySpark ilike.
+    pub fn ilike(&self, pattern: &str) -> Column {
+        use polars::prelude::*;
+        let regex = format!("(?i){}", like_pattern_to_regex(pattern));
+        Self::from_expr(self.expr().clone().str().contains(lit(regex), false), None)
     }
 
     /// PySpark-style equality comparison (NULL == NULL returns NULL, not True)
@@ -277,6 +308,16 @@ impl Column {
         Self::from_expr(self.expr().clone().str().to_lowercase(), None)
     }
 
+    /// Alias for lower. PySpark lcase.
+    pub fn lcase(&self) -> Column {
+        self.lower()
+    }
+
+    /// Alias for upper. PySpark ucase.
+    pub fn ucase(&self) -> Column {
+        self.upper()
+    }
+
     /// Substring with 1-based start (PySpark substring semantics)
     pub fn substr(&self, start: i64, length: Option<i64>) -> Column {
         use polars::prelude::*;
@@ -335,6 +376,74 @@ impl Column {
         let rep = replacement.to_string();
         Self::from_expr(
             self.expr().clone().str().replace(lit(pat), lit(rep), false),
+            None,
+        )
+    }
+
+    /// Leftmost n characters (PySpark left).
+    pub fn left(&self, n: i64) -> Column {
+        use polars::prelude::*;
+        let len = n.max(0) as u32;
+        Self::from_expr(
+            self.expr().clone().str().slice(lit(0i64), lit(len as i64)),
+            None,
+        )
+    }
+
+    /// Rightmost n characters (PySpark right).
+    pub fn right(&self, n: i64) -> Column {
+        use polars::prelude::*;
+        let n_val = n.max(0);
+        let n_expr = lit(n_val);
+        let len_chars = self.expr().clone().str().len_chars().cast(DataType::Int64);
+        let start = when((len_chars.clone() - n_expr.clone()).lt_eq(lit(0i64)))
+            .then(lit(0i64))
+            .otherwise(len_chars - n_expr.clone());
+        Self::from_expr(self.expr().clone().str().slice(start, n_expr), None)
+    }
+
+    /// Replace all occurrences of literal search string with replacement (PySpark replace for literal).
+    pub fn replace(&self, search: &str, replacement: &str) -> Column {
+        use polars::prelude::*;
+        Self::from_expr(
+            self.expr().clone().str().replace_all(
+                lit(search.to_string()),
+                lit(replacement.to_string()),
+                true,
+            ),
+            None,
+        )
+    }
+
+    /// True if string starts with prefix (PySpark startswith).
+    pub fn startswith(&self, prefix: &str) -> Column {
+        use polars::prelude::*;
+        Self::from_expr(
+            self.expr()
+                .clone()
+                .str()
+                .starts_with(lit(prefix.to_string())),
+            None,
+        )
+    }
+
+    /// True if string ends with suffix (PySpark endswith).
+    pub fn endswith(&self, suffix: &str) -> Column {
+        use polars::prelude::*;
+        Self::from_expr(
+            self.expr().clone().str().ends_with(lit(suffix.to_string())),
+            None,
+        )
+    }
+
+    /// True if string contains substring (literal, not regex). PySpark contains.
+    pub fn contains(&self, substring: &str) -> Column {
+        use polars::prelude::*;
+        Self::from_expr(
+            self.expr()
+                .clone()
+                .str()
+                .contains(lit(substring.to_string()), true),
             None,
         )
     }
@@ -660,6 +769,11 @@ impl Column {
         Self::from_expr(self.expr().clone().ceil(), None)
     }
 
+    /// Alias for ceil. PySpark ceiling.
+    pub fn ceiling(&self) -> Column {
+        self.ceil()
+    }
+
     /// Floor (PySpark floor)
     pub fn floor(&self) -> Column {
         Self::from_expr(self.expr().clone().floor(), None)
@@ -681,6 +795,11 @@ impl Column {
         Self::from_expr(self.expr().clone().pow(lit(exp)), None)
     }
 
+    /// Alias for pow. PySpark power.
+    pub fn power(&self, exp: i64) -> Column {
+        self.pow(exp)
+    }
+
     /// Exponential (PySpark exp)
     pub fn exp(&self) -> Column {
         Self::from_expr(self.expr().clone().exp(), None)
@@ -689,6 +808,11 @@ impl Column {
     /// Natural logarithm (PySpark log)
     pub fn log(&self) -> Column {
         Self::from_expr(self.expr().clone().log(std::f64::consts::E), None)
+    }
+
+    /// Alias for log. PySpark ln.
+    pub fn ln(&self) -> Column {
+        self.log()
     }
 
     /// Sine (radians). PySpark sin.
@@ -765,6 +889,11 @@ impl Column {
         Self::from_expr(expr, None)
     }
 
+    /// Alias for degrees. PySpark toDegrees.
+    pub fn to_degrees(&self) -> Column {
+        self.degrees()
+    }
+
     /// Convert degrees to radians. PySpark radians.
     pub fn radians(&self) -> Column {
         let expr = self.expr().clone().map(
@@ -774,6 +903,11 @@ impl Column {
         Self::from_expr(expr, None)
     }
 
+    /// Alias for radians. PySpark toRadians.
+    pub fn to_radians(&self) -> Column {
+        self.radians()
+    }
+
     /// Sign of the number (-1, 0, or 1). PySpark signum.
     pub fn signum(&self) -> Column {
         let expr = self.expr().clone().map(
@@ -781,6 +915,110 @@ impl Column {
             GetOutput::from_type(DataType::Float64),
         );
         Self::from_expr(expr, None)
+    }
+
+    /// Hyperbolic cosine. PySpark cosh.
+    pub fn cosh(&self) -> Column {
+        let expr = self.expr().clone().map(
+            crate::udfs::apply_cosh,
+            GetOutput::from_type(DataType::Float64),
+        );
+        Self::from_expr(expr, None)
+    }
+    /// Hyperbolic sine. PySpark sinh.
+    pub fn sinh(&self) -> Column {
+        let expr = self.expr().clone().map(
+            crate::udfs::apply_sinh,
+            GetOutput::from_type(DataType::Float64),
+        );
+        Self::from_expr(expr, None)
+    }
+    /// Hyperbolic tangent. PySpark tanh.
+    pub fn tanh(&self) -> Column {
+        let expr = self.expr().clone().map(
+            crate::udfs::apply_tanh,
+            GetOutput::from_type(DataType::Float64),
+        );
+        Self::from_expr(expr, None)
+    }
+    /// Inverse hyperbolic cosine. PySpark acosh.
+    pub fn acosh(&self) -> Column {
+        let expr = self.expr().clone().map(
+            crate::udfs::apply_acosh,
+            GetOutput::from_type(DataType::Float64),
+        );
+        Self::from_expr(expr, None)
+    }
+    /// Inverse hyperbolic sine. PySpark asinh.
+    pub fn asinh(&self) -> Column {
+        let expr = self.expr().clone().map(
+            crate::udfs::apply_asinh,
+            GetOutput::from_type(DataType::Float64),
+        );
+        Self::from_expr(expr, None)
+    }
+    /// Inverse hyperbolic tangent. PySpark atanh.
+    pub fn atanh(&self) -> Column {
+        let expr = self.expr().clone().map(
+            crate::udfs::apply_atanh,
+            GetOutput::from_type(DataType::Float64),
+        );
+        Self::from_expr(expr, None)
+    }
+    /// Cube root. PySpark cbrt.
+    pub fn cbrt(&self) -> Column {
+        let expr = self.expr().clone().map(
+            crate::udfs::apply_cbrt,
+            GetOutput::from_type(DataType::Float64),
+        );
+        Self::from_expr(expr, None)
+    }
+    /// exp(x) - 1. PySpark expm1.
+    pub fn expm1(&self) -> Column {
+        let expr = self.expr().clone().map(
+            crate::udfs::apply_expm1,
+            GetOutput::from_type(DataType::Float64),
+        );
+        Self::from_expr(expr, None)
+    }
+    /// log(1 + x). PySpark log1p.
+    pub fn log1p(&self) -> Column {
+        let expr = self.expr().clone().map(
+            crate::udfs::apply_log1p,
+            GetOutput::from_type(DataType::Float64),
+        );
+        Self::from_expr(expr, None)
+    }
+    /// Base-10 logarithm. PySpark log10.
+    pub fn log10(&self) -> Column {
+        let expr = self.expr().clone().map(
+            crate::udfs::apply_log10,
+            GetOutput::from_type(DataType::Float64),
+        );
+        Self::from_expr(expr, None)
+    }
+    /// Base-2 logarithm. PySpark log2.
+    pub fn log2(&self) -> Column {
+        let expr = self.expr().clone().map(
+            crate::udfs::apply_log2,
+            GetOutput::from_type(DataType::Float64),
+        );
+        Self::from_expr(expr, None)
+    }
+    /// Round to nearest integer. PySpark rint.
+    pub fn rint(&self) -> Column {
+        let expr = self.expr().clone().map(
+            crate::udfs::apply_rint,
+            GetOutput::from_type(DataType::Float64),
+        );
+        Self::from_expr(expr, None)
+    }
+
+    /// sqrt(x^2 + y^2). PySpark hypot.
+    pub fn hypot(&self, other: &Column) -> Column {
+        let xx = self.expr().clone() * self.expr().clone();
+        let yy = other.expr().clone() * other.expr().clone();
+        Self::from_expr((xx + yy).sqrt(), None)
     }
 
     /// Cast to the given type (PySpark cast). Fails on invalid conversion.
@@ -813,6 +1051,11 @@ impl Column {
     /// Extract day of month from datetime column (PySpark day)
     pub fn day(&self) -> Column {
         Self::from_expr(self.expr().clone().dt().day(), None)
+    }
+
+    /// Alias for day. PySpark dayofmonth.
+    pub fn dayofmonth(&self) -> Column {
+        self.day()
     }
 
     /// Extract quarter (1-4) from date/datetime column (PySpark quarter).
@@ -1135,6 +1378,11 @@ impl Column {
             ..Default::default()
         };
         Self::from_expr(self.expr().clone().list().sort(opts), None)
+    }
+
+    /// Distinct elements in list (PySpark array_distinct). Order not guaranteed.
+    pub fn array_distinct(&self) -> Column {
+        Self::from_expr(self.expr().clone().list().unique(), None)
     }
 
     /// Slice list from start with optional length (PySpark slice). 1-based start.

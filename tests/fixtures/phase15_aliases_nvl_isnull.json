@@ -1,0 +1,58 @@
+{
+  "name": "phase15_aliases_nvl_isnull",
+  "input": {
+    "schema": [
+      {"name": "id", "type": "int"},
+      {"name": "a", "type": "int"},
+      {"name": "b", "type": "int"}
+    ],
+    "rows": [
+      [1, 10, 100],
+      [2, null, 200],
+      [3, 30, null],
+      [4, null, null]
+    ]
+  },
+  "operations": [
+    {
+      "op": "withColumn",
+      "column": "a_filled",
+      "expr": "nvl(col('a'), lit(0))"
+    },
+    {
+      "op": "withColumn",
+      "column": "nvl2_ab",
+      "expr": "nvl2(col('a'), col('b'), lit(-1))"
+    },
+    {
+      "op": "withColumn",
+      "column": "a_is_null",
+      "expr": "isnull(col('a'))"
+    },
+    {
+      "op": "select",
+      "columns": ["id", "a", "b", "a_filled", "nvl2_ab", "a_is_null"]
+    },
+    {
+      "op": "orderBy",
+      "columns": ["id"],
+      "ascending": [true]
+    }
+  ],
+  "expected": {
+    "schema": [
+      {"name": "id", "type": "int"},
+      {"name": "a", "type": "int"},
+      {"name": "b", "type": "int"},
+      {"name": "a_filled", "type": "int"},
+      {"name": "nvl2_ab", "type": "int"},
+      {"name": "a_is_null", "type": "boolean"}
+    ],
+    "rows": [
+      [1, 10, 100, 10, 100, false],
+      [2, null, 200, 0, -1, true],
+      [3, 30, null, 30, null, false],
+      [4, null, null, 0, -1, true]
+    ]
+  }
+}

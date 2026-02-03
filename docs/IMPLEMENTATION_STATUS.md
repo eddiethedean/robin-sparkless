@@ -61,7 +61,7 @@ Robin-sparkless is designed to **replace the backend logic** of [Sparkless](http
 7. **Phase 5 Test Conversion** ✅ **COMPLETED**
    - Fixture converter maps Sparkless `expected_outputs` to robin-sparkless format (join, window, withColumn, union, distinct, drop, dropna, fillna, limit, withColumnRenamed, etc.).
    - Parity discovers `tests/fixtures/` and `tests/fixtures/converted/`; optional `skip: true` in fixtures.
-  - `make sparkless-parity` (set `SPARKLESS_EXPECTED_OUTPUTS` to run converter first); 82 hand-written fixtures passing.
+  - `make sparkless-parity` (set `SPARKLESS_EXPECTED_OUTPUTS` to run converter first); 88 hand-written fixtures passing.
   - See [CONVERTER_STATUS.md](CONVERTER_STATUS.md), [SPARKLESS_PARITY_STATUS.md](SPARKLESS_PARITY_STATUS.md).
 
 8. **Phase 6 Broad Function Parity** (partial) ✅
@@ -75,13 +75,17 @@ Robin-sparkless is designed to **replace the backend logic** of [Sparkless](http
    - Optional **Delta Lake** (`delta` feature): `read_delta`, `read_delta_with_version` (time travel), `write_delta` (overwrite/append) via delta-rs.
    - **Performance**: `cargo bench` (criterion) compares robin-sparkless vs Polars; target within ~2x. Error messages improved; Troubleshooting in [QUICKSTART.md](QUICKSTART.md).
 
-10. **Path to 100% before Sparkless integration** ([ROADMAP.md](ROADMAP.md) Phases 12–17)
+10. **Path to 100% before Sparkless integration** ([ROADMAP.md](ROADMAP.md) Phases 12–21)
    - **Phase 12** ✅ **COMPLETED**: DataFrame methods parity — implemented sample, random_split, first, head, take, tail, is_empty, to_df, stat (cov/corr), summary, to_json, explain, print_schema, checkpoint, local_checkpoint, repartition, coalesce, select_expr, col_regex, with_columns, with_columns_renamed, na (fill/drop), to_pandas, offset, transform, except_all, intersect_all; **freq_items**, **approx_quantile**, **crosstab**, **melt** (full implementations in Rust); **sample_by** (stratified sampling); Spark no-ops (hint, is_local, input_files, same_semantics, semantic_hash, observe, with_watermark). Parity fixtures: first_row, head_n, offset_n. PyO3: all new DataFrame methods exposed including random_split, summary, to_df, select_expr, col_regex, with_columns, with_columns_renamed, stat(), na(), to_pandas; PyDataFrameStat (cov, corr) and PyDataFrameNa (fill, drop). See [PYTHON_API.md](PYTHON_API.md). Methods ~35 → ~55+.
    - **Phase 13** ✅ (completed): Functions batch 1 — string: ascii, format_number, overlay, position, char, chr; base64, unbase64; binary: sha1, sha2, md5 (hex string out); collection: array_compact. Parity: parse_with_column_expr branches and fixtures `string_ascii`, `string_format_number` (82 fixtures total). PyO3: module-level and Column methods (ascii_, format_number, overlay, position, char_, chr_, base64_, unbase64_, sha1_, sha2_, md5_, array_compact). Dependencies: base64, sha1, sha2, md5 crates.
    - **Phase 14** ✅ (completed): Functions batch 2 — math: sin, cos, tan, asin, acos, atan, atan2, degrees, radians, signum (UDFs in udfs.rs); datetime: quarter, weekofyear, dayofweek, dayofyear, add_months, months_between, next_day (Polars dt + chrono UDFs); type/conditional: cast, try_cast (parse_type_name + strict_cast/cast), isnan, greatest, least (UDF apply_greatest2/apply_least2). Parity: parser branches for all; fixtures `math_sin_cos`, `datetime_quarter_week` (84 fixtures). PyO3: module and Column methods for all Phase 14 functions. Docs: PYTHON_API, PARITY_STATUS, IMPLEMENTATION_STATUS, ROADMAP updated.
-   - **Phase 15**: Functions batch 3 (remaining) → 403 functions; parity fixtures 84 → 150+.
-   - **Phase 16**: Prepare and publish robin-sparkless as a Rust crate (crates.io, API stability, docs, release workflow; optional PyPI wheel). See [ROADMAP.md](ROADMAP.md) § Phase 16.
-   - **Phase 17**: Sparkless integration (BackendFactory "robin", 200+ tests passing). See [FULL_BACKEND_ROADMAP.md](FULL_BACKEND_ROADMAP.md) § Path to 100%.
+   - **Phase 15** ✅ **COMPLETED**: Functions batch 3 — Batch 1 (nvl, nvl2, substr, power, ln, ceiling, lcase, ucase, dayofmonth, to_degrees, to_radians, isnull, isnotnull), Batch 2 (left, right, replace, startswith, endswith, contains, like, ilike, rlike), Batch 3 (cosh, sinh, tanh, acosh, asinh, atanh, cbrt, expm1, log1p, log10, log2, rint, hypot), Batch 4 (array_distinct) implemented; parity fixtures 84 → 88. Gap list: [PHASE15_GAP_LIST.md](PHASE15_GAP_LIST.md), [GAP_ANALYSIS_SPARKLESS_3.28.md](GAP_ANALYSIS_SPARKLESS_3.28.md).
+   - **Phase 16**: Remaining gaps 1 — string/regex (regexp_count, regexp_instr, regexp_substr, split_part, find_in_set, format_string, printf). See [ROADMAP.md](ROADMAP.md).
+   - **Phase 17**: Remaining gaps 2 — datetime/unix (unix_timestamp, from_unixtime, make_date, timestamp_*, pmod, factorial).
+   - **Phase 18**: Remaining gaps 3 — array/map/struct (array_append, array_prepend, array_insert, array_except/intersect/union, zip_with, map_concat, map_filter, map_zip_with, transform_keys/values, named_struct).
+   - **Phase 19**: Remaining gaps 4 — aggregates and try_* (any_value, bool_and, bool_or, count_if, max_by, min_by, percentile, product, try_add/divide/subtract/multiply/sum/avg, try_element_at, width_bucket, elt, bit_length, typeof).
+   - **Phase 20**: Prepare and publish robin-sparkless as a Rust crate (crates.io, API stability, docs, release workflow; optional PyPI wheel).
+   - **Phase 21**: Sparkless integration (BackendFactory "robin", 200+ tests passing).
 
 11. **Sparkless integration** (in Sparkless repo, after Phase 17)
    - Fixture converter: Sparkless `expected_outputs/` JSON → robin-sparkless fixtures
