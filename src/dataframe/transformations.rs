@@ -4,6 +4,7 @@
 //! sample, random_split, first, head, take, tail, is_empty, to_df.
 
 use super::DataFrame;
+use crate::functions::SortOrder;
 use polars::prelude::{
     col, Expr, IntoLazy, IntoSeries, NamedFrom, PolarsError, Series, UnionArgs, UniqueKeepStrategy,
 };
@@ -72,6 +73,34 @@ pub fn order_by(
         exprs,
         SortMultipleOptions::new().with_order_descending_multi(descending),
     );
+    let pl_df = sorted.collect()?;
+    Ok(super::DataFrame::from_polars_with_options(
+        pl_df,
+        case_sensitive,
+    ))
+}
+
+/// Order by sort expressions (asc/desc with nulls_first/last). Preserves case_sensitive on result.
+pub fn order_by_exprs(
+    df: &DataFrame,
+    sort_orders: Vec<SortOrder>,
+    case_sensitive: bool,
+) -> Result<DataFrame, PolarsError> {
+    use polars::prelude::*;
+    if sort_orders.is_empty() {
+        return Ok(super::DataFrame::from_polars_with_options(
+            df.df.as_ref().clone(),
+            case_sensitive,
+        ));
+    }
+    let exprs: Vec<Expr> = sort_orders.iter().map(|s| s.expr().clone()).collect();
+    let descending: Vec<bool> = sort_orders.iter().map(|s| s.descending).collect();
+    let nulls_last: Vec<bool> = sort_orders.iter().map(|s| s.nulls_last).collect();
+    let opts = SortMultipleOptions::new()
+        .with_order_descending_multi(descending)
+        .with_nulls_last_multi(nulls_last);
+    let lf = df.df.as_ref().clone().lazy();
+    let sorted = lf.sort_by_exprs(exprs, opts);
     let pl_df = sorted.collect()?;
     Ok(super::DataFrame::from_polars_with_options(
         pl_df,

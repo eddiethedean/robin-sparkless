@@ -364,15 +364,15 @@ To reach **full Sparkless parity** (robin-sparkless as a complete backend replac
 
 ---
 
-### Phase 20 – Full parity 1: ordering, aggregates, numeric (1.5–2 weeks)
+### Phase 20 – Full parity 1: ordering, aggregates, numeric (1.5–2 weeks) ✅ **COMPLETED**
 
 **Goal**: High-value ordering and aggregate functions. Reference: [PARITY_CHECK_SPARKLESS_3.28.md](PARITY_CHECK_SPARKLESS_3.28.md).
 
-- **Ordering**: `asc`, `asc_nulls_first`, `asc_nulls_last`, `desc`, `desc_nulls_first`, `desc_nulls_last` (return Expr for use in orderBy).
-- **Aggregates**: `covar_pop`, `covar_samp`, `corr` (as agg); `median`, `mode`; `stddev_pop`, `stddev_samp`, `var_pop`, `var_samp`; `kurtosis`, `skewness`; `try_sum`, `try_avg`; `percentile_approx` (defer if complex).
-- **Numeric**: `bround`; `negate`, `negative`, `positive`; `cot`, `csc`, `sec`; `e`, `pi` (constants).
+- **Ordering** ✅: `asc`, `asc_nulls_first`, `asc_nulls_last`, `desc`, `desc_nulls_first`, `desc_nulls_last` (return SortOrder for use in orderBy); `DataFrame::order_by_exprs(sort_orders)`.
+- **Aggregates** ✅: `median`, `mode`; `stddev_pop`, `stddev_samp`, `var_pop`, `var_samp`; `try_sum`, `try_avg`. Deferred: `covar_pop`, `covar_samp`, `corr` (as groupBy agg), `kurtosis`, `skewness`, `percentile_approx`.
+- **Numeric** ✅: `bround`; `negate`, `negative`, `positive`; `cot`, `csc`, `sec`; `e`, `pi` (constants).
 
-**Parity**: Fixtures for new aggregates. **Outcome**: ~25 new functions; ready for Phase 21.
+**Parity**: Fixtures `groupby_median`, `with_bround`; OrderBy supports optional `nulls_first`. **Outcome**: ~25 new functions; ready for Phase 21.
 
 ---
 

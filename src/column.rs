@@ -68,6 +68,40 @@ impl Column {
         }
     }
 
+    // -------------------------------------------------------------------------
+    // Phase 20: Ordering (asc/desc with nulls_first/last) - return SortOrder
+    // -------------------------------------------------------------------------
+
+    /// Ascending sort, nulls first (Spark default for ASC). PySpark asc.
+    pub fn asc(&self) -> crate::functions::SortOrder {
+        crate::functions::asc(self)
+    }
+
+    /// Ascending sort, nulls first. PySpark asc_nulls_first.
+    pub fn asc_nulls_first(&self) -> crate::functions::SortOrder {
+        crate::functions::asc_nulls_first(self)
+    }
+
+    /// Ascending sort, nulls last. PySpark asc_nulls_last.
+    pub fn asc_nulls_last(&self) -> crate::functions::SortOrder {
+        crate::functions::asc_nulls_last(self)
+    }
+
+    /// Descending sort, nulls last (Spark default for DESC). PySpark desc.
+    pub fn desc(&self) -> crate::functions::SortOrder {
+        crate::functions::desc(self)
+    }
+
+    /// Descending sort, nulls first. PySpark desc_nulls_first.
+    pub fn desc_nulls_first(&self) -> crate::functions::SortOrder {
+        crate::functions::desc_nulls_first(self)
+    }
+
+    /// Descending sort, nulls last. PySpark desc_nulls_last.
+    pub fn desc_nulls_last(&self) -> crate::functions::SortOrder {
+        crate::functions::desc_nulls_last(self)
+    }
+
     /// Check if column is null
     pub fn is_null(&self) -> Column {
         Column {
@@ -865,6 +899,21 @@ impl Column {
         Self::from_expr(self.expr().clone().round(decimals), None)
     }
 
+    /// Banker's rounding - round half to even (PySpark bround).
+    pub fn bround(&self, scale: i32) -> Column {
+        let expr = self.expr().clone().map(
+            move |s| crate::udfs::apply_bround(s, scale),
+            GetOutput::from_type(DataType::Float64),
+        );
+        Self::from_expr(expr, None)
+    }
+
+    /// Unary minus (PySpark negate, negative).
+    pub fn negate(&self) -> Column {
+        use polars::prelude::*;
+        Self::from_expr(self.expr().clone() * lit(-1), None)
+    }
+
     /// Square root (PySpark sqrt)
     pub fn sqrt(&self) -> Column {
         Self::from_expr(self.expr().clone().sqrt(), None)
@@ -918,6 +967,33 @@ impl Column {
     pub fn tan(&self) -> Column {
         let expr = self.expr().clone().map(
             crate::udfs::apply_tan,
+            GetOutput::from_type(DataType::Float64),
+        );
+        Self::from_expr(expr, None)
+    }
+
+    /// Cotangent: 1/tan (PySpark cot).
+    pub fn cot(&self) -> Column {
+        let expr = self.expr().clone().map(
+            crate::udfs::apply_cot,
+            GetOutput::from_type(DataType::Float64),
+        );
+        Self::from_expr(expr, None)
+    }
+
+    /// Cosecant: 1/sin (PySpark csc).
+    pub fn csc(&self) -> Column {
+        let expr = self.expr().clone().map(
+            crate::udfs::apply_csc,
+            GetOutput::from_type(DataType::Float64),
+        );
+        Self::from_expr(expr, None)
+    }
+
+    /// Secant: 1/cos (PySpark sec).
+    pub fn sec(&self) -> Column {
+        let expr = self.expr().clone().map(
+            crate::udfs::apply_sec,
             GetOutput::from_type(DataType::Float64),
         );
         Self::from_expr(expr, None)
@@ -1548,6 +1624,21 @@ impl Column {
     /// Distinct elements in list (PySpark array_distinct). Order not guaranteed.
     pub fn array_distinct(&self) -> Column {
         Self::from_expr(self.expr().clone().list().unique(), None)
+    }
+
+    /// Mode aggregation - most frequent value (PySpark mode).
+    /// Uses value_counts sorted by count descending, then first.
+    pub fn mode(&self) -> Column {
+        // value_counts(sort=true, parallel=false, name="count", normalize=false)
+        // puts highest count first; first() gives the mode
+        // Struct has "count" and value field; field 0 is typically the value
+        let vc = self
+            .expr()
+            .clone()
+            .value_counts(true, false, "count", false);
+        let first_struct = vc.first();
+        let val_expr = first_struct.struct_().field_by_index(0);
+        Self::from_expr(val_expr, Some("mode".to_string()))
     }
 
     /// Slice list from start with optional length (PySpark slice). 1-based start.

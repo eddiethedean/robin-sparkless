@@ -3,6 +3,7 @@
 
 use crate::column::Column as RsColumn;
 use crate::dataframe::JoinType;
+use crate::functions::SortOrder;
 use crate::functions::{
     acos, acosh, add_months, array_append, array_compact, array_distinct, array_except,
     array_insert, array_intersect, array_prepend, array_union, ascii, asin, asinh, atan, atan2,
@@ -16,6 +17,10 @@ use crate::functions::{
     startswith, substr, tan, tanh, timestamp_micros, timestamp_millis, timestamp_seconds,
     to_degrees, to_radians, to_unix_timestamp, try_cast as rs_try_cast, ucase, unbase64, unix_date,
     unix_timestamp, unix_timestamp_now, weekofyear,
+};
+use crate::functions::{
+    asc, asc_nulls_first, asc_nulls_last, bround, cot, csc, desc, desc_nulls_first,
+    desc_nulls_last, e, median, mode, negate, pi, positive, sec, stddev_pop, var_pop,
 };
 use crate::functions::{avg, coalesce, col as rs_col, count, max, min, sum as rs_sum};
 use crate::functions::{
@@ -38,6 +43,7 @@ fn robin_sparkless(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyDataFrameStat>()?;
     m.add_class::<PyDataFrameNa>()?;
     m.add_class::<PyColumn>()?;
+    m.add_class::<PySortOrder>()?;
     m.add_class::<PyWhenBuilder>()?;
     m.add_class::<PyThenBuilder>()?;
     m.add_class::<PyGroupedData>()?;
@@ -201,6 +207,29 @@ fn robin_sparkless(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("typeof", wrap_pyfunction!(py_typeof, m)?)?;
     m.add("struct", wrap_pyfunction!(py_struct, m)?)?;
     m.add("named_struct", wrap_pyfunction!(py_named_struct, m)?)?;
+    // Phase 20: ordering, aggregates, numeric
+    m.add("asc", wrap_pyfunction!(py_asc, m)?)?;
+    m.add("asc_nulls_first", wrap_pyfunction!(py_asc_nulls_first, m)?)?;
+    m.add("asc_nulls_last", wrap_pyfunction!(py_asc_nulls_last, m)?)?;
+    m.add("desc", wrap_pyfunction!(py_desc, m)?)?;
+    m.add(
+        "desc_nulls_first",
+        wrap_pyfunction!(py_desc_nulls_first, m)?,
+    )?;
+    m.add("desc_nulls_last", wrap_pyfunction!(py_desc_nulls_last, m)?)?;
+    m.add("bround", wrap_pyfunction!(py_bround, m)?)?;
+    m.add("negate", wrap_pyfunction!(py_negate, m)?)?;
+    m.add("negative", wrap_pyfunction!(py_negate, m)?)?;
+    m.add("positive", wrap_pyfunction!(py_positive, m)?)?;
+    m.add("cot", wrap_pyfunction!(py_cot, m)?)?;
+    m.add("csc", wrap_pyfunction!(py_csc, m)?)?;
+    m.add("sec", wrap_pyfunction!(py_sec, m)?)?;
+    m.add("e", wrap_pyfunction!(py_e, m)?)?;
+    m.add("pi", wrap_pyfunction!(py_pi, m)?)?;
+    m.add("median", wrap_pyfunction!(py_median, m)?)?;
+    m.add("mode", wrap_pyfunction!(py_mode, m)?)?;
+    m.add("stddev_pop", wrap_pyfunction!(py_stddev_pop, m)?)?;
+    m.add("var_pop", wrap_pyfunction!(py_var_pop, m)?)?;
     Ok(())
 }
 
@@ -279,6 +308,128 @@ fn py_max(column: &PyColumn) -> PyColumn {
 fn py_count(column: &PyColumn) -> PyColumn {
     PyColumn {
         inner: count(&column.inner),
+    }
+}
+
+#[pyfunction]
+fn py_asc(column: &PyColumn) -> PySortOrder {
+    PySortOrder {
+        inner: asc(&column.inner),
+    }
+}
+
+#[pyfunction]
+fn py_asc_nulls_first(column: &PyColumn) -> PySortOrder {
+    PySortOrder {
+        inner: asc_nulls_first(&column.inner),
+    }
+}
+
+#[pyfunction]
+fn py_asc_nulls_last(column: &PyColumn) -> PySortOrder {
+    PySortOrder {
+        inner: asc_nulls_last(&column.inner),
+    }
+}
+
+#[pyfunction]
+fn py_desc(column: &PyColumn) -> PySortOrder {
+    PySortOrder {
+        inner: desc(&column.inner),
+    }
+}
+
+#[pyfunction]
+fn py_desc_nulls_first(column: &PyColumn) -> PySortOrder {
+    PySortOrder {
+        inner: desc_nulls_first(&column.inner),
+    }
+}
+
+#[pyfunction]
+fn py_desc_nulls_last(column: &PyColumn) -> PySortOrder {
+    PySortOrder {
+        inner: desc_nulls_last(&column.inner),
+    }
+}
+
+#[pyfunction]
+fn py_bround(column: &PyColumn, scale: i32) -> PyColumn {
+    PyColumn {
+        inner: bround(&column.inner, scale),
+    }
+}
+
+#[pyfunction]
+fn py_negate(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: negate(&column.inner),
+    }
+}
+
+#[pyfunction]
+fn py_positive(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: positive(&column.inner),
+    }
+}
+
+#[pyfunction]
+fn py_cot(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: cot(&column.inner),
+    }
+}
+
+#[pyfunction]
+fn py_csc(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: csc(&column.inner),
+    }
+}
+
+#[pyfunction]
+fn py_sec(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: sec(&column.inner),
+    }
+}
+
+#[pyfunction]
+fn py_e() -> PyColumn {
+    PyColumn { inner: e() }
+}
+
+#[pyfunction]
+fn py_pi() -> PyColumn {
+    PyColumn { inner: pi() }
+}
+
+#[pyfunction]
+fn py_median(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: median(&column.inner),
+    }
+}
+
+#[pyfunction]
+fn py_mode(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: mode(&column.inner),
+    }
+}
+
+#[pyfunction]
+fn py_stddev_pop(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: stddev_pop(&column.inner),
+    }
+}
+
+#[pyfunction]
+fn py_var_pop(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: var_pop(&column.inner),
     }
 }
 
@@ -1044,6 +1195,13 @@ fn py_hypot(x: &PyColumn, y: &PyColumn) -> PyColumn {
     PyColumn {
         inner: hypot(&x.inner, &y.inner),
     }
+}
+
+/// Python wrapper for SortOrder (used with order_by_exprs).
+#[pyclass]
+#[derive(Clone)]
+struct PySortOrder {
+    inner: SortOrder,
 }
 
 /// Python wrapper for Column (expression).
@@ -2057,6 +2215,15 @@ impl PyDataFrame {
         let df = self
             .inner
             .order_by(cols.iter().map(|s| s.as_str()).collect::<Vec<_>>(), asc)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        Ok(PyDataFrame { inner: df })
+    }
+
+    fn order_by_exprs(&self, sort_orders: Vec<PySortOrder>) -> PyResult<PyDataFrame> {
+        let orders: Vec<SortOrder> = sort_orders.into_iter().map(|po| po.inner).collect();
+        let df = self
+            .inner
+            .order_by_exprs(orders)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
         Ok(PyDataFrame { inner: df })
     }

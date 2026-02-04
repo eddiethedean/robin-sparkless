@@ -8,9 +8,10 @@ mod transformations;
 pub use aggregations::GroupedData;
 pub use joins::{join, JoinType};
 pub use stats::DataFrameStat;
-pub use transformations::{filter, order_by, select, with_column, DataFrameNa};
+pub use transformations::{filter, order_by, order_by_exprs, select, with_column, DataFrameNa};
 
 use crate::column::Column;
+use crate::functions::SortOrder;
 use crate::schema::StructType;
 use polars::prelude::{DataFrame as PlDataFrame, Expr, PolarsError};
 use std::sync::Arc;
@@ -190,6 +191,11 @@ impl DataFrame {
             .collect::<Result<Vec<_>, _>>()?;
         let refs: Vec<&str> = resolved.iter().map(|s| s.as_str()).collect();
         transformations::order_by(self, refs, ascending, self.case_sensitive)
+    }
+
+    /// Order by sort expressions (asc/desc with nulls_first/last).
+    pub fn order_by_exprs(&self, sort_orders: Vec<SortOrder>) -> Result<DataFrame, PolarsError> {
+        transformations::order_by_exprs(self, sort_orders, self.case_sensitive)
     }
 
     /// Union (unionAll): stack another DataFrame vertically. Schemas must match (same columns, same order).

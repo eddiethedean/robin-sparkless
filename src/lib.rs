@@ -23,6 +23,6 @@ pub mod python;
 
 pub use column::Column;
 pub use dataframe::{DataFrame, GroupedData, JoinType};
-pub use functions::*;
+pub use functions::{SortOrder, *};
 pub use schema::{StructField, StructType};
 pub use session::{DataFrameReader, SparkSession, SparkSessionBuilder};

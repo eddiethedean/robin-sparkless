@@ -262,9 +262,9 @@ The following Sparkless function names have an equivalent implementation in robi
 ### Struct
 - transform_keys, transform_values
 
-### Ordering
-- asc, asc_nulls_first, asc_nulls_last
-- desc, desc_nulls_first, desc_nulls_last
+### Ordering (Phase 20)
+- asc, asc_nulls_first, asc_nulls_last ✅
+- desc, desc_nulls_first, desc_nulls_last ✅
 
 ### Control
 - assert_true, raise_error
@@ -279,23 +279,23 @@ The following Sparkless function names have an equivalent implementation in robi
 - monotonically_increasing_id
 - current_catalog, current_database, current_schema, current_user, user
 
-### Numeric
-- bround
+### Numeric (Phase 20)
+- bround ✅
 
 ### String
 - btrim, conv, locate (we have instr/position)
 
-### Math
-- cot, csc, sec, e, pi
-- negate, negative, positive
+### Math (Phase 20)
+- cot, csc, sec, e, pi ✅
+- negate, negative, positive ✅
 
-### Aggregates
-- covar_pop, covar_samp, corr
-- median, mode
-- percentile_approx
-- stddev_pop, stddev_samp, var_pop, var_samp
-- kurtosis, skewness
-- try_sum, try_avg
+### Aggregates (Phase 20)
+- covar_pop, covar_samp, corr (deferred for groupBy agg)
+- median, mode ✅
+- percentile_approx (deferred)
+- stddev_pop, stddev_samp, var_pop, var_samp ✅
+- kurtosis, skewness (deferred)
+- try_sum, try_avg ✅
 
 ### Datetime
 - convert_timezone, current_timezone

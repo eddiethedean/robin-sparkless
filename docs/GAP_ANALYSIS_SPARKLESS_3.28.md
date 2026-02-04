@@ -97,9 +97,9 @@ Functions and aliases that exist in Sparkless 3.28.0 but are **not** implemented
 - `transform_keys`, `transform_values`
 - `transform` — we have `array_transform`
 
-### 2.6 Ordering / sort helpers
-- `asc`, `asc_nulls_first`, `asc_nulls_last`
-- `desc`, `desc_nulls_first`, `desc_nulls_last`
+### 2.6 Ordering / sort helpers (Phase 20)
+- ~~`asc`, `asc_nulls_first`, `asc_nulls_last`~~ — **implemented**
+- ~~`desc`, `desc_nulls_first`, `desc_nulls_last`~~ — **implemented**
 
 ### 2.7 Assert / control
 - `assert_true`
@@ -120,8 +120,8 @@ Functions and aliases that exist in Sparkless 3.28.0 but are **not** implemented
 - `monotonically_increasing_id`
 - `current_catalog`, `current_database`, `current_schema`, `current_user`, `user`
 
-### 2.11 Rounding / numeric
-- `bround`
+### 2.11 Rounding / numeric (Phase 20)
+- ~~`bround`~~ — **implemented**
 - ~~`pmod`~~ — **implemented (Phase 17)**
 - ~~`factorial`~~ — **implemented (Phase 17)**
 - ~~`width_bucket`~~ — **implemented (Phase 19)**
@@ -138,23 +138,23 @@ Functions and aliases that exist in Sparkless 3.28.0 but are **not** implemented
 - `regexp` — we have `rlike`
 - ~~`regexp_count`, `regexp_instr`, `regexp_substr`~~ — **implemented (Phase 16)**
 
-### 2.14 Math / trig (additional)
-- `cot`, `csc`, `sec`
-- `e`, `pi`
+### 2.14 Math / trig (additional) (Phase 20)
+- ~~`cot`, `csc`, `sec`~~ — **implemented**
+- ~~`e`, `pi`~~ — **implemented**
 - `sign` (we have `signum`)
-- `negate`, `negative`, `positive`
+- ~~`negate`, `negative`, `positive`~~ — **implemented**
 
-### 2.15 Aggregates (additional)
+### 2.15 Aggregates (additional) (Phase 20)
 - ~~`any_value`, `count_if`, `max_by`, `min_by`, `percentile`, `product`~~ — **implemented (Phase 19)**
 - `first`, `last` (aggregate) — we have GroupedData.first, last
-- `covar_pop`, `covar_samp`, `corr`
+- `covar_pop`, `covar_samp`, `corr` (deferred for groupBy agg)
 - `mean` — we have `avg`
-- `median`, `mode`
-- `percentile_approx`
+- ~~`median`, `mode`~~ — **implemented (Phase 20)**
+- `percentile_approx` (deferred)
 - `std` — we have `stddev`
-- `stddev_pop`, `stddev_samp`
-- `var_pop`, `var_samp` — we have `variance`
-- `kurtosis`, `skewness`
+- ~~`stddev_pop`, `stddev_samp`~~ — **implemented (Phase 20)**
+- ~~`var_pop`, `var_samp`~~ — we have `variance`; **implemented (Phase 20)**
+- `kurtosis`, `skewness` (deferred)
 
 ### 2.16 Collect aggregates
 - ~~`collect_list`, `collect_set`~~ — **implemented (Phase 19)**
@@ -188,9 +188,9 @@ Functions and aliases that exist in Sparkless 3.28.0 but are **not** implemented
 - `from_csv`, `to_csv`
 - `schema_of_csv`, `schema_of_json`
 
-### 2.20 Try-* arithmetic
+### 2.20 Try-* arithmetic (Phase 20)
 - ~~`try_add`, `try_divide`, `try_subtract`, `try_multiply`, `try_element_at`~~ — **implemented (Phase 19)**
-- `try_sum`, `try_avg`
+- ~~`try_sum`, `try_avg`~~ — **implemented (Phase 20)**
 - `try_to_number`, `try_to_timestamp`
 
 ### 2.21 Type / cast

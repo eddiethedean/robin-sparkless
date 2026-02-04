@@ -1201,6 +1201,64 @@ pub fn apply_cos(column: Column) -> PolarsResult<Option<Column>> {
     Ok(Some(Column::new(name, out)))
 }
 
+/// Banker's rounding: round half to even (PySpark bround).
+fn bround_one(x: f64, scale: i32) -> f64 {
+    if x.is_nan() || x.is_infinite() {
+        return x;
+    }
+    let factor = 10_f64.powi(scale);
+    let scaled = x * factor;
+    let rounded =
+        if scaled.fract().abs() > 0.5_f64 - 1e-10 && scaled.fract().abs() < 0.5_f64 + 1e-10 {
+            // Half case: round to nearest even
+            let floor_val = scaled.trunc();
+            if floor_val as i64 % 2 == 0 {
+                floor_val
+            } else {
+                floor_val + scaled.signum()
+            }
+        } else {
+            scaled.round()
+        };
+    rounded / factor
+}
+
+/// Apply bround (banker's rounding) to a float column.
+pub fn apply_bround(column: Column, scale: i32) -> PolarsResult<Option<Column>> {
+    let name = column.field().into_owned().name;
+    let series = column.take_materialized_series();
+    let ca = float_series_to_f64(&series)?;
+    let out = ca.apply_values(|x| bround_one(x, scale)).into_series();
+    Ok(Some(Column::new(name, out)))
+}
+
+/// Apply cot (1/tan) to a float column.
+pub fn apply_cot(column: Column) -> PolarsResult<Option<Column>> {
+    let name = column.field().into_owned().name;
+    let series = column.take_materialized_series();
+    let ca = float_series_to_f64(&series)?;
+    let out = ca.apply_values(|x| 1.0 / x.tan()).into_series();
+    Ok(Some(Column::new(name, out)))
+}
+
+/// Apply csc (1/sin) to a float column.
+pub fn apply_csc(column: Column) -> PolarsResult<Option<Column>> {
+    let name = column.field().into_owned().name;
+    let series = column.take_materialized_series();
+    let ca = float_series_to_f64(&series)?;
+    let out = ca.apply_values(|x| 1.0 / x.sin()).into_series();
+    Ok(Some(Column::new(name, out)))
+}
+
+/// Apply sec (1/cos) to a float column.
+pub fn apply_sec(column: Column) -> PolarsResult<Option<Column>> {
+    let name = column.field().into_owned().name;
+    let series = column.take_materialized_series();
+    let ca = float_series_to_f64(&series)?;
+    let out = ca.apply_values(|x| 1.0 / x.cos()).into_series();
+    Ok(Some(Column::new(name, out)))
+}
+
 /// Apply tan (radians) to a float column.
 pub fn apply_tan(column: Column) -> PolarsResult<Option<Column>> {
     let name = column.field().into_owned().name;

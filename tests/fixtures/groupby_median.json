@@ -1,0 +1,37 @@
+{
+  "name": "groupby_median",
+  "pyspark_version": "3.5.0",
+  "input": {
+    "schema": [
+      { "name": "dept", "type": "string" },
+      { "name": "salary", "type": "double" }
+    ],
+    "rows": [
+      ["Sales", 1000.0],
+      ["Sales", 1500.0],
+      ["Sales", 2000.0],
+      ["Engineering", 3000.0],
+      ["Engineering", 3500.0]
+    ]
+  },
+  "operations": [
+    { "op": "groupBy", "columns": ["dept"] },
+    {
+      "op": "agg",
+      "aggregations": [
+        { "func": "median", "alias": "median(salary)", "column": "salary" }
+      ]
+    },
+    { "op": "orderBy", "columns": ["dept"], "ascending": [true] }
+  ],
+  "expected": {
+    "schema": [
+      { "name": "dept", "type": "string" },
+      { "name": "median(salary)", "type": "double" }
+    ],
+    "rows": [
+      ["Engineering", 3250.0],
+      ["Sales", 1500.0]
+    ]
+  }
+}

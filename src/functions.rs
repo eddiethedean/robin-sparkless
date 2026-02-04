@@ -1,6 +1,80 @@
 use crate::column::Column;
 use polars::prelude::*;
 
+// -----------------------------------------------------------------------------
+// Phase 20: Ordering functions (asc, desc, nulls_first, nulls_last)
+// -----------------------------------------------------------------------------
+
+/// Sort order specification for use in orderBy/sort. Holds expr + direction + null placement.
+#[derive(Debug, Clone)]
+pub struct SortOrder {
+    pub(crate) expr: Expr,
+    pub(crate) descending: bool,
+    pub(crate) nulls_last: bool,
+}
+
+impl SortOrder {
+    pub fn expr(&self) -> &Expr {
+        &self.expr
+    }
+}
+
+/// Ascending sort, nulls first (Spark default for ASC).
+pub fn asc(column: &Column) -> SortOrder {
+    SortOrder {
+        expr: column.expr().clone(),
+        descending: false,
+        nulls_last: false,
+    }
+}
+
+/// Ascending sort, nulls first.
+pub fn asc_nulls_first(column: &Column) -> SortOrder {
+    SortOrder {
+        expr: column.expr().clone(),
+        descending: false,
+        nulls_last: false,
+    }
+}
+
+/// Ascending sort, nulls last.
+pub fn asc_nulls_last(column: &Column) -> SortOrder {
+    SortOrder {
+        expr: column.expr().clone(),
+        descending: false,
+        nulls_last: true,
+    }
+}
+
+/// Descending sort, nulls last (Spark default for DESC).
+pub fn desc(column: &Column) -> SortOrder {
+    SortOrder {
+        expr: column.expr().clone(),
+        descending: true,
+        nulls_last: true,
+    }
+}
+
+/// Descending sort, nulls first.
+pub fn desc_nulls_first(column: &Column) -> SortOrder {
+    SortOrder {
+        expr: column.expr().clone(),
+        descending: true,
+        nulls_last: false,
+    }
+}
+
+/// Descending sort, nulls last.
+pub fn desc_nulls_last(column: &Column) -> SortOrder {
+    SortOrder {
+        expr: column.expr().clone(),
+        descending: true,
+        nulls_last: true,
+    }
+}
+
+// -----------------------------------------------------------------------------
+
 /// Parse PySpark-like type name to Polars DataType.
 pub fn parse_type_name(name: &str) -> Result<DataType, String> {
     let s = name.trim().to_lowercase();
@@ -81,6 +155,43 @@ pub fn stddev(col: &Column) -> Column {
 /// Variance (sample) aggregation (PySpark variance / var_samp)
 pub fn variance(col: &Column) -> Column {
     Column::from_expr(col.expr().clone().var(1), Some("variance".to_string()))
+}
+
+// Phase 20: Additional aggregates
+/// Population standard deviation (ddof=0). PySpark stddev_pop.
+pub fn stddev_pop(col: &Column) -> Column {
+    Column::from_expr(col.expr().clone().std(0), Some("stddev_pop".to_string()))
+}
+
+/// Sample standard deviation (ddof=1). Alias for stddev. PySpark stddev_samp.
+pub fn stddev_samp(col: &Column) -> Column {
+    stddev(col)
+}
+
+/// Population variance (ddof=0). PySpark var_pop.
+pub fn var_pop(col: &Column) -> Column {
+    Column::from_expr(col.expr().clone().var(0), Some("var_pop".to_string()))
+}
+
+/// Sample variance (ddof=1). Alias for variance. PySpark var_samp.
+pub fn var_samp(col: &Column) -> Column {
+    variance(col)
+}
+
+/// Median aggregation. PySpark median.
+pub fn median(col: &Column) -> Column {
+    use polars::prelude::QuantileMethod;
+    Column::from_expr(
+        col.expr()
+            .clone()
+            .quantile(lit(0.5), QuantileMethod::Linear),
+        Some("median".to_string()),
+    )
+}
+
+/// Mode aggregation - most frequent value. PySpark mode.
+pub fn mode(col: &Column) -> Column {
+    col.clone().mode()
 }
 
 /// Count distinct aggregation (PySpark countDistinct)
@@ -458,6 +569,51 @@ pub fn floor(column: &Column) -> Column {
 /// Round (PySpark round)
 pub fn round(column: &Column, decimals: u32) -> Column {
     column.clone().round(decimals)
+}
+
+/// Banker's rounding - round half to even (PySpark bround).
+pub fn bround(column: &Column, scale: i32) -> Column {
+    column.clone().bround(scale)
+}
+
+/// Unary minus / negate (PySpark negate, negative).
+pub fn negate(column: &Column) -> Column {
+    column.clone().negate()
+}
+
+/// Alias for negate. PySpark negative.
+pub fn negative(column: &Column) -> Column {
+    negate(column)
+}
+
+/// Unary plus - no-op, returns column as-is (PySpark positive).
+pub fn positive(column: &Column) -> Column {
+    column.clone()
+}
+
+/// Cotangent: 1/tan (PySpark cot).
+pub fn cot(column: &Column) -> Column {
+    column.clone().cot()
+}
+
+/// Cosecant: 1/sin (PySpark csc).
+pub fn csc(column: &Column) -> Column {
+    column.clone().csc()
+}
+
+/// Secant: 1/cos (PySpark sec).
+pub fn sec(column: &Column) -> Column {
+    column.clone().sec()
+}
+
+/// Constant e = 2.718... (PySpark e).
+pub fn e() -> Column {
+    Column::from_expr(lit(std::f64::consts::E), Some("e".to_string()))
+}
+
+/// Constant pi = 3.14159... (PySpark pi).
+pub fn pi() -> Column {
+    Column::from_expr(lit(std::f64::consts::PI), Some("pi".to_string()))
 }
 
 /// Square root (PySpark sqrt)

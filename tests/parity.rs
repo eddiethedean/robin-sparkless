@@ -68,6 +68,8 @@ enum Operation {
         columns: Vec<String>,
         #[serde(default)]
         ascending: Vec<bool>,
+        #[serde(default)]
+        nulls_first: Option<Vec<bool>>,
     },
     #[serde(rename = "groupBy")]
     GroupBy { columns: Vec<String> },
@@ -607,16 +609,43 @@ fn apply_operations(
                 let cols: Vec<&str> = columns.iter().map(|s| s.as_str()).collect();
                 df = df.select(cols)?;
             }
-            Operation::OrderBy { columns, ascending } => {
-                // OrderBy can be applied to DataFrame or after aggregation
+            Operation::OrderBy {
+                columns,
+                ascending,
+                nulls_first,
+            } => {
                 if let Some(ref _gd) = grouped {
-                    // If we have a grouped data, we need to aggregate first
                     return Err(PolarsError::ComputeError(
                         "orderBy cannot be applied to GroupedData, must aggregate first".into(),
                     ));
                 }
-                let cols: Vec<&str> = columns.iter().map(|s| s.as_str()).collect();
-                df = df.order_by(cols, ascending.clone())?;
+                if let Some(nf) = nulls_first {
+                    use robin_sparkless::{
+                        asc_nulls_first, asc_nulls_last, col, desc_nulls_first, desc_nulls_last,
+                    };
+                    let mut sort_orders = Vec::with_capacity(columns.len());
+                    for (i, col_name) in columns.iter().enumerate() {
+                        let asc = ascending.get(i).copied().unwrap_or(true);
+                        let nf_val = nf.get(i).copied().unwrap_or(true);
+                        let c = col(col_name);
+                        let order = if asc {
+                            if nf_val {
+                                asc_nulls_first(&c)
+                            } else {
+                                asc_nulls_last(&c)
+                            }
+                        } else if nf_val {
+                            desc_nulls_first(&c)
+                        } else {
+                            desc_nulls_last(&c)
+                        };
+                        sort_orders.push(order);
+                    }
+                    df = df.order_by_exprs(sort_orders)?;
+                } else {
+                    let cols: Vec<&str> = columns.iter().map(|s| s.as_str()).collect();
+                    df = df.order_by(cols, ascending.clone())?;
+                }
             }
             Operation::GroupBy { columns } => {
                 if grouped.is_some() {
@@ -712,6 +741,19 @@ fn apply_operations(
                                 .filter(|a| *a != "stddev")
                                 .map(String::from)
                                 .unwrap_or_else(|| format!("stddev({})", col_name));
+                            e.alias(&name)
+                        }
+                        "stddev_pop" => {
+                            let col_name = agg_spec.column.as_ref().ok_or_else(|| {
+                                PolarsError::ComputeError(
+                                    "stddev_pop aggregation requires column name".into(),
+                                )
+                            })?;
+                            let e = col(col_name).std(0);
+                            let name: String = alias
+                                .filter(|a| !a.is_empty())
+                                .map(String::from)
+                                .unwrap_or_else(|| format!("stddev_pop({})", col_name));
                             e.alias(&name)
                         }
                         "variance" | "var_samp" => {
@@ -833,6 +875,75 @@ fn apply_operations(
                                 .filter(|a| !a.is_empty())
                                 .map(String::from)
                                 .unwrap_or_else(|| format!("count_if({})", col_name));
+                            e.alias(&name)
+                        }
+                        "var_pop" => {
+                            let col_name = agg_spec.column.as_ref().ok_or_else(|| {
+                                PolarsError::ComputeError(
+                                    "var_pop aggregation requires column name".into(),
+                                )
+                            })?;
+                            let e = col(col_name).var(0);
+                            let name: String = alias
+                                .filter(|a| !a.is_empty())
+                                .map(String::from)
+                                .unwrap_or_else(|| format!("var_pop({})", col_name));
+                            e.alias(&name)
+                        }
+                        "median" => {
+                            let col_name = agg_spec.column.as_ref().ok_or_else(|| {
+                                PolarsError::ComputeError(
+                                    "median aggregation requires column name".into(),
+                                )
+                            })?;
+                            let e = col(col_name).quantile(
+                                polars::prelude::lit(0.5),
+                                polars::prelude::QuantileMethod::Linear,
+                            );
+                            let name: String = alias
+                                .filter(|a| !a.is_empty())
+                                .map(String::from)
+                                .unwrap_or_else(|| format!("median({})", col_name));
+                            e.alias(&name)
+                        }
+                        "mode" => {
+                            let col_name = agg_spec.column.as_ref().ok_or_else(|| {
+                                PolarsError::ComputeError(
+                                    "mode aggregation requires column name".into(),
+                                )
+                            })?;
+                            let vc = col(col_name).value_counts(true, false, "count", false);
+                            let e = vc.first().struct_().field_by_index(0);
+                            let name: String = alias
+                                .filter(|a| !a.is_empty())
+                                .map(String::from)
+                                .unwrap_or_else(|| format!("mode({})", col_name));
+                            e.alias(&name)
+                        }
+                        "try_sum" => {
+                            let col_name = agg_spec.column.as_ref().ok_or_else(|| {
+                                PolarsError::ComputeError(
+                                    "try_sum aggregation requires column name".into(),
+                                )
+                            })?;
+                            let e = col(col_name).sum();
+                            let name: String = alias
+                                .filter(|a| !a.is_empty())
+                                .map(String::from)
+                                .unwrap_or_else(|| format!("try_sum({})", col_name));
+                            e.alias(&name)
+                        }
+                        "try_avg" => {
+                            let col_name = agg_spec.column.as_ref().ok_or_else(|| {
+                                PolarsError::ComputeError(
+                                    "try_avg aggregation requires column name".into(),
+                                )
+                            })?;
+                            let e = col(col_name).mean();
+                            let name: String = alias
+                                .filter(|a| !a.is_empty())
+                                .map(String::from)
+                                .unwrap_or_else(|| format!("try_avg({})", col_name));
                             e.alias(&name)
                         }
                         "percentile" => {
@@ -1889,22 +2000,22 @@ fn parse_with_column_expr(src: &str) -> Result<Expr, String> {
     use robin_sparkless::{
         acos, add_months, array_append, array_compact, array_contains, array_distinct,
         array_except, array_insert, array_intersect, array_prepend, array_size, array_sum,
-        array_union, ascii, asin, atan, atan2, base64, bit_length, cast, cbrt, ceiling,
-        char as rs_char, chr, coalesce, col, concat, concat_ws, contains, cos, cosh, create_map,
-        current_date, current_timestamp, date_add, date_from_unix_date, date_sub, datediff, day,
-        dayofmonth, dayofweek, dayofyear, degrees, element_at, elt, endswith, exp, factorial,
-        find_in_set, format_number, format_string, from_unixtime, get, greatest, hour, hypot,
-        ilike, initcap, instr, isnan, isnotnull, isnull, last_day, lcase, least, left, length,
-        like, lit_str, ln, log, log10, lower, lpad, make_date, map_concat, map_contains_key,
-        map_filter, map_from_entries, map_zip_with, md5, minute, months_between, named_struct,
-        nanvl, next_day, nullif, nvl, nvl2, overlay, pmod, position, pow, power, quarter, radians,
-        regexp_count, regexp_extract, regexp_extract_all, regexp_instr, regexp_like,
-        regexp_replace, regexp_substr, repeat, replace, reverse, right, rlike, rpad, second, sha1,
-        sha2, signum, sin, sinh, size, split, split_part, sqrt, startswith, struct_, substr,
-        substring, tan, tanh, timestamp_micros, timestamp_millis, timestamp_seconds, to_degrees,
-        to_radians, to_unix_timestamp, trim, trunc, try_add, try_cast, try_divide, try_multiply,
-        try_subtract, typeof_, ucase, unbase64, unix_date, unix_timestamp, unix_timestamp_now,
-        upper, weekofyear, when, width_bucket, zip_with,
+        array_union, ascii, asin, atan, atan2, base64, bit_length, bround, cast, cbrt, ceiling,
+        char as rs_char, chr, coalesce, col, concat, concat_ws, contains, cos, cosh, cot,
+        create_map, csc, current_date, current_timestamp, date_add, date_from_unix_date, date_sub,
+        datediff, day, dayofmonth, dayofweek, dayofyear, degrees, e, element_at, elt, endswith,
+        exp, factorial, find_in_set, format_number, format_string, from_unixtime, get, greatest,
+        hour, hypot, ilike, initcap, instr, isnan, isnotnull, isnull, last_day, lcase, least, left,
+        length, like, lit_str, ln, log, log10, lower, lpad, make_date, map_concat,
+        map_contains_key, map_filter, map_from_entries, map_zip_with, md5, minute, months_between,
+        named_struct, nanvl, negate, next_day, nullif, nvl, nvl2, overlay, pi, pmod, position,
+        positive, pow, power, quarter, radians, regexp_count, regexp_extract, regexp_extract_all,
+        regexp_instr, regexp_like, regexp_replace, regexp_substr, repeat, replace, reverse, right,
+        rlike, rpad, sec, second, sha1, sha2, signum, sin, sinh, size, split, split_part, sqrt,
+        startswith, struct_, substr, substring, tan, tanh, timestamp_micros, timestamp_millis,
+        timestamp_seconds, to_degrees, to_radians, to_unix_timestamp, trim, trunc, try_add,
+        try_cast, try_divide, try_multiply, try_subtract, typeof_, ucase, unbase64, unix_date,
+        unix_timestamp, unix_timestamp_now, upper, weekofyear, when, width_bucket, zip_with,
     };
 
     let s = src.trim();
@@ -3284,6 +3395,60 @@ fn parse_with_column_expr(src: &str) -> Result<Expr, String> {
         let col_name = extract_col_name(inner)?;
         let c = col(col_name);
         return Ok(sqrt(&c).into_expr());
+    }
+    if s.starts_with("bround(") {
+        let inner = extract_first_arg(s, "bround(")?;
+        let parts = parse_comma_separated_args(inner);
+        let col_name = extract_col_name(parts.first().ok_or("bround needs column")?)?;
+        let scale: i32 = parts
+            .get(1)
+            .ok_or("bround needs scale")?
+            .trim()
+            .parse()
+            .map_err(|e: std::num::ParseIntError| e.to_string())?;
+        let c = col(col_name);
+        return Ok(bround(&c, scale).into_expr());
+    }
+    if s.starts_with("negate(") || s.starts_with("negative(") {
+        let prefix = if s.starts_with("negate(") {
+            "negate("
+        } else {
+            "negative("
+        };
+        let inner = extract_first_arg(s, prefix)?;
+        let col_name = extract_col_name(inner)?;
+        let c = col(col_name);
+        return Ok(negate(&c).into_expr());
+    }
+    if s.starts_with("positive(") {
+        let inner = extract_first_arg(s, "positive(")?;
+        let col_name = extract_col_name(inner)?;
+        let c = col(col_name);
+        return Ok(positive(&c).into_expr());
+    }
+    if s.starts_with("cot(") {
+        let inner = extract_first_arg(s, "cot(")?;
+        let col_name = extract_col_name(inner)?;
+        let c = col(col_name);
+        return Ok(cot(&c).into_expr());
+    }
+    if s.starts_with("csc(") {
+        let inner = extract_first_arg(s, "csc(")?;
+        let col_name = extract_col_name(inner)?;
+        let c = col(col_name);
+        return Ok(csc(&c).into_expr());
+    }
+    if s.starts_with("sec(") {
+        let inner = extract_first_arg(s, "sec(")?;
+        let col_name = extract_col_name(inner)?;
+        let c = col(col_name);
+        return Ok(sec(&c).into_expr());
+    }
+    if s == "e()" || s == "e" {
+        return Ok(e().into_expr());
+    }
+    if s == "pi()" || s == "pi" {
+        return Ok(pi().into_expr());
     }
     if s.starts_with("pow(") {
         let inner = extract_first_arg(s, "pow(")?;
