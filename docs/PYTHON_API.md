@@ -40,6 +40,16 @@ Python module is only compiled when the `pyo3` feature is enabled. Default `carg
 | GroupedData     | `GroupedData` | `count()`, `sum(column)`, `avg(column)`, `min(column)`, `max(column)`, `agg(exprs)`; **Phase 19**: `any_value(column)`, `bool_and(column)`, `bool_or(column)`, `product(column)`, `collect_list(column)`, `collect_set(column)`, `count_if(column)`, `percentile(column, p)`, `max_by(value_column, ord_column)`, `min_by(value_column, ord_column)` |
 | Functions       | Module-level            | ... **Phase 16**: `regexp_count`, `regexp_instr`, `regexp_substr`, `split_part`, `find_in_set`, `format_string`, `printf`; **Phase 17**: `unix_timestamp`, `to_unix_timestamp`, `from_unixtime`, `make_date`, `timestamp_seconds`, `timestamp_millis`, `timestamp_micros`, `unix_date`, `date_from_unix_date`, `pmod`, `factorial`; **Phase 19**: `try_divide(left, right)`, `try_add`, `try_subtract`, `try_multiply`, `width_bucket(value, min_val, max_val, num_bucket)`, `elt(index, columns)`, `bit_length(column)`, `typeof(column)`; **Phase 20**: `asc`, `desc`, `asc_nulls_first`, `asc_nulls_last`, `desc_nulls_first`, `desc_nulls_last`, `bround`, `median`, `mode`, etc.; **Phase 21**: `btrim(column, trim_str=None)`, `locate(substr, column, pos=1)`, `conv(column, from_base, to_base)`, `hex`, `unhex`, `bin`, `getbit(column, pos)`, `to_char`, `to_varchar`, `to_number`, `try_to_number`, `try_to_timestamp`, `str_to_map(column, pair_delim=None, key_value_delim=None)`, `arrays_overlap`, `arrays_zip`, `explode_outer`, `array_agg`; **Phase 22**: `curdate()`, `now()`, `localtimestamp()`, `date_diff(end, start)`, `dateadd(column, n)`, `datepart(column, field)`, `extract(column, field)`, `date_part(column, field)`, `unix_micros`, `unix_millis`, `unix_seconds`, `dayname`, `weekday`, `make_timestamp(year, month, day, hour, minute, sec)`, `make_timestamp_ntz`, `make_interval(years, months, weeks, days, hours, mins, secs)`, `timestampadd(unit, amount, ts)`, `timestampdiff(unit, start, end)`, `days(n)`, `hours(n)`, `minutes(n)`, `months(n)`, `years(n)`, `from_utc_timestamp(column, tz)`, `to_utc_timestamp(column, tz)`, `convert_timezone(source_tz, target_tz, column)`, `current_timezone()`, `to_timestamp(column)` |
 
+## Signature parity (PySpark alignment)
+
+A **signature gap analysis** against PySpark (parameter names, types, defaults) is maintained to guide API alignment. See [SIGNATURE_GAP_ANALYSIS.md](SIGNATURE_GAP_ANALYSIS.md) for:
+
+- Counts: exact match, partial (param name differences), missing (PySpark-only), extra (robin-only)
+- Per-function and per-class method comparison
+- Recommendations (e.g. align param names like `column` → `col` for drop-in compatibility)
+
+Signatures are exported with `scripts/export_pyspark_signatures.py` and `scripts/export_robin_signatures.py`, then compared with `scripts/compare_signatures.py`.
+
 ## Key signatures (Python)
 
 - **SparkSession**

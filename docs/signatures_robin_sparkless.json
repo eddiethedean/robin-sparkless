@@ -1,0 +1,6116 @@
+{
+  "source": "robin_sparkless",
+  "functions": [
+    {
+      "name": "acos",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "acosh",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "add_months",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "n",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "array_agg",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "array_append",
+      "kind": "function",
+      "args": [
+        {
+          "name": "array",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "elem",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "array_compact",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "array_distinct",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "array_except",
+      "kind": "function",
+      "args": [
+        {
+          "name": "a",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "b",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "array_insert",
+      "kind": "function",
+      "args": [
+        {
+          "name": "array",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "pos",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "elem",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "array_intersect",
+      "kind": "function",
+      "args": [
+        {
+          "name": "a",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "b",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "array_prepend",
+      "kind": "function",
+      "args": [
+        {
+          "name": "array",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "elem",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "array_union",
+      "kind": "function",
+      "args": [
+        {
+          "name": "a",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "b",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "arrays_overlap",
+      "kind": "function",
+      "args": [
+        {
+          "name": "left",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "right",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "arrays_zip",
+      "kind": "function",
+      "args": [
+        {
+          "name": "left",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "right",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "asc",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "asc_nulls_first",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "asc_nulls_last",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "ascii",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "asin",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "asinh",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "assert_true",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "atan",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "atan2",
+      "kind": "function",
+      "args": [
+        {
+          "name": "y",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "x",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "atanh",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "avg",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "base64",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "bin",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "bit_and",
+      "kind": "function",
+      "args": [
+        {
+          "name": "left",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "right",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "bit_count",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "bit_get",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "pos",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "bit_length",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "bit_or",
+      "kind": "function",
+      "args": [
+        {
+          "name": "left",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "right",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "bit_xor",
+      "kind": "function",
+      "args": [
+        {
+          "name": "left",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "right",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "bitwiseNOT",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "bitwise_not",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "broadcast",
+      "kind": "function",
+      "args": [
+        {
+          "name": "df",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "bround",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "scale",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "btrim",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "trim_str",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "cast",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "type_name",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "cbrt",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "ceiling",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "char",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "chr",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "coalesce",
+      "kind": "function",
+      "args": [
+        {
+          "name": "columns",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "col",
+      "kind": "function",
+      "args": [
+        {
+          "name": "name",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "contains",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "substring",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "conv",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "from_base",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "to_base",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "convert_timezone",
+      "kind": "function",
+      "args": [
+        {
+          "name": "source_tz",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "target_tz",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "cos",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "cosh",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "cot",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "count",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "create_map",
+      "kind": "function",
+      "args": [
+        {
+          "name": "columns",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "csc",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "curdate",
+      "kind": "function",
+      "args": [],
+      "return_annotation": null
+    },
+    {
+      "name": "current_catalog",
+      "kind": "function",
+      "args": [],
+      "return_annotation": null
+    },
+    {
+      "name": "current_database",
+      "kind": "function",
+      "args": [],
+      "return_annotation": null
+    },
+    {
+      "name": "current_schema",
+      "kind": "function",
+      "args": [],
+      "return_annotation": null
+    },
+    {
+      "name": "current_timezone",
+      "kind": "function",
+      "args": [],
+      "return_annotation": null
+    },
+    {
+      "name": "current_user",
+      "kind": "function",
+      "args": [],
+      "return_annotation": null
+    },
+    {
+      "name": "date_diff",
+      "kind": "function",
+      "args": [
+        {
+          "name": "end",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "start",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "date_from_unix_date",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "date_part",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "field",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "dateadd",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "n",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "datepart",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "field",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "day",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "dayname",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "dayofmonth",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "dayofweek",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "dayofyear",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "days",
+      "kind": "function",
+      "args": [
+        {
+          "name": "n",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "degrees",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "desc",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "desc_nulls_first",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "desc_nulls_last",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "e",
+      "kind": "function",
+      "args": [],
+      "return_annotation": null
+    },
+    {
+      "name": "elt",
+      "kind": "function",
+      "args": [
+        {
+          "name": "index",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "columns",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "endswith",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "suffix",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "equal_null",
+      "kind": "function",
+      "args": [
+        {
+          "name": "left",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "right",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "execute_plan",
+      "kind": "function",
+      "args": [
+        {
+          "name": "data",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "schema",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "plan_json",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "explode_outer",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "expm1",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "extract",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "field",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "factorial",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "find_in_set",
+      "kind": "function",
+      "args": [
+        {
+          "name": "str_column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "set_column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "format_number",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "decimals",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "format_string",
+      "kind": "function",
+      "args": [
+        {
+          "name": "format",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "columns",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "from_unixtime",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "format",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "from_utc_timestamp",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "tz",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "get",
+      "kind": "function",
+      "args": [
+        {
+          "name": "map_col",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "key",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "getbit",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "pos",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "greatest",
+      "kind": "function",
+      "args": [
+        {
+          "name": "columns",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "hash",
+      "kind": "function",
+      "args": [
+        {
+          "name": "columns",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "hex",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "hours",
+      "kind": "function",
+      "args": [
+        {
+          "name": "n",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "hypot",
+      "kind": "function",
+      "args": [
+        {
+          "name": "x",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "y",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "ifnull",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "value",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "ilike",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "pattern",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "input_file_name",
+      "kind": "function",
+      "args": [],
+      "return_annotation": null
+    },
+    {
+      "name": "isin",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "other",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "isin_i64",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "values",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "isin_str",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "values",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "isnan",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "isnotnull",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "isnull",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "json_array_length",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "path",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "lcase",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "least",
+      "kind": "function",
+      "args": [
+        {
+          "name": "columns",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "left",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "n",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "like",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "pattern",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "lit",
+      "kind": "function",
+      "args": [
+        {
+          "name": "value",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "ln",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "localtimestamp",
+      "kind": "function",
+      "args": [],
+      "return_annotation": null
+    },
+    {
+      "name": "locate",
+      "kind": "function",
+      "args": [
+        {
+          "name": "substr",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "pos",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "log10",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "log1p",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "log2",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "make_date",
+      "kind": "function",
+      "args": [
+        {
+          "name": "year",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "month",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "day",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "make_interval",
+      "kind": "function",
+      "args": [
+        {
+          "name": "years",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "months",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "weeks",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "days",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "hours",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "mins",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "secs",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "make_timestamp",
+      "kind": "function",
+      "args": [
+        {
+          "name": "year",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "month",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "day",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "hour",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "minute",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "sec",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "make_timestamp_ntz",
+      "kind": "function",
+      "args": [
+        {
+          "name": "year",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "month",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "day",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "hour",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "minute",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "sec",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "map_concat",
+      "kind": "function",
+      "args": [
+        {
+          "name": "a",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "b",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "map_contains_key",
+      "kind": "function",
+      "args": [
+        {
+          "name": "map_col",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "key",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "map_filter_value_gt",
+      "kind": "function",
+      "args": [
+        {
+          "name": "map_col",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "threshold",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "map_from_entries",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "map_zip_with_coalesce",
+      "kind": "function",
+      "args": [
+        {
+          "name": "map1",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "map2",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "max",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "md5",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "median",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "min",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "minutes",
+      "kind": "function",
+      "args": [
+        {
+          "name": "n",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "mode",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "monotonically_increasing_id",
+      "kind": "function",
+      "args": [],
+      "return_annotation": null
+    },
+    {
+      "name": "months",
+      "kind": "function",
+      "args": [
+        {
+          "name": "n",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "months_between",
+      "kind": "function",
+      "args": [
+        {
+          "name": "end",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "start",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "named_struct",
+      "kind": "function",
+      "args": [
+        {
+          "name": "names",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "columns",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "negate",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "negative",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "next_day",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "day_of_week",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "now",
+      "kind": "function",
+      "args": [],
+      "return_annotation": null
+    },
+    {
+      "name": "nvl",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "value",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "nvl2",
+      "kind": "function",
+      "args": [
+        {
+          "name": "col1",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "col2",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "col3",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "overlay",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "replace",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "pos",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "length",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "parse_url",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "part",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "pi",
+      "kind": "function",
+      "args": [],
+      "return_annotation": null
+    },
+    {
+      "name": "pmod",
+      "kind": "function",
+      "args": [
+        {
+          "name": "dividend",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "divisor",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "position",
+      "kind": "function",
+      "args": [
+        {
+          "name": "substr",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "positive",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "power",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "exp",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "printf",
+      "kind": "function",
+      "args": [
+        {
+          "name": "format",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "columns",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "quarter",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "radians",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "raise_error",
+      "kind": "function",
+      "args": [
+        {
+          "name": "message",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "rand",
+      "kind": "function",
+      "args": [
+        {
+          "name": "seed",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "randn",
+      "kind": "function",
+      "args": [
+        {
+          "name": "seed",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "regexp_count",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "pattern",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "regexp_instr",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "pattern",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "group_idx",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "regexp_substr",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "pattern",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "replace",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "search",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "replacement",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "right",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "n",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "rint",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "rlike",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "pattern",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "sec",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "sha1",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "sha2",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "bit_length",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "shiftLeft",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "n",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "shiftRight",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "n",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "shift_left",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "n",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "shift_right",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "n",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "signum",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "sin",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "sinh",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "spark_partition_id",
+      "kind": "function",
+      "args": [],
+      "return_annotation": null
+    },
+    {
+      "name": "split_part",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "delimiter",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "part_num",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "stack",
+      "kind": "function",
+      "args": [
+        {
+          "name": "columns",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "startswith",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "prefix",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "stddev_pop",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "str_to_map",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "pair_delim",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "key_value_delim",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "struct",
+      "kind": "function",
+      "args": [
+        {
+          "name": "columns",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "substr",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "start",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "length",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "sum",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "tan",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "tanh",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "timestamp_micros",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "timestamp_millis",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "timestamp_seconds",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "timestampadd",
+      "kind": "function",
+      "args": [
+        {
+          "name": "unit",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "amount",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "ts",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "timestampdiff",
+      "kind": "function",
+      "args": [
+        {
+          "name": "unit",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "start",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "end",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "to_char",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "to_degrees",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "to_number",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "to_radians",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "to_timestamp",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "to_unix_timestamp",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "format",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "to_utc_timestamp",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "tz",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "to_varchar",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "try_add",
+      "kind": "function",
+      "args": [
+        {
+          "name": "left",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "right",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "try_cast",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "type_name",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "try_divide",
+      "kind": "function",
+      "args": [
+        {
+          "name": "left",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "right",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "try_multiply",
+      "kind": "function",
+      "args": [
+        {
+          "name": "left",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "right",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "try_subtract",
+      "kind": "function",
+      "args": [
+        {
+          "name": "left",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "right",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "try_to_number",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "try_to_timestamp",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "typeof",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "ucase",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "unbase64",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "unhex",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "unix_date",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "unix_micros",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "unix_millis",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "unix_seconds",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "unix_timestamp",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "format",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "url_decode",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "url_encode",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "user",
+      "kind": "function",
+      "args": [],
+      "return_annotation": null
+    },
+    {
+      "name": "var_pop",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "version",
+      "kind": "function",
+      "args": [],
+      "return_annotation": null
+    },
+    {
+      "name": "weekday",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "weekofyear",
+      "kind": "function",
+      "args": [
+        {
+          "name": "column",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "when",
+      "kind": "function",
+      "args": [
+        {
+          "name": "condition",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "width_bucket",
+      "kind": "function",
+      "args": [
+        {
+          "name": "value",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "min_val",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "max_val",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "num_bucket",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "years",
+      "kind": "function",
+      "args": [
+        {
+          "name": "n",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    },
+    {
+      "name": "zip_with_coalesce",
+      "kind": "function",
+      "args": [
+        {
+          "name": "left",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "right",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
+      "return_annotation": null
+    }
+  ],
+  "classes": {
+    "SparkSession": [
+      {
+        "name": "builder",
+        "kind": "method",
+        "args": [],
+        "return_annotation": null,
+        "class": "SparkSession"
+      },
+      {
+        "name": "create_dataframe",
+        "kind": "method",
+        "args": [
+          {
+            "name": "data",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          },
+          {
+            "name": "column_names",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ],
+        "return_annotation": null,
+        "class": "SparkSession"
+      },
+      {
+        "name": "create_dataframe_from_rows",
+        "kind": "method",
+        "args": [
+          {
+            "name": "data",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          },
+          {
+            "name": "schema",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ],
+        "return_annotation": null,
+        "class": "SparkSession"
+      },
+      {
+        "name": "is_case_sensitive",
+        "kind": "method",
+        "args": [],
+        "return_annotation": null,
+        "class": "SparkSession"
+      },
+      {
+        "name": "read_csv",
+        "kind": "method",
+        "args": [
+          {
+            "name": "path",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ],
+        "return_annotation": null,
+        "class": "SparkSession"
+      },
+      {
+        "name": "read_json",
+        "kind": "method",
+        "args": [
+          {
+            "name": "path",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ],
+        "return_annotation": null,
+        "class": "SparkSession"
+      },
+      {
+        "name": "read_parquet",
+        "kind": "method",
+        "args": [
+          {
+            "name": "path",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ],
+        "return_annotation": null,
+        "class": "SparkSession"
+      }
+    ],
+    "SparkSessionBuilder": [
+      {
+        "name": "app_name",
+        "kind": "method",
+        "args": [
+          {
+            "name": "name",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ],
+        "return_annotation": null,
+        "class": "SparkSessionBuilder"
+      },
+      {
+        "name": "config",
+        "kind": "method",
+        "args": [
+          {
+            "name": "key",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          },
+          {
+            "name": "value",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ],
+        "return_annotation": null,
+        "class": "SparkSessionBuilder"
+      },
+      {
+        "name": "get_or_create",
+        "kind": "method",
+        "args": [],
+        "return_annotation": null,
+        "class": "SparkSessionBuilder"
+      },
+      {
+        "name": "master",
+        "kind": "method",
+        "args": [
+          {
+            "name": "master",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ],
+        "return_annotation": null,
+        "class": "SparkSessionBuilder"
+      }
+    ],
+    "DataFrame": [
+      {
+        "name": "checkpoint",
+        "kind": "method",
+        "args": [],
+        "return_annotation": null,
+        "class": "DataFrame"
+      },
+      {
+        "name": "coalesce",
+        "kind": "method",
+        "args": [
+          {
+            "name": "num_partitions",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ],
+        "return_annotation": null,
+        "class": "DataFrame"
+      },
+      {
+        "name": "col_regex",
+        "kind": "method",
+        "args": [
+          {
+            "name": "pattern",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ],
+        "return_annotation": null,
+        "class": "DataFrame"
+      },
+      {
+        "name": "collect",
+        "kind": "method",
+        "args": [],
+        "return_annotation": null,
+        "class": "DataFrame"
+      },
+      {
+        "name": "corr",
+        "kind": "method",
+        "args": [],
+        "return_annotation": null,
+        "class": "DataFrame"
+      },
+      {
+        "name": "count",
+        "kind": "method",
+        "args": [],
+        "return_annotation": null,
+        "class": "DataFrame"
+      },
+      {
+        "name": "distinct",
+        "kind": "method",
+        "args": [
+          {
+            "name": "subset",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ],
+        "return_annotation": null,
+        "class": "DataFrame"
+      },
+      {
+        "name": "drop",
+        "kind": "method",
+        "args": [
+          {
+            "name": "cols",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ],
+        "return_annotation": null,
+        "class": "DataFrame"
+      },
+      {
+        "name": "dropna",
+        "kind": "method",
+        "args": [
+          {
+            "name": "subset",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ],
+        "return_annotation": null,
+        "class": "DataFrame"
+      },
+      {
+        "name": "explain",
+        "kind": "method",
+        "args": [],
+        "return_annotation": null,
+        "class": "DataFrame"
+      },
+      {
+        "name": "fillna",
+        "kind": "method",
+        "args": [
+          {
+            "name": "value",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ],
+        "return_annotation": null,
+        "class": "DataFrame"
+      },
+      {
+        "name": "filter",
+        "kind": "method",
+        "args": [
+          {
+            "name": "condition",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ],
+        "return_annotation": null,
+        "class": "DataFrame"
+      },
+      {
+        "name": "first",
+        "kind": "method",
+        "args": [],
+        "return_annotation": null,
+        "class": "DataFrame"
+      },
+      {
+        "name": "group_by",
+        "kind": "method",
+        "args": [
+          {
+            "name": "cols",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ],
+        "return_annotation": null,
+        "class": "DataFrame"
+      },
+      {
+        "name": "head",
+        "kind": "method",
+        "args": [
+          {
+            "name": "n",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ],
+        "return_annotation": null,
+        "class": "DataFrame"
+      },
+      {
+        "name": "is_empty",
+        "kind": "method",
+        "args": [],
+        "return_annotation": null,
+        "class": "DataFrame"
+      },
+      {
+        "name": "join",
+        "kind": "method",
+        "args": [
+          {
+            "name": "other",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          },
+          {
+            "name": "on",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          },
+          {
+            "name": "how",
+            "default": "inner",
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ],
+        "return_annotation": null,
+        "class": "DataFrame"
+      },
+      {
+        "name": "limit",
+        "kind": "method",
+        "args": [
+          {
+            "name": "n",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ],
+        "return_annotation": null,
+        "class": "DataFrame"
+      },
+      {
+        "name": "local_checkpoint",
+        "kind": "method",
+        "args": [],
+        "return_annotation": null,
+        "class": "DataFrame"
+      },
+      {
+        "name": "na",
+        "kind": "method",
+        "args": [],
+        "return_annotation": null,
+        "class": "DataFrame"
+      },
+      {
+        "name": "offset",
+        "kind": "method",
+        "args": [
+          {
+            "name": "n",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ],
+        "return_annotation": null,
+        "class": "DataFrame"
+      },
+      {
+        "name": "order_by",
+        "kind": "method",
+        "args": [
+          {
+            "name": "cols",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          },
+          {
+            "name": "ascending",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ],
+        "return_annotation": null,
+        "class": "DataFrame"
+      },
+      {
+        "name": "order_by_exprs",
+        "kind": "method",
+        "args": [
+          {
+            "name": "sort_orders",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ],
+        "return_annotation": null,
+        "class": "DataFrame"
+      },
+      {
+        "name": "print_schema",
+        "kind": "method",
+        "args": [],
+        "return_annotation": null,
+        "class": "DataFrame"
+      },
+      {
+        "name": "random_split",
+        "kind": "method",
+        "args": [
+          {
+            "name": "weights",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          },
+          {
+            "name": "seed",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ],
+        "return_annotation": null,
+        "class": "DataFrame"
+      },
+      {
+        "name": "repartition",
+        "kind": "method",
+        "args": [
+          {
+            "name": "num_partitions",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ],
+        "return_annotation": null,
+        "class": "DataFrame"
+      },
+      {
+        "name": "sample",
+        "kind": "method",
+        "args": [
+          {
+            "name": "with_replacement",
+            "default": false,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          },
+          {
+            "name": "fraction",
+            "default": 1.0,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          },
+          {
+            "name": "seed",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ],
+        "return_annotation": null,
+        "class": "DataFrame"
+      },
+      {
+        "name": "select",
+        "kind": "method",
+        "args": [
+          {
+            "name": "cols",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ],
+        "return_annotation": null,
+        "class": "DataFrame"
+      },
+      {
+        "name": "select_expr",
+        "kind": "method",
+        "args": [
+          {
+            "name": "exprs",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ],
+        "return_annotation": null,
+        "class": "DataFrame"
+      },
+      {
+        "name": "show",
+        "kind": "method",
+        "args": [
+          {
+            "name": "n",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ],
+        "return_annotation": null,
+        "class": "DataFrame"
+      },
+      {
+        "name": "stat",
+        "kind": "method",
+        "args": [],
+        "return_annotation": null,
+        "class": "DataFrame"
+      },
+      {
+        "name": "summary",
+        "kind": "method",
+        "args": [],
+        "return_annotation": null,
+        "class": "DataFrame"
+      },
+      {
+        "name": "tail",
+        "kind": "method",
+        "args": [
+          {
+            "name": "n",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ],
+        "return_annotation": null,
+        "class": "DataFrame"
+      },
+      {
+        "name": "take",
+        "kind": "method",
+        "args": [
+          {
+            "name": "n",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ],
+        "return_annotation": null,
+        "class": "DataFrame"
+      },
+      {
+        "name": "to_df",
+        "kind": "method",
+        "args": [
+          {
+            "name": "names",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ],
+        "return_annotation": null,
+        "class": "DataFrame"
+      },
+      {
+        "name": "to_json",
+        "kind": "method",
+        "args": [],
+        "return_annotation": null,
+        "class": "DataFrame"
+      },
+      {
+        "name": "to_pandas",
+        "kind": "method",
+        "args": [],
+        "return_annotation": null,
+        "class": "DataFrame"
+      },
+      {
+        "name": "union",
+        "kind": "method",
+        "args": [
+          {
+            "name": "other",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ],
+        "return_annotation": null,
+        "class": "DataFrame"
+      },
+      {
+        "name": "union_by_name",
+        "kind": "method",
+        "args": [
+          {
+            "name": "other",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ],
+        "return_annotation": null,
+        "class": "DataFrame"
+      },
+      {
+        "name": "with_column",
+        "kind": "method",
+        "args": [
+          {
+            "name": "column_name",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          },
+          {
+            "name": "expr",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ],
+        "return_annotation": null,
+        "class": "DataFrame"
+      },
+      {
+        "name": "with_column_renamed",
+        "kind": "method",
+        "args": [
+          {
+            "name": "old",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          },
+          {
+            "name": "new",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ],
+        "return_annotation": null,
+        "class": "DataFrame"
+      },
+      {
+        "name": "with_columns",
+        "kind": "method",
+        "args": [
+          {
+            "name": "mapping",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ],
+        "return_annotation": null,
+        "class": "DataFrame"
+      },
+      {
+        "name": "with_columns_renamed",
+        "kind": "method",
+        "args": [
+          {
+            "name": "mapping",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ],
+        "return_annotation": null,
+        "class": "DataFrame"
+      }
+    ],
+    "GroupedData": [
+      {
+        "name": "agg",
+        "kind": "method",
+        "args": [
+          {
+            "name": "exprs",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ],
+        "return_annotation": null,
+        "class": "GroupedData"
+      },
+      {
+        "name": "any_value",
+        "kind": "method",
+        "args": [
+          {
+            "name": "column",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ],
+        "return_annotation": null,
+        "class": "GroupedData"
+      },
+      {
+        "name": "avg",
+        "kind": "method",
+        "args": [
+          {
+            "name": "column",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ],
+        "return_annotation": null,
+        "class": "GroupedData"
+      },
+      {
+        "name": "bool_and",
+        "kind": "method",
+        "args": [
+          {
+            "name": "column",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ],
+        "return_annotation": null,
+        "class": "GroupedData"
+      },
+      {
+        "name": "bool_or",
+        "kind": "method",
+        "args": [
+          {
+            "name": "column",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ],
+        "return_annotation": null,
+        "class": "GroupedData"
+      },
+      {
+        "name": "collect_list",
+        "kind": "method",
+        "args": [
+          {
+            "name": "column",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ],
+        "return_annotation": null,
+        "class": "GroupedData"
+      },
+      {
+        "name": "collect_set",
+        "kind": "method",
+        "args": [
+          {
+            "name": "column",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ],
+        "return_annotation": null,
+        "class": "GroupedData"
+      },
+      {
+        "name": "corr",
+        "kind": "method",
+        "args": [
+          {
+            "name": "col1",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          },
+          {
+            "name": "col2",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ],
+        "return_annotation": null,
+        "class": "GroupedData"
+      },
+      {
+        "name": "count",
+        "kind": "method",
+        "args": [],
+        "return_annotation": null,
+        "class": "GroupedData"
+      },
+      {
+        "name": "count_if",
+        "kind": "method",
+        "args": [
+          {
+            "name": "column",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ],
+        "return_annotation": null,
+        "class": "GroupedData"
+      },
+      {
+        "name": "covar_pop",
+        "kind": "method",
+        "args": [
+          {
+            "name": "col1",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          },
+          {
+            "name": "col2",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ],
+        "return_annotation": null,
+        "class": "GroupedData"
+      },
+      {
+        "name": "covar_samp",
+        "kind": "method",
+        "args": [
+          {
+            "name": "col1",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          },
+          {
+            "name": "col2",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ],
+        "return_annotation": null,
+        "class": "GroupedData"
+      },
+      {
+        "name": "kurtosis",
+        "kind": "method",
+        "args": [
+          {
+            "name": "column",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ],
+        "return_annotation": null,
+        "class": "GroupedData"
+      },
+      {
+        "name": "max",
+        "kind": "method",
+        "args": [
+          {
+            "name": "column",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ],
+        "return_annotation": null,
+        "class": "GroupedData"
+      },
+      {
+        "name": "max_by",
+        "kind": "method",
+        "args": [
+          {
+            "name": "value_column",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          },
+          {
+            "name": "ord_column",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ],
+        "return_annotation": null,
+        "class": "GroupedData"
+      },
+      {
+        "name": "min",
+        "kind": "method",
+        "args": [
+          {
+            "name": "column",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ],
+        "return_annotation": null,
+        "class": "GroupedData"
+      },
+      {
+        "name": "min_by",
+        "kind": "method",
+        "args": [
+          {
+            "name": "value_column",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          },
+          {
+            "name": "ord_column",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ],
+        "return_annotation": null,
+        "class": "GroupedData"
+      },
+      {
+        "name": "percentile",
+        "kind": "method",
+        "args": [
+          {
+            "name": "column",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          },
+          {
+            "name": "p",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ],
+        "return_annotation": null,
+        "class": "GroupedData"
+      },
+      {
+        "name": "product",
+        "kind": "method",
+        "args": [
+          {
+            "name": "column",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ],
+        "return_annotation": null,
+        "class": "GroupedData"
+      },
+      {
+        "name": "skewness",
+        "kind": "method",
+        "args": [
+          {
+            "name": "column",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ],
+        "return_annotation": null,
+        "class": "GroupedData"
+      },
+      {
+        "name": "sum",
+        "kind": "method",
+        "args": [
+          {
+            "name": "column",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ],
+        "return_annotation": null,
+        "class": "GroupedData"
+      }
+    ],
+    "Column": [
+      {
+        "name": "acos_",
+        "kind": "method",
+        "args": [],
+        "return_annotation": null,
+        "class": "Column"
+      },
+      {
+        "name": "acosh",
+        "kind": "method",
+        "args": [],
+        "return_annotation": null,
+        "class": "Column"
+      },
+      {
+        "name": "add_months",
+        "kind": "method",
+        "args": [
+          {
+            "name": "n",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ],
+        "return_annotation": null,
+        "class": "Column"
+      },
+      {
+        "name": "alias",
+        "kind": "method",
+        "args": [
+          {
+            "name": "name",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ],
+        "return_annotation": null,
+        "class": "Column"
+      },
+      {
+        "name": "and_",
+        "kind": "method",
+        "args": [
+          {
+            "name": "other",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ],
+        "return_annotation": null,
+        "class": "Column"
+      },
+      {
+        "name": "array_append",
+        "kind": "method",
+        "args": [
+          {
+            "name": "elem",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ],
+        "return_annotation": null,
+        "class": "Column"
+      },
+      {
+        "name": "array_compact",
+        "kind": "method",
+        "args": [],
+        "return_annotation": null,
+        "class": "Column"
+      },
+      {
+        "name": "array_distinct",
+        "kind": "method",
+        "args": [],
+        "return_annotation": null,
+        "class": "Column"
+      },
+      {
+        "name": "array_except",
+        "kind": "method",
+        "args": [
+          {
+            "name": "other",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ],
+        "return_annotation": null,
+        "class": "Column"
+      },
+      {
+        "name": "array_insert",
+        "kind": "method",
+        "args": [
+          {
+            "name": "pos",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          },
+          {
+            "name": "elem",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ],
+        "return_annotation": null,
+        "class": "Column"
+      },
+      {
+        "name": "array_intersect",
+        "kind": "method",
+        "args": [
+          {
+            "name": "other",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ],
+        "return_annotation": null,
+        "class": "Column"
+      },
+      {
+        "name": "array_position",
+        "kind": "method",
+        "args": [
+          {
+            "name": "value",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ],
+        "return_annotation": null,
+        "class": "Column"
+      },
+      {
+        "name": "array_prepend",
+        "kind": "method",
+        "args": [
+          {
+            "name": "elem",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ],
+        "return_annotation": null,
+        "class": "Column"
+      },
+      {
+        "name": "array_remove",
+        "kind": "method",
+        "args": [
+          {
+            "name": "value",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ],
+        "return_annotation": null,
+        "class": "Column"
+      },
+      {
+        "name": "array_repeat",
+        "kind": "method",
+        "args": [
+          {
+            "name": "n",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ],
+        "return_annotation": null,
+        "class": "Column"
+      },
+      {
+        "name": "array_union",
+        "kind": "method",
+        "args": [
+          {
+            "name": "other",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ],
+        "return_annotation": null,
+        "class": "Column"
+      },
+      {
+        "name": "ascii_",
+        "kind": "method",
+        "args": [],
+        "return_annotation": null,
+        "class": "Column"
+      },
+      {
+        "name": "asin_",
+        "kind": "method",
+        "args": [],
+        "return_annotation": null,
+        "class": "Column"
+      },
+      {
+        "name": "asinh",
+        "kind": "method",
+        "args": [],
+        "return_annotation": null,
+        "class": "Column"
+      },
+      {
+        "name": "atan2",
+        "kind": "method",
+        "args": [
+          {
+            "name": "x",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ],
+        "return_annotation": null,
+        "class": "Column"
+      },
+      {
+        "name": "atan_",
+        "kind": "method",
+        "args": [],
+        "return_annotation": null,
+        "class": "Column"
+      },
+      {
+        "name": "atanh_",
+        "kind": "method",
+        "args": [],
+        "return_annotation": null,
+        "class": "Column"
+      },
+      {
+        "name": "base64_",
+        "kind": "method",
+        "args": [],
+        "return_annotation": null,
+        "class": "Column"
+      },
+      {
+        "name": "bit_length",
+        "kind": "method",
+        "args": [],
+        "return_annotation": null,
+        "class": "Column"
+      },
+      {
+        "name": "cast",
+        "kind": "method",
+        "args": [
+          {
+            "name": "type_name",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ],
+        "return_annotation": null,
+        "class": "Column"
+      },
+      {
+        "name": "cbrt",
+        "kind": "method",
+        "args": [],
+        "return_annotation": null,
+        "class": "Column"
+      },
+      {
+        "name": "ceiling",
+        "kind": "method",
+        "args": [],
+        "return_annotation": null,
+        "class": "Column"
+      },
+      {
+        "name": "char_",
+        "kind": "method",
+        "args": [],
+        "return_annotation": null,
+        "class": "Column"
+      },
+      {
+        "name": "chr_",
+        "kind": "method",
+        "args": [],
+        "return_annotation": null,
+        "class": "Column"
+      },
+      {
+        "name": "contains",
+        "kind": "method",
+        "args": [
+          {
+            "name": "substring",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ],
+        "return_annotation": null,
+        "class": "Column"
+      },
+      {
+        "name": "cos",
+        "kind": "method",
+        "args": [],
+        "return_annotation": null,
+        "class": "Column"
+      },
+      {
+        "name": "cosh",
+        "kind": "method",
+        "args": [],
+        "return_annotation": null,
+        "class": "Column"
+      },
+      {
+        "name": "cume_dist",
+        "kind": "method",
+        "args": [
+          {
+            "name": "partition_by",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          },
+          {
+            "name": "descending",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ],
+        "return_annotation": null,
+        "class": "Column"
+      },
+      {
+        "name": "date_from_unix_date",
+        "kind": "method",
+        "args": [],
+        "return_annotation": null,
+        "class": "Column"
+      },
+      {
+        "name": "day",
+        "kind": "method",
+        "args": [],
+        "return_annotation": null,
+        "class": "Column"
+      },
+      {
+        "name": "dayofmonth",
+        "kind": "method",
+        "args": [],
+        "return_annotation": null,
+        "class": "Column"
+      },
+      {
+        "name": "dayofweek",
+        "kind": "method",
+        "args": [],
+        "return_annotation": null,
+        "class": "Column"
+      },
+      {
+        "name": "dayofyear",
+        "kind": "method",
+        "args": [],
+        "return_annotation": null,
+        "class": "Column"
+      },
+      {
+        "name": "degrees_",
+        "kind": "method",
+        "args": [],
+        "return_annotation": null,
+        "class": "Column"
+      },
+      {
+        "name": "element_at",
+        "kind": "method",
+        "args": [
+          {
+            "name": "index",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ],
+        "return_annotation": null,
+        "class": "Column"
+      },
+      {
+        "name": "endswith",
+        "kind": "method",
+        "args": [
+          {
+            "name": "suffix",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ],
+        "return_annotation": null,
+        "class": "Column"
+      },
+      {
+        "name": "eq",
+        "kind": "method",
+        "args": [
+          {
+            "name": "other",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ],
+        "return_annotation": null,
+        "class": "Column"
+      },
+      {
+        "name": "explode",
+        "kind": "method",
+        "args": [],
+        "return_annotation": null,
+        "class": "Column"
+      },
+      {
+        "name": "expm1",
+        "kind": "method",
+        "args": [],
+        "return_annotation": null,
+        "class": "Column"
+      },
+      {
+        "name": "factorial",
+        "kind": "method",
+        "args": [],
+        "return_annotation": null,
+        "class": "Column"
+      },
+      {
+        "name": "find_in_set",
+        "kind": "method",
+        "args": [
+          {
+            "name": "set_column",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ],
+        "return_annotation": null,
+        "class": "Column"
+      },
+      {
+        "name": "first_value",
+        "kind": "method",
+        "args": [],
+        "return_annotation": null,
+        "class": "Column"
+      },
+      {
+        "name": "format_number",
+        "kind": "method",
+        "args": [
+          {
+            "name": "decimals",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ],
+        "return_annotation": null,
+        "class": "Column"
+      },
+      {
+        "name": "from_unixtime",
+        "kind": "method",
+        "args": [
+          {
+            "name": "format",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ],
+        "return_annotation": null,
+        "class": "Column"
+      },
+      {
+        "name": "ge",
+        "kind": "method",
+        "args": [
+          {
+            "name": "other",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ],
+        "return_annotation": null,
+        "class": "Column"
+      },
+      {
+        "name": "get",
+        "kind": "method",
+        "args": [
+          {
+            "name": "key",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ],
+        "return_annotation": null,
+        "class": "Column"
+      },
+      {
+        "name": "gt",
+        "kind": "method",
+        "args": [
+          {
+            "name": "other",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ],
+        "return_annotation": null,
+        "class": "Column"
+      },
+      {
+        "name": "hypot",
+        "kind": "method",
+        "args": [
+          {
+            "name": "other",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ],
+        "return_annotation": null,
+        "class": "Column"
+      },
+      {
+        "name": "ifnull",
+        "kind": "method",
+        "args": [
+          {
+            "name": "value",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ],
+        "return_annotation": null,
+        "class": "Column"
+      },
+      {
+        "name": "ilike",
+        "kind": "method",
+        "args": [
+          {
+            "name": "pattern",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ],
+        "return_annotation": null,
+        "class": "Column"
+      },
+      {
+        "name": "is_not_null",
+        "kind": "method",
+        "args": [],
+        "return_annotation": null,
+        "class": "Column"
+      },
+      {
+        "name": "is_null",
+        "kind": "method",
+        "args": [],
+        "return_annotation": null,
+        "class": "Column"
+      },
+      {
+        "name": "isnan",
+        "kind": "method",
+        "args": [],
+        "return_annotation": null,
+        "class": "Column"
+      },
+      {
+        "name": "isnotnull",
+        "kind": "method",
+        "args": [],
+        "return_annotation": null,
+        "class": "Column"
+      },
+      {
+        "name": "isnull",
+        "kind": "method",
+        "args": [],
+        "return_annotation": null,
+        "class": "Column"
+      },
+      {
+        "name": "last_value",
+        "kind": "method",
+        "args": [],
+        "return_annotation": null,
+        "class": "Column"
+      },
+      {
+        "name": "lcase",
+        "kind": "method",
+        "args": [],
+        "return_annotation": null,
+        "class": "Column"
+      },
+      {
+        "name": "le",
+        "kind": "method",
+        "args": [
+          {
+            "name": "other",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ],
+        "return_annotation": null,
+        "class": "Column"
+      },
+      {
+        "name": "left",
+        "kind": "method",
+        "args": [
+          {
+            "name": "n",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ],
+        "return_annotation": null,
+        "class": "Column"
+      },
+      {
+        "name": "like",
+        "kind": "method",
+        "args": [
+          {
+            "name": "pattern",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ],
+        "return_annotation": null,
+        "class": "Column"
+      },
+      {
+        "name": "ln",
+        "kind": "method",
+        "args": [],
+        "return_annotation": null,
+        "class": "Column"
+      },
+      {
+        "name": "log10",
+        "kind": "method",
+        "args": [],
+        "return_annotation": null,
+        "class": "Column"
+      },
+      {
+        "name": "log1p",
+        "kind": "method",
+        "args": [],
+        "return_annotation": null,
+        "class": "Column"
+      },
+      {
+        "name": "log2",
+        "kind": "method",
+        "args": [],
+        "return_annotation": null,
+        "class": "Column"
+      },
+      {
+        "name": "lower",
+        "kind": "method",
+        "args": [],
+        "return_annotation": null,
+        "class": "Column"
+      },
+      {
+        "name": "lt",
+        "kind": "method",
+        "args": [
+          {
+            "name": "other",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ],
+        "return_annotation": null,
+        "class": "Column"
+      },
+      {
+        "name": "map_concat",
+        "kind": "method",
+        "args": [
+          {
+            "name": "other",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ],
+        "return_annotation": null,
+        "class": "Column"
+      },
+      {
+        "name": "map_contains_key",
+        "kind": "method",
+        "args": [
+          {
+            "name": "key",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ],
+        "return_annotation": null,
+        "class": "Column"
+      },
+      {
+        "name": "map_filter_value_gt",
+        "kind": "method",
+        "args": [
+          {
+            "name": "threshold",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ],
+        "return_annotation": null,
+        "class": "Column"
+      },
+      {
+        "name": "map_from_entries",
+        "kind": "method",
+        "args": [],
+        "return_annotation": null,
+        "class": "Column"
+      },
+      {
+        "name": "map_zip_with_coalesce",
+        "kind": "method",
+        "args": [
+          {
+            "name": "other",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ],
+        "return_annotation": null,
+        "class": "Column"
+      },
+      {
+        "name": "md5_",
+        "kind": "method",
+        "args": [],
+        "return_annotation": null,
+        "class": "Column"
+      },
+      {
+        "name": "months_between",
+        "kind": "method",
+        "args": [
+          {
+            "name": "start",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ],
+        "return_annotation": null,
+        "class": "Column"
+      },
+      {
+        "name": "ne",
+        "kind": "method",
+        "args": [
+          {
+            "name": "other",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ],
+        "return_annotation": null,
+        "class": "Column"
+      },
+      {
+        "name": "next_day",
+        "kind": "method",
+        "args": [
+          {
+            "name": "day_of_week",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ],
+        "return_annotation": null,
+        "class": "Column"
+      },
+      {
+        "name": "nth_value",
+        "kind": "method",
+        "args": [
+          {
+            "name": "n",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          },
+          {
+            "name": "partition_by",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          },
+          {
+            "name": "descending",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ],
+        "return_annotation": null,
+        "class": "Column"
+      },
+      {
+        "name": "ntile",
+        "kind": "method",
+        "args": [
+          {
+            "name": "n",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          },
+          {
+            "name": "partition_by",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          },
+          {
+            "name": "descending",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ],
+        "return_annotation": null,
+        "class": "Column"
+      },
+      {
+        "name": "nvl",
+        "kind": "method",
+        "args": [
+          {
+            "name": "value",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ],
+        "return_annotation": null,
+        "class": "Column"
+      },
+      {
+        "name": "or_",
+        "kind": "method",
+        "args": [
+          {
+            "name": "other",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ],
+        "return_annotation": null,
+        "class": "Column"
+      },
+      {
+        "name": "overlay",
+        "kind": "method",
+        "args": [
+          {
+            "name": "replace",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          },
+          {
+            "name": "pos",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          },
+          {
+            "name": "length",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ],
+        "return_annotation": null,
+        "class": "Column"
+      },
+      {
+        "name": "percent_rank",
+        "kind": "method",
+        "args": [
+          {
+            "name": "partition_by",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          },
+          {
+            "name": "descending",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ],
+        "return_annotation": null,
+        "class": "Column"
+      },
+      {
+        "name": "pmod",
+        "kind": "method",
+        "args": [
+          {
+            "name": "divisor",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ],
+        "return_annotation": null,
+        "class": "Column"
+      },
+      {
+        "name": "posexplode",
+        "kind": "method",
+        "args": [],
+        "return_annotation": null,
+        "class": "Column"
+      },
+      {
+        "name": "power",
+        "kind": "method",
+        "args": [
+          {
+            "name": "exp",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ],
+        "return_annotation": null,
+        "class": "Column"
+      },
+      {
+        "name": "quarter",
+        "kind": "method",
+        "args": [],
+        "return_annotation": null,
+        "class": "Column"
+      },
+      {
+        "name": "radians_",
+        "kind": "method",
+        "args": [],
+        "return_annotation": null,
+        "class": "Column"
+      },
+      {
+        "name": "regexp_count",
+        "kind": "method",
+        "args": [
+          {
+            "name": "pattern",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ],
+        "return_annotation": null,
+        "class": "Column"
+      },
+      {
+        "name": "regexp_instr",
+        "kind": "method",
+        "args": [
+          {
+            "name": "pattern",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          },
+          {
+            "name": "group_idx",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ],
+        "return_annotation": null,
+        "class": "Column"
+      },
+      {
+        "name": "regexp_like",
+        "kind": "method",
+        "args": [
+          {
+            "name": "pattern",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ],
+        "return_annotation": null,
+        "class": "Column"
+      },
+      {
+        "name": "regexp_substr",
+        "kind": "method",
+        "args": [
+          {
+            "name": "pattern",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ],
+        "return_annotation": null,
+        "class": "Column"
+      },
+      {
+        "name": "replace",
+        "kind": "method",
+        "args": [
+          {
+            "name": "search",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          },
+          {
+            "name": "replacement",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ],
+        "return_annotation": null,
+        "class": "Column"
+      },
+      {
+        "name": "right",
+        "kind": "method",
+        "args": [
+          {
+            "name": "n",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ],
+        "return_annotation": null,
+        "class": "Column"
+      },
+      {
+        "name": "rint",
+        "kind": "method",
+        "args": [],
+        "return_annotation": null,
+        "class": "Column"
+      },
+      {
+        "name": "rlike",
+        "kind": "method",
+        "args": [
+          {
+            "name": "pattern",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ],
+        "return_annotation": null,
+        "class": "Column"
+      },
+      {
+        "name": "sha1_",
+        "kind": "method",
+        "args": [],
+        "return_annotation": null,
+        "class": "Column"
+      },
+      {
+        "name": "sha2_",
+        "kind": "method",
+        "args": [
+          {
+            "name": "bit_length",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ],
+        "return_annotation": null,
+        "class": "Column"
+      },
+      {
+        "name": "signum",
+        "kind": "method",
+        "args": [],
+        "return_annotation": null,
+        "class": "Column"
+      },
+      {
+        "name": "sin",
+        "kind": "method",
+        "args": [],
+        "return_annotation": null,
+        "class": "Column"
+      },
+      {
+        "name": "sinh",
+        "kind": "method",
+        "args": [],
+        "return_annotation": null,
+        "class": "Column"
+      },
+      {
+        "name": "size",
+        "kind": "method",
+        "args": [],
+        "return_annotation": null,
+        "class": "Column"
+      },
+      {
+        "name": "split_part",
+        "kind": "method",
+        "args": [
+          {
+            "name": "delimiter",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          },
+          {
+            "name": "part_num",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ],
+        "return_annotation": null,
+        "class": "Column"
+      },
+      {
+        "name": "startswith",
+        "kind": "method",
+        "args": [
+          {
+            "name": "prefix",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ],
+        "return_annotation": null,
+        "class": "Column"
+      },
+      {
+        "name": "substr",
+        "kind": "method",
+        "args": [
+          {
+            "name": "start",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          },
+          {
+            "name": "length",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ],
+        "return_annotation": null,
+        "class": "Column"
+      },
+      {
+        "name": "tan",
+        "kind": "method",
+        "args": [],
+        "return_annotation": null,
+        "class": "Column"
+      },
+      {
+        "name": "tanh",
+        "kind": "method",
+        "args": [],
+        "return_annotation": null,
+        "class": "Column"
+      },
+      {
+        "name": "timestamp_micros",
+        "kind": "method",
+        "args": [],
+        "return_annotation": null,
+        "class": "Column"
+      },
+      {
+        "name": "timestamp_millis",
+        "kind": "method",
+        "args": [],
+        "return_annotation": null,
+        "class": "Column"
+      },
+      {
+        "name": "timestamp_seconds",
+        "kind": "method",
+        "args": [],
+        "return_annotation": null,
+        "class": "Column"
+      },
+      {
+        "name": "to_degrees",
+        "kind": "method",
+        "args": [],
+        "return_annotation": null,
+        "class": "Column"
+      },
+      {
+        "name": "to_radians",
+        "kind": "method",
+        "args": [],
+        "return_annotation": null,
+        "class": "Column"
+      },
+      {
+        "name": "try_add",
+        "kind": "method",
+        "args": [
+          {
+            "name": "right",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ],
+        "return_annotation": null,
+        "class": "Column"
+      },
+      {
+        "name": "try_cast",
+        "kind": "method",
+        "args": [
+          {
+            "name": "type_name",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ],
+        "return_annotation": null,
+        "class": "Column"
+      },
+      {
+        "name": "try_divide",
+        "kind": "method",
+        "args": [
+          {
+            "name": "right",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ],
+        "return_annotation": null,
+        "class": "Column"
+      },
+      {
+        "name": "try_multiply",
+        "kind": "method",
+        "args": [
+          {
+            "name": "right",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ],
+        "return_annotation": null,
+        "class": "Column"
+      },
+      {
+        "name": "try_subtract",
+        "kind": "method",
+        "args": [
+          {
+            "name": "right",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ],
+        "return_annotation": null,
+        "class": "Column"
+      },
+      {
+        "name": "typeof_",
+        "kind": "method",
+        "args": [],
+        "return_annotation": null,
+        "class": "Column"
+      },
+      {
+        "name": "ucase",
+        "kind": "method",
+        "args": [],
+        "return_annotation": null,
+        "class": "Column"
+      },
+      {
+        "name": "unbase64_",
+        "kind": "method",
+        "args": [],
+        "return_annotation": null,
+        "class": "Column"
+      },
+      {
+        "name": "unix_date",
+        "kind": "method",
+        "args": [],
+        "return_annotation": null,
+        "class": "Column"
+      },
+      {
+        "name": "unix_timestamp",
+        "kind": "method",
+        "args": [
+          {
+            "name": "format",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ],
+        "return_annotation": null,
+        "class": "Column"
+      },
+      {
+        "name": "upper",
+        "kind": "method",
+        "args": [],
+        "return_annotation": null,
+        "class": "Column"
+      },
+      {
+        "name": "weekofyear",
+        "kind": "method",
+        "args": [],
+        "return_annotation": null,
+        "class": "Column"
+      },
+      {
+        "name": "zip_with_coalesce",
+        "kind": "method",
+        "args": [
+          {
+            "name": "other",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ],
+        "return_annotation": null,
+        "class": "Column"
+      }
+    ],
+    "DataFrameStat": [
+      {
+        "name": "corr",
+        "kind": "method",
+        "args": [
+          {
+            "name": "col1",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          },
+          {
+            "name": "col2",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ],
+        "return_annotation": null,
+        "class": "DataFrameStat"
+      },
+      {
+        "name": "corr_matrix",
+        "kind": "method",
+        "args": [],
+        "return_annotation": null,
+        "class": "DataFrameStat"
+      },
+      {
+        "name": "cov",
+        "kind": "method",
+        "args": [
+          {
+            "name": "col1",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          },
+          {
+            "name": "col2",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ],
+        "return_annotation": null,
+        "class": "DataFrameStat"
+      }
+    ],
+    "DataFrameNa": [
+      {
+        "name": "drop",
+        "kind": "method",
+        "args": [
+          {
+            "name": "subset",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ],
+        "return_annotation": null,
+        "class": "DataFrameNa"
+      },
+      {
+        "name": "fill",
+        "kind": "method",
+        "args": [
+          {
+            "name": "value",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ],
+        "return_annotation": null,
+        "class": "DataFrameNa"
+      }
+    ],
+    "SortOrder": [],
+    "WhenBuilder": [
+      {
+        "name": "then",
+        "kind": "method",
+        "args": [
+          {
+            "name": "value",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ],
+        "return_annotation": null,
+        "class": "WhenBuilder"
+      }
+    ],
+    "ThenBuilder": [
+      {
+        "name": "otherwise",
+        "kind": "method",
+        "args": [
+          {
+            "name": "value",
+            "default": null,
+            "annotation": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ],
+        "return_annotation": null,
+        "class": "ThenBuilder"
+      }
+    ]
+  }
+}

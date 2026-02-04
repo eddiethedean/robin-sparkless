@@ -440,24 +440,24 @@ fn robin_sparkless(m: &Bound<'_, PyModule>) -> PyResult<()> {
 }
 
 #[pyfunction]
-fn py_col(name: &str) -> PyColumn {
+fn py_col(col: &str) -> PyColumn {
     PyColumn {
-        inner: rs_col(name),
+        inner: rs_col(col),
     }
 }
 
 #[pyfunction]
-fn py_lit(value: &Bound<'_, pyo3::types::PyAny>) -> PyResult<PyColumn> {
-    let inner = if value.is_none() {
+fn py_lit(col: &Bound<'_, pyo3::types::PyAny>) -> PyResult<PyColumn> {
+    let inner = if col.is_none() {
         use polars::prelude::*;
         RsColumn::from_expr(lit(NULL), None)
-    } else if let Ok(x) = value.extract::<i64>() {
+    } else if let Ok(x) = col.extract::<i64>() {
         RsColumn::from_expr(polars::prelude::lit(x), None)
-    } else if let Ok(x) = value.extract::<f64>() {
+    } else if let Ok(x) = col.extract::<f64>() {
         RsColumn::from_expr(polars::prelude::lit(x), None)
-    } else if let Ok(x) = value.extract::<bool>() {
+    } else if let Ok(x) = col.extract::<bool>() {
         RsColumn::from_expr(polars::prelude::lit(x), None)
-    } else if let Ok(x) = value.extract::<String>() {
+    } else if let Ok(x) = col.extract::<String>() {
         RsColumn::from_expr(polars::prelude::lit(x.as_str()), None)
     } else {
         return Err(pyo3::exceptions::PyTypeError::new_err(
@@ -468,136 +468,138 @@ fn py_lit(value: &Bound<'_, pyo3::types::PyAny>) -> PyResult<PyColumn> {
 }
 
 #[pyfunction]
-fn py_when(condition: &PyColumn) -> PyWhenBuilder {
+#[pyo3(signature = (condition, value=None))]
+fn py_when(condition: &PyColumn, _value: Option<PyRef<PyColumn>>) -> PyWhenBuilder {
+    let _ = _value;
     PyWhenBuilder {
         condition: condition.inner.expr().clone(),
     }
 }
 
 #[pyfunction]
-fn py_coalesce(columns: Vec<PyRef<PyColumn>>) -> PyResult<PyColumn> {
-    let refs: Vec<&RsColumn> = columns.iter().map(|c| &c.inner).collect();
+fn py_coalesce(cols: Vec<PyRef<PyColumn>>) -> PyResult<PyColumn> {
+    let refs: Vec<&RsColumn> = cols.iter().map(|c| &c.inner).collect();
     Ok(PyColumn {
         inner: coalesce(&refs),
     })
 }
 
 #[pyfunction]
-fn py_sum(column: &PyColumn) -> PyColumn {
+fn py_sum(col: &PyColumn) -> PyColumn {
     PyColumn {
-        inner: rs_sum(&column.inner),
+        inner: rs_sum(&col.inner),
     }
 }
 
 #[pyfunction]
-fn py_avg(column: &PyColumn) -> PyColumn {
+fn py_avg(col: &PyColumn) -> PyColumn {
     PyColumn {
-        inner: avg(&column.inner),
+        inner: avg(&col.inner),
     }
 }
 
 #[pyfunction]
-fn py_min(column: &PyColumn) -> PyColumn {
+fn py_min(col: &PyColumn) -> PyColumn {
     PyColumn {
-        inner: min(&column.inner),
+        inner: min(&col.inner),
     }
 }
 
 #[pyfunction]
-fn py_max(column: &PyColumn) -> PyColumn {
+fn py_max(col: &PyColumn) -> PyColumn {
     PyColumn {
-        inner: max(&column.inner),
+        inner: max(&col.inner),
     }
 }
 
 #[pyfunction]
-fn py_count(column: &PyColumn) -> PyColumn {
+fn py_count(col: &PyColumn) -> PyColumn {
     PyColumn {
-        inner: count(&column.inner),
+        inner: count(&col.inner),
     }
 }
 
 #[pyfunction]
-fn py_asc(column: &PyColumn) -> PySortOrder {
+fn py_asc(col: &PyColumn) -> PySortOrder {
     PySortOrder {
-        inner: asc(&column.inner),
+        inner: asc(&col.inner),
     }
 }
 
 #[pyfunction]
-fn py_asc_nulls_first(column: &PyColumn) -> PySortOrder {
+fn py_asc_nulls_first(col: &PyColumn) -> PySortOrder {
     PySortOrder {
-        inner: asc_nulls_first(&column.inner),
+        inner: asc_nulls_first(&col.inner),
     }
 }
 
 #[pyfunction]
-fn py_asc_nulls_last(column: &PyColumn) -> PySortOrder {
+fn py_asc_nulls_last(col: &PyColumn) -> PySortOrder {
     PySortOrder {
-        inner: asc_nulls_last(&column.inner),
+        inner: asc_nulls_last(&col.inner),
     }
 }
 
 #[pyfunction]
-fn py_desc(column: &PyColumn) -> PySortOrder {
+fn py_desc(col: &PyColumn) -> PySortOrder {
     PySortOrder {
-        inner: desc(&column.inner),
+        inner: desc(&col.inner),
     }
 }
 
 #[pyfunction]
-fn py_desc_nulls_first(column: &PyColumn) -> PySortOrder {
+fn py_desc_nulls_first(col: &PyColumn) -> PySortOrder {
     PySortOrder {
-        inner: desc_nulls_first(&column.inner),
+        inner: desc_nulls_first(&col.inner),
     }
 }
 
 #[pyfunction]
-fn py_desc_nulls_last(column: &PyColumn) -> PySortOrder {
+fn py_desc_nulls_last(col: &PyColumn) -> PySortOrder {
     PySortOrder {
-        inner: desc_nulls_last(&column.inner),
+        inner: desc_nulls_last(&col.inner),
     }
 }
 
 #[pyfunction]
-fn py_bround(column: &PyColumn, scale: i32) -> PyColumn {
+fn py_bround(col: &PyColumn, scale: i32) -> PyColumn {
     PyColumn {
-        inner: bround(&column.inner, scale),
+        inner: bround(&col.inner, scale),
     }
 }
 
 #[pyfunction]
-fn py_negate(column: &PyColumn) -> PyColumn {
+fn py_negate(col: &PyColumn) -> PyColumn {
     PyColumn {
-        inner: negate(&column.inner),
+        inner: negate(&col.inner),
     }
 }
 
 #[pyfunction]
-fn py_positive(column: &PyColumn) -> PyColumn {
+fn py_positive(col: &PyColumn) -> PyColumn {
     PyColumn {
-        inner: positive(&column.inner),
+        inner: positive(&col.inner),
     }
 }
 
 #[pyfunction]
-fn py_cot(column: &PyColumn) -> PyColumn {
+fn py_cot(col: &PyColumn) -> PyColumn {
     PyColumn {
-        inner: cot(&column.inner),
+        inner: cot(&col.inner),
     }
 }
 
 #[pyfunction]
-fn py_csc(column: &PyColumn) -> PyColumn {
+fn py_csc(col: &PyColumn) -> PyColumn {
     PyColumn {
-        inner: csc(&column.inner),
+        inner: csc(&col.inner),
     }
 }
 
 #[pyfunction]
-fn py_sec(column: &PyColumn) -> PyColumn {
+fn py_sec(col: &PyColumn) -> PyColumn {
     PyColumn {
-        inner: sec(&column.inner),
+        inner: sec(&col.inner),
     }
 }
 
@@ -612,153 +614,166 @@ fn py_pi() -> PyColumn {
 }
 
 #[pyfunction]
-fn py_median(column: &PyColumn) -> PyColumn {
+fn py_median(col: &PyColumn) -> PyColumn {
     PyColumn {
-        inner: median(&column.inner),
+        inner: median(&col.inner),
     }
 }
 
 #[pyfunction]
-fn py_mode(column: &PyColumn) -> PyColumn {
+fn py_mode(col: &PyColumn) -> PyColumn {
     PyColumn {
-        inner: mode(&column.inner),
+        inner: mode(&col.inner),
     }
 }
 
 #[pyfunction]
-fn py_stddev_pop(column: &PyColumn) -> PyColumn {
+fn py_stddev_pop(col: &PyColumn) -> PyColumn {
     PyColumn {
-        inner: stddev_pop(&column.inner),
+        inner: stddev_pop(&col.inner),
     }
 }
 
 #[pyfunction]
-fn py_var_pop(column: &PyColumn) -> PyColumn {
+fn py_var_pop(col: &PyColumn) -> PyColumn {
     PyColumn {
-        inner: var_pop(&column.inner),
+        inner: var_pop(&col.inner),
     }
 }
 
 #[pyfunction]
-fn py_btrim(column: &PyColumn, trim_str: Option<&str>) -> PyColumn {
+fn py_btrim(str: &PyColumn, trim: Option<&str>) -> PyColumn {
     PyColumn {
-        inner: btrim(&column.inner, trim_str),
+        inner: btrim(&str.inner, trim),
     }
 }
 
 #[pyfunction]
-fn py_locate(substr: &str, column: &PyColumn, pos: Option<i64>) -> PyColumn {
+fn py_locate(substr: &str, str: &PyColumn, pos: Option<i64>) -> PyColumn {
     PyColumn {
-        inner: locate(substr, &column.inner, pos.unwrap_or(1)),
+        inner: locate(substr, &str.inner, pos.unwrap_or(1)),
     }
 }
 
 #[pyfunction]
-fn py_conv(column: &PyColumn, from_base: i32, to_base: i32) -> PyColumn {
+#[pyo3(signature = (col, fromBase, toBase))]
+fn py_conv(col: &PyColumn, from_base: i32, to_base: i32) -> PyColumn {
     PyColumn {
-        inner: conv(&column.inner, from_base, to_base),
+        inner: conv(&col.inner, from_base, to_base),
     }
 }
 
 #[pyfunction]
-fn py_hex(column: &PyColumn) -> PyColumn {
+fn py_hex(col: &PyColumn) -> PyColumn {
     PyColumn {
-        inner: hex(&column.inner),
+        inner: hex(&col.inner),
     }
 }
 
 #[pyfunction]
-fn py_unhex(column: &PyColumn) -> PyColumn {
+fn py_unhex(col: &PyColumn) -> PyColumn {
     PyColumn {
-        inner: unhex(&column.inner),
+        inner: unhex(&col.inner),
     }
 }
 
 #[pyfunction]
-fn py_bin(column: &PyColumn) -> PyColumn {
+fn py_bin(col: &PyColumn) -> PyColumn {
     PyColumn {
-        inner: bin(&column.inner),
+        inner: bin(&col.inner),
     }
 }
 
 #[pyfunction]
-fn py_getbit(column: &PyColumn, pos: i64) -> PyColumn {
+fn py_getbit(col: &PyColumn, pos: i64) -> PyColumn {
     PyColumn {
-        inner: getbit(&column.inner, pos),
+        inner: getbit(&col.inner, pos),
     }
 }
 
 #[pyfunction]
-fn py_to_char(column: &PyColumn) -> PyColumn {
+#[pyo3(signature = (col, format=None))]
+fn py_to_char(col: &PyColumn, _format: Option<&str>) -> PyColumn {
+    let _ = _format;
     PyColumn {
-        inner: to_char(&column.inner),
+        inner: to_char(&col.inner),
     }
 }
 
 #[pyfunction]
-fn py_to_varchar(column: &PyColumn) -> PyColumn {
+#[pyo3(signature = (col, format=None))]
+fn py_to_varchar(col: &PyColumn, _format: Option<&str>) -> PyColumn {
+    let _ = _format;
     PyColumn {
-        inner: to_varchar(&column.inner),
+        inner: to_varchar(&col.inner),
     }
 }
 
 #[pyfunction]
-fn py_to_number(column: &PyColumn) -> PyColumn {
+#[pyo3(signature = (col, format=None))]
+fn py_to_number(col: &PyColumn, _format: Option<&str>) -> PyColumn {
+    let _ = _format;
     PyColumn {
-        inner: to_number(&column.inner),
+        inner: to_number(&col.inner),
     }
 }
 
 #[pyfunction]
-fn py_try_to_number(column: &PyColumn) -> PyColumn {
+#[pyo3(signature = (col, format=None))]
+fn py_try_to_number(col: &PyColumn, _format: Option<&str>) -> PyColumn {
+    let _ = _format;
     PyColumn {
-        inner: try_to_number(&column.inner),
+        inner: try_to_number(&col.inner),
     }
 }
 
 #[pyfunction]
-fn py_try_to_timestamp(column: &PyColumn) -> PyColumn {
+#[pyo3(signature = (col, format=None))]
+fn py_try_to_timestamp(col: &PyColumn, _format: Option<&str>) -> PyColumn {
+    let _ = _format;
     PyColumn {
-        inner: try_to_timestamp(&column.inner),
+        inner: try_to_timestamp(&col.inner),
     }
 }
 
 #[pyfunction]
+#[pyo3(signature = (text, pairDelim=None, keyValueDelim=None))]
 fn py_str_to_map(
-    column: &PyColumn,
+    text: &PyColumn,
     pair_delim: Option<&str>,
     key_value_delim: Option<&str>,
 ) -> PyColumn {
     PyColumn {
-        inner: str_to_map(&column.inner, pair_delim, key_value_delim),
+        inner: str_to_map(&text.inner, pair_delim, key_value_delim),
     }
 }
 
 #[pyfunction]
-fn py_arrays_overlap(left: &PyColumn, right: &PyColumn) -> PyColumn {
+fn py_arrays_overlap(a1: &PyColumn, a2: &PyColumn) -> PyColumn {
     PyColumn {
-        inner: arrays_overlap(&left.inner, &right.inner),
+        inner: arrays_overlap(&a1.inner, &a2.inner),
     }
 }
 
 #[pyfunction]
-fn py_arrays_zip(left: &PyColumn, right: &PyColumn) -> PyColumn {
+#[pyo3(signature = (col1, col2))]
+fn py_arrays_zip(col1: &PyColumn, col2: &PyColumn) -> PyColumn {
     PyColumn {
-        inner: arrays_zip(&left.inner, &right.inner),
+        inner: arrays_zip(&col1.inner, &col2.inner),
     }
 }
 
 #[pyfunction]
-fn py_explode_outer(column: &PyColumn) -> PyColumn {
+fn py_explode_outer(col: &PyColumn) -> PyColumn {
     PyColumn {
-        inner: explode_outer(&column.inner),
+        inner: explode_outer(&col.inner),
     }
 }
 
 #[pyfunction]
-fn py_array_agg(column: &PyColumn) -> PyColumn {
+fn py_array_agg(col: &PyColumn) -> PyColumn {
     PyColumn {
-        inner: array_agg(&column.inner),
+        inner: array_agg(&col.inner),
     }
 }
 
@@ -788,69 +803,70 @@ fn py_date_diff(end: &PyColumn, start: &PyColumn) -> PyColumn {
 }
 
 #[pyfunction]
-fn py_dateadd(column: &PyColumn, n: i32) -> PyColumn {
+fn py_dateadd(start: &PyColumn, days: i32) -> PyColumn {
     PyColumn {
-        inner: dateadd(&column.inner, n),
+        inner: dateadd(&start.inner, days),
     }
 }
 
 #[pyfunction]
-fn py_datepart(column: &PyColumn, field: &str) -> PyColumn {
+fn py_datepart(field: &str, source: &PyColumn) -> PyColumn {
     PyColumn {
-        inner: datepart(&column.inner, field),
+        inner: datepart(&source.inner, field),
     }
 }
 
 #[pyfunction]
-fn py_extract(column: &PyColumn, field: &str) -> PyColumn {
+fn py_extract(field: &str, source: &PyColumn) -> PyColumn {
     PyColumn {
-        inner: extract(&column.inner, field),
+        inner: extract(&source.inner, field),
     }
 }
 
 #[pyfunction]
-fn py_date_part(column: &PyColumn, field: &str) -> PyColumn {
+fn py_date_part(field: &str, source: &PyColumn) -> PyColumn {
     PyColumn {
-        inner: date_part(&column.inner, field),
+        inner: date_part(&source.inner, field),
     }
 }
 
 #[pyfunction]
-fn py_unix_micros(column: &PyColumn) -> PyColumn {
+fn py_unix_micros(col: &PyColumn) -> PyColumn {
     PyColumn {
-        inner: unix_micros(&column.inner),
+        inner: unix_micros(&col.inner),
     }
 }
 
 #[pyfunction]
-fn py_unix_millis(column: &PyColumn) -> PyColumn {
+fn py_unix_millis(col: &PyColumn) -> PyColumn {
     PyColumn {
-        inner: unix_millis(&column.inner),
+        inner: unix_millis(&col.inner),
     }
 }
 
 #[pyfunction]
-fn py_unix_seconds(column: &PyColumn) -> PyColumn {
+fn py_unix_seconds(col: &PyColumn) -> PyColumn {
     PyColumn {
-        inner: unix_seconds(&column.inner),
+        inner: unix_seconds(&col.inner),
     }
 }
 
 #[pyfunction]
-fn py_dayname(column: &PyColumn) -> PyColumn {
+fn py_dayname(col: &PyColumn) -> PyColumn {
     PyColumn {
-        inner: dayname(&column.inner),
+        inner: dayname(&col.inner),
     }
 }
 
 #[pyfunction]
-fn py_weekday(column: &PyColumn) -> PyColumn {
+fn py_weekday(col: &PyColumn) -> PyColumn {
     PyColumn {
-        inner: weekday(&column.inner),
+        inner: weekday(&col.inner),
     }
 }
 
 #[pyfunction]
+#[pyo3(signature = (year, month, day, hour, minute, sec, timezone=None))]
 fn py_make_timestamp(
     year: &PyColumn,
     month: &PyColumn,
@@ -858,6 +874,7 @@ fn py_make_timestamp(
     hour: &PyColumn,
     minute: &PyColumn,
     sec: &PyColumn,
+    _timezone: Option<&str>,
 ) -> PyColumn {
     PyColumn {
         inner: make_timestamp(
@@ -872,6 +889,7 @@ fn py_make_timestamp(
 }
 
 #[pyfunction]
+#[pyo3(signature = (years, months, days, hours, mins, secs))]
 fn py_make_timestamp_ntz(
     year: &PyColumn,
     month: &PyColumn,
@@ -922,13 +940,13 @@ fn py_timestampdiff(unit: &str, start: &PyColumn, end: &PyColumn) -> PyColumn {
 }
 
 #[pyfunction]
-fn py_days(n: i64) -> PyColumn {
-    PyColumn { inner: days(n) }
+fn py_days(col: i64) -> PyColumn {
+    PyColumn { inner: days(col) }
 }
 
 #[pyfunction]
-fn py_hours(n: i64) -> PyColumn {
-    PyColumn { inner: hours(n) }
+fn py_hours(col: i64) -> PyColumn {
+    PyColumn { inner: hours(col) }
 }
 
 #[pyfunction]
@@ -937,33 +955,34 @@ fn py_minutes(n: i64) -> PyColumn {
 }
 
 #[pyfunction]
-fn py_months(n: i64) -> PyColumn {
-    PyColumn { inner: months(n) }
+fn py_months(col: i64) -> PyColumn {
+    PyColumn { inner: months(col) }
 }
 
 #[pyfunction]
-fn py_years(n: i64) -> PyColumn {
-    PyColumn { inner: years(n) }
+fn py_years(col: i64) -> PyColumn {
+    PyColumn { inner: years(col) }
 }
 
 #[pyfunction]
-fn py_from_utc_timestamp(column: &PyColumn, tz: &str) -> PyColumn {
+fn py_from_utc_timestamp(timestamp: &PyColumn, tz: &str) -> PyColumn {
     PyColumn {
-        inner: from_utc_timestamp(&column.inner, tz),
+        inner: from_utc_timestamp(&timestamp.inner, tz),
     }
 }
 
 #[pyfunction]
-fn py_to_utc_timestamp(column: &PyColumn, tz: &str) -> PyColumn {
+fn py_to_utc_timestamp(timestamp: &PyColumn, tz: &str) -> PyColumn {
     PyColumn {
-        inner: to_utc_timestamp(&column.inner, tz),
+        inner: to_utc_timestamp(&timestamp.inner, tz),
     }
 }
 
 #[pyfunction]
-fn py_convert_timezone(source_tz: &str, target_tz: &str, column: &PyColumn) -> PyColumn {
+#[pyo3(signature = (sourceTz, targetTz, sourceTs))]
+fn py_convert_timezone(source_tz: &str, target_tz: &str, source_ts: &PyColumn) -> PyColumn {
     PyColumn {
-        inner: convert_timezone(source_tz, target_tz, &column.inner),
+        inner: convert_timezone(source_tz, target_tz, &source_ts.inner),
     }
 }
 
@@ -975,95 +994,102 @@ fn py_current_timezone() -> PyColumn {
 }
 
 #[pyfunction]
-fn py_to_timestamp(column: &PyColumn) -> PyResult<PyColumn> {
-    to_timestamp(&column.inner)
+#[pyo3(signature = (col, format=None))]
+fn py_to_timestamp(col: &PyColumn, _format: Option<&str>) -> PyResult<PyColumn> {
+    let _ = _format;
+    to_timestamp(&col.inner)
         .map(|c| PyColumn { inner: c })
         .map_err(|e| pyo3::exceptions::PyValueError::new_err(e))
 }
 
 // Phase 23: JSON, URL, misc
 #[pyfunction]
-fn py_isin(column: &PyColumn, other: &PyColumn) -> PyColumn {
+fn py_isin(col: &PyColumn, other: &PyColumn) -> PyColumn {
     PyColumn {
-        inner: isin(&column.inner, &other.inner),
+        inner: isin(&col.inner, &other.inner),
     }
 }
 
 #[pyfunction]
-fn py_isin_i64(column: &PyColumn, values: Vec<i64>) -> PyColumn {
+fn py_isin_i64(col: &PyColumn, values: Vec<i64>) -> PyColumn {
     PyColumn {
-        inner: isin_i64(&column.inner, &values),
+        inner: isin_i64(&col.inner, &values),
     }
 }
 
 #[pyfunction]
-fn py_isin_str(column: &PyColumn, values: Vec<String>) -> PyColumn {
+fn py_isin_str(col: &PyColumn, values: Vec<String>) -> PyColumn {
     let refs: Vec<&str> = values.iter().map(|s| s.as_str()).collect();
     PyColumn {
-        inner: isin_str(&column.inner, &refs),
+        inner: isin_str(&col.inner, &refs),
     }
 }
 
 #[pyfunction]
-fn py_url_decode(column: &PyColumn) -> PyColumn {
+fn py_url_decode(str: &PyColumn) -> PyColumn {
     PyColumn {
-        inner: url_decode(&column.inner),
+        inner: url_decode(&str.inner),
     }
 }
 
 #[pyfunction]
-fn py_url_encode(column: &PyColumn) -> PyColumn {
+fn py_url_encode(str: &PyColumn) -> PyColumn {
     PyColumn {
-        inner: url_encode(&column.inner),
+        inner: url_encode(&str.inner),
     }
 }
 
 #[pyfunction]
-fn py_shift_left(column: &PyColumn, n: i32) -> PyColumn {
+#[pyo3(signature = (col, numBits))]
+fn py_shift_left(col: &PyColumn, num_bits: i32) -> PyColumn {
     PyColumn {
-        inner: shift_left(&column.inner, n),
+        inner: shift_left(&col.inner, num_bits),
     }
 }
 
 #[pyfunction]
-fn py_shift_right(column: &PyColumn, n: i32) -> PyColumn {
+#[pyo3(signature = (col, numBits))]
+fn py_shift_right(col: &PyColumn, num_bits: i32) -> PyColumn {
     PyColumn {
-        inner: shift_right(&column.inner, n),
+        inner: shift_right(&col.inner, num_bits),
     }
 }
 
 #[pyfunction]
-fn py_bit_and(left: &PyColumn, right: &PyColumn) -> PyColumn {
+#[pyo3(signature = (col1, col2))]
+fn py_bit_and(col1: &PyColumn, col2: &PyColumn) -> PyColumn {
     PyColumn {
-        inner: bit_and(&left.inner, &right.inner),
+        inner: bit_and(&col1.inner, &col2.inner),
     }
 }
 
 #[pyfunction]
-fn py_bit_or(left: &PyColumn, right: &PyColumn) -> PyColumn {
+#[pyo3(signature = (col1, col2))]
+fn py_bit_or(col1: &PyColumn, col2: &PyColumn) -> PyColumn {
     PyColumn {
-        inner: bit_or(&left.inner, &right.inner),
+        inner: bit_or(&col1.inner, &col2.inner),
     }
 }
 
 #[pyfunction]
-fn py_bit_xor(left: &PyColumn, right: &PyColumn) -> PyColumn {
+#[pyo3(signature = (col1, col2))]
+fn py_bit_xor(col1: &PyColumn, col2: &PyColumn) -> PyColumn {
     PyColumn {
-        inner: bit_xor(&left.inner, &right.inner),
+        inner: bit_xor(&col1.inner, &col2.inner),
     }
 }
 
 #[pyfunction]
-fn py_bit_count(column: &PyColumn) -> PyColumn {
+fn py_bit_count(col: &PyColumn) -> PyColumn {
     PyColumn {
-        inner: bit_count(&column.inner),
+        inner: bit_count(&col.inner),
     }
 }
 
 #[pyfunction]
-fn py_bitwise_not(column: &PyColumn) -> PyColumn {
+fn py_bitwise_not(col: &PyColumn) -> PyColumn {
     PyColumn {
-        inner: bitwise_not(&column.inner),
+        inner: bitwise_not(&col.inner),
     }
 }
 
@@ -1073,16 +1099,18 @@ fn py_version() -> PyColumn {
 }
 
 #[pyfunction]
-fn py_assert_true(column: &PyColumn) -> PyColumn {
+#[pyo3(signature = (col, errMsg=None))]
+fn py_assert_true(col: &PyColumn, _err_msg: Option<&str>) -> PyColumn {
     PyColumn {
-        inner: rs_assert_true(&column.inner),
+        inner: rs_assert_true(&col.inner),
     }
 }
 
 #[pyfunction]
-fn py_raise_error(message: &str) -> PyColumn {
+#[pyo3(signature = (errMsg))]
+fn py_raise_error(err_msg: &str) -> PyColumn {
     PyColumn {
-        inner: crate::functions::raise_error(message),
+        inner: crate::functions::raise_error(err_msg),
     }
 }
 
@@ -1162,278 +1190,287 @@ fn py_broadcast(df: &PyDataFrame) -> PyDataFrame {
 }
 
 #[pyfunction]
-fn py_equal_null(left: &PyColumn, right: &PyColumn) -> PyColumn {
+fn py_equal_null(col1: &PyColumn, col2: &PyColumn) -> PyColumn {
     PyColumn {
-        inner: equal_null(&left.inner, &right.inner),
+        inner: equal_null(&col1.inner, &col2.inner),
     }
 }
 
 #[pyfunction]
-fn py_json_array_length(column: &PyColumn, path: &str) -> PyColumn {
+#[pyo3(signature = (col, path=None))]
+fn py_json_array_length(col: &PyColumn, path: Option<&str>) -> PyColumn {
     PyColumn {
-        inner: json_array_length(&column.inner, path),
+        inner: json_array_length(&col.inner, path.unwrap_or("")),
     }
 }
 
 #[pyfunction]
-fn py_parse_url(column: &PyColumn, part: &str) -> PyColumn {
+#[pyo3(signature = (url, partToExtract, key=None))]
+fn py_parse_url(url: &PyColumn, part: &str, _key: Option<&str>) -> PyColumn {
+    let _ = _key;
     PyColumn {
-        inner: parse_url(&column.inner, part),
+        inner: parse_url(&url.inner, part),
     }
 }
 
 #[pyfunction]
-fn py_hash(columns: Vec<PyRef<PyColumn>>) -> PyColumn {
-    let rs_refs: Vec<&crate::column::Column> = columns.iter().map(|c| &(&*c).inner).collect();
+fn py_hash(cols: Vec<PyRef<PyColumn>>) -> PyColumn {
+    let rs_refs: Vec<&crate::column::Column> = cols.iter().map(|c| &(&*c).inner).collect();
     PyColumn {
         inner: hash(&rs_refs),
     }
 }
 
 #[pyfunction]
-fn py_stack(columns: Vec<PyRef<PyColumn>>) -> PyColumn {
-    let rs_refs: Vec<&crate::column::Column> = columns.iter().map(|c| &(&*c).inner).collect();
+fn py_stack(cols: Vec<PyRef<PyColumn>>) -> PyColumn {
+    let rs_refs: Vec<&crate::column::Column> = cols.iter().map(|c| &(&*c).inner).collect();
     PyColumn {
         inner: struct_(&rs_refs),
     }
 }
 
 #[pyfunction]
-fn py_ascii(column: &PyColumn) -> PyColumn {
+fn py_ascii(col: &PyColumn) -> PyColumn {
     PyColumn {
-        inner: ascii(&column.inner),
+        inner: ascii(&col.inner),
     }
 }
 
 #[pyfunction]
-fn py_format_number(column: &PyColumn, decimals: u32) -> PyColumn {
+fn py_format_number(col: &PyColumn, d: u32) -> PyColumn {
     PyColumn {
-        inner: format_number(&column.inner, decimals),
+        inner: format_number(&col.inner, d),
     }
 }
 
 #[pyfunction]
-fn py_overlay(column: &PyColumn, replace: &str, pos: i64, length: i64) -> PyColumn {
+fn py_overlay(src: &PyColumn, replace: &str, pos: i64, len: i64) -> PyColumn {
     PyColumn {
-        inner: overlay(&column.inner, replace, pos, length),
+        inner: overlay(&src.inner, replace, pos, len),
     }
 }
 
 #[pyfunction]
-fn py_position(substr: &str, column: &PyColumn) -> PyColumn {
+#[pyo3(signature = (substr, str, start=None))]
+fn py_position(substr: &str, str: &PyColumn, start: Option<i64>) -> PyColumn {
+    let pos = start.unwrap_or(1);
     PyColumn {
-        inner: rs_position(substr, &column.inner),
+        inner: locate(substr, &str.inner, pos),
     }
 }
 
 #[pyfunction]
-fn py_char(column: &PyColumn) -> PyColumn {
+fn py_char(col: &PyColumn) -> PyColumn {
     PyColumn {
-        inner: crate::functions::char(&column.inner),
+        inner: crate::functions::char(&col.inner),
     }
 }
 
 #[pyfunction]
-fn py_chr(column: &PyColumn) -> PyColumn {
+fn py_chr(col: &PyColumn) -> PyColumn {
     PyColumn {
-        inner: chr(&column.inner),
+        inner: chr(&col.inner),
     }
 }
 
 #[pyfunction]
-fn py_base64(column: &PyColumn) -> PyColumn {
+fn py_base64(col: &PyColumn) -> PyColumn {
     PyColumn {
-        inner: base64(&column.inner),
+        inner: base64(&col.inner),
     }
 }
 
 #[pyfunction]
-fn py_unbase64(column: &PyColumn) -> PyColumn {
+fn py_unbase64(col: &PyColumn) -> PyColumn {
     PyColumn {
-        inner: unbase64(&column.inner),
+        inner: unbase64(&col.inner),
     }
 }
 
 #[pyfunction]
-fn py_sha1(column: &PyColumn) -> PyColumn {
+fn py_sha1(col: &PyColumn) -> PyColumn {
     PyColumn {
-        inner: sha1(&column.inner),
+        inner: sha1(&col.inner),
     }
 }
 
 #[pyfunction]
-fn py_sha2(column: &PyColumn, bit_length: i32) -> PyColumn {
+#[pyo3(signature = (col, numBits))]
+fn py_sha2(col: &PyColumn, num_bits: i32) -> PyColumn {
     PyColumn {
-        inner: sha2(&column.inner, bit_length),
+        inner: sha2(&col.inner, num_bits),
     }
 }
 
 #[pyfunction]
-fn py_md5(column: &PyColumn) -> PyColumn {
+fn py_md5(col: &PyColumn) -> PyColumn {
     PyColumn {
-        inner: md5(&column.inner),
+        inner: md5(&col.inner),
     }
 }
 
 #[pyfunction]
-fn py_array_compact(column: &PyColumn) -> PyColumn {
+fn py_array_compact(col: &PyColumn) -> PyColumn {
     PyColumn {
-        inner: array_compact(&column.inner),
+        inner: array_compact(&col.inner),
     }
 }
 
 #[pyfunction]
-fn py_array_distinct(column: &PyColumn) -> PyColumn {
+fn py_array_distinct(col: &PyColumn) -> PyColumn {
     PyColumn {
-        inner: array_distinct(&column.inner),
+        inner: array_distinct(&col.inner),
     }
 }
 
 #[pyfunction]
-fn py_sin(column: &PyColumn) -> PyColumn {
+fn py_sin(col: &PyColumn) -> PyColumn {
     PyColumn {
-        inner: sin(&column.inner),
+        inner: sin(&col.inner),
     }
 }
 #[pyfunction]
-fn py_cos(column: &PyColumn) -> PyColumn {
+fn py_cos(col: &PyColumn) -> PyColumn {
     PyColumn {
-        inner: cos(&column.inner),
+        inner: cos(&col.inner),
     }
 }
 #[pyfunction]
-fn py_tan(column: &PyColumn) -> PyColumn {
+fn py_tan(col: &PyColumn) -> PyColumn {
     PyColumn {
-        inner: tan(&column.inner),
+        inner: tan(&col.inner),
     }
 }
 #[pyfunction]
-fn py_asin(column: &PyColumn) -> PyColumn {
+fn py_asin(col: &PyColumn) -> PyColumn {
     PyColumn {
-        inner: asin(&column.inner),
+        inner: asin(&col.inner),
     }
 }
 #[pyfunction]
-fn py_acos(column: &PyColumn) -> PyColumn {
+fn py_acos(col: &PyColumn) -> PyColumn {
     PyColumn {
-        inner: acos(&column.inner),
+        inner: acos(&col.inner),
     }
 }
 #[pyfunction]
-fn py_atan(column: &PyColumn) -> PyColumn {
+fn py_atan(col: &PyColumn) -> PyColumn {
     PyColumn {
-        inner: atan(&column.inner),
+        inner: atan(&col.inner),
     }
 }
 #[pyfunction]
-fn py_atan2(y: &PyColumn, x: &PyColumn) -> PyColumn {
+fn py_atan2(col1: &PyColumn, col2: &PyColumn) -> PyColumn {
     PyColumn {
-        inner: atan2(&y.inner, &x.inner),
+        inner: atan2(&col1.inner, &col2.inner),
     }
 }
 #[pyfunction]
-fn py_degrees(column: &PyColumn) -> PyColumn {
+fn py_degrees(col: &PyColumn) -> PyColumn {
     PyColumn {
-        inner: degrees(&column.inner),
+        inner: degrees(&col.inner),
     }
 }
 #[pyfunction]
-fn py_radians(column: &PyColumn) -> PyColumn {
+fn py_radians(col: &PyColumn) -> PyColumn {
     PyColumn {
-        inner: radians(&column.inner),
+        inner: radians(&col.inner),
     }
 }
 #[pyfunction]
-fn py_signum(column: &PyColumn) -> PyColumn {
+fn py_signum(col: &PyColumn) -> PyColumn {
     PyColumn {
-        inner: signum(&column.inner),
+        inner: signum(&col.inner),
     }
 }
 #[pyfunction]
-fn py_quarter(column: &PyColumn) -> PyColumn {
+fn py_quarter(col: &PyColumn) -> PyColumn {
     PyColumn {
-        inner: quarter(&column.inner),
+        inner: quarter(&col.inner),
     }
 }
 #[pyfunction]
-fn py_weekofyear(column: &PyColumn) -> PyColumn {
+fn py_weekofyear(col: &PyColumn) -> PyColumn {
     PyColumn {
-        inner: weekofyear(&column.inner),
+        inner: weekofyear(&col.inner),
     }
 }
 #[pyfunction]
-fn py_dayofweek(column: &PyColumn) -> PyColumn {
+fn py_dayofweek(col: &PyColumn) -> PyColumn {
     PyColumn {
-        inner: dayofweek(&column.inner),
+        inner: dayofweek(&col.inner),
     }
 }
 #[pyfunction]
-fn py_dayofyear(column: &PyColumn) -> PyColumn {
+fn py_dayofyear(col: &PyColumn) -> PyColumn {
     PyColumn {
-        inner: dayofyear(&column.inner),
+        inner: dayofyear(&col.inner),
     }
 }
 #[pyfunction]
-fn py_add_months(column: &PyColumn, n: i32) -> PyColumn {
+fn py_add_months(start: &PyColumn, months: i32) -> PyColumn {
     PyColumn {
-        inner: add_months(&column.inner, n),
+        inner: add_months(&start.inner, months),
     }
 }
 #[pyfunction]
-fn py_months_between(end: &PyColumn, start: &PyColumn) -> PyColumn {
+#[pyo3(signature = (date1, date2, roundOff=true))]
+fn py_months_between(date1: &PyColumn, date2: &PyColumn, _round_off: Option<bool>) -> PyColumn {
+    let _ = _round_off;
     PyColumn {
-        inner: months_between(&end.inner, &start.inner),
+        inner: months_between(&date1.inner, &date2.inner),
     }
 }
 #[pyfunction]
-fn py_next_day(column: &PyColumn, day_of_week: &str) -> PyColumn {
+#[pyo3(signature = (date, dayOfWeek))]
+fn py_next_day(date: &PyColumn, day_of_week: &str) -> PyColumn {
     PyColumn {
-        inner: next_day(&column.inner, day_of_week),
+        inner: next_day(&date.inner, day_of_week),
     }
 }
 #[pyfunction]
-fn py_cast(column: &PyColumn, type_name: &str) -> PyResult<PyColumn> {
-    rs_cast(&column.inner, type_name)
+fn py_cast(col: &PyColumn, type_name: &str) -> PyResult<PyColumn> {
+    rs_cast(&col.inner, type_name)
         .map(|inner| PyColumn { inner })
         .map_err(|e| pyo3::exceptions::PyValueError::new_err(e))
 }
 #[pyfunction]
-fn py_try_cast(column: &PyColumn, type_name: &str) -> PyResult<PyColumn> {
-    rs_try_cast(&column.inner, type_name)
+fn py_try_cast(col: &PyColumn, type_name: &str) -> PyResult<PyColumn> {
+    rs_try_cast(&col.inner, type_name)
         .map(|inner| PyColumn { inner })
         .map_err(|e| pyo3::exceptions::PyValueError::new_err(e))
 }
 #[pyfunction]
-fn py_isnan(column: &PyColumn) -> PyColumn {
+fn py_isnan(col: &PyColumn) -> PyColumn {
     PyColumn {
-        inner: rs_isnan(&column.inner),
+        inner: rs_isnan(&col.inner),
     }
 }
 #[pyfunction]
-fn py_greatest(columns: Vec<PyRef<PyColumn>>) -> PyResult<PyColumn> {
-    let refs: Vec<&RsColumn> = columns.iter().map(|c| &c.inner).collect();
+fn py_greatest(cols: Vec<PyRef<PyColumn>>) -> PyResult<PyColumn> {
+    let refs: Vec<&RsColumn> = cols.iter().map(|c| &c.inner).collect();
     rs_greatest(&refs)
         .map(|inner| PyColumn { inner })
         .map_err(|e| pyo3::exceptions::PyValueError::new_err(e))
 }
 #[pyfunction]
-fn py_least(columns: Vec<PyRef<PyColumn>>) -> PyResult<PyColumn> {
-    let refs: Vec<&RsColumn> = columns.iter().map(|c| &c.inner).collect();
+fn py_least(cols: Vec<PyRef<PyColumn>>) -> PyResult<PyColumn> {
+    let refs: Vec<&RsColumn> = cols.iter().map(|c| &c.inner).collect();
     rs_least(&refs)
         .map(|inner| PyColumn { inner })
         .map_err(|e| pyo3::exceptions::PyValueError::new_err(e))
 }
 
 #[pyfunction]
-fn py_nvl(column: &PyColumn, value: &PyColumn) -> PyColumn {
+fn py_nvl(col1: &PyColumn, col2: &PyColumn) -> PyColumn {
     PyColumn {
-        inner: nvl(&column.inner, &value.inner),
+        inner: nvl(&col1.inner, &col2.inner),
     }
 }
 #[pyfunction]
-fn py_ifnull(column: &PyColumn, value: &PyColumn) -> PyColumn {
+fn py_ifnull(col1: &PyColumn, col2: &PyColumn) -> PyColumn {
     PyColumn {
-        inner: ifnull(&column.inner, &value.inner),
+        inner: ifnull(&col1.inner, &col2.inner),
     }
 }
 #[pyfunction]
@@ -1443,185 +1480,188 @@ fn py_nvl2(col1: &PyColumn, col2: &PyColumn, col3: &PyColumn) -> PyColumn {
     }
 }
 #[pyfunction]
-fn py_substr(column: &PyColumn, start: i64, length: Option<i64>) -> PyColumn {
+fn py_substr(str: &PyColumn, pos: i64, len: Option<i64>) -> PyColumn {
     PyColumn {
-        inner: substr(&column.inner, start, length),
+        inner: substr(&str.inner, pos, len),
     }
 }
 #[pyfunction]
-fn py_power(column: &PyColumn, exp: i64) -> PyColumn {
+fn py_power(col1: &PyColumn, col2: i64) -> PyColumn {
     PyColumn {
-        inner: power(&column.inner, exp),
+        inner: power(&col1.inner, col2),
     }
 }
 #[pyfunction]
-fn py_ln(column: &PyColumn) -> PyColumn {
+fn py_ln(col: &PyColumn) -> PyColumn {
     PyColumn {
-        inner: ln(&column.inner),
+        inner: ln(&col.inner),
     }
 }
 #[pyfunction]
-fn py_ceiling(column: &PyColumn) -> PyColumn {
+fn py_ceiling(col: &PyColumn) -> PyColumn {
     PyColumn {
-        inner: ceiling(&column.inner),
+        inner: ceiling(&col.inner),
     }
 }
 #[pyfunction]
-fn py_lcase(column: &PyColumn) -> PyColumn {
+fn py_lcase(str: &PyColumn) -> PyColumn {
     PyColumn {
-        inner: lcase(&column.inner),
+        inner: lcase(&str.inner),
     }
 }
 #[pyfunction]
-fn py_ucase(column: &PyColumn) -> PyColumn {
+fn py_ucase(str: &PyColumn) -> PyColumn {
     PyColumn {
-        inner: ucase(&column.inner),
+        inner: ucase(&str.inner),
     }
 }
 #[pyfunction]
-fn py_day(column: &PyColumn) -> PyColumn {
+fn py_day(col: &PyColumn) -> PyColumn {
     PyColumn {
-        inner: day(&column.inner),
+        inner: day(&col.inner),
     }
 }
 #[pyfunction]
-fn py_dayofmonth(column: &PyColumn) -> PyColumn {
+fn py_dayofmonth(col: &PyColumn) -> PyColumn {
     PyColumn {
-        inner: dayofmonth(&column.inner),
+        inner: dayofmonth(&col.inner),
     }
 }
 #[pyfunction]
-fn py_to_degrees(column: &PyColumn) -> PyColumn {
+fn py_to_degrees(col: &PyColumn) -> PyColumn {
     PyColumn {
-        inner: to_degrees(&column.inner),
+        inner: to_degrees(&col.inner),
     }
 }
 #[pyfunction]
-fn py_to_radians(column: &PyColumn) -> PyColumn {
+fn py_to_radians(col: &PyColumn) -> PyColumn {
     PyColumn {
-        inner: to_radians(&column.inner),
+        inner: to_radians(&col.inner),
     }
 }
 #[pyfunction]
-fn py_isnull(column: &PyColumn) -> PyColumn {
+fn py_isnull(col: &PyColumn) -> PyColumn {
     PyColumn {
-        inner: isnull(&column.inner),
+        inner: isnull(&col.inner),
     }
 }
 #[pyfunction]
-fn py_isnotnull(column: &PyColumn) -> PyColumn {
+fn py_isnotnull(col: &PyColumn) -> PyColumn {
     PyColumn {
-        inner: isnotnull(&column.inner),
-    }
-}
-
-#[pyfunction]
-fn py_left(column: &PyColumn, n: i64) -> PyColumn {
-    PyColumn {
-        inner: left(&column.inner, n),
-    }
-}
-#[pyfunction]
-fn py_right(column: &PyColumn, n: i64) -> PyColumn {
-    PyColumn {
-        inner: right(&column.inner, n),
-    }
-}
-#[pyfunction]
-fn py_replace(column: &PyColumn, search: &str, replacement: &str) -> PyColumn {
-    PyColumn {
-        inner: rs_replace(&column.inner, search, replacement),
-    }
-}
-#[pyfunction]
-fn py_startswith(column: &PyColumn, prefix: &str) -> PyColumn {
-    PyColumn {
-        inner: startswith(&column.inner, prefix),
-    }
-}
-#[pyfunction]
-fn py_endswith(column: &PyColumn, suffix: &str) -> PyColumn {
-    PyColumn {
-        inner: endswith(&column.inner, suffix),
-    }
-}
-#[pyfunction]
-fn py_contains(column: &PyColumn, substring: &str) -> PyColumn {
-    PyColumn {
-        inner: contains(&column.inner, substring),
-    }
-}
-#[pyfunction]
-fn py_like(column: &PyColumn, pattern: &str) -> PyColumn {
-    PyColumn {
-        inner: like(&column.inner, pattern),
-    }
-}
-#[pyfunction]
-fn py_ilike(column: &PyColumn, pattern: &str) -> PyColumn {
-    PyColumn {
-        inner: ilike(&column.inner, pattern),
-    }
-}
-#[pyfunction]
-fn py_rlike(column: &PyColumn, pattern: &str) -> PyColumn {
-    PyColumn {
-        inner: rlike(&column.inner, pattern),
+        inner: isnotnull(&col.inner),
     }
 }
 
 #[pyfunction]
-fn py_regexp_count(column: &PyColumn, pattern: &str) -> PyColumn {
+fn py_left(str: &PyColumn, len: i64) -> PyColumn {
     PyColumn {
-        inner: regexp_count(&column.inner, pattern),
+        inner: left(&str.inner, len),
+    }
+}
+#[pyfunction]
+fn py_right(str: &PyColumn, len: i64) -> PyColumn {
+    PyColumn {
+        inner: right(&str.inner, len),
+    }
+}
+#[pyfunction]
+fn py_replace(src: &PyColumn, search: &str, replace: &str) -> PyColumn {
+    PyColumn {
+        inner: rs_replace(&src.inner, search, replace),
+    }
+}
+#[pyfunction]
+fn py_startswith(str: &PyColumn, prefix: &str) -> PyColumn {
+    PyColumn {
+        inner: startswith(&str.inner, prefix),
+    }
+}
+#[pyfunction]
+fn py_endswith(str: &PyColumn, suffix: &str) -> PyColumn {
+    PyColumn {
+        inner: endswith(&str.inner, suffix),
+    }
+}
+#[pyfunction]
+fn py_contains(left: &PyColumn, right: &str) -> PyColumn {
+    PyColumn {
+        inner: contains(&left.inner, right),
+    }
+}
+#[pyfunction]
+#[pyo3(signature = (str, pattern, escapeChar=None))]
+fn py_like(str: &PyColumn, pattern: &str, _escape_char: Option<&str>) -> PyColumn {
+    PyColumn {
+        inner: like(&str.inner, pattern),
+    }
+}
+#[pyfunction]
+#[pyo3(signature = (str, pattern, escapeChar=None))]
+fn py_ilike(str: &PyColumn, pattern: &str, _escape_char: Option<&str>) -> PyColumn {
+    PyColumn {
+        inner: ilike(&str.inner, pattern),
+    }
+}
+#[pyfunction]
+fn py_rlike(str: &PyColumn, regexp: &str) -> PyColumn {
+    PyColumn {
+        inner: rlike(&str.inner, regexp),
     }
 }
 
 #[pyfunction]
-fn py_regexp_instr(column: &PyColumn, pattern: &str, group_idx: Option<usize>) -> PyColumn {
+fn py_regexp_count(str: &PyColumn, regexp: &str) -> PyColumn {
     PyColumn {
-        inner: regexp_instr(&column.inner, pattern, group_idx),
+        inner: regexp_count(&str.inner, regexp),
     }
 }
 
 #[pyfunction]
-fn py_regexp_substr(column: &PyColumn, pattern: &str) -> PyColumn {
+fn py_regexp_instr(str: &PyColumn, regexp: &str, idx: Option<usize>) -> PyColumn {
     PyColumn {
-        inner: regexp_substr(&column.inner, pattern),
+        inner: regexp_instr(&str.inner, regexp, idx),
     }
 }
 
 #[pyfunction]
-fn py_split_part(column: &PyColumn, delimiter: &str, part_num: i64) -> PyColumn {
+fn py_regexp_substr(str: &PyColumn, regexp: &str) -> PyColumn {
     PyColumn {
-        inner: split_part(&column.inner, delimiter, part_num),
+        inner: regexp_substr(&str.inner, regexp),
     }
 }
 
 #[pyfunction]
-fn py_find_in_set(str_column: &PyColumn, set_column: &PyColumn) -> PyColumn {
+#[pyo3(signature = (src, delimiter, partNum))]
+fn py_split_part(src: &PyColumn, delimiter: &str, part_num: i64) -> PyColumn {
     PyColumn {
-        inner: find_in_set(&str_column.inner, &set_column.inner),
+        inner: split_part(&src.inner, delimiter, part_num),
     }
 }
 
 #[pyfunction]
-fn py_format_string(format: &str, columns: Vec<PyRef<PyColumn>>) -> PyColumn {
-    let refs: Vec<&RsColumn> = columns.iter().map(|c| &c.inner).collect();
+fn py_find_in_set(str: &PyColumn, str_array: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: find_in_set(&str.inner, &str_array.inner),
+    }
+}
+
+#[pyfunction]
+fn py_format_string(format: &str, cols: Vec<PyRef<PyColumn>>) -> PyColumn {
+    let refs: Vec<&RsColumn> = cols.iter().map(|c| &c.inner).collect();
     PyColumn {
         inner: format_string(format, &refs),
     }
 }
 
 #[pyfunction]
-fn py_printf(format: &str, columns: Vec<PyRef<PyColumn>>) -> PyColumn {
-    py_format_string(format, columns)
+fn py_printf(format: &str, cols: Vec<PyRef<PyColumn>>) -> PyColumn {
+    py_format_string(format, cols)
 }
 
 // Phase 17: datetime/unix and math
 #[pyfunction]
-fn py_unix_timestamp(column: Option<PyRef<PyColumn>>, format: Option<&str>) -> PyColumn {
-    match &column {
+fn py_unix_timestamp(timestamp: Option<PyRef<PyColumn>>, format: Option<&str>) -> PyColumn {
+    match &timestamp {
         None => PyColumn {
             inner: unix_timestamp_now(),
         },
@@ -1632,16 +1672,16 @@ fn py_unix_timestamp(column: Option<PyRef<PyColumn>>, format: Option<&str>) -> P
 }
 
 #[pyfunction]
-fn py_to_unix_timestamp(column: PyRef<PyColumn>, format: Option<&str>) -> PyColumn {
+fn py_to_unix_timestamp(timestamp: PyRef<PyColumn>, format: Option<&str>) -> PyColumn {
     PyColumn {
-        inner: to_unix_timestamp(&column.inner, format),
+        inner: to_unix_timestamp(&timestamp.inner, format),
     }
 }
 
 #[pyfunction]
-fn py_from_unixtime(column: &PyColumn, format: Option<&str>) -> PyColumn {
+fn py_from_unixtime(timestamp: &PyColumn, format: Option<&str>) -> PyColumn {
     PyColumn {
-        inner: from_unixtime(&column.inner, format),
+        inner: from_unixtime(&timestamp.inner, format),
     }
 }
 
@@ -1653,37 +1693,37 @@ fn py_make_date(year: &PyColumn, month: &PyColumn, day: &PyColumn) -> PyColumn {
 }
 
 #[pyfunction]
-fn py_timestamp_seconds(column: &PyColumn) -> PyColumn {
+fn py_timestamp_seconds(col: &PyColumn) -> PyColumn {
     PyColumn {
-        inner: timestamp_seconds(&column.inner),
+        inner: timestamp_seconds(&col.inner),
     }
 }
 
 #[pyfunction]
-fn py_timestamp_millis(column: &PyColumn) -> PyColumn {
+fn py_timestamp_millis(col: &PyColumn) -> PyColumn {
     PyColumn {
-        inner: timestamp_millis(&column.inner),
+        inner: timestamp_millis(&col.inner),
     }
 }
 
 #[pyfunction]
-fn py_timestamp_micros(column: &PyColumn) -> PyColumn {
+fn py_timestamp_micros(col: &PyColumn) -> PyColumn {
     PyColumn {
-        inner: timestamp_micros(&column.inner),
+        inner: timestamp_micros(&col.inner),
     }
 }
 
 #[pyfunction]
-fn py_unix_date(column: &PyColumn) -> PyColumn {
+fn py_unix_date(col: &PyColumn) -> PyColumn {
     PyColumn {
-        inner: unix_date(&column.inner),
+        inner: unix_date(&col.inner),
     }
 }
 
 #[pyfunction]
-fn py_date_from_unix_date(column: &PyColumn) -> PyColumn {
+fn py_date_from_unix_date(days: &PyColumn) -> PyColumn {
     PyColumn {
-        inner: date_from_unix_date(&column.inner),
+        inner: date_from_unix_date(&days.inner),
     }
 }
 
@@ -1695,59 +1735,60 @@ fn py_pmod(dividend: &PyColumn, divisor: &PyColumn) -> PyColumn {
 }
 
 #[pyfunction]
-fn py_factorial(column: &PyColumn) -> PyColumn {
+fn py_factorial(col: &PyColumn) -> PyColumn {
     PyColumn {
-        inner: factorial(&column.inner),
+        inner: factorial(&col.inner),
     }
 }
 
 // Phase 18: array, map, struct
 #[pyfunction]
-fn py_array_append(array: &PyColumn, elem: &PyColumn) -> PyColumn {
+fn py_array_append(col: &PyColumn, value: &PyColumn) -> PyColumn {
     PyColumn {
-        inner: array_append(&array.inner, &elem.inner),
+        inner: array_append(&col.inner, &value.inner),
     }
 }
 
 #[pyfunction]
-fn py_array_prepend(array: &PyColumn, elem: &PyColumn) -> PyColumn {
+fn py_array_prepend(col: &PyColumn, value: &PyColumn) -> PyColumn {
     PyColumn {
-        inner: array_prepend(&array.inner, &elem.inner),
+        inner: array_prepend(&col.inner, &value.inner),
     }
 }
 
 #[pyfunction]
-fn py_array_insert(array: &PyColumn, pos: &PyColumn, elem: &PyColumn) -> PyColumn {
+fn py_array_insert(arr: &PyColumn, pos: &PyColumn, value: &PyColumn) -> PyColumn {
     PyColumn {
-        inner: array_insert(&array.inner, &pos.inner, &elem.inner),
+        inner: array_insert(&arr.inner, &pos.inner, &value.inner),
     }
 }
 
 #[pyfunction]
-fn py_array_except(a: &PyColumn, b: &PyColumn) -> PyColumn {
+fn py_array_except(col1: &PyColumn, col2: &PyColumn) -> PyColumn {
     PyColumn {
-        inner: array_except(&a.inner, &b.inner),
+        inner: array_except(&col1.inner, &col2.inner),
     }
 }
 
 #[pyfunction]
-fn py_array_intersect(a: &PyColumn, b: &PyColumn) -> PyColumn {
+fn py_array_intersect(col1: &PyColumn, col2: &PyColumn) -> PyColumn {
     PyColumn {
-        inner: array_intersect(&a.inner, &b.inner),
+        inner: array_intersect(&col1.inner, &col2.inner),
     }
 }
 
 #[pyfunction]
-fn py_array_union(a: &PyColumn, b: &PyColumn) -> PyColumn {
+fn py_array_union(col1: &PyColumn, col2: &PyColumn) -> PyColumn {
     PyColumn {
-        inner: array_union(&a.inner, &b.inner),
+        inner: array_union(&col1.inner, &col2.inner),
     }
 }
 
 #[pyfunction]
-fn py_map_concat(a: &PyColumn, b: &PyColumn) -> PyColumn {
+#[pyo3(signature = (col1, col2))]
+fn py_map_concat(col1: &PyColumn, col2: &PyColumn) -> PyColumn {
     PyColumn {
-        inner: map_concat(&a.inner, &b.inner),
+        inner: map_concat(&col1.inner, &col2.inner),
     }
 }
 
@@ -1773,31 +1814,31 @@ fn py_map_zip_with_coalesce(map1: &PyColumn, map2: &PyColumn) -> PyColumn {
 }
 
 #[pyfunction]
-fn py_map_from_entries(column: &PyColumn) -> PyColumn {
+fn py_map_from_entries(col: &PyColumn) -> PyColumn {
     PyColumn {
-        inner: map_from_entries(&column.inner),
+        inner: map_from_entries(&col.inner),
     }
 }
 
 #[pyfunction]
-fn py_map_contains_key(map_col: &PyColumn, key: &PyColumn) -> PyColumn {
+fn py_map_contains_key(col: &PyColumn, value: &PyColumn) -> PyColumn {
     PyColumn {
-        inner: map_contains_key(&map_col.inner, &key.inner),
+        inner: map_contains_key(&col.inner, &value.inner),
     }
 }
 
 #[pyfunction]
-fn py_create_map(columns: Vec<PyRef<PyColumn>>) -> PyColumn {
-    let refs: Vec<&RsColumn> = columns.iter().map(|c| &c.inner).collect();
+fn py_create_map(cols: Vec<PyRef<PyColumn>>) -> PyColumn {
+    let refs: Vec<&RsColumn> = cols.iter().map(|c| &c.inner).collect();
     PyColumn {
         inner: create_map(&refs),
     }
 }
 
 #[pyfunction]
-fn py_get(map_col: &PyColumn, key: &PyColumn) -> PyColumn {
+fn py_get(col: &PyColumn, index: &PyColumn) -> PyColumn {
     PyColumn {
-        inner: get(&map_col.inner, &key.inner),
+        inner: get(&col.inner, &index.inner),
     }
 }
 
@@ -1830,6 +1871,7 @@ fn py_try_multiply(left: &PyColumn, right: &PyColumn) -> PyColumn {
 }
 
 #[pyfunction]
+#[pyo3(signature = (v, min, max, numBucket))]
 fn py_width_bucket(value: &PyColumn, min_val: f64, max_val: f64, num_bucket: i64) -> PyColumn {
     PyColumn {
         inner: width_bucket(&value.inner, min_val, max_val, num_bucket),
@@ -1837,36 +1879,38 @@ fn py_width_bucket(value: &PyColumn, min_val: f64, max_val: f64, num_bucket: i64
 }
 
 #[pyfunction]
-fn py_elt(index: &PyColumn, columns: Vec<PyRef<PyColumn>>) -> PyColumn {
-    let refs: Vec<&RsColumn> = columns.iter().map(|c| &c.inner).collect();
+#[pyo3(signature = (index, cols))]
+fn py_elt(index: &PyColumn, cols: Vec<PyRef<PyColumn>>) -> PyColumn {
+    let refs: Vec<&RsColumn> = cols.iter().map(|c| &c.inner).collect();
     PyColumn {
         inner: crate::functions::elt(&index.inner, &refs),
     }
 }
 
 #[pyfunction]
-fn py_bit_length(column: &PyColumn) -> PyColumn {
+fn py_bit_length(col: &PyColumn) -> PyColumn {
     PyColumn {
-        inner: bit_length(&column.inner),
+        inner: bit_length(&col.inner),
     }
 }
 
 #[pyfunction]
-fn py_typeof(column: &PyColumn) -> PyColumn {
+fn py_typeof(col: &PyColumn) -> PyColumn {
     PyColumn {
-        inner: typeof_(&column.inner),
+        inner: typeof_(&col.inner),
     }
 }
 
 #[pyfunction]
-fn py_struct(columns: Vec<PyRef<PyColumn>>) -> PyColumn {
-    let refs: Vec<&RsColumn> = columns.iter().map(|c| &c.inner).collect();
+fn py_struct(cols: Vec<PyRef<PyColumn>>) -> PyColumn {
+    let refs: Vec<&RsColumn> = cols.iter().map(|c| &c.inner).collect();
     PyColumn {
         inner: struct_(&refs),
     }
 }
 
 #[pyfunction]
+#[pyo3(signature = (names, columns))]
 fn py_named_struct(names: Vec<String>, columns: Vec<PyRef<PyColumn>>) -> PyResult<PyColumn> {
     if names.len() != columns.len() {
         return Err(pyo3::exceptions::PyValueError::new_err(
@@ -1884,81 +1928,81 @@ fn py_named_struct(names: Vec<String>, columns: Vec<PyRef<PyColumn>>) -> PyResul
 }
 
 #[pyfunction]
-fn py_cosh(column: &PyColumn) -> PyColumn {
+fn py_cosh(col: &PyColumn) -> PyColumn {
     PyColumn {
-        inner: cosh(&column.inner),
+        inner: cosh(&col.inner),
     }
 }
 #[pyfunction]
-fn py_sinh(column: &PyColumn) -> PyColumn {
+fn py_sinh(col: &PyColumn) -> PyColumn {
     PyColumn {
-        inner: sinh(&column.inner),
+        inner: sinh(&col.inner),
     }
 }
 #[pyfunction]
-fn py_tanh(column: &PyColumn) -> PyColumn {
+fn py_tanh(col: &PyColumn) -> PyColumn {
     PyColumn {
-        inner: tanh(&column.inner),
+        inner: tanh(&col.inner),
     }
 }
 #[pyfunction]
-fn py_acosh(column: &PyColumn) -> PyColumn {
+fn py_acosh(col: &PyColumn) -> PyColumn {
     PyColumn {
-        inner: acosh(&column.inner),
+        inner: acosh(&col.inner),
     }
 }
 #[pyfunction]
-fn py_asinh(column: &PyColumn) -> PyColumn {
+fn py_asinh(col: &PyColumn) -> PyColumn {
     PyColumn {
-        inner: asinh(&column.inner),
+        inner: asinh(&col.inner),
     }
 }
 #[pyfunction]
-fn py_atanh(column: &PyColumn) -> PyColumn {
+fn py_atanh(col: &PyColumn) -> PyColumn {
     PyColumn {
-        inner: atanh(&column.inner),
+        inner: atanh(&col.inner),
     }
 }
 #[pyfunction]
-fn py_cbrt(column: &PyColumn) -> PyColumn {
+fn py_cbrt(col: &PyColumn) -> PyColumn {
     PyColumn {
-        inner: cbrt(&column.inner),
+        inner: cbrt(&col.inner),
     }
 }
 #[pyfunction]
-fn py_expm1(column: &PyColumn) -> PyColumn {
+fn py_expm1(col: &PyColumn) -> PyColumn {
     PyColumn {
-        inner: expm1(&column.inner),
+        inner: expm1(&col.inner),
     }
 }
 #[pyfunction]
-fn py_log1p(column: &PyColumn) -> PyColumn {
+fn py_log1p(col: &PyColumn) -> PyColumn {
     PyColumn {
-        inner: log1p(&column.inner),
+        inner: log1p(&col.inner),
     }
 }
 #[pyfunction]
-fn py_log10(column: &PyColumn) -> PyColumn {
+fn py_log10(col: &PyColumn) -> PyColumn {
     PyColumn {
-        inner: log10(&column.inner),
+        inner: log10(&col.inner),
     }
 }
 #[pyfunction]
-fn py_log2(column: &PyColumn) -> PyColumn {
+fn py_log2(col: &PyColumn) -> PyColumn {
     PyColumn {
-        inner: log2(&column.inner),
+        inner: log2(&col.inner),
     }
 }
 #[pyfunction]
-fn py_rint(column: &PyColumn) -> PyColumn {
+fn py_rint(col: &PyColumn) -> PyColumn {
     PyColumn {
-        inner: rint(&column.inner),
+        inner: rint(&col.inner),
     }
 }
 #[pyfunction]
-fn py_hypot(x: &PyColumn, y: &PyColumn) -> PyColumn {
+fn py_hypot(col1: &PyColumn, col2: &PyColumn) -> PyColumn {
     PyColumn {
-        inner: hypot(&x.inner, &y.inner),
+        inner: hypot(&col1.inner, &col2.inner),
     }
 }
 
@@ -2659,9 +2703,9 @@ impl PyColumn {
     }
 
     /// 1-based index in comma-delimited set (PySpark find_in_set).
-    fn find_in_set(&self, set_column: &PyColumn) -> Self {
+    fn find_in_set(&self, set_col: &PyColumn) -> Self {
         PyColumn {
-            inner: find_in_set(&self.inner, &set_column.inner),
+            inner: find_in_set(&self.inner, &set_col.inner),
         }
     }
 

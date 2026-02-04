@@ -8,6 +8,8 @@
 | [PARITY_STATUS](PARITY_STATUS.md) | PySpark parity coverage matrix (149 fixtures; plan fixtures in tests/fixtures/plans/; Phases 12–25) |
 | [PYSPARK_DIFFERENCES](PYSPARK_DIFFERENCES.md) | Known divergences from PySpark (window, SQL, Delta, rand/randn semantics; Phase 8 completed) |
 | [PYTHON_API](PYTHON_API.md) | Python API contract (Phase 4 PyO3 bridge): build, install, signatures; optional SQL and Delta |
+| [SIGNATURE_GAP_ANALYSIS](SIGNATURE_GAP_ANALYSIS.md) | PySpark vs robin-sparkless signature gap analysis (params, types, defaults) and recommendations |
+| [SIGNATURE_ALIGNMENT_TASKS](SIGNATURE_ALIGNMENT_TASKS.md) | Checklist to align Python param names to PySpark (column→col, add optional, etc.) |
 | [CONVERTER_STATUS](CONVERTER_STATUS.md) | Sparkless → robin-sparkless fixture converter |
 | [SPARKLESS_PARITY_STATUS](SPARKLESS_PARITY_STATUS.md) | Phase 5: pass/fail and failure reasons for converted fixtures |
 | [FULL_BACKEND_ROADMAP](FULL_BACKEND_ROADMAP.md) | Phased plan to full Sparkless backend replacement (Phases 12–25 done; ~283 functions, 149 fixtures, plan interpreter; Phase 26 crate publish, Phase 27 Sparkless integration) |
