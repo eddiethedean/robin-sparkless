@@ -2,6 +2,8 @@
 
 Checklist derived from [SIGNATURE_GAP_ANALYSIS.md](SIGNATURE_GAP_ANALYSIS.md) / `signature_comparison.json`. Goal: make Python parameter names and optional args match PySpark so existing PySpark call sites work unchanged.
 
+**Status (February 2026):** Section 1 (column→col renames), Section 2 (optional params), Section 3 (param count/shape), and Section 4 (other renames) are complete. All optional-parameter *behaviors* are implemented (assert_true errMsg, like/ilike escapeChar, months_between roundOff, parse_url key, make_timestamp timezone, to_char/to_timestamp format, when(condition, value)); parity fixtures added for each. PyO3 signatures and `into_py`→`into_py_any` fixes applied.
+
 **How to apply:**
 - In `src/python/mod.rs`, either (1) rename the `#[pyfunction]` parameter to the PySpark name, or (2) add `#[pyo3(signature = (col, ...))]` and keep the Rust param name.
 - For "Add optional", add the parameter with the same default as PySpark (check [PySpark SQL API](https://spark.apache.org/docs/latest/api/python/reference/pyspark.sql/functions.html)).

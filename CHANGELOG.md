@@ -13,6 +13,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Signature alignment (optional params & two-arg when)** ✅ **COMPLETED**
+  - **Optional parameters**: `assert_true(col, errMsg)`; `like`/`ilike(str, pattern, escapeChar)`; `months_between(date1, date2, roundOff)`; `parse_url(..., key)`; `make_timestamp(..., timezone)`; `position(substr, str, start)`; `to_char`/`to_varchar`/`to_timestamp`/`try_to_timestamp(col, format)` (PySpark-style format mapping for datetime); `to_number`/`try_to_number` accept `format` (reserved for future format-based parsing).
+  - **Two-arg when**: `when(condition, value)` returns value where condition is true, null otherwise (single-branch when).
+  - **Parity fixtures** (149 → 159): `position_start`, `assert_true_err_msg`, `like_escape_char`, `ilike_escape_char`, `months_between_round_off`, `parse_url_key`, `make_timestamp_timezone`, `to_timestamp_format`, `to_char_format`, `when_two_arg`.
+  - **PyO3**: Signature attributes aligned to PySpark param names (snake_case in `#[pyo3(signature = ...)]`); deprecated `into_py` replaced with `into_py_any` for PyColumn/PyWhenBuilder. Section 3 (param count/shape) documented in [SIGNATURE_ALIGNMENT_TASKS.md](docs/SIGNATURE_ALIGNMENT_TASKS.md).
+  - **Code quality**: `cargo fmt`, Clippy clean with `-D warnings`.
+
 - **Phase 25 – Readiness for post-refactor merge** ✅ **COMPLETED**
   - **Plan interpreter**: `execute_plan(session, data, schema, plan)` in Rust (`src/plan/`); Python `robin_sparkless.execute_plan(data, schema, plan_json)` returning a DataFrame (call `.collect()` for list of dicts).
   - **Logical plan schema**: [docs/LOGICAL_PLAN_FORMAT.md](docs/LOGICAL_PLAN_FORMAT.md) defines op list, payload shapes (filter, select, withColumn, join, union, orderBy, limit, groupBy+aggs, etc.), and expression tree format.

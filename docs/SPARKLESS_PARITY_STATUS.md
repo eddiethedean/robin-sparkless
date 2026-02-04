@@ -19,10 +19,10 @@ cargo test pyspark_parity_fixtures
 
 | Source | Converted | Passing | Failing | Skipped |
 |--------|-----------|---------|--------|---------|
-| Hand-written (`tests/fixtures/*.json`) | — | 149 | 0 | 2 (array_distinct, with_curdate_now) |
+| Hand-written (`tests/fixtures/*.json`) | — | 159 | 0 | 2 (array_distinct, with_curdate_now) |
 | Sparkless converted (`tests/fixtures/converted/*.json`) | 0 (run converter when `SPARKLESS_EXPECTED_OUTPUTS` set) | — | — | — |
 
-**Target: 50+ tests passing** (hand-written + converted). **Current: 149 passing** (hand-written; array_distinct, with_curdate_now skipped). **Phase 25 completed**: plan interpreter, expression interpreter, plan fixtures (`tests/fixtures/plans/`), create_dataframe_from_rows. Phase 22: datetime extensions. Phase 21: ordering, aggregates, numeric. Phase 19–18: aggregates, array/map/struct. Phase 17–15: datetime/unix, regexp, aliases, string, math. **Phase 27** (Sparkless integration) target: 200+ Sparkless tests passing with robin backend (after Phase 26 publish Rust crate). CI runs parity on hand-written (and optionally converted) fixtures; when Sparkless repo is available, run `make sparkless-parity` and update this doc.
+**Target: 50+ tests passing** (hand-written + converted). **Current: 159 passing** (hand-written; array_distinct, with_curdate_now skipped). **Phase 25 completed**: plan interpreter, expression interpreter, plan fixtures (`tests/fixtures/plans/`), create_dataframe_from_rows. Phase 22: datetime extensions. Phase 21: ordering, aggregates, numeric. Phase 19–18: aggregates, array/map/struct. Phase 17–15: datetime/unix, regexp, aliases, string, math. **Phase 27** (Sparkless integration) target: 200+ Sparkless tests passing with robin backend (after Phase 26 publish Rust crate). CI runs parity on hand-written (and optionally converted) fixtures; when Sparkless repo is available, run `make sparkless-parity` and update this doc.
 
 ### When Sparkless repo is available
 
