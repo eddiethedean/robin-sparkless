@@ -3,6 +3,8 @@
 **Date:** February 2026  
 **Method:** Direct comparison of Sparkless 3.28.0 `sparkless.sql.functions` API vs robin-sparkless implementation.
 
+**Gap closure (Feb 2026):** Implemented: bitmap_* (5), make_dt_interval, make_ym_interval, to_timestamp_ltz, to_timestamp_ntz, sequence, shuffle, inline, inline_outer, regr_* (9). DataFrame: cube, rollup, write, data, toLocalIterator, persist, unpersist; stubs for rdd, foreach, foreachPartition, mapInPandas, mapPartitions, storageLevel, isStreaming, withWatermark. Deferred: from_xml, to_xml, schema_of_xml, xpath_*, sentences.
+
 ## Robin-Sparkless Implemented Functions (by Sparkless name)
 
 The following Sparkless function names have an equivalent implementation in robin-sparkless:

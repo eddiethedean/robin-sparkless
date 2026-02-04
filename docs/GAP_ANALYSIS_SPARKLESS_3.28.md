@@ -8,11 +8,11 @@
 
 | Metric | Sparkless 3.28.0 | Robin-Sparkless |
 |--------|-------------------|-----------------|
-| **Functions (top-level / F.xxx)** | ~280+ distinct names | ~283 implemented |
-| **Implemented in robin-sparkless** | — | ~283 PySpark-equivalent functions |
-| **Gap (in Sparkless, not in robin-sparkless)** | — | ~10+ function names (see below) |
+| **Functions (top-level / F.xxx)** | ~280+ distinct names | ~295+ implemented |
+| **Implemented in robin-sparkless** | — | ~295+ PySpark-equivalent functions (incl. gap closure: bitmap, interval, sequence, shuffle, inline, regr_*) |
+| **Gap (in Sparkless, not in robin-sparkless)** | — | ~8+ function names (XML/XPath/sentences deferred; see below) |
 
-**Update (Phase 18–23):** Phase 18–22 — all implemented. **Phase 23:** isin, isin_i64, isin_str, url_decode, url_encode, json_array_length, parse_url, hash, shift_left, shift_right, shift_right_unsigned, version, equal_null, stack — all implemented.
+**Update (Phase 18–23 + gap closure):** Phase 18–22 — all implemented. **Phase 23:** isin, isin_i64, isin_str, url_decode, url_encode, json_array_length, parse_url, hash, shift_left, shift_right, shift_right_unsigned, version, equal_null, stack — all implemented. **Gap closure (Feb 2026):** Bitmap (bitmap_bit_position, bitmap_bucket_number, bitmap_construct_agg, bitmap_count, bitmap_or_agg); datetime/interval (make_dt_interval, make_ym_interval, to_timestamp_ltz, to_timestamp_ntz); sequence, shuffle, inline, inline_outer; regr_avgx, regr_avgy, regr_count, regr_intercept, regr_r2, regr_slope, regr_sxx, regr_sxy, regr_syy. XML/XPath/sentences deferred (see [ROBIN_SPARKLESS_MISSING.md](ROBIN_SPARKLESS_MISSING.md)).
 
 Sparkless exposes both camelCase and snake_case for some (e.g. `countDistinct` / `count_distinct`). Robin-sparkless implements the snake_case PySpark-style names; where we have an equivalent, it’s counted as implemented.
 
@@ -59,6 +59,8 @@ The following are implemented in robin-sparkless (Rust `functions.rs`, `column.r
 **URL (Phase 23):** `url_decode`, `url_encode`
 
 **Misc (Phase 23):** `isin`, `isin_i64`, `isin_str`, `equal_null`, `hash`, `shift_left`, `shift_right`, `shift_right_unsigned`, `version`, `stack`
+
+**Gap closure (Feb 2026):** `bitmap_bit_position`, `bitmap_bucket_number`, `bitmap_construct_agg`, `bitmap_count`, `bitmap_or_agg`; `make_dt_interval`, `make_ym_interval`; `to_timestamp_ltz`, `to_timestamp_ntz`; `sequence`, `shuffle`; `inline`, `inline_outer`; `regr_avgx`, `regr_avgy`, `regr_count`, `regr_intercept`, `regr_r2`, `regr_slope`, `regr_sxx`, `regr_sxy`, `regr_syy` (GroupedData agg). DataFrame: `cube`, `rollup`, `write` (parquet/csv/json), `data`, `toLocalIterator`, `persist`, `unpersist`; stubs: `rdd`, `foreach`, `foreachPartition`, `mapInPandas`, `mapPartitions`, `storageLevel`, `isStreaming`, `withWatermark`.
 
 ---
 

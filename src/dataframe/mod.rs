@@ -5,7 +5,7 @@ mod joins;
 mod stats;
 mod transformations;
 
-pub use aggregations::GroupedData;
+pub use aggregations::{CubeRollupData, GroupedData};
 pub use joins::{join, JoinType};
 pub use stats::DataFrameStat;
 pub use transformations::{filter, order_by, order_by_exprs, select, with_column, DataFrameNa};
@@ -170,6 +170,34 @@ impl DataFrame {
             lazy_grouped,
             grouping_cols: resolved,
             case_sensitive: self.case_sensitive,
+        })
+    }
+
+    /// Cube: multiple grouping sets (all subsets of columns), then union (PySpark cube).
+    pub fn cube(&self, column_names: Vec<&str>) -> Result<CubeRollupData, PolarsError> {
+        let resolved: Vec<String> = column_names
+            .iter()
+            .map(|c| self.resolve_column_name(c))
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(CubeRollupData {
+            df: self.df.as_ref().clone(),
+            grouping_cols: resolved,
+            case_sensitive: self.case_sensitive,
+            is_cube: true,
+        })
+    }
+
+    /// Rollup: grouping sets (prefixes of columns), then union (PySpark rollup).
+    pub fn rollup(&self, column_names: Vec<&str>) -> Result<CubeRollupData, PolarsError> {
+        let resolved: Vec<String> = column_names
+            .iter()
+            .map(|c| self.resolve_column_name(c))
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(CubeRollupData {
+            df: self.df.as_ref().clone(),
+            grouping_cols: resolved,
+            case_sensitive: self.case_sensitive,
+            is_cube: false,
         })
     }
 
@@ -581,6 +609,116 @@ impl DataFrame {
         Err(PolarsError::InvalidOperation(
             "Delta Lake requires the 'delta' feature. Build with --features delta.".into(),
         ))
+    }
+
+    /// Return a writer for generic format (parquet, csv, json). PySpark-style write API.
+    pub fn write(&self) -> DataFrameWriter<'_> {
+        DataFrameWriter {
+            df: self,
+            mode: WriteMode::Overwrite,
+            format: WriteFormat::Parquet,
+        }
+    }
+}
+
+/// Write mode: overwrite or append (PySpark DataFrameWriter.mode).
+#[derive(Clone, Copy)]
+pub enum WriteMode {
+    Overwrite,
+    Append,
+}
+
+/// Output format for generic write (PySpark DataFrameWriter.format).
+#[derive(Clone, Copy)]
+pub enum WriteFormat {
+    Parquet,
+    Csv,
+    Json,
+}
+
+/// Builder for writing DataFrame to path (PySpark DataFrameWriter).
+pub struct DataFrameWriter<'a> {
+    df: &'a DataFrame,
+    mode: WriteMode,
+    format: WriteFormat,
+}
+
+impl<'a> DataFrameWriter<'a> {
+    pub fn mode(mut self, mode: WriteMode) -> Self {
+        self.mode = mode;
+        self
+    }
+
+    pub fn format(mut self, format: WriteFormat) -> Self {
+        self.format = format;
+        self
+    }
+
+    /// Write to path. Overwrite replaces; append reads existing (if any) and concatenates then writes.
+    pub fn save(&self, path: impl AsRef<std::path::Path>) -> Result<(), PolarsError> {
+        use polars::prelude::*;
+        let path = path.as_ref();
+        let to_write: PlDataFrame = match self.mode {
+            WriteMode::Overwrite => self.df.df.as_ref().clone(),
+            WriteMode::Append => {
+                use polars::prelude::*;
+                let existing: Option<PlDataFrame> = if path.exists() {
+                    match self.format {
+                        WriteFormat::Parquet => {
+                            LazyFrame::scan_parquet(path, ScanArgsParquet::default())
+                                .and_then(|lf| lf.collect())
+                                .ok()
+                        }
+                        WriteFormat::Csv => LazyCsvReader::new(path)
+                            .with_has_header(true)
+                            .finish()
+                            .and_then(|lf| lf.collect())
+                            .ok(),
+                        WriteFormat::Json => None, // append for JSON not supported
+                    }
+                } else {
+                    None
+                };
+                match existing {
+                    Some(existing) => {
+                        let lfs: [polars::prelude::LazyFrame; 2] =
+                            [existing.lazy(), self.df.df.as_ref().clone().lazy()];
+                        polars::prelude::concat(lfs, UnionArgs::default())?.collect()?
+                    }
+                    None => self.df.df.as_ref().clone(),
+                }
+            }
+        };
+        match self.format {
+            WriteFormat::Parquet => {
+                let mut file = std::fs::File::create(path).map_err(|e| {
+                    PolarsError::ComputeError(format!("write parquet create: {}", e).into())
+                })?;
+                let mut df_mut = to_write;
+                ParquetWriter::new(&mut file)
+                    .finish(&mut df_mut)
+                    .map_err(|e| {
+                        PolarsError::ComputeError(format!("write parquet: {}", e).into())
+                    })?;
+            }
+            WriteFormat::Csv => {
+                let mut file = std::fs::File::create(path).map_err(|e| {
+                    PolarsError::ComputeError(format!("write csv create: {}", e).into())
+                })?;
+                CsvWriter::new(&mut file)
+                    .finish(&mut to_write.clone())
+                    .map_err(|e| PolarsError::ComputeError(format!("write csv: {}", e).into()))?;
+            }
+            WriteFormat::Json => {
+                let mut file = std::fs::File::create(path).map_err(|e| {
+                    PolarsError::ComputeError(format!("write json create: {}", e).into())
+                })?;
+                JsonWriter::new(&mut file)
+                    .finish(&mut to_write.clone())
+                    .map_err(|e| PolarsError::ComputeError(format!("write json: {}", e).into()))?;
+            }
+        }
+        Ok(())
     }
 }
 

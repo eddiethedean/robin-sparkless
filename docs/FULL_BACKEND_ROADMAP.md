@@ -4,14 +4,16 @@ This document plans the path for **robin-sparkless** to become a complete backen
 
 **Reference**: [PYSPARK_FUNCTION_MATRIX](https://github.com/eddiethedean/sparkless/blob/main/PYSPARK_FUNCTION_MATRIX.md) catalogs all functions/methods; [SPARKLESS_INTEGRATION_ANALYSIS.md](SPARKLESS_INTEGRATION_ANALYSIS.md) describes architecture mapping.
 
+**Gap closure (Feb 2026):** Bitmap (5), make_dt_interval, make_ym_interval, to_timestamp_ltz, to_timestamp_ntz, sequence, shuffle, inline, inline_outer, regr_* (9); cube, rollup, write (parquet/csv/json); DataFrame stubs (data, toLocalIterator, persist, unpersist, rdd, foreach, foreachPartition, mapInPandas, mapPartitions, storageLevel, isStreaming, withWatermark). XML/XPath/sentences documented as deferred. See [ROBIN_SPARKLESS_MISSING.md](ROBIN_SPARKLESS_MISSING.md) and [PYSPARK_DIFFERENCES.md](PYSPARK_DIFFERENCES.md).
+
 ---
 
 ## Current State (February 2026)
 
 | Area | Robin-Sparkless | Sparkless | Gap |
 |------|-----------------|-----------|-----|
-| **Functions** | ~283 (Phase 23: isin, url_decode, url_encode, json_array_length, parse_url, hash, shift_left, shift_right, version, equal_null, stack; Phase 22: curdate, now, localtimestamp, date_diff, dateadd, datepart, extract, unix_micros/millis/seconds, dayname, weekday, make_timestamp, timestampadd, timestampdiff, from_utc_timestamp, to_utc_timestamp, etc.; Phase 21: btrim, locate, conv, hex, unhex, bin, getbit, to_char, to_varchar, to_number, try_to_number, try_to_timestamp, str_to_map, arrays_overlap, arrays_zip, explode_outer, posexplode_outer, array_agg; Phase 20: asc/desc with nulls, median, mode, stddev_pop, var_pop, try_sum, try_avg, bround, negate, positive, cot, csc, sec, e, pi; Phase 19–8: aggregates, try_*, Map, JSON, array extensions, string 6.4 — all implemented) | 403 | ~118 |
-| **DataFrame methods** | ~55+ (Phase 12: filter, select, orderBy, groupBy, withColumn, join, union, unionByName, distinct, drop, dropna, fillna, limit, withColumnRenamed, collect, count, show, read_*; sample, random_split, first, head, tail, take, is_empty, to_json, to_pandas, explain, print_schema, checkpoint, repartition, coalesce, offset, summary, to_df, select_expr, col_regex, with_columns, with_columns_renamed, stat, na, freq_items, approx_quantile, crosstab, melt, except_all, intersect_all, sample_by, no-ops; Phase 20: order_by_exprs) | 85 | ~30 |
+| **Functions** | ~295+ (Phase 23 + gap closure: bitmap, make_dt_interval, make_ym_interval, to_timestamp_ltz/ntz, sequence, shuffle, inline, inline_outer, regr_*; Phase 23: isin, url_decode, url_encode, hash, shift_left, shift_right, version, equal_null, stack; Phase 22: curdate, now, localtimestamp, date_diff, dateadd, datepart, extract, dayname, weekday, make_timestamp, timestampadd, timestampdiff, from_utc_timestamp, to_utc_timestamp, etc.; Phase 21–8: btrim, locate, conv, hex, unhex, Map, JSON, array extensions, string 6.4 — all implemented) | 403 | ~105 |
+| **DataFrame methods** | ~68+ (Phase 12 + gap closure: cube, rollup, write, data, toLocalIterator, persist, unpersist; stubs: rdd, foreach, foreachPartition, mapInPandas, mapPartitions, storageLevel, isStreaming, withWatermark; Phase 12: filter, select, orderBy, groupBy, withColumn, join, union, distinct, drop, dropna, fillna, limit, sample, first, head, tail, explain, print_schema, stat, na, etc.; Phase 20: order_by_exprs) | 85 | ~17 |
 | **Parity fixtures** | 159 passing | 270+ expected_outputs | 118+ |
 | **PyO3 bridge** | ✅ Optional `pyo3` feature; `robin_sparkless` Python module | — | — |
 | **SQL** | Optional `sql` feature: SELECT, FROM, WHERE, JOIN, GROUP BY, ORDER BY, LIMIT; temp views | Full DDL/DML support | Subqueries, CTEs, DDL, HAVING |

@@ -13,6 +13,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Gap closure (bitmap, datetime/interval, misc, DataFrame)** — plan Phases 1–4
+  - **Phase 1**: Bitmap (5): `bitmap_bit_position`, `bitmap_bucket_number`, `bitmap_construct_agg`, `bitmap_count`, `bitmap_or_agg`. Datetime/interval: `make_dt_interval`, `make_ym_interval`, `to_timestamp_ltz`, `to_timestamp_ntz`.
+  - **Phase 2**: `sequence`, `shuffle`, `inline`, `inline_outer`; regression aggregates `regr_avgx`, `regr_avgy`, `regr_count`, `regr_intercept`, `regr_r2`, `regr_slope`, `regr_sxx`, `regr_sxy`, `regr_syy`. Stubs: `call_function`, UDF/UDTF, window/session_window, HLL/sketch aggregates, etc. (see PYSPARK_DIFFERENCES).
+  - **Phase 3**: `DataFrame::cube()`, `DataFrame::rollup()` with `.agg()`; generic `DataFrame::write()` → `.mode()`, `.format()`, `.save(path)` (parquet/csv/json, overwrite/append). DataFrame stubs: `data` (same as collect), `toLocalIterator` (same as collect), `persist`/`unpersist` (no-op); `rdd`, `foreach`, `foreachPartition`, `mapInPandas`, `mapPartitions` (raise NotImplementedError); `storageLevel` (returns None), `isStreaming` (False), `withWatermark` (no-op). Python: `PyCubeRollupData`, `PyDataFrameWriter`, `cube()`, `rollup()`, `write()`.
+  - **Phase 4**: XML/XPath/sentences documented as optional/deferred in [ROBIN_SPARKLESS_MISSING.md](docs/ROBIN_SPARKLESS_MISSING.md) and [PYSPARK_DIFFERENCES.md](docs/PYSPARK_DIFFERENCES.md).
+
 - **Signature alignment (optional params & two-arg when)** ✅ **COMPLETED**
   - **Optional parameters**: `assert_true(col, errMsg)`; `like`/`ilike(str, pattern, escapeChar)`; `months_between(date1, date2, roundOff)`; `parse_url(..., key)`; `make_timestamp(..., timezone)`; `position(substr, str, start)`; `to_char`/`to_varchar`/`to_timestamp`/`try_to_timestamp(col, format)` (PySpark-style format mapping for datetime); `to_number`/`try_to_number` accept `format` (reserved for future format-based parsing).
   - **Two-arg when**: `when(condition, value)` returns value where condition is true, null otherwise (single-branch when).

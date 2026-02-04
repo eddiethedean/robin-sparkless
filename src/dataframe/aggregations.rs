@@ -2,7 +2,8 @@
 
 use super::DataFrame;
 use polars::prelude::{
-    col, len, lit, when, DataFrame as PlDataFrame, Expr, LazyGroupBy, PolarsError,
+    col, len, lit, when, DataFrame as PlDataFrame, DataType, Expr, LazyGroupBy, NamedFrom,
+    PolarsError, Series,
 };
 
 /// GroupedData - represents a DataFrame grouped by certain columns.
@@ -370,6 +371,123 @@ impl GroupedData {
         ))
     }
 
+    /// Regression count of (y, x) pairs where both non-null (PySpark regr_count).
+    pub fn regr_count(&self, y_col: &str, x_col: &str) -> Result<DataFrame, PolarsError> {
+        let agg_expr = vec![crate::functions::regr_count_expr(y_col, x_col)
+            .alias(format!("regr_count({}, {})", y_col, x_col))];
+        let lf = self.lazy_grouped.clone().agg(agg_expr);
+        let mut pl_df = lf.collect()?;
+        pl_df = reorder_groupby_columns(&mut pl_df, &self.grouping_cols)?;
+        Ok(super::DataFrame::from_polars_with_options(
+            pl_df,
+            self.case_sensitive,
+        ))
+    }
+
+    /// Regression average of x (PySpark regr_avgx).
+    pub fn regr_avgx(&self, y_col: &str, x_col: &str) -> Result<DataFrame, PolarsError> {
+        let agg_expr = vec![crate::functions::regr_avgx_expr(y_col, x_col)
+            .alias(format!("regr_avgx({}, {})", y_col, x_col))];
+        let lf = self.lazy_grouped.clone().agg(agg_expr);
+        let mut pl_df = lf.collect()?;
+        pl_df = reorder_groupby_columns(&mut pl_df, &self.grouping_cols)?;
+        Ok(super::DataFrame::from_polars_with_options(
+            pl_df,
+            self.case_sensitive,
+        ))
+    }
+
+    /// Regression average of y (PySpark regr_avgy).
+    pub fn regr_avgy(&self, y_col: &str, x_col: &str) -> Result<DataFrame, PolarsError> {
+        let agg_expr = vec![crate::functions::regr_avgy_expr(y_col, x_col)
+            .alias(format!("regr_avgy({}, {})", y_col, x_col))];
+        let lf = self.lazy_grouped.clone().agg(agg_expr);
+        let mut pl_df = lf.collect()?;
+        pl_df = reorder_groupby_columns(&mut pl_df, &self.grouping_cols)?;
+        Ok(super::DataFrame::from_polars_with_options(
+            pl_df,
+            self.case_sensitive,
+        ))
+    }
+
+    /// Regression slope (PySpark regr_slope).
+    pub fn regr_slope(&self, y_col: &str, x_col: &str) -> Result<DataFrame, PolarsError> {
+        let agg_expr = vec![crate::functions::regr_slope_expr(y_col, x_col)
+            .alias(format!("regr_slope({}, {})", y_col, x_col))];
+        let lf = self.lazy_grouped.clone().agg(agg_expr);
+        let mut pl_df = lf.collect()?;
+        pl_df = reorder_groupby_columns(&mut pl_df, &self.grouping_cols)?;
+        Ok(super::DataFrame::from_polars_with_options(
+            pl_df,
+            self.case_sensitive,
+        ))
+    }
+
+    /// Regression intercept (PySpark regr_intercept).
+    pub fn regr_intercept(&self, y_col: &str, x_col: &str) -> Result<DataFrame, PolarsError> {
+        let agg_expr = vec![crate::functions::regr_intercept_expr(y_col, x_col)
+            .alias(format!("regr_intercept({}, {})", y_col, x_col))];
+        let lf = self.lazy_grouped.clone().agg(agg_expr);
+        let mut pl_df = lf.collect()?;
+        pl_df = reorder_groupby_columns(&mut pl_df, &self.grouping_cols)?;
+        Ok(super::DataFrame::from_polars_with_options(
+            pl_df,
+            self.case_sensitive,
+        ))
+    }
+
+    /// Regression R-squared (PySpark regr_r2).
+    pub fn regr_r2(&self, y_col: &str, x_col: &str) -> Result<DataFrame, PolarsError> {
+        let agg_expr = vec![crate::functions::regr_r2_expr(y_col, x_col)
+            .alias(format!("regr_r2({}, {})", y_col, x_col))];
+        let lf = self.lazy_grouped.clone().agg(agg_expr);
+        let mut pl_df = lf.collect()?;
+        pl_df = reorder_groupby_columns(&mut pl_df, &self.grouping_cols)?;
+        Ok(super::DataFrame::from_polars_with_options(
+            pl_df,
+            self.case_sensitive,
+        ))
+    }
+
+    /// Regression sum (x - avg_x)^2 (PySpark regr_sxx).
+    pub fn regr_sxx(&self, y_col: &str, x_col: &str) -> Result<DataFrame, PolarsError> {
+        let agg_expr = vec![crate::functions::regr_sxx_expr(y_col, x_col)
+            .alias(format!("regr_sxx({}, {})", y_col, x_col))];
+        let lf = self.lazy_grouped.clone().agg(agg_expr);
+        let mut pl_df = lf.collect()?;
+        pl_df = reorder_groupby_columns(&mut pl_df, &self.grouping_cols)?;
+        Ok(super::DataFrame::from_polars_with_options(
+            pl_df,
+            self.case_sensitive,
+        ))
+    }
+
+    /// Regression sum (y - avg_y)^2 (PySpark regr_syy).
+    pub fn regr_syy(&self, y_col: &str, x_col: &str) -> Result<DataFrame, PolarsError> {
+        let agg_expr = vec![crate::functions::regr_syy_expr(y_col, x_col)
+            .alias(format!("regr_syy({}, {})", y_col, x_col))];
+        let lf = self.lazy_grouped.clone().agg(agg_expr);
+        let mut pl_df = lf.collect()?;
+        pl_df = reorder_groupby_columns(&mut pl_df, &self.grouping_cols)?;
+        Ok(super::DataFrame::from_polars_with_options(
+            pl_df,
+            self.case_sensitive,
+        ))
+    }
+
+    /// Regression sum (x - avg_x)(y - avg_y) (PySpark regr_sxy).
+    pub fn regr_sxy(&self, y_col: &str, x_col: &str) -> Result<DataFrame, PolarsError> {
+        let agg_expr = vec![crate::functions::regr_sxy_expr(y_col, x_col)
+            .alias(format!("regr_sxy({}, {})", y_col, x_col))];
+        let lf = self.lazy_grouped.clone().agg(agg_expr);
+        let mut pl_df = lf.collect()?;
+        pl_df = reorder_groupby_columns(&mut pl_df, &self.grouping_cols)?;
+        Ok(super::DataFrame::from_polars_with_options(
+            pl_df,
+            self.case_sensitive,
+        ))
+    }
+
     /// Kurtosis of a column in each group (PySpark kurtosis). Fisher definition, bias=true.
     pub fn kurtosis(&self, column: &str) -> Result<DataFrame, PolarsError> {
         use polars::prelude::*;
@@ -417,6 +535,127 @@ impl GroupedData {
     pub fn grouping_columns(&self) -> &[String] {
         &self.grouping_cols
     }
+}
+
+/// Cube/rollup: multiple grouping sets then union (PySpark cube / rollup).
+pub struct CubeRollupData {
+    pub(super) df: PlDataFrame,
+    pub(super) grouping_cols: Vec<String>,
+    pub(super) case_sensitive: bool,
+    pub(super) is_cube: bool,
+}
+
+impl CubeRollupData {
+    /// Run aggregation on each grouping set and union results. Missing keys become null.
+    pub fn agg(&self, aggregations: Vec<Expr>) -> Result<DataFrame, PolarsError> {
+        use polars::prelude::*;
+        let subsets: Vec<Vec<String>> = if self.is_cube {
+            // All subsets of grouping_cols (2^n)
+            let n = self.grouping_cols.len();
+            (0..1 << n)
+                .map(|mask| {
+                    self.grouping_cols
+                        .iter()
+                        .enumerate()
+                        .filter(|(i, _)| (mask & (1 << i)) != 0)
+                        .map(|(_, c)| c.clone())
+                        .collect()
+                })
+                .collect()
+        } else {
+            // Prefixes: [all], [all-1], ..., []
+            (0..=self.grouping_cols.len())
+                .map(|len| self.grouping_cols[..len].to_vec())
+                .collect()
+        };
+
+        let schema = self.df.schema();
+        let mut parts: Vec<PlDataFrame> = Vec::with_capacity(subsets.len());
+        for subset in subsets {
+            if subset.is_empty() {
+                // Single row: no grouping keys, one row of aggregates over full table
+                let lf = self.df.clone().lazy().select(aggregations.clone());
+                let mut part = lf.collect()?;
+                let n = part.height();
+                for gc in &self.grouping_cols {
+                    let dtype = schema.get(gc).cloned().unwrap_or(DataType::Null);
+                    let null_series = null_series_for_dtype(gc.as_str(), n, &dtype)?;
+                    part.with_column(null_series)?;
+                }
+                // Reorder to [grouping_cols..., agg_cols]
+                let mut order: Vec<&str> = self.grouping_cols.iter().map(|s| s.as_str()).collect();
+                for name in part.get_column_names() {
+                    if !self.grouping_cols.iter().any(|g| g == name) {
+                        order.push(name);
+                    }
+                }
+                part = part.select(order)?;
+                parts.push(part);
+            } else {
+                let grouped = self
+                    .df
+                    .clone()
+                    .lazy()
+                    .group_by(subset.iter().map(|s| col(s.as_str())).collect::<Vec<_>>());
+                let mut part = grouped.agg(aggregations.clone()).collect()?;
+                part = reorder_groupby_columns(&mut part, &subset)?;
+                let n = part.height();
+                for gc in &self.grouping_cols {
+                    if subset.iter().any(|s| s == gc) {
+                        continue;
+                    }
+                    let dtype = schema.get(gc).cloned().unwrap_or(DataType::Null);
+                    let null_series = null_series_for_dtype(gc.as_str(), n, &dtype)?;
+                    part.with_column(null_series)?;
+                }
+                let mut order: Vec<&str> = self.grouping_cols.iter().map(|s| s.as_str()).collect();
+                for name in part.get_column_names() {
+                    if !self.grouping_cols.iter().any(|g| g == name) {
+                        order.push(name);
+                    }
+                }
+                part = part.select(order)?;
+                parts.push(part);
+            }
+        }
+
+        if parts.is_empty() {
+            return Ok(super::DataFrame::from_polars_with_options(
+                PlDataFrame::empty(),
+                self.case_sensitive,
+            ));
+        }
+        let first_schema = parts[0].schema();
+        let order: Vec<&str> = first_schema.iter_names().map(|s| s.as_str()).collect();
+        for p in parts.iter_mut().skip(1) {
+            *p = p.select(order.clone())?;
+        }
+        let lazy_frames: Vec<_> = parts.into_iter().map(|p| p.lazy()).collect();
+        let out = polars::prelude::concat(lazy_frames, UnionArgs::default())?.collect()?;
+        Ok(super::DataFrame::from_polars_with_options(
+            out,
+            self.case_sensitive,
+        ))
+    }
+}
+
+fn null_series_for_dtype(name: &str, n: usize, dtype: &DataType) -> Result<Series, PolarsError> {
+    let name = name.into();
+    let s = match dtype {
+        DataType::Int32 => Series::new(name, vec![None::<i32>; n]),
+        DataType::Int64 => Series::new(name, vec![None::<i64>; n]),
+        DataType::Float32 => Series::new(name, vec![None::<f32>; n]),
+        DataType::Float64 => Series::new(name, vec![None::<f64>; n]),
+        DataType::String => {
+            let v: Vec<Option<String>> = (0..n).map(|_| None).collect();
+            Series::new(name, v)
+        }
+        DataType::Boolean => Series::new(name, vec![None::<bool>; n]),
+        DataType::Date => Series::new(name, vec![None::<i32>; n]).cast(dtype)?,
+        DataType::Datetime(_, _) => Series::new(name, vec![None::<i64>; n]).cast(dtype)?,
+        _ => Series::new(name, vec![None::<i64>; n]).cast(dtype)?,
+    };
+    Ok(s)
 }
 
 /// Reorder columns after groupBy to match PySpark order: grouping columns first, then aggregations

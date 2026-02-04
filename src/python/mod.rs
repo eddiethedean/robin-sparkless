@@ -3,6 +3,7 @@
 
 use crate::column::Column as RsColumn;
 use crate::dataframe::JoinType;
+use crate::dataframe::{CubeRollupData, WriteFormat, WriteMode};
 use crate::functions::SortOrder;
 use crate::functions::{
     acos, acosh, add_months, array_append, array_compact, array_distinct, array_except,
@@ -27,10 +28,11 @@ use crate::functions::{
     bit_length, bit_or, bit_xor, bitwise_not, broadcast as rs_broadcast, create_map,
     current_catalog as rs_current_catalog, current_database as rs_current_database,
     current_schema as rs_current_schema, current_user as rs_current_user, equal_null,
-    explode_outer, get, hash, input_file_name as rs_input_file_name, isin, isin_i64, isin_str,
-    json_array_length, map_concat, map_contains_key, map_filter_value_gt, map_from_entries,
-    map_zip_with_coalesce, monotonically_increasing_id as rs_monotonically_increasing_id,
-    named_struct, parse_url, rand as rs_rand, randn as rs_randn, shift_left, shift_right,
+    explode_outer, get, hash, inline as rs_inline, inline_outer as rs_inline_outer,
+    input_file_name as rs_input_file_name, isin, isin_i64, isin_str, json_array_length, map_concat,
+    map_contains_key, map_filter_value_gt, map_from_entries, map_zip_with_coalesce,
+    monotonically_increasing_id as rs_monotonically_increasing_id, named_struct, parse_url,
+    rand as rs_rand, randn as rs_randn, sequence, shift_left, shift_right, shuffle,
     spark_partition_id as rs_spark_partition_id, str_to_map, struct_, to_char, to_number,
     to_varchar, try_add, try_divide, try_multiply, try_subtract, try_to_number, try_to_timestamp,
     typeof_, url_decode, url_encode, user as rs_user, version, width_bucket, zip_with_coalesce,
@@ -49,6 +51,7 @@ use pyo3::prelude::*;
 use pyo3::types::PyDict;
 use serde_json::Value as JsonValue;
 use std::path::Path;
+use std::sync::RwLock;
 
 /// Convert a Python scalar to serde_json::Value for plan/row data.
 fn py_to_json_value(value: &Bound<'_, pyo3::types::PyAny>) -> PyResult<JsonValue> {
@@ -139,6 +142,8 @@ fn robin_sparkless(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyWhenBuilder>()?;
     m.add_class::<PyThenBuilder>()?;
     m.add_class::<PyGroupedData>()?;
+    m.add_class::<PyCubeRollupData>()?;
+    m.add_class::<PyDataFrameWriter>()?;
     m.add("col", wrap_pyfunction!(py_col, m)?)?;
     m.add("lit", wrap_pyfunction!(py_lit, m)?)?;
     m.add("when", wrap_pyfunction!(py_when, m)?)?;
@@ -342,6 +347,10 @@ fn robin_sparkless(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("arrays_overlap", wrap_pyfunction!(py_arrays_overlap, m)?)?;
     m.add("arrays_zip", wrap_pyfunction!(py_arrays_zip, m)?)?;
     m.add("explode_outer", wrap_pyfunction!(py_explode_outer, m)?)?;
+    m.add("inline", wrap_pyfunction!(py_inline, m)?)?;
+    m.add("inline_outer", wrap_pyfunction!(py_inline_outer, m)?)?;
+    m.add("sequence", wrap_pyfunction!(py_sequence, m)?)?;
+    m.add("shuffle", wrap_pyfunction!(py_shuffle, m)?)?;
     m.add("array_agg", wrap_pyfunction!(py_array_agg, m)?)?;
     // Phase 22: datetime extensions
     m.add("curdate", wrap_pyfunction!(py_curdate, m)?)?;
@@ -771,6 +780,34 @@ fn py_arrays_zip(col1: &PyColumn, col2: &PyColumn) -> PyColumn {
 fn py_explode_outer(col: &PyColumn) -> PyColumn {
     PyColumn {
         inner: explode_outer(&col.inner),
+    }
+}
+
+#[pyfunction]
+fn py_inline(col: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: rs_inline(&col.inner),
+    }
+}
+
+#[pyfunction]
+fn py_inline_outer(col: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: rs_inline_outer(&col.inner),
+    }
+}
+
+#[pyfunction]
+fn py_sequence(start: &PyColumn, stop: &PyColumn, step: Option<&PyColumn>) -> PyColumn {
+    PyColumn {
+        inner: sequence(&start.inner, &stop.inner, step.map(|c| &c.inner)),
+    }
+}
+
+#[pyfunction]
+fn py_shuffle(col: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: shuffle(&col.inner),
     }
 }
 
@@ -3098,6 +3135,32 @@ impl PyDataFrame {
         Ok(PyGroupedData { inner: gd })
     }
 
+    fn cube(&self, cols: Vec<String>) -> PyResult<PyCubeRollupData> {
+        let refs: Vec<&str> = cols.iter().map(|s| s.as_str()).collect();
+        let cr = self
+            .inner
+            .cube(refs)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        Ok(PyCubeRollupData { inner: cr })
+    }
+
+    fn rollup(&self, cols: Vec<String>) -> PyResult<PyCubeRollupData> {
+        let refs: Vec<&str> = cols.iter().map(|s| s.as_str()).collect();
+        let cr = self
+            .inner
+            .rollup(refs)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        Ok(PyCubeRollupData { inner: cr })
+    }
+
+    fn write(&self) -> PyDataFrameWriter {
+        PyDataFrameWriter {
+            df: self.inner.clone(),
+            mode: RwLock::new(WriteMode::Overwrite),
+            format: RwLock::new(WriteFormat::Parquet),
+        }
+    }
+
     #[pyo3(signature = (other, on, how="inner"))]
     fn join(&self, other: &PyDataFrame, on: Vec<String>, how: &str) -> PyResult<PyDataFrame> {
         let join_type = match how.to_lowercase().as_str() {
@@ -3293,6 +3356,99 @@ impl PyDataFrame {
             .offset(n)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
         Ok(PyDataFrame { inner: df })
+    }
+
+    /// Best-effort local collection: returns list of rows (same as collect()). PySpark .data.
+    fn data(&self, py: Python<'_>) -> PyResult<PyObject> {
+        self.collect(py)
+    }
+
+    fn persist(&self) -> PyResult<PyDataFrame> {
+        let df = self
+            .inner
+            .persist()
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        Ok(PyDataFrame { inner: df })
+    }
+
+    fn unpersist(&self) -> PyResult<PyDataFrame> {
+        let df = self
+            .inner
+            .unpersist()
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        Ok(PyDataFrame { inner: df })
+    }
+
+    /// Stub: RDD API is not supported. Raises NotImplementedError.
+    fn rdd(&self) -> PyResult<PyObject> {
+        Err(pyo3::exceptions::PyNotImplementedError::new_err(
+            "RDD is not supported in Sparkless; use collect() or toLocalIterator() for local data",
+        ))
+    }
+
+    /// Stub: foreach is not supported (no distributed execution). Raises NotImplementedError.
+    fn foreach(&self, _f: &Bound<'_, pyo3::types::PyAny>) -> PyResult<()> {
+        Err(pyo3::exceptions::PyNotImplementedError::new_err(
+            "foreach is not supported in Sparkless",
+        ))
+    }
+
+    /// Stub: foreachPartition is not supported. Raises NotImplementedError.
+    #[pyo3(name = "foreachPartition")]
+    fn foreach_partition(&self, _f: &Bound<'_, pyo3::types::PyAny>) -> PyResult<()> {
+        Err(pyo3::exceptions::PyNotImplementedError::new_err(
+            "foreachPartition is not supported in Sparkless",
+        ))
+    }
+
+    /// Stub: mapInPandas is not supported. Raises NotImplementedError.
+    #[pyo3(name = "mapInPandas")]
+    fn map_in_pandas(
+        &self,
+        _func: &Bound<'_, pyo3::types::PyAny>,
+        _schema: &Bound<'_, pyo3::types::PyAny>,
+    ) -> PyResult<PyDataFrame> {
+        Err(pyo3::exceptions::PyNotImplementedError::new_err(
+            "mapInPandas is not supported in Sparkless",
+        ))
+    }
+
+    /// Stub: mapPartitions is not supported. Raises NotImplementedError.
+    #[pyo3(name = "mapPartitions")]
+    fn map_partitions(
+        &self,
+        _f: &Bound<'_, pyo3::types::PyAny>,
+        _schema: &Bound<'_, pyo3::types::PyAny>,
+    ) -> PyResult<PyDataFrame> {
+        Err(pyo3::exceptions::PyNotImplementedError::new_err(
+            "mapPartitions is not supported in Sparkless",
+        ))
+    }
+
+    /// Returns an iterable of rows (same as collect()). Best-effort local iterator.
+    #[pyo3(name = "toLocalIterator")]
+    fn to_local_iterator(&self, py: Python<'_>) -> PyResult<PyObject> {
+        self.collect(py)
+    }
+
+    /// Stub: storage level not applicable (eager execution). Returns None.
+    #[pyo3(name = "storageLevel")]
+    fn storage_level(&self, py: Python<'_>) -> PyResult<PyObject> {
+        Ok(py.None())
+    }
+
+    /// Always False; streaming is not supported.
+    #[pyo3(name = "isStreaming")]
+    fn is_streaming(&self) -> PyResult<bool> {
+        Ok(false)
+    }
+
+    /// No-op; streaming/watermark not supported. Returns self for chaining.
+    #[pyo3(name = "withWatermark")]
+    fn with_watermark(&self, _event_time: &str, _delay_threshold: &str) -> PyResult<PyDataFrame> {
+        Ok(PyDataFrame {
+            inner: self.inner.clone(),
+        })
     }
 
     fn random_split(&self, weights: Vec<f64>, seed: Option<u64>) -> PyResult<Vec<PyDataFrame>> {
@@ -3644,6 +3800,78 @@ impl PyGroupedData {
         Ok(PyDataFrame { inner: df })
     }
 
+    fn regr_count(&self, y_col: &str, x_col: &str) -> PyResult<PyDataFrame> {
+        let df = self
+            .inner
+            .regr_count(y_col, x_col)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        Ok(PyDataFrame { inner: df })
+    }
+
+    fn regr_avgx(&self, y_col: &str, x_col: &str) -> PyResult<PyDataFrame> {
+        let df = self
+            .inner
+            .regr_avgx(y_col, x_col)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        Ok(PyDataFrame { inner: df })
+    }
+
+    fn regr_avgy(&self, y_col: &str, x_col: &str) -> PyResult<PyDataFrame> {
+        let df = self
+            .inner
+            .regr_avgy(y_col, x_col)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        Ok(PyDataFrame { inner: df })
+    }
+
+    fn regr_slope(&self, y_col: &str, x_col: &str) -> PyResult<PyDataFrame> {
+        let df = self
+            .inner
+            .regr_slope(y_col, x_col)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        Ok(PyDataFrame { inner: df })
+    }
+
+    fn regr_intercept(&self, y_col: &str, x_col: &str) -> PyResult<PyDataFrame> {
+        let df = self
+            .inner
+            .regr_intercept(y_col, x_col)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        Ok(PyDataFrame { inner: df })
+    }
+
+    fn regr_r2(&self, y_col: &str, x_col: &str) -> PyResult<PyDataFrame> {
+        let df = self
+            .inner
+            .regr_r2(y_col, x_col)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        Ok(PyDataFrame { inner: df })
+    }
+
+    fn regr_sxx(&self, y_col: &str, x_col: &str) -> PyResult<PyDataFrame> {
+        let df = self
+            .inner
+            .regr_sxx(y_col, x_col)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        Ok(PyDataFrame { inner: df })
+    }
+
+    fn regr_syy(&self, y_col: &str, x_col: &str) -> PyResult<PyDataFrame> {
+        let df = self
+            .inner
+            .regr_syy(y_col, x_col)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        Ok(PyDataFrame { inner: df })
+    }
+
+    fn regr_sxy(&self, y_col: &str, x_col: &str) -> PyResult<PyDataFrame> {
+        let df = self
+            .inner
+            .regr_sxy(y_col, x_col)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        Ok(PyDataFrame { inner: df })
+    }
+
     fn kurtosis(&self, column: &str) -> PyResult<PyDataFrame> {
         let df = self
             .inner
@@ -3658,6 +3886,65 @@ impl PyGroupedData {
             .skewness(column)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
         Ok(PyDataFrame { inner: df })
+    }
+}
+
+/// Python wrapper for CubeRollupData (cube/rollup then agg).
+#[pyclass(name = "CubeRollupData")]
+struct PyCubeRollupData {
+    inner: CubeRollupData,
+}
+
+#[pymethods]
+impl PyCubeRollupData {
+    fn agg(&self, exprs: Vec<PyRef<PyColumn>>) -> PyResult<PyDataFrame> {
+        let aggregations: Vec<Expr> = exprs.iter().map(|c| c.inner.expr().clone()).collect();
+        let df = self
+            .inner
+            .agg(aggregations)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        Ok(PyDataFrame { inner: df })
+    }
+}
+
+/// Python wrapper for DataFrameWriter (write().mode().format().save()).
+#[pyclass(name = "DataFrameWriter")]
+struct PyDataFrameWriter {
+    df: crate::DataFrame,
+    mode: RwLock<WriteMode>,
+    format: RwLock<WriteFormat>,
+}
+
+#[pymethods]
+impl PyDataFrameWriter {
+    fn mode<'py>(slf: PyRef<'py, Self>, mode: &str) -> PyRef<'py, Self> {
+        *slf.mode.write().unwrap() = match mode.to_lowercase().as_str() {
+            "append" => WriteMode::Append,
+            _ => WriteMode::Overwrite,
+        };
+        slf
+    }
+
+    fn format<'py>(slf: PyRef<'py, Self>, format: &str) -> PyRef<'py, Self> {
+        *slf.format.write().unwrap() = match format.to_lowercase().as_str() {
+            "csv" => WriteFormat::Csv,
+            "json" => WriteFormat::Json,
+            _ => WriteFormat::Parquet,
+        };
+        slf
+    }
+
+    fn save(&self, path: &str) -> PyResult<()> {
+        let mode = *self.mode.read().unwrap();
+        let format = *self.format.read().unwrap();
+        self.df
+            .write()
+            .mode(mode)
+            .format(format)
+            .save(Path::new(path))
+            .map_err(|e: polars::prelude::PolarsError| {
+                pyo3::exceptions::PyRuntimeError::new_err(e.to_string())
+            })
     }
 }
 

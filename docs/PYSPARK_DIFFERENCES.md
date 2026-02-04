@@ -29,6 +29,20 @@ This document lists **intentional or known divergences** from PySpark semantics 
 - **assert_true(expr)**: In PySpark, `assert_true` fails the job if `expr` is false for any row. In robin-sparkless, `assert_true` is implemented as an expression that **returns the original boolean column** but **fails evaluation** (returns an error) if **any value is explicitly `false`**. Nulls are allowed and do not trigger failure. This behavior matches the intent of PySpark's `assert_true` for typical uses, but details of error messages and null handling may differ.
 - **raise_error(msg)**: In PySpark, `raise_error` produces an expression that always fails when evaluated. In robin-sparkless, `raise_error(msg)` is implemented as an expression that **always returns an error** with a message prefixed by `\"raise_error:\"`. The result type is an `Int64` expression that never materializes successfully.
 
+## DataFrame: cube, rollup, write, and stubs
+
+- **cube / rollup**: Implemented. `df.cube("a", "b").agg(...)` and `df.rollup("a", "b").agg(...)` run multiple grouping sets and union results (missing keys become null), matching PySpark semantics.
+- **write**: Implemented. `df.write().mode("overwrite"|"append").format("parquet"|"csv"|"json").save(path)` uses Polars IO. Append for JSON is not supported (overwrite only).
+- **data**: Returns the same as `collect()` (list of row dicts). Best-effort local collection; no RDD.
+- **toLocalIterator**: Returns the same as `collect()` (an iterable of rows). Best-effort local iterator.
+- **rdd**: Stub; raises `NotImplementedError` ("RDD is not supported in Sparkless").
+- **foreach**, **foreachPartition**: Stub; raise `NotImplementedError`.
+- **mapInPandas**, **mapPartitions**: Stub; raise `NotImplementedError`.
+- **storageLevel**: Stub; returns `None` (eager execution; no storage level).
+- **isStreaming**: Always returns `False`; streaming is not supported.
+- **withWatermark**: No-op; returns self. Streaming/watermark not supported.
+- **persist** / **unpersist**: No-op; return self (execution is eager).
+
 ## JVM / runtime stubs
 
 The following JVM- or runtime-related functions are implemented as **stubs for API compatibility**, not full equivalents of PySpark behavior:
@@ -65,5 +79,13 @@ The following JVM- or runtime-related functions are implemented as **stubs for A
 - **Phase 20 ordering/aggregates/numeric**: **`asc`**, **`asc_nulls_first`**, **`asc_nulls_last`**, **`desc`**, **`desc_nulls_first`**, **`desc_nulls_last`**; **`median`**, **`mode`**; **`stddev_pop`**, **`stddev_samp`**, **`var_pop`**, **`var_samp`**; **`try_sum`**, **`try_avg`**; **`bround`**, **`negate`**, **`negative`**, **`positive`**; **`cot`**, **`csc`**, **`sec`**; **`e`**, **`pi`**; **`covar_pop`**, **`covar_samp`**, **`corr`** (groupBy agg), **`kurtosis`**, **`skewness`**; **`approx_percentile`**, **`percentile_approx`** — all implemented.
 - **Phase 21 string/binary/type/array/map/struct**: **`btrim`**, **`locate`**, **`conv`**; **`hex`**, **`unhex`**, **`bin`**, **`getbit`**; **`decode`**, **`encode`**, **`to_binary`**, **`try_to_binary`**; **`to_char`**, **`to_varchar`**, **`to_number`**, **`try_to_number`**, **`try_to_timestamp`**; **`str_to_map`**; **`arrays_overlap`**, **`arrays_zip`**, **`explode_outer`**, **`posexplode_outer`**, **`array_agg`**; **`transform_keys`**, **`transform_values`** — all implemented. Deferred: `aggregate` (array fold). PyO3: `transform_keys` and `transform_values` require Expr and are Rust-only for now.
 - **Phase 23 JSON/URL/misc**: **`isin`**, **`isin_i64`**, **`isin_str`**; **`url_decode`**, **`url_encode`**; **`json_array_length`**, **`parse_url`**; **`hash`**; **`shift_left`**, **`shift_right`**, **`shift_right_unsigned`**; **`version`**; **`equal_null`**; **`stack`** — all implemented. Note: `hash` uses xxHash64 (PySpark uses Murmur3); results will differ. Deferred: `json_object_keys`, `json_tuple`, `from_csv`, `to_csv`, `schema_of_csv`, `schema_of_json`.
+
+## Optional / deferred (XML, XPath, sentences)
+
+The following are **not implemented** and are documented as deferred; implement only if prioritized:
+
+- **XML**: `from_xml`, `to_xml`, `schema_of_xml` — would require an XML parser (e.g. quick-xml) and a feature flag.
+- **XPath**: `xpath`, `xpath_boolean`, `xpath_double`, etc. — depend on XML support; stub or defer.
+- **sentences**: Splits string into array of array of words (NLP); could be implemented as string split + list of lists, or left as stub.
 
 See [ROADMAP.md](ROADMAP.md) and [FULL_BACKEND_ROADMAP.md](FULL_BACKEND_ROADMAP.md) for the full list.

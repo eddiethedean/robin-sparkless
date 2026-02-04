@@ -3419,3 +3419,252 @@ fn hash_any_value(av: &polars::datatypes::AnyValue, h: &mut impl std::hash::Hash
         _ => h.write(av.to_string().as_bytes()),
     }
 }
+
+// --- sequence / shuffle (Phase 2) ---
+
+/// Build array [start, start+step, ...] up to but not past stop (PySpark sequence).
+/// Input column is a struct with fields "0"=start, "1"=stop, "2"=step (step optional, default 1).
+pub fn apply_sequence(column: Column) -> PolarsResult<Option<Column>> {
+    use polars::chunked_array::builder::get_list_builder;
+    let name = column.field().into_owned().name;
+    let series = column.take_materialized_series();
+    let st = series.struct_().map_err(|e| {
+        PolarsError::ComputeError(format!("sequence: expected struct column: {}", e).into())
+    })?;
+    let start_s = st
+        .field_by_name("0")
+        .map_err(|e| PolarsError::ComputeError(format!("sequence field 0: {}", e).into()))?;
+    let stop_s = st
+        .field_by_name("1")
+        .map_err(|e| PolarsError::ComputeError(format!("sequence field 1: {}", e).into()))?;
+    let step_s = st.field_by_name("2").ok(); // optional
+    let start_series = start_s
+        .cast(&DataType::Int64)
+        .map_err(|e| PolarsError::ComputeError(format!("sequence start: {}", e).into()))?;
+    let stop_series = stop_s
+        .cast(&DataType::Int64)
+        .map_err(|e| PolarsError::ComputeError(format!("sequence stop: {}", e).into()))?;
+    let step_series_opt: Option<Series> = step_s
+        .as_ref()
+        .map(|s| s.cast(&DataType::Int64))
+        .transpose()
+        .map_err(|e| PolarsError::ComputeError(format!("sequence step: {}", e).into()))?;
+    let start_ca = start_series
+        .i64()
+        .map_err(|e| PolarsError::ComputeError(format!("sequence: {}", e).into()))?;
+    let stop_ca = stop_series
+        .i64()
+        .map_err(|e| PolarsError::ComputeError(format!("sequence: {}", e).into()))?;
+    let step_ca = step_series_opt.as_ref().and_then(|s| s.i64().ok());
+    let n = start_ca.len();
+    let mut builder = get_list_builder(&DataType::Int64, 64, n, name.as_str().into());
+    for i in 0..n {
+        let start_v = start_ca.get(i);
+        let stop_v = stop_ca.get(i);
+        let step_v: Option<i64> = step_ca.as_ref().and_then(|ca| ca.get(i)).or(Some(1));
+        match (start_v, stop_v, step_v) {
+            (Some(s), Some(st), Some(step)) if step != 0 => {
+                let mut vals: Vec<i64> = Vec::new();
+                if step > 0 {
+                    let mut v = s;
+                    while v <= st {
+                        vals.push(v);
+                        v += step;
+                    }
+                } else {
+                    let mut v = s;
+                    while v >= st {
+                        vals.push(v);
+                        v += step;
+                    }
+                }
+                let series = Series::new("".into(), vals);
+                builder.append_series(&series)?;
+            }
+            _ => builder.append_null(),
+        }
+    }
+    Ok(Some(Column::new(name, builder.finish().into_series())))
+}
+
+/// Random permutation of list elements (PySpark shuffle). Uses rand::seq::SliceRandom.
+pub fn apply_shuffle(column: Column) -> PolarsResult<Option<Column>> {
+    use polars::chunked_array::builder::get_list_builder;
+    use rand::seq::SliceRandom;
+    let name = column.field().into_owned().name;
+    let series = column.take_materialized_series();
+    let list_ca = series
+        .list()
+        .map_err(|e| PolarsError::ComputeError(format!("shuffle: {}", e).into()))?;
+    let inner_dtype = list_ca.inner_dtype().clone();
+    let mut builder = get_list_builder(&inner_dtype, 64, list_ca.len(), name.as_str().into());
+    for opt_list in list_ca.amortized_iter() {
+        match opt_list {
+            None => builder.append_null(),
+            Some(amort) => {
+                let list_s = amort.as_ref();
+                let n = list_s.len();
+                let mut indices: Vec<u32> = (0..n as u32).collect();
+                indices.shuffle(&mut rand::thread_rng());
+                let idx_ca = UInt32Chunked::from_vec("".into(), indices);
+                let taken = list_s.take(&idx_ca).map_err(|e| {
+                    PolarsError::ComputeError(format!("shuffle take: {}", e).into())
+                })?;
+                builder.append_series(&taken)?;
+            }
+        }
+    }
+    Ok(Some(Column::new(name, builder.finish().into_series())))
+}
+
+// --- Bitmap (PySpark 3.5+) ---
+
+/// Size of bitmap in bytes (32768 bits).
+const BITMAP_BYTES: usize = 4096;
+
+/// Count set bits in a bitmap (binary column). PySpark bitmap_count.
+pub fn apply_bitmap_count(column: Column) -> PolarsResult<Option<Column>> {
+    let name = column.field().into_owned().name;
+    let series = column.take_materialized_series();
+    let ca = series
+        .binary()
+        .map_err(|e| PolarsError::ComputeError(format!("bitmap_count: {}", e).into()))?;
+    let out = Int64Chunked::from_iter_options(
+        name.as_str().into(),
+        ca.into_iter().map(|opt_b| {
+            opt_b.map(|b| b.iter().map(|&byte| byte.count_ones() as i64).sum::<i64>())
+        }),
+    );
+    Ok(Some(Column::new(name, out.into_series())))
+}
+
+/// Build one bitmap from a list of bit positions (0..32767). Used after implode for bitmap_construct_agg.
+pub fn apply_bitmap_construct_agg(column: Column) -> PolarsResult<Option<Column>> {
+    let name = column.field().into_owned().name;
+    let series = column.take_materialized_series();
+    let list_ca = series
+        .list()
+        .map_err(|e| PolarsError::ComputeError(format!("bitmap_construct_agg: {}", e).into()))?;
+    let out: BinaryChunked = list_ca
+        .amortized_iter()
+        .map(|opt_list| {
+            opt_list.and_then(|list_series| {
+                let mut buf = vec![0u8; BITMAP_BYTES];
+                let ca = list_series.as_ref().i64().ok()?;
+                for pos in ca.into_iter().flatten() {
+                    let pos = pos as usize;
+                    if pos < BITMAP_BYTES * 8 {
+                        let byte_idx = pos / 8;
+                        let bit_idx = pos % 8;
+                        buf[byte_idx] |= 1 << bit_idx;
+                    }
+                }
+                Some(bytes::Bytes::from(buf))
+            })
+        })
+        .collect();
+    Ok(Some(Column::new(name, out.into_series())))
+}
+
+/// Bitwise OR of a list of bitmaps (binary). Used after implode for bitmap_or_agg.
+pub fn apply_bitmap_or_agg(column: Column) -> PolarsResult<Option<Column>> {
+    let name = column.field().into_owned().name;
+    let series = column.take_materialized_series();
+    let list_ca = series
+        .list()
+        .map_err(|e| PolarsError::ComputeError(format!("bitmap_or_agg: {}", e).into()))?;
+    let out: BinaryChunked = list_ca
+        .amortized_iter()
+        .map(|opt_list| {
+            opt_list.and_then(|list_series| {
+                let list_c = list_series.as_ref().as_list();
+                let mut buf = vec![0u8; BITMAP_BYTES];
+                for opt_bin in list_c.amortized_iter().flatten() {
+                    let bin_ca: &BinaryChunked = opt_bin.as_ref().binary().ok()?;
+                    for b in bin_ca.into_iter().flatten() {
+                        let b: &[u8] = b;
+                        for (i, &byte) in b.iter().take(BITMAP_BYTES).enumerate() {
+                            buf[i] |= byte;
+                        }
+                    }
+                }
+                Some(bytes::Bytes::from(buf))
+            })
+        })
+        .collect();
+    Ok(Some(Column::new(name, out.into_series())))
+}
+
+// --- to_timestamp_ltz / to_timestamp_ntz ---
+
+/// Parse string as timestamp in local timezone, return UTC micros (PySpark to_timestamp_ltz).
+pub fn apply_to_timestamp_ltz_format(
+    column: Column,
+    format: Option<&str>,
+    strict: bool,
+) -> PolarsResult<Option<Column>> {
+    use chrono::offset::TimeZone;
+    use chrono::{Local, NaiveDateTime, Utc};
+    use polars::datatypes::TimeUnit;
+    let chrono_fmt = format
+        .map(pyspark_format_to_chrono)
+        .unwrap_or_else(|| "%Y-%m-%d %H:%M:%S".to_string());
+    let name = column.field().into_owned().name;
+    let series = column.take_materialized_series();
+    let ca = series
+        .str()
+        .map_err(|e| PolarsError::ComputeError(format!("to_timestamp_ltz: {}", e).into()))?;
+    let out = Int64Chunked::from_iter_options(
+        name.as_str().into(),
+        ca.into_iter().map(|opt_s| {
+            opt_s.and_then(|s| {
+                NaiveDateTime::parse_from_str(s, &chrono_fmt)
+                    .ok()
+                    .and_then(|ndt| {
+                        Local
+                            .from_local_datetime(&ndt)
+                            .single()
+                            .map(|dt| dt.with_timezone(&Utc).timestamp_micros())
+                    })
+            })
+        }),
+    );
+    let out_series = out
+        .into_series()
+        .cast(&DataType::Datetime(TimeUnit::Microseconds, None))?;
+    let _ = strict;
+    Ok(Some(Column::new(name, out_series)))
+}
+
+/// Parse string as timestamp without timezone (PySpark to_timestamp_ntz). Returns Datetime(_, None).
+pub fn apply_to_timestamp_ntz_format(
+    column: Column,
+    format: Option<&str>,
+    strict: bool,
+) -> PolarsResult<Option<Column>> {
+    use chrono::NaiveDateTime;
+    use polars::datatypes::TimeUnit;
+    let chrono_fmt = format
+        .map(pyspark_format_to_chrono)
+        .unwrap_or_else(|| "%Y-%m-%d %H:%M:%S".to_string());
+    let name = column.field().into_owned().name;
+    let series = column.take_materialized_series();
+    let ca = series
+        .str()
+        .map_err(|e| PolarsError::ComputeError(format!("to_timestamp_ntz: {}", e).into()))?;
+    let out = Int64Chunked::from_iter_options(
+        name.as_str().into(),
+        ca.into_iter().map(|opt_s| {
+            opt_s.and_then(|s| {
+                NaiveDateTime::parse_from_str(s, &chrono_fmt)
+                    .ok()
+                    .map(|ndt| ndt.and_utc().timestamp_micros())
+            })
+        }),
+    );
+    let out_series = out
+        .into_series()
+        .cast(&DataType::Datetime(TimeUnit::Microseconds, None))?;
+    let _ = strict;
+    Ok(Some(Column::new(name, out_series)))
+}

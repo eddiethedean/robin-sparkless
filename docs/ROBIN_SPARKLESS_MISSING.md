@@ -23,11 +23,11 @@ This list is **only** items that **Sparkless has** and **robin-sparkless does no
 - ~~`cardinality`~~ — **implemented** (alias for size)
 
 ### Bitmap (PySpark 3.5+)
-- `bitmap_bit_position`, `bitmap_bucket_number`, `bitmap_construct_agg`, `bitmap_count`, `bitmap_or_agg`
+- ~~`bitmap_bit_position`, `bitmap_bucket_number`, `bitmap_construct_agg`, `bitmap_count`, `bitmap_or_agg`~~ — **implemented**
 
 ### Datetime / interval
-- `make_dt_interval`, `make_ym_interval`
-- `to_timestamp_ltz`, `to_timestamp_ntz` (we have `to_timestamp`)
+- ~~`make_dt_interval`, `make_ym_interval`~~ — **implemented**
+- ~~`to_timestamp_ltz`, `to_timestamp_ntz`~~ — **implemented** (we have `to_timestamp`)
 
 ### JSON / XML / CSV
 - ~~`json_object_keys`, `json_tuple`~~ — **implemented**
@@ -36,24 +36,24 @@ This list is **only** items that **Sparkless has** and **robin-sparkless does no
 - ~~`schema_of_csv`, `schema_of_json`~~ — **implemented** (stub: return literal schema string)
 
 ### Misc / UDF / JVM
-- `call_function`
+- `call_function` (stub: not supported)
 - ~~`grouping`, `grouping_id`~~ — **implemented** (stub: return 0)
-- `inline`, `inline_outer` (explode struct rows)
-- `sentences`
-- `sequence` (generate array of numbers)
-- `sha` (generic; we have sha1, sha2)
-- `shuffle`
-- `window`, `window_time` (window spec builders)
+- ~~`inline`, `inline_outer`~~ — **implemented** (explode list of structs; use unnest for struct fields)
+- **sentences** (optional/deferred): NLP string→array of array of words; implement only if prioritized.
+- ~~`sequence`~~ — **implemented** (generate array of numbers)
+- ~~`sha`~~ — we have sha1, sha2
+- ~~`shuffle`~~ — **implemented**
+- `window`, `window_time` (we have `.over()`; thin wrappers if needed; see PYSPARK_DIFFERENCES)
 - `udf`, `pandas_udf` (we have no UDF support; stub only if any)
-- `count_min_sketch`, `histogram_numeric`, `hll_sketch_agg`, `hll_sketch_estimate`, `hll_union`, `hll_union_agg`
-- `session_window`
-- `call_udf`, `udtf`, `reduce`, `reflect`, `java_method`
+- `count_min_sketch`, `histogram_numeric`, `hll_sketch_agg`, `hll_sketch_estimate`, `hll_union`, `hll_union_agg` (stub/defer)
+- `session_window` (stub: no streaming)
+- `call_udf`, `udtf`, `reduce`, `reflect`, `java_method` (stub: not supported)
 
 ### Regression
-- `regr_avgx`, `regr_avgy`, `regr_count`, `regr_intercept`, `regr_r2`, `regr_slope`, `regr_sxx`, `regr_sxy`, `regr_syy`
+- ~~`regr_avgx`, `regr_avgy`, `regr_count`, `regr_intercept`, `regr_r2`, `regr_slope`, `regr_sxx`, `regr_sxy`, `regr_syy`~~ — **implemented**
 
-### XPath
-- `xpath`, `xpath_boolean`, `xpath_double`, `xpath_float`, `xpath_int`, `xpath_long`, `xpath_number`, `xpath_short`, `xpath_string`
+### XPath (deferred)
+- **XPath (deferred)**: `xpath`, `xpath_boolean`, `xpath_double`, etc. — require XML support; stub or defer (see PYSPARK_DIFFERENCES).
 
 ### Aliases we don’t expose (Sparkless has, we have equivalent under different name)
 - ~~`sign`~~ — alias of signum
@@ -69,23 +69,23 @@ This list is **only** items that **Sparkless has** and **robin-sparkless does no
 - **`corr`** — We have `df.stat().corr(col1, col2)` (scalar) and `df.corr()` (correlation matrix DataFrame).
 - ~~**`createGlobalTempView`**, **`createOrReplaceGlobalTempView`**~~ — **implemented** (stub: same catalog as temp view).
 - **`createTempView`**, **`createOrReplaceTempView`** — we expose `create_or_replace_temp_view` (SQL feature).
-- **`cube`**, **`rollup`** — no cube/rollup groupBy.
-- **`data`** — returns RDD-like representation; we don’t have RDD.
+- ~~**`cube`**, **`rollup`**~~ — **implemented** (multiple grouping sets then union).
+- ~~**`data`**~~ — **implemented** (best-effort: same as `collect()`, list of row dicts).
 - ~~**`dtypes`**~~ — **implemented** (returns list of (name, dtype_string)).
-- **`foreach`**, **`foreachPartition`** — row/partition iteration; we don’t support.
-- **`mapInPandas`**, **`mapPartitions`** — we don’t support.
-- **`rdd`** — we have no RDD.
+- **`foreach`**, **`foreachPartition`** — stub: raise `NotImplementedError` (see PYSPARK_DIFFERENCES).
+- **`mapInPandas`**, **`mapPartitions`** — stub: raise `NotImplementedError`.
+- **`rdd`** — stub: raise `NotImplementedError` (use `collect()` or `toLocalIterator()` for local data).
 - **`registerTempTable`** — legacy; we have `create_or_replace_temp_view`.
 - ~~**`repartitionByRange`**~~ — **implemented** (no-op).
 - **`sameSemantics`**, **`semanticHash`** — we have no-op stubs that return fixed values.
 - ~~**`sortWithinPartitions`**~~ — **implemented** (no-op).
-- **`storage`** — storage level; we don’t have.
+- **`storageLevel`** — stub: returns `None` (eager execution).
 - **`to`** — generic writer; we have `write_delta` with delta feature.
-- **`toLocalIterator`** — we don’t have.
-- **`unpersist`** — we have it (no-op).
-- **`withWatermark`** — we have no-op stub.
-- **`write`**, **`writeTo`** — we have `write_delta` (delta feature); no generic `write`/`writeTo`.
-- **`isStreaming`** — we don’t support streaming.
+- ~~**`toLocalIterator`**~~ — **implemented** (best-effort: same as `collect()`, iterable of rows).
+- ~~**`unpersist`**~~ — we have it (no-op).
+- **`withWatermark`** — no-op stub (streaming not supported).
+- ~~**`write`**~~ — **implemented** (generic write: parquet/csv/json, mode overwrite/append). **`writeTo`** — catalog/table API; stub or use write to path.
+- **`isStreaming`** — stub: always returns `False`.
 
 ---
 

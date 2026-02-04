@@ -308,6 +308,119 @@ pub fn corr_expr(col1: &str, col2: &str) -> Expr {
         .otherwise(lit(f64::NAN))
 }
 
+// --- Regression aggregates (PySpark regr_*). y = col1, x = col2; only pairs where both non-null. ---
+
+fn regr_cond_and_sums(y_col: &str, x_col: &str) -> (Expr, Expr, Expr, Expr, Expr, Expr) {
+    use polars::prelude::col as pl_col;
+    let y = pl_col(y_col).cast(DataType::Float64);
+    let x = pl_col(x_col).cast(DataType::Float64);
+    let cond = y.clone().is_not_null().and(x.clone().is_not_null());
+    let n = y
+        .clone()
+        .filter(cond.clone())
+        .count()
+        .cast(DataType::Float64);
+    let sum_x = x.clone().filter(cond.clone()).sum();
+    let sum_y = y.clone().filter(cond.clone()).sum();
+    let sum_xx = (x.clone() * x.clone()).filter(cond.clone()).sum();
+    let sum_yy = (y.clone() * y.clone()).filter(cond.clone()).sum();
+    let sum_xy = (x * y).filter(cond).sum();
+    (n, sum_x, sum_y, sum_xx, sum_yy, sum_xy)
+}
+
+/// Regression: count of (y, x) pairs where both non-null (PySpark regr_count).
+pub fn regr_count_expr(y_col: &str, x_col: &str) -> Expr {
+    let (n, ..) = regr_cond_and_sums(y_col, x_col);
+    n
+}
+
+/// Regression: average of x (PySpark regr_avgx).
+pub fn regr_avgx_expr(y_col: &str, x_col: &str) -> Expr {
+    use polars::prelude::{lit, when};
+    let (n, sum_x, ..) = regr_cond_and_sums(y_col, x_col);
+    when(n.clone().gt(lit(0.0)))
+        .then(sum_x / n)
+        .otherwise(lit(f64::NAN))
+}
+
+/// Regression: average of y (PySpark regr_avgy).
+pub fn regr_avgy_expr(y_col: &str, x_col: &str) -> Expr {
+    use polars::prelude::{lit, when};
+    let (n, _, sum_y, ..) = regr_cond_and_sums(y_col, x_col);
+    when(n.clone().gt(lit(0.0)))
+        .then(sum_y / n)
+        .otherwise(lit(f64::NAN))
+}
+
+/// Regression: sum((x - avg_x)^2) (PySpark regr_sxx).
+pub fn regr_sxx_expr(y_col: &str, x_col: &str) -> Expr {
+    use polars::prelude::{lit, when};
+    let (n, sum_x, _, sum_xx, ..) = regr_cond_and_sums(y_col, x_col);
+    when(n.clone().gt(lit(0.0)))
+        .then(sum_xx - sum_x.clone() * sum_x / n)
+        .otherwise(lit(f64::NAN))
+}
+
+/// Regression: sum((y - avg_y)^2) (PySpark regr_syy).
+pub fn regr_syy_expr(y_col: &str, x_col: &str) -> Expr {
+    use polars::prelude::{lit, when};
+    let (n, _, sum_y, _, sum_yy, _) = regr_cond_and_sums(y_col, x_col);
+    when(n.clone().gt(lit(0.0)))
+        .then(sum_yy - sum_y.clone() * sum_y / n)
+        .otherwise(lit(f64::NAN))
+}
+
+/// Regression: sum((x - avg_x)(y - avg_y)) (PySpark regr_sxy).
+pub fn regr_sxy_expr(y_col: &str, x_col: &str) -> Expr {
+    use polars::prelude::{lit, when};
+    let (n, sum_x, sum_y, _, _, sum_xy) = regr_cond_and_sums(y_col, x_col);
+    when(n.clone().gt(lit(0.0)))
+        .then(sum_xy - sum_x * sum_y / n)
+        .otherwise(lit(f64::NAN))
+}
+
+/// Regression slope: cov_samp(y,x)/var_samp(x) (PySpark regr_slope).
+pub fn regr_slope_expr(y_col: &str, x_col: &str) -> Expr {
+    use polars::prelude::{lit, when};
+    let (n, sum_x, sum_y, sum_xx, _sum_yy, sum_xy) = regr_cond_and_sums(y_col, x_col);
+    let regr_sxx = sum_xx.clone() - sum_x.clone() * sum_x.clone() / n.clone();
+    let regr_sxy = sum_xy - sum_x * sum_y / n.clone();
+    when(n.gt(lit(1.0)).and(regr_sxx.clone().gt(lit(0.0))))
+        .then(regr_sxy / regr_sxx)
+        .otherwise(lit(f64::NAN))
+}
+
+/// Regression intercept: avg_y - slope*avg_x (PySpark regr_intercept).
+pub fn regr_intercept_expr(y_col: &str, x_col: &str) -> Expr {
+    use polars::prelude::{lit, when};
+    let (n, sum_x, sum_y, sum_xx, _, sum_xy) = regr_cond_and_sums(y_col, x_col);
+    let regr_sxx = sum_xx - sum_x.clone() * sum_x.clone() / n.clone();
+    let regr_sxy = sum_xy.clone() - sum_x.clone() * sum_y.clone() / n.clone();
+    let slope = regr_sxy.clone() / regr_sxx.clone();
+    let avg_y = sum_y / n.clone();
+    let avg_x = sum_x / n.clone();
+    when(n.gt(lit(1.0)).and(regr_sxx.clone().gt(lit(0.0))))
+        .then(avg_y - slope * avg_x)
+        .otherwise(lit(f64::NAN))
+}
+
+/// Regression R-squared (PySpark regr_r2).
+pub fn regr_r2_expr(y_col: &str, x_col: &str) -> Expr {
+    use polars::prelude::{lit, when};
+    let (n, sum_x, sum_y, sum_xx, sum_yy, sum_xy) = regr_cond_and_sums(y_col, x_col);
+    let regr_sxx = sum_xx - sum_x.clone() * sum_x.clone() / n.clone();
+    let regr_syy = sum_yy - sum_y.clone() * sum_y.clone() / n.clone();
+    let regr_sxy = sum_xy - sum_x * sum_y / n;
+    when(
+        regr_sxx
+            .clone()
+            .gt(lit(0.0))
+            .and(regr_syy.clone().gt(lit(0.0))),
+    )
+    .then(regr_sxy.clone() * regr_sxy / (regr_sxx * regr_syy))
+    .otherwise(lit(f64::NAN))
+}
+
 /// PySpark-style conditional expression builder.
 ///
 /// # Example
@@ -515,6 +628,51 @@ pub fn bit_count(column: &Column) -> Column {
 /// Bitwise NOT of an integer/boolean column (PySpark bitwise_not / bitwiseNOT).
 pub fn bitwise_not(column: &Column) -> Column {
     column.clone().bitwise_not()
+}
+
+// --- Bitmap (PySpark 3.5+) ---
+
+/// Map integral value (0–32767) to bit position for bitmap aggregates (PySpark bitmap_bit_position).
+pub fn bitmap_bit_position(column: &Column) -> Column {
+    use polars::prelude::DataType;
+    let expr = column.expr().clone().cast(DataType::Int32);
+    Column::from_expr(expr, None)
+}
+
+/// Bucket number for distributed bitmap (PySpark bitmap_bucket_number). value / 32768.
+pub fn bitmap_bucket_number(column: &Column) -> Column {
+    use polars::prelude::DataType;
+    let expr = column.expr().clone().cast(DataType::Int64) / lit(32768i64);
+    Column::from_expr(expr, None)
+}
+
+/// Count set bits in a bitmap binary column (PySpark bitmap_count).
+pub fn bitmap_count(column: &Column) -> Column {
+    use polars::prelude::{DataType, GetOutput};
+    let expr = column.expr().clone().map(
+        crate::udfs::apply_bitmap_count,
+        GetOutput::from_type(DataType::Int64),
+    );
+    Column::from_expr(expr, None)
+}
+
+/// Aggregate: bitwise OR of bit positions into one bitmap binary (PySpark bitmap_construct_agg).
+/// Use in group_by(...).agg([bitmap_construct_agg(col)]).
+pub fn bitmap_construct_agg(column: &Column) -> polars::prelude::Expr {
+    use polars::prelude::{DataType, GetOutput};
+    column.expr().clone().implode().map(
+        crate::udfs::apply_bitmap_construct_agg,
+        GetOutput::from_type(DataType::Binary),
+    )
+}
+
+/// Aggregate: bitwise OR of bitmap binary column (PySpark bitmap_or_agg).
+pub fn bitmap_or_agg(column: &Column) -> polars::prelude::Expr {
+    use polars::prelude::{DataType, GetOutput};
+    column.expr().clone().implode().map(
+        crate::udfs::apply_bitmap_or_agg,
+        GetOutput::from_type(DataType::Binary),
+    )
 }
 
 /// Alias for getbit (PySpark bit_get).
@@ -1110,6 +1268,38 @@ pub fn try_to_timestamp(column: &Column, format: Option<&str>) -> Column {
     }
 }
 
+/// Parse as timestamp in local timezone, return UTC (PySpark to_timestamp_ltz).
+pub fn to_timestamp_ltz(column: &Column, format: Option<&str>) -> Result<Column, String> {
+    use polars::prelude::{DataType, GetOutput, TimeUnit};
+    match format {
+        None => crate::cast(column, "timestamp"),
+        Some(fmt) => {
+            let fmt_owned = fmt.to_string();
+            let expr = column.expr().clone().map(
+                move |s| crate::udfs::apply_to_timestamp_ltz_format(s, Some(&fmt_owned), true),
+                GetOutput::from_type(DataType::Datetime(TimeUnit::Microseconds, None)),
+            );
+            Ok(crate::column::Column::from_expr(expr, None))
+        }
+    }
+}
+
+/// Parse as timestamp without timezone (PySpark to_timestamp_ntz). Returns Datetime(_, None).
+pub fn to_timestamp_ntz(column: &Column, format: Option<&str>) -> Result<Column, String> {
+    use polars::prelude::{DataType, GetOutput, TimeUnit};
+    match format {
+        None => crate::cast(column, "timestamp"),
+        Some(fmt) => {
+            let fmt_owned = fmt.to_string();
+            let expr = column.expr().clone().map(
+                move |s| crate::udfs::apply_to_timestamp_ntz_format(s, Some(&fmt_owned), true),
+                GetOutput::from_type(DataType::Datetime(TimeUnit::Microseconds, None)),
+            );
+            Ok(crate::column::Column::from_expr(expr, None))
+        }
+    }
+}
+
 /// Division that returns null on divide-by-zero (PySpark try_divide).
 pub fn try_divide(left: &Column, right: &Column) -> Column {
     use polars::prelude::*;
@@ -1596,6 +1786,25 @@ pub fn make_interval(
     crate::column::Column::from_expr(dur, None)
 }
 
+/// Day-time interval: days, hours, minutes, seconds (PySpark make_dt_interval). All optional; 0 for omitted.
+pub fn make_dt_interval(days: i64, hours: i64, minutes: i64, seconds: i64) -> Column {
+    use polars::prelude::*;
+    let args = DurationArgs::new()
+        .with_days(lit(days))
+        .with_hours(lit(hours))
+        .with_minutes(lit(minutes))
+        .with_seconds(lit(seconds));
+    let dur = duration(args);
+    crate::column::Column::from_expr(dur, None)
+}
+
+/// Year-month interval (PySpark make_ym_interval). Polars has no native YM type; return months as Int32 (years*12 + months).
+pub fn make_ym_interval(years: i32, months: i32) -> Column {
+    use polars::prelude::*;
+    let total_months = years * 12 + months;
+    crate::column::Column::from_expr(lit(total_months), None)
+}
+
 /// Alias for make_timestamp (PySpark make_timestamp_ntz - no timezone).
 pub fn make_timestamp_ntz(
     year: &Column,
@@ -1962,6 +2171,44 @@ pub fn array_distinct(column: &Column) -> Column {
 /// Slice list from 1-based start with optional length (PySpark slice).
 pub fn array_slice(column: &Column, start: i64, length: Option<i64>) -> Column {
     column.clone().array_slice(start, length)
+}
+
+/// Generate array of numbers from start to stop (inclusive) with optional step (PySpark sequence).
+/// step defaults to 1.
+pub fn sequence(start: &Column, stop: &Column, step: Option<&Column>) -> Column {
+    use polars::prelude::{as_struct, lit, DataType, GetOutput};
+    let step_expr = step
+        .map(|c| c.expr().clone().alias("2"))
+        .unwrap_or_else(|| lit(1i64).alias("2"));
+    let struct_expr = as_struct(vec![
+        start.expr().clone().alias("0"),
+        stop.expr().clone().alias("1"),
+        step_expr,
+    ]);
+    let out_dtype = DataType::List(Box::new(DataType::Int64));
+    let expr = struct_expr.map(crate::udfs::apply_sequence, GetOutput::from_type(out_dtype));
+    crate::column::Column::from_expr(expr, None)
+}
+
+/// Random permutation of list elements (PySpark shuffle).
+pub fn shuffle(column: &Column) -> Column {
+    use polars::prelude::GetOutput;
+    let expr = column
+        .expr()
+        .clone()
+        .map(crate::udfs::apply_shuffle, GetOutput::same_type());
+    crate::column::Column::from_expr(expr, None)
+}
+
+/// Explode list of structs into rows; struct fields become columns after unnest (PySpark inline).
+/// Returns the exploded struct column; use unnest to expand struct fields to columns.
+pub fn inline(column: &Column) -> Column {
+    column.clone().explode()
+}
+
+/// Like inline but null/empty yields one row of nulls (PySpark inline_outer).
+pub fn inline_outer(column: &Column) -> Column {
+    column.clone().explode_outer()
 }
 
 /// Explode list into one row per element (PySpark explode).

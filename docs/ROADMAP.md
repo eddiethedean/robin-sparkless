@@ -109,6 +109,13 @@ The path to full backend replacement is planned in [FULL_BACKEND_ROADMAP.md](FUL
     - **Window fixtures**: percent_rank, cume_dist, ntile, nth_value covered (multi-step workaround in harness).
     - **Documentation of differences**: See [PYSPARK_DIFFERENCES.md](PYSPARK_DIFFERENCES.md).
 
+12. **Gap closure (bitmap, datetime/interval, misc, DataFrame)** ✅ **COMPLETED** (Feb 2026)
+    - **Bitmap (5)**: bitmap_bit_position, bitmap_bucket_number, bitmap_construct_agg, bitmap_count, bitmap_or_agg.
+    - **Datetime/interval**: make_dt_interval, make_ym_interval, to_timestamp_ltz, to_timestamp_ntz.
+    - **Misc**: sequence, shuffle, inline, inline_outer; regr_* (9 regression aggregates); stubs for call_function, UDF/UDTF, window/session_window, HLL/sketch (see [PYSPARK_DIFFERENCES.md](PYSPARK_DIFFERENCES.md)).
+    - **DataFrame**: cube(), rollup() with .agg(); write().mode().format().save() (parquet/csv/json); data, toLocalIterator (same as collect); persist/unpersist (no-op); stubs for rdd, foreach, foreachPartition, mapInPandas, mapPartitions, storageLevel, isStreaming, withWatermark.
+    - **Deferred**: XML (from_xml, to_xml, schema_of_xml), XPath, sentences — documented in [ROBIN_SPARKLESS_MISSING.md](ROBIN_SPARKLESS_MISSING.md).
+
 ### Sparkless Integration Phases (see SPARKLESS_INTEGRATION_ANALYSIS.md, FULL_BACKEND_ROADMAP.md)
 
 - **Phase 1 – Foundation**: Structural alignment (split dataframe.rs), case sensitivity, fixture converter. *Prereqs done: joins, windows, strings.*

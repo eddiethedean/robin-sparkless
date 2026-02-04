@@ -153,7 +153,9 @@ fn lit_as_string(v: &Value) -> Result<String, PlanExprError> {
     if let Some(b) = lit_val.as_bool() {
         return Ok(b.to_string());
     }
-    Err(PlanExprError("literal must be string, number, or bool".to_string()))
+    Err(PlanExprError(
+        "literal must be string, number, or bool".to_string(),
+    ))
 }
 
 fn lit_as_i64(v: &Value) -> Result<i64, PlanExprError> {
@@ -167,7 +169,8 @@ fn lit_as_i64(v: &Value) -> Result<i64, PlanExprError> {
 
 fn lit_as_i32(v: &Value) -> Result<i32, PlanExprError> {
     let n = lit_as_i64(v)?;
-    n.try_into().map_err(|_| PlanExprError("literal out of i32 range".to_string()))
+    n.try_into()
+        .map_err(|_| PlanExprError("literal out of i32 range".to_string()))
 }
 
 fn lit_as_u32(v: &Value) -> Result<u32, PlanExprError> {
@@ -175,10 +178,14 @@ fn lit_as_u32(v: &Value) -> Result<u32, PlanExprError> {
         .get("lit")
         .ok_or_else(|| PlanExprError("expected literal".to_string()))?;
     if let Some(n) = lit_val.as_u64() {
-        return n.try_into().map_err(|_| PlanExprError("literal out of u32 range".to_string()));
+        return n
+            .try_into()
+            .map_err(|_| PlanExprError("literal out of u32 range".to_string()));
     }
     if let Some(n) = lit_val.as_i64() {
-        return (n as u64).try_into().map_err(|_| PlanExprError("literal out of u32 range".to_string()));
+        return (n as u64)
+            .try_into()
+            .map_err(|_| PlanExprError("literal out of u32 range".to_string()));
     }
     Err(PlanExprError("literal must be number".to_string()))
 }
@@ -196,6 +203,7 @@ fn lit_as_f64(v: &Value) -> Result<f64, PlanExprError> {
     Err(PlanExprError("literal must be number".to_string()))
 }
 
+#[allow(dead_code)]
 fn lit_as_bool(v: &Value) -> Result<bool, PlanExprError> {
     let lit_val = v
         .get("lit")
@@ -208,9 +216,12 @@ fn lit_as_bool(v: &Value) -> Result<bool, PlanExprError> {
 fn lit_as_usize(v: &Value) -> Result<usize, PlanExprError> {
     let n = lit_as_i64(v)?;
     if n < 0 {
-        return Err(PlanExprError("literal must be non-negative for usize".to_string()));
+        return Err(PlanExprError(
+            "literal must be non-negative for usize".to_string(),
+        ));
     }
-    n.try_into().map_err(|_| PlanExprError("literal out of usize range".to_string()))
+    n.try_into()
+        .map_err(|_| PlanExprError("literal out of usize range".to_string()))
 }
 
 /// Optional string literal: if args[i] is missing or null, return None; else require {"lit": "..."}.
@@ -286,6 +297,7 @@ fn opt_lit_i64(args: &[Value], i: usize) -> Option<i64> {
 }
 
 /// Get optional u64 from args (e.g. for rand(seed)).
+#[allow(dead_code)]
 fn opt_lit_u64(args: &[Value], i: usize) -> Option<u64> {
     let v = args.get(i)?;
     if let Some(n) = v.get("lit").and_then(Value::as_i64) {
@@ -317,36 +329,37 @@ fn eq_null_safe_expr(left: Expr, right: Expr) -> Expr {
 }
 
 fn expr_from_fn(name: &str, args: &[Value]) -> Result<Expr, PlanExprError> {
+    #[allow(unused_imports)]
     use crate::functions::{
         add_months, array_agg, array_append, array_compact, array_contains, array_distinct,
         array_except, array_insert, array_intersect, array_join, array_prepend, array_remove,
         array_slice, array_sort, array_sum, array_union, arrays_overlap, arrays_zip, ascii,
-        assert_true, atan2, base64, bin, bit_and, bit_count, bit_get, bit_length, bit_or,
-        bit_xor, bitwise_not, bround, btrim, cast, cbrt, ceiling, char as rs_char, chr,
-        coalesce, concat, concat_ws, contains, conv, cos, cosh, cot, crc32, csc, current_catalog,
+        assert_true, atan2, base64, bin, bit_and, bit_count, bit_get, bit_length, bit_or, bit_xor,
+        bitwise_not, bround, btrim, cast, cbrt, ceiling, char as rs_char, chr, coalesce, concat,
+        concat_ws, contains, conv, cos, cosh, cot, crc32, csc, curdate, current_catalog,
         current_database, current_date, current_schema, current_timestamp, current_timezone,
-        current_user, curdate, date_add, date_diff, date_format, date_from_unix_date, date_part,
-        date_sub, date_trunc, dateadd, datediff, datepart, day, dayname, dayofmonth, dayofweek,
-        dayofyear, days, decode, degrees, e, element_at, elt, encode, endswith, equal_null,
-        exp, explode_outer, extract, factorial, find_in_set, floor, format_number, format_string,
-        from_unixtime, from_utc_timestamp, get, getbit, get_json_object, greatest, hash, hex,
-        hour, hypot, ilike, initcap, input_file_name, instr, isnan, last_day, lcase, least, left,
-        length, like, lit_str, ln, localtimestamp, locate, log, log10, log1p, log2, lower, lpad,
-        make_date, make_interval, make_timestamp, make_timestamp_ntz, mask, md5, minute,
-        monotonically_increasing_id, month, months_between, nanvl, negate, negative, next_day,
-        now, nullif, nvl, nvl2, octet_length, overlay, parse_url, pi, pmod, positive, pow, power,
+        current_user, date_add, date_diff, date_format, date_from_unix_date, date_part, date_sub,
+        date_trunc, dateadd, datediff, datepart, day, dayname, dayofmonth, dayofweek, dayofyear,
+        days, decode, degrees, e, element_at, elt, encode, endswith, equal_null, exp,
+        explode_outer, extract, factorial, find_in_set, floor, format_number, format_string,
+        from_unixtime, from_utc_timestamp, get, get_json_object, getbit, greatest, hash, hex, hour,
+        hypot, ilike, initcap, input_file_name, instr, isnan, last_day, lcase, least, left, length,
+        like, lit_str, ln, localtimestamp, locate, log, log10, log1p, log2, lower, lpad, make_date,
+        make_interval, make_timestamp, make_timestamp_ntz, mask, md5, minute,
+        monotonically_increasing_id, month, months_between, nanvl, negate, negative, next_day, now,
+        nullif, nvl, nvl2, octet_length, overlay, parse_url, pi, pmod, positive, pow, power,
         quarter, radians, raise_error, rand, randn, regexp, regexp_count, regexp_extract,
         regexp_extract_all, regexp_instr, regexp_like, regexp_replace, regexp_substr, repeat,
         replace, reverse, right, rint, rlike, round, rpad, sec, second, sha1, sha2, shift_left,
-        shift_right, signum, sin, sinh, size, soundex, spark_partition_id, split, split_part,
-        sqrt, startswith, str_to_map, struct_, substr, substring, substring_index, tan, tanh,
+        shift_right, signum, sin, sinh, size, soundex, spark_partition_id, split, split_part, sqrt,
+        startswith, str_to_map, struct_, substr, substring, substring_index, tan, tanh,
         timestamp_micros, timestamp_millis, timestamp_seconds, timestampadd, timestampdiff,
         to_binary, to_char, to_date, to_degrees, to_radians, to_timestamp, to_unix_timestamp,
         to_utc_timestamp, to_varchar, translate, trim, trunc, try_add, try_cast, try_divide,
         try_element_at, try_multiply, try_subtract, try_to_binary, try_to_number, try_to_timestamp,
         typeof_, ucase, unbase64, unhex, unix_date, unix_micros, unix_millis, unix_seconds,
-        unix_timestamp, unix_timestamp_now, upper, url_decode, url_encode, user, version,
-        weekday, weekofyear, when_then_otherwise_null, width_bucket, xxhash64, year,
+        unix_timestamp, unix_timestamp_now, upper, url_decode, url_encode, user, version, weekday,
+        weekofyear, when_then_otherwise_null, width_bucket, xxhash64, year,
     };
     use crate::Column;
 
@@ -363,7 +376,10 @@ fn expr_from_fn(name: &str, args: &[Value]) -> Result<Expr, PlanExprError> {
         }
         "coalesce" => {
             if args.is_empty() {
-                return Err(PlanExprError(format!("fn '{}' requires at least one argument", name)));
+                return Err(PlanExprError(format!(
+                    "fn '{}' requires at least one argument",
+                    name
+                )));
             }
             let exprs: Result<Vec<Expr>, _> = args.iter().map(expr_from_value).collect();
             let exprs = exprs?;
@@ -412,7 +428,10 @@ fn expr_from_fn(name: &str, args: &[Value]) -> Result<Expr, PlanExprError> {
         }
         "concat" => {
             if args.len() < 2 {
-                return Err(PlanExprError(format!("fn '{}' requires at least two arguments", name)));
+                return Err(PlanExprError(format!(
+                    "fn '{}' requires at least two arguments",
+                    name
+                )));
             }
             let exprs: Result<Vec<Expr>, _> = args.iter().map(expr_from_value).collect();
             let cols: Vec<Column> = exprs?.into_iter().map(expr_to_column).collect();
@@ -695,10 +714,22 @@ fn expr_from_fn(name: &str, args: &[Value]) -> Result<Expr, PlanExprError> {
         "mask" => {
             require_args_min(name, args, 1)?;
             let c = expr_to_column(arg_expr(args, 0)?);
-            let u = args.get(1).and_then(|v| lit_as_string(v).ok()).and_then(|s| s.chars().next());
-            let l = args.get(2).and_then(|v| lit_as_string(v).ok()).and_then(|s| s.chars().next());
-            let d = args.get(3).and_then(|v| lit_as_string(v).ok()).and_then(|s| s.chars().next());
-            let o = args.get(4).and_then(|v| lit_as_string(v).ok()).and_then(|s| s.chars().next());
+            let u = args
+                .get(1)
+                .and_then(|v| lit_as_string(v).ok())
+                .and_then(|s| s.chars().next());
+            let l = args
+                .get(2)
+                .and_then(|v| lit_as_string(v).ok())
+                .and_then(|s| s.chars().next());
+            let d = args
+                .get(3)
+                .and_then(|v| lit_as_string(v).ok())
+                .and_then(|s| s.chars().next());
+            let o = args
+                .get(4)
+                .and_then(|v| lit_as_string(v).ok())
+                .and_then(|s| s.chars().next());
             Ok(mask(&c, u, l, d, o).into_expr())
         }
         "str_to_map" => {
@@ -708,35 +739,34 @@ fn expr_from_fn(name: &str, args: &[Value]) -> Result<Expr, PlanExprError> {
             let key_value_delim: Option<String> = arg_lit_opt_str(args, 2)?;
             Ok(str_to_map(&c, pair_delim.as_deref(), key_value_delim.as_deref()).into_expr())
         }
-        _ => return expr_from_fn_rest(name, args),
+        _ => expr_from_fn_rest(name, args),
     }
 }
 
 fn expr_from_fn_rest(name: &str, args: &[Value]) -> Result<Expr, PlanExprError> {
+    #[allow(unused_imports)]
     use crate::functions::{
         abs, acos, add_months, array_agg, array_append, array_compact, array_contains,
         array_distinct, array_except, array_insert, array_intersect, array_join, array_prepend,
-        array_remove, array_slice, array_sort, array_sum, array_union, arrays_overlap, arrays_zip,
-        array_size, asin, atan, atan2, bround, cast, cbrt, ceiling, cos, cosh, cot, create_map, csc,
-        current_catalog,
-        current_database, current_date, current_schema, current_timezone, current_timestamp,
-        current_user, curdate, date_add, date_diff, date_format, date_from_unix_date, date_part,
-        date_sub, date_trunc, dateadd, datediff, datepart, day, dayname, dayofmonth, dayofweek,
-        dayofyear, days, decode, degrees, element_at, encode, equal_null, e, exp, explode,
-        explode_outer, expm1, extract, factorial, floor, from_unixtime, from_utc_timestamp, get,
-        get_json_object, greatest, grouping,
-        grouping_id, hash, hour, hours, hypot, input_file_name, last_day, least, localtimestamp,
-        log, log1p, log10, log2, make_date, make_interval, make_timestamp, make_timestamp_ntz,
-        minute, minutes, month, months, months_between, monotonically_increasing_id, negate,
-        next_day, now, nullif, nvl, nvl2, parse_url, pi, pmod, positive, pow, quarter, radians,
-        map_keys, map_values,
-        rint, round, second, sec, shift_left, shift_right, signum, sin, sinh, size, spark_partition_id,
-        sqrt, tan, tanh, timestamp_micros, timestamp_millis, timestamp_seconds, timestampadd,
-        timestampdiff, to_binary, to_char, to_date, to_degrees, to_radians, to_number,
-        to_timestamp, to_unix_timestamp, to_utc_timestamp, to_varchar, try_add, try_cast,
-        try_divide, try_element_at, try_multiply, try_subtract, try_to_number, try_to_timestamp,
-        trunc, typeof_, unix_date, unix_micros, unix_millis, unix_seconds, unix_timestamp,
-        unix_timestamp_now, user, weekofyear, weekday, width_bucket, year, years,
+        array_remove, array_size, array_slice, array_sort, array_sum, array_union, arrays_overlap,
+        arrays_zip, asin, atan, atan2, bround, cast, cbrt, ceiling, cos, cosh, cot, create_map,
+        csc, curdate, current_catalog, current_database, current_date, current_schema,
+        current_timestamp, current_timezone, current_user, date_add, date_diff, date_format,
+        date_from_unix_date, date_part, date_sub, date_trunc, dateadd, datediff, datepart, day,
+        dayname, dayofmonth, dayofweek, dayofyear, days, decode, degrees, e, element_at, encode,
+        equal_null, exp, explode, explode_outer, expm1, extract, factorial, floor, from_unixtime,
+        from_utc_timestamp, get, get_json_object, greatest, grouping, grouping_id, hash, hour,
+        hours, hypot, input_file_name, last_day, least, localtimestamp, log, log10, log1p, log2,
+        make_date, make_interval, make_timestamp, make_timestamp_ntz, map_keys, map_values, minute,
+        minutes, monotonically_increasing_id, month, months, months_between, negate, next_day, now,
+        nullif, nvl, nvl2, parse_url, pi, pmod, positive, pow, quarter, radians, rint, round, sec,
+        second, shift_left, shift_right, signum, sin, sinh, size, spark_partition_id, sqrt, tan,
+        tanh, timestamp_micros, timestamp_millis, timestamp_seconds, timestampadd, timestampdiff,
+        to_binary, to_char, to_date, to_degrees, to_number, to_radians, to_timestamp,
+        to_unix_timestamp, to_utc_timestamp, to_varchar, trunc, try_add, try_cast, try_divide,
+        try_element_at, try_multiply, try_subtract, try_to_number, try_to_timestamp, typeof_,
+        unix_date, unix_micros, unix_millis, unix_seconds, unix_timestamp, unix_timestamp_now,
+        user, weekday, weekofyear, width_bucket, year, years,
     };
     use crate::Column;
 
@@ -1088,7 +1118,10 @@ fn expr_from_fn_rest(name: &str, args: &[Value]) -> Result<Expr, PlanExprError> 
             require_args_min(name, args, 2)?;
             let end = expr_to_column(arg_expr(args, 0)?);
             let start = expr_to_column(arg_expr(args, 1)?);
-            let round_off = args.get(2).and_then(|v| v.get("lit").and_then(Value::as_bool)).unwrap_or(true);
+            let round_off = args
+                .get(2)
+                .and_then(|v| v.get("lit").and_then(Value::as_bool))
+                .unwrap_or(true);
             Ok(months_between(&end, &start, round_off).into_expr())
         }
         "next_day" => {
@@ -1219,7 +1252,9 @@ fn expr_from_fn_rest(name: &str, args: &[Value]) -> Result<Expr, PlanExprError> 
         }
         "localtimestamp" => {
             if !args.is_empty() {
-                return Err(PlanExprError("fn 'localtimestamp' takes no arguments".to_string()));
+                return Err(PlanExprError(
+                    "fn 'localtimestamp' takes no arguments".to_string(),
+                ));
             }
             Ok(localtimestamp().into_expr())
         }
@@ -1281,7 +1316,9 @@ fn expr_from_fn_rest(name: &str, args: &[Value]) -> Result<Expr, PlanExprError> 
             require_args_min(name, args, 1)?;
             let c = expr_to_column(arg_expr(args, 0)?);
             let format: Option<String> = arg_lit_opt_str(args, 1)?;
-            Ok(to_timestamp(&c, format.as_deref()).map_err(PlanExprError)?.into_expr())
+            Ok(to_timestamp(&c, format.as_deref())
+                .map_err(PlanExprError)?
+                .into_expr())
         }
         "try_to_timestamp" => {
             require_args_min(name, args, 1)?;
@@ -1302,13 +1339,21 @@ fn expr_from_fn_rest(name: &str, args: &[Value]) -> Result<Expr, PlanExprError> 
         }
         "current_timezone" => {
             if !args.is_empty() {
-                return Err(PlanExprError("fn 'current_timezone' takes no arguments".to_string()));
+                return Err(PlanExprError(
+                    "fn 'current_timezone' takes no arguments".to_string(),
+                ));
             }
             Ok(current_timezone().into_expr())
         }
         // --- Zero-arg JVM/runtime stubs ---
-        "spark_partition_id" | "input_file_name" | "monotonically_increasing_id"
-        | "current_catalog" | "current_database" | "current_schema" | "current_user" | "user" => {
+        "spark_partition_id"
+        | "input_file_name"
+        | "monotonically_increasing_id"
+        | "current_catalog"
+        | "current_database"
+        | "current_schema"
+        | "current_user"
+        | "user" => {
             if !args.is_empty() {
                 return Err(PlanExprError(format!("fn '{}' takes no arguments", name)));
             }
@@ -1412,6 +1457,29 @@ fn expr_from_fn_rest(name: &str, args: &[Value]) -> Result<Expr, PlanExprError> 
         "explode_outer" => {
             require_args(name, args, 1)?;
             Ok(explode_outer(&expr_to_column(arg_expr(args, 0)?)).into_expr())
+        }
+        "inline" => {
+            require_args(name, args, 1)?;
+            Ok(crate::functions::inline(&expr_to_column(arg_expr(args, 0)?)).into_expr())
+        }
+        "inline_outer" => {
+            require_args(name, args, 1)?;
+            Ok(crate::functions::inline_outer(&expr_to_column(arg_expr(args, 0)?)).into_expr())
+        }
+        "sequence" => {
+            require_args_min(name, args, 2)?;
+            let start = expr_to_column(arg_expr(args, 0)?);
+            let stop = expr_to_column(arg_expr(args, 1)?);
+            let step = if args.len() > 2 {
+                Some(expr_to_column(arg_expr(args, 2)?))
+            } else {
+                None
+            };
+            Ok(crate::functions::sequence(&start, &stop, step.as_ref()).into_expr())
+        }
+        "shuffle" => {
+            require_args(name, args, 1)?;
+            Ok(crate::functions::shuffle(&expr_to_column(arg_expr(args, 0)?)).into_expr())
         }
         "array_position" => {
             require_args(name, args, 2)?;
