@@ -19,15 +19,17 @@ use crate::functions::{
     unix_timestamp, unix_timestamp_now, weekofyear,
 };
 use crate::functions::{
+    array_agg, arrays_overlap, arrays_zip, bit_length, create_map, explode_outer, get, map_concat,
+    map_contains_key, map_filter_value_gt, map_from_entries, map_zip_with_coalesce, named_struct,
+    str_to_map, struct_, to_char, to_number, to_varchar, try_add, try_divide, try_multiply,
+    try_subtract, try_to_number, try_to_timestamp, typeof_, width_bucket, zip_with_coalesce,
+};
+use crate::functions::{
     asc, asc_nulls_first, asc_nulls_last, bround, cot, csc, desc, desc_nulls_first,
     desc_nulls_last, e, median, mode, negate, pi, positive, sec, stddev_pop, var_pop,
 };
 use crate::functions::{avg, coalesce, col as rs_col, count, max, min, sum as rs_sum};
-use crate::functions::{
-    bit_length, create_map, get, map_concat, map_contains_key, map_filter_value_gt,
-    map_from_entries, map_zip_with_coalesce, named_struct, struct_, try_add, try_divide,
-    try_multiply, try_subtract, typeof_, width_bucket, zip_with_coalesce,
-};
+use crate::functions::{bin, btrim, conv, getbit, hex, locate, unhex};
 use crate::{DataFrame, GroupedData, SparkSession};
 use polars::prelude::Expr;
 use pyo3::prelude::*;
@@ -230,6 +232,27 @@ fn robin_sparkless(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("mode", wrap_pyfunction!(py_mode, m)?)?;
     m.add("stddev_pop", wrap_pyfunction!(py_stddev_pop, m)?)?;
     m.add("var_pop", wrap_pyfunction!(py_var_pop, m)?)?;
+    // Phase 21: string, binary, type, array, map, struct
+    m.add("btrim", wrap_pyfunction!(py_btrim, m)?)?;
+    m.add("locate", wrap_pyfunction!(py_locate, m)?)?;
+    m.add("conv", wrap_pyfunction!(py_conv, m)?)?;
+    m.add("hex", wrap_pyfunction!(py_hex, m)?)?;
+    m.add("unhex", wrap_pyfunction!(py_unhex, m)?)?;
+    m.add("bin", wrap_pyfunction!(py_bin, m)?)?;
+    m.add("getbit", wrap_pyfunction!(py_getbit, m)?)?;
+    m.add("to_char", wrap_pyfunction!(py_to_char, m)?)?;
+    m.add("to_varchar", wrap_pyfunction!(py_to_varchar, m)?)?;
+    m.add("to_number", wrap_pyfunction!(py_to_number, m)?)?;
+    m.add("try_to_number", wrap_pyfunction!(py_try_to_number, m)?)?;
+    m.add(
+        "try_to_timestamp",
+        wrap_pyfunction!(py_try_to_timestamp, m)?,
+    )?;
+    m.add("str_to_map", wrap_pyfunction!(py_str_to_map, m)?)?;
+    m.add("arrays_overlap", wrap_pyfunction!(py_arrays_overlap, m)?)?;
+    m.add("arrays_zip", wrap_pyfunction!(py_arrays_zip, m)?)?;
+    m.add("explode_outer", wrap_pyfunction!(py_explode_outer, m)?)?;
+    m.add("array_agg", wrap_pyfunction!(py_array_agg, m)?)?;
     Ok(())
 }
 
@@ -430,6 +453,129 @@ fn py_stddev_pop(column: &PyColumn) -> PyColumn {
 fn py_var_pop(column: &PyColumn) -> PyColumn {
     PyColumn {
         inner: var_pop(&column.inner),
+    }
+}
+
+#[pyfunction]
+fn py_btrim(column: &PyColumn, trim_str: Option<&str>) -> PyColumn {
+    PyColumn {
+        inner: btrim(&column.inner, trim_str),
+    }
+}
+
+#[pyfunction]
+fn py_locate(substr: &str, column: &PyColumn, pos: Option<i64>) -> PyColumn {
+    PyColumn {
+        inner: locate(substr, &column.inner, pos.unwrap_or(1)),
+    }
+}
+
+#[pyfunction]
+fn py_conv(column: &PyColumn, from_base: i32, to_base: i32) -> PyColumn {
+    PyColumn {
+        inner: conv(&column.inner, from_base, to_base),
+    }
+}
+
+#[pyfunction]
+fn py_hex(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: hex(&column.inner),
+    }
+}
+
+#[pyfunction]
+fn py_unhex(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: unhex(&column.inner),
+    }
+}
+
+#[pyfunction]
+fn py_bin(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: bin(&column.inner),
+    }
+}
+
+#[pyfunction]
+fn py_getbit(column: &PyColumn, pos: i64) -> PyColumn {
+    PyColumn {
+        inner: getbit(&column.inner, pos),
+    }
+}
+
+#[pyfunction]
+fn py_to_char(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: to_char(&column.inner),
+    }
+}
+
+#[pyfunction]
+fn py_to_varchar(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: to_varchar(&column.inner),
+    }
+}
+
+#[pyfunction]
+fn py_to_number(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: to_number(&column.inner),
+    }
+}
+
+#[pyfunction]
+fn py_try_to_number(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: try_to_number(&column.inner),
+    }
+}
+
+#[pyfunction]
+fn py_try_to_timestamp(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: try_to_timestamp(&column.inner),
+    }
+}
+
+#[pyfunction]
+fn py_str_to_map(
+    column: &PyColumn,
+    pair_delim: Option<&str>,
+    key_value_delim: Option<&str>,
+) -> PyColumn {
+    PyColumn {
+        inner: str_to_map(&column.inner, pair_delim, key_value_delim),
+    }
+}
+
+#[pyfunction]
+fn py_arrays_overlap(left: &PyColumn, right: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: arrays_overlap(&left.inner, &right.inner),
+    }
+}
+
+#[pyfunction]
+fn py_arrays_zip(left: &PyColumn, right: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: arrays_zip(&left.inner, &right.inner),
+    }
+}
+
+#[pyfunction]
+fn py_explode_outer(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: explode_outer(&column.inner),
+    }
+}
+
+#[pyfunction]
+fn py_array_agg(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: array_agg(&column.inner),
     }
 }
 

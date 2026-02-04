@@ -96,6 +96,26 @@ The following Sparkless function names have an equivalent implementation in robi
 | format_number | ✅ | |
 | format_string | ✅ | Phase 16 |
 | from_json | ✅ | |
+| btrim | ✅ | Phase 21 |
+| locate | ✅ | Phase 21 |
+| conv | ✅ | Phase 21 |
+| hex | ✅ | Phase 21 |
+| unhex | ✅ | Phase 21 |
+| bin | ✅ | Phase 21 |
+| getbit | ✅ | Phase 21 |
+| to_char | ✅ | Phase 21 |
+| to_varchar | ✅ | Phase 21 |
+| to_number | ✅ | Phase 21 |
+| try_to_number | ✅ | Phase 21 |
+| try_to_timestamp | ✅ | Phase 21 |
+| str_to_map | ✅ | Phase 21 |
+| arrays_overlap | ✅ | Phase 21 |
+| arrays_zip | ✅ | Phase 21 |
+| explode_outer | ✅ | Phase 21 |
+| posexplode_outer | ✅ | Phase 21 |
+| array_agg | ✅ | Phase 21 |
+| transform_keys | ✅ | Phase 21 |
+| transform_values | ✅ | Phase 21 |
 | from_unixtime | ✅ | Phase 17 |
 | get | ✅ | Phase 18 (map element) |
 | get_json_object | ✅ | |
@@ -246,21 +266,21 @@ The following Sparkless function names have an equivalent implementation in robi
 - aes_decrypt, aes_encrypt, try_aes_decrypt
 - to_binary, try_to_binary
 - decode, encode
-- hex, unhex
-- bin
-- getbit
+- ~~hex, unhex~~ ✅ Phase 21
+- ~~bin~~ ✅ Phase 21
+- ~~getbit~~ ✅ Phase 21
 
 ### Array (additional)
-- aggregate (array aggregate)
-- array_agg
-- arrays_overlap, arrays_zip
-- explode_outer, posexplode_outer
+- aggregate (array aggregate) — deferred
+- ~~array_agg~~ ✅ Phase 21
+- ~~arrays_overlap, arrays_zip~~ ✅ Phase 21
+- ~~explode_outer, posexplode_outer~~ ✅ Phase 21
 
 ### Map
-- str_to_map
+- ~~str_to_map~~ ✅ Phase 21
 
 ### Struct
-- transform_keys, transform_values
+- ~~transform_keys, transform_values~~ ✅ Phase 21
 
 ### Ordering (Phase 20)
 - asc, asc_nulls_first, asc_nulls_last ✅
@@ -283,7 +303,7 @@ The following Sparkless function names have an equivalent implementation in robi
 - bround ✅
 
 ### String
-- btrim, conv, locate (we have instr/position)
+- ~~btrim, conv, locate~~ ✅ Phase 21
 
 ### Math (Phase 20)
 - cot, csc, sec, e, pi ✅
@@ -321,8 +341,8 @@ The following Sparkless function names have an equivalent implementation in robi
 - schema_of_csv, schema_of_json
 
 ### Type / cast
-- to_char, to_number, to_varchar
-- try_to_number, try_to_timestamp
+- ~~to_char, to_number, to_varchar~~ ✅ Phase 21
+- ~~try_to_number, try_to_timestamp~~ ✅ Phase 21
 
 ### URL
 - url_decode, url_encode

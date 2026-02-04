@@ -24,11 +24,11 @@ The following are implemented in robin-sparkless (Rust `functions.rs`, `column.r
 
 **Aggregates:** `count`, `sum`, `avg`, `min`, `max`, `stddev`, `variance`, `count_distinct`
 
-**String:** `upper`, `lower`, `substring`, `substr`, `length`, `trim`, `ltrim`, `rtrim`, `regexp_extract`, `regexp_replace`, `regexp_extract_all`, `regexp_like`, `split`, `initcap`, `repeat`, `reverse`, `instr`, `position`, `ascii`, `format_number`, `overlay`, `char`, `chr`, `base64`, `unbase64`, `sha1`, `sha2`, `md5`, `lpad`, `rpad`, `translate`, `mask`, `substring_index`, `left`, `right`, `replace`, `startswith`, `endswith`, `contains`, `like`, `ilike`, `rlike`, `soundex`, `levenshtein`, `crc32`, `xxhash64`
+**String:** `upper`, `lower`, `substring`, `substr`, `length`, `trim`, `ltrim`, `rtrim`, `btrim`, `locate`, `conv`, `regexp_extract`, `regexp_replace`, `regexp_extract_all`, `regexp_like`, `split`, `initcap`, `repeat`, `reverse`, `instr`, `position`, `ascii`, `format_number`, `overlay`, `char`, `chr`, `base64`, `unbase64`, `sha1`, `sha2`, `md5`, `lpad`, `rpad`, `translate`, `mask`, `substring_index`, `left`, `right`, `replace`, `startswith`, `endswith`, `contains`, `like`, `ilike`, `rlike`, `soundex`, `levenshtein`, `crc32`, `xxhash64`
 
 **Math:** `abs`, `ceil`, `ceiling`, `floor`, `round`, `sqrt`, `pow`, `power`, `exp`, `log`, `ln`, `sin`, `cos`, `tan`, `asin`, `acos`, `atan`, `atan2`, `degrees`, `radians`, `to_degrees`, `to_radians`, `signum`, `cosh`, `sinh`, `tanh`, `acosh`, `asinh`, `atanh`, `cbrt`, `expm1`, `log1p`, `log10`, `log2`, `rint`, `hypot`
 
-**Type / conditional:** `cast`, `try_cast`, `isnan`, `greatest`, `least`
+**Type / conditional:** `cast`, `try_cast`, `isnan`, `greatest`, `least`, `to_char`, `to_varchar`, `to_number`, `try_to_number`, `try_to_timestamp`
 
 **Datetime:** `year`, `month`, `day`, `dayofmonth`, `quarter`, `weekofyear`, `dayofweek`, `dayofyear`, `to_date`, `date_format`, `current_date`, `current_timestamp`, `hour`, `minute`, `second`, `date_add`, `date_sub`, `datediff`, `last_day`, `trunc`, `add_months`, `months_between`, `next_day`
 
@@ -38,11 +38,13 @@ The following are implemented in robin-sparkless (Rust `functions.rs`, `column.r
 
 **Null checks:** `isnull`, `isnotnull` (and Column `is_null`, `is_not_null`)
 
-**Array:** `array`, `array_size`, `size`, `array_contains`, `array_join`, `array_max`, `array_min`, `element_at`, `array_sort`, `array_distinct`, `array_slice`, `explode`, `array_position`, `array_compact`, `array_remove`, `array_repeat`, `array_flatten`, `array_exists`, `array_forall`, `array_filter`, `array_transform`, `array_sum`, `array_mean`, `posexplode`
+**Array:** `array`, `array_size`, `size`, `array_contains`, `array_join`, `array_max`, `array_min`, `element_at`, `array_sort`, `array_distinct`, `array_slice`, `explode`, `explode_outer`, `array_position`, `array_compact`, `array_remove`, `array_repeat`, `array_flatten`, `array_exists`, `array_forall`, `array_filter`, `array_transform`, `array_sum`, `array_mean`, `posexplode`, `posexplode_outer`, `arrays_overlap`, `arrays_zip`, `array_agg`
 
-**Map:** `create_map`, `map_keys`, `map_values`, `map_entries`, `map_from_arrays`, `map_concat`, `map_contains_key`, `map_filter`, `map_from_entries`, `map_zip_with`, `get` (Phase 18)
+**Map:** `create_map`, `map_keys`, `map_values`, `map_entries`, `map_from_arrays`, `map_concat`, `map_contains_key`, `map_filter`, `map_from_entries`, `map_zip_with`, `get` (Phase 18), `str_to_map` (Phase 21)
 
-**Struct:** `struct`, `named_struct` (Phase 18)
+**Struct:** `struct`, `named_struct` (Phase 18), `transform_keys`, `transform_values` (Phase 21)
+
+**Binary (Phase 21):** `hex`, `unhex`, `bin`, `getbit`
 
 **Array (Phase 18):** `array_append`, `array_prepend`, `array_insert`, `array_except`, `array_intersect`, `array_union`, `zip_with`
 
@@ -69,32 +71,32 @@ Functions and aliases that exist in Sparkless 3.28.0 but are **not** implemented
 - `try_aes_decrypt`
 - `to_binary`, `try_to_binary`
 - `decode`, `encode`
-- `hex`, `unhex`
-- `bin`
-- `getbit`
+- ~~`hex`, `unhex`~~ — **implemented (Phase 21)**
+- ~~`bin`~~ — **implemented (Phase 21)**
+- ~~`getbit`~~ — **implemented (Phase 21)**
 - ~~`bit_length`~~ — **implemented (Phase 19)**; `octet_length`, `char_length`, `character_length`
 
 ### 2.3 Array (additional)
-- `aggregate` (array aggregate)
-- `array_agg`
+- `aggregate` (array aggregate) — deferred
+- ~~`array_agg`~~ — **implemented (Phase 21)**
 - ~~`array_append`, `array_prepend`, `array_insert`~~ — **implemented (Phase 18)**
 - ~~`array_except`, `array_intersect`, `array_union`~~ — **implemented (Phase 18)**
-- `arrays_overlap`, `arrays_zip`
+- ~~`arrays_overlap`, `arrays_zip`~~ — **implemented (Phase 21)**
 - `cardinality` (array size alias in some contexts)
 - `exists` (array), `filter` (array), `forall` (array) — we have array_exists, array_filter, array_forall
 - `slice` — we have `array_slice`
 - `sort_array` — we have `array_sort`
 - `flatten` — we have `array_flatten`
-- `explode_outer`, `posexplode_outer`
+- ~~`explode_outer`, `posexplode_outer`~~ — **implemented (Phase 21)**
 - ~~`zip_with`~~ — **implemented (Phase 18)**
 
 ### 2.4 Map (additional)
 - ~~`map_concat`, `map_contains_key`, `map_filter`, `map_from_entries`, `map_zip_with`, `get`~~ — **implemented (Phase 18)**
-- `str_to_map`
+- ~~`str_to_map`~~ — **implemented (Phase 21)**
 
 ### 2.5 Struct / type
 - ~~`named_struct`, `struct`~~ — **implemented (Phase 18)**
-- `transform_keys`, `transform_values`
+- ~~`transform_keys`, `transform_values`~~ — **implemented (Phase 21)**
 - `transform` — we have `array_transform`
 
 ### 2.6 Ordering / sort helpers (Phase 20)
@@ -127,12 +129,12 @@ Functions and aliases that exist in Sparkless 3.28.0 but are **not** implemented
 - ~~`width_bucket`~~ — **implemented (Phase 19)**
 
 ### 2.12 String (additional)
-- `btrim`
-- `conv`
+- ~~`btrim`~~ — **implemented (Phase 21)**
+- ~~`conv`~~ — **implemented (Phase 21)**
 - ~~`format_string`, `printf`~~ — **implemented (Phase 16)**
 - ~~`find_in_set`~~ — **implemented (Phase 16)**
 - ~~`split_part`~~ — **implemented (Phase 16)**
-- `locate` (we have `instr` / `position`; semantics may differ slightly)
+- ~~`locate`~~ — **implemented (Phase 21)**
 
 ### 2.13 Regex (additional)
 - `regexp` — we have `rlike`
@@ -191,10 +193,10 @@ Functions and aliases that exist in Sparkless 3.28.0 but are **not** implemented
 ### 2.20 Try-* arithmetic (Phase 20)
 - ~~`try_add`, `try_divide`, `try_subtract`, `try_multiply`, `try_element_at`~~ — **implemented (Phase 19)**
 - ~~`try_sum`, `try_avg`~~ — **implemented (Phase 20)**
-- `try_to_number`, `try_to_timestamp`
+- ~~`try_to_number`, `try_to_timestamp`~~ — **implemented (Phase 21)**
 
 ### 2.21 Type / cast
-- `to_char`, `to_number`, `to_varchar`
+- ~~`to_char`, `to_number`, `to_varchar`~~ — **implemented (Phase 21)**
 - ~~`typeof`~~ — **implemented (Phase 19)**
 
 ### 2.22 URL / string

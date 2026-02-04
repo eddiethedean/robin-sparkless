@@ -1,0 +1,33 @@
+{
+  "name": "arrays_overlap",
+  "pyspark_version": "3.5.0",
+  "input": {
+    "schema": [
+      { "name": "id", "type": "bigint" },
+      { "name": "sa", "type": "string" },
+      { "name": "sb", "type": "string" }
+    ],
+    "rows": [
+      [1, "1|2|3", "3|4|5"],
+      [2, "1|2", "5|6"],
+      [3, "10|20", "20|30"]
+    ]
+  },
+  "operations": [
+    { "op": "withColumn", "column": "a", "expr": "split(col('sa'), '|')" },
+    { "op": "withColumn", "column": "b", "expr": "split(col('sb'), '|')" },
+    { "op": "withColumn", "column": "overlap", "expr": "arrays_overlap(col('a'), col('b'))" },
+    { "op": "select", "columns": ["id", "overlap"] }
+  ],
+  "expected": {
+    "schema": [
+      { "name": "id", "type": "bigint" },
+      { "name": "overlap", "type": "boolean" }
+    ],
+    "rows": [
+      [1, true],
+      [2, false],
+      [3, true]
+    ]
+  }
+}

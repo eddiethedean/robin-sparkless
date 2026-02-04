@@ -411,6 +411,84 @@ impl Column {
         )
     }
 
+    /// Trim leading and trailing characters (PySpark btrim). trim_str defaults to whitespace.
+    pub fn btrim(&self, trim_str: Option<&str>) -> Column {
+        use polars::prelude::*;
+        let chars = trim_str.unwrap_or(" \t\n\r");
+        Self::from_expr(self.expr().clone().str().strip_chars(lit(chars)), None)
+    }
+
+    /// Find substring position 1-based, starting at pos (PySpark locate). 0 if not found.
+    pub fn locate(&self, substr: &str, pos: i64) -> Column {
+        use polars::prelude::*;
+        if substr.is_empty() {
+            return Self::from_expr(lit(1i64), None);
+        }
+        let start = (pos - 1).max(0);
+        let slice_expr = self.expr().clone().str().slice(lit(start), lit(i64::MAX));
+        let found = slice_expr.str().find_literal(lit(substr.to_string()));
+        Self::from_expr(
+            (found.cast(DataType::Int64) + lit(start + 1)).fill_null(lit(0i64)),
+            None,
+        )
+    }
+
+    /// Base conversion (PySpark conv). num_str from from_base to to_base.
+    pub fn conv(&self, from_base: i32, to_base: i32) -> Column {
+        let expr = self.expr().clone().map(
+            move |s| crate::udfs::apply_conv(s, from_base, to_base),
+            GetOutput::from_type(DataType::String),
+        );
+        Self::from_expr(expr, None)
+    }
+
+    /// Convert to hex string (PySpark hex). Int or string input.
+    pub fn hex(&self) -> Column {
+        let expr = self.expr().clone().map(
+            crate::udfs::apply_hex,
+            GetOutput::from_type(DataType::String),
+        );
+        Self::from_expr(expr, None)
+    }
+
+    /// Convert hex string to binary/string (PySpark unhex).
+    pub fn unhex(&self) -> Column {
+        let expr = self.expr().clone().map(
+            crate::udfs::apply_unhex,
+            GetOutput::from_type(DataType::String),
+        );
+        Self::from_expr(expr, None)
+    }
+
+    /// Convert integer to binary string (PySpark bin).
+    pub fn bin(&self) -> Column {
+        let expr = self.expr().clone().map(
+            crate::udfs::apply_bin,
+            GetOutput::from_type(DataType::String),
+        );
+        Self::from_expr(expr, None)
+    }
+
+    /// Get bit at 0-based position (PySpark getbit).
+    pub fn getbit(&self, pos: i64) -> Column {
+        let expr = self.expr().clone().map(
+            move |s| crate::udfs::apply_getbit(s, pos),
+            GetOutput::from_type(DataType::Int64),
+        );
+        Self::from_expr(expr, None)
+    }
+
+    /// Parse string to map (PySpark str_to_map). "k1:v1,k2:v2" -> map.
+    pub fn str_to_map(&self, pair_delim: &str, key_value_delim: &str) -> Column {
+        let pair_delim = pair_delim.to_string();
+        let key_value_delim = key_value_delim.to_string();
+        let expr = self.expr().clone().map(
+            move |s| crate::udfs::apply_str_to_map(s, &pair_delim, &key_value_delim),
+            GetOutput::same_type(),
+        );
+        Self::from_expr(expr, None)
+    }
+
     /// Extract first match of regex pattern (PySpark regexp_extract). Group 0 = full match.
     pub fn regexp_extract(&self, pattern: &str, group_index: usize) -> Column {
         use polars::prelude::*;
@@ -1657,6 +1735,43 @@ impl Column {
         Self::from_expr(self.expr().clone().explode(), None)
     }
 
+    /// Explode list; null/empty produces one row with null (PySpark explode_outer).
+    pub fn explode_outer(&self) -> Column {
+        Self::from_expr(self.expr().clone().explode(), None)
+    }
+
+    /// Posexplode with null preservation (PySpark posexplode_outer).
+    pub fn posexplode_outer(&self) -> (Column, Column) {
+        self.posexplode()
+    }
+
+    /// Zip two arrays element-wise into array of structs (PySpark arrays_zip).
+    pub fn arrays_zip(&self, other: &Column) -> Column {
+        let args = [other.expr().clone()];
+        let expr = self.expr().clone().map_many(
+            crate::udfs::apply_arrays_zip,
+            &args,
+            GetOutput::same_type(),
+        );
+        Self::from_expr(expr, None)
+    }
+
+    /// True if two arrays have any element in common (PySpark arrays_overlap).
+    pub fn arrays_overlap(&self, other: &Column) -> Column {
+        let args = [other.expr().clone()];
+        let expr = self.expr().clone().map_many(
+            crate::udfs::apply_arrays_overlap,
+            &args,
+            GetOutput::from_type(DataType::Boolean),
+        );
+        Self::from_expr(expr, None)
+    }
+
+    /// Collect to array (PySpark array_agg). Alias for implode in group context.
+    pub fn array_agg(&self) -> Column {
+        Self::from_expr(self.expr().clone().implode(), None)
+    }
+
     /// 1-based index of first occurrence of value in list, or 0 if not found (PySpark array_position).
     /// Uses Polars list.eval with col("") as element (requires polars list_eval feature).
     pub fn array_position(&self, value: Expr) -> Column {
@@ -1922,6 +2037,24 @@ impl Column {
             GetOutput::same_type(),
         );
         Self::from_expr(expr, None)
+    }
+
+    /// Transform each map key by expr (PySpark transform_keys). key_expr should use col("").struct_().field_by_name("key").
+    pub fn transform_keys(&self, key_expr: Expr) -> Column {
+        use polars::prelude::as_struct;
+        let value = col("").struct_().field_by_name("value");
+        let new_struct = as_struct(vec![key_expr.alias("key"), value.alias("value")]);
+        let list_expr = self.expr().clone().list().eval(new_struct, false);
+        Self::from_expr(list_expr, None)
+    }
+
+    /// Transform each map value by expr (PySpark transform_values). value_expr should use col("").struct_().field_by_name("value").
+    pub fn transform_values(&self, value_expr: Expr) -> Column {
+        use polars::prelude::as_struct;
+        let key = col("").struct_().field_by_name("key");
+        let new_struct = as_struct(vec![key.alias("key"), value_expr.alias("value")]);
+        let list_expr = self.expr().clone().list().eval(new_struct, false);
+        Self::from_expr(list_expr, None)
     }
 
     /// Merge two maps by key with merge function (PySpark map_zip_with).

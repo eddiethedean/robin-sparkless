@@ -379,6 +379,135 @@ pub fn apply_array_except(columns: &mut [Column]) -> PolarsResult<Option<Column>
     Ok(Some(Column::new(name, builder.finish().into_series())))
 }
 
+/// True if two arrays have any element in common (PySpark arrays_overlap).
+pub fn apply_arrays_overlap(columns: &mut [Column]) -> PolarsResult<Option<Column>> {
+    if columns.len() < 2 {
+        return Err(PolarsError::ComputeError(
+            "arrays_overlap needs two columns (array1, array2)".into(),
+        ));
+    }
+    let name = columns[0].field().into_owned().name;
+    let a_series = std::mem::take(&mut columns[0]).take_materialized_series();
+    let b_series = std::mem::take(&mut columns[1]).take_materialized_series();
+    let a_ca = a_series
+        .list()
+        .map_err(|e| PolarsError::ComputeError(format!("arrays_overlap: {}", e).into()))?;
+    let b_ca = b_series
+        .list()
+        .map_err(|e| PolarsError::ComputeError(format!("arrays_overlap: {}", e).into()))?;
+    let mut results: Vec<bool> = Vec::with_capacity(a_ca.len());
+    for (opt_a, opt_b) in a_ca.amortized_iter().zip(b_ca.amortized_iter()) {
+        let overlap = match (opt_a, opt_b) {
+            (Some(a_amort), Some(b_amort)) => {
+                let a_list = a_amort.as_ref().as_list();
+                let b_list = b_amort.as_ref().as_list();
+                let a_keys: std::collections::HashSet<String> = a_list
+                    .amortized_iter()
+                    .flatten()
+                    .map(|e| series_to_set_key(&e.deep_clone()))
+                    .collect();
+                let b_keys: std::collections::HashSet<String> = b_list
+                    .amortized_iter()
+                    .flatten()
+                    .map(|e| series_to_set_key(&e.deep_clone()))
+                    .collect();
+                !a_keys.is_disjoint(&b_keys)
+            }
+            _ => false,
+        };
+        results.push(overlap);
+    }
+    let out =
+        BooleanChunked::from_iter_options(name.as_str().into(), results.into_iter().map(Some));
+    Ok(Some(Column::new(name, out.into_series())))
+}
+
+/// Zip two arrays into array of structs (PySpark arrays_zip).
+pub fn apply_arrays_zip(columns: &mut [Column]) -> PolarsResult<Option<Column>> {
+    if columns.len() < 2 {
+        return Err(PolarsError::ComputeError(
+            "arrays_zip needs at least two columns".into(),
+        ));
+    }
+    let name = columns[0].field().into_owned().name;
+    let n = columns.len();
+    let mut series_vec: Vec<Series> = Vec::with_capacity(n);
+    for col in columns.iter_mut() {
+        series_vec.push(std::mem::take(col).take_materialized_series());
+    }
+    let list_cas: Vec<_> = series_vec
+        .iter()
+        .map(|s| {
+            s.list()
+                .map_err(|e| PolarsError::ComputeError(format!("arrays_zip: {}", e).into()))
+        })
+        .collect::<PolarsResult<Vec<_>>>()?;
+    let len = list_cas[0].len();
+    let inner_dtype = list_cas[0].inner_dtype().clone();
+    use polars::chunked_array::builder::get_list_builder;
+    use polars::chunked_array::StructChunked;
+    use polars::datatypes::Field;
+    let struct_fields: Vec<Field> = (0..n)
+        .map(|i| Field::new(format!("field_{}", i).into(), inner_dtype.clone()))
+        .collect();
+    let out_struct = DataType::Struct(struct_fields);
+    let mut builder = get_list_builder(&out_struct, 64, len, name.as_str().into());
+    for row_idx in 0..len {
+        let mut max_len = 0usize;
+        let mut row_lists: Vec<Vec<Series>> = Vec::with_capacity(n);
+        for ca in &list_cas {
+            let opt_amort = ca.amortized_iter().nth(row_idx).flatten();
+            if let Some(amort) = opt_amort {
+                let list_s = amort.as_ref().as_list();
+                let elems: Vec<Series> = list_s
+                    .amortized_iter()
+                    .flatten()
+                    .map(|e| e.deep_clone())
+                    .collect();
+                max_len = max_len.max(elems.len());
+                row_lists.push(elems);
+            } else {
+                row_lists.push(vec![]);
+            }
+        }
+        if max_len == 0 {
+            builder.append_null();
+        } else {
+            let mut struct_parts: Vec<Vec<Series>> =
+                (0..n).map(|_| Vec::with_capacity(max_len)).collect();
+            for i in 0..max_len {
+                for (j, lst) in row_lists.iter().enumerate() {
+                    let elem = lst
+                        .get(i)
+                        .cloned()
+                        .unwrap_or_else(|| Series::new_empty(PlSmallStr::EMPTY, &inner_dtype));
+                    struct_parts[j].push(elem);
+                }
+            }
+            let field_series: Vec<Series> = struct_parts
+                .into_iter()
+                .enumerate()
+                .map(|(j, mut parts)| {
+                    let mut r = parts.remove(0);
+                    for s in parts {
+                        let _ = r.extend(&s);
+                    }
+                    r.with_name(format!("field_{}", j).as_str().into())
+                })
+                .collect();
+            let field_refs: Vec<&Series> = field_series.iter().collect();
+            let st =
+                StructChunked::from_series(PlSmallStr::EMPTY, max_len, field_refs.iter().copied())
+                    .map_err(|e| {
+                        PolarsError::ComputeError(format!("arrays_zip struct: {}", e).into())
+                    })?
+                    .into_series();
+            builder.append_series(&st)?;
+        }
+    }
+    Ok(Some(Column::new(name, builder.finish().into_series())))
+}
+
 /// Elements in both arrays (PySpark array_intersect). Distinct.
 pub fn apply_array_intersect(columns: &mut [Column]) -> PolarsResult<Option<Column>> {
     if columns.len() < 2 {
@@ -500,6 +629,64 @@ pub fn apply_array_union(columns: &mut [Column]) -> PolarsResult<Option<Column>>
 }
 
 // --- Phase 18: map_concat, map_from_entries, map_contains_key, get ---
+
+/// Parse string to map: "k1:v1,k2:v2" -> List(Struct{key, value}) (PySpark str_to_map).
+pub fn apply_str_to_map(
+    column: Column,
+    pair_delim: &str,
+    key_value_delim: &str,
+) -> PolarsResult<Option<Column>> {
+    use polars::chunked_array::builder::get_list_builder;
+    use polars::chunked_array::StructChunked;
+    use polars::datatypes::Field;
+    let name = column.field().into_owned().name;
+    let series = column.take_materialized_series();
+    let ca = series
+        .str()
+        .map_err(|e| PolarsError::ComputeError(format!("str_to_map: {}", e).into()))?;
+    let out_struct = DataType::Struct(vec![
+        Field::new("key".into(), DataType::String),
+        Field::new("value".into(), DataType::String),
+    ]);
+    let mut builder = get_list_builder(&out_struct, 64, ca.len(), name.as_str().into());
+    for opt_s in ca.into_iter() {
+        if let Some(s) = opt_s {
+            let pairs: Vec<(String, String)> = s
+                .split(pair_delim)
+                .filter_map(|part| {
+                    let kv: Vec<&str> = part.splitn(2, key_value_delim).collect();
+                    if kv.len() >= 2 {
+                        Some((kv[0].to_string(), kv[1].to_string()))
+                    } else if kv.len() == 1 && !kv[0].is_empty() {
+                        Some((kv[0].to_string(), String::new()))
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            if pairs.is_empty() {
+                builder.append_null();
+            } else {
+                let keys: Vec<String> = pairs.iter().map(|(k, _)| k.clone()).collect();
+                let vals: Vec<String> = pairs.iter().map(|(_, v)| v.clone()).collect();
+                let k_series = Series::new("key".into(), keys);
+                let v_series = Series::new("value".into(), vals);
+                let fields: [&Series; 2] = [&k_series, &v_series];
+                let st = StructChunked::from_series(
+                    PlSmallStr::EMPTY,
+                    pairs.len(),
+                    fields.iter().copied(),
+                )
+                .map_err(|e| PolarsError::ComputeError(format!("str_to_map struct: {}", e).into()))?
+                .into_series();
+                builder.append_series(&st)?;
+            }
+        } else {
+            builder.append_null();
+        }
+    }
+    Ok(Some(Column::new(name, builder.finish().into_series())))
+}
 
 /// Merge two map columns (PySpark map_concat). Last value wins for duplicate keys.
 pub fn apply_map_concat(columns: &mut [Column]) -> PolarsResult<Option<Column>> {
@@ -1221,6 +1408,202 @@ fn bround_one(x: f64, scale: i32) -> f64 {
             scaled.round()
         };
     rounded / factor
+}
+
+/// Convert number string from one base to another (PySpark conv).
+fn conv_one(s: &str, from_base: i32, to_base: i32) -> Option<String> {
+    if !(2..=36).contains(&from_base) || !(2..=36).contains(&to_base) {
+        return None;
+    }
+    let s_trim = s.trim();
+    if s_trim.is_empty() {
+        return None;
+    }
+    let n = i64::from_str_radix(s_trim, from_base as u32).ok()?;
+    let to_b = to_base as u32;
+    const DIGITS: &[u8] = b"0123456789abcdefghijklmnopqrstuvwxyz";
+    if n == 0 {
+        return Some("0".to_string());
+    }
+    let mut result = String::new();
+    let mut val = if n < 0 {
+        result.push('-');
+        n.unsigned_abs()
+    } else {
+        n as u64
+    };
+    let mut buf = String::new();
+    while val > 0 {
+        buf.push(DIGITS[(val % to_b as u64) as usize] as char);
+        val /= to_b as u64;
+    }
+    result.push_str(&buf.chars().rev().collect::<String>());
+    Some(result)
+}
+
+/// Apply conv (base conversion). String: parse from from_base, format in to_base. Int: format value in to_base.
+pub fn apply_conv(column: Column, from_base: i32, to_base: i32) -> PolarsResult<Option<Column>> {
+    use std::borrow::Cow;
+    let name = column.field().into_owned().name;
+    let series = column.take_materialized_series();
+    let out = if series.dtype() == &DataType::String {
+        let ca = series
+            .str()
+            .map_err(|e| PolarsError::ComputeError(format!("conv: {}", e).into()))?;
+        ca.apply(|opt_s| opt_s.and_then(|s| conv_one(s, from_base, to_base).map(Cow::Owned)))
+            .into_series()
+    } else if series.dtype() == &DataType::Int64 {
+        let ca = series
+            .i64()
+            .map_err(|e| PolarsError::ComputeError(format!("conv: {}", e).into()))?;
+        let to_b = to_base as u32;
+        const DIGITS: &[u8] = b"0123456789abcdefghijklmnopqrstuvwxyz";
+        let format_int = |n: i64| -> Option<String> {
+            if !(2..=36).contains(&to_b) {
+                return None;
+            }
+            if n == 0 {
+                return Some("0".to_string());
+            }
+            let mut result = String::new();
+            let mut val = if n < 0 {
+                result.push('-');
+                n.unsigned_abs()
+            } else {
+                n as u64
+            };
+            let mut buf = String::new();
+            while val > 0 {
+                buf.push(DIGITS[(val % to_b as u64) as usize] as char);
+                val /= to_b as u64;
+            }
+            result.push_str(&buf.chars().rev().collect::<String>());
+            Some(result)
+        };
+        let out_ca = StringChunked::from_iter_options(
+            name.as_str().into(),
+            ca.into_iter().map(|opt| opt.and_then(&format_int)),
+        );
+        out_ca.into_series()
+    } else {
+        let s_str = series.cast(&DataType::String)?;
+        let ca = s_str
+            .str()
+            .map_err(|e| PolarsError::ComputeError(e.to_string().into()))?;
+        ca.apply(|opt_s| opt_s.and_then(|s| conv_one(s, from_base, to_base).map(Cow::Owned)))
+            .into_series()
+    };
+    Ok(Some(Column::new(name, out)))
+}
+
+/// Apply hex: integer or string to hex string (PySpark hex).
+pub fn apply_hex(column: Column) -> PolarsResult<Option<Column>> {
+    let name = column.field().into_owned().name;
+    let series = column.take_materialized_series();
+    let out = if series.dtype() == &DataType::Int64 || series.dtype() == &DataType::Int32 {
+        let s = series.cast(&DataType::Int64)?;
+        let ca = s
+            .i64()
+            .map_err(|e| PolarsError::ComputeError(e.to_string().into()))?;
+        let out_ca = StringChunked::from_iter_options(
+            name.as_str().into(),
+            ca.into_iter().map(|opt| opt.map(|n| format!("{:x}", n))),
+        );
+        out_ca.into_series()
+    } else if series.dtype() == &DataType::String {
+        let ca = series
+            .str()
+            .map_err(|e| PolarsError::ComputeError(e.to_string().into()))?;
+        let out_ca = StringChunked::from_iter_options(
+            name.as_str().into(),
+            ca.into_iter().map(|opt| {
+                opt.map(|s| {
+                    s.as_bytes()
+                        .iter()
+                        .map(|b| format!("{:02x}", b))
+                        .collect::<String>()
+                })
+            }),
+        );
+        out_ca.into_series()
+    } else {
+        let s = series.cast(&DataType::Int64)?;
+        let ca = s
+            .i64()
+            .map_err(|e| PolarsError::ComputeError(e.to_string().into()))?;
+        let out_ca = StringChunked::from_iter_options(
+            name.as_str().into(),
+            ca.into_iter().map(|opt| opt.map(|n| format!("{:x}", n))),
+        );
+        out_ca.into_series()
+    };
+    Ok(Some(Column::new(name, out)))
+}
+
+/// Apply unhex: hex string to binary/string (PySpark unhex).
+pub fn apply_unhex(column: Column) -> PolarsResult<Option<Column>> {
+    use std::borrow::Cow;
+    let name = column.field().into_owned().name;
+    let series = column.take_materialized_series();
+    let ca = series
+        .str()
+        .map_err(|e| PolarsError::ComputeError(format!("unhex: {}", e).into()))?;
+    let unhex_one = |s: &str| -> Option<Vec<u8>> {
+        let s = s.trim();
+        let chars: Vec<char> = if s.len() % 2 == 1 {
+            s.chars().skip(1).collect()
+        } else {
+            s.chars().collect()
+        };
+        let mut bytes = Vec::with_capacity(chars.len() / 2);
+        for chunk in chars.chunks(2) {
+            let hex_pair: String = chunk.iter().collect();
+            let byte = u8::from_str_radix(&hex_pair, 16).ok()?;
+            bytes.push(byte);
+        }
+        Some(bytes)
+    };
+    let out = ca
+        .apply(|opt_s| {
+            opt_s.and_then(|s| {
+                unhex_one(s)
+                    .and_then(|b| String::from_utf8(b).ok())
+                    .map(Cow::Owned)
+            })
+        })
+        .into_series();
+    Ok(Some(Column::new(name, out)))
+}
+
+/// Apply bin: integer to binary string (PySpark bin).
+pub fn apply_bin(column: Column) -> PolarsResult<Option<Column>> {
+    let name = column.field().into_owned().name;
+    let series = column.take_materialized_series();
+    let s = series.cast(&DataType::Int64)?;
+    let ca = s
+        .i64()
+        .map_err(|e| PolarsError::ComputeError(e.to_string().into()))?;
+    let out_ca = StringChunked::from_iter_options(
+        name.as_str().into(),
+        ca.into_iter().map(|opt| opt.map(|n| format!("{:b}", n))),
+    );
+    Ok(Some(Column::new(name, out_ca.into_series())))
+}
+
+/// Apply getbit: get bit at 0-based position (PySpark getbit).
+pub fn apply_getbit(column: Column, pos: i64) -> PolarsResult<Option<Column>> {
+    let name = column.field().into_owned().name;
+    let series = column.take_materialized_series();
+    let s = series.cast(&DataType::Int64)?;
+    let ca = s
+        .i64()
+        .map_err(|e| PolarsError::ComputeError(e.to_string().into()))?;
+    let pos = pos.max(0);
+    let out_ca = Int64Chunked::from_iter_options(
+        name.as_str().into(),
+        ca.into_iter().map(|opt| opt.map(|n| (n >> pos) & 1)),
+    );
+    Ok(Some(Column::new(name, out_ca.into_series())))
 }
 
 /// Apply bround (banker's rounding) to a float column.

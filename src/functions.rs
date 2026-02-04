@@ -307,6 +307,87 @@ pub fn rtrim(column: &Column) -> Column {
     column.clone().rtrim()
 }
 
+/// Trim leading and trailing chars (PySpark btrim). trim_str defaults to whitespace.
+pub fn btrim(column: &Column, trim_str: Option<&str>) -> Column {
+    column.clone().btrim(trim_str)
+}
+
+/// Find substring position 1-based, starting at pos (PySpark locate). 0 if not found.
+pub fn locate(substr: &str, column: &Column, pos: i64) -> Column {
+    column.clone().locate(substr, pos)
+}
+
+/// Base conversion (PySpark conv). num from from_base to to_base.
+pub fn conv(column: &Column, from_base: i32, to_base: i32) -> Column {
+    column.clone().conv(from_base, to_base)
+}
+
+/// Convert to hex string (PySpark hex).
+pub fn hex(column: &Column) -> Column {
+    column.clone().hex()
+}
+
+/// Convert hex string to binary/string (PySpark unhex).
+pub fn unhex(column: &Column) -> Column {
+    column.clone().unhex()
+}
+
+/// Convert integer to binary string (PySpark bin).
+pub fn bin(column: &Column) -> Column {
+    column.clone().bin()
+}
+
+/// Get bit at 0-based position (PySpark getbit).
+pub fn getbit(column: &Column, pos: i64) -> Column {
+    column.clone().getbit(pos)
+}
+
+/// True if two arrays have any element in common (PySpark arrays_overlap).
+pub fn arrays_overlap(left: &Column, right: &Column) -> Column {
+    left.clone().arrays_overlap(right)
+}
+
+/// Zip arrays into array of structs (PySpark arrays_zip).
+pub fn arrays_zip(left: &Column, right: &Column) -> Column {
+    left.clone().arrays_zip(right)
+}
+
+/// Explode; null/empty yields one row with null (PySpark explode_outer).
+pub fn explode_outer(column: &Column) -> Column {
+    column.clone().explode_outer()
+}
+
+/// Posexplode with null preservation (PySpark posexplode_outer).
+pub fn posexplode_outer(column: &Column) -> (Column, Column) {
+    column.clone().posexplode_outer()
+}
+
+/// Collect to array (PySpark array_agg).
+pub fn array_agg(column: &Column) -> Column {
+    column.clone().array_agg()
+}
+
+/// Transform map keys by expr (PySpark transform_keys).
+pub fn transform_keys(column: &Column, key_expr: Expr) -> Column {
+    column.clone().transform_keys(key_expr)
+}
+
+/// Transform map values by expr (PySpark transform_values).
+pub fn transform_values(column: &Column, value_expr: Expr) -> Column {
+    column.clone().transform_values(value_expr)
+}
+
+/// Parse string to map (PySpark str_to_map). Default delims: "," and ":".
+pub fn str_to_map(
+    column: &Column,
+    pair_delim: Option<&str>,
+    key_value_delim: Option<&str>,
+) -> Column {
+    let pd = pair_delim.unwrap_or(",");
+    let kvd = key_value_delim.unwrap_or(":");
+    column.clone().str_to_map(pd, kvd)
+}
+
 /// Extract first match of regex (PySpark regexp_extract). group_index 0 = full match.
 pub fn regexp_extract(column: &Column, pattern: &str, group_index: usize) -> Column {
     column.clone().regexp_extract(pattern, group_index)
@@ -699,6 +780,31 @@ pub fn cast(column: &Column, type_name: &str) -> Result<Column, String> {
 pub fn try_cast(column: &Column, type_name: &str) -> Result<Column, String> {
     let dtype = parse_type_name(type_name)?;
     Ok(Column::from_expr(column.expr().clone().cast(dtype), None))
+}
+
+/// Cast to string (PySpark to_char, to_varchar).
+pub fn to_char(column: &Column) -> Column {
+    cast(column, "string").unwrap()
+}
+
+/// Alias for to_char (PySpark to_varchar).
+pub fn to_varchar(column: &Column) -> Column {
+    to_char(column)
+}
+
+/// Cast to numeric (PySpark to_number). Uses Double.
+pub fn to_number(column: &Column) -> Column {
+    cast(column, "double").unwrap()
+}
+
+/// Cast to numeric, null on invalid (PySpark try_to_number).
+pub fn try_to_number(column: &Column) -> Column {
+    try_cast(column, "double").unwrap()
+}
+
+/// Cast to timestamp, null on invalid (PySpark try_to_timestamp).
+pub fn try_to_timestamp(column: &Column) -> Column {
+    try_cast(column, "timestamp").unwrap()
 }
 
 /// Division that returns null on divide-by-zero (PySpark try_divide).

@@ -1,0 +1,33 @@
+{
+  "name": "with_str_to_map",
+  "pyspark_version": "3.5.0",
+  "input": {
+    "schema": [
+      { "name": "id", "type": "bigint" },
+      { "name": "s", "type": "string" }
+    ],
+    "rows": [
+      [1, "a:1,b:2,c:3"],
+      [2, "x:10,y:20"],
+      [3, ""]
+    ]
+  },
+  "operations": [
+    { "op": "withColumn", "column": "m", "expr": "str_to_map(col('s'))" },
+    { "op": "withColumn", "column": "va", "expr": "get(col('m'), lit('a'))" },
+    { "op": "withColumn", "column": "vx", "expr": "get(col('m'), lit('x'))" },
+    { "op": "select", "columns": ["id", "va", "vx"] }
+  ],
+  "expected": {
+    "schema": [
+      { "name": "id", "type": "bigint" },
+      { "name": "va", "type": "string" },
+      { "name": "vx", "type": "string" }
+    ],
+    "rows": [
+      [1, "1", null],
+      [2, null, "10"],
+      [3, null, null]
+    ]
+  }
+}

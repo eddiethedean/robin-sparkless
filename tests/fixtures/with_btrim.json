@@ -1,0 +1,33 @@
+{
+  "name": "with_btrim",
+  "pyspark_version": "3.5.0",
+  "input": {
+    "schema": [
+      { "name": "id", "type": "bigint" },
+      { "name": "s", "type": "string" }
+    ],
+    "rows": [
+      [1, "  hello  "],
+      [2, "xxhelloxx"],
+      [3, "  world  "]
+    ]
+  },
+  "operations": [
+    { "op": "withColumn", "column": "t1", "expr": "btrim(col('s'))" },
+    { "op": "withColumn", "column": "t2", "expr": "btrim(col('s'), 'x')" },
+    { "op": "orderBy", "columns": ["id"], "ascending": [true] }
+  ],
+  "expected": {
+    "schema": [
+      { "name": "id", "type": "bigint" },
+      { "name": "s", "type": "string" },
+      { "name": "t1", "type": "string" },
+      { "name": "t2", "type": "string" }
+    ],
+    "rows": [
+      [1, "  hello  ", "hello", "  hello  "],
+      [2, "xxhelloxx", "xxhelloxx", "hello"],
+      [3, "  world  ", "world", "  world  "]
+    ]
+  }
+}

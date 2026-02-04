@@ -376,18 +376,18 @@ To reach **full Sparkless parity** (robin-sparkless as a complete backend replac
 
 ---
 
-### Phase 21 – Full parity 2: string, binary, type, array/map/struct (2 weeks)
+### Phase 21 – Full parity 2: string, binary, type, array/map/struct (2 weeks) — COMPLETED
 
 **Goal**: String/binary/type and collection extensions.
 
-- **String**: `btrim`; `locate` (alias for instr); `conv` (base conversion).
-- **Binary**: `hex`, `unhex`; `bin`; `getbit`; `decode`, `encode`; `to_binary`, `try_to_binary` (defer AES if heavy).
-- **Type/cast**: `to_char`, `to_number`, `to_varchar`; `try_to_number`, `try_to_timestamp`.
-- **Array**: `aggregate` (array aggregate); `array_agg`; `arrays_overlap`, `arrays_zip`; `explode_outer`, `posexplode_outer`.
-- **Map**: `str_to_map`.
-- **Struct**: `transform_keys`, `transform_values`.
+- **String**: `btrim`; `locate`; `conv` (base conversion). ✅
+- **Binary**: `hex`, `unhex`; `bin`; `getbit`. Defer: `decode`, `encode`; `to_binary`, `try_to_binary`. ✅
+- **Type/cast**: `to_char`, `to_number`, `to_varchar`; `try_to_number`, `try_to_timestamp`. ✅
+- **Array**: `array_agg`; `arrays_overlap`, `arrays_zip`; `explode_outer`, `posexplode_outer`. Defer: `aggregate`. ✅
+- **Map**: `str_to_map`. ✅
+- **Struct**: `transform_keys`, `transform_values`. ✅
 
-**Parity**: Fixtures for new functions. **Outcome**: ~20 new functions; ready for Phase 22.
+**Parity**: Fixtures `with_btrim`, `with_hex`, `with_conv`, `with_str_to_map`, `arrays_overlap`, `arrays_zip`. **Outcome**: ~20 new functions; ready for Phase 22.
 
 ---
 

@@ -2000,22 +2000,25 @@ fn parse_with_column_expr(src: &str) -> Result<Expr, String> {
     use robin_sparkless::{
         acos, add_months, array_append, array_compact, array_contains, array_distinct,
         array_except, array_insert, array_intersect, array_prepend, array_size, array_sum,
-        array_union, ascii, asin, atan, atan2, base64, bit_length, bround, cast, cbrt, ceiling,
-        char as rs_char, chr, coalesce, col, concat, concat_ws, contains, cos, cosh, cot,
-        create_map, csc, current_date, current_timestamp, date_add, date_from_unix_date, date_sub,
-        datediff, day, dayofmonth, dayofweek, dayofyear, degrees, e, element_at, elt, endswith,
-        exp, factorial, find_in_set, format_number, format_string, from_unixtime, get, greatest,
-        hour, hypot, ilike, initcap, instr, isnan, isnotnull, isnull, last_day, lcase, least, left,
-        length, like, lit_str, ln, log, log10, lower, lpad, make_date, map_concat,
-        map_contains_key, map_filter, map_from_entries, map_zip_with, md5, minute, months_between,
-        named_struct, nanvl, negate, next_day, nullif, nvl, nvl2, overlay, pi, pmod, position,
-        positive, pow, power, quarter, radians, regexp_count, regexp_extract, regexp_extract_all,
-        regexp_instr, regexp_like, regexp_replace, regexp_substr, repeat, replace, reverse, right,
-        rlike, rpad, sec, second, sha1, sha2, signum, sin, sinh, size, split, split_part, sqrt,
-        startswith, struct_, substr, substring, tan, tanh, timestamp_micros, timestamp_millis,
-        timestamp_seconds, to_degrees, to_radians, to_unix_timestamp, trim, trunc, try_add,
-        try_cast, try_divide, try_multiply, try_subtract, typeof_, ucase, unbase64, unix_date,
-        unix_timestamp, unix_timestamp_now, upper, weekofyear, when, width_bucket, zip_with,
+        array_union, arrays_overlap, arrays_zip, ascii, asin, atan, atan2, base64, bin, bit_length,
+        bround, btrim, cast, cbrt, ceiling, char as rs_char, chr, coalesce, col, concat, concat_ws,
+        contains, conv, cos, cosh, cot, create_map, csc, current_date, current_timestamp, date_add,
+        date_from_unix_date, date_sub, datediff, day, dayofmonth, dayofweek, dayofyear, degrees, e,
+        element_at, elt, endswith, exp, factorial, find_in_set, format_number,
+        format_string, from_unixtime, get, getbit, greatest, hex, hour, hypot, ilike, initcap,
+        instr, isnan, isnotnull, isnull, last_day, lcase, least, left, length, like, lit_str, ln,
+        locate, log, log10, lower, lpad, make_date, map_concat, map_contains_key, map_filter,
+        map_from_entries, map_zip_with, md5, minute, months_between, named_struct, nanvl, negate,
+        next_day, nullif, nvl, nvl2, overlay, pi, pmod, position, positive, pow, power, quarter,
+        radians, regexp_count, regexp_extract, regexp_extract_all, regexp_instr, regexp_like,
+        regexp_replace, regexp_substr, repeat, replace, reverse, right, rlike, rpad, sec, second,
+        sha1, sha2, signum, sin, sinh, size, split, split_part, sqrt, startswith, str_to_map,
+        struct_, substr, substring, tan, tanh, timestamp_micros, timestamp_millis,
+        timestamp_seconds, to_char, to_degrees, to_number, to_radians, to_unix_timestamp,
+        trim, trunc, try_add, try_cast, try_divide,
+        try_multiply, try_subtract, try_to_number, try_to_timestamp, typeof_, ucase, unbase64,
+        unhex, unix_date, unix_timestamp, unix_timestamp_now, upper, weekofyear, when,
+        width_bucket, zip_with,
     };
 
     let s = src.trim();
@@ -3119,6 +3122,120 @@ fn parse_with_column_expr(src: &str) -> Result<Expr, String> {
         let c = col(col_name);
         return Ok(repeat(&c, n).into_expr());
     }
+    if s.starts_with("btrim(") {
+        let inner = extract_first_arg(s, "btrim(")?;
+        let parts = parse_comma_separated_args(inner);
+        let col_name = extract_col_name(parts.first().ok_or("btrim needs column")?)?;
+        let trim_str = parts.get(1).map(|p| p.trim_matches(['\'', '"']).trim());
+        let c = col(col_name);
+        return Ok(btrim(&c, trim_str).into_expr());
+    }
+    if s.starts_with("conv(") {
+        let inner = extract_first_arg(s, "conv(")?;
+        let parts = parse_comma_separated_args(inner);
+        let col_name = extract_col_name(parts.first().ok_or("conv needs column")?)?;
+        let from_base: i32 = parts
+            .get(1)
+            .ok_or("conv needs from_base")?
+            .trim()
+            .parse()
+            .map_err(|e: std::num::ParseIntError| e.to_string())?;
+        let to_base: i32 = parts
+            .get(2)
+            .ok_or("conv needs to_base")?
+            .trim()
+            .parse()
+            .map_err(|e: std::num::ParseIntError| e.to_string())?;
+        let c = col(col_name);
+        return Ok(conv(&c, from_base, to_base).into_expr());
+    }
+    if s.starts_with("hex(") {
+        let inner = extract_first_arg(s, "hex(")?;
+        let col_name = extract_col_name(inner)?;
+        let c = col(col_name);
+        return Ok(hex(&c).into_expr());
+    }
+    if s.starts_with("unhex(") {
+        let inner = extract_first_arg(s, "unhex(")?;
+        let col_name = extract_col_name(inner)?;
+        let c = col(col_name);
+        return Ok(unhex(&c).into_expr());
+    }
+    if s.starts_with("bin(") {
+        let inner = extract_first_arg(s, "bin(")?;
+        let col_name = extract_col_name(inner)?;
+        let c = col(col_name);
+        return Ok(bin(&c).into_expr());
+    }
+    if s.starts_with("getbit(") {
+        let inner = extract_first_arg(s, "getbit(")?;
+        let parts = parse_comma_separated_args(inner);
+        let col_name = extract_col_name(parts.first().ok_or("getbit needs column")?)?;
+        let pos: i64 = parts
+            .get(1)
+            .ok_or("getbit needs pos")?
+            .trim()
+            .parse()
+            .map_err(|e: std::num::ParseIntError| e.to_string())?;
+        let c = col(col_name);
+        return Ok(getbit(&c, pos).into_expr());
+    }
+    if s.starts_with("to_char(") || s.starts_with("to_varchar(") {
+        let func = if s.starts_with("to_char(") {
+            "to_char("
+        } else {
+            "to_varchar("
+        };
+        let inner = extract_first_arg(s, func)?;
+        let col_name = extract_col_name(inner)?;
+        let c = col(col_name);
+        return Ok(to_char(&c).into_expr());
+    }
+    if s.starts_with("to_number(") {
+        let inner = extract_first_arg(s, "to_number(")?;
+        let col_name = extract_col_name(inner)?;
+        let c = col(col_name);
+        return Ok(to_number(&c).into_expr());
+    }
+    if s.starts_with("try_to_number(") {
+        let inner = extract_first_arg(s, "try_to_number(")?;
+        let col_name = extract_col_name(inner)?;
+        let c = col(col_name);
+        return Ok(try_to_number(&c).into_expr());
+    }
+    if s.starts_with("try_to_timestamp(") {
+        let inner = extract_first_arg(s, "try_to_timestamp(")?;
+        let col_name = extract_col_name(inner)?;
+        let c = col(col_name);
+        return Ok(try_to_timestamp(&c).into_expr());
+    }
+    if s.starts_with("str_to_map(") {
+        let inner = extract_first_arg(s, "str_to_map(")?;
+        let parts = parse_comma_separated_args(inner);
+        let col_name = extract_col_name(parts.first().ok_or("str_to_map needs column")?)?;
+        let pair_delim = parts.get(1).map(|p| p.trim_matches(['\'', '"']));
+        let key_value_delim = parts.get(2).map(|p| p.trim_matches(['\'', '"']));
+        let c = col(col_name);
+        return Ok(str_to_map(&c, pair_delim, key_value_delim).into_expr());
+    }
+    if s.starts_with("arrays_overlap(") {
+        let inner = extract_first_arg(s, "arrays_overlap(")?;
+        let parts = parse_comma_separated_args(inner);
+        let col_a = extract_col_name(parts.first().ok_or("arrays_overlap needs col1")?)?;
+        let col_b = extract_col_name(parts.get(1).ok_or("arrays_overlap needs col2")?)?;
+        let a = col(col_a);
+        let b = col(col_b);
+        return Ok(arrays_overlap(&a, &b).into_expr());
+    }
+    if s.starts_with("arrays_zip(") {
+        let inner = extract_first_arg(s, "arrays_zip(")?;
+        let parts = parse_comma_separated_args(inner);
+        let col_a = extract_col_name(parts.first().ok_or("arrays_zip needs col1")?)?;
+        let col_b = extract_col_name(parts.get(1).ok_or("arrays_zip needs col2")?)?;
+        let a = col(col_a);
+        let b = col(col_b);
+        return Ok(arrays_zip(&a, &b).into_expr());
+    }
     if s.starts_with("reverse(") {
         let inner = extract_first_arg(s, "reverse(")?;
         let col_name = extract_col_name(inner)?;
@@ -3137,7 +3254,6 @@ fn parse_with_column_expr(src: &str) -> Result<Expr, String> {
         return Ok(instr(&c, substr).into_expr());
     }
     if s.starts_with("locate(") {
-        // locate(substr, col) - note argument order
         let inner = extract_first_arg(s, "locate(")?;
         let parts = parse_comma_separated_args(inner);
         let substr = parts
@@ -3145,8 +3261,12 @@ fn parse_with_column_expr(src: &str) -> Result<Expr, String> {
             .ok_or("locate needs substr")?
             .trim_matches(['\'', '"']);
         let col_name = extract_col_name(parts.get(1).ok_or("locate needs column")?)?;
+        let pos: i64 = parts
+            .get(2)
+            .map(|p| p.trim().parse().unwrap_or(1))
+            .unwrap_or(1);
         let c = col(col_name);
-        return Ok(instr(&c, substr).into_expr());
+        return Ok(locate(substr, &c, pos).into_expr());
     }
     if s.starts_with("lpad(") {
         let inner = extract_first_arg(s, "lpad(")?;
