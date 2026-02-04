@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Phase 19 – Remaining gaps 4: aggregates, try_*, misc** ✅ **COMPLETED**
+  - **Aggregates**: `any_value`, `bool_and`, `bool_or`, `every`/`some`, `count_if`, `max_by`, `min_by`, `percentile`, `product`, `collect_list`, `collect_set` (GroupedData + parity agg parser).
+  - **Try_***: `try_divide` (when/otherwise), `try_add`, `try_subtract`, `try_multiply` (UDFs with checked arithmetic), `try_element_at` (alias of element_at).
+  - **Misc**: `width_bucket`, `elt`, `bit_length`, `typeof` (Polars expr or UDF).
+  - **Parity fixtures**: `groupby_any_value`, `groupby_product`, `try_divide`, `width_bucket` (124 → 128).
+  - **PyO3**: All new GroupedData methods; try_divide, try_add, try_subtract, try_multiply, width_bucket, elt, bit_length, typeof as module/Column methods.
+
 - **Phase 18 – Remaining gaps 3: array, map, struct** ✅ **COMPLETED**
   - **Array**: `array_append`, `array_prepend`, `array_insert`, `array_except`, `array_intersect`, `array_union` (UDFs in udfs.rs + Column/functions + PyO3 + parity parser).
   - **Map**: `map_concat`, `map_from_entries`, `map_contains_key`, `get` (map element); `create_map` added to parity parser.

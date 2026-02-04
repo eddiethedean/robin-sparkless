@@ -1869,6 +1869,171 @@ pub fn apply_map_zip_to_struct(columns: &mut [Column]) -> PolarsResult<Option<Co
     Ok(Some(Column::new(name, out)))
 }
 
+// --- Phase 19: try_add, try_subtract, try_multiply (checked arithmetic) ---
+
+/// typeof: return dtype as string (PySpark typeof).
+pub fn apply_typeof(column: Column) -> PolarsResult<Option<Column>> {
+    let name = column.field().into_owned().name;
+    let series = column.take_materialized_series();
+    let dtype_str = format!("{:?}", series.dtype());
+    let len = series.len();
+    let out = StringChunked::from_iter_options(
+        name.as_str().into(),
+        (0..len).map(|_| Some(dtype_str.clone())),
+    );
+    Ok(Some(Column::new(name, out.into_series())))
+}
+
+/// try_add: returns null on overflow.
+pub fn apply_try_add(columns: &mut [Column]) -> PolarsResult<Option<Column>> {
+    if columns.len() < 2 {
+        return Err(PolarsError::ComputeError(
+            "try_add needs two columns".into(),
+        ));
+    }
+    let name = columns[0].field().into_owned().name;
+    let a_s = std::mem::take(&mut columns[0]).take_materialized_series();
+    let b_s = std::mem::take(&mut columns[1]).take_materialized_series();
+    let out = match (a_s.dtype(), b_s.dtype()) {
+        (DataType::Int64, DataType::Int64) => {
+            let ca_a = a_s.i64().unwrap();
+            let ca_b = b_s.i64().unwrap();
+            Int64Chunked::from_iter_options(
+                name.as_str().into(),
+                ca_a.into_iter()
+                    .zip(ca_b)
+                    .map(|(oa, ob)| oa.and_then(|a| ob.and_then(|b| a.checked_add(b)))),
+            )
+            .into_series()
+        }
+        (DataType::Int32, DataType::Int32) => {
+            let ca_a = a_s.i32().unwrap();
+            let ca_b = b_s.i32().unwrap();
+            Int32Chunked::from_iter_options(
+                name.as_str().into(),
+                ca_a.into_iter()
+                    .zip(ca_b)
+                    .map(|(oa, ob)| oa.and_then(|a| ob.and_then(|b| a.checked_add(b)))),
+            )
+            .into_series()
+        }
+        _ => {
+            let a_f = a_s.cast(&DataType::Float64)?;
+            let b_f = b_s.cast(&DataType::Float64)?;
+            let ca_a = a_f.f64().unwrap();
+            let ca_b = b_f.f64().unwrap();
+            Float64Chunked::from_iter_options(
+                name.as_str().into(),
+                ca_a.into_iter()
+                    .zip(ca_b)
+                    .map(|(oa, ob)| oa.and_then(|a| ob.map(|b| a + b))),
+            )
+            .into_series()
+        }
+    };
+    Ok(Some(Column::new(name, out)))
+}
+
+/// try_subtract: returns null on overflow.
+pub fn apply_try_subtract(columns: &mut [Column]) -> PolarsResult<Option<Column>> {
+    if columns.len() < 2 {
+        return Err(PolarsError::ComputeError(
+            "try_subtract needs two columns".into(),
+        ));
+    }
+    let name = columns[0].field().into_owned().name;
+    let a_s = std::mem::take(&mut columns[0]).take_materialized_series();
+    let b_s = std::mem::take(&mut columns[1]).take_materialized_series();
+    let out = match (a_s.dtype(), b_s.dtype()) {
+        (DataType::Int64, DataType::Int64) => {
+            let ca_a = a_s.i64().unwrap();
+            let ca_b = b_s.i64().unwrap();
+            Int64Chunked::from_iter_options(
+                name.as_str().into(),
+                ca_a.into_iter()
+                    .zip(ca_b)
+                    .map(|(oa, ob)| oa.and_then(|a| ob.and_then(|b| a.checked_sub(b)))),
+            )
+            .into_series()
+        }
+        (DataType::Int32, DataType::Int32) => {
+            let ca_a = a_s.i32().unwrap();
+            let ca_b = b_s.i32().unwrap();
+            Int32Chunked::from_iter_options(
+                name.as_str().into(),
+                ca_a.into_iter()
+                    .zip(ca_b)
+                    .map(|(oa, ob)| oa.and_then(|a| ob.and_then(|b| a.checked_sub(b)))),
+            )
+            .into_series()
+        }
+        _ => {
+            let a_f = a_s.cast(&DataType::Float64)?;
+            let b_f = b_s.cast(&DataType::Float64)?;
+            let ca_a = a_f.f64().unwrap();
+            let ca_b = b_f.f64().unwrap();
+            Float64Chunked::from_iter_options(
+                name.as_str().into(),
+                ca_a.into_iter()
+                    .zip(ca_b)
+                    .map(|(oa, ob)| oa.and_then(|a| ob.map(|b| a - b))),
+            )
+            .into_series()
+        }
+    };
+    Ok(Some(Column::new(name, out)))
+}
+
+/// try_multiply: returns null on overflow.
+pub fn apply_try_multiply(columns: &mut [Column]) -> PolarsResult<Option<Column>> {
+    if columns.len() < 2 {
+        return Err(PolarsError::ComputeError(
+            "try_multiply needs two columns".into(),
+        ));
+    }
+    let name = columns[0].field().into_owned().name;
+    let a_s = std::mem::take(&mut columns[0]).take_materialized_series();
+    let b_s = std::mem::take(&mut columns[1]).take_materialized_series();
+    let out = match (a_s.dtype(), b_s.dtype()) {
+        (DataType::Int64, DataType::Int64) => {
+            let ca_a = a_s.i64().unwrap();
+            let ca_b = b_s.i64().unwrap();
+            Int64Chunked::from_iter_options(
+                name.as_str().into(),
+                ca_a.into_iter()
+                    .zip(ca_b)
+                    .map(|(oa, ob)| oa.and_then(|a| ob.and_then(|b| a.checked_mul(b)))),
+            )
+            .into_series()
+        }
+        (DataType::Int32, DataType::Int32) => {
+            let ca_a = a_s.i32().unwrap();
+            let ca_b = b_s.i32().unwrap();
+            Int32Chunked::from_iter_options(
+                name.as_str().into(),
+                ca_a.into_iter()
+                    .zip(ca_b)
+                    .map(|(oa, ob)| oa.and_then(|a| ob.and_then(|b| a.checked_mul(b)))),
+            )
+            .into_series()
+        }
+        _ => {
+            let a_f = a_s.cast(&DataType::Float64)?;
+            let b_f = b_s.cast(&DataType::Float64)?;
+            let ca_a = a_f.f64().unwrap();
+            let ca_b = b_f.f64().unwrap();
+            Float64Chunked::from_iter_options(
+                name.as_str().into(),
+                ca_a.into_iter()
+                    .zip(ca_b)
+                    .map(|(oa, ob)| oa.and_then(|a| ob.map(|b| a * b))),
+            )
+            .into_series()
+        }
+    };
+    Ok(Some(Column::new(name, out)))
+}
+
 // --- Phase 17: unix_timestamp, from_unixtime, make_date, timestamp_*, unix_date, date_from_unix_date, pmod, factorial ---
 
 /// Map PySpark/Java SimpleDateFormat style to chrono strftime.

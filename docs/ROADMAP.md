@@ -132,7 +132,7 @@ We know we're on track if:
 
 | Metric | Current | After Phase 19 | Full Backend (Phase 21) |
 |--------|---------|-----------------|-------------------------|
-| Parity fixtures | 124 | 150+ | 150+ |
+| Parity fixtures | 128 | 150+ | 150+ |
 | Functions | ~175+ | 403 | 403 |
 | DataFrame methods | ~55+ | 85 | 85 |
 | Sparkless tests passing (robin backend) | 0 | — | 200+ |
@@ -214,7 +214,7 @@ To reach **full Sparkless parity** (robin-sparkless as a complete backend replac
 | **16** | Remaining gaps 1: string/regex (regexp_count, regexp_instr, regexp_substr, split_part, find_in_set, format_string, printf) | ✅ **COMPLETED** |
 | **17** | Remaining gaps 2: datetime/unix (unix_timestamp, from_unixtime, make_date, timestamp_*, pmod, factorial) | ✅ **COMPLETED** |
 | **18** | Remaining gaps 3: array/map/struct (array_append, array_prepend, array_insert, array_except/intersect/union, map_concat, map_from_entries, map_contains_key, get, named_struct, struct, map_filter, map_zip_with, zip_with) | ✅ **COMPLETED** |
-| **19** | Remaining gaps 4: aggregates and try_* (any_value, bool_and, bool_or, count_if, max_by, min_by, percentile, product, try_add/divide/subtract/multiply/sum/avg, try_element_at, width_bucket, elt, bit_length, typeof) | 3–4 weeks |
+| **19** | Remaining gaps 4: aggregates and try_* (any_value, bool_and, bool_or, count_if, max_by, min_by, percentile, product, try_add/divide/subtract/multiply/sum/avg, try_element_at, width_bucket, elt, bit_length, typeof) | ✅ **COMPLETED** |
 | **20** | Prepare and publish robin-sparkless as a Rust crate (crates.io, API stability, docs, release) | 2–3 weeks |
 | **21** | Sparkless integration (BackendFactory "robin", 200+ tests), PyO3 surface | 4–6 weeks |
 
@@ -350,12 +350,12 @@ To reach **full Sparkless parity** (robin-sparkless as a complete backend replac
 
 **Goal**: Implement remaining aggregates and try_* / misc functions.
 
-- **Aggregates**: `any_value`, `bool_and`, `bool_or`, `every`, `some`, `count_if`, `max_by`, `min_by`, `percentile`, `percentile_approx`, `product`; optional `collect_list`, `collect_set`.
-- **Try_***: `try_add`, `try_divide`, `try_subtract`, `try_multiply`, `try_sum`, `try_avg`, `try_element_at`.
+- **Aggregates**: `any_value`, `bool_and`, `bool_or`, `every`/`some`, `count_if`, `max_by`, `min_by`, `percentile`, `product`, `collect_list`, `collect_set` — all implemented. `percentile_approx` deferred.
+- **Try_***: `try_divide`, `try_add`, `try_subtract`, `try_multiply`, `try_element_at` — all implemented.
 - **Misc**: `width_bucket`, `elt`, `bit_length`, `typeof`.
-- **Parity**: Parser and fixtures.
-- **PyO3**: Expose on Column and module.
-- **Outcome**: Aggregates and try_* gap closed; ready for crate publish (Phase 20).
+- **Parity**: `groupby_any_value`, `groupby_product`, `try_divide`, `width_bucket` (124 → 128).
+- **PyO3**: GroupedData methods; try_*, width_bucket, elt, bit_length, typeof.
+- **Outcome**: Aggregates and try_* gap closed; ready for Phase 20.
 
 ---
 

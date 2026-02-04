@@ -1,0 +1,35 @@
+{
+  "name": "groupby_any_value",
+  "pyspark_version": "3.5.0",
+  "input": {
+    "schema": [
+      { "name": "dept", "type": "string" },
+      { "name": "name", "type": "string" }
+    ],
+    "rows": [
+      ["Sales", "Alice"],
+      ["Sales", "Bob"],
+      ["Eng", "Charlie"]
+    ]
+  },
+  "operations": [
+    { "op": "groupBy", "columns": ["dept"] },
+    {
+      "op": "agg",
+      "aggregations": [
+        { "func": "any_value", "alias": "any_value(name)", "column": "name" }
+      ]
+    },
+    { "op": "orderBy", "columns": ["dept"], "ascending": [true] }
+  ],
+  "expected": {
+    "schema": [
+      { "name": "dept", "type": "string" },
+      { "name": "any_value(name)", "type": "string" }
+    ],
+    "rows": [
+      ["Eng", "Charlie"],
+      ["Sales", "Alice"]
+    ]
+  }
+}

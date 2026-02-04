@@ -138,6 +138,164 @@ impl GroupedData {
         ))
     }
 
+    /// Any value from the group (PySpark any_value). Uses first value.
+    pub fn any_value(&self, column: &str) -> Result<DataFrame, PolarsError> {
+        use polars::prelude::*;
+        let agg_expr = vec![col(column).first().alias(format!("any_value({})", column))];
+        let lf = self.lazy_grouped.clone().agg(agg_expr);
+        let mut pl_df = lf.collect()?;
+        pl_df = reorder_groupby_columns(&mut pl_df, &self.grouping_cols)?;
+        Ok(super::DataFrame::from_polars_with_options(
+            pl_df,
+            self.case_sensitive,
+        ))
+    }
+
+    /// Boolean AND across group (PySpark bool_and / every).
+    pub fn bool_and(&self, column: &str) -> Result<DataFrame, PolarsError> {
+        use polars::prelude::*;
+        let agg_expr = vec![col(column).all(true).alias(format!("bool_and({})", column))];
+        let lf = self.lazy_grouped.clone().agg(agg_expr);
+        let mut pl_df = lf.collect()?;
+        pl_df = reorder_groupby_columns(&mut pl_df, &self.grouping_cols)?;
+        Ok(super::DataFrame::from_polars_with_options(
+            pl_df,
+            self.case_sensitive,
+        ))
+    }
+
+    /// Boolean OR across group (PySpark bool_or / some).
+    pub fn bool_or(&self, column: &str) -> Result<DataFrame, PolarsError> {
+        use polars::prelude::*;
+        let agg_expr = vec![col(column).any(true).alias(format!("bool_or({})", column))];
+        let lf = self.lazy_grouped.clone().agg(agg_expr);
+        let mut pl_df = lf.collect()?;
+        pl_df = reorder_groupby_columns(&mut pl_df, &self.grouping_cols)?;
+        Ok(super::DataFrame::from_polars_with_options(
+            pl_df,
+            self.case_sensitive,
+        ))
+    }
+
+    /// Product of column values in each group (PySpark product).
+    pub fn product(&self, column: &str) -> Result<DataFrame, PolarsError> {
+        use polars::prelude::*;
+        let agg_expr = vec![col(column).product().alias(format!("product({})", column))];
+        let lf = self.lazy_grouped.clone().agg(agg_expr);
+        let mut pl_df = lf.collect()?;
+        pl_df = reorder_groupby_columns(&mut pl_df, &self.grouping_cols)?;
+        Ok(super::DataFrame::from_polars_with_options(
+            pl_df,
+            self.case_sensitive,
+        ))
+    }
+
+    /// Collect column values into list per group (PySpark collect_list).
+    pub fn collect_list(&self, column: &str) -> Result<DataFrame, PolarsError> {
+        use polars::prelude::*;
+        let agg_expr = vec![col(column)
+            .implode()
+            .alias(format!("collect_list({})", column))];
+        let lf = self.lazy_grouped.clone().agg(agg_expr);
+        let mut pl_df = lf.collect()?;
+        pl_df = reorder_groupby_columns(&mut pl_df, &self.grouping_cols)?;
+        Ok(super::DataFrame::from_polars_with_options(
+            pl_df,
+            self.case_sensitive,
+        ))
+    }
+
+    /// Collect distinct column values into list per group (PySpark collect_set).
+    pub fn collect_set(&self, column: &str) -> Result<DataFrame, PolarsError> {
+        use polars::prelude::*;
+        let agg_expr = vec![col(column)
+            .unique()
+            .implode()
+            .alias(format!("collect_set({})", column))];
+        let lf = self.lazy_grouped.clone().agg(agg_expr);
+        let mut pl_df = lf.collect()?;
+        pl_df = reorder_groupby_columns(&mut pl_df, &self.grouping_cols)?;
+        Ok(super::DataFrame::from_polars_with_options(
+            pl_df,
+            self.case_sensitive,
+        ))
+    }
+
+    /// Count rows where condition column is true (PySpark count_if).
+    pub fn count_if(&self, column: &str) -> Result<DataFrame, PolarsError> {
+        use polars::prelude::*;
+        let agg_expr = vec![col(column)
+            .cast(DataType::Int64)
+            .sum()
+            .alias(format!("count_if({})", column))];
+        let lf = self.lazy_grouped.clone().agg(agg_expr);
+        let mut pl_df = lf.collect()?;
+        pl_df = reorder_groupby_columns(&mut pl_df, &self.grouping_cols)?;
+        Ok(super::DataFrame::from_polars_with_options(
+            pl_df,
+            self.case_sensitive,
+        ))
+    }
+
+    /// Percentile of column (PySpark percentile). p in 0.0..=1.0.
+    pub fn percentile(&self, column: &str, p: f64) -> Result<DataFrame, PolarsError> {
+        use polars::prelude::*;
+        let agg_expr = vec![col(column)
+            .quantile(lit(p), QuantileMethod::Linear)
+            .alias(format!("percentile({}, {})", column, p))];
+        let lf = self.lazy_grouped.clone().agg(agg_expr);
+        let mut pl_df = lf.collect()?;
+        pl_df = reorder_groupby_columns(&mut pl_df, &self.grouping_cols)?;
+        Ok(super::DataFrame::from_polars_with_options(
+            pl_df,
+            self.case_sensitive,
+        ))
+    }
+
+    /// Value of value_col where ord_col is maximum (PySpark max_by).
+    pub fn max_by(&self, value_col: &str, ord_col: &str) -> Result<DataFrame, PolarsError> {
+        use polars::prelude::*;
+        let st = as_struct(vec![
+            col(ord_col).alias("_ord"),
+            col(value_col).alias("_val"),
+        ]);
+        let agg_expr = vec![st
+            .sort(SortOptions::default().with_order_descending(true))
+            .first()
+            .struct_()
+            .field_by_name("_val")
+            .alias(format!("max_by({}, {})", value_col, ord_col))];
+        let lf = self.lazy_grouped.clone().agg(agg_expr);
+        let mut pl_df = lf.collect()?;
+        pl_df = reorder_groupby_columns(&mut pl_df, &self.grouping_cols)?;
+        Ok(super::DataFrame::from_polars_with_options(
+            pl_df,
+            self.case_sensitive,
+        ))
+    }
+
+    /// Value of value_col where ord_col is minimum (PySpark min_by).
+    pub fn min_by(&self, value_col: &str, ord_col: &str) -> Result<DataFrame, PolarsError> {
+        use polars::prelude::*;
+        let st = as_struct(vec![
+            col(ord_col).alias("_ord"),
+            col(value_col).alias("_val"),
+        ]);
+        let agg_expr = vec![st
+            .sort(SortOptions::default())
+            .first()
+            .struct_()
+            .field_by_name("_val")
+            .alias(format!("min_by({}, {})", value_col, ord_col))];
+        let lf = self.lazy_grouped.clone().agg(agg_expr);
+        let mut pl_df = lf.collect()?;
+        pl_df = reorder_groupby_columns(&mut pl_df, &self.grouping_cols)?;
+        Ok(super::DataFrame::from_polars_with_options(
+            pl_df,
+            self.case_sensitive,
+        ))
+    }
+
     /// Apply multiple aggregations at once (generic agg method)
     pub fn agg(&self, aggregations: Vec<Expr>) -> Result<DataFrame, PolarsError> {
         let lf = self.lazy_grouped.clone().agg(aggregations);

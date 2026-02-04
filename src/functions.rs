@@ -545,6 +545,103 @@ pub fn try_cast(column: &Column, type_name: &str) -> Result<Column, String> {
     Ok(Column::from_expr(column.expr().clone().cast(dtype), None))
 }
 
+/// Division that returns null on divide-by-zero (PySpark try_divide).
+pub fn try_divide(left: &Column, right: &Column) -> Column {
+    use polars::prelude::*;
+    let zero_cond = right.expr().clone().cast(DataType::Float64).eq(lit(0.0f64));
+    let null_expr = Expr::Literal(LiteralValue::Null);
+    let div_expr =
+        left.expr().clone().cast(DataType::Float64) / right.expr().clone().cast(DataType::Float64);
+    let expr = polars::prelude::when(zero_cond)
+        .then(null_expr)
+        .otherwise(div_expr);
+    crate::column::Column::from_expr(expr, None)
+}
+
+/// Add that returns null on overflow (PySpark try_add). Uses checked arithmetic.
+pub fn try_add(left: &Column, right: &Column) -> Column {
+    let args = [right.expr().clone()];
+    let expr =
+        left.expr()
+            .clone()
+            .map_many(crate::udfs::apply_try_add, &args, GetOutput::same_type());
+    Column::from_expr(expr, None)
+}
+
+/// Subtract that returns null on overflow (PySpark try_subtract).
+pub fn try_subtract(left: &Column, right: &Column) -> Column {
+    let args = [right.expr().clone()];
+    let expr = left.expr().clone().map_many(
+        crate::udfs::apply_try_subtract,
+        &args,
+        GetOutput::same_type(),
+    );
+    Column::from_expr(expr, None)
+}
+
+/// Multiply that returns null on overflow (PySpark try_multiply).
+pub fn try_multiply(left: &Column, right: &Column) -> Column {
+    let args = [right.expr().clone()];
+    let expr = left.expr().clone().map_many(
+        crate::udfs::apply_try_multiply,
+        &args,
+        GetOutput::same_type(),
+    );
+    Column::from_expr(expr, None)
+}
+
+/// Element at index, null if out of bounds (PySpark try_element_at). Same as element_at for lists.
+pub fn try_element_at(column: &Column, index: i64) -> Column {
+    column.clone().element_at(index)
+}
+
+/// Assign value to histogram bucket (PySpark width_bucket). Returns 0 if v < min_val, num_bucket+1 if v >= max_val.
+pub fn width_bucket(value: &Column, min_val: f64, max_val: f64, num_bucket: i64) -> Column {
+    use polars::prelude::*;
+    let v = value.expr().clone().cast(DataType::Float64);
+    let min_expr = lit(min_val);
+    let max_expr = lit(max_val);
+    let nb = num_bucket as f64;
+    let width = (max_val - min_val) / nb;
+    let bucket_expr = (v.clone() - min_expr.clone()) / lit(width);
+    let floor_bucket = bucket_expr.floor().cast(DataType::Int64) + lit(1i64);
+    let bucket_clamped = floor_bucket.clip(lit(1i64), lit(num_bucket));
+    let expr = polars::prelude::when(v.clone().lt(min_expr))
+        .then(lit(0i64))
+        .when(v.gt_eq(max_expr))
+        .then(lit(num_bucket + 1))
+        .otherwise(bucket_clamped);
+    crate::column::Column::from_expr(expr, None)
+}
+
+/// Return column at 1-based index (PySpark elt). elt(2, a, b, c) returns b.
+pub fn elt(index: &Column, columns: &[&Column]) -> Column {
+    use polars::prelude::*;
+    if columns.is_empty() {
+        panic!("elt requires at least one column");
+    }
+    let idx_expr = index.expr().clone();
+    let null_expr = Expr::Literal(LiteralValue::Null);
+    let mut expr = null_expr;
+    for (i, c) in columns.iter().enumerate().rev() {
+        let n = (i + 1) as i64;
+        expr = polars::prelude::when(idx_expr.clone().eq(lit(n)))
+            .then(c.expr().clone())
+            .otherwise(expr);
+    }
+    crate::column::Column::from_expr(expr, None)
+}
+
+/// Bit length of string (bytes * 8) (PySpark bit_length).
+pub fn bit_length(column: &Column) -> Column {
+    column.clone().bit_length()
+}
+
+/// Data type of column as string (PySpark typeof). Constant per column from schema.
+pub fn typeof_(column: &Column) -> Column {
+    column.clone().typeof_()
+}
+
 /// True where the float value is NaN (PySpark isnan).
 pub fn isnan(column: &Column) -> Column {
     column.clone().is_nan()

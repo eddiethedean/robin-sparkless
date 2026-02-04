@@ -19,8 +19,9 @@ use crate::functions::{
 };
 use crate::functions::{avg, coalesce, col as rs_col, count, max, min, sum as rs_sum};
 use crate::functions::{
-    create_map, get, map_concat, map_contains_key, map_filter_value_gt, map_from_entries,
-    map_zip_with_coalesce, named_struct, struct_, zip_with_coalesce,
+    bit_length, create_map, get, map_concat, map_contains_key, map_filter_value_gt,
+    map_from_entries, map_zip_with_coalesce, named_struct, struct_, try_add, try_divide,
+    try_multiply, try_subtract, typeof_, width_bucket, zip_with_coalesce,
 };
 use crate::{DataFrame, GroupedData, SparkSession};
 use polars::prelude::Expr;
@@ -190,6 +191,14 @@ fn robin_sparkless(m: &Bound<'_, PyModule>) -> PyResult<()> {
     )?;
     m.add("create_map", wrap_pyfunction!(py_create_map, m)?)?;
     m.add("get", wrap_pyfunction!(py_get, m)?)?;
+    m.add("try_divide", wrap_pyfunction!(py_try_divide, m)?)?;
+    m.add("try_add", wrap_pyfunction!(py_try_add, m)?)?;
+    m.add("try_subtract", wrap_pyfunction!(py_try_subtract, m)?)?;
+    m.add("try_multiply", wrap_pyfunction!(py_try_multiply, m)?)?;
+    m.add("width_bucket", wrap_pyfunction!(py_width_bucket, m)?)?;
+    m.add("elt", wrap_pyfunction!(py_elt, m)?)?;
+    m.add("bit_length", wrap_pyfunction!(py_bit_length, m)?)?;
+    m.add("typeof", wrap_pyfunction!(py_typeof, m)?)?;
     m.add("struct", wrap_pyfunction!(py_struct, m)?)?;
     m.add("named_struct", wrap_pyfunction!(py_named_struct, m)?)?;
     Ok(())
@@ -877,6 +886,63 @@ fn py_get(map_col: &PyColumn, key: &PyColumn) -> PyColumn {
 }
 
 #[pyfunction]
+fn py_try_divide(left: &PyColumn, right: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: try_divide(&left.inner, &right.inner),
+    }
+}
+
+#[pyfunction]
+fn py_try_add(left: &PyColumn, right: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: try_add(&left.inner, &right.inner),
+    }
+}
+
+#[pyfunction]
+fn py_try_subtract(left: &PyColumn, right: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: try_subtract(&left.inner, &right.inner),
+    }
+}
+
+#[pyfunction]
+fn py_try_multiply(left: &PyColumn, right: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: try_multiply(&left.inner, &right.inner),
+    }
+}
+
+#[pyfunction]
+fn py_width_bucket(value: &PyColumn, min_val: f64, max_val: f64, num_bucket: i64) -> PyColumn {
+    PyColumn {
+        inner: width_bucket(&value.inner, min_val, max_val, num_bucket),
+    }
+}
+
+#[pyfunction]
+fn py_elt(index: &PyColumn, columns: Vec<PyRef<PyColumn>>) -> PyColumn {
+    let refs: Vec<&RsColumn> = columns.iter().map(|c| &c.inner).collect();
+    PyColumn {
+        inner: crate::functions::elt(&index.inner, &refs),
+    }
+}
+
+#[pyfunction]
+fn py_bit_length(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: bit_length(&column.inner),
+    }
+}
+
+#[pyfunction]
+fn py_typeof(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: typeof_(&column.inner),
+    }
+}
+
+#[pyfunction]
 fn py_struct(columns: Vec<PyRef<PyColumn>>) -> PyColumn {
     let refs: Vec<&RsColumn> = columns.iter().map(|c| &c.inner).collect();
     PyColumn {
@@ -1225,6 +1291,42 @@ impl PyColumn {
     fn get(&self, key: &PyColumn) -> Self {
         PyColumn {
             inner: get(&self.inner, &key.inner),
+        }
+    }
+
+    fn try_divide(&self, right: &PyColumn) -> Self {
+        PyColumn {
+            inner: try_divide(&self.inner, &right.inner),
+        }
+    }
+
+    fn try_add(&self, right: &PyColumn) -> Self {
+        PyColumn {
+            inner: try_add(&self.inner, &right.inner),
+        }
+    }
+
+    fn try_subtract(&self, right: &PyColumn) -> Self {
+        PyColumn {
+            inner: try_subtract(&self.inner, &right.inner),
+        }
+    }
+
+    fn try_multiply(&self, right: &PyColumn) -> Self {
+        PyColumn {
+            inner: try_multiply(&self.inner, &right.inner),
+        }
+    }
+
+    fn bit_length(&self) -> Self {
+        PyColumn {
+            inner: bit_length(&self.inner),
+        }
+    }
+
+    fn typeof_(&self) -> Self {
+        PyColumn {
+            inner: typeof_(&self.inner),
         }
     }
 
@@ -2387,6 +2489,86 @@ impl PyGroupedData {
         let df = self
             .inner
             .agg(aggregations)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        Ok(PyDataFrame { inner: df })
+    }
+
+    fn any_value(&self, column: &str) -> PyResult<PyDataFrame> {
+        let df = self
+            .inner
+            .any_value(column)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        Ok(PyDataFrame { inner: df })
+    }
+
+    fn bool_and(&self, column: &str) -> PyResult<PyDataFrame> {
+        let df = self
+            .inner
+            .bool_and(column)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        Ok(PyDataFrame { inner: df })
+    }
+
+    fn bool_or(&self, column: &str) -> PyResult<PyDataFrame> {
+        let df = self
+            .inner
+            .bool_or(column)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        Ok(PyDataFrame { inner: df })
+    }
+
+    fn product(&self, column: &str) -> PyResult<PyDataFrame> {
+        let df = self
+            .inner
+            .product(column)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        Ok(PyDataFrame { inner: df })
+    }
+
+    fn collect_list(&self, column: &str) -> PyResult<PyDataFrame> {
+        let df = self
+            .inner
+            .collect_list(column)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        Ok(PyDataFrame { inner: df })
+    }
+
+    fn collect_set(&self, column: &str) -> PyResult<PyDataFrame> {
+        let df = self
+            .inner
+            .collect_set(column)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        Ok(PyDataFrame { inner: df })
+    }
+
+    fn count_if(&self, column: &str) -> PyResult<PyDataFrame> {
+        let df = self
+            .inner
+            .count_if(column)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        Ok(PyDataFrame { inner: df })
+    }
+
+    fn percentile(&self, column: &str, p: f64) -> PyResult<PyDataFrame> {
+        let df = self
+            .inner
+            .percentile(column, p)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        Ok(PyDataFrame { inner: df })
+    }
+
+    fn max_by(&self, value_column: &str, ord_column: &str) -> PyResult<PyDataFrame> {
+        let df = self
+            .inner
+            .max_by(value_column, ord_column)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        Ok(PyDataFrame { inner: df })
+    }
+
+    fn min_by(&self, value_column: &str, ord_column: &str) -> PyResult<PyDataFrame> {
+        let df = self
+            .inner
+            .min_by(value_column, ord_column)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
         Ok(PyDataFrame { inner: df })
     }

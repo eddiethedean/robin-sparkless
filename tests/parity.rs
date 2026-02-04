@@ -152,6 +152,12 @@ struct AggregationSpec {
     alias: String,
     #[serde(default)]
     column: Option<String>, // Column name for sum/avg/min/max (not needed for count)
+    #[serde(default)]
+    percentile: Option<f64>, // For percentile(column, p)
+    #[serde(default)]
+    value_column: Option<String>, // For max_by, min_by
+    #[serde(default)]
+    ord_column: Option<String>, // For max_by, min_by
 }
 
 /// Parity tests generated from PySpark fixtures.
@@ -775,6 +781,173 @@ fn apply_operations(
                                 .filter(|a| *a != "approx_count_distinct")
                                 .map(String::from)
                                 .unwrap_or_else(|| format!("approx_count_distinct({})", col_name));
+                            e.alias(&name)
+                        }
+                        "any_value" => {
+                            let col_name = agg_spec.column.as_ref().ok_or_else(|| {
+                                PolarsError::ComputeError(
+                                    "any_value aggregation requires column name".into(),
+                                )
+                            })?;
+                            let e = col(col_name).first();
+                            let name: String = alias
+                                .filter(|a| !a.is_empty())
+                                .map(String::from)
+                                .unwrap_or_else(|| format!("any_value({})", col_name));
+                            e.alias(&name)
+                        }
+                        "bool_and" | "every" => {
+                            let col_name = agg_spec.column.as_ref().ok_or_else(|| {
+                                PolarsError::ComputeError(
+                                    "bool_and aggregation requires column name".into(),
+                                )
+                            })?;
+                            let e = col(col_name).all(true);
+                            let name: String = alias
+                                .filter(|a| !a.is_empty())
+                                .map(String::from)
+                                .unwrap_or_else(|| format!("bool_and({})", col_name));
+                            e.alias(&name)
+                        }
+                        "bool_or" | "some" => {
+                            let col_name = agg_spec.column.as_ref().ok_or_else(|| {
+                                PolarsError::ComputeError(
+                                    "bool_or aggregation requires column name".into(),
+                                )
+                            })?;
+                            let e = col(col_name).any(true);
+                            let name: String = alias
+                                .filter(|a| !a.is_empty())
+                                .map(String::from)
+                                .unwrap_or_else(|| format!("bool_or({})", col_name));
+                            e.alias(&name)
+                        }
+                        "count_if" => {
+                            let col_name = agg_spec.column.as_ref().ok_or_else(|| {
+                                PolarsError::ComputeError(
+                                    "count_if aggregation requires column name".into(),
+                                )
+                            })?;
+                            let e = col(col_name).cast(polars::prelude::DataType::Int64).sum();
+                            let name: String = alias
+                                .filter(|a| !a.is_empty())
+                                .map(String::from)
+                                .unwrap_or_else(|| format!("count_if({})", col_name));
+                            e.alias(&name)
+                        }
+                        "percentile" => {
+                            let col_name = agg_spec.column.as_ref().ok_or_else(|| {
+                                PolarsError::ComputeError(
+                                    "percentile aggregation requires column name".into(),
+                                )
+                            })?;
+                            let p = agg_spec.percentile.unwrap_or(0.5);
+                            let e = col(col_name).quantile(
+                                polars::prelude::lit(p),
+                                polars::prelude::QuantileMethod::Linear,
+                            );
+                            let name: String = alias
+                                .filter(|a| !a.is_empty())
+                                .map(String::from)
+                                .unwrap_or_else(|| format!("percentile({}, {})", col_name, p));
+                            e.alias(&name)
+                        }
+                        "product" => {
+                            let col_name = agg_spec.column.as_ref().ok_or_else(|| {
+                                PolarsError::ComputeError(
+                                    "product aggregation requires column name".into(),
+                                )
+                            })?;
+                            let e = col(col_name).product();
+                            let name: String = alias
+                                .filter(|a| !a.is_empty())
+                                .map(String::from)
+                                .unwrap_or_else(|| format!("product({})", col_name));
+                            e.alias(&name)
+                        }
+                        "collect_list" => {
+                            let col_name = agg_spec.column.as_ref().ok_or_else(|| {
+                                PolarsError::ComputeError(
+                                    "collect_list aggregation requires column name".into(),
+                                )
+                            })?;
+                            let e = col(col_name).implode();
+                            let name: String = alias
+                                .filter(|a| !a.is_empty())
+                                .map(String::from)
+                                .unwrap_or_else(|| format!("collect_list({})", col_name));
+                            e.alias(&name)
+                        }
+                        "collect_set" => {
+                            let col_name = agg_spec.column.as_ref().ok_or_else(|| {
+                                PolarsError::ComputeError(
+                                    "collect_set aggregation requires column name".into(),
+                                )
+                            })?;
+                            let e = col(col_name).unique().implode();
+                            let name: String = alias
+                                .filter(|a| !a.is_empty())
+                                .map(String::from)
+                                .unwrap_or_else(|| format!("collect_set({})", col_name));
+                            e.alias(&name)
+                        }
+                        "max_by" => {
+                            let v_col = agg_spec.value_column.as_ref().ok_or_else(|| {
+                                PolarsError::ComputeError(
+                                    "max_by aggregation requires value_column and ord_column"
+                                        .into(),
+                                )
+                            })?;
+                            let o_col = agg_spec.ord_column.as_ref().ok_or_else(|| {
+                                PolarsError::ComputeError(
+                                    "max_by aggregation requires value_column and ord_column"
+                                        .into(),
+                                )
+                            })?;
+                            let st = polars::prelude::as_struct(vec![
+                                col(o_col).alias("_ord"),
+                                col(v_col).alias("_val"),
+                            ]);
+                            let e = st
+                                .sort(
+                                    polars::prelude::SortOptions::default()
+                                        .with_order_descending(true),
+                                )
+                                .first()
+                                .struct_()
+                                .field_by_name("_val");
+                            let name: String = alias
+                                .filter(|a| !a.is_empty())
+                                .map(String::from)
+                                .unwrap_or_else(|| format!("max_by({}, {})", v_col, o_col));
+                            e.alias(&name)
+                        }
+                        "min_by" => {
+                            let v_col = agg_spec.value_column.as_ref().ok_or_else(|| {
+                                PolarsError::ComputeError(
+                                    "min_by aggregation requires value_column and ord_column"
+                                        .into(),
+                                )
+                            })?;
+                            let o_col = agg_spec.ord_column.as_ref().ok_or_else(|| {
+                                PolarsError::ComputeError(
+                                    "min_by aggregation requires value_column and ord_column"
+                                        .into(),
+                                )
+                            })?;
+                            let st = polars::prelude::as_struct(vec![
+                                col(o_col).alias("_ord"),
+                                col(v_col).alias("_val"),
+                            ]);
+                            let e = st
+                                .sort(polars::prelude::SortOptions::default())
+                                .first()
+                                .struct_()
+                                .field_by_name("_val");
+                            let name: String = alias
+                                .filter(|a| !a.is_empty())
+                                .map(String::from)
+                                .unwrap_or_else(|| format!("min_by({}, {})", v_col, o_col));
                             e.alias(&name)
                         }
                         other => {
@@ -1716,21 +1889,22 @@ fn parse_with_column_expr(src: &str) -> Result<Expr, String> {
     use robin_sparkless::{
         acos, add_months, array_append, array_compact, array_contains, array_distinct,
         array_except, array_insert, array_intersect, array_prepend, array_size, array_sum,
-        array_union, ascii, asin, atan, atan2, base64, cast, cbrt, ceiling, char as rs_char, chr,
-        coalesce, col, concat, concat_ws, contains, cos, cosh, create_map, current_date,
-        current_timestamp, date_add, date_from_unix_date, date_sub, datediff, day, dayofmonth,
-        dayofweek, dayofyear, degrees, element_at, endswith, exp, factorial, find_in_set,
-        format_number, format_string, from_unixtime, get, greatest, hour, hypot, ilike, initcap,
-        instr, isnan, isnotnull, isnull, last_day, lcase, least, left, length, like, lit_str, ln,
-        log, log10, lower, lpad, make_date, map_concat, map_contains_key, map_filter,
-        map_from_entries, map_zip_with, md5, minute, months_between, named_struct, nanvl, next_day,
-        nullif, nvl, nvl2, overlay, pmod, position, pow, power, quarter, radians, regexp_count,
-        regexp_extract, regexp_extract_all, regexp_instr, regexp_like, regexp_replace,
-        regexp_substr, repeat, replace, reverse, right, rlike, rpad, second, sha1, sha2, signum,
-        sin, sinh, size, split, split_part, sqrt, startswith, struct_, substr, substring, tan,
-        tanh, timestamp_micros, timestamp_millis, timestamp_seconds, to_degrees, to_radians,
-        to_unix_timestamp, trim, trunc, try_cast, ucase, unbase64, unix_date, unix_timestamp,
-        unix_timestamp_now, upper, weekofyear, when, zip_with,
+        array_union, ascii, asin, atan, atan2, base64, bit_length, cast, cbrt, ceiling,
+        char as rs_char, chr, coalesce, col, concat, concat_ws, contains, cos, cosh, create_map,
+        current_date, current_timestamp, date_add, date_from_unix_date, date_sub, datediff, day,
+        dayofmonth, dayofweek, dayofyear, degrees, element_at, elt, endswith, exp, factorial,
+        find_in_set, format_number, format_string, from_unixtime, get, greatest, hour, hypot,
+        ilike, initcap, instr, isnan, isnotnull, isnull, last_day, lcase, least, left, length,
+        like, lit_str, ln, log, log10, lower, lpad, make_date, map_concat, map_contains_key,
+        map_filter, map_from_entries, map_zip_with, md5, minute, months_between, named_struct,
+        nanvl, next_day, nullif, nvl, nvl2, overlay, pmod, position, pow, power, quarter, radians,
+        regexp_count, regexp_extract, regexp_extract_all, regexp_instr, regexp_like,
+        regexp_replace, regexp_substr, repeat, replace, reverse, right, rlike, rpad, second, sha1,
+        sha2, signum, sin, sinh, size, split, split_part, sqrt, startswith, struct_, substr,
+        substring, tan, tanh, timestamp_micros, timestamp_millis, timestamp_seconds, to_degrees,
+        to_radians, to_unix_timestamp, trim, trunc, try_add, try_cast, try_divide, try_multiply,
+        try_subtract, typeof_, ucase, unbase64, unix_date, unix_timestamp, unix_timestamp_now,
+        upper, weekofyear, when, width_bucket, zip_with,
     };
 
     let s = src.trim();
@@ -2542,6 +2716,83 @@ fn parse_with_column_expr(src: &str) -> Result<Expr, String> {
         let merge_str = parts.get(2).ok_or("map_zip_with needs merge expr")?.trim();
         let merge = parse_map_zip_with_merge(merge_str)?;
         return Ok(map_zip_with(&col(m1_name), &col(m2_name), merge).into_expr());
+    }
+    if s.starts_with("try_divide(") {
+        let inner = extract_first_arg(s, "try_divide(")?;
+        let parts = parse_comma_separated_args(inner);
+        let a_name = extract_col_name(parts.first().ok_or("try_divide needs left")?)?;
+        let b_name = extract_col_name(parts.get(1).ok_or("try_divide needs right")?)?;
+        return Ok(try_divide(&col(a_name), &col(b_name)).into_expr());
+    }
+    if s.starts_with("try_add(") {
+        let inner = extract_first_arg(s, "try_add(")?;
+        let parts = parse_comma_separated_args(inner);
+        let a_name = extract_col_name(parts.first().ok_or("try_add needs left")?)?;
+        let b_name = extract_col_name(parts.get(1).ok_or("try_add needs right")?)?;
+        return Ok(try_add(&col(a_name), &col(b_name)).into_expr());
+    }
+    if s.starts_with("try_subtract(") {
+        let inner = extract_first_arg(s, "try_subtract(")?;
+        let parts = parse_comma_separated_args(inner);
+        let a_name = extract_col_name(parts.first().ok_or("try_subtract needs left")?)?;
+        let b_name = extract_col_name(parts.get(1).ok_or("try_subtract needs right")?)?;
+        return Ok(try_subtract(&col(a_name), &col(b_name)).into_expr());
+    }
+    if s.starts_with("try_multiply(") {
+        let inner = extract_first_arg(s, "try_multiply(")?;
+        let parts = parse_comma_separated_args(inner);
+        let a_name = extract_col_name(parts.first().ok_or("try_multiply needs left")?)?;
+        let b_name = extract_col_name(parts.get(1).ok_or("try_multiply needs right")?)?;
+        return Ok(try_multiply(&col(a_name), &col(b_name)).into_expr());
+    }
+    if s.starts_with("width_bucket(") {
+        let inner = extract_first_arg(s, "width_bucket(")?;
+        let parts = parse_comma_separated_args(inner);
+        let col_name = extract_col_name(parts.first().ok_or("width_bucket needs value")?)?;
+        let min_val: f64 = parts
+            .get(1)
+            .ok_or("width_bucket needs min")?
+            .trim()
+            .parse()
+            .map_err(|e: std::num::ParseFloatError| e.to_string())?;
+        let max_val: f64 = parts
+            .get(2)
+            .ok_or("width_bucket needs max")?
+            .trim()
+            .parse()
+            .map_err(|e: std::num::ParseFloatError| e.to_string())?;
+        let nb: i64 = parts
+            .get(3)
+            .ok_or("width_bucket needs num_bucket")?
+            .trim()
+            .parse()
+            .map_err(|e: std::num::ParseIntError| e.to_string())?;
+        return Ok(width_bucket(&col(col_name), min_val, max_val, nb).into_expr());
+    }
+    if s.starts_with("elt(") {
+        let inner = extract_first_arg(s, "elt(")?;
+        let parts = parse_comma_separated_args(inner);
+        if parts.len() < 2 {
+            return Err("elt needs index and at least one column".to_string());
+        }
+        let idx_name = extract_col_name(parts.first().ok_or("elt needs index")?)?;
+        let mut cols: Vec<robin_sparkless::Column> = Vec::new();
+        for p in parts.iter().skip(1) {
+            let name = extract_col_name(p.trim())?;
+            cols.push(col(name));
+        }
+        let col_refs: Vec<&robin_sparkless::Column> = cols.iter().collect();
+        return Ok(elt(&col(idx_name), &col_refs).into_expr());
+    }
+    if s.starts_with("bit_length(") {
+        let inner = extract_first_arg(s, "bit_length(")?;
+        let col_name = extract_col_name(inner.trim())?;
+        return Ok(bit_length(&col(col_name)).into_expr());
+    }
+    if s.starts_with("typeof(") {
+        let inner = extract_first_arg(s, "typeof(")?;
+        let col_name = extract_col_name(inner.trim())?;
+        return Ok(typeof_(&col(col_name)).into_expr());
     }
     if s.starts_with("struct(") {
         let inner = extract_first_arg(s, "struct(")?;

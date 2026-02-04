@@ -335,6 +335,24 @@ impl Column {
         Self::from_expr(self.expr().clone().str().len_chars(), None)
     }
 
+    /// Bit length of string in bytes * 8 (PySpark bit_length).
+    pub fn bit_length(&self) -> Column {
+        use polars::prelude::*;
+        let len_bytes = self.expr().clone().str().len_bytes().cast(DataType::Int32);
+        Self::from_expr(len_bytes * lit(8i32), None)
+    }
+
+    /// Data type as string (PySpark typeof). Uses dtype from schema.
+    pub fn typeof_(&self) -> Column {
+        Self::from_expr(
+            self.expr().clone().map(
+                crate::udfs::apply_typeof,
+                GetOutput::from_type(DataType::String),
+            ),
+            None,
+        )
+    }
+
     /// Trim leading and trailing whitespace (PySpark trim)
     pub fn trim(&self) -> Column {
         use polars::prelude::*;

@@ -13,7 +13,7 @@ A Rust DataFrame library that aims to **emulate PySpark’s DataFrame behavior a
 - **Optional SQL** (`--features sql`): `spark.sql("SELECT ...")` with temp views (`createOrReplaceTempView`, `table`); single SELECT, FROM/JOIN, WHERE, GROUP BY, ORDER BY, LIMIT
 - **Optional Delta Lake** (`--features delta`): `read_delta` / `read_delta_with_version` (time travel), `write_delta` (overwrite/append) via delta-rs
 - **Benchmarks**: `cargo bench` compares robin-sparkless vs plain Polars; target within ~2x for supported pipelines
-- **Sparkless backend target**: Intended to power Sparkless's execution engine; aligns with its 403+ PySpark functions and 270+ test fixtures; **124 parity fixtures** passing (~208+ functions). **Phase 18 completed**: array (array_append, array_prepend, array_insert, array_except, array_intersect, array_union, zip_with), map (map_concat, map_from_entries, map_contains_key, map_filter, map_zip_with, get), struct (named_struct, struct). Phase 17: datetime/unix, pmod, factorial. Phase 16: string/regex. Path to 100%: ROADMAP Phases 19–21 (aggregates/try_*, publish crate, Sparkless integration).
+- **Sparkless backend target**: Intended to power Sparkless's execution engine; aligns with its 403+ PySpark functions and 270+ test fixtures; **128 parity fixtures** passing (~220+ functions). **Phase 19 completed**: aggregates (any_value, bool_and, bool_or, count_if, max_by, min_by, percentile, product, collect_list, collect_set), try_* (try_divide, try_add, try_subtract, try_multiply), misc (width_bucket, elt, bit_length, typeof). Phase 18: array/map/struct. Phase 17: datetime/unix, pmod, factorial. Phase 16: string/regex. Path to 100%: ROADMAP Phases 20–21 (publish crate, Sparkless integration).
 
 ## Installation
 
