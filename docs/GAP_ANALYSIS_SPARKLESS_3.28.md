@@ -8,9 +8,11 @@
 
 | Metric | Sparkless 3.28.0 | Robin-Sparkless |
 |--------|-------------------|-----------------|
-| **Functions (top-level / F.xxx)** | 417 names | ~180 Rust `pub fn` + Column methods |
-| **Implemented in robin-sparkless** | — | ~175 distinct PySpark-equivalent functions |
-| **Gap (in Sparkless, not in robin-sparkless)** | — | ~240+ function names (see below) |
+| **Functions (top-level / F.xxx)** | ~280+ distinct names | ~165 implemented |
+| **Implemented in robin-sparkless** | — | ~165 PySpark-equivalent functions |
+| **Gap (in Sparkless, not in robin-sparkless)** | — | ~115+ function names (see below) |
+
+**Update (Phase 18–19):** array_append, array_prepend, array_insert, array_except/intersect/union, zip_with, map_concat, map_contains_key, map_filter, map_from_entries, map_zip_with, get, named_struct, struct; any_value, bool_and, bool_or, every, some, count_if, max_by, min_by, percentile, product, collect_list, collect_set; try_divide, try_add, try_subtract, try_multiply, try_element_at; width_bucket, elt, bit_length, typeof — all implemented.
 
 Sparkless exposes both camelCase and snake_case for some (e.g. `countDistinct` / `count_distinct`). Robin-sparkless implements the snake_case PySpark-style names; where we have an equivalent, it’s counted as implemented.
 
@@ -38,7 +40,17 @@ The following are implemented in robin-sparkless (Rust `functions.rs`, `column.r
 
 **Array:** `array`, `array_size`, `size`, `array_contains`, `array_join`, `array_max`, `array_min`, `element_at`, `array_sort`, `array_distinct`, `array_slice`, `explode`, `array_position`, `array_compact`, `array_remove`, `array_repeat`, `array_flatten`, `array_exists`, `array_forall`, `array_filter`, `array_transform`, `array_sum`, `array_mean`, `posexplode`
 
-**Map:** `create_map`, `map_keys`, `map_values`, `map_entries`, `map_from_arrays`
+**Map:** `create_map`, `map_keys`, `map_values`, `map_entries`, `map_from_arrays`, `map_concat`, `map_contains_key`, `map_filter`, `map_from_entries`, `map_zip_with`, `get` (Phase 18)
+
+**Struct:** `struct`, `named_struct` (Phase 18)
+
+**Array (Phase 18):** `array_append`, `array_prepend`, `array_insert`, `array_except`, `array_intersect`, `array_union`, `zip_with`
+
+**Aggregates (Phase 19):** `any_value`, `bool_and`, `bool_or`, `every`, `some`, `count_if`, `max_by`, `min_by`, `percentile`, `product`, `collect_list`, `collect_set`
+
+**Try_* (Phase 19):** `try_divide`, `try_add`, `try_subtract`, `try_multiply`, `try_element_at`
+
+**Misc (Phase 19):** `width_bucket`, `elt`, `bit_length`, `typeof`
 
 **JSON:** `get_json_object`, `from_json`, `to_json`
 
@@ -49,7 +61,7 @@ The following are implemented in robin-sparkless (Rust `functions.rs`, `column.r
 Functions and aliases that exist in Sparkless 3.28.0 but are **not** implemented in robin-sparkless, grouped by category.
 
 ### 2.1 Approx / distinct aggregates
-- `approxCountDistinct`, `approx_count_distinct`
+- ~~`approx_count_distinct`~~ — **implemented** (GroupedData)
 - `approx_percentile`
 
 ### 2.2 Crypto / binary
@@ -60,13 +72,13 @@ Functions and aliases that exist in Sparkless 3.28.0 but are **not** implemented
 - `hex`, `unhex`
 - `bin`
 - `getbit`
-- `bit_length`, `octet_length`, `char_length`, `character_length`
+- ~~`bit_length`~~ — **implemented (Phase 19)**; `octet_length`, `char_length`, `character_length`
 
 ### 2.3 Array (additional)
 - `aggregate` (array aggregate)
 - `array_agg`
-- `array_append`, `array_prepend`, `array_insert`
-- `array_except`, `array_intersect`, `array_union`
+- ~~`array_append`, `array_prepend`, `array_insert`~~ — **implemented (Phase 18)**
+- ~~`array_except`, `array_intersect`, `array_union`~~ — **implemented (Phase 18)**
 - `arrays_overlap`, `arrays_zip`
 - `cardinality` (array size alias in some contexts)
 - `exists` (array), `filter` (array), `forall` (array) — we have array_exists, array_filter, array_forall
@@ -74,20 +86,14 @@ Functions and aliases that exist in Sparkless 3.28.0 but are **not** implemented
 - `sort_array` — we have `array_sort`
 - `flatten` — we have `array_flatten`
 - `explode_outer`, `posexplode_outer`
-- `zip_with`
+- ~~`zip_with`~~ — **implemented (Phase 18)**
 
 ### 2.4 Map (additional)
-- `map_concat`
-- `map_contains_key`
-- `map_filter`
-- `map_from_entries`
-- `map_zip_with`
-- `get` (map element)
+- ~~`map_concat`, `map_contains_key`, `map_filter`, `map_from_entries`, `map_zip_with`, `get`~~ — **implemented (Phase 18)**
 - `str_to_map`
 
 ### 2.5 Struct / type
-- `named_struct`
-- `struct`
+- ~~`named_struct`, `struct`~~ — **implemented (Phase 18)**
 - `transform_keys`, `transform_values`
 - `transform` — we have `array_transform`
 
@@ -105,8 +111,7 @@ Functions and aliases that exist in Sparkless 3.28.0 but are **not** implemented
 - `bitmap_bit_position`, `bitmap_bucket_number`, `bitmap_construct_agg`, `bitmap_count`, `bitmap_or_agg`
 
 ### 2.9 Boolean aggregates
-- `bool_and`, `bool_or`
-- `every`, `some`
+- ~~`bool_and`, `bool_or`, `every`, `some`~~ — **implemented (Phase 19)**
 
 ### 2.10 JVM / runtime (defer)
 - `broadcast`
@@ -119,7 +124,7 @@ Functions and aliases that exist in Sparkless 3.28.0 but are **not** implemented
 - `bround`
 - ~~`pmod`~~ — **implemented (Phase 17)**
 - ~~`factorial`~~ — **implemented (Phase 17)**
-- `width_bucket`
+- ~~`width_bucket`~~ — **implemented (Phase 19)**
 
 ### 2.12 String (additional)
 - `btrim`
@@ -140,23 +145,19 @@ Functions and aliases that exist in Sparkless 3.28.0 but are **not** implemented
 - `negate`, `negative`, `positive`
 
 ### 2.15 Aggregates (additional)
-- `any_value`
-- `count_if`
-- `covar_pop`, `covar_samp`
-- `corr`
-- `first`, `last` (aggregate)
-- `max_by`, `min_by`
+- ~~`any_value`, `count_if`, `max_by`, `min_by`, `percentile`, `product`~~ — **implemented (Phase 19)**
+- `first`, `last` (aggregate) — we have GroupedData.first, last
+- `covar_pop`, `covar_samp`, `corr`
 - `mean` — we have `avg`
 - `median`, `mode`
-- `percentile`, `percentile_approx`
-- `product`
+- `percentile_approx`
 - `std` — we have `stddev`
 - `stddev_pop`, `stddev_samp`
 - `var_pop`, `var_samp` — we have `variance`
 - `kurtosis`, `skewness`
 
 ### 2.16 Collect aggregates
-- `collect_list`, `collect_set`
+- ~~`collect_list`, `collect_set`~~ — **implemented (Phase 19)**
 
 ### 2.17 Datetime / timestamp (additional)
 - `convert_timezone`, `current_timezone`
@@ -188,14 +189,13 @@ Functions and aliases that exist in Sparkless 3.28.0 but are **not** implemented
 - `schema_of_csv`, `schema_of_json`
 
 ### 2.20 Try-* arithmetic
-- `try_add`, `try_divide`, `try_subtract`, `try_multiply`
+- ~~`try_add`, `try_divide`, `try_subtract`, `try_multiply`, `try_element_at`~~ — **implemented (Phase 19)**
 - `try_sum`, `try_avg`
-- `try_element_at`
 - `try_to_number`, `try_to_timestamp`
 
 ### 2.21 Type / cast
 - `to_char`, `to_number`, `to_varchar`
-- `typeof`
+- ~~`typeof`~~ — **implemented (Phase 19)**
 
 ### 2.22 URL / string
 - `url_decode`, `url_encode`

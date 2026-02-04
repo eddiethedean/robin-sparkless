@@ -10,8 +10,9 @@
 | [PYTHON_API](PYTHON_API.md) | Python API contract (Phase 4 PyO3 bridge): build, install, signatures; optional SQL and Delta |
 | [CONVERTER_STATUS](CONVERTER_STATUS.md) | Sparkless → robin-sparkless fixture converter |
 | [SPARKLESS_PARITY_STATUS](SPARKLESS_PARITY_STATUS.md) | Phase 5: pass/fail and failure reasons for converted fixtures |
-| [FULL_BACKEND_ROADMAP](FULL_BACKEND_ROADMAP.md) | Phased plan to full Sparkless backend replacement (Phases 12–19 done; ~55+ DataFrame methods, ~220+ functions, 128 fixtures; Phase 20 crate publish, Phase 21 Sparkless integration) |
+| [FULL_BACKEND_ROADMAP](FULL_BACKEND_ROADMAP.md) | Phased plan to full Sparkless backend replacement (Phases 12–19 done; ~165 functions, 128 fixtures; Phases 20–24 full parity, Phase 25 crate publish, Phase 26 Sparkless integration) |
 | [GAP_ANALYSIS_SPARKLESS_3.28](GAP_ANALYSIS_SPARKLESS_3.28.md) | Full gap analysis vs Sparkless 3.28.0 (installed API comparison) |
+| [PARITY_CHECK_SPARKLESS_3.28](PARITY_CHECK_SPARKLESS_3.28.md) | Double-check parity: implemented vs gap (Feb 2026) |
 | [PHASE15_GAP_LIST](PHASE15_GAP_LIST.md) | Function gap list (PYSPARK_FUNCTION_MATRIX vs robin-sparkless) |
 | [SPARKLESS_INTEGRATION_ANALYSIS](SPARKLESS_INTEGRATION_ANALYSIS.md) | Sparkless backend replacement strategy, architecture, test conversion |
 | [TEST_CREATION_GUIDE](TEST_CREATION_GUIDE.md) | How to add parity tests and convert Sparkless fixtures |

@@ -22,7 +22,7 @@ cargo test pyspark_parity_fixtures
 | Hand-written (`tests/fixtures/*.json`) | — | 128 | 0 | 1 (array_distinct) |
 | Sparkless converted (`tests/fixtures/converted/*.json`) | 0 (run converter when `SPARKLESS_EXPECTED_OUTPUTS` set) | — | — | — |
 
-**Target: 50+ tests passing** (hand-written + converted). **Current: 128 passing** (hand-written; array_distinct skipped due to order divergence). Phase 19 completed (aggregates, try_*, misc). Phase 18: array/map/struct (map_filter, zip_with, map_zip_with). Phase 17: datetime/unix, pmod, factorial. Phase 16: regexp. Phase 15: aliases, string, math, array_distinct. **Phase 21** (Sparkless integration) target: 200+ Sparkless tests passing with robin backend (after Phase 20: publish Rust crate). CI runs parity on hand-written (and optionally converted) fixtures; when Sparkless repo is available, run `make sparkless-parity` and update this doc.
+**Target: 50+ tests passing** (hand-written + converted). **Current: 128 passing** (hand-written; array_distinct skipped due to order divergence). Phase 19 completed (aggregates, try_*, misc). Phase 18: array/map/struct (map_filter, zip_with, map_zip_with). Phase 17: datetime/unix, pmod, factorial. Phase 16: regexp. Phase 15: aliases, string, math, array_distinct. **Phase 26** (Sparkless integration) target: 200+ Sparkless tests passing with robin backend (after Phases 20–24 full parity, Phase 25 publish Rust crate). CI runs parity on hand-written (and optionally converted) fixtures; when Sparkless repo is available, run `make sparkless-parity` and update this doc.
 
 ### When Sparkless repo is available
 

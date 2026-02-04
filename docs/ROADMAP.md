@@ -130,11 +130,11 @@ We know we're on track if:
 
 **Full backend targets** (see [FULL_BACKEND_ROADMAP.md](FULL_BACKEND_ROADMAP.md)):
 
-| Metric | Current | After Phase 19 | Full Backend (Phase 21) |
-|--------|---------|-----------------|-------------------------|
-| Parity fixtures | 128 | 150+ | 150+ |
-| Functions | ~175+ | 403 | 403 |
-| DataFrame methods | ~55+ | 85 | 85 |
+| Metric | Current | After Phase 24 (full parity) | Full Backend (Phase 26) |
+|--------|---------|------------------------------|-------------------------|
+| Parity fixtures | 128 | 180+ | 180+ |
+| Functions | ~165 | ~280 (Sparkless 3.28) | ~280 |
+| DataFrame methods | ~55+ | ~55+ | 85 |
 | Sparkless tests passing (robin backend) | 0 | — | 200+ |
 | PyO3 bridge | ✅ Yes (optional) | Yes | Yes |
 
@@ -198,7 +198,7 @@ We know we're on track if:
 
 ## Next Steps to Full Sparkless Parity
 
-To reach **full Sparkless parity** (robin-sparkless as a complete backend replacement), the remaining work is organized into phases 12–21 below (phases 9–17 complete). Reference: [FULL_BACKEND_ROADMAP.md](FULL_BACKEND_ROADMAP.md), [PYSPARK_FUNCTION_MATRIX](https://github.com/eddiethedean/sparkless/blob/main/PYSPARK_FUNCTION_MATRIX.md), [GAP_ANALYSIS_SPARKLESS_3.28.md](GAP_ANALYSIS_SPARKLESS_3.28.md).
+To reach **full Sparkless parity** (robin-sparkless as a complete backend replacement), the remaining work is organized into phases 12–26 below (phases 9–19 complete). **Phases 20–24** achieve full parity with Sparkless 3.28.0 in manageable increments. Reference: [FULL_BACKEND_ROADMAP.md](FULL_BACKEND_ROADMAP.md), [PYSPARK_FUNCTION_MATRIX](https://github.com/eddiethedean/sparkless/blob/main/PYSPARK_FUNCTION_MATRIX.md), [GAP_ANALYSIS_SPARKLESS_3.28.md](GAP_ANALYSIS_SPARKLESS_3.28.md).
 
 ### Phase overview
 
@@ -215,8 +215,13 @@ To reach **full Sparkless parity** (robin-sparkless as a complete backend replac
 | **17** | Remaining gaps 2: datetime/unix (unix_timestamp, from_unixtime, make_date, timestamp_*, pmod, factorial) | ✅ **COMPLETED** |
 | **18** | Remaining gaps 3: array/map/struct (array_append, array_prepend, array_insert, array_except/intersect/union, map_concat, map_from_entries, map_contains_key, get, named_struct, struct, map_filter, map_zip_with, zip_with) | ✅ **COMPLETED** |
 | **19** | Remaining gaps 4: aggregates and try_* (any_value, bool_and, bool_or, count_if, max_by, min_by, percentile, product, try_add/divide/subtract/multiply/sum/avg, try_element_at, width_bucket, elt, bit_length, typeof) | ✅ **COMPLETED** |
-| **20** | Prepare and publish robin-sparkless as a Rust crate (crates.io, API stability, docs, release) | 2–3 weeks |
-| **21** | Sparkless integration (BackendFactory "robin", 200+ tests), PyO3 surface | 4–6 weeks |
+| **20** | Full parity 1: ordering, aggregates, numeric | 1.5–2 weeks |
+| **21** | Full parity 2: string, binary, type, array/map/struct | 2 weeks |
+| **22** | Full parity 3: datetime extensions | 2 weeks |
+| **23** | Full parity 4: JSON, CSV, URL, misc | 2 weeks |
+| **24** | Full parity 5: bit, control, JVM stubs, random, crypto | 1.5–2 weeks |
+| **25** | Prepare and publish robin-sparkless as a Rust crate (crates.io, API stability, docs, release) | 2–3 weeks |
+| **26** | Sparkless integration (BackendFactory "robin", 200+ tests), PyO3 surface | 4–6 weeks |
 
 ---
 
@@ -346,7 +351,7 @@ To reach **full Sparkless parity** (robin-sparkless as a complete backend replac
 
 ---
 
-### Phase 19 – Remaining gaps 4: aggregates and try_* (3–4 weeks)
+### Phase 19 – Remaining gaps 4: aggregates and try_* ✅ **COMPLETED**
 
 **Goal**: Implement remaining aggregates and try_* / misc functions.
 
@@ -355,11 +360,79 @@ To reach **full Sparkless parity** (robin-sparkless as a complete backend replac
 - **Misc**: `width_bucket`, `elt`, `bit_length`, `typeof`.
 - **Parity**: `groupby_any_value`, `groupby_product`, `try_divide`, `width_bucket` (124 → 128).
 - **PyO3**: GroupedData methods; try_*, width_bucket, elt, bit_length, typeof.
-- **Outcome**: Aggregates and try_* gap closed; ready for Phase 20.
+- **Outcome**: Aggregates and try_* gap closed; ready for Phase 20 (full parity part 1).
 
 ---
 
-### Phase 20 – Prepare and publish robin-sparkless as a Rust crate (2–3 weeks)
+### Phase 20 – Full parity 1: ordering, aggregates, numeric (1.5–2 weeks)
+
+**Goal**: High-value ordering and aggregate functions. Reference: [PARITY_CHECK_SPARKLESS_3.28.md](PARITY_CHECK_SPARKLESS_3.28.md).
+
+- **Ordering**: `asc`, `asc_nulls_first`, `asc_nulls_last`, `desc`, `desc_nulls_first`, `desc_nulls_last` (return Expr for use in orderBy).
+- **Aggregates**: `covar_pop`, `covar_samp`, `corr` (as agg); `median`, `mode`; `stddev_pop`, `stddev_samp`, `var_pop`, `var_samp`; `kurtosis`, `skewness`; `try_sum`, `try_avg`; `percentile_approx` (defer if complex).
+- **Numeric**: `bround`; `negate`, `negative`, `positive`; `cot`, `csc`, `sec`; `e`, `pi` (constants).
+
+**Parity**: Fixtures for new aggregates. **Outcome**: ~25 new functions; ready for Phase 21.
+
+---
+
+### Phase 21 – Full parity 2: string, binary, type, array/map/struct (2 weeks)
+
+**Goal**: String/binary/type and collection extensions.
+
+- **String**: `btrim`; `locate` (alias for instr); `conv` (base conversion).
+- **Binary**: `hex`, `unhex`; `bin`; `getbit`; `decode`, `encode`; `to_binary`, `try_to_binary` (defer AES if heavy).
+- **Type/cast**: `to_char`, `to_number`, `to_varchar`; `try_to_number`, `try_to_timestamp`.
+- **Array**: `aggregate` (array aggregate); `array_agg`; `arrays_overlap`, `arrays_zip`; `explode_outer`, `posexplode_outer`.
+- **Map**: `str_to_map`.
+- **Struct**: `transform_keys`, `transform_values`.
+
+**Parity**: Fixtures for new functions. **Outcome**: ~20 new functions; ready for Phase 22.
+
+---
+
+### Phase 22 – Full parity 3: datetime extensions (2 weeks)
+
+**Goal**: Complete datetime function set.
+
+- `convert_timezone`, `current_timezone`; `curdate`; `date_diff`, `date_part`; `dateadd`, `datepart`; `dayname`, `weekday`; `days`, `hours`, `months`, `years`; `extract`; `localtimestamp`; `now`.
+- `make_timestamp`, `make_timestamp_ltz`, `make_timestamp_ntz`, `make_interval`, `make_dt_interval`, `make_ym_interval`; `timestampadd`, `timestampdiff`; `to_timestamp`, `to_timestamp_ltz`, `to_timestamp_ntz`; `from_utc_timestamp`, `to_utc_timestamp`; `unix_micros`, `unix_millis`, `unix_seconds`.
+
+**Parity**: Fixtures for datetime. **Outcome**: ~25 new functions; ready for Phase 23.
+
+---
+
+### Phase 23 – Full parity 4: JSON, CSV, URL, misc (2 weeks)
+
+**Goal**: JSON/CSV/URL and misc helpers.
+
+- **JSON**: `json_array_length`, `json_object_keys`, `json_tuple`; `parse_url`.
+- **Schema/I/O**: `from_csv`, `to_csv`; `schema_of_csv`, `schema_of_json`.
+- **URL**: `url_decode`, `url_encode`.
+- **Misc**: `isin`; `equal_null`; `hash`; `inline`, `inline_outer`; `sentences`, `sequence`; `shiftLeft`, `shiftRight`, `shiftRightUnsigned`; `shuffle`; `stack`; `version`; `call_function` (if in scope).
+
+**Parity**: Fixtures. **Outcome**: ~20 new functions; ready for Phase 24.
+
+---
+
+### Phase 24 – Full parity 5: bit, control, JVM stubs, random, crypto (1.5–2 weeks)
+
+**Goal**: Bit operations, control flow, JVM compatibility stubs, random, crypto.
+
+- **Bit**: `bit_and`, `bit_or`, `bit_xor`, `bit_count`, `bit_get`; `bitwiseNOT`, `bitwise_not`; `bitmap_*` (if in Sparkless 3.28).
+- **Control**: `assert_true`, `raise_error`.
+- **JVM stubs**: `broadcast`, `spark_partition_id`, `input_file_name`, `monotonically_increasing_id`, `current_catalog`, `current_database`, `current_schema`, `current_user`, `user` — no-ops or placeholders for API compatibility.
+- **Regression**: `regr_*` (defer if low priority).
+- **Random**: `rand`, `randn`; `udf`, `pandas_udf` — stub or minimal support.
+- **Crypto**: `aes_decrypt`, `aes_encrypt`, `try_aes_decrypt` — implement if feasible; else document as deferred.
+
+**Defer**: XML (`from_xml`, `to_xml`, `xpath_*`), ML/HLL — document as out of scope.
+
+**Parity**: Target 128 → 180+ fixtures across Phases 20–24. **PyO3**: Expose all new functions. **Outcome**: Full parity with Sparkless 3.28.0; ~280 functions; ready for Phase 25 (crate publish).
+
+---
+
+### Phase 25 – Prepare and publish robin-sparkless as a Rust crate (2–3 weeks)
 
 **Goal**: Make the library ready for public use as a Rust dependency and (optionally) a Python wheel before Sparkless integration.
 
@@ -373,14 +446,14 @@ To reach **full Sparkless parity** (robin-sparkless as a complete backend replac
 
 ---
 
-### Phase 21 – Sparkless integration & PyO3 surface (4–6 weeks)
+### Phase 26 – Sparkless integration & PyO3 surface (4–6 weeks)
 
 **Goal**: Make robin-sparkless a runnable backend for Sparkless and keep the Python API in sync.
 
-- **Sparkless repo**: Add "robin" backend option to BackendFactory; when selected, delegate DataFrame execution to robin-sparkless via PyO3 (using the published crate or wheel from Phase 20).
+- **Sparkless repo**: Add "robin" backend option to BackendFactory; when selected, delegate DataFrame execution to robin-sparkless via PyO3 (using the published crate or wheel from Phase 25).
 - **Fallback**: When an operation is not supported, raise a clear error or fall back to Python Polars; document behavior.
 - **Target**: 200+ Sparkless tests passing with robin backend (current: 0).
-- **PyO3**: Expose new Rust functions (Phases 12–17) on Python `Column` and module-level API; keep [PYTHON_API.md](PYTHON_API.md) updated.
+- **PyO3**: Expose new Rust functions (Phases 20–24) on Python `Column` and module-level API; keep [PYTHON_API.md](PYTHON_API.md) updated.
 
 **Outcome**: Sparkless can run against robin-sparkless; 200+ tests passing; Python API matches full function set.
 
@@ -397,11 +470,11 @@ To reach **full Sparkless parity** (robin-sparkless as a complete backend replac
 
 ### Summary metrics (full parity targets)
 
-| Metric | Current | After Phase 16 | After Phase 19 | After Phase 20 (crate published) | Full Backend (Phase 21) |
-|--------|---------|----------------|----------------|----------------------------------|-------------------------|
-| Parity fixtures | 93 | 93 | 150+ | 150+ | 150+ |
-| Functions | ~175+ | ~175 | 403 | 403 | 403 |
-| DataFrame methods | ~55+ | ~55+ | 85 | 85 | 85 |
+| Metric | Current | After Phase 19 | After Phase 24 (full parity) | After Phase 25 (crate) | Full Backend (Phase 26) |
+|--------|---------|----------------|------------------------------|------------------------|-------------------------|
+| Parity fixtures | 128 | 128 | 180+ | 180+ | 180+ |
+| Functions | ~165 | ~165 | ~280 | ~280 | ~280 |
+| DataFrame methods | ~55+ | ~55+ | ~55+ | ~55+ | 85 |
 | Crate on crates.io | No | — | — | Yes | Yes |
 | Sparkless tests passing (robin backend) | 0 | — | — | — | 200+ |
 

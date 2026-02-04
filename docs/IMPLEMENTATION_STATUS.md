@@ -84,8 +84,9 @@ Robin-sparkless is designed to **replace the backend logic** of [Sparkless](http
    - **Phase 17** ✅ **COMPLETED**: Datetime/unix — unix_timestamp, to_unix_timestamp, from_unixtime, make_date, timestamp_seconds, timestamp_millis, timestamp_micros, unix_date, date_from_unix_date; math: pmod, factorial. Parity fixtures: unix_timestamp, from_unixtime, make_date, timestamp_seconds, timestamp_millis, timestamp_micros, unix_date, date_from_unix_date, pmod, factorial (103 fixtures total). PyO3: module and Column methods for all.
    - **Phase 18** ✅ **COMPLETED**: Array/map/struct — array_append, array_prepend, array_insert, array_except/intersect/union, zip_with, map_concat, map_filter, map_zip_with, named_struct (124 fixtures). PyO3: map_filter_value_gt, zip_with_coalesce, map_zip_with_coalesce.
    - **Phase 19** ✅ **COMPLETED**: Aggregates (any_value, bool_and, bool_or, count_if, max_by, min_by, percentile, product, collect_list, collect_set), try_* (try_divide, try_add, try_subtract, try_multiply), misc (width_bucket, elt, bit_length, typeof). Parity fixtures: groupby_any_value, groupby_product, try_divide, width_bucket (128 fixtures). PyO3: GroupedData methods; try_*, width_bucket, elt, bit_length, typeof.
-   - **Phase 20**: Prepare and publish robin-sparkless as a Rust crate (crates.io, API stability, docs, release workflow; optional PyPI wheel).
-   - **Phase 21**: Sparkless integration (BackendFactory "robin", 200+ tests passing).
+   - **Phases 20–24**: Full parity with Sparkless 3.28.0 (ordering, aggregates, string/binary/type, datetime, JSON/CSV/URL, bit/control/JVM/random/crypto).
+   - **Phase 25**: Prepare and publish robin-sparkless as a Rust crate (crates.io, API stability, docs, release workflow; optional PyPI wheel).
+   - **Phase 26**: Sparkless integration (BackendFactory "robin", 200+ tests passing).
 
 11. **Sparkless integration** (in Sparkless repo, after Phase 17)
    - Fixture converter: Sparkless `expected_outputs/` JSON → robin-sparkless fixtures

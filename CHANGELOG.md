@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Planned
+
+- **Phases 20–24 – Full parity** with Sparkless 3.28.0: Five manageable phases before crate publish. Phase 20: ordering, aggregates, numeric. Phase 21: string, binary, type, array/map/struct. Phase 22: datetime extensions. Phase 23: JSON, CSV, URL, misc. Phase 24: bit, control, JVM stubs, random, crypto. Target: 180+ parity fixtures; ~280 total functions. Est. 1.5–2 weeks per phase. See [ROADMAP.md](docs/ROADMAP.md) and [PARITY_CHECK_SPARKLESS_3.28.md](docs/PARITY_CHECK_SPARKLESS_3.28.md).
+
 ### Added
 
 - **Phase 19 – Remaining gaps 4: aggregates, try_*, misc** ✅ **COMPLETED**
@@ -40,7 +44,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Batch 2 (string)**: `left`, `right`, `replace` (literal), `startswith`, `endswith`, `contains`, `like` (SQL LIKE → regex), `ilike`, `rlike`/`regexp`. Fixture `string_left_right_replace`.
   - **Batch 3 (math)**: `cosh`, `sinh`, `tanh`, `acosh`, `asinh`, `atanh`, `cbrt`, `expm1`, `log1p`, `log10`, `log2`, `rint`, `hypot` (UDFs in udfs.rs + Column/functions + PyO3). Fixture `math_cosh_cbrt`.
   - **Batch 4 (array)**: `array_distinct`. Fixture `array_distinct`.
-  - Parity fixtures: 84 → 88. Remaining gaps (string/regex, datetime/unix, array/map/struct, aggregates/try_*) are planned in ROADMAP Phases 16–19; then Phase 20 (publish crate), Phase 21 (Sparkless integration). Gap list: [docs/PHASE15_GAP_LIST.md](docs/PHASE15_GAP_LIST.md), [docs/GAP_ANALYSIS_SPARKLESS_3.28.md](docs/GAP_ANALYSIS_SPARKLESS_3.28.md).
+  - Parity fixtures: 84 → 88. Remaining gaps addressed in Phases 16–19; then Phases 20–24 (full parity), Phase 25 (publish crate), Phase 26 (Sparkless integration). Gap list: [docs/PHASE15_GAP_LIST.md](docs/PHASE15_GAP_LIST.md), [docs/GAP_ANALYSIS_SPARKLESS_3.28.md](docs/GAP_ANALYSIS_SPARKLESS_3.28.md).
 
 - **Phase 1 – Foundation** ✅
   - Structural alignment: split `dataframe.rs` into `transformations.rs`, `aggregations.rs`, `joins.rs`.
