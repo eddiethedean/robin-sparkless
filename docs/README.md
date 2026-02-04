@@ -1,5 +1,7 @@
 # Robin Sparkless Documentation
 
+This page is the **legacy doc index**. The full documentation is built with [MkDocs](https://www.mkdocs.org/) and published on [Read the Docs](https://robin-sparkless.readthedocs.io/). To build locally: `pip install -r docs/requirements.txt` then `mkdocs serve`.
+
 | Document | Description |
 |----------|-------------|
 | [QUICKSTART](QUICKSTART.md) | Build, install, basic usage, optional features (SQL, Delta), troubleshooting, benchmarks |

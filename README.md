@@ -4,6 +4,7 @@
 
 [![crates.io](https://img.shields.io/crates/v/robin-sparkless.svg)](https://crates.io/crates/robin-sparkless)
 [![docs.rs](https://docs.rs/robin-sparkless/badge.svg)](https://docs.rs/robin-sparkless)
+[![Documentation](https://readthedocs.org/projects/robin-sparkless/badge/?version=latest)](https://robin-sparkless.readthedocs.io/en/latest/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 ---
@@ -134,13 +135,12 @@ CI runs the same checks on push/PR (see [.github/workflows/ci.yml](.github/workf
 
 ## Documentation
 
+- [**Full documentation (Read the Docs)**](https://robin-sparkless.readthedocs.io/) — Quickstart, Python API, reference, and Sparkless integration (MkDocs)
 - [**API reference (docs.rs)**](https://docs.rs/robin-sparkless) — Crate API
-- [**docs/README.md**](docs/README.md) — Documentation index
-- [**QUICKSTART.md**](docs/QUICKSTART.md) — Build, usage, optional features, benchmarks
-- [**ROADMAP.md**](docs/ROADMAP.md) — Development roadmap and Sparkless integration
-- [**PYSPARK_DIFFERENCES.md**](docs/PYSPARK_DIFFERENCES.md) — Known divergences from PySpark
-- [**RELEASING.md**](docs/RELEASING.md) — Releasing and publishing to crates.io
-- [**SPARKLESS_INTEGRATION_ANALYSIS.md**](docs/SPARKLESS_INTEGRATION_ANALYSIS.md) — Sparkless backend strategy and architecture
+- [**QUICKSTART**](docs/QUICKSTART.md) — Build, usage, optional features, benchmarks
+- [**ROADMAP**](docs/ROADMAP.md) — Development roadmap and Sparkless integration
+- [**PYSPARK_DIFFERENCES**](docs/PYSPARK_DIFFERENCES.md) — Known divergences from PySpark
+- [**RELEASING**](docs/RELEASING.md) — Releasing and publishing to crates.io
 
 See also [CHANGELOG.md](CHANGELOG.md) for version history.
 

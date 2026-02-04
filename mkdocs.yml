@@ -1,0 +1,77 @@
+# MkDocs configuration for Read the Docs and local builds
+# https://www.mkdocs.org/user-guide/configuration/
+
+site_name: Robin Sparkless
+site_description: PySpark-style DataFrames in Rust on Polars—no JVM
+site_url: https://robin-sparkless.readthedocs.io/
+repo_url: https://github.com/eddiethedean/robin-sparkless
+repo_name: eddiethedean/robin-sparkless
+edit_uri: edit/main/docs/
+copyright: Robin Sparkless contributors
+
+theme:
+  name: material
+  palette:
+    - scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - search.suggest
+    - search.highlight
+
+plugins:
+  - search
+
+markdown_extensions:
+  - admonition
+  - pymdownx.superfences
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - toc:
+      permalink: true
+
+nav:
+  - Home: index.md
+  - Getting started:
+    - Quickstart: QUICKSTART.md
+    - Python API: PYTHON_API.md
+    - Releasing: RELEASING.md
+  - Reference:
+    - PySpark differences: PYSPARK_DIFFERENCES.md
+    - Parity status: PARITY_STATUS.md
+    - Robin-Sparkless missing: ROBIN_SPARKLESS_MISSING.md
+  - Sparkless integration:
+    - Integration analysis: SPARKLESS_INTEGRATION_ANALYSIS.md
+    - Full backend roadmap: FULL_BACKEND_ROADMAP.md
+    - Refactor plan: SPARKLESS_REFACTOR_PLAN.md
+    - Readiness plan: READINESS_FOR_SPARKLESS_PLAN.md
+    - Logical plan format: LOGICAL_PLAN_FORMAT.md
+  - Development:
+    - Roadmap: ROADMAP.md
+    - Test creation guide: TEST_CREATION_GUIDE.md
+    - Converter status: CONVERTER_STATUS.md
+    - Sparkless parity status: SPARKLESS_PARITY_STATUS.md
+  - Status & analysis:
+    - Signature gap analysis: SIGNATURE_GAP_ANALYSIS.md
+    - Signature alignment tasks: SIGNATURE_ALIGNMENT_TASKS.md
+    - Gap analysis (Sparkless 3.28): GAP_ANALYSIS_SPARKLESS_3.28.md
+    - Parity check (Sparkless 3.28): PARITY_CHECK_SPARKLESS_3.28.md
+    - Phase 15 gap list: PHASE15_GAP_LIST.md
+    - Sparkless 3.28 API snapshot: SPARKLESS_3.28_API_SNAPSHOT.md
+    - Sparkless parity issues reported: SPARKLESS_PARITY_ISSUES_REPORTED.md
+    - Implementation status: IMPLEMENTATION_STATUS.md
+    - Migration status: MIGRATION_STATUS.md
+    - Compilation status: COMPILATION_STATUS.md

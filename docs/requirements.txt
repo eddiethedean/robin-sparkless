@@ -1,0 +1,4 @@
+# Docs build for MkDocs (Read the Docs and local)
+mkdocs>=1.5,<2
+mkdocs-material>=9.5,<10
+pymdown-extensions>=10,<11

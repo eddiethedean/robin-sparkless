@@ -47,3 +47,12 @@ htmlcov/
 
 # Maturin
 *.whl
+
+# Built documentation (MkDocs, Sphinx, etc.)
+site/
+docs/_build/
+_build/
+
+# Artifacts
+artifacts/
+artifact/
