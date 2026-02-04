@@ -31,7 +31,7 @@ Python module is only compiled when the `pyo3` feature is enabled. Default `carg
 
 | Rust type       | Python class / function | Notes |
 |-----------------|-------------------------|--------|
-| SparkSession    | `SparkSession`          | `builder()`, `get_or_create()`, `create_dataframe`, `read_csv`, `read_parquet`, `read_json`, `is_case_sensitive()`; with `sql`: `sql(query)`, `create_or_replace_temp_view(name, df)`, `table(name)`; with `delta`: `read_delta(path)`, `read_delta_version(path, version)` |
+| SparkSession    | `SparkSession`          | `builder()`, `get_or_create()`, `create_dataframe`, `create_dataframe_from_rows` (Phase 25), `read_csv`, `read_parquet`, `read_json`, `is_case_sensitive()`; with `sql`: `sql(query)`, `create_or_replace_temp_view(name, df)`, `table(name)`; with `delta`: `read_delta(path)`, `read_delta_version(path, version)` |
 | SparkSessionBuilder | `SparkSessionBuilder` | `app_name()`, `master()`, `config()`, `get_or_create()` |
 | DataFrame       | `DataFrame` | `filter`, `select`, `with_column`, `order_by`, `group_by`, `join`, `union`, `union_by_name`, `distinct`, `drop`, `dropna`, `fillna`, `limit`, `with_column_renamed`, `count`, `show`, `collect`; **Phase 12**: `sample`, `random_split`, `first`, `head`, `tail`, `take`, `is_empty`, `to_json`, `to_pandas`, `explain`, `print_schema`, `checkpoint`, `local_checkpoint`, `repartition`, `coalesce`, `offset`, `summary`, `to_df`, `select_expr`, `col_regex`, `with_columns`, `with_columns_renamed`, `stat`, `na`; with `delta`: `write_delta(path, overwrite)` |
 | DataFrameStat   | `DataFrameStat` (returned by `df.stat()`) | `cov(col1, col2)` → `float`, `corr(col1, col2)` → `float` |
@@ -46,9 +46,11 @@ Python module is only compiled when the `pyo3` feature is enabled. Default `carg
   - `SparkSession.builder()` → `SparkSessionBuilder`
   - `get_or_create()` → `SparkSession`
   - `create_dataframe(data: list of (int, int, str), column_names: list of 3 str)` → `DataFrame`
+  - **Phase 25**: `create_dataframe_from_rows(data: list[dict] | list[list], schema: list[tuple[str, str]])` → `DataFrame` (arbitrary schema; each row is a dict keyed by column name or a list of values in schema order).
   - `read_csv(path: str)`, `read_parquet(path: str)`, `read_json(path: str)` → `DataFrame`
   - `is_case_sensitive()` → `bool`
   - **When `sql` feature enabled**: `sql(query: str)` → `DataFrame`; `create_or_replace_temp_view(name: str, df: DataFrame)` → `None`; `table(name: str)` → `DataFrame`
+  - **Phase 25 (plan interpreter)**: Module-level `execute_plan(data: list[dict]|list[list], schema: list[tuple[str, str]], plan_json: str)` → `DataFrame`. Run a serialized logical plan; call `.collect()` on the result to get `list[dict]`. `plan_json` is e.g. `json.dumps([{"op": "filter", "payload": ...}, ...])`. See [LOGICAL_PLAN_FORMAT.md](LOGICAL_PLAN_FORMAT.md).
 
 - **DataFrame**
   - `filter(condition: Column)` → `DataFrame`

@@ -1,5 +1,6 @@
 use crate::dataframe::DataFrame;
-use polars::prelude::{DataFrame as PlDataFrame, NamedFrom, PolarsError, Series};
+use polars::prelude::{DataType, DataFrame as PlDataFrame, NamedFrom, PolarsError, Series, TimeUnit};
+use serde_json::Value as JsonValue;
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
@@ -184,6 +185,148 @@ impl SparkSession {
     /// Create a DataFrame from a Polars DataFrame
     pub fn create_dataframe_from_polars(&self, df: PlDataFrame) -> DataFrame {
         DataFrame::from_polars_with_options(df, self.is_case_sensitive())
+    }
+
+    /// Create a DataFrame from rows and a schema (arbitrary column count and types).
+    ///
+    /// `rows`: each inner vec is one row; length must match schema length. Values are JSON-like (i64, f64, string, bool, null).
+    /// `schema`: list of (column_name, dtype_string), e.g. `[("id", "bigint"), ("name", "string")]`.
+    /// Supported dtype strings: bigint, int, long, double, float, string, str, varchar, boolean, bool, date, timestamp, datetime.
+    pub fn create_dataframe_from_rows(
+        &self,
+        rows: Vec<Vec<JsonValue>>,
+        schema: Vec<(String, String)>,
+    ) -> Result<DataFrame, PolarsError> {
+        use chrono::{NaiveDate, NaiveDateTime};
+
+        let mut cols: Vec<Series> = Vec::with_capacity(schema.len());
+
+        for (col_idx, (name, type_str)) in schema.iter().enumerate() {
+            let type_lower = type_str.trim().to_lowercase();
+            let s = match type_lower.as_str() {
+                "int" | "bigint" | "long" => {
+                    let vals: Vec<Option<i64>> = rows
+                        .iter()
+                        .map(|row| {
+                            let v = row.get(col_idx).cloned().unwrap_or(JsonValue::Null);
+                            match v {
+                                JsonValue::Number(n) => n.as_i64(),
+                                JsonValue::Null => None,
+                                _ => None,
+                            }
+                        })
+                        .collect();
+                    Series::new(name.as_str().into(), vals)
+                }
+                "double" | "float" | "double_precision" => {
+                    let vals: Vec<Option<f64>> = rows
+                        .iter()
+                        .map(|row| {
+                            let v = row.get(col_idx).cloned().unwrap_or(JsonValue::Null);
+                            match v {
+                                JsonValue::Number(n) => n.as_f64(),
+                                JsonValue::Null => None,
+                                _ => None,
+                            }
+                        })
+                        .collect();
+                    Series::new(name.as_str().into(), vals)
+                }
+                "string" | "str" | "varchar" => {
+                    let vals: Vec<Option<String>> = rows
+                        .iter()
+                        .map(|row| {
+                            let v = row.get(col_idx).cloned().unwrap_or(JsonValue::Null);
+                            match v {
+                                JsonValue::String(s) => Some(s),
+                                JsonValue::Null => None,
+                                other => Some(other.to_string()),
+                            }
+                        })
+                        .collect();
+                    Series::new(name.as_str().into(), vals)
+                }
+                "boolean" | "bool" => {
+                    let vals: Vec<Option<bool>> = rows
+                        .iter()
+                        .map(|row| {
+                            let v = row.get(col_idx).cloned().unwrap_or(JsonValue::Null);
+                            match v {
+                                JsonValue::Bool(b) => Some(b),
+                                JsonValue::Null => None,
+                                _ => None,
+                            }
+                        })
+                        .collect();
+                    Series::new(name.as_str().into(), vals)
+                }
+                "date" => {
+                    let epoch = NaiveDate::from_ymd_opt(1970, 1, 1)
+                        .ok_or_else(|| PolarsError::ComputeError("invalid epoch date".into()))?;
+                    let vals: Vec<Option<i32>> = rows
+                        .iter()
+                        .map(|row| {
+                            let v = row.get(col_idx).cloned().unwrap_or(JsonValue::Null);
+                            match v {
+                                JsonValue::String(s) => NaiveDate::parse_from_str(&s, "%Y-%m-%d")
+                                    .ok()
+                                    .map(|d| (d - epoch).num_days() as i32),
+                                JsonValue::Null => None,
+                                _ => None,
+                            }
+                        })
+                        .collect();
+                    let series = Series::new(name.as_str().into(), vals);
+                    series.cast(&DataType::Date).map_err(|e| {
+                        PolarsError::ComputeError(format!("date cast: {}", e).into())
+                    })?
+                }
+                "timestamp" | "datetime" | "timestamp_ntz" => {
+                    let vals: Vec<Option<i64>> = rows
+                        .iter()
+                        .map(|row| {
+                            let v = row.get(col_idx).cloned().unwrap_or(JsonValue::Null);
+                            match v {
+                                JsonValue::String(s) => {
+                                    let parsed = NaiveDateTime::parse_from_str(&s, "%Y-%m-%dT%H:%M:%S%.f")
+                                        .or_else(|_| NaiveDateTime::parse_from_str(&s, "%Y-%m-%dT%H:%M:%S"))
+                                        .or_else(|_| {
+                                            NaiveDate::parse_from_str(&s, "%Y-%m-%d")
+                                                .map(|d| d.and_hms_opt(0, 0, 0).unwrap())
+                                        });
+                                    parsed.ok().map(|dt| dt.and_utc().timestamp_micros())
+                                }
+                                JsonValue::Number(n) => n.as_i64(),
+                                JsonValue::Null => None,
+                                _ => None,
+                            }
+                        })
+                        .collect();
+                    let series = Series::new(name.as_str().into(), vals);
+                    series
+                        .cast(&DataType::Datetime(TimeUnit::Microseconds, None))
+                        .map_err(|e| {
+                            PolarsError::ComputeError(format!("datetime cast: {}", e).into())
+                        })?
+                }
+                _ => {
+                    return Err(PolarsError::ComputeError(
+                        format!(
+                            "create_dataframe_from_rows: unsupported type '{}' for column '{}'",
+                            type_str, name
+                        )
+                        .into(),
+                    ));
+                }
+            };
+            cols.push(s);
+        }
+
+        let pl_df = PlDataFrame::new(cols.iter().map(|s| s.clone().into()).collect())?;
+        Ok(DataFrame::from_polars_with_options(
+            pl_df,
+            self.is_case_sensitive(),
+        ))
     }
 
     /// Read a CSV file.

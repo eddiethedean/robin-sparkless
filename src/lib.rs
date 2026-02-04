@@ -7,6 +7,7 @@ pub mod column;
 pub mod dataframe;
 pub mod expression;
 pub mod functions;
+pub mod plan;
 pub mod schema;
 pub mod session;
 pub mod type_coercion;

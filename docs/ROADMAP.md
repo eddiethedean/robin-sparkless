@@ -224,7 +224,7 @@ To reach **full Sparkless parity** (robin-sparkless as a complete backend replac
 | **22** | Full parity 3: datetime extensions | ✅ **COMPLETED** |
 | **23** | Full parity 4: JSON, CSV, URL, misc | ✅ **COMPLETED** |
 | **24** | Full parity 5: bit, control, JVM stubs, random, crypto | ✅ **PARTIALLY COMPLETED** (bit/control/JVM/random implemented; AES crypto deferred) |
-| **25** | Readiness for post-refactor merge (plan interpreter, expression interpreter, plan schema, plan fixtures, create_dataframe_from_rows) | 3–4 weeks |
+| **25** | Readiness for post-refactor merge (plan interpreter, expression interpreter, plan schema, plan fixtures, create_dataframe_from_rows) | ✅ **COMPLETED** |
 | **26** | Prepare and publish robin-sparkless as a Rust crate (crates.io, API stability, docs, release) | 2–3 weeks |
 | **27** | Sparkless integration (BackendFactory "robin", 200+ tests), PyO3 surface | 4–6 weeks |
 
@@ -437,15 +437,15 @@ To reach **full Sparkless parity** (robin-sparkless as a complete backend replac
 
 ---
 
-### Phase 25 – Readiness for post-refactor merge (3–4 weeks)
+### Phase 25 – Readiness for post-refactor merge (3–4 weeks) ✅ **COMPLETED**
 
 **Goal**: Prepare robin-sparkless so that when Sparkless completes its [refactor plan](SPARKLESS_REFACTOR_PLAN.md) (serializable logical plan and `materialize_from_plan`), integration is a thin adapter. See [READINESS_FOR_SPARKLESS_PLAN.md](READINESS_FOR_SPARKLESS_PLAN.md) for full detail.
 
-- **Plan interpreter**: Add `execute_plan(session, data, schema, logical_plan)` in Rust (e.g. `src/plan.rs` or `src/session.rs`) that runs a serialized op list using existing DataFrame API; expose in Python as `robin_sparkless.execute_plan(data, schema, logical_plan)` returning list of dicts. Sparkless `RobinMaterializer.materialize_from_plan` can then call this and convert to Row.
-- **Logical plan schema**: Define and document a minimal backend plan format we consume (op names + payload shapes for filter, select, join, etc.; expression tree as dict/list/primitives). Add `docs/LOGICAL_PLAN_FORMAT.md` (optional coordination with Sparkless); if Sparkless chooses a different format, add a thin plan adapter.
-- **Expression interpreter**: In Rust, turn serialized expression trees (e.g. `{"op": "gt", "left": {"col": "age"}, "right": {"lit": 30}}`) into Polars `Expr` / our Column. Handle `col`, `lit`, comparisons, logical ops, and a subset of functions; expand as needed for parity fixtures.
-- **Plan-based fixtures and tests**: Add JSON fixtures under `tests/fixtures/plans/` (schema + input rows + plan + expected output); test that `execute_plan` produces expected schema and rows. Start with filter+select+limit, then join; reuse Sparkless sample plans when available.
-- **Flexible DataFrame creation (Python)**: Add `create_dataframe_from_rows(data: list[dict], schema: ...)` (or equivalent) so Sparkless can pass arbitrary schema and list of dicts; keep existing 3-tuple `create_dataframe` for backward compatibility.
+- **Plan interpreter** ✅: `execute_plan(session, data, schema, plan)` in Rust (`src/plan/`); exposed in Python as `robin_sparkless.execute_plan(data, schema, plan_json)` returning a DataFrame (call `.collect()` for list of dicts).
+- **Logical plan schema** ✅: [docs/LOGICAL_PLAN_FORMAT.md](LOGICAL_PLAN_FORMAT.md) defines op names, payload shapes, and expression tree format.
+- **Expression interpreter** ✅: `src/plan/expr.rs` turns serialized expression trees into Polars `Expr` (col, lit, comparisons, and, or, not, upper, lower, coalesce, eq_null_safe).
+- **Plan-based fixtures and tests** ✅: `tests/fixtures/plans/` (filter_select_limit, join_simple); `plan_parity_fixtures` test in `tests/parity.rs`.
+- **Flexible DataFrame creation** ✅: Rust `create_dataframe_from_rows(rows, schema)` in session; Python `create_dataframe_from_rows(data, schema)` on SparkSession.
 
 **Outcome**: When Sparkless emits a logical plan, we can execute it via `execute_plan`; Sparkless robin backend becomes a thin wrapper. Ready for Phase 26 (crate publish).
 
@@ -494,7 +494,7 @@ To reach **full Sparkless parity** (robin-sparkless as a complete backend replac
 | Parity fixtures | 149 | 149 | 180+ | 180+ | 180+ | 180+ |
 | Functions | ~283 | ~283 | ~280 | ~280 | ~280 | ~280 |
 | DataFrame methods | ~55+ | ~55+ | ~55+ | ~55+ | ~55+ | 85 |
-| Plan interpreter / execute_plan | No | — | — | Yes | Yes | Yes |
+| Plan interpreter / execute_plan | Yes | — | — | Yes | Yes | Yes |
 | Crate on crates.io | No | — | — | — | Yes | Yes |
 | Sparkless tests passing (robin backend) | 0 | — | — | — | — | 200+ |
 

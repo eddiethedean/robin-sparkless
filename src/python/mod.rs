@@ -3,6 +3,8 @@
 
 use crate::column::Column as RsColumn;
 use crate::dataframe::JoinType;
+use crate::plan;
+use serde_json::Value as JsonValue;
 use crate::functions::SortOrder;
 use crate::functions::{
     acos, acosh, add_months, array_append, array_compact, array_distinct, array_except,
@@ -46,6 +48,82 @@ use polars::prelude::Expr;
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 use std::path::Path;
+
+/// Convert a Python scalar to serde_json::Value for plan/row data.
+fn py_to_json_value(value: &Bound<'_, pyo3::types::PyAny>) -> PyResult<JsonValue> {
+    if value.is_none() {
+        return Ok(JsonValue::Null);
+    }
+    if let Ok(x) = value.extract::<i64>() {
+        return Ok(JsonValue::Number(serde_json::Number::from(x)));
+    }
+    if let Ok(x) = value.extract::<f64>() {
+        if let Some(n) = serde_json::Number::from_f64(x) {
+            return Ok(JsonValue::Number(n));
+        }
+        return Ok(JsonValue::Null);
+    }
+    if let Ok(x) = value.extract::<bool>() {
+        return Ok(JsonValue::Bool(x));
+    }
+    if let Ok(x) = value.extract::<String>() {
+        return Ok(JsonValue::String(x));
+    }
+    Err(pyo3::exceptions::PyTypeError::new_err(
+        "create_dataframe_from_rows / execute_plan: row values must be None, int, float, bool, or str",
+    ))
+}
+
+/// Execute a logical plan (Phase 25). Returns a DataFrame; call .collect() to get list of dicts.
+/// data: list of dicts or list of lists (rows). schema: list of (name, dtype_str).
+/// plan_json: JSON string of the plan, e.g. json.dumps([{"op": "filter", "payload": ...}, ...]).
+#[pyfunction]
+fn py_execute_plan(
+    py: Python<'_>,
+    data: &Bound<'_, pyo3::types::PyAny>,
+    schema: Vec<(String, String)>,
+    plan_json: &str,
+) -> PyResult<PyDataFrame> {
+    let data_list = data
+        .extract::<Vec<Bound<'_, pyo3::types::PyAny>>>()
+        .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+    let mut rows: Vec<Vec<JsonValue>> = Vec::with_capacity(data_list.len());
+    let names: Vec<&str> = schema.iter().map(|(n, _)| n.as_str()).collect();
+    for row_any in &data_list {
+        if let Ok(dict) = row_any.downcast::<PyDict>() {
+            let row: Vec<JsonValue> = names
+                .iter()
+                .map(|name| {
+                    let v = dict
+                        .get_item(*name)
+                        .ok()
+                        .flatten()
+                        .unwrap_or_else(|| py.None().into_bound(py));
+                    py_to_json_value(&v)
+                })
+                .collect::<PyResult<Vec<_>>>()?;
+            rows.push(row);
+        } else if let Ok(list) = row_any.extract::<Vec<Bound<'_, pyo3::types::PyAny>>>() {
+            let row: Vec<JsonValue> = list
+                .iter()
+                .map(|v| py_to_json_value(v))
+                .collect::<PyResult<Vec<_>>>()?;
+            rows.push(row);
+        } else {
+            return Err(pyo3::exceptions::PyTypeError::new_err(
+                "execute_plan: each row must be a dict or a list",
+            ));
+        }
+    }
+    let plan_values: Vec<JsonValue> = serde_json::from_str(plan_json)
+        .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
+    let spark = SparkSession::builder()
+        .app_name("execute_plan")
+        .get_or_create();
+    let df = plan::execute_plan(&spark, rows, schema, &plan_values)
+        .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+    Ok(PyDataFrame { inner: df })
+}
 
 /// Python module entry point.
 #[pymodule]
@@ -357,6 +435,7 @@ fn robin_sparkless(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("rand", wrap_pyfunction!(py_rand, m)?)?;
     m.add("randn", wrap_pyfunction!(py_randn, m)?)?;
     m.add("broadcast", wrap_pyfunction!(py_broadcast, m)?)?;
+    m.add("execute_plan", wrap_pyfunction!(py_execute_plan, m)?)?;
     Ok(())
 }
 
@@ -2709,6 +2788,53 @@ impl PySparkSession {
         let df = self
             .inner
             .create_dataframe(data_rust, names_ref)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        Ok(PyDataFrame { inner: df })
+    }
+
+    /// Create a DataFrame from a list of dicts (or list of lists) and a schema.
+    /// schema: list of (name, dtype_str) e.g. [("id", "bigint"), ("name", "string")].
+    /// data: list of dicts (keys = column names) or list of lists (values in schema order).
+    fn create_dataframe_from_rows(
+        &self,
+        py: Python<'_>,
+        data: &Bound<'_, pyo3::types::PyAny>,
+        schema: Vec<(String, String)>,
+    ) -> PyResult<PyDataFrame> {
+        let data_list = data
+            .extract::<Vec<Bound<'_, pyo3::types::PyAny>>>()
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        let mut rows: Vec<Vec<JsonValue>> = Vec::with_capacity(data_list.len());
+        let names: Vec<&str> = schema.iter().map(|(n, _)| n.as_str()).collect();
+        for row_any in &data_list {
+            if let Ok(dict) = row_any.downcast::<PyDict>() {
+                let row: Vec<JsonValue> = names
+                    .iter()
+                    .map(|name| {
+                        let v = dict
+                            .get_item(*name)
+                            .ok()
+                            .flatten()
+                            .unwrap_or_else(|| py.None().into_bound(py));
+                        py_to_json_value(&v)
+                    })
+                    .collect::<PyResult<Vec<_>>>()?;
+                rows.push(row);
+            } else if let Ok(list) = row_any.extract::<Vec<Bound<'_, pyo3::types::PyAny>>>() {
+                let row: Vec<JsonValue> = list
+                    .iter()
+                    .map(|v| py_to_json_value(v))
+                    .collect::<PyResult<Vec<_>>>()?;
+                rows.push(row);
+            } else {
+                return Err(pyo3::exceptions::PyTypeError::new_err(
+                    "create_dataframe_from_rows: each row must be a dict or a list",
+                ));
+            }
+        }
+        let df = self
+            .inner
+            .create_dataframe_from_rows(rows, schema)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
         Ok(PyDataFrame { inner: df })
     }

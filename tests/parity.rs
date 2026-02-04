@@ -6,6 +6,7 @@ use polars::prelude::{
     col, len, lit, DataFrame as PlDataFrame, DataType, Expr, NamedFrom, PolarsError, Series,
     TimeUnit,
 };
+use robin_sparkless::plan;
 use robin_sparkless::{DataFrame, JoinType, SparkSession};
 use serde::Deserialize;
 use serde_json::Value;
@@ -5182,6 +5183,86 @@ fn values_equal(a: &Value, b: &Value) -> bool {
 }
 
 /// Run with: cargo test print_rand_seed_42_values -- --ignored --nocapture
+/// Plan fixture: schema + rows + plan + expected (see docs/LOGICAL_PLAN_FORMAT.md).
+#[derive(Debug, Deserialize)]
+struct PlanFixture {
+    name: String,
+    input: InputSection,
+    plan: Vec<Value>,
+    expected: ExpectedSection,
+}
+
+/// Run plan interpreter against fixtures in tests/fixtures/plans/.
+#[test]
+fn plan_parity_fixtures() {
+    let plans_dir = Path::new("tests/fixtures/plans");
+    if !plans_dir.exists() {
+        return;
+    }
+    let mut failures = Vec::new();
+    for entry in fs::read_dir(plans_dir).expect("read plans dir") {
+        let path = entry.expect("entry").path();
+        if path.extension().and_then(|s| s.to_str()) != Some("json") {
+            continue;
+        }
+        let text = fs::read_to_string(&path).expect("read fixture");
+        let fixture: PlanFixture = serde_json::from_str(&text).expect("parse plan fixture");
+
+        let spark = SparkSession::builder()
+            .app_name("plan_parity")
+            .get_or_create();
+
+        let schema: Vec<(String, String)> = fixture
+            .input
+            .schema
+            .iter()
+            .map(|s| (s.name.clone(), s.r#type.clone()))
+            .collect();
+        let rows = fixture.input.rows.clone();
+
+        match plan::execute_plan(&spark, rows, schema, &fixture.plan) {
+            Ok(result_df) => {
+                let (actual_schema, actual_rows) =
+                    match collect_to_simple_format(&result_df) {
+                        Ok(t) => t,
+                        Err(e) => {
+                            failures.push((fixture.name.clone(), format!("collect: {}", e)));
+                            continue;
+                        }
+                    };
+                if let Err(e) = assert_schema_eq(
+                    &actual_schema,
+                    &fixture.expected.schema,
+                    &fixture.name,
+                    false,
+                ) {
+                    failures.push((fixture.name.clone(), e.to_string()));
+                    continue;
+                }
+                let ordered = fixture.plan.iter().any(|op| {
+                    op.get("op").and_then(Value::as_str) == Some("orderBy")
+                });
+                if let Err(e) = assert_rows_eq(
+                    &actual_rows,
+                    &fixture.expected.rows,
+                    ordered,
+                    &fixture.name,
+                ) {
+                    failures.push((fixture.name.clone(), e.to_string()));
+                }
+            }
+            Err(e) => {
+                failures.push((fixture.name.clone(), e.to_string()));
+            }
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "plan fixture(s) failed: {:?}",
+        failures
+    );
+}
+
 /// to print actual rand(42)/randn(42) values for tests/fixtures/with_rand_seed.json.
 #[test]
 #[ignore]

@@ -1,0 +1,31 @@
+{
+  "name": "filter_select_limit",
+  "input": {
+    "schema": [
+      {"name": "id", "type": "bigint"},
+      {"name": "age", "type": "bigint"},
+      {"name": "name", "type": "string"}
+    ],
+    "rows": [
+      [1, 25, "Alice"],
+      [2, 30, "Bob"],
+      [3, 35, "Charlie"]
+    ]
+  },
+  "plan": [
+    {
+      "op": "filter",
+      "payload": {"op": "gt", "left": {"col": "age"}, "right": {"lit": 30}}
+    },
+    {"op": "select", "payload": ["name", "age"]},
+    {"op": "orderBy", "payload": {"columns": ["name"], "ascending": [true]}},
+    {"op": "limit", "payload": {"n": 10}}
+  ],
+  "expected": {
+    "schema": [
+      {"name": "name", "type": "string"},
+      {"name": "age", "type": "bigint"}
+    ],
+    "rows": [["Charlie", 35]]
+  }
+}

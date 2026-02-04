@@ -1,0 +1,39 @@
+{
+  "name": "join_simple",
+  "input": {
+    "schema": [
+      {"name": "id", "type": "bigint"},
+      {"name": "name", "type": "string"}
+    ],
+    "rows": [
+      [1, "Alice"],
+      [2, "Bob"]
+    ]
+  },
+  "plan": [
+    {
+      "op": "join",
+      "payload": {
+        "other_data": [[1, "x"], [2, "y"]],
+        "other_schema": [
+          {"name": "id", "type": "bigint"},
+          {"name": "tag", "type": "string"}
+        ],
+        "on": ["id"],
+        "how": "inner"
+      }
+    }
+  ],
+  "expected": {
+    "schema": [
+      {"name": "id", "type": "bigint"},
+      {"name": "name", "type": "string"},
+      {"name": "id_right", "type": "bigint"},
+      {"name": "tag", "type": "string"}
+    ],
+    "rows": [
+      [1, "Alice", 1, "x"],
+      [2, "Bob", 2, "y"]
+    ]
+  }
+}
