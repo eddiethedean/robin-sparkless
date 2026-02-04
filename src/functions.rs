@@ -88,7 +88,7 @@ pub fn parse_type_name(name: &str) -> Result<DataType, String> {
         "boolean" | "bool" => DataType::Boolean,
         "date" => DataType::Date,
         "timestamp" => DataType::Datetime(TimeUnit::Microseconds, None),
-        _ => return Err(format!("unknown type name: {}", name)),
+        _ => return Err(format!("unknown type name: {name}")),
     })
 }
 
@@ -218,7 +218,7 @@ pub fn approx_percentile(col: &Column, percentage: f64) -> Column {
         col.expr()
             .clone()
             .quantile(lit(percentage), QuantileMethod::Linear),
-        Some(format!("approx_percentile({})", percentage)),
+        Some(format!("approx_percentile({percentage})")),
     )
 }
 
@@ -692,7 +692,7 @@ pub fn raise_error(message: &str) -> Column {
     let expr = lit(0i64).map(
         move |_col| -> PolarsResult<Option<polars::prelude::Column>> {
             Err(PolarsError::ComputeError(
-                format!("raise_error: {}", msg).into(),
+                format!("raise_error: {msg}").into(),
             ))
         },
         GetOutput::from_type(DataType::Int64),

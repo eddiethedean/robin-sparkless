@@ -41,10 +41,10 @@ pub fn expr_from_value(v: &Value) -> Result<Expr, PlanExprError> {
             "eq" | "ne" | "gt" | "ge" | "lt" | "le" => {
                 let left = obj
                     .get("left")
-                    .ok_or_else(|| PlanExprError(format!("op '{}' requires 'left'", op)))?;
+                    .ok_or_else(|| PlanExprError(format!("op '{op}' requires 'left'")))?;
                 let right = obj
                     .get("right")
-                    .ok_or_else(|| PlanExprError(format!("op '{}' requires 'right'", op)))?;
+                    .ok_or_else(|| PlanExprError(format!("op '{op}' requires 'right'")))?;
                 let l = expr_from_value(left)?;
                 let r = expr_from_value(right)?;
                 return Ok(match op {
@@ -93,7 +93,7 @@ pub fn expr_from_value(v: &Value) -> Result<Expr, PlanExprError> {
                 return Ok(expr_from_value(arg)?.not());
             }
             _ => {
-                return Err(PlanExprError(format!("unsupported expression op: {}", op)));
+                return Err(PlanExprError(format!("unsupported expression op: {op}")));
             }
         }
     }
@@ -103,7 +103,7 @@ pub fn expr_from_value(v: &Value) -> Result<Expr, PlanExprError> {
         let args = obj
             .get("args")
             .and_then(Value::as_array)
-            .ok_or_else(|| PlanExprError(format!("fn '{}' requires 'args' array", fn_name)))?;
+            .ok_or_else(|| PlanExprError(format!("fn '{fn_name}' requires 'args' array")))?;
         return expr_from_fn(fn_name, args);
     }
 
@@ -244,49 +244,49 @@ fn arg_lit_opt_str(args: &[Value], i: usize) -> Result<Option<String>, PlanExprE
 fn arg_expr(args: &[Value], i: usize) -> Result<Expr, PlanExprError> {
     let v = args
         .get(i)
-        .ok_or_else(|| PlanExprError(format!("fn requires argument at index {}", i)))?;
+        .ok_or_else(|| PlanExprError(format!("fn requires argument at index {i}")))?;
     expr_from_value(v)
 }
 
 fn arg_lit_str(args: &[Value], i: usize) -> Result<String, PlanExprError> {
     let v = args
         .get(i)
-        .ok_or_else(|| PlanExprError(format!("fn requires string literal at index {}", i)))?;
+        .ok_or_else(|| PlanExprError(format!("fn requires string literal at index {i}")))?;
     lit_as_string(v)
 }
 
 fn arg_lit_i64(args: &[Value], i: usize) -> Result<i64, PlanExprError> {
     let v = args
         .get(i)
-        .ok_or_else(|| PlanExprError(format!("fn requires integer literal at index {}", i)))?;
+        .ok_or_else(|| PlanExprError(format!("fn requires integer literal at index {i}")))?;
     lit_as_i64(v)
 }
 
 fn arg_lit_i32(args: &[Value], i: usize) -> Result<i32, PlanExprError> {
     let v = args
         .get(i)
-        .ok_or_else(|| PlanExprError(format!("fn requires integer literal at index {}", i)))?;
+        .ok_or_else(|| PlanExprError(format!("fn requires integer literal at index {i}")))?;
     lit_as_i32(v)
 }
 
 fn arg_lit_u32(args: &[Value], i: usize) -> Result<u32, PlanExprError> {
     let v = args
         .get(i)
-        .ok_or_else(|| PlanExprError(format!("fn requires non-negative integer at index {}", i)))?;
+        .ok_or_else(|| PlanExprError(format!("fn requires non-negative integer at index {i}")))?;
     lit_as_u32(v)
 }
 
 fn arg_lit_f64(args: &[Value], i: usize) -> Result<f64, PlanExprError> {
     let v = args
         .get(i)
-        .ok_or_else(|| PlanExprError(format!("fn requires number literal at index {}", i)))?;
+        .ok_or_else(|| PlanExprError(format!("fn requires number literal at index {i}")))?;
     lit_as_f64(v)
 }
 
 fn arg_lit_usize(args: &[Value], i: usize) -> Result<usize, PlanExprError> {
     let v = args
         .get(i)
-        .ok_or_else(|| PlanExprError(format!("fn requires non-negative integer at index {}", i)))?;
+        .ok_or_else(|| PlanExprError(format!("fn requires non-negative integer at index {i}")))?;
     lit_as_usize(v)
 }
 
@@ -377,8 +377,7 @@ fn expr_from_fn(name: &str, args: &[Value]) -> Result<Expr, PlanExprError> {
         "coalesce" => {
             if args.is_empty() {
                 return Err(PlanExprError(format!(
-                    "fn '{}' requires at least one argument",
-                    name
+                    "fn '{name}' requires at least one argument"
                 )));
             }
             let exprs: Result<Vec<Expr>, _> = args.iter().map(expr_from_value).collect();
@@ -388,8 +387,7 @@ fn expr_from_fn(name: &str, args: &[Value]) -> Result<Expr, PlanExprError> {
         "when" => {
             if args.len() != 2 {
                 return Err(PlanExprError(format!(
-                    "fn '{}' two-arg form requires [condition, then_expr]",
-                    name
+                    "fn '{name}' two-arg form requires [condition, then_expr]"
                 )));
             }
             let cond = expr_to_column(arg_expr(args, 0)?);
@@ -429,8 +427,7 @@ fn expr_from_fn(name: &str, args: &[Value]) -> Result<Expr, PlanExprError> {
         "concat" => {
             if args.len() < 2 {
                 return Err(PlanExprError(format!(
-                    "fn '{}' requires at least two arguments",
-                    name
+                    "fn '{name}' requires at least two arguments"
                 )));
             }
             let exprs: Result<Vec<Expr>, _> = args.iter().map(expr_from_value).collect();
@@ -1240,13 +1237,13 @@ fn expr_from_fn_rest(name: &str, args: &[Value]) -> Result<Expr, PlanExprError> 
         }
         "current_date" | "curdate" => {
             if !args.is_empty() {
-                return Err(PlanExprError(format!("fn '{}' takes no arguments", name)));
+                return Err(PlanExprError(format!("fn '{name}' takes no arguments")));
             }
             Ok(current_date().into_expr())
         }
         "current_timestamp" | "now" => {
             if !args.is_empty() {
-                return Err(PlanExprError(format!("fn '{}' takes no arguments", name)));
+                return Err(PlanExprError(format!("fn '{name}' takes no arguments")));
             }
             Ok(current_timestamp().into_expr())
         }
@@ -1355,7 +1352,7 @@ fn expr_from_fn_rest(name: &str, args: &[Value]) -> Result<Expr, PlanExprError> 
         | "current_user"
         | "user" => {
             if !args.is_empty() {
-                return Err(PlanExprError(format!("fn '{}' takes no arguments", name)));
+                return Err(PlanExprError(format!("fn '{name}' takes no arguments")));
             }
             let out = match name {
                 "spark_partition_id" => spark_partition_id(),
@@ -1573,15 +1570,14 @@ fn expr_from_fn_rest(name: &str, args: &[Value]) -> Result<Expr, PlanExprError> 
             let col3 = expr_to_column(arg_expr(args, 2)?);
             Ok(nvl2(&col1, &col2, &col3).into_expr())
         }
-        _ => Err(PlanExprError(format!("unsupported function: {}", name))),
+        _ => Err(PlanExprError(format!("unsupported function: {name}"))),
     }
 }
 
 fn require_args(name: &str, args: &[Value], n: usize) -> Result<(), PlanExprError> {
     if args.len() != n {
         return Err(PlanExprError(format!(
-            "fn '{}' requires exactly {} argument(s)",
-            name, n
+            "fn '{name}' requires exactly {n} argument(s)"
         )));
     }
     Ok(())
@@ -1590,8 +1586,7 @@ fn require_args(name: &str, args: &[Value], n: usize) -> Result<(), PlanExprErro
 fn require_args_min(name: &str, args: &[Value], n: usize) -> Result<(), PlanExprError> {
     if args.len() < n {
         return Err(PlanExprError(format!(
-            "fn '{}' requires at least {} argument(s)",
-            name, n
+            "fn '{name}' requires at least {n} argument(s)"
         )));
     }
     Ok(())

@@ -183,8 +183,7 @@ mod tests {
         let r = stat.corr("id", "age").unwrap();
         assert!(
             r.is_nan() || (-1.0 - 1e-10..=1.0 + 1e-10).contains(&r),
-            "corr should be in [-1,1] or NaN, got {}",
-            r
+            "corr should be in [-1,1] or NaN, got {r}"
         );
     }
 

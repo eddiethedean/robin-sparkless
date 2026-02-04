@@ -33,7 +33,7 @@ fn test_column_not_found_error() {
         Err(PolarsError::ColumnNotFound(msg)) => {
             assert!(msg.to_string().contains("nonexistent"));
         }
-        Err(e) => panic!("Expected ColumnNotFound error, got: {:?}", e),
+        Err(e) => panic!("Expected ColumnNotFound error, got: {e:?}"),
         Ok(_) => panic!("Expected error, got Ok"),
     }
 }

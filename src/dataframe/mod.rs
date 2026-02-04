@@ -451,7 +451,7 @@ impl DataFrame {
         let schema = self.df.schema();
         Ok(schema
             .iter_names_and_dtypes()
-            .map(|(name, dtype)| (name.to_string(), format!("{:?}", dtype)))
+            .map(|(name, dtype)| (name.to_string(), format!("{dtype:?}")))
             .collect())
     }
 
@@ -692,30 +692,28 @@ impl<'a> DataFrameWriter<'a> {
         match self.format {
             WriteFormat::Parquet => {
                 let mut file = std::fs::File::create(path).map_err(|e| {
-                    PolarsError::ComputeError(format!("write parquet create: {}", e).into())
+                    PolarsError::ComputeError(format!("write parquet create: {e}").into())
                 })?;
                 let mut df_mut = to_write;
                 ParquetWriter::new(&mut file)
                     .finish(&mut df_mut)
-                    .map_err(|e| {
-                        PolarsError::ComputeError(format!("write parquet: {}", e).into())
-                    })?;
+                    .map_err(|e| PolarsError::ComputeError(format!("write parquet: {e}").into()))?;
             }
             WriteFormat::Csv => {
                 let mut file = std::fs::File::create(path).map_err(|e| {
-                    PolarsError::ComputeError(format!("write csv create: {}", e).into())
+                    PolarsError::ComputeError(format!("write csv create: {e}").into())
                 })?;
                 CsvWriter::new(&mut file)
                     .finish(&mut to_write.clone())
-                    .map_err(|e| PolarsError::ComputeError(format!("write csv: {}", e).into()))?;
+                    .map_err(|e| PolarsError::ComputeError(format!("write csv: {e}").into()))?;
             }
             WriteFormat::Json => {
                 let mut file = std::fs::File::create(path).map_err(|e| {
-                    PolarsError::ComputeError(format!("write json create: {}", e).into())
+                    PolarsError::ComputeError(format!("write json create: {e}").into())
                 })?;
                 JsonWriter::new(&mut file)
                     .finish(&mut to_write.clone())
-                    .map_err(|e| PolarsError::ComputeError(format!("write json: {}", e).into()))?;
+                    .map_err(|e| PolarsError::ComputeError(format!("write json: {e}").into()))?;
             }
         }
         Ok(())

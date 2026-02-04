@@ -234,8 +234,7 @@ fn pyspark_parity_fixtures() {
     if let Some(ref name_filter) = single {
         assert!(
             ran_any,
-            "PARITY_FIXTURE={} but no matching fixture found (check fixture name)",
-            name_filter
+            "PARITY_FIXTURE={name_filter} but no matching fixture found (check fixture name)"
         );
     }
 
@@ -245,7 +244,7 @@ fn pyspark_parity_fixtures() {
         failures.len(),
         failures
             .iter()
-            .map(|(name, err)| format!("{}: {}", name, err))
+            .map(|(name, err)| format!("{name}: {err}"))
             .collect::<Vec<_>>()
     );
 }
@@ -385,11 +384,11 @@ fn create_df_from_file_source(
     // Write content to temp file
     {
         let mut file = std::fs::File::create(&temp_path).map_err(|e| {
-            PolarsError::ComputeError(format!("failed to create temp file: {}", e).into())
+            PolarsError::ComputeError(format!("failed to create temp file: {e}").into())
         })?;
         file.write_all(file_source.content.as_bytes())
             .map_err(|e| {
-                PolarsError::ComputeError(format!("failed to write temp file: {}", e).into())
+                PolarsError::ComputeError(format!("failed to write temp file: {e}").into())
             })?;
     }
 
@@ -410,9 +409,7 @@ fn create_df_from_file_source(
             let mut df_to_write = (*pl_df).clone();
             {
                 let mut file = std::fs::File::create(&temp_path).map_err(|e| {
-                    PolarsError::ComputeError(
-                        format!("failed to create Parquet file: {}", e).into(),
-                    )
+                    PolarsError::ComputeError(format!("failed to create Parquet file: {e}").into())
                 })?;
 
                 // Use ParquetWriter from prelude
@@ -420,7 +417,7 @@ fn create_df_from_file_source(
                 ParquetWriter::new(&mut file)
                     .finish(&mut df_to_write)
                     .map_err(|e| {
-                        PolarsError::ComputeError(format!("failed to write Parquet: {}", e).into())
+                        PolarsError::ComputeError(format!("failed to write Parquet: {e}").into())
                     })?;
             }
 
@@ -516,9 +513,8 @@ fn create_df_from_input_direct(input: &InputSection) -> Result<DataFrame, Polars
                 }
                 let s = Series::new(spec.name.clone().into(), vals);
                 cols.push(
-                    s.cast(&DataType::Date).map_err(|e| {
-                        PolarsError::ComputeError(format!("date cast: {}", e).into())
-                    })?,
+                    s.cast(&DataType::Date)
+                        .map_err(|e| PolarsError::ComputeError(format!("date cast: {e}").into()))?,
                 );
             }
             "timestamp" | "datetime" | "timestamp_ntz" => {
@@ -546,7 +542,7 @@ fn create_df_from_input_direct(input: &InputSection) -> Result<DataFrame, Polars
                 cols.push(
                     s.cast(&DataType::Datetime(TimeUnit::Microseconds, None))
                         .map_err(|e| {
-                            PolarsError::ComputeError(format!("datetime cast: {}", e).into())
+                            PolarsError::ComputeError(format!("datetime cast: {e}").into())
                         })?,
                 );
             }
@@ -597,7 +593,7 @@ fn apply_operations(
                 // Pass df so column names in the expression can be resolved (case-insensitive)
                 let predicate = parse_simple_filter_expr(expr, Some(&df)).map_err(|e| {
                     PolarsError::ComputeError(
-                        format!("failed to parse filter expr '{}': {}", expr, e).into(),
+                        format!("failed to parse filter expr '{expr}': {e}").into(),
                     )
                 })?;
                 df = df.filter(predicate)?;
@@ -691,7 +687,7 @@ fn apply_operations(
                             let name: String = alias
                                 .filter(|a| *a != "sum")
                                 .map(String::from)
-                                .unwrap_or_else(|| format!("sum({})", col_name));
+                                .unwrap_or_else(|| format!("sum({col_name})"));
                             e.alias(&name)
                         }
                         "avg" => {
@@ -704,7 +700,7 @@ fn apply_operations(
                             let name: String = alias
                                 .filter(|a| *a != "avg")
                                 .map(String::from)
-                                .unwrap_or_else(|| format!("avg({})", col_name));
+                                .unwrap_or_else(|| format!("avg({col_name})"));
                             e.alias(&name)
                         }
                         "min" => {
@@ -717,7 +713,7 @@ fn apply_operations(
                             let name: String = alias
                                 .filter(|a| *a != "min")
                                 .map(String::from)
-                                .unwrap_or_else(|| format!("min({})", col_name));
+                                .unwrap_or_else(|| format!("min({col_name})"));
                             e.alias(&name)
                         }
                         "max" => {
@@ -730,7 +726,7 @@ fn apply_operations(
                             let name: String = alias
                                 .filter(|a| *a != "max")
                                 .map(String::from)
-                                .unwrap_or_else(|| format!("max({})", col_name));
+                                .unwrap_or_else(|| format!("max({col_name})"));
                             e.alias(&name)
                         }
                         "stddev" | "stddev_samp" => {
@@ -743,7 +739,7 @@ fn apply_operations(
                             let name: String = alias
                                 .filter(|a| *a != "stddev")
                                 .map(String::from)
-                                .unwrap_or_else(|| format!("stddev({})", col_name));
+                                .unwrap_or_else(|| format!("stddev({col_name})"));
                             e.alias(&name)
                         }
                         "stddev_pop" => {
@@ -756,7 +752,7 @@ fn apply_operations(
                             let name: String = alias
                                 .filter(|a| !a.is_empty())
                                 .map(String::from)
-                                .unwrap_or_else(|| format!("stddev_pop({})", col_name));
+                                .unwrap_or_else(|| format!("stddev_pop({col_name})"));
                             e.alias(&name)
                         }
                         "variance" | "var_samp" => {
@@ -769,7 +765,7 @@ fn apply_operations(
                             let name: String = alias
                                 .filter(|a| *a != "variance")
                                 .map(String::from)
-                                .unwrap_or_else(|| format!("variance({})", col_name));
+                                .unwrap_or_else(|| format!("variance({col_name})"));
                             e.alias(&name)
                         }
                         "count_distinct" | "countDistinct" => {
@@ -784,7 +780,7 @@ fn apply_operations(
                             let name: String = alias
                                 .filter(|a| *a != "count_distinct")
                                 .map(String::from)
-                                .unwrap_or_else(|| format!("count_distinct({})", col_name));
+                                .unwrap_or_else(|| format!("count_distinct({col_name})"));
                             e.alias(&name)
                         }
                         "first" => {
@@ -797,7 +793,7 @@ fn apply_operations(
                             let name: String = alias
                                 .filter(|a| *a != "first")
                                 .map(String::from)
-                                .unwrap_or_else(|| format!("first({})", col_name));
+                                .unwrap_or_else(|| format!("first({col_name})"));
                             e.alias(&name)
                         }
                         "last" => {
@@ -810,7 +806,7 @@ fn apply_operations(
                             let name: String = alias
                                 .filter(|a| *a != "last")
                                 .map(String::from)
-                                .unwrap_or_else(|| format!("last({})", col_name));
+                                .unwrap_or_else(|| format!("last({col_name})"));
                             e.alias(&name)
                         }
                         "approx_count_distinct" => {
@@ -825,7 +821,7 @@ fn apply_operations(
                             let name: String = alias
                                 .filter(|a| *a != "approx_count_distinct")
                                 .map(String::from)
-                                .unwrap_or_else(|| format!("approx_count_distinct({})", col_name));
+                                .unwrap_or_else(|| format!("approx_count_distinct({col_name})"));
                             e.alias(&name)
                         }
                         "any_value" => {
@@ -838,7 +834,7 @@ fn apply_operations(
                             let name: String = alias
                                 .filter(|a| !a.is_empty())
                                 .map(String::from)
-                                .unwrap_or_else(|| format!("any_value({})", col_name));
+                                .unwrap_or_else(|| format!("any_value({col_name})"));
                             e.alias(&name)
                         }
                         "bool_and" | "every" => {
@@ -851,7 +847,7 @@ fn apply_operations(
                             let name: String = alias
                                 .filter(|a| !a.is_empty())
                                 .map(String::from)
-                                .unwrap_or_else(|| format!("bool_and({})", col_name));
+                                .unwrap_or_else(|| format!("bool_and({col_name})"));
                             e.alias(&name)
                         }
                         "bool_or" | "some" => {
@@ -864,7 +860,7 @@ fn apply_operations(
                             let name: String = alias
                                 .filter(|a| !a.is_empty())
                                 .map(String::from)
-                                .unwrap_or_else(|| format!("bool_or({})", col_name));
+                                .unwrap_or_else(|| format!("bool_or({col_name})"));
                             e.alias(&name)
                         }
                         "count_if" => {
@@ -877,7 +873,7 @@ fn apply_operations(
                             let name: String = alias
                                 .filter(|a| !a.is_empty())
                                 .map(String::from)
-                                .unwrap_or_else(|| format!("count_if({})", col_name));
+                                .unwrap_or_else(|| format!("count_if({col_name})"));
                             e.alias(&name)
                         }
                         "var_pop" => {
@@ -890,7 +886,7 @@ fn apply_operations(
                             let name: String = alias
                                 .filter(|a| !a.is_empty())
                                 .map(String::from)
-                                .unwrap_or_else(|| format!("var_pop({})", col_name));
+                                .unwrap_or_else(|| format!("var_pop({col_name})"));
                             e.alias(&name)
                         }
                         "median" => {
@@ -906,7 +902,7 @@ fn apply_operations(
                             let name: String = alias
                                 .filter(|a| !a.is_empty())
                                 .map(String::from)
-                                .unwrap_or_else(|| format!("median({})", col_name));
+                                .unwrap_or_else(|| format!("median({col_name})"));
                             e.alias(&name)
                         }
                         "mode" => {
@@ -920,7 +916,7 @@ fn apply_operations(
                             let name: String = alias
                                 .filter(|a| !a.is_empty())
                                 .map(String::from)
-                                .unwrap_or_else(|| format!("mode({})", col_name));
+                                .unwrap_or_else(|| format!("mode({col_name})"));
                             e.alias(&name)
                         }
                         "try_sum" => {
@@ -933,7 +929,7 @@ fn apply_operations(
                             let name: String = alias
                                 .filter(|a| !a.is_empty())
                                 .map(String::from)
-                                .unwrap_or_else(|| format!("try_sum({})", col_name));
+                                .unwrap_or_else(|| format!("try_sum({col_name})"));
                             e.alias(&name)
                         }
                         "try_avg" => {
@@ -946,7 +942,7 @@ fn apply_operations(
                             let name: String = alias
                                 .filter(|a| !a.is_empty())
                                 .map(String::from)
-                                .unwrap_or_else(|| format!("try_avg({})", col_name));
+                                .unwrap_or_else(|| format!("try_avg({col_name})"));
                             e.alias(&name)
                         }
                         "percentile" => {
@@ -963,7 +959,7 @@ fn apply_operations(
                             let name: String = alias
                                 .filter(|a| !a.is_empty())
                                 .map(String::from)
-                                .unwrap_or_else(|| format!("percentile({}, {})", col_name, p));
+                                .unwrap_or_else(|| format!("percentile({col_name}, {p})"));
                             e.alias(&name)
                         }
                         "approx_percentile" | "percentile_approx" => {
@@ -980,9 +976,7 @@ fn apply_operations(
                             let name: String = alias
                                 .filter(|a| !a.is_empty())
                                 .map(String::from)
-                                .unwrap_or_else(|| {
-                                    format!("approx_percentile({}, {})", col_name, p)
-                                });
+                                .unwrap_or_else(|| format!("approx_percentile({col_name}, {p})"));
                             e.alias(&name)
                         }
                         "product" => {
@@ -995,7 +989,7 @@ fn apply_operations(
                             let name: String = alias
                                 .filter(|a| !a.is_empty())
                                 .map(String::from)
-                                .unwrap_or_else(|| format!("product({})", col_name));
+                                .unwrap_or_else(|| format!("product({col_name})"));
                             e.alias(&name)
                         }
                         "collect_list" => {
@@ -1008,7 +1002,7 @@ fn apply_operations(
                             let name: String = alias
                                 .filter(|a| !a.is_empty())
                                 .map(String::from)
-                                .unwrap_or_else(|| format!("collect_list({})", col_name));
+                                .unwrap_or_else(|| format!("collect_list({col_name})"));
                             e.alias(&name)
                         }
                         "collect_set" => {
@@ -1021,7 +1015,7 @@ fn apply_operations(
                             let name: String = alias
                                 .filter(|a| !a.is_empty())
                                 .map(String::from)
-                                .unwrap_or_else(|| format!("collect_set({})", col_name));
+                                .unwrap_or_else(|| format!("collect_set({col_name})"));
                             e.alias(&name)
                         }
                         "max_by" => {
@@ -1052,7 +1046,7 @@ fn apply_operations(
                             let name: String = alias
                                 .filter(|a| !a.is_empty())
                                 .map(String::from)
-                                .unwrap_or_else(|| format!("max_by({}, {})", v_col, o_col));
+                                .unwrap_or_else(|| format!("max_by({v_col}, {o_col})"));
                             e.alias(&name)
                         }
                         "min_by" => {
@@ -1080,7 +1074,7 @@ fn apply_operations(
                             let name: String = alias
                                 .filter(|a| !a.is_empty())
                                 .map(String::from)
-                                .unwrap_or_else(|| format!("min_by({}, {})", v_col, o_col));
+                                .unwrap_or_else(|| format!("min_by({v_col}, {o_col})"));
                             e.alias(&name)
                         }
                         "covar_pop" => {
@@ -1098,7 +1092,7 @@ fn apply_operations(
                             let name: String = alias
                                 .filter(|a| !a.is_empty())
                                 .map(String::from)
-                                .unwrap_or_else(|| format!("covar_pop({}, {})", c1, c2));
+                                .unwrap_or_else(|| format!("covar_pop({c1}, {c2})"));
                             e.alias(&name)
                         }
                         "covar_samp" => {
@@ -1116,7 +1110,7 @@ fn apply_operations(
                             let name: String = alias
                                 .filter(|a| !a.is_empty())
                                 .map(String::from)
-                                .unwrap_or_else(|| format!("covar_samp({}, {})", c1, c2));
+                                .unwrap_or_else(|| format!("covar_samp({c1}, {c2})"));
                             e.alias(&name)
                         }
                         "corr" => {
@@ -1134,7 +1128,7 @@ fn apply_operations(
                             let name: String = alias
                                 .filter(|a| !a.is_empty())
                                 .map(String::from)
-                                .unwrap_or_else(|| format!("corr({}, {})", c1, c2));
+                                .unwrap_or_else(|| format!("corr({c1}, {c2})"));
                             e.alias(&name)
                         }
                         "kurtosis" => {
@@ -1149,7 +1143,7 @@ fn apply_operations(
                             let name: String = alias
                                 .filter(|a| !a.is_empty())
                                 .map(String::from)
-                                .unwrap_or_else(|| format!("kurtosis({})", col_name));
+                                .unwrap_or_else(|| format!("kurtosis({col_name})"));
                             e.alias(&name)
                         }
                         "skewness" => {
@@ -1164,12 +1158,12 @@ fn apply_operations(
                             let name: String = alias
                                 .filter(|a| !a.is_empty())
                                 .map(String::from)
-                                .unwrap_or_else(|| format!("skewness({})", col_name));
+                                .unwrap_or_else(|| format!("skewness({col_name})"));
                             e.alias(&name)
                         }
                         other => {
                             return Err(PolarsError::ComputeError(
-                                format!("unsupported aggregation function: {}", other).into(),
+                                format!("unsupported aggregation function: {other}").into(),
                             ));
                         }
                     };
@@ -1194,7 +1188,7 @@ fn apply_operations(
                     "outer" | "full" => JoinType::Outer,
                     other => {
                         return Err(PolarsError::ComputeError(
-                            format!("unsupported join type: {}", other).into(),
+                            format!("unsupported join type: {other}").into(),
                         ));
                     }
                 };
@@ -1206,7 +1200,7 @@ fn apply_operations(
                 // For now, support simple expressions like when(), coalesce()
                 let parsed_expr = parse_with_column_expr(expr).map_err(|e| {
                     PolarsError::ComputeError(
-                        format!("failed to parse withColumn expr '{}': {}", expr, e).into(),
+                        format!("failed to parse withColumn expr '{expr}': {e}").into(),
                     )
                 })?;
                 df = df.with_column_expr(column, parsed_expr)?;
@@ -1352,7 +1346,7 @@ fn apply_operations(
                             }
                             other => {
                                 return Err(PolarsError::ComputeError(
-                                    format!("unsupported window function: {}", other).into(),
+                                    format!("unsupported window function: {other}").into(),
                                 ));
                             }
                         };
@@ -1420,7 +1414,7 @@ fn apply_operations(
                     ));
                 }
                 let fill_expr = json_value_to_lit(value).map_err(|e| {
-                    PolarsError::ComputeError(format!("fillna value not supported: {}", e).into())
+                    PolarsError::ComputeError(format!("fillna value not supported: {e}").into())
                 })?;
                 df = df.fillna(fill_expr)?;
             }
@@ -1451,14 +1445,10 @@ fn apply_operations(
                     ));
                 }
                 let old_expr = parse_column_or_literal(old_val_str).map_err(|e| {
-                    PolarsError::ComputeError(
-                        format!("replace old_value parse error: {}", e).into(),
-                    )
+                    PolarsError::ComputeError(format!("replace old_value parse error: {e}").into())
                 })?;
                 let new_expr = parse_column_or_literal(new_val_str).map_err(|e| {
-                    PolarsError::ComputeError(
-                        format!("replace new_value parse error: {}", e).into(),
-                    )
+                    PolarsError::ComputeError(format!("replace new_value parse error: {e}").into())
                 })?;
                 df = df.replace(col_name, old_expr, new_expr)?;
             }
@@ -1780,7 +1770,7 @@ fn parse_comparison_expr(
     } else if after_col.starts_with("=") {
         "="
     } else {
-        return Err(format!("unable to find operator in '{}'", after_col));
+        return Err(format!("unable to find operator in '{after_col}'"));
     };
 
     // Extract the right side after the operator, but stop at logical operators
@@ -1861,8 +1851,7 @@ fn parse_comparison_expr(
             lit(lit_val)
         } else {
             return Err(format!(
-                "unable to parse right side '{}' as column or literal",
-                right_side
+                "unable to parse right side '{right_side}' as column or literal"
             ));
         }
     };
@@ -1900,7 +1889,7 @@ fn parse_comparison_expr(
             "<=" => left_col.le_pyspark(&right_col).into_expr(),
             "==" | "=" => left_col.eq_pyspark(&right_col).into_expr(),
             "!=" | "<>" => left_col.ne_pyspark(&right_col).into_expr(),
-            other => return Err(format!("unsupported operator '{}'", other)),
+            other => return Err(format!("unsupported operator '{other}'")),
         }
     } else {
         // Column-to-literal comparison: use standard methods (Polars handles nulls in literals)
@@ -1911,7 +1900,7 @@ fn parse_comparison_expr(
             "<=" => c.lt_eq(right_expr),
             "==" | "=" => c.eq(right_expr),
             "!=" | "<>" => c.neq(right_expr),
-            other => return Err(format!("unsupported operator '{}'", other)),
+            other => return Err(format!("unsupported operator '{other}'")),
         }
     };
 
@@ -1941,7 +1930,7 @@ fn extract_first_arg<'a>(s: &'a str, prefix: &str) -> Result<&'a str, String> {
 fn extract_col_name(s: &str) -> Result<&str, String> {
     let s = s.trim();
     if !s.starts_with("col(") {
-        return Err(format!("expected col(...), got {}", s));
+        return Err(format!("expected col(...), got {s}"));
     }
     let content = &s[4..s.len() - 1];
     let quote = content.find(['\'', '"']).ok_or("missing quote in col()")?;
@@ -1962,8 +1951,7 @@ fn parse_struct_field_expr(s: &str) -> Result<polars::prelude::Expr, String> {
         (stripped, prefix2)
     } else {
         return Err(format!(
-            "expected col(\"\").struct_().field_by_name(...), got {}",
-            s
+            "expected col(\"\").struct_().field_by_name(...), got {s}"
         ));
     };
     let field_name = rest.trim_matches([')', '"', '\'', ' ']);
@@ -1995,7 +1983,7 @@ fn parse_map_filter_predicate(s: &str) -> Result<polars::prelude::Expr, String> 
             }
         }
     }
-    Err(format!("map_filter predicate not supported: {}", s))
+    Err(format!("map_filter predicate not supported: {s}"))
 }
 
 /// Parse merge expr for zip_with: coalesce(col("").struct_().field_by_name("left"), col("").struct_().field_by_name("right"))
@@ -2014,7 +2002,7 @@ fn parse_zip_with_merge(s: &str) -> Result<polars::prelude::Expr, String> {
             .into_expr());
         }
     }
-    Err(format!("zip_with merge expr not supported: {}", s))
+    Err(format!("zip_with merge expr not supported: {s}"))
 }
 
 /// Parse merge expr for map_zip_with: coalesce(col("").struct_().field_by_name("value1"), col("").struct_().field_by_name("value2"))
@@ -2033,7 +2021,7 @@ fn parse_map_zip_with_merge(s: &str) -> Result<polars::prelude::Expr, String> {
             .into_expr());
         }
     }
-    Err(format!("map_zip_with merge expr not supported: {}", s))
+    Err(format!("map_zip_with merge expr not supported: {s}"))
 }
 
 /// Helper to parse comma-separated args (respecting nested parens)
@@ -2076,7 +2064,7 @@ fn parse_column_or_literal_for_concat(part: &str) -> Result<robin_sparkless::Col
     } else if let Ok(num) = part.parse::<i64>() {
         Ok(lit_i64(num))
     } else {
-        Err(format!("unexpected part: {}", part))
+        Err(format!("unexpected part: {part}"))
     }
 }
 
@@ -3614,7 +3602,7 @@ fn parse_with_column_expr(src: &str) -> Result<Expr, String> {
                     use robin_sparkless::lit_i64;
                     columns.push(lit_i64(num));
                 } else {
-                    return Err(format!("unexpected part in coalesce: {}", part));
+                    return Err(format!("unexpected part in coalesce: {part}"));
                 }
             }
         }
@@ -4579,7 +4567,7 @@ fn parse_with_column_expr(src: &str) -> Result<Expr, String> {
                 "<=" => left_expr.lt_eq(right_expr),
                 "==" | "=" => left_expr.eq(right_expr),
                 "!=" => left_expr.neq(right_expr),
-                _ => return Err(format!("unsupported comparison operator: {}", op)),
+                _ => return Err(format!("unsupported comparison operator: {op}")),
             });
         }
 
@@ -4617,7 +4605,7 @@ fn parse_with_column_expr(src: &str) -> Result<Expr, String> {
         return Ok(expr);
     }
 
-    Err(format!("unsupported withColumn expression: {}", s))
+    Err(format!("unsupported withColumn expression: {s}"))
 }
 
 /// Parse a column reference or literal value
@@ -4650,12 +4638,9 @@ fn parse_column_or_literal(s: &str) -> Result<Expr, String> {
             }
         }
 
-        let close_idx = close_idx.ok_or_else(|| format!("invalid col(...) expression: {}", s))?;
+        let close_idx = close_idx.ok_or_else(|| format!("invalid col(...) expression: {s}"))?;
         if close_idx != s.len() - 1 {
-            return Err(format!(
-                "invalid col(...) reference (trailing tokens): {}",
-                s
-            ));
+            return Err(format!("invalid col(...) reference (trailing tokens): {s}"));
         }
 
         let inner = s[4..s.len() - 1].trim();
@@ -4665,10 +4650,7 @@ fn parse_column_or_literal(s: &str) -> Result<Expr, String> {
             let col_name = inner.trim_matches(['\'', '"']);
             Ok(col(col_name).into_expr())
         } else {
-            Err(format!(
-                "col(...) must wrap a quoted column name, got: {}",
-                s
-            ))
+            Err(format!("col(...) must wrap a quoted column name, got: {s}"))
         }
     } else if s.starts_with("lit(") {
         use robin_sparkless::lit_f64;
@@ -4743,7 +4725,7 @@ fn any_value_to_json(av: &polars::prelude::AnyValue, _dtype: &polars::prelude::D
             }
             Value::Object(obj)
         }
-        _ => Value::String(format!("{:?}", av)),
+        _ => Value::String(format!("{av:?}")),
     }
 }
 
@@ -4834,7 +4816,7 @@ fn collect_to_simple_format(
         let mut row: Vec<Value> = Vec::with_capacity(num_cols);
         for col_idx in 0..num_cols {
             let series = pl_df.get_columns().get(col_idx).ok_or_else(|| {
-                PolarsError::ComputeError(format!("column index {} out of range", col_idx).into())
+                PolarsError::ComputeError(format!("column index {col_idx} out of range").into())
             })?;
             let json_val = match series.get(row_idx) {
                 Ok(av) => {
@@ -4843,7 +4825,7 @@ fn collect_to_simple_format(
                         Value::Null
                     } else if matches!(series.dtype(), polars::prelude::DataType::String) {
                         // For String type, extract the actual string value
-                        let debug_str = format!("{:?}", av);
+                        let debug_str = format!("{av:?}");
                         // Handle "StringOwned(\"value\")" format
                         if debug_str.starts_with("StringOwned(") && debug_str.ends_with(")") {
                             let inner = &debug_str[12..debug_str.len() - 1];
@@ -4924,7 +4906,7 @@ fn collect_to_simple_format(
                                 // For unknown types, try to extract as number if dtype suggests it
                                 if matches!(series.dtype(), polars::prelude::DataType::UInt32) {
                                     // Try to get the value as u32 from debug format
-                                    let debug_str = format!("{:?}", av);
+                                    let debug_str = format!("{av:?}");
                                     if let Some(start) = debug_str.find('(') {
                                         if let Some(end) = debug_str.rfind(')') {
                                             if let Ok(num) =
@@ -4941,7 +4923,7 @@ fn collect_to_simple_format(
                                         Value::String(debug_str)
                                     }
                                 } else {
-                                    Value::String(format!("{:?}", av))
+                                    Value::String(format!("{av:?}"))
                                 }
                             }
                         }
@@ -4970,7 +4952,7 @@ fn dtype_to_string(dtype: &polars::prelude::DataType) -> String {
         polars::prelude::DataType::Date => "date".to_string(),
         polars::prelude::DataType::Datetime(_, _) => "timestamp".to_string(),
         polars::prelude::DataType::List(inner) => format!("array<{}>", dtype_to_string(inner)),
-        _ => format!("{:?}", dtype),
+        _ => format!("{dtype:?}"),
     }
 }
 
@@ -5141,8 +5123,7 @@ fn assert_rows_eq(
             if !values_equal(act_val, exp_val) {
                 return Err(PolarsError::ComputeError(
                     format!(
-                        "fixture {}: row {}, column {} mismatch: actual {:?}, expected {:?}",
-                        fixture_name, i, j, act_val, exp_val
+                        "fixture {fixture_name}: row {i}, column {j} mismatch: actual {act_val:?}, expected {exp_val:?}"
                     )
                     .into(),
                 ));
@@ -5190,7 +5171,7 @@ fn compare_values(a: &Value, b: &Value) -> std::cmp::Ordering {
             }
             a1.len().cmp(&a2.len())
         }
-        _ => format!("{:?}", a).cmp(&format!("{:?}", b)),
+        _ => format!("{a:?}").cmp(&format!("{b:?}")),
     }
 }
 
@@ -5277,7 +5258,7 @@ fn plan_parity_fixtures() {
                 let (actual_schema, actual_rows) = match collect_to_simple_format(&result_df) {
                     Ok(t) => t,
                     Err(e) => {
-                        failures.push((fixture.name.clone(), format!("collect: {}", e)));
+                        failures.push((fixture.name.clone(), format!("collect: {e}")));
                         continue;
                     }
                 };
@@ -5305,11 +5286,7 @@ fn plan_parity_fixtures() {
             }
         }
     }
-    assert!(
-        failures.is_empty(),
-        "plan fixture(s) failed: {:?}",
-        failures
-    );
+    assert!(failures.is_empty(), "plan fixture(s) failed: {failures:?}");
 }
 
 /// to print actual rand(42)/randn(42) values for tests/fixtures/with_rand_seed.json.
@@ -5329,6 +5306,6 @@ fn print_rand_seed_42_values() {
     println!("randn(42) 3 values:");
     for _ in 0..3 {
         let v: f64 = dist.sample(&mut rng2);
-        println!("  {}", v);
+        println!("  {v}");
     }
 }

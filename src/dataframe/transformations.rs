@@ -648,7 +648,7 @@ fn any_value_to_serde_value(av: &polars::prelude::AnyValue) -> serde_json::Value
             .map(serde_json::Value::Number)
             .unwrap_or(serde_json::Value::Null),
         AnyValue::String(v) => serde_json::Value::String(v.to_string()),
-        _ => serde_json::Value::String(format!("{:?}", av)),
+        _ => serde_json::Value::String(format!("{av:?}")),
     }
 }
 
@@ -734,7 +734,7 @@ pub fn col_regex(
     case_sensitive: bool,
 ) -> Result<DataFrame, PolarsError> {
     let re = regex::Regex::new(pattern).map_err(|e| {
-        PolarsError::ComputeError(format!("colRegex: invalid pattern {:?}: {}", pattern, e).into())
+        PolarsError::ComputeError(format!("colRegex: invalid pattern {pattern:?}: {e}").into())
     })?;
     let names = df.df.get_column_names();
     let matched: Vec<&str> = names
@@ -744,7 +744,7 @@ pub fn col_regex(
         .collect();
     if matched.is_empty() {
         return Err(PolarsError::ComputeError(
-            format!("colRegex: no columns matched pattern {:?}", pattern).into(),
+            format!("colRegex: no columns matched pattern {pattern:?}").into(),
         ));
     }
     select(df, matched, case_sensitive)
@@ -848,7 +848,7 @@ pub fn freq_items(
                 .clone();
             let empty_sub = s.head(Some(0));
             let list_chunked = polars::prelude::ListChunked::from_iter([empty_sub].into_iter())
-                .with_name(format!("{}_freqItems", resolved).into());
+                .with_name(format!("{resolved}_freqItems").into());
             out.push(list_chunked.into_series().into());
         }
         return Ok(super::DataFrame::from_polars_with_options(
@@ -896,7 +896,7 @@ pub fn freq_items(
             .ok_or_else(|| PolarsError::ComputeError("value column not a series".into()))?;
         let filtered = values_series.take(idx_ca)?;
         let list_chunked = polars::prelude::ListChunked::from_iter([filtered].into_iter())
-            .with_name(format!("{}_freqItems", resolved).into());
+            .with_name(format!("{resolved}_freqItems").into());
         let list_row = list_chunked.into_series();
         out_series.push(list_row.into());
     }

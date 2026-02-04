@@ -108,8 +108,7 @@ impl SparkSession {
             .ok_or_else(|| {
                 PolarsError::InvalidOperation(
                     format!(
-                        "Table or view '{}' not found. Register it with create_or_replace_temp_view.",
-                        name
+                        "Table or view '{name}' not found. Register it with create_or_replace_temp_view."
                     )
                     .into(),
                 )
@@ -279,9 +278,9 @@ impl SparkSession {
                         })
                         .collect();
                     let series = Series::new(name.as_str().into(), vals);
-                    series.cast(&DataType::Date).map_err(|e| {
-                        PolarsError::ComputeError(format!("date cast: {}", e).into())
-                    })?
+                    series
+                        .cast(&DataType::Date)
+                        .map_err(|e| PolarsError::ComputeError(format!("date cast: {e}").into()))?
                 }
                 "timestamp" | "datetime" | "timestamp_ntz" => {
                     let vals: Vec<Option<i64>> =
@@ -313,14 +312,13 @@ impl SparkSession {
                     series
                         .cast(&DataType::Datetime(TimeUnit::Microseconds, None))
                         .map_err(|e| {
-                            PolarsError::ComputeError(format!("datetime cast: {}", e).into())
+                            PolarsError::ComputeError(format!("datetime cast: {e}").into())
                         })?
                 }
                 _ => {
                     return Err(PolarsError::ComputeError(
                         format!(
-                            "create_dataframe_from_rows: unsupported type '{}' for column '{}'",
-                            type_str, name
+                            "create_dataframe_from_rows: unsupported type '{type_str}' for column '{name}'"
                         )
                         .into(),
                     ));
@@ -362,15 +360,14 @@ impl SparkSession {
             .map_err(|e| {
                 PolarsError::ComputeError(
                     format!(
-                        "read_csv({}): {} Hint: check that the file exists and is valid CSV.",
-                        path_display, e
+                        "read_csv({path_display}): {e} Hint: check that the file exists and is valid CSV."
                     )
                     .into(),
                 )
             })?;
         let pl_df = lf.collect().map_err(|e| {
             PolarsError::ComputeError(
-                format!("read_csv({}): collect failed: {}", path_display, e).into(),
+                format!("read_csv({path_display}): collect failed: {e}").into(),
             )
         })?;
         Ok(crate::dataframe::DataFrame::from_polars_with_options(
@@ -691,8 +688,7 @@ mod tests {
                 // With sql feature but no table: "Table or view 'table' not found" or parse error
                 assert!(
                     s.contains("SQL") || s.contains("Table") || s.contains("feature"),
-                    "unexpected message: {}",
-                    s
+                    "unexpected message: {s}"
                 );
             }
             _ => panic!("Expected InvalidOperation error"),

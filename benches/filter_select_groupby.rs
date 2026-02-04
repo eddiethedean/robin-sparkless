@@ -11,7 +11,7 @@ fn sample_data_robin(n: usize) -> (Vec<(i64, i64, String)>, Vec<&'static str>) {
         data.push((
             i as i64,
             (i % 80) as i64, // age 0..79
-            format!("user_{}", i),
+            format!("user_{i}"),
         ));
     }
     (data, vec!["id", "age", "name"])
@@ -20,7 +20,7 @@ fn sample_data_robin(n: usize) -> (Vec<(i64, i64, String)>, Vec<&'static str>) {
 fn sample_data_polars(n: usize) -> PlDataFrame {
     let id: Vec<i64> = (0..n as i64).collect();
     let age: Vec<i64> = (0..n).map(|i| (i % 80) as i64).collect();
-    let name: Vec<String> = (0..n).map(|i| format!("user_{}", i)).collect();
+    let name: Vec<String> = (0..n).map(|i| format!("user_{i}")).collect();
     PlDataFrame::new(vec![
         Series::new("id".into(), id).into(),
         Series::new("age".into(), age).into(),
@@ -32,7 +32,7 @@ fn sample_data_polars(n: usize) -> PlDataFrame {
 fn bench_robin_filter_select_groupby(c: &mut Criterion, n: usize) {
     let (data, cols) = sample_data_robin(n);
     let spark = SparkSession::builder().app_name("bench").get_or_create();
-    c.bench_function(&format!("robin_filter_select_groupby_{}", n), |b| {
+    c.bench_function(&format!("robin_filter_select_groupby_{n}"), |b| {
         b.iter(|| {
             let df: RobinDataFrame = spark
                 .create_dataframe(black_box(data.clone()), cols.clone())
@@ -50,7 +50,7 @@ fn bench_robin_filter_select_groupby(c: &mut Criterion, n: usize) {
 
 fn bench_polars_filter_select_groupby(c: &mut Criterion, n: usize) {
     let df = sample_data_polars(n);
-    c.bench_function(&format!("polars_filter_select_groupby_{}", n), |b| {
+    c.bench_function(&format!("polars_filter_select_groupby_{n}"), |b| {
         b.iter(|| {
             let lf = df
                 .clone()

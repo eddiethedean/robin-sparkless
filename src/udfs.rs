@@ -19,7 +19,7 @@ pub fn apply_soundex(column: Column) -> PolarsResult<Option<Column>> {
     let series = column.take_materialized_series();
     let ca = series
         .str()
-        .map_err(|e| PolarsError::ComputeError(format!("soundex: {}", e).into()))?;
+        .map_err(|e| PolarsError::ComputeError(format!("soundex: {e}").into()))?;
     let out: StringChunked = ca.apply_values(soundex_one);
     Ok(Some(Column::new(name, out.into_series())))
 }
@@ -31,7 +31,7 @@ pub fn apply_crc32(column: Column) -> PolarsResult<Option<Column>> {
     let series = column.take_materialized_series();
     let ca = series
         .str()
-        .map_err(|e| PolarsError::ComputeError(format!("crc32: {}", e).into()))?;
+        .map_err(|e| PolarsError::ComputeError(format!("crc32: {e}").into()))?;
     let out = Int64Chunked::from_iter_options(
         name.as_str().into(),
         ca.into_iter().map(|opt_s| {
@@ -53,7 +53,7 @@ pub fn apply_xxhash64(column: Column) -> PolarsResult<Option<Column>> {
     let series = column.take_materialized_series();
     let ca = series
         .str()
-        .map_err(|e| PolarsError::ComputeError(format!("xxhash64: {}", e).into()))?;
+        .map_err(|e| PolarsError::ComputeError(format!("xxhash64: {e}").into()))?;
     let out = Int64Chunked::from_iter_options(
         name.as_str().into(),
         ca.into_iter().map(|opt_s| {
@@ -80,10 +80,10 @@ pub fn apply_levenshtein(columns: &mut [Column]) -> PolarsResult<Option<Column>>
     let b_series = std::mem::take(&mut columns[1]).take_materialized_series();
     let a_ca = a_series
         .str()
-        .map_err(|e| PolarsError::ComputeError(format!("levenshtein: {}", e).into()))?;
+        .map_err(|e| PolarsError::ComputeError(format!("levenshtein: {e}").into()))?;
     let b_ca = b_series
         .str()
-        .map_err(|e| PolarsError::ComputeError(format!("levenshtein: {}", e).into()))?;
+        .map_err(|e| PolarsError::ComputeError(format!("levenshtein: {e}").into()))?;
     let out = Int64Chunked::from_iter_options(
         name.as_str().into(),
         a_ca.into_iter().zip(b_ca).map(|(a, b)| match (a, b) {
@@ -100,7 +100,7 @@ pub fn apply_array_flatten(column: Column) -> PolarsResult<Option<Column>> {
     let series = column.take_materialized_series();
     let list_ca = series
         .list()
-        .map_err(|e| PolarsError::ComputeError(format!("array_flatten: {}", e).into()))?;
+        .map_err(|e| PolarsError::ComputeError(format!("array_flatten: {e}").into()))?;
     let inner_dtype = match list_ca.inner_dtype() {
         DataType::List(inner) => *inner.clone(),
         other => other.clone(),
@@ -134,7 +134,7 @@ pub fn apply_array_repeat(column: Column, n: i64) -> PolarsResult<Option<Column>
     let series = column.take_materialized_series();
     let list_ca = series
         .list()
-        .map_err(|e| PolarsError::ComputeError(format!("array_repeat: {}", e).into()))?;
+        .map_err(|e| PolarsError::ComputeError(format!("array_repeat: {e}").into()))?;
     let inner_dtype = list_ca.inner_dtype().clone();
     let n = n.max(0) as usize;
     let out = list_ca.try_apply_amortized(move |amort_s| {
@@ -178,7 +178,7 @@ pub fn apply_array_append(columns: &mut [Column]) -> PolarsResult<Option<Column>
     let elem_series = std::mem::take(&mut columns[1]).take_materialized_series();
     let list_ca = list_series
         .list()
-        .map_err(|e| PolarsError::ComputeError(format!("array_append: {}", e).into()))?;
+        .map_err(|e| PolarsError::ComputeError(format!("array_append: {e}").into()))?;
     let inner_dtype = list_ca.inner_dtype().clone();
     let elem_casted = elem_series.cast(&inner_dtype)?;
     let elem_len = elem_casted.len();
@@ -223,7 +223,7 @@ pub fn apply_array_prepend(columns: &mut [Column]) -> PolarsResult<Option<Column
     let elem_series = std::mem::take(&mut columns[1]).take_materialized_series();
     let list_ca = list_series
         .list()
-        .map_err(|e| PolarsError::ComputeError(format!("array_prepend: {}", e).into()))?;
+        .map_err(|e| PolarsError::ComputeError(format!("array_prepend: {e}").into()))?;
     let inner_dtype = list_ca.inner_dtype().clone();
     let elem_casted = elem_series.cast(&inner_dtype)?;
     let elem_len = elem_casted.len();
@@ -269,7 +269,7 @@ pub fn apply_array_insert(columns: &mut [Column]) -> PolarsResult<Option<Column>
     let elem_series = std::mem::take(&mut columns[2]).take_materialized_series();
     let list_ca = list_series
         .list()
-        .map_err(|e| PolarsError::ComputeError(format!("array_insert: {}", e).into()))?;
+        .map_err(|e| PolarsError::ComputeError(format!("array_insert: {e}").into()))?;
     let inner_dtype = list_ca.inner_dtype().clone();
     let pos_ca = pos_series.cast(&DataType::Int64)?.i64().unwrap().clone();
     let elem_casted = elem_series.cast(&inner_dtype)?;
@@ -333,10 +333,10 @@ pub fn apply_array_except(columns: &mut [Column]) -> PolarsResult<Option<Column>
     let b_series = std::mem::take(&mut columns[1]).take_materialized_series();
     let a_ca = a_series
         .list()
-        .map_err(|e| PolarsError::ComputeError(format!("array_except: {}", e).into()))?;
+        .map_err(|e| PolarsError::ComputeError(format!("array_except: {e}").into()))?;
     let b_ca = b_series
         .list()
-        .map_err(|e| PolarsError::ComputeError(format!("array_except: {}", e).into()))?;
+        .map_err(|e| PolarsError::ComputeError(format!("array_except: {e}").into()))?;
     let inner_dtype = a_ca.inner_dtype().clone();
     let mut builder = polars::chunked_array::builder::get_list_builder(
         &inner_dtype,
@@ -392,10 +392,10 @@ pub fn apply_arrays_overlap(columns: &mut [Column]) -> PolarsResult<Option<Colum
     let b_series = std::mem::take(&mut columns[1]).take_materialized_series();
     let a_ca = a_series
         .list()
-        .map_err(|e| PolarsError::ComputeError(format!("arrays_overlap: {}", e).into()))?;
+        .map_err(|e| PolarsError::ComputeError(format!("arrays_overlap: {e}").into()))?;
     let b_ca = b_series
         .list()
-        .map_err(|e| PolarsError::ComputeError(format!("arrays_overlap: {}", e).into()))?;
+        .map_err(|e| PolarsError::ComputeError(format!("arrays_overlap: {e}").into()))?;
     let mut results: Vec<bool> = Vec::with_capacity(a_ca.len());
     for (opt_a, opt_b) in a_ca.amortized_iter().zip(b_ca.amortized_iter()) {
         let overlap = match (opt_a, opt_b) {
@@ -440,7 +440,7 @@ pub fn apply_arrays_zip(columns: &mut [Column]) -> PolarsResult<Option<Column>> 
         .iter()
         .map(|s| {
             s.list()
-                .map_err(|e| PolarsError::ComputeError(format!("arrays_zip: {}", e).into()))
+                .map_err(|e| PolarsError::ComputeError(format!("arrays_zip: {e}").into()))
         })
         .collect::<PolarsResult<Vec<_>>>()?;
     let len = list_cas[0].len();
@@ -449,7 +449,7 @@ pub fn apply_arrays_zip(columns: &mut [Column]) -> PolarsResult<Option<Column>> 
     use polars::chunked_array::StructChunked;
     use polars::datatypes::Field;
     let struct_fields: Vec<Field> = (0..n)
-        .map(|i| Field::new(format!("field_{}", i).into(), inner_dtype.clone()))
+        .map(|i| Field::new(format!("field_{i}").into(), inner_dtype.clone()))
         .collect();
     let out_struct = DataType::Struct(struct_fields);
     let mut builder = get_list_builder(&out_struct, 64, len, name.as_str().into());
@@ -493,14 +493,14 @@ pub fn apply_arrays_zip(columns: &mut [Column]) -> PolarsResult<Option<Column>> 
                     for s in parts {
                         let _ = r.extend(&s);
                     }
-                    r.with_name(format!("field_{}", j).as_str().into())
+                    r.with_name(format!("field_{j}").as_str().into())
                 })
                 .collect();
             let field_refs: Vec<&Series> = field_series.iter().collect();
             let st =
                 StructChunked::from_series(PlSmallStr::EMPTY, max_len, field_refs.iter().copied())
                     .map_err(|e| {
-                        PolarsError::ComputeError(format!("arrays_zip struct: {}", e).into())
+                        PolarsError::ComputeError(format!("arrays_zip struct: {e}").into())
                     })?
                     .into_series();
             builder.append_series(&st)?;
@@ -521,10 +521,10 @@ pub fn apply_array_intersect(columns: &mut [Column]) -> PolarsResult<Option<Colu
     let b_series = std::mem::take(&mut columns[1]).take_materialized_series();
     let a_ca = a_series
         .list()
-        .map_err(|e| PolarsError::ComputeError(format!("array_intersect: {}", e).into()))?;
+        .map_err(|e| PolarsError::ComputeError(format!("array_intersect: {e}").into()))?;
     let b_ca = b_series
         .list()
-        .map_err(|e| PolarsError::ComputeError(format!("array_intersect: {}", e).into()))?;
+        .map_err(|e| PolarsError::ComputeError(format!("array_intersect: {e}").into()))?;
     let inner_dtype = a_ca.inner_dtype().clone();
     let mut builder = polars::chunked_array::builder::get_list_builder(
         &inner_dtype,
@@ -580,10 +580,10 @@ pub fn apply_array_union(columns: &mut [Column]) -> PolarsResult<Option<Column>>
     let b_series = std::mem::take(&mut columns[1]).take_materialized_series();
     let a_ca = a_series
         .list()
-        .map_err(|e| PolarsError::ComputeError(format!("array_union: {}", e).into()))?;
+        .map_err(|e| PolarsError::ComputeError(format!("array_union: {e}").into()))?;
     let b_ca = b_series
         .list()
-        .map_err(|e| PolarsError::ComputeError(format!("array_union: {}", e).into()))?;
+        .map_err(|e| PolarsError::ComputeError(format!("array_union: {e}").into()))?;
     let inner_dtype = a_ca.inner_dtype().clone();
     let mut builder = polars::chunked_array::builder::get_list_builder(
         &inner_dtype,
@@ -644,7 +644,7 @@ pub fn apply_str_to_map(
     let series = column.take_materialized_series();
     let ca = series
         .str()
-        .map_err(|e| PolarsError::ComputeError(format!("str_to_map: {}", e).into()))?;
+        .map_err(|e| PolarsError::ComputeError(format!("str_to_map: {e}").into()))?;
     let out_struct = DataType::Struct(vec![
         Field::new("key".into(), DataType::String),
         Field::new("value".into(), DataType::String),
@@ -678,7 +678,7 @@ pub fn apply_str_to_map(
                     pairs.len(),
                     fields.iter().copied(),
                 )
-                .map_err(|e| PolarsError::ComputeError(format!("str_to_map struct: {}", e).into()))?
+                .map_err(|e| PolarsError::ComputeError(format!("str_to_map struct: {e}").into()))?
                 .into_series();
                 builder.append_series(&st)?;
             }
@@ -704,10 +704,10 @@ pub fn apply_map_concat(columns: &mut [Column]) -> PolarsResult<Option<Column>> 
     let b_series = std::mem::take(&mut columns[1]).take_materialized_series();
     let a_ca = a_series
         .list()
-        .map_err(|e| PolarsError::ComputeError(format!("map_concat: {}", e).into()))?;
+        .map_err(|e| PolarsError::ComputeError(format!("map_concat: {e}").into()))?;
     let b_ca = b_series
         .list()
-        .map_err(|e| PolarsError::ComputeError(format!("map_concat: {}", e).into()))?;
+        .map_err(|e| PolarsError::ComputeError(format!("map_concat: {e}").into()))?;
     let struct_dtype = a_ca.inner_dtype().clone();
     let (key_dtype, value_dtype) = match &struct_dtype {
         DataType::Struct(fields) => {
@@ -739,13 +739,13 @@ pub fn apply_map_concat(columns: &mut [Column]) -> PolarsResult<Option<Column>> 
             for elem in list_s.amortized_iter().flatten() {
                 let s = elem.deep_clone();
                 let st = s.struct_().map_err(|e| {
-                    PolarsError::ComputeError(format!("map_concat struct: {}", e).into())
+                    PolarsError::ComputeError(format!("map_concat struct: {e}").into())
                 })?;
                 let k_s = st.field_by_name("key").map_err(|e| {
-                    PolarsError::ComputeError(format!("map_concat key: {}", e).into())
+                    PolarsError::ComputeError(format!("map_concat key: {e}").into())
                 })?;
                 let v_s = st.field_by_name("value").map_err(|e| {
-                    PolarsError::ComputeError(format!("map_concat value: {}", e).into())
+                    PolarsError::ComputeError(format!("map_concat value: {e}").into())
                 })?;
                 let key = std::string::ToString::to_string(&k_s);
                 merged.insert(key, (k_s, v_s));
@@ -760,7 +760,7 @@ pub fn apply_map_concat(columns: &mut [Column]) -> PolarsResult<Option<Column>> 
                 let fields: [&Series; 2] = [&k_s, &v_s];
                 let st = StructChunked::from_series(PlSmallStr::EMPTY, len, fields.iter().copied())
                     .map_err(|e| {
-                        PolarsError::ComputeError(format!("map_concat build: {}", e).into())
+                        PolarsError::ComputeError(format!("map_concat build: {e}").into())
                     })?
                     .into_series();
                 row_structs.push(st);
@@ -787,7 +787,7 @@ pub fn apply_map_contains_key(columns: &mut [Column]) -> PolarsResult<Option<Col
     let key_series = std::mem::take(&mut columns[1]).take_materialized_series();
     let map_ca = map_series
         .list()
-        .map_err(|e| PolarsError::ComputeError(format!("map_contains_key: {}", e).into()))?;
+        .map_err(|e| PolarsError::ComputeError(format!("map_contains_key: {e}").into()))?;
     let key_str = key_series.cast(&DataType::String)?;
     let key_vec: Vec<String> = (0..key_str.len())
         .map(|i| key_str.get(i).map(|av| av.to_string()).unwrap_or_default())
@@ -835,7 +835,7 @@ pub fn apply_get(columns: &mut [Column]) -> PolarsResult<Option<Column>> {
     let key_series = std::mem::take(&mut columns[1]).take_materialized_series();
     let map_ca = map_series
         .list()
-        .map_err(|e| PolarsError::ComputeError(format!("get: {}", e).into()))?;
+        .map_err(|e| PolarsError::ComputeError(format!("get: {e}").into()))?;
     let key_str = key_series.cast(&DataType::String)?;
     let key_vec: Vec<String> = (0..key_str.len())
         .map(|i| key_str.get(i).map(|av| av.to_string()).unwrap_or_default())
@@ -890,7 +890,7 @@ pub fn apply_ascii(column: Column) -> PolarsResult<Option<Column>> {
     let series = column.take_materialized_series();
     let ca = series
         .str()
-        .map_err(|e| PolarsError::ComputeError(format!("ascii: {}", e).into()))?;
+        .map_err(|e| PolarsError::ComputeError(format!("ascii: {e}").into()))?;
     let out = Int32Chunked::from_iter_options(
         name.as_str().into(),
         ca.into_iter()
@@ -908,34 +908,34 @@ pub fn apply_format_number(column: Column, decimals: u32) -> PolarsResult<Option
         DataType::Float64 => {
             let ca = series
                 .f64()
-                .map_err(|e| PolarsError::ComputeError(format!("format_number: {}", e).into()))?;
+                .map_err(|e| PolarsError::ComputeError(format!("format_number: {e}").into()))?;
             StringChunked::from_iter_options(
                 name.as_str().into(),
                 ca.into_iter()
-                    .map(|opt_v| opt_v.map(|v| format!("{:.prec$}", v, prec = prec))),
+                    .map(|opt_v| opt_v.map(|v| format!("{v:.prec$}"))),
             )
         }
         DataType::Float32 => {
             let ca = series
                 .f32()
-                .map_err(|e| PolarsError::ComputeError(format!("format_number: {}", e).into()))?;
+                .map_err(|e| PolarsError::ComputeError(format!("format_number: {e}").into()))?;
             StringChunked::from_iter_options(
                 name.as_str().into(),
                 ca.into_iter()
-                    .map(|opt_v| opt_v.map(|v| format!("{:.prec$}", v, prec = prec))),
+                    .map(|opt_v| opt_v.map(|v| format!("{v:.prec$}"))),
             )
         }
         _ => {
             let f64_series = series.cast(&DataType::Float64).map_err(|e| {
-                PolarsError::ComputeError(format!("format_number cast: {}", e).into())
+                PolarsError::ComputeError(format!("format_number cast: {e}").into())
             })?;
             let ca = f64_series
                 .f64()
-                .map_err(|e| PolarsError::ComputeError(format!("format_number: {}", e).into()))?;
+                .map_err(|e| PolarsError::ComputeError(format!("format_number: {e}").into()))?;
             StringChunked::from_iter_options(
                 name.as_str().into(),
                 ca.into_iter()
-                    .map(|opt_v| opt_v.map(|v| format!("{:.prec$}", v, prec = prec))),
+                    .map(|opt_v| opt_v.map(|v| format!("{v:.prec$}"))),
             )
         }
     };
@@ -1040,10 +1040,10 @@ pub fn apply_find_in_set(columns: &mut [Column]) -> PolarsResult<Option<Column>>
     let set_series = std::mem::take(&mut columns[1]).take_materialized_series();
     let str_ca = str_series
         .str()
-        .map_err(|e| PolarsError::ComputeError(format!("find_in_set: {}", e).into()))?;
+        .map_err(|e| PolarsError::ComputeError(format!("find_in_set: {e}").into()))?;
     let set_ca = set_series
         .str()
-        .map_err(|e| PolarsError::ComputeError(format!("find_in_set: {}", e).into()))?;
+        .map_err(|e| PolarsError::ComputeError(format!("find_in_set: {e}").into()))?;
     let out = Int64Chunked::from_iter_options(
         name.as_str().into(),
         str_ca
@@ -1077,9 +1077,9 @@ pub fn apply_regexp_instr(
     let series = column.take_materialized_series();
     let ca = series
         .str()
-        .map_err(|e| PolarsError::ComputeError(format!("regexp_instr: {}", e).into()))?;
+        .map_err(|e| PolarsError::ComputeError(format!("regexp_instr: {e}").into()))?;
     let re = Regex::new(&pattern).map_err(|e| {
-        PolarsError::ComputeError(format!("regexp_instr invalid regex '{}': {}", pattern, e).into())
+        PolarsError::ComputeError(format!("regexp_instr invalid regex '{pattern}': {e}").into())
     })?;
     let out = Int64Chunked::from_iter_options(
         name.as_str().into(),
@@ -1104,7 +1104,7 @@ pub fn apply_base64(column: Column) -> PolarsResult<Option<Column>> {
     let series = column.take_materialized_series();
     let ca = series
         .str()
-        .map_err(|e| PolarsError::ComputeError(format!("base64: {}", e).into()))?;
+        .map_err(|e| PolarsError::ComputeError(format!("base64: {e}").into()))?;
     let out = StringChunked::from_iter_options(
         name.as_str().into(),
         ca.into_iter().map(|opt_s| {
@@ -1121,7 +1121,7 @@ pub fn apply_unbase64(column: Column) -> PolarsResult<Option<Column>> {
     let series = column.take_materialized_series();
     let ca = series
         .str()
-        .map_err(|e| PolarsError::ComputeError(format!("unbase64: {}", e).into()))?;
+        .map_err(|e| PolarsError::ComputeError(format!("unbase64: {e}").into()))?;
     let out = StringChunked::from_iter_options(
         name.as_str().into(),
         ca.into_iter().map(|opt_s| {
@@ -1143,7 +1143,7 @@ pub fn apply_sha1(column: Column) -> PolarsResult<Option<Column>> {
     let series = column.take_materialized_series();
     let ca = series
         .str()
-        .map_err(|e| PolarsError::ComputeError(format!("sha1: {}", e).into()))?;
+        .map_err(|e| PolarsError::ComputeError(format!("sha1: {e}").into()))?;
     let out = StringChunked::from_iter_options(
         name.as_str().into(),
         ca.into_iter().map(|opt_s| {
@@ -1163,7 +1163,7 @@ pub fn apply_sha2(column: Column, bit_length: i32) -> PolarsResult<Option<Column
     let series = column.take_materialized_series();
     let ca = series
         .str()
-        .map_err(|e| PolarsError::ComputeError(format!("sha2: {}", e).into()))?;
+        .map_err(|e| PolarsError::ComputeError(format!("sha2: {e}").into()))?;
     let out = StringChunked::from_iter_options(
         name.as_str().into(),
         ca.into_iter().map(|opt_s| {
@@ -1188,7 +1188,7 @@ pub fn apply_md5(column: Column) -> PolarsResult<Option<Column>> {
     let series = column.take_materialized_series();
     let ca = series
         .str()
-        .map_err(|e| PolarsError::ComputeError(format!("md5: {}", e).into()))?;
+        .map_err(|e| PolarsError::ComputeError(format!("md5: {e}").into()))?;
     let out = StringChunked::from_iter_options(
         name.as_str().into(),
         ca.into_iter()
@@ -1203,7 +1203,7 @@ pub fn apply_encode(column: Column, charset: &str) -> PolarsResult<Option<Column
     let series = column.take_materialized_series();
     let ca = series
         .str()
-        .map_err(|e| PolarsError::ComputeError(format!("encode: {}", e).into()))?;
+        .map_err(|e| PolarsError::ComputeError(format!("encode: {e}").into()))?;
     let cs = charset.to_lowercase();
     let out = StringChunked::from_iter_options(
         name.as_str().into(),
@@ -1226,7 +1226,7 @@ pub fn apply_decode(column: Column, charset: &str) -> PolarsResult<Option<Column
     let series = column.take_materialized_series();
     let ca = series
         .str()
-        .map_err(|e| PolarsError::ComputeError(format!("decode: {}", e).into()))?;
+        .map_err(|e| PolarsError::ComputeError(format!("decode: {e}").into()))?;
     let _ = charset;
     let out = StringChunked::from_iter_options(
         name.as_str().into(),
@@ -1246,7 +1246,7 @@ pub fn apply_to_binary(column: Column, fmt: &str) -> PolarsResult<Option<Column>
     let series = column.take_materialized_series();
     let ca = series
         .str()
-        .map_err(|e| PolarsError::ComputeError(format!("to_binary: {}", e).into()))?;
+        .map_err(|e| PolarsError::ComputeError(format!("to_binary: {e}").into()))?;
     let fmt_lower = fmt.to_lowercase();
     let out = StringChunked::from_iter_options(
         name.as_str().into(),
@@ -1327,7 +1327,7 @@ pub fn apply_aes_encrypt(column: Column, key: &str) -> PolarsResult<Option<Colum
     let series = column.take_materialized_series();
     let ca = series
         .str()
-        .map_err(|e| PolarsError::ComputeError(format!("aes_encrypt: {}", e).into()))?;
+        .map_err(|e| PolarsError::ComputeError(format!("aes_encrypt: {e}").into()))?;
     let key_bytes = key.as_bytes();
     let out = StringChunked::from_iter_options(
         name.as_str().into(),
@@ -1343,7 +1343,7 @@ pub fn apply_aes_decrypt(column: Column, key: &str) -> PolarsResult<Option<Colum
     let series = column.take_materialized_series();
     let ca = series
         .str()
-        .map_err(|e| PolarsError::ComputeError(format!("aes_decrypt: {}", e).into()))?;
+        .map_err(|e| PolarsError::ComputeError(format!("aes_decrypt: {e}").into()))?;
     let key_bytes = key.as_bytes();
     let out = StringChunked::from_iter_options(
         name.as_str().into(),
@@ -1374,7 +1374,7 @@ pub fn apply_char(column: Column) -> PolarsResult<Option<Column>> {
         DataType::Int32 => {
             let ca = series
                 .i32()
-                .map_err(|e| PolarsError::ComputeError(format!("char: {}", e).into()))?;
+                .map_err(|e| PolarsError::ComputeError(format!("char: {e}").into()))?;
             StringChunked::from_iter_options(
                 name.as_str().into(),
                 ca.into_iter().map(|opt_v| opt_v.map(|v| to_char(v as i64))),
@@ -1383,7 +1383,7 @@ pub fn apply_char(column: Column) -> PolarsResult<Option<Column>> {
         DataType::Int64 => {
             let ca = series
                 .i64()
-                .map_err(|e| PolarsError::ComputeError(format!("char: {}", e).into()))?;
+                .map_err(|e| PolarsError::ComputeError(format!("char: {e}").into()))?;
             StringChunked::from_iter_options(
                 name.as_str().into(),
                 ca.into_iter().map(|opt_v| opt_v.map(to_char)),
@@ -1392,10 +1392,10 @@ pub fn apply_char(column: Column) -> PolarsResult<Option<Column>> {
         _ => {
             let i64_series = series
                 .cast(&DataType::Int64)
-                .map_err(|e| PolarsError::ComputeError(format!("char cast: {}", e).into()))?;
+                .map_err(|e| PolarsError::ComputeError(format!("char cast: {e}").into()))?;
             let ca = i64_series
                 .i64()
-                .map_err(|e| PolarsError::ComputeError(format!("char: {}", e).into()))?;
+                .map_err(|e| PolarsError::ComputeError(format!("char: {e}").into()))?;
             StringChunked::from_iter_options(
                 name.as_str().into(),
                 ca.into_iter().map(|opt_v| opt_v.map(to_char)),
@@ -1476,7 +1476,7 @@ fn chrono_weekday_to_dayofweek(w: chrono::Weekday) -> u32 {
 
 pub fn apply_next_day(column: Column, day_of_week: &str) -> PolarsResult<Option<Column>> {
     let target = parse_day_of_week(day_of_week).ok_or_else(|| {
-        PolarsError::ComputeError(format!("next_day: invalid day '{}'", day_of_week).into())
+        PolarsError::ComputeError(format!("next_day: invalid day '{day_of_week}'").into())
     })?;
     let name = column.field().into_owned().name;
     let series = column.take_materialized_series();
@@ -1654,13 +1654,13 @@ pub fn apply_conv(column: Column, from_base: i32, to_base: i32) -> PolarsResult<
     let out = if series.dtype() == &DataType::String {
         let ca = series
             .str()
-            .map_err(|e| PolarsError::ComputeError(format!("conv: {}", e).into()))?;
+            .map_err(|e| PolarsError::ComputeError(format!("conv: {e}").into()))?;
         ca.apply(|opt_s| opt_s.and_then(|s| conv_one(s, from_base, to_base).map(Cow::Owned)))
             .into_series()
     } else if series.dtype() == &DataType::Int64 {
         let ca = series
             .i64()
-            .map_err(|e| PolarsError::ComputeError(format!("conv: {}", e).into()))?;
+            .map_err(|e| PolarsError::ComputeError(format!("conv: {e}").into()))?;
         let to_b = to_base as u32;
         const DIGITS: &[u8] = b"0123456789abcdefghijklmnopqrstuvwxyz";
         let format_int = |n: i64| -> Option<String> {
@@ -1687,7 +1687,7 @@ pub fn apply_conv(column: Column, from_base: i32, to_base: i32) -> PolarsResult<
         };
         let out_ca = StringChunked::from_iter_options(
             name.as_str().into(),
-            ca.into_iter().map(|opt| opt.and_then(&format_int)),
+            ca.into_iter().map(|opt| opt.and_then(format_int)),
         );
         out_ca.into_series()
     } else {
@@ -1712,7 +1712,7 @@ pub fn apply_hex(column: Column) -> PolarsResult<Option<Column>> {
             .map_err(|e| PolarsError::ComputeError(e.to_string().into()))?;
         let out_ca = StringChunked::from_iter_options(
             name.as_str().into(),
-            ca.into_iter().map(|opt| opt.map(|n| format!("{:x}", n))),
+            ca.into_iter().map(|opt| opt.map(|n| format!("{n:x}"))),
         );
         out_ca.into_series()
     } else if series.dtype() == &DataType::String {
@@ -1725,7 +1725,7 @@ pub fn apply_hex(column: Column) -> PolarsResult<Option<Column>> {
                 opt.map(|s| {
                     s.as_bytes()
                         .iter()
-                        .map(|b| format!("{:02x}", b))
+                        .map(|b| format!("{b:02x}"))
                         .collect::<String>()
                 })
             }),
@@ -1738,7 +1738,7 @@ pub fn apply_hex(column: Column) -> PolarsResult<Option<Column>> {
             .map_err(|e| PolarsError::ComputeError(e.to_string().into()))?;
         let out_ca = StringChunked::from_iter_options(
             name.as_str().into(),
-            ca.into_iter().map(|opt| opt.map(|n| format!("{:x}", n))),
+            ca.into_iter().map(|opt| opt.map(|n| format!("{n:x}"))),
         );
         out_ca.into_series()
     };
@@ -1752,7 +1752,7 @@ pub fn apply_unhex(column: Column) -> PolarsResult<Option<Column>> {
     let series = column.take_materialized_series();
     let ca = series
         .str()
-        .map_err(|e| PolarsError::ComputeError(format!("unhex: {}", e).into()))?;
+        .map_err(|e| PolarsError::ComputeError(format!("unhex: {e}").into()))?;
     let unhex_one = |s: &str| -> Option<Vec<u8>> {
         let s = s.trim();
         let chars: Vec<char> = if s.len() % 2 == 1 {
@@ -1790,7 +1790,7 @@ pub fn apply_bin(column: Column) -> PolarsResult<Option<Column>> {
         .map_err(|e| PolarsError::ComputeError(e.to_string().into()))?;
     let out_ca = StringChunked::from_iter_options(
         name.as_str().into(),
-        ca.into_iter().map(|opt| opt.map(|n| format!("{:b}", n))),
+        ca.into_iter().map(|opt| opt.map(|n| format!("{n:b}"))),
     );
     Ok(Some(Column::new(name, out_ca.into_series())))
 }
@@ -1836,17 +1836,11 @@ pub fn apply_assert_true(column: Column, err_msg: Option<&str>) -> PolarsResult<
     let ca = series
         .bool()
         .map_err(|e| PolarsError::ComputeError(e.to_string().into()))?;
-    let mut failed = false;
-    for v in ca {
-        if let Some(false) = v {
-            failed = true;
-            break;
-        }
-    }
+    let failed = ca.into_iter().flatten().any(|b| !b);
     if failed {
         let msg = err_msg
             .map(String::from)
-            .unwrap_or_else(|| format!("assert_true failed on column '{}'", name));
+            .unwrap_or_else(|| format!("assert_true failed on column '{name}'"));
         return Err(PolarsError::ComputeError(msg.into()));
     }
     Ok(Some(Column::new(name, series)))
@@ -2384,10 +2378,10 @@ pub fn apply_map_from_arrays(columns: &mut [Column]) -> PolarsResult<Option<Colu
     let values_series = std::mem::take(&mut columns[1]).take_materialized_series();
     let keys_ca = keys_series
         .list()
-        .map_err(|e| PolarsError::ComputeError(format!("map_from_arrays keys: {}", e).into()))?;
+        .map_err(|e| PolarsError::ComputeError(format!("map_from_arrays keys: {e}").into()))?;
     let values_ca = values_series
         .list()
-        .map_err(|e| PolarsError::ComputeError(format!("map_from_arrays values: {}", e).into()))?;
+        .map_err(|e| PolarsError::ComputeError(format!("map_from_arrays values: {e}").into()))?;
     let key_dtype = keys_ca.inner_dtype().clone();
     let value_dtype = values_ca.inner_dtype().clone();
     let struct_dtype = DataType::Struct(vec![
@@ -2412,7 +2406,7 @@ pub fn apply_map_from_arrays(columns: &mut [Column]) -> PolarsResult<Option<Colu
                             len,
                             fields.iter().copied(),
                         )
-                        .map_err(|e| PolarsError::ComputeError(format!("struct: {}", e).into()))?
+                        .map_err(|e| PolarsError::ComputeError(format!("struct: {e}").into()))?
                         .into_series();
                         row_structs.push(st);
                     }
@@ -2420,7 +2414,7 @@ pub fn apply_map_from_arrays(columns: &mut [Column]) -> PolarsResult<Option<Colu
                 if row_structs.is_empty() {
                     builder
                         .append_series(&Series::new_empty(PlSmallStr::EMPTY, &struct_dtype))
-                        .map_err(|e| PolarsError::ComputeError(format!("builder: {}", e).into()))?;
+                        .map_err(|e| PolarsError::ComputeError(format!("builder: {e}").into()))?;
                 } else {
                     let mut combined = row_structs.remove(0);
                     for s in row_structs {
@@ -2428,7 +2422,7 @@ pub fn apply_map_from_arrays(columns: &mut [Column]) -> PolarsResult<Option<Colu
                     }
                     builder
                         .append_series(&combined)
-                        .map_err(|e| PolarsError::ComputeError(format!("builder: {}", e).into()))?;
+                        .map_err(|e| PolarsError::ComputeError(format!("builder: {e}").into()))?;
                 }
             }
             _ => {
@@ -2455,10 +2449,10 @@ pub fn apply_zip_arrays_to_struct(columns: &mut [Column]) -> PolarsResult<Option
     let b_series = std::mem::take(&mut columns[1]).take_materialized_series();
     let a_ca = a_series
         .list()
-        .map_err(|e| PolarsError::ComputeError(format!("zip_with left: {}", e).into()))?;
+        .map_err(|e| PolarsError::ComputeError(format!("zip_with left: {e}").into()))?;
     let b_ca = b_series
         .list()
-        .map_err(|e| PolarsError::ComputeError(format!("zip_with right: {}", e).into()))?;
+        .map_err(|e| PolarsError::ComputeError(format!("zip_with right: {e}").into()))?;
     let left_dtype = a_ca.inner_dtype().clone();
     let right_dtype = b_ca.inner_dtype().clone();
     let struct_dtype = DataType::Struct(vec![
@@ -2496,7 +2490,7 @@ pub fn apply_zip_arrays_to_struct(columns: &mut [Column]) -> PolarsResult<Option
                                 false,
                             )
                             .map_err(|e| {
-                                PolarsError::ComputeError(format!("zip null: {}", e).into())
+                                PolarsError::ComputeError(format!("zip null: {e}").into())
                             })?;
                             (l, r)
                         }
@@ -2508,7 +2502,7 @@ pub fn apply_zip_arrays_to_struct(columns: &mut [Column]) -> PolarsResult<Option
                                 false,
                             )
                             .map_err(|e| {
-                                PolarsError::ComputeError(format!("zip null: {}", e).into())
+                                PolarsError::ComputeError(format!("zip null: {e}").into())
                             })?;
                             (l, r)
                         }
@@ -2520,7 +2514,7 @@ pub fn apply_zip_arrays_to_struct(columns: &mut [Column]) -> PolarsResult<Option
                                 false,
                             )
                             .map_err(|e| {
-                                PolarsError::ComputeError(format!("zip null: {}", e).into())
+                                PolarsError::ComputeError(format!("zip null: {e}").into())
                             })?;
                             l.rename("left".into());
                             let mut r = Series::from_any_values_and_dtype(
@@ -2530,7 +2524,7 @@ pub fn apply_zip_arrays_to_struct(columns: &mut [Column]) -> PolarsResult<Option
                                 false,
                             )
                             .map_err(|e| {
-                                PolarsError::ComputeError(format!("zip null: {}", e).into())
+                                PolarsError::ComputeError(format!("zip null: {e}").into())
                             })?;
                             r.rename("right".into());
                             (l, r)
@@ -2543,7 +2537,7 @@ pub fn apply_zip_arrays_to_struct(columns: &mut [Column]) -> PolarsResult<Option
                     let st =
                         StructChunked::from_series(PlSmallStr::EMPTY, len, fields.iter().copied())
                             .map_err(|e| {
-                                PolarsError::ComputeError(format!("zip struct: {}", e).into())
+                                PolarsError::ComputeError(format!("zip struct: {e}").into())
                             })?
                             .into_series();
                     row_structs.push(st);
@@ -2552,7 +2546,7 @@ pub fn apply_zip_arrays_to_struct(columns: &mut [Column]) -> PolarsResult<Option
                     builder
                         .append_series(&Series::new_empty(PlSmallStr::EMPTY, &struct_dtype))
                         .map_err(|e| {
-                            PolarsError::ComputeError(format!("zip builder: {}", e).into())
+                            PolarsError::ComputeError(format!("zip builder: {e}").into())
                         })?;
                 } else {
                     let mut combined = row_structs.remove(0);
@@ -2560,7 +2554,7 @@ pub fn apply_zip_arrays_to_struct(columns: &mut [Column]) -> PolarsResult<Option
                         combined.extend(&s)?;
                     }
                     builder.append_series(&combined).map_err(|e| {
-                        PolarsError::ComputeError(format!("zip builder: {}", e).into())
+                        PolarsError::ComputeError(format!("zip builder: {e}").into())
                     })?;
                 }
             }
@@ -2587,10 +2581,10 @@ pub fn apply_map_zip_to_struct(columns: &mut [Column]) -> PolarsResult<Option<Co
     let b_series = std::mem::take(&mut columns[1]).take_materialized_series();
     let a_ca = a_series
         .list()
-        .map_err(|e| PolarsError::ComputeError(format!("map_zip_with map1: {}", e).into()))?;
+        .map_err(|e| PolarsError::ComputeError(format!("map_zip_with map1: {e}").into()))?;
     let b_ca = b_series
         .list()
-        .map_err(|e| PolarsError::ComputeError(format!("map_zip_with map2: {}", e).into()))?;
+        .map_err(|e| PolarsError::ComputeError(format!("map_zip_with map2: {e}").into()))?;
     let struct_dtype_in = a_ca.inner_dtype().clone();
     let (key_dtype, value_dtype) = match &struct_dtype_in {
         DataType::Struct(fields) => {
@@ -2676,7 +2670,7 @@ pub fn apply_map_zip_to_struct(columns: &mut [Column]) -> PolarsResult<Option<Co
                     let st =
                         StructChunked::from_series(PlSmallStr::EMPTY, len, fields.iter().copied())
                             .map_err(|e| {
-                                PolarsError::ComputeError(format!("map_zip struct: {}", e).into())
+                                PolarsError::ComputeError(format!("map_zip struct: {e}").into())
                             })?
                             .into_series();
                     row_structs.push(st);
@@ -2685,7 +2679,7 @@ pub fn apply_map_zip_to_struct(columns: &mut [Column]) -> PolarsResult<Option<Co
                     builder
                         .append_series(&Series::new_empty(PlSmallStr::EMPTY, &out_struct_dtype))
                         .map_err(|e| {
-                            PolarsError::ComputeError(format!("map_zip builder: {}", e).into())
+                            PolarsError::ComputeError(format!("map_zip builder: {e}").into())
                         })?;
                 } else {
                     let mut combined = row_structs.remove(0);
@@ -2693,7 +2687,7 @@ pub fn apply_map_zip_to_struct(columns: &mut [Column]) -> PolarsResult<Option<Co
                         combined.extend(&s)?;
                     }
                     builder.append_series(&combined).map_err(|e| {
-                        PolarsError::ComputeError(format!("map_zip builder: {}", e).into())
+                        PolarsError::ComputeError(format!("map_zip builder: {e}").into())
                     })?;
                 }
             }
@@ -2891,7 +2885,7 @@ pub fn apply_unix_timestamp(column: Column, format: Option<&str>) -> PolarsResul
     let series = column.take_materialized_series();
     let ca = series
         .str()
-        .map_err(|e| PolarsError::ComputeError(format!("unix_timestamp: {}", e).into()))?;
+        .map_err(|e| PolarsError::ComputeError(format!("unix_timestamp: {e}").into()))?;
     let out = Int64Chunked::from_iter_options(
         name.as_str().into(),
         ca.into_iter().map(|opt_s| {
@@ -2915,10 +2909,10 @@ pub fn apply_from_unixtime(column: Column, format: Option<&str>) -> PolarsResult
     let series = column.take_materialized_series();
     let casted = series
         .cast(&DataType::Int64)
-        .map_err(|e| PolarsError::ComputeError(format!("from_unixtime cast: {}", e).into()))?;
+        .map_err(|e| PolarsError::ComputeError(format!("from_unixtime cast: {e}").into()))?;
     let ca = casted
         .i64()
-        .map_err(|e| PolarsError::ComputeError(format!("from_unixtime: {}", e).into()))?;
+        .map_err(|e| PolarsError::ComputeError(format!("from_unixtime: {e}").into()))?;
     let out = StringChunked::from_iter_options(
         name.as_str().into(),
         ca.into_iter().map(|opt_secs| {
@@ -2947,7 +2941,7 @@ pub fn apply_make_timestamp(
     let tz: Option<Tz> = timezone
         .map(|s| {
             s.parse()
-                .map_err(|_| PolarsError::ComputeError(format!("invalid timezone: {}", s).into()))
+                .map_err(|_| PolarsError::ComputeError(format!("invalid timezone: {s}").into()))
         })
         .transpose()?;
     let name = columns[0].field().into_owned().name;
@@ -3002,7 +2996,7 @@ pub fn apply_to_timestamp_format(
     let series = column.take_materialized_series();
     let ca = series
         .str()
-        .map_err(|e| PolarsError::ComputeError(format!("to_timestamp: {}", e).into()))?;
+        .map_err(|e| PolarsError::ComputeError(format!("to_timestamp: {e}").into()))?;
     let out = Int64Chunked::from_iter_options(
         name.as_str().into(),
         ca.into_iter().map(|opt_s| {
@@ -3117,7 +3111,7 @@ fn factorial_u64(n: i64) -> Option<i64> {
 pub fn apply_from_utc_timestamp(column: Column, tz_str: &str) -> PolarsResult<Option<Column>> {
     let _: Tz = tz_str
         .parse()
-        .map_err(|_| PolarsError::ComputeError(format!("invalid timezone: {}", tz_str).into()))?;
+        .map_err(|_| PolarsError::ComputeError(format!("invalid timezone: {tz_str}").into()))?;
     Ok(Some(column))
 }
 
@@ -3125,7 +3119,7 @@ pub fn apply_from_utc_timestamp(column: Column, tz_str: &str) -> PolarsResult<Op
 pub fn apply_to_utc_timestamp(column: Column, tz_str: &str) -> PolarsResult<Option<Column>> {
     let _: Tz = tz_str
         .parse()
-        .map_err(|_| PolarsError::ComputeError(format!("invalid timezone: {}", tz_str).into()))?;
+        .map_err(|_| PolarsError::ComputeError(format!("invalid timezone: {tz_str}").into()))?;
     Ok(Some(column))
 }
 
@@ -3144,10 +3138,10 @@ pub fn apply_factorial(column: Column) -> PolarsResult<Option<Column>> {
     let series = column.take_materialized_series();
     let casted = series
         .cast(&DataType::Int64)
-        .map_err(|e| PolarsError::ComputeError(format!("factorial cast: {}", e).into()))?;
+        .map_err(|e| PolarsError::ComputeError(format!("factorial cast: {e}").into()))?;
     let ca = casted
         .i64()
-        .map_err(|e| PolarsError::ComputeError(format!("factorial: {}", e).into()))?;
+        .map_err(|e| PolarsError::ComputeError(format!("factorial: {e}").into()))?;
     let out = Int64Chunked::from_iter_options(
         name.as_str().into(),
         ca.into_iter().map(|opt_n| opt_n.and_then(factorial_u64)),
@@ -3164,7 +3158,7 @@ pub fn apply_url_decode(column: Column) -> PolarsResult<Option<Column>> {
     let series = column.take_materialized_series();
     let ca = series
         .str()
-        .map_err(|e| PolarsError::ComputeError(format!("url_decode: {}", e).into()))?;
+        .map_err(|e| PolarsError::ComputeError(format!("url_decode: {e}").into()))?;
     let out = StringChunked::from_iter_options(
         name.as_str().into(),
         ca.into_iter().map(|opt_s| {
@@ -3186,7 +3180,7 @@ pub fn apply_url_encode(column: Column) -> PolarsResult<Option<Column>> {
     let series = column.take_materialized_series();
     let ca = series
         .str()
-        .map_err(|e| PolarsError::ComputeError(format!("url_encode: {}", e).into()))?;
+        .map_err(|e| PolarsError::ComputeError(format!("url_encode: {e}").into()))?;
     let out = StringChunked::from_iter_options(
         name.as_str().into(),
         ca.into_iter()
@@ -3202,7 +3196,7 @@ pub fn apply_shift_right_unsigned(column: Column, n: i32) -> PolarsResult<Option
     let s = series.cast(&DataType::Int64)?;
     let ca = s
         .i64()
-        .map_err(|e| PolarsError::ComputeError(format!("shift_right_unsigned: {}", e).into()))?;
+        .map_err(|e| PolarsError::ComputeError(format!("shift_right_unsigned: {e}").into()))?;
     let u = n as u32;
     let out = Int64Chunked::from_iter_options(
         name.as_str().into(),
@@ -3218,7 +3212,7 @@ pub fn apply_json_array_length(column: Column, path: &str) -> PolarsResult<Optio
     let series = column.take_materialized_series();
     let ca = series
         .str()
-        .map_err(|e| PolarsError::ComputeError(format!("json_array_length: {}", e).into()))?;
+        .map_err(|e| PolarsError::ComputeError(format!("json_array_length: {e}").into()))?;
     let path = path.trim_start_matches('$').trim_start_matches('.');
     let path_parts: Vec<&str> = if path.is_empty() {
         vec![]
@@ -3247,7 +3241,7 @@ pub fn apply_json_object_keys(column: Column) -> PolarsResult<Option<Column>> {
     let series = column.take_materialized_series();
     let ca = series
         .str()
-        .map_err(|e| PolarsError::ComputeError(format!("json_object_keys: {}", e).into()))?;
+        .map_err(|e| PolarsError::ComputeError(format!("json_object_keys: {e}").into()))?;
     let out: ListChunked = ca
         .into_iter()
         .map(|opt_s| {
@@ -3268,7 +3262,7 @@ pub fn apply_json_tuple(column: Column, keys: &[String]) -> PolarsResult<Option<
     let series = column.take_materialized_series();
     let ca = series
         .str()
-        .map_err(|e| PolarsError::ComputeError(format!("json_tuple: {}", e).into()))?;
+        .map_err(|e| PolarsError::ComputeError(format!("json_tuple: {e}").into()))?;
     let keys = keys.to_vec();
     let mut columns_per_key: Vec<Vec<Option<String>>> =
         (0..keys.len()).map(|_| Vec::new()).collect();
@@ -3298,7 +3292,7 @@ pub fn apply_from_csv(column: Column) -> PolarsResult<Option<Column>> {
     let series = column.take_materialized_series();
     let ca = series
         .str()
-        .map_err(|e| PolarsError::ComputeError(format!("from_csv: {}", e).into()))?;
+        .map_err(|e| PolarsError::ComputeError(format!("from_csv: {e}").into()))?;
     const MAX_COLS: usize = 32;
     let mut columns: Vec<Vec<Option<String>>> = (0..MAX_COLS).map(|_| Vec::new()).collect();
     for opt_s in ca.into_iter() {
@@ -3311,7 +3305,7 @@ pub fn apply_from_csv(column: Column) -> PolarsResult<Option<Column>> {
         }
     }
     let field_series: Vec<Series> = (0..MAX_COLS)
-        .map(|i| Series::new(format!("_c{}", i).into(), columns[i].clone()))
+        .map(|i| Series::new(format!("_c{i}").into(), columns[i].clone()))
         .collect();
     let out_df = DataFrame::new(field_series.into_iter().map(|s| s.into()).collect())?;
     let out_series = out_df.into_struct(name.as_str().into()).into_series();
@@ -3338,7 +3332,7 @@ pub fn apply_parse_url(
     let series = column.take_materialized_series();
     let ca = series
         .str()
-        .map_err(|e| PolarsError::ComputeError(format!("parse_url: {}", e).into()))?;
+        .map_err(|e| PolarsError::ComputeError(format!("parse_url: {e}").into()))?;
     let part_upper = part.trim().to_uppercase();
     let key_owned = key.map(String::from);
     let out = StringChunked::from_iter_options(
@@ -3429,32 +3423,32 @@ pub fn apply_sequence(column: Column) -> PolarsResult<Option<Column>> {
     let name = column.field().into_owned().name;
     let series = column.take_materialized_series();
     let st = series.struct_().map_err(|e| {
-        PolarsError::ComputeError(format!("sequence: expected struct column: {}", e).into())
+        PolarsError::ComputeError(format!("sequence: expected struct column: {e}").into())
     })?;
     let start_s = st
         .field_by_name("0")
-        .map_err(|e| PolarsError::ComputeError(format!("sequence field 0: {}", e).into()))?;
+        .map_err(|e| PolarsError::ComputeError(format!("sequence field 0: {e}").into()))?;
     let stop_s = st
         .field_by_name("1")
-        .map_err(|e| PolarsError::ComputeError(format!("sequence field 1: {}", e).into()))?;
+        .map_err(|e| PolarsError::ComputeError(format!("sequence field 1: {e}").into()))?;
     let step_s = st.field_by_name("2").ok(); // optional
     let start_series = start_s
         .cast(&DataType::Int64)
-        .map_err(|e| PolarsError::ComputeError(format!("sequence start: {}", e).into()))?;
+        .map_err(|e| PolarsError::ComputeError(format!("sequence start: {e}").into()))?;
     let stop_series = stop_s
         .cast(&DataType::Int64)
-        .map_err(|e| PolarsError::ComputeError(format!("sequence stop: {}", e).into()))?;
+        .map_err(|e| PolarsError::ComputeError(format!("sequence stop: {e}").into()))?;
     let step_series_opt: Option<Series> = step_s
         .as_ref()
         .map(|s| s.cast(&DataType::Int64))
         .transpose()
-        .map_err(|e| PolarsError::ComputeError(format!("sequence step: {}", e).into()))?;
+        .map_err(|e| PolarsError::ComputeError(format!("sequence step: {e}").into()))?;
     let start_ca = start_series
         .i64()
-        .map_err(|e| PolarsError::ComputeError(format!("sequence: {}", e).into()))?;
+        .map_err(|e| PolarsError::ComputeError(format!("sequence: {e}").into()))?;
     let stop_ca = stop_series
         .i64()
-        .map_err(|e| PolarsError::ComputeError(format!("sequence: {}", e).into()))?;
+        .map_err(|e| PolarsError::ComputeError(format!("sequence: {e}").into()))?;
     let step_ca = step_series_opt.as_ref().and_then(|s| s.i64().ok());
     let n = start_ca.len();
     let mut builder = get_list_builder(&DataType::Int64, 64, n, name.as_str().into());
@@ -3495,7 +3489,7 @@ pub fn apply_shuffle(column: Column) -> PolarsResult<Option<Column>> {
     let series = column.take_materialized_series();
     let list_ca = series
         .list()
-        .map_err(|e| PolarsError::ComputeError(format!("shuffle: {}", e).into()))?;
+        .map_err(|e| PolarsError::ComputeError(format!("shuffle: {e}").into()))?;
     let inner_dtype = list_ca.inner_dtype().clone();
     let mut builder = get_list_builder(&inner_dtype, 64, list_ca.len(), name.as_str().into());
     for opt_list in list_ca.amortized_iter() {
@@ -3507,9 +3501,9 @@ pub fn apply_shuffle(column: Column) -> PolarsResult<Option<Column>> {
                 let mut indices: Vec<u32> = (0..n as u32).collect();
                 indices.shuffle(&mut rand::thread_rng());
                 let idx_ca = UInt32Chunked::from_vec("".into(), indices);
-                let taken = list_s.take(&idx_ca).map_err(|e| {
-                    PolarsError::ComputeError(format!("shuffle take: {}", e).into())
-                })?;
+                let taken = list_s
+                    .take(&idx_ca)
+                    .map_err(|e| PolarsError::ComputeError(format!("shuffle take: {e}").into()))?;
                 builder.append_series(&taken)?;
             }
         }
@@ -3528,7 +3522,7 @@ pub fn apply_bitmap_count(column: Column) -> PolarsResult<Option<Column>> {
     let series = column.take_materialized_series();
     let ca = series
         .binary()
-        .map_err(|e| PolarsError::ComputeError(format!("bitmap_count: {}", e).into()))?;
+        .map_err(|e| PolarsError::ComputeError(format!("bitmap_count: {e}").into()))?;
     let out = Int64Chunked::from_iter_options(
         name.as_str().into(),
         ca.into_iter().map(|opt_b| {
@@ -3544,7 +3538,7 @@ pub fn apply_bitmap_construct_agg(column: Column) -> PolarsResult<Option<Column>
     let series = column.take_materialized_series();
     let list_ca = series
         .list()
-        .map_err(|e| PolarsError::ComputeError(format!("bitmap_construct_agg: {}", e).into()))?;
+        .map_err(|e| PolarsError::ComputeError(format!("bitmap_construct_agg: {e}").into()))?;
     let out: BinaryChunked = list_ca
         .amortized_iter()
         .map(|opt_list| {
@@ -3572,7 +3566,7 @@ pub fn apply_bitmap_or_agg(column: Column) -> PolarsResult<Option<Column>> {
     let series = column.take_materialized_series();
     let list_ca = series
         .list()
-        .map_err(|e| PolarsError::ComputeError(format!("bitmap_or_agg: {}", e).into()))?;
+        .map_err(|e| PolarsError::ComputeError(format!("bitmap_or_agg: {e}").into()))?;
     let out: BinaryChunked = list_ca
         .amortized_iter()
         .map(|opt_list| {
@@ -3613,7 +3607,7 @@ pub fn apply_to_timestamp_ltz_format(
     let series = column.take_materialized_series();
     let ca = series
         .str()
-        .map_err(|e| PolarsError::ComputeError(format!("to_timestamp_ltz: {}", e).into()))?;
+        .map_err(|e| PolarsError::ComputeError(format!("to_timestamp_ltz: {e}").into()))?;
     let out = Int64Chunked::from_iter_options(
         name.as_str().into(),
         ca.into_iter().map(|opt_s| {
@@ -3651,7 +3645,7 @@ pub fn apply_to_timestamp_ntz_format(
     let series = column.take_materialized_series();
     let ca = series
         .str()
-        .map_err(|e| PolarsError::ComputeError(format!("to_timestamp_ntz: {}", e).into()))?;
+        .map_err(|e| PolarsError::ComputeError(format!("to_timestamp_ntz: {e}").into()))?;
     let out = Int64Chunked::from_iter_options(
         name.as_str().into(),
         ca.into_iter().map(|opt_s| {

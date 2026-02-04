@@ -57,10 +57,10 @@ pub enum PlanError {
 impl std::fmt::Display for PlanError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            PlanError::Session(e) => write!(f, "session/df: {}", e),
-            PlanError::Expr(e) => write!(f, "expression: {}", e),
-            PlanError::InvalidPlan(s) => write!(f, "invalid plan: {}", s),
-            PlanError::UnsupportedOp(s) => write!(f, "unsupported op: {}", s),
+            PlanError::Session(e) => write!(f, "session/df: {e}"),
+            PlanError::Expr(e) => write!(f, "expression: {e}"),
+            PlanError::InvalidPlan(s) => write!(f, "invalid plan: {s}"),
+            PlanError::UnsupportedOp(s) => write!(f, "unsupported op: {s}"),
         }
     }
 }
@@ -314,8 +314,7 @@ fn parse_aggs(aggs: &[Value]) -> Result<Vec<polars::prelude::Expr>, PlanError> {
                     Column::new("".to_string()) // count() without column
                 } else {
                     return Err(PlanError::InvalidPlan(format!(
-                        "agg '{}' requires 'column'",
-                        agg
+                        "agg '{agg}' requires 'column'"
                     )));
                 }
             }
@@ -326,7 +325,7 @@ fn parse_aggs(aggs: &[Value]) -> Result<Vec<polars::prelude::Expr>, PlanError> {
             "avg" => avg(&c),
             "min" => min(&c),
             "max" => max(&c),
-            _ => return Err(PlanError::InvalidPlan(format!("unsupported agg: {}", agg))),
+            _ => return Err(PlanError::InvalidPlan(format!("unsupported agg: {agg}"))),
         };
         out.push(col_expr.into_expr());
     }

@@ -32,7 +32,7 @@ fn like_pattern_to_regex(pattern: &str, escape_char: Option<char>) -> String {
             }
         }
     }
-    format!("^{}$", out)
+    format!("^{out}$")
 }
 
 /// Deferred random column: when added via with_column, we generate a full-length series in one go (PySpark-like).
