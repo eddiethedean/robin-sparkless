@@ -1,0 +1,4 @@
+# Pinned versions for CI; keep in sync with .github/workflows/ci.yml
+# Install with: pip install -r requirements-ci.txt
+maturin>=1.4,<2
+pytest>=8,<9

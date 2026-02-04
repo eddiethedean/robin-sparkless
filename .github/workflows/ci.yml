@@ -16,11 +16,11 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: stable
+          toolchain: 1.83.0
           components: clippy
 
       - name: Install cargo-nextest
-        run: cargo install cargo-nextest --locked
+        run: cargo install cargo-nextest --version 0.9.92 --locked
 
       - name: Cache cargo
         uses: actions/cache@v4
@@ -57,12 +57,12 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.10"
+          python-version-file: ".python-version"
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: stable
+          toolchain: 1.83.0
 
       - name: Cache cargo
         uses: actions/cache@v4
@@ -76,7 +76,7 @@ jobs:
             ${{ runner.os }}-cargo-py-
 
       - name: Install maturin and pytest
-        run: pip install maturin pytest
+        run: pip install -r requirements-ci.txt
 
       - name: Build and install extension
         run: maturin develop --features pyo3 --release

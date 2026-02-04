@@ -15,11 +15,11 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: stable
+          toolchain: 1.83.0
           components: clippy
 
       - name: Install cargo-nextest
-        run: cargo install cargo-nextest --locked
+        run: cargo install cargo-nextest --version 0.9.92 --locked
 
       - name: Cache cargo
         uses: actions/cache@v4
