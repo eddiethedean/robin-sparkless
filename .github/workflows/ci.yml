@@ -22,6 +22,9 @@ jobs:
       - name: Install cargo-nextest
         run: cargo install cargo-nextest --version 0.9.92 --locked
 
+      - name: Install cargo-audit and cargo-deny
+        run: cargo install cargo-audit cargo-deny
+
       - name: Cache cargo
         uses: actions/cache@v4
         with:
@@ -63,6 +66,7 @@ jobs:
         uses: dtolnay/rust-toolchain@master
         with:
           toolchain: 1.88.0
+          components: clippy, rustfmt
 
       - name: Cache cargo
         uses: actions/cache@v4
