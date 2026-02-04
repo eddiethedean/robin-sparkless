@@ -2002,23 +2002,25 @@ fn parse_with_column_expr(src: &str) -> Result<Expr, String> {
         array_except, array_insert, array_intersect, array_prepend, array_size, array_sum,
         array_union, arrays_overlap, arrays_zip, ascii, asin, atan, atan2, base64, bin, bit_length,
         bround, btrim, cast, cbrt, ceiling, char as rs_char, chr, coalesce, col, concat, concat_ws,
-        contains, conv, cos, cosh, cot, create_map, csc, current_date, current_timestamp, date_add,
-        date_from_unix_date, date_sub, datediff, day, dayofmonth, dayofweek, dayofyear, degrees, e,
-        element_at, elt, endswith, exp, factorial, find_in_set, format_number,
-        format_string, from_unixtime, get, getbit, greatest, hex, hour, hypot, ilike, initcap,
-        instr, isnan, isnotnull, isnull, last_day, lcase, least, left, length, like, lit_str, ln,
-        locate, log, log10, lower, lpad, make_date, map_concat, map_contains_key, map_filter,
-        map_from_entries, map_zip_with, md5, minute, months_between, named_struct, nanvl, negate,
-        next_day, nullif, nvl, nvl2, overlay, pi, pmod, position, positive, pow, power, quarter,
-        radians, regexp_count, regexp_extract, regexp_extract_all, regexp_instr, regexp_like,
-        regexp_replace, regexp_substr, repeat, replace, reverse, right, rlike, rpad, sec, second,
-        sha1, sha2, signum, sin, sinh, size, split, split_part, sqrt, startswith, str_to_map,
-        struct_, substr, substring, tan, tanh, timestamp_micros, timestamp_millis,
-        timestamp_seconds, to_char, to_degrees, to_number, to_radians, to_unix_timestamp,
-        trim, trunc, try_add, try_cast, try_divide,
-        try_multiply, try_subtract, try_to_number, try_to_timestamp, typeof_, ucase, unbase64,
-        unhex, unix_date, unix_timestamp, unix_timestamp_now, upper, weekofyear, when,
-        width_bucket, zip_with,
+        contains, conv, convert_timezone, cos, cosh, cot, create_map, csc, curdate, current_date,
+        current_timestamp, current_timezone, date_add, date_diff, date_from_unix_date, date_part,
+        date_sub, dateadd, datediff, datepart, day, dayname, dayofmonth, dayofweek, dayofyear,
+        days, degrees, e, element_at, elt, endswith, exp, extract, factorial, find_in_set,
+        format_number, format_string, from_unixtime, from_utc_timestamp, get, getbit, greatest,
+        hex, hour, hours, hypot, ilike, initcap, instr, isnan, isnotnull, isnull, last_day, lcase,
+        least, left, length, like, lit_str, ln, localtimestamp, locate, log, log10, lower, lpad,
+        make_date, make_interval, make_timestamp, make_timestamp_ntz, map_concat, map_contains_key,
+        map_filter, map_from_entries, map_zip_with, md5, minute, minutes, months, months_between,
+        named_struct, nanvl, negate, next_day, now, nullif, nvl, nvl2, overlay, pi, pmod, position,
+        positive, pow, power, quarter, radians, regexp_count, regexp_extract, regexp_extract_all,
+        regexp_instr, regexp_like, regexp_replace, regexp_substr, repeat, replace, reverse, right,
+        rlike, rpad, sec, second, sha1, sha2, signum, sin, sinh, size, split, split_part, sqrt,
+        startswith, str_to_map, struct_, substr, substring, tan, tanh, timestamp_micros,
+        timestamp_millis, timestamp_seconds, timestampadd, timestampdiff, to_char, to_degrees,
+        to_number, to_radians, to_unix_timestamp, to_utc_timestamp, trim, trunc, try_add, try_cast,
+        try_divide, try_multiply, try_subtract, try_to_number, try_to_timestamp, typeof_, ucase,
+        unbase64, unhex, unix_date, unix_micros, unix_millis, unix_seconds, unix_timestamp,
+        unix_timestamp_now, upper, weekday, weekofyear, when, width_bucket, years, zip_with,
     };
 
     let s = src.trim();
@@ -2505,6 +2507,143 @@ fn parse_with_column_expr(src: &str) -> Result<Expr, String> {
         let mc = col(m_name);
         let dc = col(d_name);
         return Ok(make_date(&yc, &mc, &dc).into_expr());
+    }
+
+    // Handle make_timestamp(col('y'), col('mo'), col('d'), col('h'), col('mi'), col('s'))
+    if s.starts_with("make_timestamp(") {
+        let inner = extract_first_arg(s, "make_timestamp(")?;
+        let parts = parse_comma_separated_args(inner);
+        let y_name = extract_col_name(parts.get(0).ok_or("make_timestamp needs year")?)?;
+        let mo_name = extract_col_name(parts.get(1).ok_or("make_timestamp needs month")?)?;
+        let d_name = extract_col_name(parts.get(2).ok_or("make_timestamp needs day")?)?;
+        let h_name = extract_col_name(parts.get(3).ok_or("make_timestamp needs hour")?)?;
+        let mi_name = extract_col_name(parts.get(4).ok_or("make_timestamp needs minute")?)?;
+        let s_name = extract_col_name(parts.get(5).ok_or("make_timestamp needs second")?)?;
+        let yc = col(y_name);
+        let moc = col(mo_name);
+        let dc = col(d_name);
+        let hc = col(h_name);
+        let mic = col(mi_name);
+        let sc = col(s_name);
+        return Ok(make_timestamp(&yc, &moc, &dc, &hc, &mic, &sc).into_expr());
+    }
+
+    // Handle timestampadd('DAY', col('delta'), col('ts'))
+    if s.starts_with("timestampadd(") {
+        let inner = extract_first_arg(s, "timestampadd(")?;
+        let parts = parse_comma_separated_args(inner);
+        let unit = parts
+            .first()
+            .ok_or("timestampadd needs unit")?
+            .trim()
+            .trim_matches(['\'', '"']);
+        let amount_name = extract_col_name(parts.get(1).ok_or("timestampadd needs amount")?)?;
+        let ts_name = extract_col_name(parts.get(2).ok_or("timestampadd needs timestamp")?)?;
+        return Ok(timestampadd(unit, &col(amount_name), &col(ts_name)).into_expr());
+    }
+
+    // Handle timestampdiff('DAY', col('start'), col('end'))
+    if s.starts_with("timestampdiff(") {
+        let inner = extract_first_arg(s, "timestampdiff(")?;
+        let parts = parse_comma_separated_args(inner);
+        let unit = parts
+            .first()
+            .ok_or("timestampdiff needs unit")?
+            .trim()
+            .trim_matches(['\'', '"']);
+        let start_name = extract_col_name(parts.get(1).ok_or("timestampdiff needs start")?)?;
+        let end_name = extract_col_name(parts.get(2).ok_or("timestampdiff needs end")?)?;
+        return Ok(timestampdiff(unit, &col(start_name), &col(end_name)).into_expr());
+    }
+
+    // Handle from_utc_timestamp(col('ts'), 'America/Los_Angeles')
+    if s.starts_with("from_utc_timestamp(") {
+        let inner = extract_first_arg(s, "from_utc_timestamp(")?;
+        let parts = parse_comma_separated_args(inner);
+        let col_name = extract_col_name(parts.first().ok_or("from_utc_timestamp needs column")?)?;
+        let tz = parts
+            .get(1)
+            .ok_or("from_utc_timestamp needs timezone")?
+            .trim()
+            .trim_matches(['\'', '"']);
+        return Ok(from_utc_timestamp(&col(col_name), tz).into_expr());
+    }
+
+    // Handle to_utc_timestamp(col('ts'), 'America/Los_Angeles')
+    if s.starts_with("to_utc_timestamp(") {
+        let inner = extract_first_arg(s, "to_utc_timestamp(")?;
+        let parts = parse_comma_separated_args(inner);
+        let col_name = extract_col_name(parts.first().ok_or("to_utc_timestamp needs column")?)?;
+        let tz = parts
+            .get(1)
+            .ok_or("to_utc_timestamp needs timezone")?
+            .trim()
+            .trim_matches(['\'', '"']);
+        return Ok(to_utc_timestamp(&col(col_name), tz).into_expr());
+    }
+
+    // Handle curdate(), now(), localtimestamp()
+    if s == "curdate()" {
+        return Ok(curdate().into_expr());
+    }
+    if s == "now()" {
+        return Ok(now().into_expr());
+    }
+    if s == "localtimestamp()" {
+        return Ok(localtimestamp().into_expr());
+    }
+
+    // Handle extract(col('x'), 'year') or extract('year', col('x'))
+    if s.starts_with("extract(") {
+        let inner = extract_first_arg(s, "extract(")?;
+        let parts = parse_comma_separated_args(inner);
+        let (col_name, field) = if parts[0].contains("col(") {
+            let col_name = extract_col_name(parts.first().ok_or("extract needs column")?)?;
+            let field = parts
+                .get(1)
+                .ok_or("extract needs field")?
+                .trim()
+                .trim_matches(['\'', '"']);
+            (col_name, field)
+        } else {
+            let field = parts
+                .first()
+                .ok_or("extract needs field")?
+                .trim()
+                .trim_matches(['\'', '"']);
+            let col_name = extract_col_name(parts.get(1).ok_or("extract needs column")?)?;
+            (col_name, field)
+        };
+        return Ok(extract(&col(col_name), field).into_expr());
+    }
+
+    // Handle dayname(col('x')), weekday(col('x'))
+    if s.starts_with("dayname(") {
+        let inner = extract_first_arg(s, "dayname(")?;
+        let col_name = extract_col_name(inner)?;
+        return Ok(dayname(&col(col_name)).into_expr());
+    }
+    if s.starts_with("weekday(") {
+        let inner = extract_first_arg(s, "weekday(")?;
+        let col_name = extract_col_name(inner)?;
+        return Ok(weekday(&col(col_name)).into_expr());
+    }
+
+    // Handle unix_micros(col), unix_millis(col), unix_seconds(col)
+    if s.starts_with("unix_micros(") {
+        let inner = extract_first_arg(s, "unix_micros(")?;
+        let col_name = extract_col_name(inner)?;
+        return Ok(unix_micros(&col(col_name)).into_expr());
+    }
+    if s.starts_with("unix_millis(") {
+        let inner = extract_first_arg(s, "unix_millis(")?;
+        let col_name = extract_col_name(inner)?;
+        return Ok(unix_millis(&col(col_name)).into_expr());
+    }
+    if s.starts_with("unix_seconds(") {
+        let inner = extract_first_arg(s, "unix_seconds(")?;
+        let col_name = extract_col_name(inner)?;
+        return Ok(unix_seconds(&col(col_name)).into_expr());
     }
 
     // Handle timestamp_seconds(col('x')), timestamp_millis(col('x')), timestamp_micros(col('x'))

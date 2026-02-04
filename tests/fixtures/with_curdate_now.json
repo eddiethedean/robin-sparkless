@@ -1,0 +1,31 @@
+{
+  "name": "with_curdate_now",
+  "pyspark_version": "3.5.0",
+  "skip": true,
+  "skip_reason": "curdate() and now() are non-deterministic; row comparison not applicable",
+  "input": {
+    "schema": [
+      { "name": "id", "type": "bigint" }
+    ],
+    "rows": [
+      [1],
+      [2]
+    ]
+  },
+  "operations": [
+    { "op": "withColumn", "column": "today", "expr": "curdate()" },
+    { "op": "withColumn", "column": "ts", "expr": "now()" },
+    { "op": "select", "columns": ["id", "today", "ts"] }
+  ],
+  "expected": {
+    "schema": [
+      { "name": "id", "type": "bigint" },
+      { "name": "today", "type": "date" },
+      { "name": "ts", "type": "timestamp" }
+    ],
+    "rows": [
+      [1, "2025-02-03", "2025-02-03T00:00:00.000000"],
+      [2, "2025-02-03", "2025-02-03T00:00:00.000000"]
+    ]
+  }
+}

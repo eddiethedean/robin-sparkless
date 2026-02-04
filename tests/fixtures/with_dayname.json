@@ -1,0 +1,30 @@
+{
+  "name": "with_dayname",
+  "pyspark_version": "3.5.0",
+  "input": {
+    "schema": [
+      { "name": "id", "type": "bigint" },
+      { "name": "d", "type": "date" }
+    ],
+    "rows": [
+      [1, "2024-01-01"],
+      [2, "2024-01-02"],
+      [3, "2024-01-07"]
+    ]
+  },
+  "operations": [
+    { "op": "withColumn", "column": "day", "expr": "dayname(col('d'))" },
+    { "op": "select", "columns": ["id", "day"] }
+  ],
+  "expected": {
+    "schema": [
+      { "name": "id", "type": "bigint" },
+      { "name": "day", "type": "string" }
+    ],
+    "rows": [
+      [1, "Mon"],
+      [2, "Tue"],
+      [3, "Sun"]
+    ]
+  }
+}

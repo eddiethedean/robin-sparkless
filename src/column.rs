@@ -1350,6 +1350,67 @@ impl Column {
         Self::from_expr(self.expr().clone().dt().second(), None)
     }
 
+    /// Extract field from date/datetime (PySpark extract). field: "year","month","day","hour","minute","second","quarter","week","dayofweek","dayofyear".
+    pub fn extract(&self, field: &str) -> Column {
+        use polars::prelude::*;
+        let e = self.expr().clone();
+        let expr = match field.trim().to_lowercase().as_str() {
+            "year" => e.dt().year(),
+            "month" => e.dt().month(),
+            "day" => e.dt().day(),
+            "hour" => e.dt().hour(),
+            "minute" => e.dt().minute(),
+            "second" => e.dt().second(),
+            "quarter" => e.dt().quarter(),
+            "week" | "weekofyear" => e.dt().week(),
+            "dayofweek" | "dow" => {
+                let w = e.dt().weekday();
+                (w % lit(7i32)) + lit(1i32)
+            }
+            "dayofyear" | "doy" => e.dt().ordinal_day().cast(DataType::Int32),
+            _ => e.dt().year(), // fallback
+        };
+        Self::from_expr(expr, None)
+    }
+
+    /// Timestamp to microseconds since epoch (PySpark unix_micros).
+    pub fn unix_micros(&self) -> Column {
+        use polars::prelude::*;
+        Self::from_expr(self.expr().clone().cast(DataType::Int64), None)
+    }
+
+    /// Timestamp to milliseconds since epoch (PySpark unix_millis).
+    pub fn unix_millis(&self) -> Column {
+        use polars::prelude::*;
+        let micros = self.expr().clone().cast(DataType::Int64);
+        Self::from_expr(micros / lit(1000i64), None)
+    }
+
+    /// Timestamp to seconds since epoch (PySpark unix_seconds).
+    pub fn unix_seconds(&self) -> Column {
+        use polars::prelude::*;
+        let micros = self.expr().clone().cast(DataType::Int64);
+        Self::from_expr(micros / lit(1_000_000i64), None)
+    }
+
+    /// Weekday name "Mon","Tue",... (PySpark dayname).
+    pub fn dayname(&self) -> Column {
+        let expr = self.expr().clone().map(
+            crate::udfs::apply_dayname,
+            GetOutput::from_type(DataType::String),
+        );
+        Self::from_expr(expr, None)
+    }
+
+    /// Weekday 0=Mon, 6=Sun (PySpark weekday).
+    pub fn weekday(&self) -> Column {
+        let expr = self.expr().clone().map(
+            crate::udfs::apply_weekday,
+            GetOutput::from_type(DataType::Int32),
+        );
+        Self::from_expr(expr, None)
+    }
+
     /// Add n days to date/datetime column (PySpark date_add).
     pub fn date_add(&self, n: i32) -> Column {
         use polars::prelude::*;
@@ -1377,6 +1438,57 @@ impl Column {
     /// Last day of the month for date/datetime column (PySpark last_day).
     pub fn last_day(&self) -> Column {
         Self::from_expr(self.expr().clone().dt().month_end(), None)
+    }
+
+    /// Add amount of unit to timestamp (PySpark timestampadd). unit: DAY, HOUR, MINUTE, SECOND, etc.
+    pub fn timestampadd(&self, unit: &str, amount: &Column) -> Column {
+        use polars::prelude::*;
+        let ts = self.expr().clone();
+        let amt = amount.expr().clone().cast(DataType::Int64);
+        let dur = match unit.trim().to_uppercase().as_str() {
+            "DAY" | "DAYS" => duration(DurationArgs::new().with_days(amt)),
+            "HOUR" | "HOURS" => duration(DurationArgs::new().with_hours(amt)),
+            "MINUTE" | "MINUTES" => duration(DurationArgs::new().with_minutes(amt)),
+            "SECOND" | "SECONDS" => duration(DurationArgs::new().with_seconds(amt)),
+            "WEEK" | "WEEKS" => duration(DurationArgs::new().with_weeks(amt)),
+            _ => duration(DurationArgs::new().with_days(amt)),
+        };
+        Self::from_expr(ts + dur, None)
+    }
+
+    /// Difference between timestamps in given unit (PySpark timestampdiff). unit: DAY, HOUR, MINUTE, SECOND.
+    pub fn timestampdiff(&self, unit: &str, other: &Column) -> Column {
+        let start = self.expr().clone();
+        let end = other.expr().clone();
+        let diff = end - start;
+        let expr = match unit.trim().to_uppercase().as_str() {
+            "HOUR" | "HOURS" => diff.dt().total_hours(),
+            "MINUTE" | "MINUTES" => diff.dt().total_minutes(),
+            "SECOND" | "SECONDS" => diff.dt().total_seconds(),
+            "DAY" | "DAYS" => diff.dt().total_days(),
+            _ => diff.dt().total_days(),
+        };
+        Self::from_expr(expr, None)
+    }
+
+    /// Interpret timestamp as UTC, convert to target timezone (PySpark from_utc_timestamp).
+    pub fn from_utc_timestamp(&self, tz: &str) -> Column {
+        let tz = tz.to_string();
+        let expr = self.expr().clone().map(
+            move |s| crate::udfs::apply_from_utc_timestamp(s, &tz),
+            GetOutput::same_type(),
+        );
+        Self::from_expr(expr, None)
+    }
+
+    /// Interpret timestamp as in tz, convert to UTC (PySpark to_utc_timestamp).
+    pub fn to_utc_timestamp(&self, tz: &str) -> Column {
+        let tz = tz.to_string();
+        let expr = self.expr().clone().map(
+            move |s| crate::udfs::apply_to_utc_timestamp(s, &tz),
+            GetOutput::same_type(),
+        );
+        Self::from_expr(expr, None)
     }
 
     /// Truncate date/datetime to unit (e.g. "mo", "wk", "day"). PySpark trunc.

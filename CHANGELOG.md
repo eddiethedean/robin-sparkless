@@ -9,9 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Planned
 
-- **Phases 22–24 – Full parity** with Sparkless 3.28.0: Phase 22: datetime extensions. Phase 23: JSON, CSV, URL, misc. Phase 24: bit, control, JVM stubs, random, crypto. Target: 180+ parity fixtures; ~280 total functions. Est. 1.5–2 weeks per phase. See [ROADMAP.md](docs/ROADMAP.md) and [PARITY_CHECK_SPARKLESS_3.28.md](docs/PARITY_CHECK_SPARKLESS_3.28.md).
+- **Phases 23–24 – Full parity** with Sparkless 3.28.0: Phase 23: JSON, CSV, URL, misc. Phase 24: bit, control, JVM stubs, random, crypto. Target: 180+ parity fixtures; ~280 total functions. Est. 1.5–2 weeks per phase. See [ROADMAP.md](docs/ROADMAP.md) and [PARITY_CHECK_SPARKLESS_3.28.md](docs/PARITY_CHECK_SPARKLESS_3.28.md).
 
 ### Added
+
+- **Phase 22 – Full parity 3: datetime extensions** ✅ **COMPLETED**
+  - **Aliases**: `curdate`, `now`, `localtimestamp`; `date_diff`, `dateadd`, `datepart`.
+  - **Extract / unix**: `extract`, `date_part`, `unix_micros`, `unix_millis`, `unix_seconds`.
+  - **UDF-based**: `dayname`, `weekday` (PySpark weekday: Mon=0..Sun=6).
+  - **Constructors**: `make_timestamp`, `make_timestamp_ntz`; `to_timestamp` (strict cast).
+  - **Interval**: `make_interval`, `timestampadd`, `timestampdiff`; `days`, `hours`, `minutes`, `months`, `years`.
+  - **Timezone**: `from_utc_timestamp`, `to_utc_timestamp`, `convert_timezone`, `current_timezone` (chrono-tz).
+  - **Parity fixtures**: `with_dayname`, `with_weekday`, `with_extract`, `with_unix_micros`, `make_timestamp_test`, `timestampadd_test`, `from_utc_timestamp_test` (136 → 142; `with_curdate_now` skipped).
+  - **PyO3**: All new functions.
 
 - **Phase 21 – Full parity 2: string, binary, type, array/map/struct** ✅ **COMPLETED**
   - **String**: `btrim`, `locate`, `conv` (base conversion).

@@ -7,16 +7,20 @@ use crate::functions::SortOrder;
 use crate::functions::{
     acos, acosh, add_months, array_append, array_compact, array_distinct, array_except,
     array_insert, array_intersect, array_prepend, array_union, ascii, asin, asinh, atan, atan2,
-    atanh, base64, cast as rs_cast, cbrt, ceiling, chr, contains, cos, cosh, date_from_unix_date,
-    day, dayofmonth, dayofweek, dayofyear, degrees, endswith, expm1, factorial, find_in_set,
-    format_number, format_string, from_unixtime, greatest as rs_greatest, hypot, ifnull, ilike,
-    isnan as rs_isnan, isnotnull, isnull, lcase, least as rs_least, left, like, ln, log10, log1p,
-    log2, make_date, md5, months_between, next_day, nvl, nvl2, overlay, pmod,
-    position as rs_position, power, quarter, radians, regexp_count, regexp_instr, regexp_substr,
-    replace as rs_replace, right, rint, rlike, sha1, sha2, signum, sin, sinh, split_part,
-    startswith, substr, tan, tanh, timestamp_micros, timestamp_millis, timestamp_seconds,
-    to_degrees, to_radians, to_unix_timestamp, try_cast as rs_try_cast, ucase, unbase64, unix_date,
-    unix_timestamp, unix_timestamp_now, weekofyear,
+    atanh, base64, cast as rs_cast, cbrt, ceiling, chr, contains, convert_timezone, cos, cosh,
+    curdate, current_timezone, date_diff, date_from_unix_date, date_part, dateadd, datepart, day,
+    dayname, dayofmonth, dayofweek, dayofyear, days, degrees, endswith, expm1, extract, factorial,
+    find_in_set, format_number, format_string, from_unixtime, from_utc_timestamp,
+    greatest as rs_greatest, hours, hypot, ifnull, ilike, isnan as rs_isnan, isnotnull, isnull,
+    lcase, least as rs_least, left, like, ln, localtimestamp, log10, log1p, log2, make_date,
+    make_interval, make_timestamp, make_timestamp_ntz, md5, minutes, months, months_between,
+    next_day, now, nvl, nvl2, overlay, pmod, position as rs_position, power, quarter, radians,
+    regexp_count, regexp_instr, regexp_substr, replace as rs_replace, right, rint, rlike, sha1,
+    sha2, signum, sin, sinh, split_part, startswith, substr, tan, tanh, timestamp_micros,
+    timestamp_millis, timestamp_seconds, timestampadd, timestampdiff, to_degrees, to_radians,
+    to_timestamp, to_unix_timestamp, to_utc_timestamp, try_cast as rs_try_cast, ucase, unbase64,
+    unix_date, unix_micros, unix_millis, unix_seconds, unix_timestamp, unix_timestamp_now, weekday,
+    weekofyear, years,
 };
 use crate::functions::{
     array_agg, arrays_overlap, arrays_zip, bit_length, create_map, explode_outer, get, map_concat,
@@ -253,6 +257,50 @@ fn robin_sparkless(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("arrays_zip", wrap_pyfunction!(py_arrays_zip, m)?)?;
     m.add("explode_outer", wrap_pyfunction!(py_explode_outer, m)?)?;
     m.add("array_agg", wrap_pyfunction!(py_array_agg, m)?)?;
+    // Phase 22: datetime extensions
+    m.add("curdate", wrap_pyfunction!(py_curdate, m)?)?;
+    m.add("now", wrap_pyfunction!(py_now, m)?)?;
+    m.add("localtimestamp", wrap_pyfunction!(py_localtimestamp, m)?)?;
+    m.add("date_diff", wrap_pyfunction!(py_date_diff, m)?)?;
+    m.add("dateadd", wrap_pyfunction!(py_dateadd, m)?)?;
+    m.add("datepart", wrap_pyfunction!(py_datepart, m)?)?;
+    m.add("extract", wrap_pyfunction!(py_extract, m)?)?;
+    m.add("date_part", wrap_pyfunction!(py_date_part, m)?)?;
+    m.add("unix_micros", wrap_pyfunction!(py_unix_micros, m)?)?;
+    m.add("unix_millis", wrap_pyfunction!(py_unix_millis, m)?)?;
+    m.add("unix_seconds", wrap_pyfunction!(py_unix_seconds, m)?)?;
+    m.add("dayname", wrap_pyfunction!(py_dayname, m)?)?;
+    m.add("weekday", wrap_pyfunction!(py_weekday, m)?)?;
+    m.add("make_timestamp", wrap_pyfunction!(py_make_timestamp, m)?)?;
+    m.add(
+        "make_timestamp_ntz",
+        wrap_pyfunction!(py_make_timestamp_ntz, m)?,
+    )?;
+    m.add("make_interval", wrap_pyfunction!(py_make_interval, m)?)?;
+    m.add("timestampadd", wrap_pyfunction!(py_timestampadd, m)?)?;
+    m.add("timestampdiff", wrap_pyfunction!(py_timestampdiff, m)?)?;
+    m.add("days", wrap_pyfunction!(py_days, m)?)?;
+    m.add("hours", wrap_pyfunction!(py_hours, m)?)?;
+    m.add("minutes", wrap_pyfunction!(py_minutes, m)?)?;
+    m.add("months", wrap_pyfunction!(py_months, m)?)?;
+    m.add("years", wrap_pyfunction!(py_years, m)?)?;
+    m.add(
+        "from_utc_timestamp",
+        wrap_pyfunction!(py_from_utc_timestamp, m)?,
+    )?;
+    m.add(
+        "to_utc_timestamp",
+        wrap_pyfunction!(py_to_utc_timestamp, m)?,
+    )?;
+    m.add(
+        "convert_timezone",
+        wrap_pyfunction!(py_convert_timezone, m)?,
+    )?;
+    m.add(
+        "current_timezone",
+        wrap_pyfunction!(py_current_timezone, m)?,
+    )?;
+    m.add("to_timestamp", wrap_pyfunction!(py_to_timestamp, m)?)?;
     Ok(())
 }
 
@@ -577,6 +625,225 @@ fn py_array_agg(column: &PyColumn) -> PyColumn {
     PyColumn {
         inner: array_agg(&column.inner),
     }
+}
+
+// Phase 22: datetime extensions
+#[pyfunction]
+fn py_curdate() -> PyColumn {
+    PyColumn { inner: curdate() }
+}
+
+#[pyfunction]
+fn py_now() -> PyColumn {
+    PyColumn { inner: now() }
+}
+
+#[pyfunction]
+fn py_localtimestamp() -> PyColumn {
+    PyColumn {
+        inner: localtimestamp(),
+    }
+}
+
+#[pyfunction]
+fn py_date_diff(end: &PyColumn, start: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: date_diff(&end.inner, &start.inner),
+    }
+}
+
+#[pyfunction]
+fn py_dateadd(column: &PyColumn, n: i32) -> PyColumn {
+    PyColumn {
+        inner: dateadd(&column.inner, n),
+    }
+}
+
+#[pyfunction]
+fn py_datepart(column: &PyColumn, field: &str) -> PyColumn {
+    PyColumn {
+        inner: datepart(&column.inner, field),
+    }
+}
+
+#[pyfunction]
+fn py_extract(column: &PyColumn, field: &str) -> PyColumn {
+    PyColumn {
+        inner: extract(&column.inner, field),
+    }
+}
+
+#[pyfunction]
+fn py_date_part(column: &PyColumn, field: &str) -> PyColumn {
+    PyColumn {
+        inner: date_part(&column.inner, field),
+    }
+}
+
+#[pyfunction]
+fn py_unix_micros(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: unix_micros(&column.inner),
+    }
+}
+
+#[pyfunction]
+fn py_unix_millis(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: unix_millis(&column.inner),
+    }
+}
+
+#[pyfunction]
+fn py_unix_seconds(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: unix_seconds(&column.inner),
+    }
+}
+
+#[pyfunction]
+fn py_dayname(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: dayname(&column.inner),
+    }
+}
+
+#[pyfunction]
+fn py_weekday(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: weekday(&column.inner),
+    }
+}
+
+#[pyfunction]
+fn py_make_timestamp(
+    year: &PyColumn,
+    month: &PyColumn,
+    day: &PyColumn,
+    hour: &PyColumn,
+    minute: &PyColumn,
+    sec: &PyColumn,
+) -> PyColumn {
+    PyColumn {
+        inner: make_timestamp(
+            &year.inner,
+            &month.inner,
+            &day.inner,
+            &hour.inner,
+            &minute.inner,
+            &sec.inner,
+        ),
+    }
+}
+
+#[pyfunction]
+fn py_make_timestamp_ntz(
+    year: &PyColumn,
+    month: &PyColumn,
+    day: &PyColumn,
+    hour: &PyColumn,
+    minute: &PyColumn,
+    sec: &PyColumn,
+) -> PyColumn {
+    PyColumn {
+        inner: make_timestamp_ntz(
+            &year.inner,
+            &month.inner,
+            &day.inner,
+            &hour.inner,
+            &minute.inner,
+            &sec.inner,
+        ),
+    }
+}
+
+#[pyfunction]
+fn py_make_interval(
+    years: i64,
+    months: i64,
+    weeks: i64,
+    days: i64,
+    hours: i64,
+    mins: i64,
+    secs: i64,
+) -> PyColumn {
+    PyColumn {
+        inner: make_interval(years, months, weeks, days, hours, mins, secs),
+    }
+}
+
+#[pyfunction]
+fn py_timestampadd(unit: &str, amount: &PyColumn, ts: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: timestampadd(unit, &amount.inner, &ts.inner),
+    }
+}
+
+#[pyfunction]
+fn py_timestampdiff(unit: &str, start: &PyColumn, end: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: timestampdiff(unit, &start.inner, &end.inner),
+    }
+}
+
+#[pyfunction]
+fn py_days(n: i64) -> PyColumn {
+    PyColumn { inner: days(n) }
+}
+
+#[pyfunction]
+fn py_hours(n: i64) -> PyColumn {
+    PyColumn { inner: hours(n) }
+}
+
+#[pyfunction]
+fn py_minutes(n: i64) -> PyColumn {
+    PyColumn { inner: minutes(n) }
+}
+
+#[pyfunction]
+fn py_months(n: i64) -> PyColumn {
+    PyColumn { inner: months(n) }
+}
+
+#[pyfunction]
+fn py_years(n: i64) -> PyColumn {
+    PyColumn { inner: years(n) }
+}
+
+#[pyfunction]
+fn py_from_utc_timestamp(column: &PyColumn, tz: &str) -> PyColumn {
+    PyColumn {
+        inner: from_utc_timestamp(&column.inner, tz),
+    }
+}
+
+#[pyfunction]
+fn py_to_utc_timestamp(column: &PyColumn, tz: &str) -> PyColumn {
+    PyColumn {
+        inner: to_utc_timestamp(&column.inner, tz),
+    }
+}
+
+#[pyfunction]
+fn py_convert_timezone(source_tz: &str, target_tz: &str, column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: convert_timezone(source_tz, target_tz, &column.inner),
+    }
+}
+
+#[pyfunction]
+fn py_current_timezone() -> PyColumn {
+    PyColumn {
+        inner: current_timezone(),
+    }
+}
+
+#[pyfunction]
+fn py_to_timestamp(column: &PyColumn) -> PyResult<PyColumn> {
+    to_timestamp(&column.inner)
+        .map(|c| PyColumn { inner: c })
+        .map_err(|e| pyo3::exceptions::PyValueError::new_err(e))
 }
 
 #[pyfunction]

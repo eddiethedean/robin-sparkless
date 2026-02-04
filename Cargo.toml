@@ -18,6 +18,7 @@ delta = ["dep:deltalake", "dep:tokio", "dep:url"]
 polars = { version = "0.45", features = ["lazy", "csv", "parquet", "json", "temporal", "strings", "concat_str", "regex", "round_series", "abs", "dtype-categorical", "dtype-date", "dtype-datetime", "dtype-duration", "dtype-time", "rank", "is_in", "list_eval", "list_drop_nulls", "list_any_all", "cum_agg", "string_pad", "string_reverse", "repeat_by", "log", "month_end", "describe", "cross_join", "semi_anti_join", "extract_jsonpath", "dtype-struct", "random", "product"] }
 serde = { version = "1.0", features = ["derive"] }
 chrono = "0.4"
+chrono-tz = "0.9"
 serde_json = "1.0"
 anyhow = "1.0"
 thiserror = "1.0"

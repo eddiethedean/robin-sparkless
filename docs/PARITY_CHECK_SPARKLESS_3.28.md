@@ -372,7 +372,7 @@ The following Sparkless function names have an equivalent implementation in robi
 
 | Metric | Sparkless 3.28.0 | Robin-Sparkless | Coverage |
 |--------|-------------------|-----------------|----------|
-| **Function names** | ~280+ distinct | ~165 implemented | ~59% |
-| **Parity fixtures** | — | 128 passing | — |
+| **Function names** | ~280+ distinct | ~265 implemented | ~95% |
+| **Parity fixtures** | — | 142 passing | — |
 
-**Conclusion:** Robin-sparkless has substantial parity with Sparkless 3.28.0 for the core PySpark operations used in typical data pipelines (filter, select, groupBy, join, window, array, map, string, math, datetime, type/conditional). Remaining gaps (~115 functions) are addressed in **ROADMAP Phases 20–24 – Full parity** (5 manageable phases; see [ROADMAP.md](ROADMAP.md)). The 128 parity fixtures validate behavior for implemented functions.
+**Conclusion:** Robin-sparkless has substantial parity with Sparkless 3.28.0 for the core PySpark operations used in typical data pipelines (filter, select, groupBy, join, window, array, map, string, math, datetime, type/conditional). Phases 20–22 completed (~25 datetime extensions in Phase 22). Remaining gaps are addressed in **ROADMAP Phases 23–24**. The 142 parity fixtures validate behavior for implemented functions.

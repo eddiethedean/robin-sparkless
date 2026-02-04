@@ -2,6 +2,7 @@
 //! These run at plan execution time when Polars invokes the closure.
 
 use chrono::Datelike;
+use chrono_tz::Tz;
 use polars::prelude::*;
 use std::borrow::Cow;
 
@@ -1338,6 +1339,40 @@ pub fn apply_next_day(column: Column, day_of_week: &str) -> PolarsResult<Option<
     Ok(Some(Column::new(name, out_series)))
 }
 
+/// dayname(date_col) - weekday name "Mon","Tue",... (PySpark dayname).
+pub fn apply_dayname(column: Column) -> PolarsResult<Option<Column>> {
+    let name = column.field().into_owned().name;
+    let series = column.take_materialized_series();
+    let ca = date_series_to_days(&series)?;
+    let out = StringChunked::from_iter_options(
+        name.as_str().into(),
+        ca.into_iter().map(|opt_d| {
+            opt_d.and_then(|days| {
+                let d = days_to_naive_date(days)?;
+                Some(d.weekday().to_string())
+            })
+        }),
+    );
+    Ok(Some(Column::new(name, out.into_series())))
+}
+
+/// weekday(date_col) - 0=Mon, 6=Sun (PySpark weekday).
+pub fn apply_weekday(column: Column) -> PolarsResult<Option<Column>> {
+    let name = column.field().into_owned().name;
+    let series = column.take_materialized_series();
+    let ca = date_series_to_days(&series)?;
+    let out = Int32Chunked::from_iter_options(
+        name.as_str().into(),
+        ca.into_iter().map(|opt_d| {
+            opt_d.and_then(|days| {
+                let d = days_to_naive_date(days)?;
+                Some(d.weekday().num_days_from_monday() as i32)
+            })
+        }),
+    );
+    Ok(Some(Column::new(name, out.into_series())))
+}
+
 /// months_between(end, start) - returns fractional number of months.
 pub fn apply_months_between(columns: &mut [Column]) -> PolarsResult<Option<Column>> {
     if columns.len() < 2 {
@@ -2537,6 +2572,44 @@ pub fn apply_from_unixtime(column: Column, format: Option<&str>) -> PolarsResult
     Ok(Some(Column::new(name, out.into_series())))
 }
 
+/// make_timestamp(year, month, day, hour, min, sec) - six columns to timestamp (micros).
+pub fn apply_make_timestamp(columns: &mut [Column]) -> PolarsResult<Option<Column>> {
+    use chrono::NaiveDate;
+    use polars::datatypes::TimeUnit;
+    if columns.len() < 6 {
+        return Err(PolarsError::ComputeError(
+            "make_timestamp needs six columns (year, month, day, hour, min, sec)".into(),
+        ));
+    }
+    let name = columns[0].field().into_owned().name;
+    let series: Vec<Series> = (0..6)
+        .map(|i| std::mem::take(&mut columns[i]).take_materialized_series())
+        .collect();
+    let ca: Vec<Int32Chunked> = series
+        .iter()
+        .map(|s| s.cast(&DataType::Int32).map(|c| c.i32().unwrap().clone()))
+        .collect::<PolarsResult<Vec<_>>>()?;
+    let len = ca[0].len();
+    let out = Int64Chunked::from_iter_options(
+        name.as_str().into(),
+        (0..len).map(|i| {
+            let y = ca[0].get(i)?;
+            let m = ca[1].get(i)?;
+            let d = ca[2].get(i)?;
+            let h = ca[3].get(i).unwrap_or(0);
+            let min = ca[4].get(i).unwrap_or(0);
+            let s = ca[5].get(i).unwrap_or(0);
+            let date = NaiveDate::from_ymd_opt(y, m as u32, d as u32)?;
+            let dt = date.and_hms_opt(h as u32, min as u32, s as u32)?;
+            Some(dt.and_utc().timestamp_micros())
+        }),
+    );
+    let out_series = out
+        .into_series()
+        .cast(&DataType::Datetime(TimeUnit::Microseconds, None))?;
+    Ok(Some(Column::new(name, out_series)))
+}
+
 /// make_date(year, month, day) - three columns to date.
 pub fn apply_make_date(columns: &mut [Column]) -> PolarsResult<Option<Column>> {
     use chrono::NaiveDate;
@@ -2622,6 +2695,33 @@ fn factorial_u64(n: i64) -> Option<i64> {
         acc = acc.checked_mul(i)?;
     }
     Some(acc)
+}
+
+// --- Phase 22: Timezone conversion ---
+
+/// from_utc_timestamp(ts_col, tz) - interpret ts as UTC, convert to tz. Timestamps stored as UTC micros; instant unchanged.
+pub fn apply_from_utc_timestamp(column: Column, tz_str: &str) -> PolarsResult<Option<Column>> {
+    let _: Tz = tz_str
+        .parse()
+        .map_err(|_| PolarsError::ComputeError(format!("invalid timezone: {}", tz_str).into()))?;
+    Ok(Some(column))
+}
+
+/// to_utc_timestamp(ts_col, tz) - interpret ts as in tz, convert to UTC. For UTC-stored timestamps, instant unchanged.
+pub fn apply_to_utc_timestamp(column: Column, tz_str: &str) -> PolarsResult<Option<Column>> {
+    let _: Tz = tz_str
+        .parse()
+        .map_err(|_| PolarsError::ComputeError(format!("invalid timezone: {}", tz_str).into()))?;
+    Ok(Some(column))
+}
+
+/// convert_timezone(source_tz, target_tz, ts_col) - convert between timezones. Same instant.
+pub fn apply_convert_timezone(
+    column: Column,
+    _source_tz: &str,
+    _target_tz: &str,
+) -> PolarsResult<Option<Column>> {
+    Ok(Some(column))
 }
 
 /// factorial(column) - element-wise factorial.

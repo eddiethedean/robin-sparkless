@@ -115,7 +115,7 @@ Additional string: `length`, `trim`, `ltrim`, `rtrim`, `btrim`, `locate`, `conv`
 
 ### Datetime
 
-For date/datetime columns: `year()`, `month()`, `day()`, `to_date()` (cast to date), `date_format(format)` (chrono strftime, e.g. `"%Y-%m-%d"`), `hour()`, `minute()`, `second()`, `date_add(n)`, `date_sub(n)`, `datediff(end, start)`, `last_day()`, `trunc(format)`. **Phase 14**: `quarter()`, `weekofyear()`/`week()`, `dayofweek()` (1=Sun..7=Sat), `dayofyear()`, `add_months(n)`, `months_between(end, start)`, `next_day(day_of_week)` (e.g. `"Mon"`, `"Tue"`). **Phase 17**: `unix_timestamp()`, `unix_timestamp(col, format)`, `from_unixtime(col, format)`, `make_date(year, month, day)`, `timestamp_seconds(col)`, `timestamp_millis(col)`, `timestamp_micros(col)`, `unix_date(col)`, `date_from_unix_date(col)`.
+For date/datetime columns: `year()`, `month()`, `day()`, `to_date()` (cast to date), `date_format(format)` (chrono strftime, e.g. `"%Y-%m-%d"`), `hour()`, `minute()`, `second()`, `date_add(n)`, `date_sub(n)`, `datediff(end, start)`, `last_day()`, `trunc(format)`. **Phase 14**: `quarter()`, `weekofyear()`/`week()`, `dayofweek()` (1=Sun..7=Sat), `dayofyear()`, `add_months(n)`, `months_between(end, start)`, `next_day(day_of_week)` (e.g. `"Mon"`, `"Tue"`). **Phase 17**: `unix_timestamp()`, `unix_timestamp(col, format)`, `from_unixtime(col, format)`, `make_date(year, month, day)`, `timestamp_seconds(col)`, `timestamp_millis(col)`, `timestamp_micros(col)`, `unix_date(col)`, `date_from_unix_date(col)`. **Phase 22**: `curdate()`, `now()`, `localtimestamp()`, `date_diff(end, start)`, `dateadd(col, n)`, `datepart(col, field)`, `extract(col, field)`, `date_part(col, field)`, `unix_micros(col)`, `unix_millis(col)`, `unix_seconds(col)`, `dayname(col)`, `weekday(col)` (Mon=0..Sun=6), `make_timestamp(y, m, d, h, mi, s)`, `make_interval`, `timestampadd(unit, amount, ts)`, `timestampdiff(unit, start, end)`, `days(n)`, `hours(n)`, `minutes(n)`, `months(n)`, `years(n)`, `from_utc_timestamp(col, tz)`, `to_utc_timestamp(col, tz)`, `convert_timezone`, `current_timezone()`, `to_timestamp(col)`.
 
 ### Math and type (Phase 14)
 
@@ -123,9 +123,9 @@ Math (radians): `sin()`, `cos()`, `tan()`, `asin()`, `acos()`, `atan()`, `atan2(
 
 ### Parity
 
-Behavior is validated against PySpark on **136 parity fixtures** (~240+ functions); see [PARITY_STATUS.md](PARITY_STATUS.md). Known differences are in [PYSPARK_DIFFERENCES.md](PYSPARK_DIFFERENCES.md). CI (GitHub Actions) runs format, clippy, audit, deny, and all tests (including parity) on every push/PR.
+Behavior is validated against PySpark on **142 parity fixtures** (~265+ functions); see [PARITY_STATUS.md](PARITY_STATUS.md). Known differences are in [PYSPARK_DIFFERENCES.md](PYSPARK_DIFFERENCES.md). CI (GitHub Actions) runs format, clippy, audit, deny, and all tests (including parity) on every push/PR.
 
-For roadmap and Sparkless integration phases (Phases 12–21 completed; Phases 22–24 remaining), see [ROADMAP.md](ROADMAP.md).
+For roadmap and Sparkless integration phases (Phases 12–22 completed; Phases 23–24 remaining), see [ROADMAP.md](ROADMAP.md).
 
 ## Troubleshooting
 

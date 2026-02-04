@@ -802,6 +802,11 @@ pub fn try_to_number(column: &Column) -> Column {
     try_cast(column, "double").unwrap()
 }
 
+/// Cast to timestamp, error on invalid (PySpark to_timestamp).
+pub fn to_timestamp(column: &Column) -> Result<Column, String> {
+    cast(column, "timestamp")
+}
+
 /// Cast to timestamp, null on invalid (PySpark try_to_timestamp).
 pub fn try_to_timestamp(column: &Column) -> Column {
     try_cast(column, "timestamp").unwrap()
@@ -984,6 +989,71 @@ pub fn current_timestamp() -> Column {
     )
 }
 
+/// Alias for current_date (PySpark curdate).
+pub fn curdate() -> Column {
+    current_date()
+}
+
+/// Alias for current_timestamp (PySpark now).
+pub fn now() -> Column {
+    current_timestamp()
+}
+
+/// Alias for current_timestamp (PySpark localtimestamp).
+pub fn localtimestamp() -> Column {
+    current_timestamp()
+}
+
+/// Alias for datediff (PySpark date_diff). date_diff(end, start).
+pub fn date_diff(end: &Column, start: &Column) -> Column {
+    datediff(end, start)
+}
+
+/// Alias for date_add (PySpark dateadd).
+pub fn dateadd(column: &Column, n: i32) -> Column {
+    date_add(column, n)
+}
+
+/// Extract field from date/datetime (PySpark extract). field: year, month, day, hour, minute, second, quarter, week, dayofweek, dayofyear.
+pub fn extract(column: &Column, field: &str) -> Column {
+    column.clone().extract(field)
+}
+
+/// Alias for extract (PySpark date_part).
+pub fn date_part(column: &Column, field: &str) -> Column {
+    extract(column, field)
+}
+
+/// Alias for extract (PySpark datepart).
+pub fn datepart(column: &Column, field: &str) -> Column {
+    extract(column, field)
+}
+
+/// Timestamp to microseconds since epoch (PySpark unix_micros).
+pub fn unix_micros(column: &Column) -> Column {
+    column.clone().unix_micros()
+}
+
+/// Timestamp to milliseconds since epoch (PySpark unix_millis).
+pub fn unix_millis(column: &Column) -> Column {
+    column.clone().unix_millis()
+}
+
+/// Timestamp to seconds since epoch (PySpark unix_seconds).
+pub fn unix_seconds(column: &Column) -> Column {
+    column.clone().unix_seconds()
+}
+
+/// Weekday name "Mon","Tue",... (PySpark dayname).
+pub fn dayname(column: &Column) -> Column {
+    column.clone().dayname()
+}
+
+/// Weekday 0=Mon, 6=Sun (PySpark weekday).
+pub fn weekday(column: &Column) -> Column {
+    column.clone().weekday()
+}
+
 /// Extract hour from datetime column (PySpark hour).
 pub fn hour(column: &Column) -> Column {
     column.clone().hour()
@@ -1093,6 +1163,127 @@ pub fn make_date(year: &Column, month: &Column, day: &Column) -> Column {
         GetOutput::from_type(DataType::Date),
     );
     crate::column::Column::from_expr(expr, None)
+}
+
+/// make_timestamp(year, month, day, hour, min, sec) - six columns to timestamp (PySpark make_timestamp).
+pub fn make_timestamp(
+    year: &Column,
+    month: &Column,
+    day: &Column,
+    hour: &Column,
+    minute: &Column,
+    sec: &Column,
+) -> Column {
+    use polars::prelude::*;
+    let args = [
+        month.expr().clone(),
+        day.expr().clone(),
+        hour.expr().clone(),
+        minute.expr().clone(),
+        sec.expr().clone(),
+    ];
+    let expr = year.expr().clone().map_many(
+        crate::udfs::apply_make_timestamp,
+        &args,
+        GetOutput::from_type(DataType::Datetime(TimeUnit::Microseconds, None)),
+    );
+    crate::column::Column::from_expr(expr, None)
+}
+
+/// Add amount of unit to timestamp (PySpark timestampadd).
+pub fn timestampadd(unit: &str, amount: &Column, ts: &Column) -> Column {
+    ts.clone().timestampadd(unit, amount)
+}
+
+/// Difference between timestamps in unit (PySpark timestampdiff).
+pub fn timestampdiff(unit: &str, start: &Column, end: &Column) -> Column {
+    start.clone().timestampdiff(unit, end)
+}
+
+/// Interval of n days (PySpark days). For use in date_add, timestampadd, etc.
+pub fn days(n: i64) -> Column {
+    make_interval(0, 0, 0, n, 0, 0, 0)
+}
+
+/// Interval of n hours (PySpark hours).
+pub fn hours(n: i64) -> Column {
+    make_interval(0, 0, 0, 0, n, 0, 0)
+}
+
+/// Interval of n minutes (PySpark minutes).
+pub fn minutes(n: i64) -> Column {
+    make_interval(0, 0, 0, 0, 0, n, 0)
+}
+
+/// Interval of n months (PySpark months). Approximated as 30*n days.
+pub fn months(n: i64) -> Column {
+    make_interval(0, n, 0, 0, 0, 0, 0)
+}
+
+/// Interval of n years (PySpark years). Approximated as 365*n days.
+pub fn years(n: i64) -> Column {
+    make_interval(n, 0, 0, 0, 0, 0, 0)
+}
+
+/// Interpret timestamp as UTC, convert to tz (PySpark from_utc_timestamp).
+pub fn from_utc_timestamp(column: &Column, tz: &str) -> Column {
+    column.clone().from_utc_timestamp(tz)
+}
+
+/// Interpret timestamp as in tz, convert to UTC (PySpark to_utc_timestamp).
+pub fn to_utc_timestamp(column: &Column, tz: &str) -> Column {
+    column.clone().to_utc_timestamp(tz)
+}
+
+/// Convert timestamp between timezones (PySpark convert_timezone).
+pub fn convert_timezone(source_tz: &str, target_tz: &str, column: &Column) -> Column {
+    let source_tz = source_tz.to_string();
+    let target_tz = target_tz.to_string();
+    let expr = column.expr().clone().map(
+        move |s| crate::udfs::apply_convert_timezone(s, &source_tz, &target_tz),
+        GetOutput::same_type(),
+    );
+    crate::column::Column::from_expr(expr, None)
+}
+
+/// Current session timezone (PySpark current_timezone). Default "UTC". Returns literal column.
+pub fn current_timezone() -> Column {
+    use polars::prelude::*;
+    crate::column::Column::from_expr(lit("UTC"), None)
+}
+
+/// Create interval duration (PySpark make_interval). Optional args; 0 for omitted.
+pub fn make_interval(
+    years: i64,
+    months: i64,
+    weeks: i64,
+    days: i64,
+    hours: i64,
+    mins: i64,
+    secs: i64,
+) -> Column {
+    use polars::prelude::*;
+    // Approximate: 1 year = 365 days, 1 month = 30 days
+    let total_days = years * 365 + months * 30 + weeks * 7 + days;
+    let args = DurationArgs::new()
+        .with_days(lit(total_days))
+        .with_hours(lit(hours))
+        .with_minutes(lit(mins))
+        .with_seconds(lit(secs));
+    let dur = duration(args);
+    crate::column::Column::from_expr(dur, None)
+}
+
+/// Alias for make_timestamp (PySpark make_timestamp_ntz - no timezone).
+pub fn make_timestamp_ntz(
+    year: &Column,
+    month: &Column,
+    day: &Column,
+    hour: &Column,
+    minute: &Column,
+    sec: &Column,
+) -> Column {
+    make_timestamp(year, month, day, hour, minute, sec)
 }
 
 /// Convert seconds since epoch to timestamp (PySpark timestamp_seconds).

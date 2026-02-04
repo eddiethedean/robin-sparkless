@@ -8,11 +8,11 @@
 
 | Metric | Sparkless 3.28.0 | Robin-Sparkless |
 |--------|-------------------|-----------------|
-| **Functions (top-level / F.xxx)** | ~280+ distinct names | ~240 implemented |
-| **Implemented in robin-sparkless** | — | ~240 PySpark-equivalent functions |
-| **Gap (in Sparkless, not in robin-sparkless)** | — | ~40+ function names (see below) |
+| **Functions (top-level / F.xxx)** | ~280+ distinct names | ~265 implemented |
+| **Implemented in robin-sparkless** | — | ~265 PySpark-equivalent functions |
+| **Gap (in Sparkless, not in robin-sparkless)** | — | ~15+ function names (see below) |
 
-**Update (Phase 18–21):** Phase 18–19 (array/map/struct, aggregates, try_*, misc) — all implemented. **Phase 20:** asc, desc, nulls_first/last, median, mode, stddev_pop, var_pop, try_sum, try_avg, bround, negate, positive, cot, csc, sec, e, pi. **Phase 21:** btrim, locate, conv, hex, unhex, bin, getbit, to_char, to_varchar, to_number, try_to_number, try_to_timestamp, str_to_map, arrays_overlap, arrays_zip, explode_outer, posexplode_outer, array_agg, transform_keys, transform_values — all implemented.
+**Update (Phase 18–22):** Phase 18–21 — all implemented. **Phase 22:** curdate, now, localtimestamp, date_diff, dateadd, datepart, extract, date_part, unix_micros, unix_millis, unix_seconds, dayname, weekday, make_timestamp, make_timestamp_ntz, make_interval, timestampadd, timestampdiff, days, hours, minutes, months, years, from_utc_timestamp, to_utc_timestamp, convert_timezone, current_timezone, to_timestamp — all implemented.
 
 Sparkless exposes both camelCase and snake_case for some (e.g. `countDistinct` / `count_distinct`). Robin-sparkless implements the snake_case PySpark-style names; where we have an equivalent, it’s counted as implemented.
 
@@ -30,7 +30,7 @@ The following are implemented in robin-sparkless (Rust `functions.rs`, `column.r
 
 **Type / conditional:** `cast`, `try_cast`, `isnan`, `greatest`, `least`, `to_char`, `to_varchar`, `to_number`, `try_to_number`, `try_to_timestamp`
 
-**Datetime:** `year`, `month`, `day`, `dayofmonth`, `quarter`, `weekofyear`, `dayofweek`, `dayofyear`, `to_date`, `date_format`, `current_date`, `current_timestamp`, `hour`, `minute`, `second`, `date_add`, `date_sub`, `datediff`, `last_day`, `trunc`, `add_months`, `months_between`, `next_day`
+**Datetime:** `year`, `month`, `day`, `dayofmonth`, `quarter`, `weekofyear`, `dayofweek`, `dayofyear`, `to_date`, `date_format`, `current_date`, `current_timestamp`, `hour`, `minute`, `second`, `date_add`, `date_sub`, `datediff`, `last_day`, `trunc`, `add_months`, `months_between`, `next_day`, `curdate`, `now`, `localtimestamp`, `date_diff`, `dateadd`, `datepart`, `extract`, `date_part`, `dayname`, `weekday`, `unix_micros`, `unix_millis`, `unix_seconds`, `make_timestamp`, `make_timestamp_ntz`, `make_interval`, `timestampadd`, `timestampdiff`, `days`, `hours`, `minutes`, `months`, `years`, `from_utc_timestamp`, `to_utc_timestamp`, `convert_timezone`, `current_timezone`, `to_timestamp` (Phase 22)
 
 **Concat:** `concat`, `concat_ws`
 
@@ -162,24 +162,24 @@ Functions and aliases that exist in Sparkless 3.28.0 but are **not** implemented
 - ~~`collect_list`, `collect_set`~~ — **implemented (Phase 19)**
 
 ### 2.17 Datetime / timestamp (additional)
-- `convert_timezone`, `current_timezone`
-- `curdate`
-- `date_diff`, `date_part`
+- ~~`convert_timezone`, `current_timezone`~~ — **implemented (Phase 22)**
+- ~~`curdate`~~ — **implemented (Phase 22)**
+- ~~`date_diff`, `date_part`~~ — **implemented (Phase 22)**
 - `date_trunc` — we have `trunc`
-- `dateadd`, `datepart`
+- ~~`dateadd`, `datepart`~~ — **implemented (Phase 22)**
 - ~~`date_from_unix_date`~~ — **implemented (Phase 17)**
-- `dayname`
-- `days`, `hours`, `months`, `years`
-- `extract`
-- `localtimestamp`
-- ~~`make_date`~~ — **implemented (Phase 17)**; `make_dt_interval`, `make_interval`, `make_timestamp`, `make_timestamp_ltz`, `make_timestamp_ntz`, `make_ym_interval`
-- `now`
+- ~~`dayname`~~ — **implemented (Phase 22)**
+- ~~`days`, `hours`, `months`, `years`~~ — **implemented (Phase 22)**
+- ~~`extract`~~ — **implemented (Phase 22)**
+- ~~`localtimestamp`~~ — **implemented (Phase 22)**
+- ~~`make_date`~~ — **implemented (Phase 17)**; `make_dt_interval`, `make_ym_interval` deferred; ~~`make_interval`, `make_timestamp`, `make_timestamp_ntz`~~ — **implemented (Phase 22)**
+- ~~`now`~~ — **implemented (Phase 22)**
 - ~~`timestamp_micros`, `timestamp_millis`, `timestamp_seconds`~~ — **implemented (Phase 17)**
-- `timestampadd`, `timestampdiff`
-- `to_timestamp`, `to_timestamp_ltz`, `to_timestamp_ntz`
+- ~~`timestampadd`, `timestampdiff`~~ — **implemented (Phase 22)**
+- ~~`to_timestamp`~~ — **implemented (Phase 22)**; `to_timestamp_ltz`, `to_timestamp_ntz` deferred
 - ~~`to_unix_timestamp`, `from_unixtime`~~ — **implemented (Phase 17)**
-- ~~`unix_date`~~ — **implemented (Phase 17)**; `unix_micros`, `unix_millis`, `unix_seconds`
-- `weekday`
+- ~~`unix_date`~~ — **implemented (Phase 17)**; ~~`unix_micros`, `unix_millis`, `unix_seconds`~~ — **implemented (Phase 22)**
+- ~~`weekday`~~ — **implemented (Phase 22)**
 
 ### 2.18 JSON / XML
 - `json_array_length`, `json_object_keys`, `json_tuple`

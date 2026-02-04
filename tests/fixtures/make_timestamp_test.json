@@ -1,0 +1,33 @@
+{
+  "name": "make_timestamp_test",
+  "pyspark_version": "3.5.0",
+  "input": {
+    "schema": [
+      { "name": "id", "type": "bigint" },
+      { "name": "y", "type": "int" },
+      { "name": "mo", "type": "int" },
+      { "name": "d", "type": "int" },
+      { "name": "h", "type": "int" },
+      { "name": "mi", "type": "int" },
+      { "name": "s", "type": "int" }
+    ],
+    "rows": [
+      [1, 2024, 3, 15, 14, 30, 0],
+      [2, 1970, 1, 1, 0, 0, 0]
+    ]
+  },
+  "operations": [
+    { "op": "withColumn", "column": "ts", "expr": "make_timestamp(col('y'), col('mo'), col('d'), col('h'), col('mi'), col('s'))" },
+    { "op": "select", "columns": ["id", "ts"] }
+  ],
+  "expected": {
+    "schema": [
+      { "name": "id", "type": "bigint" },
+      { "name": "ts", "type": "timestamp" }
+    ],
+    "rows": [
+      [1, "2024-03-15T14:30:00.000000"],
+      [2, "1970-01-01T00:00:00.000000"]
+    ]
+  }
+}

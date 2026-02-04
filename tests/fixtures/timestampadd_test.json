@@ -1,0 +1,30 @@
+{
+  "name": "timestampadd_test",
+  "pyspark_version": "3.5.0",
+  "input": {
+    "schema": [
+      { "name": "id", "type": "bigint" },
+      { "name": "ts", "type": "timestamp" },
+      { "name": "delta", "type": "int" }
+    ],
+    "rows": [
+      [1, "2024-01-15T12:00:00", 5],
+      [2, "2024-06-01T00:00:00", 1]
+    ]
+  },
+  "operations": [
+    { "op": "withColumn", "column": "ts_plus", "expr": "timestampadd('DAY', col('delta'), col('ts'))" },
+    { "op": "select", "columns": ["id", "ts", "ts_plus"] }
+  ],
+  "expected": {
+    "schema": [
+      { "name": "id", "type": "bigint" },
+      { "name": "ts", "type": "timestamp" },
+      { "name": "ts_plus", "type": "timestamp" }
+    ],
+    "rows": [
+      [1, "2024-01-15T12:00:00.000000", "2024-01-20T12:00:00.000000"],
+      [2, "2024-06-01T00:00:00.000000", "2024-06-02T00:00:00.000000"]
+    ]
+  }
+}
