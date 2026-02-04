@@ -61,7 +61,7 @@ Robin-sparkless is designed to **replace the backend logic** of [Sparkless](http
 7. **Phase 5 Test Conversion** ✅ **COMPLETED**
    - Fixture converter maps Sparkless `expected_outputs` to robin-sparkless format (join, window, withColumn, union, distinct, drop, dropna, fillna, limit, withColumnRenamed, etc.).
    - Parity discovers `tests/fixtures/` and `tests/fixtures/converted/`; optional `skip: true` in fixtures.
-  - `make sparkless-parity` (set `SPARKLESS_EXPECTED_OUTPUTS` to run converter first); 103 hand-written fixtures passing (array_distinct skipped).
+  - `make sparkless-parity` (set `SPARKLESS_EXPECTED_OUTPUTS` to run converter first); 128 hand-written fixtures passing (array_distinct skipped).
   - See [CONVERTER_STATUS.md](CONVERTER_STATUS.md), [SPARKLESS_PARITY_STATUS.md](SPARKLESS_PARITY_STATUS.md).
 
 8. **Phase 6 Broad Function Parity** (partial) ✅
@@ -82,9 +82,8 @@ Robin-sparkless is designed to **replace the backend logic** of [Sparkless](http
    - **Phase 15** ✅ **COMPLETED**: Functions batch 3 — Batch 1 (nvl, nvl2, substr, power, ln, ceiling, lcase, ucase, dayofmonth, to_degrees, to_radians, isnull, isnotnull), Batch 2 (left, right, replace, startswith, endswith, contains, like, ilike, rlike), Batch 3 (cosh, sinh, tanh, acosh, asinh, atanh, cbrt, expm1, log1p, log10, log2, rint, hypot), Batch 4 (array_distinct) implemented; parity fixtures 84 → 88. Gap list: [PHASE15_GAP_LIST.md](PHASE15_GAP_LIST.md), [GAP_ANALYSIS_SPARKLESS_3.28.md](GAP_ANALYSIS_SPARKLESS_3.28.md).
    - **Phase 16** ✅ **COMPLETED**: String/regex — regexp_count, regexp_instr, regexp_substr, split_part, find_in_set, format_string, printf. Parity fixtures: regexp_count, regexp_substr, regexp_instr, split_part, find_in_set, format_string (93 fixtures total; array_distinct skipped). PyO3: module and Column methods for all. See [ROADMAP.md](ROADMAP.md).
    - **Phase 17** ✅ **COMPLETED**: Datetime/unix — unix_timestamp, to_unix_timestamp, from_unixtime, make_date, timestamp_seconds, timestamp_millis, timestamp_micros, unix_date, date_from_unix_date; math: pmod, factorial. Parity fixtures: unix_timestamp, from_unixtime, make_date, timestamp_seconds, timestamp_millis, timestamp_micros, unix_date, date_from_unix_date, pmod, factorial (103 fixtures total). PyO3: module and Column methods for all.
-   - **Phase 18**: Remaining gaps 3 — array/map/struct (array_append, array_prepend, array_insert, array_except/intersect/union, zip_with, map_concat, map_filter, map_zip_with, transform_keys/values, named_struct).
-   - **Phase 18**: Remaining gaps 3 — array/map/struct.
-   - **Phase 19**: Remaining gaps 4 — aggregates and try_*.
+   - **Phase 18** ✅ **COMPLETED**: Array/map/struct — array_append, array_prepend, array_insert, array_except/intersect/union, zip_with, map_concat, map_filter, map_zip_with, named_struct (124 fixtures). PyO3: map_filter_value_gt, zip_with_coalesce, map_zip_with_coalesce.
+   - **Phase 19** ✅ **COMPLETED**: Aggregates (any_value, bool_and, bool_or, count_if, max_by, min_by, percentile, product, collect_list, collect_set), try_* (try_divide, try_add, try_subtract, try_multiply), misc (width_bucket, elt, bit_length, typeof). Parity fixtures: groupby_any_value, groupby_product, try_divide, width_bucket (128 fixtures). PyO3: GroupedData methods; try_*, width_bucket, elt, bit_length, typeof.
    - **Phase 20**: Prepare and publish robin-sparkless as a Rust crate (crates.io, API stability, docs, release workflow; optional PyPI wheel).
    - **Phase 21**: Sparkless integration (BackendFactory "robin", 200+ tests passing).
 

@@ -123,7 +123,7 @@ Math (radians): `sin()`, `cos()`, `tan()`, `asin()`, `acos()`, `atan()`, `atan2(
 
 ### Parity
 
-Behavior is validated against PySpark on **103 parity fixtures** (~192+ functions); see [PARITY_STATUS.md](PARITY_STATUS.md). Known differences are in [PYSPARK_DIFFERENCES.md](PYSPARK_DIFFERENCES.md). CI (GitHub Actions) runs format, clippy, audit, deny, and all tests (including parity) on every push/PR.
+Behavior is validated against PySpark on **128 parity fixtures** (~220+ functions); see [PARITY_STATUS.md](PARITY_STATUS.md). Known differences are in [PYSPARK_DIFFERENCES.md](PYSPARK_DIFFERENCES.md). CI (GitHub Actions) runs format, clippy, audit, deny, and all tests (including parity) on every push/PR.
 
 For roadmap and Sparkless integration phases (Phases 12–17 completed; Phases 18–19 remaining), see [ROADMAP.md](ROADMAP.md).
 
