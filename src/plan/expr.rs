@@ -151,21 +151,27 @@ fn expr_from_fn(name: &str, args: &[Value]) -> Result<Expr, PlanExprError> {
     match name {
         "upper" => {
             if args.len() != 1 {
-                return Err(PlanExprError("upper() requires exactly one argument".to_string()));
+                return Err(PlanExprError(
+                    "upper() requires exactly one argument".to_string(),
+                ));
             }
             let e = expr_from_value(&args[0])?;
             Ok(e.str().to_uppercase())
         }
         "lower" => {
             if args.len() != 1 {
-                return Err(PlanExprError("lower() requires exactly one argument".to_string()));
+                return Err(PlanExprError(
+                    "lower() requires exactly one argument".to_string(),
+                ));
             }
             let e = expr_from_value(&args[0])?;
             Ok(e.str().to_lowercase())
         }
         "coalesce" => {
             if args.is_empty() {
-                return Err(PlanExprError("coalesce() requires at least one argument".to_string()));
+                return Err(PlanExprError(
+                    "coalesce() requires at least one argument".to_string(),
+                ));
             }
             let exprs: Result<Vec<Expr>, _> = args.iter().map(expr_from_value).collect();
             let exprs = exprs?;

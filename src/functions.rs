@@ -282,9 +282,7 @@ pub fn covar_samp_expr(col1: &str, col2: &str) -> Expr {
     let sum_a = pl_col(col1).sum().cast(DataType::Float64);
     let sum_b = pl_col(col2).sum().cast(DataType::Float64);
     when(len().gt(lit(1)))
-        .then(
-            (sum_ab - sum_a * sum_b / n.clone()) / (len() - lit(1)).cast(DataType::Float64),
-        )
+        .then((sum_ab - sum_a * sum_b / n.clone()) / (len() - lit(1)).cast(DataType::Float64))
         .otherwise(lit(f64::NAN))
 }
 

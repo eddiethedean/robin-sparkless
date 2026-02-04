@@ -7,11 +7,10 @@ mod expr;
 use crate::dataframe::{DataFrame, JoinType};
 use crate::plan::expr::expr_from_value;
 
-pub use expr::PlanExprError;
 use crate::session::SparkSession;
+pub use expr::PlanExprError;
 use polars::prelude::PolarsError;
 use serde_json::Value;
-
 
 /// Execute a logical plan: build initial DataFrame from (data, schema), then apply each op in sequence.
 ///
@@ -83,9 +82,11 @@ fn apply_op(
             if let Some(arr) = payload.as_array() {
                 let mut names = Vec::with_capacity(arr.len());
                 for v in arr {
-                    let name = v
-                        .as_str()
-                        .ok_or_else(|| PlanError::InvalidPlan("select payload must be list of column name strings".into()))?;
+                    let name = v.as_str().ok_or_else(|| {
+                        PlanError::InvalidPlan(
+                            "select payload must be list of column name strings".into(),
+                        )
+                    })?;
                     names.push(name.to_string());
                 }
                 let refs: Vec<&str> = names.iter().map(|s| s.as_str()).collect();
@@ -97,10 +98,9 @@ fn apply_op(
             }
         }
         "limit" => {
-            let n = payload
-                .get("n")
-                .and_then(Value::as_u64)
-                .ok_or_else(|| PlanError::InvalidPlan("limit payload must have 'n' number".into()))?;
+            let n = payload.get("n").and_then(Value::as_u64).ok_or_else(|| {
+                PlanError::InvalidPlan("limit payload must have 'n' number".into())
+            })?;
             df.limit(n as usize).map_err(PlanError::Session)
         }
         "offset" => {
@@ -111,7 +111,9 @@ fn apply_op(
             let columns = payload
                 .get("columns")
                 .and_then(Value::as_array)
-                .ok_or_else(|| PlanError::InvalidPlan("orderBy payload must have 'columns' array".into()))?;
+                .ok_or_else(|| {
+                    PlanError::InvalidPlan("orderBy payload must have 'columns' array".into())
+                })?;
             let col_names: Vec<String> = columns
                 .iter()
                 .filter_map(|v| v.as_str().map(String::from))
@@ -119,11 +121,7 @@ fn apply_op(
             let ascending = payload
                 .get("ascending")
                 .and_then(Value::as_array)
-                .map(|a| {
-                    a.iter()
-                        .filter_map(|v| v.as_bool())
-                        .collect::<Vec<_>>()
-                })
+                .map(|a| a.iter().filter_map(|v| v.as_bool()).collect::<Vec<_>>())
                 .unwrap_or_else(|| vec![true; col_names.len()]);
             let refs: Vec<&str> = col_names.iter().map(|s| s.as_str()).collect();
             df.order_by(refs, ascending).map_err(PlanError::Session)
@@ -133,22 +131,19 @@ fn apply_op(
             let columns = payload
                 .get("columns")
                 .and_then(Value::as_array)
-                .ok_or_else(|| PlanError::InvalidPlan("drop payload must have 'columns' array".into()))?;
-            let names: Vec<&str> = columns
-                .iter()
-                .filter_map(|v| v.as_str())
-                .collect();
+                .ok_or_else(|| {
+                    PlanError::InvalidPlan("drop payload must have 'columns' array".into())
+                })?;
+            let names: Vec<&str> = columns.iter().filter_map(|v| v.as_str()).collect();
             df.drop(names).map_err(PlanError::Session)
         }
         "withColumnRenamed" => {
-            let old_name = payload
-                .get("old")
-                .and_then(Value::as_str)
-                .ok_or_else(|| PlanError::InvalidPlan("withColumnRenamed must have 'old'".into()))?;
-            let new_name = payload
-                .get("new")
-                .and_then(Value::as_str)
-                .ok_or_else(|| PlanError::InvalidPlan("withColumnRenamed must have 'new'".into()))?;
+            let old_name = payload.get("old").and_then(Value::as_str).ok_or_else(|| {
+                PlanError::InvalidPlan("withColumnRenamed must have 'old'".into())
+            })?;
+            let new_name = payload.get("new").and_then(Value::as_str).ok_or_else(|| {
+                PlanError::InvalidPlan("withColumnRenamed must have 'new'".into())
+            })?;
             df.with_column_renamed(old_name, new_name)
                 .map_err(PlanError::Session)
         }
@@ -167,7 +162,9 @@ fn apply_op(
             let group_by = payload
                 .get("group_by")
                 .and_then(Value::as_array)
-                .ok_or_else(|| PlanError::InvalidPlan("groupBy must have 'group_by' array".into()))?;
+                .ok_or_else(|| {
+                    PlanError::InvalidPlan("groupBy must have 'group_by' array".into())
+                })?;
             let cols: Vec<String> = group_by
                 .iter()
                 .filter_map(|v| v.as_str().map(String::from))
@@ -218,7 +215,7 @@ fn apply_op(
                 .collect();
             let rows: Vec<Vec<Value>> = other_data
                 .iter()
-                .filter_map(|v| v.as_array().map(|a| a.clone()))
+                .filter_map(|v| v.as_array().cloned())
                 .collect();
             let other_df = session
                 .create_dataframe_from_rows(rows, schema_vec)
@@ -254,7 +251,7 @@ fn apply_op(
                 .collect();
             let rows: Vec<Vec<Value>> = other_data
                 .iter()
-                .filter_map(|v| v.as_array().map(|a| a.clone()))
+                .filter_map(|v| v.as_array().cloned())
                 .collect();
             let other_df = session
                 .create_dataframe_from_rows(rows, schema_vec)
@@ -265,11 +262,15 @@ fn apply_op(
             let other_data = payload
                 .get("other_data")
                 .and_then(Value::as_array)
-                .ok_or_else(|| PlanError::InvalidPlan("unionByName must have 'other_data'".into()))?;
+                .ok_or_else(|| {
+                    PlanError::InvalidPlan("unionByName must have 'other_data'".into())
+                })?;
             let other_schema = payload
                 .get("other_schema")
                 .and_then(Value::as_array)
-                .ok_or_else(|| PlanError::InvalidPlan("unionByName must have 'other_schema'".into()))?;
+                .ok_or_else(|| {
+                    PlanError::InvalidPlan("unionByName must have 'other_schema'".into())
+                })?;
             let schema_vec: Vec<(String, String)> = other_schema
                 .iter()
                 .filter_map(|v| {
@@ -281,13 +282,12 @@ fn apply_op(
                 .collect();
             let rows: Vec<Vec<Value>> = other_data
                 .iter()
-                .filter_map(|v| v.as_array().map(|a| a.clone()))
+                .filter_map(|v| v.as_array().cloned())
                 .collect();
             let other_df = session
                 .create_dataframe_from_rows(rows, schema_vec)
                 .map_err(PlanError::Session)?;
-            df.union_by_name(&other_df)
-                .map_err(PlanError::Session)
+            df.union_by_name(&other_df).map_err(PlanError::Session)
         }
         _ => Err(PlanError::UnsupportedOp(op_name.to_string())),
     }
@@ -313,9 +313,10 @@ fn parse_aggs(aggs: &[Value]) -> Result<Vec<polars::prelude::Expr>, PlanError> {
                 if agg == "count" {
                     Column::new("".to_string()) // count() without column
                 } else {
-                    return Err(PlanError::InvalidPlan(
-                        format!("agg '{}' requires 'column'", agg).into(),
-                    ));
+                    return Err(PlanError::InvalidPlan(format!(
+                        "agg '{}' requires 'column'",
+                        agg
+                    )));
                 }
             }
         };
@@ -325,7 +326,7 @@ fn parse_aggs(aggs: &[Value]) -> Result<Vec<polars::prelude::Expr>, PlanError> {
             "avg" => avg(&c),
             "min" => min(&c),
             "max" => max(&c),
-            _ => return Err(PlanError::InvalidPlan(format!("unsupported agg: {}", agg).into())),
+            _ => return Err(PlanError::InvalidPlan(format!("unsupported agg: {}", agg))),
         };
         out.push(col_expr.into_expr());
     }

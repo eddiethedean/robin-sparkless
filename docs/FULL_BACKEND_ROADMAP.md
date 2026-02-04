@@ -1,6 +1,6 @@
 # Full Sparkless Backend Roadmap
 
-This document plans the path for **robin-sparkless** to become a complete backend replacement for [Sparkless](https://github.com/eddiethedean/sparkless). Sparkless implements 403+ PySpark functions and 85+ DataFrame methods; robin-sparkless currently covers ~283 functions with 149 parity fixtures (Phases 11–24 partial). Next: Phase 24 (AES crypto deferred), Phase 25 (readiness for post-refactor merge), Phase 26 (publish), Phase 27 (integration).
+This document plans the path for **robin-sparkless** to become a complete backend replacement for [Sparkless](https://github.com/eddiethedean/sparkless). Sparkless implements 403+ PySpark functions and 85+ DataFrame methods; robin-sparkless currently covers ~283 functions with 149 parity fixtures (Phases 11–24 partial). **Phase 25** ✅ **completed** (plan interpreter, expression interpreter, logical plan schema, plan fixtures, create_dataframe_from_rows). Next: Phase 26 (publish crate), Phase 27 (integration).
 
 **Reference**: [PYSPARK_FUNCTION_MATRIX](https://github.com/eddiethedean/sparkless/blob/main/PYSPARK_FUNCTION_MATRIX.md) catalogs all functions/methods; [SPARKLESS_INTEGRATION_ANALYSIS.md](SPARKLESS_INTEGRATION_ANALYSIS.md) describes architecture mapping.
 
@@ -305,7 +305,7 @@ To reach **100% feature parity** and a published crate before wiring the robin b
 | **21** | **Full parity 2**: string, binary, type, array/map/struct | ✅ **COMPLETED** |
 | **22** | **Full parity 3**: datetime extensions | ✅ **COMPLETED** |
 | **23** | **Full parity 4**: JSON, CSV, URL, misc | ✅ **COMPLETED** |
-| **24** | **Full parity 5**: bit, control, JVM stubs, random, crypto | ✅ **PARTIALLY COMPLETED** (bit/control/JVM/rand/randn; AES deferred) |
+| **24** | **Full parity 5**: bit, control, JVM stubs, random, crypto | ✅ **COMPLETED** |
 | **25** | **Publish Rust crate**: crates.io, API stability, docs, release; optional PyPI wheel | 2–3 weeks |
 | **26** | **Sparkless integration**: BackendFactory "robin", 200+ tests passing, PyO3 surface | 4–6 weeks |
 
@@ -325,8 +325,8 @@ Detail for each phase is in [ROADMAP.md](ROADMAP.md) (§ Phase 12–26).
 8. **Phase 8**: ✅ **COMPLETED** – array_repeat, array_flatten, Map (6b), String 6.4 (soundex/levenshtein/crc32/xxhash64), window fixtures, documentation (see Phase 8 section above)
 9. **Phase 9**: High-value functions (datetime, string repeat/reverse/lpad/rpad, math sqrt/pow/exp/log, nvl/nullif/nanvl, first/last/approx_count_distinct) + DataFrame methods (replace, cross_join, describe, cache/persist/unpersist, subtract, intersect) ✅ **COMPLETED**
 10. **Phase 10**: Complex types (Map, JSON, array_repeat, string 6.4) + window fixture simplification ✅ **COMPLETED**
-11. **Phase 11–24**: Parity scale (149 fixtures), harness date/datetime/boolean, Phase 12 DataFrame methods, Phase 13–17 functions batches, **Phase 18** array/map/struct, **Phase 19** aggregates, try_*, misc; **Phase 20** ordering, aggregates, numeric; **Phase 21** string, binary, type, array/map/struct; **Phase 22** datetime extensions; **Phase 23** JSON/CSV/URL/misc (isin, url_decode, url_encode, json_array_length, parse_url, hash, shift_left/right, version, equal_null, stack); converter + CI ✅ **COMPLETED**. Phases 24 (full parity), Phase 25 (readiness), Phase 26 (publish), Phase 27 (integration). See [ROADMAP.md](ROADMAP.md).
-12. **ROADMAP Phase 12–27**: Path to 100% before integration — **Phases 12–24 partial** (DataFrame methods ~55+, ~283 functions, 149 fixtures; Phase 24: bit, control, JVM stubs, rand/randn; AES crypto deferred). **Phase 25**: readiness for post-refactor merge (plan interpreter, etc.; see [READINESS_FOR_SPARKLESS_PLAN.md](READINESS_FOR_SPARKLESS_PLAN.md)). **Phase 26**: prepare and publish crate (crates.io, docs, release). **Phase 27**: Sparkless integration (see § Path to 100% above).
+11. **Phase 11–25**: Parity scale (149 fixtures), harness date/datetime/boolean, Phase 12 DataFrame methods, Phase 13–17 functions batches, **Phase 18** array/map/struct, **Phase 19** aggregates, try_*, misc; **Phase 20** ordering, aggregates, numeric; **Phase 21** string, binary, type, array/map/struct; **Phase 22** datetime extensions; **Phase 23** JSON/CSV/URL/misc; **Phase 24** ✅ (bit, control, JVM stubs, rand/randn, AES crypto); **Phase 25** ✅ **COMPLETED** (plan interpreter, expression interpreter, [LOGICAL_PLAN_FORMAT.md](LOGICAL_PLAN_FORMAT.md), plan fixtures, create_dataframe_from_rows). Phase 26 (publish), Phase 27 (integration). See [ROADMAP.md](ROADMAP.md).
+12. **ROADMAP Phase 12–27**: Path to 100% — **Phases 12–25 done** (DataFrame methods ~55+, ~283 functions, 149 fixtures; plan interpreter, plan fixtures in `tests/fixtures/plans/`). **Phase 26**: prepare and publish crate (crates.io, docs, release). **Phase 27**: Sparkless integration (see § Path to 100% above).
 
 ---
 

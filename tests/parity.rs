@@ -980,7 +980,9 @@ fn apply_operations(
                             let name: String = alias
                                 .filter(|a| !a.is_empty())
                                 .map(String::from)
-                                .unwrap_or_else(|| format!("approx_percentile({}, {})", col_name, p));
+                                .unwrap_or_else(|| {
+                                    format!("approx_percentile({}, {})", col_name, p)
+                                });
                             e.alias(&name)
                         }
                         "product" => {
@@ -5222,14 +5224,13 @@ fn plan_parity_fixtures() {
 
         match plan::execute_plan(&spark, rows, schema, &fixture.plan) {
             Ok(result_df) => {
-                let (actual_schema, actual_rows) =
-                    match collect_to_simple_format(&result_df) {
-                        Ok(t) => t,
-                        Err(e) => {
-                            failures.push((fixture.name.clone(), format!("collect: {}", e)));
-                            continue;
-                        }
-                    };
+                let (actual_schema, actual_rows) = match collect_to_simple_format(&result_df) {
+                    Ok(t) => t,
+                    Err(e) => {
+                        failures.push((fixture.name.clone(), format!("collect: {}", e)));
+                        continue;
+                    }
+                };
                 if let Err(e) = assert_schema_eq(
                     &actual_schema,
                     &fixture.expected.schema,
@@ -5239,15 +5240,13 @@ fn plan_parity_fixtures() {
                     failures.push((fixture.name.clone(), e.to_string()));
                     continue;
                 }
-                let ordered = fixture.plan.iter().any(|op| {
-                    op.get("op").and_then(Value::as_str) == Some("orderBy")
-                });
-                if let Err(e) = assert_rows_eq(
-                    &actual_rows,
-                    &fixture.expected.rows,
-                    ordered,
-                    &fixture.name,
-                ) {
+                let ordered = fixture
+                    .plan
+                    .iter()
+                    .any(|op| op.get("op").and_then(Value::as_str) == Some("orderBy"));
+                if let Err(e) =
+                    assert_rows_eq(&actual_rows, &fixture.expected.rows, ordered, &fixture.name)
+                {
                     failures.push((fixture.name.clone(), e.to_string()));
                 }
             }

@@ -2,8 +2,8 @@
 //! PySpark: df.stat().cov("a", "b"), df.stat().corr("a", "b"), df.corr() (matrix), df.summary(...).
 
 use super::DataFrame;
-use polars::prelude::{DataFrame as PlDataFrame, NamedFrom, PolarsError, Series};
 use polars::datatypes::DataType;
+use polars::prelude::{DataFrame as PlDataFrame, NamedFrom, PolarsError, Series};
 
 /// Helper for DataFrame statistical methods (PySpark-style df.stat().cov/corr).
 pub struct DataFrameStat<'a> {
@@ -116,9 +116,16 @@ impl<'a> DataFrameStat<'a> {
             .filter(|s| {
                 matches!(
                     s.dtype(),
-                    DataType::Int8 | DataType::Int16 | DataType::Int32 | DataType::Int64
-                        | DataType::UInt8 | DataType::UInt16 | DataType::UInt32 | DataType::UInt64
-                        | DataType::Float32 | DataType::Float64
+                    DataType::Int8
+                        | DataType::Int16
+                        | DataType::Int32
+                        | DataType::Int64
+                        | DataType::UInt8
+                        | DataType::UInt16
+                        | DataType::UInt32
+                        | DataType::UInt64
+                        | DataType::Float32
+                        | DataType::Float64
                 )
             })
             .map(|s| s.name().to_string())

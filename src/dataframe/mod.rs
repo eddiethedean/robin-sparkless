@@ -410,7 +410,11 @@ impl DataFrame {
     }
 
     /// No-op: Polars has no range partitioning. PySpark repartitionByRange(n, cols).
-    pub fn repartition_by_range(&self, _num_partitions: usize, _cols: Vec<&str>) -> Result<DataFrame, PolarsError> {
+    pub fn repartition_by_range(
+        &self,
+        _num_partitions: usize,
+        _cols: Vec<&str>,
+    ) -> Result<DataFrame, PolarsError> {
         Ok(self.clone())
     }
 
@@ -424,7 +428,10 @@ impl DataFrame {
     }
 
     /// No-op: we don't model partitions. PySpark sortWithinPartitions. Same as orderBy for compatibility.
-    pub fn sort_within_partitions(&self, _cols: &[crate::functions::SortOrder]) -> Result<DataFrame, PolarsError> {
+    pub fn sort_within_partitions(
+        &self,
+        _cols: &[crate::functions::SortOrder],
+    ) -> Result<DataFrame, PolarsError> {
         Ok(self.clone())
     }
 

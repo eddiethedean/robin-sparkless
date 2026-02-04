@@ -1,5 +1,7 @@
 use crate::dataframe::DataFrame;
-use polars::prelude::{DataType, DataFrame as PlDataFrame, NamedFrom, PolarsError, Series, TimeUnit};
+use polars::prelude::{
+    DataFrame as PlDataFrame, DataType, NamedFrom, PolarsError, Series, TimeUnit,
+};
 use serde_json::Value as JsonValue;
 use std::collections::HashMap;
 use std::path::Path;
@@ -282,26 +284,31 @@ impl SparkSession {
                     })?
                 }
                 "timestamp" | "datetime" | "timestamp_ntz" => {
-                    let vals: Vec<Option<i64>> = rows
-                        .iter()
-                        .map(|row| {
-                            let v = row.get(col_idx).cloned().unwrap_or(JsonValue::Null);
-                            match v {
-                                JsonValue::String(s) => {
-                                    let parsed = NaiveDateTime::parse_from_str(&s, "%Y-%m-%dT%H:%M:%S%.f")
-                                        .or_else(|_| NaiveDateTime::parse_from_str(&s, "%Y-%m-%dT%H:%M:%S"))
+                    let vals: Vec<Option<i64>> =
+                        rows.iter()
+                            .map(|row| {
+                                let v = row.get(col_idx).cloned().unwrap_or(JsonValue::Null);
+                                match v {
+                                    JsonValue::String(s) => {
+                                        let parsed = NaiveDateTime::parse_from_str(
+                                            &s,
+                                            "%Y-%m-%dT%H:%M:%S%.f",
+                                        )
+                                        .or_else(|_| {
+                                            NaiveDateTime::parse_from_str(&s, "%Y-%m-%dT%H:%M:%S")
+                                        })
                                         .or_else(|_| {
                                             NaiveDate::parse_from_str(&s, "%Y-%m-%d")
                                                 .map(|d| d.and_hms_opt(0, 0, 0).unwrap())
                                         });
-                                    parsed.ok().map(|dt| dt.and_utc().timestamp_micros())
+                                        parsed.ok().map(|dt| dt.and_utc().timestamp_micros())
+                                    }
+                                    JsonValue::Number(n) => n.as_i64(),
+                                    JsonValue::Null => None,
+                                    _ => None,
                                 }
-                                JsonValue::Number(n) => n.as_i64(),
-                                JsonValue::Null => None,
-                                _ => None,
-                            }
-                        })
-                        .collect();
+                            })
+                            .collect();
                     let series = Series::new(name.as_str().into(), vals);
                     series
                         .cast(&DataType::Datetime(TimeUnit::Microseconds, None))

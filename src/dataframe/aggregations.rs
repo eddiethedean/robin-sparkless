@@ -327,9 +327,9 @@ impl GroupedData {
         let sum_ab = (c1.clone() * c2.clone()).sum();
         let sum_a = col(col1).sum().cast(DataType::Float64);
         let sum_b = col(col2).sum().cast(DataType::Float64);
-        let cov = when(len().gt(lit(1))).then(
-            (sum_ab - sum_a * sum_b / n.clone()) / (len() - lit(1)).cast(DataType::Float64),
-        ).otherwise(lit(f64::NAN));
+        let cov = when(len().gt(lit(1)))
+            .then((sum_ab - sum_a * sum_b / n.clone()) / (len() - lit(1)).cast(DataType::Float64))
+            .otherwise(lit(f64::NAN));
         let agg_expr = vec![cov.alias(format!("covar_samp({}, {})", col1, col2))];
         let lf = self.lazy_grouped.clone().agg(agg_expr);
         let mut pl_df = lf.collect()?;

@@ -33,7 +33,7 @@
    - ✅ JSON fixtures generated and versioned (`tests/fixtures/*.json`)
    - ✅ All parity tests passing for initial slice
 
-### Medium-Term Objectives (1–3 months) 🚧 **IN PROGRESS**
+### Medium-Term Objectives (1–3 months) ✅ **COMPLETED**
 
 4. **Data Source Readers** ✅ **COMPLETED**
    - ✅ Implement CSV/Parquet/JSON readers using Polars IO
@@ -199,10 +199,11 @@ We know we're on track if:
   - **Phase 21**: `with_btrim`, `with_hex`, `with_conv`, `with_str_to_map`, `arrays_overlap`, `arrays_zip`
   - **Phase 22**: `with_dayname`, `with_weekday`, `with_extract`, `with_unix_micros`, `make_timestamp_test`, `timestampadd_test`, `from_utc_timestamp_test`
   - **Phase 23**: `with_isin`, `with_url_decode`, `with_url_encode`, `json_array_length_test`, `with_hash`, `with_shift_left`
+- ✅ **Phase 25** (readiness for post-refactor merge): **Plan interpreter** (`execute_plan(session, data, schema, plan)` in Rust; Python `robin_sparkless.execute_plan(data, schema, plan_json)`); **expression interpreter** (serialized expr trees → Polars Expr in `src/plan/expr.rs`); **logical plan schema** ([LOGICAL_PLAN_FORMAT.md](LOGICAL_PLAN_FORMAT.md)); **plan fixtures** (`tests/fixtures/plans/filter_select_limit.json`, `join_simple.json`) with `plan_parity_fixtures` test; **create_dataframe_from_rows** (Rust + Python) for arbitrary schema and list of dicts/rows.
 
 ## Next Steps to Full Sparkless Parity
 
-To reach **full Sparkless parity** (robin-sparkless as a complete backend replacement), the remaining work is organized into phases 12–26 below (phases 9–21 complete). **Phases 22–24** achieve full parity with Sparkless 3.28.0 in manageable increments. Reference: [FULL_BACKEND_ROADMAP.md](FULL_BACKEND_ROADMAP.md), [PYSPARK_FUNCTION_MATRIX](https://github.com/eddiethedean/sparkless/blob/main/PYSPARK_FUNCTION_MATRIX.md), [GAP_ANALYSIS_SPARKLESS_3.28.md](GAP_ANALYSIS_SPARKLESS_3.28.md).
+To reach **full Sparkless parity** (robin-sparkless as a complete backend replacement), the remaining work is organized into phases 12–27 below (phases 9–25 complete). **Phases 26–27** are crate publish and Sparkless integration. Reference: [FULL_BACKEND_ROADMAP.md](FULL_BACKEND_ROADMAP.md), [PYSPARK_FUNCTION_MATRIX](https://github.com/eddiethedean/sparkless/blob/main/PYSPARK_FUNCTION_MATRIX.md), [GAP_ANALYSIS_SPARKLESS_3.28.md](GAP_ANALYSIS_SPARKLESS_3.28.md).
 
 ### Phase overview
 
@@ -223,7 +224,7 @@ To reach **full Sparkless parity** (robin-sparkless as a complete backend replac
 | **21** | Full parity 2: string, binary, type, array/map/struct | ✅ **COMPLETED** |
 | **22** | Full parity 3: datetime extensions | ✅ **COMPLETED** |
 | **23** | Full parity 4: JSON, CSV, URL, misc | ✅ **COMPLETED** |
-| **24** | Full parity 5: bit, control, JVM stubs, random, crypto | ✅ **PARTIALLY COMPLETED** (bit/control/JVM/random implemented; AES crypto deferred) |
+| **24** | Full parity 5: bit, control, JVM stubs, random, crypto | ✅ **COMPLETED** |
 | **25** | Readiness for post-refactor merge (plan interpreter, expression interpreter, plan schema, plan fixtures, create_dataframe_from_rows) | ✅ **COMPLETED** |
 | **26** | Prepare and publish robin-sparkless as a Rust crate (crates.io, API stability, docs, release) | 2–3 weeks |
 | **27** | Sparkless integration (BackendFactory "robin", 200+ tests), PyO3 surface | 4–6 weeks |
@@ -420,20 +421,19 @@ To reach **full Sparkless parity** (robin-sparkless as a complete backend replac
 
 ---
 
-### Phase 24 – Full parity 5: bit, control, JVM stubs, random, crypto (1.5–2 weeks)
+### Phase 24 – Full parity 5: bit, control, JVM stubs, random, crypto (1.5–2 weeks) ✅ **COMPLETED**
 
 **Goal**: Bit operations, control flow, JVM compatibility stubs, random, crypto.
 
-- **Bit**: `bit_and`, `bit_or`, `bit_xor`, `bit_count`, `bit_get`; `bitwiseNOT`, `bitwise_not`; `bitmap_*` (if in Sparkless 3.28).
-- **Control**: `assert_true`, `raise_error`.
-- **JVM stubs**: `broadcast`, `spark_partition_id`, `input_file_name`, `monotonically_increasing_id`, `current_catalog`, `current_database`, `current_schema`, `current_user`, `user` — no-ops or placeholders for API compatibility.
-- **Regression**: `regr_*` (defer if low priority).
-- **Random**: `rand(seed)`, `randn(seed)` — real RNG with optional seed; one value per row when used in `with_column`/`with_columns` (PySpark-like). `udf`, `pandas_udf` — stub or minimal support.
-- **Crypto**: `aes_decrypt`, `aes_encrypt`, `try_aes_decrypt` — implement if feasible; else document as deferred.
+- **Bit** ✅: `bit_and`, `bit_or`, `bit_xor`, `bit_count`, `bit_get`; `bitwiseNOT`, `bitwise_not`. (`bitmap_*` deferred if in Sparkless 3.28.)
+- **Control** ✅: `assert_true`, `raise_error`.
+- **JVM stubs** ✅: `broadcast`, `spark_partition_id`, `input_file_name`, `monotonically_increasing_id`, `current_catalog`, `current_database`, `current_schema`, `current_user`, `user` — no-ops or placeholders for API compatibility.
+- **Random** ✅: `rand(seed)`, `randn(seed)` — real RNG with optional seed; one value per row when used in `with_column`/`with_columns` (PySpark-like). `udf`, `pandas_udf` — stub or minimal support.
+- **Crypto** ✅: `aes_encrypt`, `aes_decrypt`, `try_aes_decrypt` (AES-128-GCM). See [PYSPARK_DIFFERENCES.md](PYSPARK_DIFFERENCES.md).
 
-**Defer**: XML (`from_xml`, `to_xml`, `xpath_*`), ML/HLL — document as out of scope.
+**Defer**: `regr_*` (regression), XML (`from_xml`, `to_xml`, `xpath_*`), ML/HLL — document as out of scope.
 
-**Parity**: Target 142 → 180+ fixtures across Phases 23–24. **PyO3**: Expose all new functions. **Outcome**: Full parity with Sparkless 3.28.0; ~280 functions; ready for Phase 25 (readiness for post-refactor merge).
+**Parity**: Fixture `with_bit_ops`; `with_rand_seed`, `with_jvm_stubs`. **PyO3**: All new functions exposed. **Outcome**: Full parity 5 done; ready for Phase 25 (readiness for post-refactor merge).
 
 ---
 
@@ -514,6 +514,7 @@ To enforce the roadmap above, we will:
     - ✅ Reconstructs a `DataFrame` from each fixture's `input`.
     - ✅ Applies the listed operations (`filter`, `select`, `groupBy+agg`, `orderBy`, etc.) via the Rust API.
     - ✅ Collects results and compares schema + rows against `expected`, with well-defined tolerances (e.g. for floats, or order-insensitive comparisons where PySpark doesn't guarantee ordering).
+  - ✅ **Plan fixtures** (Phase 25): `plan_parity_fixtures` loads `tests/fixtures/plans/*.json`, runs `plan::execute_plan`, and asserts schema and rows match expected. Fixtures use the serialized plan format in [LOGICAL_PLAN_FORMAT.md](LOGICAL_PLAN_FORMAT.md).
 
 - **Track parity coverage**
   - ✅ Initial parity test infrastructure in place

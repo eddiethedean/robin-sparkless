@@ -3,8 +3,6 @@
 
 use crate::column::Column as RsColumn;
 use crate::dataframe::JoinType;
-use crate::plan;
-use serde_json::Value as JsonValue;
 use crate::functions::SortOrder;
 use crate::functions::{
     acos, acosh, add_months, array_append, array_compact, array_distinct, array_except,
@@ -26,7 +24,7 @@ use crate::functions::{
 };
 use crate::functions::{
     array_agg, arrays_overlap, arrays_zip, assert_true as rs_assert_true, bit_and, bit_count,
-    bit_get, bit_length, bit_or, bit_xor, bitwise_not, broadcast as rs_broadcast, create_map,
+    bit_length, bit_or, bit_xor, bitwise_not, broadcast as rs_broadcast, create_map,
     current_catalog as rs_current_catalog, current_database as rs_current_database,
     current_schema as rs_current_schema, current_user as rs_current_user, equal_null,
     explode_outer, get, hash, input_file_name as rs_input_file_name, isin, isin_i64, isin_str,
@@ -43,10 +41,12 @@ use crate::functions::{
 };
 use crate::functions::{avg, coalesce, col as rs_col, count, max, min, sum as rs_sum};
 use crate::functions::{bin, btrim, conv, getbit, hex, locate, unhex};
+use crate::plan;
 use crate::{DataFrame, GroupedData, SparkSession};
 use polars::prelude::Expr;
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
+use serde_json::Value as JsonValue;
 use std::path::Path;
 
 /// Convert a Python scalar to serde_json::Value for plan/row data.

@@ -1205,15 +1205,18 @@ pub fn apply_encode(column: Column, charset: &str) -> PolarsResult<Option<Column
         .str()
         .map_err(|e| PolarsError::ComputeError(format!("encode: {}", e).into()))?;
     let cs = charset.to_lowercase();
-    let out = StringChunked::from_iter_options(name.as_str().into(), ca.into_iter().map(|opt_s| {
-        opt_s.and_then(|s| {
-            let bytes: Vec<u8> = match cs.as_str() {
-                "utf-8" | "utf8" => s.as_bytes().to_vec(),
-                _ => s.as_bytes().to_vec(), // default UTF-8
-            };
-            Some(hex::encode(bytes))
-        })
-    }));
+    let out = StringChunked::from_iter_options(
+        name.as_str().into(),
+        ca.into_iter().map(|opt_s| {
+            opt_s.map(|s| {
+                let bytes: Vec<u8> = match cs.as_str() {
+                    "utf-8" | "utf8" => s.as_bytes().to_vec(),
+                    _ => s.as_bytes().to_vec(), // default UTF-8
+                };
+                hex::encode(bytes)
+            })
+        }),
+    );
     Ok(Some(Column::new(name, out.into_series())))
 }
 
@@ -1225,12 +1228,15 @@ pub fn apply_decode(column: Column, charset: &str) -> PolarsResult<Option<Column
         .str()
         .map_err(|e| PolarsError::ComputeError(format!("decode: {}", e).into()))?;
     let _ = charset;
-    let out = StringChunked::from_iter_options(name.as_str().into(), ca.into_iter().map(|opt_s| {
-        opt_s.and_then(|s| {
-            let bytes = hex::decode(s.as_bytes()).ok()?;
-            String::from_utf8(bytes).ok()
-        })
-    }));
+    let out = StringChunked::from_iter_options(
+        name.as_str().into(),
+        ca.into_iter().map(|opt_s| {
+            opt_s.and_then(|s| {
+                let bytes = hex::decode(s.as_bytes()).ok()?;
+                String::from_utf8(bytes).ok()
+            })
+        }),
+    );
     Ok(Some(Column::new(name, out.into_series())))
 }
 
@@ -1242,20 +1248,23 @@ pub fn apply_to_binary(column: Column, fmt: &str) -> PolarsResult<Option<Column>
         .str()
         .map_err(|e| PolarsError::ComputeError(format!("to_binary: {}", e).into()))?;
     let fmt_lower = fmt.to_lowercase();
-    let out = StringChunked::from_iter_options(name.as_str().into(), ca.into_iter().map(|opt_s| {
-        opt_s.and_then(|s| {
-            let hex_str = match fmt_lower.as_str() {
-                "hex" => {
-                    // Input is hex string; validate and return as-is (binary representation)
-                    hex::decode(s.as_bytes()).ok()?;
-                    Some(s.to_string())
-                }
-                "utf-8" | "utf8" => Some(hex::encode(s.as_bytes())),
-                _ => Some(hex::encode(s.as_bytes())),
-            };
-            hex_str
-        })
-    }));
+    let out = StringChunked::from_iter_options(
+        name.as_str().into(),
+        ca.into_iter().map(|opt_s| {
+            opt_s.and_then(|s| {
+                let hex_str = match fmt_lower.as_str() {
+                    "hex" => {
+                        // Input is hex string; validate and return as-is (binary representation)
+                        hex::decode(s.as_bytes()).ok()?;
+                        Some(s.to_string())
+                    }
+                    "utf-8" | "utf8" => Some(hex::encode(s.as_bytes())),
+                    _ => Some(hex::encode(s.as_bytes())),
+                };
+                hex_str
+            })
+        }),
+    );
     Ok(Some(Column::new(name, out.into_series())))
 }
 
@@ -1270,7 +1279,14 @@ fn aes_gcm_encrypt_one(plaintext: &[u8], key: &[u8]) -> Option<String> {
     use aes_gcm::aead::{Aead, KeyInit};
     use aes_gcm::Aes128Gcm;
     use rand::RngCore;
-    let key_arr: [u8; 16] = key.iter().copied().chain(std::iter::repeat(0)).take(16).collect::<Vec<_>>().try_into().ok()?;
+    let key_arr: [u8; 16] = key
+        .iter()
+        .copied()
+        .chain(std::iter::repeat(0))
+        .take(16)
+        .collect::<Vec<_>>()
+        .try_into()
+        .ok()?;
     let cipher = Aes128Gcm::new(GenericArray::from_slice(&key_arr));
     let mut nonce = [0u8; 12];
     rand::thread_rng().fill_bytes(&mut nonce);
@@ -1291,7 +1307,14 @@ fn aes_gcm_decrypt_one(hex_input: &str, key: &[u8]) -> Option<String> {
         return None; // nonce + at least tag
     }
     let (nonce_bytes, ct) = bytes.split_at(12);
-    let key_arr: [u8; 16] = key.iter().copied().chain(std::iter::repeat(0)).take(16).collect::<Vec<_>>().try_into().ok()?;
+    let key_arr: [u8; 16] = key
+        .iter()
+        .copied()
+        .chain(std::iter::repeat(0))
+        .take(16)
+        .collect::<Vec<_>>()
+        .try_into()
+        .ok()?;
     let cipher = Aes128Gcm::new(GenericArray::from_slice(&key_arr));
     let nonce = GenericArray::from_slice(nonce_bytes);
     let plaintext = cipher.decrypt(nonce, ct).ok()?;
@@ -3181,7 +3204,8 @@ pub fn apply_json_tuple(column: Column, keys: &[String]) -> PolarsResult<Option<
         .str()
         .map_err(|e| PolarsError::ComputeError(format!("json_tuple: {}", e).into()))?;
     let keys = keys.to_vec();
-    let mut columns_per_key: Vec<Vec<Option<String>>> = (0..keys.len()).map(|_| Vec::new()).collect();
+    let mut columns_per_key: Vec<Vec<Option<String>>> =
+        (0..keys.len()).map(|_| Vec::new()).collect();
     for opt_s in ca.into_iter() {
         for (i, key) in keys.iter().enumerate() {
             let val = opt_s.and_then(|s| {
@@ -3215,9 +3239,9 @@ pub fn apply_from_csv(column: Column) -> PolarsResult<Option<Column>> {
         let parts: Vec<&str> = opt_s
             .map(|s| s.split(',').collect::<Vec<_>>())
             .unwrap_or_default();
-        for i in 0..MAX_COLS {
+        for (i, col) in columns.iter_mut().enumerate().take(MAX_COLS) {
             let v = parts.get(i).map(|p| (*p).to_string());
-            columns[i].push(v);
+            col.push(v);
         }
     }
     let field_series: Vec<Series> = (0..MAX_COLS)

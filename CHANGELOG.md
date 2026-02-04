@@ -9,10 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Planned
 
-- **Phase 25 – Readiness for post-refactor merge**: Plan interpreter (`execute_plan`), expression interpreter, logical plan schema, plan fixtures, `create_dataframe_from_rows`. See [READINESS_FOR_SPARKLESS_PLAN.md](docs/READINESS_FOR_SPARKLESS_PLAN.md) and [ROADMAP.md](docs/ROADMAP.md).
 - **Phase 26 – Publish crate**: Prepare and publish robin-sparkless to crates.io (and optionally PyPI via maturin). See [ROADMAP.md](docs/ROADMAP.md) for details.
 
 ### Added
+
+- **Phase 25 – Readiness for post-refactor merge** ✅ **COMPLETED**
+  - **Plan interpreter**: `execute_plan(session, data, schema, plan)` in Rust (`src/plan/`); Python `robin_sparkless.execute_plan(data, schema, plan_json)` returning a DataFrame (call `.collect()` for list of dicts).
+  - **Logical plan schema**: [docs/LOGICAL_PLAN_FORMAT.md](docs/LOGICAL_PLAN_FORMAT.md) defines op list, payload shapes (filter, select, withColumn, join, union, orderBy, limit, groupBy+aggs, etc.), and expression tree format.
+  - **Expression interpreter**: `src/plan/expr.rs` converts serialized expression trees to Polars `Expr` (col, lit, eq/ne/gt/ge/lt/le, and, or, not, eq_null_safe, upper, lower, coalesce).
+  - **Plan fixtures and tests**: `tests/fixtures/plans/filter_select_limit.json`, `join_simple.json`; `plan_parity_fixtures` test in `tests/parity.rs`.
+  - **create_dataframe_from_rows**: Rust `SparkSession::create_dataframe_from_rows(rows, schema)` for arbitrary schema and row data; Python `SparkSession.create_dataframe_from_rows(data, schema)` (data: list of dicts or list of lists). See [READINESS_FOR_SPARKLESS_PLAN.md](docs/READINESS_FOR_SPARKLESS_PLAN.md) and [ROADMAP.md](docs/ROADMAP.md).
 
 - **Missing PySpark features (plan Phases 1–6)** ✅ **COMPLETED**
   - **Phase 1**: GroupedData `covar_pop`, `covar_samp`, `corr`, `kurtosis`, `skewness`; `approx_percentile`, `percentile_approx`; `df.corr()` correlation matrix; parity agg parser and `covar_pop_expr`/`corr_expr`/`kurtosis`/`skewness` in functions.
@@ -23,7 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Phase 6**: Aliases `sign`→signum, `std`→stddev, `mean`→avg, `date_trunc`→trunc, `regexp`→rlike.
   - **Docs**: [ROBIN_SPARKLESS_MISSING.md](docs/ROBIN_SPARKLESS_MISSING.md) and [PYSPARK_DIFFERENCES.md](docs/PYSPARK_DIFFERENCES.md) updated.
 
-- **Phase 24 – Full parity 5: bit, control, JVM stubs, random, crypto (partial)** ✅ **COMPLETED (bit/control/JVM/random); AES deferred**
+- **Phase 24 – Full parity 5: bit, control, JVM stubs, random, crypto** ✅ **COMPLETED** (bit, control, JVM stubs, rand/randn, AES crypto implemented)
   - **Bit**: `bit_and`, `bit_or`, `bit_xor`, `bit_count`, `bit_get`; `bitwise_not` / `bitwiseNOT`. Parity fixture `with_bit_ops` added.
   - **Control**: `assert_true`, `raise_error` (expression-level; assert_true fails when any value is false; raise_error always fails when evaluated).
   - **JVM stubs**: `broadcast` (no-op), `spark_partition_id` (constant 0), `input_file_name` (empty string), `monotonically_increasing_id` (constant 0), `current_catalog`, `current_database`, `current_schema`, `current_user`, `user` (constant placeholders). Semantics documented in [PYSPARK_DIFFERENCES.md](docs/PYSPARK_DIFFERENCES.md).
