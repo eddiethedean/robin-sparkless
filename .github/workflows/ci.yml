@@ -50,10 +50,27 @@ jobs:
 
       - name: Test
         run: cargo nextest run
+        env:
+          # Limit parallelism to avoid OOM on GitHub runners (exit 143 = SIGTERM)
+          NEXTEST_THREADS: "2"
+        timeout-minutes: 20
 
   python-tests:
-    name: Python tests (PyO3)
-    runs-on: ubuntu-latest
+    name: Python tests (PyO3) - ${{ matrix.label }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            label: Ubuntu
+          - os: windows-latest
+            label: Windows
+          - os: macos-latest
+            label: macOS
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@v4
 
@@ -82,16 +99,24 @@ jobs:
       - name: Create venv
         run: python -m venv .venv
 
+      - name: Set Python path
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            echo "PY=.venv/Scripts/python" >> $GITHUB_ENV
+          else
+            echo "PY=.venv/bin/python" >> $GITHUB_ENV
+          fi
+
       - name: Verify Python version
-        run: .venv/bin/python --version
+        run: $PY --version
 
       - name: Install maturin and pytest
-        run: .venv/bin/python -m pip install -r requirements-ci.txt
+        run: $PY -m pip install -r requirements-ci.txt
 
       - name: Build and install extension
-        run: .venv/bin/python -m maturin develop --features pyo3 --release
+        run: $PY -m maturin develop --features pyo3 --release
         env:
           VIRTUAL_ENV: ${{ github.workspace }}/.venv
 
       - name: Run Python tests
-        run: .venv/bin/python -m pytest tests/python/ -v
+        run: $PY -m pytest tests/python/ -v
