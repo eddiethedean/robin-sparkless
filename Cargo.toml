@@ -2,6 +2,12 @@
 name = "robin-sparkless"
 version = "0.1.0"
 edition = "2021"
+description = "PySpark-like DataFrame API in Rust on Polars; no JVM."
+license = "MIT"
+repository = "https://github.com/eddiethedean/robin-sparkless"
+keywords = ["pyspark", "polars", "dataframe", "spark", "etl"]
+categories = ["data-structures", "development-tools"]
+authors = ["Robin Sparkless contributors"]
 
 [lib]
 name = "robin_sparkless"

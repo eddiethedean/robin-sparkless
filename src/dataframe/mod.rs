@@ -140,7 +140,7 @@ impl DataFrame {
         Ok(Column::new(resolved))
     }
 
-    /// Add or replace a column. Use a [`Column`](crate::Column) (e.g. from `col("x")`, `rand(42)`, `randn(42)`).
+    /// Add or replace a column. Use a [`Column`] (e.g. from `col("x")`, `rand(42)`, `randn(42)`).
     /// For `rand`/`randn`, generates one distinct value per row (PySpark-like).
     pub fn with_column(&self, column_name: &str, col: &Column) -> Result<DataFrame, PolarsError> {
         transformations::with_column(self, column_name, col, self.case_sensitive)

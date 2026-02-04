@@ -2,6 +2,12 @@
 //!
 //! This library provides a PySpark-compatible API built on top of Polars,
 //! offering high-performance data processing in pure Rust.
+//!
+//! # API stability
+//!
+//! While the crate is in the 0.x series, we follow [semver](https://semver.org/) but may introduce
+//! breaking changes in minor releases (e.g. 0.1 → 0.2) until 1.0. For behavioral caveats and
+//! intentional differences from PySpark, see the [repository documentation](https://github.com/eddiethedean/robin-sparkless/blob/main/docs/PYSPARK_DIFFERENCES.md).
 
 pub mod column;
 pub mod dataframe;

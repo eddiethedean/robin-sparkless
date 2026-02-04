@@ -168,7 +168,9 @@ Core behavior (null handling, grouping semantics, joins, window functions, array
 
 ## Related Documentation
 
+- [API docs (docs.rs)](https://docs.rs/robin-sparkless) – Crate API reference
 - [docs/](docs/README.md) – Documentation index
+- [docs/RELEASING.md](docs/RELEASING.md) – How to cut a release and publish to crates.io
 - [CHANGELOG.md](CHANGELOG.md) – Version history and release notes
 - [docs/SPARKLESS_INTEGRATION_ANALYSIS.md](docs/SPARKLESS_INTEGRATION_ANALYSIS.md) – Sparkless backend replacement strategy, architecture learnings, test conversion
 - [docs/ROADMAP.md](docs/ROADMAP.md) – Development roadmap; Phases 12–24 partial; Phase 25 (readiness), Phase 26 (crate publish), Phase 27 (Sparkless integration)
