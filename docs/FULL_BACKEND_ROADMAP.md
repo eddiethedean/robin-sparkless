@@ -1,6 +1,6 @@
 # Full Sparkless Backend Roadmap
 
-This document plans the path for **robin-sparkless** to become a complete backend replacement for [Sparkless](https://github.com/eddiethedean/sparkless). Sparkless implements 403+ PySpark functions and 85+ DataFrame methods; robin-sparkless currently covers ~220+ functions with 128 parity fixtures (Phases 11–19 complete). Next: Phases 20–24 (full parity, in 5 parts), Phase 25 (publish), Phase 26 (integration).
+This document plans the path for **robin-sparkless** to become a complete backend replacement for [Sparkless](https://github.com/eddiethedean/sparkless). Sparkless implements 403+ PySpark functions and 85+ DataFrame methods; robin-sparkless currently covers ~240+ functions with 136 parity fixtures (Phases 11–21 complete). Next: Phases 22–24 (full parity), Phase 25 (publish), Phase 26 (integration).
 
 **Reference**: [PYSPARK_FUNCTION_MATRIX](https://github.com/eddiethedean/sparkless/blob/main/PYSPARK_FUNCTION_MATRIX.md) catalogs all functions/methods; [SPARKLESS_INTEGRATION_ANALYSIS.md](SPARKLESS_INTEGRATION_ANALYSIS.md) describes architecture mapping.
 
@@ -10,9 +10,9 @@ This document plans the path for **robin-sparkless** to become a complete backen
 
 | Area | Robin-Sparkless | Sparkless | Gap |
 |------|-----------------|-----------|-----|
-| **Functions** | ~220+ (Phase 19: any_value, bool_and, bool_or, count_if, max_by, min_by, percentile, product, collect_list, collect_set, try_divide, try_add, try_subtract, try_multiply, width_bucket, elt, bit_length, typeof; Phase 18: map_filter, zip_with, map_zip_with; Phase 17: unix_timestamp, from_unixtime, make_date, timestamp_*, pmod, factorial; Phase 16–8: regexp, Map, JSON, array extensions, string 6.4 — all implemented) | 403 | ~183 |
-| **DataFrame methods** | ~55+ (Phase 12: filter, select, orderBy, groupBy, withColumn, join, union, unionByName, distinct, drop, dropna, fillna, limit, withColumnRenamed, collect, count, show, read_*; sample, random_split, first, head, tail, take, is_empty, to_json, to_pandas, explain, print_schema, checkpoint, repartition, coalesce, offset, summary, to_df, select_expr, col_regex, with_columns, with_columns_renamed, stat, na, freq_items, approx_quantile, crosstab, melt, except_all, intersect_all, sample_by, no-ops) | 85 | ~30 |
-| **Parity fixtures** | 128 passing | 270+ expected_outputs | 142+ |
+| **Functions** | ~240+ (Phase 21: btrim, locate, conv, hex, unhex, bin, getbit, to_char, to_varchar, to_number, try_to_number, try_to_timestamp, str_to_map, arrays_overlap, arrays_zip, explode_outer, posexplode_outer, array_agg, transform_keys, transform_values; Phase 20: asc/desc with nulls, median, mode, stddev_pop, var_pop, try_sum, try_avg, bround, negate, positive, cot, csc, sec, e, pi; Phase 19–8: aggregates, try_*, Map, JSON, array extensions, string 6.4 — all implemented) | 403 | ~163 |
+| **DataFrame methods** | ~55+ (Phase 12: filter, select, orderBy, groupBy, withColumn, join, union, unionByName, distinct, drop, dropna, fillna, limit, withColumnRenamed, collect, count, show, read_*; sample, random_split, first, head, tail, take, is_empty, to_json, to_pandas, explain, print_schema, checkpoint, repartition, coalesce, offset, summary, to_df, select_expr, col_regex, with_columns, with_columns_renamed, stat, na, freq_items, approx_quantile, crosstab, melt, except_all, intersect_all, sample_by, no-ops; Phase 20: order_by_exprs) | 85 | ~30 |
+| **Parity fixtures** | 136 passing | 270+ expected_outputs | 134+ |
 | **PyO3 bridge** | ✅ Optional `pyo3` feature; `robin_sparkless` Python module | — | — |
 | **SQL** | Optional `sql` feature: SELECT, FROM, WHERE, JOIN, GROUP BY, ORDER BY, LIMIT; temp views | Full DDL/DML support | Subqueries, CTEs, DDL, HAVING |
 

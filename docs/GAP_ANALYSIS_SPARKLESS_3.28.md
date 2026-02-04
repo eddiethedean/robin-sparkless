@@ -8,11 +8,11 @@
 
 | Metric | Sparkless 3.28.0 | Robin-Sparkless |
 |--------|-------------------|-----------------|
-| **Functions (top-level / F.xxx)** | ~280+ distinct names | ~165 implemented |
-| **Implemented in robin-sparkless** | — | ~165 PySpark-equivalent functions |
-| **Gap (in Sparkless, not in robin-sparkless)** | — | ~115+ function names (see below) |
+| **Functions (top-level / F.xxx)** | ~280+ distinct names | ~240 implemented |
+| **Implemented in robin-sparkless** | — | ~240 PySpark-equivalent functions |
+| **Gap (in Sparkless, not in robin-sparkless)** | — | ~40+ function names (see below) |
 
-**Update (Phase 18–19):** array_append, array_prepend, array_insert, array_except/intersect/union, zip_with, map_concat, map_contains_key, map_filter, map_from_entries, map_zip_with, get, named_struct, struct; any_value, bool_and, bool_or, every, some, count_if, max_by, min_by, percentile, product, collect_list, collect_set; try_divide, try_add, try_subtract, try_multiply, try_element_at; width_bucket, elt, bit_length, typeof — all implemented.
+**Update (Phase 18–21):** Phase 18–19 (array/map/struct, aggregates, try_*, misc) — all implemented. **Phase 20:** asc, desc, nulls_first/last, median, mode, stddev_pop, var_pop, try_sum, try_avg, bround, negate, positive, cot, csc, sec, e, pi. **Phase 21:** btrim, locate, conv, hex, unhex, bin, getbit, to_char, to_varchar, to_number, try_to_number, try_to_timestamp, str_to_map, arrays_overlap, arrays_zip, explode_outer, posexplode_outer, array_agg, transform_keys, transform_values — all implemented.
 
 Sparkless exposes both camelCase and snake_case for some (e.g. `countDistinct` / `count_distinct`). Robin-sparkless implements the snake_case PySpark-style names; where we have an equivalent, it’s counted as implemented.
 

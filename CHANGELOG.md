@@ -9,9 +9,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Planned
 
-- **Phases 20–24 – Full parity** with Sparkless 3.28.0: Five manageable phases before crate publish. Phase 20: ordering, aggregates, numeric. Phase 21: string, binary, type, array/map/struct. Phase 22: datetime extensions. Phase 23: JSON, CSV, URL, misc. Phase 24: bit, control, JVM stubs, random, crypto. Target: 180+ parity fixtures; ~280 total functions. Est. 1.5–2 weeks per phase. See [ROADMAP.md](docs/ROADMAP.md) and [PARITY_CHECK_SPARKLESS_3.28.md](docs/PARITY_CHECK_SPARKLESS_3.28.md).
+- **Phases 22–24 – Full parity** with Sparkless 3.28.0: Phase 22: datetime extensions. Phase 23: JSON, CSV, URL, misc. Phase 24: bit, control, JVM stubs, random, crypto. Target: 180+ parity fixtures; ~280 total functions. Est. 1.5–2 weeks per phase. See [ROADMAP.md](docs/ROADMAP.md) and [PARITY_CHECK_SPARKLESS_3.28.md](docs/PARITY_CHECK_SPARKLESS_3.28.md).
 
 ### Added
+
+- **Phase 21 – Full parity 2: string, binary, type, array/map/struct** ✅ **COMPLETED**
+  - **String**: `btrim`, `locate`, `conv` (base conversion).
+  - **Binary**: `hex`, `unhex`, `bin`, `getbit`.
+  - **Type/cast**: `to_char`, `to_varchar`, `to_number`, `try_to_number`, `try_to_timestamp`.
+  - **Map**: `str_to_map` (parse "k1:v1,k2:v2" into map).
+  - **Array**: `arrays_overlap`, `arrays_zip`, `explode_outer`, `posexplode_outer`, `array_agg`.
+  - **Struct**: `transform_keys`, `transform_values` (Rust only; require Expr).
+  - **Parity fixtures**: `with_btrim`, `with_hex`, `with_conv`, `with_str_to_map`, `arrays_overlap`, `arrays_zip` (130 → 136).
+  - **PyO3**: All new functions except transform_keys/transform_values.
+
+- **Phase 20 – Full parity 1: ordering, aggregates, numeric** ✅ **COMPLETED**
+  - **Ordering**: `asc`, `desc`, `asc_nulls_first`, `asc_nulls_last`, `desc_nulls_first`, `desc_nulls_last`; `DataFrame::order_by_exprs` with per-column null placement.
+  - **Aggregates**: `median`, `mode`, `stddev_pop`, `stddev_samp`, `var_pop`, `var_samp`, `try_sum`, `try_avg`.
+  - **Numeric**: `bround` (banker's rounding), `negate`, `negative`, `positive`, `cot`, `csc`, `sec`, `e`, `pi`.
+  - **Parity fixtures**: `groupby_median`, `with_bround`; OrderBy supports optional `nulls_first`.
+  - **PyO3**: PySortOrder, order_by_exprs, all new functions.
 
 - **Phase 19 – Remaining gaps 4: aggregates, try_*, misc** ✅ **COMPLETED**
   - **Aggregates**: `any_value`, `bool_and`, `bool_or`, `every`/`some`, `count_if`, `max_by`, `min_by`, `percentile`, `product`, `collect_list`, `collect_set` (GroupedData + parity agg parser).

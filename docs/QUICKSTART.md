@@ -111,7 +111,7 @@ let df = df.with_column("full", concat(&[&col("first"), &col("last")]).into_expr
 let df = df.with_column("joined", concat_ws("-", &[&col("a"), &col("b")]).into_expr())?;
 ```
 
-Additional string: `length`, `trim`, `ltrim`, `rtrim`, `regexp_extract`, `regexp_replace`, `regexp_extract_all`, `regexp_like`, `split`, `initcap`, `mask`, `translate`, `substring_index` (Phase 10); **Phase 16**: `regexp_count`, `regexp_instr`, `regexp_substr`, `split_part`, `find_in_set`, `format_string`, `printf`. DataFrame methods (Phase 12): `sample`, `random_split`, `first`, `head`, `tail`, `take`, `is_empty`, `to_json`, `to_pandas`, `explain`, `print_schema`, `summary`, `to_df`, `select_expr`, `col_regex`, `with_columns`, `with_columns_renamed`, `stat()` (cov/corr), `na()` (fill/drop), `freq_items`, `approx_quantile`, `crosstab`, `melt`, `sample_by`, etc. See [PYTHON_API.md](PYTHON_API.md) for the full Python API.
+Additional string: `length`, `trim`, `ltrim`, `rtrim`, `btrim`, `locate`, `conv`, `regexp_extract`, `regexp_replace`, `regexp_extract_all`, `regexp_like`, `split`, `initcap`, `mask`, `translate`, `substring_index` (Phase 10); **Phase 16**: `regexp_count`, `regexp_instr`, `regexp_substr`, `split_part`, `find_in_set`, `format_string`, `printf`; **Phase 21**: `btrim`, `locate`, `conv`. DataFrame methods (Phase 12): `sample`, `random_split`, `first`, `head`, `tail`, `take`, `is_empty`, `to_json`, `to_pandas`, `explain`, `print_schema`, `summary`, `to_df`, `select_expr`, `col_regex`, `with_columns`, `with_columns_renamed`, `stat()` (cov/corr), `na()` (fill/drop), `freq_items`, `approx_quantile`, `crosstab`, `melt`, `sample_by`, etc. See [PYTHON_API.md](PYTHON_API.md) for the full Python API.
 
 ### Datetime
 
@@ -119,13 +119,13 @@ For date/datetime columns: `year()`, `month()`, `day()`, `to_date()` (cast to da
 
 ### Math and type (Phase 14)
 
-Math (radians): `sin()`, `cos()`, `tan()`, `asin()`, `acos()`, `atan()`, `atan2(y, x)`, `degrees()`, `radians()`, `signum()` (plus existing `sqrt`, `pow`, `exp`, `log`). **Phase 17**: `pmod(dividend, divisor)`, `factorial(n)`. Type: `cast(column, type_name)` (strict; use type names like `"int"`, `"long"`, `"double"`, `"string"`, `"date"`, `"timestamp"`), `try_cast(column, type_name)` (null on failure), `isnan(column)`; conditional: `greatest(columns...)`, `least(columns...)`.
+Math (radians): `sin()`, `cos()`, `tan()`, `asin()`, `acos()`, `atan()`, `atan2(y, x)`, `degrees()`, `radians()`, `signum()` (plus existing `sqrt`, `pow`, `exp`, `log`). **Phase 17**: `pmod(dividend, divisor)`, `factorial(n)`. **Phase 20**: `bround(column, scale)`, `negate`, `positive`, `cot`, `csc`, `sec`, `e`, `pi`. Type: `cast(column, type_name)` (strict; use type names like `"int"`, `"long"`, `"double"`, `"string"`, `"date"`, `"timestamp"`), `try_cast(column, type_name)` (null on failure), `isnan(column)`; conditional: `greatest(columns...)`, `least(columns...)`. **Phase 21**: `to_char(column)`, `to_varchar(column)`, `to_number(column)`, `try_to_number(column)`, `try_to_timestamp(column)`. Binary: `hex(column)`, `unhex(column)`, `bin(column)`, `getbit(column, pos)`.
 
 ### Parity
 
-Behavior is validated against PySpark on **128 parity fixtures** (~220+ functions); see [PARITY_STATUS.md](PARITY_STATUS.md). Known differences are in [PYSPARK_DIFFERENCES.md](PYSPARK_DIFFERENCES.md). CI (GitHub Actions) runs format, clippy, audit, deny, and all tests (including parity) on every push/PR.
+Behavior is validated against PySpark on **136 parity fixtures** (~240+ functions); see [PARITY_STATUS.md](PARITY_STATUS.md). Known differences are in [PYSPARK_DIFFERENCES.md](PYSPARK_DIFFERENCES.md). CI (GitHub Actions) runs format, clippy, audit, deny, and all tests (including parity) on every push/PR.
 
-For roadmap and Sparkless integration phases (Phases 12–17 completed; Phases 18–19 remaining), see [ROADMAP.md](ROADMAP.md).
+For roadmap and Sparkless integration phases (Phases 12–21 completed; Phases 22–24 remaining), see [ROADMAP.md](ROADMAP.md).
 
 ## Troubleshooting
 
