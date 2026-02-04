@@ -2,4 +2,4 @@
 # Update when upgrading; CI (.github/workflows/ci.yml, release.yml) uses this via toolchain input.
 [toolchain]
 channel = "1.83.0"
-components = ["clippy"]
+components = ["clippy", "rustfmt"]

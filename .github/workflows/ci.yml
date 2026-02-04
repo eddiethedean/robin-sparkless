@@ -17,7 +17,7 @@ jobs:
         uses: dtolnay/rust-toolchain@master
         with:
           toolchain: 1.83.0
-          components: clippy
+          components: clippy, rustfmt
 
       - name: Install cargo-nextest
         run: cargo install cargo-nextest --version 0.9.92 --locked
@@ -75,11 +75,16 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-py-
 
+      - name: Create venv
+        run: python -m venv .venv
+
       - name: Install maturin and pytest
-        run: pip install -r requirements-ci.txt
+        run: .venv/bin/pip install -r requirements-ci.txt
 
       - name: Build and install extension
-        run: maturin develop --features pyo3 --release
+        run: .venv/bin/maturin develop --features pyo3 --release
+        env:
+          VIRTUAL_ENV: ${{ github.workspace }}/.venv
 
       - name: Run Python tests
-        run: pytest tests/python/ -v
+        run: .venv/bin/pytest tests/python/ -v
