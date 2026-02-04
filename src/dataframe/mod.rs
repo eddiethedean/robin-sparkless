@@ -140,9 +140,20 @@ impl DataFrame {
         Ok(Column::new(resolved))
     }
 
-    /// Add or replace a column using an expression
-    pub fn with_column(&self, column_name: &str, expr: Expr) -> Result<DataFrame, PolarsError> {
-        transformations::with_column(self, column_name, expr, self.case_sensitive)
+    /// Add or replace a column. Use a [`Column`](crate::Column) (e.g. from `col("x")`, `rand(42)`, `randn(42)`).
+    /// For `rand`/`randn`, generates one distinct value per row (PySpark-like).
+    pub fn with_column(&self, column_name: &str, col: &Column) -> Result<DataFrame, PolarsError> {
+        transformations::with_column(self, column_name, col, self.case_sensitive)
+    }
+
+    /// Add or replace a column using an expression. Prefer [`with_column`](Self::with_column) with a `Column` for rand/randn (per-row values).
+    pub fn with_column_expr(
+        &self,
+        column_name: &str,
+        expr: Expr,
+    ) -> Result<DataFrame, PolarsError> {
+        let col = Column::from_expr(expr, None);
+        self.with_column(column_name, &col)
     }
 
     /// Group by columns (returns GroupedData for aggregation).
@@ -451,8 +462,8 @@ impl DataFrame {
         transformations::col_regex(self, pattern, self.case_sensitive)
     }
 
-    /// Add or replace multiple columns. PySpark withColumns.
-    pub fn with_columns(&self, exprs: &[(String, Expr)]) -> Result<DataFrame, PolarsError> {
+    /// Add or replace multiple columns. PySpark withColumns. Accepts `Column` so rand/randn get per-row values.
+    pub fn with_columns(&self, exprs: &[(String, Column)]) -> Result<DataFrame, PolarsError> {
         transformations::with_columns(self, exprs, self.case_sensitive)
     }
 

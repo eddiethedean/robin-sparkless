@@ -108,23 +108,23 @@ Functions and aliases that exist in Sparkless 3.28.0 but are **not** implemented
 - ~~`desc`, `desc_nulls_first`, `desc_nulls_last`~~ — **implemented**
 
 ### 2.7 Assert / control
-- `assert_true`
-- `raise_error`
+- ~~`assert_true`~~ — **implemented (Phase 24; control)**
+- ~~`raise_error`~~ — **implemented (Phase 24; control)**
 
 ### 2.8 Bit / bitmap (PySpark 3.5+ style)
-- `bit_and`, `bit_or`, `bit_xor`, `bit_count`, `bit_get`
-- `bitwiseNOT`, `bitwise_not`
+- ~~`bit_and`, `bit_or`, `bit_xor`, `bit_count`, `bit_get`~~ — **implemented (Phase 24; bit operations)**
+- ~~`bitwiseNOT`, `bitwise_not`~~ — **implemented (Phase 24; aliases)**
 - `bitmap_bit_position`, `bitmap_bucket_number`, `bitmap_construct_agg`, `bitmap_count`, `bitmap_or_agg`
 
 ### 2.9 Boolean aggregates
 - ~~`bool_and`, `bool_or`, `every`, `some`~~ — **implemented (Phase 19)**
 
 ### 2.10 JVM / runtime (defer)
-- `broadcast`
-- `spark_partition_id`
-- `input_file_name`
-- `monotonically_increasing_id`
-- `current_catalog`, `current_database`, `current_schema`, `current_user`, `user`
+- ~~`broadcast`~~ — **implemented as stub (Phase 24; no-op)**  
+- ~~`spark_partition_id`~~ — **implemented as stub (Phase 24; constant 0)**  
+- ~~`input_file_name`~~ — **implemented as stub (Phase 24; empty string)**  
+- ~~`monotonically_increasing_id`~~ — **implemented as stub (Phase 24; constant 0)**  
+- ~~`current_catalog`, `current_database`, `current_schema`, `current_user`, `user`~~ — **implemented as stubs (Phase 24; placeholders)**
 
 ### 2.11 Rounding / numeric (Phase 20)
 - ~~`bround`~~ — **implemented**
@@ -228,7 +228,7 @@ Functions and aliases that exist in Sparkless 3.28.0 but are **not** implemented
 - `xpath`, `xpath_boolean`, `xpath_double`, `xpath_float`, `xpath_int`, `xpath_long`, `xpath_number`, `xpath_short`, `xpath_string`
 
 ### 2.25 Random / UDF
-- `rand`, `randn`
+- ~~`rand`, `randn`~~ — **implemented (Phase 24): real RNG with optional seed; per-row values when used in with_column/with_columns (see PYSPARK_DIFFERENCES.md)**  
 - `udf`, `pandas_udf`
 
 ### 2.26 Deferred (ML / JVM / UDTF)

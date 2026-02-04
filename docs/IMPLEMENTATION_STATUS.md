@@ -61,7 +61,7 @@ Robin-sparkless is designed to **replace the backend logic** of [Sparkless](http
 7. **Phase 5 Test Conversion** ✅ **COMPLETED**
    - Fixture converter maps Sparkless `expected_outputs` to robin-sparkless format (join, window, withColumn, union, distinct, drop, dropna, fillna, limit, withColumnRenamed, etc.).
    - Parity discovers `tests/fixtures/` and `tests/fixtures/converted/`; optional `skip: true` in fixtures.
-  - `make sparkless-parity` (set `SPARKLESS_EXPECTED_OUTPUTS` to run converter first); 148 hand-written fixtures passing (array_distinct, with_curdate_now skipped).
+  - `make sparkless-parity` (set `SPARKLESS_EXPECTED_OUTPUTS` to run converter first); 149 hand-written fixtures passing (array_distinct, with_curdate_now skipped).
   - See [CONVERTER_STATUS.md](CONVERTER_STATUS.md), [SPARKLESS_PARITY_STATUS.md](SPARKLESS_PARITY_STATUS.md).
 
 8. **Phase 6 Broad Function Parity** (partial) ✅
@@ -86,8 +86,9 @@ Robin-sparkless is designed to **replace the backend logic** of [Sparkless](http
    - **Phase 19** ✅ **COMPLETED**: Aggregates (any_value, bool_and, bool_or, count_if, max_by, min_by, percentile, product, collect_list, collect_set), try_* (try_divide, try_add, try_subtract, try_multiply), misc (width_bucket, elt, bit_length, typeof). Parity fixtures: groupby_any_value, groupby_product, try_divide, width_bucket (128 fixtures). PyO3: GroupedData methods; try_*, width_bucket, elt, bit_length, typeof.
    - **Phase 20** ✅ **COMPLETED**: Ordering (asc, desc, nulls_first/last); aggregates (median, mode, stddev_pop, var_pop, try_sum, try_avg); numeric (bround, negate, positive, cot, csc, sec, e, pi). Parity: groupby_median, with_bround; order_by_exprs. PyO3: PySortOrder, order_by_exprs.
    - **Phase 21** ✅ **COMPLETED**: String (btrim, locate, conv); binary (hex, unhex, bin, getbit); type (to_char, to_varchar, to_number, try_to_number, try_to_timestamp); array (arrays_overlap, arrays_zip, explode_outer, posexplode_outer, array_agg); map (str_to_map); struct (transform_keys, transform_values). Parity: with_btrim, with_hex, with_conv, with_str_to_map, arrays_overlap, arrays_zip (136 fixtures). PyO3: all except transform_keys/transform_values.
-   - **Phase 23** ✅ (completed): JSON, URL, misc (isin, url_decode, url_encode, json_array_length, parse_url, hash, shift_left, shift_right, version, equal_null, stack). Parity: with_isin, with_url_decode, with_url_encode, json_array_length_test, with_hash, with_shift_left (148 fixtures). PyO3 bindings for all.
+   - **Phase 23** ✅ (completed): JSON, URL, misc (isin, url_decode, url_encode, json_array_length, parse_url, hash, shift_left, shift_right, version, equal_null, stack). Parity: with_isin, with_url_decode, with_url_encode, json_array_length_test, with_hash, with_shift_left (149 fixtures). PyO3 bindings for all.
    - **Phase 22** ✅ (completed): Datetime extensions — curdate, now, localtimestamp, date_diff, dateadd, datepart, extract, date_part, unix_micros/millis/seconds, dayname, weekday, make_timestamp, make_timestamp_ntz, make_interval, timestampadd, timestampdiff, days, hours, minutes, months, years, from_utc_timestamp, to_utc_timestamp, convert_timezone, current_timezone, to_timestamp. Parity: fixtures with_dayname, with_weekday, with_extract, with_unix_micros, make_timestamp_test, timestampadd_test, from_utc_timestamp_test. PyO3 bindings for all.
+   - **Phase 24** ✅ (partial): Bit ops, control (assert_true, raise_error), JVM stubs, rand/randn (real RNG, optional seed; per-row values when used in with_column/with_columns). AES crypto deferred.
    - **Phases 23–24**: Full parity (JSON/CSV/URL, bit/control/JVM/random/crypto).
    - **Phase 25**: Prepare and publish robin-sparkless as a Rust crate (crates.io, API stability, docs, release workflow; optional PyPI wheel).
    - **Phase 26**: Sparkless integration (BackendFactory "robin", 200+ tests passing).

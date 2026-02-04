@@ -24,6 +24,30 @@ This document lists **intentional or known divergences** from PySpark semantics 
 
 - **array_distinct order**: Polars `list().unique()` may return distinct elements in a different order than PySpark `array_distinct`, which preserves first-occurrence order. The `array_distinct` parity fixture is skipped due to this ordering difference.
 
+## Control functions (assert_true, raise_error)
+
+- **assert_true(expr)**: In PySpark, `assert_true` fails the job if `expr` is false for any row. In robin-sparkless, `assert_true` is implemented as an expression that **returns the original boolean column** but **fails evaluation** (returns an error) if **any value is explicitly `false`**. Nulls are allowed and do not trigger failure. This behavior matches the intent of PySpark's `assert_true` for typical uses, but details of error messages and null handling may differ.
+- **raise_error(msg)**: In PySpark, `raise_error` produces an expression that always fails when evaluated. In robin-sparkless, `raise_error(msg)` is implemented as an expression that **always returns an error** with a message prefixed by `\"raise_error:\"`. The result type is an `Int64` expression that never materializes successfully.
+
+## JVM / runtime stubs
+
+The following JVM- or runtime-related functions are implemented as **stubs for API compatibility**, not full equivalents of PySpark behavior:
+
+- **broadcast(df)**: Returns the same `DataFrame` unchanged. It is a **no-op hint**; there is no optimizer that takes broadcast hints into account.
+- **spark_partition_id()**: Returns a **constant 0** for all rows, rather than the actual Spark partition id. This is sufficient for tests that only require the function to exist but does not model Spark's partitioning behavior.
+- **input_file_name()**: Returns an **empty string** for all rows. File path information is not tracked on a per-row basis.
+- **monotonically_increasing_id()**: Returns a **constant 0** for all rows, rather than a strictly increasing 64-bit id. This is a compatibility stub; code that relies on uniqueness should not use this stub.
+- **current_catalog() / current_database() / current_schema()**: Return constant strings (`\"spark_catalog\"`, `\"default\"`, `\"default\"` respectively). There is no catalog or database concept in robin-sparkless.
+- **current_user() / user()**: Return the constant string `\"unknown\"`. The actual OS or session user is not surfaced.
+
+## Random functions (rand, randn)
+
+- **rand(seed)** / **randn(seed)**: In PySpark, these return a column with **one distinct value per row** and optional seeding. In robin-sparkless, when you add the column via **`with_column`** or **`with_columns`** (Rust or Python), the implementation generates a full-length random series so you get **one value per row** (PySpark-like). Optional `seed` (e.g. `rand(42)`) gives reproducible results. Use `df.with_column("r", rand(42))` or `df.with_columns({"r": rand(42)})`; if you use the expression in other contexts (e.g. select only), per-row semantics are not guaranteed.
+
+## Crypto (AES)
+
+- **aes_encrypt / aes_decrypt / try_aes_decrypt**: PySpark exposes AES-based encryption/decryption helpers. These are **not implemented** in robin-sparkless as of February 2026 and remain **deferred** due to the complexity of matching Spark's exact binary format and mode semantics. They remain listed as gaps in [GAP_ANALYSIS_SPARKLESS_3.28.md](GAP_ANALYSIS_SPARKLESS_3.28.md).
+
 ## Phase 10 & Phase 8 – Implemented
 
 **All previously stubbed Phase 8 items are now implemented (February 2026):**

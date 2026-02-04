@@ -13,7 +13,7 @@ A Rust DataFrame library that aims to **emulate PySpark’s DataFrame behavior a
 - **Optional SQL** (`--features sql`): `spark.sql("SELECT ...")` with temp views (`createOrReplaceTempView`, `table`); single SELECT, FROM/JOIN, WHERE, GROUP BY, ORDER BY, LIMIT
 - **Optional Delta Lake** (`--features delta`): `read_delta` / `read_delta_with_version` (time travel), `write_delta` (overwrite/append) via delta-rs
 - **Benchmarks**: `cargo bench` compares robin-sparkless vs plain Polars; target within ~2x for supported pipelines
-- **Sparkless backend target**: Intended to power Sparkless's execution engine; aligns with its 403+ PySpark functions and 270+ test fixtures; **148 parity fixtures** passing (~283+ functions). **Phase 23 completed**: JSON/URL/misc (isin, url_decode, url_encode, json_array_length, parse_url, hash, shift_left, shift_right, version, equal_null, stack). **Phase 22 completed**: datetime extensions (curdate, now, localtimestamp, date_diff, dateadd, datepart, extract, unix_micros/millis/seconds, dayname, weekday, make_timestamp, timestampadd, timestampdiff, from_utc_timestamp, to_utc_timestamp, convert_timezone, current_timezone, to_timestamp, days, hours, months, years). **Phase 21 completed**: string (btrim, locate, conv), binary (hex, unhex, bin, getbit), type (to_char, to_varchar, to_number, try_to_number, try_to_timestamp), array (arrays_overlap, arrays_zip, explode_outer, posexplode_outer, array_agg), map (str_to_map), struct (transform_keys, transform_values). **Phase 20 completed**: ordering (asc, desc, nulls_first/last), aggregates (median, mode, stddev_pop, var_pop, try_sum, try_avg), numeric (bround, negate, positive, cot, csc, sec, e, pi). Phase 19: aggregates, try_*, misc. Phase 18: array/map/struct. Phase 17: datetime/unix, pmod, factorial. Phase 16: string/regex. Path to 100%: ROADMAP Phases 23–24 (full parity), Phase 25 (publish crate), Phase 26 (Sparkless integration).
+- **Sparkless backend target**: Intended to power Sparkless's execution engine; aligns with its 403+ PySpark functions and 270+ test fixtures; **149 parity fixtures** passing (~283+ functions). **Phase 23 completed**: JSON/URL/misc (isin, url_decode, url_encode, json_array_length, parse_url, hash, shift_left, shift_right, version, equal_null, stack). **Phase 22 completed**: datetime extensions (curdate, now, localtimestamp, date_diff, dateadd, datepart, extract, unix_micros/millis/seconds, dayname, weekday, make_timestamp, timestampadd, timestampdiff, from_utc_timestamp, to_utc_timestamp, convert_timezone, current_timezone, to_timestamp, days, hours, months, years). **Phase 21 completed**: string (btrim, locate, conv), binary (hex, unhex, bin, getbit), type (to_char, to_varchar, to_number, try_to_number, try_to_timestamp), array (arrays_overlap, arrays_zip, explode_outer, posexplode_outer, array_agg), map (str_to_map), struct (transform_keys, transform_values). **Phase 20 completed**: ordering (asc, desc, nulls_first/last), aggregates (median, mode, stddev_pop, var_pop, try_sum, try_avg), numeric (bround, negate, positive, cot, csc, sec, e, pi). Phase 19: aggregates, try_*, misc. Phase 18: array/map/struct. Phase 17: datetime/unix, pmod, factorial. Phase 16: string/regex. Path to 100%: ROADMAP Phases 23–24 (full parity), Phase 25 (publish crate), Phase 26 (Sparkless integration).
 
 ## Installation
 
@@ -89,11 +89,12 @@ let complex = df.filter(
         ),
 )?;
 
-// Complex expressions in withColumn (arithmetic and logical):
-use robin_sparkless::{col, lit_i64};
-let df_with_computed = df.with_column(
+// Complex expressions: use with_column_expr when you have a Polars Expr (e.g. arithmetic).
+// Use with_column(name, &Column) for Column expressions (e.g. col(), rand(42)).
+use robin_sparkless::{col, lit, lit_i64};
+let df_with_computed = df.with_column_expr(
     "above_threshold",
-    (col("age").into_expr() + col("score").into_expr()).gt(lit(100))
+    (col("age").into_expr() + col("score").into_expr()).gt(lit(100)),
 )?;
 
 adults.show(Some(10))?;
@@ -163,7 +164,7 @@ Robin Sparkless aims to provide a **PySpark-like API layer** on top of Polars:
 - **Column**: Represents expressions over columns, similar to PySpark’s `Column`; includes window methods (`rank`, `row_number`, `dense_rank`, `lag`, `lead`) with `.over()`.
 - **Functions**: Helper functions like `col()`, `lit_*()`, `count()`, `when`, `coalesce`, window functions, etc., modeled after PySpark’s `pyspark.sql.functions`.
 
-Core behavior (null handling, grouping semantics, joins, window functions, array and string functions, JSON, Map, math, datetime, type/conditional, expression behavior) matches PySpark on **142 parity fixtures** (~265+ functions). Phase 22 (completed): datetime extensions (curdate, now, localtimestamp, date_diff, dateadd, datepart, extract, unix_micros/millis/seconds, dayname, weekday, make_timestamp, timestampadd, timestampdiff, from_utc_timestamp, to_utc_timestamp, etc.). Phase 21: string (btrim, locate, conv), binary (hex, unhex, bin, getbit), type (to_char, to_varchar, to_number, try_to_number, try_to_timestamp), array (arrays_overlap, arrays_zip, explode_outer, posexplode_outer, array_agg), map (str_to_map), struct (transform_keys, transform_values). Phase 20: ordering, aggregates (median, mode, stddev_pop, var_pop, try_sum, try_avg), numeric (bround, negate, positive, cot, csc, sec, e, pi). Phase 19: aggregates, try_*, misc. Phase 18: array/map/struct. Phase 17: datetime/unix, pmod, factorial. Phase 16: string/regex. Phase 15: aliases, string, math, array_distinct. Remaining: ROADMAP Phases 23–24 (full parity), Phase 25 (publish crate), Phase 26 (Sparkless integration). Python bindings expose the full set via the `robin_sparkless` module; see [docs/PYTHON_API.md](docs/PYTHON_API.md). Known divergences are documented in [docs/PYSPARK_DIFFERENCES.md](docs/PYSPARK_DIFFERENCES.md).
+Core behavior (null handling, grouping semantics, joins, window functions, array and string functions, JSON, Map, math, datetime, type/conditional, expression behavior) matches PySpark on **149 parity fixtures** (~265+ functions). Phase 22 (completed): datetime extensions (curdate, now, localtimestamp, date_diff, dateadd, datepart, extract, unix_micros/millis/seconds, dayname, weekday, make_timestamp, timestampadd, timestampdiff, from_utc_timestamp, to_utc_timestamp, etc.). Phase 21: string (btrim, locate, conv), binary (hex, unhex, bin, getbit), type (to_char, to_varchar, to_number, try_to_number, try_to_timestamp), array (arrays_overlap, arrays_zip, explode_outer, posexplode_outer, array_agg), map (str_to_map), struct (transform_keys, transform_values). Phase 20: ordering, aggregates (median, mode, stddev_pop, var_pop, try_sum, try_avg), numeric (bround, negate, positive, cot, csc, sec, e, pi). Phase 19: aggregates, try_*, misc. Phase 18: array/map/struct. Phase 17: datetime/unix, pmod, factorial. Phase 16: string/regex. Phase 15: aliases, string, math, array_distinct. Remaining: ROADMAP Phases 23–24 (full parity), Phase 25 (publish crate), Phase 26 (Sparkless integration). Python bindings expose the full set via the `robin_sparkless` module; see [docs/PYTHON_API.md](docs/PYTHON_API.md). Known divergences are documented in [docs/PYSPARK_DIFFERENCES.md](docs/PYSPARK_DIFFERENCES.md).
 
 ## Related Documentation
 
@@ -173,7 +174,7 @@ Core behavior (null handling, grouping semantics, joins, window functions, array
 - [docs/ROADMAP.md](docs/ROADMAP.md) – Development roadmap; Phases 12–21 completed; Phases 22–24 (full parity), Phase 25 (crate publish), Phase 26 (Sparkless integration)
 - [docs/FULL_BACKEND_ROADMAP.md](docs/FULL_BACKEND_ROADMAP.md) – Phased plan to full Sparkless backend replacement (400+ functions, PyO3 bridge)
 - [docs/PYTHON_API.md](docs/PYTHON_API.md) – Python API contract (Phase 4 PyO3 bridge): build, install, method signatures, data transfer
-- [docs/PARITY_STATUS.md](docs/PARITY_STATUS.md) – PySpark parity coverage matrix (148 fixtures)
+- [docs/PARITY_STATUS.md](docs/PARITY_STATUS.md) – PySpark parity coverage matrix (149 fixtures)
 - [docs/PYSPARK_DIFFERENCES.md](docs/PYSPARK_DIFFERENCES.md) – Known divergences from PySpark (window, SQL, Delta; Phase 8 completed)
 - [docs/CONVERTER_STATUS.md](docs/CONVERTER_STATUS.md) – Sparkless → robin-sparkless fixture converter and operation mapping
 - [docs/SPARKLESS_PARITY_STATUS.md](docs/SPARKLESS_PARITY_STATUS.md) – Phase 5: pass/fail and failure reasons for converted fixtures; `make sparkless-parity`

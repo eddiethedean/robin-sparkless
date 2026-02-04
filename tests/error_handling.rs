@@ -108,7 +108,7 @@ fn test_with_column_preserves_dataframe() {
 
     // withColumn with a valid expression should succeed
     let expr = col("age").gt(polars::prelude::lit(30));
-    let result = df.with_column("is_adult", expr.into_expr());
+    let result = df.with_column_expr("is_adult", expr.into_expr());
 
     assert!(result.is_ok());
     let new_df = result.unwrap();

@@ -82,33 +82,39 @@ Supported join types: `Inner`, `Left`, `Right`, `Outer`.
 ```rust
 use robin_sparkless::{col, DataFrame};
 
+// with_column(name, &Column) — use Column from col(), window methods, etc.
 // row_number, rank, dense_rank over partition
-let df_with_rn = df.with_column(
-    "rn",
-    col("salary").row_number(true).over(&["dept"]).into_expr(),
-)?;
+let df_with_rn = df.with_column("rn", &col("salary").row_number(true).over(&["dept"]))?;
 
 // lag and lead
-let df_with_lag = df.with_column(
-    "prev_salary",
-    col("salary").lag(1).over(&["dept"]).into_expr(),
-)?;
+let df_with_lag = df.with_column("prev_salary", &col("salary").lag(1).over(&["dept"]))?;
 ```
 
-Supported window functions: `row_number()`, `rank()`, `dense_rank()`, `lag(n)`, `lead(n)` — each used with `.over(&["col1", "col2"])` for partitioning.
+Supported window functions: `row_number()`, `rank()`, `dense_rank()`, `lag(n)`, `lead(n)` — each used with `.over(&["col1", "col2"])` for partitioning. Use **`with_column(name, &Column)`** for any `Column` (e.g. from `col()`, `rand(42)`); use **`with_column_expr(name, expr)`** when you have a raw Polars `Expr`.
 
 ### String Functions
 
 ```rust
 use robin_sparkless::{col, concat, concat_ws, DataFrame};
 
-// upper, lower, substring (1-based start) - via Column methods
-let df = df.with_column("name_upper", col("name").upper().into_expr())?;
-let df = df.with_column("prefix", col("name").substr(1, Some(3)).into_expr())?;
+// Column methods: use with_column(name, &Column)
+let df = df.with_column("name_upper", &col("name").upper())?;
+let df = df.with_column("prefix", &col("name").substr(1, Some(3)))?;
 
-// concat and concat_ws
-let df = df.with_column("full", concat(&[&col("first"), &col("last")]).into_expr())?;
-let df = df.with_column("joined", concat_ws("-", &[&col("a"), &col("b")]).into_expr())?;
+// concat/concat_ws return expressions — use with_column_expr when you have an Expr
+let df = df.with_column_expr("full", concat(&[&col("first"), &col("last")]).into_expr())?;
+let df = df.with_column_expr("joined", concat_ws("-", &[&col("a"), &col("b")]).into_expr())?;
+```
+
+### Random (rand, randn)
+
+Use **`with_column`** or **`with_columns`** so each row gets a distinct value (PySpark-like). Optional seed gives reproducible results.
+
+```rust
+use robin_sparkless::{rand, randn, DataFrame};
+
+let df = df.with_column("r", &rand(Some(42)))?;   // uniform [0, 1), one value per row
+let df = df.with_column("z", &randn(Some(42)))?;  // standard normal, one value per row
 ```
 
 Additional string: `length`, `trim`, `ltrim`, `rtrim`, `btrim`, `locate`, `conv`, `regexp_extract`, `regexp_replace`, `regexp_extract_all`, `regexp_like`, `split`, `initcap`, `mask`, `translate`, `substring_index` (Phase 10); **Phase 16**: `regexp_count`, `regexp_instr`, `regexp_substr`, `split_part`, `find_in_set`, `format_string`, `printf`; **Phase 21**: `btrim`, `locate`, `conv`. DataFrame methods (Phase 12): `sample`, `random_split`, `first`, `head`, `tail`, `take`, `is_empty`, `to_json`, `to_pandas`, `explain`, `print_schema`, `summary`, `to_df`, `select_expr`, `col_regex`, `with_columns`, `with_columns_renamed`, `stat()` (cov/corr), `na()` (fill/drop), `freq_items`, `approx_quantile`, `crosstab`, `melt`, `sample_by`, etc. See [PYTHON_API.md](PYTHON_API.md) for the full Python API.

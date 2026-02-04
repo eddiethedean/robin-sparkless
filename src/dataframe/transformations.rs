@@ -36,16 +36,39 @@ pub fn filter(
     ))
 }
 
-/// Add or replace a column using an expression. Preserves case_sensitive on result.
+/// Add or replace a column. Handles deferred rand/randn by generating a full-length series (PySpark-like).
 pub fn with_column(
     df: &DataFrame,
     column_name: &str,
-    expr: Expr,
+    column: &crate::column::Column,
     case_sensitive: bool,
 ) -> Result<DataFrame, PolarsError> {
-    use polars::prelude::*;
+    if let Some(deferred) = column.deferred {
+        match deferred {
+            crate::column::DeferredRandom::Rand(seed) => {
+                let mut pl_df = df.df.as_ref().clone();
+                let n = pl_df.height();
+                let series = crate::udfs::series_rand_n(column_name, n, seed);
+                pl_df.with_column(series)?;
+                return Ok(super::DataFrame::from_polars_with_options(
+                    pl_df,
+                    case_sensitive,
+                ));
+            }
+            crate::column::DeferredRandom::Randn(seed) => {
+                let mut pl_df = df.df.as_ref().clone();
+                let n = pl_df.height();
+                let series = crate::udfs::series_randn_n(column_name, n, seed);
+                pl_df.with_column(series)?;
+                return Ok(super::DataFrame::from_polars_with_options(
+                    pl_df,
+                    case_sensitive,
+                ));
+            }
+        }
+    }
     let lf = df.df.as_ref().clone().lazy();
-    let lf_with_col = lf.with_column(expr.alias(column_name));
+    let lf_with_col = lf.with_column(column.expr().clone().alias(column_name));
     let pl_df = lf_with_col.collect()?;
     Ok(super::DataFrame::from_polars_with_options(
         pl_df,
@@ -727,22 +750,18 @@ pub fn col_regex(
     select(df, matched, case_sensitive)
 }
 
-/// Add or replace multiple columns. PySpark withColumns.
+/// Add or replace multiple columns. PySpark withColumns. Uses Column so deferred rand/randn get per-row values.
 pub fn with_columns(
     df: &DataFrame,
-    exprs: &[(String, Expr)],
+    exprs: &[(String, crate::column::Column)],
     case_sensitive: bool,
 ) -> Result<DataFrame, PolarsError> {
-    let mut current = df.df.as_ref().clone();
-    for (name, expr) in exprs {
-        let lf = current.lazy();
-        let lf = lf.with_column(expr.clone().alias(name.as_str()));
-        current = lf.collect()?;
+    let mut current =
+        super::DataFrame::from_polars_with_options(df.df.as_ref().clone(), case_sensitive);
+    for (name, col) in exprs {
+        current = with_column(&current, name, col, case_sensitive)?;
     }
-    Ok(super::DataFrame::from_polars_with_options(
-        current,
-        case_sensitive,
-    ))
+    Ok(current)
 }
 
 /// Rename multiple columns. PySpark withColumnsRenamed.

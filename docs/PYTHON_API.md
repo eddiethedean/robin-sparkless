@@ -53,7 +53,7 @@ Python module is only compiled when the `pyo3` feature is enabled. Default `carg
 - **DataFrame**
   - `filter(condition: Column)` → `DataFrame`
   - `select(cols: list[str])` → `DataFrame`
-  - `with_column(column_name: str, expr: Column)` → `DataFrame`
+  - `with_column(column_name: str, expr: Column)` → `DataFrame` (use a `Column` so `rand(seed)`/`randn(seed)` get one value per row; same for `with_columns`)
   - `order_by(cols: list[str], ascending: list[bool] | None)` → `DataFrame`
   - `group_by(cols: list[str])` → `GroupedData`
   - `join(other: DataFrame, on: list[str], how: str = "inner")` → `DataFrame` (how: "inner" | "left" | "right" | "outer")
@@ -84,6 +84,7 @@ Python module is only compiled when the `pyo3` feature is enabled. Default `carg
   - **Phase 20**: `asc()`, `desc()`, `asc_nulls_first()`, `asc_nulls_last()`, `desc_nulls_first()`, `desc_nulls_last()` → `SortOrder`; `order_by_exprs(sort_orders)` on DataFrame; `bround(column, scale)`, `median`, `mode`, `stddev_pop`, `var_pop`, `try_sum`, `try_avg`, `negate`, `positive`, `cot`, `csc`, `sec`, `e`, `pi`.
   - **Phase 21**: `btrim(column, trim_str=None)` → `Column`; `locate(substr, column, pos=1)` → `Column`; `conv(column, from_base, to_base)` → `Column`; `hex(column)`, `unhex(column)`, `bin(column)`, `getbit(column, pos)` → `Column`; `to_char(column)`, `to_varchar(column)`, `to_number(column)`, `try_to_number(column)`, `try_to_timestamp(column)` → `Column`; `str_to_map(column, pair_delim=None, key_value_delim=None)` → `Column`; `arrays_overlap(left, right)`, `arrays_zip(left, right)` → `Column`; `explode_outer(column)`, `array_agg(column)` → `Column`. Note: `transform_keys` and `transform_values` require Expr and are Rust-only for now.
   - **Phase 22**: `curdate()`, `now()`, `localtimestamp()` → `Column`; `date_diff(end, start)`, `dateadd(column, n)`, `datepart(column, field)`, `extract(column, field)`, `date_part(column, field)` → `Column`; `unix_micros(column)`, `unix_millis(column)`, `unix_seconds(column)` → `Column`; `dayname(column)`, `weekday(column)` → `Column`; `make_timestamp(year, month, day, hour, minute, sec)`, `make_timestamp_ntz(...)` → `Column`; `make_interval(years, months, weeks, days, hours, mins, secs)` → `Column`; `timestampadd(unit, amount, ts)`, `timestampdiff(unit, start, end)` → `Column`; `days(n)`, `hours(n)`, `minutes(n)`, `months(n)`, `years(n)` → `Column`; `from_utc_timestamp(column, tz)`, `to_utc_timestamp(column, tz)`, `convert_timezone(source_tz, target_tz, column)` → `Column`; `current_timezone()` → `Column`; `to_timestamp(column)` → `Column`.
+  - **Phase 24**: `rand(seed=None)` → `Column` (uniform [0, 1)); `randn(seed=None)` → `Column` (standard normal). Use in `with_column` or `with_columns` for one value per row (PySpark-like).
 
 - **GroupedData**
   - `count()` → `DataFrame`

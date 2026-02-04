@@ -19,12 +19,21 @@ fn like_pattern_to_regex(pattern: &str) -> String {
     format!("^{}$", out)
 }
 
+/// Deferred random column: when added via with_column, we generate a full-length series in one go (PySpark-like).
+#[derive(Debug, Clone, Copy)]
+pub enum DeferredRandom {
+    Rand(Option<u64>),
+    Randn(Option<u64>),
+}
+
 /// Column - represents a column in a DataFrame, used for building expressions
-/// Thin wrapper around Polars `Expr`.
+/// Thin wrapper around Polars `Expr`. May carry a DeferredRandom for rand/randn so with_column can produce one value per row.
 #[derive(Debug, Clone)]
 pub struct Column {
     name: String,
     expr: Expr, // Polars expression for lazy evaluation
+    /// When Some, with_column generates a full-length random series instead of using expr (PySpark-like per-row rand/randn).
+    pub(crate) deferred: Option<DeferredRandom>,
 }
 
 impl Column {
@@ -33,6 +42,7 @@ impl Column {
         Column {
             name: name.clone(),
             expr: col(&name),
+            deferred: None,
         }
     }
 
@@ -42,6 +52,33 @@ impl Column {
         Column {
             name: display_name,
             expr,
+            deferred: None,
+        }
+    }
+
+    /// Create a Column for rand(seed). When used in with_column, generates one value per row (PySpark-like).
+    pub fn from_rand(seed: Option<u64>) -> Self {
+        let expr = lit(1i64).cum_sum(false).map(
+            move |c| crate::udfs::apply_rand_with_seed(c, seed),
+            GetOutput::from_type(DataType::Float64),
+        );
+        Column {
+            name: "rand".to_string(),
+            expr,
+            deferred: Some(DeferredRandom::Rand(seed)),
+        }
+    }
+
+    /// Create a Column for randn(seed). When used in with_column, generates one value per row (PySpark-like).
+    pub fn from_randn(seed: Option<u64>) -> Self {
+        let expr = lit(1i64).cum_sum(false).map(
+            move |c| crate::udfs::apply_randn_with_seed(c, seed),
+            GetOutput::from_type(DataType::Float64),
+        );
+        Column {
+            name: "randn".to_string(),
+            expr,
+            deferred: Some(DeferredRandom::Randn(seed)),
         }
     }
 
@@ -65,6 +102,7 @@ impl Column {
         Column {
             name: name.to_string(),
             expr: self.expr.clone().alias(name),
+            deferred: self.deferred,
         }
     }
 
@@ -107,6 +145,7 @@ impl Column {
         Column {
             name: format!("({} IS NULL)", self.name),
             expr: self.expr.clone().is_null(),
+            deferred: None,
         }
     }
 
@@ -115,6 +154,7 @@ impl Column {
         Column {
             name: format!("({} IS NOT NULL)", self.name),
             expr: self.expr.clone().is_not_null(),
+            deferred: None,
         }
     }
 
@@ -475,6 +515,64 @@ impl Column {
             move |s| crate::udfs::apply_getbit(s, pos),
             GetOutput::from_type(DataType::Int64),
         );
+        Self::from_expr(expr, None)
+    }
+
+    /// Bitwise AND of two integer/boolean columns (PySpark bit_and).
+    pub fn bit_and(&self, other: &Column) -> Column {
+        let args = [other.expr().clone()];
+        let expr = self.expr().clone().cast(DataType::Int64).map_many(
+            crate::udfs::apply_bit_and,
+            &args,
+            GetOutput::from_type(DataType::Int64),
+        );
+        Self::from_expr(expr, None)
+    }
+
+    /// Bitwise OR of two integer/boolean columns (PySpark bit_or).
+    pub fn bit_or(&self, other: &Column) -> Column {
+        let args = [other.expr().clone()];
+        let expr = self.expr().clone().cast(DataType::Int64).map_many(
+            crate::udfs::apply_bit_or,
+            &args,
+            GetOutput::from_type(DataType::Int64),
+        );
+        Self::from_expr(expr, None)
+    }
+
+    /// Bitwise XOR of two integer/boolean columns (PySpark bit_xor).
+    pub fn bit_xor(&self, other: &Column) -> Column {
+        let args = [other.expr().clone()];
+        let expr = self.expr().clone().cast(DataType::Int64).map_many(
+            crate::udfs::apply_bit_xor,
+            &args,
+            GetOutput::from_type(DataType::Int64),
+        );
+        Self::from_expr(expr, None)
+    }
+
+    /// Count of set bits in the integer representation (PySpark bit_count).
+    pub fn bit_count(&self) -> Column {
+        let expr = self.expr().clone().map(
+            crate::udfs::apply_bit_count,
+            GetOutput::from_type(DataType::Int64),
+        );
+        Self::from_expr(expr, None)
+    }
+
+    /// Assert that all boolean values are true; errors otherwise (PySpark assert_true).
+    pub fn assert_true(&self) -> Column {
+        let expr = self
+            .expr()
+            .clone()
+            .map(crate::udfs::apply_assert_true, GetOutput::same_type());
+        Self::from_expr(expr, None)
+    }
+
+    /// Bitwise NOT of an integer/boolean column (PySpark bitwise_not / bitwiseNOT).
+    pub fn bitwise_not(&self) -> Column {
+        // Use arithmetic identity: !n == -1 - n for two's-complement integers.
+        let expr = (lit(-1i64) - self.expr().clone().cast(DataType::Int64)).cast(DataType::Int64);
         Self::from_expr(expr, None)
     }
 

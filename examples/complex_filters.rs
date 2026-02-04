@@ -57,7 +57,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Example 4: withColumn with logical expression
     // Add a boolean column: age > 30 AND score < 100
-    let df_with_flag = df.with_column(
+    let df_with_flag = df.with_column_expr(
         "is_target",
         col("age")
             .into_expr()
@@ -69,7 +69,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Example 5: withColumn with arithmetic and comparison
     // Add a column: (age + score) > 100
-    let df_with_sum = df.with_column(
+    let df_with_sum = df.with_column_expr(
         "above_threshold",
         (col("age").into_expr() + col("score").into_expr()).gt(lit(100)),
     )?;

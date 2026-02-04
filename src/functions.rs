@@ -1,4 +1,5 @@
 use crate::column::Column;
+use crate::dataframe::DataFrame;
 use polars::prelude::*;
 
 // -----------------------------------------------------------------------------
@@ -340,6 +341,113 @@ pub fn bin(column: &Column) -> Column {
 /// Get bit at 0-based position (PySpark getbit).
 pub fn getbit(column: &Column, pos: i64) -> Column {
     column.clone().getbit(pos)
+}
+
+/// Bitwise AND of two integer/boolean columns (PySpark bit_and).
+pub fn bit_and(left: &Column, right: &Column) -> Column {
+    left.clone().bit_and(right)
+}
+
+/// Bitwise OR of two integer/boolean columns (PySpark bit_or).
+pub fn bit_or(left: &Column, right: &Column) -> Column {
+    left.clone().bit_or(right)
+}
+
+/// Bitwise XOR of two integer/boolean columns (PySpark bit_xor).
+pub fn bit_xor(left: &Column, right: &Column) -> Column {
+    left.clone().bit_xor(right)
+}
+
+/// Count of set bits in the integer representation (PySpark bit_count).
+pub fn bit_count(column: &Column) -> Column {
+    column.clone().bit_count()
+}
+
+/// Bitwise NOT of an integer/boolean column (PySpark bitwise_not / bitwiseNOT).
+pub fn bitwise_not(column: &Column) -> Column {
+    column.clone().bitwise_not()
+}
+
+/// Alias for getbit (PySpark bit_get).
+pub fn bit_get(column: &Column, pos: i64) -> Column {
+    getbit(column, pos)
+}
+
+/// Assert that all boolean values are true; errors otherwise (PySpark assert_true).
+pub fn assert_true(column: &Column) -> Column {
+    column.clone().assert_true()
+}
+
+/// Raise an error when evaluated (PySpark raise_error). Always fails with the given message.
+pub fn raise_error(message: &str) -> Column {
+    let msg = message.to_string();
+    let expr = lit(0i64).map(
+        move |_col| -> PolarsResult<Option<polars::prelude::Column>> {
+            Err(PolarsError::ComputeError(
+                format!("raise_error: {}", msg).into(),
+            ))
+        },
+        GetOutput::from_type(DataType::Int64),
+    );
+    Column::from_expr(expr, Some("raise_error".to_string()))
+}
+
+/// Broadcast hint - no-op that returns the same DataFrame (PySpark broadcast).
+pub fn broadcast(df: &DataFrame) -> DataFrame {
+    df.clone()
+}
+
+/// Stub partition id - always 0 (PySpark spark_partition_id).
+pub fn spark_partition_id() -> Column {
+    Column::from_expr(lit(0i32), Some("spark_partition_id".to_string()))
+}
+
+/// Stub input file name - empty string (PySpark input_file_name).
+pub fn input_file_name() -> Column {
+    Column::from_expr(lit(""), Some("input_file_name".to_string()))
+}
+
+/// Stub monotonically_increasing_id - constant 0 (PySpark monotonically_increasing_id).
+/// Note: differs from PySpark which is unique per-row; see PYSPARK_DIFFERENCES.md.
+pub fn monotonically_increasing_id() -> Column {
+    Column::from_expr(lit(0i64), Some("monotonically_increasing_id".to_string()))
+}
+
+/// Current catalog name stub (PySpark current_catalog).
+pub fn current_catalog() -> Column {
+    Column::from_expr(lit("spark_catalog"), Some("current_catalog".to_string()))
+}
+
+/// Current database/schema name stub (PySpark current_database).
+pub fn current_database() -> Column {
+    Column::from_expr(lit("default"), Some("current_database".to_string()))
+}
+
+/// Current schema name stub (PySpark current_schema).
+pub fn current_schema() -> Column {
+    Column::from_expr(lit("default"), Some("current_schema".to_string()))
+}
+
+/// Current user stub (PySpark current_user).
+pub fn current_user() -> Column {
+    Column::from_expr(lit("unknown"), Some("current_user".to_string()))
+}
+
+/// User stub (PySpark user).
+pub fn user() -> Column {
+    Column::from_expr(lit("unknown"), Some("user".to_string()))
+}
+
+/// Random uniform [0, 1) per row, with optional seed (PySpark rand).
+/// When added via with_column, generates one distinct value per row (PySpark-like).
+pub fn rand(seed: Option<u64>) -> Column {
+    Column::from_rand(seed)
+}
+
+/// Random standard normal per row, with optional seed (PySpark randn).
+/// When added via with_column, generates one distinct value per row (PySpark-like).
+pub fn randn(seed: Option<u64>) -> Column {
+    Column::from_randn(seed)
 }
 
 /// True if two arrays have any element in common (PySpark arrays_overlap).

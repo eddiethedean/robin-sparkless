@@ -287,17 +287,17 @@ The following Sparkless function names have an equivalent implementation in robi
 - desc, desc_nulls_first, desc_nulls_last ✅
 
 ### Control
-- assert_true, raise_error
+- ~~assert_true, raise_error~~ — **implemented (Phase 24; control functions)**
 
 ### Bit / bitmap
-- bit_and, bit_or, bit_xor, bit_count, bit_get
-- bitwiseNOT, bitwise_not
+- ~~bit_and, bit_or, bit_xor, bit_count, bit_get~~ — **implemented (Phase 24; bit operations)**
+- ~~bitwiseNOT, bitwise_not~~ — **implemented (Phase 24; aliases)**
 - bitmap_* functions
 
 ### JVM / runtime (defer)
-- broadcast, spark_partition_id, input_file_name
-- monotonically_increasing_id
-- current_catalog, current_database, current_schema, current_user, user
+- ~~broadcast, spark_partition_id, input_file_name~~ — **implemented as stubs (Phase 24; see PYSPARK_DIFFERENCES.md)**
+- ~~monotonically_increasing_id~~ — **implemented as stub (Phase 24; constant 0; see PYSPARK_DIFFERENCES.md)**
+- ~~current_catalog, current_database, current_schema, current_user, user~~ — **implemented as stubs (Phase 24; placeholders; see PYSPARK_DIFFERENCES.md)**
 
 ### Numeric (Phase 20)
 - bround ✅
@@ -365,14 +365,14 @@ The following Sparkless function names have an equivalent implementation in robi
 - regr_*
 
 ### Random / UDF
-- rand, randn
+- ~~rand, randn~~ — **implemented (Phase 24): real RNG with seed; per-row values in with_column/with_columns (see PYSPARK_DIFFERENCES.md)**
 - udf, pandas_udf
 
 ## Summary
 
 | Metric | Sparkless 3.28.0 | Robin-Sparkless | Coverage |
 |--------|-------------------|-----------------|----------|
-| **Function names** | ~280+ distinct | ~283 implemented | ~95% |
-| **Parity fixtures** | — | 148 passing | — |
+| **Function names** | ~280+ distinct | ~290+ implemented | ~95%+ |
+| **Parity fixtures** | — | 149 passing | — |
 
-**Conclusion:** Robin-sparkless has substantial parity with Sparkless 3.28.0 for the core PySpark operations used in typical data pipelines (filter, select, groupBy, join, window, array, map, string, math, datetime, type/conditional). Phases 20–22 completed (~25 datetime extensions in Phase 22). Remaining gaps are addressed in **ROADMAP Phases 23–24**. The 148 parity fixtures validate behavior for implemented functions.
+**Conclusion:** Robin-sparkless has substantial parity with Sparkless 3.28.0 for the core PySpark operations used in typical data pipelines (filter, select, groupBy, join, window, array, map, string, math, datetime, type/conditional). Phases 20–22 completed (~25 datetime extensions in Phase 22). Remaining gaps are addressed in **ROADMAP Phases 23–24**. The 149 parity fixtures validate behavior for implemented functions.

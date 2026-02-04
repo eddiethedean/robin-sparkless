@@ -1,0 +1,40 @@
+{
+  "name": "with_jvm_stubs",
+  "pyspark_version": "3.5.0",
+  "input": {
+    "schema": [
+      { "name": "id", "type": "bigint" }
+    ],
+    "rows": [[1], [2], [3]]
+  },
+  "operations": [
+    { "op": "withColumn", "column": "pid", "expr": "spark_partition_id()" },
+    { "op": "withColumn", "column": "fname", "expr": "input_file_name()" },
+    { "op": "withColumn", "column": "mono_id", "expr": "monotonically_increasing_id()" },
+    { "op": "withColumn", "column": "cat", "expr": "current_catalog()" },
+    { "op": "withColumn", "column": "db", "expr": "current_database()" },
+    { "op": "withColumn", "column": "schema", "expr": "current_schema()" },
+    { "op": "withColumn", "column": "cuser", "expr": "current_user()" },
+    { "op": "withColumn", "column": "u", "expr": "user()" },
+    { "op": "select", "columns": ["id", "pid", "fname", "mono_id", "cat", "db", "schema", "cuser", "u"] },
+    { "op": "orderBy", "columns": ["id"], "ascending": [true] }
+  ],
+  "expected": {
+    "schema": [
+      { "name": "id", "type": "bigint" },
+      { "name": "pid", "type": "integer" },
+      { "name": "fname", "type": "string" },
+      { "name": "mono_id", "type": "bigint" },
+      { "name": "cat", "type": "string" },
+      { "name": "db", "type": "string" },
+      { "name": "schema", "type": "string" },
+      { "name": "cuser", "type": "string" },
+      { "name": "u", "type": "string" }
+    ],
+    "rows": [
+      [1, 0, "", 0, "spark_catalog", "default", "default", "unknown", "unknown"],
+      [2, 0, "", 0, "spark_catalog", "default", "default", "unknown", "unknown"],
+      [3, 0, "", 0, "spark_catalog", "default", "default", "unknown", "unknown"]
+    ]
+  }
+}

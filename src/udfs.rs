@@ -1641,6 +1641,193 @@ pub fn apply_getbit(column: Column, pos: i64) -> PolarsResult<Option<Column>> {
     Ok(Some(Column::new(name, out_ca.into_series())))
 }
 
+/// Apply bit_count: count set bits in integer (PySpark bit_count).
+pub fn apply_bit_count(column: Column) -> PolarsResult<Option<Column>> {
+    let name = column.field().into_owned().name;
+    let series = column.take_materialized_series();
+    let s = series.cast(&DataType::Int64)?;
+    let ca = s
+        .i64()
+        .map_err(|e| PolarsError::ComputeError(e.to_string().into()))?;
+    let out_ca = Int64Chunked::from_iter_options(
+        name.as_str().into(),
+        ca.into_iter()
+            .map(|opt| opt.map(|n| i64::from(n.count_ones()))),
+    );
+    Ok(Some(Column::new(name, out_ca.into_series())))
+}
+
+/// Assert that all boolean values are true (PySpark assert_true).
+/// Returns the original column if assertion passes; errors otherwise.
+pub fn apply_assert_true(column: Column) -> PolarsResult<Option<Column>> {
+    let name = column.field().into_owned().name;
+    let series = column.take_materialized_series();
+    let ca = series
+        .bool()
+        .map_err(|e| PolarsError::ComputeError(e.to_string().into()))?;
+    let mut failed = false;
+    for v in ca {
+        if let Some(false) = v {
+            failed = true;
+            break;
+        }
+    }
+    if failed {
+        return Err(PolarsError::ComputeError(
+            format!("assert_true failed on column '{}'", name).into(),
+        ));
+    }
+    Ok(Some(Column::new(name, series)))
+}
+
+/// Apply rand: uniform [0, 1) per row, with optional seed (PySpark rand).
+pub fn apply_rand_with_seed(column: Column, seed: Option<u64>) -> PolarsResult<Option<Column>> {
+    use rand::Rng;
+    use rand::SeedableRng;
+    let name = column.field().into_owned().name;
+    let series = column.take_materialized_series();
+    let n = series.len();
+    let values: Vec<f64> = if let Some(s) = seed {
+        let mut rng = rand::rngs::StdRng::seed_from_u64(s);
+        (0..n).map(|_| rng.gen::<f64>()).collect()
+    } else {
+        let mut rng = rand::thread_rng();
+        (0..n).map(|_| rng.gen::<f64>()).collect()
+    };
+    let out = Float64Chunked::from_vec(name.as_str().into(), values);
+    Ok(Some(Column::new(name, out.into_series())))
+}
+
+/// Apply randn: standard normal per row, with optional seed (PySpark randn).
+pub fn apply_randn_with_seed(column: Column, seed: Option<u64>) -> PolarsResult<Option<Column>> {
+    use rand::SeedableRng;
+    use rand_distr::Distribution;
+    let name = column.field().into_owned().name;
+    let series = column.take_materialized_series();
+    let n = series.len();
+    let dist = rand_distr::StandardNormal;
+    let values: Vec<f64> = if let Some(s) = seed {
+        let mut rng = rand::rngs::StdRng::seed_from_u64(s);
+        (0..n).map(|_| dist.sample(&mut rng)).collect()
+    } else {
+        let mut rng = rand::thread_rng();
+        (0..n).map(|_| dist.sample(&mut rng)).collect()
+    };
+    let out = Float64Chunked::from_vec(name.as_str().into(), values);
+    Ok(Some(Column::new(name, out.into_series())))
+}
+
+/// Build a Series of `n` uniform [0, 1) values with optional seed (for with_column PySpark-like rand).
+pub fn series_rand_n(name: &str, n: usize, seed: Option<u64>) -> Series {
+    use rand::Rng;
+    use rand::SeedableRng;
+    let values: Vec<f64> = if let Some(s) = seed {
+        let mut rng = rand::rngs::StdRng::seed_from_u64(s);
+        (0..n).map(|_| rng.gen::<f64>()).collect()
+    } else {
+        let mut rng = rand::thread_rng();
+        (0..n).map(|_| rng.gen::<f64>()).collect()
+    };
+    Float64Chunked::from_vec(name.into(), values).into_series()
+}
+
+/// Build a Series of `n` standard normal values with optional seed (for with_column PySpark-like randn).
+pub fn series_randn_n(name: &str, n: usize, seed: Option<u64>) -> Series {
+    use rand::SeedableRng;
+    use rand_distr::Distribution;
+    let dist = rand_distr::StandardNormal;
+    let values: Vec<f64> = if let Some(s) = seed {
+        let mut rng = rand::rngs::StdRng::seed_from_u64(s);
+        (0..n).map(|_| dist.sample(&mut rng)).collect()
+    } else {
+        let mut rng = rand::thread_rng();
+        (0..n).map(|_| dist.sample(&mut rng)).collect()
+    };
+    Float64Chunked::from_vec(name.into(), values).into_series()
+}
+
+/// Apply bitwise AND for two integer columns (PySpark bit_and).
+pub fn apply_bit_and(columns: &mut [Column]) -> PolarsResult<Option<Column>> {
+    if columns.len() < 2 {
+        return Err(PolarsError::ComputeError(
+            "bit_and needs two columns".into(),
+        ));
+    }
+    let name = columns[0].field().into_owned().name;
+    let a_series = std::mem::take(&mut columns[0]).take_materialized_series();
+    let b_series = std::mem::take(&mut columns[1]).take_materialized_series();
+    let a_cast = a_series.cast(&DataType::Int64)?;
+    let b_cast = b_series.cast(&DataType::Int64)?;
+    let a = a_cast
+        .i64()
+        .map_err(|e| PolarsError::ComputeError(e.to_string().into()))?;
+    let b = b_cast
+        .i64()
+        .map_err(|e| PolarsError::ComputeError(e.to_string().into()))?;
+    let out = Int64Chunked::from_iter_options(
+        name.as_str().into(),
+        a.into_iter().zip(b).map(|(av, bv)| match (av, bv) {
+            (Some(x), Some(y)) => Some(x & y),
+            _ => None,
+        }),
+    );
+    Ok(Some(Column::new(name, out.into_series())))
+}
+
+/// Apply bitwise OR for two integer columns (PySpark bit_or).
+pub fn apply_bit_or(columns: &mut [Column]) -> PolarsResult<Option<Column>> {
+    if columns.len() < 2 {
+        return Err(PolarsError::ComputeError("bit_or needs two columns".into()));
+    }
+    let name = columns[0].field().into_owned().name;
+    let a_series = std::mem::take(&mut columns[0]).take_materialized_series();
+    let b_series = std::mem::take(&mut columns[1]).take_materialized_series();
+    let a_cast = a_series.cast(&DataType::Int64)?;
+    let b_cast = b_series.cast(&DataType::Int64)?;
+    let a = a_cast
+        .i64()
+        .map_err(|e| PolarsError::ComputeError(e.to_string().into()))?;
+    let b = b_cast
+        .i64()
+        .map_err(|e| PolarsError::ComputeError(e.to_string().into()))?;
+    let out = Int64Chunked::from_iter_options(
+        name.as_str().into(),
+        a.into_iter().zip(b).map(|(av, bv)| match (av, bv) {
+            (Some(x), Some(y)) => Some(x | y),
+            _ => None,
+        }),
+    );
+    Ok(Some(Column::new(name, out.into_series())))
+}
+
+/// Apply bitwise XOR for two integer columns (PySpark bit_xor).
+pub fn apply_bit_xor(columns: &mut [Column]) -> PolarsResult<Option<Column>> {
+    if columns.len() < 2 {
+        return Err(PolarsError::ComputeError(
+            "bit_xor needs two columns".into(),
+        ));
+    }
+    let name = columns[0].field().into_owned().name;
+    let a_series = std::mem::take(&mut columns[0]).take_materialized_series();
+    let b_series = std::mem::take(&mut columns[1]).take_materialized_series();
+    let a_cast = a_series.cast(&DataType::Int64)?;
+    let b_cast = b_series.cast(&DataType::Int64)?;
+    let a = a_cast
+        .i64()
+        .map_err(|e| PolarsError::ComputeError(e.to_string().into()))?;
+    let b = b_cast
+        .i64()
+        .map_err(|e| PolarsError::ComputeError(e.to_string().into()))?;
+    let out = Int64Chunked::from_iter_options(
+        name.as_str().into(),
+        a.into_iter().zip(b).map(|(av, bv)| match (av, bv) {
+            (Some(x), Some(y)) => Some(x ^ y),
+            _ => None,
+        }),
+    );
+    Ok(Some(Column::new(name, out.into_series())))
+}
+
 /// Apply bround (banker's rounding) to a float column.
 pub fn apply_bround(column: Column, scale: i32) -> PolarsResult<Option<Column>> {
     let name = column.field().into_owned().name;

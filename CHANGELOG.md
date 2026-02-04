@@ -9,9 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Planned
 
-- **Phase 24 – Full parity** with Sparkless 3.28.0: bit, control, JVM stubs, random, crypto. Target: 180+ parity fixtures; ~280 total functions. Est. 1.5–2 weeks. See [ROADMAP.md](docs/ROADMAP.md) and [PARITY_CHECK_SPARKLESS_3.28.md](docs/PARITY_CHECK_SPARKLESS_3.28.md).
+- **Phase 25 – Publish crate**: Prepare and publish robin-sparkless to crates.io (and optionally PyPI via maturin). See [ROADMAP.md](docs/ROADMAP.md) for details.
 
 ### Added
+
+- **Phase 24 – Full parity 5: bit, control, JVM stubs, random, crypto (partial)** ✅ **COMPLETED (bit/control/JVM/random); AES deferred**
+  - **Bit**: `bit_and`, `bit_or`, `bit_xor`, `bit_count`, `bit_get`; `bitwise_not` / `bitwiseNOT`. Parity fixture `with_bit_ops` added.
+  - **Control**: `assert_true`, `raise_error` (expression-level; assert_true fails when any value is false; raise_error always fails when evaluated).
+  - **JVM stubs**: `broadcast` (no-op), `spark_partition_id` (constant 0), `input_file_name` (empty string), `monotonically_increasing_id` (constant 0), `current_catalog`, `current_database`, `current_schema`, `current_user`, `user` (constant placeholders). Semantics documented in [PYSPARK_DIFFERENCES.md](docs/PYSPARK_DIFFERENCES.md).
+  - **Random**: `rand(seed)`, `randn(seed)` use a real RNG with optional seed; when added via `with_column` or `with_columns`, one distinct value per row (PySpark-like). Semantics documented in [PYSPARK_DIFFERENCES.md](docs/PYSPARK_DIFFERENCES.md).
+  - **Crypto**: `aes_encrypt`, `aes_decrypt`, `try_aes_decrypt` remain **deferred**; listed in [GAP_ANALYSIS_SPARKLESS_3.28.md](docs/GAP_ANALYSIS_SPARKLESS_3.28.md) and documented in [PYSPARK_DIFFERENCES.md](docs/PYSPARK_DIFFERENCES.md).
+  - **PyO3**: All new functions exposed in the `robin_sparkless` Python module (bit ops, control, JVM stubs, rand/randn, broadcast).
 
 - **Phase 23 – Full parity 4: JSON, CSV, URL, misc** ✅ **COMPLETED**
   - **URL**: `url_decode`, `url_encode` (percent-encoding).

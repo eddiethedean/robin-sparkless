@@ -19,10 +19,10 @@ cargo test pyspark_parity_fixtures
 
 | Source | Converted | Passing | Failing | Skipped |
 |--------|-----------|---------|--------|---------|
-| Hand-written (`tests/fixtures/*.json`) | — | 148 | 0 | 2 (array_distinct, with_curdate_now) |
+| Hand-written (`tests/fixtures/*.json`) | — | 149 | 0 | 2 (array_distinct, with_curdate_now) |
 | Sparkless converted (`tests/fixtures/converted/*.json`) | 0 (run converter when `SPARKLESS_EXPECTED_OUTPUTS` set) | — | — | — |
 
-**Target: 50+ tests passing** (hand-written + converted). **Current: 148 passing** (hand-written; array_distinct, with_curdate_now skipped). Phase 22 completed (datetime extensions: curdate, now, localtimestamp, date_diff, dateadd, datepart, extract, unix_micros/millis/seconds, dayname, weekday, make_timestamp, timestampadd, timestampdiff, from_utc_timestamp, etc.). Phase 21: ordering, aggregates (median, mode, stddev_pop, var_pop), numeric (bround). Phase 19: aggregates, try_*, misc. Phase 18: array/map/struct. Phase 17: datetime/unix, pmod, factorial. Phase 16: regexp. Phase 15: aliases, string, math, array_distinct. **Phase 26** (Sparkless integration) target: 200+ Sparkless tests passing with robin backend (after Phases 22–24 full parity, Phase 25 publish Rust crate). CI runs parity on hand-written (and optionally converted) fixtures; when Sparkless repo is available, run `make sparkless-parity` and update this doc.
+**Target: 50+ tests passing** (hand-written + converted). **Current: 149 passing** (hand-written; array_distinct, with_curdate_now skipped). Phase 22 completed (datetime extensions: curdate, now, localtimestamp, date_diff, dateadd, datepart, extract, unix_micros/millis/seconds, dayname, weekday, make_timestamp, timestampadd, timestampdiff, from_utc_timestamp, etc.). Phase 21: ordering, aggregates (median, mode, stddev_pop, var_pop), numeric (bround). Phase 19: aggregates, try_*, misc. Phase 18: array/map/struct. Phase 17: datetime/unix, pmod, factorial. Phase 16: regexp. Phase 15: aliases, string, math, array_distinct. **Phase 26** (Sparkless integration) target: 200+ Sparkless tests passing with robin backend (after Phases 22–24 full parity, Phase 25 publish Rust crate). CI runs parity on hand-written (and optionally converted) fixtures; when Sparkless repo is available, run `make sparkless-parity` and update this doc.
 
 ### When Sparkless repo is available
 

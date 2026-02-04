@@ -23,12 +23,17 @@ use crate::functions::{
     weekofyear, years,
 };
 use crate::functions::{
-    array_agg, arrays_overlap, arrays_zip, bit_length, create_map, equal_null, explode_outer, get,
-    hash, isin, isin_i64, isin_str, json_array_length, map_concat, map_contains_key,
-    map_filter_value_gt, map_from_entries, map_zip_with_coalesce, named_struct, parse_url,
-    shift_left, shift_right, str_to_map, struct_, to_char, to_number, to_varchar, try_add,
-    try_divide, try_multiply, try_subtract, try_to_number, try_to_timestamp, typeof_, url_decode,
-    url_encode, version, width_bucket, zip_with_coalesce,
+    array_agg, arrays_overlap, arrays_zip, assert_true as rs_assert_true, bit_and, bit_count,
+    bit_get, bit_length, bit_or, bit_xor, bitwise_not, broadcast as rs_broadcast, create_map,
+    current_catalog as rs_current_catalog, current_database as rs_current_database,
+    current_schema as rs_current_schema, current_user as rs_current_user, equal_null,
+    explode_outer, get, hash, input_file_name as rs_input_file_name, isin, isin_i64, isin_str,
+    json_array_length, map_concat, map_contains_key, map_filter_value_gt, map_from_entries,
+    map_zip_with_coalesce, monotonically_increasing_id as rs_monotonically_increasing_id,
+    named_struct, parse_url, rand as rs_rand, randn as rs_randn, shift_left, shift_right,
+    spark_partition_id as rs_spark_partition_id, str_to_map, struct_, to_char, to_number,
+    to_varchar, try_add, try_divide, try_multiply, try_subtract, try_to_number, try_to_timestamp,
+    typeof_, url_decode, url_encode, user as rs_user, version, width_bucket, zip_with_coalesce,
 };
 use crate::functions::{
     asc, asc_nulls_first, asc_nulls_last, bround, cot, csc, desc, desc_nulls_first,
@@ -322,6 +327,36 @@ fn robin_sparkless(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("parse_url", wrap_pyfunction!(py_parse_url, m)?)?;
     m.add("hash", wrap_pyfunction!(py_hash, m)?)?;
     m.add("stack", wrap_pyfunction!(py_stack, m)?)?;
+    // Phase 24: bit, control, JVM stubs, random
+    m.add("bit_and", wrap_pyfunction!(py_bit_and, m)?)?;
+    m.add("bit_or", wrap_pyfunction!(py_bit_or, m)?)?;
+    m.add("bit_xor", wrap_pyfunction!(py_bit_xor, m)?)?;
+    m.add("bit_count", wrap_pyfunction!(py_bit_count, m)?)?;
+    m.add("bitwise_not", wrap_pyfunction!(py_bitwise_not, m)?)?;
+    m.add("bitwiseNOT", wrap_pyfunction!(py_bitwise_not, m)?)?;
+    m.add("bit_get", wrap_pyfunction!(py_getbit, m)?)?;
+    m.add("assert_true", wrap_pyfunction!(py_assert_true, m)?)?;
+    m.add("raise_error", wrap_pyfunction!(py_raise_error, m)?)?;
+    m.add(
+        "spark_partition_id",
+        wrap_pyfunction!(py_spark_partition_id, m)?,
+    )?;
+    m.add("input_file_name", wrap_pyfunction!(py_input_file_name, m)?)?;
+    m.add(
+        "monotonically_increasing_id",
+        wrap_pyfunction!(py_monotonically_increasing_id, m)?,
+    )?;
+    m.add("current_catalog", wrap_pyfunction!(py_current_catalog, m)?)?;
+    m.add(
+        "current_database",
+        wrap_pyfunction!(py_current_database, m)?,
+    )?;
+    m.add("current_schema", wrap_pyfunction!(py_current_schema, m)?)?;
+    m.add("current_user", wrap_pyfunction!(py_current_user, m)?)?;
+    m.add("user", wrap_pyfunction!(py_user, m)?)?;
+    m.add("rand", wrap_pyfunction!(py_rand, m)?)?;
+    m.add("randn", wrap_pyfunction!(py_randn, m)?)?;
+    m.add("broadcast", wrap_pyfunction!(py_broadcast, m)?)?;
     Ok(())
 }
 
@@ -919,8 +954,132 @@ fn py_shift_right(column: &PyColumn, n: i32) -> PyColumn {
 }
 
 #[pyfunction]
+fn py_bit_and(left: &PyColumn, right: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: bit_and(&left.inner, &right.inner),
+    }
+}
+
+#[pyfunction]
+fn py_bit_or(left: &PyColumn, right: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: bit_or(&left.inner, &right.inner),
+    }
+}
+
+#[pyfunction]
+fn py_bit_xor(left: &PyColumn, right: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: bit_xor(&left.inner, &right.inner),
+    }
+}
+
+#[pyfunction]
+fn py_bit_count(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: bit_count(&column.inner),
+    }
+}
+
+#[pyfunction]
+fn py_bitwise_not(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: bitwise_not(&column.inner),
+    }
+}
+
+#[pyfunction]
 fn py_version() -> PyColumn {
     PyColumn { inner: version() }
+}
+
+#[pyfunction]
+fn py_assert_true(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: rs_assert_true(&column.inner),
+    }
+}
+
+#[pyfunction]
+fn py_raise_error(message: &str) -> PyColumn {
+    PyColumn {
+        inner: crate::functions::raise_error(message),
+    }
+}
+
+#[pyfunction]
+fn py_spark_partition_id() -> PyColumn {
+    PyColumn {
+        inner: rs_spark_partition_id(),
+    }
+}
+
+#[pyfunction]
+fn py_input_file_name() -> PyColumn {
+    PyColumn {
+        inner: rs_input_file_name(),
+    }
+}
+
+#[pyfunction]
+fn py_monotonically_increasing_id() -> PyColumn {
+    PyColumn {
+        inner: rs_monotonically_increasing_id(),
+    }
+}
+
+#[pyfunction]
+fn py_current_catalog() -> PyColumn {
+    PyColumn {
+        inner: rs_current_catalog(),
+    }
+}
+
+#[pyfunction]
+fn py_current_database() -> PyColumn {
+    PyColumn {
+        inner: rs_current_database(),
+    }
+}
+
+#[pyfunction]
+fn py_current_schema() -> PyColumn {
+    PyColumn {
+        inner: rs_current_schema(),
+    }
+}
+
+#[pyfunction]
+fn py_current_user() -> PyColumn {
+    PyColumn {
+        inner: rs_current_user(),
+    }
+}
+
+#[pyfunction]
+fn py_user() -> PyColumn {
+    PyColumn { inner: rs_user() }
+}
+
+#[pyfunction]
+fn py_rand(seed: Option<u64>) -> PyColumn {
+    PyColumn {
+        inner: rs_rand(seed),
+    }
+}
+
+#[pyfunction]
+fn py_randn(seed: Option<u64>) -> PyColumn {
+    PyColumn {
+        inner: rs_randn(seed),
+    }
+}
+
+#[pyfunction]
+fn py_broadcast(df: &PyDataFrame) -> PyDataFrame {
+    PyDataFrame {
+        inner: rs_broadcast(&df.inner),
+    }
 }
 
 #[pyfunction]
@@ -2731,7 +2890,7 @@ impl PyDataFrame {
     fn with_column(&self, column_name: &str, expr: &PyColumn) -> PyResult<PyDataFrame> {
         let df = self
             .inner
-            .with_column(column_name, expr.inner.expr().clone())
+            .with_column(column_name, &expr.inner)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
         Ok(PyDataFrame { inner: df })
     }
@@ -3006,17 +3165,17 @@ impl PyDataFrame {
     }
 
     fn with_columns(&self, mapping: &Bound<'_, pyo3::types::PyAny>) -> PyResult<PyDataFrame> {
-        let mut exprs: Vec<(String, Expr)> = Vec::new();
+        let mut exprs: Vec<(String, crate::column::Column)> = Vec::new();
         if let Ok(dict) = mapping.downcast::<PyDict>() {
             for (k, v) in dict.iter() {
                 let name: String = k.extract()?;
                 let col: PyRef<PyColumn> = v.extract()?;
-                exprs.push((name, col.inner.expr().clone()));
+                exprs.push((name, col.inner.clone()));
             }
         } else if let Ok(list) = mapping.downcast::<pyo3::types::PyList>() {
             for item in list.iter() {
                 let tuple: (String, PyRef<PyColumn>) = item.extract()?;
-                exprs.push((tuple.0, tuple.1.inner.expr().clone()));
+                exprs.push((tuple.0, tuple.1.inner.clone()));
             }
         } else {
             return Err(pyo3::exceptions::PyTypeError::new_err(

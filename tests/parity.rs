@@ -1103,7 +1103,7 @@ fn apply_operations(
                         format!("failed to parse withColumn expr '{}': {}", expr, e).into(),
                     )
                 })?;
-                df = df.with_column(&column, parsed_expr)?;
+                df = df.with_column_expr(&column, parsed_expr)?;
             }
             Operation::Window {
                 column: col_name,
@@ -1133,18 +1133,18 @@ fn apply_operations(
 
                 match func.as_str() {
                     "percent_rank" => {
-                        df = df.with_column(
+                        df = df.with_column_expr(
                             "_pr_rank",
                             robin_sparkless::col(order_col)
                                 .rank(descending)
                                 .over(&partition_refs)
                                 .into_expr(),
                         )?;
-                        df = df.with_column(
+                        df = df.with_column_expr(
                             "_pr_count",
                             col(order_col).count().over(partition_exprs.clone()),
                         )?;
-                        df = df.with_column(
+                        df = df.with_column_expr(
                             col_name,
                             (col("_pr_rank") - lit(1i64)).cast(DataType::Float64)
                                 / (col("_pr_count") - lit(1i64)).cast(DataType::Float64),
@@ -1152,18 +1152,18 @@ fn apply_operations(
                         df = df.drop(vec!["_pr_rank", "_pr_count"])?;
                     }
                     "cume_dist" => {
-                        df = df.with_column(
+                        df = df.with_column_expr(
                             "_cd_rn",
                             robin_sparkless::col(order_col)
                                 .row_number(descending)
                                 .over(&partition_refs)
                                 .into_expr(),
                         )?;
-                        df = df.with_column(
+                        df = df.with_column_expr(
                             "_cd_count",
                             col(order_col).count().over(partition_exprs.clone()),
                         )?;
-                        df = df.with_column(
+                        df = df.with_column_expr(
                             col_name,
                             col("_cd_rn").cast(DataType::Float64)
                                 / col("_cd_count").cast(DataType::Float64),
@@ -1172,18 +1172,18 @@ fn apply_operations(
                     }
                     "ntile" => {
                         let n_buckets = n.unwrap_or(4) as u32;
-                        df = df.with_column(
+                        df = df.with_column_expr(
                             "_nt_rank",
                             robin_sparkless::col(order_col)
                                 .row_number(descending)
                                 .over(&partition_refs)
                                 .into_expr(),
                         )?;
-                        df = df.with_column(
+                        df = df.with_column_expr(
                             "_nt_count",
                             col(order_col).count().over(partition_exprs.clone()),
                         )?;
-                        df = df.with_column(
+                        df = df.with_column_expr(
                             col_name,
                             (col("_nt_rank").cast(DataType::Float64) * lit(n_buckets as f64)
                                 / col("_nt_count").cast(DataType::Float64))
@@ -1196,14 +1196,14 @@ fn apply_operations(
                     "nth_value" => {
                         let val_col = value_column.as_deref().unwrap_or(order_col);
                         let n_val = n.unwrap_or(1);
-                        df = df.with_column(
+                        df = df.with_column_expr(
                             "_nv_rn",
                             robin_sparkless::col(order_col)
                                 .row_number(descending)
                                 .over(&partition_refs)
                                 .into_expr(),
                         )?;
-                        df = df.with_column(
+                        df = df.with_column_expr(
                             col_name,
                             polars::prelude::when(col("_nv_rn").eq(lit(n_val)))
                                 .then(robin_sparkless::col(val_col).into_expr())
@@ -1250,7 +1250,7 @@ fn apply_operations(
                                 ));
                             }
                         };
-                        df = df.with_column(col_name, window_expr.into_expr())?;
+                        df = df.with_column_expr(col_name, window_expr.into_expr())?;
                     }
                 }
             }
@@ -2000,32 +2000,86 @@ fn parse_with_column_expr(src: &str) -> Result<Expr, String> {
     use robin_sparkless::{
         acos, add_months, array_append, array_compact, array_contains, array_distinct,
         array_except, array_insert, array_intersect, array_prepend, array_size, array_sum,
-        array_union, arrays_overlap, arrays_zip, ascii, asin, atan, atan2, base64, bin, bit_length,
-        bround, btrim, cast, cbrt, ceiling, char as rs_char, chr, coalesce, col, concat, concat_ws,
-        contains, conv, convert_timezone, cos, cosh, cot, create_map, csc, curdate, current_date,
-        current_timestamp, current_timezone, date_add, date_diff, date_from_unix_date, date_part,
-        date_sub, dateadd, datediff, datepart, day, dayname, dayofmonth, dayofweek, dayofyear,
-        days, degrees, e, element_at, elt, endswith, equal_null, exp, extract, factorial,
-        find_in_set, format_number, format_string, from_unixtime, from_utc_timestamp, get, getbit,
-        greatest, hash, hex, hour, hours, hypot, ilike, initcap, instr, isin, isin_i64, isin_str,
-        isnan, isnotnull, isnull, json_array_length, last_day, lcase, least, left, length, like,
-        lit_str, ln, localtimestamp, locate, log, log10, lower, lpad, make_date, make_interval,
-        make_timestamp, make_timestamp_ntz, map_concat, map_contains_key, map_filter,
-        map_from_entries, map_zip_with, md5, minute, minutes, months, months_between, named_struct,
-        nanvl, negate, next_day, now, nullif, nvl, nvl2, overlay, parse_url, pi, pmod, position,
-        positive, pow, power, quarter, radians, regexp_count, regexp_extract, regexp_extract_all,
+        array_union, arrays_overlap, arrays_zip, ascii, asin, assert_true, atan, atan2, base64,
+        bin, bit_and, bit_count, bit_get, bit_length, bit_or, bit_xor, bitwise_not, bround, btrim,
+        cast, cbrt, ceiling, char as rs_char, chr, coalesce, col, concat, concat_ws, contains,
+        conv, cos, cosh, cot, create_map, csc, curdate, current_catalog, current_database,
+        current_date, current_schema, current_timestamp, current_user, date_add,
+        date_from_unix_date, date_sub, datediff, day, dayname, dayofmonth, dayofweek, dayofyear,
+        degrees, e, element_at, elt, endswith, equal_null, exp, extract, factorial, find_in_set,
+        format_number, format_string, from_unixtime, from_utc_timestamp, get, getbit, greatest,
+        hash, hex, hour, hypot, ilike, initcap, input_file_name, instr, isin_i64, isin_str, isnan,
+        isnotnull, isnull, json_array_length, last_day, lcase, least, left, length, like, lit_str,
+        ln, localtimestamp, locate, log, log10, lower, lpad, make_date, make_timestamp, map_concat,
+        map_contains_key, map_filter, map_from_entries, map_zip_with, md5, minute,
+        monotonically_increasing_id, months_between, named_struct, nanvl, negate, next_day, now,
+        nullif, nvl, nvl2, overlay, parse_url, pi, pmod, position, positive, pow, power, quarter,
+        radians, raise_error, rand, randn, regexp_count, regexp_extract, regexp_extract_all,
         regexp_instr, regexp_like, regexp_replace, regexp_substr, repeat, replace, reverse, right,
-        rlike, rpad, sec, second, sha1, sha2, shift_left, shift_right, shift_right_unsigned,
-        signum, sin, sinh, size, split, split_part, sqrt, stack, startswith, str_to_map, struct_,
-        substr, substring, tan, tanh, timestamp_micros, timestamp_millis, timestamp_seconds,
-        timestampadd, timestampdiff, to_char, to_degrees, to_number, to_radians, to_unix_timestamp,
+        rlike, rpad, sec, second, sha1, sha2, shift_left, shift_right, signum, sin, sinh, size,
+        spark_partition_id, split, split_part, sqrt, startswith, str_to_map, struct_, substr,
+        substring, tan, tanh, timestamp_micros, timestamp_millis, timestamp_seconds, timestampadd,
+        timestampdiff, to_char, to_degrees, to_number, to_radians, to_unix_timestamp,
         to_utc_timestamp, trim, trunc, try_add, try_cast, try_divide, try_multiply, try_subtract,
         try_to_number, try_to_timestamp, typeof_, ucase, unbase64, unhex, unix_date, unix_micros,
         unix_millis, unix_seconds, unix_timestamp, unix_timestamp_now, upper, url_decode,
-        url_encode, version, weekday, weekofyear, when, width_bucket, years, zip_with,
+        url_encode, user, version, weekday, weekofyear, when, width_bucket, zip_with,
     };
 
     let s = src.trim();
+
+    // Handle assert_true(col('name'))
+    if s.starts_with("assert_true(") {
+        let inner = extract_first_arg(s, "assert_true(")?;
+        let col_name = extract_col_name(inner)?;
+        let c = col(col_name);
+        return Ok(assert_true(&c).into_expr());
+    }
+
+    // Handle raise_error('message')
+    if s.starts_with("raise_error(") {
+        let inner = extract_first_arg(s, "raise_error(")?;
+        let msg = inner.trim_matches(['\'', '"']).to_string();
+        return Ok(raise_error(&msg).into_expr());
+    }
+
+    // No-arg JVM/runtime stubs: spark_partition_id(), input_file_name(), ...
+    if s == "spark_partition_id()" {
+        return Ok(spark_partition_id().into_expr());
+    }
+    if s == "input_file_name()" {
+        return Ok(input_file_name().into_expr());
+    }
+    if s == "monotonically_increasing_id()" {
+        return Ok(monotonically_increasing_id().into_expr());
+    }
+    if s == "current_catalog()" {
+        return Ok(current_catalog().into_expr());
+    }
+    if s == "current_database()" {
+        return Ok(current_database().into_expr());
+    }
+    if s == "current_schema()" {
+        return Ok(current_schema().into_expr());
+    }
+    if s == "current_user()" {
+        return Ok(current_user().into_expr());
+    }
+    if s == "user()" {
+        return Ok(user().into_expr());
+    }
+
+    // rand(), rand(seed), randn(), randn(seed)
+    if s.starts_with("randn(") {
+        let inner = extract_first_arg(s, "randn(")?;
+        let seed = inner.trim().parse::<u64>().ok();
+        return Ok(randn(seed).into_expr());
+    }
+    if s.starts_with("rand(") {
+        let inner = extract_first_arg(s, "rand(")?;
+        let seed = inner.trim().parse::<u64>().ok();
+        return Ok(rand(seed).into_expr());
+    }
 
     // Handle when().then().otherwise() or when().otherwise() expressions
     if s.starts_with("when(") {
@@ -2212,6 +2266,69 @@ fn parse_with_column_expr(src: &str) -> Result<Expr, String> {
         let col_name = extract_col_name(inner)?;
         let c = col(col_name);
         return Ok(ceiling(&c).into_expr());
+    }
+
+    // Handle bit_count(col('name'))
+    if s.starts_with("bit_count(") {
+        let inner = extract_first_arg(s, "bit_count(")?;
+        let col_name = extract_col_name(inner)?;
+        let c = col(col_name);
+        return Ok(bit_count(&c).into_expr());
+    }
+
+    // Handle bitwise_not(col('name')) / bitwiseNOT(col('name'))
+    if s.starts_with("bitwise_not(") || s.starts_with("bitwiseNOT(") {
+        // Both variants have the same argument layout, so we can strip the function name generically.
+        let inner = if s.starts_with("bitwise_not(") {
+            extract_first_arg(s, "bitwise_not(")?
+        } else {
+            extract_first_arg(s, "bitwiseNOT(")?
+        };
+        let col_name = extract_col_name(inner)?;
+        let c = col(col_name);
+        return Ok(bitwise_not(&c).into_expr());
+    }
+
+    // Handle bit_get(col('name'), pos)
+    if s.starts_with("bit_get(") {
+        let inner = extract_first_arg(s, "bit_get(")?;
+        let parts = parse_comma_separated_args(inner);
+        let col_name = extract_col_name(parts.first().ok_or("bit_get needs column")?)?;
+        let pos: i64 = parts
+            .get(1)
+            .ok_or("bit_get needs position")?
+            .trim()
+            .parse()
+            .map_err(|e: std::num::ParseIntError| e.to_string())?;
+        let c = col(col_name);
+        return Ok(bit_get(&c, pos).into_expr());
+    }
+
+    // Handle bit_and/bit_or/bit_xor with two columns: bit_and(col('a'), col('b'))
+    if s.starts_with("bit_and(") || s.starts_with("bit_or(") || s.starts_with("bit_xor(") {
+        let (fn_name, prefix) = if s.starts_with("bit_and(") {
+            ("bit_and", "bit_and(")
+        } else if s.starts_with("bit_or(") {
+            ("bit_or", "bit_or(")
+        } else {
+            ("bit_xor", "bit_xor(")
+        };
+        let inner = extract_first_arg(s, prefix)?;
+        let parts = parse_comma_separated_args(inner);
+        if parts.len() != 2 {
+            return Err(format!("{fn_name} requires two column arguments"));
+        }
+        let left_name = extract_col_name(parts.first().unwrap())?;
+        let right_name = extract_col_name(parts.get(1).unwrap())?;
+        let left_col = col(left_name);
+        let right_col = col(right_name);
+        let expr = match fn_name {
+            "bit_and" => bit_and(&left_col, &right_col),
+            "bit_or" => bit_or(&left_col, &right_col),
+            "bit_xor" => bit_xor(&left_col, &right_col),
+            _ => unreachable!(),
+        };
+        return Ok(expr.into_expr());
     }
 
     // Handle lcase(col('name')), ucase(col('name'))
@@ -4774,8 +4891,8 @@ fn types_compatible(actual: &str, expected: &str) -> bool {
     if actual.starts_with("array<Struct(") && expected == "map" {
         return true;
     }
-    // Allow int/bigint/long/Int8 to match (hour/minute return Int8 in Polars)
-    let int_types = ["int", "bigint", "long", "Int8"];
+    // Allow int/bigint/long/integer/Int8 to match (hour/minute return Int8 in Polars)
+    let int_types = ["int", "integer", "bigint", "long", "Int8"];
     if int_types.contains(&actual) && int_types.contains(&expected) {
         return true;
     }
@@ -4958,5 +5075,27 @@ fn values_equal(a: &Value, b: &Value) -> bool {
             true
         }
         _ => false,
+    }
+}
+
+/// Run with: cargo test print_rand_seed_42_values -- --ignored --nocapture
+/// to print actual rand(42)/randn(42) values for tests/fixtures/with_rand_seed.json.
+#[test]
+#[ignore]
+fn print_rand_seed_42_values() {
+    use rand::Rng;
+    use rand::SeedableRng;
+    use rand_distr::Distribution;
+    let mut rng = rand::rngs::StdRng::seed_from_u64(42);
+    let dist = rand_distr::StandardNormal;
+    println!("rand(42) 3 values:");
+    for _ in 0..3 {
+        println!("  {}", rng.gen::<f64>());
+    }
+    let mut rng2 = rand::rngs::StdRng::seed_from_u64(42);
+    println!("randn(42) 3 values:");
+    for _ in 0..3 {
+        let v: f64 = dist.sample(&mut rng2);
+        println!("  {}", v);
     }
 }

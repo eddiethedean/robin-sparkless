@@ -1,0 +1,44 @@
+{
+  "name": "with_bit_ops",
+  "pyspark_version": "3.5.0",
+  "input": {
+    "schema": [
+      { "name": "id", "type": "bigint" },
+      { "name": "a", "type": "int" },
+      { "name": "b", "type": "int" }
+    ],
+    "rows": [
+      [1, 6, 3],
+      [2, 5, 1],
+      [3, 8, 7]
+    ]
+  },
+  "operations": [
+    { "op": "withColumn", "column": "and_ab", "expr": "bit_and(col('a'), col('b'))" },
+    { "op": "withColumn", "column": "or_ab", "expr": "bit_or(col('a'), col('b'))" },
+    { "op": "withColumn", "column": "xor_ab", "expr": "bit_xor(col('a'), col('b'))" },
+    { "op": "withColumn", "column": "count_a", "expr": "bit_count(col('a'))" },
+    { "op": "withColumn", "column": "not_a", "expr": "bitwise_not(col('a'))" },
+    { "op": "withColumn", "column": "bit_get_a_1", "expr": "bit_get(col('a'), 1)" },
+    { "op": "select", "columns": ["id", "a", "b", "and_ab", "or_ab", "xor_ab", "count_a", "bit_get_a_1"] },
+    { "op": "orderBy", "columns": ["id"], "ascending": [true] }
+  ],
+  "expected": {
+    "schema": [
+      { "name": "id", "type": "bigint" },
+      { "name": "a", "type": "int" },
+      { "name": "b", "type": "int" },
+      { "name": "and_ab", "type": "bigint" },
+      { "name": "or_ab", "type": "bigint" },
+      { "name": "xor_ab", "type": "bigint" },
+      { "name": "count_a", "type": "bigint" },
+      { "name": "bit_get_a_1", "type": "bigint" }
+    ],
+    "rows": [
+      [1, 6, 3, 2, 7, 5, 2, 1],
+      [2, 5, 1, 1, 5, 4, 2, 0],
+      [3, 8, 7, 0, 15, 15, 1, 0]
+    ]
+  }
+}
+
