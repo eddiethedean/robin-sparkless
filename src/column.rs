@@ -2252,6 +2252,90 @@ impl Column {
         let out = self.expr().clone().struct_().json_encode();
         Self::from_expr(out, None)
     }
+
+    /// Length of JSON array at path (PySpark json_array_length). UDF.
+    pub fn json_array_length(&self, path: &str) -> Column {
+        let path = path.to_string();
+        let expr = self.expr().clone().map(
+            move |s| crate::udfs::apply_json_array_length(s, &path),
+            GetOutput::from_type(DataType::Int64),
+        );
+        Self::from_expr(expr, None)
+    }
+
+    /// Parse URL and extract part (PySpark parse_url). UDF.
+    pub fn parse_url(&self, part: &str) -> Column {
+        let part = part.to_string();
+        let expr = self.expr().clone().map(
+            move |s| crate::udfs::apply_parse_url(s, &part),
+            GetOutput::from_type(DataType::String),
+        );
+        Self::from_expr(expr, None)
+    }
+
+    /// Hash of column value (PySpark hash). Single-column version.
+    pub fn hash(&self) -> Column {
+        let expr = self.expr().clone().map(
+            crate::udfs::apply_hash_one,
+            GetOutput::from_type(DataType::Int64),
+        );
+        Self::from_expr(expr, None)
+    }
+
+    // --- Phase 23: URL, misc ---
+
+    /// Check if column values are in the other column's list/series (PySpark isin).
+    pub fn isin(&self, other: &Column) -> Column {
+        let out = self.expr().clone().is_in(other.expr().clone());
+        Self::from_expr(out, None)
+    }
+
+    /// Percent-decode URL-encoded string (PySpark url_decode). Uses UDF.
+    pub fn url_decode(&self) -> Column {
+        let expr = self.expr().clone().map(
+            crate::udfs::apply_url_decode,
+            GetOutput::from_type(DataType::String),
+        );
+        Self::from_expr(expr, None)
+    }
+
+    /// Percent-encode string for URL (PySpark url_encode). Uses UDF.
+    pub fn url_encode(&self) -> Column {
+        let expr = self.expr().clone().map(
+            crate::udfs::apply_url_encode,
+            GetOutput::from_type(DataType::String),
+        );
+        Self::from_expr(expr, None)
+    }
+
+    /// Bitwise left shift (PySpark shiftLeft). col << n = col * 2^n.
+    pub fn shift_left(&self, n: i32) -> Column {
+        use polars::prelude::*;
+        let pow = lit(2i64).pow(lit(n as i64));
+        Self::from_expr(
+            (self.expr().clone().cast(DataType::Int64) * pow).cast(DataType::Int64),
+            None,
+        )
+    }
+
+    /// Bitwise signed right shift (PySpark shiftRight). col >> n = col / 2^n.
+    pub fn shift_right(&self, n: i32) -> Column {
+        use polars::prelude::*;
+        let pow = lit(2i64).pow(lit(n as i64));
+        Self::from_expr(
+            (self.expr().clone().cast(DataType::Int64) / pow).cast(DataType::Int64),
+            None,
+        )
+    }
+
+    /// Bitwise unsigned right shift (PySpark shiftRightUnsigned). Logical shift.
+    pub fn shift_right_unsigned(&self, n: i32) -> Column {
+        let expr = self.expr().clone().map(
+            move |s| crate::udfs::apply_shift_right_unsigned(s, n),
+            GetOutput::from_type(DataType::Int64),
+        );
+        Self::from_expr(expr, None)
+    }
 }
 
 #[cfg(test)]

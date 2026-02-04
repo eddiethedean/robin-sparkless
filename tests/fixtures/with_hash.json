@@ -1,0 +1,32 @@
+{
+  "name": "with_hash",
+  "pyspark_version": "3.5.0",
+  "input": {
+    "schema": [
+      { "name": "id", "type": "bigint" },
+      { "name": "a", "type": "int" },
+      { "name": "b", "type": "int" }
+    ],
+    "rows": [
+      [1, 10, 20],
+      [2, 10, 20],
+      [3, 5, 6]
+    ]
+  },
+  "operations": [
+    { "op": "withColumn", "column": "h", "expr": "hash(col('a'), col('b'))" },
+    { "op": "select", "columns": ["id", "h"] },
+    { "op": "orderBy", "columns": ["id"], "ascending": [true] }
+  ],
+  "expected": {
+    "schema": [
+      { "name": "id", "type": "bigint" },
+      { "name": "h", "type": "bigint" }
+    ],
+    "rows": [
+      [1, 4317102815173335287],
+      [2, 4317102815173335287],
+      [3, -2809789929572816272]
+    ]
+  }
+}

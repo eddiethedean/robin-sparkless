@@ -1,0 +1,32 @@
+{
+  "name": "with_shift_left",
+  "pyspark_version": "3.5.0",
+  "input": {
+    "schema": [
+      { "name": "id", "type": "bigint" },
+      { "name": "x", "type": "int" }
+    ],
+    "rows": [
+      [1, 4],
+      [2, 8],
+      [3, 1]
+    ]
+  },
+  "operations": [
+    { "op": "withColumn", "column": "shifted", "expr": "shiftLeft(col('x'), 2)" },
+    { "op": "select", "columns": ["id", "x", "shifted"] },
+    { "op": "orderBy", "columns": ["id"], "ascending": [true] }
+  ],
+  "expected": {
+    "schema": [
+      { "name": "id", "type": "bigint" },
+      { "name": "x", "type": "int" },
+      { "name": "shifted", "type": "bigint" }
+    ],
+    "rows": [
+      [1, 4, 16],
+      [2, 8, 32],
+      [3, 1, 4]
+    ]
+  }
+}

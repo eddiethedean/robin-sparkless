@@ -1,0 +1,31 @@
+{
+  "name": "json_array_length_test",
+  "pyspark_version": "3.5.0",
+  "input": {
+    "schema": [
+      { "name": "id", "type": "bigint" },
+      { "name": "json_col", "type": "string" }
+    ],
+    "rows": [
+      [1, "{\"arr\": [1, 2, 3]}"],
+      [2, "{\"arr\": []}"],
+      [3, "{\"arr\": [10]}"]
+    ]
+  },
+  "operations": [
+    { "op": "withColumn", "column": "len", "expr": "json_array_length(col('json_col'), '$.arr')" },
+    { "op": "select", "columns": ["id", "len"] },
+    { "op": "orderBy", "columns": ["id"], "ascending": [true] }
+  ],
+  "expected": {
+    "schema": [
+      { "name": "id", "type": "bigint" },
+      { "name": "len", "type": "bigint" }
+    ],
+    "rows": [
+      [1, 3],
+      [2, 0],
+      [3, 1]
+    ]
+  }
+}

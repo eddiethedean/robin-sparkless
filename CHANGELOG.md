@@ -9,9 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Planned
 
-- **Phases 23–24 – Full parity** with Sparkless 3.28.0: Phase 23: JSON, CSV, URL, misc. Phase 24: bit, control, JVM stubs, random, crypto. Target: 180+ parity fixtures; ~280 total functions. Est. 1.5–2 weeks per phase. See [ROADMAP.md](docs/ROADMAP.md) and [PARITY_CHECK_SPARKLESS_3.28.md](docs/PARITY_CHECK_SPARKLESS_3.28.md).
+- **Phase 24 – Full parity** with Sparkless 3.28.0: bit, control, JVM stubs, random, crypto. Target: 180+ parity fixtures; ~280 total functions. Est. 1.5–2 weeks. See [ROADMAP.md](docs/ROADMAP.md) and [PARITY_CHECK_SPARKLESS_3.28.md](docs/PARITY_CHECK_SPARKLESS_3.28.md).
 
 ### Added
+
+- **Phase 23 – Full parity 4: JSON, CSV, URL, misc** ✅ **COMPLETED**
+  - **URL**: `url_decode`, `url_encode` (percent-encoding).
+  - **JSON**: `json_array_length`, `parse_url`.
+  - **Misc**: `isin`, `isin_i64`, `isin_str`; `equal_null`; `hash` (xxHash64); `shift_left`, `shift_right`, `shift_right_unsigned`; `version`; `stack` (alias for struct_).
+  - **Parity fixtures**: `with_isin`, `with_url_decode`, `with_url_encode`, `json_array_length_test`, `with_hash`, `with_shift_left` (142→148).
+  - **PyO3**: All new functions.
 
 - **Phase 22 – Full parity 3: datetime extensions** ✅ **COMPLETED**
   - **Aliases**: `curdate`, `now`, `localtimestamp`; `date_diff`, `dateadd`, `datepart`.

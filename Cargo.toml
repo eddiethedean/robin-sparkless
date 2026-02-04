@@ -12,7 +12,7 @@ crate-type = ["rlib"]
 default = []
 pyo3 = ["dep:pyo3"]
 sql = ["dep:sqlparser"]
-delta = ["dep:deltalake", "dep:tokio", "dep:url"]
+delta = ["dep:deltalake", "dep:tokio"]
 
 [dependencies]
 polars = { version = "0.45", features = ["lazy", "csv", "parquet", "json", "temporal", "strings", "concat_str", "regex", "round_series", "abs", "dtype-categorical", "dtype-date", "dtype-datetime", "dtype-duration", "dtype-time", "rank", "is_in", "list_eval", "list_drop_nulls", "list_any_all", "cum_agg", "string_pad", "string_reverse", "repeat_by", "log", "month_end", "describe", "cross_join", "semi_anti_join", "extract_jsonpath", "dtype-struct", "random", "product"] }
@@ -26,7 +26,9 @@ pyo3 = { version = "0.24", optional = true, features = ["extension-module"] }
 sqlparser = { version = "0.45", optional = true }
 deltalake = { version = "0.30", optional = true }
 tokio = { version = "1", optional = true, features = ["rt", "rt-multi-thread", "fs", "io-util"] }
-url = { version = "2", optional = true }
+url = "2"
+# Phase 23: URL encode/decode
+percent-encoding = "2"
 # Phase 8: string UDFs and list helpers (used in map closures)
 strsim = "0.11"
 crc32fast = "1.4"

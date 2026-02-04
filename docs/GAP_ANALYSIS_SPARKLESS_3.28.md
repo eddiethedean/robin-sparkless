@@ -8,11 +8,11 @@
 
 | Metric | Sparkless 3.28.0 | Robin-Sparkless |
 |--------|-------------------|-----------------|
-| **Functions (top-level / F.xxx)** | ~280+ distinct names | ~265 implemented |
-| **Implemented in robin-sparkless** | — | ~265 PySpark-equivalent functions |
-| **Gap (in Sparkless, not in robin-sparkless)** | — | ~15+ function names (see below) |
+| **Functions (top-level / F.xxx)** | ~280+ distinct names | ~283 implemented |
+| **Implemented in robin-sparkless** | — | ~283 PySpark-equivalent functions |
+| **Gap (in Sparkless, not in robin-sparkless)** | — | ~10+ function names (see below) |
 
-**Update (Phase 18–22):** Phase 18–21 — all implemented. **Phase 22:** curdate, now, localtimestamp, date_diff, dateadd, datepart, extract, date_part, unix_micros, unix_millis, unix_seconds, dayname, weekday, make_timestamp, make_timestamp_ntz, make_interval, timestampadd, timestampdiff, days, hours, minutes, months, years, from_utc_timestamp, to_utc_timestamp, convert_timezone, current_timezone, to_timestamp — all implemented.
+**Update (Phase 18–23):** Phase 18–22 — all implemented. **Phase 23:** isin, isin_i64, isin_str, url_decode, url_encode, json_array_length, parse_url, hash, shift_left, shift_right, shift_right_unsigned, version, equal_null, stack — all implemented.
 
 Sparkless exposes both camelCase and snake_case for some (e.g. `countDistinct` / `count_distinct`). Robin-sparkless implements the snake_case PySpark-style names; where we have an equivalent, it’s counted as implemented.
 
@@ -54,7 +54,11 @@ The following are implemented in robin-sparkless (Rust `functions.rs`, `column.r
 
 **Misc (Phase 19):** `width_bucket`, `elt`, `bit_length`, `typeof`
 
-**JSON:** `get_json_object`, `from_json`, `to_json`
+**JSON:** `get_json_object`, `from_json`, `to_json`, `json_array_length`, `parse_url` (Phase 23)
+
+**URL (Phase 23):** `url_decode`, `url_encode`
+
+**Misc (Phase 23):** `isin`, `isin_i64`, `isin_str`, `equal_null`, `hash`, `shift_left`, `shift_right`, `shift_right_unsigned`, `version`, `stack`
 
 ---
 
@@ -182,9 +186,9 @@ Functions and aliases that exist in Sparkless 3.28.0 but are **not** implemented
 - ~~`weekday`~~ — **implemented (Phase 22)**
 
 ### 2.18 JSON / XML
-- `json_array_length`, `json_object_keys`, `json_tuple`
+- ~~`json_array_length`~~, `json_object_keys`, `json_tuple` — **json_array_length implemented (Phase 23)**
 - `from_xml`, `to_xml`, `schema_of_xml`
-- `parse_url`
+- ~~`parse_url`~~ — **implemented (Phase 23)**
 
 ### 2.19 Schema / I/O
 - `from_csv`, `to_csv`
@@ -200,7 +204,7 @@ Functions and aliases that exist in Sparkless 3.28.0 but are **not** implemented
 - ~~`typeof`~~ — **implemented (Phase 19)**
 
 ### 2.22 URL / string
-- `url_decode`, `url_encode`
+- ~~`url_decode`, `url_encode`~~ — **implemented (Phase 23)**
 
 ### 2.23 Regression (defer)
 - `regr_avgx`, `regr_avgy`, `regr_count`, `regr_intercept`, `regr_r2`, `regr_slope`, `regr_sxx`, `regr_sxy`, `regr_syy`
@@ -208,18 +212,18 @@ Functions and aliases that exist in Sparkless 3.28.0 but are **not** implemented
 ### 2.24 Misc
 - `call_function`
 - `case_when` — we have `when` + WhenBuilder
-- `equal_null`
+- ~~`equal_null`~~ — **implemented (Phase 23)**
 - `grouping`, `grouping_id`
-- `hash`
+- ~~`hash`~~ — **implemented (Phase 23)**
 - `inline`, `inline_outer`
-- `isin`
+- ~~`isin`~~ — **implemented (Phase 23)**
 - `sentences`
 - `sequence`
 - `sha` (generic)
-- `shiftLeft`, `shiftRight`, `shiftRightUnsigned`, `shiftleft`, `shiftright`, `shiftrightunsigned`
+- ~~`shiftLeft`, `shiftRight`, `shiftRightUnsigned`~~ — **implemented (Phase 23)**
 - `shuffle`
-- `stack`
-- `version`
+- ~~`stack`~~ — **implemented (Phase 23)** (alias for struct_)
+- ~~`version`~~ — **implemented (Phase 23)**
 - `window`, `window_time`
 - `xpath`, `xpath_boolean`, `xpath_double`, `xpath_float`, `xpath_int`, `xpath_long`, `xpath_number`, `xpath_short`, `xpath_string`
 

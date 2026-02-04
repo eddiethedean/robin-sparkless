@@ -1891,6 +1891,94 @@ pub fn to_json(column: &Column) -> Column {
     column.clone().to_json()
 }
 
+// --- Phase 23: JSON, URL, misc ---
+
+/// Check if column values are in the given list (PySpark isin). Uses Polars is_in.
+pub fn isin(column: &Column, other: &Column) -> Column {
+    column.clone().isin(other)
+}
+
+/// Check if column values are in the given i64 slice (PySpark isin with literal list).
+pub fn isin_i64(column: &Column, values: &[i64]) -> Column {
+    let s = Series::from_iter(values.iter().cloned());
+    Column::from_expr(column.expr().clone().is_in(lit(s)), None)
+}
+
+/// Check if column values are in the given string slice (PySpark isin with literal list).
+pub fn isin_str(column: &Column, values: &[&str]) -> Column {
+    let s: Series = Series::from_iter(values.iter().copied());
+    Column::from_expr(column.expr().clone().is_in(lit(s)), None)
+}
+
+/// Percent-decode URL-encoded string (PySpark url_decode).
+pub fn url_decode(column: &Column) -> Column {
+    column.clone().url_decode()
+}
+
+/// Percent-encode string for URL (PySpark url_encode).
+pub fn url_encode(column: &Column) -> Column {
+    column.clone().url_encode()
+}
+
+/// Bitwise left shift (PySpark shiftLeft). col << n.
+pub fn shift_left(column: &Column, n: i32) -> Column {
+    column.clone().shift_left(n)
+}
+
+/// Bitwise signed right shift (PySpark shiftRight). col >> n.
+pub fn shift_right(column: &Column, n: i32) -> Column {
+    column.clone().shift_right(n)
+}
+
+/// Bitwise unsigned right shift (PySpark shiftRightUnsigned). Logical shift for Long.
+pub fn shift_right_unsigned(column: &Column, n: i32) -> Column {
+    column.clone().shift_right_unsigned(n)
+}
+
+/// Session/library version string (PySpark version).
+pub fn version() -> Column {
+    Column::from_expr(lit("robin-sparkless-0.1.0"), None)
+}
+
+/// Null-safe equality: true if both null or both equal (PySpark equal_null). Alias for eq_null_safe.
+pub fn equal_null(left: &Column, right: &Column) -> Column {
+    left.clone().eq_null_safe(right)
+}
+
+/// Length of JSON array at path (PySpark json_array_length).
+pub fn json_array_length(column: &Column, path: &str) -> Column {
+    column.clone().json_array_length(path)
+}
+
+/// Parse URL and extract part: PROTOCOL, HOST, PATH, etc. (PySpark parse_url).
+pub fn parse_url(column: &Column, part: &str) -> Column {
+    column.clone().parse_url(part)
+}
+
+/// Hash of column values (PySpark hash). Uses xxHash64 for consistency.
+pub fn hash(columns: &[&Column]) -> Column {
+    use polars::prelude::*;
+    if columns.is_empty() {
+        return crate::column::Column::from_expr(lit(0i64), None);
+    }
+    if columns.len() == 1 {
+        return columns[0].clone().hash();
+    }
+    let exprs: Vec<Expr> = columns.iter().map(|c| c.expr().clone()).collect();
+    let struct_expr = polars::prelude::as_struct(exprs);
+    let name = columns[0].name().to_string();
+    let expr = struct_expr.map(
+        crate::udfs::apply_hash_struct,
+        GetOutput::from_type(DataType::Int64),
+    );
+    crate::column::Column::from_expr(expr, Some(name))
+}
+
+/// Stack columns into struct (PySpark stack). Alias for struct_.
+pub fn stack(columns: &[&Column]) -> Column {
+    struct_(columns)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

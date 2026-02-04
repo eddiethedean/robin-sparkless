@@ -2005,22 +2005,24 @@ fn parse_with_column_expr(src: &str) -> Result<Expr, String> {
         contains, conv, convert_timezone, cos, cosh, cot, create_map, csc, curdate, current_date,
         current_timestamp, current_timezone, date_add, date_diff, date_from_unix_date, date_part,
         date_sub, dateadd, datediff, datepart, day, dayname, dayofmonth, dayofweek, dayofyear,
-        days, degrees, e, element_at, elt, endswith, exp, extract, factorial, find_in_set,
-        format_number, format_string, from_unixtime, from_utc_timestamp, get, getbit, greatest,
-        hex, hour, hours, hypot, ilike, initcap, instr, isnan, isnotnull, isnull, last_day, lcase,
-        least, left, length, like, lit_str, ln, localtimestamp, locate, log, log10, lower, lpad,
-        make_date, make_interval, make_timestamp, make_timestamp_ntz, map_concat, map_contains_key,
-        map_filter, map_from_entries, map_zip_with, md5, minute, minutes, months, months_between,
-        named_struct, nanvl, negate, next_day, now, nullif, nvl, nvl2, overlay, pi, pmod, position,
+        days, degrees, e, element_at, elt, endswith, equal_null, exp, extract, factorial,
+        find_in_set, format_number, format_string, from_unixtime, from_utc_timestamp, get, getbit,
+        greatest, hash, hex, hour, hours, hypot, ilike, initcap, instr, isin, isin_i64, isin_str,
+        isnan, isnotnull, isnull, json_array_length, last_day, lcase, least, left, length, like,
+        lit_str, ln, localtimestamp, locate, log, log10, lower, lpad, make_date, make_interval,
+        make_timestamp, make_timestamp_ntz, map_concat, map_contains_key, map_filter,
+        map_from_entries, map_zip_with, md5, minute, minutes, months, months_between, named_struct,
+        nanvl, negate, next_day, now, nullif, nvl, nvl2, overlay, parse_url, pi, pmod, position,
         positive, pow, power, quarter, radians, regexp_count, regexp_extract, regexp_extract_all,
         regexp_instr, regexp_like, regexp_replace, regexp_substr, repeat, replace, reverse, right,
-        rlike, rpad, sec, second, sha1, sha2, signum, sin, sinh, size, split, split_part, sqrt,
-        startswith, str_to_map, struct_, substr, substring, tan, tanh, timestamp_micros,
-        timestamp_millis, timestamp_seconds, timestampadd, timestampdiff, to_char, to_degrees,
-        to_number, to_radians, to_unix_timestamp, to_utc_timestamp, trim, trunc, try_add, try_cast,
-        try_divide, try_multiply, try_subtract, try_to_number, try_to_timestamp, typeof_, ucase,
-        unbase64, unhex, unix_date, unix_micros, unix_millis, unix_seconds, unix_timestamp,
-        unix_timestamp_now, upper, weekday, weekofyear, when, width_bucket, years, zip_with,
+        rlike, rpad, sec, second, sha1, sha2, shift_left, shift_right, shift_right_unsigned,
+        signum, sin, sinh, size, split, split_part, sqrt, stack, startswith, str_to_map, struct_,
+        substr, substring, tan, tanh, timestamp_micros, timestamp_millis, timestamp_seconds,
+        timestampadd, timestampdiff, to_char, to_degrees, to_number, to_radians, to_unix_timestamp,
+        to_utc_timestamp, trim, trunc, try_add, try_cast, try_divide, try_multiply, try_subtract,
+        try_to_number, try_to_timestamp, typeof_, ucase, unbase64, unhex, unix_date, unix_micros,
+        unix_millis, unix_seconds, unix_timestamp, unix_timestamp_now, upper, url_decode,
+        url_encode, version, weekday, weekofyear, when, width_bucket, years, zip_with,
     };
 
     let s = src.trim();
@@ -2580,6 +2582,136 @@ fn parse_with_column_expr(src: &str) -> Result<Expr, String> {
             .trim()
             .trim_matches(['\'', '"']);
         return Ok(to_utc_timestamp(&col(col_name), tz).into_expr());
+    }
+
+    // Handle url_decode(col('x')), url_encode(col('x'))
+    if s.starts_with("url_decode(") {
+        let inner = extract_first_arg(s, "url_decode(")?;
+        let col_name = extract_col_name(inner)?;
+        return Ok(url_decode(&col(col_name)).into_expr());
+    }
+    if s.starts_with("url_encode(") {
+        let inner = extract_first_arg(s, "url_encode(")?;
+        let col_name = extract_col_name(inner)?;
+        return Ok(url_encode(&col(col_name)).into_expr());
+    }
+
+    // Handle json_array_length(col('json'), '$.arr')
+    if s.starts_with("json_array_length(") {
+        let inner = extract_first_arg(s, "json_array_length(")?;
+        let parts = parse_comma_separated_args(inner);
+        let col_name = extract_col_name(parts.first().ok_or("json_array_length needs column")?)?;
+        let path = parts
+            .get(1)
+            .ok_or("json_array_length needs path")?
+            .trim()
+            .trim_matches(['\'', '"']);
+        return Ok(json_array_length(&col(col_name), path).into_expr());
+    }
+
+    // Handle parse_url(col('url'), 'HOST')
+    if s.starts_with("parse_url(") {
+        let inner = extract_first_arg(s, "parse_url(")?;
+        let parts = parse_comma_separated_args(inner);
+        let col_name = extract_col_name(parts.first().ok_or("parse_url needs column")?)?;
+        let part = parts
+            .get(1)
+            .ok_or("parse_url needs part")?
+            .trim()
+            .trim_matches(['\'', '"']);
+        return Ok(parse_url(&col(col_name), part).into_expr());
+    }
+
+    // Handle isin(col('x'), 1, 2, 3) or isin(col('x'), 'a', 'b', 'c')
+    if s.starts_with("isin(") {
+        let inner = extract_first_arg(s, "isin(")?;
+        let parts = parse_comma_separated_args(inner);
+        let col_name = extract_col_name(parts.first().ok_or("isin needs column")?)?;
+        let rest: Vec<&str> = parts.iter().skip(1).map(|p| p.trim()).collect();
+        if rest.is_empty() {
+            return Err("isin needs at least one value".to_string());
+        }
+        let first = rest[0].trim_matches(['\'', '"']);
+        if first.parse::<i64>().is_ok() {
+            let values: Vec<i64> = rest
+                .iter()
+                .filter_map(|p| p.trim().trim_matches(['\'', '"']).parse::<i64>().ok())
+                .collect();
+            return Ok(isin_i64(&col(col_name), &values).into_expr());
+        }
+        let values: Vec<&str> = rest
+            .iter()
+            .map(|p| p.trim().trim_matches(['\'', '"']))
+            .collect();
+        return Ok(isin_str(&col(col_name), &values).into_expr());
+    }
+
+    // Handle hash(col('a')) or hash(col('a'), col('b'))
+    if s.starts_with("hash(") {
+        let inner = extract_first_arg(s, "hash(")?;
+        let parts = parse_comma_separated_args(inner);
+        let cols: Vec<_> = parts
+            .iter()
+            .map(|p| extract_col_name(p.trim()))
+            .collect::<Result<Vec<_>, _>>()?;
+        if cols.is_empty() {
+            return Err("hash needs at least one column".to_string());
+        }
+        let refs: Vec<_> = cols.iter().map(|c| col(c)).collect();
+        let col_refs: Vec<_> = refs.iter().collect();
+        return Ok(hash(&col_refs).into_expr());
+    }
+
+    // Handle shiftLeft(col('x'), 2) or shift_left
+    if s.starts_with("shiftLeft(") || s.starts_with("shift_left(") {
+        let prefix = if s.starts_with("shiftLeft(") {
+            "shiftLeft("
+        } else {
+            "shift_left("
+        };
+        let inner = extract_first_arg(s, prefix)?;
+        let parts = parse_comma_separated_args(inner);
+        let col_name = extract_col_name(parts.first().ok_or("shiftLeft needs column")?)?;
+        let n: i32 = parts
+            .get(1)
+            .ok_or("shiftLeft needs n")?
+            .trim()
+            .parse()
+            .map_err(|_| "shiftLeft n must be integer")?;
+        return Ok(shift_left(&col(col_name), n).into_expr());
+    }
+
+    // Handle shiftRight(col('x'), 2)
+    if s.starts_with("shiftRight(") || s.starts_with("shift_right(") {
+        let prefix = if s.starts_with("shiftRight(") {
+            "shiftRight("
+        } else {
+            "shift_right("
+        };
+        let inner = extract_first_arg(s, prefix)?;
+        let parts = parse_comma_separated_args(inner);
+        let col_name = extract_col_name(parts.first().ok_or("shiftRight needs column")?)?;
+        let n: i32 = parts
+            .get(1)
+            .ok_or("shiftRight needs n")?
+            .trim()
+            .parse()
+            .map_err(|_| "shiftRight n must be integer")?;
+        return Ok(shift_right(&col(col_name), n).into_expr());
+    }
+
+    // Handle version()
+    if s == "version()" {
+        return Ok(version().into_expr());
+    }
+
+    // Handle equal_null(col('a'), col('b'))
+    if s.starts_with("equal_null(") {
+        let inner = extract_first_arg(s, "equal_null(")?;
+        let parts = parse_comma_separated_args(inner);
+        let a_name = extract_col_name(parts.first().ok_or("equal_null needs a")?)?;
+        let b_name = extract_col_name(parts.get(1).ok_or("equal_null needs b")?)?;
+        return Ok(equal_null(&col(a_name), &col(b_name)).into_expr());
     }
 
     // Handle curdate(), now(), localtimestamp()

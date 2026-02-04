@@ -5,12 +5,12 @@
 | [QUICKSTART](QUICKSTART.md) | Build, install, basic usage, optional features (SQL, Delta), troubleshooting, benchmarks |
 | [ROADMAP](ROADMAP.md) | Development roadmap and Sparkless integration phases |
 | [CHANGELOG](../CHANGELOG.md) | Version history and release notes |
-| [PARITY_STATUS](PARITY_STATUS.md) | PySpark parity coverage matrix (142 fixtures; Phases 12–22 covered) |
+| [PARITY_STATUS](PARITY_STATUS.md) | PySpark parity coverage matrix (148 fixtures; Phases 12–23 covered) |
 | [PYSPARK_DIFFERENCES](PYSPARK_DIFFERENCES.md) | Known divergences from PySpark (window, SQL, Delta; Phase 8 completed) |
 | [PYTHON_API](PYTHON_API.md) | Python API contract (Phase 4 PyO3 bridge): build, install, signatures; optional SQL and Delta |
 | [CONVERTER_STATUS](CONVERTER_STATUS.md) | Sparkless → robin-sparkless fixture converter |
 | [SPARKLESS_PARITY_STATUS](SPARKLESS_PARITY_STATUS.md) | Phase 5: pass/fail and failure reasons for converted fixtures |
-| [FULL_BACKEND_ROADMAP](FULL_BACKEND_ROADMAP.md) | Phased plan to full Sparkless backend replacement (Phases 12–22 done; ~265 functions, 142 fixtures; Phases 23–24 full parity, Phase 25 crate publish, Phase 26 Sparkless integration) |
+| [FULL_BACKEND_ROADMAP](FULL_BACKEND_ROADMAP.md) | Phased plan to full Sparkless backend replacement (Phases 12–23 done; ~283 functions, 148 fixtures; Phase 24 full parity, Phase 25 crate publish, Phase 26 Sparkless integration) |
 | [GAP_ANALYSIS_SPARKLESS_3.28](GAP_ANALYSIS_SPARKLESS_3.28.md) | Full gap analysis vs Sparkless 3.28.0 (installed API comparison) |
 | [PARITY_CHECK_SPARKLESS_3.28](PARITY_CHECK_SPARKLESS_3.28.md) | Double-check parity: implemented vs gap (Feb 2026) |
 | [PHASE15_GAP_LIST](PHASE15_GAP_LIST.md) | Function gap list (PYSPARK_FUNCTION_MATRIX vs robin-sparkless) |

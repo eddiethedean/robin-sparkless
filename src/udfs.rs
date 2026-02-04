@@ -2740,3 +2740,169 @@ pub fn apply_factorial(column: Column) -> PolarsResult<Option<Column>> {
     );
     Ok(Some(Column::new(name, out.into_series())))
 }
+
+// --- Phase 23: URL, misc ---
+
+/// url_decode(column) - percent-decode URL-encoded string (PySpark url_decode).
+pub fn apply_url_decode(column: Column) -> PolarsResult<Option<Column>> {
+    use percent_encoding::percent_decode_str;
+    let name = column.field().into_owned().name;
+    let series = column.take_materialized_series();
+    let ca = series
+        .str()
+        .map_err(|e| PolarsError::ComputeError(format!("url_decode: {}", e).into()))?;
+    let out = StringChunked::from_iter_options(
+        name.as_str().into(),
+        ca.into_iter().map(|opt_s| {
+            opt_s.and_then(|s| {
+                percent_decode_str(s)
+                    .decode_utf8()
+                    .ok()
+                    .map(|c| c.into_owned())
+            })
+        }),
+    );
+    Ok(Some(Column::new(name, out.into_series())))
+}
+
+/// url_encode(column) - percent-encode string for URL (PySpark url_encode).
+pub fn apply_url_encode(column: Column) -> PolarsResult<Option<Column>> {
+    use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
+    let name = column.field().into_owned().name;
+    let series = column.take_materialized_series();
+    let ca = series
+        .str()
+        .map_err(|e| PolarsError::ComputeError(format!("url_encode: {}", e).into()))?;
+    let out = StringChunked::from_iter_options(
+        name.as_str().into(),
+        ca.into_iter()
+            .map(|opt_s| opt_s.map(|s| utf8_percent_encode(s, NON_ALPHANUMERIC).to_string())),
+    );
+    Ok(Some(Column::new(name, out.into_series())))
+}
+
+/// shiftRightUnsigned - logical right shift for i64 (PySpark shiftRightUnsigned).
+pub fn apply_shift_right_unsigned(column: Column, n: i32) -> PolarsResult<Option<Column>> {
+    let name = column.field().into_owned().name;
+    let series = column.take_materialized_series();
+    let s = series.cast(&DataType::Int64)?;
+    let ca = s
+        .i64()
+        .map_err(|e| PolarsError::ComputeError(format!("shift_right_unsigned: {}", e).into()))?;
+    let u = n as u32;
+    let out = Int64Chunked::from_iter_options(
+        name.as_str().into(),
+        ca.into_iter()
+            .map(|opt_v| opt_v.map(|v| ((v as u64) >> u) as i64)),
+    );
+    Ok(Some(Column::new(name, out.into_series())))
+}
+
+/// json_array_length(json_str, path) - length of JSON array at path (PySpark json_array_length).
+pub fn apply_json_array_length(column: Column, path: &str) -> PolarsResult<Option<Column>> {
+    let name = column.field().into_owned().name;
+    let series = column.take_materialized_series();
+    let ca = series
+        .str()
+        .map_err(|e| PolarsError::ComputeError(format!("json_array_length: {}", e).into()))?;
+    let path = path.trim_start_matches('$').trim_start_matches('.');
+    let path_parts: Vec<&str> = if path.is_empty() {
+        vec![]
+    } else {
+        path.split('.').collect()
+    };
+    let out = Int64Chunked::from_iter_options(
+        name.as_str().into(),
+        ca.into_iter().map(|opt_s| {
+            opt_s.and_then(|s| {
+                let v: serde_json::Value = serde_json::from_str(s).ok()?;
+                let mut current = &v;
+                for part in &path_parts {
+                    current = current.get(part)?;
+                }
+                current.as_array().map(|a| a.len() as i64)
+            })
+        }),
+    );
+    Ok(Some(Column::new(name, out.into_series())))
+}
+
+/// parse_url(url_str, part) - extract URL component (PySpark parse_url).
+pub fn apply_parse_url(column: Column, part: &str) -> PolarsResult<Option<Column>> {
+    use url::Url;
+    let name = column.field().into_owned().name;
+    let series = column.take_materialized_series();
+    let ca = series
+        .str()
+        .map_err(|e| PolarsError::ComputeError(format!("parse_url: {}", e).into()))?;
+    let part_upper = part.trim().to_uppercase();
+    let out = StringChunked::from_iter_options(
+        name.as_str().into(),
+        ca.into_iter().map(|opt_s| {
+            opt_s.and_then(|s| {
+                let u = Url::parse(s).ok()?;
+                let out: Option<String> = match part_upper.as_str() {
+                    "PROTOCOL" | "PROT" => Some(u.scheme().to_string()),
+                    "HOST" => u.host_str().map(String::from),
+                    "PATH" | "FILE" | "PATHNAME" => Some(u.path().to_string()),
+                    "QUERY" | "REF" | "QUERYSTRING" => u.query().map(String::from),
+                    "USERINFO" => Some(format!("{}:{}", u.username(), u.password().unwrap_or(""))),
+                    "AUTHORITY" => u.host_str().map(|h| h.to_string()),
+                    _ => None,
+                };
+                out
+            })
+        }),
+    );
+    Ok(Some(Column::new(name, out.into_series())))
+}
+
+/// hash one column (PySpark hash) - uses xxHash64.
+pub fn apply_hash_one(column: Column) -> PolarsResult<Option<Column>> {
+    let name = column.field().into_owned().name;
+    let series = column.take_materialized_series();
+    let out = Int64Chunked::from_iter_options(
+        name.as_str().into(),
+        series_to_hash_iter(series).map(|opt| opt.map(|h| h as i64)),
+    );
+    Ok(Some(Column::new(name, out.into_series())))
+}
+
+/// hash struct (multiple columns combined) - PySpark hash.
+pub fn apply_hash_struct(column: Column) -> PolarsResult<Option<Column>> {
+    let name = column.field().into_owned().name;
+    let series = column.take_materialized_series();
+    let out = Int64Chunked::from_iter_options(
+        name.as_str().into(),
+        series_to_hash_iter(series).map(|opt| opt.map(|h| h as i64)),
+    );
+    Ok(Some(Column::new(name, out.into_series())))
+}
+
+fn series_to_hash_iter(series: Series) -> impl Iterator<Item = Option<u64>> {
+    use std::hash::Hasher;
+    use twox_hash::XxHash64;
+    (0..series.len()).map(move |i| {
+        let av = series.get(i).ok()?;
+        let mut hasher = XxHash64::default();
+        hash_any_value(&av, &mut hasher);
+        Some(hasher.finish())
+    })
+}
+
+fn hash_any_value(av: &polars::datatypes::AnyValue, h: &mut impl std::hash::Hasher) {
+    use polars::datatypes::AnyValue;
+    match av {
+        AnyValue::Null => h.write_u8(0),
+        AnyValue::Boolean(v) => h.write_u8(*v as u8),
+        AnyValue::Int32(v) => h.write(&v.to_le_bytes()),
+        AnyValue::Int64(v) => h.write(&v.to_le_bytes()),
+        AnyValue::UInt32(v) => h.write(&v.to_le_bytes()),
+        AnyValue::UInt64(v) => h.write(&v.to_le_bytes()),
+        AnyValue::Float32(v) => h.write(&v.to_bits().to_le_bytes()),
+        AnyValue::Float64(v) => h.write(&v.to_bits().to_le_bytes()),
+        AnyValue::String(v) => h.write(v.as_bytes()),
+        AnyValue::Binary(v) => h.write(v),
+        _ => h.write(av.to_string().as_bytes()),
+    }
+}

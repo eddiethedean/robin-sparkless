@@ -23,10 +23,12 @@ use crate::functions::{
     weekofyear, years,
 };
 use crate::functions::{
-    array_agg, arrays_overlap, arrays_zip, bit_length, create_map, explode_outer, get, map_concat,
-    map_contains_key, map_filter_value_gt, map_from_entries, map_zip_with_coalesce, named_struct,
-    str_to_map, struct_, to_char, to_number, to_varchar, try_add, try_divide, try_multiply,
-    try_subtract, try_to_number, try_to_timestamp, typeof_, width_bucket, zip_with_coalesce,
+    array_agg, arrays_overlap, arrays_zip, bit_length, create_map, equal_null, explode_outer, get,
+    hash, isin, isin_i64, isin_str, json_array_length, map_concat, map_contains_key,
+    map_filter_value_gt, map_from_entries, map_zip_with_coalesce, named_struct, parse_url,
+    shift_left, shift_right, str_to_map, struct_, to_char, to_number, to_varchar, try_add,
+    try_divide, try_multiply, try_subtract, try_to_number, try_to_timestamp, typeof_, url_decode,
+    url_encode, version, width_bucket, zip_with_coalesce,
 };
 use crate::functions::{
     asc, asc_nulls_first, asc_nulls_last, bround, cot, csc, desc, desc_nulls_first,
@@ -301,6 +303,25 @@ fn robin_sparkless(m: &Bound<'_, PyModule>) -> PyResult<()> {
         wrap_pyfunction!(py_current_timezone, m)?,
     )?;
     m.add("to_timestamp", wrap_pyfunction!(py_to_timestamp, m)?)?;
+    // Phase 23: JSON, URL, misc
+    m.add("isin", wrap_pyfunction!(py_isin, m)?)?;
+    m.add("isin_i64", wrap_pyfunction!(py_isin_i64, m)?)?;
+    m.add("isin_str", wrap_pyfunction!(py_isin_str, m)?)?;
+    m.add("url_decode", wrap_pyfunction!(py_url_decode, m)?)?;
+    m.add("url_encode", wrap_pyfunction!(py_url_encode, m)?)?;
+    m.add("shift_left", wrap_pyfunction!(py_shift_left, m)?)?;
+    m.add("shift_right", wrap_pyfunction!(py_shift_right, m)?)?;
+    m.add("shiftRight", wrap_pyfunction!(py_shift_right, m)?)?;
+    m.add("shiftLeft", wrap_pyfunction!(py_shift_left, m)?)?;
+    m.add("version", wrap_pyfunction!(py_version, m)?)?;
+    m.add("equal_null", wrap_pyfunction!(py_equal_null, m)?)?;
+    m.add(
+        "json_array_length",
+        wrap_pyfunction!(py_json_array_length, m)?,
+    )?;
+    m.add("parse_url", wrap_pyfunction!(py_parse_url, m)?)?;
+    m.add("hash", wrap_pyfunction!(py_hash, m)?)?;
+    m.add("stack", wrap_pyfunction!(py_stack, m)?)?;
     Ok(())
 }
 
@@ -844,6 +865,99 @@ fn py_to_timestamp(column: &PyColumn) -> PyResult<PyColumn> {
     to_timestamp(&column.inner)
         .map(|c| PyColumn { inner: c })
         .map_err(|e| pyo3::exceptions::PyValueError::new_err(e))
+}
+
+// Phase 23: JSON, URL, misc
+#[pyfunction]
+fn py_isin(column: &PyColumn, other: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: isin(&column.inner, &other.inner),
+    }
+}
+
+#[pyfunction]
+fn py_isin_i64(column: &PyColumn, values: Vec<i64>) -> PyColumn {
+    PyColumn {
+        inner: isin_i64(&column.inner, &values),
+    }
+}
+
+#[pyfunction]
+fn py_isin_str(column: &PyColumn, values: Vec<String>) -> PyColumn {
+    let refs: Vec<&str> = values.iter().map(|s| s.as_str()).collect();
+    PyColumn {
+        inner: isin_str(&column.inner, &refs),
+    }
+}
+
+#[pyfunction]
+fn py_url_decode(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: url_decode(&column.inner),
+    }
+}
+
+#[pyfunction]
+fn py_url_encode(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: url_encode(&column.inner),
+    }
+}
+
+#[pyfunction]
+fn py_shift_left(column: &PyColumn, n: i32) -> PyColumn {
+    PyColumn {
+        inner: shift_left(&column.inner, n),
+    }
+}
+
+#[pyfunction]
+fn py_shift_right(column: &PyColumn, n: i32) -> PyColumn {
+    PyColumn {
+        inner: shift_right(&column.inner, n),
+    }
+}
+
+#[pyfunction]
+fn py_version() -> PyColumn {
+    PyColumn { inner: version() }
+}
+
+#[pyfunction]
+fn py_equal_null(left: &PyColumn, right: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: equal_null(&left.inner, &right.inner),
+    }
+}
+
+#[pyfunction]
+fn py_json_array_length(column: &PyColumn, path: &str) -> PyColumn {
+    PyColumn {
+        inner: json_array_length(&column.inner, path),
+    }
+}
+
+#[pyfunction]
+fn py_parse_url(column: &PyColumn, part: &str) -> PyColumn {
+    PyColumn {
+        inner: parse_url(&column.inner, part),
+    }
+}
+
+#[pyfunction]
+fn py_hash(columns: Vec<PyRef<PyColumn>>) -> PyColumn {
+    let rs_refs: Vec<&crate::column::Column> = columns.iter().map(|c| &(&*c).inner).collect();
+    PyColumn {
+        inner: hash(&rs_refs),
+    }
+}
+
+#[pyfunction]
+fn py_stack(columns: Vec<PyRef<PyColumn>>) -> PyColumn {
+    let rs_refs: Vec<&crate::column::Column> = columns.iter().map(|c| &(&*c).inner).collect();
+    PyColumn {
+        inner: struct_(&rs_refs),
+    }
 }
 
 #[pyfunction]
