@@ -1,7 +1,9 @@
 //! GroupBy and aggregation operations.
 
 use super::DataFrame;
-use polars::prelude::{DataFrame as PlDataFrame, Expr, LazyGroupBy, PolarsError};
+use polars::prelude::{
+    col, len, lit, when, DataFrame as PlDataFrame, Expr, LazyGroupBy, PolarsError,
+};
 
 /// GroupedData - represents a DataFrame grouped by certain columns.
 /// Similar to PySpark's GroupedData
@@ -287,6 +289,110 @@ impl GroupedData {
             .struct_()
             .field_by_name("_val")
             .alias(format!("min_by({}, {})", value_col, ord_col))];
+        let lf = self.lazy_grouped.clone().agg(agg_expr);
+        let mut pl_df = lf.collect()?;
+        pl_df = reorder_groupby_columns(&mut pl_df, &self.grouping_cols)?;
+        Ok(super::DataFrame::from_polars_with_options(
+            pl_df,
+            self.case_sensitive,
+        ))
+    }
+
+    /// Population covariance between two columns in each group (PySpark covar_pop).
+    pub fn covar_pop(&self, col1: &str, col2: &str) -> Result<DataFrame, PolarsError> {
+        use polars::prelude::DataType;
+        let c1 = col(col1).cast(DataType::Float64);
+        let c2 = col(col2).cast(DataType::Float64);
+        let n = len().cast(DataType::Float64);
+        let sum_ab = (c1.clone() * c2.clone()).sum();
+        let sum_a = col(col1).sum().cast(DataType::Float64);
+        let sum_b = col(col2).sum().cast(DataType::Float64);
+        let cov = (sum_ab - sum_a * sum_b / n.clone()) / n;
+        let agg_expr = vec![cov.alias(format!("covar_pop({}, {})", col1, col2))];
+        let lf = self.lazy_grouped.clone().agg(agg_expr);
+        let mut pl_df = lf.collect()?;
+        pl_df = reorder_groupby_columns(&mut pl_df, &self.grouping_cols)?;
+        Ok(super::DataFrame::from_polars_with_options(
+            pl_df,
+            self.case_sensitive,
+        ))
+    }
+
+    /// Sample covariance between two columns in each group (PySpark covar_samp). ddof=1.
+    pub fn covar_samp(&self, col1: &str, col2: &str) -> Result<DataFrame, PolarsError> {
+        use polars::prelude::DataType;
+        let c1 = col(col1).cast(DataType::Float64);
+        let c2 = col(col2).cast(DataType::Float64);
+        let n = len().cast(DataType::Float64);
+        let sum_ab = (c1.clone() * c2.clone()).sum();
+        let sum_a = col(col1).sum().cast(DataType::Float64);
+        let sum_b = col(col2).sum().cast(DataType::Float64);
+        let cov = when(len().gt(lit(1))).then(
+            (sum_ab - sum_a * sum_b / n.clone()) / (len() - lit(1)).cast(DataType::Float64),
+        ).otherwise(lit(f64::NAN));
+        let agg_expr = vec![cov.alias(format!("covar_samp({}, {})", col1, col2))];
+        let lf = self.lazy_grouped.clone().agg(agg_expr);
+        let mut pl_df = lf.collect()?;
+        pl_df = reorder_groupby_columns(&mut pl_df, &self.grouping_cols)?;
+        Ok(super::DataFrame::from_polars_with_options(
+            pl_df,
+            self.case_sensitive,
+        ))
+    }
+
+    /// Pearson correlation between two columns in each group (PySpark corr).
+    pub fn corr(&self, col1: &str, col2: &str) -> Result<DataFrame, PolarsError> {
+        use polars::prelude::DataType;
+        let c1 = col(col1).cast(DataType::Float64);
+        let c2 = col(col2).cast(DataType::Float64);
+        let n = len().cast(DataType::Float64);
+        let n1 = (len() - lit(1)).cast(DataType::Float64);
+        let sum_ab = (c1.clone() * c2.clone()).sum();
+        let sum_a = col(col1).sum().cast(DataType::Float64);
+        let sum_b = col(col2).sum().cast(DataType::Float64);
+        let sum_a2 = (c1.clone() * c1).sum();
+        let sum_b2 = (c2.clone() * c2).sum();
+        let cov_samp = (sum_ab - sum_a.clone() * sum_b.clone() / n.clone()) / n1.clone();
+        let var_a = (sum_a2 - sum_a.clone() * sum_a / n.clone()) / n1.clone();
+        let var_b = (sum_b2 - sum_b.clone() * sum_b / n.clone()) / n1.clone();
+        let std_a = var_a.sqrt();
+        let std_b = var_b.sqrt();
+        let corr_expr = when(len().gt(lit(1)))
+            .then(cov_samp / (std_a * std_b))
+            .otherwise(lit(f64::NAN));
+        let agg_expr = vec![corr_expr.alias(format!("corr({}, {})", col1, col2))];
+        let lf = self.lazy_grouped.clone().agg(agg_expr);
+        let mut pl_df = lf.collect()?;
+        pl_df = reorder_groupby_columns(&mut pl_df, &self.grouping_cols)?;
+        Ok(super::DataFrame::from_polars_with_options(
+            pl_df,
+            self.case_sensitive,
+        ))
+    }
+
+    /// Kurtosis of a column in each group (PySpark kurtosis). Fisher definition, bias=true.
+    pub fn kurtosis(&self, column: &str) -> Result<DataFrame, PolarsError> {
+        use polars::prelude::*;
+        let agg_expr = vec![col(column)
+            .cast(DataType::Float64)
+            .kurtosis(true, true)
+            .alias(format!("kurtosis({})", column))];
+        let lf = self.lazy_grouped.clone().agg(agg_expr);
+        let mut pl_df = lf.collect()?;
+        pl_df = reorder_groupby_columns(&mut pl_df, &self.grouping_cols)?;
+        Ok(super::DataFrame::from_polars_with_options(
+            pl_df,
+            self.case_sensitive,
+        ))
+    }
+
+    /// Skewness of a column in each group (PySpark skewness). bias=true.
+    pub fn skewness(&self, column: &str) -> Result<DataFrame, PolarsError> {
+        use polars::prelude::*;
+        let agg_expr = vec![col(column)
+            .cast(DataType::Float64)
+            .skew(true)
+            .alias(format!("skewness({})", column))];
         let lf = self.lazy_grouped.clone().agg(agg_expr);
         let mut pl_df = lf.collect()?;
         pl_df = reorder_groupby_columns(&mut pl_df, &self.grouping_cols)?;

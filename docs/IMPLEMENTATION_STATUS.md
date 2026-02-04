@@ -90,8 +90,9 @@ Robin-sparkless is designed to **replace the backend logic** of [Sparkless](http
    - **Phase 22** ✅ (completed): Datetime extensions — curdate, now, localtimestamp, date_diff, dateadd, datepart, extract, date_part, unix_micros/millis/seconds, dayname, weekday, make_timestamp, make_timestamp_ntz, make_interval, timestampadd, timestampdiff, days, hours, minutes, months, years, from_utc_timestamp, to_utc_timestamp, convert_timezone, current_timezone, to_timestamp. Parity: fixtures with_dayname, with_weekday, with_extract, with_unix_micros, make_timestamp_test, timestampadd_test, from_utc_timestamp_test. PyO3 bindings for all.
    - **Phase 24** ✅ (partial): Bit ops, control (assert_true, raise_error), JVM stubs, rand/randn (real RNG, optional seed; per-row values when used in with_column/with_columns). AES crypto deferred.
    - **Phases 23–24**: Full parity (JSON/CSV/URL, bit/control/JVM/random/crypto).
-   - **Phase 25**: Prepare and publish robin-sparkless as a Rust crate (crates.io, API stability, docs, release workflow; optional PyPI wheel).
-   - **Phase 26**: Sparkless integration (BackendFactory "robin", 200+ tests passing).
+   - **Phase 25**: Readiness for post-refactor merge (plan interpreter, expression interpreter, logical plan schema, plan fixtures, create_dataframe_from_rows). See [READINESS_FOR_SPARKLESS_PLAN.md](READINESS_FOR_SPARKLESS_PLAN.md).
+   - **Phase 26**: Prepare and publish robin-sparkless as a Rust crate (crates.io, API stability, docs, release workflow; optional PyPI wheel).
+   - **Phase 27**: Sparkless integration (BackendFactory "robin", 200+ tests passing).
 
 11. **Sparkless integration** (in Sparkless repo, after Phase 17)
    - Fixture converter: Sparkless `expected_outputs/` JSON → robin-sparkless fixtures

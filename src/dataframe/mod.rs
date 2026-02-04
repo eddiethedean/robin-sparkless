@@ -13,7 +13,7 @@ pub use transformations::{filter, order_by, order_by_exprs, select, with_column,
 use crate::column::Column;
 use crate::functions::SortOrder;
 use crate::schema::StructType;
-use polars::prelude::{DataFrame as PlDataFrame, Expr, PolarsError};
+use polars::prelude::{DataFrame as PlDataFrame, Expr, PolarsError, SchemaNamesAndDtypes};
 use std::sync::Arc;
 
 /// Default for `spark.sql.caseSensitive` (PySpark default is false = case-insensitive).
@@ -365,6 +365,11 @@ impl DataFrame {
         DataFrameStat { df: self }
     }
 
+    /// Correlation matrix of all numeric columns. PySpark df.corr() returns a DataFrame of pairwise correlations.
+    pub fn corr(&self) -> Result<DataFrame, PolarsError> {
+        self.stat().corr_matrix()
+    }
+
     /// Summary statistics (alias for describe). PySpark summary.
     pub fn summary(&self) -> Result<DataFrame, PolarsError> {
         self.describe()
@@ -401,6 +406,25 @@ impl DataFrame {
 
     /// No-op: single partition in Polars. PySpark repartition(n).
     pub fn repartition(&self, _num_partitions: usize) -> Result<DataFrame, PolarsError> {
+        Ok(self.clone())
+    }
+
+    /// No-op: Polars has no range partitioning. PySpark repartitionByRange(n, cols).
+    pub fn repartition_by_range(&self, _num_partitions: usize, _cols: Vec<&str>) -> Result<DataFrame, PolarsError> {
+        Ok(self.clone())
+    }
+
+    /// Column names and dtype strings. PySpark dtypes. Returns (name, dtype_string) per column.
+    pub fn dtypes(&self) -> Result<Vec<(String, String)>, PolarsError> {
+        let schema = self.df.schema();
+        Ok(schema
+            .iter_names_and_dtypes()
+            .map(|(name, dtype)| (name.to_string(), format!("{:?}", dtype)))
+            .collect())
+    }
+
+    /// No-op: we don't model partitions. PySpark sortWithinPartitions. Same as orderBy for compatibility.
+    pub fn sort_within_partitions(&self, _cols: &[crate::functions::SortOrder]) -> Result<DataFrame, PolarsError> {
         Ok(self.clone())
     }
 

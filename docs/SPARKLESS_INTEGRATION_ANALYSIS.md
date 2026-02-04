@@ -218,16 +218,96 @@ Sparkless implements **403+ PySpark functions** ([PYSPARK_FUNCTION_MATRIX.md](ht
 
 ---
 
-## 7. Related Documentation
+## 7. Backend Replacement Viability (Investigation)
+
+This section summarizes the outcome of reading the Sparkless source to assess how viable it is to replace backend logic with **simple** robin-sparkless hookups.
+
+### 7.1 What Is a Simple Hookup
+
+| Area | Simple hookup? | Notes |
+|------|----------------|--------|
+| **BackendFactory** | Yes | Add `"robin"` branches in `create_storage_backend`, `create_materializer`, `create_export_backend`; extend `get_backend_type(storage)` to detect `"robin"` (e.g. `"robin" in module_name` or class name); add `"robin"` to `list_available_backends()` and allow it in `validate_backend_type`. Sparkless `config.resolve_backend_type()` already calls `BackendFactory.validate_backend_type(candidate_normalized)`, so once "robin" is in the list, `SparkSession.builder.config("spark.sparkless.backend", "robin").getOrCreate()` (or `SPARKLESS_BACKEND=robin`) will resolve to `"robin"`. On the order of 20–40 lines in `sparkless/backend/factory.py`. |
+| **ExportBackend** | Yes | Implement a `RobinExporter` that, given a Sparkless DataFrame, obtains rows (e.g. via materialization if needed) and uses `robin_sparkless` only for format conversion if desired, or delegates to existing Sparkless export helpers after converting to a robin DataFrame and calling `collect()` / `to_pandas()`. The protocol is minimal; main method is effectively “DataFrame → external format”. |
+| **StorageBackend (IStorageManager)** | Partial | Robin-sparkless has session, temp views, `read_csv`/`read_parquet`/`read_json`, `write_delta`. It does **not** have a first-class catalog (create_schema, create_table, insert_data, query_data). A **RobinStorageManager** can be a thin adapter: e.g. map schema/table to temp view names or file paths; implement create_table/insert_data using robin session + temp view or write to a path. Some methods (e.g. full catalog listing, metadata) may be no-op or limited. |
+
+### 7.2 What Is Not Simple: DataMaterializer
+
+The **DataMaterializer** is the core execution hook. Its contract is:
+
+- `materialize(data: List[Dict], schema: StructType, operations: List[Tuple[str, Any]]) -> List[Row]`
+
+Operations are queued by Sparkless as `(op_name, payload)`. Payloads are **live Python objects**, not serializable primitives:
+
+- **filter**: `payload` = `Column` or `ColumnOperation` (e.g. `F.col("age") > 30` → tree of Column/ColumnOperation/Literal).
+- **select**: `payload` = tuple/list of `Column` or `str` (column names or expressions).
+- **withColumn**: `payload` = `(col_name: str, expression: Column)`.
+- **join**: `payload` = `(other_df: DataFrame, on, how)` (other_df may have `_operations_queue` and must be materialized first).
+- **union**: `payload` = other `DataFrame`.
+- **orderBy**: `payload` = `(columns, ascending)` (columns can be Column or str).
+- **limit** / **offset**: `payload` = `n: int`.
+- **groupBy**: `payload` = `(group_by_columns, agg_expressions)` (aggs are Column/AggregateFunction, etc.).
+- **distinct**: `payload` = `()`.
+- **drop**: `payload` = column name(s) (str or list/tuple).
+- **withColumnRenamed**: `payload` = `(old_name: str, new_name: str)`.
+
+So a robin backend **cannot** be “send op name + JSON to Rust”. It must either:
+
+1. **Translate** Sparkless types to robin_sparkless types in Python: walk Column/ColumnOperation trees and build `robin_sparkless.Column` (and robin DataFrame API calls). This is comparable in spirit to `PolarsExpressionTranslator` + `PolarsOperationExecutor` but targeting the robin Python API. Op-level dispatch (filter → `df.filter`, select → `df.select`, …) is 1:1 with [PYTHON_API.md](PYTHON_API.md); the bulk of the work is **expression translation**.
+2. **Refactor Sparkless** to emit a serializable op format (e.g. expr strings or JSON) that backends interpret. Then robin could implement a thin interpreter. That would be a larger change in Sparkless.
+
+The surface to mirror for translation is:
+
+- **Sparkless**: `backend/polars/expression_translator.py` (`translate(expr, ...)` → Polars `Expr`), `backend/polars/operation_executor.py` (`apply_filter`, `apply_select`, `apply_with_column`, `apply_join`, `apply_union`, `apply_order_by`, `apply_limit`, `apply_offset`, `apply_group_by_agg`, `apply_distinct`, `apply_drop`, `apply_with_column_renamed`).
+- **Robin**: Same op names map to `DataFrame.filter`, `select`, `with_column`, `join`, `union`, `order_by`, `limit`, `offset`, `group_by`+`agg`, `distinct`, `drop`, `with_column_renamed`; expressions must be built as `robin_sparkless.Column` via `col`, `lit`, `when`/`then`/`otherwise`, and the function set in PYTHON_API.md.
+
+### 7.3 Materializer Op Names and Payload Shapes (Reference)
+
+| Op name | Payload shape | Notes |
+|---------|---------------|--------|
+| filter | `Column` or `ColumnOperation` | Condition expression tree. |
+| select | `Tuple[Union[Column, str], ...]` or list | Column refs or expressions. |
+| withColumn | `(col_name: str, expression: Column)` | New column expression. |
+| join | `(other_df: DataFrame, on, how)` | Other df may be lazy; must materialize. |
+| union | `other_df: DataFrame` | Same. |
+| orderBy | `(columns, ascending)` | columns: tuple/list of Column or str; ascending: bool or list. |
+| limit | `n: int` | |
+| offset | `n: int` | |
+| groupBy | `(group_by, aggs)` | group_by: columns; aggs: list of aggregation expressions (Column/AggregateFunction). |
+| distinct | `()` | |
+| drop | `str` or `List[str]` / tuple | Column names to drop. |
+| withColumnRenamed | `(old_name: str, new_name: str)` | |
+
+### 7.4 Gaps and Out-of-Scope for Initial Robin Backend
+
+- **SQL executor**: Sparkless has a full SQL layer (DDL/DML, MERGE, etc.) that uses the storage backend and may use a different execution path. Robin-sparkless has optional `sql` feature (`spark.sql()`, temp views). Replacing the SQL executor with robin would be a separate effort.
+- **Delta MERGE**: Implemented in Sparkless with mock/SQL; not in robin-sparkless.
+- **Full catalog**: IStorageManager has create_schema, list_schemas, create_table, insert_data, query_data, etc. Robin has no native catalog; adapter only (e.g. temp views + file paths).
+- **Window spec details**: Window functions in Sparkless use `WindowFunction` and partition/order specs. Robin supports window functions; the translator would need to map Sparkless window specs to robin’s `.over(...)` API.
+
+### 7.5 Dependency and install constraints (Sparkless → robin backend)
+
+When Sparkless is used with `backend_type="robin"` (e.g. `SparkSession.builder.config("spark.sparkless.backend", "robin").getOrCreate()` or `SPARKLESS_BACKEND=robin`), the **robin_sparkless** Python package must be available. It is an **optional** dependency of Sparkless:
+
+- **Install from source (robin-sparkless repo)**: From the robin-sparkless repo root, run `maturin develop --features pyo3` (optionally `maturin develop --features "pyo3,sql"` or `"pyo3,delta"`). This builds the extension and installs it into the current environment. Requires Rust (stable) and Python 3.8+.
+- **Install from PyPI (when published)**: `pip install robin_sparkless` will install the wheel. No Rust required.
+- **Build constraints**: The extension is built with PyO3 0.24. Python 3.8–3.12 are typically supported; check the robin-sparkless release for compatible manylinux/ABI tags.
+
+If `robin_sparkless` is not installed and the user selects the robin backend, `BackendFactory.create_materializer("robin")` succeeds (the module is importable), but the first call to `RobinMaterializer.materialize(...)` will raise a clear `RuntimeError` asking to install robin_sparkless. Sparkless can document the robin backend in `docs/backend_selection.md` and add an optional extra, e.g. `pip install sparkless[robin]`, that depends on `robin_sparkless` when that package is published.
+
+---
+
+## 8. Related Documentation
 
 - [README.md](../README.md) – Project overview and Sparkless integration goal
 - [ROADMAP.md](ROADMAP.md) – Development roadmap including integration phases
 - [PARITY_STATUS.md](PARITY_STATUS.md) – Parity matrix and Sparkless test conversion
 - [TEST_CREATION_GUIDE.md](TEST_CREATION_GUIDE.md) – How to add parity tests; §7 covers Sparkless fixture conversion
+- [SPARKLESS_REFACTOR_PLAN.md](SPARKLESS_REFACTOR_PLAN.md) – Refactor plan for Sparkless to prepare for a robin-sparkless backend (serializable logical plan, phased approach)
+- [READINESS_FOR_SPARKLESS_PLAN.md](READINESS_FOR_SPARKLESS_PLAN.md) – What robin-sparkless can do in parallel (plan interpreter, expression interpreter, fixture tests, API extensions) to prepare for the post-refactor merge
 
 ---
 
-## 8. Summary
+## 9. Summary
 
 | Goal | Action |
 |------|--------|

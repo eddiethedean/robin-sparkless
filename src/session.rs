@@ -84,6 +84,16 @@ impl SparkSession {
             .map(|mut m| m.insert(name.to_string(), df));
     }
 
+    /// Global temp view (PySpark: createGlobalTempView). Stub: uses same catalog as temp view.
+    pub fn create_global_temp_view(&self, name: &str, df: DataFrame) {
+        self.create_or_replace_temp_view(name, df);
+    }
+
+    /// Global temp view (PySpark: createOrReplaceGlobalTempView). Stub: uses same catalog as temp view.
+    pub fn create_or_replace_global_temp_view(&self, name: &str, df: DataFrame) {
+        self.create_or_replace_temp_view(name, df);
+    }
+
     /// Look up a temporary view by name (PySpark: table(name)).
     /// Returns an error if the view does not exist.
     pub fn table(&self, name: &str) -> Result<DataFrame, PolarsError> {

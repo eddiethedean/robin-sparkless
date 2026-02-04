@@ -155,6 +155,8 @@ struct AggregationSpec {
     #[serde(default)]
     column: Option<String>, // Column name for sum/avg/min/max (not needed for count)
     #[serde(default)]
+    column2: Option<String>, // Second column for covar_pop, covar_samp, corr
+    #[serde(default)]
     percentile: Option<f64>, // For percentile(column, p)
     #[serde(default)]
     value_column: Option<String>, // For max_by, min_by
@@ -963,6 +965,23 @@ fn apply_operations(
                                 .unwrap_or_else(|| format!("percentile({}, {})", col_name, p));
                             e.alias(&name)
                         }
+                        "approx_percentile" | "percentile_approx" => {
+                            let col_name = agg_spec.column.as_ref().ok_or_else(|| {
+                                PolarsError::ComputeError(
+                                    "approx_percentile/percentile_approx aggregation requires column name".into(),
+                                )
+                            })?;
+                            let p = agg_spec.percentile.unwrap_or(0.5);
+                            let e = col(col_name).quantile(
+                                polars::prelude::lit(p),
+                                polars::prelude::QuantileMethod::Linear,
+                            );
+                            let name: String = alias
+                                .filter(|a| !a.is_empty())
+                                .map(String::from)
+                                .unwrap_or_else(|| format!("approx_percentile({}, {})", col_name, p));
+                            e.alias(&name)
+                        }
                         "product" => {
                             let col_name = agg_spec.column.as_ref().ok_or_else(|| {
                                 PolarsError::ComputeError(
@@ -1059,6 +1078,90 @@ fn apply_operations(
                                 .filter(|a| !a.is_empty())
                                 .map(String::from)
                                 .unwrap_or_else(|| format!("min_by({}, {})", v_col, o_col));
+                            e.alias(&name)
+                        }
+                        "covar_pop" => {
+                            let c1 = agg_spec.column.as_ref().ok_or_else(|| {
+                                PolarsError::ComputeError(
+                                    "covar_pop aggregation requires column and column2".into(),
+                                )
+                            })?;
+                            let c2 = agg_spec.column2.as_ref().ok_or_else(|| {
+                                PolarsError::ComputeError(
+                                    "covar_pop aggregation requires column and column2".into(),
+                                )
+                            })?;
+                            let e = robin_sparkless::covar_pop_expr(c1, c2);
+                            let name: String = alias
+                                .filter(|a| !a.is_empty())
+                                .map(String::from)
+                                .unwrap_or_else(|| format!("covar_pop({}, {})", c1, c2));
+                            e.alias(&name)
+                        }
+                        "covar_samp" => {
+                            let c1 = agg_spec.column.as_ref().ok_or_else(|| {
+                                PolarsError::ComputeError(
+                                    "covar_samp aggregation requires column and column2".into(),
+                                )
+                            })?;
+                            let c2 = agg_spec.column2.as_ref().ok_or_else(|| {
+                                PolarsError::ComputeError(
+                                    "covar_samp aggregation requires column and column2".into(),
+                                )
+                            })?;
+                            let e = robin_sparkless::covar_samp_expr(c1, c2);
+                            let name: String = alias
+                                .filter(|a| !a.is_empty())
+                                .map(String::from)
+                                .unwrap_or_else(|| format!("covar_samp({}, {})", c1, c2));
+                            e.alias(&name)
+                        }
+                        "corr" => {
+                            let c1 = agg_spec.column.as_ref().ok_or_else(|| {
+                                PolarsError::ComputeError(
+                                    "corr aggregation requires column and column2".into(),
+                                )
+                            })?;
+                            let c2 = agg_spec.column2.as_ref().ok_or_else(|| {
+                                PolarsError::ComputeError(
+                                    "corr aggregation requires column and column2".into(),
+                                )
+                            })?;
+                            let e = robin_sparkless::corr_expr(c1, c2);
+                            let name: String = alias
+                                .filter(|a| !a.is_empty())
+                                .map(String::from)
+                                .unwrap_or_else(|| format!("corr({}, {})", c1, c2));
+                            e.alias(&name)
+                        }
+                        "kurtosis" => {
+                            let col_name = agg_spec.column.as_ref().ok_or_else(|| {
+                                PolarsError::ComputeError(
+                                    "kurtosis aggregation requires column name".into(),
+                                )
+                            })?;
+                            let e = col(col_name)
+                                .cast(polars::prelude::DataType::Float64)
+                                .kurtosis(true, true);
+                            let name: String = alias
+                                .filter(|a| !a.is_empty())
+                                .map(String::from)
+                                .unwrap_or_else(|| format!("kurtosis({})", col_name));
+                            e.alias(&name)
+                        }
+                        "skewness" => {
+                            let col_name = agg_spec.column.as_ref().ok_or_else(|| {
+                                PolarsError::ComputeError(
+                                    "skewness aggregation requires column name".into(),
+                                )
+                            })?;
+                            let e = col(col_name)
+                                .cast(polars::prelude::DataType::Float64)
+                                .skew(true);
+                            let name: String = alias
+                                .filter(|a| !a.is_empty())
+                                .map(String::from)
+                                .unwrap_or_else(|| format!("skewness({})", col_name));
                             e.alias(&name)
                         }
                         other => {

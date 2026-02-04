@@ -9,16 +9,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Planned
 
-- **Phase 25 – Publish crate**: Prepare and publish robin-sparkless to crates.io (and optionally PyPI via maturin). See [ROADMAP.md](docs/ROADMAP.md) for details.
+- **Phase 25 – Readiness for post-refactor merge**: Plan interpreter (`execute_plan`), expression interpreter, logical plan schema, plan fixtures, `create_dataframe_from_rows`. See [READINESS_FOR_SPARKLESS_PLAN.md](docs/READINESS_FOR_SPARKLESS_PLAN.md) and [ROADMAP.md](docs/ROADMAP.md).
+- **Phase 26 – Publish crate**: Prepare and publish robin-sparkless to crates.io (and optionally PyPI via maturin). See [ROADMAP.md](docs/ROADMAP.md) for details.
 
 ### Added
+
+- **Missing PySpark features (plan Phases 1–6)** ✅ **COMPLETED**
+  - **Phase 1**: GroupedData `covar_pop`, `covar_samp`, `corr`, `kurtosis`, `skewness`; `approx_percentile`, `percentile_approx`; `df.corr()` correlation matrix; parity agg parser and `covar_pop_expr`/`corr_expr`/`kurtosis`/`skewness` in functions.
+  - **Phase 2**: AES `aes_encrypt`, `aes_decrypt`, `try_aes_decrypt` (AES-128-GCM); `encode`, `decode`, `to_binary`, `try_to_binary` (UTF-8, hex); `octet_length`, `char_length`, `character_length`. Polars `moment` feature for kurtosis/skew.
+  - **Phase 3**: `aggregate` (array fold: zero + sum), `cardinality` (alias for size); `json_object_keys`, `json_tuple`; `from_csv`, `to_csv`, `schema_of_csv`, `schema_of_json` (minimal/stub).
+  - **Phase 4**: `grouping`, `grouping_id` (stub: return 0).
+  - **Phase 5**: `dtypes()` (column name + dtype string list); `repartition_by_range`, `sort_within_partitions` (no-op); `create_global_temp_view`, `create_or_replace_global_temp_view` (stub: same catalog as temp view).
+  - **Phase 6**: Aliases `sign`→signum, `std`→stddev, `mean`→avg, `date_trunc`→trunc, `regexp`→rlike.
+  - **Docs**: [ROBIN_SPARKLESS_MISSING.md](docs/ROBIN_SPARKLESS_MISSING.md) and [PYSPARK_DIFFERENCES.md](docs/PYSPARK_DIFFERENCES.md) updated.
 
 - **Phase 24 – Full parity 5: bit, control, JVM stubs, random, crypto (partial)** ✅ **COMPLETED (bit/control/JVM/random); AES deferred**
   - **Bit**: `bit_and`, `bit_or`, `bit_xor`, `bit_count`, `bit_get`; `bitwise_not` / `bitwiseNOT`. Parity fixture `with_bit_ops` added.
   - **Control**: `assert_true`, `raise_error` (expression-level; assert_true fails when any value is false; raise_error always fails when evaluated).
   - **JVM stubs**: `broadcast` (no-op), `spark_partition_id` (constant 0), `input_file_name` (empty string), `monotonically_increasing_id` (constant 0), `current_catalog`, `current_database`, `current_schema`, `current_user`, `user` (constant placeholders). Semantics documented in [PYSPARK_DIFFERENCES.md](docs/PYSPARK_DIFFERENCES.md).
   - **Random**: `rand(seed)`, `randn(seed)` use a real RNG with optional seed; when added via `with_column` or `with_columns`, one distinct value per row (PySpark-like). Semantics documented in [PYSPARK_DIFFERENCES.md](docs/PYSPARK_DIFFERENCES.md).
-  - **Crypto**: `aes_encrypt`, `aes_decrypt`, `try_aes_decrypt` remain **deferred**; listed in [GAP_ANALYSIS_SPARKLESS_3.28.md](docs/GAP_ANALYSIS_SPARKLESS_3.28.md) and documented in [PYSPARK_DIFFERENCES.md](docs/PYSPARK_DIFFERENCES.md).
+  - **Crypto**: `aes_encrypt`, `aes_decrypt`, `try_aes_decrypt` **implemented** (Phase 2; AES-128-GCM). See [PYSPARK_DIFFERENCES.md](docs/PYSPARK_DIFFERENCES.md).
   - **PyO3**: All new functions exposed in the `robin_sparkless` Python module (bit ops, control, JVM stubs, rand/randn, broadcast).
 
 - **Phase 23 – Full parity 4: JSON, CSV, URL, misc** ✅ **COMPLETED**
@@ -86,7 +96,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Batch 2 (string)**: `left`, `right`, `replace` (literal), `startswith`, `endswith`, `contains`, `like` (SQL LIKE → regex), `ilike`, `rlike`/`regexp`. Fixture `string_left_right_replace`.
   - **Batch 3 (math)**: `cosh`, `sinh`, `tanh`, `acosh`, `asinh`, `atanh`, `cbrt`, `expm1`, `log1p`, `log10`, `log2`, `rint`, `hypot` (UDFs in udfs.rs + Column/functions + PyO3). Fixture `math_cosh_cbrt`.
   - **Batch 4 (array)**: `array_distinct`. Fixture `array_distinct`.
-  - Parity fixtures: 84 → 88. Remaining gaps addressed in Phases 16–19; then Phases 20–24 (full parity), Phase 25 (publish crate), Phase 26 (Sparkless integration). Gap list: [docs/PHASE15_GAP_LIST.md](docs/PHASE15_GAP_LIST.md), [docs/GAP_ANALYSIS_SPARKLESS_3.28.md](docs/GAP_ANALYSIS_SPARKLESS_3.28.md).
+  - Parity fixtures: 84 → 88. Remaining gaps addressed in Phases 16–19; then Phases 20–24 (full parity), Phase 25 (readiness for post-refactor merge), Phase 26 (publish crate), Phase 27 (Sparkless integration). Gap list: [docs/PHASE15_GAP_LIST.md](docs/PHASE15_GAP_LIST.md), [docs/GAP_ANALYSIS_SPARKLESS_3.28.md](docs/GAP_ANALYSIS_SPARKLESS_3.28.md).
 
 - **Phase 1 – Foundation** ✅
   - Structural alignment: split `dataframe.rs` into `transformations.rs`, `aggregations.rs`, `joins.rs`.

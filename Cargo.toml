@@ -15,7 +15,7 @@ sql = ["dep:sqlparser"]
 delta = ["dep:deltalake", "dep:tokio"]
 
 [dependencies]
-polars = { version = "0.45", features = ["lazy", "csv", "parquet", "json", "temporal", "strings", "concat_str", "regex", "round_series", "abs", "dtype-categorical", "dtype-date", "dtype-datetime", "dtype-duration", "dtype-time", "rank", "is_in", "list_eval", "list_drop_nulls", "list_any_all", "cum_agg", "string_pad", "string_reverse", "repeat_by", "log", "month_end", "describe", "cross_join", "semi_anti_join", "extract_jsonpath", "dtype-struct", "random", "product"] }
+polars = { version = "0.45", features = ["lazy", "csv", "parquet", "json", "temporal", "strings", "concat_str", "regex", "round_series", "abs", "dtype-categorical", "dtype-date", "dtype-datetime", "dtype-duration", "dtype-time", "rank", "is_in", "list_eval", "list_drop_nulls", "list_any_all", "cum_agg", "string_pad", "string_reverse", "repeat_by", "log", "month_end", "describe", "cross_join", "semi_anti_join", "extract_jsonpath", "dtype-struct", "random", "product", "moment"] }
 serde = { version = "1.0", features = ["derive"] }
 chrono = "0.4"
 chrono-tz = "0.9"
@@ -38,18 +38,21 @@ soundex = "0.2"
 bytes = "1.11.1"
 # Phase 12: colRegex (column name pattern matching)
 regex = "1.11"
-# Phase 13: base64, binary hashes
+# Phase 13: base64, binary hashes; Phase 2: encode/decode
 base64 = "0.22"
+hex = "0.4"
 sha1 = "0.10"
 sha2 = "0.10"
 md5 = "0.7"
 # Phase 24: rand/randn with seed support
 rand = "0.8"
 rand_distr = "0.4"
+# Phase 2: AES crypto (PySpark aes_encrypt/aes_decrypt)
+aes-gcm = "0.10"
 
 [dev-dependencies]
 chrono = "0.4"
-polars = { version = "0.45", features = ["lazy", "csv", "parquet", "json", "temporal", "strings", "concat_str", "regex", "round_series", "abs", "dtype-categorical", "dtype-date", "dtype-datetime", "dtype-duration", "dtype-time", "test", "rank", "is_in", "list_eval", "list_drop_nulls", "list_any_all", "cum_agg", "string_pad", "string_reverse", "repeat_by", "log", "month_end", "describe", "cross_join", "semi_anti_join", "extract_jsonpath", "dtype-struct", "product"] }
+polars = { version = "0.45", features = ["lazy", "csv", "parquet", "json", "temporal", "strings", "concat_str", "regex", "round_series", "abs", "dtype-categorical", "dtype-date", "dtype-datetime", "dtype-duration", "dtype-time", "test", "rank", "is_in", "list_eval", "list_drop_nulls", "list_any_all", "cum_agg", "string_pad", "string_reverse", "repeat_by", "log", "month_end", "describe", "cross_join", "semi_anti_join", "extract_jsonpath", "dtype-struct", "product", "moment"] }
 tempfile = "3"
 criterion = "0.5"
 

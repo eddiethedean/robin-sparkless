@@ -3223,6 +3223,15 @@ impl PyDataFrame {
         }
     }
 
+    /// Correlation matrix of all numeric columns. Returns a DataFrame of pairwise correlations.
+    fn corr(&self) -> PyResult<PyDataFrame> {
+        let df = self
+            .inner
+            .corr()
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        Ok(PyDataFrame { inner: df })
+    }
+
     fn na(&self) -> PyDataFrameNa {
         PyDataFrameNa {
             df: self.inner.clone(),
@@ -3254,6 +3263,16 @@ impl PyDataFrameStat {
             .stat()
             .corr(col1, col2)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
+    }
+
+    /// Correlation matrix of all numeric columns. Returns a DataFrame.
+    fn corr_matrix(&self) -> PyResult<PyDataFrame> {
+        let df = self
+            .df
+            .stat()
+            .corr_matrix()
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        Ok(PyDataFrame { inner: df })
     }
 }
 
@@ -3422,6 +3441,46 @@ impl PyGroupedData {
         let df = self
             .inner
             .min_by(value_column, ord_column)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        Ok(PyDataFrame { inner: df })
+    }
+
+    fn covar_pop(&self, col1: &str, col2: &str) -> PyResult<PyDataFrame> {
+        let df = self
+            .inner
+            .covar_pop(col1, col2)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        Ok(PyDataFrame { inner: df })
+    }
+
+    fn covar_samp(&self, col1: &str, col2: &str) -> PyResult<PyDataFrame> {
+        let df = self
+            .inner
+            .covar_samp(col1, col2)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        Ok(PyDataFrame { inner: df })
+    }
+
+    fn corr(&self, col1: &str, col2: &str) -> PyResult<PyDataFrame> {
+        let df = self
+            .inner
+            .corr(col1, col2)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        Ok(PyDataFrame { inner: df })
+    }
+
+    fn kurtosis(&self, column: &str) -> PyResult<PyDataFrame> {
+        let df = self
+            .inner
+            .kurtosis(column)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        Ok(PyDataFrame { inner: df })
+    }
+
+    fn skewness(&self, column: &str) -> PyResult<PyDataFrame> {
+        let df = self
+            .inner
+            .skewness(column)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
         Ok(PyDataFrame { inner: df })
     }

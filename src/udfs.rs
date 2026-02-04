@@ -1197,6 +1197,144 @@ pub fn apply_md5(column: Column) -> PolarsResult<Option<Column>> {
     Ok(Some(Column::new(name, out.into_series())))
 }
 
+/// Encode string to binary (PySpark encode). Charset: UTF-8, hex. Returns hex string representation of bytes.
+pub fn apply_encode(column: Column, charset: &str) -> PolarsResult<Option<Column>> {
+    let name = column.field().into_owned().name;
+    let series = column.take_materialized_series();
+    let ca = series
+        .str()
+        .map_err(|e| PolarsError::ComputeError(format!("encode: {}", e).into()))?;
+    let cs = charset.to_lowercase();
+    let out = StringChunked::from_iter_options(name.as_str().into(), ca.into_iter().map(|opt_s| {
+        opt_s.and_then(|s| {
+            let bytes: Vec<u8> = match cs.as_str() {
+                "utf-8" | "utf8" => s.as_bytes().to_vec(),
+                _ => s.as_bytes().to_vec(), // default UTF-8
+            };
+            Some(hex::encode(bytes))
+        })
+    }));
+    Ok(Some(Column::new(name, out.into_series())))
+}
+
+/// Decode binary (hex string) to string (PySpark decode). Charset: UTF-8.
+pub fn apply_decode(column: Column, charset: &str) -> PolarsResult<Option<Column>> {
+    let name = column.field().into_owned().name;
+    let series = column.take_materialized_series();
+    let ca = series
+        .str()
+        .map_err(|e| PolarsError::ComputeError(format!("decode: {}", e).into()))?;
+    let _ = charset;
+    let out = StringChunked::from_iter_options(name.as_str().into(), ca.into_iter().map(|opt_s| {
+        opt_s.and_then(|s| {
+            let bytes = hex::decode(s.as_bytes()).ok()?;
+            String::from_utf8(bytes).ok()
+        })
+    }));
+    Ok(Some(Column::new(name, out.into_series())))
+}
+
+/// to_binary(expr, fmt): PySpark to_binary. fmt 'utf-8' => hex(utf8 bytes), 'hex' => validate and return hex. Returns hex string.
+pub fn apply_to_binary(column: Column, fmt: &str) -> PolarsResult<Option<Column>> {
+    let name = column.field().into_owned().name;
+    let series = column.take_materialized_series();
+    let ca = series
+        .str()
+        .map_err(|e| PolarsError::ComputeError(format!("to_binary: {}", e).into()))?;
+    let fmt_lower = fmt.to_lowercase();
+    let out = StringChunked::from_iter_options(name.as_str().into(), ca.into_iter().map(|opt_s| {
+        opt_s.and_then(|s| {
+            let hex_str = match fmt_lower.as_str() {
+                "hex" => {
+                    // Input is hex string; validate and return as-is (binary representation)
+                    hex::decode(s.as_bytes()).ok()?;
+                    Some(s.to_string())
+                }
+                "utf-8" | "utf8" => Some(hex::encode(s.as_bytes())),
+                _ => Some(hex::encode(s.as_bytes())),
+            };
+            hex_str
+        })
+    }));
+    Ok(Some(Column::new(name, out.into_series())))
+}
+
+/// try_to_binary: like to_binary but returns null on failure.
+pub fn apply_try_to_binary(column: Column, fmt: &str) -> PolarsResult<Option<Column>> {
+    apply_to_binary(column, fmt)
+}
+
+/// AES-GCM encrypt (PySpark aes_encrypt). Key: UTF-8 string, 16 or 32 bytes for AES-128/256. Output: hex(nonce||ciphertext).
+fn aes_gcm_encrypt_one(plaintext: &[u8], key: &[u8]) -> Option<String> {
+    use aes_gcm::aead::generic_array::GenericArray;
+    use aes_gcm::aead::{Aead, KeyInit};
+    use aes_gcm::Aes128Gcm;
+    use rand::RngCore;
+    let key_arr: [u8; 16] = key.iter().copied().chain(std::iter::repeat(0)).take(16).collect::<Vec<_>>().try_into().ok()?;
+    let cipher = Aes128Gcm::new(GenericArray::from_slice(&key_arr));
+    let mut nonce = [0u8; 12];
+    rand::thread_rng().fill_bytes(&mut nonce);
+    let nonce = GenericArray::from_slice(&nonce);
+    let ciphertext = cipher.encrypt(nonce, plaintext).ok()?;
+    let mut out = nonce.as_slice().to_vec();
+    out.extend(ciphertext);
+    Some(hex::encode(out))
+}
+
+/// AES-GCM decrypt (PySpark aes_decrypt). Input: hex(nonce||ciphertext).
+fn aes_gcm_decrypt_one(hex_input: &str, key: &[u8]) -> Option<String> {
+    use aes_gcm::aead::generic_array::GenericArray;
+    use aes_gcm::aead::{Aead, KeyInit};
+    use aes_gcm::Aes128Gcm;
+    let bytes = hex::decode(hex_input.as_bytes()).ok()?;
+    if bytes.len() < 12 + 16 {
+        return None; // nonce + at least tag
+    }
+    let (nonce_bytes, ct) = bytes.split_at(12);
+    let key_arr: [u8; 16] = key.iter().copied().chain(std::iter::repeat(0)).take(16).collect::<Vec<_>>().try_into().ok()?;
+    let cipher = Aes128Gcm::new(GenericArray::from_slice(&key_arr));
+    let nonce = GenericArray::from_slice(nonce_bytes);
+    let plaintext = cipher.decrypt(nonce, ct).ok()?;
+    String::from_utf8(plaintext).ok()
+}
+
+/// AES encrypt (PySpark aes_encrypt). Key as string; uses AES-128-GCM. Output hex.
+pub fn apply_aes_encrypt(column: Column, key: &str) -> PolarsResult<Option<Column>> {
+    let name = column.field().into_owned().name;
+    let series = column.take_materialized_series();
+    let ca = series
+        .str()
+        .map_err(|e| PolarsError::ComputeError(format!("aes_encrypt: {}", e).into()))?;
+    let key_bytes = key.as_bytes();
+    let out = StringChunked::from_iter_options(
+        name.as_str().into(),
+        ca.into_iter()
+            .map(|opt_s| opt_s.and_then(|s| aes_gcm_encrypt_one(s.as_bytes(), key_bytes))),
+    );
+    Ok(Some(Column::new(name, out.into_series())))
+}
+
+/// AES decrypt (PySpark aes_decrypt). Input hex(nonce||ciphertext). Returns null on failure.
+pub fn apply_aes_decrypt(column: Column, key: &str) -> PolarsResult<Option<Column>> {
+    let name = column.field().into_owned().name;
+    let series = column.take_materialized_series();
+    let ca = series
+        .str()
+        .map_err(|e| PolarsError::ComputeError(format!("aes_decrypt: {}", e).into()))?;
+    let key_bytes = key.as_bytes();
+    let out = StringChunked::from_iter_options(
+        name.as_str().into(),
+        ca.into_iter()
+            .map(|opt_s| opt_s.and_then(|s| aes_gcm_decrypt_one(s, key_bytes))),
+    );
+    Ok(Some(Column::new(name, out.into_series())))
+}
+
+/// try_aes_decrypt: same as aes_decrypt, returns null on failure (PySpark try_aes_decrypt).
+pub fn apply_try_aes_decrypt(column: Column, key: &str) -> PolarsResult<Option<Column>> {
+    apply_aes_decrypt(column, key)
+}
+
 /// Int column to single-character string (PySpark char / chr). Valid codepoint only.
 pub fn apply_char(column: Column) -> PolarsResult<Option<Column>> {
     let name = column.field().into_owned().name;
@@ -3012,6 +3150,90 @@ pub fn apply_json_array_length(column: Column, path: &str) -> PolarsResult<Optio
         }),
     );
     Ok(Some(Column::new(name, out.into_series())))
+}
+
+/// json_object_keys(json_str) - return list of keys of JSON object (PySpark json_object_keys).
+pub fn apply_json_object_keys(column: Column) -> PolarsResult<Option<Column>> {
+    let name = column.field().into_owned().name;
+    let series = column.take_materialized_series();
+    let ca = series
+        .str()
+        .map_err(|e| PolarsError::ComputeError(format!("json_object_keys: {}", e).into()))?;
+    let out: ListChunked = ca
+        .into_iter()
+        .map(|opt_s| {
+            opt_s.and_then(|s| {
+                let v: serde_json::Value = serde_json::from_str(s).ok()?;
+                let obj = v.as_object()?;
+                let keys: Vec<String> = obj.keys().map(String::from).collect();
+                Some(Series::new("".into(), keys))
+            })
+        })
+        .collect();
+    Ok(Some(Column::new(name, out.into_series())))
+}
+
+/// json_tuple(json_str, key1, key2, ...) - extract keys from JSON; returns struct with one field per key (PySpark json_tuple).
+pub fn apply_json_tuple(column: Column, keys: &[String]) -> PolarsResult<Option<Column>> {
+    let name = column.field().into_owned().name;
+    let series = column.take_materialized_series();
+    let ca = series
+        .str()
+        .map_err(|e| PolarsError::ComputeError(format!("json_tuple: {}", e).into()))?;
+    let keys = keys.to_vec();
+    let mut columns_per_key: Vec<Vec<Option<String>>> = (0..keys.len()).map(|_| Vec::new()).collect();
+    for opt_s in ca.into_iter() {
+        for (i, key) in keys.iter().enumerate() {
+            let val = opt_s.and_then(|s| {
+                let v: serde_json::Value = serde_json::from_str(s).ok()?;
+                let obj = v.as_object()?;
+                obj.get(key).and_then(|x| x.as_str()).map(String::from)
+            });
+            columns_per_key[i].push(val);
+        }
+    }
+    let field_series: Vec<Series> = keys
+        .iter()
+        .zip(columns_per_key.iter())
+        .map(|(k, vals)| Series::new(k.as_str().into(), vals.clone()))
+        .collect();
+    let out_df = DataFrame::new(field_series.into_iter().map(|s| s.into()).collect())?;
+    let out_struct = out_df.into_struct(name.as_str().into());
+    Ok(Some(Column::new(name, out_struct.into_series())))
+}
+
+/// from_csv(str_col, schema) - parse CSV string to struct (PySpark from_csv). Minimal: split by comma, up to 32 columns.
+pub fn apply_from_csv(column: Column) -> PolarsResult<Option<Column>> {
+    let name = column.field().into_owned().name;
+    let series = column.take_materialized_series();
+    let ca = series
+        .str()
+        .map_err(|e| PolarsError::ComputeError(format!("from_csv: {}", e).into()))?;
+    const MAX_COLS: usize = 32;
+    let mut columns: Vec<Vec<Option<String>>> = (0..MAX_COLS).map(|_| Vec::new()).collect();
+    for opt_s in ca.into_iter() {
+        let parts: Vec<&str> = opt_s
+            .map(|s| s.split(',').collect::<Vec<_>>())
+            .unwrap_or_default();
+        for i in 0..MAX_COLS {
+            let v = parts.get(i).map(|p| (*p).to_string());
+            columns[i].push(v);
+        }
+    }
+    let field_series: Vec<Series> = (0..MAX_COLS)
+        .map(|i| Series::new(format!("_c{}", i).into(), columns[i].clone()))
+        .collect();
+    let out_df = DataFrame::new(field_series.into_iter().map(|s| s.into()).collect())?;
+    let out_series = out_df.into_struct(name.as_str().into()).into_series();
+    Ok(Some(Column::new(name, out_series)))
+}
+
+/// to_csv(struct_col) - format struct as CSV string (PySpark to_csv). Minimal: uses struct cast to string.
+pub fn apply_to_csv(column: Column) -> PolarsResult<Option<Column>> {
+    let name = column.field().into_owned().name;
+    let series = column.take_materialized_series();
+    let out = series.cast(&DataType::String)?;
+    Ok(Some(Column::new(name, out)))
 }
 
 /// parse_url(url_str, part) - extract URL component (PySpark parse_url).

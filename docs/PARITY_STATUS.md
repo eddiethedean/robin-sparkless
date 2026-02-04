@@ -207,7 +207,7 @@ Status as of **February 2026**: **PASSING (149 fixtures; array_distinct, with_cu
 ## Next additions to the matrix (recommended)
 
 - Add more join edge-case fixtures (e.g. left/outer with null keys) if needed.
-- **ROADMAP Phases 16–26**: Phases 18–19 completed. Phases 20–24 (full parity in 5 parts), Phase 25 (publish crate on crates.io), Phase 26 (Sparkless integration, 200+ tests). See [ROADMAP.md](ROADMAP.md), [GAP_ANALYSIS_SPARKLESS_3.28.md](GAP_ANALYSIS_SPARKLESS_3.28.md).
+- **ROADMAP Phases 16–27**: Phases 18–19 completed. Phases 20–24 (full parity in 5 parts), Phase 25 (readiness for post-refactor merge), Phase 26 (publish crate on crates.io), Phase 27 (Sparkless integration, 200+ tests). See [ROADMAP.md](ROADMAP.md), [GAP_ANALYSIS_SPARKLESS_3.28.md](GAP_ANALYSIS_SPARKLESS_3.28.md).
 
 ## Sparkless Test Conversion
 

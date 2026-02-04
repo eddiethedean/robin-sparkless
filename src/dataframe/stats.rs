@@ -1,8 +1,9 @@
 //! DataFrame statistical methods: stat (cov, corr), summary.
-//! PySpark: df.stat().cov("a", "b"), df.stat().corr("a", "b"), df.summary(...).
+//! PySpark: df.stat().cov("a", "b"), df.stat().corr("a", "b"), df.corr() (matrix), df.summary(...).
 
 use super::DataFrame;
-use polars::prelude::PolarsError;
+use polars::prelude::{DataFrame as PlDataFrame, NamedFrom, PolarsError, Series};
+use polars::datatypes::DataType;
 
 /// Helper for DataFrame statistical methods (PySpark-style df.stat().cov/corr).
 pub struct DataFrameStat<'a> {
@@ -103,6 +104,50 @@ impl<'a> DataFrameStat<'a> {
         }
         let cov = (sum_ab - n as f64 * mean_a * mean_b) / (n as f64 - 1.0);
         Ok(cov / (std_a * std_b))
+    }
+
+    /// Correlation matrix of all numeric columns. PySpark df.corr() returns a DataFrame of pairwise correlations.
+    /// Returns a DataFrame with column names as first column and one column per numeric column with correlation values.
+    pub fn corr_matrix(&self) -> Result<DataFrame, PolarsError> {
+        let pl_df = self.df.df.as_ref();
+        let numeric_cols: Vec<String> = pl_df
+            .get_columns()
+            .iter()
+            .filter(|s| {
+                matches!(
+                    s.dtype(),
+                    DataType::Int8 | DataType::Int16 | DataType::Int32 | DataType::Int64
+                        | DataType::UInt8 | DataType::UInt16 | DataType::UInt32 | DataType::UInt64
+                        | DataType::Float32 | DataType::Float64
+                )
+            })
+            .map(|s| s.name().to_string())
+            .collect();
+        if numeric_cols.is_empty() {
+            return Ok(DataFrame::from_polars_with_options(
+                PlDataFrame::default(),
+                self.df.case_sensitive,
+            ));
+        }
+        let mut columns: Vec<Series> = Vec::with_capacity(numeric_cols.len());
+        for (i, name_i) in numeric_cols.iter().enumerate() {
+            let mut row_vals = Vec::with_capacity(numeric_cols.len());
+            for (j, name_j) in numeric_cols.iter().enumerate() {
+                let r = if i == j {
+                    1.0_f64
+                } else {
+                    self.corr(name_i, name_j)?
+                };
+                row_vals.push(Some(r));
+            }
+            let series = Series::new(name_i.as_str().into(), row_vals);
+            columns.push(series);
+        }
+        let out_pl = PlDataFrame::new(columns.into_iter().map(|s| s.into()).collect())?;
+        Ok(DataFrame::from_polars_with_options(
+            out_pl,
+            self.df.case_sensitive,
+        ))
     }
 }
 

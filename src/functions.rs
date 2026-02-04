@@ -97,6 +97,17 @@ pub fn col(name: &str) -> Column {
     Column::new(name.to_string())
 }
 
+/// Grouping set marker (PySpark grouping). Stub: returns 0 (no GROUPING SETS in robin-sparkless).
+pub fn grouping(column: &Column) -> Column {
+    let _ = column;
+    Column::from_expr(lit(0i32), Some("grouping".to_string()))
+}
+
+/// Grouping set id (PySpark grouping_id). Stub: returns 0.
+pub fn grouping_id(_columns: &[Column]) -> Column {
+    Column::from_expr(lit(0i64), Some("grouping_id".to_string()))
+}
+
 /// Create a literal column from a value
 pub fn lit_i32(value: i32) -> Column {
     let expr: Expr = lit(value);
@@ -138,6 +149,11 @@ pub fn avg(col: &Column) -> Column {
     Column::from_expr(col.expr().clone().mean(), Some("avg".to_string()))
 }
 
+/// Alias for avg (PySpark mean).
+pub fn mean(col: &Column) -> Column {
+    avg(col)
+}
+
 /// Maximum aggregation
 pub fn max(col: &Column) -> Column {
     Column::from_expr(col.expr().clone().max(), Some("max".to_string()))
@@ -169,6 +185,11 @@ pub fn stddev_samp(col: &Column) -> Column {
     stddev(col)
 }
 
+/// Alias for stddev (PySpark std).
+pub fn std(col: &Column) -> Column {
+    stddev(col)
+}
+
 /// Population variance (ddof=0). PySpark var_pop.
 pub fn var_pop(col: &Column) -> Column {
     Column::from_expr(col.expr().clone().var(0), Some("var_pop".to_string()))
@@ -190,6 +211,22 @@ pub fn median(col: &Column) -> Column {
     )
 }
 
+/// Approximate percentile (PySpark approx_percentile). Maps to quantile; percentage in 0.0..=1.0.
+pub fn approx_percentile(col: &Column, percentage: f64) -> Column {
+    use polars::prelude::QuantileMethod;
+    Column::from_expr(
+        col.expr()
+            .clone()
+            .quantile(lit(percentage), QuantileMethod::Linear),
+        Some(format!("approx_percentile({})", percentage)),
+    )
+}
+
+/// Approximate percentile (PySpark percentile_approx). Alias for approx_percentile.
+pub fn percentile_approx(col: &Column, percentage: f64) -> Column {
+    approx_percentile(col, percentage)
+}
+
 /// Mode aggregation - most frequent value. PySpark mode.
 pub fn mode(col: &Column) -> Column {
     col.clone().mode()
@@ -202,6 +239,75 @@ pub fn count_distinct(col: &Column) -> Column {
         col.expr().clone().n_unique().cast(DataType::Int64),
         Some("count_distinct".to_string()),
     )
+}
+
+/// Kurtosis aggregation (PySpark kurtosis). Fisher definition, bias=true. Use in groupBy.agg().
+pub fn kurtosis(col: &Column) -> Column {
+    Column::from_expr(
+        col.expr()
+            .clone()
+            .cast(DataType::Float64)
+            .kurtosis(true, true),
+        Some("kurtosis".to_string()),
+    )
+}
+
+/// Skewness aggregation (PySpark skewness). bias=true. Use in groupBy.agg().
+pub fn skewness(col: &Column) -> Column {
+    Column::from_expr(
+        col.expr().clone().cast(DataType::Float64).skew(true),
+        Some("skewness".to_string()),
+    )
+}
+
+/// Population covariance aggregation (PySpark covar_pop). Returns Expr for use in groupBy.agg().
+pub fn covar_pop_expr(col1: &str, col2: &str) -> Expr {
+    use polars::prelude::{col as pl_col, len};
+    let c1 = pl_col(col1).cast(DataType::Float64);
+    let c2 = pl_col(col2).cast(DataType::Float64);
+    let n = len().cast(DataType::Float64);
+    let sum_ab = (c1.clone() * c2.clone()).sum();
+    let sum_a = pl_col(col1).sum().cast(DataType::Float64);
+    let sum_b = pl_col(col2).sum().cast(DataType::Float64);
+    (sum_ab - sum_a * sum_b / n.clone()) / n
+}
+
+/// Sample covariance aggregation (PySpark covar_samp). Returns Expr for use in groupBy.agg().
+pub fn covar_samp_expr(col1: &str, col2: &str) -> Expr {
+    use polars::prelude::{col as pl_col, len, lit, when};
+    let c1 = pl_col(col1).cast(DataType::Float64);
+    let c2 = pl_col(col2).cast(DataType::Float64);
+    let n = len().cast(DataType::Float64);
+    let sum_ab = (c1.clone() * c2.clone()).sum();
+    let sum_a = pl_col(col1).sum().cast(DataType::Float64);
+    let sum_b = pl_col(col2).sum().cast(DataType::Float64);
+    when(len().gt(lit(1)))
+        .then(
+            (sum_ab - sum_a * sum_b / n.clone()) / (len() - lit(1)).cast(DataType::Float64),
+        )
+        .otherwise(lit(f64::NAN))
+}
+
+/// Pearson correlation aggregation (PySpark corr). Returns Expr for use in groupBy.agg().
+pub fn corr_expr(col1: &str, col2: &str) -> Expr {
+    use polars::prelude::{col as pl_col, len, lit, when};
+    let c1 = pl_col(col1).cast(DataType::Float64);
+    let c2 = pl_col(col2).cast(DataType::Float64);
+    let n = len().cast(DataType::Float64);
+    let n1 = (len() - lit(1)).cast(DataType::Float64);
+    let sum_ab = (c1.clone() * c2.clone()).sum();
+    let sum_a = pl_col(col1).sum().cast(DataType::Float64);
+    let sum_b = pl_col(col2).sum().cast(DataType::Float64);
+    let sum_a2 = (c1.clone() * c1).sum();
+    let sum_b2 = (c2.clone() * c2).sum();
+    let cov_samp = (sum_ab - sum_a.clone() * sum_b.clone() / n.clone()) / n1.clone();
+    let var_a = (sum_a2 - sum_a.clone() * sum_a / n.clone()) / n1.clone();
+    let var_b = (sum_b2 - sum_b.clone() * sum_b / n.clone()) / n1.clone();
+    let std_a = var_a.sqrt();
+    let std_b = var_b.sqrt();
+    when(len().gt(lit(1)))
+        .then(cov_samp / (std_a * std_b))
+        .otherwise(lit(f64::NAN))
 }
 
 /// PySpark-style conditional expression builder.
@@ -331,6 +437,41 @@ pub fn hex(column: &Column) -> Column {
 /// Convert hex string to binary/string (PySpark unhex).
 pub fn unhex(column: &Column) -> Column {
     column.clone().unhex()
+}
+
+/// Encode string to binary (PySpark encode). Charset: UTF-8. Returns hex string.
+pub fn encode(column: &Column, charset: &str) -> Column {
+    column.clone().encode(charset)
+}
+
+/// Decode binary (hex string) to string (PySpark decode). Charset: UTF-8.
+pub fn decode(column: &Column, charset: &str) -> Column {
+    column.clone().decode(charset)
+}
+
+/// Convert to binary (PySpark to_binary). fmt: 'utf-8', 'hex'.
+pub fn to_binary(column: &Column, fmt: &str) -> Column {
+    column.clone().to_binary(fmt)
+}
+
+/// Try convert to binary; null on failure (PySpark try_to_binary).
+pub fn try_to_binary(column: &Column, fmt: &str) -> Column {
+    column.clone().try_to_binary(fmt)
+}
+
+/// AES encrypt (PySpark aes_encrypt). Key as string; AES-128-GCM.
+pub fn aes_encrypt(column: &Column, key: &str) -> Column {
+    column.clone().aes_encrypt(key)
+}
+
+/// AES decrypt (PySpark aes_decrypt). Input hex(nonce||ciphertext).
+pub fn aes_decrypt(column: &Column, key: &str) -> Column {
+    column.clone().aes_decrypt(key)
+}
+
+/// Try AES decrypt (PySpark try_aes_decrypt). Returns null on failure.
+pub fn try_aes_decrypt(column: &Column, key: &str) -> Column {
+    column.clone().try_aes_decrypt(key)
 }
 
 /// Convert integer to binary string (PySpark bin).
@@ -720,6 +861,11 @@ pub fn rlike(column: &Column, pattern: &str) -> Column {
     column.clone().regexp_like(pattern)
 }
 
+/// Alias for rlike (PySpark regexp).
+pub fn regexp(column: &Column, pattern: &str) -> Column {
+    rlike(column, pattern)
+}
+
 /// Soundex code (PySpark soundex). Not implemented: requires element-wise UDF.
 pub fn soundex(column: &Column) -> Column {
     column.clone().soundex()
@@ -875,6 +1021,11 @@ pub fn signum(column: &Column) -> Column {
     column.clone().signum()
 }
 
+/// Alias for signum (PySpark sign).
+pub fn sign(column: &Column) -> Column {
+    signum(column)
+}
+
 /// Cast column to the given type (PySpark cast). Fails on invalid conversion.
 pub fn cast(column: &Column, type_name: &str) -> Result<Column, String> {
     let dtype = parse_type_name(type_name)?;
@@ -1010,6 +1161,21 @@ pub fn elt(index: &Column, columns: &[&Column]) -> Column {
 /// Bit length of string (bytes * 8) (PySpark bit_length).
 pub fn bit_length(column: &Column) -> Column {
     column.clone().bit_length()
+}
+
+/// Length of string in bytes (PySpark octet_length).
+pub fn octet_length(column: &Column) -> Column {
+    column.clone().octet_length()
+}
+
+/// Length of string in characters (PySpark char_length). Alias of length().
+pub fn char_length(column: &Column) -> Column {
+    column.clone().char_length()
+}
+
+/// Length of string in characters (PySpark character_length). Alias of length().
+pub fn character_length(column: &Column) -> Column {
+    column.clone().character_length()
 }
 
 /// Data type of column as string (PySpark typeof). Constant per column from schema.
@@ -1200,6 +1366,11 @@ pub fn last_day(column: &Column) -> Column {
 /// Truncate date/datetime to unit (PySpark trunc).
 pub fn trunc(column: &Column, format: &str) -> Column {
     column.clone().trunc(format)
+}
+
+/// Alias for trunc (PySpark date_trunc).
+pub fn date_trunc(format: &str, column: &Column) -> Column {
+    trunc(column, format)
 }
 
 /// Extract quarter (1-4) from date/datetime (PySpark quarter).
@@ -1705,6 +1876,11 @@ pub fn size(column: &Column) -> Column {
     column.clone().array_size()
 }
 
+/// Cardinality: number of elements in array (PySpark cardinality). Alias for size/array_size.
+pub fn cardinality(column: &Column) -> Column {
+    column.clone().cardinality()
+}
+
 /// Check if list contains value (PySpark array_contains).
 pub fn array_contains(column: &Column, value: &Column) -> Column {
     column.clone().array_contains(value.expr().clone())
@@ -1800,6 +1976,11 @@ pub fn array_transform(column: &Column, f: Expr) -> Column {
 /// Sum of list elements (PySpark aggregate sum).
 pub fn array_sum(column: &Column) -> Column {
     column.clone().array_sum()
+}
+
+/// Array fold/aggregate (PySpark aggregate). Simplified: zero + sum(list elements).
+pub fn aggregate(column: &Column, zero: &Column) -> Column {
+    column.clone().array_aggregate(zero)
 }
 
 /// Mean of list elements (PySpark aggregate avg).
@@ -1987,6 +2168,42 @@ pub fn zip_with(left: &Column, right: &Column, merge: Expr) -> Column {
 /// Extract JSON path from string column (PySpark get_json_object).
 pub fn get_json_object(column: &Column, path: &str) -> Column {
     column.clone().get_json_object(path)
+}
+
+/// Keys of JSON object (PySpark json_object_keys). Returns list of strings.
+pub fn json_object_keys(column: &Column) -> Column {
+    column.clone().json_object_keys()
+}
+
+/// Extract keys from JSON as struct (PySpark json_tuple). keys: e.g. ["a", "b"].
+pub fn json_tuple(column: &Column, keys: &[&str]) -> Column {
+    column.clone().json_tuple(keys)
+}
+
+/// Parse CSV string to struct (PySpark from_csv). Minimal implementation.
+pub fn from_csv(column: &Column) -> Column {
+    column.clone().from_csv()
+}
+
+/// Format struct as CSV string (PySpark to_csv). Minimal implementation.
+pub fn to_csv(column: &Column) -> Column {
+    column.clone().to_csv()
+}
+
+/// Schema of CSV string (PySpark schema_of_csv). Returns literal schema string; minimal stub.
+pub fn schema_of_csv(_column: &Column) -> Column {
+    Column::from_expr(
+        lit("STRUCT<_c0: STRING, _c1: STRING>".to_string()),
+        Some("schema_of_csv".to_string()),
+    )
+}
+
+/// Schema of JSON string (PySpark schema_of_json). Returns literal schema string; minimal stub.
+pub fn schema_of_json(_column: &Column) -> Column {
+    Column::from_expr(
+        lit("STRUCT<>".to_string()),
+        Some("schema_of_json".to_string()),
+    )
 }
 
 /// Parse string column as JSON into struct (PySpark from_json).

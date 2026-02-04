@@ -416,6 +416,95 @@ impl Column {
         Self::from_expr(len_bytes * lit(8i32), None)
     }
 
+    /// Length of string in bytes (PySpark octet_length).
+    pub fn octet_length(&self) -> Column {
+        use polars::prelude::*;
+        Self::from_expr(
+            self.expr().clone().str().len_bytes().cast(DataType::Int32),
+            None,
+        )
+    }
+
+    /// Length of string in characters (PySpark char_length). Alias of length().
+    pub fn char_length(&self) -> Column {
+        self.length()
+    }
+
+    /// Length of string in characters (PySpark character_length). Alias of length().
+    pub fn character_length(&self) -> Column {
+        self.length()
+    }
+
+    /// Encode string to binary (PySpark encode). Charset: UTF-8. Returns hex string.
+    pub fn encode(&self, charset: &str) -> Column {
+        let charset = charset.to_string();
+        let expr = self.expr().clone().map(
+            move |s| crate::udfs::apply_encode(s, &charset),
+            GetOutput::from_type(DataType::String),
+        );
+        Self::from_expr(expr, None)
+    }
+
+    /// Decode binary (hex string) to string (PySpark decode). Charset: UTF-8.
+    pub fn decode(&self, charset: &str) -> Column {
+        let charset = charset.to_string();
+        let expr = self.expr().clone().map(
+            move |s| crate::udfs::apply_decode(s, &charset),
+            GetOutput::from_type(DataType::String),
+        );
+        Self::from_expr(expr, None)
+    }
+
+    /// Convert to binary (PySpark to_binary). fmt: 'utf-8', 'hex'. Returns hex string.
+    pub fn to_binary(&self, fmt: &str) -> Column {
+        let fmt = fmt.to_string();
+        let expr = self.expr().clone().map(
+            move |s| crate::udfs::apply_to_binary(s, &fmt),
+            GetOutput::from_type(DataType::String),
+        );
+        Self::from_expr(expr, None)
+    }
+
+    /// Try convert to binary; null on failure (PySpark try_to_binary).
+    pub fn try_to_binary(&self, fmt: &str) -> Column {
+        let fmt = fmt.to_string();
+        let expr = self.expr().clone().map(
+            move |s| crate::udfs::apply_try_to_binary(s, &fmt),
+            GetOutput::from_type(DataType::String),
+        );
+        Self::from_expr(expr, None)
+    }
+
+    /// AES encrypt (PySpark aes_encrypt). Key as string; AES-128-GCM. Output hex(nonce||ciphertext).
+    pub fn aes_encrypt(&self, key: &str) -> Column {
+        let key = key.to_string();
+        let expr = self.expr().clone().map(
+            move |s| crate::udfs::apply_aes_encrypt(s, &key),
+            GetOutput::from_type(DataType::String),
+        );
+        Self::from_expr(expr, None)
+    }
+
+    /// AES decrypt (PySpark aes_decrypt). Input hex(nonce||ciphertext). Null on failure.
+    pub fn aes_decrypt(&self, key: &str) -> Column {
+        let key = key.to_string();
+        let expr = self.expr().clone().map(
+            move |s| crate::udfs::apply_aes_decrypt(s, &key),
+            GetOutput::from_type(DataType::String),
+        );
+        Self::from_expr(expr, None)
+    }
+
+    /// Try AES decrypt (PySpark try_aes_decrypt). Returns null on failure.
+    pub fn try_aes_decrypt(&self, key: &str) -> Column {
+        let key = key.to_string();
+        let expr = self.expr().clone().map(
+            move |s| crate::udfs::apply_try_aes_decrypt(s, &key),
+            GetOutput::from_type(DataType::String),
+        );
+        Self::from_expr(expr, None)
+    }
+
     /// Data type as string (PySpark typeof). Uses dtype from schema.
     pub fn typeof_(&self) -> Column {
         Self::from_expr(
@@ -1863,6 +1952,11 @@ impl Column {
         )
     }
 
+    /// Cardinality: number of elements in array/list (PySpark cardinality). Alias for array_size.
+    pub fn cardinality(&self) -> Column {
+        self.array_size()
+    }
+
     /// Check if list contains value (PySpark array_contains).
     pub fn array_contains(&self, value: Expr) -> Column {
         Self::from_expr(self.expr().clone().list().contains(value), None)
@@ -2185,6 +2279,12 @@ impl Column {
         Self::from_expr(self.expr().clone().list().sum(), None)
     }
 
+    /// Array fold/aggregate (PySpark aggregate). Simplified: zero + sum(list). Full (zero, merge, finish) deferred.
+    pub fn array_aggregate(&self, zero: &Column) -> Column {
+        let sum_expr = self.expr().clone().list().sum();
+        Self::from_expr(sum_expr + zero.expr().clone(), None)
+    }
+
     /// Mean of list elements (PySpark aggregate with avg). Uses list.mean().
     pub fn array_mean(&self) -> Column {
         Self::from_expr(self.expr().clone().list().mean(), None)
@@ -2357,6 +2457,47 @@ impl Column {
         let expr = self.expr().clone().map(
             move |s| crate::udfs::apply_json_array_length(s, &path),
             GetOutput::from_type(DataType::Int64),
+        );
+        Self::from_expr(expr, None)
+    }
+
+    /// Keys of JSON object (PySpark json_object_keys). Returns list of strings. UDF.
+    pub fn json_object_keys(&self) -> Column {
+        let expr = self.expr().clone().map(
+            crate::udfs::apply_json_object_keys,
+            GetOutput::from_type(DataType::List(Box::new(DataType::String))),
+        );
+        Self::from_expr(expr, None)
+    }
+
+    /// Extract keys from JSON as struct (PySpark json_tuple). UDF. Returns struct with one string field per key.
+    pub fn json_tuple(&self, keys: &[&str]) -> Column {
+        let keys_vec: Vec<String> = keys.iter().map(|s| (*s).to_string()).collect();
+        let struct_fields: Vec<polars::datatypes::Field> = keys_vec
+            .iter()
+            .map(|k| polars::datatypes::Field::new(k.as_str().into(), DataType::String))
+            .collect();
+        let expr = self.expr().clone().map(
+            move |s| crate::udfs::apply_json_tuple(s, &keys_vec),
+            GetOutput::from_type(DataType::Struct(struct_fields)),
+        );
+        Self::from_expr(expr, None)
+    }
+
+    /// Parse CSV string to struct (PySpark from_csv). Minimal: split by comma, up to 32 columns. UDF.
+    pub fn from_csv(&self) -> Column {
+        let expr = self.expr().clone().map(
+            crate::udfs::apply_from_csv,
+            GetOutput::from_type(DataType::Struct(vec![])),
+        );
+        Self::from_expr(expr, None)
+    }
+
+    /// Format struct as CSV string (PySpark to_csv). Minimal. UDF.
+    pub fn to_csv(&self) -> Column {
+        let expr = self.expr().clone().map(
+            crate::udfs::apply_to_csv,
+            GetOutput::from_type(DataType::String),
         );
         Self::from_expr(expr, None)
     }
