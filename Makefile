@@ -1,4 +1,4 @@
-.PHONY: build test test-rust test-python sparkless-parity clean check fmt clippy audit outdated deny all
+.PHONY: build test test-rust test-python sparkless-parity bench-python clean check fmt clippy audit outdated deny all
 
 # Use stable toolchain when no default is configured (override with RUSTUP_TOOLCHAIN=nightly etc.)
 export RUSTUP_TOOLCHAIN ?= stable
@@ -22,6 +22,13 @@ test-python:
 
 # Run all tests (Rust + Python)
 test: test-rust test-python
+
+# Compare robin-sparkless vs sparkless performance. Use .venv-sparkless for both backends (pip install sparkless + maturin develop).
+# Quick run (smaller sizes): . .venv-sparkless/bin/activate && python scripts/bench_robin_vs_sparkless.py --quick
+bench-python:
+	@if [ ! -d .venv-sparkless ]; then python3 -m venv .venv-sparkless; fi
+	. .venv-sparkless/bin/activate && pip install -q maturin sparkless && maturin develop --features pyo3
+	. .venv-sparkless/bin/activate && python scripts/bench_robin_vs_sparkless.py
 
 # Run parity tests (optionally convert from Sparkless expected_outputs first).
 # Set SPARKLESS_EXPECTED_OUTPUTS=/path/to/sparkless/tests/expected_outputs to run converter.

@@ -43,6 +43,15 @@ This document lists **intentional or known divergences** from PySpark semantics 
 - **withWatermark**: No-op; returns self. Streaming/watermark not supported.
 - **persist** / **unpersist**: No-op; return self (execution is eager).
 
+## SparkSession.createDataFrame / create_dataframe
+
+- **PySpark** `createDataFrame(data, schema=None, samplingRatio=None, verifySchema=True)` accepts many input types: list of tuples (any length, types inferred or from schema), list of dicts, list of Row, RDD, pandas DataFrame; `schema` can be a list of column names (types inferred) or a StructType.
+- **Robin-sparkless** has two entry points:
+  - **`create_dataframe(data, column_names)`**: Accepts **only** a list of 3-tuples `(int, int, str)` and exactly three column names (e.g. `["id", "age", "name"]`). This is a convenience for the common simple case; it does **not** accept arbitrary tuple lengths or mixed types.
+  - **`create_dataframe_from_rows(data, schema)`**: Accepts list of dicts (keys = column names) or list of lists (values in schema order), and `schema` as list of `(name, dtype_str)` e.g. `[("id", "bigint"), ("name", "string")]`. This matches PySpark when you have explicit schema with types. Supported dtypes: bigint, int, long, double, float, string, boolean, date, timestamp, etc.
+- **For PySpark/Sparkless parity**: Use **`create_dataframe_from_rows(data, schema)`** for arbitrary column counts and types (e.g. from Sparkless or plan interpreter). Use **`create_dataframe(data, column_names)`** only when your data is exactly 3 columns `(int, int, str)`.
+- **Alias**: `createDataFrame` is exposed as an alias of `create_dataframe` so that `spark.createDataFrame(data, ["id", "age", "name"])` works for the 3-tuple case; for other schemas use `create_dataframe_from_rows`.
+
 ## JVM / runtime stubs
 
 The following JVM- or runtime-related functions are implemented as **stubs for API compatibility**, not full equivalents of PySpark behavior:

@@ -2861,6 +2861,7 @@ impl PySparkSession {
 
     /// Create a DataFrame from a list of 3-tuples (id, age, name) and column names.
     /// data: list of (int, int, str), column_names: list of 3 strings e.g. ["id", "age", "name"].
+    /// For arbitrary schemas use create_dataframe_from_rows(data, schema).
     fn create_dataframe(
         &self,
         _py: Python<'_>,
@@ -2876,6 +2877,18 @@ impl PySparkSession {
             .create_dataframe(data_rust, names_ref)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
         Ok(PyDataFrame { inner: df })
+    }
+
+    /// PySpark alias: createDataFrame(data, schema) for 3-column (int, int, str) data.
+    /// For other schemas use create_dataframe_from_rows(data, schema).
+    #[pyo3(name = "createDataFrame")]
+    fn create_data_frame_pyspark_alias(
+        &self,
+        _py: Python<'_>,
+        data: &Bound<'_, pyo3::types::PyAny>,
+        column_names: Vec<String>,
+    ) -> PyResult<PyDataFrame> {
+        self.create_dataframe(_py, data, column_names)
     }
 
     /// Create a DataFrame from a list of dicts (or list of lists) and a schema.
