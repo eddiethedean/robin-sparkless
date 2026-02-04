@@ -199,7 +199,7 @@ We know we're on track if:
   - **Phase 21**: `with_btrim`, `with_hex`, `with_conv`, `with_str_to_map`, `arrays_overlap`, `arrays_zip`
   - **Phase 22**: `with_dayname`, `with_weekday`, `with_extract`, `with_unix_micros`, `make_timestamp_test`, `timestampadd_test`, `from_utc_timestamp_test`
   - **Phase 23**: `with_isin`, `with_url_decode`, `with_url_encode`, `json_array_length_test`, `with_hash`, `with_shift_left`
-- ✅ **Phase 25** (readiness for post-refactor merge): **Plan interpreter** (`execute_plan(session, data, schema, plan)` in Rust; Python `robin_sparkless.execute_plan(data, schema, plan_json)`); **expression interpreter** (serialized expr trees → Polars Expr in `src/plan/expr.rs`); **logical plan schema** ([LOGICAL_PLAN_FORMAT.md](LOGICAL_PLAN_FORMAT.md)); **plan fixtures** (`tests/fixtures/plans/filter_select_limit.json`, `join_simple.json`) with `plan_parity_fixtures` test; **create_dataframe_from_rows** (Rust + Python) for arbitrary schema and list of dicts/rows.
+- ✅ **Phase 25** (readiness for post-refactor merge): **Plan interpreter** (`execute_plan(session, data, schema, plan)` in Rust; Python `robin_sparkless.execute_plan(data, schema, plan_json)`); **expression interpreter** (all scalar functions; serialized expr trees → Polars Expr in `src/plan/expr.rs`); **logical plan schema** ([LOGICAL_PLAN_FORMAT.md](LOGICAL_PLAN_FORMAT.md)); **plan fixtures** (`tests/fixtures/plans/filter_select_limit.json`, `join_simple.json`, `with_column_functions.json`) with `plan_parity_fixtures` test; **create_dataframe_from_rows** (Rust + Python) for arbitrary schema and list of dicts/rows.
 
 ## Next Steps to Full Sparkless Parity
 
@@ -225,7 +225,7 @@ To reach **full Sparkless parity** (robin-sparkless as a complete backend replac
 | **22** | Full parity 3: datetime extensions | ✅ **COMPLETED** |
 | **23** | Full parity 4: JSON, CSV, URL, misc | ✅ **COMPLETED** |
 | **24** | Full parity 5: bit, control, JVM stubs, random, crypto | ✅ **COMPLETED** |
-| **25** | Readiness for post-refactor merge (plan interpreter, expression interpreter, plan schema, plan fixtures, create_dataframe_from_rows) | ✅ **COMPLETED** |
+| **25** | Readiness for post-refactor merge (plan interpreter, expression interpreter for all scalar functions, plan schema, 3 plan fixtures, create_dataframe_from_rows) | ✅ **COMPLETED** |
 | **26** | Prepare and publish robin-sparkless as a Rust crate (crates.io, API stability, docs, release) | 2–3 weeks |
 | **27** | Sparkless integration (BackendFactory "robin", 200+ tests), PyO3 surface | 4–6 weeks |
 
@@ -443,7 +443,7 @@ To reach **full Sparkless parity** (robin-sparkless as a complete backend replac
 
 - **Plan interpreter** ✅: `execute_plan(session, data, schema, plan)` in Rust (`src/plan/`); exposed in Python as `robin_sparkless.execute_plan(data, schema, plan_json)` returning a DataFrame (call `.collect()` for list of dicts).
 - **Logical plan schema** ✅: [docs/LOGICAL_PLAN_FORMAT.md](LOGICAL_PLAN_FORMAT.md) defines op names, payload shapes, and expression tree format.
-- **Expression interpreter** ✅: `src/plan/expr.rs` turns serialized expression trees into Polars `Expr` (col, lit, comparisons, and, or, not, upper, lower, coalesce, eq_null_safe).
+- **Expression interpreter** ✅: `src/plan/expr.rs` turns serialized expression trees into Polars `Expr`. Supports col, lit, comparison/logical ops, eq_null_safe, and **all scalar functions** (string, math, datetime, type/conditional, bit, array, map, misc; two-arg when). See [LOGICAL_PLAN_FORMAT.md](LOGICAL_PLAN_FORMAT.md).
 - **Plan-based fixtures and tests** ✅: `tests/fixtures/plans/` (filter_select_limit, join_simple); `plan_parity_fixtures` test in `tests/parity.rs`.
 - **Flexible DataFrame creation** ✅: Rust `create_dataframe_from_rows(rows, schema)` in session; Python `create_dataframe_from_rows(data, schema)` on SparkSession.
 

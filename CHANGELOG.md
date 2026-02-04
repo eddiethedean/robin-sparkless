@@ -23,8 +23,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Phase 25 – Readiness for post-refactor merge** ✅ **COMPLETED**
   - **Plan interpreter**: `execute_plan(session, data, schema, plan)` in Rust (`src/plan/`); Python `robin_sparkless.execute_plan(data, schema, plan_json)` returning a DataFrame (call `.collect()` for list of dicts).
   - **Logical plan schema**: [docs/LOGICAL_PLAN_FORMAT.md](docs/LOGICAL_PLAN_FORMAT.md) defines op list, payload shapes (filter, select, withColumn, join, union, orderBy, limit, groupBy+aggs, etc.), and expression tree format.
-  - **Expression interpreter**: `src/plan/expr.rs` converts serialized expression trees to Polars `Expr` (col, lit, eq/ne/gt/ge/lt/le, and, or, not, eq_null_safe, upper, lower, coalesce).
-  - **Plan fixtures and tests**: `tests/fixtures/plans/filter_select_limit.json`, `join_simple.json`; `plan_parity_fixtures` test in `tests/parity.rs`.
+  - **Expression interpreter**: `src/plan/expr.rs` converts serialized expression trees to Polars `Expr`. **Extended to all scalar functions**: col, lit, comparison/logical ops, eq_null_safe, and **all scalar functions** valid in filter/select/withColumn (string, math, datetime, type/conditional, binary/bit, array/list, map/struct, misc; two-arg when). Single source of truth: `expr_from_fn` and `expr_from_fn_rest` delegate to `crate::functions` / `Column`; literal and arg helpers in expr.rs.
+  - **Plan fixtures and tests**: `tests/fixtures/plans/filter_select_limit.json`, `join_simple.json`, `with_column_functions.json`; `plan_parity_fixtures` test in `tests/parity.rs`; unit tests in `src/plan/expr.rs` for length, substring, year, cast, when, concat, greatest, array_size, element_at, coalesce.
   - **create_dataframe_from_rows**: Rust `SparkSession::create_dataframe_from_rows(rows, schema)` for arbitrary schema and row data; Python `SparkSession.create_dataframe_from_rows(data, schema)` (data: list of dicts or list of lists). See [READINESS_FOR_SPARKLESS_PLAN.md](docs/READINESS_FOR_SPARKLESS_PLAN.md) and [ROADMAP.md](docs/ROADMAP.md).
 
 - **Missing PySpark features (plan Phases 1–6)** ✅ **COMPLETED**

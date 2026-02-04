@@ -5,7 +5,7 @@
 | [QUICKSTART](QUICKSTART.md) | Build, install, basic usage, optional features (SQL, Delta), troubleshooting, benchmarks |
 | [ROADMAP](ROADMAP.md) | Development roadmap and Sparkless integration phases |
 | [CHANGELOG](../CHANGELOG.md) | Version history and release notes |
-| [PARITY_STATUS](PARITY_STATUS.md) | PySpark parity coverage matrix (159 fixtures; plan fixtures in tests/fixtures/plans/; Phases 12–25 + signature alignment) |
+| [PARITY_STATUS](PARITY_STATUS.md) | PySpark parity coverage matrix (159 fixtures; 3 plan fixtures in tests/fixtures/plans/; Phases 12–25 + signature alignment) |
 | [PYSPARK_DIFFERENCES](PYSPARK_DIFFERENCES.md) | Known divergences from PySpark (window, SQL, Delta, rand/randn semantics; Phase 8 completed) |
 | [PYTHON_API](PYTHON_API.md) | Python API contract (Phase 4 PyO3 bridge): build, install, signatures; optional SQL and Delta |
 | [SIGNATURE_GAP_ANALYSIS](SIGNATURE_GAP_ANALYSIS.md) | PySpark vs robin-sparkless signature gap analysis (params, types, defaults) and recommendations |
@@ -19,7 +19,7 @@
 | [SPARKLESS_INTEGRATION_ANALYSIS](SPARKLESS_INTEGRATION_ANALYSIS.md) | Sparkless backend replacement strategy, architecture, test conversion |
 | [SPARKLESS_REFACTOR_PLAN](SPARKLESS_REFACTOR_PLAN.md) | Refactor plan for Sparkless (serializable logical plan) to prepare for robin backend |
 | [READINESS_FOR_SPARKLESS_PLAN](READINESS_FOR_SPARKLESS_PLAN.md) | What robin-sparkless can do in parallel (plan interpreter, fixtures, API) before merge |
-| [LOGICAL_PLAN_FORMAT](LOGICAL_PLAN_FORMAT.md) | Backend plan format (op list + payload shapes + expression tree) consumed by execute_plan (Phase 25) |
+| [LOGICAL_PLAN_FORMAT](LOGICAL_PLAN_FORMAT.md) | Backend plan format (op list + payload shapes + expression tree) consumed by execute_plan; full expression support (all scalar functions in filter/select/withColumn) |
 | [TEST_CREATION_GUIDE](TEST_CREATION_GUIDE.md) | How to add parity tests and convert Sparkless fixtures |
 | [IMPLEMENTATION_STATUS](IMPLEMENTATION_STATUS.md) | Polars migration status |
 | [MIGRATION_STATUS](MIGRATION_STATUS.md) | Rust-only migration history |

@@ -45,8 +45,8 @@ While Sparkless implements the [refactor plan](SPARKLESS_REFACTOR_PLAN.md) (seri
 
 **Goal**: Our plan interpreter must evaluate “expression trees” (filter conditions, withColumn exprs, select exprs) that are already in serialized form (dict/list/primitives).
 
-- **Rust**: Add a module that turns a serialized expression (e.g. `{"op": "gt", "left": {"col": "age"}, "right": {"lit": 30}}`) into a Polars `Expr` (or our `Column`). Recursively handle `col`, `lit`, comparison ops, logical ops, and a set of functions (e.g. `upper`, `lower`, `coalesce`). This is the same semantics we already have in `column.rs` / `functions.rs`, but driven from data instead of from Python Column objects.
-- **Coverage**: Start with the subset needed for the parity fixtures we already have (filter with comparisons and maybe `and`/`or`, select with column refs, withColumn with one or two function calls). Expand as needed.
+- **Rust**: Add a module that turns a serialized expression (e.g. `{"op": "gt", "left": {"col": "age"}, "right": {"lit": 30}}`) into a Polars `Expr` (or our `Column`). Recursively handle `col`, `lit`, comparison ops, logical ops, and function calls. **Done**: The expression interpreter in `src/plan/expr.rs` now supports **all scalar functions** in robin-sparkless that are valid in filter/select/withColumn (string, math, datetime, type/conditional, binary/bit, array/list, map/struct, misc), delegating to `crate::functions` and `Column`; see [LOGICAL_PLAN_FORMAT.md](LOGICAL_PLAN_FORMAT.md).
+- **Coverage**: Full. Any function available in `functions.rs` / `Column` for scalar expressions can be used in plan expression trees.
 - **Python**: No need to expose the expression interpreter directly; it’s used internally by `execute_plan`.
 
 **Outcome**: We can run plans that include filter/select/withColumn with structured expressions without any Python-side Column translation.
@@ -58,7 +58,7 @@ While Sparkless implements the [refactor plan](SPARKLESS_REFACTOR_PLAN.md) (seri
 **Goal**: Lock in behavior of our plan interpreter and catch regressions.
 
 - **Fixture files**: Add JSON fixtures under e.g. `tests/fixtures/plans/` that represent a logical plan (schema + input rows + op list + expected output rows). Same structure as existing parity fixtures but with a “plan” instead of “operations” in the current robin format.
-- **Test**: Load fixture, call `execute_plan` (or the Rust equivalent in tests), assert output schema and rows match expected. Start with one or two plans (e.g. filter + select + limit, then join).
+- **Test**: Load fixture, call `execute_plan` (or the Rust equivalent in tests), assert output schema and rows match expected. **Done**: Three plan fixtures — `filter_select_limit.json`, `join_simple.json`, `with_column_functions.json` (withColumn with upper, when); `plan_parity_fixtures` test in `tests/parity.rs`.
 - **Reuse**: When Sparkless publishes sample serialized plans (e.g. from their Phase 1 tests), we can add those as fixtures and run them here to ensure we stay aligned.
 
 **Outcome**: Safe refactors; clear compatibility with whatever plan format we commit to.

@@ -1,0 +1,49 @@
+{
+  "name": "with_column_functions",
+  "input": {
+    "schema": [
+      {"name": "name", "type": "string"},
+      {"name": "age", "type": "bigint"}
+    ],
+    "rows": [
+      ["alice", 20],
+      ["bob", 15]
+    ]
+  },
+  "plan": [
+    {
+      "op": "withColumn",
+      "payload": {
+        "name": "upper_name",
+        "expr": {"fn": "upper", "args": [{"col": "name"}]}
+      }
+    },
+    {
+      "op": "withColumn",
+      "payload": {
+        "name": "label",
+        "expr": {
+          "fn": "when",
+          "args": [
+            {"op": "gt", "left": {"col": "age"}, "right": {"lit": 17}},
+            {"lit": "adult"}
+          ]
+        }
+      }
+    },
+    {"op": "select", "payload": ["name", "upper_name", "age", "label"]},
+    {"op": "limit", "payload": {"n": 10}}
+  ],
+  "expected": {
+    "schema": [
+      {"name": "name", "type": "string"},
+      {"name": "upper_name", "type": "string"},
+      {"name": "age", "type": "bigint"},
+      {"name": "label", "type": "string"}
+    ],
+    "rows": [
+      ["alice", "ALICE", 20, "adult"],
+      ["bob", "BOB", 15, null]
+    ]
+  }
+}

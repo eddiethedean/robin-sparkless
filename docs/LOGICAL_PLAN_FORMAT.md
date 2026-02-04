@@ -111,18 +111,20 @@ Expressions are recursive structures used in **filter**, **select** (computed co
 
 - **Form**: `{"fn": "<function_name>", "args": [<expr>, ...]}`
 
-**Supported functions (MVP / parity subset)**:
+**when (two-arg form)**: `{"fn": "when", "args": [<condition_expr>, <then_expr>]}` — evaluates to `<then_expr>` where `<condition_expr>` is true, otherwise null. Chained when/then/otherwise can be represented by nesting further `when` in the else branch.
 
-| Function   | Args (typical)        | Notes                    |
-|-----------|------------------------|--------------------------|
-| upper     | [col/expr]             | String to uppercase      |
-| lower     | [col/expr]             | String to lowercase      |
-| coalesce  | [expr, expr, ...]      | First non-null           |
-| when      | (see below)            | Conditional; may be nested with then/otherwise |
+**Supported functions**: All scalar functions in robin-sparkless that are valid in filter/select/withColumn are supported. The expression interpreter in `src/plan/expr.rs` (in `expr_from_fn` and `expr_from_fn_rest`) is the single source of truth. Categories include:
 
-**when/otherwise**: Can be represented as `{"fn": "when", "args": [<condition_expr>, <then_expr>]}` with a follow-up convention for chained when/then/otherwise, or as a single object with `condition`, `then`, `otherwise` (the latter being an expr that may itself be a when). Document exact shape when implemented.
+- **String**: upper, lower, length, trim, ltrim, rtrim, btrim, substring, substr, concat, concat_ws, initcap, repeat, reverse, instr, position, ascii, format_number, overlay, char, chr, base64, unbase64, sha1, sha2, md5, lpad, rpad, translate, mask, substring_index, left, right, replace, startswith, endswith, contains, like, ilike, rlike, regexp, soundex, regexp_extract, regexp_replace, regexp_extract_all, regexp_like, regexp_count, split, split_part, find_in_set, format_string, lcase, ucase, and related.
+- **Math/numeric**: abs, ceil, floor, round, bround, negate, sqrt, pow, power, exp, log, ln, sin, cos, tan, asin, acos, atan, atan2, degrees, radians, signum, sign, pmod, factorial, hypot, cosh, sinh, tanh, cbrt, expm1, log1p, log10, log2, rint, e, pi, etc.
+- **Datetime**: year, month, day, dayofmonth, quarter, weekofyear, dayofweek, dayofyear, hour, minute, second, to_date, date_format, date_add, date_sub, datediff, last_day, trunc, add_months, months_between, next_day, unix_timestamp, from_unixtime, make_date, make_timestamp, make_timestamp_ntz, timestampadd, timestampdiff, current_date, current_timestamp, extract, date_part, etc.
+- **Type/conditional**: cast, try_cast, coalesce, when (two-arg), nvl, nvl2, nullif, ifnull, greatest, least, typeof, try_divide, try_add, try_subtract, try_multiply, width_bucket, equal_null.
+- **Binary/bit**: hex, unhex, bin, getbit, bit_and, bit_or, bit_xor, bit_count, bitwise_not, bit_length, octet_length, etc.
+- **Array/list**: array_size, size, element_at, try_element_at, array_contains, array_join, array_sort, array_distinct, array_slice, array_compact, array_remove, explode, explode_outer, array_position, array_append, array_prepend, array_insert, array_except, array_intersect, array_union, arrays_overlap, arrays_zip, array_agg, array_sum.
+- **Map/struct**: create_map, map_keys, map_values, get (map lookup).
+- **Misc**: hash, shift_left, shift_right, version; JVM-style stubs (e.g. spark_partition_id, current_catalog, current_database, current_user, input_file_name) as zero-arg.
 
-Additional functions (length, trim, substring, concat, year, month, etc.) can be added to this table as the expression interpreter is extended.
+Aggregates (sum, count, avg, min, max) are used in the **agg** op payload, not in expression trees. Sort-order functions (asc, desc) are used in **orderBy**, not in expressions.
 
 ---
 
