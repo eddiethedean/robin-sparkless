@@ -1,0 +1,31 @@
+{
+  "name": "ilike_escape_char",
+  "pyspark_version": "3.5.0",
+  "input": {
+    "schema": [
+      { "name": "id", "type": "bigint" },
+      { "name": "s", "type": "string" }
+    ],
+    "rows": [
+      [1, "A%B"],
+      [2, "a_b"],
+      [3, "AxB"]
+    ]
+  },
+  "operations": [
+    { "op": "withColumn", "column": "m", "expr": "ilike(col('s'), 'A#%B', '#')" },
+    { "op": "orderBy", "columns": ["id"], "ascending": [true] }
+  ],
+  "expected": {
+    "schema": [
+      { "name": "id", "type": "bigint" },
+      { "name": "s", "type": "string" },
+      { "name": "m", "type": "boolean" }
+    ],
+    "rows": [
+      [1, "A%B", true],
+      [2, "a_b", false],
+      [3, "AxB", false]
+    ]
+  }
+}

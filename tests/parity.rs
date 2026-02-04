@@ -338,7 +338,7 @@ fn create_df_from_input(
         if is_int_int_string {
             let mut tuples: Vec<(i64, i64, String)> = Vec::new();
             for row in &input.rows {
-                let v0 = row.get(0).and_then(|v| v.as_i64()).unwrap_or(0);
+                let v0 = row.first().and_then(|v| v.as_i64()).unwrap_or(0);
                 let v1 = row.get(1).and_then(|v| v.as_i64()).unwrap_or(0);
                 let v2 = row
                     .get(2)
@@ -1209,7 +1209,7 @@ fn apply_operations(
                         format!("failed to parse withColumn expr '{}': {}", expr, e).into(),
                     )
                 })?;
-                df = df.with_column_expr(&column, parsed_expr)?;
+                df = df.with_column_expr(column, parsed_expr)?;
             }
             Operation::Window {
                 column: col_name,
@@ -1956,10 +1956,10 @@ fn parse_struct_field_expr(s: &str) -> Result<polars::prelude::Expr, String> {
     let s = s.trim();
     let prefix = "col(\"\").struct_().field_by_name(";
     let prefix2 = "col('').struct_().field_by_name(";
-    let (rest, _) = if s.starts_with(prefix) {
-        (&s[prefix.len()..], prefix)
-    } else if s.starts_with(prefix2) {
-        (&s[prefix2.len()..], prefix2)
+    let (rest, _) = if let Some(stripped) = s.strip_prefix(prefix) {
+        (stripped, prefix)
+    } else if let Some(stripped) = s.strip_prefix(prefix2) {
+        (stripped, prefix2)
     } else {
         return Err(format!(
             "expected col(\"\").struct_().field_by_name(...), got {}",
@@ -2119,27 +2119,32 @@ fn parse_with_column_expr(src: &str) -> Result<Expr, String> {
         ln, localtimestamp, locate, log, log10, lower, lpad, make_date, make_timestamp, map_concat,
         map_contains_key, map_filter, map_from_entries, map_zip_with, md5, minute,
         monotonically_increasing_id, months_between, named_struct, nanvl, negate, next_day, now,
-        nullif, nvl, nvl2, overlay, parse_url, pi, pmod, position, positive, pow, power, quarter,
-        radians, raise_error, rand, randn, regexp_count, regexp_extract, regexp_extract_all,
-        regexp_instr, regexp_like, regexp_replace, regexp_substr, repeat, replace, reverse, right,
-        rlike, rpad, sec, second, sha1, sha2, shift_left, shift_right, signum, sin, sinh, size,
+        nullif, nvl, nvl2, overlay, parse_url, pi, pmod, positive, pow, power, quarter, radians,
+        raise_error, rand, randn, regexp_count, regexp_extract, regexp_extract_all, regexp_instr,
+        regexp_like, regexp_replace, regexp_substr, repeat, replace, reverse, right, rlike, rpad,
+        sec, second, sha1, sha2, shift_left, shift_right, signum, sin, sinh, size,
         spark_partition_id, split, split_part, sqrt, startswith, str_to_map, struct_, substr,
         substring, tan, tanh, timestamp_micros, timestamp_millis, timestamp_seconds, timestampadd,
-        timestampdiff, to_char, to_degrees, to_number, to_radians, to_unix_timestamp,
+        timestampdiff, to_char, to_degrees, to_number, to_radians, to_timestamp, to_unix_timestamp,
         to_utc_timestamp, trim, trunc, try_add, try_cast, try_divide, try_multiply, try_subtract,
         try_to_number, try_to_timestamp, typeof_, ucase, unbase64, unhex, unix_date, unix_micros,
         unix_millis, unix_seconds, unix_timestamp, unix_timestamp_now, upper, url_decode,
-        url_encode, user, version, weekday, weekofyear, when, width_bucket, zip_with,
+        url_encode, user, version, weekday, weekofyear, when, when_then_otherwise_null,
+        width_bucket, zip_with,
     };
 
     let s = src.trim();
 
-    // Handle assert_true(col('name'))
+    // Handle assert_true(col('name')) or assert_true(col('name'), 'errMsg')
     if s.starts_with("assert_true(") {
         let inner = extract_first_arg(s, "assert_true(")?;
-        let col_name = extract_col_name(inner)?;
+        let parts = parse_comma_separated_args(inner);
+        let col_name = extract_col_name(parts.first().ok_or("assert_true needs column")?)?;
+        let err_msg = parts
+            .get(1)
+            .map(|p| p.trim_matches(['\'', '"']).to_string());
         let c = col(col_name);
-        return Ok(assert_true(&c).into_expr());
+        return Ok(assert_true(&c, err_msg.as_deref()).into_expr());
     }
 
     // Handle raise_error('message')
@@ -2187,8 +2192,19 @@ fn parse_with_column_expr(src: &str) -> Result<Expr, String> {
         return Ok(rand(seed).into_expr());
     }
 
-    // Handle when().then().otherwise() or when().otherwise() expressions
+    // Handle when(cond, value) two-arg or when().then().otherwise() expressions
     if s.starts_with("when(") {
+        let inner = extract_first_arg(s, "when(")?;
+        let parts = parse_comma_separated_args(inner);
+        if parts.len() == 2 {
+            // when(condition, value) -> value where condition true, null otherwise
+            let condition_expr = parse_simple_filter_expr(parts[0].trim(), None)?;
+            let condition_col = robin_sparkless::Column::from_expr(condition_expr, None);
+            let value_expr = parse_column_or_literal(parts[1].trim())?;
+            let value_col = robin_sparkless::Column::from_expr(value_expr, None);
+            return Ok(when_then_otherwise_null(&condition_col, &value_col).into_expr());
+        }
+
         // Find the condition part: when(col('age') >= 18)...
         // The condition ends at the first ")."
         let cond_end = s.find(").").ok_or("missing ). in when expression")?;
@@ -2493,7 +2509,7 @@ fn parse_with_column_expr(src: &str) -> Result<Expr, String> {
     if s.starts_with("nvl2(") {
         let inner = &s[5..s.len() - 1];
         let parts = parse_comma_separated_args(inner);
-        let col1 = parse_column_or_literal(parts.get(0).ok_or("nvl2 needs col1")?.trim())?;
+        let col1 = parse_column_or_literal(parts.first().ok_or("nvl2 needs col1")?.trim())?;
         let col2 = parse_column_or_literal(parts.get(1).ok_or("nvl2 needs col2")?.trim())?;
         let col3 = parse_column_or_literal(parts.get(2).ok_or("nvl2 needs col3")?.trim())?;
         let c1 = robin_sparkless::Column::from_expr(col1, None);
@@ -2725,7 +2741,7 @@ fn parse_with_column_expr(src: &str) -> Result<Expr, String> {
     if s.starts_with("make_date(") {
         let inner = extract_first_arg(s, "make_date(")?;
         let parts = parse_comma_separated_args(inner);
-        let y_name = extract_col_name(parts.get(0).ok_or("make_date needs year")?)?;
+        let y_name = extract_col_name(parts.first().ok_or("make_date needs year")?)?;
         let m_name = extract_col_name(parts.get(1).ok_or("make_date needs month")?)?;
         let d_name = extract_col_name(parts.get(2).ok_or("make_date needs day")?)?;
         let yc = col(y_name);
@@ -2734,23 +2750,24 @@ fn parse_with_column_expr(src: &str) -> Result<Expr, String> {
         return Ok(make_date(&yc, &mc, &dc).into_expr());
     }
 
-    // Handle make_timestamp(col('y'), col('mo'), col('d'), col('h'), col('mi'), col('s'))
+    // Handle make_timestamp(col('y'), col('mo'), col('d'), col('h'), col('mi'), col('s')) or with optional timezone
     if s.starts_with("make_timestamp(") {
         let inner = extract_first_arg(s, "make_timestamp(")?;
         let parts = parse_comma_separated_args(inner);
-        let y_name = extract_col_name(parts.get(0).ok_or("make_timestamp needs year")?)?;
+        let y_name = extract_col_name(parts.first().ok_or("make_timestamp needs year")?)?;
         let mo_name = extract_col_name(parts.get(1).ok_or("make_timestamp needs month")?)?;
         let d_name = extract_col_name(parts.get(2).ok_or("make_timestamp needs day")?)?;
         let h_name = extract_col_name(parts.get(3).ok_or("make_timestamp needs hour")?)?;
         let mi_name = extract_col_name(parts.get(4).ok_or("make_timestamp needs minute")?)?;
         let s_name = extract_col_name(parts.get(5).ok_or("make_timestamp needs second")?)?;
+        let timezone = parts.get(6).map(|p| p.trim().trim_matches(['\'', '"']));
         let yc = col(y_name);
         let moc = col(mo_name);
         let dc = col(d_name);
         let hc = col(h_name);
         let mic = col(mi_name);
         let sc = col(s_name);
-        return Ok(make_timestamp(&yc, &moc, &dc, &hc, &mic, &sc).into_expr());
+        return Ok(make_timestamp(&yc, &moc, &dc, &hc, &mic, &sc, timezone).into_expr());
     }
 
     // Handle timestampadd('DAY', col('delta'), col('ts'))
@@ -2832,7 +2849,7 @@ fn parse_with_column_expr(src: &str) -> Result<Expr, String> {
         return Ok(json_array_length(&col(col_name), path).into_expr());
     }
 
-    // Handle parse_url(col('url'), 'HOST')
+    // Handle parse_url(col('url'), 'HOST') or parse_url(col('url'), 'QUERY', 'k')
     if s.starts_with("parse_url(") {
         let inner = extract_first_arg(s, "parse_url(")?;
         let parts = parse_comma_separated_args(inner);
@@ -2842,7 +2859,10 @@ fn parse_with_column_expr(src: &str) -> Result<Expr, String> {
             .ok_or("parse_url needs part")?
             .trim()
             .trim_matches(['\'', '"']);
-        return Ok(parse_url(&col(col_name), part).into_expr());
+        let key = parts
+            .get(2)
+            .map(|p| p.trim().trim_matches(['\'', '"']).to_string());
+        return Ok(parse_url(&col(col_name), part, key.as_deref()).into_expr());
     }
 
     // Handle isin(col('x'), 1, 2, 3) or isin(col('x'), 'a', 'b', 'c')
@@ -3148,7 +3168,7 @@ fn parse_with_column_expr(src: &str) -> Result<Expr, String> {
         return Ok(contains(&c, substring).into_expr());
     }
 
-    // Handle like(col('name'), pattern), ilike(col('name'), pattern), rlike(col('name'), pattern)
+    // Handle like(col('name'), pattern), like(..., escapeChar), ilike(...), rlike(...)
     if s.starts_with("like(") {
         let inner = extract_first_arg(s, "like(")?;
         let parts = parse_comma_separated_args(inner);
@@ -3158,8 +3178,11 @@ fn parse_with_column_expr(src: &str) -> Result<Expr, String> {
             .ok_or("like needs pattern")?
             .trim()
             .trim_matches(['\'', '"']);
+        let escape_char = parts
+            .get(2)
+            .and_then(|p| p.trim_matches(['\'', '"']).chars().next());
         let c = col(col_name);
-        return Ok(like(&c, pattern).into_expr());
+        return Ok(like(&c, pattern, escape_char).into_expr());
     }
     if s.starts_with("ilike(") {
         let inner = extract_first_arg(s, "ilike(")?;
@@ -3170,8 +3193,11 @@ fn parse_with_column_expr(src: &str) -> Result<Expr, String> {
             .ok_or("ilike needs pattern")?
             .trim()
             .trim_matches(['\'', '"']);
+        let escape_char = parts
+            .get(2)
+            .and_then(|p| p.trim_matches(['\'', '"']).chars().next());
         let c = col(col_name);
-        return Ok(ilike(&c, pattern).into_expr());
+        return Ok(ilike(&c, pattern, escape_char).into_expr());
     }
     if s.starts_with("rlike(") || s.starts_with("regexp(") {
         let prefix = if s.starts_with("rlike(") {
@@ -3259,7 +3285,7 @@ fn parse_with_column_expr(src: &str) -> Result<Expr, String> {
     if s.starts_with("create_map(") {
         let inner = extract_first_arg(s, "create_map(")?;
         let parts = parse_comma_separated_args(inner);
-        if parts.len() < 2 || parts.len() % 2 != 0 {
+        if parts.len() < 2 || !parts.len().is_multiple_of(2) {
             return Err("create_map needs key-value pairs".to_string());
         }
         let mut cols: Vec<robin_sparkless::Column> = Vec::new();
@@ -3416,7 +3442,7 @@ fn parse_with_column_expr(src: &str) -> Result<Expr, String> {
     if s.starts_with("named_struct(") {
         let inner = extract_first_arg(s, "named_struct(")?;
         let parts = parse_comma_separated_args(inner);
-        if parts.len() < 2 || parts.len() % 2 != 0 {
+        if parts.len() < 2 || !parts.len().is_multiple_of(2) {
             return Err("named_struct needs (name, column) pairs".to_string());
         }
         let mut pairs: Vec<(&str, robin_sparkless::Column)> = Vec::new();
@@ -3681,27 +3707,43 @@ fn parse_with_column_expr(src: &str) -> Result<Expr, String> {
             "to_varchar("
         };
         let inner = extract_first_arg(s, func)?;
-        let col_name = extract_col_name(inner)?;
+        let parts = parse_comma_separated_args(inner);
+        let col_name = extract_col_name(parts.first().ok_or("to_char needs column")?)?;
+        let format = parts.get(1).map(|p| p.trim_matches(['\'', '"']));
         let c = col(col_name);
-        return Ok(to_char(&c).into_expr());
+        return Ok(to_char(&c, format).into_expr());
     }
     if s.starts_with("to_number(") {
         let inner = extract_first_arg(s, "to_number(")?;
-        let col_name = extract_col_name(inner)?;
+        let parts = parse_comma_separated_args(inner);
+        let col_name = extract_col_name(parts.first().ok_or("to_number needs column")?)?;
+        let format = parts.get(1).map(|p| p.trim_matches(['\'', '"']));
         let c = col(col_name);
-        return Ok(to_number(&c).into_expr());
+        return Ok(to_number(&c, format).into_expr());
     }
     if s.starts_with("try_to_number(") {
         let inner = extract_first_arg(s, "try_to_number(")?;
-        let col_name = extract_col_name(inner)?;
+        let parts = parse_comma_separated_args(inner);
+        let col_name = extract_col_name(parts.first().ok_or("try_to_number needs column")?)?;
+        let format = parts.get(1).map(|p| p.trim_matches(['\'', '"']));
         let c = col(col_name);
-        return Ok(try_to_number(&c).into_expr());
+        return Ok(try_to_number(&c, format).into_expr());
     }
     if s.starts_with("try_to_timestamp(") {
         let inner = extract_first_arg(s, "try_to_timestamp(")?;
-        let col_name = extract_col_name(inner)?;
+        let parts = parse_comma_separated_args(inner);
+        let col_name = extract_col_name(parts.first().ok_or("try_to_timestamp needs column")?)?;
+        let format = parts.get(1).map(|p| p.trim_matches(['\'', '"']));
         let c = col(col_name);
-        return Ok(try_to_timestamp(&c).into_expr());
+        return Ok(try_to_timestamp(&c, format).into_expr());
+    }
+    if s.starts_with("to_timestamp(") {
+        let inner = extract_first_arg(s, "to_timestamp(")?;
+        let parts = parse_comma_separated_args(inner);
+        let col_name = extract_col_name(parts.first().ok_or("to_timestamp needs column")?)?;
+        let format = parts.get(1).map(|p| p.trim_matches(['\'', '"']));
+        let c = col(col_name);
+        return Ok(to_timestamp(&c, format)?.into_expr());
     }
     if s.starts_with("str_to_map(") {
         let inner = extract_first_arg(s, "str_to_map(")?;
@@ -3846,8 +3888,12 @@ fn parse_with_column_expr(src: &str) -> Result<Expr, String> {
             .ok_or("position needs substr")?
             .trim_matches(['\'', '"']);
         let col_name = extract_col_name(parts.get(1).ok_or("position needs column")?)?;
+        let pos: i64 = parts
+            .get(2)
+            .map(|p| p.trim().parse().unwrap_or(1))
+            .unwrap_or(1);
         let c = col(col_name);
-        return Ok(position(substr, &c).into_expr());
+        return Ok(locate(substr, &c, pos).into_expr());
     }
     if s.starts_with("char(") {
         let inner = extract_first_arg(s, "char(")?;
@@ -4330,7 +4376,11 @@ fn parse_with_column_expr(src: &str) -> Result<Expr, String> {
         let end_name = extract_col_name(parts.first().ok_or("months_between needs end column")?)?;
         let start_name =
             extract_col_name(parts.get(1).ok_or("months_between needs start column")?)?;
-        return Ok(months_between(&col(end_name), &col(start_name)).into_expr());
+        let round_off = parts
+            .get(2)
+            .map(|p| matches!(p.trim().to_lowercase().as_str(), "true" | "1"))
+            .unwrap_or(true);
+        return Ok(months_between(&col(end_name), &col(start_name), round_off).into_expr());
     }
     if s.starts_with("next_day(") {
         let inner = extract_first_arg(s, "next_day(")?;
@@ -4381,7 +4431,7 @@ fn parse_with_column_expr(src: &str) -> Result<Expr, String> {
         let parts = parse_comma_separated_args(inner);
         let cols: Vec<_> = parts
             .iter()
-            .map(|p| extract_col_name(p).map(|n| col(n)))
+            .map(|p| extract_col_name(p).map(col))
             .collect::<Result<Vec<_>, _>>()?;
         let col_refs: Vec<&robin_sparkless::Column> = cols.iter().collect();
         return Ok(greatest(&col_refs).map_err(|e| e.to_string())?.into_expr());
@@ -4391,7 +4441,7 @@ fn parse_with_column_expr(src: &str) -> Result<Expr, String> {
         let parts = parse_comma_separated_args(inner);
         let cols: Vec<_> = parts
             .iter()
-            .map(|p| extract_col_name(p).map(|n| col(n)))
+            .map(|p| extract_col_name(p).map(col))
             .collect::<Result<Vec<_>, _>>()?;
         let col_refs: Vec<&robin_sparkless::Column> = cols.iter().collect();
         return Ok(least(&col_refs).map_err(|e| e.to_string())?.into_expr());
@@ -4627,7 +4677,7 @@ fn parse_column_or_literal(s: &str) -> Result<Expr, String> {
         if lit_content == "None" {
             use polars::prelude::*;
             // Create an expression that is always a null Int64 value
-            return Ok(lit(NULL).cast(DataType::Int64));
+            Ok(lit(NULL).cast(DataType::Int64))
         } else {
             let lit_val = lit_content.trim_matches(['\'', '"']);
             // Try to parse as number, otherwise treat as string

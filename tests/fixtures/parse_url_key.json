@@ -1,0 +1,31 @@
+{
+  "name": "parse_url_key",
+  "pyspark_version": "3.5.0",
+  "input": {
+    "schema": [
+      { "name": "id", "type": "bigint" },
+      { "name": "url", "type": "string" }
+    ],
+    "rows": [
+      [1, "http://example.com/path?k=val1&foo=bar"],
+      [2, "https://a.b/c?x=1&x=2"]
+    ]
+  },
+  "operations": [
+    { "op": "withColumn", "column": "q_k", "expr": "parse_url(col('url'), 'QUERY', 'k')" },
+    { "op": "withColumn", "column": "q_foo", "expr": "parse_url(col('url'), 'QUERY', 'foo')" },
+    { "op": "orderBy", "columns": ["id"], "ascending": [true] }
+  ],
+  "expected": {
+    "schema": [
+      { "name": "id", "type": "bigint" },
+      { "name": "url", "type": "string" },
+      { "name": "q_k", "type": "string" },
+      { "name": "q_foo", "type": "string" }
+    ],
+    "rows": [
+      [1, "http://example.com/path?k=val1&foo=bar", "val1", "bar"],
+      [2, "https://a.b/c?x=1&x=2", null, null]
+    ]
+  }
+}

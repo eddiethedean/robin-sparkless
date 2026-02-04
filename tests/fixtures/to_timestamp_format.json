@@ -1,0 +1,28 @@
+{
+  "name": "to_timestamp_format",
+  "pyspark_version": "3.5.0",
+  "input": {
+    "schema": [
+      { "name": "id", "type": "int" },
+      { "name": "s", "type": "string" }
+    ],
+    "rows": [
+      [1, "2024-01-15 12:00:00"],
+      [2, "1970-01-01 00:00:00"]
+    ]
+  },
+  "operations": [
+    { "op": "withColumn", "column": "ts", "expr": "to_timestamp(col('s'), 'yyyy-MM-dd HH:mm:ss')" },
+    { "op": "select", "columns": ["id", "ts"] }
+  ],
+  "expected": {
+    "schema": [
+      { "name": "id", "type": "int" },
+      { "name": "ts", "type": "timestamp" }
+    ],
+    "rows": [
+      [1, "2024-01-15T12:00:00.000000"],
+      [2, "1970-01-01T00:00:00.000000"]
+    ]
+  }
+}

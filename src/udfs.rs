@@ -1,7 +1,7 @@
 //! Helpers for element-wise UDFs used by map() expressions (soundex, levenshtein, crc32, xxhash64, array_flatten, array_repeat).
 //! These run at plan execution time when Polars invokes the closure.
 
-use chrono::Datelike;
+use chrono::{Datelike, TimeZone};
 use chrono_tz::Tz;
 use polars::prelude::*;
 use std::borrow::Cow;
@@ -1534,8 +1534,12 @@ pub fn apply_weekday(column: Column) -> PolarsResult<Option<Column>> {
     Ok(Some(Column::new(name, out.into_series())))
 }
 
-/// months_between(end, start) - returns fractional number of months.
-pub fn apply_months_between(columns: &mut [Column]) -> PolarsResult<Option<Column>> {
+/// months_between(end, start, round_off) - returns fractional number of months.
+/// When round_off is true, rounds to 8 decimal places (PySpark default).
+pub fn apply_months_between(
+    columns: &mut [Column],
+    round_off: bool,
+) -> PolarsResult<Option<Column>> {
     if columns.len() < 2 {
         return Err(PolarsError::ComputeError(
             "months_between needs two columns (end, start)".into(),
@@ -1550,7 +1554,12 @@ pub fn apply_months_between(columns: &mut [Column]) -> PolarsResult<Option<Colum
         match (oe, os) {
             (Some(e), Some(s)) => {
                 let days = (e - s) as f64;
-                Some(days / 30.44) // approximate months
+                let months = days / 30.44; // approximate months
+                Some(if round_off {
+                    (months * 1e8).round() / 1e8
+                } else {
+                    months
+                })
             }
             _ => None,
         }
@@ -1820,7 +1829,8 @@ pub fn apply_bit_count(column: Column) -> PolarsResult<Option<Column>> {
 
 /// Assert that all boolean values are true (PySpark assert_true).
 /// Returns the original column if assertion passes; errors otherwise.
-pub fn apply_assert_true(column: Column) -> PolarsResult<Option<Column>> {
+/// When err_msg is Some, it is used in the error message when assertion fails.
+pub fn apply_assert_true(column: Column, err_msg: Option<&str>) -> PolarsResult<Option<Column>> {
     let name = column.field().into_owned().name;
     let series = column.take_materialized_series();
     let ca = series
@@ -1834,9 +1844,10 @@ pub fn apply_assert_true(column: Column) -> PolarsResult<Option<Column>> {
         }
     }
     if failed {
-        return Err(PolarsError::ComputeError(
-            format!("assert_true failed on column '{}'", name).into(),
-        ));
+        let msg = err_msg
+            .map(String::from)
+            .unwrap_or_else(|| format!("assert_true failed on column '{}'", name));
+        return Err(PolarsError::ComputeError(msg.into()));
     }
     Ok(Some(Column::new(name, series)))
 }
@@ -2860,8 +2871,8 @@ pub fn apply_try_multiply(columns: &mut [Column]) -> PolarsResult<Option<Column>
 
 // --- Phase 17: unix_timestamp, from_unixtime, make_date, timestamp_*, unix_date, date_from_unix_date, pmod, factorial ---
 
-/// Map PySpark/Java SimpleDateFormat style to chrono strftime.
-fn pyspark_format_to_chrono(s: &str) -> String {
+/// Map PySpark/Java SimpleDateFormat style to chrono strftime. Public for to_char/date_format.
+pub(crate) fn pyspark_format_to_chrono(s: &str) -> String {
     s.replace("yyyy", "%Y")
         .replace("MM", "%m")
         .replace("dd", "%d")
@@ -2920,15 +2931,25 @@ pub fn apply_from_unixtime(column: Column, format: Option<&str>) -> PolarsResult
     Ok(Some(Column::new(name, out.into_series())))
 }
 
-/// make_timestamp(year, month, day, hour, min, sec) - six columns to timestamp (micros).
-pub fn apply_make_timestamp(columns: &mut [Column]) -> PolarsResult<Option<Column>> {
-    use chrono::NaiveDate;
+/// make_timestamp(year, month, day, hour, min, sec, timezone?) - six columns to timestamp (micros).
+/// When timezone is Some(tz_str), components are interpreted as local time in that zone, then converted to UTC.
+pub fn apply_make_timestamp(
+    columns: &mut [Column],
+    timezone: Option<&str>,
+) -> PolarsResult<Option<Column>> {
+    use chrono::{NaiveDate, Utc};
     use polars::datatypes::TimeUnit;
     if columns.len() < 6 {
         return Err(PolarsError::ComputeError(
             "make_timestamp needs six columns (year, month, day, hour, min, sec)".into(),
         ));
     }
+    let tz: Option<Tz> = timezone
+        .map(|s| {
+            s.parse()
+                .map_err(|_| PolarsError::ComputeError(format!("invalid timezone: {}", s).into()))
+        })
+        .transpose()?;
     let name = columns[0].field().into_owned().name;
     let series: Vec<Series> = (0..6)
         .map(|i| std::mem::take(&mut columns[i]).take_materialized_series())
@@ -2938,24 +2959,69 @@ pub fn apply_make_timestamp(columns: &mut [Column]) -> PolarsResult<Option<Colum
         .map(|s| s.cast(&DataType::Int32).map(|c| c.i32().unwrap().clone()))
         .collect::<PolarsResult<Vec<_>>>()?;
     let len = ca[0].len();
+    let out =
+        Int64Chunked::from_iter_options(
+            name.as_str().into(),
+            (0..len).map(|i| {
+                let y = ca[0].get(i)?;
+                let m = ca[1].get(i)?;
+                let d = ca[2].get(i)?;
+                let h = ca[3].get(i).unwrap_or(0);
+                let min = ca[4].get(i).unwrap_or(0);
+                let s = ca[5].get(i).unwrap_or(0);
+                let date = NaiveDate::from_ymd_opt(y, m as u32, d as u32)?;
+                let naive = date.and_hms_opt(h as u32, min as u32, s as u32)?;
+                match &tz {
+                    Some(tz) => tz.from_local_datetime(&naive).single().map(
+                        |dt_tz: chrono::DateTime<Tz>| dt_tz.with_timezone(&Utc).timestamp_micros(),
+                    ),
+                    None => Some(naive.and_utc().timestamp_micros()),
+                }
+            }),
+        );
+    let out_series = out
+        .into_series()
+        .cast(&DataType::Datetime(TimeUnit::Microseconds, None))?;
+    Ok(Some(Column::new(name, out_series)))
+}
+
+/// to_timestamp(column, format?) / try_to_timestamp(column, format?) - string to timestamp.
+/// When format is Some, parse with that format (PySpark-style mapped to chrono); when None, use default.
+/// strict: true for to_timestamp (error on invalid), false for try_to_timestamp (null on invalid).
+pub fn apply_to_timestamp_format(
+    column: Column,
+    format: Option<&str>,
+    strict: bool,
+) -> PolarsResult<Option<Column>> {
+    use chrono::NaiveDateTime;
+    use polars::datatypes::TimeUnit;
+    let chrono_fmt = format
+        .map(pyspark_format_to_chrono)
+        .unwrap_or_else(|| "%Y-%m-%d %H:%M:%S".to_string());
+    let name = column.field().into_owned().name;
+    let series = column.take_materialized_series();
+    let ca = series
+        .str()
+        .map_err(|e| PolarsError::ComputeError(format!("to_timestamp: {}", e).into()))?;
     let out = Int64Chunked::from_iter_options(
         name.as_str().into(),
-        (0..len).map(|i| {
-            let y = ca[0].get(i)?;
-            let m = ca[1].get(i)?;
-            let d = ca[2].get(i)?;
-            let h = ca[3].get(i).unwrap_or(0);
-            let min = ca[4].get(i).unwrap_or(0);
-            let s = ca[5].get(i).unwrap_or(0);
-            let date = NaiveDate::from_ymd_opt(y, m as u32, d as u32)?;
-            let dt = date.and_hms_opt(h as u32, min as u32, s as u32)?;
-            Some(dt.and_utc().timestamp_micros())
+        ca.into_iter().map(|opt_s| {
+            opt_s.and_then(|s| {
+                NaiveDateTime::parse_from_str(s, &chrono_fmt)
+                    .ok()
+                    .map(|ndt| ndt.and_utc().timestamp_micros())
+            })
         }),
     );
     let out_series = out
         .into_series()
         .cast(&DataType::Datetime(TimeUnit::Microseconds, None))?;
-    Ok(Some(Column::new(name, out_series)))
+    if strict {
+        // to_timestamp: ensure no nulls introduced by parse (optional: could check and error)
+        Ok(Some(Column::new(name, out_series)))
+    } else {
+        Ok(Some(Column::new(name, out_series)))
+    }
 }
 
 /// make_date(year, month, day) - three columns to date.
@@ -3260,8 +3326,13 @@ pub fn apply_to_csv(column: Column) -> PolarsResult<Option<Column>> {
     Ok(Some(Column::new(name, out)))
 }
 
-/// parse_url(url_str, part) - extract URL component (PySpark parse_url).
-pub fn apply_parse_url(column: Column, part: &str) -> PolarsResult<Option<Column>> {
+/// parse_url(url_str, part, key) - extract URL component (PySpark parse_url).
+/// When part is QUERY/QUERYSTRING and key is Some(k), returns the value for that query parameter only.
+pub fn apply_parse_url(
+    column: Column,
+    part: &str,
+    key: Option<&str>,
+) -> PolarsResult<Option<Column>> {
     use url::Url;
     let name = column.field().into_owned().name;
     let series = column.take_materialized_series();
@@ -3269,6 +3340,7 @@ pub fn apply_parse_url(column: Column, part: &str) -> PolarsResult<Option<Column
         .str()
         .map_err(|e| PolarsError::ComputeError(format!("parse_url: {}", e).into()))?;
     let part_upper = part.trim().to_uppercase();
+    let key_owned = key.map(String::from);
     let out = StringChunked::from_iter_options(
         name.as_str().into(),
         ca.into_iter().map(|opt_s| {
@@ -3278,7 +3350,15 @@ pub fn apply_parse_url(column: Column, part: &str) -> PolarsResult<Option<Column
                     "PROTOCOL" | "PROT" => Some(u.scheme().to_string()),
                     "HOST" => u.host_str().map(String::from),
                     "PATH" | "FILE" | "PATHNAME" => Some(u.path().to_string()),
-                    "QUERY" | "REF" | "QUERYSTRING" => u.query().map(String::from),
+                    "QUERY" | "REF" | "QUERYSTRING" => {
+                        if let Some(ref k) = key_owned {
+                            u.query_pairs()
+                                .find(|(name, _)| name.as_ref() == k.as_str())
+                                .map(|(_, value)| value.into_owned())
+                        } else {
+                            u.query().map(String::from)
+                        }
+                    }
                     "USERINFO" => Some(format!("{}:{}", u.username(), u.password().unwrap_or(""))),
                     "AUTHORITY" => u.host_str().map(|h| h.to_string()),
                     _ => None,

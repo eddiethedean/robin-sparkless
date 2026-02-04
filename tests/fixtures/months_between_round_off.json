@@ -1,0 +1,33 @@
+{
+  "name": "months_between_round_off",
+  "pyspark_version": "3.5.0",
+  "input": {
+    "schema": [
+      { "name": "id", "type": "int" },
+      { "name": "d1", "type": "date" },
+      { "name": "d2", "type": "date" }
+    ],
+    "rows": [
+      [1, "2024-01-01", "2024-01-15"],
+      [2, "2024-06-01", "2024-06-30"]
+    ]
+  },
+  "operations": [
+    { "op": "withColumn", "column": "mb_round", "expr": "months_between(col('d1'), col('d2'), true)" },
+    { "op": "withColumn", "column": "mb_raw", "expr": "months_between(col('d1'), col('d2'), false)" },
+    { "op": "orderBy", "columns": ["id"], "ascending": [true] }
+  ],
+  "expected": {
+    "schema": [
+      { "name": "id", "type": "int" },
+      { "name": "d1", "type": "date" },
+      { "name": "d2", "type": "date" },
+      { "name": "mb_round", "type": "double" },
+      { "name": "mb_raw", "type": "double" }
+    ],
+    "rows": [
+      [1, "2024-01-01", "2024-01-15", -0.45992116, -0.45992115637319314],
+      [2, "2024-06-01", "2024-06-30", -0.95269382, -0.9526938239159001]
+    ]
+  }
+}

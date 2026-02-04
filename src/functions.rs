@@ -323,6 +323,16 @@ pub fn when(condition: &Column) -> WhenBuilder {
     WhenBuilder::new(condition.expr().clone())
 }
 
+/// Two-arg when(condition, value): returns value where condition is true, null otherwise (PySpark when(cond, val)).
+pub fn when_then_otherwise_null(condition: &Column, value: &Column) -> Column {
+    use polars::prelude::*;
+    let null_expr = Expr::Literal(LiteralValue::Null);
+    let expr = polars::prelude::when(condition.expr().clone())
+        .then(value.expr().clone())
+        .otherwise(null_expr);
+    crate::column::Column::from_expr(expr, None)
+}
+
 /// Builder for when-then-otherwise expressions
 pub struct WhenBuilder {
     condition: Expr,
@@ -513,8 +523,9 @@ pub fn bit_get(column: &Column, pos: i64) -> Column {
 }
 
 /// Assert that all boolean values are true; errors otherwise (PySpark assert_true).
-pub fn assert_true(column: &Column) -> Column {
-    column.clone().assert_true()
+/// When err_msg is Some, it is used in the error message when assertion fails.
+pub fn assert_true(column: &Column, err_msg: Option<&str>) -> Column {
+    column.clone().assert_true(err_msg)
 }
 
 /// Raise an error when evaluated (PySpark raise_error). Always fails with the given message.
@@ -845,13 +856,15 @@ pub fn contains(column: &Column, substring: &str) -> Column {
 }
 
 /// SQL LIKE pattern (% any, _ one char). PySpark like.
-pub fn like(column: &Column, pattern: &str) -> Column {
-    column.clone().like(pattern)
+/// When escape_char is Some(esc), esc + char treats that char as literal.
+pub fn like(column: &Column, pattern: &str, escape_char: Option<char>) -> Column {
+    column.clone().like(pattern, escape_char)
 }
 
 /// Case-insensitive LIKE. PySpark ilike.
-pub fn ilike(column: &Column, pattern: &str) -> Column {
-    column.clone().ilike(pattern)
+/// When escape_char is Some(esc), esc + char treats that char as literal.
+pub fn ilike(column: &Column, pattern: &str, escape_char: Option<char>) -> Column {
+    column.clone().ilike(pattern, escape_char)
 }
 
 /// Alias for regexp_like. PySpark rlike / regexp.
@@ -1039,34 +1052,62 @@ pub fn try_cast(column: &Column, type_name: &str) -> Result<Column, String> {
     Ok(Column::from_expr(column.expr().clone().cast(dtype), None))
 }
 
-/// Cast to string (PySpark to_char, to_varchar).
-pub fn to_char(column: &Column) -> Column {
-    cast(column, "string").unwrap()
+/// Cast to string, optionally with format for datetime (PySpark to_char, to_varchar).
+/// When format is Some, uses date_format for datetime columns (PySpark format → chrono strftime); otherwise cast to string.
+pub fn to_char(column: &Column, format: Option<&str>) -> Column {
+    match format {
+        Some(fmt) => column
+            .clone()
+            .date_format(&crate::udfs::pyspark_format_to_chrono(fmt)),
+        None => cast(column, "string").unwrap(),
+    }
 }
 
 /// Alias for to_char (PySpark to_varchar).
-pub fn to_varchar(column: &Column) -> Column {
-    to_char(column)
+pub fn to_varchar(column: &Column, format: Option<&str>) -> Column {
+    to_char(column, format)
 }
 
-/// Cast to numeric (PySpark to_number). Uses Double.
-pub fn to_number(column: &Column) -> Column {
+/// Cast to numeric (PySpark to_number). Uses Double. Format parameter reserved for future use.
+pub fn to_number(column: &Column, _format: Option<&str>) -> Column {
     cast(column, "double").unwrap()
 }
 
-/// Cast to numeric, null on invalid (PySpark try_to_number).
-pub fn try_to_number(column: &Column) -> Column {
+/// Cast to numeric, null on invalid (PySpark try_to_number). Format parameter reserved for future use.
+pub fn try_to_number(column: &Column, _format: Option<&str>) -> Column {
     try_cast(column, "double").unwrap()
 }
 
-/// Cast to timestamp, error on invalid (PySpark to_timestamp).
-pub fn to_timestamp(column: &Column) -> Result<Column, String> {
-    cast(column, "timestamp")
+/// Cast to timestamp, or parse with format when provided (PySpark to_timestamp).
+pub fn to_timestamp(column: &Column, format: Option<&str>) -> Result<Column, String> {
+    use polars::prelude::{DataType, GetOutput, TimeUnit};
+    match format {
+        None => crate::cast(column, "timestamp"),
+        Some(fmt) => {
+            let fmt_owned = fmt.to_string();
+            let expr = column.expr().clone().map(
+                move |s| crate::udfs::apply_to_timestamp_format(s, Some(&fmt_owned), true),
+                GetOutput::from_type(DataType::Datetime(TimeUnit::Microseconds, None)),
+            );
+            Ok(crate::column::Column::from_expr(expr, None))
+        }
+    }
 }
 
-/// Cast to timestamp, null on invalid (PySpark try_to_timestamp).
-pub fn try_to_timestamp(column: &Column) -> Column {
-    try_cast(column, "timestamp").unwrap()
+/// Cast to timestamp, null on invalid, or parse with format when provided (PySpark try_to_timestamp).
+pub fn try_to_timestamp(column: &Column, format: Option<&str>) -> Column {
+    use polars::prelude::*;
+    match format {
+        None => try_cast(column, "timestamp").unwrap(),
+        Some(fmt) => {
+            let fmt_owned = fmt.to_string();
+            let expr = column.expr().clone().map(
+                move |s| crate::udfs::apply_to_timestamp_format(s, Some(&fmt_owned), false),
+                GetOutput::from_type(DataType::Datetime(TimeUnit::Microseconds, None)),
+            );
+            crate::column::Column::from_expr(expr, None)
+        }
+    }
 }
 
 /// Division that returns null on divide-by-zero (PySpark try_divide).
@@ -1397,8 +1438,9 @@ pub fn add_months(column: &Column, n: i32) -> Column {
 }
 
 /// Months between end and start dates as fractional (PySpark months_between).
-pub fn months_between(end: &Column, start: &Column) -> Column {
-    end.clone().months_between(start)
+/// When round_off is true, rounds to 8 decimal places (PySpark default).
+pub fn months_between(end: &Column, start: &Column, round_off: bool) -> Column {
+    end.clone().months_between(start, round_off)
 }
 
 /// Next date that is the given weekday (e.g. "Mon") (PySpark next_day).
@@ -1442,7 +1484,8 @@ pub fn make_date(year: &Column, month: &Column, day: &Column) -> Column {
     crate::column::Column::from_expr(expr, None)
 }
 
-/// make_timestamp(year, month, day, hour, min, sec) - six columns to timestamp (PySpark make_timestamp).
+/// make_timestamp(year, month, day, hour, min, sec, timezone?) - six columns to timestamp (PySpark make_timestamp).
+/// When timezone is Some(tz), components are interpreted as local time in that zone, then converted to UTC.
 pub fn make_timestamp(
     year: &Column,
     month: &Column,
@@ -1450,8 +1493,10 @@ pub fn make_timestamp(
     hour: &Column,
     minute: &Column,
     sec: &Column,
+    timezone: Option<&str>,
 ) -> Column {
     use polars::prelude::*;
+    let tz_owned = timezone.map(|s| s.to_string());
     let args = [
         month.expr().clone(),
         day.expr().clone(),
@@ -1460,7 +1505,7 @@ pub fn make_timestamp(
         sec.expr().clone(),
     ];
     let expr = year.expr().clone().map_many(
-        crate::udfs::apply_make_timestamp,
+        move |cols| crate::udfs::apply_make_timestamp(cols, tz_owned.as_deref()),
         &args,
         GetOutput::from_type(DataType::Datetime(TimeUnit::Microseconds, None)),
     );
@@ -1560,7 +1605,7 @@ pub fn make_timestamp_ntz(
     minute: &Column,
     sec: &Column,
 ) -> Column {
-    make_timestamp(year, month, day, hour, minute, sec)
+    make_timestamp(year, month, day, hour, minute, sec, None)
 }
 
 /// Convert seconds since epoch to timestamp (PySpark timestamp_seconds).
@@ -2274,8 +2319,9 @@ pub fn json_array_length(column: &Column, path: &str) -> Column {
 }
 
 /// Parse URL and extract part: PROTOCOL, HOST, PATH, etc. (PySpark parse_url).
-pub fn parse_url(column: &Column, part: &str) -> Column {
-    column.clone().parse_url(part)
+/// When key is Some(k) and part is QUERY/QUERYSTRING, returns the value for that query parameter only.
+pub fn parse_url(column: &Column, part: &str, key: Option<&str>) -> Column {
+    column.clone().parse_url(part, key)
 }
 
 /// Hash of column values (PySpark hash). Uses xxHash64 for consistency.
@@ -2328,7 +2374,7 @@ mod tests {
 
     #[test]
     fn test_lit_f64() {
-        let column = lit_f64(3.14159);
+        let column = lit_f64(std::f64::consts::PI);
         assert_eq!(column.name(), "<expr>");
     }
 

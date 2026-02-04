@@ -1,0 +1,35 @@
+{
+  "name": "position_start",
+  "pyspark_version": "3.5.0",
+  "input": {
+    "schema": [
+      { "name": "id", "type": "bigint" },
+      { "name": "s", "type": "string" }
+    ],
+    "rows": [
+      [1, "abcab"],
+      [2, "ab"],
+      [3, "xab"],
+      [4, "xx"]
+    ]
+  },
+  "operations": [
+    { "op": "withColumn", "column": "pos1", "expr": "position('ab', col('s'), 1)" },
+    { "op": "withColumn", "column": "pos2", "expr": "position('ab', col('s'), 2)" },
+    { "op": "orderBy", "columns": ["id"], "ascending": [true] }
+  ],
+  "expected": {
+    "schema": [
+      { "name": "id", "type": "bigint" },
+      { "name": "s", "type": "string" },
+      { "name": "pos1", "type": "bigint" },
+      { "name": "pos2", "type": "bigint" }
+    ],
+    "rows": [
+      [1, "abcab", 1, 4],
+      [2, "ab", 1, 0],
+      [3, "xab", 2, 2],
+      [4, "xx", 0, 0]
+    ]
+  }
+}

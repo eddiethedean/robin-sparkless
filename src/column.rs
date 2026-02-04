@@ -3,17 +3,33 @@ use polars::prelude::{
 };
 
 /// Convert SQL LIKE pattern (% = any sequence, _ = one char) to regex. Escapes regex specials.
-fn like_pattern_to_regex(pattern: &str) -> String {
+/// When escape_char is Some(esc), esc + any char treats that char as literal (no %/_ expansion).
+fn like_pattern_to_regex(pattern: &str, escape_char: Option<char>) -> String {
     let mut out = String::with_capacity(pattern.len() * 2);
-    for c in pattern.chars() {
-        match c {
-            '%' => out.push_str(".*"),
-            '_' => out.push('.'),
-            '\\' | '.' | '+' | '*' | '?' | '[' | ']' | '(' | ')' | '{' | '}' | '^' | '$' | '|' => {
+    let mut it = pattern.chars();
+    while let Some(c) = it.next() {
+        if escape_char == Some(c) {
+            if let Some(next) = it.next() {
+                // Literal: escape for regex
+                if "\\.*+?[](){}^$|".contains(next) {
+                    out.push('\\');
+                }
+                out.push(next);
+            } else {
                 out.push('\\');
                 out.push(c);
             }
-            _ => out.push(c),
+        } else {
+            match c {
+                '%' => out.push_str(".*"),
+                '_' => out.push('.'),
+                '\\' | '.' | '+' | '*' | '?' | '[' | ']' | '(' | ')' | '{' | '}' | '^' | '$'
+                | '|' => {
+                    out.push('\\');
+                    out.push(c);
+                }
+                _ => out.push(c),
+            }
         }
     }
     format!("^{}$", out)
@@ -176,15 +192,17 @@ impl Column {
     }
 
     /// SQL LIKE pattern matching (% = any chars, _ = one char). PySpark like.
-    pub fn like(&self, pattern: &str) -> Column {
-        let regex = like_pattern_to_regex(pattern);
+    /// When escape_char is Some(esc), esc + char treats that char as literal (e.g. \\% = literal %).
+    pub fn like(&self, pattern: &str, escape_char: Option<char>) -> Column {
+        let regex = like_pattern_to_regex(pattern, escape_char);
         self.regexp_like(&regex)
     }
 
     /// Case-insensitive LIKE. PySpark ilike.
-    pub fn ilike(&self, pattern: &str) -> Column {
+    /// When escape_char is Some(esc), esc + char treats that char as literal.
+    pub fn ilike(&self, pattern: &str, escape_char: Option<char>) -> Column {
         use polars::prelude::*;
-        let regex = format!("(?i){}", like_pattern_to_regex(pattern));
+        let regex = format!("(?i){}", like_pattern_to_regex(pattern, escape_char));
         Self::from_expr(self.expr().clone().str().contains(lit(regex), false), None)
     }
 
@@ -650,11 +668,13 @@ impl Column {
     }
 
     /// Assert that all boolean values are true; errors otherwise (PySpark assert_true).
-    pub fn assert_true(&self) -> Column {
-        let expr = self
-            .expr()
-            .clone()
-            .map(crate::udfs::apply_assert_true, GetOutput::same_type());
+    /// When err_msg is Some, it is used in the error message when assertion fails.
+    pub fn assert_true(&self, err_msg: Option<&str>) -> Column {
+        let msg = err_msg.map(String::from);
+        let expr = self.expr().clone().map(
+            move |c| crate::udfs::apply_assert_true(c, msg.as_deref()),
+            GetOutput::same_type(),
+        );
         Self::from_expr(expr, None)
     }
 
@@ -1697,10 +1717,11 @@ impl Column {
     }
 
     /// Number of months between end and start dates, as fractional (PySpark months_between).
-    pub fn months_between(&self, start: &Column) -> Column {
+    /// When round_off is true, rounds to 8 decimal places (PySpark default).
+    pub fn months_between(&self, start: &Column, round_off: bool) -> Column {
         let args = [start.expr().clone()];
         let expr = self.expr().clone().map_many(
-            crate::udfs::apply_months_between,
+            move |cols| crate::udfs::apply_months_between(cols, round_off),
             &args,
             GetOutput::from_type(DataType::Float64),
         );
@@ -2503,10 +2524,12 @@ impl Column {
     }
 
     /// Parse URL and extract part (PySpark parse_url). UDF.
-    pub fn parse_url(&self, part: &str) -> Column {
+    /// When part is QUERY/QUERYSTRING and key is Some(k), returns the value for that query parameter only.
+    pub fn parse_url(&self, part: &str, key: Option<&str>) -> Column {
         let part = part.to_string();
+        let key_owned = key.map(String::from);
         let expr = self.expr().clone().map(
-            move |s| crate::udfs::apply_parse_url(s, &part),
+            move |s| crate::udfs::apply_parse_url(s, &part, key_owned.as_deref()),
             GetOutput::from_type(DataType::String),
         );
         Self::from_expr(expr, None)

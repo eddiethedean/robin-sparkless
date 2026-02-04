@@ -1,0 +1,31 @@
+{
+  "name": "make_timestamp_timezone",
+  "pyspark_version": "3.5.0",
+  "input": {
+    "schema": [
+      { "name": "id", "type": "bigint" },
+      { "name": "y", "type": "int" },
+      { "name": "mo", "type": "int" },
+      { "name": "d", "type": "int" },
+      { "name": "h", "type": "int" },
+      { "name": "mi", "type": "int" },
+      { "name": "s", "type": "int" }
+    ],
+    "rows": [
+      [1, 2024, 1, 15, 12, 0, 0]
+    ]
+  },
+  "operations": [
+    { "op": "withColumn", "column": "ts", "expr": "make_timestamp(col('y'), col('mo'), col('d'), col('h'), col('mi'), col('s'), 'America/New_York')" },
+    { "op": "select", "columns": ["id", "ts"] }
+  ],
+  "expected": {
+    "schema": [
+      { "name": "id", "type": "bigint" },
+      { "name": "ts", "type": "timestamp" }
+    ],
+    "rows": [
+      [1, "2024-01-15T17:00:00.000000"]
+    ]
+  }
+}

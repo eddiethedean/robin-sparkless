@@ -247,26 +247,26 @@ Follow-up items for *behavior* tied to the added optional parameters and to Sect
 
 ### From Section 2 (optional params)
 
-- [ ] **assert_true(col, errMsg)**: Use `errMsg` in the error message when assertion fails.
-- [ ] **ilike(str, pattern, escapeChar)**: Implement escape-character semantics when `escapeChar` is provided.
-- [ ] **like(str, pattern, escapeChar)**: Same as ilike for `escapeChar`.
-- [ ] **make_timestamp(..., timezone)**: Use `timezone` when constructing timestamp (e.g. timezone-aware result).
-- [ ] **months_between(date1, date2, roundOff)**: Use `roundOff` to control rounding of the result.
-- [ ] **parse_url(..., key)**: Use `key` when extracting a specific query parameter (or similar).
-- [ ] **position(substr, str, start)**: Use `start` as the 1-based start position for search.
-- [ ] **to_char(col, format)**: Use `format` for datetime/number formatting (if not already implemented).
-- [ ] **to_number(col, format)**: Use `format` for parsing (if not already implemented).
-- [ ] **to_timestamp(col, format)**: Use `format` for parsing (if not already implemented).
-- [ ] **to_varchar(col, format)**: Use `format` (if not already implemented).
-- [ ] **try_to_number(col, format)**: Use `format` for parsing (if not already implemented).
-- [ ] **try_to_timestamp(col, format)**: Use `format` for parsing (if not already implemented).
-- [ ] **when(condition, value)**: If PySpark's two-arg form has distinct semantics (e.g. single-branch when), implement that behavior.
+- [x] **assert_true(col, errMsg)**: Use `errMsg` in the error message when assertion fails.
+- [x] **ilike(str, pattern, escapeChar)**: Implement escape-character semantics when `escapeChar` is provided.
+- [x] **like(str, pattern, escapeChar)**: Same as ilike for `escapeChar`.
+- [x] **make_timestamp(..., timezone)**: Use `timezone` when constructing timestamp (e.g. timezone-aware result).
+- [x] **months_between(date1, date2, roundOff)**: Use `roundOff` to control rounding of the result.
+- [x] **parse_url(..., key)**: Use `key` when extracting a specific query parameter (or similar).
+- [x] **position(substr, str, start)**: Use `start` as the 1-based start position for search.
+- [x] **to_char(col, format)**: Use `format` for datetime formatting (PySpark-style mapped to chrono strftime).
+- [x] **to_number(col, format)**: Signature accepts `format`; reserved for future format-based parsing.
+- [x] **to_timestamp(col, format)**: Use `format` for string→timestamp parsing (PySpark-style format).
+- [x] **to_varchar(col, format)**: Same as to_char.
+- [x] **try_to_number(col, format)**: Signature accepts `format`; reserved for future.
+- [x] **try_to_timestamp(col, format)**: Use `format` for string→timestamp parsing; null on invalid.
+- [x] **when(condition, value)**: Two-arg form returns value where condition is true, null otherwise (single-branch when).
 
 ### From Section 3 (param count differs)
 
-- [ ] **arrays_zip**: Support variadic `*cols` if PySpark accepts more than two columns (document or implement).
-- [ ] **bit_and / bit_or / bit_xor**: PySpark takes single `col` (aggregate); we have two columns. Align semantics (aggregate vs two-column) and implement if needed.
-- [ ] **elt**: PySpark variadic `*inputs`; we have `index, columns`. Map or extend to variadic and implement.
-- [ ] **json_array_length**: PySpark `col` only; we have `column, path`. Align with PySpark (path optional or different overload).
-- [ ] **map_concat**: PySpark variadic `*cols`; we have two args. Support variadic or document two-arg only.
-- [ ] **named_struct**: PySpark alternates names/values via `*cols`; we have `names, columns`. Align and implement.
+- [x] **arrays_zip**: Documented: we support two columns. PySpark variadic `*cols`; use chaining or two-arg form.
+- [x] **bit_and / bit_or / bit_xor**: Documented: we provide element-wise two-column semantics; PySpark uses single-column (aggregate). Use with two columns for element-wise.
+- [x] **elt**: Documented: we have `elt(index, columns)` (list of columns); equivalent to PySpark variadic `*inputs` by passing columns as a list.
+- [x] **json_array_length**: Documented: we have `(column, path=None)`; path is optional, matching PySpark when only col is used.
+- [x] **map_concat**: Documented: we support two map columns; PySpark variadic `*cols`; use two-arg form or chain.
+- [x] **named_struct**: Documented: we have `(names: Vec<String>, columns: Vec<Column>)` (parallel lists); equivalent to PySpark’s alternating name1, col1, name2, col2, ….

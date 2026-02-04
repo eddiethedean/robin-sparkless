@@ -1,0 +1,34 @@
+{
+  "name": "when_two_arg",
+  "pyspark_version": "3.5.0",
+  "input": {
+    "schema": [
+      { "name": "id", "type": "int" },
+      { "name": "a", "type": "int" },
+      { "name": "b", "type": "int" }
+    ],
+    "rows": [
+      [1, 2, 10],
+      [2, 0, 20],
+      [3, 3, 30]
+    ]
+  },
+  "operations": [
+    { "op": "withColumn", "column": "res", "expr": "when(col('a') > 1, col('b'))" },
+    { "op": "select", "columns": ["id", "a", "b", "res"] },
+    { "op": "orderBy", "columns": ["id"], "ascending": [true] }
+  ],
+  "expected": {
+    "schema": [
+      { "name": "id", "type": "int" },
+      { "name": "a", "type": "int" },
+      { "name": "b", "type": "int" },
+      { "name": "res", "type": "int" }
+    ],
+    "rows": [
+      [1, 2, 10, 10],
+      [2, 0, 20, null],
+      [3, 3, 30, 30]
+    ]
+  }
+}

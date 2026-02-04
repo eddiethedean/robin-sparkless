@@ -14,12 +14,12 @@ use crate::functions::{
     greatest as rs_greatest, hours, hypot, ifnull, ilike, isnan as rs_isnan, isnotnull, isnull,
     lcase, least as rs_least, left, like, ln, localtimestamp, log10, log1p, log2, make_date,
     make_interval, make_timestamp, make_timestamp_ntz, md5, minutes, months, months_between,
-    next_day, now, nvl, nvl2, overlay, pmod, position as rs_position, power, quarter, radians,
-    regexp_count, regexp_instr, regexp_substr, replace as rs_replace, right, rint, rlike, sha1,
-    sha2, signum, sin, sinh, split_part, startswith, substr, tan, tanh, timestamp_micros,
-    timestamp_millis, timestamp_seconds, timestampadd, timestampdiff, to_degrees, to_radians,
-    to_timestamp, to_unix_timestamp, to_utc_timestamp, try_cast as rs_try_cast, ucase, unbase64,
-    unix_date, unix_micros, unix_millis, unix_seconds, unix_timestamp, unix_timestamp_now, weekday,
+    next_day, now, nvl, nvl2, overlay, pmod, power, quarter, radians, regexp_count, regexp_instr,
+    regexp_substr, replace as rs_replace, right, rint, rlike, sha1, sha2, signum, sin, sinh,
+    split_part, startswith, substr, tan, tanh, timestamp_micros, timestamp_millis,
+    timestamp_seconds, timestampadd, timestampdiff, to_degrees, to_radians, to_timestamp,
+    to_unix_timestamp, to_utc_timestamp, try_cast as rs_try_cast, ucase, unbase64, unix_date,
+    unix_micros, unix_millis, unix_seconds, unix_timestamp, unix_timestamp_now, weekday,
     weekofyear, years,
 };
 use crate::functions::{
@@ -40,10 +40,11 @@ use crate::functions::{
     desc_nulls_last, e, median, mode, negate, pi, positive, sec, stddev_pop, var_pop,
 };
 use crate::functions::{avg, coalesce, col as rs_col, count, max, min, sum as rs_sum};
-use crate::functions::{bin, btrim, conv, getbit, hex, locate, unhex};
+use crate::functions::{bin, btrim, conv, getbit, hex, locate, unhex, when_then_otherwise_null};
 use crate::plan;
 use crate::{DataFrame, GroupedData, SparkSession};
 use polars::prelude::Expr;
+use pyo3::conversion::IntoPyObjectExt;
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 use serde_json::Value as JsonValue;
@@ -441,9 +442,7 @@ fn robin_sparkless(m: &Bound<'_, PyModule>) -> PyResult<()> {
 
 #[pyfunction]
 fn py_col(col: &str) -> PyColumn {
-    PyColumn {
-        inner: rs_col(col),
-    }
+    PyColumn { inner: rs_col(col) }
 }
 
 #[pyfunction]
@@ -469,10 +468,20 @@ fn py_lit(col: &Bound<'_, pyo3::types::PyAny>) -> PyResult<PyColumn> {
 
 #[pyfunction]
 #[pyo3(signature = (condition, value=None))]
-fn py_when(condition: &PyColumn, _value: Option<PyRef<PyColumn>>) -> PyWhenBuilder {
-    let _ = _value;
-    PyWhenBuilder {
-        condition: condition.inner.expr().clone(),
+fn py_when(
+    condition: &PyColumn,
+    value: Option<PyRef<PyColumn>>,
+    py: Python<'_>,
+) -> PyResult<Py<PyAny>> {
+    match value {
+        Some(v) => {
+            let col = when_then_otherwise_null(&condition.inner, &v.inner);
+            Ok(PyColumn { inner: col }.into_py_any(py)?)
+        }
+        None => Ok(PyWhenBuilder {
+            condition: condition.inner.expr().clone(),
+        }
+        .into_py_any(py)?),
     }
 }
 
@@ -656,7 +665,7 @@ fn py_locate(substr: &str, str: &PyColumn, pos: Option<i64>) -> PyColumn {
 }
 
 #[pyfunction]
-#[pyo3(signature = (col, fromBase, toBase))]
+#[pyo3(signature = (col, from_base, to_base))]
 fn py_conv(col: &PyColumn, from_base: i32, to_base: i32) -> PyColumn {
     PyColumn {
         inner: conv(&col.inner, from_base, to_base),
@@ -693,51 +702,46 @@ fn py_getbit(col: &PyColumn, pos: i64) -> PyColumn {
 
 #[pyfunction]
 #[pyo3(signature = (col, format=None))]
-fn py_to_char(col: &PyColumn, _format: Option<&str>) -> PyColumn {
-    let _ = _format;
+fn py_to_char(col: &PyColumn, format: Option<&str>) -> PyColumn {
     PyColumn {
-        inner: to_char(&col.inner),
+        inner: to_char(&col.inner, format),
     }
 }
 
 #[pyfunction]
 #[pyo3(signature = (col, format=None))]
-fn py_to_varchar(col: &PyColumn, _format: Option<&str>) -> PyColumn {
-    let _ = _format;
+fn py_to_varchar(col: &PyColumn, format: Option<&str>) -> PyColumn {
     PyColumn {
-        inner: to_varchar(&col.inner),
+        inner: to_varchar(&col.inner, format),
     }
 }
 
 #[pyfunction]
 #[pyo3(signature = (col, format=None))]
-fn py_to_number(col: &PyColumn, _format: Option<&str>) -> PyColumn {
-    let _ = _format;
+fn py_to_number(col: &PyColumn, format: Option<&str>) -> PyColumn {
     PyColumn {
-        inner: to_number(&col.inner),
+        inner: to_number(&col.inner, format),
     }
 }
 
 #[pyfunction]
 #[pyo3(signature = (col, format=None))]
-fn py_try_to_number(col: &PyColumn, _format: Option<&str>) -> PyColumn {
-    let _ = _format;
+fn py_try_to_number(col: &PyColumn, format: Option<&str>) -> PyColumn {
     PyColumn {
-        inner: try_to_number(&col.inner),
+        inner: try_to_number(&col.inner, format),
     }
 }
 
 #[pyfunction]
 #[pyo3(signature = (col, format=None))]
-fn py_try_to_timestamp(col: &PyColumn, _format: Option<&str>) -> PyColumn {
-    let _ = _format;
+fn py_try_to_timestamp(col: &PyColumn, format: Option<&str>) -> PyColumn {
     PyColumn {
-        inner: try_to_timestamp(&col.inner),
+        inner: try_to_timestamp(&col.inner, format),
     }
 }
 
 #[pyfunction]
-#[pyo3(signature = (text, pairDelim=None, keyValueDelim=None))]
+#[pyo3(signature = (text, pair_delim=None, key_value_delim=None))]
 fn py_str_to_map(
     text: &PyColumn,
     pair_delim: Option<&str>,
@@ -874,7 +878,7 @@ fn py_make_timestamp(
     hour: &PyColumn,
     minute: &PyColumn,
     sec: &PyColumn,
-    _timezone: Option<&str>,
+    timezone: Option<&str>,
 ) -> PyColumn {
     PyColumn {
         inner: make_timestamp(
@@ -884,12 +888,13 @@ fn py_make_timestamp(
             &hour.inner,
             &minute.inner,
             &sec.inner,
+            timezone,
         ),
     }
 }
 
 #[pyfunction]
-#[pyo3(signature = (years, months, days, hours, mins, secs))]
+#[pyo3(signature = (year, month, day, hour, minute, sec))]
 fn py_make_timestamp_ntz(
     year: &PyColumn,
     month: &PyColumn,
@@ -979,7 +984,7 @@ fn py_to_utc_timestamp(timestamp: &PyColumn, tz: &str) -> PyColumn {
 }
 
 #[pyfunction]
-#[pyo3(signature = (sourceTz, targetTz, sourceTs))]
+#[pyo3(signature = (source_tz, target_tz, source_ts))]
 fn py_convert_timezone(source_tz: &str, target_tz: &str, source_ts: &PyColumn) -> PyColumn {
     PyColumn {
         inner: convert_timezone(source_tz, target_tz, &source_ts.inner),
@@ -995,9 +1000,8 @@ fn py_current_timezone() -> PyColumn {
 
 #[pyfunction]
 #[pyo3(signature = (col, format=None))]
-fn py_to_timestamp(col: &PyColumn, _format: Option<&str>) -> PyResult<PyColumn> {
-    let _ = _format;
-    to_timestamp(&col.inner)
+fn py_to_timestamp(col: &PyColumn, format: Option<&str>) -> PyResult<PyColumn> {
+    to_timestamp(&col.inner, format)
         .map(|c| PyColumn { inner: c })
         .map_err(|e| pyo3::exceptions::PyValueError::new_err(e))
 }
@@ -1040,7 +1044,7 @@ fn py_url_encode(str: &PyColumn) -> PyColumn {
 }
 
 #[pyfunction]
-#[pyo3(signature = (col, numBits))]
+#[pyo3(signature = (col, num_bits))]
 fn py_shift_left(col: &PyColumn, num_bits: i32) -> PyColumn {
     PyColumn {
         inner: shift_left(&col.inner, num_bits),
@@ -1048,7 +1052,7 @@ fn py_shift_left(col: &PyColumn, num_bits: i32) -> PyColumn {
 }
 
 #[pyfunction]
-#[pyo3(signature = (col, numBits))]
+#[pyo3(signature = (col, num_bits))]
 fn py_shift_right(col: &PyColumn, num_bits: i32) -> PyColumn {
     PyColumn {
         inner: shift_right(&col.inner, num_bits),
@@ -1099,15 +1103,15 @@ fn py_version() -> PyColumn {
 }
 
 #[pyfunction]
-#[pyo3(signature = (col, errMsg=None))]
-fn py_assert_true(col: &PyColumn, _err_msg: Option<&str>) -> PyColumn {
+#[pyo3(signature = (col, err_msg=None))]
+fn py_assert_true(col: &PyColumn, err_msg: Option<&str>) -> PyColumn {
     PyColumn {
-        inner: rs_assert_true(&col.inner),
+        inner: rs_assert_true(&col.inner, err_msg),
     }
 }
 
 #[pyfunction]
-#[pyo3(signature = (errMsg))]
+#[pyo3(signature = (err_msg))]
 fn py_raise_error(err_msg: &str) -> PyColumn {
     PyColumn {
         inner: crate::functions::raise_error(err_msg),
@@ -1205,11 +1209,10 @@ fn py_json_array_length(col: &PyColumn, path: Option<&str>) -> PyColumn {
 }
 
 #[pyfunction]
-#[pyo3(signature = (url, partToExtract, key=None))]
-fn py_parse_url(url: &PyColumn, part: &str, _key: Option<&str>) -> PyColumn {
-    let _ = _key;
+#[pyo3(signature = (url, part, key=None))]
+fn py_parse_url(url: &PyColumn, part: &str, key: Option<&str>) -> PyColumn {
     PyColumn {
-        inner: parse_url(&url.inner, part),
+        inner: parse_url(&url.inner, part, key),
     }
 }
 
@@ -1295,7 +1298,7 @@ fn py_sha1(col: &PyColumn) -> PyColumn {
 }
 
 #[pyfunction]
-#[pyo3(signature = (col, numBits))]
+#[pyo3(signature = (col, num_bits))]
 fn py_sha2(col: &PyColumn, num_bits: i32) -> PyColumn {
     PyColumn {
         inner: sha2(&col.inner, num_bits),
@@ -1414,15 +1417,15 @@ fn py_add_months(start: &PyColumn, months: i32) -> PyColumn {
     }
 }
 #[pyfunction]
-#[pyo3(signature = (date1, date2, roundOff=true))]
-fn py_months_between(date1: &PyColumn, date2: &PyColumn, _round_off: Option<bool>) -> PyColumn {
-    let _ = _round_off;
+#[pyo3(signature = (date1, date2, round_off=true))]
+fn py_months_between(date1: &PyColumn, date2: &PyColumn, round_off: Option<bool>) -> PyColumn {
+    let round_off = round_off.unwrap_or(true);
     PyColumn {
-        inner: months_between(&date1.inner, &date2.inner),
+        inner: months_between(&date1.inner, &date2.inner, round_off),
     }
 }
 #[pyfunction]
-#[pyo3(signature = (date, dayOfWeek))]
+#[pyo3(signature = (date, day_of_week))]
 fn py_next_day(date: &PyColumn, day_of_week: &str) -> PyColumn {
     PyColumn {
         inner: next_day(&date.inner, day_of_week),
@@ -1589,17 +1592,19 @@ fn py_contains(left: &PyColumn, right: &str) -> PyColumn {
     }
 }
 #[pyfunction]
-#[pyo3(signature = (str, pattern, escapeChar=None))]
-fn py_like(str: &PyColumn, pattern: &str, _escape_char: Option<&str>) -> PyColumn {
+#[pyo3(signature = (str, pattern, escape_char=None))]
+fn py_like(str: &PyColumn, pattern: &str, escape_char: Option<&str>) -> PyColumn {
+    let esc = escape_char.and_then(|s| s.chars().next());
     PyColumn {
-        inner: like(&str.inner, pattern),
+        inner: like(&str.inner, pattern, esc),
     }
 }
 #[pyfunction]
-#[pyo3(signature = (str, pattern, escapeChar=None))]
-fn py_ilike(str: &PyColumn, pattern: &str, _escape_char: Option<&str>) -> PyColumn {
+#[pyo3(signature = (str, pattern, escape_char=None))]
+fn py_ilike(str: &PyColumn, pattern: &str, escape_char: Option<&str>) -> PyColumn {
+    let esc = escape_char.and_then(|s| s.chars().next());
     PyColumn {
-        inner: ilike(&str.inner, pattern),
+        inner: ilike(&str.inner, pattern, esc),
     }
 }
 #[pyfunction]
@@ -1631,7 +1636,7 @@ fn py_regexp_substr(str: &PyColumn, regexp: &str) -> PyColumn {
 }
 
 #[pyfunction]
-#[pyo3(signature = (src, delimiter, partNum))]
+#[pyo3(signature = (src, delimiter, part_num))]
 fn py_split_part(src: &PyColumn, delimiter: &str, part_num: i64) -> PyColumn {
     PyColumn {
         inner: split_part(&src.inner, delimiter, part_num),
@@ -1871,7 +1876,7 @@ fn py_try_multiply(left: &PyColumn, right: &PyColumn) -> PyColumn {
 }
 
 #[pyfunction]
-#[pyo3(signature = (v, min, max, numBucket))]
+#[pyo3(signature = (value, min_val, max_val, num_bucket))]
 fn py_width_bucket(value: &PyColumn, min_val: f64, max_val: f64, num_bucket: i64) -> PyColumn {
     PyColumn {
         inner: width_bucket(&value.inner, min_val, max_val, num_bucket),
@@ -2374,7 +2379,7 @@ impl PyColumn {
     }
     fn months_between(&self, start: &PyColumn) -> Self {
         PyColumn {
-            inner: self.inner.months_between(&start.inner),
+            inner: self.inner.months_between(&start.inner, true),
         }
     }
     fn next_day(&self, day_of_week: &str) -> Self {
@@ -2494,12 +2499,12 @@ impl PyColumn {
     }
     fn like(&self, pattern: &str) -> Self {
         PyColumn {
-            inner: like(&self.inner, pattern),
+            inner: like(&self.inner, pattern, None),
         }
     }
     fn ilike(&self, pattern: &str) -> Self {
         PyColumn {
-            inner: ilike(&self.inner, pattern),
+            inner: ilike(&self.inner, pattern, None),
         }
     }
     fn rlike(&self, pattern: &str) -> Self {
