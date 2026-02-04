@@ -6,7 +6,7 @@ This document describes how to cut a release and publish the crate to [crates.io
 
 So that local development and CI use the same toolchains and tools:
 
-- **Rust**: [rust-toolchain.toml](../rust-toolchain.toml) pins the Rust version (e.g. 1.88.0). CI uses the same `toolchain` value in `.github/workflows/ci.yml` and `.github/workflows/release.yml`.
+- **Rust**: [rust-toolchain.toml](../rust-toolchain.toml) pins the Rust version (e.g. 1.89.0). CI uses the same `toolchain` value in `.github/workflows/ci.yml` and `.github/workflows/release.yml`.
 - **Python**: [.python-version](../.python-version) specifies the Python version (e.g. 3.10). CI uses `python-version-file: ".python-version"` with `actions/setup-python@v5`.
 - **Python deps (CI)**: [requirements-ci.txt](../requirements-ci.txt) pins maturin and pytest for the Python job.
 - **cargo-nextest**: CI installs a fixed version (e.g. 0.9.92) in the workflow. Use the same version locally if you use nextest.

@@ -1,5 +1,5 @@
 # Pin Rust version so local and CI use the same toolchain.
 # Update when upgrading; CI (.github/workflows/ci.yml, release.yml) uses this via toolchain input.
 [toolchain]
-channel = "1.88.0"
+channel = "1.89.0"
 components = ["clippy", "rustfmt"]
