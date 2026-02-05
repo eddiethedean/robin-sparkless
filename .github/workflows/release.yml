@@ -259,78 +259,10 @@ jobs:
       - name: Run Python tests
         run: $PY -m pytest tests/python/ -v
 
-  # Compile (build only) for the 3 previously-failing targets first; publish only if these succeed.
-  build-pypi-manylinux-x86_64:
-    name: Build wheel manylinux (x86_64)
-    runs-on: ubuntu-latest
-    needs: [python-lint, format, clippy, audit, deny, build, test-error-handling, test-parity, python-tests]
-    steps:
-      - uses: actions/checkout@v4
-      - name: Build wheel (manylinux x86_64)
-        uses: messense/maturin-action@v1
-        with:
-          target: x86_64-unknown-linux-gnu
-          command: build
-          args: --release --zig
-          manylinux: "2_17"
-          container: off
-      - name: Upload wheels artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: wheels-manylinux-x86_64
-          path: target/wheels
-
-  build-pypi-manylinux-aarch64:
-    name: Build wheel manylinux (aarch64)
-    runs-on: ubuntu-24.04-arm
-    needs: [python-lint, format, clippy, audit, deny, build, test-error-handling, test-parity, python-tests]
-    steps:
-      - uses: actions/checkout@v4
-      - name: Build wheel (manylinux aarch64)
-        uses: messense/maturin-action@v1
-        with:
-          target: aarch64-unknown-linux-gnu
-          command: build
-          args: --release --zig
-          manylinux: "2_28"
-          container: off
-      - name: Upload wheels artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: wheels-manylinux-aarch64
-          path: target/wheels
-
-  build-pypi-windows-arm64:
-    name: Build wheel Windows (aarch64)
-    runs-on: windows-11-arm
-    needs: [python-lint, format, clippy, audit, deny, build, test-error-handling, test-parity, python-tests]
-    steps:
-      - uses: actions/checkout@v4
-      - name: Build wheel (Windows ARM64)
-        uses: messense/maturin-action@v1
-        with:
-          target: aarch64-pc-windows-msvc
-          command: build
-          args: --release
-      - name: Upload wheels artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: wheels-windows-arm64
-          path: target/wheels
-
   publish:
     name: Build docs and publish to crates.io
     runs-on: ubuntu-latest
-    needs:
-      - python-lint
-      - format
-      - clippy
-      - audit
-      - deny
-      - build
-      - test-error-handling
-      - test-parity
-      - python-tests
+    needs: [format, clippy, audit, deny, build, test-error-handling, test-parity]
     steps:
       - uses: actions/checkout@v4
       - name: Install Rust
@@ -352,51 +284,63 @@ jobs:
       - name: Publish to crates.io
         run: cargo publish --token ${{ secrets.CARGO_REGISTRY_TOKEN }}
 
+  # --- PyPI: manylinux (glibc) ---
   publish-pypi-manylinux-x86_64:
-    name: PyPI manylinux (x86_64) + sdist
+    name: PyPI manylinux x86_64 + sdist
     runs-on: ubuntu-latest
-    needs: [publish, build-pypi-manylinux-x86_64]
+    needs: [python-lint, python-tests]
     steps:
-      - name: Download wheels artifact
-        uses: actions/download-artifact@v4
+      - uses: actions/checkout@v4
+      - name: Build wheel
+        uses: messense/maturin-action@v1
         with:
-          name: wheels-manylinux-x86_64
-      - name: Upload wheels to PyPI (manylinux x86_64 + sdist)
+          target: x86_64-unknown-linux-gnu
+          command: build
+          args: --release --zig
+          manylinux: "2_17"
+          container: off
+      - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@v1.10.0
         with:
           password: ${{ secrets.PYPI_API_TOKEN }}
-          packages-dir: wheels-manylinux-x86_64
+          packages-dir: target/wheels
           skip-existing: true
 
   publish-pypi-manylinux-aarch64:
-    name: PyPI manylinux (aarch64)
+    name: PyPI manylinux aarch64
     runs-on: ubuntu-24.04-arm
-    needs: [publish, build-pypi-manylinux-aarch64]
+    needs: [python-lint, python-tests]
     steps:
-      - name: Download wheels artifact
-        uses: actions/download-artifact@v4
+      - uses: actions/checkout@v4
+      - name: Build wheel
+        uses: messense/maturin-action@v1
         with:
-          name: wheels-manylinux-aarch64
-      - name: Upload wheels to PyPI (manylinux aarch64)
+          target: aarch64-unknown-linux-gnu
+          command: build
+          args: --release --zig
+          manylinux: "2_28"
+          container: off
+      - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@v1.10.0
         with:
           password: ${{ secrets.PYPI_API_TOKEN }}
-          packages-dir: wheels-manylinux-aarch64
+          packages-dir: target/wheels
           skip-existing: true
 
+  # --- PyPI: musllinux ---
   publish-pypi-musllinux-x86_64:
-    name: PyPI musllinux (x86_64, musl 1.2+)
+    name: PyPI musllinux x86_64
     runs-on: ubuntu-latest
-    needs: publish
+    needs: [python-lint, python-tests]
     steps:
       - uses: actions/checkout@v4
-      - name: Build wheel (musllinux x86_64)
+      - name: Build wheel
         uses: messense/maturin-action@v1
         with:
           target: x86_64-unknown-linux-musl
           command: build
           args: --release --zig --compatibility musllinux_1_2
-      - name: Upload wheels to PyPI (musllinux x86_64)
+      - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@v1.10.0
         with:
           password: ${{ secrets.PYPI_API_TOKEN }}
@@ -404,60 +348,62 @@ jobs:
           skip-existing: true
 
   publish-pypi-musllinux-aarch64:
-    name: PyPI musllinux (aarch64, musl 1.2+)
+    name: PyPI musllinux aarch64
     runs-on: ubuntu-24.04-arm
-    needs: publish
+    needs: [python-lint, python-tests]
     steps:
       - uses: actions/checkout@v4
-      - name: Build wheel (musllinux aarch64)
+      - name: Build wheel
         uses: messense/maturin-action@v1
         with:
           target: aarch64-unknown-linux-musl
           command: build
           args: --release --zig --compatibility musllinux_1_2
-      - name: Upload wheels to PyPI (musllinux aarch64)
+      - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@v1.10.0
         with:
           password: ${{ secrets.PYPI_API_TOKEN }}
           packages-dir: target/wheels
           skip-existing: true
 
+  # --- PyPI: macOS ---
   publish-pypi-mac:
-    name: PyPI macOS (${{ matrix.target }})
+    name: PyPI macOS ${{ matrix.target }}
     runs-on: macos-latest
-    needs: publish
+    needs: [python-lint, python-tests]
     strategy:
       fail-fast: false
       matrix:
         target: [x86_64-apple-darwin, aarch64-apple-darwin]
     steps:
       - uses: actions/checkout@v4
-      - name: Build wheel (macOS)
+      - name: Build wheel
         uses: messense/maturin-action@v1
         with:
           target: ${{ matrix.target }}
           command: build
           args: --release
-      - name: Upload wheels to PyPI (macOS)
+      - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@v1.10.0
         with:
           password: ${{ secrets.PYPI_API_TOKEN }}
           packages-dir: target/wheels
           skip-existing: true
 
+  # --- PyPI: Windows ---
   publish-pypi-windows-x86_64:
-    name: PyPI Windows (x86_64)
+    name: PyPI Windows x86_64
     runs-on: windows-latest
-    needs: publish
+    needs: [python-lint, python-tests]
     steps:
       - uses: actions/checkout@v4
-      - name: Build wheel (Windows x86_64)
+      - name: Build wheel
         uses: messense/maturin-action@v1
         with:
           target: x86_64-pc-windows-msvc
           command: build
           args: --release
-      - name: Upload wheels to PyPI (Windows x86_64)
+      - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@v1.10.0
         with:
           password: ${{ secrets.PYPI_API_TOKEN }}
@@ -465,17 +411,20 @@ jobs:
           skip-existing: true
 
   publish-pypi-windows-arm64:
-    name: PyPI Windows (aarch64)
+    name: PyPI Windows aarch64
     runs-on: windows-11-arm
-    needs: [publish, build-pypi-windows-arm64]
+    needs: [python-lint, python-tests]
     steps:
-      - name: Download wheels artifact
-        uses: actions/download-artifact@v4
+      - uses: actions/checkout@v4
+      - name: Build wheel
+        uses: messense/maturin-action@v1
         with:
-          name: wheels-windows-arm64
-      - name: Upload wheels to PyPI (Windows aarch64)
+          target: aarch64-pc-windows-msvc
+          command: build
+          args: --release
+      - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@v1.10.0
         with:
           password: ${{ secrets.PYPI_API_TOKEN }}
-          packages-dir: wheels-windows-arm64
+          packages-dir: target/wheels
           skip-existing: true
