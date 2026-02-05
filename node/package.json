@@ -1,0 +1,19 @@
+{
+  "name": "robin-sparkless-node",
+  "version": "0.1.0",
+  "description": "Node.js bindings for robin-sparkless (PySpark-like DataFrames on Polars)",
+  "main": "index.js",
+  "scripts": {
+    "build": "cargo build -p robin-sparkless-node --release",
+    "install": "npm run build"
+  },
+  "keywords": ["pyspark", "polars", "dataframe", "spark", "robin-sparkless"],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/eddiethedean/robin-sparkless"
+  },
+  "engines": {
+    "node": ">=14"
+  }
+}

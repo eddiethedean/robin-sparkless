@@ -13,7 +13,9 @@ pub use transformations::{filter, order_by, order_by_exprs, select, with_column,
 use crate::column::Column;
 use crate::functions::SortOrder;
 use crate::schema::StructType;
-use polars::prelude::{DataFrame as PlDataFrame, Expr, PolarsError, SchemaNamesAndDtypes};
+use polars::prelude::{AnyValue, DataFrame as PlDataFrame, Expr, PolarsError, SchemaNamesAndDtypes};
+use serde_json::Value as JsonValue;
+use std::collections::HashMap;
 use std::sync::Arc;
 
 /// Default for `spark.sql.caseSensitive` (PySpark default is false = case-insensitive).
@@ -115,6 +117,28 @@ impl DataFrame {
     /// Collect the DataFrame (action - triggers execution)
     pub fn collect(&self) -> Result<Arc<PlDataFrame>, PolarsError> {
         Ok(self.df.clone())
+    }
+
+    /// Collect as rows of column-name -> JSON value. For use by language bindings (Node, etc.).
+    pub fn collect_as_json_rows(&self) -> Result<Vec<HashMap<String, JsonValue>>, PolarsError> {
+        let df = self.df.as_ref();
+        let names = df.get_column_names();
+        let nrows = df.height();
+        let mut rows = Vec::with_capacity(nrows);
+        for i in 0..nrows {
+            let mut row = HashMap::with_capacity(names.len());
+            for (col_idx, name) in names.iter().enumerate() {
+                let s = df
+                    .get_columns()
+                    .get(col_idx)
+                    .ok_or_else(|| PolarsError::ComputeError("column index out of range".into()))?;
+                let av = s.get(i)?;
+                let jv = any_value_to_json(av);
+                row.insert(name.to_string(), jv);
+            }
+            rows.push(row);
+        }
+        Ok(rows)
     }
 
     /// Select columns (returns a new DataFrame).
@@ -726,5 +750,26 @@ impl Clone for DataFrame {
             df: self.df.clone(),
             case_sensitive: self.case_sensitive,
         }
+    }
+}
+
+/// Convert Polars AnyValue to serde_json::Value for language bindings (Node, etc.).
+fn any_value_to_json(av: AnyValue<'_>) -> JsonValue {
+    match av {
+        AnyValue::Null => JsonValue::Null,
+        AnyValue::Boolean(b) => JsonValue::Bool(b),
+        AnyValue::Int32(i) => JsonValue::Number(serde_json::Number::from(i)),
+        AnyValue::Int64(i) => JsonValue::Number(serde_json::Number::from(i)),
+        AnyValue::UInt32(u) => JsonValue::Number(serde_json::Number::from(u)),
+        AnyValue::UInt64(u) => JsonValue::Number(serde_json::Number::from(u)),
+        AnyValue::Float32(f) => serde_json::Number::from_f64(f64::from(f))
+            .map(JsonValue::Number)
+            .unwrap_or(JsonValue::Null),
+        AnyValue::Float64(f) => serde_json::Number::from_f64(f)
+            .map(JsonValue::Number)
+            .unwrap_or(JsonValue::Null),
+        AnyValue::String(s) => JsonValue::String(s.to_string()),
+        AnyValue::StringOwned(s) => JsonValue::String(s.to_string()),
+        _ => JsonValue::Null,
     }
 }
