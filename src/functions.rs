@@ -3,7 +3,6 @@ use crate::dataframe::DataFrame;
 use polars::prelude::*;
 
 // -----------------------------------------------------------------------------
-// Phase 20: Ordering functions (asc, desc, nulls_first, nulls_last)
 // -----------------------------------------------------------------------------
 
 /// Sort order specification for use in orderBy/sort. Holds expr + direction + null placement.
@@ -174,7 +173,6 @@ pub fn variance(col: &Column) -> Column {
     Column::from_expr(col.expr().clone().var(1), Some("variance".to_string()))
 }
 
-// Phase 20: Additional aggregates
 /// Population standard deviation (ddof=0). PySpark stddev_pop.
 pub fn stddev_pop(col: &Column) -> Column {
     Column::from_expr(col.expr().clone().std(0), Some("stddev_pop".to_string()))
@@ -1638,8 +1636,6 @@ pub fn next_day(column: &Column, day_of_week: &str) -> Column {
     column.clone().next_day(day_of_week)
 }
 
-// --- Phase 17: unix_timestamp, from_unixtime, make_date, timestamp_*, unix_date, date_from_unix_date, pmod, factorial ---
-
 /// Current Unix timestamp in seconds (PySpark unix_timestamp with no args).
 pub fn unix_timestamp_now() -> Column {
     use polars::prelude::*;
@@ -1993,8 +1989,6 @@ pub fn nvl2(col1: &Column, col2: &Column, col3: &Column) -> Column {
     crate::column::Column::from_expr(expr, None)
 }
 
-// --- Aliases (Phase 15 Batch 1) ---
-
 /// Alias for substring. PySpark substr.
 pub fn substr(column: &Column, start: i64, length: Option<i64>) -> Column {
     substring(column, start, length)
@@ -2104,8 +2098,6 @@ pub fn isnull(column: &Column) -> Column {
 pub fn isnotnull(column: &Column) -> Column {
     column.clone().is_not_null()
 }
-
-// --- Array / List functions (Phase 6a) ---
 
 /// Create an array column from multiple columns (PySpark array).
 pub fn array(columns: &[&Column]) -> crate::column::Column {
@@ -2284,8 +2276,6 @@ pub fn posexplode(column: &Column) -> (Column, Column) {
     column.clone().posexplode()
 }
 
-// --- Map functions (Phase 8) ---
-
 /// Build a map column from alternating key/value expressions (PySpark create_map).
 /// Returns List(Struct{key, value}) using Polars as_struct and concat_list.
 pub fn create_map(key_values: &[&Column]) -> Column {
@@ -2391,8 +2381,6 @@ pub fn map_filter_value_gt(map_col: &Column, threshold: f64) -> Column {
     map_col.clone().map_filter(pred)
 }
 
-// --- Phase 18: struct, named_struct ---
-
 /// Create struct from columns using column names as field names (PySpark struct).
 pub fn struct_(columns: &[&Column]) -> Column {
     use polars::prelude::as_struct;
@@ -2415,8 +2403,6 @@ pub fn named_struct(pairs: &[(&str, &Column)]) -> Column {
         .collect();
     crate::column::Column::from_expr(as_struct(exprs), None)
 }
-
-// --- Array Phase 18 ---
 
 /// Append element to end of list (PySpark array_append).
 pub fn array_append(array: &Column, elem: &Column) -> Column {
@@ -2452,8 +2438,6 @@ pub fn array_union(a: &Column, b: &Column) -> Column {
 pub fn zip_with(left: &Column, right: &Column, merge: Expr) -> Column {
     left.clone().zip_with(right, merge)
 }
-
-// --- JSON functions (Phase 10) ---
 
 /// Extract JSON path from string column (PySpark get_json_object).
 pub fn get_json_object(column: &Column, path: &str) -> Column {
@@ -2505,8 +2489,6 @@ pub fn from_json(column: &Column, schema: Option<polars::datatypes::DataType>) -
 pub fn to_json(column: &Column) -> Column {
     column.clone().to_json()
 }
-
-// --- Phase 23: JSON, URL, misc ---
 
 /// Check if column values are in the given list (PySpark isin). Uses Polars is_in.
 pub fn isin(column: &Column, other: &Column) -> Column {

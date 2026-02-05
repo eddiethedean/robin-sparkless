@@ -12,8 +12,8 @@ import json
 import sys
 from typing import Any, get_type_hints
 
-# Optional: get_type_hints can fail on some PySpark objects
-def safe_get_type_hints(obj: Any) -> dict:
+def safe_get_type_hints(obj: Any) -> dict[str, Any]:
+    """Return get_type_hints(obj) or {} if introspection fails (e.g. on some PySpark objects)."""
     try:
         return get_type_hints(obj) if hasattr(obj, "__annotations__") or inspect.isfunction(obj) else {}
     except Exception:
@@ -21,6 +21,7 @@ def safe_get_type_hints(obj: Any) -> dict:
 
 
 def param_default_repr(param: inspect.Parameter) -> Any:
+    """JSON-serializable default for a parameter; None if empty or not serializable."""
     if param.default is inspect.Parameter.empty:
         return None
     if param.default is None:

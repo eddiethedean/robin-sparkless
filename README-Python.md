@@ -46,6 +46,15 @@ maturin install --features "pyo3,delta"   # read_delta / write_delta
 maturin install --features "pyo3,sql,delta"
 ```
 
+## Type checking
+
+The package ships with PEP 561 type stubs (`robin_sparkless.pyi`). Use mypy, pyright, or another checker for static typing:
+
+```bash
+pip install robin-sparkless mypy
+mypy your_script.py
+```
+
 ## Links
 
 - **Documentation:** [robin-sparkless.readthedocs.io](https://robin-sparkless.readthedocs.io/)

@@ -14,12 +14,14 @@ Usage:
 
 Output: Table of mean time (and std) per backend per pipeline; speedup(robin) when both available.
 """
+from __future__ import annotations
 
 import argparse
 import sys
 import time
 import warnings
-from typing import Any, Callable, List, Optional, Tuple
+from collections.abc import Callable
+from typing import Any
 
 # Suppress Sparkless Polars LazyFrame schema warnings
 warnings.filterwarnings("ignore", message=".*LazyFrame.*")
@@ -38,20 +40,20 @@ UNION_SIZE = 200_000  # each df, then union
 TOP_N = 10_000
 
 
-def make_data(n: int) -> List[Tuple[int, int, str]]:
-    """(id, age, name) - age 0..79, names user_0, user_1, ..."""
+def make_data(n: int) -> list[tuple[int, int, str]]:
+    """Build (id, age, name) rows: age 0..79, names user_0, user_1, ..."""
     return [(i, i % 80, f"user_{i}") for i in range(n)]
 
 
 # ---------- Pipeline 1: filter -> select -> groupBy count ----------
-def run_robin_filter_select_groupby(data: List[Tuple[int, int, str]], cols: List[str]) -> Any:
+def run_robin_filter_select_groupby(data: list[tuple[int, int, str]], cols: list[str]) -> Any:
     import robin_sparkless as rs
     spark = rs.SparkSession.builder().app_name("bench").get_or_create()
     df = spark.create_dataframe(data, cols)
     return df.filter(rs.col("age").gt(rs.lit(30))).select(["name", "age"]).group_by(["age"]).count().collect()
 
 
-def run_sparkless_filter_select_groupby(data: List[Tuple[int, int, str]], cols: List[str]) -> Any:
+def run_sparkless_filter_select_groupby(data: list[tuple[int, int, str]], cols: list[str]) -> Any:
     from sparkless.sql import SparkSession
     import sparkless.sql.functions as F
     spark = SparkSession.builder.appName("bench").getOrCreate()
@@ -60,7 +62,7 @@ def run_sparkless_filter_select_groupby(data: List[Tuple[int, int, str]], cols: 
 
 
 # ---------- Pipeline 2: groupBy(age).agg(sum(id), count) ----------
-def run_robin_groupby_multi_agg(data: List[Tuple[int, int, str]], cols: List[str]) -> Any:
+def run_robin_groupby_multi_agg(data: list[tuple[int, int, str]], cols: list[str]) -> Any:
     import robin_sparkless as rs
     spark = rs.SparkSession.builder().app_name("bench").get_or_create()
     df = spark.create_dataframe(data, cols)
@@ -71,7 +73,7 @@ def run_robin_groupby_multi_agg(data: List[Tuple[int, int, str]], cols: List[str
     ]).collect()
 
 
-def run_sparkless_groupby_multi_agg(data: List[Tuple[int, int, str]], cols: List[str]) -> Any:
+def run_sparkless_groupby_multi_agg(data: list[tuple[int, int, str]], cols: list[str]) -> Any:
     from sparkless.sql import SparkSession
     import sparkless.sql.functions as F
     spark = SparkSession.builder.appName("bench").getOrCreate()
@@ -80,14 +82,14 @@ def run_sparkless_groupby_multi_agg(data: List[Tuple[int, int, str]], cols: List
 
 
 # ---------- Pipeline 3: orderBy(age).limit(TOP_N) ----------
-def run_robin_order_by_limit(data: List[Tuple[int, int, str]], cols: List[str], n: int) -> Any:
+def run_robin_order_by_limit(data: list[tuple[int, int, str]], cols: list[str], n: int) -> Any:
     import robin_sparkless as rs
     spark = rs.SparkSession.builder().app_name("bench").get_or_create()
     df = spark.create_dataframe(data, cols)
     return df.order_by(["age"], ascending=[False]).limit(n).collect()
 
 
-def run_sparkless_order_by_limit(data: List[Tuple[int, int, str]], cols: List[str], n: int) -> Any:
+def run_sparkless_order_by_limit(data: list[tuple[int, int, str]], cols: list[str], n: int) -> Any:
     from sparkless.sql import SparkSession
     import sparkless.sql.functions as F
     spark = SparkSession.builder.appName("bench").getOrCreate()
@@ -96,14 +98,14 @@ def run_sparkless_order_by_limit(data: List[Tuple[int, int, str]], cols: List[st
 
 
 # ---------- Pipeline 4: distinct ----------
-def run_robin_distinct(data: List[Tuple[int, int, str]], cols: List[str]) -> Any:
+def run_robin_distinct(data: list[tuple[int, int, str]], cols: list[str]) -> Any:
     import robin_sparkless as rs
     spark = rs.SparkSession.builder().app_name("bench").get_or_create()
     df = spark.create_dataframe(data, cols)
     return df.distinct(None).collect()
 
 
-def run_sparkless_distinct(data: List[Tuple[int, int, str]], cols: List[str]) -> Any:
+def run_sparkless_distinct(data: list[tuple[int, int, str]], cols: list[str]) -> Any:
     from sparkless.sql import SparkSession
     spark = SparkSession.builder.appName("bench").getOrCreate()
     df = spark.createDataFrame(data, cols)
@@ -112,9 +114,9 @@ def run_sparkless_distinct(data: List[Tuple[int, int, str]], cols: List[str]) ->
 
 # ---------- Pipeline 5: union two DataFrames then groupBy count ----------
 def run_robin_union_then_groupby(
-    data_a: List[Tuple[int, int, str]],
-    data_b: List[Tuple[int, int, str]],
-    cols: List[str],
+    data_a: list[tuple[int, int, str]],
+    data_b: list[tuple[int, int, str]],
+    cols: list[str],
 ) -> Any:
     import robin_sparkless as rs
     spark = rs.SparkSession.builder().app_name("bench").get_or_create()
@@ -124,9 +126,9 @@ def run_robin_union_then_groupby(
 
 
 def run_sparkless_union_then_groupby(
-    data_a: List[Tuple[int, int, str]],
-    data_b: List[Tuple[int, int, str]],
-    cols: List[str],
+    data_a: list[tuple[int, int, str]],
+    data_b: list[tuple[int, int, str]],
+    cols: list[str],
 ) -> Any:
     from sparkless.sql import SparkSession
     spark = SparkSession.builder.appName("bench").getOrCreate()
@@ -137,7 +139,7 @@ def run_sparkless_union_then_groupby(
 
 
 # ---------- Pipeline 6: inner join (JOIN_SIZE x JOIN_SIZE) ----------
-def run_robin_join(data_a: List[Tuple[int, int, str]], data_b: List[Tuple[int, int, str]]) -> Any:
+def run_robin_join(data_a: list[tuple[int, int, str]], data_b: list[tuple[int, int, str]]) -> Any:
     import robin_sparkless as rs
     spark = rs.SparkSession.builder().app_name("bench").get_or_create()
     df_a = spark.create_dataframe(data_a, ["id", "age", "name"])
@@ -145,7 +147,7 @@ def run_robin_join(data_a: List[Tuple[int, int, str]], data_b: List[Tuple[int, i
     return df_a.join(df_b, ["id"], "inner").collect()
 
 
-def run_sparkless_join(data_a: List[Tuple[int, int, str]], data_b: List[Tuple[int, int, str]]) -> Any:
+def run_sparkless_join(data_a: list[tuple[int, int, str]], data_b: list[tuple[int, int, str]]) -> Any:
     from sparkless.sql import SparkSession
     spark = SparkSession.builder.appName("bench").getOrCreate()
     df_a = spark.createDataFrame(data_a, ["id", "age", "name"])
@@ -157,10 +159,11 @@ def time_it(
     fn: Callable[[], Any],
     iterations: int,
     warmup: int = WARMUP_ITERATIONS,
-) -> Tuple[float, float]:
+) -> tuple[float, float]:
+    """Run fn warmup + iterations times; return (mean, std) of iteration times."""
     for _ in range(warmup):
         fn()
-    times: List[float] = []
+    times: list[float] = []
     for _ in range(iterations):
         t0 = time.perf_counter()
         fn()
@@ -175,12 +178,12 @@ def time_it(
 
 def run_table(
     name: str,
-    sizes: List[int],
+    sizes: list[int],
     has_robin: bool,
     has_sparkless: bool,
     iterations: int,
     check_results: bool,
-    make_row: Callable[[int], Tuple[Optional[float], Optional[float], Optional[float], Optional[float], Any]],
+    make_row: Callable[[int], tuple[float | None, float | None, float | None, float | None, Any]],
 ) -> None:
     """Print a benchmark table. make_row(n) returns (robin_mean, robin_std, sparkless_mean, sparkless_std, match?)."""
     print()
@@ -209,6 +212,7 @@ def run_table(
 
 
 def main() -> int:
+    """Parse args, run benchmark tables for each pipeline, return 0 on success."""
     ap = argparse.ArgumentParser(description="Benchmark robin-sparkless vs sparkless")
     ap.add_argument("--sizes", type=int, nargs="+", default=None, help="Row counts (default: 100k, 500k; use --quick for 10k, 50k)")
     ap.add_argument("--iterations", type=int, default=None, help="Timing iterations (default: 4; 2 with --quick)")

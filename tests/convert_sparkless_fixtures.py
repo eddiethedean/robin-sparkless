@@ -261,6 +261,7 @@ def _map_operation_to_robin(
 
 
 def main() -> int:
+    """CLI: convert one Sparkless JSON or --batch a directory; write robin-sparkless fixtures. Return 0 on success."""
     parser = argparse.ArgumentParser(description="Convert Sparkless expected_outputs to robin-sparkless fixtures")
     parser.add_argument("input_path", nargs="?", help="Path to a Sparkless JSON file")
     parser.add_argument("output_dir", nargs="?", default="tests/fixtures", help="Output directory for robin-sparkless fixtures")

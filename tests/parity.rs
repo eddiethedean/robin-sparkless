@@ -130,7 +130,6 @@ enum Operation {
     Subtract {},
     #[serde(rename = "intersect")]
     Intersect {},
-    // Phase 12
     #[serde(rename = "first")]
     First {},
     #[serde(rename = "head")]
@@ -5055,7 +5054,7 @@ fn types_compatible(actual: &str, expected: &str) -> bool {
     if float_types.contains(&actual) && float_types.contains(&expected) {
         return true;
     }
-    // Allow array<...> types to match (Phase 6a list columns)
+    // Allow array<...> types to match (list columns)
     if actual.starts_with("array<") && expected.starts_with("array<") {
         return true;
     }

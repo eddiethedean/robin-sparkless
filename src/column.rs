@@ -122,10 +122,6 @@ impl Column {
         }
     }
 
-    // -------------------------------------------------------------------------
-    // Phase 20: Ordering (asc/desc with nulls_first/last) - return SortOrder
-    // -------------------------------------------------------------------------
-
     /// Ascending sort, nulls first (Spark default for ASC). PySpark asc.
     pub fn asc(&self) -> crate::functions::SortOrder {
         crate::functions::asc(self)
@@ -1738,8 +1734,6 @@ impl Column {
         Self::from_expr(expr, None)
     }
 
-    // --- Phase 17: unix_timestamp, from_unixtime, timestamp_*, unix_date, date_from_unix_date ---
-
     /// Parse string timestamp to seconds since epoch (PySpark unix_timestamp).
     pub fn unix_timestamp(&self, format: Option<&str>) -> Column {
         let fmt = format.map(String::from);
@@ -1961,8 +1955,6 @@ impl Column {
         let windowed = when_expr.max().over(partition_exprs);
         Self::from_expr(windowed, None)
     }
-
-    // --- Array / List functions (Phase 6a) ---
 
     /// Number of elements in list (PySpark size / array_size). Returns Int32.
     pub fn array_size(&self) -> Column {
@@ -2327,8 +2319,6 @@ impl Column {
         )
     }
 
-    // --- Map functions (Phase 8) - Map as List(Struct{key, value}) ---
-
     /// Extract keys from a map column (PySpark map_keys). Map column is List(Struct{key, value}).
     pub fn map_keys(&self) -> Column {
         let elem_key = col("").struct_().field_by_name("key");
@@ -2451,8 +2441,6 @@ impl Column {
         Self::from_expr(expr, None)
     }
 
-    // --- JSON functions (Phase 10) ---
-
     /// Extract JSON path from string column (PySpark get_json_object). Uses Polars str().json_path_match.
     pub fn get_json_object(&self, path: &str) -> Column {
         let path_expr = polars::prelude::lit(path.to_string());
@@ -2543,8 +2531,6 @@ impl Column {
         );
         Self::from_expr(expr, None)
     }
-
-    // --- Phase 23: URL, misc ---
 
     /// Check if column values are in the other column's list/series (PySpark isin).
     pub fn isin(&self, other: &Column) -> Column {

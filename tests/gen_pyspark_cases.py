@@ -10,29 +10,31 @@ This script is not used by the Rust build; it is a helper to produce
 
 See `docs/TEST_CREATION_GUIDE.md` for the full workflow.
 """
-
 from __future__ import annotations
 
 import json
 import tempfile
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any
 
 from pyspark.sql import SparkSession
+from pyspark.sql.types import StructType
 
 
-def schema_to_json(schema) -> List[Dict[str, Any]]:
+def schema_to_json(schema: StructType) -> list[dict[str, Any]]:
+    """Convert a Spark StructType to a list of {name, type} dicts."""
     return [
         {"name": f.name, "type": f.dataType.simpleString()}
         for f in schema.fields
     ]
 
 
-def df_to_rows(df) -> List[List[Any]]:
+def df_to_rows(df: Any) -> list[list[Any]]:
+    """Collect DataFrame rows as list of lists (one list per row)."""
     return [list(r) for r in df.collect()]
 
 
-def case_filter_age_gt_30(spark: SparkSession) -> Dict[str, Any]:
+def case_filter_age_gt_30(spark: SparkSession) -> dict[str, Any]:
     data = [(1, 25, "Alice"), (2, 30, "Bob"), (3, 35, "Charlie")]
     df = spark.createDataFrame(data, ["id", "age", "name"])
 
@@ -57,7 +59,7 @@ def case_filter_age_gt_30(spark: SparkSession) -> Dict[str, Any]:
     }
 
 
-def case_groupby_count(spark: SparkSession) -> Dict[str, Any]:
+def case_groupby_count(spark: SparkSession) -> dict[str, Any]:
     data = [
         (1, "Alice", "Sales"),
         (2, "Bob", "Sales"),
@@ -88,7 +90,7 @@ def case_groupby_count(spark: SparkSession) -> Dict[str, Any]:
     }
 
 
-def case_read_csv(spark: SparkSession) -> Dict[str, Any]:
+def case_read_csv(spark: SparkSession) -> dict[str, Any]:
     """Test reading CSV file and applying operations."""
     # Create a temporary CSV file
     csv_content = "id,age,name\n1,25,Alice\n2,30,Bob\n3,35,Charlie\n"
@@ -133,7 +135,7 @@ def case_read_csv(spark: SparkSession) -> Dict[str, Any]:
         Path(csv_path).unlink(missing_ok=True)
 
 
-def case_read_parquet(spark: SparkSession) -> Dict[str, Any]:
+def case_read_parquet(spark: SparkSession) -> dict[str, Any]:
     """Test reading Parquet file and applying operations."""
     # Create data and write to Parquet
     data = [(1, "Alice", "Sales"), (2, "Bob", "Engineering"), (3, "Charlie", "Sales")]
@@ -190,7 +192,7 @@ def case_read_parquet(spark: SparkSession) -> Dict[str, Any]:
                 Path(parquet_path).unlink(missing_ok=True)
 
 
-def case_read_json(spark: SparkSession) -> Dict[str, Any]:
+def case_read_json(spark: SparkSession) -> dict[str, Any]:
     """Test reading JSON file and applying operations."""
     # Create JSONL content (one JSON object per line)
     json_content = '{"id":1,"age":25,"name":"Alice"}\n{"id":2,"age":30,"name":"Bob"}\n{"id":3,"age":35,"name":"Charlie"}\n'
@@ -235,7 +237,7 @@ def case_read_json(spark: SparkSession) -> Dict[str, Any]:
         Path(json_path).unlink(missing_ok=True)
 
 
-def case_when_otherwise(spark: SparkSession) -> Dict[str, Any]:
+def case_when_otherwise(spark: SparkSession) -> dict[str, Any]:
     """Test when().otherwise() conditional expression."""
     from pyspark.sql.functions import when as pyspark_when, col, lit
     
@@ -271,7 +273,7 @@ def case_when_otherwise(spark: SparkSession) -> Dict[str, Any]:
     }
 
 
-def case_when_then_otherwise(spark: SparkSession) -> Dict[str, Any]:
+def case_when_then_otherwise(spark: SparkSession) -> dict[str, Any]:
     """Test when().then().otherwise() conditional expression."""
     from pyspark.sql.functions import when as pyspark_when, col, lit
     
@@ -307,7 +309,7 @@ def case_when_then_otherwise(spark: SparkSession) -> Dict[str, Any]:
     }
 
 
-def case_coalesce(spark: SparkSession) -> Dict[str, Any]:
+def case_coalesce(spark: SparkSession) -> dict[str, Any]:
     """Test coalesce() function with nulls."""
     from pyspark.sql.functions import coalesce, col, lit
     from pyspark.sql.types import StructType, StructField, StringType, IntegerType
@@ -354,7 +356,7 @@ def case_coalesce(spark: SparkSession) -> Dict[str, Any]:
     }
 
 
-def case_groupby_sum(spark: SparkSession) -> Dict[str, Any]:
+def case_groupby_sum(spark: SparkSession) -> dict[str, Any]:
     """Test groupBy().sum() aggregation."""
     data = [
         (1, "Sales", 1000),
@@ -386,7 +388,7 @@ def case_groupby_sum(spark: SparkSession) -> Dict[str, Any]:
     }
 
 
-def case_groupby_avg(spark: SparkSession) -> Dict[str, Any]:
+def case_groupby_avg(spark: SparkSession) -> dict[str, Any]:
     """Test groupBy().avg() aggregation."""
     data = [
         (1, "Sales", 1000),
@@ -418,7 +420,7 @@ def case_groupby_avg(spark: SparkSession) -> Dict[str, Any]:
     }
 
 
-def case_groupby_min(spark: SparkSession) -> Dict[str, Any]:
+def case_groupby_min(spark: SparkSession) -> dict[str, Any]:
     """Test groupBy().min() aggregation."""
     data = [
         (1, "Sales", 1000),
@@ -450,7 +452,7 @@ def case_groupby_min(spark: SparkSession) -> Dict[str, Any]:
     }
 
 
-def case_groupby_max(spark: SparkSession) -> Dict[str, Any]:
+def case_groupby_max(spark: SparkSession) -> dict[str, Any]:
     """Test groupBy().max() aggregation."""
     data = [
         (1, "Sales", 1000),
@@ -482,7 +484,7 @@ def case_groupby_max(spark: SparkSession) -> Dict[str, Any]:
     }
 
 
-def case_groupby_multi_agg(spark: SparkSession) -> Dict[str, Any]:
+def case_groupby_multi_agg(spark: SparkSession) -> dict[str, Any]:
     """Test groupBy with multiple aggregations in one agg() call."""
     from pyspark.sql.functions import count, sum as spark_sum, avg
 
@@ -530,7 +532,7 @@ def case_groupby_multi_agg(spark: SparkSession) -> Dict[str, Any]:
     }
 
 
-def case_groupby_null_keys(spark: SparkSession) -> Dict[str, Any]:
+def case_groupby_null_keys(spark: SparkSession) -> dict[str, Any]:
     """Test groupBy with NULL values as grouping keys."""
     from pyspark.sql.types import StructType, StructField, StringType, IntegerType
 
@@ -572,7 +574,7 @@ def case_groupby_null_keys(spark: SparkSession) -> Dict[str, Any]:
     }
 
 
-def case_null_comparison_equality(spark: SparkSession) -> Dict[str, Any]:
+def case_null_comparison_equality(spark: SparkSession) -> dict[str, Any]:
     """Test null comparison semantics: col == NULL, col != NULL return NULL."""
     from pyspark.sql.types import StructType, StructField, IntegerType, StringType
     from pyspark.sql.functions import col, lit, when
@@ -629,7 +631,7 @@ def case_null_comparison_equality(spark: SparkSession) -> Dict[str, Any]:
     }
 
 
-def case_null_comparison_ordering(spark: SparkSession) -> Dict[str, Any]:
+def case_null_comparison_ordering(spark: SparkSession) -> dict[str, Any]:
     """Test null comparison semantics: col > NULL, col < NULL return NULL."""
     from pyspark.sql.types import StructType, StructField, IntegerType
     from pyspark.sql.functions import col, lit, when
@@ -689,7 +691,7 @@ def case_null_comparison_ordering(spark: SparkSession) -> Dict[str, Any]:
     }
 
 
-def case_null_safe_equality(spark: SparkSession) -> Dict[str, Any]:
+def case_null_safe_equality(spark: SparkSession) -> dict[str, Any]:
     """Test null-safe equality: NULL <=> NULL returns True."""
     from pyspark.sql.types import StructType, StructField, IntegerType, StringType
     from pyspark.sql.functions import col, lit
@@ -737,7 +739,7 @@ def case_null_safe_equality(spark: SparkSession) -> Dict[str, Any]:
     }
 
 
-def case_null_in_filter(spark: SparkSession) -> Dict[str, Any]:
+def case_null_in_filter(spark: SparkSession) -> dict[str, Any]:
     """Test filtering with null values: df.filter(col != 1) excludes NULL rows."""
     from pyspark.sql.types import StructType, StructField, IntegerType
     from pyspark.sql.functions import col
@@ -772,7 +774,7 @@ def case_null_in_filter(spark: SparkSession) -> Dict[str, Any]:
     }
 
 
-def case_type_coercion_numeric(spark: SparkSession) -> Dict[str, Any]:
+def case_type_coercion_numeric(spark: SparkSession) -> dict[str, Any]:
     """Test type coercion: int vs double comparisons."""
     from pyspark.sql.types import StructType, StructField, IntegerType, DoubleType
     from pyspark.sql.functions import col
@@ -807,7 +809,7 @@ def case_type_coercion_numeric(spark: SparkSession) -> Dict[str, Any]:
     }
 
 
-def case_type_coercion_mixed(spark: SparkSession) -> Dict[str, Any]:
+def case_type_coercion_mixed(spark: SparkSession) -> dict[str, Any]:
     """Test type coercion in arithmetic operations."""
     from pyspark.sql.types import StructType, StructField, IntegerType, DoubleType
     from pyspark.sql.functions import col
@@ -850,7 +852,7 @@ def case_type_coercion_mixed(spark: SparkSession) -> Dict[str, Any]:
     }
 
 
-def case_groupby_with_nulls(spark: SparkSession) -> Dict[str, Any]:
+def case_groupby_with_nulls(spark: SparkSession) -> dict[str, Any]:
     from pyspark.sql.types import StructType, StructField, StringType, IntegerType
 
     schema = StructType(
@@ -883,7 +885,7 @@ def case_groupby_with_nulls(spark: SparkSession) -> Dict[str, Any]:
     }
 
 
-def case_filter_and_or(spark: SparkSession) -> Dict[str, Any]:
+def case_filter_and_or(spark: SparkSession) -> dict[str, Any]:
     """Filter combining AND/OR conditions."""
     from pyspark.sql.types import StructType, StructField, IntegerType, IntegerType as IntType
     from pyspark.sql.functions import col
@@ -928,7 +930,7 @@ def case_filter_and_or(spark: SparkSession) -> Dict[str, Any]:
     }
 
 
-def case_filter_not(spark: SparkSession) -> Dict[str, Any]:
+def case_filter_not(spark: SparkSession) -> dict[str, Any]:
     """Filter using NOT on a condition."""
     from pyspark.sql.types import StructType, StructField, IntegerType, StringType
     from pyspark.sql.functions import col
@@ -967,7 +969,7 @@ def case_filter_not(spark: SparkSession) -> Dict[str, Any]:
     }
 
 
-def case_with_logical_column(spark: SparkSession) -> Dict[str, Any]:
+def case_with_logical_column(spark: SparkSession) -> dict[str, Any]:
     """withColumn producing a boolean from a complex logical expression."""
     from pyspark.sql.types import StructType, StructField, IntegerType
     from pyspark.sql.functions import col
@@ -1015,7 +1017,7 @@ def case_with_logical_column(spark: SparkSession) -> Dict[str, Any]:
     }
 
 
-def case_filter_nested(spark: SparkSession) -> Dict[str, Any]:
+def case_filter_nested(spark: SparkSession) -> dict[str, Any]:
     """Filter with nested logical expressions using parentheses."""
     from pyspark.sql.types import StructType, StructField, IntegerType
     from pyspark.sql.functions import col
@@ -1063,7 +1065,7 @@ def case_filter_nested(spark: SparkSession) -> Dict[str, Any]:
     }
 
 
-def case_with_arithmetic_logical_mix(spark: SparkSession) -> Dict[str, Any]:
+def case_with_arithmetic_logical_mix(spark: SparkSession) -> dict[str, Any]:
     """withColumn combining arithmetic and logical conditions."""
     from pyspark.sql.types import StructType, StructField, IntegerType, DoubleType
     from pyspark.sql.functions import col
@@ -1114,7 +1116,7 @@ def case_with_arithmetic_logical_mix(spark: SparkSession) -> Dict[str, Any]:
     }
 
 
-def case_inner_join(spark: SparkSession) -> Dict[str, Any]:
+def case_inner_join(spark: SparkSession) -> dict[str, Any]:
     """Test inner join between employees and departments."""
     employees_data = [
         {"id": 1, "name": "Alice", "dept_id": 10, "salary": 50000},
@@ -1150,7 +1152,7 @@ def case_inner_join(spark: SparkSession) -> Dict[str, Any]:
     }
 
 
-def case_left_join(spark: SparkSession) -> Dict[str, Any]:
+def case_left_join(spark: SparkSession) -> dict[str, Any]:
     """Test left join between employees and departments."""
     employees_data = [
         {"id": 1, "name": "Alice", "dept_id": 10, "salary": 50000},
@@ -1188,7 +1190,7 @@ def case_left_join(spark: SparkSession) -> Dict[str, Any]:
     }
 
 
-def case_right_join(spark: SparkSession) -> Dict[str, Any]:
+def case_right_join(spark: SparkSession) -> dict[str, Any]:
     """Test right join between employees and departments."""
     employees_data = [
         {"id": 1, "name": "Alice", "dept_id": 10, "salary": 50000},
@@ -1226,7 +1228,7 @@ def case_right_join(spark: SparkSession) -> Dict[str, Any]:
     }
 
 
-def case_outer_join(spark: SparkSession) -> Dict[str, Any]:
+def case_outer_join(spark: SparkSession) -> dict[str, Any]:
     """Test outer join between employees and departments."""
     employees_data = [
         {"id": 1, "name": "Alice", "dept_id": 10, "salary": 50000},
@@ -1264,7 +1266,7 @@ def case_outer_join(spark: SparkSession) -> Dict[str, Any]:
     }
 
 
-def case_string_upper_lower(spark: SparkSession) -> Dict[str, Any]:
+def case_string_upper_lower(spark: SparkSession) -> dict[str, Any]:
     """Test upper() and lower() string functions."""
     from pyspark.sql.functions import col, lower, upper
 
@@ -1294,7 +1296,7 @@ def case_string_upper_lower(spark: SparkSession) -> Dict[str, Any]:
     }
 
 
-def case_string_substring(spark: SparkSession) -> Dict[str, Any]:
+def case_string_substring(spark: SparkSession) -> dict[str, Any]:
     """Test substring() string function."""
     from pyspark.sql.functions import col, substring
 
@@ -1319,7 +1321,7 @@ def case_string_substring(spark: SparkSession) -> Dict[str, Any]:
     }
 
 
-def case_string_concat(spark: SparkSession) -> Dict[str, Any]:
+def case_string_concat(spark: SparkSession) -> dict[str, Any]:
     """Test concat() and concat_ws() string functions."""
     from pyspark.sql.functions import col, concat, concat_ws, lit
 
@@ -1349,7 +1351,7 @@ def case_string_concat(spark: SparkSession) -> Dict[str, Any]:
     }
 
 
-def case_row_number_window(spark: SparkSession) -> Dict[str, Any]:
+def case_row_number_window(spark: SparkSession) -> dict[str, Any]:
     """Test row_number() window: partition by dept, order by salary desc."""
     from pyspark.sql.functions import col, row_number
     from pyspark.sql.window import Window
@@ -1383,7 +1385,7 @@ def case_row_number_window(spark: SparkSession) -> Dict[str, Any]:
     }
 
 
-def case_rank_window(spark: SparkSession) -> Dict[str, Any]:
+def case_rank_window(spark: SparkSession) -> dict[str, Any]:
     """Test rank() window: partition by dept, order by salary desc."""
     from pyspark.sql.functions import col, rank
     from pyspark.sql.window import Window
@@ -1416,7 +1418,7 @@ def case_rank_window(spark: SparkSession) -> Dict[str, Any]:
     }
 
 
-def case_lag_lead_window(spark: SparkSession) -> Dict[str, Any]:
+def case_lag_lead_window(spark: SparkSession) -> dict[str, Any]:
     """Test lag and lead window functions."""
     from pyspark.sql.functions import col, lag, lead
     from pyspark.sql.window import Window

@@ -159,8 +159,6 @@ pub fn apply_array_repeat(column: Column, n: i64) -> PolarsResult<Option<Column>
     Ok(Some(Column::new(name, out.into_series())))
 }
 
-// --- Phase 18: array_append, array_prepend, array_insert ---
-
 fn any_value_to_single_series(av: AnyValue, dtype: &DataType) -> PolarsResult<Series> {
     Series::from_any_values_and_dtype(PlSmallStr::EMPTY, &[av], dtype, false)
 }
@@ -314,8 +312,6 @@ pub fn apply_array_insert(columns: &mut [Column]) -> PolarsResult<Option<Column>
     })?;
     Ok(Some(Column::new(name, out.into_series())))
 }
-
-// --- Phase 18: array_except, array_intersect, array_union (set ops) ---
 
 fn series_to_set_key(s: &Series) -> String {
     std::string::ToString::to_string(s)
@@ -628,8 +624,6 @@ pub fn apply_array_union(columns: &mut [Column]) -> PolarsResult<Option<Column>>
     }
     Ok(Some(Column::new(name, builder.finish().into_series())))
 }
-
-// --- Phase 18: map_concat, map_from_entries, map_contains_key, get ---
 
 /// Parse string to map: "k1:v1,k2:v2" -> List(Struct{key, value}) (PySpark str_to_map).
 pub fn apply_str_to_map(
@@ -2127,7 +2121,7 @@ pub fn apply_signum(column: Column) -> PolarsResult<Option<Column>> {
     Ok(Some(Column::new(name, out)))
 }
 
-/// Hyperbolic and inverse hyperbolic / extra math (Phase 15 Batch 3).
+/// Hyperbolic and inverse hyperbolic / extra math.
 pub fn apply_cosh(column: Column) -> PolarsResult<Option<Column>> {
     let name = column.field().into_owned().name;
     let series = column.take_materialized_series();
@@ -2702,8 +2696,6 @@ pub fn apply_map_zip_to_struct(columns: &mut [Column]) -> PolarsResult<Option<Co
     Ok(Some(Column::new(name, out)))
 }
 
-// --- Phase 19: try_add, try_subtract, try_multiply (checked arithmetic) ---
-
 /// typeof: return dtype as string (PySpark typeof).
 pub fn apply_typeof(column: Column) -> PolarsResult<Option<Column>> {
     let name = column.field().into_owned().name;
@@ -2866,8 +2858,6 @@ pub fn apply_try_multiply(columns: &mut [Column]) -> PolarsResult<Option<Column>
     };
     Ok(Some(Column::new(name, out)))
 }
-
-// --- Phase 17: unix_timestamp, from_unixtime, make_date, timestamp_*, unix_date, date_from_unix_date, pmod, factorial ---
 
 /// Map PySpark/Java SimpleDateFormat style to chrono strftime. Public for to_char/date_format.
 pub(crate) fn pyspark_format_to_chrono(s: &str) -> String {
@@ -3109,8 +3099,6 @@ fn factorial_u64(n: i64) -> Option<i64> {
     Some(acc)
 }
 
-// --- Phase 22: Timezone conversion ---
-
 /// from_utc_timestamp(ts_col, tz) - interpret ts as UTC, convert to tz. Timestamps stored as UTC micros; instant unchanged.
 pub fn apply_from_utc_timestamp(column: Column, tz_str: &str) -> PolarsResult<Option<Column>> {
     let _: Tz = tz_str
@@ -3152,8 +3140,6 @@ pub fn apply_factorial(column: Column) -> PolarsResult<Option<Column>> {
     );
     Ok(Some(Column::new(name, out.into_series())))
 }
-
-// --- Phase 23: URL, misc ---
 
 /// url_decode(column) - percent-decode URL-encoded string (PySpark url_decode).
 pub fn apply_url_decode(column: Column) -> PolarsResult<Option<Column>> {
@@ -3417,8 +3403,6 @@ fn hash_any_value(av: &polars::datatypes::AnyValue, h: &mut impl std::hash::Hash
         _ => h.write(av.to_string().as_bytes()),
     }
 }
-
-// --- sequence / shuffle (Phase 2) ---
 
 /// Build array [start, start+step, ...] up to but not past stop (PySpark sequence).
 /// Input column is a struct with fields "0"=start, "1"=stop, "2"=step (step optional, default 1).

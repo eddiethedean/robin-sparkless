@@ -9,18 +9,18 @@ Usage:
 Output: List of (check_name, exception_or_diff) for reporting to Sparkless repo.
 Does not require PySpark or robin-sparkless.
 """
-
 from __future__ import annotations
 
 import sys
 import warnings
-from typing import Any, Callable, List, Optional, Tuple
+from collections.abc import Callable
+from typing import Any
 
 warnings.filterwarnings("ignore", message=".*LazyFrame.*")
 warnings.filterwarnings("ignore", message=".*schema.*", module=".*materializer.*")
 
-Result = Tuple[str, Optional[Exception], Optional[str], Any]
 # (check_name, exception, note, result_or_none)
+Result = tuple[str, Exception | None, str | None, Any]
 
 
 def _run(name: str, fn: Callable[[], Any]) -> Result:
@@ -48,11 +48,12 @@ def _rows_eq(a: Any, b: Any) -> bool:
     return True
 
 
-def run_sparkless_checks() -> List[Result]:
+def run_sparkless_checks() -> list[Result]:
+    """Run Sparkless parity checks; return list of (name, exception, note, result)."""
     from sparkless.sql import SparkSession
     import sparkless.sql.functions as F
 
-    results: List[Result] = []
+    results: list[Result] = []
     spark: Any = None
 
     def get_spark():

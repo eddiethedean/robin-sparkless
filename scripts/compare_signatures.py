@@ -47,8 +47,8 @@ def args_signature(args: list[dict]) -> str:
     return ", ".join(parts)
 
 
-def args_key(args: list[dict]) -> tuple:
-    """Tuple of (name, default) for comparison."""
+def args_key(args: list[dict]) -> tuple[tuple[object, object], ...]:
+    """Tuple of (name, default) per arg for comparison."""
     return tuple((a.get("name"), a.get("default")) for a in args)
 
 
@@ -78,6 +78,7 @@ def classify_function(py_sig: dict | None, robin_sig: dict | None) -> str:
 
 
 def load_json(path: Path) -> dict:
+    """Load and parse a JSON file; return the root dict."""
     with open(path) as f:
         return json.load(f)
 
@@ -97,6 +98,7 @@ def build_pyspark_function_map(data: dict) -> dict[str, dict]:
 
 
 def build_robin_function_map(data: dict) -> dict[str, dict]:
+    """Map: function name -> robin_sparkless signature dict."""
     out = {}
     for item in data.get("functions") or []:
         name = item.get("name")

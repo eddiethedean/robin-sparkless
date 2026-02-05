@@ -37,27 +37,27 @@ sqlparser = { version = "0.45", optional = true }
 deltalake = { version = "0.30", optional = true }
 tokio = { version = "1", optional = true, features = ["rt", "rt-multi-thread", "fs", "io-util"] }
 url = "2"
-# Phase 23: URL encode/decode
+# URL encode/decode
 percent-encoding = "2"
-# Phase 8: string UDFs and list helpers (used in map closures)
+# String UDFs and list helpers (used in map closures)
 strsim = "0.11"
 crc32fast = "1.4"
 twox-hash = "1.6"
 soundex = "0.2"
 # Pin to address RUSTSEC-2026-0007 (integer overflow in BytesMut::reserve; transitive via polars/deltalake)
 bytes = "1.11.1"
-# Phase 12: colRegex (column name pattern matching)
+# colRegex (column name pattern matching)
 regex = "1.11"
-# Phase 13: base64, binary hashes; Phase 2: encode/decode
+# base64, binary hashes, encode/decode
 base64 = "0.22"
 hex = "0.4"
 sha1 = "0.10"
 sha2 = "0.10"
 md5 = "0.7"
-# Phase 24: rand/randn with seed support
+# rand/randn with seed support
 rand = "0.8"
 rand_distr = "0.4"
-# Phase 2: AES crypto (PySpark aes_encrypt/aes_decrypt)
+# AES crypto (PySpark aes_encrypt/aes_decrypt)
 aes-gcm = "0.10"
 
 [dev-dependencies]

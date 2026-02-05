@@ -2,9 +2,6 @@
 //! Compiled only when the `pyo3` feature is enabled.
 
 use crate::column::Column as RsColumn;
-use crate::dataframe::JoinType;
-use crate::dataframe::{CubeRollupData, WriteFormat, WriteMode};
-use crate::functions::SortOrder;
 use crate::functions::{
     acos, acosh, add_months, array_append, array_compact, array_distinct, array_except,
     array_insert, array_intersect, array_prepend, array_union, ascii, asin, asinh, atan, atan2,
@@ -44,17 +41,25 @@ use crate::functions::{
 use crate::functions::{avg, coalesce, col as rs_col, count, max, min, sum as rs_sum};
 use crate::functions::{bin, btrim, conv, getbit, hex, locate, unhex, when_then_otherwise_null};
 use crate::plan;
-use crate::{DataFrame, GroupedData, SparkSession};
-use polars::prelude::Expr;
+use crate::SparkSession;
 use pyo3::conversion::IntoPyObjectExt;
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 use serde_json::Value as JsonValue;
-use std::path::Path;
-use std::sync::RwLock;
+
+mod column;
+mod dataframe;
+mod order;
+mod session;
+pub(crate) use column::PyColumn;
+pub(crate) use dataframe::{
+    PyCubeRollupData, PyDataFrame, PyDataFrameNa, PyDataFrameStat, PyDataFrameWriter, PyGroupedData,
+};
+pub(crate) use order::{PySortOrder, PyThenBuilder, PyWhenBuilder};
+pub(crate) use session::{PySparkSession, PySparkSessionBuilder};
 
 /// Convert a Python scalar to serde_json::Value for plan/row data.
-fn py_to_json_value(value: &Bound<'_, pyo3::types::PyAny>) -> PyResult<JsonValue> {
+pub(crate) fn py_to_json_value(value: &Bound<'_, pyo3::types::PyAny>) -> PyResult<JsonValue> {
     if value.is_none() {
         return Ok(JsonValue::Null);
     }
@@ -78,9 +83,24 @@ fn py_to_json_value(value: &Bound<'_, pyo3::types::PyAny>) -> PyResult<JsonValue
     ))
 }
 
-/// Execute a logical plan (Phase 25). Returns a DataFrame; call .collect() to get list of dicts.
-/// data: list of dicts or list of lists (rows). schema: list of (name, dtype_str).
-/// plan_json: JSON string of the plan, e.g. json.dumps([{"op": "filter", "payload": ...}, ...]).
+/// Execute a logical plan over in-memory row data and return a lazy DataFrame.
+///
+/// Use this for programmatic execution of plans (e.g. from a query planner).
+/// Call ``.collect()`` on the result to materialize rows as a list of dicts.
+///
+/// Args:
+///     data: List of rows. Each row is either a dict (keyed by column name) or a list
+///         of values in schema order. Must match ``schema``.
+///     schema: List of (name, dtype_str) column definitions, e.g. [("id", "bigint"), ("name", "string")].
+///     plan_json: JSON string of the logical plan (array of op objects). Invalid JSON raises ValueError.
+///
+/// Returns:
+///     DataFrame (lazy). Call ``.collect()`` to get list of dicts.
+///
+/// Raises:
+///     TypeError: If a row is not a dict or list, or a value type is unsupported.
+///     ValueError: If plan_json is invalid JSON.
+///     RuntimeError: If plan execution fails.
 #[pyfunction]
 fn py_execute_plan(
     py: Python<'_>,
@@ -129,7 +149,22 @@ fn py_execute_plan(
     Ok(PyDataFrame { inner: df })
 }
 
-/// Python module entry point.
+/// Robin Sparkless: PySpark-compatible DataFrame API with local execution.
+///
+/// This module provides a subset of the PySpark API backed by Polars. All execution
+/// is local (single process). Use it for testing, prototyping, or running pipelines
+/// where distributed execution is not required.
+///
+/// Quick start::
+///
+///     from robin_sparkless import SparkSession
+///     spark = SparkSession.builder().app_name("my_app").get_or_create()
+///     df = spark.read_csv("data.csv")
+///     df.filter(col("age") > 18).select("name", "age").show()
+///
+/// Key entry points: ``SparkSession.builder()``, ``col()``, ``lit()``, ``when()``,
+/// ``sum()`` / ``avg()`` / ``count()``, and DataFrame methods ``filter``, ``select``,
+/// ``group_by``, ``join``, etc.
 #[pymodule]
 fn robin_sparkless(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PySparkSession>()?;
@@ -166,7 +201,6 @@ fn robin_sparkless(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("md5", wrap_pyfunction!(py_md5, m)?)?;
     m.add("array_compact", wrap_pyfunction!(py_array_compact, m)?)?;
     m.add("array_distinct", wrap_pyfunction!(py_array_distinct, m)?)?;
-    // Phase 14: math, datetime, type/conditional
     m.add("sin", wrap_pyfunction!(py_sin, m)?)?;
     m.add("cos", wrap_pyfunction!(py_cos, m)?)?;
     m.add("tan", wrap_pyfunction!(py_tan, m)?)?;
@@ -189,7 +223,6 @@ fn robin_sparkless(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("isnan", wrap_pyfunction!(py_isnan, m)?)?;
     m.add("greatest", wrap_pyfunction!(py_greatest, m)?)?;
     m.add("least", wrap_pyfunction!(py_least, m)?)?;
-    // Phase 15 Batch 1: aliases and simple
     m.add("nvl", wrap_pyfunction!(py_nvl, m)?)?;
     m.add("ifnull", wrap_pyfunction!(py_ifnull, m)?)?;
     m.add("nvl2", wrap_pyfunction!(py_nvl2, m)?)?;
@@ -205,7 +238,6 @@ fn robin_sparkless(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("to_radians", wrap_pyfunction!(py_to_radians, m)?)?;
     m.add("isnull", wrap_pyfunction!(py_isnull, m)?)?;
     m.add("isnotnull", wrap_pyfunction!(py_isnotnull, m)?)?;
-    // Phase 15 Batch 2: string (left, right, replace, startswith, endswith, contains, like, ilike, rlike)
     m.add("left", wrap_pyfunction!(py_left, m)?)?;
     m.add("right", wrap_pyfunction!(py_right, m)?)?;
     m.add("replace", wrap_pyfunction!(py_replace, m)?)?;
@@ -215,7 +247,6 @@ fn robin_sparkless(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("like", wrap_pyfunction!(py_like, m)?)?;
     m.add("ilike", wrap_pyfunction!(py_ilike, m)?)?;
     m.add("rlike", wrap_pyfunction!(py_rlike, m)?)?;
-    // Phase 16: string/regex (regexp_count, regexp_instr, regexp_substr, split_part, find_in_set, format_string, printf)
     m.add("regexp_count", wrap_pyfunction!(py_regexp_count, m)?)?;
     m.add("regexp_instr", wrap_pyfunction!(py_regexp_instr, m)?)?;
     m.add("regexp_substr", wrap_pyfunction!(py_regexp_substr, m)?)?;
@@ -223,7 +254,6 @@ fn robin_sparkless(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("find_in_set", wrap_pyfunction!(py_find_in_set, m)?)?;
     m.add("format_string", wrap_pyfunction!(py_format_string, m)?)?;
     m.add("printf", wrap_pyfunction!(py_printf, m)?)?;
-    // Phase 15 Batch 3: math (cosh, sinh, tanh, acosh, asinh, atanh, cbrt, expm1, log1p, log10, log2, rint, hypot)
     m.add("cosh", wrap_pyfunction!(py_cosh, m)?)?;
     m.add("sinh", wrap_pyfunction!(py_sinh, m)?)?;
     m.add("tanh", wrap_pyfunction!(py_tanh, m)?)?;
@@ -237,7 +267,6 @@ fn robin_sparkless(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("log2", wrap_pyfunction!(py_log2, m)?)?;
     m.add("rint", wrap_pyfunction!(py_rint, m)?)?;
     m.add("hypot", wrap_pyfunction!(py_hypot, m)?)?;
-    // Phase 17: unix_timestamp, from_unixtime, make_date, timestamp_*, unix_date, date_from_unix_date, pmod, factorial
     m.add("unix_timestamp", wrap_pyfunction!(py_unix_timestamp, m)?)?;
     m.add(
         "to_unix_timestamp",
@@ -264,7 +293,6 @@ fn robin_sparkless(m: &Bound<'_, PyModule>) -> PyResult<()> {
     )?;
     m.add("pmod", wrap_pyfunction!(py_pmod, m)?)?;
     m.add("factorial", wrap_pyfunction!(py_factorial, m)?)?;
-    // Phase 18: array (append, prepend, insert, except, intersect, union), map (concat, from_entries, contains_key, get), struct
     m.add("array_append", wrap_pyfunction!(py_array_append, m)?)?;
     m.add("array_prepend", wrap_pyfunction!(py_array_prepend, m)?)?;
     m.add("array_insert", wrap_pyfunction!(py_array_insert, m)?)?;
@@ -304,7 +332,6 @@ fn robin_sparkless(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("typeof", wrap_pyfunction!(py_typeof, m)?)?;
     m.add("struct", wrap_pyfunction!(py_struct, m)?)?;
     m.add("named_struct", wrap_pyfunction!(py_named_struct, m)?)?;
-    // Phase 20: ordering, aggregates, numeric
     m.add("asc", wrap_pyfunction!(py_asc, m)?)?;
     m.add("asc_nulls_first", wrap_pyfunction!(py_asc_nulls_first, m)?)?;
     m.add("asc_nulls_last", wrap_pyfunction!(py_asc_nulls_last, m)?)?;
@@ -327,7 +354,6 @@ fn robin_sparkless(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("mode", wrap_pyfunction!(py_mode, m)?)?;
     m.add("stddev_pop", wrap_pyfunction!(py_stddev_pop, m)?)?;
     m.add("var_pop", wrap_pyfunction!(py_var_pop, m)?)?;
-    // Phase 21: string, binary, type, array, map, struct
     m.add("btrim", wrap_pyfunction!(py_btrim, m)?)?;
     m.add("locate", wrap_pyfunction!(py_locate, m)?)?;
     m.add("conv", wrap_pyfunction!(py_conv, m)?)?;
@@ -352,7 +378,6 @@ fn robin_sparkless(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("sequence", wrap_pyfunction!(py_sequence, m)?)?;
     m.add("shuffle", wrap_pyfunction!(py_shuffle, m)?)?;
     m.add("array_agg", wrap_pyfunction!(py_array_agg, m)?)?;
-    // Phase 22: datetime extensions
     m.add("curdate", wrap_pyfunction!(py_curdate, m)?)?;
     m.add("now", wrap_pyfunction!(py_now, m)?)?;
     m.add("localtimestamp", wrap_pyfunction!(py_localtimestamp, m)?)?;
@@ -396,7 +421,6 @@ fn robin_sparkless(m: &Bound<'_, PyModule>) -> PyResult<()> {
         wrap_pyfunction!(py_current_timezone, m)?,
     )?;
     m.add("to_timestamp", wrap_pyfunction!(py_to_timestamp, m)?)?;
-    // Phase 23: JSON, URL, misc
     m.add("isin", wrap_pyfunction!(py_isin, m)?)?;
     m.add("isin_i64", wrap_pyfunction!(py_isin_i64, m)?)?;
     m.add("isin_str", wrap_pyfunction!(py_isin_str, m)?)?;
@@ -415,7 +439,6 @@ fn robin_sparkless(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("parse_url", wrap_pyfunction!(py_parse_url, m)?)?;
     m.add("hash", wrap_pyfunction!(py_hash, m)?)?;
     m.add("stack", wrap_pyfunction!(py_stack, m)?)?;
-    // Phase 24: bit, control, JVM stubs, random
     m.add("bit_and", wrap_pyfunction!(py_bit_and, m)?)?;
     m.add("bit_or", wrap_pyfunction!(py_bit_or, m)?)?;
     m.add("bit_xor", wrap_pyfunction!(py_bit_xor, m)?)?;
@@ -449,11 +472,33 @@ fn robin_sparkless(m: &Bound<'_, PyModule>) -> PyResult<()> {
     Ok(())
 }
 
+/// Return a Column expression that references a column by name.
+///
+/// Use the result in ``DataFrame.filter()``, ``DataFrame.select()``,
+/// ``DataFrame.with_column()``, ``order_by_exprs()``, and aggregation expressions.
+///
+/// Args:
+///     col: Column name (string). Must match a column in the DataFrame schema.
+///
+/// Returns:
+///     Column: Expression that can be combined with other columns or literals.
 #[pyfunction]
 fn py_col(col: &str) -> PyColumn {
     PyColumn { inner: rs_col(col) }
 }
 
+/// Create a literal Column from a Python scalar value.
+///
+/// Use for constant values in expressions (e.g. ``filter(col("x") > lit(10))``).
+///
+/// Args:
+///     col: A single value: ``None``, ``int``, ``float``, ``bool``, or ``str``.
+///
+/// Returns:
+///     Column: Literal expression with the given value.
+///
+/// Raises:
+///     TypeError: If the value is not None, int, float, bool, or str.
 #[pyfunction]
 fn py_lit(col: &Bound<'_, pyo3::types::PyAny>) -> PyResult<PyColumn> {
     let inner = if col.is_none() {
@@ -475,6 +520,19 @@ fn py_lit(col: &Bound<'_, pyo3::types::PyAny>) -> PyResult<PyColumn> {
     Ok(PyColumn { inner })
 }
 
+/// Conditional expression: when(condition) then value else default.
+///
+/// Two forms:
+/// - ``when(condition).then(value).otherwise(default)`` for multiple when-then clauses, chain
+///   additional ``.when(cond2).then(val2)`` before ``.otherwise(default)``.
+/// - ``when(condition, value)`` returns a Column equal to value where condition is true, else null.
+///
+/// Args:
+///     condition: Boolean Column expression.
+///     value: Optional. If given, result is value where condition is true, else null.
+///
+/// Returns:
+///     Column if value is provided; otherwise WhenBuilder to chain .then() and .otherwise().
 #[pyfunction]
 #[pyo3(signature = (condition, value=None))]
 fn py_when(
@@ -494,6 +552,13 @@ fn py_when(
     }
 }
 
+/// Return a Column that takes the first non-null value across the given columns, per row.
+///
+/// Args:
+///     cols: One or more Column expressions. At least one required.
+///
+/// Returns:
+///     Column: For each row, the first non-null value from cols in order.
 #[pyfunction]
 fn py_coalesce(cols: Vec<PyRef<PyColumn>>) -> PyResult<PyColumn> {
     let refs: Vec<&RsColumn> = cols.iter().map(|c| &c.inner).collect();
@@ -502,6 +567,16 @@ fn py_coalesce(cols: Vec<PyRef<PyColumn>>) -> PyResult<PyColumn> {
     })
 }
 
+/// Sum aggregation over a column.
+///
+/// Use in ``GroupedData.agg()`` (e.g. ``df.group_by("id").agg(sum(col("amount")))``)
+/// or in ``select()`` with no grouping.
+///
+/// Args:
+///     col: Numeric Column to sum.
+///
+/// Returns:
+///     Column: Aggregation expression.
 #[pyfunction]
 fn py_sum(col: &PyColumn) -> PyColumn {
     PyColumn {
@@ -509,6 +584,15 @@ fn py_sum(col: &PyColumn) -> PyColumn {
     }
 }
 
+/// Average (mean) aggregation over a column.
+///
+/// Use in ``GroupedData.agg()`` or in ``select()``. Ignores nulls.
+///
+/// Args:
+///     col: Numeric Column to average.
+///
+/// Returns:
+///     Column: Aggregation expression.
 #[pyfunction]
 fn py_avg(col: &PyColumn) -> PyColumn {
     PyColumn {
@@ -516,6 +600,15 @@ fn py_avg(col: &PyColumn) -> PyColumn {
     }
 }
 
+/// Minimum aggregation over a column.
+///
+/// Use in ``GroupedData.agg()`` or ``select()``.
+///
+/// Args:
+///     col: Column to take minimum over (numeric, string, or comparable type).
+///
+/// Returns:
+///     Column: Aggregation expression.
 #[pyfunction]
 fn py_min(col: &PyColumn) -> PyColumn {
     PyColumn {
@@ -523,6 +616,15 @@ fn py_min(col: &PyColumn) -> PyColumn {
     }
 }
 
+/// Maximum aggregation over a column.
+///
+/// Use in ``GroupedData.agg()`` or ``select()``.
+///
+/// Args:
+///     col: Column to take maximum over (numeric, string, or comparable type).
+///
+/// Returns:
+///     Column: Aggregation expression.
 #[pyfunction]
 fn py_max(col: &PyColumn) -> PyColumn {
     PyColumn {
@@ -530,6 +632,16 @@ fn py_max(col: &PyColumn) -> PyColumn {
     }
 }
 
+/// Count aggregation: number of non-null values in a column.
+///
+/// Use in ``GroupedData.agg()`` (e.g. ``count(col("id"))``) or ``select()``.
+/// Use ``count(lit(1))`` or similar for row count when all rows matter.
+///
+/// Args:
+///     col: Column to count (nulls excluded).
+///
+/// Returns:
+///     Column: Aggregation expression.
 #[pyfunction]
 fn py_count(col: &PyColumn) -> PyColumn {
     PyColumn {
@@ -537,6 +649,13 @@ fn py_count(col: &PyColumn) -> PyColumn {
     }
 }
 
+/// Ascending sort order for use in ``order_by_exprs()`` (nulls last by default).
+///
+/// Args:
+///     col: Column to sort by.
+///
+/// Returns:
+///     SortOrder to pass to ``DataFrame.order_by_exprs([...])``.
 #[pyfunction]
 fn py_asc(col: &PyColumn) -> PySortOrder {
     PySortOrder {
@@ -544,6 +663,7 @@ fn py_asc(col: &PyColumn) -> PySortOrder {
     }
 }
 
+/// Ascending sort order with nulls first.
 #[pyfunction]
 fn py_asc_nulls_first(col: &PyColumn) -> PySortOrder {
     PySortOrder {
@@ -551,6 +671,7 @@ fn py_asc_nulls_first(col: &PyColumn) -> PySortOrder {
     }
 }
 
+/// Ascending sort order with nulls last.
 #[pyfunction]
 fn py_asc_nulls_last(col: &PyColumn) -> PySortOrder {
     PySortOrder {
@@ -558,6 +679,13 @@ fn py_asc_nulls_last(col: &PyColumn) -> PySortOrder {
     }
 }
 
+/// Descending sort order for use in ``order_by_exprs()`` (nulls first by default).
+///
+/// Args:
+///     col: Column to sort by.
+///
+/// Returns:
+///     SortOrder to pass to ``DataFrame.order_by_exprs([...])``.
 #[pyfunction]
 fn py_desc(col: &PyColumn) -> PySortOrder {
     PySortOrder {
@@ -565,6 +693,7 @@ fn py_desc(col: &PyColumn) -> PySortOrder {
     }
 }
 
+/// Descending sort order with nulls first.
 #[pyfunction]
 fn py_desc_nulls_first(col: &PyColumn) -> PySortOrder {
     PySortOrder {
@@ -572,6 +701,7 @@ fn py_desc_nulls_first(col: &PyColumn) -> PySortOrder {
     }
 }
 
+/// Descending sort order with nulls last.
 #[pyfunction]
 fn py_desc_nulls_last(col: &PyColumn) -> PySortOrder {
     PySortOrder {
@@ -579,6 +709,14 @@ fn py_desc_nulls_last(col: &PyColumn) -> PySortOrder {
     }
 }
 
+/// Banker's rounding: round to ``scale`` decimal places (half rounds to nearest even).
+///
+/// Args:
+///     col: Numeric Column.
+///     scale: Number of decimal places (can be negative for rounding to tens, hundreds, etc.).
+///
+/// Returns:
+///     Column: Rounded values.
 #[pyfunction]
 fn py_bround(col: &PyColumn, scale: i32) -> PyColumn {
     PyColumn {
@@ -586,6 +724,13 @@ fn py_bround(col: &PyColumn, scale: i32) -> PyColumn {
     }
 }
 
+/// Unary minus: negate the column values.
+///
+/// Args:
+///     col: Numeric Column.
+///
+/// Returns:
+///     Column: Negated values.
 #[pyfunction]
 fn py_negate(col: &PyColumn) -> PyColumn {
     PyColumn {
@@ -593,6 +738,13 @@ fn py_negate(col: &PyColumn) -> PyColumn {
     }
 }
 
+/// Unary plus; no-op for API compatibility with PySpark.
+///
+/// Args:
+///     col: Column.
+///
+/// Returns:
+///     Column: Same as input.
 #[pyfunction]
 fn py_positive(col: &PyColumn) -> PyColumn {
     PyColumn {
@@ -818,7 +970,6 @@ fn py_array_agg(col: &PyColumn) -> PyColumn {
     }
 }
 
-// Phase 22: datetime extensions
 #[pyfunction]
 fn py_curdate() -> PyColumn {
     PyColumn { inner: curdate() }
@@ -1043,7 +1194,6 @@ fn py_to_timestamp(col: &PyColumn, format: Option<&str>) -> PyResult<PyColumn> {
         .map_err(|e| pyo3::exceptions::PyValueError::new_err(e))
 }
 
-// Phase 23: JSON, URL, misc
 #[pyfunction]
 fn py_isin(col: &PyColumn, other: &PyColumn) -> PyColumn {
     PyColumn {
@@ -1700,7 +1850,6 @@ fn py_printf(format: &str, cols: Vec<PyRef<PyColumn>>) -> PyColumn {
     py_format_string(format, cols)
 }
 
-// Phase 17: datetime/unix and math
 #[pyfunction]
 fn py_unix_timestamp(timestamp: Option<PyRef<PyColumn>>, format: Option<&str>) -> PyColumn {
     match &timestamp {
@@ -1783,7 +1932,6 @@ fn py_factorial(col: &PyColumn) -> PyColumn {
     }
 }
 
-// Phase 18: array, map, struct
 #[pyfunction]
 fn py_array_append(col: &PyColumn, value: &PyColumn) -> PyColumn {
     PyColumn {
@@ -2045,1940 +2193,5 @@ fn py_rint(col: &PyColumn) -> PyColumn {
 fn py_hypot(col1: &PyColumn, col2: &PyColumn) -> PyColumn {
     PyColumn {
         inner: hypot(&col1.inner, &col2.inner),
-    }
-}
-
-/// Python wrapper for SortOrder (used with order_by_exprs).
-#[pyclass]
-#[derive(Clone)]
-struct PySortOrder {
-    inner: SortOrder,
-}
-
-/// Python wrapper for Column (expression).
-#[pyclass(name = "Column")]
-struct PyColumn {
-    inner: RsColumn,
-}
-
-#[pymethods]
-impl PyColumn {
-    fn alias(&self, name: &str) -> Self {
-        PyColumn {
-            inner: self.inner.alias(name),
-        }
-    }
-
-    fn is_null(&self) -> Self {
-        PyColumn {
-            inner: self.inner.is_null(),
-        }
-    }
-
-    fn is_not_null(&self) -> Self {
-        PyColumn {
-            inner: self.inner.is_not_null(),
-        }
-    }
-
-    fn gt(&self, other: &PyColumn) -> Self {
-        PyColumn {
-            inner: self.inner.gt(other.inner.expr().clone()),
-        }
-    }
-
-    fn ge(&self, other: &PyColumn) -> Self {
-        PyColumn {
-            inner: self.inner.gt_eq(other.inner.expr().clone()),
-        }
-    }
-
-    fn lt(&self, other: &PyColumn) -> Self {
-        PyColumn {
-            inner: self.inner.lt(other.inner.expr().clone()),
-        }
-    }
-
-    fn le(&self, other: &PyColumn) -> Self {
-        PyColumn {
-            inner: self.inner.lt_eq(other.inner.expr().clone()),
-        }
-    }
-
-    fn eq(&self, other: &PyColumn) -> Self {
-        PyColumn {
-            inner: self.inner.eq(other.inner.expr().clone()),
-        }
-    }
-
-    fn ne(&self, other: &PyColumn) -> Self {
-        PyColumn {
-            inner: self.inner.neq(other.inner.expr().clone()),
-        }
-    }
-
-    fn and_(&self, other: &PyColumn) -> Self {
-        PyColumn {
-            inner: RsColumn::from_expr(
-                self.inner.expr().clone().and(other.inner.expr().clone()),
-                None,
-            ),
-        }
-    }
-
-    fn or_(&self, other: &PyColumn) -> Self {
-        PyColumn {
-            inner: RsColumn::from_expr(
-                self.inner.expr().clone().or(other.inner.expr().clone()),
-                None,
-            ),
-        }
-    }
-
-    fn upper(&self) -> Self {
-        PyColumn {
-            inner: self.inner.upper(),
-        }
-    }
-
-    fn lower(&self) -> Self {
-        PyColumn {
-            inner: self.inner.lower(),
-        }
-    }
-
-    #[pyo3(signature = (start, length=None))]
-    fn substr(&self, start: i64, length: Option<i64>) -> Self {
-        PyColumn {
-            inner: self.inner.substr(start, length),
-        }
-    }
-
-    fn ascii_(&self) -> Self {
-        PyColumn {
-            inner: ascii(&self.inner),
-        }
-    }
-
-    fn format_number(&self, decimals: u32) -> Self {
-        PyColumn {
-            inner: format_number(&self.inner, decimals),
-        }
-    }
-
-    fn overlay(&self, replace: &str, pos: i64, length: i64) -> Self {
-        PyColumn {
-            inner: overlay(&self.inner, replace, pos, length),
-        }
-    }
-
-    fn char_(&self) -> Self {
-        PyColumn {
-            inner: crate::functions::char(&self.inner),
-        }
-    }
-
-    fn chr_(&self) -> Self {
-        PyColumn {
-            inner: chr(&self.inner),
-        }
-    }
-
-    fn base64_(&self) -> Self {
-        PyColumn {
-            inner: base64(&self.inner),
-        }
-    }
-
-    fn unbase64_(&self) -> Self {
-        PyColumn {
-            inner: unbase64(&self.inner),
-        }
-    }
-
-    fn sha1_(&self) -> Self {
-        PyColumn {
-            inner: sha1(&self.inner),
-        }
-    }
-
-    fn sha2_(&self, bit_length: i32) -> Self {
-        PyColumn {
-            inner: sha2(&self.inner, bit_length),
-        }
-    }
-
-    fn md5_(&self) -> Self {
-        PyColumn {
-            inner: md5(&self.inner),
-        }
-    }
-
-    fn array_compact(&self) -> Self {
-        PyColumn {
-            inner: array_compact(&self.inner),
-        }
-    }
-    fn array_distinct(&self) -> Self {
-        PyColumn {
-            inner: array_distinct(&self.inner),
-        }
-    }
-
-    fn array_append(&self, elem: &PyColumn) -> Self {
-        PyColumn {
-            inner: array_append(&self.inner, &elem.inner),
-        }
-    }
-
-    fn array_prepend(&self, elem: &PyColumn) -> Self {
-        PyColumn {
-            inner: array_prepend(&self.inner, &elem.inner),
-        }
-    }
-
-    fn array_insert(&self, pos: &PyColumn, elem: &PyColumn) -> Self {
-        PyColumn {
-            inner: array_insert(&self.inner, &pos.inner, &elem.inner),
-        }
-    }
-
-    fn array_except(&self, other: &PyColumn) -> Self {
-        PyColumn {
-            inner: array_except(&self.inner, &other.inner),
-        }
-    }
-
-    fn array_intersect(&self, other: &PyColumn) -> Self {
-        PyColumn {
-            inner: array_intersect(&self.inner, &other.inner),
-        }
-    }
-
-    fn array_union(&self, other: &PyColumn) -> Self {
-        PyColumn {
-            inner: array_union(&self.inner, &other.inner),
-        }
-    }
-
-    fn map_concat(&self, other: &PyColumn) -> Self {
-        PyColumn {
-            inner: map_concat(&self.inner, &other.inner),
-        }
-    }
-
-    fn map_filter_value_gt(&self, threshold: f64) -> Self {
-        PyColumn {
-            inner: map_filter_value_gt(&self.inner, threshold),
-        }
-    }
-
-    fn zip_with_coalesce(&self, other: &PyColumn) -> Self {
-        PyColumn {
-            inner: zip_with_coalesce(&self.inner, &other.inner),
-        }
-    }
-
-    fn map_zip_with_coalesce(&self, other: &PyColumn) -> Self {
-        PyColumn {
-            inner: map_zip_with_coalesce(&self.inner, &other.inner),
-        }
-    }
-
-    fn map_from_entries(&self) -> Self {
-        PyColumn {
-            inner: map_from_entries(&self.inner),
-        }
-    }
-
-    fn map_contains_key(&self, key: &PyColumn) -> Self {
-        PyColumn {
-            inner: map_contains_key(&self.inner, &key.inner),
-        }
-    }
-
-    fn get(&self, key: &PyColumn) -> Self {
-        PyColumn {
-            inner: get(&self.inner, &key.inner),
-        }
-    }
-
-    fn try_divide(&self, right: &PyColumn) -> Self {
-        PyColumn {
-            inner: try_divide(&self.inner, &right.inner),
-        }
-    }
-
-    fn try_add(&self, right: &PyColumn) -> Self {
-        PyColumn {
-            inner: try_add(&self.inner, &right.inner),
-        }
-    }
-
-    fn try_subtract(&self, right: &PyColumn) -> Self {
-        PyColumn {
-            inner: try_subtract(&self.inner, &right.inner),
-        }
-    }
-
-    fn try_multiply(&self, right: &PyColumn) -> Self {
-        PyColumn {
-            inner: try_multiply(&self.inner, &right.inner),
-        }
-    }
-
-    fn bit_length(&self) -> Self {
-        PyColumn {
-            inner: bit_length(&self.inner),
-        }
-    }
-
-    fn typeof_(&self) -> Self {
-        PyColumn {
-            inner: typeof_(&self.inner),
-        }
-    }
-
-    fn sin(&self) -> Self {
-        PyColumn {
-            inner: sin(&self.inner),
-        }
-    }
-    fn cos(&self) -> Self {
-        PyColumn {
-            inner: cos(&self.inner),
-        }
-    }
-    fn tan(&self) -> Self {
-        PyColumn {
-            inner: tan(&self.inner),
-        }
-    }
-    fn asin_(&self) -> Self {
-        PyColumn {
-            inner: asin(&self.inner),
-        }
-    }
-    fn acos_(&self) -> Self {
-        PyColumn {
-            inner: acos(&self.inner),
-        }
-    }
-    fn atan_(&self) -> Self {
-        PyColumn {
-            inner: atan(&self.inner),
-        }
-    }
-    fn atan2(&self, x: &PyColumn) -> Self {
-        PyColumn {
-            inner: atan2(&self.inner, &x.inner),
-        }
-    }
-    fn degrees_(&self) -> Self {
-        PyColumn {
-            inner: degrees(&self.inner),
-        }
-    }
-    fn radians_(&self) -> Self {
-        PyColumn {
-            inner: radians(&self.inner),
-        }
-    }
-    fn signum(&self) -> Self {
-        PyColumn {
-            inner: signum(&self.inner),
-        }
-    }
-    fn quarter(&self) -> Self {
-        PyColumn {
-            inner: quarter(&self.inner),
-        }
-    }
-    fn weekofyear(&self) -> Self {
-        PyColumn {
-            inner: weekofyear(&self.inner),
-        }
-    }
-    fn dayofweek(&self) -> Self {
-        PyColumn {
-            inner: dayofweek(&self.inner),
-        }
-    }
-    fn dayofyear(&self) -> Self {
-        PyColumn {
-            inner: dayofyear(&self.inner),
-        }
-    }
-    fn add_months(&self, n: i32) -> Self {
-        PyColumn {
-            inner: add_months(&self.inner, n),
-        }
-    }
-    fn months_between(&self, start: &PyColumn) -> Self {
-        PyColumn {
-            inner: self.inner.months_between(&start.inner, true),
-        }
-    }
-    fn next_day(&self, day_of_week: &str) -> Self {
-        PyColumn {
-            inner: next_day(&self.inner, day_of_week),
-        }
-    }
-    fn cast(&self, type_name: &str) -> PyResult<Self> {
-        rs_cast(&self.inner, type_name)
-            .map(|inner| PyColumn { inner })
-            .map_err(|e| pyo3::exceptions::PyValueError::new_err(e))
-    }
-    fn try_cast(&self, type_name: &str) -> PyResult<Self> {
-        rs_try_cast(&self.inner, type_name)
-            .map(|inner| PyColumn { inner })
-            .map_err(|e| pyo3::exceptions::PyValueError::new_err(e))
-    }
-    fn isnan(&self) -> Self {
-        PyColumn {
-            inner: rs_isnan(&self.inner),
-        }
-    }
-    fn nvl(&self, value: &PyColumn) -> Self {
-        PyColumn {
-            inner: nvl(&self.inner, &value.inner),
-        }
-    }
-    fn ifnull(&self, value: &PyColumn) -> Self {
-        PyColumn {
-            inner: ifnull(&self.inner, &value.inner),
-        }
-    }
-    fn power(&self, exp: i64) -> Self {
-        PyColumn {
-            inner: power(&self.inner, exp),
-        }
-    }
-    fn ln(&self) -> Self {
-        PyColumn {
-            inner: ln(&self.inner),
-        }
-    }
-    fn ceiling(&self) -> Self {
-        PyColumn {
-            inner: ceiling(&self.inner),
-        }
-    }
-    fn lcase(&self) -> Self {
-        PyColumn {
-            inner: lcase(&self.inner),
-        }
-    }
-    fn ucase(&self) -> Self {
-        PyColumn {
-            inner: ucase(&self.inner),
-        }
-    }
-    fn day(&self) -> Self {
-        PyColumn {
-            inner: day(&self.inner),
-        }
-    }
-    fn dayofmonth(&self) -> Self {
-        PyColumn {
-            inner: dayofmonth(&self.inner),
-        }
-    }
-    fn to_degrees(&self) -> Self {
-        PyColumn {
-            inner: to_degrees(&self.inner),
-        }
-    }
-    fn to_radians(&self) -> Self {
-        PyColumn {
-            inner: to_radians(&self.inner),
-        }
-    }
-    fn isnull(&self) -> Self {
-        PyColumn {
-            inner: isnull(&self.inner),
-        }
-    }
-    fn isnotnull(&self) -> Self {
-        PyColumn {
-            inner: isnotnull(&self.inner),
-        }
-    }
-    fn left(&self, n: i64) -> Self {
-        PyColumn {
-            inner: left(&self.inner, n),
-        }
-    }
-    fn right(&self, n: i64) -> Self {
-        PyColumn {
-            inner: right(&self.inner, n),
-        }
-    }
-    fn replace(&self, search: &str, replacement: &str) -> Self {
-        PyColumn {
-            inner: rs_replace(&self.inner, search, replacement),
-        }
-    }
-    fn startswith(&self, prefix: &str) -> Self {
-        PyColumn {
-            inner: startswith(&self.inner, prefix),
-        }
-    }
-    fn endswith(&self, suffix: &str) -> Self {
-        PyColumn {
-            inner: endswith(&self.inner, suffix),
-        }
-    }
-    fn contains(&self, substring: &str) -> Self {
-        PyColumn {
-            inner: contains(&self.inner, substring),
-        }
-    }
-    fn like(&self, pattern: &str) -> Self {
-        PyColumn {
-            inner: like(&self.inner, pattern, None),
-        }
-    }
-    fn ilike(&self, pattern: &str) -> Self {
-        PyColumn {
-            inner: ilike(&self.inner, pattern, None),
-        }
-    }
-    fn rlike(&self, pattern: &str) -> Self {
-        PyColumn {
-            inner: rlike(&self.inner, pattern),
-        }
-    }
-    fn cosh(&self) -> Self {
-        PyColumn {
-            inner: cosh(&self.inner),
-        }
-    }
-    fn sinh(&self) -> Self {
-        PyColumn {
-            inner: sinh(&self.inner),
-        }
-    }
-    fn tanh(&self) -> Self {
-        PyColumn {
-            inner: tanh(&self.inner),
-        }
-    }
-    fn acosh(&self) -> Self {
-        PyColumn {
-            inner: acosh(&self.inner),
-        }
-    }
-    fn asinh(&self) -> Self {
-        PyColumn {
-            inner: asinh(&self.inner),
-        }
-    }
-    fn atanh_(&self) -> Self {
-        PyColumn {
-            inner: atanh(&self.inner),
-        }
-    }
-    fn cbrt(&self) -> Self {
-        PyColumn {
-            inner: cbrt(&self.inner),
-        }
-    }
-    fn expm1(&self) -> Self {
-        PyColumn {
-            inner: expm1(&self.inner),
-        }
-    }
-    fn log1p(&self) -> Self {
-        PyColumn {
-            inner: log1p(&self.inner),
-        }
-    }
-    fn log10(&self) -> Self {
-        PyColumn {
-            inner: log10(&self.inner),
-        }
-    }
-    fn log2(&self) -> Self {
-        PyColumn {
-            inner: log2(&self.inner),
-        }
-    }
-    fn rint(&self) -> Self {
-        PyColumn {
-            inner: rint(&self.inner),
-        }
-    }
-    fn hypot(&self, other: &PyColumn) -> Self {
-        PyColumn {
-            inner: hypot(&self.inner, &other.inner),
-        }
-    }
-
-    /// Array/list size (PySpark size).
-    fn size(&self) -> Self {
-        PyColumn {
-            inner: self.inner.array_size(),
-        }
-    }
-
-    /// Element at 1-based index (PySpark element_at).
-    fn element_at(&self, index: i64) -> Self {
-        PyColumn {
-            inner: self.inner.element_at(index),
-        }
-    }
-
-    /// Explode list into one row per element (PySpark explode).
-    fn explode(&self) -> Self {
-        PyColumn {
-            inner: self.inner.explode(),
-        }
-    }
-
-    /// 1-based index of first occurrence of value in list, or 0 if not found (PySpark array_position).
-    fn array_position(&self, value: &PyColumn) -> Self {
-        PyColumn {
-            inner: self.inner.array_position(value.inner.expr().clone()),
-        }
-    }
-
-    /// New list with all elements equal to value removed (PySpark array_remove).
-    fn array_remove(&self, value: &PyColumn) -> Self {
-        PyColumn {
-            inner: self.inner.array_remove(value.inner.expr().clone()),
-        }
-    }
-
-    /// Repeat each element n times (PySpark array_repeat). Not implemented.
-    fn array_repeat(&self, n: i64) -> Self {
-        PyColumn {
-            inner: self.inner.array_repeat(n),
-        }
-    }
-
-    /// Explode list with position (PySpark posexplode). Returns (pos_column, value_column).
-    fn posexplode(&self) -> (Self, Self) {
-        let (pos, val) = self.inner.posexplode();
-        (PyColumn { inner: pos }, PyColumn { inner: val })
-    }
-
-    /// First value in partition (PySpark first_value). Use with .over().
-    fn first_value(&self) -> Self {
-        PyColumn {
-            inner: self.inner.first_value(),
-        }
-    }
-
-    /// Last value in partition (PySpark last_value). Use with .over().
-    fn last_value(&self) -> Self {
-        PyColumn {
-            inner: self.inner.last_value(),
-        }
-    }
-
-    /// Percent rank in partition. Window is applied; pass partition_by.
-    fn percent_rank(&self, partition_by: Vec<String>, descending: bool) -> Self {
-        let refs: Vec<&str> = partition_by.iter().map(|s| s.as_str()).collect();
-        PyColumn {
-            inner: self.inner.percent_rank(&refs, descending),
-        }
-    }
-
-    /// Cumulative distribution in partition. Window is applied; pass partition_by.
-    fn cume_dist(&self, partition_by: Vec<String>, descending: bool) -> Self {
-        let refs: Vec<&str> = partition_by.iter().map(|s| s.as_str()).collect();
-        PyColumn {
-            inner: self.inner.cume_dist(&refs, descending),
-        }
-    }
-
-    /// Ntile: bucket 1..n by rank within partition. Window is applied; pass partition_by.
-    fn ntile(&self, n: u32, partition_by: Vec<String>, descending: bool) -> Self {
-        let refs: Vec<&str> = partition_by.iter().map(|s| s.as_str()).collect();
-        PyColumn {
-            inner: self.inner.ntile(n, &refs, descending),
-        }
-    }
-
-    /// Nth value in partition by order (1-based n). Window is applied; pass partition_by, do not call .over() again.
-    fn nth_value(&self, n: i64, partition_by: Vec<String>, descending: bool) -> Self {
-        let refs: Vec<&str> = partition_by.iter().map(|s| s.as_str()).collect();
-        PyColumn {
-            inner: self.inner.nth_value(n, &refs, descending),
-        }
-    }
-
-    /// Check if string matches regex (PySpark regexp_like).
-    fn regexp_like(&self, pattern: &str) -> Self {
-        PyColumn {
-            inner: self.inner.regexp_like(pattern),
-        }
-    }
-
-    /// Count of non-overlapping regex matches (PySpark regexp_count).
-    fn regexp_count(&self, pattern: &str) -> Self {
-        PyColumn {
-            inner: regexp_count(&self.inner, pattern),
-        }
-    }
-
-    /// 1-based position of first regex match (PySpark regexp_instr).
-    fn regexp_instr(&self, pattern: &str, group_idx: Option<usize>) -> Self {
-        PyColumn {
-            inner: regexp_instr(&self.inner, pattern, group_idx),
-        }
-    }
-
-    /// First substring matching regex (PySpark regexp_substr).
-    fn regexp_substr(&self, pattern: &str) -> Self {
-        PyColumn {
-            inner: regexp_substr(&self.inner, pattern),
-        }
-    }
-
-    /// Split by delimiter and return 1-based part (PySpark split_part).
-    fn split_part(&self, delimiter: &str, part_num: i64) -> Self {
-        PyColumn {
-            inner: split_part(&self.inner, delimiter, part_num),
-        }
-    }
-
-    /// 1-based index in comma-delimited set (PySpark find_in_set).
-    fn find_in_set(&self, set_col: &PyColumn) -> Self {
-        PyColumn {
-            inner: find_in_set(&self.inner, &set_col.inner),
-        }
-    }
-
-    // Phase 17: datetime/unix and math
-    fn unix_timestamp(&self, format: Option<&str>) -> Self {
-        PyColumn {
-            inner: unix_timestamp(&self.inner, format),
-        }
-    }
-    fn from_unixtime(&self, format: Option<&str>) -> Self {
-        PyColumn {
-            inner: from_unixtime(&self.inner, format),
-        }
-    }
-    fn timestamp_seconds(&self) -> Self {
-        PyColumn {
-            inner: timestamp_seconds(&self.inner),
-        }
-    }
-    fn timestamp_millis(&self) -> Self {
-        PyColumn {
-            inner: timestamp_millis(&self.inner),
-        }
-    }
-    fn timestamp_micros(&self) -> Self {
-        PyColumn {
-            inner: timestamp_micros(&self.inner),
-        }
-    }
-    fn unix_date(&self) -> Self {
-        PyColumn {
-            inner: unix_date(&self.inner),
-        }
-    }
-    fn date_from_unix_date(&self) -> Self {
-        PyColumn {
-            inner: date_from_unix_date(&self.inner),
-        }
-    }
-    fn pmod(&self, divisor: &PyColumn) -> Self {
-        PyColumn {
-            inner: pmod(&self.inner, &divisor.inner),
-        }
-    }
-    fn factorial(&self) -> Self {
-        PyColumn {
-            inner: factorial(&self.inner),
-        }
-    }
-}
-
-/// Python wrapper for WhenBuilder (when(cond).then(val).otherwise(val)).
-#[pyclass(name = "WhenBuilder")]
-struct PyWhenBuilder {
-    condition: Expr,
-}
-
-#[pymethods]
-impl PyWhenBuilder {
-    fn then(&self, value: &PyColumn) -> PyThenBuilder {
-        let when_then =
-            polars::prelude::when(self.condition.clone()).then(value.inner.expr().clone());
-        PyThenBuilder { when_then }
-    }
-}
-
-/// Python wrapper for ThenBuilder (.otherwise(val)).
-#[pyclass(name = "ThenBuilder")]
-struct PyThenBuilder {
-    when_then: polars::prelude::Then,
-}
-
-#[pymethods]
-impl PyThenBuilder {
-    fn otherwise(&self, value: &PyColumn) -> PyColumn {
-        let expr = self.when_then.clone().otherwise(value.inner.expr().clone());
-        PyColumn {
-            inner: RsColumn::from_expr(expr, None),
-        }
-    }
-}
-
-/// Python wrapper for SparkSession.
-#[pyclass(name = "SparkSession")]
-struct PySparkSession {
-    inner: SparkSession,
-}
-
-#[pymethods]
-impl PySparkSession {
-    #[new]
-    fn new() -> Self {
-        PySparkSession {
-            inner: SparkSession::new(None, None, std::collections::HashMap::new()),
-        }
-    }
-
-    /// Create a SparkSession via builder().app_name(...).get_or_create()
-    #[classmethod]
-    fn builder(_cls: &Bound<'_, pyo3::types::PyType>) -> PyResult<PySparkSessionBuilder> {
-        Ok(PySparkSessionBuilder {
-            app_name: None,
-            master: None,
-            config: std::collections::HashMap::new(),
-        })
-    }
-
-    fn is_case_sensitive(&self) -> bool {
-        self.inner.is_case_sensitive()
-    }
-
-    /// Create a DataFrame from a list of 3-tuples (id, age, name) and column names.
-    /// data: list of (int, int, str), column_names: list of 3 strings e.g. ["id", "age", "name"].
-    /// For arbitrary schemas use create_dataframe_from_rows(data, schema).
-    fn create_dataframe(
-        &self,
-        _py: Python<'_>,
-        data: &Bound<'_, pyo3::types::PyAny>,
-        column_names: Vec<String>,
-    ) -> PyResult<PyDataFrame> {
-        let data_rust: Vec<(i64, i64, String)> = data
-            .extract()
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        let names_ref: Vec<&str> = column_names.iter().map(|s| s.as_str()).collect();
-        let df = self
-            .inner
-            .create_dataframe(data_rust, names_ref)
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
-    }
-
-    /// PySpark alias: createDataFrame(data, schema) for 3-column (int, int, str) data.
-    /// For other schemas use create_dataframe_from_rows(data, schema).
-    #[pyo3(name = "createDataFrame")]
-    fn create_data_frame_pyspark_alias(
-        &self,
-        _py: Python<'_>,
-        data: &Bound<'_, pyo3::types::PyAny>,
-        column_names: Vec<String>,
-    ) -> PyResult<PyDataFrame> {
-        self.create_dataframe(_py, data, column_names)
-    }
-
-    /// Create a DataFrame from a list of dicts (or list of lists) and a schema.
-    /// schema: list of (name, dtype_str) e.g. [("id", "bigint"), ("name", "string")].
-    /// data: list of dicts (keys = column names) or list of lists (values in schema order).
-    fn create_dataframe_from_rows(
-        &self,
-        py: Python<'_>,
-        data: &Bound<'_, pyo3::types::PyAny>,
-        schema: Vec<(String, String)>,
-    ) -> PyResult<PyDataFrame> {
-        let data_list = data
-            .extract::<Vec<Bound<'_, pyo3::types::PyAny>>>()
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        let mut rows: Vec<Vec<JsonValue>> = Vec::with_capacity(data_list.len());
-        let names: Vec<&str> = schema.iter().map(|(n, _)| n.as_str()).collect();
-        for row_any in &data_list {
-            if let Ok(dict) = row_any.downcast::<PyDict>() {
-                let row: Vec<JsonValue> = names
-                    .iter()
-                    .map(|name| {
-                        let v = dict
-                            .get_item(*name)
-                            .ok()
-                            .flatten()
-                            .unwrap_or_else(|| py.None().into_bound(py));
-                        py_to_json_value(&v)
-                    })
-                    .collect::<PyResult<Vec<_>>>()?;
-                rows.push(row);
-            } else if let Ok(list) = row_any.extract::<Vec<Bound<'_, pyo3::types::PyAny>>>() {
-                let row: Vec<JsonValue> = list
-                    .iter()
-                    .map(|v| py_to_json_value(v))
-                    .collect::<PyResult<Vec<_>>>()?;
-                rows.push(row);
-            } else {
-                return Err(pyo3::exceptions::PyTypeError::new_err(
-                    "create_dataframe_from_rows: each row must be a dict or a list",
-                ));
-            }
-        }
-        let df = self
-            .inner
-            .create_dataframe_from_rows(rows, schema)
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
-    }
-
-    fn read_csv(&self, path: &str) -> PyResult<PyDataFrame> {
-        let df = self
-            .inner
-            .read_csv(Path::new(path))
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
-    }
-
-    fn read_parquet(&self, path: &str) -> PyResult<PyDataFrame> {
-        let df = self
-            .inner
-            .read_parquet(Path::new(path))
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
-    }
-
-    fn read_json(&self, path: &str) -> PyResult<PyDataFrame> {
-        let df = self
-            .inner
-            .read_json(Path::new(path))
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
-    }
-
-    #[cfg(feature = "sql")]
-    fn create_or_replace_temp_view(&self, name: &str, df: &PyDataFrame) {
-        self.inner
-            .create_or_replace_temp_view(name, df.inner.clone());
-    }
-
-    #[cfg(feature = "sql")]
-    fn table(&self, name: &str) -> PyResult<PyDataFrame> {
-        let df = self
-            .inner
-            .table(name)
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
-    }
-
-    #[cfg(feature = "sql")]
-    fn sql(&self, query: &str) -> PyResult<PyDataFrame> {
-        let df = self
-            .inner
-            .sql(query)
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
-    }
-
-    #[cfg(feature = "delta")]
-    fn read_delta(&self, path: &str) -> PyResult<PyDataFrame> {
-        let df = self
-            .inner
-            .read_delta(Path::new(path))
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
-    }
-
-    #[cfg(feature = "delta")]
-    fn read_delta_version(&self, path: &str, version: Option<i64>) -> PyResult<PyDataFrame> {
-        let df = self
-            .inner
-            .read_delta_with_version(Path::new(path), version)
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
-    }
-}
-
-/// Python wrapper for SparkSessionBuilder.
-#[pyclass(name = "SparkSessionBuilder")]
-struct PySparkSessionBuilder {
-    app_name: Option<String>,
-    master: Option<String>,
-    config: std::collections::HashMap<String, String>,
-}
-
-#[pymethods]
-impl PySparkSessionBuilder {
-    fn app_name<'a>(mut slf: PyRefMut<'a, Self>, name: &str) -> PyRefMut<'a, Self> {
-        slf.app_name = Some(name.to_string());
-        slf
-    }
-
-    fn master<'a>(mut slf: PyRefMut<'a, Self>, master: &str) -> PyRefMut<'a, Self> {
-        slf.master = Some(master.to_string());
-        slf
-    }
-
-    fn config<'a>(mut slf: PyRefMut<'a, Self>, key: &str, value: &str) -> PyRefMut<'a, Self> {
-        slf.config.insert(key.to_string(), value.to_string());
-        slf
-    }
-
-    fn get_or_create(slf: PyRef<'_, Self>) -> PySparkSession {
-        let mut config = std::collections::HashMap::new();
-        for (k, v) in &slf.config {
-            config.insert(k.clone(), v.clone());
-        }
-        let inner = SparkSession::new(slf.app_name.clone(), slf.master.clone(), config);
-        PySparkSession { inner }
-    }
-}
-
-/// Python wrapper for DataFrame.
-#[pyclass(name = "DataFrame")]
-struct PyDataFrame {
-    inner: DataFrame,
-}
-
-#[pymethods]
-impl PyDataFrame {
-    fn count(&self) -> PyResult<usize> {
-        self.inner
-            .count()
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
-    }
-
-    #[pyo3(signature = (n=None))]
-    fn show(&self, n: Option<usize>) -> PyResult<()> {
-        self.inner
-            .show(n)
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
-    }
-
-    #[cfg(feature = "delta")]
-    fn write_delta(&self, path: &str, overwrite: bool) -> PyResult<()> {
-        self.inner
-            .write_delta(Path::new(path), overwrite)
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
-    }
-
-    /// Collect as list of dicts (column name -> value per row).
-    fn collect(&self, py: Python<'_>) -> PyResult<PyObject> {
-        let pl_df = self
-            .inner
-            .collect()
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        let df = pl_df.as_ref();
-        let names = df.get_column_names();
-        let nrows = df.height();
-        let rows = pyo3::types::PyList::empty(py);
-        for i in 0..nrows {
-            let row_dict = PyDict::new(py);
-            for (col_idx, name) in names.iter().enumerate() {
-                let s = df.get_columns().get(col_idx).ok_or_else(|| {
-                    pyo3::exceptions::PyRuntimeError::new_err("column index out of range")
-                })?;
-                let av = s
-                    .get(i)
-                    .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-                let py_val = any_value_to_py(py, av)?;
-                row_dict.set_item(name.as_str(), py_val)?;
-            }
-            rows.append(&*row_dict)?;
-        }
-        Ok(rows.into())
-    }
-
-    fn filter(&self, condition: &PyColumn) -> PyResult<PyDataFrame> {
-        let df = self
-            .inner
-            .filter(condition.inner.expr().clone())
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
-    }
-
-    fn select(&self, cols: Vec<String>) -> PyResult<PyDataFrame> {
-        let refs: Vec<&str> = cols.iter().map(|s| s.as_str()).collect();
-        let df = self
-            .inner
-            .select(refs)
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
-    }
-
-    fn with_column(&self, column_name: &str, expr: &PyColumn) -> PyResult<PyDataFrame> {
-        let df = self
-            .inner
-            .with_column(column_name, &expr.inner)
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
-    }
-
-    #[pyo3(signature = (cols, ascending=None))]
-    fn order_by(&self, cols: Vec<String>, ascending: Option<Vec<bool>>) -> PyResult<PyDataFrame> {
-        let asc = ascending.unwrap_or_else(|| vec![true; cols.len()]);
-        let df = self
-            .inner
-            .order_by(cols.iter().map(|s| s.as_str()).collect::<Vec<_>>(), asc)
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
-    }
-
-    fn order_by_exprs(&self, sort_orders: Vec<PySortOrder>) -> PyResult<PyDataFrame> {
-        let orders: Vec<SortOrder> = sort_orders.into_iter().map(|po| po.inner).collect();
-        let df = self
-            .inner
-            .order_by_exprs(orders)
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
-    }
-
-    fn group_by(&self, cols: Vec<String>) -> PyResult<PyGroupedData> {
-        let refs: Vec<&str> = cols.iter().map(|s| s.as_str()).collect();
-        let gd = self
-            .inner
-            .group_by(refs)
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyGroupedData { inner: gd })
-    }
-
-    fn cube(&self, cols: Vec<String>) -> PyResult<PyCubeRollupData> {
-        let refs: Vec<&str> = cols.iter().map(|s| s.as_str()).collect();
-        let cr = self
-            .inner
-            .cube(refs)
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyCubeRollupData { inner: cr })
-    }
-
-    fn rollup(&self, cols: Vec<String>) -> PyResult<PyCubeRollupData> {
-        let refs: Vec<&str> = cols.iter().map(|s| s.as_str()).collect();
-        let cr = self
-            .inner
-            .rollup(refs)
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyCubeRollupData { inner: cr })
-    }
-
-    fn write(&self) -> PyDataFrameWriter {
-        PyDataFrameWriter {
-            df: self.inner.clone(),
-            mode: RwLock::new(WriteMode::Overwrite),
-            format: RwLock::new(WriteFormat::Parquet),
-        }
-    }
-
-    #[pyo3(signature = (other, on, how="inner"))]
-    fn join(&self, other: &PyDataFrame, on: Vec<String>, how: &str) -> PyResult<PyDataFrame> {
-        let join_type = match how.to_lowercase().as_str() {
-            "inner" => JoinType::Inner,
-            "left" => JoinType::Left,
-            "right" => JoinType::Right,
-            "outer" => JoinType::Outer,
-            _ => {
-                return Err(pyo3::exceptions::PyValueError::new_err(
-                    "how must be 'inner', 'left', 'right', or 'outer'",
-                ));
-            }
-        };
-        let on_refs: Vec<&str> = on.iter().map(|s| s.as_str()).collect();
-        let df = self
-            .inner
-            .join(&other.inner, on_refs, join_type)
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
-    }
-
-    fn union(&self, other: &PyDataFrame) -> PyResult<PyDataFrame> {
-        let df = self
-            .inner
-            .union(&other.inner)
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
-    }
-
-    fn union_by_name(&self, other: &PyDataFrame) -> PyResult<PyDataFrame> {
-        let df = self
-            .inner
-            .union_by_name(&other.inner)
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
-    }
-
-    #[pyo3(signature = (subset=None))]
-    fn distinct(&self, subset: Option<Vec<String>>) -> PyResult<PyDataFrame> {
-        let sub: Option<Vec<&str>> = subset
-            .as_ref()
-            .map(|v| v.iter().map(|s| s.as_str()).collect());
-        let df = self
-            .inner
-            .distinct(sub)
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
-    }
-
-    fn drop(&self, cols: Vec<String>) -> PyResult<PyDataFrame> {
-        let refs: Vec<&str> = cols.iter().map(|s| s.as_str()).collect();
-        let df = self
-            .inner
-            .drop(refs)
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
-    }
-
-    #[pyo3(signature = (subset=None))]
-    fn dropna(&self, subset: Option<Vec<String>>) -> PyResult<PyDataFrame> {
-        let sub: Option<Vec<&str>> = subset
-            .as_ref()
-            .map(|v| v.iter().map(|s| s.as_str()).collect());
-        let df = self
-            .inner
-            .dropna(sub)
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
-    }
-
-    fn fillna(&self, value: &PyColumn) -> PyResult<PyDataFrame> {
-        let df = self
-            .inner
-            .fillna(value.inner.expr().clone())
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
-    }
-
-    fn limit(&self, n: usize) -> PyResult<PyDataFrame> {
-        let df = self
-            .inner
-            .limit(n)
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
-    }
-
-    fn with_column_renamed(&self, old: &str, new: &str) -> PyResult<PyDataFrame> {
-        let df = self
-            .inner
-            .with_column_renamed(old, new)
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
-    }
-
-    // Phase 12: sample, first, head, tail, take, is_empty, to_json, explain, print_schema, checkpoint, repartition, coalesce, offset
-    #[pyo3(signature = (with_replacement=false, fraction=1.0, seed=None))]
-    fn sample(
-        &self,
-        with_replacement: bool,
-        fraction: f64,
-        seed: Option<u64>,
-    ) -> PyResult<PyDataFrame> {
-        let df = self
-            .inner
-            .sample(with_replacement, fraction, seed)
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
-    }
-
-    fn first(&self) -> PyResult<PyDataFrame> {
-        let df = self
-            .inner
-            .first()
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
-    }
-
-    fn head(&self, n: usize) -> PyResult<PyDataFrame> {
-        let df = self
-            .inner
-            .head(n)
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
-    }
-
-    fn tail(&self, n: usize) -> PyResult<PyDataFrame> {
-        let df = self
-            .inner
-            .tail(n)
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
-    }
-
-    fn take(&self, n: usize) -> PyResult<PyDataFrame> {
-        self.head(n)
-    }
-
-    fn is_empty(&self) -> PyResult<bool> {
-        Ok(self.inner.is_empty())
-    }
-
-    fn to_json(&self) -> PyResult<Vec<String>> {
-        self.inner
-            .to_json()
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
-    }
-
-    fn explain(&self) -> PyResult<String> {
-        Ok(self.inner.explain())
-    }
-
-    fn print_schema(&self) -> PyResult<String> {
-        self.inner
-            .print_schema()
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
-    }
-
-    fn checkpoint(&self) -> PyResult<PyDataFrame> {
-        let df = self
-            .inner
-            .checkpoint()
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
-    }
-
-    fn local_checkpoint(&self) -> PyResult<PyDataFrame> {
-        let df = self
-            .inner
-            .local_checkpoint()
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
-    }
-
-    fn repartition(&self, num_partitions: usize) -> PyResult<PyDataFrame> {
-        let df = self
-            .inner
-            .repartition(num_partitions)
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
-    }
-
-    fn coalesce(&self, num_partitions: usize) -> PyResult<PyDataFrame> {
-        let df = self
-            .inner
-            .coalesce(num_partitions)
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
-    }
-
-    fn offset(&self, n: usize) -> PyResult<PyDataFrame> {
-        let df = self
-            .inner
-            .offset(n)
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
-    }
-
-    /// Best-effort local collection: returns list of rows (same as collect()). PySpark .data.
-    fn data(&self, py: Python<'_>) -> PyResult<PyObject> {
-        self.collect(py)
-    }
-
-    fn persist(&self) -> PyResult<PyDataFrame> {
-        let df = self
-            .inner
-            .persist()
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
-    }
-
-    fn unpersist(&self) -> PyResult<PyDataFrame> {
-        let df = self
-            .inner
-            .unpersist()
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
-    }
-
-    /// Stub: RDD API is not supported. Raises NotImplementedError.
-    fn rdd(&self) -> PyResult<PyObject> {
-        Err(pyo3::exceptions::PyNotImplementedError::new_err(
-            "RDD is not supported in Sparkless; use collect() or toLocalIterator() for local data",
-        ))
-    }
-
-    /// Stub: foreach is not supported (no distributed execution). Raises NotImplementedError.
-    fn foreach(&self, _f: &Bound<'_, pyo3::types::PyAny>) -> PyResult<()> {
-        Err(pyo3::exceptions::PyNotImplementedError::new_err(
-            "foreach is not supported in Sparkless",
-        ))
-    }
-
-    /// Stub: foreachPartition is not supported. Raises NotImplementedError.
-    #[pyo3(name = "foreachPartition")]
-    fn foreach_partition(&self, _f: &Bound<'_, pyo3::types::PyAny>) -> PyResult<()> {
-        Err(pyo3::exceptions::PyNotImplementedError::new_err(
-            "foreachPartition is not supported in Sparkless",
-        ))
-    }
-
-    /// Stub: mapInPandas is not supported. Raises NotImplementedError.
-    #[pyo3(name = "mapInPandas")]
-    fn map_in_pandas(
-        &self,
-        _func: &Bound<'_, pyo3::types::PyAny>,
-        _schema: &Bound<'_, pyo3::types::PyAny>,
-    ) -> PyResult<PyDataFrame> {
-        Err(pyo3::exceptions::PyNotImplementedError::new_err(
-            "mapInPandas is not supported in Sparkless",
-        ))
-    }
-
-    /// Stub: mapPartitions is not supported. Raises NotImplementedError.
-    #[pyo3(name = "mapPartitions")]
-    fn map_partitions(
-        &self,
-        _f: &Bound<'_, pyo3::types::PyAny>,
-        _schema: &Bound<'_, pyo3::types::PyAny>,
-    ) -> PyResult<PyDataFrame> {
-        Err(pyo3::exceptions::PyNotImplementedError::new_err(
-            "mapPartitions is not supported in Sparkless",
-        ))
-    }
-
-    /// Returns an iterable of rows (same as collect()). Best-effort local iterator.
-    #[pyo3(name = "toLocalIterator")]
-    fn to_local_iterator(&self, py: Python<'_>) -> PyResult<PyObject> {
-        self.collect(py)
-    }
-
-    /// Stub: storage level not applicable (eager execution). Returns None.
-    #[pyo3(name = "storageLevel")]
-    fn storage_level(&self, py: Python<'_>) -> PyResult<PyObject> {
-        Ok(py.None())
-    }
-
-    /// Always False; streaming is not supported.
-    #[pyo3(name = "isStreaming")]
-    fn is_streaming(&self) -> PyResult<bool> {
-        Ok(false)
-    }
-
-    /// No-op; streaming/watermark not supported. Returns self for chaining.
-    #[pyo3(name = "withWatermark")]
-    fn with_watermark(&self, _event_time: &str, _delay_threshold: &str) -> PyResult<PyDataFrame> {
-        Ok(PyDataFrame {
-            inner: self.inner.clone(),
-        })
-    }
-
-    fn random_split(&self, weights: Vec<f64>, seed: Option<u64>) -> PyResult<Vec<PyDataFrame>> {
-        let dfs = self
-            .inner
-            .random_split(&weights, seed)
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(dfs
-            .into_iter()
-            .map(|df| PyDataFrame { inner: df })
-            .collect())
-    }
-
-    fn summary(&self) -> PyResult<PyDataFrame> {
-        let df = self
-            .inner
-            .summary()
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
-    }
-
-    fn to_df(&self, names: Vec<String>) -> PyResult<PyDataFrame> {
-        let refs: Vec<&str> = names.iter().map(|s| s.as_str()).collect();
-        let df = self
-            .inner
-            .to_df(refs)
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
-    }
-
-    fn select_expr(&self, exprs: Vec<String>) -> PyResult<PyDataFrame> {
-        let df = self
-            .inner
-            .select_expr(&exprs)
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
-    }
-
-    fn col_regex(&self, pattern: &str) -> PyResult<PyDataFrame> {
-        let df = self
-            .inner
-            .col_regex(pattern)
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
-    }
-
-    fn with_columns(&self, mapping: &Bound<'_, pyo3::types::PyAny>) -> PyResult<PyDataFrame> {
-        let mut exprs: Vec<(String, crate::column::Column)> = Vec::new();
-        if let Ok(dict) = mapping.downcast::<PyDict>() {
-            for (k, v) in dict.iter() {
-                let name: String = k.extract()?;
-                let col: PyRef<PyColumn> = v.extract()?;
-                exprs.push((name, col.inner.clone()));
-            }
-        } else if let Ok(list) = mapping.downcast::<pyo3::types::PyList>() {
-            for item in list.iter() {
-                let tuple: (String, PyRef<PyColumn>) = item.extract()?;
-                exprs.push((tuple.0, tuple.1.inner.clone()));
-            }
-        } else {
-            return Err(pyo3::exceptions::PyTypeError::new_err(
-                "with_columns expects dict[str, Column] or list[tuple[str, Column]]",
-            ));
-        }
-        let df = self
-            .inner
-            .with_columns(&exprs)
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
-    }
-
-    fn with_columns_renamed(
-        &self,
-        mapping: &Bound<'_, pyo3::types::PyAny>,
-    ) -> PyResult<PyDataFrame> {
-        let mut renames: Vec<(String, String)> = Vec::new();
-        if let Ok(dict) = mapping.downcast::<PyDict>() {
-            for (k, v) in dict.iter() {
-                let old_name: String = k.extract()?;
-                let new_name: String = v.extract()?;
-                renames.push((old_name, new_name));
-            }
-        } else if let Ok(list) = mapping.downcast::<pyo3::types::PyList>() {
-            for item in list.iter() {
-                let tuple: (String, String) = item.extract()?;
-                renames.push(tuple);
-            }
-        } else {
-            return Err(pyo3::exceptions::PyTypeError::new_err(
-                "with_columns_renamed expects dict[str, str] or list[tuple[str, str]]",
-            ));
-        }
-        let df = self
-            .inner
-            .with_columns_renamed(&renames)
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
-    }
-
-    fn stat(&self) -> PyDataFrameStat {
-        PyDataFrameStat {
-            df: self.inner.clone(),
-        }
-    }
-
-    /// Correlation matrix of all numeric columns. Returns a DataFrame of pairwise correlations.
-    fn corr(&self) -> PyResult<PyDataFrame> {
-        let df = self
-            .inner
-            .corr()
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
-    }
-
-    fn na(&self) -> PyDataFrameNa {
-        PyDataFrameNa {
-            df: self.inner.clone(),
-        }
-    }
-
-    fn to_pandas(&self, py: Python<'_>) -> PyResult<PyObject> {
-        self.collect(py)
-    }
-}
-
-/// Python wrapper for DataFrame.stat() (cov, corr).
-#[pyclass(name = "DataFrameStat")]
-struct PyDataFrameStat {
-    df: DataFrame,
-}
-
-#[pymethods]
-impl PyDataFrameStat {
-    fn cov(&self, col1: &str, col2: &str) -> PyResult<f64> {
-        self.df
-            .stat()
-            .cov(col1, col2)
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
-    }
-
-    fn corr(&self, col1: &str, col2: &str) -> PyResult<f64> {
-        self.df
-            .stat()
-            .corr(col1, col2)
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
-    }
-
-    /// Correlation matrix of all numeric columns. Returns a DataFrame.
-    fn corr_matrix(&self) -> PyResult<PyDataFrame> {
-        let df = self
-            .df
-            .stat()
-            .corr_matrix()
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
-    }
-}
-
-/// Python wrapper for DataFrame.na() (fill, drop).
-#[pyclass(name = "DataFrameNa")]
-struct PyDataFrameNa {
-    df: DataFrame,
-}
-
-#[pymethods]
-impl PyDataFrameNa {
-    fn fill(&self, value: &PyColumn) -> PyResult<PyDataFrame> {
-        let df = self
-            .df
-            .na()
-            .fill(value.inner.expr().clone())
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
-    }
-
-    #[pyo3(signature = (subset=None))]
-    fn drop(&self, subset: Option<Vec<String>>) -> PyResult<PyDataFrame> {
-        let sub: Option<Vec<&str>> = subset
-            .as_ref()
-            .map(|v| v.iter().map(|s| s.as_str()).collect());
-        let df = self
-            .df
-            .na()
-            .drop(sub)
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
-    }
-}
-
-/// Python wrapper for GroupedData.
-#[pyclass(name = "GroupedData")]
-struct PyGroupedData {
-    inner: GroupedData,
-}
-
-#[pymethods]
-impl PyGroupedData {
-    fn count(&self) -> PyResult<PyDataFrame> {
-        let df = self
-            .inner
-            .count()
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
-    }
-
-    fn sum(&self, column: &str) -> PyResult<PyDataFrame> {
-        let df = self
-            .inner
-            .sum(column)
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
-    }
-
-    fn avg(&self, column: &str) -> PyResult<PyDataFrame> {
-        let df = self
-            .inner
-            .avg(column)
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
-    }
-
-    #[pyo3(name = "min")]
-    fn min_(&self, column: &str) -> PyResult<PyDataFrame> {
-        let df = self
-            .inner
-            .min(column)
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
-    }
-
-    fn max(&self, column: &str) -> PyResult<PyDataFrame> {
-        let df = self
-            .inner
-            .max(column)
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
-    }
-
-    fn agg(&self, exprs: Vec<PyRef<PyColumn>>) -> PyResult<PyDataFrame> {
-        let aggregations: Vec<Expr> = exprs.iter().map(|c| c.inner.expr().clone()).collect();
-        let df = self
-            .inner
-            .agg(aggregations)
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
-    }
-
-    fn any_value(&self, column: &str) -> PyResult<PyDataFrame> {
-        let df = self
-            .inner
-            .any_value(column)
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
-    }
-
-    fn bool_and(&self, column: &str) -> PyResult<PyDataFrame> {
-        let df = self
-            .inner
-            .bool_and(column)
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
-    }
-
-    fn bool_or(&self, column: &str) -> PyResult<PyDataFrame> {
-        let df = self
-            .inner
-            .bool_or(column)
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
-    }
-
-    fn product(&self, column: &str) -> PyResult<PyDataFrame> {
-        let df = self
-            .inner
-            .product(column)
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
-    }
-
-    fn collect_list(&self, column: &str) -> PyResult<PyDataFrame> {
-        let df = self
-            .inner
-            .collect_list(column)
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
-    }
-
-    fn collect_set(&self, column: &str) -> PyResult<PyDataFrame> {
-        let df = self
-            .inner
-            .collect_set(column)
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
-    }
-
-    fn count_if(&self, column: &str) -> PyResult<PyDataFrame> {
-        let df = self
-            .inner
-            .count_if(column)
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
-    }
-
-    fn percentile(&self, column: &str, p: f64) -> PyResult<PyDataFrame> {
-        let df = self
-            .inner
-            .percentile(column, p)
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
-    }
-
-    fn max_by(&self, value_column: &str, ord_column: &str) -> PyResult<PyDataFrame> {
-        let df = self
-            .inner
-            .max_by(value_column, ord_column)
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
-    }
-
-    fn min_by(&self, value_column: &str, ord_column: &str) -> PyResult<PyDataFrame> {
-        let df = self
-            .inner
-            .min_by(value_column, ord_column)
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
-    }
-
-    fn covar_pop(&self, col1: &str, col2: &str) -> PyResult<PyDataFrame> {
-        let df = self
-            .inner
-            .covar_pop(col1, col2)
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
-    }
-
-    fn covar_samp(&self, col1: &str, col2: &str) -> PyResult<PyDataFrame> {
-        let df = self
-            .inner
-            .covar_samp(col1, col2)
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
-    }
-
-    fn corr(&self, col1: &str, col2: &str) -> PyResult<PyDataFrame> {
-        let df = self
-            .inner
-            .corr(col1, col2)
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
-    }
-
-    fn regr_count(&self, y_col: &str, x_col: &str) -> PyResult<PyDataFrame> {
-        let df = self
-            .inner
-            .regr_count(y_col, x_col)
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
-    }
-
-    fn regr_avgx(&self, y_col: &str, x_col: &str) -> PyResult<PyDataFrame> {
-        let df = self
-            .inner
-            .regr_avgx(y_col, x_col)
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
-    }
-
-    fn regr_avgy(&self, y_col: &str, x_col: &str) -> PyResult<PyDataFrame> {
-        let df = self
-            .inner
-            .regr_avgy(y_col, x_col)
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
-    }
-
-    fn regr_slope(&self, y_col: &str, x_col: &str) -> PyResult<PyDataFrame> {
-        let df = self
-            .inner
-            .regr_slope(y_col, x_col)
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
-    }
-
-    fn regr_intercept(&self, y_col: &str, x_col: &str) -> PyResult<PyDataFrame> {
-        let df = self
-            .inner
-            .regr_intercept(y_col, x_col)
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
-    }
-
-    fn regr_r2(&self, y_col: &str, x_col: &str) -> PyResult<PyDataFrame> {
-        let df = self
-            .inner
-            .regr_r2(y_col, x_col)
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
-    }
-
-    fn regr_sxx(&self, y_col: &str, x_col: &str) -> PyResult<PyDataFrame> {
-        let df = self
-            .inner
-            .regr_sxx(y_col, x_col)
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
-    }
-
-    fn regr_syy(&self, y_col: &str, x_col: &str) -> PyResult<PyDataFrame> {
-        let df = self
-            .inner
-            .regr_syy(y_col, x_col)
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
-    }
-
-    fn regr_sxy(&self, y_col: &str, x_col: &str) -> PyResult<PyDataFrame> {
-        let df = self
-            .inner
-            .regr_sxy(y_col, x_col)
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
-    }
-
-    fn kurtosis(&self, column: &str) -> PyResult<PyDataFrame> {
-        let df = self
-            .inner
-            .kurtosis(column)
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
-    }
-
-    fn skewness(&self, column: &str) -> PyResult<PyDataFrame> {
-        let df = self
-            .inner
-            .skewness(column)
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
-    }
-}
-
-/// Python wrapper for CubeRollupData (cube/rollup then agg).
-#[pyclass(name = "CubeRollupData")]
-struct PyCubeRollupData {
-    inner: CubeRollupData,
-}
-
-#[pymethods]
-impl PyCubeRollupData {
-    fn agg(&self, exprs: Vec<PyRef<PyColumn>>) -> PyResult<PyDataFrame> {
-        let aggregations: Vec<Expr> = exprs.iter().map(|c| c.inner.expr().clone()).collect();
-        let df = self
-            .inner
-            .agg(aggregations)
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
-    }
-}
-
-/// Python wrapper for DataFrameWriter (write().mode().format().save()).
-#[pyclass(name = "DataFrameWriter")]
-struct PyDataFrameWriter {
-    df: crate::DataFrame,
-    mode: RwLock<WriteMode>,
-    format: RwLock<WriteFormat>,
-}
-
-#[pymethods]
-impl PyDataFrameWriter {
-    fn mode<'py>(slf: PyRef<'py, Self>, mode: &str) -> PyRef<'py, Self> {
-        *slf.mode.write().expect("writer mode lock") = match mode.to_lowercase().as_str() {
-            "append" => WriteMode::Append,
-            _ => WriteMode::Overwrite,
-        };
-        slf
-    }
-
-    fn format<'py>(slf: PyRef<'py, Self>, format: &str) -> PyRef<'py, Self> {
-        *slf.format.write().expect("writer format lock") = match format.to_lowercase().as_str() {
-            "csv" => WriteFormat::Csv,
-            "json" => WriteFormat::Json,
-            _ => WriteFormat::Parquet,
-        };
-        slf
-    }
-
-    fn save(&self, path: &str) -> PyResult<()> {
-        let mode = *self.mode.read().expect("writer mode lock");
-        let format = *self.format.read().expect("writer format lock");
-        self.df
-            .write()
-            .mode(mode)
-            .format(format)
-            .save(Path::new(path))
-            .map_err(|e: polars::prelude::PolarsError| {
-                pyo3::exceptions::PyRuntimeError::new_err(e.to_string())
-            })
-    }
-}
-
-/// Convert Polars AnyValue to a Python object.
-fn any_value_to_py(py: Python<'_>, av: polars::prelude::AnyValue<'_>) -> PyResult<PyObject> {
-    use polars::prelude::AnyValue;
-    use pyo3::conversion::IntoPyObjectExt;
-    match av {
-        AnyValue::Null => py.None().into_bound_py_any(py).map(Into::into),
-        AnyValue::Boolean(b) => b.into_bound_py_any(py).map(Into::into),
-        AnyValue::Int32(i) => i.into_bound_py_any(py).map(Into::into),
-        AnyValue::Int64(i) => i.into_bound_py_any(py).map(Into::into),
-        AnyValue::UInt32(u) => u.into_bound_py_any(py).map(Into::into),
-        AnyValue::UInt64(u) => u.into_bound_py_any(py).map(Into::into),
-        AnyValue::Float32(f) => f.into_bound_py_any(py).map(Into::into),
-        AnyValue::Float64(f) => f.into_bound_py_any(py).map(Into::into),
-        AnyValue::String(s) => s.to_string().into_bound_py_any(py).map(Into::into),
-        AnyValue::StringOwned(s) => s.to_string().into_bound_py_any(py).map(Into::into),
-        other => Err(pyo3::exceptions::PyRuntimeError::new_err(format!(
-            "unsupported type for collect: {:?}",
-            other
-        ))),
     }
 }

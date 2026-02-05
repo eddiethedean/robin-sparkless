@@ -1,0 +1,853 @@
+//! Python Column type (PySpark sql Column).
+
+use crate::column::Column as RsColumn;
+use crate::functions::isnan as rs_isnan;
+use crate::functions::{
+    acos, acosh, add_months, array_append, array_compact, array_distinct, array_except,
+    array_insert, array_intersect, array_prepend, array_union, ascii, asin, asinh, atan, atan2,
+    atanh, base64, bit_length, cast as rs_cast, cbrt, ceiling, chr, contains, cos, cosh,
+    date_from_unix_date, day, dayofmonth, dayofweek, dayofyear, degrees, endswith, expm1,
+    factorial, find_in_set, format_number, from_unixtime, get, hypot, ifnull, ilike, isnotnull,
+    isnull, lcase, left, like, ln, log10, log1p, log2, map_concat, map_contains_key,
+    map_filter_value_gt, map_from_entries, map_zip_with_coalesce, md5, next_day, nvl, overlay,
+    pmod, power, quarter, radians, regexp_count, regexp_instr, regexp_substr,
+    replace as rs_replace, right, rint, rlike, sha1, sha2, signum, sin, sinh, split_part,
+    startswith, tan, tanh, timestamp_micros, timestamp_millis, timestamp_seconds, to_degrees,
+    to_radians, try_add, try_cast as rs_try_cast, try_divide, try_multiply, try_subtract, typeof_,
+    ucase, unbase64, unix_date, unix_timestamp, weekofyear, zip_with_coalesce,
+};
+use pyo3::prelude::*;
+
+/// Python wrapper for Column (expression).
+/// Expression representing a column or computed value for use in DataFrame operations.
+///
+/// Create with ``col("name")`` or ``lit(value)``. Chain methods for expressions (e.g. ``col("a").alias("x")``).
+#[pyclass(name = "Column")]
+pub struct PyColumn {
+    pub inner: RsColumn,
+}
+
+#[pymethods]
+impl PyColumn {
+    /// Return a Column with the same values but a different name (e.g. for select/agg output).
+    ///
+    /// Args:
+    ///     name: New display/schema name for this expression.
+    ///
+    /// Returns:
+    ///     Column: Same expression with the given alias.
+    fn alias(&self, name: &str) -> Self {
+        PyColumn {
+            inner: self.inner.alias(name),
+        }
+    }
+
+    /// True where this column is null.
+    fn is_null(&self) -> Self {
+        PyColumn {
+            inner: self.inner.is_null(),
+        }
+    }
+
+    /// True where this column is not null.
+    fn is_not_null(&self) -> Self {
+        PyColumn {
+            inner: self.inner.is_not_null(),
+        }
+    }
+
+    /// Greater than (self > other).
+    fn gt(&self, other: &PyColumn) -> Self {
+        PyColumn {
+            inner: self.inner.gt(other.inner.expr().clone()),
+        }
+    }
+
+    /// Greater than or equal (self >= other).
+    fn ge(&self, other: &PyColumn) -> Self {
+        PyColumn {
+            inner: self.inner.gt_eq(other.inner.expr().clone()),
+        }
+    }
+
+    /// Less than (self < other).
+    fn lt(&self, other: &PyColumn) -> Self {
+        PyColumn {
+            inner: self.inner.lt(other.inner.expr().clone()),
+        }
+    }
+
+    /// Less than or equal (self <= other).
+    fn le(&self, other: &PyColumn) -> Self {
+        PyColumn {
+            inner: self.inner.lt_eq(other.inner.expr().clone()),
+        }
+    }
+
+    /// Equal (self == other).
+    fn eq(&self, other: &PyColumn) -> Self {
+        PyColumn {
+            inner: self.inner.eq(other.inner.expr().clone()),
+        }
+    }
+
+    /// Not equal (self != other).
+    fn ne(&self, other: &PyColumn) -> Self {
+        PyColumn {
+            inner: self.inner.neq(other.inner.expr().clone()),
+        }
+    }
+
+    /// Logical AND with another boolean column.
+    fn and_(&self, other: &PyColumn) -> Self {
+        PyColumn {
+            inner: RsColumn::from_expr(
+                self.inner.expr().clone().and(other.inner.expr().clone()),
+                None,
+            ),
+        }
+    }
+
+    /// Logical OR with another boolean column.
+    fn or_(&self, other: &PyColumn) -> Self {
+        PyColumn {
+            inner: RsColumn::from_expr(
+                self.inner.expr().clone().or(other.inner.expr().clone()),
+                None,
+            ),
+        }
+    }
+
+    /// Uppercase string values.
+    fn upper(&self) -> Self {
+        PyColumn {
+            inner: self.inner.upper(),
+        }
+    }
+
+    /// Lowercase string values.
+    fn lower(&self) -> Self {
+        PyColumn {
+            inner: self.inner.lower(),
+        }
+    }
+
+    /// Substring from start (1-based); optional length.
+    #[pyo3(signature = (start, length=None))]
+    fn substr(&self, start: i64, length: Option<i64>) -> Self {
+        PyColumn {
+            inner: self.inner.substr(start, length),
+        }
+    }
+
+    /// ASCII code of first character (Spark ascii).
+    fn ascii_(&self) -> Self {
+        PyColumn {
+            inner: ascii(&self.inner),
+        }
+    }
+
+    /// Format numeric column with fixed decimal places.
+    fn format_number(&self, decimals: u32) -> Self {
+        PyColumn {
+            inner: format_number(&self.inner, decimals),
+        }
+    }
+
+    /// Overlay: replace length chars at pos with replace string.
+    fn overlay(&self, replace: &str, pos: i64, length: i64) -> Self {
+        PyColumn {
+            inner: overlay(&self.inner, replace, pos, length),
+        }
+    }
+
+    /// Spark char: single character from numeric code.
+    fn char_(&self) -> Self {
+        PyColumn {
+            inner: crate::functions::char(&self.inner),
+        }
+    }
+
+    /// Chr: character from numeric code (alias for char).
+    fn chr_(&self) -> Self {
+        PyColumn {
+            inner: chr(&self.inner),
+        }
+    }
+
+    /// Base64 encode string values.
+    fn base64_(&self) -> Self {
+        PyColumn {
+            inner: base64(&self.inner),
+        }
+    }
+
+    /// Base64 decode string values.
+    fn unbase64_(&self) -> Self {
+        PyColumn {
+            inner: unbase64(&self.inner),
+        }
+    }
+
+    /// SHA-1 hash of string values.
+    fn sha1_(&self) -> Self {
+        PyColumn {
+            inner: sha1(&self.inner),
+        }
+    }
+
+    /// SHA-2 hash; bit_length 224, 256, 384, or 512.
+    fn sha2_(&self, bit_length: i32) -> Self {
+        PyColumn {
+            inner: sha2(&self.inner, bit_length),
+        }
+    }
+
+    /// MD5 hash of string values.
+    fn md5_(&self) -> Self {
+        PyColumn {
+            inner: md5(&self.inner),
+        }
+    }
+
+    /// Remove nulls from array column.
+    fn array_compact(&self) -> Self {
+        PyColumn {
+            inner: array_compact(&self.inner),
+        }
+    }
+    /// Distinct elements in array.
+    fn array_distinct(&self) -> Self {
+        PyColumn {
+            inner: array_distinct(&self.inner),
+        }
+    }
+
+    /// Append element to array.
+    fn array_append(&self, elem: &PyColumn) -> Self {
+        PyColumn {
+            inner: array_append(&self.inner, &elem.inner),
+        }
+    }
+
+    /// Prepend element to array.
+    fn array_prepend(&self, elem: &PyColumn) -> Self {
+        PyColumn {
+            inner: array_prepend(&self.inner, &elem.inner),
+        }
+    }
+
+    /// Insert element into array at position.
+    fn array_insert(&self, pos: &PyColumn, elem: &PyColumn) -> Self {
+        PyColumn {
+            inner: array_insert(&self.inner, &pos.inner, &elem.inner),
+        }
+    }
+
+    /// Array elements in self but not in other.
+    fn array_except(&self, other: &PyColumn) -> Self {
+        PyColumn {
+            inner: array_except(&self.inner, &other.inner),
+        }
+    }
+
+    /// Intersection of two array columns.
+    fn array_intersect(&self, other: &PyColumn) -> Self {
+        PyColumn {
+            inner: array_intersect(&self.inner, &other.inner),
+        }
+    }
+
+    /// Union of two array columns (distinct).
+    fn array_union(&self, other: &PyColumn) -> Self {
+        PyColumn {
+            inner: array_union(&self.inner, &other.inner),
+        }
+    }
+
+    /// Concatenate two map columns.
+    fn map_concat(&self, other: &PyColumn) -> Self {
+        PyColumn {
+            inner: map_concat(&self.inner, &other.inner),
+        }
+    }
+
+    /// Filter map entries by value > threshold.
+    fn map_filter_value_gt(&self, threshold: f64) -> Self {
+        PyColumn {
+            inner: map_filter_value_gt(&self.inner, threshold),
+        }
+    }
+
+    /// Zip two arrays with coalesce for length mismatch.
+    fn zip_with_coalesce(&self, other: &PyColumn) -> Self {
+        PyColumn {
+            inner: zip_with_coalesce(&self.inner, &other.inner),
+        }
+    }
+
+    /// Zip two maps with coalesce.
+    fn map_zip_with_coalesce(&self, other: &PyColumn) -> Self {
+        PyColumn {
+            inner: map_zip_with_coalesce(&self.inner, &other.inner),
+        }
+    }
+
+    /// Build map from array of (key, value) entries.
+    fn map_from_entries(&self) -> Self {
+        PyColumn {
+            inner: map_from_entries(&self.inner),
+        }
+    }
+
+    /// True if map contains key.
+    fn map_contains_key(&self, key: &PyColumn) -> Self {
+        PyColumn {
+            inner: map_contains_key(&self.inner, &key.inner),
+        }
+    }
+
+    /// Get value from map/struct by key.
+    fn get(&self, key: &PyColumn) -> Self {
+        PyColumn {
+            inner: get(&self.inner, &key.inner),
+        }
+    }
+
+    /// Division that returns null on divide-by-zero.
+    fn try_divide(&self, right: &PyColumn) -> Self {
+        PyColumn {
+            inner: try_divide(&self.inner, &right.inner),
+        }
+    }
+
+    /// Addition that returns null on overflow.
+    fn try_add(&self, right: &PyColumn) -> Self {
+        PyColumn {
+            inner: try_add(&self.inner, &right.inner),
+        }
+    }
+
+    /// Subtraction that returns null on overflow.
+    fn try_subtract(&self, right: &PyColumn) -> Self {
+        PyColumn {
+            inner: try_subtract(&self.inner, &right.inner),
+        }
+    }
+
+    /// Multiplication that returns null on overflow.
+    fn try_multiply(&self, right: &PyColumn) -> Self {
+        PyColumn {
+            inner: try_multiply(&self.inner, &right.inner),
+        }
+    }
+
+    /// Bit length of string (bytes * 8).
+    fn bit_length(&self) -> Self {
+        PyColumn {
+            inner: bit_length(&self.inner),
+        }
+    }
+
+    /// Type name of each value as string.
+    fn typeof_(&self) -> Self {
+        PyColumn {
+            inner: typeof_(&self.inner),
+        }
+    }
+
+    /// Sine (radians).
+    fn sin(&self) -> Self {
+        PyColumn {
+            inner: sin(&self.inner),
+        }
+    }
+    /// Cosine (radians).
+    fn cos(&self) -> Self {
+        PyColumn {
+            inner: cos(&self.inner),
+        }
+    }
+    /// Tangent (radians).
+    fn tan(&self) -> Self {
+        PyColumn {
+            inner: tan(&self.inner),
+        }
+    }
+    /// Arc sine.
+    fn asin_(&self) -> Self {
+        PyColumn {
+            inner: asin(&self.inner),
+        }
+    }
+    /// Arc cosine.
+    fn acos_(&self) -> Self {
+        PyColumn {
+            inner: acos(&self.inner),
+        }
+    }
+    /// Arc tangent.
+    fn atan_(&self) -> Self {
+        PyColumn {
+            inner: atan(&self.inner),
+        }
+    }
+    /// Two-argument arc tangent (y, x).
+    fn atan2(&self, x: &PyColumn) -> Self {
+        PyColumn {
+            inner: atan2(&self.inner, &x.inner),
+        }
+    }
+    /// Convert radians to degrees.
+    fn degrees_(&self) -> Self {
+        PyColumn {
+            inner: degrees(&self.inner),
+        }
+    }
+    /// Convert degrees to radians.
+    fn radians_(&self) -> Self {
+        PyColumn {
+            inner: radians(&self.inner),
+        }
+    }
+    /// Sign of number (-1, 0, or 1).
+    fn signum(&self) -> Self {
+        PyColumn {
+            inner: signum(&self.inner),
+        }
+    }
+    /// Quarter of date (1-4).
+    fn quarter(&self) -> Self {
+        PyColumn {
+            inner: quarter(&self.inner),
+        }
+    }
+    /// Week of year (1-53).
+    fn weekofyear(&self) -> Self {
+        PyColumn {
+            inner: weekofyear(&self.inner),
+        }
+    }
+    /// Day of week (e.g. 1=Sunday).
+    fn dayofweek(&self) -> Self {
+        PyColumn {
+            inner: dayofweek(&self.inner),
+        }
+    }
+    /// Day of year (1-366).
+    fn dayofyear(&self) -> Self {
+        PyColumn {
+            inner: dayofyear(&self.inner),
+        }
+    }
+    /// Add n months to date/timestamp.
+    fn add_months(&self, n: i32) -> Self {
+        PyColumn {
+            inner: add_months(&self.inner, n),
+        }
+    }
+    /// Months between two dates.
+    fn months_between(&self, start: &PyColumn) -> Self {
+        PyColumn {
+            inner: self.inner.months_between(&start.inner, true),
+        }
+    }
+    /// Next date that is the given day of week.
+    fn next_day(&self, day_of_week: &str) -> Self {
+        PyColumn {
+            inner: next_day(&self.inner, day_of_week),
+        }
+    }
+    /// Cast the column to the given type. Invalid values cause an error at execution.
+    ///
+    /// Args:
+    ///     type_name: Target type string (e.g. "int", "long", "double", "string", "boolean", "date", "timestamp").
+    ///
+    /// Returns:
+    ///     Column: Expression that evaluates to the cast type.
+    ///
+    /// Raises:
+    ///     ValueError: If the type name is not supported or cast is invalid.
+    fn cast(&self, type_name: &str) -> PyResult<Self> {
+        rs_cast(&self.inner, type_name)
+            .map(|inner| PyColumn { inner })
+            .map_err(|e| pyo3::exceptions::PyValueError::new_err(e))
+    }
+    /// Cast the column to the given type; invalid values become null instead of raising.
+    ///
+    /// Args:
+    ///     type_name: Target type string (same as ``cast()``).
+    ///
+    /// Returns:
+    ///     Column: Expression that evaluates to the cast type or null where conversion fails.
+    ///
+    /// Raises:
+    ///     ValueError: If the type name is not supported.
+    fn try_cast(&self, type_name: &str) -> PyResult<Self> {
+        rs_try_cast(&self.inner, type_name)
+            .map(|inner| PyColumn { inner })
+            .map_err(|e| pyo3::exceptions::PyValueError::new_err(e))
+    }
+    fn isnan(&self) -> Self {
+        PyColumn {
+            inner: rs_isnan(&self.inner),
+        }
+    }
+    fn nvl(&self, value: &PyColumn) -> Self {
+        PyColumn {
+            inner: nvl(&self.inner, &value.inner),
+        }
+    }
+    fn ifnull(&self, value: &PyColumn) -> Self {
+        PyColumn {
+            inner: ifnull(&self.inner, &value.inner),
+        }
+    }
+    fn power(&self, exp: i64) -> Self {
+        PyColumn {
+            inner: power(&self.inner, exp),
+        }
+    }
+    fn ln(&self) -> Self {
+        PyColumn {
+            inner: ln(&self.inner),
+        }
+    }
+    fn ceiling(&self) -> Self {
+        PyColumn {
+            inner: ceiling(&self.inner),
+        }
+    }
+    fn lcase(&self) -> Self {
+        PyColumn {
+            inner: lcase(&self.inner),
+        }
+    }
+    fn ucase(&self) -> Self {
+        PyColumn {
+            inner: ucase(&self.inner),
+        }
+    }
+    fn day(&self) -> Self {
+        PyColumn {
+            inner: day(&self.inner),
+        }
+    }
+    fn dayofmonth(&self) -> Self {
+        PyColumn {
+            inner: dayofmonth(&self.inner),
+        }
+    }
+    fn to_degrees(&self) -> Self {
+        PyColumn {
+            inner: to_degrees(&self.inner),
+        }
+    }
+    fn to_radians(&self) -> Self {
+        PyColumn {
+            inner: to_radians(&self.inner),
+        }
+    }
+    fn isnull(&self) -> Self {
+        PyColumn {
+            inner: isnull(&self.inner),
+        }
+    }
+    fn isnotnull(&self) -> Self {
+        PyColumn {
+            inner: isnotnull(&self.inner),
+        }
+    }
+    fn left(&self, n: i64) -> Self {
+        PyColumn {
+            inner: left(&self.inner, n),
+        }
+    }
+    fn right(&self, n: i64) -> Self {
+        PyColumn {
+            inner: right(&self.inner, n),
+        }
+    }
+    fn replace(&self, search: &str, replacement: &str) -> Self {
+        PyColumn {
+            inner: rs_replace(&self.inner, search, replacement),
+        }
+    }
+    fn startswith(&self, prefix: &str) -> Self {
+        PyColumn {
+            inner: startswith(&self.inner, prefix),
+        }
+    }
+    fn endswith(&self, suffix: &str) -> Self {
+        PyColumn {
+            inner: endswith(&self.inner, suffix),
+        }
+    }
+    fn contains(&self, substring: &str) -> Self {
+        PyColumn {
+            inner: contains(&self.inner, substring),
+        }
+    }
+    fn like(&self, pattern: &str) -> Self {
+        PyColumn {
+            inner: like(&self.inner, pattern, None),
+        }
+    }
+    fn ilike(&self, pattern: &str) -> Self {
+        PyColumn {
+            inner: ilike(&self.inner, pattern, None),
+        }
+    }
+    fn rlike(&self, pattern: &str) -> Self {
+        PyColumn {
+            inner: rlike(&self.inner, pattern),
+        }
+    }
+    fn cosh(&self) -> Self {
+        PyColumn {
+            inner: cosh(&self.inner),
+        }
+    }
+    fn sinh(&self) -> Self {
+        PyColumn {
+            inner: sinh(&self.inner),
+        }
+    }
+    fn tanh(&self) -> Self {
+        PyColumn {
+            inner: tanh(&self.inner),
+        }
+    }
+    fn acosh(&self) -> Self {
+        PyColumn {
+            inner: acosh(&self.inner),
+        }
+    }
+    fn asinh(&self) -> Self {
+        PyColumn {
+            inner: asinh(&self.inner),
+        }
+    }
+    fn atanh_(&self) -> Self {
+        PyColumn {
+            inner: atanh(&self.inner),
+        }
+    }
+    fn cbrt(&self) -> Self {
+        PyColumn {
+            inner: cbrt(&self.inner),
+        }
+    }
+    fn expm1(&self) -> Self {
+        PyColumn {
+            inner: expm1(&self.inner),
+        }
+    }
+    fn log1p(&self) -> Self {
+        PyColumn {
+            inner: log1p(&self.inner),
+        }
+    }
+    fn log10(&self) -> Self {
+        PyColumn {
+            inner: log10(&self.inner),
+        }
+    }
+    fn log2(&self) -> Self {
+        PyColumn {
+            inner: log2(&self.inner),
+        }
+    }
+    fn rint(&self) -> Self {
+        PyColumn {
+            inner: rint(&self.inner),
+        }
+    }
+    fn hypot(&self, other: &PyColumn) -> Self {
+        PyColumn {
+            inner: hypot(&self.inner, &other.inner),
+        }
+    }
+
+    /// Array/list size (PySpark size).
+    fn size(&self) -> Self {
+        PyColumn {
+            inner: self.inner.array_size(),
+        }
+    }
+
+    /// Element at 1-based index (PySpark element_at).
+    fn element_at(&self, index: i64) -> Self {
+        PyColumn {
+            inner: self.inner.element_at(index),
+        }
+    }
+
+    /// Explode list into one row per element (PySpark explode).
+    fn explode(&self) -> Self {
+        PyColumn {
+            inner: self.inner.explode(),
+        }
+    }
+
+    /// 1-based index of first occurrence of value in list, or 0 if not found (PySpark array_position).
+    fn array_position(&self, value: &PyColumn) -> Self {
+        PyColumn {
+            inner: self.inner.array_position(value.inner.expr().clone()),
+        }
+    }
+
+    /// New list with all elements equal to value removed (PySpark array_remove).
+    fn array_remove(&self, value: &PyColumn) -> Self {
+        PyColumn {
+            inner: self.inner.array_remove(value.inner.expr().clone()),
+        }
+    }
+
+    /// Repeat each element n times (PySpark array_repeat). Not implemented.
+    fn array_repeat(&self, n: i64) -> Self {
+        PyColumn {
+            inner: self.inner.array_repeat(n),
+        }
+    }
+
+    /// Explode list with position (PySpark posexplode). Returns (pos_column, value_column).
+    fn posexplode(&self) -> (Self, Self) {
+        let (pos, val) = self.inner.posexplode();
+        (PyColumn { inner: pos }, PyColumn { inner: val })
+    }
+
+    /// First value in partition (PySpark first_value). Use with .over().
+    fn first_value(&self) -> Self {
+        PyColumn {
+            inner: self.inner.first_value(),
+        }
+    }
+
+    /// Last value in partition (PySpark last_value). Use with .over().
+    fn last_value(&self) -> Self {
+        PyColumn {
+            inner: self.inner.last_value(),
+        }
+    }
+
+    /// Percent rank in partition. Window is applied; pass partition_by.
+    fn percent_rank(&self, partition_by: Vec<String>, descending: bool) -> Self {
+        let refs: Vec<&str> = partition_by.iter().map(|s| s.as_str()).collect();
+        PyColumn {
+            inner: self.inner.percent_rank(&refs, descending),
+        }
+    }
+
+    /// Cumulative distribution in partition. Window is applied; pass partition_by.
+    fn cume_dist(&self, partition_by: Vec<String>, descending: bool) -> Self {
+        let refs: Vec<&str> = partition_by.iter().map(|s| s.as_str()).collect();
+        PyColumn {
+            inner: self.inner.cume_dist(&refs, descending),
+        }
+    }
+
+    /// Ntile: bucket 1..n by rank within partition. Window is applied; pass partition_by.
+    fn ntile(&self, n: u32, partition_by: Vec<String>, descending: bool) -> Self {
+        let refs: Vec<&str> = partition_by.iter().map(|s| s.as_str()).collect();
+        PyColumn {
+            inner: self.inner.ntile(n, &refs, descending),
+        }
+    }
+
+    /// Nth value in partition by order (1-based n). Window is applied; pass partition_by, do not call .over() again.
+    fn nth_value(&self, n: i64, partition_by: Vec<String>, descending: bool) -> Self {
+        let refs: Vec<&str> = partition_by.iter().map(|s| s.as_str()).collect();
+        PyColumn {
+            inner: self.inner.nth_value(n, &refs, descending),
+        }
+    }
+
+    /// Check if string matches regex (PySpark regexp_like).
+    fn regexp_like(&self, pattern: &str) -> Self {
+        PyColumn {
+            inner: self.inner.regexp_like(pattern),
+        }
+    }
+
+    /// Count of non-overlapping regex matches (PySpark regexp_count).
+    fn regexp_count(&self, pattern: &str) -> Self {
+        PyColumn {
+            inner: regexp_count(&self.inner, pattern),
+        }
+    }
+
+    /// 1-based position of first regex match (PySpark regexp_instr).
+    fn regexp_instr(&self, pattern: &str, group_idx: Option<usize>) -> Self {
+        PyColumn {
+            inner: regexp_instr(&self.inner, pattern, group_idx),
+        }
+    }
+
+    /// First substring matching regex (PySpark regexp_substr).
+    fn regexp_substr(&self, pattern: &str) -> Self {
+        PyColumn {
+            inner: regexp_substr(&self.inner, pattern),
+        }
+    }
+
+    /// Split by delimiter and return 1-based part (PySpark split_part).
+    fn split_part(&self, delimiter: &str, part_num: i64) -> Self {
+        PyColumn {
+            inner: split_part(&self.inner, delimiter, part_num),
+        }
+    }
+
+    /// 1-based index in comma-delimited set (PySpark find_in_set).
+    fn find_in_set(&self, set_col: &PyColumn) -> Self {
+        PyColumn {
+            inner: find_in_set(&self.inner, &set_col.inner),
+        }
+    }
+
+    fn unix_timestamp(&self, format: Option<&str>) -> Self {
+        PyColumn {
+            inner: unix_timestamp(&self.inner, format),
+        }
+    }
+    fn from_unixtime(&self, format: Option<&str>) -> Self {
+        PyColumn {
+            inner: from_unixtime(&self.inner, format),
+        }
+    }
+    fn timestamp_seconds(&self) -> Self {
+        PyColumn {
+            inner: timestamp_seconds(&self.inner),
+        }
+    }
+    fn timestamp_millis(&self) -> Self {
+        PyColumn {
+            inner: timestamp_millis(&self.inner),
+        }
+    }
+    fn timestamp_micros(&self) -> Self {
+        PyColumn {
+            inner: timestamp_micros(&self.inner),
+        }
+    }
+    fn unix_date(&self) -> Self {
+        PyColumn {
+            inner: unix_date(&self.inner),
+        }
+    }
+    fn date_from_unix_date(&self) -> Self {
+        PyColumn {
+            inner: date_from_unix_date(&self.inner),
+        }
+    }
+    fn pmod(&self, divisor: &PyColumn) -> Self {
+        PyColumn {
+            inner: pmod(&self.inner, &divisor.inner),
+        }
+    }
+    fn factorial(&self) -> Self {
+        PyColumn {
+            inner: factorial(&self.inner),
+        }
+    }
+}

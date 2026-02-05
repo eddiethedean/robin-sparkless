@@ -11,6 +11,7 @@ from pathlib import Path
 
 
 def arg_str(args: list[dict]) -> str:
+    """Format argument list as 'name, name=default, ...' for display."""
     return ", ".join(
         a["name"] + (f"={a['default']!r}" if a.get("default") is not None else "")
         for a in args
@@ -18,6 +19,7 @@ def arg_str(args: list[dict]) -> str:
 
 
 def main() -> int:
+    """Read signature_comparison.json, write SIGNATURE_ALIGNMENT_TASKS.md; return 0 on success."""
     comp_path = Path("docs/signature_comparison.json")
     out_path = Path("docs/SIGNATURE_ALIGNMENT_TASKS.md")
     if not comp_path.exists():

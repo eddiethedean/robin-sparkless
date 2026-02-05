@@ -352,8 +352,6 @@ impl DataFrame {
         transformations::intersect(self, other, self.case_sensitive)
     }
 
-    // ---------- Phase 12 Batch A: sample, first/head/take/tail, stat, summary, isEmpty, toDF ----------
-
     /// Sample a fraction of rows. PySpark sample(withReplacement, fraction, seed).
     pub fn sample(
         &self,
@@ -429,8 +427,6 @@ impl DataFrame {
         self.describe()
     }
 
-    // ---------- Phase 12 Batch B: toJSON, explain, printSchema ----------
-
     /// Collect rows as JSON strings (one per row). PySpark toJSON.
     pub fn to_json(&self) -> Result<Vec<String>, PolarsError> {
         transformations::to_json(self)
@@ -445,8 +441,6 @@ impl DataFrame {
     pub fn print_schema(&self) -> Result<String, PolarsError> {
         transformations::print_schema(self)
     }
-
-    // ---------- Phase 12 Batch C: checkpoint, repartition, coalesce (no-op on eager backend) ----------
 
     /// No-op: Polars backend is eager. PySpark checkpoint.
     pub fn checkpoint(&self) -> Result<DataFrame, PolarsError> {
@@ -494,8 +488,6 @@ impl DataFrame {
         Ok(self.clone())
     }
 
-    // ---------- Phase 12: Spark-specific no-ops (compatibility) ----------
-
     /// No-op. PySpark hint (query planner hint).
     pub fn hint(&self, _name: &str, _params: &[i32]) -> Result<DataFrame, PolarsError> {
         Ok(self.clone())
@@ -535,8 +527,6 @@ impl DataFrame {
         Ok(self.clone())
     }
 
-    // ---------- Phase 12 Batch D: selectExpr, colRegex, withColumns, withColumnsRenamed, na ----------
-
     /// Select by expression strings (minimal: column names, optionally "col as alias"). PySpark selectExpr.
     pub fn select_expr(&self, exprs: &[String]) -> Result<DataFrame, PolarsError> {
         transformations::select_expr(self, exprs, self.case_sensitive)
@@ -564,8 +554,6 @@ impl DataFrame {
     pub fn na(&self) -> DataFrameNa<'_> {
         DataFrameNa { df: self }
     }
-
-    // ---------- Phase 12 Batch E: offset, transform, freqItems, approxQuantile, crosstab, melt, exceptAll, intersectAll ----------
 
     /// Skip first n rows. PySpark offset(n).
     pub fn offset(&self, n: usize) -> Result<DataFrame, PolarsError> {
