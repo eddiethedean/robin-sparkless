@@ -6,6 +6,24 @@ on:
       - 'v*'
 
 jobs:
+  python-lint:
+    name: Python (ruff, mypy)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      - name: Install ruff and mypy
+        run: pip install -r requirements-ci.txt
+      - name: Ruff format
+        run: ruff format --check .
+      - name: Ruff check
+        run: ruff check .
+      - name: Mypy
+        run: mypy .
+
   format:
     name: Format
     runs-on: ubuntu-latest
@@ -245,7 +263,7 @@ jobs:
   build-pypi-manylinux-x86_64:
     name: Build wheel manylinux (x86_64)
     runs-on: ubuntu-latest
-    needs: [format, clippy, audit, deny, build, test-error-handling, test-parity, python-tests]
+    needs: [python-lint, format, clippy, audit, deny, build, test-error-handling, test-parity, python-tests]
     steps:
       - uses: actions/checkout@v4
       - name: Build wheel (manylinux x86_64)
@@ -265,7 +283,7 @@ jobs:
   build-pypi-manylinux-aarch64:
     name: Build wheel manylinux (aarch64)
     runs-on: ubuntu-24.04-arm
-    needs: [format, clippy, audit, deny, build, test-error-handling, test-parity, python-tests]
+    needs: [python-lint, format, clippy, audit, deny, build, test-error-handling, test-parity, python-tests]
     steps:
       - uses: actions/checkout@v4
       - name: Build wheel (manylinux aarch64)
@@ -285,7 +303,7 @@ jobs:
   build-pypi-windows-arm64:
     name: Build wheel Windows (aarch64)
     runs-on: windows-11-arm
-    needs: [format, clippy, audit, deny, build, test-error-handling, test-parity, python-tests]
+    needs: [python-lint, format, clippy, audit, deny, build, test-error-handling, test-parity, python-tests]
     steps:
       - uses: actions/checkout@v4
       - name: Build wheel (Windows ARM64)
@@ -304,6 +322,7 @@ jobs:
     name: Build docs and publish to crates.io
     runs-on: ubuntu-latest
     needs:
+      - python-lint
       - format
       - clippy
       - audit
