@@ -19,8 +19,8 @@ jobs:
           toolchain: 1.89.0
           components: clippy, rustfmt
 
-      - name: Install cargo-audit, cargo-deny, cargo-nextest
-        run: cargo install cargo-audit cargo-deny cargo-nextest --version 0.9.92 --locked
+      - name: Install cargo-audit and cargo-deny
+        run: cargo install cargo-audit cargo-deny
 
       - name: Cache cargo
         uses: actions/cache@v4
@@ -46,7 +46,7 @@ jobs:
         run: cargo deny check advisories bans sources
 
       - name: Build test binaries
-        run: cargo nextest run --no-run
+        run: cargo build --tests
         env:
           CARGO_BUILD_JOBS: 1
 
