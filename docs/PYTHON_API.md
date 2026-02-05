@@ -4,7 +4,19 @@ This document describes the **Python API contract** exposed by the `robin_sparkl
 
 ## Building and installing
 
-**Prerequisites**: Rust (stable), Python 3.8+, [maturin](https://www.maturin.rs/) (`pip install maturin`). The extension is built with **PyO3 0.24**.
+Choose one of the following:
+
+### Option 1: Install from PyPI
+
+No Rust or build tools required. Wheels are provided for Linux, macOS, and Windows (see [PyPI](https://pypi.org/project/robin-sparkless/)).
+
+```bash
+pip install robin-sparkless
+```
+
+### Option 2: Build from source
+
+Use this if you need optional features (SQL, Delta) or want to develop the crate. Prerequisites: Rust (stable), Python 3.8+, and [maturin](https://www.maturin.rs/) (`pip install maturin`). The extension is built with **PyO3 0.24**.
 
 ```bash
 # From the repo root
@@ -13,12 +25,12 @@ maturin develop --features pyo3   # Editable install into current env
 maturin develop --features "pyo3,sql"       # SQL support
 maturin develop --features "pyo3,delta"    # Delta Lake read/write
 maturin develop --features "pyo3,sql,delta"  # Both
-# or
+# or build a wheel:
 maturin build --features pyo3     # Build wheel (e.g. target/wheels/)
 pip install target/wheels/robin_sparkless-*.whl
 ```
 
-Rust-only build (no Python):
+### Rust-only (no Python)
 
 ```bash
 cargo build
