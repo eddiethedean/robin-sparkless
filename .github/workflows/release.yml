@@ -241,10 +241,54 @@ jobs:
       - name: Run Python tests
         run: $PY -m pytest tests/python/ -v
 
+  # Compile (build only) for the 3 previously-failing targets first; publish only if these succeed.
+  build-pypi-manylinux-x86_64:
+    name: Build wheel manylinux (x86_64)
+    runs-on: ubuntu-latest
+    needs: [format, clippy, audit, deny, build, test-error-handling, test-parity, python-tests]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build wheel (manylinux x86_64)
+        uses: messense/maturin-action@v1
+        with:
+          target: x86_64-unknown-linux-gnu
+          command: build
+          args: --release --zig
+          manylinux: "2_17"
+          container: off
+
+  build-pypi-manylinux-aarch64:
+    name: Build wheel manylinux (aarch64)
+    runs-on: ubuntu-24.04-arm
+    needs: [format, clippy, audit, deny, build, test-error-handling, test-parity, python-tests]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build wheel (manylinux aarch64)
+        uses: messense/maturin-action@v1
+        with:
+          target: aarch64-unknown-linux-gnu
+          command: build
+          args: --release --no-sdist --zig
+          manylinux: "2_28"
+          container: off
+
+  build-pypi-windows-arm64:
+    name: Build wheel Windows (aarch64)
+    runs-on: windows-11-arm
+    needs: [format, clippy, audit, deny, build, test-error-handling, test-parity, python-tests]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build wheel (Windows ARM64)
+        uses: messense/maturin-action@v1
+        with:
+          target: aarch64-pc-windows-msvc
+          command: build
+          args: --release --no-sdist
+
   publish:
     name: Build docs and publish to crates.io
     runs-on: ubuntu-latest
-    needs: [format, clippy, audit, deny, build, test-error-handling, test-parity, python-tests]
+    needs: [format, clippy, audit, deny, build, test-error-handling, test-parity, python-tests, build-pypi-manylinux-x86_64, build-pypi-manylinux-aarch64, build-pypi-windows-arm64]
     steps:
       - uses: actions/checkout@v4
       - name: Install Rust

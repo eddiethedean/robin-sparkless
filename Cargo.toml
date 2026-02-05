@@ -32,7 +32,7 @@ chrono-tz = "0.9"
 serde_json = "1.0"
 anyhow = "1.0"
 thiserror = "1.0"
-pyo3 = { version = "0.24", optional = true, features = ["abi3-py38"] }
+pyo3 = { version = "0.24", optional = true, features = ["abi3-py38", "extension-module"] }
 sqlparser = { version = "0.45", optional = true }
 deltalake = { version = "0.30", optional = true }
 tokio = { version = "1", optional = true, features = ["rt", "rt-multi-thread", "fs", "io-util"] }
