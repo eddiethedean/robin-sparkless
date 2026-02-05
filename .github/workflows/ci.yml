@@ -7,21 +7,16 @@ on:
     branches: [main, master]
 
 jobs:
-  lint:
-    name: Format, lint, audit, deny
+  format:
+    name: Format
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - name: Install Rust
         uses: dtolnay/rust-toolchain@master
         with:
           toolchain: 1.89.0
-          components: clippy, rustfmt
-
-      - name: Install cargo-audit and cargo-deny
-        run: cargo install cargo-audit cargo-deny
-
+          components: rustfmt
       - name: Cache cargo
         uses: actions/cache@v4
         with:
@@ -32,23 +27,83 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
             ${{ runner.os }}-cargo-
-
       - name: Check format
         run: cargo fmt --check
 
+  clippy:
+    name: Clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.89.0
+          components: clippy
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
       - name: Clippy
         run: cargo clippy -- -D warnings
 
+  audit:
+    name: Audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.89.0
+      - name: Install cargo-audit
+        run: cargo install cargo-audit
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
       - name: Audit
         run: cargo audit
 
+  deny:
+    name: Deny
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.89.0
+      - name: Install cargo-deny
+        run: cargo install cargo-deny
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
       - name: Deny
         run: cargo deny check advisories bans sources
 
   build:
     name: Build test binaries
     runs-on: ubuntu-latest
-    needs: lint
     steps:
       - uses: actions/checkout@v4
 
@@ -76,7 +131,7 @@ jobs:
   test:
     name: Test (partition ${{ matrix.partition }}/4)
     runs-on: ubuntu-latest
-    needs: build
+    needs: [format, clippy, audit, deny, build]
     timeout-minutes: 20
     strategy:
       fail-fast: false
