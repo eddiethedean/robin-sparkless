@@ -1,5 +1,11 @@
 # robin-sparkless (Python)
 
+[![PyPI version](https://badge.fury.io/py/robin-sparkless.svg)](https://pypi.org/project/robin-sparkless/)
+[![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Documentation](https://readthedocs.org/projects/robin-sparkless/badge/?version=latest)](https://robin-sparkless.readthedocs.io/)
+[![Source](https://img.shields.io/badge/source-GitHub-black.svg)](https://github.com/eddiethedean/robin-sparkless)
+
 **PySpark-style DataFrames in Python—no JVM.** Uses [Polars](https://www.pola.rs/) under the hood for fast execution.
 
 ## Install
@@ -35,25 +41,50 @@ df = spark.read_json("data.json")
 
 Filter, select, group, join, and use window functions with a PySpark-like API. See the [full documentation](https://robin-sparkless.readthedocs.io/) for details.
 
-## Optional features
+## Optional features (install from source)
 
-Install from source to enable extra features (requires [Rust](https://rustup.rs/) and [maturin](https://www.maturin.rs/)):
+Building from source requires [Rust](https://rustup.rs/) and [maturin](https://www.maturin.rs/). Clone the repo, then:
 
 ```bash
 pip install maturin
-maturin install --features "pyo3,sql"    # spark.sql() and temp views
-maturin install --features "pyo3,delta"   # read_delta / write_delta
-maturin install --features "pyo3,sql,delta"
+maturin develop --features pyo3           # default: DataFrame API
+maturin develop --features "pyo3,sql"      # spark.sql() and temp views
+maturin develop --features "pyo3,delta"    # read_delta / write_delta
+maturin develop --features "pyo3,sql,delta" # all optional features
 ```
 
 ## Type checking
 
-The package ships with PEP 561 type stubs (`robin_sparkless.pyi`). Use mypy, pyright, or another checker for static typing:
+The package ships with PEP 561 type stubs (`robin_sparkless.pyi`). Use mypy, pyright, or another checker:
 
 ```bash
 pip install robin-sparkless mypy
 mypy your_script.py
 ```
+
+For **Python 3.8** compatibility, use mypy &lt;1.10 (newer mypy drops support for `python_version = "3.8"` in config). The project’s `pyproject.toml` includes `[tool.mypy]` and `[tool.ruff]` with `target-version` / `python_version` set for 3.8.
+
+## Development
+
+From a clone of the repo:
+
+```bash
+python -m venv .venv
+source .venv/bin/activate   # or .venv\Scripts\activate on Windows
+pip install -r requirements-ci.txt
+maturin develop --features pyo3 --release
+pytest tests/python/ -v
+```
+
+Lint and format:
+
+```bash
+ruff format .
+ruff check .
+mypy .
+```
+
+CI uses `requirements-ci.txt` (maturin, pytest, mypy&lt;1.10 for Python 3.8).
 
 ## Links
 
