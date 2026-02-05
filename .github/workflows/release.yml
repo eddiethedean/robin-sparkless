@@ -331,9 +331,6 @@ jobs:
       - test-error-handling
       - test-parity
       - python-tests
-      - build-pypi-manylinux-x86_64
-      - build-pypi-manylinux-aarch64
-      - build-pypi-windows-arm64
     steps:
       - uses: actions/checkout@v4
       - name: Install Rust
