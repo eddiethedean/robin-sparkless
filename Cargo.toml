@@ -1,6 +1,3 @@
-[workspace]
-members = ["node"]
-
 [package]
 name = "robin-sparkless"
 version = "0.1.0"
