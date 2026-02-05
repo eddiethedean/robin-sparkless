@@ -1,5 +1,6 @@
 # Python
 .venv/
+.venv_scan/
 .venv-sparkless/
 .venv-sparkless-check/
 venv/
