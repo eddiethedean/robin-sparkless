@@ -2,8 +2,18 @@
 //! Uses deltalake (delta-rs) with Polars for execution.
 
 use crate::dataframe::DataFrame;
-use polars::prelude::{LazyFrame, PolarsError, ScanArgsParquet};
+use polars::prelude::{LazyFrame, PolarsError, ScanArgsParquet, UnionArgs};
 use std::path::Path;
+use url::Url;
+
+/// Concatenate multiple LazyFrames in order. Returns an error if the slice is empty or concat fails.
+#[cfg(feature = "delta")]
+fn concat_lazy_frames(lfs: Vec<LazyFrame>) -> Result<LazyFrame, PolarsError> {
+    if lfs.is_empty() {
+        return Err(PolarsError::ComputeError("read_delta: no files".into()));
+    }
+    polars::prelude::concat(lfs, UnionArgs::default())
+}
 
 /// Read a Delta table at the given path (latest version).
 /// Path can be a local path (e.g. `/tmp/table`) or a file URL (`file:///tmp/table`).
@@ -29,15 +39,22 @@ pub fn read_delta_with_version(
         PolarsError::ComputeError(format!("read_delta: failed to create runtime: {}", e).into())
     })?;
 
+    let url = Url::parse(table_uri.as_str()).map_err(|e| {
+        PolarsError::ComputeError(format!("read_delta: invalid table URI: {}", e).into())
+    })?;
     let table = rt.block_on(async {
-        if let Some(v) = version {
-            DeltaTableBuilder::from_uri(table_uri.as_str())
-                .with_version(v)
-                .load()
-                .await
+        let builder =
+            DeltaTableBuilder::from_url(url.clone()).map_err(|e: deltalake::DeltaTableError| {
+                PolarsError::ComputeError(format!("read_delta: {}", e).into())
+            })?;
+        let result = if let Some(v) = version {
+            builder.with_version(v).load().await
         } else {
-            DeltaTableBuilder::from_uri(table_uri.as_str()).load().await
-        }
+            builder.load().await
+        };
+        result.map_err(|e: deltalake::DeltaTableError| {
+            PolarsError::ComputeError(format!("read_delta: {}", e).into())
+        })
     })?;
 
     let uris: Vec<String> = table
@@ -60,10 +77,7 @@ pub fn read_delta_with_version(
         lfs.push(lf);
     }
 
-    let combined = lfs
-        .into_iter()
-        .reduce(|a, b| a.concat(b, Default::default()).unwrap())
-        .ok_or_else(|| PolarsError::ComputeError("read_delta: no files".into()))?;
+    let combined = concat_lazy_frames(lfs)?;
 
     let pl_df = combined.collect()?;
     Ok(DataFrame::from_polars_with_options(pl_df, case_sensitive))
@@ -131,10 +145,21 @@ pub fn write_delta(
         PolarsError::ComputeError(format!("write_delta: failed to create runtime: {}", e).into())
     })?;
 
+    let url = Url::parse(table_uri.as_str()).map_err(|e| {
+        PolarsError::ComputeError(format!("write_delta: invalid table URI: {}", e).into())
+    })?;
     rt.block_on(async {
-        let table_result = deltalake::DeltaTableBuilder::from_uri(table_uri.as_str())
+        let builder = deltalake::DeltaTableBuilder::from_url(url.clone()).map_err(
+            |e: deltalake::DeltaTableError| {
+                PolarsError::ComputeError(format!("write_delta: {}", e).into())
+            },
+        )?;
+        let table_result = builder
             .load()
-            .await;
+            .await
+            .map_err(|e: deltalake::DeltaTableError| {
+                PolarsError::ComputeError(format!("write_delta: {}", e).into())
+            });
 
         if overwrite {
             if path.exists() {
@@ -184,18 +209,12 @@ pub fn write_delta(
                             ScanArgsParquet::default(),
                         )?);
                     }
-                    let existing = if lfs.is_empty() {
+                    let mut combined = if lfs.is_empty() {
                         polars::prelude::DataFrame::default()
                     } else {
-                        lfs.into_iter()
-                            .reduce(|a, b| a.concat(b, Default::default()).unwrap())
-                            .unwrap()
-                            .collect()?
+                        concat_lazy_frames(lfs)?.collect()?
                     };
-                    let mut combined = polars::prelude::concat(
-                        [existing, df.clone()],
-                        polars::prelude::Default::default(),
-                    )?;
+                    combined.vstack_mut(df)?;
                     let _ = fs::remove_dir_all(path);
                     fs::create_dir_all(path).map_err(|e| {
                         PolarsError::ComputeError(

@@ -3,6 +3,14 @@
 //! This library provides a PySpark-compatible API built on top of Polars,
 //! offering high-performance data processing in pure Rust.
 //!
+//! # Panics
+//!
+//! Some functions panic when used with invalid or empty inputs (e.g. calling
+//! `when(cond).otherwise(val)` without `.then()`, or passing no columns to
+//! `format_string`, `elt`, `concat`, `coalesce`, `array`, `create_map`, or
+//! `struct`/`named_struct`). See the documentation for each function for
+//! details.
+//!
 //! # API stability
 //!
 //! While the crate is in the 0.x series, we follow [semver](https://semver.org/) but may introduce

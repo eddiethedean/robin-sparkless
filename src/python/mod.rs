@@ -3931,7 +3931,7 @@ struct PyDataFrameWriter {
 #[pymethods]
 impl PyDataFrameWriter {
     fn mode<'py>(slf: PyRef<'py, Self>, mode: &str) -> PyRef<'py, Self> {
-        *slf.mode.write().unwrap() = match mode.to_lowercase().as_str() {
+        *slf.mode.write().expect("writer mode lock") = match mode.to_lowercase().as_str() {
             "append" => WriteMode::Append,
             _ => WriteMode::Overwrite,
         };
@@ -3939,7 +3939,7 @@ impl PyDataFrameWriter {
     }
 
     fn format<'py>(slf: PyRef<'py, Self>, format: &str) -> PyRef<'py, Self> {
-        *slf.format.write().unwrap() = match format.to_lowercase().as_str() {
+        *slf.format.write().expect("writer format lock") = match format.to_lowercase().as_str() {
             "csv" => WriteFormat::Csv,
             "json" => WriteFormat::Json,
             _ => WriteFormat::Parquet,
@@ -3948,8 +3948,8 @@ impl PyDataFrameWriter {
     }
 
     fn save(&self, path: &str) -> PyResult<()> {
-        let mode = *self.mode.read().unwrap();
-        let format = *self.format.read().unwrap();
+        let mode = *self.mode.read().expect("writer mode lock");
+        let format = *self.format.read().expect("writer format lock");
         self.df
             .write()
             .mode(mode)

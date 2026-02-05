@@ -942,6 +942,19 @@ pub fn apply_format_number(column: Column, decimals: u32) -> PolarsResult<Option
     Ok(Some(Column::new(name, out.into_series())))
 }
 
+/// Return the value at index `i` in `s` as a string, or None if null/unsupported type.
+fn series_value_at_as_string(s: &Series, i: usize) -> Option<String> {
+    match s.dtype() {
+        DataType::String => s.str().ok()?.get(i).map(|v| v.to_string()),
+        DataType::Int32 => s.i32().ok()?.get(i).map(|v| v.to_string()),
+        DataType::Int64 => s.i64().ok()?.get(i).map(|v| v.to_string()),
+        DataType::Float32 => s.f32().ok()?.get(i).map(|v| v.to_string()),
+        DataType::Float64 => s.f64().ok()?.get(i).map(|v| v.to_string()),
+        DataType::Boolean => s.bool().ok()?.get(i).map(|v| v.to_string()),
+        _ => s.get(i).ok().map(|av| av.to_string()),
+    }
+}
+
 /// Format columns with printf-style format string (PySpark format_string / printf).
 /// Supports %s, %d, %i, %f, %g, %%. Null in any column yields null result.
 pub fn apply_format_string(columns: &mut [Column], format: &str) -> PolarsResult<Option<Column>> {
@@ -959,19 +972,10 @@ pub fn apply_format_string(columns: &mut [Column], format: &str) -> PolarsResult
     let len = series_vec[0].len();
     let mut result = Vec::with_capacity(len);
     for i in 0..len {
-        let mut values: Vec<Option<String>> = Vec::with_capacity(n);
-        for s in &series_vec {
-            let v = match s.dtype() {
-                DataType::String => s.str().unwrap().get(i).map(|v| v.to_string()),
-                DataType::Int32 => s.i32().unwrap().get(i).map(|v| v.to_string()),
-                DataType::Int64 => s.i64().unwrap().get(i).map(|v| v.to_string()),
-                DataType::Float32 => s.f32().unwrap().get(i).map(|v| v.to_string()),
-                DataType::Float64 => s.f64().unwrap().get(i).map(|v| v.to_string()),
-                DataType::Boolean => s.bool().unwrap().get(i).map(|v| v.to_string()),
-                _ => s.get(i).ok().map(|av| av.to_string()),
-            };
-            values.push(v);
-        }
+        let values: Vec<Option<String>> = series_vec
+            .iter()
+            .map(|s| series_value_at_as_string(s, i))
+            .collect();
         let out = format_string_row(format, &values);
         result.push(out);
     }

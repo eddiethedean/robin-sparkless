@@ -22,7 +22,7 @@ pub fn parse_sql(query: &str) -> Result<Statement, PolarsError> {
             .into(),
         ));
     }
-    let stmt = stmts.into_iter().next().unwrap();
+    let stmt = stmts.into_iter().next().expect("exactly one statement");
     match &stmt {
         Statement::Query(_) => {}
         _ => {
