@@ -281,6 +281,7 @@ jobs:
           command: publish
           args: --skip-existing --zig
           manylinux: "2_17"
+          container: off
 
   publish-pypi-manylinux-aarch64:
     name: PyPI manylinux (aarch64)
@@ -297,6 +298,7 @@ jobs:
           command: publish
           args: --skip-existing --no-sdist --zig
           manylinux: "2_28"
+          container: off
 
   publish-pypi-musllinux-x86_64:
     name: PyPI musllinux (x86_64, musl 1.2+)
@@ -349,12 +351,16 @@ jobs:
 
   publish-pypi-windows:
     name: PyPI Windows (${{ matrix.target }})
-    runs-on: windows-latest
+    runs-on: ${{ matrix.runner }}
     needs: publish
     strategy:
       fail-fast: false
       matrix:
-        target: [x86_64-pc-windows-msvc, aarch64-pc-windows-msvc]
+        include:
+          - target: x86_64-pc-windows-msvc
+            runner: windows-latest
+          - target: aarch64-pc-windows-msvc
+            runner: windows-11-arm
     steps:
       - uses: actions/checkout@v4
       - name: Publish to PyPI (Windows)

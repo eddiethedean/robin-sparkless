@@ -1,0 +1,55 @@
+name: Python publish (failed targets only)
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Package version to (re)publish (for reference only)"
+        required: false
+        default: ""
+
+env:
+  # All jobs assume this secret is configured with a PyPI API token
+  MATURIN_PYPI_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
+
+jobs:
+  pypi-manylinux-x86_64:
+    name: PyPI manylinux (x86_64) + sdist
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Publish to PyPI (manylinux x86_64 + sdist)
+        uses: messense/maturin-action@v1
+        with:
+          target: x86_64-unknown-linux-gnu
+          command: publish
+          args: --skip-existing --zig
+          manylinux: "2_17"
+          container: off
+
+  pypi-manylinux-aarch64:
+    name: PyPI manylinux (aarch64)
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+      - name: Publish to PyPI (manylinux aarch64)
+        uses: messense/maturin-action@v1
+        with:
+          target: aarch64-unknown-linux-gnu
+          command: publish
+          args: --skip-existing --no-sdist --zig
+          manylinux: "2_28"
+          container: off
+
+  pypi-windows-arm64:
+    name: PyPI Windows (aarch64)
+    runs-on: windows-11-arm
+    steps:
+      - uses: actions/checkout@v4
+      - name: Publish to PyPI (Windows ARM64)
+        uses: messense/maturin-action@v1
+        with:
+          target: aarch64-pc-windows-msvc
+          command: publish
+          args: --skip-existing --no-sdist
+
