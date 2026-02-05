@@ -6,24 +6,7 @@ on:
       - 'v*'
 
 jobs:
-  python-lint:
-    name: Python (ruff, mypy)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.10"
-      - name: Install ruff and mypy
-        run: pip install -r requirements-ci.txt
-      - name: Ruff format
-        run: ruff format --check .
-      - name: Ruff check
-        run: ruff check .
-      - name: Mypy
-        run: mypy .
-
+  # --- Rust ---
   format:
     name: Format
     runs-on: ubuntu-latest
@@ -198,6 +181,50 @@ jobs:
         env:
           NEXTEST_THREADS: "1"
 
+  publish:
+    name: Build docs and publish to crates.io
+    runs-on: ubuntu-latest
+    needs: [format, clippy, audit, deny, build, test-error-handling, test-parity]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.89.0
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+      - name: Build docs
+        run: cargo doc --no-deps
+      - name: Publish to crates.io
+        run: cargo publish --token ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+  # --- Python ---
+  python-lint:
+    name: Python (ruff, mypy)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      - name: Install ruff and mypy
+        run: pip install -r requirements-ci.txt
+      - name: Ruff format
+        run: ruff format --check .
+      - name: Ruff check
+        run: ruff check .
+      - name: Mypy
+        run: mypy .
+
   python-tests:
     name: Python tests (PyO3) - ${{ matrix.os }} py${{ matrix.python-version }}
     runs-on: ${{ matrix.os }}
@@ -259,31 +286,6 @@ jobs:
       - name: Run Python tests
         run: $PY -m pytest tests/python/ -v
 
-  publish:
-    name: Build docs and publish to crates.io
-    runs-on: ubuntu-latest
-    needs: [format, clippy, audit, deny, build, test-error-handling, test-parity]
-    steps:
-      - uses: actions/checkout@v4
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: 1.89.0
-      - name: Cache cargo
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-
-      - name: Build docs
-        run: cargo doc --no-deps
-      - name: Publish to crates.io
-        run: cargo publish --token ${{ secrets.CARGO_REGISTRY_TOKEN }}
-
   # --- PyPI: manylinux (glibc) ---
   publish-pypi-manylinux-x86_64:
     name: PyPI manylinux x86_64 + sdist
@@ -322,6 +324,32 @@ jobs:
           args: --release --zig
           manylinux: "2_28"
           container: off
+      - name: Publish to PyPI
+        shell: bash
+        env:
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
+        run: |
+          pip install twine
+          twine upload --skip-existing target/wheels/*
+
+  # --- PyPI: macOS ---
+  publish-pypi-mac:
+    name: PyPI macOS ${{ matrix.target }}
+    runs-on: macos-latest
+    needs: [python-lint, python-tests]
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [x86_64-apple-darwin, aarch64-apple-darwin]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build wheel
+        uses: messense/maturin-action@v1
+        with:
+          target: ${{ matrix.target }}
+          command: build
+          args: --release
       - name: Publish to PyPI
         shell: bash
         env:
@@ -377,32 +405,6 @@ jobs:
           for f in target/wheels/*; do
             twine check "$f" 2>/dev/null && twine upload --skip-existing "$f" || true
           done
-
-  # --- PyPI: macOS ---
-  publish-pypi-mac:
-    name: PyPI macOS ${{ matrix.target }}
-    runs-on: macos-latest
-    needs: [python-lint, python-tests]
-    strategy:
-      fail-fast: false
-      matrix:
-        target: [x86_64-apple-darwin, aarch64-apple-darwin]
-    steps:
-      - uses: actions/checkout@v4
-      - name: Build wheel
-        uses: messense/maturin-action@v1
-        with:
-          target: ${{ matrix.target }}
-          command: build
-          args: --release
-      - name: Publish to PyPI
-        shell: bash
-        env:
-          TWINE_USERNAME: __token__
-          TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
-        run: |
-          pip install twine
-          twine upload --skip-existing target/wheels/*
 
   # --- PyPI: Windows ---
   publish-pypi-windows-x86_64:
