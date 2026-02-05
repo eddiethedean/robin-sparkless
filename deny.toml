@@ -31,6 +31,7 @@ multiple-versions = "warn"
 wildcards = "allow"
 # Duplicate versions from polars vs deltalake/other deps; cannot unify
 skip = [
+    "chrono-tz@0.10.4",
     "getrandom@0.2.17",
     "hashbrown@0.14.5",
     "hashbrown@0.15.5",

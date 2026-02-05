@@ -39,9 +39,13 @@ sparkless-parity:
 	fi
 	cargo test pyspark_parity_fixtures
 
-# Run all checks (lint, format, security, deny, tests)
-check: fmt clippy audit deny test
+# Run all Rust checks (format, clippy, audit, deny, Rust tests). Completes without Python build.
+check: fmt clippy audit deny test-rust
 	@echo "All checks passed"
+
+# Run full check including Python tests (slower; builds PyO3 extension)
+check-full: check test-python
+	@echo "All checks including Python passed"
 
 # Format code
 fmt:

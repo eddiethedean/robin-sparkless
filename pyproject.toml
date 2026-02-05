@@ -19,5 +19,7 @@ classifiers = [
 ]
 
 [tool.maturin]
-# Build the Rust lib with the pyo3 feature so the Python module is compiled
+# Build the Rust lib with the pyo3 feature so the Python module is compiled.
+# abi3 (py-limited-api) produces one wheel for Python 3.8+.
 features = ["pyo3"]
+py-limited-api = "cp38"

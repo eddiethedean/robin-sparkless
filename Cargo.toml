@@ -6,6 +6,7 @@ name = "robin-sparkless"
 version = "0.1.0"
 edition = "2021"
 description = "PySpark-like DataFrame API in Rust on Polars; no JVM."
+readme = "README.md"
 license = "MIT"
 repository = "https://github.com/eddiethedean/robin-sparkless"
 keywords = ["pyspark", "polars", "dataframe", "spark", "etl"]
@@ -14,7 +15,7 @@ authors = ["Robin Sparkless contributors"]
 
 [lib]
 name = "robin_sparkless"
-# When building the Python wheel, maturin adds cdylib and sets extension-module linker flags.
+# When building the Python wheel, maturin adds cdylib. We use abi3 for Py 3.8+ wheels.
 crate-type = ["rlib"]
 
 [features]
@@ -31,7 +32,7 @@ chrono-tz = "0.9"
 serde_json = "1.0"
 anyhow = "1.0"
 thiserror = "1.0"
-pyo3 = { version = "0.24", optional = true, features = ["extension-module"] }
+pyo3 = { version = "0.24", optional = true, features = ["abi3-py38"] }
 sqlparser = { version = "0.45", optional = true }
 deltalake = { version = "0.30", optional = true }
 tokio = { version = "1", optional = true, features = ["rt", "rt-multi-thread", "fs", "io-util"] }
