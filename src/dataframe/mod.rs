@@ -13,7 +13,9 @@ pub use transformations::{filter, order_by, order_by_exprs, select, with_column,
 use crate::column::Column;
 use crate::functions::SortOrder;
 use crate::schema::StructType;
-use polars::prelude::{AnyValue, DataFrame as PlDataFrame, Expr, PolarsError, SchemaNamesAndDtypes};
+use polars::prelude::{
+    AnyValue, DataFrame as PlDataFrame, Expr, PolarsError, SchemaNamesAndDtypes,
+};
 use serde_json::Value as JsonValue;
 use std::collections::HashMap;
 use std::sync::Arc;
