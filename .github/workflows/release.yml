@@ -273,7 +273,7 @@ jobs:
         with:
           target: aarch64-unknown-linux-gnu
           command: build
-          args: --release --no-sdist --zig
+          args: --release --zig
           manylinux: "2_28"
           container: off
       - name: Upload wheels artifact
@@ -293,7 +293,7 @@ jobs:
         with:
           target: aarch64-pc-windows-msvc
           command: build
-          args: --release --no-sdist
+          args: --release
       - name: Upload wheels artifact
         uses: actions/upload-artifact@v4
         with:
@@ -379,7 +379,7 @@ jobs:
         with:
           target: x86_64-unknown-linux-musl
           command: build
-          args: --release --no-sdist --zig --compatibility musllinux_1_2
+          args: --release --zig --compatibility musllinux_1_2
       - name: Upload wheels to PyPI (musllinux x86_64)
         uses: pypa/gh-action-pypi-publish@v1.10.0
         with:
@@ -398,7 +398,7 @@ jobs:
         with:
           target: aarch64-unknown-linux-musl
           command: build
-          args: --release --no-sdist --zig --compatibility musllinux_1_2
+          args: --release --zig --compatibility musllinux_1_2
       - name: Upload wheels to PyPI (musllinux aarch64)
         uses: pypa/gh-action-pypi-publish@v1.10.0
         with:
@@ -421,7 +421,7 @@ jobs:
         with:
           target: ${{ matrix.target }}
           command: build
-          args: --release --no-sdist
+          args: --release
       - name: Upload wheels to PyPI (macOS)
         uses: pypa/gh-action-pypi-publish@v1.10.0
         with:
@@ -440,7 +440,7 @@ jobs:
         with:
           target: x86_64-pc-windows-msvc
           command: build
-          args: --release --no-sdist
+          args: --release
       - name: Upload wheels to PyPI (Windows x86_64)
         uses: pypa/gh-action-pypi-publish@v1.10.0
         with:
