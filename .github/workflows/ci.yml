@@ -46,13 +46,13 @@ jobs:
         run: cargo deny check advisories bans sources
 
   test:
-    name: Test (partition ${{ matrix.partition_index }}/2)
+    name: Test (partition ${{ matrix.partition }}/2)
     runs-on: ubuntu-latest
     timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
-        partition_index: [0, 1]
+        partition: [1, 2]
     steps:
       - uses: actions/checkout@v4
 
@@ -76,7 +76,7 @@ jobs:
             ${{ runner.os }}-cargo-
 
       - name: Test
-        run: cargo nextest run --partition count:2 --partition-index ${{ matrix.partition_index }}
+        run: cargo nextest run --partition count:${{ matrix.partition }}/2
         env:
           NEXTEST_THREADS: "1"
 
