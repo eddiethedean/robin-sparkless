@@ -4,18 +4,23 @@ Export robin_sparkless module function and method signatures to JSON.
 Requires robin_sparkless to be built and installed (maturin develop --features pyo3).
   python scripts/export_robin_signatures.py [--output docs/signatures_robin_sparkless.json]
 """
+
 from __future__ import annotations
 
 import inspect
 import json
 import sys
-from typing import Any, get_type_hints
+from typing import Any, Dict, get_type_hints
 
 
 def safe_get_type_hints(obj: Any) -> dict[str, Any]:
     """Return get_type_hints(obj) or {} if introspection fails."""
     try:
-        return get_type_hints(obj) if hasattr(obj, "__annotations__") or inspect.isfunction(obj) else {}
+        return (
+            get_type_hints(obj)
+            if hasattr(obj, "__annotations__") or inspect.isfunction(obj)
+            else {}
+        )
     except Exception:
         return {}
 
@@ -33,32 +38,42 @@ def param_default_repr(param: inspect.Parameter) -> Any:
         return repr(param.default)
 
 
-def signature_to_dict(name: str, obj: Any, kind: str, class_name: str | None = None) -> dict | None:
+def signature_to_dict(
+    name: str, obj: Any, kind: str, class_name: str | None = None
+) -> Dict[str, Any] | None:
     if not callable(obj):
         return None
     try:
         sig = inspect.signature(obj)
     except (ValueError, TypeError):
-        out = {"name": name, "kind": kind, "args": [], "return_annotation": None, "error": "no signature"}
+        out_err: Dict[str, Any] = {
+            "name": name,
+            "kind": kind,
+            "args": [],
+            "return_annotation": None,
+            "error": "no signature",
+        }
         if class_name:
-            out["class"] = class_name
-        return out
+            out_err["class"] = class_name
+        return out_err
     hints = safe_get_type_hints(obj)
     args = []
     for pname, param in sig.parameters.items():
         if pname in ("self", "cls", "_py", "_cls"):
             continue
         ann = hints.get(pname)
-        args.append({
-            "name": pname,
-            "default": param_default_repr(param),
-            "annotation": str(ann) if ann is not None else None,
-            "kind": str(param.kind),
-        })
+        args.append(
+            {
+                "name": pname,
+                "default": param_default_repr(param),
+                "annotation": str(ann) if ann is not None else None,
+                "kind": str(param.kind),
+            }
+        )
     return_ann = hints.get("return", sig.return_annotation)
     if return_ann is inspect.Parameter.empty:
         return_ann = None
-    out = {
+    out: Dict[str, Any] = {
         "name": name,
         "kind": kind,
         "args": args,
@@ -107,11 +122,14 @@ def main() -> int:
 
     try:
         import robin_sparkless as rs
-    except ImportError as e:
-        print("robin_sparkless not installed. Run: maturin develop --features pyo3", file=sys.stderr)
+    except ImportError:
+        print(
+            "robin_sparkless not installed. Run: maturin develop --features pyo3",
+            file=sys.stderr,
+        )
         return 1
 
-    result = {
+    result: Dict[str, Any] = {
         "source": "robin_sparkless",
         "functions": collect_module_callables(rs),
         "classes": {},

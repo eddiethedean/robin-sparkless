@@ -5,17 +5,23 @@ Uses inspect.signature and optional type hints. Run with PySpark installed:
   pip install pyspark
   python scripts/export_pyspark_signatures.py [--output docs/signatures_pyspark.json]
 """
+
 from __future__ import annotations
 
 import inspect
 import json
 import sys
-from typing import Any, get_type_hints
+from typing import Any, Dict, get_type_hints
+
 
 def safe_get_type_hints(obj: Any) -> dict[str, Any]:
     """Return get_type_hints(obj) or {} if introspection fails (e.g. on some PySpark objects)."""
     try:
-        return get_type_hints(obj) if hasattr(obj, "__annotations__") or inspect.isfunction(obj) else {}
+        return (
+            get_type_hints(obj)
+            if hasattr(obj, "__annotations__") or inspect.isfunction(obj)
+            else {}
+        )
     except Exception:
         return {}
 
@@ -41,19 +47,27 @@ def signature_to_dict(name: str, obj: Any, kind: str) -> dict | None:
     try:
         sig = inspect.signature(obj)
     except (ValueError, TypeError):
-        return {"name": name, "kind": kind, "args": [], "return_annotation": None, "error": "no signature"}
+        return {
+            "name": name,
+            "kind": kind,
+            "args": [],
+            "return_annotation": None,
+            "error": "no signature",
+        }
     hints = safe_get_type_hints(obj)
     args = []
     for pname, param in sig.parameters.items():
         if pname in ("self", "cls"):
             continue
         ann = hints.get(pname)
-        args.append({
-            "name": pname,
-            "default": param_default_repr(param),
-            "annotation": str(ann) if ann is not None else None,
-            "kind": str(param.kind),
-        })
+        args.append(
+            {
+                "name": pname,
+                "default": param_default_repr(param),
+                "annotation": str(ann) if ann is not None else None,
+                "kind": str(param.kind),
+            }
+        )
     return_ann = hints.get("return", sig.return_annotation)
     if return_ann is inspect.Parameter.empty:
         return_ann = None
@@ -104,13 +118,13 @@ def main() -> int:
         import pyspark
         from pyspark.sql import SparkSession
         from pyspark import sql as pyspark_sql
-    except ImportError as e:
+    except ImportError:
         print("PySpark not installed. pip install pyspark", file=sys.stderr)
         return 1
 
     pyspark_version = getattr(pyspark, "__version__", "unknown")
 
-    result = {
+    result: Dict[str, Any] = {
         "source": "pyspark",
         "pyspark_version": pyspark_version,
         "functions": [],
@@ -126,7 +140,9 @@ def main() -> int:
     # 2) SparkSession
     try:
         spark = SparkSession.builder.appName("export").getOrCreate()
-        result["classes"]["SparkSession"] = collect_class_methods(SparkSession, "SparkSession")
+        result["classes"]["SparkSession"] = collect_class_methods(
+            SparkSession, "SparkSession"
+        )
     except Exception as e:
         result["classes"]["SparkSession"] = []
         result["classes_SparkSession_error"] = str(e)
@@ -136,7 +152,9 @@ def main() -> int:
     try:
         if spark is not None:
             builder = spark.builder
-            result["classes"]["SparkSessionBuilder"] = collect_class_methods(type(builder), "SparkSessionBuilder")
+            result["classes"]["SparkSessionBuilder"] = collect_class_methods(
+                type(builder), "SparkSessionBuilder"
+            )
     except Exception as e:
         result["classes"]["SparkSessionBuilder"] = []
         result["classes_SparkSessionBuilder_error"] = str(e)
@@ -145,7 +163,9 @@ def main() -> int:
     try:
         if spark is not None:
             df = spark.createDataFrame([], [])
-            result["classes"]["DataFrame"] = collect_class_methods(type(df), "DataFrame")
+            result["classes"]["DataFrame"] = collect_class_methods(
+                type(df), "DataFrame"
+            )
     except Exception as e:
         result["classes"]["DataFrame"] = []
         result["classes_DataFrame_error"] = str(e)
@@ -155,7 +175,9 @@ def main() -> int:
         if spark is not None:
             df = spark.createDataFrame([], [])
             gd = df.groupBy()
-            result["classes"]["GroupedData"] = collect_class_methods(type(gd), "GroupedData")
+            result["classes"]["GroupedData"] = collect_class_methods(
+                type(gd), "GroupedData"
+            )
     except Exception as e:
         result["classes"]["GroupedData"] = []
         result["classes_GroupedData_error"] = str(e)
@@ -163,6 +185,7 @@ def main() -> int:
     # 6) Column (from F.col("x"))
     try:
         from pyspark.sql import functions as F
+
         col_obj = F.col("x")
         result["classes"]["Column"] = collect_class_methods(type(col_obj), "Column")
     except Exception as e:
@@ -173,8 +196,12 @@ def main() -> int:
     try:
         if spark is not None:
             df = spark.createDataFrame([], [])
-            result["classes"]["DataFrameStat"] = collect_class_methods(type(df.stat()), "DataFrameStat")
-            result["classes"]["DataFrameNa"] = collect_class_methods(type(df.na), "DataFrameNa")
+            result["classes"]["DataFrameStat"] = collect_class_methods(
+                type(df.stat()), "DataFrameStat"
+            )
+            result["classes"]["DataFrameNa"] = collect_class_methods(
+                type(df.na), "DataFrameNa"
+            )
     except Exception as e:
         result["classes"].setdefault("DataFrameStat", [])
         result["classes"].setdefault("DataFrameNa", [])

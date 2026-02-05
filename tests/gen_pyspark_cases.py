@@ -10,12 +10,13 @@ This script is not used by the Rust build; it is a helper to produce
 
 See `docs/TEST_CREATION_GUIDE.md` for the full workflow.
 """
+
 from __future__ import annotations
 
 import json
 import tempfile
 from pathlib import Path
-from typing import Any
+from typing import Any, Dict, List
 
 from pyspark.sql import SparkSession
 from pyspark.sql.types import StructType
@@ -23,10 +24,7 @@ from pyspark.sql.types import StructType
 
 def schema_to_json(schema: StructType) -> list[dict[str, Any]]:
     """Convert a Spark StructType to a list of {name, type} dicts."""
-    return [
-        {"name": f.name, "type": f.dataType.simpleString()}
-        for f in schema.fields
-    ]
+    return [{"name": f.name, "type": f.dataType.simpleString()} for f in schema.fields]
 
 
 def df_to_rows(df: Any) -> list[list[Any]]:
@@ -94,24 +92,28 @@ def case_read_csv(spark: SparkSession) -> dict[str, Any]:
     """Test reading CSV file and applying operations."""
     # Create a temporary CSV file
     csv_content = "id,age,name\n1,25,Alice\n2,30,Bob\n3,35,Charlie\n"
-    
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False) as f:
+
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False) as f:
         f.write(csv_content)
         csv_path = f.name
-    
+
     try:
         # Read CSV using PySpark
-        df = spark.read.option("header", "true").option("inferSchema", "true").csv(csv_path)
-        
+        df = (
+            spark.read.option("header", "true")
+            .option("inferSchema", "true")
+            .csv(csv_path)
+        )
+
         # Apply operations
         out_df = df.filter("age > 30").select("name", "age").orderBy("name")
-        
+
         input_schema = schema_to_json(df.schema)
         input_rows = df_to_rows(df)
-        
+
         expected_schema = schema_to_json(out_df.schema)
         expected_rows = df_to_rows(out_df)
-        
+
         return {
             "name": "read_csv",
             "pyspark_version": spark.version,
@@ -140,30 +142,36 @@ def case_read_parquet(spark: SparkSession) -> dict[str, Any]:
     # Create data and write to Parquet
     data = [(1, "Alice", "Sales"), (2, "Bob", "Engineering"), (3, "Charlie", "Sales")]
     df_temp = spark.createDataFrame(data, ["id", "name", "department"])
-    
-    with tempfile.NamedTemporaryFile(suffix='.parquet', delete=False) as f:
+
+    with tempfile.NamedTemporaryFile(suffix=".parquet", delete=False) as f:
         parquet_path = f.name
-    
+
     try:
         # Write to Parquet
         df_temp.write.mode("overwrite").parquet(parquet_path)
-        
+
         # Read Parquet using PySpark
         df = spark.read.parquet(parquet_path)
-        
+
         # Apply operations
-        out_df = df.filter("department == 'Sales'").select("name", "department").orderBy("name")
-        
+        out_df = (
+            df.filter("department == 'Sales'")
+            .select("name", "department")
+            .orderBy("name")
+        )
+
         input_schema = schema_to_json(df.schema)
         input_rows = df_to_rows(df)
-        
+
         expected_schema = schema_to_json(out_df.schema)
         expected_rows = df_to_rows(out_df)
-        
+
         # For Parquet, we'll embed the original data as CSV-like content for the fixture
         # (Parquet is binary, so we store the source data representation)
-        parquet_content = "id,name,department\n1,Alice,Sales\n2,Bob,Engineering\n3,Charlie,Sales\n"
-        
+        parquet_content = (
+            "id,name,department\n1,Alice,Sales\n2,Bob,Engineering\n3,Charlie,Sales\n"
+        )
+
         return {
             "name": "read_parquet",
             "pyspark_version": spark.version,
@@ -185,6 +193,7 @@ def case_read_parquet(spark: SparkSession) -> dict[str, Any]:
     finally:
         # Clean up temp file
         import shutil
+
         if Path(parquet_path).exists():
             if Path(parquet_path).is_dir():
                 shutil.rmtree(parquet_path)
@@ -196,24 +205,24 @@ def case_read_json(spark: SparkSession) -> dict[str, Any]:
     """Test reading JSON file and applying operations."""
     # Create JSONL content (one JSON object per line)
     json_content = '{"id":1,"age":25,"name":"Alice"}\n{"id":2,"age":30,"name":"Bob"}\n{"id":3,"age":35,"name":"Charlie"}\n'
-    
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
         f.write(json_content)
         json_path = f.name
-    
+
     try:
         # Read JSON using PySpark
         df = spark.read.option("multiLine", "false").json(json_path)
-        
+
         # Apply operations
         out_df = df.filter("age > 30").select("name", "age").orderBy("name")
-        
+
         input_schema = schema_to_json(df.schema)
         input_rows = df_to_rows(df)
-        
+
         expected_schema = schema_to_json(out_df.schema)
         expected_rows = df_to_rows(out_df)
-        
+
         return {
             "name": "read_json",
             "pyspark_version": spark.version,
@@ -240,22 +249,26 @@ def case_read_json(spark: SparkSession) -> dict[str, Any]:
 def case_when_otherwise(spark: SparkSession) -> dict[str, Any]:
     """Test when().otherwise() conditional expression."""
     from pyspark.sql.functions import when as pyspark_when, col, lit
-    
+
     data = [(1, 25), (2, 17), (3, 30), (4, 16)]
     df = spark.createDataFrame(data, ["id", "age"])
-    
+
     # Use when(age >= 18).otherwise("minor") -> should return "adult" or "minor"
-    out_df = df.withColumn(
-        "status",
-        pyspark_when(col("age") >= 18, lit("adult")).otherwise(lit("minor"))
-    ).select("id", "age", "status").orderBy("id")
-    
+    out_df = (
+        df.withColumn(
+            "status",
+            pyspark_when(col("age") >= 18, lit("adult")).otherwise(lit("minor")),
+        )
+        .select("id", "age", "status")
+        .orderBy("id")
+    )
+
     input_schema = schema_to_json(df.schema)
     input_rows = df_to_rows(df)
-    
+
     expected_schema = schema_to_json(out_df.schema)
     expected_rows = df_to_rows(out_df)
-    
+
     return {
         "name": "when_otherwise",
         "pyspark_version": spark.version,
@@ -264,7 +277,7 @@ def case_when_otherwise(spark: SparkSession) -> dict[str, Any]:
             {
                 "op": "withColumn",
                 "column": "status",
-                "expr": "when(col('age') >= 18).then('adult').otherwise('minor')"
+                "expr": "when(col('age') >= 18).then('adult').otherwise('minor')",
             },
             {"op": "select", "columns": ["id", "age", "status"]},
             {"op": "orderBy", "columns": ["id"], "ascending": [True]},
@@ -276,22 +289,26 @@ def case_when_otherwise(spark: SparkSession) -> dict[str, Any]:
 def case_when_then_otherwise(spark: SparkSession) -> dict[str, Any]:
     """Test when().then().otherwise() conditional expression."""
     from pyspark.sql.functions import when as pyspark_when, col, lit
-    
+
     data = [(1, 25), (2, 17), (3, 30), (4, 16)]
     df = spark.createDataFrame(data, ["id", "age"])
-    
+
     # Use when(age >= 18).then("adult").otherwise("minor")
-    out_df = df.withColumn(
-        "status",
-        pyspark_when(col("age") >= 18, lit("adult")).otherwise(lit("minor"))
-    ).select("id", "age", "status").orderBy("id")
-    
+    out_df = (
+        df.withColumn(
+            "status",
+            pyspark_when(col("age") >= 18, lit("adult")).otherwise(lit("minor")),
+        )
+        .select("id", "age", "status")
+        .orderBy("id")
+    )
+
     input_schema = schema_to_json(df.schema)
     input_rows = df_to_rows(df)
-    
+
     expected_schema = schema_to_json(out_df.schema)
     expected_rows = df_to_rows(out_df)
-    
+
     return {
         "name": "when_then_otherwise",
         "pyspark_version": spark.version,
@@ -300,7 +317,7 @@ def case_when_then_otherwise(spark: SparkSession) -> dict[str, Any]:
             {
                 "op": "withColumn",
                 "column": "status",
-                "expr": "when(col('age') >= 18).then('adult').otherwise('minor')"
+                "expr": "when(col('age') >= 18).then('adult').otherwise('minor')",
             },
             {"op": "select", "columns": ["id", "age", "status"]},
             {"op": "orderBy", "columns": ["id"], "ascending": [True]},
@@ -313,12 +330,14 @@ def case_coalesce(spark: SparkSession) -> dict[str, Any]:
     """Test coalesce() function with nulls."""
     from pyspark.sql.functions import coalesce, col, lit
     from pyspark.sql.types import StructType, StructField, StringType, IntegerType
-    
-    schema = StructType([
-        StructField("id", IntegerType(), True),
-        StructField("col1", StringType(), True),
-        StructField("col2", StringType(), True),
-    ])
+
+    schema = StructType(
+        [
+            StructField("id", IntegerType(), True),
+            StructField("col1", StringType(), True),
+            StructField("col2", StringType(), True),
+        ]
+    )
     data = [
         (1, "A", "X"),
         (2, None, "Y"),
@@ -326,19 +345,20 @@ def case_coalesce(spark: SparkSession) -> dict[str, Any]:
         (4, None, None),
     ]
     df = spark.createDataFrame(data, schema=schema)
-    
+
     # coalesce(col1, col2, lit("default"))
-    out_df = df.withColumn(
-        "result",
-        coalesce(col("col1"), col("col2"), lit("default"))
-    ).select("id", "col1", "col2", "result").orderBy("id")
-    
+    out_df = (
+        df.withColumn("result", coalesce(col("col1"), col("col2"), lit("default")))
+        .select("id", "col1", "col2", "result")
+        .orderBy("id")
+    )
+
     input_schema = schema_to_json(df.schema)
     input_rows = df_to_rows(df)
-    
+
     expected_schema = schema_to_json(out_df.schema)
     expected_rows = df_to_rows(out_df)
-    
+
     return {
         "name": "coalesce",
         "pyspark_version": spark.version,
@@ -347,7 +367,7 @@ def case_coalesce(spark: SparkSession) -> dict[str, Any]:
             {
                 "op": "withColumn",
                 "column": "result",
-                "expr": "coalesce(col('col1'), col('col2'), lit('default'))"
+                "expr": "coalesce(col('col1'), col('col2'), lit('default'))",
             },
             {"op": "select", "columns": ["id", "col1", "col2", "result"]},
             {"op": "orderBy", "columns": ["id"], "ascending": [True]},
@@ -366,22 +386,25 @@ def case_groupby_sum(spark: SparkSession) -> dict[str, Any]:
         (5, "Sales", 1200),
     ]
     df = spark.createDataFrame(data, ["id", "department", "salary"])
-    
+
     out_df = df.groupBy("department").sum("salary").orderBy("department")
-    
+
     input_schema = schema_to_json(df.schema)
     input_rows = df_to_rows(df)
-    
+
     expected_schema = schema_to_json(out_df.schema)
     expected_rows = df_to_rows(out_df)
-    
+
     return {
         "name": "groupby_sum",
         "pyspark_version": spark.version,
         "input": {"schema": input_schema, "rows": input_rows},
         "operations": [
             {"op": "groupBy", "columns": ["department"]},
-            {"op": "agg", "aggregations": [{"func": "sum", "alias": "sum", "column": "salary"}]},
+            {
+                "op": "agg",
+                "aggregations": [{"func": "sum", "alias": "sum", "column": "salary"}],
+            },
             {"op": "orderBy", "columns": ["department"], "ascending": [True]},
         ],
         "expected": {"schema": expected_schema, "rows": expected_rows},
@@ -398,22 +421,25 @@ def case_groupby_avg(spark: SparkSession) -> dict[str, Any]:
         (5, "Sales", 1200),
     ]
     df = spark.createDataFrame(data, ["id", "department", "salary"])
-    
+
     out_df = df.groupBy("department").avg("salary").orderBy("department")
-    
+
     input_schema = schema_to_json(df.schema)
     input_rows = df_to_rows(df)
-    
+
     expected_schema = schema_to_json(out_df.schema)
     expected_rows = df_to_rows(out_df)
-    
+
     return {
         "name": "groupby_avg",
         "pyspark_version": spark.version,
         "input": {"schema": input_schema, "rows": input_rows},
         "operations": [
             {"op": "groupBy", "columns": ["department"]},
-            {"op": "agg", "aggregations": [{"func": "avg", "alias": "avg", "column": "salary"}]},
+            {
+                "op": "agg",
+                "aggregations": [{"func": "avg", "alias": "avg", "column": "salary"}],
+            },
             {"op": "orderBy", "columns": ["department"], "ascending": [True]},
         ],
         "expected": {"schema": expected_schema, "rows": expected_rows},
@@ -430,22 +456,25 @@ def case_groupby_min(spark: SparkSession) -> dict[str, Any]:
         (5, "Sales", 1200),
     ]
     df = spark.createDataFrame(data, ["id", "department", "salary"])
-    
+
     out_df = df.groupBy("department").min("salary").orderBy("department")
-    
+
     input_schema = schema_to_json(df.schema)
     input_rows = df_to_rows(df)
-    
+
     expected_schema = schema_to_json(out_df.schema)
     expected_rows = df_to_rows(out_df)
-    
+
     return {
         "name": "groupby_min",
         "pyspark_version": spark.version,
         "input": {"schema": input_schema, "rows": input_rows},
         "operations": [
             {"op": "groupBy", "columns": ["department"]},
-            {"op": "agg", "aggregations": [{"func": "min", "alias": "min", "column": "salary"}]},
+            {
+                "op": "agg",
+                "aggregations": [{"func": "min", "alias": "min", "column": "salary"}],
+            },
             {"op": "orderBy", "columns": ["department"], "ascending": [True]},
         ],
         "expected": {"schema": expected_schema, "rows": expected_rows},
@@ -462,22 +491,25 @@ def case_groupby_max(spark: SparkSession) -> dict[str, Any]:
         (5, "Sales", 1200),
     ]
     df = spark.createDataFrame(data, ["id", "department", "salary"])
-    
+
     out_df = df.groupBy("department").max("salary").orderBy("department")
-    
+
     input_schema = schema_to_json(df.schema)
     input_rows = df_to_rows(df)
-    
+
     expected_schema = schema_to_json(out_df.schema)
     expected_rows = df_to_rows(out_df)
-    
+
     return {
         "name": "groupby_max",
         "pyspark_version": spark.version,
         "input": {"schema": input_schema, "rows": input_rows},
         "operations": [
             {"op": "groupBy", "columns": ["department"]},
-            {"op": "agg", "aggregations": [{"func": "max", "alias": "max", "column": "salary"}]},
+            {
+                "op": "agg",
+                "aggregations": [{"func": "max", "alias": "max", "column": "salary"}],
+            },
             {"op": "orderBy", "columns": ["department"], "ascending": [True]},
         ],
         "expected": {"schema": expected_schema, "rows": expected_rows},
@@ -567,7 +599,10 @@ def case_groupby_null_keys(spark: SparkSession) -> dict[str, Any]:
         "input": {"schema": input_schema, "rows": input_rows},
         "operations": [
             {"op": "groupBy", "columns": ["category"]},
-            {"op": "agg", "aggregations": [{"func": "sum", "alias": "sum", "column": "value"}]},
+            {
+                "op": "agg",
+                "aggregations": [{"func": "sum", "alias": "sum", "column": "value"}],
+            },
             {"op": "orderBy", "columns": ["category"], "ascending": [True]},
         ],
         "expected": {"schema": expected_schema, "rows": expected_rows},
@@ -576,53 +611,61 @@ def case_groupby_null_keys(spark: SparkSession) -> dict[str, Any]:
 
 def case_null_comparison_equality(spark: SparkSession) -> dict[str, Any]:
     """Test null comparison semantics: col == NULL, col != NULL return NULL."""
-    from pyspark.sql.types import StructType, StructField, IntegerType, StringType
-    from pyspark.sql.functions import col, lit, when
-    
-    schema = StructType([
-        StructField("id", IntegerType(), True),
-        StructField("value", IntegerType(), True),
-    ])
+    from pyspark.sql.types import StructType, StructField, IntegerType
+    from pyspark.sql.functions import col, lit
+
+    schema = StructType(
+        [
+            StructField("id", IntegerType(), True),
+            StructField("value", IntegerType(), True),
+        ]
+    )
     data = [(1, 10), (2, None), (3, 20), (4, None)]
     df = spark.createDataFrame(data, schema=schema)
-    
+
     # Test that col == NULL and col != NULL return NULL (not boolean)
     # Use a null column instead of lit(None) for Polars compatibility
     from pyspark.sql.functions import when as pyspark_when
+
     df_with_null_col = df.withColumn("null_col", lit(None).cast("int"))
-    out_df = df_with_null_col.withColumn(
-        "eq_null",
-        pyspark_when(col("value") == col("null_col"), lit("NULL")).otherwise(lit("NOT_NULL"))
-    ).withColumn(
-        "ne_null",
-        pyspark_when(col("value") != col("null_col"), lit("NOT_NULL")).otherwise(lit("NULL"))
-    ).select("id", "value", "eq_null", "ne_null").orderBy("id")
-    
+    out_df = (
+        df_with_null_col.withColumn(
+            "eq_null",
+            pyspark_when(col("value") == col("null_col"), lit("NULL")).otherwise(
+                lit("NOT_NULL")
+            ),
+        )
+        .withColumn(
+            "ne_null",
+            pyspark_when(col("value") != col("null_col"), lit("NOT_NULL")).otherwise(
+                lit("NULL")
+            ),
+        )
+        .select("id", "value", "eq_null", "ne_null")
+        .orderBy("id")
+    )
+
     input_schema = schema_to_json(df.schema)
     input_rows = df_to_rows(df)
-    
+
     expected_schema = schema_to_json(out_df.schema)
     expected_rows = df_to_rows(out_df)
-    
+
     return {
         "name": "null_comparison_equality",
         "pyspark_version": spark.version,
         "input": {"schema": input_schema, "rows": input_rows},
         "operations": [
-            {
-                "op": "withColumn",
-                "column": "null_col",
-                "expr": "lit(None)"
-            },
+            {"op": "withColumn", "column": "null_col", "expr": "lit(None)"},
             {
                 "op": "withColumn",
                 "column": "eq_null",
-                "expr": "when(col('value') == col('null_col')).then('NULL').otherwise('NOT_NULL')"
+                "expr": "when(col('value') == col('null_col')).then('NULL').otherwise('NOT_NULL')",
             },
             {
                 "op": "withColumn",
                 "column": "ne_null",
-                "expr": "when(col('value') != col('null_col')).then('NOT_NULL').otherwise('NULL')"
+                "expr": "when(col('value') != col('null_col')).then('NOT_NULL').otherwise('NULL')",
             },
             {"op": "select", "columns": ["id", "value", "eq_null", "ne_null"]},
             {"op": "orderBy", "columns": ["id"], "ascending": [True]},
@@ -634,55 +677,63 @@ def case_null_comparison_equality(spark: SparkSession) -> dict[str, Any]:
 def case_null_comparison_ordering(spark: SparkSession) -> dict[str, Any]:
     """Test null comparison semantics: col > NULL, col < NULL return NULL."""
     from pyspark.sql.types import StructType, StructField, IntegerType
-    from pyspark.sql.functions import col, lit, when
-    
-    schema = StructType([
-        StructField("id", IntegerType(), True),
-        StructField("value", IntegerType(), True),
-    ])
+    from pyspark.sql.functions import col, lit
+
+    schema = StructType(
+        [
+            StructField("id", IntegerType(), True),
+            StructField("value", IntegerType(), True),
+        ]
+    )
     data = [(1, 10), (2, None), (3, 20), (4, None)]
     df = spark.createDataFrame(data, schema=schema)
-    
+
     # Test that ordering comparisons with NULL return NULL
     # Note: We test this indirectly by checking that comparisons with null columns return null
     # Direct lit(None) comparisons are not easily representable in Polars
     # Instead, we'll test by comparing with a null column
     from pyspark.sql.functions import when as pyspark_when
+
     # Create a column that's always null for comparison
     df_with_null_col = df.withColumn("null_col", lit(None).cast("int"))
-    out_df = df_with_null_col.withColumn(
-        "gt_null",
-        pyspark_when(col("value") > col("null_col"), lit("TRUE")).otherwise(lit("FALSE_OR_NULL"))
-    ).withColumn(
-        "lt_null",
-        pyspark_when(col("value") < col("null_col"), lit("TRUE")).otherwise(lit("FALSE_OR_NULL"))
-    ).select("id", "value", "gt_null", "lt_null").orderBy("id")
-    
+    out_df = (
+        df_with_null_col.withColumn(
+            "gt_null",
+            pyspark_when(col("value") > col("null_col"), lit("TRUE")).otherwise(
+                lit("FALSE_OR_NULL")
+            ),
+        )
+        .withColumn(
+            "lt_null",
+            pyspark_when(col("value") < col("null_col"), lit("TRUE")).otherwise(
+                lit("FALSE_OR_NULL")
+            ),
+        )
+        .select("id", "value", "gt_null", "lt_null")
+        .orderBy("id")
+    )
+
     input_schema = schema_to_json(df.schema)
     input_rows = df_to_rows(df)
-    
+
     expected_schema = schema_to_json(out_df.schema)
     expected_rows = df_to_rows(out_df)
-    
+
     return {
         "name": "null_comparison_ordering",
         "pyspark_version": spark.version,
         "input": {"schema": input_schema, "rows": input_rows},
         "operations": [
-            {
-                "op": "withColumn",
-                "column": "null_col",
-                "expr": "lit(None)"
-            },
+            {"op": "withColumn", "column": "null_col", "expr": "lit(None)"},
             {
                 "op": "withColumn",
                 "column": "gt_null",
-                "expr": "when(col('value') > col('null_col')).then('TRUE').otherwise('FALSE_OR_NULL')"
+                "expr": "when(col('value') > col('null_col')).then('TRUE').otherwise('FALSE_OR_NULL')",
             },
             {
                 "op": "withColumn",
                 "column": "lt_null",
-                "expr": "when(col('value') < col('null_col')).then('TRUE').otherwise('FALSE_OR_NULL')"
+                "expr": "when(col('value') < col('null_col')).then('TRUE').otherwise('FALSE_OR_NULL')",
             },
             {"op": "select", "columns": ["id", "value", "gt_null", "lt_null"]},
             {"op": "orderBy", "columns": ["id"], "ascending": [True]},
@@ -693,14 +744,16 @@ def case_null_comparison_ordering(spark: SparkSession) -> dict[str, Any]:
 
 def case_null_safe_equality(spark: SparkSession) -> dict[str, Any]:
     """Test null-safe equality: NULL <=> NULL returns True."""
-    from pyspark.sql.types import StructType, StructField, IntegerType, StringType
-    from pyspark.sql.functions import col, lit
-    
-    schema = StructType([
-        StructField("id", IntegerType(), True),
-        StructField("value1", IntegerType(), True),
-        StructField("value2", IntegerType(), True),
-    ])
+    from pyspark.sql.types import StructType, StructField, IntegerType
+    from pyspark.sql.functions import col
+
+    schema = StructType(
+        [
+            StructField("id", IntegerType(), True),
+            StructField("value1", IntegerType(), True),
+            StructField("value2", IntegerType(), True),
+        ]
+    )
     data = [
         (1, 10, 10),
         (2, None, None),
@@ -709,19 +762,20 @@ def case_null_safe_equality(spark: SparkSession) -> dict[str, Any]:
         (5, 40, 40),
     ]
     df = spark.createDataFrame(data, schema=schema)
-    
+
     # Test eqNullSafe: NULL <=> NULL = True, value <=> NULL = False
-    out_df = df.withColumn(
-        "null_safe_eq",
-        col("value1").eqNullSafe(col("value2"))
-    ).select("id", "value1", "value2", "null_safe_eq").orderBy("id")
-    
+    out_df = (
+        df.withColumn("null_safe_eq", col("value1").eqNullSafe(col("value2")))
+        .select("id", "value1", "value2", "null_safe_eq")
+        .orderBy("id")
+    )
+
     input_schema = schema_to_json(df.schema)
     input_rows = df_to_rows(df)
-    
+
     expected_schema = schema_to_json(out_df.schema)
     expected_rows = df_to_rows(out_df)
-    
+
     return {
         "name": "null_safe_equality",
         "pyspark_version": spark.version,
@@ -730,7 +784,7 @@ def case_null_safe_equality(spark: SparkSession) -> dict[str, Any]:
             {
                 "op": "withColumn",
                 "column": "null_safe_eq",
-                "expr": "col('value1').eqNullSafe(col('value2'))"
+                "expr": "col('value1').eqNullSafe(col('value2'))",
             },
             {"op": "select", "columns": ["id", "value1", "value2", "null_safe_eq"]},
             {"op": "orderBy", "columns": ["id"], "ascending": [True]},
@@ -743,24 +797,26 @@ def case_null_in_filter(spark: SparkSession) -> dict[str, Any]:
     """Test filtering with null values: df.filter(col != 1) excludes NULL rows."""
     from pyspark.sql.types import StructType, StructField, IntegerType
     from pyspark.sql.functions import col
-    
-    schema = StructType([
-        StructField("id", IntegerType(), True),
-        StructField("value", IntegerType(), True),
-    ])
+
+    schema = StructType(
+        [
+            StructField("id", IntegerType(), True),
+            StructField("value", IntegerType(), True),
+        ]
+    )
     data = [(1, 1), (2, 2), (3, None), (4, 1), (5, None)]
     df = spark.createDataFrame(data, schema=schema)
-    
+
     # filter(col != 1) should exclude rows where value is NULL
     # because NULL != 1 returns NULL (falsy)
     out_df = df.filter(col("value") != 1).select("id", "value").orderBy("id")
-    
+
     input_schema = schema_to_json(df.schema)
     input_rows = df_to_rows(df)
-    
+
     expected_schema = schema_to_json(out_df.schema)
     expected_rows = df_to_rows(out_df)
-    
+
     return {
         "name": "null_in_filter",
         "pyspark_version": spark.version,
@@ -778,24 +834,30 @@ def case_type_coercion_numeric(spark: SparkSession) -> dict[str, Any]:
     """Test type coercion: int vs double comparisons."""
     from pyspark.sql.types import StructType, StructField, IntegerType, DoubleType
     from pyspark.sql.functions import col
-    
-    schema = StructType([
-        StructField("id", IntegerType(), True),
-        StructField("int_col", IntegerType(), True),
-        StructField("double_col", DoubleType(), True),
-    ])
+
+    schema = StructType(
+        [
+            StructField("id", IntegerType(), True),
+            StructField("int_col", IntegerType(), True),
+            StructField("double_col", DoubleType(), True),
+        ]
+    )
     data = [(1, 10, 5.5), (2, 20, 15.7), (3, 30, 25.3)]
     df = spark.createDataFrame(data, schema=schema)
-    
+
     # Test that int_col > 5.5 coerces int to double
-    out_df = df.filter(col("int_col") > 5.5).select("id", "int_col", "double_col").orderBy("id")
-    
+    out_df = (
+        df.filter(col("int_col") > 5.5)
+        .select("id", "int_col", "double_col")
+        .orderBy("id")
+    )
+
     input_schema = schema_to_json(df.schema)
     input_rows = df_to_rows(df)
-    
+
     expected_schema = schema_to_json(out_df.schema)
     expected_rows = df_to_rows(out_df)
-    
+
     return {
         "name": "type_coercion_numeric",
         "pyspark_version": spark.version,
@@ -813,28 +875,31 @@ def case_type_coercion_mixed(spark: SparkSession) -> dict[str, Any]:
     """Test type coercion in arithmetic operations."""
     from pyspark.sql.types import StructType, StructField, IntegerType, DoubleType
     from pyspark.sql.functions import col
-    
-    schema = StructType([
-        StructField("id", IntegerType(), True),
-        StructField("int_val", IntegerType(), True),
-        StructField("double_val", DoubleType(), True),
-    ])
+
+    schema = StructType(
+        [
+            StructField("id", IntegerType(), True),
+            StructField("int_val", IntegerType(), True),
+            StructField("double_val", DoubleType(), True),
+        ]
+    )
     data = [(1, 10, 2.5), (2, 20, 3.5), (3, 30, 4.5)]
     df = spark.createDataFrame(data, schema=schema)
-    
+
     # Test arithmetic with type coercion: int + double = double
     # We'll use withColumn to see the result type
-    out_df = df.withColumn(
-        "sum",
-        col("int_val") + col("double_val")
-    ).select("id", "int_val", "double_val", "sum").orderBy("id")
-    
+    out_df = (
+        df.withColumn("sum", col("int_val") + col("double_val"))
+        .select("id", "int_val", "double_val", "sum")
+        .orderBy("id")
+    )
+
     input_schema = schema_to_json(df.schema)
     input_rows = df_to_rows(df)
-    
+
     expected_schema = schema_to_json(out_df.schema)
     expected_rows = df_to_rows(out_df)
-    
+
     return {
         "name": "type_coercion_mixed",
         "pyspark_version": spark.version,
@@ -843,7 +908,7 @@ def case_type_coercion_mixed(spark: SparkSession) -> dict[str, Any]:
             {
                 "op": "withColumn",
                 "column": "sum",
-                "expr": "col('int_val') + col('double_val')"
+                "expr": "col('int_val') + col('double_val')",
             },
             {"op": "select", "columns": ["id", "int_val", "double_val", "sum"]},
             {"op": "orderBy", "columns": ["id"], "ascending": [True]},
@@ -887,7 +952,12 @@ def case_groupby_with_nulls(spark: SparkSession) -> dict[str, Any]:
 
 def case_filter_and_or(spark: SparkSession) -> dict[str, Any]:
     """Filter combining AND/OR conditions."""
-    from pyspark.sql.types import StructType, StructField, IntegerType, IntegerType as IntType
+    from pyspark.sql.types import (
+        StructType,
+        StructField,
+        IntegerType,
+        IntegerType as IntType,
+    )
     from pyspark.sql.functions import col
 
     schema = StructType(
@@ -989,10 +1059,14 @@ def case_with_logical_column(spark: SparkSession) -> dict[str, Any]:
     ]
     df = spark.createDataFrame(data, schema=schema)
 
-    out_df = df.withColumn(
-        "is_target",
-        (col("age") > 30) & (col("score") < 100),
-    ).select("id", "age", "score", "is_target").orderBy("id")
+    out_df = (
+        df.withColumn(
+            "is_target",
+            (col("age") > 30) & (col("score") < 100),
+        )
+        .select("id", "age", "score", "is_target")
+        .orderBy("id")
+    )
 
     input_schema = schema_to_json(df.schema)
     input_rows = df_to_rows(df)
@@ -1088,10 +1162,14 @@ def case_with_arithmetic_logical_mix(spark: SparkSession) -> dict[str, Any]:
 
     # Test: withColumn producing a boolean from arithmetic + logical
     # (int_val + double_val) > threshold
-    out_df = df.withColumn(
-        "above_threshold",
-        (col("int_val") + col("double_val")) > col("threshold"),
-    ).select("id", "int_val", "double_val", "threshold", "above_threshold").orderBy("id")
+    out_df = (
+        df.withColumn(
+            "above_threshold",
+            (col("int_val") + col("double_val")) > col("threshold"),
+        )
+        .select("id", "int_val", "double_val", "threshold", "above_threshold")
+        .orderBy("id")
+    )
 
     input_schema = schema_to_json(df.schema)
     input_rows = df_to_rows(df)
@@ -1109,7 +1187,16 @@ def case_with_arithmetic_logical_mix(spark: SparkSession) -> dict[str, Any]:
                 "column": "above_threshold",
                 "expr": "(col('int_val') + col('double_val')) > col('threshold')",
             },
-            {"op": "select", "columns": ["id", "int_val", "double_val", "threshold", "above_threshold"]},
+            {
+                "op": "select",
+                "columns": [
+                    "id",
+                    "int_val",
+                    "double_val",
+                    "threshold",
+                    "above_threshold",
+                ],
+            },
             {"op": "orderBy", "columns": ["id"], "ascending": [True]},
         ],
         "expected": {"schema": expected_schema, "rows": expected_rows},
@@ -1314,7 +1401,11 @@ def case_string_substring(spark: SparkSession) -> dict[str, Any]:
         "pyspark_version": spark.version,
         "input": {"schema": input_schema, "rows": input_rows},
         "operations": [
-            {"op": "withColumn", "column": "name_prefix", "expr": "substring(col('name'), 1, 3)"},
+            {
+                "op": "withColumn",
+                "column": "name_prefix",
+                "expr": "substring(col('name'), 1, 3)",
+            },
             {"op": "orderBy", "columns": ["id"], "ascending": [True]},
         ],
         "expected": {"schema": expected_schema, "rows": expected_rows},
@@ -1343,8 +1434,16 @@ def case_string_concat(spark: SparkSession) -> dict[str, Any]:
         "pyspark_version": spark.version,
         "input": {"schema": input_schema, "rows": input_rows},
         "operations": [
-            {"op": "withColumn", "column": "full_name", "expr": "concat(col('first'), lit(' '), col('last'))"},
-            {"op": "withColumn", "column": "initials", "expr": "concat_ws('.', col('first'), col('last'))"},
+            {
+                "op": "withColumn",
+                "column": "full_name",
+                "expr": "concat(col('first'), lit(' '), col('last'))",
+            },
+            {
+                "op": "withColumn",
+                "column": "initials",
+                "expr": "concat_ws('.', col('first'), col('last'))",
+            },
             {"op": "orderBy", "columns": ["id"], "ascending": [True]},
         ],
         "expected": {"schema": expected_schema, "rows": expected_rows},
@@ -1377,8 +1476,18 @@ def case_row_number_window(spark: SparkSession) -> dict[str, Any]:
         "pyspark_version": spark.version,
         "input": {"schema": input_schema, "rows": input_rows},
         "operations": [
-            {"op": "orderBy", "columns": ["dept", "salary"], "ascending": [True, False]},
-            {"op": "window", "column": "rn", "func": "row_number", "partition_by": ["dept"], "order_by": [{"col": "salary", "asc": False}]},
+            {
+                "op": "orderBy",
+                "columns": ["dept", "salary"],
+                "ascending": [True, False],
+            },
+            {
+                "op": "window",
+                "column": "rn",
+                "func": "row_number",
+                "partition_by": ["dept"],
+                "order_by": [{"col": "salary", "asc": False}],
+            },
             {"op": "orderBy", "columns": ["dept", "rn"], "ascending": [True, True]},
         ],
         "expected": {"schema": expected_schema, "rows": expected_rows},
@@ -1410,8 +1519,18 @@ def case_rank_window(spark: SparkSession) -> dict[str, Any]:
         "pyspark_version": spark.version,
         "input": {"schema": input_schema, "rows": input_rows},
         "operations": [
-            {"op": "orderBy", "columns": ["dept", "salary"], "ascending": [True, False]},
-            {"op": "window", "column": "rank", "func": "rank", "partition_by": ["dept"], "order_by": [{"col": "salary", "asc": False}]},
+            {
+                "op": "orderBy",
+                "columns": ["dept", "salary"],
+                "ascending": [True, False],
+            },
+            {
+                "op": "window",
+                "column": "rank",
+                "func": "rank",
+                "partition_by": ["dept"],
+                "order_by": [{"col": "salary", "asc": False}],
+            },
             {"op": "orderBy", "columns": ["dept", "rank"], "ascending": [True, True]},
         ],
         "expected": {"schema": expected_schema, "rows": expected_rows},
@@ -1443,8 +1562,22 @@ def case_lag_lead_window(spark: SparkSession) -> dict[str, Any]:
         "input": {"schema": input_schema, "rows": input_rows},
         "operations": [
             {"op": "orderBy", "columns": ["id"], "ascending": [True]},
-            {"op": "window", "column": "lag_val", "func": "lag", "partition_by": ["dept"], "order_by": [{"col": "id", "asc": True}], "value_column": "val"},
-            {"op": "window", "column": "lead_val", "func": "lead", "partition_by": ["dept"], "order_by": [{"col": "id", "asc": True}], "value_column": "val"},
+            {
+                "op": "window",
+                "column": "lag_val",
+                "func": "lag",
+                "partition_by": ["dept"],
+                "order_by": [{"col": "id", "asc": True}],
+                "value_column": "val",
+            },
+            {
+                "op": "window",
+                "column": "lead_val",
+                "func": "lead",
+                "partition_by": ["dept"],
+                "order_by": [{"col": "id", "asc": True}],
+                "value_column": "val",
+            },
             {"op": "orderBy", "columns": ["id"], "ascending": [True]},
         ],
         "expected": {"schema": expected_schema, "rows": expected_rows},
@@ -1506,4 +1639,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

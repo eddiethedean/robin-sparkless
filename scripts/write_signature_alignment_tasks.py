@@ -4,6 +4,7 @@ Generate docs/SIGNATURE_ALIGNMENT_TASKS.md from docs/signature_comparison.json.
 Run after compare_signatures.py. Provides a concrete checklist to align
 robin-sparkless Python API parameter names and optional args to PySpark.
 """
+
 from __future__ import annotations
 
 import json
@@ -58,12 +59,18 @@ def main() -> int:
 
     # Group by action type for checklist
     only_col_to_col = [t for t in tasks if t["actions"] == ["column → col"]]
-    add_optional = [t for t in tasks if t["actions"] and "Add optional" in t["actions"][0]]
-    param_count_diff = [t for t in tasks if t["actions"] and "Param count" in t["actions"][0]]
+    add_optional = [
+        t for t in tasks if t["actions"] and "Add optional" in t["actions"][0]
+    ]
+    param_count_diff = [
+        t for t in tasks if t["actions"] and "Param count" in t["actions"][0]
+    ]
     other_renames = [
         t
         for t in tasks
-        if t not in only_col_to_col and t not in add_optional and t not in param_count_diff
+        if t not in only_col_to_col
+        and t not in add_optional
+        and t not in param_count_diff
     ]
 
     lines = [
@@ -74,7 +81,7 @@ def main() -> int:
         "",
         "**How to apply:**",
         "- In `src/python/mod.rs`, either (1) rename the `#[pyfunction]` parameter to the PySpark name, or (2) add `#[pyo3(signature = (col, ...))]` and keep the Rust param name.",
-        "- For \"Add optional\", add the parameter with the same default as PySpark (check [PySpark SQL API](https://spark.apache.org/docs/latest/api/python/reference/pyspark.sql/functions.html)).",
+        '- For "Add optional", add the parameter with the same default as PySpark (check [PySpark SQL API](https://spark.apache.org/docs/latest/api/python/reference/pyspark.sql/functions.html)).',
         "",
         "---",
         "",
@@ -104,7 +111,9 @@ def main() -> int:
     )
     for t in add_optional:
         add = t["actions"][0].replace("Add optional: ", "") if t["actions"] else ""
-        lines.append(f"| | `{t['name']}` | `{t['name']}({t['pyspark']})` | `{t['name']}({t['robin']})` | {add} |")
+        lines.append(
+            f"| | `{t['name']}` | `{t['name']}({t['pyspark']})` | `{t['name']}({t['robin']})` | {add} |"
+        )
     lines.append("")
     lines.append(f"**Total: {len(add_optional)}**")
     lines.extend(
@@ -137,7 +146,9 @@ def main() -> int:
     )
     for t in other_renames:
         action = "; ".join(t["actions"])
-        lines.append(f"| | `{t['name']}` | `{t['pyspark']}` | `{t['robin']}` | {action} |")
+        lines.append(
+            f"| | `{t['name']}` | `{t['pyspark']}` | `{t['robin']}` | {action} |"
+        )
     lines.append("")
     lines.append(f"**Total: {len(other_renames)}**")
     lines.extend(
@@ -165,4 +176,5 @@ def main() -> int:
 
 if __name__ == "__main__":
     import sys
+
     sys.exit(main())

@@ -25,3 +25,18 @@ features = ["pyo3"]
 py-limited-api = "cp38"
 # Type stubs for static checkers (mypy, pyright).
 include = ["robin_sparkless.pyi"]
+
+[tool.mypy]
+python_version = "3.8"
+exclude = ["^target/", "^\\.venv/", ".*/site-packages/", ".*/\\.pyenv/"]
+# Optional deps (pyspark, sparkless) may not be installed
+[[tool.mypy.overrides]]
+module = ["pyspark.*", "sparkless.*", "pytest.*", "_pytest.*"]
+ignore_missing_imports = true
+# Don't type-check pytest (uses 3.9+ syntax); skip following into it
+[[tool.mypy.overrides]]
+module = ["pytest", "_pytest", "pytest.*", "_pytest.*"]
+follow_imports = "skip"
+
+[tool.ruff]
+target-version = "py38"

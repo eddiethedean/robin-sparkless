@@ -8,6 +8,7 @@ Run after building the extension (requires an activated virtualenv for maturin d
   pytest tests/python/
   # or: python -m pytest tests/python/
 """
+
 from __future__ import annotations
 
 import pytest
@@ -16,12 +17,14 @@ import pytest
 def test_import_module() -> None:
     """Module can be imported."""
     import robin_sparkless
+
     assert robin_sparkless is not None
 
 
 def test_spark_session_builder() -> None:
     """SparkSession.builder().app_name(...).get_or_create() works."""
     import robin_sparkless as rs
+
     spark = rs.SparkSession.builder().app_name("test").get_or_create()
     assert spark is not None
     assert spark.is_case_sensitive() in (True, False)
@@ -30,6 +33,7 @@ def test_spark_session_builder() -> None:
 def test_create_dataframe_and_collect() -> None:
     """create_dataframe with list of 3-tuples and collect returns list of dicts."""
     import robin_sparkless as rs
+
     spark = rs.SparkSession.builder().app_name("test").get_or_create()
     data = [(1, 25, "Alice"), (2, 30, "Bob"), (3, 35, "Carol")]
     df = spark.create_dataframe(data, ["id", "age", "name"])
@@ -47,6 +51,7 @@ def test_create_dataframe_and_collect() -> None:
 def test_filter_and_select() -> None:
     """filter(expr) and select(cols) return DataFrame; collect matches."""
     import robin_sparkless as rs
+
     spark = rs.SparkSession.builder().app_name("test").get_or_create()
     data = [(1, 25, "Alice"), (2, 30, "Bob"), (3, 35, "Carol")]
     df = spark.create_dataframe(data, ["id", "age", "name"])
@@ -66,6 +71,7 @@ def test_filter_and_select() -> None:
 def test_with_column_and_show() -> None:
     """with_column adds a column; show runs without error."""
     import robin_sparkless as rs
+
     spark = rs.SparkSession.builder().app_name("test").get_or_create()
     data = [(1, 25, "Alice"), (2, 30, "Bob")]
     df = spark.create_dataframe(data, ["id", "age", "name"])
@@ -77,8 +83,11 @@ def test_with_column_and_show() -> None:
 def test_group_by_count() -> None:
     """group_by(...).count() returns DataFrame with group keys and count."""
     import robin_sparkless as rs
+
     spark = rs.SparkSession.builder().app_name("test").get_or_create()
-    df = spark.create_dataframe([(1, 0, "a"), (2, 0, "a"), (3, 0, "b")], ["id", "age", "grp"])
+    df = spark.create_dataframe(
+        [(1, 0, "a"), (2, 0, "a"), (3, 0, "b")], ["id", "age", "grp"]
+    )
     grouped = df.group_by(["grp"])
     result = grouped.count()
     assert result is not None
@@ -92,9 +101,16 @@ def test_group_by_count() -> None:
 def test_col_lit_when() -> None:
     """col, lit, when().then().otherwise() build expressions."""
     import robin_sparkless as rs
+
     spark = rs.SparkSession.builder().app_name("test").get_or_create()
-    df = spark.create_dataframe([(1, 10, ""), (2, 20, ""), (3, 30, "")], ["id", "age", "name"])
-    expr = rs.when(rs.col("age").gt(rs.lit(15))).then(rs.lit("high")).otherwise(rs.lit("low"))
+    df = spark.create_dataframe(
+        [(1, 10, ""), (2, 20, ""), (3, 30, "")], ["id", "age", "name"]
+    )
+    expr = (
+        rs.when(rs.col("age").gt(rs.lit(15)))
+        .then(rs.lit("high"))
+        .otherwise(rs.lit("low"))
+    )
     out = df.with_column("level", expr)
     rows = out.collect()
     assert len(rows) == 3
@@ -106,6 +122,7 @@ def test_col_lit_when() -> None:
 def test_limit_and_distinct() -> None:
     """limit(n) and distinct() behave correctly."""
     import robin_sparkless as rs
+
     spark = rs.SparkSession.builder().app_name("test").get_or_create()
     data = [(1, 1, "a"), (2, 2, "b"), (3, 3, "c")]
     df = spark.create_dataframe(data, ["id", "age", "name"])
@@ -121,8 +138,11 @@ def test_limit_and_distinct() -> None:
 def test_aggregate_functions() -> None:
     """Module-level sum, avg, min, max, count work on columns."""
     import robin_sparkless as rs
+
     spark = rs.SparkSession.builder().app_name("test").get_or_create()
-    df = spark.create_dataframe([(1, 10, "a"), (2, 20, "a"), (3, 30, "b")], ["id", "val", "grp"])
+    df = spark.create_dataframe(
+        [(1, 10, "a"), (2, 20, "a"), (3, 30, "b")], ["id", "val", "grp"]
+    )
     grouped = df.group_by(["grp"])
     agg_df = grouped.agg([rs.sum(rs.col("val")), rs.count(rs.col("id"))])
     rows = agg_df.collect()
@@ -132,8 +152,11 @@ def test_aggregate_functions() -> None:
 def test_stat_cov_corr() -> None:
     """df.stat().cov(col1, col2) and .corr(col1, col2) return float."""
     import robin_sparkless as rs
+
     spark = rs.SparkSession.builder().app_name("test").get_or_create()
-    df = spark.create_dataframe([(1, 10, "a"), (2, 20, "b"), (3, 30, "c")], ["id", "x", "name"])
+    df = spark.create_dataframe(
+        [(1, 10, "a"), (2, 20, "b"), (3, 30, "c")], ["id", "x", "name"]
+    )
     stat = df.stat()
     c = stat.cov("id", "x")
     assert isinstance(c, (int, float))
@@ -145,8 +168,11 @@ def test_stat_cov_corr() -> None:
 def test_na_fill_drop() -> None:
     """df.na().fill(value) and df.na().drop() exist and run."""
     import robin_sparkless as rs
+
     spark = rs.SparkSession.builder().app_name("test").get_or_create()
-    df = spark.create_dataframe([(1, 10, "a"), (2, 20, "b"), (3, 30, "c")], ["id", "age", "name"])
+    df = spark.create_dataframe(
+        [(1, 10, "a"), (2, 20, "b"), (3, 30, "c")], ["id", "age", "name"]
+    )
     filled = df.na().fill(rs.lit(0))
     assert filled.count() == 3
     dropped = df.na().drop()
@@ -156,6 +182,7 @@ def test_na_fill_drop() -> None:
 def test_with_columns_and_renamed() -> None:
     """with_columns and with_columns_renamed work (dict or list of tuples)."""
     import robin_sparkless as rs
+
     spark = rs.SparkSession.builder().app_name("test").get_or_create()
     df = spark.create_dataframe([(1, 25, "Alice")], ["id", "age", "name"])
     out = df.with_columns({"extra": rs.lit(42)})
@@ -169,18 +196,22 @@ def test_with_columns_and_renamed() -> None:
 def test_to_pandas() -> None:
     """to_pandas returns list of dicts (same as collect)."""
     import robin_sparkless as rs
+
     spark = rs.SparkSession.builder().app_name("test").get_or_create()
     df = spark.create_dataframe([(1, 25, "Alice")], ["id", "age", "name"])
     result = df.to_pandas()
     assert result is not None
     assert isinstance(result, list)
     assert len(result) == 1
-    assert result[0]["id"] == 1 and result[0]["age"] == 25 and result[0]["name"] == "Alice"
+    assert (
+        result[0]["id"] == 1 and result[0]["age"] == 25 and result[0]["name"] == "Alice"
+    )
 
 
 def test_ascii_base64() -> None:
     """ascii(column) and base64(column) exist and run."""
     import robin_sparkless as rs
+
     spark = rs.SparkSession.builder().app_name("test").get_or_create()
     df = spark.create_dataframe([(1, 65, "A")], ["id", "code", "name"])
     out = df.with_column("ascii_val", rs.ascii(rs.col("name")))
@@ -193,6 +224,7 @@ def test_ascii_base64() -> None:
 def test_filter_nonexistent_column_raises() -> None:
     """Filter with non-existent column raises an error."""
     import robin_sparkless as rs
+
     spark = rs.SparkSession.builder().app_name("test").get_or_create()
     df = spark.create_dataframe([(1, 25, "Alice")], ["id", "age", "name"])
     with pytest.raises(Exception):
@@ -202,6 +234,7 @@ def test_filter_nonexistent_column_raises() -> None:
 def test_select_nonexistent_column_raises() -> None:
     """Select with non-existent column raises an error."""
     import robin_sparkless as rs
+
     spark = rs.SparkSession.builder().app_name("test").get_or_create()
     df = spark.create_dataframe([(1, 25, "Alice")], ["id", "age", "name"])
     with pytest.raises(Exception):
