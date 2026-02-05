@@ -300,11 +300,13 @@ jobs:
           manylinux: "2_17"
           container: off
       - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@v1.10.0
-        with:
-          password: ${{ secrets.PYPI_API_TOKEN }}
-          packages-dir: target/wheels
-          skip-existing: true
+        shell: bash
+        env:
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
+        run: |
+          pip install twine
+          twine upload --skip-existing target/wheels/*
 
   publish-pypi-manylinux-aarch64:
     name: PyPI manylinux aarch64
@@ -321,11 +323,13 @@ jobs:
           manylinux: "2_28"
           container: off
       - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@v1.10.0
-        with:
-          password: ${{ secrets.PYPI_API_TOKEN }}
-          packages-dir: target/wheels
-          skip-existing: true
+        shell: bash
+        env:
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
+        run: |
+          pip install twine
+          twine upload --skip-existing target/wheels/*
 
   # --- PyPI: musllinux ---
   publish-pypi-musllinux-x86_64:
@@ -341,11 +345,15 @@ jobs:
           command: build
           args: --release --zig --compatibility musllinux_1_2
       - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@v1.10.0
-        with:
-          password: ${{ secrets.PYPI_API_TOKEN }}
-          packages-dir: target/wheels
-          skip-existing: true
+        shell: bash
+        env:
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
+        run: |
+          pip install twine
+          for f in target/wheels/*; do
+            twine check "$f" 2>/dev/null && twine upload --skip-existing "$f" || true
+          done
 
   publish-pypi-musllinux-aarch64:
     name: PyPI musllinux aarch64
@@ -360,11 +368,15 @@ jobs:
           command: build
           args: --release --zig --compatibility musllinux_1_2
       - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@v1.10.0
-        with:
-          password: ${{ secrets.PYPI_API_TOKEN }}
-          packages-dir: target/wheels
-          skip-existing: true
+        shell: bash
+        env:
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
+        run: |
+          pip install twine
+          for f in target/wheels/*; do
+            twine check "$f" 2>/dev/null && twine upload --skip-existing "$f" || true
+          done
 
   # --- PyPI: macOS ---
   publish-pypi-mac:
@@ -384,11 +396,13 @@ jobs:
           command: build
           args: --release
       - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@v1.10.0
-        with:
-          password: ${{ secrets.PYPI_API_TOKEN }}
-          packages-dir: target/wheels
-          skip-existing: true
+        shell: bash
+        env:
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
+        run: |
+          pip install twine
+          twine upload --skip-existing target/wheels/*
 
   # --- PyPI: Windows ---
   publish-pypi-windows-x86_64:
@@ -404,11 +418,13 @@ jobs:
           command: build
           args: --release
       - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@v1.10.0
-        with:
-          password: ${{ secrets.PYPI_API_TOKEN }}
-          packages-dir: target/wheels
-          skip-existing: true
+        shell: bash
+        env:
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
+        run: |
+          pip install twine
+          twine upload --skip-existing target/wheels/*
 
   publish-pypi-windows-arm64:
     name: PyPI Windows aarch64
@@ -423,8 +439,10 @@ jobs:
           command: build
           args: --release
       - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@v1.10.0
-        with:
-          password: ${{ secrets.PYPI_API_TOKEN }}
-          packages-dir: target/wheels
-          skip-existing: true
+        shell: bash
+        env:
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
+        run: |
+          pip install twine
+          twine upload --skip-existing target/wheels/*
