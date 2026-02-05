@@ -41,15 +41,3 @@ jobs:
           manylinux: "2_28"
           container: off
 
-  pypi-windows-arm64:
-    name: PyPI Windows (aarch64)
-    runs-on: windows-11-arm
-    steps:
-      - uses: actions/checkout@v4
-      - name: Publish to PyPI (Windows ARM64)
-        uses: messense/maturin-action@v1
-        with:
-          target: aarch64-pc-windows-msvc
-          command: publish
-          args: --skip-existing --no-sdist
-

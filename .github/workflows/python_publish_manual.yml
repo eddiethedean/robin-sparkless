@@ -117,25 +117,3 @@ jobs:
           command: publish
           args: --skip-existing --no-sdist
 
-  pypi-windows:
-    name: PyPI Windows (${{ matrix.target }}) (manual)
-    runs-on: ${{ matrix.runner }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - target: x86_64-pc-windows-msvc
-            runner: windows-latest
-          - target: aarch64-pc-windows-msvc
-            runner: windows-11-arm
-    steps:
-      - uses: actions/checkout@v4
-      - name: Publish to PyPI (Windows)
-        uses: messense/maturin-action@v1
-        env:
-          MATURIN_PYPI_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
-        with:
-          target: ${{ matrix.target }}
-          command: publish
-          args: --skip-existing --no-sdist
-
