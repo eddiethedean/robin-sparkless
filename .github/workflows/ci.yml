@@ -10,6 +10,7 @@ jobs:
   check:
     name: Format, lint, audit, deny, test
     runs-on: ubuntu-latest
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
 
@@ -51,9 +52,9 @@ jobs:
       - name: Test
         run: cargo nextest run
         env:
-          # Limit parallelism to avoid OOM on GitHub runners (exit 143 = SIGTERM)
-          NEXTEST_THREADS: "2"
-        timeout-minutes: 20
+          # Single thread to avoid OOM on GitHub runners (canceled/signal 143)
+          NEXTEST_THREADS: "1"
+        timeout-minutes: 25
 
   python-tests:
     name: Python tests (PyO3) - ${{ matrix.label }}
