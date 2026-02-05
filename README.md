@@ -3,6 +3,7 @@
 **PySpark-style DataFrames in Rust—no JVM.** A DataFrame library that mirrors PySpark’s API and semantics while using [Polars](https://www.pola.rs/) as the execution engine.
 
 [![crates.io](https://img.shields.io/crates/v/robin-sparkless.svg)](https://crates.io/crates/robin-sparkless)
+[![PyPI version](https://badge.fury.io/py/robin-sparkless.svg)](https://pypi.org/project/robin-sparkless/)
 [![docs.rs](https://docs.rs/robin-sparkless/badge.svg)](https://docs.rs/robin-sparkless)
 [![Documentation](https://readthedocs.org/projects/robin-sparkless/badge/?version=latest)](https://robin-sparkless.readthedocs.io/en/latest/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
@@ -45,7 +46,7 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-robin-sparkless = "0.1.1"
+robin-sparkless = "0.1.0"
 ```
 
 Optional features:
@@ -57,7 +58,13 @@ robin-sparkless = { version = "0.1.0", features = ["delta"] }  # Delta Lake read
 
 ### Python (PyO3)
 
-Build the Python extension with [maturin](https://www.maturin.rs/) (Rust + Python 3.8+):
+Install from [PyPI](https://pypi.org/project/robin-sparkless/) (Python 3.8+):
+
+```bash
+pip install robin-sparkless
+```
+
+Or build from source with [maturin](https://www.maturin.rs/):
 
 ```bash
 pip install maturin
@@ -136,6 +143,7 @@ CI runs the same checks on push/PR (see [.github/workflows/ci.yml](.github/workf
 ## Documentation
 
 - [**Full documentation (Read the Docs)**](https://robin-sparkless.readthedocs.io/) — Quickstart, Python API, reference, and Sparkless integration (MkDocs)
+- [**PyPI**](https://pypi.org/project/robin-sparkless/) — Python package (wheels for Linux, macOS, Windows)
 - [**API reference (docs.rs)**](https://docs.rs/robin-sparkless) — Crate API
 - [**QUICKSTART**](docs/QUICKSTART.md) — Build, usage, optional features, benchmarks
 - [**ROADMAP**](docs/ROADMAP.md) — Development roadmap and Sparkless integration
