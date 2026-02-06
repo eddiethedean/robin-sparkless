@@ -22,8 +22,8 @@ So that local development and CI use the same toolchains and tools:
 
 2. **Create and push a tag** matching the version with a `v` prefix:
    ```bash
-   git tag v0.1.0
-   git push origin v0.1.0
+   git tag v0.2.0
+   git push origin v0.2.0
    ```
 
 3. **CI runs automatically** on the tag push (see [.github/workflows/release.yml](../.github/workflows/release.yml)):
@@ -34,7 +34,7 @@ So that local development and CI use the same toolchains and tools:
 
 ## Version policy
 
-- Tags must match the version in `Cargo.toml` (e.g. tag `v0.1.0` only when `version = "0.1.0"`).
+- Tags must match the version in `Cargo.toml` (e.g. tag `v0.2.0` only when `version = "0.2.0"`).
 - Do not re-tag or overwrite tags; crates.io does not allow republishing the same version.
 
 ## Optional: PyPI wheel
