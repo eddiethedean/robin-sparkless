@@ -688,7 +688,10 @@ impl<'a> DataFrameWriter<'a> {
                             .finish()
                             .and_then(|lf| lf.collect())
                             .ok(),
-                        WriteFormat::Json => None, // append for JSON not supported
+                        WriteFormat::Json => LazyJsonLineReader::new(path)
+                            .finish()
+                            .and_then(|lf| lf.collect())
+                            .ok(),
                     }
                 } else {
                     None
