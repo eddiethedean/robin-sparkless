@@ -1288,7 +1288,8 @@ fn apply_operations(
                         )?;
                         // PySpark ntile: floor((rank-1)*n/count)+1, clamped to 1..n (approximately equal buckets).
                         let nt_quot = (col("_nt_rank") - lit(1i64)) * lit(n_buckets);
-                        let nt_quot_f = nt_quot.cast(DataType::Float64) / col("_nt_count").cast(DataType::Float64);
+                        let nt_quot_f = nt_quot.cast(DataType::Float64)
+                            / col("_nt_count").cast(DataType::Float64);
                         df = df.with_column_expr(
                             col_name,
                             (nt_quot_f.floor() + lit(1.0))
@@ -4855,7 +4856,9 @@ fn collect_to_simple_format(
                             Value::String(normalize_timestamp_str(cleaned))
                         } else if debug_str.starts_with('"') && debug_str.ends_with('"') {
                             // Handle quoted strings
-                            Value::String(normalize_timestamp_str(&debug_str[1..debug_str.len() - 1]))
+                            Value::String(normalize_timestamp_str(
+                                &debug_str[1..debug_str.len() - 1],
+                            ))
                         } else {
                             // Try to match known variants
                             match av {
@@ -5292,19 +5295,14 @@ fn values_equal_with_struct(a: &Value, b: &Value, struct_fields: Option<&[String
     }
 }
 
-fn values_equal_with_schema(
-    a: &Value,
-    b: &Value,
-    col_schema: Option<&ColumnSpec>,
-) -> bool {
+fn values_equal_with_schema(a: &Value, b: &Value, col_schema: Option<&ColumnSpec>) -> bool {
     // PySpark assert_true returns void (null); we return boolean. Treat as equal when expected is void and null.
     if let Some(c) = col_schema {
         if c.r#type == "void" && b == &Value::Null {
             return a == &Value::Null || a == &Value::Bool(true);
         }
     }
-    let struct_fields = col_schema
-        .and_then(|c| struct_field_names(&c.r#type));
+    let struct_fields = col_schema.and_then(|c| struct_field_names(&c.r#type));
     values_equal_with_struct(a, b, struct_fields.as_deref())
 }
 
@@ -5374,8 +5372,7 @@ fn plan_parity_fixtures() {
                     ordered,
                     &fixture.name,
                     Some(&fixture.expected.schema),
-                )
-                {
+                ) {
                     failures.push((fixture.name.clone(), e.to_string()));
                 }
             }
