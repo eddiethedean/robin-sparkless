@@ -1133,9 +1133,14 @@ pub fn exp(column: &Column) -> Column {
     column.clone().exp()
 }
 
-/// Natural logarithm (PySpark log)
+/// Natural logarithm (PySpark log with one arg)
 pub fn log(column: &Column) -> Column {
     column.clone().log()
+}
+
+/// Logarithm with given base (PySpark log(col, base)). base must be positive and not 1.
+pub fn log_with_base(column: &Column, base: f64) -> Column {
+    crate::column::Column::from_expr(column.expr().clone().log(base), None)
 }
 
 /// Sine in radians (PySpark sin)

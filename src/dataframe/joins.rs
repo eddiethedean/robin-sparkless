@@ -11,6 +11,10 @@ pub enum JoinType {
     Left,
     Right,
     Outer,
+    /// Rows from left that have a match in right; only left columns (PySpark left_semi).
+    LeftSemi,
+    /// Rows from left that have no match in right; only left columns (PySpark left_anti).
+    LeftAnti,
 }
 
 /// Join with another DataFrame on the given columns. Preserves case_sensitive on result.
@@ -30,6 +34,8 @@ pub fn join(
         JoinType::Left => PlJoinType::Left,
         JoinType::Right => PlJoinType::Right,
         JoinType::Outer => PlJoinType::Full, // PySpark Outer = Polars Full
+        JoinType::LeftSemi => PlJoinType::Semi,
+        JoinType::LeftAnti => PlJoinType::Anti,
     };
     let joined = JoinBuilder::new(left_lf)
         .with(right_lf)
