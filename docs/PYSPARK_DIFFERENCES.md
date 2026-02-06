@@ -14,15 +14,17 @@ This document lists **intentional or known divergences** from PySpark semantics 
 
 ## SQL (optional `sql` feature)
 
-- **Unsupported constructs**: No subqueries in `FROM`, no CTEs, no DDL, no `HAVING`. Unsupported constructs should produce clear errors. Supported: single `SELECT`, `FROM` (single table or JOIN), `WHERE`, `GROUP BY` + aggregates, `ORDER BY`, `LIMIT`, and temporary views (`createOrReplaceTempView`, `table()`).
+- **Supported**: single `SELECT`, `FROM` (single table or JOIN), `WHERE`, `GROUP BY` + aggregates, `HAVING`, `ORDER BY`, `LIMIT`, and temporary views (`createOrReplaceTempView`, `table()`). Unsupported constructs produce clear errors.
+- **Unsupported (tracked in #141)**: DDL (`CREATE/DROP DATABASE`, `CREATE/DROP TABLE`, `CREATE SCHEMA`, `SET CURRENT DATABASE`, etc.), DML (`INSERT INTO`, `UPDATE`, `DELETE FROM`), subqueries in `FROM`, CTEs.
 
 ## Delta Lake (optional `delta` feature)
 
-- **Deferred**: Schema evolution and MERGE are not implemented. Read by path/version, overwrite, and append are supported. See [FULL_BACKEND_ROADMAP.md](FULL_BACKEND_ROADMAP.md) §7.2.
+- **Supported**: Read by path/version, overwrite, and append. See [FULL_BACKEND_ROADMAP.md](FULL_BACKEND_ROADMAP.md) §7.2.
+- **Unsupported (tracked in #152)**: Schema evolution (e.g. add columns, change types under Delta rules) and MERGE (upsert with whenMatchedUpdate/whenNotMatchedInsert). Implement when Delta usage requires them.
 
 ## Array
 
-- **array_distinct order**: Polars `list().unique()` may return distinct elements in a different order than PySpark `array_distinct`, which preserves first-occurrence order. The `array_distinct` parity fixture is skipped due to this ordering difference.
+- **array_distinct order**: Implemented with first-occurrence order to match PySpark (via UDF; parity fixture enabled).
 
 ## Control functions (assert_true, raise_error)
 
@@ -32,7 +34,7 @@ This document lists **intentional or known divergences** from PySpark semantics 
 ## DataFrame: cube, rollup, write, and stubs
 
 - **cube / rollup**: Implemented. `df.cube("a", "b").agg(...)` and `df.rollup("a", "b").agg(...)` run multiple grouping sets and union results (missing keys become null), matching PySpark semantics.
-- **write**: Implemented. `df.write().mode("overwrite"|"append").format("parquet"|"csv"|"json").save(path)` uses Polars IO. Append for JSON is not supported (overwrite only).
+- **write**: Implemented. `df.write().mode("overwrite"|"append").format("parquet"|"csv"|"json").save(path)` uses Polars IO. Append for JSON is supported (NDJSON/JsonLines).
 - **data**: Returns the same as `collect()` (list of row dicts). Best-effort local collection; no RDD.
 - **toLocalIterator**: Returns the same as `collect()` (an iterable of rows). Best-effort local iterator.
 - **rdd**: Stub; raises `NotImplementedError` ("RDD is not supported in Sparkless").
@@ -87,7 +89,7 @@ The following JVM- or runtime-related functions are implemented as **stubs for A
 - **Phase 19 aggregates/try/misc**: **`any_value`**, **`bool_and`**, **`bool_or`**, **`every`/`some`**, **`count_if`**, **`max_by`**, **`min_by`**, **`percentile`**, **`product`**, **`collect_list`**, **`collect_set`**; **`try_divide`**, **`try_add`**, **`try_subtract`**, **`try_multiply`**, **`try_element_at`**; **`width_bucket`**, **`elt`**, **`bit_length`**, **`typeof`** — all implemented. `percentile_approx` deferred (complex).
 - **Phase 20 ordering/aggregates/numeric**: **`asc`**, **`asc_nulls_first`**, **`asc_nulls_last`**, **`desc`**, **`desc_nulls_first`**, **`desc_nulls_last`**; **`median`**, **`mode`**; **`stddev_pop`**, **`stddev_samp`**, **`var_pop`**, **`var_samp`**; **`try_sum`**, **`try_avg`**; **`bround`**, **`negate`**, **`negative`**, **`positive`**; **`cot`**, **`csc`**, **`sec`**; **`e`**, **`pi`**; **`covar_pop`**, **`covar_samp`**, **`corr`** (groupBy agg), **`kurtosis`**, **`skewness`**; **`approx_percentile`**, **`percentile_approx`** — all implemented.
 - **Phase 21 string/binary/type/array/map/struct**: **`btrim`**, **`locate`**, **`conv`**; **`hex`**, **`unhex`**, **`bin`**, **`getbit`**; **`decode`**, **`encode`**, **`to_binary`**, **`try_to_binary`**; **`to_char`**, **`to_varchar`**, **`to_number`**, **`try_to_number`**, **`try_to_timestamp`**; **`str_to_map`**; **`arrays_overlap`**, **`arrays_zip`**, **`explode_outer`**, **`posexplode_outer`**, **`array_agg`**; **`transform_keys`**, **`transform_values`** — all implemented. Deferred: `aggregate` (array fold). PyO3: `transform_keys` and `transform_values` require Expr and are Rust-only for now.
-- **Phase 23 JSON/URL/misc**: **`isin`**, **`isin_i64`**, **`isin_str`**; **`url_decode`**, **`url_encode`**; **`json_array_length`**, **`parse_url`**; **`hash`**; **`shift_left`**, **`shift_right`**, **`shift_right_unsigned`**; **`version`**; **`equal_null`**; **`stack`** — all implemented. Note: `hash` uses xxHash64 (PySpark uses Murmur3); results will differ. Deferred: `json_object_keys`, `json_tuple`, `from_csv`, `to_csv`, `schema_of_csv`, `schema_of_json`.
+- **Phase 23 JSON/URL/misc**: **`isin`**, **`isin_i64`**, **`isin_str`**; **`url_decode`**, **`url_encode`**; **`json_array_length`**, **`parse_url`**; **`hash`** (Murmur3 32-bit for PySpark parity); **`shift_left`**, **`shift_right`**, **`shift_right_unsigned`**; **`version`**; **`equal_null`**; **`stack`**; **`from_csv`**, **`to_csv`**, **`schema_of_csv`**, **`schema_of_json`**; **`get_json_object`**, **`json_tuple`** — all implemented. Deferred: `json_object_keys`.
 
 ## Optional / deferred (XML, XPath, sentences)
 
