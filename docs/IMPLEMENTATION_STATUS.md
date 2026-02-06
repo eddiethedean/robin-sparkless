@@ -55,7 +55,7 @@ Robin-sparkless is designed to **replace the backend logic** of [Sparkless](http
 6. **PyO3 Bridge** ✅ **COMPLETED** (Phase 4)
    - Optional `pyo3` feature (PyO3 0.24); `src/python/mod.rs` exposes `robin_sparkless` Python module.
    - SparkSession, DataFrame, Column, GroupedData; create_dataframe, filter, select, join, group_by, collect (list of dicts), read_csv/parquet/json, etc.
-   - `maturin develop --features pyo3`; Python smoke tests in `tests/python/`; `make test` runs Rust + Python tests.
+   - `maturin develop --features "pyo3,sql,delta"`; Python tests in `tests/python/` (45 tests); `make test` runs Rust + Python tests; `make check-full` adds ruff, mypy, and full CI.
    - API contract: [PYTHON_API.md](PYTHON_API.md).
 
 7. **Phase 5 Test Conversion** ✅ **COMPLETED**

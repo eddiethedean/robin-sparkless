@@ -19,14 +19,12 @@ pip install robin-sparkless
 Use this if you need optional features (SQL, Delta) or want to develop the crate. Prerequisites: Rust (stable), Python 3.8+, and [maturin](https://www.maturin.rs/) (`pip install maturin`). The extension is built with **PyO3 0.24**.
 
 ```bash
-# From the repo root
-maturin develop --features pyo3   # Editable install into current env
-# With optional SQL and/or Delta:
-maturin develop --features "pyo3,sql"       # SQL support
-maturin develop --features "pyo3,delta"    # Delta Lake read/write
-maturin develop --features "pyo3,sql,delta"  # Both
-# or build a wheel:
-maturin build --features pyo3     # Build wheel (e.g. target/wheels/)
+# From the repo root (recommended for tests: SQL + Delta)
+maturin develop --features "pyo3,sql,delta"
+# Or minimal:
+maturin develop --features pyo3
+# Build a wheel:
+maturin build --features "pyo3,sql,delta"
 pip install target/wheels/robin_sparkless-*.whl
 ```
 
@@ -135,20 +133,20 @@ Unsupported operations or invalid arguments raise Python exceptions (e.g. `Runti
 
 ## Running Python tests
 
-From the repo root, either:
+From the repo root:
 
 ```bash
-make test        # Runs Rust tests, then Python tests (creates .venv if needed, maturin develop --features pyo3, pytest tests/python/)
-make test-python # Python tests only (same setup)
+make check-full  # Full check: Rust (fmt, clippy, audit, deny, test) + Python lint (ruff, mypy) + Python tests
+make test        # Rust tests, then Python tests (venv, maturin develop --features "pyo3,sql,delta", pytest)
+make test-python # Python tests only (same venv/setup)
+make lint-python # Python only: ruff format --check, ruff check, mypy
 ```
 
 Or manually (with an activated virtualenv):
 
 ```bash
-maturin develop --features pyo3
-pytest tests/python/
-# or
-python -m pytest tests/python/
+maturin develop --features "pyo3,sql,delta"
+pytest tests/python/ -v
 ```
 
 ## Out of scope (this repo)

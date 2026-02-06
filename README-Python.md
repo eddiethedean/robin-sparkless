@@ -69,22 +69,30 @@ For **Python 3.8** compatibility, use mypy &lt;1.10 (newer mypy drops support fo
 From a clone of the repo:
 
 ```bash
+# Full CI-like check (Rust + Python lint + Python tests)
+make check-full
+```
+
+Or step by step:
+
+```bash
 python -m venv .venv
 source .venv/bin/activate   # or .venv\Scripts\activate on Windows
-pip install -r requirements-ci.txt
-maturin develop --features pyo3 --release
+pip install maturin pytest
+maturin develop --features "pyo3,sql,delta"
 pytest tests/python/ -v
 ```
 
-Lint and format:
+Python lint and type-check (run by `make check-full`):
 
 ```bash
-ruff format .
+pip install ruff 'mypy>=1.4,<1.10'
+ruff format --check .
 ruff check .
 mypy .
 ```
 
-CI uses `requirements-ci.txt` (maturin, pytest, mypy&lt;1.10 for Python 3.8).
+CI uses the same tooling: ruff, mypy&lt;1.10 (Python 3.8), and pytest. PySpark is not required for tests (parity expectations are predetermined).
 
 ## Links
 

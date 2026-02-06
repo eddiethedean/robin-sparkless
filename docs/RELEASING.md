@@ -8,7 +8,7 @@ So that local development and CI use the same toolchains and tools:
 
 - **Rust**: [rust-toolchain.toml](../rust-toolchain.toml) pins the Rust version (e.g. 1.89.0). CI uses the same `toolchain` value in `.github/workflows/ci.yml` and `.github/workflows/release.yml`.
 - **Python**: [.python-version](../.python-version) specifies the Python version (e.g. 3.10). CI uses `python-version-file: ".python-version"` with `actions/setup-python@v5`.
-- **Python deps (CI)**: [requirements-ci.txt](../requirements-ci.txt) pins maturin and pytest for the Python job.
+- **Python deps (CI)**: [requirements-ci.txt](../requirements-ci.txt) pins maturin, pytest, ruff, and mypy for the Python lint and test jobs.
 - **cargo-nextest**: CI installs a fixed version (e.g. 0.9.92) in the workflow. Use the same version locally if you use nextest.
 
 ## Prerequisites
@@ -39,4 +39,4 @@ So that local development and CI use the same toolchains and tools:
 
 ## Optional: PyPI wheel
 
-Phase 26 leaves PyPI publication as optional. To publish Python wheels via maturin in the future, add a step (or separate workflow) that runs `maturin publish --features pyo3` using a `PYPI_API_TOKEN` (or similar) secret after the crates.io publish step.
+Phase 26 leaves PyPI publication as optional. To publish Python wheels via maturin in the future, add a step (or separate workflow) that runs `maturin publish --features "pyo3,sql,delta"` using a `PYPI_API_TOKEN` (or similar) secret after the crates.io publish step.
