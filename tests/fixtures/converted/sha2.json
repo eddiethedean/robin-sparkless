@@ -1,0 +1,66 @@
+{
+  "name": "sha2",
+  "pyspark_version": "3.5",
+  "input": {
+    "schema": [
+      {
+        "name": "id",
+        "type": "string"
+      },
+      {
+        "name": "name",
+        "type": "string"
+      },
+      {
+        "name": "text",
+        "type": "string"
+      },
+      {
+        "name": "email",
+        "type": "string"
+      }
+    ],
+    "rows": [
+      [
+        1,
+        "Alice",
+        "Hello World",
+        "alice@example.com"
+      ],
+      [
+        2,
+        "Bob",
+        "Test String",
+        "bob@test.com"
+      ],
+      [
+        3,
+        "Charlie",
+        "Python Data",
+        "charlie@company.org"
+      ]
+    ]
+  },
+  "operations": [],
+  "expected": {
+    "schema": [
+      {
+        "name": "sha2(text, 256)",
+        "type": "string"
+      }
+    ],
+    "rows": [
+      [
+        "a591a6d40bf420404a011733cfb7b190d62c65bf0bcda32b57b277d9ad9f146e"
+      ],
+      [
+        "30c6ff7a44f7035af933babaea771bf177fc38f06482ad06434cbcc04de7ac14"
+      ],
+      [
+        "bf51577b590f777cf4fdc9d0d76bd828c89eb745857f1bb1ad9da98abdcdcf02"
+      ]
+    ]
+  },
+  "skip": true,
+  "skip_reason": "Expected shape from Sparkless converter; regenerate expected from PySpark for parity"
+}

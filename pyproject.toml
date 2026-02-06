@@ -18,6 +18,12 @@ classifiers = [
     "Topic :: Scientific/Engineering",
 ]
 
+[project.optional-dependencies]
+# PySpark (for regenerate_expected_from_pyspark.py and parity tests). Requires Java 17+.
+pyspark = ["pyspark>=3.5"]
+# Delta Lake Python (read/write Delta tables from Python; optional alongside Rust delta feature).
+deltalake = ["deltalake>=0.20"]
+
 [tool.maturin]
 # Build the Rust lib with the pyo3 feature so the Python module is compiled.
 # abi3 (py-limited-api) produces one wheel for Python 3.8+.
@@ -29,9 +35,9 @@ include = ["robin_sparkless.pyi"]
 [tool.mypy]
 python_version = "3.8"
 exclude = ["^target/", "^\\.venv/", ".*/site-packages/", ".*/\\.pyenv/"]
-# Optional deps (pyspark, sparkless) may not be installed
+# Optional deps (pyspark, sparkless, deltalake) may not be installed
 [[tool.mypy.overrides]]
-module = ["pyspark.*", "sparkless.*", "pytest.*", "_pytest.*"]
+module = ["pyspark.*", "sparkless.*", "deltalake.*", "pytest.*", "_pytest.*"]
 ignore_missing_imports = true
 # Don't type-check pytest (uses 3.9+ syntax); skip following into it
 [[tool.mypy.overrides]]

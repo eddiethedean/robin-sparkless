@@ -24,6 +24,8 @@ maturin develop --features "pyo3,delta"      # read_delta, write_delta
 maturin develop --features "pyo3,sql,delta" # All optional features
 ```
 
+**Delta Lake** (optional `delta` feature): No extra runtime dependencies. Build with `--features delta` (Rust) or `maturin develop --features "pyo3,delta"` (Python). Then use `spark.read_delta(path)`, `spark.read_delta_version(path, version)`, and `df.write_delta(path, overwrite)`.
+
 Then use the `robin_sparkless` Python module; see [PYTHON_API.md](PYTHON_API.md).
 
 ### Add as a dependency

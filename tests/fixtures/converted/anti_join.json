@@ -1,0 +1,107 @@
+{
+  "name": "anti_join",
+  "pyspark_version": "3.5",
+  "input": {
+    "schema": [
+      {
+        "name": "id",
+        "type": "string"
+      },
+      {
+        "name": "name",
+        "type": "string"
+      },
+      {
+        "name": "dept_id",
+        "type": "string"
+      },
+      {
+        "name": "salary",
+        "type": "string"
+      }
+    ],
+    "rows": [
+      [
+        1,
+        "Alice",
+        10,
+        50000
+      ],
+      [
+        2,
+        "Bob",
+        20,
+        60000
+      ],
+      [
+        3,
+        "Charlie",
+        10,
+        70000
+      ],
+      [
+        4,
+        "David",
+        30,
+        55000
+      ],
+      [
+        null,
+        "IT",
+        10,
+        null
+      ],
+      [
+        null,
+        "HR",
+        20,
+        null
+      ],
+      [
+        null,
+        "Finance",
+        40,
+        null
+      ]
+    ]
+  },
+  "operations": [
+    {
+      "op": "join",
+      "on": [
+        "id"
+      ],
+      "how": "inner"
+    }
+  ],
+  "expected": {
+    "schema": [
+      {
+        "name": "dept_id",
+        "type": "bigint"
+      },
+      {
+        "name": "id",
+        "type": "bigint"
+      },
+      {
+        "name": "name",
+        "type": "string"
+      },
+      {
+        "name": "salary",
+        "type": "bigint"
+      }
+    ],
+    "rows": [
+      [
+        30,
+        4,
+        "David",
+        55000
+      ]
+    ]
+  },
+  "skip": true,
+  "skip_reason": "Expected shape from Sparkless converter; regenerate expected from PySpark for parity"
+}

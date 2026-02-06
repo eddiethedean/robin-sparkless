@@ -15,9 +15,11 @@ Robin-sparkless format (tests/fixtures/*.json):
 Usage:
   python tests/convert_sparkless_fixtures.py <sparkless_json_path> [output_dir]
   python tests/convert_sparkless_fixtures.py --batch <sparkless_expected_outputs_dir> [output_dir]
+  python tests/convert_sparkless_fixtures.py --batch <dir> tests/fixtures --output-subdir converted --dedupe
 
 When Sparkless repo is available, run from robin-sparkless root:
-  python tests/convert_sparkless_fixtures.py --batch /path/to/sparkless/tests/expected_outputs tests/fixtures
+  python tests/convert_sparkless_fixtures.py --batch /path/to/sparkless/tests/expected_outputs tests/fixtures --output-subdir converted
+  Use --dedupe to skip converting Sparkless files whose fixture name already exists in tests/fixtures/*.json (avoid duplicate scenarios).
 
 See docs/SPARKLESS_INTEGRATION_ANALYSIS.md §4 for format details.
 """
@@ -392,6 +394,11 @@ def main() -> int:
         help="When using --batch, write into output_dir/DIR (e.g. converted)",
     )
     parser.add_argument("--name", help="Fixture name (default: from file or operation)")
+    parser.add_argument(
+        "--dedupe",
+        action="store_true",
+        help="When using --batch: skip Sparkless files whose converted fixture name already exists in output_dir/*.json (avoid duplicating hand-written fixtures)",
+    )
     args = parser.parse_args()
 
     if args.batch:
@@ -402,21 +409,36 @@ def main() -> int:
         base_out = Path(args.output_dir or "tests/fixtures")
         out_dir = base_out / args.output_subdir if args.output_subdir else base_out
         out_dir.mkdir(parents=True, exist_ok=True)
+
+        # When --dedupe: existing names = all .json in base_out (hand-written fixtures), not in subdirs
+        existing_names: set[str] = set()
+        if args.dedupe and base_out.is_dir():
+            for p in base_out.glob("*.json"):
+                if p.is_file():
+                    existing_names.add(p.stem)
+
         count = 0
+        skipped_dup = 0
         for path in sorted(in_dir.glob("*.json")):
             try:
                 with open(path) as f:
                     data = json.load(f)
                 name = args.name or path.stem
                 out = convert_sparkless_to_robin(data, fixture_name=name)
-                out_path = out_dir / f"{out['name']}.json"
+                fixture_name = out["name"]
+                if args.dedupe and fixture_name in existing_names:
+                    print(f"Skipped (duplicate): {path.name} -> already have fixture '{fixture_name}'")
+                    skipped_dup += 1
+                    continue
+                out_path = out_dir / f"{fixture_name}.json"
                 with open(out_path, "w") as f:
                     json.dump(out, f, indent=2)
                 count += 1
+                existing_names.add(fixture_name)  # avoid writing same name again in same batch
                 print(f"Converted: {path.name} -> {out_path}")
             except Exception as e:
                 print(f"Skip {path.name}: {e}", file=sys.stderr)
-        print(f"Done: {count} fixtures written to {out_dir}")
+        print(f"Done: {count} fixtures written to {out_dir}" + (f"; {skipped_dup} skipped (duplicate)" if skipped_dup else ""))
         return 0
 
     if not args.input_path:

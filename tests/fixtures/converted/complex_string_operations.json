@@ -1,0 +1,110 @@
+{
+  "name": "complex_string_operations",
+  "pyspark_version": "3.5",
+  "input": {
+    "schema": [
+      {
+        "name": "id",
+        "type": "string"
+      },
+      {
+        "name": "name",
+        "type": "string"
+      },
+      {
+        "name": "age",
+        "type": "string"
+      },
+      {
+        "name": "salary",
+        "type": "string"
+      },
+      {
+        "name": "department",
+        "type": "string"
+      },
+      {
+        "name": "hire_date",
+        "type": "string"
+      }
+    ],
+    "rows": [
+      [
+        1,
+        "Alice",
+        25,
+        50000.0,
+        "IT",
+        "2020-01-15"
+      ],
+      [
+        2,
+        "Bob",
+        30,
+        60000.0,
+        "HR",
+        "2019-03-10"
+      ],
+      [
+        3,
+        "Charlie",
+        35,
+        70000.0,
+        "IT",
+        "2021-07-22"
+      ],
+      [
+        4,
+        "David",
+        40,
+        80000.0,
+        "Finance",
+        "2018-11-05"
+      ],
+      [
+        5,
+        "Eve",
+        28,
+        55000.0,
+        "IT",
+        "2022-02-14"
+      ]
+    ]
+  },
+  "operations": [],
+  "expected": {
+    "schema": [
+      {
+        "name": "name_upper",
+        "type": "string"
+      },
+      {
+        "name": "name_dept",
+        "type": "string"
+      },
+      {
+        "name": "name_length",
+        "type": "int"
+      }
+    ],
+    "rows": [
+      [
+        "ALICE",
+        "Alice (IT)",
+        5
+      ],
+      [
+        "CHARLIE",
+        "Charlie (IT)",
+        7
+      ],
+      [
+        "DAVID",
+        "David (Finance)",
+        5
+      ]
+    ]
+  },
+  "skip": true,
+  "skip_reason": "Expected shape from Sparkless converter; regenerate expected from PySpark for parity"
+}

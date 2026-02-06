@@ -1,0 +1,59 @@
+{
+  "name": "hash",
+  "pyspark_version": "3.5",
+  "input": {
+    "schema": [
+      {
+        "name": "id",
+        "type": "string"
+      },
+      {
+        "name": "name",
+        "type": "string"
+      },
+      {
+        "name": "text",
+        "type": "string"
+      }
+    ],
+    "rows": [
+      [
+        1,
+        "Alice",
+        "Hello World"
+      ],
+      [
+        2,
+        "Bob",
+        "Test"
+      ],
+      [
+        3,
+        "Charlie",
+        "Python"
+      ]
+    ]
+  },
+  "operations": [],
+  "expected": {
+    "schema": [
+      {
+        "name": "hash(name)",
+        "type": "int"
+      }
+    ],
+    "rows": [
+      [
+        -1597477876
+      ],
+      [
+        549595493
+      ],
+      [
+        906014075
+      ]
+    ]
+  },
+  "skip": true,
+  "skip_reason": "Expected shape from Sparkless converter; regenerate expected from PySpark for parity"
+}

@@ -1,0 +1,59 @@
+{
+  "name": "monotonically_increasing_id",
+  "pyspark_version": "3.5",
+  "input": {
+    "schema": [
+      {
+        "name": "id",
+        "type": "string"
+      },
+      {
+        "name": "name",
+        "type": "string"
+      },
+      {
+        "name": "text",
+        "type": "string"
+      }
+    ],
+    "rows": [
+      [
+        1,
+        "Alice",
+        "Hello World"
+      ],
+      [
+        2,
+        "Bob",
+        "Test"
+      ],
+      [
+        3,
+        "Charlie",
+        "Python"
+      ]
+    ]
+  },
+  "operations": [],
+  "expected": {
+    "schema": [
+      {
+        "name": "monotonically_increasing_id()",
+        "type": "bigint"
+      }
+    ],
+    "rows": [
+      [
+        0
+      ],
+      [
+        1
+      ],
+      [
+        2
+      ]
+    ]
+  },
+  "skip": true,
+  "skip_reason": "Expected shape from Sparkless converter; regenerate expected from PySpark for parity"
+}

@@ -1,0 +1,138 @@
+{
+  "name": "select_expr_groupby_agg_orderby",
+  "pyspark_version": "3.5",
+  "input": {
+    "schema": [
+      {
+        "name": "id",
+        "type": "string"
+      },
+      {
+        "name": "name",
+        "type": "string"
+      },
+      {
+        "name": "age",
+        "type": "string"
+      },
+      {
+        "name": "salary",
+        "type": "string"
+      },
+      {
+        "name": "department",
+        "type": "string"
+      },
+      {
+        "name": "hire_date",
+        "type": "string"
+      }
+    ],
+    "rows": [
+      [
+        1,
+        "Alice",
+        25,
+        50000.0,
+        "IT",
+        "2020-01-15"
+      ],
+      [
+        2,
+        "Bob",
+        30,
+        60000.0,
+        "HR",
+        "2019-03-10"
+      ],
+      [
+        3,
+        "Charlie",
+        35,
+        70000.0,
+        "IT",
+        "2021-07-22"
+      ],
+      [
+        4,
+        "David",
+        40,
+        80000.0,
+        "Finance",
+        "2018-11-05"
+      ],
+      [
+        5,
+        "Eve",
+        28,
+        55000.0,
+        "IT",
+        "2022-02-14"
+      ]
+    ]
+  },
+  "operations": [
+    {
+      "op": "select",
+      "columns": [
+        "level",
+        "count",
+        "avg_salary"
+      ]
+    },
+    {
+      "op": "groupBy",
+      "columns": [
+        "id"
+      ]
+    },
+    {
+      "op": "agg",
+      "aggregations": [
+        {
+          "func": "count",
+          "alias": "count"
+        }
+      ]
+    },
+    {
+      "op": "orderBy",
+      "columns": [
+        "level"
+      ],
+      "ascending": [
+        true
+      ]
+    }
+  ],
+  "expected": {
+    "schema": [
+      {
+        "name": "level",
+        "type": "string"
+      },
+      {
+        "name": "count",
+        "type": "bigint"
+      },
+      {
+        "name": "avg_salary",
+        "type": "double"
+      }
+    ],
+    "rows": [
+      [
+        "Junior",
+        3,
+        55000.0
+      ],
+      [
+        "Senior",
+        2,
+        75000.0
+      ]
+    ]
+  },
+  "skip": true,
+  "skip_reason": "Expected shape from Sparkless converter; regenerate expected from PySpark for parity"
+}

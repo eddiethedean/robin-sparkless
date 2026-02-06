@@ -1,0 +1,73 @@
+{
+  "name": "math_log1p",
+  "pyspark_version": "3.5",
+  "input": {
+    "schema": [
+      {
+        "name": "id",
+        "type": "string"
+      },
+      {
+        "name": "x",
+        "type": "string"
+      },
+      {
+        "name": "y",
+        "type": "string"
+      },
+      {
+        "name": "angle",
+        "type": "string"
+      },
+      {
+        "name": "value",
+        "type": "string"
+      }
+    ],
+    "rows": [
+      [
+        1,
+        0.5,
+        1.2,
+        0.785,
+        4.5
+      ],
+      [
+        2,
+        1.0,
+        2.5,
+        1.57,
+        3.2
+      ],
+      [
+        3,
+        2.0,
+        3.0,
+        0.0,
+        7.8
+      ]
+    ]
+  },
+  "operations": [],
+  "expected": {
+    "schema": [
+      {
+        "name": "LOG1P(x)",
+        "type": "double"
+      }
+    ],
+    "rows": [
+      [
+        0.4054651081081644
+      ],
+      [
+        0.6931471805599453
+      ],
+      [
+        1.0986122886681096
+      ]
+    ]
+  },
+  "skip": true,
+  "skip_reason": "Expected shape from Sparkless converter; regenerate expected from PySpark for parity"
+}

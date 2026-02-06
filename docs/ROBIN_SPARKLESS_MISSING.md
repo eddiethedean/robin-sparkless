@@ -2,6 +2,8 @@
 
 This list is **only** items that **Sparkless has** and **robin-sparkless does not** (or has only as a stub/no-op). Implemented equivalents (e.g. `signum` for `sign`, `avg` for `mean`, `trunc` for `date_trunc`) are not listed.
 
+**PySpark parity scope:** All items below are **PySpark APIs** (or direct Sparkless equivalents of PySpark), unless marked as *Sparkless-specific*. PySpark reference: [pyspark.sql](https://spark.apache.org/docs/latest/api/python/reference/pyspark.sql/index.html) (SparkSession, DataFrame, Catalog, functions), [pyspark.sql.functions](https://spark.apache.org/docs/latest/api/python/reference/pyspark.sql/functions.html), and [RDD / SparkContext](https://spark.apache.org/docs/latest/api/python/reference/pyspark.html). Tracking these as unimplemented is for **PySpark parity**; implementing them would align robin-sparkless with standard PySpark behavior.
+
 ---
 
 ## Functions (sparkless.sql.functions) — Missing or stub only
@@ -31,29 +33,29 @@ This list is **only** items that **Sparkless has** and **robin-sparkless does no
 
 ### JSON / XML / CSV
 - ~~`json_object_keys`, `json_tuple`~~ — **implemented**
-- `from_xml`, `to_xml`, `schema_of_xml` (optional/deferred)
+- `from_xml`, `to_xml`, `schema_of_xml` (PySpark 3.4+/4.0+; optional/deferred)
 - ~~`from_csv`, `to_csv`~~ — **implemented** (minimal)
 - ~~`schema_of_csv`, `schema_of_json`~~ — **implemented** (stub: return literal schema string)
 
 ### Misc / UDF / JVM
-- `call_function` (stub: not supported)
+- `call_function` (stub: not supported; *Sparkless-specific* — PySpark equivalent: register UDF with `spark.udf.register` then use the name in `expr()` or SQL)
 - ~~`grouping`, `grouping_id`~~ — **implemented** (stub: return 0)
 - ~~`inline`, `inline_outer`~~ — **implemented** (explode list of structs; use unnest for struct fields)
-- **sentences** (optional/deferred): NLP string→array of array of words; implement only if prioritized.
+- **sentences** (optional/deferred): PySpark `pyspark.sql.functions.sentences` — NLP string→array of array of words; implement only if prioritized.
 - ~~`sequence`~~ — **implemented** (generate array of numbers)
 - ~~`sha`~~ — we have sha1, sha2
 - ~~`shuffle`~~ — **implemented**
-- `window`, `window_time` (we have `.over()`; thin wrappers if needed; see PYSPARK_DIFFERENCES)
-- `udf`, `pandas_udf` (we have no UDF support; stub only if any)
-- `count_min_sketch`, `histogram_numeric`, `hll_sketch_agg`, `hll_sketch_estimate`, `hll_union`, `hll_union_agg` (stub/defer)
-- `session_window` (stub: no streaming)
-- `call_udf`, `udtf`, `reduce`, `reflect`, `java_method` (stub: not supported)
+- `window`, `window_time` (PySpark; we have `.over()`; thin wrappers if needed; see PYSPARK_DIFFERENCES)
+- `udf`, `pandas_udf` (PySpark `spark.udf.register`, `F.udf`, `pandas_udf`; we have no UDF support; stub only if any)
+- `count_min_sketch`, `histogram_numeric`, `hll_sketch_agg`, `hll_sketch_estimate`, `hll_union`, `hll_union_agg` (PySpark 3.5+; stub/defer)
+- `session_window` (PySpark Structured Streaming; stub: no streaming)
+- `call_udf`, `udtf`, `reduce`, `reflect`, `java_method` (PySpark JVM/UDTF APIs; stub: not supported)
 
 ### Regression
 - ~~`regr_avgx`, `regr_avgy`, `regr_count`, `regr_intercept`, `regr_r2`, `regr_slope`, `regr_sxx`, `regr_sxy`, `regr_syy`~~ — **implemented**
 
 ### XPath (deferred)
-- **XPath (deferred)**: `xpath`, `xpath_boolean`, `xpath_double`, etc. — require XML support; stub or defer (see PYSPARK_DIFFERENCES).
+- **XPath (deferred)**: PySpark `xpath`, `xpath_boolean`, `xpath_double`, etc. (3.5+) — require XML support; stub or defer (see PYSPARK_DIFFERENCES).
 
 ### Aliases we don’t expose (Sparkless has, we have equivalent under different name)
 - ~~`sign`~~ — alias of signum
@@ -72,20 +74,20 @@ This list is **only** items that **Sparkless has** and **robin-sparkless does no
 - ~~**`cube`**, **`rollup`**~~ — **implemented** (multiple grouping sets then union).
 - ~~**`data`**~~ — **implemented** (best-effort: same as `collect()`, list of row dicts).
 - ~~**`dtypes`**~~ — **implemented** (returns list of (name, dtype_string)).
-- **`foreach`**, **`foreachPartition`** — stub: raise `NotImplementedError` (see PYSPARK_DIFFERENCES).
-- **`mapInPandas`**, **`mapPartitions`** — stub: raise `NotImplementedError`.
-- **`rdd`** — stub: raise `NotImplementedError` (use `collect()` or `toLocalIterator()` for local data).
+- **`foreach`**, **`foreachPartition`** — PySpark DataFrame; stub: raise `NotImplementedError` (see PYSPARK_DIFFERENCES).
+- **`mapInPandas`**, **`mapPartitions`** — PySpark DataFrame; stub: raise `NotImplementedError`.
+- **`rdd`** — PySpark `DataFrame.rdd`; stub: raise `NotImplementedError` (use `collect()` or `toLocalIterator()` for local data).
 - **`registerTempTable`** — legacy; we have `create_or_replace_temp_view`.
 - ~~**`repartitionByRange`**~~ — **implemented** (no-op).
 - **`sameSemantics`**, **`semanticHash`** — we have no-op stubs that return fixed values.
 - ~~**`sortWithinPartitions`**~~ — **implemented** (no-op).
-- **`storageLevel`** — stub: returns `None` (eager execution).
-- **`to`** — generic writer; we have `write_delta` with delta feature.
+- **`storageLevel`** — PySpark; stub: returns `None` (eager execution).
+- **`to`** — PySpark generic writer; we have `write_delta` with delta feature.
 - ~~**`toLocalIterator`**~~ — **implemented** (best-effort: same as `collect()`, iterable of rows).
 - ~~**`unpersist`**~~ — we have it (no-op).
-- **`withWatermark`** — no-op stub (streaming not supported).
-- ~~**`write`**~~ — **implemented** (generic write: parquet/csv/json, mode overwrite/append). **`writeTo`** — catalog/table API; stub or use write to path.
-- **`isStreaming`** — stub: always returns `False`.
+- **`withWatermark`** — PySpark Structured Streaming; no-op stub (streaming not supported).
+- ~~**`write`**~~ — **implemented** (generic write: parquet/csv/json, mode overwrite/append). **`writeTo`** — PySpark `DataFrameWriterV2` / catalog table API; stub or use write to path.
+- **`isStreaming`** — PySpark; stub: always returns `False`.
 
 ---
 

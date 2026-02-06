@@ -1,0 +1,74 @@
+{
+  "name": "covar_samp",
+  "pyspark_version": "3.5",
+  "input": {
+    "schema": [
+      {
+        "name": "id",
+        "type": "string"
+      },
+      {
+        "name": "name",
+        "type": "string"
+      },
+      {
+        "name": "age",
+        "type": "string"
+      },
+      {
+        "name": "salary",
+        "type": "string"
+      },
+      {
+        "name": "dept",
+        "type": "string"
+      }
+    ],
+    "rows": [
+      [
+        1,
+        "Alice",
+        25,
+        50000.0,
+        "IT"
+      ],
+      [
+        2,
+        "Bob",
+        30,
+        60000.0,
+        "HR"
+      ],
+      [
+        3,
+        "Charlie",
+        35,
+        70000.0,
+        "IT"
+      ],
+      [
+        4,
+        "David",
+        40,
+        80000.0,
+        "IT"
+      ]
+    ]
+  },
+  "operations": [],
+  "expected": {
+    "schema": [
+      {
+        "name": "covar_samp(age, salary)",
+        "type": "double"
+      }
+    ],
+    "rows": [
+      [
+        83333.33333333333
+      ]
+    ]
+  },
+  "skip": true,
+  "skip_reason": "Expected shape from Sparkless converter; regenerate expected from PySpark for parity"
+}

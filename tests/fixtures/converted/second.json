@@ -1,0 +1,59 @@
+{
+  "name": "second",
+  "pyspark_version": "3.5",
+  "input": {
+    "schema": [
+      {
+        "name": "id",
+        "type": "string"
+      },
+      {
+        "name": "date",
+        "type": "string"
+      },
+      {
+        "name": "timestamp",
+        "type": "string"
+      }
+    ],
+    "rows": [
+      [
+        1,
+        "2020-01-15",
+        "2020-01-15 10:30:00"
+      ],
+      [
+        2,
+        "2019-03-10",
+        "2019-03-10 14:20:00"
+      ],
+      [
+        3,
+        "2021-07-22",
+        "2021-07-22 08:15:00"
+      ]
+    ]
+  },
+  "operations": [],
+  "expected": {
+    "schema": [
+      {
+        "name": "second(timestamp)",
+        "type": "int"
+      }
+    ],
+    "rows": [
+      [
+        0
+      ],
+      [
+        0
+      ],
+      [
+        0
+      ]
+    ]
+  },
+  "skip": true,
+  "skip_reason": "Expected shape from Sparkless converter; regenerate expected from PySpark for parity"
+}

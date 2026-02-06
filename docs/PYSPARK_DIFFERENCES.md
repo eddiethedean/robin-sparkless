@@ -2,7 +2,7 @@
 
 This document lists **intentional or known divergences** from PySpark semantics in robin-sparkless. Robin-sparkless aims for behavioral parity where practical; when perfect parity is impossible or deferred, we document it here.
 
-**Unimplemented API surface:** For a full list of functions and methods present in Sparkless 3.28.0 but not yet implemented in robin-sparkless, see [GAP_ANALYSIS_SPARKLESS_3.28.md](GAP_ANALYSIS_SPARKLESS_3.28.md).
+**Unimplemented API surface:** For a full list of functions and methods present in Sparkless 3.28.0 but not yet implemented in robin-sparkless, see [GAP_ANALYSIS_SPARKLESS_3.28.md](GAP_ANALYSIS_SPARKLESS_3.28.md). That list is **scoped to PySpark parity**: all listed items are standard PySpark APIs (or direct Sparkless equivalents); see [ROBIN_SPARKLESS_MISSING.md](ROBIN_SPARKLESS_MISSING.md) for the canonical “missing vs PySpark” list with PySpark references.
 
 ## Window functions
 

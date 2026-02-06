@@ -1,0 +1,89 @@
+{
+  "name": "basic_select",
+  "pyspark_version": "3.5",
+  "input": {
+    "schema": [
+      {
+        "name": "id",
+        "type": "string"
+      },
+      {
+        "name": "name",
+        "type": "string"
+      },
+      {
+        "name": "age",
+        "type": "string"
+      },
+      {
+        "name": "salary",
+        "type": "string"
+      }
+    ],
+    "rows": [
+      [
+        1,
+        "Alice",
+        25,
+        50000.0
+      ],
+      [
+        2,
+        "Bob",
+        30,
+        60000.0
+      ],
+      [
+        3,
+        "Charlie",
+        35,
+        70000.0
+      ]
+    ]
+  },
+  "operations": [
+    {
+      "op": "select",
+      "columns": [
+        "id",
+        "name",
+        "age"
+      ]
+    }
+  ],
+  "expected": {
+    "schema": [
+      {
+        "name": "id",
+        "type": "bigint"
+      },
+      {
+        "name": "name",
+        "type": "string"
+      },
+      {
+        "name": "age",
+        "type": "bigint"
+      }
+    ],
+    "rows": [
+      [
+        1,
+        "Alice",
+        25
+      ],
+      [
+        2,
+        "Bob",
+        30
+      ],
+      [
+        3,
+        "Charlie",
+        35
+      ]
+    ]
+  },
+  "skip": true,
+  "skip_reason": "Expected shape from Sparkless converter; regenerate expected from PySpark for parity"
+}

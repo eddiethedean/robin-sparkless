@@ -89,11 +89,30 @@ fn path_to_table_uri(path: &Path) -> Result<String, PolarsError> {
     if s.starts_with("file://") {
         return Ok(s.to_string());
     }
-    let abs_path = path.canonicalize().unwrap_or_else(|_| {
-        std::env::current_dir()
-            .unwrap_or_else(|_| Path::new(".").to_path_buf())
-            .join(path)
-    });
+    // Resolve to absolute path; support paths that don't exist yet (e.g. for write_delta).
+    let abs_path = if path.exists() {
+        path.canonicalize().map_err(|e| {
+            PolarsError::ComputeError(
+                format!("path_to_table_uri: canonicalize: {}", e).into(),
+            )
+        })?
+    } else {
+        let base = path.parent().unwrap_or(Path::new("."));
+        let name = path.file_name().unwrap_or(std::ffi::OsStr::new("."));
+        if base.exists() {
+            base.canonicalize()
+                .map_err(|e| {
+                    PolarsError::ComputeError(
+                        format!("path_to_table_uri: canonicalize parent: {}", e).into(),
+                    )
+                })?
+                .join(name)
+        } else {
+            std::env::current_dir()
+                .unwrap_or_else(|_| Path::new(".").to_path_buf())
+                .join(path)
+        }
+    };
     let path_str = abs_path.to_string_lossy();
     #[cfg(target_os = "windows")]
     let uri = format!("file:///{}", path_str.replace('\\', "/"));
@@ -116,6 +135,10 @@ fn uri_to_parquet_path(uri: &str) -> Result<std::path::PathBuf, PolarsError> {
             return Ok(std::path::PathBuf::from(format!("/{}", s)));
         }
     }
+    // deltalake may return bare absolute paths (e.g. /private/var/.../file.parquet).
+    if uri.starts_with('/') || (cfg!(target_os = "windows") && uri.len() >= 2 && uri.chars().nth(1) == Some(':')) {
+        return Ok(std::path::PathBuf::from(uri));
+    }
     Err(PolarsError::ComputeError(
         format!("read_delta: unsupported URI (local file only): {}", uri).into(),
     ))
@@ -135,11 +158,21 @@ pub fn write_delta(
     use tokio::runtime::Runtime;
 
     let path = path.as_ref();
-    let table_uri = path_to_table_uri(path)?;
 
     if df.height() == 0 {
         return Ok(());
     }
+
+    // Create target directory before resolving URI so deltalake sees an existing path.
+    if overwrite {
+        if path.exists() {
+            let _ = fs::remove_dir_all(path);
+        }
+        fs::create_dir_all(path).map_err(|e| {
+            PolarsError::ComputeError(format!("write_delta: create_dir_all: {}", e).into())
+        })?;
+    }
+    let table_uri = path_to_table_uri(path)?;
 
     let rt = Runtime::new().map_err(|e| {
         PolarsError::ComputeError(format!("write_delta: failed to create runtime: {}", e).into())
@@ -162,12 +195,6 @@ pub fn write_delta(
             });
 
         if overwrite {
-            if path.exists() {
-                let _ = fs::remove_dir_all(path);
-            }
-            fs::create_dir_all(path).map_err(|e| {
-                PolarsError::ComputeError(format!("write_delta: create_dir_all: {}", e).into())
-            })?;
             let parquet_path = path.join("part-00000.parquet");
             let mut file =
                 std::io::BufWriter::new(fs::File::create(&parquet_path).map_err(|e| {

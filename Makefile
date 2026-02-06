@@ -30,12 +30,13 @@ bench-python:
 	. .venv-sparkless/bin/activate && pip install -q maturin sparkless && maturin develop --features pyo3
 	. .venv-sparkless/bin/activate && python scripts/bench_robin_vs_sparkless.py
 
-# Run parity tests (optionally convert from Sparkless expected_outputs first).
-# Set SPARKLESS_EXPECTED_OUTPUTS=/path/to/sparkless/tests/expected_outputs to run converter.
+# Run parity tests (optionally convert from Sparkless expected_outputs, regenerate expected from PySpark, then run).
+# Set SPARKLESS_EXPECTED_OUTPUTS=/path/to/sparkless/tests/expected_outputs to run converter + regeneration.
 sparkless-parity:
 	@if [ -n "$$SPARKLESS_EXPECTED_OUTPUTS" ]; then \
 		mkdir -p tests/fixtures/converted; \
-		python3 tests/convert_sparkless_fixtures.py --batch "$$SPARKLESS_EXPECTED_OUTPUTS" tests/fixtures --output-subdir converted; \
+		python3 tests/convert_sparkless_fixtures.py --batch "$$SPARKLESS_EXPECTED_OUTPUTS" tests/fixtures --output-subdir converted --dedupe; \
+		 python3 tests/regenerate_expected_from_pyspark.py tests/fixtures/converted 2>/dev/null || true; \
 	fi
 	cargo test pyspark_parity_fixtures
 

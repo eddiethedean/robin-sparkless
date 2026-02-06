@@ -1,0 +1,83 @@
+{
+  "name": "nvl",
+  "pyspark_version": "3.5",
+  "input": {
+    "schema": [
+      {
+        "name": "id",
+        "type": "string"
+      },
+      {
+        "name": "name",
+        "type": "string"
+      },
+      {
+        "name": "age",
+        "type": "string"
+      },
+      {
+        "name": "salary",
+        "type": "string"
+      },
+      {
+        "name": "department",
+        "type": "string"
+      }
+    ],
+    "rows": [
+      [
+        1,
+        "Alice",
+        25,
+        50000.0,
+        "IT"
+      ],
+      [
+        2,
+        null,
+        30,
+        null,
+        "HR"
+      ],
+      [
+        3,
+        "Charlie",
+        null,
+        70000.0,
+        null
+      ],
+      [
+        4,
+        "David",
+        40,
+        80000.0,
+        "Finance"
+      ]
+    ]
+  },
+  "operations": [],
+  "expected": {
+    "schema": [
+      {
+        "name": "coalesce(salary, 0)",
+        "type": "double"
+      }
+    ],
+    "rows": [
+      [
+        50000.0
+      ],
+      [
+        0.0
+      ],
+      [
+        70000.0
+      ],
+      [
+        80000.0
+      ]
+    ]
+  },
+  "skip": true,
+  "skip_reason": "Expected shape from Sparkless converter; regenerate expected from PySpark for parity"
+}

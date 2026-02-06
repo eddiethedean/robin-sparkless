@@ -1,0 +1,88 @@
+{
+  "name": "create_map",
+  "pyspark_version": "3.5",
+  "input": {
+    "schema": [
+      {
+        "name": "id",
+        "type": "string"
+      },
+      {
+        "name": "map1",
+        "type": "string"
+      },
+      {
+        "name": "map2",
+        "type": "string"
+      },
+      {
+        "name": "key",
+        "type": "string"
+      }
+    ],
+    "rows": [
+      [
+        1,
+        {
+          "a": 1,
+          "b": 2
+        },
+        {
+          "c": 3,
+          "d": 4
+        },
+        "a"
+      ],
+      [
+        2,
+        {
+          "x": 10,
+          "y": 20
+        },
+        {
+          "z": 30
+        },
+        "x"
+      ],
+      [
+        3,
+        {
+          "p": 100,
+          "q": 200
+        },
+        {
+          "r": 300
+        },
+        "p"
+      ]
+    ]
+  },
+  "operations": [],
+  "expected": {
+    "schema": [
+      {
+        "name": "map(key, value)",
+        "type": "map"
+      }
+    ],
+    "rows": [
+      [
+        {
+          "key": "value"
+        }
+      ],
+      [
+        {
+          "key": "value"
+        }
+      ],
+      [
+        {
+          "key": "value"
+        }
+      ]
+    ]
+  },
+  "skip": true,
+  "skip_reason": "Expected shape from Sparkless converter; regenerate expected from PySpark for parity"
+}

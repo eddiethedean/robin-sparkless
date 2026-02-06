@@ -1,0 +1,80 @@
+{
+  "name": "math_sin",
+  "pyspark_version": "3.5",
+  "input": {
+    "schema": [
+      {
+        "name": "id",
+        "type": "string"
+      },
+      {
+        "name": "a",
+        "type": "string"
+      },
+      {
+        "name": "b",
+        "type": "string"
+      },
+      {
+        "name": "c",
+        "type": "string"
+      },
+      {
+        "name": "angle",
+        "type": "string"
+      },
+      {
+        "name": "value",
+        "type": "string"
+      }
+    ],
+    "rows": [
+      [
+        1,
+        5,
+        3,
+        7,
+        0.785,
+        4.5
+      ],
+      [
+        2,
+        2,
+        8,
+        1,
+        1.57,
+        3.2
+      ],
+      [
+        3,
+        9,
+        4,
+        6,
+        0.0,
+        7.8
+      ]
+    ]
+  },
+  "operations": [],
+  "expected": {
+    "schema": [
+      {
+        "name": "SIN(angle)",
+        "type": "double"
+      }
+    ],
+    "rows": [
+      [
+        0.706825181105366
+      ],
+      [
+        0.9999996829318346
+      ],
+      [
+        0.0
+      ]
+    ]
+  },
+  "skip": true,
+  "skip_reason": "Expected shape from Sparkless converter; regenerate expected from PySpark for parity"
+}

@@ -9,6 +9,8 @@ export SPARKLESS_EXPECTED_OUTPUTS=/path/to/sparkless/tests/expected_outputs
 make sparkless-parity
 ```
 
+This will: (1) convert Sparkless expected_outputs to `tests/fixtures/converted/` (with `--dedupe` to skip scenarios already in hand-written fixtures), (2) regenerate each converted fixture’s `expected` from **PySpark** via `tests/regenerate_expected_from_pyspark.py` (requires `pip install pyspark`), (3) run `cargo test pyspark_parity_fixtures`. Parity is thus Robin vs **PySpark**, not Sparkless.
+
 Or run parity only (hand-written + `tests/fixtures/converted/*.json`):
 
 ```bash
@@ -20,16 +22,16 @@ cargo test pyspark_parity_fixtures
 | Source | Converted | Passing | Failing | Skipped |
 |--------|-----------|---------|--------|---------|
 | Hand-written (`tests/fixtures/*.json`) | — | 159 | 0 | 2 (array_distinct, with_curdate_now) |
-| Sparkless converted (`tests/fixtures/converted/*.json`) | 0 (run converter when `SPARKLESS_EXPECTED_OUTPUTS` set) | — | — | — |
+| Sparkless converted (`tests/fixtures/converted/*.json`) | 226 | 0 | 0 | 226 (all skipped: expected shape from converter; run `regenerate_expected_from_pyspark.py` with PySpark to fix) |
 
 **Target: 50+ tests passing** (hand-written + converted). **Current: 159 passing** (hand-written; array_distinct, with_curdate_now skipped). **Phase 25 completed**: plan interpreter, expression interpreter (all scalar functions), 3 plan fixtures (`tests/fixtures/plans/`: filter_select_limit, join_simple, with_column_functions), create_dataframe_from_rows. Phase 22: datetime extensions. Phase 21: ordering, aggregates, numeric. Phase 19–18: aggregates, array/map/struct. Phase 17–15: datetime/unix, regexp, aliases, string, math. **Phase 27** (Sparkless integration) target: 200+ Sparkless tests passing with robin backend (after Phase 26 publish Rust crate). CI runs parity on hand-written (and optionally converted) fixtures; when Sparkless repo is available, run `make sparkless-parity` and update this doc.
 
 ### When Sparkless repo is available
 
 1. Set `export SPARKLESS_EXPECTED_OUTPUTS=/path/to/sparkless/tests/expected_outputs`.
-2. Run `make sparkless-parity` (converts to `tests/fixtures/converted/`, then runs `cargo test pyspark_parity_fixtures`).
+2. Run `make sparkless-parity` (converts with `--dedupe`, regenerates expected from PySpark, then runs `cargo test pyspark_parity_fixtures`).
 3. Update the table above with converted count and passing/failing/skipped for `tests/fixtures/converted/*.json`.
-4. For any failing fixture, add a row under "Failure reasons" and use `skip: true` + `skip_reason` in the fixture if it is a known unsupported or semantic difference.
+4. For any failing fixture, add a row under "Failure reasons" and use `skip: true` + `skip_reason` in the fixture if it is a known unsupported or semantic difference. Because expected is PySpark-derived, failures indicate Robin vs PySpark divergence.
 
 ## Failure reasons (converted fixtures)
 

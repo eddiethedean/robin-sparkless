@@ -1,0 +1,80 @@
+{
+  "name": "conditional_when_otherwise",
+  "pyspark_version": "3.5",
+  "input": {
+    "schema": [
+      {
+        "name": "id",
+        "type": "string"
+      },
+      {
+        "name": "age",
+        "type": "string"
+      },
+      {
+        "name": "salary",
+        "type": "string"
+      },
+      {
+        "name": "col1",
+        "type": "string"
+      },
+      {
+        "name": "col2",
+        "type": "string"
+      },
+      {
+        "name": "col3",
+        "type": "string"
+      }
+    ],
+    "rows": [
+      [
+        1,
+        25,
+        50000,
+        null,
+        "backup",
+        "default"
+      ],
+      [
+        2,
+        35,
+        null,
+        "primary",
+        null,
+        "default"
+      ],
+      [
+        3,
+        45,
+        70000,
+        "primary",
+        "backup",
+        null
+      ]
+    ]
+  },
+  "operations": [],
+  "expected": {
+    "schema": [
+      {
+        "name": "level",
+        "type": "string"
+      }
+    ],
+    "rows": [
+      [
+        "Junior"
+      ],
+      [
+        "Senior"
+      ],
+      [
+        "Senior"
+      ]
+    ]
+  },
+  "skip": true,
+  "skip_reason": "Expected shape from Sparkless converter; regenerate expected from PySpark for parity"
+}

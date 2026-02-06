@@ -239,3 +239,22 @@ def test_select_nonexistent_column_raises() -> None:
     df = spark.create_dataframe([(1, 25, "Alice")], ["id", "age", "name"])
     with pytest.raises(Exception):
         df.select(["id", "nonexistent"])
+
+
+def test_delta_write_and_read(spark) -> None:
+    """When built with delta feature: write_delta then read_delta round-trips data."""
+    import tempfile
+
+    df = spark.create_dataframe([(1, 1, "a"), (2, 2, "b")], ["id", "num", "name"])
+    try:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = f"{tmpdir}/delta_table"
+            df.write_delta(path, overwrite=True)
+            back = spark.read_delta(path)
+            rows = back.collect()
+            assert len(rows) == 2
+            assert rows[0]["id"] == 1 and rows[0]["name"] == "a"
+    except RuntimeError as e:
+        if "delta" in str(e).lower() or "Delta Lake" in str(e):
+            pytest.skip("Delta Lake feature not built (build with --features pyo3,delta)")
+        raise

@@ -90,6 +90,8 @@ The parity harness supports **date** and **timestamp** (or **datetime**) column 
 
 ## 3. PySpark Generator Script
 
+**Requirements:** PySpark (`pip install pyspark`) and **Java 17 or newer**. Set `JAVA_HOME` to a JDK 17+ installation if you see JVM or `UnsupportedClassVersionError` when starting PySpark.
+
 Create a Python script, e.g. `tests/gen_pyspark_cases.py`, that:
 
 1. Starts a PySpark `SparkSession` (pinned PySpark version).

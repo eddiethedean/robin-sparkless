@@ -1,0 +1,59 @@
+{
+  "name": "overlay",
+  "pyspark_version": "3.5",
+  "input": {
+    "schema": [
+      {
+        "name": "id",
+        "type": "string"
+      },
+      {
+        "name": "name",
+        "type": "string"
+      },
+      {
+        "name": "text",
+        "type": "string"
+      }
+    ],
+    "rows": [
+      [
+        1,
+        "Alice",
+        "Hello World"
+      ],
+      [
+        2,
+        "Bob",
+        "Test"
+      ],
+      [
+        3,
+        "Charlie",
+        "Python"
+      ]
+    ]
+  },
+  "operations": [],
+  "expected": {
+    "schema": [
+      {
+        "name": "overlay(text, X, 1, 1)",
+        "type": "string"
+      }
+    ],
+    "rows": [
+      [
+        "Xello World"
+      ],
+      [
+        "Xest"
+      ],
+      [
+        "Xython"
+      ]
+    ]
+  },
+  "skip": true,
+  "skip_reason": "Expected shape from Sparkless converter; regenerate expected from PySpark for parity"
+}

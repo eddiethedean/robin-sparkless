@@ -2,28 +2,43 @@
 
 The script `tests/convert_sparkless_fixtures.py` converts Sparkless `expected_outputs` JSON to robin-sparkless fixture format. Use it when you have the [Sparkless](https://github.com/eddiethedean/sparkless) repo or a copy of its `tests/expected_outputs/` directory.
 
+## Obtaining Sparkless expected_outputs
+
+Clone [Sparkless](https://github.com/eddiethedean/sparkless) (or add as git submodule / CI checkout) so `tests/expected_outputs/` is available. Set the environment variable to the **exact path** to that directory:
+
+```bash
+export SPARKLESS_EXPECTED_OUTPUTS=/path/to/sparkless/tests/expected_outputs
+```
+
+Example if Sparkless is cloned next to robin-sparkless: `export SPARKLESS_EXPECTED_OUTPUTS=../sparkless/tests/expected_outputs`
+
 ## Usage
 
 ```bash
 # Convert a single Sparkless JSON file
-python tests/convert_sparkless_fixtures.py /path/to/sparkless/expected_outputs/some_test.json tests/fixtures
+python tests/convert_sparkless_fixtures.py /path/to/sparkless/tests/expected_outputs/some_test.json tests/fixtures
 
-# Convert all JSON files in a Sparkless expected_outputs directory (output to tests/fixtures/converted/)
-python tests/convert_sparkless_fixtures.py --batch /path/to/sparkless/tests/expected_outputs tests/fixtures --output-subdir converted
+# Convert all JSON files (optionally skip duplicates of existing tests/fixtures/*.json)
+python tests/convert_sparkless_fixtures.py --batch "$SPARKLESS_EXPECTED_OUTPUTS" tests/fixtures --output-subdir converted
+python tests/convert_sparkless_fixtures.py --batch "$SPARKLESS_EXPECTED_OUTPUTS" tests/fixtures --output-subdir converted --dedupe
 ```
 
-**Phase 5 – Run parity on converted fixtures:**
+**Run parity (convert → regenerate expected from PySpark → run Rust parity):**
 
 ```bash
-# Optional: set path to Sparkless expected_outputs; converter runs first, then parity test
 export SPARKLESS_EXPECTED_OUTPUTS=/path/to/sparkless/tests/expected_outputs
 make sparkless-parity
-
-# Or run parity only (hand-written + tests/fixtures/converted/*.json)
-cargo test pyspark_parity_fixtures
 ```
 
-To run Phase 5 conversion, clone [Sparkless](https://github.com/eddiethedean/sparkless) and set `SPARKLESS_EXPECTED_OUTPUTS` to `path/to/sparkless/tests/expected_outputs`.
+The `sparkless-parity` target: (1) runs the converter with `--dedupe`, (2) runs `tests/regenerate_expected_from_pyspark.py` on `tests/fixtures/converted/` to overwrite each fixture’s `expected` with PySpark’s result, (3) runs `cargo test pyspark_parity_fixtures`. Ground truth for parity is **PySpark**.
+
+**PySpark for regeneration:** `pip install pyspark` and **Java 17 or newer** are required. Set `JAVA_HOME` to a JDK 17+ installation (e.g. `export JAVA_HOME=/path/to/jdk-17`). If Java is missing or too old, the script prints a clear error and exits; the Makefile skips regeneration when the script fails, so the rest of the pipeline still runs.
+
+Or run parity only (hand-written + tests/fixtures/converted/*.json):
+
+```bash
+cargo test pyspark_parity_fixtures
+```
 
 ## Format mapping
 
@@ -62,6 +77,10 @@ To run Phase 5 conversion, clone [Sparkless](https://github.com/eddiethedean/spa
 - **Script**: Implemented in `tests/convert_sparkless_fixtures.py`. Schema and row conversion, `right_input` for join/union, and operation mapping for filter, select, groupBy, agg, orderBy, join, window, withColumn, union, unionByName, distinct, drop, dropna, fillna, limit, withColumnRenamed are in place.
 - **Target**: Convert Sparkless `expected_outputs` with `--batch` and `--output-subdir converted`; run `make sparkless-parity` (set `SPARKLESS_EXPECTED_OUTPUTS` when Sparkless repo is available). Goal: 50+ tests passing (hand-written + converted). Current: 159 hand-written fixtures passing (Phase 19: aggregates, try_*, misc; Phase 18: array/map/struct; Phase 17: datetime/unix, pmod, factorial; Phase 16: regexp; Phase 15: aliases, string, math, array_distinct; array_distinct skipped). Target: 160+ total fixtures with converted outputs.
 - **Tests that may fail after conversion**: Unsupported expressions, missing functions, or semantic differences. Fix converter where possible; add `skip: true` and document in [SPARKLESS_PARITY_STATUS.md](SPARKLESS_PARITY_STATUS.md).
+
+## Port status
+
+When Sparkless repo is available: run `make sparkless-parity`, then update [SPARKLESS_PARITY_STATUS.md](SPARKLESS_PARITY_STATUS.md) with converted/passing/failing/skipped counts and failure reasons. Re-run after Sparkless updates to refresh converted fixtures and expected (PySpark-regenerated).
 
 ## Related
 
