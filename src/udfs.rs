@@ -128,6 +128,38 @@ pub fn apply_array_flatten(column: Column) -> PolarsResult<Option<Column>> {
     Ok(Some(Column::new(name, out.into_series())))
 }
 
+/// Distinct elements in list preserving first-occurrence order (PySpark array_distinct parity).
+pub fn apply_array_distinct_first_order(column: Column) -> PolarsResult<Option<Column>> {
+    let name = column.field().into_owned().name;
+    let series = column.take_materialized_series();
+    let list_ca = series
+        .list()
+        .map_err(|e| PolarsError::ComputeError(format!("array_distinct: {e}").into()))?;
+    let inner_dtype = list_ca.inner_dtype().clone();
+    let out = list_ca.try_apply_amortized(|amort_s| {
+        let list_s = amort_s.as_ref().as_list();
+        let len = list_s.len();
+        let mut indices: Vec<u32> = Vec::new();
+        for i in 0..len {
+            let av_i = list_s.get(i);
+            let is_dup = (0..i).any(|j| list_s.get(j) == av_i);
+            if !is_dup {
+                indices.push(i as u32);
+            }
+        }
+        if indices.is_empty() {
+            Ok(Series::new_empty(PlSmallStr::EMPTY, &inner_dtype))
+        } else {
+            let idx_ca = UInt32Chunked::from_vec("".into(), indices);
+            let taken = list_s.take(&idx_ca).map_err(|e| {
+                PolarsError::ComputeError(format!("array_distinct take: {e}").into())
+            })?;
+            Ok(taken.into_series())
+        }
+    })?;
+    Ok(Some(Column::new(name, out.into_series())))
+}
+
 /// Repeat each list element n times (PySpark array_repeat).
 pub fn apply_array_repeat(column: Column, n: i64) -> PolarsResult<Option<Column>> {
     let name = column.field().into_owned().name;
@@ -3354,54 +3386,50 @@ pub fn apply_parse_url(
     Ok(Some(Column::new(name, out.into_series())))
 }
 
-/// hash one column (PySpark hash) - uses xxHash64.
+/// hash one column (PySpark hash) - uses Murmur3 32-bit for parity with PySpark.
 pub fn apply_hash_one(column: Column) -> PolarsResult<Option<Column>> {
     let name = column.field().into_owned().name;
     let series = column.take_materialized_series();
-    let out = Int64Chunked::from_iter_options(
-        name.as_str().into(),
-        series_to_hash_iter(series).map(|opt| opt.map(|h| h as i64)),
-    );
+    let out = Int64Chunked::from_iter_options(name.as_str().into(), series_to_hash_iter(series));
     Ok(Some(Column::new(name, out.into_series())))
 }
 
-/// hash struct (multiple columns combined) - PySpark hash.
+/// hash struct (multiple columns combined) - PySpark hash (Murmur3).
 pub fn apply_hash_struct(column: Column) -> PolarsResult<Option<Column>> {
     let name = column.field().into_owned().name;
     let series = column.take_materialized_series();
-    let out = Int64Chunked::from_iter_options(
-        name.as_str().into(),
-        series_to_hash_iter(series).map(|opt| opt.map(|h| h as i64)),
-    );
+    let out = Int64Chunked::from_iter_options(name.as_str().into(), series_to_hash_iter(series));
     Ok(Some(Column::new(name, out.into_series())))
 }
 
-fn series_to_hash_iter(series: Series) -> impl Iterator<Item = Option<u64>> {
-    use std::hash::Hasher;
-    use twox_hash::XxHash64;
+fn series_to_hash_iter(series: Series) -> impl Iterator<Item = Option<i64>> {
+    use std::io::Cursor;
     (0..series.len()).map(move |i| {
         let av = series.get(i).ok()?;
-        let mut hasher = XxHash64::default();
-        hash_any_value(&av, &mut hasher);
-        Some(hasher.finish())
+        let bytes = any_value_to_hash_bytes(&av);
+        let h = murmur3::murmur3_32(&mut Cursor::new(bytes), 0).ok()?;
+        // PySpark hash returns 32-bit signed int; we store as i64 for column type
+        Some(h as i32 as i64)
     })
 }
 
-fn hash_any_value(av: &polars::datatypes::AnyValue, h: &mut impl std::hash::Hasher) {
+fn any_value_to_hash_bytes(av: &polars::datatypes::AnyValue) -> Vec<u8> {
     use polars::datatypes::AnyValue;
+    let mut buf = Vec::new();
     match av {
-        AnyValue::Null => h.write_u8(0),
-        AnyValue::Boolean(v) => h.write_u8(*v as u8),
-        AnyValue::Int32(v) => h.write(&v.to_le_bytes()),
-        AnyValue::Int64(v) => h.write(&v.to_le_bytes()),
-        AnyValue::UInt32(v) => h.write(&v.to_le_bytes()),
-        AnyValue::UInt64(v) => h.write(&v.to_le_bytes()),
-        AnyValue::Float32(v) => h.write(&v.to_bits().to_le_bytes()),
-        AnyValue::Float64(v) => h.write(&v.to_bits().to_le_bytes()),
-        AnyValue::String(v) => h.write(v.as_bytes()),
-        AnyValue::Binary(v) => h.write(v),
-        _ => h.write(av.to_string().as_bytes()),
+        AnyValue::Null => buf.push(0),
+        AnyValue::Boolean(v) => buf.push(*v as u8),
+        AnyValue::Int32(v) => buf.extend_from_slice(&v.to_le_bytes()),
+        AnyValue::Int64(v) => buf.extend_from_slice(&v.to_le_bytes()),
+        AnyValue::UInt32(v) => buf.extend_from_slice(&v.to_le_bytes()),
+        AnyValue::UInt64(v) => buf.extend_from_slice(&v.to_le_bytes()),
+        AnyValue::Float32(v) => buf.extend_from_slice(&v.to_bits().to_le_bytes()),
+        AnyValue::Float64(v) => buf.extend_from_slice(&v.to_bits().to_le_bytes()),
+        AnyValue::String(v) => buf.extend_from_slice(v.as_bytes()),
+        AnyValue::Binary(v) => buf.extend_from_slice(v),
+        _ => buf.extend_from_slice(av.to_string().as_bytes()),
     }
+    buf
 }
 
 /// Build array [start, start+step, ...] up to but not past stop (PySpark sequence).
