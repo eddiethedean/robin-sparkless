@@ -233,6 +233,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added `deny.toml` for cargo-deny (advisories, bans, sources; licenses need per-crate config)
 - Updated Makefile with Rust targets: build, test, check, fmt, clippy, audit, outdated, deny, all
 
+## [0.2.0] - 2026-02-06
+
+### Added
+
+- **check-full** now runs Python lint and type-check: `ruff format --check`, `ruff check`, `mypy` via new Makefile target `lint-python` (no Java/PySpark required for full check).
+- **create_dataframe_from_rows** parity test uses predetermined PySpark-derived expected rows; tests run only robin-sparkless at runtime (#151).
+- **Type stubs** (`robin_sparkless.pyi`): `DataFrame.drop(cols: list[str])`, `Column.multiply`, `DataFrame.pivot`; duplicate `month`/`year` definitions removed for mypy/ruff.
+- **Docs**: [CLOSED_ISSUES_TEST_COVERAGE.md](docs/CLOSED_ISSUES_TEST_COVERAGE.md) (closed issues → fixtures/tests), [PORTED_TEST_EXPECTATIONS.md](docs/PORTED_TEST_EXPECTATIONS.md), [SPARKLESS_PYTHON_TEST_PORT.md](docs/SPARKLESS_PYTHON_TEST_PORT.md); SQL/session, string/binary, datetime/type, window, and deferred parity docs updated.
+- **Rust/Python API**: `hash()` Murmur3 parity; `array_distinct` first-occurrence order; JSON write append; Python `from_csv`, `to_csv`, `schema_of_csv`, `schema_of_json`; SQL `HAVING` in GROUP BY; Python `get_json_object`, `json_tuple` (#91, #94); `year`/`month`/`nullif`, `log` with base, `astype`/`split`; left_semi and left_anti join; `Column` `__and__`/`__or__` for filter with `&`/`|`; `Column.multiply()`, `DataFrame.pivot` stub (#151, #156).
+- **Sparkless parity**: Ported tests and expectations for issues #1–#21; many converted fixtures and parity fixes (split, join_simple, zip_with, array_intersect, etc.).
+
+### Changed
+
+- **Makefile**: `test-python` no longer installs pyspark (no Java needed for test run). `check-full` = check → lint-python → test-python.
+- **Python parity test** `test_create_dataframe_from_rows_schema_pyspark_parity`: asserts against a fixed expected list derived from PySpark 3.5; no PySpark or JVM at test runtime.
+- **CI**: Python extension built with `pyo3,sql,delta`; release workflow groups Rust and Python jobs.
+
+### Fixed
+
+- **Python row conversion**: `py_to_json_value` checks `bool` before `i64` so Python `True`/`False` stay booleans in `create_dataframe_from_rows` and collect (#151).
+- **Python collect**: `any_value_to_py` handles `Date` and `Datetime`/`DatetimeOwned` so `collect()` returns date/datetime as strings for parity tests.
+- **Python API**: `pivot()` signature aligned with Rust (`pivot_col`, `values`); `Column.multiply()` exposed; `DataFrame.drop(cols)` accepts list of column names.
+- **Parity fixtures**: literal `split(|)`, `join_simple`, `zip_with`/`array_intersect`; `string_xxhash64`, `with_hash` un-skipped with expected values from current implementation; alloc/anes vendor patches for build.
+
+### Tooling
+
+- **Ruff**: format and check run in `lint-python`; test and stub files formatted.
+- **Mypy**: `mypy .` in `lint-python`; stubs updated so tests type-check (drop list, multiply, pivot; no duplicate symbols).
+
 ## [0.1.0] - (Initial release)
 
 ### Added
