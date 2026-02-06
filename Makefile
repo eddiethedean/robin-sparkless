@@ -14,10 +14,11 @@ build-release:
 test-rust:
 	cargo test
 
-# Run Python tests (creates .venv, installs extension with maturin, runs pytest)
+# Run Python tests (creates .venv, installs extension with sql+delta, runs pytest)
+# SQL and Delta features enable create_or_replace_temp_view, table(), sql(), read_delta, write_delta.
 test-python:
 	@if [ ! -d .venv ]; then python3 -m venv .venv; fi
-	. .venv/bin/activate && pip install -q maturin pytest && maturin develop --features pyo3
+	. .venv/bin/activate && pip install -q maturin pytest && maturin develop --features "pyo3,sql,delta"
 	. .venv/bin/activate && pytest tests/python/ -v
 
 # Run all tests (Rust + Python)

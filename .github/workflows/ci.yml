@@ -256,7 +256,7 @@ jobs:
         run: $PY -m pip install -r requirements-ci.txt
 
       - name: Build and install extension
-        run: $PY -m maturin develop --features pyo3 --release
+        run: $PY -m maturin develop --features "pyo3,sql,delta" --release
         env:
           VIRTUAL_ENV: ${{ github.workspace }}/.venv
 

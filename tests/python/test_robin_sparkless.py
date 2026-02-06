@@ -558,39 +558,29 @@ def test_sql_select_where_returns_rows() -> None:
     assert rows[0]["name"] == "b" and rows[1]["name"] == "c"
 
 
+# Predetermined expected output for create_dataframe_from_rows (int/string/boolean/date).
+# Derived from PySpark 3.5 createDataFrame with schema "id INT, name STRING, ok BOOLEAN, d DATE"
+# and rows [(1, "Alice", True, date(2024,1,15)), (2, "Bob", False, date(2024,6,10))].
+# Tests run only robin-sparkless and assert against this; no PySpark at test runtime.
+EXPECTED_CREATE_DATAFRAME_FROM_ROWS_PARITY = [
+    {"id": 1, "name": "Alice", "ok": True, "d": "2024-01-15"},
+    {"id": 2, "name": "Bob", "ok": False, "d": "2024-06-10"},
+]
+
+
 def test_create_dataframe_from_rows_schema_pyspark_parity() -> None:
-    """create_dataframe_from_rows matches PySpark for int/string/boolean/date (#151)."""
+    """create_dataframe_from_rows matches predetermined PySpark expectations (#151)."""
     import robin_sparkless as rs
 
-    pytest.importorskip("pyspark")
-    from datetime import date
-    from pyspark.sql import SparkSession as PySparkSession
-
-    spark_robin = rs.SparkSession.builder().app_name("test").get_or_create()
-    spark_pyspark = PySparkSession.builder.appName("parity").getOrCreate()
-
-    # Schema: id (int), name (string), ok (boolean), d (date)
     schema = [("id", "int"), ("name", "string"), ("ok", "boolean"), ("d", "date")]
     rows = [
         {"id": 1, "name": "Alice", "ok": True, "d": "2024-01-15"},
         {"id": 2, "name": "Bob", "ok": False, "d": "2024-06-10"},
     ]
-
-    robin_df = spark_robin.create_dataframe_from_rows(rows, schema)
-    robin_rows = sorted(robin_df.collect(), key=lambda r: r["id"])
-
-    pyspark_df = spark_pyspark.createDataFrame(
-        [(1, "Alice", True, date(2024, 1, 15)), (2, "Bob", False, date(2024, 6, 10))],
-        schema="id INT, name STRING, ok BOOLEAN, d DATE",
-    )
-    pyspark_rows = sorted([r.asDict() for r in pyspark_df.collect()], key=lambda r: r["id"])
-
-    assert len(robin_rows) == len(pyspark_rows) == 2
-    for r, p in zip(robin_rows, pyspark_rows):
-        assert r["id"] == p["id"]
-        assert r["name"] == p["name"]
-        assert r["ok"] == p["ok"]
-        assert str(r["d"]) == str(p["d"])
+    spark = rs.SparkSession.builder().app_name("test").get_or_create()
+    df = spark.create_dataframe_from_rows(rows, schema)
+    result = sorted(df.collect(), key=lambda r: r["id"])
+    assert result == EXPECTED_CREATE_DATAFRAME_FROM_ROWS_PARITY
 
 
 def test_pivot_raises_not_implemented() -> None:

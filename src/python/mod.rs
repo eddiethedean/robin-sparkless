@@ -60,9 +60,13 @@ pub(crate) use order::{PySortOrder, PyThenBuilder, PyWhenBuilder};
 pub(crate) use session::{PySparkSession, PySparkSessionBuilder};
 
 /// Convert a Python scalar to serde_json::Value for plan/row data.
+/// Bool must be checked before i64 because in Python bool is a subclass of int (True/False extract as 1/0).
 pub(crate) fn py_to_json_value(value: &Bound<'_, pyo3::types::PyAny>) -> PyResult<JsonValue> {
     if value.is_none() {
         return Ok(JsonValue::Null);
+    }
+    if let Ok(x) = value.extract::<bool>() {
+        return Ok(JsonValue::Bool(x));
     }
     if let Ok(x) = value.extract::<i64>() {
         return Ok(JsonValue::Number(serde_json::Number::from(x)));
@@ -72,9 +76,6 @@ pub(crate) fn py_to_json_value(value: &Bound<'_, pyo3::types::PyAny>) -> PyResul
             return Ok(JsonValue::Number(n));
         }
         return Ok(JsonValue::Null);
-    }
-    if let Ok(x) = value.extract::<bool>() {
-        return Ok(JsonValue::Bool(x));
     }
     if let Ok(x) = value.extract::<String>() {
         return Ok(JsonValue::String(x));
