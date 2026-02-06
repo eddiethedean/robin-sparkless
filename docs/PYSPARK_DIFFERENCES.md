@@ -91,12 +91,17 @@ The following JVM- or runtime-related functions are implemented as **stubs for A
 - **Phase 21 string/binary/type/array/map/struct**: **`btrim`**, **`locate`**, **`conv`**; **`hex`**, **`unhex`**, **`bin`**, **`getbit`**; **`decode`**, **`encode`**, **`to_binary`**, **`try_to_binary`**; **`to_char`**, **`to_varchar`**, **`to_number`**, **`try_to_number`**, **`try_to_timestamp`**; **`str_to_map`**; **`arrays_overlap`**, **`arrays_zip`**, **`explode_outer`**, **`posexplode_outer`**, **`array_agg`**; **`transform_keys`**, **`transform_values`** — all implemented. Deferred: `aggregate` (array fold). PyO3: `transform_keys` and `transform_values` require Expr and are Rust-only for now.
 - **Phase 23 JSON/URL/misc**: **`isin`**, **`isin_i64`**, **`isin_str`**; **`url_decode`**, **`url_encode`**; **`json_array_length`**, **`parse_url`**; **`hash`** (Murmur3 32-bit for PySpark parity); **`shift_left`**, **`shift_right`**, **`shift_right_unsigned`**; **`version`**; **`equal_null`**; **`stack`**; **`from_csv`**, **`to_csv`**, **`schema_of_csv`**, **`schema_of_json`**; **`get_json_object`**, **`json_tuple`** — all implemented. Deferred: `json_object_keys`.
 
-## Optional / deferred (XML, XPath, sentences)
+## Optional / deferred (XML, XPath, sentences, RDD, UDF, Catalog, Streaming, sketch, JVM stubs)
 
-The following are **not implemented** and are documented as deferred; implement only if prioritized:
+The following are **not implemented** or are **stubs**; tracked in GitHub issues for parity:
 
-- **XML**: `from_xml`, `to_xml`, `schema_of_xml` — would require an XML parser (e.g. quick-xml) and a feature flag.
-- **XPath**: `xpath`, `xpath_boolean`, `xpath_double`, etc. — depend on XML support; stub or defer.
-- **sentences**: Splits string into array of array of words (NLP); could be implemented as string split + list of lists, or left as stub.
+- **RDD / distributed (#142)**: RDD and distributed execution APIs — not supported; `rdd`, `foreach`, `foreachPartition`, `mapInPandas`, `mapPartitions` raise `NotImplementedError`.
+- **UDF / UDTF (#143)**: User-defined functions and table functions — not implemented; use built-in expressions and plan interpreter where possible.
+- **Catalog / DataFrameWriterV2 (#144)**: `writeTo`, catalog tables, `CREATE TABLE`-style DDL — not implemented; use `df.write().format(...).save(path)`.
+- **Structured Streaming (#145)**: Not supported; `isStreaming` returns false, `withWatermark` is a no-op.
+- **XML / XPath (#146)**: `from_xml`, `to_xml`, `schema_of_xml`, `xpath*` — would require an XML parser and feature flag; deferred.
+- **Sketch aggregates (#147)**: Approximate aggregates (e.g. HyperLogLog, count-min sketch) — not implemented.
+- **sentences / NLP (#148)**: `sentences` and JVM/UDTF helpers — deferred; could be implemented as string split + list of lists.
+- **JVM / runtime stubs (#154)**: See section **JVM / runtime stubs** above — `broadcast`, `spark_partition_id`, `input_file_name`, `monotonically_increasing_id`, `current_catalog`, `current_user`, etc. are stubs for API compatibility.
 
 See [ROADMAP.md](ROADMAP.md) and [FULL_BACKEND_ROADMAP.md](FULL_BACKEND_ROADMAP.md) for the full list.
