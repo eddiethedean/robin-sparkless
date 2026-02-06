@@ -10,8 +10,6 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-import pytest
-
 # Allow importing utils when running pytest from project root
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from utils import assert_rows_equal
@@ -36,6 +34,7 @@ SCHEMA_EMPLOYEES = [
 def test_filter_salary_gt_60000(spark) -> None:
     """Ported from Sparkless test_filter_with_boolean: filter(salary > 60000)."""
     import robin_sparkless as rs
+
     df = spark.create_dataframe_from_rows(INPUT_EMPLOYEES, SCHEMA_EMPLOYEES)
     result = df.filter(rs.col("salary").gt(rs.lit(60000)))
     rows = result.collect()
@@ -49,6 +48,7 @@ def test_filter_salary_gt_60000(spark) -> None:
 def test_filter_and_operator(spark) -> None:
     """Ported from Sparkless test_filter_with_and_operator: (a > 1) & (b > 1)."""
     import robin_sparkless as rs
+
     data = [{"a": 1, "b": 2}, {"a": 2, "b": 3}, {"a": 3, "b": 1}]
     schema = [("a", "bigint"), ("b", "bigint")]
     df = spark.create_dataframe_from_rows(data, schema)
@@ -63,6 +63,7 @@ def test_filter_and_operator(spark) -> None:
 def test_filter_or_operator(spark) -> None:
     """Ported from Sparkless test_filter_with_or_operator: (a > 1) | (b > 1)."""
     import robin_sparkless as rs
+
     data = [{"a": 1, "b": 2}, {"a": 2, "b": 3}, {"a": 3, "b": 1}]
     schema = [("a", "bigint"), ("b", "bigint")]
     df = spark.create_dataframe_from_rows(data, schema)
@@ -90,11 +91,14 @@ def test_basic_select(spark) -> None:
 def test_select_with_alias(spark) -> None:
     """Ported from Sparkless test_select_with_alias: select id as user_id, name as full_name."""
     import robin_sparkless as rs
+
     df = spark.create_dataframe_from_rows(INPUT_EMPLOYEES, SCHEMA_EMPLOYEES)
     # Robin select() takes column names; use with_column + select for aliasing
-    result = df.with_column("user_id", rs.col("id")).with_column(
-        "full_name", rs.col("name")
-    ).select(["user_id", "full_name"])
+    result = (
+        df.with_column("user_id", rs.col("id"))
+        .with_column("full_name", rs.col("name"))
+        .select(["user_id", "full_name"])
+    )
     rows = result.collect()
     expected = [
         {"user_id": 1, "full_name": "Alice"},
@@ -108,12 +112,15 @@ def test_select_with_alias(spark) -> None:
 def test_aggregation_avg_count(spark) -> None:
     """Ported from Sparkless test_aggregation: groupBy(department).agg(avg(salary), count(id))."""
     import robin_sparkless as rs
+
     df = spark.create_dataframe_from_rows(INPUT_EMPLOYEES, SCHEMA_EMPLOYEES)
     grouped = df.group_by(["department"])
-    result = grouped.agg([
-        rs.avg(rs.col("salary")).alias("avg_salary"),
-        rs.count(rs.col("id")).alias("count"),
-    ])
+    result = grouped.agg(
+        [
+            rs.avg(rs.col("salary")).alias("avg_salary"),
+            rs.count(rs.col("id")).alias("count"),
+        ]
+    )
     rows = result.collect()
     expected = [
         {"department": "Finance", "avg_salary": 80000.0, "count": 1},
@@ -136,7 +143,12 @@ def test_inner_join(spark) -> None:
         {"dept_id": 20, "name": "HR", "location": "LA"},
         {"dept_id": 40, "name": "Finance", "location": "Chicago"},
     ]
-    emp_schema = [("id", "bigint"), ("name", "string"), ("dept_id", "bigint"), ("salary", "bigint")]
+    emp_schema = [
+        ("id", "bigint"),
+        ("name", "string"),
+        ("dept_id", "bigint"),
+        ("salary", "bigint"),
+    ]
     dept_schema = [("dept_id", "bigint"), ("name", "string"), ("location", "string")]
     emp_df = spark.create_dataframe_from_rows(employees_data, emp_schema)
     dept_df = spark.create_dataframe_from_rows(departments_data, dept_schema)

@@ -34,7 +34,9 @@ def assert_rows_equal(
             _assert_row_equal(a, e, index=i)
     else:
         # Sort by stringified row for stable comparison
-        key_fn = lambda r: str(sorted((k, _norm_val(v)) for k, v in r.items()))
+        def key_fn(r: dict) -> str:
+            return str(sorted((k, _norm_val(v)) for k, v in r.items()))
+
         actual_sorted = sorted(actual, key=key_fn)
         expected_sorted = sorted(expected, key=key_fn)
         for i, (a, e) in enumerate(zip(actual_sorted, expected_sorted)):
@@ -69,4 +71,5 @@ def _assert_row_equal(actual: dict, expected: dict, index: int = 0) -> None:
 def get_session():
     """Return a robin_sparkless SparkSession for programmatic tests."""
     import robin_sparkless as rs
+
     return rs.SparkSession.builder().app_name("test").get_or_create()

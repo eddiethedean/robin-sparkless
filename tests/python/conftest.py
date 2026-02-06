@@ -16,5 +16,6 @@ import pytest
 def spark():
     """Yield a robin_sparkless SparkSession for the test."""
     import robin_sparkless as rs
+
     session = rs.SparkSession.builder().app_name("test").get_or_create()
     yield session

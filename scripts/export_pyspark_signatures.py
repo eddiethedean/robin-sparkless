@@ -197,7 +197,8 @@ def main() -> int:
         if spark is not None:
             df = spark.createDataFrame([], [])
             result["classes"]["DataFrameStat"] = collect_class_methods(
-                type(df.stat()), "DataFrameStat"
+                type(df.stat()),  # type: ignore[operator]
+                "DataFrameStat",
             )
             result["classes"]["DataFrameNa"] = collect_class_methods(
                 type(df.na), "DataFrameNa"

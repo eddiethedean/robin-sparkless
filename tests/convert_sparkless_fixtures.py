@@ -427,18 +427,25 @@ def main() -> int:
                 out = convert_sparkless_to_robin(data, fixture_name=name)
                 fixture_name = out["name"]
                 if args.dedupe and fixture_name in existing_names:
-                    print(f"Skipped (duplicate): {path.name} -> already have fixture '{fixture_name}'")
+                    print(
+                        f"Skipped (duplicate): {path.name} -> already have fixture '{fixture_name}'"
+                    )
                     skipped_dup += 1
                     continue
                 out_path = out_dir / f"{fixture_name}.json"
                 with open(out_path, "w") as f:
                     json.dump(out, f, indent=2)
                 count += 1
-                existing_names.add(fixture_name)  # avoid writing same name again in same batch
+                existing_names.add(
+                    fixture_name
+                )  # avoid writing same name again in same batch
                 print(f"Converted: {path.name} -> {out_path}")
             except Exception as e:
                 print(f"Skip {path.name}: {e}", file=sys.stderr)
-        print(f"Done: {count} fixtures written to {out_dir}" + (f"; {skipped_dup} skipped (duplicate)" if skipped_dup else ""))
+        print(
+            f"Done: {count} fixtures written to {out_dir}"
+            + (f"; {skipped_dup} skipped (duplicate)" if skipped_dup else "")
+        )
         return 0
 
     if not args.input_path:

@@ -92,9 +92,7 @@ fn path_to_table_uri(path: &Path) -> Result<String, PolarsError> {
     // Resolve to absolute path; support paths that don't exist yet (e.g. for write_delta).
     let abs_path = if path.exists() {
         path.canonicalize().map_err(|e| {
-            PolarsError::ComputeError(
-                format!("path_to_table_uri: canonicalize: {}", e).into(),
-            )
+            PolarsError::ComputeError(format!("path_to_table_uri: canonicalize: {}", e).into())
         })?
     } else {
         let base = path.parent().unwrap_or(Path::new("."));
@@ -136,7 +134,9 @@ fn uri_to_parquet_path(uri: &str) -> Result<std::path::PathBuf, PolarsError> {
         }
     }
     // deltalake may return bare absolute paths (e.g. /private/var/.../file.parquet).
-    if uri.starts_with('/') || (cfg!(target_os = "windows") && uri.len() >= 2 && uri.chars().nth(1) == Some(':')) {
+    if uri.starts_with('/')
+        || (cfg!(target_os = "windows") && uri.len() >= 2 && uri.chars().nth(1) == Some(':'))
+    {
         return Ok(std::path::PathBuf::from(uri));
     }
     Err(PolarsError::ComputeError(

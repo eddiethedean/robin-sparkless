@@ -254,7 +254,13 @@ def test_delta_write_and_read(spark) -> None:
             rows = back.collect()
             assert len(rows) == 2
             assert rows[0]["id"] == 1 and rows[0]["name"] == "a"
-    except RuntimeError as e:
-        if "delta" in str(e).lower() or "Delta Lake" in str(e):
-            pytest.skip("Delta Lake feature not built (build with --features pyo3,delta)")
+    except (RuntimeError, AttributeError) as e:
+        if (
+            isinstance(e, AttributeError)
+            or "delta" in str(e).lower()
+            or "Delta Lake" in str(e)
+        ):
+            pytest.skip(
+                "Delta Lake feature not built (build with --features pyo3,delta)"
+            )
         raise

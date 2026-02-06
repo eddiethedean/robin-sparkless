@@ -28,10 +28,11 @@ from typing import Any
 try:
     from pyspark.sql import SparkSession
     from pyspark.sql import functions as F
+
     try:
         from pyspark.errors.exceptions.base import PySparkRuntimeError
     except ImportError:
-        PySparkRuntimeError = Exception  # older PySpark
+        PySparkRuntimeError = Exception  # type: ignore[assignment,misc]  # older PySpark
     from pyspark.sql.types import (
         BooleanType,
         DateType,
@@ -43,8 +44,10 @@ try:
         StructType,
         TimestampType,
     )
-except ImportError as e:
-    print("Error: PySpark is required. Install with: pip install pyspark", file=sys.stderr)
+except ImportError:
+    print(
+        "Error: PySpark is required. Install with: pip install pyspark", file=sys.stderr
+    )
     sys.exit(1)
 
 
@@ -77,7 +80,9 @@ def schema_to_struct_type(schema: list[dict]) -> StructType:
     return StructType(fields)
 
 
-def rows_to_pyspark_df(spark: SparkSession, schema: list[dict], rows: list[list[Any]]) -> Any:
+def rows_to_pyspark_df(
+    spark: SparkSession, schema: list[dict], rows: list[list[Any]]
+) -> Any:
     """Create PySpark DataFrame from fixture schema + rows."""
     if not schema or not rows:
         return spark.createDataFrame([], schema_to_struct_type(schema or []))
@@ -87,7 +92,9 @@ def rows_to_pyspark_df(spark: SparkSession, schema: list[dict], rows: list[list[
 
 def schema_from_df(df: Any) -> list[dict]:
     """Extract fixture-format schema from PySpark DataFrame."""
-    return [{"name": f.name, "type": f.dataType.simpleString()} for f in df.schema.fields]
+    return [
+        {"name": f.name, "type": f.dataType.simpleString()} for f in df.schema.fields
+    ]
 
 
 def rows_from_df(df: Any) -> list[list[Any]]:
@@ -125,7 +132,10 @@ def apply_operations(
             columns = op_spec.get("columns", [])
             ascending = op_spec.get("ascending", [True] * len(columns))
             if columns:
-                order_cols = [F.col(c).asc() if asc else F.col(c).desc() for c, asc in zip(columns, ascending)]
+                order_cols = [
+                    F.col(c).asc() if asc else F.col(c).desc()
+                    for c, asc in zip(columns, ascending)
+                ]
                 df = df.orderBy(*order_cols)
         elif op == "groupBy":
             cols = op_spec.get("columns", [])
@@ -169,16 +179,22 @@ def apply_operations(
             col_name = op_spec.get("column", "computed")
             expr = op_spec.get("expr", "lit(0)")
             try:
-                df = df.withColumn(col_name, eval(expr, {"F": F, "col": F.col, "lit": F.lit}))
+                df = df.withColumn(
+                    col_name, eval(expr, {"F": F, "col": F.col, "lit": F.lit})
+                )
             except Exception:
                 df = df.withColumn(col_name, F.expr(_expr_to_sql(expr)))
         elif op == "union":
             if right_input:
-                right_df = rows_to_pyspark_df(spark, right_input.get("schema", []), right_input.get("rows", []))
+                right_df = rows_to_pyspark_df(
+                    spark, right_input.get("schema", []), right_input.get("rows", [])
+                )
                 df = df.union(right_df)
         elif op == "unionByName":
             if right_input:
-                right_df = rows_to_pyspark_df(spark, right_input.get("schema", []), right_input.get("rows", []))
+                right_df = rows_to_pyspark_df(
+                    spark, right_input.get("schema", []), right_input.get("rows", [])
+                )
                 df = df.unionByName(right_df)
         elif op == "distinct":
             subset = op_spec.get("subset")
@@ -211,7 +227,9 @@ def apply_operations(
                 df = df.replace(old_val, new_val, subset=[col_name])
         elif op == "crossJoin":
             if right_input:
-                right_df = rows_to_pyspark_df(spark, right_input.get("schema", []), right_input.get("rows", []))
+                right_df = rows_to_pyspark_df(
+                    spark, right_input.get("schema", []), right_input.get("rows", [])
+                )
                 df = df.crossJoin(right_df)
         elif op == "describe":
             df = df.describe()
@@ -219,8 +237,13 @@ def apply_operations(
             n = int(op_spec.get("n", 0))
             if n > 0:
                 from pyspark.sql.window import Window
+
                 w = Window.orderBy(F.monotonically_increasing_id())
-                df = df.withColumn("_rn", F.row_number().over(w)).filter(F.col("_rn") > n).drop("_rn")
+                df = (
+                    df.withColumn("_rn", F.row_number().over(w))
+                    .filter(F.col("_rn") > n)
+                    .drop("_rn")
+                )
         elif op == "head":
             n = int(op_spec.get("n", 1))
             df = df.limit(n)
@@ -231,7 +254,13 @@ def apply_operations(
 def _expr_to_sql(expr: str) -> str:
     """Heuristic: turn col('x') > 30 into SQL-like "x > 30" for F.expr."""
     import re
-    s = expr.replace("col('", "").replace("')", "").replace('col("', "").replace('")', "")
+
+    s = (
+        expr.replace("col('", "")
+        .replace("')", "")
+        .replace('col("', "")
+        .replace('")', "")
+    )
     s = re.sub(r"\.gt\s*\(\s*lit\s*\(\s*(\d+)\s*\)\s*\)", r" > \1", s)
     s = re.sub(r"\.gt\s*\(\s*(\d+)\s*\)", r" > \1", s)
     s = re.sub(r"\.lt\s*\(\s*(\d+)\s*\)", r" < \1", s)
@@ -285,7 +314,11 @@ def main() -> int:
         spark = SparkSession.builder.appName("regenerate_expected").getOrCreate()
     except PySparkRuntimeError as e:
         err_msg = str(e)
-        if "JAVA_GATEWAY" in err_msg or "UnsupportedClassVersionError" in err_msg or "class file version" in err_msg.lower():
+        if (
+            "JAVA_GATEWAY" in err_msg
+            or "UnsupportedClassVersionError" in err_msg
+            or "class file version" in err_msg.lower()
+        ):
             print(
                 "Error: PySpark could not start the JVM. PySpark requires Java 17 or newer.",
                 file=sys.stderr,
@@ -301,12 +334,19 @@ def main() -> int:
         return 1
     except Exception as e:
         err_msg = str(e)
-        if "Java" in err_msg or "JAVA_GATEWAY" in err_msg or "class file version" in err_msg.lower():
+        if (
+            "Java" in err_msg
+            or "JAVA_GATEWAY" in err_msg
+            or "class file version" in err_msg.lower()
+        ):
             print(
                 "Error: PySpark could not start the JVM. PySpark requires Java 17 or newer.",
                 file=sys.stderr,
             )
-            print("  Set JAVA_HOME to a JDK 17+ installation (e.g. export JAVA_HOME=/path/to/jdk-17).", file=sys.stderr)
+            print(
+                "  Set JAVA_HOME to a JDK 17+ installation (e.g. export JAVA_HOME=/path/to/jdk-17).",
+                file=sys.stderr,
+            )
         else:
             print(f"Error starting PySpark: {e}", file=sys.stderr)
         return 1
