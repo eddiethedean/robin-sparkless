@@ -520,6 +520,7 @@ pub fn sample(
 
 /// Split DataFrame by weights (random split). PySpark randomSplit(weights, seed).
 /// Returns one DataFrame per weight; weights are normalized to fractions.
+/// Each row is assigned to exactly one split (disjoint partitions).
 pub fn random_split(
     df: &DataFrame,
     weights: &[f64],
@@ -534,31 +535,46 @@ pub fn random_split(
     if n == 0 {
         return Ok(weights.iter().map(|_| super::DataFrame::empty()).collect());
     }
-    let mut out = Vec::with_capacity(weights.len());
-    let mut start = 0_usize;
+    // Normalize weights to cumulative fractions: e.g. [0.25, 0.25, 0.5] -> [0.25, 0.5, 1.0]
+    let mut cum = Vec::with_capacity(weights.len());
+    let mut acc = 0.0_f64;
     for w in weights {
-        let frac = w / total;
-        let take_n = (n as f64 * frac).round() as usize;
-        let take_n = take_n.min(n - start).max(0);
-        if take_n == 0 {
+        acc += w / total;
+        cum.push(acc);
+    }
+    // Assign each row index to one bucket using a single seeded RNG (disjoint split).
+    use polars::prelude::Series;
+    use rand::Rng;
+    use rand::SeedableRng;
+    let mut rng = rand::rngs::StdRng::seed_from_u64(seed.unwrap_or(0));
+    let mut bucket_indices: Vec<Vec<u32>> = (0..weights.len()).map(|_| Vec::new()).collect();
+    for i in 0..n {
+        let r: f64 = rng.gen();
+        let bucket = cum
+            .iter()
+            .position(|&c| r < c)
+            .unwrap_or(weights.len().saturating_sub(1));
+        bucket_indices[bucket].push(i as u32);
+    }
+    let pl = df.df.as_ref();
+    let mut out = Vec::with_capacity(weights.len());
+    for indices in bucket_indices {
+        if indices.is_empty() {
             out.push(super::DataFrame::from_polars_with_options(
-                df.df.as_ref().clone().head(Some(0)),
+                pl.clone().head(Some(0)),
                 case_sensitive,
             ));
-            continue;
+        } else {
+            let idx_series = Series::new("idx".into(), indices);
+            let idx_ca = idx_series.u32().map_err(|_| {
+                PolarsError::ComputeError("random_split: expected u32 indices".into())
+            })?;
+            let taken = pl.take(idx_ca)?;
+            out.push(super::DataFrame::from_polars_with_options(
+                taken,
+                case_sensitive,
+            ));
         }
-        use polars::prelude::Series;
-        let idx_series = Series::new("idx".into(), (0..n).map(|i| i as u32).collect::<Vec<_>>());
-        let sampled_idx = idx_series.sample_n(take_n, false, true, seed)?;
-        let idx_ca = sampled_idx
-            .u32()
-            .map_err(|_| PolarsError::ComputeError("random_split: expected u32 indices".into()))?;
-        let sampled = df.df.as_ref().take(idx_ca)?;
-        start += take_n;
-        out.push(super::DataFrame::from_polars_with_options(
-            sampled,
-            case_sensitive,
-        ));
     }
     Ok(out)
 }

@@ -1331,12 +1331,18 @@ impl PyDataFrameWriter {
     ///
     /// Returns:
     ///     Self for chaining.
-    fn mode<'py>(slf: PyRef<'py, Self>, mode: &str) -> PyRef<'py, Self> {
-        *slf.mode.write().expect("writer mode lock") = match mode.to_lowercase().as_str() {
-            "append" => WriteMode::Append,
-            _ => WriteMode::Overwrite,
-        };
-        slf
+    fn mode<'py>(slf: PyRef<'py, Self>, mode: &str) -> PyResult<PyRef<'py, Self>> {
+        {
+            let mut guard = slf
+                .mode
+                .try_write()
+                .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+            *guard = match mode.to_lowercase().as_str() {
+                "append" => WriteMode::Append,
+                _ => WriteMode::Overwrite,
+            };
+        }
+        Ok(slf)
     }
 
     /// Set the output file format for ``save()``.
@@ -1346,13 +1352,19 @@ impl PyDataFrameWriter {
     ///
     /// Returns:
     ///     Self for chaining.
-    fn format<'py>(slf: PyRef<'py, Self>, format: &str) -> PyRef<'py, Self> {
-        *slf.format.write().expect("writer format lock") = match format.to_lowercase().as_str() {
-            "csv" => WriteFormat::Csv,
-            "json" => WriteFormat::Json,
-            _ => WriteFormat::Parquet,
-        };
-        slf
+    fn format<'py>(slf: PyRef<'py, Self>, format: &str) -> PyResult<PyRef<'py, Self>> {
+        {
+            let mut guard = slf
+                .format
+                .try_write()
+                .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+            *guard = match format.to_lowercase().as_str() {
+                "csv" => WriteFormat::Csv,
+                "json" => WriteFormat::Json,
+                _ => WriteFormat::Parquet,
+            };
+        }
+        Ok(slf)
     }
 
     /// Write the DataFrame to the given path using the current mode and format.
@@ -1363,8 +1375,14 @@ impl PyDataFrameWriter {
     /// Raises:
     ///     RuntimeError: If write fails (e.g. permission, disk, or format error).
     fn save(&self, path: &str) -> PyResult<()> {
-        let mode = *self.mode.read().expect("writer mode lock");
-        let format = *self.format.read().expect("writer format lock");
+        let mode = *self
+            .mode
+            .try_read()
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        let format = *self
+            .format
+            .try_read()
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
         self.df
             .write()
             .mode(mode)
