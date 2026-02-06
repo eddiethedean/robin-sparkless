@@ -2558,7 +2558,7 @@ pub fn parse_url(column: &Column, part: &str, key: Option<&str>) -> Column {
     column.clone().parse_url(part, key)
 }
 
-/// Hash of column values (PySpark hash). Uses xxHash64 for consistency.
+/// Hash of column values (PySpark hash). Uses Murmur3 32-bit for parity with PySpark.
 pub fn hash(columns: &[&Column]) -> Column {
     use polars::prelude::*;
     if columns.is_empty() {
