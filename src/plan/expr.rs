@@ -816,8 +816,22 @@ fn expr_from_fn_rest(name: &str, args: &[Value]) -> Result<Expr, PlanExprError> 
             Ok(exp(&expr_to_column(arg_expr(args, 0)?)).into_expr())
         }
         "log" | "ln" => {
-            require_args(name, args, 1)?;
-            Ok(log(&expr_to_column(arg_expr(args, 0)?)).into_expr())
+            if args.len() == 1 {
+                Ok(log(&expr_to_column(arg_expr(args, 0)?)).into_expr())
+            } else if args.len() == 2 {
+                let col_expr = expr_to_column(arg_expr(args, 0)?);
+                let base = match &args[1] {
+                    Value::Number(n) => n
+                        .as_f64()
+                        .ok_or_else(|| PlanExprError("log base must be a number".to_string()))?,
+                    _ => return Err(PlanExprError("log base must be a number".to_string())),
+                };
+                Ok(crate::functions::log_with_base(&col_expr, base).into_expr())
+            } else {
+                Err(PlanExprError(format!(
+                    "fn '{name}' requires 1 or 2 arguments"
+                )))
+            }
         }
         "sin" => {
             require_args(name, args, 1)?;

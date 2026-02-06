@@ -1185,6 +1185,8 @@ fn apply_operations(
                     "left" => JoinType::Left,
                     "right" => JoinType::Right,
                     "outer" | "full" => JoinType::Outer,
+                    "left_semi" | "semi" => JoinType::LeftSemi,
+                    "left_anti" | "anti" => JoinType::LeftAnti,
                     other => {
                         return Err(PolarsError::ComputeError(
                             format!("unsupported join type: {other}").into(),
