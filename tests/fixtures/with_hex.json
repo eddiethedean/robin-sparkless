@@ -3,29 +3,77 @@
   "pyspark_version": "3.5.0",
   "input": {
     "schema": [
-      { "name": "id", "type": "bigint" },
-      { "name": "n", "type": "bigint" }
+      {
+        "name": "id",
+        "type": "bigint"
+      },
+      {
+        "name": "n",
+        "type": "bigint"
+      }
     ],
     "rows": [
-      [1, 255],
-      [2, 16],
-      [3, 0]
+      [
+        1,
+        255
+      ],
+      [
+        2,
+        16
+      ],
+      [
+        3,
+        0
+      ]
     ]
   },
   "operations": [
-    { "op": "withColumn", "column": "hexed", "expr": "hex(col('n'))" },
-    { "op": "orderBy", "columns": ["id"], "ascending": [true] }
+    {
+      "op": "withColumn",
+      "column": "hexed",
+      "expr": "hex(col('n'))"
+    },
+    {
+      "op": "orderBy",
+      "columns": [
+        "id"
+      ],
+      "ascending": [
+        true
+      ]
+    }
   ],
   "expected": {
     "schema": [
-      { "name": "id", "type": "bigint" },
-      { "name": "n", "type": "bigint" },
-      { "name": "hexed", "type": "string" }
+      {
+        "name": "id",
+        "type": "bigint"
+      },
+      {
+        "name": "n",
+        "type": "bigint"
+      },
+      {
+        "name": "hexed",
+        "type": "string"
+      }
     ],
     "rows": [
-      [1, 255, "ff"],
-      [2, 16, "10"],
-      [3, 0, "0"]
+      [
+        1,
+        255,
+        "FF"
+      ],
+      [
+        2,
+        16,
+        "10"
+      ],
+      [
+        3,
+        0,
+        "0"
+      ]
     ]
   }
 }

@@ -3,33 +3,77 @@
   "pyspark_version": "3.5.0",
   "input": {
     "schema": [
-      { "name": "dept", "type": "string" },
-      { "name": "val", "type": "bigint" }
+      {
+        "name": "dept",
+        "type": "string"
+      },
+      {
+        "name": "val",
+        "type": "bigint"
+      }
     ],
     "rows": [
-      ["A", 2],
-      ["A", 3],
-      ["B", 5]
+      [
+        "A",
+        2
+      ],
+      [
+        "A",
+        3
+      ],
+      [
+        "B",
+        5
+      ]
     ]
   },
   "operations": [
-    { "op": "groupBy", "columns": ["dept"] },
+    {
+      "op": "groupBy",
+      "columns": [
+        "dept"
+      ]
+    },
     {
       "op": "agg",
       "aggregations": [
-        { "func": "product", "alias": "product(val)", "column": "val" }
+        {
+          "func": "product",
+          "alias": "product(val)",
+          "column": "val"
+        }
       ]
     },
-    { "op": "orderBy", "columns": ["dept"], "ascending": [true] }
+    {
+      "op": "orderBy",
+      "columns": [
+        "dept"
+      ],
+      "ascending": [
+        true
+      ]
+    }
   ],
   "expected": {
     "schema": [
-      { "name": "dept", "type": "string" },
-      { "name": "product(val)", "type": "bigint" }
+      {
+        "name": "dept",
+        "type": "string"
+      },
+      {
+        "name": "product(val)",
+        "type": "double"
+      }
     ],
     "rows": [
-      ["A", 6],
-      ["B", 5]
+      [
+        "A",
+        6.0
+      ],
+      [
+        "B",
+        5.0
+      ]
     ]
   }
 }

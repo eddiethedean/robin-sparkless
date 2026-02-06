@@ -3,29 +3,79 @@
   "pyspark_version": "3.5.0",
   "input": {
     "schema": [
-      { "name": "id", "type": "int" },
-      { "name": "d", "type": "date" }
+      {
+        "name": "id",
+        "type": "int"
+      },
+      {
+        "name": "d",
+        "type": "date"
+      }
     ],
     "rows": [
-      [1, "2024-01-15"],
-      [2, "2024-06-10"]
+      [
+        1,
+        "2024-01-15"
+      ],
+      [
+        2,
+        "2024-06-10"
+      ]
     ]
   },
   "operations": [
-    { "op": "withColumn", "column": "plus_7", "expr": "date_add(col('d'), 7)" },
-    { "op": "withColumn", "column": "minus_3", "expr": "date_sub(col('d'), 3)" },
-    { "op": "orderBy", "columns": ["id"], "ascending": [true] }
+    {
+      "op": "withColumn",
+      "column": "plus_7",
+      "expr": "date_add(col('d'), 7)"
+    },
+    {
+      "op": "withColumn",
+      "column": "minus_3",
+      "expr": "date_sub(col('d'), 3)"
+    },
+    {
+      "op": "orderBy",
+      "columns": [
+        "id"
+      ],
+      "ascending": [
+        true
+      ]
+    }
   ],
   "expected": {
     "schema": [
-      { "name": "id", "type": "int" },
-      { "name": "d", "type": "date" },
-      { "name": "plus_7", "type": "date" },
-      { "name": "minus_3", "type": "date" }
+      {
+        "name": "id",
+        "type": "int"
+      },
+      {
+        "name": "d",
+        "type": "date"
+      },
+      {
+        "name": "plus_7",
+        "type": "date"
+      },
+      {
+        "name": "minus_3",
+        "type": "date"
+      }
     ],
     "rows": [
-      [1, "2024-01-15", "2024-01-22", "2024-01-12"],
-      [2, "2024-06-10", "2024-06-17", "2024-06-07"]
+      [
+        1,
+        "2024-01-15",
+        "2024-01-22",
+        "2024-01-12"
+      ],
+      [
+        2,
+        "2024-06-10",
+        "2024-06-17",
+        "2024-06-07"
+      ]
     ]
   }
 }

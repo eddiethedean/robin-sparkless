@@ -3,26 +3,60 @@
   "pyspark_version": "3.5.0",
   "input": {
     "schema": [
-      { "name": "id", "type": "bigint" },
-      { "name": "encoded", "type": "string" }
+      {
+        "name": "id",
+        "type": "bigint"
+      },
+      {
+        "name": "encoded",
+        "type": "string"
+      }
     ],
     "rows": [
-      [1, "hello%20world"],
-      [2, "foo%2Bbar"]
+      [
+        1,
+        "hello%20world"
+      ],
+      [
+        2,
+        "foo%2Bbar"
+      ]
     ]
   },
   "operations": [
-    { "op": "withColumn", "column": "decoded", "expr": "url_decode(col('encoded'))" },
-    { "op": "select", "columns": ["id", "decoded"] }
+    {
+      "op": "withColumn",
+      "column": "decoded",
+      "expr": "url_decode(col('encoded'))"
+    },
+    {
+      "op": "select",
+      "columns": [
+        "id",
+        "decoded"
+      ]
+    }
   ],
   "expected": {
     "schema": [
-      { "name": "id", "type": "bigint" },
-      { "name": "decoded", "type": "string" }
+      {
+        "name": "id",
+        "type": "bigint"
+      },
+      {
+        "name": "decoded",
+        "type": "string"
+      }
     ],
     "rows": [
-      [1, "hello world"],
-      [2, "foo+bar"]
+      [
+        1,
+        "hello world"
+      ],
+      [
+        2,
+        "foo+bar"
+      ]
     ]
   }
 }

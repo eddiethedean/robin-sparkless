@@ -3,41 +3,106 @@
   "pyspark_version": "3.5.0",
   "input": {
     "schema": [
-      { "name": "dept_id", "type": "bigint" },
-      { "name": "id", "type": "bigint" },
-      { "name": "name", "type": "string" }
+      {
+        "name": "dept_id",
+        "type": "bigint"
+      },
+      {
+        "name": "id",
+        "type": "bigint"
+      },
+      {
+        "name": "name",
+        "type": "string"
+      }
     ],
     "rows": [
-      [10, 1, "Alice"],
-      [10, 2, "Bob"],
-      [20, 3, "Charlie"]
+      [
+        10,
+        1,
+        "Alice"
+      ],
+      [
+        10,
+        2,
+        "Bob"
+      ],
+      [
+        20,
+        3,
+        "Charlie"
+      ]
     ]
   },
   "right_input": {
     "schema": [
-      { "name": "dept_id", "type": "bigint" },
-      { "name": "location", "type": "string" }
+      {
+        "name": "dept_id",
+        "type": "bigint"
+      },
+      {
+        "name": "location",
+        "type": "string"
+      }
     ],
     "rows": [
-      [10, "NYC"],
-      [20, "LA"]
+      [
+        10,
+        "NYC"
+      ],
+      [
+        20,
+        "LA"
+      ]
     ]
   },
   "operations": [
-    { "op": "join", "on": ["dept_id"], "how": "inner" }
+    {
+      "op": "join",
+      "on": [
+        "dept_id"
+      ],
+      "how": "inner"
+    }
   ],
   "expected": {
     "schema": [
-      { "name": "dept_id", "type": "bigint" },
-      { "name": "id", "type": "bigint" },
-      { "name": "name", "type": "string" },
-      { "name": "dept_id", "type": "bigint" },
-      { "name": "location", "type": "string" }
+      {
+        "name": "dept_id",
+        "type": "bigint"
+      },
+      {
+        "name": "id",
+        "type": "bigint"
+      },
+      {
+        "name": "name",
+        "type": "string"
+      },
+      {
+        "name": "location",
+        "type": "string"
+      }
     ],
     "rows": [
-      [10, 1, "Alice", 10, "NYC"],
-      [10, 2, "Bob", 10, "NYC"],
-      [20, 3, "Charlie", 20, "LA"]
+      [
+        10,
+        1,
+        "Alice",
+        "NYC"
+      ],
+      [
+        10,
+        2,
+        "Bob",
+        "NYC"
+      ],
+      [
+        20,
+        3,
+        "Charlie",
+        "LA"
+      ]
     ]
   }
 }

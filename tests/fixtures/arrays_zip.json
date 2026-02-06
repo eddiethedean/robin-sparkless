@@ -3,30 +3,81 @@
   "pyspark_version": "3.5.0",
   "input": {
     "schema": [
-      { "name": "id", "type": "bigint" },
-      { "name": "sa", "type": "string" },
-      { "name": "sb", "type": "string" }
+      {
+        "name": "id",
+        "type": "bigint"
+      },
+      {
+        "name": "sa",
+        "type": "string"
+      },
+      {
+        "name": "sb",
+        "type": "string"
+      }
     ],
     "rows": [
-      [1, "1|2|3", "10|20|30"],
-      [2, "1|2", "100|200"]
+      [
+        1,
+        "1|2|3",
+        "10|20|30"
+      ],
+      [
+        2,
+        "1|2",
+        "100|200"
+      ]
     ]
   },
   "operations": [
-    { "op": "withColumn", "column": "a", "expr": "split(col('sa'), '|')" },
-    { "op": "withColumn", "column": "b", "expr": "split(col('sb'), '|')" },
-    { "op": "withColumn", "column": "zipped", "expr": "arrays_zip(col('a'), col('b'))" },
-    { "op": "withColumn", "column": "size_zipped", "expr": "size(col('zipped'))" },
-    { "op": "select", "columns": ["id", "size_zipped"] }
+    {
+      "op": "withColumn",
+      "column": "a",
+      "expr": "split(col('sa'), '|')"
+    },
+    {
+      "op": "withColumn",
+      "column": "b",
+      "expr": "split(col('sb'), '|')"
+    },
+    {
+      "op": "withColumn",
+      "column": "zipped",
+      "expr": "arrays_zip(col('a'), col('b'))"
+    },
+    {
+      "op": "withColumn",
+      "column": "size_zipped",
+      "expr": "size(col('zipped'))"
+    },
+    {
+      "op": "select",
+      "columns": [
+        "id",
+        "size_zipped"
+      ]
+    }
   ],
   "expected": {
     "schema": [
-      { "name": "id", "type": "bigint" },
-      { "name": "size_zipped", "type": "int" }
+      {
+        "name": "id",
+        "type": "bigint"
+      },
+      {
+        "name": "size_zipped",
+        "type": "int"
+      }
     ],
     "rows": [
-      [1, 3],
-      [2, 2]
+      [
+        1,
+        3
+      ],
+      [
+        2,
+        2
+      ]
     ]
   }
 }

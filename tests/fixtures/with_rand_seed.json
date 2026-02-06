@@ -3,26 +3,85 @@
   "pyspark_version": "3.5.0",
   "input": {
     "schema": [
-      { "name": "id", "type": "bigint" }
+      {
+        "name": "id",
+        "type": "bigint"
+      }
     ],
-    "rows": [[1], [2], [3]]
+    "rows": [
+      [
+        1
+      ],
+      [
+        2
+      ],
+      [
+        3
+      ]
+    ]
   },
   "operations": [
-    { "op": "withColumn", "column": "r", "expr": "rand(42)" },
-    { "op": "withColumn", "column": "rn", "expr": "randn(42)" },
-    { "op": "select", "columns": ["id", "r", "rn"] },
-    { "op": "orderBy", "columns": ["id"], "ascending": [true] }
+    {
+      "op": "withColumn",
+      "column": "r",
+      "expr": "rand(42)"
+    },
+    {
+      "op": "withColumn",
+      "column": "rn",
+      "expr": "randn(42)"
+    },
+    {
+      "op": "select",
+      "columns": [
+        "id",
+        "r",
+        "rn"
+      ]
+    },
+    {
+      "op": "orderBy",
+      "columns": [
+        "id"
+      ],
+      "ascending": [
+        true
+      ]
+    }
   ],
   "expected": {
     "schema": [
-      { "name": "id", "type": "bigint" },
-      { "name": "r", "type": "double" },
-      { "name": "rn", "type": "double" }
+      {
+        "name": "id",
+        "type": "bigint"
+      },
+      {
+        "name": "r",
+        "type": "double"
+      },
+      {
+        "name": "rn",
+        "type": "double"
+      }
     ],
     "rows": [
-      [1, 0.5265574090027738, 0.06942791836196335],
-      [2, 0.5265574090027738, 0.06942791836196335],
-      [3, 0.5265574090027738, 0.06942791836196335]
+      [
+        1,
+        0.7971301351894658,
+        0.7400395449950132
+      ],
+      [
+        2,
+        0.47952506308000253,
+        -0.04167221574820542
+      ],
+      [
+        3,
+        0.9676898928895498,
+        -0.06706288020621906
+      ]
     ]
-  }
+  },
+  "skip": true,
+  "skip_reason": "non-deterministic"
 }

@@ -3,29 +3,79 @@
   "pyspark_version": "3.5.0",
   "input": {
     "schema": [
-      { "name": "id", "type": "int" },
-      { "name": "ts", "type": "timestamp" }
+      {
+        "name": "id",
+        "type": "int"
+      },
+      {
+        "name": "ts",
+        "type": "timestamp"
+      }
     ],
     "rows": [
-      [1, "2024-01-15T14:30:00.000000"],
-      [2, "2024-06-10T09:45:30.000000"]
+      [
+        1,
+        "2024-01-15T14:30:00.000000"
+      ],
+      [
+        2,
+        "2024-06-10T09:45:30.000000"
+      ]
     ]
   },
   "operations": [
-    { "op": "withColumn", "column": "h", "expr": "hour(col('ts'))" },
-    { "op": "withColumn", "column": "m", "expr": "minute(col('ts'))" },
-    { "op": "orderBy", "columns": ["id"], "ascending": [true] }
+    {
+      "op": "withColumn",
+      "column": "h",
+      "expr": "hour(col('ts'))"
+    },
+    {
+      "op": "withColumn",
+      "column": "m",
+      "expr": "minute(col('ts'))"
+    },
+    {
+      "op": "orderBy",
+      "columns": [
+        "id"
+      ],
+      "ascending": [
+        true
+      ]
+    }
   ],
   "expected": {
     "schema": [
-      { "name": "id", "type": "int" },
-      { "name": "ts", "type": "timestamp" },
-      { "name": "h", "type": "int" },
-      { "name": "m", "type": "int" }
+      {
+        "name": "id",
+        "type": "int"
+      },
+      {
+        "name": "ts",
+        "type": "timestamp"
+      },
+      {
+        "name": "h",
+        "type": "int"
+      },
+      {
+        "name": "m",
+        "type": "int"
+      }
     ],
     "rows": [
-      [1, "2024-01-15T14:30:00.000000", 14, 30],
-      [2, "2024-06-10T09:45:30.000000", 9, 45]
+      [
+        1,
+        "2024-01-15T14:30:00",
+        14,
+        30
+      ],
+      [
+        2,
+        "2024-06-10T09:45:30",
+        9,
+        45
+      ]
     ]
   }
 }

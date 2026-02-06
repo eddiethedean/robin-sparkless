@@ -348,7 +348,7 @@ pub fn cross_join(
 }
 
 /// Summary statistics (count, mean, std, min, max). PySpark describe.
-/// Builds a summary DataFrame with a "statistic" column and one column per numeric input column.
+/// Builds a summary DataFrame with a "summary" column (PySpark name) and one column per numeric input column.
 pub fn describe(df: &DataFrame, case_sensitive: bool) -> Result<DataFrame, PolarsError> {
     use polars::prelude::*;
     let pl_df = df.df.as_ref().clone();
@@ -367,15 +367,25 @@ pub fn describe(df: &DataFrame, case_sensitive: bool) -> Result<DataFrame, Polar
                 .map_err(|_| PolarsError::ComputeError("cast to f64 failed".into()))?;
             let min_f = ca.min().unwrap_or(f64::NAN);
             let max_f = ca.max().unwrap_or(f64::NAN);
-            let series = Series::new(name, [count as f64, mean_f, std_f, min_f, max_f]);
+            // PySpark describe/summary returns string type for value columns
+            let is_float = matches!(dtype, DataType::Float64 | DataType::Float32);
+            let count_s = count.to_string();
+            let mean_s = if mean_f.is_nan() { "None".to_string() } else { format!("{:.1}", mean_f) };
+            let std_s = if std_f.is_nan() { "None".to_string() } else { format!("{:.1}", std_f) };
+            let min_s = if min_f.is_nan() { "None".to_string() } else if min_f.fract() == 0.0 && is_float { format!("{:.1}", min_f) } else if min_f.fract() == 0.0 { format!("{:.0}", min_f) } else { format!("{min_f}") };
+            let max_s = if max_f.is_nan() { "None".to_string() } else if max_f.fract() == 0.0 && is_float { format!("{:.1}", max_f) } else if max_f.fract() == 0.0 { format!("{:.0}", max_f) } else { format!("{max_f}") };
+            let series = Series::new(
+                name,
+                [count_s.as_str(), mean_s.as_str(), std_s.as_str(), min_s.as_str(), max_s.as_str()],
+            );
             stat_values.push(series.into());
         }
     }
     if stat_values.is_empty() {
-        // No numeric columns: return minimal describe with just statistic column
+        // No numeric columns: return minimal describe with just summary column (PySpark name)
         let stat_col = Series::new(
-            "statistic".into(),
-            &["count", "mean", "std", "min", "max" as &str],
+            "summary".into(),
+            &["count", "mean", "stddev", "min", "max" as &str],
         )
         .into();
         let empty: Vec<f64> = Vec::new();
@@ -386,12 +396,12 @@ pub fn describe(df: &DataFrame, case_sensitive: bool) -> Result<DataFrame, Polar
             case_sensitive,
         ));
     }
-    let statistic = Series::new(
-        "statistic".into(),
-        &["count", "mean", "std", "min", "max" as &str],
+    let summary_col = Series::new(
+        "summary".into(),
+        &["count", "mean", "stddev", "min", "max" as &str],
     )
     .into();
-    let mut cols: Vec<Column> = vec![statistic];
+    let mut cols: Vec<Column> = vec![summary_col];
     cols.extend(stat_values);
     let out_pl = polars::prelude::DataFrame::new(cols)?;
     Ok(super::DataFrame::from_polars_with_options(

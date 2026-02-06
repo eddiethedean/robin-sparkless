@@ -1,1 +1,104 @@
-{"name":"find_in_set","pyspark_version":"3.5.0","input":{"schema":[{"name":"id","type":"bigint"},{"name":"str","type":"string"},{"name":"set","type":"string"}],"rows":[[1,"b","a,b,c"],[2,"x","a,b,c"],[3,"a","a,b,c"],[4,"a,b","a,b,c"]]},"operations":[{"op":"withColumn","column":"idx","expr":"find_in_set(col('str'), col('set'))"},{"op":"select","columns":["id","str","set","idx"]}],"expected":{"schema":[{"name":"id","type":"bigint"},{"name":"str","type":"string"},{"name":"set","type":"string"},{"name":"idx","type":"bigint"}],"rows":[[1,"b","a,b,c",2],[2,"x","a,b,c",0],[3,"a","a,b,c",1],[4,"a,b","a,b,c",0]]}}
+{
+  "name": "find_in_set",
+  "pyspark_version": "3.5.0",
+  "input": {
+    "schema": [
+      {
+        "name": "id",
+        "type": "bigint"
+      },
+      {
+        "name": "str",
+        "type": "string"
+      },
+      {
+        "name": "set",
+        "type": "string"
+      }
+    ],
+    "rows": [
+      [
+        1,
+        "b",
+        "a,b,c"
+      ],
+      [
+        2,
+        "x",
+        "a,b,c"
+      ],
+      [
+        3,
+        "a",
+        "a,b,c"
+      ],
+      [
+        4,
+        "a,b",
+        "a,b,c"
+      ]
+    ]
+  },
+  "operations": [
+    {
+      "op": "withColumn",
+      "column": "idx",
+      "expr": "find_in_set(col('str'), col('set'))"
+    },
+    {
+      "op": "select",
+      "columns": [
+        "id",
+        "str",
+        "set",
+        "idx"
+      ]
+    }
+  ],
+  "expected": {
+    "schema": [
+      {
+        "name": "id",
+        "type": "bigint"
+      },
+      {
+        "name": "str",
+        "type": "string"
+      },
+      {
+        "name": "set",
+        "type": "string"
+      },
+      {
+        "name": "idx",
+        "type": "int"
+      }
+    ],
+    "rows": [
+      [
+        1,
+        "b",
+        "a,b,c",
+        2
+      ],
+      [
+        2,
+        "x",
+        "a,b,c",
+        0
+      ],
+      [
+        3,
+        "a",
+        "a,b,c",
+        1
+      ],
+      [
+        4,
+        "a,b",
+        "a,b,c",
+        0
+      ]
+    ]
+  }
+}

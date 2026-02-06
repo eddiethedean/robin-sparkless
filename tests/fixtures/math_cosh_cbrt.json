@@ -2,13 +2,28 @@
   "name": "math_cosh_cbrt",
   "input": {
     "schema": [
-      {"name": "id", "type": "int"},
-      {"name": "x", "type": "double"}
+      {
+        "name": "id",
+        "type": "int"
+      },
+      {
+        "name": "x",
+        "type": "double"
+      }
     ],
     "rows": [
-      [1, 0.0],
-      [2, 1.0],
-      [3, 2.0]
+      [
+        1,
+        0.0
+      ],
+      [
+        2,
+        1.0
+      ],
+      [
+        3,
+        2.0
+      ]
     ]
   },
   "operations": [
@@ -24,25 +39,61 @@
     },
     {
       "op": "select",
-      "columns": ["id", "x", "cbrt_x", "cosh_x"]
+      "columns": [
+        "id",
+        "x",
+        "cbrt_x",
+        "cosh_x"
+      ]
     },
     {
       "op": "orderBy",
-      "columns": ["id"],
-      "ascending": [true]
+      "columns": [
+        "id"
+      ],
+      "ascending": [
+        true
+      ]
     }
   ],
   "expected": {
     "schema": [
-      {"name": "id", "type": "int"},
-      {"name": "x", "type": "double"},
-      {"name": "cbrt_x", "type": "double"},
-      {"name": "cosh_x", "type": "double"}
+      {
+        "name": "id",
+        "type": "int"
+      },
+      {
+        "name": "x",
+        "type": "double"
+      },
+      {
+        "name": "cbrt_x",
+        "type": "double"
+      },
+      {
+        "name": "cosh_x",
+        "type": "double"
+      }
     ],
     "rows": [
-      [1, 0.0, 0.0, 1.0],
-      [2, 1.0, 1.0, 1.5430806348152437],
-      [3, 2.0, 1.2599210498948732, 3.7621956910836314]
+      [
+        1,
+        0.0,
+        0.0,
+        1.0
+      ],
+      [
+        2,
+        1.0,
+        1.0,
+        1.543080634815244
+      ],
+      [
+        3,
+        2.0,
+        1.2599210498948732,
+        3.7621956910836314
+      ]
     ]
   }
 }

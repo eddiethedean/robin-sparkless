@@ -78,7 +78,7 @@
         "type": "string"
       },
       {
-        "name": "max(salary)",
+        "name": "max",
         "type": "bigint"
       }
     ],

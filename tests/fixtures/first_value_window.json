@@ -3,45 +3,154 @@
   "pyspark_version": "3.5.0",
   "input": {
     "schema": [
-      {"name": "id", "type": "bigint"},
-      {"name": "name", "type": "string"},
-      {"name": "dept", "type": "string"},
-      {"name": "salary", "type": "bigint"}
+      {
+        "name": "id",
+        "type": "bigint"
+      },
+      {
+        "name": "name",
+        "type": "string"
+      },
+      {
+        "name": "dept",
+        "type": "string"
+      },
+      {
+        "name": "salary",
+        "type": "bigint"
+      }
     ],
     "rows": [
-      [1, "Alice", "Sales", 1000],
-      [2, "Bob", "Sales", 1500],
-      [3, "Charlie", "Engineering", 2000],
-      [4, "David", "Engineering", 2500],
-      [5, "Eve", "Sales", 1200]
+      [
+        1,
+        "Alice",
+        "Sales",
+        1000
+      ],
+      [
+        2,
+        "Bob",
+        "Sales",
+        1500
+      ],
+      [
+        3,
+        "Charlie",
+        "Engineering",
+        2000
+      ],
+      [
+        4,
+        "David",
+        "Engineering",
+        2500
+      ],
+      [
+        5,
+        "Eve",
+        "Sales",
+        1200
+      ]
     ]
   },
   "operations": [
-    {"op": "orderBy", "columns": ["dept", "salary"], "ascending": [true, false]},
+    {
+      "op": "orderBy",
+      "columns": [
+        "dept",
+        "salary"
+      ],
+      "ascending": [
+        true,
+        false
+      ]
+    },
     {
       "op": "window",
       "column": "first_sal",
       "func": "first_value",
-      "partition_by": ["dept"],
-      "order_by": [{"col": "salary", "asc": false}],
+      "partition_by": [
+        "dept"
+      ],
+      "order_by": [
+        {
+          "col": "salary",
+          "asc": false
+        }
+      ],
       "value_column": "salary"
     },
-    {"op": "orderBy", "columns": ["dept", "salary"], "ascending": [true, false]}
+    {
+      "op": "orderBy",
+      "columns": [
+        "dept",
+        "salary"
+      ],
+      "ascending": [
+        true,
+        false
+      ]
+    }
   ],
   "expected": {
     "schema": [
-      {"name": "id", "type": "bigint"},
-      {"name": "name", "type": "string"},
-      {"name": "dept", "type": "string"},
-      {"name": "salary", "type": "bigint"},
-      {"name": "first_sal", "type": "bigint"}
+      {
+        "name": "id",
+        "type": "bigint"
+      },
+      {
+        "name": "name",
+        "type": "string"
+      },
+      {
+        "name": "dept",
+        "type": "string"
+      },
+      {
+        "name": "salary",
+        "type": "bigint"
+      },
+      {
+        "name": "first_sal",
+        "type": "bigint"
+      }
     ],
     "rows": [
-      [4, "David", "Engineering", 2500, 2500],
-      [3, "Charlie", "Engineering", 2000, 2500],
-      [2, "Bob", "Sales", 1500, 1500],
-      [5, "Eve", "Sales", 1200, 1500],
-      [1, "Alice", "Sales", 1000, 1500]
+      [
+        4,
+        "David",
+        "Engineering",
+        2500,
+        2500
+      ],
+      [
+        3,
+        "Charlie",
+        "Engineering",
+        2000,
+        2500
+      ],
+      [
+        2,
+        "Bob",
+        "Sales",
+        1500,
+        1500
+      ],
+      [
+        5,
+        "Eve",
+        "Sales",
+        1200,
+        1500
+      ],
+      [
+        1,
+        "Alice",
+        "Sales",
+        1000,
+        1500
+      ]
     ]
   }
 }

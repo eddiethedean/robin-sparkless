@@ -3,31 +3,89 @@
   "pyspark_version": "3.5.0",
   "input": {
     "schema": [
-      { "name": "id", "type": "bigint" },
-      { "name": "hex_str", "type": "string" }
+      {
+        "name": "id",
+        "type": "bigint"
+      },
+      {
+        "name": "hex_str",
+        "type": "string"
+      }
     ],
     "rows": [
-      [1, "FF"],
-      [2, "10"],
-      [3, "1010"]
+      [
+        1,
+        "FF"
+      ],
+      [
+        2,
+        "10"
+      ],
+      [
+        3,
+        "1010"
+      ]
     ]
   },
   "operations": [
-    { "op": "withColumn", "column": "dec", "expr": "conv(col('hex_str'), 16, 10)" },
-    { "op": "withColumn", "column": "bin_val", "expr": "conv(col('hex_str'), 16, 2)" },
-    { "op": "orderBy", "columns": ["id"], "ascending": [true] }
+    {
+      "op": "withColumn",
+      "column": "dec",
+      "expr": "conv(col('hex_str'), 16, 10)"
+    },
+    {
+      "op": "withColumn",
+      "column": "bin_val",
+      "expr": "conv(col('hex_str'), 16, 2)"
+    },
+    {
+      "op": "orderBy",
+      "columns": [
+        "id"
+      ],
+      "ascending": [
+        true
+      ]
+    }
   ],
   "expected": {
     "schema": [
-      { "name": "id", "type": "bigint" },
-      { "name": "hex_str", "type": "string" },
-      { "name": "dec", "type": "string" },
-      { "name": "bin_val", "type": "string" }
+      {
+        "name": "id",
+        "type": "bigint"
+      },
+      {
+        "name": "hex_str",
+        "type": "string"
+      },
+      {
+        "name": "dec",
+        "type": "string"
+      },
+      {
+        "name": "bin_val",
+        "type": "string"
+      }
     ],
     "rows": [
-      [1, "FF", "255", "11111111"],
-      [2, "10", "16", "10000"],
-      [3, "1010", "4112", "1000000010000"]
+      [
+        1,
+        "FF",
+        "255",
+        "11111111"
+      ],
+      [
+        2,
+        "10",
+        "16",
+        "10000"
+      ],
+      [
+        3,
+        "1010",
+        "4112",
+        "1000000010000"
+      ]
     ]
   }
 }

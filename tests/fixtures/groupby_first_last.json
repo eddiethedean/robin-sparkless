@@ -3,37 +3,100 @@
   "pyspark_version": "3.5.0",
   "input": {
     "schema": [
-      { "name": "dept", "type": "string" },
-      { "name": "name", "type": "string" },
-      { "name": "salary", "type": "bigint" }
+      {
+        "name": "dept",
+        "type": "string"
+      },
+      {
+        "name": "name",
+        "type": "string"
+      },
+      {
+        "name": "salary",
+        "type": "bigint"
+      }
     ],
     "rows": [
-      ["Sales", "Alice", 1000],
-      ["Sales", "Bob", 1500],
-      ["Eng", "Charlie", 2000],
-      ["Eng", "Dave", 2500]
+      [
+        "Sales",
+        "Alice",
+        1000
+      ],
+      [
+        "Sales",
+        "Bob",
+        1500
+      ],
+      [
+        "Eng",
+        "Charlie",
+        2000
+      ],
+      [
+        "Eng",
+        "Dave",
+        2500
+      ]
     ]
   },
   "operations": [
-    { "op": "groupBy", "columns": ["dept"] },
+    {
+      "op": "groupBy",
+      "columns": [
+        "dept"
+      ]
+    },
     {
       "op": "agg",
       "aggregations": [
-        { "func": "first", "alias": "first(name)", "column": "name" },
-        { "func": "last", "alias": "last(name)", "column": "name" }
+        {
+          "func": "first",
+          "alias": "first(name)",
+          "column": "name"
+        },
+        {
+          "func": "last",
+          "alias": "last(name)",
+          "column": "name"
+        }
       ]
     },
-    { "op": "orderBy", "columns": ["dept"], "ascending": [true] }
+    {
+      "op": "orderBy",
+      "columns": [
+        "dept"
+      ],
+      "ascending": [
+        true
+      ]
+    }
   ],
   "expected": {
     "schema": [
-      { "name": "dept", "type": "string" },
-      { "name": "first(name)", "type": "string" },
-      { "name": "last(name)", "type": "string" }
+      {
+        "name": "dept",
+        "type": "string"
+      },
+      {
+        "name": "first(name)",
+        "type": "string"
+      },
+      {
+        "name": "last(name)",
+        "type": "string"
+      }
     ],
     "rows": [
-      ["Eng", "Charlie", "Dave"],
-      ["Sales", "Alice", "Bob"]
+      [
+        "Eng",
+        "Charlie",
+        "Dave"
+      ],
+      [
+        "Sales",
+        "Alice",
+        "Bob"
+      ]
     ]
   }
 }

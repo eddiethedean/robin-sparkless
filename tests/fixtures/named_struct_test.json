@@ -3,29 +3,86 @@
   "pyspark_version": "3.5.0",
   "input": {
     "schema": [
-      { "name": "id", "type": "bigint" },
-      { "name": "x", "type": "int" },
-      { "name": "y", "type": "int" }
+      {
+        "name": "id",
+        "type": "bigint"
+      },
+      {
+        "name": "x",
+        "type": "int"
+      },
+      {
+        "name": "y",
+        "type": "int"
+      }
     ],
     "rows": [
-      [1, 100, 200],
-      [2, 300, 400]
+      [
+        1,
+        100,
+        200
+      ],
+      [
+        2,
+        300,
+        400
+      ]
     ]
   },
   "operations": [
-    { "op": "withColumn", "column": "st", "expr": "named_struct('foo', col('x'), 'bar', col('y'))" },
-    { "op": "select", "columns": ["id", "x", "y", "st"] }
+    {
+      "op": "withColumn",
+      "column": "st",
+      "expr": "named_struct('foo', col('x'), 'bar', col('y'))"
+    },
+    {
+      "op": "select",
+      "columns": [
+        "id",
+        "x",
+        "y",
+        "st"
+      ]
+    }
   ],
   "expected": {
     "schema": [
-      { "name": "id", "type": "bigint" },
-      { "name": "x", "type": "int" },
-      { "name": "y", "type": "int" },
-      { "name": "st", "type": "struct" }
+      {
+        "name": "id",
+        "type": "bigint"
+      },
+      {
+        "name": "x",
+        "type": "int"
+      },
+      {
+        "name": "y",
+        "type": "int"
+      },
+      {
+        "name": "st",
+        "type": "struct<foo:int,bar:int>"
+      }
     ],
     "rows": [
-      [1, 100, 200, {"foo": 100, "bar": 200}],
-      [2, 300, 400, {"foo": 300, "bar": 400}]
+      [
+        1,
+        100,
+        200,
+        [
+          100,
+          200
+        ]
+      ],
+      [
+        2,
+        300,
+        400,
+        [
+          300,
+          400
+        ]
+      ]
     ]
   }
 }

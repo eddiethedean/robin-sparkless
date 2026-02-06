@@ -3,30 +3,85 @@
   "pyspark_version": "3.5.0",
   "input": {
     "schema": [
-      { "name": "id", "type": "bigint" },
-      { "name": "ok", "type": "boolean" }
+      {
+        "name": "id",
+        "type": "bigint"
+      },
+      {
+        "name": "ok",
+        "type": "boolean"
+      }
     ],
     "rows": [
-      [1, true],
-      [2, true],
-      [3, true]
+      [
+        1,
+        true
+      ],
+      [
+        2,
+        true
+      ],
+      [
+        3,
+        true
+      ]
     ]
   },
   "operations": [
-    { "op": "withColumn", "column": "check", "expr": "assert_true(col('ok'))" },
-    { "op": "select", "columns": ["id", "ok", "check"] },
-    { "op": "orderBy", "columns": ["id"], "ascending": [true] }
+    {
+      "op": "withColumn",
+      "column": "check",
+      "expr": "assert_true(col('ok'))"
+    },
+    {
+      "op": "select",
+      "columns": [
+        "id",
+        "ok",
+        "check"
+      ]
+    },
+    {
+      "op": "orderBy",
+      "columns": [
+        "id"
+      ],
+      "ascending": [
+        true
+      ]
+    }
   ],
   "expected": {
     "schema": [
-      { "name": "id", "type": "bigint" },
-      { "name": "ok", "type": "boolean" },
-      { "name": "check", "type": "boolean" }
+      {
+        "name": "id",
+        "type": "bigint"
+      },
+      {
+        "name": "ok",
+        "type": "boolean"
+      },
+      {
+        "name": "check",
+        "type": "void"
+      }
     ],
     "rows": [
-      [1, true, true],
-      [2, true, true],
-      [3, true, true]
+      [
+        1,
+        true,
+        null
+      ],
+      [
+        2,
+        true,
+        null
+      ],
+      [
+        3,
+        true,
+        null
+      ]
     ]
   }
 }

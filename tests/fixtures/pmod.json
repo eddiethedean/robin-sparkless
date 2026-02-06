@@ -3,32 +3,100 @@
   "pyspark_version": "3.5.0",
   "input": {
     "schema": [
-      { "name": "id", "type": "int" },
-      { "name": "a", "type": "double" },
-      { "name": "b", "type": "double" }
+      {
+        "name": "id",
+        "type": "int"
+      },
+      {
+        "name": "a",
+        "type": "double"
+      },
+      {
+        "name": "b",
+        "type": "double"
+      }
     ],
     "rows": [
-      [1, -10.0, 3.0],
-      [2, -3.0, 4.0],
-      [3, 10.0, 3.0]
+      [
+        1,
+        -10.0,
+        3.0
+      ],
+      [
+        2,
+        -3.0,
+        4.0
+      ],
+      [
+        3,
+        10.0,
+        3.0
+      ]
     ]
   },
   "operations": [
-    { "op": "withColumn", "column": "r", "expr": "pmod(col('a'), col('b'))" },
-    { "op": "select", "columns": ["id", "a", "b", "r"] },
-    { "op": "orderBy", "columns": ["id"], "ascending": [true] }
+    {
+      "op": "withColumn",
+      "column": "r",
+      "expr": "pmod(col('a'), col('b'))"
+    },
+    {
+      "op": "select",
+      "columns": [
+        "id",
+        "a",
+        "b",
+        "r"
+      ]
+    },
+    {
+      "op": "orderBy",
+      "columns": [
+        "id"
+      ],
+      "ascending": [
+        true
+      ]
+    }
   ],
   "expected": {
     "schema": [
-      { "name": "id", "type": "int" },
-      { "name": "a", "type": "double" },
-      { "name": "b", "type": "double" },
-      { "name": "r", "type": "double" }
+      {
+        "name": "id",
+        "type": "int"
+      },
+      {
+        "name": "a",
+        "type": "double"
+      },
+      {
+        "name": "b",
+        "type": "double"
+      },
+      {
+        "name": "r",
+        "type": "double"
+      }
     ],
     "rows": [
-      [1, -10.0, 3.0, 2.0],
-      [2, -3.0, 4.0, 1.0],
-      [3, 10.0, 3.0, 1.0]
+      [
+        1,
+        -10.0,
+        3.0,
+        2.0
+      ],
+      [
+        2,
+        -3.0,
+        4.0,
+        1.0
+      ],
+      [
+        3,
+        10.0,
+        3.0,
+        1.0
+      ]
     ]
   }
 }

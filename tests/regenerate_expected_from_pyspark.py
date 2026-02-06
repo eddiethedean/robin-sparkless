@@ -12,9 +12,13 @@ Requires: PySpark (pip install pyspark) and Java 17 or newer. PySpark uses the J
 if you see "UnsupportedClassVersionError" or "JAVA_GATEWAY_EXITED", set JAVA_HOME
 to a JDK 17+ installation (e.g. export JAVA_HOME=/path/to/jdk-17).
 
-Reads each JSON fixture in the given directory, builds a PySpark DataFrame from
-input.schema + input.rows, applies operations in order, then overwrites the
-fixture's expected.schema and expected.rows with PySpark's result.
+Reads each JSON fixture in the given directory (or list of paths), builds a
+PySpark DataFrame from input.schema + input.rows, applies operations in order,
+then overwrites the fixture's expected.schema and expected.rows with PySpark's
+result. Hand-written fixtures under tests/fixtures/ (same operation format as
+converted) are supported; use tests/fixtures to process only top-level JSON
+files (converted/ and plans/ are not recursed). Fixtures with "skip": true are
+skipped. Use --dry-run to print diffs without writing.
 """
 
 from __future__ import annotations
@@ -22,12 +26,14 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
 try:
     from pyspark.sql import SparkSession
     from pyspark.sql import functions as F
+    from pyspark.sql.window import Window
 
     try:
         from pyspark.errors.exceptions.base import PySparkRuntimeError
@@ -80,6 +86,23 @@ def schema_to_struct_type(schema: list[dict]) -> StructType:
     return StructType(fields)
 
 
+def _cast_cell(value: Any, type_str: str) -> Any:
+    """Cast a fixture value (e.g. date/timestamp string) for PySpark createDataFrame."""
+    if value is None:
+        return None
+    t = (type_str or "string").lower()
+    if t == "date" and isinstance(value, str):
+        return datetime.strptime(value[:10], "%Y-%m-%d").date()
+    if t in ("timestamp", "timestamp_ntz", "datetime") and isinstance(value, str):
+        s = value.replace("Z", "+00:00")
+        if "T" in s:
+            if "+" in s or "-" in s.split("T")[-1][:1] == "-":
+                return datetime.fromisoformat(s)
+            return datetime.fromisoformat(s.replace("T", " "))
+        return datetime.strptime(s[:19], "%Y-%m-%d %H:%M:%S")
+    return value
+
+
 def rows_to_pyspark_df(
     spark: SparkSession, schema: list[dict], rows: list[list[Any]]
 ) -> Any:
@@ -87,19 +110,85 @@ def rows_to_pyspark_df(
     if not schema or not rows:
         return spark.createDataFrame([], schema_to_struct_type(schema or []))
     struct = schema_to_struct_type(schema)
-    return spark.createDataFrame(rows, struct)
+    type_strs = [(c.get("type") or "string").lower() for c in schema]
+    cast_rows = [
+        [_cast_cell(v, type_strs[i]) for i, v in enumerate(row)]
+        for row in rows
+    ]
+    return spark.createDataFrame(cast_rows, struct)
+
+
+# Normalize PySpark simpleString() to fixture type names (e.g. long -> bigint)
+SCHEMA_TYPE_NORMALIZE = {
+    "long": "bigint",
+    "integer": "int",
+}
 
 
 def schema_from_df(df: Any) -> list[dict]:
     """Extract fixture-format schema from PySpark DataFrame."""
-    return [
-        {"name": f.name, "type": f.dataType.simpleString()} for f in df.schema.fields
-    ]
+    out = []
+    for f in df.schema.fields:
+        t = f.dataType.simpleString()
+        out.append({"name": f.name, "type": SCHEMA_TYPE_NORMALIZE.get(t, t)})
+    return out
 
 
 def rows_from_df(df: Any) -> list[list[Any]]:
     """Collect DataFrame rows as list of lists (column order)."""
     return [list(r) for r in df.collect()]
+
+
+def _json_serializable(obj: Any) -> Any:
+    """Convert date/datetime in collected rows to strings for JSON."""
+    if isinstance(obj, (date, datetime)):
+        return obj.isoformat()
+    if isinstance(obj, list):
+        return [_json_serializable(x) for x in obj]
+    if isinstance(obj, dict):
+        return {k: _json_serializable(v) for k, v in obj.items()}
+    return obj
+
+
+def _withcolumn_globals() -> dict[str, Any]:
+    """Namespace for eval() of withColumn/filter exprs in fixtures (hand-written and converted)."""
+    return {
+        "F": F,
+        "col": F.col,
+        "lit": F.lit,
+        "split": F.split,
+        "date_add": F.date_add,
+        "date_sub": F.date_sub,
+        "array_distinct": F.array_distinct,
+        "size": F.size,
+        "length": F.length,
+        "lower": F.lower,
+        "upper": F.upper,
+        "trim": F.trim,
+        "ltrim": F.ltrim,
+        "rtrim": F.rtrim,
+        "when": F.when,
+        "coalesce": F.coalesce,
+        "element_at": F.element_at,
+        "array_contains": F.array_contains,
+        "struct": F.struct,
+        "to_date": F.to_date,
+        "to_timestamp": F.to_timestamp,
+        "date_format": F.date_format,
+        "year": F.year,
+        "month": F.month,
+        "dayofmonth": F.dayofmonth,
+        "dayofweek": F.dayofweek,
+        "current_date": F.current_date,
+        "current_timestamp": F.current_timestamp,
+        "crc32": F.crc32,
+        "concat_ws": F.concat_ws,
+        "regexp_replace": F.regexp_replace,
+        "substring": F.substring,
+        "hash": F.hash,
+        "rand": F.rand,
+        "randn": F.randn,
+    }
 
 
 def apply_operations(
@@ -116,8 +205,7 @@ def apply_operations(
         if op == "filter":
             expr = op_spec.get("expr", "true")
             try:
-                # Fixture expr is often Python-style: col('age') > 30
-                cond = eval(expr, {"F": F, "col": F.col, "lit": F.lit})
+                cond = eval(expr, _withcolumn_globals())
                 df = df.filter(cond)
             except Exception:
                 try:
@@ -157,6 +245,23 @@ def apply_operations(
                     agg_exprs.append(F.min(col_name).alias(alias))
                 elif func == "max" and col_name:
                     agg_exprs.append(F.max(col_name).alias(alias))
+                elif func == "any_value" and col_name:
+                    agg_exprs.append(F.first(col_name).alias(alias))
+                elif func == "first" and col_name:
+                    agg_exprs.append(F.first(col_name).alias(alias))
+                elif func == "last" and col_name:
+                    agg_exprs.append(F.last(col_name).alias(alias))
+                elif func == "median" and col_name:
+                    try:
+                        agg_exprs.append(F.median(col_name).alias(alias))
+                    except AttributeError:
+                        agg_exprs.append(F.expr(f"percentile_approx({col_name}, 0.5)").alias(alias))
+                elif func == "product" and col_name:
+                    agg_exprs.append(F.product(col_name).alias(alias))
+                elif func in ("stddev", "stddev_samp") and col_name:
+                    agg_exprs.append(F.stddev(col_name).alias(alias))
+                elif func == "count_distinct" and col_name:
+                    agg_exprs.append(F.countDistinct(col_name).alias(alias))
                 else:
                     agg_exprs.append(F.count(F.lit(1)).alias(alias))
             if agg_exprs:
@@ -179,11 +284,60 @@ def apply_operations(
             col_name = op_spec.get("column", "computed")
             expr = op_spec.get("expr", "lit(0)")
             try:
-                df = df.withColumn(
-                    col_name, eval(expr, {"F": F, "col": F.col, "lit": F.lit})
-                )
+                df = df.withColumn(col_name, eval(expr, _withcolumn_globals()))
             except Exception:
                 df = df.withColumn(col_name, F.expr(_expr_to_sql(expr)))
+        elif op == "window":
+            col_name = op_spec.get("column", "win_col")
+            func = (op_spec.get("func") or "row_number").lower()
+            partition_by = op_spec.get("partition_by", [])
+            order_by_specs = op_spec.get("order_by") or []
+            value_column = op_spec.get("value_column")
+            n = op_spec.get("n")
+            w = Window.partitionBy(*partition_by) if partition_by else Window.partitionBy()
+            if order_by_specs:
+                order_exprs = [
+                    F.col(x["col"]).asc() if x.get("asc", True) else F.col(x["col"]).desc()
+                    for x in order_by_specs
+                ]
+                w = w.orderBy(*order_exprs)
+            else:
+                w = w.orderBy(F.lit(0))
+            if func == "row_number":
+                df = df.withColumn(col_name, F.row_number().over(w))
+            elif func == "rank":
+                df = df.withColumn(col_name, F.rank().over(w))
+            elif func == "dense_rank":
+                df = df.withColumn(col_name, F.dense_rank().over(w))
+            elif func == "lag":
+                vcol = value_column or (df.columns[0] if df.columns else None)
+                df = df.withColumn(col_name, F.lag(F.col(vcol), n or 1).over(w))
+            elif func == "lead":
+                vcol = value_column or (df.columns[0] if df.columns else None)
+                df = df.withColumn(col_name, F.lead(F.col(vcol), n or 1).over(w))
+            elif func == "first_value":
+                vcol = value_column or (df.columns[0] if df.columns else None)
+                df = df.withColumn(col_name, F.first(F.col(vcol)).over(w))
+            elif func == "last_value":
+                vcol = value_column or (df.columns[0] if df.columns else None)
+                df = df.withColumn(col_name, F.last(F.col(vcol)).over(w))
+            elif func == "nth_value":
+                vcol = value_column or (df.columns[0] if df.columns else None)
+                idx = int(n or 1)
+                df = df.withColumn(col_name, F.nth_value(F.col(vcol), idx).over(w))
+            elif func == "percent_rank":
+                df = df.withColumn(col_name, F.percent_rank().over(w))
+            elif func == "cume_dist":
+                df = df.withColumn(col_name, F.cume_dist().over(w))
+            elif func == "ntile":
+                df = df.withColumn(col_name, F.ntile(int(n or 2)).over(w))
+            elif func in ("sum", "avg", "count", "min", "max"):
+                agg_col = op_spec.get("value_column") or (df.columns[0] if df.columns else None)
+                if agg_col is None:
+                    continue
+                agg_expr = getattr(F, func)(F.col(agg_col))
+                df = df.withColumn(col_name, agg_expr.over(w))
+            # else: unsupported window func, skip
         elif op == "union":
             if right_input:
                 right_df = rows_to_pyspark_df(
@@ -223,6 +377,17 @@ def apply_operations(
             col_name = op_spec.get("column", "")
             old_val = op_spec.get("old_value", "")
             new_val = op_spec.get("new_value", "")
+            # Strip surrounding quotes so 'pending' -> pending (match parity literal parsing)
+            if isinstance(old_val, str) and len(old_val) >= 2 and (
+                (old_val.startswith("'") and old_val.endswith("'"))
+                or (old_val.startswith('"') and old_val.endswith('"'))
+            ):
+                old_val = old_val[1:-1]
+            if isinstance(new_val, str) and len(new_val) >= 2 and (
+                (new_val.startswith("'") and new_val.endswith("'"))
+                or (new_val.startswith('"') and new_val.endswith('"'))
+            ):
+                new_val = new_val[1:-1]
             if col_name:
                 df = df.replace(old_val, new_val, subset=[col_name])
         elif op == "crossJoin":
@@ -233,11 +398,11 @@ def apply_operations(
                 df = df.crossJoin(right_df)
         elif op == "describe":
             df = df.describe()
+        elif op == "summary":
+            df = df.summary()
         elif op == "offset":
             n = int(op_spec.get("n", 0))
             if n > 0:
-                from pyspark.sql.window import Window
-
                 w = Window.orderBy(F.monotonically_increasing_id())
                 df = (
                     df.withColumn("_rn", F.row_number().over(w))
@@ -247,7 +412,9 @@ def apply_operations(
         elif op == "head":
             n = int(op_spec.get("n", 1))
             df = df.limit(n)
-        # first, summary, subtract, intersect: optional to add
+        elif op == "first":
+            df = df.limit(1)
+        # subtract, intersect: optional to add
     return df
 
 
@@ -272,6 +439,8 @@ def process_fixture(spark: SparkSession, path: Path, dry_run: bool) -> bool:
     """Load fixture, run in PySpark, write updated expected. Return True on success."""
     with open(path) as f:
         fixture = json.load(f)
+    if fixture.get("skip"):
+        return False
     input_section = fixture.get("input", {})
     schema = input_section.get("schema", [])
     rows = input_section.get("rows", [])
@@ -285,7 +454,19 @@ def process_fixture(spark: SparkSession, path: Path, dry_run: bool) -> bool:
         print(f"  Error running PySpark for {path.name}: {e}", file=sys.stderr)
         return False
 
-    fixture["expected"] = {"schema": new_schema, "rows": new_rows}
+    old_expected = fixture.get("expected", {})
+    if dry_run and old_expected:
+        old_rows = old_expected.get("rows", [])
+        old_schema = old_expected.get("schema", [])
+        if old_schema != new_schema or old_rows != new_rows:
+            print(
+                f"  Would change {path.name}: schema {len(old_schema)}->{len(new_schema)} fields, "
+                f"rows {len(old_rows)}->{len(new_rows)}"
+            )
+    fixture["expected"] = {
+        "schema": new_schema,
+        "rows": _json_serializable(new_rows),
+    }
     if not dry_run:
         with open(path, "w") as f:
             json.dump(fixture, f, indent=2)
@@ -297,17 +478,28 @@ def main() -> int:
         description="Regenerate fixture expected sections from PySpark"
     )
     parser.add_argument(
-        "dir",
-        nargs="?",
-        default="tests/fixtures/converted",
-        help="Directory containing Robin-format JSON fixtures",
+        "paths",
+        nargs="*",
+        default=["tests/fixtures/converted"],
+        help="Directories (glob *.json) or JSON files. Default: tests/fixtures/converted. Use tests/fixtures for hand-written.",
     )
-    parser.add_argument("--dry-run", action="store_true", help="Do not write files")
+    parser.add_argument("--dry-run", action="store_true", help="Do not write files; print diffs")
     args = parser.parse_args()
 
-    dir_path = Path(args.dir)
-    if not dir_path.is_dir():
-        print(f"Error: not a directory: {dir_path}", file=sys.stderr)
+    to_process: list[Path] = []
+    for p in args.paths:
+        path = Path(p)
+        if path.is_file() and path.suffix.lower() == ".json":
+            to_process.append(path)
+        elif path.is_dir():
+            # Only top-level *.json (no recurse into converted/ or plans/)
+            for f in sorted(path.glob("*.json")):
+                if f.is_file():
+                    to_process.append(f)
+        else:
+            print(f"Warning: skipping (not a dir or .json file): {path}", file=sys.stderr)
+    if not to_process:
+        print("Error: no JSON files to process.", file=sys.stderr)
         return 1
 
     try:
@@ -352,11 +544,11 @@ def main() -> int:
         return 1
 
     count = 0
-    for path in sorted(dir_path.glob("*.json")):
-        if path.is_file():
-            if process_fixture(spark, path, args.dry_run):
-                count += 1
-                print(f"  {'Would update' if args.dry_run else 'Updated'}: {path.name}")
+    for path in to_process:
+        if process_fixture(spark, path, args.dry_run):
+            count += 1
+            if not args.dry_run:
+                print(f"  Updated: {path.name}")
     spark.stop()
     print(f"Done: {count} fixtures {'would be updated' if args.dry_run else 'updated'}")
     return 0

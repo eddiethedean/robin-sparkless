@@ -3,31 +3,117 @@
   "pyspark_version": "3.5.0",
   "input": {
     "schema": [
-      { "name": "id", "type": "bigint" },
-      { "name": "s1", "type": "string" },
-      { "name": "s2", "type": "string" }
+      {
+        "name": "id",
+        "type": "bigint"
+      },
+      {
+        "name": "s1",
+        "type": "string"
+      },
+      {
+        "name": "s2",
+        "type": "string"
+      }
     ],
     "rows": [
-      [1, "a|b|c", "b|c|d"],
-      [2, "x|y", "x"]
+      [
+        1,
+        "a|b|c",
+        "b|c|d"
+      ],
+      [
+        2,
+        "x|y",
+        "x"
+      ]
     ]
   },
   "operations": [
-    { "op": "withColumn", "column": "a", "expr": "split(col('s1'), '|')" },
-    { "op": "withColumn", "column": "b", "expr": "split(col('s2'), '|')" },
-    { "op": "withColumn", "column": "except_ab", "expr": "array_except(col('a'), col('b'))" },
-    { "op": "select", "columns": ["id", "a", "b", "except_ab"] }
+    {
+      "op": "withColumn",
+      "column": "a",
+      "expr": "split(col('s1'), '|')"
+    },
+    {
+      "op": "withColumn",
+      "column": "b",
+      "expr": "split(col('s2'), '|')"
+    },
+    {
+      "op": "withColumn",
+      "column": "except_ab",
+      "expr": "array_except(col('a'), col('b'))"
+    },
+    {
+      "op": "select",
+      "columns": [
+        "id",
+        "a",
+        "b",
+        "except_ab"
+      ]
+    }
   ],
   "expected": {
     "schema": [
-      { "name": "id", "type": "bigint" },
-      { "name": "a", "type": "array<string>" },
-      { "name": "b", "type": "array<string>" },
-      { "name": "except_ab", "type": "array<string>" }
+      {
+        "name": "id",
+        "type": "bigint"
+      },
+      {
+        "name": "a",
+        "type": "array<string>"
+      },
+      {
+        "name": "b",
+        "type": "array<string>"
+      },
+      {
+        "name": "except_ab",
+        "type": "array<string>"
+      }
     ],
     "rows": [
-      [1, ["a", "b", "c"], ["b", "c", "d"], ["a"]],
-      [2, ["x", "y"], ["x"], ["y"]]
+      [
+        1,
+        [
+          "a",
+          "|",
+          "b",
+          "|",
+          "c",
+          ""
+        ],
+        [
+          "b",
+          "|",
+          "c",
+          "|",
+          "d",
+          ""
+        ],
+        [
+          "a"
+        ]
+      ],
+      [
+        2,
+        [
+          "x",
+          "|",
+          "y",
+          ""
+        ],
+        [
+          "x",
+          ""
+        ],
+        [
+          "|",
+          "y"
+        ]
+      ]
     ]
   }
 }
