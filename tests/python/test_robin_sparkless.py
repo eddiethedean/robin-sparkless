@@ -310,9 +310,9 @@ def test_sparkless_parity_join_left_returns_rows() -> None:
     import robin_sparkless as rs
 
     spark = rs.SparkSession.builder().app_name("test").get_or_create()
-    left = spark.create_dataframe([(1, 0, "a"), (2, 0, "b")], ["id", "_", "label"]).drop(
-        ["_"]
-    )
+    left = spark.create_dataframe(
+        [(1, 0, "a"), (2, 0, "b")], ["id", "_", "label"]
+    ).drop(["_"])
     right = spark.create_dataframe([(1, 0, "x")], ["id", "_", "tag"]).drop(["_"])
     joined = left.join(right, ["id"], "left")
     rows = joined.collect()
@@ -327,9 +327,9 @@ def test_sparkless_parity_join_right_returns_rows() -> None:
 
     spark = rs.SparkSession.builder().app_name("test").get_or_create()
     left = spark.create_dataframe([(1, 0, "x")], ["id", "_", "tag"]).drop(["_"])
-    right = spark.create_dataframe([(1, 0, "a"), (2, 0, "b")], ["id", "_", "label"]).drop(
-        ["_"]
-    )
+    right = spark.create_dataframe(
+        [(1, 0, "a"), (2, 0, "b")], ["id", "_", "label"]
+    ).drop(["_"])
     joined = left.join(right, ["id"], "right")
     rows = joined.collect()
     assert len(rows) == 2
@@ -340,9 +340,9 @@ def test_sparkless_parity_join_outer_returns_rows() -> None:
     import robin_sparkless as rs
 
     spark = rs.SparkSession.builder().app_name("test").get_or_create()
-    left = spark.create_dataframe([(1, 0, "a"), (2, 0, "b")], ["id", "_", "label"]).drop(
-        ["_"]
-    )
+    left = spark.create_dataframe(
+        [(1, 0, "a"), (2, 0, "b")], ["id", "_", "label"]
+    ).drop(["_"])
     right = spark.create_dataframe([(1, 0, "x"), (3, 0, "z")], ["id", "_", "tag"]).drop(
         ["_"]
     )
@@ -498,9 +498,9 @@ def test_sparkless_parity_filter_comparison_not_column_existence() -> None:
     import robin_sparkless as rs
 
     spark = rs.SparkSession.builder().app_name("test").get_or_create()
-    df = spark.create_dataframe([(1, 10, "a"), (2, 20, "b"), (3, 30, "c")], ["id", "v", "x"]).drop(
-        ["x"]
-    )
+    df = spark.create_dataframe(
+        [(1, 10, "a"), (2, 20, "b"), (3, 30, "c")], ["id", "v", "x"]
+    ).drop(["x"])
     out = df.filter(rs.col("v").gt(rs.lit(15)))
     rows = out.collect()
     assert len(rows) == 2

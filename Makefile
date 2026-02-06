@@ -1,4 +1,4 @@
-.PHONY: build test test-rust test-python sparkless-parity bench-python clean check fmt clippy audit outdated deny all
+.PHONY: build test test-rust test-python sparkless-parity bench-python clean check check-full fmt clippy audit outdated deny lint-python all
 
 # Use stable toolchain when no default is configured (override with RUSTUP_TOOLCHAIN=nightly etc.)
 export RUSTUP_TOOLCHAIN ?= stable
@@ -13,6 +13,11 @@ build-release:
 # Run Rust tests only
 test-rust:
 	cargo test
+
+# Run Python linters and type checker (ruff format, ruff check, mypy). Uses same .venv as test-python.
+lint-python:
+	@if [ ! -d .venv ]; then python3 -m venv .venv; fi
+	. .venv/bin/activate && pip install -q ruff 'mypy>=1.4,<1.10' && ruff format --check . && ruff check . && mypy .
 
 # Run Python tests (creates .venv, installs extension with sql+delta, runs pytest)
 # SQL and Delta features enable create_or_replace_temp_view, table(), sql(), read_delta, write_delta.
@@ -45,8 +50,8 @@ sparkless-parity:
 check: fmt clippy audit deny test-rust
 	@echo "All checks passed"
 
-# Run full check including Python tests (slower; builds PyO3 extension)
-check-full: check test-python
+# Run full check: Rust checks + Python lint (ruff, mypy) + Python tests (builds PyO3 extension).
+check-full: check lint-python test-python
 	@echo "All checks including Python passed"
 
 # Format code

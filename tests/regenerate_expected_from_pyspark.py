@@ -112,8 +112,7 @@ def rows_to_pyspark_df(
     struct = schema_to_struct_type(schema)
     type_strs = [(c.get("type") or "string").lower() for c in schema]
     cast_rows = [
-        [_cast_cell(v, type_strs[i]) for i, v in enumerate(row)]
-        for row in rows
+        [_cast_cell(v, type_strs[i]) for i, v in enumerate(row)] for row in rows
     ]
     return spark.createDataFrame(cast_rows, struct)
 
@@ -255,7 +254,9 @@ def apply_operations(
                     try:
                         agg_exprs.append(F.median(col_name).alias(alias))
                     except AttributeError:
-                        agg_exprs.append(F.expr(f"percentile_approx({col_name}, 0.5)").alias(alias))
+                        agg_exprs.append(
+                            F.expr(f"percentile_approx({col_name}, 0.5)").alias(alias)
+                        )
                 elif func == "product" and col_name:
                     agg_exprs.append(F.product(col_name).alias(alias))
                 elif func in ("stddev", "stddev_samp") and col_name:
@@ -294,10 +295,16 @@ def apply_operations(
             order_by_specs = op_spec.get("order_by") or []
             value_column = op_spec.get("value_column")
             n = op_spec.get("n")
-            w = Window.partitionBy(*partition_by) if partition_by else Window.partitionBy()
+            w = (
+                Window.partitionBy(*partition_by)
+                if partition_by
+                else Window.partitionBy()
+            )
             if order_by_specs:
                 order_exprs = [
-                    F.col(x["col"]).asc() if x.get("asc", True) else F.col(x["col"]).desc()
+                    F.col(x["col"]).asc()
+                    if x.get("asc", True)
+                    else F.col(x["col"]).desc()
                     for x in order_by_specs
                 ]
                 w = w.orderBy(*order_exprs)
@@ -332,7 +339,9 @@ def apply_operations(
             elif func == "ntile":
                 df = df.withColumn(col_name, F.ntile(int(n or 2)).over(w))
             elif func in ("sum", "avg", "count", "min", "max"):
-                agg_col = op_spec.get("value_column") or (df.columns[0] if df.columns else None)
+                agg_col = op_spec.get("value_column") or (
+                    df.columns[0] if df.columns else None
+                )
                 if agg_col is None:
                     continue
                 agg_expr = getattr(F, func)(F.col(agg_col))
@@ -378,14 +387,22 @@ def apply_operations(
             old_val = op_spec.get("old_value", "")
             new_val = op_spec.get("new_value", "")
             # Strip surrounding quotes so 'pending' -> pending (match parity literal parsing)
-            if isinstance(old_val, str) and len(old_val) >= 2 and (
-                (old_val.startswith("'") and old_val.endswith("'"))
-                or (old_val.startswith('"') and old_val.endswith('"'))
+            if (
+                isinstance(old_val, str)
+                and len(old_val) >= 2
+                and (
+                    (old_val.startswith("'") and old_val.endswith("'"))
+                    or (old_val.startswith('"') and old_val.endswith('"'))
+                )
             ):
                 old_val = old_val[1:-1]
-            if isinstance(new_val, str) and len(new_val) >= 2 and (
-                (new_val.startswith("'") and new_val.endswith("'"))
-                or (new_val.startswith('"') and new_val.endswith('"'))
+            if (
+                isinstance(new_val, str)
+                and len(new_val) >= 2
+                and (
+                    (new_val.startswith("'") and new_val.endswith("'"))
+                    or (new_val.startswith('"') and new_val.endswith('"'))
+                )
             ):
                 new_val = new_val[1:-1]
             if col_name:
@@ -483,7 +500,9 @@ def main() -> int:
         default=["tests/fixtures/converted"],
         help="Directories (glob *.json) or JSON files. Default: tests/fixtures/converted. Use tests/fixtures for hand-written.",
     )
-    parser.add_argument("--dry-run", action="store_true", help="Do not write files; print diffs")
+    parser.add_argument(
+        "--dry-run", action="store_true", help="Do not write files; print diffs"
+    )
     args = parser.parse_args()
 
     to_process: list[Path] = []
@@ -497,7 +516,9 @@ def main() -> int:
                 if f.is_file():
                     to_process.append(f)
         else:
-            print(f"Warning: skipping (not a dir or .json file): {path}", file=sys.stderr)
+            print(
+                f"Warning: skipping (not a dir or .json file): {path}", file=sys.stderr
+            )
     if not to_process:
         print("Error: no JSON files to process.", file=sys.stderr)
         return 1
