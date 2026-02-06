@@ -68,6 +68,25 @@ def test_filter_and_select() -> None:
     assert "age" not in first
 
 
+def test_filter_with_and_or_operators() -> None:
+    """filter with (Column & Column) and (Column | Column) works (fixes #9, #10)."""
+    import robin_sparkless as rs
+
+    spark = rs.SparkSession.builder().app_name("test").get_or_create()
+    data = [(1, 25, "Alice"), (2, 30, "Bob"), (3, 35, "Carol"), (4, 40, "Dave")]
+    df = spark.create_dataframe(data, ["id", "age", "name"])
+    # AND: age > 26 & age < 36
+    filtered_and = df.filter((rs.col("age") > 26) & (rs.col("age") < 36))
+    rows_and = filtered_and.collect()
+    assert len(rows_and) == 2
+    assert all(26 < r["age"] < 36 for r in rows_and)
+    # OR: age < 26 | age > 35
+    filtered_or = df.filter((rs.col("age") < 26) | (rs.col("age") > 35))
+    rows_or = filtered_or.collect()
+    assert len(rows_or) == 2
+    assert rows_or[0]["age"] == 25 and rows_or[1]["age"] == 40
+
+
 def test_with_column_and_show() -> None:
     """with_column adds a column; show runs without error."""
     import robin_sparkless as rs
