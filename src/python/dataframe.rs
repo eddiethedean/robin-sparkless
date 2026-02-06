@@ -1381,7 +1381,7 @@ pub(crate) fn any_value_to_py(
     py: Python<'_>,
     av: polars::prelude::AnyValue<'_>,
 ) -> PyResult<PyObject> {
-    use polars::prelude::AnyValue;
+    use polars::prelude::{AnyValue, TimeUnit};
     use pyo3::conversion::IntoPyObjectExt;
     match av {
         AnyValue::Null => py.None().into_bound_py_any(py).map(Into::into),
@@ -1394,6 +1394,24 @@ pub(crate) fn any_value_to_py(
         AnyValue::Float64(f) => f.into_bound_py_any(py).map(Into::into),
         AnyValue::String(s) => s.to_string().into_bound_py_any(py).map(Into::into),
         AnyValue::StringOwned(s) => s.to_string().into_bound_py_any(py).map(Into::into),
+        AnyValue::Date(days) => {
+            let epoch = chrono::NaiveDate::from_ymd_opt(1970, 1, 1).unwrap();
+            let d = epoch + chrono::TimeDelta::days(days as i64);
+            d.format("%Y-%m-%d")
+                .to_string()
+                .into_bound_py_any(py)
+                .map(Into::into)
+        }
+        AnyValue::Datetime(us, tu, _) | AnyValue::DatetimeOwned(us, tu, _) => {
+            let micros = match tu {
+                TimeUnit::Microseconds => us,
+                TimeUnit::Milliseconds => us.saturating_mul(1000),
+                TimeUnit::Nanoseconds => us.saturating_div(1000),
+            };
+            let dt = chrono::DateTime::from_timestamp_micros(micros).unwrap_or_default();
+            let s = dt.format("%Y-%m-%dT%H:%M:%S%.6f").to_string();
+            s.into_bound_py_any(py).map(Into::into)
+        }
         other => Err(pyo3::exceptions::PyRuntimeError::new_err(format!(
             "unsupported type for collect: {:?}",
             other
