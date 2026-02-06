@@ -7,8 +7,9 @@ use crate::functions::{
     array_insert, array_intersect, array_prepend, array_union, ascii, asin, asinh, atan, atan2,
     atanh, base64, bit_length, cast as rs_cast, cbrt, ceiling, chr, contains, cos, cosh,
     date_from_unix_date, day, dayofmonth, dayofweek, dayofyear, degrees, endswith, expm1,
-    factorial, find_in_set, format_number, from_unixtime, get, hypot, ifnull, ilike, isnotnull,
-    isnull, lcase, left, like, ln, log10, log1p, log2, map_concat, map_contains_key,
+    factorial, find_in_set, format_number, from_unixtime, get, get_json_object, hypot, ifnull,
+    ilike, isnotnull,
+    isnull, json_tuple, lcase, left, like, ln, log10, log1p, log2, map_concat, map_contains_key,
     map_filter_value_gt, map_from_entries, map_zip_with_coalesce, md5, month, next_day, nullif,
     nvl, overlay, pmod, power, quarter, radians, regexp_count, regexp_instr, regexp_substr,
     replace as rs_replace, right, rint, rlike, sha1, sha2, signum, sin, sinh, split, split_part,
@@ -830,6 +831,19 @@ impl PyColumn {
     fn find_in_set(&self, set_col: &PyColumn) -> Self {
         PyColumn {
             inner: find_in_set(&self.inner, &set_col.inner),
+        }
+    }
+    /// Extract JSON path from string column (PySpark get_json_object).
+    fn get_json_object(&self, path: &str) -> Self {
+        PyColumn {
+            inner: get_json_object(&self.inner, path),
+        }
+    }
+    /// Extract keys from JSON as struct (PySpark json_tuple). Returns struct with one field per key.
+    fn json_tuple(&self, keys: Vec<String>) -> Self {
+        let key_refs: Vec<&str> = keys.iter().map(|s| s.as_str()).collect();
+        PyColumn {
+            inner: json_tuple(&self.inner, &key_refs),
         }
     }
 
