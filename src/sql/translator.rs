@@ -66,6 +66,10 @@ fn translate_query(
     } else {
         df = apply_projection(&df, &body.projection)?;
     }
+    if let Some(having_expr) = &body.having {
+        let having_polars = sql_expr_to_polars(having_expr)?;
+        df = df.filter(having_polars)?;
+    }
     if !query.order_by.is_empty() {
         let pairs: Vec<(String, bool)> = query
             .order_by
