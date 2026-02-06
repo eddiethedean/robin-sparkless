@@ -79,6 +79,35 @@ mod tests {
     }
 
     #[test]
+    fn test_sql_having() {
+        let spark = SparkSession::builder().app_name("test").get_or_create();
+        let df = spark
+            .create_dataframe(
+                vec![
+                    (1, 25, "a".to_string()),
+                    (2, 25, "b".to_string()),
+                    (3, 30, "c".to_string()),
+                    (4, 35, "d".to_string()),
+                ],
+                vec!["id", "age", "name"],
+            )
+            .unwrap();
+        spark.create_or_replace_temp_view("t", df);
+        let result = spark
+            .sql("SELECT age, COUNT(id) FROM t GROUP BY age HAVING age > 26")
+            .unwrap();
+        assert_eq!(result.count().unwrap(), 2);
+        let rows = result.collect_as_json_rows().unwrap();
+        let ages: Vec<i64> = rows
+            .iter()
+            .map(|r| r.get("age").and_then(|v| v.as_i64()).unwrap())
+            .collect();
+        assert!(ages.contains(&30));
+        assert!(ages.contains(&35));
+        assert!(!ages.contains(&25));
+    }
+
+    #[test]
     fn test_sql_table_not_found() {
         let spark = SparkSession::builder().app_name("test").get_or_create();
         let result = spark.sql("SELECT 1 FROM nonexistent");
