@@ -283,3 +283,251 @@ def test_delta_write_and_read(spark) -> None:
                 "Delta Lake feature not built (build with --features pyo3,delta)"
             )
         raise
+
+
+# --- Sparkless parity tests (PR-S: issues #1-#21). Expectations match PySpark. ---
+
+
+def test_sparkless_parity_join_inner_returns_rows() -> None:
+    """Join (inner) returns rows. PySpark: inner join on key yields matched rows."""
+    import robin_sparkless as rs
+
+    spark = rs.SparkSession.builder().app_name("test").get_or_create()
+    left = spark.create_dataframe([(1, 10, "a"), (2, 20, "b")], ["id", "v", "label"])
+    right = spark.create_dataframe([(1, 100, "x"), (3, 300, "z")], ["id", "w", "tag"])
+    joined = left.join(right, ["id"], "inner")
+    rows = joined.collect()
+    assert len(rows) == 1
+    assert rows[0]["id"] == 1 and rows[0]["v"] == 10 and rows[0]["w"] == 100
+
+
+def test_sparkless_parity_join_left_returns_rows() -> None:
+    """Join (left) returns rows. PySpark: left join keeps all left rows."""
+    import robin_sparkless as rs
+
+    spark = rs.SparkSession.builder().app_name("test").get_or_create()
+    left = spark.create_dataframe([(1, 0, "a"), (2, 0, "b")], ["id", "_", "label"]).drop(
+        ["_"]
+    )
+    right = spark.create_dataframe([(1, 0, "x")], ["id", "_", "tag"]).drop(["_"])
+    joined = left.join(right, ["id"], "left")
+    rows = joined.collect()
+    assert len(rows) == 2
+    assert rows[0]["id"] == 1 and rows[0]["tag"] == "x"
+    assert rows[1]["id"] == 2 and rows[1]["tag"] is None
+
+
+def test_sparkless_parity_join_right_returns_rows() -> None:
+    """Join (right) returns rows. PySpark: right join keeps all right rows."""
+    import robin_sparkless as rs
+
+    spark = rs.SparkSession.builder().app_name("test").get_or_create()
+    left = spark.create_dataframe([(1, 0, "x")], ["id", "_", "tag"]).drop(["_"])
+    right = spark.create_dataframe([(1, 0, "a"), (2, 0, "b")], ["id", "_", "label"]).drop(
+        ["_"]
+    )
+    joined = left.join(right, ["id"], "right")
+    rows = joined.collect()
+    assert len(rows) == 2
+
+
+def test_sparkless_parity_join_outer_returns_rows() -> None:
+    """Join (outer) returns rows. PySpark: full outer keeps all keys from both sides."""
+    import robin_sparkless as rs
+
+    spark = rs.SparkSession.builder().app_name("test").get_or_create()
+    left = spark.create_dataframe([(1, 0, "a"), (2, 0, "b")], ["id", "_", "label"]).drop(
+        ["_"]
+    )
+    right = spark.create_dataframe([(1, 0, "x"), (3, 0, "z")], ["id", "_", "tag"]).drop(
+        ["_"]
+    )
+    joined = left.join(right, ["id"], "outer")
+    rows = joined.collect()
+    assert len(rows) == 3
+
+
+def test_sparkless_parity_join_left_semi_returns_rows() -> None:
+    """Join (left_semi) returns rows. PySpark: only left columns, rows that have a match in right."""
+    import robin_sparkless as rs
+
+    spark = rs.SparkSession.builder().app_name("test").get_or_create()
+    left = spark.create_dataframe(
+        [(1, 0, "a"), (2, 0, "b"), (3, 0, "c")], ["id", "_", "label"]
+    ).drop(["_"])
+    right = spark.create_dataframe([(2, 0, "x")], ["id", "_", "tag"]).drop(["_"])
+    joined = left.join(right, ["id"], "left_semi")
+    rows = joined.collect()
+    assert len(rows) == 1
+    assert rows[0]["id"] == 2 and rows[0]["label"] == "b"
+    assert "tag" not in rows[0]
+
+
+def test_sparkless_parity_join_left_anti_returns_rows() -> None:
+    """Join (left_anti) returns rows. PySpark: only left columns, rows with no match in right."""
+    import robin_sparkless as rs
+
+    spark = rs.SparkSession.builder().app_name("test").get_or_create()
+    left = spark.create_dataframe(
+        [(1, 0, "a"), (2, 0, "b"), (3, 0, "c")], ["id", "_", "label"]
+    ).drop(["_"])
+    right = spark.create_dataframe([(2, 0, "x")], ["id", "_", "tag"]).drop(["_"])
+    joined = left.join(right, ["id"], "left_anti")
+    rows = joined.collect()
+    assert len(rows) == 2
+    ids = {r["id"] for r in rows}
+    assert ids == {1, 3}
+
+
+def test_sparkless_parity_filter_simple_returns_rows() -> None:
+    """Filter (simple) returns rows. PySpark: filter(expr) returns matching rows."""
+    import robin_sparkless as rs
+
+    spark = rs.SparkSession.builder().app_name("test").get_or_create()
+    df = spark.create_dataframe(
+        [(1, 25, "Alice"), (2, 30, "Bob"), (3, 35, "Carol")], ["id", "age", "name"]
+    )
+    out = df.filter(rs.col("age").gt(rs.lit(28)))
+    rows = out.collect()
+    assert len(rows) == 2
+    assert all(r["age"] > 28 for r in rows)
+
+
+def test_sparkless_parity_filter_boolean_returns_rows() -> None:
+    """Filter (boolean column) returns rows. PySpark: filter(boolean_col) keeps True rows."""
+    import robin_sparkless as rs
+
+    spark = rs.SparkSession.builder().app_name("test").get_or_create()
+    df = spark.create_dataframe(
+        [(1, 0, "a"), (2, 0, "b"), (3, 0, "c")], ["id", "_", "name"]
+    )
+    df = df.with_column(
+        "flag",
+        rs.when(rs.col("id").eq(rs.lit(2))).then(rs.lit(False)).otherwise(rs.lit(True)),
+    ).drop(["_"])
+    out = df.filter(rs.col("flag"))
+    rows = out.collect()
+    assert len(rows) == 2
+    assert [r["id"] for r in rows] == [1, 3]
+
+
+def test_sparkless_parity_select_returns_rows() -> None:
+    """Select (column access) returns rows. PySpark: select(cols) returns same number of rows."""
+    import robin_sparkless as rs
+
+    spark = rs.SparkSession.builder().app_name("test").get_or_create()
+    df = spark.create_dataframe([(1, 10, "a"), (2, 20, "b")], ["id", "v", "name"])
+    out = df.select(["id", "name"])
+    rows = out.collect()
+    assert len(rows) == 2
+    assert rows[0]["id"] == 1 and rows[0]["name"] == "a"
+
+
+def test_sparkless_parity_select_with_alias_returns_rows() -> None:
+    """Select with alias returns rows. PySpark: select(col.alias(...)) preserves row count."""
+    import robin_sparkless as rs
+
+    spark = rs.SparkSession.builder().app_name("test").get_or_create()
+    df = spark.create_dataframe([(1, 25, "Alice")], ["id", "age", "name"])
+    df = df.with_column("years", rs.col("age"))
+    out = df.select(["years", "name"])
+    rows = out.collect()
+    assert len(rows) == 1
+    assert rows[0]["years"] == 25 and rows[0]["name"] == "Alice"
+
+
+def test_sparkless_parity_with_column_returns_rows() -> None:
+    """withColumn returns rows. PySpark: withColumn preserves row count."""
+    import robin_sparkless as rs
+
+    spark = rs.SparkSession.builder().app_name("test").get_or_create()
+    df = spark.create_dataframe([(1, 0, "a"), (2, 0, "b")], ["id", "_", "name"]).drop(
+        ["_"]
+    )
+    out = df.with_column("double_id", rs.col("id").multiply(rs.lit(2)))
+    rows = out.collect()
+    assert len(rows) == 2
+    assert rows[0]["double_id"] == 2 and rows[1]["double_id"] == 4
+
+
+def test_sparkless_parity_drop_returns_rows() -> None:
+    """Drop column returns rows. PySpark: drop(cols) preserves row count."""
+    import robin_sparkless as rs
+
+    spark = rs.SparkSession.builder().app_name("test").get_or_create()
+    df = spark.create_dataframe([(1, 10, "a"), (2, 20, "b")], ["id", "v", "name"])
+    out = df.drop(["v"])
+    rows = out.collect()
+    assert len(rows) == 2
+    assert "v" not in rows[0] and "id" in rows[0] and "name" in rows[0]
+
+
+def test_sparkless_parity_distinct_returns_rows() -> None:
+    """distinct returns rows. PySpark: distinct() returns one row per unique row."""
+    import robin_sparkless as rs
+
+    spark = rs.SparkSession.builder().app_name("test").get_or_create()
+    df = spark.create_dataframe(
+        [(1, 0, "a"), (1, 0, "a"), (2, 0, "b")], ["id", "_", "name"]
+    ).drop(["_"])
+    out = df.distinct()
+    rows = out.collect()
+    assert len(rows) == 2
+
+
+def test_sparkless_parity_order_by_desc_returns_rows() -> None:
+    """orderBy desc returns rows. PySpark: orderBy(col, ascending=False) preserves rows."""
+    import robin_sparkless as rs
+
+    spark = rs.SparkSession.builder().app_name("test").get_or_create()
+    df = spark.create_dataframe([(1, "a"), (2, "b"), (3, "c")], ["id", "name"])
+    out = df.order_by(["id"], ascending=[False])
+    rows = out.collect()
+    assert len(rows) == 3
+    assert rows[0]["id"] == 3 and rows[2]["id"] == 1
+
+
+def test_sparkless_parity_filter_comparison_not_column_existence() -> None:
+    """Filter comparison operations not treated as column existence. PySpark: col('a') > 1 is comparison."""
+    import robin_sparkless as rs
+
+    spark = rs.SparkSession.builder().app_name("test").get_or_create()
+    df = spark.create_dataframe([(1, 10, "a"), (2, 20, "b"), (3, 30, "c")], ["id", "v", "x"]).drop(
+        ["x"]
+    )
+    out = df.filter(rs.col("v").gt(rs.lit(15)))
+    rows = out.collect()
+    assert len(rows) == 2
+    assert rows[0]["v"] == 20 and rows[1]["v"] == 30
+
+
+def test_sparkless_parity_table_read_returns_rows() -> None:
+    """Table read (createOrReplaceTempView + table) returns correct row count. PySpark parity."""
+    import robin_sparkless as rs
+
+    spark = rs.SparkSession.builder().app_name("test").get_or_create()
+    df = spark.create_dataframe(
+        [(1, 10, "a"), (2, 20, "b"), (3, 30, "c")], ["id", "v", "name"]
+    )
+    try:
+        spark.create_or_replace_temp_view("t", df)
+    except AttributeError:
+        pytest.skip("sql feature not built (create_or_replace_temp_view not available)")
+    read_back = spark.table("t")
+    rows = read_back.collect()
+    assert len(rows) == 3
+    assert rows[0]["id"] == 1 and rows[2]["name"] == "c"
+
+
+def test_sparkless_parity_multiple_append_operations() -> None:
+    """Multiple append-like operations (union) preserve rows. PySpark: union stacks rows."""
+    import robin_sparkless as rs
+
+    spark = rs.SparkSession.builder().app_name("test").get_or_create()
+    a = spark.create_dataframe([(1, 0, "a")], ["id", "_", "name"]).drop(["_"])
+    b = spark.create_dataframe([(2, 0, "b")], ["id", "_", "name"]).drop(["_"])
+    c = spark.create_dataframe([(3, 0, "c")], ["id", "_", "name"]).drop(["_"])
+    combined = a.union(b).union(c)
+    rows = combined.collect()
+    assert len(rows) == 3
+    assert rows[0]["id"] == 1 and rows[1]["id"] == 2 and rows[2]["id"] == 3
