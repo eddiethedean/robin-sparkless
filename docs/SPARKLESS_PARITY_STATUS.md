@@ -57,6 +57,12 @@ String and binary functions in this batch are implemented and covered by hand-wr
 
 SQL (via `SparkSession::sql()` with optional `sql` feature) and session behaviour are implemented: the SQL translator maps to DataFrame ops; cache_table/uncache_table, CASE WHEN, IN, JOINs, LIKE, ORDER BY, subquery, UNION, create_table_from_dataframe, insert_from_select, basic/filtered select, and group_by are supported via the translator and session catalog. Parity is exercised via DataFrame fixtures (filter, join, orderBy, groupBy, etc.) and plan fixtures. When running Sparkless tests with robin backend, ensure the adapter uses the SQL API and session catalog as documented.
 
+## Features: createDataFrame and pivot (Sparkless issues #151, #156)
+
+**createDataFrame (#151):** Implemented. `SparkSession::create_dataframe(data, column_names)` supports 3-column (i64, i64, String) tuples. For arbitrary schemas and input types use `create_dataframe_from_rows(rows, schema)` with schema inference or explicit (name, dtype) pairs; supported dtypes include bigint, double, string, boolean, date, timestamp. Python: `createDataFrame(data, column_names)` and `create_dataframe_from_rows(data, schema)`.
+
+**pivot (#156):** Stub. `DataFrame::pivot(pivot_col, values)` / `DataFrame.pivot(pivot_col, values=None)` are present but raise "not yet implemented"; use `crosstab(col1, col2)` for two-column cross-tabulation until pivot is implemented.
+
 ## Failure reasons (converted fixtures)
 
 When a converted fixture fails, classify and document here:
