@@ -53,6 +53,10 @@ String and binary functions in this batch are implemented and covered by hand-wr
 
 String and binary functions in this batch are implemented and covered by hand-written parity fixtures: string_length/length, like/rlike (with escape), lower/upper, lpad/rpad, regexp_extract, rtrim/trim, substring/substr, translate, substring_index, xxhash64. Fixtures include `string_length_trim`, `string_upper_lower`, `string_lpad_rpad`, `string_substring`, `string_substring_index`, `string_translate`, `string_xxhash64`, `like_escape_char`, `ilike_escape_char`, etc. When running Sparkless tests with robin backend, ensure the adapter uses these APIs.
 
+## SQL / session parity (Sparkless issues #122–#140)
+
+SQL (via `SparkSession::sql()` with optional `sql` feature) and session behaviour are implemented: the SQL translator maps to DataFrame ops; cache_table/uncache_table, CASE WHEN, IN, JOINs, LIKE, ORDER BY, subquery, UNION, create_table_from_dataframe, insert_from_select, basic/filtered select, and group_by are supported via the translator and session catalog. Parity is exercised via DataFrame fixtures (filter, join, orderBy, groupBy, etc.) and plan fixtures. When running Sparkless tests with robin backend, ensure the adapter uses the SQL API and session catalog as documented.
+
 ## Failure reasons (converted fixtures)
 
 When a converted fixture fails, classify and document here:
