@@ -41,6 +41,10 @@ Window functions are implemented and covered by hand-written parity fixtures: `r
 
 Array functions are implemented and covered by hand-written parity fixtures: `array_contains`, `array_distinct` (first-occurrence order), `array_join`, `array_position`, `array_remove`, `array_sort`, `array_union`, `element_at`, `explode`, `size`/`array_size`, plus `array_append`, `array_insert`, `array_intersect`, `array_except`, `array_prepend`, `array_sum`, `arrays_overlap`, `arrays_zip`, `zip_with`. Converted fixtures in `tests/fixtures/converted/` for array_* are currently skipped until expected is regenerated from PySpark. When running Sparkless tests with robin backend, ensure the adapter uses these APIs.
 
+## Datetime / type parity (Sparkless issues #50–#57)
+
+Datetime and cast/alias behaviour are implemented and covered by hand-written parity fixtures: `date_add_sub`, `datediff`, `datetime_hour_minute`, `datetime_quarter_week`, `with_extract`, `with_weekday`, `with_dayname`, `make_date`, `unix_timestamp`, `unix_date`, `timestampadd_test`, `months_between_round_off`, `make_timestamp_test`, `type_coercion_*`, and cast/alias in expression tests. Functions include date_add, date_sub, date_format, dayofmonth, dayofweek, month, to_date, and cast/alias in select and filter. When running Sparkless tests with robin backend, ensure the adapter uses these APIs.
+
 ## Failure reasons (converted fixtures)
 
 When a converted fixture fails, classify and document here:
