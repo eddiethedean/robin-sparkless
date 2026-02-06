@@ -49,6 +49,10 @@ Datetime and cast/alias behaviour are implemented and covered by hand-written pa
 
 String and binary functions in this batch are implemented and covered by hand-written parity fixtures: ascii, base64/unbase64, concat_ws (string_concat), crc32 (string_crc32), hex, initcap, levenshtein (string_levenshtein), repeat, reverse, soundex, and related tests. Fixtures include `string_crc32`, `string_levenshtein`, `string_concat`, `string_upper_lower`, `string_left_right_replace`, `string_length_trim`, `string_substring_index`, `string_lpad_rpad`, `string_translate`, `string_xxhash64`, etc. When running Sparkless tests with robin backend, ensure the adapter uses these APIs.
 
+## String / binary parity batch 2 (Sparkless issues #100–#116)
+
+String and binary functions in this batch are implemented and covered by hand-written parity fixtures: string_length/length, like/rlike (with escape), lower/upper, lpad/rpad, regexp_extract, rtrim/trim, substring/substr, translate, substring_index, xxhash64. Fixtures include `string_length_trim`, `string_upper_lower`, `string_lpad_rpad`, `string_substring`, `string_substring_index`, `string_translate`, `string_xxhash64`, `like_escape_char`, `ilike_escape_char`, etc. When running Sparkless tests with robin backend, ensure the adapter uses these APIs.
+
 ## Failure reasons (converted fixtures)
 
 When a converted fixture fails, classify and document here:
