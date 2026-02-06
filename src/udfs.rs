@@ -4,8 +4,8 @@
 use chrono::{Datelike, TimeZone};
 use chrono_tz::Tz;
 use polars::prelude::*;
-use std::borrow::Cow;
 use regex::Regex;
+use std::borrow::Cow;
 
 /// Split string by regex and return 1-based part (for split_part with regex delimiter).
 pub fn apply_split_part_regex(
@@ -463,7 +463,7 @@ pub fn apply_arrays_overlap(columns: &mut [Column]) -> PolarsResult<Option<Colum
     let mut results: Vec<bool> = Vec::with_capacity(a_ca.len());
     for (opt_a, opt_b) in a_ca.amortized_iter().zip(b_ca.amortized_iter()) {
         let overlap = match (opt_a, opt_b) {
-                (Some(a_amort), Some(b_amort)) => {
+            (Some(a_amort), Some(b_amort)) => {
                 let a_list = a_amort.as_ref().as_list();
                 let b_list = b_amort.as_ref().as_list();
                 let a_keys: std::collections::HashSet<String> = a_list
@@ -545,9 +545,7 @@ pub fn apply_arrays_zip(columns: &mut [Column]) -> PolarsResult<Option<Column>> 
                     let elem = lst
                         .get(i)
                         .cloned()
-                        .unwrap_or_else(|| {
-                            Series::full_null(PlSmallStr::EMPTY, 1, &inner_dtype)
-                        });
+                        .unwrap_or_else(|| Series::full_null(PlSmallStr::EMPTY, 1, &inner_dtype));
                     struct_parts[j].push(elem);
                 }
             }
@@ -1619,8 +1617,10 @@ pub fn apply_months_between(
     let end_ca = date_series_to_days(&end_series)?;
     let start_ca = date_series_to_days(&start_series)?;
     // PySpark: fractional months using 31 days per month; roundOff rounds to 8 decimal places.
-    let out = end_ca.into_iter().zip(&start_ca).map(|(oe, os)| {
-        match (oe, os) {
+    let out = end_ca
+        .into_iter()
+        .zip(&start_ca)
+        .map(|(oe, os)| match (oe, os) {
             (Some(e), Some(s)) => {
                 let days = (e - s) as f64;
                 let months = days / 31.0;
@@ -1631,8 +1631,7 @@ pub fn apply_months_between(
                 })
             }
             _ => None,
-        }
-    });
+        });
     let out = Float64Chunked::from_iter_options(name.as_str().into(), out);
     Ok(Some(Column::new(name, out.into_series())))
 }
