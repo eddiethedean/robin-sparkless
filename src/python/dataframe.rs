@@ -382,7 +382,8 @@ impl PyDataFrame {
 
     /// Pivot (wide format). PySpark pivot. Stub: not yet implemented.
     #[pyo3(signature = (pivot_col, values=None))]
-    fn pivot(&self, _pivot_col: &str, _values: Option<Vec<String>>) -> PyResult<PyDataFrame> {
+    fn pivot(&self, pivot_col: &str, values: Option<Vec<String>>) -> PyResult<PyDataFrame> {
+        let _ = (pivot_col, values);
         Err(pyo3::exceptions::PyNotImplementedError::new_err(
             "pivot is not yet implemented; use crosstab(col1, col2) for two-column cross-tabulation.",
         ))
