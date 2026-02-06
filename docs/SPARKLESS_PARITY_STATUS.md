@@ -45,6 +45,10 @@ Array functions are implemented and covered by hand-written parity fixtures: `ar
 
 Datetime and cast/alias behaviour are implemented and covered by hand-written parity fixtures: `date_add_sub`, `datediff`, `datetime_hour_minute`, `datetime_quarter_week`, `with_extract`, `with_weekday`, `with_dayname`, `make_date`, `unix_timestamp`, `unix_date`, `timestampadd_test`, `months_between_round_off`, `make_timestamp_test`, `type_coercion_*`, and cast/alias in expression tests. Functions include date_add, date_sub, date_format, dayofmonth, dayofweek, month, to_date, and cast/alias in select and filter. When running Sparkless tests with robin backend, ensure the adapter uses these APIs.
 
+## String / binary parity batch 1 (Sparkless issues #86–#99)
+
+String and binary functions in this batch are implemented and covered by hand-written parity fixtures: ascii, base64/unbase64, concat_ws (string_concat), crc32 (string_crc32), hex, initcap, levenshtein (string_levenshtein), repeat, reverse, soundex, and related tests. Fixtures include `string_crc32`, `string_levenshtein`, `string_concat`, `string_upper_lower`, `string_left_right_replace`, `string_length_trim`, `string_substring_index`, `string_lpad_rpad`, `string_translate`, `string_xxhash64`, etc. When running Sparkless tests with robin backend, ensure the adapter uses these APIs.
+
 ## Failure reasons (converted fixtures)
 
 When a converted fixture fails, classify and document here:
