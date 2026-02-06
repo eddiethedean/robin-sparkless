@@ -1215,12 +1215,15 @@ pub fn try_cast(column: &Column, type_name: &str) -> Result<Column, String> {
 
 /// Cast to string, optionally with format for datetime (PySpark to_char, to_varchar).
 /// When format is Some, uses date_format for datetime columns (PySpark format → chrono strftime); otherwise cast to string.
+/// Panics if the cast to string fails (invalid type name or unsupported column type).
 pub fn to_char(column: &Column, format: Option<&str>) -> Column {
     match format {
         Some(fmt) => column
             .clone()
             .date_format(&crate::udfs::pyspark_format_to_chrono(fmt)),
-        None => cast(column, "string").unwrap(),
+        None => {
+            cast(column, "string").expect("to_char: cast to string failed; use a valid column type")
+        }
     }
 }
 
@@ -1230,13 +1233,16 @@ pub fn to_varchar(column: &Column, format: Option<&str>) -> Column {
 }
 
 /// Cast to numeric (PySpark to_number). Uses Double. Format parameter reserved for future use.
+/// Panics if the cast to double fails (invalid type name or unsupported column type).
 pub fn to_number(column: &Column, _format: Option<&str>) -> Column {
-    cast(column, "double").unwrap()
+    cast(column, "double").expect("to_number: cast to double failed; use a valid column type")
 }
 
 /// Cast to numeric, null on invalid (PySpark try_to_number). Format parameter reserved for future use.
+/// Panics if the try_cast setup fails (invalid type name); column values that cannot be parsed become null.
 pub fn try_to_number(column: &Column, _format: Option<&str>) -> Column {
-    try_cast(column, "double").unwrap()
+    try_cast(column, "double")
+        .expect("try_to_number: try_cast to double failed; use a valid type name")
 }
 
 /// Cast to timestamp, or parse with format when provided (PySpark to_timestamp).
@@ -1256,10 +1262,12 @@ pub fn to_timestamp(column: &Column, format: Option<&str>) -> Result<Column, Str
 }
 
 /// Cast to timestamp, null on invalid, or parse with format when provided (PySpark try_to_timestamp).
+/// Panics if the try_cast setup fails (invalid type name) when format is None.
 pub fn try_to_timestamp(column: &Column, format: Option<&str>) -> Column {
     use polars::prelude::*;
     match format {
-        None => try_cast(column, "timestamp").unwrap(),
+        None => try_cast(column, "timestamp")
+            .expect("try_to_timestamp: try_cast to timestamp failed; use a valid type name"),
         Some(fmt) => {
             let fmt_owned = fmt.to_string();
             let expr = column.expr().clone().map(
@@ -1487,7 +1495,7 @@ pub fn date_format(column: &Column, format: &str) -> Column {
 pub fn current_date() -> Column {
     use polars::prelude::*;
     let today = chrono::Utc::now().date_naive();
-    let days = (today - chrono::NaiveDate::from_ymd_opt(1970, 1, 1).unwrap()).num_days() as i32;
+    let days = (today - crate::date_utils::epoch_naive_date()).num_days() as i32;
     crate::column::Column::from_expr(Expr::Literal(LiteralValue::Date(days)), None)
 }
 
@@ -2111,14 +2119,15 @@ pub fn isnotnull(column: &Column) -> Column {
 }
 
 /// Create an array column from multiple columns (PySpark array).
-pub fn array(columns: &[&Column]) -> crate::column::Column {
+pub fn array(columns: &[&Column]) -> Result<crate::column::Column, PolarsError> {
     use polars::prelude::*;
     if columns.is_empty() {
         panic!("array requires at least one column");
     }
     let exprs: Vec<Expr> = columns.iter().map(|c| c.expr().clone()).collect();
-    let expr = concat_list(exprs).expect("concat_list");
-    crate::column::Column::from_expr(expr, None)
+    let expr = concat_list(exprs)
+        .map_err(|e| PolarsError::ComputeError(format!("array concat_list: {e}").into()))?;
+    Ok(crate::column::Column::from_expr(expr, None))
 }
 
 /// Number of elements in list (PySpark size / array_size). Returns Int32.
@@ -2289,7 +2298,7 @@ pub fn posexplode(column: &Column) -> (Column, Column) {
 
 /// Build a map column from alternating key/value expressions (PySpark create_map).
 /// Returns List(Struct{key, value}) using Polars as_struct and concat_list.
-pub fn create_map(key_values: &[&Column]) -> Column {
+pub fn create_map(key_values: &[&Column]) -> Result<Column, PolarsError> {
     use polars::prelude::{as_struct, concat_list};
     if key_values.is_empty() {
         panic!("create_map requires at least one key-value pair");
@@ -2302,8 +2311,9 @@ pub fn create_map(key_values: &[&Column]) -> Column {
             struct_exprs.push(as_struct(vec![k, v]));
         }
     }
-    let expr = concat_list(struct_exprs).expect("create_map concat_list");
-    crate::column::Column::from_expr(expr, None)
+    let expr = concat_list(struct_exprs)
+        .map_err(|e| PolarsError::ComputeError(format!("create_map concat_list: {e}").into()))?;
+    Ok(crate::column::Column::from_expr(expr, None))
 }
 
 /// Extract keys from a map column (PySpark map_keys). Map is List(Struct{key, value}).

@@ -2108,11 +2108,11 @@ fn py_map_contains_key(col: &PyColumn, value: &PyColumn) -> PyColumn {
 }
 
 #[pyfunction]
-fn py_create_map(cols: Vec<PyRef<PyColumn>>) -> PyColumn {
+fn py_create_map(cols: Vec<PyRef<PyColumn>>) -> PyResult<PyColumn> {
     let refs: Vec<&RsColumn> = cols.iter().map(|c| &c.inner).collect();
-    PyColumn {
-        inner: create_map(&refs),
-    }
+    let inner =
+        create_map(&refs).map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+    Ok(PyColumn { inner })
 }
 
 #[pyfunction]
