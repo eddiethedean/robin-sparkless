@@ -25,7 +25,7 @@ cargo test pyspark_parity_fixtures
   ```
   Use `--dry-run` to print diffs without writing. The script builds a PySpark DataFrame from each fixture’s `input.schema` and `input.rows`, applies the same `operations` (filter, select, withColumn, orderBy, groupBy, window, join, etc.), then overwrites that fixture’s `expected.schema` and `expected.rows`. Fixtures with unsupported expressions or ops are left unchanged. After regenerating, run `cargo test pyspark_parity_fixtures`; any failure indicates Robin vs PySpark divergence (fix Robin or leave fixture unregenerated). Requires PySpark and Java 17+.
 
-- **Python tests:** Tests in `tests/python/test_robin_sparkless.py` (and any `test_closed_issues_*` modules) are written so assertions match PySpark behaviour. Some tests (e.g. `test_create_dataframe_from_rows_schema_pyspark_parity`) run the same scenario in both Robin and PySpark and assert equality when PySpark is available (`pytest.importorskip("pyspark")`).
+- **Python tests:** Tests in `tests/python/test_robin_sparkless.py` and `test_dataframe_parity.py` assert behaviour that matches PySpark. Expectations are predetermined (no PySpark at test runtime). For example, `test_create_dataframe_from_rows_schema_pyspark_parity` compares Robin output to a fixed expected list derived from PySpark 3.5.
 
 - **CI:** A CI job can run the regenerator in `--dry-run` and fail if current expected ≠ PySpark result (requires PySpark and Java 17+ in the environment).
 

@@ -4,12 +4,12 @@ This doc tracks which Sparkless Python tests have been **ported** to run against
 
 **Ground truth:** Expected results for ported tests must come from **PySpark** (not Sparkless). Use the `spark` fixture from `tests/python/conftest.py` and `assert_rows_equal()` from `tests/python/utils.py` in ported tests.
 
-## Why only 7 Python tests ported?
+## Why 45 Python tests (and fixture-driven parity)?
 
-Sparkless has **hundreds** of tests (313+ test files, many test methods in `parity/dataframe/`, `parity/functions/`, `parity/sql/`, etc.). Only 7 were ported as **Python** tests because:
+Sparkless has **hundreds** of tests (313+ test files, many test methods in `parity/dataframe/`, `parity/functions/`, `parity/sql/`, etc.). We have **45 Python tests** in `tests/python/`; many scenarios are covered by fixture-driven parity (Rust) instead. Rationale:
 
 1. **No duplicates** – We skip any scenario already covered by (a) hand-written fixtures in `tests/fixtures/*.json`, (b) **226 converted fixtures** in `tests/fixtures/converted/` (from Sparkless `expected_outputs`), or (c) `test_robin_sparkless.py`. So e.g. filter (age > 30) and group_by count were not ported again.
-2. **Fixture conversion covers many scenarios** – The 226 converted JSON fixtures are run as **Rust** parity tests (`cargo test pyspark_parity_fixtures`). Those are “ported” as fixture-driven parity, not as separate Python test functions. The 7 Python tests are extra coverage with inlined expectations.
+2. **Fixture conversion covers many scenarios** – The 226 converted JSON fixtures are run as **Rust** parity tests (`cargo test pyspark_parity_fixtures`). Those are “ported” as fixture-driven parity, not as separate Python test functions. The 45 Python tests add coverage with inlined or predetermined expectations (no PySpark at test runtime).
 3. **API gaps** – Many Sparkless tests depend on **PySpark** APIs Robin does not implement: **SQL** (`spark.sql`, DDL/DML, subqueries, CTEs, HAVING), **RDD** (`df.rdd`, `foreach`, `foreachPartition`, `mapInPandas`, `mapPartitions`), **UDFs** (`udf`, `pandas_udf`, UDTF), **catalog** (databases, tables, `writeTo`), **streaming** (`withWatermark`, `isStreaming`), and **built-in functions** (XML/XPath, sentences, sketch functions, etc.). All of these are standard PySpark APIs; see [ROBIN_SPARKLESS_MISSING.md](ROBIN_SPARKLESS_MISSING.md) (scoped to PySpark parity). Those tests are deferred until Robin supports them.
 4. **Initial batch** – The port focused on a small set of DataFrame ops Robin fully supports (filter, select, join, groupBy+agg) that were not duplicate coverage. Expanding the port means adding more Python tests for supported ops and/or implementing more APIs and then porting the corresponding tests.
 

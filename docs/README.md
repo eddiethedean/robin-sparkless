@@ -6,6 +6,7 @@ This page is the **legacy doc index**. The full documentation is built with [MkD
 |----------|-------------|
 | [QUICKSTART](QUICKSTART.md) | Build, install, basic usage, optional features (SQL, Delta), troubleshooting, benchmarks |
 | [ROADMAP](ROADMAP.md) | Development roadmap and Sparkless integration phases |
+| [RELEASING](RELEASING.md) | How to cut a release (version bump, tag, crates.io publish) |
 | [CHANGELOG](../CHANGELOG.md) | Version history and release notes |
 | [PARITY_STATUS](PARITY_STATUS.md) | PySpark parity coverage matrix (159 fixtures; 3 plan fixtures; Phases 12–25 + signature alignment + gap closure) |
 | [PYSPARK_DIFFERENCES](PYSPARK_DIFFERENCES.md) | Known divergences from PySpark (window, SQL, Delta, rand/randn semantics; DataFrame cube/rollup/write and stubs; Phase 8 + gap closure) |

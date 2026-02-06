@@ -9,6 +9,8 @@ The goal is to:
 - Generate **JSON fixtures** from PySpark runs.
 - Consume those fixtures in **Rust tests** to ensure `robin-sparkless` matches PySpark.
 
+**Note:** Running the test suite (`make test`, `make check-full`) does **not** require PySpark or Java; Python tests use predetermined expectations. PySpark/Java 17+ are only required when **generating** new fixtures (e.g. `gen_pyspark_cases.py`) or when running `make sparkless-parity` with regeneration.
+
 ---
 
 ## 1. Overview

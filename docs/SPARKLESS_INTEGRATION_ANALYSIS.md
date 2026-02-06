@@ -288,7 +288,7 @@ The surface to mirror for translation is:
 
 When Sparkless is used with `backend_type="robin"` (e.g. `SparkSession.builder.config("spark.sparkless.backend", "robin").getOrCreate()` or `SPARKLESS_BACKEND=robin`), the **robin_sparkless** Python package must be available. It is an **optional** dependency of Sparkless:
 
-- **Install from source (robin-sparkless repo)**: From the robin-sparkless repo root, run `maturin develop --features pyo3` (optionally `maturin develop --features "pyo3,sql"` or `"pyo3,delta"`). This builds the extension and installs it into the current environment. Requires Rust (stable) and Python 3.8+.
+- **Install from source (robin-sparkless repo)**: From the robin-sparkless repo root, run `maturin develop --features "pyo3,sql,delta"` (or `pyo3` only for minimal build). This builds the extension and installs it into the current environment. Requires Rust (stable) and Python 3.8+. Full check (Rust + Python lint + tests): `make check-full`.
 - **Install from PyPI (when published)**: `pip install robin_sparkless` will install the wheel. No Rust required.
 - **Build constraints**: The extension is built with PyO3 0.24. Python 3.8–3.12 are typically supported; check the robin-sparkless release for compatible manylinux/ABI tags.
 

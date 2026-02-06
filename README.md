@@ -124,19 +124,21 @@ print(filtered.collect())  # [{"id": 2, "age": 30, "name": "Bob"}]
 
 ## Development
 
-**Prerequisites:** Rust (see [rust-toolchain.toml](rust-toolchain.toml)), and for Python tests: Python 3.8+, `maturin`, `pytest`.
+**Prerequisites:** Rust (see [rust-toolchain.toml](rust-toolchain.toml)). For Python tests: Python 3.8+, `maturin`, `pytest`. For full check (lint + type-check): `ruff`, `mypy` (installed by Makefile when needed).
 
 | Command | Description |
 |---------|-------------|
 | `cargo build` | Build (Rust only) |
 | `cargo build --features pyo3` | Build with Python extension |
 | `cargo test` | Run Rust tests |
-| `make test` | Run Rust + Python tests (creates venv, `maturin develop`, `pytest`) |
-| `make check` | Format, clippy, audit, deny, tests |
+| `make test` | Run Rust + Python tests (creates venv, `maturin develop --features pyo3,sql,delta`, `pytest`) |
+| `make check` | Rust only: format, clippy, audit, deny, Rust tests |
+| `make check-full` | Full CI: check + Python lint (ruff format, ruff check, mypy) + Python tests |
+| `make lint-python` | Python only: ruff format --check, ruff check, mypy |
 | `cargo bench` | Benchmarks (robin-sparkless vs Polars) |
 | `cargo doc --open` | Build and open API docs |
 
-CI runs the same checks on push/PR (see [.github/workflows/ci.yml](.github/workflows/ci.yml)).
+CI runs format, clippy, audit, deny, Rust tests, Python lint (ruff, mypy), and Python tests on push/PR (see [.github/workflows/ci.yml](.github/workflows/ci.yml)).
 
 ---
 

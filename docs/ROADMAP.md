@@ -165,7 +165,7 @@ We know we're on track if:
 - ✅ String functions: `upper()`, `lower()`, `substring()`, `concat()`, `concat_ws()`, `length`, `trim`, `regexp_extract`, `regexp_replace`, `regexp_extract_all`, `regexp_like`, `split`
 - ✅ Datetime: `year()`, `month()`, `day()`, `to_date()`, `date_format(format)` (chrono strftime)
 - ✅ DataFrame methods: `union`, `union_by_name`, `distinct`, `drop`, `dropna`, `fillna`, `limit`, `with_column_renamed`
-- ✅ **PyO3 bridge** (optional `pyo3` feature): Python module `robin_sparkless` with SparkSession, DataFrame, Column, GroupedData; `create_dataframe`, filter, select, join, group_by, collect (list of dicts), etc. Build: `maturin develop --features pyo3`. Tests: `make test` runs Rust + Python smoke tests. See [PYTHON_API.md](PYTHON_API.md).
+- ✅ **PyO3 bridge** (optional `pyo3` feature): Python module `robin_sparkless` with SparkSession, DataFrame, Column, GroupedData; `create_dataframe`, `create_dataframe_from_rows`, filter, select, join, group_by, collect (list of dicts), etc. Build: `maturin develop --features "pyo3,sql,delta"`. Tests: `make test` runs Rust + Python tests; `make check-full` runs full CI (Rust + ruff + mypy + Python tests). See [PYTHON_API.md](PYTHON_API.md).
 - ✅ **Phase 9** (high-value functions & DataFrame methods): Datetime (`current_date`, `current_timestamp`, `date_add`, `date_sub`, `hour`, `minute`, `second`, `datediff`, `last_day`, `trunc`); string (`repeat`, `reverse`, `instr`, `lpad`, `rpad`); math (`sqrt`, `pow`, `exp`, `log`); conditional (`nvl`/`ifnull`, `nullif`, `nanvl`); GroupedData (`first`, `last`, `approx_count_distinct`); DataFrame (`replace`, `cross_join`, `describe`, `cache`/`persist`/`unpersist`, `subtract`, `intersect`).
 - ✅ Parity test harness with 159 passing fixtures:
   - `filter_age_gt_30`: filter + select + orderBy
@@ -275,7 +275,7 @@ To reach **full Sparkless parity** (robin-sparkless as a complete backend replac
 - **Parity harness**: Date/datetime and boolean column support in fixture input ([tests/parity.rs](tests/parity.rs)); `dtype_to_string` and `collect_to_simple_format` for Date/Datetime/Int8; `types_compatible` for date/timestamp.
 - **Fixture growth**: 73 → 80 (Phase 11) → 82 (Phase 12–13) → 88 (Phase 14–15) → **93** (Phase 16) fixtures (Phase 16: regexp_count, regexp_substr, regexp_instr, split_part, find_in_set, format_string; array_distinct skipped).
 - **Converter**: Date/timestamp type mapping added in [tests/convert_sparkless_fixtures.py](tests/convert_sparkless_fixtures.py).
-- **CI**: [.github/workflows/ci.yml](.github/workflows/ci.yml) runs format, clippy, audit, deny, and all tests (including `pyspark_parity_fixtures`); separate job for Python (PyO3) tests.
+- **CI**: [.github/workflows/ci.yml](.github/workflows/ci.yml) runs format, clippy, audit, deny, Rust tests (including `pyspark_parity_fixtures`), Python lint (ruff, mypy), and Python tests (PyO3 with sql, delta). Locally: `make check-full`.
 - **Docs**: [TEST_CREATION_GUIDE.md](TEST_CREATION_GUIDE.md) documents date/timestamp fixture format; [SPARKLESS_PARITY_STATUS.md](SPARKLESS_PARITY_STATUS.md) updated with CI note.
 
 **Outcome**: 93 parity fixtures passing; CI runs parity; SPARKLESS_PARITY_STATUS kept current.
@@ -465,7 +465,7 @@ To reach **full Sparkless parity** (robin-sparkless as a complete backend replac
 - **Crate metadata**: Finalize `Cargo.toml` (description, license, repository, keywords, categories); ensure semver and version are release-ready.
 - **API surface**: Review public API for stability; document breaking-change policy (e.g. semver for 0.x); consider `#[deprecated]` or feature flags for experimental APIs.
 - **Documentation**: `cargo doc` builds cleanly; add or expand crate-level and module docs; link from README to docs.rs (or hosted docs).
-- **Release workflow**: Tag releases; publish to [crates.io](https://crates.io) (`cargo publish`); optionally publish Python wheels to PyPI via maturin (e.g. `maturin publish --features pyo3`).
+- **Release workflow**: Tag releases; publish to [crates.io](https://crates.io) (`cargo publish`); optionally publish Python wheels to PyPI via maturin (e.g. `maturin publish --features "pyo3,sql,delta"`).
 - **CI**: Ensure CI runs full check (format, clippy, audit, deny, tests, benchmarks) on release branches/tags; document how to cut a release in CONTRIBUTING or README.
 
 **Outcome**: `robin-sparkless` is published on crates.io; consumers can add it as a dependency; optional PyPI wheel for Python users; clear release and versioning process.
