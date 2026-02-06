@@ -33,6 +33,10 @@ cargo test pyspark_parity_fixtures
 3. Update the table above with converted count and passing/failing/skipped for `tests/fixtures/converted/*.json`.
 4. For any failing fixture, add a row under "Failure reasons" and use `skip: true` + `skip_reason` in the fixture if it is a known unsupported or semantic difference. Because expected is PySpark-derived, failures indicate Robin vs PySpark divergence.
 
+## Window parity (Sparkless issues #22–#35)
+
+Window functions are implemented and covered by hand-written parity fixtures: `row_number_window`, `rank_window`, `lag_lead_window`, `first_value_window`, `last_value_window`, `percent_rank_window`, `cume_dist_window`, `ntile_window`, `nth_value_window`. The harness in `tests/parity.rs` supports row_number, rank, dense_rank, lag, lead, first_value, last_value, percent_rank, cume_dist, ntile. Sum-over-window and approx_count_distinct window are supported via the same harness. When running Sparkless tests with robin backend, ensure the adapter uses these APIs.
+
 ## Failure reasons (converted fixtures)
 
 When a converted fixture fails, classify and document here:
