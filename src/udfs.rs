@@ -332,7 +332,13 @@ pub fn apply_array_insert(columns: &mut [Column]) -> PolarsResult<Option<Column>
         .list()
         .map_err(|e| PolarsError::ComputeError(format!("array_insert: {e}").into()))?;
     let inner_dtype = list_ca.inner_dtype().clone();
-    let pos_ca = pos_series.cast(&DataType::Int64)?.i64().unwrap().clone();
+    let pos_ca = pos_series
+        .cast(&DataType::Int64)?
+        .i64()
+        .map_err(|e| {
+            PolarsError::ComputeError(format!("array_insert: position column: {e}").into())
+        })?
+        .clone();
     let elem_casted = elem_series.cast(&inner_dtype)?;
     let pos_len = pos_ca.len();
     let pos_vec: Vec<i64> = (0..pos_len).map(|i| pos_ca.get(i).unwrap_or(1)).collect();
@@ -1476,7 +1482,10 @@ pub fn apply_char(column: Column) -> PolarsResult<Option<Column>> {
 fn date_series_to_days(series: &Series) -> PolarsResult<Int32Chunked> {
     let casted = series.cast(&DataType::Date)?;
     let days_series = casted.cast(&DataType::Int32)?;
-    Ok(days_series.i32().unwrap().clone())
+    days_series
+        .i32()
+        .map_err(|e| PolarsError::ComputeError(format!("date_series_to_days: {e}").into()))
+        .cloned()
 }
 
 fn days_to_naive_date(days: i32) -> Option<chrono::NaiveDate> {
@@ -1640,7 +1649,10 @@ pub fn apply_months_between(
 
 fn float_series_to_f64(series: &Series) -> PolarsResult<Float64Chunked> {
     let casted = series.cast(&DataType::Float64)?;
-    Ok(casted.f64().unwrap().clone())
+    casted
+        .f64()
+        .map_err(|e| PolarsError::ComputeError(format!("float_series_to_f64: {e}").into()))
+        .cloned()
 }
 
 /// Apply sin (radians) to a float column.
@@ -2308,8 +2320,12 @@ pub fn apply_greatest2(columns: &mut [Column]) -> PolarsResult<Option<Column>> {
         | (_, DataType::Int32) => {
             let a = a_series.cast(&DataType::Int64)?;
             let b = b_series.cast(&DataType::Int64)?;
-            let ca_a = a.i64().unwrap();
-            let ca_b = b.i64().unwrap();
+            let ca_a = a
+                .i64()
+                .map_err(|e| PolarsError::ComputeError(format!("greatest: {e}").into()))?;
+            let ca_b = b
+                .i64()
+                .map_err(|e| PolarsError::ComputeError(format!("greatest: {e}").into()))?;
             let out = Int64Chunked::from_iter_options(
                 name.as_str().into(),
                 ca_a.into_iter().zip(ca_b).map(|(oa, ob)| match (oa, ob) {
@@ -2324,8 +2340,12 @@ pub fn apply_greatest2(columns: &mut [Column]) -> PolarsResult<Option<Column>> {
         (DataType::String, _) | (_, DataType::String) => {
             let a = a_series.cast(&DataType::String)?;
             let b = b_series.cast(&DataType::String)?;
-            let ca_a = a.str().unwrap();
-            let ca_b = b.str().unwrap();
+            let ca_a = a
+                .str()
+                .map_err(|e| PolarsError::ComputeError(format!("greatest: {e}").into()))?;
+            let ca_b = b
+                .str()
+                .map_err(|e| PolarsError::ComputeError(format!("greatest: {e}").into()))?;
             let out = StringChunked::from_iter_options(
                 name.as_str().into(),
                 ca_a.into_iter().zip(ca_b).map(|(oa, ob)| match (oa, ob) {
@@ -2384,8 +2404,12 @@ pub fn apply_least2(columns: &mut [Column]) -> PolarsResult<Option<Column>> {
         | (_, DataType::Int32) => {
             let a = a_series.cast(&DataType::Int64)?;
             let b = b_series.cast(&DataType::Int64)?;
-            let ca_a = a.i64().unwrap();
-            let ca_b = b.i64().unwrap();
+            let ca_a = a
+                .i64()
+                .map_err(|e| PolarsError::ComputeError(format!("least: {e}").into()))?;
+            let ca_b = b
+                .i64()
+                .map_err(|e| PolarsError::ComputeError(format!("least: {e}").into()))?;
             let out = Int64Chunked::from_iter_options(
                 name.as_str().into(),
                 ca_a.into_iter().zip(ca_b).map(|(oa, ob)| match (oa, ob) {
@@ -2400,8 +2424,12 @@ pub fn apply_least2(columns: &mut [Column]) -> PolarsResult<Option<Column>> {
         (DataType::String, _) | (_, DataType::String) => {
             let a = a_series.cast(&DataType::String)?;
             let b = b_series.cast(&DataType::String)?;
-            let ca_a = a.str().unwrap();
-            let ca_b = b.str().unwrap();
+            let ca_a = a
+                .str()
+                .map_err(|e| PolarsError::ComputeError(format!("least: {e}").into()))?;
+            let ca_b = b
+                .str()
+                .map_err(|e| PolarsError::ComputeError(format!("least: {e}").into()))?;
             let out = StringChunked::from_iter_options(
                 name.as_str().into(),
                 ca_a.into_iter().zip(ca_b).map(|(oa, ob)| match (oa, ob) {
@@ -2791,8 +2819,12 @@ pub fn apply_try_add(columns: &mut [Column]) -> PolarsResult<Option<Column>> {
     let b_s = std::mem::take(&mut columns[1]).take_materialized_series();
     let out = match (a_s.dtype(), b_s.dtype()) {
         (DataType::Int64, DataType::Int64) => {
-            let ca_a = a_s.i64().unwrap();
-            let ca_b = b_s.i64().unwrap();
+            let ca_a = a_s
+                .i64()
+                .map_err(|e| PolarsError::ComputeError(format!("try_add: {e}").into()))?;
+            let ca_b = b_s
+                .i64()
+                .map_err(|e| PolarsError::ComputeError(format!("try_add: {e}").into()))?;
             Int64Chunked::from_iter_options(
                 name.as_str().into(),
                 ca_a.into_iter()
@@ -2802,8 +2834,12 @@ pub fn apply_try_add(columns: &mut [Column]) -> PolarsResult<Option<Column>> {
             .into_series()
         }
         (DataType::Int32, DataType::Int32) => {
-            let ca_a = a_s.i32().unwrap();
-            let ca_b = b_s.i32().unwrap();
+            let ca_a = a_s
+                .i32()
+                .map_err(|e| PolarsError::ComputeError(format!("try_add: {e}").into()))?;
+            let ca_b = b_s
+                .i32()
+                .map_err(|e| PolarsError::ComputeError(format!("try_add: {e}").into()))?;
             Int32Chunked::from_iter_options(
                 name.as_str().into(),
                 ca_a.into_iter()
@@ -2815,8 +2851,12 @@ pub fn apply_try_add(columns: &mut [Column]) -> PolarsResult<Option<Column>> {
         _ => {
             let a_f = a_s.cast(&DataType::Float64)?;
             let b_f = b_s.cast(&DataType::Float64)?;
-            let ca_a = a_f.f64().unwrap();
-            let ca_b = b_f.f64().unwrap();
+            let ca_a = a_f
+                .f64()
+                .map_err(|e| PolarsError::ComputeError(format!("try_add: {e}").into()))?;
+            let ca_b = b_f
+                .f64()
+                .map_err(|e| PolarsError::ComputeError(format!("try_add: {e}").into()))?;
             Float64Chunked::from_iter_options(
                 name.as_str().into(),
                 ca_a.into_iter()
@@ -2841,8 +2881,12 @@ pub fn apply_try_subtract(columns: &mut [Column]) -> PolarsResult<Option<Column>
     let b_s = std::mem::take(&mut columns[1]).take_materialized_series();
     let out = match (a_s.dtype(), b_s.dtype()) {
         (DataType::Int64, DataType::Int64) => {
-            let ca_a = a_s.i64().unwrap();
-            let ca_b = b_s.i64().unwrap();
+            let ca_a = a_s
+                .i64()
+                .map_err(|e| PolarsError::ComputeError(format!("try_subtract: {e}").into()))?;
+            let ca_b = b_s
+                .i64()
+                .map_err(|e| PolarsError::ComputeError(format!("try_subtract: {e}").into()))?;
             Int64Chunked::from_iter_options(
                 name.as_str().into(),
                 ca_a.into_iter()
@@ -2852,8 +2896,12 @@ pub fn apply_try_subtract(columns: &mut [Column]) -> PolarsResult<Option<Column>
             .into_series()
         }
         (DataType::Int32, DataType::Int32) => {
-            let ca_a = a_s.i32().unwrap();
-            let ca_b = b_s.i32().unwrap();
+            let ca_a = a_s
+                .i32()
+                .map_err(|e| PolarsError::ComputeError(format!("try_subtract: {e}").into()))?;
+            let ca_b = b_s
+                .i32()
+                .map_err(|e| PolarsError::ComputeError(format!("try_subtract: {e}").into()))?;
             Int32Chunked::from_iter_options(
                 name.as_str().into(),
                 ca_a.into_iter()
@@ -2865,8 +2913,12 @@ pub fn apply_try_subtract(columns: &mut [Column]) -> PolarsResult<Option<Column>
         _ => {
             let a_f = a_s.cast(&DataType::Float64)?;
             let b_f = b_s.cast(&DataType::Float64)?;
-            let ca_a = a_f.f64().unwrap();
-            let ca_b = b_f.f64().unwrap();
+            let ca_a = a_f
+                .f64()
+                .map_err(|e| PolarsError::ComputeError(format!("try_subtract: {e}").into()))?;
+            let ca_b = b_f
+                .f64()
+                .map_err(|e| PolarsError::ComputeError(format!("try_subtract: {e}").into()))?;
             Float64Chunked::from_iter_options(
                 name.as_str().into(),
                 ca_a.into_iter()
@@ -2891,8 +2943,12 @@ pub fn apply_try_multiply(columns: &mut [Column]) -> PolarsResult<Option<Column>
     let b_s = std::mem::take(&mut columns[1]).take_materialized_series();
     let out = match (a_s.dtype(), b_s.dtype()) {
         (DataType::Int64, DataType::Int64) => {
-            let ca_a = a_s.i64().unwrap();
-            let ca_b = b_s.i64().unwrap();
+            let ca_a = a_s
+                .i64()
+                .map_err(|e| PolarsError::ComputeError(format!("try_multiply: {e}").into()))?;
+            let ca_b = b_s
+                .i64()
+                .map_err(|e| PolarsError::ComputeError(format!("try_multiply: {e}").into()))?;
             Int64Chunked::from_iter_options(
                 name.as_str().into(),
                 ca_a.into_iter()
@@ -2902,8 +2958,12 @@ pub fn apply_try_multiply(columns: &mut [Column]) -> PolarsResult<Option<Column>
             .into_series()
         }
         (DataType::Int32, DataType::Int32) => {
-            let ca_a = a_s.i32().unwrap();
-            let ca_b = b_s.i32().unwrap();
+            let ca_a = a_s
+                .i32()
+                .map_err(|e| PolarsError::ComputeError(format!("try_multiply: {e}").into()))?;
+            let ca_b = b_s
+                .i32()
+                .map_err(|e| PolarsError::ComputeError(format!("try_multiply: {e}").into()))?;
             Int32Chunked::from_iter_options(
                 name.as_str().into(),
                 ca_a.into_iter()
@@ -2915,8 +2975,12 @@ pub fn apply_try_multiply(columns: &mut [Column]) -> PolarsResult<Option<Column>
         _ => {
             let a_f = a_s.cast(&DataType::Float64)?;
             let b_f = b_s.cast(&DataType::Float64)?;
-            let ca_a = a_f.f64().unwrap();
-            let ca_b = b_f.f64().unwrap();
+            let ca_a = a_f
+                .f64()
+                .map_err(|e| PolarsError::ComputeError(format!("try_multiply: {e}").into()))?;
+            let ca_b = b_f
+                .f64()
+                .map_err(|e| PolarsError::ComputeError(format!("try_multiply: {e}").into()))?;
             Float64Chunked::from_iter_options(
                 name.as_str().into(),
                 ca_a.into_iter()
@@ -3014,7 +3078,12 @@ pub fn apply_make_timestamp(
         .collect();
     let ca: Vec<Int32Chunked> = series
         .iter()
-        .map(|s| s.cast(&DataType::Int32).map(|c| c.i32().unwrap().clone()))
+        .map(|s| {
+            let c = s.cast(&DataType::Int32)?;
+            Ok(c.i32()
+                .map_err(|e| PolarsError::ComputeError(format!("make_timestamp: {e}").into()))?
+                .clone())
+        })
         .collect::<PolarsResult<Vec<_>>>()?;
     let len = ca[0].len();
     let out =
@@ -3094,9 +3163,21 @@ pub fn apply_make_date(columns: &mut [Column]) -> PolarsResult<Option<Column>> {
     let y_series = std::mem::take(&mut columns[0]).take_materialized_series();
     let m_series = std::mem::take(&mut columns[1]).take_materialized_series();
     let d_series = std::mem::take(&mut columns[2]).take_materialized_series();
-    let y_ca = y_series.cast(&DataType::Int32)?.i32().unwrap().clone();
-    let m_ca = m_series.cast(&DataType::Int32)?.i32().unwrap().clone();
-    let d_ca = d_series.cast(&DataType::Int32)?.i32().unwrap().clone();
+    let y_ca = y_series
+        .cast(&DataType::Int32)?
+        .i32()
+        .map_err(|e| PolarsError::ComputeError(format!("make_date: {e}").into()))?
+        .clone();
+    let m_ca = m_series
+        .cast(&DataType::Int32)?
+        .i32()
+        .map_err(|e| PolarsError::ComputeError(format!("make_date: {e}").into()))?
+        .clone();
+    let d_ca = d_series
+        .cast(&DataType::Int32)?
+        .i32()
+        .map_err(|e| PolarsError::ComputeError(format!("make_date: {e}").into()))?
+        .clone();
     let out = Int32Chunked::from_iter_options(
         name.as_str().into(),
         y_ca.into_iter()

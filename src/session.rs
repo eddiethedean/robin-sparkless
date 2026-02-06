@@ -198,6 +198,11 @@ impl SparkSession {
         rows: Vec<Vec<JsonValue>>,
         schema: Vec<(String, String)>,
     ) -> Result<DataFrame, PolarsError> {
+        if schema.is_empty() {
+            return Err(PolarsError::InvalidOperation(
+                "create_dataframe_from_rows: schema must not be empty".into(),
+            ));
+        }
         use chrono::{NaiveDate, NaiveDateTime};
 
         let mut cols: Vec<Series> = Vec::with_capacity(schema.len());

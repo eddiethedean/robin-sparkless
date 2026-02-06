@@ -1355,6 +1355,12 @@ pub fn try_element_at(column: &Column, index: i64) -> Column {
 
 /// Assign value to histogram bucket (PySpark width_bucket). Returns 0 if v < min_val, num_bucket+1 if v >= max_val.
 pub fn width_bucket(value: &Column, min_val: f64, max_val: f64, num_bucket: i64) -> Column {
+    if num_bucket <= 0 {
+        panic!(
+            "width_bucket: num_bucket must be positive, got {}",
+            num_bucket
+        );
+    }
     use polars::prelude::*;
     let v = value.expr().clone().cast(DataType::Float64);
     let min_expr = lit(min_val);
