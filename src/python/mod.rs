@@ -9,6 +9,7 @@ use crate::functions::{
     curdate, current_timezone, date_diff, date_from_unix_date, date_part, dateadd, datepart, day,
     dayname, dayofmonth, dayofweek, dayofyear, days, degrees, endswith, expm1, extract, factorial,
     find_in_set, format_number, format_string, from_unixtime, from_utc_timestamp,
+    get_json_object, json_tuple,
     greatest as rs_greatest, hours, hypot, ifnull, ilike, isnan as rs_isnan, isnotnull, isnull,
     lcase, least as rs_least, left, like, ln, localtimestamp, log, log10, log1p, log2,
     log_with_base, make_date, make_interval, make_timestamp, make_timestamp_ntz, md5, minutes,
@@ -257,6 +258,8 @@ fn robin_sparkless(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("split", wrap_pyfunction!(py_split, m)?)?;
     m.add("split_part", wrap_pyfunction!(py_split_part, m)?)?;
     m.add("find_in_set", wrap_pyfunction!(py_find_in_set, m)?)?;
+    m.add("get_json_object", wrap_pyfunction!(py_get_json_object, m)?)?;
+    m.add("json_tuple", wrap_pyfunction!(py_json_tuple, m)?)?;
     m.add("format_string", wrap_pyfunction!(py_format_string, m)?)?;
     m.add("printf", wrap_pyfunction!(py_printf, m)?)?;
     m.add("cosh", wrap_pyfunction!(py_cosh, m)?)?;
@@ -1873,6 +1876,21 @@ fn py_split_part(src: &PyColumn, delimiter: &str, part_num: i64) -> PyColumn {
 fn py_find_in_set(str: &PyColumn, str_array: &PyColumn) -> PyColumn {
     PyColumn {
         inner: find_in_set(&str.inner, &str_array.inner),
+    }
+}
+
+#[pyfunction]
+fn py_get_json_object(col: &PyColumn, path: &str) -> PyColumn {
+    PyColumn {
+        inner: get_json_object(&col.inner, path),
+    }
+}
+
+#[pyfunction]
+fn py_json_tuple(col: &PyColumn, keys: Vec<String>) -> PyColumn {
+    let key_refs: Vec<&str> = keys.iter().map(|s| s.as_str()).collect();
+    PyColumn {
+        inner: json_tuple(&col.inner, &key_refs),
     }
 }
 
