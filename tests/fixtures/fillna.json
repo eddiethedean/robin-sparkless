@@ -3,25 +3,52 @@
   "pyspark_version": "3.5.0",
   "input": {
     "schema": [
-      { "name": "a", "type": "bigint" },
-      { "name": "b", "type": "bigint" }
+      {
+        "name": "a",
+        "type": "bigint"
+      },
+      {
+        "name": "b",
+        "type": "bigint"
+      }
     ],
     "rows": [
-      [1, null],
-      [2, 20]
+      [
+        1,
+        null
+      ],
+      [
+        2,
+        20
+      ]
     ]
   },
   "operations": [
-    { "op": "fillna", "value": 0 }
+    {
+      "op": "fillna",
+      "value": 0
+    }
   ],
   "expected": {
     "schema": [
-      { "name": "a", "type": "bigint" },
-      { "name": "b", "type": "bigint" }
+      {
+        "name": "a",
+        "type": "bigint"
+      },
+      {
+        "name": "b",
+        "type": "bigint"
+      }
     ],
     "rows": [
-      [1, 0],
-      [2, 20]
+      [
+        1,
+        0
+      ],
+      [
+        2,
+        20
+      ]
     ]
   }
 }

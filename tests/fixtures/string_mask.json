@@ -3,27 +3,68 @@
   "pyspark_version": "3.5.0",
   "input": {
     "schema": [
-      { "name": "id", "type": "bigint" },
-      { "name": "s", "type": "string" }
+      {
+        "name": "id",
+        "type": "bigint"
+      },
+      {
+        "name": "s",
+        "type": "string"
+      }
     ],
     "rows": [
-      [1, "Hello World 123"],
-      [2, "AbCdEf 99"]
+      [
+        1,
+        "Hello World 123"
+      ],
+      [
+        2,
+        "AbCdEf 99"
+      ]
     ]
   },
   "operations": [
-    { "op": "withColumn", "column": "m", "expr": "mask(col('s'))" },
-    { "op": "orderBy", "columns": ["id"], "ascending": [true] }
+    {
+      "op": "withColumn",
+      "column": "m",
+      "expr": "mask(col('s'))"
+    },
+    {
+      "op": "orderBy",
+      "columns": [
+        "id"
+      ],
+      "ascending": [
+        true
+      ]
+    }
   ],
   "expected": {
     "schema": [
-      { "name": "id", "type": "bigint" },
-      { "name": "s", "type": "string" },
-      { "name": "m", "type": "string" }
+      {
+        "name": "id",
+        "type": "bigint"
+      },
+      {
+        "name": "s",
+        "type": "string"
+      },
+      {
+        "name": "m",
+        "type": "string"
+      }
     ],
     "rows": [
-      [1, "Hello World 123", "Xxxxx Xxxxx nnn"],
-      [2, "AbCdEf 99", "XxXxXx nn"]
+      [
+        1,
+        "Hello World 123",
+        "Xxxxx Xxxxx nnn"
+      ],
+      [
+        2,
+        "AbCdEf 99",
+        "XxXxXx nn"
+      ]
     ]
   }
 }

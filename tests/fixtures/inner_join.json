@@ -108,10 +108,6 @@
         "type": "bigint"
       },
       {
-        "name": "dept_id",
-        "type": "bigint"
-      },
-      {
         "name": "location",
         "type": "string"
       },
@@ -126,7 +122,6 @@
         1,
         "Alice",
         50000,
-        10,
         "NYC",
         "IT"
       ],
@@ -135,7 +130,6 @@
         3,
         "Charlie",
         70000,
-        10,
         "NYC",
         "IT"
       ],
@@ -144,7 +138,6 @@
         2,
         "Bob",
         60000,
-        20,
         "LA",
         "HR"
       ]

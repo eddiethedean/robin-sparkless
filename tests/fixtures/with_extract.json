@@ -3,28 +3,72 @@
   "pyspark_version": "3.5.0",
   "input": {
     "schema": [
-      { "name": "id", "type": "bigint" },
-      { "name": "ts", "type": "timestamp" }
+      {
+        "name": "id",
+        "type": "bigint"
+      },
+      {
+        "name": "ts",
+        "type": "timestamp"
+      }
     ],
     "rows": [
-      [1, "2024-03-15T14:30:00"],
-      [2, "2023-12-01T00:00:00"]
+      [
+        1,
+        "2024-03-15T14:30:00"
+      ],
+      [
+        2,
+        "2023-12-01T00:00:00"
+      ]
     ]
   },
   "operations": [
-    { "op": "withColumn", "column": "yr", "expr": "extract('year', col('ts'))" },
-    { "op": "withColumn", "column": "mo", "expr": "extract('month', col('ts'))" },
-    { "op": "select", "columns": ["id", "yr", "mo"] }
+    {
+      "op": "withColumn",
+      "column": "yr",
+      "expr": "extract('year', col('ts'))"
+    },
+    {
+      "op": "withColumn",
+      "column": "mo",
+      "expr": "extract('month', col('ts'))"
+    },
+    {
+      "op": "select",
+      "columns": [
+        "id",
+        "yr",
+        "mo"
+      ]
+    }
   ],
   "expected": {
     "schema": [
-      { "name": "id", "type": "bigint" },
-      { "name": "yr", "type": "int" },
-      { "name": "mo", "type": "int" }
+      {
+        "name": "id",
+        "type": "bigint"
+      },
+      {
+        "name": "yr",
+        "type": "int"
+      },
+      {
+        "name": "mo",
+        "type": "int"
+      }
     ],
     "rows": [
-      [1, 2024, 3],
-      [2, 2023, 12]
+      [
+        1,
+        2024,
+        3
+      ],
+      [
+        2,
+        2023,
+        12
+      ]
     ]
   }
 }

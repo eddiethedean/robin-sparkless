@@ -3,31 +3,86 @@
   "pyspark_version": "3.5.0",
   "input": {
     "schema": [
-      { "name": "id", "type": "bigint" },
-      { "name": "x", "type": "double" }
+      {
+        "name": "id",
+        "type": "bigint"
+      },
+      {
+        "name": "x",
+        "type": "double"
+      }
     ],
     "rows": [
-      [1, 2.5],
-      [2, 3.5],
-      [3, 4.5],
-      [4, -2.5]
+      [
+        1,
+        2.5
+      ],
+      [
+        2,
+        3.5
+      ],
+      [
+        3,
+        4.5
+      ],
+      [
+        4,
+        -2.5
+      ]
     ]
   },
   "operations": [
-    { "op": "withColumn", "column": "brounded", "expr": "bround(col('x'), 0)" },
-    { "op": "orderBy", "columns": ["id"], "ascending": [true] }
+    {
+      "op": "withColumn",
+      "column": "brounded",
+      "expr": "bround(col('x'), 0)"
+    },
+    {
+      "op": "orderBy",
+      "columns": [
+        "id"
+      ],
+      "ascending": [
+        true
+      ]
+    }
   ],
   "expected": {
     "schema": [
-      { "name": "id", "type": "bigint" },
-      { "name": "x", "type": "double" },
-      { "name": "brounded", "type": "double" }
+      {
+        "name": "id",
+        "type": "bigint"
+      },
+      {
+        "name": "x",
+        "type": "double"
+      },
+      {
+        "name": "brounded",
+        "type": "double"
+      }
     ],
     "rows": [
-      [1, 2.5, 2.0],
-      [2, 3.5, 4.0],
-      [3, 4.5, 4.0],
-      [4, -2.5, -2.0]
+      [
+        1,
+        2.5,
+        2.0
+      ],
+      [
+        2,
+        3.5,
+        4.0
+      ],
+      [
+        3,
+        4.5,
+        4.0
+      ],
+      [
+        4,
+        -2.5,
+        -2.0
+      ]
     ]
   }
 }

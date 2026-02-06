@@ -3,31 +3,89 @@
   "pyspark_version": "3.5.0",
   "input": {
     "schema": [
-      { "name": "id", "type": "bigint" },
-      { "name": "x", "type": "double" }
+      {
+        "name": "id",
+        "type": "bigint"
+      },
+      {
+        "name": "x",
+        "type": "double"
+      }
     ],
     "rows": [
-      [1, 4.0],
-      [2, 9.0],
-      [3, 2.0]
+      [
+        1,
+        4.0
+      ],
+      [
+        2,
+        9.0
+      ],
+      [
+        3,
+        2.0
+      ]
     ]
   },
   "operations": [
-    { "op": "withColumn", "column": "sqrt_x", "expr": "sqrt(col('x'))" },
-    { "op": "withColumn", "column": "x_sq", "expr": "pow(col('x'), 2)" },
-    { "op": "orderBy", "columns": ["id"], "ascending": [true] }
+    {
+      "op": "withColumn",
+      "column": "sqrt_x",
+      "expr": "sqrt(col('x'))"
+    },
+    {
+      "op": "withColumn",
+      "column": "x_sq",
+      "expr": "pow(col('x'), 2)"
+    },
+    {
+      "op": "orderBy",
+      "columns": [
+        "id"
+      ],
+      "ascending": [
+        true
+      ]
+    }
   ],
   "expected": {
     "schema": [
-      { "name": "id", "type": "bigint" },
-      { "name": "x", "type": "double" },
-      { "name": "sqrt_x", "type": "double" },
-      { "name": "x_sq", "type": "double" }
+      {
+        "name": "id",
+        "type": "bigint"
+      },
+      {
+        "name": "x",
+        "type": "double"
+      },
+      {
+        "name": "sqrt_x",
+        "type": "double"
+      },
+      {
+        "name": "x_sq",
+        "type": "double"
+      }
     ],
     "rows": [
-      [1, 4.0, 2.0, 16.0],
-      [2, 9.0, 3.0, 81.0],
-      [3, 2.0, 1.4142135623730951, 4.0]
+      [
+        1,
+        4.0,
+        2.0,
+        16.0
+      ],
+      [
+        2,
+        9.0,
+        3.0,
+        81.0
+      ],
+      [
+        3,
+        2.0,
+        1.4142135623730951,
+        4.0
+      ]
     ]
   }
 }

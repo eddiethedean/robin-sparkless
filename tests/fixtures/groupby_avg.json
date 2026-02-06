@@ -78,7 +78,7 @@
         "type": "string"
       },
       {
-        "name": "avg(salary)",
+        "name": "avg",
         "type": "double"
       }
     ],

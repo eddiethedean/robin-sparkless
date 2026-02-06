@@ -3,28 +3,71 @@
   "pyspark_version": "3.5.0",
   "input": {
     "schema": [
-      { "name": "id", "type": "bigint" },
-      { "name": "status", "type": "string" }
+      {
+        "name": "id",
+        "type": "bigint"
+      },
+      {
+        "name": "status",
+        "type": "string"
+      }
     ],
     "rows": [
-      [1, "active"],
-      [2, "pending"],
-      [3, "active"]
+      [
+        1,
+        "active"
+      ],
+      [
+        2,
+        "pending"
+      ],
+      [
+        3,
+        "active"
+      ]
     ]
   },
   "operations": [
-    { "op": "replace", "column": "status", "old_value": "'pending'", "new_value": "'PENDING'" },
-    { "op": "orderBy", "columns": ["id"], "ascending": [true] }
+    {
+      "op": "replace",
+      "column": "status",
+      "old_value": "'pending'",
+      "new_value": "'PENDING'"
+    },
+    {
+      "op": "orderBy",
+      "columns": [
+        "id"
+      ],
+      "ascending": [
+        true
+      ]
+    }
   ],
   "expected": {
     "schema": [
-      { "name": "id", "type": "bigint" },
-      { "name": "status", "type": "string" }
+      {
+        "name": "id",
+        "type": "bigint"
+      },
+      {
+        "name": "status",
+        "type": "string"
+      }
     ],
     "rows": [
-      [1, "active"],
-      [2, "PENDING"],
-      [3, "active"]
+      [
+        1,
+        "active"
+      ],
+      [
+        2,
+        "PENDING"
+      ],
+      [
+        3,
+        "active"
+      ]
     ]
   }
 }

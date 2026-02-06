@@ -3,35 +3,113 @@
   "pyspark_version": "3.5.0",
   "input": {
     "schema": [
-      { "name": "id", "type": "bigint" },
-      { "name": "ts", "type": "timestamp" }
+      {
+        "name": "id",
+        "type": "bigint"
+      },
+      {
+        "name": "ts",
+        "type": "timestamp"
+      }
     ],
     "rows": [
-      [1, "2024-01-15T12:00:00"],
-      [2, "2024-05-20T00:00:00"],
-      [3, "2024-12-31T23:59:59"]
+      [
+        1,
+        "2024-01-15T12:00:00"
+      ],
+      [
+        2,
+        "2024-05-20T00:00:00"
+      ],
+      [
+        3,
+        "2024-12-31T23:59:59"
+      ]
     ]
   },
   "operations": [
-    { "op": "withColumn", "column": "q", "expr": "quarter(col('ts'))" },
-    { "op": "withColumn", "column": "woy", "expr": "weekofyear(col('ts'))" },
-    { "op": "withColumn", "column": "dow", "expr": "dayofweek(col('ts'))" },
-    { "op": "withColumn", "column": "doy", "expr": "dayofyear(col('ts'))" },
-    { "op": "orderBy", "columns": ["id"], "ascending": [true] }
+    {
+      "op": "withColumn",
+      "column": "q",
+      "expr": "quarter(col('ts'))"
+    },
+    {
+      "op": "withColumn",
+      "column": "woy",
+      "expr": "weekofyear(col('ts'))"
+    },
+    {
+      "op": "withColumn",
+      "column": "dow",
+      "expr": "dayofweek(col('ts'))"
+    },
+    {
+      "op": "withColumn",
+      "column": "doy",
+      "expr": "dayofyear(col('ts'))"
+    },
+    {
+      "op": "orderBy",
+      "columns": [
+        "id"
+      ],
+      "ascending": [
+        true
+      ]
+    }
   ],
   "expected": {
     "schema": [
-      { "name": "id", "type": "bigint" },
-      { "name": "ts", "type": "timestamp" },
-      { "name": "q", "type": "int" },
-      { "name": "woy", "type": "int" },
-      { "name": "dow", "type": "int" },
-      { "name": "doy", "type": "int" }
+      {
+        "name": "id",
+        "type": "bigint"
+      },
+      {
+        "name": "ts",
+        "type": "timestamp"
+      },
+      {
+        "name": "q",
+        "type": "int"
+      },
+      {
+        "name": "woy",
+        "type": "int"
+      },
+      {
+        "name": "dow",
+        "type": "int"
+      },
+      {
+        "name": "doy",
+        "type": "int"
+      }
     ],
     "rows": [
-      [1, "2024-01-15T12:00:00.000000", 1, 3, 2, 15],
-      [2, "2024-05-20T00:00:00.000000", 2, 21, 2, 141],
-      [3, "2024-12-31T23:59:59.000000", 4, 1, 3, 366]
+      [
+        1,
+        "2024-01-15T12:00:00",
+        1,
+        3,
+        2,
+        15
+      ],
+      [
+        2,
+        "2024-05-20T00:00:00",
+        2,
+        21,
+        2,
+        141
+      ],
+      [
+        3,
+        "2024-12-31T23:59:59",
+        4,
+        1,
+        3,
+        366
+      ]
     ]
   }
 }

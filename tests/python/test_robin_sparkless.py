@@ -531,3 +531,67 @@ def test_sparkless_parity_multiple_append_operations() -> None:
     rows = combined.collect()
     assert len(rows) == 3
     assert rows[0]["id"] == 1 and rows[1]["id"] == 2 and rows[2]["id"] == 3
+
+
+def test_sql_select_where_returns_rows() -> None:
+    """SQL SELECT with WHERE returns filtered rows (#122-#140 session/SQL parity)."""
+    import robin_sparkless as rs
+
+    spark = rs.SparkSession.builder().app_name("test").get_or_create()
+    df = spark.create_dataframe(
+        [(1, 10, "a"), (2, 20, "b"), (3, 30, "c")], ["id", "v", "name"]
+    )
+    try:
+        spark.create_or_replace_temp_view("t", df)
+        result = spark.sql("SELECT * FROM t WHERE id > 1")
+    except AttributeError:
+        pytest.skip("sql feature not built")
+    rows = result.collect()
+    assert len(rows) == 2
+    assert rows[0]["id"] == 2 and rows[1]["id"] == 3
+    assert rows[0]["name"] == "b" and rows[1]["name"] == "c"
+
+
+def test_create_dataframe_from_rows_schema_pyspark_parity() -> None:
+    """create_dataframe_from_rows matches PySpark for int/string/boolean/date (#151)."""
+    import robin_sparkless as rs
+
+    pytest.importorskip("pyspark")
+    from datetime import date
+    from pyspark.sql import SparkSession as PySparkSession
+
+    spark_robin = rs.SparkSession.builder().app_name("test").get_or_create()
+    spark_pyspark = PySparkSession.builder.appName("parity").getOrCreate()
+
+    # Schema: id (int), name (string), ok (boolean), d (date)
+    schema = [("id", "int"), ("name", "string"), ("ok", "boolean"), ("d", "date")]
+    rows = [
+        {"id": 1, "name": "Alice", "ok": True, "d": "2024-01-15"},
+        {"id": 2, "name": "Bob", "ok": False, "d": "2024-06-10"},
+    ]
+
+    robin_df = spark_robin.create_dataframe_from_rows(rows, schema)
+    robin_rows = sorted(robin_df.collect(), key=lambda r: r["id"])
+
+    pyspark_df = spark_pyspark.createDataFrame(
+        [(1, "Alice", True, date(2024, 1, 15)), (2, "Bob", False, date(2024, 6, 10))],
+        schema="id INT, name STRING, ok BOOLEAN, d DATE",
+    )
+    pyspark_rows = sorted([r.asDict() for r in pyspark_df.collect()], key=lambda r: r["id"])
+
+    assert len(robin_rows) == len(pyspark_rows) == 2
+    for r, p in zip(robin_rows, pyspark_rows):
+        assert r["id"] == p["id"]
+        assert r["name"] == p["name"]
+        assert r["ok"] == p["ok"]
+        assert str(r["d"]) == str(p["d"])
+
+
+def test_pivot_raises_not_implemented() -> None:
+    """pivot() raises NotImplementedError (#156 stub)."""
+    import robin_sparkless as rs
+
+    spark = rs.SparkSession.builder().app_name("test").get_or_create()
+    df = spark.create_dataframe([(1, "x", 10)], ["id", "pcol", "v"])
+    with pytest.raises(NotImplementedError, match="pivot is not yet implemented"):
+        df.pivot("pcol")

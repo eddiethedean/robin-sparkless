@@ -3,13 +3,28 @@
   "pyspark_version": "3.5.0",
   "input": {
     "schema": [
-      { "name": "id", "type": "bigint" },
-      { "name": "s", "type": "string" }
+      {
+        "name": "id",
+        "type": "bigint"
+      },
+      {
+        "name": "s",
+        "type": "string"
+      }
     ],
     "rows": [
-      [1, "a|b|c"],
-      [2, "x|y"],
-      [3, "z"]
+      [
+        1,
+        "a|b|c"
+      ],
+      [
+        2,
+        "x|y"
+      ],
+      [
+        3,
+        "z"
+      ]
     ]
   },
   "operations": [
@@ -23,19 +38,69 @@
       "column": "first",
       "expr": "element_at(col('arr'), 1)"
     },
-    { "op": "select", "columns": ["id", "s", "arr", "first"] }
+    {
+      "op": "select",
+      "columns": [
+        "id",
+        "s",
+        "arr",
+        "first"
+      ]
+    }
   ],
   "expected": {
     "schema": [
-      { "name": "id", "type": "bigint" },
-      { "name": "s", "type": "string" },
-      { "name": "arr", "type": "array<string>" },
-      { "name": "first", "type": "string" }
+      {
+        "name": "id",
+        "type": "bigint"
+      },
+      {
+        "name": "s",
+        "type": "string"
+      },
+      {
+        "name": "arr",
+        "type": "array<string>"
+      },
+      {
+        "name": "first",
+        "type": "string"
+      }
     ],
     "rows": [
-      [1, "a|b|c", ["a", "b", "c"], "a"],
-      [2, "x|y", ["x", "y"], "x"],
-      [3, "z", ["z"], "z"]
+      [
+        1,
+        "a|b|c",
+        [
+          "a",
+          "|",
+          "b",
+          "|",
+          "c",
+          ""
+        ],
+        "a"
+      ],
+      [
+        2,
+        "x|y",
+        [
+          "x",
+          "|",
+          "y",
+          ""
+        ],
+        "x"
+      ],
+      [
+        3,
+        "z",
+        [
+          "z",
+          ""
+        ],
+        "z"
+      ]
     ]
   }
 }

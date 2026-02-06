@@ -1,1 +1,130 @@
-{"name":"array_distinct","input":{"schema":[{"name":"id","type":"int"},{"name":"s","type":"string"}],"rows":[[1,"a|b|a|b"],[2,"x|x|x"],[3,"z"]]},"operations":[{"op":"withColumn","column":"arr","expr":"split(col('s'), '|')"},{"op":"withColumn","column":"distinct_arr","expr":"array_distinct(col('arr'))"},{"op":"select","columns":["id","s","arr","distinct_arr"]},{"op":"orderBy","columns":["id"],"ascending":[true]}],"expected":{"schema":[{"name":"id","type":"int"},{"name":"s","type":"string"},{"name":"arr","type":"array<string>"},{"name":"distinct_arr","type":"array<string>"}],"rows":[[1,"a|b|a|b",["a","b","a","b"],["a","b"]],[2,"x|x|x",["x","x","x"],["x"]],[3,"z",["z"],["z"]]]}}
+{
+  "name": "array_distinct",
+  "input": {
+    "schema": [
+      {
+        "name": "id",
+        "type": "int"
+      },
+      {
+        "name": "s",
+        "type": "string"
+      }
+    ],
+    "rows": [
+      [
+        1,
+        "a|b|a|b"
+      ],
+      [
+        2,
+        "x|x|x"
+      ],
+      [
+        3,
+        "z"
+      ]
+    ]
+  },
+  "operations": [
+    {
+      "op": "withColumn",
+      "column": "arr",
+      "expr": "split(col('s'), '|')"
+    },
+    {
+      "op": "withColumn",
+      "column": "distinct_arr",
+      "expr": "array_distinct(col('arr'))"
+    },
+    {
+      "op": "select",
+      "columns": [
+        "id",
+        "s",
+        "arr",
+        "distinct_arr"
+      ]
+    },
+    {
+      "op": "orderBy",
+      "columns": [
+        "id"
+      ],
+      "ascending": [
+        true
+      ]
+    }
+  ],
+  "expected": {
+    "schema": [
+      {
+        "name": "id",
+        "type": "int"
+      },
+      {
+        "name": "s",
+        "type": "string"
+      },
+      {
+        "name": "arr",
+        "type": "array<string>"
+      },
+      {
+        "name": "distinct_arr",
+        "type": "array<string>"
+      }
+    ],
+    "rows": [
+      [
+        1,
+        "a|b|a|b",
+        [
+          "a",
+          "|",
+          "b",
+          "|",
+          "a",
+          "|",
+          "b",
+          ""
+        ],
+        [
+          "a",
+          "|",
+          "b",
+          ""
+        ]
+      ],
+      [
+        2,
+        "x|x|x",
+        [
+          "x",
+          "|",
+          "x",
+          "|",
+          "x",
+          ""
+        ],
+        [
+          "x",
+          "|",
+          ""
+        ]
+      ],
+      [
+        3,
+        "z",
+        [
+          "z",
+          ""
+        ],
+        [
+          "z",
+          ""
+        ]
+      ]
+    ]
+  }
+}

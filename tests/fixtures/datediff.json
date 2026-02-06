@@ -3,29 +3,80 @@
   "pyspark_version": "3.5.0",
   "input": {
     "schema": [
-      { "name": "id", "type": "int" },
-      { "name": "start", "type": "date" },
-      { "name": "end", "type": "date" }
+      {
+        "name": "id",
+        "type": "int"
+      },
+      {
+        "name": "start",
+        "type": "date"
+      },
+      {
+        "name": "end",
+        "type": "date"
+      }
     ],
     "rows": [
-      [1, "2024-01-01", "2024-01-15"],
-      [2, "2024-06-01", "2024-06-10"]
+      [
+        1,
+        "2024-01-01",
+        "2024-01-15"
+      ],
+      [
+        2,
+        "2024-06-01",
+        "2024-06-10"
+      ]
     ]
   },
   "operations": [
-    { "op": "withColumn", "column": "diff", "expr": "datediff(col('end'), col('start'))" },
-    { "op": "orderBy", "columns": ["id"], "ascending": [true] }
+    {
+      "op": "withColumn",
+      "column": "diff",
+      "expr": "datediff(col('end'), col('start'))"
+    },
+    {
+      "op": "orderBy",
+      "columns": [
+        "id"
+      ],
+      "ascending": [
+        true
+      ]
+    }
   ],
   "expected": {
     "schema": [
-      { "name": "id", "type": "int" },
-      { "name": "start", "type": "date" },
-      { "name": "end", "type": "date" },
-      { "name": "diff", "type": "bigint" }
+      {
+        "name": "id",
+        "type": "int"
+      },
+      {
+        "name": "start",
+        "type": "date"
+      },
+      {
+        "name": "end",
+        "type": "date"
+      },
+      {
+        "name": "diff",
+        "type": "int"
+      }
     ],
     "rows": [
-      [1, "2024-01-01", "2024-01-15", 14],
-      [2, "2024-06-01", "2024-06-10", 9]
+      [
+        1,
+        "2024-01-01",
+        "2024-01-15",
+        14
+      ],
+      [
+        2,
+        "2024-06-01",
+        "2024-06-10",
+        9
+      ]
     ]
   }
 }

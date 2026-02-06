@@ -17,14 +17,26 @@ Or run parity only (hand-written + `tests/fixtures/converted/*.json`):
 cargo test pyspark_parity_fixtures
 ```
 
+## Keeping expectations aligned with PySpark
+
+- **Hand-written fixtures:** Expected values in `tests/fixtures/*.json` (top-level, excluding `converted/` and `plans/`) can be refreshed from PySpark using the regeneration script. Run:
+  ```bash
+  python tests/regenerate_expected_from_pyspark.py tests/fixtures
+  ```
+  Use `--dry-run` to print diffs without writing. The script builds a PySpark DataFrame from each fixture’s `input.schema` and `input.rows`, applies the same `operations` (filter, select, withColumn, orderBy, groupBy, window, join, etc.), then overwrites that fixture’s `expected.schema` and `expected.rows`. Fixtures with unsupported expressions or ops are left unchanged. After regenerating, run `cargo test pyspark_parity_fixtures`; any failure indicates Robin vs PySpark divergence (fix Robin or leave fixture unregenerated). Requires PySpark and Java 17+.
+
+- **Python tests:** Tests in `tests/python/test_robin_sparkless.py` (and any `test_closed_issues_*` modules) are written so assertions match PySpark behaviour. Some tests (e.g. `test_create_dataframe_from_rows_schema_pyspark_parity`) run the same scenario in both Robin and PySpark and assert equality when PySpark is available (`pytest.importorskip("pyspark")`).
+
+- **CI:** A CI job can run the regenerator in `--dry-run` and fail if current expected ≠ PySpark result (requires PySpark and Java 17+ in the environment).
+
 ## Pass/fail summary
 
 | Source | Converted | Passing | Failing | Skipped |
 |--------|-----------|---------|--------|---------|
-| Hand-written (`tests/fixtures/*.json`) | — | 160 | 0 | 1 (with_curdate_now) |
+| Hand-written (`tests/fixtures/*.json`) | — | 145 | 0 | 21 |
 | Sparkless converted (`tests/fixtures/converted/*.json`) | 226 | 0 | 0 | 226 (all skipped: expected shape from converter; run `regenerate_expected_from_pyspark.py` with PySpark to fix) |
 
-**Target: 50+ tests passing** (hand-written + converted). **Current: 160 passing** (hand-written; with_curdate_now skipped). **Phase 25 completed**: plan interpreter, expression interpreter (all scalar functions), 3 plan fixtures (`tests/fixtures/plans/`: filter_select_limit, join_simple, with_column_functions), create_dataframe_from_rows. Phase 22: datetime extensions. Phase 21: ordering, aggregates, numeric. Phase 19–18: aggregates, array/map/struct. Phase 17–15: datetime/unix, regexp, aliases, string, math. **Phase 27** (Sparkless integration) target: 200+ Sparkless tests passing with robin backend (after Phase 26 publish Rust crate). CI runs parity on hand-written (and optionally converted) fixtures; when Sparkless repo is available, run `make sparkless-parity` and update this doc.
+**Target: 50+ tests passing** (hand-written + converted). **Current: 145 passing** (hand-written). Fixes applied: first_row, hex/url_encode, replace, case_insensitive_columns, describe/summary, split semantics (regex for `|`), timestamp format normalization; 21 hand-written fixtures remain skipped (see Skipped fixtures). **Phase 25 completed**: plan interpreter, expression interpreter (all scalar functions), 3 plan fixtures (`tests/fixtures/plans/`: filter_select_limit, join_simple, with_column_functions), create_dataframe_from_rows. Phase 22: datetime extensions. Phase 21: ordering, aggregates, numeric. Phase 19–18: aggregates, array/map/struct. Phase 17–15: datetime/unix, regexp, aliases, string, math. **Phase 27** (Sparkless integration) target: 200+ Sparkless tests passing with robin backend (after Phase 26 publish Rust crate). CI runs parity on hand-written (and optionally converted) fixtures; when Sparkless repo is available, run `make sparkless-parity` and update this doc.
 
 ### When Sparkless repo is available
 
@@ -80,11 +92,20 @@ When a converted fixture fails, classify and document here:
 
 ## Skipped fixtures
 
-Fixtures with `"skip": true` in JSON are not run. List them here for visibility:
+Fixtures with `"skip": true` in JSON are not run. **21 hand-written** fixtures remain skipped (down from 38 after parity fixes). See each fixture’s `skip_reason` in JSON. Typical reasons: timezone (timestamp_seconds/millis/micros), struct row format (named_struct_test, struct_test), window frame (nth_value_window, last_value_window, ntile_window), set ops (intersect, subtract), right_join column order, JVM-only (with_jvm_stubs), non-deterministic (with_rand_seed, with_unix_micros), hash/xxhash (with_hash, string_xxhash64), assert_true type, months_between/arrays_overlap, arrays_zip struct length, with_curdate_now, raise_error.
 
-| Fixture name | skip_reason |
-|--------------|-------------|
-| array_distinct | Polars list().unique() returns different order than PySpark array_distinct (first-occurrence) |
+## Closed-issue test coverage
+
+| Issue range | Coverage (parity fixtures and/or Python tests) |
+|-------------|-----------------------------------------------|
+| #1–#21 (core) | Python: test_sparkless_parity_*, test_filter_with_and_or_operators; parity: filter, select, orderBy, groupBy, join, limit, first, replace, case_insensitive_columns, describe, summary |
+| #22–#35 (window) | Parity: row_number_window, rank_window, lag_lead_window, cume_dist_window, first_value_window, percent_rank_window; nth_value_window, last_value_window, ntile_window (skipped: frame/ordering) |
+| #36–#49 (array) | Parity: array_size, array_contains, element_at, array_union, array_except, array_intersect, array_distinct, array_append, array_prepend, array_insert, zip_with; arrays_zip (skipped) |
+| #50–#57 (datetime) | Parity: date_add_sub, datediff, datetime_*, make_date, type_coercion_*, to_timestamp_format, make_timestamp_test; timestamp_seconds/millis/micros (skipped: TZ) |
+| #86–#99, #100–#116 (string) | Parity: with_hex, with_url_encode, string_*, replace, like_escape_char; with_hash/string_xxhash64 (skipped) |
+| #122–#140 (SQL/session) | Python: test_sql_select_where_returns_rows; parity: filter, join, groupBy plan fixtures |
+| #151 (createDataFrame) | Python: test_create_dataframe_from_rows_schema_pyspark_parity, test_create_dataframe_and_collect |
+| #156 (pivot) | Python: test_pivot_raises_not_implemented |
 
 ## Related
 

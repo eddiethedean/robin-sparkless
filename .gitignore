@@ -27,6 +27,7 @@ wheels/
 
 # Rust
 target/
+.cargo-home/
 Cargo.lock
 **/*.rs.bk
 

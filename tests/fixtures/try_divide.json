@@ -3,31 +3,91 @@
   "pyspark_version": "3.5.0",
   "input": {
     "schema": [
-      { "name": "id", "type": "bigint" },
-      { "name": "a", "type": "bigint" },
-      { "name": "b", "type": "bigint" }
+      {
+        "name": "id",
+        "type": "bigint"
+      },
+      {
+        "name": "a",
+        "type": "bigint"
+      },
+      {
+        "name": "b",
+        "type": "bigint"
+      }
     ],
     "rows": [
-      [1, 10, 2],
-      [2, 20, 0],
-      [3, 30, 5]
+      [
+        1,
+        10,
+        2
+      ],
+      [
+        2,
+        20,
+        0
+      ],
+      [
+        3,
+        30,
+        5
+      ]
     ]
   },
   "operations": [
-    { "op": "withColumn", "column": "div", "expr": "try_divide(col('a'), col('b'))" },
-    { "op": "select", "columns": ["id", "a", "b", "div"] }
+    {
+      "op": "withColumn",
+      "column": "div",
+      "expr": "try_divide(col('a'), col('b'))"
+    },
+    {
+      "op": "select",
+      "columns": [
+        "id",
+        "a",
+        "b",
+        "div"
+      ]
+    }
   ],
   "expected": {
     "schema": [
-      { "name": "id", "type": "bigint" },
-      { "name": "a", "type": "bigint" },
-      { "name": "b", "type": "bigint" },
-      { "name": "div", "type": "double" }
+      {
+        "name": "id",
+        "type": "bigint"
+      },
+      {
+        "name": "a",
+        "type": "bigint"
+      },
+      {
+        "name": "b",
+        "type": "bigint"
+      },
+      {
+        "name": "div",
+        "type": "double"
+      }
     ],
     "rows": [
-      [1, 10, 2, 5.0],
-      [2, 20, 0, null],
-      [3, 30, 5, 6.0]
+      [
+        1,
+        10,
+        2,
+        5.0
+      ],
+      [
+        2,
+        20,
+        0,
+        null
+      ],
+      [
+        3,
+        30,
+        5,
+        6.0
+      ]
     ]
   }
 }

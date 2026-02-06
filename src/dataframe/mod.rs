@@ -151,7 +151,16 @@ impl DataFrame {
             .map(|c| self.resolve_column_name(c))
             .collect::<Result<Vec<_>, _>>()?;
         let refs: Vec<&str> = resolved.iter().map(|s| s.as_str()).collect();
-        transformations::select(self, refs, self.case_sensitive)
+        let mut result = transformations::select(self, refs, self.case_sensitive)?;
+        // When case-insensitive, PySpark returns column names in requested (e.g. lowercase) form.
+        if !self.case_sensitive {
+            for (requested, res) in cols.iter().zip(resolved.iter()) {
+                if *requested != res.as_str() {
+                    result = result.with_column_renamed(res, requested)?;
+                }
+            }
+        }
+        Ok(result)
     }
 
     /// Filter rows using a Polars expression.

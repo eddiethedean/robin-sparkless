@@ -3,13 +3,28 @@
   "pyspark_version": "3.5.0",
   "input": {
     "schema": [
-      { "name": "id", "type": "bigint" },
-      { "name": "name", "type": "string" }
+      {
+        "name": "id",
+        "type": "bigint"
+      },
+      {
+        "name": "name",
+        "type": "string"
+      }
     ],
     "rows": [
-      [1, "  Alice  "],
-      [2, "Bob"],
-      [3, "  Charlie  "]
+      [
+        1,
+        "  Alice  "
+      ],
+      [
+        2,
+        "Bob"
+      ],
+      [
+        3,
+        "  Charlie  "
+      ]
     ]
   },
   "operations": [
@@ -23,19 +38,54 @@
       "column": "name_trimmed",
       "expr": "trim(col('name'))"
     },
-    { "op": "select", "columns": ["id", "name", "name_len", "name_trimmed"] }
+    {
+      "op": "select",
+      "columns": [
+        "id",
+        "name",
+        "name_len",
+        "name_trimmed"
+      ]
+    }
   ],
   "expected": {
     "schema": [
-      { "name": "id", "type": "bigint" },
-      { "name": "name", "type": "string" },
-      { "name": "name_len", "type": "uint32" },
-      { "name": "name_trimmed", "type": "string" }
+      {
+        "name": "id",
+        "type": "bigint"
+      },
+      {
+        "name": "name",
+        "type": "string"
+      },
+      {
+        "name": "name_len",
+        "type": "int"
+      },
+      {
+        "name": "name_trimmed",
+        "type": "string"
+      }
     ],
     "rows": [
-      [1, "  Alice  ", 9, "Alice"],
-      [2, "Bob", 3, "Bob"],
-      [3, "  Charlie  ", 11, "Charlie"]
+      [
+        1,
+        "  Alice  ",
+        9,
+        "Alice"
+      ],
+      [
+        2,
+        "Bob",
+        3,
+        "Bob"
+      ],
+      [
+        3,
+        "  Charlie  ",
+        11,
+        "Charlie"
+      ]
     ]
   }
 }

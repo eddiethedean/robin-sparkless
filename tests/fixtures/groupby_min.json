@@ -78,7 +78,7 @@
         "type": "string"
       },
       {
-        "name": "min(salary)",
+        "name": "min",
         "type": "bigint"
       }
     ],

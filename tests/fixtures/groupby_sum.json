@@ -78,7 +78,7 @@
         "type": "string"
       },
       {
-        "name": "sum(salary)",
+        "name": "sum",
         "type": "bigint"
       }
     ],

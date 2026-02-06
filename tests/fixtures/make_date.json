@@ -3,34 +3,115 @@
   "pyspark_version": "3.5.0",
   "input": {
     "schema": [
-      { "name": "id", "type": "int" },
-      { "name": "y", "type": "int" },
-      { "name": "m", "type": "int" },
-      { "name": "d", "type": "int" }
+      {
+        "name": "id",
+        "type": "int"
+      },
+      {
+        "name": "y",
+        "type": "int"
+      },
+      {
+        "name": "m",
+        "type": "int"
+      },
+      {
+        "name": "d",
+        "type": "int"
+      }
     ],
     "rows": [
-      [1, 2015, 4, 8],
-      [2, 2020, 2, 29],
-      [3, 2021, 2, 29]
+      [
+        1,
+        2015,
+        4,
+        8
+      ],
+      [
+        2,
+        2020,
+        2,
+        29
+      ],
+      [
+        3,
+        2021,
+        2,
+        29
+      ]
     ]
   },
   "operations": [
-    { "op": "withColumn", "column": "dt", "expr": "make_date(col('y'), col('m'), col('d'))" },
-    { "op": "select", "columns": ["id", "y", "m", "d", "dt"] },
-    { "op": "orderBy", "columns": ["id"], "ascending": [true] }
+    {
+      "op": "withColumn",
+      "column": "dt",
+      "expr": "make_date(col('y'), col('m'), col('d'))"
+    },
+    {
+      "op": "select",
+      "columns": [
+        "id",
+        "y",
+        "m",
+        "d",
+        "dt"
+      ]
+    },
+    {
+      "op": "orderBy",
+      "columns": [
+        "id"
+      ],
+      "ascending": [
+        true
+      ]
+    }
   ],
   "expected": {
     "schema": [
-      { "name": "id", "type": "int" },
-      { "name": "y", "type": "int" },
-      { "name": "m", "type": "int" },
-      { "name": "d", "type": "int" },
-      { "name": "dt", "type": "date" }
+      {
+        "name": "id",
+        "type": "int"
+      },
+      {
+        "name": "y",
+        "type": "int"
+      },
+      {
+        "name": "m",
+        "type": "int"
+      },
+      {
+        "name": "d",
+        "type": "int"
+      },
+      {
+        "name": "dt",
+        "type": "date"
+      }
     ],
     "rows": [
-      [1, 2015, 4, 8, "2015-04-08"],
-      [2, 2020, 2, 29, "2020-02-29"],
-      [3, 2021, 2, 29, null]
+      [
+        1,
+        2015,
+        4,
+        8,
+        "2015-04-08"
+      ],
+      [
+        2,
+        2020,
+        2,
+        29,
+        "2020-02-29"
+      ],
+      [
+        3,
+        2021,
+        2,
+        29,
+        null
+      ]
     ]
   }
 }

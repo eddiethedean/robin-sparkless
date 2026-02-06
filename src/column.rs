@@ -782,6 +782,7 @@ impl Column {
     }
 
     /// Split string by delimiter (PySpark split). Returns list of strings.
+    /// Uses literal split so "|" is not interpreted as regex alternation.
     pub fn split(&self, delimiter: &str) -> Column {
         use polars::prelude::*;
         Self::from_expr(
@@ -969,16 +970,27 @@ impl Column {
         if part_num == 0 {
             return Self::from_expr(Expr::Literal(LiteralValue::Null), None);
         }
+        let use_regex = delimiter == "|";
+        if use_regex {
+            let pattern = delimiter.to_string();
+            let part = part_num;
+            let get_expr = self.expr().clone().map(
+                move |col| crate::udfs::apply_split_part_regex(col, &pattern, part),
+                GetOutput::from_type(DataType::String),
+            );
+            let expr = when(self.expr().clone().is_null())
+                .then(Expr::Literal(LiteralValue::Null))
+                .otherwise(get_expr.fill_null(lit("")));
+            return Self::from_expr(expr, None);
+        }
         let delim = delimiter.to_string();
         let split_expr = self.expr().clone().str().split(lit(delim));
-        // Polars list.get: 0-based; -1 = last. part_num 1 -> index 0, part_num -1 -> index -1.
         let index = if part_num > 0 {
             lit(part_num - 1)
         } else {
-            lit(part_num) // -1, -2, etc. work for list.get
+            lit(part_num)
         };
         let get_expr = split_expr.list().get(index, true).fill_null(lit(""));
-        // Preserve null when source string was null
         let expr = when(self.expr().clone().is_null())
             .then(Expr::Literal(LiteralValue::Null))
             .otherwise(get_expr);

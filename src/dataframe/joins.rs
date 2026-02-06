@@ -18,6 +18,7 @@ pub enum JoinType {
 }
 
 /// Join with another DataFrame on the given columns. Preserves case_sensitive on result.
+/// For Right and Outer, reorders columns to match PySpark: key(s), then left non-key, then right non-key.
 pub fn join(
     left: &DataFrame,
     right: &DataFrame,
@@ -28,6 +29,7 @@ pub fn join(
     use polars::prelude::{col, IntoLazy, JoinBuilder, JoinCoalesce};
     let left_lf = left.df.as_ref().clone().lazy();
     let right_lf = right.df.as_ref().clone().lazy();
+    let on_set: std::collections::HashSet<&str> = on.iter().copied().collect();
     let on_exprs: Vec<polars::prelude::Expr> = on.iter().map(|name| col(*name)).collect();
     let polars_how: PlJoinType = match how {
         JoinType::Inner => PlJoinType::Inner,
@@ -41,9 +43,53 @@ pub fn join(
         .with(right_lf)
         .how(polars_how)
         .on(&on_exprs)
-        .coalesce(JoinCoalesce::KeepColumns)
+        .coalesce(JoinCoalesce::CoalesceColumns)
         .finish();
-    let pl_df = joined.collect()?;
+    let mut pl_df = joined.collect()?;
+    if matches!(how, JoinType::Right | JoinType::Outer) {
+        let left_names: Vec<String> = left
+            .df
+            .get_column_names()
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        let right_names: Vec<String> = right
+            .df
+            .get_column_names()
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        let result_names: std::collections::HashSet<String> = pl_df
+            .get_column_names()
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        let mut order: Vec<String> = Vec::new();
+        for k in &on {
+            order.push((*k).to_string());
+        }
+        for n in &left_names {
+            if !on_set.contains(n.as_str()) {
+                order.push(n.clone());
+            }
+        }
+        for n in &right_names {
+            let use_name = if left_names.iter().any(|l| l == n) {
+                format!("{n}_right")
+            } else {
+                n.clone()
+            };
+            if result_names.contains(&use_name) {
+                order.push(use_name);
+            }
+        }
+        if order.len() == result_names.len() {
+            let select_refs: Vec<&str> = order.iter().map(String::as_str).collect();
+            pl_df = pl_df.select(select_refs).map_err(|e| {
+                PolarsError::ComputeError(format!("join column reorder: {e}").into())
+            })?;
+        }
+    }
     Ok(super::DataFrame::from_polars_with_options(
         pl_df,
         case_sensitive,

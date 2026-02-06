@@ -3,44 +3,153 @@
   "pyspark_version": "3.5.0",
   "input": {
     "schema": [
-      {"name": "id", "type": "bigint"},
-      {"name": "name", "type": "string"},
-      {"name": "dept", "type": "string"},
-      {"name": "salary", "type": "bigint"}
+      {
+        "name": "id",
+        "type": "bigint"
+      },
+      {
+        "name": "name",
+        "type": "string"
+      },
+      {
+        "name": "dept",
+        "type": "string"
+      },
+      {
+        "name": "salary",
+        "type": "bigint"
+      }
     ],
     "rows": [
-      [1, "Alice", "Sales", 1000],
-      [2, "Bob", "Sales", 1500],
-      [3, "Charlie", "Engineering", 2000],
-      [4, "David", "Engineering", 2500],
-      [5, "Eve", "Sales", 1200]
+      [
+        1,
+        "Alice",
+        "Sales",
+        1000
+      ],
+      [
+        2,
+        "Bob",
+        "Sales",
+        1500
+      ],
+      [
+        3,
+        "Charlie",
+        "Engineering",
+        2000
+      ],
+      [
+        4,
+        "David",
+        "Engineering",
+        2500
+      ],
+      [
+        5,
+        "Eve",
+        "Sales",
+        1200
+      ]
     ]
   },
   "operations": [
-    {"op": "orderBy", "columns": ["dept", "salary"], "ascending": [true, false]},
+    {
+      "op": "orderBy",
+      "columns": [
+        "dept",
+        "salary"
+      ],
+      "ascending": [
+        true,
+        false
+      ]
+    },
     {
       "op": "window",
       "column": "cume",
       "func": "cume_dist",
-      "partition_by": ["dept"],
-      "order_by": [{"col": "salary", "asc": false}]
+      "partition_by": [
+        "dept"
+      ],
+      "order_by": [
+        {
+          "col": "salary",
+          "asc": false
+        }
+      ]
     },
-    {"op": "orderBy", "columns": ["dept", "salary"], "ascending": [true, false]}
+    {
+      "op": "orderBy",
+      "columns": [
+        "dept",
+        "salary"
+      ],
+      "ascending": [
+        true,
+        false
+      ]
+    }
   ],
   "expected": {
     "schema": [
-      {"name": "id", "type": "bigint"},
-      {"name": "name", "type": "string"},
-      {"name": "dept", "type": "string"},
-      {"name": "salary", "type": "bigint"},
-      {"name": "cume", "type": "double"}
+      {
+        "name": "id",
+        "type": "bigint"
+      },
+      {
+        "name": "name",
+        "type": "string"
+      },
+      {
+        "name": "dept",
+        "type": "string"
+      },
+      {
+        "name": "salary",
+        "type": "bigint"
+      },
+      {
+        "name": "cume",
+        "type": "double"
+      }
     ],
     "rows": [
-      [4, "David", "Engineering", 2500, 0.5],
-      [3, "Charlie", "Engineering", 2000, 1.0],
-      [2, "Bob", "Sales", 1500, 0.3333333333333333],
-      [5, "Eve", "Sales", 1200, 0.6666666666666666],
-      [1, "Alice", "Sales", 1000, 1.0]
+      [
+        4,
+        "David",
+        "Engineering",
+        2500,
+        0.5
+      ],
+      [
+        3,
+        "Charlie",
+        "Engineering",
+        2000,
+        1.0
+      ],
+      [
+        2,
+        "Bob",
+        "Sales",
+        1500,
+        0.3333333333333333
+      ],
+      [
+        5,
+        "Eve",
+        "Sales",
+        1200,
+        0.6666666666666666
+      ],
+      [
+        1,
+        "Alice",
+        "Sales",
+        1000,
+        1.0
+      ]
     ]
   }
 }

@@ -3,26 +3,60 @@
   "pyspark_version": "3.5.0",
   "input": {
     "schema": [
-      { "name": "id", "type": "bigint" },
-      { "name": "s", "type": "string" }
+      {
+        "name": "id",
+        "type": "bigint"
+      },
+      {
+        "name": "s",
+        "type": "string"
+      }
     ],
     "rows": [
-      [1, "hello world"],
-      [2, "a+b"]
+      [
+        1,
+        "hello world"
+      ],
+      [
+        2,
+        "a+b"
+      ]
     ]
   },
   "operations": [
-    { "op": "withColumn", "column": "encoded", "expr": "url_encode(col('s'))" },
-    { "op": "select", "columns": ["id", "encoded"] }
+    {
+      "op": "withColumn",
+      "column": "encoded",
+      "expr": "url_encode(col('s'))"
+    },
+    {
+      "op": "select",
+      "columns": [
+        "id",
+        "encoded"
+      ]
+    }
   ],
   "expected": {
     "schema": [
-      { "name": "id", "type": "bigint" },
-      { "name": "encoded", "type": "string" }
+      {
+        "name": "id",
+        "type": "bigint"
+      },
+      {
+        "name": "encoded",
+        "type": "string"
+      }
     ],
     "rows": [
-      [1, "hello%20world"],
-      [2, "a%2Bb"]
+      [
+        1,
+        "hello+world"
+      ],
+      [
+        2,
+        "a%2Bb"
+      ]
     ]
   }
 }

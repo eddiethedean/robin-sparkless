@@ -3,28 +3,75 @@
   "pyspark_version": "3.5.0",
   "input": {
     "schema": [
-      { "name": "Id", "type": "bigint" },
-      { "name": "Age", "type": "bigint" },
-      { "name": "Name", "type": "string" }
+      {
+        "name": "Id",
+        "type": "bigint"
+      },
+      {
+        "name": "Age",
+        "type": "bigint"
+      },
+      {
+        "name": "Name",
+        "type": "string"
+      }
     ],
     "rows": [
-      [1, 25, "Alice"],
-      [2, 30, "Bob"],
-      [3, 35, "Charlie"]
+      [
+        1,
+        25,
+        "Alice"
+      ],
+      [
+        2,
+        30,
+        "Bob"
+      ],
+      [
+        3,
+        35,
+        "Charlie"
+      ]
     ]
   },
   "operations": [
-    { "op": "filter", "expr": "col('age') > 30" },
-    { "op": "select", "columns": ["name", "age"] },
-    { "op": "orderBy", "columns": ["name"], "ascending": [true] }
+    {
+      "op": "filter",
+      "expr": "col('age') > 30"
+    },
+    {
+      "op": "select",
+      "columns": [
+        "name",
+        "age"
+      ]
+    },
+    {
+      "op": "orderBy",
+      "columns": [
+        "name"
+      ],
+      "ascending": [
+        true
+      ]
+    }
   ],
   "expected": {
     "schema": [
-      { "name": "Name", "type": "string" },
-      { "name": "Age", "type": "bigint" }
+      {
+        "name": "name",
+        "type": "string"
+      },
+      {
+        "name": "age",
+        "type": "bigint"
+      }
     ],
     "rows": [
-      ["Charlie", 35]
+      [
+        "Charlie",
+        35
+      ]
     ]
   }
 }

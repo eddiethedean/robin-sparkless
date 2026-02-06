@@ -3,31 +3,89 @@
   "pyspark_version": "3.5.0",
   "input": {
     "schema": [
-      { "name": "id", "type": "bigint" },
-      { "name": "s", "type": "string" }
+      {
+        "name": "id",
+        "type": "bigint"
+      },
+      {
+        "name": "s",
+        "type": "string"
+      }
     ],
     "rows": [
-      [1, "a.b.c.d"],
-      [2, "x.y"],
-      [3, "only"]
+      [
+        1,
+        "a.b.c.d"
+      ],
+      [
+        2,
+        "x.y"
+      ],
+      [
+        3,
+        "only"
+      ]
     ]
   },
   "operations": [
-    { "op": "withColumn", "column": "before2", "expr": "substring_index(col('s'), '.', 2)" },
-    { "op": "withColumn", "column": "after_neg2", "expr": "substring_index(col('s'), '.', -2)" },
-    { "op": "orderBy", "columns": ["id"], "ascending": [true] }
+    {
+      "op": "withColumn",
+      "column": "before2",
+      "expr": "substring_index(col('s'), '.', 2)"
+    },
+    {
+      "op": "withColumn",
+      "column": "after_neg2",
+      "expr": "substring_index(col('s'), '.', -2)"
+    },
+    {
+      "op": "orderBy",
+      "columns": [
+        "id"
+      ],
+      "ascending": [
+        true
+      ]
+    }
   ],
   "expected": {
     "schema": [
-      { "name": "id", "type": "bigint" },
-      { "name": "s", "type": "string" },
-      { "name": "before2", "type": "string" },
-      { "name": "after_neg2", "type": "string" }
+      {
+        "name": "id",
+        "type": "bigint"
+      },
+      {
+        "name": "s",
+        "type": "string"
+      },
+      {
+        "name": "before2",
+        "type": "string"
+      },
+      {
+        "name": "after_neg2",
+        "type": "string"
+      }
     ],
     "rows": [
-      [1, "a.b.c.d", "a.b", "c.d"],
-      [2, "x.y", "x.y", "x.y"],
-      [3, "only", "only", "only"]
+      [
+        1,
+        "a.b.c.d",
+        "a.b",
+        "c.d"
+      ],
+      [
+        2,
+        "x.y",
+        "x.y",
+        "x.y"
+      ],
+      [
+        3,
+        "only",
+        "only",
+        "only"
+      ]
     ]
   }
 }

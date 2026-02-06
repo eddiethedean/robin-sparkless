@@ -3,33 +3,80 @@
   "pyspark_version": "3.5.0",
   "input": {
     "schema": [
-      { "name": "id", "type": "int" },
-      { "name": "category", "type": "string" },
-      { "name": "value", "type": "int" }
+      {
+        "name": "id",
+        "type": "int"
+      },
+      {
+        "name": "category",
+        "type": "string"
+      },
+      {
+        "name": "value",
+        "type": "int"
+      }
     ],
     "rows": [
-      [1, "X", 10],
-      [2, "X", 20],
-      [3, "X", 30]
+      [
+        1,
+        "X",
+        10
+      ],
+      [
+        2,
+        "X",
+        20
+      ],
+      [
+        3,
+        "X",
+        30
+      ]
     ]
   },
   "operations": [
-    { "op": "groupBy", "columns": ["category"] },
+    {
+      "op": "groupBy",
+      "columns": [
+        "category"
+      ]
+    },
     {
       "op": "agg",
       "aggregations": [
-        { "func": "sum", "alias": "sum", "column": "value" }
+        {
+          "func": "sum",
+          "alias": "sum",
+          "column": "value"
+        }
       ]
     },
-    { "op": "orderBy", "columns": ["category"], "ascending": [true] }
+    {
+      "op": "orderBy",
+      "columns": [
+        "category"
+      ],
+      "ascending": [
+        true
+      ]
+    }
   ],
   "expected": {
     "schema": [
-      { "name": "category", "type": "string" },
-      { "name": "sum(value)", "type": "bigint" }
+      {
+        "name": "category",
+        "type": "string"
+      },
+      {
+        "name": "sum",
+        "type": "bigint"
+      }
     ],
     "rows": [
-      ["X", 60]
+      [
+        "X",
+        60
+      ]
     ]
   }
 }

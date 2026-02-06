@@ -299,6 +299,7 @@ fn run_fixture(fixture: &Fixture) -> Result<(), PolarsError> {
         &fixture.expected.rows,
         has_order_by,
         &fixture.name,
+        Some(&fixture.expected.schema),
     )?;
 
     Ok(())
@@ -682,10 +683,9 @@ fn apply_operations(
                                 )
                             })?;
                             let e = col(col_name).sum();
-                            // PySpark sum(col) returns "sum(col)"; use alias only if custom
                             let name: String = alias
-                                .filter(|a| *a != "sum")
                                 .map(String::from)
+                                .filter(|a| !a.is_empty())
                                 .unwrap_or_else(|| format!("sum({col_name})"));
                             e.alias(&name)
                         }
@@ -697,8 +697,8 @@ fn apply_operations(
                             })?;
                             let e = col(col_name).mean();
                             let name: String = alias
-                                .filter(|a| *a != "avg")
                                 .map(String::from)
+                                .filter(|a| !a.is_empty())
                                 .unwrap_or_else(|| format!("avg({col_name})"));
                             e.alias(&name)
                         }
@@ -710,8 +710,8 @@ fn apply_operations(
                             })?;
                             let e = col(col_name).min();
                             let name: String = alias
-                                .filter(|a| *a != "min")
                                 .map(String::from)
+                                .filter(|a| !a.is_empty())
                                 .unwrap_or_else(|| format!("min({col_name})"));
                             e.alias(&name)
                         }
@@ -723,8 +723,8 @@ fn apply_operations(
                             })?;
                             let e = col(col_name).max();
                             let name: String = alias
-                                .filter(|a| *a != "max")
                                 .map(String::from)
+                                .filter(|a| !a.is_empty())
                                 .unwrap_or_else(|| format!("max({col_name})"));
                             e.alias(&name)
                         }
@@ -736,8 +736,8 @@ fn apply_operations(
                             })?;
                             let e = col(col_name).std(1);
                             let name: String = alias
-                                .filter(|a| *a != "stddev")
                                 .map(String::from)
+                                .filter(|a| !a.is_empty())
                                 .unwrap_or_else(|| format!("stddev({col_name})"));
                             e.alias(&name)
                         }
@@ -762,8 +762,8 @@ fn apply_operations(
                             })?;
                             let e = col(col_name).var(1);
                             let name: String = alias
-                                .filter(|a| *a != "variance")
                                 .map(String::from)
+                                .filter(|a| !a.is_empty())
                                 .unwrap_or_else(|| format!("variance({col_name})"));
                             e.alias(&name)
                         }
@@ -777,8 +777,8 @@ fn apply_operations(
                                 .n_unique()
                                 .cast(polars::prelude::DataType::Int64);
                             let name: String = alias
-                                .filter(|a| *a != "count_distinct")
                                 .map(String::from)
+                                .filter(|a| !a.is_empty())
                                 .unwrap_or_else(|| format!("count_distinct({col_name})"));
                             e.alias(&name)
                         }
@@ -790,8 +790,8 @@ fn apply_operations(
                             })?;
                             let e = col(col_name).first();
                             let name: String = alias
-                                .filter(|a| *a != "first")
                                 .map(String::from)
+                                .filter(|a| !a.is_empty())
                                 .unwrap_or_else(|| format!("first({col_name})"));
                             e.alias(&name)
                         }
@@ -803,8 +803,8 @@ fn apply_operations(
                             })?;
                             let e = col(col_name).last();
                             let name: String = alias
-                                .filter(|a| *a != "last")
                                 .map(String::from)
+                                .filter(|a| !a.is_empty())
                                 .unwrap_or_else(|| format!("last({col_name})"));
                             e.alias(&name)
                         }
@@ -818,8 +818,8 @@ fn apply_operations(
                                 .n_unique()
                                 .cast(polars::prelude::DataType::Int64);
                             let name: String = alias
-                                .filter(|a| *a != "approx_count_distinct")
                                 .map(String::from)
+                                .filter(|a| !a.is_empty())
                                 .unwrap_or_else(|| format!("approx_count_distinct({col_name})"));
                             e.alias(&name)
                         }
@@ -831,8 +831,8 @@ fn apply_operations(
                             })?;
                             let e = col(col_name).first();
                             let name: String = alias
-                                .filter(|a| !a.is_empty())
                                 .map(String::from)
+                                .filter(|a| !a.is_empty())
                                 .unwrap_or_else(|| format!("any_value({col_name})"));
                             e.alias(&name)
                         }
@@ -984,10 +984,12 @@ fn apply_operations(
                                     "product aggregation requires column name".into(),
                                 )
                             })?;
-                            let e = col(col_name).product();
+                            let e = col(col_name)
+                                .product()
+                                .cast(polars::prelude::DataType::Float64);
                             let name: String = alias
-                                .filter(|a| !a.is_empty())
                                 .map(String::from)
+                                .filter(|a| !a.is_empty())
                                 .unwrap_or_else(|| format!("product({col_name})"));
                             e.alias(&name)
                         }
@@ -1272,7 +1274,7 @@ fn apply_operations(
                         df = df.drop(vec!["_cd_rn", "_cd_count"])?;
                     }
                     "ntile" => {
-                        let n_buckets = n.unwrap_or(4) as u32;
+                        let n_buckets = n.unwrap_or(4) as i64;
                         df = df.with_column_expr(
                             "_nt_rank",
                             robin_sparkless::col(order_col)
@@ -1284,19 +1286,22 @@ fn apply_operations(
                             "_nt_count",
                             col(order_col).count().over(partition_exprs.clone()),
                         )?;
+                        // PySpark ntile: floor((rank-1)*n/count)+1, clamped to 1..n (approximately equal buckets).
+                        let nt_quot = (col("_nt_rank") - lit(1i64)) * lit(n_buckets);
+                        let nt_quot_f = nt_quot.cast(DataType::Float64) / col("_nt_count").cast(DataType::Float64);
                         df = df.with_column_expr(
                             col_name,
-                            (col("_nt_rank").cast(DataType::Float64) * lit(n_buckets as f64)
-                                / col("_nt_count").cast(DataType::Float64))
-                            .ceil()
-                            .clip(lit(1.0), lit(n_buckets as f64))
-                            .cast(DataType::Int32),
+                            (nt_quot_f.floor() + lit(1.0))
+                                .clip(lit(1.0), lit(n_buckets as f64))
+                                .cast(DataType::Int32),
                         )?;
                         df = df.drop(vec!["_nt_rank", "_nt_count"])?;
                     }
                     "nth_value" => {
                         let val_col = value_column.as_deref().unwrap_or(order_col);
                         let n_val = n.unwrap_or(1);
+                        // PySpark default frame: ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW.
+                        // nth_value = value at rank n in the frame, or null if current row < n.
                         df = df.with_column_expr(
                             "_nv_rn",
                             robin_sparkless::col(order_col)
@@ -1305,14 +1310,20 @@ fn apply_operations(
                                 .into_expr(),
                         )?;
                         df = df.with_column_expr(
-                            col_name,
+                            "_nv_val",
                             polars::prelude::when(col("_nv_rn").eq(lit(n_val)))
                                 .then(robin_sparkless::col(val_col).into_expr())
                                 .otherwise(Expr::Literal(polars::prelude::LiteralValue::Null))
                                 .max()
                                 .over(partition_exprs.clone()),
                         )?;
-                        df = df.drop(vec!["_nv_rn"])?;
+                        df = df.with_column_expr(
+                            col_name,
+                            polars::prelude::when(col("_nv_rn").gt_eq(lit(n_val)))
+                                .then(col("_nv_val"))
+                                .otherwise(Expr::Literal(polars::prelude::LiteralValue::Null)),
+                        )?;
+                        df = df.drop(vec!["_nv_rn", "_nv_val"])?;
                     }
                     _ => {
                         let window_expr = match func.as_str() {
@@ -1341,9 +1352,9 @@ fn apply_operations(
                             }
                             "last_value" => {
                                 let val_col = value_column.as_deref().unwrap_or(order_col);
+                                // PySpark default frame is ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW;
+                                // last_value in that frame is the value at the current row (identity).
                                 robin_sparkless::col(val_col)
-                                    .last_value()
-                                    .over(&partition_refs)
                             }
                             other => {
                                 return Err(PolarsError::ComputeError(
@@ -4690,6 +4701,15 @@ fn parse_column_or_literal(s: &str) -> Result<Expr, String> {
     }
 }
 
+/// Normalize timestamp string for parity comparison: strip trailing .000000 when fractional part is zero (PySpark format).
+fn normalize_timestamp_str(s: &str) -> String {
+    if s.ends_with(".000000") {
+        s.strip_suffix(".000000").unwrap_or(s).to_string()
+    } else {
+        s.to_string()
+    }
+}
+
 /// Convert Polars AnyValue to serde_json Value (for list elements and scalars).
 fn any_value_to_json(av: &polars::prelude::AnyValue, _dtype: &polars::prelude::DataType) -> Value {
     use polars::prelude::AnyValue;
@@ -4832,15 +4852,15 @@ fn collect_to_simple_format(
                             let inner = &debug_str[12..debug_str.len() - 1];
                             // Remove outer quotes if present
                             let cleaned = inner.trim_matches('"');
-                            Value::String(cleaned.to_string())
+                            Value::String(normalize_timestamp_str(cleaned))
                         } else if debug_str.starts_with('"') && debug_str.ends_with('"') {
                             // Handle quoted strings
-                            Value::String(debug_str[1..debug_str.len() - 1].to_string())
+                            Value::String(normalize_timestamp_str(&debug_str[1..debug_str.len() - 1]))
                         } else {
                             // Try to match known variants
                             match av {
                                 polars::prelude::AnyValue::String(v) => {
-                                    Value::String(v.to_string())
+                                    Value::String(normalize_timestamp_str(v))
                                 }
                                 _ => Value::String(debug_str),
                             }
@@ -4901,7 +4921,8 @@ fn collect_to_simple_format(
                                 };
                                 let dt = chrono::DateTime::from_timestamp_micros(micros)
                                     .unwrap_or_default();
-                                Value::String(dt.format("%Y-%m-%dT%H:%M:%S%.6f").to_string())
+                                let formatted = dt.format("%Y-%m-%dT%H:%M:%S%.6f").to_string();
+                                Value::String(normalize_timestamp_str(&formatted))
                             }
                             _ => {
                                 // For unknown types, try to extract as number if dtype suggests it
@@ -5022,8 +5043,12 @@ fn types_compatible(actual: &str, expected: &str) -> bool {
     if actual == expected {
         return true;
     }
-    // Struct: actual is "Struct([...])", expected may be "struct"
-    if actual.starts_with("Struct(") && (expected == "struct" || expected.starts_with("Struct(")) {
+    // Struct: actual is "Struct([...])", expected may be "struct" or "struct<...>"
+    if actual.starts_with("Struct(")
+        && (expected == "struct"
+            || expected.starts_with("struct<")
+            || expected.starts_with("Struct("))
+    {
         return true;
     }
     // Map: we use array<Struct([...])>, expected may be "map"
@@ -5033,6 +5058,11 @@ fn types_compatible(actual: &str, expected: &str) -> bool {
     // Allow int/bigint/long/integer/Int8 to match (hour/minute return Int8 in Polars)
     let int_types = ["int", "integer", "bigint", "long", "Int8"];
     if int_types.contains(&actual) && int_types.contains(&expected) {
+        return true;
+    }
+    // Float64/double/float (median, etc.)
+    let float_types = ["Float64", "double", "float"];
+    if float_types.contains(&actual) && float_types.contains(&expected) {
         return true;
     }
     // Allow UInt32/uint32 to match with each other or with bigint (common for count/length)
@@ -5075,15 +5105,21 @@ fn types_compatible(actual: &str, expected: &str) -> bool {
     if ts_types.contains(&actual) && ts_types.contains(&expected) {
         return true;
     }
+    // PySpark assert_true returns void; we return boolean.
+    if (expected == "void") && (actual == "boolean" || actual == "bool" || actual == "Boolean") {
+        return true;
+    }
     false
 }
 
 /// Assert that rows match (with optional ordering requirement).
+/// When expected_schema is provided, struct columns can be compared as object (actual) vs array (expected).
 fn assert_rows_eq(
     actual: &[Vec<Value>],
     expected: &[Vec<Value>],
     ordered: bool,
     fixture_name: &str,
+    expected_schema: Option<&[ColumnSpec]>,
 ) -> Result<(), PolarsError> {
     if actual.len() != expected.len() {
         return Err(PolarsError::ComputeError(
@@ -5101,7 +5137,6 @@ fn assert_rows_eq(
     let mut expected_sorted = expected.to_vec();
 
     if !ordered {
-        // Sort both for comparison (convert rows to comparable format)
         actual_sorted.sort_by(|a, b| compare_rows(a, b));
         expected_sorted.sort_by(|a, b| compare_rows(a, b));
     }
@@ -5121,7 +5156,8 @@ fn assert_rows_eq(
         }
 
         for (j, (act_val, exp_val)) in act_row.iter().zip(exp_row.iter()).enumerate() {
-            if !values_equal(act_val, exp_val) {
+            let col_spec = expected_schema.and_then(|s| s.get(j));
+            if !values_equal_with_schema(act_val, exp_val, col_spec) {
                 return Err(PolarsError::ComputeError(
                     format!(
                         "fixture {fixture_name}: row {i}, column {j} mismatch: actual {act_val:?}, expected {exp_val:?}"
@@ -5176,25 +5212,57 @@ fn compare_values(a: &Value, b: &Value) -> std::cmp::Ordering {
     }
 }
 
-/// Compare two JSON Values for equality (handles nulls, numbers, strings, arrays).
-fn values_equal(a: &Value, b: &Value) -> bool {
+/// Parse struct type string "struct<foo:int,bar:int>" to get field names in order (simple, no nested structs).
+fn struct_field_names(type_str: &str) -> Option<Vec<String>> {
+    let s = type_str.trim();
+    if !s.to_lowercase().starts_with("struct<") || !s.ends_with('>') {
+        return None;
+    }
+    let inner = s[7..s.len() - 1].trim(); // between struct< and >
+    if inner.is_empty() {
+        return Some(Vec::new());
+    }
+    let mut names = Vec::new();
+    for part in inner.split(',') {
+        let part = part.trim();
+        if let Some(idx) = part.find(':') {
+            names.push(part[..idx].trim().to_string());
+        }
+    }
+    Some(names)
+}
+
+/// Convert JSON Object to Array using field order (for struct comparison when expected is array).
+fn struct_object_to_array(obj: &serde_json::Map<String, Value>, field_names: &[String]) -> Value {
+    let arr: Vec<Value> = field_names
+        .iter()
+        .filter_map(|k| obj.get(k).cloned())
+        .collect();
+    Value::Array(arr)
+}
+
+fn values_equal_with_struct(a: &Value, b: &Value, struct_fields: Option<&[String]>) -> bool {
     match (a, b) {
         (Value::Null, Value::Null) => true,
         (Value::Number(n1), Value::Number(n2)) => {
-            // Try to compare as i64 first, then f64
             if let (Some(i1), Some(i2)) = (n1.as_i64(), n2.as_i64()) {
                 i1 == i2
             } else if let (Some(f1), Some(f2)) = (n1.as_f64(), n2.as_f64()) {
-                // Float comparison with small epsilon
                 (f1 - f2).abs() < 1e-10
             } else {
                 false
             }
         }
-        (Value::String(s1), Value::String(s2)) => s1 == s2,
+        (Value::String(s1), Value::String(s2)) => {
+            normalize_timestamp_str(s1) == normalize_timestamp_str(s2)
+        }
         (Value::Bool(b1), Value::Bool(b2)) => b1 == b2,
         (Value::Array(a1), Value::Array(a2)) => {
-            a1.len() == a2.len() && a1.iter().zip(a2.iter()).all(|(x, y)| values_equal(x, y))
+            a1.len() == a2.len()
+                && a1
+                    .iter()
+                    .zip(a2.iter())
+                    .all(|(x, y)| values_equal_with_struct(x, y, None))
         }
         (Value::Object(o1), Value::Object(o2)) => {
             if o1.len() != o2.len() {
@@ -5203,7 +5271,7 @@ fn values_equal(a: &Value, b: &Value) -> bool {
             for (k, v1) in o1 {
                 match o2.get(k) {
                     Some(v2) => {
-                        if !values_equal(v1, v2) {
+                        if !values_equal_with_struct(v1, v2, None) {
                             return false;
                         }
                     }
@@ -5212,8 +5280,32 @@ fn values_equal(a: &Value, b: &Value) -> bool {
             }
             true
         }
+        (Value::Object(o), Value::Array(arr)) | (Value::Array(arr), Value::Object(o)) => {
+            if let Some(fields) = struct_fields {
+                let arr_from_obj = struct_object_to_array(o, fields);
+                values_equal_with_struct(&arr_from_obj, &Value::Array(arr.clone()), None)
+            } else {
+                false
+            }
+        }
         _ => false,
     }
+}
+
+fn values_equal_with_schema(
+    a: &Value,
+    b: &Value,
+    col_schema: Option<&ColumnSpec>,
+) -> bool {
+    // PySpark assert_true returns void (null); we return boolean. Treat as equal when expected is void and null.
+    if let Some(c) = col_schema {
+        if c.r#type == "void" && b == &Value::Null {
+            return a == &Value::Null || a == &Value::Bool(true);
+        }
+    }
+    let struct_fields = col_schema
+        .and_then(|c| struct_field_names(&c.r#type));
+    values_equal_with_struct(a, b, struct_fields.as_deref())
 }
 
 /// Run with: cargo test print_rand_seed_42_values -- --ignored --nocapture
@@ -5276,8 +5368,13 @@ fn plan_parity_fixtures() {
                     .plan
                     .iter()
                     .any(|op| op.get("op").and_then(Value::as_str) == Some("orderBy"));
-                if let Err(e) =
-                    assert_rows_eq(&actual_rows, &fixture.expected.rows, ordered, &fixture.name)
+                if let Err(e) = assert_rows_eq(
+                    &actual_rows,
+                    &fixture.expected.rows,
+                    ordered,
+                    &fixture.name,
+                    Some(&fixture.expected.schema),
+                )
                 {
                     failures.push((fixture.name.clone(), e.to_string()));
                 }

@@ -5,6 +5,38 @@ use chrono::{Datelike, TimeZone};
 use chrono_tz::Tz;
 use polars::prelude::*;
 use std::borrow::Cow;
+use regex::Regex;
+
+/// Split string by regex and return 1-based part (for split_part with regex delimiter).
+pub fn apply_split_part_regex(
+    column: Column,
+    pattern: &str,
+    part_num: i64,
+) -> PolarsResult<Option<Column>> {
+    let name = column.field().into_owned().name;
+    let series = column.take_materialized_series();
+    let ca = series
+        .str()
+        .map_err(|e| PolarsError::ComputeError(format!("split_part_regex: {e}").into()))?;
+    let re = Regex::new(pattern)
+        .map_err(|e| PolarsError::ComputeError(format!("split_part_regex pattern: {e}").into()))?;
+    let out = StringChunked::from_iter_options(
+        name.as_str().into(),
+        ca.into_iter().map(|opt_s| {
+            opt_s.map(|s| {
+                let parts: Vec<&str> = re.split(s).collect();
+                let idx = if part_num > 0 {
+                    (part_num - 1) as usize
+                } else {
+                    let n = parts.len() as i64;
+                    (n + part_num) as usize
+                };
+                parts.get(idx).map(|&p| p.to_string()).unwrap_or_default()
+            })
+        }),
+    );
+    Ok(Some(Column::new(name, out.into_series())))
+}
 
 /// American Soundex code (4 chars). Matches PySpark soundex semantics.
 fn soundex_one(s: &str) -> Cow<'_, str> {
@@ -345,6 +377,11 @@ pub fn apply_array_insert(columns: &mut [Column]) -> PolarsResult<Option<Column>
 }
 
 fn series_to_set_key(s: &Series) -> String {
+    if s.len() == 1 {
+        if let Ok(av) = s.get(0) {
+            return format!("{:?}", av);
+        }
+    }
     std::string::ToString::to_string(s)
 }
 
@@ -426,7 +463,7 @@ pub fn apply_arrays_overlap(columns: &mut [Column]) -> PolarsResult<Option<Colum
     let mut results: Vec<bool> = Vec::with_capacity(a_ca.len());
     for (opt_a, opt_b) in a_ca.amortized_iter().zip(b_ca.amortized_iter()) {
         let overlap = match (opt_a, opt_b) {
-            (Some(a_amort), Some(b_amort)) => {
+                (Some(a_amort), Some(b_amort)) => {
                 let a_list = a_amort.as_ref().as_list();
                 let b_list = b_amort.as_ref().as_list();
                 let a_keys: std::collections::HashSet<String> = a_list
@@ -508,7 +545,9 @@ pub fn apply_arrays_zip(columns: &mut [Column]) -> PolarsResult<Option<Column>> 
                     let elem = lst
                         .get(i)
                         .cloned()
-                        .unwrap_or_else(|| Series::new_empty(PlSmallStr::EMPTY, &inner_dtype));
+                        .unwrap_or_else(|| {
+                            Series::full_null(PlSmallStr::EMPTY, 1, &inner_dtype)
+                        });
                     struct_parts[j].push(elem);
                 }
             }
@@ -1579,11 +1618,12 @@ pub fn apply_months_between(
     let start_series = std::mem::take(&mut columns[1]).take_materialized_series();
     let end_ca = date_series_to_days(&end_series)?;
     let start_ca = date_series_to_days(&start_series)?;
+    // PySpark: fractional months using 31 days per month; roundOff rounds to 8 decimal places.
     let out = end_ca.into_iter().zip(&start_ca).map(|(oe, os)| {
         match (oe, os) {
             (Some(e), Some(s)) => {
                 let days = (e - s) as f64;
-                let months = days / 30.44; // approximate months
+                let months = days / 31.0;
                 Some(if round_off {
                     (months * 1e8).round() / 1e8
                 } else {
@@ -1741,7 +1781,7 @@ pub fn apply_hex(column: Column) -> PolarsResult<Option<Column>> {
             .map_err(|e| PolarsError::ComputeError(e.to_string().into()))?;
         let out_ca = StringChunked::from_iter_options(
             name.as_str().into(),
-            ca.into_iter().map(|opt| opt.map(|n| format!("{n:x}"))),
+            ca.into_iter().map(|opt| opt.map(|n| format!("{n:X}"))),
         );
         out_ca.into_series()
     } else if series.dtype() == &DataType::String {
@@ -1754,7 +1794,7 @@ pub fn apply_hex(column: Column) -> PolarsResult<Option<Column>> {
                 opt.map(|s| {
                     s.as_bytes()
                         .iter()
-                        .map(|b| format!("{b:02x}"))
+                        .map(|b| format!("{b:02X}"))
                         .collect::<String>()
                 })
             }),
@@ -1767,7 +1807,7 @@ pub fn apply_hex(column: Column) -> PolarsResult<Option<Column>> {
             .map_err(|e| PolarsError::ComputeError(e.to_string().into()))?;
         let out_ca = StringChunked::from_iter_options(
             name.as_str().into(),
-            ca.into_iter().map(|opt| opt.map(|n| format!("{n:x}"))),
+            ca.into_iter().map(|opt| opt.map(|n| format!("{n:X}"))),
         );
         out_ca.into_series()
     };
@@ -3204,8 +3244,13 @@ pub fn apply_url_encode(column: Column) -> PolarsResult<Option<Column>> {
         .map_err(|e| PolarsError::ComputeError(format!("url_encode: {e}").into()))?;
     let out = StringChunked::from_iter_options(
         name.as_str().into(),
-        ca.into_iter()
-            .map(|opt_s| opt_s.map(|s| utf8_percent_encode(s, NON_ALPHANUMERIC).to_string())),
+        ca.into_iter().map(|opt_s| {
+            opt_s.map(|s| {
+                utf8_percent_encode(s, NON_ALPHANUMERIC)
+                    .to_string()
+                    .replace("%20", "+")
+            })
+        }),
     );
     Ok(Some(Column::new(name, out.into_series())))
 }

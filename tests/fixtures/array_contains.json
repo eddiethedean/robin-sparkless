@@ -3,13 +3,28 @@
   "pyspark_version": "3.5.0",
   "input": {
     "schema": [
-      { "name": "id", "type": "bigint" },
-      { "name": "s", "type": "string" }
+      {
+        "name": "id",
+        "type": "bigint"
+      },
+      {
+        "name": "s",
+        "type": "string"
+      }
     ],
     "rows": [
-      [1, "a|b|c"],
-      [2, "x|y"],
-      [3, "a"]
+      [
+        1,
+        "a|b|c"
+      ],
+      [
+        2,
+        "x|y"
+      ],
+      [
+        3,
+        "a"
+      ]
     ]
   },
   "operations": [
@@ -23,19 +38,69 @@
       "column": "has_a",
       "expr": "array_contains(col('arr'), lit('a'))"
     },
-    { "op": "select", "columns": ["id", "s", "arr", "has_a"] }
+    {
+      "op": "select",
+      "columns": [
+        "id",
+        "s",
+        "arr",
+        "has_a"
+      ]
+    }
   ],
   "expected": {
     "schema": [
-      { "name": "id", "type": "bigint" },
-      { "name": "s", "type": "string" },
-      { "name": "arr", "type": "array<string>" },
-      { "name": "has_a", "type": "boolean" }
+      {
+        "name": "id",
+        "type": "bigint"
+      },
+      {
+        "name": "s",
+        "type": "string"
+      },
+      {
+        "name": "arr",
+        "type": "array<string>"
+      },
+      {
+        "name": "has_a",
+        "type": "boolean"
+      }
     ],
     "rows": [
-      [1, "a|b|c", ["a", "b", "c"], true],
-      [2, "x|y", ["x", "y"], false],
-      [3, "a", ["a"], true]
+      [
+        1,
+        "a|b|c",
+        [
+          "a",
+          "|",
+          "b",
+          "|",
+          "c",
+          ""
+        ],
+        true
+      ],
+      [
+        2,
+        "x|y",
+        [
+          "x",
+          "|",
+          "y",
+          ""
+        ],
+        false
+      ],
+      [
+        3,
+        "a",
+        [
+          "a",
+          ""
+        ],
+        true
+      ]
     ]
   }
 }
