@@ -354,6 +354,13 @@ impl PyColumn {
         }
     }
 
+    /// Multiply by another column or literal (PySpark multiply). Broadcasts scalars.
+    fn multiply(&self, other: &PyColumn) -> Self {
+        PyColumn {
+            inner: self.inner.multiply(&other.inner),
+        }
+    }
+
     /// Bit length of string (bytes * 8).
     fn bit_length(&self) -> Self {
         PyColumn {

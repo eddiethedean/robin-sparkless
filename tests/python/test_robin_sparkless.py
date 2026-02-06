@@ -76,12 +76,16 @@ def test_filter_with_and_or_operators() -> None:
     data = [(1, 25, "Alice"), (2, 30, "Bob"), (3, 35, "Carol"), (4, 40, "Dave")]
     df = spark.create_dataframe(data, ["id", "age", "name"])
     # AND: age > 26 & age < 36
-    filtered_and = df.filter((rs.col("age") > 26) & (rs.col("age") < 36))
+    filtered_and = df.filter(
+        (rs.col("age").gt(rs.lit(26))) & (rs.col("age").lt(rs.lit(36)))
+    )
     rows_and = filtered_and.collect()
     assert len(rows_and) == 2
     assert all(26 < r["age"] < 36 for r in rows_and)
     # OR: age < 26 | age > 35
-    filtered_or = df.filter((rs.col("age") < 26) | (rs.col("age") > 35))
+    filtered_or = df.filter(
+        (rs.col("age").lt(rs.lit(26))) | (rs.col("age").gt(rs.lit(35)))
+    )
     rows_or = filtered_or.collect()
     assert len(rows_or) == 2
     assert rows_or[0]["age"] == 25 and rows_or[1]["age"] == 40
@@ -405,7 +409,7 @@ def test_sparkless_parity_filter_boolean_returns_rows() -> None:
         "flag",
         rs.when(rs.col("id").eq(rs.lit(2))).then(rs.lit(False)).otherwise(rs.lit(True)),
     ).drop(["_"])
-    out = df.filter(rs.col("flag"))
+    out = df.filter(rs.col("flag").eq(rs.lit(True)))
     rows = out.collect()
     assert len(rows) == 2
     assert [r["id"] for r in rows] == [1, 3]
@@ -480,7 +484,9 @@ def test_sparkless_parity_order_by_desc_returns_rows() -> None:
     import robin_sparkless as rs
 
     spark = rs.SparkSession.builder().app_name("test").get_or_create()
-    df = spark.create_dataframe([(1, "a"), (2, "b"), (3, "c")], ["id", "name"])
+    df = spark.create_dataframe_from_rows(
+        [[1, "a"], [2, "b"], [3, "c"]], [("id", "bigint"), ("name", "string")]
+    )
     out = df.order_by(["id"], ascending=[False])
     rows = out.collect()
     assert len(rows) == 3
@@ -592,6 +598,8 @@ def test_pivot_raises_not_implemented() -> None:
     import robin_sparkless as rs
 
     spark = rs.SparkSession.builder().app_name("test").get_or_create()
-    df = spark.create_dataframe([(1, "x", 10)], ["id", "pcol", "v"])
+    df = spark.create_dataframe_from_rows(
+        [[1, "x", 10]], [("id", "bigint"), ("pcol", "string"), ("v", "bigint")]
+    )
     with pytest.raises(NotImplementedError, match="pivot is not yet implemented"):
         df.pivot("pcol")

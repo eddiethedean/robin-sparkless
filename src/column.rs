@@ -1207,6 +1207,11 @@ impl Column {
         Self::from_expr(self.expr().clone() * lit(-1), None)
     }
 
+    /// Multiply by another column or literal (PySpark multiply). Broadcasts scalars.
+    pub fn multiply(&self, other: &Column) -> Column {
+        Self::from_expr(self.expr().clone() * other.expr().clone(), None)
+    }
+
     /// Square root (PySpark sqrt)
     pub fn sqrt(&self) -> Column {
         Self::from_expr(self.expr().clone().sqrt(), None)
