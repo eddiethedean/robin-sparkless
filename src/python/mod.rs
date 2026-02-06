@@ -8,15 +8,15 @@ use crate::functions::{
     atanh, base64, cast as rs_cast, cbrt, ceiling, chr, contains, convert_timezone, cos, cosh,
     curdate, current_timezone, date_diff, date_from_unix_date, date_part, dateadd, datepart, day,
     dayname, dayofmonth, dayofweek, dayofyear, days, degrees, endswith, expm1, extract, factorial,
-    find_in_set, format_number, format_string, from_unixtime, from_utc_timestamp,
-    get_json_object, json_tuple,
-    greatest as rs_greatest, hours, hypot, ifnull, ilike, isnan as rs_isnan, isnotnull, isnull,
-    lcase, least as rs_least, left, like, ln, localtimestamp, log, log10, log1p, log2,
-    log_with_base, make_date, make_interval, make_timestamp, make_timestamp_ntz, md5, minutes,
-    month, months, months_between, next_day, now, nullif, nvl, nvl2, overlay, pmod, power, quarter,
-    radians, regexp_count, regexp_instr, regexp_substr, replace as rs_replace, right, rint, rlike,
-    sha1, sha2, signum, sin, sinh, split, split_part, startswith, substr, tan, tanh,
-    timestamp_micros, timestamp_millis, timestamp_seconds, timestampadd, timestampdiff, to_degrees,
+    find_in_set, format_number, format_string, from_csv, from_unixtime, from_utc_timestamp,
+    get_json_object, greatest as rs_greatest, hours, hypot, ifnull, ilike, isnan as rs_isnan,
+    isnotnull, isnull, json_tuple, lcase, least as rs_least, left, like, ln, localtimestamp, log,
+    log10, log1p, log2, log_with_base, make_date, make_interval, make_timestamp,
+    make_timestamp_ntz, md5, minutes, month, months, months_between, next_day, now, nullif, nvl,
+    nvl2, overlay, pmod, power, quarter, radians, regexp_count, regexp_instr, regexp_substr,
+    replace as rs_replace, right, rint, rlike, schema_of_csv, schema_of_json, sha1, sha2, signum,
+    sin, sinh, split, split_part, startswith, substr, tan, tanh, timestamp_micros,
+    timestamp_millis, timestamp_seconds, timestampadd, timestampdiff, to_csv, to_degrees,
     to_radians, to_timestamp, to_unix_timestamp, to_utc_timestamp, try_cast as rs_try_cast, ucase,
     unbase64, unix_date, unix_micros, unix_millis, unix_seconds, unix_timestamp,
     unix_timestamp_now, weekday, weekofyear, year, years,
@@ -260,6 +260,10 @@ fn robin_sparkless(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("find_in_set", wrap_pyfunction!(py_find_in_set, m)?)?;
     m.add("get_json_object", wrap_pyfunction!(py_get_json_object, m)?)?;
     m.add("json_tuple", wrap_pyfunction!(py_json_tuple, m)?)?;
+    m.add("from_csv", wrap_pyfunction!(py_from_csv, m)?)?;
+    m.add("to_csv", wrap_pyfunction!(py_to_csv, m)?)?;
+    m.add("schema_of_csv", wrap_pyfunction!(py_schema_of_csv, m)?)?;
+    m.add("schema_of_json", wrap_pyfunction!(py_schema_of_json, m)?)?;
     m.add("format_string", wrap_pyfunction!(py_format_string, m)?)?;
     m.add("printf", wrap_pyfunction!(py_printf, m)?)?;
     m.add("cosh", wrap_pyfunction!(py_cosh, m)?)?;
@@ -1891,6 +1895,34 @@ fn py_json_tuple(col: &PyColumn, keys: Vec<String>) -> PyColumn {
     let key_refs: Vec<&str> = keys.iter().map(|s| s.as_str()).collect();
     PyColumn {
         inner: json_tuple(&col.inner, &key_refs),
+    }
+}
+
+#[pyfunction]
+fn py_from_csv(col: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: from_csv(&col.inner),
+    }
+}
+
+#[pyfunction]
+fn py_to_csv(col: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: to_csv(&col.inner),
+    }
+}
+
+#[pyfunction]
+fn py_schema_of_csv(col: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: schema_of_csv(&col.inner),
+    }
+}
+
+#[pyfunction]
+fn py_schema_of_json(col: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: schema_of_json(&col.inner),
     }
 }
 

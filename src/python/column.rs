@@ -7,16 +7,17 @@ use crate::functions::{
     array_insert, array_intersect, array_prepend, array_union, ascii, asin, asinh, atan, atan2,
     atanh, base64, bit_length, cast as rs_cast, cbrt, ceiling, chr, contains, cos, cosh,
     date_from_unix_date, day, dayofmonth, dayofweek, dayofyear, degrees, endswith, expm1,
-    factorial, find_in_set, format_number, from_unixtime, get, get_json_object, hypot, ifnull,
-    ilike, isnotnull,
-    isnull, json_tuple, lcase, left, like, ln, log10, log1p, log2, map_concat, map_contains_key,
-    map_filter_value_gt, map_from_entries, map_zip_with_coalesce, md5, month, next_day, nullif,
-    nvl, overlay, pmod, power, quarter, radians, regexp_count, regexp_instr, regexp_substr,
-    replace as rs_replace, right, rint, rlike, sha1, sha2, signum, sin, sinh, split, split_part,
-    startswith, tan, tanh, timestamp_micros, timestamp_millis, timestamp_seconds, to_degrees,
-    to_radians, try_add, try_cast as rs_try_cast, try_divide, try_multiply, try_subtract, typeof_,
-    ucase, unbase64, unix_date, unix_timestamp, weekofyear, year, zip_with_coalesce,
+    factorial, find_in_set, format_number, from_csv, from_unixtime, get, get_json_object, hypot,
+    ifnull, ilike, isnotnull, isnull, json_tuple, lcase, left, like, ln, log10, log1p, log2,
+    map_concat, map_contains_key, map_filter_value_gt, map_from_entries, map_zip_with_coalesce,
+    md5, month, next_day, nullif, nvl, overlay, pmod, power, quarter, radians, regexp_count,
+    regexp_instr, regexp_substr, replace as rs_replace, right, rint, rlike, sha1, sha2, signum,
+    sin, sinh, split, split_part, startswith, tan, tanh, timestamp_micros, timestamp_millis,
+    timestamp_seconds, to_degrees, to_radians, try_add, try_cast as rs_try_cast, try_divide,
+    try_multiply, try_subtract, typeof_, ucase, unbase64, unix_date, unix_timestamp, weekofyear,
+    year, zip_with_coalesce,
 };
+use crate::functions::{schema_of_csv, schema_of_json, to_csv};
 use pyo3::prelude::*;
 
 /// Python wrapper for Column (expression).
@@ -844,6 +845,34 @@ impl PyColumn {
         let key_refs: Vec<&str> = keys.iter().map(|s| s.as_str()).collect();
         PyColumn {
             inner: json_tuple(&self.inner, &key_refs),
+        }
+    }
+
+    /// Parse CSV string to struct (PySpark from_csv). Minimal: split by comma.
+    fn from_csv(&self) -> Self {
+        PyColumn {
+            inner: from_csv(&self.inner),
+        }
+    }
+
+    /// Format struct as CSV string (PySpark to_csv). Minimal.
+    fn to_csv(&self) -> Self {
+        PyColumn {
+            inner: to_csv(&self.inner),
+        }
+    }
+
+    /// Schema of CSV string (PySpark schema_of_csv). Returns literal schema string; minimal stub.
+    fn schema_of_csv(&self) -> Self {
+        PyColumn {
+            inner: schema_of_csv(&self.inner),
+        }
+    }
+
+    /// Schema of JSON string (PySpark schema_of_json). Returns literal schema string; minimal stub.
+    fn schema_of_json(&self) -> Self {
+        PyColumn {
+            inner: schema_of_json(&self.inner),
         }
     }
 
