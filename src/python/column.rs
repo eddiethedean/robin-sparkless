@@ -100,6 +100,16 @@ impl PyColumn {
         }
     }
 
+    /// Logical AND with another boolean column. Also supports Python & operator.
+    fn __and__(&self, other: &PyColumn) -> PyResult<Self> {
+        Ok(self.and_(other))
+    }
+
+    /// Logical OR with another boolean column. Also supports Python | operator.
+    fn __or__(&self, other: &PyColumn) -> PyResult<Self> {
+        Ok(self.or_(other))
+    }
+
     /// Logical AND with another boolean column.
     fn and_(&self, other: &PyColumn) -> Self {
         PyColumn {
