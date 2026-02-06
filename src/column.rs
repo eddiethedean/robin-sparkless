@@ -2016,9 +2016,13 @@ impl Column {
         Self::from_expr(self.expr().clone().list().sort(opts), None)
     }
 
-    /// Distinct elements in list (PySpark array_distinct). Order not guaranteed.
+    /// Distinct elements in list (PySpark array_distinct). Preserves first-occurrence order.
     pub fn array_distinct(&self) -> Column {
-        Self::from_expr(self.expr().clone().list().unique(), None)
+        let expr = self.expr().clone().map(
+            crate::udfs::apply_array_distinct_first_order,
+            GetOutput::same_type(),
+        );
+        Self::from_expr(expr, None)
     }
 
     /// Mode aggregation - most frequent value (PySpark mode).

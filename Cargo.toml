@@ -43,6 +43,7 @@ percent-encoding = "2"
 strsim = "0.11"
 crc32fast = "1.4"
 twox-hash = "1.6"
+murmur3 = "0.5"
 soundex = "0.2"
 # Pin to address RUSTSEC-2026-0007 (integer overflow in BytesMut::reserve; transitive via polars/deltalake)
 bytes = "1.11.1"
