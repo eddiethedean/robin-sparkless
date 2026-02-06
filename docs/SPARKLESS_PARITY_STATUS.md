@@ -21,10 +21,10 @@ cargo test pyspark_parity_fixtures
 
 | Source | Converted | Passing | Failing | Skipped |
 |--------|-----------|---------|--------|---------|
-| Hand-written (`tests/fixtures/*.json`) | — | 159 | 0 | 2 (array_distinct, with_curdate_now) |
+| Hand-written (`tests/fixtures/*.json`) | — | 160 | 0 | 1 (with_curdate_now) |
 | Sparkless converted (`tests/fixtures/converted/*.json`) | 226 | 0 | 0 | 226 (all skipped: expected shape from converter; run `regenerate_expected_from_pyspark.py` with PySpark to fix) |
 
-**Target: 50+ tests passing** (hand-written + converted). **Current: 159 passing** (hand-written; array_distinct, with_curdate_now skipped). **Phase 25 completed**: plan interpreter, expression interpreter (all scalar functions), 3 plan fixtures (`tests/fixtures/plans/`: filter_select_limit, join_simple, with_column_functions), create_dataframe_from_rows. Phase 22: datetime extensions. Phase 21: ordering, aggregates, numeric. Phase 19–18: aggregates, array/map/struct. Phase 17–15: datetime/unix, regexp, aliases, string, math. **Phase 27** (Sparkless integration) target: 200+ Sparkless tests passing with robin backend (after Phase 26 publish Rust crate). CI runs parity on hand-written (and optionally converted) fixtures; when Sparkless repo is available, run `make sparkless-parity` and update this doc.
+**Target: 50+ tests passing** (hand-written + converted). **Current: 160 passing** (hand-written; with_curdate_now skipped). **Phase 25 completed**: plan interpreter, expression interpreter (all scalar functions), 3 plan fixtures (`tests/fixtures/plans/`: filter_select_limit, join_simple, with_column_functions), create_dataframe_from_rows. Phase 22: datetime extensions. Phase 21: ordering, aggregates, numeric. Phase 19–18: aggregates, array/map/struct. Phase 17–15: datetime/unix, regexp, aliases, string, math. **Phase 27** (Sparkless integration) target: 200+ Sparkless tests passing with robin backend (after Phase 26 publish Rust crate). CI runs parity on hand-written (and optionally converted) fixtures; when Sparkless repo is available, run `make sparkless-parity` and update this doc.
 
 ### When Sparkless repo is available
 
@@ -36,6 +36,10 @@ cargo test pyspark_parity_fixtures
 ## Window parity (Sparkless issues #22–#35)
 
 Window functions are implemented and covered by hand-written parity fixtures: `row_number_window`, `rank_window`, `lag_lead_window`, `first_value_window`, `last_value_window`, `percent_rank_window`, `cume_dist_window`, `ntile_window`, `nth_value_window`. The harness in `tests/parity.rs` supports row_number, rank, dense_rank, lag, lead, first_value, last_value, percent_rank, cume_dist, ntile. Sum-over-window and approx_count_distinct window are supported via the same harness. When running Sparkless tests with robin backend, ensure the adapter uses these APIs.
+
+## Array parity (Sparkless issues #36–#49)
+
+Array functions are implemented and covered by hand-written parity fixtures: `array_contains`, `array_distinct` (first-occurrence order), `array_join`, `array_position`, `array_remove`, `array_sort`, `array_union`, `element_at`, `explode`, `size`/`array_size`, plus `array_append`, `array_insert`, `array_intersect`, `array_except`, `array_prepend`, `array_sum`, `arrays_overlap`, `arrays_zip`, `zip_with`. Converted fixtures in `tests/fixtures/converted/` for array_* are currently skipped until expected is regenerated from PySpark. When running Sparkless tests with robin backend, ensure the adapter uses these APIs.
 
 ## Failure reasons (converted fixtures)
 

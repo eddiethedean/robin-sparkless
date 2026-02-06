@@ -138,23 +138,22 @@ pub fn apply_array_distinct_first_order(column: Column) -> PolarsResult<Option<C
     let inner_dtype = list_ca.inner_dtype().clone();
     let out = list_ca.try_apply_amortized(|amort_s| {
         let list_s = amort_s.as_ref().as_list();
-        let len = list_s.len();
-        let mut indices: Vec<u32> = Vec::new();
-        for i in 0..len {
-            let av_i = list_s.get(i);
-            let is_dup = (0..i).any(|j| list_s.get(j) == av_i);
+        let mut result: Vec<Series> = Vec::new();
+        for elem in list_s.amortized_iter().flatten() {
+            let taken = elem.deep_clone();
+            let is_dup = result.iter().any(|s| s.get(0).ok() == taken.get(0).ok());
             if !is_dup {
-                indices.push(i as u32);
+                result.push(taken);
             }
         }
-        if indices.is_empty() {
+        if result.is_empty() {
             Ok(Series::new_empty(PlSmallStr::EMPTY, &inner_dtype))
         } else {
-            let idx_ca = UInt32Chunked::from_vec("".into(), indices);
-            let taken = list_s.take(&idx_ca).map_err(|e| {
-                PolarsError::ComputeError(format!("array_distinct take: {e}").into())
-            })?;
-            Ok(taken.into_series())
+            let mut combined = result.remove(0);
+            for s in result {
+                combined.extend(&s)?;
+            }
+            Ok(combined)
         }
     })?;
     Ok(Some(Column::new(name, out.into_series())))
