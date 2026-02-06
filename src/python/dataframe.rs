@@ -287,9 +287,11 @@ impl PyDataFrame {
             "left" => JoinType::Left,
             "right" => JoinType::Right,
             "outer" => JoinType::Outer,
+            "left_semi" | "semi" => JoinType::LeftSemi,
+            "left_anti" | "anti" => JoinType::LeftAnti,
             _ => {
                 return Err(pyo3::exceptions::PyValueError::new_err(
-                    "how must be 'inner', 'left', 'right', or 'outer'",
+                    "how must be 'inner', 'left', 'right', 'outer', 'left_semi', or 'left_anti'",
                 ));
             }
         };

@@ -9,12 +9,12 @@ use crate::functions::{
     date_from_unix_date, day, dayofmonth, dayofweek, dayofyear, degrees, endswith, expm1,
     factorial, find_in_set, format_number, from_unixtime, get, hypot, ifnull, ilike, isnotnull,
     isnull, lcase, left, like, ln, log10, log1p, log2, map_concat, map_contains_key,
-    map_filter_value_gt, map_from_entries, map_zip_with_coalesce, md5, next_day, nvl, overlay,
-    pmod, power, quarter, radians, regexp_count, regexp_instr, regexp_substr,
-    replace as rs_replace, right, rint, rlike, sha1, sha2, signum, sin, sinh, split_part,
+    map_filter_value_gt, map_from_entries, map_zip_with_coalesce, md5, month, next_day, nullif,
+    nvl, overlay, pmod, power, quarter, radians, regexp_count, regexp_instr, regexp_substr,
+    replace as rs_replace, right, rint, rlike, sha1, sha2, signum, sin, sinh, split, split_part,
     startswith, tan, tanh, timestamp_micros, timestamp_millis, timestamp_seconds, to_degrees,
     to_radians, try_add, try_cast as rs_try_cast, try_divide, try_multiply, try_subtract, typeof_,
-    ucase, unbase64, unix_date, unix_timestamp, weekofyear, zip_with_coalesce,
+    ucase, unbase64, unix_date, unix_timestamp, weekofyear, year, zip_with_coalesce,
 };
 use pyo3::prelude::*;
 
@@ -488,6 +488,10 @@ impl PyColumn {
             .map(|inner| PyColumn { inner })
             .map_err(|e| pyo3::exceptions::PyValueError::new_err(e))
     }
+    /// PySpark alias for cast. Cast the column to the given type.
+    fn astype(&self, type_name: &str) -> PyResult<Self> {
+        self.cast(type_name)
+    }
     fn isnan(&self) -> Self {
         PyColumn {
             inner: rs_isnan(&self.inner),
@@ -536,6 +540,24 @@ impl PyColumn {
     fn dayofmonth(&self) -> Self {
         PyColumn {
             inner: dayofmonth(&self.inner),
+        }
+    }
+    /// Extract year from date/timestamp column (PySpark year).
+    fn year(&self) -> Self {
+        PyColumn {
+            inner: year(&self.inner),
+        }
+    }
+    /// Extract month from date/timestamp column (PySpark month).
+    fn month(&self) -> Self {
+        PyColumn {
+            inner: month(&self.inner),
+        }
+    }
+    /// Return null if self equals other, else self (PySpark nullif).
+    fn nullif(&self, other: &PyColumn) -> Self {
+        PyColumn {
+            inner: nullif(&self.inner, &other.inner),
         }
     }
     fn to_degrees(&self) -> Self {
@@ -791,6 +813,12 @@ impl PyColumn {
         }
     }
 
+    /// Split string by delimiter into list of strings (PySpark split).
+    fn split(&self, delimiter: &str) -> Self {
+        PyColumn {
+            inner: split(&self.inner, delimiter),
+        }
+    }
     /// Split by delimiter and return 1-based part (PySpark split_part).
     fn split_part(&self, delimiter: &str, part_num: i64) -> Self {
         PyColumn {

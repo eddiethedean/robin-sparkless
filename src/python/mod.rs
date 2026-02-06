@@ -10,15 +10,15 @@ use crate::functions::{
     dayname, dayofmonth, dayofweek, dayofyear, days, degrees, endswith, expm1, extract, factorial,
     find_in_set, format_number, format_string, from_unixtime, from_utc_timestamp,
     greatest as rs_greatest, hours, hypot, ifnull, ilike, isnan as rs_isnan, isnotnull, isnull,
-    lcase, least as rs_least, left, like, ln, localtimestamp, log10, log1p, log2, make_date,
-    make_interval, make_timestamp, make_timestamp_ntz, md5, minutes, months, months_between,
-    next_day, now, nvl, nvl2, overlay, pmod, power, quarter, radians, regexp_count, regexp_instr,
-    regexp_substr, replace as rs_replace, right, rint, rlike, sha1, sha2, signum, sin, sinh,
-    split_part, startswith, substr, tan, tanh, timestamp_micros, timestamp_millis,
-    timestamp_seconds, timestampadd, timestampdiff, to_degrees, to_radians, to_timestamp,
-    to_unix_timestamp, to_utc_timestamp, try_cast as rs_try_cast, ucase, unbase64, unix_date,
-    unix_micros, unix_millis, unix_seconds, unix_timestamp, unix_timestamp_now, weekday,
-    weekofyear, years,
+    lcase, least as rs_least, left, like, ln, localtimestamp, log, log10, log1p, log2,
+    log_with_base, make_date, make_interval, make_timestamp, make_timestamp_ntz, md5, minutes,
+    month, months, months_between, next_day, now, nullif, nvl, nvl2, overlay, pmod, power, quarter,
+    radians, regexp_count, regexp_instr, regexp_substr, replace as rs_replace, right, rint, rlike,
+    sha1, sha2, signum, sin, sinh, split, split_part, startswith, substr, tan, tanh,
+    timestamp_micros, timestamp_millis, timestamp_seconds, timestampadd, timestampdiff, to_degrees,
+    to_radians, to_timestamp, to_unix_timestamp, to_utc_timestamp, try_cast as rs_try_cast, ucase,
+    unbase64, unix_date, unix_micros, unix_millis, unix_seconds, unix_timestamp,
+    unix_timestamp_now, weekday, weekofyear, year, years,
 };
 use crate::functions::{
     array_agg, arrays_overlap, arrays_zip, assert_true as rs_assert_true, bit_and, bit_count,
@@ -225,15 +225,19 @@ fn robin_sparkless(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("least", wrap_pyfunction!(py_least, m)?)?;
     m.add("nvl", wrap_pyfunction!(py_nvl, m)?)?;
     m.add("ifnull", wrap_pyfunction!(py_ifnull, m)?)?;
+    m.add("nullif", wrap_pyfunction!(py_nullif, m)?)?;
     m.add("nvl2", wrap_pyfunction!(py_nvl2, m)?)?;
     m.add("substr", wrap_pyfunction!(py_substr, m)?)?;
     m.add("power", wrap_pyfunction!(py_power, m)?)?;
     m.add("ln", wrap_pyfunction!(py_ln, m)?)?;
+    m.add("log", wrap_pyfunction!(py_log, m)?)?;
     m.add("ceiling", wrap_pyfunction!(py_ceiling, m)?)?;
     m.add("lcase", wrap_pyfunction!(py_lcase, m)?)?;
     m.add("ucase", wrap_pyfunction!(py_ucase, m)?)?;
     m.add("day", wrap_pyfunction!(py_day, m)?)?;
     m.add("dayofmonth", wrap_pyfunction!(py_dayofmonth, m)?)?;
+    m.add("year", wrap_pyfunction!(py_year, m)?)?;
+    m.add("month", wrap_pyfunction!(py_month, m)?)?;
     m.add("to_degrees", wrap_pyfunction!(py_to_degrees, m)?)?;
     m.add("to_radians", wrap_pyfunction!(py_to_radians, m)?)?;
     m.add("isnull", wrap_pyfunction!(py_isnull, m)?)?;
@@ -250,6 +254,7 @@ fn robin_sparkless(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("regexp_count", wrap_pyfunction!(py_regexp_count, m)?)?;
     m.add("regexp_instr", wrap_pyfunction!(py_regexp_instr, m)?)?;
     m.add("regexp_substr", wrap_pyfunction!(py_regexp_substr, m)?)?;
+    m.add("split", wrap_pyfunction!(py_split, m)?)?;
     m.add("split_part", wrap_pyfunction!(py_split_part, m)?)?;
     m.add("find_in_set", wrap_pyfunction!(py_find_in_set, m)?)?;
     m.add("format_string", wrap_pyfunction!(py_format_string, m)?)?;
@@ -1688,6 +1693,16 @@ fn py_ln(col: &PyColumn) -> PyColumn {
     }
 }
 #[pyfunction]
+#[pyo3(signature = (col, base=None))]
+fn py_log(col: &PyColumn, base: Option<f64>) -> PyColumn {
+    PyColumn {
+        inner: match base {
+            None => log(&col.inner),
+            Some(b) => log_with_base(&col.inner, b),
+        },
+    }
+}
+#[pyfunction]
 fn py_ceiling(col: &PyColumn) -> PyColumn {
     PyColumn {
         inner: ceiling(&col.inner),
@@ -1715,6 +1730,24 @@ fn py_day(col: &PyColumn) -> PyColumn {
 fn py_dayofmonth(col: &PyColumn) -> PyColumn {
     PyColumn {
         inner: dayofmonth(&col.inner),
+    }
+}
+#[pyfunction]
+fn py_year(col: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: year(&col.inner),
+    }
+}
+#[pyfunction]
+fn py_month(col: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: month(&col.inner),
+    }
+}
+#[pyfunction]
+fn py_nullif(col1: &PyColumn, col2: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: nullif(&col1.inner, &col2.inner),
     }
 }
 #[pyfunction]
@@ -1822,6 +1855,12 @@ fn py_regexp_substr(str: &PyColumn, regexp: &str) -> PyColumn {
     }
 }
 
+#[pyfunction]
+fn py_split(src: &PyColumn, delimiter: &str) -> PyColumn {
+    PyColumn {
+        inner: split(&src.inner, delimiter),
+    }
+}
 #[pyfunction]
 #[pyo3(signature = (src, delimiter, part_num))]
 fn py_split_part(src: &PyColumn, delimiter: &str, part_num: i64) -> PyColumn {
