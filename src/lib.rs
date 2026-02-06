@@ -19,6 +19,7 @@
 
 pub mod column;
 pub mod dataframe;
+pub(crate) mod date_utils;
 pub mod expression;
 pub mod functions;
 pub mod plan;

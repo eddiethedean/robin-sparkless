@@ -22,7 +22,8 @@ pub fn parse_sql(query: &str) -> Result<Statement, PolarsError> {
             .into(),
         ));
     }
-    let stmt = stmts.into_iter().next().expect("exactly one statement");
+    // Length check above guarantees exactly one element.
+    let stmt = stmts.into_iter().next().unwrap();
     match &stmt {
         Statement::Query(_) => {}
         _ => {

@@ -1561,7 +1561,9 @@ fn expr_from_fn_rest(name: &str, args: &[Value]) -> Result<Expr, PlanExprError> 
             let exprs: Result<Vec<Expr>, _> = args.iter().map(expr_from_value).collect();
             let cols: Vec<Column> = exprs?.into_iter().map(expr_to_column).collect();
             let refs: Vec<&Column> = cols.iter().collect();
-            Ok(create_map(&refs).into_expr())
+            Ok(create_map(&refs)
+                .map_err(|e| PlanExprError(e.to_string()))?
+                .into_expr())
         }
         "map_keys" => {
             require_args(name, args, 1)?;

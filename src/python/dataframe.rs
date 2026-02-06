@@ -1413,7 +1413,7 @@ pub(crate) fn any_value_to_py(
         AnyValue::String(s) => s.to_string().into_bound_py_any(py).map(Into::into),
         AnyValue::StringOwned(s) => s.to_string().into_bound_py_any(py).map(Into::into),
         AnyValue::Date(days) => {
-            let epoch = chrono::NaiveDate::from_ymd_opt(1970, 1, 1).unwrap();
+            let epoch = crate::date_utils::epoch_naive_date();
             let d = epoch + chrono::TimeDelta::days(days as i64);
             d.format("%Y-%m-%d")
                 .to_string()

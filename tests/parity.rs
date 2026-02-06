@@ -3295,7 +3295,9 @@ fn parse_with_column_expr(src: &str) -> Result<Expr, String> {
             cols.push(robin_sparkless::Column::from_expr(expr, None));
         }
         let col_refs: Vec<&robin_sparkless::Column> = cols.iter().collect();
-        return Ok(create_map(&col_refs).into_expr());
+        return Ok(create_map(&col_refs)
+            .map_err(|e| e.to_string())?
+            .into_expr());
     }
     if s.starts_with("map_concat(") {
         let inner = extract_first_arg(s, "map_concat(")?;

@@ -267,8 +267,7 @@ impl SparkSession {
                     Series::new(name.as_str().into(), vals)
                 }
                 "date" => {
-                    let epoch = NaiveDate::from_ymd_opt(1970, 1, 1)
-                        .ok_or_else(|| PolarsError::ComputeError("invalid epoch date".into()))?;
+                    let epoch = crate::date_utils::epoch_naive_date();
                     let vals: Vec<Option<i32>> = rows
                         .iter()
                         .map(|row| {
