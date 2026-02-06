@@ -592,6 +592,18 @@ impl DataFrame {
         transformations::melt(self, id_vars, value_vars, self.case_sensitive)
     }
 
+    /// Pivot (wide format). PySpark pivot. Stub: not yet implemented; use crosstab for two-column count.
+    pub fn pivot(
+        &self,
+        _pivot_col: &str,
+        _values: Option<Vec<&str>>,
+    ) -> Result<DataFrame, PolarsError> {
+        Err(PolarsError::InvalidOperation(
+            "pivot is not yet implemented; use crosstab(col1, col2) for two-column cross-tabulation."
+                .into(),
+        ))
+    }
+
     /// Set difference keeping duplicates. PySpark exceptAll.
     pub fn except_all(&self, other: &DataFrame) -> Result<DataFrame, PolarsError> {
         transformations::except_all(self, other, self.case_sensitive)

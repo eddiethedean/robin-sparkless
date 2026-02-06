@@ -380,6 +380,14 @@ impl PyDataFrame {
         Ok(PyDataFrame { inner: df })
     }
 
+    /// Pivot (wide format). PySpark pivot. Stub: not yet implemented.
+    #[pyo3(signature = (pivot_col, values=None))]
+    fn pivot(&self, _pivot_col: &str, _values: Option<Vec<String>>) -> PyResult<PyDataFrame> {
+        Err(pyo3::exceptions::PyNotImplementedError::new_err(
+            "pivot is not yet implemented; use crosstab(col1, col2) for two-column cross-tabulation.",
+        ))
+    }
+
     /// Drop rows containing null values. Optionally only in specified columns.
     ///
     /// Args:
