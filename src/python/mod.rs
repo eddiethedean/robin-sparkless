@@ -167,8 +167,42 @@ fn py_execute_plan(
 /// Key entry points: ``SparkSession.builder()``, ``col()``, ``lit()``, ``when()``,
 /// ``sum()`` / ``avg()`` / ``count()``, and DataFrame methods ``filter``, ``select``,
 /// ``group_by``, ``join``, etc.
+///
+/// Multiprocessing / pytest-xdist: Polars (and thus robin-sparkless) is not fork-safe.
+/// When using pytest-xdist (``pytest -n N``) or multiprocessing with fork, workers may
+/// crash ("node down: Not properly terminated"). To reduce this risk, call
+/// ``configure_for_multiprocessing()`` as early as possible (e.g. in conftest.py), or
+/// set ``ROBIN_SPARKLESS_MULTIPROCESSING=1`` before running. Prefer fewer workers
+/// (e.g. ``-n 4``) or serial (``-n 0``) when using the Robin backend. For custom
+/// multiprocessing, use ``multiprocessing.get_context("spawn")`` instead of fork.
+/// Limit Polars to a single thread for fork-safety when using multiprocessing
+/// (e.g. pytest-xdist, multiprocessing.Pool). Must be called before any
+/// SparkSession/DataFrame operations. See docs on multiprocessing/fork safety.
+fn set_polars_single_thread_if_requested() {
+    if std::env::var("ROBIN_SPARKLESS_MULTIPROCESSING").is_ok() {
+        std::env::set_var("POLARS_MAX_THREADS", "1");
+    }
+}
+
+/// Configure robin-sparkless for use from forked worker processes (pytest-xdist,
+/// multiprocessing with fork). Limits Polars to a single thread to reduce
+/// deadlocks. Call this as early as possible, before any SparkSession or
+/// DataFrame operations.
+///
+/// Example for pytest (conftest.py)::
+///
+///     import robin_sparkless
+///     robin_sparkless.configure_for_multiprocessing()
+///
+/// Alternatively, set ``ROBIN_SPARKLESS_MULTIPROCESSING=1`` before running.
+#[pyfunction]
+fn py_configure_for_multiprocessing() {
+    std::env::set_var("POLARS_MAX_THREADS", "1");
+}
+
 #[pymodule]
 fn robin_sparkless(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    set_polars_single_thread_if_requested();
     m.add_class::<PySparkSession>()?;
     m.add_class::<PySparkSessionBuilder>()?;
     m.add_class::<PyDataFrame>()?;
@@ -486,6 +520,10 @@ fn robin_sparkless(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("randn", wrap_pyfunction!(py_randn, m)?)?;
     m.add("broadcast", wrap_pyfunction!(py_broadcast, m)?)?;
     m.add("execute_plan", wrap_pyfunction!(py_execute_plan, m)?)?;
+    m.add(
+        "configure_for_multiprocessing",
+        wrap_pyfunction!(py_configure_for_multiprocessing, m)?,
+    )?;
     Ok(())
 }
 
