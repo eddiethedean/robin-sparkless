@@ -583,6 +583,36 @@ def test_create_dataframe_from_rows_schema_pyspark_parity() -> None:
     assert result == EXPECTED_CREATE_DATAFRAME_FROM_ROWS_PARITY
 
 
+def test_regexp_extract_all_and_select_with_expression() -> None:
+    """regexp_extract_all and select with Column expressions (issue #176)."""
+    import robin_sparkless as rs
+
+    spark = rs.SparkSession.builder().app_name("test").get_or_create()
+    data = [
+        {"s": "a1 b22 c333"},
+        {"s": "no-digits"},
+        {"s": None},
+    ]
+    schema = [("s", "string")]
+    df = spark.create_dataframe_from_rows(data, schema)
+    # PySpark-style: select with expression (regexp_extract_all returns array of matches)
+    result = df.select([rs.regexp_extract_all(rs.col("s"), r"\d+", 0).alias("m")])
+    rows = result.collect()
+    assert len(rows) == 3
+    assert rows[0]["m"] == ["1", "22", "333"]
+    assert rows[1]["m"] == []
+    assert rows[2]["m"] is None
+    # Also support select with varargs: select(expr)
+    result2 = df.select(rs.regexp_extract_all(rs.col("s"), r"\d+", 0).alias("m"))
+    rows2 = result2.collect()
+    assert rows2 == rows
+    # Column names still work: select(["s"]) and select("s")
+    result3 = df.select(["s"])
+    assert result3.collect()[0]["s"] == "a1 b22 c333"
+    result4 = df.select("s")
+    assert result4.collect()[0]["s"] == "a1 b22 c333"
+
+
 def test_pivot_raises_not_implemented() -> None:
     """pivot() raises NotImplementedError (#156 stub)."""
     import robin_sparkless as rs
