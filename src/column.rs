@@ -1212,6 +1212,26 @@ impl Column {
         Self::from_expr(self.expr().clone() * other.expr().clone(), None)
     }
 
+    /// Add another column or literal (PySpark +). Broadcasts scalars.
+    pub fn add(&self, other: &Column) -> Column {
+        Self::from_expr(self.expr().clone() + other.expr().clone(), None)
+    }
+
+    /// Subtract another column or literal (PySpark -). Broadcasts scalars.
+    pub fn subtract(&self, other: &Column) -> Column {
+        Self::from_expr(self.expr().clone() - other.expr().clone(), None)
+    }
+
+    /// Divide by another column or literal (PySpark /). Broadcasts scalars.
+    pub fn divide(&self, other: &Column) -> Column {
+        Self::from_expr(self.expr().clone() / other.expr().clone(), None)
+    }
+
+    /// Modulo (PySpark %). Broadcasts scalars.
+    pub fn mod_(&self, other: &Column) -> Column {
+        Self::from_expr(self.expr().clone() % other.expr().clone(), None)
+    }
+
     /// Square root (PySpark sqrt)
     pub fn sqrt(&self) -> Column {
         Self::from_expr(self.expr().clone().sqrt(), None)

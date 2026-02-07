@@ -18,7 +18,33 @@ use crate::functions::{
     year, zip_with_coalesce,
 };
 use crate::functions::{schema_of_csv, schema_of_json, to_csv};
+use polars::prelude::{lit, NULL};
 use pyo3::prelude::*;
+
+/// Convert a Python value to RsColumn (for operator overloads). Accepts Column or scalar (int, float, bool, str, None).
+fn py_any_to_column(value: &Bound<'_, pyo3::types::PyAny>) -> PyResult<RsColumn> {
+    if let Ok(pycol) = value.downcast::<PyColumn>() {
+        return Ok(pycol.borrow().inner.clone());
+    }
+    if value.is_none() {
+        return Ok(RsColumn::from_expr(lit(NULL), None));
+    }
+    if let Ok(x) = value.extract::<i64>() {
+        return Ok(RsColumn::from_expr(lit(x), None));
+    }
+    if let Ok(x) = value.extract::<f64>() {
+        return Ok(RsColumn::from_expr(lit(x), None));
+    }
+    if let Ok(x) = value.extract::<bool>() {
+        return Ok(RsColumn::from_expr(lit(x), None));
+    }
+    if let Ok(x) = value.extract::<String>() {
+        return Ok(RsColumn::from_expr(lit(x.as_str()), None));
+    }
+    Err(pyo3::exceptions::PyTypeError::new_err(
+        "arithmetic operands must be Column or scalar (int, float, bool, str, None)",
+    ))
+}
 
 /// Python wrapper for Column (expression).
 /// Expression representing a column or computed value for use in DataFrame operations.
@@ -108,6 +134,86 @@ impl PyColumn {
     /// Logical OR with another boolean column. Also supports Python | operator.
     fn __or__(&self, other: &PyColumn) -> PyResult<Self> {
         Ok(self.or_(other))
+    }
+
+    /// Add (self + other). PySpark: col + col or col + scalar. Accepts Column or int/float/bool/str/None.
+    fn __add__(&self, other: &Bound<'_, pyo3::types::PyAny>) -> PyResult<Self> {
+        let other_col = py_any_to_column(other)?;
+        Ok(PyColumn {
+            inner: self.inner.add(&other_col),
+        })
+    }
+
+    /// Reflected add (other + self). Enables scalar + col (e.g. 2 + col("x")).
+    fn __radd__(&self, other: &Bound<'_, pyo3::types::PyAny>) -> PyResult<Self> {
+        let other_col = py_any_to_column(other)?;
+        Ok(PyColumn {
+            inner: other_col.add(&self.inner),
+        })
+    }
+
+    /// Subtract (self - other). PySpark: col - col or col - scalar.
+    fn __sub__(&self, other: &Bound<'_, pyo3::types::PyAny>) -> PyResult<Self> {
+        let other_col = py_any_to_column(other)?;
+        Ok(PyColumn {
+            inner: self.inner.subtract(&other_col),
+        })
+    }
+
+    /// Reflected subtract (other - self). Enables scalar - col.
+    fn __rsub__(&self, other: &Bound<'_, pyo3::types::PyAny>) -> PyResult<Self> {
+        let other_col = py_any_to_column(other)?;
+        Ok(PyColumn {
+            inner: other_col.subtract(&self.inner),
+        })
+    }
+
+    /// Multiply (self * other). PySpark: col * col or col * scalar (e.g. col("a") * 2).
+    fn __mul__(&self, other: &Bound<'_, pyo3::types::PyAny>) -> PyResult<Self> {
+        let other_col = py_any_to_column(other)?;
+        Ok(PyColumn {
+            inner: self.inner.multiply(&other_col),
+        })
+    }
+
+    /// Reflected multiply (other * self). Enables scalar * col (e.g. 3 * col("x")).
+    fn __rmul__(&self, other: &Bound<'_, pyo3::types::PyAny>) -> PyResult<Self> {
+        let other_col = py_any_to_column(other)?;
+        Ok(PyColumn {
+            inner: other_col.multiply(&self.inner),
+        })
+    }
+
+    /// True division (self / other). PySpark: col / col or col / scalar.
+    fn __truediv__(&self, other: &Bound<'_, pyo3::types::PyAny>) -> PyResult<Self> {
+        let other_col = py_any_to_column(other)?;
+        Ok(PyColumn {
+            inner: self.inner.divide(&other_col),
+        })
+    }
+
+    /// Reflected true division (other / self).
+    fn __rtruediv__(&self, other: &Bound<'_, pyo3::types::PyAny>) -> PyResult<Self> {
+        let other_col = py_any_to_column(other)?;
+        Ok(PyColumn {
+            inner: other_col.divide(&self.inner),
+        })
+    }
+
+    /// Modulo (self % other). PySpark: col % col or col % scalar.
+    fn __mod__(&self, other: &Bound<'_, pyo3::types::PyAny>) -> PyResult<Self> {
+        let other_col = py_any_to_column(other)?;
+        Ok(PyColumn {
+            inner: self.inner.mod_(&other_col),
+        })
+    }
+
+    /// Reflected modulo (other % self).
+    fn __rmod__(&self, other: &Bound<'_, pyo3::types::PyAny>) -> PyResult<Self> {
+        let other_col = py_any_to_column(other)?;
+        Ok(PyColumn {
+            inner: other_col.mod_(&self.inner),
+        })
     }
 
     /// Logical AND with another boolean column.
