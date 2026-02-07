@@ -8,7 +8,9 @@ mod transformations;
 pub use aggregations::{CubeRollupData, GroupedData};
 pub use joins::{join, JoinType};
 pub use stats::DataFrameStat;
-pub use transformations::{filter, order_by, order_by_exprs, select, with_column, DataFrameNa};
+pub use transformations::{
+    filter, order_by, order_by_exprs, select, select_with_exprs, with_column, DataFrameNa,
+};
 
 use crate::column::Column;
 use crate::functions::SortOrder;
@@ -144,6 +146,13 @@ impl DataFrame {
     }
 
     /// Select columns (returns a new DataFrame).
+    /// Accepts either column names (strings) or Column expressions (e.g. from regexp_extract_all(...).alias("m")).
+    /// Column names are resolved according to case sensitivity.
+    pub fn select_exprs(&self, exprs: Vec<Expr>) -> Result<DataFrame, PolarsError> {
+        transformations::select_with_exprs(self, exprs, self.case_sensitive)
+    }
+
+    /// Select columns by name (returns a new DataFrame).
     /// Column names are resolved according to case sensitivity.
     pub fn select(&self, cols: Vec<&str>) -> Result<DataFrame, PolarsError> {
         let resolved: Vec<String> = cols

@@ -13,7 +13,7 @@ use crate::functions::{
     isnotnull, isnull, json_tuple, lcase, least as rs_least, left, like, ln, localtimestamp, log,
     log10, log1p, log2, log_with_base, make_date, make_interval, make_timestamp,
     make_timestamp_ntz, md5, minutes, month, months, months_between, next_day, now, nullif, nvl,
-    nvl2, overlay, pmod, power, quarter, radians, regexp_count, regexp_instr, regexp_substr,
+    nvl2, overlay, pmod, power, quarter, radians, regexp_count, regexp_extract_all, regexp_instr, regexp_substr,
     replace as rs_replace, right, rint, rlike, schema_of_csv, schema_of_json, sha1, sha2, signum,
     sin, sinh, split, split_part, startswith, substr, tan, tanh, timestamp_micros,
     timestamp_millis, timestamp_seconds, timestampadd, timestampdiff, to_csv, to_degrees,
@@ -256,6 +256,7 @@ fn robin_sparkless(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("regexp_count", wrap_pyfunction!(py_regexp_count, m)?)?;
     m.add("regexp_instr", wrap_pyfunction!(py_regexp_instr, m)?)?;
     m.add("regexp_substr", wrap_pyfunction!(py_regexp_substr, m)?)?;
+    m.add("regexp_extract_all", wrap_pyfunction!(py_regexp_extract_all, m)?)?;
     m.add("split", wrap_pyfunction!(py_split, m)?)?;
     m.add("split_part", wrap_pyfunction!(py_split_part, m)?)?;
     m.add("find_in_set", wrap_pyfunction!(py_find_in_set, m)?)?;
@@ -1861,6 +1862,31 @@ fn py_regexp_substr(str: &PyColumn, regexp: &str) -> PyColumn {
     PyColumn {
         inner: regexp_substr(&str.inner, regexp),
     }
+}
+
+/// Extract all non-overlapping matches of regex as an array of strings (PySpark regexp_extract_all).
+///
+/// For each string in the column, finds all matches of the pattern and returns them as an array.
+/// Null in → null out. Empty array if no matches.
+///
+/// Args:
+///     col: String Column to extract from.
+///     pattern: Regex pattern (string).
+///     idx: Regex group index (0 = full match). Currently only 0 is supported.
+///
+/// Returns:
+///     Column: Array of strings (all matches). PySpark-style signature.
+#[pyfunction]
+#[pyo3(signature = (col, pattern, idx=0))]
+fn py_regexp_extract_all(col: &PyColumn, pattern: &str, idx: i32) -> PyResult<PyColumn> {
+    if idx != 0 {
+        return Err(pyo3::exceptions::PyNotImplementedError::new_err(
+            "regexp_extract_all: group index != 0 is not yet supported; use idx=0 for full match",
+        ));
+    }
+    Ok(PyColumn {
+        inner: regexp_extract_all(&col.inner, pattern),
+    })
 }
 
 #[pyfunction]

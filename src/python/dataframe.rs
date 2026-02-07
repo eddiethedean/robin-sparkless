@@ -4,9 +4,9 @@ use crate::dataframe::JoinType;
 use crate::dataframe::{CubeRollupData, WriteFormat, WriteMode};
 use crate::functions::SortOrder;
 use crate::{DataFrame, GroupedData};
-use polars::prelude::Expr;
+use polars::prelude::{col, Expr};
 use pyo3::prelude::*;
-use pyo3::types::PyDict;
+use pyo3::types::{PyDict, PyList, PyTuple};
 use std::path::Path;
 use std::sync::RwLock;
 
@@ -119,21 +119,50 @@ impl PyDataFrame {
         Ok(PyDataFrame { inner: df })
     }
 
-    /// Return a DataFrame with only the specified columns (by name).
+    /// Return a DataFrame with the specified columns or expressions.
     ///
     /// Args:
-    ///     cols: List of column names to keep. Order is preserved.
+    ///     *cols: Column names (str) and/or Column expressions (e.g. ``regexp_extract_all(col("s"), r"\\d+", 0).alias("m")``).
+    ///         Supports both ``select("a", "b")`` and ``select([col("a"), col("b")])`` (PySpark-style).
+    ///         Order is preserved. Column names are resolved according to schema.
     ///
     /// Returns:
     ///     DataFrame (lazy). Missing columns raise RuntimeError at execution.
     ///
     /// Raises:
-    ///     RuntimeError: If a column name is not in the schema.
-    fn select(&self, cols: Vec<String>) -> PyResult<PyDataFrame> {
-        let refs: Vec<&str> = cols.iter().map(|s| s.as_str()).collect();
+    ///     TypeError: If an item is not str or Column.
+    ///     RuntimeError: If a column name is not in the schema or expression evaluation fails.
+    #[pyo3(signature = (*cols))]
+    fn select(&self, cols: &Bound<'_, PyTuple>) -> PyResult<PyDataFrame> {
+        let items: Vec<Bound<'_, pyo3::types::PyAny>> = if cols.len() == 1 {
+            let first = cols.get_item(0)?;
+            if let Ok(lst) = first.downcast::<PyList>() {
+                lst.iter().collect()
+            } else {
+                vec![first]
+            }
+        } else {
+            cols.iter().map(|o| o.clone()).collect()
+        };
+        let mut exprs: Vec<Expr> = Vec::with_capacity(items.len());
+        for item in items.iter() {
+            if let Ok(name) = item.extract::<std::string::String>() {
+                let resolved = self
+                    .inner
+                    .resolve_column_name(&name)
+                    .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+                exprs.push(col(resolved.as_str()));
+            } else if let Ok(py_col) = item.extract::<PyRef<PyColumn>>() {
+                exprs.push(py_col.inner.expr().clone());
+            } else {
+                return Err(pyo3::exceptions::PyTypeError::new_err(
+                    "select() items must be str (column name) or Column (expression)",
+                ));
+            }
+        }
         let df = self
             .inner
-            .select(refs)
+            .select_exprs(exprs)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
         Ok(PyDataFrame { inner: df })
     }
@@ -1429,6 +1458,17 @@ pub(crate) fn any_value_to_py(
             let dt = chrono::DateTime::from_timestamp_micros(micros).unwrap_or_default();
             let s = dt.format("%Y-%m-%dT%H:%M:%S%.6f").to_string();
             s.into_bound_py_any(py).map(Into::into)
+        }
+        AnyValue::List(s) => {
+            let py_list = pyo3::types::PyList::empty(py);
+            for i in 0..s.len() {
+                let av = s.get(i).map_err(|e| {
+                    pyo3::exceptions::PyRuntimeError::new_err(e.to_string())
+                })?;
+                let py_val = any_value_to_py(py, av)?;
+                py_list.append(py_val)?;
+            }
+            Ok(py_list.into())
         }
         other => Err(pyo3::exceptions::PyRuntimeError::new_err(format!(
             "unsupported type for collect: {:?}",
