@@ -482,9 +482,7 @@ def test_issue_179_with_column_expression_operators() -> None:
     ]
 
     # lit(2) + col(x) - literal on left
-    df2 = spark.create_dataframe_from_rows(
-        [{"x": 10}, {"x": 20}], [("x", "int")]
-    )
+    df2 = spark.create_dataframe_from_rows([{"x": 10}, {"x": 20}], [("x", "int")])
     result2 = df2.with_column("plus_two", F.lit(2) + F.col("x")).collect()
     assert result2 == [
         {"x": 10, "plus_two": 12},
