@@ -1462,9 +1462,9 @@ pub(crate) fn any_value_to_py(
         AnyValue::List(s) => {
             let py_list = pyo3::types::PyList::empty(py);
             for i in 0..s.len() {
-                let av = s.get(i).map_err(|e| {
-                    pyo3::exceptions::PyRuntimeError::new_err(e.to_string())
-                })?;
+                let av = s
+                    .get(i)
+                    .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
                 let py_val = any_value_to_py(py, av)?;
                 py_list.append(py_val)?;
             }

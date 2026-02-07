@@ -13,9 +13,9 @@ use crate::functions::{
     isnotnull, isnull, json_tuple, lcase, least as rs_least, left, like, ln, localtimestamp, log,
     log10, log1p, log2, log_with_base, make_date, make_interval, make_timestamp,
     make_timestamp_ntz, md5, minutes, month, months, months_between, next_day, now, nullif, nvl,
-    nvl2, overlay, pmod, power, quarter, radians, regexp_count, regexp_extract_all, regexp_instr, regexp_substr,
-    replace as rs_replace, right, rint, rlike, schema_of_csv, schema_of_json, sha1, sha2, signum,
-    sin, sinh, split, split_part, startswith, substr, tan, tanh, timestamp_micros,
+    nvl2, overlay, pmod, power, quarter, radians, regexp_count, regexp_extract_all, regexp_instr,
+    regexp_substr, replace as rs_replace, right, rint, rlike, schema_of_csv, schema_of_json, sha1,
+    sha2, signum, sin, sinh, split, split_part, startswith, substr, tan, tanh, timestamp_micros,
     timestamp_millis, timestamp_seconds, timestampadd, timestampdiff, to_csv, to_degrees,
     to_radians, to_timestamp, to_unix_timestamp, to_utc_timestamp, try_cast as rs_try_cast, ucase,
     unbase64, unix_date, unix_micros, unix_millis, unix_seconds, unix_timestamp,
@@ -256,7 +256,10 @@ fn robin_sparkless(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("regexp_count", wrap_pyfunction!(py_regexp_count, m)?)?;
     m.add("regexp_instr", wrap_pyfunction!(py_regexp_instr, m)?)?;
     m.add("regexp_substr", wrap_pyfunction!(py_regexp_substr, m)?)?;
-    m.add("regexp_extract_all", wrap_pyfunction!(py_regexp_extract_all, m)?)?;
+    m.add(
+        "regexp_extract_all",
+        wrap_pyfunction!(py_regexp_extract_all, m)?,
+    )?;
     m.add("split", wrap_pyfunction!(py_split, m)?)?;
     m.add("split_part", wrap_pyfunction!(py_split_part, m)?)?;
     m.add("find_in_set", wrap_pyfunction!(py_find_in_set, m)?)?;
