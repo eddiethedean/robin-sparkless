@@ -22,6 +22,20 @@ pub fn select(
     ))
 }
 
+/// Select using column expressions (e.g. F.regexp_extract_all(...).alias("m")). Preserves case_sensitive.
+pub fn select_with_exprs(
+    df: &DataFrame,
+    exprs: Vec<Expr>,
+    case_sensitive: bool,
+) -> Result<DataFrame, PolarsError> {
+    let lf = df.df.as_ref().clone().lazy();
+    let out_df = lf.select(exprs).collect()?;
+    Ok(super::DataFrame::from_polars_with_options(
+        out_df,
+        case_sensitive,
+    ))
+}
+
 /// Filter rows using a Polars expression. Preserves case_sensitive on result.
 pub fn filter(
     df: &DataFrame,
