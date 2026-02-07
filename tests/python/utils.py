@@ -73,3 +73,53 @@ def get_session():
     import robin_sparkless as rs
 
     return rs.SparkSession.builder().app_name("test").get_or_create()
+
+
+def _row_to_dict(r) -> dict:
+    """Convert PySpark Row to plain Python dict (handles asDict, Java list->list)."""
+    d = r.asDict() if hasattr(r, "asDict") else dict(r)
+    out = {}
+    for k, v in d.items():
+        if (
+            v is not None
+            and hasattr(v, "__iter__")
+            and not isinstance(v, (str, bytes, dict))
+        ):
+            try:
+                out[k] = list(v)
+            except (TypeError, ValueError):
+                out[k] = v
+        else:
+            out[k] = v
+    return out
+
+
+def _try_pyspark():
+    """Return (pyspark SparkSession, F) or (None, None) if PySpark unavailable."""
+    try:
+        from pyspark.sql import SparkSession as PySparkSession
+        from pyspark.sql import functions as F
+
+        spark = PySparkSession.builder.master("local[1]").appName("test").getOrCreate()
+        return spark, F
+    except Exception:
+        return None, None
+
+
+def run_with_pyspark_expected(
+    pyspark_fn,
+    fallback_expected: list[dict],
+) -> list[dict]:
+    """Run the same logic in PySpark if available; else return fallback expected.
+
+    pyspark_fn(spark, F) should create a DataFrame and return list of row dicts.
+    Used for parity tests where we want live PySpark comparison when available.
+    """
+    pyspark_spark, F = _try_pyspark()
+    if pyspark_spark is not None and F is not None:
+        try:
+            rows = pyspark_fn(pyspark_spark, F)
+            return [_row_to_dict(r) for r in rows]
+        except Exception:
+            pass
+    return fallback_expected
