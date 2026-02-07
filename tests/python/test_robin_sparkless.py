@@ -596,9 +596,7 @@ def test_regexp_extract_all_and_select_with_expression() -> None:
     schema = [("s", "string")]
     df = spark.create_dataframe_from_rows(data, schema)
     # PySpark-style: select with expression (regexp_extract_all returns array of matches)
-    result = df.select(
-        [rs.regexp_extract_all(rs.col("s"), r"\d+", 0).alias("m")]
-    )
+    result = df.select([rs.regexp_extract_all(rs.col("s"), r"\d+", 0).alias("m")])
     rows = result.collect()
     assert len(rows) == 3
     assert rows[0]["m"] == ["1", "22", "333"]
