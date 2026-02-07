@@ -16,22 +16,62 @@ import argparse
 import json
 import re
 from pathlib import Path
-from typing import Any
 
 
 # PySpark typing re-exports to skip
 PYSPARK_TYPING_NAMES = frozenset(
     {
-        "Any", "Callable", "Dict", "Iterable", "List", "Optional", "Tuple",
-        "Type", "Union", "ValuesView", "TYPE_CHECKING", "overload", "cast",
-        "AbstractSet", "ByteString", "Container", "ContextManager", "Counter",
-        "DefaultDict", "Deque", "FrozenSet", "Generator", "Generic", "Hashable",
-        "ItemsView", "KeysView", "Mapping", "MappingView", "MutableMapping",
-        "MutableSet", "Sequence", "Set", "Sized", "TypeVar", "ParamSpec",
-        "Concatenate", "TypedDict", "NamedTuple", "Protocol", "runtime_checkable",
-        "SupportsAbs", "SupportsBytes", "SupportsComplex", "SupportsFloat",
-        "SupportsIndex", "SupportsInt", "SupportsRound", "warnings", "attr_name",
-        "attr_value", "Functions",
+        "Any",
+        "Callable",
+        "Dict",
+        "Iterable",
+        "List",
+        "Optional",
+        "Tuple",
+        "Type",
+        "Union",
+        "ValuesView",
+        "TYPE_CHECKING",
+        "overload",
+        "cast",
+        "AbstractSet",
+        "ByteString",
+        "Container",
+        "ContextManager",
+        "Counter",
+        "DefaultDict",
+        "Deque",
+        "FrozenSet",
+        "Generator",
+        "Generic",
+        "Hashable",
+        "ItemsView",
+        "KeysView",
+        "Mapping",
+        "MappingView",
+        "MutableMapping",
+        "MutableSet",
+        "Sequence",
+        "Set",
+        "Sized",
+        "TypeVar",
+        "ParamSpec",
+        "Concatenate",
+        "TypedDict",
+        "NamedTuple",
+        "Protocol",
+        "runtime_checkable",
+        "SupportsAbs",
+        "SupportsBytes",
+        "SupportsComplex",
+        "SupportsFloat",
+        "SupportsIndex",
+        "SupportsInt",
+        "SupportsRound",
+        "warnings",
+        "attr_name",
+        "attr_value",
+        "Functions",
     }
 )
 
@@ -148,10 +188,7 @@ def load_annotations(annotations_path: Path) -> dict[str, list[str]]:
     if not annotations_path.exists():
         return {}
     data = load_json(annotations_path)
-    return {
-        k: v for k, v in data.items()
-        if k != "_comment" and isinstance(v, list)
-    }
+    return {k: v for k, v in data.items() if k != "_comment" and isinstance(v, list)}
 
 
 def _norm_for_annotation(name: str) -> str:
@@ -191,15 +228,21 @@ def compare_functions(py_data: dict, robin_data: dict) -> list[dict]:
         classification = classify_item(py_sig, robin_sig)
         py_args = (py_sig or {}).get("args") or []
         robin_args = (robin_sig or {}).get("args") or []
-        results.append({
-            "name": name,
-            "classification": classification,
-            "pyspark_signature": f"{name}({args_signature(py_args)})" if py_sig else None,
-            "robin_signature": f"{name}({args_signature(robin_args)})" if robin_sig else None,
-            "pyspark_args": py_args,
-            "robin_args": robin_args,
-            "notes": "",
-        })
+        results.append(
+            {
+                "name": name,
+                "classification": classification,
+                "pyspark_signature": f"{name}({args_signature(py_args)})"
+                if py_sig
+                else None,
+                "robin_signature": f"{name}({args_signature(robin_args)})"
+                if robin_sig
+                else None,
+                "pyspark_args": py_args,
+                "robin_args": robin_args,
+                "notes": "",
+            }
+        )
     return results
 
 
@@ -216,14 +259,20 @@ def compare_class_methods(
         classification = classify_item(py_sig, robin_sig)
         py_args = (py_sig or {}).get("args") or []
         robin_args = (robin_sig or {}).get("args") or []
-        results.append({
-            "class": class_name,
-            "name": name,
-            "classification": classification,
-            "pyspark_signature": f"{name}({args_signature(py_args)})" if py_sig else None,
-            "robin_signature": f"{name}({args_signature(robin_args)})" if robin_sig else None,
-            "notes": "",
-        })
+        results.append(
+            {
+                "class": class_name,
+                "name": name,
+                "classification": classification,
+                "pyspark_signature": f"{name}({args_signature(py_args)})"
+                if py_sig
+                else None,
+                "robin_signature": f"{name}({args_signature(robin_args)})"
+                if robin_sig
+                else None,
+                "notes": "",
+            }
+        )
     return results
 
 
@@ -268,8 +317,14 @@ def write_gap_analysis_md(out: dict, path: Path, pyspark_source: str) -> None:
         "|-------|-------|---------|---------|-------|",
     ]
     for cls_name in [
-        "SparkSession", "DataFrame", "Column", "GroupedData",
-        "DataFrameReader", "DataFrameWriter", "Window", "Catalog",
+        "SparkSession",
+        "DataFrame",
+        "Column",
+        "GroupedData",
+        "DataFrameReader",
+        "DataFrameWriter",
+        "Window",
+        "Catalog",
     ]:
         methods = classes.get(cls_name) or []
         exact = sum(1 for m in methods if m.get("classification") == "exact")
@@ -278,27 +333,31 @@ def write_gap_analysis_md(out: dict, path: Path, pyspark_source: str) -> None:
         extra = sum(1 for m in methods if m.get("classification") == "extra")
         lines.append(f"| {cls_name} | {exact} | {partial} | {missing} | {extra} |")
 
-    lines.extend([
-        "",
-        "---",
-        "",
-        "## Function details (sample)",
-        "",
-        "### Exact match",
-        "",
-    ])
+    lines.extend(
+        [
+            "",
+            "---",
+            "",
+            "## Function details (sample)",
+            "",
+            "### Exact match",
+            "",
+        ]
+    )
     exact_funcs = [f for f in funcs if f.get("classification") == "exact"]
     for r in exact_funcs[:30]:
         lines.append(f"- `{r.get('pyspark_signature', r.get('name', ''))}`")
     if len(exact_funcs) > 30:
         lines.append(f"- ... and {len(exact_funcs) - 30} more")
-    lines.extend([
-        "",
-        "### Partial (param mismatch)",
-        "",
-        "| PySpark | Robin |",
-        "|---------|-------|",
-    ])
+    lines.extend(
+        [
+            "",
+            "### Partial (param mismatch)",
+            "",
+            "| PySpark | Robin |",
+            "|---------|-------|",
+        ]
+    )
     partial_funcs = [f for f in funcs if f.get("classification") == "partial"]
     for r in partial_funcs[:25]:
         py_s = r.get("pyspark_signature") or ""
@@ -306,21 +365,25 @@ def write_gap_analysis_md(out: dict, path: Path, pyspark_source: str) -> None:
         lines.append(f"| `{py_s}` | `{robin_s}` |")
     if len(partial_funcs) > 25:
         lines.append(f"| *... and {len(partial_funcs) - 25} more* | |")
-    lines.extend([
-        "",
-        "### Missing (PySpark only)",
-        "",
-    ])
+    lines.extend(
+        [
+            "",
+            "### Missing (PySpark only)",
+            "",
+        ]
+    )
     missing_funcs = [f for f in funcs if f.get("classification") == "missing"]
     for r in missing_funcs[:50]:
         lines.append(f"- `{r.get('pyspark_signature', r.get('name', ''))}`")
     if len(missing_funcs) > 50:
         lines.append(f"- ... and {len(missing_funcs) - 50} more")
-    lines.extend([
-        "",
-        "### Extra (robin-sparkless only)",
-        "",
-    ])
+    lines.extend(
+        [
+            "",
+            "### Extra (robin-sparkless only)",
+            "",
+        ]
+    )
     extra_funcs = [f for f in funcs if f.get("classification") == "extra"]
     for r in extra_funcs[:30]:
         lines.append(f"- `{r.get('robin_signature', r.get('name', ''))}`")
@@ -328,40 +391,79 @@ def write_gap_analysis_md(out: dict, path: Path, pyspark_source: str) -> None:
         lines.append(f"- ... and {len(extra_funcs) - 30} more")
     # Semantic annotations summary
     all_items = list(funcs) + sum(((v or []) for v in classes.values()), [])
-    stub_items = [r for r in all_items if r.get("semantic_flags") and "stub" in r.get("semantic_flags", [])]
-    diverges_items = [r for r in all_items if r.get("semantic_flags") and "diverges" in r.get("semantic_flags", [])]
-    deferred_items = [r for r in all_items if r.get("semantic_flags") and "deferred" in r.get("semantic_flags", [])]
+    stub_items = [
+        r
+        for r in all_items
+        if r.get("semantic_flags") and "stub" in r.get("semantic_flags", [])
+    ]
+    diverges_items = [
+        r
+        for r in all_items
+        if r.get("semantic_flags") and "diverges" in r.get("semantic_flags", [])
+    ]
+    deferred_items = [
+        r
+        for r in all_items
+        if r.get("semantic_flags") and "deferred" in r.get("semantic_flags", [])
+    ]
     if stub_items or diverges_items or deferred_items:
-        lines.extend([
+        lines.extend(
+            [
+                "",
+                "---",
+                "",
+                "## Semantic annotations",
+                "",
+                "Items tagged from [docs/gap_annotations.json](gap_annotations.json) and [PYSPARK_DIFFERENCES.md](PYSPARK_DIFFERENCES.md):",
+                "",
+            ]
+        )
+        if stub_items:
+            lines.extend(
+                ["**stub** (no-op or placeholder):", ""]
+                + [
+                    f"- `{r.get('name', r.get('pyspark_signature', ''))}`"
+                    for r in stub_items[:25]
+                ]
+                + [""]
+            )
+        if diverges_items:
+            lines.extend(
+                ["**diverges** (behavior differs from PySpark):", ""]
+                + [
+                    f"- `{r.get('name', r.get('pyspark_signature', ''))}`"
+                    for r in diverges_items[:20]
+                ]
+                + [""]
+            )
+        if deferred_items:
+            lines.extend(
+                ["**deferred** (out of scope):", ""]
+                + [
+                    f"- `{r.get('name', r.get('pyspark_signature', ''))}`"
+                    for r in deferred_items[:25]
+                ]
+                + [""]
+            )
+        lines.append(
+            "Parity fixture coverage: see [PARITY_STATUS.md](PARITY_STATUS.md)."
+        )
+
+    lines.extend(
+        [
             "",
             "---",
             "",
-            "## Semantic annotations",
+            "## Regeneration",
             "",
-            "Items tagged from [docs/gap_annotations.json](gap_annotations.json) and [PYSPARK_DIFFERENCES.md](PYSPARK_DIFFERENCES.md):",
+            "```bash",
+            "python scripts/extract_pyspark_api_from_repo.py --clone --branch v3.5.0",
+            "python scripts/extract_robin_api_from_source.py  # or use existing signatures_robin_sparkless.json",
+            "python scripts/gap_analysis_pyspark_repo.py --write-md docs/GAP_ANALYSIS_PYSPARK_REPO.md",
+            "```",
             "",
-        ])
-        if stub_items:
-            lines.extend(["**stub** (no-op or placeholder):", ""] + [f"- `{r.get('name', r.get('pyspark_signature', ''))}`" for r in stub_items[:25]] + [""])
-        if diverges_items:
-            lines.extend(["**diverges** (behavior differs from PySpark):", ""] + [f"- `{r.get('name', r.get('pyspark_signature', ''))}`" for r in diverges_items[:20]] + [""])
-        if deferred_items:
-            lines.extend(["**deferred** (out of scope):", ""] + [f"- `{r.get('name', r.get('pyspark_signature', ''))}`" for r in deferred_items[:25]] + [""])
-        lines.append("Parity fixture coverage: see [PARITY_STATUS.md](PARITY_STATUS.md).")
-
-    lines.extend([
-        "",
-        "---",
-        "",
-        "## Regeneration",
-        "",
-        "```bash",
-        "python scripts/extract_pyspark_api_from_repo.py --clone --branch v3.5.0",
-        "python scripts/extract_robin_api_from_source.py  # or use existing signatures_robin_sparkless.json",
-        "python scripts/gap_analysis_pyspark_repo.py --write-md docs/GAP_ANALYSIS_PYSPARK_REPO.md",
-        "```",
-        "",
-    ])
+        ]
+    )
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("\n".join(lines))
 
@@ -407,10 +509,16 @@ def main() -> int:
     py_path = Path(args.pyspark)
     robin_path = Path(args.robin)
     if not py_path.exists():
-        print(f"Missing: {py_path}. Run extract_pyspark_api_from_repo.py first.", file=__import__("sys").stderr)
+        print(
+            f"Missing: {py_path}. Run extract_pyspark_api_from_repo.py first.",
+            file=__import__("sys").stderr,
+        )
         return 1
     if not robin_path.exists():
-        print(f"Missing: {robin_path}. Run export_robin_signatures.py or extract_robin_api_from_source.py.", file=__import__("sys").stderr)
+        print(
+            f"Missing: {robin_path}. Run export_robin_signatures.py or extract_robin_api_from_source.py.",
+            file=__import__("sys").stderr,
+        )
         return 1
 
     py_data = load_json(py_path)
@@ -423,9 +531,16 @@ def main() -> int:
 
     func_comparison = compare_functions(py_data, robin_data)
     class_names = [
-        "SparkSession", "DataFrame", "Column", "GroupedData",
-        "DataFrameReader", "DataFrameWriter", "DataFrameWriterV2",
-        "Window", "WindowSpec", "Catalog",
+        "SparkSession",
+        "DataFrame",
+        "Column",
+        "GroupedData",
+        "DataFrameReader",
+        "DataFrameWriter",
+        "DataFrameWriterV2",
+        "Window",
+        "WindowSpec",
+        "Catalog",
     ]
     class_comparisons = {}
     for c in class_names:
@@ -476,4 +591,5 @@ def main() -> int:
 
 if __name__ == "__main__":
     import sys
+
     sys.exit(main())

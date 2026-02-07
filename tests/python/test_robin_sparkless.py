@@ -22,11 +22,11 @@ def test_import_module() -> None:
 
 
 def test_configure_for_multiprocessing() -> None:
-    """configure_for_multiprocessing() exists and can be called (no-op after first use)."""
+    """_configure_for_multiprocessing() exists and can be called (no-op after first use)."""
     import robin_sparkless as rs
 
     # Call is idempotent; limits Polars to 1 thread for fork-safety
-    rs.configure_for_multiprocessing()
+    rs._configure_for_multiprocessing()
 
 
 def test_spark_session_builder() -> None:
@@ -470,7 +470,7 @@ def test_issue_179_with_column_expression_operators() -> None:
     spark = F.SparkSession.builder().app_name("test").get_or_create()
     data = [{"a": 1}, {"a": 2}, {"a": 3}]
     schema = [("a", "int")]
-    df = spark.create_dataframe_from_rows(data, schema)
+    df = spark._create_dataframe_from_rows(data, schema)
 
     # col * lit(2) - operator style
     expr = F.col("a") * F.lit(2)
@@ -482,7 +482,7 @@ def test_issue_179_with_column_expression_operators() -> None:
     ]
 
     # lit(2) + col(x) - literal on left
-    df2 = spark.create_dataframe_from_rows([{"x": 10}, {"x": 20}], [("x", "int")])
+    df2 = spark._create_dataframe_from_rows([{"x": 10}, {"x": 20}], [("x", "int")])
     result2 = df2.with_column("plus_two", F.lit(2) + F.col("x")).collect()
     assert result2 == [
         {"x": 10, "plus_two": 12},
@@ -535,7 +535,7 @@ def test_sparkless_parity_order_by_desc_returns_rows() -> None:
     import robin_sparkless as rs
 
     spark = rs.SparkSession.builder().app_name("test").get_or_create()
-    df = spark.create_dataframe_from_rows(
+    df = spark._create_dataframe_from_rows(
         [[1, "a"], [2, "b"], [3, "c"]], [("id", "bigint"), ("name", "string")]
     )
     out = df.order_by(["id"], ascending=[False])
@@ -609,7 +609,7 @@ def test_sql_select_where_returns_rows() -> None:
     assert rows[0]["name"] == "b" and rows[1]["name"] == "c"
 
 
-# Predetermined expected output for create_dataframe_from_rows (int/string/boolean/date).
+# Predetermined expected output for _create_dataframe_from_rows (int/string/boolean/date).
 # Derived from PySpark 3.5 createDataFrame with schema "id INT, name STRING, ok BOOLEAN, d DATE"
 # and rows [(1, "Alice", True, date(2024,1,15)), (2, "Bob", False, date(2024,6,10))].
 # Tests run only robin-sparkless and assert against this; no PySpark at test runtime.
@@ -619,8 +619,8 @@ EXPECTED_CREATE_DATAFRAME_FROM_ROWS_PARITY = [
 ]
 
 
-def test_create_dataframe_from_rows_schema_pyspark_parity() -> None:
-    """create_dataframe_from_rows matches predetermined PySpark expectations (#151)."""
+def test__create_dataframe_from_rows_schema_pyspark_parity() -> None:
+    """_create_dataframe_from_rows matches predetermined PySpark expectations (#151)."""
     import robin_sparkless as rs
 
     schema = [("id", "int"), ("name", "string"), ("ok", "boolean"), ("d", "date")]
@@ -629,7 +629,7 @@ def test_create_dataframe_from_rows_schema_pyspark_parity() -> None:
         {"id": 2, "name": "Bob", "ok": False, "d": "2024-06-10"},
     ]
     spark = rs.SparkSession.builder().app_name("test").get_or_create()
-    df = spark.create_dataframe_from_rows(rows, schema)
+    df = spark._create_dataframe_from_rows(rows, schema)
     result = sorted(df.collect(), key=lambda r: r["id"])
     assert result == EXPECTED_CREATE_DATAFRAME_FROM_ROWS_PARITY
 
@@ -645,7 +645,7 @@ def test_regexp_extract_all_and_select_with_expression() -> None:
         {"s": None},
     ]
     schema = [("s", "string")]
-    df = spark.create_dataframe_from_rows(data, schema)
+    df = spark._create_dataframe_from_rows(data, schema)
     # PySpark-style: select with expression (regexp_extract_all returns array of matches)
     result = df.select([rs.regexp_extract_all(rs.col("s"), r"\d+", 0).alias("m")])
     rows = result.collect()
@@ -669,7 +669,7 @@ def test_pivot_raises_not_implemented() -> None:
     import robin_sparkless as rs
 
     spark = rs.SparkSession.builder().app_name("test").get_or_create()
-    df = spark.create_dataframe_from_rows(
+    df = spark._create_dataframe_from_rows(
         [[1, "x", 10]], [("id", "bigint"), ("pcol", "string"), ("v", "bigint")]
     )
     with pytest.raises(NotImplementedError, match="pivot is not yet implemented"):

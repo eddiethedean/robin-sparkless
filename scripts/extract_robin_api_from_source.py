@@ -38,9 +38,11 @@ def extract_module_functions(mod_rs: Path) -> list[dict[str, Any]]:
 def extract_impl_methods(file_path: Path, struct_name: str) -> list[dict[str, Any]]:
     """Extract fn name(...) from impl StructName {...} using brace counting."""
     text = file_path.read_text(encoding="utf-8", errors="replace")
-    methods = []
+    methods: list[dict[str, Any]] = []
     # Find "impl StructName {" (with optional #[pymethods] before it)
-    impl_re = re.compile(rf"(?:#\[pymethods\]\s*\n\s*)?impl\s+{re.escape(struct_name)}\s*\{{")
+    impl_re = re.compile(
+        rf"(?:#\[pymethods\]\s*\n\s*)?impl\s+{re.escape(struct_name)}\s*\{{"
+    )
     for impl_match in impl_re.finditer(text):
         start = impl_match.end()
         depth = 1
@@ -61,7 +63,9 @@ def extract_impl_methods(file_path: Path, struct_name: str) -> list[dict[str, An
             py_name = m.group(1) or m.group(2)
             if py_name.startswith("__") and py_name.endswith("__"):
                 continue
-            methods.append({"name": py_name, "args": [], "class": struct_name.replace("Py", "")})
+            methods.append(
+                {"name": py_name, "args": [], "class": struct_name.replace("Py", "")}
+            )
     return methods
 
 
@@ -75,7 +79,9 @@ def extract_class_methods_from_file(
     for rust_name, out_name in class_map:
         methods = extract_impl_methods(file_path, rust_name)
         # Normalize class name for output (PyColumn -> Column, etc.)
-        result[out_name] = [{"name": m["name"], "args": m.get("args", [])} for m in methods]
+        result[out_name] = [
+            {"name": m["name"], "args": m.get("args", [])} for m in methods
+        ]
     return result
 
 
