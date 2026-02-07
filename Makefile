@@ -1,4 +1,4 @@
-.PHONY: build test test-rust test-python sparkless-parity bench-python clean check check-full fmt clippy audit outdated deny lint-python all
+.PHONY: build test test-rust test-python sparkless-parity bench-python clean check check-full fmt clippy audit outdated deny lint-python all gap-analysis gap-analysis-quick
 
 # Use stable toolchain when no default is configured (override with RUSTUP_TOOLCHAIN=nightly etc.)
 export RUSTUP_TOOLCHAIN ?= stable
@@ -82,6 +82,21 @@ deny:
 # Run everything: format, lint, security, deny, tests
 all: check
 	@echo "All updates and checks complete"
+
+# Gap analysis: PySpark vs robin-sparkless (from Apache Spark repo)
+# Full pipeline: clone Spark, extract APIs, produce docs/GAP_ANALYSIS_PYSPARK_REPO.{json,md}
+gap-analysis:
+	python3 scripts/extract_pyspark_api_from_repo.py --clone --branch v3.5.0 --output docs/pyspark_api_from_repo.json
+	python3 scripts/extract_robin_api_from_source.py --output docs/robin_api_from_source.json
+	python3 scripts/gap_analysis_pyspark_repo.py --pyspark docs/pyspark_api_from_repo.json --robin docs/robin_api_from_source.json --write-md docs/GAP_ANALYSIS_PYSPARK_REPO.md
+	@echo "Gap analysis complete. See docs/GAP_ANALYSIS_PYSPARK_REPO.md"
+
+# Quick gap analysis (no clone): use existing pyspark_api_from_repo.json and robin signatures
+gap-analysis-quick:
+	@test -f docs/pyspark_api_from_repo.json || (echo "Run 'make gap-analysis' first to create docs/pyspark_api_from_repo.json" && exit 1)
+	python3 scripts/extract_robin_api_from_source.py --output docs/robin_api_from_source.json
+	python3 scripts/gap_analysis_pyspark_repo.py --pyspark docs/pyspark_api_from_repo.json --robin docs/robin_api_from_source.json --write-md docs/GAP_ANALYSIS_PYSPARK_REPO.md
+	@echo "Gap analysis complete. See docs/GAP_ANALYSIS_PYSPARK_REPO.md"
 
 # Clean
 clean:
