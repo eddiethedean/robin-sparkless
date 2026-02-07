@@ -195,7 +195,6 @@ def test_select_expression_and_column_name_pyspark_parity() -> None:
 
 def test_select_list_of_column_names_still_works() -> None:
     """select(['a','b']) continues to work (backward compatibility)."""
-    import robin_sparkless as rs
 
     spark = get_session()
     data = [{"a": 1, "b": 2}, {"a": 3, "b": 4}]
@@ -208,7 +207,6 @@ def test_select_list_of_column_names_still_works() -> None:
 
 def test_select_varargs_column_names_still_works() -> None:
     """select('a', 'b') continues to work (backward compatibility)."""
-    import robin_sparkless as rs
 
     spark = get_session()
     data = [{"a": 1, "b": 2}, {"a": 3, "b": 4}]

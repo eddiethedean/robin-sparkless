@@ -462,6 +462,49 @@ def test_sparkless_parity_with_column_returns_rows() -> None:
     assert rows[0]["double_id"] == 2 and rows[1]["double_id"] == 4
 
 
+def test_issue_179_with_column_expression_operators() -> None:
+    """with_column accepts Column expressions built with +, -, *, / (PySpark parity)."""
+    import robin_sparkless as rs
+
+    F = rs
+    spark = F.SparkSession.builder().app_name("test").get_or_create()
+    data = [{"a": 1}, {"a": 2}, {"a": 3}]
+    schema = [("a", "int")]
+    df = spark.create_dataframe_from_rows(data, schema)
+
+    # col * lit(2) - operator style
+    expr = F.col("a") * F.lit(2)
+    result = df.with_column("doubled", expr).collect()
+    assert result == [
+        {"a": 1, "doubled": 2},
+        {"a": 2, "doubled": 4},
+        {"a": 3, "doubled": 6},
+    ]
+
+    # lit(2) + col(x) - literal on left
+    df2 = spark.create_dataframe_from_rows([{"x": 10}, {"x": 20}], [("x", "int")])
+    result2 = df2.with_column("plus_two", F.lit(2) + F.col("x")).collect()
+    assert result2 == [
+        {"x": 10, "plus_two": 12},
+        {"x": 20, "plus_two": 22},
+    ]
+
+    # col * 2 - scalar (PySpark col * 2)
+    result3 = df.with_column("times_two", F.col("a") * 2).collect()
+    assert result3 == [
+        {"a": 1, "times_two": 2},
+        {"a": 2, "times_two": 4},
+        {"a": 3, "times_two": 6},
+    ]
+
+    # 3 * col(x)
+    result4 = df2.with_column("tripled", 3 * F.col("x")).collect()
+    assert result4 == [
+        {"x": 10, "tripled": 30},
+        {"x": 20, "tripled": 60},
+    ]
+
+
 def test_sparkless_parity_drop_returns_rows() -> None:
     """Drop column returns rows. PySpark: drop(cols) preserves row count."""
     import robin_sparkless as rs
