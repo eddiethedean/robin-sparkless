@@ -21,6 +21,14 @@ def test_import_module() -> None:
     assert robin_sparkless is not None
 
 
+def test_configure_for_multiprocessing() -> None:
+    """configure_for_multiprocessing() exists and can be called (no-op after first use)."""
+    import robin_sparkless as rs
+
+    # Call is idempotent; limits Polars to 1 thread for fork-safety
+    rs.configure_for_multiprocessing()
+
+
 def test_spark_session_builder() -> None:
     """SparkSession.builder().app_name(...).get_or_create() works."""
     import robin_sparkless as rs

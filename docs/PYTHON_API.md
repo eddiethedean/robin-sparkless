@@ -50,7 +50,7 @@ Python module is only compiled when the `pyo3` feature is enabled. Default `carg
 | DataFrameNa     | `DataFrameNa` (returned by `df.na()`) | `fill(value: Column)` → `DataFrame`, `drop(subset=None)` → `DataFrame` |
 | Column          | `Column` | ... **Phase 16**: `regexp_count`, `regexp_instr`, `regexp_substr`, `split_part`, `find_in_set`; **Phase 17**: `unix_timestamp`, `from_unixtime`, `timestamp_seconds`, etc., `pmod`, `factorial`; **Phase 19**: `try_divide`, `try_add`, `try_subtract`, `try_multiply`, `bit_length`, `typeof_`; **Phase 21**: `btrim`, `locate`, `conv`, `hex`, `unhex`, `bin`, `getbit`, `to_char`, `to_varchar`, `to_number`, `try_to_number`, `try_to_timestamp`, `str_to_map`, `arrays_overlap`, `arrays_zip`, `explode_outer`, `array_agg`; **Phase 22**: `curdate`, `now`, `localtimestamp`, `date_diff`, `dateadd`, `datepart`, `extract`, `date_part`, `unix_micros`, `unix_millis`, `unix_seconds`, `dayname`, `weekday`, `make_timestamp`, `make_timestamp_ntz`, `make_interval`, `timestampadd`, `timestampdiff`, `days`, `hours`, `minutes`, `months`, `years`, `from_utc_timestamp`, `to_utc_timestamp`, `convert_timezone`, `current_timezone`, `to_timestamp` |
 | GroupedData     | `GroupedData` | `count()`, `sum(column)`, `avg(column)`, `min(column)`, `max(column)`, `agg(exprs)`; **Phase 19**: `any_value(column)`, `bool_and(column)`, `bool_or(column)`, `product(column)`, `collect_list(column)`, `collect_set(column)`, `count_if(column)`, `percentile(column, p)`, `max_by(value_column, ord_column)`, `min_by(value_column, ord_column)` |
-| Functions       | Module-level            | ... **Phase 16**: `regexp_count`, `regexp_instr`, `regexp_substr`, `split_part`, `find_in_set`, `format_string`, `printf`; **Phase 17**: `unix_timestamp`, `to_unix_timestamp`, `from_unixtime`, `make_date`, `timestamp_seconds`, `timestamp_millis`, `timestamp_micros`, `unix_date`, `date_from_unix_date`, `pmod`, `factorial`; **Phase 19**: `try_divide(left, right)`, `try_add`, `try_subtract`, `try_multiply`, `width_bucket(value, min_val, max_val, num_bucket)`, `elt(index, columns)`, `bit_length(column)`, `typeof(column)`; **Phase 20**: `asc`, `desc`, `asc_nulls_first`, `asc_nulls_last`, `desc_nulls_first`, `desc_nulls_last`, `bround`, `median`, `mode`, etc.; **Phase 21**: `btrim(column, trim_str=None)`, `locate(substr, column, pos=1)`, `conv(column, from_base, to_base)`, `hex`, `unhex`, `bin`, `getbit(column, pos)`, `to_char`, `to_varchar`, `to_number`, `try_to_number`, `try_to_timestamp`, `str_to_map(column, pair_delim=None, key_value_delim=None)`, `arrays_overlap`, `arrays_zip`, `explode_outer`, `array_agg`; **Phase 22**: `curdate()`, `now()`, `localtimestamp()`, `date_diff(end, start)`, `dateadd(column, n)`, `datepart(column, field)`, `extract(column, field)`, `date_part(column, field)`, `unix_micros`, `unix_millis`, `unix_seconds`, `dayname`, `weekday`, `make_timestamp(year, month, day, hour, minute, sec)`, `make_timestamp_ntz`, `make_interval(years, months, weeks, days, hours, mins, secs)`, `timestampadd(unit, amount, ts)`, `timestampdiff(unit, start, end)`, `days(n)`, `hours(n)`, `minutes(n)`, `months(n)`, `years(n)`, `from_utc_timestamp(column, tz)`, `to_utc_timestamp(column, tz)`, `convert_timezone(source_tz, target_tz, column)`, `current_timezone()`, `to_timestamp(column)` |
+| Functions       | Module-level            | ... **Phase 16**: `regexp_count`, `regexp_instr`, `regexp_substr`, `split_part`, `find_in_set`, `format_string`, `printf`; **Phase 17**: `unix_timestamp`, `to_unix_timestamp`, `from_unixtime`, `make_date`, `timestamp_seconds`, `timestamp_millis`, `timestamp_micros`, `unix_date`, `date_from_unix_date`, `pmod`, `factorial`; **Phase 19**: `try_divide(left, right)`, `try_add`, `try_subtract`, `try_multiply`, `width_bucket(value, min_val, max_val, num_bucket)`, `elt(index, columns)`, `bit_length(column)`, `typeof(column)`; **Phase 20**: `asc`, `desc`, `asc_nulls_first`, `asc_nulls_last`, `desc_nulls_first`, `desc_nulls_last`, `bround`, `median`, `mode`, etc.; **Phase 21**: `btrim(column, trim_str=None)`, `locate(substr, column, pos=1)`, `conv(column, from_base, to_base)`, `hex`, `unhex`, `bin`, `getbit(column, pos)`, `to_char`, `to_varchar`, `to_number`, `try_to_number`, `try_to_timestamp`, `str_to_map(column, pair_delim=None, key_value_delim=None)`, `arrays_overlap`, `arrays_zip`, `explode_outer`, `array_agg`; **Phase 22**: `curdate()`, `now()`, `localtimestamp()`, `date_diff(end, start)`, `dateadd(column, n)`, `datepart(column, field)`, `extract(column, field)`, `date_part(column, field)`, `unix_micros`, `unix_millis`, `unix_seconds`, `dayname`, `weekday`, `make_timestamp(year, month, day, hour, minute, sec)`, `make_timestamp_ntz`, `make_interval(years, months, weeks, days, hours, mins, secs)`, `timestampadd(unit, amount, ts)`, `timestampdiff(unit, start, end)`, `days(n)`, `hours(n)`, `minutes(n)`, `months(n)`, `years(n)`, `from_utc_timestamp(column, tz)`, `to_utc_timestamp(column, tz)`, `convert_timezone(source_tz, target_tz, column)`, `current_timezone()`, `to_timestamp(column)`; **#178**: `configure_for_multiprocessing()` (fork-safety for pytest-xdist / multiprocessing) |
 
 ## Signature parity (PySpark alignment)
 
@@ -73,6 +73,8 @@ Signatures are exported with `scripts/export_pyspark_signatures.py` and `scripts
   - `is_case_sensitive()` → `bool`
   - **When `sql` feature enabled**: `sql(query: str)` → `DataFrame`; `create_or_replace_temp_view(name: str, df: DataFrame)` → `None`; `table(name: str)` → `DataFrame`
   - **Phase 25 (plan interpreter)**: Module-level `execute_plan(data: list[dict]|list[list], schema: list[tuple[str, str]], plan_json: str)` → `DataFrame`. Run a serialized logical plan; call `.collect()` on the result to get `list[dict]`. `plan_json` is e.g. `json.dumps([{"op": "filter", "payload": ...}, ...])`. See [LOGICAL_PLAN_FORMAT.md](LOGICAL_PLAN_FORMAT.md).
+
+- **Multiprocessing / pytest-xdist**: `configure_for_multiprocessing()` → `None`. Call as early as possible (e.g. in `conftest.py`) before any SparkSession/DataFrame operations when using pytest-xdist (`pytest -n N`) or multiprocessing with fork. Alternatively, set `ROBIN_SPARKLESS_MULTIPROCESSING=1` before running. See [Multiprocessing and pytest-xdist](#multiprocessing-and-pytest-xdist) below.
 
 - **DataFrame**
   - `filter(condition: Column)` → `DataFrame`
@@ -148,6 +150,37 @@ Or manually (with an activated virtualenv):
 maturin develop --features "pyo3,sql,delta"
 pytest tests/python/ -v
 ```
+
+## Multiprocessing and pytest-xdist
+
+robin-sparkless uses [Polars](https://www.pola.rs/), which is multithreaded (Rayon) and **not fork-safe**. When using pytest-xdist (`pytest -n N`) or Python `multiprocessing` with the default `fork` start method on Unix, worker processes may crash with "node down: Not properly terminated".
+
+To reduce this risk:
+
+1. **Call `configure_for_multiprocessing()` early** — before any SparkSession or DataFrame operations. For pytest, add to your `conftest.py`:
+
+   ```python
+   import robin_sparkless as rs
+   rs.configure_for_multiprocessing()
+   ```
+
+2. **Or set the environment variable** before running:
+
+   ```bash
+   ROBIN_SPARKLESS_MULTIPROCESSING=1 pytest tests/ -n 4
+   ```
+
+3. **Use fewer workers or run serially** — e.g. `pytest -n 4` instead of `-n 12`, or `-n 0` for serial execution.
+
+4. **For custom multiprocessing** — use `multiprocessing.get_context("spawn")` instead of the default `fork`:
+
+   ```python
+   from multiprocessing import get_context
+   with get_context("spawn").Pool() as pool:
+       pool.map(my_function, args)
+   ```
+
+See [Polars multiprocessing docs](https://docs.pola.rs/user-guide/misc/multiprocessing/) and [GitHub issue #178](https://github.com/eddiethedean/robin-sparkless/issues/178).
 
 ## Out of scope (this repo)
 

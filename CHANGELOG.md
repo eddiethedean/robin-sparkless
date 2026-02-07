@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **#178 – pytest-xdist / forked worker crashes** — Polars (used by robin-sparkless) is multithreaded and not fork-safe. Added `configure_for_multiprocessing()` to limit Polars to a single thread, reducing worker crashes ("node down: Not properly terminated") when using pytest-xdist (`pytest -n N`) or multiprocessing with fork. Call it early (e.g. in `conftest.py`) or set `ROBIN_SPARKLESS_MULTIPROCESSING=1` before running. See [docs/PYTHON_API.md](docs/PYTHON_API.md#multiprocessing-and-pytest-xdist).
+
 ### Planned
 
 - **Phase 26 – Publish crate**: Prepare and publish robin-sparkless to crates.io (and optionally PyPI via maturin). See [ROADMAP.md](docs/ROADMAP.md) for details.
