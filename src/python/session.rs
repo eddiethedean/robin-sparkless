@@ -88,7 +88,7 @@ impl PySparkSession {
         self.create_dataframe(_py, data, column_names)
     }
 
-    /// Create a DataFrame from row data and an explicit schema.
+    /// Create a DataFrame from row data and an explicit schema (internal / PySpark createDataFrame equivalent).
     ///
     /// Args:
     ///     data: List of rows. Each row is a dict (keyed by column name) or a list of
@@ -102,7 +102,7 @@ impl PySparkSession {
     /// Raises:
     ///     TypeError: If a row is not a dict or list, or a value type is unsupported.
     ///     RuntimeError: If creation fails.
-    fn create_dataframe_from_rows(
+    fn _create_dataframe_from_rows(
         &self,
         py: Python<'_>,
         data: &Bound<'_, pyo3::types::PyAny>,

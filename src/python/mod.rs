@@ -351,12 +351,12 @@ fn robin_sparkless(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("array_intersect", wrap_pyfunction!(py_array_intersect, m)?)?;
     m.add("array_union", wrap_pyfunction!(py_array_union, m)?)?;
     m.add(
-        "zip_with_coalesce",
+        "_zip_with_coalesce",
         wrap_pyfunction!(py_zip_with_coalesce, m)?,
     )?;
     m.add("map_concat", wrap_pyfunction!(py_map_concat, m)?)?;
     m.add(
-        "map_filter_value_gt",
+        "_map_filter_value_gt",
         wrap_pyfunction!(py_map_filter_value_gt, m)?,
     )?;
     m.add(
@@ -368,7 +368,7 @@ fn robin_sparkless(m: &Bound<'_, PyModule>) -> PyResult<()> {
         wrap_pyfunction!(py_map_contains_key, m)?,
     )?;
     m.add(
-        "map_zip_with_coalesce",
+        "_map_zip_with_coalesce",
         wrap_pyfunction!(py_map_zip_with_coalesce, m)?,
     )?;
     m.add("create_map", wrap_pyfunction!(py_create_map, m)?)?;
@@ -473,8 +473,8 @@ fn robin_sparkless(m: &Bound<'_, PyModule>) -> PyResult<()> {
     )?;
     m.add("to_timestamp", wrap_pyfunction!(py_to_timestamp, m)?)?;
     m.add("isin", wrap_pyfunction!(py_isin, m)?)?;
-    m.add("isin_i64", wrap_pyfunction!(py_isin_i64, m)?)?;
-    m.add("isin_str", wrap_pyfunction!(py_isin_str, m)?)?;
+    m.add("_isin_i64", wrap_pyfunction!(py_isin_i64, m)?)?;
+    m.add("_isin_str", wrap_pyfunction!(py_isin_str, m)?)?;
     m.add("url_decode", wrap_pyfunction!(py_url_decode, m)?)?;
     m.add("url_encode", wrap_pyfunction!(py_url_encode, m)?)?;
     m.add("shift_left", wrap_pyfunction!(py_shift_left, m)?)?;
@@ -519,9 +519,9 @@ fn robin_sparkless(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("rand", wrap_pyfunction!(py_rand, m)?)?;
     m.add("randn", wrap_pyfunction!(py_randn, m)?)?;
     m.add("broadcast", wrap_pyfunction!(py_broadcast, m)?)?;
-    m.add("execute_plan", wrap_pyfunction!(py_execute_plan, m)?)?;
+    m.add("_execute_plan", wrap_pyfunction!(py_execute_plan, m)?)?;
     m.add(
-        "configure_for_multiprocessing",
+        "_configure_for_multiprocessing",
         wrap_pyfunction!(py_configure_for_multiprocessing, m)?,
     )?;
     Ok(())

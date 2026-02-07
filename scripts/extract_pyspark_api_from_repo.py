@@ -15,7 +15,6 @@ from __future__ import annotations
 import argparse
 import ast
 import json
-import os
 import shutil
 import subprocess
 import sys
@@ -46,17 +45,61 @@ FILES_TO_PARSE: list[tuple[str, str]] = [
 # Re-exports from typing / other modules to skip in functions.py
 SKIP_FUNCTION_NAMES = frozenset(
     {
-        "Any", "Callable", "Dict", "Iterable", "List", "Optional", "Tuple",
-        "Type", "Union", "ValuesView", "TYPE_CHECKING", "overload", "cast",
-        "AbstractSet", "ByteString", "Container", "ContextManager", "Counter",
-        "DefaultDict", "Deque", "FrozenSet", "Generator", "Generic", "Hashable",
-        "ItemsView", "KeysView", "Mapping", "MappingView", "MutableMapping",
-        "MutableSet", "Sequence", "Set", "Sized", "TypeVar", "ParamSpec",
-        "Concatenate", "TypedDict", "NamedTuple", "Protocol", "runtime_checkable",
-        "SupportsAbs", "SupportsBytes", "SupportsComplex", "SupportsFloat",
-        "SupportsIndex", "SupportsInt", "SupportsRound", "no_type_check",
-        "get_args", "get_origin", "get_type_hints", "warnings", "attr_name",
-        "attr_value", "Functions",
+        "Any",
+        "Callable",
+        "Dict",
+        "Iterable",
+        "List",
+        "Optional",
+        "Tuple",
+        "Type",
+        "Union",
+        "ValuesView",
+        "TYPE_CHECKING",
+        "overload",
+        "cast",
+        "AbstractSet",
+        "ByteString",
+        "Container",
+        "ContextManager",
+        "Counter",
+        "DefaultDict",
+        "Deque",
+        "FrozenSet",
+        "Generator",
+        "Generic",
+        "Hashable",
+        "ItemsView",
+        "KeysView",
+        "Mapping",
+        "MappingView",
+        "MutableMapping",
+        "MutableSet",
+        "Sequence",
+        "Set",
+        "Sized",
+        "TypeVar",
+        "ParamSpec",
+        "Concatenate",
+        "TypedDict",
+        "NamedTuple",
+        "Protocol",
+        "runtime_checkable",
+        "SupportsAbs",
+        "SupportsBytes",
+        "SupportsComplex",
+        "SupportsFloat",
+        "SupportsIndex",
+        "SupportsInt",
+        "SupportsRound",
+        "no_type_check",
+        "get_args",
+        "get_origin",
+        "get_type_hints",
+        "warnings",
+        "attr_name",
+        "attr_value",
+        "Functions",
     }
 )
 
@@ -65,7 +108,16 @@ def clone_repo(branch: str, target_dir: Path) -> bool:
     """Clone Apache Spark repo and checkout branch. Returns True on success."""
     try:
         subprocess.run(
-            ["git", "clone", "--depth", "1", "--branch", branch, SPARK_REPO_URL, str(target_dir)],
+            [
+                "git",
+                "clone",
+                "--depth",
+                "1",
+                "--branch",
+                branch,
+                SPARK_REPO_URL,
+                str(target_dir),
+            ],
             check=True,
             capture_output=True,
             text=True,
@@ -88,9 +140,14 @@ def get_version_from_repo(repo_path: Path, branch: str) -> str:
     if pom.exists():
         try:
             import re
+
             content = pom.read_text()
             # Look for <version>3.5.0</version> in project (not parent)
-            m = re.search(r"<project[^>]*>.*?<version>([\d.]+(?:-SNAPSHOT)?)</version>", content, re.DOTALL)
+            m = re.search(
+                r"<project[^>]*>.*?<version>([\d.]+(?:-SNAPSHOT)?)</version>",
+                content,
+                re.DOTALL,
+            )
             if m:
                 return m.group(1)
         except Exception:
@@ -103,7 +160,7 @@ def param_to_dict(node: ast.arg) -> dict[str, Any]:
     return {
         "name": node.arg,
         "default": None,
-        "annotation": ast.unparse(node.annotation) if node.annotation else None,
+        "annotation": ast.unparse(node.annotation) if node.annotation else None,  # type: ignore[attr-defined]
         "kind": "POSITIONAL_OR_KEYWORD",
     }
 
@@ -112,13 +169,10 @@ def extract_args_from_func(node: ast.FunctionDef) -> list[dict[str, Any]]:
     """Extract argument list from FunctionDef, excluding self/cls."""
     args = []
     # positional only
-    for i, arg in enumerate(node.args.posonlyargs):
+    for arg in node.args.posonlyargs:
         if arg.arg in ("self", "cls"):
             continue
         d = param_to_dict(arg)
-        # default for posonly?
-        default_start = len(node.args.args) - len(node.args.defaults) if node.args.defaults else len(node.args.args)
-        pos = len(node.args.posonlyargs) - len(node.args.defaults) if i >= len(node.args.posonlyargs) - len(node.args.defaults) else None
         args.append(d)
     # regular args
     defaults = node.args.defaults
@@ -131,15 +185,29 @@ def extract_args_from_func(node: ast.FunctionDef) -> list[dict[str, Any]]:
             idx = i - num_required
             if idx < len(defaults):
                 try:
-                    d["default"] = ast.unparse(defaults[idx])
+                    d["default"] = ast.unparse(defaults[idx])  # type: ignore[attr-defined]
                 except Exception:
                     d["default"] = "<expr>"
         args.append(d)
     # *args, **kwargs - simplified
     if node.args.vararg:
-        args.append({"name": node.args.vararg.arg, "default": None, "annotation": None, "kind": "VAR_POSITIONAL"})
+        args.append(
+            {
+                "name": node.args.vararg.arg,
+                "default": None,
+                "annotation": None,
+                "kind": "VAR_POSITIONAL",
+            }
+        )
     if node.args.kwarg:
-        args.append({"name": node.args.kwarg.arg, "default": None, "annotation": None, "kind": "VAR_KEYWORD"})
+        args.append(
+            {
+                "name": node.args.kwarg.arg,
+                "default": None,
+                "annotation": None,
+                "kind": "VAR_KEYWORD",
+            }
+        )
     return args
 
 
@@ -163,11 +231,13 @@ def extract_module_functions(tree: ast.Module) -> list[dict[str, Any]]:
             # Only top-level (parent is Module)
             for child in ast.iter_child_nodes(tree):
                 if child is node:
-                    out.append({
-                        "name": node.name,
-                        "args": extract_args_from_func(node),
-                        "doc_preview": extract_doc_preview(node),
-                    })
+                    out.append(
+                        {
+                            "name": node.name,
+                            "args": extract_args_from_func(node),
+                            "doc_preview": extract_doc_preview(node),
+                        }
+                    )
                     break
     # ast.walk doesn't preserve hierarchy; collect top-level defs manually
     out = []
@@ -175,11 +245,13 @@ def extract_module_functions(tree: ast.Module) -> list[dict[str, Any]]:
         if isinstance(node, ast.FunctionDef):
             if node.name.startswith("_") or node.name in SKIP_FUNCTION_NAMES:
                 continue
-            out.append({
-                "name": node.name,
-                "args": extract_args_from_func(node),
-                "doc_preview": extract_doc_preview(node),
-            })
+            out.append(
+                {
+                    "name": node.name,
+                    "args": extract_args_from_func(node),
+                    "doc_preview": extract_doc_preview(node),
+                }
+            )
     return out
 
 
@@ -192,12 +264,14 @@ def extract_class_methods(tree: ast.Module, class_name: str) -> list[dict[str, A
                 if isinstance(item, ast.FunctionDef):
                     if item.name.startswith("_"):
                         continue
-                    out.append({
-                        "name": item.name,
-                        "args": extract_args_from_func(item),
-                        "doc_preview": extract_doc_preview(item),
-                        "class": class_name,
-                    })
+                    out.append(
+                        {
+                            "name": item.name,
+                            "args": extract_args_from_func(item),
+                            "doc_preview": extract_doc_preview(item),
+                            "class": class_name,
+                        }
+                    )
             break
     return out
 
@@ -264,8 +338,18 @@ def extract_from_repo(repo_path: Path, branch: str) -> dict[str, Any]:
 
     # Sort functions by name
     result["functions"] = sorted(result["functions"], key=lambda x: x["name"])
-    for key in ["DataFrame", "Column", "GroupedData", "SparkSession", "DataFrameReader",
-                "DataFrameWriter", "DataFrameWriterV2", "Window", "WindowSpec", "Catalog"]:
+    for key in [
+        "DataFrame",
+        "Column",
+        "GroupedData",
+        "SparkSession",
+        "DataFrameReader",
+        "DataFrameWriter",
+        "DataFrameWriterV2",
+        "Window",
+        "WindowSpec",
+        "Catalog",
+    ]:
         if key in result and isinstance(result[key], list):
             result[key] = sorted(result[key], key=lambda x: x["name"])
 
@@ -326,7 +410,9 @@ def main() -> int:
         out_path.parent.mkdir(parents=True, exist_ok=True)
         with open(out_path, "w") as f:
             json.dump(result, f, indent=2)
-        print(f"Wrote {out_path} (Spark {result.get('spark_version', '?')}, branch {args.branch})")
+        print(
+            f"Wrote {out_path} (Spark {result.get('spark_version', '?')}, branch {args.branch})"
+        )
         print(f"  functions: {len(result.get('functions', []))}")
         for cls in ["DataFrame", "Column", "GroupedData", "SparkSession"]:
             count = len(result.get(cls, []))

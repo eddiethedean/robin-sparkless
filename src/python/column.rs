@@ -390,21 +390,24 @@ impl PyColumn {
         }
     }
 
-    /// Filter map entries by value > threshold.
+    /// Filter map entries by value > threshold (internal utility).
+    #[pyo3(name = "_map_filter_value_gt")]
     fn map_filter_value_gt(&self, threshold: f64) -> Self {
         PyColumn {
             inner: map_filter_value_gt(&self.inner, threshold),
         }
     }
 
-    /// Zip two arrays with coalesce for length mismatch.
+    /// Zip two arrays with coalesce for length mismatch (internal utility).
+    #[pyo3(name = "_zip_with_coalesce")]
     fn zip_with_coalesce(&self, other: &PyColumn) -> Self {
         PyColumn {
             inner: zip_with_coalesce(&self.inner, &other.inner),
         }
     }
 
-    /// Zip two maps with coalesce.
+    /// Zip two maps with coalesce (internal utility).
+    #[pyo3(name = "_map_zip_with_coalesce")]
     fn map_zip_with_coalesce(&self, other: &PyColumn) -> Self {
         PyColumn {
             inner: map_zip_with_coalesce(&self.inner, &other.inner),

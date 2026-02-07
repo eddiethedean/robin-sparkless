@@ -7,7 +7,7 @@ run the same scenario with PySpark in the test or use precomputed expected
 (see docs/SPARKLESS_PYTHON_TEST_PORT.md).
 
 Multiprocessing / pytest-xdist: When using pytest-xdist (pytest -n N), call
-configure_for_multiprocessing() early to reduce worker crashes. This conftest
+_configure_for_multiprocessing() early to reduce worker crashes. This conftest
 does so automatically.
 """
 
@@ -19,7 +19,7 @@ import pytest
 # Must run before any SparkSession/DataFrame operations.
 import robin_sparkless as _rs  # noqa: F401
 
-_rs.configure_for_multiprocessing()
+_rs._configure_for_multiprocessing()
 
 
 @pytest.fixture
