@@ -1,0 +1,2221 @@
+{
+  "source": "robin_source",
+  "functions": [
+    {
+      "name": "acos",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "acosh",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "add_months",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "array_agg",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "array_append",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "array_compact",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "array_distinct",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "array_except",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "array_insert",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "array_intersect",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "array_prepend",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "array_union",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "arrays_overlap",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "arrays_zip",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "asc",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "asc_nulls_first",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "asc_nulls_last",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "ascii",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "asin",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "asinh",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "assert_true",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "atan",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "atan2",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "atanh",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "avg",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "base64",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "bin",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "bit_and",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "bit_count",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "bit_get",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "bit_length",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "bit_or",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "bit_xor",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "bitwiseNOT",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "bitwise_not",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "broadcast",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "bround",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "btrim",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "cast",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "cbrt",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "ceiling",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "char",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "chr",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "coalesce",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "col",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "configure_for_multiprocessing",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "contains",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "conv",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "convert_timezone",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "cos",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "cosh",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "cot",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "count",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "create_map",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "csc",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "curdate",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "current_catalog",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "current_database",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "current_schema",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "current_timezone",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "current_user",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "date_diff",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "date_from_unix_date",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "date_part",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "dateadd",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "datepart",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "day",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "dayname",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "dayofmonth",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "dayofweek",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "dayofyear",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "days",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "degrees",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "desc",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "desc_nulls_first",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "desc_nulls_last",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "e",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "elt",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "endswith",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "equal_null",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "execute_plan",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "explode_outer",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "expm1",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "extract",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "factorial",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "find_in_set",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "format_number",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "format_string",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "from_csv",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "from_unixtime",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "from_utc_timestamp",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "get",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "get_json_object",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "getbit",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "greatest",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "hash",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "hex",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "hours",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "hypot",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "ifnull",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "ilike",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "inline",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "inline_outer",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "input_file_name",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "isin",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "isin_i64",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "isin_str",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "isnan",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "isnotnull",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "isnull",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "json_array_length",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "json_tuple",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "lcase",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "least",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "left",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "like",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "lit",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "ln",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "localtimestamp",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "locate",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "log",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "log10",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "log1p",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "log2",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "make_date",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "make_interval",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "make_timestamp",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "make_timestamp_ntz",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "map_concat",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "map_contains_key",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "map_filter_value_gt",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "map_from_entries",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "map_zip_with_coalesce",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "max",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "md5",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "median",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "min",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "minutes",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "mode",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "monotonically_increasing_id",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "month",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "months",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "months_between",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "named_struct",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "negate",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "negative",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "next_day",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "now",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "nullif",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "nvl",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "nvl2",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "overlay",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "parse_url",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "pi",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "pmod",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "position",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "positive",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "power",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "printf",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "quarter",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "radians",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "raise_error",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "rand",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "randn",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "regexp_count",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "regexp_extract_all",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "regexp_instr",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "regexp_substr",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "replace",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "right",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "rint",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "rlike",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "schema_of_csv",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "schema_of_json",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "sec",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "sequence",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "sha1",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "sha2",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "shiftLeft",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "shiftRight",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "shift_left",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "shift_right",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "shuffle",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "signum",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "sin",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "sinh",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "spark_partition_id",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "split",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "split_part",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "stack",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "startswith",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "stddev_pop",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "str_to_map",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "struct",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "substr",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "sum",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "tan",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "tanh",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "timestamp_micros",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "timestamp_millis",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "timestamp_seconds",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "timestampadd",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "timestampdiff",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "to_char",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "to_csv",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "to_degrees",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "to_number",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "to_radians",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "to_timestamp",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "to_unix_timestamp",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "to_utc_timestamp",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "to_varchar",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "try_add",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "try_cast",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "try_divide",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "try_multiply",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "try_subtract",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "try_to_number",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "try_to_timestamp",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "typeof",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "ucase",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "unbase64",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "unhex",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "unix_date",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "unix_micros",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "unix_millis",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "unix_seconds",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "unix_timestamp",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "url_decode",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "url_encode",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "user",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "var_pop",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "version",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "weekday",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "weekofyear",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "when",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "width_bucket",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "year",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "years",
+      "args": [],
+      "kind": "function"
+    },
+    {
+      "name": "zip_with_coalesce",
+      "args": [],
+      "kind": "function"
+    }
+  ],
+  "classes": {
+    "Column": [
+      {
+        "name": "alias",
+        "args": []
+      },
+      {
+        "name": "is_null",
+        "args": []
+      },
+      {
+        "name": "is_not_null",
+        "args": []
+      },
+      {
+        "name": "gt",
+        "args": []
+      },
+      {
+        "name": "ge",
+        "args": []
+      },
+      {
+        "name": "lt",
+        "args": []
+      },
+      {
+        "name": "le",
+        "args": []
+      },
+      {
+        "name": "eq",
+        "args": []
+      },
+      {
+        "name": "ne",
+        "args": []
+      },
+      {
+        "name": "and_",
+        "args": []
+      },
+      {
+        "name": "or_",
+        "args": []
+      },
+      {
+        "name": "upper",
+        "args": []
+      },
+      {
+        "name": "lower",
+        "args": []
+      },
+      {
+        "name": "substr",
+        "args": []
+      },
+      {
+        "name": "ascii_",
+        "args": []
+      },
+      {
+        "name": "format_number",
+        "args": []
+      },
+      {
+        "name": "overlay",
+        "args": []
+      },
+      {
+        "name": "char_",
+        "args": []
+      },
+      {
+        "name": "chr_",
+        "args": []
+      },
+      {
+        "name": "base64_",
+        "args": []
+      },
+      {
+        "name": "unbase64_",
+        "args": []
+      },
+      {
+        "name": "sha1_",
+        "args": []
+      },
+      {
+        "name": "sha2_",
+        "args": []
+      },
+      {
+        "name": "md5_",
+        "args": []
+      },
+      {
+        "name": "array_compact",
+        "args": []
+      },
+      {
+        "name": "array_distinct",
+        "args": []
+      },
+      {
+        "name": "array_append",
+        "args": []
+      },
+      {
+        "name": "array_prepend",
+        "args": []
+      },
+      {
+        "name": "array_insert",
+        "args": []
+      },
+      {
+        "name": "array_except",
+        "args": []
+      },
+      {
+        "name": "array_intersect",
+        "args": []
+      },
+      {
+        "name": "array_union",
+        "args": []
+      },
+      {
+        "name": "map_concat",
+        "args": []
+      },
+      {
+        "name": "map_filter_value_gt",
+        "args": []
+      },
+      {
+        "name": "zip_with_coalesce",
+        "args": []
+      },
+      {
+        "name": "map_zip_with_coalesce",
+        "args": []
+      },
+      {
+        "name": "map_from_entries",
+        "args": []
+      },
+      {
+        "name": "map_contains_key",
+        "args": []
+      },
+      {
+        "name": "get",
+        "args": []
+      },
+      {
+        "name": "try_divide",
+        "args": []
+      },
+      {
+        "name": "try_add",
+        "args": []
+      },
+      {
+        "name": "try_subtract",
+        "args": []
+      },
+      {
+        "name": "try_multiply",
+        "args": []
+      },
+      {
+        "name": "multiply",
+        "args": []
+      },
+      {
+        "name": "bit_length",
+        "args": []
+      },
+      {
+        "name": "typeof_",
+        "args": []
+      },
+      {
+        "name": "sin",
+        "args": []
+      },
+      {
+        "name": "cos",
+        "args": []
+      },
+      {
+        "name": "tan",
+        "args": []
+      },
+      {
+        "name": "asin_",
+        "args": []
+      },
+      {
+        "name": "acos_",
+        "args": []
+      },
+      {
+        "name": "atan_",
+        "args": []
+      },
+      {
+        "name": "atan2",
+        "args": []
+      },
+      {
+        "name": "degrees_",
+        "args": []
+      },
+      {
+        "name": "radians_",
+        "args": []
+      },
+      {
+        "name": "signum",
+        "args": []
+      },
+      {
+        "name": "quarter",
+        "args": []
+      },
+      {
+        "name": "weekofyear",
+        "args": []
+      },
+      {
+        "name": "dayofweek",
+        "args": []
+      },
+      {
+        "name": "dayofyear",
+        "args": []
+      },
+      {
+        "name": "add_months",
+        "args": []
+      },
+      {
+        "name": "months_between",
+        "args": []
+      },
+      {
+        "name": "next_day",
+        "args": []
+      },
+      {
+        "name": "cast",
+        "args": []
+      },
+      {
+        "name": "try_cast",
+        "args": []
+      },
+      {
+        "name": "astype",
+        "args": []
+      },
+      {
+        "name": "isnan",
+        "args": []
+      },
+      {
+        "name": "nvl",
+        "args": []
+      },
+      {
+        "name": "ifnull",
+        "args": []
+      },
+      {
+        "name": "power",
+        "args": []
+      },
+      {
+        "name": "ln",
+        "args": []
+      },
+      {
+        "name": "ceiling",
+        "args": []
+      },
+      {
+        "name": "lcase",
+        "args": []
+      },
+      {
+        "name": "ucase",
+        "args": []
+      },
+      {
+        "name": "day",
+        "args": []
+      },
+      {
+        "name": "dayofmonth",
+        "args": []
+      },
+      {
+        "name": "year",
+        "args": []
+      },
+      {
+        "name": "month",
+        "args": []
+      },
+      {
+        "name": "nullif",
+        "args": []
+      },
+      {
+        "name": "to_degrees",
+        "args": []
+      },
+      {
+        "name": "to_radians",
+        "args": []
+      },
+      {
+        "name": "isnull",
+        "args": []
+      },
+      {
+        "name": "isnotnull",
+        "args": []
+      },
+      {
+        "name": "left",
+        "args": []
+      },
+      {
+        "name": "right",
+        "args": []
+      },
+      {
+        "name": "replace",
+        "args": []
+      },
+      {
+        "name": "startswith",
+        "args": []
+      },
+      {
+        "name": "endswith",
+        "args": []
+      },
+      {
+        "name": "contains",
+        "args": []
+      },
+      {
+        "name": "like",
+        "args": []
+      },
+      {
+        "name": "ilike",
+        "args": []
+      },
+      {
+        "name": "rlike",
+        "args": []
+      },
+      {
+        "name": "cosh",
+        "args": []
+      },
+      {
+        "name": "sinh",
+        "args": []
+      },
+      {
+        "name": "tanh",
+        "args": []
+      },
+      {
+        "name": "acosh",
+        "args": []
+      },
+      {
+        "name": "asinh",
+        "args": []
+      },
+      {
+        "name": "atanh_",
+        "args": []
+      },
+      {
+        "name": "cbrt",
+        "args": []
+      },
+      {
+        "name": "expm1",
+        "args": []
+      },
+      {
+        "name": "log1p",
+        "args": []
+      },
+      {
+        "name": "log10",
+        "args": []
+      },
+      {
+        "name": "log2",
+        "args": []
+      },
+      {
+        "name": "rint",
+        "args": []
+      },
+      {
+        "name": "hypot",
+        "args": []
+      },
+      {
+        "name": "size",
+        "args": []
+      },
+      {
+        "name": "element_at",
+        "args": []
+      },
+      {
+        "name": "explode",
+        "args": []
+      },
+      {
+        "name": "array_position",
+        "args": []
+      },
+      {
+        "name": "array_remove",
+        "args": []
+      },
+      {
+        "name": "array_repeat",
+        "args": []
+      },
+      {
+        "name": "posexplode",
+        "args": []
+      },
+      {
+        "name": "first_value",
+        "args": []
+      },
+      {
+        "name": "last_value",
+        "args": []
+      },
+      {
+        "name": "percent_rank",
+        "args": []
+      },
+      {
+        "name": "cume_dist",
+        "args": []
+      },
+      {
+        "name": "ntile",
+        "args": []
+      },
+      {
+        "name": "nth_value",
+        "args": []
+      },
+      {
+        "name": "regexp_like",
+        "args": []
+      },
+      {
+        "name": "regexp_count",
+        "args": []
+      },
+      {
+        "name": "regexp_instr",
+        "args": []
+      },
+      {
+        "name": "regexp_substr",
+        "args": []
+      },
+      {
+        "name": "split",
+        "args": []
+      },
+      {
+        "name": "split_part",
+        "args": []
+      },
+      {
+        "name": "find_in_set",
+        "args": []
+      },
+      {
+        "name": "get_json_object",
+        "args": []
+      },
+      {
+        "name": "json_tuple",
+        "args": []
+      },
+      {
+        "name": "from_csv",
+        "args": []
+      },
+      {
+        "name": "to_csv",
+        "args": []
+      },
+      {
+        "name": "schema_of_csv",
+        "args": []
+      },
+      {
+        "name": "schema_of_json",
+        "args": []
+      },
+      {
+        "name": "unix_timestamp",
+        "args": []
+      },
+      {
+        "name": "from_unixtime",
+        "args": []
+      },
+      {
+        "name": "timestamp_seconds",
+        "args": []
+      },
+      {
+        "name": "timestamp_millis",
+        "args": []
+      },
+      {
+        "name": "timestamp_micros",
+        "args": []
+      },
+      {
+        "name": "unix_date",
+        "args": []
+      },
+      {
+        "name": "date_from_unix_date",
+        "args": []
+      },
+      {
+        "name": "pmod",
+        "args": []
+      },
+      {
+        "name": "factorial",
+        "args": []
+      }
+    ],
+    "DataFrame": [
+      {
+        "name": "count",
+        "args": []
+      },
+      {
+        "name": "show",
+        "args": []
+      },
+      {
+        "name": "write_delta",
+        "args": []
+      },
+      {
+        "name": "collect",
+        "args": []
+      },
+      {
+        "name": "filter",
+        "args": []
+      },
+      {
+        "name": "select",
+        "args": []
+      },
+      {
+        "name": "with_column",
+        "args": []
+      },
+      {
+        "name": "order_by",
+        "args": []
+      },
+      {
+        "name": "order_by_exprs",
+        "args": []
+      },
+      {
+        "name": "group_by",
+        "args": []
+      },
+      {
+        "name": "cube",
+        "args": []
+      },
+      {
+        "name": "rollup",
+        "args": []
+      },
+      {
+        "name": "write",
+        "args": []
+      },
+      {
+        "name": "join",
+        "args": []
+      },
+      {
+        "name": "union",
+        "args": []
+      },
+      {
+        "name": "union_by_name",
+        "args": []
+      },
+      {
+        "name": "distinct",
+        "args": []
+      },
+      {
+        "name": "drop",
+        "args": []
+      },
+      {
+        "name": "pivot",
+        "args": []
+      },
+      {
+        "name": "dropna",
+        "args": []
+      },
+      {
+        "name": "fillna",
+        "args": []
+      },
+      {
+        "name": "limit",
+        "args": []
+      },
+      {
+        "name": "with_column_renamed",
+        "args": []
+      },
+      {
+        "name": "sample",
+        "args": []
+      },
+      {
+        "name": "first",
+        "args": []
+      },
+      {
+        "name": "head",
+        "args": []
+      },
+      {
+        "name": "tail",
+        "args": []
+      },
+      {
+        "name": "take",
+        "args": []
+      },
+      {
+        "name": "is_empty",
+        "args": []
+      },
+      {
+        "name": "to_json",
+        "args": []
+      },
+      {
+        "name": "explain",
+        "args": []
+      },
+      {
+        "name": "print_schema",
+        "args": []
+      },
+      {
+        "name": "checkpoint",
+        "args": []
+      },
+      {
+        "name": "local_checkpoint",
+        "args": []
+      },
+      {
+        "name": "repartition",
+        "args": []
+      },
+      {
+        "name": "coalesce",
+        "args": []
+      },
+      {
+        "name": "offset",
+        "args": []
+      },
+      {
+        "name": "data",
+        "args": []
+      },
+      {
+        "name": "persist",
+        "args": []
+      },
+      {
+        "name": "unpersist",
+        "args": []
+      },
+      {
+        "name": "rdd",
+        "args": []
+      },
+      {
+        "name": "foreach",
+        "args": []
+      },
+      {
+        "name": "foreachPartition",
+        "args": []
+      },
+      {
+        "name": "mapInPandas",
+        "args": []
+      },
+      {
+        "name": "mapPartitions",
+        "args": []
+      },
+      {
+        "name": "toLocalIterator",
+        "args": []
+      },
+      {
+        "name": "storageLevel",
+        "args": []
+      },
+      {
+        "name": "isStreaming",
+        "args": []
+      },
+      {
+        "name": "withWatermark",
+        "args": []
+      },
+      {
+        "name": "random_split",
+        "args": []
+      },
+      {
+        "name": "summary",
+        "args": []
+      },
+      {
+        "name": "to_df",
+        "args": []
+      },
+      {
+        "name": "select_expr",
+        "args": []
+      },
+      {
+        "name": "col_regex",
+        "args": []
+      },
+      {
+        "name": "with_columns",
+        "args": []
+      },
+      {
+        "name": "with_columns_renamed",
+        "args": []
+      },
+      {
+        "name": "stat",
+        "args": []
+      },
+      {
+        "name": "corr",
+        "args": []
+      },
+      {
+        "name": "na",
+        "args": []
+      },
+      {
+        "name": "to_pandas",
+        "args": []
+      }
+    ],
+    "GroupedData": [
+      {
+        "name": "count",
+        "args": []
+      },
+      {
+        "name": "sum",
+        "args": []
+      },
+      {
+        "name": "avg",
+        "args": []
+      },
+      {
+        "name": "min",
+        "args": []
+      },
+      {
+        "name": "max",
+        "args": []
+      },
+      {
+        "name": "agg",
+        "args": []
+      },
+      {
+        "name": "any_value",
+        "args": []
+      },
+      {
+        "name": "bool_and",
+        "args": []
+      },
+      {
+        "name": "bool_or",
+        "args": []
+      },
+      {
+        "name": "product",
+        "args": []
+      },
+      {
+        "name": "collect_list",
+        "args": []
+      },
+      {
+        "name": "collect_set",
+        "args": []
+      },
+      {
+        "name": "count_if",
+        "args": []
+      },
+      {
+        "name": "percentile",
+        "args": []
+      },
+      {
+        "name": "max_by",
+        "args": []
+      },
+      {
+        "name": "min_by",
+        "args": []
+      },
+      {
+        "name": "covar_pop",
+        "args": []
+      },
+      {
+        "name": "covar_samp",
+        "args": []
+      },
+      {
+        "name": "corr",
+        "args": []
+      },
+      {
+        "name": "regr_count",
+        "args": []
+      },
+      {
+        "name": "regr_avgx",
+        "args": []
+      },
+      {
+        "name": "regr_avgy",
+        "args": []
+      },
+      {
+        "name": "regr_slope",
+        "args": []
+      },
+      {
+        "name": "regr_intercept",
+        "args": []
+      },
+      {
+        "name": "regr_r2",
+        "args": []
+      },
+      {
+        "name": "regr_sxx",
+        "args": []
+      },
+      {
+        "name": "regr_syy",
+        "args": []
+      },
+      {
+        "name": "regr_sxy",
+        "args": []
+      },
+      {
+        "name": "kurtosis",
+        "args": []
+      },
+      {
+        "name": "skewness",
+        "args": []
+      }
+    ],
+    "DataFrameStat": [
+      {
+        "name": "cov",
+        "args": []
+      },
+      {
+        "name": "corr",
+        "args": []
+      },
+      {
+        "name": "corr_matrix",
+        "args": []
+      }
+    ],
+    "DataFrameNa": [
+      {
+        "name": "fill",
+        "args": []
+      },
+      {
+        "name": "drop",
+        "args": []
+      }
+    ],
+    "SparkSession": [
+      {
+        "name": "new",
+        "args": []
+      },
+      {
+        "name": "builder",
+        "args": []
+      },
+      {
+        "name": "is_case_sensitive",
+        "args": []
+      },
+      {
+        "name": "create_dataframe",
+        "args": []
+      },
+      {
+        "name": "createDataFrame",
+        "args": []
+      },
+      {
+        "name": "create_dataframe_from_rows",
+        "args": []
+      },
+      {
+        "name": "read_csv",
+        "args": []
+      },
+      {
+        "name": "read_parquet",
+        "args": []
+      },
+      {
+        "name": "read_json",
+        "args": []
+      },
+      {
+        "name": "create_or_replace_temp_view",
+        "args": []
+      },
+      {
+        "name": "table",
+        "args": []
+      },
+      {
+        "name": "sql",
+        "args": []
+      },
+      {
+        "name": "read_delta",
+        "args": []
+      },
+      {
+        "name": "read_delta_version",
+        "args": []
+      }
+    ],
+    "SparkSessionBuilder": [
+      {
+        "name": "get_or_create",
+        "args": []
+      }
+    ]
+  }
+}

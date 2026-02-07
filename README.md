@@ -137,6 +137,8 @@ print(filtered.collect())  # [{"id": 2, "age": 30, "name": "Bob"}]
 | `make lint-python` | Python only: ruff format --check, ruff check, mypy |
 | `cargo bench` | Benchmarks (robin-sparkless vs Polars) |
 | `cargo doc --open` | Build and open API docs |
+| `make gap-analysis` | PySpark gap analysis (clones Spark repo, extracts APIs, produces [docs/GAP_ANALYSIS_PYSPARK_REPO.md](docs/GAP_ANALYSIS_PYSPARK_REPO.md)) |
+| `make gap-analysis-quick` | Quick gap analysis (uses existing pyspark_api_from_repo.json) |
 
 CI runs format, clippy, audit, deny, Rust tests, Python lint (ruff, mypy), and Python tests on push/PR (see [.github/workflows/ci.yml](.github/workflows/ci.yml)).
 
@@ -150,6 +152,7 @@ CI runs format, clippy, audit, deny, Rust tests, Python lint (ruff, mypy), and P
 - [**QUICKSTART**](docs/QUICKSTART.md) — Build, usage, optional features, benchmarks
 - [**ROADMAP**](docs/ROADMAP.md) — Development roadmap and Sparkless integration
 - [**PYSPARK_DIFFERENCES**](docs/PYSPARK_DIFFERENCES.md) — Known divergences from PySpark
+- [**GAP_ANALYSIS_PYSPARK_REPO**](docs/GAP_ANALYSIS_PYSPARK_REPO.md) — Gap analysis vs Apache PySpark (from source)
 - [**RELEASING**](docs/RELEASING.md) — Releasing and publishing to crates.io
 
 See also [CHANGELOG.md](CHANGELOG.md) for version history.
