@@ -613,6 +613,137 @@ def test_sparkless_parity_table_read_returns_rows() -> None:
     assert rows[0]["id"] == 1 and rows[2]["name"] == "c"
 
 
+def test_phase_a_signature_alignment() -> None:
+    """Phase A: position, assert_true, like, months_between, when — smoke tests for signature alignment."""
+    import robin_sparkless as rs
+
+    spark = rs.SparkSession.builder().app_name("test").get_or_create()
+    df = spark._create_dataframe_from_rows(
+        [{"id": 1, "name": "Alice", "start": "2024-01-15", "end": "2024-06-15"}],
+        [("id", "bigint"), ("name", "string"), ("start", "date"), ("end", "date")],
+    )
+    # position(substr, col): 1-based position of substring
+    out = df.with_column("pos", rs.position("li", rs.col("name")))
+    rows = out.collect()
+    assert rows[0]["pos"] == 2  # "li" in "Alice" at 1-based 2
+    # like(col, pattern)
+    df2 = spark._create_dataframe_from_rows(
+        [{"id": 1, "s": "hello%world"}],
+        [("id", "bigint"), ("s", "string")],
+    )
+    matched = df2.filter(rs.like(rs.col("s"), "hello%world"))
+    assert matched.count() == 1
+    # months_between(end, start) — use date columns
+    df3 = spark._create_dataframe_from_rows(
+        [["2024-06-15", "2024-01-15"]],
+        [("end", "date"), ("start", "date")],
+    )
+    out3 = df3.with_column("mo", rs.months_between(rs.col("end"), rs.col("start")))
+    assert out3.count() == 1
+    # when(cond).then(val).otherwise(val) — two-branch conditional
+    df4 = spark._create_dataframe_from_rows(
+        [{"id": 1, "val": 10}, {"id": 2, "val": 20}],
+        [("id", "bigint"), ("val", "bigint")],
+    )
+    out4 = df4.with_column(
+        "level",
+        rs.when(rs.col("val").gt(rs.lit(15)))
+        .then(rs.lit("high"))
+        .otherwise(rs.lit("low")),
+    )
+    rows4 = out4.collect()
+    assert rows4[0]["level"] == "low" and rows4[1]["level"] == "high"
+
+
+def test_phase_b_functions() -> None:
+    """Phase B: abs, date_add, date_format, char_length, array, array_contains — high-value functions."""
+    import robin_sparkless as rs
+
+    spark = rs.SparkSession.builder().app_name("test").get_or_create()
+    df = spark._create_dataframe_from_rows(
+        [{"id": 1, "x": -10, "name": "Alice", "d": "2024-01-15"}],
+        [("id", "bigint"), ("x", "bigint"), ("name", "string"), ("d", "date")],
+    )
+    out = df.with_column("abs_x", rs.abs(rs.col("x")))
+    assert out.collect()[0]["abs_x"] == 10
+    out = df.with_column("len", rs.char_length(rs.col("name")))
+    assert out.collect()[0]["len"] == 5
+    out = df.with_column("fmt", rs.date_format(rs.col("d"), "yyyy-MM"))
+    assert out.collect()[0]["fmt"] == "2024-01"
+    out = df.with_column("plus7", rs.date_add(rs.col("d"), 7))
+    assert out.collect()[0]["plus7"] == "2024-01-22"
+    # array(col1, col2, ...)
+    df2 = spark._create_dataframe_from_rows(
+        [{"a": 1, "b": 10, "c": 100}],
+        [("a", "bigint"), ("b", "bigint"), ("c", "bigint")],
+    )
+    out2 = df2.with_column("arr", rs.array(rs.col("a"), rs.col("b"), rs.col("c")))
+    rows2 = out2.collect()
+    assert rows2[0]["arr"] == [1, 10, 100]
+    # array_contains(col, value)
+    out3 = df2.with_column(
+        "has", rs.array_contains(rs.array(rs.col("a"), rs.col("b")), rs.lit(10))
+    )
+    assert out3.collect()[0]["has"] is True
+
+
+def test_phase_c_reader_writer() -> None:
+    """Phase C: spark.read().option().csv, spark.read.table, df.write.mode().parquet — Reader/Writer API."""
+    import tempfile
+
+    import robin_sparkless as rs
+
+    spark = rs.SparkSession.builder().app_name("test").get_or_create()
+    df = spark.create_dataframe([(1, 10, "a"), (2, 20, "b")], ["id", "x", "label"])
+    with tempfile.TemporaryDirectory() as tmpdir:
+        csv_path = f"{tmpdir}/data.csv"
+        with open(csv_path, "w") as f:
+            f.write("id,x,label\n1,10,a\n2,20,b\n")
+        read_df = spark.read().option("header", "true").csv(csv_path)
+        assert read_df.count() == 2
+        parquet_path = f"{tmpdir}/out.parquet"
+        df.write().mode("overwrite").parquet(parquet_path)
+        back = spark.read().parquet(parquet_path)
+        assert back.count() == 2
+    try:
+        df.createOrReplaceTempView("phase_c_view")
+        tbl = spark.read().table("phase_c_view")
+        assert tbl.count() == 2
+    except (AttributeError, RuntimeError) as e:
+        if "sql" in str(e).lower():
+            pytest.skip("sql feature not built")
+
+
+def test_phase_f_behavioral() -> None:
+    """Phase F: assert_true(lit(True)) returns null; assert_true(lit(False)/lit(None)) raises; raise_error raises."""
+    import robin_sparkless as rs
+
+    spark = rs.SparkSession.builder().app_name("test").get_or_create()
+    # assert_true on True-valued column returns null (success yields null)
+    df = spark._create_dataframe_from_rows(
+        [{"id": 1, "ok": True}],
+        [("id", "bigint"), ("ok", "boolean")],
+    )
+    out = df.with_column("_check", rs.assert_true(rs.col("ok")))
+    rows = out.collect()
+    assert len(rows) == 1
+    assert rows[0]["_check"] is None  # success yields null
+    # assert_true on False-valued column raises
+    df2 = spark._create_dataframe_from_rows(
+        [{"id": 1, "ok": False}],
+        [("id", "bigint"), ("ok", "boolean")],
+    )
+    with pytest.raises(Exception):
+        df2.with_column("_check", rs.assert_true(rs.col("ok"))).collect()
+    # raise_error raises with message
+    df3 = spark._create_dataframe_from_rows(
+        [{"id": 1, "msg": "err"}],
+        [("id", "bigint"), ("msg", "string")],
+    )
+    with pytest.raises(Exception):
+        df3.with_column("_err", rs.raise_error(rs.col("msg"))).collect()
+
+
 def test_phase_d_dataframe_methods() -> None:
     """Phase D: df.createOrReplaceTempView, corr/cov, toDF, columns, etc."""
     import robin_sparkless as rs

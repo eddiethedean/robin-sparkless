@@ -184,6 +184,16 @@ The file `tests/parity.rs` implements the full parity flow:
 PARITY_FIXTURE=groupby_count cargo test pyspark_parity_fixtures
 ```
 
+**Running by phase**: Set the `PARITY_PHASE` environment variable to run only fixtures in that phase's manifest. Phases are `a`–`g`; the mapping lives in `tests/fixtures/phase_manifest.json`. Example:
+
+```bash
+PARITY_PHASE=a cargo test pyspark_parity_fixtures
+make test-parity-phase-a   # same as above
+make test-parity-phases    # runs all phases (a through g)
+```
+
+Phase A = signature alignment; B = high-value functions; C = Reader/Writer; D = DataFrame methods; E = SparkSession/Catalog (no fixtures, Python-only); F = behavioral; G = fixture expansion. See [PARITY_STATUS.md](PARITY_STATUS.md) for the phase-to-fixture mapping.
+
 ### Extending the harness
 
 When adding new operations or expression forms:
