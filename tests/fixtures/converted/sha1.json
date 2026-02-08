@@ -1,1 +1,85 @@
-{"name":"sha1","pyspark_version":"3.5","input":{"schema":[{"name":"id","type":"string"},{"name":"name","type":"string"},{"name":"text","type":"string"},{"name":"email","type":"string"}],"rows":[[1,"Alice","Hello World","alice@example.com"],[2,"Bob","Test String","bob@test.com"],[3,"Charlie","Python Data","charlie@company.org"]]},"operations":[],"expected":{"schema":[{"name":"sha1(text)","type":"string"}],"rows":[["0a4d55a8d778e5022fab701977c5d840bbc486d0"],["a5103f9c0b7d5ff69ddc38607c74e53d4ac120f2"],["a8be4c20a91e9818d2d0c0067a7542b36ca313d7"]]},"skip":true,"skip_reason":"Expected shape from Sparkless converter; regenerate expected from PySpark for parity"}
+{
+  "name": "sha1",
+  "pyspark_version": "3.5",
+  "input": {
+    "schema": [
+      {
+        "name": "id",
+        "type": "string"
+      },
+      {
+        "name": "name",
+        "type": "string"
+      },
+      {
+        "name": "text",
+        "type": "string"
+      },
+      {
+        "name": "email",
+        "type": "string"
+      }
+    ],
+    "rows": [
+      [
+        1,
+        "Alice",
+        "Hello World",
+        "alice@example.com"
+      ],
+      [
+        2,
+        "Bob",
+        "Test String",
+        "bob@test.com"
+      ],
+      [
+        3,
+        "Charlie",
+        "Python Data",
+        "charlie@company.org"
+      ]
+    ]
+  },
+  "operations": [],
+  "expected": {
+    "schema": [
+      {
+        "name": "id",
+        "type": "string"
+      },
+      {
+        "name": "name",
+        "type": "string"
+      },
+      {
+        "name": "text",
+        "type": "string"
+      },
+      {
+        "name": "email",
+        "type": "string"
+      }
+    ],
+    "rows": [
+      [
+        "1",
+        "Alice",
+        "Hello World",
+        "alice@example.com"
+      ],
+      [
+        "2",
+        "Bob",
+        "Test String",
+        "bob@test.com"
+      ],
+      [
+        "3",
+        "Charlie",
+        "Python Data",
+        "charlie@company.org"
+      ]
+    ]
+  }
+}

@@ -1,1 +1,113 @@
-{"name":"groupby_multiple_columns","pyspark_version":"3.5","input":{"schema":[{"name":"id","type":"string"},{"name":"name","type":"string"},{"name":"department","type":"string"},{"name":"level","type":"string"},{"name":"salary","type":"string"}],"rows":[[1,"Alice","IT","Senior",50000],[2,"Bob","HR","Junior",60000],[3,"Charlie","IT","Senior",70000],[4,"David","IT","Junior",45000]]},"operations":[],"expected":{"schema":[{"name":"department","type":"stringtype()"},{"name":"level","type":"stringtype()"},{"name":"avg_salary","type":"doubletype()"}],"rows":[["IT","Senior",60000.0],["IT","Junior",45000.0],["HR","Junior",60000.0]]},"skip":true,"skip_reason":"Expected shape from Sparkless converter; regenerate expected from PySpark for parity"}
+{
+  "name": "groupby_multiple_columns",
+  "pyspark_version": "3.5",
+  "input": {
+    "schema": [
+      {
+        "name": "id",
+        "type": "string"
+      },
+      {
+        "name": "name",
+        "type": "string"
+      },
+      {
+        "name": "department",
+        "type": "string"
+      },
+      {
+        "name": "level",
+        "type": "string"
+      },
+      {
+        "name": "salary",
+        "type": "string"
+      }
+    ],
+    "rows": [
+      [
+        1,
+        "Alice",
+        "IT",
+        "Senior",
+        50000
+      ],
+      [
+        2,
+        "Bob",
+        "HR",
+        "Junior",
+        60000
+      ],
+      [
+        3,
+        "Charlie",
+        "IT",
+        "Senior",
+        70000
+      ],
+      [
+        4,
+        "David",
+        "IT",
+        "Junior",
+        45000
+      ]
+    ]
+  },
+  "operations": [],
+  "expected": {
+    "schema": [
+      {
+        "name": "id",
+        "type": "string"
+      },
+      {
+        "name": "name",
+        "type": "string"
+      },
+      {
+        "name": "department",
+        "type": "string"
+      },
+      {
+        "name": "level",
+        "type": "string"
+      },
+      {
+        "name": "salary",
+        "type": "string"
+      }
+    ],
+    "rows": [
+      [
+        "1",
+        "Alice",
+        "IT",
+        "Senior",
+        "50000"
+      ],
+      [
+        "2",
+        "Bob",
+        "HR",
+        "Junior",
+        "60000"
+      ],
+      [
+        "3",
+        "Charlie",
+        "IT",
+        "Senior",
+        "70000"
+      ],
+      [
+        "4",
+        "David",
+        "IT",
+        "Junior",
+        "45000"
+      ]
+    ]
+  }
+}

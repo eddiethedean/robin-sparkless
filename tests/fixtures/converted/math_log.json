@@ -1,1 +1,113 @@
-{"name":"math_log","pyspark_version":"3.5","input":{"schema":[{"name":"id","type":"string"},{"name":"name","type":"string"},{"name":"age","type":"string"},{"name":"salary","type":"string"},{"name":"active","type":"string"},{"name":"email","type":"string"}],"rows":[[1,"Alice",25,50000.0,true,"alice@example.com"],[2,"Bob",30,60000.0,false,"bob@test.com"],[3,"Charlie",35,70000.0,true,"charlie@company.org"]]},"operations":[],"expected":{"schema":[{"name":"ln(salary)","type":"double"}],"rows":[[10.819778284410283],[11.002099841204238],[11.156250521031495]]},"skip":true,"skip_reason":"Expected shape from Sparkless converter; regenerate expected from PySpark for parity"}
+{
+  "name": "math_log",
+  "pyspark_version": "3.5",
+  "input": {
+    "schema": [
+      {
+        "name": "id",
+        "type": "string"
+      },
+      {
+        "name": "name",
+        "type": "string"
+      },
+      {
+        "name": "age",
+        "type": "string"
+      },
+      {
+        "name": "salary",
+        "type": "string"
+      },
+      {
+        "name": "active",
+        "type": "string"
+      },
+      {
+        "name": "email",
+        "type": "string"
+      }
+    ],
+    "rows": [
+      [
+        1,
+        "Alice",
+        25,
+        50000.0,
+        true,
+        "alice@example.com"
+      ],
+      [
+        2,
+        "Bob",
+        30,
+        60000.0,
+        false,
+        "bob@test.com"
+      ],
+      [
+        3,
+        "Charlie",
+        35,
+        70000.0,
+        true,
+        "charlie@company.org"
+      ]
+    ]
+  },
+  "operations": [],
+  "expected": {
+    "schema": [
+      {
+        "name": "id",
+        "type": "string"
+      },
+      {
+        "name": "name",
+        "type": "string"
+      },
+      {
+        "name": "age",
+        "type": "string"
+      },
+      {
+        "name": "salary",
+        "type": "string"
+      },
+      {
+        "name": "active",
+        "type": "string"
+      },
+      {
+        "name": "email",
+        "type": "string"
+      }
+    ],
+    "rows": [
+      [
+        "1",
+        "Alice",
+        "25",
+        "50000.0",
+        "true",
+        "alice@example.com"
+      ],
+      [
+        "2",
+        "Bob",
+        "30",
+        "60000.0",
+        "false",
+        "bob@test.com"
+      ],
+      [
+        "3",
+        "Charlie",
+        "35",
+        "70000.0",
+        "true",
+        "charlie@company.org"
+      ]
+    ]
+  }
+}

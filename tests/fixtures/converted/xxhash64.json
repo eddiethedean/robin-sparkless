@@ -1,1 +1,85 @@
-{"name":"xxhash64","pyspark_version":"3.5","input":{"schema":[{"name":"id","type":"string"},{"name":"name","type":"string"},{"name":"text","type":"string"},{"name":"email","type":"string"}],"rows":[[1,"Alice","Hello World","alice@example.com"],[2,"Bob","Test String","bob@test.com"],[3,"Charlie","Python Data","charlie@company.org"]]},"operations":[],"expected":{"schema":[{"name":"xxhash64(text)","type":"bigint"}],"rows":[[8557436188178888239],[2382133013086486406],[1248907732286396539]]},"skip":true,"skip_reason":"Expected shape from Sparkless converter; regenerate expected from PySpark for parity"}
+{
+  "name": "xxhash64",
+  "pyspark_version": "3.5",
+  "input": {
+    "schema": [
+      {
+        "name": "id",
+        "type": "string"
+      },
+      {
+        "name": "name",
+        "type": "string"
+      },
+      {
+        "name": "text",
+        "type": "string"
+      },
+      {
+        "name": "email",
+        "type": "string"
+      }
+    ],
+    "rows": [
+      [
+        1,
+        "Alice",
+        "Hello World",
+        "alice@example.com"
+      ],
+      [
+        2,
+        "Bob",
+        "Test String",
+        "bob@test.com"
+      ],
+      [
+        3,
+        "Charlie",
+        "Python Data",
+        "charlie@company.org"
+      ]
+    ]
+  },
+  "operations": [],
+  "expected": {
+    "schema": [
+      {
+        "name": "id",
+        "type": "string"
+      },
+      {
+        "name": "name",
+        "type": "string"
+      },
+      {
+        "name": "text",
+        "type": "string"
+      },
+      {
+        "name": "email",
+        "type": "string"
+      }
+    ],
+    "rows": [
+      [
+        "1",
+        "Alice",
+        "Hello World",
+        "alice@example.com"
+      ],
+      [
+        "2",
+        "Bob",
+        "Test String",
+        "bob@test.com"
+      ],
+      [
+        "3",
+        "Charlie",
+        "Python Data",
+        "charlie@company.org"
+      ]
+    ]
+  }
+}

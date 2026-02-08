@@ -1,1 +1,135 @@
-{"name":"shuffle","pyspark_version":"3.5","input":{"schema":[{"name":"id","type":"string"},{"name":"arr1","type":"string"},{"name":"arr2","type":"string"},{"name":"arr3","type":"string"},{"name":"value","type":"string"}],"rows":[[1,[1,2,3],[4,5],[1,2,3,4,5],2],[2,[10,20],[30,40,50],[10,20,30],20],[3,[5,10,15],[20,25],[5,5,10,10],5]]},"operations":[],"expected":{"schema":[{"name":"shuffle(arr1)","type":"array"}],"rows":[[[2,3,1]],[[10,20]],[[10,15,5]]]},"skip":true,"skip_reason":"Expected shape from Sparkless converter; regenerate expected from PySpark for parity"}
+{
+  "name": "shuffle",
+  "pyspark_version": "3.5",
+  "input": {
+    "schema": [
+      {
+        "name": "id",
+        "type": "string"
+      },
+      {
+        "name": "arr1",
+        "type": "string"
+      },
+      {
+        "name": "arr2",
+        "type": "string"
+      },
+      {
+        "name": "arr3",
+        "type": "string"
+      },
+      {
+        "name": "value",
+        "type": "string"
+      }
+    ],
+    "rows": [
+      [
+        1,
+        [
+          1,
+          2,
+          3
+        ],
+        [
+          4,
+          5
+        ],
+        [
+          1,
+          2,
+          3,
+          4,
+          5
+        ],
+        2
+      ],
+      [
+        2,
+        [
+          10,
+          20
+        ],
+        [
+          30,
+          40,
+          50
+        ],
+        [
+          10,
+          20,
+          30
+        ],
+        20
+      ],
+      [
+        3,
+        [
+          5,
+          10,
+          15
+        ],
+        [
+          20,
+          25
+        ],
+        [
+          5,
+          5,
+          10,
+          10
+        ],
+        5
+      ]
+    ]
+  },
+  "operations": [],
+  "expected": {
+    "schema": [
+      {
+        "name": "id",
+        "type": "string"
+      },
+      {
+        "name": "arr1",
+        "type": "string"
+      },
+      {
+        "name": "arr2",
+        "type": "string"
+      },
+      {
+        "name": "arr3",
+        "type": "string"
+      },
+      {
+        "name": "value",
+        "type": "string"
+      }
+    ],
+    "rows": [
+      [
+        "1",
+        "[1, 2, 3]",
+        "[4, 5]",
+        "[1, 2, 3, 4, 5]",
+        "2"
+      ],
+      [
+        "2",
+        "[10, 20]",
+        "[30, 40, 50]",
+        "[10, 20, 30]",
+        "20"
+      ],
+      [
+        "3",
+        "[5, 10, 15]",
+        "[20, 25]",
+        "[5, 5, 10, 10]",
+        "5"
+      ]
+    ]
+  }
+}

@@ -1,1 +1,85 @@
-{"name":"locate","pyspark_version":"3.5","input":{"schema":[{"name":"id","type":"string"},{"name":"name","type":"string"},{"name":"text","type":"string"},{"name":"email","type":"string"}],"rows":[[1,"Alice","Hello World","alice@example.com"],[2,"Bob","Test String","bob@test.com"],[3,"Charlie","Python Data","charlie@company.org"]]},"operations":[],"expected":{"schema":[{"name":"locate(World, text, 1)","type":"int"}],"rows":[[7],[0],[0]]},"skip":true,"skip_reason":"Expected shape from Sparkless converter; regenerate expected from PySpark for parity"}
+{
+  "name": "locate",
+  "pyspark_version": "3.5",
+  "input": {
+    "schema": [
+      {
+        "name": "id",
+        "type": "string"
+      },
+      {
+        "name": "name",
+        "type": "string"
+      },
+      {
+        "name": "text",
+        "type": "string"
+      },
+      {
+        "name": "email",
+        "type": "string"
+      }
+    ],
+    "rows": [
+      [
+        1,
+        "Alice",
+        "Hello World",
+        "alice@example.com"
+      ],
+      [
+        2,
+        "Bob",
+        "Test String",
+        "bob@test.com"
+      ],
+      [
+        3,
+        "Charlie",
+        "Python Data",
+        "charlie@company.org"
+      ]
+    ]
+  },
+  "operations": [],
+  "expected": {
+    "schema": [
+      {
+        "name": "id",
+        "type": "string"
+      },
+      {
+        "name": "name",
+        "type": "string"
+      },
+      {
+        "name": "text",
+        "type": "string"
+      },
+      {
+        "name": "email",
+        "type": "string"
+      }
+    ],
+    "rows": [
+      [
+        "1",
+        "Alice",
+        "Hello World",
+        "alice@example.com"
+      ],
+      [
+        "2",
+        "Bob",
+        "Test String",
+        "bob@test.com"
+      ],
+      [
+        "3",
+        "Charlie",
+        "Python Data",
+        "charlie@company.org"
+      ]
+    ]
+  }
+}

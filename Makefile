@@ -1,4 +1,4 @@
-.PHONY: build test test-rust test-python sparkless-parity test-parity-phase-a test-parity-phase-b test-parity-phase-c test-parity-phase-d test-parity-phase-e test-parity-phase-f test-parity-phase-g test-parity-phases bench-python clean check check-full fmt clippy audit outdated deny lint-python all gap-analysis gap-analysis-quick gap-analysis-runtime
+.PHONY: build test test-rust test-python sparkless-parity pyspark-parity extract-pyspark-tests test-parity-phase-a test-parity-phase-b test-parity-phase-c test-parity-phase-d test-parity-phase-e test-parity-phase-f test-parity-phase-g test-parity-phases bench-python clean check check-full fmt clippy audit outdated deny lint-python all gap-analysis gap-analysis-quick gap-analysis-runtime
 
 # Use stable toolchain when no default is configured (override with RUSTUP_TOOLCHAIN=nightly etc.)
 export RUSTUP_TOOLCHAIN ?= stable
@@ -45,9 +45,24 @@ sparkless-parity:
 	@if [ -n "$$SPARKLESS_EXPECTED_OUTPUTS" ]; then \
 		mkdir -p tests/fixtures/converted; \
 		python3 tests/convert_sparkless_fixtures.py --batch "$$SPARKLESS_EXPECTED_OUTPUTS" tests/fixtures --output-subdir converted --dedupe; \
-		 python3 tests/regenerate_expected_from_pyspark.py tests/fixtures/converted 2>/dev/null || true; \
+		 python3 tests/regenerate_expected_from_pyspark.py tests/fixtures/converted --include-skipped 2>/dev/null || true; \
 	fi
 	cargo test pyspark_parity_fixtures
+
+# Run parity on tests/fixtures/, tests/fixtures/converted/, tests/fixtures/pyspark_extracted/
+pyspark-parity:
+	cargo test pyspark_parity_fixtures
+
+# Extract PySpark SQL tests to fixtures and pytest stubs. Requires SPARK_REPO_PATH or use --clone.
+# Example: make extract-pyspark-tests
+# Example: SPARK_REPO_PATH=/path/to/spark make extract-pyspark-tests
+extract-pyspark-tests:
+	@if [ -n "$$SPARK_REPO_PATH" ]; then \
+		python3 scripts/extract_pyspark_tests.py --spark-repo "$$SPARK_REPO_PATH"; \
+	else \
+		python3 scripts/extract_pyspark_tests.py --clone --branch v3.5.0; \
+	fi
+	@echo "Extracted fixtures -> tests/fixtures/pyspark_extracted. Run: python tests/regenerate_expected_from_pyspark.py tests/fixtures/pyspark_extracted --include-skipped"
 
 # Run parity tests for a specific phase (A–G). Uses tests/fixtures/phase_manifest.json.
 test-parity-phase-a: ; PARITY_PHASE=a cargo test pyspark_parity_fixtures --

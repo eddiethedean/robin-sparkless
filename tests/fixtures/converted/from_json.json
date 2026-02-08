@@ -1,1 +1,73 @@
-{"name":"from_json","pyspark_version":"3.5","input":{"schema":[{"name":"id","type":"string"},{"name":"json_str","type":"string"},{"name":"name","type":"string"},{"name":"age","type":"string"}],"rows":[[1,"{\"name\":\"Alice\",\"age\":25}","Alice",25],[2,"{\"name\":\"Bob\",\"age\":30}","Bob",30]]},"operations":[],"expected":{"schema":[{"name":"from_json(json_str)","type":"struct"}],"rows":[[{"name":"Alice","age":25}],[{"name":"Bob","age":30}]]},"skip":true,"skip_reason":"Expected shape from Sparkless converter; regenerate expected from PySpark for parity"}
+{
+  "name": "from_json",
+  "pyspark_version": "3.5",
+  "input": {
+    "schema": [
+      {
+        "name": "id",
+        "type": "string"
+      },
+      {
+        "name": "json_str",
+        "type": "string"
+      },
+      {
+        "name": "name",
+        "type": "string"
+      },
+      {
+        "name": "age",
+        "type": "string"
+      }
+    ],
+    "rows": [
+      [
+        1,
+        "{\"name\":\"Alice\",\"age\":25}",
+        "Alice",
+        25
+      ],
+      [
+        2,
+        "{\"name\":\"Bob\",\"age\":30}",
+        "Bob",
+        30
+      ]
+    ]
+  },
+  "operations": [],
+  "expected": {
+    "schema": [
+      {
+        "name": "id",
+        "type": "string"
+      },
+      {
+        "name": "json_str",
+        "type": "string"
+      },
+      {
+        "name": "name",
+        "type": "string"
+      },
+      {
+        "name": "age",
+        "type": "string"
+      }
+    ],
+    "rows": [
+      [
+        "1",
+        "{\"name\":\"Alice\",\"age\":25}",
+        "Alice",
+        "25"
+      ],
+      [
+        "2",
+        "{\"name\":\"Bob\",\"age\":30}",
+        "Bob",
+        "30"
+      ]
+    ]
+  }
+}

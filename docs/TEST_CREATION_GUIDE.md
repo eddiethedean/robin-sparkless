@@ -170,7 +170,7 @@ The file `tests/parity.rs` implements the full parity flow:
 
 - It defines `Fixture`, `InputSection`, `ColumnSpec`, `ExpectedSection`, and `Operation` to mirror the JSON format.
 - The test `pyspark_parity_fixtures`:
-  - Scans `tests/fixtures/` and (if present) `tests/fixtures/converted/`.
+  - Scans `tests/fixtures/`, `tests/fixtures/converted/`, and `tests/fixtures/pyspark_extracted/`.
   - Deserializes each JSON fixture, skips any with `"skip": true`.
   - For each fixture, calls `run_fixture(&fixture)`, which:
     1. **Input reconstruction**: Builds a `DataFrame` from `input.schema` and `input.rows` (or from `input.file_source` for read_csv/read_parquet/read_json).
@@ -242,7 +242,24 @@ This makes it clear where Robin Sparkless truly emulates PySpark today and where
 
 ---
 
-## 7. Sparkless Fixture Conversion
+## 7. PySpark Test Extractor
+
+The **Apache PySpark test extractor** parses Spark's `python/pyspark/sql/tests/` and produces fixture stubs and pytest stubs:
+
+```bash
+make extract-pyspark-tests
+# or: SPARK_REPO_PATH=/path/to/spark make extract-pyspark-tests
+```
+
+Output:
+- `tests/fixtures/pyspark_extracted/*.json` — minimal fixture stubs (add operations, then run `regenerate_expected_from_pyspark.py --include-skipped`)
+- `tests/python/test_pyspark_port_extracted.py` — pytest stubs for error/API tests
+
+See [PYSPARK_TEST_TRANSLATION.md](PYSPARK_TEST_TRANSLATION.md) for the extraction pipeline, classification rules, and coverage matrix.
+
+---
+
+## 8. Sparkless Fixture Conversion
 
 Sparkless uses a different fixture format (`input_data` as dict rows, `expected_output` with `schema`/`data`). A converter can:
 

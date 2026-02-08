@@ -1,0 +1,38 @@
+{
+  "name": "explode",
+  "pyspark_version": "3.5",
+  "source": "extracted from /Users/odosmatthews/Documents/coding/robin-sparkless/.spark_clone/spark/python/pyspark/sql/tests/test_functions.py",
+  "input": {
+    "schema": [
+      {
+        "name": "id",
+        "type": "bigint"
+      },
+      {
+        "name": "value",
+        "type": "double"
+      }
+    ],
+    "rows": [
+      [
+        1,
+        1.0
+      ],
+      [
+        2,
+        2.0
+      ],
+      [
+        3,
+        3.0
+      ]
+    ]
+  },
+  "operations": [],
+  "expected": {
+    "schema": [],
+    "rows": []
+  },
+  "skip": true,
+  "skip_reason": "Placeholder from extractor; add operations and run regenerate_expected_from_pyspark.py --include-skipped"
+}

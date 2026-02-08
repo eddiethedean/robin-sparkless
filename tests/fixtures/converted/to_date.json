@@ -1,1 +1,85 @@
-{"name":"to_date","pyspark_version":"3.5","input":{"schema":[{"name":"id","type":"string"},{"name":"name","type":"string"},{"name":"hire_date","type":"string"},{"name":"birth_date","type":"string"}],"rows":[[1,"Alice","2020-01-15","1990-05-20"],[2,"Bob","2019-03-10","1985-12-03"],[3,"Charlie","2021-07-22","1992-08-14"]]},"operations":[],"expected":{"schema":[{"name":"to_date(hire_date)","type":"date"}],"rows":[["2020-01-15"],["2019-03-10"],["2021-07-22"]]},"skip":true,"skip_reason":"Expected shape from Sparkless converter; regenerate expected from PySpark for parity"}
+{
+  "name": "to_date",
+  "pyspark_version": "3.5",
+  "input": {
+    "schema": [
+      {
+        "name": "id",
+        "type": "string"
+      },
+      {
+        "name": "name",
+        "type": "string"
+      },
+      {
+        "name": "hire_date",
+        "type": "string"
+      },
+      {
+        "name": "birth_date",
+        "type": "string"
+      }
+    ],
+    "rows": [
+      [
+        1,
+        "Alice",
+        "2020-01-15",
+        "1990-05-20"
+      ],
+      [
+        2,
+        "Bob",
+        "2019-03-10",
+        "1985-12-03"
+      ],
+      [
+        3,
+        "Charlie",
+        "2021-07-22",
+        "1992-08-14"
+      ]
+    ]
+  },
+  "operations": [],
+  "expected": {
+    "schema": [
+      {
+        "name": "id",
+        "type": "string"
+      },
+      {
+        "name": "name",
+        "type": "string"
+      },
+      {
+        "name": "hire_date",
+        "type": "string"
+      },
+      {
+        "name": "birth_date",
+        "type": "string"
+      }
+    ],
+    "rows": [
+      [
+        "1",
+        "Alice",
+        "2020-01-15",
+        "1990-05-20"
+      ],
+      [
+        "2",
+        "Bob",
+        "2019-03-10",
+        "1985-12-03"
+      ],
+      [
+        "3",
+        "Charlie",
+        "2021-07-22",
+        "1992-08-14"
+      ]
+    ]
+  }
+}

@@ -243,6 +243,21 @@ fn run_pyspark_parity_fixtures(phase_filter: Option<&str>) {
         }
     }
 
+    let pyspark_extracted_dir = Path::new("tests/fixtures/pyspark_extracted");
+    if pyspark_extracted_dir.exists() {
+        for entry in fs::read_dir(pyspark_extracted_dir)
+            .expect("read fixtures/pyspark_extracted directory")
+        {
+            let path = entry.expect("dir entry").path();
+            if path.extension().and_then(|s| s.to_str()) != Some("json") {
+                continue;
+            }
+            if path.is_file() {
+                paths.push(path);
+            }
+        }
+    }
+
     let mut failures: Vec<(String, String)> = Vec::new();
     let mut ran_any = false;
 
@@ -755,9 +770,18 @@ fn apply_operations(
                 grouped = Some(df.group_by(cols)?);
             }
             Operation::Agg { aggregations } => {
-                let gd = grouped.take().ok_or_else(|| {
-                    PolarsError::ComputeError("agg requires a preceding groupBy".into())
-                })?;
+                // Support global aggregation when no preceding groupBy (empty group = whole table)
+                let was_global_agg = grouped.is_none();
+                let gd = if let Some(g) = grouped.take() {
+                    g
+                } else {
+                    // Global agg: add literal column, group by it, then drop after agg
+                    df = df.with_column_expr(
+                        "_gb_global",
+                        Expr::Literal(polars::prelude::LiteralValue::Int64(1)),
+                    )?;
+                    df.group_by(vec!["_gb_global"])?
+                };
 
                 // Build Vec<Expr> for count, sum, avg, min, max (single or multiple)
                 let mut agg_exprs: Vec<Expr> = Vec::with_capacity(aggregations.len());
@@ -1270,6 +1294,9 @@ fn apply_operations(
                     agg_exprs.push(expr);
                 }
                 df = gd.agg(agg_exprs)?;
+                if was_global_agg {
+                    df = df.drop(vec!["_gb_global"])?;
+                }
                 grouped = None; // Aggregation consumes the GroupedData
             }
             Operation::Join { on, how } => {
@@ -4837,6 +4864,20 @@ fn parse_column_or_literal(s: &str) -> Result<Expr, String> {
     }
 }
 
+/// Parse string as JSON, handling both JSON and Python repr format (single quotes).
+/// Returns Ok(Value) if parseable, Err otherwise.
+fn parse_json_like_string(s: &str) -> Result<Value, serde_json::Error> {
+    serde_json::from_str(s).or_else(|_| {
+        // Python repr uses single quotes; try replacing for keys/values
+        let normalized: String = s
+            .replace("'", "\"")
+            .replace("None", "null")
+            .replace("True", "true")
+            .replace("False", "false");
+        serde_json::from_str(&normalized)
+    })
+}
+
 /// Normalize timestamp string for parity comparison: strip trailing .000000 when fractional part is zero (PySpark format).
 fn normalize_timestamp_str(s: &str) -> String {
     if s.ends_with(".000000") {
@@ -5392,6 +5433,16 @@ fn values_equal_with_struct(a: &Value, b: &Value, struct_fields: Option<&[String
             }
         }
         (Value::String(s1), Value::String(s2)) => {
+            // Compare JSON-like strings (array/map) structurally; Polars uses [1,2,3], PySpark uses [1, 2, 3]
+            if (s1.starts_with('[') && s2.starts_with('['))
+                || (s1.starts_with('{') && s2.starts_with('{'))
+            {
+                if let (Ok(v1), Ok(v2)) =
+                    (parse_json_like_string(s1), parse_json_like_string(s2))
+                {
+                    return values_equal_with_struct(&v1, &v2, None);
+                }
+            }
             normalize_timestamp_str(s1) == normalize_timestamp_str(s2)
         }
         (Value::Bool(b1), Value::Bool(b2)) => b1 == b2,
