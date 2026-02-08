@@ -12,6 +12,7 @@ use std::sync::RwLock;
 
 use super::column::PyColumn;
 use super::order::PySortOrder;
+use super::session::get_default_session;
 /// Python wrapper for DataFrame.
 #[pyclass(name = "DataFrame")]
 pub struct PyDataFrame {
@@ -286,6 +287,15 @@ impl PyDataFrame {
 
     /// Return a DataFrameWriter to save the DataFrame (chain ``.mode()``, ``.format()``, then ``.save(path)``).
     ///
+    /// Stub: writeTo (DataFrameWriterV2 / catalog tables) not supported.
+    /// Use df.write().parquet(path) or df.write().csv(path) instead.
+    #[pyo3(name = "writeTo")]
+    fn write_to(&self) -> PyResult<PyObject> {
+        Err(pyo3::exceptions::PyNotImplementedError::new_err(
+            "writeTo (catalog tables) is not supported; use df.write().parquet(path) or df.write().csv(path)",
+        ))
+    }
+
     /// Returns:
     ///     DataFrameWriter: Default mode "overwrite", format "parquet".
     fn write(&self) -> PyDataFrameWriter {
@@ -296,6 +306,41 @@ impl PyDataFrame {
             options: RwLock::new(std::collections::HashMap::new()),
             partition_by: RwLock::new(Vec::new()),
         }
+    }
+
+    /// Register this DataFrame as a temp view (PySpark: df.createOrReplaceTempView(name)).
+    /// Uses the default session from SparkSession.builder().get_or_create().
+    #[cfg(feature = "sql")]
+    #[pyo3(name = "createOrReplaceTempView")]
+    fn create_or_replace_temp_view(&self, name: &str, _py: Python<'_>) -> PyResult<()> {
+        let session = get_default_session().ok_or_else(|| {
+            pyo3::exceptions::PyRuntimeError::new_err(
+                "create_or_replace_temp_view: no default session. Call SparkSession.builder().get_or_create() first.",
+            )
+        })?;
+        session.create_or_replace_temp_view(name, self.inner.clone());
+        Ok(())
+    }
+
+    /// Register this DataFrame as a temp view (alias for create_or_replace_temp_view).
+    #[cfg(feature = "sql")]
+    #[pyo3(name = "createTempView")]
+    fn create_temp_view(&self, name: &str, py: Python<'_>) -> PyResult<()> {
+        self.create_or_replace_temp_view(name, py)
+    }
+
+    /// Register this DataFrame as a global temp view (stub: uses same catalog as temp view).
+    #[cfg(feature = "sql")]
+    #[pyo3(name = "createGlobalTempView")]
+    fn create_global_temp_view(&self, name: &str, py: Python<'_>) -> PyResult<()> {
+        self.create_or_replace_temp_view(name, py)
+    }
+
+    /// Register this DataFrame as a global temp view (stub: uses same catalog as temp view).
+    #[cfg(feature = "sql")]
+    #[pyo3(name = "createOrReplaceGlobalTempView")]
+    fn create_or_replace_global_temp_view(&self, name: &str, py: Python<'_>) -> PyResult<()> {
+        self.create_or_replace_temp_view(name, py)
     }
 
     /// Join with another DataFrame on one or more column names.
@@ -597,10 +642,17 @@ impl PyDataFrame {
     ///
     /// Raises:
     ///     RuntimeError: If execution or serialization fails.
+    #[pyo3(name = "toJSON")]
     fn to_json(&self) -> PyResult<Vec<String>> {
         self.inner
             .to_json()
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
+    }
+
+    /// Alias for toJSON (snake_case).
+    #[pyo3(name = "to_json")]
+    fn to_json_snake(&self) -> PyResult<Vec<String>> {
+        self.to_json()
     }
 
     /// Return a string representation of the logical plan (for debugging).
@@ -690,6 +742,84 @@ impl PyDataFrame {
             .unpersist()
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
         Ok(PyDataFrame { inner: df })
+    }
+
+    /// No-op: query planner hint. Returns self for chaining.
+    fn hint(&self, _name: &str, _params: Vec<i32>) -> PyResult<PyDataFrame> {
+        let df = self
+            .inner
+            .hint(_name, &_params)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        Ok(PyDataFrame { inner: df })
+    }
+
+    /// No-op: Polars has no range partitioning. Returns self.
+    #[pyo3(name = "repartitionByRange")]
+    #[pyo3(signature = (num_partitions, *cols))]
+    fn repartition_by_range(
+        &self,
+        num_partitions: usize,
+        cols: Vec<String>,
+    ) -> PyResult<PyDataFrame> {
+        let refs: Vec<&str> = cols.iter().map(|s| s.as_str()).collect();
+        let df = self
+            .inner
+            .repartition_by_range(num_partitions, refs)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        Ok(PyDataFrame { inner: df })
+    }
+
+    /// No-op: same as orderBy for compatibility. Returns self.
+    #[pyo3(name = "sortWithinPartitions")]
+    #[pyo3(signature = (*cols))]
+    fn sort_within_partitions(&self, cols: Vec<String>) -> PyResult<PyDataFrame> {
+        use crate::functions::{asc, col};
+        let sorts: Vec<SortOrder> = cols.iter().map(|c| asc(&col(c.as_str()))).collect();
+        let df = self
+            .inner
+            .sort_within_partitions(&sorts)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        Ok(PyDataFrame { inner: df })
+    }
+
+    /// No-op: returns False (semantic comparison not implemented).
+    #[pyo3(name = "sameSemantics")]
+    fn same_semantics(&self, other: &PyDataFrame) -> bool {
+        self.inner.same_semantics(&other.inner)
+    }
+
+    /// No-op: returns 0 (semantic hash not implemented).
+    #[pyo3(name = "semanticHash")]
+    fn semantic_hash(&self) -> u64 {
+        self.inner.semantic_hash()
+    }
+
+    /// Return list of column names.
+    fn columns(&self) -> PyResult<Vec<String>> {
+        self.inner
+            .columns()
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
+    }
+
+    /// No-op: eager execution. Returns self.
+    fn cache(&self) -> PyResult<PyDataFrame> {
+        let df = self
+            .inner
+            .cache()
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        Ok(PyDataFrame { inner: df })
+    }
+
+    /// Always True (eager single-node execution).
+    #[pyo3(name = "isLocal")]
+    fn is_local(&self) -> bool {
+        self.inner.is_local()
+    }
+
+    /// Return empty list (no file sources in eager execution).
+    #[pyo3(name = "inputFiles")]
+    fn input_files(&self) -> Vec<String> {
+        self.inner.input_files()
     }
 
     /// Stub: RDD API is not supported. Raises NotImplementedError.
@@ -786,7 +916,19 @@ impl PyDataFrame {
     }
 
     /// Rename all columns to the given names (e.g. after toDF in Scala).
+    #[pyo3(name = "toDF")]
     fn to_df(&self, names: Vec<String>) -> PyResult<PyDataFrame> {
+        let refs: Vec<&str> = names.iter().map(|s| s.as_str()).collect();
+        let df = self
+            .inner
+            .to_df(refs)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        Ok(PyDataFrame { inner: df })
+    }
+
+    /// Alias for toDF (snake_case). PySpark df.to_df(*cols).
+    #[pyo3(name = "to_df")]
+    fn to_df_snake(&self, names: Vec<String>) -> PyResult<PyDataFrame> {
         let refs: Vec<&str> = names.iter().map(|s| s.as_str()).collect();
         let df = self
             .inner
@@ -878,13 +1020,32 @@ impl PyDataFrame {
         }
     }
 
-    /// Correlation matrix of all numeric columns. Returns a DataFrame of pairwise correlations.
-    fn corr(&self) -> PyResult<PyDataFrame> {
-        let df = self
-            .inner
-            .corr()
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
+    /// Correlation matrix or scalar. PySpark: corr() -> matrix, corr(col1, col2) -> float.
+    #[pyo3(signature = (col1=None, col2=None))]
+    fn corr(&self, col1: Option<&str>, col2: Option<&str>, py: Python<'_>) -> PyResult<PyObject> {
+        match (col1, col2) {
+            (Some(c1), Some(c2)) => {
+                let r = self
+                    .inner
+                    .corr_cols(c1, c2)
+                    .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+                Ok(r.into_py(py))
+            }
+            _ => {
+                let df = self
+                    .inner
+                    .corr()
+                    .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+                Ok(PyDataFrame { inner: df }.into_py(py))
+            }
+        }
+    }
+
+    /// Sample covariance of two columns (scalar). PySpark df.cov(col1, col2).
+    fn cov(&self, col1: &str, col2: &str) -> PyResult<f64> {
+        self.inner
+            .cov_cols(col1, col2)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
     }
 
     /// Return a DataFrameNa for null handling: fill nulls or drop rows with nulls.
@@ -904,8 +1065,15 @@ impl PyDataFrame {
     ///
     /// Raises:
     ///     RuntimeError: If execution fails.
+    #[pyo3(name = "toPandas")]
     fn to_pandas(&self, py: Python<'_>) -> PyResult<PyObject> {
         self.collect(py)
+    }
+
+    /// Alias for toPandas (snake_case).
+    #[pyo3(name = "to_pandas")]
+    fn to_pandas_snake(&self, py: Python<'_>) -> PyResult<PyObject> {
+        self.to_pandas(py)
     }
 }
 

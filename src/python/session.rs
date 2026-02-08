@@ -6,9 +6,25 @@ use pyo3::types::PyDict;
 use serde_json::Value as JsonValue;
 use std::collections::HashMap;
 use std::path::Path;
-use std::sync::RwLock;
+use std::sync::{Mutex, OnceLock, RwLock};
 
 use super::dataframe::PyDataFrame;
+
+/// Default SparkSession for df.create_or_replace_temp_view(name) (PySpark parity).
+/// Set when SparkSession.builder().get_or_create() is called. Stored as inner SparkSession
+/// so we can call create_or_replace_temp_view from Rust without going through PyO3.
+static DEFAULT_SESSION: OnceLock<Mutex<Option<SparkSession>>> = OnceLock::new();
+
+fn default_session_cell() -> &'static Mutex<Option<SparkSession>> {
+    DEFAULT_SESSION.get_or_init(|| Mutex::new(None))
+}
+
+/// Return a clone of the default SparkSession if set. Used by df.create_or_replace_temp_view.
+/// The clone shares the catalog (Arc) with the session returned by get_or_create.
+pub(crate) fn get_default_session() -> Option<SparkSession> {
+    default_session_cell().lock().ok().and_then(|g| g.clone())
+}
+
 use super::py_to_json_value;
 /// Python wrapper for SparkSession.
 #[pyclass(name = "SparkSession")]
@@ -482,14 +498,22 @@ impl PySparkSessionBuilder {
 
     /// Build and return a SparkSession with the current builder configuration.
     ///
+    /// The returned session is stored as the default session for df.create_or_replace_temp_view(name)
+    /// (PySpark parity: df.createOrReplaceTempView does not take a session argument).
+    ///
     /// Returns:
-    ///     SparkSession: New session. No singleton; each call creates a new session.
-    fn get_or_create(slf: PyRef<'_, Self>) -> PySparkSession {
+    ///     SparkSession: New session.
+    fn get_or_create(slf: PyRef<'_, Self>, py: Python<'_>) -> PyResult<Py<PySparkSession>> {
         let mut config = std::collections::HashMap::new();
         for (k, v) in &slf.config {
             config.insert(k.clone(), v.clone());
         }
         let inner = SparkSession::new(slf.app_name.clone(), slf.master.clone(), config);
-        PySparkSession { inner }
+        if let Ok(mut guard) = default_session_cell().lock() {
+            *guard = Some(inner.clone());
+        }
+        let session = PySparkSession { inner };
+        let py_session = Py::new(py, session)?;
+        Ok(py_session)
     }
 }

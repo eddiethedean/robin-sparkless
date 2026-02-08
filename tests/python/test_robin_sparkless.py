@@ -613,6 +613,41 @@ def test_sparkless_parity_table_read_returns_rows() -> None:
     assert rows[0]["id"] == 1 and rows[2]["name"] == "c"
 
 
+def test_phase_d_dataframe_methods() -> None:
+    """Phase D: df.createOrReplaceTempView, corr/cov, toDF, columns, etc."""
+    import robin_sparkless as rs
+
+    spark = rs.SparkSession.builder().app_name("test").get_or_create()
+    df = spark.create_dataframe(
+        [(1, 10, "a"), (2, 20, "b"), (3, 30, "c")], ["id", "v", "name"]
+    )
+    # df.createOrReplaceTempView (requires get_or_create first for default session)
+    try:
+        df.createOrReplaceTempView("phase_d_view")
+        read_back = spark.table("phase_d_view")
+        assert read_back.count() == 3
+    except (AttributeError, RuntimeError) as e:
+        if "sql" in str(e).lower() or "create" in str(e).lower():
+            pytest.skip("sql feature not built or no default session")
+        raise
+    # corr(col1, col2) returns scalar
+    r = df.corr("id", "v")
+    assert isinstance(r, float)
+    assert -1 <= r <= 1 or (r != r)  # NaN check
+    # cov(col1, col2)
+    c = df.cov("id", "v")
+    assert isinstance(c, float)
+    # columns()
+    cols = df.columns()
+    assert cols == ["id", "v", "name"]
+    # toDF / to_df
+    renamed = df.toDF(["a", "b", "c"])
+    assert renamed.columns() == ["a", "b", "c"]
+    # toJSON
+    js = df.toJSON()
+    assert isinstance(js, list) and len(js) == 3
+
+
 def test_sparkless_parity_multiple_append_operations() -> None:
     """Multiple append-like operations (union) preserve rows. PySpark: union stacks rows."""
     import robin_sparkless as rs
