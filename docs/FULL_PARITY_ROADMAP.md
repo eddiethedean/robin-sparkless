@@ -9,7 +9,7 @@ A phased plan to achieve full API and behavioral parity between robin-sparkless 
 | Area | Robin-Sparkless | PySpark | Gap |
 |------|-----------------|---------|-----|
 | **Functions** | ~295+ implemented | ~415 | ~120 (many are aliases or param-name mismatches) |
-| **DataFrame methods** | ~68+ | ~95 | ~27 |
+| **DataFrame methods** | ~80+ (Phase D: view, corr/cov, aliases, stubs) | ~95 | ~15 |
 | **DataFrameReader** | spark.read().option/options/format/load/table/csv/parquet/json | 12+ methods | ~6 (jdbc, orc, text, schema full impl) |
 | **DataFrameWriter** | option/options/partition_by/parquet/csv/json | 16+ methods | ~10 (bucketBy, saveAsTable, insertInto, orc, text) |
 | **Column methods** | Many as module functions | 17 in class | Structural (robin uses F.xxx style) |
@@ -99,27 +99,17 @@ A phased plan to achieve full API and behavioral parity between robin-sparkless 
 
 ---
 
-## Phase D: DataFrame Method Gaps (2–3 weeks)
+## Phase D: DataFrame Method Gaps (2–3 weeks) — COMPLETED
 
 **Goal:** Implement remaining DataFrame methods from gap analysis (52 missing).
 
-**High priority:**
-- `createTempView`, `createOrReplaceTempView`, `createGlobalTempView` (stubs or full)
-- `corr` (scalar and matrix)
-- `checkpoint`, `localCheckpoint`
-- `toDF`, `toJSON`, `toPandas` (ensure aliases)
-- `observe`, `withWatermark` (stub)
-
-**Medium priority:**
-- `hint`, `repartitionByRange`, `sortWithinPartitions` (no-op or minimal)
-- `sameSemantics`, `semanticHash`
-- `writeTo` (DataFrameWriterV2 stub)
-
-**Already stubbed:** `rdd`, `foreach`, `foreachPartition`, `mapInPandas`, `mapPartitions`, `storageLevel`, `isStreaming`
-
-**Deliverables:**
-- ~25 DataFrame methods added or confirmed
-- No-op stubs for distributed/streaming methods
+**Deliverables (done):**
+- **View methods:** `df.createOrReplaceTempView(name)`, `createTempView`, `createGlobalTempView`, `createOrReplaceGlobalTempView` — use default session from `get_or_create`
+- **corr/cov:** `df.corr()` (matrix), `df.corr(col1, col2)` (scalar), `df.cov(col1, col2)` (scalar)
+- **Aliases:** `toDF`, `toJSON`, `toPandas` + snake_case `to_df`, `to_json`, `to_pandas`
+- **Exposed stubs:** `hint`, `repartitionByRange`, `sortWithinPartitions`, `sameSemantics`, `semanticHash`, `columns`, `cache`, `isLocal`, `inputFiles`
+- **writeTo stub:** raises NotImplementedError (use `df.write().parquet(path)` instead)
+- `checkpoint`, `local_checkpoint`, `observe`, `withWatermark` already present
 
 ---
 

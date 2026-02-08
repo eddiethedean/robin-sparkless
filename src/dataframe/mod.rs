@@ -440,6 +440,16 @@ impl DataFrame {
         self.stat().corr_matrix()
     }
 
+    /// Pearson correlation between two columns (scalar). PySpark df.corr(col1, col2).
+    pub fn corr_cols(&self, col1: &str, col2: &str) -> Result<f64, PolarsError> {
+        self.stat().corr(col1, col2)
+    }
+
+    /// Sample covariance between two columns (scalar). PySpark df.cov(col1, col2).
+    pub fn cov_cols(&self, col1: &str, col2: &str) -> Result<f64, PolarsError> {
+        self.stat().cov(col1, col2)
+    }
+
     /// Summary statistics (alias for describe). PySpark summary.
     pub fn summary(&self) -> Result<DataFrame, PolarsError> {
         self.describe()
