@@ -10,8 +10,8 @@ A phased plan to achieve full API and behavioral parity between robin-sparkless 
 |------|-----------------|---------|-----|
 | **Functions** | ~295+ implemented | ~415 | ~120 (many are aliases or param-name mismatches) |
 | **DataFrame methods** | ~68+ | ~95 | ~27 |
-| **DataFrameReader** | Partial (read_csv, read_parquet, read_json) | 12+ methods | ~12 |
-| **DataFrameWriter** | Partial (format/mode/save) | 16+ methods | ~16 |
+| **DataFrameReader** | spark.read().option/options/format/load/table/csv/parquet/json | 12+ methods | ~6 (jdbc, orc, text, schema full impl) |
+| **DataFrameWriter** | option/options/partition_by/parquet/csv/json | 16+ methods | ~10 (bucketBy, saveAsTable, insertInto, orc, text) |
 | **Column methods** | Many as module functions | 17 in class | Structural (robin uses F.xxx style) |
 | **GroupedData** | Strong | 10 methods | ~2 |
 | **SparkSession** | Core | 36 methods | ~25 |
@@ -83,27 +83,19 @@ A phased plan to achieve full API and behavioral parity between robin-sparkless 
 
 ---
 
-## Phase C: DataFrameReader / DataFrameWriter Parity (2–3 weeks)
+## Phase C: DataFrameReader / DataFrameWriter Parity (2–3 weeks) — COMPLETED
 
 **Goal:** Expose full Reader/Writer API so `spark.read.*` and `df.write.*` match PySpark.
 
-**DataFrameReader (12 missing):**
-- `schema`, `option`, `options`, `format`, `load`
-- `table`, `jdbc`, `orc`, `text`, `orc`, `csv` (options)
-- `parquet`, `json` (option variants)
-- Map existing `read_csv`, `read_parquet`, `read_json` to Reader API
-
-**DataFrameWriter (16 missing):**
-- `partitionBy`, `bucketBy`, `sortBy`
-- `option`, `options`, `mode`, `format`, `save`
-- `saveAsTable`, `insertInto`
-- `parquet`, `orc`, `text`, `csv`, `json` (format helpers)
-- Map existing write logic to Writer API
-
-**Deliverables:**
-- `spark.read.csv(...)` / `spark.read.parquet(...)` etc. match PySpark
-- `df.write.mode("overwrite").parquet(path)` etc. match PySpark
-- Reader/Writer options (header, inferSchema, etc.) aligned
+**Deliverables (done):**
+- **DataFrameReader (Rust)**: `option`, `options`, `format`, `schema` (stub), `load`, `table`, `csv`, `parquet`, `json` — options applied (header, inferSchema, sep, nullValue)
+- **DataFrameWriter (Rust)**: `option`, `options`, `partition_by`, `parquet`, `csv`, `json` — format helpers; partitionBy stored (partitioned write stubbed)
+- **PyDataFrameReader**: `read()` on SparkSession; `option`, `options`, `format`, `schema`, `load`, `table`, `csv`, `parquet`, `json`
+- **PyDataFrameWriter**: `option`, `options`, `partition_by`, `parquet`, `csv`, `json`
+- **Parity fixtures**: `read_csv_with_options` (reader_options), `read_table` (table_source)
+- `spark.read.csv(...)`, `spark.read.option("header","true").csv(path)`, `spark.read.format("parquet").load(path)`, `spark.read.table("name")` work
+- `df.write.mode("overwrite").parquet(path)`, `df.write.option("header","true").csv(path)` work
+- Stubs: `jdbc`, `orc`, `text`, `bucketBy`, `saveAsTable`, `insertInto` (out of scope)
 
 ---
 

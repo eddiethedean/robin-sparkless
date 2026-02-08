@@ -293,6 +293,8 @@ impl PyDataFrame {
             df: self.inner.clone(),
             mode: RwLock::new(WriteMode::Overwrite),
             format: RwLock::new(WriteFormat::Parquet),
+            options: RwLock::new(std::collections::HashMap::new()),
+            partition_by: RwLock::new(Vec::new()),
         }
     }
 
@@ -1349,6 +1351,27 @@ pub struct PyDataFrameWriter {
     df: crate::DataFrame,
     mode: RwLock<WriteMode>,
     format: RwLock<WriteFormat>,
+    options: RwLock<std::collections::HashMap<String, String>>,
+    partition_by: RwLock<Vec<String>>,
+}
+
+impl PyDataFrameWriter {
+    fn build_writer(&self) -> crate::dataframe::DataFrameWriter<'_> {
+        let mode = *self.mode.read().expect("DataFrameWriter mode lock");
+        let format = *self.format.read().expect("DataFrameWriter format lock");
+        let mut w = self.df.write().mode(mode).format(format);
+        if let Ok(opts) = self.options.read() {
+            for (k, v) in opts.iter() {
+                w = w.option(k.clone(), v.clone());
+            }
+        }
+        if let Ok(cols) = self.partition_by.read() {
+            if !cols.is_empty() {
+                w = w.partition_by(cols.clone());
+            }
+        }
+        w
+    }
 }
 
 #[pymethods]
@@ -1396,6 +1419,67 @@ impl PyDataFrameWriter {
         Ok(slf)
     }
 
+    /// Add an option (PySpark: option(key, value)). Returns self for chaining.
+    fn option<'py>(slf: PyRef<'py, Self>, key: &str, value: &str) -> PyResult<PyRef<'py, Self>> {
+        if let Ok(mut opts) = slf.options.try_write() {
+            opts.insert(key.to_string(), value.to_string());
+        }
+        Ok(slf)
+    }
+
+    /// Add options from a dict (PySpark: options(**kwargs)). Returns self for chaining.
+    fn options<'py>(
+        slf: PyRef<'py, Self>,
+        _py: Python<'_>,
+        opts: &Bound<'_, pyo3::types::PyAny>,
+    ) -> PyResult<PyRef<'py, Self>> {
+        let dict = opts.downcast::<pyo3::types::PyDict>()?;
+        if let Ok(mut guard) = slf.options.try_write() {
+            for (k, v) in dict.iter() {
+                let k_str: String = k.extract()?;
+                let v_str: String = v.extract()?;
+                guard.insert(k_str, v_str);
+            }
+        }
+        Ok(slf)
+    }
+
+    /// Partition output by the given columns (PySpark: partitionBy(*cols)). Returns self for chaining.
+    #[pyo3(signature = (*cols))]
+    fn partition_by<'py>(slf: PyRef<'py, Self>, cols: Vec<String>) -> PyResult<PyRef<'py, Self>> {
+        if let Ok(mut guard) = slf.partition_by.try_write() {
+            *guard = cols;
+        }
+        Ok(slf)
+    }
+
+    /// Write as Parquet (PySpark: parquet(path)).
+    fn parquet(&self, path: &str) -> PyResult<()> {
+        self.build_writer()
+            .parquet(Path::new(path))
+            .map_err(|e: polars::prelude::PolarsError| {
+                pyo3::exceptions::PyRuntimeError::new_err(e.to_string())
+            })
+    }
+
+    /// Write as CSV (PySpark: csv(path)).
+    fn csv(&self, path: &str) -> PyResult<()> {
+        self.build_writer()
+            .csv(Path::new(path))
+            .map_err(|e: polars::prelude::PolarsError| {
+                pyo3::exceptions::PyRuntimeError::new_err(e.to_string())
+            })
+    }
+
+    /// Write as JSON lines (PySpark: json(path)).
+    fn json(&self, path: &str) -> PyResult<()> {
+        self.build_writer()
+            .json(Path::new(path))
+            .map_err(|e: polars::prelude::PolarsError| {
+                pyo3::exceptions::PyRuntimeError::new_err(e.to_string())
+            })
+    }
+
     /// Write the DataFrame to the given path using the current mode and format.
     ///
     /// Args:
@@ -1404,18 +1488,7 @@ impl PyDataFrameWriter {
     /// Raises:
     ///     RuntimeError: If write fails (e.g. permission, disk, or format error).
     fn save(&self, path: &str) -> PyResult<()> {
-        let mode = *self
-            .mode
-            .try_read()
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        let format = *self
-            .format
-            .try_read()
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        self.df
-            .write()
-            .mode(mode)
-            .format(format)
+        self.build_writer()
             .save(Path::new(path))
             .map_err(|e: polars::prelude::PolarsError| {
                 pyo3::exceptions::PyRuntimeError::new_err(e.to_string())

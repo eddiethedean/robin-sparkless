@@ -36,12 +36,21 @@ struct InputSection {
     rows: Vec<Vec<Value>>,
     #[serde(default)]
     file_source: Option<FileSource>,
+    #[serde(default)]
+    table_source: Option<TableSource>,
 }
 
 #[derive(Debug, Deserialize)]
 struct FileSource {
     format: String,  // "csv", "parquet", "json"
     content: String, // file content as string
+    #[serde(default)]
+    reader_options: Option<std::collections::HashMap<String, String>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct TableSource {
+    view_name: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -312,10 +321,18 @@ fn run_fixture(fixture: &Fixture) -> Result<(), PolarsError> {
 /// - `string`         → UTF-8
 ///
 /// If `file_source` is present, reads from a temporary file instead of in-memory data.
+/// If `table_source` is present, creates df from rows, registers temp view, then reads via table().
 fn create_df_from_input(
     spark: &SparkSession,
     input: &InputSection,
 ) -> Result<DataFrame, PolarsError> {
+    // Check if we have a table source (spark.read.table)
+    if let Some(ref table_source) = input.table_source {
+        let df = create_df_from_input_direct(input)?;
+        spark.create_or_replace_temp_view(&table_source.view_name, df);
+        return spark.read().table(&table_source.view_name);
+    }
+
     // Check if we have a file source
     if let Some(ref file_source) = input.file_source {
         return create_df_from_file_source(spark, file_source, input);
@@ -392,9 +409,17 @@ fn create_df_from_file_source(
             })?;
     }
 
+    // Build reader with optional options
+    let mut reader = spark.read();
+    if let Some(ref opts) = file_source.reader_options {
+        for (k, v) in opts.iter() {
+            reader = reader.option(k.clone(), v.clone());
+        }
+    }
+
     // Read the file using the appropriate reader
     let df = match file_source.format.as_str() {
-        "csv" => spark.read_csv(&temp_path)?,
+        "csv" => reader.csv(&temp_path)?,
         "parquet" => {
             // For Parquet, use the input.rows data (what PySpark actually read) to create
             // a DataFrame, write it as Parquet, then read it back.
@@ -421,10 +446,10 @@ fn create_df_from_file_source(
                     })?;
             }
 
-            // Now read the Parquet file we just created
-            spark.read_parquet(&temp_path)?
+            // Now read the Parquet file we just created (with optional reader options)
+            reader.parquet(&temp_path)?
         }
-        "json" => spark.read_json(&temp_path)?,
+        "json" => reader.json(&temp_path)?,
         _ => {
             return Err(PolarsError::ComputeError(
                 format!("unsupported file format: {}", file_source.format).into(),
