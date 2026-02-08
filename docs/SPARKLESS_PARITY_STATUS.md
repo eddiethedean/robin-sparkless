@@ -17,6 +17,20 @@ Or run parity only (hand-written + `tests/fixtures/converted/*.json`):
 cargo test pyspark_parity_fixtures
 ```
 
+Or run phase-specific parity (fixtures from `tests/fixtures/phase_manifest.json`):
+
+```bash
+PARITY_PHASE=a cargo test pyspark_parity_fixtures
+make test-parity-phase-a   # Phase A: signature alignment
+make test-parity-phase-b   # Phase B: high-value functions
+make test-parity-phase-c   # Phase C: Reader/Writer
+make test-parity-phase-d   # Phase D: DataFrame methods
+make test-parity-phase-e   # Phase E: SparkSession/Catalog (no fixtures)
+make test-parity-phase-f   # Phase F: behavioral
+make test-parity-phase-g   # Phase G: fixture expansion
+make test-parity-phases    # All phases
+```
+
 ## Keeping expectations aligned with PySpark
 
 - **Hand-written fixtures:** Expected values in `tests/fixtures/*.json` (top-level, excluding `converted/` and `plans/`) can be refreshed from PySpark using the regeneration script. Run:
@@ -92,7 +106,7 @@ When a converted fixture fails, classify and document here:
 
 ## Skipped fixtures
 
-Fixtures with `"skip": true` in JSON are not run. **21 hand-written** fixtures remain skipped (down from 38 after parity fixes). See each fixture’s `skip_reason` in JSON. Typical reasons: timezone (timestamp_seconds/millis/micros), struct row format (named_struct_test, struct_test), window frame (nth_value_window, last_value_window, ntile_window), set ops (intersect, subtract), right_join column order, JVM-only (with_jvm_stubs), non-deterministic (with_rand_seed, with_unix_micros), hash/xxhash (with_hash, string_xxhash64), assert_true type, months_between/arrays_overlap, arrays_zip struct length, with_curdate_now, raise_error.
+Fixtures with `"skip": true` in JSON are not run. **11 hand-written** fixtures remain skipped. See each fixture’s `skip_reason` in JSON. Typical reasons: timezone (timestamp_seconds/millis/micros), struct row format (named_struct_test, struct_test), window frame (nth_value_window, last_value_window, ntile_window), set ops (intersect, subtract), right_join column order, JVM-only (with_jvm_stubs), non-deterministic (with_rand_seed, with_unix_micros), hash/xxhash (with_hash, string_xxhash64), assert_true type, months_between/arrays_overlap, arrays_zip struct length, with_curdate_now, raise_error.
 
 ## Closed-issue test coverage
 

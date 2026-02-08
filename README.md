@@ -134,6 +134,7 @@ print(filtered.collect())  # [{"id": 2, "age": 30, "name": "Bob"}]
 | `make test` | Run Rust + Python tests (creates venv, `maturin develop --features pyo3,sql,delta`, `pytest`) |
 | `make check` | Rust only: format, clippy, audit, deny, Rust tests |
 | `make check-full` | Full CI: check + Python lint (ruff format, ruff check, mypy) + Python tests |
+| `make test-parity-phase-a` … `make test-parity-phase-g` | Run parity fixtures for a specific phase (see [PARITY_STATUS](docs/PARITY_STATUS.md)) |
 | `make lint-python` | Python only: ruff format --check, ruff check, mypy |
 | `cargo bench` | Benchmarks (robin-sparkless vs Polars) |
 | `cargo doc --open` | Build and open API docs |

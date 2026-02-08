@@ -18,7 +18,7 @@ A phased plan to achieve full API and behavioral parity between robin-sparkless 
 | **Catalog** | None | 27 methods | 27 |
 | **Window** | Core | 4 WindowSpec methods | 4 |
 
-**Parity fixtures:** 159 passing. Target: 200+ for full confidence.
+**Parity fixtures:** 201 passing (11 skipped). Target: 200+ for full confidence. Phase-specific tests: `make test-parity-phase-a` … `make test-parity-phase-g`; see [PARITY_STATUS.md](PARITY_STATUS.md) and `tests/fixtures/phase_manifest.json`.
 
 ---
 
@@ -192,7 +192,7 @@ A phased plan to achieve full API and behavioral parity between robin-sparkless 
 - [DEFERRED_SCOPE.md](DEFERRED_SCOPE.md) — Phase H: deferred/optional scope (XML, UDF, streaming, RDD, etc.)
 - [PYSPARK_DIFFERENCES.md](PYSPARK_DIFFERENCES.md) — semantic divergences
 - [ROBIN_SPARKLESS_MISSING.md](ROBIN_SPARKLESS_MISSING.md) — canonical missing list
-- [PARITY_STATUS.md](PARITY_STATUS.md) — fixture coverage
+- [PARITY_STATUS.md](PARITY_STATUS.md) — fixture coverage and phase test coverage
 
 ---
 
