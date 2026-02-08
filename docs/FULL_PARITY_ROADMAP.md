@@ -158,7 +158,7 @@ A phased plan to achieve full API and behavioral parity between robin-sparkless 
 
 ---
 
-## Phase H: Deferred / Optional
+## Phase H: Deferred / Optional — COMPLETED (documented)
 
 **Explicitly out of scope for full parity (document only):**
 - **XML / XPath:** `from_xml`, `to_xml`, `schema_of_xml`, `xpath*` — require XML parser
@@ -167,6 +167,8 @@ A phased plan to achieve full API and behavioral parity between robin-sparkless 
 - **Sketch aggregates:** HLL, count-min sketch — optional
 - **RDD / distributed:** `rdd`, `foreach`, `mapInPandas` — eager execution only
 - **Catalog DDL:** `CREATE TABLE`, etc. — use write to path
+
+**Deliverables (done):** [DEFERRED_SCOPE.md](DEFERRED_SCOPE.md) created with rationale and workarounds for each category; cross-references added in PYSPARK_DIFFERENCES, README, ROBIN_SPARKLESS_MISSING.
 
 ---
 
@@ -187,6 +189,7 @@ A phased plan to achieve full API and behavioral parity between robin-sparkless 
 ## Dependencies
 
 - [GAP_ANALYSIS_PYSPARK_REPO.md](GAP_ANALYSIS_PYSPARK_REPO.md) — gap matrix (regenerate with `make gap-analysis`)
+- [DEFERRED_SCOPE.md](DEFERRED_SCOPE.md) — Phase H: deferred/optional scope (XML, UDF, streaming, RDD, etc.)
 - [PYSPARK_DIFFERENCES.md](PYSPARK_DIFFERENCES.md) — semantic divergences
 - [ROBIN_SPARKLESS_MISSING.md](ROBIN_SPARKLESS_MISSING.md) — canonical missing list
 - [PARITY_STATUS.md](PARITY_STATUS.md) — fixture coverage

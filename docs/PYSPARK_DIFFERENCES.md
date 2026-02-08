@@ -93,6 +93,8 @@ The following JVM- or runtime-related functions are implemented as **stubs for A
 
 ## Optional / deferred (XML, XPath, sentences, RDD, UDF, Catalog, Streaming, sketch, JVM stubs)
 
+See [DEFERRED_SCOPE.md](DEFERRED_SCOPE.md) for the full Phase H deferred scope with rationale and workarounds.
+
 The following are **not implemented** or are **stubs**; tracked in GitHub issues for parity:
 
 - **RDD / distributed (#142)**: RDD and distributed execution APIs — not supported; `rdd`, `foreach`, `foreachPartition`, `mapInPandas`, `mapPartitions` raise `NotImplementedError`.

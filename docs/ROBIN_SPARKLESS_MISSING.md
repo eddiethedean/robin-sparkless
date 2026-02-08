@@ -4,6 +4,8 @@ This list is **only** items that **Sparkless has** and **robin-sparkless does no
 
 **PySpark parity scope:** All items below are **PySpark APIs** (or direct Sparkless equivalents of PySpark), unless marked as *Sparkless-specific*. PySpark reference: [pyspark.sql](https://spark.apache.org/docs/latest/api/python/reference/pyspark.sql/index.html) (SparkSession, DataFrame, Catalog, functions), [pyspark.sql.functions](https://spark.apache.org/docs/latest/api/python/reference/pyspark.sql/functions.html), and [RDD / SparkContext](https://spark.apache.org/docs/latest/api/python/reference/pyspark.html). Tracking these as unimplemented is for **PySpark parity**; implementing them would align robin-sparkless with standard PySpark behavior.
 
+For a consolidated view of deferred/optional scope (XML, UDF, streaming, RDD, sketch, Catalog DDL), see [DEFERRED_SCOPE.md](DEFERRED_SCOPE.md).
+
 ---
 
 ## Functions (sparkless.sql.functions) — Missing or stub only

@@ -34,7 +34,7 @@
 | **Optional SQL** | `spark.sql("SELECT ...")` with temp views (`createOrReplaceTempView`, `table`) — enable with `--features sql` |
 | **Optional Delta** | `read_delta`, `read_delta_with_version`, `write_delta` — enable with `--features delta` |
 
-Known differences from PySpark are documented in [docs/PYSPARK_DIFFERENCES.md](docs/PYSPARK_DIFFERENCES.md). Parity status and roadmap are in [docs/PARITY_STATUS.md](docs/PARITY_STATUS.md) and [docs/ROADMAP.md](docs/ROADMAP.md).
+Known differences from PySpark are documented in [docs/PYSPARK_DIFFERENCES.md](docs/PYSPARK_DIFFERENCES.md). Out-of-scope items (XML, UDF, streaming, RDD) are documented in [docs/DEFERRED_SCOPE.md](docs/DEFERRED_SCOPE.md). Parity status and roadmap are in [docs/PARITY_STATUS.md](docs/PARITY_STATUS.md) and [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ---
 
