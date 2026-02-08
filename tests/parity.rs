@@ -2105,33 +2105,33 @@ fn json_value_to_lit(v: &serde_json::Value) -> Result<Expr, String> {
 fn parse_with_column_expr(src: &str) -> Result<Expr, String> {
     use polars::prelude::concat_list;
     use robin_sparkless::{
-        acos, add_months, array_append, array_compact, array_contains, array_distinct,
+        abs, acos, add_months, array_append, array_compact, array_contains, array_distinct,
         array_except, array_insert, array_intersect, array_prepend, array_size, array_sum,
         array_union, arrays_overlap, arrays_zip, ascii, asin, assert_true, atan, atan2, base64,
         bin, bit_and, bit_count, bit_get, bit_length, bit_or, bit_xor, bitwise_not, bround, btrim,
-        cast, cbrt, ceiling, char as rs_char, chr, coalesce, col, concat, concat_ws, contains,
-        conv, cos, cosh, cot, create_map, csc, curdate, current_catalog, current_database,
-        current_date, current_schema, current_timestamp, current_user, date_add,
-        date_from_unix_date, date_sub, datediff, day, dayname, dayofmonth, dayofweek, dayofyear,
-        degrees, e, element_at, elt, endswith, equal_null, exp, extract, factorial, find_in_set,
-        format_number, format_string, from_unixtime, from_utc_timestamp, get, getbit, greatest,
-        hash, hex, hour, hypot, ilike, initcap, input_file_name, instr, isin_i64, isin_str, isnan,
-        isnotnull, isnull, json_array_length, last_day, lcase, least, left, length, like, lit_str,
-        ln, localtimestamp, locate, log, log10, lower, lpad, make_date, make_timestamp, map_concat,
-        map_contains_key, map_filter, map_from_entries, map_zip_with, md5, minute,
-        monotonically_increasing_id, months_between, named_struct, nanvl, negate, next_day, now,
-        nullif, nvl, nvl2, overlay, parse_url, pi, pmod, positive, pow, power, quarter, radians,
-        raise_error, rand, randn, regexp_count, regexp_extract, regexp_extract_all, regexp_instr,
-        regexp_like, regexp_replace, regexp_substr, repeat, replace, reverse, right, rlike, rpad,
-        sec, second, sha1, sha2, shift_left, shift_right, signum, sin, sinh, size,
-        spark_partition_id, split, split_part, sqrt, startswith, str_to_map, struct_, substr,
-        substring, tan, tanh, timestamp_micros, timestamp_millis, timestamp_seconds, timestampadd,
-        timestampdiff, to_char, to_degrees, to_number, to_radians, to_timestamp, to_unix_timestamp,
-        to_utc_timestamp, trim, trunc, try_add, try_cast, try_divide, try_multiply, try_subtract,
-        try_to_number, try_to_timestamp, typeof_, ucase, unbase64, unhex, unix_date, unix_micros,
-        unix_millis, unix_seconds, unix_timestamp, unix_timestamp_now, upper, url_decode,
-        url_encode, user, version, weekday, weekofyear, when, when_then_otherwise_null,
-        width_bucket, zip_with,
+        cast, cbrt, ceiling, char as rs_char, char_length, chr, coalesce, col, concat, concat_ws,
+        contains, conv, cos, cosh, cot, create_map, csc, curdate, current_catalog,
+        current_database, current_date, current_schema, current_timestamp, current_user, date_add,
+        date_format, date_from_unix_date, date_sub, datediff, day, dayname, dayofmonth, dayofweek,
+        dayofyear, degrees, e, element_at, elt, endswith, equal_null, exp, extract, factorial,
+        find_in_set, format_number, format_string, from_unixtime, from_utc_timestamp, get, getbit,
+        greatest, hash, hex, hour, hypot, ilike, initcap, input_file_name, instr, isin_i64,
+        isin_str, isnan, isnotnull, isnull, json_array_length, last_day, lcase, least, left,
+        length, like, lit_str, ln, localtimestamp, locate, log, log10, lower, lpad, make_date,
+        make_timestamp, map_concat, map_contains_key, map_filter, map_from_entries, map_zip_with,
+        md5, minute, monotonically_increasing_id, months_between, named_struct, nanvl, negate,
+        next_day, now, nullif, nvl, nvl2, overlay, parse_url, pi, pmod, positive, pow, power,
+        quarter, radians, raise_error, rand, randn, regexp_count, regexp_extract,
+        regexp_extract_all, regexp_instr, regexp_like, regexp_replace, regexp_substr, repeat,
+        replace, reverse, right, rlike, rpad, sec, second, sha1, sha2, shift_left, shift_right,
+        signum, sin, sinh, size, spark_partition_id, split, split_part, sqrt, startswith,
+        str_to_map, struct_, substr, substring, tan, tanh, timestamp_micros, timestamp_millis,
+        timestamp_seconds, timestampadd, timestampdiff, to_char, to_degrees, to_number, to_radians,
+        to_timestamp, to_unix_timestamp, to_utc_timestamp, trim, trunc, try_add, try_cast,
+        try_divide, try_multiply, try_subtract, try_to_number, try_to_timestamp, typeof_, ucase,
+        unbase64, unhex, unix_date, unix_micros, unix_millis, unix_seconds, unix_timestamp,
+        unix_timestamp_now, upper, url_decode, url_encode, user, version, weekday, weekofyear,
+        when, when_then_otherwise_null, width_bucket, zip_with,
     };
 
     let s = src.trim();
@@ -2322,12 +2322,46 @@ fn parse_with_column_expr(src: &str) -> Result<Expr, String> {
         return Ok(lower(&c).into_expr());
     }
 
-    // Handle length(col('name'))
+    // Handle length(col('name')), char_length(...), character_length(...)
     if s.starts_with("length(") {
         let inner = extract_first_arg(s, "length(")?;
         let col_name = extract_col_name(inner)?;
         let c = col(col_name);
         return Ok(length(&c).into_expr());
+    }
+    if s.starts_with("char_length(") || s.starts_with("character_length(") {
+        let prefix = if s.starts_with("char_length(") {
+            "char_length("
+        } else {
+            "character_length("
+        };
+        let inner = extract_first_arg(s, prefix)?;
+        let col_name = extract_col_name(inner)?;
+        let c = col(col_name);
+        return Ok(char_length(&c).into_expr());
+    }
+
+    // Handle abs(col('x'))
+    if s.starts_with("abs(") {
+        let inner = extract_first_arg(s, "abs(")?;
+        let col_name = extract_col_name(inner)?;
+        let c = col(col_name);
+        return Ok(abs(&c).into_expr());
+    }
+
+    // Handle date_format(col('d'), 'yyyy-MM')
+    if s.starts_with("date_format(") {
+        let inner = extract_first_arg(s, "date_format(")?;
+        let parts = parse_comma_separated_args(inner);
+        let col_name = extract_col_name(parts.first().ok_or("date_format needs column")?)?;
+        let format_str = parts
+            .get(1)
+            .ok_or("date_format needs format string")?
+            .trim()
+            .trim_matches(['\'', '"'])
+            .to_string();
+        let c = col(col_name);
+        return Ok(date_format(&c, &format_str).into_expr());
     }
 
     // Handle isnull(col('name')), isnotnull(col('name'))

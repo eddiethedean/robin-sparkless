@@ -395,7 +395,7 @@ fn expr_from_fn(name: &str, args: &[Value]) -> Result<Expr, PlanExprError> {
             Ok(when_then_otherwise_null(&cond, &then_val).into_expr())
         }
         // --- String ---
-        "length" => {
+        "length" | "char_length" | "character_length" => {
             require_args(name, args, 1)?;
             Ok(length(&expr_to_column(arg_expr(args, 0)?)).into_expr())
         }
@@ -743,27 +743,28 @@ fn expr_from_fn(name: &str, args: &[Value]) -> Result<Expr, PlanExprError> {
 fn expr_from_fn_rest(name: &str, args: &[Value]) -> Result<Expr, PlanExprError> {
     #[allow(unused_imports)]
     use crate::functions::{
-        abs, acos, add_months, array_agg, array_append, array_compact, array_contains,
-        array_distinct, array_except, array_insert, array_intersect, array_join, array_prepend,
-        array_remove, array_size, array_slice, array_sort, array_sum, array_union, arrays_overlap,
-        arrays_zip, asin, atan, atan2, bround, cast, cbrt, ceiling, cos, cosh, cot, create_map,
-        csc, curdate, current_catalog, current_database, current_date, current_schema,
-        current_timestamp, current_timezone, current_user, date_add, date_diff, date_format,
-        date_from_unix_date, date_part, date_sub, date_trunc, dateadd, datediff, datepart, day,
-        dayname, dayofmonth, dayofweek, dayofyear, days, decode, degrees, e, element_at, encode,
-        equal_null, exp, explode, explode_outer, expm1, extract, factorial, floor, from_unixtime,
-        from_utc_timestamp, get, get_json_object, greatest, grouping, grouping_id, hash, hour,
-        hours, hypot, input_file_name, last_day, least, localtimestamp, log, log10, log1p, log2,
-        make_date, make_interval, make_timestamp, make_timestamp_ntz, map_keys, map_values, minute,
-        minutes, monotonically_increasing_id, month, months, months_between, negate, next_day, now,
-        nullif, nvl, nvl2, parse_url, pi, pmod, positive, pow, quarter, radians, rint, round, sec,
-        second, shift_left, shift_right, signum, sin, sinh, size, spark_partition_id, sqrt, tan,
-        tanh, timestamp_micros, timestamp_millis, timestamp_seconds, timestampadd, timestampdiff,
-        to_binary, to_char, to_date, to_degrees, to_number, to_radians, to_timestamp,
-        to_unix_timestamp, to_utc_timestamp, to_varchar, trunc, try_add, try_cast, try_divide,
-        try_element_at, try_multiply, try_subtract, try_to_number, try_to_timestamp, typeof_,
-        unix_date, unix_micros, unix_millis, unix_seconds, unix_timestamp, unix_timestamp_now,
-        user, weekday, weekofyear, width_bucket, year, years,
+        abs, acos, add_months, array, array_agg, array_append, array_compact, array_contains,
+        array_distinct, array_except, array_insert, array_intersect, array_join, array_max,
+        array_min, array_prepend, array_remove, array_size, array_slice, array_sort, array_sum,
+        array_union, arrays_overlap, arrays_zip, asin, atan, atan2, bround, cast, cbrt, ceiling,
+        cos, cosh, cot, create_map, csc, curdate, current_catalog, current_database, current_date,
+        current_schema, current_timestamp, current_timezone, current_user, date_add, date_diff,
+        date_format, date_from_unix_date, date_part, date_sub, date_trunc, dateadd, datediff,
+        datepart, day, dayname, dayofmonth, dayofweek, dayofyear, days, decode, degrees, e,
+        element_at, encode, equal_null, exp, explode, explode_outer, expm1, extract, factorial,
+        floor, from_unixtime, from_utc_timestamp, get, get_json_object, greatest, grouping,
+        grouping_id, hash, hour, hours, hypot, input_file_name, last_day, least, localtimestamp,
+        log, log10, log1p, log2, make_date, make_interval, make_timestamp, make_timestamp_ntz,
+        map_keys, map_values, minute, minutes, monotonically_increasing_id, month, months,
+        months_between, negate, next_day, now, nullif, nvl, nvl2, parse_url, pi, pmod, positive,
+        pow, quarter, radians, rint, round, sec, second, shift_left, shift_right, signum, sin,
+        sinh, size, spark_partition_id, sqrt, tan, tanh, timestamp_micros, timestamp_millis,
+        timestamp_seconds, timestampadd, timestampdiff, to_binary, to_char, to_date, to_degrees,
+        to_number, to_radians, to_timestamp, to_unix_timestamp, to_utc_timestamp, to_varchar,
+        trunc, try_add, try_cast, try_divide, try_element_at, try_multiply, try_subtract,
+        try_to_number, try_to_timestamp, typeof_, unix_date, unix_micros, unix_millis,
+        unix_seconds, unix_timestamp, unix_timestamp_now, user, weekday, weekofyear, width_bucket,
+        year, years,
     };
     use crate::Column;
 
@@ -1119,6 +1120,12 @@ fn expr_from_fn_rest(name: &str, args: &[Value]) -> Result<Expr, PlanExprError> 
             let format = arg_lit_str(args, 1)?;
             Ok(trunc(&c, &format).into_expr())
         }
+        "date_trunc" => {
+            require_args(name, args, 2)?;
+            let format = arg_lit_str(args, 0)?;
+            let c = expr_to_column(arg_expr(args, 1)?);
+            Ok(date_trunc(&format, &c).into_expr())
+        }
         "add_months" => {
             require_args(name, args, 2)?;
             let c = expr_to_column(arg_expr(args, 0)?);
@@ -1407,7 +1414,28 @@ fn expr_from_fn_rest(name: &str, args: &[Value]) -> Result<Expr, PlanExprError> 
             Ok(crate::functions::version().into_expr())
         }
         // --- Array / list ---
-        "array_size" | "size" => {
+        "array" => {
+            if args.is_empty() {
+                return Err(PlanExprError(
+                    "fn 'array' requires at least one argument".to_string(),
+                ));
+            }
+            let exprs: Result<Vec<Expr>, _> = args.iter().map(expr_from_value).collect();
+            let cols: Vec<Column> = exprs?.into_iter().map(expr_to_column).collect();
+            let refs: Vec<&Column> = cols.iter().collect();
+            Ok(array(&refs)
+                .map_err(|e| PlanExprError(e.to_string()))?
+                .into_expr())
+        }
+        "array_max" => {
+            require_args(name, args, 1)?;
+            Ok(crate::functions::array_max(&expr_to_column(arg_expr(args, 0)?)).into_expr())
+        }
+        "array_min" => {
+            require_args(name, args, 1)?;
+            Ok(crate::functions::array_min(&expr_to_column(arg_expr(args, 0)?)).into_expr())
+        }
+        "array_size" | "size" | "cardinality" => {
             require_args(name, args, 1)?;
             let c = expr_to_column(arg_expr(args, 0)?);
             Ok(array_size(&c).into_expr())

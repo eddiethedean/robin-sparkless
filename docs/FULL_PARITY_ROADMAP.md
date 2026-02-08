@@ -62,29 +62,24 @@ A phased plan to achieve full API and behavioral parity between robin-sparkless 
 
 ---
 
-## Phase B: Missing High-Value Functions (3–4 weeks)
+## Phase B: Missing High-Value Functions (3–4 weeks) — COMPLETED
 
 **Goal:** Implement functions that appear in PySpark gap analysis as "missing" but are commonly used.
 
-**High priority (implement):**
-- `abs` (if not already present as alias)
-- `array(cols)` — construct array from columns
-- `ceil` (alias for ceiling if needed)
-- `char_length`, `character_length` (aliases for length)
-- `date_add`, `date_sub` (aliases if different from current)
-- `date_format` (ensure PySpark format string compatibility)
-- `current_date`, `current_timestamp` (ensure exposed)
-- `aggregate` (array fold) — full semantics if not yet complete
-- PySpark aliases: `sign` → signum, `std` → stddev, `mean` → avg, `date_trunc` → trunc
+**Deliverables (done):**
+- **Tier 1 functions exposed** in `src/python/mod.rs`: `abs`, `date_add`, `date_sub`, `date_format`, `current_date`, `current_timestamp`, `char_length`, `character_length`, `date_trunc`, `array`, `array_contains`, `array_max`, `array_min`, `array_position`, `array_size`, `size`, `array_join`, `array_sort`, `cardinality`
+- **Aliases**: `ceil` → ceiling, `mean` → avg, `std` → stddev, `sign` → signum
+- **Varargs**: `array(*cols)` via `#[pyo3(signature = (*cols))]`
+- **aggregate(col, zero)** exposed for array fold
+- **plan/expr.rs**: Added `array`, `array_max`, `array_min`, `cardinality`, `char_length`, `character_length`, `date_trunc` to expr_from_fn_rest
+- **Parity fixtures**: abs, array_from_cols, date_format, char_length, current_date_timestamp (skipped; non-deterministic)
+- **date_format**: Now accepts PySpark/Java SimpleDateFormat (e.g. `yyyy-MM`) via pyspark_format_to_chrono conversion
+- Gap analysis: missing reduced from 195 → 171; exact increased 199 → 214
 
-**Medium priority (evaluate):**
+**Medium priority (deferred):**
 - `bucket`, `call_function` (stub or narrow implementation)
 - `cume_dist`, `percent_rank` (window) — ensure full parity
 - `window`, `window_time` — thin wrappers over `.over()`
-
-**Deliverables:**
-- ~30–50 "missing" functions implemented or aliased
-- Parity fixtures for new functions
 
 ---
 

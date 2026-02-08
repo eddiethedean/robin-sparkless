@@ -4,35 +4,37 @@
 
 use crate::column::Column as RsColumn;
 use crate::functions::{
-    acos, acosh, add_months, array_append, array_compact, array_distinct, array_except,
+    abs, acos, acosh, add_months, array, array_append, array_compact, array_distinct, array_except,
     array_insert, array_intersect, array_prepend, array_union, ascii, asin, asinh, atan, atan2,
-    atanh, base64, cast as rs_cast, cbrt, ceiling, chr, contains, convert_timezone, cos, cosh,
-    curdate, current_timezone, date_diff, date_from_unix_date, date_part, dateadd, datepart, day,
-    dayname, dayofmonth, dayofweek, dayofyear, days, degrees, endswith, expm1, extract, factorial,
-    find_in_set, format_number, format_string, from_csv, from_unixtime, from_utc_timestamp,
-    get_json_object, greatest as rs_greatest, hours, hypot, ifnull, ilike, isnan as rs_isnan,
-    isnotnull, isnull, json_tuple, lcase, least as rs_least, left, like, ln, localtimestamp, log,
-    log10, log1p, log2, log_with_base, make_date, make_interval, make_timestamp,
-    make_timestamp_ntz, md5, minutes, month, months, months_between, next_day, now, nullif, nvl,
-    nvl2, overlay, pmod, power, quarter, radians, regexp_count, regexp_extract_all, regexp_instr,
-    regexp_substr, replace as rs_replace, right, rint, rlike, schema_of_csv, schema_of_json, sha1,
-    sha2, signum, sin, sinh, split, split_part, startswith, substr, tan, tanh, timestamp_micros,
-    timestamp_millis, timestamp_seconds, timestampadd, timestampdiff, to_csv, to_degrees,
-    to_radians, to_timestamp, to_unix_timestamp, to_utc_timestamp, try_cast as rs_try_cast, ucase,
-    unbase64, unix_date, unix_micros, unix_millis, unix_seconds, unix_timestamp,
-    unix_timestamp_now, weekday, weekofyear, year, years,
+    atanh, base64, cast as rs_cast, cbrt, ceiling, char_length, character_length, chr, contains,
+    convert_timezone, cos, cosh, curdate, current_date, current_timestamp, current_timezone,
+    date_add, date_diff, date_format, date_from_unix_date, date_part, date_sub, date_trunc,
+    dateadd, datepart, day, dayname, dayofmonth, dayofweek, dayofyear, days, degrees, endswith,
+    expm1, extract, factorial, find_in_set, format_number, format_string, from_csv, from_unixtime,
+    from_utc_timestamp, get_json_object, greatest as rs_greatest, hours, hypot, ifnull, ilike,
+    isnan as rs_isnan, isnotnull, isnull, json_tuple, lcase, least as rs_least, left, like, ln,
+    localtimestamp, log, log10, log1p, log2, log_with_base, make_date, make_interval,
+    make_timestamp, make_timestamp_ntz, md5, minutes, month, months, months_between, next_day, now,
+    nullif, nvl, nvl2, overlay, pmod, power, quarter, radians, regexp_count, regexp_extract_all,
+    regexp_instr, regexp_substr, replace as rs_replace, right, rint, rlike, schema_of_csv,
+    schema_of_json, sha1, sha2, signum, sin, sinh, split, split_part, startswith, substr, tan,
+    tanh, timestamp_micros, timestamp_millis, timestamp_seconds, timestampadd, timestampdiff,
+    to_csv, to_degrees, to_radians, to_timestamp, to_unix_timestamp, to_utc_timestamp,
+    try_cast as rs_try_cast, ucase, unbase64, unix_date, unix_micros, unix_millis, unix_seconds,
+    unix_timestamp, unix_timestamp_now, weekday, weekofyear, year, years,
 };
 use crate::functions::{
-    array_agg, arrays_overlap, arrays_zip, assert_true as rs_assert_true, bit_and, bit_count,
-    bit_length, bit_or, bit_xor, bitwise_not, broadcast as rs_broadcast, create_map,
-    current_catalog as rs_current_catalog, current_database as rs_current_database,
+    aggregate, array_agg, array_contains, array_join, array_max, array_min, array_position,
+    array_size, array_sort, arrays_overlap, arrays_zip, assert_true as rs_assert_true, bit_and,
+    bit_count, bit_length, bit_or, bit_xor, bitwise_not, broadcast as rs_broadcast, cardinality,
+    create_map, current_catalog as rs_current_catalog, current_database as rs_current_database,
     current_schema as rs_current_schema, current_user as rs_current_user, equal_null,
     explode_outer, get, hash, inline as rs_inline, inline_outer as rs_inline_outer,
     input_file_name as rs_input_file_name, isin, isin_i64, isin_str, json_array_length, map_concat,
     map_contains_key, map_filter_value_gt, map_from_entries, map_zip_with_coalesce,
     monotonically_increasing_id as rs_monotonically_increasing_id, named_struct, parse_url,
-    rand as rs_rand, randn as rs_randn, sequence, shift_left, shift_right, shuffle,
-    spark_partition_id as rs_spark_partition_id, str_to_map, struct_, to_char, to_number,
+    rand as rs_rand, randn as rs_randn, sequence, shift_left, shift_right, shuffle, size,
+    spark_partition_id as rs_spark_partition_id, stddev, str_to_map, struct_, to_char, to_number,
     to_varchar, try_add, try_divide, try_multiply, try_subtract, try_to_number, try_to_timestamp,
     typeof_, url_decode, url_encode, user as rs_user, version, width_bucket, zip_with_coalesce,
 };
@@ -269,6 +271,36 @@ fn robin_sparkless(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("ln", wrap_pyfunction!(py_ln, m)?)?;
     m.add("log", wrap_pyfunction!(py_log, m)?)?;
     m.add("ceiling", wrap_pyfunction!(py_ceiling, m)?)?;
+    m.add("ceil", wrap_pyfunction!(py_ceiling, m)?)?;
+    m.add("abs", wrap_pyfunction!(py_abs, m)?)?;
+    m.add("date_add", wrap_pyfunction!(py_date_add, m)?)?;
+    m.add("date_sub", wrap_pyfunction!(py_date_sub, m)?)?;
+    m.add("date_format", wrap_pyfunction!(py_date_format, m)?)?;
+    m.add("current_date", wrap_pyfunction!(py_current_date, m)?)?;
+    m.add(
+        "current_timestamp",
+        wrap_pyfunction!(py_current_timestamp, m)?,
+    )?;
+    m.add("char_length", wrap_pyfunction!(py_char_length, m)?)?;
+    m.add(
+        "character_length",
+        wrap_pyfunction!(py_character_length, m)?,
+    )?;
+    m.add("date_trunc", wrap_pyfunction!(py_date_trunc, m)?)?;
+    m.add("array", wrap_pyfunction!(py_array, m)?)?;
+    m.add("array_contains", wrap_pyfunction!(py_array_contains, m)?)?;
+    m.add("array_max", wrap_pyfunction!(py_array_max, m)?)?;
+    m.add("array_min", wrap_pyfunction!(py_array_min, m)?)?;
+    m.add("array_position", wrap_pyfunction!(py_array_position, m)?)?;
+    m.add("array_size", wrap_pyfunction!(py_array_size, m)?)?;
+    m.add("size", wrap_pyfunction!(py_size, m)?)?;
+    m.add("array_join", wrap_pyfunction!(py_array_join, m)?)?;
+    m.add("array_sort", wrap_pyfunction!(py_array_sort, m)?)?;
+    m.add("cardinality", wrap_pyfunction!(py_cardinality, m)?)?;
+    m.add("mean", wrap_pyfunction!(py_avg, m)?)?;
+    m.add("std", wrap_pyfunction!(py_stddev, m)?)?;
+    m.add("sign", wrap_pyfunction!(py_signum, m)?)?;
+    m.add("aggregate", wrap_pyfunction!(py_aggregate, m)?)?;
     m.add("lcase", wrap_pyfunction!(py_lcase, m)?)?;
     m.add("ucase", wrap_pyfunction!(py_ucase, m)?)?;
     m.add("day", wrap_pyfunction!(py_day, m)?)?;
@@ -851,6 +883,13 @@ fn py_median(col: &PyColumn) -> PyColumn {
 fn py_mode(col: &PyColumn) -> PyColumn {
     PyColumn {
         inner: mode(&col.inner),
+    }
+}
+
+#[pyfunction]
+fn py_stddev(col: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: stddev(&col.inner),
     }
 }
 
@@ -1763,6 +1802,149 @@ fn py_ceiling(col: &PyColumn) -> PyColumn {
         inner: ceiling(&col.inner),
     }
 }
+
+#[pyfunction]
+fn py_abs(col: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: abs(&col.inner),
+    }
+}
+
+#[pyfunction]
+fn py_date_add(col: &PyColumn, days: i32) -> PyColumn {
+    PyColumn {
+        inner: date_add(&col.inner, days),
+    }
+}
+
+#[pyfunction]
+fn py_date_sub(col: &PyColumn, days: i32) -> PyColumn {
+    PyColumn {
+        inner: date_sub(&col.inner, days),
+    }
+}
+
+#[pyfunction]
+fn py_date_format(col: &PyColumn, format: &str) -> PyColumn {
+    PyColumn {
+        inner: date_format(&col.inner, format),
+    }
+}
+
+#[pyfunction]
+fn py_current_date() -> PyColumn {
+    PyColumn {
+        inner: current_date(),
+    }
+}
+
+#[pyfunction]
+fn py_current_timestamp() -> PyColumn {
+    PyColumn {
+        inner: current_timestamp(),
+    }
+}
+
+#[pyfunction]
+fn py_char_length(col: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: char_length(&col.inner),
+    }
+}
+
+#[pyfunction]
+fn py_character_length(col: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: character_length(&col.inner),
+    }
+}
+
+#[pyfunction]
+fn py_date_trunc(format: &str, col: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: date_trunc(format, &col.inner),
+    }
+}
+
+#[pyfunction]
+#[pyo3(signature = (*cols))]
+fn py_array(cols: Vec<PyRef<PyColumn>>) -> PyResult<PyColumn> {
+    let refs: Vec<&RsColumn> = cols.iter().map(|c| &c.inner).collect();
+    array(&refs)
+        .map(|inner| PyColumn { inner })
+        .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
+}
+
+#[pyfunction]
+fn py_array_contains(col: &PyColumn, value: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: array_contains(&col.inner, &value.inner),
+    }
+}
+
+#[pyfunction]
+fn py_array_max(col: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: array_max(&col.inner),
+    }
+}
+
+#[pyfunction]
+fn py_array_min(col: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: array_min(&col.inner),
+    }
+}
+
+#[pyfunction]
+fn py_array_position(col: &PyColumn, value: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: array_position(&col.inner, &value.inner),
+    }
+}
+
+#[pyfunction]
+fn py_array_size(col: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: array_size(&col.inner),
+    }
+}
+
+#[pyfunction]
+fn py_size(col: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: size(&col.inner),
+    }
+}
+
+#[pyfunction]
+fn py_array_join(col: &PyColumn, delimiter: &str) -> PyColumn {
+    PyColumn {
+        inner: array_join(&col.inner, delimiter),
+    }
+}
+
+#[pyfunction]
+fn py_array_sort(col: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: array_sort(&col.inner),
+    }
+}
+
+#[pyfunction]
+fn py_cardinality(col: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: cardinality(&col.inner),
+    }
+}
+
+#[pyfunction]
+fn py_aggregate(col: &PyColumn, zero: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: aggregate(&col.inner, &zero.inner),
+    }
+}
+
 #[pyfunction]
 fn py_lcase(str: &PyColumn) -> PyColumn {
     PyColumn {
