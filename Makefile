@@ -1,4 +1,4 @@
-.PHONY: build test test-rust test-python sparkless-parity pyspark-parity extract-pyspark-tests test-parity-phase-a test-parity-phase-b test-parity-phase-c test-parity-phase-d test-parity-phase-e test-parity-phase-f test-parity-phase-g test-parity-phases bench-python clean check check-full fmt clippy audit outdated deny lint-python all gap-analysis gap-analysis-quick gap-analysis-runtime
+.PHONY: build test test-rust test-python sparkless-parity pyspark-parity extract-pyspark-tests extract-pyspark-tests-expanded batch-regenerate-extracted test-parity-phase-a test-parity-phase-b test-parity-phase-c test-parity-phase-d test-parity-phase-e test-parity-phase-f test-parity-phase-g test-parity-phases bench-python clean check check-full fmt clippy audit outdated deny lint-python all gap-analysis gap-analysis-quick gap-analysis-runtime
 
 # Use stable toolchain when no default is configured (override with RUSTUP_TOOLCHAIN=nightly etc.)
 export RUSTUP_TOOLCHAIN ?= stable
@@ -54,6 +54,7 @@ pyspark-parity:
 	cargo test pyspark_parity_fixtures
 
 # Extract PySpark SQL tests to fixtures and pytest stubs. Requires SPARK_REPO_PATH or use --clone.
+# Uses expanded TARGET_FILES (18+ files: test_functions, test_dataframe, test_column, test_catalog, etc.).
 # Example: make extract-pyspark-tests
 # Example: SPARK_REPO_PATH=/path/to/spark make extract-pyspark-tests
 extract-pyspark-tests:
@@ -62,7 +63,14 @@ extract-pyspark-tests:
 	else \
 		python3 scripts/extract_pyspark_tests.py --clone --branch v3.5.0; \
 	fi
-	@echo "Extracted fixtures -> tests/fixtures/pyspark_extracted. Run: python tests/regenerate_expected_from_pyspark.py tests/fixtures/pyspark_extracted --include-skipped"
+	@echo "Extracted fixtures -> tests/fixtures/pyspark_extracted. Run: make batch-regenerate-extracted"
+
+# Alias for extract-pyspark-tests (uses expanded target files)
+extract-pyspark-tests-expanded: extract-pyspark-tests
+
+# Regenerate expected sections for all pyspark_extracted fixtures. Requires PySpark + Java 17+.
+batch-regenerate-extracted:
+	python3 scripts/batch_regenerate_extracted.py
 
 # Run parity tests for a specific phase (A–G). Uses tests/fixtures/phase_manifest.json.
 test-parity-phase-a: ; PARITY_PHASE=a cargo test pyspark_parity_fixtures --

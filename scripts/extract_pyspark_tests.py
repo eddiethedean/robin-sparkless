@@ -30,6 +30,10 @@ from pathlib import Path
 from typing import Any
 
 # Target files in python/pyspark/sql/tests/
+# Excluded: test_udf*.py, test_artifact, test_context, test_job_cancellation,
+# test_listener, test_python_datasource, test_python_streaming_datasource,
+# test_resources, test_serde, test_tvf, test_geographytype, test_geometrytype,
+# test_connect_compatibility (require UDF/SparkContext/Connect/geo)
 TARGET_FILES = [
     "test_functions.py",
     "test_dataframe.py",
@@ -38,6 +42,17 @@ TARGET_FILES = [
     "test_readwriter.py",
     "test_session.py",
     "test_sql.py",
+    "test_catalog.py",
+    "test_conf.py",
+    "test_conversion.py",
+    "test_creation.py",
+    "test_datasources.py",
+    "test_errors.py",
+    "test_observation.py",
+    "test_repartition.py",
+    "test_stat.py",
+    "test_subquery.py",
+    "test_types.py",
 ]
 
 # Exclude patterns (don't process)
@@ -84,6 +99,9 @@ class TestClassifier(ast.NodeVisitor):
                 self.has_spark_range = True
             elif "read" in name and ("spark" in name or "session" in name):
                 self.has_read = True
+            elif name in ("load", "csv", "parquet", "json", "table"):
+                # spark.read.load/csv/parquet/json/table
+                self.has_read = True
             elif name in (
                 "filter",
                 "select",
@@ -97,6 +115,27 @@ class TestClassifier(ast.NodeVisitor):
                 "drop",
                 "dropna",
                 "fillna",
+                "replace",
+                "sample",
+                "hint",
+                "repartition",
+                "coalesce",
+                "stat",
+                "na",
+                "union",
+                "intersect",
+                "exceptAll",
+                "subtract",
+                "crossJoin",
+                "toPandas",
+                "toDF",
+                "toJSON",
+                "cache",
+                "persist",
+                "checkpoint",
+                "localCheckpoint",
+                "write",
+                "save",
             ):
                 self.has_df_ops = True
             elif "collect" in name:

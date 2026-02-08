@@ -3730,6 +3730,22 @@ fn parse_with_column_expr(src: &str) -> Result<Expr, String> {
         return Ok(lit(NULL).cast(DataType::Int64));
     }
 
+    // Handle col('x').between(lit(low), lit(high))
+    if s.contains(".between(") {
+        let between_pos = s.find(".between(").ok_or("missing .between(")?;
+        let col_part = s[..between_pos].trim();
+        let col_name = extract_col_name(col_part)?.to_string();
+        let args_start = between_pos + 9; // len(".between(")
+        let args_inner = &s[args_start..s.len() - 1]; // strip final ")"
+        let parts = parse_comma_separated_args(args_inner);
+        let low_str = parts.first().ok_or("between needs lower bound")?.trim();
+        let high_str = parts.get(1).ok_or("between needs upper bound")?.trim();
+        let low_expr = parse_column_or_literal(low_str)?;
+        let high_expr = parse_column_or_literal(high_str)?;
+        let c = polars::prelude::col(&col_name);
+        return Ok(c.clone().gt_eq(low_expr).and(c.lt_eq(high_expr)));
+    }
+
     // Handle coalesce() expressions
     if s.starts_with("coalesce(") {
         // Parse: coalesce(col('col1'), col('col2'), lit('default'))
@@ -3765,6 +3781,10 @@ fn parse_with_column_expr(src: &str) -> Result<Expr, String> {
                 let content = &part[4..part.len() - 1]; // Skip "lit(" and ")"
                 let lit_val = content.trim_matches(['\'', '"']);
                 columns.push(lit_str(lit_val));
+            } else if part.starts_with("when(") {
+                // Recursively parse when() expression
+                let expr = parse_with_column_expr(part)?;
+                columns.push(robin_sparkless::Column::from_expr(expr, None));
             } else {
                 // Try as a bare literal (quoted string or number)
                 if (part.starts_with('\'') && part.ends_with('\''))

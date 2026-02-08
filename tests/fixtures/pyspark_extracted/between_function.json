@@ -1,7 +1,7 @@
 {
   "name": "between_function",
   "pyspark_version": "3.5",
-  "source": "extracted from /Users/odosmatthews/Documents/coding/robin-sparkless/.spark_clone/spark/python/pyspark/sql/tests/test_functions.py",
+  "source": "extracted from PySpark test_functions.py",
   "input": {
     "schema": [
       {
@@ -16,23 +16,83 @@
     "rows": [
       [
         1,
-        1.0
+        10.0
       ],
       [
         2,
-        2.0
+        25.0
       ],
       [
         3,
-        3.0
+        50.0
+      ],
+      [
+        4,
+        75.0
+      ],
+      [
+        5,
+        100.0
       ]
     ]
   },
-  "operations": [],
+  "operations": [
+    {
+      "op": "withColumn",
+      "column": "in_range",
+      "expr": "col('value').between(lit(20), lit(80))"
+    },
+    {
+      "op": "select",
+      "columns": [
+        "id",
+        "value",
+        "in_range"
+      ]
+    }
+  ],
   "expected": {
-    "schema": [],
-    "rows": []
+    "schema": [
+      {
+        "name": "id",
+        "type": "bigint"
+      },
+      {
+        "name": "value",
+        "type": "double"
+      },
+      {
+        "name": "in_range",
+        "type": "boolean"
+      }
+    ],
+    "rows": [
+      [
+        1,
+        10.0,
+        false
+      ],
+      [
+        2,
+        25.0,
+        true
+      ],
+      [
+        3,
+        50.0,
+        true
+      ],
+      [
+        4,
+        75.0,
+        true
+      ],
+      [
+        5,
+        100.0,
+        false
+      ]
+    ]
   },
-  "skip": true,
-  "skip_reason": "Placeholder from extractor; add operations and run regenerate_expected_from_pyspark.py --include-skipped"
+  "skip": false
 }

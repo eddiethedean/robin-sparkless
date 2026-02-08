@@ -134,7 +134,5 @@
         75000.0
       ]
     ]
-  },
-  "skip": true,
-  "skip_reason": "coalesce(when(...), lit(...)) requires coalesce to accept when() as arg"
+  }
 }

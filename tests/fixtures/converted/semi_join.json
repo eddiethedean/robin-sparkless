@@ -117,24 +117,6 @@
         "David",
         "30",
         "55000"
-      ],
-      [
-        null,
-        "IT",
-        "10",
-        null
-      ],
-      [
-        null,
-        "HR",
-        "20",
-        null
-      ],
-      [
-        null,
-        "Finance",
-        "40",
-        null
       ]
     ]
   },
@@ -201,7 +183,5 @@
         null
       ]
     ]
-  },
-  "skip": true,
-  "skip_reason": "converter: expected row count inconsistent with left_semi semantics"
+  }
 }
