@@ -1,0 +1,1 @@
+{"name":"head_two","pyspark_version":"3.5.0","input":{"schema":[{"name":"x","type":"bigint"}],"rows":[[1],[2],[3],[4],[5]]},"operations":[{"op":"head","n":2}],"expected":{"schema":[{"name":"x","type":"bigint"}],"rows":[[1],[2]]}}

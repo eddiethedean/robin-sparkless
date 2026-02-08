@@ -141,7 +141,7 @@ A phased plan to achieve full API and behavioral parity between robin-sparkless 
 
 ---
 
-## Phase G: Parity Fixture Expansion (2–3 weeks)
+## Phase G: Parity Fixture Expansion (2–3 weeks) — COMPLETED
 
 **Goal:** Grow parity coverage from 159 to 200+ fixtures.
 
@@ -152,9 +152,9 @@ A phased plan to achieve full API and behavioral parity between robin-sparkless 
 - Add fixtures for signature alignment (Phase A)
 - Run `make sparkless-parity` in CI
 
-**Deliverables:**
-- 200+ parity fixtures passing
-- CI runs full parity suite
+**Deliverables (done):**
+- 201 parity fixtures passing (40+ hand-written fixtures added: filter_age_lt_25, filter_name_eq, select_single_column, groupby_count_desc, limit_one/three, orderby_desc, with_column_lit, distinct_all, fillna_simple, filter_then_select, groupby_sum_simple, filter_ge/le/ne, filter_or_simple, filter_eq_lit, select_reorder, cross_join_small, union_three_rows, and more)
+- CI runs full parity suite (cargo nextest run --test parity)
 
 ---
 
@@ -174,7 +174,7 @@ A phased plan to achieve full API and behavioral parity between robin-sparkless 
 
 | Metric | Current | Target |
 |--------|---------|--------|
-| Parity fixtures passing | 159 | 200+ |
+| Parity fixtures passing | 201 | 200+ |
 | Functions (exact + partial) | ~220 | ~380+ |
 | DataFrame methods | ~68 | ~90 |
 | DataFrameReader methods | Partial | 12 |

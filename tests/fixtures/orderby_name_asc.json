@@ -1,0 +1,1 @@
+{"name":"orderby_name_asc","pyspark_version":"3.5.0","input":{"schema":[{"name":"id","type":"bigint"},{"name":"name","type":"string"}],"rows":[[1,"Charlie"],[2,"Alice"],[3,"Bob"]]},"operations":[{"op":"orderBy","columns":["name"],"ascending":[true]}],"expected":{"schema":[{"name":"id","type":"bigint"},{"name":"name","type":"string"}],"rows":[[2,"Alice"],[3,"Bob"],[1,"Charlie"]]}}

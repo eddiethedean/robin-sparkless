@@ -1,0 +1,1 @@
+{"name":"limit_one","pyspark_version":"3.5.0","input":{"schema":[{"name":"id","type":"bigint"},{"name":"val","type":"string"}],"rows":[[1,"a"],[2,"b"],[3,"c"]]},"operations":[{"op":"limit","n":1}],"expected":{"schema":[{"name":"id","type":"bigint"},{"name":"val","type":"string"}],"rows":[[1,"a"]]}}

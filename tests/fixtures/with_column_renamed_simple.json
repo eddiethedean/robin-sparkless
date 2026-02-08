@@ -1,0 +1,1 @@
+{"name":"with_column_renamed_simple","pyspark_version":"3.5.0","input":{"schema":[{"name":"old_name","type":"string"},{"name":"val","type":"bigint"}],"rows":[["x",1],["y",2]]},"operations":[{"op":"withColumnRenamed","existing":"old_name","new":"new_name"}],"expected":{"schema":[{"name":"new_name","type":"string"},{"name":"val","type":"bigint"}],"rows":[["x",1],["y",2]]}}

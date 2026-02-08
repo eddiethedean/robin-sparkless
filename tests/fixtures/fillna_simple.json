@@ -1,0 +1,1 @@
+{"name":"fillna_simple","pyspark_version":"3.5.0","input":{"schema":[{"name":"id","type":"bigint"},{"name":"val","type":"bigint"}],"rows":[[1,null],[2,10],[3,null],[4,20]]},"operations":[{"op":"fillna","value":0}],"expected":{"schema":[{"name":"id","type":"bigint"},{"name":"val","type":"bigint"}],"rows":[[1,0],[2,10],[3,0],[4,20]]}}
