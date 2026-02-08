@@ -97,6 +97,36 @@ impl SparkSession {
         self.create_or_replace_temp_view(name, df);
     }
 
+    /// Drop a temporary view by name (PySpark: catalog.dropTempView).
+    /// No error if the view does not exist.
+    pub fn drop_temp_view(&self, name: &str) {
+        let _ = self
+            .catalog
+            .lock()
+            .map(|mut m| m.remove(name));
+    }
+
+    /// Drop a global temporary view (PySpark: catalog.dropGlobalTempView). Stub: same catalog as temp view.
+    pub fn drop_global_temp_view(&self, name: &str) {
+        self.drop_temp_view(name);
+    }
+
+    /// Check if a temporary view exists.
+    pub fn table_exists(&self, name: &str) -> bool {
+        self.catalog
+            .lock()
+            .map(|m| m.contains_key(name))
+            .unwrap_or(false)
+    }
+
+    /// Return temporary view names in this session.
+    pub fn list_temp_view_names(&self) -> Vec<String> {
+        self.catalog
+            .lock()
+            .map(|m| m.keys().cloned().collect())
+            .unwrap_or_default()
+    }
+
     /// Look up a temporary view by name (PySpark: table(name)).
     /// Returns an error if the view does not exist.
     pub fn table(&self, name: &str) -> Result<DataFrame, PolarsError> {
@@ -117,6 +147,11 @@ impl SparkSession {
 
     pub fn builder() -> SparkSessionBuilder {
         SparkSessionBuilder::new()
+    }
+
+    /// Return a reference to the session config (for catalog/conf compatibility).
+    pub fn get_config(&self) -> &HashMap<String, String> {
+        &self.config
     }
 
     /// Whether column names are case-sensitive (PySpark: spark.sql.caseSensitive).
@@ -332,6 +367,39 @@ impl SparkSession {
         }
 
         let pl_df = PlDataFrame::new(cols.iter().map(|s| s.clone().into()).collect())?;
+        Ok(DataFrame::from_polars_with_options(
+            pl_df,
+            self.is_case_sensitive(),
+        ))
+    }
+
+    /// Create a DataFrame with a single column `id` (bigint) containing values from start to end (exclusive) with step.
+    /// PySpark: spark.range(end) or spark.range(start, end, step).
+    ///
+    /// - `range(end)` → 0 to end-1, step 1
+    /// - `range(start, end)` → start to end-1, step 1
+    /// - `range(start, end, step)` → start, start+step, ... up to but not including end
+    pub fn range(&self, start: i64, end: i64, step: i64) -> Result<DataFrame, PolarsError> {
+        if step == 0 {
+            return Err(PolarsError::InvalidOperation(
+                "range: step must not be 0".into(),
+            ));
+        }
+        let mut vals: Vec<i64> = Vec::new();
+        let mut v = start;
+        if step > 0 {
+            while v < end {
+                vals.push(v);
+                v = v.saturating_add(step);
+            }
+        } else {
+            while v > end {
+                vals.push(v);
+                v = v.saturating_add(step);
+            }
+        }
+        let col = Series::new("id".into(), vals);
+        let pl_df = PlDataFrame::new(vec![col.into()])?;
         Ok(DataFrame::from_polars_with_options(
             pl_df,
             self.is_case_sensitive(),

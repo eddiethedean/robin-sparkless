@@ -97,7 +97,7 @@ The following are **not implemented** or are **stubs**; tracked in GitHub issues
 
 - **RDD / distributed (#142)**: RDD and distributed execution APIs — not supported; `rdd`, `foreach`, `foreachPartition`, `mapInPandas`, `mapPartitions` raise `NotImplementedError`.
 - **UDF / UDTF (#143)**: User-defined functions and table functions — not implemented; use built-in expressions and plan interpreter where possible.
-- **Catalog / DataFrameWriterV2 (#144)**: `writeTo`, catalog tables, `CREATE TABLE`-style DDL — not implemented; use `df.write().format(...).save(path)`.
+- **Catalog / DataFrameWriterV2 (#144)**: `writeTo`, catalog tables, `CREATE TABLE`-style DDL — not implemented; use `df.write().format(...).save(path)`. Phase E added **Catalog stubs** for API compatibility: `spark.catalog()` returns a Catalog with `dropTempView`, `listTables`, `tableExists`, `currentDatabase`, `currentCatalog`, etc.; `createTable`, `getDatabase`, `getFunction`, `getTable`, `registerFunction` raise `NotImplementedError`. `spark.conf()` returns RuntimeConfig (get/getAll; set raises NotImplementedError).
 - **Structured Streaming (#145)**: Not supported; `isStreaming` returns false, `withWatermark` is a no-op.
 - **XML / XPath (#146)**: `from_xml`, `to_xml`, `schema_of_xml`, `xpath*` — would require an XML parser and feature flag; deferred.
 - **Sketch aggregates (#147)**: Approximate aggregates (e.g. HyperLogLog, count-min sketch) — not implemented.

@@ -60,7 +60,9 @@ pub(crate) use dataframe::{
     PyCubeRollupData, PyDataFrame, PyDataFrameNa, PyDataFrameStat, PyDataFrameWriter, PyGroupedData,
 };
 pub(crate) use order::{PySortOrder, PyThenBuilder, PyWhenBuilder};
-pub(crate) use session::{PyDataFrameReader, PySparkSession, PySparkSessionBuilder};
+pub(crate) use session::{
+    PyCatalog, PyDataFrameReader, PyRuntimeConfig, PySparkSession, PySparkSessionBuilder,
+};
 
 /// Convert a Python scalar to serde_json::Value for plan/row data.
 /// Bool must be checked before i64 because in Python bool is a subclass of int (True/False extract as 1/0).
@@ -209,6 +211,8 @@ fn robin_sparkless(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PySparkSession>()?;
     m.add_class::<PySparkSessionBuilder>()?;
     m.add_class::<PyDataFrameReader>()?;
+    m.add_class::<PyCatalog>()?;
+    m.add_class::<PyRuntimeConfig>()?;
     m.add_class::<PyDataFrame>()?;
     m.add_class::<PyDataFrameStat>()?;
     m.add_class::<PyDataFrameNa>()?;

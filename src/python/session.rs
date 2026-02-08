@@ -323,6 +323,79 @@ impl PySparkSession {
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
         Ok(PyDataFrame { inner: df })
     }
+
+    /// Return the Catalog for table/view operations (PySpark: spark.catalog).
+    fn catalog(&self) -> PyCatalog {
+        PyCatalog {
+            session: self.inner.clone(),
+        }
+    }
+
+    /// Return the runtime config (PySpark: spark.conf).
+    fn conf(&self) -> PyRuntimeConfig {
+        PyRuntimeConfig {
+            config: self.inner.get_config().clone(),
+        }
+    }
+
+    /// Return a new session sharing the same catalog (PySpark: spark.newSession).
+    #[pyo3(name = "newSession")]
+    fn new_session(&self) -> Self {
+        PySparkSession {
+            inner: self.inner.clone(),
+        }
+    }
+
+    /// Stop the session (cleanup). No-op for local execution.
+    fn stop(&self) {
+        self.inner.stop();
+    }
+
+    /// Create a DataFrame with single column 'id' (bigint) from start to end with step.
+    /// PySpark: spark.range(end) or spark.range(start, end) or spark.range(start, end, step).
+    #[pyo3(signature = (start, end=None, step=1))]
+    fn range(
+        &self,
+        start: i64,
+        end: Option<i64>,
+        step: i64,
+    ) -> PyResult<PyDataFrame> {
+        let (s, e, st) = match end {
+            None => (0i64, start, 1i64),           // range(end) -> start=0, end=start
+            Some(e) => (start, e, step),
+        };
+        let df = self
+            .inner
+            .range(s, e, st)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        Ok(PyDataFrame { inner: df })
+    }
+
+    /// Session/library version string.
+    fn version(&self) -> &'static str {
+        env!("CARGO_PKG_VERSION")
+    }
+
+    /// UDF not supported. Raises NotImplementedError.
+    fn udf(&self) -> PyResult<()> {
+        Err(pyo3::exceptions::PyNotImplementedError::new_err(
+            "UDF not supported; use built-in functions",
+        ))
+    }
+
+    /// Returns the active SparkSession for this thread (from get_or_create).
+    #[classmethod]
+    fn get_active_session(_cls: &Bound<'_, pyo3::types::PyType>, py: Python<'_>) -> PyResult<Option<Py<PySparkSession>>> {
+        get_default_session()
+            .map(|inner| Py::new(py, PySparkSession { inner }))
+            .transpose()
+    }
+
+    /// Returns the default SparkSession (same as getActiveSession).
+    #[classmethod]
+    fn get_default_session(_cls: &Bound<'_, pyo3::types::PyType>, py: Python<'_>) -> PyResult<Option<Py<PySparkSession>>> {
+        Self::get_active_session(_cls, py)
+    }
 }
 
 /// Python wrapper for DataFrameReader (spark.read).
@@ -446,6 +519,196 @@ impl PyDataFrameReader {
             .delta(Path::new(path))
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
         Ok(PyDataFrame { inner: df })
+    }
+}
+
+/// Python wrapper for Catalog (spark.catalog).
+#[pyclass(name = "Catalog")]
+pub struct PyCatalog {
+    session: SparkSession,
+}
+
+#[pymethods]
+impl PyCatalog {
+    #[pyo3(name = "dropTempView")]
+    fn drop_temp_view(&self, view_name: &str) {
+        self.session.drop_temp_view(view_name);
+    }
+
+    #[pyo3(name = "dropGlobalTempView")]
+    fn drop_global_temp_view(&self, view_name: &str) {
+        self.session.drop_global_temp_view(view_name);
+    }
+
+    #[pyo3(name = "listTables")]
+    fn list_tables(&self, _db_name: Option<&str>) -> Vec<String> {
+        self.session.list_temp_view_names()
+    }
+
+    #[pyo3(name = "tableExists")]
+    fn table_exists(&self, table_name: &str, _db_name: Option<&str>) -> bool {
+        self.session.table_exists(table_name)
+    }
+
+    #[pyo3(name = "currentDatabase")]
+    fn current_database(&self) -> &'static str {
+        "default"
+    }
+
+    #[pyo3(name = "currentCatalog")]
+    fn current_catalog(&self) -> &'static str {
+        "spark_catalog"
+    }
+
+    #[pyo3(name = "listDatabases")]
+    fn list_databases(&self, _pattern: Option<&str>) -> Vec<&'static str> {
+        vec!["default"]
+    }
+
+    #[pyo3(name = "listCatalogs")]
+    fn list_catalogs(&self, _pattern: Option<&str>) -> Vec<&'static str> {
+        vec!["spark_catalog"]
+    }
+
+    #[pyo3(name = "cacheTable")]
+    fn cache_table(&self, _table_name: &str, _storage_level: Option<&Bound<'_, pyo3::types::PyAny>>) {
+        // No-op: no distributed cache
+    }
+
+    #[pyo3(name = "uncacheTable")]
+    fn uncache_table(&self, _table_name: &str) {
+        // No-op
+    }
+
+    #[pyo3(name = "clearCache")]
+    fn clear_cache(&self) {
+        // No-op
+    }
+
+    #[pyo3(name = "refreshTable")]
+    fn refresh_table(&self, _table_name: &str) {
+        // No-op
+    }
+
+    #[pyo3(name = "refreshByPath")]
+    fn refresh_by_path(&self, _path: &str) {
+        // No-op
+    }
+
+    #[pyo3(name = "recoverPartitions")]
+    fn recover_partitions(&self, _table_name: &str) {
+        // No-op
+    }
+
+    #[pyo3(name = "createTable")]
+    fn create_table(&self, _table_name: &str) -> PyResult<()> {
+        Err(pyo3::exceptions::PyNotImplementedError::new_err(
+            "createTable not supported; use df.write().parquet(path)",
+        ))
+    }
+
+    #[pyo3(name = "createExternalTable")]
+    fn create_external_table(&self, _table_name: &str) -> PyResult<()> {
+        Err(pyo3::exceptions::PyNotImplementedError::new_err(
+            "createExternalTable not supported; use df.write().parquet(path)",
+        ))
+    }
+
+    #[pyo3(name = "getDatabase")]
+    fn get_database(&self, _db_name: &str) -> PyResult<()> {
+        Err(pyo3::exceptions::PyNotImplementedError::new_err(
+            "getDatabase not supported; no catalog databases",
+        ))
+    }
+
+    #[pyo3(name = "getFunction")]
+    fn get_function(&self, _function_name: &str) -> PyResult<()> {
+        Err(pyo3::exceptions::PyNotImplementedError::new_err(
+            "getFunction not supported",
+        ))
+    }
+
+    #[pyo3(name = "getTable")]
+    fn get_table(&self, _table_name: &str) -> PyResult<()> {
+        Err(pyo3::exceptions::PyNotImplementedError::new_err(
+            "getTable not supported; use spark.table(name) for temp views",
+        ))
+    }
+
+    #[pyo3(name = "databaseExists")]
+    fn database_exists(&self, db_name: &str) -> bool {
+        db_name == "default"
+    }
+
+    #[pyo3(name = "functionExists")]
+    fn function_exists(&self, _function_name: &str, _db_name: Option<&str>) -> bool {
+        false
+    }
+
+    #[pyo3(name = "setCurrentCatalog")]
+    fn set_current_catalog(&self, _catalog_name: &str) {
+        // No-op
+    }
+
+    #[pyo3(name = "setCurrentDatabase")]
+    fn set_current_database(&self, _db_name: &str) {
+        // No-op
+    }
+
+    #[pyo3(name = "registerFunction")]
+    fn register_function(
+        &self,
+        _name: &str,
+        _f: &Bound<'_, pyo3::types::PyAny>,
+        _return_type: Option<&Bound<'_, pyo3::types::PyAny>>,
+    ) -> PyResult<()> {
+        Err(pyo3::exceptions::PyNotImplementedError::new_err(
+            "registerFunction not supported; UDFs not supported",
+        ))
+    }
+
+    #[pyo3(name = "isCached")]
+    fn is_cached(&self, _table_name: &str) -> bool {
+        false
+    }
+
+    #[pyo3(name = "listColumns")]
+    fn list_columns(&self, _table_name: &str, _db_name: Option<&str>) -> Vec<String> {
+        vec![]
+    }
+
+    #[pyo3(name = "listFunctions")]
+    fn list_functions(&self, _db_name: Option<&str>, _pattern: Option<&str>) -> Vec<String> {
+        vec![]
+    }
+}
+
+/// Python wrapper for RuntimeConfig (spark.conf).
+#[pyclass(name = "RuntimeConfig")]
+pub struct PyRuntimeConfig {
+    config: HashMap<String, String>,
+}
+
+#[pymethods]
+impl PyRuntimeConfig {
+    fn get(&self, key: &str) -> String {
+        self.config.get(key).cloned().unwrap_or_default()
+    }
+
+    fn set(&self, _key: &str, _value: &str) -> PyResult<()> {
+        Err(pyo3::exceptions::PyNotImplementedError::new_err(
+            "RuntimeConfig.set not supported; config is read-only",
+        ))
+    }
+
+    #[pyo3(name = "getAll")]
+    fn get_all(&self) -> HashMap<String, String> {
+        self.config.clone()
+    }
+
+    #[pyo3(name = "isModifiable")]
+    fn is_modifiable(&self, _key: &str) -> bool {
+        false
     }
 }
 
