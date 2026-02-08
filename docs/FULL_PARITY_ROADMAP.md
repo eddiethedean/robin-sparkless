@@ -126,23 +126,18 @@ A phased plan to achieve full API and behavioral parity between robin-sparkless 
 
 ---
 
-## Phase F: Behavioral Alignment (2–3 weeks)
+## Phase F: Behavioral Alignment (2–3 weeks) — COMPLETED
 
 **Goal:** Reduce semantic divergences documented in [PYSPARK_DIFFERENCES.md](PYSPARK_DIFFERENCES.md).
 
-| Item | Current | Target |
-|------|---------|--------|
-| `assert_true` | Fails on any false | Match PySpark null/false semantics |
-| `raise_error` | Always errors | Match PySpark |
-| `rand` / `randn` | Per-row in with_column | Document; ensure consistency |
-| `from_utc_timestamp` / `to_utc_timestamp` | Identity for UTC | Full timezone conversion if feasible |
-| `unix_timestamp` / `from_unixtime` | chrono-based | Document timezone assumptions |
-| AES crypto | AES-128-GCM | Document vs PySpark modes |
-| `create_dataframe` | 3-tuple only | `create_dataframe_from_rows` for arbitrary schemas (done) |
-
-**Deliverables:**
-- Divergences doc updated; behavior aligned where practical
-- Test fixtures for edge cases (null, timezone)
+**Deliverables (done):**
+- **assert_true**: Aligned with PySpark — fails on false or null; returns null on success.
+- **raise_error**: Error message uses user message directly (no prefix).
+- **rand/randn**: Documented; per-row when used via `with_column`/`with_columns`.
+- **from_utc_timestamp/to_utc_timestamp**: Documented (identity for UTC; full conversion deferred).
+- **unix_timestamp/from_unixtime**: Documented timezone assumptions.
+- **AES**: Documented mode/padding (GCM only; CBC etc. not supported).
+- **Fixtures**: assert_true.json, assert_true_err_msg.json (void/null); assert_true_null_fails, assert_true_false_fails (skipped).
 
 ---
 

@@ -1908,7 +1908,7 @@ pub fn apply_bit_count(column: Column) -> PolarsResult<Option<Column>> {
 }
 
 /// Assert that all boolean values are true (PySpark assert_true).
-/// Returns the original column if assertion passes; errors otherwise.
+/// PySpark: returns null when input is true; throws when input is false or null.
 /// When err_msg is Some, it is used in the error message when assertion fails.
 pub fn apply_assert_true(column: Column, err_msg: Option<&str>) -> PolarsResult<Option<Column>> {
     let name = column.field().into_owned().name;
@@ -1916,14 +1916,21 @@ pub fn apply_assert_true(column: Column, err_msg: Option<&str>) -> PolarsResult<
     let ca = series
         .bool()
         .map_err(|e| PolarsError::ComputeError(e.to_string().into()))?;
-    let failed = ca.into_iter().flatten().any(|b| !b);
+    let len = ca.len();
+    // PySpark: fail on false or null
+    let failed = ca.into_iter().any(|opt| match opt {
+        Some(true) => false,
+        Some(false) | None => true,
+    });
     if failed {
         let msg = err_msg
             .map(String::from)
             .unwrap_or_else(|| format!("assert_true failed on column '{name}'"));
         return Err(PolarsError::ComputeError(msg.into()));
     }
-    Ok(Some(Column::new(name, series)))
+    // PySpark: return null on success
+    let null_col = BooleanChunked::from_iter_options(name.as_str().into(), (0..len).map(|_| None));
+    Ok(Some(Column::new(name, null_col.into_series())))
 }
 
 /// Apply rand: uniform [0, 1) per row, with optional seed (PySpark rand).
