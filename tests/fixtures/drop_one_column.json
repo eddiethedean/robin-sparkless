@@ -1,0 +1,1 @@
+{"name":"drop_one_column","pyspark_version":"3.5.0","input":{"schema":[{"name":"a","type":"bigint"},{"name":"b","type":"string"},{"name":"c","type":"bigint"}],"rows":[[1,"x",10],[2,"y",20]]},"operations":[{"op":"drop","columns":["b"]}],"expected":{"schema":[{"name":"a","type":"bigint"},{"name":"c","type":"bigint"}],"rows":[[1,10],[2,20]]}}

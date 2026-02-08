@@ -1,0 +1,1 @@
+{"name":"distinct_all","pyspark_version":"3.5.0","input":{"schema":[{"name":"v","type":"bigint"}],"rows":[[1],[2],[1],[3],[2],[1]]},"operations":[{"op":"distinct"}],"expected":{"schema":[{"name":"v","type":"bigint"}],"rows":[[1],[2],[3]]}}

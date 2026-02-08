@@ -1,0 +1,1 @@
+{"name":"with_column_double","pyspark_version":"3.5.0","input":{"schema":[{"name":"x","type":"bigint"}],"rows":[[1],[2],[3]]},"operations":[{"op":"withColumn","column":"doubled","expr":"col('x') * 2"}],"expected":{"schema":[{"name":"x","type":"bigint"},{"name":"doubled","type":"bigint"}],"rows":[[1,2],[2,4],[3,6]]}}

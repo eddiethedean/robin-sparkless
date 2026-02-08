@@ -1,0 +1,1 @@
+{"name":"first_row_simple","pyspark_version":"3.5.0","input":{"schema":[{"name":"id","type":"bigint"},{"name":"name","type":"string"}],"rows":[[1,"Alice"],[2,"Bob"],[3,"Carol"]]},"operations":[{"op":"first"}],"expected":{"schema":[{"name":"id","type":"bigint"},{"name":"name","type":"string"}],"rows":[[1,"Alice"]]}}

@@ -1,0 +1,1 @@
+{"name":"distinct_strings","pyspark_version":"3.5.0","input":{"schema":[{"name":"word","type":"string"}],"rows":[["hello"],["world"],["hello"],["rust"],["world"]]},"operations":[{"op":"distinct"},{"op":"orderBy","columns":["word"],"ascending":[true]}],"expected":{"schema":[{"name":"word","type":"string"}],"rows":[["hello"],["rust"],["world"]]}}

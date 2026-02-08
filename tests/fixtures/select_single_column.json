@@ -1,0 +1,1 @@
+{"name":"select_single_column","pyspark_version":"3.5.0","input":{"schema":[{"name":"id","type":"bigint"},{"name":"name","type":"string"},{"name":"age","type":"bigint"}],"rows":[[1,"Alice",25],[2,"Bob",30],[3,"Charlie",35]]},"operations":[{"op":"select","columns":["name"]}],"expected":{"schema":[{"name":"name","type":"string"}],"rows":[["Alice"],["Bob"],["Charlie"]]}}

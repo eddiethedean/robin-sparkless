@@ -1,0 +1,1 @@
+{"name":"limit_exceeds_rows","pyspark_version":"3.5.0","input":{"schema":[{"name":"id","type":"bigint"},{"name":"x","type":"string"}],"rows":[[1,"a"],[2,"b"]]},"operations":[{"op":"limit","n":100}],"expected":{"schema":[{"name":"id","type":"bigint"},{"name":"x","type":"string"}],"rows":[[1,"a"],[2,"b"]]}}

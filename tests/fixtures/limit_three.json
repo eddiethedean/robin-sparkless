@@ -1,0 +1,1 @@
+{"name":"limit_three","pyspark_version":"3.5.0","input":{"schema":[{"name":"n","type":"bigint"}],"rows":[[1],[2],[3],[4],[5]]},"operations":[{"op":"limit","n":3}],"expected":{"schema":[{"name":"n","type":"bigint"}],"rows":[[1],[2],[3]]}}

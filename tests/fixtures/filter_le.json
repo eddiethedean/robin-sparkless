@@ -1,0 +1,1 @@
+{"name":"filter_le","pyspark_version":"3.5.0","input":{"schema":[{"name":"id","type":"bigint"},{"name":"n","type":"bigint"}],"rows":[[1,10],[2,20],[3,30],[4,40]]},"operations":[{"op":"filter","expr":"col('n') <= 20"},{"op":"orderBy","columns":["id"],"ascending":[true]}],"expected":{"schema":[{"name":"id","type":"bigint"},{"name":"n","type":"bigint"}],"rows":[[1,10],[2,20]]}}

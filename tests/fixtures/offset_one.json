@@ -1,0 +1,1 @@
+{"name":"offset_one","pyspark_version":"3.5.0","input":{"schema":[{"name":"id","type":"bigint"}],"rows":[[1],[2],[3],[4]]},"operations":[{"op":"offset","n":1}],"expected":{"schema":[{"name":"id","type":"bigint"}],"rows":[[2],[3],[4]]}}
