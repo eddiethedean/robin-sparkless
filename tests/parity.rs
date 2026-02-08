@@ -245,8 +245,8 @@ fn run_pyspark_parity_fixtures(phase_filter: Option<&str>) {
 
     let pyspark_extracted_dir = Path::new("tests/fixtures/pyspark_extracted");
     if pyspark_extracted_dir.exists() {
-        for entry in fs::read_dir(pyspark_extracted_dir)
-            .expect("read fixtures/pyspark_extracted directory")
+        for entry in
+            fs::read_dir(pyspark_extracted_dir).expect("read fixtures/pyspark_extracted directory")
         {
             let path = entry.expect("dir entry").path();
             if path.extension().and_then(|s| s.to_str()) != Some("json") {
@@ -5437,9 +5437,7 @@ fn values_equal_with_struct(a: &Value, b: &Value, struct_fields: Option<&[String
             if (s1.starts_with('[') && s2.starts_with('['))
                 || (s1.starts_with('{') && s2.starts_with('{'))
             {
-                if let (Ok(v1), Ok(v2)) =
-                    (parse_json_like_string(s1), parse_json_like_string(s2))
-                {
+                if let (Ok(v1), Ok(v2)) = (parse_json_like_string(s1), parse_json_like_string(s2)) {
                     return values_equal_with_struct(&v1, &v2, None);
                 }
             }

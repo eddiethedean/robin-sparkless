@@ -7,6 +7,7 @@ import pytest
 
 # --- Behavioral tests (robin_sparkless supports) ---
 
+
 def test_drop() -> None:
     """Ported from PySpark DataFrameTestsMixin.test_drop. Drop columns by name."""
     import robin_sparkless as rs
@@ -40,7 +41,9 @@ def test_with_columns_renamed_invalid_type_raises() -> None:
     import robin_sparkless as rs
 
     spark = rs.SparkSession.builder().app_name("test").get_or_create()
-    df = spark._create_dataframe_from_rows([["Alice", 50]], [("name", "string"), ("age", "bigint")])
+    df = spark._create_dataframe_from_rows(
+        [["Alice", 50]], [("name", "string"), ("age", "bigint")]
+    )
     with pytest.raises((TypeError, Exception)):
         df.with_columns_renamed(("name", "x"))  # type: ignore[arg-type]
 
@@ -76,7 +79,12 @@ def test_drop_column_name_with_dot() -> None:
     import robin_sparkless as rs
 
     spark = rs.SparkSession.builder().app_name("test").get_or_create()
-    df = spark.range(1, 3).with_column("first.name", rs.lit("Peter")).with_column("city.name", rs.lit("raleigh")).with_column("state", rs.lit("nc"))
+    df = (
+        spark.range(1, 3)
+        .with_column("first.name", rs.lit("Peter"))
+        .with_column("city.name", rs.lit("raleigh"))
+        .with_column("state", rs.lit("nc"))
+    )
     assert df.drop(["first.name"]).columns() == ["id", "city.name", "state"]
     assert df.drop(["city.name"]).columns() == ["id", "first.name", "state"]
     assert df.drop(["first.name", "city.name"]).columns() == ["id", "state"]
@@ -115,7 +123,9 @@ def test_with_column_with_existing_name() -> None:
     import robin_sparkless as rs
 
     spark = rs.SparkSession.builder().app_name("test").get_or_create()
-    df = spark._create_dataframe_from_rows([[1, 10], [2, 20]], [("id", "bigint"), ("x", "bigint")])
+    df = spark._create_dataframe_from_rows(
+        [[1, 10], [2, 20]], [("id", "bigint"), ("x", "bigint")]
+    )
     out = df.with_column("x", rs.col("x").multiply(rs.lit(2)))
     rows = out.collect()
     assert rows[0]["x"] == 20 and rows[1]["x"] == 40
@@ -132,10 +142,20 @@ def test_with_columns() -> None:
     )
     keys = df.with_columns({"key": rs.col("key")}).select(["key"]).collect()
     assert [r["key"] for r in keys] == list(range(100))
-    kvs = df.with_columns({"key": rs.col("key"), "value": rs.col("value")}).select(["key", "value"]).collect()
+    kvs = (
+        df.with_columns({"key": rs.col("key"), "value": rs.col("value")})
+        .select(["key", "value"])
+        .collect()
+    )
     assert [(r["key"], r["value"]) for r in kvs] == [(i, str(i)) for i in range(100)]
-    kvs2 = df.with_columns({"key_alias": rs.col("key"), "value_alias": rs.col("value")}).select(["key_alias", "value_alias"]).collect()
-    assert [(r["key_alias"], r["value_alias"]) for r in kvs2] == [(i, str(i)) for i in range(100)]
+    kvs2 = (
+        df.with_columns({"key_alias": rs.col("key"), "value_alias": rs.col("value")})
+        .select(["key_alias", "value_alias"])
+        .collect()
+    )
+    assert [(r["key_alias"], r["value_alias"]) for r in kvs2] == [
+        (i, str(i)) for i in range(100)
+    ]
 
 
 def test_with_columns_invalid_type_raises() -> None:
@@ -143,17 +163,16 @@ def test_with_columns_invalid_type_raises() -> None:
     import robin_sparkless as rs
 
     spark = rs.SparkSession.builder().app_name("test").get_or_create()
-    df = spark._create_dataframe_from_rows([[1, "a"]], [("key", "bigint"), ("value", "string")])
+    df = spark._create_dataframe_from_rows(
+        [[1, "a"]], [("key", "bigint"), ("value", "string")]
+    )
     with pytest.raises((TypeError, Exception)):
-        df.with_columns(["key"])  # type: ignore[arg-type]
+        df.with_columns(["key"])  # type: ignore[arg-type,list-item]
 
 
 def test_column_iterator_raises() -> None:
     """Ported from PySpark: iterating over Column raises TypeError."""
     import robin_sparkless as rs
-
-    spark = rs.SparkSession.builder().app_name("test").get_or_create()
-    df = spark._create_dataframe_from_rows([[1, "a"]], [("key", "bigint"), ("value", "string")])
 
     def foo() -> None:
         # PySpark: for x in df.key raises TypeError (Column is not iterable)
@@ -222,8 +241,10 @@ def test_repartition() -> None:
     import robin_sparkless as rs
 
     spark = rs.SparkSession.builder().app_name("test").get_or_create()
-    df = spark._create_dataframe_from_rows([[1, 10], [2, 20]], [("id", "bigint"), ("x", "bigint")])
-    rep = df.repartition(2)
+    df = spark._create_dataframe_from_rows(
+        [[1, 10], [2, 20]], [("id", "bigint"), ("x", "bigint")]
+    )
+    rep = df.repartition(2)  # type: ignore[attr-defined]
     assert rep.count() == 2
 
 
@@ -236,7 +257,7 @@ def test_sample() -> None:
         [[i, i * 10] for i in range(100)],
         [("id", "bigint"), ("x", "bigint")],
     )
-    sampled = df.sample(with_replacement=False, fraction=0.5, seed=42)
+    sampled = df.sample(with_replacement=False, fraction=0.5, seed=42)  # type: ignore[attr-defined]
     assert sampled.count() <= 100
 
 
@@ -287,8 +308,12 @@ def test_invalid_join_method() -> None:
     import robin_sparkless as rs
 
     spark = rs.SparkSession.builder().app_name("test").get_or_create()
-    df1 = spark._create_dataframe_from_rows([[1, "a"]], [("id", "bigint"), ("x", "string")])
-    df2 = spark._create_dataframe_from_rows([[1, "b"]], [("id", "bigint"), ("y", "string")])
+    df1 = spark._create_dataframe_from_rows(
+        [[1, "a"]], [("id", "bigint"), ("x", "string")]
+    )
+    df2 = spark._create_dataframe_from_rows(
+        [[1, "b"]], [("id", "bigint"), ("y", "string")]
+    )
     with pytest.raises((ValueError, Exception)):
         df1.join(df2, on=["id"], how="invalid")
 
@@ -342,7 +367,9 @@ def test_access_column() -> None:
     import robin_sparkless as rs
 
     spark = rs.SparkSession.builder().app_name("test").get_or_create()
-    df = spark._create_dataframe_from_rows([[1, "a"]], [("key", "bigint"), ("value", "string")])
+    df = spark._create_dataframe_from_rows(
+        [[1, "a"]], [("key", "bigint"), ("value", "string")]
+    )
     col_key = rs.col("key")
     assert hasattr(col_key, "alias")
     _ = df.select([col_key])
@@ -357,7 +384,9 @@ def test_when() -> None:
         [[1, 10], [2, 20], [3, 30]],
         [("id", "bigint"), ("x", "bigint")],
     )
-    out = df.with_column("y", rs.when(rs.col("id").eq(rs.lit(1))).then(rs.lit(100)).otherwise(rs.lit(0)))
+    out = df.with_column(
+        "y", rs.when(rs.col("id").eq(rs.lit(1))).then(rs.lit(100)).otherwise(rs.lit(0))
+    )
     rows = out.collect()
     assert rows[0]["y"] == 100
     assert rows[1]["y"] == 0
@@ -373,7 +402,10 @@ def test_greatest() -> None:
         [[1, 2, 3], [4, 2, 1]],
         [("a", "bigint"), ("b", "bigint"), ("c", "bigint")],
     )
-    out = df.with_column("max_val", rs.greatest([rs.col("a"), rs.col("b"), rs.col("c")]))
+    out = df.with_column(
+        "max_val",
+        rs.greatest([rs.col("a"), rs.col("b"), rs.col("c")]),  # type: ignore[arg-type]
+    )
     rows = out.collect()
     assert rows[0]["max_val"] == 3
     assert rows[1]["max_val"] == 4
@@ -388,7 +420,7 @@ def test_least() -> None:
         [[1, 2, 3], [4, 2, 1]],
         [("a", "bigint"), ("b", "bigint"), ("c", "bigint")],
     )
-    out = df.with_column("min_val", rs.least([rs.col("a"), rs.col("b"), rs.col("c")]))
+    out = df.with_column("min_val", rs.least([rs.col("a"), rs.col("b"), rs.col("c")]))  # type: ignore[arg-type]
     rows = out.collect()
     assert rows[0]["min_val"] == 1
     assert rows[1]["min_val"] == 1
@@ -396,7 +428,10 @@ def test_least() -> None:
 
 # --- Skip: PySpark-specific or unsupported ---
 
-@pytest.mark.skip(reason="sampleBy requires PySpark-specific sampling; not in robin_sparkless")
+
+@pytest.mark.skip(
+    reason="sampleBy requires PySpark-specific sampling; not in robin_sparkless"
+)
 def test_sampleby() -> None:
     pass
 
@@ -536,7 +571,9 @@ def test_duplicated_column_names() -> None:
     pass
 
 
-@pytest.mark.skip(reason="drop_duplicates_with_ambiguous_reference; join+drop semantics")
+@pytest.mark.skip(
+    reason="drop_duplicates_with_ambiguous_reference; join+drop semantics"
+)
 def test_drop_duplicates_with_ambiguous_reference() -> None:
     pass
 
