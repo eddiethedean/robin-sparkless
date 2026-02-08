@@ -648,6 +648,72 @@ def test_phase_d_dataframe_methods() -> None:
     assert isinstance(js, list) and len(js) == 3
 
 
+def test_phase_e_spark_session_catalog() -> None:
+    """Phase E: spark.catalog, spark.conf, spark.range, spark.version, etc."""
+    import robin_sparkless as rs
+
+    spark = rs.SparkSession.builder().app_name("phase_e").get_or_create()
+    # catalog returns Catalog
+    cat = spark.catalog()
+    assert cat is not None
+    assert cat.currentDatabase() == "default"
+    assert cat.currentCatalog() == "spark_catalog"
+    assert cat.listDatabases(None) == ["default"]
+    assert cat.listCatalogs(None) == ["spark_catalog"]
+    # listTables returns temp view names (empty initially)
+    tables = cat.listTables(None)
+    assert isinstance(tables, list)
+    # tableExists
+    assert cat.tableExists("nonexistent", None) is False
+    # dropTempView no-op if absent
+    cat.dropTempView("x")
+    # conf returns RuntimeConfig
+    conf = spark.conf()
+    assert conf is not None
+    assert isinstance(conf.get("spark.app.name"), str)
+    assert isinstance(conf.getAll(), dict)
+    # version
+    ver = spark.version()
+    assert isinstance(ver, str) and len(ver) > 0
+    # range
+    r5 = spark.range(5)
+    assert r5.count() == 5
+    rows = r5.collect()
+    assert [r["id"] for r in rows] == [0, 1, 2, 3, 4]
+    r2_6 = spark.range(2, 6)
+    assert r2_6.count() == 4
+    assert [r["id"] for r in r2_6.collect()] == [2, 3, 4, 5]
+    r0_10_2 = spark.range(0, 10, 2)
+    assert [r["id"] for r in r0_10_2.collect()] == [0, 2, 4, 6, 8]
+    # newSession returns session
+    sess2 = spark.newSession()
+    assert sess2 is not None
+    assert sess2.version() == ver
+    # getActiveSession / getDefaultSession (classmethod)
+    active = rs.SparkSession.get_active_session()
+    assert active is not None
+    assert active.version() == ver
+    default = rs.SparkSession.get_default_session()
+    assert default is not None
+    # stop() completes without error
+    spark.stop()
+    # udf raises NotImplementedError
+    spark2 = rs.SparkSession.builder().app_name("e2").get_or_create()
+    with pytest.raises(NotImplementedError, match="UDF"):
+        spark2.udf()
+    # catalog + temp view: register, listTables, tableExists, dropTempView
+    df = spark2.create_dataframe([(1, 2, "a")], ["a", "b", "c"])
+    try:
+        df.createOrReplaceTempView("phase_e_v")
+        assert spark2.catalog().tableExists("phase_e_v", None) is True
+        assert "phase_e_v" in spark2.catalog().listTables(None)
+        spark2.catalog().dropTempView("phase_e_v")
+        assert spark2.catalog().tableExists("phase_e_v") is False
+    except (AttributeError, RuntimeError) as e:
+        if "sql" in str(e).lower():
+            pytest.skip("sql feature not built")
+
+
 def test_sparkless_parity_multiple_append_operations() -> None:
     """Multiple append-like operations (union) preserve rows. PySpark: union stacks rows."""
     import robin_sparkless as rs

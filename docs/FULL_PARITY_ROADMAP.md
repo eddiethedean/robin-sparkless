@@ -113,26 +113,16 @@ A phased plan to achieve full API and behavioral parity between robin-sparkless 
 
 ---
 
-## Phase E: SparkSession & Catalog Stubs (1–2 weeks)
+## Phase E: SparkSession & Catalog Stubs (1–2 weeks) — COMPLETED
 
 **Goal:** Expose SparkSession and Catalog methods for API compatibility.
 
-**SparkSession (25 missing):**
-- `sql`, `table`, `createDataFrame`, `range` (core — likely done)
-- `catalog`, `conf`, `sparkContext` (stub)
-- `newSession`, `getActiveSession`, `getDefaultSession`
-- `udf`, `udf.register` (stub)
-- Version/setActiveSession etc.
-
-**Catalog (27 methods):**
-- `listDatabases`, `listTables`, `listFunctions`, `currentDatabase`
-- `createTable`, `dropTempView`, `dropGlobalTempView`
-- `cacheTable`, `uncacheTable`, `refreshTable`
-- Stub most as no-op or return empty/fixed values
-
-**Deliverables:**
-- Catalog class with stub methods
-- SparkSession methods present (stub where no local equivalent)
+**Deliverables (done):**
+- **Catalog class**: `dropTempView`, `dropGlobalTempView`, `listTables`, `tableExists`, `currentDatabase`, `currentCatalog`, `listDatabases`, `listCatalogs` (functional where supported); `cacheTable`, `uncacheTable`, `clearCache`, `refreshTable`, `refreshByPath`, `recoverPartitions` (no-op); `createTable`, `createExternalTable`, `getDatabase`, `getFunction`, `getTable`, `registerFunction` (NotImplementedError); `databaseExists`, `functionExists`, `isCached`, `listColumns`, `listFunctions`, `setCurrentCatalog`, `setCurrentDatabase` (stub/fixed).
+- **RuntimeConfig (spark.conf)**: `get`, `getAll`, `set` (NotImplementedError), `isModifiable`.
+- **SparkSession**: `catalog()`, `conf()`, `newSession()`, `stop()`, `range(end)` / `range(start, end, step)`, `version`, `udf()` (NotImplementedError), `getActiveSession()`, `getDefaultSession()` (classmethods).
+- **Rust session**: `drop_temp_view`, `drop_global_temp_view`, `table_exists`, `list_temp_view_names`, `range(start, end, step)`.
+- **Tests**: `test_phase_e_spark_session_catalog`.
 
 ---
 
