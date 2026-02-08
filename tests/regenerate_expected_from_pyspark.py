@@ -187,6 +187,13 @@ def _withcolumn_globals() -> dict[str, Any]:
         "hash": F.hash,
         "rand": F.rand,
         "randn": F.randn,
+        "bit_length": F.bit_length,
+        "octet_length": F.octet_length,
+        "levenshtein": F.levenshtein,
+        "slice": F.slice,
+        "explode": F.explode,
+        "abs": F.abs,
+        "sqrt": F.sqrt,
     }
 
 

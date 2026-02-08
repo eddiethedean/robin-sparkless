@@ -1,7 +1,7 @@
 {
   "name": "octet_length_function",
   "pyspark_version": "3.5",
-  "source": "extracted from /Users/odosmatthews/Documents/coding/robin-sparkless/.spark_clone/spark/python/pyspark/sql/tests/test_functions.py",
+  "source": "extracted from PySpark test_functions.py",
   "input": {
     "schema": [
       {
@@ -9,30 +9,73 @@
         "type": "bigint"
       },
       {
-        "name": "value",
-        "type": "double"
+        "name": "s",
+        "type": "string"
       }
     ],
     "rows": [
       [
         1,
-        1.0
+        "a"
       ],
       [
         2,
-        2.0
+        "ab"
       ],
       [
         3,
-        3.0
+        "hello"
       ]
     ]
   },
-  "operations": [],
+  "operations": [
+    {
+      "op": "withColumn",
+      "column": "octets",
+      "expr": "octet_length(col('s'))"
+    },
+    {
+      "op": "select",
+      "columns": [
+        "id",
+        "s",
+        "octets"
+      ]
+    }
+  ],
   "expected": {
-    "schema": [],
-    "rows": []
+    "schema": [
+      {
+        "name": "id",
+        "type": "bigint"
+      },
+      {
+        "name": "s",
+        "type": "string"
+      },
+      {
+        "name": "octets",
+        "type": "int"
+      }
+    ],
+    "rows": [
+      [
+        1,
+        "a",
+        1
+      ],
+      [
+        2,
+        "ab",
+        2
+      ],
+      [
+        3,
+        "hello",
+        5
+      ]
+    ]
   },
   "skip": true,
-  "skip_reason": "Placeholder from extractor; add operations and run regenerate_expected_from_pyspark.py --include-skipped"
+  "skip_reason": "octet_length returns string in robin-sparkless, fixture expects int"
 }

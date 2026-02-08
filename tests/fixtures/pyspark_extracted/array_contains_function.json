@@ -1,7 +1,7 @@
 {
   "name": "array_contains_function",
   "pyspark_version": "3.5",
-  "source": "extracted from /Users/odosmatthews/Documents/coding/robin-sparkless/.spark_clone/spark/python/pyspark/sql/tests/test_functions.py",
+  "source": "extracted from PySpark test_functions.py",
   "input": {
     "schema": [
       {
@@ -9,30 +9,94 @@
         "type": "bigint"
       },
       {
-        "name": "value",
-        "type": "double"
+        "name": "s",
+        "type": "string"
       }
     ],
     "rows": [
       [
         1,
-        1.0
+        "a;b;c"
       ],
       [
         2,
-        2.0
+        "x;y"
       ],
       [
         3,
-        3.0
+        "a"
       ]
     ]
   },
-  "operations": [],
+  "operations": [
+    {
+      "op": "withColumn",
+      "column": "arr",
+      "expr": "split(col('s'), ';')"
+    },
+    {
+      "op": "withColumn",
+      "column": "has_a",
+      "expr": "array_contains(col('arr'), lit('a'))"
+    },
+    {
+      "op": "select",
+      "columns": [
+        "id",
+        "s",
+        "arr",
+        "has_a"
+      ]
+    }
+  ],
   "expected": {
-    "schema": [],
-    "rows": []
+    "schema": [
+      {
+        "name": "id",
+        "type": "bigint"
+      },
+      {
+        "name": "s",
+        "type": "string"
+      },
+      {
+        "name": "arr",
+        "type": "array<string>"
+      },
+      {
+        "name": "has_a",
+        "type": "boolean"
+      }
+    ],
+    "rows": [
+      [
+        1,
+        "a;b;c",
+        [
+          "a",
+          "b",
+          "c"
+        ],
+        true
+      ],
+      [
+        2,
+        "x;y",
+        [
+          "x",
+          "y"
+        ],
+        false
+      ],
+      [
+        3,
+        "a",
+        [
+          "a"
+        ],
+        true
+      ]
+    ]
   },
-  "skip": true,
-  "skip_reason": "Placeholder from extractor; add operations and run regenerate_expected_from_pyspark.py --include-skipped"
+  "skip": false
 }
