@@ -1,10 +1,12 @@
 //! Python SparkSession and SparkSessionBuilder (PySpark sql session).
 
-use crate::SparkSession;
+use crate::{DataFrameReader, SparkSession};
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 use serde_json::Value as JsonValue;
+use std::collections::HashMap;
 use std::path::Path;
+use std::sync::RwLock;
 
 use super::dataframe::PyDataFrame;
 use super::py_to_json_value;
@@ -144,6 +146,18 @@ impl PySparkSession {
             .create_dataframe_from_rows(rows, schema)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
         Ok(PyDataFrame { inner: df })
+    }
+
+    /// Return a DataFrameReader for reading files (PySpark: spark.read).
+    ///
+    /// Chain ``.option(key, value)``, ``.format("parquet"|"csv"|"json")``,
+    /// then ``.csv(path)``, ``.parquet(path)``, ``.json(path)``, or ``.load(path)``.
+    fn read(slf: PyRef<'_, Self>) -> PyDataFrameReader {
+        PyDataFrameReader {
+            session: slf.inner.clone(),
+            options: RwLock::new(HashMap::new()),
+            format: RwLock::new(None),
+        }
     }
 
     /// Read a CSV file as a DataFrame.
@@ -290,6 +304,130 @@ impl PySparkSession {
         let df = self
             .inner
             .read_delta_with_version(Path::new(path), version)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        Ok(PyDataFrame { inner: df })
+    }
+}
+
+/// Python wrapper for DataFrameReader (spark.read).
+#[pyclass(name = "DataFrameReader")]
+pub struct PyDataFrameReader {
+    session: SparkSession,
+    options: RwLock<HashMap<String, String>>,
+    format: RwLock<Option<String>>,
+}
+
+impl PyDataFrameReader {
+    fn build_reader(&self) -> DataFrameReader {
+        let mut reader = DataFrameReader::new(self.session.clone());
+        if let Ok(opts) = self.options.read() {
+            for (k, v) in opts.iter() {
+                reader = reader.option(k.clone(), v.clone());
+            }
+        }
+        if let Ok(guard) = self.format.read() {
+            if let Some(ref fmt) = *guard {
+                reader = reader.format(fmt.clone());
+            }
+        }
+        reader
+    }
+}
+
+#[pymethods]
+impl PyDataFrameReader {
+    /// Add an option (PySpark: option(key, value)). Returns self for chaining.
+    fn option<'py>(slf: PyRef<'py, Self>, key: &str, value: &str) -> PyRef<'py, Self> {
+        if let Ok(mut opts) = slf.options.write() {
+            opts.insert(key.to_string(), value.to_string());
+        }
+        slf
+    }
+
+    /// Add options from a dict (PySpark: options(**kwargs)). Returns self for chaining.
+    fn options<'py>(
+        slf: PyRef<'py, Self>,
+        _py: Python<'_>,
+        opts: &Bound<'_, pyo3::types::PyAny>,
+    ) -> PyResult<PyRef<'py, Self>> {
+        let dict = opts.downcast::<PyDict>()?;
+        if let Ok(mut guard) = slf.options.write() {
+            for (k, v) in dict.iter() {
+                let k_str: String = k.extract()?;
+                let v_str: String = v.extract()?;
+                guard.insert(k_str, v_str);
+            }
+        }
+        Ok(slf)
+    }
+
+    /// Set format for load() (PySpark: format("parquet") etc). Returns self for chaining.
+    fn format<'py>(slf: PyRef<'py, Self>, fmt: &str) -> PyRef<'py, Self> {
+        if let Ok(mut guard) = slf.format.write() {
+            *guard = Some(fmt.to_string());
+        }
+        slf
+    }
+
+    /// Set schema (stub). Returns self for chaining.
+    fn schema<'py>(
+        slf: PyRef<'py, Self>,
+        _schema: &Bound<'_, pyo3::types::PyAny>,
+    ) -> PyRef<'py, Self> {
+        slf
+    }
+
+    /// Load data from path using format (or infer from extension) and options.
+    fn load(&self, path: &str) -> PyResult<PyDataFrame> {
+        let reader = self.build_reader();
+        let df = reader
+            .load(Path::new(path))
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        Ok(PyDataFrame { inner: df })
+    }
+
+    /// Return the named table/view (PySpark: table(name)).
+    fn table(&self, name: &str) -> PyResult<PyDataFrame> {
+        let reader = self.build_reader();
+        let df = reader
+            .table(name)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        Ok(PyDataFrame { inner: df })
+    }
+
+    /// Read CSV file. Applies stored options.
+    fn csv(&self, path: &str) -> PyResult<PyDataFrame> {
+        let reader = self.build_reader();
+        let df = reader
+            .csv(Path::new(path))
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        Ok(PyDataFrame { inner: df })
+    }
+
+    /// Read Parquet file or directory. Applies stored options.
+    fn parquet(&self, path: &str) -> PyResult<PyDataFrame> {
+        let reader = self.build_reader();
+        let df = reader
+            .parquet(Path::new(path))
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        Ok(PyDataFrame { inner: df })
+    }
+
+    /// Read JSON file (JSONL). Applies stored options.
+    fn json(&self, path: &str) -> PyResult<PyDataFrame> {
+        let reader = self.build_reader();
+        let df = reader
+            .json(Path::new(path))
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        Ok(PyDataFrame { inner: df })
+    }
+
+    #[cfg(feature = "delta")]
+    /// Read Delta table. Requires delta feature.
+    fn delta(&self, path: &str) -> PyResult<PyDataFrame> {
+        let reader = self.build_reader();
+        let df = reader
+            .delta(Path::new(path))
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
         Ok(PyDataFrame { inner: df })
     }

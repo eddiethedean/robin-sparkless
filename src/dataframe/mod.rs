@@ -661,6 +661,8 @@ impl DataFrame {
             df: self,
             mode: WriteMode::Overwrite,
             format: WriteFormat::Parquet,
+            options: HashMap::new(),
+            partition_by: Vec::new(),
         }
     }
 }
@@ -685,6 +687,8 @@ pub struct DataFrameWriter<'a> {
     df: &'a DataFrame,
     mode: WriteMode,
     format: WriteFormat,
+    options: HashMap<String, String>,
+    partition_by: Vec<String>,
 }
 
 impl<'a> DataFrameWriter<'a> {
@@ -696,6 +700,62 @@ impl<'a> DataFrameWriter<'a> {
     pub fn format(mut self, format: WriteFormat) -> Self {
         self.format = format;
         self
+    }
+
+    /// Add a single option (PySpark: option(key, value)). Returns self for chaining.
+    pub fn option(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
+        self.options.insert(key.into(), value.into());
+        self
+    }
+
+    /// Add multiple options (PySpark: options(**kwargs)). Returns self for chaining.
+    pub fn options(mut self, opts: impl IntoIterator<Item = (String, String)>) -> Self {
+        for (k, v) in opts {
+            self.options.insert(k, v);
+        }
+        self
+    }
+
+    /// Partition output by the given columns (PySpark: partitionBy(cols)).
+    pub fn partition_by(mut self, cols: impl IntoIterator<Item = impl Into<String>>) -> Self {
+        self.partition_by = cols.into_iter().map(|s| s.into()).collect();
+        self
+    }
+
+    /// Write as Parquet (PySpark: parquet(path)). Equivalent to format(Parquet).save(path).
+    pub fn parquet(&self, path: impl AsRef<std::path::Path>) -> Result<(), PolarsError> {
+        DataFrameWriter {
+            df: self.df,
+            mode: self.mode,
+            format: WriteFormat::Parquet,
+            options: self.options.clone(),
+            partition_by: self.partition_by.clone(),
+        }
+        .save(path)
+    }
+
+    /// Write as CSV (PySpark: csv(path)). Equivalent to format(Csv).save(path).
+    pub fn csv(&self, path: impl AsRef<std::path::Path>) -> Result<(), PolarsError> {
+        DataFrameWriter {
+            df: self.df,
+            mode: self.mode,
+            format: WriteFormat::Csv,
+            options: self.options.clone(),
+            partition_by: self.partition_by.clone(),
+        }
+        .save(path)
+    }
+
+    /// Write as JSON lines (PySpark: json(path)). Equivalent to format(Json).save(path).
+    pub fn json(&self, path: impl AsRef<std::path::Path>) -> Result<(), PolarsError> {
+        DataFrameWriter {
+            df: self.df,
+            mode: self.mode,
+            format: WriteFormat::Json,
+            options: self.options.clone(),
+            partition_by: self.partition_by.clone(),
+        }
+        .save(path)
     }
 
     /// Write to path. Overwrite replaces; append reads existing (if any) and concatenates then writes.
@@ -738,19 +798,40 @@ impl<'a> DataFrameWriter<'a> {
         };
         match self.format {
             WriteFormat::Parquet => {
-                let mut file = std::fs::File::create(path).map_err(|e| {
-                    PolarsError::ComputeError(format!("write parquet create: {e}").into())
-                })?;
-                let mut df_mut = to_write;
-                ParquetWriter::new(&mut file)
-                    .finish(&mut df_mut)
-                    .map_err(|e| PolarsError::ComputeError(format!("write parquet: {e}").into()))?;
+                if self.partition_by.is_empty() {
+                    let mut file = std::fs::File::create(path).map_err(|e| {
+                        PolarsError::ComputeError(format!("write parquet create: {e}").into())
+                    })?;
+                    let mut df_mut = to_write;
+                    ParquetWriter::new(&mut file)
+                        .finish(&mut df_mut)
+                        .map_err(|e| {
+                            PolarsError::ComputeError(format!("write parquet: {e}").into())
+                        })?;
+                } else {
+                    // partitionBy stored but partitioned parquet write deferred
+                    return Err(PolarsError::InvalidOperation(
+                        "partitionBy for parquet write is not yet implemented. Use save(path) without partitionBy.".into(),
+                    ));
+                }
             }
             WriteFormat::Csv => {
+                let has_header = self
+                    .options
+                    .get("header")
+                    .map(|v| v.eq_ignore_ascii_case("true") || v == "1")
+                    .unwrap_or(true);
+                let delimiter = self
+                    .options
+                    .get("sep")
+                    .and_then(|s| s.bytes().next())
+                    .unwrap_or(b',');
                 let mut file = std::fs::File::create(path).map_err(|e| {
                     PolarsError::ComputeError(format!("write csv create: {e}").into())
                 })?;
                 CsvWriter::new(&mut file)
+                    .include_header(has_header)
+                    .with_separator(delimiter)
                     .finish(&mut to_write.clone())
                     .map_err(|e| PolarsError::ComputeError(format!("write csv: {e}").into()))?;
             }

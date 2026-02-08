@@ -272,6 +272,43 @@ def test_select_nonexistent_column_raises() -> None:
         df.select(["id", "nonexistent"])
 
 
+def test_read_api_and_write_parquet_csv_json() -> None:
+    """spark.read().csv/parquet/json and df.write().parquet/csv/json work (Phase C)."""
+    import tempfile
+
+    import robin_sparkless as rs
+
+    spark = rs.SparkSession.builder().app_name("test").get_or_create()
+    df = spark.create_dataframe([(1, 10, "a"), (2, 20, "b")], ["id", "x", "label"])
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        # Write as parquet
+        parquet_path = f"{tmpdir}/out.parquet"
+        df.write().mode("overwrite").parquet(parquet_path)
+        back = spark.read().parquet(parquet_path)
+        assert back.count() == 2
+        assert back.collect()[0]["id"] == 1
+
+        # Write as CSV
+        csv_path = f"{tmpdir}/out.csv"
+        df.write().mode("overwrite").option("header", "true").csv(csv_path)
+        back_csv = spark.read().option("header", "true").csv(csv_path)
+        assert back_csv.count() == 2
+
+        # Write as JSON
+        json_path = f"{tmpdir}/out.json"
+        df.write().mode("overwrite").json(json_path)
+        back_json = spark.read().json(json_path)
+        assert back_json.count() == 2
+
+        # format().save() still works
+        df.write().mode("overwrite").format("parquet").save(
+            f"{tmpdir}/via_save.parquet"
+        )
+        via_save = spark.read().format("parquet").load(f"{tmpdir}/via_save.parquet")
+        assert via_save.count() == 2
+
+
 def test_delta_write_and_read(spark) -> None:
     """When built with delta feature: write_delta then read_delta round-trips data."""
     import tempfile
