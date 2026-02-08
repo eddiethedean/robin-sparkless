@@ -452,11 +452,13 @@ def _expr_to_sql(expr: str) -> str:
     return s if s.strip() else "1=1"
 
 
-def process_fixture(spark: SparkSession, path: Path, dry_run: bool) -> bool:
+def process_fixture(
+    spark: SparkSession, path: Path, dry_run: bool, include_skipped: bool = False
+) -> bool:
     """Load fixture, run in PySpark, write updated expected. Return True on success."""
     with open(path) as f:
         fixture = json.load(f)
-    if fixture.get("skip"):
+    if fixture.get("skip") and not include_skipped:
         return False
     input_section = fixture.get("input", {})
     schema = input_section.get("schema", [])
@@ -484,6 +486,9 @@ def process_fixture(spark: SparkSession, path: Path, dry_run: bool) -> bool:
         "schema": new_schema,
         "rows": _json_serializable(new_rows),
     }
+    if include_skipped and fixture.get("skip"):
+        fixture.pop("skip", None)
+        fixture.pop("skip_reason", None)
     if not dry_run:
         with open(path, "w") as f:
             json.dump(fixture, f, indent=2)
@@ -502,6 +507,11 @@ def main() -> int:
     )
     parser.add_argument(
         "--dry-run", action="store_true", help="Do not write files; print diffs"
+    )
+    parser.add_argument(
+        "--include-skipped",
+        action="store_true",
+        help="Process fixtures with skip:true (e.g. converted); remove skip on success.",
     )
     args = parser.parse_args()
 
@@ -566,7 +576,9 @@ def main() -> int:
 
     count = 0
     for path in to_process:
-        if process_fixture(spark, path, args.dry_run):
+        if process_fixture(
+            spark, path, args.dry_run, include_skipped=args.include_skipped
+        ):
             count += 1
             if not args.dry_run:
                 print(f"  Updated: {path.name}")

@@ -1,1 +1,85 @@
-{"name":"column_lit","pyspark_version":"3.5","input":{"schema":[{"name":"id","type":"string"},{"name":"name","type":"string"},{"name":"age","type":"string"},{"name":"salary","type":"string"}],"rows":[[1,"Alice",25,50000.0],[2,"Bob",30,60000.0],[3,"Charlie",35,70000.0]]},"operations":[],"expected":{"schema":[{"name":"test","type":"string"}],"rows":[["test"],["test"],["test"]]},"skip":true,"skip_reason":"Expected shape from Sparkless converter; regenerate expected from PySpark for parity"}
+{
+  "name": "column_lit",
+  "pyspark_version": "3.5",
+  "input": {
+    "schema": [
+      {
+        "name": "id",
+        "type": "string"
+      },
+      {
+        "name": "name",
+        "type": "string"
+      },
+      {
+        "name": "age",
+        "type": "string"
+      },
+      {
+        "name": "salary",
+        "type": "string"
+      }
+    ],
+    "rows": [
+      [
+        1,
+        "Alice",
+        25,
+        50000.0
+      ],
+      [
+        2,
+        "Bob",
+        30,
+        60000.0
+      ],
+      [
+        3,
+        "Charlie",
+        35,
+        70000.0
+      ]
+    ]
+  },
+  "operations": [],
+  "expected": {
+    "schema": [
+      {
+        "name": "id",
+        "type": "string"
+      },
+      {
+        "name": "name",
+        "type": "string"
+      },
+      {
+        "name": "age",
+        "type": "string"
+      },
+      {
+        "name": "salary",
+        "type": "string"
+      }
+    ],
+    "rows": [
+      [
+        "1",
+        "Alice",
+        "25",
+        "50000.0"
+      ],
+      [
+        "2",
+        "Bob",
+        "30",
+        "60000.0"
+      ],
+      [
+        "3",
+        "Charlie",
+        "35",
+        "70000.0"
+      ]
+    ]
+  }
+}

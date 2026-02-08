@@ -1,1 +1,107 @@
-{"name":"select_with_alias","pyspark_version":"3.5","input":{"schema":[{"name":"id","type":"string"},{"name":"name","type":"string"},{"name":"age","type":"string"},{"name":"salary","type":"string"},{"name":"department","type":"string"}],"rows":[[1,"Alice",25,50000.0,"IT"],[2,"Bob",30,60000.0,"HR"],[3,"Charlie",35,70000.0,"IT"],[4,"David",40,80000.0,"Finance"]]},"operations":[{"op":"select","columns":["user_id","full_name"]}],"expected":{"schema":[{"name":"user_id","type":"bigint"},{"name":"full_name","type":"string"}],"rows":[[1,"Alice"],[2,"Bob"],[3,"Charlie"],[4,"David"]]},"skip":true,"skip_reason":"Expected shape from Sparkless converter; regenerate expected from PySpark for parity"}
+{
+  "name": "select_with_alias",
+  "pyspark_version": "3.5",
+  "input": {
+    "schema": [
+      {
+        "name": "id",
+        "type": "bigint"
+      },
+      {
+        "name": "name",
+        "type": "string"
+      },
+      {
+        "name": "age",
+        "type": "string"
+      },
+      {
+        "name": "salary",
+        "type": "string"
+      },
+      {
+        "name": "department",
+        "type": "string"
+      }
+    ],
+    "rows": [
+      [
+        1,
+        "Alice",
+        25,
+        50000.0,
+        "IT"
+      ],
+      [
+        2,
+        "Bob",
+        30,
+        60000.0,
+        "HR"
+      ],
+      [
+        3,
+        "Charlie",
+        35,
+        70000.0,
+        "IT"
+      ],
+      [
+        4,
+        "David",
+        40,
+        80000.0,
+        "Finance"
+      ]
+    ]
+  },
+  "operations": [
+    {
+      "op": "withColumnRenamed",
+      "existing": "id",
+      "new": "user_id"
+    },
+    {
+      "op": "withColumnRenamed",
+      "existing": "name",
+      "new": "full_name"
+    },
+    {
+      "op": "select",
+      "columns": [
+        "user_id",
+        "full_name"
+      ]
+    }
+  ],
+  "expected": {
+    "schema": [
+      {
+        "name": "user_id",
+        "type": "bigint"
+      },
+      {
+        "name": "full_name",
+        "type": "string"
+      }
+    ],
+    "rows": [
+      [
+        1,
+        "Alice"
+      ],
+      [
+        2,
+        "Bob"
+      ],
+      [
+        3,
+        "Charlie"
+      ],
+      [
+        4,
+        "David"
+      ]
+    ]
+  }
+}

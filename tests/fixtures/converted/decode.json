@@ -1,1 +1,85 @@
-{"name":"decode","pyspark_version":"3.5","input":{"schema":[{"name":"id","type":"string"},{"name":"name","type":"string"},{"name":"text","type":"string"},{"name":"email","type":"string"}],"rows":[[1,"Alice","Hello World","alice@example.com"],[2,"Bob","Test String","bob@test.com"],[3,"Charlie","Python Data","charlie@company.org"]]},"operations":[],"expected":{"schema":[{"name":"stringdecode(encode(name, UTF-8), UTF-8)","type":"string"}],"rows":[["Alice"],["Bob"],["Charlie"]]},"skip":true,"skip_reason":"Expected shape from Sparkless converter; regenerate expected from PySpark for parity"}
+{
+  "name": "decode",
+  "pyspark_version": "3.5",
+  "input": {
+    "schema": [
+      {
+        "name": "id",
+        "type": "string"
+      },
+      {
+        "name": "name",
+        "type": "string"
+      },
+      {
+        "name": "text",
+        "type": "string"
+      },
+      {
+        "name": "email",
+        "type": "string"
+      }
+    ],
+    "rows": [
+      [
+        1,
+        "Alice",
+        "Hello World",
+        "alice@example.com"
+      ],
+      [
+        2,
+        "Bob",
+        "Test String",
+        "bob@test.com"
+      ],
+      [
+        3,
+        "Charlie",
+        "Python Data",
+        "charlie@company.org"
+      ]
+    ]
+  },
+  "operations": [],
+  "expected": {
+    "schema": [
+      {
+        "name": "id",
+        "type": "string"
+      },
+      {
+        "name": "name",
+        "type": "string"
+      },
+      {
+        "name": "text",
+        "type": "string"
+      },
+      {
+        "name": "email",
+        "type": "string"
+      }
+    ],
+    "rows": [
+      [
+        "1",
+        "Alice",
+        "Hello World",
+        "alice@example.com"
+      ],
+      [
+        "2",
+        "Bob",
+        "Test String",
+        "bob@test.com"
+      ],
+      [
+        "3",
+        "Charlie",
+        "Python Data",
+        "charlie@company.org"
+      ]
+    ]
+  }
+}

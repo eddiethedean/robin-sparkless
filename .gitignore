@@ -58,3 +58,6 @@ _build/
 # Artifacts
 artifacts/
 artifact/
+
+# Extractor clone
+.spark_clone/

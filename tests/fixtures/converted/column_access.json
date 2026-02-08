@@ -1,1 +1,113 @@
-{"name":"column_access","pyspark_version":"3.5","input":{"schema":[{"name":"id","type":"string"},{"name":"name","type":"string"},{"name":"age","type":"string"},{"name":"salary","type":"string"},{"name":"department","type":"string"}],"rows":[[1,"Alice",25,50000.0,"IT"],[2,"Bob",30,60000.0,"HR"],[3,"Charlie",35,70000.0,"IT"],[4,"David",40,80000.0,"Finance"]]},"operations":[],"expected":{"schema":[{"name":"id","type":"bigint"},{"name":"name","type":"string"},{"name":"salary","type":"double"}],"rows":[[1,"Alice",50000.0],[2,"Bob",60000.0],[3,"Charlie",70000.0],[4,"David",80000.0]]},"skip":true,"skip_reason":"Expected shape from Sparkless converter; regenerate expected from PySpark for parity"}
+{
+  "name": "column_access",
+  "pyspark_version": "3.5",
+  "input": {
+    "schema": [
+      {
+        "name": "id",
+        "type": "string"
+      },
+      {
+        "name": "name",
+        "type": "string"
+      },
+      {
+        "name": "age",
+        "type": "string"
+      },
+      {
+        "name": "salary",
+        "type": "string"
+      },
+      {
+        "name": "department",
+        "type": "string"
+      }
+    ],
+    "rows": [
+      [
+        1,
+        "Alice",
+        25,
+        50000.0,
+        "IT"
+      ],
+      [
+        2,
+        "Bob",
+        30,
+        60000.0,
+        "HR"
+      ],
+      [
+        3,
+        "Charlie",
+        35,
+        70000.0,
+        "IT"
+      ],
+      [
+        4,
+        "David",
+        40,
+        80000.0,
+        "Finance"
+      ]
+    ]
+  },
+  "operations": [],
+  "expected": {
+    "schema": [
+      {
+        "name": "id",
+        "type": "string"
+      },
+      {
+        "name": "name",
+        "type": "string"
+      },
+      {
+        "name": "age",
+        "type": "string"
+      },
+      {
+        "name": "salary",
+        "type": "string"
+      },
+      {
+        "name": "department",
+        "type": "string"
+      }
+    ],
+    "rows": [
+      [
+        "1",
+        "Alice",
+        "25",
+        "50000.0",
+        "IT"
+      ],
+      [
+        "2",
+        "Bob",
+        "30",
+        "60000.0",
+        "HR"
+      ],
+      [
+        "3",
+        "Charlie",
+        "35",
+        "70000.0",
+        "IT"
+      ],
+      [
+        "4",
+        "David",
+        "40",
+        "80000.0",
+        "Finance"
+      ]
+    ]
+  }
+}

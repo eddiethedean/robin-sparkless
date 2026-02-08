@@ -1,1 +1,61 @@
-{"name":"struct","pyspark_version":"3.5","input":{"schema":[{"name":"id","type":"string"},{"name":"name","type":"string"},{"name":"age","type":"string"}],"rows":[[1,"Alice",25],[2,"Bob",30]]},"operations":[],"expected":{"schema":[{"name":"struct(name, age)","type":"struct"}],"rows":[[{"name":"Alice","age":25}],[{"name":"Bob","age":30}]]},"skip":true,"skip_reason":"Expected shape from Sparkless converter; regenerate expected from PySpark for parity"}
+{
+  "name": "struct",
+  "pyspark_version": "3.5",
+  "input": {
+    "schema": [
+      {
+        "name": "id",
+        "type": "string"
+      },
+      {
+        "name": "name",
+        "type": "string"
+      },
+      {
+        "name": "age",
+        "type": "string"
+      }
+    ],
+    "rows": [
+      [
+        1,
+        "Alice",
+        25
+      ],
+      [
+        2,
+        "Bob",
+        30
+      ]
+    ]
+  },
+  "operations": [],
+  "expected": {
+    "schema": [
+      {
+        "name": "id",
+        "type": "string"
+      },
+      {
+        "name": "name",
+        "type": "string"
+      },
+      {
+        "name": "age",
+        "type": "string"
+      }
+    ],
+    "rows": [
+      [
+        "1",
+        "Alice",
+        "25"
+      ],
+      [
+        "2",
+        "Bob",
+        "30"
+      ]
+    ]
+  }
+}

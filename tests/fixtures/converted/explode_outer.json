@@ -1,1 +1,106 @@
-{"name":"explode_outer","pyspark_version":"3.5","input":{"schema":[{"name":"id","type":"string"},{"name":"name","type":"string"},{"name":"scores","type":"string"},{"name":"tags","type":"string"}],"rows":[[1,"Alice",[85,90,78],["python","data"]],[2,"Bob",[92,88,95],["java","backend"]],[3,"Charlie",[76,82,89],["python","ml"]]]},"operations":[],"expected":{"schema":[{"name":"name","type":"string"},{"name":"score","type":"bigint"}],"rows":[["Alice",85],["Alice",90],["Alice",78],["Bob",92],["Bob",88],["Bob",95],["Charlie",76],["Charlie",82],["Charlie",89]]},"skip":true,"skip_reason":"Expected shape from Sparkless converter; regenerate expected from PySpark for parity"}
+{
+  "name": "explode_outer",
+  "pyspark_version": "3.5",
+  "input": {
+    "schema": [
+      {
+        "name": "id",
+        "type": "string"
+      },
+      {
+        "name": "name",
+        "type": "string"
+      },
+      {
+        "name": "scores",
+        "type": "string"
+      },
+      {
+        "name": "tags",
+        "type": "string"
+      }
+    ],
+    "rows": [
+      [
+        1,
+        "Alice",
+        [
+          85,
+          90,
+          78
+        ],
+        [
+          "python",
+          "data"
+        ]
+      ],
+      [
+        2,
+        "Bob",
+        [
+          92,
+          88,
+          95
+        ],
+        [
+          "java",
+          "backend"
+        ]
+      ],
+      [
+        3,
+        "Charlie",
+        [
+          76,
+          82,
+          89
+        ],
+        [
+          "python",
+          "ml"
+        ]
+      ]
+    ]
+  },
+  "operations": [],
+  "expected": {
+    "schema": [
+      {
+        "name": "id",
+        "type": "string"
+      },
+      {
+        "name": "name",
+        "type": "string"
+      },
+      {
+        "name": "scores",
+        "type": "string"
+      },
+      {
+        "name": "tags",
+        "type": "string"
+      }
+    ],
+    "rows": [
+      [
+        "1",
+        "Alice",
+        "[85, 90, 78]",
+        "['python', 'data']"
+      ],
+      [
+        "2",
+        "Bob",
+        "[92, 88, 95]",
+        "['java', 'backend']"
+      ],
+      [
+        "3",
+        "Charlie",
+        "[76, 82, 89]",
+        "['python', 'ml']"
+      ]
+    ]
+  }
+}

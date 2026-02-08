@@ -1,1 +1,101 @@
-{"name":"transform_keys","pyspark_version":"3.5","input":{"schema":[{"name":"id","type":"string"},{"name":"map1","type":"string"},{"name":"map2","type":"string"},{"name":"key","type":"string"}],"rows":[[1,{"a":1,"b":2},{"c":3,"d":4},"a"],[2,{"x":10,"y":20},{"z":30},"x"],[3,{"p":100,"q":200},{"r":300},"p"]]},"operations":[],"expected":{"schema":[{"name":"transform_keys(map1, lambdafunction(upper(namedlambdavariable()), namedlambdavariable(), namedlambdavariable()))","type":"map"}],"rows":[[{"A":1,"B":2}],[{"X":10,"Y":20}],[{"P":100,"Q":200}]]},"skip":true,"skip_reason":"Expected shape from Sparkless converter; regenerate expected from PySpark for parity"}
+{
+  "name": "transform_keys",
+  "pyspark_version": "3.5",
+  "input": {
+    "schema": [
+      {
+        "name": "id",
+        "type": "string"
+      },
+      {
+        "name": "map1",
+        "type": "string"
+      },
+      {
+        "name": "map2",
+        "type": "string"
+      },
+      {
+        "name": "key",
+        "type": "string"
+      }
+    ],
+    "rows": [
+      [
+        1,
+        {
+          "a": 1,
+          "b": 2
+        },
+        {
+          "c": 3,
+          "d": 4
+        },
+        "a"
+      ],
+      [
+        2,
+        {
+          "x": 10,
+          "y": 20
+        },
+        {
+          "z": 30
+        },
+        "x"
+      ],
+      [
+        3,
+        {
+          "p": 100,
+          "q": 200
+        },
+        {
+          "r": 300
+        },
+        "p"
+      ]
+    ]
+  },
+  "operations": [],
+  "expected": {
+    "schema": [
+      {
+        "name": "id",
+        "type": "string"
+      },
+      {
+        "name": "map1",
+        "type": "string"
+      },
+      {
+        "name": "map2",
+        "type": "string"
+      },
+      {
+        "name": "key",
+        "type": "string"
+      }
+    ],
+    "rows": [
+      [
+        "1",
+        "{'a': 1, 'b': 2}",
+        "{'c': 3, 'd': 4}",
+        "a"
+      ],
+      [
+        "2",
+        "{'x': 10, 'y': 20}",
+        "{'z': 30}",
+        "x"
+      ],
+      [
+        "3",
+        "{'p': 100, 'q': 200}",
+        "{'r': 300}",
+        "p"
+      ]
+    ]
+  }
+}

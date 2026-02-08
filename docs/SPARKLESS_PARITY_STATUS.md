@@ -39,6 +39,8 @@ make test-parity-phases    # All phases
   ```
   Use `--dry-run` to print diffs without writing. The script builds a PySpark DataFrame from each fixture’s `input.schema` and `input.rows`, applies the same `operations` (filter, select, withColumn, orderBy, groupBy, window, join, etc.), then overwrites that fixture’s `expected.schema` and `expected.rows`. Fixtures with unsupported expressions or ops are left unchanged. After regenerating, run `cargo test pyspark_parity_fixtures`; any failure indicates Robin vs PySpark divergence (fix Robin or leave fixture unregenerated). Requires PySpark and Java 17+.
 
+- **Converted fixtures:** Run `python tests/regenerate_expected_from_pyspark.py tests/fixtures/converted --include-skipped` to process fixtures with `skip: true`. On success, skip is removed. Requires PySpark and Java 17+ (e.g. `export JAVA_HOME=/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home`).
+
 - **Python tests:** Tests in `tests/python/test_robin_sparkless.py` and `test_dataframe_parity.py` assert behaviour that matches PySpark. Expectations are predetermined (no PySpark at test runtime). For example, `test_create_dataframe_from_rows_schema_pyspark_parity` compares Robin output to a fixed expected list derived from PySpark 3.5.
 
 - **CI:** A CI job can run the regenerator in `--dry-run` and fail if current expected ≠ PySpark result (requires PySpark and Java 17+ in the environment).
@@ -48,7 +50,7 @@ make test-parity-phases    # All phases
 | Source | Converted | Passing | Failing | Skipped |
 |--------|-----------|---------|--------|---------|
 | Hand-written (`tests/fixtures/*.json`) | — | 201 | 0 | 11 |
-| Sparkless converted (`tests/fixtures/converted/*.json`) | 226 | 0 | 0 | 226 (all skipped: expected shape from converter; run `regenerate_expected_from_pyspark.py` with PySpark to fix) |
+| Sparkless converted (`tests/fixtures/converted/*.json`) | 226 | 216 | 0 | 10 (3 converter; 2 join/semi expected mismatch; 1 coalesce+when) |
 
 **Target: 200+ tests passing** (hand-written + converted). **Current: 201 passing** (hand-written). **Phase G** ✅ **COMPLETED**. **Phase C** ✅: DataFrameReader/Writer parity (read_csv_with_options, read_table fixtures). **Phase D** ✅: DataFrame methods (createOrReplaceTempView, corr/cov, toDF/toJSON/toPandas, columns, cache, stubs). **Phase E** ✅: SparkSession & Catalog stubs (catalog, conf, range, version, newSession, stop, getActiveSession, getDefaultSession, udf; Catalog 27 methods). Fixes applied: first_row, hex/url_encode, replace, case_insensitive_columns, describe/summary, split semantics (regex for `|`), timestamp format normalization; 11 hand-written fixtures remain skipped (see Skipped fixtures). **Phase 25 completed**: plan interpreter, expression interpreter (all scalar functions), 3 plan fixtures (`tests/fixtures/plans/`: filter_select_limit, join_simple, with_column_functions), create_dataframe_from_rows. Phase 22: datetime extensions. Phase 21: ordering, aggregates, numeric. Phase 19–18: aggregates, array/map/struct. Phase 17–15: datetime/unix, regexp, aliases, string, math. **Phase 27** (Sparkless integration) target: 200+ Sparkless tests passing with robin backend (after Phase 26 publish Rust crate). CI runs parity on hand-written (and optionally converted) fixtures; when Sparkless repo is available, run `make sparkless-parity` and update this doc.
 
@@ -95,8 +97,17 @@ When a converted fixture fails, classify and document here:
 
 | Fixture name | Reason | Notes |
 |--------------|--------|-------|
-| (example) | unsupported: regexp_extract | robin-sparkless does not yet implement this function |
-| (example) | semantic: null in groupBy key | PySpark vs Polars grouping difference |
+| aggregation | converter: select avg_salary before groupBy+agg | fix convert_sparkless_fixtures.py |
+| group_by | converter: select count before groupBy+agg | fix convert_sparkless_fixtures.py |
+| filter_select_groupby_agg | converter: filter col(name)>0 invalid; select avg_salary before agg | name is string; op order wrong |
+| filter_operations | converter: filter col(name)>0 invalid | name is string |
+| filter_with_boolean | converter: filter col(name)>0 invalid | name is string |
+| select_expr_groupby_agg_orderby | converter: select level,count,avg_salary before groupBy+agg | op order wrong |
+| select_with_alias | converter: select user_id,full_name but schema has id,name | needs withColumn alias |
+| withcolumn_filter_orderby | converter: filter col(name)>0 invalid; expected bonus vs ops | name string; expr mismatch |
+| group_by | converter: expected schema inconsistent with groupBy id agg count | |
+| semi_join | converter: expected row count inconsistent with left_semi semantics | |
+| select_expr_groupby_agg_orderby | coalesce(when(...), lit(...)) requires coalesce to accept when() | |
 
 **Reason categories:**
 

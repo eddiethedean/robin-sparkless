@@ -1,1 +1,71 @@
-{"name":"months_between","pyspark_version":"3.5","input":{"schema":[{"name":"id","type":"string"},{"name":"date","type":"string"},{"name":"timestamp","type":"string"}],"rows":[[1,"2020-01-15","2020-01-15 10:30:00"],[2,"2019-03-10","2019-03-10 14:20:00"],[3,"2021-07-22","2021-07-22 08:15:00"]]},"operations":[],"expected":{"schema":[{"name":"months_between(date, 2019-01-01, true)","type":"double"}],"rows":[[12.4516129],[2.29032258],[30.67741935]]},"skip":true,"skip_reason":"Expected shape from Sparkless converter; regenerate expected from PySpark for parity"}
+{
+  "name": "months_between",
+  "pyspark_version": "3.5",
+  "input": {
+    "schema": [
+      {
+        "name": "id",
+        "type": "string"
+      },
+      {
+        "name": "date",
+        "type": "string"
+      },
+      {
+        "name": "timestamp",
+        "type": "string"
+      }
+    ],
+    "rows": [
+      [
+        1,
+        "2020-01-15",
+        "2020-01-15 10:30:00"
+      ],
+      [
+        2,
+        "2019-03-10",
+        "2019-03-10 14:20:00"
+      ],
+      [
+        3,
+        "2021-07-22",
+        "2021-07-22 08:15:00"
+      ]
+    ]
+  },
+  "operations": [],
+  "expected": {
+    "schema": [
+      {
+        "name": "id",
+        "type": "string"
+      },
+      {
+        "name": "date",
+        "type": "string"
+      },
+      {
+        "name": "timestamp",
+        "type": "string"
+      }
+    ],
+    "rows": [
+      [
+        "1",
+        "2020-01-15",
+        "2020-01-15 10:30:00"
+      ],
+      [
+        "2",
+        "2019-03-10",
+        "2019-03-10 14:20:00"
+      ],
+      [
+        "3",
+        "2021-07-22",
+        "2021-07-22 08:15:00"
+      ]
+    ]
+  }
+}
