@@ -1,5 +1,7 @@
+use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use chrono::{NaiveDate, NaiveDateTime};
 use polars::prelude::{
@@ -173,6 +175,19 @@ struct AggregationSpec {
     ord_column: Option<String>, // For max_by, min_by
 }
 
+/// Load phase manifest and return fixture names for the given phase.
+/// Phase should be "a", "b", "c", etc.; looks up "phase_a", "phase_b", etc.
+fn load_phase_fixture_names(phase: &str) -> Option<Vec<String>> {
+    let manifest_path = Path::new("tests/fixtures/phase_manifest.json");
+    if !manifest_path.exists() {
+        return None;
+    }
+    let text = fs::read_to_string(manifest_path).ok()?;
+    let manifest: HashMap<String, Vec<String>> = serde_json::from_str(&text).ok()?;
+    let key = format!("phase_{}", phase.to_lowercase());
+    manifest.get(&key).cloned()
+}
+
 /// Parity tests generated from PySpark fixtures.
 ///
 /// This test reads JSON fixtures from `tests/fixtures/` and (if present)
@@ -181,9 +196,21 @@ struct AggregationSpec {
 ///
 /// Set `PARITY_FIXTURE=<name>` (e.g. `PARITY_FIXTURE=groupby_count`) to run only the fixture
 /// whose `name` matches, for faster iteration.
+///
+/// Set `PARITY_PHASE=<a|b|c|d|e|f|g>` to run only fixtures in that phase's manifest.
 #[test]
 fn pyspark_parity_fixtures() {
+    run_pyspark_parity_fixtures(std::env::var("PARITY_PHASE").ok().as_deref());
+}
+
+/// Core parity runner. When `phase_filter` is Some("a") etc., only fixtures in that phase's
+/// manifest are run. Phase E has no fixtures; the test passes with no fixtures run.
+fn run_pyspark_parity_fixtures(phase_filter: Option<&str>) {
     let single = std::env::var("PARITY_FIXTURE").ok();
+
+    let phase_names: Option<std::collections::HashSet<String>> = phase_filter
+        .and_then(load_phase_fixture_names)
+        .map(|v| v.into_iter().collect());
 
     let mut paths: Vec<std::path::PathBuf> = Vec::new();
 
@@ -192,6 +219,9 @@ fn pyspark_parity_fixtures() {
         for entry in fs::read_dir(fixtures_dir).expect("read fixtures directory") {
             let path = entry.expect("dir entry").path();
             if path.extension().and_then(|s| s.to_str()) != Some("json") {
+                continue;
+            }
+            if path.file_name().and_then(|s| s.to_str()) == Some("phase_manifest.json") {
                 continue;
             }
             if path.is_file() {
@@ -226,6 +256,12 @@ fn pyspark_parity_fixtures() {
             }
         }
 
+        if let Some(ref names) = phase_names {
+            if !names.contains(&fixture.name) {
+                continue;
+            }
+        }
+
         if fixture.skip {
             continue;
         }
@@ -255,6 +291,41 @@ fn pyspark_parity_fixtures() {
             .map(|(name, err)| format!("{name}: {err}"))
             .collect::<Vec<_>>()
     );
+}
+
+#[test]
+fn test_parity_phase_a() {
+    run_pyspark_parity_fixtures(Some("a"));
+}
+
+#[test]
+fn test_parity_phase_b() {
+    run_pyspark_parity_fixtures(Some("b"));
+}
+
+#[test]
+fn test_parity_phase_c() {
+    run_pyspark_parity_fixtures(Some("c"));
+}
+
+#[test]
+fn test_parity_phase_d() {
+    run_pyspark_parity_fixtures(Some("d"));
+}
+
+#[test]
+fn test_parity_phase_e() {
+    run_pyspark_parity_fixtures(Some("e"));
+}
+
+#[test]
+fn test_parity_phase_f() {
+    run_pyspark_parity_fixtures(Some("f"));
+}
+
+#[test]
+fn test_parity_phase_g() {
+    run_pyspark_parity_fixtures(Some("g"));
 }
 
 fn run_fixture(fixture: &Fixture) -> Result<(), PolarsError> {
@@ -392,9 +463,12 @@ fn create_df_from_file_source(
             ))
         }
     };
+    static TEMP_COUNTER: AtomicUsize = AtomicUsize::new(0);
+    let n = TEMP_COUNTER.fetch_add(1, Ordering::SeqCst);
     let temp_path = temp_dir.join(format!(
-        "robin_sparkless_test_{}.{}",
+        "robin_sparkless_test_{}_{}.{}",
         std::process::id(),
+        n,
         extension
     ));
 

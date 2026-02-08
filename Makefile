@@ -1,9 +1,10 @@
-.PHONY: build test test-rust test-python sparkless-parity bench-python clean check check-full fmt clippy audit outdated deny lint-python all gap-analysis gap-analysis-quick gap-analysis-runtime
+.PHONY: build test test-rust test-python sparkless-parity test-parity-phase-a test-parity-phase-b test-parity-phase-c test-parity-phase-d test-parity-phase-e test-parity-phase-f test-parity-phase-g test-parity-phases bench-python clean check check-full fmt clippy audit outdated deny lint-python all gap-analysis gap-analysis-quick gap-analysis-runtime
 
 # Use stable toolchain when no default is configured (override with RUSTUP_TOOLCHAIN=nightly etc.)
 export RUSTUP_TOOLCHAIN ?= stable
-# Use real Cargo home to avoid sandbox cache corruption (e.g. Cursor IDE)
-export CARGO_HOME ?= $(HOME)/.cargo
+# Use real Cargo home to avoid sandbox cache corruption (e.g. Cursor IDE).
+# Force override (:=) so Cursor/sandbox CARGO_HOME does not take precedence.
+export CARGO_HOME := $(HOME)/.cargo
 
 # Build
 build:
@@ -47,6 +48,18 @@ sparkless-parity:
 		 python3 tests/regenerate_expected_from_pyspark.py tests/fixtures/converted 2>/dev/null || true; \
 	fi
 	cargo test pyspark_parity_fixtures
+
+# Run parity tests for a specific phase (A–G). Uses tests/fixtures/phase_manifest.json.
+test-parity-phase-a: ; PARITY_PHASE=a cargo test pyspark_parity_fixtures --
+test-parity-phase-b: ; PARITY_PHASE=b cargo test pyspark_parity_fixtures --
+test-parity-phase-c: ; PARITY_PHASE=c cargo test pyspark_parity_fixtures --
+test-parity-phase-d: ; PARITY_PHASE=d cargo test pyspark_parity_fixtures --
+test-parity-phase-e: ; PARITY_PHASE=e cargo test pyspark_parity_fixtures --
+test-parity-phase-f: ; PARITY_PHASE=f cargo test pyspark_parity_fixtures --
+test-parity-phase-g: ; PARITY_PHASE=g cargo test pyspark_parity_fixtures --
+
+# Run all phase-specific parity tests
+test-parity-phases: test-parity-phase-a test-parity-phase-b test-parity-phase-c test-parity-phase-d test-parity-phase-e test-parity-phase-f test-parity-phase-g
 
 # Run all Rust checks (format, clippy, audit, deny, Rust tests). Completes without Python build.
 check: fmt clippy audit deny test-rust
