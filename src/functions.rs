@@ -1486,9 +1486,11 @@ pub fn to_date(column: &Column) -> Column {
     column.clone().to_date()
 }
 
-/// Format date/datetime as string (PySpark date_format). Uses chrono strftime format (e.g. "%Y-%m-%d").
+/// Format date/datetime as string (PySpark date_format). Accepts PySpark/Java SimpleDateFormat style (e.g. "yyyy-MM") and converts to chrono strftime internally.
 pub fn date_format(column: &Column, format: &str) -> Column {
-    column.clone().date_format(format)
+    column
+        .clone()
+        .date_format(&crate::udfs::pyspark_format_to_chrono(format))
 }
 
 /// Current date (evaluation time). PySpark current_date.

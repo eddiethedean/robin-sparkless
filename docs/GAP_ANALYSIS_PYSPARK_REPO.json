@@ -5,9 +5,9 @@
   "functions": [
     {
       "name": "abs",
-      "classification": "missing",
+      "classification": "exact",
       "pyspark_signature": "abs(col)",
-      "robin_signature": null,
+      "robin_signature": "abs(col)",
       "pyspark_args": [
         {
           "name": "col",
@@ -16,7 +16,14 @@
           "kind": "POSITIONAL_OR_KEYWORD"
         }
       ],
-      "robin_args": [],
+      "robin_args": [
+        {
+          "name": "col",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "notes": ""
     },
     {
@@ -194,9 +201,9 @@
     },
     {
       "name": "aggregate",
-      "classification": "missing",
+      "classification": "partial",
       "pyspark_signature": "aggregate(col, initialValue, merge, finish='None')",
-      "robin_signature": null,
+      "robin_signature": "aggregate(col, zero)",
       "pyspark_args": [
         {
           "name": "col",
@@ -223,7 +230,20 @@
           "kind": "POSITIONAL_OR_KEYWORD"
         }
       ],
-      "robin_args": [],
+      "robin_args": [
+        {
+          "name": "col",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "zero",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "notes": ""
     },
     {
@@ -300,9 +320,9 @@
     },
     {
       "name": "array",
-      "classification": "missing",
+      "classification": "exact",
       "pyspark_signature": "array(cols)",
-      "robin_signature": null,
+      "robin_signature": "array(cols)",
       "pyspark_args": [
         {
           "name": "cols",
@@ -311,7 +331,14 @@
           "kind": "VAR_POSITIONAL"
         }
       ],
-      "robin_args": [],
+      "robin_args": [
+        {
+          "name": "cols",
+          "default": null,
+          "annotation": null,
+          "kind": "VAR_POSITIONAL"
+        }
+      ],
       "notes": ""
     },
     {
@@ -397,9 +424,9 @@
     },
     {
       "name": "array_contains",
-      "classification": "missing",
+      "classification": "exact",
       "pyspark_signature": "array_contains(col, value)",
-      "robin_signature": null,
+      "robin_signature": "array_contains(col, value)",
       "pyspark_args": [
         {
           "name": "col",
@@ -414,7 +441,20 @@
           "kind": "POSITIONAL_OR_KEYWORD"
         }
       ],
-      "robin_args": [],
+      "robin_args": [
+        {
+          "name": "col",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "value",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "notes": ""
     },
     {
@@ -559,9 +599,9 @@
     },
     {
       "name": "array_join",
-      "classification": "missing",
+      "classification": "partial",
       "pyspark_signature": "array_join(col, delimiter, null_replacement='None')",
-      "robin_signature": null,
+      "robin_signature": "array_join(col, delimiter)",
       "pyspark_args": [
         {
           "name": "col",
@@ -582,14 +622,27 @@
           "kind": "POSITIONAL_OR_KEYWORD"
         }
       ],
-      "robin_args": [],
+      "robin_args": [
+        {
+          "name": "col",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "delimiter",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "notes": ""
     },
     {
       "name": "array_max",
-      "classification": "missing",
+      "classification": "exact",
       "pyspark_signature": "array_max(col)",
-      "robin_signature": null,
+      "robin_signature": "array_max(col)",
       "pyspark_args": [
         {
           "name": "col",
@@ -598,14 +651,21 @@
           "kind": "POSITIONAL_OR_KEYWORD"
         }
       ],
-      "robin_args": [],
+      "robin_args": [
+        {
+          "name": "col",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "notes": ""
     },
     {
       "name": "array_min",
-      "classification": "missing",
+      "classification": "exact",
       "pyspark_signature": "array_min(col)",
-      "robin_signature": null,
+      "robin_signature": "array_min(col)",
       "pyspark_args": [
         {
           "name": "col",
@@ -614,14 +674,21 @@
           "kind": "POSITIONAL_OR_KEYWORD"
         }
       ],
-      "robin_args": [],
+      "robin_args": [
+        {
+          "name": "col",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "notes": ""
     },
     {
       "name": "array_position",
-      "classification": "missing",
+      "classification": "exact",
       "pyspark_signature": "array_position(col, value)",
-      "robin_signature": null,
+      "robin_signature": "array_position(col, value)",
       "pyspark_args": [
         {
           "name": "col",
@@ -636,7 +703,20 @@
           "kind": "POSITIONAL_OR_KEYWORD"
         }
       ],
-      "robin_args": [],
+      "robin_args": [
+        {
+          "name": "col",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "value",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "notes": ""
     },
     {
@@ -720,9 +800,9 @@
     },
     {
       "name": "array_size",
-      "classification": "missing",
+      "classification": "exact",
       "pyspark_signature": "array_size(col)",
-      "robin_signature": null,
+      "robin_signature": "array_size(col)",
       "pyspark_args": [
         {
           "name": "col",
@@ -731,14 +811,21 @@
           "kind": "POSITIONAL_OR_KEYWORD"
         }
       ],
-      "robin_args": [],
+      "robin_args": [
+        {
+          "name": "col",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "notes": ""
     },
     {
       "name": "array_sort",
-      "classification": "missing",
+      "classification": "partial",
       "pyspark_signature": "array_sort(col, comparator='None')",
-      "robin_signature": null,
+      "robin_signature": "array_sort(col)",
       "pyspark_args": [
         {
           "name": "col",
@@ -753,7 +840,14 @@
           "kind": "POSITIONAL_OR_KEYWORD"
         }
       ],
-      "robin_args": [],
+      "robin_args": [
+        {
+          "name": "col",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "notes": ""
     },
     {
@@ -1667,9 +1761,9 @@
     },
     {
       "name": "cardinality",
-      "classification": "missing",
+      "classification": "exact",
       "pyspark_signature": "cardinality(col)",
-      "robin_signature": null,
+      "robin_signature": "cardinality(col)",
       "pyspark_args": [
         {
           "name": "col",
@@ -1678,7 +1772,14 @@
           "kind": "POSITIONAL_OR_KEYWORD"
         }
       ],
-      "robin_args": [],
+      "robin_args": [
+        {
+          "name": "col",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "notes": ""
     },
     {
@@ -1728,9 +1829,9 @@
     },
     {
       "name": "ceil",
-      "classification": "missing",
+      "classification": "exact",
       "pyspark_signature": "ceil(col)",
-      "robin_signature": null,
+      "robin_signature": "ceil(col)",
       "pyspark_args": [
         {
           "name": "col",
@@ -1739,7 +1840,14 @@
           "kind": "POSITIONAL_OR_KEYWORD"
         }
       ],
-      "robin_args": [],
+      "robin_args": [
+        {
+          "name": "col",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "notes": ""
     },
     {
@@ -1790,9 +1898,9 @@
     },
     {
       "name": "char_length",
-      "classification": "missing",
+      "classification": "partial",
       "pyspark_signature": "char_length(str)",
-      "robin_signature": null,
+      "robin_signature": "char_length(col)",
       "pyspark_args": [
         {
           "name": "str",
@@ -1801,14 +1909,21 @@
           "kind": "POSITIONAL_OR_KEYWORD"
         }
       ],
-      "robin_args": [],
+      "robin_args": [
+        {
+          "name": "col",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "notes": ""
     },
     {
       "name": "character_length",
-      "classification": "missing",
+      "classification": "partial",
       "pyspark_signature": "character_length(str)",
-      "robin_signature": null,
+      "robin_signature": "character_length(col)",
       "pyspark_args": [
         {
           "name": "str",
@@ -1817,7 +1932,14 @@
           "kind": "POSITIONAL_OR_KEYWORD"
         }
       ],
-      "robin_args": [],
+      "robin_args": [
+        {
+          "name": "col",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "notes": ""
     },
     {
@@ -2420,9 +2542,9 @@
     },
     {
       "name": "current_date",
-      "classification": "missing",
+      "classification": "exact",
       "pyspark_signature": "current_date()",
-      "robin_signature": null,
+      "robin_signature": "current_date()",
       "pyspark_args": [],
       "robin_args": [],
       "notes": ""
@@ -2441,9 +2563,9 @@
     },
     {
       "name": "current_timestamp",
-      "classification": "missing",
+      "classification": "exact",
       "pyspark_signature": "current_timestamp()",
-      "robin_signature": null,
+      "robin_signature": "current_timestamp()",
       "pyspark_args": [],
       "robin_args": [],
       "notes": ""
@@ -2471,9 +2593,9 @@
     },
     {
       "name": "date_add",
-      "classification": "missing",
+      "classification": "partial",
       "pyspark_signature": "date_add(start, days)",
-      "robin_signature": null,
+      "robin_signature": "date_add(col, days)",
       "pyspark_args": [
         {
           "name": "start",
@@ -2488,7 +2610,20 @@
           "kind": "POSITIONAL_OR_KEYWORD"
         }
       ],
-      "robin_args": [],
+      "robin_args": [
+        {
+          "name": "col",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "days",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "notes": ""
     },
     {
@@ -2528,9 +2663,9 @@
     },
     {
       "name": "date_format",
-      "classification": "missing",
+      "classification": "partial",
       "pyspark_signature": "date_format(date, format)",
-      "robin_signature": null,
+      "robin_signature": "date_format(col, format)",
       "pyspark_args": [
         {
           "name": "date",
@@ -2545,7 +2680,20 @@
           "kind": "POSITIONAL_OR_KEYWORD"
         }
       ],
-      "robin_args": [],
+      "robin_args": [
+        {
+          "name": "col",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "format",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "notes": ""
     },
     {
@@ -2608,9 +2756,9 @@
     },
     {
       "name": "date_sub",
-      "classification": "missing",
+      "classification": "partial",
       "pyspark_signature": "date_sub(start, days)",
-      "robin_signature": null,
+      "robin_signature": "date_sub(col, days)",
       "pyspark_args": [
         {
           "name": "start",
@@ -2625,14 +2773,27 @@
           "kind": "POSITIONAL_OR_KEYWORD"
         }
       ],
-      "robin_args": [],
+      "robin_args": [
+        {
+          "name": "col",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "days",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "notes": ""
     },
     {
       "name": "date_trunc",
-      "classification": "missing",
+      "classification": "partial",
       "pyspark_signature": "date_trunc(format, timestamp)",
-      "robin_signature": null,
+      "robin_signature": "date_trunc(format, col)",
       "pyspark_args": [
         {
           "name": "format",
@@ -2647,7 +2808,20 @@
           "kind": "POSITIONAL_OR_KEYWORD"
         }
       ],
-      "robin_args": [],
+      "robin_args": [
+        {
+          "name": "format",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "col",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "notes": ""
     },
     {
@@ -5805,9 +5979,9 @@
     },
     {
       "name": "mean",
-      "classification": "missing",
+      "classification": "exact",
       "pyspark_signature": "mean(col)",
-      "robin_signature": null,
+      "robin_signature": "mean(col)",
       "pyspark_args": [
         {
           "name": "col",
@@ -5816,7 +5990,14 @@
           "kind": "POSITIONAL_OR_KEYWORD"
         }
       ],
-      "robin_args": [],
+      "robin_args": [
+        {
+          "name": "col",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "notes": ""
     },
     {
@@ -8169,9 +8350,9 @@
     },
     {
       "name": "sign",
-      "classification": "missing",
+      "classification": "exact",
       "pyspark_signature": "sign(col)",
-      "robin_signature": null,
+      "robin_signature": "sign(col)",
       "pyspark_args": [
         {
           "name": "col",
@@ -8180,7 +8361,14 @@
           "kind": "POSITIONAL_OR_KEYWORD"
         }
       ],
-      "robin_args": [],
+      "robin_args": [
+        {
+          "name": "col",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "notes": ""
     },
     {
@@ -8254,9 +8442,9 @@
     },
     {
       "name": "size",
-      "classification": "missing",
+      "classification": "exact",
       "pyspark_signature": "size(col)",
-      "robin_signature": null,
+      "robin_signature": "size(col)",
       "pyspark_args": [
         {
           "name": "col",
@@ -8265,7 +8453,14 @@
           "kind": "POSITIONAL_OR_KEYWORD"
         }
       ],
-      "robin_args": [],
+      "robin_args": [
+        {
+          "name": "col",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "notes": ""
     },
     {
@@ -8542,9 +8737,9 @@
     },
     {
       "name": "std",
-      "classification": "missing",
+      "classification": "exact",
       "pyspark_signature": "std(col)",
-      "robin_signature": null,
+      "robin_signature": "std(col)",
       "pyspark_args": [
         {
           "name": "col",
@@ -8553,7 +8748,14 @@
           "kind": "POSITIONAL_OR_KEYWORD"
         }
       ],
-      "robin_args": [],
+      "robin_args": [
+        {
+          "name": "col",
+          "default": null,
+          "annotation": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "notes": ""
     },
     {
@@ -14089,13 +14291,13 @@
   },
   "summary": {
     "functions": {
-      "exact": 199,
+      "exact": 214,
       "compatible": 0,
-      "partial": 21,
-      "missing": 195,
+      "partial": 30,
+      "missing": 171,
       "extra": 13
     },
     "function_total_pyspark": 415,
-    "function_total_robin": 233
+    "function_total_robin": 257
   }
 }
