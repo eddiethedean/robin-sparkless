@@ -354,14 +354,9 @@ impl PySparkSession {
     /// Create a DataFrame with single column 'id' (bigint) from start to end with step.
     /// PySpark: spark.range(end) or spark.range(start, end) or spark.range(start, end, step).
     #[pyo3(signature = (start, end=None, step=1))]
-    fn range(
-        &self,
-        start: i64,
-        end: Option<i64>,
-        step: i64,
-    ) -> PyResult<PyDataFrame> {
+    fn range(&self, start: i64, end: Option<i64>, step: i64) -> PyResult<PyDataFrame> {
         let (s, e, st) = match end {
-            None => (0i64, start, 1i64),           // range(end) -> start=0, end=start
+            None => (0i64, start, 1i64), // range(end) -> start=0, end=start
             Some(e) => (start, e, step),
         };
         let df = self
@@ -385,7 +380,10 @@ impl PySparkSession {
 
     /// Returns the active SparkSession for this thread (from get_or_create).
     #[classmethod]
-    fn get_active_session(_cls: &Bound<'_, pyo3::types::PyType>, py: Python<'_>) -> PyResult<Option<Py<PySparkSession>>> {
+    fn get_active_session(
+        _cls: &Bound<'_, pyo3::types::PyType>,
+        py: Python<'_>,
+    ) -> PyResult<Option<Py<PySparkSession>>> {
         get_default_session()
             .map(|inner| Py::new(py, PySparkSession { inner }))
             .transpose()
@@ -393,7 +391,10 @@ impl PySparkSession {
 
     /// Returns the default SparkSession (same as getActiveSession).
     #[classmethod]
-    fn get_default_session(_cls: &Bound<'_, pyo3::types::PyType>, py: Python<'_>) -> PyResult<Option<Py<PySparkSession>>> {
+    fn get_default_session(
+        _cls: &Bound<'_, pyo3::types::PyType>,
+        py: Python<'_>,
+    ) -> PyResult<Option<Py<PySparkSession>>> {
         Self::get_active_session(_cls, py)
     }
 }
@@ -571,7 +572,11 @@ impl PyCatalog {
     }
 
     #[pyo3(name = "cacheTable")]
-    fn cache_table(&self, _table_name: &str, _storage_level: Option<&Bound<'_, pyo3::types::PyAny>>) {
+    fn cache_table(
+        &self,
+        _table_name: &str,
+        _storage_level: Option<&Bound<'_, pyo3::types::PyAny>>,
+    ) {
         // No-op: no distributed cache
     }
 

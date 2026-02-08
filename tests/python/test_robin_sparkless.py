@@ -708,7 +708,7 @@ def test_phase_e_spark_session_catalog() -> None:
         assert spark2.catalog().tableExists("phase_e_v", None) is True
         assert "phase_e_v" in spark2.catalog().listTables(None)
         spark2.catalog().dropTempView("phase_e_v")
-        assert spark2.catalog().tableExists("phase_e_v") is False
+        assert spark2.catalog().tableExists("phase_e_v", None) is False
     except (AttributeError, RuntimeError) as e:
         if "sql" in str(e).lower():
             pytest.skip("sql feature not built")

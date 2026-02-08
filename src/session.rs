@@ -100,10 +100,7 @@ impl SparkSession {
     /// Drop a temporary view by name (PySpark: catalog.dropTempView).
     /// No error if the view does not exist.
     pub fn drop_temp_view(&self, name: &str) {
-        let _ = self
-            .catalog
-            .lock()
-            .map(|mut m| m.remove(name));
+        let _ = self.catalog.lock().map(|mut m| m.remove(name));
     }
 
     /// Drop a global temporary view (PySpark: catalog.dropGlobalTempView). Stub: same catalog as temp view.

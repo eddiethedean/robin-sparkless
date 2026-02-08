@@ -5357,10 +5357,10 @@ fn values_equal_with_struct(a: &Value, b: &Value, struct_fields: Option<&[String
 }
 
 fn values_equal_with_schema(a: &Value, b: &Value, col_schema: Option<&ColumnSpec>) -> bool {
-    // PySpark assert_true returns void (null); we return boolean. Treat as equal when expected is void and null.
+    // PySpark assert_true returns void (null). We return boolean column of nulls; treat as equal when expected is void and null.
     if let Some(c) = col_schema {
         if c.r#type == "void" && b == &Value::Null {
-            return a == &Value::Null || a == &Value::Bool(true);
+            return a == &Value::Null;
         }
     }
     let struct_fields = col_schema.and_then(|c| struct_field_names(&c.r#type));

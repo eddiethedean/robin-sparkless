@@ -2,6 +2,8 @@
 
 # Use stable toolchain when no default is configured (override with RUSTUP_TOOLCHAIN=nightly etc.)
 export RUSTUP_TOOLCHAIN ?= stable
+# Use real Cargo home to avoid sandbox cache corruption (e.g. Cursor IDE)
+export CARGO_HOME ?= $(HOME)/.cargo
 
 # Build
 build:

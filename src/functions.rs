@@ -689,9 +689,7 @@ pub fn raise_error(message: &str) -> Column {
     let msg = message.to_string();
     let expr = lit(0i64).map(
         move |_col| -> PolarsResult<Option<polars::prelude::Column>> {
-            Err(PolarsError::ComputeError(
-                format!("raise_error: {msg}").into(),
-            ))
+            Err(PolarsError::ComputeError(msg.clone().into()))
         },
         GetOutput::from_type(DataType::Int64),
     );
