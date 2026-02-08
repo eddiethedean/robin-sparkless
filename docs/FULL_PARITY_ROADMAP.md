@@ -37,7 +37,7 @@ A phased plan to achieve full API and behavioral parity between robin-sparkless 
 
 ---
 
-## Phase A: Signature Alignment (2–3 weeks)
+## Phase A: Signature Alignment (2–3 weeks) — COMPLETED
 
 **Goal:** Align parameter names and optional args so existing PySpark code works with minimal changes.
 
@@ -50,10 +50,15 @@ A phased plan to achieve full API and behavioral parity between robin-sparkless 
 | Optional args | `errMsg=None` | (missing) | Add optional params with defaults |
 | Array/struct | `cols` / `*cols` | varargs | Align signatures |
 
-**Deliverables:**
-- PyO3 bindings accept `col` and `column` interchangeably
-- Optional params (e.g. `assert_true(col, errMsg=None)`) added
-- `SIGNATURE_GAP_ANALYSIS.md` partial count reduced to &lt;50
+**Deliverables (done):**
+- PyO3 bindings use `col` and PySpark camelCase param names (errMsg, fromBase, dayOfWeek, etc.)
+- Optional params (e.g. `assert_true(col, errMsg=None)`) with PySpark defaults
+- Gap analysis partial count reduced from 205 to 21 (exact: 199). See [GAP_ANALYSIS_PYSPARK_REPO.md](GAP_ANALYSIS_PYSPARK_REPO.md)
+- Enhanced `extract_robin_api_from_source.py` parses `#[pyo3(signature=...)]` for accurate comparison
+- `make gap-analysis-runtime` target added for introspection-based gap analysis
+- Default normalization in gap analysis (0/'0', None/'None') for fair comparison
+- PyO3 signatures: bround(scale=0), locate(pos=1), btrim(trim=None), from_unixtime(format=None), overlay(len=-1)
+- PySpark param renames: conv(fromBase, toBase), convert_timezone(sourceTz, targetTz, sourceTs), sha2/shift_left/shift_right(numBits), months_between(roundOff), next_day(dayOfWeek), like/ilike(escapeChar), parse_url(partToExtract), assert_true/raise_error(errMsg), json_tuple(*fields), regexp_extract_all(str, regexp), make_timestamp(years, months, ...)
 
 ---
 

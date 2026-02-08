@@ -98,9 +98,31 @@ def args_signature(args: list[dict]) -> str:
     return ", ".join(parts)
 
 
+def _normalize_default(d: object) -> object:
+    """Normalize default for comparison (0/'0', None/'None', True/'True' etc.)."""
+    if d is None:
+        return None
+    if d in ("None", "None)"):
+        return None
+    if d in (0, "0", 0.0):
+        return 0
+    if d in (1, "1", 1.0):
+        return 1
+    if d in (True, "True", "true"):
+        return True
+    if d in (False, "False", "false"):
+        return False
+    return d
+
+
 def args_key(args: list[dict]) -> tuple[tuple[object, object], ...]:
     """Tuple of (name, default) per arg for comparison."""
     return tuple((a.get("name"), a.get("default")) for a in args)
+
+
+def args_key_normalized(args: list[dict]) -> tuple[tuple[object, object], ...]:
+    """Tuple of (name, normalized_default) for comparison (treats 0/'0', None/'None' as same)."""
+    return tuple((a.get("name"), _normalize_default(a.get("default"))) for a in args)
 
 
 def classify_item(py_sig: dict | None, robin_sig: dict | None) -> str:
@@ -117,8 +139,15 @@ def classify_item(py_sig: dict | None, robin_sig: dict | None) -> str:
     robin_key = args_key(robin_args)
     if py_key == robin_key:
         return "exact"
-    py_set = set((a.get("name"), a.get("default")) for a in py_args)
-    robin_set = set((a.get("name"), a.get("default")) for a in robin_args)
+    # Normalized comparison: 0/'0', None/'None', True/'True' etc. treated as same
+    py_key_norm = args_key_normalized(py_args)
+    robin_key_norm = args_key_normalized(robin_args)
+    if py_key_norm == robin_key_norm:
+        return "exact"
+    py_set = set((a.get("name"), _normalize_default(a.get("default"))) for a in py_args)
+    robin_set = set(
+        (a.get("name"), _normalize_default(a.get("default"))) for a in robin_args
+    )
     if py_set == robin_set:
         return "compatible"
     return "partial"

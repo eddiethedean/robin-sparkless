@@ -6,7 +6,7 @@ This document compares robin-sparkless with **Apache PySpark** using API surface
 
 - **PySpark API**: Extracted from Apache Spark repo via `scripts/extract_pyspark_api_from_repo.py` (AST parsing of `pyspark.sql` sources).
 - **PySpark version/branch**: 18 (branch/tag: v3.5.0)
-- **Robin-sparkless API**: From robin_api_from_source.json (source extraction)
+- **Robin-sparkless API**: From signatures_robin_sparkless.json (introspection)
 - **Scope**: `pyspark.sql` (functions, DataFrame, Column, GroupedData, SparkSession, Reader, Writer, Window).
 
 ## Summary
@@ -15,23 +15,23 @@ This document compares robin-sparkless with **Apache PySpark** using API surface
 
 | Classification | Count | Description |
 |----------------|-------|-------------|
-| exact | 15 | Same parameter names, order, and defaults |
+| exact | 199 | Same parameter names, order, and defaults |
 | compatible | 0 | Same params/defaults; types may differ |
-| partial | 205 | Different param names or counts |
+| partial | 21 | Different param names or counts |
 | missing | 195 | In PySpark but not in robin-sparkless |
-| extra | 20 | In robin-sparkless only (extensions) |
+| extra | 13 | In robin-sparkless only (extensions) |
 
 - **PySpark functions:** 415
-- **Robin-sparkless functions:** 240
+- **Robin-sparkless functions:** 233
 
 ### Class methods
 
 | Class | Exact | Partial | Missing | Extra |
 |-------|-------|---------|---------|-------|
-| SparkSession | 1 | 2 | 25 | 11 |
-| DataFrame | 10 | 37 | 52 | 13 |
-| Column | 0 | 6 | 9 | 134 |
-| GroupedData | 1 | 5 | 2 | 24 |
+| SparkSession | 1 | 2 | 25 | 9 |
+| DataFrame | 16 | 31 | 52 | 13 |
+| Column | 0 | 6 | 9 | 131 |
+| GroupedData | 2 | 4 | 2 | 24 |
 | DataFrameReader | 0 | 0 | 12 | 0 |
 | DataFrameWriter | 0 | 0 | 16 | 0 |
 | Window | 0 | 0 | 4 | 0 |
@@ -43,52 +43,63 @@ This document compares robin-sparkless with **Apache PySpark** using API surface
 
 ### Exact match
 
-- `curdate()`
-- `current_catalog()`
-- `current_database()`
-- `current_schema()`
-- `current_timezone()`
-- `current_user()`
-- `e()`
-- `input_file_name()`
-- `localtimestamp()`
-- `monotonically_increasing_id()`
-- `now()`
-- `pi()`
-- `spark_partition_id()`
-- `user()`
-- `version()`
+- `acos(col)`
+- `acosh(col)`
+- `add_months(start, months)`
+- `array_agg(col)`
+- `array_append(col, value)`
+- `array_compact(col)`
+- `array_distinct(col)`
+- `array_except(col1, col2)`
+- `array_insert(arr, pos, value)`
+- `array_intersect(col1, col2)`
+- `array_prepend(col, value)`
+- `array_union(col1, col2)`
+- `arrays_overlap(a1, a2)`
+- `asc(col)`
+- `asc_nulls_first(col)`
+- `asc_nulls_last(col)`
+- `ascii(col)`
+- `asin(col)`
+- `asinh(col)`
+- `assert_true(col, errMsg='None')`
+- `atan(col)`
+- `atan2(col1, col2)`
+- `atanh(col)`
+- `avg(col)`
+- `base64(col)`
+- `bin(col)`
+- `bit_count(col)`
+- `bit_get(col, pos)`
+- `bit_length(col)`
+- `bitwise_not(col)`
+- ... and 169 more
 
 ### Partial (param mismatch)
 
 | PySpark | Robin |
 |---------|-------|
-| `acos(col)` | `acos()` |
-| `acosh(col)` | `acosh()` |
-| `add_months(start, months)` | `add_months()` |
-| `array_agg(col)` | `array_agg()` |
-| `array_append(col, value)` | `array_append()` |
-| `array_compact(col)` | `array_compact()` |
-| `array_distinct(col)` | `array_distinct()` |
-| `array_except(col1, col2)` | `array_except()` |
-| `array_insert(arr, pos, value)` | `array_insert()` |
-| `array_intersect(col1, col2)` | `array_intersect()` |
-| `array_prepend(col, value)` | `array_prepend()` |
-| `array_union(col1, col2)` | `array_union()` |
-| `arrays_overlap(a1, a2)` | `arrays_overlap()` |
-| `arrays_zip(cols)` | `arrays_zip()` |
-| `asc(col)` | `asc()` |
-| `asc_nulls_first(col)` | `asc_nulls_first()` |
-| `asc_nulls_last(col)` | `asc_nulls_last()` |
-| `ascii(col)` | `ascii()` |
-| `asin(col)` | `asin()` |
-| `asinh(col)` | `asinh()` |
-| `assert_true(col, errMsg='None')` | `assert_true()` |
-| `atan(col)` | `atan()` |
-| `atan2(col1, col2)` | `atan2()` |
-| `atanh(col)` | `atanh()` |
-| `avg(col)` | `avg()` |
-| *... and 180 more* | |
+| `arrays_zip(cols)` | `arrays_zip(col1, col2)` |
+| `bit_and(col)` | `bit_and(col1, col2)` |
+| `bit_or(col)` | `bit_or(col1, col2)` |
+| `bit_xor(col)` | `bit_xor(col1, col2)` |
+| `elt(inputs)` | `elt(index, cols)` |
+| `from_csv(col, schema, options='None')` | `from_csv(col)` |
+| `from_unixtime(timestamp, format="'yyyy-MM-dd HH:mm:ss'")` | `from_unixtime(timestamp, format)` |
+| `json_array_length(col)` | `json_array_length(col, path)` |
+| `log(col)` | `log(col, base)` |
+| `map_concat(cols)` | `map_concat(col1, col2)` |
+| `named_struct(cols)` | `named_struct(names, columns)` |
+| `overlay(src, replace, pos, len='-1')` | `overlay(src, replace, pos, len='Ellipsis')` |
+| `regexp_extract_all(str, regexp, idx='None')` | `regexp_extract_all(str, regexp, idx=0)` |
+| `schema_of_csv(csv, options='None')` | `schema_of_csv(col)` |
+| `schema_of_json(json, options='None')` | `schema_of_json(col)` |
+| `split(str, pattern, limit='-1')` | `split(src, delimiter)` |
+| `split_part(src, delimiter, partNum)` | `split_part(src, delimiter, part_num)` |
+| `str_to_map(text, pairDelim='None', keyValueDelim='None')` | `str_to_map(text, pair_delim, key_value_delim)` |
+| `to_csv(col, options='None')` | `to_csv(col)` |
+| `unix_timestamp(timestamp='None', format="'yyyy-MM-dd HH:mm:ss'")` | `unix_timestamp(timestamp, format)` |
+| `width_bucket(v, min, max, numBucket)` | `width_bucket(value, min_val, max_val, num_bucket)` |
 
 ### Missing (PySpark only)
 
@@ -146,26 +157,19 @@ This document compares robin-sparkless with **Apache PySpark** using API surface
 
 ### Extra (robin-sparkless only)
 
-- `bitwiseNOT()`
-- `cast()`
-- `chr()`
-- `configure_for_multiprocessing()`
-- `dayname()`
-- `execute_plan()`
-- `isin()`
-- `isin_i64()`
-- `isin_str()`
-- `map_filter_value_gt()`
-- `map_zip_with_coalesce()`
-- `minutes()`
-- `negate()`
-- `power()`
-- `shiftLeft()`
-- `shiftRight()`
-- `timestampadd()`
-- `timestampdiff()`
-- `try_cast()`
-- `zip_with_coalesce()`
+- `bitwiseNOT(col)`
+- `cast(col, type_name)`
+- `chr(col)`
+- `dayname(col)`
+- `isin(col, other)`
+- `minutes(n)`
+- `negate(col)`
+- `power(col1, col2)`
+- `shiftLeft(col, numBits)`
+- `shiftRight(col, numBits)`
+- `timestampadd(unit, amount, ts)`
+- `timestampdiff(unit, start, end)`
+- `try_cast(col, type_name)`
 
 ---
 
