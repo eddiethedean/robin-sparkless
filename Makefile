@@ -1,4 +1,4 @@
-.PHONY: build test test-rust test-python sparkless-parity bench-python clean check check-full fmt clippy audit outdated deny lint-python all gap-analysis gap-analysis-quick
+.PHONY: build test test-rust test-python sparkless-parity bench-python clean check check-full fmt clippy audit outdated deny lint-python all gap-analysis gap-analysis-quick gap-analysis-runtime
 
 # Use stable toolchain when no default is configured (override with RUSTUP_TOOLCHAIN=nightly etc.)
 export RUSTUP_TOOLCHAIN ?= stable
@@ -97,6 +97,14 @@ gap-analysis-quick:
 	python3 scripts/extract_robin_api_from_source.py --output docs/robin_api_from_source.json
 	python3 scripts/gap_analysis_pyspark_repo.py --pyspark docs/pyspark_api_from_repo.json --robin docs/robin_api_from_source.json --write-md docs/GAP_ANALYSIS_PYSPARK_REPO.md
 	@echo "Gap analysis complete. See docs/GAP_ANALYSIS_PYSPARK_REPO.md"
+
+# Gap analysis using runtime introspection (requires maturin develop; accurate param names)
+gap-analysis-runtime:
+	@test -f docs/pyspark_api_from_repo.json || (echo "Run 'make gap-analysis' first to create docs/pyspark_api_from_repo.json" && exit 1)
+	. .venv/bin/activate && pip install -q maturin && maturin develop --features "pyo3,sql,delta"
+	. .venv/bin/activate && python scripts/export_robin_signatures.py --output docs/signatures_robin_sparkless.json
+	python3 scripts/gap_analysis_pyspark_repo.py --pyspark docs/pyspark_api_from_repo.json --robin docs/signatures_robin_sparkless.json --write-md docs/GAP_ANALYSIS_PYSPARK_REPO.md
+	@echo "Gap analysis (runtime) complete. See docs/GAP_ANALYSIS_PYSPARK_REPO.md"
 
 # Clean
 clean:

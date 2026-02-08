@@ -1,4 +1,5 @@
 //! Python Column type (PySpark sql Column).
+#![allow(non_snake_case)] // PySpark param names (dayOfWeek) for API parity
 
 use crate::column::Column as RsColumn;
 use crate::functions::isnan as rs_isnan;
@@ -581,9 +582,10 @@ impl PyColumn {
         }
     }
     /// Next date that is the given day of week.
-    fn next_day(&self, day_of_week: &str) -> Self {
+    #[pyo3(signature = (dayOfWeek))]
+    fn next_day(&self, dayOfWeek: &str) -> Self {
         PyColumn {
-            inner: next_day(&self.inner, day_of_week),
+            inner: next_day(&self.inner, dayOfWeek),
         }
     }
     /// Cast the column to the given type. Invalid values cause an error at execution.
@@ -967,8 +969,9 @@ impl PyColumn {
         }
     }
     /// Extract keys from JSON as struct (PySpark json_tuple). Returns struct with one field per key.
-    fn json_tuple(&self, keys: Vec<String>) -> Self {
-        let key_refs: Vec<&str> = keys.iter().map(|s| s.as_str()).collect();
+    #[pyo3(signature = (*fields))]
+    fn json_tuple(&self, fields: Vec<String>) -> Self {
+        let key_refs: Vec<&str> = fields.iter().map(|s| s.as_str()).collect();
         PyColumn {
             inner: json_tuple(&self.inner, &key_refs),
         }

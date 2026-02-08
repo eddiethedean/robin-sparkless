@@ -2,6 +2,8 @@
 
 This document compares **signatures** (parameters, types, defaults) of the public Python API of robin-sparkless with **PySpark** to guide alignment.
 
+**Note:** For source-based gap analysis (no PySpark install), see [GAP_ANALYSIS_PYSPARK_REPO.md](GAP_ANALYSIS_PYSPARK_REPO.md). As of Phase A (Feb 2026), that shows 199 exact, 21 partial for functions (target partial &lt; 50 achieved).
+
 ## Method
 
 - **PySpark signatures**: Obtained by introspecting an installed PySpark (`inspect.signature`, optional type hints) for `pyspark.sql.functions`, `SparkSession`, `SparkSession.builder`, `DataFrame`, `GroupedData`, `Column`, `DataFrameStat`, and `DataFrameNa`.

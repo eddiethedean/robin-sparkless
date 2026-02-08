@@ -3,277 +3,716 @@
   "functions": [
     {
       "name": "acos",
-      "args": [],
+      "args": [
+        {
+          "name": "col",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "acosh",
-      "args": [],
+      "args": [
+        {
+          "name": "col",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "add_months",
-      "args": [],
+      "args": [
+        {
+          "name": "start",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "months",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "array_agg",
-      "args": [],
+      "args": [
+        {
+          "name": "col",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "array_append",
-      "args": [],
+      "args": [
+        {
+          "name": "col",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "value",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "array_compact",
-      "args": [],
+      "args": [
+        {
+          "name": "col",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "array_distinct",
-      "args": [],
+      "args": [
+        {
+          "name": "col",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "array_except",
-      "args": [],
+      "args": [
+        {
+          "name": "col1",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "col2",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "array_insert",
-      "args": [],
+      "args": [
+        {
+          "name": "arr",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "pos",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "value",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "array_intersect",
-      "args": [],
+      "args": [
+        {
+          "name": "col1",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "col2",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "array_prepend",
-      "args": [],
+      "args": [
+        {
+          "name": "col",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "value",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "array_union",
-      "args": [],
+      "args": [
+        {
+          "name": "col1",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "col2",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "arrays_overlap",
-      "args": [],
+      "args": [
+        {
+          "name": "a1",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "a2",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "arrays_zip",
-      "args": [],
+      "args": [
+        {
+          "name": "col1",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "col2",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "asc",
-      "args": [],
+      "args": [
+        {
+          "name": "col",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "asc_nulls_first",
-      "args": [],
+      "args": [
+        {
+          "name": "col",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "asc_nulls_last",
-      "args": [],
+      "args": [
+        {
+          "name": "col",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "ascii",
-      "args": [],
+      "args": [
+        {
+          "name": "col",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "asin",
-      "args": [],
+      "args": [
+        {
+          "name": "col",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "asinh",
-      "args": [],
+      "args": [
+        {
+          "name": "col",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "assert_true",
-      "args": [],
+      "args": [
+        {
+          "name": "col",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "errMsg",
+          "default": "None",
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "atan",
-      "args": [],
+      "args": [
+        {
+          "name": "col",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "atan2",
-      "args": [],
+      "args": [
+        {
+          "name": "col1",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "col2",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "atanh",
-      "args": [],
+      "args": [
+        {
+          "name": "col",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "avg",
-      "args": [],
+      "args": [
+        {
+          "name": "col",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "base64",
-      "args": [],
+      "args": [
+        {
+          "name": "col",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "bin",
-      "args": [],
+      "args": [
+        {
+          "name": "col",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "bit_and",
-      "args": [],
+      "args": [
+        {
+          "name": "col1",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "col2",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "bit_count",
-      "args": [],
+      "args": [
+        {
+          "name": "col",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "bit_get",
-      "args": [],
+      "args": [
+        {
+          "name": "col",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "pos",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "bit_length",
-      "args": [],
+      "args": [
+        {
+          "name": "col",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "bit_or",
-      "args": [],
+      "args": [
+        {
+          "name": "col1",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "col2",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "bit_xor",
-      "args": [],
+      "args": [
+        {
+          "name": "col1",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "col2",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "bitwiseNOT",
-      "args": [],
+      "args": [
+        {
+          "name": "col",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "bitwise_not",
-      "args": [],
+      "args": [
+        {
+          "name": "col",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "broadcast",
-      "args": [],
+      "args": [
+        {
+          "name": "df",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "bround",
-      "args": [],
+      "args": [
+        {
+          "name": "col",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "scale",
+          "default": "0",
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "btrim",
-      "args": [],
+      "args": [
+        {
+          "name": "str",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "trim",
+          "default": "None",
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "cast",
-      "args": [],
+      "args": [
+        {
+          "name": "col",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "type_name",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "cbrt",
-      "args": [],
+      "args": [
+        {
+          "name": "col",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "ceiling",
-      "args": [],
+      "args": [
+        {
+          "name": "col",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "char",
-      "args": [],
+      "args": [
+        {
+          "name": "col",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "chr",
-      "args": [],
+      "args": [
+        {
+          "name": "col",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "coalesce",
-      "args": [],
+      "args": [
+        {
+          "name": "cols",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "col",
-      "args": [],
-      "kind": "function"
-    },
-    {
-      "name": "configure_for_multiprocessing",
-      "args": [],
+      "args": [
+        {
+          "name": "col",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "contains",
-      "args": [],
+      "args": [
+        {
+          "name": "left",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "right",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "conv",
-      "args": [],
+      "args": [
+        {
+          "name": "col",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "fromBase",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "toBase",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "convert_timezone",
-      "args": [],
+      "args": [
+        {
+          "name": "sourceTz",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "targetTz",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "sourceTs",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "cos",
-      "args": [],
+      "args": [
+        {
+          "name": "col",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "cosh",
-      "args": [],
+      "args": [
+        {
+          "name": "col",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "cot",
-      "args": [],
+      "args": [
+        {
+          "name": "col",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "count",
-      "args": [],
+      "args": [
+        {
+          "name": "col",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "create_map",
-      "args": [],
+      "args": [
+        {
+          "name": "cols",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "csc",
-      "args": [],
+      "args": [
+        {
+          "name": "col",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
@@ -308,77 +747,187 @@
     },
     {
       "name": "date_diff",
-      "args": [],
+      "args": [
+        {
+          "name": "end",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "start",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "date_from_unix_date",
-      "args": [],
+      "args": [
+        {
+          "name": "days",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "date_part",
-      "args": [],
+      "args": [
+        {
+          "name": "field",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "source",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "dateadd",
-      "args": [],
+      "args": [
+        {
+          "name": "start",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "days",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "datepart",
-      "args": [],
+      "args": [
+        {
+          "name": "field",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "source",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "day",
-      "args": [],
+      "args": [
+        {
+          "name": "col",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "dayname",
-      "args": [],
+      "args": [
+        {
+          "name": "col",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "dayofmonth",
-      "args": [],
+      "args": [
+        {
+          "name": "col",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "dayofweek",
-      "args": [],
+      "args": [
+        {
+          "name": "col",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "dayofyear",
-      "args": [],
+      "args": [
+        {
+          "name": "col",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "days",
-      "args": [],
+      "args": [
+        {
+          "name": "col",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "degrees",
-      "args": [],
+      "args": [
+        {
+          "name": "col",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "desc",
-      "args": [],
+      "args": [
+        {
+          "name": "col",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "desc_nulls_first",
-      "args": [],
+      "args": [
+        {
+          "name": "col",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "desc_nulls_last",
-      "args": [],
+      "args": [
+        {
+          "name": "col",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
@@ -388,132 +937,357 @@
     },
     {
       "name": "elt",
-      "args": [],
+      "args": [
+        {
+          "name": "index",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "cols",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "endswith",
-      "args": [],
+      "args": [
+        {
+          "name": "str",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "suffix",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "equal_null",
-      "args": [],
-      "kind": "function"
-    },
-    {
-      "name": "execute_plan",
-      "args": [],
+      "args": [
+        {
+          "name": "col1",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "col2",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "explode_outer",
-      "args": [],
+      "args": [
+        {
+          "name": "col",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "expm1",
-      "args": [],
+      "args": [
+        {
+          "name": "col",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "extract",
-      "args": [],
+      "args": [
+        {
+          "name": "field",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "source",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "factorial",
-      "args": [],
+      "args": [
+        {
+          "name": "col",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "find_in_set",
-      "args": [],
+      "args": [
+        {
+          "name": "str",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "str_array",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "format_number",
-      "args": [],
+      "args": [
+        {
+          "name": "col",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "d",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "format_string",
-      "args": [],
+      "args": [
+        {
+          "name": "format",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "cols",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "from_csv",
-      "args": [],
+      "args": [
+        {
+          "name": "col",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "from_unixtime",
-      "args": [],
+      "args": [
+        {
+          "name": "timestamp",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "format",
+          "default": "None",
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "from_utc_timestamp",
-      "args": [],
+      "args": [
+        {
+          "name": "timestamp",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "tz",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "get",
-      "args": [],
+      "args": [
+        {
+          "name": "col",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "index",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "get_json_object",
-      "args": [],
+      "args": [
+        {
+          "name": "col",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "path",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "getbit",
-      "args": [],
+      "args": [
+        {
+          "name": "col",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "pos",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "greatest",
-      "args": [],
+      "args": [
+        {
+          "name": "cols",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "hash",
-      "args": [],
+      "args": [
+        {
+          "name": "cols",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "hex",
-      "args": [],
+      "args": [
+        {
+          "name": "col",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "hours",
-      "args": [],
+      "args": [
+        {
+          "name": "col",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "hypot",
-      "args": [],
+      "args": [
+        {
+          "name": "col1",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "col2",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "ifnull",
-      "args": [],
+      "args": [
+        {
+          "name": "col1",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "col2",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "ilike",
-      "args": [],
+      "args": [
+        {
+          "name": "str",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "pattern",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "escapeChar",
+          "default": "None",
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "inline",
-      "args": [],
+      "args": [
+        {
+          "name": "col",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "inline_outer",
-      "args": [],
+      "args": [
+        {
+          "name": "col",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
@@ -523,72 +1297,164 @@
     },
     {
       "name": "isin",
-      "args": [],
-      "kind": "function"
-    },
-    {
-      "name": "isin_i64",
-      "args": [],
-      "kind": "function"
-    },
-    {
-      "name": "isin_str",
-      "args": [],
+      "args": [
+        {
+          "name": "col",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "other",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "isnan",
-      "args": [],
+      "args": [
+        {
+          "name": "col",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "isnotnull",
-      "args": [],
+      "args": [
+        {
+          "name": "col",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "isnull",
-      "args": [],
+      "args": [
+        {
+          "name": "col",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "json_array_length",
-      "args": [],
+      "args": [
+        {
+          "name": "col",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "path",
+          "default": "None",
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "json_tuple",
-      "args": [],
+      "args": [
+        {
+          "name": "col",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "*fields",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "lcase",
-      "args": [],
+      "args": [
+        {
+          "name": "str",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "least",
-      "args": [],
+      "args": [
+        {
+          "name": "cols",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "left",
-      "args": [],
+      "args": [
+        {
+          "name": "str",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "len",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "like",
-      "args": [],
+      "args": [
+        {
+          "name": "str",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "pattern",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "escapeChar",
+          "default": "None",
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "lit",
-      "args": [],
+      "args": [
+        {
+          "name": "col",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "ln",
-      "args": [],
+      "args": [
+        {
+          "name": "col",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
@@ -598,102 +1464,320 @@
     },
     {
       "name": "locate",
-      "args": [],
+      "args": [
+        {
+          "name": "substr",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "str",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "pos",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "log",
-      "args": [],
+      "args": [
+        {
+          "name": "col",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "base",
+          "default": "None",
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "log10",
-      "args": [],
+      "args": [
+        {
+          "name": "col",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "log1p",
-      "args": [],
+      "args": [
+        {
+          "name": "col",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "log2",
-      "args": [],
+      "args": [
+        {
+          "name": "col",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "make_date",
-      "args": [],
+      "args": [
+        {
+          "name": "year",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "month",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "day",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "make_interval",
-      "args": [],
+      "args": [
+        {
+          "name": "years",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "months",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "weeks",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "days",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "hours",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "mins",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "secs",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "make_timestamp",
-      "args": [],
+      "args": [
+        {
+          "name": "years",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "months",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "days",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "hours",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "mins",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "secs",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "timezone",
+          "default": "None",
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "make_timestamp_ntz",
-      "args": [],
+      "args": [
+        {
+          "name": "years",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "months",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "days",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "hours",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "mins",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "secs",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "map_concat",
-      "args": [],
+      "args": [
+        {
+          "name": "col1",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "col2",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "map_contains_key",
-      "args": [],
-      "kind": "function"
-    },
-    {
-      "name": "map_filter_value_gt",
-      "args": [],
+      "args": [
+        {
+          "name": "col",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "value",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "map_from_entries",
-      "args": [],
-      "kind": "function"
-    },
-    {
-      "name": "map_zip_with_coalesce",
-      "args": [],
+      "args": [
+        {
+          "name": "col",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "max",
-      "args": [],
+      "args": [
+        {
+          "name": "col",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "md5",
-      "args": [],
+      "args": [
+        {
+          "name": "col",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "median",
-      "args": [],
+      "args": [
+        {
+          "name": "col",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "min",
-      "args": [],
+      "args": [
+        {
+          "name": "col",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "minutes",
-      "args": [],
+      "args": [
+        {
+          "name": "n",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "mode",
-      "args": [],
+      "args": [
+        {
+          "name": "col",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
@@ -703,37 +1787,99 @@
     },
     {
       "name": "month",
-      "args": [],
+      "args": [
+        {
+          "name": "col",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "months",
-      "args": [],
+      "args": [
+        {
+          "name": "col",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "months_between",
-      "args": [],
+      "args": [
+        {
+          "name": "date1",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "date2",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "roundOff",
+          "default": "True",
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "named_struct",
-      "args": [],
+      "args": [
+        {
+          "name": "names",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "columns",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "negate",
-      "args": [],
+      "args": [
+        {
+          "name": "col",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "negative",
-      "args": [],
+      "args": [
+        {
+          "name": "col",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "next_day",
-      "args": [],
+      "args": [
+        {
+          "name": "date",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "dayOfWeek",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
@@ -743,27 +1889,102 @@
     },
     {
       "name": "nullif",
-      "args": [],
+      "args": [
+        {
+          "name": "col1",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "col2",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "nvl",
-      "args": [],
+      "args": [
+        {
+          "name": "col1",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "col2",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "nvl2",
-      "args": [],
+      "args": [
+        {
+          "name": "col1",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "col2",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "col3",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "overlay",
-      "args": [],
+      "args": [
+        {
+          "name": "src",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "replace",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "pos",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "len",
+          "default": "-1",
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "parse_url",
-      "args": [],
+      "args": [
+        {
+          "name": "url",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "partToExtract",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "key",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
@@ -773,162 +1994,464 @@
     },
     {
       "name": "pmod",
-      "args": [],
+      "args": [
+        {
+          "name": "dividend",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "divisor",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "position",
-      "args": [],
+      "args": [
+        {
+          "name": "substr",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "str",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "start",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "positive",
-      "args": [],
+      "args": [
+        {
+          "name": "col",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "power",
-      "args": [],
+      "args": [
+        {
+          "name": "col1",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "col2",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "printf",
-      "args": [],
+      "args": [
+        {
+          "name": "format",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "cols",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "quarter",
-      "args": [],
+      "args": [
+        {
+          "name": "col",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "radians",
-      "args": [],
+      "args": [
+        {
+          "name": "col",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "raise_error",
-      "args": [],
+      "args": [
+        {
+          "name": "errMsg",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "rand",
-      "args": [],
+      "args": [
+        {
+          "name": "seed",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "randn",
-      "args": [],
+      "args": [
+        {
+          "name": "seed",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "regexp_count",
-      "args": [],
+      "args": [
+        {
+          "name": "str",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "regexp",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "regexp_extract_all",
-      "args": [],
+      "args": [
+        {
+          "name": "str",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "regexp",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "idx",
+          "default": "0",
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "regexp_instr",
-      "args": [],
+      "args": [
+        {
+          "name": "str",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "regexp",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "idx",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "regexp_substr",
-      "args": [],
+      "args": [
+        {
+          "name": "str",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "regexp",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "replace",
-      "args": [],
+      "args": [
+        {
+          "name": "src",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "search",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "replace",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "right",
-      "args": [],
+      "args": [
+        {
+          "name": "str",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "len",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "rint",
-      "args": [],
+      "args": [
+        {
+          "name": "col",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "rlike",
-      "args": [],
+      "args": [
+        {
+          "name": "str",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "regexp",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "schema_of_csv",
-      "args": [],
+      "args": [
+        {
+          "name": "col",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "schema_of_json",
-      "args": [],
+      "args": [
+        {
+          "name": "col",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "sec",
-      "args": [],
+      "args": [
+        {
+          "name": "col",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "sequence",
-      "args": [],
+      "args": [
+        {
+          "name": "start",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "stop",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "step",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "sha1",
-      "args": [],
+      "args": [
+        {
+          "name": "col",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "sha2",
-      "args": [],
+      "args": [
+        {
+          "name": "col",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "numBits",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "shiftLeft",
-      "args": [],
+      "args": [
+        {
+          "name": "col",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "numBits",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "shiftRight",
-      "args": [],
+      "args": [
+        {
+          "name": "col",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "numBits",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "shift_left",
-      "args": [],
+      "args": [
+        {
+          "name": "col",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "numBits",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "shift_right",
-      "args": [],
+      "args": [
+        {
+          "name": "col",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "numBits",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "shuffle",
-      "args": [],
+      "args": [
+        {
+          "name": "col",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "signum",
-      "args": [],
+      "args": [
+        {
+          "name": "col",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "sin",
-      "args": [],
+      "args": [
+        {
+          "name": "col",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "sinh",
-      "args": [],
+      "args": [
+        {
+          "name": "col",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
@@ -938,217 +2461,605 @@
     },
     {
       "name": "split",
-      "args": [],
+      "args": [
+        {
+          "name": "src",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "delimiter",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "split_part",
-      "args": [],
+      "args": [
+        {
+          "name": "src",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "delimiter",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "part_num",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "stack",
-      "args": [],
+      "args": [
+        {
+          "name": "cols",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "startswith",
-      "args": [],
+      "args": [
+        {
+          "name": "str",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "prefix",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "stddev_pop",
-      "args": [],
+      "args": [
+        {
+          "name": "col",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "str_to_map",
-      "args": [],
+      "args": [
+        {
+          "name": "text",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "pair_delim",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "key_value_delim",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "struct",
-      "args": [],
+      "args": [
+        {
+          "name": "cols",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "substr",
-      "args": [],
+      "args": [
+        {
+          "name": "str",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "pos",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "len",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "sum",
-      "args": [],
+      "args": [
+        {
+          "name": "col",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "tan",
-      "args": [],
+      "args": [
+        {
+          "name": "col",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "tanh",
-      "args": [],
+      "args": [
+        {
+          "name": "col",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "timestamp_micros",
-      "args": [],
+      "args": [
+        {
+          "name": "col",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "timestamp_millis",
-      "args": [],
+      "args": [
+        {
+          "name": "col",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "timestamp_seconds",
-      "args": [],
+      "args": [
+        {
+          "name": "col",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "timestampadd",
-      "args": [],
+      "args": [
+        {
+          "name": "unit",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "amount",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "ts",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "timestampdiff",
-      "args": [],
+      "args": [
+        {
+          "name": "unit",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "start",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "end",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "to_char",
-      "args": [],
+      "args": [
+        {
+          "name": "col",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "format",
+          "default": "None",
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "to_csv",
-      "args": [],
+      "args": [
+        {
+          "name": "col",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "to_degrees",
-      "args": [],
+      "args": [
+        {
+          "name": "col",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "to_number",
-      "args": [],
+      "args": [
+        {
+          "name": "col",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "format",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "to_radians",
-      "args": [],
+      "args": [
+        {
+          "name": "col",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "to_timestamp",
-      "args": [],
+      "args": [
+        {
+          "name": "col",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "format",
+          "default": "None",
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "to_unix_timestamp",
-      "args": [],
+      "args": [
+        {
+          "name": "timestamp",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "format",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "to_utc_timestamp",
-      "args": [],
+      "args": [
+        {
+          "name": "timestamp",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "tz",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "to_varchar",
-      "args": [],
+      "args": [
+        {
+          "name": "col",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "format",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "try_add",
-      "args": [],
+      "args": [
+        {
+          "name": "left",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "right",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "try_cast",
-      "args": [],
+      "args": [
+        {
+          "name": "col",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "type_name",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "try_divide",
-      "args": [],
+      "args": [
+        {
+          "name": "left",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "right",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "try_multiply",
-      "args": [],
+      "args": [
+        {
+          "name": "left",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "right",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "try_subtract",
-      "args": [],
+      "args": [
+        {
+          "name": "left",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "right",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "try_to_number",
-      "args": [],
+      "args": [
+        {
+          "name": "col",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "format",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "try_to_timestamp",
-      "args": [],
+      "args": [
+        {
+          "name": "col",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "format",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "typeof",
-      "args": [],
+      "args": [
+        {
+          "name": "col",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "ucase",
-      "args": [],
+      "args": [
+        {
+          "name": "str",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "unbase64",
-      "args": [],
+      "args": [
+        {
+          "name": "col",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "unhex",
-      "args": [],
+      "args": [
+        {
+          "name": "col",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "unix_date",
-      "args": [],
+      "args": [
+        {
+          "name": "col",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "unix_micros",
-      "args": [],
+      "args": [
+        {
+          "name": "col",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "unix_millis",
-      "args": [],
+      "args": [
+        {
+          "name": "col",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "unix_seconds",
-      "args": [],
+      "args": [
+        {
+          "name": "col",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "unix_timestamp",
-      "args": [],
+      "args": [
+        {
+          "name": "timestamp",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "format",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "url_decode",
-      "args": [],
+      "args": [
+        {
+          "name": "str",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "url_encode",
-      "args": [],
+      "args": [
+        {
+          "name": "str",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
@@ -1158,7 +3069,13 @@
     },
     {
       "name": "var_pop",
-      "args": [],
+      "args": [
+        {
+          "name": "col",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
@@ -1168,37 +3085,88 @@
     },
     {
       "name": "weekday",
-      "args": [],
+      "args": [
+        {
+          "name": "col",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "weekofyear",
-      "args": [],
+      "args": [
+        {
+          "name": "col",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "when",
-      "args": [],
+      "args": [
+        {
+          "name": "condition",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "value",
+          "default": "None",
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "width_bucket",
-      "args": [],
+      "args": [
+        {
+          "name": "value",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "min_val",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "max_val",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        },
+        {
+          "name": "num_bucket",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "year",
-      "args": [],
+      "args": [
+        {
+          "name": "col",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     },
     {
       "name": "years",
-      "args": [],
-      "kind": "function"
-    },
-    {
-      "name": "zip_with_coalesce",
-      "args": [],
+      "args": [
+        {
+          "name": "col",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD"
+        }
+      ],
       "kind": "function"
     }
   ],
@@ -1206,7 +3174,13 @@
     "Column": [
       {
         "name": "alias",
-        "args": []
+        "args": [
+          {
+            "name": "name",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "is_null",
@@ -1218,35 +3192,83 @@
       },
       {
         "name": "gt",
-        "args": []
+        "args": [
+          {
+            "name": "other",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "ge",
-        "args": []
+        "args": [
+          {
+            "name": "other",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "lt",
-        "args": []
+        "args": [
+          {
+            "name": "other",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "le",
-        "args": []
+        "args": [
+          {
+            "name": "other",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "eq",
-        "args": []
+        "args": [
+          {
+            "name": "other",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "ne",
-        "args": []
+        "args": [
+          {
+            "name": "other",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "and_",
-        "args": []
+        "args": [
+          {
+            "name": "other",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "or_",
-        "args": []
+        "args": [
+          {
+            "name": "other",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "upper",
@@ -1258,7 +3280,18 @@
       },
       {
         "name": "substr",
-        "args": []
+        "args": [
+          {
+            "name": "start",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          },
+          {
+            "name": "length",
+            "default": "None",
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "ascii_",
@@ -1266,11 +3299,33 @@
       },
       {
         "name": "format_number",
-        "args": []
+        "args": [
+          {
+            "name": "decimals",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "overlay",
-        "args": []
+        "args": [
+          {
+            "name": "replace",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          },
+          {
+            "name": "pos",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          },
+          {
+            "name": "length",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "char_",
@@ -1294,7 +3349,13 @@
       },
       {
         "name": "sha2_",
-        "args": []
+        "args": [
+          {
+            "name": "bit_length",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "md5_",
@@ -1310,43 +3371,108 @@
       },
       {
         "name": "array_append",
-        "args": []
+        "args": [
+          {
+            "name": "elem",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "array_prepend",
-        "args": []
+        "args": [
+          {
+            "name": "elem",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "array_insert",
-        "args": []
+        "args": [
+          {
+            "name": "pos",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          },
+          {
+            "name": "elem",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "array_except",
-        "args": []
+        "args": [
+          {
+            "name": "other",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "array_intersect",
-        "args": []
+        "args": [
+          {
+            "name": "other",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "array_union",
-        "args": []
+        "args": [
+          {
+            "name": "other",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "map_concat",
-        "args": []
+        "args": [
+          {
+            "name": "other",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
-        "name": "map_filter_value_gt",
-        "args": []
+        "name": "_map_filter_value_gt",
+        "args": [
+          {
+            "name": "threshold",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
-        "name": "zip_with_coalesce",
-        "args": []
+        "name": "_zip_with_coalesce",
+        "args": [
+          {
+            "name": "other",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
-        "name": "map_zip_with_coalesce",
-        "args": []
+        "name": "_map_zip_with_coalesce",
+        "args": [
+          {
+            "name": "other",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "map_from_entries",
@@ -1354,31 +3480,73 @@
       },
       {
         "name": "map_contains_key",
-        "args": []
+        "args": [
+          {
+            "name": "key",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "get",
-        "args": []
+        "args": [
+          {
+            "name": "key",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "try_divide",
-        "args": []
+        "args": [
+          {
+            "name": "right",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "try_add",
-        "args": []
+        "args": [
+          {
+            "name": "right",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "try_subtract",
-        "args": []
+        "args": [
+          {
+            "name": "right",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "try_multiply",
-        "args": []
+        "args": [
+          {
+            "name": "right",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "multiply",
-        "args": []
+        "args": [
+          {
+            "name": "other",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "bit_length",
@@ -1414,7 +3582,13 @@
       },
       {
         "name": "atan2",
-        "args": []
+        "args": [
+          {
+            "name": "x",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "degrees_",
@@ -1446,27 +3620,63 @@
       },
       {
         "name": "add_months",
-        "args": []
+        "args": [
+          {
+            "name": "n",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "months_between",
-        "args": []
+        "args": [
+          {
+            "name": "start",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "next_day",
-        "args": []
+        "args": [
+          {
+            "name": "dayOfWeek",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "cast",
-        "args": []
+        "args": [
+          {
+            "name": "type_name",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "try_cast",
-        "args": []
+        "args": [
+          {
+            "name": "type_name",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "astype",
-        "args": []
+        "args": [
+          {
+            "name": "type_name",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "isnan",
@@ -1474,15 +3684,33 @@
       },
       {
         "name": "nvl",
-        "args": []
+        "args": [
+          {
+            "name": "value",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "ifnull",
-        "args": []
+        "args": [
+          {
+            "name": "value",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "power",
-        "args": []
+        "args": [
+          {
+            "name": "exp",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "ln",
@@ -1518,7 +3746,13 @@
       },
       {
         "name": "nullif",
-        "args": []
+        "args": [
+          {
+            "name": "other",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "to_degrees",
@@ -1538,39 +3772,98 @@
       },
       {
         "name": "left",
-        "args": []
+        "args": [
+          {
+            "name": "n",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "right",
-        "args": []
+        "args": [
+          {
+            "name": "n",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "replace",
-        "args": []
+        "args": [
+          {
+            "name": "search",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          },
+          {
+            "name": "replacement",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "startswith",
-        "args": []
+        "args": [
+          {
+            "name": "prefix",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "endswith",
-        "args": []
+        "args": [
+          {
+            "name": "suffix",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "contains",
-        "args": []
+        "args": [
+          {
+            "name": "substring",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "like",
-        "args": []
+        "args": [
+          {
+            "name": "pattern",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "ilike",
-        "args": []
+        "args": [
+          {
+            "name": "pattern",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "rlike",
-        "args": []
+        "args": [
+          {
+            "name": "pattern",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "cosh",
@@ -1622,7 +3915,13 @@
       },
       {
         "name": "hypot",
-        "args": []
+        "args": [
+          {
+            "name": "other",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "size",
@@ -1630,7 +3929,13 @@
       },
       {
         "name": "element_at",
-        "args": []
+        "args": [
+          {
+            "name": "index",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "explode",
@@ -1638,15 +3943,33 @@
       },
       {
         "name": "array_position",
-        "args": []
+        "args": [
+          {
+            "name": "value",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "array_remove",
-        "args": []
+        "args": [
+          {
+            "name": "value",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "array_repeat",
-        "args": []
+        "args": [
+          {
+            "name": "n",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "posexplode",
@@ -1662,55 +3985,173 @@
       },
       {
         "name": "percent_rank",
-        "args": []
+        "args": [
+          {
+            "name": "partition_by",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          },
+          {
+            "name": "descending",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "cume_dist",
-        "args": []
+        "args": [
+          {
+            "name": "partition_by",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          },
+          {
+            "name": "descending",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "ntile",
-        "args": []
+        "args": [
+          {
+            "name": "n",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          },
+          {
+            "name": "partition_by",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          },
+          {
+            "name": "descending",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "nth_value",
-        "args": []
+        "args": [
+          {
+            "name": "n",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          },
+          {
+            "name": "partition_by",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          },
+          {
+            "name": "descending",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "regexp_like",
-        "args": []
+        "args": [
+          {
+            "name": "pattern",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "regexp_count",
-        "args": []
+        "args": [
+          {
+            "name": "pattern",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "regexp_instr",
-        "args": []
+        "args": [
+          {
+            "name": "pattern",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          },
+          {
+            "name": "group_idx",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "regexp_substr",
-        "args": []
+        "args": [
+          {
+            "name": "pattern",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "split",
-        "args": []
+        "args": [
+          {
+            "name": "delimiter",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "split_part",
-        "args": []
+        "args": [
+          {
+            "name": "delimiter",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          },
+          {
+            "name": "part_num",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "find_in_set",
-        "args": []
+        "args": [
+          {
+            "name": "set_col",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "get_json_object",
-        "args": []
+        "args": [
+          {
+            "name": "path",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "json_tuple",
-        "args": []
+        "args": [
+          {
+            "name": "*fields",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "from_csv",
@@ -1730,11 +4171,23 @@
       },
       {
         "name": "unix_timestamp",
-        "args": []
+        "args": [
+          {
+            "name": "format",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "from_unixtime",
-        "args": []
+        "args": [
+          {
+            "name": "format",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "timestamp_seconds",
@@ -1758,7 +4211,13 @@
       },
       {
         "name": "pmod",
-        "args": []
+        "args": [
+          {
+            "name": "divisor",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "factorial",
@@ -1772,47 +4231,128 @@
       },
       {
         "name": "show",
-        "args": []
+        "args": [
+          {
+            "name": "n",
+            "default": "None",
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "write_delta",
-        "args": []
+        "args": [
+          {
+            "name": "path",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          },
+          {
+            "name": "overwrite",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "collect",
-        "args": []
+        "args": [
+          {
+            "name": "py",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "filter",
-        "args": []
+        "args": [
+          {
+            "name": "condition",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "select",
-        "args": []
+        "args": [
+          {
+            "name": "*cols",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "with_column",
-        "args": []
+        "args": [
+          {
+            "name": "column_name",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          },
+          {
+            "name": "expr",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "order_by",
-        "args": []
+        "args": [
+          {
+            "name": "cols",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          },
+          {
+            "name": "ascending",
+            "default": "None",
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "order_by_exprs",
-        "args": []
+        "args": [
+          {
+            "name": "sort_orders",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "group_by",
-        "args": []
+        "args": [
+          {
+            "name": "cols",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "cube",
-        "args": []
+        "args": [
+          {
+            "name": "cols",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "rollup",
-        "args": []
+        "args": [
+          {
+            "name": "cols",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "write",
@@ -1820,47 +4360,143 @@
       },
       {
         "name": "join",
-        "args": []
+        "args": [
+          {
+            "name": "other",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          },
+          {
+            "name": "on",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          },
+          {
+            "name": "how",
+            "default": "\"inner\"",
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "union",
-        "args": []
+        "args": [
+          {
+            "name": "other",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "union_by_name",
-        "args": []
+        "args": [
+          {
+            "name": "other",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "distinct",
-        "args": []
+        "args": [
+          {
+            "name": "subset",
+            "default": "None",
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "drop",
-        "args": []
+        "args": [
+          {
+            "name": "cols",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "pivot",
-        "args": []
+        "args": [
+          {
+            "name": "pivot_col",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          },
+          {
+            "name": "values",
+            "default": "None",
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "dropna",
-        "args": []
+        "args": [
+          {
+            "name": "subset",
+            "default": "None",
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "fillna",
-        "args": []
+        "args": [
+          {
+            "name": "value",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "limit",
-        "args": []
+        "args": [
+          {
+            "name": "n",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "with_column_renamed",
-        "args": []
+        "args": [
+          {
+            "name": "old",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          },
+          {
+            "name": "new",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "sample",
-        "args": []
+        "args": [
+          {
+            "name": "with_replacement",
+            "default": "False",
+            "kind": "POSITIONAL_OR_KEYWORD"
+          },
+          {
+            "name": "fraction",
+            "default": "1.0",
+            "kind": "POSITIONAL_OR_KEYWORD"
+          },
+          {
+            "name": "seed",
+            "default": "None",
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "first",
@@ -1868,15 +4504,33 @@
       },
       {
         "name": "head",
-        "args": []
+        "args": [
+          {
+            "name": "n",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "tail",
-        "args": []
+        "args": [
+          {
+            "name": "n",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "take",
-        "args": []
+        "args": [
+          {
+            "name": "n",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "is_empty",
@@ -1904,19 +4558,43 @@
       },
       {
         "name": "repartition",
-        "args": []
+        "args": [
+          {
+            "name": "num_partitions",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "coalesce",
-        "args": []
+        "args": [
+          {
+            "name": "num_partitions",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "offset",
-        "args": []
+        "args": [
+          {
+            "name": "n",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "data",
-        "args": []
+        "args": [
+          {
+            "name": "py",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "persist",
@@ -1932,27 +4610,73 @@
       },
       {
         "name": "foreach",
-        "args": []
+        "args": [
+          {
+            "name": "_f",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "foreachPartition",
-        "args": []
+        "args": [
+          {
+            "name": "_f",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "mapInPandas",
-        "args": []
+        "args": [
+          {
+            "name": "_func",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          },
+          {
+            "name": "_schema",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "mapPartitions",
-        "args": []
+        "args": [
+          {
+            "name": "_f",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          },
+          {
+            "name": "_schema",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "toLocalIterator",
-        "args": []
+        "args": [
+          {
+            "name": "py",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "storageLevel",
-        "args": []
+        "args": [
+          {
+            "name": "py",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "isStreaming",
@@ -1960,11 +4684,33 @@
       },
       {
         "name": "withWatermark",
-        "args": []
+        "args": [
+          {
+            "name": "_event_time",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          },
+          {
+            "name": "_delay_threshold",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "random_split",
-        "args": []
+        "args": [
+          {
+            "name": "weights",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          },
+          {
+            "name": "seed",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "summary",
@@ -1972,23 +4718,53 @@
       },
       {
         "name": "to_df",
-        "args": []
+        "args": [
+          {
+            "name": "names",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "select_expr",
-        "args": []
+        "args": [
+          {
+            "name": "exprs",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "col_regex",
-        "args": []
+        "args": [
+          {
+            "name": "pattern",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "with_columns",
-        "args": []
+        "args": [
+          {
+            "name": "mapping",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "with_columns_renamed",
-        "args": []
+        "args": [
+          {
+            "name": "mapping",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "stat",
@@ -2004,7 +4780,13 @@
       },
       {
         "name": "to_pandas",
-        "args": []
+        "args": [
+          {
+            "name": "py",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       }
     ],
     "GroupedData": [
@@ -2014,129 +4796,400 @@
       },
       {
         "name": "sum",
-        "args": []
+        "args": [
+          {
+            "name": "column",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "avg",
-        "args": []
+        "args": [
+          {
+            "name": "column",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "min",
-        "args": []
+        "args": [
+          {
+            "name": "column",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "max",
-        "args": []
+        "args": [
+          {
+            "name": "column",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "agg",
-        "args": []
+        "args": [
+          {
+            "name": "exprs",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "any_value",
-        "args": []
+        "args": [
+          {
+            "name": "column",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "bool_and",
-        "args": []
+        "args": [
+          {
+            "name": "column",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "bool_or",
-        "args": []
+        "args": [
+          {
+            "name": "column",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "product",
-        "args": []
+        "args": [
+          {
+            "name": "column",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "collect_list",
-        "args": []
+        "args": [
+          {
+            "name": "column",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "collect_set",
-        "args": []
+        "args": [
+          {
+            "name": "column",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "count_if",
-        "args": []
+        "args": [
+          {
+            "name": "column",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "percentile",
-        "args": []
+        "args": [
+          {
+            "name": "column",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          },
+          {
+            "name": "p",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "max_by",
-        "args": []
+        "args": [
+          {
+            "name": "value_column",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          },
+          {
+            "name": "ord_column",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "min_by",
-        "args": []
+        "args": [
+          {
+            "name": "value_column",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          },
+          {
+            "name": "ord_column",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "covar_pop",
-        "args": []
+        "args": [
+          {
+            "name": "col1",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          },
+          {
+            "name": "col2",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "covar_samp",
-        "args": []
+        "args": [
+          {
+            "name": "col1",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          },
+          {
+            "name": "col2",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "corr",
-        "args": []
+        "args": [
+          {
+            "name": "col1",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          },
+          {
+            "name": "col2",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "regr_count",
-        "args": []
+        "args": [
+          {
+            "name": "y_col",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          },
+          {
+            "name": "x_col",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "regr_avgx",
-        "args": []
+        "args": [
+          {
+            "name": "y_col",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          },
+          {
+            "name": "x_col",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "regr_avgy",
-        "args": []
+        "args": [
+          {
+            "name": "y_col",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          },
+          {
+            "name": "x_col",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "regr_slope",
-        "args": []
+        "args": [
+          {
+            "name": "y_col",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          },
+          {
+            "name": "x_col",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "regr_intercept",
-        "args": []
+        "args": [
+          {
+            "name": "y_col",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          },
+          {
+            "name": "x_col",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "regr_r2",
-        "args": []
+        "args": [
+          {
+            "name": "y_col",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          },
+          {
+            "name": "x_col",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "regr_sxx",
-        "args": []
+        "args": [
+          {
+            "name": "y_col",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          },
+          {
+            "name": "x_col",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "regr_syy",
-        "args": []
+        "args": [
+          {
+            "name": "y_col",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          },
+          {
+            "name": "x_col",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "regr_sxy",
-        "args": []
+        "args": [
+          {
+            "name": "y_col",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          },
+          {
+            "name": "x_col",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "kurtosis",
-        "args": []
+        "args": [
+          {
+            "name": "column",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "skewness",
-        "args": []
+        "args": [
+          {
+            "name": "column",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       }
     ],
     "DataFrameStat": [
       {
         "name": "cov",
-        "args": []
+        "args": [
+          {
+            "name": "col1",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          },
+          {
+            "name": "col2",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "corr",
-        "args": []
+        "args": [
+          {
+            "name": "col1",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          },
+          {
+            "name": "col2",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "corr_matrix",
@@ -2146,11 +5199,23 @@
     "DataFrameNa": [
       {
         "name": "fill",
-        "args": []
+        "args": [
+          {
+            "name": "value",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "drop",
-        "args": []
+        "args": [
+          {
+            "name": "subset",
+            "default": "None",
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       }
     ],
     "SparkSession": [
@@ -2160,7 +5225,13 @@
       },
       {
         "name": "builder",
-        "args": []
+        "args": [
+          {
+            "name": "_cls",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "is_case_sensitive",
@@ -2168,53 +5239,165 @@
       },
       {
         "name": "create_dataframe",
-        "args": []
+        "args": [
+          {
+            "name": "_py",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          },
+          {
+            "name": "data",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          },
+          {
+            "name": "column_names",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "createDataFrame",
-        "args": []
+        "args": [
+          {
+            "name": "_py",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          },
+          {
+            "name": "data",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          },
+          {
+            "name": "column_names",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
-        "name": "create_dataframe_from_rows",
-        "args": []
+        "name": "_create_dataframe_from_rows",
+        "args": [
+          {
+            "name": "py",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          },
+          {
+            "name": "data",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          },
+          {
+            "name": "schema",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "read_csv",
-        "args": []
+        "args": [
+          {
+            "name": "path",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "read_parquet",
-        "args": []
+        "args": [
+          {
+            "name": "path",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "read_json",
-        "args": []
+        "args": [
+          {
+            "name": "path",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "create_or_replace_temp_view",
-        "args": []
+        "args": [
+          {
+            "name": "name",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          },
+          {
+            "name": "df",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "table",
-        "args": []
+        "args": [
+          {
+            "name": "name",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "sql",
-        "args": []
+        "args": [
+          {
+            "name": "query",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "read_delta",
-        "args": []
+        "args": [
+          {
+            "name": "path",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       },
       {
         "name": "read_delta_version",
-        "args": []
+        "args": [
+          {
+            "name": "path",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          },
+          {
+            "name": "version",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       }
     ],
     "SparkSessionBuilder": [
       {
         "name": "get_or_create",
-        "args": []
+        "args": [
+          {
+            "name": "slf",
+            "default": null,
+            "kind": "POSITIONAL_OR_KEYWORD"
+          }
+        ]
       }
     ]
   }
