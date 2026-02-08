@@ -40,6 +40,8 @@ Or run parity only (hand-written + tests/fixtures/converted/*.json):
 cargo test pyspark_parity_fixtures
 ```
 
+Or run phase-specific parity: `PARITY_PHASE=a cargo test pyspark_parity_fixtures` or `make test-parity-phase-a` … `make test-parity-phase-g`. See [PARITY_STATUS.md](PARITY_STATUS.md).
+
 ## Format mapping
 
 | Sparkless | Robin-sparkless |

@@ -220,9 +220,13 @@ When adding new operations or expression forms:
 4. **Update Rust harness if needed**
    - If the new scenario uses an operation not yet supported by the dispatcher, update `Operation` and `apply_op` logic.
 
-5. **Run tests**
+5. **Update phase manifest (optional)**  
+   - Add the new fixture name to the appropriate phase in `tests/fixtures/phase_manifest.json` so it is included in phase-specific tests (`make test-parity-phase-X`).
+
+6. **Run tests**
    - `cargo test pyspark_parity_fixtures` (runs all fixtures).
    - To run a single fixture: `PARITY_FIXTURE=<name> cargo test pyspark_parity_fixtures`.
+   - To run by phase: `PARITY_PHASE=a cargo test pyspark_parity_fixtures` or `make test-parity-phase-a`.
 
 ---
 
