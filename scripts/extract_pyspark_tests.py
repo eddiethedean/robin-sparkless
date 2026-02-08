@@ -130,7 +130,11 @@ class TestClassifier(ast.NodeVisitor):
         if self.has_assert_raises:
             return "python-test", "assertRaises / error handling"
         if self.has_create_dataframe and self.has_df_ops and self.has_collect:
-            if self.has_assert_dataframe_equal or self.has_assert_equal or self.has_assert_close:
+            if (
+                self.has_assert_dataframe_equal
+                or self.has_assert_equal
+                or self.has_assert_close
+            ):
                 return "fixture", "createDataFrame + ops + collect + assert"
             return "fixture", "createDataFrame + ops + collect"
         if self.has_spark_range and self.has_df_ops and self.has_collect:
@@ -142,9 +146,7 @@ class TestClassifier(ast.NodeVisitor):
         return "skip", "no fixture pattern matched"
 
 
-def extract_tests_from_file(
-    path: Path, source: str
-) -> list[dict[str, Any]]:
+def extract_tests_from_file(path: Path, source: str) -> list[dict[str, Any]]:
     """Parse file and extract test info for each test_* method."""
     try:
         tree = ast.parse(source)
@@ -154,24 +156,28 @@ def extract_tests_from_file(
     for node in ast.walk(tree):
         if isinstance(node, ast.FunctionDef) and node.name.startswith("test_"):
             if should_skip_test(node.name):
-                results.append({
-                    "name": node.name,
-                    "file": str(path),
-                    "classification": "skip",
-                    "reason": "excluded pattern",
-                })
+                results.append(
+                    {
+                        "name": node.name,
+                        "file": str(path),
+                        "classification": "skip",
+                        "reason": "excluded pattern",
+                    }
+                )
                 continue
             classifier = TestClassifier()
             classifier.visit(node)
             class_name = _find_class_for_method(tree, node)
             classification, reason = classifier.classify()
-            results.append({
-                "name": node.name,
-                "class": class_name,
-                "file": str(path),
-                "classification": classification,
-                "reason": reason,
-            })
+            results.append(
+                {
+                    "name": node.name,
+                    "class": class_name,
+                    "file": str(path),
+                    "classification": classification,
+                    "reason": reason,
+                }
+            )
     return results
 
 
@@ -192,7 +198,16 @@ def clone_spark_repo(branch: str, dest: Path) -> Path:
     if spark_path.exists():
         return spark_path
     subprocess.run(
-        ["git", "clone", "--depth", "1", "--branch", branch, "https://github.com/apache/spark.git", str(spark_path)],
+        [
+            "git",
+            "clone",
+            "--depth",
+            "1",
+            "--branch",
+            branch,
+            "https://github.com/apache/spark.git",
+            str(spark_path),
+        ],
         check=True,
         capture_output=True,
     )
@@ -213,7 +228,10 @@ def emit_fixture_stub(
         "pyspark_version": "3.5",
         "source": f"extracted from {source_file}",
         "input": {
-            "schema": [{"name": "id", "type": "bigint"}, {"name": "value", "type": "double"}],
+            "schema": [
+                {"name": "id", "type": "bigint"},
+                {"name": "value", "type": "double"},
+            ],
             "rows": [[1, 1.0], [2, 2.0], [3, 3.0]],
         },
         "operations": [],
@@ -239,7 +257,7 @@ def emit_pytest_stub(
     stub = f'''
 @pytest.mark.skip(reason="Ported from {source_file}; implement with robin_sparkless")
 def {test_name}() -> None:
-    """Ported from PySpark {class_name or '?'}.{test_name}."""
+    """Ported from PySpark {class_name or "?"}.{test_name}."""
     # with pytest.raises(...): ...
     pass
 '''
@@ -290,14 +308,14 @@ def main() -> int:
     spark_repo: Path | None = None
     if args.spark_repo:
         spark_repo = args.spark_repo.resolve()
-        tests_dir = spark_repo / "python" / "pyspark" / "sql" / "tests"
+        tests_dir = spark_repo / "python" / "pyspark" / "sql" / "tests"  # type: ignore[operator]
         if not tests_dir.exists():
             print(f"Error: {tests_dir} does not exist", file=sys.stderr)
             return 1
     elif args.clone:
         dest = Path.cwd() / ".spark_clone"
         spark_repo = clone_spark_repo(args.branch, dest)
-        tests_dir = spark_repo / "python" / "pyspark" / "sql" / "tests"
+        tests_dir = spark_repo / "python" / "pyspark" / "sql" / "tests"  # type: ignore[operator]
     else:
         print("Error: provide --spark-repo PATH or --clone", file=sys.stderr)
         return 1
@@ -320,10 +338,14 @@ def main() -> int:
     fixture_count = 0
     pytest_count = 0
     pytest_path = args.output_pytest
-    if not args.dry_run and any(r["classification"] == "python-test" for r in all_results):
+    if not args.dry_run and any(
+        r["classification"] == "python-test" for r in all_results
+    ):
         pytest_path.parent.mkdir(parents=True, exist_ok=True)
         with open(pytest_path, "w") as f:
-            f.write('"""Ported PySpark error/API tests (extracted). Use robin_sparkless."""\n\n')
+            f.write(
+                '"""Ported PySpark error/API tests (extracted). Use robin_sparkless."""\n\n'
+            )
             f.write("import pytest\n\n\n")
 
     for r in all_results:
@@ -347,14 +369,20 @@ def main() -> int:
                 print(f"  [skip]    {r['name']}: {r['reason']}")
 
     print(f"Classified: {len(all_results)} tests")
-    print(f"  fixture-candidates: {sum(1 for r in all_results if r['classification'] == 'fixture')}")
-    print(f"  python-test-candidates: {sum(1 for r in all_results if r['classification'] == 'python-test')}")
+    print(
+        f"  fixture-candidates: {sum(1 for r in all_results if r['classification'] == 'fixture')}"
+    )
+    print(
+        f"  python-test-candidates: {sum(1 for r in all_results if r['classification'] == 'python-test')}"
+    )
     print(f"  skipped: {sum(1 for r in all_results if r['classification'] == 'skip')}")
     if not args.dry_run:
         print(f"Emitted: {fixture_count} fixtures -> {args.output_fixtures}")
         print(f"         {pytest_count} pytest stubs -> {args.output_pytest}")
         if fixture_count:
-            print("Run: python tests/regenerate_expected_from_pyspark.py tests/fixtures/pyspark_extracted --include-skipped")
+            print(
+                "Run: python tests/regenerate_expected_from_pyspark.py tests/fixtures/pyspark_extracted --include-skipped"
+            )
     return 0
 
 
