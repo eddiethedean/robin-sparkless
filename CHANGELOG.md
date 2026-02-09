@@ -19,6 +19,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Phase 26 – Publish crate**: Prepare and publish robin-sparkless to crates.io (and optionally PyPI via maturin). See [ROADMAP.md](docs/ROADMAP.md) for details.
 
+## [0.3.0] - 2026-02-06
+
+### Changed
+
+- Version bump to 0.3.0.
+
+### Fixed
+
+- **Parity fixtures**: PySpark-expected values as source of truth; Robin matches behavior.
+  - `current_date`/`curdate` mock returns Date type (not timestamp).
+  - `octet_length` parity handler and Int32 return type.
+  - `with_unix_micros` UTC timezone alignment.
+  - `with_rand_seed` skipped (Spark XORShiftRandom vs Robin StdRng differ).
+  - `current_date_timestamp` and `with_curdate_now` expected values aligned with mock dates.
+
+## [0.2.1]
+
 ### Added
 
 - **Gap closure (bitmap, datetime/interval, misc, DataFrame)** — plan Phases 1–4
