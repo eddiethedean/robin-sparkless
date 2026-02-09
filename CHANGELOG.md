@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **#174 – Column Python operator overloads** — `col("age") > lit(30)` and `col("age") > 30` work (PySpark-style). Implementation was in 0.4.0 (#184); explicit test added to close #174.
 - **#175 – join(on=): accept str for single column (PySpark compatibility)** — `df.join(other, on="id", how="inner")` now works; previously only `on=["id"]` was accepted. `on` can be a single column name (str) or a list/tuple of column names.
 
 ### Planned
