@@ -619,21 +619,22 @@ fn py_lit(value: &Bound<'_, pyo3::types::PyAny>) -> PyResult<PyColumn> {
 /// Try to build a Date or DateTime literal from Python datetime.date / datetime.datetime.
 /// We detect by attributes: values with year/month/day are supported; if they also have
 /// hour/minute/second we treat as datetime, else as date (avoids is_instance across the pyo3 boundary).
-fn py_lit_date_or_datetime(value: &Bound<'_, pyo3::types::PyAny>) -> PyResult<polars::prelude::Expr> {
+fn py_lit_date_or_datetime(
+    value: &Bound<'_, pyo3::types::PyAny>,
+) -> PyResult<polars::prelude::Expr> {
     use chrono::NaiveDate;
     use polars::prelude::{Expr, LiteralValue, TimeUnit};
 
     let year: Option<i32> = value.getattr("year").ok().and_then(|a| a.extract().ok());
     let month: Option<u32> = value.getattr("month").ok().and_then(|a| a.extract().ok());
     let day: Option<u32> = value.getattr("day").ok().and_then(|a| a.extract().ok());
-    let (year, month, day) = match (year, month, day) {
-        (Some(y), Some(m), Some(d)) => (y, m, d),
-        _ => {
-            return Err(pyo3::exceptions::PyTypeError::new_err(
+    let (year, month, day) =
+        match (year, month, day) {
+            (Some(y), Some(m), Some(d)) => (y, m, d),
+            _ => return Err(pyo3::exceptions::PyTypeError::new_err(
                 "lit() supports only None, int, float, bool, str, datetime.date, datetime.datetime",
-            ))
-        }
-    };
+            )),
+        };
 
     // datetime.datetime has hour/minute/second; datetime.date does not
     let has_time = value.getattr("hour").is_ok()
