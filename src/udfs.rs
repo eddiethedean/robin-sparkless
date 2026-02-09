@@ -191,10 +191,38 @@ pub fn apply_array_distinct_first_order(column: Column) -> PolarsResult<Option<C
     Ok(Some(Column::new(name, out.into_series())))
 }
 
-/// Repeat each list element n times (PySpark array_repeat).
+/// Repeat each element n times (PySpark array_repeat).
+/// Supports both: (1) scalar column (string, int, etc.) - create array of n copies; (2) List column - repeat each element within the list.
 pub fn apply_array_repeat(column: Column, n: i64) -> PolarsResult<Option<Column>> {
     let name = column.field().into_owned().name;
     let series = column.take_materialized_series();
+    let n_usize = n.max(0) as usize;
+
+    // Scalar column: create array of n copies of each element (PySpark array_repeat on string/int/etc.)
+    if !matches!(series.dtype(), DataType::List(_)) {
+        use polars::chunked_array::builder::get_list_builder;
+        let inner_dtype = series.dtype().clone();
+        let len = series.len();
+        let mut builder = get_list_builder(&inner_dtype, 64, len, name.as_str().into());
+        for i in 0..len {
+            let opt_av = series.get(i);
+            let elem_series = match opt_av {
+                Ok(av) => any_value_to_single_series(av, &inner_dtype)?,
+                Err(_) => Series::new_empty(PlSmallStr::EMPTY, &inner_dtype),
+            };
+            let mut repeated = elem_series.clone();
+            for _ in 1..n_usize {
+                repeated.extend(&elem_series)?;
+            }
+            builder.append_series(&repeated).map_err(|e| {
+                PolarsError::ComputeError(format!("array_repeat scalar: {e}").into())
+            })?;
+        }
+        let out = builder.finish().into_series();
+        return Ok(Some(Column::new(name, out)));
+    }
+
+    // List column: repeat each element within the list
     let list_ca = series
         .list()
         .map_err(|e| PolarsError::ComputeError(format!("array_repeat: {e}").into()))?;

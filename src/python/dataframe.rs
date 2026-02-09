@@ -4,7 +4,7 @@ use crate::dataframe::JoinType;
 use crate::dataframe::{CubeRollupData, WriteFormat, WriteMode};
 use crate::functions::SortOrder;
 use crate::{DataFrame, GroupedData};
-use polars::prelude::{col, Expr};
+use polars::prelude::{col, lit, Expr, NULL};
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList, PyTuple};
 use std::path::Path;
@@ -13,6 +13,26 @@ use std::sync::RwLock;
 use super::column::PyColumn;
 use super::order::PySortOrder;
 use super::session::get_default_session;
+
+fn py_any_to_expr(value: &pyo3::Bound<'_, pyo3::types::PyAny>) -> PyResult<Expr> {
+    let expr = if value.is_none() {
+        lit(NULL)
+    } else if let Ok(x) = value.extract::<i64>() {
+        lit(x)
+    } else if let Ok(x) = value.extract::<f64>() {
+        lit(x)
+    } else if let Ok(x) = value.extract::<bool>() {
+        lit(x)
+    } else if let Ok(x) = value.extract::<String>() {
+        lit(x.as_str())
+    } else {
+        return Err(pyo3::exceptions::PyTypeError::new_err(
+            "replace: to_replace and value must be None, int, float, bool, or str",
+        ));
+    };
+    Ok(expr)
+}
+
 /// Python wrapper for DataFrame.
 #[pyclass(name = "DataFrame")]
 pub struct PyDataFrame {
@@ -358,6 +378,14 @@ impl PyDataFrame {
     ///     RuntimeError: If join execution fails.
     #[pyo3(signature = (other, on, how="inner"))]
     fn join(&self, other: &PyDataFrame, on: Vec<String>, how: &str) -> PyResult<PyDataFrame> {
+        // PySpark: join(other) with no on = cross join
+        if on.is_empty() {
+            let df = self
+                .inner
+                .cross_join(&other.inner)
+                .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+            return Ok(PyDataFrame { inner: df });
+        }
         let join_type = match how.to_lowercase().as_str() {
             "inner" => JoinType::Inner,
             "left" => JoinType::Left,
@@ -502,6 +530,40 @@ impl PyDataFrame {
             .inner
             .fillna(value.inner.expr().clone())
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        Ok(PyDataFrame { inner: df })
+    }
+
+    /// Replace values in columns (PySpark replace). Where column equals to_replace, use value.
+    ///
+    /// Args:
+    ///     to_replace: Value to replace (None, int, float, bool, or str).
+    ///     value: Replacement value. Same types supported.
+    ///     subset: Optional list of column names. If None, applies to all columns.
+    ///
+    /// Returns:
+    ///     DataFrame with replacements applied.
+    #[pyo3(signature = (to_replace, value, subset=None))]
+    fn replace(
+        &self,
+        to_replace: &pyo3::Bound<'_, pyo3::types::PyAny>,
+        value: &pyo3::Bound<'_, pyo3::types::PyAny>,
+        subset: Option<Vec<String>>,
+    ) -> PyResult<PyDataFrame> {
+        let old_expr = py_any_to_expr(to_replace)?;
+        let new_expr = py_any_to_expr(value)?;
+        let cols: Vec<String> = match &subset {
+            Some(s) => s.clone(),
+            None => self
+                .inner
+                .columns()
+                .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?,
+        };
+        let mut df = self.inner.clone();
+        for col_name in cols {
+            df = df
+                .replace(col_name.as_str(), old_expr.clone(), new_expr.clone())
+                .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        }
         Ok(PyDataFrame { inner: df })
     }
 
@@ -1674,6 +1736,7 @@ pub(crate) fn any_value_to_py(
     match av {
         AnyValue::Null => py.None().into_bound_py_any(py).map(Into::into),
         AnyValue::Boolean(b) => b.into_bound_py_any(py).map(Into::into),
+        AnyValue::Int8(i) => (i as i64).into_bound_py_any(py).map(Into::into),
         AnyValue::Int32(i) => i.into_bound_py_any(py).map(Into::into),
         AnyValue::Int64(i) => i.into_bound_py_any(py).map(Into::into),
         AnyValue::UInt32(u) => u.into_bound_py_any(py).map(Into::into),

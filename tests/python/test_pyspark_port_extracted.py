@@ -478,9 +478,19 @@ def test_approxQuantile() -> None:
     pass
 
 
-@pytest.mark.skip(reason="array_repeat semantics differ: robin expects List column")
 def test_array_repeat() -> None:
-    pass
+    """Ported from PySpark: array_repeat(col, n) for scalar and list columns."""
+    import robin_sparkless as rs
+
+    spark = rs.SparkSession.builder().app_name("test").get_or_create()
+    df = spark._create_dataframe_from_rows(
+        [["a", 2], ["b", 3]],
+        [("s", "string"), ("n", "bigint")],
+    )
+    out = df.with_column("arr", rs.col("s").array_repeat(2))
+    rows = out.collect()
+    assert rows[0]["arr"] == ["a", "a"]
+    assert rows[1]["arr"] == ["b", "b"]
 
 
 def test_overlay() -> None:
@@ -507,10 +517,22 @@ def test_nested_higher_order_function() -> None:
     pass
 
 
-@pytest.mark.skip(reason="datetime extract returns Int8; collect unsupported type")
 def test_datetime_functions() -> None:
     """Ported subset: year, month, dayofmonth. Full suite covered by parity fixtures."""
-    pass
+    import robin_sparkless as rs
+
+    spark = rs.SparkSession.builder().app_name("test").get_or_create()
+    df = spark._create_dataframe_from_rows(
+        [["2024-03-15T10:30:00"]],
+        [("ts", "timestamp")],
+    )
+    out = (
+        df.with_column("y", rs.year(rs.col("ts")))
+        .with_column("m", rs.month(rs.col("ts")))
+        .with_column("d", rs.dayofmonth(rs.col("ts")))
+    )
+    row = out.collect()[0]
+    assert row["y"] == 2024 and row["m"] == 3 and row["d"] == 15
 
 
 @pytest.mark.skip(reason="lit day_time_interval not in robin_sparkless")
@@ -573,9 +595,22 @@ def test_repartitionByRange_dataframe() -> None:
     pass
 
 
-@pytest.mark.skip(reason="replace(value, subset) API differs; use na().fill")
 def test_replace() -> None:
-    pass
+    """Ported from PySpark: df.replace(to_replace, value, subset)."""
+    import robin_sparkless as rs
+
+    spark = rs.SparkSession.builder().app_name("test").get_or_create()
+    df = spark._create_dataframe_from_rows(
+        [[1, "a", 10], [2, "b", 20], [1, "c", 30]],
+        [("id", "bigint"), ("x", "string"), ("v", "bigint")],
+    )
+    out = df.replace(1, 99, subset=["id"])
+    rows = out.order_by(["id"]).collect()
+    ids = [r["id"] for r in rows]
+    assert sorted(ids) == [2, 99, 99]
+    out2 = df.replace("a", "X", subset=["x"])
+    rows2 = out2.filter(rs.col("x").eq(rs.lit("X"))).collect()
+    assert len(rows2) == 1 and rows2[0]["x"] == "X"
 
 
 @pytest.mark.skip(reason="unpivot not implemented in robin_sparkless")
@@ -605,9 +640,15 @@ def test_drop_duplicates_with_ambiguous_reference() -> None:
     pass
 
 
-@pytest.mark.skip(reason="join_without_on; robin_sparkless requires on")
 def test_join_without_on() -> None:
-    pass
+    """Ported from PySpark: join(other) with no on performs cross join."""
+    import robin_sparkless as rs
+
+    spark = rs.SparkSession.builder().app_name("test").get_or_create()
+    df1 = spark._create_dataframe_from_rows([[1], [2]], [("a", "bigint")])
+    df2 = spark._create_dataframe_from_rows([["x"], ["y"]], [("b", "string")])
+    out = df1.join(df2, on=[], how="inner")
+    assert out.count() == 4
 
 
 @pytest.mark.skip(reason="require_cross; cross join semantics")
