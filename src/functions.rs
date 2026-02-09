@@ -2555,7 +2555,10 @@ pub fn shift_right_unsigned(column: &Column, n: i32) -> Column {
 
 /// Session/library version string (PySpark version).
 pub fn version() -> Column {
-    Column::from_expr(lit(concat!("robin-sparkless-", env!("CARGO_PKG_VERSION"))), None)
+    Column::from_expr(
+        lit(concat!("robin-sparkless-", env!("CARGO_PKG_VERSION"))),
+        None,
+    )
 }
 
 /// Null-safe equality: true if both null or both equal (PySpark equal_null). Alias for eq_null_safe.
