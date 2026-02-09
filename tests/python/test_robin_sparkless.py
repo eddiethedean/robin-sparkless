@@ -242,6 +242,125 @@ def test_column_operator_overloads_pyspark_style() -> None:
     assert df.filter(rs.col("age") != 30).count() == 2
 
 
+def test_column_operator_overloads_operator_vs_method_parity() -> None:
+    """Operator style and method style produce identical results (PySpark parity)."""
+    import robin_sparkless as rs
+
+    spark = rs.SparkSession.builder().app_name("test").get_or_create()
+    data = [[1, 5], [2, 4], [3, 1], [4, 2], [5, 1]]
+    schema = [("a", "bigint"), ("b", "bigint")]
+    df = spark._create_dataframe_from_rows(data, schema)
+    # Column vs Column: each operator
+    for op_name, op_fn, method_fn in [
+        ("gt", lambda c1, c2: c1 > c2, lambda c1, c2: c1.gt(c2)),
+        ("lt", lambda c1, c2: c1 < c2, lambda c1, c2: c1.lt(c2)),
+        ("ge", lambda c1, c2: c1 >= c2, lambda c1, c2: c1.ge(c2)),
+        ("le", lambda c1, c2: c1 <= c2, lambda c1, c2: c1.le(c2)),
+        ("eq", lambda c1, c2: c1 == c2, lambda c1, c2: c1.eq(c2)),
+        ("ne", lambda c1, c2: c1 != c2, lambda c1, c2: c1.ne(c2)),
+    ]:
+        out_op = df.filter(op_fn(rs.col("a"), rs.col("b"))).collect()
+        out_method = df.filter(method_fn(rs.col("a"), rs.col("b"))).collect()
+        assert out_op == out_method, f"{op_name}: operator vs method should match"
+    # Column vs scalar: each operator
+    for op_name, op_fn, method_fn in [
+        ("gt", lambda c, v: c > v, lambda c, v: c.gt(v)),
+        ("lt", lambda c, v: c < v, lambda c, v: c.lt(v)),
+        ("ge", lambda c, v: c >= v, lambda c, v: c.ge(v)),
+        ("le", lambda c, v: c <= v, lambda c, v: c.le(v)),
+        ("eq", lambda c, v: c == v, lambda c, v: c.eq(v)),
+        ("ne", lambda c, v: c != v, lambda c, v: c.ne(v)),
+    ]:
+        out_op = df.filter(op_fn(rs.col("a"), 3)).collect()
+        out_method = df.filter(method_fn(rs.col("a"), 3)).collect()
+        assert out_op == out_method, (
+            f"{op_name} scalar: operator vs method should match"
+        )
+
+
+def test_column_operator_overloads_with_column_pyspark_semantics() -> None:
+    """with_column(..., col op col / col op scalar) produces correct boolean column (PySpark)."""
+    import robin_sparkless as rs
+
+    spark = rs.SparkSession.builder().app_name("test").get_or_create()
+    data = [[10, 5], [3, 7], [0, 0], [2, 2]]
+    schema = [("p", "bigint"), ("q", "bigint")]
+    df = spark._create_dataframe_from_rows(data, schema)
+    # Operator style in with_column
+    out = df.with_column("p_gt_q", rs.col("p") > rs.col("q"))
+    rows = out.collect()
+    assert [r["p_gt_q"] for r in rows] == [True, False, False, False]
+    out2 = df.with_column("p_eq_q", rs.col("p") == rs.col("q"))
+    assert [r["p_eq_q"] for r in out2.collect()] == [False, False, True, True]
+    # Scalar in with_column
+    out3 = df.with_column("p_ge_5", rs.col("p") >= 5)
+    assert [r["p_ge_5"] for r in out3.collect()] == [True, False, False, False]
+
+
+def test_column_operator_overloads_combined_and_or_pyspark_semantics() -> None:
+    """(col op col) & (col op scalar) and | combinations match PySpark semantics."""
+    import robin_sparkless as rs
+
+    spark = rs.SparkSession.builder().app_name("test").get_or_create()
+    data = [[1, 5], [2, 4], [3, 1], [4, 2], [5, 1]]
+    schema = [("a", "bigint"), ("b", "bigint")]
+    df = spark._create_dataframe_from_rows(data, schema)
+    # (a > b) & (a > 2) -> (3,1), (4,2), (5,1)
+    out = df.filter((rs.col("a") > rs.col("b")) & (rs.col("a") > 2)).collect()
+    assert len(out) == 3
+    assert {(r["a"], r["b"]) for r in out} == {(3, 1), (4, 2), (5, 1)}
+    # (a < b) | (b == 1) -> (1,5), (2,4), (3,1), (5,1)
+    out2 = df.filter((rs.col("a") < rs.col("b")) | (rs.col("b") == 1)).collect()
+    assert len(out2) == 4
+    assert {(r["a"], r["b"]) for r in out2} == {(1, 5), (2, 4), (3, 1), (5, 1)}
+    # (a >= 4) | (b <= 2) -> a>=4 gives (4,2),(5,1); b<=2 gives (3,1),(4,2); union (3,1),(4,2),(5,1)
+    out3 = df.filter((rs.col("a") >= 4) | (rs.col("b") <= 2)).collect()
+    assert len(out3) == 3
+    assert {(r["a"], r["b"]) for r in out3} == {(3, 1), (4, 2), (5, 1)}
+
+
+def test_column_operator_overloads_float_and_string_scalar() -> None:
+    """col op float and col op str behave like PySpark (implicit lit)."""
+    import robin_sparkless as rs
+
+    spark = rs.SparkSession.builder().app_name("test").get_or_create()
+    df = spark._create_dataframe_from_rows(
+        [
+            {"id": 1, "score": 2.0, "name": "Alice"},
+            {"id": 2, "score": 3.5, "name": "Bob"},
+            {"id": 3, "score": 2.5, "name": "Charlie"},
+        ],
+        [("id", "bigint"), ("score", "double"), ("name", "string")],
+    )
+    # Float: score > 2.5 -> only 3.5 (Bob); 2.5 is not > 2.5
+    out = df.filter(rs.col("score") > 2.5).collect()
+    assert len(out) == 1 and out[0]["name"] == "Bob"
+    assert df.filter(rs.col("score") >= 3.5).count() == 1
+    assert df.filter(rs.col("score") == 2.0).count() == 1
+    # String
+    assert df.filter(rs.col("name") == "Bob").count() == 1
+    assert df.filter(rs.col("name") != "Alice").count() == 2
+    assert df.filter(rs.col("name") > "B").count() == 2  # Bob, Charlie
+
+
+def test_column_operator_overloads_reflected_scalar() -> None:
+    """Scalar on left (e.g. 30 < col('age')) works via reflected comparison (PySpark)."""
+    import robin_sparkless as rs
+
+    spark = rs.SparkSession.builder().app_name("test").get_or_create()
+    df = spark.create_dataframe(
+        [(1, 25, "a"), (2, 35, "b"), (3, 30, "c")], ["id", "age", "name"]
+    )
+    # 30 < col("age") is same as col("age") > 30 -> one row (age 35)
+    out = df.filter(30 < rs.col("age")).collect()
+    assert len(out) == 1 and out[0]["age"] == 35
+    # 25 <= col("age") -> all three
+    assert df.filter(25 <= rs.col("age")).count() == 3
+    # 30 > col("age") -> age < 30 -> one row (25)
+    out2 = df.filter(30 > rs.col("age")).collect()
+    assert len(out2) == 1 and out2[0]["age"] == 25
+
+
 def test_filter_column_vs_column_scalar_still_works() -> None:
     """Regression: column vs literal (scalar) still works after #184."""
     import robin_sparkless as rs
