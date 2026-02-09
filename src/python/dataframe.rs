@@ -6,7 +6,7 @@ use crate::functions::SortOrder;
 use crate::{DataFrame, GroupedData};
 use polars::prelude::{col, lit, Expr, NULL};
 use pyo3::prelude::*;
-use pyo3::types::{PyDict, PyList, PyTuple};
+use pyo3::types::{PyDict, PyList, PyString, PyTuple};
 use std::path::Path;
 use std::sync::RwLock;
 
@@ -31,6 +31,34 @@ fn py_any_to_expr(value: &pyo3::Bound<'_, pyo3::types::PyAny>) -> PyResult<Expr>
         ));
     };
     Ok(expr)
+}
+
+/// Join `on` parameter: accept str (single column) or list/tuple of str (PySpark compatibility, #175).
+struct JoinOn(Vec<String>);
+
+impl FromPyObject<'_> for JoinOn {
+    fn extract_bound(ob: &Bound<'_, PyAny>) -> PyResult<Self> {
+        if let Ok(s) = ob.downcast_exact::<PyString>() {
+            return Ok(JoinOn(vec![s.to_string_lossy().into_owned()]));
+        }
+        if let Ok(list) = ob.downcast_exact::<PyList>() {
+            let mut v = Vec::with_capacity(list.len());
+            for item in list.iter() {
+                v.push(item.extract::<String>()?);
+            }
+            return Ok(JoinOn(v));
+        }
+        if let Ok(tup) = ob.downcast_exact::<PyTuple>() {
+            let mut v = Vec::with_capacity(tup.len());
+            for item in tup.iter() {
+                v.push(item.extract::<String>()?);
+            }
+            return Ok(JoinOn(v));
+        }
+        Err(pyo3::exceptions::PyTypeError::new_err(
+            "join 'on' must be str or list/tuple of str",
+        ))
+    }
 }
 
 /// Python wrapper for DataFrame.
@@ -384,7 +412,7 @@ impl PyDataFrame {
     ///
     /// Args:
     ///     other: Right DataFrame.
-    ///     on: Column names to join on. Must exist in both DataFrames with compatible types.
+    ///     on: Column name (str) or list/tuple of column names. Must exist in both DataFrames with compatible types. PySpark compatibility: single column can be passed as ``on="id"``.
     ///     how: Join type: "inner", "left", "right", or "outer". Default "inner".
     ///
     /// Returns:
@@ -394,7 +422,8 @@ impl PyDataFrame {
     ///     ValueError: If ``how`` is not one of the allowed values.
     ///     RuntimeError: If join execution fails.
     #[pyo3(signature = (other, on, how="inner"))]
-    fn join(&self, other: &PyDataFrame, on: Vec<String>, how: &str) -> PyResult<PyDataFrame> {
+    fn join(&self, other: &PyDataFrame, on: JoinOn, how: &str) -> PyResult<PyDataFrame> {
+        let on = on.0;
         // PySpark: join(other) with no on = cross join
         if on.is_empty() {
             let df = self
