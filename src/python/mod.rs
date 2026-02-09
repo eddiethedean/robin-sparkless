@@ -966,42 +966,42 @@ fn py_getbit(col: &PyColumn, pos: i64) -> PyColumn {
 
 #[pyfunction]
 #[pyo3(signature = (col, format=None))]
-fn py_to_char(col: &PyColumn, format: Option<&str>) -> PyColumn {
-    PyColumn {
-        inner: to_char(&col.inner, format),
-    }
+fn py_to_char(col: &PyColumn, format: Option<&str>) -> PyResult<PyColumn> {
+    to_char(&col.inner, format)
+        .map(|c| PyColumn { inner: c })
+        .map_err(|e| pyo3::exceptions::PyValueError::new_err(e))
 }
 
 #[pyfunction]
 #[pyo3(signature = (col, format=None))]
-fn py_to_varchar(col: &PyColumn, format: Option<&str>) -> PyColumn {
-    PyColumn {
-        inner: to_varchar(&col.inner, format),
-    }
+fn py_to_varchar(col: &PyColumn, format: Option<&str>) -> PyResult<PyColumn> {
+    to_varchar(&col.inner, format)
+        .map(|c| PyColumn { inner: c })
+        .map_err(|e| pyo3::exceptions::PyValueError::new_err(e))
 }
 
 #[pyfunction]
 #[pyo3(signature = (col, format=None))]
-fn py_to_number(col: &PyColumn, format: Option<&str>) -> PyColumn {
-    PyColumn {
-        inner: to_number(&col.inner, format),
-    }
+fn py_to_number(col: &PyColumn, format: Option<&str>) -> PyResult<PyColumn> {
+    to_number(&col.inner, format)
+        .map(|c| PyColumn { inner: c })
+        .map_err(|e| pyo3::exceptions::PyValueError::new_err(e))
 }
 
 #[pyfunction]
 #[pyo3(signature = (col, format=None))]
-fn py_try_to_number(col: &PyColumn, format: Option<&str>) -> PyColumn {
-    PyColumn {
-        inner: try_to_number(&col.inner, format),
-    }
+fn py_try_to_number(col: &PyColumn, format: Option<&str>) -> PyResult<PyColumn> {
+    try_to_number(&col.inner, format)
+        .map(|c| PyColumn { inner: c })
+        .map_err(|e| pyo3::exceptions::PyValueError::new_err(e))
 }
 
 #[pyfunction]
 #[pyo3(signature = (col, format=None))]
-fn py_try_to_timestamp(col: &PyColumn, format: Option<&str>) -> PyColumn {
-    PyColumn {
-        inner: try_to_timestamp(&col.inner, format),
-    }
+fn py_try_to_timestamp(col: &PyColumn, format: Option<&str>) -> PyResult<PyColumn> {
+    try_to_timestamp(&col.inner, format)
+        .map(|c| PyColumn { inner: c })
+        .map_err(|e| pyo3::exceptions::PyValueError::new_err(e))
 }
 
 #[pyfunction]
