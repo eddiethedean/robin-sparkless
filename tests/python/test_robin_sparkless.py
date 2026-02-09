@@ -99,6 +99,33 @@ def test_filter_with_and_or_operators() -> None:
     assert rows_or[0]["age"] == 25 and rows_or[1]["age"] == 40
 
 
+def test_filter_column_vs_column() -> None:
+    """filter with column–column comparison (col('a') > col('b')) works (fixes #184)."""
+    import robin_sparkless as rs
+
+    spark = rs.SparkSession.builder().app_name("test").get_or_create()
+    # Rows where col a > col b: (5,1), (4,2), (3,1) -> a>b for (5,1), (4,2)
+    data = [[1, 5], [2, 4], [3, 1], [4, 2], [5, 1]]
+    schema = [("a", "bigint"), ("b", "bigint")]
+    df = spark._create_dataframe_from_rows(data, schema)
+    # Method: col("a").gt(col("b"))
+    filtered_method = df.filter(rs.col("a").gt(rs.col("b")))
+    rows_method = filtered_method.collect()
+    assert len(rows_method) == 3
+    assert {(r["a"], r["b"]) for r in rows_method} == {(3, 1), (4, 2), (5, 1)}
+    # Operator: col("a") > col("b")
+    filtered_op = df.filter(rs.col("a") > rs.col("b"))
+    rows_op = filtered_op.collect()
+    assert len(rows_op) == 3
+    assert {(r["a"], r["b"]) for r in rows_op} == {(3, 1), (4, 2), (5, 1)}
+    # Other operators: <, >=, <=, ==, !=
+    assert df.filter(rs.col("a") < rs.col("b")).count() == 2  # (1,5), (2,4)
+    assert df.filter(rs.col("a") >= rs.col("b")).count() == 3  # (3,1), (4,2), (5,1)
+    assert df.filter(rs.col("a") <= rs.col("b")).count() == 2  # (1,5), (2,4)
+    assert df.filter(rs.col("a") == rs.col("b")).count() == 0
+    assert df.filter(rs.col("a") != rs.col("b")).count() == 5
+
+
 def test_with_column_and_show() -> None:
     """with_column adds a column; show runs without error."""
     import robin_sparkless as rs
