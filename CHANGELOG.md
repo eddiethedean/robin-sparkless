@@ -7,13 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Fixed
-
-- **#184 – Filter: support Column–Column comparisons** — `df.filter(col("a") > col("b"))` and `df.filter(col("a").gt(col("b")))` now work. Previously Python raised `TypeError: '>' not supported between instances of 'builtins.Column' and 'builtins.Column'`. The Python `Column` type now implements rich comparison methods (`__gt__`, `__ge__`, `__lt__`, `__le__`, `__eq__`, `__ne__`), and the comparison methods (`gt`, `ge`, `lt`, `le`, `eq`, `ne`) accept either a Column or a scalar (int, float, bool, str, None), matching PySpark semantics.
-
 ### Planned
 
 - **Phase 26 – Publish crate**: Prepare and publish robin-sparkless to crates.io (and optionally PyPI via maturin). See [ROADMAP.md](docs/ROADMAP.md) for details.
+
+## [0.4.0] - 2026-02-09
+
+### Added
+
+- **#184 – Filter: support Column–Column comparisons** — `df.filter(col("a") > col("b"))` and `df.filter(col("a").gt(col("b")))` now work. The Python `Column` type implements rich comparison methods (`__gt__`, `__ge__`, `__lt__`, `__le__`, `__eq__`, `__ne__`), and the comparison methods (`gt`, `ge`, `lt`, `le`, `eq`, `ne`) accept either a Column or a scalar (int, float, bool, str, None), matching PySpark semantics.
 
 ## [0.3.1] - 2026-02-09
 
