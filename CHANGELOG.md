@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **#182 – select() now evaluates Column expressions instead of resolving by name** — When `select()` received Column objects (e.g. `lit(2) + col("x")` or `(col("a") * 2).alias("doubled")`), the Python bindings tried `extract::<String>()` before `extract::<PyColumn>()`. Because Column is convertible to string, expressions were wrongly treated as column names and raised `RuntimeError: not found: (2 + x)`. We now check for PyColumn first, then str, so expression-based `select()` and the Sparkless Robin backend match PySpark semantics.
+- **Type-conversion functions no longer panic** — `to_char`, `to_varchar`, `to_number`, `try_to_number`, and `try_to_timestamp` now return `Result<Column, String>` (Rust) and `PyResult<PyColumn>` (Python) instead of using `.expect()`; invalid type names or unsupported column types produce a clear error instead of aborting. Plan interpreter and parity tests propagate these errors.
 
 ## [0.3.0] - 2026-02-06
 
