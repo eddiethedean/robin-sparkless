@@ -371,6 +371,39 @@ def test_col_lit_when() -> None:
     assert rows[2]["level"] == "high"
 
 
+def test_lit_date_and_datetime() -> None:
+    """lit() accepts datetime.date and datetime.datetime (Fixes #186)."""
+    import datetime
+
+    import robin_sparkless as rs
+
+    spark = rs.SparkSession.builder().app_name("test").get_or_create()
+    df = spark.create_dataframe(
+        [(1, 10, "a"), (2, 20, "b"), (3, 30, "c")], ["id", "x", "name"]
+    )
+
+    # with_column: lit(date) and lit(datetime) produce date/datetime columns
+    out = df.with_column("const_date", rs.lit(datetime.date(2025, 6, 15)))
+    out = out.with_column(
+        "const_ts",
+        rs.lit(datetime.datetime(2025, 6, 15, 12, 30, 45, 123456)),
+    )
+    rows = out.collect()
+    assert len(rows) == 3
+    # collect() may return date/datetime as Python types or as ISO strings
+    assert rows[0]["const_date"] in (datetime.date(2025, 6, 15), "2025-06-15")
+    ts_val = rows[0]["const_ts"]
+    assert ts_val == datetime.datetime(2025, 6, 15, 12, 30, 45, 123456) or (
+        isinstance(ts_val, str) and ts_val.startswith("2025-06-15")
+    )
+
+    # filter with lit(date): add two date columns and filter col(date) < col(date2)
+    out2 = df.with_column("d1", rs.lit(datetime.date(2025, 1, 1)))
+    out2 = out2.with_column("d2", rs.lit(datetime.date(2025, 6, 1)))
+    filtered = out2.filter(rs.col("d1").lt(rs.col("d2")))
+    assert filtered.count() == 3
+
+
 def test_limit_and_distinct() -> None:
     """limit(n) and distinct() behave correctly."""
     import robin_sparkless as rs

@@ -585,32 +585,87 @@ fn py_col(col: &str) -> PyColumn {
 /// Use for constant values in expressions (e.g. ``filter(col("x") > lit(10))``).
 ///
 /// Args:
-///     col: A single value: ``None``, ``int``, ``float``, ``bool``, or ``str``.
+///     col: A single value: ``None``, ``int``, ``float``, ``bool``, ``str``,
+///         ``datetime.date``, or ``datetime.datetime`` (PySpark parity, see #186).
 ///
 /// Returns:
 ///     Column: Literal expression with the given value.
 ///
 /// Raises:
-///     TypeError: If the value is not None, int, float, bool, or str.
+///     TypeError: If the value is not a supported type.
 #[pyfunction]
-fn py_lit(col: &Bound<'_, pyo3::types::PyAny>) -> PyResult<PyColumn> {
-    let inner = if col.is_none() {
-        use polars::prelude::*;
+fn py_lit(value: &Bound<'_, pyo3::types::PyAny>) -> PyResult<PyColumn> {
+    use polars::prelude::*;
+    let inner = if value.is_none() {
         RsColumn::from_expr(lit(NULL), None)
-    } else if let Ok(x) = col.extract::<i64>() {
+    } else if let Ok(x) = value.extract::<i64>() {
         RsColumn::from_expr(polars::prelude::lit(x), None)
-    } else if let Ok(x) = col.extract::<f64>() {
+    } else if let Ok(x) = value.extract::<f64>() {
         RsColumn::from_expr(polars::prelude::lit(x), None)
-    } else if let Ok(x) = col.extract::<bool>() {
+    } else if let Ok(x) = value.extract::<bool>() {
         RsColumn::from_expr(polars::prelude::lit(x), None)
-    } else if let Ok(x) = col.extract::<String>() {
+    } else if let Ok(x) = value.extract::<String>() {
         RsColumn::from_expr(polars::prelude::lit(x.as_str()), None)
+    } else if let Ok(expr) = py_lit_date_or_datetime(value) {
+        RsColumn::from_expr(expr, None)
     } else {
         return Err(pyo3::exceptions::PyTypeError::new_err(
-            "lit() supports only None, int, float, bool, str",
+            "lit() supports only None, int, float, bool, str, datetime.date, datetime.datetime",
         ));
     };
     Ok(PyColumn { inner })
+}
+
+/// Try to build a Date or DateTime literal from Python datetime.date / datetime.datetime.
+/// We detect by attributes: values with year/month/day are supported; if they also have
+/// hour/minute/second we treat as datetime, else as date (avoids is_instance across the pyo3 boundary).
+fn py_lit_date_or_datetime(value: &Bound<'_, pyo3::types::PyAny>) -> PyResult<polars::prelude::Expr> {
+    use chrono::NaiveDate;
+    use polars::prelude::{Expr, LiteralValue, TimeUnit};
+
+    let year: Option<i32> = value.getattr("year").ok().and_then(|a| a.extract().ok());
+    let month: Option<u32> = value.getattr("month").ok().and_then(|a| a.extract().ok());
+    let day: Option<u32> = value.getattr("day").ok().and_then(|a| a.extract().ok());
+    let (year, month, day) = match (year, month, day) {
+        (Some(y), Some(m), Some(d)) => (y, m, d),
+        _ => {
+            return Err(pyo3::exceptions::PyTypeError::new_err(
+                "lit() supports only None, int, float, bool, str, datetime.date, datetime.datetime",
+            ))
+        }
+    };
+
+    // datetime.datetime has hour/minute/second; datetime.date does not
+    let has_time = value.getattr("hour").is_ok()
+        && value.getattr("minute").is_ok()
+        && value.getattr("second").is_ok();
+
+    if has_time {
+        let hour: u32 = value.getattr("hour")?.extract()?;
+        let minute: u32 = value.getattr("minute")?.extract()?;
+        let second: u32 = value.getattr("second")?.extract()?;
+        let micros: u32 = value
+            .getattr("microsecond")
+            .ok()
+            .and_then(|a| a.extract().ok())
+            .unwrap_or(0);
+        let nd = NaiveDate::from_ymd_opt(year, month, day)
+            .ok_or_else(|| pyo3::exceptions::PyValueError::new_err("invalid date"))?;
+        let ndt = nd
+            .and_hms_micro_opt(hour, minute, second, micros)
+            .ok_or_else(|| pyo3::exceptions::PyValueError::new_err("invalid datetime"))?;
+        let us = ndt.and_utc().timestamp_micros();
+        return Ok(Expr::Literal(LiteralValue::DateTime(
+            us,
+            TimeUnit::Microseconds,
+            None,
+        )));
+    }
+
+    let nd = NaiveDate::from_ymd_opt(year, month, day)
+        .ok_or_else(|| pyo3::exceptions::PyValueError::new_err("invalid date"))?;
+    let days = (nd - crate::date_utils::epoch_naive_date()).num_days() as i32;
+    Ok(Expr::Literal(LiteralValue::Date(days)))
 }
 
 /// Conditional expression: when(condition) then value else default.
