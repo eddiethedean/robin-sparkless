@@ -54,7 +54,9 @@ def main() -> int:
         return result.returncode
 
     print(f"\nProcessed {len(json_files)} fixtures in {fixtures_dir}")
-    print("Run 'make pyspark-parity' or 'cargo test pyspark_parity_fixtures' to verify.")
+    print(
+        "Run 'make pyspark-parity' or 'cargo test pyspark_parity_fixtures' to verify."
+    )
     return 0
 
 
