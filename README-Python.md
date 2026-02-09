@@ -48,8 +48,8 @@ Building from source requires [Rust](https://rustup.rs/) and [maturin](https://w
 ```bash
 pip install maturin
 maturin develop --features pyo3           # default: DataFrame API
-maturin develop --features "pyo3,sql"      # spark.sql() and temp views
-maturin develop --features "pyo3,delta"    # read_delta / write_delta
+maturin develop --features "pyo3,sql"      # spark.sql(), temp views, saveAsTable (in-memory tables), catalog.listTables/dropTable, read_delta(name)
+maturin develop --features "pyo3,delta"   # read_delta / write_delta (path I/O)
 maturin develop --features "pyo3,sql,delta" # all optional features
 ```
 

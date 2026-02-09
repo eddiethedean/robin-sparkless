@@ -24,7 +24,7 @@ maturin develop --features "pyo3,delta"      # read_delta, write_delta
 maturin develop --features "pyo3,sql,delta" # All optional features
 ```
 
-**Delta Lake** (optional `delta` feature): No extra runtime dependencies. Build with `--features delta` (Rust) or `maturin develop --features "pyo3,delta"` (Python). Then use `spark.read_delta(path)`, `spark.read_delta_version(path, version)`, and `df.write_delta(path, overwrite)`.
+**Delta Lake** (optional `delta` feature): No extra runtime dependencies. Build with `--features delta` (Rust) or `maturin develop --features "pyo3,delta"` (Python). Then use `spark.read_delta(path)`, `spark.read_delta_version(path, version)`, and `df.write_delta(path, overwrite)`. With the `sql` feature, `read_delta(name_or_path)` also accepts a **table name**: if the argument is not path-like, it resolves like `table(name)` (temp view first, then saved table), so you can `df.write_delta_table("t")` then `spark.read_delta("t")` without writing to disk.
 
 Then use the `robin_sparkless` Python module; see [PYTHON_API.md](PYTHON_API.md).
 
@@ -149,8 +149,8 @@ For roadmap and Sparkless integration phases (Phases 12–22 completed; Phases 2
 
 ### Optional features (Rust)
 
-- **SQL** (`--features sql`): `SparkSession::sql(query)` with temp views (`create_or_replace_temp_view`, `table`). Supports single SELECT, FROM/JOIN, WHERE, GROUP BY, ORDER BY, LIMIT.
-- **Delta Lake** (`--features delta`): `read_delta(path)`, `read_delta_with_version(path, version)` (time travel), `write_delta(path, overwrite)` on DataFrame. Requires `deltalake` + tokio.
+- **SQL** (`--features sql`): `SparkSession::sql(query)` with temp views and in-memory tables. Use `create_or_replace_temp_view` and `table(name)`; or `df.write().saveAsTable(name, mode="error"|"overwrite"|"append"|"ignore")` for saved tables (session-scoped, no disk). Resolution: `table(name)` and `read_delta(name)` use temp view first, then saved table. Catalog: `listTables()`, `tableExists()`, `dropTempView(name)`, `dropTable(name)`. Supports single SELECT, FROM/JOIN, WHERE, GROUP BY, ORDER BY, LIMIT.
+- **Delta Lake** (`--features delta`): `read_delta(path)`, `read_delta_with_version(path, version)` (time travel), `write_delta(path, overwrite)` on DataFrame. With `sql`, `read_delta(name_or_path)` accepts a table name (in-memory); `df.write_delta_table(name)` registers a DataFrame for `read_delta(name)`. Requires `deltalake` + tokio for path-based I/O.
 
 ### Benchmarks
 

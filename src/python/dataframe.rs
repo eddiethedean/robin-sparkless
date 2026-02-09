@@ -1,7 +1,7 @@
 //! Python DataFrame, GroupedData, DataFrameStat, DataFrameNa, DataFrameWriter (PySpark sql).
 
 use crate::dataframe::JoinType;
-use crate::dataframe::{CubeRollupData, WriteFormat, WriteMode};
+use crate::dataframe::{CubeRollupData, SaveMode, WriteFormat, WriteMode};
 use crate::functions::SortOrder;
 use crate::{DataFrame, GroupedData};
 use polars::prelude::{col, lit, Expr, NULL};
@@ -112,6 +112,18 @@ impl PyDataFrame {
         self.inner
             .write_delta(Path::new(path), overwrite)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
+    }
+
+    /// Register this DataFrame as an in-memory table by name (saved-tables namespace). Readable via ``read_delta(name)`` or ``spark.table(name)``.
+    #[cfg(feature = "sql")]
+    fn write_delta_table(&self, name: &str, _py: Python<'_>) -> PyResult<()> {
+        let session = get_default_session().ok_or_else(|| {
+            pyo3::exceptions::PyRuntimeError::new_err(
+                "write_delta_table: no default session. Call SparkSession.builder().get_or_create() first.",
+            )
+        })?;
+        session.register_table(name, self.inner.clone());
+        Ok(())
     }
 
     /// Materialize the DataFrame and return rows as a list of dicts.
@@ -1776,6 +1788,59 @@ impl PyDataFrameWriter {
     fn save(&self, path: &str) -> PyResult<()> {
         self.build_writer()
             .save(Path::new(path))
+            .map_err(|e: polars::prelude::PolarsError| {
+                pyo3::exceptions::PyRuntimeError::new_err(e.to_string())
+            })
+    }
+
+    /// Save the DataFrame as an in-memory table (PySpark: saveAsTable).
+    ///
+    /// Registers the DataFrame in the session's saved-tables namespace. Session-scoped;
+    /// readable via ``spark.table(name)`` or ``spark.read.table(name)`` (temp view
+    /// takes precedence if same name exists). format, partitionBy, and options are
+    /// accepted for API compatibility but ignored for in-memory tables.
+    ///
+    /// Args:
+    ///     name: Table name.
+    ///     format: Ignored for in-memory (API compatibility).
+    ///     mode: "error" (default), "overwrite", "append", or "ignore".
+    ///     partitionBy: Ignored for in-memory (API compatibility).
+    ///     **options: Ignored for in-memory (API compatibility).
+    ///
+    /// Raises:
+    ///     RuntimeError: If no default session, or mode is "error" and table exists.
+    #[cfg(feature = "sql")]
+    #[pyo3(name = "saveAsTable")]
+    #[pyo3(signature = (name, format=None, mode=None, partition_by=None))]
+    fn save_as_table(
+        &self,
+        _py: Python<'_>,
+        name: &str,
+        format: Option<&str>,
+        mode: Option<&str>,
+        partition_by: Option<&Bound<'_, pyo3::types::PyAny>>,
+    ) -> PyResult<()> {
+        let _ = (format, partition_by); // ignored for in-memory (API compatibility)
+        let session = get_default_session().ok_or_else(|| {
+            pyo3::exceptions::PyRuntimeError::new_err(
+                "saveAsTable: no default session. Call SparkSession.builder().get_or_create() first.",
+            )
+        })?;
+        let save_mode = match mode.unwrap_or("error").to_lowercase().as_str() {
+            "error" | "errorifexists" => SaveMode::ErrorIfExists,
+            "overwrite" => SaveMode::Overwrite,
+            "append" => SaveMode::Append,
+            "ignore" => SaveMode::Ignore,
+            other => {
+                return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                    "saveAsTable mode must be one of 'error', 'overwrite', 'append', 'ignore', got '{}'",
+                    other
+                )));
+            }
+        };
+        self.df
+            .write()
+            .save_as_table(&session, name, save_mode)
             .map_err(|e: polars::prelude::PolarsError| {
                 pyo3::exceptions::PyRuntimeError::new_err(e.to_string())
             })

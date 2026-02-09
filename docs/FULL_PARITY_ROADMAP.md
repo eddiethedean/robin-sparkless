@@ -11,11 +11,11 @@ A phased plan to achieve full API and behavioral parity between robin-sparkless 
 | **Functions** | ~295+ implemented | ~415 | ~120 (many are aliases or param-name mismatches) |
 | **DataFrame methods** | ~80+ (Phase D: view, corr/cov, aliases, stubs) | ~95 | ~15 |
 | **DataFrameReader** | spark.read().option/options/format/load/table/csv/parquet/json | 12+ methods | ~6 (jdbc, orc, text, schema full impl) |
-| **DataFrameWriter** | option/options/partition_by/parquet/csv/json | 16+ methods | ~10 (bucketBy, saveAsTable, insertInto, orc, text) |
+| **DataFrameWriter** | option/options/partition_by/parquet/csv/json, saveAsTable (in-memory) | 16+ methods | ~9 (bucketBy, insertInto, orc, text) |
 | **Column methods** | Many as module functions | 17 in class | Structural (robin uses F.xxx style) |
 | **GroupedData** | Strong | 10 methods | ~2 |
 | **SparkSession** | Core | 36 methods | ~25 |
-| **Catalog** | None | 27 methods | 27 |
+| **Catalog** | dropTempView, listTables, tableExists, dropTable (in-memory) | 27 methods | ~23 (createTable, getTable, etc. stubs) |
 | **Window** | Core | 4 WindowSpec methods | 4 |
 
 **Parity fixtures:** 201 passing (11 skipped). Target: 200+ for full confidence. Phase-specific tests: `make test-parity-phase-a` … `make test-parity-phase-g`; see [PARITY_STATUS.md](PARITY_STATUS.md) and `tests/fixtures/phase_manifest.json`.
@@ -95,7 +95,7 @@ A phased plan to achieve full API and behavioral parity between robin-sparkless 
 - **Parity fixtures**: `read_csv_with_options` (reader_options), `read_table` (table_source)
 - `spark.read.csv(...)`, `spark.read.option("header","true").csv(path)`, `spark.read.format("parquet").load(path)`, `spark.read.table("name")` work
 - `df.write.mode("overwrite").parquet(path)`, `df.write.option("header","true").csv(path)` work
-- Stubs: `jdbc`, `orc`, `text`, `bucketBy`, `saveAsTable`, `insertInto` (out of scope)
+- `saveAsTable(name, mode)` implemented (in-memory; session-scoped). Stubs: `jdbc`, `orc`, `text`, `bucketBy`, `insertInto` (out of scope)
 
 ---
 
@@ -118,10 +118,10 @@ A phased plan to achieve full API and behavioral parity between robin-sparkless 
 **Goal:** Expose SparkSession and Catalog methods for API compatibility.
 
 **Deliverables (done):**
-- **Catalog class**: `dropTempView`, `dropGlobalTempView`, `listTables`, `tableExists`, `currentDatabase`, `currentCatalog`, `listDatabases`, `listCatalogs` (functional where supported); `cacheTable`, `uncacheTable`, `clearCache`, `refreshTable`, `refreshByPath`, `recoverPartitions` (no-op); `createTable`, `createExternalTable`, `getDatabase`, `getFunction`, `getTable`, `registerFunction` (NotImplementedError); `databaseExists`, `functionExists`, `isCached`, `listColumns`, `listFunctions`, `setCurrentCatalog`, `setCurrentDatabase` (stub/fixed).
+- **Catalog class**: `dropTempView`, `dropGlobalTempView`, `listTables(dbName=None)` (names from temp views + saved tables), `tableExists(tableName, dbName=None)`, `dropTable(tableName)` (in-memory saved tables only), `currentDatabase`, `currentCatalog`, `listDatabases`, `listCatalogs` (functional where supported); `cacheTable`, `uncacheTable`, `clearCache`, `refreshTable`, `refreshByPath`, `recoverPartitions` (no-op); `createTable`, `createExternalTable`, `getDatabase`, `getFunction`, `getTable`, `registerFunction` (NotImplementedError); `databaseExists`, `functionExists`, `isCached`, `listColumns`, `listFunctions`, `setCurrentCatalog`, `setCurrentDatabase` (stub/fixed).
 - **RuntimeConfig (spark.conf)**: `get`, `getAll`, `set` (NotImplementedError), `isModifiable`.
 - **SparkSession**: `catalog()`, `conf()`, `newSession()`, `stop()`, `range(end)` / `range(start, end, step)`, `version`, `udf()` (NotImplementedError), `getActiveSession()`, `getDefaultSession()` (classmethods).
-- **Rust session**: `drop_temp_view`, `drop_global_temp_view`, `table_exists`, `list_temp_view_names`, `range(start, end, step)`.
+- **Rust session**: `drop_temp_view`, `drop_global_temp_view`, `table_exists`, `list_temp_view_names`, `list_table_names`, `drop_table`, `range(start, end, step)`.
 - **Tests**: `test_phase_e_spark_session_catalog`.
 
 ---

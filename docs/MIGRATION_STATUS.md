@@ -29,7 +29,7 @@
 
 The migration itself is complete (Rust-only + Polars backend, build/test green). Optional features are implemented:
 
-- **SQL** (optional `sql` feature): `SparkSession::sql()`, temp views; see [QUICKSTART.md](QUICKSTART.md).
+- **SQL** (optional `sql` feature): `SparkSession::sql()`, temp views, in-memory `saveAsTable`/`write_delta_table`, catalog `listTables`/`dropTable`, `read_delta(name_or_path)`; see [QUICKSTART.md](QUICKSTART.md).
 - **Delta Lake** (optional `delta` feature): `read_delta`, `read_delta_with_version`, `write_delta`.
 - **Benchmarks**: `cargo bench` (robin vs Polars); target within ~2x.
 

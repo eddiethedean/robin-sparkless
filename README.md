@@ -31,8 +31,8 @@
 | **Arrays & maps** | `array_*`, `explode`, `create_map`, `map_keys`, `map_values`, and related functions |
 | **Strings & JSON** | String functions (`upper`, `lower`, `substring`, `regexp_*`, etc.), `get_json_object`, `from_json`, `to_json` |
 | **Datetime & math** | Date/time extractors and arithmetic, `year`/`month`/`day`, math (`sin`, `cos`, `sqrt`, `pow`, …) |
-| **Optional SQL** | `spark.sql("SELECT ...")` with temp views (`createOrReplaceTempView`, `table`) — enable with `--features sql` |
-| **Optional Delta** | `read_delta`, `read_delta_with_version`, `write_delta` — enable with `--features delta` |
+| **Optional SQL** | `spark.sql("SELECT ...")` with temp views and in-memory tables: `createOrReplaceTempView`, `table(name)`, `df.write().saveAsTable(name, mode=...)`, `spark.catalog().listTables()`, `dropTable(name)` — enable with `--features sql` |
+| **Optional Delta** | `read_delta(path)` or `read_delta(table_name)`, `read_delta_with_version`, `write_delta`, `write_delta_table(name)` — enable with `--features delta` (path I/O); table-by-name works with `sql` only |
 
 Known differences from PySpark are documented in [docs/PYSPARK_DIFFERENCES.md](docs/PYSPARK_DIFFERENCES.md). Out-of-scope items (XML, UDF, streaming, RDD) are documented in [docs/DEFERRED_SCOPE.md](docs/DEFERRED_SCOPE.md). Parity status and roadmap are in [docs/PARITY_STATUS.md](docs/PARITY_STATUS.md) and [docs/ROADMAP.md](docs/ROADMAP.md).
 
