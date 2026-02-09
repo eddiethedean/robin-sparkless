@@ -411,9 +411,7 @@ def test_lit_date_edge_cases() -> None:
     import robin_sparkless as rs
 
     spark = rs.SparkSession.builder().app_name("test").get_or_create()
-    df = spark.create_dataframe(
-        [(1, 10, "a"), (2, 20, "b")], ["id", "x", "name"]
-    )
+    df = spark.create_dataframe([(1, 10, "a"), (2, 20, "b")], ["id", "x", "name"])
 
     # Epoch date (1970-01-01)
     out = df.with_column("epoch", rs.lit(datetime.date(1970, 1, 1)))
@@ -439,9 +437,7 @@ def test_lit_datetime_edge_cases() -> None:
     import robin_sparkless as rs
 
     spark = rs.SparkSession.builder().app_name("test").get_or_create()
-    df = spark.create_dataframe(
-        [(1, 10, "a")], ["id", "x", "name"]
-    )
+    df = spark.create_dataframe([(1, 10, "a")], ["id", "x", "name"])
 
     # Midnight, no microseconds
     out = df.with_column(
@@ -510,21 +506,19 @@ def test_lit_rejects_non_date_datetime() -> None:
     import robin_sparkless as rs
 
     spark = rs.SparkSession.builder().app_name("test").get_or_create()
-    df = spark.create_dataframe(
-        [(1, 10, "a")], ["id", "x", "name"]
-    )
+    df = spark.create_dataframe([(1, 10, "a")], ["id", "x", "name"])
 
-    # list is not supported
+    # list is not supported (intentionally wrong type for runtime test)
     with pytest.raises(TypeError, match="lit\\(\\) supports only"):
-        df.with_column("bad", rs.lit([1, 2, 3]))
+        df.with_column("bad", rs.lit([1, 2, 3]))  # type: ignore[arg-type]
 
-    # dict is not supported
+    # dict is not supported (intentionally wrong type for runtime test)
     with pytest.raises(TypeError, match="lit\\(\\) supports only"):
-        df.with_column("bad", rs.lit({"a": 1}))
+        df.with_column("bad", rs.lit({"a": 1}))  # type: ignore[arg-type]
 
     # bytes is not supported (no year/month/day path; fails as unsupported type)
     with pytest.raises(TypeError, match="lit\\(\\) supports only"):
-        df.with_column("bad", rs.lit(b"bytes"))
+        df.with_column("bad", rs.lit(b"bytes"))  # type: ignore[arg-type]
 
 
 def test_lit_date_and_datetime_in_when() -> None:

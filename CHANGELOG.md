@@ -7,10 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
-
-- **#187 – Window API for row_number, rank, sum over window, lag, lead** — Column now exposes `.over(partition_by)` and window functions: `.row_number(descending)`, `.rank(descending)`, `.dense_rank(descending)`, `.lag(n)`, `.lead(n)`. Use with `.over(["dept"])` for partition. Aggregations like `sum(col("amount")).over(["id"])` are supported. Enables PySpark-style window expressions without a separate Window type.
-
 ### Planned
 
 - **Phase 26 – Publish crate**: Prepare and publish robin-sparkless to crates.io (and optionally PyPI via maturin). See [ROADMAP.md](docs/ROADMAP.md) for details.
@@ -19,8 +15,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **#187 – Window API for row_number, rank, sum over window, lag, lead** — Column now exposes `.over(partition_by)` and window functions: `.row_number(descending)`, `.rank(descending)`, `.dense_rank(descending)`, `.lag(n)`, `.lead(n)`. Use with `.over(["dept"])` for partition. Aggregations like `sum(col("amount")).over(["id"])` are supported. Enables PySpark-style window expressions without a separate Window type.
 - **#186 – lit(): extend to date/datetime types for PySpark parity** — `lit()` now accepts `datetime.date` and `datetime.datetime` in addition to `None`, int, float, bool, and str. Enables expressions like `col("dt") > lit(some_date)` and `with_column("ts", lit(datetime.datetime(...)))` with proper date/timestamp semantics.
 - **#184 – Filter: support Column–Column comparisons** — `df.filter(col("a") > col("b"))` and `df.filter(col("a").gt(col("b")))` now work. The Python `Column` type implements rich comparison methods (`__gt__`, `__ge__`, `__lt__`, `__le__`, `__eq__`, `__ne__`), and the comparison methods (`gt`, `ge`, `lt`, `le`, `eq`, `ne`) accept either a Column or a scalar (int, float, bool, str, None), matching PySpark semantics.
+
+### Changed
+
+- **Python parity tests** — Lit date/datetime, column-vs-column, issue 176, and window parity tests now use only predetermined expected outputs (from prior PySpark runs); no PySpark or JVM at test runtime.
 
 ## [0.3.1] - 2026-02-09
 
