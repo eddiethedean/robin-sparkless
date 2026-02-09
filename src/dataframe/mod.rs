@@ -16,8 +16,7 @@ use crate::column::Column;
 use crate::functions::SortOrder;
 use crate::schema::StructType;
 use polars::prelude::{
-    col, lit, AnyValue, DataFrame as PlDataFrame, DataType, Expr, PolarsError,
-    SchemaNamesAndDtypes,
+    col, lit, AnyValue, DataFrame as PlDataFrame, DataType, Expr, PolarsError, SchemaNamesAndDtypes,
 };
 use serde_json::Value as JsonValue;
 use std::collections::HashMap;
@@ -801,10 +800,8 @@ impl<'a> DataFrameWriter<'a> {
                     };
                     match existing {
                         Some(existing) => {
-                            let lfs: [LazyFrame; 2] = [
-                                existing.lazy(),
-                                self.df.df.as_ref().clone().lazy(),
-                            ];
+                            let lfs: [LazyFrame; 2] =
+                                [existing.lazy(), self.df.df.as_ref().clone().lazy()];
                             concat(lfs, UnionArgs::default())?.collect()?
                         }
                         None => self.df.df.as_ref().clone(),
@@ -827,9 +824,7 @@ impl<'a> DataFrameWriter<'a> {
                 let mut df_mut = to_write;
                 ParquetWriter::new(&mut file)
                     .finish(&mut df_mut)
-                    .map_err(|e| {
-                        PolarsError::ComputeError(format!("write parquet: {e}").into())
-                    })?;
+                    .map_err(|e| PolarsError::ComputeError(format!("write parquet: {e}").into()))?;
             }
             WriteFormat::Csv => {
                 let has_header = self
@@ -895,9 +890,7 @@ impl<'a> DataFrameWriter<'a> {
                 })?;
             } else {
                 std::fs::remove_file(path).map_err(|e| {
-                    PolarsError::ComputeError(
-                        format!("write partitioned: remove_file: {e}").into(),
-                    )
+                    PolarsError::ComputeError(format!("write partitioned: remove_file: {e}").into())
                 })?;
             }
         }
@@ -912,15 +905,11 @@ impl<'a> DataFrameWriter<'a> {
         };
 
         for row_idx in 0..unique_keys.height() {
-            let row = unique_keys.get(row_idx).ok_or_else(|| {
-                PolarsError::ComputeError("partition_row: get row".into())
-            })?;
+            let row = unique_keys
+                .get(row_idx)
+                .ok_or_else(|| PolarsError::ComputeError("partition_row: get row".into()))?;
             let filter_expr = partition_row_to_filter_expr(&resolved, &row)?;
-            let subset = to_write
-                .clone()
-                .lazy()
-                .filter(filter_expr)
-                .collect()?;
+            let subset = to_write.clone().lazy().filter(filter_expr).collect()?;
             let subset = subset.select(data_cols.iter().copied())?;
             if subset.height() == 0 {
                 continue;
@@ -997,9 +986,7 @@ impl<'a> DataFrameWriter<'a> {
                         .with_separator(delimiter)
                         .finish(&mut subset.clone())
                         .map_err(|e| {
-                            PolarsError::ComputeError(
-                                format!("write partitioned csv: {e}").into(),
-                            )
+                            PolarsError::ComputeError(format!("write partitioned csv: {e}").into())
                         })?;
                 }
                 WriteFormat::Json => {
@@ -1011,9 +998,7 @@ impl<'a> DataFrameWriter<'a> {
                     JsonWriter::new(&mut file)
                         .finish(&mut subset.clone())
                         .map_err(|e| {
-                            PolarsError::ComputeError(
-                                format!("write partitioned json: {e}").into(),
-                            )
+                            PolarsError::ComputeError(format!("write partitioned json: {e}").into())
                         })?;
                 }
             }
@@ -1049,11 +1034,14 @@ fn format_partition_value(av: &AnyValue<'_>) -> String {
         _ => av.to_string(),
     };
     // Replace path separators and other unsafe chars so the value is a valid path segment
-    s.replace(std::path::MAIN_SEPARATOR, "_").replace('/', "_")
+    s.replace([std::path::MAIN_SEPARATOR, '/'], "_")
 }
 
 /// Build a filter expression that matches rows where partition columns equal the given row values.
-fn partition_row_to_filter_expr(col_names: &[String], row: &[AnyValue<'_>]) -> Result<Expr, PolarsError> {
+fn partition_row_to_filter_expr(
+    col_names: &[String],
+    row: &[AnyValue<'_>],
+) -> Result<Expr, PolarsError> {
     if col_names.len() != row.len() {
         return Err(PolarsError::ComputeError(
             format!(
@@ -1080,9 +1068,7 @@ fn partition_row_to_filter_expr(col_names: &[String], row: &[AnyValue<'_>]) -> R
             _ => {
                 // Fallback: compare as string
                 let s = av.to_string();
-                col(name.as_str())
-                    .cast(DataType::String)
-                    .eq(lit(s))
+                col(name.as_str()).cast(DataType::String).eq(lit(s))
             }
         };
         pred = Some(match pred {

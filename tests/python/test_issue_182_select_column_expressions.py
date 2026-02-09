@@ -10,8 +10,6 @@ and produces the correct computed columns.
 
 from __future__ import annotations
 
-import pytest
-
 
 def test_select_expression_literal_plus_column() -> None:
     """select(lit(2) + col('x')) evaluates expression; plus_two = [12, 22] for x=[10, 20]."""
@@ -46,7 +44,9 @@ def test_select_expression_aliased() -> None:
     import robin_sparkless as rs
 
     spark = rs.SparkSession.builder().app_name("test").get_or_create()
-    df = spark._create_dataframe_from_rows([{"a": 1}, {"a": 2}, {"a": 3}], [("a", "int")])
+    df = spark._create_dataframe_from_rows(
+        [{"a": 1}, {"a": 2}, {"a": 3}], [("a", "int")]
+    )
 
     result = df.select((rs.col("a") * 2).alias("doubled")).collect()
     assert result == [{"doubled": 2}, {"doubled": 4}, {"doubled": 6}]

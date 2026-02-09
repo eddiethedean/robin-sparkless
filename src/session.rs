@@ -1031,7 +1031,11 @@ mod tests {
             .unwrap();
         assert!(path.is_dir());
         let entries: Vec<_> = fs::read_dir(&path).unwrap().collect();
-        assert_eq!(entries.len(), 2, "expected two partition dirs (age=25, age=30)");
+        assert_eq!(
+            entries.len(),
+            2,
+            "expected two partition dirs (age=25, age=30)"
+        );
         let names: Vec<String> = entries
             .iter()
             .filter_map(|e| e.as_ref().ok())
