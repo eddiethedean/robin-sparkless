@@ -824,6 +824,26 @@ def test_sparkless_parity_join_inner_returns_rows() -> None:
     assert rows[0]["id"] == 1 and rows[0]["v"] == 10 and rows[0]["w"] == 100
 
 
+def test_join_on_string_single_column() -> None:
+    """join(other, on='id', how='inner') works like on=['id'] (Fixes #175)."""
+    import robin_sparkless as rs
+
+    spark = rs.SparkSession.builder().app_name("test").get_or_create()
+    df1 = spark._create_dataframe_from_rows(
+        [{"id": 1, "x": 10}], [("id", "bigint"), ("x", "bigint")]
+    )
+    df2 = spark._create_dataframe_from_rows(
+        [{"id": 1, "y": 20}], [("id", "bigint"), ("y", "bigint")]
+    )
+    result = df1.join(df2, on="id", how="inner")
+    rows = result.collect()
+    assert len(rows) == 1
+    assert rows[0]["id"] == 1 and rows[0]["x"] == 10 and rows[0]["y"] == 20
+    # List form still works and yields same result
+    result_list = df1.join(df2, on=["id"], how="inner")
+    assert result_list.collect() == rows
+
+
 def test_sparkless_parity_join_left_returns_rows() -> None:
     """Join (left) returns rows. PySpark: left join keeps all left rows."""
     import robin_sparkless as rs
