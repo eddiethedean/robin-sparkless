@@ -1213,34 +1213,31 @@ pub fn try_cast(column: &Column, type_name: &str) -> Result<Column, String> {
 
 /// Cast to string, optionally with format for datetime (PySpark to_char, to_varchar).
 /// When format is Some, uses date_format for datetime columns (PySpark format → chrono strftime); otherwise cast to string.
-/// Panics if the cast to string fails (invalid type name or unsupported column type).
-pub fn to_char(column: &Column, format: Option<&str>) -> Column {
+/// Returns Err if the cast to string fails (invalid type name or unsupported column type).
+pub fn to_char(column: &Column, format: Option<&str>) -> Result<Column, String> {
     match format {
-        Some(fmt) => column
+        Some(fmt) => Ok(column
             .clone()
-            .date_format(&crate::udfs::pyspark_format_to_chrono(fmt)),
-        None => {
-            cast(column, "string").expect("to_char: cast to string failed; use a valid column type")
-        }
+            .date_format(&crate::udfs::pyspark_format_to_chrono(fmt))),
+        None => cast(column, "string"),
     }
 }
 
 /// Alias for to_char (PySpark to_varchar).
-pub fn to_varchar(column: &Column, format: Option<&str>) -> Column {
+pub fn to_varchar(column: &Column, format: Option<&str>) -> Result<Column, String> {
     to_char(column, format)
 }
 
 /// Cast to numeric (PySpark to_number). Uses Double. Format parameter reserved for future use.
-/// Panics if the cast to double fails (invalid type name or unsupported column type).
-pub fn to_number(column: &Column, _format: Option<&str>) -> Column {
-    cast(column, "double").expect("to_number: cast to double failed; use a valid column type")
+/// Returns Err if the cast to double fails (invalid type name or unsupported column type).
+pub fn to_number(column: &Column, _format: Option<&str>) -> Result<Column, String> {
+    cast(column, "double")
 }
 
 /// Cast to numeric, null on invalid (PySpark try_to_number). Format parameter reserved for future use.
-/// Panics if the try_cast setup fails (invalid type name); column values that cannot be parsed become null.
-pub fn try_to_number(column: &Column, _format: Option<&str>) -> Column {
+/// Returns Err if the try_cast setup fails (invalid type name); column values that cannot be parsed become null.
+pub fn try_to_number(column: &Column, _format: Option<&str>) -> Result<Column, String> {
     try_cast(column, "double")
-        .expect("try_to_number: try_cast to double failed; use a valid type name")
 }
 
 /// Cast to timestamp, or parse with format when provided (PySpark to_timestamp).
@@ -1260,19 +1257,18 @@ pub fn to_timestamp(column: &Column, format: Option<&str>) -> Result<Column, Str
 }
 
 /// Cast to timestamp, null on invalid, or parse with format when provided (PySpark try_to_timestamp).
-/// Panics if the try_cast setup fails (invalid type name) when format is None.
-pub fn try_to_timestamp(column: &Column, format: Option<&str>) -> Column {
+/// Returns Err if the try_cast setup fails (invalid type name) when format is None.
+pub fn try_to_timestamp(column: &Column, format: Option<&str>) -> Result<Column, String> {
     use polars::prelude::*;
     match format {
-        None => try_cast(column, "timestamp")
-            .expect("try_to_timestamp: try_cast to timestamp failed; use a valid type name"),
+        None => try_cast(column, "timestamp"),
         Some(fmt) => {
             let fmt_owned = fmt.to_string();
             let expr = column.expr().clone().map(
                 move |s| crate::udfs::apply_to_timestamp_format(s, Some(&fmt_owned), false),
                 GetOutput::from_type(DataType::Datetime(TimeUnit::Microseconds, None)),
             );
-            crate::column::Column::from_expr(expr, None)
+            Ok(crate::column::Column::from_expr(expr, None))
         }
     }
 }

@@ -3945,7 +3945,7 @@ fn parse_with_column_expr(src: &str, mock_dates: bool) -> Result<Expr, String> {
         let col_name = extract_col_name(parts.first().ok_or("to_char needs column")?)?;
         let format = parts.get(1).map(|p| p.trim_matches(['\'', '"']));
         let c = col(col_name);
-        return Ok(to_char(&c, format).into_expr());
+        return Ok(to_char(&c, format)?.into_expr());
     }
     if s.starts_with("to_number(") {
         let inner = extract_first_arg(s, "to_number(")?;
@@ -3953,7 +3953,7 @@ fn parse_with_column_expr(src: &str, mock_dates: bool) -> Result<Expr, String> {
         let col_name = extract_col_name(parts.first().ok_or("to_number needs column")?)?;
         let format = parts.get(1).map(|p| p.trim_matches(['\'', '"']));
         let c = col(col_name);
-        return Ok(to_number(&c, format).into_expr());
+        return Ok(to_number(&c, format)?.into_expr());
     }
     if s.starts_with("try_to_number(") {
         let inner = extract_first_arg(s, "try_to_number(")?;
@@ -3961,7 +3961,7 @@ fn parse_with_column_expr(src: &str, mock_dates: bool) -> Result<Expr, String> {
         let col_name = extract_col_name(parts.first().ok_or("try_to_number needs column")?)?;
         let format = parts.get(1).map(|p| p.trim_matches(['\'', '"']));
         let c = col(col_name);
-        return Ok(try_to_number(&c, format).into_expr());
+        return Ok(try_to_number(&c, format)?.into_expr());
     }
     if s.starts_with("try_to_timestamp(") {
         let inner = extract_first_arg(s, "try_to_timestamp(")?;
@@ -3969,7 +3969,7 @@ fn parse_with_column_expr(src: &str, mock_dates: bool) -> Result<Expr, String> {
         let col_name = extract_col_name(parts.first().ok_or("try_to_timestamp needs column")?)?;
         let format = parts.get(1).map(|p| p.trim_matches(['\'', '"']));
         let c = col(col_name);
-        return Ok(try_to_timestamp(&c, format).into_expr());
+        return Ok(try_to_timestamp(&c, format)?.into_expr());
     }
     if s.starts_with("to_timestamp(") {
         let inner = extract_first_arg(s, "to_timestamp(")?;

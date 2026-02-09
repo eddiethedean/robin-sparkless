@@ -1328,7 +1328,9 @@ fn expr_from_fn_rest(name: &str, args: &[Value]) -> Result<Expr, PlanExprError> 
             require_args_min(name, args, 1)?;
             let c = expr_to_column(arg_expr(args, 0)?);
             let format: Option<String> = arg_lit_opt_str(args, 1)?;
-            Ok(to_char(&c, format.as_deref()).into_expr())
+            Ok(to_char(&c, format.as_deref())
+                .map_err(PlanExprError)?
+                .into_expr())
         }
         "to_timestamp" => {
             require_args_min(name, args, 1)?;
@@ -1342,16 +1344,18 @@ fn expr_from_fn_rest(name: &str, args: &[Value]) -> Result<Expr, PlanExprError> 
             require_args_min(name, args, 1)?;
             let c = expr_to_column(arg_expr(args, 0)?);
             let format: Option<String> = arg_lit_opt_str(args, 1)?;
-            Ok(try_to_timestamp(&c, format.as_deref()).into_expr())
+            Ok(try_to_timestamp(&c, format.as_deref())
+                .map_err(PlanExprError)?
+                .into_expr())
         }
         "to_number" | "try_to_number" => {
             require_args_min(name, args, 1)?;
             let c = expr_to_column(arg_expr(args, 0)?);
             let format: Option<String> = arg_lit_opt_str(args, 1)?;
             let out = if name == "to_number" {
-                to_number(&c, format.as_deref())
+                to_number(&c, format.as_deref()).map_err(PlanExprError)?
             } else {
-                try_to_number(&c, format.as_deref())
+                try_to_number(&c, format.as_deref()).map_err(PlanExprError)?
             };
             Ok(out.into_expr())
         }
