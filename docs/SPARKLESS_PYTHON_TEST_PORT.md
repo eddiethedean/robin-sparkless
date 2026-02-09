@@ -2,7 +2,7 @@
 
 This doc tracks which Sparkless Python tests have been **ported** to run against `robin_sparkless` in this repo, which were **skipped as duplicates** of existing fixtures or `tests/python/test_robin_sparkless.py`, and which are **deferred** (unsupported API or low priority).
 
-**Ground truth:** Expected results for ported tests must come from **PySpark** (not Sparkless). Use the `spark` fixture from `tests/python/conftest.py` and `assert_rows_equal()` from `tests/python/utils.py` in ported tests.
+**Ground truth:** Expected results for ported tests come from **PySpark** (not Sparkless). The lit date/datetime, column-vs-column, issue 176, and window parity tests use **predetermined expected outputs** (from a prior PySpark run); no PySpark or JVM is required at test runtime. Use the `spark` fixture from `tests/python/conftest.py` and `assert_rows_equal()` from `tests/python/utils.py` in ported tests.
 
 ## Why 45 Python tests (and fixture-driven parity)?
 
