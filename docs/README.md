@@ -25,6 +25,4 @@ This page is the **legacy doc index**. The full documentation is built with [MkD
 | [READINESS_FOR_SPARKLESS_PLAN](READINESS_FOR_SPARKLESS_PLAN.md) | What robin-sparkless can do in parallel (plan interpreter, fixtures, API) before merge |
 | [LOGICAL_PLAN_FORMAT](LOGICAL_PLAN_FORMAT.md) | Backend plan format (op list + payload shapes + expression tree) consumed by execute_plan; full expression support (all scalar functions in filter/select/withColumn) |
 | [TEST_CREATION_GUIDE](TEST_CREATION_GUIDE.md) | How to add parity tests and convert Sparkless fixtures |
-| [IMPLEMENTATION_STATUS](IMPLEMENTATION_STATUS.md) | Polars migration status |
-| [MIGRATION_STATUS](MIGRATION_STATUS.md) | Rust-only migration history |
-| [COMPILATION_STATUS](COMPILATION_STATUS.md) | Build status and remaining work |
+| [IMPLEMENTATION_STATUS](IMPLEMENTATION_STATUS.md) | Polars migration status, build & test status |
