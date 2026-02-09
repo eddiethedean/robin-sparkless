@@ -411,9 +411,7 @@ def test_lit_date_edge_cases() -> None:
     import robin_sparkless as rs
 
     spark = rs.SparkSession.builder().app_name("test").get_or_create()
-    df = spark.create_dataframe(
-        [(1, 10, "a"), (2, 20, "b")], ["id", "x", "name"]
-    )
+    df = spark.create_dataframe([(1, 10, "a"), (2, 20, "b")], ["id", "x", "name"])
 
     # Epoch date (1970-01-01)
     out = df.with_column("epoch", rs.lit(datetime.date(1970, 1, 1)))
@@ -439,9 +437,7 @@ def test_lit_datetime_edge_cases() -> None:
     import robin_sparkless as rs
 
     spark = rs.SparkSession.builder().app_name("test").get_or_create()
-    df = spark.create_dataframe(
-        [(1, 10, "a")], ["id", "x", "name"]
-    )
+    df = spark.create_dataframe([(1, 10, "a")], ["id", "x", "name"])
 
     # Midnight, no microseconds
     out = df.with_column(
@@ -510,21 +506,19 @@ def test_lit_rejects_non_date_datetime() -> None:
     import robin_sparkless as rs
 
     spark = rs.SparkSession.builder().app_name("test").get_or_create()
-    df = spark.create_dataframe(
-        [(1, 10, "a")], ["id", "x", "name"]
-    )
+    df = spark.create_dataframe([(1, 10, "a")], ["id", "x", "name"])
 
-    # list is not supported
+    # list is not supported (intentionally wrong type for runtime test)
     with pytest.raises(TypeError, match="lit\\(\\) supports only"):
-        df.with_column("bad", rs.lit([1, 2, 3]))
+        df.with_column("bad", rs.lit([1, 2, 3]))  # type: ignore[arg-type]
 
-    # dict is not supported
+    # dict is not supported (intentionally wrong type for runtime test)
     with pytest.raises(TypeError, match="lit\\(\\) supports only"):
-        df.with_column("bad", rs.lit({"a": 1}))
+        df.with_column("bad", rs.lit({"a": 1}))  # type: ignore[arg-type]
 
     # bytes is not supported (no year/month/day path; fails as unsupported type)
     with pytest.raises(TypeError, match="lit\\(\\) supports only"):
-        df.with_column("bad", rs.lit(b"bytes"))
+        df.with_column("bad", rs.lit(b"bytes"))  # type: ignore[arg-type]
 
 
 def test_lit_date_and_datetime_in_when() -> None:
@@ -580,6 +574,70 @@ def test_limit_and_distinct() -> None:
     )
     uniq = distinct_df.distinct()
     assert uniq.count() == 2
+
+
+def test_window_row_number_rank_over() -> None:
+    """Window API: row_number(), rank(), dense_rank(), lag(), lead(), sum().over() (Fixes #187)."""
+    import robin_sparkless as rs
+
+    spark = rs.SparkSession.builder().app_name("test").get_or_create()
+    # id, salary, dept (dept "a" has 100, 90; dept "b" has 80)
+    df = spark.create_dataframe(
+        [(1, 100, "a"), (2, 90, "a"), (3, 80, "b")], ["id", "salary", "dept"]
+    )
+    # row_number over dept order by salary desc: a->1,2; b->1
+    out = df.with_column(
+        "rn",
+        rs.col("salary").row_number(descending=True).over(["dept"]),
+    )
+    rows = out.collect()
+    assert len(rows) == 3
+    rn_by_id = {r["id"]: r["rn"] for r in rows}
+    assert rn_by_id[1] == 1 and rn_by_id[2] == 2 and rn_by_id[3] == 1
+
+    # rank over dept (same as row_number when no ties)
+    out2 = df.with_column(
+        "rk",
+        rs.col("salary").rank(descending=True).over(["dept"]),
+    )
+    rows2 = out2.collect()
+    assert [r["rk"] for r in rows2] == [1, 2, 1]
+
+    # dense_rank over dept
+    out3 = df.with_column(
+        "dr",
+        rs.col("salary").dense_rank(descending=True).over(["dept"]),
+    )
+    rows3 = out3.collect()
+    assert [r["dr"] for r in rows3] == [1, 2, 1]
+
+    # lag(1) and lead(1) over dept
+    out4 = df.with_column(
+        "prev",
+        rs.col("salary").lag(1).over(["dept"]),
+    )
+    out4 = out4.with_column(
+        "nxt",
+        rs.col("salary").lead(1).over(["dept"]),
+    )
+    rows4 = out4.collect()
+    by_id = {r["id"]: r for r in rows4}
+    # dept "a" has two rows: one has prev=None (first in partition), one has nxt=None (last)
+    # dept "b" has one row: prev=None, nxt=None
+    assert by_id[3]["prev"] is None and by_id[3]["nxt"] is None
+    # At least one row in "a" has a non-null nxt (lead) or non-null prev (lag)
+    a_rows = [r for r in rows4 if r["dept"] == "a"]
+    assert len(a_rows) == 2
+    assert sum(1 for r in a_rows if r["prev"] is not None or r["nxt"] is not None) >= 1
+
+    # sum over window: partition by dept
+    out5 = df.with_column(
+        "total_by_dept",
+        rs.sum(rs.col("salary")).over(["dept"]),
+    )
+    rows5 = out5.collect()
+    # dept a: 100+90=190; dept b: 80
+    assert rows5[0]["total_by_dept"] == 190 and rows5[2]["total_by_dept"] == 80
 
 
 def test_aggregate_functions() -> None:
