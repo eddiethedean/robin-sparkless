@@ -381,14 +381,14 @@ fn run_fixture(fixture: &Fixture) -> Result<(), PolarsError> {
     // Apply operations
     let result_df = match apply_operations(df, right_df, &fixture.operations, fixture.mock_dates) {
         Ok(df) => df,
-        Err(e) if fixture.expect_error => return Ok(()),
+        Err(_e) if fixture.expect_error => return Ok(()),
         Err(e) => return Err(e),
     };
 
     // Collect and compare results
     let (actual_schema, actual_rows) = match collect_to_simple_format(&result_df) {
         Ok(v) => v,
-        Err(e) if fixture.expect_error => return Ok(()),
+        Err(_e) if fixture.expect_error => return Ok(()),
         Err(e) => return Err(e),
     };
 

@@ -1003,4 +1003,42 @@ mod tests {
         let df = result.unwrap();
         assert_eq!(df.count().unwrap(), 0);
     }
+
+    #[test]
+    fn test_write_partitioned_parquet() {
+        use crate::dataframe::{WriteFormat, WriteMode};
+        use std::fs;
+        use tempfile::TempDir;
+
+        let spark = SparkSession::builder().app_name("test").get_or_create();
+        let df = spark
+            .create_dataframe(
+                vec![
+                    (1, 25, "Alice".to_string()),
+                    (2, 30, "Bob".to_string()),
+                    (3, 25, "Carol".to_string()),
+                ],
+                vec!["id", "age", "name"],
+            )
+            .unwrap();
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("out");
+        df.write()
+            .mode(WriteMode::Overwrite)
+            .format(WriteFormat::Parquet)
+            .partition_by(["age"])
+            .save(&path)
+            .unwrap();
+        assert!(path.is_dir());
+        let entries: Vec<_> = fs::read_dir(&path).unwrap().collect();
+        assert_eq!(entries.len(), 2, "expected two partition dirs (age=25, age=30)");
+        let names: Vec<String> = entries
+            .iter()
+            .filter_map(|e| e.as_ref().ok())
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect();
+        assert!(names.iter().any(|n| n.starts_with("age=")));
+        let df_read = spark.read_parquet(&path).unwrap();
+        assert_eq!(df_read.count().unwrap(), 3);
+    }
 }

@@ -1587,8 +1587,18 @@ pub struct PyDataFrameWriter {
 
 impl PyDataFrameWriter {
     fn build_writer(&self) -> crate::dataframe::DataFrameWriter<'_> {
-        let mode = *self.mode.read().expect("DataFrameWriter mode lock");
-        let format = *self.format.read().expect("DataFrameWriter format lock");
+        let mode = self
+            .mode
+            .read()
+            .ok()
+            .map(|g| *g)
+            .unwrap_or(WriteMode::Overwrite);
+        let format = self
+            .format
+            .read()
+            .ok()
+            .map(|g| *g)
+            .unwrap_or(WriteFormat::Parquet);
         let mut w = self.df.write().mode(mode).format(format);
         if let Ok(opts) = self.options.read() {
             for (k, v) in opts.iter() {

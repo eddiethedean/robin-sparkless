@@ -16,10 +16,12 @@ use crate::column::Column;
 use crate::functions::SortOrder;
 use crate::schema::StructType;
 use polars::prelude::{
-    AnyValue, DataFrame as PlDataFrame, Expr, PolarsError, SchemaNamesAndDtypes,
+    col, lit, AnyValue, DataFrame as PlDataFrame, DataType, Expr, PolarsError,
+    SchemaNamesAndDtypes,
 };
 use serde_json::Value as JsonValue;
 use std::collections::HashMap;
+use std::path::Path;
 use std::sync::Arc;
 
 /// Default for `spark.sql.caseSensitive` (PySpark default is false = case-insensitive).
@@ -678,7 +680,7 @@ impl DataFrame {
 }
 
 /// Write mode: overwrite or append (PySpark DataFrameWriter.mode).
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub enum WriteMode {
     Overwrite,
     Append,
@@ -769,61 +771,65 @@ impl<'a> DataFrameWriter<'a> {
     }
 
     /// Write to path. Overwrite replaces; append reads existing (if any) and concatenates then writes.
+    /// With partition_by, path is a directory; each partition is written as path/col1=val1/col2=val2/... with partition columns omitted from the file (Spark/Hive style).
     pub fn save(&self, path: impl AsRef<std::path::Path>) -> Result<(), PolarsError> {
         use polars::prelude::*;
         let path = path.as_ref();
         let to_write: PlDataFrame = match self.mode {
             WriteMode::Overwrite => self.df.df.as_ref().clone(),
             WriteMode::Append => {
-                use polars::prelude::*;
-                let existing: Option<PlDataFrame> = if path.exists() {
-                    match self.format {
-                        WriteFormat::Parquet => {
-                            LazyFrame::scan_parquet(path, ScanArgsParquet::default())
+                if self.partition_by.is_empty() {
+                    let existing: Option<PlDataFrame> = if path.exists() && path.is_file() {
+                        match self.format {
+                            WriteFormat::Parquet => {
+                                LazyFrame::scan_parquet(path, ScanArgsParquet::default())
+                                    .and_then(|lf| lf.collect())
+                                    .ok()
+                            }
+                            WriteFormat::Csv => LazyCsvReader::new(path)
+                                .with_has_header(true)
+                                .finish()
                                 .and_then(|lf| lf.collect())
-                                .ok()
+                                .ok(),
+                            WriteFormat::Json => LazyJsonLineReader::new(path)
+                                .finish()
+                                .and_then(|lf| lf.collect())
+                                .ok(),
                         }
-                        WriteFormat::Csv => LazyCsvReader::new(path)
-                            .with_has_header(true)
-                            .finish()
-                            .and_then(|lf| lf.collect())
-                            .ok(),
-                        WriteFormat::Json => LazyJsonLineReader::new(path)
-                            .finish()
-                            .and_then(|lf| lf.collect())
-                            .ok(),
+                    } else {
+                        None
+                    };
+                    match existing {
+                        Some(existing) => {
+                            let lfs: [LazyFrame; 2] = [
+                                existing.lazy(),
+                                self.df.df.as_ref().clone().lazy(),
+                            ];
+                            concat(lfs, UnionArgs::default())?.collect()?
+                        }
+                        None => self.df.df.as_ref().clone(),
                     }
                 } else {
-                    None
-                };
-                match existing {
-                    Some(existing) => {
-                        let lfs: [polars::prelude::LazyFrame; 2] =
-                            [existing.lazy(), self.df.df.as_ref().clone().lazy()];
-                        polars::prelude::concat(lfs, UnionArgs::default())?.collect()?
-                    }
-                    None => self.df.df.as_ref().clone(),
+                    self.df.df.as_ref().clone()
                 }
             }
         };
+
+        if !self.partition_by.is_empty() {
+            return self.save_partitioned(path, &to_write);
+        }
+
         match self.format {
             WriteFormat::Parquet => {
-                if self.partition_by.is_empty() {
-                    let mut file = std::fs::File::create(path).map_err(|e| {
-                        PolarsError::ComputeError(format!("write parquet create: {e}").into())
+                let mut file = std::fs::File::create(path).map_err(|e| {
+                    PolarsError::ComputeError(format!("write parquet create: {e}").into())
+                })?;
+                let mut df_mut = to_write;
+                ParquetWriter::new(&mut file)
+                    .finish(&mut df_mut)
+                    .map_err(|e| {
+                        PolarsError::ComputeError(format!("write parquet: {e}").into())
                     })?;
-                    let mut df_mut = to_write;
-                    ParquetWriter::new(&mut file)
-                        .finish(&mut df_mut)
-                        .map_err(|e| {
-                            PolarsError::ComputeError(format!("write parquet: {e}").into())
-                        })?;
-                } else {
-                    // partitionBy stored but partitioned parquet write deferred
-                    return Err(PolarsError::InvalidOperation(
-                        "partitionBy for parquet write is not yet implemented. Use save(path) without partitionBy.".into(),
-                    ));
-                }
             }
             WriteFormat::Csv => {
                 let has_header = self
@@ -856,6 +862,164 @@ impl<'a> DataFrameWriter<'a> {
         }
         Ok(())
     }
+
+    /// Write partitioned by columns: path/col1=val1/col2=val2/part-00000.{ext}. Partition columns are not written into the file (Spark/Hive style).
+    fn save_partitioned(&self, path: &Path, to_write: &PlDataFrame) -> Result<(), PolarsError> {
+        use polars::prelude::*;
+        let resolved: Vec<String> = self
+            .partition_by
+            .iter()
+            .map(|c| self.df.resolve_column_name(c))
+            .collect::<Result<Vec<_>, _>>()?;
+        let all_names = to_write.get_column_names();
+        let data_cols: Vec<&str> = all_names
+            .iter()
+            .filter(|n| !resolved.iter().any(|r| r == n.as_str()))
+            .map(|n| n.as_str())
+            .collect();
+
+        let unique_keys = to_write
+            .select(resolved.iter().map(|s| s.as_str()).collect::<Vec<_>>())?
+            .unique::<Option<&[String]>, String>(
+                None,
+                polars::prelude::UniqueKeepStrategy::First,
+                None,
+            )?;
+
+        if self.mode == WriteMode::Overwrite && path.exists() {
+            if path.is_dir() {
+                std::fs::remove_dir_all(path).map_err(|e| {
+                    PolarsError::ComputeError(
+                        format!("write partitioned: remove_dir_all: {e}").into(),
+                    )
+                })?;
+            } else {
+                std::fs::remove_file(path).map_err(|e| {
+                    PolarsError::ComputeError(
+                        format!("write partitioned: remove_file: {e}").into(),
+                    )
+                })?;
+            }
+        }
+        std::fs::create_dir_all(path).map_err(|e| {
+            PolarsError::ComputeError(format!("write partitioned: create_dir_all: {e}").into())
+        })?;
+
+        let ext = match self.format {
+            WriteFormat::Parquet => "parquet",
+            WriteFormat::Csv => "csv",
+            WriteFormat::Json => "json",
+        };
+
+        for row_idx in 0..unique_keys.height() {
+            let row = unique_keys.get(row_idx).ok_or_else(|| {
+                PolarsError::ComputeError("partition_row: get row".into())
+            })?;
+            let filter_expr = partition_row_to_filter_expr(&resolved, &row)?;
+            let subset = to_write
+                .clone()
+                .lazy()
+                .filter(filter_expr)
+                .collect()?;
+            let subset = subset.select(data_cols.iter().copied())?;
+            if subset.height() == 0 {
+                continue;
+            }
+
+            let part_path: std::path::PathBuf = resolved
+                .iter()
+                .zip(row.iter())
+                .map(|(name, av)| format!("{}={}", name, format_partition_value(av)))
+                .fold(path.to_path_buf(), |p, seg| p.join(seg));
+            std::fs::create_dir_all(&part_path).map_err(|e| {
+                PolarsError::ComputeError(
+                    format!("write partitioned: create_dir_all partition: {e}").into(),
+                )
+            })?;
+
+            let file_idx = if self.mode == WriteMode::Append {
+                let suffix = format!(".{ext}");
+                let max_n = std::fs::read_dir(&part_path)
+                    .map(|rd| {
+                        rd.filter_map(Result::ok)
+                            .filter_map(|e| {
+                                e.file_name().to_str().and_then(|s| {
+                                    s.strip_prefix("part-")
+                                        .and_then(|t| t.strip_suffix(&suffix))
+                                        .and_then(|t| t.parse::<u32>().ok())
+                                })
+                            })
+                            .max()
+                            .unwrap_or(0)
+                    })
+                    .unwrap_or(0);
+                max_n + 1
+            } else {
+                0
+            };
+            let filename = format!("part-{file_idx:05}.{ext}");
+            let file_path = part_path.join(&filename);
+
+            match self.format {
+                WriteFormat::Parquet => {
+                    let mut file = std::fs::File::create(&file_path).map_err(|e| {
+                        PolarsError::ComputeError(
+                            format!("write partitioned parquet create: {e}").into(),
+                        )
+                    })?;
+                    let mut df_mut = subset;
+                    ParquetWriter::new(&mut file)
+                        .finish(&mut df_mut)
+                        .map_err(|e| {
+                            PolarsError::ComputeError(
+                                format!("write partitioned parquet: {e}").into(),
+                            )
+                        })?;
+                }
+                WriteFormat::Csv => {
+                    let has_header = self
+                        .options
+                        .get("header")
+                        .map(|v| v.eq_ignore_ascii_case("true") || v == "1")
+                        .unwrap_or(true);
+                    let delimiter = self
+                        .options
+                        .get("sep")
+                        .and_then(|s| s.bytes().next())
+                        .unwrap_or(b',');
+                    let mut file = std::fs::File::create(&file_path).map_err(|e| {
+                        PolarsError::ComputeError(
+                            format!("write partitioned csv create: {e}").into(),
+                        )
+                    })?;
+                    CsvWriter::new(&mut file)
+                        .include_header(has_header)
+                        .with_separator(delimiter)
+                        .finish(&mut subset.clone())
+                        .map_err(|e| {
+                            PolarsError::ComputeError(
+                                format!("write partitioned csv: {e}").into(),
+                            )
+                        })?;
+                }
+                WriteFormat::Json => {
+                    let mut file = std::fs::File::create(&file_path).map_err(|e| {
+                        PolarsError::ComputeError(
+                            format!("write partitioned json create: {e}").into(),
+                        )
+                    })?;
+                    JsonWriter::new(&mut file)
+                        .finish(&mut subset.clone())
+                        .map_err(|e| {
+                            PolarsError::ComputeError(
+                                format!("write partitioned json: {e}").into(),
+                            )
+                        })?;
+                }
+            }
+        }
+        Ok(())
+    }
 }
 
 impl Clone for DataFrame {
@@ -865,6 +1029,68 @@ impl Clone for DataFrame {
             case_sensitive: self.case_sensitive,
         }
     }
+}
+
+/// Format a partition column value for use in a directory name (Spark/Hive style).
+/// Null becomes "__HIVE_DEFAULT_PARTITION__"; other values use string representation with path-unsafe chars replaced.
+fn format_partition_value(av: &AnyValue<'_>) -> String {
+    let s = match av {
+        AnyValue::Null => "__HIVE_DEFAULT_PARTITION__".to_string(),
+        AnyValue::Boolean(b) => b.to_string(),
+        AnyValue::Int32(i) => i.to_string(),
+        AnyValue::Int64(i) => i.to_string(),
+        AnyValue::UInt32(u) => u.to_string(),
+        AnyValue::UInt64(u) => u.to_string(),
+        AnyValue::Float32(f) => f.to_string(),
+        AnyValue::Float64(f) => f.to_string(),
+        AnyValue::String(s) => s.to_string(),
+        AnyValue::StringOwned(s) => s.as_str().to_string(),
+        AnyValue::Date(d) => d.to_string(),
+        _ => av.to_string(),
+    };
+    // Replace path separators and other unsafe chars so the value is a valid path segment
+    s.replace(std::path::MAIN_SEPARATOR, "_").replace('/', "_")
+}
+
+/// Build a filter expression that matches rows where partition columns equal the given row values.
+fn partition_row_to_filter_expr(col_names: &[String], row: &[AnyValue<'_>]) -> Result<Expr, PolarsError> {
+    if col_names.len() != row.len() {
+        return Err(PolarsError::ComputeError(
+            format!(
+                "partition_row_to_filter_expr: {} columns but {} row values",
+                col_names.len(),
+                row.len()
+            )
+            .into(),
+        ));
+    }
+    let mut pred = None::<Expr>;
+    for (name, av) in col_names.iter().zip(row.iter()) {
+        let clause = match av {
+            AnyValue::Null => col(name.as_str()).is_null(),
+            AnyValue::Boolean(b) => col(name.as_str()).eq(lit(*b)),
+            AnyValue::Int32(i) => col(name.as_str()).eq(lit(*i)),
+            AnyValue::Int64(i) => col(name.as_str()).eq(lit(*i)),
+            AnyValue::UInt32(u) => col(name.as_str()).eq(lit(*u)),
+            AnyValue::UInt64(u) => col(name.as_str()).eq(lit(*u)),
+            AnyValue::Float32(f) => col(name.as_str()).eq(lit(*f)),
+            AnyValue::Float64(f) => col(name.as_str()).eq(lit(*f)),
+            AnyValue::String(s) => col(name.as_str()).eq(lit(s.to_string())),
+            AnyValue::StringOwned(s) => col(name.as_str()).eq(lit(s.clone())),
+            _ => {
+                // Fallback: compare as string
+                let s = av.to_string();
+                col(name.as_str())
+                    .cast(DataType::String)
+                    .eq(lit(s))
+            }
+        };
+        pred = Some(match pred {
+            None => clause,
+            Some(p) => p.and(clause),
+        });
+    }
+    Ok(pred.unwrap_or_else(|| lit(true)))
 }
 
 /// Convert Polars AnyValue to serde_json::Value for language bindings (Node, etc.).
