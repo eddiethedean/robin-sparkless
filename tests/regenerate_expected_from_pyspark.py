@@ -26,7 +26,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -87,7 +87,9 @@ def schema_to_struct_type(schema: list[dict]) -> StructType:
 
 
 def _cast_cell(value: Any, type_str: str) -> Any:
-    """Cast a fixture value (e.g. date/timestamp string) for PySpark createDataFrame."""
+    """Cast a fixture value (e.g. date/timestamp string) for PySpark createDataFrame.
+    Timestamps without explicit timezone are treated as UTC when session timeZone is UTC.
+    """
     if value is None:
         return None
     t = (type_str or "string").lower()
@@ -98,8 +100,14 @@ def _cast_cell(value: Any, type_str: str) -> Any:
         if "T" in s:
             if "+" in s or "-" in s.split("T")[-1][:1] == "-":
                 return datetime.fromisoformat(s)
-            return datetime.fromisoformat(s.replace("T", " "))
-        return datetime.strptime(s[:19], "%Y-%m-%d %H:%M:%S")
+            dt = datetime.fromisoformat(s.replace("T", " "))
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt
+        dt = datetime.strptime(s[:19], "%Y-%m-%d %H:%M:%S")
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt
     return value
 
 
@@ -541,7 +549,11 @@ def main() -> int:
         return 1
 
     try:
-        spark = SparkSession.builder.appName("regenerate_expected").getOrCreate()
+        spark = (
+            SparkSession.builder.appName("regenerate_expected")
+            .config("spark.sql.session.timeZone", "UTC")
+            .getOrCreate()
+        )
     except PySparkRuntimeError as e:
         err_msg = str(e)
         if (
