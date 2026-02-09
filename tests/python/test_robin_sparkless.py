@@ -100,7 +100,8 @@ def test_filter_with_and_or_operators() -> None:
 
 
 def test_filter_column_vs_column() -> None:
-    """filter with column–column comparison (col('a') > col('b')) works (fixes #184)."""
+    """filter with column–column comparison (col('a') > col('b')) works (fixes #184).
+    For expectations derived from real PySpark, see test_column_vs_column_pyspark_parity.py."""
     import robin_sparkless as rs
 
     spark = rs.SparkSession.builder().app_name("test").get_or_create()
@@ -124,6 +125,110 @@ def test_filter_column_vs_column() -> None:
     assert df.filter(rs.col("a") <= rs.col("b")).count() == 2  # (1,5), (2,4)
     assert df.filter(rs.col("a") == rs.col("b")).count() == 0
     assert df.filter(rs.col("a") != rs.col("b")).count() == 5
+
+
+def test_filter_column_vs_column_all_method_forms() -> None:
+    """All six comparison methods (.gt, .ge, .lt, .le, .eq, .neq) accept Column (fixes #184)."""
+    import robin_sparkless as rs
+
+    spark = rs.SparkSession.builder().app_name("test").get_or_create()
+    data = [[3, 1], [1, 3], [2, 2], [0, 5]]
+    schema = [("x", "bigint"), ("y", "bigint")]
+    df = spark._create_dataframe_from_rows(data, schema)
+    # Method form (column vs column) — same semantics as operators
+    assert df.filter(rs.col("x").gt(rs.col("y"))).count() == 1  # (3,1)
+    assert df.filter(rs.col("x").ge(rs.col("y"))).count() == 2  # (3,1), (2,2)
+    assert df.filter(rs.col("x").lt(rs.col("y"))).count() == 2  # (1,3), (0,5)
+    assert df.filter(rs.col("x").le(rs.col("y"))).count() == 3  # (1,3), (2,2), (0,5)
+    assert df.filter(rs.col("x").eq(rs.col("y"))).count() == 1  # (2,2)
+    assert df.filter(rs.col("x") != rs.col("y")).count() == 3  # (3,1), (1,3), (0,5)
+
+
+def test_filter_column_vs_column_combined_with_literal() -> None:
+    """Column–column comparison combined with column–literal (e.g. (a > b) & (a > 2))."""
+    import robin_sparkless as rs
+
+    spark = rs.SparkSession.builder().app_name("test").get_or_create()
+    data = [[1, 5], [2, 4], [3, 1], [4, 2], [5, 1]]
+    schema = [("a", "bigint"), ("b", "bigint")]
+    df = spark._create_dataframe_from_rows(data, schema)
+    # (a > b) and (a > 2) -> (3,1), (4,2), (5,1) then a>2 -> (3,1), (4,2), (5,1)
+    out = df.filter((rs.col("a") > rs.col("b")) & (rs.col("a") > 2))
+    rows = out.collect()
+    assert len(rows) == 3
+    assert {(r["a"], r["b"]) for r in rows} == {(3, 1), (4, 2), (5, 1)}
+    # (a < b) or (b >= 5)
+    out2 = df.filter((rs.col("a") < rs.col("b")) | (rs.col("b") >= rs.lit(5)))
+    assert out2.count() == 2  # (1,5), (2,4) from a<b; (1,5) has b>=5
+
+
+def test_filter_column_vs_column_with_with_column() -> None:
+    """Column–column comparison used in with_column produces boolean column."""
+    import robin_sparkless as rs
+
+    spark = rs.SparkSession.builder().app_name("test").get_or_create()
+    data = [[10, 5], [3, 7], [0, 0]]
+    schema = [("p", "bigint"), ("q", "bigint")]
+    df = spark._create_dataframe_from_rows(data, schema)
+    out = df.with_column("p_gt_q", rs.col("p") > rs.col("q"))
+    rows = out.collect()
+    assert len(rows) == 3
+    assert rows[0] == {"p": 10, "q": 5, "p_gt_q": True}
+    assert rows[1] == {"p": 3, "q": 7, "p_gt_q": False}
+    assert rows[2] == {"p": 0, "q": 0, "p_gt_q": False}
+    # Method form in with_column
+    out2 = df.with_column("p_le_q", rs.col("p").le(rs.col("q")))
+    assert out2.collect()[0]["p_le_q"] is False
+    assert out2.collect()[1]["p_le_q"] is True
+
+
+def test_filter_column_vs_column_strings() -> None:
+    """Column–column comparison on string columns (lexicographic)."""
+    import robin_sparkless as rs
+
+    spark = rs.SparkSession.builder().app_name("test").get_or_create()
+    data = [["apple", "banana"], ["banana", "apple"], ["x", "x"]]
+    schema = [("s1", "string"), ("s2", "string")]
+    df = spark._create_dataframe_from_rows(data, schema)
+    # s1 > s2: "banana" > "apple" only
+    out = df.filter(rs.col("s1") > rs.col("s2"))
+    rows = out.collect()
+    assert len(rows) == 1 and rows[0]["s1"] == "banana" and rows[0]["s2"] == "apple"
+    assert df.filter(rs.col("s1") == rs.col("s2")).count() == 1
+    assert df.filter(rs.col("s1") != rs.col("s2")).count() == 2
+
+
+def test_filter_column_vs_column_empty_and_all_match() -> None:
+    """Edge cases: condition matching zero rows, and condition matching all rows."""
+    import robin_sparkless as rs
+
+    spark = rs.SparkSession.builder().app_name("test").get_or_create()
+    data = [[1, 2], [3, 4]]
+    schema = [("a", "bigint"), ("b", "bigint")]
+    df = spark._create_dataframe_from_rows(data, schema)
+    # a == b matches nothing
+    empty = df.filter(rs.col("a") == rs.col("b"))
+    assert empty.count() == 0
+    assert empty.collect() == []
+    # a != b matches all
+    all_match = df.filter(rs.col("a") != rs.col("b"))
+    assert all_match.count() == 2
+
+
+def test_filter_column_vs_column_scalar_still_works() -> None:
+    """Regression: column vs literal (scalar) still works after #184."""
+    import robin_sparkless as rs
+
+    spark = rs.SparkSession.builder().app_name("test").get_or_create()
+    data = [[1, 5], [2, 4], [3, 1]]
+    schema = [("a", "bigint"), ("b", "bigint")]
+    df = spark._create_dataframe_from_rows(data, schema)
+    # Column vs literal (int)
+    assert df.filter(rs.col("a") > 2).count() == 1
+    assert df.filter(rs.col("a").gt(2)).count() == 1
+    # Column vs lit()
+    assert df.filter(rs.col("b") >= rs.lit(4)).count() == 2
+    assert df.filter(rs.col("b").ge(rs.lit(4))).count() == 2
 
 
 def test_with_column_and_show() -> None:
