@@ -125,17 +125,35 @@ impl PyDataFrame {
     /// Return a DataFrame with only rows where the condition is true.
     ///
     /// Args:
-    ///     condition: Boolean Column expression (e.g. ``col("age") > 18``).
+    ///     condition: Boolean Column expression (e.g. ``col("age") > 18``), or literal
+    ///         ``True`` (no filter) / ``False`` (filter to zero rows) for PySpark parity.
     ///
     /// Returns:
     ///     DataFrame (lazy) with filtered rows.
     ///
     /// Raises:
+    ///     TypeError: If condition is not a Column or literal bool (True/False).
     ///     RuntimeError: If the expression cannot be applied.
-    fn filter(&self, condition: &PyColumn) -> PyResult<PyDataFrame> {
+    fn filter(
+        &self,
+        condition: &pyo3::Bound<'_, pyo3::types::PyAny>,
+    ) -> PyResult<PyDataFrame> {
+        let expr: Expr = if let Ok(py_col) = condition.downcast::<PyColumn>() {
+            py_col.borrow().inner.expr().clone()
+        } else if let Ok(b) = condition.extract::<bool>() {
+            if b {
+                lit(true)
+            } else {
+                lit(false)
+            }
+        } else {
+            return Err(pyo3::exceptions::PyTypeError::new_err(
+                "condition must be a Column or literal bool (True/False)",
+            ));
+        };
         let df = self
             .inner
-            .filter(condition.inner.expr().clone())
+            .filter(expr)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
         Ok(PyDataFrame { inner: df })
     }

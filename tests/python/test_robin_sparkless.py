@@ -231,6 +231,23 @@ def test_filter_column_vs_column_scalar_still_works() -> None:
     assert df.filter(rs.col("b").ge(rs.lit(4))).count() == 2
 
 
+def test_filter_accepts_literal_bool() -> None:
+    """filter(True) is no-op; filter(False) returns zero rows (fixes #185)."""
+    import robin_sparkless as rs
+
+    spark = rs.SparkSession.builder().app_name("test").get_or_create()
+    data = [(1, 25, "Alice"), (2, 30, "Bob")]
+    df = spark.create_dataframe(data, ["id", "age", "name"])
+    # Literal True: no filter, all rows
+    out_true = df.filter(True)
+    assert out_true.count() == 2
+    assert out_true.collect() == df.collect()
+    # Literal False: filter to zero rows
+    out_false = df.filter(False)
+    assert out_false.count() == 0
+    assert out_false.collect() == []
+
+
 def test_with_column_and_show() -> None:
     """with_column adds a column; show runs without error."""
     import robin_sparkless as rs
