@@ -167,14 +167,16 @@ impl PyDataFrame {
         };
         let mut exprs: Vec<Expr> = Vec::with_capacity(items.len());
         for item in items.iter() {
-            if let Ok(name) = item.extract::<std::string::String>() {
+            // Try Column before str: PySpark Column objects are often convertible to str (e.g. "(2 + x)"),
+            // so we must treat as expression first to support select(col("a") * 2, lit(3) + col("x")).
+            if let Ok(py_col) = item.extract::<PyRef<PyColumn>>() {
+                exprs.push(py_col.inner.expr().clone());
+            } else if let Ok(name) = item.extract::<std::string::String>() {
                 let resolved = self
                     .inner
                     .resolve_column_name(&name)
                     .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
                 exprs.push(col(resolved.as_str()));
-            } else if let Ok(py_col) = item.extract::<PyRef<PyColumn>>() {
-                exprs.push(py_col.inner.expr().clone());
             } else {
                 return Err(pyo3::exceptions::PyTypeError::new_err(
                     "select() items must be str (column name) or Column (expression)",
