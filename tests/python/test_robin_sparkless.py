@@ -844,6 +844,198 @@ def test_join_on_string_single_column() -> None:
     assert result_list.collect() == rows
 
 
+def test_join_on_string_all_join_types() -> None:
+    """join(..., on='id', how=...) matches on=['id'] for inner, left, right, outer, left_semi, left_anti (#175)."""
+    import robin_sparkless as rs
+
+    spark = rs.SparkSession.builder().app_name("test").get_or_create()
+    left = spark.create_dataframe(
+        [(1, 10, "a"), (2, 20, "b"), (3, 30, "c")], ["id", "v", "label"]
+    )
+    right = spark.create_dataframe([(1, 100, "x"), (3, 300, "z")], ["id", "w", "tag"])
+    for how in ("inner", "left", "right", "outer", "left_semi", "left_anti"):
+        with_str = left.join(right, on="id", how=how).collect()
+        with_list = left.join(right, on=["id"], how=how).collect()
+        assert len(with_str) == len(with_list), f"how={how} row count mismatch"
+        if how not in ("left_semi", "left_anti"):
+            # Sort by id for deterministic comparison (order may differ)
+            def by_id(r):
+                return (r.get("id"), r.get("v"), r.get("w"), r.get("tag"))
+
+            assert sorted(with_str, key=by_id) == sorted(with_list, key=by_id), (
+                f"how={how} rows differ"
+            )
+        else:
+            assert sorted(r["id"] for r in with_str) == sorted(
+                r["id"] for r in with_list
+            ), f"how={how} ids differ"
+
+
+def test_join_on_tuple_single_and_multi_column() -> None:
+    """join(..., on=('id',)) and on=('a','b') work like list (#175)."""
+    import robin_sparkless as rs
+
+    spark = rs.SparkSession.builder().app_name("test").get_or_create()
+    # Single column as tuple
+    df1 = spark._create_dataframe_from_rows(
+        [{"id": 1, "x": 10}], [("id", "bigint"), ("x", "bigint")]
+    )
+    df2 = spark._create_dataframe_from_rows(
+        [{"id": 1, "y": 20}], [("id", "bigint"), ("y", "bigint")]
+    )
+    result_tuple = df1.join(df2, on=("id",), how="inner").collect()
+    result_list = df1.join(df2, on=["id"], how="inner").collect()
+    assert result_tuple == result_list
+    # Multi-column join: tuple and list equivalent
+    left = spark._create_dataframe_from_rows(
+        [{"a": 1, "b": 2, "v": 10}],
+        [("a", "bigint"), ("b", "bigint"), ("v", "bigint")],
+    )
+    right = spark._create_dataframe_from_rows(
+        [{"a": 1, "b": 2, "w": 20}],
+        [("a", "bigint"), ("b", "bigint"), ("w", "bigint")],
+    )
+    on_tuple = left.join(right, on=("a", "b"), how="inner").collect()
+    on_list = left.join(right, on=["a", "b"], how="inner").collect()
+    assert on_tuple == on_list
+    assert len(on_tuple) == 1 and on_tuple[0]["v"] == 10 and on_tuple[0]["w"] == 20
+
+
+def test_join_on_string_no_matches() -> None:
+    """join(..., on='id', how='inner') with no overlapping keys returns empty (#175)."""
+    import robin_sparkless as rs
+
+    spark = rs.SparkSession.builder().app_name("test").get_or_create()
+    df1 = spark._create_dataframe_from_rows(
+        [{"id": 1, "x": 10}], [("id", "bigint"), ("x", "bigint")]
+    )
+    df2 = spark._create_dataframe_from_rows(
+        [{"id": 99, "y": 20}], [("id", "bigint"), ("y", "bigint")]
+    )
+    result = df1.join(df2, on="id", how="inner").collect()
+    assert result == []
+    assert df1.join(df2, on=["id"], how="inner").collect() == result
+
+
+def test_join_on_string_multiple_matches() -> None:
+    """join(..., on='id') with duplicate keys produces correct Cartesian match count (#175)."""
+    import robin_sparkless as rs
+
+    spark = rs.SparkSession.builder().app_name("test").get_or_create()
+    left = spark._create_dataframe_from_rows(
+        [{"id": 1, "x": 10}, {"id": 1, "x": 11}],
+        [("id", "bigint"), ("x", "bigint")],
+    )
+    right = spark._create_dataframe_from_rows(
+        [{"id": 1, "y": 20}], [("id", "bigint"), ("y", "bigint")]
+    )
+    result = left.join(right, on="id", how="inner").collect()
+    assert len(result) == 2
+    assert {r["x"] for r in result} == {10, 11}
+    assert all(r["id"] == 1 and r["y"] == 20 for r in result)
+    result_list = left.join(right, on=["id"], how="inner").collect()
+    assert sorted(result, key=lambda r: r["x"]) == sorted(
+        result_list, key=lambda r: r["x"]
+    )
+
+
+def test_join_on_invalid_type_raises() -> None:
+    """join(..., on=<invalid>) raises TypeError with clear message (#175)."""
+    import robin_sparkless as rs
+
+    spark = rs.SparkSession.builder().app_name("test").get_or_create()
+    df1 = spark._create_dataframe_from_rows([{"id": 1}], [("id", "bigint")])
+    df2 = spark._create_dataframe_from_rows([{"id": 1}], [("id", "bigint")])
+    for invalid in (42, None, 3.14):
+        with pytest.raises(
+            TypeError, match="join 'on' must be str or list/tuple of str"
+        ):
+            df1.join(df2, on=invalid, how="inner")  # type: ignore[arg-type]
+
+
+def test_join_on_string_pyspark_semantics_single_key_column() -> None:
+    """join(..., on='col') produces one key column in output, like PySpark (no duplicate key columns)."""
+    import robin_sparkless as rs
+
+    spark = rs.SparkSession.builder().app_name("test").get_or_create()
+    # Same shape as PySpark docs: df (name, age), df2 (name, height)
+    df = spark._create_dataframe_from_rows(
+        [{"name": "Alice", "age": 2}, {"name": "Bob", "age": 5}],
+        [("name", "string"), ("age", "bigint")],
+    )
+    df2 = spark._create_dataframe_from_rows(
+        [{"name": "Tom", "height": 80}, {"name": "Bob", "height": 85}],
+        [("name", "string"), ("height", "bigint")],
+    )
+    # Inner join on string: PySpark df.join(df2, "name") -> one row Bob, 5, 85; single "name" column
+    result = df.join(df2, on="name", how="inner").collect()
+    assert len(result) == 1
+    assert (
+        result[0]["name"] == "Bob"
+        and result[0]["age"] == 5
+        and result[0]["height"] == 85
+    )
+    assert list(result[0].keys()) == ["name", "age", "height"], (
+        "join on single column must not duplicate key: output should have one 'name' column"
+    )
+    # Same with list form
+    result_list = df.join(df2, on=["name"], how="inner").collect()
+    assert result_list == result
+
+
+def test_join_on_string_pyspark_semantics_outer_and_semi_anti() -> None:
+    """join(..., on='col', how=outer|left_semi|left_anti) matches PySpark row counts and semantics."""
+    import robin_sparkless as rs
+
+    spark = rs.SparkSession.builder().app_name("test").get_or_create()
+    df = spark._create_dataframe_from_rows(
+        [{"name": "Alice", "age": 2}, {"name": "Bob", "age": 5}],
+        [("name", "string"), ("age", "bigint")],
+    )
+    df2 = spark._create_dataframe_from_rows(
+        [{"name": "Tom", "height": 80}, {"name": "Bob", "height": 85}],
+        [("name", "string"), ("height", "bigint")],
+    )
+    # Outer: PySpark df.join(df2, "name", "outer") -> 3 rows (Alice, Bob, Tom)
+    outer = df.join(df2, on="name", how="outer").collect()
+    assert len(outer) == 3
+    names = {r["name"] for r in outer}
+    assert names == {"Alice", "Bob", "Tom"}
+    # left_semi: rows in left that have a match in right -> 1 row (Bob)
+    semi = df.join(df2, on="name", how="left_semi").collect()
+    assert len(semi) == 1 and semi[0]["name"] == "Bob"
+    assert "height" not in semi[0]
+    # left_anti: rows in left with no match in right -> 1 row (Alice)
+    anti = df.join(df2, on="name", how="left_anti").collect()
+    assert len(anti) == 1 and anti[0]["name"] == "Alice"
+    assert "height" not in anti[0]
+
+
+def test_join_on_list_multiple_columns_pyspark_semantics() -> None:
+    """join(..., on=['c1','c2']) equi-join on multiple columns; single key set in output (PySpark)."""
+    import robin_sparkless as rs
+
+    spark = rs.SparkSession.builder().app_name("test").get_or_create()
+    # PySpark docs: df (name, age), df3 (name, age, height); join on ["name", "age"]
+    df = spark._create_dataframe_from_rows(
+        [{"name": "Alice", "age": 2}, {"name": "Bob", "age": 5}],
+        [("name", "string"), ("age", "bigint")],
+    )
+    df3 = spark._create_dataframe_from_rows(
+        [
+            {"name": "Alice", "age": 10, "height": 80},
+            {"name": "Bob", "age": 5, "height": None},
+            {"name": "Tom", "age": None, "height": None},
+        ],
+        [("name", "string"), ("age", "bigint"), ("height", "bigint")],
+    )
+    result = df.join(df3, on=["name", "age"], how="inner").collect()
+    # Only Bob matches on both name and age
+    assert len(result) == 1
+    assert result[0]["name"] == "Bob" and result[0]["age"] == 5
+    assert list(result[0].keys()) == ["name", "age", "height"]
+
+
 def test_sparkless_parity_join_left_returns_rows() -> None:
     """Join (left) returns rows. PySpark: left join keeps all left rows."""
     import robin_sparkless as rs

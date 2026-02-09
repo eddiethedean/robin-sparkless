@@ -145,7 +145,7 @@ class DataFrame:
     def join(
         self,
         other: DataFrame,
-        on: str | list[str],
+        on: str | list[str] | tuple[str, ...],
         how: str = "inner",
     ) -> DataFrame: ...
     def drop(self, cols: list[str]) -> DataFrame: ...
