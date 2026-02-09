@@ -4,6 +4,16 @@
 
 Robin-sparkless is designed to **replace the backend logic** of [Sparkless](https://github.com/eddiethedean/sparkless)—the Python PySpark drop-in replacement. Sparkless would call robin-sparkless via PyO3/FFI for DataFrame execution. See [SPARKLESS_INTEGRATION_ANALYSIS.md](SPARKLESS_INTEGRATION_ANALYSIS.md) for architecture mapping, structural learnings, and test conversion strategy.
 
+## Build & Test Status
+
+- `cargo check` passes for the Rust-only, Polars-backed implementation.
+- `cargo build --features pyo3` builds the Python extension (optional). `cargo build --features "pyo3,sql"` and `cargo build --features "pyo3,delta"` add SQL and Delta Lake support.
+- There are no outstanding Rust compiler errors.
+- `cargo test` passes (unit/integration/doc tests).
+- `make test` runs Rust tests plus Python tests (creates `.venv`, `maturin develop --features "pyo3,sql,delta"`, `pytest tests/python/`).
+- `make check-full` runs Rust check, then `lint-python` (ruff format, ruff check, mypy), then Python tests.
+- `make sparkless-parity` runs parity over hand-written and (if present) converted fixtures; set `SPARKLESS_EXPECTED_OUTPUTS` to convert from Sparkless first.
+
 ## ✅ Completed
 
 ### 1. Rust Core (default build)
