@@ -905,6 +905,58 @@ impl PyColumn {
         (PyColumn { inner: pos }, PyColumn { inner: val })
     }
 
+    // --- Window functions (use with .over(partition_by); Fixes #187) ---
+
+    /// Apply window partitioning. Use after row_number(), rank(), dense_rank(), lag(), lead(), first_value(), last_value(), or aggregation (e.g. sum).
+    /// Example: ``col("salary").row_number(True).over(["dept"])`` or ``sum(col("amount")).over(["id"])``.
+    #[pyo3(signature = (partition_by))]
+    fn over(&self, partition_by: Vec<String>) -> Self {
+        let refs: Vec<&str> = partition_by.iter().map(|s| s.as_str()).collect();
+        PyColumn {
+            inner: self.inner.over(&refs),
+        }
+    }
+
+    /// Row number (1, 2, 3) by this column's order within partition. Use with .over(partition_by).
+    #[pyo3(signature = (descending=false))]
+    fn row_number(&self, descending: bool) -> Self {
+        PyColumn {
+            inner: self.inner.row_number(descending),
+        }
+    }
+
+    /// Rank (ties same rank, gaps). Use with .over(partition_by).
+    #[pyo3(signature = (descending=false))]
+    fn rank(&self, descending: bool) -> Self {
+        PyColumn {
+            inner: self.inner.rank(descending),
+        }
+    }
+
+    /// Dense rank (no gaps). Use with .over(partition_by).
+    #[pyo3(signature = (descending=false))]
+    fn dense_rank(&self, descending: bool) -> Self {
+        PyColumn {
+            inner: self.inner.dense_rank(descending),
+        }
+    }
+
+    /// Lag: value from n rows before in partition. Use with .over(partition_by).
+    #[pyo3(signature = (n=1))]
+    fn lag(&self, n: i64) -> Self {
+        PyColumn {
+            inner: self.inner.lag(n),
+        }
+    }
+
+    /// Lead: value from n rows after in partition. Use with .over(partition_by).
+    #[pyo3(signature = (n=1))]
+    fn lead(&self, n: i64) -> Self {
+        PyColumn {
+            inner: self.inner.lead(n),
+        }
+    }
+
     /// First value in partition (PySpark first_value). Use with .over().
     fn first_value(&self) -> Self {
         PyColumn {
