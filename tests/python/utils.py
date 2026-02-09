@@ -8,6 +8,31 @@ fixture from conftest.py.
 
 from __future__ import annotations
 
+from datetime import date, datetime
+
+
+def _is_date_like(v: object) -> bool:
+    """True if v is a date, datetime, or string that looks like a date/datetime."""
+    if isinstance(v, (date, datetime)):
+        return True
+    if isinstance(v, str) and len(v) >= 10 and v[4:5] == "-" and v[7:8] == "-":
+        return v[:4].isdigit() and v[5:7].isdigit() and v[8:10].isdigit()
+    return False
+
+
+def _normalize_date_like(v: object) -> tuple[str | None, str | None]:
+    """Normalize to (date_part, time_part) for comparison; (None, None) if not date-like."""
+    if isinstance(v, datetime):
+        return (v.date().isoformat(), v.time().isoformat())
+    if isinstance(v, date):
+        return (v.isoformat(), None)
+    if isinstance(v, str) and _is_date_like(v):
+        if "T" in v or " " in v:
+            parts = v.replace("T", " ").split(" ", 1)
+            return (parts[0], parts[1] if len(parts) > 1 else None)
+        return (v[:10], None)
+    return (None, None)
+
 
 def assert_rows_equal(
     actual: list[dict],
@@ -63,6 +88,11 @@ def _assert_row_equal(actual: dict, expected: dict, index: int = 0) -> None:
             if a != a and e != e:
                 continue  # both NaN
             if abs(a - e) > 1e-9:
+                raise AssertionError(f"Row {index} key '{k}': {a!r} != {e!r}")
+        elif _is_date_like(a) or _is_date_like(e):
+            na, ta = _normalize_date_like(a)
+            ne, te = _normalize_date_like(e)
+            if (na, ta) != (ne, te):
                 raise AssertionError(f"Row {index} key '{k}': {a!r} != {e!r}")
         elif a != e:
             raise AssertionError(f"Row {index} key '{k}': {a!r} != {e!r}")

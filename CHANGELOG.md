@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **#186 – lit(): extend to date/datetime types for PySpark parity** — `lit()` now accepts `datetime.date` and `datetime.datetime` in addition to `None`, int, float, bool, and str. Enables expressions like `col("dt") > lit(some_date)` and `with_column("ts", lit(datetime.datetime(...)))` with proper date/timestamp semantics.
 - **#184 – Filter: support Column–Column comparisons** — `df.filter(col("a") > col("b"))` and `df.filter(col("a").gt(col("b")))` now work. The Python `Column` type implements rich comparison methods (`__gt__`, `__ge__`, `__lt__`, `__le__`, `__eq__`, `__ne__`), and the comparison methods (`gt`, `ge`, `lt`, `le`, `eq`, `ne`) accept either a Column or a scalar (int, float, bool, str, None), matching PySpark semantics.
 
 ## [0.3.1] - 2026-02-09

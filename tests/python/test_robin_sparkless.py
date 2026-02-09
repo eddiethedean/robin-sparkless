@@ -371,6 +371,201 @@ def test_col_lit_when() -> None:
     assert rows[2]["level"] == "high"
 
 
+def test_lit_date_and_datetime() -> None:
+    """lit() accepts datetime.date and datetime.datetime (Fixes #186)."""
+    import datetime
+
+    import robin_sparkless as rs
+
+    spark = rs.SparkSession.builder().app_name("test").get_or_create()
+    df = spark.create_dataframe(
+        [(1, 10, "a"), (2, 20, "b"), (3, 30, "c")], ["id", "x", "name"]
+    )
+
+    # with_column: lit(date) and lit(datetime) produce date/datetime columns
+    out = df.with_column("const_date", rs.lit(datetime.date(2025, 6, 15)))
+    out = out.with_column(
+        "const_ts",
+        rs.lit(datetime.datetime(2025, 6, 15, 12, 30, 45, 123456)),
+    )
+    rows = out.collect()
+    assert len(rows) == 3
+    # collect() may return date/datetime as Python types or as ISO strings
+    assert rows[0]["const_date"] in (datetime.date(2025, 6, 15), "2025-06-15")
+    ts_val = rows[0]["const_ts"]
+    assert ts_val == datetime.datetime(2025, 6, 15, 12, 30, 45, 123456) or (
+        isinstance(ts_val, str) and ts_val.startswith("2025-06-15")
+    )
+
+    # filter with lit(date): add two date columns and filter col(date) < col(date2)
+    out2 = df.with_column("d1", rs.lit(datetime.date(2025, 1, 1)))
+    out2 = out2.with_column("d2", rs.lit(datetime.date(2025, 6, 1)))
+    filtered = out2.filter(rs.col("d1").lt(rs.col("d2")))
+    assert filtered.count() == 3
+
+
+def test_lit_date_edge_cases() -> None:
+    """lit(datetime.date) with epoch, leap day, and boundary dates."""
+    import datetime
+
+    import robin_sparkless as rs
+
+    spark = rs.SparkSession.builder().app_name("test").get_or_create()
+    df = spark.create_dataframe(
+        [(1, 10, "a"), (2, 20, "b")], ["id", "x", "name"]
+    )
+
+    # Epoch date (1970-01-01)
+    out = df.with_column("epoch", rs.lit(datetime.date(1970, 1, 1)))
+    rows = out.collect()
+    assert len(rows) == 2
+    assert rows[0]["epoch"] in (datetime.date(1970, 1, 1), "1970-01-01")
+
+    # Leap day
+    out = df.with_column("leap", rs.lit(datetime.date(2024, 2, 29)))
+    rows = out.collect()
+    assert rows[0]["leap"] in (datetime.date(2024, 2, 29), "2024-02-29")
+
+    # Early date
+    out = df.with_column("early", rs.lit(datetime.date(1, 1, 1)))
+    rows = out.collect()
+    assert rows[0]["early"] in (datetime.date(1, 1, 1), "0001-01-01")
+
+
+def test_lit_datetime_edge_cases() -> None:
+    """lit(datetime.datetime) with midnight, zero microseconds, and full precision."""
+    import datetime
+
+    import robin_sparkless as rs
+
+    spark = rs.SparkSession.builder().app_name("test").get_or_create()
+    df = spark.create_dataframe(
+        [(1, 10, "a")], ["id", "x", "name"]
+    )
+
+    # Midnight, no microseconds
+    out = df.with_column(
+        "midnight",
+        rs.lit(datetime.datetime(2025, 3, 15, 0, 0, 0, 0)),
+    )
+    rows = out.collect()
+    assert len(rows) == 1
+    ts = rows[0]["midnight"]
+    assert ts == datetime.datetime(2025, 3, 15, 0, 0, 0, 0) or (
+        isinstance(ts, str) and "2025-03-15" in ts and "00:00" in ts
+    )
+
+    # With microseconds
+    out = df.with_column(
+        "with_micros",
+        rs.lit(datetime.datetime(2025, 1, 1, 23, 59, 59, 999999)),
+    )
+    rows = out.collect()
+    assert len(rows) == 1
+    ts = rows[0]["with_micros"]
+    assert ts == datetime.datetime(2025, 1, 1, 23, 59, 59, 999999) or (
+        isinstance(ts, str) and "2025-01-01" in ts
+    )
+
+
+def test_lit_date_filter_comparisons() -> None:
+    """Filter using col(date) vs lit(date): eq, gt, lt, ge, le."""
+    import datetime
+
+    import robin_sparkless as rs
+
+    spark = rs.SparkSession.builder().app_name("test").get_or_create()
+    df = spark.create_dataframe(
+        [(1, 10, "a"), (2, 20, "b"), (3, 30, "c")], ["id", "x", "name"]
+    )
+    # Column of constant date
+    df = df.with_column("d", rs.lit(datetime.date(2025, 5, 15)))
+    threshold = datetime.date(2025, 5, 15)
+
+    # col("d") == lit(threshold) -> all rows (same date)
+    eq_rows = df.filter(rs.col("d").eq(rs.lit(threshold)))
+    assert eq_rows.count() == 3
+
+    # col("d") > lit(future) -> 0 rows
+    future = datetime.date(2026, 1, 1)
+    gt_rows = df.filter(rs.col("d").gt(rs.lit(future)))
+    assert gt_rows.count() == 0
+
+    # col("d") < lit(future) -> all rows
+    lt_rows = df.filter(rs.col("d").lt(rs.lit(future)))
+    assert lt_rows.count() == 3
+
+    # col("d") >= lit(threshold) -> all rows
+    ge_rows = df.filter(rs.col("d").ge(rs.lit(threshold)))
+    assert ge_rows.count() == 3
+
+    # col("d") <= lit(past) -> 0 rows
+    past = datetime.date(2020, 1, 1)
+    le_rows = df.filter(rs.col("d").le(rs.lit(past)))
+    assert le_rows.count() == 0
+
+
+def test_lit_rejects_non_date_datetime() -> None:
+    """lit() raises TypeError for types that are not date/datetime but have year/month/day."""
+    import robin_sparkless as rs
+
+    spark = rs.SparkSession.builder().app_name("test").get_or_create()
+    df = spark.create_dataframe(
+        [(1, 10, "a")], ["id", "x", "name"]
+    )
+
+    # list is not supported
+    with pytest.raises(TypeError, match="lit\\(\\) supports only"):
+        df.with_column("bad", rs.lit([1, 2, 3]))
+
+    # dict is not supported
+    with pytest.raises(TypeError, match="lit\\(\\) supports only"):
+        df.with_column("bad", rs.lit({"a": 1}))
+
+    # bytes is not supported (no year/month/day path; fails as unsupported type)
+    with pytest.raises(TypeError, match="lit\\(\\) supports only"):
+        df.with_column("bad", rs.lit(b"bytes"))
+
+
+def test_lit_date_and_datetime_in_when() -> None:
+    """when().then(lit(date)).otherwise(lit(date)) and same for datetime."""
+    import datetime
+
+    import robin_sparkless as rs
+
+    spark = rs.SparkSession.builder().app_name("test").get_or_create()
+    df = spark.create_dataframe(
+        [(1, 1, "a"), (2, 2, "b"), (3, 10, "c")], ["id", "x", "name"]
+    )
+
+    # Branch on int, result is date literal
+    out = df.with_column(
+        "bucket",
+        rs.when(rs.col("x").lt(rs.lit(5)))
+        .then(rs.lit(datetime.date(2025, 1, 1)))
+        .otherwise(rs.lit(datetime.date(2025, 12, 31))),
+    )
+    rows = out.collect()
+    assert len(rows) == 3
+    assert rows[0]["bucket"] in (datetime.date(2025, 1, 1), "2025-01-01")
+    assert rows[2]["bucket"] in (datetime.date(2025, 12, 31), "2025-12-31")
+
+    # Branch on int, result is datetime literal
+    out2 = df.with_column(
+        "ts",
+        rs.when(rs.col("id").eq(rs.lit(2)))
+        .then(rs.lit(datetime.datetime(2025, 6, 15, 12, 0, 0, 0)))
+        .otherwise(rs.lit(datetime.datetime(2025, 1, 1, 0, 0, 0, 0))),
+    )
+    rows2 = out2.collect()
+    assert len(rows2) == 3
+    # Row id=2 gets 2025-06-15 12:00, others get 2025-01-01 00:00
+    mid_ts = rows2[1]["ts"]
+    assert mid_ts == datetime.datetime(2025, 6, 15, 12, 0, 0, 0) or (
+        isinstance(mid_ts, str) and "2025-06-15" in mid_ts and "12" in mid_ts
+    )
+
+
 def test_limit_and_distinct() -> None:
     """limit(n) and distinct() behave correctly."""
     import robin_sparkless as rs
