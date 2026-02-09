@@ -236,7 +236,10 @@ def _map_operation_to_robin(
         agg_func = sparkless.get("agg_func", "count")
         groupby_op = {"op": "groupBy", "columns": group_cols}
         if agg_func == "count":
-            agg_op = {"op": "agg", "aggregations": [{"func": "count", "alias": "count"}]}
+            agg_op = {
+                "op": "agg",
+                "aggregations": [{"func": "count", "alias": "count"}],
+            }
         else:
             agg_op = {
                 "op": "agg",
@@ -244,7 +247,8 @@ def _map_operation_to_robin(
                     {
                         "func": agg_func,
                         "alias": agg_func,
-                        "column": agg_col or (input_schema_names[-1] if input_schema_names else ""),
+                        "column": agg_col
+                        or (input_schema_names[-1] if input_schema_names else ""),
                     }
                 ],
             }
