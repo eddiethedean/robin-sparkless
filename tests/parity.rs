@@ -30,6 +30,12 @@ struct Fixture {
     #[serde(default)]
     #[allow(dead_code)]
     skip_reason: Option<String>,
+    /// When true, expect execution to fail (e.g. assert_true on false, raise_error). Pass if Err.
+    #[serde(default)]
+    expect_error: bool,
+    /// When true, substitute current_date/current_timestamp/curdate/now with fixed literals for deterministic tests.
+    #[serde(default)]
+    mock_dates: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -350,12 +356,14 @@ fn run_fixture(fixture: &Fixture) -> Result<(), PolarsError> {
         "fixture {} has empty schema",
         fixture.name
     );
-    assert_eq!(
-        fixture.expected.schema.len(),
-        fixture.expected.rows.first().map(|r| r.len()).unwrap_or(0),
-        "fixture {} expected schema/row length mismatch",
-        fixture.name
-    );
+    if !fixture.expect_error {
+        assert_eq!(
+            fixture.expected.schema.len(),
+            fixture.expected.rows.first().map(|r| r.len()).unwrap_or(0),
+            "fixture {} expected schema/row length mismatch",
+            fixture.name
+        );
+    }
 
     // Create SparkSession and DataFrame from input
     let spark = SparkSession::builder()
@@ -371,10 +379,28 @@ fn run_fixture(fixture: &Fixture) -> Result<(), PolarsError> {
         .transpose()?;
 
     // Apply operations
-    let result_df = apply_operations(df, right_df, &fixture.operations)?;
+    let result_df = match apply_operations(df, right_df, &fixture.operations, fixture.mock_dates) {
+        Ok(df) => df,
+        Err(e) if fixture.expect_error => return Ok(()),
+        Err(e) => return Err(e),
+    };
 
     // Collect and compare results
-    let (actual_schema, actual_rows) = collect_to_simple_format(&result_df)?;
+    let (actual_schema, actual_rows) = match collect_to_simple_format(&result_df) {
+        Ok(v) => v,
+        Err(e) if fixture.expect_error => return Ok(()),
+        Err(e) => return Err(e),
+    };
+
+    if fixture.expect_error {
+        return Err(PolarsError::ComputeError(
+            format!(
+                "fixture {} has expect_error=true but execution succeeded (expected failure)",
+                fixture.name
+            )
+            .into(),
+        ));
+    }
 
     // Check if operations include orderBy (for comparison strategy)
     let has_order_by = fixture
@@ -690,6 +716,7 @@ fn apply_operations(
     mut df: DataFrame,
     mut right: Option<DataFrame>,
     ops: &[Operation],
+    mock_dates: bool,
 ) -> Result<DataFrame, PolarsError> {
     use robin_sparkless::GroupedData;
 
@@ -1327,7 +1354,7 @@ fn apply_operations(
             Operation::WithColumn { column, expr } => {
                 // Parse the expression and apply withColumn
                 // For now, support simple expressions like when(), coalesce()
-                let parsed_expr = parse_with_column_expr(expr).map_err(|e| {
+                let parsed_expr = parse_with_column_expr(expr, mock_dates).map_err(|e| {
                     PolarsError::ComputeError(
                         format!("failed to parse withColumn expr '{expr}': {e}").into(),
                     )
@@ -2228,7 +2255,7 @@ fn json_value_to_lit(v: &serde_json::Value) -> Result<Expr, String> {
 }
 
 /// Parse expressions for withColumn operations (when, coalesce, string funcs, array funcs, etc.)
-fn parse_with_column_expr(src: &str) -> Result<Expr, String> {
+fn parse_with_column_expr(src: &str, mock_dates: bool) -> Result<Expr, String> {
     use polars::prelude::concat_list;
     use robin_sparkless::{
         abs, acos, add_months, array_append, array_compact, array_contains, array_distinct,
@@ -2246,7 +2273,8 @@ fn parse_with_column_expr(src: &str) -> Result<Expr, String> {
         length, like, lit_str, ln, localtimestamp, locate, log, log10, lower, lpad, make_date,
         make_timestamp, map_concat, map_contains_key, map_filter, map_from_entries, map_zip_with,
         md5, minute, monotonically_increasing_id, months_between, named_struct, nanvl, negate,
-        next_day, now, nullif, nvl, nvl2, overlay, parse_url, pi, pmod, positive, pow, power,
+        next_day, now, nullif, nvl, nvl2, octet_length, overlay, parse_url, pi, pmod, positive,
+        pow, power,
         quarter, radians, raise_error, rand, randn, regexp_count, regexp_extract,
         regexp_extract_all, regexp_instr, regexp_like, regexp_replace, regexp_substr, repeat,
         replace, reverse, right, rlike, rpad, sec, second, sha1, sha2, shift_left, shift_right,
@@ -3118,12 +3146,31 @@ fn parse_with_column_expr(src: &str) -> Result<Expr, String> {
         return Ok(equal_null(&col(a_name), &col(b_name)).into_expr());
     }
 
-    // Handle curdate(), now(), localtimestamp()
-    if s == "curdate()" {
-        return Ok(curdate().into_expr());
+    // Handle curdate(), now(), localtimestamp() - with optional mock for deterministic tests
+    if s == "curdate()" || s == "current_date()" {
+        if mock_dates {
+            let d = NaiveDate::from_ymd_opt(2025, 1, 15).unwrap();
+            return Ok(lit(d).cast(DataType::Date));
+        }
+        return Ok(if s == "curdate()" {
+            curdate()
+        } else {
+            current_date()
+        }
+        .into_expr());
     }
-    if s == "now()" {
-        return Ok(now().into_expr());
+    if s == "now()" || s == "current_timestamp()" {
+        if mock_dates {
+            let dt =
+                NaiveDateTime::parse_from_str("2025-01-15 00:00:00", "%Y-%m-%d %H:%M:%S").unwrap();
+            return Ok(lit(dt));
+        }
+        return Ok(if s == "now()" {
+            now()
+        } else {
+            current_timestamp()
+        }
+        .into_expr());
     }
     if s == "localtimestamp()" {
         return Ok(localtimestamp().into_expr());
@@ -3586,6 +3633,11 @@ fn parse_with_column_expr(src: &str) -> Result<Expr, String> {
         let col_name = extract_col_name(inner.trim())?;
         return Ok(bit_length(&col(col_name)).into_expr());
     }
+    if s.starts_with("octet_length(") {
+        let inner = extract_first_arg(s, "octet_length(")?;
+        let col_name = extract_col_name(inner.trim())?;
+        return Ok(octet_length(&col(col_name)).into_expr());
+    }
     if s.starts_with("typeof(") {
         let inner = extract_first_arg(s, "typeof(")?;
         let col_name = extract_col_name(inner.trim())?;
@@ -3783,7 +3835,7 @@ fn parse_with_column_expr(src: &str) -> Result<Expr, String> {
                 columns.push(lit_str(lit_val));
             } else if part.starts_with("when(") {
                 // Recursively parse when() expression
-                let expr = parse_with_column_expr(part)?;
+                let expr = parse_with_column_expr(part, mock_dates)?;
                 columns.push(robin_sparkless::Column::from_expr(expr, None));
             } else {
                 // Try as a bare literal (quoted string or number)
@@ -4439,13 +4491,8 @@ fn parse_with_column_expr(src: &str) -> Result<Expr, String> {
         return Ok(nanvl(&c, &val_col).into_expr());
     }
 
-    // --- Datetime: current_date, current_timestamp, date_add, date_sub, hour, minute, second, datediff, last_day, trunc ---
-    if s == "current_date()" {
-        return Ok(current_date().into_expr());
-    }
-    if s == "current_timestamp()" {
-        return Ok(current_timestamp().into_expr());
-    }
+    // --- Datetime: date_add, date_sub, hour, minute, second, datediff, last_day, trunc ---
+    // (current_date/curdate/now/current_timestamp handled above with mock_dates)
     if s.starts_with("date_add(") {
         let inner = extract_first_arg(s, "date_add(")?;
         let parts = parse_comma_separated_args(inner);

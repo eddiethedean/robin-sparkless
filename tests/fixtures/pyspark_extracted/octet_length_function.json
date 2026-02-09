@@ -75,7 +75,5 @@
         5
       ]
     ]
-  },
-  "skip": true,
-  "skip_reason": "octet_length returns string in robin-sparkless, fixture expects int"
+  }
 }

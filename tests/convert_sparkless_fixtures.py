@@ -182,70 +182,94 @@ def _build_right_input(sparkless: dict) -> dict | None:
     return {"schema": right_schema, "rows": right_rows}
 
 
+# Column names typically used for numeric comparisons (avoid col('name')>0 when name is string)
+NUMERIC_COLUMN_NAMES = frozenset(
+    {"id", "age", "salary", "amount", "value", "count", "score", "num", "qty"}
+)
+
+# Alias mapping: output column -> input column (for select_with_alias)
+ALIAS_MAPPING = {"user_id": "id", "full_name": "name"}
+
+
+def _pick_numeric_filter_column(input_schema_names: list[str]) -> str:
+    """Pick first column that looks numeric for filter expr (avoid string columns)."""
+    for n in input_schema_names:
+        if n.lower() in NUMERIC_COLUMN_NAMES:
+            return n
+    return input_schema_names[0] if input_schema_names else "id"
+
+
 def _map_operation_to_robin(
     operation: str,
     sparkless: dict,
     input_schema_names: list[str],
     exp_schema: list[dict],
 ) -> list[dict]:
-    """Map Sparkless operation string and context to robin-sparkless operations list."""
+    """Map Sparkless operation string and context to robin-sparkless operations list.
+    Order: filter -> groupBy -> agg -> select -> orderBy (never select before groupBy).
+    """
     op_lower = operation.lower().strip().replace("-", "_").replace(" ", "_")
-    operations: list[dict] = []
+    filter_op: dict | None = None
+    groupby_op: dict | None = None
+    agg_op: dict | None = None
+    select_op: dict | None = None
+    orderby_op: dict | None = None
+    join_op: dict | None = None
+    window_op: dict | None = None
+    withcolumn_ops: list[dict] = []
+    other_ops: list[dict] = []
 
     if "filter" in op_lower:
-        filter_expr = (
-            sparkless.get("filter_expr")
-            or "col('"
-            + (
-                input_schema_names[1]
-                if len(input_schema_names) > 1
-                else input_schema_names[0]
-            )
-            + "') > 0"
-        )
-        operations.append({"op": "filter", "expr": filter_expr})
+        filter_expr = sparkless.get("filter_expr")
+        if not filter_expr:
+            col_name = _pick_numeric_filter_column(input_schema_names)
+            filter_expr = f"col('{col_name}') > 0"
+        filter_op = {"op": "filter", "expr": filter_expr}
     if "select" in op_lower:
         cols = sparkless.get("select_columns") or [s["name"] for s in exp_schema]
-        operations.append({"op": "select", "columns": cols})
+        select_op = {"op": "select", "columns": cols}
     if "groupby" in op_lower or "group_by" in op_lower:
         group_cols = sparkless.get("group_by_columns") or (
             input_schema_names[:1] if input_schema_names else []
         )
         agg_col = sparkless.get("agg_column")
         agg_func = sparkless.get("agg_func", "count")
-        operations.append({"op": "groupBy", "columns": group_cols})
+        groupby_op = {"op": "groupBy", "columns": group_cols}
         if agg_func == "count":
-            operations.append(
-                {"op": "agg", "aggregations": [{"func": "count", "alias": "count"}]}
-            )
+            agg_op = {"op": "agg", "aggregations": [{"func": "count", "alias": "count"}]}
         else:
-            operations.append(
-                {
-                    "op": "agg",
-                    "aggregations": [
-                        {
-                            "func": agg_func,
-                            "alias": agg_func,
-                            "column": agg_col or input_schema_names[-1]
-                            if input_schema_names
-                            else "",
-                        }
-                    ],
-                }
-            )
+            agg_op = {
+                "op": "agg",
+                "aggregations": [
+                    {
+                        "func": agg_func,
+                        "alias": agg_func,
+                        "column": agg_col or (input_schema_names[-1] if input_schema_names else ""),
+                    }
+                ],
+            }
     if "order" in op_lower or "orderby" in op_lower:
         order_cols = (
             sparkless.get("order_by_columns") or [exp_schema[0]["name"]]
             if exp_schema
             else []
         )
-        operations.append(
-            {
-                "op": "orderBy",
-                "columns": order_cols,
-                "ascending": [True] * len(order_cols),
-            }
-        )
+        orderby_op = {
+            "op": "orderBy",
+            "columns": order_cols,
+            "ascending": [True] * len(order_cols),
+        }
+
+    # Select_with_alias: output cols (e.g. user_id, full_name) not in input -> add withColumn aliases
+    if select_op and groupby_op is None:
+        input_set = set(input_schema_names)
+        for out_col in select_op.get("columns", []):
+            if out_col not in input_set and out_col in ALIAS_MAPPING:
+                src = ALIAS_MAPPING[out_col]
+                if src in input_set:
+                    withcolumn_ops.append(
+                        {"op": "withColumn", "column": out_col, "expr": f"col('{src}')"}
+                    )
 
     # Join: needs right_input from _build_right_input; emit join op
     if "join" in op_lower:
@@ -257,9 +281,7 @@ def _map_operation_to_robin(
         how = (sparkless.get("join_how") or sparkless.get("how") or "inner").lower()
         if how not in ("inner", "left", "right", "outer"):
             how = "inner"
-        operations.append(
-            {"op": "join", "on": on if isinstance(on, list) else [on], "how": how}
-        )
+        join_op = {"op": "join", "on": on if isinstance(on, list) else [on], "how": how}
 
     # Window: partition_by, order_by, func, value_column (for lag/lead)
     if "window" in op_lower:
@@ -293,7 +315,7 @@ def _map_operation_to_robin(
         }
         if value_col is not None:
             op_payload["value_column"] = value_col
-        operations.append(op_payload)
+        window_op = op_payload
 
     # WithColumn / transformations
     if (
@@ -311,18 +333,18 @@ def _map_operation_to_robin(
             or sparkless.get("expr")
             or "col('" + (input_schema_names[0] if input_schema_names else "id") + "')"
         )
-        operations.append({"op": "withColumn", "column": col_name, "expr": expr})
+        withcolumn_ops.append({"op": "withColumn", "column": col_name, "expr": expr})
 
     # Union / unionAll
     if "union" in op_lower and "name" not in op_lower:
-        operations.append({"op": "union"})
+        other_ops.append({"op": "union"})
     if "union_by_name" in op_lower or "unionbyname" in op_lower:
-        operations.append({"op": "unionByName"})
+        other_ops.append({"op": "unionByName"})
 
     # Distinct
     if "distinct" in op_lower or "drop_duplicate" in op_lower:
         subset = sparkless.get("subset") or sparkless.get("columns")
-        operations.append(
+        other_ops.append(
             {"op": "distinct", "subset": subset if isinstance(subset, list) else None}
         )
 
@@ -333,26 +355,26 @@ def _map_operation_to_robin(
         and "drop_duplicate" not in op_lower
     ):
         cols = sparkless.get("columns") or sparkless.get("drop_columns") or []
-        operations.append(
+        other_ops.append(
             {"op": "drop", "columns": cols if isinstance(cols, list) else [cols]}
         )
 
     # Dropna
     if "dropna" in op_lower or "drop_null" in op_lower:
         subset = sparkless.get("subset") or sparkless.get("columns")
-        operations.append(
+        other_ops.append(
             {"op": "dropna", "subset": subset if isinstance(subset, list) else None}
         )
 
     # Fillna
     if "fillna" in op_lower or "fill_null" in op_lower:
         value = sparkless.get("value") or sparkless.get("fill_value") or 0
-        operations.append({"op": "fillna", "value": value})
+        other_ops.append({"op": "fillna", "value": value})
 
     # Limit
     if "limit" in op_lower or "head" in op_lower:
         n = sparkless.get("n") or sparkless.get("limit") or 10
-        operations.append({"op": "limit", "n": int(n)})
+        other_ops.append({"op": "limit", "n": int(n)})
 
     # WithColumnRenamed
     if (
@@ -366,7 +388,27 @@ def _map_operation_to_robin(
             or (input_schema_names[0] if input_schema_names else "old")
         )
         new = sparkless.get("new") or sparkless.get("new_name") or "new"
-        operations.append({"op": "withColumnRenamed", "existing": existing, "new": new})
+        other_ops.append({"op": "withColumnRenamed", "existing": existing, "new": new})
+
+    # Build final operations list: filter -> withColumn (aliases) -> groupBy -> agg -> select -> orderBy -> join -> window -> other
+    operations: list[dict] = []
+    if filter_op:
+        operations.append(filter_op)
+    operations.extend(withcolumn_ops)
+    if groupby_op:
+        operations.append(groupby_op)
+    if agg_op:
+        operations.append(agg_op)
+    # Select after groupBy when both present; never emit select before groupBy
+    if select_op:
+        operations.append(select_op)
+    if orderby_op:
+        operations.append(orderby_op)
+    if join_op:
+        operations.append(join_op)
+    if window_op:
+        operations.append(window_op)
+    operations.extend(other_ops)
 
     return operations
 
