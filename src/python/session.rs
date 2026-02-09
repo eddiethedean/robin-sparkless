@@ -295,31 +295,20 @@ impl PySparkSession {
     ///
     /// Raises:
     ///     RuntimeError: If the table cannot be read. Requires the ``delta`` feature.
-    #[cfg(feature = "delta")]
+    /// Read a Delta table from path, or an in-memory table by name (same resolution as spark.table).
     fn read_delta(&self, path: &str) -> PyResult<PyDataFrame> {
         let df = self
             .inner
-            .read_delta(Path::new(path))
+            .read_delta(path)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
         Ok(PyDataFrame { inner: df })
     }
 
-    /// Read a Delta Lake table at a specific version (time travel).
-    ///
-    /// Args:
-    ///     path: Local path or URI to the Delta table directory.
-    ///     version: Delta table version to read. If None, reads latest.
-    ///
-    /// Returns:
-    ///     DataFrame (lazy) for that version.
-    ///
-    /// Raises:
-    ///     RuntimeError: If the table or version cannot be read. Requires the ``delta`` feature.
-    #[cfg(feature = "delta")]
+    /// Read a Delta Lake table at a specific version (time travel). For in-memory table names, version is ignored.
     fn read_delta_version(&self, path: &str, version: Option<i64>) -> PyResult<PyDataFrame> {
         let df = self
             .inner
-            .read_delta_with_version(Path::new(path), version)
+            .read_delta_with_version(path, version)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
         Ok(PyDataFrame { inner: df })
     }
@@ -541,9 +530,18 @@ impl PyCatalog {
         self.session.drop_global_temp_view(view_name);
     }
 
+    /// List table/view names in the current session (temp views and saved tables). Returns names only (no Table objects).
     #[pyo3(name = "listTables")]
     fn list_tables(&self, _db_name: Option<&str>) -> Vec<String> {
-        self.session.list_temp_view_names()
+        let mut names: Vec<String> = self.session.list_temp_view_names();
+        let table_names = self.session.list_table_names();
+        for n in table_names {
+            if !names.contains(&n) {
+                names.push(n);
+            }
+        }
+        names.sort();
+        names
     }
 
     #[pyo3(name = "tableExists")]
@@ -603,6 +601,12 @@ impl PyCatalog {
     #[pyo3(name = "recoverPartitions")]
     fn recover_partitions(&self, _table_name: &str) {
         // No-op
+    }
+
+    /// Drop an in-memory saved table by name (removes from saved-tables only; does not drop temp views).
+    #[pyo3(name = "dropTable")]
+    fn drop_table(&self, table_name: &str) -> bool {
+        self.session.drop_table(table_name)
     }
 
     #[pyo3(name = "createTable")]

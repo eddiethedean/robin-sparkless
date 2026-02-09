@@ -53,6 +53,9 @@ impl SparkSessionBuilder {
 /// Catalog of temporary view names to DataFrames (session-scoped). Uses Arc<Mutex<>> for Send+Sync (Python bindings).
 pub type TempViewCatalog = Arc<Mutex<HashMap<String, DataFrame>>>;
 
+/// Catalog of saved table names to DataFrames (session-scoped). Used by saveAsTable.
+pub type TableCatalog = Arc<Mutex<HashMap<String, DataFrame>>>;
+
 /// Main entry point for creating DataFrames and executing queries
 /// Similar to PySpark's SparkSession but using Polars as the backend
 #[derive(Clone)]
@@ -62,6 +65,8 @@ pub struct SparkSession {
     config: HashMap<String, String>,
     /// Temporary views: name -> DataFrame. Session-scoped; cleared when session is dropped.
     pub(crate) catalog: TempViewCatalog,
+    /// Saved tables (saveAsTable): name -> DataFrame. Session-scoped; separate namespace from temp views.
+    pub(crate) tables: TableCatalog,
 }
 
 impl SparkSession {
@@ -75,6 +80,7 @@ impl SparkSession {
             master,
             config,
             catalog: Arc::new(Mutex::new(HashMap::new())),
+            tables: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -108,9 +114,41 @@ impl SparkSession {
         self.drop_temp_view(name);
     }
 
-    /// Check if a temporary view exists.
+    /// Register a DataFrame as a saved table (PySpark: saveAsTable). Inserts into the tables catalog only.
+    pub fn register_table(&self, name: &str, df: DataFrame) {
+        let _ = self
+            .tables
+            .lock()
+            .map(|mut m| m.insert(name.to_string(), df));
+    }
+
+    /// Get a saved table by name (tables map only). Returns None if not in saved tables (temp views not checked).
+    pub fn get_saved_table(&self, name: &str) -> Option<DataFrame> {
+        self.tables
+            .lock()
+            .ok()
+            .and_then(|m| m.get(name).cloned())
+    }
+
+    /// True if the name exists in the saved-tables map (not temp views).
+    pub fn saved_table_exists(&self, name: &str) -> bool {
+        self.tables
+            .lock()
+            .map(|m| m.contains_key(name))
+            .unwrap_or(false)
+    }
+
+    /// Check if a table or temp view exists (PySpark: catalog.tableExists). True if name is in temp views or saved tables.
     pub fn table_exists(&self, name: &str) -> bool {
-        self.catalog
+        if self
+            .catalog
+            .lock()
+            .map(|m| m.contains_key(name))
+            .unwrap_or(false)
+        {
+            return true;
+        }
+        self.tables
             .lock()
             .map(|m| m.contains_key(name))
             .unwrap_or(false)
@@ -124,10 +162,35 @@ impl SparkSession {
             .unwrap_or_default()
     }
 
-    /// Look up a temporary view by name (PySpark: table(name)).
-    /// Returns an error if the view does not exist.
+    /// Return saved table names in this session (saveAsTable / write_delta_table).
+    pub fn list_table_names(&self) -> Vec<String> {
+        self.tables
+            .lock()
+            .map(|m| m.keys().cloned().collect())
+            .unwrap_or_default()
+    }
+
+    /// Drop a saved table by name (removes from tables catalog only). No-op if not present.
+    pub fn drop_table(&self, name: &str) -> bool {
+        self.tables
+            .lock()
+            .map(|mut m| m.remove(name).is_some())
+            .unwrap_or(false)
+    }
+
+    /// Look up a table or temp view by name (PySpark: table(name)).
+    /// Resolution order: (1) temp view, (2) saved table. Returns an error if not found.
     pub fn table(&self, name: &str) -> Result<DataFrame, PolarsError> {
-        self.catalog
+        if let Some(df) = self
+            .catalog
+            .lock()
+            .map_err(|_| PolarsError::InvalidOperation("catalog lock poisoned".into()))?
+            .get(name)
+            .cloned()
+        {
+            return Ok(df);
+        }
+        self.tables
             .lock()
             .map_err(|_| PolarsError::InvalidOperation("catalog lock poisoned".into()))?
             .get(name)
@@ -135,7 +198,7 @@ impl SparkSession {
             .ok_or_else(|| {
                 PolarsError::InvalidOperation(
                     format!(
-                        "Table or view '{name}' not found. Register it with create_or_replace_temp_view."
+                        "Table or view '{name}' not found. Register it with create_or_replace_temp_view or saveAsTable."
                     )
                     .into(),
                 )
@@ -514,16 +577,20 @@ impl SparkSession {
         ))
     }
 
-    /// Read a Delta table at the given path (latest version).
-    /// Requires the `delta` feature. Path can be local (e.g. `/tmp/table`) or `file:///...`.
+    /// Returns true if the string looks like a filesystem path (has separators or path exists).
+    fn looks_like_path(s: &str) -> bool {
+        s.contains('/') || s.contains('\\') || Path::new(s).exists()
+    }
+
+    /// Read a Delta table from path (latest version). Internal; use read_delta(name_or_path: &str) for dispatch.
     #[cfg(feature = "delta")]
-    pub fn read_delta(&self, path: impl AsRef<Path>) -> Result<DataFrame, PolarsError> {
+    pub fn read_delta_path(&self, path: impl AsRef<Path>) -> Result<DataFrame, PolarsError> {
         crate::delta::read_delta(path, self.is_case_sensitive())
     }
 
-    /// Read a Delta table at the given path, optionally at a specific version (time travel).
+    /// Read Delta table at path, optional version. Internal; use read_delta_str for dispatch.
     #[cfg(feature = "delta")]
-    pub fn read_delta_with_version(
+    pub fn read_delta_path_with_version(
         &self,
         path: impl AsRef<Path>,
         version: Option<i64>,
@@ -531,20 +598,60 @@ impl SparkSession {
         crate::delta::read_delta_with_version(path, version, self.is_case_sensitive())
     }
 
-    /// Stub when `delta` feature is disabled.
+    /// Read a Delta table or in-memory table by name/path. If name_or_path looks like a path, reads from Delta on disk; else resolves as table name (temp view then saved table).
+    #[cfg(feature = "delta")]
+    pub fn read_delta(&self, name_or_path: &str) -> Result<DataFrame, PolarsError> {
+        if Self::looks_like_path(name_or_path) {
+            self.read_delta_path(Path::new(name_or_path))
+        } else {
+            self.table(name_or_path)
+        }
+    }
+
+    #[cfg(feature = "delta")]
+    pub fn read_delta_with_version(
+        &self,
+        name_or_path: &str,
+        version: Option<i64>,
+    ) -> Result<DataFrame, PolarsError> {
+        if Self::looks_like_path(name_or_path) {
+            self.read_delta_path_with_version(Path::new(name_or_path), version)
+        } else {
+            // In-memory tables have no version; ignore version and return table
+            self.table(name_or_path)
+        }
+    }
+
+    /// Stub when `delta` feature is disabled. Still supports reading by table name.
     #[cfg(not(feature = "delta"))]
-    pub fn read_delta(&self, _path: impl AsRef<Path>) -> Result<DataFrame, PolarsError> {
-        Err(PolarsError::InvalidOperation(
-            "Delta Lake requires the 'delta' feature. Build with --features delta.".into(),
-        ))
+    pub fn read_delta(&self, name_or_path: &str) -> Result<DataFrame, PolarsError> {
+        if Self::looks_like_path(name_or_path) {
+            Err(PolarsError::InvalidOperation(
+                "Delta Lake requires the 'delta' feature. Build with --features delta.".into(),
+            ))
+        } else {
+            self.table(name_or_path)
+        }
     }
 
     #[cfg(not(feature = "delta"))]
     pub fn read_delta_with_version(
         &self,
-        _path: impl AsRef<Path>,
-        _version: Option<i64>,
+        name_or_path: &str,
+        version: Option<i64>,
     ) -> Result<DataFrame, PolarsError> {
+        let _ = version;
+        self.read_delta(name_or_path)
+    }
+
+    /// Path-only read_delta (for DataFrameReader.load/format delta). Requires delta feature.
+    #[cfg(feature = "delta")]
+    pub fn read_delta_from_path(&self, path: impl AsRef<Path>) -> Result<DataFrame, PolarsError> {
+        self.read_delta_path(path)
+    }
+
+    #[cfg(not(feature = "delta"))]
+    pub fn read_delta_from_path(&self, _path: impl AsRef<Path>) -> Result<DataFrame, PolarsError> {
         Err(PolarsError::InvalidOperation(
             "Delta Lake requires the 'delta' feature. Build with --features delta.".into(),
         ))
@@ -611,7 +718,7 @@ impl DataFrameReader {
             Some("csv") => self.csv(path),
             Some("json") | Some("jsonl") => self.json(path),
             #[cfg(feature = "delta")]
-            Some("delta") => self.session.read_delta(path),
+            Some("delta") => self.session.read_delta_from_path(path),
             _ => Err(PolarsError::ComputeError(
                 format!(
                     "load: could not infer format for path '{}'. Use format('parquet'|'csv'|'json') before load.",
@@ -737,7 +844,7 @@ impl DataFrameReader {
 
     #[cfg(feature = "delta")]
     pub fn delta(&self, path: impl AsRef<std::path::Path>) -> Result<DataFrame, PolarsError> {
-        self.session.read_delta(path)
+        self.session.read_delta_from_path(path)
     }
 }
 
@@ -749,6 +856,7 @@ impl SparkSession {
             master: self.master.clone(),
             config: self.config.clone(),
             catalog: self.catalog.clone(),
+            tables: self.tables.clone(),
         })
     }
 }
@@ -1044,5 +1152,146 @@ mod tests {
         assert!(names.iter().any(|n| n.starts_with("age=")));
         let df_read = spark.read_parquet(&path).unwrap();
         assert_eq!(df_read.count().unwrap(), 3);
+    }
+
+    #[test]
+    fn test_save_as_table_error_if_exists() {
+        use crate::dataframe::SaveMode;
+
+        let spark = SparkSession::builder().app_name("test").get_or_create();
+        let df = spark
+            .create_dataframe(
+                vec![(1, 25, "Alice".to_string())],
+                vec!["id", "age", "name"],
+            )
+            .unwrap();
+        // First call succeeds
+        df.write()
+            .save_as_table(&spark, "t1", SaveMode::ErrorIfExists)
+            .unwrap();
+        assert!(spark.table("t1").is_ok());
+        assert_eq!(spark.table("t1").unwrap().count().unwrap(), 1);
+        // Second call with ErrorIfExists fails
+        let err = df
+            .write()
+            .save_as_table(&spark, "t1", SaveMode::ErrorIfExists)
+            .unwrap_err();
+        assert!(err.to_string().contains("already exists"));
+    }
+
+    #[test]
+    fn test_save_as_table_overwrite() {
+        use crate::dataframe::SaveMode;
+
+        let spark = SparkSession::builder().app_name("test").get_or_create();
+        let df1 = spark
+            .create_dataframe(
+                vec![(1, 25, "Alice".to_string())],
+                vec!["id", "age", "name"],
+            )
+            .unwrap();
+        let df2 = spark
+            .create_dataframe(
+                vec![(2, 30, "Bob".to_string()), (3, 35, "Carol".to_string())],
+                vec!["id", "age", "name"],
+            )
+            .unwrap();
+        df1.write().save_as_table(&spark, "t_over", SaveMode::ErrorIfExists).unwrap();
+        assert_eq!(spark.table("t_over").unwrap().count().unwrap(), 1);
+        df2.write().save_as_table(&spark, "t_over", SaveMode::Overwrite).unwrap();
+        assert_eq!(spark.table("t_over").unwrap().count().unwrap(), 2);
+    }
+
+    #[test]
+    fn test_save_as_table_append() {
+        use crate::dataframe::SaveMode;
+
+        let spark = SparkSession::builder().app_name("test").get_or_create();
+        let df1 = spark
+            .create_dataframe(
+                vec![(1, 25, "Alice".to_string())],
+                vec!["id", "age", "name"],
+            )
+            .unwrap();
+        let df2 = spark
+            .create_dataframe(
+                vec![(2, 30, "Bob".to_string())],
+                vec!["id", "age", "name"],
+            )
+            .unwrap();
+        df1.write().save_as_table(&spark, "t_append", SaveMode::ErrorIfExists).unwrap();
+        df2.write().save_as_table(&spark, "t_append", SaveMode::Append).unwrap();
+        assert_eq!(spark.table("t_append").unwrap().count().unwrap(), 2);
+    }
+
+    #[test]
+    fn test_save_as_table_ignore() {
+        use crate::dataframe::SaveMode;
+
+        let spark = SparkSession::builder().app_name("test").get_or_create();
+        let df1 = spark
+            .create_dataframe(
+                vec![(1, 25, "Alice".to_string())],
+                vec!["id", "age", "name"],
+            )
+            .unwrap();
+        let df2 = spark
+            .create_dataframe(
+                vec![(2, 30, "Bob".to_string())],
+                vec!["id", "age", "name"],
+            )
+            .unwrap();
+        df1.write().save_as_table(&spark, "t_ignore", SaveMode::ErrorIfExists).unwrap();
+        df2.write().save_as_table(&spark, "t_ignore", SaveMode::Ignore).unwrap();
+        // Still 1 row (ignore did not replace)
+        assert_eq!(spark.table("t_ignore").unwrap().count().unwrap(), 1);
+    }
+
+    #[test]
+    fn test_table_resolution_temp_view_first() {
+        use crate::dataframe::SaveMode;
+
+        let spark = SparkSession::builder().app_name("test").get_or_create();
+        let df_saved = spark
+            .create_dataframe(
+                vec![(1, 25, "Saved".to_string())],
+                vec!["id", "age", "name"],
+            )
+            .unwrap();
+        let df_temp = spark
+            .create_dataframe(
+                vec![(2, 30, "Temp".to_string())],
+                vec!["id", "age", "name"],
+            )
+            .unwrap();
+        df_saved.write().save_as_table(&spark, "x", SaveMode::ErrorIfExists).unwrap();
+        spark.create_or_replace_temp_view("x", df_temp);
+        // table("x") must return temp view (PySpark order)
+        let t = spark.table("x").unwrap();
+        let rows = t.collect_as_json_rows().unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(
+            rows[0].get("name").and_then(|v| v.as_str()),
+            Some("Temp")
+        );
+    }
+
+    #[test]
+    fn test_drop_table() {
+        use crate::dataframe::SaveMode;
+
+        let spark = SparkSession::builder().app_name("test").get_or_create();
+        let df = spark
+            .create_dataframe(
+                vec![(1, 25, "Alice".to_string())],
+                vec!["id", "age", "name"],
+            )
+            .unwrap();
+        df.write().save_as_table(&spark, "t_drop", SaveMode::ErrorIfExists).unwrap();
+        assert!(spark.table("t_drop").is_ok());
+        assert!(spark.drop_table("t_drop"));
+        assert!(spark.table("t_drop").is_err());
+        // drop again is no-op, returns false
+        assert!(!spark.drop_table("t_drop"));
     }
 }

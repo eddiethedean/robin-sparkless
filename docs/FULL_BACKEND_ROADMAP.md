@@ -242,12 +242,14 @@ See [PYTHON_API.md](PYTHON_API.md) for the API contract Sparkless maintainers ne
 - [x] Use `sqlparser` for parsing; execution via existing DataFrame API
 - [x] Support: SELECT, FROM (single table or JOIN), WHERE, GROUP BY + aggregates (COUNT, SUM, AVG, MIN, MAX), ORDER BY, LIMIT
 - [x] Temporary views: `createOrReplaceTempView`, `table()`
-- **Limits (first iteration)**: No subqueries in FROM, no CTEs, no DDL, no HAVING; document unsupported constructs with clear errors.
+- [x] In-memory saved tables: `df.write().saveAsTable(name, mode)`, `write_delta_table(name)`; resolution (temp view then saved table) for `table(name)` and `read_delta(name)`; catalog `listTables`, `tableExists`, `dropTempView`, `dropTable`. Tables are session-scoped (no disk persistence).
+- **Limits (first iteration)**: No subqueries in FROM, no CTEs, no DDL, no HAVING; only unqualified table names; document unsupported constructs with clear errors.
 
 ### 7.2 Delta Lake (Optional) ✅
 
 - [x] Read/write Delta tables (optional `delta` feature; deltalake + Polars)
 - [x] Time travel: `read_delta_with_version(path, version)` (read by version)
+- [x] Table by name: `read_delta(name_or_path)` (path → Delta on disk; name → in-memory table when `sql` enabled); `write_delta_table(name)` registers for `read_delta(name)`
 - [x] Overwrite/append: `write_delta(path, overwrite)`
 - [ ] Schema evolution, MERGE (deferred; document as Phase 7 follow-up)
 

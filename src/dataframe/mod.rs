@@ -15,6 +15,7 @@ pub use transformations::{
 use crate::column::Column;
 use crate::functions::SortOrder;
 use crate::schema::StructType;
+use crate::session::SparkSession;
 use polars::prelude::{
     col, lit, AnyValue, DataFrame as PlDataFrame, DataType, Expr, PolarsError, SchemaNamesAndDtypes,
 };
@@ -666,6 +667,15 @@ impl DataFrame {
         ))
     }
 
+    /// Register this DataFrame as an in-memory "delta table" by name (same namespace as saveAsTable). Readable via `read_delta(name)` or `table(name)`.
+    pub fn save_as_delta_table(
+        &self,
+        session: &crate::session::SparkSession,
+        name: &str,
+    ) {
+        session.register_table(name, self.clone());
+    }
+
     /// Return a writer for generic format (parquet, csv, json). PySpark-style write API.
     pub fn write(&self) -> DataFrameWriter<'_> {
         DataFrameWriter {
@@ -678,11 +688,24 @@ impl DataFrame {
     }
 }
 
-/// Write mode: overwrite or append (PySpark DataFrameWriter.mode).
+/// Write mode: overwrite or append (PySpark DataFrameWriter.mode for path-based save).
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum WriteMode {
     Overwrite,
     Append,
+}
+
+/// Save mode for saveAsTable (PySpark default is ErrorIfExists).
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum SaveMode {
+    /// Throw if table already exists (PySpark default).
+    ErrorIfExists,
+    /// Replace existing table.
+    Overwrite,
+    /// Append to existing table; create if not exists. Column names align.
+    Append,
+    /// No-op if table exists; create if not.
+    Ignore,
 }
 
 /// Output format for generic write (PySpark DataFrameWriter.format).
@@ -731,6 +754,70 @@ impl<'a> DataFrameWriter<'a> {
     pub fn partition_by(mut self, cols: impl IntoIterator<Item = impl Into<String>>) -> Self {
         self.partition_by = cols.into_iter().map(|s| s.into()).collect();
         self
+    }
+
+    /// Save the DataFrame as a table in the session (PySpark: saveAsTable). In-memory only; table is in the saved-tables namespace.
+    pub fn save_as_table(
+        &self,
+        session: &SparkSession,
+        name: &str,
+        mode: SaveMode,
+    ) -> Result<(), PolarsError> {
+        use polars::prelude::*;
+        match mode {
+            SaveMode::ErrorIfExists => {
+                if session.saved_table_exists(name) {
+                    return Err(PolarsError::InvalidOperation(
+                        format!("Table or view '{name}' already exists. SaveMode is ErrorIfExists.")
+                            .into(),
+                    ));
+                }
+                session.register_table(name, self.df.clone());
+            }
+            SaveMode::Overwrite => {
+                session.register_table(name, self.df.clone());
+            }
+            SaveMode::Append => {
+                if let Some(existing) = session.get_saved_table(name) {
+                    let existing_pl = existing.df.as_ref().clone();
+                    let new_pl = self.df.df.as_ref().clone();
+                    let existing_cols: Vec<&str> =
+                        existing_pl.get_column_names().iter().map(|s| s.as_str()).collect();
+                    let new_cols = new_pl.get_column_names();
+                    let missing: Vec<_> = existing_cols
+                        .iter()
+                        .filter(|c| !new_cols.iter().any(|n| n.as_str() == **c))
+                        .collect();
+                    if !missing.is_empty() {
+                        return Err(PolarsError::InvalidOperation(
+                            format!(
+                                "saveAsTable append: new DataFrame missing columns: {:?}",
+                                missing
+                            )
+                            .into(),
+                        ));
+                    }
+                    let new_ordered = new_pl.select(existing_cols.iter().copied())?;
+                    let mut combined = existing_pl;
+                    combined.vstack_mut(&new_ordered)?;
+                    session.register_table(
+                        name,
+                        crate::dataframe::DataFrame::from_polars_with_options(
+                            combined,
+                            self.df.case_sensitive,
+                        ),
+                    );
+                } else {
+                    session.register_table(name, self.df.clone());
+                }
+            }
+            SaveMode::Ignore => {
+                if !session.saved_table_exists(name) {
+                    session.register_table(name, self.df.clone());
+                }
+            }
+        }
+        Ok(())
     }
 
     /// Write as Parquet (PySpark: parquet(path)). Equivalent to format(Parquet).save(path).

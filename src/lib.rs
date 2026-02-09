@@ -38,7 +38,9 @@ pub mod delta;
 pub mod python;
 
 pub use column::Column;
-pub use dataframe::{CubeRollupData, DataFrame, GroupedData, JoinType, WriteFormat, WriteMode};
+pub use dataframe::{
+    CubeRollupData, DataFrame, GroupedData, JoinType, SaveMode, WriteFormat, WriteMode,
+};
 pub use functions::{SortOrder, *};
 pub use schema::{StructField, StructType};
 pub use session::{DataFrameReader, SparkSession, SparkSessionBuilder};

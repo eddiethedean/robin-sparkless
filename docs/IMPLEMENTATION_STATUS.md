@@ -60,7 +60,7 @@ Robin-sparkless is designed to **replace the backend logic** of [Sparkless](http
 5. **Window functions** ✅ **COMPLETED**
    - ✅ `Column::rank()`, `row_number()`, `dense_rank()`, `lag()`, `lead()` with `.over(partition_by)`
    - ✅ Parity fixtures: `row_number_window`, `rank_window`, `lag_lead_window`
-   - ✅ `SparkSession::sql()` implemented (optional `sql` feature); temp views; see [QUICKSTART.md](QUICKSTART.md), [PYTHON_API.md](PYTHON_API.md).
+   - ✅ `SparkSession::sql()` implemented (optional `sql` feature); temp views and in-memory saved tables (`saveAsTable`, `write_delta_table`); catalog `listTables`, `tableExists`, `dropTempView`, `dropTable`; see [QUICKSTART.md](QUICKSTART.md), [PYTHON_API.md](PYTHON_API.md).
 
 6. **PyO3 Bridge** ✅ **COMPLETED** (Phase 4)
    - Optional `pyo3` feature (PyO3 0.24); `src/python/mod.rs` exposes `robin_sparkless` Python module.
@@ -81,7 +81,7 @@ Robin-sparkless is designed to **replace the backend logic** of [Sparkless](http
    - **Phase 10**: JSON `get_json_object`, `from_json`, `to_json`. **Phase 8**: Map `create_map`, `map_keys`, `map_values`, `map_entries`, `map_from_arrays` **implemented**. See [PYSPARK_DIFFERENCES.md](PYSPARK_DIFFERENCES.md).
 
 9. **Phase 7 SQL & Advanced** ✅ **COMPLETED**
-   - Optional **SQL** (`sql` feature): `SparkSession::sql(query)`, temp views (`create_or_replace_temp_view`, `table`); sqlparser → DataFrame ops (SELECT, FROM, WHERE, JOIN, GROUP BY, ORDER BY, LIMIT).
+   - Optional **SQL** (`sql` feature): `SparkSession::sql(query)`, temp views and in-memory tables (`create_or_replace_temp_view`, `table(name)`, `df.write().saveAsTable(name, mode)`, `write_delta_table(name)`); catalog `listTables`, `tableExists`, `dropTempView`, `dropTable`; `read_delta(name_or_path)` (path → Delta on disk, name → in-memory table); sqlparser → DataFrame ops (SELECT, FROM, WHERE, JOIN, GROUP BY, ORDER BY, LIMIT).
    - Optional **Delta Lake** (`delta` feature): `read_delta`, `read_delta_with_version` (time travel), `write_delta` (overwrite/append) via delta-rs.
    - **Performance**: `cargo bench` (criterion) compares robin-sparkless vs Polars; target within ~2x. Error messages improved; Troubleshooting in [QUICKSTART.md](QUICKSTART.md).
 

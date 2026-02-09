@@ -14,12 +14,14 @@ This document lists **intentional or known divergences** from PySpark semantics 
 
 ## SQL (optional `sql` feature)
 
+- **Tables and views**: Two namespaces — **temp views** (`createOrReplaceTempView`) and **saved tables** (`saveAsTable`). Same name can exist in both; resolution order for `table(name)` and `read_delta(name)` is temp view first, then saved table. Saved tables are in-memory only and do not persist past the session; see DataFrame/catalog bullets below.
 - **Supported**: single `SELECT`, `FROM` (single table or JOIN), `WHERE`, `GROUP BY` + aggregates, `HAVING`, `ORDER BY`, `LIMIT`, and temporary views (`createOrReplaceTempView`, `table()`). Unsupported constructs produce clear errors.
 - **Unsupported (tracked in #141)**: DDL (`CREATE/DROP DATABASE`, `CREATE/DROP TABLE`, `CREATE SCHEMA`, `SET CURRENT DATABASE`, etc.), DML (`INSERT INTO`, `UPDATE`, `DELETE FROM`), subqueries in `FROM`, CTEs.
 
 ## Delta Lake (optional `delta` feature)
 
 - **Supported**: Read by path/version, overwrite, and append. See [FULL_BACKEND_ROADMAP.md](FULL_BACKEND_ROADMAP.md) §7.2.
+- **read_delta(name_or_path)**: If the argument looks like a path (contains `/` or `\\`, or path exists), reads from Delta on disk. Otherwise treats it as a **table name** and returns the in-memory table (same resolution as `spark.table`: temp view first, then saved table). So you can `df.write_delta_table("t")` then `spark.read_delta("t")` without the delta feature.
 - **Unsupported (tracked in #152)**: Schema evolution (e.g. add columns, change types under Delta rules) and MERGE (upsert with whenMatchedUpdate/whenNotMatchedInsert). Implement when Delta usage requires them.
 
 ## Array
@@ -31,10 +33,12 @@ This document lists **intentional or known divergences** from PySpark semantics 
 - **assert_true(expr)**: Aligned with PySpark (Phase F): returns **null** when input is true; throws an exception when input is **false** or **null**. Error message uses `errMsg` when provided.
 - **raise_error(msg)**: In PySpark, `raise_error` produces an expression that always fails when evaluated. In robin-sparkless, `raise_error(msg)` is implemented as an expression that **always returns an error** with the user-provided message. The result type is an `Int64` expression that never materializes successfully.
 
-## DataFrame: cube, rollup, write, and stubs
+## DataFrame: cube, rollup, write, saveAsTable, and stubs
 
 - **cube / rollup**: Implemented. `df.cube("a", "b").agg(...)` and `df.rollup("a", "b").agg(...)` run multiple grouping sets and union results (missing keys become null), matching PySpark semantics.
 - **write**: Implemented. `df.write().mode("overwrite"|"append").format("parquet"|"csv"|"json").save(path)` uses Polars IO. Append for JSON is supported (NDJSON/JsonLines).
+- **saveAsTable(name, format=None, mode=None, partitionBy=None, **options)**: Implemented for **in-memory tables only**. Registers the DataFrame in the session's **saved-tables** namespace (separate from temp views). Mode semantics match PySpark: default `"error"` (throw if exists), `"overwrite"`, `"append"`, `"ignore"`. **Tables do not persist past the session**; full persistence may be added later. `format`, `partitionBy`, and `**options` are accepted for API compatibility but **ignored** (no disk).
+- **write_delta_table(name)**: Robin-sparkless convenience. Registers the DataFrame in the saved-tables namespace so `read_delta(name)` returns it. No PySpark direct equivalent (PySpark would use saveAsTable for a Delta catalog table).
 - **data**: Returns the same as `collect()` (list of row dicts). Best-effort local collection; no RDD.
 - **toLocalIterator**: Returns the same as `collect()` (an iterable of rows). Best-effort local iterator.
 - **rdd**: Stub; raises `NotImplementedError` ("RDD is not supported in Sparkless").
@@ -99,7 +103,7 @@ The following are **not implemented** or are **stubs**; tracked in GitHub issues
 
 - **RDD / distributed (#142)**: RDD and distributed execution APIs — not supported; `rdd`, `foreach`, `foreachPartition`, `mapInPandas`, `mapPartitions` raise `NotImplementedError`.
 - **UDF / UDTF (#143)**: User-defined functions and table functions — not implemented; use built-in expressions and plan interpreter where possible.
-- **Catalog / DataFrameWriterV2 (#144)**: `writeTo`, catalog tables, `CREATE TABLE`-style DDL — not implemented; use `df.write().format(...).save(path)`. Phase E added **Catalog stubs** for API compatibility: `spark.catalog()` returns a Catalog with `dropTempView`, `listTables`, `tableExists`, `currentDatabase`, `currentCatalog`, etc.; `createTable`, `getDatabase`, `getFunction`, `getTable`, `registerFunction` raise `NotImplementedError`. `spark.conf()` returns RuntimeConfig (get/getAll; set raises NotImplementedError).
+- **Catalog / DataFrameWriterV2 (#144)**: `writeTo`, catalog tables, `CREATE TABLE`-style DDL — not implemented; use `df.write().format(...).save(path)` or `df.write().saveAsTable(name)` for in-memory tables. **Catalog**: `spark.catalog()` returns a Catalog with `dropTempView`, `listTables`, `tableExists`, `currentDatabase`, `currentCatalog`, **`dropTable(tableName)`** (in-memory saved tables only), etc. **listTables** returns a **list of names** (not Table objects). **table(name)** and **read_delta(name_or_path)** resolve in PySpark order: temp view first, then saved table. Only **unqualified** table names are supported (no `catalog.schema.table`). `createTable`, `getDatabase`, `getFunction`, `getTable`, `registerFunction` raise `NotImplementedError`. `spark.conf()` returns RuntimeConfig (get/getAll; set raises NotImplementedError).
 - **Structured Streaming (#145)**: Not supported; `isStreaming` returns false, `withWatermark` is a no-op.
 - **XML / XPath (#146)**: `from_xml`, `to_xml`, `schema_of_xml`, `xpath*` — would require an XML parser and feature flag; deferred.
 - **Sketch aggregates (#147)**: Approximate aggregates (e.g. HyperLogLog, count-min sketch) — not implemented.
