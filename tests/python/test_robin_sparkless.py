@@ -313,11 +313,11 @@ def test_filter_condition_type_error() -> None:
     spark = rs.SparkSession.builder().app_name("test").get_or_create()
     df = spark.create_dataframe([(1, 2, "a")], ["id", "v", "name"])
     with pytest.raises(TypeError, match="condition must be a Column or literal bool"):
-        df.filter(1)
+        df.filter(1)  # type: ignore[arg-type]
     with pytest.raises(TypeError, match="condition must be a Column or literal bool"):
-        df.filter("age > 10")
+        df.filter("age > 10")  # type: ignore[arg-type]
     with pytest.raises(TypeError, match="condition must be a Column or literal bool"):
-        df.filter(None)
+        df.filter(None)  # type: ignore[arg-type]
 
 
 def test_with_column_and_show() -> None:
