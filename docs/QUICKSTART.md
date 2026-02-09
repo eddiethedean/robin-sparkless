@@ -92,7 +92,7 @@ let df_with_rn = df.with_column("rn", &col("salary").row_number(true).over(&["de
 let df_with_lag = df.with_column("prev_salary", &col("salary").lag(1).over(&["dept"]))?;
 ```
 
-Supported window functions: `row_number()`, `rank()`, `dense_rank()`, `lag(n)`, `lead(n)` — each used with `.over(&["col1", "col2"])` for partitioning. Use **`with_column(name, &Column)`** for any `Column` (e.g. from `col()`, `rand(42)`); use **`with_column_expr(name, expr)`** when you have a raw Polars `Expr`.
+Supported window functions: `row_number()`, `rank()`, `dense_rank()`, `lag(n)`, `lead(n)` — each used with `.over(&["col1", "col2"])` for partitioning. Aggregations (e.g. `sum(col("x")).over(&["dept"])`) are also supported. Use **`with_column(name, &Column)`** for any `Column` (e.g. from `col()`, `rand(42)`); use **`with_column_expr(name, expr)`** when you have a raw Polars `Expr`. **Python**: Same API via `col("x").row_number().over(["dept"])`, `sum(col("amount")).over(["id"])`, etc. — see [PYTHON_API.md](PYTHON_API.md).
 
 ### String Functions
 

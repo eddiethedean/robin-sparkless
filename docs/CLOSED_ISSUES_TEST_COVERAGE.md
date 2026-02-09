@@ -10,6 +10,9 @@ This document maps **closed GitHub issues** to tests in this repo. All tests are
 - **[Sparkless parity] test_* issues (#1–#140)**  
   Closed when parity was achieved. Coverage is via **parity fixtures** in `tests/fixtures/` and `tests/fixtures/converted/`. Fixture names often differ from the test name (e.g. `test_string_upper` → `string_upper_lower.json`, `test_group_by` → `groupby_*.json`).
 
+- **#186 (lit date/datetime), #187 (Window API)**  
+  Python tests: `test_robin_sparkless.py` (`test_lit_*`, `test_window_row_number_rank_over`), `test_lit_date_datetime_pyspark_parity.py`, `test_window_pyspark_parity.py`, `test_column_vs_column_pyspark_parity.py`, `test_issue_176_pyspark_parity.py`. These parity tests use **predetermined expected outputs** (from a prior PySpark run); no PySpark at test runtime.
+
 ## Working tests for previously skipped fixtures
 
 The following fixtures were previously skipped (platform/algorithm difference). They are now **un-skipped** and expected values were set to **our implementation’s output** so we have a working test for the corresponding closed issues:
