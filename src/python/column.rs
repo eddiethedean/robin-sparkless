@@ -85,46 +85,82 @@ impl PyColumn {
         }
     }
 
-    /// Greater than (self > other).
-    fn gt(&self, other: &PyColumn) -> Self {
-        PyColumn {
-            inner: self.inner.gt(other.inner.expr().clone()),
-        }
+    /// Greater than (self > other). Accepts Column or scalar (int, float, bool, str, None).
+    fn gt(&self, other: &Bound<'_, pyo3::types::PyAny>) -> PyResult<Self> {
+        let other_col = py_any_to_column(other)?;
+        Ok(PyColumn {
+            inner: self.inner.gt(other_col.expr().clone()),
+        })
     }
 
-    /// Greater than or equal (self >= other).
-    fn ge(&self, other: &PyColumn) -> Self {
-        PyColumn {
-            inner: self.inner.gt_eq(other.inner.expr().clone()),
-        }
+    /// Greater than or equal (self >= other). Accepts Column or scalar.
+    fn ge(&self, other: &Bound<'_, pyo3::types::PyAny>) -> PyResult<Self> {
+        let other_col = py_any_to_column(other)?;
+        Ok(PyColumn {
+            inner: self.inner.gt_eq(other_col.expr().clone()),
+        })
     }
 
-    /// Less than (self < other).
-    fn lt(&self, other: &PyColumn) -> Self {
-        PyColumn {
-            inner: self.inner.lt(other.inner.expr().clone()),
-        }
+    /// Less than (self < other). Accepts Column or scalar.
+    fn lt(&self, other: &Bound<'_, pyo3::types::PyAny>) -> PyResult<Self> {
+        let other_col = py_any_to_column(other)?;
+        Ok(PyColumn {
+            inner: self.inner.lt(other_col.expr().clone()),
+        })
     }
 
-    /// Less than or equal (self <= other).
-    fn le(&self, other: &PyColumn) -> Self {
-        PyColumn {
-            inner: self.inner.lt_eq(other.inner.expr().clone()),
-        }
+    /// Less than or equal (self <= other). Accepts Column or scalar.
+    fn le(&self, other: &Bound<'_, pyo3::types::PyAny>) -> PyResult<Self> {
+        let other_col = py_any_to_column(other)?;
+        Ok(PyColumn {
+            inner: self.inner.lt_eq(other_col.expr().clone()),
+        })
     }
 
-    /// Equal (self == other).
-    fn eq(&self, other: &PyColumn) -> Self {
-        PyColumn {
-            inner: self.inner.eq(other.inner.expr().clone()),
-        }
+    /// Equal (self == other). Accepts Column or scalar.
+    fn eq(&self, other: &Bound<'_, pyo3::types::PyAny>) -> PyResult<Self> {
+        let other_col = py_any_to_column(other)?;
+        Ok(PyColumn {
+            inner: self.inner.eq(other_col.expr().clone()),
+        })
     }
 
-    /// Not equal (self != other).
-    fn ne(&self, other: &PyColumn) -> Self {
-        PyColumn {
-            inner: self.inner.neq(other.inner.expr().clone()),
-        }
+    /// Not equal (self != other). Accepts Column or scalar.
+    fn ne(&self, other: &Bound<'_, pyo3::types::PyAny>) -> PyResult<Self> {
+        let other_col = py_any_to_column(other)?;
+        Ok(PyColumn {
+            inner: self.inner.neq(other_col.expr().clone()),
+        })
+    }
+
+    /// Python > operator. Enables col("a") > col("b") and col("a") > 5.
+    fn __gt__(&self, other: &Bound<'_, pyo3::types::PyAny>) -> PyResult<Self> {
+        self.gt(other)
+    }
+
+    /// Python >= operator.
+    fn __ge__(&self, other: &Bound<'_, pyo3::types::PyAny>) -> PyResult<Self> {
+        self.ge(other)
+    }
+
+    /// Python < operator.
+    fn __lt__(&self, other: &Bound<'_, pyo3::types::PyAny>) -> PyResult<Self> {
+        self.lt(other)
+    }
+
+    /// Python <= operator.
+    fn __le__(&self, other: &Bound<'_, pyo3::types::PyAny>) -> PyResult<Self> {
+        self.le(other)
+    }
+
+    /// Python == operator.
+    fn __eq__(&self, other: &Bound<'_, pyo3::types::PyAny>) -> PyResult<Self> {
+        self.eq(other)
+    }
+
+    /// Python != operator.
+    fn __ne__(&self, other: &Bound<'_, pyo3::types::PyAny>) -> PyResult<Self> {
+        self.ne(other)
     }
 
     /// Logical AND with another boolean column. Also supports Python & operator.
