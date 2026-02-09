@@ -11,6 +11,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Phase 26 – Publish crate**: Prepare and publish robin-sparkless to crates.io (and optionally PyPI via maturin). See [ROADMAP.md](docs/ROADMAP.md) for details.
 
+## [0.3.1] - 2026-02-09
+
+### Fixed
+
+- **#182 – select() now evaluates Column expressions instead of resolving by name** — When `select()` received Column objects (e.g. `lit(2) + col("x")` or `(col("a") * 2).alias("doubled")`), the Python bindings tried `extract::<String>()` before `extract::<PyColumn>()`. Because Column is convertible to string, expressions were wrongly treated as column names and raised `RuntimeError: not found: (2 + x)`. We now check for PyColumn first, then str, so expression-based `select()` and the Sparkless Robin backend match PySpark semantics.
+
 ## [0.3.0] - 2026-02-06
 
 ### Added
