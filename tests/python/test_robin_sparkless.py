@@ -215,6 +215,33 @@ def test_filter_column_vs_column_empty_and_all_match() -> None:
     assert all_match.count() == 2
 
 
+def test_column_operator_overloads_pyspark_style() -> None:
+    """col('age') > lit(30) and col('age') > 30 work; no TypeError (Fixes #174)."""
+    import robin_sparkless as rs
+
+    spark = rs.SparkSession.builder().app_name("test").get_or_create()
+    df = spark.create_dataframe(
+        [(1, 25, "a"), (2, 35, "b"), (3, 30, "c")], ["id", "age", "name"]
+    )
+    # Method style (already worked)
+    expr_method = rs.col("age").gt(rs.lit(30))
+    out_method = df.filter(expr_method).collect()
+    assert len(out_method) == 1 and out_method[0]["age"] == 35
+    # Operator style with Column (issue #174: was TypeError)
+    expr_op = rs.col("age") > rs.lit(30)
+    out_op = df.filter(expr_op).collect()
+    assert out_op == out_method
+    # Operator style with scalar (PySpark parity: implicit lit)
+    out_scalar = df.filter(rs.col("age") > 30).collect()
+    assert out_scalar == out_method
+    # All six operators return Column and work in filter
+    assert df.filter(rs.col("age") >= 30).count() == 2
+    assert df.filter(rs.col("age") < 30).count() == 1
+    assert df.filter(rs.col("age") <= 25).count() == 1
+    assert df.filter(rs.col("age") == 30).count() == 1
+    assert df.filter(rs.col("age") != 30).count() == 2
+
+
 def test_filter_column_vs_column_scalar_still_works() -> None:
     """Regression: column vs literal (scalar) still works after #184."""
     import robin_sparkless as rs
