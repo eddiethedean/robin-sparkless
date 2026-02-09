@@ -134,10 +134,7 @@ impl PyDataFrame {
     /// Raises:
     ///     TypeError: If condition is not a Column or literal bool (True/False).
     ///     RuntimeError: If the expression cannot be applied.
-    fn filter(
-        &self,
-        condition: &pyo3::Bound<'_, pyo3::types::PyAny>,
-    ) -> PyResult<PyDataFrame> {
+    fn filter(&self, condition: &pyo3::Bound<'_, pyo3::types::PyAny>) -> PyResult<PyDataFrame> {
         let expr: Expr = if let Ok(py_col) = condition.downcast::<PyColumn>() {
             py_col.borrow().inner.expr().clone()
         } else if let Ok(b) = condition.extract::<bool>() {

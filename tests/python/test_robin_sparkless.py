@@ -248,6 +248,78 @@ def test_filter_accepts_literal_bool() -> None:
     assert out_false.collect() == []
 
 
+def test_filter_literal_bool_empty_dataframe() -> None:
+    """filter(True) and filter(False) on empty DataFrame (fixes #185)."""
+    import robin_sparkless as rs
+
+    spark = rs.SparkSession.builder().app_name("test").get_or_create()
+    df = spark.create_dataframe([], ["id", "age", "name"])
+    assert df.count() == 0
+    assert df.filter(True).count() == 0
+    assert df.filter(True).collect() == []
+    assert df.filter(False).count() == 0
+    assert df.filter(False).collect() == []
+
+
+def test_filter_literal_bool_preserves_schema() -> None:
+    """filter(False) returns DataFrame with same columns, zero rows (fixes #185)."""
+    import robin_sparkless as rs
+
+    spark = rs.SparkSession.builder().app_name("test").get_or_create()
+    data = [(1, 10, "a"), (2, 20, "b")]
+    df = spark.create_dataframe(data, ["id", "v", "label"])
+    out = df.filter(False)
+    rows = out.collect()
+    assert rows == []
+    # Schema preserved: can add column / collect still returns list of dicts with right keys
+    out2 = out.with_column("extra", rs.lit(1))
+    assert out2.count() == 0
+    assert out2.collect() == []
+
+
+def test_filter_literal_bool_chained_with_column_filter() -> None:
+    """filter(True) then filter(Column) and filter(False) then limit (fixes #185)."""
+    import robin_sparkless as rs
+
+    spark = rs.SparkSession.builder().app_name("test").get_or_create()
+    data = [(1, 25, "Alice"), (2, 30, "Bob"), (3, 35, "Carol")]
+    df = spark.create_dataframe(data, ["id", "age", "name"])
+    # filter(True) then filter(column): same as just filter(column)
+    out = df.filter(True).filter(rs.col("age") > 28)
+    assert out.count() == 2
+    assert {r["name"] for r in out.collect()} == {"Bob", "Carol"}
+    # filter(False) then limit: still zero rows
+    out_empty = df.filter(False).limit(5)
+    assert out_empty.count() == 0
+
+
+def test_filter_literal_bool_from_rows_schema() -> None:
+    """filter(True)/filter(False) with _create_dataframe_from_rows (fixes #185)."""
+    import robin_sparkless as rs
+
+    spark = rs.SparkSession.builder().app_name("test").get_or_create()
+    data = [{"a": 1, "b": "x"}, {"a": 2, "b": "y"}]
+    schema = [("a", "bigint"), ("b", "string")]
+    df = spark._create_dataframe_from_rows(data, schema)
+    assert df.filter(True).count() == 2
+    assert df.filter(False).count() == 0
+    assert df.filter(False).collect() == []
+
+
+def test_filter_condition_type_error() -> None:
+    """filter(condition) raises TypeError for non-Column, non-bool (fixes #185)."""
+    import robin_sparkless as rs
+
+    spark = rs.SparkSession.builder().app_name("test").get_or_create()
+    df = spark.create_dataframe([(1, 2, "a")], ["id", "v", "name"])
+    with pytest.raises(TypeError, match="condition must be a Column or literal bool"):
+        df.filter(1)
+    with pytest.raises(TypeError, match="condition must be a Column or literal bool"):
+        df.filter("age > 10")
+    with pytest.raises(TypeError, match="condition must be a Column or literal bool"):
+        df.filter(None)
+
+
 def test_with_column_and_show() -> None:
     """with_column adds a column; show runs without error."""
     import robin_sparkless as rs
