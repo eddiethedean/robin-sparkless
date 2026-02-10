@@ -70,6 +70,7 @@ pub(crate) use udf::execute_python_udf;
 
 /// Convert a Python scalar to serde_json::Value for plan/row data.
 /// Bool must be checked before i64 because in Python bool is a subclass of int (True/False extract as 1/0).
+/// Supports dict (struct/map) and list (array) for nested values (#198).
 pub(crate) fn py_to_json_value(value: &Bound<'_, pyo3::types::PyAny>) -> PyResult<JsonValue> {
     if value.is_none() {
         return Ok(JsonValue::Null);
@@ -89,8 +90,24 @@ pub(crate) fn py_to_json_value(value: &Bound<'_, pyo3::types::PyAny>) -> PyResul
     if let Ok(x) = value.extract::<String>() {
         return Ok(JsonValue::String(x));
     }
+    if let Ok(dict) = value.downcast::<pyo3::types::PyDict>() {
+        let mut obj = serde_json::Map::new();
+        for (k, v) in dict.iter() {
+            let key = k.extract::<String>()?;
+            let val = py_to_json_value(&v)?;
+            obj.insert(key, val);
+        }
+        return Ok(JsonValue::Object(obj));
+    }
+    if let Ok(list) = value.downcast::<pyo3::types::PyList>() {
+        let arr: Vec<JsonValue> = list
+            .iter()
+            .map(|v| py_to_json_value(&v))
+            .collect::<PyResult<Vec<_>>>()?;
+        return Ok(JsonValue::Array(arr));
+    }
     Err(pyo3::exceptions::PyTypeError::new_err(
-        "create_dataframe_from_rows / execute_plan: row values must be None, int, float, bool, or str",
+        "create_dataframe_from_rows / execute_plan: row values must be None, int, float, bool, str, dict (struct/map), or list (array)",
     ))
 }
 
