@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **#202 – Supported plan operations API (Sparkless parity)** — New `supported_plan_operations()` returns a tuple of plan op names supported by `_execute_plan` (e.g. `filter`, `select`, `limit`, `orderBy`, …). Sparkless and other backends can query this instead of using a hardcoded list that omits `filter`, fixing `SparkUnsupportedOperationError: Operation 'Operations: filter' is not supported` when using the Robin backend. Documented in `docs/LOGICAL_PLAN_FORMAT.md`. New tests: `test_issue_202_supported_plan_operations.py`.
+
 ### Fixed
 
 - **#201 – Type strictness (string vs numeric, coercion)** — PySpark coerces string to numeric in arithmetic; robin-sparkless now matches. Python Column operators (`col("a") + col("b")`, `-`, `*`, `/`, `%`) already used PySpark-style coercion; the plan interpreter now supports `add`, `subtract`, `multiply`, `divide`, `mod` (and aliases `+`, `-`, `*`, `/`, `%`) with the same string-to-numeric coercion in `withColumn`/`select` expressions. Invalid numeric strings yield null. New tests: `test_issue_201_type_strictness.py`, `plan_with_column_add_string_numeric`.
