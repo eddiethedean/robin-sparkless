@@ -176,4 +176,31 @@ mod tests {
         assert_eq!(rows[0].get("name").and_then(|v| v.as_str()), Some("a"));
         assert_eq!(rows[1].get("name").and_then(|v| v.as_str()), Some("b"));
     }
+
+    /// Case-insensitive column resolution (PySpark default; issue #194).
+    #[test]
+    fn test_sql_case_insensitive_columns() {
+        let spark = SparkSession::builder().app_name("test").get_or_create();
+        let df = spark
+            .create_dataframe(
+                vec![
+                    (1, 25, "Alice".to_string()),
+                    (2, 30, "Bob".to_string()),
+                    (3, 35, "Charlie".to_string()),
+                ],
+                vec!["Id", "Age", "Name"],
+            )
+            .unwrap();
+        spark.create_or_replace_temp_view("t", df);
+        // SQL with lowercase column names resolves to Id, Age, Name
+        let result = spark
+            .sql("SELECT name, age FROM t WHERE age > 26 ORDER BY age")
+            .unwrap();
+        assert_eq!(result.count().unwrap(), 2);
+        let cols = result.columns().unwrap();
+        assert_eq!(cols, vec!["name", "age"]);
+        let rows = result.collect_as_json_rows().unwrap();
+        assert_eq!(rows[0].get("name").and_then(|v| v.as_str()), Some("Bob"));
+        assert_eq!(rows[0].get("age").and_then(|v| v.as_i64()), Some(30));
+    }
 }
