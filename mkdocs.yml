@@ -47,6 +47,7 @@ nav:
   - Home: index.md
   - Getting started:
     - Quickstart: QUICKSTART.md
+    - Persistence guide: PERSISTENCE_GUIDE.md
     - Python API: PYTHON_API.md
     - Releasing: RELEASING.md
   - Reference:

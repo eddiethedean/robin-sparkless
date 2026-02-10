@@ -5,7 +5,17 @@ use polars::prelude::{
 use serde_json::Value as JsonValue;
 use std::collections::HashMap;
 use std::path::Path;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
+
+/// Catalog of global temporary views (process-scoped). Persists across sessions within the same process.
+/// PySpark: createOrReplaceGlobalTempView / spark.table("global_temp.name").
+static GLOBAL_TEMP_CATALOG: OnceLock<Arc<Mutex<HashMap<String, DataFrame>>>> = OnceLock::new();
+
+fn global_temp_catalog() -> Arc<Mutex<HashMap<String, DataFrame>>> {
+    GLOBAL_TEMP_CATALOG
+        .get_or_init(|| Arc::new(Mutex::new(HashMap::new())))
+        .clone()
+}
 
 /// Builder for creating a SparkSession with configuration options
 #[derive(Clone)]
@@ -93,14 +103,18 @@ impl SparkSession {
             .map(|mut m| m.insert(name.to_string(), df));
     }
 
-    /// Global temp view (PySpark: createGlobalTempView). Stub: uses same catalog as temp view.
+    /// Global temp view (PySpark: createGlobalTempView). Persists across sessions within the same process.
     pub fn create_global_temp_view(&self, name: &str, df: DataFrame) {
-        self.create_or_replace_temp_view(name, df);
+        let _ = global_temp_catalog()
+            .lock()
+            .map(|mut m| m.insert(name.to_string(), df));
     }
 
-    /// Global temp view (PySpark: createOrReplaceGlobalTempView). Stub: uses same catalog as temp view.
+    /// Global temp view (PySpark: createOrReplaceGlobalTempView). Persists across sessions within the same process.
     pub fn create_or_replace_global_temp_view(&self, name: &str, df: DataFrame) {
-        self.create_or_replace_temp_view(name, df);
+        let _ = global_temp_catalog()
+            .lock()
+            .map(|mut m| m.insert(name.to_string(), df));
     }
 
     /// Drop a temporary view by name (PySpark: catalog.dropTempView).
@@ -109,9 +123,12 @@ impl SparkSession {
         let _ = self.catalog.lock().map(|mut m| m.remove(name));
     }
 
-    /// Drop a global temporary view (PySpark: catalog.dropGlobalTempView). Stub: same catalog as temp view.
-    pub fn drop_global_temp_view(&self, name: &str) {
-        self.drop_temp_view(name);
+    /// Drop a global temporary view (PySpark: catalog.dropGlobalTempView). Removes from process-wide catalog.
+    pub fn drop_global_temp_view(&self, name: &str) -> bool {
+        global_temp_catalog()
+            .lock()
+            .map(|mut m| m.remove(name).is_some())
+            .unwrap_or(false)
     }
 
     /// Register a DataFrame as a saved table (PySpark: saveAsTable). Inserts into the tables catalog only.
@@ -124,10 +141,7 @@ impl SparkSession {
 
     /// Get a saved table by name (tables map only). Returns None if not in saved tables (temp views not checked).
     pub fn get_saved_table(&self, name: &str) -> Option<DataFrame> {
-        self.tables
-            .lock()
-            .ok()
-            .and_then(|m| m.get(name).cloned())
+        self.tables.lock().ok().and_then(|m| m.get(name).cloned())
     }
 
     /// True if the name exists in the saved-tables map (not temp views).
@@ -138,8 +152,15 @@ impl SparkSession {
             .unwrap_or(false)
     }
 
-    /// Check if a table or temp view exists (PySpark: catalog.tableExists). True if name is in temp views or saved tables.
+    /// Check if a table or temp view exists (PySpark: catalog.tableExists). True if name is in temp views, saved tables, global temp, or warehouse.
     pub fn table_exists(&self, name: &str) -> bool {
+        // global_temp.xyz
+        if let Some((_db, tbl)) = Self::parse_global_temp_name(name) {
+            return global_temp_catalog()
+                .lock()
+                .map(|m| m.contains_key(tbl))
+                .unwrap_or(false);
+        }
         if self
             .catalog
             .lock()
@@ -148,10 +169,30 @@ impl SparkSession {
         {
             return true;
         }
-        self.tables
+        if self
+            .tables
             .lock()
             .map(|m| m.contains_key(name))
             .unwrap_or(false)
+        {
+            return true;
+        }
+        // Warehouse fallback
+        if let Some(warehouse) = self.warehouse_dir() {
+            let path = Path::new(warehouse).join(name);
+            if path.is_dir() {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Return global temp view names (process-scoped). PySpark: catalog.listTables(dbName="global_temp").
+    pub fn list_global_temp_view_names(&self) -> Vec<String> {
+        global_temp_catalog()
+            .lock()
+            .map(|m| m.keys().cloned().collect())
+            .unwrap_or_default()
     }
 
     /// Return temporary view names in this session.
@@ -178,9 +219,46 @@ impl SparkSession {
             .unwrap_or(false)
     }
 
+    /// Parse "global_temp.xyz" into ("global_temp", "xyz"). Returns None for plain names.
+    fn parse_global_temp_name(name: &str) -> Option<(&str, &str)> {
+        if let Some(dot) = name.find('.') {
+            let (db, tbl) = name.split_at(dot);
+            if db.eq_ignore_ascii_case("global_temp") {
+                return Some((db, tbl.strip_prefix('.').unwrap_or(tbl)));
+            }
+        }
+        None
+    }
+
+    /// Return spark.sql.warehouse.dir from config if set. Enables disk-backed saveAsTable.
+    pub fn warehouse_dir(&self) -> Option<&str> {
+        self.config
+            .get("spark.sql.warehouse.dir")
+            .map(|s| s.as_str())
+            .filter(|s| !s.is_empty())
+    }
+
     /// Look up a table or temp view by name (PySpark: table(name)).
-    /// Resolution order: (1) temp view, (2) saved table. Returns an error if not found.
+    /// Resolution order: (1) global_temp.xyz from global catalog, (2) temp view, (3) saved table, (4) warehouse.
     pub fn table(&self, name: &str) -> Result<DataFrame, PolarsError> {
+        // global_temp.xyz -> global catalog only
+        if let Some((_db, tbl)) = Self::parse_global_temp_name(name) {
+            if let Some(df) = global_temp_catalog()
+                .lock()
+                .map_err(|_| PolarsError::InvalidOperation("catalog lock poisoned".into()))?
+                .get(tbl)
+                .cloned()
+            {
+                return Ok(df);
+            }
+            return Err(PolarsError::InvalidOperation(
+                format!(
+                    "Global temp view '{tbl}' not found. Register it with createOrReplaceGlobalTempView."
+                )
+                .into(),
+            ));
+        }
+        // Session: temp view, saved table
         if let Some(df) = self
             .catalog
             .lock()
@@ -190,19 +268,31 @@ impl SparkSession {
         {
             return Ok(df);
         }
-        self.tables
+        if let Some(df) = self
+            .tables
             .lock()
             .map_err(|_| PolarsError::InvalidOperation("catalog lock poisoned".into()))?
             .get(name)
             .cloned()
-            .ok_or_else(|| {
-                PolarsError::InvalidOperation(
-                    format!(
-                        "Table or view '{name}' not found. Register it with create_or_replace_temp_view or saveAsTable."
-                    )
-                    .into(),
-                )
-            })
+        {
+            return Ok(df);
+        }
+        // Warehouse fallback (disk-backed saveAsTable)
+        if let Some(warehouse) = self.warehouse_dir() {
+            let dir = Path::new(warehouse).join(name);
+            if dir.is_dir() {
+                // Read data.parquet (our convention) or the dir (Polars accepts dirs with parquet files)
+                let data_file = dir.join("data.parquet");
+                let read_path = if data_file.is_file() { data_file } else { dir };
+                return self.read_parquet(&read_path);
+            }
+        }
+        Err(PolarsError::InvalidOperation(
+            format!(
+                "Table or view '{name}' not found. Register it with create_or_replace_temp_view or saveAsTable."
+            )
+            .into(),
+        ))
     }
 
     pub fn builder() -> SparkSessionBuilder {
@@ -1196,9 +1286,13 @@ mod tests {
                 vec!["id", "age", "name"],
             )
             .unwrap();
-        df1.write().save_as_table(&spark, "t_over", SaveMode::ErrorIfExists).unwrap();
+        df1.write()
+            .save_as_table(&spark, "t_over", SaveMode::ErrorIfExists)
+            .unwrap();
         assert_eq!(spark.table("t_over").unwrap().count().unwrap(), 1);
-        df2.write().save_as_table(&spark, "t_over", SaveMode::Overwrite).unwrap();
+        df2.write()
+            .save_as_table(&spark, "t_over", SaveMode::Overwrite)
+            .unwrap();
         assert_eq!(spark.table("t_over").unwrap().count().unwrap(), 2);
     }
 
@@ -1214,13 +1308,14 @@ mod tests {
             )
             .unwrap();
         let df2 = spark
-            .create_dataframe(
-                vec![(2, 30, "Bob".to_string())],
-                vec!["id", "age", "name"],
-            )
+            .create_dataframe(vec![(2, 30, "Bob".to_string())], vec!["id", "age", "name"])
             .unwrap();
-        df1.write().save_as_table(&spark, "t_append", SaveMode::ErrorIfExists).unwrap();
-        df2.write().save_as_table(&spark, "t_append", SaveMode::Append).unwrap();
+        df1.write()
+            .save_as_table(&spark, "t_append", SaveMode::ErrorIfExists)
+            .unwrap();
+        df2.write()
+            .save_as_table(&spark, "t_append", SaveMode::Append)
+            .unwrap();
         assert_eq!(spark.table("t_append").unwrap().count().unwrap(), 2);
     }
 
@@ -1236,13 +1331,14 @@ mod tests {
             )
             .unwrap();
         let df2 = spark
-            .create_dataframe(
-                vec![(2, 30, "Bob".to_string())],
-                vec!["id", "age", "name"],
-            )
+            .create_dataframe(vec![(2, 30, "Bob".to_string())], vec!["id", "age", "name"])
             .unwrap();
-        df1.write().save_as_table(&spark, "t_ignore", SaveMode::ErrorIfExists).unwrap();
-        df2.write().save_as_table(&spark, "t_ignore", SaveMode::Ignore).unwrap();
+        df1.write()
+            .save_as_table(&spark, "t_ignore", SaveMode::ErrorIfExists)
+            .unwrap();
+        df2.write()
+            .save_as_table(&spark, "t_ignore", SaveMode::Ignore)
+            .unwrap();
         // Still 1 row (ignore did not replace)
         assert_eq!(spark.table("t_ignore").unwrap().count().unwrap(), 1);
     }
@@ -1259,21 +1355,18 @@ mod tests {
             )
             .unwrap();
         let df_temp = spark
-            .create_dataframe(
-                vec![(2, 30, "Temp".to_string())],
-                vec!["id", "age", "name"],
-            )
+            .create_dataframe(vec![(2, 30, "Temp".to_string())], vec!["id", "age", "name"])
             .unwrap();
-        df_saved.write().save_as_table(&spark, "x", SaveMode::ErrorIfExists).unwrap();
+        df_saved
+            .write()
+            .save_as_table(&spark, "x", SaveMode::ErrorIfExists)
+            .unwrap();
         spark.create_or_replace_temp_view("x", df_temp);
         // table("x") must return temp view (PySpark order)
         let t = spark.table("x").unwrap();
         let rows = t.collect_as_json_rows().unwrap();
         assert_eq!(rows.len(), 1);
-        assert_eq!(
-            rows[0].get("name").and_then(|v| v.as_str()),
-            Some("Temp")
-        );
+        assert_eq!(rows[0].get("name").and_then(|v| v.as_str()), Some("Temp"));
     }
 
     #[test]
@@ -1287,11 +1380,99 @@ mod tests {
                 vec!["id", "age", "name"],
             )
             .unwrap();
-        df.write().save_as_table(&spark, "t_drop", SaveMode::ErrorIfExists).unwrap();
+        df.write()
+            .save_as_table(&spark, "t_drop", SaveMode::ErrorIfExists)
+            .unwrap();
         assert!(spark.table("t_drop").is_ok());
         assert!(spark.drop_table("t_drop"));
         assert!(spark.table("t_drop").is_err());
         // drop again is no-op, returns false
         assert!(!spark.drop_table("t_drop"));
+    }
+
+    #[test]
+    fn test_global_temp_view_persists_across_sessions() {
+        // Session 1: create global temp view
+        let spark1 = SparkSession::builder().app_name("s1").get_or_create();
+        let df1 = spark1
+            .create_dataframe(
+                vec![(1, 25, "Alice".to_string()), (2, 30, "Bob".to_string())],
+                vec!["id", "age", "name"],
+            )
+            .unwrap();
+        spark1.create_or_replace_global_temp_view("people", df1);
+        assert_eq!(
+            spark1.table("global_temp.people").unwrap().count().unwrap(),
+            2
+        );
+
+        // Session 2: different session can see global temp view
+        let spark2 = SparkSession::builder().app_name("s2").get_or_create();
+        let df2 = spark2.table("global_temp.people").unwrap();
+        assert_eq!(df2.count().unwrap(), 2);
+        let rows = df2.collect_as_json_rows().unwrap();
+        assert_eq!(rows[0].get("name").and_then(|v| v.as_str()), Some("Alice"));
+
+        // Local temp view in spark2 does not shadow global_temp
+        let df_local = spark2
+            .create_dataframe(
+                vec![(3, 35, "Carol".to_string())],
+                vec!["id", "age", "name"],
+            )
+            .unwrap();
+        spark2.create_or_replace_temp_view("people", df_local);
+        // table("people") = local temp view (session resolution)
+        assert_eq!(spark2.table("people").unwrap().count().unwrap(), 1);
+        // table("global_temp.people") = global temp view (unchanged)
+        assert_eq!(
+            spark2.table("global_temp.people").unwrap().count().unwrap(),
+            2
+        );
+
+        // Drop global temp view
+        assert!(spark2.drop_global_temp_view("people"));
+        assert!(spark2.table("global_temp.people").is_err());
+    }
+
+    #[test]
+    fn test_warehouse_persistence_between_sessions() {
+        use crate::dataframe::SaveMode;
+        use std::fs;
+        use tempfile::TempDir;
+
+        let dir = TempDir::new().unwrap();
+        let warehouse = dir.path().to_str().unwrap();
+
+        // Session 1: save to warehouse
+        let spark1 = SparkSession::builder()
+            .app_name("w1")
+            .config("spark.sql.warehouse.dir", warehouse)
+            .get_or_create();
+        let df1 = spark1
+            .create_dataframe(
+                vec![(1, 25, "Alice".to_string()), (2, 30, "Bob".to_string())],
+                vec!["id", "age", "name"],
+            )
+            .unwrap();
+        df1.write()
+            .save_as_table(&spark1, "users", SaveMode::ErrorIfExists)
+            .unwrap();
+        assert_eq!(spark1.table("users").unwrap().count().unwrap(), 2);
+
+        // Session 2: new session reads from warehouse
+        let spark2 = SparkSession::builder()
+            .app_name("w2")
+            .config("spark.sql.warehouse.dir", warehouse)
+            .get_or_create();
+        let df2 = spark2.table("users").unwrap();
+        assert_eq!(df2.count().unwrap(), 2);
+        let rows = df2.collect_as_json_rows().unwrap();
+        assert_eq!(rows[0].get("name").and_then(|v| v.as_str()), Some("Alice"));
+
+        // Verify parquet was written
+        let table_path = dir.path().join("users");
+        assert!(table_path.is_dir());
+        let entries: Vec<_> = fs::read_dir(&table_path).unwrap().collect();
+        assert!(!entries.is_empty());
     }
 }

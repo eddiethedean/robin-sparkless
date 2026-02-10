@@ -149,7 +149,7 @@ For roadmap and Sparkless integration phases (Phases 12–22 completed; Phases 2
 
 ### Optional features (Rust)
 
-- **SQL** (`--features sql`): `SparkSession::sql(query)` with temp views and in-memory tables. Use `create_or_replace_temp_view` and `table(name)`; or `df.write().saveAsTable(name, mode="error"|"overwrite"|"append"|"ignore")` for saved tables (session-scoped, no disk). Resolution: `table(name)` and `read_delta(name)` use temp view first, then saved table. Catalog: `listTables()`, `tableExists()`, `dropTempView(name)`, `dropTable(name)`. Supports single SELECT, FROM/JOIN, WHERE, GROUP BY, ORDER BY, LIMIT.
+- **SQL** (`--features sql`): `SparkSession::sql(query)` with temp views and tables. Use `create_or_replace_temp_view` and `table(name)`; or `df.write().saveAsTable(name, mode="error"|"overwrite"|"append"|"ignore")` for saved tables. Global temp views (`createOrReplaceGlobalTempView`) persist across sessions; disk-backed `saveAsTable` via `spark.sql.warehouse.dir` persists across restarts. See [PERSISTENCE_GUIDE.md](PERSISTENCE_GUIDE.md). Resolution: `table(name)` uses temp view → saved table → warehouse. Catalog: `listTables()`, `tableExists()`, `dropTempView(name)`, `dropTable(name)`. Supports single SELECT, FROM/JOIN, WHERE, GROUP BY, ORDER BY, LIMIT.
 - **Delta Lake** (`--features delta`): `read_delta(path)`, `read_delta_with_version(path, version)` (time travel), `write_delta(path, overwrite)` on DataFrame. With `sql`, `read_delta(name_or_path)` accepts a table name (in-memory); `df.write_delta_table(name)` registers a DataFrame for `read_delta(name)`. Requires `deltalake` + tokio for path-based I/O.
 
 ### Benchmarks

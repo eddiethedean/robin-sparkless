@@ -406,18 +406,31 @@ impl PyDataFrame {
         self.create_or_replace_temp_view(name, py)
     }
 
-    /// Register this DataFrame as a global temp view (stub: uses same catalog as temp view).
+    /// Register this DataFrame as a global temp view (PySpark: createGlobalTempView). Persists across sessions.
     #[cfg(feature = "sql")]
     #[pyo3(name = "createGlobalTempView")]
-    fn create_global_temp_view(&self, name: &str, py: Python<'_>) -> PyResult<()> {
-        self.create_or_replace_temp_view(name, py)
+    fn create_global_temp_view(&self, name: &str, _py: Python<'_>) -> PyResult<()> {
+        let session = crate::python::session::get_default_session().ok_or_else(|| {
+            pyo3::exceptions::PyRuntimeError::new_err(
+                "createGlobalTempView: no default session. Call SparkSession.builder().get_or_create() first.",
+            )
+        })?;
+        session.create_global_temp_view(name, self.inner.clone());
+        Ok(())
     }
 
-    /// Register this DataFrame as a global temp view (stub: uses same catalog as temp view).
+    /// Register this DataFrame as a global temp view (PySpark: createOrReplaceGlobalTempView). Persists across sessions.
     #[cfg(feature = "sql")]
     #[pyo3(name = "createOrReplaceGlobalTempView")]
     fn create_or_replace_global_temp_view(&self, name: &str, py: Python<'_>) -> PyResult<()> {
-        self.create_or_replace_temp_view(name, py)
+        let _ = py;
+        let session = crate::python::session::get_default_session().ok_or_else(|| {
+            pyo3::exceptions::PyRuntimeError::new_err(
+                "createOrReplaceGlobalTempView: no default session. Call SparkSession.builder().get_or_create() first.",
+            )
+        })?;
+        session.create_or_replace_global_temp_view(name, self.inner.clone());
+        Ok(())
     }
 
     /// Join with another DataFrame on one or more column names.

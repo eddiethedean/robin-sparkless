@@ -668,11 +668,7 @@ impl DataFrame {
     }
 
     /// Register this DataFrame as an in-memory "delta table" by name (same namespace as saveAsTable). Readable via `read_delta(name)` or `table(name)`.
-    pub fn save_as_delta_table(
-        &self,
-        session: &crate::session::SparkSession,
-        name: &str,
-    ) {
+    pub fn save_as_delta_table(&self, session: &crate::session::SparkSession, name: &str) {
         session.register_table(name, self.clone());
     }
 
@@ -756,7 +752,7 @@ impl<'a> DataFrameWriter<'a> {
         self
     }
 
-    /// Save the DataFrame as a table in the session (PySpark: saveAsTable). In-memory only; table is in the saved-tables namespace.
+    /// Save the DataFrame as a table (PySpark: saveAsTable). In-memory by default; when spark.sql.warehouse.dir is set, persists to disk for cross-session access.
     pub fn save_as_table(
         &self,
         session: &SparkSession,
@@ -764,59 +760,123 @@ impl<'a> DataFrameWriter<'a> {
         mode: SaveMode,
     ) -> Result<(), PolarsError> {
         use polars::prelude::*;
-        match mode {
+        use std::fs;
+        use std::path::Path;
+
+        let warehouse_path = session.warehouse_dir().map(|w| Path::new(w).join(name));
+        let warehouse_exists = warehouse_path.as_ref().is_some_and(|p| p.is_dir());
+
+        fn persist_to_warehouse(
+            df: &crate::dataframe::DataFrame,
+            dir: &Path,
+        ) -> Result<(), PolarsError> {
+            use std::fs;
+            fs::create_dir_all(dir).map_err(|e| {
+                PolarsError::ComputeError(format!("saveAsTable: create dir: {e}").into())
+            })?;
+            let file_path = dir.join("data.parquet");
+            df.write()
+                .mode(crate::dataframe::WriteMode::Overwrite)
+                .format(crate::dataframe::WriteFormat::Parquet)
+                .save(&file_path)
+        }
+
+        let final_df = match mode {
             SaveMode::ErrorIfExists => {
-                if session.saved_table_exists(name) {
+                if session.saved_table_exists(name) || warehouse_exists {
                     return Err(PolarsError::InvalidOperation(
-                        format!("Table or view '{name}' already exists. SaveMode is ErrorIfExists.")
-                            .into(),
+                        format!(
+                            "Table or view '{name}' already exists. SaveMode is ErrorIfExists."
+                        )
+                        .into(),
                     ));
                 }
-                session.register_table(name, self.df.clone());
+                if let Some(ref p) = warehouse_path {
+                    persist_to_warehouse(self.df, p)?;
+                }
+                self.df.clone()
             }
             SaveMode::Overwrite => {
-                session.register_table(name, self.df.clone());
+                if let Some(ref p) = warehouse_path {
+                    let _ = fs::remove_dir_all(p);
+                    persist_to_warehouse(self.df, p)?;
+                }
+                self.df.clone()
             }
             SaveMode::Append => {
-                if let Some(existing) = session.get_saved_table(name) {
-                    let existing_pl = existing.df.as_ref().clone();
-                    let new_pl = self.df.df.as_ref().clone();
-                    let existing_cols: Vec<&str> =
-                        existing_pl.get_column_names().iter().map(|s| s.as_str()).collect();
-                    let new_cols = new_pl.get_column_names();
-                    let missing: Vec<_> = existing_cols
-                        .iter()
-                        .filter(|c| !new_cols.iter().any(|n| n.as_str() == **c))
-                        .collect();
-                    if !missing.is_empty() {
-                        return Err(PolarsError::InvalidOperation(
-                            format!(
-                                "saveAsTable append: new DataFrame missing columns: {:?}",
-                                missing
+                let existing_pl = if let Some(existing) = session.get_saved_table(name) {
+                    existing.df.as_ref().clone()
+                } else if let (Some(ref p), true) = (warehouse_path.as_ref(), warehouse_exists) {
+                    // Read from warehouse (data.parquet convention)
+                    let data_file = p.join("data.parquet");
+                    let read_path = if data_file.is_file() {
+                        data_file.as_path()
+                    } else {
+                        p.as_ref()
+                    };
+                    let lf = LazyFrame::scan_parquet(read_path, ScanArgsParquet::default())
+                        .map_err(|e| {
+                            PolarsError::ComputeError(
+                                format!("saveAsTable append: read warehouse: {e}").into(),
                             )
-                            .into(),
-                        ));
-                    }
-                    let new_ordered = new_pl.select(existing_cols.iter().copied())?;
-                    let mut combined = existing_pl;
-                    combined.vstack_mut(&new_ordered)?;
-                    session.register_table(
-                        name,
-                        crate::dataframe::DataFrame::from_polars_with_options(
-                            combined,
-                            self.df.case_sensitive,
-                        ),
-                    );
+                        })?;
+                    lf.collect().map_err(|e| {
+                        PolarsError::ComputeError(
+                            format!("saveAsTable append: collect: {e}").into(),
+                        )
+                    })?
                 } else {
+                    // New table
                     session.register_table(name, self.df.clone());
+                    if let Some(ref p) = warehouse_path {
+                        persist_to_warehouse(self.df, p)?;
+                    }
+                    return Ok(());
+                };
+                let new_pl = self.df.df.as_ref().clone();
+                let existing_cols: Vec<&str> = existing_pl
+                    .get_column_names()
+                    .iter()
+                    .map(|s| s.as_str())
+                    .collect();
+                let new_cols = new_pl.get_column_names();
+                let missing: Vec<_> = existing_cols
+                    .iter()
+                    .filter(|c| !new_cols.iter().any(|n| n.as_str() == **c))
+                    .collect();
+                if !missing.is_empty() {
+                    return Err(PolarsError::InvalidOperation(
+                        format!(
+                            "saveAsTable append: new DataFrame missing columns: {:?}",
+                            missing
+                        )
+                        .into(),
+                    ));
                 }
+                let new_ordered = new_pl.select(existing_cols.iter().copied())?;
+                let mut combined = existing_pl;
+                combined.vstack_mut(&new_ordered)?;
+                let merged = crate::dataframe::DataFrame::from_polars_with_options(
+                    combined,
+                    self.df.case_sensitive,
+                );
+                if let Some(ref p) = warehouse_path {
+                    let _ = fs::remove_dir_all(p);
+                    persist_to_warehouse(&merged, p)?;
+                }
+                merged
             }
             SaveMode::Ignore => {
-                if !session.saved_table_exists(name) {
-                    session.register_table(name, self.df.clone());
+                if session.saved_table_exists(name) || warehouse_exists {
+                    return Ok(());
                 }
+                if let Some(ref p) = warehouse_path {
+                    persist_to_warehouse(self.df, p)?;
+                }
+                self.df.clone()
             }
-        }
+        };
+        session.register_table(name, final_df);
         Ok(())
     }
 

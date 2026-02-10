@@ -14,7 +14,7 @@ This document lists **intentional or known divergences** from PySpark semantics 
 
 ## SQL (optional `sql` feature)
 
-- **Tables and views**: Two namespaces — **temp views** (`createOrReplaceTempView`) and **saved tables** (`saveAsTable`). Same name can exist in both; resolution order for `table(name)` and `read_delta(name)` is temp view first, then saved table. Saved tables are in-memory only and do not persist past the session; see DataFrame/catalog bullets below.
+- **Tables and views**: Three namespaces — **temp views** (session-scoped), **saved tables** (`saveAsTable`), and **global temp views** (`createOrReplaceGlobalTempView`, process-scoped). Resolution order for `table(name)`: (1) `global_temp.xyz` → global catalog, (2) temp view, (3) saved table, (4) warehouse (when `spark.sql.warehouse.dir` is set). Global temp views persist across sessions within the same process. Saved tables can optionally persist to disk when `spark.sql.warehouse.dir` is configured.
 - **Supported**: single `SELECT`, `FROM` (single table or JOIN), `WHERE`, `GROUP BY` + aggregates, `HAVING`, `ORDER BY`, `LIMIT`, and temporary views (`createOrReplaceTempView`, `table()`). Unsupported constructs produce clear errors.
 - **Unsupported (tracked in #141)**: DDL (`CREATE/DROP DATABASE`, `CREATE/DROP TABLE`, `CREATE SCHEMA`, `SET CURRENT DATABASE`, etc.), DML (`INSERT INTO`, `UPDATE`, `DELETE FROM`), subqueries in `FROM`, CTEs.
 
@@ -37,7 +37,7 @@ This document lists **intentional or known divergences** from PySpark semantics 
 
 - **cube / rollup**: Implemented. `df.cube("a", "b").agg(...)` and `df.rollup("a", "b").agg(...)` run multiple grouping sets and union results (missing keys become null), matching PySpark semantics.
 - **write**: Implemented. `df.write().mode("overwrite"|"append").format("parquet"|"csv"|"json").save(path)` uses Polars IO. Append for JSON is supported (NDJSON/JsonLines).
-- **saveAsTable(name, format=None, mode=None, partitionBy=None, **options)**: Implemented for **in-memory tables only**. Registers the DataFrame in the session's **saved-tables** namespace (separate from temp views). Mode semantics match PySpark: default `"error"` (throw if exists), `"overwrite"`, `"append"`, `"ignore"`. **Tables do not persist past the session**; full persistence may be added later. `format`, `partitionBy`, and `**options` are accepted for API compatibility but **ignored** (no disk).
+- **saveAsTable(name, format=None, mode=None, partitionBy=None, **options)**: Implemented. Registers the DataFrame in the session's **saved-tables** namespace. Mode semantics match PySpark: default `"error"` (throw if exists), `"overwrite"`, `"append"`, `"ignore"`. **In-memory by default**; when `spark.sql.warehouse.dir` is set, tables persist to disk at `{warehouse}/{name}/data.parquet` for cross-session and cross-process access. `format`, `partitionBy`, and `**options` are accepted for API compatibility but **ignored** for persistence (Parquet only).
 - **write_delta_table(name)**: Robin-sparkless convenience. Registers the DataFrame in the saved-tables namespace so `read_delta(name)` returns it. No PySpark direct equivalent (PySpark would use saveAsTable for a Delta catalog table).
 - **data**: Returns the same as `collect()` (list of row dicts). Best-effort local collection; no RDD.
 - **toLocalIterator**: Returns the same as `collect()` (an iterable of rows). Best-effort local iterator.
