@@ -23,11 +23,16 @@ pub fn select(
 }
 
 /// Select using column expressions (e.g. F.regexp_extract_all(...).alias("m")). Preserves case_sensitive.
+/// Column names in expressions are resolved per df's case sensitivity (PySpark parity).
 pub fn select_with_exprs(
     df: &DataFrame,
     exprs: Vec<Expr>,
     case_sensitive: bool,
 ) -> Result<DataFrame, PolarsError> {
+    let exprs: Vec<Expr> = exprs
+        .into_iter()
+        .map(|e| df.resolve_expr_column_names(e))
+        .collect::<Result<Vec<_>, _>>()?;
     let lf = df.df.as_ref().clone().lazy();
     let out_df = lf.select(exprs).collect()?;
     Ok(super::DataFrame::from_polars_with_options(
@@ -37,11 +42,13 @@ pub fn select_with_exprs(
 }
 
 /// Filter rows using a Polars expression. Preserves case_sensitive on result.
+/// Column names in the condition are resolved per df's case sensitivity (PySpark parity).
 pub fn filter(
     df: &DataFrame,
     condition: Expr,
     case_sensitive: bool,
 ) -> Result<DataFrame, PolarsError> {
+    let condition = df.resolve_expr_column_names(condition)?;
     let lf = df.df.as_ref().clone().lazy().filter(condition);
     let out_df = lf.collect()?;
     Ok(super::DataFrame::from_polars_with_options(
@@ -96,8 +103,9 @@ pub fn with_column(
             }
         }
     }
+    let expr = df.resolve_expr_column_names(column.expr().clone())?;
     let lf = df.df.as_ref().clone().lazy();
-    let lf_with_col = lf.with_column(column.expr().clone().alias(column_name));
+    let lf_with_col = lf.with_column(expr.alias(column_name));
     let pl_df = lf_with_col.collect()?;
     Ok(super::DataFrame::from_polars_with_options(
         pl_df,
@@ -133,6 +141,7 @@ pub fn order_by(
 }
 
 /// Order by sort expressions (asc/desc with nulls_first/last). Preserves case_sensitive on result.
+/// Column names in sort expressions are resolved per df's case sensitivity (PySpark parity).
 pub fn order_by_exprs(
     df: &DataFrame,
     sort_orders: Vec<SortOrder>,
@@ -145,7 +154,10 @@ pub fn order_by_exprs(
             case_sensitive,
         ));
     }
-    let exprs: Vec<Expr> = sort_orders.iter().map(|s| s.expr().clone()).collect();
+    let exprs: Vec<Expr> = sort_orders
+        .iter()
+        .map(|s| df.resolve_expr_column_names(s.expr().clone()))
+        .collect::<Result<Vec<_>, _>>()?;
     let descending: Vec<bool> = sort_orders.iter().map(|s| s.descending).collect();
     let nulls_last: Vec<bool> = sort_orders.iter().map(|s| s.nulls_last).collect();
     let opts = SortMultipleOptions::new()
