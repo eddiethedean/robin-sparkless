@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Planned
+
+- **Phase 26 – Publish crate**: Prepare and publish robin-sparkless to crates.io (and optionally PyPI via maturin). See [ROADMAP.md](docs/ROADMAP.md) for details.
+
+## [0.5.0] - 2026-02-09
+
 ### Added
 
 - **UDFs (scalar, vectorized, grouped)** — Expanded user-defined function support across Rust and Python with a session-scoped registry.
@@ -19,12 +25,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **SQL**: Unknown functions in SELECT and WHERE continue to resolve to the UDF registry; built-ins `UPPER`/`LOWER` supported; `SelectItem::ExprWithAlias` for `SELECT expr AS alias`.
   - **Thread-local session**: `call_udf` resolves UDFs from the session set by `get_or_create()`.
   - **Docs**: [UDF_GUIDE.md](docs/UDF_GUIDE.md), [PYTHON_API.md](docs/PYTHON_API.md), [PYSPARK_DIFFERENCES.md](docs/PYSPARK_DIFFERENCES.md), [DEFERRED_SCOPE.md](docs/DEFERRED_SCOPE.md), [ROBIN_SPARKLESS_MISSING.md](docs/ROBIN_SPARKLESS_MISSING.md), [FULL_PARITY_ROADMAP.md](docs/FULL_PARITY_ROADMAP.md), and top-level READMEs updated to describe UDF support and grouped vectorized `pandas_udf(..., function_type="grouped_agg")`. `udtf` and non-aggregating `pandas_udf` variants remain deferred.
-
-### Planned
-
-- **Phase 26 – Publish crate**: Prepare and publish robin-sparkless to crates.io (and optionally PyPI via maturin). See [ROADMAP.md](docs/ROADMAP.md) for details.
-
-## [0.5.0] - 2026-02-09
 
 ### Changed
 
