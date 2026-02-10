@@ -3,7 +3,9 @@ Subset of Sparkless string arithmetic tests, run directly against robin-sparkles
 
 These focus on verifying that string columns participate in arithmetic operations
 and that behaviour matches PySpark-style semantics for common cases (invalid
-strings -> null). Robin-sparkless requires explicit cast for string-to-numeric coercion.
+strings -> null). Column operators (+, -, *, /) support implicit string-to-numeric
+coercion (issue #201); these tests use explicit cast for clarity. See
+test_issue_201_type_strictness.py for implicit coercion tests.
 """
 
 from __future__ import annotations
