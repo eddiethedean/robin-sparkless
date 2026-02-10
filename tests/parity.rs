@@ -1427,7 +1427,7 @@ fn apply_operations(
                         df = df.drop(vec!["_cd_rn", "_cd_count"])?;
                     }
                     "ntile" => {
-                        let n_buckets = n.unwrap_or(4) as i64;
+                        let n_buckets = n.unwrap_or(4);
                         df = df.with_column_expr(
                             "_nt_rank",
                             robin_sparkless::col(order_col)
@@ -5704,9 +5704,9 @@ fn plan_column_resolution() {
     let result = plan::execute_plan(&spark, rows, schema, &plan).unwrap();
     let rows_out = result.collect_as_json_rows().unwrap();
     assert_eq!(rows_out.len(), 3);
-    assert!(rows_out[0].get("Id").is_some());
-    assert!(rows_out[0].get("Name").is_some());
-    assert!(rows_out[0].get("Value").is_none());
+    assert!(rows_out[0].contains_key("Id"));
+    assert!(rows_out[0].contains_key("Name"));
+    assert!(!rows_out[0].contains_key("Value"));
 }
 
 /// Plan select accepts concat/concat_ws expression strings (e.g. "concat(first_name, , last_name)")
