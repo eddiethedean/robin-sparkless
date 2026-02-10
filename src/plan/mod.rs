@@ -109,19 +109,43 @@ fn apply_op(
                     }
                     df.select_exprs(exprs).map_err(PlanError::Session)
                 } else {
-                    // List of column name strings
-                    let mut names = Vec::with_capacity(arr.len());
-                    for v in arr {
-                        let name = v.as_str().ok_or_else(|| {
-                            PlanError::InvalidPlan(
-                                "select payload must be list of column name strings or list of {name, expr} objects".into(),
-                            )
-                        })?;
-                        let resolved = df.resolve_column_name(name).map_err(PlanError::Session)?;
-                        names.push(resolved);
+                    // List of column name strings; any may be concat/concat_ws expression strings
+                    let strings: Vec<&str> = arr
+                        .iter()
+                        .map(|v| {
+                            v.as_str().ok_or_else(|| {
+                                PlanError::InvalidPlan(
+                                    "select payload must be list of column name strings or list of {name, expr} objects".into(),
+                                )
+                            })
+                        })
+                        .collect::<Result<Vec<_>, _>>()?;
+                    let has_concat = strings
+                        .iter()
+                        .any(|s| crate::plan::expr::try_parse_concat_expr_from_string(s).is_some());
+                    if !has_concat {
+                        let names: Vec<String> = strings
+                            .iter()
+                            .map(|s| df.resolve_column_name(s))
+                            .collect::<Result<Vec<_>, _>>()
+                            .map_err(PlanError::Session)?;
+                        let refs: Vec<&str> = names.iter().map(|s| s.as_str()).collect();
+                        return df.select(refs).map_err(PlanError::Session);
                     }
-                    let refs: Vec<&str> = names.iter().map(|s| s.as_str()).collect();
-                    df.select(refs).map_err(PlanError::Session)
+                    let mut exprs = Vec::with_capacity(strings.len());
+                    for s in strings {
+                        if let Some(expr) = crate::plan::expr::try_parse_concat_expr_from_string(s)
+                        {
+                            let resolved = df
+                                .resolve_expr_column_names(expr)
+                                .map_err(PlanError::Session)?;
+                            exprs.push(resolved.alias(s));
+                        } else {
+                            let resolved = df.resolve_column_name(s).map_err(PlanError::Session)?;
+                            exprs.push(polars::prelude::col(resolved));
+                        }
+                    }
+                    df.select_exprs(exprs).map_err(PlanError::Session)
                 }
             } else {
                 Err(PlanError::InvalidPlan(
