@@ -69,7 +69,7 @@ fn json_values_to_series(
         })?;
         let mut builder = get_list_builder(&inner_dtype, 64, values.len(), name.into());
         for v in values.iter() {
-            if v.as_ref().map_or(true, |x| matches!(x, JsonValue::Null)) {
+            if v.as_ref().is_none_or(|x| matches!(x, JsonValue::Null)) {
                 builder.append_null();
             } else if let Some(arr) = v.as_ref().and_then(|x| x.as_array()) {
                 let elem_series: Vec<Series> = arr
@@ -95,10 +95,11 @@ fn json_values_to_series(
     }
 
     if let Some(fields) = parse_struct_fields(&type_lower) {
-        let mut field_series_vec: Vec<Vec<Option<JsonValue>>> =
-            (0..fields.len()).map(|_| Vec::with_capacity(values.len())).collect();
+        let mut field_series_vec: Vec<Vec<Option<JsonValue>>> = (0..fields.len())
+            .map(|_| Vec::with_capacity(values.len()))
+            .collect();
         for v in values.iter() {
-            if v.as_ref().map_or(true, |x| matches!(x, JsonValue::Null)) {
+            if v.as_ref().is_none_or(|x| matches!(x, JsonValue::Null)) {
                 for fc in &mut field_series_vec {
                     fc.push(None);
                 }
@@ -119,9 +120,7 @@ fn json_values_to_series(
         let series_per_field: Vec<Series> = fields
             .iter()
             .enumerate()
-            .map(|(fi, (fname, ftype))| {
-                json_values_to_series(&field_series_vec[fi], ftype, fname)
-            })
+            .map(|(fi, (fname, ftype))| json_values_to_series(&field_series_vec[fi], ftype, fname))
             .collect::<Result<Vec<_>, _>>()?;
         let field_refs: Vec<&Series> = series_per_field.iter().collect();
         let st = StructChunked::from_series(name.into(), values.len(), field_refs.iter().copied())
@@ -168,10 +167,8 @@ fn json_values_to_series(
                     })
                 })
                 .collect();
-            let owned: Vec<Option<String>> = vals
-                .into_iter()
-                .map(|o| o.map(|s| s.to_string()))
-                .collect();
+            let owned: Vec<Option<String>> =
+                vals.into_iter().map(|o| o.map(|s| s.to_string())).collect();
             Ok(Series::new(name.into(), owned))
         }
         "boolean" | "bool" => {
@@ -211,9 +208,7 @@ fn json_values_to_series(
                     ov.as_ref().and_then(|v| match v {
                         JsonValue::String(s) => {
                             let parsed = NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S%.f")
-                                .or_else(|_| {
-                                    NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S")
-                                })
+                                .or_else(|_| NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S"))
                                 .or_else(|_| {
                                     NaiveDate::parse_from_str(s, "%Y-%m-%d")
                                         .map(|d| d.and_hms_opt(0, 0, 0).unwrap())
@@ -228,9 +223,7 @@ fn json_values_to_series(
                 .collect();
             let s = Series::new(name.into(), vals);
             s.cast(&DataType::Datetime(TimeUnit::Microseconds, None))
-                .map_err(|e| {
-                    PolarsError::ComputeError(format!("datetime cast: {e}").into())
-                })
+                .map_err(|e| PolarsError::ComputeError(format!("datetime cast: {e}").into()))
         }
         _ => Err(PolarsError::ComputeError(
             format!("json_values_to_series: unsupported type '{type_str}'").into(),
@@ -251,7 +244,9 @@ fn json_value_to_series_single(
         (JsonValue::Number(n), "int" | "bigint" | "long") => {
             Ok(Series::new(name.into(), vec![n.as_i64()]))
         }
-        (JsonValue::Number(n), "double" | "float") => Ok(Series::new(name.into(), vec![n.as_f64()])),
+        (JsonValue::Number(n), "double" | "float") => {
+            Ok(Series::new(name.into(), vec![n.as_f64()]))
+        }
         (JsonValue::String(s), "string" | "str" | "varchar") => {
             Ok(Series::new(name.into(), vec![s.as_str()]))
         }
@@ -270,10 +265,11 @@ fn json_value_to_series_single(
 }
 
 /// Build a struct Series from JsonValue::Object or JsonValue::Array (field-order) or Null.
+#[allow(dead_code)]
 fn json_object_or_array_to_struct_series(
     value: &JsonValue,
     fields: &[(String, String)],
-    name: &str,
+    _name: &str,
 ) -> Result<Option<Series>, PolarsError> {
     use polars::prelude::StructChunked;
     if matches!(value, JsonValue::Null) {
@@ -295,13 +291,9 @@ fn json_object_or_array_to_struct_series(
         field_series.push(s);
     }
     let field_refs: Vec<&Series> = field_series.iter().collect();
-    let st = StructChunked::from_series(
-        PlSmallStr::EMPTY,
-        1,
-        field_refs.iter().copied(),
-    )
-    .map_err(|e| PolarsError::ComputeError(format!("struct from value: {e}").into()))?
-    .into_series();
+    let st = StructChunked::from_series(PlSmallStr::EMPTY, 1, field_refs.iter().copied())
+        .map_err(|e| PolarsError::ComputeError(format!("struct from value: {e}").into()))?
+        .into_series();
     Ok(Some(st))
 }
 
@@ -868,8 +860,7 @@ impl SparkSession {
                             )
                         })?;
                     let n = rows.len();
-                    let mut builder =
-                        get_list_builder(&inner_dtype, 64, n, name.as_str().into());
+                    let mut builder = get_list_builder(&inner_dtype, 64, n, name.as_str().into());
                     for row in rows.iter() {
                         let v = row.get(col_idx).cloned().unwrap_or(JsonValue::Null);
                         if let JsonValue::Null = v {
@@ -879,10 +870,8 @@ impl SparkSession {
                                 .iter()
                                 .map(|e| json_value_to_series_single(e, &elem_type, "elem"))
                                 .collect::<Result<Vec<_>, _>>()?;
-                            let vals: Vec<_> = elem_series
-                                .iter()
-                                .filter_map(|s| s.get(0).ok())
-                                .collect();
+                            let vals: Vec<_> =
+                                elem_series.iter().filter_map(|s| s.get(0).ok()).collect();
                             let s = Series::from_any_values_and_dtype(
                                 PlSmallStr::EMPTY,
                                 &vals,
@@ -902,11 +891,9 @@ impl SparkSession {
                     builder.finish().into_series()
                 }
                 _ if parse_struct_fields(&type_lower).is_some() => {
-                    let values: Vec<Option<JsonValue>> = rows
-                        .iter()
-                        .map(|row| row.get(col_idx).cloned())
-                        .collect();
-                    json_values_to_series(&values, &type_lower, &name)?
+                    let values: Vec<Option<JsonValue>> =
+                        rows.iter().map(|row| row.get(col_idx).cloned()).collect();
+                    json_values_to_series(&values, &type_lower, name)?
                 }
                 _ => {
                     return Err(PolarsError::ComputeError(
