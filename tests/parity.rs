@@ -5758,6 +5758,37 @@ fn plan_select_concat_string() {
     );
 }
 
+/// Plan withColumn with add(string, bigint) uses PySpark-style coercion (issue #201).
+#[test]
+fn plan_with_column_add_string_numeric() {
+    use robin_sparkless::plan;
+    use serde_json::json;
+
+    let spark = SparkSession::builder()
+        .app_name("plan_with_column_add_string_numeric")
+        .get_or_create();
+
+    let schema = vec![
+        ("a".to_string(), "string".to_string()),
+        ("b".to_string(), "bigint".to_string()),
+    ];
+    let rows = vec![vec![json!("10"), json!(2)], vec![json!("20"), json!(3)]];
+
+    let plan = vec![json!({
+        "op": "withColumn",
+        "payload": {
+            "name": "x",
+            "expr": {"fn": "add", "args": [{"col": "a"}, {"col": "b"}]}
+        }
+    })];
+
+    let result = plan::execute_plan(&spark, rows, schema, &plan).unwrap();
+    let rows_out = result.collect_as_json_rows().unwrap();
+    assert_eq!(rows_out.len(), 2);
+    assert_eq!(rows_out[0].get("x").and_then(|v| v.as_f64()), Some(12.0));
+    assert_eq!(rows_out[1].get("x").and_then(|v| v.as_f64()), Some(23.0));
+}
+
 /// to print actual rand(42)/randn(42) values for tests/fixtures/with_rand_seed.json.
 #[test]
 #[ignore]
