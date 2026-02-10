@@ -1227,6 +1227,69 @@ impl Column {
         Self::from_expr(self.expr().clone() * lit(-1), None)
     }
 
+    /// Multiply with PySpark-style string/number coercion (used by Python Column operators).
+    ///
+    /// Both operands are coerced to Double when used from Python; string columns are parsed
+    /// as doubles where possible, invalid strings become null.
+    pub fn multiply_pyspark(&self, other: &Column) -> Column {
+        use polars::prelude::GetOutput;
+        let args = [other.expr().clone()];
+        let expr = self.expr().clone().map_many(
+            crate::udfs::apply_pyspark_multiply,
+            &args,
+            GetOutput::from_type(DataType::Float64),
+        );
+        Self::from_expr(expr, None)
+    }
+
+    /// Add with PySpark-style string/number coercion (used by Python Column operators).
+    pub fn add_pyspark(&self, other: &Column) -> Column {
+        use polars::prelude::GetOutput;
+        let args = [other.expr().clone()];
+        let expr = self.expr().clone().map_many(
+            crate::udfs::apply_pyspark_add,
+            &args,
+            GetOutput::from_type(DataType::Float64),
+        );
+        Self::from_expr(expr, None)
+    }
+
+    /// Subtract with PySpark-style string/number coercion (used by Python Column operators).
+    pub fn subtract_pyspark(&self, other: &Column) -> Column {
+        use polars::prelude::GetOutput;
+        let args = [other.expr().clone()];
+        let expr = self.expr().clone().map_many(
+            crate::udfs::apply_pyspark_subtract,
+            &args,
+            GetOutput::from_type(DataType::Float64),
+        );
+        Self::from_expr(expr, None)
+    }
+
+    /// Divide with PySpark-style string/number coercion (used by Python Column operators).
+    pub fn divide_pyspark(&self, other: &Column) -> Column {
+        use polars::prelude::GetOutput;
+        let args = [other.expr().clone()];
+        let expr = self.expr().clone().map_many(
+            crate::udfs::apply_pyspark_divide,
+            &args,
+            GetOutput::from_type(DataType::Float64),
+        );
+        Self::from_expr(expr, None)
+    }
+
+    /// Modulo with PySpark-style string/number coercion (used by Python Column operators).
+    pub fn mod_pyspark(&self, other: &Column) -> Column {
+        use polars::prelude::GetOutput;
+        let args = [other.expr().clone()];
+        let expr = self.expr().clone().map_many(
+            crate::udfs::apply_pyspark_mod,
+            &args,
+            GetOutput::from_type(DataType::Float64),
+        );
+        Self::from_expr(expr, None)
+    }
+
     /// Multiply by another column or literal (PySpark multiply). Broadcasts scalars.
     pub fn multiply(&self, other: &Column) -> Column {
         Self::from_expr(self.expr().clone() * other.expr().clone(), None)
