@@ -2066,6 +2066,31 @@ def test__create_dataframe_from_rows_schema_pyspark_parity() -> None:
     assert result == EXPECTED_CREATE_DATAFRAME_FROM_ROWS_PARITY
 
 
+def test_create_dataframe_from_rows_struct_and_array() -> None:
+    """_create_dataframe_from_rows supports struct and array columns (#198)."""
+    import robin_sparkless as rs
+
+    spark = rs.SparkSession.builder().app_name("test").get_or_create()
+    schema = [
+        ("id", "bigint"),
+        ("person", "struct<name:string,age:bigint>"),
+        ("scores", "array<bigint>"),
+    ]
+    rows = [
+        {"id": 1, "person": {"name": "Alice", "age": 25}, "scores": [10, 20, 30]},
+        {"id": 2, "person": {"name": "Bob", "age": 30}, "scores": [5, 15]},
+    ]
+    df = spark._create_dataframe_from_rows(rows, schema)
+    result = df.collect()
+    assert len(result) == 2
+    assert result[0]["id"] == 1
+    assert result[0]["person"] == {"name": "Alice", "age": 25}
+    assert result[0]["scores"] == [10, 20, 30]
+    assert result[1]["id"] == 2
+    assert result[1]["person"] == {"name": "Bob", "age": 30}
+    assert result[1]["scores"] == [5, 15]
+
+
 def test_regexp_extract_all_and_select_with_expression() -> None:
     """regexp_extract_all and select with Column expressions (issue #176)."""
     import robin_sparkless as rs

@@ -1,10 +1,310 @@
 use crate::dataframe::DataFrame;
 use crate::udf_registry::UdfRegistry;
+use polars::chunked_array::builder::get_list_builder;
+use polars::chunked_array::StructChunked;
 use polars::prelude::{
-    DataFrame as PlDataFrame, DataType, NamedFrom, PolarsError, Series, TimeUnit,
+    DataFrame as PlDataFrame, DataType, IntoSeries, NamedFrom, PlSmallStr, PolarsError, Series,
+    TimeUnit,
 };
 use serde_json::Value as JsonValue;
 use std::cell::RefCell;
+
+/// Parse "array<element_type>" to get inner type string. Returns None if not array<>.
+fn parse_array_element_type(type_str: &str) -> Option<String> {
+    let s = type_str.trim();
+    if !s.to_lowercase().starts_with("array<") || !s.ends_with('>') {
+        return None;
+    }
+    Some(s[6..s.len() - 1].trim().to_string())
+}
+
+/// Parse "struct<field:type,...>" to get field (name, type) pairs. Simple parsing, no nested structs.
+fn parse_struct_fields(type_str: &str) -> Option<Vec<(String, String)>> {
+    let s = type_str.trim();
+    if !s.to_lowercase().starts_with("struct<") || !s.ends_with('>') {
+        return None;
+    }
+    let inner = s[7..s.len() - 1].trim();
+    if inner.is_empty() {
+        return Some(Vec::new());
+    }
+    let mut out = Vec::new();
+    for part in inner.split(',') {
+        let part = part.trim();
+        if let Some(idx) = part.find(':') {
+            let name = part[..idx].trim().to_string();
+            let typ = part[idx + 1..].trim().to_string();
+            out.push((name, typ));
+        }
+    }
+    Some(out)
+}
+
+/// Map schema type string to Polars DataType (primitives only for nested use).
+fn json_type_str_to_polars(type_str: &str) -> Option<DataType> {
+    match type_str.trim().to_lowercase().as_str() {
+        "int" | "bigint" | "long" => Some(DataType::Int64),
+        "double" | "float" | "double_precision" => Some(DataType::Float64),
+        "string" | "str" | "varchar" => Some(DataType::String),
+        "boolean" | "bool" => Some(DataType::Boolean),
+        _ => None,
+    }
+}
+
+/// Build a length-N Series from Vec<Option<JsonValue>> for a given type (recursive for struct/array).
+fn json_values_to_series(
+    values: &[Option<JsonValue>],
+    type_str: &str,
+    name: &str,
+) -> Result<Series, PolarsError> {
+    use chrono::{NaiveDate, NaiveDateTime};
+    let epoch = crate::date_utils::epoch_naive_date();
+    let type_lower = type_str.trim().to_lowercase();
+
+    if let Some(elem_type) = parse_array_element_type(&type_lower) {
+        let inner_dtype = json_type_str_to_polars(&elem_type).ok_or_else(|| {
+            PolarsError::ComputeError(
+                format!("array element type '{elem_type}' not supported").into(),
+            )
+        })?;
+        let mut builder = get_list_builder(&inner_dtype, 64, values.len(), name.into());
+        for v in values.iter() {
+            if v.as_ref().map_or(true, |x| matches!(x, JsonValue::Null)) {
+                builder.append_null();
+            } else if let Some(arr) = v.as_ref().and_then(|x| x.as_array()) {
+                let elem_series: Vec<Series> = arr
+                    .iter()
+                    .map(|e| json_value_to_series_single(e, &elem_type, "elem"))
+                    .collect::<Result<Vec<_>, _>>()?;
+                let vals: Vec<_> = elem_series.iter().filter_map(|s| s.get(0).ok()).collect();
+                let s = Series::from_any_values_and_dtype(
+                    PlSmallStr::EMPTY,
+                    &vals,
+                    &inner_dtype,
+                    false,
+                )
+                .map_err(|e| PolarsError::ComputeError(format!("array elem: {e}").into()))?;
+                builder.append_series(&s)?;
+            } else {
+                return Err(PolarsError::ComputeError(
+                    "array column value must be null or array".into(),
+                ));
+            }
+        }
+        return Ok(builder.finish().into_series());
+    }
+
+    if let Some(fields) = parse_struct_fields(&type_lower) {
+        let mut field_series_vec: Vec<Vec<Option<JsonValue>>> =
+            (0..fields.len()).map(|_| Vec::with_capacity(values.len())).collect();
+        for v in values.iter() {
+            if v.as_ref().map_or(true, |x| matches!(x, JsonValue::Null)) {
+                for fc in &mut field_series_vec {
+                    fc.push(None);
+                }
+            } else if let Some(obj) = v.as_ref().and_then(|x| x.as_object()) {
+                for (fi, (fname, _)) in fields.iter().enumerate() {
+                    field_series_vec[fi].push(obj.get(fname).cloned());
+                }
+            } else if let Some(arr) = v.as_ref().and_then(|x| x.as_array()) {
+                for (fi, _) in fields.iter().enumerate() {
+                    field_series_vec[fi].push(arr.get(fi).cloned());
+                }
+            } else {
+                return Err(PolarsError::ComputeError(
+                    "struct value must be object or array".into(),
+                ));
+            }
+        }
+        let series_per_field: Vec<Series> = fields
+            .iter()
+            .enumerate()
+            .map(|(fi, (fname, ftype))| {
+                json_values_to_series(&field_series_vec[fi], ftype, fname)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let field_refs: Vec<&Series> = series_per_field.iter().collect();
+        let st = StructChunked::from_series(name.into(), values.len(), field_refs.iter().copied())
+            .map_err(|e| PolarsError::ComputeError(format!("struct column: {e}").into()))?
+            .into_series();
+        return Ok(st);
+    }
+
+    match type_lower.as_str() {
+        "int" | "bigint" | "long" => {
+            let vals: Vec<Option<i64>> = values
+                .iter()
+                .map(|ov| {
+                    ov.as_ref().and_then(|v| match v {
+                        JsonValue::Number(n) => n.as_i64(),
+                        JsonValue::Null => None,
+                        _ => None,
+                    })
+                })
+                .collect();
+            Ok(Series::new(name.into(), vals))
+        }
+        "double" | "float" => {
+            let vals: Vec<Option<f64>> = values
+                .iter()
+                .map(|ov| {
+                    ov.as_ref().and_then(|v| match v {
+                        JsonValue::Number(n) => n.as_f64(),
+                        JsonValue::Null => None,
+                        _ => None,
+                    })
+                })
+                .collect();
+            Ok(Series::new(name.into(), vals))
+        }
+        "string" | "str" | "varchar" => {
+            let vals: Vec<Option<&str>> = values
+                .iter()
+                .map(|ov| {
+                    ov.as_ref().and_then(|v| match v {
+                        JsonValue::String(s) => Some(s.as_str()),
+                        JsonValue::Null => None,
+                        _ => None,
+                    })
+                })
+                .collect();
+            let owned: Vec<Option<String>> = vals
+                .into_iter()
+                .map(|o| o.map(|s| s.to_string()))
+                .collect();
+            Ok(Series::new(name.into(), owned))
+        }
+        "boolean" | "bool" => {
+            let vals: Vec<Option<bool>> = values
+                .iter()
+                .map(|ov| {
+                    ov.as_ref().and_then(|v| match v {
+                        JsonValue::Bool(b) => Some(*b),
+                        JsonValue::Null => None,
+                        _ => None,
+                    })
+                })
+                .collect();
+            Ok(Series::new(name.into(), vals))
+        }
+        "date" => {
+            let vals: Vec<Option<i32>> = values
+                .iter()
+                .map(|ov| {
+                    ov.as_ref().and_then(|v| match v {
+                        JsonValue::String(s) => NaiveDate::parse_from_str(s, "%Y-%m-%d")
+                            .ok()
+                            .map(|d| (d - epoch).num_days() as i32),
+                        JsonValue::Null => None,
+                        _ => None,
+                    })
+                })
+                .collect();
+            let s = Series::new(name.into(), vals);
+            s.cast(&DataType::Date)
+                .map_err(|e| PolarsError::ComputeError(format!("date cast: {e}").into()))
+        }
+        "timestamp" | "datetime" | "timestamp_ntz" => {
+            let vals: Vec<Option<i64>> = values
+                .iter()
+                .map(|ov| {
+                    ov.as_ref().and_then(|v| match v {
+                        JsonValue::String(s) => {
+                            let parsed = NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S%.f")
+                                .or_else(|_| {
+                                    NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S")
+                                })
+                                .or_else(|_| {
+                                    NaiveDate::parse_from_str(s, "%Y-%m-%d")
+                                        .map(|d| d.and_hms_opt(0, 0, 0).unwrap())
+                                });
+                            parsed.ok().map(|dt| dt.and_utc().timestamp_micros())
+                        }
+                        JsonValue::Number(n) => n.as_i64(),
+                        JsonValue::Null => None,
+                        _ => None,
+                    })
+                })
+                .collect();
+            let s = Series::new(name.into(), vals);
+            s.cast(&DataType::Datetime(TimeUnit::Microseconds, None))
+                .map_err(|e| {
+                    PolarsError::ComputeError(format!("datetime cast: {e}").into())
+                })
+        }
+        _ => Err(PolarsError::ComputeError(
+            format!("json_values_to_series: unsupported type '{type_str}'").into(),
+        )),
+    }
+}
+
+/// Build a single Series from a JsonValue for use as list element or struct field.
+fn json_value_to_series_single(
+    value: &JsonValue,
+    type_str: &str,
+    name: &str,
+) -> Result<Series, PolarsError> {
+    use chrono::NaiveDate;
+    let epoch = crate::date_utils::epoch_naive_date();
+    match (value, type_str.trim().to_lowercase().as_str()) {
+        (JsonValue::Null, _) => Ok(Series::new_null(name.into(), 1)),
+        (JsonValue::Number(n), "int" | "bigint" | "long") => {
+            Ok(Series::new(name.into(), vec![n.as_i64()]))
+        }
+        (JsonValue::Number(n), "double" | "float") => Ok(Series::new(name.into(), vec![n.as_f64()])),
+        (JsonValue::String(s), "string" | "str" | "varchar") => {
+            Ok(Series::new(name.into(), vec![s.as_str()]))
+        }
+        (JsonValue::Bool(b), "boolean" | "bool") => Ok(Series::new(name.into(), vec![*b])),
+        (JsonValue::String(s), "date") => {
+            let d = NaiveDate::parse_from_str(s, "%Y-%m-%d")
+                .map_err(|e| PolarsError::ComputeError(format!("date parse: {e}").into()))?;
+            let days = (d - epoch).num_days() as i32;
+            let s = Series::new(name.into(), vec![days]).cast(&DataType::Date)?;
+            Ok(s)
+        }
+        _ => Err(PolarsError::ComputeError(
+            format!("json_value_to_series: unsupported {type_str} for {value:?}").into(),
+        )),
+    }
+}
+
+/// Build a struct Series from JsonValue::Object or JsonValue::Array (field-order) or Null.
+fn json_object_or_array_to_struct_series(
+    value: &JsonValue,
+    fields: &[(String, String)],
+    name: &str,
+) -> Result<Option<Series>, PolarsError> {
+    use polars::prelude::StructChunked;
+    if matches!(value, JsonValue::Null) {
+        return Ok(None);
+    }
+    let mut field_series: Vec<Series> = Vec::with_capacity(fields.len());
+    for (fname, ftype) in fields {
+        let fval = if let Some(obj) = value.as_object() {
+            obj.get(fname).unwrap_or(&JsonValue::Null)
+        } else if let Some(arr) = value.as_array() {
+            let idx = field_series.len();
+            arr.get(idx).unwrap_or(&JsonValue::Null)
+        } else {
+            return Err(PolarsError::ComputeError(
+                "struct value must be object or array".into(),
+            ));
+        };
+        let s = json_value_to_series_single(fval, ftype, fname)?;
+        field_series.push(s);
+    }
+    let field_refs: Vec<&Series> = field_series.iter().collect();
+    let st = StructChunked::from_series(
+        PlSmallStr::EMPTY,
+        1,
+        field_refs.iter().copied(),
+    )
+    .map_err(|e| PolarsError::ComputeError(format!("struct from value: {e}").into()))?
+    .into_series();
+    Ok(Some(st))
+}
+
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::{Arc, Mutex, OnceLock};
@@ -427,9 +727,9 @@ impl SparkSession {
 
     /// Create a DataFrame from rows and a schema (arbitrary column count and types).
     ///
-    /// `rows`: each inner vec is one row; length must match schema length. Values are JSON-like (i64, f64, string, bool, null).
+    /// `rows`: each inner vec is one row; length must match schema length. Values are JSON-like (i64, f64, string, bool, null, object, array).
     /// `schema`: list of (column_name, dtype_string), e.g. `[("id", "bigint"), ("name", "string")]`.
-    /// Supported dtype strings: bigint, int, long, double, float, string, str, varchar, boolean, bool, date, timestamp, datetime.
+    /// Supported dtype strings: bigint, int, long, double, float, string, str, varchar, boolean, bool, date, timestamp, datetime, array<element_type>, struct<field:type,...>.
     pub fn create_dataframe_from_rows(
         &self,
         rows: Vec<Vec<JsonValue>>,
@@ -555,6 +855,58 @@ impl SparkSession {
                         .map_err(|e| {
                             PolarsError::ComputeError(format!("datetime cast: {e}").into())
                         })?
+                }
+                _ if parse_array_element_type(&type_lower).is_some() => {
+                    let elem_type = parse_array_element_type(&type_lower).unwrap();
+                    let inner_dtype = json_type_str_to_polars(&elem_type)
+                        .ok_or_else(|| {
+                            PolarsError::ComputeError(
+                                format!(
+                                    "create_dataframe_from_rows: array element type '{elem_type}' not supported"
+                                )
+                                .into(),
+                            )
+                        })?;
+                    let n = rows.len();
+                    let mut builder =
+                        get_list_builder(&inner_dtype, 64, n, name.as_str().into());
+                    for row in rows.iter() {
+                        let v = row.get(col_idx).cloned().unwrap_or(JsonValue::Null);
+                        if let JsonValue::Null = v {
+                            builder.append_null();
+                        } else if let Some(arr) = v.as_array() {
+                            let elem_series: Vec<Series> = arr
+                                .iter()
+                                .map(|e| json_value_to_series_single(e, &elem_type, "elem"))
+                                .collect::<Result<Vec<_>, _>>()?;
+                            let vals: Vec<_> = elem_series
+                                .iter()
+                                .filter_map(|s| s.get(0).ok())
+                                .collect();
+                            let s = Series::from_any_values_and_dtype(
+                                PlSmallStr::EMPTY,
+                                &vals,
+                                &inner_dtype,
+                                false,
+                            )
+                            .map_err(|e| {
+                                PolarsError::ComputeError(format!("array elem: {e}").into())
+                            })?;
+                            builder.append_series(&s)?;
+                        } else {
+                            return Err(PolarsError::ComputeError(
+                                "array column value must be null or array".into(),
+                            ));
+                        }
+                    }
+                    builder.finish().into_series()
+                }
+                _ if parse_struct_fields(&type_lower).is_some() => {
+                    let values: Vec<Option<JsonValue>> = rows
+                        .iter()
+                        .map(|row| row.get(col_idx).cloned())
+                        .collect();
+                    json_values_to_series(&values, &type_lower, &name)?
                 }
                 _ => {
                     return Err(PolarsError::ComputeError(
