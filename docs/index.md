@@ -4,6 +4,7 @@
 
 ## Quick links
 
+- **[User guide](USER_GUIDE.md)** — Learn how to use Robin Sparkless (Rust and Python)
 - **[Quickstart](QUICKSTART.md)** — Build, install, and basic usage (Rust and Python)
 - **[Persistence guide](PERSISTENCE_GUIDE.md)** — Global temp views and disk-backed saveAsTable
 - **[Python API](PYTHON_API.md)** — PyO3 bindings, build with maturin, method signatures

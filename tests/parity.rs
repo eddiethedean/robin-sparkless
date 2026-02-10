@@ -5634,6 +5634,37 @@ fn plan_parity_fixtures() {
     assert!(failures.is_empty(), "plan fixture(s) failed: {failures:?}");
 }
 
+#[test]
+fn plan_udf_with_column() {
+    use polars::prelude::DataType;
+    use robin_sparkless::plan;
+    use serde_json::json;
+
+    let spark = SparkSession::builder().app_name("plan_udf").get_or_create();
+    spark
+        .register_udf("to_str", |cols| cols[0].cast(&DataType::String))
+        .unwrap();
+
+    let schema = vec![("id".to_string(), "bigint".to_string())];
+    let rows = vec![vec![json!(1)], vec![json!(2)]];
+    let plan = vec![
+        json!({
+            "op": "withColumn",
+            "payload": {
+                "name": "id_str",
+                "expr": {"udf": "to_str", "args": [{"col": "id"}]}
+            }
+        }),
+        json!({"op": "select", "payload": ["id", "id_str"]}),
+    ];
+
+    let result = plan::execute_plan(&spark, rows, schema, &plan).unwrap();
+    let rows_out = result.collect_as_json_rows().unwrap();
+    assert_eq!(rows_out.len(), 2);
+    assert_eq!(rows_out[0].get("id_str").and_then(|v| v.as_str()), Some("1"));
+    assert_eq!(rows_out[1].get("id_str").and_then(|v| v.as_str()), Some("2"));
+}
+
 /// to print actual rand(42)/randn(42) values for tests/fixtures/with_rand_seed.json.
 #[test]
 #[ignore]

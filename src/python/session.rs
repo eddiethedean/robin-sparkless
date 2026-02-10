@@ -1,5 +1,6 @@
 //! Python SparkSession and SparkSessionBuilder (PySpark sql session).
 
+use crate::session::set_thread_udf_session;
 use crate::{DataFrameReader, SparkSession};
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
@@ -360,11 +361,11 @@ impl PySparkSession {
         env!("CARGO_PKG_VERSION")
     }
 
-    /// UDF not supported. Raises NotImplementedError.
-    fn udf(&self) -> PyResult<()> {
-        Err(pyo3::exceptions::PyNotImplementedError::new_err(
-            "UDF not supported; use built-in functions",
-        ))
+    /// Return UDF registration (PySpark: spark.udf).
+    fn udf(slf: PyRef<'_, Self>) -> PyUDFRegistration {
+        PyUDFRegistration {
+            session: slf.inner.clone(),
+        }
     }
 
     /// Returns the active SparkSession for this thread (from get_or_create).
@@ -386,6 +387,103 @@ impl PySparkSession {
     ) -> PyResult<Option<Py<PySparkSession>>> {
         Self::get_active_session(_cls, py)
     }
+}
+
+/// Python UDF registration (PySpark: spark.udf). Supports register(name, f, returnType=None).
+#[pyclass(name = "UDFRegistration")]
+pub struct PyUDFRegistration {
+    session: SparkSession,
+}
+
+#[pymethods]
+impl PyUDFRegistration {
+    /// Register a Python UDF. PySpark: spark.udf.register(name, f, returnType=None).
+    /// When returnType is omitted for plain Python fn, defaults to StringType.
+    #[pyo3(signature = (name, f, return_type=None))]
+    fn register(
+        &self,
+        py: Python<'_>,
+        name: &str,
+        f: Bound<'_, pyo3::types::PyAny>,
+        return_type: Option<Bound<'_, pyo3::types::PyAny>>,
+    ) -> PyResult<Py<PyUserDefinedFunction>> {
+        let dtype = parse_return_type(py, return_type.as_ref())?;
+        let callable = f.unbind();
+        self.session
+            .udf_registry
+            .register_python_udf(name, callable, dtype)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        Ok(Py::new(
+            py,
+            PyUserDefinedFunction {
+                name: name.to_string(),
+                session: self.session.clone(),
+            },
+        )?)
+    }
+}
+
+/// User-defined function (returned by register). Callable as my_udf(col("a")).
+#[pyclass(name = "UserDefinedFunction")]
+pub struct PyUserDefinedFunction {
+    name: String,
+    session: SparkSession,
+}
+
+#[pymethods]
+impl PyUserDefinedFunction {
+    #[pyo3(signature = (*cols))]
+    fn __call__(
+        &self,
+        py: Python<'_>,
+        cols: &Bound<'_, pyo3::types::PyTuple>,
+    ) -> PyResult<Py<super::column::PyColumn>> {
+        use crate::functions::col as rs_col;
+        let rs_cols: Vec<crate::column::Column> = cols
+            .iter()
+            .map(|item| {
+                if let Ok(py_col) = item.downcast::<super::column::PyColumn>() {
+                    Ok(py_col.borrow().inner.clone())
+                } else if let Ok(s) = item.extract::<String>() {
+                    Ok(rs_col(&s))
+                } else {
+                    Err(pyo3::exceptions::PyTypeError::new_err(
+                        "UDF __call__: each arg must be Column or str (column name)",
+                    ))
+                }
+            })
+            .collect::<PyResult<Vec<_>>>()?;
+        let col = crate::functions::call_udf(&self.name, &rs_cols)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        Ok(Py::new(py, super::column::PyColumn { inner: col })?)
+    }
+}
+
+fn parse_return_type(
+    py: Python<'_>,
+    return_type: Option<&Bound<'_, pyo3::types::PyAny>>,
+) -> PyResult<polars::prelude::DataType> {
+    use polars::prelude::DataType;
+    let default = DataType::String; // PySpark default
+    let Some(rt) = return_type else {
+        return Ok(default);
+    };
+    if rt.is_none() {
+        return Ok(default);
+    }
+    // DDL string: "int", "string", "bigint", etc.
+    if let Ok(s) = rt.extract::<String>() {
+        return crate::functions::parse_type_name(&s)
+            .map_err(|e| pyo3::exceptions::PyValueError::new_err(e));
+    }
+    // DataType-like object: IntegerType(), StringType() - check for type_name or similar
+    if let Ok(attr) = rt.getattr("typeName") {
+        if let Ok(s) = attr.call0()?.extract::<String>() {
+            return crate::functions::parse_type_name(&s.to_lowercase())
+                .map_err(|e| pyo3::exceptions::PyValueError::new_err(e));
+        }
+    }
+    Ok(default)
 }
 
 /// Python wrapper for DataFrameReader (spark.read).
@@ -790,6 +888,7 @@ impl PySparkSessionBuilder {
             config.insert(k.clone(), v.clone());
         }
         let inner = SparkSession::new(slf.app_name.clone(), slf.master.clone(), config);
+        set_thread_udf_session(inner.clone());
         if let Ok(mut guard) = default_session_cell().lock() {
             *guard = Some(inner.clone());
         }

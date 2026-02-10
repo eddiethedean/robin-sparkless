@@ -1,11 +1,29 @@
 use crate::dataframe::DataFrame;
+use crate::udf_registry::UdfRegistry;
 use polars::prelude::{
     DataFrame as PlDataFrame, DataType, NamedFrom, PolarsError, Series, TimeUnit,
 };
 use serde_json::Value as JsonValue;
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::{Arc, Mutex, OnceLock};
+use std::thread_local;
+
+thread_local! {
+    /// Thread-local SparkSession for UDF resolution in call_udf. Set by get_or_create.
+    static THREAD_UDF_SESSION: RefCell<Option<SparkSession>> = RefCell::new(None);
+}
+
+/// Set the thread-local session for UDF resolution (call_udf). Used by get_or_create.
+pub(crate) fn set_thread_udf_session(session: SparkSession) {
+    THREAD_UDF_SESSION.with(|cell| *cell.borrow_mut() = Some(session));
+}
+
+/// Get the thread-local session for UDF resolution. Used by call_udf.
+pub(crate) fn get_thread_udf_session() -> Option<SparkSession> {
+    THREAD_UDF_SESSION.with(|cell| cell.borrow().clone())
+}
 
 /// Catalog of global temporary views (process-scoped). Persists across sessions within the same process.
 /// PySpark: createOrReplaceGlobalTempView / spark.table("global_temp.name").
@@ -56,7 +74,9 @@ impl SparkSessionBuilder {
     }
 
     pub fn get_or_create(self) -> SparkSession {
-        SparkSession::new(self.app_name, self.master, self.config)
+        let session = SparkSession::new(self.app_name, self.master, self.config);
+        set_thread_udf_session(session.clone());
+        session
     }
 }
 
@@ -77,6 +97,8 @@ pub struct SparkSession {
     pub(crate) catalog: TempViewCatalog,
     /// Saved tables (saveAsTable): name -> DataFrame. Session-scoped; separate namespace from temp views.
     pub(crate) tables: TableCatalog,
+    /// UDF registry: Rust and Python UDFs. Session-scoped.
+    pub(crate) udf_registry: UdfRegistry,
 }
 
 impl SparkSession {
@@ -91,6 +113,7 @@ impl SparkSession {
             config,
             catalog: Arc::new(Mutex::new(HashMap::new())),
             tables: Arc::new(Mutex::new(HashMap::new())),
+            udf_registry: UdfRegistry::new(),
         }
     }
 
@@ -311,6 +334,14 @@ impl SparkSession {
             .get("spark.sql.caseSensitive")
             .map(|v| v.eq_ignore_ascii_case("true"))
             .unwrap_or(false)
+    }
+
+    /// Register a Rust UDF. Session-scoped. Use with call_udf. PySpark: spark.udf.register (Python) or equivalent.
+    pub fn register_udf<F>(&self, name: &str, f: F) -> Result<(), PolarsError>
+    where
+        F: Fn(&[Series]) -> Result<Series, PolarsError> + Send + Sync + 'static,
+    {
+        self.udf_registry.register_rust_udf(name, f)
     }
 
     /// Create a DataFrame from a vector of tuples (i64, i64, String)
@@ -947,6 +978,7 @@ impl SparkSession {
             config: self.config.clone(),
             catalog: self.catalog.clone(),
             tables: self.tables.clone(),
+            udf_registry: self.udf_registry.clone(),
         })
     }
 }
@@ -1095,6 +1127,33 @@ mod tests {
         let result = spark.read_json("nonexistent_file.json");
 
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_rust_udf_dataframe() {
+        use crate::functions::{call_udf, col};
+        use polars::prelude::DataType;
+
+        let spark = SparkSession::builder().app_name("test").get_or_create();
+        spark
+            .register_udf("to_str", |cols| cols[0].cast(&DataType::String))
+            .unwrap();
+        let df = spark
+            .create_dataframe(
+                vec![
+                    (1, 25, "Alice".to_string()),
+                    (2, 30, "Bob".to_string()),
+                ],
+                vec!["id", "age", "name"],
+            )
+            .unwrap();
+        let col = call_udf("to_str", &[col("id")]).unwrap();
+        let df2 = df.with_column("id_str", &col).unwrap();
+        let cols = df2.columns().unwrap();
+        assert!(cols.contains(&"id_str".to_string()));
+        let rows = df2.collect_as_json_rows().unwrap();
+        assert_eq!(rows[0].get("id_str").and_then(|v| v.as_str()), Some("1"));
+        assert_eq!(rows[1].get("id_str").and_then(|v| v.as_str()), Some("2"));
     }
 
     #[test]

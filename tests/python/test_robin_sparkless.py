@@ -1772,10 +1772,10 @@ def test_phase_e_spark_session_catalog() -> None:
     assert default is not None
     # stop() completes without error
     spark.stop()
-    # udf raises NotImplementedError
+    # udf returns UDFRegistration (PySpark parity)
     spark2 = rs.SparkSession.builder().app_name("e2").get_or_create()
-    with pytest.raises(NotImplementedError, match="UDF"):
-        spark2.udf()
+    udf_reg = spark2.udf()
+    assert udf_reg is not None
     # catalog + temp view: register, listTables, tableExists, dropTempView
     df = spark2.create_dataframe([(1, 2, "a")], ["a", "b", "c"])
     try:
@@ -1820,6 +1820,31 @@ def test_sql_select_where_returns_rows() -> None:
     assert len(rows) == 2
     assert rows[0]["id"] == 2 and rows[1]["id"] == 3
     assert rows[0]["name"] == "b" and rows[1]["name"] == "c"
+
+
+def test_python_udf_register_and_call() -> None:
+    """Python UDF: register, use in DataFrame with_column and call_udf (PySpark parity)."""
+    import robin_sparkless as rs
+
+    spark = rs.SparkSession.builder().app_name("test").get_or_create()
+
+    def double(x):
+        return x * 2 if x is not None else None
+
+    my_udf = spark.udf().register("double", double, return_type="int")
+    assert my_udf is not None
+
+    df = spark.create_dataframe([(1, 10, "a"), (2, 20, "b")], ["id", "v", "name"])
+    # Use returned UDF as column: my_udf(col("id"))
+    df2 = df.with_column("doubled", my_udf(rs.col("id")))
+    rows = df2.collect()
+    assert rows[0]["doubled"] == 2
+    assert rows[1]["doubled"] == 4
+
+    # call_udf by name
+    df3 = df.with_column("d2", rs.call_udf("double", rs.col("id")))
+    rows3 = df3.collect()
+    assert rows3[0]["d2"] == 2
 
 
 # Predetermined expected output for _create_dataframe_from_rows (int/string/boolean/date).

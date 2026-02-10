@@ -44,12 +44,15 @@ pub enum DeferredRandom {
 
 /// Column - represents a column in a DataFrame, used for building expressions
 /// Thin wrapper around Polars `Expr`. May carry a DeferredRandom for rand/randn so with_column can produce one value per row.
+/// May carry UdfCall for Python UDFs (eager execution at with_column).
 #[derive(Debug, Clone)]
 pub struct Column {
     name: String,
     expr: Expr, // Polars expression for lazy evaluation
     /// When Some, with_column generates a full-length random series instead of using expr (PySpark-like per-row rand/randn).
     pub(crate) deferred: Option<DeferredRandom>,
+    /// When Some, with_column executes Python UDF eagerly (name, arg columns).
+    pub(crate) udf_call: Option<(String, Vec<Column>)>,
 }
 
 impl Column {
@@ -59,6 +62,7 @@ impl Column {
             name: name.clone(),
             expr: col(&name),
             deferred: None,
+            udf_call: None,
         }
     }
 
@@ -69,6 +73,17 @@ impl Column {
             name: display_name,
             expr,
             deferred: None,
+            udf_call: None,
+        }
+    }
+
+    /// Create a Column for Python UDF call (eager execution at with_column).
+    pub fn from_udf_call(name: String, args: Vec<Column>) -> Self {
+        Column {
+            name: format!("{name}()"),
+            expr: lit(0i32), // dummy, never used
+            deferred: None,
+            udf_call: Some((name, args)),
         }
     }
 
@@ -82,6 +97,7 @@ impl Column {
             name: "rand".to_string(),
             expr,
             deferred: Some(DeferredRandom::Rand(seed)),
+            udf_call: None,
         }
     }
 
@@ -95,6 +111,7 @@ impl Column {
             name: "randn".to_string(),
             expr,
             deferred: Some(DeferredRandom::Randn(seed)),
+            udf_call: None,
         }
     }
 
@@ -119,6 +136,7 @@ impl Column {
             name: name.to_string(),
             expr: self.expr.clone().alias(name),
             deferred: self.deferred,
+            udf_call: self.udf_call.clone(),
         }
     }
 
@@ -158,6 +176,7 @@ impl Column {
             name: format!("({} IS NULL)", self.name),
             expr: self.expr.clone().is_null(),
             deferred: None,
+            udf_call: None,
         }
     }
 
@@ -167,6 +186,7 @@ impl Column {
             name: format!("({} IS NOT NULL)", self.name),
             expr: self.expr.clone().is_not_null(),
             deferred: None,
+            udf_call: None,
         }
     }
 

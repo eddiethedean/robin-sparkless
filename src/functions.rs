@@ -754,6 +754,64 @@ pub fn randn(seed: Option<u64>) -> Column {
     Column::from_randn(seed)
 }
 
+/// Call a registered UDF by name. PySpark: F.call_udf(udfName, *cols).
+/// Requires a session (set by get_or_create). Raises if UDF not found.
+pub fn call_udf(name: &str, cols: &[Column]) -> Result<Column, PolarsError> {
+    use polars::prelude::Column as PlColumn;
+
+    let session = crate::session::get_thread_udf_session().ok_or_else(|| {
+        PolarsError::InvalidOperation(
+            "call_udf: no session. Use SparkSession.builder().get_or_create() first.".into(),
+        )
+    })?;
+    let case_sensitive = session.is_case_sensitive();
+
+    // Python UDF: eager execution via UdfCall
+    #[cfg(feature = "pyo3")]
+    if session.udf_registry.get_python_udf(name, case_sensitive).is_some() {
+        return Ok(Column::from_udf_call(name.to_string(), cols.to_vec()));
+    }
+
+    // Rust UDF: build lazy Expr
+    let udf = session
+        .udf_registry
+        .get_rust_udf(name, case_sensitive)
+        .ok_or_else(|| {
+            PolarsError::InvalidOperation(format!("call_udf: UDF '{name}' not found").into())
+        })?;
+
+    let exprs: Vec<Expr> = cols.iter().map(|c| c.expr().clone()).collect();
+    let output_type = DataType::String; // PySpark default
+
+    let expr = if exprs.len() == 1 {
+        let udf = udf.clone();
+        exprs.into_iter().next().unwrap().map(
+            move |c| {
+                let s = c.take_materialized_series();
+                udf.apply(&[s]).map(|out| Some(PlColumn::new("_".into(), out)))
+            },
+            GetOutput::from_type(output_type),
+        )
+    } else {
+        let udf = udf.clone();
+        let first = exprs[0].clone();
+        let rest: Vec<Expr> = exprs[1..].to_vec();
+        first.map_many(
+            move |columns| {
+                let series: Vec<Series> = columns
+                    .iter_mut()
+                    .map(|c| std::mem::take(c).take_materialized_series())
+                    .collect();
+                udf.apply(&series).map(|out| Some(PlColumn::new("_".into(), out)))
+            },
+            &rest,
+            GetOutput::from_type(output_type),
+        )
+    };
+
+    Ok(Column::from_expr(expr, Some(format!("{name}()"))))
+}
+
 /// True if two arrays have any element in common (PySpark arrays_overlap).
 pub fn arrays_overlap(left: &Column, right: &Column) -> Column {
     left.clone().arrays_overlap(right)

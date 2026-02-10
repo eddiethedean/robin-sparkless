@@ -1,11 +1,15 @@
 //! Translate sqlparser AST to DataFrame operations.
+//! Resolves unknown functions as UDFs from the session registry.
 
+use crate::column::Column;
 use crate::dataframe::{join, JoinType};
-use crate::session::SparkSession;
+use crate::functions;
+use crate::session::{set_thread_udf_session, SparkSession};
 use polars::prelude::{col, lit, Expr, PolarsError};
 use sqlparser::ast::{
-    BinaryOperator, Expr as SqlExpr, GroupByExpr, JoinConstraint, JoinOperator, Query, Select,
-    SelectItem, SetExpr, Statement, TableFactor, Value,
+    BinaryOperator, Expr as SqlExpr, Function, FunctionArg, FunctionArgExpr, GroupByExpr,
+    JoinConstraint, JoinOperator, Query, Select, SelectItem, SetExpr, Statement, TableFactor,
+    Value,
 };
 
 /// Translate a parsed Statement (must be Query) into a DataFrame using the session catalog.
@@ -13,6 +17,7 @@ pub fn translate(
     session: &SparkSession,
     stmt: &Statement,
 ) -> Result<crate::dataframe::DataFrame, PolarsError> {
+    set_thread_udf_session(session.clone());
     let query = match stmt {
         Statement::Query(q) => q.as_ref(),
         _ => {
@@ -38,7 +43,7 @@ fn translate_query(
     };
     let mut df = translate_select_from(session, body)?;
     if let Some(selection) = &body.selection {
-        let expr = sql_expr_to_polars(selection)?;
+        let expr = sql_expr_to_polars(selection, session)?;
         df = df.filter(expr)?;
     }
     let group_exprs: &[SqlExpr] = match &body.group_by {
@@ -64,10 +69,10 @@ fn translate_query(
             df = grouped.agg(agg_exprs)?;
         }
     } else {
-        df = apply_projection(&df, &body.projection)?;
+        df = apply_projection(&df, &body.projection, session)?;
     }
     if let Some(having_expr) = &body.having {
-        let having_polars = sql_expr_to_polars(having_expr)?;
+        let having_polars = sql_expr_to_polars(having_expr, session)?;
         df = df.filter(having_polars)?;
     }
     if !query.order_by.is_empty() {
@@ -192,7 +197,7 @@ fn join_condition_to_on_columns(join_op: &JoinOperator) -> Result<Vec<String>, P
     }
 }
 
-fn sql_expr_to_polars(expr: &SqlExpr) -> Result<Expr, PolarsError> {
+fn sql_expr_to_polars(expr: &SqlExpr, session: &SparkSession) -> Result<Expr, PolarsError> {
     match expr {
         SqlExpr::Identifier(ident) => Ok(col(ident.value.as_str())),
         SqlExpr::Value(Value::Number(s, _)) => {
@@ -212,8 +217,8 @@ fn sql_expr_to_polars(expr: &SqlExpr) -> Result<Expr, PolarsError> {
         SqlExpr::Value(Value::Boolean(b)) => Ok(lit(*b)),
         SqlExpr::Value(Value::Null) => Ok(lit(polars::prelude::LiteralValue::Null)),
         SqlExpr::BinaryOp { left, op, right } => {
-            let l = sql_expr_to_polars(left)?;
-            let r = sql_expr_to_polars(right)?;
+            let l = sql_expr_to_polars(left, session)?;
+            let r = sql_expr_to_polars(right, session)?;
             match op {
                 BinaryOperator::Eq => Ok(l.eq(r)),
                 BinaryOperator::NotEq => Ok(l.eq(r).not()),
@@ -228,10 +233,10 @@ fn sql_expr_to_polars(expr: &SqlExpr) -> Result<Expr, PolarsError> {
                 )),
             }
         }
-        SqlExpr::IsNull(expr) => Ok(sql_expr_to_polars(expr)?.is_null()),
-        SqlExpr::IsNotNull(expr) => Ok(sql_expr_to_polars(expr)?.is_not_null()),
+        SqlExpr::IsNull(expr) => Ok(sql_expr_to_polars(expr, session)?.is_null()),
+        SqlExpr::IsNotNull(expr) => Ok(sql_expr_to_polars(expr, session)?.is_not_null()),
         SqlExpr::UnaryOp { op, expr } => {
-            let e = sql_expr_to_polars(expr)?;
+            let e = sql_expr_to_polars(expr, session)?;
             match op {
                 sqlparser::ast::UnaryOperator::Not => Ok(e.not()),
                 _ => Err(PolarsError::InvalidOperation(
@@ -239,10 +244,70 @@ fn sql_expr_to_polars(expr: &SqlExpr) -> Result<Expr, PolarsError> {
                 )),
             }
         }
+        SqlExpr::Function(func) => sql_function_to_expr(func, session),
         _ => Err(PolarsError::InvalidOperation(
             format!("SQL: unsupported expression in WHERE: {:?}. Use column, literal, =, <, >, AND, OR, IS NULL.", expr).into(),
         )),
     }
+}
+
+/// Convert SQL function call to Polars Expr. Supports built-ins (UPPER, LOWER, etc.) and UDFs.
+/// For Python UDF in WHERE/HAVING we cannot return a lazy Expr; returns error (Python UDF in
+/// predicates requires eager materialization - deferred).
+fn sql_function_to_expr(func: &Function, session: &SparkSession) -> Result<Expr, PolarsError> {
+    let func_name = func.name.0.last().map(|i| i.value.as_str()).unwrap_or("");
+    let args = sql_function_args_to_columns(func, session)?;
+
+    let case_sensitive = session.is_case_sensitive();
+
+    // Built-in scalar functions (single-column arg)
+    if let Some(col) = args.first() {
+        let builtin_expr = match func_name.to_uppercase().as_str() {
+            "UPPER" | "UCASE" if args.len() == 1 => {
+                Some(functions::upper(col).expr().clone())
+            }
+            "LOWER" | "LCASE" if args.len() == 1 => {
+                Some(functions::lower(col).expr().clone())
+            }
+            _ => None,
+        };
+        if let Some(e) = builtin_expr {
+            return Ok(e);
+        }
+    }
+
+    // UDF lookup
+    if session.udf_registry.has_udf(func_name, case_sensitive) {
+        let col = functions::call_udf(func_name, &args)?;
+        if col.udf_call.is_some() {
+            return Err(PolarsError::InvalidOperation(
+                "SQL: Python UDF in WHERE/HAVING not yet supported. Use in SELECT.".into(),
+            ));
+        }
+        return Ok(col.expr().clone());
+    }
+
+    Err(PolarsError::InvalidOperation(
+        format!("SQL: unknown function '{}'. Register with spark.udf.register() or use built-ins: UPPER, LOWER.", func_name).into(),
+    ))
+}
+
+fn sql_function_args_to_columns(
+    func: &Function,
+    session: &SparkSession,
+) -> Result<Vec<Column>, PolarsError> {
+    let mut cols = Vec::new();
+    for arg in &func.args {
+        if let FunctionArg::Unnamed(FunctionArgExpr::Expr(expr)) = arg {
+            let e = sql_expr_to_polars(expr, session)?;
+            cols.push(Column::from_expr(e, None));
+        } else {
+            return Err(PolarsError::InvalidOperation(
+                "SQL: only positional function arguments supported.".into(),
+            ));
+        }
+    }
+    Ok(cols)
 }
 
 fn sql_expr_to_col_name(expr: &SqlExpr) -> Result<String, PolarsError> {
@@ -258,42 +323,178 @@ fn sql_expr_to_col_name(expr: &SqlExpr) -> Result<String, PolarsError> {
     }
 }
 
+/// Projection item: either a plain Expr (built-in, Rust UDF, identifier) or Python UDF Column.
+enum ProjItem {
+    Expr(Expr, String),
+    PythonUdf(Column, String),
+}
+
 fn apply_projection(
     df: &crate::dataframe::DataFrame,
     projection: &[SelectItem],
+    session: &SparkSession,
 ) -> Result<crate::dataframe::DataFrame, PolarsError> {
-    let mut cols = Vec::new();
+    // Wildcard: expand to all columns
     for item in projection {
-        match item {
+        if matches!(item, SelectItem::Wildcard(_)) {
+            let column_names = df.columns()?;
+            let all_col_names: Vec<&str> = column_names.iter().map(|s| s.as_str()).collect();
+            return df.select(all_col_names);
+        }
+    }
+
+    let mut items = Vec::new();
+    for item in projection {
+        let proj = match item {
             SelectItem::UnnamedExpr(SqlExpr::Identifier(ident)) => {
-                cols.push(ident.value.as_str());
+                let name = ident.value.as_str();
+                ProjItem::Expr(col(name), name.to_string())
             }
             SelectItem::UnnamedExpr(SqlExpr::CompoundIdentifier(parts)) => {
                 let name = parts.last().map(|i| i.value.as_str()).unwrap_or("");
-                cols.push(name);
+                ProjItem::Expr(col(name), name.to_string())
             }
-            SelectItem::Wildcard(_) => {
-                let column_names = df.columns()?;
-                let all_col_names: Vec<&str> = column_names.iter().map(|s| s.as_str()).collect();
-                return df.select(all_col_names);
+            SelectItem::UnnamedExpr(SqlExpr::Function(func)) => {
+                projection_function_to_item(func, session)?
+            }
+            SelectItem::ExprWithAlias { expr, alias } => {
+                let alias_str = alias.value.clone();
+                match expr {
+                    SqlExpr::Identifier(ident) => {
+                        let name = ident.value.as_str();
+                        ProjItem::Expr(col(name), alias_str)
+                    }
+                    SqlExpr::CompoundIdentifier(parts) => {
+                        let name = parts.last().map(|i| i.value.as_str()).unwrap_or("");
+                        ProjItem::Expr(col(name), alias_str)
+                    }
+                    SqlExpr::Function(func) => {
+                        let mut item = projection_function_to_item(func, session)?;
+                        // Override alias with AS alias
+                        item = match item {
+                            ProjItem::Expr(e, _) => ProjItem::Expr(e, alias_str),
+                            ProjItem::PythonUdf(c, _) => ProjItem::PythonUdf(c, alias_str),
+                        };
+                        item
+                    }
+                    _ => {
+                        return Err(PolarsError::InvalidOperation(
+                            format!("SQL: unsupported expression with alias: {:?}", expr).into(),
+                        ));
+                    }
+                }
             }
             _ => {
                 return Err(PolarsError::InvalidOperation(
                     format!(
-                        "SQL: SELECT only supports column names or * for now, got {:?}",
+                        "SQL: SELECT supports column names, *, and function calls. Got {:?}",
                         item
                     )
                     .into(),
                 ));
             }
-        }
+        };
+        items.push(proj);
     }
-    if cols.is_empty() {
+
+    if items.is_empty() {
         return Err(PolarsError::InvalidOperation(
             "SQL: SELECT must list at least one column or *.".into(),
         ));
     }
-    df.select(cols)
+
+    // Check if any Python UDF (requires with_column path)
+    let has_python_udf = items.iter().any(|i| matches!(i, ProjItem::PythonUdf(_, _)));
+
+    let mut df = df.clone();
+
+    if has_python_udf {
+        // Add Python UDF columns first, then select all in order
+        for item in &items {
+            if let ProjItem::PythonUdf(ref col, ref alias) = item {
+                df = df.with_column(alias, col)?;
+            }
+        }
+        let exprs: Vec<Expr> = items
+            .iter()
+            .map(|i| match i {
+                ProjItem::Expr(e, alias) => e.clone().alias(alias),
+                ProjItem::PythonUdf(_, alias) => col(alias.as_str()).alias(alias),
+            })
+            .collect();
+        df.select_exprs(exprs)
+    } else {
+        // All exprs: use select_with_exprs
+        let exprs: Vec<Expr> = items
+            .iter()
+            .map(|i| match i {
+                ProjItem::Expr(e, alias) => e.clone().alias(alias),
+                ProjItem::PythonUdf(_, _) => unreachable!(),
+            })
+            .collect();
+        df.select_exprs(exprs)
+    }
+}
+
+fn sql_function_alias(func: &Function) -> String {
+    let func_name = func.name.0.last().map(|i| i.value.as_str()).unwrap_or("");
+    let arg_parts: Vec<String> = func
+        .args
+        .iter()
+        .filter_map(|a| {
+            if let FunctionArg::Unnamed(FunctionArgExpr::Expr(SqlExpr::Identifier(ident))) = a {
+                Some(ident.value.to_string())
+            } else if let FunctionArg::Unnamed(FunctionArgExpr::Expr(SqlExpr::CompoundIdentifier(parts))) = a {
+                parts.last().map(|i| i.value.to_string())
+            } else {
+                Some("_".to_string())
+            }
+        })
+        .collect();
+    if arg_parts.is_empty() {
+        format!("{}()", func_name)
+    } else {
+        format!("{}({})", func_name, arg_parts.join(", "))
+    }
+}
+
+fn projection_function_to_item(
+    func: &Function,
+    session: &SparkSession,
+) -> Result<ProjItem, PolarsError> {
+    let func_name = func.name.0.last().map(|i| i.value.as_str()).unwrap_or("");
+    let args = sql_function_args_to_columns(func, session)?;
+    let case_sensitive = session.is_case_sensitive();
+    let alias = sql_function_alias(func);
+
+    // Built-ins
+    if let Some(col) = args.first() {
+        let builtin = match func_name.to_uppercase().as_str() {
+            "UPPER" | "UCASE" if args.len() == 1 => Some(functions::upper(col).expr().clone().alias(&alias)),
+            "LOWER" | "LCASE" if args.len() == 1 => Some(functions::lower(col).expr().clone().alias(&alias)),
+            _ => None,
+        };
+        if let Some(e) = builtin {
+            return Ok(ProjItem::Expr(e, alias));
+        }
+    }
+
+    // UDF lookup
+    if session.udf_registry.has_udf(func_name, case_sensitive) {
+        let col = functions::call_udf(func_name, &args)?;
+        if col.udf_call.is_some() {
+            return Ok(ProjItem::PythonUdf(col, alias));
+        }
+        return Ok(ProjItem::Expr(col.expr().clone().alias(&alias), alias));
+    }
+
+    Err(PolarsError::InvalidOperation(
+        format!(
+            "SQL: unknown function '{}'. Register with spark.udf.register() or use built-ins: UPPER, LOWER.",
+            func_name
+        )
+        .into(),
+    ))
 }
 
 fn projection_to_agg_exprs(
@@ -301,7 +502,6 @@ fn projection_to_agg_exprs(
     group_cols: &[String],
 ) -> Result<Vec<Expr>, PolarsError> {
     use polars::prelude::len;
-    use sqlparser::ast::Function;
 
     let mut agg = Vec::new();
     for item in projection {

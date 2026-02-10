@@ -98,7 +98,22 @@ pub fn expr_from_value(v: &Value) -> Result<Expr, PlanExprError> {
         }
     }
 
-    // Function call: {"fn": "upper"|"lower"|..., "args": [<expr>, ...]}
+    // UDF call: {"udf": "name", "args": [<expr>, ...]} - returns Expr for Rust UDF only (Python UDF needs Column path)
+    if let Some(udf_name) = obj.get("udf").and_then(Value::as_str) {
+        let args = obj
+            .get("args")
+            .and_then(Value::as_array)
+            .ok_or_else(|| PlanExprError("udf requires 'args' array".to_string()))?;
+        let col = column_from_udf_call(udf_name, args)?;
+        if col.udf_call.is_some() {
+            return Err(PlanExprError(
+                "Python UDF in filter/plan expression not supported; use in withColumn".into(),
+            ));
+        }
+        return Ok(col.expr().clone());
+    }
+
+    // Function call: {"fn": "upper"|"lower"|"call_udf"|..., "args": [<expr>, ...]}
     if let Some(fn_name) = obj.get("fn").and_then(Value::as_str) {
         let args = obj
             .get("args")
@@ -328,6 +343,41 @@ fn eq_null_safe_expr(left: Expr, right: Expr) -> Expr {
         .otherwise(lit(false))
 }
 
+/// Build a Column from a UDF call. Used by expr_from_value and apply_op (withColumn).
+/// Returns Column; caller checks udf_call for Python UDF (needs with_column, not with_column_expr).
+pub fn column_from_udf_call(udf_name: &str, args: &[Value]) -> Result<crate::Column, PlanExprError> {
+    use crate::Column;
+    let cols: Vec<Column> = args
+        .iter()
+        .map(|v| expr_from_value(v).map(expr_to_column))
+        .collect::<Result<Vec<_>, _>>()?;
+    crate::functions::call_udf(udf_name, &cols).map_err(|e| PlanExprError(e.to_string()))
+}
+
+/// Try to parse a UDF expression and build Column. Supports {"udf": "name", "args": [...]}
+/// and {"fn": "call_udf", "args": [{"lit": "name"}, ...]}. Returns None if not a UDF expression.
+pub fn try_column_from_udf_value(v: &Value) -> Option<Result<crate::Column, PlanExprError>> {
+    let obj = v.as_object()?;
+    let (udf_name, args) = if let Some(name) = obj.get("udf").and_then(Value::as_str) {
+        let args = obj.get("args")?.as_array()?;
+        (name.to_string(), args)
+    } else if obj.get("fn").and_then(Value::as_str) == Some("call_udf") {
+        let args = obj.get("args")?.as_array()?;
+        if args.is_empty() {
+            return Some(Err(PlanExprError("call_udf requires at least name and one arg".into())));
+        }
+        let name = match lit_as_string(&args[0]) {
+            Ok(n) => n,
+            Err(e) => return Some(Err(e)),
+        };
+        let rest: &[Value] = &args[1..];
+        return Some(column_from_udf_call(&name, rest));
+    } else {
+        return None;
+    };
+    Some(column_from_udf_call(&udf_name, args))
+}
+
 fn expr_from_fn(name: &str, args: &[Value]) -> Result<Expr, PlanExprError> {
     #[allow(unused_imports)]
     use crate::functions::{
@@ -364,6 +414,19 @@ fn expr_from_fn(name: &str, args: &[Value]) -> Result<Expr, PlanExprError> {
     use crate::Column;
 
     match name {
+        "call_udf" => {
+            if args.is_empty() {
+                return Err(PlanExprError("call_udf requires at least name and one arg".into()));
+            }
+            let udf_name = lit_as_string(&args[0])?;
+            let col = column_from_udf_call(&udf_name, &args[1..])?;
+            if col.udf_call.is_some() {
+                return Err(PlanExprError(
+                    "Python UDF in filter/plan expression not supported; use in withColumn".into(),
+                ));
+            }
+            Ok(col.expr().clone())
+        }
         "upper" => {
             require_args(name, args, 1)?;
             let c = expr_to_column(arg_expr(args, 0)?);
