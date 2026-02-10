@@ -3831,6 +3831,64 @@ pub fn apply_shuffle(column: Column) -> PolarsResult<Option<Column>> {
 /// Size of bitmap in bytes (32768 bits).
 const BITMAP_BYTES: usize = 4096;
 
+/// Parse string to boolean (PySpark cast string->boolean). "true"/"false"/"1"/"0" case-insensitive.
+/// For try_cast: invalid strings -> null. For cast: invalid strings -> error.
+fn parse_str_to_bool(s: &str, strict: bool) -> Option<bool> {
+    let lower = s.trim().to_lowercase();
+    match lower.as_str() {
+        "true" | "1" | "yes" => Some(true),
+        "false" | "0" | "no" => Some(false),
+        _ if strict => None, // will error
+        _ => None,
+    }
+}
+
+/// Apply string-to-boolean cast. Handles string columns; passes through boolean; null for others (try_cast) or error (cast).
+pub fn apply_string_to_boolean(column: Column, strict: bool) -> PolarsResult<Option<Column>> {
+    let name = column.field().into_owned().name;
+    let series = column.take_materialized_series();
+    let out: BooleanChunked = match series.dtype() {
+        DataType::String => {
+            let ca = series
+                .str()
+                .map_err(|e| PolarsError::ComputeError(format!("string to boolean: {e}").into()))?;
+            let mut results = Vec::with_capacity(ca.len());
+            for opt_s in ca.into_iter() {
+                let v = match opt_s {
+                    None => None,
+                    Some(s) => {
+                        let parsed = parse_str_to_bool(s, strict);
+                        if strict && parsed.is_none() {
+                            return Err(PolarsError::ComputeError(
+                                format!("casting from string to boolean failed for value '{s}'")
+                                    .into(),
+                            ));
+                        }
+                        parsed
+                    }
+                };
+                results.push(v);
+            }
+            BooleanChunked::from_iter_options(name.as_str().into(), results.into_iter())
+        }
+        DataType::Boolean => {
+            let ca = series
+                .bool()
+                .map_err(|e| PolarsError::ComputeError(format!("boolean: {e}").into()))?;
+            BooleanChunked::from_iter_options(name.as_str().into(), ca.into_iter())
+        }
+        _ => {
+            if strict {
+                return Err(PolarsError::ComputeError(
+                    format!("casting from {} to boolean not supported", series.dtype()).into(),
+                ));
+            }
+            BooleanChunked::from_iter_options(name.as_str().into(), (0..series.len()).map(|_| None))
+        }
+    };
+    Ok(Some(Column::new(name, out.into_series())))
+}
+
 /// Count set bits in a bitmap (binary column). PySpark bitmap_count.
 pub fn apply_bitmap_count(column: Column) -> PolarsResult<Option<Column>> {
     let name = column.field().into_owned().name;

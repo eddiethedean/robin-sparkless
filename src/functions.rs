@@ -1261,8 +1261,17 @@ pub fn sign(column: &Column) -> Column {
 }
 
 /// Cast column to the given type (PySpark cast). Fails on invalid conversion.
+/// String-to-boolean uses custom parsing ("true"/"false"/"1"/"0") since Polars does not support Utf8->Boolean.
 pub fn cast(column: &Column, type_name: &str) -> Result<Column, String> {
     let dtype = parse_type_name(type_name)?;
+    if dtype == DataType::Boolean {
+        use polars::prelude::GetOutput;
+        let expr = column.expr().clone().map(
+            |col| crate::udfs::apply_string_to_boolean(col, true),
+            GetOutput::from_type(DataType::Boolean),
+        );
+        return Ok(Column::from_expr(expr, None));
+    }
     Ok(Column::from_expr(
         column.expr().clone().strict_cast(dtype),
         None,
@@ -1270,8 +1279,17 @@ pub fn cast(column: &Column, type_name: &str) -> Result<Column, String> {
 }
 
 /// Cast column to the given type, returning null on invalid conversion (PySpark try_cast).
+/// String-to-boolean uses custom parsing ("true"/"false"/"1"/"0") since Polars does not support Utf8->Boolean.
 pub fn try_cast(column: &Column, type_name: &str) -> Result<Column, String> {
     let dtype = parse_type_name(type_name)?;
+    if dtype == DataType::Boolean {
+        use polars::prelude::GetOutput;
+        let expr = column.expr().clone().map(
+            |col| crate::udfs::apply_string_to_boolean(col, false),
+            GetOutput::from_type(DataType::Boolean),
+        );
+        return Ok(Column::from_expr(expr, None));
+    }
     Ok(Column::from_expr(column.expr().clone().cast(dtype), None))
 }
 

@@ -2066,6 +2066,32 @@ def test__create_dataframe_from_rows_schema_pyspark_parity() -> None:
     assert result == EXPECTED_CREATE_DATAFRAME_FROM_ROWS_PARITY
 
 
+def test_cast_string_to_boolean() -> None:
+    """cast/try_cast string to boolean (fixes #199)."""
+    import robin_sparkless as rs
+
+    spark = rs.SparkSession.builder().app_name("test").get_or_create()
+    df = spark._create_dataframe_from_rows(
+        [
+            {"s": "true"},
+            {"s": "false"},
+            {"s": "1"},
+            {"s": "0"},
+            {"s": "TRUE"},
+            {"s": "invalid"},
+        ],
+        [("s", "string")],
+    )
+    result = df.with_column("b", rs.col("s").try_cast("boolean"))
+    rows = result.collect()
+    assert rows[0]["b"] is True
+    assert rows[1]["b"] is False
+    assert rows[2]["b"] is True
+    assert rows[3]["b"] is False
+    assert rows[4]["b"] is True
+    assert rows[5]["b"] is None
+
+
 def test_create_dataframe_from_rows_struct_and_array() -> None:
     """_create_dataframe_from_rows supports struct and array columns (#198)."""
     import robin_sparkless as rs
