@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **#194 – Column name case sensitivity (Sparkless parity)** — Column names are now resolved case-insensitively by default (PySpark `spark.sql.caseSensitive=false`), so queries and DataFrame API calls using lowercase or mixed-case column names (e.g. `col("name")`, `SELECT name FROM t`) work when the schema has different casing (e.g. `Name`). SQL: identifiers in SELECT, WHERE, GROUP BY, ORDER BY, HAVING, and aggregate arguments are resolved against the current DataFrame. DataFrame API: `filter`, `select_with_exprs`, `order_by_exprs`, and `with_column` now resolve column names in expressions via `resolve_expr_column_names()` before applying to Polars. New tests: `test_sql_case_insensitive_columns`, `test_case_insensitive_filter_select`.
+
 ### Planned
 
 - **Phase 26 – Publish crate**: Prepare and publish robin-sparkless to crates.io (and optionally PyPI via maturin). See [ROADMAP.md](docs/ROADMAP.md) for details.

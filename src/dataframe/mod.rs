@@ -17,7 +17,8 @@ use crate::functions::SortOrder;
 use crate::schema::StructType;
 use crate::session::SparkSession;
 use polars::prelude::{
-    col, lit, AnyValue, DataFrame as PlDataFrame, DataType, Expr, PolarsError, SchemaNamesAndDtypes,
+    col, lit, AnyValue, DataFrame as PlDataFrame, DataType, Expr, PlSmallStr, PolarsError,
+    SchemaNamesAndDtypes,
 };
 use serde_json::Value as JsonValue;
 use std::collections::HashMap;
@@ -59,6 +60,23 @@ impl DataFrame {
             df: Arc::new(PlDataFrame::empty()),
             case_sensitive: DEFAULT_CASE_SENSITIVE,
         }
+    }
+
+    /// Resolve column names in a Polars expression against this DataFrame's schema.
+    /// When case_sensitive is false, column references (e.g. col("name")) are resolved
+    /// case-insensitively (PySpark default). Use before filter/select_with_exprs/order_by_exprs.
+    pub fn resolve_expr_column_names(&self, expr: Expr) -> Result<Expr, PolarsError> {
+        let df = self;
+        expr.try_map_expr(|e| {
+            if let Expr::Column(name) = e {
+                let name_str = name.as_str();
+                let resolved = df.resolve_column_name(name_str)?;
+                Ok(Expr::Column(PlSmallStr::from(resolved.as_str())))
+            } else {
+                Ok(e)
+            }
+        })
+        .map_err(|e| e.into())
     }
 
     /// Resolve a logical column name to the actual column name in the schema.

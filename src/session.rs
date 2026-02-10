@@ -1179,6 +1179,38 @@ mod tests {
     }
 
     #[test]
+    fn test_case_insensitive_filter_select() {
+        use crate::expression::lit_i64;
+        use crate::functions::col;
+
+        let spark = SparkSession::builder().app_name("test").get_or_create();
+        let df = spark
+            .create_dataframe(
+                vec![
+                    (1, 25, "Alice".to_string()),
+                    (2, 30, "Bob".to_string()),
+                    (3, 35, "Charlie".to_string()),
+                ],
+                vec!["Id", "Age", "Name"],
+            )
+            .unwrap();
+        // Filter with lowercase column names (PySpark default: case-insensitive)
+        let filtered = df
+            .filter(col("age").gt(lit_i64(26)).expr().clone())
+            .unwrap()
+            .select(vec!["name"])
+            .unwrap();
+        assert_eq!(filtered.count().unwrap(), 2);
+        let rows = filtered.collect_as_json_rows().unwrap();
+        let names: Vec<&str> = rows
+            .iter()
+            .map(|r| r.get("name").and_then(|v| v.as_str()).unwrap())
+            .collect();
+        assert!(names.contains(&"Bob"));
+        assert!(names.contains(&"Charlie"));
+    }
+
+    #[test]
     fn test_sql_returns_error_without_feature_or_unknown_table() {
         let spark = SparkSession::builder().app_name("test").get_or_create();
 
