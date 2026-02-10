@@ -768,7 +768,11 @@ pub fn call_udf(name: &str, cols: &[Column]) -> Result<Column, PolarsError> {
 
     // Python UDF: eager execution via UdfCall
     #[cfg(feature = "pyo3")]
-    if session.udf_registry.get_python_udf(name, case_sensitive).is_some() {
+    if session
+        .udf_registry
+        .get_python_udf(name, case_sensitive)
+        .is_some()
+    {
         return Ok(Column::from_udf_call(name.to_string(), cols.to_vec()));
     }
 
@@ -788,7 +792,8 @@ pub fn call_udf(name: &str, cols: &[Column]) -> Result<Column, PolarsError> {
         exprs.into_iter().next().unwrap().map(
             move |c| {
                 let s = c.take_materialized_series();
-                udf.apply(&[s]).map(|out| Some(PlColumn::new("_".into(), out)))
+                udf.apply(&[s])
+                    .map(|out| Some(PlColumn::new("_".into(), out)))
             },
             GetOutput::from_type(output_type),
         )
@@ -802,7 +807,8 @@ pub fn call_udf(name: &str, cols: &[Column]) -> Result<Column, PolarsError> {
                     .iter_mut()
                     .map(|c| std::mem::take(c).take_materialized_series())
                     .collect();
-                udf.apply(&series).map(|out| Some(PlColumn::new("_".into(), out)))
+                udf.apply(&series)
+                    .map(|out| Some(PlColumn::new("_".into(), out)))
             },
             &rest,
             GetOutput::from_type(output_type),

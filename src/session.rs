@@ -12,7 +12,7 @@ use std::thread_local;
 
 thread_local! {
     /// Thread-local SparkSession for UDF resolution in call_udf. Set by get_or_create.
-    static THREAD_UDF_SESSION: RefCell<Option<SparkSession>> = RefCell::new(None);
+    static THREAD_UDF_SESSION: RefCell<Option<SparkSession>> = const { RefCell::new(None) };
 }
 
 /// Set the thread-local session for UDF resolution (call_udf). Used by get_or_create.
@@ -1140,10 +1140,7 @@ mod tests {
             .unwrap();
         let df = spark
             .create_dataframe(
-                vec![
-                    (1, 25, "Alice".to_string()),
-                    (2, 30, "Bob".to_string()),
-                ],
+                vec![(1, 25, "Alice".to_string()), (2, 30, "Bob".to_string())],
                 vec!["id", "age", "name"],
             )
             .unwrap();

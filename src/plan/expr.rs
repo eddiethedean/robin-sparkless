@@ -345,7 +345,10 @@ fn eq_null_safe_expr(left: Expr, right: Expr) -> Expr {
 
 /// Build a Column from a UDF call. Used by expr_from_value and apply_op (withColumn).
 /// Returns Column; caller checks udf_call for Python UDF (needs with_column, not with_column_expr).
-pub fn column_from_udf_call(udf_name: &str, args: &[Value]) -> Result<crate::Column, PlanExprError> {
+pub fn column_from_udf_call(
+    udf_name: &str,
+    args: &[Value],
+) -> Result<crate::Column, PlanExprError> {
     use crate::Column;
     let cols: Vec<Column> = args
         .iter()
@@ -364,7 +367,9 @@ pub fn try_column_from_udf_value(v: &Value) -> Option<Result<crate::Column, Plan
     } else if obj.get("fn").and_then(Value::as_str) == Some("call_udf") {
         let args = obj.get("args")?.as_array()?;
         if args.is_empty() {
-            return Some(Err(PlanExprError("call_udf requires at least name and one arg".into())));
+            return Some(Err(PlanExprError(
+                "call_udf requires at least name and one arg".into(),
+            )));
         }
         let name = match lit_as_string(&args[0]) {
             Ok(n) => n,
@@ -416,7 +421,9 @@ fn expr_from_fn(name: &str, args: &[Value]) -> Result<Expr, PlanExprError> {
     match name {
         "call_udf" => {
             if args.is_empty() {
-                return Err(PlanExprError("call_udf requires at least name and one arg".into()));
+                return Err(PlanExprError(
+                    "call_udf requires at least name and one arg".into(),
+                ));
             }
             let udf_name = lit_as_string(&args[0])?;
             let col = column_from_udf_call(&udf_name, &args[1..])?;

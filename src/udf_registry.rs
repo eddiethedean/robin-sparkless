@@ -35,9 +35,7 @@ pub struct UdfRegistry {
     rust_udfs: Arc<std::sync::RwLock<HashMap<String, Arc<dyn RustUdf>>>>,
     #[cfg(feature = "pyo3")]
     python_udfs: Arc<
-        std::sync::RwLock<
-            HashMap<String, Arc<(pyo3::Py<pyo3::PyAny>, polars::prelude::DataType)>>,
-        >,
+        std::sync::RwLock<HashMap<String, Arc<(pyo3::Py<pyo3::PyAny>, polars::prelude::DataType)>>>,
     >,
 }
 

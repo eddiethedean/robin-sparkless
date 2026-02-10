@@ -124,10 +124,7 @@ mod tests {
             .unwrap();
         let df = spark
             .create_dataframe(
-                vec![
-                    (1, 25, "Alice".to_string()),
-                    (2, 30, "Bob".to_string()),
-                ],
+                vec![(1, 25, "Alice".to_string()), (2, 30, "Bob".to_string())],
                 vec!["id", "age", "name"],
             )
             .unwrap();
@@ -146,10 +143,7 @@ mod tests {
         let spark = SparkSession::builder().app_name("test").get_or_create();
         let df = spark
             .create_dataframe(
-                vec![
-                    (1, 25, "alice".to_string()),
-                    (2, 30, "bob".to_string()),
-                ],
+                vec![(1, 25, "alice".to_string()), (2, 30, "bob".to_string())],
                 vec!["id", "age", "name"],
             )
             .unwrap();
@@ -158,7 +152,10 @@ mod tests {
             .sql("SELECT id, UPPER(name) AS upper_name FROM t ORDER BY id")
             .unwrap();
         let rows = result.collect_as_json_rows().unwrap();
-        assert_eq!(rows[0].get("upper_name").and_then(|v| v.as_str()), Some("ALICE"));
+        assert_eq!(
+            rows[0].get("upper_name").and_then(|v| v.as_str()),
+            Some("ALICE")
+        );
     }
 
     #[test]

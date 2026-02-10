@@ -5661,8 +5661,14 @@ fn plan_udf_with_column() {
     let result = plan::execute_plan(&spark, rows, schema, &plan).unwrap();
     let rows_out = result.collect_as_json_rows().unwrap();
     assert_eq!(rows_out.len(), 2);
-    assert_eq!(rows_out[0].get("id_str").and_then(|v| v.as_str()), Some("1"));
-    assert_eq!(rows_out[1].get("id_str").and_then(|v| v.as_str()), Some("2"));
+    assert_eq!(
+        rows_out[0].get("id_str").and_then(|v| v.as_str()),
+        Some("1")
+    );
+    assert_eq!(
+        rows_out[1].get("id_str").and_then(|v| v.as_str()),
+        Some("2")
+    );
 }
 
 /// to print actual rand(42)/randn(42) values for tests/fixtures/with_rand_seed.json.
