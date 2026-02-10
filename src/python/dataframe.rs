@@ -1962,14 +1962,23 @@ pub(crate) fn any_value_to_py(
         AnyValue::Null => py.None().into_bound_py_any(py).map(Into::into),
         AnyValue::Boolean(b) => (*b).into_bound_py_any(py).map(Into::into),
         AnyValue::Int8(i) => (*i as i64).into_bound_py_any(py).map(Into::into),
+        AnyValue::Int16(i) => (*i as i64).into_bound_py_any(py).map(Into::into),
         AnyValue::Int32(i) => (*i).into_bound_py_any(py).map(Into::into),
         AnyValue::Int64(i) => (*i).into_bound_py_any(py).map(Into::into),
+        AnyValue::UInt8(u) => (*u as i64).into_bound_py_any(py).map(Into::into),
+        AnyValue::UInt16(u) => (*u as i64).into_bound_py_any(py).map(Into::into),
         AnyValue::UInt32(u) => (*u).into_bound_py_any(py).map(Into::into),
         AnyValue::UInt64(u) => (*u).into_bound_py_any(py).map(Into::into),
         AnyValue::Float32(f) => (*f).into_bound_py_any(py).map(Into::into),
         AnyValue::Float64(f) => (*f).into_bound_py_any(py).map(Into::into),
         AnyValue::String(s) => s.to_string().into_bound_py_any(py).map(Into::into),
         AnyValue::StringOwned(s) => s.to_string().into_bound_py_any(py).map(Into::into),
+        AnyValue::Binary(b) => pyo3::types::PyBytes::new(py, b)
+            .into_bound_py_any(py)
+            .map(Into::into),
+        AnyValue::BinaryOwned(b) => pyo3::types::PyBytes::new(py, b)
+            .into_bound_py_any(py)
+            .map(Into::into),
         AnyValue::Date(days) => {
             let epoch = crate::date_utils::epoch_naive_date();
             let d = epoch + chrono::TimeDelta::days(*days as i64);
@@ -2016,9 +2025,8 @@ pub(crate) fn any_value_to_py(
             }
             Ok(py_dict.into())
         }
-        other => Err(pyo3::exceptions::PyRuntimeError::new_err(format!(
-            "unsupported type for collect: {:?}",
-            other
-        ))),
+        // Duration, Time, Categorical, Decimal, etc.: use string representation so
+        // collect() never returns None for non-null values (issue #211).
+        other => other.to_string().into_bound_py_any(py).map(Into::into),
     }
 }
