@@ -5709,6 +5709,55 @@ fn plan_column_resolution() {
     assert!(rows_out[0].get("Value").is_none());
 }
 
+/// Plan select accepts concat/concat_ws expression strings (e.g. "concat(first_name, , last_name)")
+/// when Sparkless sends them as column names; they are parsed and evaluated. See issue #196.
+#[test]
+fn plan_select_concat_string() {
+    use robin_sparkless::plan;
+    use serde_json::json;
+
+    let spark = SparkSession::builder()
+        .app_name("plan_select_concat_string")
+        .get_or_create();
+
+    let schema = vec![
+        ("first_name".to_string(), "string".to_string()),
+        ("last_name".to_string(), "string".to_string()),
+    ];
+    let rows = vec![
+        vec![json!("Alice"), json!("Smith")],
+        vec![json!("Bob"), json!("Jones")],
+    ];
+
+    // Select with a concat expression string (literal separator between columns)
+    let plan = vec![json!({
+        "op": "select",
+        "payload": ["first_name", "last_name", "concat(first_name, , last_name)"]
+    })];
+
+    let result = plan::execute_plan(&spark, rows, schema, &plan).unwrap();
+    let rows_out = result.collect_as_json_rows().unwrap();
+    assert_eq!(rows_out.len(), 2);
+    assert_eq!(
+        rows_out[0].get("first_name").and_then(|v| v.as_str()),
+        Some("Alice")
+    );
+    assert_eq!(
+        rows_out[0].get("last_name").and_then(|v| v.as_str()),
+        Some("Smith")
+    );
+    let concat_col = rows_out[0]
+        .get("concat(first_name, , last_name)")
+        .and_then(|v| v.as_str());
+    assert_eq!(concat_col, Some("AliceSmith"));
+    assert_eq!(
+        rows_out[1]
+            .get("concat(first_name, , last_name)")
+            .and_then(|v| v.as_str()),
+        Some("BobJones")
+    );
+}
+
 /// to print actual rand(42)/randn(42) values for tests/fixtures/with_rand_seed.json.
 #[test]
 #[ignore]

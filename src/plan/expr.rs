@@ -344,6 +344,87 @@ fn eq_null_safe_expr(left: Expr, right: Expr) -> Expr {
         .otherwise(lit(false))
 }
 
+/// Find index of the closing paren matching the open paren at start.
+fn matching_paren(s: &str, start: usize) -> Option<usize> {
+    if s.as_bytes().get(start) != Some(&b'(') {
+        return None;
+    }
+    let mut depth = 1u32;
+    for (i, b) in s.bytes().enumerate().skip(start + 1) {
+        match b {
+            b'(' => depth += 1,
+            b')' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(i);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// Parse a single part (column name or literal) for concat/concat_ws.
+fn concat_part_to_expr(part: &str) -> Expr {
+    let part = part.trim();
+    if part.is_empty() {
+        return lit("");
+    }
+    if (part.starts_with('"') && part.ends_with('"'))
+        || (part.starts_with('\'') && part.ends_with('\''))
+    {
+        let inner = part[1..part.len() - 1].trim_matches(['\'', '"']);
+        return lit(inner);
+    }
+    col(part)
+}
+
+/// Try to parse a select-item string as concat(...) or concat_ws(...) expression.
+/// Used when Sparkless sends e.g. "concat(first_name, , last_name)" as a column name;
+/// we treat it as an expression and evaluate it. Returns None if s doesn't look like concat/concat_ws.
+pub fn try_parse_concat_expr_from_string(s: &str) -> Option<Expr> {
+    use polars::prelude::concat_str;
+    let s = s.trim();
+    // concat(...)
+    if s.starts_with("concat(") {
+        let close = matching_paren(s, 6)?; // 6 = len("concat")
+        if close != s.len() - 1 {
+            return None;
+        }
+        let inner = s[7..close].trim();
+        let parts: Vec<&str> = inner.split(',').map(str::trim).collect();
+        if parts.is_empty() {
+            return None;
+        }
+        let exprs: Vec<Expr> = parts.iter().map(|p| concat_part_to_expr(p)).collect();
+        return Some(concat_str(&exprs, "", false));
+    }
+    // concat_ws(sep, ...)
+    if s.starts_with("concat_ws(") {
+        let close = matching_paren(s, 10)?; // 10 = len("concat_ws")
+        if close != s.len() - 1 {
+            return None;
+        }
+        let inner = s[10..close].trim();
+        let parts: Vec<&str> = inner.split(',').map(str::trim).collect();
+        if parts.len() < 2 {
+            return None;
+        }
+        let sep = parts[0].trim_matches(['\'', '"']);
+        let exprs: Vec<Expr> = parts
+            .iter()
+            .skip(1)
+            .map(|p| concat_part_to_expr(p))
+            .collect();
+        if exprs.is_empty() {
+            return None;
+        }
+        return Some(concat_str(&exprs, sep, false));
+    }
+    None
+}
+
 /// Build a Column from a UDF call. Used by expr_from_value and apply_op (withColumn).
 /// Returns Column; caller checks udf_call for Python UDF (needs with_column, not with_column_expr).
 pub fn column_from_udf_call(
@@ -497,9 +578,9 @@ fn expr_from_fn(name: &str, args: &[Value]) -> Result<Expr, PlanExprError> {
             Ok(substring(&c, start, len).into_expr())
         }
         "concat" => {
-            if args.len() < 2 {
+            if args.is_empty() {
                 return Err(PlanExprError(format!(
-                    "fn '{name}' requires at least two arguments"
+                    "fn '{name}' requires at least one argument"
                 )));
             }
             let exprs: Result<Vec<Expr>, _> = args.iter().map(expr_from_value).collect();
