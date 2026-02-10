@@ -80,20 +80,52 @@ fn apply_op(
         }
         "select" => {
             if let Some(arr) = payload.as_array() {
-                let mut names = Vec::with_capacity(arr.len());
-                for v in arr {
-                    let name = v.as_str().ok_or_else(|| {
-                        PlanError::InvalidPlan(
-                            "select payload must be list of column name strings".into(),
-                        )
-                    })?;
-                    names.push(name.to_string());
+                if arr.is_empty() {
+                    return Err(PlanError::InvalidPlan(
+                        "select payload must be non-empty array".into(),
+                    ));
                 }
-                let refs: Vec<&str> = names.iter().map(|s| s.as_str()).collect();
-                df.select(refs).map_err(PlanError::Session)
+                let first = &arr[0];
+                if first.is_object() {
+                    // Select with computed columns: [{"name": "<alias>", "expr": <expr>}, ...]
+                    let mut exprs = Vec::with_capacity(arr.len());
+                    for v in arr {
+                        let obj = v.as_object().ok_or_else(|| {
+                            PlanError::InvalidPlan(
+                                "select payload with expressions must be array of {name, expr} objects".into(),
+                            )
+                        })?;
+                        let name = obj.get("name").and_then(Value::as_str).ok_or_else(|| {
+                            PlanError::InvalidPlan("select item must have 'name' string".into())
+                        })?;
+                        let expr_val = obj.get("expr").ok_or_else(|| {
+                            PlanError::InvalidPlan("select item must have 'expr'".into())
+                        })?;
+                        let expr = expr_from_value(expr_val).map_err(PlanError::Expr)?;
+                        let resolved = df
+                            .resolve_expr_column_names(expr)
+                            .map_err(PlanError::Session)?;
+                        exprs.push(resolved.alias(name));
+                    }
+                    df.select_exprs(exprs).map_err(PlanError::Session)
+                } else {
+                    // List of column name strings
+                    let mut names = Vec::with_capacity(arr.len());
+                    for v in arr {
+                        let name = v.as_str().ok_or_else(|| {
+                            PlanError::InvalidPlan(
+                                "select payload must be list of column name strings or list of {name, expr} objects".into(),
+                            )
+                        })?;
+                        let resolved = df.resolve_column_name(name).map_err(PlanError::Session)?;
+                        names.push(resolved);
+                    }
+                    let refs: Vec<&str> = names.iter().map(|s| s.as_str()).collect();
+                    df.select(refs).map_err(PlanError::Session)
+                }
             } else {
                 Err(PlanError::InvalidPlan(
-                    "select payload must be array of column names".into(),
+                    "select payload must be array of column names or {name, expr} objects".into(),
                 ))
             }
         }
@@ -116,8 +148,10 @@ fn apply_op(
                 })?;
             let col_names: Vec<String> = columns
                 .iter()
-                .filter_map(|v| v.as_str().map(String::from))
-                .collect();
+                .filter_map(|v| v.as_str())
+                .map(|s| df.resolve_column_name(s))
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(PlanError::Session)?;
             let ascending = payload
                 .get("ascending")
                 .and_then(Value::as_array)
@@ -134,8 +168,14 @@ fn apply_op(
                 .ok_or_else(|| {
                     PlanError::InvalidPlan("drop payload must have 'columns' array".into())
                 })?;
-            let names: Vec<&str> = columns.iter().filter_map(|v| v.as_str()).collect();
-            df.drop(names).map_err(PlanError::Session)
+            let names: Vec<String> = columns
+                .iter()
+                .filter_map(|v| v.as_str())
+                .map(|s| df.resolve_column_name(s))
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(PlanError::Session)?;
+            let refs: Vec<&str> = names.iter().map(|s| s.as_str()).collect();
+            df.drop(refs).map_err(PlanError::Session)
         }
         "withColumnRenamed" => {
             let old_name = payload.get("old").and_then(Value::as_str).ok_or_else(|| {
@@ -144,7 +184,10 @@ fn apply_op(
             let new_name = payload.get("new").and_then(Value::as_str).ok_or_else(|| {
                 PlanError::InvalidPlan("withColumnRenamed must have 'new'".into())
             })?;
-            df.with_column_renamed(old_name, new_name)
+            let resolved_old = df
+                .resolve_column_name(old_name)
+                .map_err(PlanError::Session)?;
+            df.with_column_renamed(&resolved_old, new_name)
                 .map_err(PlanError::Session)
         }
         "withColumn" => {
@@ -172,14 +215,16 @@ fn apply_op(
                 })?;
             let cols: Vec<String> = group_by
                 .iter()
-                .filter_map(|v| v.as_str().map(String::from))
-                .collect();
+                .filter_map(|v| v.as_str())
+                .map(|s| df.resolve_column_name(s))
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(PlanError::Session)?;
             let refs: Vec<&str> = cols.iter().map(|s| s.as_str()).collect();
             let grouped = df.group_by(refs).map_err(PlanError::Session)?;
             let aggs = payload.get("aggs").and_then(Value::as_array);
             match aggs {
                 Some(aggs_arr) => {
-                    let agg_exprs = parse_aggs(aggs_arr)?;
+                    let agg_exprs = parse_aggs(aggs_arr, &df)?;
                     grouped.agg(agg_exprs).map_err(PlanError::Session)
                 }
                 None => Err(PlanError::InvalidPlan(
@@ -222,7 +267,13 @@ fn apply_op(
                 .create_dataframe_from_rows(rows, schema_vec)
                 .map_err(PlanError::Session)?;
 
-            let on_keys: Vec<&str> = on.iter().filter_map(|v| v.as_str()).collect();
+            let on_keys: Vec<String> = on
+                .iter()
+                .filter_map(|v| v.as_str())
+                .map(|s| df.resolve_column_name(s))
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(PlanError::Session)?;
+            let on_refs: Vec<&str> = on_keys.iter().map(|s| s.as_str()).collect();
             let join_type = match how {
                 "left" => JoinType::Left,
                 "right" => JoinType::Right,
@@ -231,7 +282,7 @@ fn apply_op(
                 "left_anti" | "anti" => JoinType::LeftAnti,
                 _ => JoinType::Inner,
             };
-            df.join(&other_df, on_keys, join_type)
+            df.join(&other_df, on_refs, join_type)
                 .map_err(PlanError::Session)
         }
         "union" => {
@@ -296,7 +347,7 @@ fn apply_op(
     }
 }
 
-fn parse_aggs(aggs: &[Value]) -> Result<Vec<polars::prelude::Expr>, PlanError> {
+fn parse_aggs(aggs: &[Value], df: &DataFrame) -> Result<Vec<polars::prelude::Expr>, PlanError> {
     use crate::functions::{avg, count, max, min, sum as rs_sum};
     use crate::Column;
 
@@ -320,7 +371,10 @@ fn parse_aggs(aggs: &[Value]) -> Result<Vec<polars::prelude::Expr>, PlanError> {
 
         let col_name = obj.get("column").and_then(Value::as_str);
         let c = match col_name {
-            Some(name) => Column::new(name.to_string()),
+            Some(name) => {
+                let resolved = df.resolve_column_name(name).map_err(PlanError::Session)?;
+                Column::new(resolved)
+            }
             None => {
                 if agg == "count" {
                     Column::new("".to_string()) // count() without column

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **#195 – Column/expression resolution in plan interpreter** — `execute_plan` now resolves column names (case-insensitive) for `select`, `orderBy`, `drop`, `withColumnRenamed`, `groupBy`, and `join` so plans using column names that differ in case from the schema, or that reference computed columns by alias after a select-with-expressions step, work correctly. Select supports both a list of column name strings (resolved) and a list of `{name, expr}` objects (expressions resolved via `resolve_expr_column_names`). Aggregation columns in `groupBy`/`agg` are resolved. New test: `plan_column_resolution`.
+
 ### Planned
 
 - **Phase 26 – Publish crate**: Prepare and publish robin-sparkless to crates.io (and optionally PyPI via maturin). See [ROADMAP.md](docs/ROADMAP.md) for details.
