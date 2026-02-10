@@ -1958,21 +1958,21 @@ pub(crate) fn any_value_to_py(
 ) -> PyResult<PyObject> {
     use polars::prelude::{AnyValue, TimeUnit};
     use pyo3::conversion::IntoPyObjectExt;
-    match av {
+    match &av {
         AnyValue::Null => py.None().into_bound_py_any(py).map(Into::into),
-        AnyValue::Boolean(b) => b.into_bound_py_any(py).map(Into::into),
-        AnyValue::Int8(i) => (i as i64).into_bound_py_any(py).map(Into::into),
-        AnyValue::Int32(i) => i.into_bound_py_any(py).map(Into::into),
-        AnyValue::Int64(i) => i.into_bound_py_any(py).map(Into::into),
-        AnyValue::UInt32(u) => u.into_bound_py_any(py).map(Into::into),
-        AnyValue::UInt64(u) => u.into_bound_py_any(py).map(Into::into),
-        AnyValue::Float32(f) => f.into_bound_py_any(py).map(Into::into),
-        AnyValue::Float64(f) => f.into_bound_py_any(py).map(Into::into),
+        AnyValue::Boolean(b) => (*b).into_bound_py_any(py).map(Into::into),
+        AnyValue::Int8(i) => (*i as i64).into_bound_py_any(py).map(Into::into),
+        AnyValue::Int32(i) => (*i).into_bound_py_any(py).map(Into::into),
+        AnyValue::Int64(i) => (*i).into_bound_py_any(py).map(Into::into),
+        AnyValue::UInt32(u) => (*u).into_bound_py_any(py).map(Into::into),
+        AnyValue::UInt64(u) => (*u).into_bound_py_any(py).map(Into::into),
+        AnyValue::Float32(f) => (*f).into_bound_py_any(py).map(Into::into),
+        AnyValue::Float64(f) => (*f).into_bound_py_any(py).map(Into::into),
         AnyValue::String(s) => s.to_string().into_bound_py_any(py).map(Into::into),
         AnyValue::StringOwned(s) => s.to_string().into_bound_py_any(py).map(Into::into),
         AnyValue::Date(days) => {
             let epoch = crate::date_utils::epoch_naive_date();
-            let d = epoch + chrono::TimeDelta::days(days as i64);
+            let d = epoch + chrono::TimeDelta::days(*days as i64);
             d.format("%Y-%m-%d")
                 .to_string()
                 .into_bound_py_any(py)
@@ -1980,7 +1980,7 @@ pub(crate) fn any_value_to_py(
         }
         AnyValue::Datetime(us, tu, _) | AnyValue::DatetimeOwned(us, tu, _) => {
             let micros = match tu {
-                TimeUnit::Microseconds => us,
+                TimeUnit::Microseconds => *us,
                 TimeUnit::Milliseconds => us.saturating_mul(1000),
                 TimeUnit::Nanoseconds => us.saturating_div(1000),
             };
@@ -1998,6 +1998,23 @@ pub(crate) fn any_value_to_py(
                 py_list.append(py_val)?;
             }
             Ok(py_list.into())
+        }
+        AnyValue::Struct(_, _, fields) => {
+            let py_dict = pyo3::types::PyDict::new(py);
+            for (fld_av, fld) in av._iter_struct_av().zip(fields.iter()) {
+                let py_val = any_value_to_py(py, fld_av.clone())?;
+                py_dict.set_item(fld.name.as_str(), py_val)?;
+            }
+            Ok(py_dict.into())
+        }
+        AnyValue::StructOwned(payload) => {
+            let (values, fields) = payload.as_ref();
+            let py_dict = pyo3::types::PyDict::new(py);
+            for (fld_av, fld) in values.iter().zip(fields.iter()) {
+                let py_val = any_value_to_py(py, fld_av.clone())?;
+                py_dict.set_item(fld.name.as_str(), py_val)?;
+            }
+            Ok(py_dict.into())
         }
         other => Err(pyo3::exceptions::PyRuntimeError::new_err(format!(
             "unsupported type for collect: {:?}",
