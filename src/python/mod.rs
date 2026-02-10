@@ -177,6 +177,36 @@ fn py_execute_plan(
     Ok(PyDataFrame { inner: df })
 }
 
+/// Return the set of plan operation names supported by ``_execute_plan`` (issue #202).
+///
+/// Sparkless and other backends can use this to decide which operations to send
+/// to the Robin backend. Includes ``filter``, ``select``, ``limit``, ``offset``,
+/// ``orderBy``, ``withColumn``, ``withColumnRenamed``, ``groupBy``, ``join``,
+/// ``union``, ``unionByName``, ``distinct``, ``drop``.
+///
+/// Returns:
+///     tuple[str, ...]: Immutable tuple of supported op names.
+#[pyfunction]
+fn py_supported_plan_operations(py: Python<'_>) -> PyResult<pyo3::Py<pyo3::types::PyTuple>> {
+    const OPS: &[&str] = &[
+        "filter",
+        "select",
+        "limit",
+        "offset",
+        "orderBy",
+        "withColumn",
+        "withColumnRenamed",
+        "groupBy",
+        "join",
+        "union",
+        "unionByName",
+        "distinct",
+        "drop",
+    ];
+    let t = pyo3::types::PyTuple::new(py, OPS.iter().map(|s| *s))?;
+    Ok(t.unbind())
+}
+
 /// Robin Sparkless: PySpark-compatible DataFrame API with local execution.
 ///
 /// This module provides a subset of the PySpark API backed by Polars. All execution
@@ -647,6 +677,10 @@ fn robin_sparkless(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("randn", wrap_pyfunction!(py_randn, m)?)?;
     m.add("broadcast", wrap_pyfunction!(py_broadcast, m)?)?;
     m.add("_execute_plan", wrap_pyfunction!(py_execute_plan, m)?)?;
+    m.add(
+        "supported_plan_operations",
+        wrap_pyfunction!(py_supported_plan_operations, m)?,
+    )?;
     m.add(
         "_configure_for_multiprocessing",
         wrap_pyfunction!(py_configure_for_multiprocessing, m)?,
