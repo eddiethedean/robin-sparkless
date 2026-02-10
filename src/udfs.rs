@@ -2907,6 +2907,114 @@ fn binary_series_f64(
     Ok((ca_a, ca_b))
 }
 
+/// Helper: convert any numeric-or-string series to Float64Chunked with PySpark-like semantics.
+///
+/// - Numeric types are cast to Float64.
+/// - Utf8/string values are trimmed and parsed as f64; invalid strings become null.
+/// - Null values remain null.
+fn series_to_f64_pyspark(s: &Series, ctx: &str) -> PolarsResult<Float64Chunked> {
+    match s.dtype() {
+        DataType::String => {
+            let name = s.name();
+            let ca = s
+                .str()
+                .map_err(|e| PolarsError::ComputeError(format!("{ctx}: {e}").into()))?;
+            let out = Float64Chunked::from_iter_options(
+                name.as_str().into(),
+                ca.into_iter().map(|opt_s| {
+                    opt_s.and_then(|raw| {
+                        let trimmed = raw.trim();
+                        if trimmed.is_empty() {
+                            return None;
+                        }
+                        trimmed.parse::<f64>().ok()
+                    })
+                }),
+            );
+            Ok(out)
+        }
+        DataType::Null => {
+            // All-null column – return a null Float64Chunked of same length.
+            Ok(Float64Chunked::full_null(PlSmallStr::EMPTY, s.len()))
+        }
+        // For all other dtypes, rely on Polars cast to Float64.
+        _ => {
+            let casted = s
+                .cast(&DataType::Float64)
+                .map_err(|e| PolarsError::ComputeError(format!("{ctx}: {e}").into()))?;
+            casted
+                .f64()
+                .map(|ca| ca.clone())
+                .map_err(|e| PolarsError::ComputeError(format!("{ctx}: {e}").into()))
+        }
+    }
+}
+
+/// Binary arithmetic helper used for Python Column operators with PySpark-style string coercion.
+///
+/// Always returns a Float64 series; string inputs are coerced to numbers when possible,
+/// invalid strings become null. Numeric-only inputs are upcast to Float64.
+fn pyspark_binary_arith(
+    columns: &mut [Column],
+    ctx: &str,
+    op: fn(f64, f64) -> f64,
+) -> PolarsResult<Option<Column>> {
+    if columns.len() < 2 {
+        return Err(PolarsError::ComputeError(
+            format!("{ctx} needs two columns").into(),
+        ));
+    }
+
+    let name = columns[0].field().into_owned().name;
+    let a_s = std::mem::take(&mut columns[0]).take_materialized_series();
+    let b_s = std::mem::take(&mut columns[1]).take_materialized_series();
+
+    let ca_a = series_to_f64_pyspark(&a_s, ctx)?;
+    let ca_b = series_to_f64_pyspark(&b_s, ctx)?;
+
+    let out = Float64Chunked::from_iter_options(
+        name.as_str().into(),
+        ca_a
+            .into_iter()
+            .zip(ca_b.into_iter())
+            .map(|(oa, ob)| match (oa, ob) {
+                (Some(a), Some(b)) => Some(op(a, b)),
+                _ => None,
+            }),
+    )
+    .into_series();
+
+    Ok(Some(Column::new(name, out)))
+}
+
+/// PySpark-style addition with string/number coercion for Python Column operators.
+pub fn apply_pyspark_add(columns: &mut [Column]) -> PolarsResult<Option<Column>> {
+    pyspark_binary_arith(columns, "pyspark_add", |a, b| a + b)
+}
+
+/// PySpark-style subtraction with string/number coercion for Python Column operators.
+pub fn apply_pyspark_subtract(columns: &mut [Column]) -> PolarsResult<Option<Column>> {
+    pyspark_binary_arith(columns, "pyspark_subtract", |a, b| a - b)
+}
+
+/// PySpark-style multiplication with string/number coercion for Python Column operators.
+pub fn apply_pyspark_multiply(columns: &mut [Column]) -> PolarsResult<Option<Column>> {
+    pyspark_binary_arith(columns, "pyspark_multiply", |a, b| a * b)
+}
+
+/// PySpark-style true division with string/number coercion for Python Column operators.
+///
+/// Division by zero yields +/-inf or NaN, which Sparkless tests accept as a backend-specific
+/// representation of null/invalid.
+pub fn apply_pyspark_divide(columns: &mut [Column]) -> PolarsResult<Option<Column>> {
+    pyspark_binary_arith(columns, "pyspark_divide", |a, b| a / b)
+}
+
+/// PySpark-style modulo with string/number coercion for Python Column operators.
+pub fn apply_pyspark_mod(columns: &mut [Column]) -> PolarsResult<Option<Column>> {
+    pyspark_binary_arith(columns, "pyspark_mod", |a, b| a % b)
+}
+
 /// try_add: returns null on overflow.
 pub fn apply_try_add(columns: &mut [Column]) -> PolarsResult<Option<Column>> {
     if columns.len() < 2 {

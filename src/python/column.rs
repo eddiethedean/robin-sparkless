@@ -177,7 +177,7 @@ impl PyColumn {
     fn __add__(&self, other: &Bound<'_, pyo3::types::PyAny>) -> PyResult<Self> {
         let other_col = py_any_to_column(other)?;
         Ok(PyColumn {
-            inner: self.inner.add(&other_col),
+            inner: self.inner.add_pyspark(&other_col),
         })
     }
 
@@ -185,7 +185,7 @@ impl PyColumn {
     fn __radd__(&self, other: &Bound<'_, pyo3::types::PyAny>) -> PyResult<Self> {
         let other_col = py_any_to_column(other)?;
         Ok(PyColumn {
-            inner: other_col.add(&self.inner),
+            inner: other_col.add_pyspark(&self.inner),
         })
     }
 
@@ -193,7 +193,7 @@ impl PyColumn {
     fn __sub__(&self, other: &Bound<'_, pyo3::types::PyAny>) -> PyResult<Self> {
         let other_col = py_any_to_column(other)?;
         Ok(PyColumn {
-            inner: self.inner.subtract(&other_col),
+            inner: self.inner.subtract_pyspark(&other_col),
         })
     }
 
@@ -201,7 +201,7 @@ impl PyColumn {
     fn __rsub__(&self, other: &Bound<'_, pyo3::types::PyAny>) -> PyResult<Self> {
         let other_col = py_any_to_column(other)?;
         Ok(PyColumn {
-            inner: other_col.subtract(&self.inner),
+            inner: other_col.subtract_pyspark(&self.inner),
         })
     }
 
@@ -209,7 +209,7 @@ impl PyColumn {
     fn __mul__(&self, other: &Bound<'_, pyo3::types::PyAny>) -> PyResult<Self> {
         let other_col = py_any_to_column(other)?;
         Ok(PyColumn {
-            inner: self.inner.multiply(&other_col),
+            inner: self.inner.multiply_pyspark(&other_col),
         })
     }
 
@@ -217,7 +217,7 @@ impl PyColumn {
     fn __rmul__(&self, other: &Bound<'_, pyo3::types::PyAny>) -> PyResult<Self> {
         let other_col = py_any_to_column(other)?;
         Ok(PyColumn {
-            inner: other_col.multiply(&self.inner),
+            inner: other_col.multiply_pyspark(&self.inner),
         })
     }
 
@@ -225,7 +225,7 @@ impl PyColumn {
     fn __truediv__(&self, other: &Bound<'_, pyo3::types::PyAny>) -> PyResult<Self> {
         let other_col = py_any_to_column(other)?;
         Ok(PyColumn {
-            inner: self.inner.divide(&other_col),
+            inner: self.inner.divide_pyspark(&other_col),
         })
     }
 
@@ -233,7 +233,7 @@ impl PyColumn {
     fn __rtruediv__(&self, other: &Bound<'_, pyo3::types::PyAny>) -> PyResult<Self> {
         let other_col = py_any_to_column(other)?;
         Ok(PyColumn {
-            inner: other_col.divide(&self.inner),
+            inner: other_col.divide_pyspark(&self.inner),
         })
     }
 
@@ -241,7 +241,7 @@ impl PyColumn {
     fn __mod__(&self, other: &Bound<'_, pyo3::types::PyAny>) -> PyResult<Self> {
         let other_col = py_any_to_column(other)?;
         Ok(PyColumn {
-            inner: self.inner.mod_(&other_col),
+            inner: self.inner.mod_pyspark(&other_col),
         })
     }
 
@@ -249,7 +249,7 @@ impl PyColumn {
     fn __rmod__(&self, other: &Bound<'_, pyo3::types::PyAny>) -> PyResult<Self> {
         let other_col = py_any_to_column(other)?;
         Ok(PyColumn {
-            inner: other_col.mod_(&self.inner),
+            inner: other_col.mod_pyspark(&self.inner),
         })
     }
 
