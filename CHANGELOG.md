@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Full UDF support** — Scalar user-defined functions (Rust and Python) with session-scoped registry.
+  - **Rust**: `SparkSession::register_udf(name, closure)` and `call_udf(name, cols)` — UDFs run lazily via Polars `Expr::map` / `map_many`.
+  - **Python**: `spark.udf().register(name, f, return_type=None)` (default `StringType`); `call_udf(name, *cols)`; `my_udf(col("a"))` via returned `UserDefinedFunction`. Python UDFs run row-at-a-time (eager at UDF boundary).
+  - **SQL**: Unknown functions in SELECT and WHERE resolve to UDF registry; built-ins `UPPER`/`LOWER` supported; `SelectItem::ExprWithAlias` for `SELECT expr AS alias`.
+  - **Plan interpreter**: `{"udf": "name", "args": [...]}` and `{"fn": "call_udf", "args": [{"lit": "name"}, ...]}` in expression trees; `withColumn` supports Python UDFs.
+  - **Thread-local session**: `call_udf` resolves UDFs from session set by `get_or_create()`.
+  - **Docs**: [UDF_GUIDE.md](docs/UDF_GUIDE.md), [USER_GUIDE.md](docs/USER_GUIDE.md); [DEFERRED_SCOPE.md](docs/DEFERRED_SCOPE.md) and [PYSPARK_DIFFERENCES.md](docs/PYSPARK_DIFFERENCES.md) updated. `pandas_udf` and `udtf` remain deferred.
+
 ### Planned
 
 - **Phase 26 – Publish crate**: Prepare and publish robin-sparkless to crates.io (and optionally PyPI via maturin). See [ROADMAP.md](docs/ROADMAP.md) for details.
