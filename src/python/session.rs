@@ -526,13 +526,22 @@ impl PyCatalog {
     }
 
     #[pyo3(name = "dropGlobalTempView")]
-    fn drop_global_temp_view(&self, view_name: &str) {
-        self.session.drop_global_temp_view(view_name);
+    fn drop_global_temp_view(&self, view_name: &str) -> bool {
+        self.session.drop_global_temp_view(view_name)
     }
 
-    /// List table/view names in the current session (temp views and saved tables). Returns names only (no Table objects).
+    /// List table/view names. When db_name is "global_temp", returns global temp view names (cross-session).
+    /// Otherwise returns temp views + saved tables in current session.
     #[pyo3(name = "listTables")]
-    fn list_tables(&self, _db_name: Option<&str>) -> Vec<String> {
+    fn list_tables(&self, db_name: Option<&str>) -> Vec<String> {
+        if db_name
+            .map(|d| d.eq_ignore_ascii_case("global_temp"))
+            .unwrap_or(false)
+        {
+            let mut names = self.session.list_global_temp_view_names();
+            names.sort();
+            return names;
+        }
         let mut names: Vec<String> = self.session.list_temp_view_names();
         let table_names = self.session.list_table_names();
         for n in table_names {
@@ -561,7 +570,7 @@ impl PyCatalog {
 
     #[pyo3(name = "listDatabases")]
     fn list_databases(&self, _pattern: Option<&str>) -> Vec<&'static str> {
-        vec!["default"]
+        vec!["default", "global_temp"]
     }
 
     #[pyo3(name = "listCatalogs")]
@@ -646,7 +655,7 @@ impl PyCatalog {
 
     #[pyo3(name = "databaseExists")]
     fn database_exists(&self, db_name: &str) -> bool {
-        db_name == "default"
+        db_name.eq_ignore_ascii_case("default") || db_name.eq_ignore_ascii_case("global_temp")
     }
 
     #[pyo3(name = "functionExists")]

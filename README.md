@@ -14,6 +14,7 @@
 
 - **Familiar API** — `SparkSession`, `DataFrame`, `Column`, and PySpark-like functions so you can reuse patterns without the JVM.
 - **Polars under the hood** — Fast, native Rust execution with Polars for IO, expressions, and aggregations.
+- **Persistence options** — Global temp views (cross-session in-memory) and disk-backed `saveAsTable` via `spark.sql.warehouse.dir`.
 - **Rust-first, Python optional** — Use it as a Rust library or build the Python extension via PyO3 for a drop-in style API.
 - **Sparkless backend target** — Designed to power [Sparkless](https://github.com/eddiethedean/sparkless) (the Python PySpark replacement) so Sparkless can run on this engine via PyO3.
 
@@ -31,7 +32,7 @@
 | **Arrays & maps** | `array_*`, `explode`, `create_map`, `map_keys`, `map_values`, and related functions |
 | **Strings & JSON** | String functions (`upper`, `lower`, `substring`, `regexp_*`, etc.), `get_json_object`, `from_json`, `to_json` |
 | **Datetime & math** | Date/time extractors and arithmetic, `year`/`month`/`day`, math (`sin`, `cos`, `sqrt`, `pow`, …) |
-| **Optional SQL** | `spark.sql("SELECT ...")` with temp views and in-memory tables: `createOrReplaceTempView`, `table(name)`, `df.write().saveAsTable(name, mode=...)`, `spark.catalog().listTables()`, `dropTable(name)` — enable with `--features sql` |
+| **Optional SQL** | `spark.sql("SELECT ...")` with temp views, global temp views (cross-session), and tables: `createOrReplaceTempView`, `createOrReplaceGlobalTempView`, `table(name)`, `table("global_temp.name")`, `df.write().saveAsTable(name, mode=...)`, `spark.catalog().listTables()` — enable with `--features sql` |
 | **Optional Delta** | `read_delta(path)` or `read_delta(table_name)`, `read_delta_with_version`, `write_delta`, `write_delta_table(name)` — enable with `--features delta` (path I/O); table-by-name works with `sql` only |
 
 Known differences from PySpark are documented in [docs/PYSPARK_DIFFERENCES.md](docs/PYSPARK_DIFFERENCES.md). Out-of-scope items (XML, UDF, streaming, RDD) are documented in [docs/DEFERRED_SCOPE.md](docs/DEFERRED_SCOPE.md). Parity status and roadmap are in [docs/PARITY_STATUS.md](docs/PARITY_STATUS.md) and [docs/ROADMAP.md](docs/ROADMAP.md).
@@ -151,6 +152,7 @@ CI runs format, clippy, audit, deny, Rust tests, Python lint (ruff, mypy), and P
 - [**PyPI**](https://pypi.org/project/robin-sparkless/) — Python package (wheels for Linux, macOS, Windows)
 - [**API reference (docs.rs)**](https://docs.rs/robin-sparkless) — Crate API
 - [**QUICKSTART**](docs/QUICKSTART.md) — Build, usage, optional features, benchmarks
+- [**Persistence guide**](docs/PERSISTENCE_GUIDE.md) — Global temp views and disk-backed saveAsTable
 - [**ROADMAP**](docs/ROADMAP.md) — Development roadmap and Sparkless integration
 - [**PYSPARK_DIFFERENCES**](docs/PYSPARK_DIFFERENCES.md) — Known divergences from PySpark
 - [**GAP_ANALYSIS_PYSPARK_REPO**](docs/GAP_ANALYSIS_PYSPARK_REPO.md) — Gap analysis vs Apache PySpark (from source)

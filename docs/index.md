@@ -5,6 +5,7 @@
 ## Quick links
 
 - **[Quickstart](QUICKSTART.md)** — Build, install, and basic usage (Rust and Python)
+- **[Persistence guide](PERSISTENCE_GUIDE.md)** — Global temp views and disk-backed saveAsTable
 - **[Python API](PYTHON_API.md)** — PyO3 bindings, build with maturin, method signatures
 - **[PySpark differences](PYSPARK_DIFFERENCES.md)** — Known divergences and caveats
 - **[Roadmap](ROADMAP.md)** — Development phases and Sparkless integration
@@ -17,12 +18,12 @@ Robin Sparkless provides a **PySpark-like API** in Rust so you can write familia
 |--------|-------------|
 | **Core** | `SparkSession`, `DataFrame`, `Column`; filter, select, groupBy, joins |
 | **Engine** | [Polars](https://www.pola.rs/) for fast, native execution |
-| **Optional** | SQL (`spark.sql`, temp views, in-memory `saveAsTable`, catalog), Delta Lake (`read_delta` / `write_delta`; `read_delta(name)` with sql) |
+| **Optional** | SQL (`spark.sql`, temp views, global temp views, `saveAsTable` in-memory or warehouse), Delta Lake (`read_delta` / `write_delta`) |
 | **Python** | `robin_sparkless` module built with maturin |
 
 ## Documentation
 
-- **Getting started** — [Quickstart](QUICKSTART.md), [Python API](PYTHON_API.md), [Releasing](RELEASING.md)
+- **Getting started** — [Quickstart](QUICKSTART.md), [Persistence guide](PERSISTENCE_GUIDE.md), [Python API](PYTHON_API.md), [Releasing](RELEASING.md)
 - **Reference** — [PySpark differences](PYSPARK_DIFFERENCES.md), [Parity status](PARITY_STATUS.md), [Robin-Sparkless missing](ROBIN_SPARKLESS_MISSING.md)
 - **Testing** — Run `make check-full` for full CI (Rust + ruff + mypy + Python tests); `make test-parity-phase-X` for phase-specific parity. See [QUICKSTART](QUICKSTART.md), [TEST_CREATION_GUIDE](TEST_CREATION_GUIDE.md), and [PYTHON_API](PYTHON_API.md).
 - **Sparkless integration** — [Integration analysis](SPARKLESS_INTEGRATION_ANALYSIS.md), [Full backend roadmap](FULL_BACKEND_ROADMAP.md), [Logical plan format](LOGICAL_PLAN_FORMAT.md)

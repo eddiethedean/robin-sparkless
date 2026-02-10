@@ -113,4 +113,23 @@ mod tests {
         let result = spark.sql("SELECT 1 FROM nonexistent");
         assert!(result.is_err());
     }
+
+    #[test]
+    fn test_sql_from_global_temp_view() {
+        let spark = SparkSession::builder().app_name("test").get_or_create();
+        let df = spark
+            .create_dataframe(
+                vec![(1, 10, "a".to_string()), (2, 20, "b".to_string())],
+                vec!["id", "v", "name"],
+            )
+            .unwrap();
+        spark.create_or_replace_global_temp_view("gv", df);
+        let result = spark
+            .sql("SELECT * FROM global_temp.gv ORDER BY id")
+            .unwrap();
+        assert_eq!(result.count().unwrap(), 2);
+        let rows = result.collect_as_json_rows().unwrap();
+        assert_eq!(rows[0].get("name").and_then(|v| v.as_str()), Some("a"));
+        assert_eq!(rows[1].get("name").and_then(|v| v.as_str()), Some("b"));
+    }
 }

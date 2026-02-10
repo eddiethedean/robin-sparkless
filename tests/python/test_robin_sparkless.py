@@ -1450,9 +1450,7 @@ def test_save_as_table_and_catalog() -> None:
     import robin_sparkless as rs
 
     spark = rs.SparkSession.builder().app_name("test").get_or_create()
-    df = spark.create_dataframe(
-        [(1, 10, "a"), (2, 20, "b")], ["id", "v", "name"]
-    )
+    df = spark.create_dataframe([(1, 10, "a"), (2, 20, "b")], ["id", "v", "name"])
     try:
         df.write().saveAsTable("t1")
     except AttributeError:
@@ -1490,6 +1488,29 @@ def test_save_as_table_and_catalog() -> None:
     df3.write().saveAsTable("delta_t")
     rd = spark.read_delta("delta_t")
     assert rd.count() == 1 and rd.collect()[0]["name"] == "d"
+
+
+def test_global_temp_view_persists_across_sessions() -> None:
+    """Global temp views persist across sessions (Option A)."""
+    import robin_sparkless as rs
+
+    try:
+        spark1 = rs.SparkSession.builder().app_name("g1").get_or_create()
+        df = spark1.create_dataframe(
+            [(1, 25, "Alice"), (2, 30, "Bob")], ["id", "age", "name"]
+        )
+        df.createOrReplaceGlobalTempView("people")
+        assert spark1.table("global_temp.people").count() == 2
+
+        spark2 = rs.SparkSession.builder().app_name("g2").get_or_create()
+        assert spark2.table("global_temp.people").count() == 2
+        assert spark2.catalog().listTables("global_temp") == ["people"]
+
+        assert spark2.catalog().dropGlobalTempView("people") is True
+        with pytest.raises(Exception, match="not found"):
+            spark2.table("global_temp.people")
+    except AttributeError:
+        pytest.skip("sql feature not built")
 
 
 def test_save_as_table_without_session_raises() -> None:
@@ -1712,7 +1733,7 @@ def test_phase_e_spark_session_catalog() -> None:
     assert cat is not None
     assert cat.currentDatabase() == "default"
     assert cat.currentCatalog() == "spark_catalog"
-    assert cat.listDatabases(None) == ["default"]
+    assert set(cat.listDatabases(None)) == {"default", "global_temp"}
     assert cat.listCatalogs(None) == ["spark_catalog"]
     # listTables returns temp view names (empty initially)
     tables = cat.listTables(None)

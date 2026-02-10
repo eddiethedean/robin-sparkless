@@ -135,12 +135,18 @@ fn resolve_table_factor(
 ) -> Result<crate::dataframe::DataFrame, PolarsError> {
     match factor {
         TableFactor::Table { name, .. } => {
-            let table_name = name
-                .0
-                .last()
-                .map(|i| i.value.as_str())
-                .unwrap_or("");
-            session.table(table_name)
+            // Build full name for global_temp.xyz (sqlparser: [Ident("global_temp"), Ident("people")])
+            let table_name = if name.0.len() >= 2 {
+                let parts: Vec<&str> = name.0.iter().map(|i| i.value.as_str()).collect();
+                parts.join(".")
+            } else {
+                name.0
+                    .last()
+                    .map(|i| i.value.as_str())
+                    .unwrap_or("")
+                    .to_string()
+            };
+            session.table(&table_name)
         }
         _ => Err(PolarsError::InvalidOperation(
             "SQL: only plain table names are supported in FROM (no subqueries, derived tables). Register with create_or_replace_temp_view.".into(),
