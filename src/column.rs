@@ -426,16 +426,56 @@ impl Column {
         self.upper()
     }
 
-    /// Substring with 1-based start (PySpark substring semantics)
+    /// Substring with 1-based start (PySpark substring semantics).
+    ///
+    /// PySpark rules (verified in Sparkless tests):
+    /// - Positive start: 1-based index into the string.
+    /// - start = 0: treated as start = 1.
+    /// - Negative start: count from the end (-1 = last char, -2 = second-to-last, etc.).
+    ///   Implemented as max(len + start, 0) on 0-based index.
+    /// - length:
+    ///   - None: rest of string.
+    ///   - 0: empty string.
+    ///   - >0: up to `length` chars from computed start (clamped by string end).
     pub fn substr(&self, start: i64, length: Option<i64>) -> Column {
         use polars::prelude::*;
-        let offset = (start - 1).max(0);
-        let offset_expr = lit(offset);
-        let length_expr = length.map(lit).unwrap_or_else(|| lit(i64::MAX)); // No length = rest of string
-        Self::from_expr(
-            self.expr().clone().str().slice(offset_expr, length_expr),
-            None,
-        )
+
+        let base_expr = self.expr().clone();
+        let len_expr = base_expr.clone().str().len_chars().cast(DataType::Int64);
+
+        // 0-based offset expression
+        let offset_expr = if start >= 0 {
+            // PySpark: start = 0 treated as 1
+            let adj_start = if start == 0 { 1 } else { start };
+            // 1-based → 0-based; clamp to 0 just in case
+            let offset = (adj_start - 1).max(0);
+            lit(offset)
+        } else {
+            // Negative start: count from end; offset = max(len + start, 0)
+            let raw = len_expr.clone() + lit(start);
+            when(raw.clone().lt(lit(0i64)))
+                .then(lit(0i64))
+                .otherwise(raw)
+        };
+
+        // Length expression (in characters)
+        let len_expr_final = match length {
+            Some(l) => {
+                if l <= 0 {
+                    // PySpark: length <= 0 → empty string
+                    lit(0i64)
+                } else {
+                    lit(l)
+                }
+            }
+            None => {
+                // Rest of string: len - offset
+                len_expr - offset_expr.clone()
+            }
+        };
+
+        let sliced = base_expr.str().slice(offset_expr, len_expr_final);
+        Self::from_expr(sliced, None)
     }
 
     /// String length in characters (PySpark length)
@@ -2688,6 +2728,99 @@ mod tests {
         let expr = col("test").gt(lit(5));
         let column = Column::from_expr(expr, None);
         assert_eq!(column.name(), "<expr>");
+    }
+
+    #[test]
+    fn test_substr_positive_and_zero_start() {
+        let df = df!("text" => &["Hello"]).unwrap();
+        let col_text = Column::new("text".to_string());
+
+        // start = 1, len = 3 -> "Hel"
+        let c1 = col_text.substr(1, Some(3));
+        let out1 = df
+            .clone()
+            .lazy()
+            .with_column(c1.into_expr().alias("partial"))
+            .collect()
+            .unwrap();
+        let v1 = out1
+            .column("partial")
+            .unwrap()
+            .get(0)
+            .unwrap()
+            .to_string();
+        let v1 = v1.trim_matches('\"');
+        assert_eq!(v1, "Hel");
+
+        // start = 0 treated as 1
+        let c2 = col_text.substr(0, Some(3));
+        let out2 = df
+            .clone()
+            .lazy()
+            .with_column(c2.into_expr().alias("partial"))
+            .collect()
+            .unwrap();
+        let v2 = out2
+            .column("partial")
+            .unwrap()
+            .get(0)
+            .unwrap()
+            .to_string();
+        let v2 = v2.trim_matches('\"');
+        assert_eq!(v2, "Hel");
+    }
+
+    #[test]
+    fn test_substr_negative_start_pyspark_semantics() {
+        let df = df!("text" => &["Hello"]).unwrap();
+        let col_text = Column::new("text".to_string());
+
+        let cases = vec![
+            (-5, 3, "Hel"),
+            (-4, 3, "ell"),
+            (-3, 3, "llo"),
+            (-2, 3, "lo"),
+            (-1, 3, "o"),
+        ];
+
+        for (start, len, expected) in cases {
+            let c = col_text.substr(start, Some(len));
+            let out = df
+                .clone()
+                .lazy()
+                .with_column(c.into_expr().alias("partial"))
+                .collect()
+                .unwrap();
+            let v = out
+                .column("partial")
+                .unwrap()
+                .get(0)
+                .unwrap()
+                .to_string();
+            let v = v.trim_matches('\"');
+            assert_eq!(v, expected, "substr({start}, {len}) mismatch");
+        }
+    }
+
+    #[test]
+    fn test_substr_negative_start_exceeds_length() {
+        let df = df!("text" => &["Hi"]).unwrap();
+        let col_text = Column::new("text".to_string());
+
+        let c = col_text.substr(-10, Some(3));
+        let out = df
+            .lazy()
+            .with_column(c.into_expr().alias("result"))
+            .collect()
+            .unwrap();
+        let v = out
+            .column("result")
+            .unwrap()
+            .get(0)
+            .unwrap()
+            .to_string();
+        let v = v.trim_matches('\"');
+        assert_eq!(v, "Hi");
     }
 
     #[test]
