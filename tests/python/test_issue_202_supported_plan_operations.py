@@ -1,7 +1,5 @@
 """Tests for supported_plan_operations() and plan filter (issue #202)."""
 
-import pytest
-
 import robin_sparkless as rs
 
 
