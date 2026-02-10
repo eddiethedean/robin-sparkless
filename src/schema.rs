@@ -77,9 +77,10 @@ impl StructType {
 fn polars_type_to_data_type(polars_type: &PlDataType) -> DataType {
     match polars_type {
         PlDataType::String => DataType::String,
-        PlDataType::Int32 => DataType::Integer,
-        PlDataType::Int64 => DataType::Long,
-        PlDataType::Float64 => DataType::Double,
+        // Spark/Sparkless inferSchema uses 64-bit for integral types; map Int32 as Long.
+        PlDataType::Int32 | PlDataType::Int64 => DataType::Long,
+        // Map both Float32 and Float64 to Double for schema parity.
+        PlDataType::Float32 | PlDataType::Float64 => DataType::Double,
         PlDataType::Boolean => DataType::Boolean,
         PlDataType::Date => DataType::Date,
         PlDataType::Datetime(_, _) => DataType::Timestamp,
@@ -201,10 +202,6 @@ mod tests {
         assert!(matches!(
             polars_type_to_data_type(&PlDataType::String),
             DataType::String
-        ));
-        assert!(matches!(
-            polars_type_to_data_type(&PlDataType::Int32),
-            DataType::Integer
         ));
         assert!(matches!(
             polars_type_to_data_type(&PlDataType::Int64),
