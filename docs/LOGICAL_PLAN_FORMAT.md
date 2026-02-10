@@ -172,6 +172,20 @@ Input and expected schemas use a list of column specs:
 
 ---
 
+## Supported operations (Sparkless parity)
+
+Backends such as Sparkless can discover which plan operations robin-sparkless supports by calling:
+
+```python
+import robin_sparkless as rs
+ops = rs.supported_plan_operations()  # tuple[str, ...]
+# e.g. "filter" in ops
+```
+
+The returned tuple includes all op names that `_execute_plan` accepts: `filter`, `select`, `limit`, `offset`, `orderBy`, `withColumn`, `withColumnRenamed`, `groupBy`, `join`, `union`, `unionByName`, `distinct`, `drop`. This allows Sparkless to avoid raising "Operation 'filter' is not supported" when the Robin backend does support filter (see issue #202).
+
+---
+
 ## Plan fixture format
 
 For tests, a plan fixture JSON has:
