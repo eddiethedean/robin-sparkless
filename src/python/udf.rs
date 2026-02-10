@@ -1,8 +1,8 @@
 //! Python UDF execution: row-at-a-time call into user Python functions.
 
+use crate::column::Column as RsColumn;
 use crate::dataframe::DataFrame;
 use crate::session::SparkSession;
-use crate::column::Column as RsColumn;
 use polars::prelude::*;
 use pyo3::prelude::*;
 
@@ -41,9 +41,7 @@ pub(crate) fn execute_python_udf(
                 .map_err(|e| PolarsError::ComputeError(e.to_string().into()))?
                 .as_series()
                 .cloned()
-                .ok_or_else(|| {
-                    PolarsError::ComputeError(format!("udf arg {i} not found").into())
-                })
+                .ok_or_else(|| PolarsError::ComputeError(format!("udf arg {i} not found").into()))
         })
         .collect::<Result<Vec<_>, _>>()?;
 
@@ -55,18 +53,16 @@ pub(crate) fn execute_python_udf(
             // Build Python args for this row (tuple for *args)
             let mut py_row = Vec::with_capacity(args.len());
             for series in &arg_series {
-                let av = series.get(row_idx).map_err(|e| {
-                    PolarsError::ComputeError(format!("udf get row: {e}").into())
-                })?;
+                let av = series
+                    .get(row_idx)
+                    .map_err(|e| PolarsError::ComputeError(format!("udf get row: {e}").into()))?;
                 py_row.push(any_value_to_py(py, &av)?);
             }
 
             // Call UDF(*args) - pass tuple of row values
             let args_tuple = pyo3::types::PyTuple::new(py, py_row.iter().map(|o| o.bind(py)))
                 .map_err(|e| {
-                    PolarsError::ComputeError(
-                        format!("Python UDF '{udf_name}' tuple: {e}").into(),
-                    )
+                    PolarsError::ComputeError(format!("Python UDF '{udf_name}' tuple: {e}").into())
                 })?;
             let ret = callable.call1(args_tuple).map_err(|e| {
                 PolarsError::ComputeError(
@@ -97,7 +93,10 @@ pub(crate) fn execute_python_udf(
     Ok(DataFrame::from_polars_with_options(out_df, case_sensitive))
 }
 
-fn any_value_to_py(py: Python<'_>, av: &polars::prelude::AnyValue) -> Result<PyObject, PolarsError> {
+fn any_value_to_py(
+    py: Python<'_>,
+    av: &polars::prelude::AnyValue,
+) -> Result<PyObject, PolarsError> {
     use polars::prelude::AnyValue;
     let obj = match av {
         AnyValue::Null => py.None().into_py(py),
@@ -121,29 +120,30 @@ fn py_result_to_series(
     let values: Vec<Option<serde_json::Value>> = results
         .iter()
         .map(|opt| {
-            opt.as_ref().map(|obj| {
-                let bound = obj.clone().bind(py);
-                if bound.is_none() {
-                    return Ok(serde_json::Value::Null);
-                }
-                if let Ok(v) = bound.extract::<bool>() {
-                    return Ok(serde_json::Value::Bool(v));
-                }
-                if let Ok(v) = bound.extract::<i64>() {
-                    return Ok(serde_json::Value::Number(serde_json::Number::from(v)));
-                }
-                if let Ok(v) = bound.extract::<f64>() {
-                    if let Some(n) = serde_json::Number::from_f64(v) {
-                        return Ok(serde_json::Value::Number(n));
+            opt.as_ref()
+                .map(|obj| {
+                    let bound = obj.clone().bind(py);
+                    if bound.is_none() {
+                        return Ok(serde_json::Value::Null);
                     }
-                    return Ok(serde_json::Value::Null);
-                }
-                if let Ok(v) = bound.extract::<String>() {
-                    return Ok(serde_json::Value::String(v));
-                }
-                Ok(serde_json::Value::String(bound.to_string()))
-            })
-            .transpose()
+                    if let Ok(v) = bound.extract::<bool>() {
+                        return Ok(serde_json::Value::Bool(v));
+                    }
+                    if let Ok(v) = bound.extract::<i64>() {
+                        return Ok(serde_json::Value::Number(serde_json::Number::from(v)));
+                    }
+                    if let Ok(v) = bound.extract::<f64>() {
+                        if let Some(n) = serde_json::Number::from_f64(v) {
+                            return Ok(serde_json::Value::Number(n));
+                        }
+                        return Ok(serde_json::Value::Null);
+                    }
+                    if let Ok(v) = bound.extract::<String>() {
+                        return Ok(serde_json::Value::String(v));
+                    }
+                    Ok(serde_json::Value::String(bound.to_string()))
+                })
+                .transpose()
         })
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e: PyErr| PolarsError::ComputeError(e.to_string().into()))?;
@@ -197,7 +197,7 @@ fn py_result_to_series(
             Series::new(name.into(), v)
         }
     };
-    series.cast(dtype).map_err(|e| {
-        PolarsError::ComputeError(format!("Python UDF result cast: {e}").into())
-    })
+    series
+        .cast(dtype)
+        .map_err(|e| PolarsError::ComputeError(format!("Python UDF result cast: {e}").into()))
 }

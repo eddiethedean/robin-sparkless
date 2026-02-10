@@ -263,12 +263,8 @@ fn sql_function_to_expr(func: &Function, session: &SparkSession) -> Result<Expr,
     // Built-in scalar functions (single-column arg)
     if let Some(col) = args.first() {
         let builtin_expr = match func_name.to_uppercase().as_str() {
-            "UPPER" | "UCASE" if args.len() == 1 => {
-                Some(functions::upper(col).expr().clone())
-            }
-            "LOWER" | "LCASE" if args.len() == 1 => {
-                Some(functions::lower(col).expr().clone())
-            }
+            "UPPER" | "UCASE" if args.len() == 1 => Some(functions::upper(col).expr().clone()),
+            "LOWER" | "LCASE" if args.len() == 1 => Some(functions::lower(col).expr().clone()),
             _ => None,
         };
         if let Some(e) = builtin_expr {
@@ -444,7 +440,10 @@ fn sql_function_alias(func: &Function) -> String {
         .filter_map(|a| {
             if let FunctionArg::Unnamed(FunctionArgExpr::Expr(SqlExpr::Identifier(ident))) = a {
                 Some(ident.value.to_string())
-            } else if let FunctionArg::Unnamed(FunctionArgExpr::Expr(SqlExpr::CompoundIdentifier(parts))) = a {
+            } else if let FunctionArg::Unnamed(FunctionArgExpr::Expr(
+                SqlExpr::CompoundIdentifier(parts),
+            )) = a
+            {
                 parts.last().map(|i| i.value.to_string())
             } else {
                 Some("_".to_string())
@@ -470,8 +469,12 @@ fn projection_function_to_item(
     // Built-ins
     if let Some(col) = args.first() {
         let builtin = match func_name.to_uppercase().as_str() {
-            "UPPER" | "UCASE" if args.len() == 1 => Some(functions::upper(col).expr().clone().alias(&alias)),
-            "LOWER" | "LCASE" if args.len() == 1 => Some(functions::lower(col).expr().clone().alias(&alias)),
+            "UPPER" | "UCASE" if args.len() == 1 => {
+                Some(functions::upper(col).expr().clone().alias(&alias))
+            }
+            "LOWER" | "LCASE" if args.len() == 1 => {
+                Some(functions::lower(col).expr().clone().alias(&alias))
+            }
             _ => None,
         };
         if let Some(e) = builtin {
