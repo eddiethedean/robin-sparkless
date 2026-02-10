@@ -5671,6 +5671,44 @@ fn plan_udf_with_column() {
     );
 }
 
+/// Plan interpreter resolves column names (case-insensitive) so select/orderBy/drop/groupBy/join
+/// find columns by name. See issue #195.
+#[test]
+fn plan_column_resolution() {
+    use robin_sparkless::plan;
+    use serde_json::json;
+
+    let spark = SparkSession::builder()
+        .app_name("plan_column_resolution")
+        .get_or_create();
+
+    // Schema has mixed case: Id, Name, Value
+    let schema = vec![
+        ("Id".to_string(), "bigint".to_string()),
+        ("Name".to_string(), "string".to_string()),
+        ("Value".to_string(), "double".to_string()),
+    ];
+    let rows = vec![
+        vec![json!(1), json!("a"), json!(10.0)],
+        vec![json!(2), json!("b"), json!(20.0)],
+        vec![json!(3), json!("c"), json!(30.0)],
+    ];
+
+    // Use lowercase in plan (id, name, value) — should resolve to Id, Name, Value
+    let plan = vec![
+        json!({"op": "orderBy", "payload": {"columns": ["value"], "ascending": [true]}}),
+        json!({"op": "select", "payload": ["id", "name", "value"]}),
+        json!({"op": "drop", "payload": {"columns": ["value"]}}),
+    ];
+
+    let result = plan::execute_plan(&spark, rows, schema, &plan).unwrap();
+    let rows_out = result.collect_as_json_rows().unwrap();
+    assert_eq!(rows_out.len(), 3);
+    assert!(rows_out[0].get("Id").is_some());
+    assert!(rows_out[0].get("Name").is_some());
+    assert!(rows_out[0].get("Value").is_none());
+}
+
 /// to print actual rand(42)/randn(42) values for tests/fixtures/with_rand_seed.json.
 #[test]
 #[ignore]
