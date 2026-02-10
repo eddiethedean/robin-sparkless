@@ -22,11 +22,15 @@ See also: [PYSPARK_DIFFERENCES.md](PYSPARK_DIFFERENCES.md), [ROBIN_SPARKLESS_MIS
 
 | APIs | Status | Rationale |
 |------|--------|-----------|
-| `udf`, `pandas_udf`, `udtf`, `call_udf`, `spark.udf.register` | Not implemented | Robin-sparkless has no Python UDF support; execution is pure Rust/Polars. |
+| `spark.udf.register`, `call_udf`, `udf()` (decorator), Rust `register_udf` | **Implemented** | Scalar UDFs: Python UDFs (row-at-a-time) and Rust UDFs. Session-scoped registry; visible to DataFrame API, SQL, and plan interpreter. |
+| `pandas_udf` (vectorized) | Deferred | Would batch Polars↔Pandas; row-at-a-time Python UDFs supported first. |
+| `udtf` (table functions) | Not implemented | Returns multiple rows per input; out of scope. |
 
-**Workaround:** Use built-in expressions and the plan interpreter. For custom logic, preprocess data in Python/Rust before passing to robin-sparkless, or use Polars expressions via the plan format.
+**Implemented:** Python: `spark.udf().register(name, f, return_type=None)`; `call_udf(name, *cols)`; `my_udf(col("x"))` via returned UserDefinedFunction. Rust: `session.register_udf(name, \|cols\| ...)`. SQL: `SELECT my_udf(col) FROM t`. Plan: `{"udf": "name", "args": [...]}` or `{"fn": "call_udf", "args": [{"lit": "name"}, ...]}`.
 
-**Tracking:** GitHub issue #143
+**Limitations:** Python UDFs run eagerly (materialize at UDF boundary). Python UDF in WHERE/HAVING not yet supported. See [docs/UDF_GUIDE.md](UDF_GUIDE.md).
+
+**Tracking:** GitHub issue #143 (pandas_udf, udtf remain deferred)
 
 ---
 

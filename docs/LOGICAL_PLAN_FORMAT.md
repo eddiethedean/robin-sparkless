@@ -123,6 +123,7 @@ Expressions are recursive structures used in **filter**, **select** (computed co
 - **Array/list**: array_size, size, element_at, try_element_at, array_contains, array_join, array_sort, array_distinct, array_slice, array_compact, array_remove, explode, explode_outer, array_position, array_append, array_prepend, array_insert, array_except, array_intersect, array_union, arrays_overlap, arrays_zip, array_agg, array_sum.
 - **Map/struct**: create_map, map_keys, map_values, get (map lookup).
 - **Misc**: hash, shift_left, shift_right, version; JVM-style stubs (e.g. spark_partition_id, current_catalog, current_database, current_user, input_file_name) as zero-arg.
+- **UDF**: `{"udf": "<udf_name>", "args": [<expr>, ...]}` or `{"fn": "call_udf", "args": [{"lit": "<udf_name>"}, <expr>, ...]}`. Resolved from session registry. Rust UDFs supported in filter/withColumn; Python UDFs in withColumn only (Python UDF in filter returns error).
 
 Aggregates (sum, count, avg, min, max) are used in the **agg** op payload, not in expression trees. Sort-order functions (asc, desc) are used in **orderBy**, not in expressions.
 

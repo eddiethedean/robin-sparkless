@@ -26,6 +26,7 @@ pub mod plan;
 pub mod schema;
 pub mod session;
 pub mod type_coercion;
+pub(crate) mod udf_registry;
 pub(crate) mod udfs;
 
 #[cfg(feature = "sql")]

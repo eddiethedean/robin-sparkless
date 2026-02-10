@@ -55,6 +55,7 @@ mod column;
 mod dataframe;
 mod order;
 mod session;
+mod udf;
 pub(crate) use column::PyColumn;
 pub(crate) use dataframe::{
     PyCubeRollupData, PyDataFrame, PyDataFrameNa, PyDataFrameStat, PyDataFrameWriter, PyGroupedData,
@@ -62,7 +63,9 @@ pub(crate) use dataframe::{
 pub(crate) use order::{PySortOrder, PyThenBuilder, PyWhenBuilder};
 pub(crate) use session::{
     PyCatalog, PyDataFrameReader, PyRuntimeConfig, PySparkSession, PySparkSessionBuilder,
+    PyUDFRegistration, PyUserDefinedFunction,
 };
+pub(crate) use udf::execute_python_udf;
 
 /// Convert a Python scalar to serde_json::Value for plan/row data.
 /// Bool must be checked before i64 because in Python bool is a subclass of int (True/False extract as 1/0).
@@ -213,6 +216,8 @@ fn robin_sparkless(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyDataFrameReader>()?;
     m.add_class::<PyCatalog>()?;
     m.add_class::<PyRuntimeConfig>()?;
+    m.add_class::<PyUDFRegistration>()?;
+    m.add_class::<PyUserDefinedFunction>()?;
     m.add_class::<PyDataFrame>()?;
     m.add_class::<PyDataFrameStat>()?;
     m.add_class::<PyDataFrameNa>()?;
@@ -224,6 +229,7 @@ fn robin_sparkless(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyCubeRollupData>()?;
     m.add_class::<PyDataFrameWriter>()?;
     m.add("col", wrap_pyfunction!(py_col, m)?)?;
+    m.add("call_udf", wrap_pyfunction!(py_call_udf, m)?)?;
     m.add("lit", wrap_pyfunction!(py_lit, m)?)?;
     m.add("when", wrap_pyfunction!(py_when, m)?)?;
     m.add("coalesce", wrap_pyfunction!(py_coalesce, m)?)?;
@@ -578,6 +584,38 @@ fn robin_sparkless(m: &Bound<'_, PyModule>) -> PyResult<()> {
 #[pyfunction]
 fn py_col(col: &str) -> PyColumn {
     PyColumn { inner: rs_col(col) }
+}
+
+/// Call a registered UDF by name. PySpark: F.call_udf(udfName, *cols).
+#[pyfunction]
+#[pyo3(signature = (name, *cols))]
+fn py_call_udf(
+    _py: Python<'_>,
+    name: &str,
+    cols: &Bound<'_, pyo3::types::PyTuple>,
+) -> PyResult<PyColumn> {
+    if cols.len() < 1 {
+        return Err(pyo3::exceptions::PyTypeError::new_err(
+            "call_udf requires at least name and one column",
+        ));
+    }
+    let rs_cols: Vec<RsColumn> = (0..cols.len())
+        .map(|i| {
+            let item = cols.get_item(i)?;
+            if let Ok(py_col) = item.downcast::<PyColumn>() {
+                Ok(py_col.borrow().inner.clone())
+            } else if let Ok(s) = item.extract::<String>() {
+                Ok(rs_col(&s))
+            } else {
+                Err(pyo3::exceptions::PyTypeError::new_err(
+                    "call_udf: each arg must be Column or str (column name)",
+                ))
+            }
+        })
+        .collect::<PyResult<Vec<_>>>()?;
+    let col = crate::functions::call_udf(&name, &rs_cols)
+        .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+    Ok(PyColumn { inner: col })
 }
 
 /// Create a literal Column from a Python scalar value.

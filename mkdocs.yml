@@ -46,6 +46,7 @@ markdown_extensions:
 nav:
   - Home: index.md
   - Getting started:
+    - User guide: USER_GUIDE.md
     - Quickstart: QUICKSTART.md
     - Persistence guide: PERSISTENCE_GUIDE.md
     - Python API: PYTHON_API.md

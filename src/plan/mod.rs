@@ -5,9 +5,8 @@
 mod expr;
 
 use crate::dataframe::{DataFrame, JoinType};
-use crate::plan::expr::expr_from_value;
-
-use crate::session::SparkSession;
+use crate::plan::expr::{expr_from_value, try_column_from_udf_value};
+use crate::session::{set_thread_udf_session, SparkSession};
 pub use expr::PlanExprError;
 use polars::prelude::PolarsError;
 use serde_json::Value;
@@ -25,6 +24,7 @@ pub fn execute_plan(
     schema: Vec<(String, String)>,
     plan: &[Value],
 ) -> Result<DataFrame, PlanError> {
+    set_thread_udf_session(session.clone());
     let mut df = session
         .create_dataframe_from_rows(data, schema)
         .map_err(PlanError::Session)?;
@@ -155,8 +155,13 @@ fn apply_op(
             let expr_val = payload
                 .get("expr")
                 .ok_or_else(|| PlanError::InvalidPlan("withColumn must have 'expr'".into()))?;
-            let expr = expr_from_value(expr_val).map_err(PlanError::Expr)?;
-            df.with_column_expr(name, expr).map_err(PlanError::Session)
+            if let Some(res) = try_column_from_udf_value(expr_val) {
+                let col = res.map_err(PlanError::Expr)?;
+                df.with_column(name, &col).map_err(PlanError::Session)
+            } else {
+                let expr = expr_from_value(expr_val).map_err(PlanError::Expr)?;
+                df.with_column_expr(name, expr).map_err(PlanError::Session)
+            }
         }
         "groupBy" => {
             let group_by = payload

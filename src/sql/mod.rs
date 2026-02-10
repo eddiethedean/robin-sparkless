@@ -115,6 +115,53 @@ mod tests {
     }
 
     #[test]
+    fn test_sql_udf_select() {
+        use polars::prelude::DataType;
+
+        let spark = SparkSession::builder().app_name("test").get_or_create();
+        spark
+            .register_udf("to_str", |cols| cols[0].cast(&DataType::String))
+            .unwrap();
+        let df = spark
+            .create_dataframe(
+                vec![
+                    (1, 25, "Alice".to_string()),
+                    (2, 30, "Bob".to_string()),
+                ],
+                vec!["id", "age", "name"],
+            )
+            .unwrap();
+        spark.create_or_replace_temp_view("t", df);
+        let result = spark
+            .sql("SELECT id, to_str(id) AS id_str, name FROM t")
+            .unwrap();
+        let cols = result.columns().unwrap();
+        assert!(cols.contains(&"id_str".to_string()));
+        let rows = result.collect_as_json_rows().unwrap();
+        assert_eq!(rows[0].get("id_str").and_then(|v| v.as_str()), Some("1"));
+    }
+
+    #[test]
+    fn test_sql_builtin_upper() {
+        let spark = SparkSession::builder().app_name("test").get_or_create();
+        let df = spark
+            .create_dataframe(
+                vec![
+                    (1, 25, "alice".to_string()),
+                    (2, 30, "bob".to_string()),
+                ],
+                vec!["id", "age", "name"],
+            )
+            .unwrap();
+        spark.create_or_replace_temp_view("t", df);
+        let result = spark
+            .sql("SELECT id, UPPER(name) AS upper_name FROM t ORDER BY id")
+            .unwrap();
+        let rows = result.collect_as_json_rows().unwrap();
+        assert_eq!(rows[0].get("upper_name").and_then(|v| v.as_str()), Some("ALICE"));
+    }
+
+    #[test]
     fn test_sql_from_global_temp_view() {
         let spark = SparkSession::builder().app_name("test").get_or_create();
         let df = spark
