@@ -1162,6 +1162,37 @@ fn expr_from_fn_rest(name: &str, args: &[Value]) -> Result<Expr, PlanExprError> 
             let b = expr_to_column(arg_expr(args, 1)?);
             Ok(try_divide(&a, &b).into_expr())
         }
+        // PySpark-style arithmetic with string/numeric coercion (issue #201)
+        "add" | "+" => {
+            require_args(name, args, 2)?;
+            let a = expr_to_column(arg_expr(args, 0)?);
+            let b = expr_to_column(arg_expr(args, 1)?);
+            Ok(a.add_pyspark(&b).into_expr())
+        }
+        "subtract" | "-" => {
+            require_args(name, args, 2)?;
+            let a = expr_to_column(arg_expr(args, 0)?);
+            let b = expr_to_column(arg_expr(args, 1)?);
+            Ok(a.subtract_pyspark(&b).into_expr())
+        }
+        "multiply" | "*" => {
+            require_args(name, args, 2)?;
+            let a = expr_to_column(arg_expr(args, 0)?);
+            let b = expr_to_column(arg_expr(args, 1)?);
+            Ok(a.multiply_pyspark(&b).into_expr())
+        }
+        "divide" | "/" => {
+            require_args(name, args, 2)?;
+            let a = expr_to_column(arg_expr(args, 0)?);
+            let b = expr_to_column(arg_expr(args, 1)?);
+            Ok(a.divide_pyspark(&b).into_expr())
+        }
+        "mod" | "remainder" | "%" => {
+            require_args(name, args, 2)?;
+            let a = expr_to_column(arg_expr(args, 0)?);
+            let b = expr_to_column(arg_expr(args, 1)?);
+            Ok(a.mod_pyspark(&b).into_expr())
+        }
         "try_add" => {
             require_args(name, args, 2)?;
             let a = expr_to_column(arg_expr(args, 0)?);
