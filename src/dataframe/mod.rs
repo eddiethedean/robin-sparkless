@@ -21,7 +21,7 @@ use polars::prelude::{
     SchemaNamesAndDtypes,
 };
 use serde_json::Value as JsonValue;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::Arc;
 
@@ -65,16 +65,27 @@ impl DataFrame {
     /// Resolve column names in a Polars expression against this DataFrame's schema.
     /// When case_sensitive is false, column references (e.g. col("name")) are resolved
     /// case-insensitively (PySpark default). Use before filter/select_with_exprs/order_by_exprs.
+    /// Names that appear as alias outputs (e.g. in expr.alias("partial")) are not resolved
+    /// as input columns, so select(col("x").substr(1, 3).alias("partial")) works (issue #200).
     pub fn resolve_expr_column_names(&self, expr: Expr) -> Result<Expr, PolarsError> {
         let df = self;
-        expr.try_map_expr(|e| {
-            if let Expr::Column(name) = e {
-                let name_str = name.as_str();
-                let resolved = df.resolve_column_name(name_str)?;
-                Ok(Expr::Column(PlSmallStr::from(resolved.as_str())))
-            } else {
-                Ok(e)
+        let mut alias_output_names: HashSet<String> = HashSet::new();
+        let _ = expr.clone().try_map_expr(|e| {
+            if let Expr::Alias(_, name) = &e {
+                alias_output_names.insert(name.as_str().to_string());
             }
+            Ok(e)
+        })?;
+        expr.try_map_expr(move |e| {
+            if let Expr::Column(name) = &e {
+                let name_str = name.as_str();
+                if alias_output_names.contains(name_str) {
+                    return Ok(e);
+                }
+                let resolved = df.resolve_column_name(name_str)?;
+                return Ok(Expr::Column(PlSmallStr::from(resolved.as_str())));
+            }
+            Ok(e)
         })
     }
 
