@@ -211,8 +211,10 @@ impl DataFrame {
             .map(|c| self.resolve_column_name(c))
             .collect::<Result<Vec<_>, _>>()?;
         let exprs: Vec<Expr> = resolved.iter().map(|name| col(name.as_str())).collect();
-        let lazy_grouped = self.df.as_ref().clone().lazy().group_by(exprs);
+        let pl_df = self.df.as_ref().clone();
+        let lazy_grouped = pl_df.clone().lazy().group_by(exprs);
         Ok(GroupedData {
+            df: pl_df,
             lazy_grouped,
             grouping_cols: resolved,
             case_sensitive: self.case_sensitive,

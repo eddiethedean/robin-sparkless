@@ -3,6 +3,8 @@
 use crate::dataframe::JoinType;
 use crate::dataframe::{CubeRollupData, SaveMode, WriteFormat, WriteMode};
 use crate::functions::SortOrder;
+#[cfg(feature = "pyo3")]
+use crate::python::udf::{execute_grouped_vectorized_aggs, GroupedAggSpec};
 use crate::{DataFrame, GroupedData};
 use polars::prelude::{col, lit, Expr, NULL};
 use pyo3::prelude::*;
@@ -1409,7 +1411,9 @@ impl PyGroupedData {
     /// Aggregate groups with one or more expressions (e.g. sum(col("x")), avg(col("y"))).
     ///
     /// Args:
-    ///     exprs: List of aggregation Column expressions (from ``sum()``, ``avg()``, ``count()``, ``min()``, ``max()``, etc.).
+    ///     exprs: List of aggregation Column expressions (from ``sum()``, ``avg()``, ``count()``,
+    ///         ``min()``, ``max()``, etc.), or grouped vectorized UDFs created via
+    ///         ``pandas_udf(..., function_type="grouped_agg")``.
     ///
     /// Returns:
     ///     DataFrame (lazy) with one row per group and the aggregated columns.
@@ -1417,12 +1421,99 @@ impl PyGroupedData {
     /// Raises:
     ///     RuntimeError: If execution fails.
     fn agg(&self, exprs: Vec<PyRef<PyColumn>>) -> PyResult<PyDataFrame> {
-        let aggregations: Vec<Expr> = exprs.iter().map(|c| c.inner.expr().clone()).collect();
-        let df = self
-            .inner
-            .agg(aggregations)
+        #[cfg(feature = "pyo3")]
+        {
+            use crate::column::Column;
+            use crate::session::get_thread_udf_session;
+
+            let mut native_exprs: Vec<Expr> = Vec::new();
+            let mut grouped_specs: Vec<GroupedAggSpec> = Vec::new();
+
+            // Session is required only for grouped Python UDF aggregations.
+            let session_opt = get_thread_udf_session();
+
+            for py_col in &exprs {
+                let col: &Column = &py_col.inner;
+                if let Some((ref udf_name, ref args)) = col.udf_call {
+                    // Interpret as a potential grouped Python UDF aggregation.
+                    let session = session_opt.as_ref().ok_or_else(|| {
+                        pyo3::exceptions::PyRuntimeError::new_err(
+                            "grouped Python UDFs in groupBy().agg require an active SparkSession; call SparkSession.builder().get_or_create() first.",
+                        )
+                    })?;
+                    let entry = session
+                        .udf_registry
+                        .get_python_udf(udf_name, session.is_case_sensitive())
+                        .ok_or_else(|| {
+                            pyo3::exceptions::PyRuntimeError::new_err(format!(
+                                "Python UDF '{}' not found",
+                                udf_name
+                            ))
+                        })?;
+                    match entry.kind {
+                        crate::udf_registry::PythonUdfKind::GroupedVectorizedAgg => {
+                            grouped_specs.push(GroupedAggSpec {
+                                output_name: col.name().to_string(),
+                                udf_name: udf_name.clone(),
+                                args: args.clone(),
+                            });
+                        }
+                        _ => {
+                            return Err(pyo3::exceptions::PyRuntimeError::new_err(
+                                "Python scalar and non-grouped vectorized UDFs are not supported in groupBy().agg; use pandas_udf(..., function_type=\"grouped_agg\") instead.",
+                            ));
+                        }
+                    }
+                } else {
+                    native_exprs.push(col.expr().clone());
+                }
+            }
+
+            // If we have both native aggs and grouped UDFs, require separate calls for now.
+            if !native_exprs.is_empty() && !grouped_specs.is_empty() {
+                return Err(pyo3::exceptions::PyNotImplementedError::new_err(
+                    "Mixing grouped Python UDF aggregations with built-in aggregations in a single groupBy().agg call is not yet supported; run them in separate agg() calls.",
+                ));
+            }
+
+            if grouped_specs.is_empty() {
+                // Only native aggregations: use existing path.
+                let df = self
+                    .inner
+                    .agg(native_exprs)
+                    .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+                return Ok(PyDataFrame { inner: df });
+            }
+
+            // Only grouped Python UDF aggregations.
+            let session = session_opt.ok_or_else(|| {
+                pyo3::exceptions::PyRuntimeError::new_err(
+                    "grouped Python UDFs in groupBy().agg require an active SparkSession; call SparkSession.builder().get_or_create() first.",
+                )
+            })?;
+            let df = execute_grouped_vectorized_aggs(
+                &DataFrame {
+                    df: std::sync::Arc::new(self.inner.df.clone()),
+                    case_sensitive: self.inner.case_sensitive,
+                },
+                &self.inner.grouping_cols,
+                &grouped_specs,
+                self.inner.case_sensitive,
+                &session,
+            )
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
+            return Ok(PyDataFrame { inner: df });
+        }
+
+        #[cfg(not(feature = "pyo3"))]
+        {
+            let aggregations: Vec<Expr> = exprs.iter().map(|c| c.inner.expr().clone()).collect();
+            let df = self
+                .inner
+                .agg(aggregations)
+                .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+            Ok(PyDataFrame { inner: df })
+        }
     }
 
     fn any_value(&self, column: &str) -> PyResult<PyDataFrame> {

@@ -107,7 +107,8 @@ pub fn expr_from_value(v: &Value) -> Result<Expr, PlanExprError> {
         let col = column_from_udf_call(udf_name, args)?;
         if col.udf_call.is_some() {
             return Err(PlanExprError(
-                "Python UDF in filter/plan expression not supported; use in withColumn".into(),
+                "Python/Vectorized UDFs are only supported in withColumn/select, not in filter/plan expressions"
+                    .into(),
             ));
         }
         return Ok(col.expr().clone());
@@ -429,7 +430,8 @@ fn expr_from_fn(name: &str, args: &[Value]) -> Result<Expr, PlanExprError> {
             let col = column_from_udf_call(&udf_name, &args[1..])?;
             if col.udf_call.is_some() {
                 return Err(PlanExprError(
-                    "Python UDF in filter/plan expression not supported; use in withColumn".into(),
+                    "Python/Vectorized UDFs are only supported in withColumn/select, not in filter/plan expressions"
+                        .into(),
                 ));
             }
             Ok(col.expr().clone())

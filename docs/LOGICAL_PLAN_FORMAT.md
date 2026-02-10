@@ -52,11 +52,38 @@ Example: `{"op": "withColumn", "payload": {"name": "upper_name", "expr": {"fn": 
 
 ### groupBy
 
-- **payload**: `{"group_by": ["col1", ...]}`. Marks a grouping; the next operation in the plan should be **agg**.
+- **payload**: `{"group_by": ["col1", ...], "aggs": [...]}`.
+  - `group_by`: list of grouping key column names.
+  - Optional `aggs`: see **agg** below. When provided, `groupBy` + `agg` are executed in a single logical step.
 
 ### agg
 
-- **payload**: `{"aggs": [{"agg": "sum"|"count"|"avg"|"min"|"max", "column": "<col>"}, ...]}`. Applied to the result of the previous **groupBy**. For `count`, `column` may be omitted or a column name.
+- **payload**: `{"aggs": [...]}`. When used as a separate op, it is applied to the result of the previous **groupBy** (for backwards compatibility). New plans SHOULD prefer putting `aggs` inside the `groupBy` payload.
+
+Each entry in `aggs` is one aggregation:
+
+```json
+{ "agg": "sum"|"count"|"avg"|"min"|"max", "column": "<col>" }
+```
+
+- For `"count"`, `column` may be omitted or a column name.
+
+Grouped Python UDF aggregations (pandas_udf-style GROUPED_AGG) use a dedicated shape:
+
+```json
+{
+  "agg": "python_grouped_udf",
+  "udf": "<udf_name>",
+  "args": [ <expression>, ... ],
+  "alias": "<output_col>",
+  "return_type": "<type_str>"
+}
+```
+
+- `udf`: Name of a Python UDF registered on the session with `function_type="grouped_agg"`.
+- `args`: Expression trees for the UDF arguments (typically column refs).
+- `alias`: Output column name in the aggregated DataFrame.
+- `return_type`: DDL-style type string (`"int"`, `"bigint"`, `"double"`, `"string"`, etc.).
 
 ### join
 

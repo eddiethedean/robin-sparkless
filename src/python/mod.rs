@@ -61,6 +61,7 @@ pub(crate) use dataframe::{
     PyCubeRollupData, PyDataFrame, PyDataFrameNa, PyDataFrameStat, PyDataFrameWriter, PyGroupedData,
 };
 pub(crate) use order::{PySortOrder, PyThenBuilder, PyWhenBuilder};
+use session::parse_return_type;
 pub(crate) use session::{
     PyCatalog, PyDataFrameReader, PyRuntimeConfig, PySparkSession, PySparkSessionBuilder,
     PyUDFRegistration, PyUserDefinedFunction,
@@ -206,6 +207,71 @@ fn set_polars_single_thread_if_requested() {
 #[pyfunction]
 fn py_configure_for_multiprocessing() {
     std::env::set_var("POLARS_MAX_THREADS", "1");
+}
+
+/// Register a grouped vectorized (pandas-style) aggregation UDF and return a callable wrapper.
+///
+/// This is a minimal pandas_udf-style API focused on GROUPED_AGG semantics. It registers the
+/// given Python callable as a grouped, vectorized aggregation UDF on the **active SparkSession**
+/// (SparkSession.builder().get_or_create()) and returns a callable object that can be used
+/// inside groupBy().agg(...).
+///
+/// Usage (minimal v1):
+///
+///     import robin_sparkless as rs
+///
+///     spark = rs.SparkSession.builder().app_name("grouped").get_or_create()
+///
+///     def mean_udf(values):
+///         return sum(values) / len(values)
+///
+///     mean_udf = rs.pandas_udf(mean_udf, "double", function_type="grouped_agg")
+///
+///     df = spark.create_dataframe([(1, 10), (1, 20), (2, 5)], ["k", "v"])
+///     result = df.group_by(["k"]).agg([mean_udf(rs.col("v")).alias("mean_v")])
+///
+/// In v1 only function_type="grouped_agg" is supported. The return_type is required and may be
+/// a DDL string ("int", "double", "string", etc.) or a DataType-like object with typeName().
+#[pyfunction]
+#[pyo3(signature = (f, return_type=None, function_type="grouped_agg"))]
+fn py_pandas_udf(
+    py: Python<'_>,
+    f: Bound<'_, pyo3::types::PyAny>,
+    return_type: Option<Bound<'_, pyo3::types::PyAny>>,
+    function_type: &str,
+) -> PyResult<Py<PyUserDefinedFunction>> {
+    if function_type != "grouped_agg" {
+        return Err(pyo3::exceptions::PyNotImplementedError::new_err(
+            "pandas_udf currently supports only function_type='grouped_agg'",
+        ));
+    }
+
+    // Resolve return dtype using the same helper as spark.udf().register.
+    let dtype = parse_return_type(py, return_type.as_ref())
+        .map_err(pyo3::exceptions::PyValueError::new_err)?;
+
+    // Derive UDF name from function __name__ (PySpark parity-ish).
+    let name: String = f
+        .getattr("__name__")
+        .ok()
+        .and_then(|n| n.extract().ok())
+        .unwrap_or_else(|| "pandas_udf".to_string());
+
+    // Get active/default session (same source as DataFrame.createOrReplaceTempView etc.).
+    let session = session::get_default_session().ok_or_else(|| {
+        pyo3::exceptions::PyRuntimeError::new_err(
+            "pandas_udf: no active SparkSession. Call SparkSession.builder().get_or_create() first.",
+        )
+    })?;
+
+    // Register as grouped, vectorized aggregation UDF.
+    session
+        .udf_registry
+        .register_grouped_vectorized_python_udf(&name, f.unbind(), dtype)
+        .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+
+    // Return a UserDefinedFunction wrapper so usage is similar to spark.udf().register.
+    Py::new(py, PyUserDefinedFunction { name, session })
 }
 
 #[pymodule]
@@ -568,6 +634,7 @@ fn robin_sparkless(m: &Bound<'_, PyModule>) -> PyResult<()> {
         "_configure_for_multiprocessing",
         wrap_pyfunction!(py_configure_for_multiprocessing, m)?,
     )?;
+    m.add("pandas_udf", wrap_pyfunction!(py_pandas_udf, m)?)?;
     Ok(())
 }
 

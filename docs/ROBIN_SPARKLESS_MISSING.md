@@ -48,7 +48,7 @@ For a consolidated view of deferred/optional scope (XML, UDF, streaming, RDD, sk
 - ~~`sha`~~ — we have sha1, sha2
 - ~~`shuffle`~~ — **implemented**
 - `window`, `window_time` (PySpark; we have `.over()`; thin wrappers if needed; see PYSPARK_DIFFERENCES)
-- `udf`, `pandas_udf` (PySpark `spark.udf.register`, `F.udf`, `pandas_udf`; we have no UDF support; stub only if any)
+- `pandas_udf` (PySpark `pandas_udf` decorator for scalar, grouped map, and other function types; robin-sparkless currently supports only a minimal grouped aggregation variant via `pandas_udf(..., function_type="grouped_agg")` on the Python side)
 - `count_min_sketch`, `histogram_numeric`, `hll_sketch_agg`, `hll_sketch_estimate`, `hll_union`, `hll_union_agg` (PySpark 3.5+; stub/defer)
 - `session_window` (PySpark Structured Streaming; stub: no streaming)
 - `call_udf`, `udtf`, `reduce`, `reflect`, `java_method` (PySpark JVM/UDTF APIs; stub: not supported)

@@ -34,6 +34,7 @@
 | **Datetime & math** | Date/time extractors and arithmetic, `year`/`month`/`day`, math (`sin`, `cos`, `sqrt`, `pow`, …) |
 | **Optional SQL** | `spark.sql("SELECT ...")` with temp views, global temp views (cross-session), and tables: `createOrReplaceTempView`, `createOrReplaceGlobalTempView`, `table(name)`, `table("global_temp.name")`, `df.write().saveAsTable(name, mode=...)`, `spark.catalog().listTables()` — enable with `--features sql` |
 | **Optional Delta** | `read_delta(path)` or `read_delta(table_name)`, `read_delta_with_version`, `write_delta`, `write_delta_table(name)` — enable with `--features delta` (path I/O); table-by-name works with `sql` only |
+| **UDFs** | Scalar and vectorized Python UDFs via `spark.udf().register(...)`, grouped vectorized **pandas UDFs** for `group_by().agg(...)` (`function_type="grouped_agg"`), and pure-Rust UDFs; see `docs/UDF_GUIDE.md` |
 
 Known differences from PySpark are documented in [docs/PYSPARK_DIFFERENCES.md](docs/PYSPARK_DIFFERENCES.md). Out-of-scope items (XML, UDF, streaming, RDD) are documented in [docs/DEFERRED_SCOPE.md](docs/DEFERRED_SCOPE.md). Parity status and roadmap are in [docs/PARITY_STATUS.md](docs/PARITY_STATUS.md) and [docs/ROADMAP.md](docs/ROADMAP.md).
 
@@ -156,6 +157,7 @@ CI runs format, clippy, audit, deny, Rust tests, Python lint (ruff, mypy), and P
 - [**ROADMAP**](docs/ROADMAP.md) — Development roadmap and Sparkless integration
 - [**PYSPARK_DIFFERENCES**](docs/PYSPARK_DIFFERENCES.md) — Known divergences from PySpark
 - [**GAP_ANALYSIS_PYSPARK_REPO**](docs/GAP_ANALYSIS_PYSPARK_REPO.md) — Gap analysis vs Apache PySpark (from source)
+- [**UDF guide**](docs/UDF_GUIDE.md) — Scalar, vectorized, and grouped vectorized UDFs (including `pandas_udf(..., function_type="grouped_agg")`)
 - [**RELEASING**](docs/RELEASING.md) — Releasing and publishing to crates.io
 
 See also [CHANGELOG.md](CHANGELOG.md) for version history.
