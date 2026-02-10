@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **#199 – String-to-boolean cast (partial)** — `cast` and `try_cast` now support string-to-boolean via custom parsing ("true"/"false"/"1"/"0" case-insensitive). Polars does not support Utf8→Boolean natively. Fixes test_column_astype string-to-boolean failures.
 - **#198 – map(), array(), nested struct/row values** — `create_dataframe_from_rows` and `execute_plan` now support `array<>`, `struct<>`, and nested types. Python row values accept `dict` (struct/map) and `list` (array); `collect()` returns struct columns as Python dicts. New test: `test_create_dataframe_from_rows_struct_and_array`.
 - **Type stubs and lint** — Added `Column.try_cast` to robin_sparkless.pyi for mypy; addressed clippy warnings in session.rs (is_none_or, needless_borrow).
 - **#208 – String arithmetic tests adapted for robin-sparkless API** — `test_string_arithmetic_robin.py` now uses `with_column` (snake_case) instead of `withColumn`, explicit `cast`/`try_cast` for string-to-numeric coercion (robin requires explicit cast; invalid strings become null via `try_cast`), and `print_schema()` instead of `schema()` for result type assertions.
