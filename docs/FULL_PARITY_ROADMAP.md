@@ -162,7 +162,7 @@ A phased plan to achieve full API and behavioral parity between robin-sparkless 
 
 **Explicitly out of scope for full parity (document only):**
 - **XML / XPath:** `from_xml`, `to_xml`, `schema_of_xml`, `xpath*` — require XML parser
-- **UDF / UDTF:** `udf`, `pandas_udf`, `udtf`, `call_udf` — no Python UDF support
+- **UDF / UDTF:** Full PySpark-style `pandas_udf` decorator (all function types), `udtf`, and advanced UDF integration in SQL/streaming. Scalar UDFs (Rust and Python), column-wise vectorized UDFs in `withColumn`/`select`, and grouped vectorized aggregation UDFs via `pandas_udf(..., function_type="grouped_agg")` in `groupBy().agg(...)` are implemented; everything else in this space is documented as optional/deferred.
 - **Streaming:** `withWatermark`, `session_window` — no streaming execution
 - **Sketch aggregates:** HLL, count-min sketch — optional
 - **RDD / distributed:** `rdd`, `foreach`, `mapInPandas` — eager execution only

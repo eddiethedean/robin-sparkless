@@ -1847,6 +1847,200 @@ def test_python_udf_register_and_call() -> None:
     assert rows3[0]["d2"] == 2
 
 
+def test_vectorized_udf_with_column() -> None:
+    """Vectorized Python UDF: register with vectorized=True and use in with_column."""
+    import robin_sparkless as rs
+
+    spark = rs.SparkSession.builder().app_name("vec_udf").get_or_create()
+
+    def double_list(col):
+        # col is a sequence of values; return one value per input.
+        return [x * 2 if x is not None else None for x in col]
+
+    my_udf = spark.udf().register(
+        "double_vec", double_list, return_type="int", vectorized=True
+    )
+    assert my_udf is not None
+
+    df = spark.create_dataframe(
+        [(1, 10, "a"), (2, 20, "b"), (3, 30, "c")], ["id", "v", "name"]
+    )
+    df2 = df.with_column("d2", my_udf(rs.col("id")))
+    rows = df2.collect()
+    assert [r["d2"] for r in rows] == [2, 4, 6]
+
+
+def test_vectorized_call_udf() -> None:
+    """Vectorized Python UDF: register and use via call_udf in with_column."""
+    import robin_sparkless as rs
+
+    spark = rs.SparkSession.builder().app_name("vec_udf_call").get_or_create()
+
+    def triple_list(col):
+        return [x * 3 if x is not None else None for x in col]
+
+    spark.udf().register("triple_vec", triple_list, return_type="int", vectorized=True)
+    df = spark.create_dataframe(
+        [(1, 10, "a"), (2, 20, "b"), (3, 30, "c")], ["id", "v", "name"]
+    )
+    df2 = df.with_column("d3", rs.call_udf("triple_vec", rs.col("id")))
+    rows = df2.collect()
+    assert [r["d3"] for r in rows] == [3, 6, 9]
+
+
+def test_grouped_vectorized_pandas_udf_grouped_agg() -> None:
+    """Grouped vectorized UDF via pandas_udf(function_type='grouped_agg') works in groupBy().agg."""
+    import robin_sparkless as rs
+
+    spark = rs.SparkSession.builder().app_name("grouped_vec_udf").get_or_create()
+
+    def _mean(values):
+        # values is a Python sequence (engine-dependent); normalize to floats.
+        import ast
+
+        xs = []
+        for v in values:
+            if v is None:
+                continue
+            if isinstance(v, str):
+                try:
+                    inner = ast.literal_eval(v)
+                except Exception:
+                    xs.append(float(v))
+                else:
+                    if isinstance(inner, (list, tuple)):
+                        xs.extend(float(iv) for iv in inner if iv is not None)
+                    else:
+                        xs.append(float(inner))
+            else:
+                xs.append(float(v))
+        if not xs:
+            return None
+        return sum(xs) / len(xs)
+
+    mean_udf = rs.pandas_udf(_mean, "double", function_type="grouped_agg")
+
+    schema = [("k", "bigint"), ("v", "double")]
+    rows = [
+        {"k": 1, "v": 10.0},
+        {"k": 1, "v": 20.0},
+        {"k": 2, "v": 5.0},
+        {"k": 2, "v": 15.0},
+    ]
+    df = spark._create_dataframe_from_rows(rows, schema)
+    grouped = df.group_by(["k"])
+    result = grouped.agg([mean_udf(rs.col("v")).alias("mean_v")])
+    rows = sorted(result.collect(), key=lambda r: r["k"])
+    assert rows == [
+        {"k": 1, "mean_v": 15.0},
+        {"k": 2, "mean_v": 10.0},
+    ]
+
+
+def test_grouped_vectorized_pandas_udf_mixed_with_builtins_raises() -> None:
+    """Grouped vectorized UDF cannot be mixed with built-in aggregations in a single agg call."""
+    import robin_sparkless as rs
+
+    spark = rs.SparkSession.builder().app_name("grouped_vec_udf_mixed").get_or_create()
+
+    def _mean(values):
+        import ast
+
+        xs = []
+        for v in values:
+            if v is None:
+                continue
+            if isinstance(v, str):
+                try:
+                    inner = ast.literal_eval(v)
+                except Exception:
+                    xs.append(float(v))
+                else:
+                    if isinstance(inner, (list, tuple)):
+                        xs.extend(float(iv) for iv in inner if iv is not None)
+                    else:
+                        xs.append(float(inner))
+            else:
+                xs.append(float(v))
+        if not xs:
+            return None
+        return sum(xs) / len(xs)
+
+    mean_udf = rs.pandas_udf(_mean, "double", function_type="grouped_agg")
+
+    schema = [("k", "bigint"), ("v", "double")]
+    rows = [
+        {"k": 1, "v": 10.0},
+        {"k": 1, "v": 20.0},
+        {"k": 2, "v": 5.0},
+        {"k": 2, "v": 15.0},
+    ]
+    df = spark._create_dataframe_from_rows(rows, schema)
+    grouped = df.group_by(["k"])
+
+    # Mixing built-in sum() with grouped pandas_udf should raise for now.
+    with pytest.raises(NotImplementedError, match="grouped Python UDF aggregations"):
+        grouped.agg(
+            [rs.sum(rs.col("v")).alias("sum_v"), mean_udf(rs.col("v")).alias("mean_v")]
+        )
+
+
+def test_pandas_udf_wrong_function_type_raises() -> None:
+    """pandas_udf with unsupported function_type raises NotImplementedError."""
+    import robin_sparkless as rs
+
+    def f(xs):
+        return xs
+
+    with pytest.raises(NotImplementedError, match="only function_type='grouped_agg'"):
+        rs.pandas_udf(f, "int", function_type="scalar")
+
+
+def test_grouped_vectorized_pandas_udf_unsupported_with_column_context() -> None:
+    """Grouped vectorized pandas_udf used in with_column raises a clear error."""
+    import robin_sparkless as rs
+
+    spark = (
+        rs.SparkSession.builder().app_name("grouped_vec_udf_bad_ctx").get_or_create()
+    )
+
+    def _mean(values):
+        import ast
+
+        xs = []
+        for v in values:
+            if v is None:
+                continue
+            if isinstance(v, str):
+                try:
+                    inner = ast.literal_eval(v)
+                except Exception:
+                    xs.append(float(v))
+                else:
+                    if isinstance(inner, (list, tuple)):
+                        xs.extend(float(iv) for iv in inner if iv is not None)
+                    else:
+                        xs.append(float(inner))
+            else:
+                xs.append(float(v))
+        if not xs:
+            return None
+        return sum(xs) / len(xs)
+
+    mean_udf = rs.pandas_udf(_mean, "double", function_type="grouped_agg")
+
+    schema = [("k", "bigint"), ("v", "double")]
+    rows = [
+        {"k": 1, "v": 10.0},
+        {"k": 2, "v": 20.0},
+    ]
+    df = spark._create_dataframe_from_rows(rows, schema)
+
+    # Using grouped_agg UDF in with_column is not supported; must go through groupBy().agg.
+    with pytest.raises(Exception, match="only supported in groupBy\\(\\)\\.agg"):
+        df.with_column("bad", mean_udf(rs.col("v"))).collect()
+
+
 # Predetermined expected output for _create_dataframe_from_rows (int/string/boolean/date).
 # Derived from PySpark 3.5 createDataFrame with schema "id INT, name STRING, ok BOOLEAN, d DATE"
 # and rows [(1, "Alice", True, date(2024,1,15)), (2, "Bob", False, date(2024,6,10))].

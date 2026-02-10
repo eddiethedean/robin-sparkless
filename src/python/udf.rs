@@ -3,6 +3,7 @@
 use crate::column::Column as RsColumn;
 use crate::dataframe::DataFrame;
 use crate::session::SparkSession;
+use crate::udf_registry::PythonUdfKind;
 use polars::prelude::*;
 use pyo3::prelude::*;
 
@@ -21,7 +22,8 @@ pub(crate) fn execute_python_udf(
         .ok_or_else(|| {
             PolarsError::InvalidOperation(format!("Python UDF '{udf_name}' not found").into())
         })?;
-    let (callable, return_type) = &*entry;
+    let kind = entry.kind;
+    let return_type = entry.return_type.clone();
 
     // Evaluate arg expressions in df context
     let lf = df.df.as_ref().clone().lazy();
@@ -32,7 +34,7 @@ pub(crate) fn execute_python_udf(
     let lf_with_args = lf.with_columns(arg_exprs);
     let pl_df = lf_with_args.collect()?;
 
-    let n = pl_df.height();
+    let n_total = pl_df.height();
     let arg_series: Vec<Series> = (0..args.len())
         .map(|i| {
             let name = format!("_udf_arg_{i}");
@@ -46,38 +48,158 @@ pub(crate) fn execute_python_udf(
         .collect::<Result<Vec<_>, _>>()?;
 
     let result_series = Python::with_gil(|py| {
-        let callable = callable.bind(py);
-        let mut results: Vec<Option<PyObject>> = Vec::with_capacity(n);
+        let callable = entry.callable.bind(py);
+        match kind {
+            PythonUdfKind::Scalar => {
+                // Existing row-at-a-time execution.
+                let mut results: Vec<Option<PyObject>> = Vec::with_capacity(n_total);
 
-        for row_idx in 0..n {
-            // Build Python args for this row (tuple for *args)
-            let mut py_row = Vec::with_capacity(args.len());
-            for series in &arg_series {
-                let av = series
-                    .get(row_idx)
-                    .map_err(|e| PolarsError::ComputeError(format!("udf get row: {e}").into()))?;
-                py_row.push(any_value_to_py(py, &av)?);
+                for row_idx in 0..n_total {
+                    // Build Python args for this row (tuple for *args)
+                    let mut py_row = Vec::with_capacity(args.len());
+                    for series in &arg_series {
+                        let av = series.get(row_idx).map_err(|e| {
+                            PolarsError::ComputeError(format!("udf get row: {e}").into())
+                        })?;
+                        py_row.push(any_value_to_py(py, &av)?);
+                    }
+
+                    // Call UDF(*args) - pass tuple of row values
+                    let args_tuple =
+                        pyo3::types::PyTuple::new(py, py_row.iter().map(|o| o.bind(py))).map_err(
+                            |e| {
+                                PolarsError::ComputeError(
+                                    format!("Python UDF '{udf_name}' tuple: {e}").into(),
+                                )
+                            },
+                        )?;
+                    let ret = callable.call1(args_tuple).map_err(|e| {
+                        PolarsError::ComputeError(
+                            format!("Python UDF '{udf_name}' failed at row {row_idx}: {e}").into(),
+                        )
+                    })?;
+
+                    results.push(if ret.is_none() {
+                        None
+                    } else {
+                        Some(ret.into_any().unbind())
+                    });
+                }
+
+                py_result_to_series(py, &results, &return_type, column_name)
             }
+            PythonUdfKind::Vectorized => {
+                // Vectorized execution: call UDF once per batch of column values.
+                // Batch size and concurrency are controlled by session config.
+                let batch_size = session.python_udf_batch_size;
+                let total = n_total;
+                let mut all_results: Vec<Option<PyObject>> = Vec::with_capacity(total);
 
-            // Call UDF(*args) - pass tuple of row values
-            let args_tuple = pyo3::types::PyTuple::new(py, py_row.iter().map(|o| o.bind(py)))
-                .map_err(|e| {
-                    PolarsError::ComputeError(format!("Python UDF '{udf_name}' tuple: {e}").into())
-                })?;
-            let ret = callable.call1(args_tuple).map_err(|e| {
-                PolarsError::ComputeError(
-                    format!("Python UDF '{udf_name}' failed at row {row_idx}: {e}").into(),
-                )
-            })?;
+                let mut offset = 0usize;
+                while offset < total {
+                    let end = std::cmp::min(offset + batch_size, total);
+                    let batch_len = end - offset;
 
-            results.push(if ret.is_none() {
-                None
-            } else {
-                Some(ret.into_any().unbind())
-            });
+                    // Build Python arg lists (one list per input column) for this batch.
+                    let mut py_args: Vec<PyObject> = Vec::with_capacity(args.len());
+                    for series in &arg_series {
+                        let mut values: Vec<PyObject> = Vec::with_capacity(batch_len);
+                        for row_idx in offset..end {
+                            let av = series.get(row_idx).map_err(|e| {
+                                PolarsError::ComputeError(format!("udf get row: {e}").into())
+                            })?;
+                            values.push(any_value_to_py(py, &av)?);
+                        }
+                        let py_list =
+                            pyo3::types::PyList::new(py, values.iter().map(|o| o.bind(py)))
+                                .map_err(|e| {
+                                    PolarsError::ComputeError(
+                                        format!("Python UDF '{udf_name}' list: {e}").into(),
+                                    )
+                                })?;
+                        py_args.push(py_list.into_py(py));
+                    }
+
+                    // Call UDF once with lists of values for this batch.
+                    let args_tuple =
+                        pyo3::types::PyTuple::new(py, py_args.iter().map(|o| o.bind(py)))
+                            .map_err(|e| {
+                                PolarsError::ComputeError(
+                                    format!("Python UDF '{udf_name}' tuple: {e}").into(),
+                                )
+                            })?;
+                    let ret = callable.call1(args_tuple).map_err(|e| {
+                        PolarsError::ComputeError(
+                            format!(
+                                "Python UDF '{udf_name}' failed (vectorized batch starting at {}): {e}",
+                                offset
+                            )
+                            .into(),
+                        )
+                    })?;
+
+                    // Interpret return value as a sequence of row results for this batch.
+                    let seq = ret.iter().map_err(|e| {
+                        PolarsError::ComputeError(
+                            format!(
+                                "Python UDF '{udf_name}' vectorized result not iterable: {e}"
+                            )
+                            .into(),
+                        )
+                    })?;
+                    let mut batch_results: Vec<Option<PyObject>> =
+                        Vec::with_capacity(batch_len);
+                    for (idx, res) in seq.enumerate() {
+                        let item = res.map_err(|e| {
+                            PolarsError::ComputeError(
+                                format!(
+                                    "Python UDF '{udf_name}' vectorized result at index {} in batch starting at {}: {e}",
+                                    idx, offset
+                                )
+                                .into(),
+                            )
+                        })?;
+                        if item.is_none() {
+                            batch_results.push(None);
+                        } else {
+                            batch_results.push(Some(item.into_any().unbind()));
+                        }
+                    }
+
+                    if batch_results.len() != batch_len {
+                        return Err(PolarsError::ComputeError(
+                            format!(
+                                "Python UDF '{udf_name}' vectorized result length {} does not match input rows {} in batch starting at {}",
+                                batch_results.len(),
+                                batch_len,
+                                offset
+                            )
+                            .into(),
+                        ));
+                    }
+
+                    all_results.extend(batch_results.into_iter());
+                    offset = end;
+                }
+
+                if all_results.len() != total {
+                    return Err(PolarsError::ComputeError(
+                        format!(
+                            "Python UDF '{udf_name}' total result length {} does not match input rows {}",
+                            all_results.len(),
+                            total
+                        )
+                        .into(),
+                    ));
+                }
+
+                py_result_to_series(py, &all_results, &return_type, column_name)
+            }
+            PythonUdfKind::GroupedVectorizedAgg => Err(PolarsError::ComputeError(
+                "Grouped vectorized Python UDFs are only supported in groupBy().agg(...). Use pandas_udf(..., function_type='grouped_agg') within group_by().agg()."
+                    .into(),
+            )),
         }
-
-        py_result_to_series(py, &results, &return_type, column_name)
     })?;
 
     // Drop temp columns and add result
@@ -91,6 +213,217 @@ pub(crate) fn execute_python_udf(
     out_df.with_column(result_series)?;
 
     Ok(DataFrame::from_polars_with_options(out_df, case_sensitive))
+}
+
+/// Execute one or more grouped, vectorized aggregation Python UDFs over groups defined by
+/// `grouping_cols`. Each UDF is called once per group with Python lists of values for each
+/// argument column and must return exactly one value per group.
+///
+/// The result DataFrame has one row per group, containing the grouping key columns from the
+/// underlying DataFrame plus one column per aggregation specification.
+#[cfg(feature = "pyo3")]
+pub(crate) struct GroupedAggSpec {
+    pub output_name: String,
+    pub udf_name: String,
+    pub args: Vec<RsColumn>,
+}
+
+#[cfg(feature = "pyo3")]
+pub(crate) fn execute_grouped_vectorized_aggs(
+    df: &DataFrame,
+    grouping_cols: &[String],
+    specs: &[GroupedAggSpec],
+    case_sensitive: bool,
+    session: &SparkSession,
+) -> Result<DataFrame, PolarsError> {
+    if specs.is_empty() {
+        // No UDF aggs: just return distinct groups.
+        let lf = df
+            .df
+            .as_ref()
+            .clone()
+            .lazy()
+            .group_by(
+                grouping_cols
+                    .iter()
+                    .map(|c| col(c.as_str()))
+                    .collect::<Vec<_>>(),
+            )
+            .agg([len().alias("_count_for_groups_only")]);
+        let mut pl_df = lf.collect()?;
+        // Drop helper count column
+        let _ = pl_df.drop_in_place("_count_for_groups_only");
+        return Ok(DataFrame::from_polars_with_options(pl_df, case_sensitive));
+    }
+
+    // Build lazy group-by with imploded argument columns for all specs/args.
+    let mut arg_exprs: Vec<Expr> = Vec::new();
+    for (spec_idx, spec) in specs.iter().enumerate() {
+        for (arg_idx, arg) in spec.args.iter().enumerate() {
+            let alias = format!("_pyg_udf_{}_arg_{}", spec_idx, arg_idx);
+            arg_exprs.push(arg.expr().clone().implode().alias(&alias));
+        }
+    }
+
+    let lf = df
+        .df
+        .as_ref()
+        .clone()
+        .lazy()
+        .group_by(
+            grouping_cols
+                .iter()
+                .map(|c| col(c.as_str()))
+                .collect::<Vec<_>>(),
+        )
+        .agg(arg_exprs);
+    let mut pl_df = lf.collect()?;
+
+    let n_groups = pl_df.height();
+
+    // For each spec, call into Python per group and build a Series of results.
+    let mut result_series: Vec<Series> = Vec::with_capacity(specs.len());
+    Python::with_gil(|py| -> Result<(), PolarsError> {
+        for (spec_idx, spec) in specs.iter().enumerate() {
+            // Look up UDF entry and ensure it's grouped-vectorized.
+            let entry = session
+                .udf_registry
+                .get_python_udf(&spec.udf_name, session.is_case_sensitive())
+                .ok_or_else(|| {
+                    PolarsError::InvalidOperation(
+                        format!("Python grouped UDF '{}' not found", spec.udf_name).into(),
+                    )
+                })?;
+            if entry.kind != PythonUdfKind::GroupedVectorizedAgg {
+                return Err(PolarsError::InvalidOperation(
+                    format!(
+                        "Python UDF '{}' is not registered as grouped_agg (use pandas_udf(..., function_type='grouped_agg'))",
+                        spec.udf_name
+                    )
+                    .into(),
+                ));
+            }
+
+            let callable = entry.callable.bind(py);
+            let return_type = entry.return_type.clone();
+
+            // Pre-fetch all list-valued Series for this spec's arguments.
+            // Each column is a List Series with one list of values per group.
+            let mut list_series_per_arg: Vec<Series> = Vec::with_capacity(spec.args.len());
+            for (arg_idx, _arg) in spec.args.iter().enumerate() {
+                let alias = format!("_pyg_udf_{}_arg_{}", spec_idx, arg_idx);
+                let s = pl_df
+                    .column(&alias)
+                    .map_err(|e| PolarsError::ComputeError(e.to_string().into()))?
+                    .as_series()
+                    .cloned()
+                    .ok_or_else(|| {
+                        PolarsError::ComputeError(
+                            format!("grouped UDF arg column '{alias}' not found").into(),
+                        )
+                    })?;
+                list_series_per_arg.push(s);
+            }
+
+            let mut per_group_results: Vec<Option<PyObject>> = Vec::with_capacity(n_groups);
+
+            for group_idx in 0..n_groups {
+                // Build Python args: one list per argument.
+                let mut py_args: Vec<PyObject> = Vec::with_capacity(list_series_per_arg.len());
+                for s in &list_series_per_arg {
+                    let av = s.get(group_idx).map_err(|e| {
+                        PolarsError::ComputeError(
+                            format!("grouped UDF list get failed for group {group_idx}: {e}")
+                                .into(),
+                        )
+                    })?;
+                    if matches!(av, AnyValue::Null) {
+                        // Empty group: pass empty list.
+                        let empty = pyo3::types::PyList::empty(py);
+                        py_args.push(empty.into_py(py));
+                        continue;
+                    }
+                    let inner = match av {
+                        AnyValue::List(ref inner_series) => inner_series.clone(),
+                        _ => {
+                            return Err(PolarsError::ComputeError(
+                                "grouped UDF internal error: expected list AnyValue".into(),
+                            ))
+                        }
+                    };
+                    let mut values: Vec<PyObject> = Vec::with_capacity(inner.len());
+                    for i in 0..inner.len() {
+                        let item_av = inner.get(i).map_err(|e| {
+                            PolarsError::ComputeError(
+                                format!("grouped UDF inner get failed at index {i}: {e}").into(),
+                            )
+                        })?;
+                        values.push(any_value_to_py(py, &item_av)?);
+                    }
+                    let py_list = pyo3::types::PyList::new(py, values.iter().map(|o| o.bind(py)))
+                        .map_err(|e| {
+                        PolarsError::ComputeError(
+                            format!(
+                                "Python grouped UDF '{}' list construction failed: {e}",
+                                spec.udf_name
+                            )
+                            .into(),
+                        )
+                    })?;
+                    py_args.push(py_list.into_py(py));
+                }
+
+                // Call UDF once per group.
+                let args_tuple = pyo3::types::PyTuple::new(py, py_args.iter().map(|o| o.bind(py)))
+                    .map_err(|e| {
+                        PolarsError::ComputeError(
+                            format!(
+                                "Python grouped UDF '{}' tuple creation failed: {e}",
+                                spec.udf_name
+                            )
+                            .into(),
+                        )
+                    })?;
+                let ret = callable.call1(args_tuple).map_err(|e| {
+                    PolarsError::ComputeError(
+                        format!(
+                            "Python grouped UDF '{}' failed for group {}: {e}",
+                            spec.udf_name, group_idx
+                        )
+                        .into(),
+                    )
+                })?;
+
+                if ret.is_none() {
+                    per_group_results.push(None);
+                } else {
+                    // For grouped_agg we expect a scalar, not a sequence.
+                    per_group_results.push(Some(ret.into_any().unbind()));
+                }
+            }
+
+            // Convert per-group Python results to Series.
+            let series =
+                py_result_to_series(py, &per_group_results, &return_type, &spec.output_name)?;
+            result_series.push(series);
+        }
+        Ok(())
+    })?;
+
+    // Attach result Series and drop temporary arg list columns.
+    for s in result_series {
+        pl_df.with_column(s)?;
+    }
+
+    // Drop the internal list columns used for arguments.
+    for (spec_idx, spec) in specs.iter().enumerate() {
+        for (arg_idx, _arg) in spec.args.iter().enumerate() {
+            let alias = format!("_pyg_udf_{}_arg_{}", spec_idx, arg_idx);
+            let _ = pl_df.drop_in_place(&alias);
+        }
+    }
+
+    Ok(DataFrame::from_polars_with_options(pl_df, case_sensitive))
 }
 
 fn any_value_to_py(

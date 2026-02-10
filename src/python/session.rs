@@ -399,20 +399,28 @@ pub struct PyUDFRegistration {
 impl PyUDFRegistration {
     /// Register a Python UDF. PySpark: spark.udf.register(name, f, returnType=None).
     /// When returnType is omitted for plain Python fn, defaults to StringType.
-    #[pyo3(signature = (name, f, return_type=None))]
+    #[pyo3(signature = (name, f, return_type=None, vectorized=false))]
     fn register(
         &self,
         py: Python<'_>,
         name: &str,
         f: Bound<'_, pyo3::types::PyAny>,
         return_type: Option<Bound<'_, pyo3::types::PyAny>>,
+        vectorized: bool,
     ) -> PyResult<Py<PyUserDefinedFunction>> {
         let dtype = parse_return_type(py, return_type.as_ref())?;
         let callable = f.unbind();
-        self.session
-            .udf_registry
-            .register_python_udf(name, callable, dtype)
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        if vectorized {
+            self.session
+                .udf_registry
+                .register_vectorized_python_udf(name, callable, dtype)
+                .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        } else {
+            self.session
+                .udf_registry
+                .register_python_udf(name, callable, dtype)
+                .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        }
         Ok(Py::new(
             py,
             PyUserDefinedFunction {
@@ -426,8 +434,8 @@ impl PyUDFRegistration {
 /// User-defined function (returned by register). Callable as my_udf(col("a")).
 #[pyclass(name = "UserDefinedFunction")]
 pub struct PyUserDefinedFunction {
-    name: String,
-    session: SparkSession,
+    pub(crate) name: String,
+    pub(crate) session: SparkSession,
 }
 
 #[pymethods]
@@ -459,8 +467,8 @@ impl PyUserDefinedFunction {
     }
 }
 
-fn parse_return_type(
-    py: Python<'_>,
+pub(crate) fn parse_return_type(
+    _py: Python<'_>,
     return_type: Option<&Bound<'_, pyo3::types::PyAny>>,
 ) -> PyResult<polars::prelude::DataType> {
     use polars::prelude::DataType;

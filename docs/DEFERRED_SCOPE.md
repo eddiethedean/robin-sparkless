@@ -22,13 +22,13 @@ See also: [PYSPARK_DIFFERENCES.md](PYSPARK_DIFFERENCES.md), [ROBIN_SPARKLESS_MIS
 
 | APIs | Status | Rationale |
 |------|--------|-----------|
-| `spark.udf.register`, `call_udf`, `udf()` (decorator), Rust `register_udf` | **Implemented** | Scalar UDFs: Python UDFs (row-at-a-time) and Rust UDFs. Session-scoped registry; visible to DataFrame API, SQL, and plan interpreter. |
-| `pandas_udf` (vectorized) | Deferred | Would batch Polars↔Pandas; row-at-a-time Python UDFs supported first. |
+| `spark.udf.register`, `call_udf`, `udf()` (decorator), Rust `register_udf` | **Implemented** | Scalar UDFs: Python UDFs (row-at-a-time) and Rust UDFs, plus column-wise vectorized Python UDFs via `vectorized=True`. Session-scoped registry; visible to DataFrame API, SQL, and plan interpreter. |
+| `pandas_udf` (vectorized) | **Partially implemented** | Minimal support for grouped aggregation UDFs via `pandas_udf(..., function_type="grouped_agg")` (one scalar per group, used only in `groupBy().agg(...)`). Other pandas_udf function types (scalar, map, grouped map, etc.) remain deferred; would require broader Polars↔Pandas batching and plan integration. |
 | `udtf` (table functions) | Not implemented | Returns multiple rows per input; out of scope. |
 
-**Implemented:** Python: `spark.udf().register(name, f, return_type=None)`; `call_udf(name, *cols)`; `my_udf(col("x"))` via returned UserDefinedFunction. Rust: `session.register_udf(name, \|cols\| ...)`. SQL: `SELECT my_udf(col) FROM t`. Plan: `{"udf": "name", "args": [...]}` or `{"fn": "call_udf", "args": [{"lit": "name"}, ...]}`.
+**Implemented:** Python: `spark.udf().register(name, f, return_type=None, vectorized=False|True)`; `call_udf(name, *cols)`; `my_udf(col("x"))` via returned `UserDefinedFunction`; grouped vectorized aggregations via `pandas_udf(f, return_type, function_type="grouped_agg")` used in `group_by().agg([...])`. Rust: `session.register_udf(name, \|cols\| ...)`. SQL: `SELECT my_udf(col) FROM t`. Plan: `{"udf": "name", "args": [...]}` or `{"fn": "call_udf", "args": [{"lit": "name"}, ...]}`.
 
-**Limitations:** Python UDFs run eagerly (materialize at UDF boundary). Python UDF in WHERE/HAVING not yet supported. See [docs/UDF_GUIDE.md](UDF_GUIDE.md).
+**Limitations:** Python UDFs run eagerly (materialize at UDF boundary). Column-wise vectorized UDFs are supported only in `withColumn` / `select` paths. Grouped pandas UDFs are restricted to `groupBy().agg(...)`, cannot be mixed with built-ins in a single `agg` call, and are not available in SQL or other contexts. Python UDF in WHERE/HAVING not yet supported. See [docs/UDF_GUIDE.md](UDF_GUIDE.md).
 
 **Tracking:** GitHub issue #143 (pandas_udf, udtf remain deferred)
 

@@ -9,13 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Full UDF support** — Scalar user-defined functions (Rust and Python) with session-scoped registry.
+- **UDFs (scalar, vectorized, grouped)** — Expanded user-defined function support across Rust and Python with a session-scoped registry.
   - **Rust**: `SparkSession::register_udf(name, closure)` and `call_udf(name, cols)` — UDFs run lazily via Polars `Expr::map` / `map_many`.
-  - **Python**: `spark.udf().register(name, f, return_type=None)` (default `StringType`); `call_udf(name, *cols)`; `my_udf(col("a"))` via returned `UserDefinedFunction`. Python UDFs run row-at-a-time (eager at UDF boundary).
-  - **SQL**: Unknown functions in SELECT and WHERE resolve to UDF registry; built-ins `UPPER`/`LOWER` supported; `SelectItem::ExprWithAlias` for `SELECT expr AS alias`.
-  - **Plan interpreter**: `{"udf": "name", "args": [...]}` and `{"fn": "call_udf", "args": [{"lit": "name"}, ...]}` in expression trees; `withColumn` supports Python UDFs.
-  - **Thread-local session**: `call_udf` resolves UDFs from session set by `get_or_create()`.
-  - **Docs**: [UDF_GUIDE.md](docs/UDF_GUIDE.md), [USER_GUIDE.md](docs/USER_GUIDE.md); [DEFERRED_SCOPE.md](docs/DEFERRED_SCOPE.md) and [PYSPARK_DIFFERENCES.md](docs/PYSPARK_DIFFERENCES.md) updated. `pandas_udf` and `udtf` remain deferred.
+  - **Python scalar UDFs**: `spark.udf().register(name, f, return_type=None)` (default `StringType`); `call_udf(name, *cols)`; `my_udf(col("a"))` via returned `UserDefinedFunction`. Scalar Python UDFs run row-at-a-time (eager at the UDF boundary).
+  - **Python vectorized UDFs (column-wise)**: `spark.udf().register(name, f, return_type=..., vectorized=True)` — UDF receives Python sequences (e.g. lists or pandas Series) and returns one value per input element. Supported in `with_column` / `select` / `call_udf` paths; batch size controlled by new session config `spark.robin.pythonUdf.batchSize`.
+  - **Grouped vectorized Python UDFs (GROUPED_AGG)**: New `pandas_udf` helper for grouped aggregations: `@rs.pandas_udf("double", function_type="grouped_agg") def f(values): ...`. Supported in `group_by(...).agg([f(col("x")).alias("out"), ...])`, returning one value per group. Backed by `PythonUdfKind::GroupedVectorizedAgg` and a dedicated grouped execution path.
+  - **Config knobs**: `SparkSession` reads `spark.robin.pythonUdf.batchSize` and `spark.robin.pythonUdf.maxConcurrentBatches` from its config map (Python: `SparkSession.builder().config(key, value)`); batch size is used for non-grouped vectorized UDFs; maxConcurrentBatches is reserved for future concurrency control.
+  - **Plan interpreter**: Logical plan format extended with `python_grouped_udf` aggregation nodes in `groupBy` payloads; the interpreter currently rejects these with a clear `PlanError::InvalidPlan` until grouped UDF execution is wired through `execute_plan`.
+  - **SQL**: Unknown functions in SELECT and WHERE continue to resolve to the UDF registry; built-ins `UPPER`/`LOWER` supported; `SelectItem::ExprWithAlias` for `SELECT expr AS alias`.
+  - **Thread-local session**: `call_udf` resolves UDFs from the session set by `get_or_create()`.
+  - **Docs**: [UDF_GUIDE.md](docs/UDF_GUIDE.md), [PYTHON_API.md](docs/PYTHON_API.md), [PYSPARK_DIFFERENCES.md](docs/PYSPARK_DIFFERENCES.md), [DEFERRED_SCOPE.md](docs/DEFERRED_SCOPE.md), [ROBIN_SPARKLESS_MISSING.md](docs/ROBIN_SPARKLESS_MISSING.md), [FULL_PARITY_ROADMAP.md](docs/FULL_PARITY_ROADMAP.md), and top-level READMEs updated to describe UDF support and grouped vectorized `pandas_udf(..., function_type="grouped_agg")`. `udtf` and non-aggregating `pandas_udf` variants remain deferred.
 
 ### Planned
 

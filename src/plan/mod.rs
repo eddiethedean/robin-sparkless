@@ -176,10 +176,6 @@ fn apply_op(
                 .collect();
             let refs: Vec<&str> = cols.iter().map(|s| s.as_str()).collect();
             let grouped = df.group_by(refs).map_err(PlanError::Session)?;
-            // Next op in plan should be agg; we don't peek ahead here, so we return grouped as a DataFrame.
-            // Actually GroupedData is different from DataFrame - we need to handle agg in the same op or next.
-            // Plan format says "groupBy" then "agg" as separate ops. So we need to either combine groupBy+agg in one step or have state. For simplicity we'll require agg to follow and handle "agg" by taking the previous result. That would require state in the loop. Simpler: have a single "groupBy" payload that can include "aggs", and if present we do group_by + agg in one go. Let me re-read the plan.
-            // Plan says: groupBy payload {"group_by": ["a"]}, then next op is agg with {"aggs": [...]}. So we need to carry GroupedData. That would require execute_plan to hold either DataFrame or GroupedData. So we have two options: (1) combine groupBy+agg into one logical step in the interpreter (e.g. if we see groupBy we look for agg payload in the same or next op), or (2) have an intermediate enum. The plan format says "The next operation in the plan should be agg". So we need to peek at the next op when we see groupBy, or we add a compound op. Easiest: when we see "groupBy", we require the next op to be "agg" and we'll process them together. So in apply_op for groupBy we can't return a DataFrame. Alternative: have "groupBy" in the plan include optional "aggs" in payload; if "aggs" is present we do group_by + agg and return DataFrame. So we extend the format slightly: groupBy payload can be {"group_by": ["a"], "aggs": [{"agg": "sum", "column": "b"}]}. Then we don't need two ops. Let me implement that: if groupBy has aggs, do both and return df; otherwise return an error (unsupported: groupBy without aggs in same payload). So we'll require aggs inside groupBy for now.
             let aggs = payload.get("aggs").and_then(Value::as_array);
             match aggs {
                 Some(aggs_arr) => {
@@ -313,6 +309,15 @@ fn parse_aggs(aggs: &[Value]) -> Result<Vec<polars::prelude::Expr>, PlanError> {
             .get("agg")
             .and_then(Value::as_str)
             .ok_or_else(|| PlanError::InvalidPlan("agg must have 'agg' string".into()))?;
+
+        if agg == "python_grouped_udf" {
+            // Grouped Python UDF aggregations are not expressible as pure Expr; the plan
+            // interpreter currently supports only Rust/built-in aggregations at this level.
+            return Err(PlanError::InvalidPlan(
+                "python_grouped_udf aggregations are not yet supported in execute_plan; use built-in aggregations in plans for now".into(),
+            ));
+        }
+
         let col_name = obj.get("column").and_then(Value::as_str);
         let c = match col_name {
             Some(name) => Column::new(name.to_string()),

@@ -9,9 +9,14 @@ use polars::prelude::{
 /// GroupedData - represents a DataFrame grouped by certain columns.
 /// Similar to PySpark's GroupedData
 pub struct GroupedData {
-    pub(super) lazy_grouped: LazyGroupBy,
-    pub(super) grouping_cols: Vec<String>,
-    pub(super) case_sensitive: bool,
+    // Underlying Polars DataFrame (before grouping). Used by some Python-only paths
+    // (e.g. grouped vectorized UDF execution). When the `pyo3` feature is not
+    // enabled this field is effectively unused, so we allow dead_code there.
+    #[cfg_attr(not(feature = "pyo3"), allow(dead_code))]
+    pub(crate) df: PlDataFrame,
+    pub(crate) lazy_grouped: LazyGroupBy,
+    pub(crate) grouping_cols: Vec<String>,
+    pub(crate) case_sensitive: bool,
 }
 
 impl GroupedData {

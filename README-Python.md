@@ -41,6 +41,14 @@ df = spark.read_json("data.json")
 
 Filter, select, group, join, and use window functions with a PySpark-like API. See the [full documentation](https://robin-sparkless.readthedocs.io/) for details.
 
+## UDFs and pandas_udf (Python)
+
+- **Scalar Python UDFs**: `spark.udf().register("name", f, return_type=...)` and `call_udf("name", col("x"))`, or use the returned `UserDefinedFunction` directly in `with_column` / `select`.
+- **Vectorized Python UDFs**: `spark.udf().register("name", f, return_type=..., vectorized=True)` for column-wise batch UDFs (one output per input row) in `with_column` / `select`.
+- **Grouped vectorized UDFs (GROUPED_AGG)**: `@rs.pandas_udf("double", function_type="grouped_agg")` for per-group aggregations in `group_by().agg([...])`, returning one value per group.
+
+See `docs/UDF_GUIDE.md` (or the “UDF guide” section in the online docs) for full details, semantics, and limitations.
+
 ## Optional features (install from source)
 
 Building from source requires [Rust](https://rustup.rs/) and [maturin](https://www.maturin.rs/). Clone the repo, then:

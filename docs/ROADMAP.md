@@ -85,7 +85,7 @@ The path to full backend replacement is planned in [FULL_BACKEND_ROADMAP.md](FUL
    - Math: abs, ceil, floor, sqrt, stddev, variance, count_distinct.
    - Array/Map/JSON: array_*, map_*, get_json_object, from_json, to_json.
    - Function parity with Sparkless (403+); use [PYSPARK_FUNCTION_MATRIX](https://github.com/eddiethedean/sparkless/blob/main/PYSPARK_FUNCTION_MATRIX.md) as checklist.
-   - UDF story: pure-Rust UDFs; Python UDFs out of scope.
+   - UDF story: pure-Rust UDFs and Python UDFs (scalar and column-wise vectorized) with a session-scoped registry; minimal grouped vectorized aggregation support via `pandas_udf(..., function_type="grouped_agg")`. Other pandas_udf variants and UDTFs remain out of scope.
 
 8. **DataFrame Methods** (Phase 3)
    - union, unionByName, distinct, drop, dropna, fillna, limit, withColumnRenamed.
@@ -489,7 +489,7 @@ To reach **full Sparkless parity** (robin-sparkless as a complete backend replac
 
 - **Trait-based backend**: `QueryExecutor`, `DataMaterializer` for pluggability (FULL_BACKEND_ROADMAP Phase 1 Future).
 - **Expression model doc**: Document Column/Expr mapping to Sparkless `ColumnOperation` trees.
-- **UDFs**: Pure-Rust UDFs only; Python UDFs out of scope.
+- **UDFs**: Pure-Rust UDFs, scalar and column-wise vectorized Python UDFs via `spark.udf().register`, and grouped vectorized aggregation UDFs via `pandas_udf(..., function_type="grouped_agg")`. Full pandas_udf decorator surface and UDTFs remain out of scope.
 - **Memory / scale**: Optional memory profiling and large-dataset handling.
 
 ---
