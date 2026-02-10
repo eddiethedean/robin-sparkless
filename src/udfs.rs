@@ -2944,7 +2944,7 @@ fn series_to_f64_pyspark(s: &Series, ctx: &str) -> PolarsResult<Float64Chunked> 
                 .map_err(|e| PolarsError::ComputeError(format!("{ctx}: {e}").into()))?;
             casted
                 .f64()
-                .map(|ca| ca.clone())
+                .cloned()
                 .map_err(|e| PolarsError::ComputeError(format!("{ctx}: {e}").into()))
         }
     }
@@ -2954,6 +2954,8 @@ fn series_to_f64_pyspark(s: &Series, ctx: &str) -> PolarsResult<Float64Chunked> 
 ///
 /// Always returns a Float64 series; string inputs are coerced to numbers when possible,
 /// invalid strings become null. Numeric-only inputs are upcast to Float64.
+/// Broadcasts scalar (length-1) operands to match the other series length (PySpark parity).
+#[allow(clippy::useless_conversion)]
 fn pyspark_binary_arith(
     columns: &mut [Column],
     ctx: &str,
@@ -2969,13 +2971,29 @@ fn pyspark_binary_arith(
     let a_s = std::mem::take(&mut columns[0]).take_materialized_series();
     let b_s = std::mem::take(&mut columns[1]).take_materialized_series();
 
-    let ca_a = series_to_f64_pyspark(&a_s, ctx)?;
-    let ca_b = series_to_f64_pyspark(&b_s, ctx)?;
+    let mut ca_a = series_to_f64_pyspark(&a_s, ctx)?;
+    let mut ca_b = series_to_f64_pyspark(&b_s, ctx)?;
+
+    // Broadcast scalar (length-1) to match the other series (#179)
+    let len_a = ca_a.len();
+    let len_b = ca_b.len();
+    if len_a == 1 && len_b > 1 {
+        let val = ca_a.get(0);
+        ca_a = Float64Chunked::from_iter_options(
+            name.as_str().into(),
+            std::iter::repeat_n(val, len_b),
+        );
+    } else if len_b == 1 && len_a > 1 {
+        let val = ca_b.get(0);
+        ca_b = Float64Chunked::from_iter_options(
+            name.as_str().into(),
+            std::iter::repeat_n(val, len_a),
+        );
+    }
 
     let out = Float64Chunked::from_iter_options(
         name.as_str().into(),
-        ca_a
-            .into_iter()
+        ca_a.into_iter()
             .zip(ca_b.into_iter())
             .map(|(oa, ob)| match (oa, ob) {
                 (Some(a), Some(b)) => Some(op(a, b)),
