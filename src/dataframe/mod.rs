@@ -76,7 +76,6 @@ impl DataFrame {
                 Ok(e)
             }
         })
-        .map_err(|e| e.into())
     }
 
     /// Resolve a logical column name to the actual column name in the schema.

@@ -587,8 +587,7 @@ fn projection_to_agg_exprs(
                                         ident,
                                     )),
                                 ) => {
-                                    let resolved =
-                                        df.resolve_column_name(ident.value.as_str())?;
+                                    let resolved = df.resolve_column_name(ident.value.as_str())?;
                                     col(resolved.as_str()).count().alias("count")
                                 }
                                 _ => {
@@ -605,8 +604,7 @@ fn projection_to_agg_exprs(
                             sqlparser::ast::FunctionArgExpr::Expr(SqlExpr::Identifier(ident)),
                         )) = args.first()
                         {
-                            let resolved =
-                                df.resolve_column_name(ident.value.as_str())?;
+                            let resolved = df.resolve_column_name(ident.value.as_str())?;
                             agg.push(
                                 col(resolved.as_str())
                                     .sum()
@@ -623,8 +621,7 @@ fn projection_to_agg_exprs(
                             sqlparser::ast::FunctionArgExpr::Expr(SqlExpr::Identifier(ident)),
                         )) = args.first()
                         {
-                            let resolved =
-                                df.resolve_column_name(ident.value.as_str())?;
+                            let resolved = df.resolve_column_name(ident.value.as_str())?;
                             agg.push(
                                 col(resolved.as_str())
                                     .mean()
@@ -641,8 +638,7 @@ fn projection_to_agg_exprs(
                             sqlparser::ast::FunctionArgExpr::Expr(SqlExpr::Identifier(ident)),
                         )) = args.first()
                         {
-                            let resolved =
-                                df.resolve_column_name(ident.value.as_str())?;
+                            let resolved = df.resolve_column_name(ident.value.as_str())?;
                             agg.push(
                                 col(resolved.as_str())
                                     .min()
@@ -659,8 +655,7 @@ fn projection_to_agg_exprs(
                             sqlparser::ast::FunctionArgExpr::Expr(SqlExpr::Identifier(ident)),
                         )) = args.first()
                         {
-                            let resolved =
-                                df.resolve_column_name(ident.value.as_str())?;
+                            let resolved = df.resolve_column_name(ident.value.as_str())?;
                             agg.push(
                                 col(resolved.as_str())
                                     .max()
