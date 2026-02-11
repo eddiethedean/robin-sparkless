@@ -16,6 +16,7 @@ use crate::column::Column;
 use crate::functions::SortOrder;
 use crate::schema::StructType;
 use crate::session::SparkSession;
+use crate::type_coercion::coerce_for_pyspark_comparison;
 use polars::prelude::{
     col, lit, AnyValue, DataFrame as PlDataFrame, DataType, Expr, PlSmallStr, PolarsError,
     SchemaNamesAndDtypes,
@@ -90,38 +91,110 @@ impl DataFrame {
         })
     }
 
-    /// Coerce string-vs-numeric comparisons to numeric for PySpark-style type strictness.
+    /// Rewrite comparison expressions to apply PySpark-style type coercion.
     ///
-    /// With robin-sparkless 0.6.0, comparisons like `col("str_col") == lit(123)` could raise
-    /// `RuntimeError: cannot compare string with numeric type (i32)` because Polars enforces
-    /// strict types for comparison operations. PySpark, however, coerces the string side to
-    /// a numeric type for equality/inequality and ordering comparisons.
-    ///
-    /// This helper walks the expression tree and, for comparison operators where one side is
-    /// a string column in this DataFrame's schema and the other side is a numeric literal,
-    /// casts the string column to a numeric type (Float64). This allows comparisons like:
-    ///
-    /// - `df.filter(col("str_col") == lit(123))`
-    /// - `df.filter(col("str_col") > lit(100))`
-    ///
-    /// to succeed with numeric semantics instead of raising a type error.
+    /// This walks the expression tree and, for comparison operators where one side is
+    /// a column and the other is a numeric literal, delegates to
+    /// `coerce_for_pyspark_comparison` so that string–numeric comparisons behave like
+    /// PySpark (string values parsed to numbers where possible, invalid strings treated
+    /// as null/non-matching).
     pub fn coerce_string_numeric_comparisons(&self, expr: Expr) -> Result<Expr, PolarsError> {
         use polars::prelude::{DataType, LiteralValue, Operator};
         use std::sync::Arc;
 
         fn is_numeric_literal(expr: &Expr) -> bool {
-            match expr {
-                Expr::Literal(lv) => matches!(
-                    lv,
+            matches!(
+                expr,
+                Expr::Literal(
                     LiteralValue::Int32(_)
                         | LiteralValue::Int64(_)
+                        | LiteralValue::UInt32(_)
+                        | LiteralValue::UInt64(_)
                         | LiteralValue::Float32(_)
                         | LiteralValue::Float64(_)
-                ),
-                _ => false,
+                        | LiteralValue::Int(_)   // dynamic int (e.g. lit(123) from some code paths)
+                        | LiteralValue::Float(_) // dynamic float
+                )
+            )
+        }
+
+        fn literal_dtype(lv: &LiteralValue) -> DataType {
+            match lv {
+                LiteralValue::Int32(_) => DataType::Int32,
+                LiteralValue::Int64(_) => DataType::Int64,
+                LiteralValue::UInt32(_) => DataType::UInt32,
+                LiteralValue::UInt64(_) => DataType::UInt64,
+                LiteralValue::Float32(_) => DataType::Float32,
+                LiteralValue::Float64(_) => DataType::Float64,
+                LiteralValue::Int(_) | LiteralValue::Float(_) => DataType::Float64,
+                _ => DataType::Float64,
             }
         }
 
+        // Apply root-level coercion first so the top-level filter condition (e.g. col("str_col") == lit(123))
+        // is always rewritten even if try_map_expr traversal does not hit the root in the expected order.
+        let expr = {
+            if let Expr::BinaryExpr { left, op, right } = &expr {
+                let is_comparison_op = matches!(
+                    op,
+                    Operator::Eq
+                        | Operator::NotEq
+                        | Operator::Lt
+                        | Operator::LtEq
+                        | Operator::Gt
+                        | Operator::GtEq
+                );
+                let left_is_col = matches!(&**left, Expr::Column(_));
+                let right_is_col = matches!(&**right, Expr::Column(_));
+                let left_is_numeric_lit =
+                    matches!(&**left, Expr::Literal(_)) && is_numeric_literal(left.as_ref());
+                let right_is_numeric_lit =
+                    matches!(&**right, Expr::Literal(_)) && is_numeric_literal(right.as_ref());
+                let root_is_col_vs_numeric = is_comparison_op
+                    && ((left_is_col && right_is_numeric_lit)
+                        || (right_is_col && left_is_numeric_lit));
+                if root_is_col_vs_numeric {
+                    let (new_left, new_right) = if left_is_col && right_is_numeric_lit {
+                        let lit_ty = match &**right {
+                            Expr::Literal(lv) => literal_dtype(lv),
+                            _ => DataType::Float64,
+                        };
+                        coerce_for_pyspark_comparison(
+                            (*left).as_ref().clone(),
+                            (*right).as_ref().clone(),
+                            &DataType::String,
+                            &lit_ty,
+                            op,
+                        )
+                        .map_err(|e| PolarsError::ComputeError(e.to_string().into()))?
+                    } else {
+                        let lit_ty = match &**left {
+                            Expr::Literal(lv) => literal_dtype(lv),
+                            _ => DataType::Float64,
+                        };
+                        coerce_for_pyspark_comparison(
+                            (*left).as_ref().clone(),
+                            (*right).as_ref().clone(),
+                            &lit_ty,
+                            &DataType::String,
+                            op,
+                        )
+                        .map_err(|e| PolarsError::ComputeError(e.to_string().into()))?
+                    };
+                    Expr::BinaryExpr {
+                        left: Arc::new(new_left),
+                        op: *op,
+                        right: Arc::new(new_right),
+                    }
+                } else {
+                    expr
+                }
+            } else {
+                expr
+            }
+        };
+
+        // Then walk the tree for nested comparisons (e.g. (col("a")==1) & (col("b")==2)).
         expr.try_map_expr(move |e| {
             if let Expr::BinaryExpr { left, op, right } = e {
                 let is_comparison_op = matches!(
@@ -139,34 +212,51 @@ impl DataFrame {
 
                 let left_is_col = matches!(&*left, Expr::Column(_));
                 let right_is_col = matches!(&*right, Expr::Column(_));
+                let left_is_lit = matches!(&*left, Expr::Literal(_));
+                let right_is_lit = matches!(&*right, Expr::Literal(_));
 
-                let left_is_numeric_lit = is_numeric_literal(&left);
-                let right_is_numeric_lit = is_numeric_literal(&right);
+                let left_is_numeric_lit = left_is_lit && is_numeric_literal(left.as_ref());
+                let right_is_numeric_lit = right_is_lit && is_numeric_literal(right.as_ref());
 
-                if left_is_col && right_is_numeric_lit {
-                    // Cast column on the left to Float64 for numeric-style comparison
-                    // against a numeric literal. This covers string-vs-numeric as well
-                    // as numeric-vs-numeric and keeps behavior consistent.
-                    let new_left = left.as_ref().clone().cast(DataType::Float64);
-                    return Ok(Expr::BinaryExpr {
-                        left: Arc::new(new_left),
-                        op,
-                        right,
-                    });
-                }
+                // Heuristic: for column-vs-numeric-literal, treat the column as "string-like"
+                // and the literal as numeric, so coerce_for_pyspark_comparison will route
+                // the column through try_to_number and compare as doubles.
+                let (new_left, new_right) = if left_is_col && right_is_numeric_lit {
+                    let lit_ty = match &*right {
+                        Expr::Literal(lv) => literal_dtype(lv),
+                        _ => DataType::Float64,
+                    };
+                    coerce_for_pyspark_comparison(
+                        (*left).clone(),
+                        (*right).clone(),
+                        &DataType::String,
+                        &lit_ty,
+                        &op,
+                    )
+                    .map_err(|e| PolarsError::ComputeError(e.to_string().into()))?
+                } else if right_is_col && left_is_numeric_lit {
+                    let lit_ty = match &*left {
+                        Expr::Literal(lv) => literal_dtype(lv),
+                        _ => DataType::Float64,
+                    };
+                    coerce_for_pyspark_comparison(
+                        (*left).clone(),
+                        (*right).clone(),
+                        &lit_ty,
+                        &DataType::String,
+                        &op,
+                    )
+                    .map_err(|e| PolarsError::ComputeError(e.to_string().into()))?
+                } else {
+                    // Leave other comparison forms (col-col, lit-lit, non-numeric) unchanged.
+                    return Ok(Expr::BinaryExpr { left, op, right });
+                };
 
-                if right_is_col && left_is_numeric_lit {
-                    // Cast column on the right to Float64 for numeric-style comparison
-                    // against a numeric literal on the left.
-                    let new_right = right.as_ref().clone().cast(DataType::Float64);
-                    return Ok(Expr::BinaryExpr {
-                        left,
-                        op,
-                        right: Arc::new(new_right),
-                    });
-                }
-
-                Ok(Expr::BinaryExpr { left, op, right })
+                Ok(Expr::BinaryExpr {
+                    left: Arc::new(new_left),
+                    op,
+                    right: Arc::new(new_right),
+                })
             } else {
                 Ok(e)
             }
@@ -1358,5 +1448,22 @@ fn any_value_to_json(av: AnyValue<'_>) -> JsonValue {
         AnyValue::String(s) => JsonValue::String(s.to_string()),
         AnyValue::StringOwned(s) => JsonValue::String(s.to_string()),
         _ => JsonValue::Null,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use polars::prelude::{NamedFrom, Series};
+
+    /// Issue #235: root-level string–numeric comparison coercion in filter.
+    #[test]
+    fn coerce_string_numeric_root_in_filter() {
+        let s = Series::new("str_col".into(), &["123", "456"]);
+        let pl_df = polars::prelude::DataFrame::new(vec![s.into()]).unwrap();
+        let df = DataFrame::from_polars(pl_df);
+        let expr = col("str_col").eq(lit(123i64));
+        let out = df.filter(expr).unwrap();
+        assert_eq!(out.count().unwrap(), 1);
     }
 }

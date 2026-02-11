@@ -72,13 +72,7 @@ pub fn filter(
     case_sensitive: bool,
 ) -> Result<DataFrame, PolarsError> {
     let condition = df.resolve_expr_column_names(condition)?;
-    if std::env::var("ROBIN_DEBUG_235").is_ok() {
-        eprintln!("ROBIN_DEBUG_235 before coercion: {:?}", condition);
-    }
     let condition = df.coerce_string_numeric_comparisons(condition)?;
-    if std::env::var("ROBIN_DEBUG_235").is_ok() {
-        eprintln!("ROBIN_DEBUG_235 after coercion: {:?}", condition);
-    }
     let lf = df.df.as_ref().clone().lazy().filter(condition);
     let out_df = lf.collect()?;
     Ok(super::DataFrame::from_polars_with_options(
