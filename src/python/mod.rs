@@ -43,7 +43,7 @@ use crate::functions::{
     desc_nulls_last, e, median, mode, negate, pi, positive, sec, stddev_pop, var_pop,
 };
 use crate::functions::{avg, coalesce, col as rs_col, count, max, min, sum as rs_sum};
-use crate::functions::{bin, btrim, conv, getbit, hex, locate, unhex, when_then_otherwise_null};
+use crate::functions::{bin, btrim, conv, getbit, hex, locate, unhex};
 use crate::plan;
 use crate::SparkSession;
 use pyo3::conversion::IntoPyObjectExt;
@@ -60,7 +60,7 @@ pub(crate) use column::PyColumn;
 pub(crate) use dataframe::{
     PyCubeRollupData, PyDataFrame, PyDataFrameNa, PyDataFrameStat, PyDataFrameWriter, PyGroupedData,
 };
-pub(crate) use order::{PySortOrder, PyThenBuilder, PyWhenBuilder};
+pub(crate) use order::{PySortOrder, PyThenBuilder, PyWhenBuilder, PyWhenThen};
 use session::parse_return_type;
 pub(crate) use session::{
     PyCatalog, PyDataFrameReader, PyRuntimeConfig, PySparkSession, PySparkSessionBuilder,
@@ -336,6 +336,7 @@ fn robin_sparkless(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyDataFrameNa>()?;
     m.add_class::<PyColumn>()?;
     m.add_class::<PySortOrder>()?;
+    m.add_class::<PyWhenThen>()?;
     m.add_class::<PyWhenBuilder>()?;
     m.add_class::<PyThenBuilder>()?;
     m.add_class::<PyGroupedData>()?;
@@ -830,14 +831,14 @@ fn py_lit_date_or_datetime(
 /// Two forms:
 /// - ``when(condition).then(value).otherwise(default)`` for multiple when-then clauses, chain
 ///   additional ``.when(cond2).then(val2)`` before ``.otherwise(default)``.
-/// - ``when(condition, value)`` returns a Column equal to value where condition is true, else null.
+/// - ``when(condition, value)`` returns a WhenThen; call ``.otherwise(default)`` to get a Column (PySpark parity).
 ///
 /// Args:
 ///     condition: Boolean Column expression.
 ///     value: Optional. If given, result is value where condition is true, else null.
 ///
 /// Returns:
-///     Column if value is provided; otherwise WhenBuilder to chain .then() and .otherwise().
+///     WhenThen if value is provided (use ``.otherwise(default)`` to get Column); otherwise WhenBuilder to chain .then() and .otherwise().
 #[pyfunction]
 #[pyo3(signature = (condition, value=None))]
 fn py_when(
@@ -846,10 +847,11 @@ fn py_when(
     py: Python<'_>,
 ) -> PyResult<Py<PyAny>> {
     match value {
-        Some(v) => {
-            let col = when_then_otherwise_null(&condition.inner, &v.inner);
-            Ok(PyColumn { inner: col }.into_py_any(py)?)
+        Some(v) => Ok(PyWhenThen {
+            condition: condition.inner.expr().clone(),
+            then_value: v.inner.expr().clone(),
         }
+        .into_py_any(py)?),
         None => Ok(PyWhenBuilder {
             condition: condition.inner.expr().clone(),
         }
