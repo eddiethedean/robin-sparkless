@@ -66,7 +66,8 @@ impl DataFrame {
     /// When case_sensitive is false, column references (e.g. col("name")) are resolved
     /// case-insensitively (PySpark default). Use before filter/select_with_exprs/order_by_exprs.
     /// Names that appear as alias outputs (e.g. in expr.alias("partial")) are not resolved
-    /// as input columns, so select(col("x").substr(1, 3).alias("partial")) works (issue #200).
+    /// as input columns, so select(col("x").substr(1, 3).alias("partial")),
+    /// when().then().otherwise().alias("result"), and col("x").rank().over([]).alias("rank") work (issues #200, #212).
     pub fn resolve_expr_column_names(&self, expr: Expr) -> Result<Expr, PolarsError> {
         let df = self;
         let mut alias_output_names: HashSet<String> = HashSet::new();
