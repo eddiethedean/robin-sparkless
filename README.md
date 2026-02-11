@@ -2,6 +2,7 @@
 
 **PySpark-style DataFrames in Rust—no JVM.** A DataFrame library that mirrors PySpark’s API and semantics while using [Polars](https://www.pola.rs/) as the execution engine.
 
+[![CI](https://github.com/eddiethedean/robin-sparkless/actions/workflows/ci.yml/badge.svg)](https://github.com/eddiethedean/robin-sparkless/actions/workflows/ci.yml)
 [![crates.io](https://img.shields.io/crates/v/robin-sparkless.svg)](https://crates.io/crates/robin-sparkless)
 [![PyPI version](https://badge.fury.io/py/robin-sparkless.svg)](https://pypi.org/project/robin-sparkless/)
 [![docs.rs](https://docs.rs/robin-sparkless/badge.svg)](https://docs.rs/robin-sparkless)
@@ -36,7 +37,7 @@
 | **Optional Delta** | `read_delta(path)` or `read_delta(table_name)`, `read_delta_with_version`, `write_delta`, `write_delta_table(name)` — enable with `--features delta` (path I/O); table-by-name works with `sql` only |
 | **UDFs** | Scalar and vectorized Python UDFs via `spark.udf().register(...)`, grouped vectorized **pandas UDFs** for `group_by().agg(...)` (`function_type="grouped_agg"`), and pure-Rust UDFs; see `docs/UDF_GUIDE.md` |
 
-Known differences from PySpark are documented in [docs/PYSPARK_DIFFERENCES.md](docs/PYSPARK_DIFFERENCES.md). Out-of-scope items (XML, UDF, streaming, RDD) are documented in [docs/DEFERRED_SCOPE.md](docs/DEFERRED_SCOPE.md). Parity status and roadmap are in [docs/PARITY_STATUS.md](docs/PARITY_STATUS.md) and [docs/ROADMAP.md](docs/ROADMAP.md).
+**Parity:** 200+ fixtures validated against PySpark. Known differences from PySpark are documented in [docs/PYSPARK_DIFFERENCES.md](docs/PYSPARK_DIFFERENCES.md). Out-of-scope items (XML, UDTF, streaming, RDD) are in [docs/DEFERRED_SCOPE.md](docs/DEFERRED_SCOPE.md). Full parity status: [docs/PARITY_STATUS.md](docs/PARITY_STATUS.md).
 
 ---
 
@@ -109,6 +110,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
+Output (from `show`):
+```
+shape: (2, 3)
+┌─────┬─────┬─────────┐
+│ id  ┆ age ┆ name    │
+│ --- ┆ --- ┆ ---     │
+│ i64 ┆ i64 ┆ str     │
+╞═════╪═════╪═════════╡
+│ 2   ┆ 30  ┆ Bob     │
+│ 3   ┆ 35  ┆ Charlie │
+└─────┴─────┴─────────┘
+```
+
 You can also wrap an existing Polars `DataFrame` with `DataFrame::from_polars(polars_df)`. See [docs/QUICKSTART.md](docs/QUICKSTART.md) for joins, window functions, and more.
 
 ### Python
@@ -117,9 +131,17 @@ You can also wrap an existing Polars `DataFrame` with `DataFrame::from_polars(po
 import robin_sparkless as rs
 
 spark = rs.SparkSession.builder().app_name("demo").get_or_create()
-df = spark.create_dataframe([(1, 25, "Alice"), (2, 30, "Bob")], ["id", "age", "name"])
-filtered = df.filter(rs.col("age").gt(rs.lit(26)))
-print(filtered.collect())  # [{"id": 2, "age": 30, "name": "Bob"}]
+df = spark.create_dataframe(
+    [(1, 25, "Alice"), (2, 30, "Bob"), (3, 35, "Charlie")],
+    ["id", "age", "name"],
+)
+filtered = df.filter(rs.col("age") > rs.lit(26))  # or .gt(rs.lit(26))
+print(filtered.collect())
+```
+
+Output:
+```
+[{'id': 2, 'age': 30, 'name': 'Bob'}, {'id': 3, 'age': 35, 'name': 'Charlie'}]
 ```
 
 ---
@@ -149,18 +171,20 @@ CI runs format, clippy, audit, deny, Rust tests, Python lint (ruff, mypy), and P
 
 ## Documentation
 
-- [**Full documentation (Read the Docs)**](https://robin-sparkless.readthedocs.io/) — Quickstart, Python API, reference, and Sparkless integration (MkDocs)
-- [**PyPI**](https://pypi.org/project/robin-sparkless/) — Python package (wheels for Linux, macOS, Windows)
-- [**API reference (docs.rs)**](https://docs.rs/robin-sparkless) — Crate API
-- [**QUICKSTART**](docs/QUICKSTART.md) — Build, usage, optional features, benchmarks
-- [**Persistence guide**](docs/PERSISTENCE_GUIDE.md) — Global temp views and disk-backed saveAsTable
-- [**ROADMAP**](docs/ROADMAP.md) — Development roadmap and Sparkless integration
-- [**PYSPARK_DIFFERENCES**](docs/PYSPARK_DIFFERENCES.md) — Known divergences from PySpark
-- [**GAP_ANALYSIS_PYSPARK_REPO**](docs/GAP_ANALYSIS_PYSPARK_REPO.md) — Gap analysis vs Apache PySpark (from source)
-- [**UDF guide**](docs/UDF_GUIDE.md) — Scalar, vectorized, and grouped vectorized UDFs (including `pandas_udf(..., function_type="grouped_agg")`)
-- [**RELEASING**](docs/RELEASING.md) — Releasing and publishing to crates.io
+| Resource | Description |
+|----------|-------------|
+| [**Read the Docs**](https://robin-sparkless.readthedocs.io/) | Full docs: quickstart, Python API, Sparkless integration (MkDocs) |
+| [**docs.rs**](https://docs.rs/robin-sparkless) | Rust API reference |
+| [**PyPI**](https://pypi.org/project/robin-sparkless/) | Python package (wheels for Linux, macOS, Windows) |
+| [QUICKSTART](docs/QUICKSTART.md) | Build, usage, optional features, benchmarks |
+| [User Guide](docs/USER_GUIDE.md) | Everyday usage (Rust and Python) |
+| [Persistence Guide](docs/PERSISTENCE_GUIDE.md) | Global temp views, disk-backed saveAsTable |
+| [UDF Guide](docs/UDF_GUIDE.md) | Scalar, vectorized, and grouped UDFs |
+| [PySpark Differences](docs/PYSPARK_DIFFERENCES.md) | Known divergences |
+| [Roadmap](docs/ROADMAP.md) | Development phases, Sparkless integration |
+| [RELEASING](docs/RELEASING.md) | Publishing to crates.io |
 
-See also [CHANGELOG.md](CHANGELOG.md) for version history.
+See [CHANGELOG.md](CHANGELOG.md) for version history.
 
 ---
 
