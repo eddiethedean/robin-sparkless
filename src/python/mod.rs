@@ -109,9 +109,63 @@ pub(crate) fn py_to_json_value(value: &Bound<'_, pyo3::types::PyAny>) -> PyResul
             .collect::<PyResult<Vec<_>>>()?;
         return Ok(JsonValue::Array(arr));
     }
+    // Python datetime.date / datetime.datetime (#239): serialize to ISO string for Rust date/timestamp columns.
+    if let Ok(iso) = py_date_or_datetime_to_iso_string(value) {
+        return Ok(JsonValue::String(iso));
+    }
     Err(pyo3::exceptions::PyTypeError::new_err(
-        "create_dataframe_from_rows / execute_plan: row values must be None, int, float, bool, str, dict (struct/map), or list (array)",
+        "create_dataframe_from_rows / execute_plan: row values must be None, int, float, bool, str, dict (struct/map), list (array), datetime.date, or datetime.datetime",
     ))
+}
+
+/// Convert Python datetime.date or datetime.datetime to an ISO string for use as JsonValue.
+/// Returns Ok(s) if the value has year/month/day (and optionally time); Err if not.
+fn py_date_or_datetime_to_iso_string(value: &Bound<'_, pyo3::types::PyAny>) -> PyResult<String> {
+    let year: i32 = value
+        .getattr("year")
+        .ok()
+        .and_then(|a| a.extract().ok())
+        .ok_or_else(|| {
+            pyo3::exceptions::PyTypeError::new_err("expected date/datetime with year")
+        })?;
+    let month: u32 = value
+        .getattr("month")
+        .ok()
+        .and_then(|a| a.extract().ok())
+        .ok_or_else(|| {
+            pyo3::exceptions::PyTypeError::new_err("expected date/datetime with month")
+        })?;
+    let day: u32 = value
+        .getattr("day")
+        .ok()
+        .and_then(|a| a.extract().ok())
+        .ok_or_else(|| pyo3::exceptions::PyTypeError::new_err("expected date/datetime with day"))?;
+    let has_time = value.getattr("hour").is_ok()
+        && value.getattr("minute").is_ok()
+        && value.getattr("second").is_ok();
+    if has_time {
+        let hour: u32 = value.getattr("hour")?.extract()?;
+        let minute: u32 = value.getattr("minute")?.extract()?;
+        let second: u32 = value.getattr("second")?.extract()?;
+        let micros: u32 = value
+            .getattr("microsecond")
+            .ok()
+            .and_then(|a| a.extract().ok())
+            .unwrap_or(0);
+        if micros > 0 {
+            Ok(format!(
+                "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}.{:06}",
+                year, month, day, hour, minute, second, micros
+            ))
+        } else {
+            Ok(format!(
+                "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}",
+                year, month, day, hour, minute, second
+            ))
+        }
+    } else {
+        Ok(format!("{:04}-{:02}-{:02}", year, month, day))
+    }
 }
 
 /// Execute a logical plan over in-memory row data and return a lazy DataFrame.
