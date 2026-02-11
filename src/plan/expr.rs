@@ -1,7 +1,7 @@
 //! Expression interpreter: turn serialized expression trees (JSON/serde) into Polars Expr.
 //! Used by the plan interpreter for filter, select, and withColumn payloads.
 
-use polars::prelude::{col, lit, Expr};
+use polars::prelude::{col, lit, DataType, Expr};
 use serde_json::Value;
 use std::error::Error;
 use std::fmt;
@@ -39,23 +39,76 @@ pub fn expr_from_value(v: &Value) -> Result<Expr, PlanExprError> {
     if let Some(op) = obj.get("op").and_then(Value::as_str) {
         match op {
             "eq" | "ne" | "gt" | "ge" | "lt" | "le" => {
-                let left = obj
+                let left_v = obj
                     .get("left")
                     .ok_or_else(|| PlanExprError(format!("op '{op}' requires 'left'")))?;
-                let right = obj
+                let right_v = obj
                     .get("right")
                     .ok_or_else(|| PlanExprError(format!("op '{op}' requires 'right'")))?;
-                let l = expr_from_value(left)?;
-                let r = expr_from_value(right)?;
-                return Ok(match op {
-                    "eq" => l.eq(r),
-                    "ne" => l.neq(r),
-                    "gt" => l.gt(r),
-                    "ge" => l.gt_eq(r),
-                    "lt" => l.lt(r),
-                    "le" => l.lt_eq(r),
-                    _ => unreachable!(),
-                });
+                let l = expr_from_value(left_v)?;
+                let r = expr_from_value(right_v)?;
+
+                // Best-effort type hints: literals we can infer directly; columns are left
+                // without types here and will be handled by the DataFrame-level rewriter.
+                use polars::prelude::LiteralValue;
+                let infer_lit_type = |e: &Expr| -> Option<DataType> {
+                    if let Expr::Literal(lv) = e {
+                        Some(match lv {
+                            LiteralValue::Int32(_) => DataType::Int32,
+                            LiteralValue::Int64(_) => DataType::Int64,
+                            LiteralValue::UInt32(_) => DataType::UInt32,
+                            LiteralValue::UInt64(_) => DataType::UInt64,
+                            LiteralValue::Float32(_) => DataType::Float32,
+                            LiteralValue::Float64(_) => DataType::Float64,
+                            LiteralValue::Boolean(_) => DataType::Boolean,
+                            LiteralValue::String(_) => DataType::String,
+                            _ => return None,
+                        })
+                    } else {
+                        None
+                    }
+                };
+
+                let l_ty = infer_lit_type(&l);
+                let r_ty = infer_lit_type(&r);
+
+                let expr = match (l_ty, r_ty) {
+                    (Some(lt), Some(rt)) => {
+                        use crate::type_coercion::{coerce_for_pyspark_comparison, CompareOp};
+                        let op_enum = match op {
+                            "eq" => CompareOp::Eq,
+                            "ne" => CompareOp::NotEq,
+                            "gt" => CompareOp::Gt,
+                            "ge" => CompareOp::GtEq,
+                            "lt" => CompareOp::Lt,
+                            "le" => CompareOp::LtEq,
+                            _ => unreachable!(),
+                        };
+                        let (lc, rc) =
+                            coerce_for_pyspark_comparison(l.clone(), r.clone(), &lt, &rt, &op_enum)
+                                .map_err(|e| PlanExprError(e.to_string()))?;
+                        match op {
+                            "eq" => lc.eq(rc),
+                            "ne" => lc.neq(rc),
+                            "gt" => lc.gt(rc),
+                            "ge" => lc.gt_eq(rc),
+                            "lt" => lc.lt(rc),
+                            "le" => lc.lt_eq(rc),
+                            _ => unreachable!(),
+                        }
+                    }
+                    _ => match op {
+                        "eq" => l.eq(r),
+                        "ne" => l.neq(r),
+                        "gt" => l.gt(r),
+                        "ge" => l.gt_eq(r),
+                        "lt" => l.lt(r),
+                        "le" => l.lt_eq(r),
+                        _ => unreachable!(),
+                    },
+                };
+
+                return Ok(expr);
             }
             "eq_null_safe" => {
                 let left = obj.get("left").ok_or_else(|| {

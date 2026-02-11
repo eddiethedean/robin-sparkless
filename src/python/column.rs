@@ -89,7 +89,7 @@ impl PyColumn {
     fn gt(&self, other: &Bound<'_, pyo3::types::PyAny>) -> PyResult<Self> {
         let other_col = py_any_to_column(other)?;
         Ok(PyColumn {
-            inner: self.inner.gt(other_col.expr().clone()),
+            inner: self.inner.gt(other_col.into_expr()),
         })
     }
 
@@ -97,7 +97,7 @@ impl PyColumn {
     fn ge(&self, other: &Bound<'_, pyo3::types::PyAny>) -> PyResult<Self> {
         let other_col = py_any_to_column(other)?;
         Ok(PyColumn {
-            inner: self.inner.gt_eq(other_col.expr().clone()),
+            inner: self.inner.gt_eq(other_col.into_expr()),
         })
     }
 
@@ -105,7 +105,7 @@ impl PyColumn {
     fn lt(&self, other: &Bound<'_, pyo3::types::PyAny>) -> PyResult<Self> {
         let other_col = py_any_to_column(other)?;
         Ok(PyColumn {
-            inner: self.inner.lt(other_col.expr().clone()),
+            inner: self.inner.lt(other_col.into_expr()),
         })
     }
 
@@ -113,7 +113,7 @@ impl PyColumn {
     fn le(&self, other: &Bound<'_, pyo3::types::PyAny>) -> PyResult<Self> {
         let other_col = py_any_to_column(other)?;
         Ok(PyColumn {
-            inner: self.inner.lt_eq(other_col.expr().clone()),
+            inner: self.inner.lt_eq(other_col.into_expr()),
         })
     }
 
@@ -121,7 +121,7 @@ impl PyColumn {
     fn eq(&self, other: &Bound<'_, pyo3::types::PyAny>) -> PyResult<Self> {
         let other_col = py_any_to_column(other)?;
         Ok(PyColumn {
-            inner: self.inner.eq(other_col.expr().clone()),
+            inner: self.inner.eq(other_col.into_expr()),
         })
     }
 
@@ -129,7 +129,7 @@ impl PyColumn {
     fn ne(&self, other: &Bound<'_, pyo3::types::PyAny>) -> PyResult<Self> {
         let other_col = py_any_to_column(other)?;
         Ok(PyColumn {
-            inner: self.inner.neq(other_col.expr().clone()),
+            inner: self.inner.neq(other_col.into_expr()),
         })
     }
 

@@ -72,6 +72,7 @@ pub fn filter(
     case_sensitive: bool,
 ) -> Result<DataFrame, PolarsError> {
     let condition = df.resolve_expr_column_names(condition)?;
+    let condition = df.coerce_string_numeric_comparisons(condition)?;
     let lf = df.df.as_ref().clone().lazy().filter(condition);
     let out_df = lf.collect()?;
     Ok(super::DataFrame::from_polars_with_options(
