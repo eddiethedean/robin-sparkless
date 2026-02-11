@@ -3021,11 +3021,56 @@ pub fn apply_pyspark_multiply(columns: &mut [Column]) -> PolarsResult<Option<Col
 }
 
 /// PySpark-style true division with string/number coercion for Python Column operators.
-///
-/// Division by zero yields +/-inf or NaN, which Sparkless tests accept as a backend-specific
-/// representation of null/invalid.
+/// Division by zero yields null (Spark/PySpark parity; issue #218).
+#[allow(clippy::useless_conversion)] // ChunkedArray needs .into_iter() for owned iteration
 pub fn apply_pyspark_divide(columns: &mut [Column]) -> PolarsResult<Option<Column>> {
-    pyspark_binary_arith(columns, "pyspark_divide", |a, b| a / b)
+    if columns.len() < 2 {
+        return Err(PolarsError::ComputeError(
+            "pyspark_divide needs two columns".into(),
+        ));
+    }
+
+    let name = columns[0].field().into_owned().name;
+    let a_s = std::mem::take(&mut columns[0]).take_materialized_series();
+    let b_s = std::mem::take(&mut columns[1]).take_materialized_series();
+
+    let mut ca_a = series_to_f64_pyspark(&a_s, "pyspark_divide")?;
+    let mut ca_b = series_to_f64_pyspark(&b_s, "pyspark_divide")?;
+
+    let len_a = ca_a.len();
+    let len_b = ca_b.len();
+    if len_a == 1 && len_b > 1 {
+        let val = ca_a.get(0);
+        ca_a = Float64Chunked::from_iter_options(
+            name.as_str().into(),
+            std::iter::repeat_n(val, len_b),
+        );
+    } else if len_b == 1 && len_a > 1 {
+        let val = ca_b.get(0);
+        ca_b = Float64Chunked::from_iter_options(
+            name.as_str().into(),
+            std::iter::repeat_n(val, len_a),
+        );
+    }
+
+    let out = Float64Chunked::from_iter_options(
+        name.as_str().into(),
+        ca_a.into_iter()
+            .zip(ca_b.into_iter())
+            .map(|(oa, ob)| match (oa, ob) {
+                (Some(a), Some(b)) => {
+                    if b == 0.0 {
+                        None // division by zero -> null (Spark parity, #218)
+                    } else {
+                        Some(a / b)
+                    }
+                }
+                _ => None,
+            }),
+    )
+    .into_series();
+
+    Ok(Some(Column::new(name, out)))
 }
 
 /// PySpark-style modulo with string/number coercion for Python Column operators.
