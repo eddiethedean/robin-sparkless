@@ -85,11 +85,15 @@ def test_user_guide_persistence_temp_view() -> None:
 
 
 def test_readme_python_quickstart() -> None:
-    """README: Python quick start example."""
+    """README: Python quick start example (runs both main README and README-Python)."""
     spark = rs.SparkSession.builder().app_name("demo").get_or_create()
     df = spark.create_dataframe(
-        [(1, 25, "Alice"), (2, 30, "Bob")], ["id", "age", "name"]
+        [(1, 25, "Alice"), (2, 30, "Bob"), (3, 35, "Charlie")],
+        ["id", "age", "name"],
     )
-    filtered = df.filter(rs.col("age").gt(rs.lit(26)))
+    filtered = df.filter(rs.col("age") > rs.lit(26))
     rows = filtered.collect()
-    assert rows == [{"id": 2, "age": 30, "name": "Bob"}]
+    assert rows == [
+        {"id": 2, "age": 30, "name": "Bob"},
+        {"id": 3, "age": 35, "name": "Charlie"},
+    ]

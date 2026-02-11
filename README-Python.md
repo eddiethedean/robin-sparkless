@@ -1,12 +1,12 @@
 # robin-sparkless (Python)
 
+[![CI](https://github.com/eddiethedean/robin-sparkless/actions/workflows/ci.yml/badge.svg)](https://github.com/eddiethedean/robin-sparkless/actions/workflows/ci.yml)
 [![PyPI version](https://badge.fury.io/py/robin-sparkless.svg)](https://pypi.org/project/robin-sparkless/)
 [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Documentation](https://readthedocs.org/projects/robin-sparkless/badge/?version=latest)](https://robin-sparkless.readthedocs.io/)
-[![Source](https://img.shields.io/badge/source-GitHub-black.svg)](https://github.com/eddiethedean/robin-sparkless)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 
-**PySpark-style DataFrames in Python—no JVM.** Uses [Polars](https://www.pola.rs/) under the hood for fast execution.
+**PySpark-style DataFrames in Python—no JVM.** Uses [Polars](https://www.pola.rs/) under the hood for fast, native execution. 200+ operations validated against PySpark.
 
 ## Install
 
@@ -26,12 +26,16 @@ df = spark.create_dataframe(
     [(1, 25, "Alice"), (2, 30, "Bob"), (3, 35, "Charlie")],
     ["id", "age", "name"],
 )
-filtered = df.filter(rs.col("age").gt(rs.lit(26)))
+filtered = df.filter(rs.col("age") > rs.lit(26))  # or .gt(rs.lit(26))
 print(filtered.collect())
-# [{"id": 2, "age": 30, "name": "Bob"}, {"id": 3, "age": 35, "name": "Charlie"}]
 ```
 
-Read from files:
+Output:
+```
+[{'id': 2, 'age': 30, 'name': 'Bob'}, {'id': 3, 'age': 35, 'name': 'Charlie'}]
+```
+
+**Read from files:**
 
 ```python
 df = spark.read_csv("data.csv")
@@ -39,7 +43,7 @@ df = spark.read_parquet("data.parquet")
 df = spark.read_json("data.json")
 ```
 
-Filter, select, group, join, and use window functions with a PySpark-like API. See the [full documentation](https://robin-sparkless.readthedocs.io/) for details.
+Filter, select, group, join, and use window functions with a PySpark-like API. For arbitrary schemas, use `spark._create_dataframe_from_rows(rows, schema)`. See the [User Guide](docs/USER_GUIDE.md) and [full documentation](https://robin-sparkless.readthedocs.io/) for details.
 
 ## UDFs and pandas_udf (Python)
 
@@ -104,9 +108,14 @@ CI uses the same tooling: ruff, mypy&lt;1.10 (Python 3.8), and pytest. PySpark i
 
 ## Links
 
-- **Documentation:** [robin-sparkless.readthedocs.io](https://robin-sparkless.readthedocs.io/)
-- **Source:** [github.com/eddiethedean/robin-sparkless](https://github.com/eddiethedean/robin-sparkless)
-- **Rust crate:** [crates.io/crates/robin-sparkless](https://crates.io/crates/robin-sparkless)
+| Resource | URL |
+|----------|-----|
+| **Documentation** | [robin-sparkless.readthedocs.io](https://robin-sparkless.readthedocs.io/) |
+| **User Guide** | [docs/USER_GUIDE.md](docs/USER_GUIDE.md) |
+| **Python API** | [docs/PYTHON_API.md](docs/PYTHON_API.md) |
+| **UDF Guide** | [docs/UDF_GUIDE.md](docs/UDF_GUIDE.md) |
+| **Source** | [github.com/eddiethedean/robin-sparkless](https://github.com/eddiethedean/robin-sparkless) |
+| **Rust crate** | [crates.io/crates/robin-sparkless](https://crates.io/crates/robin-sparkless) |
 
 ## License
 
