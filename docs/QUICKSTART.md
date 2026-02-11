@@ -43,7 +43,7 @@ The current API is intentionally small and focused on wrapping Polars types.
 
 ```rust
 use polars::prelude::*;
-use robin_sparkless::{DataFrame, Column};
+use robin_sparkless::{col, lit_i64, DataFrame};
 
 fn main() -> polars::prelude::PolarsResult<()> {
     // Build a Polars DataFrame
@@ -59,9 +59,8 @@ fn main() -> polars::prelude::PolarsResult<()> {
     // Introspect
     println!("{:?}", df.columns()?);
 
-    // Use a Column wrapper around a Polars expression
-    let age_col: Column = df.column("age")?;
-    let adults = df.filter(age_col.expr().clone().gt(lit(18)))?;
+    // Filter using col() and lit_i64
+    let adults = df.filter(col("age").gt(lit_i64(18)))?;
 
     adults.show(Some(10))?;
 

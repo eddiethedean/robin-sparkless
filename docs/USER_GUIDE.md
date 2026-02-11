@@ -97,13 +97,15 @@ df = spark.create_dataframe(
 
 **From rows with arbitrary schema**
 
+Use `_create_dataframe_from_rows` for schemas other than the 3-tuple (id, age, name):
+
 ```python
 schema = [("id", "bigint"), ("name", "string"), ("score", "double")]
 rows = [
     {"id": 1, "name": "Alice", "score": 95.5},
     {"id": 2, "name": "Bob", "score": 87.0},
 ]
-df = spark.create_dataframe_from_rows(rows, schema)
+df = spark._create_dataframe_from_rows(rows, schema)
 ```
 
 **From files**
@@ -247,7 +249,7 @@ df.write().mode("append").format("csv").save("output.csv")
 With the `sql` feature, you can run SQL against temp views.
 
 ```python
-df.create_or_replace_temp_view("people")
+df.createOrReplaceTempView("people")
 result = spark.sql("SELECT name, age FROM people WHERE age > 25 ORDER BY age")
 ```
 
@@ -282,9 +284,9 @@ See [UDF Guide](UDF_GUIDE.md) for full details.
 
 ## Persistence and Tables
 
-- **Temp views**: `df.create_or_replace_temp_view("my_table")` — in-session only
-- **Global temp views**: `df.create_or_replace_global_temp_view("global_table")` — visible across sessions
-- **Saved tables**: `df.write().save_as_table("my_table", mode="overwrite")` — disk-backed when `spark.sql.warehouse.dir` is set
+- **Temp views**: `df.createOrReplaceTempView("my_table")` — in-session only
+- **Global temp views**: `df.createOrReplaceGlobalTempView("global_table")` — visible across sessions
+- **Saved tables**: `df.write().saveAsTable("my_table", mode="overwrite")` — disk-backed when `spark.sql.warehouse.dir` is set
 
 See [Persistence Guide](PERSISTENCE_GUIDE.md) for more.
 
@@ -306,11 +308,14 @@ result = (
 ### Conditional Logic (when/then/otherwise)
 
 ```python
+# Nested when/then/otherwise for multiple conditions
 df2 = df.with_column(
     "category",
-    rs.when(rs.col("age") >= 65, rs.lit("senior"))
-    .when(rs.col("age") >= 18, rs.lit("adult"))
-    .otherwise(rs.lit("minor")),
+    rs.when(rs.col("age") >= 65)
+    .then(rs.lit("senior"))
+    .otherwise(
+        rs.when(rs.col("age") >= 18).then(rs.lit("adult")).otherwise(rs.lit("minor"))
+    ),
 )
 ```
 
@@ -318,8 +323,8 @@ df2 = df.with_column(
 
 ```python
 df2 = df.with_column("age_filled", rs.coalesce(rs.col("age"), rs.lit(0)))
-df2 = df.na().fill(0, subset=["age"])
-df2 = df.na().drop(subset=["name"])
+df2 = df.na().fill(rs.lit(0))   # Fill nulls in all columns with 0
+df2 = df.na().drop(subset=["name"])   # Drop rows with null in "name"
 ```
 
 ---
@@ -338,7 +343,8 @@ df.show(Some(20))?;                     // Print to stdout
 ```python
 rows = df.collect()           # List of dicts
 df.show(20)                   # Print to stdout
-pandas_df = df.to_pandas()    # Pandas DataFrame
+# to_pandas() returns list of dicts; for a pandas DataFrame use:
+# pandas.DataFrame.from_records(df.to_pandas())
 ```
 
 ---
@@ -348,7 +354,7 @@ pandas_df = df.to_pandas()    # Pandas DataFrame
 | Error | Cause | Fix |
 |-------|-------|-----|
 | Column 'X' not found | Typo or wrong case | Check column names with `df.columns()` |
-| create_dataframe: expected 3 column names | `create_dataframe` needs exactly 3 columns | Use `create_dataframe_from_rows` for other schemas |
+| create_dataframe: expected 3 column names | `create_dataframe` needs exactly 3 columns | Use `_create_dataframe_from_rows` for other schemas |
 | call_udf: no session | UDF used before session created | Use `SparkSession.builder().get_or_create()` first |
 | SQL: unknown function | Function not built-in or UDF | Register with `spark.udf().register()` or use a built-in |
 
