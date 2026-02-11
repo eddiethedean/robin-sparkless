@@ -8,6 +8,7 @@ use crate::functions::SortOrder;
 use polars::prelude::{
     col, Expr, IntoLazy, IntoSeries, NamedFrom, PolarsError, Series, UnionArgs, UniqueKeepStrategy,
 };
+use std::collections::HashMap;
 
 /// Select columns (returns a new DataFrame). Preserves case_sensitive on result.
 pub fn select(
@@ -24,6 +25,7 @@ pub fn select(
 
 /// Select using column expressions (e.g. F.regexp_extract_all(...).alias("m")). Preserves case_sensitive.
 /// Column names in expressions are resolved per df's case sensitivity (PySpark parity).
+/// Duplicate output names are disambiguated with _1, _2, ... so select(col("num").cast("string"), col("num").cast("int")) works (issue #213).
 pub fn select_with_exprs(
     df: &DataFrame,
     exprs: Vec<Expr>,
@@ -33,6 +35,27 @@ pub fn select_with_exprs(
         .into_iter()
         .map(|e| df.resolve_expr_column_names(e))
         .collect::<Result<Vec<_>, _>>()?;
+    let mut name_count: HashMap<String, u32> = HashMap::new();
+    let exprs: Vec<Expr> = exprs
+        .into_iter()
+        .map(|e| {
+            let base_name = polars_plan::utils::expr_output_name(&e)
+                .map(|s| s.to_string())
+                .unwrap_or_else(|_| "_".to_string());
+            let count = name_count.entry(base_name.clone()).or_insert(0);
+            *count += 1;
+            let final_name = if *count == 1 {
+                base_name
+            } else {
+                format!("{}_{}", base_name, *count - 1)
+            };
+            if *count == 1 {
+                e
+            } else {
+                e.alias(final_name.as_str())
+            }
+        })
+        .collect();
     let lf = df.df.as_ref().clone().lazy();
     let out_df = lf.select(exprs).collect()?;
     Ok(super::DataFrame::from_polars_with_options(
