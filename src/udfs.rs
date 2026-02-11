@@ -4036,6 +4036,62 @@ pub fn apply_string_to_boolean(column: Column, strict: bool) -> PolarsResult<Opt
     Ok(Some(Column::new(name, out.into_series())))
 }
 
+/// Parse string to f64 (Spark-style to_number/try_to_number for doubles).
+fn parse_str_to_double(s: &str) -> Option<f64> {
+    let s = s.trim();
+    if s.is_empty() {
+        return None;
+    }
+    s.parse::<f64>().ok()
+}
+
+/// Apply string-to-double cast. Handles string columns: empty/invalid -> null (Spark parity);
+/// passes through numeric columns; others error (strict) or null.
+pub fn apply_string_to_double(column: Column, strict: bool) -> PolarsResult<Option<Column>> {
+    let name = column.field().into_owned().name;
+    let series = column.take_materialized_series();
+    let out: Series = match series.dtype() {
+        DataType::String => {
+            let ca = series
+                .str()
+                .map_err(|e| PolarsError::ComputeError(format!("string to double: {e}").into()))?;
+            let mut results: Vec<Option<f64>> = Vec::with_capacity(ca.len());
+            for opt_s in ca.into_iter() {
+                let v = opt_s.and_then(parse_str_to_double);
+                if strict {
+                    if let Some(s) = opt_s {
+                        if v.is_none() {
+                            return Err(PolarsError::ComputeError(
+                                format!(
+                                    "conversion from `str` to `double` failed in column '{}' for value \"{s}\"",
+                                    name.as_str()
+                                )
+                                .into(),
+                            ));
+                        }
+                    }
+                }
+                results.push(v);
+            }
+            Float64Chunked::from_iter_options(name.as_str().into(), results.into_iter())
+                .into_series()
+        }
+        DataType::Float32 | DataType::Float64 => series.cast(&DataType::Float64)?,
+        DataType::Int32 | DataType::Int64 | DataType::UInt32 | DataType::UInt64 => {
+            series.cast(&DataType::Float64)?
+        }
+        _ => {
+            if strict {
+                return Err(PolarsError::ComputeError(
+                    format!("casting from {} to double not supported", series.dtype()).into(),
+                ));
+            }
+            Series::new_null(name.clone(), series.len()).cast(&DataType::Float64)?
+        }
+    };
+    Ok(Some(Column::new(name, out)))
+}
+
 /// Apply string-to-date cast. Handles string columns (accepts date and datetime strings, Spark parity); passes through date; casts datetime to date; others error (cast) or null (try_cast).
 pub fn apply_string_to_date(column: Column, strict: bool) -> PolarsResult<Option<Column>> {
     let name = column.field().into_owned().name;
