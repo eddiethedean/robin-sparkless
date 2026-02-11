@@ -45,6 +45,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Documentation** — USER_GUIDE and QUICKSTART updated: fix `_create_dataframe_from_rows` API, PySpark-style camelCase for persistence methods, correct `when`/`then`/`otherwise` nested syntax, `na().fill(rs.lit(0))` usage, clarify `to_pandas()` returns list of dicts. Added `tests/python/test_doc_examples.py` to verify doc code runs.
 - Version 0.6.0.
 
 ## [0.5.0] - 2026-02-09

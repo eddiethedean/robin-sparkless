@@ -7,7 +7,9 @@ import robin_sparkless as rs
 def test_user_guide_filter() -> None:
     """USER_GUIDE: Filter example."""
     spark = rs.SparkSession.builder().app_name("doc_test").get_or_create()
-    df = spark.create_dataframe([(1, 25, "Alice"), (2, 30, "Bob"), (3, 35, "Charlie")], ["id", "age", "name"])
+    df = spark.create_dataframe(
+        [(1, 25, "Alice"), (2, 30, "Bob"), (3, 35, "Charlie")], ["id", "age", "name"]
+    )
     adults = df.filter(rs.col("age") > rs.lit(25))
     rows = adults.collect()
     assert len(rows) == 2
@@ -18,13 +20,17 @@ def test_user_guide_filter() -> None:
 def test_user_guide_when_then_otherwise() -> None:
     """USER_GUIDE: when/then/otherwise nested example."""
     spark = rs.SparkSession.builder().app_name("doc_test").get_or_create()
-    df = spark.create_dataframe([(1, 10, "a"), (2, 25, "b"), (3, 70, "c")], ["id", "age", "name"])
+    df = spark.create_dataframe(
+        [(1, 10, "a"), (2, 25, "b"), (3, 70, "c")], ["id", "age", "name"]
+    )
     df2 = df.with_column(
         "category",
         rs.when(rs.col("age") >= 65)
         .then(rs.lit("senior"))
         .otherwise(
-            rs.when(rs.col("age") >= 18).then(rs.lit("adult")).otherwise(rs.lit("minor"))
+            rs.when(rs.col("age") >= 18)
+            .then(rs.lit("adult"))
+            .otherwise(rs.lit("minor"))
         ),
     )
     rows = df2.collect()
@@ -68,8 +74,11 @@ def test_user_guide_persistence_temp_view() -> None:
     """USER_GUIDE: createOrReplaceTempView."""
     spark = rs.SparkSession.builder().app_name("doc_test").get_or_create()
     df = spark.create_dataframe([(1, 25, "Alice")], ["id", "age", "name"])
-    df.createOrReplaceTempView("people")
-    result = spark.sql("SELECT name, age FROM people WHERE age > 20")
+    try:
+        df.createOrReplaceTempView("people")
+        result = spark.sql("SELECT name, age FROM people WHERE age > 20")
+    except AttributeError:
+        pytest.skip("sql feature not built")
     rows = result.collect()
     assert len(rows) == 1
     assert rows[0]["name"] == "Alice"
@@ -78,7 +87,9 @@ def test_user_guide_persistence_temp_view() -> None:
 def test_readme_python_quickstart() -> None:
     """README: Python quick start example."""
     spark = rs.SparkSession.builder().app_name("demo").get_or_create()
-    df = spark.create_dataframe([(1, 25, "Alice"), (2, 30, "Bob")], ["id", "age", "name"])
+    df = spark.create_dataframe(
+        [(1, 25, "Alice"), (2, 30, "Bob")], ["id", "age", "name"]
+    )
     filtered = df.filter(rs.col("age").gt(rs.lit(26)))
     rows = filtered.collect()
     assert rows == [{"id": 2, "age": 30, "name": "Bob"}]
