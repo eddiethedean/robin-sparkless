@@ -60,7 +60,9 @@ pub(crate) use column::PyColumn;
 pub(crate) use dataframe::{
     PyCubeRollupData, PyDataFrame, PyDataFrameNa, PyDataFrameStat, PyDataFrameWriter, PyGroupedData,
 };
-pub(crate) use order::{PySortOrder, PyThenBuilder, PyWhenBuilder, PyWhenThen};
+pub(crate) use order::{
+    PyRowNumber, PySortOrder, PyThenBuilder, PyWhenBuilder, PyWhenThen, PyWindow,
+};
 use session::parse_return_type;
 pub(crate) use session::{
     PyCatalog, PyDataFrameReader, PyRuntimeConfig, PySparkSession, PySparkSessionBuilder,
@@ -336,6 +338,8 @@ fn robin_sparkless(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyDataFrameNa>()?;
     m.add_class::<PyColumn>()?;
     m.add_class::<PySortOrder>()?;
+    m.add_class::<PyWindow>()?;
+    m.add_class::<PyRowNumber>()?;
     m.add_class::<PyWhenThen>()?;
     m.add_class::<PyWhenBuilder>()?;
     m.add_class::<PyThenBuilder>()?;
@@ -343,6 +347,7 @@ fn robin_sparkless(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyCubeRollupData>()?;
     m.add_class::<PyDataFrameWriter>()?;
     m.add("col", wrap_pyfunction!(py_col, m)?)?;
+    m.add("row_number", wrap_pyfunction!(py_row_number, m)?)?;
     m.add("call_udf", wrap_pyfunction!(py_call_udf, m)?)?;
     m.add("lit", wrap_pyfunction!(py_lit, m)?)?;
     m.add("when", wrap_pyfunction!(py_when, m)?)?;
@@ -872,6 +877,22 @@ fn py_coalesce(cols: Vec<PyRef<PyColumn>>) -> PyResult<PyColumn> {
     Ok(PyColumn {
         inner: coalesce(&refs),
     })
+}
+
+/// Row number window function for use with ``Window.partitionBy(...).orderBy(...)``.
+///
+/// Usage (PySpark parity-style):
+///
+///     from robin_sparkless import Window, row_number, col
+///     win = Window.partitionBy("dept").orderBy(col("salary"))
+///     df = df.with_column("rn", row_number().over(win))
+///
+/// For more control over ordering direction, use column methods
+/// (e.g. ``col("salary").row_number(descending=True).over(["dept"])``).
+#[pyfunction]
+#[pyo3(signature = (descending=false))]
+fn py_row_number(descending: bool) -> PyRowNumber {
+    PyRowNumber { descending }
 }
 
 /// Sum aggregation over a column.
