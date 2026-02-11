@@ -3831,6 +3831,26 @@ pub fn apply_shuffle(column: Column) -> PolarsResult<Option<Column>> {
 /// Size of bitmap in bytes (32768 bits).
 const BITMAP_BYTES: usize = 4096;
 
+/// Parse string to date (PySpark cast string->date). Accepts "YYYY-MM-DD" and "YYYY-MM-DD HH:MM:SS" (truncates to date).
+fn parse_str_to_date(s: &str) -> Option<chrono::NaiveDate> {
+    use chrono::{NaiveDate, NaiveDateTime};
+    let s = s.trim();
+    NaiveDate::parse_from_str(s, "%Y-%m-%d")
+        .ok()
+        .or_else(|| {
+            if s.len() >= 10 {
+                NaiveDate::parse_from_str(&s[0..10], "%Y-%m-%d").ok()
+            } else {
+                None
+            }
+        })
+        .or_else(|| {
+            NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S")
+                .ok()
+                .map(|dt| dt.date())
+        })
+}
+
 /// Parse string to boolean (PySpark cast string->boolean). "true"/"false"/"1"/"0" case-insensitive.
 /// For try_cast: invalid strings -> null. For cast: invalid strings -> error.
 fn parse_str_to_bool(s: &str, strict: bool) -> Option<bool> {
@@ -3887,6 +3907,53 @@ pub fn apply_string_to_boolean(column: Column, strict: bool) -> PolarsResult<Opt
         }
     };
     Ok(Some(Column::new(name, out.into_series())))
+}
+
+/// Apply string-to-date cast. Handles string columns (accepts date and datetime strings, Spark parity); passes through date; casts datetime to date; others error (cast) or null (try_cast).
+pub fn apply_string_to_date(column: Column, strict: bool) -> PolarsResult<Option<Column>> {
+    let name = column.field().into_owned().name;
+    let series = column.take_materialized_series();
+    let epoch = crate::date_utils::epoch_naive_date();
+    let out: Series = match series.dtype() {
+        DataType::String => {
+            let ca = series
+                .str()
+                .map_err(|e| PolarsError::ComputeError(format!("string to date: {e}").into()))?;
+            let mut results = Vec::with_capacity(ca.len());
+            for opt_s in ca.into_iter() {
+                let v =
+                    opt_s.and_then(|s| parse_str_to_date(s).map(|d| (d - epoch).num_days() as i32));
+                if strict {
+                    if let Some(s) = opt_s {
+                        if v.is_none() {
+                            return Err(PolarsError::ComputeError(
+                                format!(
+                                    "conversion from `str` to `date` failed in column '{}' for value \"{s}\"",
+                                    name.as_str()
+                                )
+                                .into(),
+                            ));
+                        }
+                    }
+                }
+                results.push(v);
+            }
+            let chunked =
+                Int32Chunked::from_iter_options(name.as_str().into(), results.into_iter());
+            chunked.into_series().cast(&DataType::Date)?
+        }
+        DataType::Date => series,
+        DataType::Datetime(_, _) => series.cast(&DataType::Date)?,
+        _ => {
+            if strict {
+                return Err(PolarsError::ComputeError(
+                    format!("casting from {} to date not supported", series.dtype()).into(),
+                ));
+            }
+            Series::new_null(name.clone(), series.len()).cast(&DataType::Date)?
+        }
+    };
+    Ok(Some(Column::new(name, out)))
 }
 
 /// Count set bits in a bitmap (binary column). PySpark bitmap_count.
