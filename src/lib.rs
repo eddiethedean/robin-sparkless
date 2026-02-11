@@ -3,13 +3,15 @@
 //! This library provides a PySpark-compatible API built on top of Polars,
 //! offering high-performance data processing in pure Rust.
 //!
-//! # Panics
+//! # Panics and errors
 //!
 //! Some functions panic when used with invalid or empty inputs (e.g. calling
 //! `when(cond).otherwise(val)` without `.then()`, or passing no columns to
-//! `format_string`, `elt`, `concat`, `coalesce`, `array`, `create_map`, or
-//! `struct`/`named_struct`). See the documentation for each function for
-//! details.
+//! `format_string`, `elt`, `concat`, `coalesce`, or `named_struct` in Rust).
+//! In Rust, `create_map` and `array` return `Result` for empty input instead of
+//! panicking. From Python, empty columns for `coalesce`, `format_string`,
+//! `printf`, and `named_struct` raise `ValueError`. See the documentation for
+//! each function for details.
 //!
 //! # API stability
 //!
