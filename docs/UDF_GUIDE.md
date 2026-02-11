@@ -80,7 +80,8 @@ import robin_sparkless as rs
 
 spark = rs.SparkSession.builder().app_name("vec_udf").get_or_create()
 
-df = spark.create_dataframe([(1,), (2,), (3,)], ["id"])
+# Single-column schema: use _create_dataframe_from_rows (create_dataframe is 3-column only)
+df = spark._create_dataframe_from_rows([{"id": 1}, {"id": 2}, {"id": 3}], [("id", "bigint")])
 
 # Using the returned UserDefinedFunction
 df2 = df.with_column("d2", my_udf(rs.col("id")))
