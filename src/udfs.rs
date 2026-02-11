@@ -3851,6 +3851,88 @@ fn parse_str_to_date(s: &str) -> Option<chrono::NaiveDate> {
         })
 }
 
+/// Parse string to integer (Spark parity). Empty/whitespace/invalid -> None. Otherwise parse as i64.
+fn parse_str_to_int(s: &str) -> Option<i64> {
+    let s = s.trim();
+    if s.is_empty() {
+        return None;
+    }
+    s.parse::<i64>().ok()
+}
+
+/// Apply string-to-int cast. Handles string columns: empty/invalid -> null (Spark parity); passes through int columns; others error (strict) or null.
+pub fn apply_string_to_int(
+    column: Column,
+    strict: bool,
+    target: DataType,
+) -> PolarsResult<Option<Column>> {
+    let name = column.field().into_owned().name;
+    let series = column.take_materialized_series();
+    let out: Series = match series.dtype() {
+        DataType::String => {
+            let ca = series
+                .str()
+                .map_err(|e| PolarsError::ComputeError(format!("string to int: {e}").into()))?;
+            let mut results: Vec<Option<i64>> = Vec::with_capacity(ca.len());
+            for opt_s in ca.into_iter() {
+                let v = opt_s.and_then(parse_str_to_int);
+                if strict {
+                    if let Some(s) = opt_s {
+                        if v.is_none() {
+                            return Err(PolarsError::ComputeError(
+                                format!(
+                                    "conversion from `str` to `{}` failed in column '{}' for value \"{s}\"",
+                                    target,
+                                    name.as_str()
+                                )
+                                .into(),
+                            ));
+                        }
+                    }
+                }
+                results.push(v);
+            }
+            match &target {
+                DataType::Int32 => {
+                    let vals: Vec<Option<i32>> = results
+                        .into_iter()
+                        .map(|o| {
+                            o.and_then(|n| {
+                                (n >= i64::from(i32::MIN) && n <= i64::from(i32::MAX))
+                                    .then_some(n as i32)
+                            })
+                        })
+                        .collect();
+                    let chunked =
+                        Int32Chunked::from_iter_options(name.as_str().into(), vals.into_iter());
+                    chunked.into_series()
+                }
+                DataType::Int64 => {
+                    let chunked =
+                        Int64Chunked::from_iter_options(name.as_str().into(), results.into_iter());
+                    chunked.into_series()
+                }
+                _ => unreachable!("target is Int32 or Int64"),
+            }
+        }
+        DataType::Int32 | DataType::Int64 => series.cast(&target)?,
+        _ => {
+            if strict {
+                return Err(PolarsError::ComputeError(
+                    format!(
+                        "casting from {} to {} not supported",
+                        series.dtype(),
+                        target
+                    )
+                    .into(),
+                ));
+            }
+            Series::new_null(name.clone(), series.len()).cast(&target)?
+        }
+    };
+    Ok(Some(Column::new(name, out)))
+}
+
 /// Parse string to boolean (PySpark cast string->boolean). "true"/"false"/"1"/"0" case-insensitive.
 /// For try_cast: invalid strings -> null. For cast: invalid strings -> error.
 fn parse_str_to_bool(s: &str, strict: bool) -> Option<bool> {

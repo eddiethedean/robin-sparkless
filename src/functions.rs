@@ -1281,6 +1281,15 @@ pub fn cast(column: &Column, type_name: &str) -> Result<Column, String> {
         );
         return Ok(Column::from_expr(expr, None));
     }
+    if dtype == DataType::Int32 || dtype == DataType::Int64 {
+        use polars::prelude::GetOutput;
+        let target = dtype.clone();
+        let expr = column.expr().clone().map(
+            move |col| crate::udfs::apply_string_to_int(col, false, target.clone()),
+            GetOutput::from_type(dtype),
+        );
+        return Ok(Column::from_expr(expr, None));
+    }
     Ok(Column::from_expr(
         column.expr().clone().strict_cast(dtype),
         None,
@@ -1305,6 +1314,15 @@ pub fn try_cast(column: &Column, type_name: &str) -> Result<Column, String> {
         let expr = column.expr().clone().map(
             |col| crate::udfs::apply_string_to_date(col, false),
             GetOutput::from_type(DataType::Date),
+        );
+        return Ok(Column::from_expr(expr, None));
+    }
+    if dtype == DataType::Int32 || dtype == DataType::Int64 {
+        use polars::prelude::GetOutput;
+        let target = dtype.clone();
+        let expr = column.expr().clone().map(
+            move |col| crate::udfs::apply_string_to_int(col, false, target.clone()),
+            GetOutput::from_type(dtype),
         );
         return Ok(Column::from_expr(expr, None));
     }
