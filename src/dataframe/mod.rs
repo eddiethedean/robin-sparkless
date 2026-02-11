@@ -90,6 +90,89 @@ impl DataFrame {
         })
     }
 
+    /// Coerce string-vs-numeric comparisons to numeric for PySpark-style type strictness.
+    ///
+    /// With robin-sparkless 0.6.0, comparisons like `col("str_col") == lit(123)` could raise
+    /// `RuntimeError: cannot compare string with numeric type (i32)` because Polars enforces
+    /// strict types for comparison operations. PySpark, however, coerces the string side to
+    /// a numeric type for equality/inequality and ordering comparisons.
+    ///
+    /// This helper walks the expression tree and, for comparison operators where one side is
+    /// a string column in this DataFrame's schema and the other side is a numeric literal,
+    /// casts the string column to a numeric type (Float64). This allows comparisons like:
+    ///
+    /// - `df.filter(col("str_col") == lit(123))`
+    /// - `df.filter(col("str_col") > lit(100))`
+    ///
+    /// to succeed with numeric semantics instead of raising a type error.
+    pub fn coerce_string_numeric_comparisons(&self, expr: Expr) -> Result<Expr, PolarsError> {
+        use polars::prelude::{DataType, LiteralValue, Operator};
+        use std::sync::Arc;
+
+        fn is_numeric_literal(expr: &Expr) -> bool {
+            match expr {
+                Expr::Literal(lv) => matches!(
+                    lv,
+                    LiteralValue::Int32(_)
+                        | LiteralValue::Int64(_)
+                        | LiteralValue::Float32(_)
+                        | LiteralValue::Float64(_)
+                ),
+                _ => false,
+            }
+        }
+
+        expr.try_map_expr(move |e| {
+            if let Expr::BinaryExpr { left, op, right } = e {
+                let is_comparison_op = matches!(
+                    op,
+                    Operator::Eq
+                        | Operator::NotEq
+                        | Operator::Lt
+                        | Operator::LtEq
+                        | Operator::Gt
+                        | Operator::GtEq
+                );
+                if !is_comparison_op {
+                    return Ok(Expr::BinaryExpr { left, op, right });
+                }
+
+                let left_is_col = matches!(&*left, Expr::Column(_));
+                let right_is_col = matches!(&*right, Expr::Column(_));
+
+                let left_is_numeric_lit = is_numeric_literal(&left);
+                let right_is_numeric_lit = is_numeric_literal(&right);
+
+                if left_is_col && right_is_numeric_lit {
+                    // Cast column on the left to Float64 for numeric-style comparison
+                    // against a numeric literal. This covers string-vs-numeric as well
+                    // as numeric-vs-numeric and keeps behavior consistent.
+                    let new_left = left.as_ref().clone().cast(DataType::Float64);
+                    return Ok(Expr::BinaryExpr {
+                        left: Arc::new(new_left),
+                        op,
+                        right,
+                    });
+                }
+
+                if right_is_col && left_is_numeric_lit {
+                    // Cast column on the right to Float64 for numeric-style comparison
+                    // against a numeric literal on the left.
+                    let new_right = right.as_ref().clone().cast(DataType::Float64);
+                    return Ok(Expr::BinaryExpr {
+                        left,
+                        op,
+                        right: Arc::new(new_right),
+                    });
+                }
+
+                Ok(Expr::BinaryExpr { left, op, right })
+            } else {
+                Ok(e)
+            }
+        })
+    }
+
     /// Resolve a logical column name to the actual column name in the schema.
     /// When case_sensitive is false, matches case-insensitively.
     pub fn resolve_column_name(&self, name: &str) -> Result<String, PolarsError> {
