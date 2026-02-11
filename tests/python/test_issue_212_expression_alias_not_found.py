@@ -67,4 +67,4 @@ def test_select_expression_alias_via_execute_plan() -> None:
     rows = df.collect()
     assert len(rows) == 2
     assert rows[0]["result"] is False  # a=1 > 1 is false
-    assert rows[1]["result"] is True   # a=2 > 1 is true
+    assert rows[1]["result"] is True  # a=2 > 1 is true
