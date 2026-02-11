@@ -18,7 +18,6 @@ def test_orderby_in_supported_plan_operations() -> None:
 
 def test_execute_plan_with_orderby() -> None:
     """Plan with orderBy (e.g. test_reverse_operations_in_orderby) runs successfully."""
-    spark = rs.SparkSession.builder().app_name("test").get_or_create()
     data = [{"x": 3}, {"x": 1}, {"x": 2}]
     schema = [("x", "bigint")]
     plan = [
