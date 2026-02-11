@@ -1262,6 +1262,7 @@ pub fn sign(column: &Column) -> Column {
 
 /// Cast column to the given type (PySpark cast). Fails on invalid conversion.
 /// String-to-boolean uses custom parsing ("true"/"false"/"1"/"0") since Polars does not support Utf8->Boolean.
+/// String-to-date accepts date and datetime strings (e.g. "2025-01-01 10:30:00" truncates to date) for Spark parity.
 pub fn cast(column: &Column, type_name: &str) -> Result<Column, String> {
     let dtype = parse_type_name(type_name)?;
     if dtype == DataType::Boolean {
@@ -1269,6 +1270,14 @@ pub fn cast(column: &Column, type_name: &str) -> Result<Column, String> {
         let expr = column.expr().clone().map(
             |col| crate::udfs::apply_string_to_boolean(col, true),
             GetOutput::from_type(DataType::Boolean),
+        );
+        return Ok(Column::from_expr(expr, None));
+    }
+    if dtype == DataType::Date {
+        use polars::prelude::GetOutput;
+        let expr = column.expr().clone().map(
+            |col| crate::udfs::apply_string_to_date(col, true),
+            GetOutput::from_type(DataType::Date),
         );
         return Ok(Column::from_expr(expr, None));
     }
@@ -1280,6 +1289,7 @@ pub fn cast(column: &Column, type_name: &str) -> Result<Column, String> {
 
 /// Cast column to the given type, returning null on invalid conversion (PySpark try_cast).
 /// String-to-boolean uses custom parsing ("true"/"false"/"1"/"0") since Polars does not support Utf8->Boolean.
+/// String-to-date accepts date and datetime strings; invalid strings become null.
 pub fn try_cast(column: &Column, type_name: &str) -> Result<Column, String> {
     let dtype = parse_type_name(type_name)?;
     if dtype == DataType::Boolean {
@@ -1287,6 +1297,14 @@ pub fn try_cast(column: &Column, type_name: &str) -> Result<Column, String> {
         let expr = column.expr().clone().map(
             |col| crate::udfs::apply_string_to_boolean(col, false),
             GetOutput::from_type(DataType::Boolean),
+        );
+        return Ok(Column::from_expr(expr, None));
+    }
+    if dtype == DataType::Date {
+        use polars::prelude::GetOutput;
+        let expr = column.expr().clone().map(
+            |col| crate::udfs::apply_string_to_date(col, false),
+            GetOutput::from_type(DataType::Date),
         );
         return Ok(Column::from_expr(expr, None));
     }
