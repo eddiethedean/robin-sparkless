@@ -931,6 +931,11 @@ fn py_when(
 #[pyfunction]
 fn py_coalesce(cols: Vec<PyRef<PyColumn>>) -> PyResult<PyColumn> {
     let refs: Vec<&RsColumn> = cols.iter().map(|c| &c.inner).collect();
+    if refs.is_empty() {
+        return Err(pyo3::exceptions::PyValueError::new_err(
+            "coalesce() requires at least one column",
+        ));
+    }
     Ok(PyColumn {
         inner: coalesce(&refs),
     })
@@ -2523,15 +2528,20 @@ fn py_schema_of_json(col: &PyColumn) -> PyColumn {
 }
 
 #[pyfunction]
-fn py_format_string(format: &str, cols: Vec<PyRef<PyColumn>>) -> PyColumn {
+fn py_format_string(format: &str, cols: Vec<PyRef<PyColumn>>) -> PyResult<PyColumn> {
     let refs: Vec<&RsColumn> = cols.iter().map(|c| &c.inner).collect();
-    PyColumn {
-        inner: format_string(format, &refs),
+    if refs.is_empty() {
+        return Err(pyo3::exceptions::PyValueError::new_err(
+            "format_string() requires at least one column",
+        ));
     }
+    Ok(PyColumn {
+        inner: format_string(format, &refs),
+    })
 }
 
 #[pyfunction]
-fn py_printf(format: &str, cols: Vec<PyRef<PyColumn>>) -> PyColumn {
+fn py_printf(format: &str, cols: Vec<PyRef<PyColumn>>) -> PyResult<PyColumn> {
     py_format_string(format, cols)
 }
 
@@ -2791,6 +2801,11 @@ fn py_named_struct(names: Vec<String>, columns: Vec<PyRef<PyColumn>>) -> PyResul
     if names.len() != columns.len() {
         return Err(pyo3::exceptions::PyValueError::new_err(
             "named_struct: names and columns must have same length",
+        ));
+    }
+    if names.is_empty() {
+        return Err(pyo3::exceptions::PyValueError::new_err(
+            "named_struct() requires at least one (name, column) pair",
         ));
     }
     let pairs: Vec<(&str, &RsColumn)> = names

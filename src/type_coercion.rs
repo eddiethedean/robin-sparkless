@@ -198,12 +198,11 @@ mod tests {
     use polars::prelude::{df, IntoLazy};
 
     #[test]
-    fn numeric_numeric_uses_standard_coercion() {
+    fn numeric_numeric_uses_standard_coercion() -> Result<(), PolarsError> {
         let df = df!(
             "a" => &[1i32, 2, 3],
             "b" => &[1i64, 2, 3]
-        )
-        .unwrap();
+        )?;
 
         let a = col("a");
         let b = col("b");
@@ -213,21 +212,20 @@ mod tests {
             &DataType::Int32,
             &DataType::Int64,
             &CompareOp::Eq,
-        )
-        .unwrap();
+        )?;
 
         // After coercion both sides should be comparable without error and all rows match.
-        let out = df.lazy().filter(ac.eq(bc)).collect().unwrap();
+        let out = df.lazy().filter(ac.eq(bc)).collect()?;
         assert_eq!(out.height(), 3);
+        Ok(())
     }
 
     #[test]
-    fn string_numeric_uses_try_to_number() {
+    fn string_numeric_uses_try_to_number() -> Result<(), PolarsError> {
         let df = df!(
             "s" => &["123", " 45.5 ", "abc"],
             "n" => &[123i32, 46, 0]
-        )
-        .unwrap();
+        )?;
 
         let s_expr = col("s");
         let n_expr = col("n");
@@ -238,12 +236,12 @@ mod tests {
             &DataType::String,
             &DataType::Int32,
             &CompareOp::Eq,
-        )
-        .unwrap();
+        )?;
 
-        let out = df.lazy().filter(s_coerced.eq(n_coerced)).collect().unwrap();
+        let out = df.lazy().filter(s_coerced.eq(n_coerced)).collect()?;
 
         // Only the first row matches ("123" == 123); " 45.5 " != 46, "abc" -> null (non-match).
         assert_eq!(out.height(), 1);
+        Ok(())
     }
 }

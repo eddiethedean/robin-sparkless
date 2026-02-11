@@ -2253,7 +2253,9 @@ pub fn isnotnull(column: &Column) -> Column {
 pub fn array(columns: &[&Column]) -> Result<crate::column::Column, PolarsError> {
     use polars::prelude::*;
     if columns.is_empty() {
-        panic!("array requires at least one column");
+        return Err(PolarsError::ComputeError(
+            "array requires at least one column".into(),
+        ));
     }
     let exprs: Vec<Expr> = columns.iter().map(|c| c.expr().clone()).collect();
     let expr = concat_list(exprs)
@@ -2432,7 +2434,9 @@ pub fn posexplode(column: &Column) -> (Column, Column) {
 pub fn create_map(key_values: &[&Column]) -> Result<Column, PolarsError> {
     use polars::prelude::{as_struct, concat_list};
     if key_values.is_empty() {
-        panic!("create_map requires at least one key-value pair");
+        return Err(PolarsError::ComputeError(
+            "create_map requires at least one key-value pair".into(),
+        ));
     }
     let mut struct_exprs: Vec<Expr> = Vec::new();
     for i in (0..key_values.len()).step_by(2) {
