@@ -1436,6 +1436,18 @@ mod tests {
     }
 
     #[test]
+    fn test_create_dataframe_from_rows_empty_schema_returns_error() {
+        let spark = SparkSession::builder().app_name("test").get_or_create();
+        let rows: Vec<Vec<JsonValue>> = vec![vec![]];
+        let schema: Vec<(String, String)> = vec![];
+        let result = spark.create_dataframe_from_rows(rows, schema);
+        match &result {
+            Err(e) => assert!(e.to_string().contains("schema must not be empty")),
+            Ok(_) => panic!("expected error for empty schema"),
+        }
+    }
+
+    #[test]
     fn test_create_dataframe_empty() {
         let spark = SparkSession::builder().app_name("test").get_or_create();
         let data: Vec<(i64, i64, String)> = vec![];

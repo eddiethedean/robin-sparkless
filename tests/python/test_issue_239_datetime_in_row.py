@@ -57,7 +57,12 @@ def test_execute_plan_accepts_datetime_in_row() -> None:
         {"id": 2, "ts": None},
     ]
     schema = [("id", "int"), ("ts", "timestamp")]
-    plan = [{"op": "filter", "payload": {"op": "gt", "left": {"col": "id"}, "right": {"lit": 0}}}]
+    plan = [
+        {
+            "op": "filter",
+            "payload": {"op": "gt", "left": {"col": "id"}, "right": {"lit": 0}},
+        }
+    ]
     plan_json = json.dumps(plan)
     df = rs._execute_plan(data, schema, plan_json)
     out = df.collect()
