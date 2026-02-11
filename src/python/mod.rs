@@ -27,7 +27,8 @@ use crate::functions::{
     aggregate, array_agg, array_contains, array_join, array_max, array_min, array_position,
     array_size, array_sort, arrays_overlap, arrays_zip, assert_true as rs_assert_true, bit_and,
     bit_count, bit_length, bit_or, bit_xor, bitwise_not, broadcast as rs_broadcast, cardinality,
-    create_map, current_catalog as rs_current_catalog, current_database as rs_current_database,
+    concat as rs_concat, concat_ws as rs_concat_ws, create_map,
+    current_catalog as rs_current_catalog, current_database as rs_current_database,
     current_schema as rs_current_schema, current_user as rs_current_user, equal_null,
     explode_outer, get, hash, inline as rs_inline, inline_outer as rs_inline_outer,
     input_file_name as rs_input_file_name, isin, isin_i64, isin_str, json_array_length, map_concat,
@@ -347,6 +348,8 @@ fn robin_sparkless(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyCubeRollupData>()?;
     m.add_class::<PyDataFrameWriter>()?;
     m.add("col", wrap_pyfunction!(py_col, m)?)?;
+    m.add("concat", wrap_pyfunction!(py_concat, m)?)?;
+    m.add("concat_ws", wrap_pyfunction!(py_concat_ws, m)?)?;
     m.add("row_number", wrap_pyfunction!(py_row_number, m)?)?;
     m.add("call_udf", wrap_pyfunction!(py_call_udf, m)?)?;
     m.add("lit", wrap_pyfunction!(py_lit, m)?)?;
@@ -876,6 +879,49 @@ fn py_coalesce(cols: Vec<PyRef<PyColumn>>) -> PyResult<PyColumn> {
     let refs: Vec<&RsColumn> = cols.iter().map(|c| &c.inner).collect();
     Ok(PyColumn {
         inner: coalesce(&refs),
+    })
+}
+
+/// Concatenate string columns without separator (PySpark concat).
+///
+/// Args:
+///     columns: One or more Column expressions.
+///
+/// Returns:
+///     Column: String concatenation of all inputs.
+#[pyfunction]
+#[pyo3(signature = (*columns))]
+fn py_concat(columns: Vec<PyRef<PyColumn>>) -> PyResult<PyColumn> {
+    let refs: Vec<&RsColumn> = columns.iter().map(|c| &c.inner).collect();
+    if refs.is_empty() {
+        return Err(pyo3::exceptions::PyTypeError::new_err(
+            "concat() requires at least one column",
+        ));
+    }
+    Ok(PyColumn {
+        inner: rs_concat(&refs),
+    })
+}
+
+/// Concatenate string columns with separator (PySpark concat_ws).
+///
+/// Args:
+///     sep: Separator string.
+///     columns: One or more Column expressions.
+///
+/// Returns:
+///     Column: String concatenation of all inputs with separator between values.
+#[pyfunction]
+#[pyo3(signature = (sep, *columns))]
+fn py_concat_ws(sep: &str, columns: Vec<PyRef<PyColumn>>) -> PyResult<PyColumn> {
+    let refs: Vec<&RsColumn> = columns.iter().map(|c| &c.inner).collect();
+    if refs.is_empty() {
+        return Err(pyo3::exceptions::PyTypeError::new_err(
+            "concat_ws() requires at least one column",
+        ));
+    }
+    Ok(PyColumn {
+        inner: rs_concat_ws(sep, &refs),
     })
 }
 
