@@ -7,12 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Planned
+
+- **Phase 26 – Publish crate**: Prepare and publish robin-sparkless to crates.io (and optionally PyPI via maturin). See [ROADMAP.md](docs/ROADMAP.md) for details.
+
+## [0.7.0] - 2026-02-11
+
 ### Added
 
+- **#239 – datetime/date in row data (PySpark parity)** — `_create_dataframe_from_rows` and `execute_plan` now accept Python `datetime.datetime` and `datetime.date` in row values; they are serialized to ISO strings and parsed by the existing Rust date/timestamp handling. New tests: `test_issue_239_datetime_in_row.py`.
+- **#237 – Window and row_number in Python API** — `row_number()` and `Window.partitionBy(...).orderBy(...)` are exposed; use `F.row_number().over(window)` for PySpark-style window expressions. New tests: `test_issue_237_window_row_number_api.py`.
+- **#238 – concat and concat_ws in Python API** — Module-level `concat(columns)` and `concat_ws(separator, columns)` are exposed for string concatenation. New tests: `test_issue_238_concat_api.py`.
 - **#202 – Supported plan operations API (Sparkless parity)** — New `supported_plan_operations()` returns a tuple of plan op names supported by `_execute_plan` (e.g. `filter`, `select`, `limit`, `orderBy`, …). Sparkless and other backends can query this instead of using a hardcoded list that omits `filter`, fixing `SparkUnsupportedOperationError: Operation 'Operations: filter' is not supported` when using the Robin backend. Documented in `docs/LOGICAL_PLAN_FORMAT.md`. New tests: `test_issue_202_supported_plan_operations.py`.
 
 ### Fixed
 
+- **#236 – CaseWhen: Column.otherwise() missing (PySpark parity)** — `when(condition, value)` now returns a `WhenThen` with `.otherwise(default)` so `when(col("x") > 0, lit(1)).otherwise(lit(0))` works. Fixes `AttributeError: 'WhenThen' object has no attribute 'otherwise'`. New tests: `test_issue_236_case_when_otherwise.py`.
 - **#235 – Type strictness: string vs numeric comparison** — Comparing a string column to a numeric literal in `filter` (e.g. `df.filter(col("str_col") == lit(123))` or `df.filter(lit(123) == col("str_col"))`) no longer raises `RuntimeError: cannot compare string with numeric type (i32)`. A central `coerce_for_pyspark_comparison` helper now rewrites comparison expressions so that string–numeric combinations route the string side through `try_to_number` (string→double) and compare numerically, with invalid numeric strings treated as null (non-matching). This applies consistently across DataFrame filters, plan interpreter comparisons, and Python Column operators. New tests: `test_issue_235_type_strictness_comparisons.py` and Rust unit tests in `type_coercion.rs` / `functions.rs`.
 - **#199 – Other expression or result parity (Sparkless)** — Representative failures (astype/cast returns None, duplicate column names, expression/alias not found, division by zero, orderBy unsupported, etc.) are addressed by child issues #211, #213–#220. Regression tests added for the issue example: `test_issue_199_expression_result_parity.py` (cast to string/int in with_column, collect returns expected value).
 - **#220 – orderBy not supported (Sparkless-side)** — robin-sparkless already supports `orderBy` in `_execute_plan` and lists it in `supported_plan_operations()`. Regression tests added: `test_issue_220_orderby_supported.py`. Sparkless should query `supported_plan_operations()` for the Robin backend to avoid `SparkUnsupportedOperationError: Operation 'Operations: orderBy' is not supported`.
@@ -34,9 +44,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **#196 – concat/concat_ws with literal separator or mixed literals in plan select** — When the plan `select` payload contains a string that looks like `concat(...)` or `concat_ws(...)` (e.g. `concat(first_name, , last_name)` with empty literal between columns), the plan interpreter now parses it as an expression and evaluates it instead of resolving it as a column name. Supports literal separators and mixed column/literal args. `concat` in the expression layer now accepts a single argument (PySpark parity). New test: `plan_select_concat_string`.
 - **#195 – Column/expression resolution in plan interpreter** — `execute_plan` now resolves column names (case-insensitive) for `select`, `orderBy`, `drop`, `withColumnRenamed`, `groupBy`, and `join` so plans using column names that differ in case from the schema, or that reference computed columns by alias after a select-with-expressions step, work correctly. Select supports both a list of column name strings (resolved) and a list of `{name, expr}` objects (expressions resolved via `resolve_expr_column_names`). Aggregation columns in `groupBy`/`agg` are resolved. New test: `plan_column_resolution`.
 
-### Planned
+### Changed
 
-- **Phase 26 – Publish crate**: Prepare and publish robin-sparkless to crates.io (and optionally PyPI via maturin). See [ROADMAP.md](docs/ROADMAP.md) for details.
+- **Error handling and docs** — Rust: `create_map` and `array` return `Result` instead of panicking for empty input; Python: `coalesce`, `format_string`, `printf`, and `named_struct` validate arity and raise `ValueError` for empty columns. Type-coercion tests use `Result` and `?`; new session test for empty-schema error. Docs: QUICKSTART, PYSPARK_DIFFERENCES, UDF_GUIDE, and `lib.rs` panic/error section updated for API accuracy and runnable examples (e.g. `_create_dataframe_from_rows` name, vectorized UDF single-column example).
 
 ## [0.6.0] - 2026-02-10
 
