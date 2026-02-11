@@ -14,6 +14,33 @@ pub struct PySortOrder {
     pub inner: SortOrder,
 }
 
+/// Python wrapper for the two-arg form when(cond, value). Supports .otherwise(default) for PySpark parity.
+#[pyclass(name = "WhenThen")]
+pub struct PyWhenThen {
+    pub(crate) condition: Expr,
+    pub(crate) then_value: Expr,
+}
+
+#[pymethods]
+impl PyWhenThen {
+    /// Set the default value when the condition is false. Returns the complete conditional Column.
+    ///
+    /// PySpark: ``F.when(cond, val).otherwise(default)``.
+    ///
+    /// Args:
+    ///     value: Column expression for the "else" value.
+    ///
+    /// Returns:
+    ///     Column: The full when-then-otherwise expression.
+    fn otherwise(&self, value: &PyColumn) -> PyColumn {
+        let when_then = polars::prelude::when(self.condition.clone()).then(self.then_value.clone());
+        let expr = when_then.otherwise(value.inner.expr().clone());
+        PyColumn {
+            inner: RsColumn::from_expr(expr, None),
+        }
+    }
+}
+
 /// Python wrapper for WhenBuilder (when(cond).then(val).otherwise(val)).
 #[pyclass(name = "WhenBuilder")]
 pub struct PyWhenBuilder {
