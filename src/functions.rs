@@ -1290,6 +1290,15 @@ pub fn cast(column: &Column, type_name: &str) -> Result<Column, String> {
         );
         return Ok(Column::from_expr(expr, None));
     }
+    if dtype == DataType::Float64 {
+        use polars::prelude::GetOutput;
+        // String-to-double uses custom parsing for Spark-style to_number semantics.
+        let expr = column.expr().clone().map(
+            |col| crate::udfs::apply_string_to_double(col, true),
+            GetOutput::from_type(DataType::Float64),
+        );
+        return Ok(Column::from_expr(expr, None));
+    }
     Ok(Column::from_expr(
         column.expr().clone().strict_cast(dtype),
         None,
@@ -1323,6 +1332,14 @@ pub fn try_cast(column: &Column, type_name: &str) -> Result<Column, String> {
         let expr = column.expr().clone().map(
             move |col| crate::udfs::apply_string_to_int(col, false, target.clone()),
             GetOutput::from_type(dtype),
+        );
+        return Ok(Column::from_expr(expr, None));
+    }
+    if dtype == DataType::Float64 {
+        use polars::prelude::GetOutput;
+        let expr = column.expr().clone().map(
+            |col| crate::udfs::apply_string_to_double(col, false),
+            GetOutput::from_type(DataType::Float64),
         );
         return Ok(Column::from_expr(expr, None));
     }
@@ -2888,5 +2905,90 @@ mod tests {
     fn test_coalesce_empty_panics() {
         let columns: [&Column; 0] = [];
         let _ = coalesce(&columns);
+    }
+
+    #[test]
+    fn test_cast_double_string_column_strict_ok() {
+        // All values parse as doubles, so strict cast should succeed.
+        let df = df!(
+            "s" => &["123", " 45.5 ", "0"]
+        )
+        .unwrap();
+
+        let s_col = col("s");
+        let cast_col = cast(&s_col, "double").unwrap();
+
+        let out = df
+            .lazy()
+            .with_column(cast_col.into_expr().alias("v"))
+            .collect()
+            .unwrap();
+
+        let v = out.column("v").unwrap();
+        let vals: Vec<Option<f64>> = v.f64().unwrap().into_iter().collect();
+        assert_eq!(vals, vec![Some(123.0), Some(45.5), Some(0.0)]);
+    }
+
+    #[test]
+    fn test_try_cast_double_string_column_invalid_to_null() {
+        // Invalid numeric strings should become null under try_cast / try_to_number.
+        let df = df!(
+            "s" => &["123", " 45.5 ", "abc", ""]
+        )
+        .unwrap();
+
+        let s_col = col("s");
+        let try_cast_col = try_cast(&s_col, "double").unwrap();
+
+        let out = df
+            .lazy()
+            .with_column(try_cast_col.into_expr().alias("v"))
+            .collect()
+            .unwrap();
+
+        let v = out.column("v").unwrap();
+        let vals: Vec<Option<f64>> = v.f64().unwrap().into_iter().collect();
+        assert_eq!(vals, vec![Some(123.0), Some(45.5), None, None]);
+    }
+
+    #[test]
+    fn test_to_number_and_try_to_number_numerics_and_strings() {
+        // Mixed numeric types should be cast to double; invalid strings become null only for try_to_number.
+        let df = df!(
+            "i" => &[1i32, 2, 3],
+            "f" => &[1.5f64, 2.5, 3.5],
+            "s" => &["10", "20.5", "xyz"]
+        )
+        .unwrap();
+
+        let i_col = col("i");
+        let f_col = col("f");
+        let s_col = col("s");
+
+        let to_number_i = to_number(&i_col, None).unwrap();
+        let to_number_f = to_number(&f_col, None).unwrap();
+        let try_to_number_s = try_to_number(&s_col, None).unwrap();
+
+        let out = df
+            .lazy()
+            .with_columns([
+                to_number_i.into_expr().alias("i_num"),
+                to_number_f.into_expr().alias("f_num"),
+                try_to_number_s.into_expr().alias("s_num"),
+            ])
+            .collect()
+            .unwrap();
+
+        let i_num = out.column("i_num").unwrap();
+        let f_num = out.column("f_num").unwrap();
+        let s_num = out.column("s_num").unwrap();
+
+        let i_vals: Vec<Option<f64>> = i_num.f64().unwrap().into_iter().collect();
+        let f_vals: Vec<Option<f64>> = f_num.f64().unwrap().into_iter().collect();
+        let s_vals: Vec<Option<f64>> = s_num.f64().unwrap().into_iter().collect();
+
+        assert_eq!(i_vals, vec![Some(1.0), Some(2.0), Some(3.0)]);
+        assert_eq!(f_vals, vec![Some(1.5), Some(2.5), Some(3.5)]);
+        assert_eq!(s_vals, vec![Some(10.0), Some(20.5), None]);
     }
 }

@@ -371,8 +371,8 @@ impl Column {
     }
 
     // Standard comparison methods that work with Expr (for literals and columns)
-    // These delegate to Polars and may not match PySpark null semantics exactly
-    // Use _pyspark variants for explicit PySpark semantics
+    // These delegate to Polars and may not match PySpark null semantics exactly.
+    // Use _pyspark variants for explicit PySpark semantics.
 
     /// Greater than comparison
     pub fn gt(&self, other: Expr) -> Column {
@@ -403,6 +403,13 @@ impl Column {
     pub fn neq(&self, other: Expr) -> Column {
         Self::from_expr(self.expr().clone().neq(other), None)
     }
+
+    // Equality comparison with special handling for string-vs-numeric literals (issue #235).
+    //
+    // When comparing a column to a numeric literal (e.g. col("s") == lit(123)), Polars
+    // normally raises `cannot compare string with numeric type` if the column is a
+    // string column. PySpark, however, coerces types (string → numeric) and performs
+    // the comparison, treating invalid strings as null (non-matching in filters).
 
     // --- String functions ---
 
