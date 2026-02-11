@@ -6,7 +6,7 @@ Use for static type checking (mypy, pyright, etc.).
 from __future__ import annotations
 
 from datetime import date, datetime
-from typing import Any, Union
+from typing import Any, Union, overload
 
 # Column arithmetic accepts Column or scalar (int, float, bool, str, None)
 _ColumnOperand = Union["Column", int, float, bool, str, None]
@@ -288,12 +288,10 @@ class WhenThen:
 
     def otherwise(self, value: Column) -> Column: ...
 
-
 class WhenBuilder:
     """Result of when(condition). Chain .then(value).otherwise(default)."""
 
     def then(self, value: Column) -> ThenBuilder: ...
-
 
 class ThenBuilder:
     def otherwise(self, value: Column) -> Column: ...
@@ -348,7 +346,10 @@ def pandas_udf(
     *,
     function_type: str = "grouped_agg",
 ) -> UserDefinedFunction: ...
-def when(condition: Column, value: Column | None = None) -> WhenThen | WhenBuilder: ...
+@overload
+def when(condition: Column) -> WhenBuilder: ...
+@overload
+def when(condition: Column, value: Column) -> WhenThen: ...
 def coalesce(*cols: Column) -> Column: ...
 def sum(column: Column) -> Column: ...
 def avg(column: Column) -> Column: ...
