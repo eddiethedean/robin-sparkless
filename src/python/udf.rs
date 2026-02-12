@@ -139,7 +139,7 @@ pub(crate) fn execute_python_udf(
                     })?;
 
                     // Interpret return value as a sequence of row results for this batch.
-                    let seq = ret.iter().map_err(|e| {
+                    let seq = ret.try_iter().map_err(|e| {
                         PolarsError::ComputeError(
                             format!(
                                 "Python UDF '{udf_name}' vectorized result not iterable: {e}"
