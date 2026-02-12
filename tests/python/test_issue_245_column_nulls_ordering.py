@@ -13,10 +13,6 @@ import robin_sparkless as rs
 
 def test_column_has_desc_nulls_last() -> None:
     """Column has desc_nulls_last method (PySpark parity)."""
-    spark = rs.SparkSession.builder().app_name("nulls_order").get_or_create()
-    data = [{"value": "A"}, {"value": "B"}, {"value": None}, {"value": "C"}]
-    schema = [("value", "string")]
-    df = spark._create_dataframe_from_rows(data, schema)
     c = rs.col("value")
     assert hasattr(c, "desc_nulls_last")
     assert hasattr(c, "desc_nulls_first")
