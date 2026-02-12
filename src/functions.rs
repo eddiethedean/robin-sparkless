@@ -874,9 +874,9 @@ pub fn regexp_replace(column: &Column, pattern: &str, replacement: &str) -> Colu
     column.clone().regexp_replace(pattern, replacement)
 }
 
-/// Split string by delimiter (PySpark split)
-pub fn split(column: &Column, delimiter: &str) -> Column {
-    column.clone().split(delimiter)
+/// Split string by delimiter (PySpark split). Optional limit: at most that many parts (remainder in last).
+pub fn split(column: &Column, delimiter: &str, limit: Option<i32>) -> Column {
+    column.clone().split(delimiter, limit)
 }
 
 /// Title case (PySpark initcap)

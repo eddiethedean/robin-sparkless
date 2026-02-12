@@ -809,13 +809,25 @@ impl Column {
     }
 
     /// Split string by delimiter (PySpark split). Returns list of strings.
+    /// When limit is Some(n) with n > 0, at most n parts; remainder in last part. None or <= 0: no limit.
     /// Uses literal split so "|" is not interpreted as regex alternation.
-    pub fn split(&self, delimiter: &str) -> Column {
+    pub fn split(&self, delimiter: &str, limit: Option<i32>) -> Column {
         use polars::prelude::*;
-        Self::from_expr(
-            self.expr().clone().str().split(lit(delimiter.to_string())),
-            None,
-        )
+        let use_limit = limit.is_some_and(|l| l > 0);
+        if use_limit {
+            let delim = delimiter.to_string();
+            let lim = limit.unwrap_or(0);
+            let expr = self.expr().clone().map(
+                move |col| crate::udfs::apply_split_with_limit(col, &delim, lim),
+                GetOutput::from_type(DataType::List(Box::new(DataType::String))),
+            );
+            Self::from_expr(expr, None)
+        } else {
+            Self::from_expr(
+                self.expr().clone().str().split(lit(delimiter.to_string())),
+                None,
+            )
+        }
     }
 
     /// Title case: first letter of each word uppercase (PySpark initcap).

@@ -3275,7 +3275,7 @@ fn parse_with_column_expr(src: &str, mock_dates: bool) -> Result<Expr, String> {
         return Ok(factorial(&col(col_name)).into_expr());
     }
 
-    // Handle split(col('name'), delimiter)
+    // Handle split(col('name'), delimiter) or split(col('name'), delimiter, limit)
     if s.starts_with("split(") {
         let inner = extract_first_arg(s, "split(")?;
         let parts = parse_comma_separated_args(inner);
@@ -3286,8 +3286,9 @@ fn parse_with_column_expr(src: &str, mock_dates: bool) -> Result<Expr, String> {
             .trim()
             .trim_matches(['\'', '"'])
             .trim();
+        let limit = parts.get(2).and_then(|p| p.trim().parse::<i32>().ok());
         let c = col(col_name);
-        return Ok(split(&c, delimiter).into_expr());
+        return Ok(split(&c, delimiter, limit).into_expr());
     }
 
     // Handle left(col('name'), n), right(col('name'), n)
