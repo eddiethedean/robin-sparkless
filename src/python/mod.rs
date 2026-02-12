@@ -17,8 +17,8 @@ use crate::functions::{
     make_timestamp, make_timestamp_ntz, md5, minutes, month, months, months_between, next_day, now,
     nullif, nvl, nvl2, overlay, pmod, power, quarter, radians, regexp_count, regexp_extract_all,
     regexp_instr, regexp_substr, replace as rs_replace, right, rint, rlike, schema_of_csv,
-    schema_of_json, sha1, sha2, signum, sin, sinh, split, split_part, startswith, substr, tan,
-    tanh, timestamp_micros, timestamp_millis, timestamp_seconds, timestampadd, timestampdiff,
+    schema_of_json, sha1, sha2, signum, sin, sinh, soundex, split, split_part, startswith, substr,
+    tan, tanh, timestamp_micros, timestamp_millis, timestamp_seconds, timestampadd, timestampdiff,
     to_csv, to_degrees, to_radians, to_timestamp, to_unix_timestamp, to_utc_timestamp,
     try_cast as rs_try_cast, ucase, unbase64, unix_date, unix_micros, unix_millis, unix_seconds,
     unix_timestamp, unix_timestamp_now, weekday, weekofyear, year, years,
@@ -514,6 +514,7 @@ fn robin_sparkless(m: &Bound<'_, PyModule>) -> PyResult<()> {
         "regexp_extract_all",
         wrap_pyfunction!(py_regexp_extract_all, m)?,
     )?;
+    m.add("soundex", wrap_pyfunction!(py_soundex, m)?)?;
     m.add("split", wrap_pyfunction!(py_split, m)?)?;
     m.add("split_part", wrap_pyfunction!(py_split_part, m)?)?;
     m.add("find_in_set", wrap_pyfunction!(py_find_in_set, m)?)?;
@@ -1871,6 +1872,13 @@ fn py_stack(cols: Vec<PyRef<PyColumn>>) -> PyResult<PyColumn> {
 fn py_ascii(col: &PyColumn) -> PyColumn {
     PyColumn {
         inner: ascii(&col.inner),
+    }
+}
+
+#[pyfunction]
+fn py_soundex(col: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: soundex(&col.inner),
     }
 }
 
