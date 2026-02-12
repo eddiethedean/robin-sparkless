@@ -9,14 +9,14 @@ use crate::functions::{
     atanh, base64, bit_length, cast as rs_cast, cbrt, ceiling, chr, contains, cos, cosh,
     date_from_unix_date, day, dayofmonth, dayofweek, dayofyear, degrees, endswith, expm1,
     factorial, find_in_set, format_number, from_csv, from_unixtime, get, get_json_object, hypot,
-    ifnull, ilike, isnotnull, isnull, json_tuple, lcase, left, like, ln, log10, log1p, log2,
-    map_concat, map_contains_key, map_filter_value_gt, map_from_entries, map_zip_with_coalesce,
-    md5, month, next_day, nullif, nvl, overlay, pmod, power, quarter, radians, regexp_count,
-    regexp_instr, regexp_substr, replace as rs_replace, right, rint, rlike, sha1, sha2, signum,
-    sin, sinh, split, split_part, startswith, tan, tanh, timestamp_micros, timestamp_millis,
-    timestamp_seconds, to_degrees, to_radians, try_add, try_cast as rs_try_cast, try_divide,
-    try_multiply, try_subtract, typeof_, ucase, unbase64, unix_date, unix_timestamp, weekofyear,
-    year, zip_with_coalesce,
+    ifnull, ilike, isin_i64, isin_str, isnotnull, isnull, json_tuple, lcase, left, like, ln, log10,
+    log1p, log2, map_concat, map_contains_key, map_filter_value_gt, map_from_entries,
+    map_zip_with_coalesce, md5, month, next_day, nullif, nvl, overlay, pmod, power, quarter,
+    radians, regexp_count, regexp_instr, regexp_substr, replace as rs_replace, right, rint, rlike,
+    sha1, sha2, signum, sin, sinh, split, split_part, startswith, tan, tanh, timestamp_micros,
+    timestamp_millis, timestamp_seconds, to_degrees, to_radians, try_add, try_cast as rs_try_cast,
+    try_divide, try_multiply, try_subtract, typeof_, ucase, unbase64, unix_date, unix_timestamp,
+    weekofyear, year, zip_with_coalesce,
 };
 use crate::functions::{schema_of_csv, schema_of_json, to_csv};
 use polars::prelude::{lit, NULL};
@@ -83,6 +83,41 @@ impl PyColumn {
         PyColumn {
             inner: self.inner.is_not_null(),
         }
+    }
+
+    /// True where this column's value is in the given list (PySpark isin). Empty list yields false for all rows.
+    ///
+    /// Args:
+    ///     values: List of int or str; empty list is supported (filter returns 0 rows).
+    fn isin(&self, values: &Bound<'_, pyo3::types::PyAny>) -> PyResult<Self> {
+        let list = values.downcast::<pyo3::types::PyList>()?;
+        let len = list.len();
+        if len == 0 {
+            return Ok(PyColumn {
+                inner: isin_i64(&self.inner, &[]),
+            });
+        }
+        let mut ints: Vec<i64> = Vec::with_capacity(len);
+        for item in list.iter() {
+            if let Ok(i) = item.extract::<i64>() {
+                ints.push(i);
+            } else {
+                break;
+            }
+        }
+        if ints.len() == len {
+            return Ok(PyColumn {
+                inner: isin_i64(&self.inner, &ints),
+            });
+        }
+        let mut strs: Vec<String> = Vec::with_capacity(len);
+        for item in list.iter() {
+            strs.push(item.extract::<String>()?);
+        }
+        let refs: Vec<&str> = strs.iter().map(|s| s.as_str()).collect();
+        Ok(PyColumn {
+            inner: isin_str(&self.inner, &refs),
+        })
     }
 
     /// Greater than (self > other). Accepts Column or scalar (int, float, bool, str, None).
