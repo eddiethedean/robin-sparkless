@@ -22,6 +22,8 @@ use crate::functions::{schema_of_csv, schema_of_json, to_csv};
 use polars::prelude::{lit, NULL};
 use pyo3::prelude::*;
 
+use super::order::PySortOrder;
+
 /// Convert a Python value to RsColumn (for operator overloads). Accepts Column or scalar (int, float, bool, str, None).
 fn py_any_to_column(value: &Bound<'_, pyo3::types::PyAny>) -> PyResult<RsColumn> {
     if let Ok(pycol) = value.downcast::<PyColumn>() {
@@ -118,6 +120,48 @@ impl PyColumn {
         Ok(PyColumn {
             inner: isin_str(&self.inner, &refs),
         })
+    }
+
+    /// Ascending sort order (nulls first). For use in order_by_exprs().
+    fn asc(&self) -> PySortOrder {
+        PySortOrder {
+            inner: self.inner.asc(),
+        }
+    }
+
+    /// Ascending sort order with nulls first.
+    fn asc_nulls_first(&self) -> PySortOrder {
+        PySortOrder {
+            inner: self.inner.asc_nulls_first(),
+        }
+    }
+
+    /// Ascending sort order with nulls last.
+    fn asc_nulls_last(&self) -> PySortOrder {
+        PySortOrder {
+            inner: self.inner.asc_nulls_last(),
+        }
+    }
+
+    /// Descending sort order (nulls last). For use in order_by_exprs().
+    fn desc(&self) -> PySortOrder {
+        PySortOrder {
+            inner: self.inner.desc(),
+        }
+    }
+
+    /// Descending sort order with nulls first.
+    fn desc_nulls_first(&self) -> PySortOrder {
+        PySortOrder {
+            inner: self.inner.desc_nulls_first(),
+        }
+    }
+
+    /// Descending sort order with nulls last.
+    fn desc_nulls_last(&self) -> PySortOrder {
+        PySortOrder {
+            inner: self.inner.desc_nulls_last(),
+        }
     }
 
     /// Greater than (self > other). Accepts Column or scalar (int, float, bool, str, None).
