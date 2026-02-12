@@ -11,6 +11,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Phase 26 – Publish crate**: Prepare and publish robin-sparkless to crates.io (and optionally PyPI via maturin). See [ROADMAP.md](docs/ROADMAP.md) for details.
 
+## [0.8.0] - 2026-02-12
+
+### Added
+
+- **#248 – Column.eq_null_safe() (PySpark parity)** — Python `Column` now exposes `.eq_null_safe(other)` for null-safe equality in filters (true when both null or both equal). Enables `df.filter(col("a").eq_null_safe(col("b")))`. Fixes #248 (#251).
+- **#249 – soundex() in Python API** — Module-level `soundex(column)` is now exposed in Python; the Rust implementation already existed but was not wired through the bindings. Fixes #249 (#252).
+- **#250 – Column.between(low, high) (PySpark parity)** — Python `Column` now exposes `.between(low, high)` for inclusive range filters, e.g. `df.filter(col("v").between(lit(20), lit(30)))`. Fixes #250 (#253).
+- **Rust–Python parity: 14 expression bindings** — The following Rust Column/function APIs are now exposed in Python as both module-level functions (e.g. `F.length(col)`) and `Column` methods (e.g. `col.length()`), with matching stubs in `robin_sparkless.pyi`:
+  - **String:** `length`, `trim`, `ltrim`, `rtrim`, `repeat`, `reverse`, `initcap`
+  - **Regex:** `regexp_extract`, `regexp_replace`
+  - **Math:** `floor`, `round`, `exp`
+  - **Hash/other:** `levenshtein`, `crc32`, `xxhash64`
+  New tests: `tests/python/test_missing_bindings_parity.py`. Parity cross-check doc: [docs/RUST_PYTHON_PARITY_CROSSCHECK.md](docs/RUST_PYTHON_PARITY_CROSSCHECK.md).
+
 ## [0.7.1] - 2026-02-12
 
 ### Added
