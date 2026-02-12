@@ -8,7 +8,7 @@ use crate::python::udf::{execute_grouped_vectorized_aggs, GroupedAggSpec};
 use crate::{DataFrame, GroupedData};
 use polars::prelude::{col, lit, Expr, NULL};
 use pyo3::prelude::*;
-use pyo3::types::{PyDict, PyList, PyString, PyTuple};
+use pyo3::types::{PyAny, PyDict, PyList, PyString, PyTuple};
 use std::path::Path;
 use std::sync::RwLock;
 
@@ -266,26 +266,70 @@ impl PyDataFrame {
         Ok(PyDataFrame { inner: df })
     }
 
-    /// Sort by one or more columns by name.
+    /// Sort by column names or by SortOrder expressions (PySpark orderBy parity).
     ///
     /// Args:
-    ///     cols: Column names to sort by, in order of precedence.
-    ///     ascending: Optional list of booleans, one per column. True = ascending, False = descending.
-    ///         If omitted, all columns are sorted ascending.
+    ///     cols: Either a list of column names (str), a single SortOrder (e.g. ``col("x").desc_nulls_last()``),
+    ///         or a list of SortOrder. When column names are used, ``ascending`` applies.
+    ///     ascending: Optional list of booleans, one per column (only when cols is list of names).
+    ///         True = ascending, False = descending. If omitted, all columns are sorted ascending.
     ///
     /// Returns:
     ///     DataFrame (lazy) with rows sorted.
     ///
     /// Raises:
-    ///     RuntimeError: If a column is not in the schema.
+    ///     RuntimeError: If a column is not in the schema or sort cannot be evaluated.
     #[pyo3(signature = (cols, ascending=None))]
-    fn order_by(&self, cols: Vec<String>, ascending: Option<Vec<bool>>) -> PyResult<PyDataFrame> {
-        let asc = ascending.unwrap_or_else(|| vec![true; cols.len()]);
-        let df = self
-            .inner
-            .order_by(cols.iter().map(|s| s.as_str()).collect::<Vec<_>>(), asc)
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
+    fn order_by(
+        &self,
+        cols: &Bound<'_, PyAny>,
+        ascending: Option<Vec<bool>>,
+    ) -> PyResult<PyDataFrame> {
+        // Single PySortOrder: df.order_by(col("x").desc_nulls_last())
+        if let Ok(sort_order) = cols.downcast::<PySortOrder>() {
+            let orders = vec![sort_order.borrow().inner.clone()];
+            let df = self
+                .inner
+                .order_by_exprs(orders)
+                .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+            return Ok(PyDataFrame { inner: df });
+        }
+        // List: either [SortOrder, ...] or [str, ...]
+        if let Ok(py_list) = cols.downcast::<PyList>() {
+            if py_list.is_empty() {
+                return Err(pyo3::exceptions::PyValueError::new_err(
+                    "order_by requires at least one column or sort order",
+                ));
+            }
+            // Try list of PySortOrder first (e.g. [col("a").asc(), col("b").desc_nulls_last()])
+            let mut orders = Vec::with_capacity(py_list.len());
+            for item in py_list.iter() {
+                if let Ok(po) = item.downcast::<PySortOrder>() {
+                    orders.push(po.borrow().inner.clone());
+                } else {
+                    orders.clear();
+                    break;
+                }
+            }
+            if !orders.is_empty() {
+                let df = self
+                    .inner
+                    .order_by_exprs(orders)
+                    .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+                return Ok(PyDataFrame { inner: df });
+            }
+            // List of column names (current behavior)
+            let col_names: Vec<String> = py_list.extract()?;
+            let asc = ascending.unwrap_or_else(|| vec![true; col_names.len()]);
+            let df = self
+                .inner
+                .order_by(col_names.iter().map(|s| s.as_str()).collect::<Vec<_>>(), asc)
+                .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+            return Ok(PyDataFrame { inner: df });
+        }
+        Err(pyo3::exceptions::PyTypeError::new_err(
+            "order_by cols must be a list of column names (str), a single SortOrder (e.g. col(\"x\").desc_nulls_last()), or a list of SortOrder",
+        ))
     }
 
     /// Sort by column expressions with explicit nulls-first/last (e.g. asc(col("a")), desc(col("b"))).
