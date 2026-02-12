@@ -23,6 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **width_bucket argument validation (panic → error)** — Python `width_bucket(col, min, max, num_bucket)` and the plan interpreter now validate that `num_bucket > 0`. Previously, `num_bucket <= 0` could trigger a panic inside the Rust implementation; now Python raises `ValueError("width_bucket: num_bucket must be positive")` and plan evaluation returns a clear `PlanExprError`.
 - **elt/struct/stack empty-argument panics** — Python functions `elt(index, cols)`, `struct(cols)`, and `stack(cols)` now check that at least one column is provided. Empty input lists used to cause a panic in the underlying Rust functions; they now raise `ValueError` with descriptive messages (`elt() requires at least one column`, etc.).
 - **named_struct stub/API alignment** — `robin_sparkless.pyi` now declares `named_struct(names: list[str], columns: list[Column]) -> Column` to match the actual Python implementation (`named_struct(names=[...], columns=[...])`) instead of a misleading `*name_column_pairs` vararg signature.
+- **PyO3 deprecations and error types** — Replaced deprecated `PyAny::iter()` with `try_iter()` in the Python UDF vectorized path; switched `DataFrame.corr()` return values to `IntoPyObjectExt::into_py_any` instead of deprecated `into_py`. Column index out of range in the Python DataFrame API now raises `IndexError` instead of `RuntimeError`.
 
 ## [0.7.0] - 2026-02-11
 
