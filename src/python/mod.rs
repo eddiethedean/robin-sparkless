@@ -2594,9 +2594,10 @@ fn py_regexp_extract_all(str: &PyColumn, regexp: &str, idx: i32) -> PyResult<PyC
 }
 
 #[pyfunction]
-fn py_split(src: &PyColumn, delimiter: &str) -> PyColumn {
+#[pyo3(signature = (src, delimiter, limit=None))]
+fn py_split(src: &PyColumn, delimiter: &str, limit: Option<i32>) -> PyColumn {
     PyColumn {
-        inner: split(&src.inner, delimiter),
+        inner: split(&src.inner, delimiter, limit),
     }
 }
 #[pyfunction]

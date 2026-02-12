@@ -1218,10 +1218,11 @@ impl PyColumn {
         }
     }
 
-    /// Split string by delimiter into list of strings (PySpark split).
-    fn split(&self, delimiter: &str) -> Self {
+    /// Split string by delimiter into list of strings (PySpark split). Optional limit: at most that many parts.
+    #[pyo3(signature = (delimiter, limit=None))]
+    fn split(&self, delimiter: &str, limit: Option<i32>) -> Self {
         PyColumn {
-            inner: split(&self.inner, delimiter),
+            inner: split(&self.inner, delimiter, limit),
         }
     }
     /// Split by delimiter and return 1-based part (PySpark split_part).

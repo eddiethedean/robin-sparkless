@@ -7,6 +7,43 @@ use polars::prelude::*;
 use regex::Regex;
 use std::borrow::Cow;
 
+/// Split string by delimiter with at most `limit` parts; remainder in last part (PySpark split with limit).
+/// Returns List(String). When limit <= 0, splits without limit.
+pub fn apply_split_with_limit(
+    column: Column,
+    delimiter: &str,
+    limit: i32,
+) -> PolarsResult<Option<Column>> {
+    let name = column.field().into_owned().name;
+    let series = column.take_materialized_series();
+    let ca = series
+        .str()
+        .map_err(|e| PolarsError::ComputeError(format!("split_with_limit: {e}").into()))?;
+    let n = if limit <= 0 {
+        usize::MAX
+    } else {
+        limit as usize
+    };
+    let values_capacity = ca.len().saturating_mul(64);
+    let mut builder =
+        ListStringChunkedBuilder::new(name.as_str().into(), ca.len(), values_capacity);
+    for opt_s in ca.into_iter() {
+        match opt_s {
+            Some(s) => {
+                if delimiter.is_empty() {
+                    // Empty delimiter: treat as no limit (split to chars would need different handling)
+                    builder.append_values_iter(s.split(delimiter));
+                } else {
+                    builder.append_values_iter(s.splitn(n, delimiter));
+                }
+            },
+            None => builder.append_null(),
+        }
+    }
+    let out = builder.finish();
+    Ok(Some(Column::new(name, out.into_series())))
+}
+
 /// Split string by regex and return 1-based part (for split_part with regex delimiter).
 pub fn apply_split_part_regex(
     column: Column,
