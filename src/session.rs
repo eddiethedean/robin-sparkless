@@ -51,7 +51,7 @@ fn json_type_str_to_polars(type_str: &str) -> Option<DataType> {
     }
 }
 
-/// Build a length-N Series from Vec<Option<JsonValue>> for a given type (recursive for struct/array).
+/// Build a length-N Series from `Vec<Option<JsonValue>>` for a given type (recursive for struct/array).
 fn json_values_to_series(
     values: &[Option<JsonValue>],
     type_str: &str,
