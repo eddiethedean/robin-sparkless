@@ -212,6 +212,14 @@ impl PyColumn {
         })
     }
 
+    /// Null-safe equality (PySpark eqNullSafe): true if both null or both equal. Accepts Column or scalar.
+    fn eq_null_safe(&self, other: &Bound<'_, pyo3::types::PyAny>) -> PyResult<Self> {
+        let other_col = py_any_to_column(other)?;
+        Ok(PyColumn {
+            inner: self.inner.eq_null_safe(&other_col),
+        })
+    }
+
     /// Python > operator. Enables col("a") > col("b") and col("a") > 5.
     fn __gt__(&self, other: &Bound<'_, pyo3::types::PyAny>) -> PyResult<Self> {
         self.gt(other)
