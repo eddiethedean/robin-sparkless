@@ -11,6 +11,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Phase 26 – Publish crate**: Prepare and publish robin-sparkless to crates.io (and optionally PyPI via maturin). See [ROADMAP.md](docs/ROADMAP.md) for details.
 
+## [0.8.1] - 2026-02-12
+
+### Added
+
+- **#254 – F.split(column, pattern, limit) (PySpark parity)** — Optional third argument `limit` added to `split()`. When `limit > 0`, returns at most that many parts with the remainder in the last part (e.g. `F.split(col("s"), ",", 2)` on `"a,b,c"` yields `['a', 'b,c']`). Available as `F.split(col, delim, limit)` and `col.split(delim, limit)` in Python; plan/SQL and parity parser updated. Fixes #254 (#255).
+
 ## [0.8.0] - 2026-02-12
 
 ### Added
