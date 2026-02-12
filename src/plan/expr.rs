@@ -886,7 +886,10 @@ fn expr_from_fn(name: &str, args: &[Value]) -> Result<Expr, PlanExprError> {
             }
             let c = expr_to_column(arg_expr(args, 0)?);
             let delimiter = arg_lit_str(args, 1)?;
-            let limit = args.get(2).and_then(|v| lit_as_i64(v).ok()).map(|n| n as i32);
+            let limit = args
+                .get(2)
+                .and_then(|v| lit_as_i64(v).ok())
+                .map(|n| n as i32);
             Ok(split(&c, &delimiter, limit).into_expr())
         }
         "split_part" => {
