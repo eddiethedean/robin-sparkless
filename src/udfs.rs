@@ -36,7 +36,7 @@ pub fn apply_split_with_limit(
                 } else {
                     builder.append_values_iter(s.splitn(n, delimiter));
                 }
-            },
+            }
             None => builder.append_null(),
         }
     }
