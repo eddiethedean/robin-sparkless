@@ -293,7 +293,7 @@ fn lit_as_usize(v: &Value) -> Result<usize, PlanExprError> {
         .map_err(|_| PlanExprError("literal out of usize range".to_string()))
 }
 
-/// Optional string literal: if args[i] is missing or null, return None; else require {"lit": "..."}.
+/// Optional string literal: if `args[i]` is missing or null, return None; else require {"lit": "..."}.
 fn arg_lit_opt_str(args: &[Value], i: usize) -> Result<Option<String>, PlanExprError> {
     let v = match args.get(i) {
         Some(x) => x,
@@ -359,7 +359,7 @@ fn arg_lit_usize(args: &[Value], i: usize) -> Result<usize, PlanExprError> {
     lit_as_usize(v)
 }
 
-/// Get optional i64 from args[i] if present and a literal.
+/// Get optional i64 from `args[i]` if present and a literal.
 fn opt_lit_i64(args: &[Value], i: usize) -> Option<i64> {
     let v = args.get(i)?;
     v.get("lit").and_then(Value::as_i64)

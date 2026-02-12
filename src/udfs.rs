@@ -1165,7 +1165,7 @@ fn format_string_row(format: &str, values: &[Option<String>]) -> Option<String> 
 
 /// Find 1-based index of str in comma-delimited set (PySpark find_in_set).
 /// Returns 0 if not found or if str contains comma.
-/// map_many: columns[0]=str, columns[1]=set
+/// map_many: `columns[0]`=str, `columns[1]`=set
 pub fn apply_find_in_set(columns: &mut [Column]) -> PolarsResult<Option<Column>> {
     if columns.len() < 2 {
         return Err(PolarsError::ComputeError(
