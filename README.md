@@ -49,14 +49,14 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-robin-sparkless = "0.7.0"
+robin-sparkless = "0.8.0"
 ```
 
 Optional features:
 
 ```toml
-robin-sparkless = { version = "0.7.0", features = ["sql"] }   # spark.sql(), temp views
-robin-sparkless = { version = "0.7.0", features = ["delta"] }  # Delta Lake read/write
+robin-sparkless = { version = "0.8.0", features = ["sql"] }   # spark.sql(), temp views
+robin-sparkless = { version = "0.8.0", features = ["delta"] }  # Delta Lake read/write
 ```
 
 ### Python (PyO3)
@@ -181,6 +181,7 @@ CI runs format, clippy, audit, deny, Rust tests, Python lint (ruff, mypy), and P
 | [Persistence Guide](docs/PERSISTENCE_GUIDE.md) | Global temp views, disk-backed saveAsTable |
 | [UDF Guide](docs/UDF_GUIDE.md) | Scalar, vectorized, and grouped UDFs |
 | [PySpark Differences](docs/PYSPARK_DIFFERENCES.md) | Known divergences |
+| [Rust–Python parity cross-check](docs/RUST_PYTHON_PARITY_CROSSCHECK.md) | Column/function binding parity (Rust vs Python) |
 | [Roadmap](docs/ROADMAP.md) | Development phases, Sparkless integration |
 | [RELEASING](docs/RELEASING.md) | Publishing to crates.io |
 

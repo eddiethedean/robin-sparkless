@@ -34,7 +34,7 @@ In your own crate:
 
 ```toml
 [dependencies]
-robin-sparkless = "0.7.0"
+robin-sparkless = "0.8.0"
 ```
 
 ## Basic Usage

@@ -55,6 +55,7 @@ nav:
     - PySpark differences: PYSPARK_DIFFERENCES.md
     - Parity status: PARITY_STATUS.md
     - Robin-Sparkless missing: ROBIN_SPARKLESS_MISSING.md
+    - Rust–Python parity cross-check: RUST_PYTHON_PARITY_CROSSCHECK.md
   - Sparkless integration:
     - Integration analysis: SPARKLESS_INTEGRATION_ANALYSIS.md
     - Full backend roadmap: FULL_BACKEND_ROADMAP.md
