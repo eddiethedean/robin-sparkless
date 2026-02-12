@@ -12,14 +12,15 @@ use crate::functions::{
     dateadd, datepart, day, dayname, dayofmonth, dayofweek, dayofyear, days, degrees, endswith,
     expm1, extract, factorial, find_in_set, format_number, format_string, from_csv, from_unixtime,
     from_utc_timestamp, get_json_object, greatest as rs_greatest, hours, hypot, ifnull, ilike,
-    isnan as rs_isnan, isnotnull, isnull, json_tuple, lcase, least as rs_least, left, like, ln,
-    localtimestamp, log, log10, log1p, log2, log_with_base, make_date, make_interval,
-    make_timestamp, make_timestamp_ntz, md5, minutes, month, months, months_between, next_day, now,
-    nullif, nvl, nvl2, overlay, pmod, power, quarter, radians, regexp_count, regexp_extract_all,
-    regexp_instr, regexp_substr, replace as rs_replace, right, rint, rlike, schema_of_csv,
-    schema_of_json, sha1, sha2, signum, sin, sinh, soundex, split, split_part, startswith, substr,
-    tan, tanh, timestamp_micros, timestamp_millis, timestamp_seconds, timestampadd, timestampdiff,
-    to_csv, to_degrees, to_radians, to_timestamp, to_unix_timestamp, to_utc_timestamp,
+    initcap, isnan as rs_isnan, isnotnull, isnull, json_tuple, lcase, least as rs_least, left,
+    length, like, ln, localtimestamp, log, log10, log1p, log2, log_with_base, ltrim, make_date,
+    make_interval, make_timestamp, make_timestamp_ntz, md5, minutes, month, months, months_between,
+    next_day, now, nullif, nvl, nvl2, overlay, pmod, power, quarter, radians, regexp_count,
+    regexp_extract, regexp_extract_all, regexp_instr, regexp_replace, regexp_substr, repeat,
+    replace as rs_replace, reverse, right, rint, rlike, rtrim, schema_of_csv, schema_of_json, sha1,
+    sha2, signum, sin, sinh, soundex, split, split_part, startswith, substr, tan, tanh,
+    timestamp_micros, timestamp_millis, timestamp_seconds, timestampadd, timestampdiff, to_csv,
+    to_degrees, to_radians, to_timestamp, to_unix_timestamp, to_utc_timestamp, trim,
     try_cast as rs_try_cast, ucase, unbase64, unix_date, unix_micros, unix_millis, unix_seconds,
     unix_timestamp, unix_timestamp_now, weekday, weekofyear, year, years,
 };
@@ -29,15 +30,16 @@ use crate::functions::{
     bit_count, bit_length, bit_or, bit_xor, bitwise_not, broadcast as rs_broadcast, cardinality,
     concat as rs_concat, concat_ws as rs_concat_ws, create_map,
     current_catalog as rs_current_catalog, current_database as rs_current_database,
-    current_schema as rs_current_schema, current_user as rs_current_user, equal_null,
-    explode_outer, get, hash, inline as rs_inline, inline_outer as rs_inline_outer,
+    current_schema as rs_current_schema, current_user as rs_current_user, equal_null, exp,
+    explode_outer, floor, get, hash, inline as rs_inline, inline_outer as rs_inline_outer,
     input_file_name as rs_input_file_name, isin, isin_i64, isin_str, json_array_length, map_concat,
     map_contains_key, map_filter_value_gt, map_from_entries, map_zip_with_coalesce,
     monotonically_increasing_id as rs_monotonically_increasing_id, named_struct, parse_url,
-    rand as rs_rand, randn as rs_randn, sequence, shift_left, shift_right, shuffle, size,
+    rand as rs_rand, randn as rs_randn, round, sequence, shift_left, shift_right, shuffle, size,
     spark_partition_id as rs_spark_partition_id, stddev, str_to_map, struct_, to_char, to_number,
     to_varchar, try_add, try_divide, try_multiply, try_subtract, try_to_number, try_to_timestamp,
-    typeof_, url_decode, url_encode, user as rs_user, version, width_bucket, zip_with_coalesce,
+    typeof_, url_decode, url_encode, user as rs_user, version, width_bucket, xxhash64,
+    zip_with_coalesce,
 };
 use crate::functions::{
     asc, asc_nulls_first, asc_nulls_last, bround, cot, csc, desc, desc_nulls_first,
@@ -45,6 +47,7 @@ use crate::functions::{
 };
 use crate::functions::{avg, coalesce, col as rs_col, count, max, min, sum as rs_sum};
 use crate::functions::{bin, btrim, conv, getbit, hex, locate, unhex};
+use crate::functions::{crc32, levenshtein};
 use crate::plan;
 use crate::SparkSession;
 use pyo3::conversion::IntoPyObjectExt;
@@ -459,6 +462,9 @@ fn robin_sparkless(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("log", wrap_pyfunction!(py_log, m)?)?;
     m.add("ceiling", wrap_pyfunction!(py_ceiling, m)?)?;
     m.add("ceil", wrap_pyfunction!(py_ceiling, m)?)?;
+    m.add("floor", wrap_pyfunction!(py_floor, m)?)?;
+    m.add("round", wrap_pyfunction!(py_round, m)?)?;
+    m.add("exp", wrap_pyfunction!(py_exp, m)?)?;
     m.add("abs", wrap_pyfunction!(py_abs, m)?)?;
     m.add("date_add", wrap_pyfunction!(py_date_add, m)?)?;
     m.add("date_sub", wrap_pyfunction!(py_date_sub, m)?)?;
@@ -499,7 +505,14 @@ fn robin_sparkless(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("isnull", wrap_pyfunction!(py_isnull, m)?)?;
     m.add("isnotnull", wrap_pyfunction!(py_isnotnull, m)?)?;
     m.add("left", wrap_pyfunction!(py_left, m)?)?;
+    m.add("length", wrap_pyfunction!(py_length, m)?)?;
     m.add("right", wrap_pyfunction!(py_right, m)?)?;
+    m.add("trim", wrap_pyfunction!(py_trim, m)?)?;
+    m.add("ltrim", wrap_pyfunction!(py_ltrim, m)?)?;
+    m.add("rtrim", wrap_pyfunction!(py_rtrim, m)?)?;
+    m.add("repeat", wrap_pyfunction!(py_repeat, m)?)?;
+    m.add("reverse", wrap_pyfunction!(py_reverse, m)?)?;
+    m.add("initcap", wrap_pyfunction!(py_initcap, m)?)?;
     m.add("replace", wrap_pyfunction!(py_replace, m)?)?;
     m.add("startswith", wrap_pyfunction!(py_startswith, m)?)?;
     m.add("endswith", wrap_pyfunction!(py_endswith, m)?)?;
@@ -510,11 +523,16 @@ fn robin_sparkless(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("regexp_count", wrap_pyfunction!(py_regexp_count, m)?)?;
     m.add("regexp_instr", wrap_pyfunction!(py_regexp_instr, m)?)?;
     m.add("regexp_substr", wrap_pyfunction!(py_regexp_substr, m)?)?;
+    m.add("regexp_extract", wrap_pyfunction!(py_regexp_extract, m)?)?;
+    m.add("regexp_replace", wrap_pyfunction!(py_regexp_replace, m)?)?;
     m.add(
         "regexp_extract_all",
         wrap_pyfunction!(py_regexp_extract_all, m)?,
     )?;
     m.add("soundex", wrap_pyfunction!(py_soundex, m)?)?;
+    m.add("levenshtein", wrap_pyfunction!(py_levenshtein, m)?)?;
+    m.add("crc32", wrap_pyfunction!(py_crc32, m)?)?;
+    m.add("xxhash64", wrap_pyfunction!(py_xxhash64, m)?)?;
     m.add("split", wrap_pyfunction!(py_split, m)?)?;
     m.add("split_part", wrap_pyfunction!(py_split_part, m)?)?;
     m.add("find_in_set", wrap_pyfunction!(py_find_in_set, m)?)?;
@@ -1883,6 +1901,27 @@ fn py_soundex(col: &PyColumn) -> PyColumn {
 }
 
 #[pyfunction]
+fn py_levenshtein(col1: &PyColumn, col2: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: levenshtein(&col1.inner, &col2.inner),
+    }
+}
+
+#[pyfunction]
+fn py_crc32(col: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: crc32(&col.inner),
+    }
+}
+
+#[pyfunction]
+fn py_xxhash64(col: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: xxhash64(&col.inner),
+    }
+}
+
+#[pyfunction]
 fn py_format_number(col: &PyColumn, d: u32) -> PyColumn {
     PyColumn {
         inner: format_number(&col.inner, d),
@@ -2162,6 +2201,28 @@ fn py_ceiling(col: &PyColumn) -> PyColumn {
 }
 
 #[pyfunction]
+fn py_floor(col: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: floor(&col.inner),
+    }
+}
+
+#[pyfunction]
+#[pyo3(signature = (col, scale=0))]
+fn py_round(col: &PyColumn, scale: u32) -> PyColumn {
+    PyColumn {
+        inner: round(&col.inner, scale),
+    }
+}
+
+#[pyfunction]
+fn py_exp(col: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: exp(&col.inner),
+    }
+}
+
+#[pyfunction]
 fn py_abs(col: &PyColumn) -> PyColumn {
     PyColumn {
         inner: abs(&col.inner),
@@ -2383,6 +2444,48 @@ fn py_right(str: &PyColumn, len: i64) -> PyColumn {
     }
 }
 #[pyfunction]
+fn py_length(col: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: length(&col.inner),
+    }
+}
+#[pyfunction]
+fn py_trim(col: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: trim(&col.inner),
+    }
+}
+#[pyfunction]
+fn py_ltrim(col: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: ltrim(&col.inner),
+    }
+}
+#[pyfunction]
+fn py_rtrim(col: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: rtrim(&col.inner),
+    }
+}
+#[pyfunction]
+fn py_repeat(col: &PyColumn, n: i32) -> PyColumn {
+    PyColumn {
+        inner: repeat(&col.inner, n),
+    }
+}
+#[pyfunction]
+fn py_reverse(col: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: reverse(&col.inner),
+    }
+}
+#[pyfunction]
+fn py_initcap(col: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: initcap(&col.inner),
+    }
+}
+#[pyfunction]
 fn py_replace(src: &PyColumn, search: &str, replace: &str) -> PyColumn {
     PyColumn {
         inner: rs_replace(&src.inner, search, replace),
@@ -2447,6 +2550,21 @@ fn py_regexp_instr(str: &PyColumn, regexp: &str, idx: Option<usize>) -> PyColumn
 fn py_regexp_substr(str: &PyColumn, regexp: &str) -> PyColumn {
     PyColumn {
         inner: regexp_substr(&str.inner, regexp),
+    }
+}
+
+#[pyfunction]
+#[pyo3(signature = (col, pattern, idx=0))]
+fn py_regexp_extract(col: &PyColumn, pattern: &str, idx: usize) -> PyColumn {
+    PyColumn {
+        inner: regexp_extract(&col.inner, pattern, idx),
+    }
+}
+
+#[pyfunction]
+fn py_regexp_replace(col: &PyColumn, pattern: &str, replacement: &str) -> PyColumn {
+    PyColumn {
+        inner: regexp_replace(&col.inner, pattern, replacement),
     }
 }
 
