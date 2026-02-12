@@ -210,8 +210,10 @@ fn json_values_to_series(
                             let parsed = NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S%.f")
                                 .or_else(|_| NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S"))
                                 .or_else(|_| {
-                                    NaiveDate::parse_from_str(s, "%Y-%m-%d")
-                                        .map(|d| d.and_hms_opt(0, 0, 0).unwrap())
+                                    NaiveDate::parse_from_str(s, "%Y-%m-%d").map(|d| {
+                                        d.and_hms_opt(0, 0, 0)
+                                            .expect("0:0:0 time should be valid for any date")
+                                    })
                                 });
                             parsed.ok().map(|dt| dt.and_utc().timestamp_micros())
                         }
@@ -830,8 +832,11 @@ impl SparkSession {
                                             NaiveDateTime::parse_from_str(&s, "%Y-%m-%dT%H:%M:%S")
                                         })
                                         .or_else(|_| {
-                                            NaiveDate::parse_from_str(&s, "%Y-%m-%d")
-                                                .map(|d| d.and_hms_opt(0, 0, 0).unwrap())
+                                            NaiveDate::parse_from_str(&s, "%Y-%m-%d").map(|d| {
+                                                d.and_hms_opt(0, 0, 0).expect(
+                                                    "0:0:0 time should be valid for any date",
+                                                )
+                                            })
                                         });
                                         parsed.ok().map(|dt| dt.and_utc().timestamp_micros())
                                     }
@@ -849,7 +854,8 @@ impl SparkSession {
                         })?
                 }
                 _ if parse_array_element_type(&type_lower).is_some() => {
-                    let elem_type = parse_array_element_type(&type_lower).unwrap();
+                    let elem_type = parse_array_element_type(&type_lower)
+                        .expect("parse_array_element_type returned Some in guard above");
                     let inner_dtype = json_type_str_to_polars(&elem_type)
                         .ok_or_else(|| {
                             PolarsError::ComputeError(
