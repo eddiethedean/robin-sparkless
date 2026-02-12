@@ -12,11 +12,15 @@ use crate::functions::{
     ifnull, ilike, isin_i64, isin_str, isnotnull, isnull, json_tuple, lcase, left, like, ln, log10,
     log1p, log2, map_concat, map_contains_key, map_filter_value_gt, map_from_entries,
     map_zip_with_coalesce, md5, month, next_day, nullif, nvl, overlay, pmod, power, quarter,
-    radians, regexp_count, regexp_instr, regexp_substr, replace as rs_replace, right, rint, rlike,
-    sha1, sha2, signum, sin, sinh, split, split_part, startswith, tan, tanh, timestamp_micros,
-    timestamp_millis, timestamp_seconds, to_degrees, to_radians, try_add, try_cast as rs_try_cast,
-    try_divide, try_multiply, try_subtract, typeof_, ucase, unbase64, unix_date, unix_timestamp,
-    weekofyear, year, zip_with_coalesce,
+    radians, regexp_count, regexp_extract, regexp_instr, regexp_replace, regexp_substr,
+    replace as rs_replace, reverse, right, rint, rlike, sha1, sha2, signum, sin, sinh, split,
+    split_part, startswith, tan, tanh, timestamp_micros, timestamp_millis, timestamp_seconds,
+    to_degrees, to_radians, try_add, try_cast as rs_try_cast, try_divide, try_multiply,
+    try_subtract, typeof_, ucase, unbase64, unix_date, unix_timestamp, weekofyear, year,
+    zip_with_coalesce,
+};
+use crate::functions::{
+    crc32, exp, floor, initcap, length, levenshtein, ltrim, repeat, round, rtrim, trim, xxhash64,
 };
 use crate::functions::{schema_of_csv, schema_of_json, to_csv};
 use polars::prelude::{lit, NULL};
@@ -858,6 +862,42 @@ impl PyColumn {
             inner: right(&self.inner, n),
         }
     }
+    fn length(&self) -> Self {
+        PyColumn {
+            inner: length(&self.inner),
+        }
+    }
+    fn trim(&self) -> Self {
+        PyColumn {
+            inner: trim(&self.inner),
+        }
+    }
+    fn ltrim(&self) -> Self {
+        PyColumn {
+            inner: ltrim(&self.inner),
+        }
+    }
+    fn rtrim(&self) -> Self {
+        PyColumn {
+            inner: rtrim(&self.inner),
+        }
+    }
+    #[pyo3(name = "repeat")]
+    fn repeat_(&self, n: i32) -> Self {
+        PyColumn {
+            inner: repeat(&self.inner, n),
+        }
+    }
+    fn reverse(&self) -> Self {
+        PyColumn {
+            inner: reverse(&self.inner),
+        }
+    }
+    fn initcap(&self) -> Self {
+        PyColumn {
+            inner: initcap(&self.inner),
+        }
+    }
     fn replace(&self, search: &str, replacement: &str) -> Self {
         PyColumn {
             inner: rs_replace(&self.inner, search, replacement),
@@ -891,6 +931,17 @@ impl PyColumn {
     fn rlike(&self, pattern: &str) -> Self {
         PyColumn {
             inner: rlike(&self.inner, pattern),
+        }
+    }
+    #[pyo3(signature = (pattern, idx=0))]
+    fn regexp_extract(&self, pattern: &str, idx: usize) -> Self {
+        PyColumn {
+            inner: regexp_extract(&self.inner, pattern, idx),
+        }
+    }
+    fn regexp_replace(&self, pattern: &str, replacement: &str) -> Self {
+        PyColumn {
+            inner: regexp_replace(&self.inner, pattern, replacement),
         }
     }
     fn cosh(&self) -> Self {
@@ -956,6 +1007,40 @@ impl PyColumn {
     fn hypot(&self, other: &PyColumn) -> Self {
         PyColumn {
             inner: hypot(&self.inner, &other.inner),
+        }
+    }
+    fn floor(&self) -> Self {
+        PyColumn {
+            inner: floor(&self.inner),
+        }
+    }
+    #[pyo3(name = "round", signature = (scale=0))]
+    fn round_(&self, scale: u32) -> Self {
+        PyColumn {
+            inner: round(&self.inner, scale),
+        }
+    }
+    #[pyo3(name = "exp")]
+    fn exp_(&self) -> Self {
+        PyColumn {
+            inner: exp(&self.inner),
+        }
+    }
+    fn levenshtein(&self, other: &PyColumn) -> Self {
+        PyColumn {
+            inner: levenshtein(&self.inner, &other.inner),
+        }
+    }
+    #[pyo3(name = "crc32")]
+    fn crc32_(&self) -> Self {
+        PyColumn {
+            inner: crc32(&self.inner),
+        }
+    }
+    #[pyo3(name = "xxhash64")]
+    fn xxhash64_(&self) -> Self {
+        PyColumn {
+            inner: xxhash64(&self.inner),
         }
     }
 
