@@ -1270,6 +1270,11 @@ fn expr_from_fn_rest(name: &str, args: &[Value]) -> Result<Expr, PlanExprError> 
             let min_val = arg_lit_f64(args, 1)?;
             let max_val = arg_lit_f64(args, 2)?;
             let num_bucket = arg_lit_i64(args, 3)?;
+            if num_bucket <= 0 {
+                return Err(PlanExprError(
+                    "width_bucket: num_bucket must be positive".into(),
+                ));
+            }
             Ok(width_bucket(&val, min_val, max_val, num_bucket).into_expr())
         }
         "equal_null" => {

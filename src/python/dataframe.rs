@@ -151,7 +151,7 @@ impl PyDataFrame {
             let row_dict = PyDict::new(py);
             for (col_idx, name) in names.iter().enumerate() {
                 let s = df.get_columns().get(col_idx).ok_or_else(|| {
-                    pyo3::exceptions::PyRuntimeError::new_err("column index out of range")
+                    pyo3::exceptions::PyIndexError::new_err("column index out of range")
                 })?;
                 let av = s
                     .get(i)
@@ -1158,20 +1158,21 @@ impl PyDataFrame {
     /// Correlation matrix or scalar. PySpark: corr() -> matrix, corr(col1, col2) -> float.
     #[pyo3(signature = (col1=None, col2=None))]
     fn corr(&self, col1: Option<&str>, col2: Option<&str>, py: Python<'_>) -> PyResult<PyObject> {
+        use pyo3::conversion::IntoPyObjectExt;
         match (col1, col2) {
             (Some(c1), Some(c2)) => {
                 let r = self
                     .inner
                     .corr_cols(c1, c2)
                     .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-                Ok(r.into_py(py))
+                Ok(r.into_py_any(py)?)
             }
             _ => {
                 let df = self
                     .inner
                     .corr()
                     .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-                Ok(PyDataFrame { inner: df }.into_py(py))
+                Ok(PyDataFrame { inner: df }.into_py_any(py)?)
             }
         }
     }

@@ -1855,11 +1855,16 @@ fn py_hash(cols: Vec<PyRef<PyColumn>>) -> PyColumn {
 }
 
 #[pyfunction]
-fn py_stack(cols: Vec<PyRef<PyColumn>>) -> PyColumn {
-    let rs_refs: Vec<&crate::column::Column> = cols.iter().map(|c| &(&*c).inner).collect();
-    PyColumn {
-        inner: struct_(&rs_refs),
+fn py_stack(cols: Vec<PyRef<PyColumn>>) -> PyResult<PyColumn> {
+    if cols.is_empty() {
+        return Err(pyo3::exceptions::PyValueError::new_err(
+            "stack() requires at least one column",
+        ));
     }
+    let rs_refs: Vec<&crate::column::Column> = cols.iter().map(|c| &(&*c).inner).collect();
+    Ok(PyColumn {
+        inner: struct_(&rs_refs),
+    })
 }
 
 #[pyfunction]
@@ -2758,19 +2763,34 @@ fn py_try_multiply(left: &PyColumn, right: &PyColumn) -> PyColumn {
 
 #[pyfunction]
 #[pyo3(signature = (value, min_val, max_val, num_bucket))]
-fn py_width_bucket(value: &PyColumn, min_val: f64, max_val: f64, num_bucket: i64) -> PyColumn {
-    PyColumn {
-        inner: width_bucket(&value.inner, min_val, max_val, num_bucket),
+fn py_width_bucket(
+    value: &PyColumn,
+    min_val: f64,
+    max_val: f64,
+    num_bucket: i64,
+) -> PyResult<PyColumn> {
+    if num_bucket <= 0 {
+        return Err(pyo3::exceptions::PyValueError::new_err(
+            "width_bucket: num_bucket must be positive",
+        ));
     }
+    Ok(PyColumn {
+        inner: width_bucket(&value.inner, min_val, max_val, num_bucket),
+    })
 }
 
 #[pyfunction]
 #[pyo3(signature = (index, cols))]
-fn py_elt(index: &PyColumn, cols: Vec<PyRef<PyColumn>>) -> PyColumn {
-    let refs: Vec<&RsColumn> = cols.iter().map(|c| &c.inner).collect();
-    PyColumn {
-        inner: crate::functions::elt(&index.inner, &refs),
+fn py_elt(index: &PyColumn, cols: Vec<PyRef<PyColumn>>) -> PyResult<PyColumn> {
+    if cols.is_empty() {
+        return Err(pyo3::exceptions::PyValueError::new_err(
+            "elt() requires at least one column",
+        ));
     }
+    let refs: Vec<&RsColumn> = cols.iter().map(|c| &c.inner).collect();
+    Ok(PyColumn {
+        inner: crate::functions::elt(&index.inner, &refs),
+    })
 }
 
 #[pyfunction]
@@ -2788,11 +2808,16 @@ fn py_typeof(col: &PyColumn) -> PyColumn {
 }
 
 #[pyfunction]
-fn py_struct(cols: Vec<PyRef<PyColumn>>) -> PyColumn {
-    let refs: Vec<&RsColumn> = cols.iter().map(|c| &c.inner).collect();
-    PyColumn {
-        inner: struct_(&refs),
+fn py_struct(cols: Vec<PyRef<PyColumn>>) -> PyResult<PyColumn> {
+    if cols.is_empty() {
+        return Err(pyo3::exceptions::PyValueError::new_err(
+            "struct() requires at least one column",
+        ));
     }
+    let refs: Vec<&RsColumn> = cols.iter().map(|c| &c.inner).collect();
+    Ok(PyColumn {
+        inner: struct_(&refs),
+    })
 }
 
 #[pyfunction]
