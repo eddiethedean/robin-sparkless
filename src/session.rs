@@ -723,7 +723,7 @@ impl SparkSession {
     ///
     /// `rows`: each inner vec is one row; length must match schema length. Values are JSON-like (i64, f64, string, bool, null, object, array).
     /// `schema`: list of (column_name, dtype_string), e.g. `[("id", "bigint"), ("name", "string")]`.
-    /// Supported dtype strings: bigint, int, long, double, float, string, str, varchar, boolean, bool, date, timestamp, datetime, array<element_type>, struct<field:type,...>.
+    /// Supported dtype strings: bigint, int, long, double, float, string, str, varchar, boolean, bool, date, timestamp, datetime, list, array, array<element_type>, struct<field:type,...>.
     pub fn create_dataframe_from_rows(
         &self,
         rows: Vec<Vec<JsonValue>>,
@@ -852,6 +852,41 @@ impl SparkSession {
                         .map_err(|e| {
                             PolarsError::ComputeError(format!("datetime cast: {e}").into())
                         })?
+                }
+                "list" | "array" => {
+                    // PySpark parity: accept schema ("col", "list") or ("col", "array"); default element type bigint.
+                    let elem_type = "bigint";
+                    let inner_dtype = DataType::Int64;
+                    let n = rows.len();
+                    let mut builder = get_list_builder(&inner_dtype, 64, n, name.as_str().into());
+                    for row in rows.iter() {
+                        let v = row.get(col_idx).cloned().unwrap_or(JsonValue::Null);
+                        if let JsonValue::Null = v {
+                            builder.append_null();
+                        } else if let Some(arr) = v.as_array() {
+                            let elem_series: Vec<Series> = arr
+                                .iter()
+                                .map(|e| json_value_to_series_single(e, elem_type, "elem"))
+                                .collect::<Result<Vec<_>, _>>()?;
+                            let vals: Vec<_> =
+                                elem_series.iter().filter_map(|s| s.get(0).ok()).collect();
+                            let s = Series::from_any_values_and_dtype(
+                                PlSmallStr::EMPTY,
+                                &vals,
+                                &inner_dtype,
+                                false,
+                            )
+                            .map_err(|e| {
+                                PolarsError::ComputeError(format!("array elem: {e}").into())
+                            })?;
+                            builder.append_series(&s)?;
+                        } else {
+                            return Err(PolarsError::ComputeError(
+                                "array column value must be null or array".into(),
+                            ));
+                        }
+                    }
+                    builder.finish().into_series()
                 }
                 _ if parse_array_element_type(&type_lower).is_some() => {
                     let elem_type = parse_array_element_type(&type_lower)
