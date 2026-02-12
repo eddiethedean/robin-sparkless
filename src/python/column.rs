@@ -220,6 +220,21 @@ impl PyColumn {
         })
     }
 
+    /// Inclusive range (PySpark between): true where (self >= low) and (self <= high). Accepts Column or scalar.
+    fn between(
+        &self,
+        low: &Bound<'_, pyo3::types::PyAny>,
+        high: &Bound<'_, pyo3::types::PyAny>,
+    ) -> PyResult<Self> {
+        let low_col = py_any_to_column(low)?;
+        let high_col = py_any_to_column(high)?;
+        let ge = self.inner.expr().clone().gt_eq(low_col.expr().clone());
+        let le = self.inner.expr().clone().lt_eq(high_col.expr().clone());
+        Ok(PyColumn {
+            inner: RsColumn::from_expr(ge.and(le), None),
+        })
+    }
+
     /// Python > operator. Enables col("a") > col("b") and col("a") > 5.
     fn __gt__(&self, other: &Bound<'_, pyo3::types::PyAny>) -> PyResult<Self> {
         self.gt(other)
