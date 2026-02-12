@@ -11,6 +11,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Phase 26 – Publish crate**: Prepare and publish robin-sparkless to crates.io (and optionally PyPI via maturin). See [ROADMAP.md](docs/ROADMAP.md) for details.
 
+## [0.8.2] - 2026-02-12
+
+### Added
+
+- **#256 – create_dataframe_from_rows: schema "list" / "array" (PySpark parity)** — `create_dataframe_from_rows` now accepts column type `"list"` or `"array"` (default element type bigint), so DataFrames with array columns can be created without using `array<element_type>`. Enables posexplode/explode and APIs that need array columns. Fixes #256 (#259).
+
 ## [0.8.1] - 2026-02-12
 
 ### Added
