@@ -880,10 +880,14 @@ fn expr_from_fn(name: &str, args: &[Value]) -> Result<Expr, PlanExprError> {
             Ok(regexp_instr(&c, &pattern, group_idx).into_expr())
         }
         "split" => {
-            require_args(name, args, 2)?;
+            require_args_min(name, args, 2)?;
+            if args.len() > 3 {
+                return Err(PlanExprError("split takes at most 3 arguments".to_string()));
+            }
             let c = expr_to_column(arg_expr(args, 0)?);
             let delimiter = arg_lit_str(args, 1)?;
-            Ok(split(&c, &delimiter).into_expr())
+            let limit = args.get(2).and_then(|v| lit_as_i64(v).ok()).map(|n| n as i32);
+            Ok(split(&c, &delimiter, limit).into_expr())
         }
         "split_part" => {
             require_args(name, args, 3)?;
