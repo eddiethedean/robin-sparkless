@@ -112,8 +112,9 @@ impl PySparkSession {
     /// Args:
     ///     data: List of rows. Each row is a dict (keyed by column name) or a list of
     ///         values in the same order as ``schema``. Supported value types: None, int,
-    ///         float, bool, str.
+    ///         float, bool, str, dict (struct), list (array).
     ///     schema: List of (name, dtype_str), e.g. [("id", "bigint"), ("name", "string")].
+    ///         Column types may include "list" or "array" for list columns (element type bigint; PySpark parity #256).
     ///
     /// Returns:
     ///     DataFrame (lazy).
