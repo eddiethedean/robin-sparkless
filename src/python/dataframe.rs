@@ -323,7 +323,10 @@ impl PyDataFrame {
             let asc = ascending.unwrap_or_else(|| vec![true; col_names.len()]);
             let df = self
                 .inner
-                .order_by(col_names.iter().map(|s| s.as_str()).collect::<Vec<_>>(), asc)
+                .order_by(
+                    col_names.iter().map(|s| s.as_str()).collect::<Vec<_>>(),
+                    asc,
+                )
                 .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
             return Ok(PyDataFrame { inner: df });
         }
