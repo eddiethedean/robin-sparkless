@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **#284 – SparkSession.sql() and SparkSession.table() always exposed (PySpark parity)** — `spark.sql(query)` and `spark.table(name)` are now always present on the Python SparkSession. When built with the `sql` feature they work as before. When built without it they raise a clear `RuntimeError` instead of `AttributeError`, so Sparkless and PySpark-migrating code can call these methods without attribute checks. Fixes #284.
+
 ### Planned
 
 - **Phase 26 – Publish crate**: Prepare and publish robin-sparkless to crates.io (and optionally PyPI via maturin). See [ROADMAP.md](docs/ROADMAP.md) for details.

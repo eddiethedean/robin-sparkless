@@ -241,9 +241,17 @@ impl PySparkSession {
     /// Note:
     ///     Requires the ``sql`` feature. Re-registering the same name replaces the view.
     #[cfg(feature = "sql")]
-    fn create_or_replace_temp_view(&self, name: &str, df: &PyDataFrame) {
+    fn create_or_replace_temp_view(&self, name: &str, df: &PyDataFrame) -> PyResult<()> {
         self.inner
             .create_or_replace_temp_view(name, df.inner.clone());
+        Ok(())
+    }
+
+    #[cfg(not(feature = "sql"))]
+    fn create_or_replace_temp_view(&self, _name: &str, _df: &PyDataFrame) -> PyResult<()> {
+        Err(pyo3::exceptions::PyRuntimeError::new_err(
+            "create_or_replace_temp_view() requires the 'sql' feature. Build with: maturin develop --features 'pyo3,sql'.",
+        ))
     }
 
     /// Return the DataFrame for a previously registered table/view name.
@@ -255,7 +263,7 @@ impl PySparkSession {
     ///     DataFrame (lazy) for that view.
     ///
     /// Raises:
-    ///     RuntimeError: If the name is not registered.
+    ///     RuntimeError: If the name is not registered, or if built without the ``sql`` feature.
     #[cfg(feature = "sql")]
     fn table(&self, name: &str) -> PyResult<PyDataFrame> {
         let df = self
@@ -263,6 +271,13 @@ impl PySparkSession {
             .table(name)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
         Ok(PyDataFrame { inner: df })
+    }
+
+    #[cfg(not(feature = "sql"))]
+    fn table(&self, _name: &str) -> PyResult<PyDataFrame> {
+        Err(pyo3::exceptions::PyRuntimeError::new_err(
+            "spark.table() requires the 'sql' feature. Build with: maturin develop --features 'pyo3,sql' (or pip install robin-sparkless and use a wheel built with sql support).",
+        ))
     }
 
     /// Execute a SQL SELECT query over registered tables/views.
@@ -277,7 +292,7 @@ impl PySparkSession {
     ///     DataFrame (lazy) with the query result.
     ///
     /// Raises:
-    ///     RuntimeError: If parsing or execution fails.
+    ///     RuntimeError: If parsing or execution fails, or if built without the ``sql`` feature.
     #[cfg(feature = "sql")]
     fn sql(&self, query: &str) -> PyResult<PyDataFrame> {
         let df = self
@@ -285,6 +300,13 @@ impl PySparkSession {
             .sql(query)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
         Ok(PyDataFrame { inner: df })
+    }
+
+    #[cfg(not(feature = "sql"))]
+    fn sql(&self, _query: &str) -> PyResult<PyDataFrame> {
+        Err(pyo3::exceptions::PyRuntimeError::new_err(
+            "spark.sql() requires the 'sql' feature. Build with: maturin develop --features 'pyo3,sql' (or pip install robin-sparkless and use a wheel built with sql support).",
+        ))
     }
 
     /// Read a Delta Lake table from the given path (latest version).
