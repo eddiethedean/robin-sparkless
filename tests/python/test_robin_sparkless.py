@@ -1907,6 +1907,27 @@ def test_lag_lead_dense_rank_module_issue_319_320() -> None:
     assert rks == [1, 2, 2]  # dense_rank: no gap after tie
 
 
+def test_hour_module_issue_313() -> None:
+    """Module-level hour(column) extracts hour from timestamp (#313)."""
+    import robin_sparkless as rs
+
+    spark = rs.SparkSession.builder().app_name("test").get_or_create()
+    df = spark._create_dataframe_from_rows(
+        [
+            {"ts_str": "2024-01-15 09:30:00"},
+            {"ts_str": "2024-06-01 14:00:00"},
+            {"ts_str": "2023-12-31 23:59:00"},
+        ],
+        [("ts_str", "string")],
+    )
+    df = df.with_column("ts", rs.to_timestamp(rs.col("ts_str")))
+    out = df.with_column("h", rs.hour(rs.col("ts")))
+    rows = out.collect()
+    assert len(rows) == 3
+    hours = [r["h"] for r in rows]
+    assert hours == [9, 14, 23]
+
+
 def test_window_partition_by_order_by_accept_str_issue_288() -> None:
     """Window.partitionBy and orderBy accept column names (str) not only Column (#288)."""
     import robin_sparkless as rs
