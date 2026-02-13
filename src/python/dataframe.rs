@@ -638,10 +638,15 @@ impl PyDataFrame {
     ///
     /// Raises:
     ///     RuntimeError: If execution fails.
-    fn union_by_name(&self, other: &PyDataFrame) -> PyResult<PyDataFrame> {
+    #[pyo3(signature = (other, allow_missing_columns=true))]
+    fn union_by_name(
+        &self,
+        other: &PyDataFrame,
+        allow_missing_columns: bool,
+    ) -> PyResult<PyDataFrame> {
         let df = self
             .inner
-            .union_by_name(&other.inner)
+            .union_by_name(&other.inner, allow_missing_columns)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
         Ok(PyDataFrame { inner: df })
     }
