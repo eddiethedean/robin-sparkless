@@ -1979,6 +1979,24 @@ def test_to_date_module_issue_322() -> None:
     assert r["d"] is not None and "2024-01-15" in str(r["d"])
 
 
+def test_element_at_module_issue_317() -> None:
+    """Module-level element_at(column, index) 1-based for array (#317)."""
+    import robin_sparkless as rs
+
+    spark = rs.SparkSession.builder().app_name("test").get_or_create()
+    df = spark._create_dataframe_from_rows(
+        [{"arr": [10, 20, 30]}, {"arr": [100, 200]}],
+        [("arr", "array<bigint>")],
+    )
+    out = df.with_column("first", rs.element_at(rs.col("arr"), 1)).with_column(
+        "third", rs.element_at(rs.col("arr"), 3)
+    )
+    rows = out.collect()
+    assert len(rows) == 2
+    assert rows[0]["first"] == 10 and rows[0]["third"] == 30
+    assert rows[1]["first"] == 100 and rows[1]["third"] is None  # out of bounds
+
+
 def test_window_partition_by_order_by_accept_str_issue_288() -> None:
     import robin_sparkless as rs
 

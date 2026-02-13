@@ -31,10 +31,11 @@ use crate::functions::{
     bit_count, bit_length, bit_or, bit_xor, bitwise_not, broadcast as rs_broadcast, cardinality,
     concat as rs_concat, concat_ws as rs_concat_ws, create_map,
     current_catalog as rs_current_catalog, current_database as rs_current_database,
-    current_schema as rs_current_schema, current_user as rs_current_user, equal_null, exp, explode,
-    explode_outer, floor, get, hash, inline as rs_inline, inline_outer as rs_inline_outer,
-    input_file_name as rs_input_file_name, isin, isin_i64, isin_str, json_array_length, map_concat,
-    map_contains_key, map_filter_value_gt, map_from_entries, map_zip_with_coalesce,
+    current_schema as rs_current_schema, current_user as rs_current_user, element_at, equal_null,
+    exp, explode, explode_outer, floor, get, hash, inline as rs_inline,
+    inline_outer as rs_inline_outer, input_file_name as rs_input_file_name, isin, isin_i64,
+    isin_str, json_array_length, map_concat, map_contains_key, map_filter_value_gt,
+    map_from_entries, map_zip_with_coalesce,
     monotonically_increasing_id as rs_monotonically_increasing_id, named_struct, parse_url,
     posexplode, rand as rs_rand, randn as rs_randn, round, sequence, shift_left, shift_right,
     shuffle, size, spark_partition_id as rs_spark_partition_id, stddev, str_to_map, struct_,
@@ -618,6 +619,7 @@ fn robin_sparkless(m: &Bound<'_, PyModule>) -> PyResult<()> {
         wrap_pyfunction!(py_map_zip_with_coalesce, m)?,
     )?;
     m.add("create_map", wrap_pyfunction!(py_create_map, m)?)?;
+    m.add("element_at", wrap_pyfunction!(py_element_at, m)?)?;
     m.add("get", wrap_pyfunction!(py_get, m)?)?;
     m.add("try_divide", wrap_pyfunction!(py_try_divide, m)?)?;
     m.add("try_add", wrap_pyfunction!(py_try_add, m)?)?;
@@ -2935,6 +2937,13 @@ fn py_create_map(cols: &Bound<'_, pyo3::types::PyTuple>) -> PyResult<PyColumn> {
     let inner =
         create_map(&refs).map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
     Ok(PyColumn { inner })
+}
+
+#[pyfunction]
+fn py_element_at(col: &PyColumn, index: i64) -> PyColumn {
+    PyColumn {
+        inner: element_at(&col.inner, index),
+    }
 }
 
 #[pyfunction]
