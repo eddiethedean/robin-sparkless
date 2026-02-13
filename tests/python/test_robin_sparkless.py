@@ -2030,6 +2030,36 @@ def test_first_agg_issue_293() -> None:
     assert by_k[2] == 5
 
 
+def test_approx_count_distinct_accepts_column_name_str_issue_342() -> None:
+    """approx_count_distinct accepts column name (str) or Column for PySpark parity (#342)."""
+    import robin_sparkless as rs
+
+    spark = rs.SparkSession.builder().app_name("test").get_or_create()
+    create_df = getattr(spark, "_create_dataframe_from_rows")
+    df = create_df(
+        [
+            {"k": "A", "value": 1},
+            {"k": "A", "value": 10},
+            {"k": "A", "value": 1},
+            {"k": "B", "value": 5},
+            {"k": "B", "value": 5},
+        ],
+        [("k", "string"), ("value", "int")],
+    )
+    # String column name (PySpark: F.approx_count_distinct("value"))
+    result = df.agg(rs.approx_count_distinct("value"))
+    rows = result.collect()
+    assert len(rows) == 1
+    # Result column name is "value" (from expression)
+    assert rows[0]["value"] == 3
+    # With rsd
+    result2 = df.agg(rs.approx_count_distinct("value", rsd=0.01))
+    assert result2.collect()[0]["value"] == 3
+    # Column still works
+    result3 = df.agg(rs.approx_count_distinct(rs.col("value")))
+    assert result3.collect()[0]["value"] == 3
+
+
 def test_approx_count_distinct_approx_percentile_issue_297_300() -> None:
     """Module-level approx_count_distinct and approx_percentile for groupBy.agg() (#297, #300)."""
     import robin_sparkless as rs
