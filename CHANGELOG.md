@@ -11,6 +11,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Phase 26 – Publish crate**: Prepare and publish robin-sparkless to crates.io (and optionally PyPI via maturin). See [ROADMAP.md](docs/ROADMAP.md) for details.
 
+## [0.8.3] - 2026-02-13
+
+### Added
+
+- **#260 – lit(None).cast("double") / lit(None).cast("date") (PySpark parity)** — Casting a null literal to double or date is now supported for schema evolution and typed null columns. Fixes #260 (#261).
+
+### Changed
+
+- **Make: parallel check and check-full** — `make check` uses `fmt-check` and lists deps so `make -j5 check` runs format check, clippy, audit, deny, and test-rust in parallel. `make -j7 check-full` runs all 7 jobs (5 Rust + 2 Python) in parallel. README updated with `make fmt` and -j usage.
+
 ## [0.8.2] - 2026-02-12
 
 ### Added
