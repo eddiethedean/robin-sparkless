@@ -1831,6 +1831,24 @@ def test_na_drop_fill_subset_how_thresh_issue_289() -> None:
     assert out_thresh.count() == 1  # only (3, 3) has 2 non-null
 
 
+def test_fillna_subset_direct_issue_290() -> None:
+    """DataFrame.fillna(value, subset=[...]) accepts subset keyword (#290)."""
+    import robin_sparkless as rs
+
+    spark = rs.SparkSession.builder().app_name("test").get_or_create()
+    df = spark._create_dataframe_from_rows(
+        [{"a": 1, "b": None}, {"a": None, "b": 2}],
+        [("a", "int"), ("b", "int")],
+    )
+    out = df.fillna(0, subset=["b"])
+    rows = out.collect()
+    assert len(rows) == 2
+    # Only column b is filled; a is unchanged (1 and None)
+    by_a = {r.get("a") for r in rows}
+    assert by_a == {1, None}
+    assert [r["b"] for r in rows] == [0, 2]
+
+
 def test_window_partition_by_order_by_accept_str_issue_288() -> None:
     """Window.partitionBy and orderBy accept column names (str) not only Column (#288)."""
     import robin_sparkless as rs
