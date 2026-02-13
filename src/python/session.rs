@@ -42,8 +42,7 @@ impl PySparkSession {
     /// Prefer ``SparkSession.builder().app_name("...").get_or_create()`` for clarity.
     #[new]
     fn new() -> Self {
-        let inner =
-            SparkSession::new(None, None, std::collections::HashMap::new());
+        let inner = SparkSession::new(None, None, std::collections::HashMap::new());
         set_thread_udf_session(inner.clone());
         if let Ok(mut guard) = default_session_cell().lock() {
             *guard = Some(inner.clone());

@@ -1819,7 +1819,7 @@ def test_active_session_and_agg_issue_286() -> None:
     by_name = {r["name"]: r[sum_col] for r in rows}
     assert by_name["a"] == 1 and by_name["b"] == 2
     # Parameterless SparkSession() also registers as active (PySpark parity)
-    spark2 = rs.SparkSession()
+    rs.SparkSession()  # side effect: sets active session
     assert rs.SparkSession.get_active_session() is not None
 
 
