@@ -44,7 +44,8 @@ use crate::functions::{
     xxhash64, zip_with_coalesce,
 };
 use crate::functions::{
-    any_value, avg, coalesce, col as rs_col, count, count_if, first, max, min, sum as rs_sum,
+    any_value, approx_count_distinct, approx_percentile, avg, coalesce, col as rs_col, count,
+    count_if, first, max, min, sum as rs_sum,
 };
 use crate::functions::{
     asc, asc_nulls_first, asc_nulls_last, bround, cot, csc, desc, desc_nulls_first,
@@ -424,6 +425,14 @@ fn robin_sparkless(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("avg", wrap_pyfunction!(py_avg, m)?)?;
     m.add("min", wrap_pyfunction!(py_min, m)?)?;
     m.add("max", wrap_pyfunction!(py_max, m)?)?;
+    m.add(
+        "approx_count_distinct",
+        wrap_pyfunction!(py_approx_count_distinct, m)?,
+    )?;
+    m.add(
+        "approx_percentile",
+        wrap_pyfunction!(py_approx_percentile, m)?,
+    )?;
     m.add("count", wrap_pyfunction!(py_count, m)?)?;
     m.add("count_if", wrap_pyfunction!(py_count_if, m)?)?;
     m.add("first", wrap_pyfunction!(py_first, m)?)?;
@@ -1143,6 +1152,22 @@ fn py_max(col: &PyColumn) -> PyColumn {
 fn py_count(col: &PyColumn) -> PyColumn {
     PyColumn {
         inner: count(&col.inner),
+    }
+}
+
+#[pyfunction]
+#[pyo3(signature = (col, rsd=None))]
+fn py_approx_count_distinct(col: &PyColumn, rsd: Option<f64>) -> PyColumn {
+    PyColumn {
+        inner: approx_count_distinct(&col.inner, rsd),
+    }
+}
+
+#[pyfunction]
+#[pyo3(signature = (col, percentage, accuracy=None))]
+fn py_approx_percentile(col: &PyColumn, percentage: f64, accuracy: Option<i32>) -> PyColumn {
+    PyColumn {
+        inner: approx_percentile(&col.inner, percentage, accuracy),
     }
 }
 
