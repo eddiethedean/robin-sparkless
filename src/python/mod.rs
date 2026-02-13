@@ -1407,9 +1407,18 @@ fn py_explode_outer(col: &PyColumn) -> PyColumn {
 }
 
 #[pyfunction]
-fn py_posexplode(col: &PyColumn) -> (PyColumn, PyColumn) {
-    let (pos, val) = posexplode(&col.inner);
-    (PyColumn { inner: pos }, PyColumn { inner: val })
+fn py_posexplode(col: &Bound<'_, pyo3::types::PyAny>) -> PyResult<(PyColumn, PyColumn)> {
+    let col_column: RsColumn = if let Ok(pycol) = col.downcast::<PyColumn>() {
+        pycol.borrow().inner.clone()
+    } else if let Ok(name) = col.extract::<String>() {
+        rs_col(&name)
+    } else {
+        return Err(pyo3::exceptions::PyTypeError::new_err(
+            "posexplode() argument must be Column or column name (str)",
+        ));
+    };
+    let (pos, val) = posexplode(&col_column);
+    Ok((PyColumn { inner: pos }, PyColumn { inner: val }))
 }
 
 #[pyfunction]
