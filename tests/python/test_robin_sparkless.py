@@ -2201,6 +2201,24 @@ def test_corr_covar_pop_skewness_kurtosis_module_issue_311_312_321() -> None:
     assert by_k["a"]["kurt_x"] is not None
 
 
+def test_explode_outer_module_issue_305() -> None:
+    """explode_outer(column) exists and returns column for list expand; null/empty -> row with null (#305)."""
+    import robin_sparkless as rs
+
+    spark = rs.SparkSession.builder().app_name("test").get_or_create()
+    df = spark._create_dataframe_from_rows(
+        [{"k": "a", "arr": [1, 2]}, {"k": "b", "arr": None}],
+        [("k", "string"), ("arr", "array<bigint>")],
+    )
+    # select with only exploded column: a->2 rows, b->1 row (null) => 3 rows
+    out = df.select(rs.explode_outer(rs.col("arr")).alias("v"))
+    rows = out.collect()
+    assert len(rows) >= 2
+    assert all("v" in r for r in rows)
+    vals = [r["v"] for r in rows]
+    assert 1 in vals or 2 in vals
+
+
 def test_encode_decode_module_issue_307() -> None:
     """Module-level encode(column, charset) and decode(column, charset) (#307)."""
     import robin_sparkless as rs
