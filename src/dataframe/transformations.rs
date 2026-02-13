@@ -128,6 +128,7 @@ pub fn with_column(
         }
     }
     let expr = df.resolve_expr_column_names(column.expr().clone())?;
+    let expr = df.coerce_string_numeric_comparisons(expr)?;
     let lf = df.df.as_ref().clone().lazy();
     let lf_with_col = lf.with_column(expr.alias(column_name));
     let pl_df = lf_with_col.collect()?;
