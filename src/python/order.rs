@@ -204,3 +204,24 @@ impl PyRowNumber {
         Ok(PyColumn { inner: col })
     }
 }
+
+/// Python wrapper for dense_rank() in the Python API (PySpark-style). Use with Window: dense_rank().over(win).
+#[pyclass(name = "DenseRank")]
+pub struct PyDenseRank {
+    pub(crate) descending: bool,
+}
+
+#[pymethods]
+impl PyDenseRank {
+    /// Apply this dense_rank() to a Window and return a Column expression.
+    fn over(&self, window: &PyWindow) -> PyResult<PyColumn> {
+        let order_col = window.order_by.as_ref().ok_or_else(|| {
+            pyo3::exceptions::PyValueError::new_err(
+                "Window.orderBy(...) must be called before dense_rank().over(window)",
+            )
+        })?;
+        let refs: Vec<&str> = window.partition_by.iter().map(|s| s.as_str()).collect();
+        let col = order_col.dense_rank(self.descending).over(&refs);
+        Ok(PyColumn { inner: col })
+    }
+}

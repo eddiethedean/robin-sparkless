@@ -65,7 +65,7 @@ pub(crate) use dataframe::{
     PyCubeRollupData, PyDataFrame, PyDataFrameNa, PyDataFrameStat, PyDataFrameWriter, PyGroupedData,
 };
 pub(crate) use order::{
-    PyRowNumber, PySortOrder, PyThenBuilder, PyWhenBuilder, PyWhenThen, PyWindow,
+    PyDenseRank, PyRowNumber, PySortOrder, PyThenBuilder, PyWhenBuilder, PyWhenThen, PyWindow,
 };
 use session::parse_return_type;
 pub(crate) use session::{
@@ -398,6 +398,7 @@ fn robin_sparkless(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PySortOrder>()?;
     m.add_class::<PyWindow>()?;
     m.add_class::<PyRowNumber>()?;
+    m.add_class::<PyDenseRank>()?;
     m.add_class::<PyWhenThen>()?;
     m.add_class::<PyWhenBuilder>()?;
     m.add_class::<PyThenBuilder>()?;
@@ -408,6 +409,9 @@ fn robin_sparkless(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("concat", wrap_pyfunction!(py_concat, m)?)?;
     m.add("concat_ws", wrap_pyfunction!(py_concat_ws, m)?)?;
     m.add("row_number", wrap_pyfunction!(py_row_number, m)?)?;
+    m.add("dense_rank", wrap_pyfunction!(py_dense_rank, m)?)?;
+    m.add("lag", wrap_pyfunction!(py_lag, m)?)?;
+    m.add("lead", wrap_pyfunction!(py_lead, m)?)?;
     m.add("call_udf", wrap_pyfunction!(py_call_udf, m)?)?;
     m.add("lit", wrap_pyfunction!(py_lit, m)?)?;
     m.add("when", wrap_pyfunction!(py_when, m)?)?;
@@ -1019,6 +1023,31 @@ fn py_concat_ws(sep: &str, columns: Vec<PyRef<PyColumn>>) -> PyResult<PyColumn> 
 #[pyo3(signature = (descending=false))]
 fn py_row_number(descending: bool) -> PyRowNumber {
     PyRowNumber { descending }
+}
+
+/// Dense rank window function. Use with ``dense_rank().over(win)`` (PySpark parity #320).
+#[pyfunction]
+#[pyo3(signature = (descending=false))]
+fn py_dense_rank(descending: bool) -> PyDenseRank {
+    PyDenseRank { descending }
+}
+
+/// Lag: value from n rows before in partition. Use with ``lag(col("v"), 1).over(["dept"])`` (PySpark parity #319).
+#[pyfunction]
+#[pyo3(signature = (column, offset=1))]
+fn py_lag(column: &PyColumn, offset: i64) -> PyColumn {
+    PyColumn {
+        inner: column.inner.lag(offset),
+    }
+}
+
+/// Lead: value from n rows after in partition. Use with ``lead(col("v"), 1).over(["dept"])`` (PySpark parity #319).
+#[pyfunction]
+#[pyo3(signature = (column, offset=1))]
+fn py_lead(column: &PyColumn, offset: i64) -> PyColumn {
+    PyColumn {
+        inner: column.inner.lead(offset),
+    }
 }
 
 /// Sum aggregation over a column.
