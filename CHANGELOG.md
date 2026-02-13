@@ -24,6 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **#315 – last_day(col) (PySpark parity)** — Module-level `last_day(column)` returns the last day of the month for a date/timestamp column. Fixes #315.
 - **#322 – to_date(col [, format]) (PySpark parity)** — Module-level `to_date(column, format=None)` casts or parses to date; with `format` parses string column using PySpark-style format. Fixes #322.
 - **#317 – element_at(col, index) (PySpark parity)** — Module-level `element_at(column, index)` (1-based index) for array/map columns. Fixes #317.
+- **#316 – array_remove(col, element) (PySpark parity)** — Module-level `array_remove(column, value)` removes all elements equal to value from the array. Fixes #316.
 
 ### Planned
 
