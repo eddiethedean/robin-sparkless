@@ -3276,8 +3276,34 @@ pub fn apply_try_multiply(columns: &mut [Column]) -> PolarsResult<Option<Column>
     Ok(Some(Column::new(name, out)))
 }
 
+/// Strip PySpark/Java SimpleDateFormat quoted literals: 'T' -> T, '' -> '. So chrono gets unquoted pattern.
+fn unquote_simple_date_format(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '\'' {
+            if chars.peek() == Some(&'\'') {
+                chars.next();
+                out.push('\'');
+            } else {
+                while let Some(q) = chars.next() {
+                    if q == '\'' {
+                        break;
+                    }
+                    out.push(q);
+                }
+            }
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
 /// Map PySpark/Java SimpleDateFormat style to chrono strftime. Public for to_char/date_format.
+/// Handles quoted literals (e.g. 'T' in "yyyy-MM-dd'T'HH:mm:ss") so they become literal in chrono (#273).
 pub(crate) fn pyspark_format_to_chrono(s: &str) -> String {
+    let s = unquote_simple_date_format(s);
     s.replace("yyyy", "%Y")
         .replace("MM", "%m")
         .replace("dd", "%d")
@@ -3397,6 +3423,7 @@ pub fn apply_make_timestamp(
 
 /// to_timestamp(column, format?) / try_to_timestamp(column, format?) - string to timestamp.
 /// When format is Some, parse with that format (PySpark-style mapped to chrono); when None, use default.
+/// Strips whitespace from string values before parsing (PySpark parity #273).
 /// strict: true for to_timestamp (error on invalid), false for try_to_timestamp (null on invalid).
 pub fn apply_to_timestamp_format(
     column: Column,
@@ -3405,11 +3432,15 @@ pub fn apply_to_timestamp_format(
 ) -> PolarsResult<Option<Column>> {
     use chrono::NaiveDateTime;
     use polars::datatypes::TimeUnit;
+    let name = column.field().into_owned().name;
+    let series = column.take_materialized_series();
+    if series.dtype() != &DataType::String {
+        let out_series = series.cast(&DataType::Datetime(TimeUnit::Microseconds, None))?;
+        return Ok(Some(Column::new(name, out_series)));
+    }
     let chrono_fmt = format
         .map(pyspark_format_to_chrono)
         .unwrap_or_else(|| "%Y-%m-%d %H:%M:%S".to_string());
-    let name = column.field().into_owned().name;
-    let series = column.take_materialized_series();
     let ca = series
         .str()
         .map_err(|e| PolarsError::ComputeError(format!("to_timestamp: {e}").into()))?;
@@ -3417,7 +3448,7 @@ pub fn apply_to_timestamp_format(
         name.as_str().into(),
         ca.into_iter().map(|opt_s| {
             opt_s.and_then(|s| {
-                NaiveDateTime::parse_from_str(s, &chrono_fmt)
+                NaiveDateTime::parse_from_str(s.trim(), &chrono_fmt)
                     .ok()
                     .map(|ndt| ndt.and_utc().timestamp_micros())
             })
