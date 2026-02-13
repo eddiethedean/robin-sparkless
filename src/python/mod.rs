@@ -44,9 +44,9 @@ use crate::functions::{
     xxhash64, zip_with_coalesce,
 };
 use crate::functions::{
-    any_value, approx_count_distinct, approx_percentile, avg, coalesce, col as rs_col,
-    collect_list, collect_set, count, count_if, first, max, max_by, min, min_by, sum as rs_sum,
-    try_avg, try_sum,
+    any_value, approx_count_distinct, approx_percentile, avg, bool_and, coalesce, col as rs_col,
+    collect_list, collect_set, count, count_if, every, first, max, max_by, min, min_by,
+    sum as rs_sum, try_avg, try_sum,
 };
 use crate::functions::{
     asc, asc_nulls_first, asc_nulls_last, bround, cot, csc, desc, desc_nulls_first,
@@ -438,9 +438,11 @@ fn robin_sparkless(m: &Bound<'_, PyModule>) -> PyResult<()> {
         "approx_percentile",
         wrap_pyfunction!(py_approx_percentile, m)?,
     )?;
+    m.add("bool_and", wrap_pyfunction!(py_bool_and, m)?)?;
     m.add("collect_list", wrap_pyfunction!(py_collect_list, m)?)?;
     m.add("collect_set", wrap_pyfunction!(py_collect_set, m)?)?;
     m.add("count", wrap_pyfunction!(py_count, m)?)?;
+    m.add("every", wrap_pyfunction!(py_every, m)?)?;
     m.add("count_if", wrap_pyfunction!(py_count_if, m)?)?;
     m.add("first", wrap_pyfunction!(py_first, m)?)?;
     m.add("any_value", wrap_pyfunction!(py_any_value, m)?)?;
@@ -1207,9 +1209,23 @@ fn py_approx_percentile(col: &PyColumn, percentage: f64, accuracy: Option<i32>) 
 }
 
 #[pyfunction]
+fn py_bool_and(col: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: bool_and(&col.inner),
+    }
+}
+
+#[pyfunction]
 fn py_collect_list(col: &PyColumn) -> PyColumn {
     PyColumn {
         inner: collect_list(&col.inner),
+    }
+}
+
+#[pyfunction]
+fn py_every(col: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: every(&col.inner),
     }
 }
 

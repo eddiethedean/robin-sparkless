@@ -35,6 +35,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **#304 – try_sum(column) / try_avg(column) (PySpark parity)** — Module-level `try_sum(column)` and `try_avg(column)` for use in `groupBy.agg()` (maps to sum/mean; null-on-overflow reserved for API). Fixes #304.
 - **#309 – collect_list(column) (PySpark parity)** — Module-level `collect_list(column)` for use in `groupBy.agg()` (collect values into list per group). Fixes #309.
 - **#310 – collect_set(column) (PySpark parity)** — Module-level `collect_set(column)` for use in `groupBy.agg()` (collect distinct values into list per group). Fixes #310.
+- **#314 – bool_and(column) / every(column) (PySpark parity)** — Module-level `bool_and(column)` and `every(column)` for use in `groupBy.agg()` (boolean AND across group). Fixes #314.
 
 ### Planned
 
