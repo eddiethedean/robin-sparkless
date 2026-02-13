@@ -167,8 +167,17 @@ class DataFrame:
         how: str = "inner",
     ) -> DataFrame: ...
     def drop(self, cols: list[str]) -> DataFrame: ...
-    def dropna(self, subset: list[str] | None = None) -> DataFrame: ...
-    def fillna(self, value: Column) -> DataFrame: ...
+    def dropna(
+        self,
+        subset: list[str] | None = None,
+        how: str = "any",
+        thresh: int | None = None,
+    ) -> DataFrame: ...
+    def fillna(
+        self,
+        value: Union[int, float, bool, str, Column],
+        subset: list[str] | None = None,
+    ) -> DataFrame: ...
     def replace(
         self,
         to_replace: int | float | bool | str | None,
@@ -212,8 +221,17 @@ class DataFrameStat:
     def corr_matrix(self) -> DataFrame: ...
 
 class DataFrameNa:
-    def fill(self, value: Column) -> DataFrame: ...
-    def drop(self, subset: list[str] | None = None) -> DataFrame: ...
+    def fill(
+        self,
+        value: Union[int, float, bool, str, Column],
+        subset: list[str] | None = None,
+    ) -> DataFrame: ...
+    def drop(
+        self,
+        subset: list[str] | None = None,
+        how: str = "any",
+        thresh: int | None = None,
+    ) -> DataFrame: ...
 
 class Column:
     def alias(self, name: str) -> Column: ...

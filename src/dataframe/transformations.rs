@@ -6,7 +6,7 @@
 use super::DataFrame;
 use crate::functions::SortOrder;
 use polars::prelude::{
-    col, Expr, IntoLazy, IntoSeries, NamedFrom, PolarsError, Series, UnionArgs, UniqueKeepStrategy,
+    Expr, IntoLazy, IntoSeries, NamedFrom, PolarsError, Series, UnionArgs, UniqueKeepStrategy,
 };
 use std::collections::HashMap;
 
@@ -295,24 +295,46 @@ pub fn drop(
     ))
 }
 
-/// Drop rows with nulls (all columns or subset).
+/// Drop rows with nulls (all columns or subset). PySpark na.drop(subset, how, thresh).
+/// - how: "any" (default) = drop if any null in subset; "all" = drop only if all null in subset.
+/// - thresh: if set, keep row if it has at least this many non-null values in subset (overrides how).
 pub fn dropna(
     df: &DataFrame,
     subset: Option<Vec<&str>>,
+    how: &str,
+    thresh: Option<usize>,
     case_sensitive: bool,
 ) -> Result<DataFrame, PolarsError> {
+    use polars::prelude::*;
     let lf = df.df.as_ref().clone().lazy();
-    let subset_exprs: Option<Vec<Expr>> = match subset {
-        Some(cols) => Some(cols.iter().map(|c| col(*c)).collect()),
-        None => Some(
-            df.df
-                .get_column_names()
-                .iter()
-                .map(|n| col(n.as_str()))
-                .collect(),
-        ),
+    let cols: Vec<&str> = match &subset {
+        Some(c) => c.as_slice().to_vec(),
+        None => df
+            .df
+            .get_column_names()
+            .iter()
+            .map(|n| n.as_str())
+            .collect(),
     };
-    let lf = lf.drop_nulls(subset_exprs);
+    let col_exprs: Vec<Expr> = cols.iter().map(|c| col(*c)).collect();
+    let lf = if let Some(n) = thresh {
+        // Keep row if number of non-null in subset >= n
+        let count_expr: Expr = col_exprs
+            .iter()
+            .map(|e| e.clone().is_not_null().cast(DataType::Int32))
+            .fold(lit(0i32), |a, b| a + b);
+        lf.filter(count_expr.gt_eq(lit(n as i32)))
+    } else if how.eq_ignore_ascii_case("all") {
+        // Drop only when all subset columns are null → keep when any is not null
+        let any_not_null: Expr = col_exprs
+            .into_iter()
+            .map(|e| e.is_not_null())
+            .fold(lit(false), |a, b| a.or(b));
+        lf.filter(any_not_null)
+    } else {
+        // how == "any" (default): drop if any null in subset
+        lf.drop_nulls(Some(col_exprs))
+    };
     let pl_df = lf.collect()?;
     Ok(super::DataFrame::from_polars_with_options(
         pl_df,
@@ -320,19 +342,30 @@ pub fn dropna(
     ))
 }
 
-/// Fill nulls with a literal expression (applied to all columns). For column-specific fill, use a map in a future extension.
+/// Fill nulls with a literal expression. If subset is Some, only those columns are filled; else all.
+/// PySpark na.fill(value, subset=...).
 pub fn fillna(
     df: &DataFrame,
     value_expr: Expr,
+    subset: Option<Vec<&str>>,
     case_sensitive: bool,
 ) -> Result<DataFrame, PolarsError> {
     use polars::prelude::*;
-    let exprs: Vec<Expr> = df
-        .df
-        .get_column_names()
-        .iter()
-        .map(|n| col(n.as_str()).fill_null(value_expr.clone()))
-        .collect();
+    let exprs: Vec<Expr> = match subset {
+        Some(cols) => cols
+            .iter()
+            .map(|n| {
+                let resolved = df.resolve_column_name(n)?;
+                Ok(col(resolved.as_str()).fill_null(value_expr.clone()))
+            })
+            .collect::<Result<Vec<_>, PolarsError>>()?,
+        None => df
+            .df
+            .get_column_names()
+            .iter()
+            .map(|n| col(n.as_str()).fill_null(value_expr.clone()))
+            .collect(),
+    };
     let pl_df = df
         .df
         .as_ref()
@@ -909,14 +942,19 @@ pub struct DataFrameNa<'a> {
 }
 
 impl<'a> DataFrameNa<'a> {
-    /// Fill nulls with the given value. PySpark na.fill(value).
-    pub fn fill(&self, value: Expr) -> Result<DataFrame, PolarsError> {
-        fillna(self.df, value, self.df.case_sensitive)
+    /// Fill nulls with the given value. PySpark na.fill(value, subset=...).
+    pub fn fill(&self, value: Expr, subset: Option<Vec<&str>>) -> Result<DataFrame, PolarsError> {
+        fillna(self.df, value, subset, self.df.case_sensitive)
     }
 
-    /// Drop rows with nulls in the given columns (or all). PySpark na.drop(subset).
-    pub fn drop(&self, subset: Option<Vec<&str>>) -> Result<DataFrame, PolarsError> {
-        dropna(self.df, subset, self.df.case_sensitive)
+    /// Drop rows with nulls. PySpark na.drop(subset=..., how=..., thresh=...).
+    pub fn drop(
+        &self,
+        subset: Option<Vec<&str>>,
+        how: &str,
+        thresh: Option<usize>,
+    ) -> Result<DataFrame, PolarsError> {
+        dropna(self.df, subset, how, thresh, self.df.case_sensitive)
     }
 }
 
@@ -1255,7 +1293,7 @@ mod tests {
     #[test]
     fn dropna_all_columns() {
         let df = test_df();
-        let out = dropna(&df, None, false).unwrap();
+        let out = dropna(&df, None, "any", None, false).unwrap();
         assert_eq!(out.count().unwrap(), 3);
     }
 }

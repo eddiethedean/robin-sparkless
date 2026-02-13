@@ -609,14 +609,19 @@ impl DataFrame {
         transformations::drop(self, columns, self.case_sensitive)
     }
 
-    /// Drop rows with nulls (all columns or optional subset).
-    pub fn dropna(&self, subset: Option<Vec<&str>>) -> Result<DataFrame, PolarsError> {
-        transformations::dropna(self, subset, self.case_sensitive)
+    /// Drop rows with nulls. PySpark na.drop(subset, how, thresh).
+    pub fn dropna(
+        &self,
+        subset: Option<Vec<&str>>,
+        how: &str,
+        thresh: Option<usize>,
+    ) -> Result<DataFrame, PolarsError> {
+        transformations::dropna(self, subset, how, thresh, self.case_sensitive)
     }
 
-    /// Fill nulls with a literal expression (applied to all columns).
-    pub fn fillna(&self, value: Expr) -> Result<DataFrame, PolarsError> {
-        transformations::fillna(self, value, self.case_sensitive)
+    /// Fill nulls with a literal expression. PySpark na.fill(value, subset=...).
+    pub fn fillna(&self, value: Expr, subset: Option<Vec<&str>>) -> Result<DataFrame, PolarsError> {
+        transformations::fillna(self, value, subset, self.case_sensitive)
     }
 
     /// Limit: return first n rows.
