@@ -230,8 +230,8 @@ pub fn median(col: &Column) -> Column {
     )
 }
 
-/// Approximate percentile (PySpark approx_percentile). Maps to quantile; percentage in 0.0..=1.0.
-pub fn approx_percentile(col: &Column, percentage: f64) -> Column {
+/// Approximate percentile (PySpark approx_percentile). Maps to quantile; percentage in 0.0..=1.0. accuracy reserved for API compatibility.
+pub fn approx_percentile(col: &Column, percentage: f64, _accuracy: Option<i32>) -> Column {
     use polars::prelude::QuantileMethod;
     Column::from_expr(
         col.expr()
@@ -242,8 +242,8 @@ pub fn approx_percentile(col: &Column, percentage: f64) -> Column {
 }
 
 /// Approximate percentile (PySpark percentile_approx). Alias for approx_percentile.
-pub fn percentile_approx(col: &Column, percentage: f64) -> Column {
-    approx_percentile(col, percentage)
+pub fn percentile_approx(col: &Column, percentage: f64, accuracy: Option<i32>) -> Column {
+    approx_percentile(col, percentage, accuracy)
 }
 
 /// Mode aggregation - most frequent value. PySpark mode.
@@ -257,6 +257,15 @@ pub fn count_distinct(col: &Column) -> Column {
     Column::from_expr(
         col.expr().clone().n_unique().cast(DataType::Int64),
         Some("count_distinct".to_string()),
+    )
+}
+
+/// Approximate count distinct (PySpark approx_count_distinct). Use in groupBy.agg(). rsd reserved for API compatibility; Polars uses exact n_unique.
+pub fn approx_count_distinct(col: &Column, _rsd: Option<f64>) -> Column {
+    use polars::prelude::DataType;
+    Column::from_expr(
+        col.expr().clone().n_unique().cast(DataType::Int64),
+        Some("approx_count_distinct".to_string()),
     )
 }
 

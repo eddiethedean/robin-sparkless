@@ -2030,6 +2030,40 @@ def test_first_agg_issue_293() -> None:
     assert by_k[2] == 5
 
 
+def test_approx_count_distinct_approx_percentile_issue_297_300() -> None:
+    """Module-level approx_count_distinct and approx_percentile for groupBy.agg() (#297, #300)."""
+    import robin_sparkless as rs
+
+    spark = rs.SparkSession.builder().app_name("test").get_or_create()
+    df = spark._create_dataframe_from_rows(
+        [
+            {"k": "a", "v": 10},
+            {"k": "a", "v": 10},
+            {"k": "a", "v": 20},
+            {"k": "b", "v": 5},
+        ],
+        [("k", "string"), ("v", "bigint")],
+    )
+    out = df.group_by(["k"]).agg(
+        [
+            rs.approx_count_distinct(rs.col("v")).alias("approx_n"),
+            rs.approx_count_distinct(rs.col("v"), rsd=0.01).alias("approx_n_rsd"),
+            rs.approx_percentile(rs.col("v"), 0.5).alias("p50"),
+            rs.approx_percentile(rs.col("v"), 0.5, accuracy=10000).alias("p50_acc"),
+        ]
+    )
+    rows = out.order_by(["k"]).collect()
+    assert len(rows) == 2
+    by_k = {r["k"]: r for r in rows}
+    assert by_k["a"]["approx_n"] == 2
+    assert by_k["a"]["approx_n_rsd"] == 2
+    # Polars quantile(0.5) for [10,10,20] may be 10.0 or 15.0 depending on method
+    assert by_k["a"]["p50"] in (10.0, 15.0)
+    assert by_k["a"]["p50_acc"] in (10.0, 15.0)
+    assert by_k["b"]["approx_n"] == 1
+    assert by_k["b"]["p50"] == 5.0
+
+
 def test_encode_decode_module_issue_307() -> None:
     """Module-level encode(column, charset) and decode(column, charset) (#307)."""
     import robin_sparkless as rs

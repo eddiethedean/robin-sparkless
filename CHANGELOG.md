@@ -29,6 +29,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **#293 – first() / first_ignore_nulls() aggregate (PySpark parity)** — `first(column, ignorenulls=True)` aggregation for use in `groupBy.agg()` (e.g. `df.group_by("k").agg([rs.first(rs.col("v"))])`). Fixes #293.
 - **#301 – any_value(expr [, isIgnoreNull]) (PySpark parity)** — Module-level `any_value(column, ignorenulls=True)` for use in `groupBy.agg()`. Fixes #301.
 - **#302 – count_if(expr) (PySpark parity)** — Module-level `count_if(column)` (count where condition true) for use in `groupBy.agg()`. Fixes #302.
+- **#297 – approx_count_distinct(column [, rsd]) (PySpark parity)** — Module-level `approx_count_distinct(column, rsd=None)` for use in `groupBy.agg()` (Polars uses exact n_unique; rsd reserved for API). Fixes #297.
+- **#300 – approx_percentile(col, percentage [, accuracy]) (PySpark parity)** — Module-level `approx_percentile(column, percentage, accuracy=None)` for use in `groupBy.agg()` (maps to quantile; accuracy reserved for API). Fixes #300.
 
 ### Planned
 
