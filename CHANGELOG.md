@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Planned
+
+- **Phase 26 – Publish crate**: Prepare and publish robin-sparkless to crates.io (and optionally PyPI via maturin). See [ROADMAP.md](docs/ROADMAP.md) for details.
+
+## [0.8.5] - 2026-02-13
+
 ### Added
 
 - **#272 – round() on string column strips whitespace (PySpark parity)** — `round()` on string columns now trims leading/trailing whitespace before parsing to double, so values like `"  10.6  "` and `"\t20.7"` round to 11.0 and 21.0 instead of returning null. Fixes #272.
@@ -15,10 +21,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **#275 – create_map() with no arguments (PySpark parity)** — `create_map()` and `create_map([])` now return a column of empty maps (one `{}` per row) instead of raising `TypeError: py_create_map() missing 1 required positional argument: 'cols'`. Python binding accepts `*cols` so zero arguments is valid. Fixes #275.
 - **#276 – between() with string column and numeric bounds (PySpark parity)** — `col("col").between(1, 20)` when `col` is string now coerces (string parsed to number for comparison) instead of raising `RuntimeError: cannot compare string with numeric type`. Coercion is applied in `with_column` as well as in `filter`. Fixes #276.
 - **#280 – posexplode() accepts column name (str) (PySpark parity)** — `posexplode("Values")` now works in addition to `posexplode(F.col("Values"))`; previously raised `TypeError: 'str' object cannot be converted to 'Column'`. Fixes #280.
-
-### Planned
-
-- **Phase 26 – Publish crate**: Prepare and publish robin-sparkless to crates.io (and optionally PyPI via maturin). See [ROADMAP.md](docs/ROADMAP.md) for details.
 
 ## [0.8.4] - 2026-02-13
 
