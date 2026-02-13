@@ -150,9 +150,15 @@ impl DataFrame {
                     matches!(&**left, Expr::Literal(_)) && is_numeric_literal(left.as_ref());
                 let right_is_numeric_lit =
                     matches!(&**right, Expr::Literal(_)) && is_numeric_literal(right.as_ref());
+                let left_is_string_lit = matches!(&**left, Expr::Literal(LiteralValue::String(_)));
+                let right_is_string_lit =
+                    matches!(&**right, Expr::Literal(LiteralValue::String(_)));
                 let root_is_col_vs_numeric = is_comparison_op
                     && ((left_is_col && right_is_numeric_lit)
                         || (right_is_col && left_is_numeric_lit));
+                let root_is_col_vs_string = is_comparison_op
+                    && ((left_is_col && right_is_string_lit)
+                        || (right_is_col && left_is_string_lit));
                 if root_is_col_vs_numeric {
                     let (new_left, new_right) = if left_is_col && right_is_numeric_lit {
                         let lit_ty = match &**right {
@@ -186,6 +192,41 @@ impl DataFrame {
                         op: *op,
                         right: Arc::new(new_right),
                     }
+                } else if root_is_col_vs_string {
+                    let col_name = if left_is_col {
+                        if let Expr::Column(n) = &**left {
+                            n.as_str()
+                        } else {
+                            unreachable!()
+                        }
+                    } else if let Expr::Column(n) = &**right {
+                        n.as_str()
+                    } else {
+                        unreachable!()
+                    };
+                    if let Some(col_dtype) = self.get_column_dtype(col_name) {
+                        if matches!(col_dtype, DataType::Date | DataType::Datetime(_, _)) {
+                            let (left_ty, right_ty) = if left_is_col {
+                                (col_dtype.clone(), DataType::String)
+                            } else {
+                                (DataType::String, col_dtype.clone())
+                            };
+                            let (new_left, new_right) = coerce_for_pyspark_comparison(
+                                (*left).as_ref().clone(),
+                                (*right).as_ref().clone(),
+                                &left_ty,
+                                &right_ty,
+                                op,
+                            )
+                            .map_err(|e| PolarsError::ComputeError(e.to_string().into()))?;
+                            return Ok(Expr::BinaryExpr {
+                                left: Arc::new(new_left),
+                                op: *op,
+                                right: Arc::new(new_right),
+                            });
+                        }
+                    }
+                    expr
                 } else {
                     expr
                 }
@@ -214,6 +255,8 @@ impl DataFrame {
                 let right_is_col = matches!(&*right, Expr::Column(_));
                 let left_is_lit = matches!(&*left, Expr::Literal(_));
                 let right_is_lit = matches!(&*right, Expr::Literal(_));
+                let left_is_string_lit = matches!(&*left, Expr::Literal(LiteralValue::String(_)));
+                let right_is_string_lit = matches!(&*right, Expr::Literal(LiteralValue::String(_)));
 
                 let left_is_numeric_lit = left_is_lit && is_numeric_literal(left.as_ref());
                 let right_is_numeric_lit = right_is_lit && is_numeric_literal(right.as_ref());
@@ -247,6 +290,43 @@ impl DataFrame {
                         &op,
                     )
                     .map_err(|e| PolarsError::ComputeError(e.to_string().into()))?
+                } else if (left_is_col && right_is_string_lit)
+                    || (right_is_col && left_is_string_lit)
+                {
+                    let col_name = if left_is_col {
+                        if let Expr::Column(n) = &*left {
+                            n.as_str()
+                        } else {
+                            unreachable!()
+                        }
+                    } else if let Expr::Column(n) = &*right {
+                        n.as_str()
+                    } else {
+                        unreachable!()
+                    };
+                    if let Some(col_dtype) = self.get_column_dtype(col_name) {
+                        if matches!(col_dtype, DataType::Date | DataType::Datetime(_, _)) {
+                            let (left_ty, right_ty) = if left_is_col {
+                                (col_dtype.clone(), DataType::String)
+                            } else {
+                                (DataType::String, col_dtype.clone())
+                            };
+                            let (new_l, new_r) = coerce_for_pyspark_comparison(
+                                (*left).clone(),
+                                (*right).clone(),
+                                &left_ty,
+                                &right_ty,
+                                &op,
+                            )
+                            .map_err(|e| PolarsError::ComputeError(e.to_string().into()))?;
+                            return Ok(Expr::BinaryExpr {
+                                left: Arc::new(new_l),
+                                op,
+                                right: Arc::new(new_r),
+                            });
+                        }
+                    }
+                    return Ok(Expr::BinaryExpr { left, op, right });
                 } else {
                     // Leave other comparison forms (col-col, lit-lit, non-numeric) unchanged.
                     return Ok(Expr::BinaryExpr { left, op, right });
@@ -298,6 +378,16 @@ impl DataFrame {
     /// Get the schema of the DataFrame
     pub fn schema(&self) -> Result<StructType, PolarsError> {
         Ok(StructType::from_polars_schema(&self.df.schema()))
+    }
+
+    /// Get the dtype of a column by name (after resolving case-insensitivity). Returns None if not found.
+    pub fn get_column_dtype(&self, name: &str) -> Option<DataType> {
+        let resolved = self.resolve_column_name(name).ok()?;
+        self.df
+            .schema()
+            .iter_names_and_dtypes()
+            .find(|(n, _)| n.to_string() == resolved)
+            .map(|(_, dt)| dt.clone())
     }
 
     /// Get column names
