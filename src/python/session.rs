@@ -36,13 +36,18 @@ pub struct PySparkSession {
 #[pymethods]
 impl PySparkSession {
     /// Create a default SparkSession with no app name or master URL.
+    /// The session is registered as the active/default session so ``get_active_session()``
+    /// and aggregate functions (e.g. ``df.agg(F.sum(col("x")))``) resolve it (PySpark parity).
     ///
     /// Prefer ``SparkSession.builder().app_name("...").get_or_create()`` for clarity.
     #[new]
     fn new() -> Self {
-        PySparkSession {
-            inner: SparkSession::new(None, None, std::collections::HashMap::new()),
+        let inner = SparkSession::new(None, None, std::collections::HashMap::new());
+        set_thread_udf_session(inner.clone());
+        if let Ok(mut guard) = default_session_cell().lock() {
+            *guard = Some(inner.clone());
         }
+        PySparkSession { inner }
     }
 
     /// Return a builder to configure and create a SparkSession.
