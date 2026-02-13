@@ -27,6 +27,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **#316 – array_remove(col, element) (PySpark parity)** — Module-level `array_remove(column, value)` removes all elements equal to value from the array. Fixes #316.
 - **#307 – encode(col, charset) / decode(col, charset) (PySpark parity)** — Module-level `encode(column, charset)` and `decode(column, charset)` for string/binary (e.g. UTF-8, hex). Fixes #307.
 - **#293 – first() / first_ignore_nulls() aggregate (PySpark parity)** — `first(column, ignorenulls=True)` aggregation for use in `groupBy.agg()` (e.g. `df.group_by("k").agg([rs.first(rs.col("v"))])`). Fixes #293.
+- **#301 – any_value(expr [, isIgnoreNull]) (PySpark parity)** — Module-level `any_value(column, ignorenulls=True)` for use in `groupBy.agg()`. Fixes #301.
+- **#302 – count_if(expr) (PySpark parity)** — Module-level `count_if(column)` (count where condition true) for use in `groupBy.agg()`. Fixes #302.
 
 ### Planned
 
