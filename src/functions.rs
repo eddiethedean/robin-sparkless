@@ -1601,9 +1601,15 @@ pub fn day(column: &Column) -> Column {
     column.clone().day()
 }
 
-/// Cast to date (PySpark to_date)
-pub fn to_date(column: &Column) -> Column {
-    column.clone().to_date()
+/// Cast or parse to date (PySpark to_date). When format is None: cast date/datetime to date, parse string with default formats. When format is Some: parse string with given format.
+pub fn to_date(column: &Column, format: Option<&str>) -> Result<Column, String> {
+    use polars::prelude::GetOutput;
+    let fmt = format.map(|s| s.to_string());
+    let expr = column.expr().clone().map(
+        move |col| crate::udfs::apply_string_to_date_format(col, fmt.as_deref(), false),
+        GetOutput::from_type(DataType::Date),
+    );
+    Ok(Column::from_expr(expr, None))
 }
 
 /// Format date/datetime as string (PySpark date_format). Accepts PySpark/Java SimpleDateFormat style (e.g. "yyyy-MM") and converts to chrono strftime internally.
