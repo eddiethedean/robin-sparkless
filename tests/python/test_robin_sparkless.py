@@ -1803,6 +1803,27 @@ def test_sparkless_parity_multiple_append_operations() -> None:
     assert rows[0]["id"] == 1 and rows[1]["id"] == 2 and rows[2]["id"] == 3
 
 
+def test_spark_sql_and_table_exist_issue_284() -> None:
+    """SparkSession.sql() and spark.table() exist (PySpark parity); work with sql feature or raise clear error (#284)."""
+    import robin_sparkless as rs
+
+    spark = rs.SparkSession.builder().app_name("test").get_or_create()
+    assert hasattr(spark, "sql"), "spark.sql must exist (issue #284)"
+    assert hasattr(spark, "table"), "spark.table must exist (issue #284)"
+    try:
+        tbl_df = spark.create_dataframe([(1, 10, "a")], ["id", "v", "name"])
+        spark.create_or_replace_temp_view("my_table", tbl_df)
+        df = spark.sql("SELECT * FROM my_table")
+        row = df.collect()
+        assert len(row) == 1 and row[0]["id"] == 1 and row[0]["name"] == "a"
+        df2 = spark.table("my_table")
+        assert df2.count() == 1
+    except RuntimeError as e:
+        if "requires the 'sql' feature" in str(e):
+            pytest.skip("sql feature not built")
+        raise
+
+
 def test_sql_select_where_returns_rows() -> None:
     """SQL SELECT with WHERE returns filtered rows (#122-#140 session/SQL parity)."""
     import robin_sparkless as rs
@@ -1814,8 +1835,10 @@ def test_sql_select_where_returns_rows() -> None:
     try:
         spark.create_or_replace_temp_view("t", df)
         result = spark.sql("SELECT * FROM t WHERE id > 1")
-    except AttributeError:
-        pytest.skip("sql feature not built")
+    except (AttributeError, RuntimeError) as e:
+        if "requires the 'sql' feature" in str(e):
+            pytest.skip("sql feature not built")
+        raise
     rows = result.collect()
     assert len(rows) == 2
     assert rows[0]["id"] == 2 and rows[1]["id"] == 3
