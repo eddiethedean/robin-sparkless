@@ -163,6 +163,12 @@ pub fn min(col: &Column) -> Column {
     Column::from_expr(col.expr().clone().min(), Some("min".to_string()))
 }
 
+/// First value in group (PySpark first). Use in groupBy.agg(). ignorenulls: when true, first non-null; Polars 0.45 uses .first() only (ignorenulls reserved for API compatibility).
+pub fn first(col: &Column, ignorenulls: bool) -> Column {
+    let _ = ignorenulls;
+    Column::from_expr(col.expr().clone().first(), None)
+}
+
 /// Standard deviation (sample) aggregation (PySpark stddev / stddev_samp)
 pub fn stddev(col: &Column) -> Column {
     Column::from_expr(col.expr().clone().std(1), Some("stddev".to_string()))
