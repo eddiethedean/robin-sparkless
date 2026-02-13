@@ -49,6 +49,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **#306 – inline(column) / inline_outer(column) array of structs (PySpark parity)** — Module-level `inline(column)` and `inline_outer(column)` for array-of-structs columns; explode then use unnest to expand struct fields to columns. Fixes #306.
 - **#318 – flatten(column) array-of-arrays (PySpark parity)** — Module-level `flatten(column)` for list-of-lists columns; flattens to one list per row. Fixes #318.
 
+### Documentation
+
+- **README and docs** — Rust quick start and QUICKSTART Basic Usage use `.into_expr()` so filter/col examples compile. Added runnable examples (`examples/demo.rs`, `examples/quickstart_from_polars.rs`) and real output blocks to QUICKSTART, USER_GUIDE, UDF_GUIDE, and PERSISTENCE_GUIDE.
+
 ## [0.8.5] - 2026-02-13
 
 ### Added
