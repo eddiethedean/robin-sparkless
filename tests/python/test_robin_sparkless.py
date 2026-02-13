@@ -2140,6 +2140,35 @@ def test_collect_list_collect_set_module_issue_309_310() -> None:
     assert set_b == [10]
 
 
+def test_bool_and_every_module_issue_314() -> None:
+    """Module-level bool_and and every for groupBy.agg() (#314)."""
+    import robin_sparkless as rs
+
+    spark = rs.SparkSession.builder().app_name("test").get_or_create()
+    df = spark._create_dataframe_from_rows(
+        [
+            {"k": "a", "v": True},
+            {"k": "a", "v": True},
+            {"k": "b", "v": False},
+            {"k": "b", "v": True},
+        ],
+        [("k", "string"), ("v", "boolean")],
+    )
+    out = df.group_by(["k"]).agg(
+        [
+            rs.bool_and(rs.col("v")).alias("and_v"),
+            rs.every(rs.col("v")).alias("every_v"),
+        ]
+    )
+    rows = out.order_by(["k"]).collect()
+    assert len(rows) == 2
+    by_k = {r["k"]: r for r in rows}
+    assert by_k["a"]["and_v"] is True
+    assert by_k["a"]["every_v"] is True
+    assert by_k["b"]["and_v"] is False
+    assert by_k["b"]["every_v"] is False
+
+
 def test_encode_decode_module_issue_307() -> None:
     """Module-level encode(column, charset) and decode(column, charset) (#307)."""
     import robin_sparkless as rs
