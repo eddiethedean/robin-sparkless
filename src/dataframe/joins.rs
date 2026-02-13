@@ -38,14 +38,10 @@ pub fn join(
     let mut right_casts: Vec<Expr> = Vec::new();
     for key in &on {
         let left_dtype = left.get_column_dtype(key).ok_or_else(|| {
-            PolarsError::ComputeError(
-                format!("join key '{key}' not found on left").into(),
-            )
+            PolarsError::ComputeError(format!("join key '{key}' not found on left").into())
         })?;
         let right_dtype = right.get_column_dtype(key).ok_or_else(|| {
-            PolarsError::ComputeError(
-                format!("join key '{key}' not found on right").into(),
-            )
+            PolarsError::ComputeError(format!("join key '{key}' not found on right").into())
         })?;
         if left_dtype != right_dtype {
             let common = find_common_type(&left_dtype, &right_dtype)?;
