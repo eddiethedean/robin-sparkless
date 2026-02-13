@@ -5,15 +5,15 @@
 use crate::column::Column as RsColumn;
 use crate::functions::{
     abs, acos, acosh, add_months, array, array_append, array_compact, array_distinct, array_except,
-    array_insert, array_intersect, array_prepend, array_union, ascii, asin, asinh, atan, atan2,
-    atanh, base64, cast as rs_cast, cbrt, ceiling, char_length, character_length, chr, contains,
-    convert_timezone, cos, cosh, curdate, current_date, current_timestamp, current_timezone,
-    date_add, date_diff, date_format, date_from_unix_date, date_part, date_sub, date_trunc,
-    dateadd, datepart, day, dayname, dayofmonth, dayofweek, dayofyear, days, degrees, endswith,
-    expm1, extract, factorial, find_in_set, format_number, format_string, from_csv, from_unixtime,
-    from_utc_timestamp, get_json_object, greatest as rs_greatest, hour, hours, hypot, ifnull,
-    ilike, initcap, isnan as rs_isnan, isnotnull, isnull, json_tuple, last_day, lcase,
-    least as rs_least, left, length, like, ln, localtimestamp, log, log10, log1p, log2,
+    array_insert, array_intersect, array_prepend, array_remove, array_union, ascii, asin, asinh,
+    atan, atan2, atanh, base64, cast as rs_cast, cbrt, ceiling, char_length, character_length, chr,
+    contains, convert_timezone, cos, cosh, curdate, current_date, current_timestamp,
+    current_timezone, date_add, date_diff, date_format, date_from_unix_date, date_part, date_sub,
+    date_trunc, dateadd, datepart, day, dayname, dayofmonth, dayofweek, dayofyear, days, degrees,
+    endswith, expm1, extract, factorial, find_in_set, format_number, format_string, from_csv,
+    from_unixtime, from_utc_timestamp, get_json_object, greatest as rs_greatest, hour, hours,
+    hypot, ifnull, ilike, initcap, isnan as rs_isnan, isnotnull, isnull, json_tuple, last_day,
+    lcase, least as rs_least, left, length, like, ln, localtimestamp, log, log10, log1p, log2,
     log_with_base, ltrim, make_date, make_interval, make_timestamp, make_timestamp_ntz, md5,
     minutes, month, months, months_between, next_day, now, nullif, nvl, nvl2, overlay, pmod, power,
     quarter, radians, regexp_count, regexp_extract, regexp_extract_all, regexp_instr,
@@ -619,6 +619,7 @@ fn robin_sparkless(m: &Bound<'_, PyModule>) -> PyResult<()> {
         wrap_pyfunction!(py_map_zip_with_coalesce, m)?,
     )?;
     m.add("create_map", wrap_pyfunction!(py_create_map, m)?)?;
+    m.add("array_remove", wrap_pyfunction!(py_array_remove, m)?)?;
     m.add("element_at", wrap_pyfunction!(py_element_at, m)?)?;
     m.add("get", wrap_pyfunction!(py_get, m)?)?;
     m.add("try_divide", wrap_pyfunction!(py_try_divide, m)?)?;
@@ -2937,6 +2938,13 @@ fn py_create_map(cols: &Bound<'_, pyo3::types::PyTuple>) -> PyResult<PyColumn> {
     let inner =
         create_map(&refs).map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
     Ok(PyColumn { inner })
+}
+
+#[pyfunction]
+fn py_array_remove(col: &PyColumn, value: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: array_remove(&col.inner, &value.inner),
+    }
 }
 
 #[pyfunction]
