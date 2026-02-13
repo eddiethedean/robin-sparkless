@@ -3286,7 +3286,7 @@ fn unquote_simple_date_format(s: &str) -> String {
                 chars.next();
                 out.push('\'');
             } else {
-                while let Some(q) = chars.next() {
+                for q in chars.by_ref() {
                     if q == '\'' {
                         break;
                     }
