@@ -1,4 +1,4 @@
-.PHONY: build test test-rust test-python sparkless-parity pyspark-parity extract-pyspark-tests extract-pyspark-tests-expanded batch-regenerate-extracted test-parity-phase-a test-parity-phase-b test-parity-phase-c test-parity-phase-d test-parity-phase-e test-parity-phase-f test-parity-phase-g test-parity-phases bench-python clean check check-full fmt clippy audit outdated deny lint-python all gap-analysis gap-analysis-quick gap-analysis-runtime
+.PHONY: build test test-rust test-python sparkless-parity pyspark-parity extract-pyspark-tests extract-pyspark-tests-expanded batch-regenerate-extracted test-parity-phase-a test-parity-phase-b test-parity-phase-c test-parity-phase-d test-parity-phase-e test-parity-phase-f test-parity-phase-g test-parity-phases bench-python clean check check-full fmt fmt-check clippy audit outdated deny lint-python all gap-analysis gap-analysis-quick gap-analysis-runtime
 
 # Use stable toolchain when no default is configured (override with RUSTUP_TOOLCHAIN=nightly etc.)
 export RUSTUP_TOOLCHAIN ?= stable
@@ -84,11 +84,13 @@ test-parity-phase-g: ; PARITY_PHASE=g cargo test pyspark_parity_fixtures --
 # Run all phase-specific parity tests
 test-parity-phases: test-parity-phase-a test-parity-phase-b test-parity-phase-c test-parity-phase-d test-parity-phase-e test-parity-phase-f test-parity-phase-g
 
-# Run all Rust checks (format, clippy, audit, deny, Rust tests). Completes without Python build.
-check: fmt clippy audit deny test-rust
+# Run all Rust checks (format check, clippy, audit, deny, Rust tests). Completes without Python build.
+# Run with -j5 to run the five jobs in parallel: make -j5 check
+check: fmt-check clippy audit deny test-rust
 	@echo "All checks passed"
 
 # Run full check: Rust checks + Python lint (ruff, mypy) + Python tests (builds PyO3 extension).
+# Run with -j3 to run Rust checks, lint-python, and test-python in parallel: make -j3 check-full
 check-full: check lint-python test-python
 	@echo "All checks including Python passed"
 

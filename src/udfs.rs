@@ -4117,13 +4117,25 @@ pub fn apply_string_to_double(column: Column, strict: bool) -> PolarsResult<Opti
         DataType::Int32 | DataType::Int64 | DataType::UInt32 | DataType::UInt64 => {
             series.cast(&DataType::Float64)?
         }
+        DataType::Null => {
+            // PySpark parity (#260): lit(None).cast("double") yields typed null column.
+            Float64Chunked::from_iter_options(
+                name.as_str().into(),
+                (0..series.len()).map(|_| None::<f64>),
+            )
+            .into_series()
+        }
         _ => {
             if strict {
                 return Err(PolarsError::ComputeError(
                     format!("casting from {} to double not supported", series.dtype()).into(),
                 ));
             }
-            Series::new_null(name.clone(), series.len()).cast(&DataType::Float64)?
+            Float64Chunked::from_iter_options(
+                name.as_str().into(),
+                (0..series.len()).map(|_| None::<f64>),
+            )
+            .into_series()
         }
     };
     Ok(Some(Column::new(name, out)))
@@ -4164,13 +4176,25 @@ pub fn apply_string_to_date(column: Column, strict: bool) -> PolarsResult<Option
         }
         DataType::Date => series,
         DataType::Datetime(_, _) => series.cast(&DataType::Date)?,
+        DataType::Null => {
+            // PySpark parity (#260): lit(None).cast("date") yields typed null column.
+            let days = Int32Chunked::from_iter_options(
+                name.as_str().into(),
+                (0..series.len()).map(|_| None::<i32>),
+            );
+            days.into_series().cast(&DataType::Date)?
+        }
         _ => {
             if strict {
                 return Err(PolarsError::ComputeError(
                     format!("casting from {} to date not supported", series.dtype()).into(),
                 ));
             }
-            Series::new_null(name.clone(), series.len()).cast(&DataType::Date)?
+            let days = Int32Chunked::from_iter_options(
+                name.as_str().into(),
+                (0..series.len()).map(|_| None::<i32>),
+            );
+            days.into_series().cast(&DataType::Date)?
         }
     };
     Ok(Some(Column::new(name, out)))
