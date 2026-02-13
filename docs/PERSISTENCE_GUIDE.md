@@ -61,7 +61,8 @@ df.createOrReplaceGlobalTempView("people")
 
 # New session can access it
 spark2 = rs.SparkSession.builder().app_name("session2").get_or_create()
-spark2.table("global_temp.people").show()
+spark2.table("global_temp.people").show()   # prints 2 rows (Alice, Bob)
+spark2.table("global_temp.people").collect() # [{'id': 1, 'age': 25, 'name': 'Alice'}, ...]
 
 # List global temp views
 spark2.catalog().listTables("global_temp")  # ["people"]
