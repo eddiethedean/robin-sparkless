@@ -119,7 +119,7 @@ pub fn expr_from_value(v: &Value) -> Result<Expr, PlanExprError> {
                 })?;
                 let l = expr_from_value(left)?;
                 let r = expr_from_value(right)?;
-                return Ok(eq_null_safe_expr(l, r));
+                return eq_null_safe_expr(l, r);
             }
             "and" => {
                 let left = obj
@@ -383,18 +383,21 @@ fn expr_to_column(expr: Expr) -> crate::Column {
 }
 
 /// Null-safe equality: (a <=> b) is true when both null, or both non-null and equal.
-fn eq_null_safe_expr(left: Expr, right: Expr) -> Expr {
+/// Applies PySpark-style type coercion (e.g. string vs int) so eq_null_safe matches PySpark (issue #266).
+fn eq_null_safe_expr(left: Expr, right: Expr) -> Result<Expr, PlanExprError> {
     use polars::prelude::*;
-    let left_null = left.clone().is_null();
-    let right_null = right.clone().is_null();
+    let (left_c, right_c) = crate::type_coercion::coerce_for_pyspark_eq_null_safe(left, right)
+        .map_err(|e| PlanExprError(e.to_string()))?;
+    let left_null = left_c.clone().is_null();
+    let right_null = right_c.clone().is_null();
     let both_null = left_null.clone().and(right_null.clone());
     let both_non_null = left_null.not().and(right_null.not());
-    let eq_result = left.eq(right);
-    when(both_null)
+    let eq_result = left_c.eq(right_c);
+    Ok(when(both_null)
         .then(lit(true))
         .when(both_non_null)
         .then(eq_result)
-        .otherwise(lit(false))
+        .otherwise(lit(false)))
 }
 
 /// Find index of the closing paren matching the open paren at start.
