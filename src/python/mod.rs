@@ -12,17 +12,18 @@ use crate::functions::{
     dateadd, datepart, day, dayname, dayofmonth, dayofweek, dayofyear, days, degrees, endswith,
     expm1, extract, factorial, find_in_set, format_number, format_string, from_csv, from_unixtime,
     from_utc_timestamp, get_json_object, greatest as rs_greatest, hour, hours, hypot, ifnull,
-    ilike, initcap, isnan as rs_isnan, isnotnull, isnull, json_tuple, lcase, least as rs_least,
-    left, length, like, ln, localtimestamp, log, log10, log1p, log2, log_with_base, ltrim,
-    make_date, make_interval, make_timestamp, make_timestamp_ntz, md5, minutes, month, months,
-    months_between, next_day, now, nullif, nvl, nvl2, overlay, pmod, power, quarter, radians,
-    regexp_count, regexp_extract, regexp_extract_all, regexp_instr, regexp_replace, regexp_substr,
-    repeat, replace as rs_replace, reverse, right, rint, rlike, rtrim, schema_of_csv,
-    schema_of_json, sha1, sha2, signum, sin, sinh, soundex, split, split_part, startswith, substr,
-    tan, tanh, timestamp_micros, timestamp_millis, timestamp_seconds, timestampadd, timestampdiff,
-    to_csv, to_degrees, to_radians, to_timestamp, to_unix_timestamp, to_utc_timestamp, trim,
-    try_cast as rs_try_cast, ucase, unbase64, unix_date, unix_micros, unix_millis, unix_seconds,
-    unix_timestamp, unix_timestamp_now, weekday, weekofyear, year, years,
+    ilike, initcap, isnan as rs_isnan, isnotnull, isnull, json_tuple, last_day, lcase,
+    least as rs_least, left, length, like, ln, localtimestamp, log, log10, log1p, log2,
+    log_with_base, ltrim, make_date, make_interval, make_timestamp, make_timestamp_ntz, md5,
+    minutes, month, months, months_between, next_day, now, nullif, nvl, nvl2, overlay, pmod, power,
+    quarter, radians, regexp_count, regexp_extract, regexp_extract_all, regexp_instr,
+    regexp_replace, regexp_substr, repeat, replace as rs_replace, reverse, right, rint, rlike,
+    rtrim, schema_of_csv, schema_of_json, sha1, sha2, signum, sin, sinh, soundex, split,
+    split_part, startswith, substr, tan, tanh, timestamp_micros, timestamp_millis,
+    timestamp_seconds, timestampadd, timestampdiff, to_csv, to_degrees, to_radians, to_timestamp,
+    to_unix_timestamp, to_utc_timestamp, trim, try_cast as rs_try_cast, ucase, unbase64, unix_date,
+    unix_micros, unix_millis, unix_seconds, unix_timestamp, unix_timestamp_now, weekday,
+    weekofyear, year, years,
 };
 use crate::functions::{
     aggregate, array_agg, array_contains, array_join, array_max, array_min, array_position,
@@ -505,6 +506,7 @@ fn robin_sparkless(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("year", wrap_pyfunction!(py_year, m)?)?;
     m.add("month", wrap_pyfunction!(py_month, m)?)?;
     m.add("hour", wrap_pyfunction!(py_hour, m)?)?;
+    m.add("last_day", wrap_pyfunction!(py_last_day, m)?)?;
     m.add("to_degrees", wrap_pyfunction!(py_to_degrees, m)?)?;
     m.add("to_radians", wrap_pyfunction!(py_to_radians, m)?)?;
     m.add("isnull", wrap_pyfunction!(py_isnull, m)?)?;
@@ -2458,6 +2460,12 @@ fn py_month(col: &PyColumn) -> PyColumn {
 fn py_hour(col: &PyColumn) -> PyColumn {
     PyColumn {
         inner: hour(&col.inner),
+    }
+}
+#[pyfunction]
+fn py_last_day(col: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: last_day(&col.inner),
     }
 }
 #[pyfunction]
