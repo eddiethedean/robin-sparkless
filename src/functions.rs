@@ -169,6 +169,21 @@ pub fn first(col: &Column, ignorenulls: bool) -> Column {
     Column::from_expr(col.expr().clone().first(), None)
 }
 
+/// Any value from the group (PySpark any_value). Use in groupBy.agg(). ignorenulls reserved for API compatibility.
+pub fn any_value(col: &Column, ignorenulls: bool) -> Column {
+    let _ = ignorenulls;
+    Column::from_expr(col.expr().clone().first(), None)
+}
+
+/// Count rows where condition is true (PySpark count_if). Use in groupBy.agg(); column should be boolean (true=1, false=0).
+pub fn count_if(col: &Column) -> Column {
+    use polars::prelude::DataType;
+    Column::from_expr(
+        col.expr().clone().cast(DataType::Int64).sum(),
+        Some("count_if".to_string()),
+    )
+}
+
 /// Standard deviation (sample) aggregation (PySpark stddev / stddev_samp)
 pub fn stddev(col: &Column) -> Column {
     Column::from_expr(col.expr().clone().std(1), Some("stddev".to_string()))
