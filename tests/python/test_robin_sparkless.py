@@ -1830,7 +1830,9 @@ def test_dataframe_create_or_replace_temp_view_and_table_issue_285() -> None:
 
     spark = rs.SparkSession.builder().app_name("test").get_or_create()
     df = spark.create_dataframe([(1, 10, "a")], ["id", "v", "name"])
-    assert hasattr(df, "createOrReplaceTempView"), "df.createOrReplaceTempView must exist (issue #285)"
+    assert hasattr(df, "createOrReplaceTempView"), (
+        "df.createOrReplaceTempView must exist (issue #285)"
+    )
     try:
         df.createOrReplaceTempView("t")
         rows = spark.table("t").collect()
