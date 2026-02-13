@@ -1979,6 +1979,24 @@ def test_to_date_module_issue_322() -> None:
     assert r["d"] is not None and "2024-01-15" in str(r["d"])
 
 
+def test_encode_decode_module_issue_307() -> None:
+    """Module-level encode(column, charset) and decode(column, charset) (#307)."""
+    import robin_sparkless as rs
+
+    spark = rs.SparkSession.builder().app_name("test").get_or_create()
+    df = spark._create_dataframe_from_rows(
+        [{"s": "hello"}],
+        [("s", "string")],
+    )
+    # encode to hex, then decode back
+    encoded = df.with_column("hex", rs.encode(rs.col("s"), "utf-8"))
+    rows = encoded.collect()
+    assert rows[0]["hex"] is not None  # hex string of UTF-8 bytes
+    decoded = encoded.with_column("back", rs.decode(rs.col("hex"), "utf-8"))
+    rows2 = decoded.collect()
+    assert rows2[0]["back"] == "hello"
+
+
 def test_array_remove_module_issue_316() -> None:
     """Module-level array_remove(column, value) (#316)."""
     import robin_sparkless as rs
