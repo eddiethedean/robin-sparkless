@@ -1713,6 +1713,18 @@ pub fn apply_months_between(
 // --- Math (trig, degrees, radians, signum) ---
 
 fn float_series_to_f64(series: &Series) -> PolarsResult<Float64Chunked> {
+    if series.dtype() == &DataType::String {
+        // PySpark parity (#272): strip whitespace then parse (cast does not strip).
+        let ca = series
+            .str()
+            .map_err(|e| PolarsError::ComputeError(format!("float_series_to_f64: {e}").into()))?;
+        let name = series.name().as_str().into();
+        let results: Vec<Option<f64>> = ca
+            .into_iter()
+            .map(|opt_s| opt_s.and_then(parse_str_to_double))
+            .collect();
+        return Ok(Float64Chunked::from_iter_options(name, results.into_iter()));
+    }
     let casted = series.cast(&DataType::Float64)?;
     casted
         .f64()
