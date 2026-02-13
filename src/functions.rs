@@ -1381,13 +1381,7 @@ pub fn to_timestamp(column: &Column, format: Option<&str>) -> Result<Column, Str
     use polars::prelude::{DataType, GetOutput, TimeUnit};
     let fmt_owned = format.map(|s| s.to_string());
     let expr = column.expr().clone().map(
-        move |s| {
-            crate::udfs::apply_to_timestamp_format(
-                s,
-                fmt_owned.as_deref(),
-                true,
-            )
-        },
+        move |s| crate::udfs::apply_to_timestamp_format(s, fmt_owned.as_deref(), true),
         GetOutput::from_type(DataType::Datetime(TimeUnit::Microseconds, None)),
     );
     Ok(crate::column::Column::from_expr(expr, None))
@@ -1399,13 +1393,7 @@ pub fn try_to_timestamp(column: &Column, format: Option<&str>) -> Result<Column,
     use polars::prelude::*;
     let fmt_owned = format.map(|s| s.to_string());
     let expr = column.expr().clone().map(
-        move |s| {
-            crate::udfs::apply_to_timestamp_format(
-                s,
-                fmt_owned.as_deref(),
-                false,
-            )
-        },
+        move |s| crate::udfs::apply_to_timestamp_format(s, fmt_owned.as_deref(), false),
         GetOutput::from_type(DataType::Datetime(TimeUnit::Microseconds, None)),
     );
     Ok(crate::column::Column::from_expr(expr, None))
