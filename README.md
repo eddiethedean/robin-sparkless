@@ -49,7 +49,7 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-robin-sparkless = "0.8.3"
+robin-sparkless = "0.8.4"
 ```
 
 Optional features:
