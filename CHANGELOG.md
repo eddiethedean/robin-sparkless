@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **#272 – round() on string column strips whitespace (PySpark parity)** — `round()` on string columns now trims leading/trailing whitespace before parsing to double, so values like `"  10.6  "` and `"\t20.7"` round to 11.0 and 21.0 instead of returning null. Fixes #272.
 - **#273 – to_timestamp() on string column (PySpark parity)** — `to_timestamp(col("ts_str"))` without format now parses common string timestamps (e.g. `"2024-01-01 10:00:00"`) using default format `%Y-%m-%d %H:%M:%S` instead of raising `RuntimeError`. With format, PySpark-style patterns with single-quoted literals (e.g. `"yyyy-MM-dd'T'HH:mm:ss"`) are supported: quoted segments like `'T'` are unquoted before conversion to strftime, so `"2024-01-01T10:00:00"` parses correctly. String values are trimmed before parsing. Fixes #273.
+- **#274 – join key type coercion (PySpark parity)** — Join on columns with different types (e.g. str on left, int on right) now coerces both sides to a common type (via `find_common_type`) instead of raising `RuntimeError: datatypes of join keys don't match`. Fixes #274.
 
 ### Planned
 
