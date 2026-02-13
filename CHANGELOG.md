@@ -16,6 +16,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **#288 – Window.partitionBy() / orderBy() accept column names (str) (PySpark parity)** — `Window.partitionBy("col1", "col2")` and `Window.orderBy("col")` now accept column names (strings) as well as Column expressions, so `Window.partitionBy("dept").orderBy("salary")` works without wrapping in `col()`. Fixes #288.
 - **#289 – DataFrame.na.drop() / na.fill() with subset, how, thresh (PySpark parity)** — `df.na().drop(subset=..., how=..., thresh=...)` and `df.na().fill(value, subset=...)` now match PySpark: `drop` accepts `subset` (columns to consider), `how` (`"any"` drop if any null, `"all"` drop only if all null), and `thresh` (keep row if at least that many non-null in subset). `fill` accepts scalar or Column as `value` and optional `subset` (columns to fill). Direct `df.dropna(subset=..., how=..., thresh=...)` and `df.fillna(value, subset=...)` updated accordingly. Fixes #289.
 - **#290 – DataFrame.fillna(value, subset=[...]) (PySpark parity)** — Direct `df.fillna(value, subset=[...])` is supported (same API as #289); fills only the listed columns. Fixes #290.
+- **#291 – create_dataframe_from_rows: allow empty data with schema or empty schema (PySpark parity)** — `create_dataframe_from_rows([], schema)` returns an empty DataFrame with the given column names and types. `create_dataframe_from_rows([], [])` returns an empty DataFrame with no columns. Fixes #291.
+- **#292 – union_by_name(allow_missing_columns=True) (PySpark parity)** — `df.union_by_name(other, allow_missing_columns=True)` (default True) fills columns missing in the other DataFrame with null. When False, errors if the other DataFrame is missing any column from this one. Fixes #292.
 
 ### Planned
 

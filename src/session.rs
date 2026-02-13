@@ -730,8 +730,15 @@ impl SparkSession {
         schema: Vec<(String, String)>,
     ) -> Result<DataFrame, PolarsError> {
         if schema.is_empty() {
+            if rows.is_empty() {
+                return Ok(DataFrame::from_polars_with_options(
+                    PlDataFrame::new(vec![])?,
+                    self.is_case_sensitive(),
+                ));
+            }
             return Err(PolarsError::InvalidOperation(
-                "create_dataframe_from_rows: schema must not be empty".into(),
+                "create_dataframe_from_rows: schema must not be empty when rows are not empty"
+                    .into(),
             ));
         }
         use chrono::{NaiveDate, NaiveDateTime};
@@ -1477,15 +1484,40 @@ mod tests {
     }
 
     #[test]
-    fn test_create_dataframe_from_rows_empty_schema_returns_error() {
+    fn test_create_dataframe_from_rows_empty_schema_with_rows_returns_error() {
         let spark = SparkSession::builder().app_name("test").get_or_create();
         let rows: Vec<Vec<JsonValue>> = vec![vec![]];
         let schema: Vec<(String, String)> = vec![];
         let result = spark.create_dataframe_from_rows(rows, schema);
         match &result {
             Err(e) => assert!(e.to_string().contains("schema must not be empty")),
-            Ok(_) => panic!("expected error for empty schema"),
+            Ok(_) => panic!("expected error for empty schema with non-empty rows"),
         }
+    }
+
+    #[test]
+    fn test_create_dataframe_from_rows_empty_data_with_schema() {
+        let spark = SparkSession::builder().app_name("test").get_or_create();
+        let rows: Vec<Vec<JsonValue>> = vec![];
+        let schema = vec![
+            ("a".to_string(), "int".to_string()),
+            ("b".to_string(), "string".to_string()),
+        ];
+        let result = spark.create_dataframe_from_rows(rows, schema);
+        let df = result.unwrap();
+        assert_eq!(df.count().unwrap(), 0);
+        assert_eq!(df.df.as_ref().get_column_names(), &["a", "b"]);
+    }
+
+    #[test]
+    fn test_create_dataframe_from_rows_empty_schema_empty_data() {
+        let spark = SparkSession::builder().app_name("test").get_or_create();
+        let rows: Vec<Vec<JsonValue>> = vec![];
+        let schema: Vec<(String, String)> = vec![];
+        let result = spark.create_dataframe_from_rows(rows, schema);
+        let df = result.unwrap();
+        assert_eq!(df.count().unwrap(), 0);
+        assert_eq!(df.df.as_ref().get_column_names().len(), 0);
     }
 
     #[test]
