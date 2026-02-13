@@ -1824,6 +1824,25 @@ def test_spark_sql_and_table_exist_issue_284() -> None:
         raise
 
 
+def test_dataframe_create_or_replace_temp_view_and_table_issue_285() -> None:
+    """DataFrame.createOrReplaceTempView() exists; spark.table() resolves temp view (#285)."""
+    import robin_sparkless as rs
+
+    spark = rs.SparkSession.builder().app_name("test").get_or_create()
+    df = spark.create_dataframe([(1, 10, "a")], ["id", "v", "name"])
+    assert hasattr(df, "createOrReplaceTempView"), "df.createOrReplaceTempView must exist (issue #285)"
+    try:
+        df.createOrReplaceTempView("t")
+        rows = spark.table("t").collect()
+        assert len(rows) == 1 and rows[0]["id"] == 1 and rows[0]["name"] == "a"
+        rows2 = spark.sql("SELECT * FROM t").collect()
+        assert len(rows2) == 1 and rows2[0]["id"] == 1
+    except RuntimeError as e:
+        if "requires the 'sql' feature" in str(e):
+            pytest.skip("sql feature not built")
+        raise
+
+
 def test_sql_select_where_returns_rows() -> None:
     """SQL SELECT with WHERE returns filtered rows (#122-#140 session/SQL parity)."""
     import robin_sparkless as rs

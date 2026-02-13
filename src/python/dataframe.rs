@@ -448,11 +448,27 @@ impl PyDataFrame {
         Ok(())
     }
 
+    #[cfg(not(feature = "sql"))]
+    #[pyo3(name = "createOrReplaceTempView")]
+    fn create_or_replace_temp_view(&self, _name: &str, _py: Python<'_>) -> PyResult<()> {
+        Err(pyo3::exceptions::PyRuntimeError::new_err(
+            "createOrReplaceTempView() requires the 'sql' feature. Build with: maturin develop --features 'pyo3,sql'.",
+        ))
+    }
+
     /// Register this DataFrame as a temp view (alias for create_or_replace_temp_view).
     #[cfg(feature = "sql")]
     #[pyo3(name = "createTempView")]
     fn create_temp_view(&self, name: &str, py: Python<'_>) -> PyResult<()> {
         self.create_or_replace_temp_view(name, py)
+    }
+
+    #[cfg(not(feature = "sql"))]
+    #[pyo3(name = "createTempView")]
+    fn create_temp_view(&self, _name: &str, _py: Python<'_>) -> PyResult<()> {
+        Err(pyo3::exceptions::PyRuntimeError::new_err(
+            "createTempView() requires the 'sql' feature. Build with: maturin develop --features 'pyo3,sql'.",
+        ))
     }
 
     /// Register this DataFrame as a global temp view (PySpark: createGlobalTempView). Persists across sessions.
@@ -468,6 +484,14 @@ impl PyDataFrame {
         Ok(())
     }
 
+    #[cfg(not(feature = "sql"))]
+    #[pyo3(name = "createGlobalTempView")]
+    fn create_global_temp_view(&self, _name: &str, _py: Python<'_>) -> PyResult<()> {
+        Err(pyo3::exceptions::PyRuntimeError::new_err(
+            "createGlobalTempView() requires the 'sql' feature. Build with: maturin develop --features 'pyo3,sql'.",
+        ))
+    }
+
     /// Register this DataFrame as a global temp view (PySpark: createOrReplaceGlobalTempView). Persists across sessions.
     #[cfg(feature = "sql")]
     #[pyo3(name = "createOrReplaceGlobalTempView")]
@@ -480,6 +504,14 @@ impl PyDataFrame {
         })?;
         session.create_or_replace_global_temp_view(name, self.inner.clone());
         Ok(())
+    }
+
+    #[cfg(not(feature = "sql"))]
+    #[pyo3(name = "createOrReplaceGlobalTempView")]
+    fn create_or_replace_global_temp_view(&self, _name: &str, _py: Python<'_>) -> PyResult<()> {
+        Err(pyo3::exceptions::PyRuntimeError::new_err(
+            "createOrReplaceGlobalTempView() requires the 'sql' feature. Build with: maturin develop --features 'pyo3,sql'.",
+        ))
     }
 
     /// Join with another DataFrame on one or more column names.
