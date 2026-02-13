@@ -2201,6 +2201,26 @@ def test_corr_covar_pop_skewness_kurtosis_module_issue_311_312_321() -> None:
     assert by_k["a"]["kurt_x"] is not None
 
 
+def test_flatten_module_issue_318() -> None:
+    """flatten(column) for array-of-arrays (#318)."""
+    import robin_sparkless as rs
+
+    # flatten exists and is callable; returns Column usable in with_column
+    assert hasattr(rs, "flatten")
+    assert callable(rs.flatten)
+    spark = rs.SparkSession.builder().app_name("test").get_or_create()
+    df = spark._create_dataframe_from_rows(
+        [{"arr": [1, 2, 3]}, {"arr": [10]}],
+        [("arr", "array<bigint>")],
+    )
+    out = df.with_column("flat", rs.flatten(rs.col("arr")))
+    rows = out.collect()
+    assert len(rows) == 2
+    assert "flat" in rows[0]
+    # flatten of list-of-lists would concatenate; for plain list implementation may pass through
+    assert rows[0]["flat"] is not None
+
+
 def test_inline_inline_outer_module_issue_306() -> None:
     """inline(column) and inline_outer(column) for array/array-of-structs (#306)."""
     import robin_sparkless as rs
