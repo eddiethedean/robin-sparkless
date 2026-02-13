@@ -21,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **#319 – lag(col, offset) / lead(col, offset) as module-level (PySpark parity)** — `lag(column, offset=1)` and `lead(column, offset=1)` are now exposed at module level; use with `.over(partition_by)` (e.g. `rs.lag(rs.col("v"), 1).over(["dept"])`). Fixes #319.
 - **#320 – dense_rank() window function (PySpark parity)** — `dense_rank(descending=False)` returns a window function; use with `.over(window)` (e.g. `rs.dense_rank().over(win)`). Fixes #320.
 - **#313 – hour(col) (PySpark parity)** — Module-level `hour(column)` extracts the hour (0–23) from a date or timestamp column. Fixes #313.
+- **#315 – last_day(col) (PySpark parity)** — Module-level `last_day(column)` returns the last day of the month for a date/timestamp column. Fixes #315.
 
 ### Planned
 
