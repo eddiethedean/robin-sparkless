@@ -35,6 +35,14 @@ fn py_any_to_expr(value: &pyo3::Bound<'_, pyo3::types::PyAny>) -> PyResult<Expr>
     Ok(expr)
 }
 
+/// Value for na.fill: Column expression or scalar (int, float, bool, str). PySpark parity.
+fn py_fill_value_to_expr(value: &pyo3::Bound<'_, pyo3::types::PyAny>) -> PyResult<Expr> {
+    if let Ok(pc) = value.downcast::<PyColumn>() {
+        return Ok(pc.borrow().inner.expr().clone());
+    }
+    py_any_to_expr(value)
+}
+
 /// Extract one or more Column expressions from a single Column, list, or tuple (for agg(*exprs)).
 fn python_exprs_to_columns(exprs: &Bound<'_, PyAny>, _py: Python<'_>) -> PyResult<Vec<Expr>> {
     if let Ok(py_col) = exprs.downcast::<PyColumn>() {
@@ -698,32 +706,47 @@ impl PyDataFrame {
     ///
     /// Raises:
     ///     RuntimeError: If execution fails.
-    #[pyo3(signature = (subset=None))]
-    fn dropna(&self, subset: Option<Vec<String>>) -> PyResult<PyDataFrame> {
+    #[pyo3(signature = (subset=None, how="any", thresh=None))]
+    fn dropna(
+        &self,
+        subset: Option<Vec<String>>,
+        how: &str,
+        thresh: Option<usize>,
+    ) -> PyResult<PyDataFrame> {
         let sub: Option<Vec<&str>> = subset
             .as_ref()
             .map(|v| v.iter().map(|s| s.as_str()).collect());
         let df = self
             .inner
-            .dropna(sub)
+            .dropna(sub, how, thresh)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
         Ok(PyDataFrame { inner: df })
     }
 
-    /// Replace null values with the result of the given expression (e.g. ``lit(0)``).
+    /// Replace null values. Value can be a scalar (int, float, bool, str) or a Column expression.
     ///
     /// Args:
-    ///     value: Column expression; can be a literal or another column. Applied per row.
+    ///     value: Scalar or Column (e.g. ``lit(0)`` or ``0``). If subset is given, only those columns are filled.
+    ///     subset: Optional list of column names. If None, all columns are filled.
     ///
     /// Returns:
     ///     DataFrame (lazy) with nulls filled.
     ///
     /// Raises:
     ///     RuntimeError: If execution fails.
-    fn fillna(&self, value: &PyColumn) -> PyResult<PyDataFrame> {
+    #[pyo3(signature = (value, subset=None))]
+    fn fillna(
+        &self,
+        value: &Bound<'_, PyAny>,
+        subset: Option<Vec<String>>,
+    ) -> PyResult<PyDataFrame> {
+        let expr = py_fill_value_to_expr(value)?;
+        let sub: Option<Vec<&str>> = subset
+            .as_ref()
+            .map(|v| v.iter().map(|s| s.as_str()).collect());
         let df = self
             .inner
-            .fillna(value.inner.expr().clone())
+            .fillna(expr, sub)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
         Ok(PyDataFrame { inner: df })
     }
@@ -1396,7 +1419,7 @@ impl PyDataFrameStat {
     }
 }
 
-/// Python wrapper for DataFrame.na() (fill, drop).
+/// Python wrapper for DataFrame.na() (fill, drop). PySpark df.na.fill(value, subset=...) / na.drop(subset=..., how=..., thresh=...).
 #[pyclass(name = "DataFrameNa")]
 pub struct PyDataFrameNa {
     df: DataFrame,
@@ -1404,44 +1427,51 @@ pub struct PyDataFrameNa {
 
 #[pymethods]
 impl PyDataFrameNa {
-    /// Replace null values with the result of the given expression.
+    /// Replace null values. Value can be a scalar (int, float, bool, str) or a Column expression.
     ///
     /// Args:
-    ///     value: Column expression (e.g. ``lit(0)`` or ``col("other")``). Evaluated per row.
+    ///     value: Scalar or Column (e.g. ``0`` or ``lit(0)`` or ``col("other")``).
+    ///     subset: Optional list of column names. If provided, only those columns are filled.
     ///
     /// Returns:
     ///     DataFrame (lazy) with nulls filled.
-    ///
-    /// Raises:
-    ///     RuntimeError: If execution fails.
-    fn fill(&self, value: &PyColumn) -> PyResult<PyDataFrame> {
-        let df = self
-            .df
-            .na()
-            .fill(value.inner.expr().clone())
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
-    }
-
-    /// Drop rows that contain null in any column or, if subset is given, in any of those columns.
-    ///
-    /// Args:
-    ///     subset: Optional list of column names. If provided, drop only when one of these is null.
-    ///
-    /// Returns:
-    ///     DataFrame (lazy) with null rows removed.
-    ///
-    /// Raises:
-    ///     RuntimeError: If execution fails.
-    #[pyo3(signature = (subset=None))]
-    fn drop(&self, subset: Option<Vec<String>>) -> PyResult<PyDataFrame> {
+    #[pyo3(signature = (value, subset=None))]
+    fn fill(&self, value: &Bound<'_, PyAny>, subset: Option<Vec<String>>) -> PyResult<PyDataFrame> {
+        let expr = py_fill_value_to_expr(value)?;
         let sub: Option<Vec<&str>> = subset
             .as_ref()
             .map(|v| v.iter().map(|s| s.as_str()).collect());
         let df = self
             .df
             .na()
-            .drop(sub)
+            .fill(expr, sub)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        Ok(PyDataFrame { inner: df })
+    }
+
+    /// Drop rows with nulls. PySpark na.drop(subset=..., how=..., thresh=...).
+    ///
+    /// Args:
+    ///     subset: Optional list of column names. If None, all columns are considered.
+    ///     how: "any" (default) drop if any null in subset; "all" drop only if all null in subset.
+    ///     thresh: If set, keep row if it has at least this many non-null values in subset (overrides how).
+    ///
+    /// Returns:
+    ///     DataFrame (lazy) with null rows removed.
+    #[pyo3(signature = (subset=None, how="any", thresh=None))]
+    fn drop(
+        &self,
+        subset: Option<Vec<String>>,
+        how: &str,
+        thresh: Option<usize>,
+    ) -> PyResult<PyDataFrame> {
+        let sub: Option<Vec<&str>> = subset
+            .as_ref()
+            .map(|v| v.iter().map(|s| s.as_str()).collect());
+        let df = self
+            .df
+            .na()
+            .drop(sub, how, thresh)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
         Ok(PyDataFrame { inner: df })
     }

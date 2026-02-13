@@ -1803,6 +1803,34 @@ def test_sparkless_parity_multiple_append_operations() -> None:
     assert rows[0]["id"] == 1 and rows[1]["id"] == 2 and rows[2]["id"] == 3
 
 
+def test_na_drop_fill_subset_how_thresh_issue_289() -> None:
+    """DataFrame.na.drop(subset=..., how=..., thresh=...) and na.fill(value, subset=...) (#289)."""
+    import robin_sparkless as rs
+
+    spark = rs.SparkSession.builder().app_name("test").get_or_create()
+    df = spark._create_dataframe_from_rows(
+        [{"x": 1, "y": None}, {"x": None, "y": 2}, {"x": 3, "y": 3}],
+        [("x", "int"), ("y", "int")],
+    )
+    # na().drop(subset=["x"]): drop rows where x is null → keep (1, None), (3, 3); drop (None, 2)
+    out_drop = df.na().drop(subset=["x"])
+    rows_drop = out_drop.order_by(["x"]).collect()
+    assert len(rows_drop) == 2
+    assert rows_drop[0]["x"] == 1 and rows_drop[1]["x"] == 3
+    # na().fill(0, subset=["y"]): fill null only in y → (1,0), (None,2), (3,3)
+    out_fill = df.na().fill(0, subset=["y"])
+    rows_fill = out_fill.order_by(rs.col("x").asc_nulls_last()).collect()
+    assert len(rows_fill) == 3
+    # order: x=1, x=3, x=null (asc_nulls_last) → y values 0, 3, 2
+    assert rows_fill[0]["y"] == 0 and rows_fill[1]["y"] == 3 and rows_fill[2]["y"] == 2
+    # drop with how="all": drop only if all subset are null; subset ["x","y"] → no row has both null
+    out_all = df.na().drop(subset=["x", "y"], how="all")
+    assert out_all.count() == 3
+    # thresh=2: keep row if >=2 non-null in subset
+    out_thresh = df.na().drop(subset=["x", "y"], thresh=2)
+    assert out_thresh.count() == 1  # only (3, 3) has 2 non-null
+
+
 def test_window_partition_by_order_by_accept_str_issue_288() -> None:
     """Window.partitionBy and orderBy accept column names (str) not only Column (#288)."""
     import robin_sparkless as rs

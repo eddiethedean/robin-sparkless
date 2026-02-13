@@ -1571,7 +1571,7 @@ fn apply_operations(
                 let subset_refs: Option<Vec<&str>> = subset
                     .as_ref()
                     .map(|s| s.iter().map(|x| x.as_str()).collect());
-                df = df.dropna(subset_refs)?;
+                df = df.dropna(subset_refs, "any", None)?;
             }
             Operation::Fillna { value } => {
                 if grouped.is_some() {
@@ -1582,7 +1582,7 @@ fn apply_operations(
                 let fill_expr = json_value_to_lit(value).map_err(|e| {
                     PolarsError::ComputeError(format!("fillna value not supported: {e}").into())
                 })?;
-                df = df.fillna(fill_expr)?;
+                df = df.fillna(fill_expr, None)?;
             }
             Operation::Limit { n } => {
                 if grouped.is_some() {
