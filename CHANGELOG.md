@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **#272 – round() on string column strips whitespace (PySpark parity)** — `round()` on string columns now trims leading/trailing whitespace before parsing to double, so values like `"  10.6  "` and `"\t20.7"` round to 11.0 and 21.0 instead of returning null. Fixes #272.
+
 ### Planned
 
 - **Phase 26 – Publish crate**: Prepare and publish robin-sparkless to crates.io (and optionally PyPI via maturin). See [ROADMAP.md](docs/ROADMAP.md) for details.
