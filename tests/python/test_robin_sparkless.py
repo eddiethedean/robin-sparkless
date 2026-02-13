@@ -1979,6 +1979,22 @@ def test_to_date_module_issue_322() -> None:
     assert r["d"] is not None and "2024-01-15" in str(r["d"])
 
 
+def test_array_remove_module_issue_316() -> None:
+    """Module-level array_remove(column, value) (#316)."""
+    import robin_sparkless as rs
+
+    spark = rs.SparkSession.builder().app_name("test").get_or_create()
+    df = spark._create_dataframe_from_rows(
+        [{"arr": [1, 2, 2, 3]}, {"arr": [2, 2]}],
+        [("arr", "array<bigint>")],
+    )
+    out = df.with_column("removed", rs.array_remove(rs.col("arr"), rs.lit(2)))
+    rows = out.collect()
+    assert len(rows) == 2
+    assert rows[0]["removed"] == [1, 3]
+    assert rows[1]["removed"] == []
+
+
 def test_element_at_module_issue_317() -> None:
     """Module-level element_at(column, index) 1-based for array (#317)."""
     import robin_sparkless as rs
