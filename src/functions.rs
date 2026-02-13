@@ -184,6 +184,46 @@ pub fn count_if(col: &Column) -> Column {
     )
 }
 
+/// Sum aggregation; null on overflow (PySpark try_sum). Use in groupBy.agg(). Polars sum does not overflow; reserved for API.
+pub fn try_sum(col: &Column) -> Column {
+    Column::from_expr(col.expr().clone().sum(), Some("try_sum".to_string()))
+}
+
+/// Average aggregation; null on invalid (PySpark try_avg). Use in groupBy.agg(). Maps to mean; reserved for API.
+pub fn try_avg(col: &Column) -> Column {
+    Column::from_expr(col.expr().clone().mean(), Some("try_avg".to_string()))
+}
+
+/// Value of value_col in the row where ord_col is maximum (PySpark max_by). Use in groupBy.agg().
+pub fn max_by(value_col: &Column, ord_col: &Column) -> Column {
+    use polars::prelude::{as_struct, SortOptions};
+    let st = as_struct(vec![
+        ord_col.expr().clone().alias("_ord"),
+        value_col.expr().clone().alias("_val"),
+    ]);
+    let e = st
+        .sort(SortOptions::default().with_order_descending(true))
+        .first()
+        .struct_()
+        .field_by_name("_val");
+    Column::from_expr(e, None)
+}
+
+/// Value of value_col in the row where ord_col is minimum (PySpark min_by). Use in groupBy.agg().
+pub fn min_by(value_col: &Column, ord_col: &Column) -> Column {
+    use polars::prelude::{as_struct, SortOptions};
+    let st = as_struct(vec![
+        ord_col.expr().clone().alias("_ord"),
+        value_col.expr().clone().alias("_val"),
+    ]);
+    let e = st
+        .sort(SortOptions::default())
+        .first()
+        .struct_()
+        .field_by_name("_val");
+    Column::from_expr(e, None)
+}
+
 /// Standard deviation (sample) aggregation (PySpark stddev / stddev_samp)
 pub fn stddev(col: &Column) -> Column {
     Column::from_expr(col.expr().clone().std(1), Some("stddev".to_string()))
