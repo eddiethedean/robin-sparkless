@@ -1213,7 +1213,10 @@ fn py_count(col: &PyColumn) -> PyColumn {
 
 #[pyfunction]
 #[pyo3(signature = (col, rsd=None))]
-fn py_approx_count_distinct(col: &Bound<'_, pyo3::types::PyAny>, rsd: Option<f64>) -> PyResult<PyColumn> {
+fn py_approx_count_distinct(
+    col: &Bound<'_, pyo3::types::PyAny>,
+    rsd: Option<f64>,
+) -> PyResult<PyColumn> {
     let col_column: RsColumn = if let Ok(pycol) = col.downcast::<PyColumn>() {
         pycol.borrow().inner.clone()
     } else if let Ok(name) = col.extract::<String>() {
