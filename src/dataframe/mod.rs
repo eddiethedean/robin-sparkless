@@ -541,6 +541,18 @@ impl DataFrame {
         })
     }
 
+    /// Global aggregation (no groupBy): apply aggregate expressions over the whole DataFrame,
+    /// returning a single-row DataFrame (PySpark: df.agg(F.sum("x"), F.avg("y"))).
+    pub fn agg(&self, aggregations: Vec<Expr>) -> Result<DataFrame, PolarsError> {
+        use polars::prelude::IntoLazy;
+        let resolved: Vec<Expr> = aggregations
+            .into_iter()
+            .map(|e| self.resolve_expr_column_names(e))
+            .collect::<Result<Vec<_>, _>>()?;
+        let pl_df = self.df.as_ref().clone().lazy().select(resolved).collect()?;
+        Ok(Self::from_polars_with_options(pl_df, self.case_sensitive))
+    }
+
     /// Join with another DataFrame on the given columns.
     /// Join column names are resolved on the left (and right must have matching names).
     pub fn join(

@@ -1803,6 +1803,30 @@ def test_sparkless_parity_multiple_append_operations() -> None:
     assert rows[0]["id"] == 1 and rows[1]["id"] == 2 and rows[2]["id"] == 3
 
 
+def test_dataframe_global_agg_issue_287() -> None:
+    """DataFrame.agg() for global aggregation (no groupBy) returns single-row (#287)."""
+    import robin_sparkless as rs
+
+    spark = rs.SparkSession.builder().app_name("test").get_or_create()
+    df = spark.create_dataframe(
+        [(1, 10, "a"), (2, 20, "b"), (3, 30, "c")],
+        ["x", "y", "name"],
+    )
+    # Single expr: df.agg(expr)
+    out1 = df.agg(rs.sum(rs.col("x")))
+    rows1 = out1.collect()
+    assert len(rows1) == 1
+    # Polars may use "x" or "sum" as output column name
+    vals = list(rows1[0].values())
+    assert vals == [6]
+    # List of exprs: df.agg([sum(x), avg(y)])
+    out2 = df.agg([rs.sum(rs.col("x")), rs.avg(rs.col("y"))])
+    rows2 = out2.collect()
+    assert len(rows2) == 1
+    row2_vals = [v for v in rows2[0].values() if isinstance(v, (int, float))]
+    assert sorted(row2_vals) == [6, 20.0]
+
+
 def test_active_session_and_agg_issue_286() -> None:
     """get_active_session() and groupBy().agg(sum(...)) work after get_or_create or SparkSession() (#286)."""
     import robin_sparkless as rs

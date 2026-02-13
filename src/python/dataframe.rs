@@ -35,6 +35,32 @@ fn py_any_to_expr(value: &pyo3::Bound<'_, pyo3::types::PyAny>) -> PyResult<Expr>
     Ok(expr)
 }
 
+/// Extract one or more Column expressions from a single Column, list, or tuple (for agg(*exprs)).
+fn python_exprs_to_columns(exprs: &Bound<'_, PyAny>, _py: Python<'_>) -> PyResult<Vec<Expr>> {
+    if let Ok(py_col) = exprs.downcast::<PyColumn>() {
+        return Ok(vec![py_col.borrow().inner.expr().clone()]);
+    }
+    if let Ok(list) = exprs.downcast::<PyList>() {
+        let mut out = Vec::with_capacity(list.len());
+        for item in list.iter() {
+            let py_col = item.downcast::<PyColumn>()?;
+            out.push(py_col.borrow().inner.expr().clone());
+        }
+        return Ok(out);
+    }
+    if let Ok(tup) = exprs.downcast::<PyTuple>() {
+        let mut out = Vec::with_capacity(tup.len());
+        for item in tup.iter() {
+            let py_col = item.downcast::<PyColumn>()?;
+            out.push(py_col.borrow().inner.expr().clone());
+        }
+        return Ok(out);
+    }
+    Err(pyo3::exceptions::PyTypeError::new_err(
+        "agg() requires a Column or a list/tuple of Columns",
+    ))
+}
+
 /// Join `on` parameter: accept str (single column) or list/tuple of str (PySpark compatibility, #175).
 struct JoinOn(Vec<String>);
 
@@ -409,6 +435,23 @@ impl PyDataFrame {
             .rollup(refs)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
         Ok(PyCubeRollupData { inner: cr })
+    }
+
+    /// Global aggregation (no groupBy): apply one or more aggregate expressions over the whole
+    /// DataFrame, returning a single-row DataFrame (PySpark: df.agg(F.sum("x"), F.avg("y"))).
+    ///
+    /// Args:
+    ///     exprs: Single Column, or list/tuple of Columns (e.g. sum(col("x")), avg(col("y"))).
+    ///
+    /// Returns:
+    ///     DataFrame with one row and one column per expression.
+    fn agg(&self, exprs: &Bound<'_, PyAny>, py: Python<'_>) -> PyResult<PyDataFrame> {
+        let aggregations = python_exprs_to_columns(exprs, py)?;
+        let df = self
+            .inner
+            .agg(aggregations)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        Ok(PyDataFrame { inner: df })
     }
 
     /// Return a DataFrameWriter to save the DataFrame (chain ``.mode()``, ``.format()``, then ``.save(path)``).
