@@ -2250,12 +2250,18 @@ pub fn isnotnull(column: &Column) -> Column {
 }
 
 /// Create an array column from multiple columns (PySpark array).
+/// With no arguments, returns a column of empty arrays (one per row); PySpark parity.
 pub fn array(columns: &[&Column]) -> Result<crate::column::Column, PolarsError> {
     use polars::prelude::*;
     if columns.is_empty() {
-        return Err(PolarsError::ComputeError(
-            "array requires at least one column".into(),
-        ));
+        // PySpark F.array() with no args: one empty list per row (broadcast literal).
+        // Use .first() so the single-row literal is treated as a scalar and broadcasts to frame height.
+        let empty_inner = Series::new("".into(), Vec::<i64>::new());
+        let list_series = ListChunked::from_iter([Some(empty_inner)])
+            .with_name("array".into())
+            .into_series();
+        let expr = lit(list_series).first();
+        return Ok(crate::column::Column::from_expr(expr, None));
     }
     let exprs: Vec<Expr> = columns.iter().map(|c| c.expr().clone()).collect();
     let expr = concat_list(exprs)
