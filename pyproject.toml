@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "robin-sparkless"
-version = "0.8.4"
+version = "0.8.5"
 description = "PySpark-like DataFrame API in Rust (Polars backend), with Python bindings via PyO3"
 readme = "README-Python.md"
 requires-python = ">=3.8"
