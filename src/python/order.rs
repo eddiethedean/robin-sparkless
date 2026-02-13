@@ -2,11 +2,37 @@
 
 use crate::column::Column as RsColumn;
 use crate::functions::SortOrder;
-use polars::prelude::Expr;
+use polars::prelude::{col, Expr};
 use pyo3::prelude::*;
 use pyo3::types::PyTuple;
 
 use super::column::PyColumn;
+
+/// Convert a Python value (str or Column) to a partition column name (for partitionBy).
+fn py_to_partition_name(item: &Bound<'_, pyo3::types::PyAny>) -> PyResult<String> {
+    if let Ok(s) = item.extract::<String>() {
+        return Ok(s);
+    }
+    if let Ok(py_col) = item.downcast::<PyColumn>() {
+        return Ok(py_col.borrow().inner.name().to_string());
+    }
+    Err(pyo3::exceptions::PyTypeError::new_err(
+        "Window.partitionBy(*) requires column names (str) or Column expressions",
+    ))
+}
+
+/// Convert a Python value (str or Column) to a Column (for orderBy).
+fn py_to_order_column(item: &Bound<'_, pyo3::types::PyAny>) -> PyResult<RsColumn> {
+    if let Ok(py_col) = item.downcast::<PyColumn>() {
+        return Ok(py_col.borrow().inner.clone());
+    }
+    if let Ok(name) = item.extract::<String>() {
+        return Ok(RsColumn::from_expr(col(name.as_str()), None));
+    }
+    Err(pyo3::exceptions::PyTypeError::new_err(
+        "Window.orderBy(*) requires column names (str) or Column expressions",
+    ))
+}
 
 /// Python wrapper for SortOrder (used with order_by_exprs).
 #[pyclass]
@@ -32,6 +58,7 @@ impl PyWindow {
     ///
     /// PySpark-style usage:
     ///     win = Window.partitionBy("dept").orderBy(col("salary"))
+    /// Partition by column names or Column expressions (PySpark: partitionBy("col1", "col2") or partitionBy(col("col1"))).
     #[classmethod]
     #[pyo3(name = "partitionBy")]
     #[pyo3(signature = (*cols))]
@@ -41,7 +68,7 @@ impl PyWindow {
     ) -> PyResult<Self> {
         let mut names = Vec::with_capacity(cols.len());
         for item in cols.iter() {
-            names.push(item.extract::<String>()?);
+            names.push(py_to_partition_name(&item)?);
         }
         Ok(Self {
             partition_by: names,
@@ -49,14 +76,15 @@ impl PyWindow {
         })
     }
 
-    /// Set ordering columns for the window. Currently supports a single Column.
+    /// Set ordering column(s). Accepts column names (str) or Column expressions (PySpark: orderBy("col") or orderBy(col("col"))).
     ///
-    /// PySpark-style usage:
-    ///     win = Window.partitionBy("dept").orderBy(F.col("salary"))
+    /// Currently supports a single column. PySpark-style usage:
+    ///     win = Window.partitionBy("dept").orderBy("salary")
+    ///     win = Window.partitionBy("dept").orderBy(col("salary"))
     #[pyo3(name = "orderBy")]
     #[pyo3(signature = (*cols))]
-    fn order_by(&self, cols: Vec<PyRef<PyColumn>>) -> PyResult<Self> {
-        if cols.is_empty() {
+    fn order_by(&self, cols: &Bound<'_, PyTuple>) -> PyResult<Self> {
+        if cols.len() == 0 {
             return Err(pyo3::exceptions::PyValueError::new_err(
                 "Window.orderBy requires at least one column",
             ));
@@ -66,9 +94,10 @@ impl PyWindow {
                 "Window.orderBy with multiple columns is not yet supported; use a single column",
             ));
         }
+        let order_col = py_to_order_column(&cols.get_item(0)?)?;
         Ok(Self {
             partition_by: self.partition_by.clone(),
-            order_by: Some(cols[0].inner.clone()),
+            order_by: Some(order_col),
         })
     }
 }

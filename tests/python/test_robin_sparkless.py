@@ -1803,6 +1803,24 @@ def test_sparkless_parity_multiple_append_operations() -> None:
     assert rows[0]["id"] == 1 and rows[1]["id"] == 2 and rows[2]["id"] == 3
 
 
+def test_window_partition_by_order_by_accept_str_issue_288() -> None:
+    """Window.partitionBy and orderBy accept column names (str) not only Column (#288)."""
+    import robin_sparkless as rs
+
+    spark = rs.SparkSession.builder().app_name("test").get_or_create()
+    df = spark.create_dataframe(
+        [(1, 100, "A"), (2, 200, "A"), (3, 150, "B")],
+        ["id", "salary", "dept"],
+    )
+    # PySpark: Window.partitionBy("dept").orderBy("salary") with strings
+    w = rs.Window.partitionBy("dept").orderBy("salary")
+    out = df.with_column("rn", rs.row_number().over(w))
+    rows = out.order_by(["id"]).collect()
+    assert len(rows) == 3
+    by_id = {r["id"]: r["rn"] for r in rows}
+    assert by_id[1] == 1 and by_id[2] == 2 and by_id[3] == 1  # A: 100,200; B: 150
+
+
 def test_dataframe_global_agg_issue_287() -> None:
     """DataFrame.agg() for global aggregation (no groupBy) returns single-row (#287)."""
     import robin_sparkless as rs
