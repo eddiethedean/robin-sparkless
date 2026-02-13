@@ -617,9 +617,10 @@ impl ThenBuilder {
     /// Chain an additional when-then clause
     /// Note: Chaining multiple when-then clauses is not yet fully supported.
     /// For now, use a single when().then().otherwise() pattern.
+    /// Chaining multiple when-then (e.g. when(a).when(b).then(...)) is not yet supported.
+    /// Use a single when(cond).then(val).otherwise(fallback), or nest when/then in otherwise.
+    /// See docs/PYSPARK_DIFFERENCES.md for limitations.
     pub fn when(self, _condition: &Column) -> ThenBuilder {
-        // TODO: Implement proper chaining support
-        // For now, return self to allow compilation but chaining won't work correctly
         self
     }
 
