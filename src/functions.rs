@@ -1376,36 +1376,27 @@ pub fn try_to_number(column: &Column, _format: Option<&str>) -> Result<Column, S
 }
 
 /// Cast to timestamp, or parse with format when provided (PySpark to_timestamp).
+/// When format is None, parses string columns with default format "%Y-%m-%d %H:%M:%S" (PySpark parity #273).
 pub fn to_timestamp(column: &Column, format: Option<&str>) -> Result<Column, String> {
     use polars::prelude::{DataType, GetOutput, TimeUnit};
-    match format {
-        None => crate::cast(column, "timestamp"),
-        Some(fmt) => {
-            let fmt_owned = fmt.to_string();
-            let expr = column.expr().clone().map(
-                move |s| crate::udfs::apply_to_timestamp_format(s, Some(&fmt_owned), true),
-                GetOutput::from_type(DataType::Datetime(TimeUnit::Microseconds, None)),
-            );
-            Ok(crate::column::Column::from_expr(expr, None))
-        }
-    }
+    let fmt_owned = format.map(|s| s.to_string());
+    let expr = column.expr().clone().map(
+        move |s| crate::udfs::apply_to_timestamp_format(s, fmt_owned.as_deref(), true),
+        GetOutput::from_type(DataType::Datetime(TimeUnit::Microseconds, None)),
+    );
+    Ok(crate::column::Column::from_expr(expr, None))
 }
 
 /// Cast to timestamp, null on invalid, or parse with format when provided (PySpark try_to_timestamp).
-/// Returns Err if the try_cast setup fails (invalid type name) when format is None.
+/// When format is None, parses string columns with default format (null on invalid). #273
 pub fn try_to_timestamp(column: &Column, format: Option<&str>) -> Result<Column, String> {
     use polars::prelude::*;
-    match format {
-        None => try_cast(column, "timestamp"),
-        Some(fmt) => {
-            let fmt_owned = fmt.to_string();
-            let expr = column.expr().clone().map(
-                move |s| crate::udfs::apply_to_timestamp_format(s, Some(&fmt_owned), false),
-                GetOutput::from_type(DataType::Datetime(TimeUnit::Microseconds, None)),
-            );
-            Ok(crate::column::Column::from_expr(expr, None))
-        }
-    }
+    let fmt_owned = format.map(|s| s.to_string());
+    let expr = column.expr().clone().map(
+        move |s| crate::udfs::apply_to_timestamp_format(s, fmt_owned.as_deref(), false),
+        GetOutput::from_type(DataType::Datetime(TimeUnit::Microseconds, None)),
+    );
+    Ok(crate::column::Column::from_expr(expr, None))
 }
 
 /// Parse as timestamp in local timezone, return UTC (PySpark to_timestamp_ltz).
