@@ -1928,8 +1928,31 @@ def test_hour_module_issue_313() -> None:
     assert hours == [9, 14, 23]
 
 
+def test_last_day_module_issue_315() -> None:
+    """Module-level last_day(column) returns last day of month (#315)."""
+    import robin_sparkless as rs
+
+    spark = rs.SparkSession.builder().app_name("test").get_or_create()
+    df = spark._create_dataframe_from_rows(
+        [
+            {"ts_str": "2024-01-15 00:00:00"},
+            {"ts_str": "2024-02-10 00:00:00"},
+            {"ts_str": "2023-12-01 00:00:00"},
+        ],
+        [("ts_str", "string")],
+    )
+    df = df.with_column("ts", rs.to_timestamp(rs.col("ts_str")))
+    out = df.with_column("last", rs.last_day(rs.col("ts")))
+    rows = out.collect()
+    assert len(rows) == 3
+    # last day of Jan 2024, Feb 2024, Dec 2023
+    last_days = [str(r["last"]) for r in rows]
+    assert any("2024-01-31" in d for d in last_days)
+    assert any("2024-02-29" in d for d in last_days)  # leap year
+    assert any("2023-12-31" in d for d in last_days)
+
+
 def test_window_partition_by_order_by_accept_str_issue_288() -> None:
-    """Window.partitionBy and orderBy accept column names (str) not only Column (#288)."""
     import robin_sparkless as rs
 
     spark = rs.SparkSession.builder().app_name("test").get_or_create()
