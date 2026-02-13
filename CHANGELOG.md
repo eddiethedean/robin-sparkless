@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **#274 – join key type coercion (PySpark parity)** — Join on columns with different types (e.g. str on left, int on right) now coerces both sides to a common type (via `find_common_type`) instead of raising `RuntimeError: datatypes of join keys don't match`. Fixes #274.
 - **#275 – create_map() with no arguments (PySpark parity)** — `create_map()` and `create_map([])` now return a column of empty maps (one `{}` per row) instead of raising `TypeError: py_create_map() missing 1 required positional argument: 'cols'`. Python binding accepts `*cols` so zero arguments is valid. Fixes #275.
 - **#276 – between() with string column and numeric bounds (PySpark parity)** — `col("col").between(1, 20)` when `col` is string now coerces (string parsed to number for comparison) instead of raising `RuntimeError: cannot compare string with numeric type`. Coercion is applied in `with_column` as well as in `filter`. Fixes #276.
+- **#280 – posexplode() accepts column name (str) (PySpark parity)** — `posexplode("Values")` now works in addition to `posexplode(F.col("Values"))`; previously raised `TypeError: 'str' object cannot be converted to 'Column'`. Fixes #280.
 
 ### Planned
 
