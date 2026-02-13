@@ -49,14 +49,14 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-robin-sparkless = "0.8.2"
+robin-sparkless = "0.8.3"
 ```
 
 Optional features:
 
 ```toml
-robin-sparkless = { version = "0.8.2", features = ["sql"] }   # spark.sql(), temp views
-robin-sparkless = { version = "0.8.2", features = ["delta"] }  # Delta Lake read/write
+robin-sparkless = { version = "0.8.3", features = ["sql"] }   # spark.sql(), temp views
+robin-sparkless = { version = "0.8.3", features = ["delta"] }  # Delta Lake read/write
 ```
 
 ### Python (PyO3)
@@ -156,8 +156,9 @@ Output:
 | `cargo build --features pyo3` | Build with Python extension |
 | `cargo test` | Run Rust tests |
 | `make test` | Run Rust + Python tests (creates venv, `maturin develop --features pyo3,sql,delta`, `pytest`) |
-| `make check` | Rust only: format, clippy, audit, deny, Rust tests |
-| `make check-full` | Full CI: check + Python lint (ruff format, ruff check, mypy) + Python tests |
+| `make check` | Rust only: format check, clippy, audit, deny, Rust tests. Use `make -j5 check` to run the five jobs in parallel. |
+| `make check-full` | Full CI: check + Python lint (ruff, mypy) + Python tests. Use `make -j7 check-full` to run all 7 jobs in parallel (5 Rust + 2 Python), or `-j3` for the three top-level jobs. |
+| `make fmt` | Format Rust code (run before check if you want to fix formatting). |
 | `make test-parity-phase-a` … `make test-parity-phase-g` | Run parity fixtures for a specific phase (see [PARITY_STATUS](docs/PARITY_STATUS.md)) |
 | `make lint-python` | Python only: ruff format --check, ruff check, mypy |
 | `cargo bench` | Benchmarks (robin-sparkless vs Polars) |
