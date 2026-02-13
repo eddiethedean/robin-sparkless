@@ -594,9 +594,13 @@ impl DataFrame {
         transformations::union(self, other, self.case_sensitive)
     }
 
-    /// Union by name: stack vertically, aligning columns by name.
-    pub fn union_by_name(&self, other: &DataFrame) -> Result<DataFrame, PolarsError> {
-        transformations::union_by_name(self, other, self.case_sensitive)
+    /// Union by name: stack vertically, aligning columns by name. When allow_missing_columns is true, columns missing in other are filled with null.
+    pub fn union_by_name(
+        &self,
+        other: &DataFrame,
+        allow_missing_columns: bool,
+    ) -> Result<DataFrame, PolarsError> {
+        transformations::union_by_name(self, other, allow_missing_columns, self.case_sensitive)
     }
 
     /// Distinct: drop duplicate rows (all columns or optional subset).
