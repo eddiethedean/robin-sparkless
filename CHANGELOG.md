@@ -31,6 +31,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **#302 – count_if(expr) (PySpark parity)** — Module-level `count_if(column)` (count where condition true) for use in `groupBy.agg()`. Fixes #302.
 - **#297 – approx_count_distinct(column [, rsd]) (PySpark parity)** — Module-level `approx_count_distinct(column, rsd=None)` for use in `groupBy.agg()` (Polars uses exact n_unique; rsd reserved for API). Fixes #297.
 - **#300 – approx_percentile(col, percentage [, accuracy]) (PySpark parity)** — Module-level `approx_percentile(column, percentage, accuracy=None)` for use in `groupBy.agg()` (maps to quantile; accuracy reserved for API). Fixes #300.
+- **#303 – max_by(value_col, ord_col) / min_by(value_col, ord_col) (PySpark parity)** — Module-level `max_by(value_column, ord_column)` and `min_by(value_column, ord_column)` for use in `groupBy.agg()` (value at row where ord is max/min). Fixes #303.
+- **#304 – try_sum(column) / try_avg(column) (PySpark parity)** — Module-level `try_sum(column)` and `try_avg(column)` for use in `groupBy.agg()` (maps to sum/mean; null-on-overflow reserved for API). Fixes #304.
 
 ### Planned
 

@@ -2064,6 +2064,41 @@ def test_approx_count_distinct_approx_percentile_issue_297_300() -> None:
     assert by_k["b"]["p50"] == 5.0
 
 
+def test_max_by_min_by_try_sum_try_avg_issue_303_304() -> None:
+    """Module-level max_by, min_by, try_sum, try_avg for groupBy.agg() (#303, #304)."""
+    import robin_sparkless as rs
+
+    spark = rs.SparkSession.builder().app_name("test").get_or_create()
+    df = spark._create_dataframe_from_rows(
+        [
+            {"k": "a", "v": 10, "ord": 1},
+            {"k": "a", "v": 20, "ord": 3},
+            {"k": "a", "v": 15, "ord": 2},
+            {"k": "b", "v": 5, "ord": 10},
+        ],
+        [("k", "string"), ("v", "bigint"), ("ord", "bigint")],
+    )
+    out = df.group_by(["k"]).agg(
+        [
+            rs.max_by(rs.col("v"), rs.col("ord")).alias("max_by_v"),
+            rs.min_by(rs.col("v"), rs.col("ord")).alias("min_by_v"),
+            rs.try_sum(rs.col("v")).alias("try_sum_v"),
+            rs.try_avg(rs.col("v")).alias("try_avg_v"),
+        ]
+    )
+    rows = out.order_by(["k"]).collect()
+    assert len(rows) == 2
+    by_k = {r["k"]: r for r in rows}
+    assert by_k["a"]["max_by_v"] == 20
+    assert by_k["a"]["min_by_v"] == 10
+    assert by_k["a"]["try_sum_v"] == 45
+    assert by_k["a"]["try_avg_v"] == 15.0
+    assert by_k["b"]["max_by_v"] == 5
+    assert by_k["b"]["min_by_v"] == 5
+    assert by_k["b"]["try_sum_v"] == 5
+    assert by_k["b"]["try_avg_v"] == 5.0
+
+
 def test_encode_decode_module_issue_307() -> None:
     """Module-level encode(column, charset) and decode(column, charset) (#307)."""
     import robin_sparkless as rs
