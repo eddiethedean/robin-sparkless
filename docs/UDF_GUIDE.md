@@ -29,6 +29,7 @@ Use the returned UDF as a column expression:
 ```python
 df = spark.create_dataframe([(1, 10, "a"), (2, 20, "b")], ["id", "v", "name"])
 df2 = df.with_column("doubled", my_udf(rs.col("id")))
+# df2.collect() → [{'id': 1, 'v': 10, 'name': 'a', 'doubled': 2}, {'id': 2, 'v': 20, 'name': 'b', 'doubled': 4}]
 ```
 
 Or call by name:

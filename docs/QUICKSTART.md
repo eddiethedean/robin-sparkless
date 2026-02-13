@@ -34,7 +34,7 @@ In your own crate:
 
 ```toml
 [dependencies]
-robin-sparkless = "0.8.5"
+robin-sparkless = "0.9.0"
 ```
 
 ## Basic Usage
@@ -59,13 +59,29 @@ fn main() -> polars::prelude::PolarsResult<()> {
     // Introspect
     println!("{:?}", df.columns()?);
 
-    // Filter using col() and lit_i64
-    let adults = df.filter(col("age").gt(lit_i64(18)))?;
+    // Filter using col() and lit_i64 (Expr for filter: use .into_expr() on Column)
+    let adults = df.filter(col("age").gt(lit_i64(18).into_expr()).into_expr())?;
 
     adults.show(Some(10))?;
 
     Ok(())
 }
+```
+
+Example output:
+
+```
+["id", "age", "name"]
+shape: (3, 3)
+┌─────┬─────┬─────────┐
+│ id  ┆ age ┆ name    │
+│ --- ┆ --- ┆ ---     │
+│ i32 ┆ i32 ┆ str     │
+╞═════╪═════╪═════════╡
+│ 1   ┆ 25  ┆ Alice   │
+│ 2   ┆ 30  ┆ Bob     │
+│ 3   ┆ 35  ┆ Charlie │
+└─────┴─────┴─────────┘
 ```
 
 ### Joins

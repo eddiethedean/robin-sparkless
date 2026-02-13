@@ -22,14 +22,14 @@ Add to `Cargo.toml`:
 
 ```toml
 [dependencies]
-robin-sparkless = "0.8.5"
+robin-sparkless = "0.9.0"
 ```
 
 Optional features:
 
 ```toml
-robin-sparkless = { version = "0.8.5", features = ["sql"] }   # spark.sql(), temp views
-robin-sparkless = { version = "0.8.5", features = ["delta"] }  # Delta Lake read/write
+robin-sparkless = { version = "0.9.0", features = ["sql"] }   # spark.sql(), temp views
+robin-sparkless = { version = "0.9.0", features = ["delta"] }  # Delta Lake read/write
 ```
 
 ### Python
@@ -345,6 +345,12 @@ rows = df.collect()           # List of dicts
 df.show(20)                   # Print to stdout
 # to_pandas() returns list of dicts; for a pandas DataFrame use:
 # pandas.DataFrame.from_records(df.to_pandas())
+```
+
+Example `collect()` output for the quick-start DataFrame (id, age, name):
+
+```
+[{'id': 1, 'age': 25, 'name': 'Alice'}, {'id': 2, 'age': 30, 'name': 'Bob'}, {'id': 3, 'age': 35, 'name': 'Charlie'}]
 ```
 
 ---

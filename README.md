@@ -49,14 +49,14 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-robin-sparkless = "0.8.5"
+robin-sparkless = "0.9.0"
 ```
 
 Optional features:
 
 ```toml
-robin-sparkless = { version = "0.8.5", features = ["sql"] }   # spark.sql(), temp views
-robin-sparkless = { version = "0.8.5", features = ["delta"] }  # Delta Lake read/write
+robin-sparkless = { version = "0.9.0", features = ["sql"] }   # spark.sql(), temp views
+robin-sparkless = { version = "0.9.0", features = ["delta"] }  # Delta Lake read/write
 ```
 
 ### Python (PyO3)
@@ -102,8 +102,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         vec!["id", "age", "name"],
     )?;
 
-    // Filter and show
-    let adults = df.filter(col("age").gt(lit_i64(26)))?;
+    // Filter and show (Expr for filter: use .into_expr() on Column)
+    let adults = df.filter(col("age").gt(lit_i64(26).into_expr()).into_expr())?;
     adults.show(Some(10))?;
 
     Ok(())

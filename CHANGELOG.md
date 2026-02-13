@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Planned
+
+- **Phase 26 – Publish crate**: Prepare and publish robin-sparkless to crates.io (and optionally PyPI via maturin). See [ROADMAP.md](docs/ROADMAP.md) for details.
+
+## [0.9.0] - 2026-02-13
+
 ### Added
 
 - **#284 – SparkSession.sql() and SparkSession.table() always exposed (PySpark parity)** — `spark.sql(query)` and `spark.table(name)` are now always present on the Python SparkSession. When built with the `sql` feature they work as before. When built without it they raise a clear `RuntimeError` instead of `AttributeError`, so Sparkless and PySpark-migrating code can call these methods without attribute checks. Fixes #284.
@@ -42,10 +48,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **#305 – explode_outer(column) (PySpark parity)** — Module-level `explode_outer(column)` for list/map columns; null/empty list yields one row with null in the exploded column (Polars default behavior). Fixes #305.
 - **#306 – inline(column) / inline_outer(column) array of structs (PySpark parity)** — Module-level `inline(column)` and `inline_outer(column)` for array-of-structs columns; explode then use unnest to expand struct fields to columns. Fixes #306.
 - **#318 – flatten(column) array-of-arrays (PySpark parity)** — Module-level `flatten(column)` for list-of-lists columns; flattens to one list per row. Fixes #318.
-
-### Planned
-
-- **Phase 26 – Publish crate**: Prepare and publish robin-sparkless to crates.io (and optionally PyPI via maturin). See [ROADMAP.md](docs/ROADMAP.md) for details.
 
 ## [0.8.5] - 2026-02-13
 
