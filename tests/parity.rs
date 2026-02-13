@@ -1540,7 +1540,7 @@ fn apply_operations(
                 let right_df = right.take().ok_or_else(|| {
                     PolarsError::ComputeError("unionByName requires right_input in fixture".into())
                 })?;
-                df = df.union_by_name(&right_df)?;
+                df = df.union_by_name(&right_df, true)?;
             }
             Operation::Distinct { subset } => {
                 if grouped.is_some() {

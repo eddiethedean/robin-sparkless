@@ -212,42 +212,102 @@ pub fn union(
     ))
 }
 
-/// Union by name: stack vertically, aligning columns by name. Right columns are reordered to match left; missing columns in right become nulls.
+/// Union by name: stack vertically, aligning columns by name.
+/// When allow_missing_columns is true: result has all columns from both sides (missing filled with null).
+/// When false: result has only left columns; right must have all left columns.
 pub fn union_by_name(
     left: &DataFrame,
     right: &DataFrame,
+    allow_missing_columns: bool,
     case_sensitive: bool,
 ) -> Result<DataFrame, PolarsError> {
     use polars::prelude::*;
-    let left_names = left.df.get_column_names();
+    let left_df = left.df.as_ref();
     let right_df = right.df.as_ref();
-    let right_names = right_df.get_column_names();
-    let resolve_right = |name: &str| -> Option<String> {
+    let left_names: Vec<String> = left_df
+        .get_column_names()
+        .iter()
+        .map(|s| s.as_str().to_string())
+        .collect();
+    let right_names: Vec<String> = right_df
+        .get_column_names()
+        .iter()
+        .map(|s| s.as_str().to_string())
+        .collect();
+    let contains = |names: &[String], name: &str| -> bool {
         if case_sensitive {
-            right_names
-                .iter()
-                .find(|n| n.as_str() == name)
-                .map(|s| s.as_str().to_string())
+            names.iter().any(|n| n.as_str() == name)
         } else {
             let name_lower = name.to_lowercase();
-            right_names
+            names
                 .iter()
-                .find(|n| n.as_str().to_lowercase() == name_lower)
-                .map(|s| s.as_str().to_string())
+                .any(|n| n.as_str().to_lowercase() == name_lower)
         }
     };
-    let mut exprs: Vec<Expr> = Vec::with_capacity(left_names.len());
-    for left_col in left_names.iter() {
-        let left_str = left_col.as_str();
-        if let Some(r) = resolve_right(left_str) {
-            exprs.push(col(r.as_str()));
+    let resolve = |names: &[String], name: &str| -> Option<String> {
+        if case_sensitive {
+            names.iter().find(|n| n.as_str() == name).cloned()
         } else {
-            exprs.push(Expr::Literal(polars::prelude::LiteralValue::Null).alias(left_str));
+            let name_lower = name.to_lowercase();
+            names
+                .iter()
+                .find(|n| n.as_str().to_lowercase() == name_lower)
+                .cloned()
         }
+    };
+    let all_columns: Vec<String> = if allow_missing_columns {
+        let mut out = left_names.clone();
+        for r in &right_names {
+            if !contains(&out, r.as_str()) {
+                out.push(r.clone());
+            }
+        }
+        out
+    } else {
+        left_names.clone()
+    };
+    let left_exprs: Vec<Expr> = all_columns
+        .iter()
+        .map(|c| match resolve(&left_names, c.as_str()) {
+            Some(r) => col(r.as_str()),
+            None => {
+                let dtype = resolve(&right_names, c.as_str())
+                    .and_then(|r| right_df.column(r.as_str()).ok())
+                    .map(|s| s.dtype().clone())
+                    .unwrap_or(polars::prelude::DataType::Null);
+                Expr::Literal(polars::prelude::LiteralValue::Null)
+                    .cast(dtype)
+                    .alias(c.as_str())
+            }
+        })
+        .collect();
+    let mut right_exprs: Vec<Expr> = Vec::with_capacity(all_columns.len());
+    for c in &all_columns {
+        let expr = match resolve(&right_names, c.as_str()) {
+            Some(r) => col(r.as_str()),
+            None if allow_missing_columns => {
+                let dtype = resolve(&left_names, c.as_str())
+                    .and_then(|r| left_df.column(r.as_str()).ok())
+                    .map(|s| s.dtype().clone())
+                    .unwrap_or(polars::prelude::DataType::Null);
+                Expr::Literal(polars::prelude::LiteralValue::Null)
+                    .cast(dtype)
+                    .alias(c.as_str())
+            }
+            None => {
+                return Err(PolarsError::InvalidOperation(
+                    format!(
+                        "union_by_name: column '{}' missing in right DataFrame (allow_missing_columns=False)",
+                        c
+                    )
+                    .into(),
+                ));
+            }
+        };
+        right_exprs.push(expr);
     }
-    let right_aligned = right_df.clone().lazy().select(exprs).collect()?;
-    let lf1 = left.df.as_ref().clone().lazy();
-    let lf2 = right_aligned.lazy();
+    let lf1 = left_df.clone().lazy().select(left_exprs);
+    let lf2 = right_df.clone().lazy().select(right_exprs);
     let out = polars::prelude::concat([lf1, lf2], UnionArgs::default())?.collect()?;
     Ok(super::DataFrame::from_polars_with_options(
         out,

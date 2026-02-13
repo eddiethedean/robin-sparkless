@@ -1849,6 +1849,37 @@ def test_fillna_subset_direct_issue_290() -> None:
     assert [r["b"] for r in rows] == [0, 2]
 
 
+def test_create_dataframe_from_rows_empty_data_and_schema_issue_291() -> None:
+    """create_dataframe_from_rows([], schema) and ([], []) allowed (#291)."""
+    import robin_sparkless as rs
+
+    spark = rs.SparkSession.builder().app_name("test").get_or_create()
+    create_df = spark._create_dataframe_from_rows
+    # Empty data with schema → 0 rows, columns a, b
+    df = create_df([], [("a", "int"), ("b", "string")])
+    assert df.count() == 0
+    assert df.columns() == ["a", "b"]
+    # Empty data with empty schema → 0 rows, 0 columns
+    df_empty = create_df([], [])
+    assert df_empty.count() == 0
+    assert df_empty.columns() == []
+
+
+def test_union_by_name_allow_missing_columns_issue_292() -> None:
+    """union_by_name(other, allow_missing_columns=True) fills missing with null (#292)."""
+    import robin_sparkless as rs
+
+    spark = rs.SparkSession.builder().app_name("test").get_or_create()
+    create_df = spark._create_dataframe_from_rows
+    df1 = create_df([{"a": 1, "b": 2}], [("a", "int"), ("b", "int")])
+    df2 = create_df([{"a": 3, "c": 4}], [("a", "int"), ("c", "int")])
+    out = df1.union_by_name(df2, allow_missing_columns=True)
+    rows = out.order_by(["a"]).collect()
+    assert len(rows) == 2
+    assert rows[0]["a"] == 1 and rows[0]["b"] == 2 and rows[0]["c"] is None
+    assert rows[1]["a"] == 3 and rows[1]["b"] is None and rows[1]["c"] == 4
+
+
 def test_window_partition_by_order_by_accept_str_issue_288() -> None:
     """Window.partitionBy and orderBy accept column names (str) not only Column (#288)."""
     import robin_sparkless as rs

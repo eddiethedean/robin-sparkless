@@ -365,7 +365,8 @@ fn apply_op(
             let other_df = session
                 .create_dataframe_from_rows(rows, schema_vec)
                 .map_err(PlanError::Session)?;
-            df.union_by_name(&other_df).map_err(PlanError::Session)
+            df.union_by_name(&other_df, true)
+                .map_err(PlanError::Session)
         }
         _ => Err(PlanError::UnsupportedOp(op_name.to_string())),
     }
