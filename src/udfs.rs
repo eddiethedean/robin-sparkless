@@ -2146,6 +2146,20 @@ pub fn apply_bit_xor(columns: &mut [Column]) -> PolarsResult<Option<Column>> {
     Ok(Some(Column::new(name, out.into_series())))
 }
 
+/// Apply round to given decimal places. Supports numeric and string columns (PySpark parity:
+/// string columns containing numeric values are implicitly cast to double then rounded).
+pub fn apply_round(column: Column, decimals: u32) -> PolarsResult<Option<Column>> {
+    let name = column.field().into_owned().name;
+    let series = column.take_materialized_series();
+    let ca = float_series_to_f64(&series)?;
+    let scale = decimals as i32;
+    let factor = 10_f64.powi(scale);
+    let out = ca
+        .apply_values(|x| (x * factor).round() / factor)
+        .into_series();
+    Ok(Some(Column::new(name, out)))
+}
+
 /// Apply bround (banker's rounding) to a float column.
 pub fn apply_bround(column: Column, scale: i32) -> PolarsResult<Option<Column>> {
     let name = column.field().into_owned().name;
