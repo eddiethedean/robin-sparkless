@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **#262 – F.round() on string column (PySpark parity)** — `round()` now accepts string columns that contain numeric values; values are implicitly cast to double then rounded (PySpark behavior). Previously raised `RuntimeError: round can only be used on numeric types`. Fixes #262.
+- **#263 – F.array() with no args (PySpark parity)** — `array()` with no arguments now returns a column of empty arrays (one `[]` per row). Previously raised `RuntimeError: array requires at least one column`. Fixes #263.
 
 ### Planned
 
