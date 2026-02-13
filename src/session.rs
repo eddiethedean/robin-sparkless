@@ -896,8 +896,9 @@ impl SparkSession {
                     builder.finish().into_series()
                 }
                 _ if parse_array_element_type(&type_lower).is_some() => {
-                    let elem_type = parse_array_element_type(&type_lower)
-                        .expect("parse_array_element_type returned Some in guard above");
+                    let elem_type = parse_array_element_type(&type_lower).unwrap_or_else(|| {
+                        unreachable!("guard above ensures parse_array_element_type returned Some")
+                    });
                     let inner_dtype = json_type_str_to_polars(&elem_type)
                         .ok_or_else(|| {
                             PolarsError::ComputeError(

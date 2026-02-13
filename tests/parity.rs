@@ -283,6 +283,7 @@ fn run_pyspark_parity_fixtures(phase_filter: Option<&str>) {
             }
         }
 
+        // Skip fixtures with known differences (e.g. with_rand_seed: Spark XORShiftRandom vs Robin StdRng); see fixture skip_reason.
         if fixture.skip {
             continue;
         }
@@ -356,7 +357,8 @@ fn run_fixture(fixture: &Fixture) -> Result<(), PolarsError> {
         "fixture {} has empty schema",
         fixture.name
     );
-    if !fixture.expect_error {
+    // expect_error fixtures (raise_error, assert_true_false_fails, assert_true_null_fails) pass when execution returns Err.
+    if !fixture.expect_error && !fixture.expected.rows.is_empty() {
         assert_eq!(
             fixture.expected.schema.len(),
             fixture.expected.rows.first().map(|r| r.len()).unwrap_or(0),
@@ -2022,9 +2024,8 @@ fn parse_comparison_expr(
         }
     };
 
-    // For type coercion, we'd need to know the column's actual type
-    // For now, use Polars comparisons directly - they should handle basic type coercion
-    // TODO: Add explicit type coercion using type_coercion module when column schema is available
+    // Type coercion: when fixture schema is available we could use type_coercion::coerce_for_comparison
+    // for column-to-column; for now Polars comparison handles these test cases.
 
     let expr = if right_expr_is_column {
         // Column-to-column comparison: use null-aware _pyspark methods
