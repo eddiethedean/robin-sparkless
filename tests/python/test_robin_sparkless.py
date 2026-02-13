@@ -2169,6 +2169,38 @@ def test_bool_and_every_module_issue_314() -> None:
     assert by_k["b"]["every_v"] is False
 
 
+def test_corr_covar_pop_skewness_kurtosis_module_issue_311_312_321() -> None:
+    """Module-level corr, covar_pop, skewness, kurtosis for groupBy.agg() (#311, #312, #321)."""
+    import robin_sparkless as rs
+
+    spark = rs.SparkSession.builder().app_name("test").get_or_create()
+    df = spark._create_dataframe_from_rows(
+        [
+            {"k": "a", "x": 1.0, "y": 2.0},
+            {"k": "a", "x": 2.0, "y": 4.0},
+            {"k": "b", "x": 10.0, "y": 10.0},
+        ],
+        [("k", "string"), ("x", "double"), ("y", "double")],
+    )
+    out = df.group_by(["k"]).agg(
+        [
+            rs.corr(rs.col("x"), rs.col("y")).alias("r"),
+            rs.covar_pop(rs.col("x"), rs.col("y")).alias("cov"),
+            rs.skewness(rs.col("x")).alias("skew_x"),
+            rs.kurtosis(rs.col("x")).alias("kurt_x"),
+        ]
+    )
+    rows = out.order_by(["k"]).collect()
+    assert len(rows) == 2
+    by_k = {r["k"]: r for r in rows}
+    assert abs(by_k["a"]["r"] - 1.0) < 1e-9
+    # Population cov for (1,2),(2,4): 0.5
+    assert abs(by_k["a"]["cov"] - 0.5) < 1e-9
+    assert "r" in by_k["b"] and "cov" in by_k["b"]
+    assert by_k["a"]["skew_x"] is not None
+    assert by_k["a"]["kurt_x"] is not None
+
+
 def test_encode_decode_module_issue_307() -> None:
     """Module-level encode(column, charset) and decode(column, charset) (#307)."""
     import robin_sparkless as rs

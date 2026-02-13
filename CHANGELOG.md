@@ -36,6 +36,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **#309 – collect_list(column) (PySpark parity)** — Module-level `collect_list(column)` for use in `groupBy.agg()` (collect values into list per group). Fixes #309.
 - **#310 – collect_set(column) (PySpark parity)** — Module-level `collect_set(column)` for use in `groupBy.agg()` (collect distinct values into list per group). Fixes #310.
 - **#314 – bool_and(column) / every(column) (PySpark parity)** — Module-level `bool_and(column)` and `every(column)` for use in `groupBy.agg()` (boolean AND across group). Fixes #314.
+- **#311 – corr(col1, col2) (PySpark parity)** — Module-level `corr(column1, column2)` for use in `groupBy.agg()` (Pearson correlation). Fixes #311.
+- **#312 – covar_pop(col1, col2) (PySpark parity)** — Module-level `covar_pop(column1, column2)` for use in `groupBy.agg()` (population covariance). Fixes #312.
+- **#321 – skewness(col) / kurtosis(col) (PySpark parity)** — Module-level `skewness(column)` and `kurtosis(column)` for use in `groupBy.agg()`. Fixes #321.
 
 ### Planned
 
