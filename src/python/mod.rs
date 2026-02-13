@@ -9,20 +9,20 @@ use crate::functions::{
     atan, atan2, atanh, base64, cast as rs_cast, cbrt, ceiling, char_length, character_length, chr,
     contains, convert_timezone, cos, cosh, curdate, current_date, current_timestamp,
     current_timezone, date_add, date_diff, date_format, date_from_unix_date, date_part, date_sub,
-    date_trunc, dateadd, datepart, day, dayname, dayofmonth, dayofweek, dayofyear, days, degrees,
-    endswith, expm1, extract, factorial, find_in_set, format_number, format_string, from_csv,
-    from_unixtime, from_utc_timestamp, get_json_object, greatest as rs_greatest, hour, hours,
-    hypot, ifnull, ilike, initcap, isnan as rs_isnan, isnotnull, isnull, json_tuple, last_day,
-    lcase, least as rs_least, left, length, like, ln, localtimestamp, log, log10, log1p, log2,
-    log_with_base, ltrim, make_date, make_interval, make_timestamp, make_timestamp_ntz, md5,
-    minutes, month, months, months_between, next_day, now, nullif, nvl, nvl2, overlay, pmod, power,
-    quarter, radians, regexp_count, regexp_extract, regexp_extract_all, regexp_instr,
-    regexp_replace, regexp_substr, repeat, replace as rs_replace, reverse, right, rint, rlike,
-    rtrim, schema_of_csv, schema_of_json, sha1, sha2, signum, sin, sinh, soundex, split,
-    split_part, startswith, substr, tan, tanh, timestamp_micros, timestamp_millis,
-    timestamp_seconds, timestampadd, timestampdiff, to_csv, to_date, to_degrees, to_radians,
-    to_timestamp, to_unix_timestamp, to_utc_timestamp, trim, try_cast as rs_try_cast, ucase,
-    unbase64, unix_date, unix_micros, unix_millis, unix_seconds, unix_timestamp,
+    date_trunc, dateadd, datepart, day, dayname, dayofmonth, dayofweek, dayofyear, days, decode,
+    degrees, encode, endswith, expm1, extract, factorial, find_in_set, format_number,
+    format_string, from_csv, from_unixtime, from_utc_timestamp, get_json_object,
+    greatest as rs_greatest, hour, hours, hypot, ifnull, ilike, initcap, isnan as rs_isnan,
+    isnotnull, isnull, json_tuple, last_day, lcase, least as rs_least, left, length, like, ln,
+    localtimestamp, log, log10, log1p, log2, log_with_base, ltrim, make_date, make_interval,
+    make_timestamp, make_timestamp_ntz, md5, minutes, month, months, months_between, next_day, now,
+    nullif, nvl, nvl2, overlay, pmod, power, quarter, radians, regexp_count, regexp_extract,
+    regexp_extract_all, regexp_instr, regexp_replace, regexp_substr, repeat, replace as rs_replace,
+    reverse, right, rint, rlike, rtrim, schema_of_csv, schema_of_json, sha1, sha2, signum, sin,
+    sinh, soundex, split, split_part, startswith, substr, tan, tanh, timestamp_micros,
+    timestamp_millis, timestamp_seconds, timestampadd, timestampdiff, to_csv, to_date, to_degrees,
+    to_radians, to_timestamp, to_unix_timestamp, to_utc_timestamp, trim, try_cast as rs_try_cast,
+    ucase, unbase64, unix_date, unix_micros, unix_millis, unix_seconds, unix_timestamp,
     unix_timestamp_now, weekday, weekofyear, year, years,
 };
 use crate::functions::{
@@ -620,7 +620,9 @@ fn robin_sparkless(m: &Bound<'_, PyModule>) -> PyResult<()> {
     )?;
     m.add("create_map", wrap_pyfunction!(py_create_map, m)?)?;
     m.add("array_remove", wrap_pyfunction!(py_array_remove, m)?)?;
+    m.add("decode", wrap_pyfunction!(py_decode, m)?)?;
     m.add("element_at", wrap_pyfunction!(py_element_at, m)?)?;
+    m.add("encode", wrap_pyfunction!(py_encode, m)?)?;
     m.add("get", wrap_pyfunction!(py_get, m)?)?;
     m.add("try_divide", wrap_pyfunction!(py_try_divide, m)?)?;
     m.add("try_add", wrap_pyfunction!(py_try_add, m)?)?;
@@ -2948,9 +2950,23 @@ fn py_array_remove(col: &PyColumn, value: &PyColumn) -> PyColumn {
 }
 
 #[pyfunction]
+fn py_decode(col: &PyColumn, charset: &str) -> PyColumn {
+    PyColumn {
+        inner: decode(&col.inner, charset),
+    }
+}
+
+#[pyfunction]
 fn py_element_at(col: &PyColumn, index: i64) -> PyColumn {
     PyColumn {
         inner: element_at(&col.inner, index),
+    }
+}
+
+#[pyfunction]
+fn py_encode(col: &PyColumn, charset: &str) -> PyColumn {
+    PyColumn {
+        inner: encode(&col.inner, charset),
     }
 }
 
