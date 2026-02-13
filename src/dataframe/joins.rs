@@ -1,6 +1,8 @@
 //! Join operations for DataFrame.
 
 use super::DataFrame;
+use crate::type_coercion::find_common_type;
+use polars::prelude::Expr;
 use polars::prelude::JoinType as PlJoinType;
 use polars::prelude::PolarsError;
 
@@ -18,6 +20,7 @@ pub enum JoinType {
 }
 
 /// Join with another DataFrame on the given columns. Preserves case_sensitive on result.
+/// When join key types differ (e.g. str vs int), coerces both sides to a common type (PySpark parity #274).
 /// For Right and Outer, reorders columns to match PySpark: key(s), then left non-key, then right non-key.
 pub fn join(
     left: &DataFrame,
@@ -27,8 +30,30 @@ pub fn join(
     case_sensitive: bool,
 ) -> Result<DataFrame, PolarsError> {
     use polars::prelude::{col, IntoLazy, JoinBuilder, JoinCoalesce};
-    let left_lf = left.df.as_ref().clone().lazy();
-    let right_lf = right.df.as_ref().clone().lazy();
+    let mut left_lf = left.df.as_ref().clone().lazy();
+    let mut right_lf = right.df.as_ref().clone().lazy();
+
+    // Coerce join keys to a common type when left/right dtypes differ (PySpark #274).
+    let mut left_casts: Vec<Expr> = Vec::new();
+    let mut right_casts: Vec<Expr> = Vec::new();
+    for key in &on {
+        let left_dtype = left.get_column_dtype(key).ok_or_else(|| {
+            PolarsError::ComputeError(format!("join key '{key}' not found on left").into())
+        })?;
+        let right_dtype = right.get_column_dtype(key).ok_or_else(|| {
+            PolarsError::ComputeError(format!("join key '{key}' not found on right").into())
+        })?;
+        if left_dtype != right_dtype {
+            let common = find_common_type(&left_dtype, &right_dtype)?;
+            left_casts.push(col(*key).cast(common.clone()).alias(*key));
+            right_casts.push(col(*key).cast(common).alias(*key));
+        }
+    }
+    if !left_casts.is_empty() {
+        left_lf = left_lf.with_columns(left_casts);
+        right_lf = right_lf.with_columns(right_casts);
+    }
+
     let on_set: std::collections::HashSet<&str> = on.iter().copied().collect();
     let on_exprs: Vec<polars::prelude::Expr> = on.iter().map(|name| col(*name)).collect();
     let polars_how: PlJoinType = match how {
@@ -168,5 +193,25 @@ mod tests {
             .unwrap();
         let out = join(&left, &right, vec!["id"], JoinType::Inner, false).unwrap();
         assert_eq!(out.count().unwrap(), 0);
+    }
+
+    /// Join when key types differ (str on left, int on right): coerces to common type (#274).
+    #[test]
+    fn join_key_type_coercion_str_int() {
+        use polars::prelude::df;
+        let spark = SparkSession::builder()
+            .app_name("join_tests")
+            .get_or_create();
+        let left_pl = df!("id" => &["1"], "label" => &["a"]).unwrap();
+        let right_pl = df!("id" => &[1i64], "x" => &[10i64]).unwrap();
+        let left = spark.create_dataframe_from_polars(left_pl);
+        let right = spark.create_dataframe_from_polars(right_pl);
+        let out = join(&left, &right, vec!["id"], JoinType::Inner, false).unwrap();
+        assert_eq!(out.count().unwrap(), 1);
+        let rows = out.collect().unwrap();
+        assert_eq!(rows.height(), 1);
+        // Join key was coerced to common type (string); row matched id "1" with id 1.
+        assert!(rows.column("label").is_ok());
+        assert!(rows.column("x").is_ok());
     }
 }
