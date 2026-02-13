@@ -2861,8 +2861,15 @@ fn py_map_contains_key(col: &PyColumn, value: &PyColumn) -> PyColumn {
 }
 
 #[pyfunction]
-fn py_create_map(cols: Vec<PyRef<PyColumn>>) -> PyResult<PyColumn> {
-    let refs: Vec<&RsColumn> = cols.iter().map(|c| &c.inner).collect();
+#[pyo3(signature = (*cols))]
+fn py_create_map(cols: &Bound<'_, pyo3::types::PyTuple>) -> PyResult<PyColumn> {
+    let columns: Vec<PyRef<PyColumn>> = (0..cols.len())
+        .map(|i| cols.get_item(i).and_then(|ob| ob.extract()))
+        .collect::<PyResult<Vec<_>>>()
+        .map_err(|e| {
+            pyo3::exceptions::PyTypeError::new_err(format!("create_map args must be Column: {e}"))
+        })?;
+    let refs: Vec<&RsColumn> = columns.iter().map(|c| &c.inner).collect();
     let inner =
         create_map(&refs).map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
     Ok(PyColumn { inner })

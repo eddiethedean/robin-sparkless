@@ -2428,12 +2428,27 @@ pub fn posexplode(column: &Column) -> (Column, Column) {
 
 /// Build a map column from alternating key/value expressions (PySpark create_map).
 /// Returns List(Struct{key, value}) using Polars as_struct and concat_list.
+/// With no args (or empty slice), returns a column of empty maps per row (PySpark parity #275).
 pub fn create_map(key_values: &[&Column]) -> Result<Column, PolarsError> {
-    use polars::prelude::{as_struct, concat_list};
+    use polars::chunked_array::StructChunked;
+    use polars::prelude::{as_struct, concat_list, lit, IntoSeries, ListChunked};
     if key_values.is_empty() {
-        return Err(PolarsError::ComputeError(
-            "create_map requires at least one key-value pair".into(),
-        ));
+        // PySpark F.create_map() with no args: one empty map {} per row (broadcast literal).
+        let key_s = Series::new("key".into(), Vec::<String>::new());
+        let value_s = Series::new("value".into(), Vec::<String>::new());
+        let fields: [&Series; 2] = [&key_s, &value_s];
+        let empty_struct = StructChunked::from_series(
+            polars::prelude::PlSmallStr::EMPTY,
+            0,
+            fields.iter().copied(),
+        )
+        .map_err(|e| PolarsError::ComputeError(format!("create_map empty struct: {e}").into()))?
+        .into_series();
+        let list_series = ListChunked::from_iter([Some(empty_struct)])
+            .with_name("create_map".into())
+            .into_series();
+        let expr = lit(list_series).first();
+        return Ok(crate::column::Column::from_expr(expr, None));
     }
     let mut struct_exprs: Vec<Expr> = Vec::new();
     for i in (0..key_values.len()).step_by(2) {
@@ -2773,6 +2788,26 @@ mod tests {
     fn test_lit_str() {
         let column = lit_str("hello");
         assert_eq!(column.name(), "<expr>");
+    }
+
+    #[test]
+    fn test_create_map_empty() {
+        // PySpark F.create_map() with no args: column of empty maps (#275).
+        let empty_col = create_map(&[]).unwrap();
+        let df = df!("id" => &[1i64, 2i64]).unwrap();
+        let out = df
+            .lazy()
+            .with_columns([empty_col.into_expr().alias("m")])
+            .collect()
+            .unwrap();
+        assert_eq!(out.height(), 2);
+        let m = out.column("m").unwrap();
+        assert_eq!(m.len(), 2);
+        let list = m.list().unwrap();
+        for i in 0..2 {
+            let row = list.get(i).unwrap();
+            assert_eq!(row.len(), 0);
+        }
     }
 
     #[test]
