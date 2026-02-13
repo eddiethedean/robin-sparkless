@@ -366,6 +366,42 @@ pub fn covar_pop_expr(col1: &str, col2: &str) -> Expr {
     (sum_ab - sum_a * sum_b / n.clone()) / n
 }
 
+/// Population covariance aggregation (PySpark covar_pop). Module-level; use in groupBy.agg() with two columns.
+pub fn covar_pop(col1: &Column, col2: &Column) -> Column {
+    use polars::prelude::len;
+    let c1 = col1.expr().clone().cast(DataType::Float64);
+    let c2 = col2.expr().clone().cast(DataType::Float64);
+    let n = len().cast(DataType::Float64);
+    let sum_ab = (c1.clone() * c2.clone()).sum();
+    let sum_a = col1.expr().clone().sum().cast(DataType::Float64);
+    let sum_b = col2.expr().clone().sum().cast(DataType::Float64);
+    let e = (sum_ab - sum_a * sum_b / n.clone()) / n;
+    Column::from_expr(e, Some("covar_pop".to_string()))
+}
+
+/// Pearson correlation aggregation (PySpark corr). Module-level; use in groupBy.agg() with two columns.
+pub fn corr(col1: &Column, col2: &Column) -> Column {
+    use polars::prelude::{len, lit, when};
+    let c1 = col1.expr().clone().cast(DataType::Float64);
+    let c2 = col2.expr().clone().cast(DataType::Float64);
+    let n = len().cast(DataType::Float64);
+    let n1 = (len() - lit(1)).cast(DataType::Float64);
+    let sum_ab = (c1.clone() * c2.clone()).sum();
+    let sum_a = col1.expr().clone().sum().cast(DataType::Float64);
+    let sum_b = col2.expr().clone().sum().cast(DataType::Float64);
+    let sum_a2 = (c1.clone() * c1).sum();
+    let sum_b2 = (c2.clone() * c2).sum();
+    let cov_samp = (sum_ab - sum_a.clone() * sum_b.clone() / n.clone()) / n1.clone();
+    let var_a = (sum_a2 - sum_a.clone() * sum_a / n.clone()) / n1.clone();
+    let var_b = (sum_b2 - sum_b.clone() * sum_b / n.clone()) / n1.clone();
+    let std_a = var_a.sqrt();
+    let std_b = var_b.sqrt();
+    let e = when(len().gt(lit(1)))
+        .then(cov_samp / (std_a * std_b))
+        .otherwise(lit(f64::NAN));
+    Column::from_expr(e, Some("corr".to_string()))
+}
+
 /// Sample covariance aggregation (PySpark covar_samp). Returns Expr for use in groupBy.agg().
 pub fn covar_samp_expr(col1: &str, col2: &str) -> Expr {
     use polars::prelude::{col as pl_col, len, lit, when};

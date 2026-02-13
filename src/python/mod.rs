@@ -45,8 +45,8 @@ use crate::functions::{
 };
 use crate::functions::{
     any_value, approx_count_distinct, approx_percentile, avg, bool_and, coalesce, col as rs_col,
-    collect_list, collect_set, count, count_if, every, first, max, max_by, min, min_by,
-    sum as rs_sum, try_avg, try_sum,
+    collect_list, collect_set, corr, count, count_if, covar_pop, every, first, kurtosis, max,
+    max_by, min, min_by, skewness, sum as rs_sum, try_avg, try_sum,
 };
 use crate::functions::{
     asc, asc_nulls_first, asc_nulls_last, bround, cot, csc, desc, desc_nulls_first,
@@ -441,10 +441,14 @@ fn robin_sparkless(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("bool_and", wrap_pyfunction!(py_bool_and, m)?)?;
     m.add("collect_list", wrap_pyfunction!(py_collect_list, m)?)?;
     m.add("collect_set", wrap_pyfunction!(py_collect_set, m)?)?;
+    m.add("corr", wrap_pyfunction!(py_corr, m)?)?;
     m.add("count", wrap_pyfunction!(py_count, m)?)?;
+    m.add("covar_pop", wrap_pyfunction!(py_covar_pop, m)?)?;
     m.add("every", wrap_pyfunction!(py_every, m)?)?;
     m.add("count_if", wrap_pyfunction!(py_count_if, m)?)?;
     m.add("first", wrap_pyfunction!(py_first, m)?)?;
+    m.add("kurtosis", wrap_pyfunction!(py_kurtosis, m)?)?;
+    m.add("skewness", wrap_pyfunction!(py_skewness, m)?)?;
     m.add("any_value", wrap_pyfunction!(py_any_value, m)?)?;
     m.add("ascii", wrap_pyfunction!(py_ascii, m)?)?;
     m.add("format_number", wrap_pyfunction!(py_format_number, m)?)?;
@@ -1175,6 +1179,20 @@ fn py_try_avg(col: &PyColumn) -> PyColumn {
     }
 }
 
+#[pyfunction]
+fn py_kurtosis(col: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: kurtosis(&col.inner),
+    }
+}
+
+#[pyfunction]
+fn py_skewness(col: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: skewness(&col.inner),
+    }
+}
+
 /// Count aggregation: number of non-null values in a column.
 ///
 /// Use in ``GroupedData.agg()`` (e.g. ``count(col("id"))``) or ``select()``.
@@ -1237,9 +1255,23 @@ fn py_collect_set(col: &PyColumn) -> PyColumn {
 }
 
 #[pyfunction]
+fn py_corr(col1: &PyColumn, col2: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: corr(&col1.inner, &col2.inner),
+    }
+}
+
+#[pyfunction]
 fn py_count_if(col: &PyColumn) -> PyColumn {
     PyColumn {
         inner: count_if(&col.inner),
+    }
+}
+
+#[pyfunction]
+fn py_covar_pop(col1: &PyColumn, col2: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: covar_pop(&col1.inner, &col2.inner),
     }
 }
 
