@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **#262 – F.round() on string column (PySpark parity)** — `round()` now accepts string columns that contain numeric values; values are implicitly cast to double then rounded (PySpark behavior). Previously raised `RuntimeError: round can only be used on numeric types`. Fixes #262.
+
 ### Planned
 
 - **Phase 26 – Publish crate**: Prepare and publish robin-sparkless to crates.io (and optionally PyPI via maturin). See [ROADMAP.md](docs/ROADMAP.md) for details.
