@@ -1880,6 +1880,33 @@ def test_union_by_name_allow_missing_columns_issue_292() -> None:
     assert rows[1]["a"] == 3 and rows[1]["b"] is None and rows[1]["c"] == 4
 
 
+def test_lag_lead_dense_rank_module_issue_319_320() -> None:
+    """Module-level lag(), lead(), dense_rank() for PySpark parity (#319, #320)."""
+    import robin_sparkless as rs
+
+    spark = rs.SparkSession.builder().app_name("test").get_or_create()
+    df = spark._create_dataframe_from_rows(
+        [{"k": "a", "v": 1}, {"k": "a", "v": 2}, {"k": "a", "v": 3}],
+        [("k", "string"), ("v", "int")],
+    )
+    w = rs.Window.partitionBy("k").orderBy("v")
+    # lag(col, 1).over(partition_by) and lead(col, 1).over(partition_by)
+    out = df.with_column("prev", rs.lag(rs.col("v"), 1).over(["k"]))
+    out = out.with_column("nxt", rs.lead(rs.col("v"), 1).over(["k"]))
+    rows = out.collect()
+    assert len(rows) == 3
+    by_v = {r["v"]: (r.get("prev"), r.get("nxt")) for r in rows}
+    assert by_v[1] == (None, 2) and by_v[2] == (1, 3) and by_v[3] == (2, None)
+    # dense_rank().over(win)
+    df2 = spark._create_dataframe_from_rows(
+        [{"k": "a", "v": 10}, {"k": "a", "v": 20}, {"k": "a", "v": 20}],
+        [("k", "string"), ("v", "int")],
+    )
+    out2 = df2.with_column("rk", rs.dense_rank().over(w))
+    rks = [r["rk"] for r in out2.order_by(["v"]).collect()]
+    assert rks == [1, 2, 2]  # dense_rank: no gap after tie
+
+
 def test_window_partition_by_order_by_accept_str_issue_288() -> None:
     """Window.partitionBy and orderBy accept column names (str) not only Column (#288)."""
     import robin_sparkless as rs
