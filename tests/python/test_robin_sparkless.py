@@ -1803,6 +1803,26 @@ def test_sparkless_parity_multiple_append_operations() -> None:
     assert rows[0]["id"] == 1 and rows[1]["id"] == 2 and rows[2]["id"] == 3
 
 
+def test_active_session_and_agg_issue_286() -> None:
+    """get_active_session() and groupBy().agg(sum(...)) work after get_or_create or SparkSession() (#286)."""
+    import robin_sparkless as rs
+
+    spark = rs.SparkSession.builder().app_name("test").get_or_create()
+    assert rs.SparkSession.get_active_session() is not None
+    df = spark.create_dataframe([(1, 10, "a"), (2, 20, "b")], ["x", "v", "name"])
+    grouped = df.group_by(["name"])
+    out = grouped.agg([rs.sum(rs.col("x"))])
+    rows = out.collect()
+    assert len(rows) == 2
+    # Column name is "sum" (from F.sum) or similar
+    sum_col = [k for k in rows[0].keys() if k != "name"][0]
+    by_name = {r["name"]: r[sum_col] for r in rows}
+    assert by_name["a"] == 1 and by_name["b"] == 2
+    # Parameterless SparkSession() also registers as active (PySpark parity)
+    spark2 = rs.SparkSession()
+    assert rs.SparkSession.get_active_session() is not None
+
+
 def test_spark_sql_and_table_exist_issue_284() -> None:
     """SparkSession.sql() and spark.table() exist (PySpark parity); work with sql feature or raise clear error (#284)."""
     import robin_sparkless as rs
