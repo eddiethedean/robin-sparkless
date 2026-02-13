@@ -30,16 +30,16 @@ use crate::functions::{
     bit_count, bit_length, bit_or, bit_xor, bitwise_not, broadcast as rs_broadcast, cardinality,
     concat as rs_concat, concat_ws as rs_concat_ws, create_map,
     current_catalog as rs_current_catalog, current_database as rs_current_database,
-    current_schema as rs_current_schema, current_user as rs_current_user, equal_null, exp,
+    current_schema as rs_current_schema, current_user as rs_current_user, equal_null, exp, explode,
     explode_outer, floor, get, hash, inline as rs_inline, inline_outer as rs_inline_outer,
     input_file_name as rs_input_file_name, isin, isin_i64, isin_str, json_array_length, map_concat,
     map_contains_key, map_filter_value_gt, map_from_entries, map_zip_with_coalesce,
     monotonically_increasing_id as rs_monotonically_increasing_id, named_struct, parse_url,
-    rand as rs_rand, randn as rs_randn, round, sequence, shift_left, shift_right, shuffle, size,
-    spark_partition_id as rs_spark_partition_id, stddev, str_to_map, struct_, to_char, to_number,
-    to_varchar, try_add, try_divide, try_multiply, try_subtract, try_to_number, try_to_timestamp,
-    typeof_, url_decode, url_encode, user as rs_user, version, width_bucket, xxhash64,
-    zip_with_coalesce,
+    posexplode, rand as rs_rand, randn as rs_randn, round, sequence, shift_left, shift_right,
+    shuffle, size, spark_partition_id as rs_spark_partition_id, stddev, str_to_map, struct_,
+    to_char, to_number, to_varchar, try_add, try_divide, try_multiply, try_subtract, try_to_number,
+    try_to_timestamp, typeof_, url_decode, url_encode, user as rs_user, version, width_bucket,
+    xxhash64, zip_with_coalesce,
 };
 use crate::functions::{
     asc, asc_nulls_first, asc_nulls_last, bround, cot, csc, desc, desc_nulls_first,
@@ -662,7 +662,9 @@ fn robin_sparkless(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("str_to_map", wrap_pyfunction!(py_str_to_map, m)?)?;
     m.add("arrays_overlap", wrap_pyfunction!(py_arrays_overlap, m)?)?;
     m.add("arrays_zip", wrap_pyfunction!(py_arrays_zip, m)?)?;
+    m.add("explode", wrap_pyfunction!(py_explode, m)?)?;
     m.add("explode_outer", wrap_pyfunction!(py_explode_outer, m)?)?;
+    m.add("posexplode", wrap_pyfunction!(py_posexplode, m)?)?;
     m.add("inline", wrap_pyfunction!(py_inline, m)?)?;
     m.add("inline_outer", wrap_pyfunction!(py_inline_outer, m)?)?;
     m.add("sequence", wrap_pyfunction!(py_sequence, m)?)?;
@@ -1391,10 +1393,23 @@ fn py_arrays_zip(col1: &PyColumn, col2: &PyColumn) -> PyColumn {
 }
 
 #[pyfunction]
+fn py_explode(col: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: explode(&col.inner),
+    }
+}
+
+#[pyfunction]
 fn py_explode_outer(col: &PyColumn) -> PyColumn {
     PyColumn {
         inner: explode_outer(&col.inner),
     }
+}
+
+#[pyfunction]
+fn py_posexplode(col: &PyColumn) -> (PyColumn, PyColumn) {
+    let (pos, val) = posexplode(&col.inner);
+    (PyColumn { inner: pos }, PyColumn { inner: val })
 }
 
 #[pyfunction]
