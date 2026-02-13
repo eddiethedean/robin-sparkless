@@ -4257,6 +4257,75 @@ pub fn apply_string_to_date(column: Column, strict: bool) -> PolarsResult<Option
     Ok(Some(Column::new(name, out)))
 }
 
+/// Apply string-to-date with optional format (PySpark to_date(col, format)). When format is None uses default parsing; when Some parses with given format.
+pub fn apply_string_to_date_format(
+    column: Column,
+    format: Option<&str>,
+    strict: bool,
+) -> PolarsResult<Option<Column>> {
+    let name = column.field().into_owned().name;
+    let series = column.take_materialized_series();
+    let epoch = crate::date_utils::epoch_naive_date();
+    let out: Series = match series.dtype() {
+        DataType::String => {
+            let ca = series
+                .str()
+                .map_err(|e| PolarsError::ComputeError(format!("string to date: {e}").into()))?;
+            let fmt = format.map(pyspark_format_to_chrono);
+            let mut results = Vec::with_capacity(ca.len());
+            for opt_s in ca.into_iter() {
+                let v = opt_s.and_then(|s| {
+                    let parsed = if let Some(ref chrono_fmt) = fmt {
+                        chrono::NaiveDate::parse_from_str(s.trim(), chrono_fmt).ok()
+                    } else {
+                        parse_str_to_date(s)
+                    };
+                    parsed.map(|d| (d.signed_duration_since(epoch).num_days()) as i32)
+                });
+                if strict {
+                    if let Some(s) = opt_s {
+                        if v.is_none() {
+                            return Err(PolarsError::ComputeError(
+                                format!(
+                                    "to_date failed in column '{}' for value \"{s}\"",
+                                    name.as_str()
+                                )
+                                .into(),
+                            ));
+                        }
+                    }
+                }
+                results.push(v);
+            }
+            let chunked =
+                Int32Chunked::from_iter_options(name.as_str().into(), results.into_iter());
+            chunked.into_series().cast(&DataType::Date)?
+        }
+        DataType::Date => series,
+        DataType::Datetime(_, _) => series.cast(&DataType::Date)?,
+        DataType::Null => {
+            let days = Int32Chunked::from_iter_options(
+                name.as_str().into(),
+                (0..series.len()).map(|_| None::<i32>),
+            );
+            days.into_series().cast(&DataType::Date)?
+        }
+        _ => {
+            if strict {
+                return Err(PolarsError::ComputeError(
+                    format!("to_date from {} not supported", series.dtype()).into(),
+                ));
+            }
+            let days = Int32Chunked::from_iter_options(
+                name.as_str().into(),
+                (0..series.len()).map(|_| None::<i32>),
+            );
+            days.into_series().cast(&DataType::Date)?
+        }
+    };
+    Ok(Some(Column::new(name, out)))
+}
+
 /// Count set bits in a bitmap (binary column). PySpark bitmap_count.
 pub fn apply_bitmap_count(column: Column) -> PolarsResult<Option<Column>> {
     let name = column.field().into_owned().name;
