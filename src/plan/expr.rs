@@ -1668,11 +1668,6 @@ fn expr_from_fn_rest(name: &str, args: &[Value]) -> Result<Expr, PlanExprError> 
         }
         // --- Array / list ---
         "array" => {
-            if args.is_empty() {
-                return Err(PlanExprError(
-                    "fn 'array' requires at least one argument".to_string(),
-                ));
-            }
             let exprs: Result<Vec<Expr>, _> = args.iter().map(expr_from_value).collect();
             let cols: Vec<Column> = exprs?.into_iter().map(expr_to_column).collect();
             let refs: Vec<&Column> = cols.iter().collect();
