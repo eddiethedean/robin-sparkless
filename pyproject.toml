@@ -28,9 +28,9 @@ pyspark = ["pyspark>=3.5"]
 deltalake = ["deltalake>=0.20"]
 
 [tool.maturin]
-# Build the Rust lib with the pyo3 feature so the Python module is compiled.
+# Build the Rust lib with pyo3 + sql + delta so the shipped Python package has full functionality.
 # abi3 (py-limited-api) produces one wheel for Python 3.8+.
-features = ["pyo3"]
+features = ["pyo3", "sql", "delta"]
 py-limited-api = "cp38"
 # Type stubs for static checkers (mypy, pyright).
 include = ["robin_sparkless.pyi", "py.typed"]
