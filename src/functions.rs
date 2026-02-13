@@ -224,6 +224,22 @@ pub fn min_by(value_col: &Column, ord_col: &Column) -> Column {
     Column::from_expr(e, None)
 }
 
+/// Collect column values into list per group (PySpark collect_list). Use in groupBy.agg().
+pub fn collect_list(col: &Column) -> Column {
+    Column::from_expr(
+        col.expr().clone().implode(),
+        Some("collect_list".to_string()),
+    )
+}
+
+/// Collect distinct column values into list per group (PySpark collect_set). Use in groupBy.agg().
+pub fn collect_set(col: &Column) -> Column {
+    Column::from_expr(
+        col.expr().clone().unique().implode(),
+        Some("collect_set".to_string()),
+    )
+}
+
 /// Standard deviation (sample) aggregation (PySpark stddev / stddev_samp)
 pub fn stddev(col: &Column) -> Column {
     Column::from_expr(col.expr().clone().std(1), Some("stddev".to_string()))
