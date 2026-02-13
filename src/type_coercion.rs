@@ -231,6 +231,37 @@ pub fn coerce_for_pyspark_comparison(
     coerce_for_comparison(left, right, left_type, right_type)
 }
 
+/// Infer DataType from an expression when it is a literal (for coercion heuristics).
+pub fn infer_type_from_expr(expr: &Expr) -> Option<DataType> {
+    use polars::prelude::LiteralValue;
+    match expr {
+        Expr::Literal(lv) => Some(match lv {
+            LiteralValue::Boolean(_) => DataType::Boolean,
+            LiteralValue::Int32(_) => DataType::Int32,
+            LiteralValue::Int64(_) => DataType::Int64,
+            LiteralValue::UInt32(_) => DataType::UInt32,
+            LiteralValue::UInt64(_) => DataType::UInt64,
+            LiteralValue::Float32(_) => DataType::Float32,
+            LiteralValue::Float64(_) => DataType::Float64,
+            LiteralValue::String(_) => DataType::String,
+            LiteralValue::Int(_) | LiteralValue::Float(_) => DataType::Float64,
+            _ => DataType::String,
+        }),
+        _ => None,
+    }
+}
+
+/// Coerce left/right for eq_null_safe so string–numeric compares like PySpark (try_to_number on string side).
+/// Infers types from literals; assumes String for column (so string–numeric gets coerced).
+pub fn coerce_for_pyspark_eq_null_safe(
+    left: Expr,
+    right: Expr,
+) -> Result<(Expr, Expr), PolarsError> {
+    let left_ty = infer_type_from_expr(&left).unwrap_or(DataType::String);
+    let right_ty = infer_type_from_expr(&right).unwrap_or(DataType::String);
+    coerce_for_pyspark_comparison(left, right, &left_ty, &right_ty, &CompareOp::Eq)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

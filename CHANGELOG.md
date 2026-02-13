@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **#263 – F.array() with no args (PySpark parity)** — `array()` with no arguments now returns a column of empty arrays (one `[]` per row). Previously raised `RuntimeError: array requires at least one column`. Fixes #263.
 - **#264 – F.posexplode() and F.explode() in Python module (PySpark parity)** — Module-level `posexplode(column)` and `explode(column)` are now exposed; previously `F.posexplode` raised `AttributeError`. `posexplode` returns `(pos_column, value_column)`. Fixes #264.
 - **#265 – date/datetime vs string comparison (PySpark parity)** — Comparing a date or datetime column to a string literal in `filter` (e.g. `df.filter(col("dt") == "2025-01-01")`) now implicitly casts the string to the column type instead of raising `RuntimeError: cannot compare 'date/datetime/time' to a string value`. Uses `try_cast` so invalid strings become null (non-matching). Fixes #265.
+- **#266 – eq_null_safe type coercion (PySpark parity)** — `eq_null_safe` (eqNullSafe) now applies the same string–numeric coercion as regular comparisons: string column vs int literal is coerced via `try_to_number` so that e.g. `df.select(col("str_col").eq_null_safe(lit(123)))` returns True/False per row instead of raising `RuntimeError: cannot compare string with numeric type (i32)`. Fixes #266.
 
 ### Planned
 

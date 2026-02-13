@@ -266,17 +266,23 @@ impl Column {
     }
 
     /// Null-safe equality (NULL <=> NULL returns True)
-    /// PySpark's eqNullSafe() method
+    /// PySpark's eqNullSafe() method. Applies type coercion (e.g. string vs int) for PySpark parity (#266).
     pub fn eq_null_safe(&self, other: &Column) -> Column {
         use crate::functions::{lit_bool, when};
 
-        let left_null = self.expr().clone().is_null();
-        let right_null = other.expr().clone().is_null();
+        let (left_c, right_c) = crate::type_coercion::coerce_for_pyspark_eq_null_safe(
+            self.expr().clone(),
+            other.expr().clone(),
+        )
+        .unwrap_or_else(|_| (self.expr().clone(), other.expr().clone()));
+
+        let left_null = left_c.clone().is_null();
+        let right_null = right_c.clone().is_null();
         let both_null = left_null.clone().and(right_null.clone());
         let either_null = left_null.clone().or(right_null.clone());
 
-        // Standard equality
-        let eq_result = self.expr().clone().eq(other.expr().clone());
+        // Standard equality (on coerced exprs)
+        let eq_result = left_c.eq(right_c);
 
         // If both are null, return True
         // If either is null (but not both), return False
