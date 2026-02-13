@@ -45,7 +45,7 @@ use crate::functions::{
 };
 use crate::functions::{
     any_value, approx_count_distinct, approx_percentile, avg, coalesce, col as rs_col, count,
-    count_if, first, max, min, sum as rs_sum,
+    count_if, first, max, max_by, min, min_by, sum as rs_sum, try_avg, try_sum,
 };
 use crate::functions::{
     asc, asc_nulls_first, asc_nulls_last, bround, cot, csc, desc, desc_nulls_first,
@@ -424,7 +424,11 @@ fn robin_sparkless(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("sum", wrap_pyfunction!(py_sum, m)?)?;
     m.add("avg", wrap_pyfunction!(py_avg, m)?)?;
     m.add("min", wrap_pyfunction!(py_min, m)?)?;
+    m.add("min_by", wrap_pyfunction!(py_min_by, m)?)?;
     m.add("max", wrap_pyfunction!(py_max, m)?)?;
+    m.add("max_by", wrap_pyfunction!(py_max_by, m)?)?;
+    m.add("try_sum", wrap_pyfunction!(py_try_sum, m)?)?;
+    m.add("try_avg", wrap_pyfunction!(py_try_avg, m)?)?;
     m.add(
         "approx_count_distinct",
         wrap_pyfunction!(py_approx_count_distinct, m)?,
@@ -1135,6 +1139,34 @@ fn py_min(col: &PyColumn) -> PyColumn {
 fn py_max(col: &PyColumn) -> PyColumn {
     PyColumn {
         inner: max(&col.inner),
+    }
+}
+
+#[pyfunction]
+fn py_max_by(value_col: &PyColumn, ord_col: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: max_by(&value_col.inner, &ord_col.inner),
+    }
+}
+
+#[pyfunction]
+fn py_min_by(value_col: &PyColumn, ord_col: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: min_by(&value_col.inner, &ord_col.inner),
+    }
+}
+
+#[pyfunction]
+fn py_try_sum(col: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: try_sum(&col.inner),
+    }
+}
+
+#[pyfunction]
+fn py_try_avg(col: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: try_avg(&col.inner),
     }
 }
 
