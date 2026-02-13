@@ -20,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **#292 – union_by_name(allow_missing_columns=True) (PySpark parity)** — `df.union_by_name(other, allow_missing_columns=True)` (default True) fills columns missing in the other DataFrame with null. When False, errors if the other DataFrame is missing any column from this one. Fixes #292.
 - **#319 – lag(col, offset) / lead(col, offset) as module-level (PySpark parity)** — `lag(column, offset=1)` and `lead(column, offset=1)` are now exposed at module level; use with `.over(partition_by)` (e.g. `rs.lag(rs.col("v"), 1).over(["dept"])`). Fixes #319.
 - **#320 – dense_rank() window function (PySpark parity)** — `dense_rank(descending=False)` returns a window function; use with `.over(window)` (e.g. `rs.dense_rank().over(win)`). Fixes #320.
+- **#313 – hour(col) (PySpark parity)** — Module-level `hour(column)` extracts the hour (0–23) from a date or timestamp column. Fixes #313.
 
 ### Planned
 
