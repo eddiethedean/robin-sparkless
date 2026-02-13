@@ -40,6 +40,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **#312 – covar_pop(col1, col2) (PySpark parity)** — Module-level `covar_pop(column1, column2)` for use in `groupBy.agg()` (population covariance). Fixes #312.
 - **#321 – skewness(col) / kurtosis(col) (PySpark parity)** — Module-level `skewness(column)` and `kurtosis(column)` for use in `groupBy.agg()`. Fixes #321.
 - **#305 – explode_outer(column) (PySpark parity)** — Module-level `explode_outer(column)` for list/map columns; null/empty list yields one row with null in the exploded column (Polars default behavior). Fixes #305.
+- **#306 – inline(column) / inline_outer(column) array of structs (PySpark parity)** — Module-level `inline(column)` and `inline_outer(column)` for array-of-structs columns; explode then use unnest to expand struct fields to columns. Fixes #306.
 
 ### Planned
 
