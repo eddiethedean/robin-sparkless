@@ -1979,6 +1979,40 @@ def test_to_date_module_issue_322() -> None:
     assert r["d"] is not None and "2024-01-15" in str(r["d"])
 
 
+def test_any_value_count_if_module_issue_301_302() -> None:
+    """Module-level any_value and count_if for groupBy.agg() (#301, #302)."""
+    import robin_sparkless as rs
+
+    spark = rs.SparkSession.builder().app_name("test").get_or_create()
+    df = spark._create_dataframe_from_rows(
+        [{"k": "a", "v": 10}, {"k": "a", "v": 20}, {"k": "b", "v": 5}],
+        [("k", "string"), ("v", "bigint")],
+    )
+    out = df.group_by(["k"]).agg(
+        [
+            rs.any_value(rs.col("v")).alias("any_v"),
+            rs.first(rs.col("v")).alias("first_v"),
+        ]
+    )
+    rows = out.order_by(["k"]).collect()
+    assert len(rows) == 2
+    # count_if: boolean column
+    df2 = spark._create_dataframe_from_rows(
+        [
+            {"k": "a", "flag": True},
+            {"k": "a", "flag": False},
+            {"k": "a", "flag": True},
+            {"k": "b", "flag": False},
+        ],
+        [("k", "string"), ("flag", "boolean")],
+    )
+    out2 = df2.group_by(["k"]).agg([rs.count_if(rs.col("flag")).alias("n_true")])
+    rows2 = out2.order_by(["k"]).collect()
+    assert len(rows2) == 2
+    by_k = {r["k"]: r["n_true"] for r in rows2}
+    assert by_k["a"] == 2 and by_k["b"] == 0
+
+
 def test_first_agg_issue_293() -> None:
     """first(column, ignorenulls) aggregate for groupBy.agg() (#293)."""
     import robin_sparkless as rs

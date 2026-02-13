@@ -44,10 +44,12 @@ use crate::functions::{
     xxhash64, zip_with_coalesce,
 };
 use crate::functions::{
+    any_value, avg, coalesce, col as rs_col, count, count_if, first, max, min, sum as rs_sum,
+};
+use crate::functions::{
     asc, asc_nulls_first, asc_nulls_last, bround, cot, csc, desc, desc_nulls_first,
     desc_nulls_last, e, median, mode, negate, pi, positive, sec, stddev_pop, var_pop,
 };
-use crate::functions::{avg, coalesce, col as rs_col, count, first, max, min, sum as rs_sum};
 use crate::functions::{bin, btrim, conv, getbit, hex, locate, unhex};
 use crate::functions::{crc32, levenshtein};
 use crate::plan;
@@ -423,7 +425,9 @@ fn robin_sparkless(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("min", wrap_pyfunction!(py_min, m)?)?;
     m.add("max", wrap_pyfunction!(py_max, m)?)?;
     m.add("count", wrap_pyfunction!(py_count, m)?)?;
+    m.add("count_if", wrap_pyfunction!(py_count_if, m)?)?;
     m.add("first", wrap_pyfunction!(py_first, m)?)?;
+    m.add("any_value", wrap_pyfunction!(py_any_value, m)?)?;
     m.add("ascii", wrap_pyfunction!(py_ascii, m)?)?;
     m.add("format_number", wrap_pyfunction!(py_format_number, m)?)?;
     m.add("overlay", wrap_pyfunction!(py_overlay, m)?)?;
@@ -1143,10 +1147,25 @@ fn py_count(col: &PyColumn) -> PyColumn {
 }
 
 #[pyfunction]
+fn py_count_if(col: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: count_if(&col.inner),
+    }
+}
+
+#[pyfunction]
 #[pyo3(signature = (col, ignorenulls=true))]
 fn py_first(col: &PyColumn, ignorenulls: bool) -> PyColumn {
     PyColumn {
         inner: first(&col.inner, ignorenulls),
+    }
+}
+
+#[pyfunction]
+#[pyo3(signature = (col, ignorenulls=true))]
+fn py_any_value(col: &PyColumn, ignorenulls: bool) -> PyColumn {
+    PyColumn {
+        inner: any_value(&col.inner, ignorenulls),
     }
 }
 
