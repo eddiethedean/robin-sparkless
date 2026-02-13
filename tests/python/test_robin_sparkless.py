@@ -1979,6 +1979,23 @@ def test_to_date_module_issue_322() -> None:
     assert r["d"] is not None and "2024-01-15" in str(r["d"])
 
 
+def test_first_agg_issue_293() -> None:
+    """first(column, ignorenulls) aggregate for groupBy.agg() (#293)."""
+    import robin_sparkless as rs
+
+    spark = rs.SparkSession.builder().app_name("test").get_or_create()
+    df = spark._create_dataframe_from_rows(
+        [{"k": 1, "v": 10}, {"k": 1, "v": 20}, {"k": 2, "v": 5}],
+        [("k", "bigint"), ("v", "bigint")],
+    )
+    out = df.group_by(["k"]).agg([rs.first(rs.col("v")).alias("first_v")])
+    rows = out.order_by(["k"]).collect()
+    assert len(rows) == 2
+    by_k = {r["k"]: r["first_v"] for r in rows}
+    assert by_k[1] in (10, 20)  # first in group
+    assert by_k[2] == 5
+
+
 def test_encode_decode_module_issue_307() -> None:
     """Module-level encode(column, charset) and decode(column, charset) (#307)."""
     import robin_sparkless as rs
