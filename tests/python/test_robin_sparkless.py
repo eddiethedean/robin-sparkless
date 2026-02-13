@@ -2099,6 +2099,47 @@ def test_max_by_min_by_try_sum_try_avg_issue_303_304() -> None:
     assert by_k["b"]["try_avg_v"] == 5.0
 
 
+def test_collect_list_collect_set_module_issue_309_310() -> None:
+    """Module-level collect_list and collect_set for groupBy.agg() (#309, #310)."""
+    import robin_sparkless as rs
+
+    spark = rs.SparkSession.builder().app_name("test").get_or_create()
+    df = spark._create_dataframe_from_rows(
+        [
+            {"k": "a", "v": 1},
+            {"k": "a", "v": 2},
+            {"k": "a", "v": 1},
+            {"k": "b", "v": 10},
+        ],
+        [("k", "string"), ("v", "bigint")],
+    )
+    out = df.group_by(["k"]).agg(
+        [
+            rs.collect_list(rs.col("v")).alias("list_v"),
+            rs.collect_set(rs.col("v")).alias("set_v"),
+        ]
+    )
+    rows = out.order_by(["k"]).collect()
+    assert len(rows) == 2
+    by_k = {r["k"]: r for r in rows}
+    list_a = by_k["a"]["list_v"]
+    set_a = by_k["a"]["set_v"]
+    if isinstance(list_a, list) and list_a and isinstance(list_a[0], list):
+        list_a = list_a[0]
+    if isinstance(set_a, list) and set_a and isinstance(set_a[0], list):
+        set_a = set_a[0]
+    assert sorted(list_a) == [1, 1, 2]
+    assert sorted(set_a) == [1, 2]
+    list_b = by_k["b"]["list_v"]
+    set_b = by_k["b"]["set_v"]
+    if isinstance(list_b, list) and list_b and isinstance(list_b[0], list):
+        list_b = list_b[0]
+    if isinstance(set_b, list) and set_b and isinstance(set_b[0], list):
+        set_b = set_b[0]
+    assert list_b == [10]
+    assert set_b == [10]
+
+
 def test_encode_decode_module_issue_307() -> None:
     """Module-level encode(column, charset) and decode(column, charset) (#307)."""
     import robin_sparkless as rs
