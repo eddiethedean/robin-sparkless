@@ -1335,8 +1335,21 @@ fn expr_from_fn_rest(name: &str, args: &[Value]) -> Result<Expr, PlanExprError> 
             Ok(dayofyear(&expr_to_column(arg_expr(args, 0)?)).into_expr())
         }
         "to_date" => {
-            require_args(name, args, 1)?;
-            Ok(to_date(&expr_to_column(arg_expr(args, 0)?)).into_expr())
+            require_args_min(name, args, 1)?;
+            if args.len() > 2 {
+                return Err(PlanExprError(format!(
+                    "fn '{name}' takes at most 2 argument(s)"
+                )));
+            }
+            let col = expr_to_column(arg_expr(args, 0)?);
+            let format_str = if args.len() == 2 {
+                Some(arg_lit_str(args, 1)?)
+            } else {
+                None
+            };
+            to_date(&col, format_str.as_deref())
+                .map_err(PlanExprError)
+                .map(|c| c.into_expr())
         }
         "date_format" => {
             require_args(name, args, 2)?;
