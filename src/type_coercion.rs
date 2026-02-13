@@ -92,6 +92,11 @@ fn is_numeric(dtype: &DataType) -> bool {
     )
 }
 
+/// Check if a DataType is date/datetime (temporal types that we can cast from string via try_cast).
+fn is_date_or_datetime(dtype: &DataType) -> bool {
+    matches!(dtype, DataType::Date | DataType::Datetime(_, _))
+}
+
 /// Coerce a column expression to a target type
 pub fn coerce_to_type(expr: Expr, target_type: DataType) -> Expr {
     expr.cast(target_type)
@@ -180,6 +185,40 @@ pub fn coerce_for_pyspark_comparison(
             right
         };
 
+        return Ok((left_out, right_out));
+    }
+
+    // Date/datetime vs string: cast string side to the temporal type (PySpark implicit cast).
+    fn wrap_try_to_temporal(expr: Expr, target: &DataType) -> Result<Expr, PolarsError> {
+        let col = Column::from_expr(expr, None);
+        let type_name = match target {
+            DataType::Date => "date",
+            DataType::Datetime(..) => "timestamp",
+            _ => {
+                return Err(PolarsError::ComputeError(
+                    "date or datetime type required".to_string().into(),
+                ));
+            }
+        };
+        let coerced = crate::functions::try_cast(&col, type_name)
+            .map_err(|e| PolarsError::ComputeError(e.into()))?;
+        Ok(coerced.into_expr())
+    }
+
+    let temporal_string = (is_date_or_datetime(left_type) && right_type == &DataType::String)
+        || (left_type == &DataType::String && is_date_or_datetime(right_type));
+
+    if temporal_string {
+        let left_out = if left_type == &DataType::String {
+            wrap_try_to_temporal(left, right_type)?
+        } else {
+            left
+        };
+        let right_out = if right_type == &DataType::String {
+            wrap_try_to_temporal(right, left_type)?
+        } else {
+            right
+        };
         return Ok((left_out, right_out));
     }
 
