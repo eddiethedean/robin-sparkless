@@ -1226,9 +1226,14 @@ impl Column {
         Self::from_expr(self.expr().clone().floor(), None)
     }
 
-    /// Round to given decimal places (PySpark round)
+    /// Round to given decimal places (PySpark round). Supports string columns containing
+    /// numeric values (implicit cast to double then round; parity with PySpark).
     pub fn round(&self, decimals: u32) -> Column {
-        Self::from_expr(self.expr().clone().round(decimals), None)
+        let expr = self.expr().clone().map(
+            move |s| crate::udfs::apply_round(s, decimals),
+            GetOutput::from_type(DataType::Float64),
+        );
+        Self::from_expr(expr, None)
     }
 
     /// Banker's rounding - round half to even (PySpark bround).
