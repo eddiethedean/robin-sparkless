@@ -20,10 +20,10 @@ use crate::functions::{
     regexp_replace, regexp_substr, repeat, replace as rs_replace, reverse, right, rint, rlike,
     rtrim, schema_of_csv, schema_of_json, sha1, sha2, signum, sin, sinh, soundex, split,
     split_part, startswith, substr, tan, tanh, timestamp_micros, timestamp_millis,
-    timestamp_seconds, timestampadd, timestampdiff, to_csv, to_degrees, to_radians, to_timestamp,
-    to_unix_timestamp, to_utc_timestamp, trim, try_cast as rs_try_cast, ucase, unbase64, unix_date,
-    unix_micros, unix_millis, unix_seconds, unix_timestamp, unix_timestamp_now, weekday,
-    weekofyear, year, years,
+    timestamp_seconds, timestampadd, timestampdiff, to_csv, to_date, to_degrees, to_radians,
+    to_timestamp, to_unix_timestamp, to_utc_timestamp, trim, try_cast as rs_try_cast, ucase,
+    unbase64, unix_date, unix_micros, unix_millis, unix_seconds, unix_timestamp,
+    unix_timestamp_now, weekday, weekofyear, year, years,
 };
 use crate::functions::{
     aggregate, array_agg, array_contains, array_join, array_max, array_min, array_position,
@@ -720,6 +720,7 @@ fn robin_sparkless(m: &Bound<'_, PyModule>) -> PyResult<()> {
         wrap_pyfunction!(py_current_timezone, m)?,
     )?;
     m.add("to_timestamp", wrap_pyfunction!(py_to_timestamp, m)?)?;
+    m.add("to_date", wrap_pyfunction!(py_to_date, m)?)?;
     m.add("isin", wrap_pyfunction!(py_isin, m)?)?;
     m.add("_isin_i64", wrap_pyfunction!(py_isin_i64, m)?)?;
     m.add("_isin_str", wrap_pyfunction!(py_isin_str, m)?)?;
@@ -1708,6 +1709,14 @@ fn py_current_timezone() -> PyColumn {
 #[pyo3(signature = (col, format=None))]
 fn py_to_timestamp(col: &PyColumn, format: Option<&str>) -> PyResult<PyColumn> {
     to_timestamp(&col.inner, format)
+        .map(|c| PyColumn { inner: c })
+        .map_err(|e| pyo3::exceptions::PyValueError::new_err(e))
+}
+
+#[pyfunction]
+#[pyo3(signature = (col, format=None))]
+fn py_to_date(col: &PyColumn, format: Option<&str>) -> PyResult<PyColumn> {
+    to_date(&col.inner, format)
         .map(|c| PyColumn { inner: c })
         .map_err(|e| pyo3::exceptions::PyValueError::new_err(e))
 }

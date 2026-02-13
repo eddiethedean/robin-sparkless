@@ -1952,6 +1952,33 @@ def test_last_day_module_issue_315() -> None:
     assert any("2023-12-31" in d for d in last_days)
 
 
+def test_to_date_module_issue_322() -> None:
+    """Module-level to_date(col, format=None) parses string to date (#322)."""
+    import robin_sparkless as rs
+
+    spark = rs.SparkSession.builder().app_name("test").get_or_create()
+    df = spark._create_dataframe_from_rows(
+        [
+            {"dt_str": "2024-01-15"},
+            {"dt_str": "2024-06-01"},
+        ],
+        [("dt_str", "string")],
+    )
+    out = df.with_column("dt", rs.to_date(rs.col("dt_str")))
+    rows = out.collect()
+    assert len(rows) == 2
+    assert rows[0]["dt"] is not None and "2024-01-15" in str(rows[0]["dt"])
+    assert rows[1]["dt"] is not None and "2024-06-01" in str(rows[1]["dt"])
+    # With format
+    df2 = spark._create_dataframe_from_rows(
+        [{"s": "15/01/2024"}],
+        [("s", "string")],
+    )
+    out2 = df2.with_column("d", rs.to_date(rs.col("s"), "dd/MM/yyyy"))
+    r = out2.collect()[0]
+    assert r["d"] is not None and "2024-01-15" in str(r["d"])
+
+
 def test_window_partition_by_order_by_accept_str_issue_288() -> None:
     import robin_sparkless as rs
 
