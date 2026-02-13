@@ -24,7 +24,7 @@ def test_posexplode_returns_two_columns() -> None:
     create_df = getattr(spark, "create_dataframe_from_rows", None) or getattr(
         spark, "_create_dataframe_from_rows"
     )
-    df = create_df(
+    _ = create_df(
         [{"Name": "Alice", "Values": [10, 20]}, {"Name": "Bob", "Values": [30, 40]}],
         [("Name", "string"), ("Values", "list")],
     )
