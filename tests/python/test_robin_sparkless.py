@@ -2201,6 +2201,25 @@ def test_corr_covar_pop_skewness_kurtosis_module_issue_311_312_321() -> None:
     assert by_k["a"]["kurt_x"] is not None
 
 
+def test_inline_inline_outer_module_issue_306() -> None:
+    """inline(column) and inline_outer(column) for array/array-of-structs (#306)."""
+    import robin_sparkless as rs
+
+    spark = rs.SparkSession.builder().app_name("test").get_or_create()
+    df = spark._create_dataframe_from_rows(
+        [{"k": "a", "arr": [1, 2]}, {"k": "b", "arr": None}],
+        [("k", "string"), ("arr", "array<bigint>")],
+    )
+    out = df.select(rs.inline(rs.col("arr")).alias("v"))
+    rows = out.collect()
+    assert len(rows) >= 2
+    assert all("v" in r for r in rows)
+    out_outer = df.select(rs.inline_outer(rs.col("arr")).alias("v"))
+    rows_outer = out_outer.collect()
+    assert len(rows_outer) >= 2
+    assert 1 in [r["v"] for r in rows_outer] or 2 in [r["v"] for r in rows_outer]
+
+
 def test_explode_outer_module_issue_305() -> None:
     """explode_outer(column) exists and returns column for list expand; null/empty -> row with null (#305)."""
     import robin_sparkless as rs
