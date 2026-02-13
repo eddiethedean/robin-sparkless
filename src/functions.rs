@@ -240,6 +240,16 @@ pub fn collect_set(col: &Column) -> Column {
     )
 }
 
+/// Boolean AND across group (PySpark bool_and). Use in groupBy.agg(); column should be boolean.
+pub fn bool_and(col: &Column) -> Column {
+    Column::from_expr(col.expr().clone().all(true), Some("bool_and".to_string()))
+}
+
+/// Alias for bool_and (PySpark every). Use in groupBy.agg().
+pub fn every(col: &Column) -> Column {
+    Column::from_expr(col.expr().clone().all(true), Some("every".to_string()))
+}
+
 /// Standard deviation (sample) aggregation (PySpark stddev / stddev_samp)
 pub fn stddev(col: &Column) -> Column {
     Column::from_expr(col.expr().clone().std(1), Some("stddev".to_string()))
