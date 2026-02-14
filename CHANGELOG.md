@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Planned
+
+- **Phase 26 – Publish crate**: Prepare and publish robin-sparkless to crates.io (and optionally PyPI via maturin). See [ROADMAP.md](docs/ROADMAP.md) for details.
+
+## [0.9.2] - 2026-02-14
+
 ### Added
 
 - **#347 – SQL support for CREATE SCHEMA / CREATE DATABASE (DDL)** — SQL parser and translator now support `CREATE SCHEMA name` and `CREATE DATABASE name`. Executing these DDL statements registers the schema/database name in session state. `SparkSession` exposes `databases` (catalog), `register_database()`, `list_database_names()`, and `database_exists()`. Python catalog `list_databases()` and `database_exists()` use this session state. Fixes #347.
@@ -14,10 +20,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - **Makefile** — `check-full` now runs `fmt` and `fmt-python` first; new `fmt-python` target formats Python code with ruff.
-
-### Planned
-
-- **Phase 26 – Publish crate**: Prepare and publish robin-sparkless to crates.io (and optionally PyPI via maturin). See [ROADMAP.md](docs/ROADMAP.md) for details.
 
 ## [0.9.1] - 2026-02-13
 
