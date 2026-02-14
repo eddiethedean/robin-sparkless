@@ -65,10 +65,18 @@ impl GroupedData {
         ))
     }
 
-    /// Average (mean) of a column in each group
-    pub fn avg(&self, column: &str) -> Result<DataFrame, PolarsError> {
+    /// Average (mean) of one or more columns in each group (PySpark: df.groupBy("x").avg("a", "b")).
+    pub fn avg(&self, columns: &[&str]) -> Result<DataFrame, PolarsError> {
+        if columns.is_empty() {
+            return Err(PolarsError::ComputeError(
+                "avg requires at least one column".into(),
+            ));
+        }
         use polars::prelude::*;
-        let agg_expr = vec![col(column).mean().alias(format!("avg({column})"))];
+        let agg_expr: Vec<Expr> = columns
+            .iter()
+            .map(|c| col(*c).mean().alias(format!("avg({c})")))
+            .collect();
         let lf = self.lazy_grouped.clone().agg(agg_expr);
         let mut pl_df = lf.collect()?;
         pl_df = reorder_groupby_columns(&mut pl_df, &self.grouping_cols)?;
