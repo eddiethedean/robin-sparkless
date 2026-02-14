@@ -11,6 +11,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Phase 26 – Publish crate**: Prepare and publish robin-sparkless to crates.io (and optionally PyPI via maturin). See [ROADMAP.md](docs/ROADMAP.md) for details.
 
+## [0.9.1] - 2026-02-13
+
+### Changed
+
+- Bugs and improvements audit: clippy/docs/parity fixes, documented TODOs, high-risk unwrap in session replaced, skip/expect_error fixtures documented in parity harness, new `filter_empty_result` fixture and parity support for empty expected rows.
+
 ## [0.9.0] - 2026-02-13
 
 ### Added

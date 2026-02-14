@@ -1,4 +1,5 @@
 //! Python DataFrame, GroupedData, DataFrameStat, DataFrameNa, DataFrameWriter (PySpark sql).
+#![allow(clippy::needless_return)] // many branches return Ok(...); clippy prefers trailing expr
 
 use crate::dataframe::JoinType;
 use crate::dataframe::{CubeRollupData, SaveMode, WriteFormat, WriteMode};
@@ -228,7 +229,7 @@ impl PyDataFrame {
             .inner
             .filter(expr)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
+        return Ok(PyDataFrame { inner: df });
     }
 
     /// Return a DataFrame with the specified columns or expressions.
@@ -254,6 +255,8 @@ impl PyDataFrame {
                 vec![first]
             }
         } else {
+            #[allow(clippy::map_clone)]
+            // Bound<'_, PyAny> from tuple iterator; clone needed for Vec
             cols.iter().map(|o| o.clone()).collect()
         };
         let mut exprs: Vec<Expr> = Vec::with_capacity(items.len());
@@ -278,7 +281,7 @@ impl PyDataFrame {
             .inner
             .select_exprs(exprs)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
+        return Ok(PyDataFrame { inner: df });
     }
 
     /// Add a new column or replace an existing one with the result of an expression.
@@ -297,7 +300,7 @@ impl PyDataFrame {
             .inner
             .with_column(column_name, &expr.inner)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
+        return Ok(PyDataFrame { inner: df });
     }
 
     /// Sort by column names or by SortOrder expressions (PySpark orderBy parity).
@@ -385,7 +388,7 @@ impl PyDataFrame {
             .inner
             .order_by_exprs(orders)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
+        return Ok(PyDataFrame { inner: df });
     }
 
     /// Group rows by the given columns for aggregation via ``GroupedData.agg()``, ``sum()``, etc.
@@ -459,7 +462,7 @@ impl PyDataFrame {
             .inner
             .agg(aggregations)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
+        return Ok(PyDataFrame { inner: df });
     }
 
     /// Return a DataFrameWriter to save the DataFrame (chain ``.mode()``, ``.format()``, then ``.save(path)``).
@@ -607,7 +610,7 @@ impl PyDataFrame {
             .inner
             .join(&other.inner, on_refs, join_type)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
+        return Ok(PyDataFrame { inner: df });
     }
 
     /// Concatenate rows of another DataFrame. Schemas must match in order and type.
@@ -625,7 +628,7 @@ impl PyDataFrame {
             .inner
             .union(&other.inner)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
+        return Ok(PyDataFrame { inner: df });
     }
 
     /// Concatenate rows of another DataFrame by matching column names (column order may differ).
@@ -648,7 +651,7 @@ impl PyDataFrame {
             .inner
             .union_by_name(&other.inner, allow_missing_columns)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
+        return Ok(PyDataFrame { inner: df });
     }
 
     /// Return rows with duplicates removed. Optionally consider only a subset of columns for uniqueness.
@@ -670,7 +673,7 @@ impl PyDataFrame {
             .inner
             .distinct(sub)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
+        return Ok(PyDataFrame { inner: df });
     }
 
     /// Return a DataFrame with the specified columns removed.
@@ -689,7 +692,7 @@ impl PyDataFrame {
             .inner
             .drop(refs)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
+        return Ok(PyDataFrame { inner: df });
     }
 
     /// Pivot (wide format). PySpark pivot. Stub: not yet implemented.
@@ -725,7 +728,7 @@ impl PyDataFrame {
             .inner
             .dropna(sub, how, thresh)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
+        return Ok(PyDataFrame { inner: df });
     }
 
     /// Replace null values. Value can be a scalar (int, float, bool, str) or a Column expression.
@@ -753,7 +756,7 @@ impl PyDataFrame {
             .inner
             .fillna(expr, sub)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
+        return Ok(PyDataFrame { inner: df });
     }
 
     /// Replace values in columns (PySpark replace). Where column equals to_replace, use value.
@@ -787,7 +790,7 @@ impl PyDataFrame {
                 .replace(col_name.as_str(), old_expr.clone(), new_expr.clone())
                 .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
         }
-        Ok(PyDataFrame { inner: df })
+        return Ok(PyDataFrame { inner: df });
     }
 
     /// Return a DataFrame with at most the first n rows.
@@ -805,7 +808,7 @@ impl PyDataFrame {
             .inner
             .limit(n)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
+        return Ok(PyDataFrame { inner: df });
     }
 
     /// Return a DataFrame with one column renamed.
@@ -824,7 +827,7 @@ impl PyDataFrame {
             .inner
             .with_column_renamed(old, new)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
+        return Ok(PyDataFrame { inner: df });
     }
 
     /// Return a DataFrame with a random sample of rows.
@@ -850,7 +853,7 @@ impl PyDataFrame {
             .inner
             .sample(with_replacement, fraction, seed)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
+        return Ok(PyDataFrame { inner: df });
     }
 
     /// Return the first row as a single-row DataFrame. Equivalent to ``head(1)``.
@@ -865,7 +868,7 @@ impl PyDataFrame {
             .inner
             .first()
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
+        return Ok(PyDataFrame { inner: df });
     }
 
     /// Return the first n rows.
@@ -883,7 +886,7 @@ impl PyDataFrame {
             .inner
             .head(n)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
+        return Ok(PyDataFrame { inner: df });
     }
 
     /// Return the last n rows. Requires evaluating the full dataset to determine order.
@@ -901,7 +904,7 @@ impl PyDataFrame {
             .inner
             .tail(n)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
+        return Ok(PyDataFrame { inner: df });
     }
 
     /// Return the first n rows. Alias for ``head(n)``.
@@ -967,7 +970,7 @@ impl PyDataFrame {
             .inner
             .checkpoint()
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
+        return Ok(PyDataFrame { inner: df });
     }
 
     /// Local checkpoint (same process).
@@ -976,7 +979,7 @@ impl PyDataFrame {
             .inner
             .local_checkpoint()
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
+        return Ok(PyDataFrame { inner: df });
     }
 
     /// Repartition into num_partitions (logical; may not change physical layout in Sparkless).
@@ -985,7 +988,7 @@ impl PyDataFrame {
             .inner
             .repartition(num_partitions)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
+        return Ok(PyDataFrame { inner: df });
     }
 
     /// Coalesce to fewer partitions.
@@ -994,7 +997,7 @@ impl PyDataFrame {
             .inner
             .coalesce(num_partitions)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
+        return Ok(PyDataFrame { inner: df });
     }
 
     /// Skip the first n rows.
@@ -1003,7 +1006,7 @@ impl PyDataFrame {
             .inner
             .offset(n)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
+        return Ok(PyDataFrame { inner: df });
     }
 
     /// Best-effort local collection: returns list of rows (same as collect()). PySpark .data.
@@ -1017,7 +1020,7 @@ impl PyDataFrame {
             .inner
             .persist()
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
+        return Ok(PyDataFrame { inner: df });
     }
 
     /// Unpersist (no-op in Sparkless; returns self).
@@ -1026,7 +1029,7 @@ impl PyDataFrame {
             .inner
             .unpersist()
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
+        return Ok(PyDataFrame { inner: df });
     }
 
     /// No-op: query planner hint. Returns self for chaining.
@@ -1035,7 +1038,7 @@ impl PyDataFrame {
             .inner
             .hint(_name, &_params)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
+        return Ok(PyDataFrame { inner: df });
     }
 
     /// No-op: Polars has no range partitioning. Returns self.
@@ -1051,7 +1054,7 @@ impl PyDataFrame {
             .inner
             .repartition_by_range(num_partitions, refs)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
+        return Ok(PyDataFrame { inner: df });
     }
 
     /// No-op: same as orderBy for compatibility. Returns self.
@@ -1064,7 +1067,7 @@ impl PyDataFrame {
             .inner
             .sort_within_partitions(&sorts)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
+        return Ok(PyDataFrame { inner: df });
     }
 
     /// No-op: returns False (semantic comparison not implemented).
@@ -1092,7 +1095,7 @@ impl PyDataFrame {
             .inner
             .cache()
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
+        return Ok(PyDataFrame { inner: df });
     }
 
     /// Always True (eager single-node execution).
@@ -1197,7 +1200,7 @@ impl PyDataFrame {
             .inner
             .summary()
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
+        return Ok(PyDataFrame { inner: df });
     }
 
     /// Rename all columns to the given names (e.g. after toDF in Scala).
@@ -1208,7 +1211,7 @@ impl PyDataFrame {
             .inner
             .to_df(refs)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
+        return Ok(PyDataFrame { inner: df });
     }
 
     /// Alias for toDF (snake_case). PySpark df.to_df(*cols).
@@ -1219,7 +1222,7 @@ impl PyDataFrame {
             .inner
             .to_df(refs)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
+        return Ok(PyDataFrame { inner: df });
     }
 
     /// Select using SQL-like expression strings.
@@ -1228,7 +1231,7 @@ impl PyDataFrame {
             .inner
             .select_expr(&exprs)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
+        return Ok(PyDataFrame { inner: df });
     }
 
     /// Select columns whose names match the regex pattern.
@@ -1237,7 +1240,7 @@ impl PyDataFrame {
             .inner
             .col_regex(pattern)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
+        return Ok(PyDataFrame { inner: df });
     }
 
     /// Add or replace multiple columns (dict[name, Column] or list of (name, Column)).
@@ -1263,7 +1266,7 @@ impl PyDataFrame {
             .inner
             .with_columns(&exprs)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
+        return Ok(PyDataFrame { inner: df });
     }
 
     /// Rename columns (dict[old, new] or list of (old, new)).
@@ -1292,7 +1295,7 @@ impl PyDataFrame {
             .inner
             .with_columns_renamed(&renames)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
+        return Ok(PyDataFrame { inner: df });
     }
 
     /// Return a DataFrameStat for covariance, correlation, and correlation matrix.
@@ -1420,7 +1423,7 @@ impl PyDataFrameStat {
             .stat()
             .corr_matrix()
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
+        return Ok(PyDataFrame { inner: df });
     }
 }
 
@@ -1451,7 +1454,7 @@ impl PyDataFrameNa {
             .na()
             .fill(expr, sub)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
+        return Ok(PyDataFrame { inner: df });
     }
 
     /// Drop rows with nulls. PySpark na.drop(subset=..., how=..., thresh=...).
@@ -1478,7 +1481,7 @@ impl PyDataFrameNa {
             .na()
             .drop(sub, how, thresh)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
+        return Ok(PyDataFrame { inner: df });
     }
 }
 
@@ -1502,7 +1505,7 @@ impl PyGroupedData {
             .inner
             .count()
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
+        return Ok(PyDataFrame { inner: df });
     }
 
     /// Return a DataFrame with one row per group and the sum of the given column.
@@ -1517,7 +1520,7 @@ impl PyGroupedData {
             .inner
             .sum(column)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
+        return Ok(PyDataFrame { inner: df });
     }
 
     /// Return a DataFrame with one row per group and the mean of the given column.
@@ -1532,7 +1535,7 @@ impl PyGroupedData {
             .inner
             .avg(column)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
+        return Ok(PyDataFrame { inner: df });
     }
 
     /// Return a DataFrame with one row per group and the minimum of the given column.
@@ -1548,7 +1551,7 @@ impl PyGroupedData {
             .inner
             .min(column)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
+        return Ok(PyDataFrame { inner: df });
     }
 
     /// Return a DataFrame with one row per group and the maximum of the given column.
@@ -1563,7 +1566,7 @@ impl PyGroupedData {
             .inner
             .max(column)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
+        return Ok(PyDataFrame { inner: df });
     }
 
     /// Aggregate groups with one or more expressions (e.g. sum(col("x")), avg(col("y"))).
@@ -1660,7 +1663,7 @@ impl PyGroupedData {
                 &session,
             )
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-            return Ok(PyDataFrame { inner: df });
+            Ok(PyDataFrame { inner: df })
         }
 
         #[cfg(not(feature = "pyo3"))]
@@ -1670,7 +1673,7 @@ impl PyGroupedData {
                 .inner
                 .agg(aggregations)
                 .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-            Ok(PyDataFrame { inner: df })
+            return Ok(PyDataFrame { inner: df });
         }
     }
 
@@ -1679,7 +1682,7 @@ impl PyGroupedData {
             .inner
             .any_value(column)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
+        return Ok(PyDataFrame { inner: df });
     }
 
     fn bool_and(&self, column: &str) -> PyResult<PyDataFrame> {
@@ -1687,7 +1690,7 @@ impl PyGroupedData {
             .inner
             .bool_and(column)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
+        return Ok(PyDataFrame { inner: df });
     }
 
     fn bool_or(&self, column: &str) -> PyResult<PyDataFrame> {
@@ -1695,7 +1698,7 @@ impl PyGroupedData {
             .inner
             .bool_or(column)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
+        return Ok(PyDataFrame { inner: df });
     }
 
     fn product(&self, column: &str) -> PyResult<PyDataFrame> {
@@ -1703,7 +1706,7 @@ impl PyGroupedData {
             .inner
             .product(column)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
+        return Ok(PyDataFrame { inner: df });
     }
 
     fn collect_list(&self, column: &str) -> PyResult<PyDataFrame> {
@@ -1711,7 +1714,7 @@ impl PyGroupedData {
             .inner
             .collect_list(column)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
+        return Ok(PyDataFrame { inner: df });
     }
 
     fn collect_set(&self, column: &str) -> PyResult<PyDataFrame> {
@@ -1719,7 +1722,7 @@ impl PyGroupedData {
             .inner
             .collect_set(column)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
+        return Ok(PyDataFrame { inner: df });
     }
 
     fn count_if(&self, column: &str) -> PyResult<PyDataFrame> {
@@ -1727,7 +1730,7 @@ impl PyGroupedData {
             .inner
             .count_if(column)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
+        return Ok(PyDataFrame { inner: df });
     }
 
     fn percentile(&self, column: &str, p: f64) -> PyResult<PyDataFrame> {
@@ -1735,7 +1738,7 @@ impl PyGroupedData {
             .inner
             .percentile(column, p)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
+        return Ok(PyDataFrame { inner: df });
     }
 
     fn max_by(&self, value_column: &str, ord_column: &str) -> PyResult<PyDataFrame> {
@@ -1743,7 +1746,7 @@ impl PyGroupedData {
             .inner
             .max_by(value_column, ord_column)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
+        return Ok(PyDataFrame { inner: df });
     }
 
     fn min_by(&self, value_column: &str, ord_column: &str) -> PyResult<PyDataFrame> {
@@ -1751,7 +1754,7 @@ impl PyGroupedData {
             .inner
             .min_by(value_column, ord_column)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
+        return Ok(PyDataFrame { inner: df });
     }
 
     fn covar_pop(&self, col1: &str, col2: &str) -> PyResult<PyDataFrame> {
@@ -1759,7 +1762,7 @@ impl PyGroupedData {
             .inner
             .covar_pop(col1, col2)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
+        return Ok(PyDataFrame { inner: df });
     }
 
     fn covar_samp(&self, col1: &str, col2: &str) -> PyResult<PyDataFrame> {
@@ -1767,7 +1770,7 @@ impl PyGroupedData {
             .inner
             .covar_samp(col1, col2)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
+        return Ok(PyDataFrame { inner: df });
     }
 
     fn corr(&self, col1: &str, col2: &str) -> PyResult<PyDataFrame> {
@@ -1775,7 +1778,7 @@ impl PyGroupedData {
             .inner
             .corr(col1, col2)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
+        return Ok(PyDataFrame { inner: df });
     }
 
     fn regr_count(&self, y_col: &str, x_col: &str) -> PyResult<PyDataFrame> {
@@ -1783,7 +1786,7 @@ impl PyGroupedData {
             .inner
             .regr_count(y_col, x_col)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
+        return Ok(PyDataFrame { inner: df });
     }
 
     fn regr_avgx(&self, y_col: &str, x_col: &str) -> PyResult<PyDataFrame> {
@@ -1791,7 +1794,7 @@ impl PyGroupedData {
             .inner
             .regr_avgx(y_col, x_col)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
+        return Ok(PyDataFrame { inner: df });
     }
 
     fn regr_avgy(&self, y_col: &str, x_col: &str) -> PyResult<PyDataFrame> {
@@ -1799,7 +1802,7 @@ impl PyGroupedData {
             .inner
             .regr_avgy(y_col, x_col)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
+        return Ok(PyDataFrame { inner: df });
     }
 
     fn regr_slope(&self, y_col: &str, x_col: &str) -> PyResult<PyDataFrame> {
@@ -1807,7 +1810,7 @@ impl PyGroupedData {
             .inner
             .regr_slope(y_col, x_col)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
+        return Ok(PyDataFrame { inner: df });
     }
 
     fn regr_intercept(&self, y_col: &str, x_col: &str) -> PyResult<PyDataFrame> {
@@ -1815,7 +1818,7 @@ impl PyGroupedData {
             .inner
             .regr_intercept(y_col, x_col)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
+        return Ok(PyDataFrame { inner: df });
     }
 
     fn regr_r2(&self, y_col: &str, x_col: &str) -> PyResult<PyDataFrame> {
@@ -1823,7 +1826,7 @@ impl PyGroupedData {
             .inner
             .regr_r2(y_col, x_col)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
+        return Ok(PyDataFrame { inner: df });
     }
 
     fn regr_sxx(&self, y_col: &str, x_col: &str) -> PyResult<PyDataFrame> {
@@ -1831,7 +1834,7 @@ impl PyGroupedData {
             .inner
             .regr_sxx(y_col, x_col)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
+        return Ok(PyDataFrame { inner: df });
     }
 
     fn regr_syy(&self, y_col: &str, x_col: &str) -> PyResult<PyDataFrame> {
@@ -1839,7 +1842,7 @@ impl PyGroupedData {
             .inner
             .regr_syy(y_col, x_col)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
+        return Ok(PyDataFrame { inner: df });
     }
 
     fn regr_sxy(&self, y_col: &str, x_col: &str) -> PyResult<PyDataFrame> {
@@ -1847,7 +1850,7 @@ impl PyGroupedData {
             .inner
             .regr_sxy(y_col, x_col)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
+        return Ok(PyDataFrame { inner: df });
     }
 
     fn kurtosis(&self, column: &str) -> PyResult<PyDataFrame> {
@@ -1855,7 +1858,7 @@ impl PyGroupedData {
             .inner
             .kurtosis(column)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
+        return Ok(PyDataFrame { inner: df });
     }
 
     fn skewness(&self, column: &str) -> PyResult<PyDataFrame> {
@@ -1863,7 +1866,7 @@ impl PyGroupedData {
             .inner
             .skewness(column)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
+        return Ok(PyDataFrame { inner: df });
     }
 }
 
@@ -1891,7 +1894,7 @@ impl PyCubeRollupData {
             .inner
             .agg(aggregations)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
+        return Ok(PyDataFrame { inner: df });
     }
 }
 

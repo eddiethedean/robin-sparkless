@@ -26,7 +26,7 @@ fn dtype_to_precedence(dtype: &DataType) -> Option<TypePrecedence> {
         DataType::Float32 => Some(TypePrecedence::Float),
         DataType::Float64 => Some(TypePrecedence::Double),
         DataType::String => Some(TypePrecedence::String),
-        // TODO: Add Decimal type when available
+        // Decimal: add when Polars exposes Decimal in public API / dtype set we use
         _ => None,
     }
 }

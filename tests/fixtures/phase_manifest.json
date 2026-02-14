@@ -60,6 +60,7 @@
   ],
   "phase_g": [
     "filter_age_lt_25",
+    "filter_empty_result",
     "filter_name_eq",
     "select_single_column",
     "select_three_columns",

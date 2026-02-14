@@ -1,4 +1,7 @@
 //! Python UDF execution: row-at-a-time call into user Python functions.
+//! TODO: migrate from IntoPy::into_py to IntoPyObject when upgrading pyo3 (see pyo3.rs migration guide).
+
+#![allow(deprecated)]
 
 use crate::column::Column as RsColumn;
 use crate::dataframe::DataFrame;
@@ -455,7 +458,7 @@ fn py_result_to_series(
         .map(|opt| {
             opt.as_ref()
                 .map(|obj| {
-                    let bound = obj.clone().bind(py);
+                    let bound = obj.bind(py);
                     if bound.is_none() {
                         return Ok(serde_json::Value::Null);
                     }

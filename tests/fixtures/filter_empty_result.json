@@ -1,0 +1,1 @@
+{"name":"filter_empty_result","pyspark_version":"3.5.0","input":{"schema":[{"name":"id","type":"bigint"},{"name":"age","type":"bigint"}],"rows":[[1,25],[2,30],[3,35]]},"operations":[{"op":"filter","expr":"col('age') < 0"},{"op":"orderBy","columns":["id"],"ascending":[true]}],"expected":{"schema":[{"name":"id","type":"bigint"},{"name":"age","type":"bigint"}],"rows":[]}}
