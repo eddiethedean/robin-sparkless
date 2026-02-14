@@ -179,6 +179,29 @@ mod tests {
 
     /// Case-insensitive column resolution (PySpark default; issue #194).
     #[test]
+    fn test_sql_create_schema_ddl() {
+        let spark = SparkSession::builder().app_name("test").get_or_create();
+        // CREATE SCHEMA persists name; returns empty DataFrame (issue #347).
+        let out = spark.sql("CREATE SCHEMA my_schema").unwrap();
+        assert_eq!(out.count().unwrap(), 0);
+        assert!(out.columns().unwrap().is_empty());
+        assert!(spark.database_exists("my_schema"));
+        assert!(spark
+            .list_database_names()
+            .contains(&"my_schema".to_string()));
+    }
+
+    #[test]
+    fn test_sql_create_database_ddl() {
+        let spark = SparkSession::builder().app_name("test").get_or_create();
+        let out = spark.sql("CREATE DATABASE my_db").unwrap();
+        assert_eq!(out.count().unwrap(), 0);
+        assert!(out.columns().unwrap().is_empty());
+        assert!(spark.database_exists("my_db"));
+        assert!(spark.list_database_names().contains(&"my_db".to_string()));
+    }
+
+    #[test]
     fn test_sql_case_insensitive_columns() {
         let spark = SparkSession::builder().app_name("test").get_or_create();
         let df = spark
