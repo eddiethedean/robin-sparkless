@@ -1708,6 +1708,29 @@ def test_coalesce_variadic_issue_345() -> None:
     assert rows[3]["c"] == "default"
 
 
+def test_groupeddata_avg_multiple_columns_issue_346() -> None:
+    """GroupedData.avg() accepts multiple column names (PySpark parity, issue #346)."""
+    import robin_sparkless as rs
+
+    spark = rs.SparkSession.builder().app_name("test").get_or_create()
+    df = spark._create_dataframe_from_rows(
+        [
+            ["A", 100.0, 10.0],
+            ["A", 200.0, 20.0],
+            ["B", 150.0, 15.0],
+        ],
+        [("dept", "string"), ("salary", "double"), ("bonus", "double")],
+    )
+    out = df.group_by(["dept"]).avg("salary", "bonus")
+    rows = out.collect()
+    assert len(rows) == 2
+    by_dept = {r["dept"]: r for r in rows}
+    assert by_dept["A"]["avg(salary)"] == 150.0
+    assert by_dept["A"]["avg(bonus)"] == 15.0
+    assert by_dept["B"]["avg(salary)"] == 150.0
+    assert by_dept["B"]["avg(bonus)"] == 15.0
+
+
 def test_phase_d_dataframe_methods() -> None:
     """Phase D: df.createOrReplaceTempView, corr/cov, toDF, columns, etc."""
     import robin_sparkless as rs
