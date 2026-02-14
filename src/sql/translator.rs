@@ -21,8 +21,17 @@ pub fn translate(
     set_thread_udf_session(session.clone());
     match stmt {
         Statement::Query(q) => translate_query(session, q.as_ref()),
-        Statement::CreateSchema { .. } | Statement::CreateDatabase { .. } => {
-            // DDL: no-op for local execution (PySpark parity: CREATE SCHEMA/DATABASE succeed, no result set).
+        Statement::CreateSchema { schema_name, .. } => {
+            let name = schema_name.to_string();
+            session.register_database(&name);
+            Ok(DataFrame::from_polars_with_options(
+                PlDataFrame::empty(),
+                session.is_case_sensitive(),
+            ))
+        }
+        Statement::CreateDatabase { db_name, .. } => {
+            let name = db_name.to_string();
+            session.register_database(&name);
             Ok(DataFrame::from_polars_with_options(
                 PlDataFrame::empty(),
                 session.is_case_sensitive(),

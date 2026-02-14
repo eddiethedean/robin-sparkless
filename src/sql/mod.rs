@@ -181,10 +181,14 @@ mod tests {
     #[test]
     fn test_sql_create_schema_ddl() {
         let spark = SparkSession::builder().app_name("test").get_or_create();
-        // CREATE SCHEMA / CREATE DATABASE are no-ops; return empty DataFrame (issue #347).
+        // CREATE SCHEMA persists name; returns empty DataFrame (issue #347).
         let out = spark.sql("CREATE SCHEMA my_schema").unwrap();
         assert_eq!(out.count().unwrap(), 0);
         assert!(out.columns().unwrap().is_empty());
+        assert!(spark.database_exists("my_schema"));
+        assert!(spark
+            .list_database_names()
+            .contains(&"my_schema".to_string()));
     }
 
     #[test]
@@ -193,6 +197,8 @@ mod tests {
         let out = spark.sql("CREATE DATABASE my_db").unwrap();
         assert_eq!(out.count().unwrap(), 0);
         assert!(out.columns().unwrap().is_empty());
+        assert!(spark.database_exists("my_db"));
+        assert!(spark.list_database_names().contains(&"my_db".to_string()));
     }
 
     #[test]

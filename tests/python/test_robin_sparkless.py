@@ -2508,7 +2508,7 @@ def test_sql_select_where_returns_rows() -> None:
 
 
 def test_sql_create_schema_database_issue_347() -> None:
-    """SQL CREATE SCHEMA / CREATE DATABASE (DDL) are accepted and return empty DataFrame (issue #347)."""
+    """SQL CREATE SCHEMA / CREATE DATABASE (DDL) are accepted, persist, and return empty DataFrame (issue #347)."""
     import robin_sparkless as rs
 
     spark = rs.SparkSession.builder().app_name("test").get_or_create()
@@ -2519,6 +2519,14 @@ def test_sql_create_schema_database_issue_347() -> None:
         out2 = spark.sql("CREATE DATABASE my_db")
         assert out2.count() == 0
         assert out2.columns() == []
+        # Persistence: created names appear in catalog.listDatabases() and databaseExists()
+        cat = spark.catalog()
+        dbs = set(cat.listDatabases(None))
+        assert "default" in dbs and "global_temp" in dbs
+        assert "my_schema" in dbs
+        assert "my_db" in dbs
+        assert cat.databaseExists("my_schema") is True
+        assert cat.databaseExists("my_db") is True
     except (AttributeError, RuntimeError) as e:
         if "requires the 'sql' feature" in str(e):
             pytest.skip("sql feature not built")

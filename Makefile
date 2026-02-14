@@ -1,4 +1,4 @@
-.PHONY: build test test-rust test-python sparkless-parity pyspark-parity extract-pyspark-tests extract-pyspark-tests-expanded batch-regenerate-extracted test-parity-phase-a test-parity-phase-b test-parity-phase-c test-parity-phase-d test-parity-phase-e test-parity-phase-f test-parity-phase-g test-parity-phases bench-python clean check check-full fmt fmt-check clippy audit outdated deny lint-python all gap-analysis gap-analysis-quick gap-analysis-runtime
+.PHONY: build test test-rust test-python sparkless-parity pyspark-parity extract-pyspark-tests extract-pyspark-tests-expanded batch-regenerate-extracted test-parity-phase-a test-parity-phase-b test-parity-phase-c test-parity-phase-d test-parity-phase-e test-parity-phase-f test-parity-phase-g test-parity-phases bench-python clean check check-full fmt fmt-python fmt-check clippy audit outdated deny lint-python all gap-analysis gap-analysis-quick gap-analysis-runtime
 
 # Use stable toolchain when no default is configured (override with RUSTUP_TOOLCHAIN=nightly etc.)
 export RUSTUP_TOOLCHAIN ?= stable
@@ -89,15 +89,21 @@ test-parity-phases: test-parity-phase-a test-parity-phase-b test-parity-phase-c 
 check: fmt-check clippy audit deny test-rust
 	@echo "All checks passed"
 
-# Run full check: Rust checks + Python lint (ruff, mypy) + Python tests (builds PyO3 extension).
-# Run with -j3 to run Rust checks, lint-python, and test-python in parallel: make -j3 check-full
-check-full: check lint-python test-python
+# Run full check: format first (so format issues don't fail the rest), then Rust checks + Python lint + Python tests.
+# Run with -j3 to run check, lint-python, and test-python in parallel: make -j3 check-full
+check-full: fmt fmt-python check lint-python test-python
 	@echo "All checks including Python passed"
 
 # Format code
 fmt:
 	cargo fmt
 	@echo "Formatted"
+
+# Format Python (ruff format). Ensures .venv and ruff so check-full can fix format before lint.
+fmt-python:
+	@if [ ! -d .venv ]; then python3 -m venv .venv; fi
+	. .venv/bin/activate && pip install -q ruff && ruff format .
+	@echo "Python formatted"
 
 # Check format without modifying
 fmt-check:

@@ -10,7 +10,11 @@ pub fn parse_sql(query: &str) -> Result<Statement, PolarsError> {
     let dialect = GenericDialect {};
     let stmts = Parser::parse_sql(&dialect, query).map_err(|e| {
         PolarsError::InvalidOperation(
-            format!("SQL parse error: {}. Hint: only SELECT and CREATE SCHEMA/DATABASE are supported.", e).into(),
+            format!(
+                "SQL parse error: {}. Hint: only SELECT and CREATE SCHEMA/DATABASE are supported.",
+                e
+            )
+            .into(),
         )
     })?;
     if stmts.len() != 1 {
