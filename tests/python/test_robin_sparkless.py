@@ -2507,6 +2507,24 @@ def test_sql_select_where_returns_rows() -> None:
     assert rows[0]["name"] == "b" and rows[1]["name"] == "c"
 
 
+def test_sql_create_schema_database_issue_347() -> None:
+    """SQL CREATE SCHEMA / CREATE DATABASE (DDL) are accepted and return empty DataFrame (issue #347)."""
+    import robin_sparkless as rs
+
+    spark = rs.SparkSession.builder().app_name("test").get_or_create()
+    try:
+        out = spark.sql("CREATE SCHEMA my_schema")
+        assert out.count() == 0
+        assert out.columns() == []
+        out2 = spark.sql("CREATE DATABASE my_db")
+        assert out2.count() == 0
+        assert out2.columns() == []
+    except (AttributeError, RuntimeError) as e:
+        if "requires the 'sql' feature" in str(e):
+            pytest.skip("sql feature not built")
+        raise
+
+
 def test_python_udf_register_and_call() -> None:
     """Python UDF: register, use in DataFrame with_column and call_udf (PySpark parity)."""
     import robin_sparkless as rs

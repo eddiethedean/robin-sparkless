@@ -5,31 +5,31 @@ use sqlparser::ast::Statement;
 use sqlparser::dialect::GenericDialect;
 use sqlparser::parser::Parser;
 
-/// Parse a single SQL statement (expects SELECT only).
+/// Parse a single SQL statement (SELECT or DDL: CREATE SCHEMA / CREATE DATABASE).
 pub fn parse_sql(query: &str) -> Result<Statement, PolarsError> {
     let dialect = GenericDialect {};
     let stmts = Parser::parse_sql(&dialect, query).map_err(|e| {
         PolarsError::InvalidOperation(
-            format!("SQL parse error: {}. Hint: only SELECT is supported.", e).into(),
+            format!("SQL parse error: {}. Hint: only SELECT and CREATE SCHEMA/DATABASE are supported.", e).into(),
         )
     })?;
     if stmts.len() != 1 {
         return Err(PolarsError::InvalidOperation(
             format!(
-                "SQL: expected exactly one statement, got {}. Hint: run one SELECT at a time.",
+                "SQL: expected exactly one statement, got {}. Hint: run one statement at a time.",
                 stmts.len()
             )
             .into(),
         ));
     }
-    // Length check above guarantees exactly one element.
     let stmt = stmts.into_iter().next().unwrap();
     match &stmt {
         Statement::Query(_) => {}
+        Statement::CreateSchema { .. } | Statement::CreateDatabase { .. } => {}
         _ => {
             return Err(PolarsError::InvalidOperation(
                 format!(
-                    "SQL: only SELECT is supported, got {:?}. Hint: use SELECT ... FROM ...",
+                    "SQL: only SELECT and CREATE SCHEMA/DATABASE are supported, got {:?}.",
                     stmt
                 )
                 .into(),

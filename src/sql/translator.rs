@@ -5,28 +5,33 @@ use crate::column::Column;
 use crate::dataframe::{join, DataFrame, JoinType};
 use crate::functions;
 use crate::session::{set_thread_udf_session, SparkSession};
-use polars::prelude::{col, lit, Expr, PolarsError};
+use polars::prelude::{col, lit, DataFrame as PlDataFrame, Expr, PolarsError};
 use sqlparser::ast::{
     BinaryOperator, Expr as SqlExpr, Function, FunctionArg, FunctionArgExpr, GroupByExpr,
     JoinConstraint, JoinOperator, Query, Select, SelectItem, SetExpr, Statement, TableFactor,
     Value,
 };
 
-/// Translate a parsed Statement (must be Query) into a DataFrame using the session catalog.
+/// Translate a parsed Statement (Query or DDL) into a DataFrame using the session catalog.
+/// CREATE SCHEMA / CREATE DATABASE are accepted as no-ops and return an empty DataFrame.
 pub fn translate(
     session: &SparkSession,
     stmt: &Statement,
 ) -> Result<crate::dataframe::DataFrame, PolarsError> {
     set_thread_udf_session(session.clone());
-    let query = match stmt {
-        Statement::Query(q) => q.as_ref(),
-        _ => {
-            return Err(PolarsError::InvalidOperation(
-                "SQL: only SELECT queries are supported.".into(),
-            ));
+    match stmt {
+        Statement::Query(q) => translate_query(session, q.as_ref()),
+        Statement::CreateSchema { .. } | Statement::CreateDatabase { .. } => {
+            // DDL: no-op for local execution (PySpark parity: CREATE SCHEMA/DATABASE succeed, no result set).
+            Ok(DataFrame::from_polars_with_options(
+                PlDataFrame::empty(),
+                session.is_case_sensitive(),
+            ))
         }
-    };
-    translate_query(session, query)
+        _ => Err(PolarsError::InvalidOperation(
+            "SQL: only SELECT and CREATE SCHEMA/DATABASE are supported.".into(),
+        )),
+    }
 }
 
 fn translate_query(
