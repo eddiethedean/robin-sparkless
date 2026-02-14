@@ -1688,6 +1688,26 @@ def test_phase_f_behavioral() -> None:
         df3.with_column("_err", rs.raise_error(rs.col("msg"))).collect()
 
 
+def test_coalesce_variadic_issue_345() -> None:
+    """Coalesce accepts multiple arguments (variadic), PySpark parity (issue #345)."""
+    import robin_sparkless as rs
+
+    spark = rs.SparkSession.builder().app_name("test").get_or_create()
+    df = spark._create_dataframe_from_rows(
+        [[1, "A", "X"], [2, None, "Y"], [3, "C", None], [4, None, None]],
+        [("id", "bigint"), ("col1", "string"), ("col2", "string")],
+    )
+    out = df.with_column(
+        "c",
+        rs.coalesce(rs.col("col1"), rs.col("col2"), rs.lit("default")),
+    )
+    rows = out.collect()
+    assert rows[0]["c"] == "A"
+    assert rows[1]["c"] == "Y"
+    assert rows[2]["c"] == "C"
+    assert rows[3]["c"] == "default"
+
+
 def test_phase_d_dataframe_methods() -> None:
     """Phase D: df.createOrReplaceTempView, corr/cov, toDF, columns, etc."""
     import robin_sparkless as rs
