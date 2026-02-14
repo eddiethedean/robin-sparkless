@@ -704,8 +704,8 @@ impl PyCatalog {
     }
 
     #[pyo3(name = "listDatabases")]
-    fn list_databases(&self, _pattern: Option<&str>) -> Vec<&'static str> {
-        vec!["default", "global_temp"]
+    fn list_databases(&self, _pattern: Option<&str>) -> Vec<String> {
+        self.session.list_database_names()
     }
 
     #[pyo3(name = "listCatalogs")]
@@ -790,7 +790,7 @@ impl PyCatalog {
 
     #[pyo3(name = "databaseExists")]
     fn database_exists(&self, db_name: &str) -> bool {
-        db_name.eq_ignore_ascii_case("default") || db_name.eq_ignore_ascii_case("global_temp")
+        self.session.database_exists(db_name)
     }
 
     #[pyo3(name = "functionExists")]

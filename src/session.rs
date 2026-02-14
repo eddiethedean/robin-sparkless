@@ -299,7 +299,7 @@ fn json_object_or_array_to_struct_series(
     Ok(Some(st))
 }
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::thread_local;
@@ -380,6 +380,9 @@ pub type TempViewCatalog = Arc<Mutex<HashMap<String, DataFrame>>>;
 /// Catalog of saved table names to DataFrames (session-scoped). Used by saveAsTable.
 pub type TableCatalog = Arc<Mutex<HashMap<String, DataFrame>>>;
 
+/// Names of databases/schemas created via CREATE DATABASE / CREATE SCHEMA (session-scoped). Persisted when SQL DDL runs.
+pub type DatabaseCatalog = Arc<Mutex<HashSet<String>>>;
+
 /// Main entry point for creating DataFrames and executing queries
 /// Similar to PySpark's SparkSession but using Polars as the backend
 #[derive(Clone)]
@@ -391,6 +394,8 @@ pub struct SparkSession {
     pub(crate) catalog: TempViewCatalog,
     /// Saved tables (saveAsTable): name -> DataFrame. Session-scoped; separate namespace from temp views.
     pub(crate) tables: TableCatalog,
+    /// Databases/schemas created via CREATE DATABASE / CREATE SCHEMA. Session-scoped; used by listDatabases/databaseExists.
+    pub(crate) databases: DatabaseCatalog,
     /// UDF registry: Rust and Python UDFs. Session-scoped.
     pub(crate) udf_registry: UdfRegistry,
     /// Python UDF execution batch size for vectorized UDFs (non-grouped). usize::MAX = no chunking.
@@ -424,6 +429,7 @@ impl SparkSession {
             config,
             catalog: Arc::new(Mutex::new(HashMap::new())),
             tables: Arc::new(Mutex::new(HashMap::new())),
+            databases: Arc::new(Mutex::new(HashSet::new())),
             udf_registry: UdfRegistry::new(),
             #[cfg(feature = "pyo3")]
             python_udf_batch_size: batch_size,
@@ -475,6 +481,35 @@ impl SparkSession {
             .tables
             .lock()
             .map(|mut m| m.insert(name.to_string(), df));
+    }
+
+    /// Register a database/schema name (from CREATE DATABASE / CREATE SCHEMA). Persisted in session for listDatabases/databaseExists.
+    pub fn register_database(&self, name: &str) {
+        let _ = self.databases.lock().map(|mut s| {
+            s.insert(name.to_string());
+        });
+    }
+
+    /// List database names: built-in "default", "global_temp", plus any created via CREATE DATABASE / CREATE SCHEMA.
+    pub fn list_database_names(&self) -> Vec<String> {
+        let mut names: Vec<String> = vec!["default".to_string(), "global_temp".to_string()];
+        if let Ok(guard) = self.databases.lock() {
+            let mut created: Vec<String> = guard.iter().cloned().collect();
+            created.sort();
+            names.extend(created);
+        }
+        names
+    }
+
+    /// True if the database name exists (default, global_temp, or created via CREATE DATABASE / CREATE SCHEMA).
+    pub fn database_exists(&self, name: &str) -> bool {
+        if name.eq_ignore_ascii_case("default") || name.eq_ignore_ascii_case("global_temp") {
+            return true;
+        }
+        self.databases
+            .lock()
+            .map(|s| s.iter().any(|n| n.eq_ignore_ascii_case(name)))
+            .unwrap_or(false)
     }
 
     /// Get a saved table by name (tables map only). Returns None if not in saved tables (temp views not checked).
@@ -1387,6 +1422,7 @@ impl SparkSession {
             config: self.config.clone(),
             catalog: self.catalog.clone(),
             tables: self.tables.clone(),
+            databases: self.databases.clone(),
             udf_registry: self.udf_registry.clone(),
             #[cfg(feature = "pyo3")]
             python_udf_batch_size: self.python_udf_batch_size,
