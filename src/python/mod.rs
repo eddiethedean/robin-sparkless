@@ -269,7 +269,7 @@ fn py_supported_plan_operations(py: Python<'_>) -> PyResult<pyo3::Py<pyo3::types
         "distinct",
         "drop",
     ];
-    let t = pyo3::types::PyTuple::new(py, OPS.iter().map(|s| *s))?;
+    let t = pyo3::types::PyTuple::new(py, OPS.iter().copied())?;
     Ok(t.unbind())
 }
 
@@ -856,7 +856,7 @@ fn py_call_udf(
             }
         })
         .collect::<PyResult<Vec<_>>>()?;
-    let col = crate::functions::call_udf(&name, &rs_cols)
+    let col = crate::functions::call_udf(name, &rs_cols)
         .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
     Ok(PyColumn { inner: col })
 }
@@ -986,18 +986,25 @@ fn py_when(
 /// Return a Column that takes the first non-null value across the given columns, per row.
 ///
 /// Args:
-///     cols: One or more Column expressions. At least one required.
+///     cols: One or more Column expressions (variadic, PySpark parity). At least one required.
 ///
 /// Returns:
 ///     Column: For each row, the first non-null value from cols in order.
 #[pyfunction]
-fn py_coalesce(cols: Vec<PyRef<PyColumn>>) -> PyResult<PyColumn> {
-    let refs: Vec<&RsColumn> = cols.iter().map(|c| &c.inner).collect();
-    if refs.is_empty() {
+#[pyo3(signature = (*cols))]
+fn py_coalesce(cols: &Bound<'_, pyo3::types::PyTuple>) -> PyResult<PyColumn> {
+    let columns: Vec<PyRef<PyColumn>> = (0..cols.len())
+        .map(|i| cols.get_item(i).and_then(|ob| ob.extract()))
+        .collect::<PyResult<Vec<_>>>()
+        .map_err(|e| {
+            pyo3::exceptions::PyTypeError::new_err(format!("coalesce() args must be Column: {e}"))
+        })?;
+    if columns.is_empty() {
         return Err(pyo3::exceptions::PyValueError::new_err(
             "coalesce() requires at least one column",
         ));
     }
+    let refs: Vec<&RsColumn> = columns.iter().map(|c| &c.inner).collect();
     Ok(PyColumn {
         inner: coalesce(&refs),
     })
@@ -1531,7 +1538,7 @@ fn py_getbit(col: &PyColumn, pos: i64) -> PyColumn {
 fn py_to_char(col: &PyColumn, format: Option<&str>) -> PyResult<PyColumn> {
     to_char(&col.inner, format)
         .map(|c| PyColumn { inner: c })
-        .map_err(|e| pyo3::exceptions::PyValueError::new_err(e))
+        .map_err(pyo3::exceptions::PyValueError::new_err)
 }
 
 #[pyfunction]
@@ -1539,7 +1546,7 @@ fn py_to_char(col: &PyColumn, format: Option<&str>) -> PyResult<PyColumn> {
 fn py_to_varchar(col: &PyColumn, format: Option<&str>) -> PyResult<PyColumn> {
     to_varchar(&col.inner, format)
         .map(|c| PyColumn { inner: c })
-        .map_err(|e| pyo3::exceptions::PyValueError::new_err(e))
+        .map_err(pyo3::exceptions::PyValueError::new_err)
 }
 
 #[pyfunction]
@@ -1547,7 +1554,7 @@ fn py_to_varchar(col: &PyColumn, format: Option<&str>) -> PyResult<PyColumn> {
 fn py_to_number(col: &PyColumn, format: Option<&str>) -> PyResult<PyColumn> {
     to_number(&col.inner, format)
         .map(|c| PyColumn { inner: c })
-        .map_err(|e| pyo3::exceptions::PyValueError::new_err(e))
+        .map_err(pyo3::exceptions::PyValueError::new_err)
 }
 
 #[pyfunction]
@@ -1555,7 +1562,7 @@ fn py_to_number(col: &PyColumn, format: Option<&str>) -> PyResult<PyColumn> {
 fn py_try_to_number(col: &PyColumn, format: Option<&str>) -> PyResult<PyColumn> {
     try_to_number(&col.inner, format)
         .map(|c| PyColumn { inner: c })
-        .map_err(|e| pyo3::exceptions::PyValueError::new_err(e))
+        .map_err(pyo3::exceptions::PyValueError::new_err)
 }
 
 #[pyfunction]
@@ -1563,7 +1570,7 @@ fn py_try_to_number(col: &PyColumn, format: Option<&str>) -> PyResult<PyColumn> 
 fn py_try_to_timestamp(col: &PyColumn, format: Option<&str>) -> PyResult<PyColumn> {
     try_to_timestamp(&col.inner, format)
         .map(|c| PyColumn { inner: c })
-        .map_err(|e| pyo3::exceptions::PyValueError::new_err(e))
+        .map_err(pyo3::exceptions::PyValueError::new_err)
 }
 
 #[pyfunction]
@@ -1878,7 +1885,7 @@ fn py_current_timezone() -> PyColumn {
 fn py_to_timestamp(col: &PyColumn, format: Option<&str>) -> PyResult<PyColumn> {
     to_timestamp(&col.inner, format)
         .map(|c| PyColumn { inner: c })
-        .map_err(|e| pyo3::exceptions::PyValueError::new_err(e))
+        .map_err(pyo3::exceptions::PyValueError::new_err)
 }
 
 #[pyfunction]
@@ -1886,7 +1893,7 @@ fn py_to_timestamp(col: &PyColumn, format: Option<&str>) -> PyResult<PyColumn> {
 fn py_to_date(col: &PyColumn, format: Option<&str>) -> PyResult<PyColumn> {
     to_date(&col.inner, format)
         .map(|c| PyColumn { inner: c })
-        .map_err(|e| pyo3::exceptions::PyValueError::new_err(e))
+        .map_err(pyo3::exceptions::PyValueError::new_err)
 }
 
 #[pyfunction]
@@ -2100,7 +2107,7 @@ fn py_parse_url(url: &PyColumn, partToExtract: &str, key: Option<&str>) -> PyCol
 
 #[pyfunction]
 fn py_hash(cols: Vec<PyRef<PyColumn>>) -> PyColumn {
-    let rs_refs: Vec<&crate::column::Column> = cols.iter().map(|c| &(&*c).inner).collect();
+    let rs_refs: Vec<&crate::column::Column> = cols.iter().map(|c| &c.inner).collect();
     PyColumn {
         inner: hash(&rs_refs),
     }
@@ -2113,7 +2120,7 @@ fn py_stack(cols: Vec<PyRef<PyColumn>>) -> PyResult<PyColumn> {
             "stack() requires at least one column",
         ));
     }
-    let rs_refs: Vec<&crate::column::Column> = cols.iter().map(|c| &(&*c).inner).collect();
+    let rs_refs: Vec<&crate::column::Column> = cols.iter().map(|c| &c.inner).collect();
     Ok(PyColumn {
         inner: struct_(&rs_refs),
     })
@@ -2351,13 +2358,13 @@ fn py_next_day(date: &PyColumn, dayOfWeek: &str) -> PyColumn {
 fn py_cast(col: &PyColumn, type_name: &str) -> PyResult<PyColumn> {
     rs_cast(&col.inner, type_name)
         .map(|inner| PyColumn { inner })
-        .map_err(|e| pyo3::exceptions::PyValueError::new_err(e))
+        .map_err(pyo3::exceptions::PyValueError::new_err)
 }
 #[pyfunction]
 fn py_try_cast(col: &PyColumn, type_name: &str) -> PyResult<PyColumn> {
     rs_try_cast(&col.inner, type_name)
         .map(|inner| PyColumn { inner })
-        .map_err(|e| pyo3::exceptions::PyValueError::new_err(e))
+        .map_err(pyo3::exceptions::PyValueError::new_err)
 }
 #[pyfunction]
 fn py_isnan(col: &PyColumn) -> PyColumn {
@@ -2382,7 +2389,7 @@ fn py_greatest(cols: &Bound<'_, pyo3::types::PyTuple>) -> PyResult<PyColumn> {
     let refs: Vec<&RsColumn> = columns.iter().map(|c| &c.inner).collect();
     rs_greatest(&refs)
         .map(|inner| PyColumn { inner })
-        .map_err(|e| pyo3::exceptions::PyValueError::new_err(e))
+        .map_err(pyo3::exceptions::PyValueError::new_err)
 }
 #[pyfunction]
 #[pyo3(signature = (*cols))]
@@ -2401,7 +2408,7 @@ fn py_least(cols: &Bound<'_, pyo3::types::PyTuple>) -> PyResult<PyColumn> {
     let refs: Vec<&RsColumn> = columns.iter().map(|c| &c.inner).collect();
     rs_least(&refs)
         .map(|inner| PyColumn { inner })
-        .map_err(|e| pyo3::exceptions::PyValueError::new_err(e))
+        .map_err(pyo3::exceptions::PyValueError::new_err)
 }
 
 #[pyfunction]

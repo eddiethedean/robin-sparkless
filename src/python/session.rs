@@ -449,13 +449,13 @@ impl PyUDFRegistration {
                 .register_python_udf(name, callable, dtype)
                 .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
         }
-        Ok(Py::new(
+        Py::new(
             py,
             PyUserDefinedFunction {
                 name: name.to_string(),
                 session: self.session.clone(),
             },
-        )?)
+        )
     }
 }
 
@@ -463,6 +463,7 @@ impl PyUDFRegistration {
 #[pyclass(name = "UserDefinedFunction")]
 pub struct PyUserDefinedFunction {
     pub(crate) name: String,
+    #[allow(dead_code)] // reserved for UDF call context / session lookup
     pub(crate) session: SparkSession,
 }
 
@@ -491,7 +492,7 @@ impl PyUserDefinedFunction {
             .collect::<PyResult<Vec<_>>>()?;
         let col = crate::functions::call_udf(&self.name, &rs_cols)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(Py::new(py, super::column::PyColumn { inner: col })?)
+        Py::new(py, super::column::PyColumn { inner: col })
     }
 }
 
@@ -510,13 +511,13 @@ pub(crate) fn parse_return_type(
     // DDL string: "int", "string", "bigint", etc.
     if let Ok(s) = rt.extract::<String>() {
         return crate::functions::parse_type_name(&s)
-            .map_err(|e| pyo3::exceptions::PyValueError::new_err(e));
+            .map_err(pyo3::exceptions::PyValueError::new_err);
     }
     // DataType-like object: IntegerType(), StringType() - check for type_name or similar
     if let Ok(attr) = rt.getattr("typeName") {
         if let Ok(s) = attr.call0()?.extract::<String>() {
             return crate::functions::parse_type_name(&s.to_lowercase())
-                .map_err(|e| pyo3::exceptions::PyValueError::new_err(e));
+                .map_err(pyo3::exceptions::PyValueError::new_err);
         }
     }
     Ok(default)

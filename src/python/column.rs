@@ -743,7 +743,7 @@ impl PyColumn {
     fn cast(&self, type_name: &str) -> PyResult<Self> {
         rs_cast(&self.inner, type_name)
             .map(|inner| PyColumn { inner })
-            .map_err(|e| pyo3::exceptions::PyValueError::new_err(e))
+            .map_err(pyo3::exceptions::PyValueError::new_err)
     }
     /// Cast the column to the given type; invalid values become null instead of raising.
     ///
@@ -758,7 +758,7 @@ impl PyColumn {
     fn try_cast(&self, type_name: &str) -> PyResult<Self> {
         rs_try_cast(&self.inner, type_name)
             .map(|inner| PyColumn { inner })
-            .map_err(|e| pyo3::exceptions::PyValueError::new_err(e))
+            .map_err(pyo3::exceptions::PyValueError::new_err)
     }
     /// PySpark alias for cast. Cast the column to the given type.
     fn astype(&self, type_name: &str) -> PyResult<Self> {
@@ -1254,6 +1254,7 @@ impl PyColumn {
     }
 
     /// Parse CSV string to struct (PySpark from_csv). Minimal: split by comma.
+    #[allow(clippy::wrong_self_convention)] // PySpark Column.from_csv(column)
     fn from_csv(&self) -> Self {
         PyColumn {
             inner: from_csv(&self.inner),
@@ -1286,6 +1287,7 @@ impl PyColumn {
             inner: unix_timestamp(&self.inner, format),
         }
     }
+    #[allow(clippy::wrong_self_convention)] // PySpark Column.from_unixtime(column, format)
     fn from_unixtime(&self, format: Option<&str>) -> Self {
         PyColumn {
             inner: from_unixtime(&self.inner, format),
