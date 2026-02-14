@@ -986,18 +986,25 @@ fn py_when(
 /// Return a Column that takes the first non-null value across the given columns, per row.
 ///
 /// Args:
-///     cols: One or more Column expressions. At least one required.
+///     cols: One or more Column expressions (variadic, PySpark parity). At least one required.
 ///
 /// Returns:
 ///     Column: For each row, the first non-null value from cols in order.
 #[pyfunction]
-fn py_coalesce(cols: Vec<PyRef<PyColumn>>) -> PyResult<PyColumn> {
-    let refs: Vec<&RsColumn> = cols.iter().map(|c| &c.inner).collect();
-    if refs.is_empty() {
+#[pyo3(signature = (*cols))]
+fn py_coalesce(cols: &Bound<'_, pyo3::types::PyTuple>) -> PyResult<PyColumn> {
+    let columns: Vec<PyRef<PyColumn>> = (0..cols.len())
+        .map(|i| cols.get_item(i).and_then(|ob| ob.extract()))
+        .collect::<PyResult<Vec<_>>>()
+        .map_err(|e| {
+            pyo3::exceptions::PyTypeError::new_err(format!("coalesce() args must be Column: {e}"))
+        })?;
+    if columns.is_empty() {
         return Err(pyo3::exceptions::PyValueError::new_err(
             "coalesce() requires at least one column",
         ));
     }
+    let refs: Vec<&RsColumn> = columns.iter().map(|c| &c.inner).collect();
     Ok(PyColumn {
         inner: coalesce(&refs),
     })
