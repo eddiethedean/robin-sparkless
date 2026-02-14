@@ -1523,19 +1523,34 @@ impl PyGroupedData {
         return Ok(PyDataFrame { inner: df });
     }
 
-    /// Return a DataFrame with one row per group and the mean of the given column.
+    /// Return a DataFrame with one row per group and the mean of the given column(s) (PySpark: avg("a", "b")).
     ///
     /// Args:
-    ///     column: Numeric column name. Nulls excluded from mean.
+    ///     cols: One or more numeric column names. Nulls excluded from mean.
     ///
     /// Returns:
-    ///     DataFrame (lazy). Raises RuntimeError if column is missing or not numeric.
-    fn avg(&self, column: &str) -> PyResult<PyDataFrame> {
+    ///     DataFrame. Raises RuntimeError if a column is missing or not numeric.
+    #[pyo3(signature = (*cols))]
+    fn avg(&self, cols: &Bound<'_, pyo3::types::PyTuple>) -> PyResult<PyDataFrame> {
+        let columns: Vec<String> = (0..cols.len())
+            .map(|i| cols.get_item(i).and_then(|ob| ob.extract()))
+            .collect::<PyResult<Vec<_>>>()
+            .map_err(|e| {
+                pyo3::exceptions::PyTypeError::new_err(format!(
+                    "avg() column names must be str: {e}"
+                ))
+            })?;
+        if columns.is_empty() {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "avg() requires at least one column",
+            ));
+        }
+        let col_refs: Vec<&str> = columns.iter().map(|s| s.as_str()).collect();
         let df = self
             .inner
-            .avg(column)
+            .avg(&col_refs)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        return Ok(PyDataFrame { inner: df });
+        Ok(PyDataFrame { inner: df })
     }
 
     /// Return a DataFrame with one row per group and the minimum of the given column.
