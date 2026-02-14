@@ -2366,15 +2366,39 @@ fn py_isnan(col: &PyColumn) -> PyColumn {
     }
 }
 #[pyfunction]
-fn py_greatest(cols: Vec<PyRef<PyColumn>>) -> PyResult<PyColumn> {
-    let refs: Vec<&RsColumn> = cols.iter().map(|c| &c.inner).collect();
+#[pyo3(signature = (*cols))]
+fn py_greatest(cols: &Bound<'_, pyo3::types::PyTuple>) -> PyResult<PyColumn> {
+    let columns: Vec<PyRef<PyColumn>> = (0..cols.len())
+        .map(|i| cols.get_item(i).and_then(|ob| ob.extract()))
+        .collect::<PyResult<Vec<_>>>()
+        .map_err(|e| {
+            pyo3::exceptions::PyTypeError::new_err(format!("greatest() args must be Column: {e}"))
+        })?;
+    if columns.is_empty() {
+        return Err(pyo3::exceptions::PyValueError::new_err(
+            "greatest() requires at least one column",
+        ));
+    }
+    let refs: Vec<&RsColumn> = columns.iter().map(|c| &c.inner).collect();
     rs_greatest(&refs)
         .map(|inner| PyColumn { inner })
         .map_err(|e| pyo3::exceptions::PyValueError::new_err(e))
 }
 #[pyfunction]
-fn py_least(cols: Vec<PyRef<PyColumn>>) -> PyResult<PyColumn> {
-    let refs: Vec<&RsColumn> = cols.iter().map(|c| &c.inner).collect();
+#[pyo3(signature = (*cols))]
+fn py_least(cols: &Bound<'_, pyo3::types::PyTuple>) -> PyResult<PyColumn> {
+    let columns: Vec<PyRef<PyColumn>> = (0..cols.len())
+        .map(|i| cols.get_item(i).and_then(|ob| ob.extract()))
+        .collect::<PyResult<Vec<_>>>()
+        .map_err(|e| {
+            pyo3::exceptions::PyTypeError::new_err(format!("least() args must be Column: {e}"))
+        })?;
+    if columns.is_empty() {
+        return Err(pyo3::exceptions::PyValueError::new_err(
+            "least() requires at least one column",
+        ));
+    }
+    let refs: Vec<&RsColumn> = columns.iter().map(|c| &c.inner).collect();
     rs_least(&refs)
         .map(|inner| PyColumn { inner })
         .map_err(|e| pyo3::exceptions::PyValueError::new_err(e))

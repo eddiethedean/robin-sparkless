@@ -394,7 +394,7 @@ def test_when() -> None:
 
 
 def test_greatest() -> None:
-    """Ported from PySpark: greatest returns max of columns."""
+    """Ported from PySpark: greatest returns max of columns (variadic, issue #344)."""
     import robin_sparkless as rs
 
     spark = rs.SparkSession.builder().app_name("test").get_or_create()
@@ -404,7 +404,7 @@ def test_greatest() -> None:
     )
     out = df.with_column(
         "max_val",
-        rs.greatest([rs.col("a"), rs.col("b"), rs.col("c")]),  # type: ignore[arg-type]
+        rs.greatest(rs.col("a"), rs.col("b"), rs.col("c")),
     )
     rows = out.collect()
     assert rows[0]["max_val"] == 3
@@ -412,7 +412,7 @@ def test_greatest() -> None:
 
 
 def test_least() -> None:
-    """Ported from PySpark: least returns min of columns."""
+    """Ported from PySpark: least returns min of columns (variadic, issue #344)."""
     import robin_sparkless as rs
 
     spark = rs.SparkSession.builder().app_name("test").get_or_create()
@@ -420,7 +420,10 @@ def test_least() -> None:
         [[1, 2, 3], [4, 2, 1]],
         [("a", "bigint"), ("b", "bigint"), ("c", "bigint")],
     )
-    out = df.with_column("min_val", rs.least([rs.col("a"), rs.col("b"), rs.col("c")]))  # type: ignore[arg-type]
+    out = df.with_column(
+        "min_val",
+        rs.least(rs.col("a"), rs.col("b"), rs.col("c")),
+    )
     rows = out.collect()
     assert rows[0]["min_val"] == 1
     assert rows[1]["min_val"] == 1
