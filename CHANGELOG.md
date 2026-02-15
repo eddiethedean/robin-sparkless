@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **#356 – Column getItem, getField, and subscript (PySpark parity)** — `Column` now exposes `.getItem(i)` for 0-based array index, `.getField(name)` for struct field, and `col[i]` / `col["name"]` via `__getitem__`. Fixes #356.
 - **#355 – Column.eqNullSafe (PySpark parity)** — `Column` now exposes `.eqNullSafe(other)` as a PySpark-style alias for `.eq_null_safe(other)` (null-safe equality: true if both null or both equal). Fixes #355.
 - **#354 – Column `.name` attribute (PySpark parity)** — `Column` now exposes a `.name` property for simple column references and aliased expressions (e.g. `col("salary").name` → `"salary"`, `col("x").alias("y").name` → `"y"`). Fixes #354.
 - **#352 – group_by and order_by accept Column expressions (PySpark parity)** — `DataFrame.group_by(cols)` now accepts a single column name (str), a single Column (e.g. `group_by(col("dept"))`), or a list/tuple of str or Column. `DataFrame.order_by(cols)` now accepts a single Column or list of Column (treated as ascending), in addition to existing str, SortOrder, and list of SortOrder. Enables PySpark-style `df.groupBy(F.col("dept")).agg(F.sum(F.col("salary")))` and `df.orderBy(col("x"))`. Fixes #352.
