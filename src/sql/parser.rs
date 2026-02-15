@@ -31,8 +31,7 @@ pub fn parse_sql(query: &str) -> Result<Statement, PolarsError> {
         Statement::Query(_) => {}
         Statement::CreateSchema { .. } | Statement::CreateDatabase { .. } => {}
         Statement::Drop {
-            object_type: sqlparser::ast::ObjectType::Table
-            | sqlparser::ast::ObjectType::View,
+            object_type: sqlparser::ast::ObjectType::Table | sqlparser::ast::ObjectType::View,
             ..
         } => {}
         _ => {
