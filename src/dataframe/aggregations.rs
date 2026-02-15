@@ -548,6 +548,181 @@ impl GroupedData {
     pub fn grouping_columns(&self) -> &[String] {
         &self.grouping_cols
     }
+
+    /// Pivot a column for pivot-table aggregation (PySpark: groupBy(...).pivot(pivot_col).sum(value_col)).
+    /// Returns PivotedGroupedData; call .sum(column), .avg(column), etc. to run the aggregation.
+    pub fn pivot(
+        &self,
+        pivot_col: &str,
+        values: Option<Vec<String>>,
+    ) -> PivotedGroupedData {
+        PivotedGroupedData {
+            df: self.df.clone(),
+            grouping_cols: self.grouping_cols.clone(),
+            pivot_col: pivot_col.to_string(),
+            values,
+            case_sensitive: self.case_sensitive,
+        }
+    }
+}
+
+/// Result of GroupedData.pivot(pivot_col); has .sum(), .avg(), etc. (PySpark pivot table).
+pub struct PivotedGroupedData {
+    pub(crate) df: PlDataFrame,
+    pub(crate) grouping_cols: Vec<String>,
+    pub(crate) pivot_col: String,
+    pub(crate) values: Option<Vec<String>>,
+    pub(crate) case_sensitive: bool,
+}
+
+/// PySpark: pivot column names use string representation; null → "null".
+fn pivot_value_to_column_name(av: polars::prelude::AnyValue<'_>) -> String {
+    use polars::prelude::AnyValue;
+    match av {
+        AnyValue::Null => "null".to_string(),
+        AnyValue::String(s) => s.to_string(),
+        _ => av.to_string(),
+    }
+}
+
+fn pivot_values_from_df(pl_df: &PlDataFrame, pivot_col: &str) -> Result<Vec<String>, PolarsError> {
+    let s = pl_df.column(pivot_col)?;
+    let uniq = s.unique()?;
+    let mut out = Vec::with_capacity(uniq.len());
+    for i in 0..uniq.len() {
+        let av = uniq.get(i)?;
+        out.push(pivot_value_to_column_name(av));
+    }
+    // PySpark parity: deterministic column order when values not provided (lexicographic)
+    out.sort();
+    Ok(out)
+}
+
+impl PivotedGroupedData {
+    fn pivot_values(&self) -> Result<Vec<String>, PolarsError> {
+        if let Some(ref v) = self.values {
+            return Ok(v.clone());
+        }
+        pivot_values_from_df(&self.df, &self.pivot_col)
+    }
+
+    fn pivot_agg(&self, value_col: &str, agg_fn: fn(Expr) -> Expr) -> Result<DataFrame, PolarsError> {
+        use polars::prelude::*;
+        let pivot_vals = self.pivot_values()?;
+        if pivot_vals.is_empty() {
+            let by: Vec<&str> = self.grouping_cols.iter().map(|s| s.as_str()).collect();
+            let lf = self.df.clone().lazy().group_by(by).agg(vec![]);
+            let pl_df = lf.collect()?;
+            return Ok(super::DataFrame::from_polars_with_options(
+                pl_df,
+                self.case_sensitive,
+            ));
+        }
+        let mut agg_exprs: Vec<Expr> = Vec::with_capacity(pivot_vals.len());
+        use polars::prelude::{DataType, LiteralValue};
+        for v in &pivot_vals {
+            // PySpark: pivot_col can be any type; compare as string for column names. Null → is_null().
+            let pred = if v == "null" {
+                col(self.pivot_col.as_str()).is_null()
+            } else {
+                col(self.pivot_col.as_str())
+                    .cast(DataType::String)
+                    .eq(lit(v.as_str()))
+            };
+            let then_expr = col(value_col);
+            let expr = when(pred)
+                .then(then_expr)
+                .otherwise(Expr::Literal(LiteralValue::Null));
+            // PySpark parity: pivot value with no matching rows → null (not 0)
+            let has_any = expr
+                .clone()
+                .is_not_null()
+                .cast(DataType::UInt32)
+                .sum()
+                .gt(lit(0));
+            let agg_expr = when(has_any)
+                .then(agg_fn(expr))
+                .otherwise(Expr::Literal(LiteralValue::Null))
+                .alias(v.as_str());
+            agg_exprs.push(agg_expr);
+        }
+        let by: Vec<&str> = self.grouping_cols.iter().map(|s| s.as_str()).collect();
+        let lf = self.df.clone().lazy().group_by(by).agg(agg_exprs);
+        let mut pl_df = lf.collect()?;
+        pl_df = reorder_groupby_columns(&mut pl_df, &self.grouping_cols)?;
+        Ok(super::DataFrame::from_polars_with_options(
+            pl_df,
+            self.case_sensitive,
+        ))
+    }
+
+    /// Pivot then sum (PySpark: groupBy(...).pivot(...).sum(column)).
+    pub fn sum(&self, value_col: &str) -> Result<DataFrame, PolarsError> {
+        self.pivot_agg(value_col, polars::prelude::Expr::sum)
+    }
+
+    /// Pivot then mean (PySpark: groupBy(...).pivot(...).avg(column)).
+    pub fn avg(&self, value_col: &str) -> Result<DataFrame, PolarsError> {
+        self.pivot_agg(value_col, polars::prelude::Expr::mean)
+    }
+
+    /// Pivot then min (PySpark: groupBy(...).pivot(...).min(column)).
+    pub fn min(&self, value_col: &str) -> Result<DataFrame, PolarsError> {
+        self.pivot_agg(value_col, polars::prelude::Expr::min)
+    }
+
+    /// Pivot then max (PySpark: groupBy(...).pivot(...).max(column)).
+    pub fn max(&self, value_col: &str) -> Result<DataFrame, PolarsError> {
+        self.pivot_agg(value_col, polars::prelude::Expr::max)
+    }
+
+    /// Pivot then count (PySpark: groupBy(...).pivot(...).count()). Counts rows per group per pivot value.
+    pub fn count(&self) -> Result<DataFrame, PolarsError> {
+        use polars::prelude::*;
+        let pivot_vals = self.pivot_values()?;
+        if pivot_vals.is_empty() {
+            let by: Vec<&str> = self.grouping_cols.iter().map(|s| s.as_str()).collect();
+            let lf = self.df.clone().lazy().group_by(by).agg(vec![]);
+            let pl_df = lf.collect()?;
+            return Ok(super::DataFrame::from_polars_with_options(
+                pl_df,
+                self.case_sensitive,
+            ));
+        }
+        let mut agg_exprs: Vec<Expr> = Vec::with_capacity(pivot_vals.len());
+        use polars::prelude::{DataType, LiteralValue};
+        for v in &pivot_vals {
+            let pred = if v == "null" {
+                col(self.pivot_col.as_str()).is_null()
+            } else {
+                col(self.pivot_col.as_str())
+                    .cast(DataType::String)
+                    .eq(lit(v.as_str()))
+            };
+            let expr = when(pred)
+                .then(lit(1))
+                .otherwise(Expr::Literal(LiteralValue::Null));
+            let has_any = expr
+                .clone()
+                .is_not_null()
+                .cast(DataType::UInt32)
+                .sum()
+                .gt(lit(0));
+            let agg_expr = when(has_any)
+                .then(expr.sum())
+                .otherwise(Expr::Literal(LiteralValue::Null))
+                .alias(v.as_str());
+            agg_exprs.push(agg_expr);
+        }
+        let by: Vec<&str> = self.grouping_cols.iter().map(|s| s.as_str()).collect();
+        let lf = self.df.clone().lazy().group_by(by).agg(agg_exprs);
+        let mut pl_df = lf.collect()?;
+        pl_df = reorder_groupby_columns(&mut pl_df, &self.grouping_cols)?;
+        Ok(super::DataFrame::from_polars_with_options(
+            pl_df,
+            self.case_sensitive,
+        ))
+    }
 }
 
 /// Cube/rollup: multiple grouping sets then union (PySpark cube / rollup).

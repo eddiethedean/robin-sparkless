@@ -5,7 +5,7 @@ mod joins;
 mod stats;
 mod transformations;
 
-pub use aggregations::{CubeRollupData, GroupedData};
+pub use aggregations::{CubeRollupData, GroupedData, PivotedGroupedData};
 pub use joins::{join, JoinType};
 pub use stats::DataFrameStat;
 pub use transformations::{

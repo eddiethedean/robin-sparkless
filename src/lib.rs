@@ -42,7 +42,8 @@ pub mod python;
 
 pub use column::Column;
 pub use dataframe::{
-    CubeRollupData, DataFrame, GroupedData, JoinType, SaveMode, WriteFormat, WriteMode,
+    CubeRollupData, DataFrame, GroupedData, PivotedGroupedData, JoinType, SaveMode, WriteFormat,
+    WriteMode,
 };
 pub use functions::{SortOrder, *};
 pub use schema::{StructField, StructType};

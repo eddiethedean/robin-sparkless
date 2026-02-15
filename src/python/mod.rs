@@ -68,7 +68,8 @@ mod session;
 mod udf;
 pub(crate) use column::PyColumn;
 pub(crate) use dataframe::{
-    PyCubeRollupData, PyDataFrame, PyDataFrameNa, PyDataFrameStat, PyDataFrameWriter, PyGroupedData,
+    PyCubeRollupData, PyDataFrame, PyDataFrameNa, PyDataFrameStat, PyDataFrameWriter,
+    PyGroupedData, PyPivotedGroupedData,
 };
 pub(crate) use order::{
     PyDenseRank, PyRowNumber, PySortOrder, PyThenBuilder, PyWhenBuilder, PyWhenThen, PyWindow,
@@ -409,6 +410,7 @@ fn robin_sparkless(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyWhenBuilder>()?;
     m.add_class::<PyThenBuilder>()?;
     m.add_class::<PyGroupedData>()?;
+    m.add_class::<PyPivotedGroupedData>()?;
     m.add_class::<PyCubeRollupData>()?;
     m.add_class::<PyDataFrameWriter>()?;
     m.add("col", wrap_pyfunction!(py_col, m)?)?;
