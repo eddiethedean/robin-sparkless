@@ -2155,6 +2155,20 @@ impl Column {
         Self::from_expr(self.expr().clone().list().get(lit(idx), true), None)
     }
 
+    /// Get element at 0-based index (PySpark Column.getItem). Returns null if out of bounds.
+    pub fn get_item(&self, index: i64) -> Column {
+        use polars::prelude::*;
+        Self::from_expr(self.expr().clone().list().get(lit(index), true), None)
+    }
+
+    /// Get struct field by name (PySpark Column.getField).
+    pub fn get_field(&self, name: &str) -> Column {
+        Self::from_expr(
+            self.expr().clone().struct_().field_by_name(name),
+            Some(name.to_string()),
+        )
+    }
+
     /// Sort list elements (PySpark array_sort). Ascending, nulls last.
     pub fn array_sort(&self) -> Column {
         use polars::prelude::SortOptions;

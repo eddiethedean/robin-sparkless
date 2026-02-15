@@ -1071,6 +1071,46 @@ impl PyColumn {
         }
     }
 
+    /// Element at 0-based index (PySpark Column.getItem). Null if out of bounds.
+    #[pyo3(name = "getItem")]
+    fn get_item(&self, index: i64) -> Self {
+        PyColumn {
+            inner: self.inner.get_item(index),
+        }
+    }
+
+    /// Struct field by name (PySpark Column.getField).
+    #[pyo3(name = "getField")]
+    fn get_field(&self, name: &str) -> Self {
+        PyColumn {
+            inner: self.inner.get_field(name),
+        }
+    }
+
+    /// Column is not iterable (PySpark parity). Prevents "for x in col" from using __getitem__.
+    fn __iter__(slf: PyRef<'_, Self>) -> PyResult<PyObject> {
+        Err(pyo3::exceptions::PyTypeError::new_err(
+            "Column is not iterable; use collect() on a DataFrame to get rows",
+        ))
+    }
+
+    /// Subscript: col[i] -> getItem(i), col["name"] -> getField("name") (PySpark parity).
+    fn __getitem__(&self, key: &Bound<'_, pyo3::types::PyAny>) -> PyResult<Self> {
+        if let Ok(i) = key.extract::<i64>() {
+            return Ok(PyColumn {
+                inner: self.inner.get_item(i),
+            });
+        }
+        if let Ok(s) = key.extract::<String>() {
+            return Ok(PyColumn {
+                inner: self.inner.get_field(&s),
+            });
+        }
+        Err(pyo3::exceptions::PyTypeError::new_err(
+            "column subscript key must be int (array index) or str (struct field name)",
+        ))
+    }
+
     /// Explode list into one row per element (PySpark explode).
     fn explode(&self) -> Self {
         PyColumn {
