@@ -64,6 +64,13 @@ pub struct PyColumn {
 
 #[pymethods]
 impl PyColumn {
+    /// Return the column name for simple column references (e.g. ``col("x").name`` → ``"x"``).
+    /// PySpark parity: Column has a ``.name`` attribute. For expressions the name may be an alias or ``"<expr>"``.
+    #[getter]
+    fn name(&self) -> String {
+        self.inner.name().to_string()
+    }
+
     /// Return a Column with the same values but a different name (e.g. for select/agg output).
     ///
     /// Args:
