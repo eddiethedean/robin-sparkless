@@ -754,6 +754,59 @@ impl SparkSession {
         DataFrame::from_polars_with_options(df, self.is_case_sensitive())
     }
 
+    /// Infer dtype string from a single JSON value (for schema inference). Returns None for Null.
+    fn infer_dtype_from_json_value(v: &JsonValue) -> Option<String> {
+        match v {
+            JsonValue::Null => None,
+            JsonValue::Bool(_) => Some("boolean".to_string()),
+            JsonValue::Number(n) => {
+                if n.is_i64() {
+                    Some("bigint".to_string())
+                } else {
+                    Some("double".to_string())
+                }
+            }
+            JsonValue::String(s) => {
+                if chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").is_ok() {
+                    Some("date".to_string())
+                } else if chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S%.f").is_ok()
+                    || chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S").is_ok()
+                {
+                    Some("timestamp".to_string())
+                } else {
+                    Some("string".to_string())
+                }
+            }
+            JsonValue::Array(_) => Some("array".to_string()),
+            JsonValue::Object(_) => Some("string".to_string()), // struct inference not implemented; treat as string for safety
+        }
+    }
+
+    /// Infer schema (name, dtype_str) from JSON rows by scanning the first non-null value per column.
+    /// Used by createDataFrame(data, schema=None) when schema is omitted or only column names given.
+    pub fn infer_schema_from_json_rows(
+        rows: &[Vec<JsonValue>],
+        names: &[String],
+    ) -> Vec<(String, String)> {
+        if names.is_empty() {
+            return Vec::new();
+        }
+        let mut schema: Vec<(String, String)> = names
+            .iter()
+            .map(|n| (n.clone(), "string".to_string()))
+            .collect();
+        for (col_idx, (_, dtype_str)) in schema.iter_mut().enumerate() {
+            for row in rows {
+                let v = row.get(col_idx).unwrap_or(&JsonValue::Null);
+                if let Some(dtype) = Self::infer_dtype_from_json_value(v) {
+                    *dtype_str = dtype;
+                    break;
+                }
+            }
+        }
+        schema
+    }
+
     /// Create a DataFrame from rows and a schema (arbitrary column count and types).
     ///
     /// `rows`: each inner vec is one row; length must match schema length. Values are JSON-like (i64, f64, string, bool, null, object, array).

@@ -15,14 +15,11 @@ F = rs
 def test_join_str_key_left_int_key_right() -> None:
     """Join on 'id': left id is str, right id is int; keys are coerced to common type."""
     spark = F.SparkSession.builder().app_name("test_274").get_or_create()
-    create_df = getattr(spark, "create_dataframe_from_rows", None) or getattr(
-        spark, "_create_dataframe_from_rows"
-    )
-    df1 = create_df(
+    df1 = spark.createDataFrame(
         [{"id": "1", "label": "a"}],
         [("id", "str"), ("label", "str")],
     )
-    df2 = create_df(
+    df2 = spark.createDataFrame(
         [{"id": 1, "x": 10}],
         [("id", "int"), ("x", "int")],
     )

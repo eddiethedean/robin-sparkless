@@ -15,11 +15,8 @@ F = rs
 def test_create_map_no_args() -> None:
     """create_map() with no args returns column of empty maps."""
     spark = F.SparkSession.builder().app_name("test_275").get_or_create()
-    create_df = getattr(spark, "create_dataframe_from_rows", None) or getattr(
-        spark, "_create_dataframe_from_rows"
-    )
     data = [{"id": 1}]
-    df = create_df(data, [("id", "int")])
+    df = spark.createDataFrame(data, [("id", "int")])
     df = df.with_column("m", F.create_map())
     rows = df.collect()
     assert len(rows) == 1
@@ -30,11 +27,8 @@ def test_create_map_no_args() -> None:
 def test_create_map_empty_list() -> None:
     """create_map([]) also returns column of empty maps (PySpark accepts both)."""
     spark = F.SparkSession.builder().app_name("test_275").get_or_create()
-    create_df = getattr(spark, "create_dataframe_from_rows", None) or getattr(
-        spark, "_create_dataframe_from_rows"
-    )
     data = [{"id": 1}, {"id": 2}]
-    df = create_df(data, [("id", "int")])
+    df = spark.createDataFrame(data, [("id", "int")])
     df = df.with_column("m", F.create_map())  # no args
     rows = df.collect()
     assert len(rows) == 2

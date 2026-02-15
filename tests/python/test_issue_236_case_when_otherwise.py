@@ -16,7 +16,7 @@ def test_when_cond_val_otherwise_returns_column() -> None:
     spark = F.SparkSession.builder().app_name("repro").get_or_create()
     data = [{"a": 1}, {"a": -1}, {"a": 0}]
     schema = [("a", "int")]
-    df = spark._create_dataframe_from_rows(data, schema)
+    df = spark.createDataFrame(data, schema)
 
     expr = F.when(F.col("a").gt(F.lit(0)), F.lit(1)).otherwise(F.lit(0))
     out = df.with_column("x", expr).collect()
@@ -36,7 +36,7 @@ def test_when_cond_val_otherwise_operator_syntax() -> None:
     spark = F.SparkSession.builder().app_name("repro").get_or_create()
     data = [{"a": 1}, {"a": -1}, {"a": 0}]
     schema = [("a", "int")]
-    df = spark._create_dataframe_from_rows(data, schema)
+    df = spark.createDataFrame(data, schema)
     expr = F.when(F.col("a") > F.lit(0), F.lit(1)).otherwise(F.lit(0))
     out = df.with_column("x", expr).collect()
 

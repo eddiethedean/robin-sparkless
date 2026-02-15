@@ -35,7 +35,7 @@ def test_filter_salary_gt_60000(spark) -> None:
     """Ported from Sparkless test_filter_with_boolean: filter(salary > 60000)."""
     import robin_sparkless as rs
 
-    df = spark._create_dataframe_from_rows(INPUT_EMPLOYEES, SCHEMA_EMPLOYEES)
+    df = spark.createDataFrame(INPUT_EMPLOYEES, SCHEMA_EMPLOYEES)
     result = df.filter(rs.col("salary").gt(rs.lit(60000)))
     rows = result.collect()
     expected = [
@@ -51,7 +51,7 @@ def test_filter_and_operator(spark) -> None:
 
     data = [{"a": 1, "b": 2}, {"a": 2, "b": 3}, {"a": 3, "b": 1}]
     schema = [("a", "bigint"), ("b", "bigint")]
-    df = spark._create_dataframe_from_rows(data, schema)
+    df = spark.createDataFrame(data, schema)
     expr1 = rs.col("a").gt(rs.lit(1))
     expr2 = rs.col("b").gt(rs.lit(1))
     result = df.filter(expr1.and_(expr2))
@@ -66,7 +66,7 @@ def test_filter_or_operator(spark) -> None:
 
     data = [{"a": 1, "b": 2}, {"a": 2, "b": 3}, {"a": 3, "b": 1}]
     schema = [("a", "bigint"), ("b", "bigint")]
-    df = spark._create_dataframe_from_rows(data, schema)
+    df = spark.createDataFrame(data, schema)
     expr1 = rs.col("a").gt(rs.lit(1))
     expr2 = rs.col("b").gt(rs.lit(1))
     result = df.filter(expr1.or_(expr2))
@@ -76,7 +76,7 @@ def test_filter_or_operator(spark) -> None:
 
 def test_basic_select(spark) -> None:
     """Ported from Sparkless test_basic_select: select id, name, age."""
-    df = spark._create_dataframe_from_rows(INPUT_EMPLOYEES, SCHEMA_EMPLOYEES)
+    df = spark.createDataFrame(INPUT_EMPLOYEES, SCHEMA_EMPLOYEES)
     result = df.select(["id", "name", "age"])
     rows = result.collect()
     expected = [
@@ -92,7 +92,7 @@ def test_select_with_alias(spark) -> None:
     """Ported from Sparkless test_select_with_alias: select id as user_id, name as full_name."""
     import robin_sparkless as rs
 
-    df = spark._create_dataframe_from_rows(INPUT_EMPLOYEES, SCHEMA_EMPLOYEES)
+    df = spark.createDataFrame(INPUT_EMPLOYEES, SCHEMA_EMPLOYEES)
     # Robin select() takes column names; use with_column + select for aliasing
     result = (
         df.with_column("user_id", rs.col("id"))
@@ -113,7 +113,7 @@ def test_aggregation_avg_count(spark) -> None:
     """Ported from Sparkless test_aggregation: groupBy(department).agg(avg(salary), count(id))."""
     import robin_sparkless as rs
 
-    df = spark._create_dataframe_from_rows(INPUT_EMPLOYEES, SCHEMA_EMPLOYEES)
+    df = spark.createDataFrame(INPUT_EMPLOYEES, SCHEMA_EMPLOYEES)
     grouped = df.group_by(["department"])
     result = grouped.agg(
         [
@@ -150,8 +150,8 @@ def test_inner_join(spark) -> None:
         ("salary", "bigint"),
     ]
     dept_schema = [("dept_id", "bigint"), ("name", "string"), ("location", "string")]
-    emp_df = spark._create_dataframe_from_rows(employees_data, emp_schema)
-    dept_df = spark._create_dataframe_from_rows(departments_data, dept_schema)
+    emp_df = spark.createDataFrame(employees_data, emp_schema)
+    dept_df = spark.createDataFrame(departments_data, dept_schema)
     result = emp_df.join(dept_df, ["dept_id"], "inner")
     rows = result.collect()
     # Expected: 3 rows (dept_id 10 x2, 20 x1). Column order may differ; compare as set of rows.

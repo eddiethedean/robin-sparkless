@@ -14,7 +14,7 @@ def test_substr_alias_select_collect() -> None:
     import robin_sparkless as rs
 
     spark = rs.SparkSession.builder().app_name("test").get_or_create()
-    df = spark._create_dataframe_from_rows(
+    df = spark.createDataFrame(
         [{"name": "hello"}],
         [("name", "string")],
     )
@@ -29,7 +29,7 @@ def test_substr_alias_multiple_rows() -> None:
     import robin_sparkless as rs
 
     spark = rs.SparkSession.builder().app_name("test").get_or_create()
-    df = spark._create_dataframe_from_rows(
+    df = spark.createDataFrame(
         [{"name": "abc"}, {"name": "xyz"}, {"name": "hi"}],
         [("name", "string")],
     )
@@ -42,7 +42,7 @@ def test_substr_alias_chained_with_other_expr() -> None:
     import robin_sparkless as rs
 
     spark = rs.SparkSession.builder().app_name("test").get_or_create()
-    df = spark._create_dataframe_from_rows(
+    df = spark.createDataFrame(
         [{"s": "hello", "n": 1}],
         [("s", "string"), ("n", "int")],
     )

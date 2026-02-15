@@ -11,7 +11,7 @@ import robin_sparkless as rs
 def test_select_when_otherwise_alias_result() -> None:
     """Exact scenario from #214: when().then().otherwise().alias('result') then collect()."""
     spark = rs.SparkSession.builder().app_name("test").get_or_create()
-    df = spark._create_dataframe_from_rows(
+    df = spark.createDataFrame(
         [{"x": 1}, {"x": 2}],
         [("x", "bigint")],
     )
@@ -30,7 +30,7 @@ def test_select_when_otherwise_alias_result() -> None:
 def test_select_window_rank_alias() -> None:
     """#214: window function with alias('rank') must not raise 'not found: rank'."""
     spark = rs.SparkSession.builder().app_name("test").get_or_create()
-    df = spark._create_dataframe_from_rows(
+    df = spark.createDataFrame(
         [{"x": 10}, {"x": 20}, {"x": 20}],
         [("x", "bigint")],
     )

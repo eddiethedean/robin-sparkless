@@ -11,6 +11,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Phase 26 – Publish crate**: Prepare and publish robin-sparkless to crates.io (and optionally PyPI via maturin). See [ROADMAP.md](docs/ROADMAP.md) for details.
 
+## [0.10.0] - 2026-02-15
+
+### Added
+
+- **#372 – PySpark-style createDataFrame(data, schema=None) (Python)** — `spark.createDataFrame(data, schema=None)` is now the primary Python API. Accepts `data` as list of dicts (schema inferred from first row keys and types from first non-null per column), list of tuples with column names (e.g. `createDataFrame([("Alice", 25)], ["name", "age"])`), or explicit `schema` as list of `(name, dtype_str)` or StructType-like (`.fields` with `.name` and `.dataType.typeName()`). Empty data with `schema=None` returns empty DataFrame; with column names or full schema returns empty DataFrame with those columns. Fixes #372.
+
+### Changed
+
+- **Documentation** — README, README-Python, USER_GUIDE, UDF_GUIDE, QUICKSTART, PERSISTENCE_GUIDE, PYTHON_API, PYSPARK_DIFFERENCES, ROADMAP, READINESS_FOR_SPARKLESS_PLAN, SPARKLESS_PARITY_STATUS and related docs now use and recommend `createDataFrame` for Python examples and parity text; Rust examples keep `create_dataframe` / `create_dataframe_from_rows`.
+- **Python tests** — All Python tests converted from `create_dataframe` / `_create_dataframe_from_rows` to `createDataFrame`.
+- **Rust** — `infer_schema_from_json_rows` (session): fix clippy `needless_range_loop` by iterating with `schema.iter_mut().enumerate()`.
+- **Tests** — `test_issue_372_create_data_frame.py`: remove unused `pytest` import; use `df.columns()` instead of `print_schema()` for empty-schema assertion (mypy).
+
 ## [0.9.2] - 2026-02-14
 
 ### Added

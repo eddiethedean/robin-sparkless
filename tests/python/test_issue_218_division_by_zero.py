@@ -10,7 +10,7 @@ import robin_sparkless as rs
 def test_division_by_zero_literal_over_column() -> None:
     """Exact scenario from #218: lit(1) / col('x') with x=0 -> null."""
     spark = rs.SparkSession.builder().app_name("test").get_or_create()
-    df = spark._create_dataframe_from_rows(
+    df = spark.createDataFrame(
         [{"x": 1}, {"x": 0}],
         [("x", "bigint")],
     )
@@ -24,7 +24,7 @@ def test_division_by_zero_literal_over_column() -> None:
 def test_division_by_zero_column_over_literal() -> None:
     """col('x') / lit(0) -> null."""
     spark = rs.SparkSession.builder().app_name("test").get_or_create()
-    df = spark._create_dataframe_from_rows(
+    df = spark.createDataFrame(
         [{"x": 10}, {"x": 20}],
         [("x", "bigint")],
     )
@@ -38,7 +38,7 @@ def test_division_by_zero_column_over_literal() -> None:
 def test_division_by_zero_column_over_column() -> None:
     """col('a') / col('b') with b=0 -> null."""
     spark = rs.SparkSession.builder().app_name("test").get_or_create()
-    df = spark._create_dataframe_from_rows(
+    df = spark.createDataFrame(
         [{"a": 5, "b": 1}, {"a": 5, "b": 0}],
         [("a", "bigint"), ("b", "bigint")],
     )

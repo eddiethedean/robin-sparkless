@@ -34,7 +34,7 @@ In your own crate:
 
 ```toml
 [dependencies]
-robin-sparkless = "0.9.2"
+robin-sparkless = "0.10.0"
 ```
 
 ## Basic Usage
@@ -156,7 +156,7 @@ For roadmap and Sparkless integration phases (Phases 12–22 completed; Phases 2
 
 - **Column 'X' not found** — The DataFrame has no column with that name (case-sensitive if `spark.sql.caseSensitive` is true). The error message lists available columns; check spelling and case.
 
-- **create_dataframe: expected 3 column names** — `create_dataframe` accepts only `(i64, i64, String)` rows and exactly three column names. Use `["id", "age", "name"]` or similar. For arbitrary schemas (e.g. boolean, date, more columns), use `create_dataframe_from_rows(data, schema)` (Rust: `SparkSession::create_dataframe_from_rows`; Python: `spark._create_dataframe_from_rows(rows, schema)`).
+- **create_dataframe: expected 3 column names** — Rust `create_dataframe` accepts only `(i64, i64, String)` rows and exactly three column names. In Python, use `spark.createDataFrame(data, schema=None)` for any schema: list of dicts (infer), list of tuples with column names, or schema as list of `(name, dtype_str)`.
 
 - **Type coercion: cannot find common type** — A comparison or arithmetic involved incompatible types (e.g. string vs numeric). Cast one side with `.cast()` or use compatible types.
 

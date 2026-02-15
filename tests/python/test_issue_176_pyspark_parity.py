@@ -46,7 +46,7 @@ def test_regexp_extract_all_select_expression_pyspark_parity() -> None:
         {"s": None},
     ]
     schema = [("s", "string")]
-    df = spark._create_dataframe_from_rows(data, schema)
+    df = spark.createDataFrame(data, schema)
     result = df.select([rs.regexp_extract_all(rs.col("s"), r"\d+", 0).alias("m")])
     actual = result.collect()
     assert_rows_equal(
@@ -65,7 +65,7 @@ def test_regexp_extract_all_select_varargs_pyspark_parity() -> None:
         {"s": None},
     ]
     schema = [("s", "string")]
-    df = spark._create_dataframe_from_rows(data, schema)
+    df = spark.createDataFrame(data, schema)
     result = df.select(rs.regexp_extract_all(rs.col("s"), r"\d+", 0).alias("m"))
     actual = result.collect()
     assert_rows_equal(
@@ -86,7 +86,7 @@ def test_regexp_extract_all_select_mixed_columns_and_expression_pyspark_parity()
         {"s": "no-digits"},
     ]
     schema = [("s", "string")]
-    df = spark._create_dataframe_from_rows(data, schema)
+    df = spark.createDataFrame(data, schema)
     result = df.select("s", rs.regexp_extract_all(rs.col("s"), r"\d+", 0).alias("m"))
     actual = result.collect()
     assert_rows_equal(actual, EXPECTED_REGEXP_EXTRACT_ALL_MIXED, order_matters=True)
@@ -103,7 +103,7 @@ def test_regexp_extract_all_empty_string_and_null_pyspark_parity() -> None:
         {"s": "x1y"},
     ]
     schema = [("s", "string")]
-    df = spark._create_dataframe_from_rows(data, schema)
+    df = spark.createDataFrame(data, schema)
     result = df.select(rs.regexp_extract_all(rs.col("s"), r"\d+", 0).alias("m"))
     actual = result.collect()
     assert_rows_equal(
@@ -118,7 +118,7 @@ def test_select_expression_and_column_name_pyspark_parity() -> None:
     spark = get_session()
     data = [{"a": 1, "b": 2}, {"a": 3, "b": 4}]
     schema = [("a", "bigint"), ("b", "bigint")]
-    df = spark._create_dataframe_from_rows(data, schema)
+    df = spark.createDataFrame(data, schema)
     result = df.select(
         "a",
         rs.try_add(rs.col("a"), rs.col("b")).alias("sum_ab"),
@@ -133,7 +133,7 @@ def test_select_list_of_column_names_still_works() -> None:
     spark = get_session()
     data = [{"a": 1, "b": 2}, {"a": 3, "b": 4}]
     schema = [("a", "bigint"), ("b", "bigint")]
-    df = spark._create_dataframe_from_rows(data, schema)
+    df = spark.createDataFrame(data, schema)
     result = df.select(["a", "b"])
     rows = result.collect()
     assert rows == [{"a": 1, "b": 2}, {"a": 3, "b": 4}]
@@ -145,7 +145,7 @@ def test_select_varargs_column_names_still_works() -> None:
     spark = get_session()
     data = [{"a": 1, "b": 2}, {"a": 3, "b": 4}]
     schema = [("a", "bigint"), ("b", "bigint")]
-    df = spark._create_dataframe_from_rows(data, schema)
+    df = spark.createDataFrame(data, schema)
     result = df.select("a", "b")
     rows = result.collect()
     assert rows == [{"a": 1, "b": 2}, {"a": 3, "b": 4}]

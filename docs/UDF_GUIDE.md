@@ -27,7 +27,7 @@ my_udf = spark.udf().register("double", double, return_type="int")
 Use the returned UDF as a column expression:
 
 ```python
-df = spark.create_dataframe([(1, 10, "a"), (2, 20, "b")], ["id", "v", "name"])
+df = spark.createDataFrame([(1, 10, "a"), (2, 20, "b")], ["id", "v", "name"])
 df2 = df.with_column("doubled", my_udf(rs.col("id")))
 # df2.collect() → [{'id': 1, 'v': 10, 'name': 'a', 'doubled': 2}, {'id': 2, 'v': 20, 'name': 'b', 'doubled': 4}]
 ```
@@ -81,8 +81,8 @@ import robin_sparkless as rs
 
 spark = rs.SparkSession.builder().app_name("vec_udf").get_or_create()
 
-# Single-column schema: use _create_dataframe_from_rows (create_dataframe is 3-column only)
-df = spark._create_dataframe_from_rows([{"id": 1}, {"id": 2}, {"id": 3}], [("id", "bigint")])
+# Single-column schema: use createDataFrame with explicit schema
+df = spark.createDataFrame([{"id": 1}, {"id": 2}, {"id": 3}], [("id", "bigint")])
 
 # Using the returned UserDefinedFunction
 df2 = df.with_column("d2", my_udf(rs.col("id")))
@@ -150,7 +150,7 @@ Internally, ``pandas_udf``:
 Use the returned grouped UDF in ``groupBy().agg(...)``:
 
 ```python
-df = spark.create_dataframe(
+df = spark.createDataFrame(
     [(1, 10.0), (1, 20.0), (2, 5.0), (2, 15.0)],
     ["k", "v"],
 )

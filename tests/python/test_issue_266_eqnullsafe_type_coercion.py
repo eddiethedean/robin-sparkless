@@ -15,10 +15,7 @@ F = rs
 def test_eqnullsafe_string_column_eq_int_literal() -> None:
     """select(col('str_col').eq_null_safe(lit(123))) with string column returns True/False per row."""
     spark = F.SparkSession.builder().app_name("test_266").get_or_create()
-    create_df = getattr(spark, "create_dataframe_from_rows", None) or getattr(
-        spark, "_create_dataframe_from_rows"
-    )
-    df = create_df(
+    df = spark.createDataFrame(
         [
             {"str_col": "123", "other": 1},
             {"str_col": "456", "other": 2},
@@ -35,10 +32,7 @@ def test_eqnullsafe_string_column_eq_int_literal() -> None:
 def test_eqnullsafe_string_column_eq_int_literal_no_match() -> None:
     """eq_null_safe with non-numeric string yields False (coerced to null, not equal)."""
     spark = F.SparkSession.builder().app_name("test_266").get_or_create()
-    create_df = getattr(spark, "create_dataframe_from_rows", None) or getattr(
-        spark, "_create_dataframe_from_rows"
-    )
-    df = create_df(
+    df = spark.createDataFrame(
         [{"str_col": "abc"}, {"str_col": "123"}],
         [("str_col", "string")],
     )

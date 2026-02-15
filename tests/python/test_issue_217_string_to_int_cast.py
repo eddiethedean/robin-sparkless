@@ -10,7 +10,7 @@ import robin_sparkless as rs
 def test_cast_empty_and_whitespace_string_to_int() -> None:
     """Exact scenario from #217: cast('') and cast(' ') -> null."""
     spark = rs.SparkSession.builder().app_name("test").get_or_create()
-    df = spark._create_dataframe_from_rows(
+    df = spark.createDataFrame(
         [{"text": ""}, {"text": " "}],
         [("text", "string")],
     )
@@ -26,7 +26,7 @@ def test_cast_empty_and_whitespace_string_to_int() -> None:
 def test_cast_invalid_strings_to_int_null() -> None:
     """#217 affected: hello, abc123, '' -> null."""
     spark = rs.SparkSession.builder().app_name("test").get_or_create()
-    df = spark._create_dataframe_from_rows(
+    df = spark.createDataFrame(
         [{"s": "hello"}, {"s": "abc123"}, {"s": ""}, {"s": "42"}],
         [("s", "string")],
     )
@@ -42,7 +42,7 @@ def test_cast_invalid_strings_to_int_null() -> None:
 def test_try_cast_invalid_to_int_null() -> None:
     """try_cast also yields null for invalid."""
     spark = rs.SparkSession.builder().app_name("test").get_or_create()
-    df = spark._create_dataframe_from_rows(
+    df = spark.createDataFrame(
         [{"s": "1"}, {"s": "x"}],
         [("s", "string")],
     )
@@ -55,7 +55,7 @@ def test_try_cast_invalid_to_int_null() -> None:
 def test_cast_valid_string_to_long() -> None:
     """cast to long/bigint works; invalid -> null."""
     spark = rs.SparkSession.builder().app_name("test").get_or_create()
-    df = spark._create_dataframe_from_rows(
+    df = spark.createDataFrame(
         [{"s": "9999999999"}, {"s": "bad"}],
         [("s", "string")],
     )

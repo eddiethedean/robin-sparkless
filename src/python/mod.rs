@@ -340,7 +340,7 @@ fn py_configure_for_multiprocessing() {
 ///
 ///     mean_udf = rs.pandas_udf(mean_udf, "double", function_type="grouped_agg")
 ///
-///     df = spark.create_dataframe([(1, 10), (1, 20), (2, 5)], ["k", "v"])
+///     df = spark.createDataFrame([(1, 10), (1, 20), (2, 5)], ["k", "v"])
 ///     result = df.group_by(["k"]).agg([mean_udf(rs.col("v")).alias("mean_v")])
 ///
 /// In v1 only function_type="grouped_agg" is supported. The return_type is required and may be

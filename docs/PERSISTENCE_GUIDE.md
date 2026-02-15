@@ -56,7 +56,7 @@ spark2.drop_global_temp_view("people");
 import robin_sparkless as rs
 
 spark1 = rs.SparkSession.builder().app_name("session1").get_or_create()
-df = spark1.create_dataframe([(1, 25, "Alice"), (2, 30, "Bob")], ["id", "age", "name"])
+df = spark1.createDataFrame([(1, 25, "Alice"), (2, 30, "Bob")], ["id", "age", "name"])
 df.createOrReplaceGlobalTempView("people")
 
 # New session can access it
@@ -156,7 +156,7 @@ spark1 = rs.SparkSession.builder() \
     .config("spark.sql.warehouse.dir", warehouse) \
     .get_or_create()
 
-df = spark1.create_dataframe([(1, 25, "Alice"), (2, 30, "Bob")], ["id", "age", "name"])
+df = spark1.createDataFrame([(1, 25, "Alice"), (2, 30, "Bob")], ["id", "age", "name"])
 df.write().saveAsTable("users", mode="error")
 
 # New session reads from warehouse

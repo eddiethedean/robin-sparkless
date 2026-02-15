@@ -58,7 +58,7 @@ def test_filter_col_gt_col_pyspark_parity() -> None:
     spark = get_session()
     data = [[1, 5], [2, 4], [3, 1], [4, 2], [5, 1]]
     schema = [("a", "bigint"), ("b", "bigint")]
-    df = spark._create_dataframe_from_rows(data, schema)
+    df = spark.createDataFrame(data, schema)
     actual = df.filter(rs.col("a") > rs.col("b")).collect()
     assert_rows_equal(actual, EXPECTED_FILTER_A_GT_B, order_matters=True)
 
@@ -70,7 +70,7 @@ def test_filter_col_lt_col_pyspark_parity() -> None:
     spark = get_session()
     data = [[1, 5], [2, 4], [3, 1], [4, 2], [5, 1]]
     schema = [("a", "bigint"), ("b", "bigint")]
-    df = spark._create_dataframe_from_rows(data, schema)
+    df = spark.createDataFrame(data, schema)
     actual = df.filter(rs.col("a") < rs.col("b")).collect()
     assert_rows_equal(actual, EXPECTED_FILTER_A_LT_B, order_matters=True)
 
@@ -82,7 +82,7 @@ def test_filter_col_eq_col_pyspark_parity() -> None:
     spark = get_session()
     data = [[3, 1], [1, 3], [2, 2], [0, 5]]
     schema = [("x", "bigint"), ("y", "bigint")]
-    df = spark._create_dataframe_from_rows(data, schema)
+    df = spark.createDataFrame(data, schema)
     actual = df.filter(rs.col("x") == rs.col("y")).collect()
     assert_rows_equal(actual, EXPECTED_FILTER_X_EQ_Y, order_matters=True)
 
@@ -94,7 +94,7 @@ def test_filter_col_neq_col_pyspark_parity() -> None:
     spark = get_session()
     data = [[3, 1], [1, 3], [2, 2], [0, 5]]
     schema = [("x", "bigint"), ("y", "bigint")]
-    df = spark._create_dataframe_from_rows(data, schema)
+    df = spark.createDataFrame(data, schema)
     actual = df.filter(rs.col("x") != rs.col("y")).collect()
     assert_rows_equal(actual, EXPECTED_FILTER_X_NEQ_Y, order_matters=False)
 
@@ -106,7 +106,7 @@ def test_filter_combined_col_col_and_literal_pyspark_parity() -> None:
     spark = get_session()
     data = [[1, 5], [2, 4], [3, 1], [4, 2], [5, 1]]
     schema = [("a", "bigint"), ("b", "bigint")]
-    df = spark._create_dataframe_from_rows(data, schema)
+    df = spark.createDataFrame(data, schema)
     actual = df.filter((rs.col("a") > rs.col("b")) & (rs.col("a") > 2)).collect()
     assert_rows_equal(actual, EXPECTED_FILTER_COMBINED, order_matters=True)
 
@@ -118,7 +118,7 @@ def test_with_column_col_gt_col_pyspark_parity() -> None:
     spark = get_session()
     data = [[10, 5], [3, 7], [0, 0]]
     schema = [("p", "bigint"), ("q", "bigint")]
-    df = spark._create_dataframe_from_rows(data, schema)
+    df = spark.createDataFrame(data, schema)
     actual = df.with_column("p_gt_q", rs.col("p") > rs.col("q")).collect()
     assert_rows_equal(actual, EXPECTED_WITH_COLUMN_P_GT_Q, order_matters=True)
 
@@ -130,7 +130,7 @@ def test_filter_col_gt_col_strings_pyspark_parity() -> None:
     spark = get_session()
     data = [["apple", "banana"], ["banana", "apple"], ["x", "x"]]
     schema = [("s1", "string"), ("s2", "string")]
-    df = spark._create_dataframe_from_rows(data, schema)
+    df = spark.createDataFrame(data, schema)
     actual = df.filter(rs.col("s1") > rs.col("s2")).collect()
     assert_rows_equal(actual, EXPECTED_FILTER_S1_GT_S2_STRINGS, order_matters=True)
 
@@ -142,7 +142,7 @@ def test_filter_col_eq_col_empty_pyspark_parity() -> None:
     spark = get_session()
     data = [[1, 2], [3, 4]]
     schema = [("a", "bigint"), ("b", "bigint")]
-    df = spark._create_dataframe_from_rows(data, schema)
+    df = spark.createDataFrame(data, schema)
     actual = df.filter(rs.col("a") == rs.col("b")).collect()
     assert_rows_equal(actual, EXPECTED_FILTER_A_EQ_B_EMPTY, order_matters=True)
 
@@ -154,6 +154,6 @@ def test_filter_col_neq_col_all_match_pyspark_parity() -> None:
     spark = get_session()
     data = [[1, 2], [3, 4]]
     schema = [("a", "bigint"), ("b", "bigint")]
-    df = spark._create_dataframe_from_rows(data, schema)
+    df = spark.createDataFrame(data, schema)
     actual = df.filter(rs.col("a") != rs.col("b")).collect()
     assert_rows_equal(actual, EXPECTED_FILTER_A_NEQ_B_ALL, order_matters=False)
