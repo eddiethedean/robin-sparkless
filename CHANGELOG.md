@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **#352 – group_by and order_by accept Column expressions (PySpark parity)** — `DataFrame.group_by(cols)` now accepts a single column name (str), a single Column (e.g. `group_by(col("dept"))`), or a list/tuple of str or Column. `DataFrame.order_by(cols)` now accepts a single Column or list of Column (treated as ascending), in addition to existing str, SortOrder, and list of SortOrder. Enables PySpark-style `df.groupBy(F.col("dept")).agg(F.sum(F.col("salary")))` and `df.orderBy(col("x"))`. Fixes #352.
+
 ### Planned
 
 - **Phase 26 – Publish crate**: Prepare and publish robin-sparkless to crates.io (and optionally PyPI via maturin). See [ROADMAP.md](docs/ROADMAP.md) for details.
