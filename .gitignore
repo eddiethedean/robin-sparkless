@@ -47,6 +47,10 @@ Thumbs.db
 .coverage
 htmlcov/
 
+# Linting / type checking
+.ruff_cache/
+.mypy_cache/
+
 # Maturin
 *.whl
 
