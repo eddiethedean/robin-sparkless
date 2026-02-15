@@ -1007,6 +1007,30 @@ impl<'a> DataFrameNa<'a> {
         fillna(self.df, value, subset, self.df.case_sensitive)
     }
 
+    /// Replace values in columns. PySpark na.replace(to_replace, value, subset=None).
+    pub fn replace(
+        &self,
+        old_value: Expr,
+        new_value: Expr,
+        subset: Option<Vec<&str>>,
+    ) -> Result<DataFrame, PolarsError> {
+        let cols: Vec<String> = match &subset {
+            Some(s) => s.iter().map(|x| (*x).to_string()).collect(),
+            None => self.df.columns()?,
+        };
+        let mut result = self.df.clone();
+        for col_name in &cols {
+            result = replace(
+                &result,
+                col_name.as_str(),
+                old_value.clone(),
+                new_value.clone(),
+                self.df.case_sensitive,
+            )?;
+        }
+        Ok(result)
+    }
+
     /// Drop rows with nulls. PySpark na.drop(subset=..., how=..., thresh=...).
     pub fn drop(
         &self,

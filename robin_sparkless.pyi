@@ -233,6 +233,12 @@ class DataFrameNa:
         how: str = "any",
         thresh: int | None = None,
     ) -> DataFrame: ...
+    def replace(
+        self,
+        to_replace: None | int | float | bool | str,
+        value: None | int | float | bool | str,
+        subset: list[str] | None = None,
+    ) -> DataFrame: ...
 
 class Column:
     @property

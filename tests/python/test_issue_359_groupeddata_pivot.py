@@ -16,9 +16,7 @@ def _spark() -> rs.SparkSession:
 def test_group_by_pivot_sum_issue_repro() -> None:
     """df.group_by("year").pivot("region").sum("sales").collect() (issue repro)."""
     spark = _spark()
-    create_df = getattr(
-        spark, "create_dataframe_from_rows", spark.createDataFrame
-    )
+    create_df = getattr(spark, "create_dataframe_from_rows", spark.createDataFrame)
     df = create_df(
         [
             {"region": "N", "year": 2023, "sales": 100},
@@ -37,9 +35,7 @@ def test_group_by_pivot_sum_issue_repro() -> None:
 def test_group_by_pivot_sum_multiple_years() -> None:
     """Pivot with multiple grouping values produces one row per group."""
     spark = _spark()
-    create_df = getattr(
-        spark, "create_dataframe_from_rows", spark.createDataFrame
-    )
+    create_df = getattr(spark, "create_dataframe_from_rows", spark.createDataFrame)
     df = create_df(
         [
             {"region": "N", "year": 2023, "sales": 100},
@@ -59,9 +55,7 @@ def test_group_by_pivot_sum_multiple_years() -> None:
 def test_group_by_pivot_avg() -> None:
     """Pivot then avg (PySpark: groupBy(...).pivot(...).avg(column))."""
     spark = _spark()
-    create_df = getattr(
-        spark, "create_dataframe_from_rows", spark.createDataFrame
-    )
+    create_df = getattr(spark, "create_dataframe_from_rows", spark.createDataFrame)
     df = create_df(
         [
             {"r": "A", "k": 1, "v": 10},
@@ -80,9 +74,7 @@ def test_group_by_pivot_avg() -> None:
 def test_group_by_pivot_with_values() -> None:
     """pivot(pivot_col, values=[...]) uses only the given values as columns."""
     spark = _spark()
-    create_df = getattr(
-        spark, "create_dataframe_from_rows", spark.createDataFrame
-    )
+    create_df = getattr(spark, "create_dataframe_from_rows", spark.createDataFrame)
     df = create_df(
         [
             {"r": "A", "k": 1, "v": 10},
@@ -103,9 +95,7 @@ def test_group_by_pivot_with_values() -> None:
 def test_group_by_pivot_column_order_from_values() -> None:
     """PySpark: when values= is provided, column order follows the values list."""
     spark = _spark()
-    create_df = getattr(
-        spark, "create_dataframe_from_rows", spark.createDataFrame
-    )
+    create_df = getattr(spark, "create_dataframe_from_rows", spark.createDataFrame)
     df = create_df(
         [
             {"course": "Java", "year": 2012, "earnings": 20000},
@@ -133,9 +123,7 @@ def test_group_by_pivot_column_order_from_values() -> None:
 def test_group_by_pivot_numeric_pivot_column() -> None:
     """PySpark: pivot column can be numeric; column names are string representation."""
     spark = _spark()
-    create_df = getattr(
-        spark, "create_dataframe_from_rows", spark.createDataFrame
-    )
+    create_df = getattr(spark, "create_dataframe_from_rows", spark.createDataFrame)
     df = create_df(
         [
             {"k": 1, "p": 10, "v": 100},
@@ -154,9 +142,7 @@ def test_group_by_pivot_numeric_pivot_column() -> None:
 def test_group_by_pivot_null_in_pivot_column() -> None:
     """PySpark: null in pivot_col becomes a column named 'null'."""
     spark = _spark()
-    create_df = getattr(
-        spark, "create_dataframe_from_rows", spark.createDataFrame
-    )
+    create_df = getattr(spark, "create_dataframe_from_rows", spark.createDataFrame)
     df = create_df(
         [
             {"r": "A", "k": 1, "v": 10},
@@ -174,9 +160,7 @@ def test_group_by_pivot_null_in_pivot_column() -> None:
 def test_group_by_pivot_count() -> None:
     """PySpark: groupBy(...).pivot(...).count() counts rows per group per pivot value."""
     spark = _spark()
-    create_df = getattr(
-        spark, "create_dataframe_from_rows", spark.createDataFrame
-    )
+    create_df = getattr(spark, "create_dataframe_from_rows", spark.createDataFrame)
     df = create_df(
         [
             {"r": "A", "k": 1},

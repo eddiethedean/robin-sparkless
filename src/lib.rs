@@ -42,7 +42,7 @@ pub mod python;
 
 pub use column::Column;
 pub use dataframe::{
-    CubeRollupData, DataFrame, GroupedData, PivotedGroupedData, JoinType, SaveMode, WriteFormat,
+    CubeRollupData, DataFrame, GroupedData, JoinType, PivotedGroupedData, SaveMode, WriteFormat,
     WriteMode,
 };
 pub use functions::{SortOrder, *};
