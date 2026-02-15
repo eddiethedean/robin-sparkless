@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **#354 – Column `.name` attribute (PySpark parity)** — `Column` now exposes a `.name` property for simple column references and aliased expressions (e.g. `col("salary").name` → `"salary"`, `col("x").alias("y").name` → `"y"`). Fixes #354.
 - **#352 – group_by and order_by accept Column expressions (PySpark parity)** — `DataFrame.group_by(cols)` now accepts a single column name (str), a single Column (e.g. `group_by(col("dept"))`), or a list/tuple of str or Column. `DataFrame.order_by(cols)` now accepts a single Column or list of Column (treated as ascending), in addition to existing str, SortOrder, and list of SortOrder. Enables PySpark-style `df.groupBy(F.col("dept")).agg(F.sum(F.col("salary")))` and `df.orderBy(col("x"))`. Fixes #352.
 - **#353 – join on accept Column expression(s) (PySpark parity)** — `DataFrame.join(other, on=...)` now accepts `on` as a single Column (e.g. `join(right, col("id"))`) or list/tuple of str or Column, in addition to existing str or list/tuple of str. Enables PySpark-style `left.join(right, F.col("id"))`. Fixes #353.
 
