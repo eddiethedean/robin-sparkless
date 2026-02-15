@@ -513,6 +513,38 @@ impl DataFrame {
         })
     }
 
+    /// Group by expressions (e.g. col("a") or col("a").alias("x")). PySpark parity for groupBy(Column).
+    /// grouping_col_names must match the output names of the resolved exprs (one per expr).
+    pub fn group_by_exprs(
+        &self,
+        exprs: Vec<Expr>,
+        grouping_col_names: Vec<String>,
+    ) -> Result<GroupedData, PolarsError> {
+        use polars::prelude::*;
+        if exprs.len() != grouping_col_names.len() {
+            return Err(PolarsError::ComputeError(
+                format!(
+                    "group_by_exprs: {} exprs but {} names",
+                    exprs.len(),
+                    grouping_col_names.len()
+                )
+                .into(),
+            ));
+        }
+        let resolved: Vec<Expr> = exprs
+            .into_iter()
+            .map(|e| self.resolve_expr_column_names(e))
+            .collect::<Result<Vec<_>, _>>()?;
+        let pl_df = self.df.as_ref().clone();
+        let lazy_grouped = pl_df.clone().lazy().group_by(resolved);
+        Ok(GroupedData {
+            df: pl_df,
+            lazy_grouped,
+            grouping_cols: grouping_col_names,
+            case_sensitive: self.case_sensitive,
+        })
+    }
+
     /// Cube: multiple grouping sets (all subsets of columns), then union (PySpark cube).
     pub fn cube(&self, column_names: Vec<&str>) -> Result<CubeRollupData, PolarsError> {
         let resolved: Vec<String> = column_names
