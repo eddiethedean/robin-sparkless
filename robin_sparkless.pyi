@@ -25,7 +25,7 @@ class SparkSession:
     def createDataFrame(
         self,
         data: Any,
-        column_names: list[str],
+        schema: Any = ...,
     ) -> DataFrame: ...
     def _create_dataframe_from_rows(
         self,

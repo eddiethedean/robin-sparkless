@@ -68,6 +68,7 @@ Signatures are exported with `scripts/export_pyspark_signatures.py` and `scripts
   - `SparkSession.builder()` → `SparkSessionBuilder`
   - `get_or_create()` → `SparkSession`
   - `create_dataframe(data: list of (int, int, str), column_names: list of 3 str)` → `DataFrame`
+  - **createDataFrame(data, schema=None)** (PySpark parity, #372): `data` is a list of dicts (keyed by column name) or list of list/tuple (row values in order). `schema` may be `None` (infer names from first dict keys or use `_1`, `_2`, … for list rows; infer types from first non-null per column), a list of column name strings (use those names, infer types), or a StructType-like object with `.fields` (each field has `.name` and `.dataType.typeName()`), or a list of `(name, dtype_str)` tuples. Returns `DataFrame`.
   - **Internal**: `_create_dataframe_from_rows(data: list[dict] | list[list], schema: list[tuple[str, str]])` → `DataFrame` (arbitrary schema; each row is a dict keyed by column name or a list of values in schema order). Use for tests or plan execution; PySpark equivalent is `createDataFrame(data, schema)`.
   - `read_csv(path: str)`, `read_parquet(path: str)`, `read_json(path: str)` → `DataFrame`
   - `is_case_sensitive()` → `bool`
