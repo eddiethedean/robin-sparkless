@@ -16,9 +16,7 @@ def _spark() -> rs.SparkSession:
 def test_drop_duplicates_subset_issue_repro() -> None:
     """df.drop_duplicates(subset=["a"]).collect() (issue repro)."""
     spark = _spark()
-    create_df = getattr(
-        spark, "create_dataframe_from_rows", spark.createDataFrame
-    )
+    create_df = getattr(spark, "create_dataframe_from_rows", spark.createDataFrame)
     df = create_df(
         [{"a": 1, "b": 1}, {"a": 1, "b": 2}, {"a": 2, "b": 1}],
         [("a", "int"), ("b", "int")],
@@ -32,9 +30,7 @@ def test_drop_duplicates_subset_issue_repro() -> None:
 def test_drop_duplicates_no_subset() -> None:
     """drop_duplicates() with no subset = distinct on all columns."""
     spark = _spark()
-    create_df = getattr(
-        spark, "create_dataframe_from_rows", spark.createDataFrame
-    )
+    create_df = getattr(spark, "create_dataframe_from_rows", spark.createDataFrame)
     df = create_df(
         [{"a": 1, "b": 1}, {"a": 1, "b": 1}, {"a": 2, "b": 1}],
         [("a", "int"), ("b", "int")],
@@ -46,9 +42,7 @@ def test_drop_duplicates_no_subset() -> None:
 def test_drop_duplicates_subset_multiple_columns() -> None:
     """drop_duplicates(subset=["a", "b"]) keeps one row per (a, b)."""
     spark = _spark()
-    create_df = getattr(
-        spark, "create_dataframe_from_rows", spark.createDataFrame
-    )
+    create_df = getattr(spark, "create_dataframe_from_rows", spark.createDataFrame)
     df = create_df(
         [{"a": 1, "b": 1}, {"a": 1, "b": 2}, {"a": 1, "b": 1}],
         [("a", "int"), ("b", "int")],
@@ -60,9 +54,7 @@ def test_drop_duplicates_subset_multiple_columns() -> None:
 def test_drop_duplicates_camel_case() -> None:
     """dropDuplicates(subset=[...]) works (PySpark camelCase)."""
     spark = _spark()
-    create_df = getattr(
-        spark, "create_dataframe_from_rows", spark.createDataFrame
-    )
+    create_df = getattr(spark, "create_dataframe_from_rows", spark.createDataFrame)
     df = create_df(
         [{"a": 1, "b": 1}, {"a": 1, "b": 2}, {"a": 2, "b": 1}],
         [("a", "int"), ("b", "int")],
