@@ -3254,14 +3254,28 @@ fn py_typeof(col: &PyColumn) -> PyColumn {
     }
 }
 
+/// Create a struct column from one or more columns (PySpark struct parity).
+///
+/// Args:
+///     *cols: One or more Column expressions (variadic). At least one required.
+///
+/// Returns:
+///     Column: Struct with one field per input column (field names from column names/aliases).
 #[pyfunction]
-fn py_struct(cols: Vec<PyRef<PyColumn>>) -> PyResult<PyColumn> {
-    if cols.is_empty() {
+#[pyo3(signature = (*cols))]
+fn py_struct(cols: &Bound<'_, pyo3::types::PyTuple>) -> PyResult<PyColumn> {
+    let columns: Vec<PyRef<PyColumn>> = (0..cols.len())
+        .map(|i| cols.get_item(i).and_then(|ob| ob.extract()))
+        .collect::<PyResult<Vec<_>>>()
+        .map_err(|e| {
+            pyo3::exceptions::PyTypeError::new_err(format!("struct() args must be Column: {e}"))
+        })?;
+    if columns.is_empty() {
         return Err(pyo3::exceptions::PyValueError::new_err(
             "struct() requires at least one column",
         ));
     }
-    let refs: Vec<&RsColumn> = cols.iter().map(|c| &c.inner).collect();
+    let refs: Vec<&RsColumn> = columns.iter().map(|c| &c.inner).collect();
     Ok(PyColumn {
         inner: struct_(&refs),
     })
