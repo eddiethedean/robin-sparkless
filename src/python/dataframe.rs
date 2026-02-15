@@ -6,7 +6,7 @@ use crate::dataframe::{CubeRollupData, SaveMode, WriteFormat, WriteMode};
 use crate::functions::SortOrder;
 #[cfg(feature = "pyo3")]
 use crate::python::udf::{execute_grouped_vectorized_aggs, GroupedAggSpec};
-use crate::{DataFrame, GroupedData};
+use crate::{DataFrame, GroupedData, PivotedGroupedData};
 use polars::prelude::{col, lit, Expr, NULL};
 use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyDict, PyList, PyTuple};
@@ -1740,6 +1740,24 @@ impl PyGroupedData {
         Ok(PyDataFrame { inner: df })
     }
 
+    /// Pivot a column for pivot-table aggregation (PySpark: groupBy(...).pivot(pivot_col).sum(value_col)).
+    ///
+    /// Args:
+    ///     pivot_col: Name of the column whose distinct values become output columns.
+    ///     values: Optional list of pivot values; if None, values are taken from the data.
+    ///
+    /// Returns:
+    ///     PivotedGroupedData: Call .sum(column), .avg(column), .min(column), .max(column) to run the aggregation.
+    #[pyo3(signature = (pivot_col, values=None))]
+    fn pivot(
+        &self,
+        pivot_col: &str,
+        values: Option<Vec<String>>,
+    ) -> PyResult<PyPivotedGroupedData> {
+        let piv = self.inner.pivot(pivot_col, values);
+        Ok(PyPivotedGroupedData { inner: piv })
+    }
+
     /// Aggregate groups with one or more expressions (e.g. sum(col("x")), avg(col("y"))).
     ///
     /// Args:
@@ -2038,6 +2056,61 @@ impl PyGroupedData {
             .skewness(column)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
         return Ok(PyDataFrame { inner: df });
+    }
+}
+
+/// Python wrapper for PivotedGroupedData (groupBy(...).pivot(...).sum(...)).
+#[pyclass(name = "PivotedGroupedData")]
+pub struct PyPivotedGroupedData {
+    inner: PivotedGroupedData,
+}
+
+#[pymethods]
+impl PyPivotedGroupedData {
+    /// Pivot then sum (PySpark: groupBy(...).pivot(...).sum(column)).
+    fn sum(&self, value_col: &str) -> PyResult<PyDataFrame> {
+        let df = self
+            .inner
+            .sum(value_col)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        Ok(PyDataFrame { inner: df })
+    }
+
+    /// Pivot then mean (PySpark: groupBy(...).pivot(...).avg(column)).
+    fn avg(&self, value_col: &str) -> PyResult<PyDataFrame> {
+        let df = self
+            .inner
+            .avg(value_col)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        Ok(PyDataFrame { inner: df })
+    }
+
+    /// Pivot then min (PySpark: groupBy(...).pivot(...).min(column)).
+    #[pyo3(name = "min")]
+    fn min_(&self, value_col: &str) -> PyResult<PyDataFrame> {
+        let df = self
+            .inner
+            .min(value_col)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        Ok(PyDataFrame { inner: df })
+    }
+
+    /// Pivot then max (PySpark: groupBy(...).pivot(...).max(column)).
+    fn max(&self, value_col: &str) -> PyResult<PyDataFrame> {
+        let df = self
+            .inner
+            .max(value_col)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        Ok(PyDataFrame { inner: df })
+    }
+
+    /// Pivot then count (PySpark: groupBy(...).pivot(...).count()). Counts rows per group per pivot value.
+    fn count(&self) -> PyResult<PyDataFrame> {
+        let df = self
+            .inner
+            .count()
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        Ok(PyDataFrame { inner: df })
     }
 }
 
