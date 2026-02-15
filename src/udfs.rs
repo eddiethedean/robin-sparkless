@@ -1202,6 +1202,37 @@ pub fn apply_find_in_set(columns: &mut [Column]) -> PolarsResult<Option<Column>>
     Ok(Some(Column::new(name, out.into_series())))
 }
 
+/// regexp_extract using fancy-regex when pattern has lookahead/lookbehind (PySpark parity).
+/// Polars str().extract() uses regex crate which does not support lookaround.
+pub fn apply_regexp_extract_lookaround(
+    column: Column,
+    pattern: &str,
+    group_index: usize,
+) -> PolarsResult<Option<Column>> {
+    use fancy_regex::Regex;
+    let name = column.field().into_owned().name;
+    let series = column.take_materialized_series();
+    let ca = series
+        .str()
+        .map_err(|e| PolarsError::ComputeError(format!("regexp_extract: {e}").into()))?;
+    let re = Regex::new(pattern).map_err(|e| {
+        PolarsError::ComputeError(
+            format!("regexp_extract invalid regex (lookaround) '{pattern}': {e}").into(),
+        )
+    })?;
+    let out = StringChunked::from_iter_options(
+        name.as_str().into(),
+        ca.into_iter().map(|opt_s| {
+            opt_s.and_then(|s| {
+                let caps = re.captures(s).ok().flatten()?;
+                let m = caps.get(group_index)?;
+                Some(m.as_str().to_string())
+            })
+        }),
+    );
+    Ok(Some(Column::new(name, out.into_series())))
+}
+
 /// Regexp instr: 1-based position of first regex match (PySpark regexp_instr).
 /// group_idx: 0 = full match, 1+ = capture group. Returns null if no match.
 pub fn apply_regexp_instr(
