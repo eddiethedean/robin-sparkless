@@ -10,7 +10,7 @@ import robin_sparkless as rs
 def test_select_same_column_cast_twice() -> None:
     """Select same column cast to different types (duplicate output names) should not error."""
     spark = rs.SparkSession.builder().app_name("test").get_or_create()
-    df = spark._create_dataframe_from_rows(
+    df = spark.createDataFrame(
         [{"num": 1}, {"num": 2}],
         [("num", "bigint")],
     )
@@ -32,7 +32,7 @@ def test_select_same_column_cast_twice() -> None:
 def test_select_three_same_name() -> None:
     """Three expressions with same output name become name, name_1, name_2."""
     spark = rs.SparkSession.builder().app_name("test").get_or_create()
-    df = spark._create_dataframe_from_rows(
+    df = spark.createDataFrame(
         [{"x": 10}],
         [("x", "bigint")],
     )

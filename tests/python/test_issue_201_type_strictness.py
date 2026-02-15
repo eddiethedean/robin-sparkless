@@ -14,7 +14,7 @@ def test_string_plus_numeric_with_column_no_cast() -> None:
     import robin_sparkless as rs
 
     spark = rs.SparkSession.builder().app_name("test").get_or_create()
-    df = spark._create_dataframe_from_rows(
+    df = spark.createDataFrame(
         [{"a": "10", "b": 2}],
         [("a", "string"), ("b", "bigint")],
     )
@@ -28,7 +28,7 @@ def test_string_arithmetic_ops_implicit_coercion() -> None:
     import robin_sparkless as rs
 
     spark = rs.SparkSession.builder().app_name("test").get_or_create()
-    df = spark._create_dataframe_from_rows(
+    df = spark.createDataFrame(
         [{"a": "10", "b": 2}, {"a": "20", "b": 3}],
         [("a", "string"), ("b", "bigint")],
     )
@@ -53,7 +53,7 @@ def test_invalid_string_becomes_null() -> None:
     import robin_sparkless as rs
 
     spark = rs.SparkSession.builder().app_name("test").get_or_create()
-    df = spark._create_dataframe_from_rows(
+    df = spark.createDataFrame(
         [{"s": "10"}, {"s": "bad"}, {"s": "5"}],
         [("s", "string")],
     )

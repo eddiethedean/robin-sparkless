@@ -15,11 +15,8 @@ F = rs
 def test_between_string_column_numeric_bounds_with_column() -> None:
     """df.with_column("between", col("col").between(1, 20)) when col is string coerces."""
     spark = F.SparkSession.builder().app_name("test_276").get_or_create()
-    create_df = getattr(spark, "create_dataframe_from_rows", None) or getattr(
-        spark, "_create_dataframe_from_rows"
-    )
     data = [{"col": "5"}, {"col": "10"}, {"col": "15"}]
-    df = create_df(data, [("col", "str")])
+    df = spark.createDataFrame(data, [("col", "str")])
     df = df.with_column("between", F.col("col").between(1, 20))
     rows = df.collect()
     assert len(rows) == 3
@@ -32,11 +29,8 @@ def test_between_string_column_numeric_bounds_with_column() -> None:
 def test_between_string_column_numeric_bounds_filter() -> None:
     """df.filter(col("col").between(1, 20)) when col is string also coerces."""
     spark = F.SparkSession.builder().app_name("test_276").get_or_create()
-    create_df = getattr(spark, "create_dataframe_from_rows", None) or getattr(
-        spark, "_create_dataframe_from_rows"
-    )
     data = [{"col": "5"}, {"col": "10"}, {"col": "25"}]
-    df = create_df(data, [("col", "str")])
+    df = spark.createDataFrame(data, [("col", "str")])
     out = df.filter(F.col("col").between(1, 20)).collect()
     assert len(out) == 2  # "5" and "10" in range, "25" not
     assert {r["col"] for r in out} == {"5", "10"}

@@ -21,10 +21,7 @@ def test_filter_eq_null_safe_lit_none_returns_null_row() -> None:
     spark = rs.SparkSession.builder().app_name("eq_null_safe").get_or_create()
     data = [{"a": 1}, {"a": None}, {"a": 3}]
     schema = [("a", "int")]
-    create_df = getattr(spark, "create_dataframe_from_rows", None) or getattr(
-        spark, "_create_dataframe_from_rows"
-    )
-    df = create_df(data, schema)
+    df = spark.createDataFrame(data, schema)
     out = df.filter(rs.col("a").eq_null_safe(rs.lit(None))).collect()
     assert len(out) == 1
     assert out[0]["a"] is None
@@ -39,10 +36,7 @@ def test_filter_eq_null_safe_column_both_null_true() -> None:
         {"a": 3, "b": 4},
     ]
     schema = [("a", "int"), ("b", "int")]
-    create_df = getattr(spark, "create_dataframe_from_rows", None) or getattr(
-        spark, "_create_dataframe_from_rows"
-    )
-    df = create_df(data, schema)
+    df = spark.createDataFrame(data, schema)
     out = df.filter(rs.col("a").eq_null_safe(rs.col("b"))).collect()
     # Rows where a and b are equal (including both null): (1,2) no, (null,null) yes, (3,4) no
     assert len(out) == 1

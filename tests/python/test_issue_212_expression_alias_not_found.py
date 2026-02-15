@@ -12,7 +12,7 @@ import robin_sparkless as rs
 def test_select_when_otherwise_alias() -> None:
     """Select with when().then().otherwise().alias('result') should not raise 'not found: result'."""
     spark = rs.SparkSession.builder().app_name("test").get_or_create()
-    df = spark._create_dataframe_from_rows(
+    df = spark.createDataFrame(
         [{"x": 1}, {"x": 2}],
         [("x", "bigint")],
     )
@@ -31,7 +31,7 @@ def test_select_when_otherwise_alias() -> None:
 def test_select_window_rank_alias() -> None:
     """Select with col().rank().over([...]).alias('rank') should not raise 'not found: rank'."""
     spark = rs.SparkSession.builder().app_name("test").get_or_create()
-    df = spark._create_dataframe_from_rows(
+    df = spark.createDataFrame(
         [{"x": 10}, {"x": 20}, {"x": 20}],
         [("x", "bigint")],
     )

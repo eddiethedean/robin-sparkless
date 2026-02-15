@@ -67,10 +67,10 @@ While Sparkless implements the [refactor plan](SPARKLESS_REFACTOR_PLAN.md) (seri
 
 ## 5. Python API: Flexible DataFrame Creation from Rows
 
-**Goal**: Sparkless will pass `data` as list of dicts and `schema` as a list of (name, type) or similar. Our current Python `create_dataframe` only accepts 3-tuple rows and three column names.
+**Goal**: Sparkless will pass `data` as list of dicts and `schema` as a list of (name, type) or similar.
 
-- **Extend**: Add an API that accepts a list of dicts (or list of lists) plus a schema description (e.g. list of `(name, dtype_string)` or a single schema dict). Implement by building a Polars DataFrame from the rows and schema, then wrapping in our `DataFrame`. This allows Sparkless to call `materialize_from_plan(data, schema, plan)` with arbitrary schemas and have us create the initial DataFrame without coercing everything to (i64, i64, str).
-- **Backward compatibility**: Keep existing `create_dataframe(data: list of 3-tuples, column_names: list of 3 str)`; add e.g. `create_dataframe_from_rows(data: list[dict], schema: list[tuple[str, str]])` or similar.
+- **Done (#372)**: Python **`createDataFrame(data, schema=None)`** accepts list of dicts (schema inferred), list of tuples with column names, or explicit schema as list of `(name, dtype_str)` or StructType-like. Sparkless can call `spark.createDataFrame(data, schema)` for arbitrary schemas.
+- **Backward compatibility**: `create_dataframe(data, column_names)` remains for 3-tuple rows; `_create_dataframe_from_rows(data, schema)` is internal/compatibility.
 
 **Outcome**: Robin backend can handle any schema Sparkless sends, not only the PoC’s 3-column case.
 
@@ -84,6 +84,6 @@ While Sparkless implements the [refactor plan](SPARKLESS_REFACTOR_PLAN.md) (seri
 | Minimal plan schema doc | robin-sparkless | `docs/LOGICAL_PLAN_FORMAT.md` (optional coordination with Sparkless) |
 | Expression interpreter (from dict tree) | robin-sparkless | Filter/select/withColumn exprs from serialized form |
 | Plan-based fixtures and tests | robin-sparkless | Regression tests for plan execution |
-| Flexible `create_dataframe_from_rows` (or equivalent) | robin-sparkless | Arbitrary schema + list of dicts → DataFrame |
+| Flexible DataFrame creation (`createDataFrame` / `create_dataframe_from_rows`) | robin-sparkless | Python: `createDataFrame(data, schema=None)`; Rust: `create_dataframe_from_rows(rows, schema)` |
 
 Doing these in parallel with Sparkless’s refactor means that when they add `materialize_from_plan` and emit a logical plan, we already have an interpreter and tests; the Sparkless robin backend then just wires their plan into our `execute_plan` and converts results to `Row`.

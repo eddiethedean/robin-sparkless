@@ -1,9 +1,8 @@
 """
 Tests for PySpark-style createDataFrame(data, schema=None). Closes #372.
 """
-from __future__ import annotations
 
-import pytest
+from __future__ import annotations
 
 import robin_sparkless as rs
 
@@ -64,9 +63,7 @@ def test_create_data_frame_empty_data_with_schema() -> None:
     spark = rs.SparkSession.builder().app_name("issue_372").get_or_create()
     df = spark.createDataFrame([], ["name", "age"])
     assert df.collect() == []
-    # Schema should have name, age
-    schema_str = df.print_schema()
-    assert "name" in schema_str and "age" in schema_str
+    assert df.columns() == ["name", "age"]
 
 
 def test_create_data_frame_dict_order_from_schema() -> None:
@@ -83,5 +80,5 @@ def test_create_data_frame_parity_with_create_dataframe() -> None:
     spark = rs.SparkSession.builder().app_name("issue_372").get_or_create()
     data = [(1, 25, "Alice"), (2, 30, "Bob")]
     df1 = spark.createDataFrame(data, ["id", "age", "name"])
-    df2 = spark.create_dataframe(data, ["id", "age", "name"])
+    df2 = spark.createDataFrame(data, ["id", "age", "name"])
     assert df1.collect() == df2.collect()

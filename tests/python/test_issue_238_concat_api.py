@@ -14,7 +14,7 @@ def test_concat_with_literal_separator_in_with_column() -> None:
 
     F = rs
     spark = F.SparkSession.builder().app_name("concat_api_repro").get_or_create()
-    df = spark._create_dataframe_from_rows(
+    df = spark.createDataFrame(
         [
             {"first_name": "Alice", "last_name": "Smith"},
             {"first_name": "Bob", "last_name": "Jones"},
@@ -40,7 +40,7 @@ def test_concat_ws_matches_concat_for_space_separator() -> None:
 
     F = rs
     spark = F.SparkSession.builder().app_name("concat_ws_api_repro").get_or_create()
-    df = spark._create_dataframe_from_rows(
+    df = spark.createDataFrame(
         [
             {"first_name": "Alice", "last_name": "Smith"},
             {"first_name": "Bob", "last_name": "Jones"},

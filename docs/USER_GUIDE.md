@@ -89,23 +89,27 @@ let df = spark.create_dataframe(
 **From tuples (Python)**
 
 ```python
-df = spark.create_dataframe(
+df = spark.createDataFrame(
     [(1, 25, "Alice"), (2, 30, "Bob"), (3, 35, "Charlie")],
     ["id", "age", "name"],
 )
 ```
 
-**From rows with arbitrary schema**
+**From rows with arbitrary schema (Python)**
 
-Use `_create_dataframe_from_rows` for schemas other than the 3-tuple (id, age, name):
+Use `createDataFrame(data, schema=None)` for list of dicts (schema inferred), list of tuples with column names, or explicit schema:
 
 ```python
-schema = [("id", "bigint"), ("name", "string"), ("score", "double")]
-rows = [
+# List of dicts, schema inferred
+df = spark.createDataFrame([
     {"id": 1, "name": "Alice", "score": 95.5},
     {"id": 2, "name": "Bob", "score": 87.0},
-]
-df = spark._create_dataframe_from_rows(rows, schema)
+])
+
+# Or with explicit schema (list of (name, dtype_str))
+schema = [("id", "bigint"), ("name", "string"), ("score", "double")]
+rows = [{"id": 1, "name": "Alice", "score": 95.5}, {"id": 2, "name": "Bob", "score": 87.0}]
+df = spark.createDataFrame(rows, schema)
 ```
 
 **From files**
@@ -360,7 +364,7 @@ Example `collect()` output for the quick-start DataFrame (id, age, name):
 | Error | Cause | Fix |
 |-------|-------|-----|
 | Column 'X' not found | Typo or wrong case | Check column names with `df.columns()` |
-| create_dataframe: expected 3 column names | `create_dataframe` needs exactly 3 columns | Use `_create_dataframe_from_rows` for other schemas |
+| create_dataframe: expected 3 column names | Rust `create_dataframe` needs exactly 3 columns | In Python use `createDataFrame(data, schema)` for any schema |
 | call_udf: no session | UDF used before session created | Use `SparkSession.builder().get_or_create()` first |
 | SQL: unknown function | Function not built-in or UDF | Register with `spark.udf().register()` or use a built-in |
 

@@ -131,7 +131,7 @@ You can also wrap an existing Polars `DataFrame` with `DataFrame::from_polars(po
 import robin_sparkless as rs
 
 spark = rs.SparkSession.builder().app_name("demo").get_or_create()
-df = spark.create_dataframe(
+df = spark.createDataFrame(
     [(1, 25, "Alice"), (2, 30, "Bob"), (3, 35, "Charlie")],
     ["id", "age", "name"],
 )

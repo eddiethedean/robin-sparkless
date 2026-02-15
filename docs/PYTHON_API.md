@@ -41,7 +41,7 @@ Python module is only compiled when the `pyo3` feature is enabled. Default `carg
 
 | Rust type       | Python class / function | Notes |
 |-----------------|-------------------------|--------|
-| SparkSession    | `SparkSession`          | `builder()`, `get_or_create()`, `create_dataframe`, `_create_dataframe_from_rows` (internal), `read_csv`, `read_parquet`, `read_json`, `is_case_sensitive()`, `udf()`; with `sql`: `sql(query)`, `create_or_replace_temp_view(name, df)`, `table(name)` (temp view then saved table), `read_delta(name_or_path)` (path → Delta on disk; name → in-memory table), `catalog()` → `listTables(dbName=None)`, `tableExists(tableName, dbName=None)`, `dropTempView(name)`, `dropTable(tableName)`; with `delta`: `read_delta_version(path, version)` for path-based time travel |
+| SparkSession    | `SparkSession`          | `builder()`, `get_or_create()`, `createDataFrame(data, schema=None)`, `create_dataframe` (3-tuple convenience), `read_csv`, `read_parquet`, `read_json`, `is_case_sensitive()`, `udf()`; with `sql`: `sql(query)`, `create_or_replace_temp_view(name, df)`, `table(name)` (temp view then saved table), `read_delta(name_or_path)` (path → Delta on disk; name → in-memory table), `catalog()` → `listTables(dbName=None)`, `tableExists(tableName, dbName=None)`, `dropTempView(name)`, `dropTable(tableName)`; with `delta`: `read_delta_version(path, version)` for path-based time travel |
 | SparkSessionBuilder | `SparkSessionBuilder` | `app_name()`, `master()`, `config()`, `get_or_create()` |
 | DataFrame       | `DataFrame` | `filter`, `select`, `with_column`, `order_by`, `group_by`, `join`, `union`, `union_by_name`, `distinct`, `drop`, `dropna`, `fillna`, `limit`, `with_column_renamed`, `count`, `show`, `collect`; **Phase 12**: `sample`, `random_split`, `first`, `head`, `tail`, `take`, `is_empty`, `to_json`, `to_pandas`, `explain`, `print_schema`, `checkpoint`, `local_checkpoint`, `repartition`, `coalesce`, `offset`, `summary`, `to_df`, `select_expr`, `col_regex`, `with_columns`, `with_columns_renamed`, `stat`, `na`; **Gap closure**: `cube(cols)`, `rollup(cols)` → `CubeRollupData`; `write()` → `DataFrameWriter` (`.mode()`, `.format()`, `.save(path)`, `.saveAsTable(name, ...)` with sql); `data()`, `toLocalIterator()` (same as collect); `persist()`, `unpersist()` (no-op); stubs: `rdd`, `foreach`, `foreachPartition`, `mapInPandas`, `mapPartitions`, `storageLevel`, `isStreaming`, `withWatermark`; with `sql`: `createOrReplaceTempView(name)` (uses default session); with `delta`: `write_delta(path, overwrite)`; with `sql`: `write_delta_table(name)` (in-memory table for `read_delta(name)`) |
 | CubeRollupData  | `CubeRollupData` (returned by `df.cube()` / `df.rollup()`) | `agg(exprs)` → `DataFrame` |
@@ -67,9 +67,9 @@ Signatures are exported with `scripts/export_pyspark_signatures.py` and `scripts
 - **SparkSession**
   - `SparkSession.builder()` → `SparkSessionBuilder`
   - `get_or_create()` → `SparkSession`
-  - `create_dataframe(data: list of (int, int, str), column_names: list of 3 str)` → `DataFrame`
-  - **createDataFrame(data, schema=None)** (PySpark parity, #372): `data` is a list of dicts (keyed by column name) or list of list/tuple (row values in order). `schema` may be `None` (infer names from first dict keys or use `_1`, `_2`, … for list rows; infer types from first non-null per column), a list of column name strings (use those names, infer types), or a StructType-like object with `.fields` (each field has `.name` and `.dataType.typeName()`), or a list of `(name, dtype_str)` tuples. Returns `DataFrame`.
-  - **Internal**: `_create_dataframe_from_rows(data: list[dict] | list[list], schema: list[tuple[str, str]])` → `DataFrame` (arbitrary schema; each row is a dict keyed by column name or a list of values in schema order). Use for tests or plan execution; PySpark equivalent is `createDataFrame(data, schema)`.
+  - **createDataFrame(data, schema=None)** (PySpark parity, #372): primary API. `data` is a list of dicts (keyed by column name) or list of list/tuple (row values in order). `schema` may be `None` (infer names from first dict keys or use `_1`, `_2`, … for list rows; infer types from first non-null per column), a list of column name strings (use those names, infer types), or a StructType-like object with `.fields` (each field has `.name` and `.dataType.typeName()`), or a list of `(name, dtype_str)` tuples. Returns `DataFrame`.
+  - `create_dataframe(data: list of (int, int, str), column_names: list of 3 str)` → `DataFrame` (convenience for 3-column tuple data only).
+  - **Internal**: `_create_dataframe_from_rows(data, schema)` — same as `createDataFrame(data, schema)` with schema as list of `(name, dtype_str)`; retained for compatibility.
   - `read_csv(path: str)`, `read_parquet(path: str)`, `read_json(path: str)` → `DataFrame`
   - `is_case_sensitive()` → `bool`
   - `udf()` → `UDFRegistration` (register scalar or vectorized Python UDFs; see UDF guide)
@@ -133,7 +133,7 @@ Signatures are exported with `scripts/export_pyspark_signatures.py` and `scripts
 
 ## Data transfer
 
-- **create_dataframe**: Python passes a list of 3-tuples `(int, int, str)` and three column names. Supported schema for this entry point is fixed (id-like, numeric, string). Other schemas may be added later.
+- **createDataFrame** / **create_dataframe**: Prefer `createDataFrame(data, schema=None)` for list of dicts (infer), list of tuples with column names, or explicit schema. `create_dataframe(data, column_names)` is a convenience for 3-tuples `(int, int, str)` and three column names only.
 - **collect** / **to_pandas**: Both return a **list of Python dicts** (`list[dict[str, Any]]`), one dict per row (column name → value). Types: `None`, `int`, `float`, `bool`, `str` (and `int` for uint64). Use `pandas.DataFrame.from_records(df.to_pandas())` to obtain a pandas DataFrame. Unsupported Polars types raise a clear runtime error.
 
 ## Errors

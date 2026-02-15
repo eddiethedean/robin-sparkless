@@ -15,10 +15,7 @@ F = rs
 def test_round_string_column_implicit_cast() -> None:
     """with_column with F.round(F.col('val')) on string column succeeds; matches PySpark [10.0, 10.0]."""
     spark = F.SparkSession.builder().app_name("test_262").get_or_create()
-    create_df = getattr(spark, "create_dataframe_from_rows", None) or getattr(
-        spark, "_create_dataframe_from_rows"
-    )
-    df = create_df(
+    df = spark.createDataFrame(
         [{"val": "10.4"}, {"val": "9.6"}],
         [("val", "string")],
     )
@@ -34,10 +31,7 @@ def test_round_string_column_implicit_cast() -> None:
 def test_round_string_column_with_scale() -> None:
     """round on string column with scale=1 yields one decimal place."""
     spark = F.SparkSession.builder().app_name("test_262").get_or_create()
-    create_df = getattr(spark, "create_dataframe_from_rows", None) or getattr(
-        spark, "_create_dataframe_from_rows"
-    )
-    df = create_df(
+    df = spark.createDataFrame(
         [{"val": "10.44"}, {"val": "9.66"}],
         [("val", "string")],
     )
@@ -51,10 +45,7 @@ def test_round_string_column_with_scale() -> None:
 def test_round_string_column_strips_whitespace() -> None:
     """round on string column with leading/trailing whitespace (PySpark strips then casts). #272."""
     spark = F.SparkSession.builder().app_name("test_272").get_or_create()
-    create_df = getattr(spark, "create_dataframe_from_rows", None) or getattr(
-        spark, "_create_dataframe_from_rows"
-    )
-    df = create_df(
+    df = spark.createDataFrame(
         [{"val": "  10.6  "}, {"val": "\t20.7"}],
         [("val", "str")],
     )

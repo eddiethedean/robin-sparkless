@@ -16,7 +16,7 @@ def test_select_expression_literal_plus_column() -> None:
     import robin_sparkless as rs
 
     spark = rs.SparkSession.builder().app_name("test").get_or_create()
-    df = spark._create_dataframe_from_rows([{"x": 10}, {"x": 20}], [("x", "int")])
+    df = spark.createDataFrame([{"x": 10}, {"x": 20}], [("x", "int")])
 
     # Without alias: one column, values 12 and 22 (column name is engine-defined)
     result = df.select(rs.lit(2) + rs.col("x")).collect()
@@ -33,7 +33,7 @@ def test_select_expression_literal_times_column() -> None:
     import robin_sparkless as rs
 
     spark = rs.SparkSession.builder().app_name("test").get_or_create()
-    df = spark._create_dataframe_from_rows([{"x": 10}, {"x": 20}], [("x", "int")])
+    df = spark.createDataFrame([{"x": 10}, {"x": 20}], [("x", "int")])
 
     result = df.select((rs.lit(3) * rs.col("x")).alias("tripled")).collect()
     assert result == [{"tripled": 30}, {"tripled": 60}]
@@ -44,9 +44,7 @@ def test_select_expression_aliased() -> None:
     import robin_sparkless as rs
 
     spark = rs.SparkSession.builder().app_name("test").get_or_create()
-    df = spark._create_dataframe_from_rows(
-        [{"a": 1}, {"a": 2}, {"a": 3}], [("a", "int")]
-    )
+    df = spark.createDataFrame([{"a": 1}, {"a": 2}, {"a": 3}], [("a", "int")])
 
     result = df.select((rs.col("a") * 2).alias("doubled")).collect()
     assert result == [{"doubled": 2}, {"doubled": 4}, {"doubled": 6}]
@@ -57,7 +55,7 @@ def test_select_mixed_column_names_and_expressions() -> None:
     import robin_sparkless as rs
 
     spark = rs.SparkSession.builder().app_name("test").get_or_create()
-    df = spark._create_dataframe_from_rows([{"x": 10}, {"x": 20}], [("x", "int")])
+    df = spark.createDataFrame([{"x": 10}, {"x": 20}], [("x", "int")])
 
     result = df.select("x", (rs.lit(2) + rs.col("x")).alias("plus_two")).collect()
     assert result == [{"x": 10, "plus_two": 12}, {"x": 20, "plus_two": 22}]
@@ -68,7 +66,7 @@ def test_select_list_of_expressions() -> None:
     import robin_sparkless as rs
 
     spark = rs.SparkSession.builder().app_name("test").get_or_create()
-    df = spark._create_dataframe_from_rows(
+    df = spark.createDataFrame(
         [{"a": 1, "b": 10}, {"a": 2, "b": 20}],
         [("a", "int"), ("b", "int")],
     )
@@ -90,7 +88,7 @@ def test_select_varargs_expressions() -> None:
     import robin_sparkless as rs
 
     spark = rs.SparkSession.builder().app_name("test").get_or_create()
-    df = spark._create_dataframe_from_rows([{"x": 5}, {"x": 7}], [("x", "int")])
+    df = spark.createDataFrame([{"x": 5}, {"x": 7}], [("x", "int")])
 
     result = df.select(
         rs.col("x"),
@@ -108,7 +106,7 @@ def test_select_string_column_names_still_work() -> None:
     import robin_sparkless as rs
 
     spark = rs.SparkSession.builder().app_name("test").get_or_create()
-    df = spark._create_dataframe_from_rows(
+    df = spark.createDataFrame(
         [{"a": 1, "b": 2, "c": 3}, {"a": 4, "b": 5, "c": 6}],
         [("a", "int"), ("b", "int"), ("c", "int")],
     )
@@ -125,7 +123,7 @@ def test_select_mixed_strings_and_expressions() -> None:
     import robin_sparkless as rs
 
     spark = rs.SparkSession.builder().app_name("test").get_or_create()
-    df = spark._create_dataframe_from_rows(
+    df = spark.createDataFrame(
         [{"a": 1, "b": 10, "c": 100}, {"a": 2, "b": 20, "c": 200}],
         [("a", "int"), ("b", "int"), ("c", "int")],
     )
@@ -146,7 +144,7 @@ def test_select_expression_with_multiply_literal_left() -> None:
     import robin_sparkless as rs
 
     spark = rs.SparkSession.builder().app_name("test").get_or_create()
-    df = spark._create_dataframe_from_rows([{"x": 10}, {"x": 20}], [("x", "int")])
+    df = spark.createDataFrame([{"x": 10}, {"x": 20}], [("x", "int")])
 
     result = df.select((3 * rs.col("x")).alias("tripled")).collect()
     assert result == [{"tripled": 30}, {"tripled": 60}]
@@ -157,7 +155,7 @@ def test_select_complex_expression() -> None:
     import robin_sparkless as rs
 
     spark = rs.SparkSession.builder().app_name("test").get_or_create()
-    df = spark._create_dataframe_from_rows(
+    df = spark.createDataFrame(
         [{"a": 1, "b": 2, "c": 3}, {"a": 4, "b": 5, "c": 6}],
         [("a", "int"), ("b", "int"), ("c", "int")],
     )
@@ -173,7 +171,7 @@ def test_select_single_expression_no_alias() -> None:
     import robin_sparkless as rs
 
     spark = rs.SparkSession.builder().app_name("test").get_or_create()
-    df = spark._create_dataframe_from_rows([{"x": 1}], [("x", "int")])
+    df = spark.createDataFrame([{"x": 1}], [("x", "int")])
 
     result = df.select(rs.col("x") + rs.lit(10)).collect()
     assert len(result) == 1

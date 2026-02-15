@@ -12,15 +12,12 @@ import robin_sparkless as rs
 
 def _spark_and_df():
     spark = rs.SparkSession.builder().app_name("bindings").get_or_create()
-    create_df = getattr(spark, "create_dataframe_from_rows", None) or getattr(
-        spark, "_create_dataframe_from_rows"
-    )
     data = [
         {"s": "  ab  ", "n": 2.7, "t": "hello world"},
         {"s": "xy", "n": -1.2, "t": "foo bar"},
     ]
     schema = [("s", "string"), ("n", "double"), ("t", "string")]
-    return spark, create_df(data, schema)
+    return spark, spark.createDataFrame(data, schema)
 
 
 def test_length_module_and_method() -> None:

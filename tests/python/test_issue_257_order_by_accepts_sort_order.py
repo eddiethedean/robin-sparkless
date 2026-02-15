@@ -13,9 +13,6 @@ import robin_sparkless as rs
 def test_order_by_single_desc_nulls_last() -> None:
     """df.order_by(col("value").desc_nulls_last()) works and puts nulls last (PySpark parity)."""
     spark = rs.SparkSession.builder().app_name("order_by_sort_order").get_or_create()
-    create_df = getattr(spark, "create_dataframe_from_rows", None) or getattr(
-        spark, "_create_dataframe_from_rows"
-    )
     data = [
         {"value": "A"},
         {"value": "B"},
@@ -23,7 +20,7 @@ def test_order_by_single_desc_nulls_last() -> None:
         {"value": "C"},
         {"value": "D"},
     ]
-    df = create_df(data, [("value", "string")])
+    df = spark.createDataFrame(data, [("value", "string")])
     out = df.order_by(rs.col("value").desc_nulls_last()).collect()
     assert len(out) == 5
     values = [r["value"] for r in out]
@@ -34,11 +31,8 @@ def test_order_by_single_desc_nulls_last() -> None:
 def test_order_by_list_of_sort_orders() -> None:
     """df.order_by([col("a").asc(), col("b").desc_nulls_last()]) works."""
     spark = rs.SparkSession.builder().app_name("order_by_sort_order").get_or_create()
-    create_df = getattr(spark, "create_dataframe_from_rows", None) or getattr(
-        spark, "_create_dataframe_from_rows"
-    )
     data = [{"a": 1, "b": 10}, {"a": 1, "b": 20}, {"a": 2, "b": 5}]
-    df = create_df(data, [("a", "int"), ("b", "int")])
+    df = spark.createDataFrame(data, [("a", "int"), ("b", "int")])
     out = df.order_by([rs.col("a").asc(), rs.col("b").desc_nulls_last()]).collect()
     assert len(out) == 3
     # a asc, then b desc: (1,20), (1,10), (2,5)
@@ -49,11 +43,8 @@ def test_order_by_list_of_sort_orders() -> None:
 def test_order_by_column_names_unchanged() -> None:
     """df.order_by(["col1", "col2"]) and order_by(list, ascending) still work."""
     spark = rs.SparkSession.builder().app_name("order_by_sort_order").get_or_create()
-    create_df = getattr(spark, "create_dataframe_from_rows", None) or getattr(
-        spark, "_create_dataframe_from_rows"
-    )
     data = [{"x": 3}, {"x": 1}, {"x": 2}]
-    df = create_df(data, [("x", "int")])
+    df = spark.createDataFrame(data, [("x", "int")])
     out = df.order_by(["x"]).collect()
     assert [r["x"] for r in out] == [1, 2, 3]
     out_desc = df.order_by(["x"], ascending=[False]).collect()

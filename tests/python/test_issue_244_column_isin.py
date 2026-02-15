@@ -15,7 +15,7 @@ def test_column_isin_empty_list_returns_zero_rows() -> None:
     spark = rs.SparkSession.builder().app_name("isin_empty").get_or_create()
     data = [{"id": 1}, {"id": 2}, {"id": 3}]
     schema = [("id", "int")]
-    df = spark._create_dataframe_from_rows(data, schema)
+    df = spark.createDataFrame(data, schema)
     out = df.filter(rs.col("id").isin([])).collect()
     assert len(out) == 0
 
@@ -25,7 +25,7 @@ def test_column_isin_non_empty_int_list() -> None:
     spark = rs.SparkSession.builder().app_name("isin_int").get_or_create()
     data = [{"id": 1}, {"id": 2}, {"id": 3}]
     schema = [("id", "int")]
-    df = spark._create_dataframe_from_rows(data, schema)
+    df = spark.createDataFrame(data, schema)
     out = df.filter(rs.col("id").isin([1, 3])).collect()
     assert len(out) == 2
     ids = {r["id"] for r in out}
@@ -37,7 +37,7 @@ def test_column_isin_string_list() -> None:
     spark = rs.SparkSession.builder().app_name("isin_str").get_or_create()
     data = [{"name": "a"}, {"name": "b"}, {"name": "c"}]
     schema = [("name", "string")]
-    df = spark._create_dataframe_from_rows(data, schema)
+    df = spark.createDataFrame(data, schema)
     out = df.filter(rs.col("name").isin(["a", "c"])).collect()
     assert len(out) == 2
     names = {r["name"] for r in out}

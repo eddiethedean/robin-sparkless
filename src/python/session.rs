@@ -63,7 +63,12 @@ fn parse_schema_param(
                 .getattr("typeName")
                 .and_then(|a| a.call0())
                 .and_then(|a| a.extract::<String>())
-                .or_else(|_| dtype.getattr("simpleString").and_then(|a| a.call0()).and_then(|a| a.extract::<String>()))
+                .or_else(|_| {
+                    dtype
+                        .getattr("simpleString")
+                        .and_then(|a| a.call0())
+                        .and_then(|a| a.extract::<String>())
+                })
                 .unwrap_or_else(|_| "string".to_string());
             schema_vec.push((name, type_str.to_lowercase()));
         }

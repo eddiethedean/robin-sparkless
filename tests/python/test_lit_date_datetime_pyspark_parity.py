@@ -62,7 +62,7 @@ def test_lit_date_and_datetime_with_column_pyspark_parity() -> None:
     import robin_sparkless as rs
 
     spark = get_session()
-    df = spark.create_dataframe(
+    df = spark.createDataFrame(
         [(1, 10, "a"), (2, 20, "b"), (3, 30, "c")], ["id", "x", "name"]
     )
     df = df.with_column("const_date", rs.lit(datetime.date(2025, 6, 15)))
@@ -79,7 +79,7 @@ def test_filter_date_lt_lit_pyspark_parity() -> None:
     import robin_sparkless as rs
 
     spark = get_session()
-    df = spark.create_dataframe(
+    df = spark.createDataFrame(
         [(1, 10, "a"), (2, 20, "b"), (3, 30, "c")], ["id", "x", "name"]
     )
     df = df.with_column("d", rs.lit(datetime.date(2025, 5, 15)))
@@ -92,7 +92,7 @@ def test_filter_date_eq_lit_pyspark_parity() -> None:
     import robin_sparkless as rs
 
     spark = get_session()
-    df = spark.create_dataframe(
+    df = spark.createDataFrame(
         [(1, 10, "a"), (2, 20, "b"), (3, 30, "c")], ["id", "x", "name"]
     )
     df = df.with_column("d", rs.lit(datetime.date(2025, 5, 15)))
@@ -105,7 +105,7 @@ def test_when_then_lit_date_otherwise_pyspark_parity() -> None:
     import robin_sparkless as rs
 
     spark = get_session()
-    df = spark.create_dataframe(
+    df = spark.createDataFrame(
         [(1, 1, "a"), (2, 2, "b"), (3, 10, "c")], ["id", "x", "name"]
     )
     df = df.with_column(
