@@ -70,6 +70,66 @@ fn python_exprs_to_columns(exprs: &Bound<'_, PyAny>, _py: Python<'_>) -> PyResul
     ))
 }
 
+/// Convert group_by cols argument (str, Column, or list of str/Column) to (exprs, names) for group_by_exprs.
+fn py_group_by_cols_to_exprs_and_names(
+    cols: &Bound<'_, PyAny>,
+) -> PyResult<(Vec<Expr>, Vec<String>)> {
+    // Single str
+    if let Ok(s) = cols.extract::<String>() {
+        return Ok((vec![col(s.as_str())], vec![s]));
+    }
+    // Single Column
+    if let Ok(py_col) = cols.downcast::<PyColumn>() {
+        let c = py_col.borrow();
+        return Ok((
+            vec![c.inner.expr().clone()],
+            vec![c.inner.name().to_string()],
+        ));
+    }
+    // List or tuple
+    if let Ok(list) = cols.downcast::<PyList>() {
+        let mut exprs = Vec::with_capacity(list.len());
+        let mut names = Vec::with_capacity(list.len());
+        for item in list.iter() {
+            if let Ok(s) = item.extract::<String>() {
+                exprs.push(col(s.as_str()));
+                names.push(s);
+            } else if let Ok(py_col) = item.downcast::<PyColumn>() {
+                let c = py_col.borrow();
+                exprs.push(c.inner.expr().clone());
+                names.push(c.inner.name().to_string());
+            } else {
+                return Err(pyo3::exceptions::PyTypeError::new_err(
+                    "group_by() cols must be str (column name) or Column (e.g. col(\"x\")); each list item must be str or Column",
+                ));
+            }
+        }
+        return Ok((exprs, names));
+    }
+    if let Ok(tup) = cols.downcast::<PyTuple>() {
+        let mut exprs = Vec::with_capacity(tup.len());
+        let mut names = Vec::with_capacity(tup.len());
+        for item in tup.iter() {
+            if let Ok(s) = item.extract::<String>() {
+                exprs.push(col(s.as_str()));
+                names.push(s);
+            } else if let Ok(py_col) = item.downcast::<PyColumn>() {
+                let c = py_col.borrow();
+                exprs.push(c.inner.expr().clone());
+                names.push(c.inner.name().to_string());
+            } else {
+                return Err(pyo3::exceptions::PyTypeError::new_err(
+                    "group_by() cols must be str (column name) or Column (e.g. col(\"x\")); each tuple item must be str or Column",
+                ));
+            }
+        }
+        return Ok((exprs, names));
+    }
+    Err(pyo3::exceptions::PyTypeError::new_err(
+        "group_by() cols must be a column name (str), a Column (e.g. col(\"x\")), or a list/tuple of str or Column",
+    ))
+}
+
 /// Join `on` parameter: accept str (single column) or list/tuple of str (PySpark compatibility, #175).
 struct JoinOn(Vec<String>);
 
@@ -322,6 +382,15 @@ impl PyDataFrame {
         cols: &Bound<'_, PyAny>,
         ascending: Option<Vec<bool>>,
     ) -> PyResult<PyDataFrame> {
+        // Single Column: treat as ascending (PySpark orderBy(col("x")) parity)
+        if let Ok(py_col) = cols.downcast::<PyColumn>() {
+            let order = py_col.borrow().inner.asc_nulls_last();
+            let df = self
+                .inner
+                .order_by_exprs(vec![order])
+                .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+            return Ok(PyDataFrame { inner: df });
+        }
         // Single PySortOrder: df.order_by(col("x").desc_nulls_last())
         if let Ok(sort_order) = cols.downcast::<PySortOrder>() {
             let orders = vec![sort_order.borrow().inner.clone()];
@@ -355,8 +424,29 @@ impl PyDataFrame {
                     .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
                 return Ok(PyDataFrame { inner: df });
             }
+            // List of Column: treat each as ascending (PySpark orderBy(col("a"), col("b")) parity)
+            let mut col_orders = Vec::with_capacity(py_list.len());
+            for item in py_list.iter() {
+                if let Ok(py_col) = item.downcast::<PyColumn>() {
+                    col_orders.push(py_col.borrow().inner.asc_nulls_last());
+                } else {
+                    col_orders.clear();
+                    break;
+                }
+            }
+            if !col_orders.is_empty() {
+                let df = self
+                    .inner
+                    .order_by_exprs(col_orders)
+                    .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+                return Ok(PyDataFrame { inner: df });
+            }
             // List of column names (current behavior)
-            let col_names: Vec<String> = py_list.extract()?;
+            let col_names: Vec<String> = py_list.extract().map_err(|_| {
+                pyo3::exceptions::PyTypeError::new_err(
+                    "order_by cols must be column names (str), Column(s), or SortOrder(s); each list item must be str, Column, or SortOrder",
+                )
+            })?;
             let asc = ascending.unwrap_or_else(|| vec![true; col_names.len()]);
             let df = self
                 .inner
@@ -368,7 +458,7 @@ impl PyDataFrame {
             return Ok(PyDataFrame { inner: df });
         }
         Err(pyo3::exceptions::PyTypeError::new_err(
-            "order_by cols must be a list of column names (str), a single SortOrder (e.g. col(\"x\").desc_nulls_last()), or a list of SortOrder",
+            "order_by cols must be a column name (str), Column (e.g. col(\"x\")), SortOrder (e.g. col(\"x\").desc_nulls_last()), or a list of str/Column/SortOrder",
         ))
     }
 
@@ -400,12 +490,13 @@ impl PyDataFrame {
     ///     GroupedData: Use ``.agg()``, ``.count()``, ``.sum(column)``, etc.
     ///
     /// Raises:
+    ///     TypeError: If an item is not str or Column.
     ///     RuntimeError: If a column name is not in the schema.
-    fn group_by(&self, cols: Vec<String>) -> PyResult<PyGroupedData> {
-        let refs: Vec<&str> = cols.iter().map(|s| s.as_str()).collect();
+    fn group_by(&self, cols: &Bound<'_, PyAny>) -> PyResult<PyGroupedData> {
+        let (exprs, names) = py_group_by_cols_to_exprs_and_names(cols)?;
         let gd = self
             .inner
-            .group_by(refs)
+            .group_by_exprs(exprs, names)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
         Ok(PyGroupedData { inner: gd })
     }
