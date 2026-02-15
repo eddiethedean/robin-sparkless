@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **#358 – GroupedData.avg(), sum(), min(), max() accept Column expression (PySpark parity)** — `GroupedData.avg(*cols)`, `sum(column)`, `min(column)`, and `max(column)` now accept Column expressions (e.g. `col("v")`) in addition to column name strings. Enables `df.group_by("k").avg(rs.col("v"))` and `df.group_by("k").sum(rs.col("v"))`. Fixes #358.
 - **#356 – Column getItem, getField, and subscript (PySpark parity)** — `Column` now exposes `.getItem(i)` for 0-based array index, `.getField(name)` for struct field, and `col[i]` / `col["name"]` via `__getitem__`. Fixes #356.
 - **#355 – Column.eqNullSafe (PySpark parity)** — `Column` now exposes `.eqNullSafe(other)` as a PySpark-style alias for `.eq_null_safe(other)` (null-safe equality: true if both null or both equal). Fixes #355.
 - **#354 – Column `.name` attribute (PySpark parity)** — `Column` now exposes a `.name` property for simple column references and aliased expressions (e.g. `col("salary").name` → `"salary"`, `col("x").alias("y").name` → `"y"`). Fixes #354.

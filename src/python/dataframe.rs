@@ -130,6 +130,32 @@ fn py_group_by_cols_to_exprs_and_names(
     ))
 }
 
+/// Convert a single Python arg (str or Column) to an aggregation Expr with alias (for GroupedData.sum/min/max).
+fn py_col_or_name_to_agg_expr<F, G>(
+    column: &Bound<'_, PyAny>,
+    agg_name: &str,
+    expr_agg: F,
+    name_agg: G,
+) -> PyResult<Expr>
+where
+    F: FnOnce(Expr) -> Expr,
+    G: FnOnce(&str) -> Expr,
+{
+    use polars::prelude::*;
+    if let Ok(name) = column.extract::<String>() {
+        Ok(name_agg(name.as_str()).alias(format!("{agg_name}({name})")))
+    } else if let Ok(pycol) = column.downcast::<PyColumn>() {
+        let c = pycol.borrow();
+        let name = c.inner.name().to_string();
+        Ok(expr_agg(c.inner.expr().clone()).alias(format!("{agg_name}({name})")))
+    } else {
+        Err(pyo3::exceptions::PyTypeError::new_err(format!(
+            "{}() requires column name (str) or Column expression (e.g. col(\"x\"))",
+            agg_name
+        )))
+    }
+}
+
 /// Join `on` parameter: accept str, Column, or list/tuple of str/Column (PySpark compatibility, #175, #353).
 struct JoinOn(Vec<String>);
 
@@ -1622,80 +1648,96 @@ impl PyGroupedData {
         return Ok(PyDataFrame { inner: df });
     }
 
-    /// Return a DataFrame with one row per group and the sum of the given column.
+    /// Return a DataFrame with one row per group and the sum of the given column (PySpark: sum("v") or sum(F.col("v"))).
     ///
     /// Args:
-    ///     column: Numeric column name to sum.
+    ///     column: Column name (str) or Column expression (e.g. col("v")).
     ///
     /// Returns:
     ///     DataFrame (lazy). Raises RuntimeError if column is missing or not numeric.
-    fn sum(&self, column: &str) -> PyResult<PyDataFrame> {
+    fn sum(&self, column: &Bound<'_, pyo3::types::PyAny>) -> PyResult<PyDataFrame> {
+        use polars::prelude::*;
+        let expr =
+            py_col_or_name_to_agg_expr(column, "sum", |e| e.clone().sum(), |n| col(n).sum())?;
         let df = self
             .inner
-            .sum(column)
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        return Ok(PyDataFrame { inner: df });
-    }
-
-    /// Return a DataFrame with one row per group and the mean of the given column(s) (PySpark: avg("a", "b")).
-    ///
-    /// Args:
-    ///     cols: One or more numeric column names. Nulls excluded from mean.
-    ///
-    /// Returns:
-    ///     DataFrame. Raises RuntimeError if a column is missing or not numeric.
-    #[pyo3(signature = (*cols))]
-    fn avg(&self, cols: &Bound<'_, pyo3::types::PyTuple>) -> PyResult<PyDataFrame> {
-        let columns: Vec<String> = (0..cols.len())
-            .map(|i| cols.get_item(i).and_then(|ob| ob.extract()))
-            .collect::<PyResult<Vec<_>>>()
-            .map_err(|e| {
-                pyo3::exceptions::PyTypeError::new_err(format!(
-                    "avg() column names must be str: {e}"
-                ))
-            })?;
-        if columns.is_empty() {
-            return Err(pyo3::exceptions::PyValueError::new_err(
-                "avg() requires at least one column",
-            ));
-        }
-        let col_refs: Vec<&str> = columns.iter().map(|s| s.as_str()).collect();
-        let df = self
-            .inner
-            .avg(&col_refs)
+            .agg(vec![expr])
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
         Ok(PyDataFrame { inner: df })
     }
 
-    /// Return a DataFrame with one row per group and the minimum of the given column.
+    /// Return a DataFrame with one row per group and the mean of the given column(s) (PySpark: avg("a", "b") or avg(F.col("v"))).
     ///
     /// Args:
-    ///     column: Column name (numeric or comparable).
+    ///     cols: One or more column names (str) or Column expressions (e.g. col("v")). Nulls excluded from mean.
+    ///
+    /// Returns:
+    ///     DataFrame. Raises RuntimeError if a column is missing or not numeric.
+    #[pyo3(signature = (*columns))]
+    fn avg(&self, columns: &Bound<'_, pyo3::types::PyTuple>) -> PyResult<PyDataFrame> {
+        use polars::prelude::*;
+        let mut agg_exprs: Vec<Expr> = Vec::with_capacity(columns.len());
+        for i in 0..columns.len() {
+            let item = columns.get_item(i)?;
+            if let Ok(name) = item.extract::<String>() {
+                agg_exprs.push(col(name.as_str()).mean().alias(format!("avg({name})")));
+            } else if let Ok(pycol) = item.downcast::<PyColumn>() {
+                let c = pycol.borrow();
+                let name = c.inner.name().to_string();
+                agg_exprs.push(c.inner.expr().clone().mean().alias(format!("avg({name})")));
+            } else {
+                return Err(pyo3::exceptions::PyTypeError::new_err(
+                    "avg() requires column names (str) or Column expressions (e.g. col(\"x\"))",
+                ));
+            }
+        }
+        if agg_exprs.is_empty() {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "avg() requires at least one column",
+            ));
+        }
+        let df = self
+            .inner
+            .agg(agg_exprs)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        Ok(PyDataFrame { inner: df })
+    }
+
+    /// Return a DataFrame with one row per group and the minimum of the given column (PySpark: min("v") or min(F.col("v"))).
+    ///
+    /// Args:
+    ///     column: Column name (str) or Column expression (e.g. col("v")).
     ///
     /// Returns:
     ///     DataFrame (lazy). Raises RuntimeError if column is missing.
     #[pyo3(name = "min")]
-    fn min_(&self, column: &str) -> PyResult<PyDataFrame> {
+    fn min_(&self, column: &Bound<'_, pyo3::types::PyAny>) -> PyResult<PyDataFrame> {
+        use polars::prelude::*;
+        let expr =
+            py_col_or_name_to_agg_expr(column, "min", |e| e.clone().min(), |n| col(n).min())?;
         let df = self
             .inner
-            .min(column)
+            .agg(vec![expr])
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        return Ok(PyDataFrame { inner: df });
+        Ok(PyDataFrame { inner: df })
     }
 
-    /// Return a DataFrame with one row per group and the maximum of the given column.
+    /// Return a DataFrame with one row per group and the maximum of the given column (PySpark: max("v") or max(F.col("v"))).
     ///
     /// Args:
-    ///     column: Column name (numeric or comparable).
+    ///     column: Column name (str) or Column expression (e.g. col("v")).
     ///
     /// Returns:
     ///     DataFrame (lazy). Raises RuntimeError if column is missing.
-    fn max(&self, column: &str) -> PyResult<PyDataFrame> {
+    fn max(&self, column: &Bound<'_, pyo3::types::PyAny>) -> PyResult<PyDataFrame> {
+        use polars::prelude::*;
+        let expr =
+            py_col_or_name_to_agg_expr(column, "max", |e| e.clone().max(), |n| col(n).max())?;
         let df = self
             .inner
-            .max(column)
+            .agg(vec![expr])
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        return Ok(PyDataFrame { inner: df });
+        Ok(PyDataFrame { inner: df })
     }
 
     /// Aggregate groups with one or more expressions (e.g. sum(col("x")), avg(col("y"))).
