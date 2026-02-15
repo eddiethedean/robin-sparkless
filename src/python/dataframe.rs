@@ -1623,6 +1623,35 @@ impl PyDataFrameNa {
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
         return Ok(PyDataFrame { inner: df });
     }
+
+    /// Replace values in columns. PySpark na.replace(to_replace, value, subset=None).
+    ///
+    /// Args:
+    ///     to_replace: Value to replace (None, int, float, bool, or str).
+    ///     value: Replacement value. Same types supported.
+    ///     subset: Optional list of column names. If None, applies to all columns.
+    ///
+    /// Returns:
+    ///     DataFrame with replacements applied.
+    #[pyo3(signature = (to_replace, value, subset=None))]
+    fn replace(
+        &self,
+        to_replace: &Bound<'_, PyAny>,
+        value: &Bound<'_, PyAny>,
+        subset: Option<Vec<String>>,
+    ) -> PyResult<PyDataFrame> {
+        let old_expr = py_any_to_expr(to_replace)?;
+        let new_expr = py_any_to_expr(value)?;
+        let sub: Option<Vec<&str>> = subset
+            .as_ref()
+            .map(|v| v.iter().map(|s| s.as_str()).collect());
+        let df = self
+            .df
+            .na()
+            .replace(old_expr, new_expr, sub)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        Ok(PyDataFrame { inner: df })
+    }
 }
 
 /// Python wrapper for GroupedData.
