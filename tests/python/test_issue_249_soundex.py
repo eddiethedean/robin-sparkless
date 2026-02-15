@@ -20,10 +20,7 @@ def test_with_column_soundex_returns_three_rows() -> None:
     spark = rs.SparkSession.builder().app_name("soundex").get_or_create()
     data = [{"name": "Alice"}, {"name": "Bob"}, {"name": "Robert"}]
     schema = [("name", "string")]
-    create_df = getattr(spark, "create_dataframe_from_rows", None) or getattr(
-        spark, "_create_dataframe_from_rows"
-    )
-    df = create_df(data, schema)
+    df = spark.createDataFrame(data, schema)
     out = df.with_column("snd", rs.soundex(rs.col("name"))).collect()
     assert len(out) == 3
     for row in out:
@@ -38,10 +35,7 @@ def test_soundex_phonetic_codes() -> None:
     spark = rs.SparkSession.builder().app_name("soundex").get_or_create()
     data = [{"name": "Alice"}, {"name": "Robert"}]
     schema = [("name", "string")]
-    create_df = getattr(spark, "create_dataframe_from_rows", None) or getattr(
-        spark, "_create_dataframe_from_rows"
-    )
-    df = create_df(data, schema)
+    df = spark.createDataFrame(data, schema)
     out = df.with_column("snd", rs.soundex(rs.col("name"))).collect()
     names_to_snd = {r["name"]: r["snd"] for r in out}
     assert names_to_snd["Alice"] == "A420"

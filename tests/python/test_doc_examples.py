@@ -7,7 +7,7 @@ import robin_sparkless as rs
 def test_user_guide_filter() -> None:
     """USER_GUIDE: Filter example."""
     spark = rs.SparkSession.builder().app_name("doc_test").get_or_create()
-    df = spark.create_dataframe(
+    df = spark.createDataFrame(
         [(1, 25, "Alice"), (2, 30, "Bob"), (3, 35, "Charlie")], ["id", "age", "name"]
     )
     adults = df.filter(rs.col("age") > rs.lit(25))
@@ -20,7 +20,7 @@ def test_user_guide_filter() -> None:
 def test_user_guide_when_then_otherwise() -> None:
     """USER_GUIDE: when/then/otherwise nested example."""
     spark = rs.SparkSession.builder().app_name("doc_test").get_or_create()
-    df = spark.create_dataframe(
+    df = spark.createDataFrame(
         [(1, 10, "a"), (2, 25, "b"), (3, 70, "c")], ["id", "age", "name"]
     )
     df2 = df.with_column(
@@ -43,7 +43,7 @@ def test_user_guide_when_then_otherwise() -> None:
 def test_user_guide_na_fill_drop() -> None:
     """USER_GUIDE: na().fill() and na().drop()."""
     spark = rs.SparkSession.builder().app_name("doc_test").get_or_create()
-    df = spark._create_dataframe_from_rows(
+    df = spark.createDataFrame(
         [{"x": 1, "y": None}, {"x": 2, "y": 5}, {"x": None, "y": 7}],
         [("x", "bigint"), ("y", "bigint")],
     )
@@ -63,7 +63,7 @@ def test_user_guide_create_dataframe_from_rows() -> None:
         {"id": 1, "name": "Alice", "score": 95.5},
         {"id": 2, "name": "Bob", "score": 87.0},
     ]
-    df = spark._create_dataframe_from_rows(rows, schema)
+    df = spark.createDataFrame(rows, schema)
     result = df.collect()
     assert len(result) == 2
     assert result[0]["name"] == "Alice"
@@ -73,7 +73,7 @@ def test_user_guide_create_dataframe_from_rows() -> None:
 def test_user_guide_persistence_temp_view() -> None:
     """USER_GUIDE: createOrReplaceTempView."""
     spark = rs.SparkSession.builder().app_name("doc_test").get_or_create()
-    df = spark.create_dataframe([(1, 25, "Alice")], ["id", "age", "name"])
+    df = spark.createDataFrame([(1, 25, "Alice")], ["id", "age", "name"])
     try:
         df.createOrReplaceTempView("people")
         result = spark.sql("SELECT name, age FROM people WHERE age > 20")
@@ -87,7 +87,7 @@ def test_user_guide_persistence_temp_view() -> None:
 def test_readme_python_quickstart() -> None:
     """README: Python quick start example (runs both main README and README-Python)."""
     spark = rs.SparkSession.builder().app_name("demo").get_or_create()
-    df = spark.create_dataframe(
+    df = spark.createDataFrame(
         [(1, 25, "Alice"), (2, 30, "Bob"), (3, 35, "Charlie")],
         ["id", "age", "name"],
     )

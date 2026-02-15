@@ -14,12 +14,9 @@ import robin_sparkless as rs
 def test_create_dataframe_from_rows_schema_list() -> None:
     """create_dataframe_from_rows with ("vals", "list") succeeds and vals is list column."""
     spark = rs.SparkSession.builder().app_name("test_256").get_or_create()
-    create_df = getattr(spark, "create_dataframe_from_rows", None) or getattr(
-        spark, "_create_dataframe_from_rows"
-    )
     data = [{"name": "a", "vals": [1, 2, 3]}]
     schema = [("name", "string"), ("vals", "list")]
-    df = create_df(data, schema)
+    df = spark.createDataFrame(data, schema)
     out = df.collect()
     assert len(out) == 1
     assert out[0]["name"] == "a"
@@ -29,12 +26,9 @@ def test_create_dataframe_from_rows_schema_list() -> None:
 def test_create_dataframe_from_rows_schema_array() -> None:
     """create_dataframe_from_rows with ("vals", "array") succeeds and vals is list column."""
     spark = rs.SparkSession.builder().app_name("test_256").get_or_create()
-    create_df = getattr(spark, "create_dataframe_from_rows", None) or getattr(
-        spark, "_create_dataframe_from_rows"
-    )
     data = [{"name": "b", "vals": [10, 20]}]
     schema = [("name", "string"), ("vals", "array")]
-    df = create_df(data, schema)
+    df = spark.createDataFrame(data, schema)
     out = df.collect()
     assert len(out) == 1
     assert out[0]["name"] == "b"
@@ -44,16 +38,13 @@ def test_create_dataframe_from_rows_schema_array() -> None:
 def test_create_dataframe_from_rows_list_null_and_multiple_rows() -> None:
     """list/array column supports null and multiple rows."""
     spark = rs.SparkSession.builder().app_name("test_256").get_or_create()
-    create_df = getattr(spark, "create_dataframe_from_rows", None) or getattr(
-        spark, "_create_dataframe_from_rows"
-    )
     data = [
         {"id": 1, "vals": [1, 2]},
         {"id": 2, "vals": None},
         {"id": 3, "vals": []},
     ]
     schema = [("id", "bigint"), ("vals", "list")]
-    df = create_df(data, schema)
+    df = spark.createDataFrame(data, schema)
     out = df.collect()
     assert len(out) == 3
     assert out[0]["vals"] == [1, 2]

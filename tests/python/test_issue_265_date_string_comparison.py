@@ -15,10 +15,7 @@ F = rs
 def test_filter_date_column_equals_string_literal() -> None:
     """filter(F.col('dt') == '2025-01-01') on date column returns matching row."""
     spark = F.SparkSession.builder().app_name("test_265").get_or_create()
-    create_df = getattr(spark, "create_dataframe_from_rows", None) or getattr(
-        spark, "_create_dataframe_from_rows"
-    )
-    df = create_df(
+    df = spark.createDataFrame(
         [{"dt": "2025-01-01"}, {"dt": "2025-01-02"}],
         [("dt", "date")],
     )
@@ -31,10 +28,7 @@ def test_filter_date_column_equals_string_literal() -> None:
 def test_filter_date_column_not_equals_string_literal() -> None:
     """filter(F.col('dt') != '2025-01-01') on date column returns non-matching rows."""
     spark = F.SparkSession.builder().app_name("test_265").get_or_create()
-    create_df = getattr(spark, "create_dataframe_from_rows", None) or getattr(
-        spark, "_create_dataframe_from_rows"
-    )
-    df = create_df(
+    df = spark.createDataFrame(
         [{"dt": "2025-01-01"}, {"dt": "2025-01-02"}],
         [("dt", "date")],
     )

@@ -791,16 +791,15 @@ impl SparkSession {
         if names.is_empty() {
             return Vec::new();
         }
-        let n_cols = names.len();
         let mut schema: Vec<(String, String)> = names
             .iter()
             .map(|n| (n.clone(), "string".to_string()))
             .collect();
-        for col_idx in 0..n_cols {
+        for (col_idx, (_, dtype_str)) in schema.iter_mut().enumerate() {
             for row in rows {
                 let v = row.get(col_idx).unwrap_or(&JsonValue::Null);
                 if let Some(dtype) = Self::infer_dtype_from_json_value(v) {
-                    schema[col_idx].1 = dtype;
+                    *dtype_str = dtype;
                     break;
                 }
             }

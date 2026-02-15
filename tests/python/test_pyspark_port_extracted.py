@@ -13,7 +13,7 @@ def test_drop() -> None:
     import robin_sparkless as rs
 
     spark = rs.SparkSession.builder().app_name("test").get_or_create()
-    df = spark._create_dataframe_from_rows(
+    df = spark.createDataFrame(
         [[1, 50, "Y"], [2, 60, "Y"]],
         [("id", "bigint"), ("age", "bigint"), ("active", "string")],
     )
@@ -26,7 +26,7 @@ def test_with_columns_renamed() -> None:
     import robin_sparkless as rs
 
     spark = rs.SparkSession.builder().app_name("test").get_or_create()
-    df = spark._create_dataframe_from_rows(
+    df = spark.createDataFrame(
         [["Alice", 50], ["Alice", 60]],
         [("name", "string"), ("age", "bigint")],
     )
@@ -41,9 +41,7 @@ def test_with_columns_renamed_invalid_type_raises() -> None:
     import robin_sparkless as rs
 
     spark = rs.SparkSession.builder().app_name("test").get_or_create()
-    df = spark._create_dataframe_from_rows(
-        [["Alice", 50]], [("name", "string"), ("age", "bigint")]
-    )
+    df = spark.createDataFrame([["Alice", 50]], [("name", "string"), ("age", "bigint")])
     with pytest.raises((TypeError, Exception)):
         df.with_columns_renamed(("name", "x"))  # type: ignore[arg-type]
 
@@ -53,7 +51,7 @@ def test_drop_duplicates() -> None:
     import robin_sparkless as rs
 
     spark = rs.SparkSession.builder().app_name("test").get_or_create()
-    df = spark._create_dataframe_from_rows(
+    df = spark.createDataFrame(
         [["Alice", 50], ["Alice", 60]],
         [("name", "string"), ("age", "bigint")],
     )
@@ -67,7 +65,7 @@ def test_drop_empty_column() -> None:
     import robin_sparkless as rs
 
     spark = rs.SparkSession.builder().app_name("test").get_or_create()
-    df = spark._create_dataframe_from_rows(
+    df = spark.createDataFrame(
         [[14, "Tom"], [23, "Alice"], [16, "Bob"]],
         [("age", "bigint"), ("name", "string")],
     )
@@ -95,7 +93,7 @@ def test_dropna() -> None:
     import robin_sparkless as rs
 
     spark = rs.SparkSession.builder().app_name("test").get_or_create()
-    df = spark._create_dataframe_from_rows(
+    df = spark.createDataFrame(
         [["Alice", 50, 80.1], [None, 60, 70.0], ["Bob", None, 90.0]],
         [("name", "string"), ("age", "bigint"), ("height", "double")],
     )
@@ -109,7 +107,7 @@ def test_fillna() -> None:
     import robin_sparkless as rs
 
     spark = rs.SparkSession.builder().app_name("test").get_or_create()
-    df = spark._create_dataframe_from_rows(
+    df = spark.createDataFrame(
         [["Alice", None, None]],
         [("name", "string"), ("age", "bigint"), ("height", "double")],
     )
@@ -123,9 +121,7 @@ def test_with_column_with_existing_name() -> None:
     import robin_sparkless as rs
 
     spark = rs.SparkSession.builder().app_name("test").get_or_create()
-    df = spark._create_dataframe_from_rows(
-        [[1, 10], [2, 20]], [("id", "bigint"), ("x", "bigint")]
-    )
+    df = spark.createDataFrame([[1, 10], [2, 20]], [("id", "bigint"), ("x", "bigint")])
     out = df.with_column("x", rs.col("x").multiply(rs.lit(2)))
     rows = out.collect()
     assert rows[0]["x"] == 20 and rows[1]["x"] == 40
@@ -136,7 +132,7 @@ def test_with_columns() -> None:
     import robin_sparkless as rs
 
     spark = rs.SparkSession.builder().app_name("test").get_or_create()
-    df = spark._create_dataframe_from_rows(
+    df = spark.createDataFrame(
         [[i, str(i)] for i in range(100)],
         [("key", "bigint"), ("value", "string")],
     )
@@ -163,9 +159,7 @@ def test_with_columns_invalid_type_raises() -> None:
     import robin_sparkless as rs
 
     spark = rs.SparkSession.builder().app_name("test").get_or_create()
-    df = spark._create_dataframe_from_rows(
-        [[1, "a"]], [("key", "bigint"), ("value", "string")]
-    )
+    df = spark.createDataFrame([[1, "a"]], [("key", "bigint"), ("value", "string")])
     with pytest.raises((TypeError, Exception)):
         df.with_columns(["key"])  # type: ignore[arg-type,list-item]
 
@@ -201,7 +195,7 @@ def test_df_show() -> None:
     import robin_sparkless as rs
 
     spark = rs.SparkSession.builder().app_name("test").get_or_create()
-    df = spark._create_dataframe_from_rows(
+    df = spark.createDataFrame(
         [[1, 10, "a"], [2, 20, "b"]],
         [("id", "bigint"), ("x", "bigint"), ("label", "string")],
     )
@@ -226,7 +220,7 @@ def test_colregex() -> None:
     import robin_sparkless as rs
 
     spark = rs.SparkSession.builder().app_name("test").get_or_create()
-    df = spark._create_dataframe_from_rows(
+    df = spark.createDataFrame(
         [[1, 10, 100]],
         [("a", "bigint"), ("ab", "bigint"), ("abc", "bigint")],
     )
@@ -241,9 +235,7 @@ def test_repartition() -> None:
     import robin_sparkless as rs
 
     spark = rs.SparkSession.builder().app_name("test").get_or_create()
-    df = spark._create_dataframe_from_rows(
-        [[1, 10], [2, 20]], [("id", "bigint"), ("x", "bigint")]
-    )
+    df = spark.createDataFrame([[1, 10], [2, 20]], [("id", "bigint"), ("x", "bigint")])
     rep = df.repartition(2)  # type: ignore[attr-defined]
     assert rep.count() == 2
 
@@ -253,7 +245,7 @@ def test_sample() -> None:
     import robin_sparkless as rs
 
     spark = rs.SparkSession.builder().app_name("test").get_or_create()
-    df = spark._create_dataframe_from_rows(
+    df = spark.createDataFrame(
         [[i, i * 10] for i in range(100)],
         [("id", "bigint"), ("x", "bigint")],
     )
@@ -277,7 +269,7 @@ def test_spark_session() -> None:
 
     spark = rs.SparkSession.builder().app_name("test").get_or_create()
     assert spark is not None
-    df = spark._create_dataframe_from_rows([[1, 2]], [("a", "bigint"), ("b", "bigint")])
+    df = spark.createDataFrame([[1, 2]], [("a", "bigint"), ("b", "bigint")])
     assert df.count() == 1
 
 
@@ -295,7 +287,7 @@ def test_cov() -> None:
     import robin_sparkless as rs
 
     spark = rs.SparkSession.builder().app_name("test").get_or_create()
-    df = spark._create_dataframe_from_rows(
+    df = spark.createDataFrame(
         [[1, 2], [2, 4], [3, 6]],
         [("a", "bigint"), ("b", "bigint")],
     )
@@ -308,12 +300,8 @@ def test_invalid_join_method() -> None:
     import robin_sparkless as rs
 
     spark = rs.SparkSession.builder().app_name("test").get_or_create()
-    df1 = spark._create_dataframe_from_rows(
-        [[1, "a"]], [("id", "bigint"), ("x", "string")]
-    )
-    df2 = spark._create_dataframe_from_rows(
-        [[1, "b"]], [("id", "bigint"), ("y", "string")]
-    )
+    df1 = spark.createDataFrame([[1, "a"]], [("id", "bigint"), ("x", "string")])
+    df2 = spark.createDataFrame([[1, "b"]], [("id", "bigint"), ("y", "string")])
     with pytest.raises((ValueError, Exception)):
         df1.join(df2, on=["id"], how="invalid")
 
@@ -323,7 +311,7 @@ def test_and_in_expression() -> None:
     import robin_sparkless as rs
 
     spark = rs.SparkSession.builder().app_name("test").get_or_create()
-    df = spark._create_dataframe_from_rows(
+    df = spark.createDataFrame(
         [[i, str(i)] for i in range(100)],
         [("key", "bigint"), ("value", "string")],
     )
@@ -338,7 +326,7 @@ def test_column_operators() -> None:
     import robin_sparkless as rs
 
     spark = rs.SparkSession.builder().app_name("test").get_or_create()
-    df = spark._create_dataframe_from_rows(
+    df = spark.createDataFrame(
         [[1, "a"], [2, "b"]],
         [("key", "bigint"), ("value", "string")],
     )
@@ -352,7 +340,7 @@ def test_column_select() -> None:
     import robin_sparkless as rs
 
     spark = rs.SparkSession.builder().app_name("test").get_or_create()
-    df = spark._create_dataframe_from_rows(
+    df = spark.createDataFrame(
         [[1, "a"], [2, "b"]],
         [("key", "bigint"), ("value", "string")],
     )
@@ -367,9 +355,7 @@ def test_access_column() -> None:
     import robin_sparkless as rs
 
     spark = rs.SparkSession.builder().app_name("test").get_or_create()
-    df = spark._create_dataframe_from_rows(
-        [[1, "a"]], [("key", "bigint"), ("value", "string")]
-    )
+    df = spark.createDataFrame([[1, "a"]], [("key", "bigint"), ("value", "string")])
     col_key = rs.col("key")
     assert hasattr(col_key, "alias")
     _ = df.select([col_key])
@@ -380,7 +366,7 @@ def test_when() -> None:
     import robin_sparkless as rs
 
     spark = rs.SparkSession.builder().app_name("test").get_or_create()
-    df = spark._create_dataframe_from_rows(
+    df = spark.createDataFrame(
         [[1, 10], [2, 20], [3, 30]],
         [("id", "bigint"), ("x", "bigint")],
     )
@@ -398,7 +384,7 @@ def test_greatest() -> None:
     import robin_sparkless as rs
 
     spark = rs.SparkSession.builder().app_name("test").get_or_create()
-    df = spark._create_dataframe_from_rows(
+    df = spark.createDataFrame(
         [[1, 2, 3], [4, 2, 1]],
         [("a", "bigint"), ("b", "bigint"), ("c", "bigint")],
     )
@@ -416,7 +402,7 @@ def test_least() -> None:
     import robin_sparkless as rs
 
     spark = rs.SparkSession.builder().app_name("test").get_or_create()
-    df = spark._create_dataframe_from_rows(
+    df = spark.createDataFrame(
         [[1, 2, 3], [4, 2, 1]],
         [("a", "bigint"), ("b", "bigint"), ("c", "bigint")],
     )
@@ -444,7 +430,7 @@ def test_string_functions() -> None:
     import robin_sparkless as rs
 
     spark = rs.SparkSession.builder().app_name("test").get_or_create()
-    df = spark._create_dataframe_from_rows(
+    df = spark.createDataFrame(
         [["  Hello  ", "world"]],
         [("a", "string"), ("b", "string")],
     )
@@ -486,7 +472,7 @@ def test_array_repeat() -> None:
     import robin_sparkless as rs
 
     spark = rs.SparkSession.builder().app_name("test").get_or_create()
-    df = spark._create_dataframe_from_rows(
+    df = spark.createDataFrame(
         [["a", 2], ["b", 3]],
         [("s", "string"), ("n", "bigint")],
     )
@@ -501,7 +487,7 @@ def test_overlay() -> None:
     import robin_sparkless as rs
 
     spark = rs.SparkSession.builder().app_name("test").get_or_create()
-    df = spark._create_dataframe_from_rows(
+    df = spark.createDataFrame(
         [["Spark_SQL"]],
         [("s", "string")],
     )
@@ -525,7 +511,7 @@ def test_datetime_functions() -> None:
     import robin_sparkless as rs
 
     spark = rs.SparkSession.builder().app_name("test").get_or_create()
-    df = spark._create_dataframe_from_rows(
+    df = spark.createDataFrame(
         [["2024-03-15T10:30:00"]],
         [("ts", "timestamp")],
     )
@@ -603,7 +589,7 @@ def test_replace() -> None:
     import robin_sparkless as rs
 
     spark = rs.SparkSession.builder().app_name("test").get_or_create()
-    df = spark._create_dataframe_from_rows(
+    df = spark.createDataFrame(
         [[1, "a", 10], [2, "b", 20], [1, "c", 30]],
         [("id", "bigint"), ("x", "string"), ("v", "bigint")],
     )
@@ -648,8 +634,8 @@ def test_join_without_on() -> None:
     import robin_sparkless as rs
 
     spark = rs.SparkSession.builder().app_name("test").get_or_create()
-    df1 = spark._create_dataframe_from_rows([[1], [2]], [("a", "bigint")])
-    df2 = spark._create_dataframe_from_rows([["x"], ["y"]], [("b", "string")])
+    df1 = spark.createDataFrame([[1], [2]], [("a", "bigint")])
+    df2 = spark.createDataFrame([["x"], ["y"]], [("b", "string")])
     out = df1.join(df2, on=[], how="inner")
     assert out.count() == 4
 
@@ -722,7 +708,7 @@ def test_save_and_load() -> None:
     import robin_sparkless as rs
 
     spark = rs.SparkSession.builder().app_name("test").get_or_create()
-    df = spark._create_dataframe_from_rows(
+    df = spark.createDataFrame(
         [[1, "a"], [2, "b"]],
         [("id", "bigint"), ("x", "string")],
     )

@@ -17,7 +17,7 @@ def test_string_eq_numeric_literal_in_filter() -> None:
     spark = F.SparkSession.builder().app_name("repro").get_or_create()
     data = [{"str_col": "123"}, {"str_col": "456"}]
     schema = [("str_col", "string")]
-    df = spark._create_dataframe_from_rows(data, schema)
+    df = spark.createDataFrame(data, schema)
 
     out = df.filter(F.col("str_col") == F.lit(123)).collect()
     assert out == [{"str_col": "123"}]
@@ -31,7 +31,7 @@ def test_string_gt_numeric_literal_uses_numeric_semantics() -> None:
     spark = F.SparkSession.builder().app_name("repro").get_or_create()
     data = [{"str_col": "123"}, {"str_col": "456"}]
     schema = [("str_col", "string")]
-    df = spark._create_dataframe_from_rows(data, schema)
+    df = spark.createDataFrame(data, schema)
 
     out = df.filter(F.col("str_col") > F.lit(200)).collect()
     assert out == [{"str_col": "456"}]
@@ -45,7 +45,7 @@ def test_string_eq_numeric_literal_with_invalid_string_is_non_matching() -> None
     spark = F.SparkSession.builder().app_name("repro").get_or_create()
     data = [{"str_col": "abc"}, {"str_col": "123"}]
     schema = [("str_col", "string")]
-    df = spark._create_dataframe_from_rows(data, schema)
+    df = spark.createDataFrame(data, schema)
 
     out = df.filter(F.col("str_col") == F.lit(123)).collect()
     assert out == [{"str_col": "123"}]
@@ -59,7 +59,7 @@ def test_literal_eq_string_column_symmetric_form() -> None:
     spark = F.SparkSession.builder().app_name("repro").get_or_create()
     data = [{"str_col": "123"}, {"str_col": "456"}]
     schema = [("str_col", "string")]
-    df = spark._create_dataframe_from_rows(data, schema)
+    df = spark.createDataFrame(data, schema)
 
     out = df.filter(F.lit(123) == F.col("str_col")).collect()
     assert out == [{"str_col": "123"}]

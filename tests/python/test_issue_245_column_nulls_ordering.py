@@ -25,7 +25,7 @@ def test_order_by_desc_nulls_last() -> None:
     spark = rs.SparkSession.builder().app_name("nulls_order").get_or_create()
     data = [{"value": "A"}, {"value": "B"}, {"value": None}, {"value": "C"}]
     schema = [("value", "string")]
-    df = spark._create_dataframe_from_rows(data, schema)
+    df = spark.createDataFrame(data, schema)
     out = df.order_by_exprs([rs.col("value").desc_nulls_last()]).collect()
     assert len(out) == 4
     # Desc with nulls last: C, B, A, null
@@ -41,7 +41,7 @@ def test_order_by_asc_nulls_first() -> None:
     spark = rs.SparkSession.builder().app_name("nulls_order").get_or_create()
     data = [{"value": "A"}, {"value": "B"}, {"value": None}, {"value": "C"}]
     schema = [("value", "string")]
-    df = spark._create_dataframe_from_rows(data, schema)
+    df = spark.createDataFrame(data, schema)
     out = df.order_by_exprs([rs.col("value").asc_nulls_first()]).collect()
     assert len(out) == 4
     # Asc with nulls first: null, A, B, C
