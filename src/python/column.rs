@@ -231,6 +231,12 @@ impl PyColumn {
         })
     }
 
+    /// PySpark name for null-safe equality. Same as eq_null_safe.
+    #[pyo3(name = "eqNullSafe")]
+    fn eq_null_safe_camel(&self, other: &Bound<'_, pyo3::types::PyAny>) -> PyResult<Self> {
+        self.eq_null_safe(other)
+    }
+
     /// Inclusive range (PySpark between): true where (self >= low) and (self <= high). Accepts Column or scalar.
     fn between(
         &self,
