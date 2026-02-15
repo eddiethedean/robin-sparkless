@@ -49,14 +49,14 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-robin-sparkless = "0.9.2"
+robin-sparkless = "0.10.0"
 ```
 
 Optional features:
 
 ```toml
-robin-sparkless = { version = "0.9.2", features = ["sql"] }   # spark.sql(), temp views
-robin-sparkless = { version = "0.9.2", features = ["delta"] }  # Delta Lake read/write
+robin-sparkless = { version = "0.10.0", features = ["sql"] }   # spark.sql(), temp views
+robin-sparkless = { version = "0.10.0", features = ["delta"] }  # Delta Lake read/write
 ```
 
 ### Python (PyO3)
@@ -131,7 +131,7 @@ You can also wrap an existing Polars `DataFrame` with `DataFrame::from_polars(po
 import robin_sparkless as rs
 
 spark = rs.SparkSession.builder().app_name("demo").get_or_create()
-df = spark.create_dataframe(
+df = spark.createDataFrame(
     [(1, 25, "Alice"), (2, 30, "Bob"), (3, 35, "Charlie")],
     ["id", "age", "name"],
 )

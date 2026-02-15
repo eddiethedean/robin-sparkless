@@ -22,7 +22,7 @@ def test_create_dataframe_from_rows_accepts_datetime_and_none() -> None:
         {"id": 2, "ts": None},
     ]
     schema = [("id", "int"), ("ts", "timestamp")]
-    df = spark._create_dataframe_from_rows(data, schema)
+    df = spark.createDataFrame(data, schema)
     out = df.order_by(["id"]).collect()
     assert len(out) == 2
     assert out[0]["id"] == 1 and out[0]["ts"] is not None
@@ -39,7 +39,7 @@ def test_create_dataframe_from_rows_accepts_date() -> None:
         {"id": 2, "d": None},
     ]
     schema = [("id", "int"), ("d", "date")]
-    df = spark._create_dataframe_from_rows(data, schema)
+    df = spark.createDataFrame(data, schema)
     out = df.order_by(["id"]).collect()
     assert len(out) == 2
     assert out[0]["id"] == 1 and out[0]["d"] is not None

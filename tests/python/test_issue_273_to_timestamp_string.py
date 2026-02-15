@@ -16,10 +16,7 @@ F = rs
 def test_to_timestamp_string_no_format() -> None:
     """to_timestamp(col('ts_str')) without format parses 'YYYY-MM-DD HH:MM:SS'."""
     spark = F.SparkSession.builder().app_name("test_273").get_or_create()
-    create_df = getattr(spark, "create_dataframe_from_rows", None) or getattr(
-        spark, "_create_dataframe_from_rows"
-    )
-    df = create_df(
+    df = spark.createDataFrame(
         [{"ts_str": "2024-01-01 10:00:00"}],
         [("ts_str", "str")],
     )
@@ -34,10 +31,7 @@ def test_to_timestamp_string_no_format() -> None:
 def test_to_timestamp_string_with_format() -> None:
     """to_timestamp(col('ts_str'), \"yyyy-MM-dd'T'HH:mm:ss\") parses ISO-like strings."""
     spark = F.SparkSession.builder().app_name("test_273").get_or_create()
-    create_df = getattr(spark, "create_dataframe_from_rows", None) or getattr(
-        spark, "_create_dataframe_from_rows"
-    )
-    df = create_df(
+    df = spark.createDataFrame(
         [{"ts_str": "2024-01-01T10:00:00"}],
         [("ts_str", "str")],
     )

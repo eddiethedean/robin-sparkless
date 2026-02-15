@@ -17,15 +17,12 @@ class SparkSession:
     @classmethod
     def builder(cls) -> SparkSessionBuilder: ...
     def is_case_sensitive(self) -> bool: ...
-    def create_dataframe(
-        self,
-        data: Any,
-        column_names: list[str],
-    ) -> DataFrame: ...
     def createDataFrame(
         self,
         data: Any,
-        column_names: list[str],
+        schema: Any = None,
+        sampling_ratio: float | None = None,
+        verify_schema: bool = True,
     ) -> DataFrame: ...
     def _create_dataframe_from_rows(
         self,

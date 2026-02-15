@@ -165,7 +165,7 @@ We know we're on track if:
 - ✅ String functions: `upper()`, `lower()`, `substring()`, `concat()`, `concat_ws()`, `length`, `trim`, `regexp_extract`, `regexp_replace`, `regexp_extract_all`, `regexp_like`, `split`
 - ✅ Datetime: `year()`, `month()`, `day()`, `to_date()`, `date_format(format)` (chrono strftime)
 - ✅ DataFrame methods: `union`, `union_by_name`, `distinct`, `drop`, `dropna`, `fillna`, `limit`, `with_column_renamed`
-- ✅ **PyO3 bridge** (optional `pyo3` feature): Python module `robin_sparkless` with SparkSession, DataFrame, Column, GroupedData; `create_dataframe`, `create_dataframe_from_rows`, filter, select, join, group_by, collect (list of dicts), etc. Build: `maturin develop --features "pyo3,sql,delta"`. Tests: `make test` runs Rust + Python tests; `make check-full` runs full CI (Rust + ruff + mypy + Python tests). See [PYTHON_API.md](PYTHON_API.md).
+- ✅ **PyO3 bridge** (optional `pyo3` feature): Python module `robin_sparkless` with SparkSession, DataFrame, Column, GroupedData; **`createDataFrame(data, schema=None)`**, `create_dataframe` (3-tuple), filter, select, join, group_by, collect (list of dicts), etc. Build: `maturin develop --features "pyo3,sql,delta"`. Tests: `make test` runs Rust + Python tests; `make check-full` runs full CI (Rust + ruff + mypy + Python tests). See [PYTHON_API.md](PYTHON_API.md).
 - ✅ **Phase 9** (high-value functions & DataFrame methods): Datetime (`current_date`, `current_timestamp`, `date_add`, `date_sub`, `hour`, `minute`, `second`, `datediff`, `last_day`, `trunc`); string (`repeat`, `reverse`, `instr`, `lpad`, `rpad`); math (`sqrt`, `pow`, `exp`, `log`); conditional (`nvl`/`ifnull`, `nullif`, `nanvl`); GroupedData (`first`, `last`, `approx_count_distinct`); DataFrame (`replace`, `cross_join`, `describe`, `cache`/`persist`/`unpersist`, `subtract`, `intersect`).
 - ✅ Parity test harness with 159 passing fixtures:
   - `filter_age_gt_30`: filter + select + orderBy
@@ -452,7 +452,7 @@ To reach **full Sparkless parity** (robin-sparkless as a complete backend replac
 - **Logical plan schema** ✅: [docs/LOGICAL_PLAN_FORMAT.md](LOGICAL_PLAN_FORMAT.md) defines op names, payload shapes, and expression tree format.
 - **Expression interpreter** ✅: `src/plan/expr.rs` turns serialized expression trees into Polars `Expr`. Supports col, lit, comparison/logical ops, eq_null_safe, and **all scalar functions** (string, math, datetime, type/conditional, bit, array, map, misc; two-arg when). See [LOGICAL_PLAN_FORMAT.md](LOGICAL_PLAN_FORMAT.md).
 - **Plan-based fixtures and tests** ✅: `tests/fixtures/plans/` (filter_select_limit, join_simple); `plan_parity_fixtures` test in `tests/parity.rs`.
-- **Flexible DataFrame creation** ✅: Rust `create_dataframe_from_rows(rows, schema)` in session; Python `create_dataframe_from_rows(data, schema)` on SparkSession.
+- **Flexible DataFrame creation** ✅: Rust `create_dataframe_from_rows(rows, schema)` in session; Python **`createDataFrame(data, schema=None)`** on SparkSession (#372).
 
 **Outcome**: When Sparkless emits a logical plan, we can execute it via `execute_plan`; Sparkless robin backend becomes a thin wrapper. Ready for Phase 26 (crate publish).
 

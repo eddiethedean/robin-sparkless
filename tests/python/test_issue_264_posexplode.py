@@ -21,10 +21,7 @@ def test_posexplode_module_exists() -> None:
 def test_posexplode_returns_two_columns() -> None:
     """F.posexplode(column) returns (pos_column, value_column); both support .alias()."""
     spark = F.SparkSession.builder().app_name("test_264").get_or_create()
-    create_df = getattr(spark, "create_dataframe_from_rows", None) or getattr(
-        spark, "_create_dataframe_from_rows"
-    )
-    _ = create_df(
+    _ = spark.createDataFrame(
         [{"Name": "Alice", "Values": [10, 20]}, {"Name": "Bob", "Values": [30, 40]}],
         [("Name", "string"), ("Values", "list")],
     )

@@ -10,7 +10,7 @@ import robin_sparkless as rs
 def test_float_to_string_with_nulls() -> None:
     """Exact scenario from #219: float column with None, cast to string, collect."""
     spark = rs.SparkSession.builder().app_name("test").get_or_create()
-    df = spark._create_dataframe_from_rows(
+    df = spark.createDataFrame(
         [{"f": 1.5}, {"f": None}, {"f": 2.0}],
         [("f", "double")],
     )
@@ -25,7 +25,7 @@ def test_float_to_string_with_nulls() -> None:
 def test_string_to_float_with_nulls() -> None:
     """String column with nulls cast to double; nulls stay None."""
     spark = rs.SparkSession.builder().app_name("test").get_or_create()
-    df = spark._create_dataframe_from_rows(
+    df = spark.createDataFrame(
         [{"s": "1.5"}, {"s": None}, {"s": "2.0"}],
         [("s", "string")],
     )
@@ -40,7 +40,7 @@ def test_string_to_float_with_nulls() -> None:
 def test_collect_null_safe_iteration() -> None:
     """Iterating over rows and keys/values must not raise when values are None."""
     spark = rs.SparkSession.builder().app_name("test").get_or_create()
-    df = spark._create_dataframe_from_rows(
+    df = spark.createDataFrame(
         [{"f": 1.0}, {"f": None}],
         [("f", "double")],
     )

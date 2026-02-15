@@ -17,7 +17,7 @@ def test_row_number_and_window_exposed_in_python_api() -> None:
     Window = rs.Window
 
     spark = F.SparkSession.builder().app_name("window_api_repro").get_or_create()
-    df = spark.create_dataframe(
+    df = spark.createDataFrame(
         [(1, 100, "a"), (2, 90, "a"), (3, 80, "b")],
         ["id", "salary", "dept"],
     )

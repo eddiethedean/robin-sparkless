@@ -60,7 +60,7 @@ EXPECTED_FIRST_LAST = [
 
 def _robin_df():
     spark = get_session()
-    return spark.create_dataframe(_WINDOW_DATA, _WINDOW_COLUMNS)
+    return spark.createDataFrame(_WINDOW_DATA, _WINDOW_COLUMNS)
 
 
 # --- Parity tests ---
@@ -187,7 +187,7 @@ def test_window_rank_with_ties_pyspark_parity() -> None:
     ]
 
     spark = get_session()
-    df = spark.create_dataframe(data_tie, _WINDOW_COLUMNS)
+    df = spark.createDataFrame(data_tie, _WINDOW_COLUMNS)
     df = df.with_column(
         "rk",
         rs.col("salary").rank(descending=True).over(["dept"]),

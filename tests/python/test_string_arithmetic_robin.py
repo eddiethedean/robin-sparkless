@@ -22,7 +22,7 @@ def test_string_division_by_numeric_literal_robin() -> None:
     spark = _get_session()
     import robin_sparkless as rs
 
-    df = spark._create_dataframe_from_rows(
+    df = spark.createDataFrame(
         [{"string_1": "10.0"}, {"string_1": "20"}],
         [("string_1", "string")],
     )
@@ -46,7 +46,7 @@ def test_numeric_literal_divided_by_string_robin() -> None:
     spark = _get_session()
     import robin_sparkless as rs
 
-    df = spark._create_dataframe_from_rows(
+    df = spark.createDataFrame(
         [{"string_1": "10.0"}, {"string_1": "5"}],
         [("string_1", "string")],
     )
@@ -64,7 +64,7 @@ def test_string_arithmetic_with_invalid_strings_robin() -> None:
     spark = _get_session()
     import robin_sparkless as rs
 
-    df = spark._create_dataframe_from_rows(
+    df = spark.createDataFrame(
         [{"string_1": "10.0"}, {"string_1": "invalid"}, {"string_1": "20"}],
         [("string_1", "string")],
     )

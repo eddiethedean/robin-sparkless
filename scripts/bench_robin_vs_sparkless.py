@@ -53,7 +53,7 @@ def run_robin_filter_select_groupby(
     import robin_sparkless as rs
 
     spark = rs.SparkSession.builder().app_name("bench").get_or_create()
-    df = spark.create_dataframe(data, cols)
+    df = spark.createDataFrame(data, cols)
     return (
         df.filter(rs.col("age").gt(rs.lit(30)))
         .select(["name", "age"])
@@ -87,7 +87,7 @@ def run_robin_groupby_multi_agg(
     import robin_sparkless as rs
 
     spark = rs.SparkSession.builder().app_name("bench").get_or_create()
-    df = spark.create_dataframe(data, cols)
+    df = spark.createDataFrame(data, cols)
     grouped = df.group_by(["age"])
     return grouped.agg(
         [
@@ -119,7 +119,7 @@ def run_robin_order_by_limit(
     import robin_sparkless as rs
 
     spark = rs.SparkSession.builder().app_name("bench").get_or_create()
-    df = spark.create_dataframe(data, cols)
+    df = spark.createDataFrame(data, cols)
     return df.order_by(["age"], ascending=[False]).limit(n).collect()
 
 
@@ -139,7 +139,7 @@ def run_robin_distinct(data: list[tuple[int, int, str]], cols: list[str]) -> Any
     import robin_sparkless as rs
 
     spark = rs.SparkSession.builder().app_name("bench").get_or_create()
-    df = spark.create_dataframe(data, cols)
+    df = spark.createDataFrame(data, cols)
     return df.distinct(None).collect()
 
 
@@ -160,8 +160,8 @@ def run_robin_union_then_groupby(
     import robin_sparkless as rs
 
     spark = rs.SparkSession.builder().app_name("bench").get_or_create()
-    df_a = spark.create_dataframe(data_a, cols)
-    df_b = spark.create_dataframe(data_b, cols)
+    df_a = spark.createDataFrame(data_a, cols)
+    df_b = spark.createDataFrame(data_b, cols)
     return df_a.union(df_b).group_by(["age"]).count().collect()
 
 
@@ -186,8 +186,8 @@ def run_robin_join(
     import robin_sparkless as rs
 
     spark = rs.SparkSession.builder().app_name("bench").get_or_create()
-    df_a = spark.create_dataframe(data_a, ["id", "age", "name"])
-    df_b = spark.create_dataframe(data_b, ["id", "x", "y"])
+    df_a = spark.createDataFrame(data_a, ["id", "age", "name"])
+    df_b = spark.createDataFrame(data_b, ["id", "x", "y"])
     return df_a.join(df_b, ["id"], "inner").collect()
 
 

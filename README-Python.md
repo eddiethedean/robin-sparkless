@@ -22,7 +22,7 @@ pip install robin-sparkless
 import robin_sparkless as rs
 
 spark = rs.SparkSession.builder().app_name("demo").get_or_create()
-df = spark.create_dataframe(
+df = spark.createDataFrame(
     [(1, 25, "Alice"), (2, 30, "Bob"), (3, 35, "Charlie")],
     ["id", "age", "name"],
 )
@@ -43,7 +43,7 @@ df = spark.read_parquet("data.parquet")
 df = spark.read_json("data.json")
 ```
 
-Filter, select, group, join, and use window functions with a PySpark-like API. For arbitrary schemas, use `spark._create_dataframe_from_rows(rows, schema)`. See the [User Guide](docs/USER_GUIDE.md) and [full documentation](https://robin-sparkless.readthedocs.io/) for details.
+Filter, select, group, join, and use window functions with a PySpark-like API. Use `spark.createDataFrame(data, schema=None)` for list of dicts (schema inferred), list of tuples with column names, or explicit schema as list of `(name, dtype_str)`. See the [User Guide](docs/USER_GUIDE.md) and [full documentation](https://robin-sparkless.readthedocs.io/) for details.
 
 ## UDFs and pandas_udf (Python)
 

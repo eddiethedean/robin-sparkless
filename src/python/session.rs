@@ -27,6 +27,109 @@ pub(crate) fn get_default_session() -> Option<SparkSession> {
 }
 
 use super::py_to_json_value;
+
+/// Result of parsing the schema argument to createDataFrame.
+/// - NoSchema: infer names from data and types from rows.
+/// - NamesOnly(Vec<String>): use these column names, infer types.
+/// - FullSchema(Vec<(String,String)>): use these (name, dtype_str).
+enum ParsedSchema {
+    NoSchema,
+    NamesOnly(Vec<String>),
+    FullSchema(Vec<(String, String)>),
+}
+
+/// Parse schema argument (None, list of str, or StructType-like) for createDataFrame.
+fn parse_schema_param(
+    _py: Python<'_>,
+    schema: Option<&Bound<'_, pyo3::types::PyAny>>,
+    _names_from_data: &[String],
+) -> PyResult<ParsedSchema> {
+    let Some(schema_any) = schema else {
+        return Ok(ParsedSchema::NoSchema);
+    };
+    if schema_any.is_none() {
+        return Ok(ParsedSchema::NoSchema);
+    }
+    if let Ok(names) = schema_any.extract::<Vec<String>>() {
+        return Ok(ParsedSchema::NamesOnly(names));
+    }
+    // PySpark DDL string: "name: string, age: int" or "name string, age int"
+    if let Ok(ddl) = schema_any.extract::<String>() {
+        let ddl = ddl.trim();
+        if ddl.is_empty() {
+            return Ok(ParsedSchema::NoSchema);
+        }
+        let mut schema_vec: Vec<(String, String)> = Vec::new();
+        for part in ddl.split(',') {
+            let part = part.trim();
+            if part.is_empty() {
+                continue;
+            }
+            let (name, type_str) = if let Some(colon) = part.find(": ") {
+                let (n, t) = part.split_at(colon);
+                (n.trim().to_string(), t[1..].trim().to_string())
+            } else if let Some(space) = part.find(' ') {
+                let (n, t) = part.split_at(space);
+                (n.trim().to_string(), t.trim().to_string())
+            } else {
+                (part.to_string(), "string".to_string())
+            };
+            if !name.is_empty() {
+                schema_vec.push((name, type_str.to_lowercase()));
+            }
+        }
+        if !schema_vec.is_empty() {
+            return Ok(ParsedSchema::FullSchema(schema_vec));
+        }
+    }
+    if let Ok(fields) = schema_any.getattr("fields") {
+        let mut schema_vec: Vec<(String, String)> = Vec::new();
+        for field in fields.try_iter()? {
+            let field = field?;
+            let name: String = field.getattr("name")?.extract()?;
+            let dtype = field.getattr("dataType")?;
+            let type_str: String = dtype
+                .getattr("typeName")
+                .and_then(|a| a.call0())
+                .and_then(|a| a.extract::<String>())
+                .or_else(|_| {
+                    dtype
+                        .getattr("simpleString")
+                        .and_then(|a| a.call0())
+                        .and_then(|a| a.extract::<String>())
+                })
+                .unwrap_or_else(|_| "string".to_string());
+            schema_vec.push((name, type_str.to_lowercase()));
+        }
+        return Ok(ParsedSchema::FullSchema(schema_vec));
+    }
+    if let Ok(list) = schema_any.downcast::<pyo3::types::PyList>() {
+        let mut schema_vec: Vec<(String, String)> = Vec::new();
+        for item in list.iter() {
+            if let Ok((name, dtype_str)) = item.extract::<(String, String)>() {
+                schema_vec.push((name, dtype_str.to_lowercase()));
+            } else if let Ok(name) = item.extract::<String>() {
+                schema_vec.push((name, "string".to_string()));
+            } else {
+                let name: String = item.getattr("name")?.extract()?;
+                let dtype = item.getattr("dataType")?;
+                let type_str: String = dtype
+                    .getattr("typeName")
+                    .and_then(|a| a.call0())
+                    .and_then(|a| a.extract::<String>())
+                    .unwrap_or_else(|_| "string".to_string());
+                schema_vec.push((name, type_str.to_lowercase()));
+            }
+        }
+        if !schema_vec.is_empty() {
+            return Ok(ParsedSchema::FullSchema(schema_vec));
+        }
+    }
+    Err(pyo3::exceptions::PyTypeError::new_err(
+        "schema must be None, a DDL string (e.g. 'name: string, age: int'), a list of column names, or a StructType (with .fields) or list of (name, type_str)",
+    ))
+}
+
 /// Python wrapper for SparkSession.
 #[pyclass(name = "SparkSession")]
 pub struct PySparkSession {
@@ -71,45 +174,136 @@ impl PySparkSession {
         self.inner.is_case_sensitive()
     }
 
-    /// Create a DataFrame from a list of 3-tuples (id, age, name) and column names.
-    ///
-    /// For arbitrary schemas use ``create_dataframe_from_rows(data, schema)`` instead.
+    /// PySpark-style createDataFrame: create a DataFrame from data with optional schema.
     ///
     /// Args:
-    ///     data: List of (int, int, str) tuples.
-    ///     column_names: List of exactly 3 strings, e.g. ["id", "age", "name"].
+    ///     data: List of rows. Each row can be a dict (keyed by column name) or a list/tuple
+    ///         of values in column order. Empty list produces an empty DataFrame.
+    ///     schema: Optional. None = infer schema from data (column names from first dict keys
+    ///         or "_1", "_2", ... for list rows; types inferred from first non-null per column).
+    ///         DDL string (e.g. "name: string, age: int") = full schema. List of str = column
+    ///         names only (types inferred). StructType or list of (name, type_str) = full schema.
+    ///     sampling_ratio: Optional. Ignored for list data (PySpark samplingRatio, for RDD inference).
+    ///     verify_schema: Optional. If True (default), data values are validated against schema.
     ///
     /// Returns:
-    ///     DataFrame (lazy).
+    ///     DataFrame.
     ///
     /// Raises:
-    ///     RuntimeError: If creation fails (e.g. wrong column count).
-    fn create_dataframe(
+    ///     TypeError: If a row is not a dict or list/tuple, or schema format is invalid.
+    ///     RuntimeError: If creation fails.
+    #[pyo3(
+        name = "createDataFrame",
+        signature = (data, schema=None, sampling_ratio=None, verify_schema=true)
+    )]
+    fn create_data_frame_pyspark_style(
         &self,
-        _py: Python<'_>,
+        py: Python<'_>,
         data: &Bound<'_, pyo3::types::PyAny>,
-        column_names: Vec<String>,
+        schema: Option<&Bound<'_, pyo3::types::PyAny>>,
+        #[allow(unused_variables)] sampling_ratio: Option<f64>,
+        #[allow(unused_variables)] verify_schema: bool,
     ) -> PyResult<PyDataFrame> {
-        let data_rust: Vec<(i64, i64, String)> = data
+        let data_list: Vec<Bound<'_, pyo3::types::PyAny>> = data
             .extract()
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        let names_ref: Vec<&str> = column_names.iter().map(|s| s.as_str()).collect();
+
+        let parsed = parse_schema_param(py, schema, &[])?;
+
+        if data_list.is_empty() {
+            let schema_vec = match &parsed {
+                ParsedSchema::FullSchema(s) => s.clone(),
+                ParsedSchema::NamesOnly(n) => n
+                    .iter()
+                    .map(|name| (name.clone(), "string".to_string()))
+                    .collect(),
+                ParsedSchema::NoSchema => vec![],
+            };
+            let df = self
+                .inner
+                .create_dataframe_from_rows(vec![], schema_vec)
+                .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+            return Ok(PyDataFrame { inner: df });
+        }
+
+        let first = &data_list[0];
+        let (rows, names_ordered) = if first.downcast::<PyDict>().is_ok() {
+            let names_from_first: Vec<String> = {
+                let dict = first.downcast::<PyDict>().unwrap();
+                let mut n: Vec<String> = Vec::new();
+                for k in dict.keys() {
+                    let name: String = k.extract().map_err(|e| {
+                        pyo3::exceptions::PyTypeError::new_err(format!("dict key must be str: {e}"))
+                    })?;
+                    if !n.contains(&name) {
+                        n.push(name);
+                    }
+                }
+                n
+            };
+            let order: Vec<String> = match &parsed {
+                ParsedSchema::NamesOnly(n) => n.clone(),
+                ParsedSchema::FullSchema(s) => s.iter().map(|(name, _)| name.clone()).collect(),
+                ParsedSchema::NoSchema => names_from_first,
+            };
+            let mut rows: Vec<Vec<JsonValue>> = Vec::with_capacity(data_list.len());
+            for row_any in &data_list {
+                let dict = row_any.downcast::<PyDict>().map_err(|_| {
+                    pyo3::exceptions::PyTypeError::new_err(
+                        "createDataFrame: when first row is dict, all rows must be dicts",
+                    )
+                })?;
+                let row: Vec<JsonValue> = order
+                    .iter()
+                    .map(|name| {
+                        let v = dict
+                            .get_item(name.as_str())
+                            .ok()
+                            .flatten()
+                            .unwrap_or_else(|| py.None().into_bound(py));
+                        py_to_json_value(&v)
+                    })
+                    .collect::<PyResult<Vec<_>>>()?;
+                rows.push(row);
+            }
+            (rows, order)
+        } else {
+            let mut rows: Vec<Vec<JsonValue>> = Vec::with_capacity(data_list.len());
+            for row_any in &data_list {
+                let list = row_any
+                    .extract::<Vec<Bound<'_, pyo3::types::PyAny>>>()
+                    .map_err(|_| {
+                        pyo3::exceptions::PyTypeError::new_err(
+                            "createDataFrame: each row must be a dict or a list/tuple",
+                        )
+                    })?;
+                let row: Vec<JsonValue> = list
+                    .iter()
+                    .map(|v| py_to_json_value(v))
+                    .collect::<PyResult<Vec<_>>>()?;
+                rows.push(row);
+            }
+            let n_cols = rows[0].len();
+            let order: Vec<String> = match &parsed {
+                ParsedSchema::NamesOnly(n) if n.len() == n_cols => n.clone(),
+                ParsedSchema::FullSchema(s) if s.len() == n_cols => {
+                    s.iter().map(|(name, _)| name.clone()).collect()
+                }
+                _ => (1..=n_cols).map(|i| format!("_{i}")).collect(),
+            };
+            (rows, order)
+        };
+
+        let schema_vec = match &parsed {
+            ParsedSchema::FullSchema(s) => s.clone(),
+            _ => SparkSession::infer_schema_from_json_rows(&rows, &names_ordered),
+        };
+
         let df = self
             .inner
-            .create_dataframe(data_rust, names_ref)
+            .create_dataframe_from_rows(rows, schema_vec)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
         Ok(PyDataFrame { inner: df })
-    }
-
-    /// PySpark alias for ``create_dataframe()`` (3-column int, int, str only).
-    #[pyo3(name = "createDataFrame")]
-    fn create_data_frame_pyspark_alias(
-        &self,
-        _py: Python<'_>,
-        data: &Bound<'_, pyo3::types::PyAny>,
-        column_names: Vec<String>,
-    ) -> PyResult<PyDataFrame> {
-        self.create_dataframe(_py, data, column_names)
     }
 
     /// Create a DataFrame from row data and an explicit schema (internal / PySpark createDataFrame equivalent).

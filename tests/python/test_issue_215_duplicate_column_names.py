@@ -11,7 +11,7 @@ import robin_sparkless as rs
 def test_select_same_column_cast_string_and_int() -> None:
     """Exact scenario from #215: select(col('num').cast('string'), col('num').cast('int'))."""
     spark = rs.SparkSession.builder().app_name("test").get_or_create()
-    df = spark._create_dataframe_from_rows(
+    df = spark.createDataFrame(
         [{"num": 1}, {"num": 2}],
         [("num", "bigint")],
     )
@@ -30,7 +30,7 @@ def test_select_same_column_cast_string_and_int() -> None:
 def test_select_duplicate_value_name() -> None:
     """#215 affected tests: duplicate 'value' in select (e.g. astype_multiple_types)."""
     spark = rs.SparkSession.builder().app_name("test").get_or_create()
-    df = spark._create_dataframe_from_rows(
+    df = spark.createDataFrame(
         [{"value": 10}],
         [("value", "bigint")],
     )
