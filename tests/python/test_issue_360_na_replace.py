@@ -16,9 +16,7 @@ def _spark() -> rs.SparkSession:
 def test_na_replace_issue_repro() -> None:
     """df.na.replace("a", "A", subset=["x"]).collect() (issue repro)."""
     spark = _spark()
-    create_df = getattr(
-        spark, "create_dataframe_from_rows", spark.createDataFrame
-    )
+    create_df = getattr(spark, "create_dataframe_from_rows", spark.createDataFrame)
     df = create_df(
         [{"x": "a"}, {"x": "b"}],
         [("x", "string")],
@@ -32,9 +30,7 @@ def test_na_replace_issue_repro() -> None:
 def test_na_replace_without_subset() -> None:
     """na.replace applies to all columns when subset is None."""
     spark = _spark()
-    create_df = getattr(
-        spark, "create_dataframe_from_rows", spark.createDataFrame
-    )
+    create_df = getattr(spark, "create_dataframe_from_rows", spark.createDataFrame)
     df = create_df(
         [{"a": "x", "b": "x"}, {"a": "y", "b": "y"}],
         [("a", "string"), ("b", "string")],
@@ -48,9 +44,7 @@ def test_na_replace_without_subset() -> None:
 def test_na_replace_subset_one_column() -> None:
     """na.replace with subset only touches specified columns."""
     spark = _spark()
-    create_df = getattr(
-        spark, "create_dataframe_from_rows", spark.createDataFrame
-    )
+    create_df = getattr(spark, "create_dataframe_from_rows", spark.createDataFrame)
     df = create_df(
         [{"a": 1, "b": 1}, {"a": 2, "b": 1}],
         [("a", "int"), ("b", "int")],
@@ -63,9 +57,7 @@ def test_na_replace_subset_one_column() -> None:
 def test_na_replace_with_none() -> None:
     """na.replace can replace with None (null)."""
     spark = _spark()
-    create_df = getattr(
-        spark, "create_dataframe_from_rows", spark.createDataFrame
-    )
+    create_df = getattr(spark, "create_dataframe_from_rows", spark.createDataFrame)
     df = create_df(
         [{"x": "a"}, {"x": "b"}],
         [("x", "string")],
