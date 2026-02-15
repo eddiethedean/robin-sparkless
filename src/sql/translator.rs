@@ -8,12 +8,12 @@ use crate::session::{set_thread_udf_session, SparkSession};
 use polars::prelude::{col, lit, DataFrame as PlDataFrame, Expr, PolarsError};
 use sqlparser::ast::{
     BinaryOperator, Expr as SqlExpr, Function, FunctionArg, FunctionArgExpr, GroupByExpr,
-    JoinConstraint, JoinOperator, Query, Select, SelectItem, SetExpr, Statement, TableFactor,
-    Value,
+    JoinConstraint, JoinOperator, ObjectType, Query, Select, SelectItem, SetExpr, Statement,
+    TableFactor, Value,
 };
 
 /// Translate a parsed Statement (Query or DDL) into a DataFrame using the session catalog.
-/// CREATE SCHEMA / CREATE DATABASE are accepted as no-ops and return an empty DataFrame.
+/// CREATE SCHEMA / CREATE DATABASE return empty DataFrame. DROP TABLE / DROP VIEW remove from session catalog.
 pub fn translate(
     session: &SparkSession,
     stmt: &Statement,
@@ -37,8 +37,28 @@ pub fn translate(
                 session.is_case_sensitive(),
             ))
         }
+        Statement::Drop {
+            object_type: ObjectType::Table | ObjectType::View,
+            names,
+            ..
+        } => {
+            for obj_name in names {
+                let name = obj_name.to_string();
+                if name.starts_with("global_temp.") {
+                    if let Some(suffix) = name.strip_prefix("global_temp.") {
+                        session.drop_global_temp_view(suffix);
+                    }
+                }
+                session.drop_temp_view(&name);
+                session.drop_table(&name);
+            }
+            Ok(DataFrame::from_polars_with_options(
+                PlDataFrame::empty(),
+                session.is_case_sensitive(),
+            ))
+        }
         _ => Err(PolarsError::InvalidOperation(
-            "SQL: only SELECT and CREATE SCHEMA/DATABASE are supported.".into(),
+            "SQL: only SELECT, CREATE SCHEMA/DATABASE, and DROP TABLE/VIEW are supported.".into(),
         )),
     }
 }
