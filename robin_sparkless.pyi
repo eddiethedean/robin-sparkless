@@ -17,11 +17,6 @@ class SparkSession:
     @classmethod
     def builder(cls) -> SparkSessionBuilder: ...
     def is_case_sensitive(self) -> bool: ...
-    def create_dataframe(
-        self,
-        data: Any,
-        column_names: list[str],
-    ) -> DataFrame: ...
     def createDataFrame(
         self,
         data: Any,

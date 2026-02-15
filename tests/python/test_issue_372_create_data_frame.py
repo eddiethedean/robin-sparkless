@@ -75,10 +75,12 @@ def test_create_data_frame_dict_order_from_schema() -> None:
     assert rows[0]["name"] == "Alice" and rows[0]["age"] == 25
 
 
-def test_create_data_frame_parity_with_create_dataframe() -> None:
-    """createDataFrame([(1, 25, 'Alice')], ['id', 'age', 'name']) matches create_dataframe."""
+def test_create_data_frame_tuples_with_column_names() -> None:
+    """createDataFrame([(1, 25, 'Alice'), ...], ['id', 'age', 'name']) returns expected rows."""
     spark = rs.SparkSession.builder().app_name("issue_372").get_or_create()
     data = [(1, 25, "Alice"), (2, 30, "Bob")]
-    df1 = spark.createDataFrame(data, ["id", "age", "name"])
-    df2 = spark.createDataFrame(data, ["id", "age", "name"])
-    assert df1.collect() == df2.collect()
+    df = spark.createDataFrame(data, ["id", "age", "name"])
+    assert df.collect() == [
+        {"id": 1, "age": 25, "name": "Alice"},
+        {"id": 2, "age": 30, "name": "Bob"},
+    ]
