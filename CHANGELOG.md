@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **#363 – struct() accept multiple Column arguments (PySpark parity)** — `struct(*cols)` now accepts variadic Column arguments like PySpark `F.struct(col1, col2, ...)`. Previously only a single list argument was accepted. Enables `df.select(rs.struct(rs.col("a"), rs.col("b")).alias("s")).collect()`. Fixes #363.
 - **#364 – Row/result use column alias as key (PySpark parity)** — `collect()` Row objects use the column alias as the key when present (e.g. `df.select(rs.lit(42).alias("map_col")).collect()` → `rows[0]["map_col"] == 42`). Regression test added. Fixes #364.
 - **#362 – SQL: support DROP TABLE / DROP VIEW (PySpark parity)** — `spark.sql("DROP TABLE IF EXISTS my_schema.my_table")` and `DROP TABLE name` / `DROP VIEW name` are now supported. Removes the table/view from the session catalog (temp views and saved tables). Qualified name `global_temp.xyz` drops from the global temp view catalog. Returns empty DataFrame. Fixes #362.
 - **#361 – dropDuplicates(subset=[...]) (PySpark parity)** — `DataFrame.drop_duplicates(subset=None)` and `dropDuplicates(subset=None)` are now supported; both delegate to `distinct(subset=...)`. When subset is provided, one row per distinct key in those columns is kept. Fixes #361.
