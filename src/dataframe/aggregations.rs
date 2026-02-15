@@ -551,11 +551,7 @@ impl GroupedData {
 
     /// Pivot a column for pivot-table aggregation (PySpark: groupBy(...).pivot(pivot_col).sum(value_col)).
     /// Returns PivotedGroupedData; call .sum(column), .avg(column), etc. to run the aggregation.
-    pub fn pivot(
-        &self,
-        pivot_col: &str,
-        values: Option<Vec<String>>,
-    ) -> PivotedGroupedData {
+    pub fn pivot(&self, pivot_col: &str, values: Option<Vec<String>>) -> PivotedGroupedData {
         PivotedGroupedData {
             df: self.df.clone(),
             grouping_cols: self.grouping_cols.clone(),
@@ -606,7 +602,11 @@ impl PivotedGroupedData {
         pivot_values_from_df(&self.df, &self.pivot_col)
     }
 
-    fn pivot_agg(&self, value_col: &str, agg_fn: fn(Expr) -> Expr) -> Result<DataFrame, PolarsError> {
+    fn pivot_agg(
+        &self,
+        value_col: &str,
+        agg_fn: fn(Expr) -> Expr,
+    ) -> Result<DataFrame, PolarsError> {
         use polars::prelude::*;
         let pivot_vals = self.pivot_values()?;
         if pivot_vals.is_empty() {
