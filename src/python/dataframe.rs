@@ -816,6 +816,24 @@ impl PyDataFrame {
         return Ok(PyDataFrame { inner: df });
     }
 
+    /// Drop duplicate rows (PySpark drop_duplicates / dropDuplicates). Same as distinct(subset=...).
+    ///
+    /// Args:
+    ///     subset: If provided, only these columns determine uniqueness; otherwise all columns.
+    ///
+    /// Returns:
+    ///     DataFrame with one row per distinct key (or per distinct subset when subset is given).
+    #[pyo3(signature = (subset=None))]
+    fn drop_duplicates(&self, subset: Option<Vec<String>>) -> PyResult<PyDataFrame> {
+        self.distinct(subset)
+    }
+
+    /// PySpark alias for drop_duplicates.
+    #[pyo3(name = "dropDuplicates", signature = (subset=None))]
+    fn drop_duplicates_camel(&self, subset: Option<Vec<String>>) -> PyResult<PyDataFrame> {
+        self.distinct(subset)
+    }
+
     /// Return a DataFrame with the specified columns removed.
     ///
     /// Args:
