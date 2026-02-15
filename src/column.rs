@@ -725,14 +725,45 @@ impl Column {
         Self::from_expr(expr, None)
     }
 
+    /// True if regex pattern contains lookahead/lookbehind (Polars regex does not support these).
+    fn pattern_has_lookaround(pattern: &str) -> bool {
+        let p = pattern.as_bytes();
+        let n = p.len();
+        let mut i = 0;
+        while i + 2 < n {
+            if p[i] == b'(' && p[i + 1] == b'?' {
+                match p[i + 2] {
+                    b'=' | b'!' => return true,  // (?= (?! lookahead
+                    b'<' if i + 4 <= n && (p[i + 3] == b'=' || p[i + 3] == b'!') => return true, // (?<= (?<! lookbehind
+                    _ => {}
+                }
+            }
+            i += 1;
+        }
+        false
+    }
+
     /// Extract first match of regex pattern (PySpark regexp_extract). Group 0 = full match.
+    /// When pattern contains lookahead/lookbehind, uses fancy-regex (Polars regex does not support them).
     pub fn regexp_extract(&self, pattern: &str, group_index: usize) -> Column {
         use polars::prelude::*;
-        let pat = pattern.to_string();
-        Self::from_expr(
-            self.expr().clone().str().extract(lit(pat), group_index),
-            None,
-        )
+        if Self::pattern_has_lookaround(pattern) {
+            let pat = pattern.to_string();
+            let group = group_index;
+            Self::from_expr(
+                self.expr().clone().map(
+                    move |s| crate::udfs::apply_regexp_extract_lookaround(s, &pat, group),
+                    GetOutput::from_type(DataType::String),
+                ),
+                None,
+            )
+        } else {
+            let pat = pattern.to_string();
+            Self::from_expr(
+                self.expr().clone().str().extract(lit(pat), group_index),
+                None,
+            )
+        }
     }
 
     /// Replace first match of regex pattern (PySpark regexp_replace). literal=false for regex.
