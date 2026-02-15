@@ -20,7 +20,9 @@ class SparkSession:
     def createDataFrame(
         self,
         data: Any,
-        schema: Any = ...,
+        schema: Any = None,
+        sampling_ratio: float | None = None,
+        verify_schema: bool = True,
     ) -> DataFrame: ...
     def _create_dataframe_from_rows(
         self,

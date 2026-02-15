@@ -51,11 +51,13 @@ This document lists **intentional or known divergences** from PySpark semantics 
 
 ## SparkSession.createDataFrame / create_dataframe
 
-- **PySpark** `createDataFrame(data, schema=None, samplingRatio=None, verifySchema=True)` accepts many input types: list of tuples (any length, types inferred or from schema), list of dicts, list of Row, RDD, pandas DataFrame; `schema` can be a list of column names (types inferred) or a StructType.
-- **Robin-sparkless (Python)** — **`createDataFrame(data, schema=None)`** is the main API (#372):
+- **PySpark** `createDataFrame(data, schema=None, samplingRatio=None, verifySchema=True)` accepts many input types: list of tuples (any length, types inferred or from schema), list of dicts, list of Row, RDD, pandas DataFrame; `schema` can be a list of column names (types inferred), a StructType, or a DDL string (e.g. `"name: string, age: int"`).
+- **Robin-sparkless (Python)** — **`createDataFrame(data, schema=None, sampling_ratio=None, verify_schema=True)`** is the main API (#372):
   - **data**: List of dicts (keyed by column name) or list of list/tuple (row values in order).
-  - **schema**: `None` (infer names from first dict keys or `_1`, `_2`, … for list rows; infer types from first non-null per column), a list of column name strings (types inferred), a StructType-like object with `.fields`, or a list of `(name, dtype_str)` e.g. `[("id", "bigint"), ("name", "string")]`. Supported dtypes: bigint, int, long, double, float, string, boolean, date, timestamp, etc.
-  - Use **`spark.createDataFrame(data, schema)`** for all cases (list of dicts, list of tuples with column names, or explicit schema). **`create_dataframe(data, column_names)`** remains for the 3-tuple `(int, int, str)` convenience only.
+  - **schema**: `None` (infer names from first dict keys or `_1`, `_2`, … for list rows; infer types from first non-null per column), a **DDL string** (e.g. `"name: string, age: int"` or `"name string, age int"`), a list of column name strings (types inferred), a StructType-like object with `.fields`, or a list of `(name, dtype_str)` e.g. `[("id", "bigint"), ("name", "string")]`. Supported dtypes: bigint, int, long, double, float, string, boolean, date, timestamp, etc.
+  - **sampling_ratio**: Accepted for API compatibility; ignored for list data (PySpark uses it for RDD schema inference).
+  - **verify_schema**: Accepted (default True); data is validated when building the DataFrame.
+  - Use **`spark.createDataFrame(data, schema)`** for all cases (list of dicts, list of tuples with column names, DDL schema, or explicit schema).
 - **Robin-sparkless (Rust)** — **`create_dataframe(data, column_names)`** accepts only 3-tuples `(i64, i64, String)` and three column names. For arbitrary schemas use **`create_dataframe_from_rows(rows, schema)`** (Rust).
 
 ## JVM / runtime stubs

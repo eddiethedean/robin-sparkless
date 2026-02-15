@@ -53,6 +53,35 @@ fn parse_schema_param(
     if let Ok(names) = schema_any.extract::<Vec<String>>() {
         return Ok(ParsedSchema::NamesOnly(names));
     }
+    // PySpark DDL string: "name: string, age: int" or "name string, age int"
+    if let Ok(ddl) = schema_any.extract::<String>() {
+        let ddl = ddl.trim();
+        if ddl.is_empty() {
+            return Ok(ParsedSchema::NoSchema);
+        }
+        let mut schema_vec: Vec<(String, String)> = Vec::new();
+        for part in ddl.split(',') {
+            let part = part.trim();
+            if part.is_empty() {
+                continue;
+            }
+            let (name, type_str) = if let Some(colon) = part.find(": ") {
+                let (n, t) = part.split_at(colon);
+                (n.trim().to_string(), t[1..].trim().to_string())
+            } else if let Some(space) = part.find(' ') {
+                let (n, t) = part.split_at(space);
+                (n.trim().to_string(), t.trim().to_string())
+            } else {
+                (part.to_string(), "string".to_string())
+            };
+            if !name.is_empty() {
+                schema_vec.push((name, type_str.to_lowercase()));
+            }
+        }
+        if !schema_vec.is_empty() {
+            return Ok(ParsedSchema::FullSchema(schema_vec));
+        }
+    }
     if let Ok(fields) = schema_any.getattr("fields") {
         let mut schema_vec: Vec<(String, String)> = Vec::new();
         for field in fields.try_iter()? {
@@ -97,7 +126,7 @@ fn parse_schema_param(
         }
     }
     Err(pyo3::exceptions::PyTypeError::new_err(
-        "schema must be None, a list of column name strings, or a StructType (with .fields) or list of (name, type_str)",
+        "schema must be None, a DDL string (e.g. 'name: string, age: int'), a list of column names, or a StructType (with .fields) or list of (name, type_str)",
     ))
 }
 
@@ -152,8 +181,10 @@ impl PySparkSession {
     ///         of values in column order. Empty list produces an empty DataFrame.
     ///     schema: Optional. None = infer schema from data (column names from first dict keys
     ///         or "_1", "_2", ... for list rows; types inferred from first non-null per column).
-    ///         List of str = column names only (types inferred). StructType or list of
-    ///         StructField-like (with .name and .dataType.typeName()) = full schema.
+    ///         DDL string (e.g. "name: string, age: int") = full schema. List of str = column
+    ///         names only (types inferred). StructType or list of (name, type_str) = full schema.
+    ///     sampling_ratio: Optional. Ignored for list data (PySpark samplingRatio, for RDD inference).
+    ///     verify_schema: Optional. If True (default), data values are validated against schema.
     ///
     /// Returns:
     ///     DataFrame.
@@ -161,12 +192,17 @@ impl PySparkSession {
     /// Raises:
     ///     TypeError: If a row is not a dict or list/tuple, or schema format is invalid.
     ///     RuntimeError: If creation fails.
-    #[pyo3(name = "createDataFrame", signature = (data, schema=None))]
+    #[pyo3(
+        name = "createDataFrame",
+        signature = (data, schema=None, sampling_ratio=None, verify_schema=true)
+    )]
     fn create_data_frame_pyspark_style(
         &self,
         py: Python<'_>,
         data: &Bound<'_, pyo3::types::PyAny>,
         schema: Option<&Bound<'_, pyo3::types::PyAny>>,
+        #[allow(unused_variables)] sampling_ratio: Option<f64>,
+        #[allow(unused_variables)] verify_schema: bool,
     ) -> PyResult<PyDataFrame> {
         let data_list: Vec<Bound<'_, pyo3::types::PyAny>> = data
             .extract()
