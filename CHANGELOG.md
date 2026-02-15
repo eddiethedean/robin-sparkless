@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **#362 – SQL: support DROP TABLE / DROP VIEW (PySpark parity)** — `spark.sql("DROP TABLE IF EXISTS my_schema.my_table")` and `DROP TABLE name` / `DROP VIEW name` are now supported. Removes the table/view from the session catalog (temp views and saved tables). Qualified name `global_temp.xyz` drops from the global temp view catalog. Returns empty DataFrame. Fixes #362.
 - **#361 – dropDuplicates(subset=[...]) (PySpark parity)** — `DataFrame.drop_duplicates(subset=None)` and `dropDuplicates(subset=None)` are now supported; both delegate to `distinct(subset=...)`. When subset is provided, one row per distinct key in those columns is kept. Fixes #361.
 - **#360 – DataFrame.na.replace() (PySpark parity)** — `df.na.replace(to_replace, value, subset=None)` replaces values in columns. Supports scalar to_replace and value (None, int, float, bool, str). When subset is provided, only those columns are updated; otherwise all columns. Fixes #360.
 - **#359 – GroupedData.pivot() for pivot tables (PySpark parity)** — `GroupedData.pivot(pivot_col, values=None)` returns `PivotedGroupedData` with `.sum(column)`, `.avg(column)`, `.min(column)`, `.max(column)`, and `.count()`. Pivot column can be any type (column names use string representation); null in pivot column becomes column `"null"`. When `values` is provided, column order follows the list; otherwise pivot values are sorted for deterministic order. No matching rows for a pivot value yields null (not 0). Fixes #359.
