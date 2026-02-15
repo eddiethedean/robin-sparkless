@@ -9,7 +9,7 @@ use crate::python::udf::{execute_grouped_vectorized_aggs, GroupedAggSpec};
 use crate::{DataFrame, GroupedData};
 use polars::prelude::{col, lit, Expr, NULL};
 use pyo3::prelude::*;
-use pyo3::types::{PyAny, PyDict, PyList, PyString, PyTuple};
+use pyo3::types::{PyAny, PyDict, PyList, PyTuple};
 use std::path::Path;
 use std::sync::RwLock;
 
@@ -130,31 +130,54 @@ fn py_group_by_cols_to_exprs_and_names(
     ))
 }
 
-/// Join `on` parameter: accept str (single column) or list/tuple of str (PySpark compatibility, #175).
+/// Join `on` parameter: accept str, Column, or list/tuple of str/Column (PySpark compatibility, #175, #353).
 struct JoinOn(Vec<String>);
+
+fn py_join_on_to_column_names(ob: &Bound<'_, PyAny>) -> PyResult<Vec<String>> {
+    if let Ok(s) = ob.extract::<String>() {
+        return Ok(vec![s]);
+    }
+    if let Ok(py_col) = ob.downcast::<PyColumn>() {
+        return Ok(vec![py_col.borrow().inner.name().to_string()]);
+    }
+    if let Ok(list) = ob.downcast::<PyList>() {
+        let mut v = Vec::with_capacity(list.len());
+        for item in list.iter() {
+            if let Ok(s) = item.extract::<String>() {
+                v.push(s);
+            } else if let Ok(py_col) = item.downcast::<PyColumn>() {
+                v.push(py_col.borrow().inner.name().to_string());
+            } else {
+                return Err(pyo3::exceptions::PyTypeError::new_err(
+                    "join 'on' list items must be str (column name) or Column (e.g. col(\"id\"))",
+                ));
+            }
+        }
+        return Ok(v);
+    }
+    if let Ok(tup) = ob.downcast::<PyTuple>() {
+        let mut v = Vec::with_capacity(tup.len());
+        for item in tup.iter() {
+            if let Ok(s) = item.extract::<String>() {
+                v.push(s);
+            } else if let Ok(py_col) = item.downcast::<PyColumn>() {
+                v.push(py_col.borrow().inner.name().to_string());
+            } else {
+                return Err(pyo3::exceptions::PyTypeError::new_err(
+                    "join 'on' tuple items must be str (column name) or Column (e.g. col(\"id\"))",
+                ));
+            }
+        }
+        return Ok(v);
+    }
+    Err(pyo3::exceptions::PyTypeError::new_err(
+        "join 'on' must be str (column name), Column (e.g. col(\"id\")), or list/tuple of str or Column",
+    ))
+}
 
 impl FromPyObject<'_> for JoinOn {
     fn extract_bound(ob: &Bound<'_, PyAny>) -> PyResult<Self> {
-        if let Ok(s) = ob.downcast_exact::<PyString>() {
-            return Ok(JoinOn(vec![s.to_string_lossy().into_owned()]));
-        }
-        if let Ok(list) = ob.downcast_exact::<PyList>() {
-            let mut v = Vec::with_capacity(list.len());
-            for item in list.iter() {
-                v.push(item.extract::<String>()?);
-            }
-            return Ok(JoinOn(v));
-        }
-        if let Ok(tup) = ob.downcast_exact::<PyTuple>() {
-            let mut v = Vec::with_capacity(tup.len());
-            for item in tup.iter() {
-                v.push(item.extract::<String>()?);
-            }
-            return Ok(JoinOn(v));
-        }
-        Err(pyo3::exceptions::PyTypeError::new_err(
-            "join 'on' must be str or list/tuple of str",
-        ))
+        py_join_on_to_column_names(ob).map(JoinOn)
     }
 }
 
