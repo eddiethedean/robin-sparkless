@@ -202,6 +202,24 @@ mod tests {
     }
 
     #[test]
+    fn test_sql_drop_table_ddl() {
+        let spark = SparkSession::builder().app_name("test").get_or_create();
+        // DROP TABLE IF EXISTS (no error when table does not exist)
+        let out = spark
+            .sql("DROP TABLE IF EXISTS my_schema.my_table")
+            .unwrap();
+        assert_eq!(out.count().unwrap(), 0);
+        // Create a temp view then DROP TABLE
+        let df = spark
+            .create_dataframe(vec![(1i64, 10i64, "a".to_string())], vec!["id", "v", "x"])
+            .unwrap();
+        spark.create_or_replace_temp_view("t_drop_me", df.clone());
+        assert!(spark.table("t_drop_me").is_ok());
+        let _ = spark.sql("DROP TABLE t_drop_me").unwrap();
+        assert!(spark.table("t_drop_me").is_err());
+    }
+
+    #[test]
     fn test_sql_case_insensitive_columns() {
         let spark = SparkSession::builder().app_name("test").get_or_create();
         let df = spark
