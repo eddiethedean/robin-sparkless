@@ -39,7 +39,7 @@ def test_spark_session_builder() -> None:
 
 
 def test_create_dataframe_and_collect() -> None:
-    """create_dataframe with list of 3-tuples and collect returns list of dicts."""
+    """createDataFrame with list of 3-tuples and collect returns list of dicts."""
     import robin_sparkless as rs
 
     spark = rs.SparkSession.builder().app_name("test").get_or_create()

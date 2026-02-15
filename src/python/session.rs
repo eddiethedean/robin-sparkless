@@ -145,36 +145,6 @@ impl PySparkSession {
         self.inner.is_case_sensitive()
     }
 
-    /// Create a DataFrame from a list of 3-tuples (id, age, name) and column names.
-    ///
-    /// For arbitrary schemas use ``create_dataframe_from_rows(data, schema)`` instead.
-    ///
-    /// Args:
-    ///     data: List of (int, int, str) tuples.
-    ///     column_names: List of exactly 3 strings, e.g. ["id", "age", "name"].
-    ///
-    /// Returns:
-    ///     DataFrame (lazy).
-    ///
-    /// Raises:
-    ///     RuntimeError: If creation fails (e.g. wrong column count).
-    fn create_dataframe(
-        &self,
-        _py: Python<'_>,
-        data: &Bound<'_, pyo3::types::PyAny>,
-        column_names: Vec<String>,
-    ) -> PyResult<PyDataFrame> {
-        let data_rust: Vec<(i64, i64, String)> = data
-            .extract()
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        let names_ref: Vec<&str> = column_names.iter().map(|s| s.as_str()).collect();
-        let df = self
-            .inner
-            .create_dataframe(data_rust, names_ref)
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(PyDataFrame { inner: df })
-    }
-
     /// PySpark-style createDataFrame: create a DataFrame from data with optional schema.
     ///
     /// Args:
