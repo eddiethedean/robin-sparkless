@@ -54,6 +54,19 @@ pub struct PyWindow {
 
 #[pymethods]
 impl PyWindow {
+    /// No-arg constructor (PySpark: Window() for unbounded window). Chain .partitionBy(...).orderBy(...).
+    ///
+    /// Usage:
+    ///     w = Window().partitionBy("dept").orderBy("salary")
+    ///     w = Window.partitionBy("dept").orderBy("salary")  # classmethod also works
+    #[new]
+    fn new() -> Self {
+        Self {
+            partition_by: vec![],
+            order_by: None,
+        }
+    }
+
     /// Classmethod: Window.partitionBy(*cols) -> Window
     ///
     /// PySpark-style usage:
