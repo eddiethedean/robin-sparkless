@@ -733,7 +733,7 @@ impl Column {
         while i + 2 < n {
             if p[i] == b'(' && p[i + 1] == b'?' {
                 match p[i + 2] {
-                    b'=' | b'!' => return true,  // (?= (?! lookahead
+                    b'=' | b'!' => return true, // (?= (?! lookahead
                     b'<' if i + 4 <= n && (p[i + 3] == b'=' || p[i + 3] == b'!') => return true, // (?<= (?<! lookbehind
                     _ => {}
                 }
