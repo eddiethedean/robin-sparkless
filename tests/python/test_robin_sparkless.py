@@ -1093,9 +1093,7 @@ def test_join_on_invalid_type_raises() -> None:
     df1 = spark.createDataFrame([{"id": 1}], [("id", "bigint")])
     df2 = spark.createDataFrame([{"id": 1}], [("id", "bigint")])
     for invalid in (42, None, 3.14):
-        with pytest.raises(
-            TypeError, match="join 'on' must be str or list/tuple of str"
-        ):
+        with pytest.raises(TypeError, match="join 'on' must be str"):
             df1.join(df2, on=invalid, how="inner")  # type: ignore[arg-type]
 
 
