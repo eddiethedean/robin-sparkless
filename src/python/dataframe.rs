@@ -1247,9 +1247,15 @@ impl PyDataFrame {
 
     /// Return a string representation of the logical plan (for debugging).
     ///
+    /// Args:
+    ///     mode: Optional; PySpark accepts "simple", "extended", "codegen", "cost", "formatted".
+    ///           Ignored for now (eager backend); present for API parity.
+    ///
     /// Returns:
     ///     str: Plan description. Does not trigger full execution.
-    fn explain(&self) -> PyResult<String> {
+    #[pyo3(signature = (mode=None))]
+    fn explain(&self, mode: Option<&str>) -> PyResult<String> {
+        let _ = mode;
         Ok(self.inner.explain())
     }
 
@@ -1584,13 +1590,22 @@ impl PyDataFrame {
             .collect())
     }
 
-    /// Summary statistics (count, mean, stddev, min, max) for numeric columns.
+    /// Summary statistics (count, mean, stddev, min, max) for numeric columns. PySpark describe.
+    fn describe(&self) -> PyResult<PyDataFrame> {
+        let df = self
+            .inner
+            .describe()
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        Ok(PyDataFrame { inner: df })
+    }
+
+    /// Summary statistics (alias for describe). PySpark summary.
     fn summary(&self) -> PyResult<PyDataFrame> {
         let df = self
             .inner
             .summary()
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        return Ok(PyDataFrame { inner: df });
+        Ok(PyDataFrame { inner: df })
     }
 
     /// Rename all columns to the given names (e.g. after toDF in Scala).
