@@ -2681,6 +2681,54 @@ pub(crate) fn any_value_to_py(
             s.into_bound_py_any(py).map(Into::into)
         }
         AnyValue::List(s) => {
+            // Map column (List(Struct{key, value})): return Python dict {} not list (fixes #380).
+            let dtype = s.dtype();
+            let (is_map, fields_ref) = match dtype {
+                polars::datatypes::DataType::List(inner) => {
+                    if let polars::datatypes::DataType::Struct(fields) = inner.as_ref() {
+                        let names: Vec<String> =
+                            fields.iter().map(|f| f.name.as_str().to_string()).collect();
+                        (names == ["key", "value"], Some(fields))
+                    } else {
+                        (false, None)
+                    }
+                }
+                polars::datatypes::DataType::Struct(fields) => {
+                    let names: Vec<String> =
+                        fields.iter().map(|f| f.name.as_str().to_string()).collect();
+                    (names == ["key", "value"], Some(fields))
+                }
+                _ => (false, None),
+            };
+            if is_map {
+                if let Some(fields) = fields_ref {
+                    let py_dict = pyo3::types::PyDict::new(py);
+                    for i in 0..s.len() {
+                        let av = s.get(i).map_err(|e| {
+                            pyo3::exceptions::PyRuntimeError::new_err(e.to_string())
+                        })?;
+                        if let AnyValue::Struct(_, _, _) = &av {
+                            let mut key_py = None;
+                            let mut val_py = None;
+                            for (fld_av, fld) in av._iter_struct_av().zip(fields.iter()) {
+                                let py_val = any_value_to_py(py, fld_av.clone())?;
+                                if fld.name.as_str() == "key" {
+                                    key_py = Some(py_val);
+                                } else if fld.name.as_str() == "value" {
+                                    val_py = Some(py_val);
+                                }
+                            }
+                            if let (Some(k), Some(v)) = (key_py, val_py) {
+                                let k_str = k.extract::<String>(py).ok();
+                                if let Some(kk) = k_str {
+                                    py_dict.set_item(kk, v)?;
+                                }
+                            }
+                        }
+                    }
+                    return Ok(py_dict.into());
+                }
+            }
             let py_list = pyo3::types::PyList::empty(py);
             for i in 0..s.len() {
                 let av = s
