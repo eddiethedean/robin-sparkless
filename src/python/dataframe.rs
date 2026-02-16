@@ -709,12 +709,19 @@ impl PyDataFrame {
     /// DataFrame, returning a single-row DataFrame (PySpark: df.agg(F.sum("x"), F.avg("y"))).
     ///
     /// Args:
-    ///     exprs: Single Column, or list/tuple of Columns (e.g. sum(col("x")), avg(col("y"))).
+    ///     *exprs: One or more Column expressions (e.g. df.agg(sum(col("x")), avg(col("y")))),
+    ///         or a single list/tuple of Columns (e.g. df.agg([sum(col("x")), avg(col("y"))])).
     ///
     /// Returns:
     ///     DataFrame with one row and one column per expression.
-    fn agg(&self, exprs: &Bound<'_, PyAny>, py: Python<'_>) -> PyResult<PyDataFrame> {
-        let aggregations = python_exprs_to_columns(exprs, py)?;
+    #[pyo3(signature = (*exprs))]
+    fn agg(&self, exprs: &Bound<'_, PyTuple>, py: Python<'_>) -> PyResult<PyDataFrame> {
+        let arg: Bound<'_, PyAny> = if exprs.len() == 1 {
+            exprs.get_item(0)?
+        } else {
+            exprs.clone().into_any()
+        };
+        let aggregations = python_exprs_to_columns(&arg, py)?;
         let df = self
             .inner
             .agg(aggregations)
