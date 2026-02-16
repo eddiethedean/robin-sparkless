@@ -893,7 +893,7 @@ def test_select_nonexistent_column_raises() -> None:
 
 
 def test_read_api_and_write_parquet_csv_json() -> None:
-    """spark.read().csv/parquet/json and df.write().parquet/csv/json work (Phase C)."""
+    """spark.read().csv/parquet/json and df.write.parquet/csv/json work (Phase C)."""
     import tempfile
 
     import robin_sparkless as rs
@@ -904,27 +904,25 @@ def test_read_api_and_write_parquet_csv_json() -> None:
     with tempfile.TemporaryDirectory() as tmpdir:
         # Write as parquet
         parquet_path = f"{tmpdir}/out.parquet"
-        df.write().mode("overwrite").parquet(parquet_path)
+        df.write.mode("overwrite").parquet(parquet_path)
         back = spark.read().parquet(parquet_path)
         assert back.count() == 2
         assert back.collect()[0]["id"] == 1
 
         # Write as CSV
         csv_path = f"{tmpdir}/out.csv"
-        df.write().mode("overwrite").option("header", "true").csv(csv_path)
+        df.write.mode("overwrite").option("header", "true").csv(csv_path)
         back_csv = spark.read().option("header", "true").csv(csv_path)
         assert back_csv.count() == 2
 
         # Write as JSON
         json_path = f"{tmpdir}/out.json"
-        df.write().mode("overwrite").json(json_path)
+        df.write.mode("overwrite").json(json_path)
         back_json = spark.read().json(json_path)
         assert back_json.count() == 2
 
         # format().save() still works
-        df.write().mode("overwrite").format("parquet").save(
-            f"{tmpdir}/via_save.parquet"
-        )
+        df.write.mode("overwrite").format("parquet").save(f"{tmpdir}/via_save.parquet")
         via_save = spark.read().format("parquet").load(f"{tmpdir}/via_save.parquet")
         assert via_save.count() == 2
 
@@ -1450,7 +1448,7 @@ def test_save_as_table_and_catalog() -> None:
     spark = rs.SparkSession.builder().app_name("test").get_or_create()
     df = spark.createDataFrame([(1, 10, "a"), (2, 20, "b")], ["id", "v", "name"])
     try:
-        df.write().saveAsTable("t1")
+        df.write.saveAsTable("t1")
     except AttributeError:
         pytest.skip("sql feature not built (saveAsTable not available)")
     read_back = spark.table("t1")
@@ -1460,14 +1458,14 @@ def test_save_as_table_and_catalog() -> None:
 
     # saveAsTable with mode overwrite
     df2 = spark.createDataFrame([(3, 30, "c")], ["id", "v", "name"])
-    df2.write().saveAsTable("t1", mode="overwrite")
+    df2.write.saveAsTable("t1", mode="overwrite")
     assert spark.table("t1").count() == 1
 
     # resolution: temp view first
     df_temp = spark.createDataFrame([(99, 99, "temp")], ["id", "v", "name"])
     spark.create_or_replace_temp_view("x", df_temp)
     df_saved = spark.createDataFrame([(1, 1, "saved")], ["id", "v", "name"])
-    df_saved.write().saveAsTable("x", mode="overwrite")
+    df_saved.write.saveAsTable("x", mode="overwrite")
     # table("x") must return temp view (PySpark order)
     rows_x = spark.table("x").collect()
     assert len(rows_x) == 1 and rows_x[0]["name"] == "temp"
@@ -1483,7 +1481,7 @@ def test_save_as_table_and_catalog() -> None:
 
     # read_delta by name (in-memory table)
     df3 = spark.createDataFrame([(1, 2, "d")], ["id", "v", "name"])
-    df3.write().saveAsTable("delta_t")
+    df3.write.saveAsTable("delta_t")
     rd = spark.read_delta("delta_t")
     assert rd.count() == 1 and rd.collect()[0]["name"] == "d"
 
@@ -1525,7 +1523,7 @@ def test_save_as_table_without_session_raises() -> None:
     df = spark.createDataFrame([(1, 2, "x")], ["id", "v", "name"])
     # With session we already have from get_or_create, saveAsTable works
     try:
-        df.write().saveAsTable("_no_session_test", mode="overwrite")
+        df.write.saveAsTable("_no_session_test", mode="overwrite")
     except AttributeError:
         pytest.skip("sql feature not built")
     # If we had no default session we'd get RuntimeError; here we just ensure no crash
@@ -1539,19 +1537,19 @@ def test_save_as_table_mode_error_append_ignore() -> None:
     spark = rs.SparkSession.builder().app_name("test").get_or_create()
     df1 = spark.createDataFrame([(1, 10, "a")], ["id", "v", "name"])
     try:
-        df1.write().saveAsTable("m1", mode="error")
+        df1.write.saveAsTable("m1", mode="error")
     except AttributeError:
         pytest.skip("sql feature not built")
     assert spark.table("m1").count() == 1
     with pytest.raises(Exception, match="already exists"):
-        df1.write().saveAsTable("m1", mode="error")
+        df1.write.saveAsTable("m1", mode="error")
 
     df2 = spark.createDataFrame([(2, 20, "b")], ["id", "v", "name"])
-    df2.write().saveAsTable("m1", mode="append")
+    df2.write.saveAsTable("m1", mode="append")
     assert spark.table("m1").count() == 2
 
     df3 = spark.createDataFrame([(3, 30, "c")], ["id", "v", "name"])
-    df3.write().saveAsTable("m1", mode="ignore")  # no-op, table exists
+    df3.write.saveAsTable("m1", mode="ignore")  # no-op, table exists
     assert spark.table("m1").count() == 2
 
 
@@ -1644,7 +1642,7 @@ def test_phase_c_reader_writer() -> None:
         read_df = spark.read().option("header", "true").csv(csv_path)
         assert read_df.count() == 2
         parquet_path = f"{tmpdir}/out.parquet"
-        df.write().mode("overwrite").parquet(parquet_path)
+        df.write.mode("overwrite").parquet(parquet_path)
         back = spark.read().parquet(parquet_path)
         assert back.count() == 2
     try:

@@ -53,12 +53,12 @@ def test_catalog_create_database() -> None:
 
 
 def test_dataframe_writer_mode() -> None:
-    """createDataFrame([]).write().mode('overwrite') for compatibility layers."""
+    """createDataFrame([]).write.mode('overwrite') for compatibility layers."""
     import robin_sparkless as rs
 
     spark = rs.SparkSession.builder().app_name("repro").get_or_create()
     df = spark.createDataFrame([], [])
-    writer = df.write()
+    writer = df.write
     assert writer is not None
     # mode() returns self for chaining (PySpark DataFrameWriter.mode)
     chained = writer.mode("overwrite")

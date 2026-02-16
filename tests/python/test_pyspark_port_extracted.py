@@ -714,7 +714,7 @@ def test_save_and_load() -> None:
     )
     with tempfile.TemporaryDirectory() as tmp:
         path = str(Path(tmp) / "out.parquet")
-        df.write().mode("overwrite").parquet(path)
+        df.write.mode("overwrite").parquet(path)
         loaded = spark.read().parquet(path)
         rows = loaded.order_by(["id"]).collect()
     assert len(rows) == 2

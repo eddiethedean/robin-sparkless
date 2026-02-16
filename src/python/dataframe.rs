@@ -681,12 +681,13 @@ impl PyDataFrame {
     #[pyo3(name = "writeTo")]
     fn write_to(&self) -> PyResult<PyObject> {
         Err(pyo3::exceptions::PyNotImplementedError::new_err(
-            "writeTo (catalog tables) is not supported; use df.write().parquet(path) or df.write().csv(path)",
+            "writeTo (catalog tables) is not supported; use df.write.format('parquet').save(path) or df.write.parquet(path)",
         ))
     }
 
     /// Returns:
-    ///     DataFrameWriter: Default mode "overwrite", format "parquet".
+    ///     DataFrameWriter: Default mode "overwrite", format "parquet". Use as property: df.write.format(...).save(...) (fixes #374).
+    #[getter]
     fn write(&self) -> PyDataFrameWriter {
         PyDataFrameWriter {
             df: self.inner.clone(),
