@@ -5,6 +5,34 @@ use polars::prelude::{
     col, len, lit, when, DataFrame as PlDataFrame, DataType, Expr, LazyGroupBy, NamedFrom,
     PolarsError, Series,
 };
+use std::collections::HashMap;
+
+/// Disambiguate duplicate output names in aggregation expressions (PySpark parity: issue #368).
+/// When multiple aggs produce the same name (e.g. sum("value"), avg("value") both "value"),
+/// suffix with _1, _2, ... so Polars does not error.
+pub(crate) fn disambiguate_agg_output_names(aggregations: Vec<Expr>) -> Vec<Expr> {
+    let mut name_count: HashMap<String, u32> = HashMap::new();
+    aggregations
+        .into_iter()
+        .map(|e| {
+            let base_name = polars_plan::utils::expr_output_name(&e)
+                .map(|s| s.to_string())
+                .unwrap_or_else(|_| "_".to_string());
+            let count = name_count.entry(base_name.clone()).or_insert(0);
+            *count += 1;
+            let final_name = if *count == 1 {
+                base_name
+            } else {
+                format!("{}_{}", base_name, *count - 1)
+            };
+            if *count == 1 {
+                e
+            } else {
+                e.alias(final_name.as_str())
+            }
+        })
+        .collect()
+}
 
 /// GroupedData - represents a DataFrame grouped by certain columns.
 /// Similar to PySpark's GroupedData
@@ -533,9 +561,11 @@ impl GroupedData {
         ))
     }
 
-    /// Apply multiple aggregations at once (generic agg method)
+    /// Apply multiple aggregations at once (generic agg method).
+    /// Duplicate output names are disambiguated with _1, _2, ... (PySpark parity, issue #368).
     pub fn agg(&self, aggregations: Vec<Expr>) -> Result<DataFrame, PolarsError> {
-        let lf = self.lazy_grouped.clone().agg(aggregations);
+        let disambiguated = disambiguate_agg_output_names(aggregations);
+        let lf = self.lazy_grouped.clone().agg(disambiguated);
         let mut pl_df = lf.collect()?;
         pl_df = reorder_groupby_columns(&mut pl_df, &self.grouping_cols)?;
         Ok(super::DataFrame::from_polars_with_options(
@@ -735,8 +765,10 @@ pub struct CubeRollupData {
 
 impl CubeRollupData {
     /// Run aggregation on each grouping set and union results. Missing keys become null.
+    /// Duplicate agg output names are disambiguated (issue #368).
     pub fn agg(&self, aggregations: Vec<Expr>) -> Result<DataFrame, PolarsError> {
         use polars::prelude::*;
+        let aggregations = disambiguate_agg_output_names(aggregations);
         let subsets: Vec<Vec<String>> = if self.is_cube {
             // All subsets of grouping_cols (2^n)
             let n = self.grouping_cols.len();
@@ -762,7 +794,7 @@ impl CubeRollupData {
         for subset in subsets {
             if subset.is_empty() {
                 // Single row: no grouping keys, one row of aggregates over full table
-                let lf = self.df.clone().lazy().select(aggregations.clone());
+                let lf = self.df.clone().lazy().select(aggregations.to_vec());
                 let mut part = lf.collect()?;
                 let n = part.height();
                 for gc in &self.grouping_cols {
@@ -785,7 +817,7 @@ impl CubeRollupData {
                     .clone()
                     .lazy()
                     .group_by(subset.iter().map(|s| col(s.as_str())).collect::<Vec<_>>());
-                let mut part = grouped.agg(aggregations.clone()).collect()?;
+                let mut part = grouped.agg(aggregations.to_vec()).collect()?;
                 part = reorder_groupby_columns(&mut part, &subset)?;
                 let n = part.height();
                 for gc in &self.grouping_cols {
