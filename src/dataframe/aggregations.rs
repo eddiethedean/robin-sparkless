@@ -794,7 +794,7 @@ impl CubeRollupData {
         for subset in subsets {
             if subset.is_empty() {
                 // Single row: no grouping keys, one row of aggregates over full table
-                let lf = self.df.clone().lazy().select(aggregations.to_vec());
+                let lf = self.df.clone().lazy().select(&aggregations);
                 let mut part = lf.collect()?;
                 let n = part.height();
                 for gc in &self.grouping_cols {
@@ -817,7 +817,7 @@ impl CubeRollupData {
                     .clone()
                     .lazy()
                     .group_by(subset.iter().map(|s| col(s.as_str())).collect::<Vec<_>>());
-                let mut part = grouped.agg(aggregations.to_vec()).collect()?;
+                let mut part = grouped.agg(aggregations.clone()).collect()?;
                 part = reorder_groupby_columns(&mut part, &subset)?;
                 let n = part.height();
                 for gc in &self.grouping_cols {

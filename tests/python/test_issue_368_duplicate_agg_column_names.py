@@ -11,10 +11,16 @@ def test_group_by_agg_sum_avg_same_column_no_duplicate_error() -> None:
         [("a", 10), ("a", 20)],
         ["g", "value"],
     )
-    result = df.group_by("g").agg([
-        rs.sum(rs.col("value")),
-        rs.avg(rs.col("value")),
-    ]).collect()
+    result = (
+        df.group_by("g")
+        .agg(
+            [
+                rs.sum(rs.col("value")),
+                rs.avg(rs.col("value")),
+            ]
+        )
+        .collect()
+    )
     assert len(result) == 1
     row = result[0]
     assert row["g"] == "a"
