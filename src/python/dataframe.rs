@@ -2407,6 +2407,15 @@ pub struct PyCubeRollupData {
 
 #[pymethods]
 impl PyCubeRollupData {
+    /// Count rows per grouping set (PySpark cube/rollup .count()).
+    fn count(&self) -> PyResult<PyDataFrame> {
+        let df = self
+            .inner
+            .count()
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        Ok(PyDataFrame { inner: df })
+    }
+
     /// Aggregate the CUBE/ROLLUP result with one or more expressions.
     ///
     /// Args:
