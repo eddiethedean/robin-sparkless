@@ -82,10 +82,20 @@ fn json_value_matches_type(v: &JsonValue, type_str: &str) -> bool {
     match v {
         JsonValue::Null => true,
         JsonValue::Bool(_) => t == "boolean" || t == "bool",
-        JsonValue::Number(_) => matches!(
-            t.as_str(),
-            "bigint" | "int" | "integer" | "long" | "double" | "float" | "numeric" | "decimal"
-        ),
+        JsonValue::Number(_) => {
+            t.starts_with("decimal")
+                || matches!(
+                    t.as_str(),
+                    "bigint"
+                        | "int"
+                        | "integer"
+                        | "long"
+                        | "double"
+                        | "float"
+                        | "numeric"
+                        | "decimal"
+                )
+        }
         JsonValue::String(_) => {
             t == "string"
                 || t == "str"
@@ -145,6 +155,69 @@ fn is_pandas_dataframe(obj: &Bound<'_, pyo3::types::PyAny>) -> bool {
         return false;
     };
     module == "pandas.core.frame" && name == "DataFrame"
+}
+
+/// True if the object is a pyarrow.Table (PySpark parity: createDataFrame accepts pyarrow.Table, #421).
+fn is_pyarrow_table(obj: &Bound<'_, pyo3::types::PyAny>) -> bool {
+    let Ok(class) = obj.getattr("__class__") else {
+        return false;
+    };
+    let Ok(module) = class
+        .getattr("__module__")
+        .and_then(|m| m.extract::<String>())
+    else {
+        return false;
+    };
+    let Ok(name) = class
+        .getattr("__name__")
+        .and_then(|n| n.extract::<String>())
+    else {
+        return false;
+    };
+    (module == "pyarrow.lib" || module == "pyarrow.table") && name == "Table"
+}
+
+/// True if the object is a numpy.ndarray (PySpark parity: createDataFrame accepts ndarray, #421).
+fn is_numpy_ndarray(obj: &Bound<'_, pyo3::types::PyAny>) -> bool {
+    let Ok(class) = obj.getattr("__class__") else {
+        return false;
+    };
+    let Ok(module) = class
+        .getattr("__module__")
+        .and_then(|m| m.extract::<String>())
+    else {
+        return false;
+    };
+    let Ok(name) = class
+        .getattr("__name__")
+        .and_then(|n| n.extract::<String>())
+    else {
+        return false;
+    };
+    module == "numpy" && name == "ndarray"
+}
+
+/// Convert numpy ndarray to list of rows for createDataFrame (#421). 2D -> list of lists; 1D -> list of single-element lists.
+fn ndarray_to_list_of_rows<'py>(
+    py: Python<'py>,
+    arr: &Bound<'py, pyo3::types::PyAny>,
+) -> PyResult<Vec<Bound<'py, pyo3::types::PyAny>>> {
+    let ndim: i32 = arr.getattr("ndim")?.extract()?;
+    if ndim == 2 {
+        let list_obj = arr.call_method0("tolist")?;
+        list_obj.extract()
+    } else {
+        // 1D: one column, each element is a row
+        let flat = arr.call_method0("tolist")?;
+        let flat_vec: Vec<Bound<'py, pyo3::types::PyAny>> = flat.extract()?;
+        let row_list = pyo3::types::PyList::empty(py);
+        for x in flat_vec {
+            let row = pyo3::types::PyList::empty(py);
+            row.append(x)?;
+            row_list.append(row)?;
+        }
+        row_list.extract()
+    }
 }
 
 /// Parse schema argument (None, list of str, or StructType-like) for createDataFrame.
@@ -362,7 +435,16 @@ impl PySparkSession {
         #[allow(unused_variables)] sampling_ratio: Option<f64>,
         #[allow(unused_variables)] verify_schema: bool,
     ) -> PyResult<PyDataFrame> {
-        let data_list: Vec<Bound<'_, pyo3::types::PyAny>> = if is_pandas_dataframe(data) {
+        let data_list: Vec<Bound<'_, pyo3::types::PyAny>> = if is_pyarrow_table(data) {
+            // PySpark parity: createDataFrame accepts pyarrow.Table (#421). to_pylist() -> list of dicts.
+            data.call_method0("to_pylist")
+                .and_then(|r| r.extract())
+                .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?
+        } else if is_numpy_ndarray(data) {
+            // PySpark parity: createDataFrame accepts numpy.ndarray (#421). 2D -> rows; 1D -> one column.
+            ndarray_to_list_of_rows(py, data)
+                .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?
+        } else if is_pandas_dataframe(data) {
             data.call_method1("to_dict", ("records",))
                 .and_then(|r| r.extract())
                 .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?
@@ -585,7 +667,7 @@ impl PySparkSession {
 
         let df = self
             .inner
-            .create_dataframe_from_rows(rows, schema_vec)
+            .create_dataframe_from_rows(rows.to_vec(), schema_vec)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
         Ok(PyDataFrame { inner: df })
     }
