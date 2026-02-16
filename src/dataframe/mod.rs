@@ -609,13 +609,21 @@ impl DataFrame {
 
     /// Global aggregation (no groupBy): apply aggregate expressions over the whole DataFrame,
     /// returning a single-row DataFrame (PySpark: df.agg(F.sum("x"), F.avg("y"))).
+    /// Duplicate output names are disambiguated with _1, _2, ... (issue #368).
     pub fn agg(&self, aggregations: Vec<Expr>) -> Result<DataFrame, PolarsError> {
         use polars::prelude::IntoLazy;
         let resolved: Vec<Expr> = aggregations
             .into_iter()
             .map(|e| self.resolve_expr_column_names(e))
             .collect::<Result<Vec<_>, _>>()?;
-        let pl_df = self.df.as_ref().clone().lazy().select(resolved).collect()?;
+        let disambiguated = aggregations::disambiguate_agg_output_names(resolved);
+        let pl_df = self
+            .df
+            .as_ref()
+            .clone()
+            .lazy()
+            .select(disambiguated)
+            .collect()?;
         Ok(Self::from_polars_with_options(pl_df, self.case_sensitive))
     }
 
