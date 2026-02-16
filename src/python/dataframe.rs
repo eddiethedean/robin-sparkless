@@ -63,6 +63,26 @@ fn py_fill_value_to_expr(value: &pyo3::Bound<'_, pyo3::types::PyAny>) -> PyResul
     py_any_to_expr(value)
 }
 
+/// Extract inner DataFrame from a PyDataFrame or DataFrame-like (e.g. has .inner or ._df). For union/unionByName.
+fn py_any_to_dataframe(other: &Bound<'_, PyAny>) -> PyResult<DataFrame> {
+    if let Ok(py_df) = other.downcast::<PyDataFrame>() {
+        return Ok(py_df.borrow().inner.clone());
+    }
+    if let Ok(inner) = other.getattr("inner") {
+        if let Ok(py_df) = inner.downcast::<PyDataFrame>() {
+            return Ok(py_df.borrow().inner.clone());
+        }
+    }
+    if let Ok(inner) = other.getattr("_df") {
+        if let Ok(py_df) = inner.downcast::<PyDataFrame>() {
+            return Ok(py_df.borrow().inner.clone());
+        }
+    }
+    Err(pyo3::exceptions::PyTypeError::new_err(
+        "union/unionAll/unionByName: other must be a DataFrame or object with .inner or ._df (DataFrame-like)",
+    ))
+}
+
 /// Normalize subset argument: None, list of str, or single str -> Option<Vec<String>> (fixes #406).
 fn py_subset_to_option_vec(
     subset: Option<&Bound<'_, pyo3::types::PyAny>>,
@@ -896,20 +916,23 @@ impl PyDataFrame {
     ///
     /// Raises:
     ///     RuntimeError: If schemas are incompatible.
-    fn union(&self, other: &PyDataFrame) -> PyResult<PyDataFrame> {
+    ///     TypeError: If other is not a DataFrame or DataFrame-like (has ``.inner`` or ``._df``).
+    fn union(&self, other: &Bound<'_, PyAny>) -> PyResult<PyDataFrame> {
+        let other_df = py_any_to_dataframe(other)?;
         let df = self
             .inner
-            .union(&other.inner)
+            .union(&other_df)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        return Ok(PyDataFrame { inner: df });
+        Ok(PyDataFrame { inner: df })
     }
 
     /// Alias for union (PySpark unionAll).
     #[pyo3(name = "unionAll")]
-    fn union_all(&self, other: &PyDataFrame) -> PyResult<PyDataFrame> {
+    fn union_all(&self, other: &Bound<'_, PyAny>) -> PyResult<PyDataFrame> {
+        let other_df = py_any_to_dataframe(other)?;
         let df = self
             .inner
-            .union_all(&other.inner)
+            .union_all(&other_df)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
         Ok(PyDataFrame { inner: df })
     }
@@ -924,17 +947,19 @@ impl PyDataFrame {
     ///
     /// Raises:
     ///     RuntimeError: If execution fails.
+    ///     TypeError: If other is not a DataFrame or DataFrame-like (has ``.inner`` or ``._df``).
     #[pyo3(signature = (other, allow_missing_columns=true))]
     fn union_by_name(
         &self,
-        other: &PyDataFrame,
+        other: &Bound<'_, PyAny>,
         allow_missing_columns: bool,
     ) -> PyResult<PyDataFrame> {
+        let other_df = py_any_to_dataframe(other)?;
         let df = self
             .inner
-            .union_by_name(&other.inner, allow_missing_columns)
+            .union_by_name(&other_df, allow_missing_columns)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        return Ok(PyDataFrame { inner: df });
+        Ok(PyDataFrame { inner: df })
     }
 
     /// Return rows with duplicates removed. Optionally consider only a subset of columns for uniqueness.
