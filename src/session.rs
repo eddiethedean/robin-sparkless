@@ -62,6 +62,29 @@ fn json_type_str_to_polars(type_str: &str) -> Option<DataType> {
     }
 }
 
+/// Infer list element type from first non-null array in the column (for schema "list" / "array").
+fn infer_list_element_type(rows: &[Vec<JsonValue>], col_idx: usize) -> Option<(String, DataType)> {
+    for row in rows {
+        let v = row.get(col_idx)?;
+        let arr = v.as_array()?;
+        let first = arr.first()?;
+        return Some(match first {
+            JsonValue::String(_) => ("string".to_string(), DataType::String),
+            JsonValue::Number(n) => {
+                if n.as_i64().is_some() {
+                    ("bigint".to_string(), DataType::Int64)
+                } else {
+                    ("double".to_string(), DataType::Float64)
+                }
+            }
+            JsonValue::Bool(_) => ("boolean".to_string(), DataType::Boolean),
+            JsonValue::Null => continue,
+            _ => ("string".to_string(), DataType::String),
+        });
+    }
+    None
+}
+
 /// Build a length-N Series from `Vec<Option<JsonValue>>` for a given type (recursive for struct/array).
 fn json_values_to_series(
     values: &[Option<JsonValue>],
@@ -977,9 +1000,9 @@ impl SparkSession {
                         })?
                 }
                 "list" | "array" => {
-                    // PySpark parity: accept schema ("col", "list") or ("col", "array"); default element type bigint.
-                    let elem_type = "bigint";
-                    let inner_dtype = DataType::Int64;
+                    // PySpark parity: ("col", "list") or ("col", "array"); infer element type from first non-null array.
+                    let (elem_type, inner_dtype) = infer_list_element_type(&rows, col_idx)
+                        .unwrap_or(("bigint".to_string(), DataType::Int64));
                     let n = rows.len();
                     let mut builder = get_list_builder(&inner_dtype, 64, n, name.as_str().into());
                     for row in rows.iter() {
@@ -989,7 +1012,7 @@ impl SparkSession {
                         } else if let Some(arr) = v.as_array() {
                             let elem_series: Vec<Series> = arr
                                 .iter()
-                                .map(|e| json_value_to_series_single(e, elem_type, "elem"))
+                                .map(|e| json_value_to_series_single(e, &elem_type, "elem"))
                                 .collect::<Result<Vec<_>, _>>()?;
                             let vals: Vec<_> =
                                 elem_series.iter().filter_map(|s| s.get(0).ok()).collect();
