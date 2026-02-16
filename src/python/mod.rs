@@ -2407,14 +2407,19 @@ fn py_next_day(date: &PyColumn, dayOfWeek: &str) -> PyColumn {
     }
 }
 #[pyfunction]
-fn py_cast(col: &PyColumn, type_name: &str) -> PyResult<PyColumn> {
-    rs_cast(&col.inner, type_name)
+fn py_cast(col: &PyColumn, type_name: &pyo3::Bound<'_, pyo3::types::PyAny>) -> PyResult<PyColumn> {
+    let s = column::py_any_to_cast_type_name(type_name)?;
+    rs_cast(&col.inner, &s)
         .map(|inner| PyColumn { inner })
         .map_err(pyo3::exceptions::PyValueError::new_err)
 }
 #[pyfunction]
-fn py_try_cast(col: &PyColumn, type_name: &str) -> PyResult<PyColumn> {
-    rs_try_cast(&col.inner, type_name)
+fn py_try_cast(
+    col: &PyColumn,
+    type_name: &pyo3::Bound<'_, pyo3::types::PyAny>,
+) -> PyResult<PyColumn> {
+    let s = column::py_any_to_cast_type_name(type_name)?;
+    rs_try_cast(&col.inner, &s)
         .map(|inner| PyColumn { inner })
         .map_err(pyo3::exceptions::PyValueError::new_err)
 }
