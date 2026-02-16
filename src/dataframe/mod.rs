@@ -227,6 +227,40 @@ impl DataFrame {
                         }
                     }
                     expr
+                } else if is_comparison_op && left_is_col && right_is_col {
+                    // Column-to-column: col("id") == col("label") where id is int, label is string.
+                    // Get both column types and coerce string-numeric / date-string for PySpark parity.
+                    let left_name = if let Expr::Column(n) = &**left {
+                        n.as_str()
+                    } else {
+                        unreachable!()
+                    };
+                    let right_name = if let Expr::Column(n) = &**right {
+                        n.as_str()
+                    } else {
+                        unreachable!()
+                    };
+                    if let (Some(left_ty), Some(right_ty)) = (
+                        self.get_column_dtype(left_name),
+                        self.get_column_dtype(right_name),
+                    ) {
+                        if left_ty != right_ty {
+                            if let Ok((new_left, new_right)) = coerce_for_pyspark_comparison(
+                                (*left).as_ref().clone(),
+                                (*right).as_ref().clone(),
+                                &left_ty,
+                                &right_ty,
+                                op,
+                            ) {
+                                return Ok(Expr::BinaryExpr {
+                                    left: Arc::new(new_left),
+                                    op: *op,
+                                    right: Arc::new(new_right),
+                                });
+                            }
+                        }
+                    }
+                    expr
                 } else {
                     expr
                 }
