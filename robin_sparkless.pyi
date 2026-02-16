@@ -163,8 +163,8 @@ class DataFrame:
     def order_by(
         self,
         cols: list[str] | SortOrder | list[SortOrder] | Column | list[Column],
-        ascending: list[bool] | None = None,
-    ) -> DataFrame: ...
+        ascending: bool | list[bool] | None = None,
+    ) -> DataFrame: ...  # single bool applies to all columns (PySpark parity)
     def order_by_exprs(self, sort_orders: list[SortOrder]) -> DataFrame: ...
     def group_by(
         self, cols: str | Column | list[str] | list[Column]

@@ -3,7 +3,7 @@
 
 use crate::dataframe::JoinType;
 use crate::dataframe::{CubeRollupData, SaveMode, WriteFormat, WriteMode};
-use crate::functions::SortOrder;
+use crate::functions::{asc_nulls_last, desc_nulls_last, SortOrder};
 #[cfg(feature = "pyo3")]
 use crate::python::udf::{execute_grouped_vectorized_aggs, GroupedAggSpec};
 use crate::{DataFrame, GroupedData, PivotedGroupedData};
@@ -485,7 +485,7 @@ impl PyDataFrame {
     /// Args:
     ///     cols: Either a list of column names (str), a single SortOrder (e.g. ``col("x").desc_nulls_last()``),
     ///         or a list of SortOrder. When column names are used, ``ascending`` applies.
-    ///     ascending: Optional list of booleans, one per column (only when cols is list of names).
+    ///     ascending: Optional bool or list of bools. Single bool applies to all columns (PySpark parity).
     ///         True = ascending, False = descending. If omitted, all columns are sorted ascending.
     ///
     /// Returns:
@@ -497,18 +497,51 @@ impl PyDataFrame {
     fn order_by(
         &self,
         cols: &Bound<'_, PyAny>,
-        ascending: Option<Vec<bool>>,
+        ascending: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<PyDataFrame> {
-        // Single Column: treat as ascending (PySpark orderBy(col("x")) parity)
+        /// Resolve ascending: None -> all true; single bool -> replicate to len; list of bool -> use as-is.
+        fn resolve_ascending(asc: Option<&Bound<'_, PyAny>>, len: usize) -> PyResult<Vec<bool>> {
+            let Some(asc) = asc else {
+                return Ok(vec![true; len]);
+            };
+            if let Ok(b) = asc.extract::<bool>() {
+                return Ok(vec![b; len]);
+            }
+            if let Ok(list) = asc.downcast::<PyList>() {
+                let v: Vec<bool> = list.extract().map_err(|_| {
+                    pyo3::exceptions::PyTypeError::new_err(
+                        "order_by ascending must be a bool or a list of bools",
+                    )
+                })?;
+                if v.len() != len {
+                    return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                        "order_by ascending list length ({}) must match number of columns ({})",
+                        v.len(),
+                        len
+                    )));
+                }
+                return Ok(v);
+            }
+            Err(pyo3::exceptions::PyTypeError::new_err(
+                "order_by ascending must be a bool or a list of bools",
+            ))
+        }
+
+        // Single Column: ascending bool or default true (PySpark orderBy(col("x"), ascending=False))
         if let Ok(py_col) = cols.downcast::<PyColumn>() {
-            let order = py_col.borrow().inner.asc_nulls_last();
+            let asc = resolve_ascending(ascending, 1)?[0];
+            let order = if asc {
+                py_col.borrow().inner.asc_nulls_last()
+            } else {
+                py_col.borrow().inner.desc_nulls_last()
+            };
             let df = self
                 .inner
                 .order_by_exprs(vec![order])
                 .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
             return Ok(PyDataFrame { inner: df });
         }
-        // Single PySortOrder: df.order_by(col("x").desc_nulls_last())
+        // Single PySortOrder: ascending is ignored
         if let Ok(sort_order) = cols.downcast::<PySortOrder>() {
             let orders = vec![sort_order.borrow().inner.clone()];
             let df = self
@@ -517,14 +550,14 @@ impl PyDataFrame {
                 .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
             return Ok(PyDataFrame { inner: df });
         }
-        // List: either [SortOrder, ...] or [str, ...]
+        // List: either [SortOrder, ...] or [str, ...] or [Column, ...]
         if let Ok(py_list) = cols.downcast::<PyList>() {
             if py_list.is_empty() {
                 return Err(pyo3::exceptions::PyValueError::new_err(
                     "order_by requires at least one column or sort order",
                 ));
             }
-            // Try list of PySortOrder first (e.g. [col("a").asc(), col("b").desc_nulls_last()])
+            // Try list of PySortOrder first
             let mut orders = Vec::with_capacity(py_list.len());
             for item in py_list.iter() {
                 if let Ok(po) = item.downcast::<PySortOrder>() {
@@ -541,30 +574,42 @@ impl PyDataFrame {
                     .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
                 return Ok(PyDataFrame { inner: df });
             }
-            // List of Column: treat each as ascending (PySpark orderBy(col("a"), col("b")) parity)
+            // List of Column: apply ascending (single bool or list of bools)
             let mut col_orders = Vec::with_capacity(py_list.len());
             for item in py_list.iter() {
                 if let Ok(py_col) = item.downcast::<PyColumn>() {
-                    col_orders.push(py_col.borrow().inner.asc_nulls_last());
+                    col_orders.push(py_col.borrow().inner.clone());
                 } else {
                     col_orders.clear();
                     break;
                 }
             }
             if !col_orders.is_empty() {
+                let asc = resolve_ascending(ascending, col_orders.len())?;
+                let orders: Vec<_> = col_orders
+                    .into_iter()
+                    .zip(asc)
+                    .map(|(c, a)| {
+                        if a {
+                            asc_nulls_last(&c)
+                        } else {
+                            desc_nulls_last(&c)
+                        }
+                    })
+                    .collect();
                 let df = self
                     .inner
-                    .order_by_exprs(col_orders)
+                    .order_by_exprs(orders)
                     .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
                 return Ok(PyDataFrame { inner: df });
             }
-            // List of column names (current behavior)
+            // List of column names
             let col_names: Vec<String> = py_list.extract().map_err(|_| {
                 pyo3::exceptions::PyTypeError::new_err(
                     "order_by cols must be column names (str), Column(s), or SortOrder(s); each list item must be str, Column, or SortOrder",
                 )
             })?;
-            let asc = ascending.unwrap_or_else(|| vec![true; col_names.len()]);
+            let asc = resolve_ascending(ascending, col_names.len())?;
             let df = self
                 .inner
                 .order_by(
