@@ -110,33 +110,51 @@ impl PyColumn {
         self.is_not_null()
     }
 
-    /// True where this column's value is in the given list (PySpark isin). Empty list yields false for all rows.
+    /// True where this column's value is in the given values (PySpark isin). Empty list yields false for all rows.
     ///
     /// Args:
-    ///     values: List of int or str; empty list is supported (filter returns 0 rows).
+    ///     values: Either a list/tuple of int or str, or variadic *values (e.g. col.isin(1, 2, 3)).
+    #[pyo3(signature = (*values))]
     fn isin(&self, values: &Bound<'_, pyo3::types::PyAny>) -> PyResult<Self> {
-        let list = values.downcast::<pyo3::types::PyList>()?;
-        let len = list.len();
-        if len == 0 {
+        // Normalize: *values in Python becomes a tuple. Also accept single list/tuple from col.isin([1,2,3]).
+        let items: Vec<_> = if let Ok(tup) = values.downcast::<pyo3::types::PyTuple>() {
+            if tup.len() == 1 {
+                let first = tup.get_item(0)?;
+                if let Ok(list) = first.downcast::<pyo3::types::PyList>() {
+                    list.iter().collect()
+                } else if let Ok(inner_tup) = first.downcast::<pyo3::types::PyTuple>() {
+                    inner_tup.iter().collect()
+                } else {
+                    vec![first]
+                }
+            } else {
+                tup.iter().collect()
+            }
+        } else if let Ok(list) = values.downcast::<pyo3::types::PyList>() {
+            list.iter().collect()
+        } else {
+            vec![values.clone()]
+        };
+        if items.is_empty() {
             return Ok(PyColumn {
                 inner: isin_i64(&self.inner, &[]),
             });
         }
-        let mut ints: Vec<i64> = Vec::with_capacity(len);
-        for item in list.iter() {
+        let mut ints: Vec<i64> = Vec::with_capacity(items.len());
+        for item in &items {
             if let Ok(i) = item.extract::<i64>() {
                 ints.push(i);
             } else {
                 break;
             }
         }
-        if ints.len() == len {
+        if ints.len() == items.len() {
             return Ok(PyColumn {
                 inner: isin_i64(&self.inner, &ints),
             });
         }
-        let mut strs: Vec<String> = Vec::with_capacity(len);
-        for item in list.iter() {
+        let mut strs: Vec<String> = Vec::with_capacity(items.len());
+        for item in &items {
             strs.push(item.extract::<String>()?);
         }
         let refs: Vec<&str> = strs.iter().map(|s| s.as_str()).collect();
