@@ -130,6 +130,28 @@ fn parse_schema_param(
     ))
 }
 
+/// Stub for PySpark parity: spark.sparkContext (fixes #387).
+#[pyclass(name = "SparkContext")]
+pub struct PySparkContext {
+    #[allow(dead_code)]
+    session: SparkSession,
+}
+
+#[pymethods]
+impl PySparkContext {
+    /// Application name (stub; returns empty for compatibility).
+    #[getter]
+    #[pyo3(name = "appName")]
+    fn app_name(&self) -> &'static str {
+        ""
+    }
+
+    /// Spark version string (same as SparkSession.version).
+    fn version(&self) -> &'static str {
+        env!("CARGO_PKG_VERSION")
+    }
+}
+
 /// Python wrapper for SparkSession.
 #[pyclass(name = "SparkSession")]
 pub struct PySparkSession {
@@ -581,6 +603,15 @@ impl PySparkSession {
     /// Session/library version string.
     fn version(&self) -> &'static str {
         env!("CARGO_PKG_VERSION")
+    }
+
+    /// Stub SparkContext for PySpark compatibility (e.g. spark.sparkContext).
+    #[getter]
+    #[pyo3(name = "sparkContext")]
+    fn spark_context(&self) -> PySparkContext {
+        PySparkContext {
+            session: self.inner.clone(),
+        }
     }
 
     /// Return UDF registration (PySpark: spark.udf).

@@ -13,9 +13,17 @@ _ColumnOperand = Union["Column", int, float, bool, str, None]
 
 # --- Classes ---
 
+class SparkContext:
+    """Stub for PySpark compatibility (spark.sparkContext)."""
+    @property
+    def appName(self) -> str: ...
+    def version(self) -> str: ...
+
 class SparkSession:
     @classmethod
     def builder(cls) -> SparkSessionBuilder: ...
+    @property
+    def sparkContext(self) -> SparkContext: ...
     def is_case_sensitive(self) -> bool: ...
     def createDataFrame(
         self,

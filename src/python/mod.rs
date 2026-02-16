@@ -76,8 +76,8 @@ pub(crate) use order::{
 };
 use session::parse_return_type;
 pub(crate) use session::{
-    PyCatalog, PyDataFrameReader, PyRuntimeConfig, PySparkSession, PySparkSessionBuilder,
-    PyUDFRegistration, PyUserDefinedFunction,
+    PyCatalog, PyDataFrameReader, PyRuntimeConfig, PySparkContext, PySparkSession,
+    PySparkSessionBuilder, PyUDFRegistration, PyUserDefinedFunction,
 };
 pub(crate) use udf::execute_python_udf;
 
@@ -393,6 +393,7 @@ fn robin_sparkless(m: &Bound<'_, PyModule>) -> PyResult<()> {
     set_polars_single_thread_if_requested();
     m.add_class::<PySparkSession>()?;
     m.add_class::<PySparkSessionBuilder>()?;
+    m.add_class::<PySparkContext>()?;
     m.add_class::<PyDataFrameReader>()?;
     m.add_class::<PyCatalog>()?;
     m.add_class::<PyRuntimeConfig>()?;
