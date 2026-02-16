@@ -403,6 +403,7 @@ fn robin_sparkless(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyDataFrameStat>()?;
     m.add_class::<PyDataFrameNa>()?;
     m.add_class::<PyColumn>()?;
+    m.add_class::<PyPosexplodeResult>()?;
     m.add_class::<PySortOrder>()?;
     m.add_class::<PyWindow>()?;
     m.add_class::<PyRowNumber>()?;
@@ -1617,8 +1618,49 @@ fn py_explode_outer(col: &PyColumn) -> PyColumn {
     }
 }
 
+/// Result of posexplode(col); supports .alias("pos", "val") for select (fixes #411).
+#[pyclass(name = "PosexplodeResult")]
+pub struct PyPosexplodeResult {
+    pos: PyColumn,
+    val: PyColumn,
+}
+
+#[pymethods]
+impl PyPosexplodeResult {
+    /// Return (pos_column, val_column) with the given names for use in select().
+    fn alias(&self, pos_name: &str, val_name: &str) -> (PyColumn, PyColumn) {
+        (
+            PyColumn {
+                inner: self.pos.inner.alias(pos_name),
+            },
+            PyColumn {
+                inner: self.val.inner.alias(val_name),
+            },
+        )
+    }
+
+    /// Unpack as pos_col, val_col = posexplode(...) (backward compatibility).
+    fn __iter__(slf: PyRef<'_, Self>) -> PyResult<PyObject> {
+        let py = slf.py();
+        let tup = pyo3::types::PyTuple::new(
+            py,
+            [
+                PyColumn {
+                    inner: slf.pos.inner.clone(),
+                }
+                .into_py(py),
+                PyColumn {
+                    inner: slf.val.inner.clone(),
+                }
+                .into_py(py),
+            ],
+        );
+        Ok(tup?.call_method0("__iter__")?.into_py(py))
+    }
+}
+
 #[pyfunction]
-fn py_posexplode(col: &Bound<'_, pyo3::types::PyAny>) -> PyResult<(PyColumn, PyColumn)> {
+fn py_posexplode(col: &Bound<'_, pyo3::types::PyAny>) -> PyResult<PyPosexplodeResult> {
     let col_column: RsColumn = if let Ok(pycol) = col.downcast::<PyColumn>() {
         pycol.borrow().inner.clone()
     } else if let Ok(name) = col.extract::<String>() {
@@ -1629,7 +1671,10 @@ fn py_posexplode(col: &Bound<'_, pyo3::types::PyAny>) -> PyResult<(PyColumn, PyC
         ));
     };
     let (pos, val) = posexplode(&col_column);
-    Ok((PyColumn { inner: pos }, PyColumn { inner: val }))
+    Ok(PyPosexplodeResult {
+        pos: PyColumn { inner: pos },
+        val: PyColumn { inner: val },
+    })
 }
 
 #[pyfunction]
