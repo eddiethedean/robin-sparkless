@@ -779,6 +779,16 @@ impl PyDataFrame {
         return Ok(PyDataFrame { inner: df });
     }
 
+    /// Alias for union (PySpark unionAll).
+    #[pyo3(name = "unionAll")]
+    fn union_all(&self, other: &PyDataFrame) -> PyResult<PyDataFrame> {
+        let df = self
+            .inner
+            .union_all(&other.inner)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        Ok(PyDataFrame { inner: df })
+    }
+
     /// Concatenate rows of another DataFrame by matching column names (column order may differ).
     ///
     /// Args:
