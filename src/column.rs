@@ -1721,19 +1721,34 @@ impl Column {
         Self::from_expr(self.expr().clone().dt().strftime(format), None)
     }
 
-    /// Extract hour from datetime column (PySpark hour).
+    /// Extract hour from datetime column (PySpark hour). Accepts string timestamp (#403).
     pub fn hour(&self) -> Column {
-        Self::from_expr(self.expr().clone().dt().hour(), None)
+        use polars::prelude::GetOutput;
+        let expr = self.expr().clone().map(
+            crate::udfs::apply_hour,
+            GetOutput::from_type(DataType::Int32),
+        );
+        Self::from_expr(expr, None)
     }
 
-    /// Extract minute from datetime column (PySpark minute).
+    /// Extract minute from datetime column (PySpark minute). Accepts string timestamp (#403).
     pub fn minute(&self) -> Column {
-        Self::from_expr(self.expr().clone().dt().minute(), None)
+        use polars::prelude::GetOutput;
+        let expr = self.expr().clone().map(
+            crate::udfs::apply_minute,
+            GetOutput::from_type(DataType::Int32),
+        );
+        Self::from_expr(expr, None)
     }
 
-    /// Extract second from datetime column (PySpark second).
+    /// Extract second from datetime column (PySpark second). Accepts string timestamp (#403).
     pub fn second(&self) -> Column {
-        Self::from_expr(self.expr().clone().dt().second(), None)
+        use polars::prelude::GetOutput;
+        let expr = self.expr().clone().map(
+            crate::udfs::apply_second,
+            GetOutput::from_type(DataType::Int32),
+        );
+        Self::from_expr(expr, None)
     }
 
     /// Extract field from date/datetime (PySpark extract). field: "year","month","day","hour","minute","second","quarter","week","dayofweek","dayofyear".
