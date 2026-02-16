@@ -60,6 +60,31 @@ fn py_fill_value_to_expr(value: &pyo3::Bound<'_, pyo3::types::PyAny>) -> PyResul
     py_any_to_expr(value)
 }
 
+/// Normalize subset argument: None, list of str, or single str -> Option<Vec<String>> (fixes #406).
+fn py_subset_to_option_vec(
+    subset: Option<&Bound<'_, pyo3::types::PyAny>>,
+) -> PyResult<Option<Vec<String>>> {
+    let Some(obj) = subset else {
+        return Ok(None);
+    };
+    if obj.is_none() {
+        return Ok(None);
+    }
+    if let Ok(list) = obj.downcast::<PyList>() {
+        let mut out = Vec::with_capacity(list.len());
+        for item in list.iter() {
+            out.push(item.extract::<String>()?);
+        }
+        return Ok(Some(out));
+    }
+    if let Ok(s) = obj.extract::<String>() {
+        return Ok(Some(vec![s]));
+    }
+    Err(pyo3::exceptions::PyTypeError::new_err(
+        "subset must be None, a list of column names (str), or a single column name (str)",
+    ))
+}
+
 /// Extract one or more Column expressions from a single Column, list, or tuple (for agg(*exprs)).
 fn python_exprs_to_columns(exprs: &Bound<'_, PyAny>, _py: Python<'_>) -> PyResult<Vec<Expr>> {
     if let Ok(py_col) = exprs.downcast::<PyColumn>() {
@@ -1660,14 +1685,19 @@ impl PyDataFrameNa {
     ///
     /// Args:
     ///     value: Scalar or Column (e.g. ``0`` or ``lit(0)`` or ``col("other")``).
-    ///     subset: Optional list of column names. If provided, only those columns are filled.
+    ///     subset: Optional list of column names (or single column name). If provided, only those columns are filled.
     ///
     /// Returns:
     ///     DataFrame (lazy) with nulls filled.
     #[pyo3(signature = (value, subset=None))]
-    fn fill(&self, value: &Bound<'_, PyAny>, subset: Option<Vec<String>>) -> PyResult<PyDataFrame> {
+    fn fill(
+        &self,
+        value: &Bound<'_, PyAny>,
+        subset: Option<Bound<'_, PyAny>>,
+    ) -> PyResult<PyDataFrame> {
         let expr = py_fill_value_to_expr(value)?;
-        let sub: Option<Vec<&str>> = subset
+        let subset_vec = py_subset_to_option_vec(subset.as_ref())?;
+        let sub: Option<Vec<&str>> = subset_vec
             .as_ref()
             .map(|v| v.iter().map(|s| s.as_str()).collect());
         let df = self
