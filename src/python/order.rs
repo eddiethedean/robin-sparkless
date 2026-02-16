@@ -41,6 +41,11 @@ pub struct PySortOrder {
     pub inner: SortOrder,
 }
 
+/// Frame bound constants for PySpark parity (Window.unboundedPreceding, etc.).
+pub const WINDOW_UNBOUNDED_PRECEDING: i64 = i64::MIN;
+pub const WINDOW_CURRENT_ROW: i64 = 0;
+pub const WINDOW_UNBOUNDED_FOLLOWING: i64 = i64::MAX;
+
 /// Python wrapper for PySpark-style Window specification.
 ///
 /// Minimal parity for ``Window.partitionBy(...).orderBy(...)`` used with
@@ -50,6 +55,8 @@ pub struct PySortOrder {
 pub struct PyWindow {
     pub(crate) partition_by: Vec<String>,
     pub(crate) order_by: Option<RsColumn>,
+    /// Optional frame: ("rows", start, end) or ("range", start, end). Stored for API parity; Polars backend uses default frame for now.
+    pub(crate) frame: Option<(String, i64, i64)>,
 }
 
 #[pymethods]
@@ -64,6 +71,7 @@ impl PyWindow {
         Self {
             partition_by: vec![],
             order_by: None,
+            frame: None,
         }
     }
 
@@ -86,6 +94,7 @@ impl PyWindow {
         Ok(Self {
             partition_by: names,
             order_by: None,
+            frame: None,
         })
     }
 
@@ -111,7 +120,52 @@ impl PyWindow {
         Ok(Self {
             partition_by: self.partition_by.clone(),
             order_by: Some(order_col),
+            frame: self.frame.clone(),
         })
+    }
+
+    /// Set frame to rows between start and end (PySpark rowsBetween). Returns self for chaining.
+    /// start/end: use Window.unboundedPreceding, Window.currentRow, Window.unboundedFollowing or int.
+    #[pyo3(name = "rowsBetween")]
+    #[pyo3(signature = (start, end))]
+    fn rows_between(&self, start: i64, end: i64) -> Self {
+        Self {
+            partition_by: self.partition_by.clone(),
+            order_by: self.order_by.clone(),
+            frame: Some(("rows".to_string(), start, end)),
+        }
+    }
+
+    /// Set frame to range between start and end (PySpark rangeBetween). Returns self for chaining.
+    #[pyo3(name = "rangeBetween")]
+    #[pyo3(signature = (start, end))]
+    fn range_between(&self, start: i64, end: i64) -> Self {
+        Self {
+            partition_by: self.partition_by.clone(),
+            order_by: self.order_by.clone(),
+            frame: Some(("range".to_string(), start, end)),
+        }
+    }
+
+    /// PySpark constant: first row of partition (use as start in rowsBetween/rangeBetween).
+    #[classattr]
+    #[pyo3(name = "unboundedPreceding")]
+    fn unbounded_preceding() -> i64 {
+        WINDOW_UNBOUNDED_PRECEDING
+    }
+
+    /// PySpark constant: current row (use as start/end in rowsBetween/rangeBetween).
+    #[classattr]
+    #[pyo3(name = "currentRow")]
+    fn current_row() -> i64 {
+        WINDOW_CURRENT_ROW
+    }
+
+    /// PySpark constant: last row of partition (use as end in rowsBetween/rangeBetween).
+    #[classattr]
+    #[pyo3(name = "unboundedFollowing")]
+    fn unbounded_following() -> i64 {
+        WINDOW_UNBOUNDED_FOLLOWING
     }
 }
 
