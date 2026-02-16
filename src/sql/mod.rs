@@ -17,7 +17,7 @@ pub fn execute_sql(session: &SparkSession, query: &str) -> Result<DataFrame, Pol
 }
 
 pub use parser::parse_sql;
-pub use translator::translate;
+pub use translator::{expr_string_to_polars, translate};
 
 #[cfg(test)]
 mod tests {

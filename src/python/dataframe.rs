@@ -19,11 +19,34 @@ use crate::python::py_to_json_value;
 use serde_json::Value as JsonValue;
 
 use super::column::PyColumn;
+#[cfg(feature = "sql")]
+use super::column::PyExprStr;
 use super::order::PySortOrder;
 use super::session::get_default_session;
 
 #[cfg(feature = "sql")]
 static FILTER_VIEW_COUNTER: AtomicUsize = AtomicUsize::new(0);
+#[cfg(feature = "sql")]
+static SELECTEXPR_VIEW_COUNTER: AtomicUsize = AtomicUsize::new(0);
+
+/// If item is PyExprStr (sql feature), resolve to Expr; otherwise None.
+#[cfg(feature = "sql")]
+fn try_resolve_expr_str(
+    item: &Bound<'_, pyo3::types::PyAny>,
+    df: &crate::DataFrame,
+) -> Option<Expr> {
+    let expr_str = item.extract::<PyRef<PyExprStr>>().ok()?;
+    let session = get_default_session()?;
+    crate::sql::expr_string_to_polars(&expr_str.expr_sql, &session, df).ok()
+}
+
+#[cfg(not(feature = "sql"))]
+fn try_resolve_expr_str(
+    _item: &Bound<'_, pyo3::types::PyAny>,
+    _df: &crate::DataFrame,
+) -> Option<Expr> {
+    None
+}
 
 /// Normalize cube/rollup *cols: one list -> use it; else each arg as column name.
 fn normalize_cube_rollup_cols(cols: &Bound<'_, PyTuple>) -> PyResult<Vec<String>> {
@@ -486,6 +509,8 @@ impl PyDataFrame {
             // so we must treat as expression first to support select(col("a") * 2, lit(3) + col("x")).
             if let Ok(py_col) = item.extract::<PyRef<PyColumn>>() {
                 exprs.push(py_col.inner.expr().clone());
+            } else if let Some(e) = try_resolve_expr_str(item, &self.inner) {
+                exprs.push(e);
             } else if let Ok(name) = item.extract::<std::string::String>() {
                 if name == "*" {
                     // Expand "*" to all columns (fixes #404).
@@ -1757,13 +1782,39 @@ impl PyDataFrame {
         return Ok(PyDataFrame { inner: df });
     }
 
-    /// Select using SQL-like expression strings.
-    fn select_expr(&self, exprs: Vec<String>) -> PyResult<PyDataFrame> {
+    /// Select using SQL-like expression strings (e.g. "Name", "upper(Name) as u"). PySpark selectExpr.
+    /// When sql feature is on, parses and evaluates SQL expressions; otherwise simple column names only.
+    #[pyo3(name = "selectExpr", signature = (*exprs))]
+    fn select_expr(&self, exprs: &Bound<'_, PyTuple>) -> PyResult<PyDataFrame> {
+        let exprs: Vec<String> = exprs
+            .iter()
+            .map(|o| o.extract::<String>())
+            .collect::<PyResult<Vec<_>>>()?;
+        #[cfg(feature = "sql")]
+        {
+            if !exprs.is_empty() {
+                let session = get_default_session().ok_or_else(|| {
+                    pyo3::exceptions::PyRuntimeError::new_err(
+                        "selectExpr with SQL expressions requires an active SparkSession (e.g. builder().get_or_create())",
+                    )
+                })?;
+                let n = SELECTEXPR_VIEW_COUNTER.fetch_add(1, Ordering::SeqCst);
+                let view_name = format!("__robin_selectexpr_{}", n);
+                session.create_or_replace_temp_view(&view_name, self.inner.clone());
+                let select_list = exprs.join(", ");
+                let query = format!("SELECT {} FROM {}", select_list, view_name);
+                let result = session.sql(&query);
+                session.drop_temp_view(&view_name);
+                let df =
+                    result.map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+                return Ok(PyDataFrame { inner: df });
+            }
+        }
         let df = self
             .inner
             .select_expr(&exprs)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        return Ok(PyDataFrame { inner: df });
+        Ok(PyDataFrame { inner: df })
     }
 
     /// Select columns whose names match the regex pattern.

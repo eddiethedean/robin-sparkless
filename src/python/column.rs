@@ -79,6 +79,13 @@ pub struct PyColumn {
     pub inner: RsColumn,
 }
 
+/// Wrapper for SQL expression string returned by expr(). Resolved to Expr when used in select()/withColumn().
+#[cfg(feature = "sql")]
+#[pyclass(name = "ExprStr")]
+pub struct PyExprStr {
+    pub expr_sql: String,
+}
+
 #[pymethods]
 impl PyColumn {
     /// Return the column name for simple column references (e.g. ``col("x").name`` → ``"x"``).
@@ -1528,5 +1535,15 @@ impl PyColumn {
         PyColumn {
             inner: factorial(&self.inner),
         }
+    }
+}
+
+#[cfg(feature = "sql")]
+#[pymethods]
+impl PyExprStr {
+    /// The SQL expression string (e.g. "upper(Name)").
+    #[getter]
+    fn expr_sql(&self) -> &str {
+        &self.expr_sql
     }
 }

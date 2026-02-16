@@ -154,9 +154,15 @@ class DataFrame:
     ) -> DataFrame: ...  # func(row_dict) -> iterable of dicts; flattens
     def flatMap(self, func: Any) -> DataFrame: ...  # alias for flat_map
     def select(
-        self, *cols: str | Column | list[str] | list[Column] | tuple[Column, Column]
+        self,
+        *cols: str
+        | Column
+        | ExprStr
+        | list[str]
+        | list[Column]
+        | tuple[Column, Column],
     ) -> DataFrame: ...
-    def select_expr(self, exprs: list[str]) -> DataFrame: ...
+    def selectExpr(self, *exprs: str) -> DataFrame: ...
     def with_column(self, column_name: str, expr: _ColumnOperand) -> DataFrame: ...
     def with_columns(
         self, mapping: dict[str, Column] | list[tuple[str, Column]]
@@ -404,6 +410,12 @@ class Column:
         self, n: int, partition_by: list[str], descending: bool = False
     ) -> Column: ...
 
+class ExprStr:
+    """SQL expression string (from expr()). Use in select() or selectExpr(); requires sql feature."""
+
+    @property
+    def expr_sql(self) -> str: ...
+
 class SortOrder: ...
 
 class WhenThen:
@@ -500,6 +512,9 @@ class DataFrameWriter:
 # --- Module-level functions (expression builders return Column) ---
 
 def col(name: str) -> Column: ...
+def expr(
+    sql_string: str,
+) -> ExprStr: ...  # SQL expression for select(); requires sql feature
 def lit(value: None | int | float | bool | str | date | datetime) -> Column: ...
 def call_udf(name: str, *cols: Column | str) -> Column: ...
 def pandas_udf(
