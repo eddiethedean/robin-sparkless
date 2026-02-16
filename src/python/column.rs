@@ -28,6 +28,23 @@ use pyo3::prelude::*;
 
 use super::order::PySortOrder;
 
+/// Normalize cast argument: str or DataType-like (has typeName()) to type name string. Pub for module-level cast/try_cast.
+pub(crate) fn py_any_to_cast_type_name(
+    type_arg: &pyo3::Bound<'_, pyo3::types::PyAny>,
+) -> PyResult<String> {
+    if let Ok(s) = type_arg.extract::<String>() {
+        return Ok(s);
+    }
+    if let Ok(attr) = type_arg.getattr("typeName") {
+        if let Ok(s) = attr.call0()?.extract::<String>() {
+            return Ok(s.to_lowercase());
+        }
+    }
+    Err(pyo3::exceptions::PyTypeError::new_err(
+        "cast type must be a type name string (e.g. \"int\", \"string\") or a DataType object with typeName() (e.g. IntegerType(), StringType())",
+    ))
+}
+
 /// Convert a Python value to RsColumn (for operator overloads). Accepts Column or scalar (int, float, bool, str, None).
 fn py_any_to_column(value: &Bound<'_, pyo3::types::PyAny>) -> PyResult<RsColumn> {
     if let Ok(pycol) = value.downcast::<PyColumn>() {
@@ -818,35 +835,37 @@ impl PyColumn {
     /// Cast the column to the given type. Invalid values cause an error at execution.
     ///
     /// Args:
-    ///     type_name: Target type string (e.g. "int", "long", "double", "string", "boolean", "date", "timestamp").
+    ///     type_name: Target type: string (e.g. "int", "long", "string") or DataType object with typeName() (e.g. IntegerType(), StringType()).
     ///
     /// Returns:
     ///     Column: Expression that evaluates to the cast type.
     ///
     /// Raises:
     ///     ValueError: If the type name is not supported or cast is invalid.
-    fn cast(&self, type_name: &str) -> PyResult<Self> {
-        rs_cast(&self.inner, type_name)
+    fn cast(&self, type_name: &pyo3::Bound<'_, pyo3::types::PyAny>) -> PyResult<Self> {
+        let s = py_any_to_cast_type_name(type_name)?;
+        rs_cast(&self.inner, &s)
             .map(|inner| PyColumn { inner })
             .map_err(pyo3::exceptions::PyValueError::new_err)
     }
     /// Cast the column to the given type; invalid values become null instead of raising.
     ///
     /// Args:
-    ///     type_name: Target type string (same as ``cast()``).
+    ///     type_name: Target type string or DataType object (same as ``cast()``).
     ///
     /// Returns:
     ///     Column: Expression that evaluates to the cast type or null where conversion fails.
     ///
     /// Raises:
     ///     ValueError: If the type name is not supported.
-    fn try_cast(&self, type_name: &str) -> PyResult<Self> {
-        rs_try_cast(&self.inner, type_name)
+    fn try_cast(&self, type_name: &pyo3::Bound<'_, pyo3::types::PyAny>) -> PyResult<Self> {
+        let s = py_any_to_cast_type_name(type_name)?;
+        rs_try_cast(&self.inner, &s)
             .map(|inner| PyColumn { inner })
             .map_err(pyo3::exceptions::PyValueError::new_err)
     }
     /// PySpark alias for cast. Cast the column to the given type.
-    fn astype(&self, type_name: &str) -> PyResult<Self> {
+    fn astype(&self, type_name: &pyo3::Bound<'_, pyo3::types::PyAny>) -> PyResult<Self> {
         self.cast(type_name)
     }
     fn isnan(&self) -> Self {
