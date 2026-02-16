@@ -1,6 +1,8 @@
 use polars::prelude::{
-    col, lit, DataType, Expr, GetOutput, ListNameSpaceExtension, RankMethod, RankOptions, TimeUnit,
+    col, lit, DataType, Expr, GetOutput, ListNameSpaceExtension, PlSmallStr, RankMethod,
+    RankOptions, TimeUnit,
 };
+use std::sync::Arc;
 
 /// Convert SQL LIKE pattern (% = any sequence, _ = one char) to regex. Escapes regex specials.
 /// When escape_char is Some(esc), esc + any char treats that char as literal (no %/_ expansion).
@@ -2198,6 +2200,21 @@ impl Column {
             self.expr().clone().struct_().field_by_name(name),
             Some(name.to_string()),
         )
+    }
+
+    /// Add or replace a struct field (PySpark Column.withField).
+    pub fn with_field(&self, name: &str, value: &Column) -> Column {
+        let fields = vec![
+            Expr::Field(Arc::from([PlSmallStr::from("*")])),
+            value.expr().clone().alias(name),
+        ];
+        let expr = self
+            .expr()
+            .clone()
+            .struct_()
+            .with_fields(fields)
+            .expect("with_field: column must be struct type");
+        Self::from_expr(expr, None)
     }
 
     /// Sort list elements (PySpark array_sort). Ascending, nulls last.
