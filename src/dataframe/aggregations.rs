@@ -764,6 +764,12 @@ pub struct CubeRollupData {
 }
 
 impl CubeRollupData {
+    /// Count rows per grouping set (PySpark cube/rollup .count()).
+    pub fn count(&self) -> Result<DataFrame, PolarsError> {
+        use polars::prelude::*;
+        self.agg(vec![len().alias("count")])
+    }
+
     /// Run aggregation on each grouping set and union results. Missing keys become null.
     /// Duplicate agg output names are disambiguated (issue #368).
     pub fn agg(&self, aggregations: Vec<Expr>) -> Result<DataFrame, PolarsError> {
