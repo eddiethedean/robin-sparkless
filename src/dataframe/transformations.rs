@@ -266,10 +266,12 @@ pub fn union_by_name(
     } else {
         left_names.clone()
     };
+    // Alias every expression to the canonical name `c` so that when left has "ID" and right has "id"
+    // (case-insensitive match), both sides produce the same column name in the result (#386).
     let left_exprs: Vec<Expr> = all_columns
         .iter()
         .map(|c| match resolve(&left_names, c.as_str()) {
-            Some(r) => col(r.as_str()),
+            Some(r) => col(r.as_str()).alias(c.as_str()),
             None => {
                 let dtype = resolve(&right_names, c.as_str())
                     .and_then(|r| right_df.column(r.as_str()).ok())
@@ -284,7 +286,7 @@ pub fn union_by_name(
     let mut right_exprs: Vec<Expr> = Vec::with_capacity(all_columns.len());
     for c in &all_columns {
         let expr = match resolve(&right_names, c.as_str()) {
-            Some(r) => col(r.as_str()),
+            Some(r) => col(r.as_str()).alias(c.as_str()),
             None if allow_missing_columns => {
                 let dtype = resolve(&left_names, c.as_str())
                     .and_then(|r| left_df.column(r.as_str()).ok())
