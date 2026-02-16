@@ -40,9 +40,20 @@ fn parse_struct_fields(type_str: &str) -> Option<Vec<(String, String)>> {
     Some(out)
 }
 
+/// True if type string is Decimal(precision, scale), e.g. "decimal(10,2)".
+fn is_decimal_type_str(type_str: &str) -> bool {
+    let s = type_str.trim().to_lowercase();
+    s.starts_with("decimal(") && s.contains(')')
+}
+
 /// Map schema type string to Polars DataType (primitives only for nested use).
+/// Decimal(p,s) is mapped to Float64 (Polars dtype-decimal feature not enabled).
 fn json_type_str_to_polars(type_str: &str) -> Option<DataType> {
-    match type_str.trim().to_lowercase().as_str() {
+    let s = type_str.trim().to_lowercase();
+    if is_decimal_type_str(&s) {
+        return Some(DataType::Float64);
+    }
+    match s.as_str() {
         "int" | "bigint" | "long" => Some(DataType::Int64),
         "double" | "float" | "double_precision" => Some(DataType::Float64),
         "string" | "str" | "varchar" => Some(DataType::String),
@@ -247,6 +258,9 @@ fn json_value_to_series_single(
             Ok(Series::new(name.into(), vec![n.as_i64()]))
         }
         (JsonValue::Number(n), "double" | "float") => {
+            Ok(Series::new(name.into(), vec![n.as_f64()]))
+        }
+        (JsonValue::Number(n), t) if is_decimal_type_str(t) => {
             Ok(Series::new(name.into(), vec![n.as_f64()]))
         }
         (JsonValue::String(s), "string" | "str" | "varchar") => {
@@ -851,6 +865,20 @@ impl SparkSession {
                     Series::new(name.as_str().into(), vals)
                 }
                 "double" | "float" | "double_precision" => {
+                    let vals: Vec<Option<f64>> = rows
+                        .iter()
+                        .map(|row| {
+                            let v = row.get(col_idx).cloned().unwrap_or(JsonValue::Null);
+                            match v {
+                                JsonValue::Number(n) => n.as_f64(),
+                                JsonValue::Null => None,
+                                _ => None,
+                            }
+                        })
+                        .collect();
+                    Series::new(name.as_str().into(), vals)
+                }
+                _ if is_decimal_type_str(&type_lower) => {
                     let vals: Vec<Option<f64>> = rows
                         .iter()
                         .map(|row| {
