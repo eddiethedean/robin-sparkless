@@ -59,6 +59,18 @@ fn parse_schema_param(
         if ddl.is_empty() {
             return Ok(ParsedSchema::NoSchema);
         }
+        // PySpark: single type string (e.g. "bigint", "string") -> one column named "value"
+        let parts: Vec<&str> = ddl
+            .split(',')
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+            .collect();
+        if parts.len() == 1 && !parts[0].contains(':') && !parts[0].contains(' ') {
+            return Ok(ParsedSchema::FullSchema(vec![(
+                "value".to_string(),
+                parts[0].to_lowercase(),
+            )]));
+        }
         let mut schema_vec: Vec<(String, String)> = Vec::new();
         for part in ddl.split(',') {
             let part = part.trim();
@@ -227,7 +239,90 @@ impl PySparkSession {
         }
 
         let first = &data_list[0];
-        let (rows, names_ordered) = if first.downcast::<PyDict>().is_ok() {
+        // PySpark: single-column schema ("value") with scalar data [1, 2, 3] -> wrap each as one-row.
+        let (rows, names_ordered) = if let ParsedSchema::FullSchema(s) = &parsed {
+            if s.len() == 1
+                && first.downcast::<PyDict>().is_err()
+                && first
+                    .extract::<Vec<Bound<'_, pyo3::types::PyAny>>>()
+                    .is_err()
+            {
+                let name = s[0].0.clone();
+                let mut rows: Vec<Vec<JsonValue>> = Vec::with_capacity(data_list.len());
+                for item in &data_list {
+                    let v = py_to_json_value(item)?;
+                    rows.push(vec![v]);
+                }
+                (rows, vec![name])
+            } else if first.downcast::<PyDict>().is_ok() {
+                let names_from_first: Vec<String> = {
+                    let dict = first.downcast::<PyDict>().unwrap();
+                    let mut n: Vec<String> = Vec::new();
+                    for k in dict.keys() {
+                        let name: String = k.extract().map_err(|e| {
+                            pyo3::exceptions::PyTypeError::new_err(format!(
+                                "dict key must be str: {e}"
+                            ))
+                        })?;
+                        if !n.contains(&name) {
+                            n.push(name);
+                        }
+                    }
+                    n
+                };
+                let order: Vec<String> = match &parsed {
+                    ParsedSchema::NamesOnly(n) => n.clone(),
+                    ParsedSchema::FullSchema(s) => s.iter().map(|(name, _)| name.clone()).collect(),
+                    ParsedSchema::NoSchema => names_from_first,
+                };
+                let mut rows: Vec<Vec<JsonValue>> = Vec::with_capacity(data_list.len());
+                for row_any in &data_list {
+                    let dict = row_any.downcast::<PyDict>().map_err(|_| {
+                        pyo3::exceptions::PyTypeError::new_err(
+                            "createDataFrame: when first row is dict, all rows must be dicts",
+                        )
+                    })?;
+                    let row: Vec<JsonValue> = order
+                        .iter()
+                        .map(|name| {
+                            let v = dict
+                                .get_item(name.as_str())
+                                .ok()
+                                .flatten()
+                                .unwrap_or_else(|| py.None().into_bound(py));
+                            py_to_json_value(&v)
+                        })
+                        .collect::<PyResult<Vec<_>>>()?;
+                    rows.push(row);
+                }
+                (rows, order)
+            } else {
+                let mut rows: Vec<Vec<JsonValue>> = Vec::with_capacity(data_list.len());
+                for row_any in &data_list {
+                    let list = row_any
+                        .extract::<Vec<Bound<'_, pyo3::types::PyAny>>>()
+                        .map_err(|_| {
+                            pyo3::exceptions::PyTypeError::new_err(
+                                "createDataFrame: each row must be a dict or a list/tuple",
+                            )
+                        })?;
+                    let row: Vec<JsonValue> = list
+                        .iter()
+                        .map(|v| py_to_json_value(v))
+                        .collect::<PyResult<Vec<_>>>()?;
+                    rows.push(row);
+                }
+                let n_cols = rows[0].len();
+                let order: Vec<String> = match &parsed {
+                    ParsedSchema::NamesOnly(n) if n.len() == n_cols => n.clone(),
+                    ParsedSchema::FullSchema(s) if s.len() == n_cols => {
+                        s.iter().map(|(name, _)| name.clone()).collect()
+                    }
+                    _ => (1..=n_cols).map(|i| format!("_{i}")).collect(),
+                };
+                (rows, order)
+            }
+        } else if first.downcast::<PyDict>().is_ok() {
             let names_from_first: Vec<String> = {
                 let dict = first.downcast::<PyDict>().unwrap();
                 let mut n: Vec<String> = Vec::new();
