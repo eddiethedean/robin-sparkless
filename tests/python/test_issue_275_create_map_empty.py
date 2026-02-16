@@ -21,7 +21,8 @@ def test_create_map_no_args() -> None:
     rows = df.collect()
     assert len(rows) == 1
     assert rows[0]["m"] is not None
-    assert rows[0]["m"] == []
+    assert isinstance(rows[0]["m"], dict), "empty map should be dict {} (fixes #380)"
+    assert rows[0]["m"] == {}
 
 
 def test_create_map_empty_list() -> None:
@@ -33,4 +34,5 @@ def test_create_map_empty_list() -> None:
     rows = df.collect()
     assert len(rows) == 2
     for r in rows:
-        assert r["m"] == []
+        assert isinstance(r["m"], dict), "empty map should be dict {} (fixes #380)"
+        assert r["m"] == {}
