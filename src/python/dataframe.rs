@@ -522,11 +522,9 @@ impl PyDataFrame {
                         exprs.push(col(c.as_str()));
                     }
                 } else {
-                    let resolved = self
-                        .inner
-                        .resolve_column_name(&name)
-                        .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-                    exprs.push(col(resolved.as_str()));
+                    // Push col(name); resolve_expr_column_names in select_exprs handles
+                    // case resolution and struct field dot notation (e.g. "StructValue.E1").
+                    exprs.push(col(name.as_str()));
                 }
             } else {
                 return Err(pyo3::exceptions::PyTypeError::new_err(
