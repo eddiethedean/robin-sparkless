@@ -3,7 +3,7 @@
 use crate::session::set_thread_udf_session;
 use crate::{DataFrameReader, SparkSession};
 use pyo3::prelude::*;
-use pyo3::types::PyDict;
+use pyo3::types::{PyDict, PyTuple};
 use serde_json::Value as JsonValue;
 use std::collections::HashMap;
 use std::path::Path;
@@ -27,6 +27,42 @@ pub(crate) fn get_default_session() -> Option<SparkSession> {
 }
 
 use super::py_to_json_value;
+
+/// Ordered column names from a Row-like or namedtuple (e.g. _fields or keys()). For #417 parity.
+fn row_like_get_names(first: &Bound<'_, pyo3::types::PyAny>) -> Option<Vec<String>> {
+    // namedtuple has _fields (tuple of str)
+    if let Ok(fields) = first.getattr("_fields") {
+        if let Ok(tup) = fields.downcast::<PyTuple>() {
+            let names: Option<Vec<String>> = tup
+                .iter()
+                .map(|e| e.extract::<String>())
+                .collect::<Result<Vec<_>, _>>()
+                .ok();
+            if let Some(n) = names {
+                if !n.is_empty() {
+                    return Some(n);
+                }
+            }
+        }
+    }
+    // Row-like: call keys()
+    if let Ok(keys_obj) = first.call_method0("keys") {
+        if let Ok(k) = keys_obj.extract::<Vec<String>>() {
+            if !k.is_empty() {
+                return Some(k);
+            }
+        }
+    }
+    None
+}
+
+/// Get value from Row-like or namedtuple by name: try get_item (Row/dict) then getattr (namedtuple). For #417.
+fn row_like_get_value<'py>(
+    row: &Bound<'py, pyo3::types::PyAny>,
+    name: &str,
+) -> PyResult<Bound<'py, pyo3::types::PyAny>> {
+    row.get_item(name).or_else(|_| row.getattr(name))
+}
 
 /// Result of parsing the schema argument to createDataFrame.
 /// - NoSchema: infer names from data and types from rows.
@@ -388,28 +424,62 @@ impl PySparkSession {
             }
             (rows, order)
         } else {
+            // Try Row-like / namedtuple: get_item(name) for each column (#417).
+            let order: Option<Vec<String>> = match &parsed {
+                ParsedSchema::NamesOnly(n) if !n.is_empty() => Some(n.clone()),
+                ParsedSchema::FullSchema(s) if !s.is_empty() => {
+                    Some(s.iter().map(|(name, _)| name.clone()).collect())
+                }
+                _ => row_like_get_names(first),
+            };
             let mut rows: Vec<Vec<JsonValue>> = Vec::with_capacity(data_list.len());
-            for row_any in &data_list {
-                let list = row_any
-                    .extract::<Vec<Bound<'_, pyo3::types::PyAny>>>()
-                    .map_err(|_| {
-                        pyo3::exceptions::PyTypeError::new_err(
-                            "createDataFrame: each row must be a dict or a list/tuple",
-                        )
-                    })?;
-                let row: Vec<JsonValue> = list
-                    .iter()
-                    .map(|v| py_to_json_value(v))
-                    .collect::<PyResult<Vec<_>>>()?;
-                rows.push(row);
+            let mut use_row_like = order.is_some();
+            if let Some(ref order_ref) = order {
+                for row_any in &data_list {
+                    let row: PyResult<Vec<JsonValue>> = order_ref
+                        .iter()
+                        .map(|name| {
+                            let v = row_like_get_value(row_any, name.as_str())?;
+                            py_to_json_value(&v)
+                        })
+                        .collect();
+                    match row {
+                        Ok(r) => rows.push(r),
+                        Err(_) => {
+                            use_row_like = false;
+                            break;
+                        }
+                    }
+                }
+            }
+            if !use_row_like || rows.len() != data_list.len() {
+                rows.clear();
+                for row_any in &data_list {
+                    let list = row_any
+                        .extract::<Vec<Bound<'_, pyo3::types::PyAny>>>()
+                        .map_err(|_| {
+                            pyo3::exceptions::PyTypeError::new_err(
+                                "createDataFrame: each row must be a dict, Row-like, or a list/tuple",
+                            )
+                        })?;
+                    let row: Vec<JsonValue> = list
+                        .iter()
+                        .map(|v| py_to_json_value(v))
+                        .collect::<PyResult<Vec<_>>>()?;
+                    rows.push(row);
+                }
             }
             let n_cols = rows[0].len();
-            let order: Vec<String> = match &parsed {
-                ParsedSchema::NamesOnly(n) if n.len() == n_cols => n.clone(),
-                ParsedSchema::FullSchema(s) if s.len() == n_cols => {
-                    s.iter().map(|(name, _)| name.clone()).collect()
+            let order: Vec<String> = if use_row_like && rows.len() == data_list.len() {
+                order.unwrap()
+            } else {
+                match &parsed {
+                    ParsedSchema::NamesOnly(n) if n.len() == n_cols => n.clone(),
+                    ParsedSchema::FullSchema(s) if s.len() == n_cols => {
+                        s.iter().map(|(name, _)| name.clone()).collect()
+                    }
+                    _ => (1..=n_cols).map(|i| format!("_{i}")).collect(),
                 }
-                _ => (1..=n_cols).map(|i| format!("_{i}")).collect(),
             };
             (rows, order)
         };
@@ -473,9 +543,22 @@ impl PySparkSession {
                     .collect::<PyResult<Vec<_>>>()?;
                 rows.push(row);
             } else {
-                return Err(pyo3::exceptions::PyTypeError::new_err(
-                    "create_dataframe_from_rows: each row must be a dict or a list",
-                ));
+                // Row-like / namedtuple: get_item or getattr by schema (#417)
+                let row: PyResult<Vec<JsonValue>> = names
+                    .iter()
+                    .map(|name| {
+                        let v = row_like_get_value(row_any, name)?;
+                        py_to_json_value(&v)
+                    })
+                    .collect();
+                match row {
+                    Ok(r) => rows.push(r),
+                    Err(e) => {
+                        return Err(pyo3::exceptions::PyTypeError::new_err(format!(
+                            "create_dataframe_from_rows: each row must be a dict, Row-like, or a list: {e}"
+                        )));
+                    }
+                }
             }
         }
         let df = self
