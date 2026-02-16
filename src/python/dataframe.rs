@@ -2,7 +2,7 @@
 #![allow(clippy::needless_return)] // many branches return Ok(...); clippy prefers trailing expr
 
 use crate::dataframe::JoinType;
-use crate::dataframe::{CubeRollupData, SaveMode, WriteFormat, WriteMode};
+use crate::dataframe::{CubeRollupData, WriteFormat, WriteMode};
 use crate::functions::SortOrder;
 #[cfg(feature = "pyo3")]
 use crate::python::udf::{execute_grouped_vectorized_aggs, GroupedAggSpec};
@@ -12,6 +12,9 @@ use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyDict, PyList, PyTuple};
 use std::path::Path;
 use std::sync::RwLock;
+
+use crate::python::py_to_json_value;
+use serde_json::Value as JsonValue;
 
 use super::column::PyColumn;
 use super::order::PySortOrder;
@@ -1355,6 +1358,94 @@ impl PyDataFrame {
     #[pyo3(name = "inputFiles")]
     fn input_files(&self) -> Vec<String> {
         self.inner.input_files()
+    }
+
+    /// Apply a function to each row and flatten (PySpark flatMap parity). Fixes #375.
+    ///
+    /// Args:
+    ///     func: Callable that takes a row (dict) and returns an iterable of rows (dicts).
+    ///
+    /// Returns:
+    ///     DataFrame with flattened rows. Requires a default SparkSession (builder().get_or_create()).
+    fn flat_map(
+        &self,
+        py: Python<'_>,
+        func: &Bound<'_, pyo3::types::PyAny>,
+    ) -> PyResult<PyDataFrame> {
+        let rows_py = self.collect(py)?;
+        let rows_list = rows_py.downcast_bound::<PyList>(py).map_err(|_| {
+            pyo3::exceptions::PyRuntimeError::new_err("flat_map: collect() did not return a list")
+        })?;
+        let flat_py = PyList::empty(py);
+        for i in 0..rows_list.len() {
+            let row = rows_list.get_item(i)?;
+            let result = func.call1((row,))?;
+            for item in result.try_iter()? {
+                flat_py.append(item?)?;
+            }
+        }
+        let session = get_default_session().ok_or_else(|| {
+            pyo3::exceptions::PyRuntimeError::new_err(
+                "flatMap requires a default session; call SparkSession.builder().get_or_create() first",
+            )
+        })?;
+        if flat_py.is_empty() {
+            let df = session
+                .create_dataframe_from_rows(vec![], vec![])
+                .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+            return Ok(PyDataFrame { inner: df });
+        }
+        let first = flat_py.get_item(0)?;
+        let order: Vec<String> = first
+            .downcast::<PyDict>()
+            .map_err(|_| {
+                pyo3::exceptions::PyTypeError::new_err(
+                    "flat_map: function must return iterable of dicts (row dicts)",
+                )
+            })?
+            .keys()
+            .iter()
+            .map(|k| k.extract::<String>())
+            .collect::<PyResult<Vec<_>>>()?;
+        let schema: Vec<(String, String)> = order
+            .iter()
+            .map(|n| (n.clone(), "string".to_string()))
+            .collect();
+        let mut rows_rust: Vec<Vec<JsonValue>> = Vec::with_capacity(flat_py.len());
+        for i in 0..flat_py.len() {
+            let item = flat_py.get_item(i)?;
+            let dict = item.downcast::<PyDict>().map_err(|_| {
+                pyo3::exceptions::PyTypeError::new_err(
+                    "flat_map: function must return iterable of dicts",
+                )
+            })?;
+            let row: Vec<JsonValue> = order
+                .iter()
+                .map(|name| {
+                    let v = dict
+                        .get_item(name.as_str())
+                        .ok()
+                        .flatten()
+                        .unwrap_or_else(|| py.None().into_bound(py));
+                    py_to_json_value(&v)
+                })
+                .collect::<PyResult<Vec<_>>>()?;
+            rows_rust.push(row);
+        }
+        let df = session
+            .create_dataframe_from_rows(rows_rust, schema)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        Ok(PyDataFrame { inner: df })
+    }
+
+    /// Alias for flat_map (camelCase). Fixes #375.
+    #[pyo3(name = "flatMap")]
+    fn flat_map_camel(
+        &self,
+        py: Python<'_>,
+        func: &Bound<'_, pyo3::types::PyAny>,
+    ) -> PyResult<PyDataFrame> {
+        self.flat_map(py, func)
     }
 
     /// Stub: RDD API is not supported. Raises NotImplementedError.
