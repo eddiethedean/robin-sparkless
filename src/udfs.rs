@@ -3496,6 +3496,69 @@ pub fn apply_to_timestamp_format(
     }
 }
 
+/// Coerce series to Datetime(Microseconds) for date-part extraction (#403). String parsed as "%Y-%m-%d %H:%M:%S".
+fn series_to_datetime_micros(series: &Series) -> PolarsResult<Series> {
+    use chrono::NaiveDateTime;
+    use polars::datatypes::TimeUnit;
+    if series.dtype() == &DataType::String {
+        let name = series.name().as_str().into();
+        let ca = series
+            .str()
+            .map_err(|e| PolarsError::ComputeError(format!("date on string: {e}").into()))?;
+        const FMT: &str = "%Y-%m-%d %H:%M:%S";
+        let out = Int64Chunked::from_iter_options(
+            name,
+            ca.into_iter().map(|opt_s| {
+                opt_s.and_then(|s| {
+                    NaiveDateTime::parse_from_str(s.trim(), FMT)
+                        .ok()
+                        .map(|ndt| ndt.and_utc().timestamp_micros())
+                })
+            }),
+        );
+        out.into_series()
+            .cast(&DataType::Datetime(TimeUnit::Microseconds, None))
+    } else {
+        series.cast(&DataType::Datetime(TimeUnit::Microseconds, None))
+    }
+}
+
+/// hour(column) - extract hour (0-23). Accepts string timestamp column (#403).
+pub fn apply_hour(column: Column) -> PolarsResult<Option<Column>> {
+    let name = column.field().into_owned().name;
+    let series = column.take_materialized_series();
+    let dt_series = series_to_datetime_micros(&series)?;
+    let ca = dt_series
+        .datetime()
+        .map_err(|e| PolarsError::ComputeError(format!("hour: {e}").into()))?;
+    let out = ca.hour().into_series();
+    Ok(Some(Column::new(name, out)))
+}
+
+/// minute(column) - extract minute. Accepts string timestamp column (#403).
+pub fn apply_minute(column: Column) -> PolarsResult<Option<Column>> {
+    let name = column.field().into_owned().name;
+    let series = column.take_materialized_series();
+    let dt_series = series_to_datetime_micros(&series)?;
+    let ca = dt_series
+        .datetime()
+        .map_err(|e| PolarsError::ComputeError(format!("minute: {e}").into()))?;
+    let out = ca.minute().into_series();
+    Ok(Some(Column::new(name, out)))
+}
+
+/// second(column) - extract second. Accepts string timestamp column (#403).
+pub fn apply_second(column: Column) -> PolarsResult<Option<Column>> {
+    let name = column.field().into_owned().name;
+    let series = column.take_materialized_series();
+    let dt_series = series_to_datetime_micros(&series)?;
+    let ca = dt_series
+        .datetime()
+        .map_err(|e| PolarsError::ComputeError(format!("second: {e}").into()))?;
+    let out = ca.second().into_series();
+    Ok(Some(Column::new(name, out)))
+}
+
 /// make_date(year, month, day) - three columns to date.
 pub fn apply_make_date(columns: &mut [Column]) -> PolarsResult<Option<Column>> {
     use chrono::NaiveDate;
