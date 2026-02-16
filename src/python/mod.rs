@@ -2984,8 +2984,12 @@ fn py_schema_of_json(col: &PyColumn) -> PyColumn {
 }
 
 #[pyfunction]
-fn py_format_string(format: &str, cols: Vec<PyRef<PyColumn>>) -> PyResult<PyColumn> {
-    let refs: Vec<&RsColumn> = cols.iter().map(|c| &c.inner).collect();
+#[pyo3(signature = (format, *cols))]
+fn py_format_string(format: &str, cols: &Bound<'_, pyo3::types::PyTuple>) -> PyResult<PyColumn> {
+    let columns: Vec<PyRef<PyColumn>> = (0..cols.len())
+        .map(|i| cols.get_item(i)?.extract())
+        .collect::<PyResult<Vec<_>>>()?;
+    let refs: Vec<&RsColumn> = columns.iter().map(|c| &c.inner).collect();
     if refs.is_empty() {
         return Err(pyo3::exceptions::PyValueError::new_err(
             "format_string() requires at least one column",
@@ -2997,7 +3001,8 @@ fn py_format_string(format: &str, cols: Vec<PyRef<PyColumn>>) -> PyResult<PyColu
 }
 
 #[pyfunction]
-fn py_printf(format: &str, cols: Vec<PyRef<PyColumn>>) -> PyResult<PyColumn> {
+#[pyo3(signature = (format, *cols))]
+fn py_printf(format: &str, cols: &Bound<'_, pyo3::types::PyTuple>) -> PyResult<PyColumn> {
     py_format_string(format, cols)
 }
 
