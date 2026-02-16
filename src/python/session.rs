@@ -1137,6 +1137,12 @@ impl PySparkSessionBuilder {
         slf
     }
 
+    /// Make builder callable so that SparkSession.builder() works (PySpark parity).
+    /// Returns self for chaining.
+    fn __call__(slf: PyRef<'_, Self>) -> PyRef<'_, Self> {
+        slf
+    }
+
     /// Build and return a SparkSession with the current builder configuration.
     ///
     /// The returned session is stored as the default session for df.create_or_replace_temp_view(name)
