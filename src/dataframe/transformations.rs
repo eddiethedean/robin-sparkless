@@ -634,7 +634,7 @@ pub fn intersect(
     let left_lf = left.df.as_ref().clone().lazy();
     let right_lf = right.df.as_ref().clone().lazy();
     let semi = left_lf.join(right_lf, left_on, right_on, JoinArgs::new(JoinType::Semi));
-    let pl_df = semi.collect()?;
+    let pl_df = semi.unique(None, UniqueKeepStrategy::First).collect()?;
     Ok(super::DataFrame::from_polars_with_options(
         pl_df,
         case_sensitive,
