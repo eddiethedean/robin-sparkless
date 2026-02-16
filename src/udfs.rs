@@ -4178,7 +4178,8 @@ fn parse_str_to_bool(s: &str, strict: bool) -> Option<bool> {
     }
 }
 
-/// Apply string-to-boolean cast. Handles string columns; passes through boolean; null for others (try_cast) or error (cast).
+/// Apply string-to-boolean cast. Handles string columns; passes through boolean; numeric types
+/// (0/0.0 -> false, non-zero -> true for PySpark parity #399); null for others (try_cast) or error (cast).
 pub fn apply_string_to_boolean(column: Column, strict: bool) -> PolarsResult<Option<Column>> {
     let name = column.field().into_owned().name;
     let series = column.take_materialized_series();
@@ -4211,6 +4212,96 @@ pub fn apply_string_to_boolean(column: Column, strict: bool) -> PolarsResult<Opt
                 .bool()
                 .map_err(|e| PolarsError::ComputeError(format!("boolean: {e}").into()))?;
             BooleanChunked::from_iter_options(name.as_str().into(), ca.into_iter())
+        }
+        DataType::Int8 => {
+            let ca = series
+                .i8()
+                .map_err(|e| PolarsError::ComputeError(format!("i8: {e}").into()))?;
+            BooleanChunked::from_iter_options(
+                name.as_str().into(),
+                ca.into_iter().map(|o| o.map(|v| v != 0)),
+            )
+        }
+        DataType::Int16 => {
+            let ca = series
+                .i16()
+                .map_err(|e| PolarsError::ComputeError(format!("i16: {e}").into()))?;
+            BooleanChunked::from_iter_options(
+                name.as_str().into(),
+                ca.into_iter().map(|o| o.map(|v| v != 0)),
+            )
+        }
+        DataType::Int32 => {
+            let ca = series
+                .i32()
+                .map_err(|e| PolarsError::ComputeError(format!("i32: {e}").into()))?;
+            BooleanChunked::from_iter_options(
+                name.as_str().into(),
+                ca.into_iter().map(|o| o.map(|v| v != 0)),
+            )
+        }
+        DataType::Int64 => {
+            let ca = series
+                .i64()
+                .map_err(|e| PolarsError::ComputeError(format!("i64: {e}").into()))?;
+            BooleanChunked::from_iter_options(
+                name.as_str().into(),
+                ca.into_iter().map(|o| o.map(|v| v != 0)),
+            )
+        }
+        DataType::UInt8 => {
+            let ca = series
+                .u8()
+                .map_err(|e| PolarsError::ComputeError(format!("u8: {e}").into()))?;
+            BooleanChunked::from_iter_options(
+                name.as_str().into(),
+                ca.into_iter().map(|o| o.map(|v| v != 0)),
+            )
+        }
+        DataType::UInt16 => {
+            let ca = series
+                .u16()
+                .map_err(|e| PolarsError::ComputeError(format!("u16: {e}").into()))?;
+            BooleanChunked::from_iter_options(
+                name.as_str().into(),
+                ca.into_iter().map(|o| o.map(|v| v != 0)),
+            )
+        }
+        DataType::UInt32 => {
+            let ca = series
+                .u32()
+                .map_err(|e| PolarsError::ComputeError(format!("u32: {e}").into()))?;
+            BooleanChunked::from_iter_options(
+                name.as_str().into(),
+                ca.into_iter().map(|o| o.map(|v| v != 0)),
+            )
+        }
+        DataType::UInt64 => {
+            let ca = series
+                .u64()
+                .map_err(|e| PolarsError::ComputeError(format!("u64: {e}").into()))?;
+            BooleanChunked::from_iter_options(
+                name.as_str().into(),
+                ca.into_iter().map(|o| o.map(|v| v != 0)),
+            )
+        }
+        DataType::Float32 => {
+            let ca = series
+                .f32()
+                .map_err(|e| PolarsError::ComputeError(format!("f32: {e}").into()))?;
+            BooleanChunked::from_iter_options(
+                name.as_str().into(),
+                ca.into_iter().map(|o| o.map(|v| v != 0.0)),
+            )
+        }
+        DataType::Float64 => {
+            let ca = series
+                .f64()
+                .map_err(|e| PolarsError::ComputeError(format!("f64: {e}").into()))?;
+            BooleanChunked::from_iter_options(
+                name.as_str().into(),
+                ca.into_iter().map(|o| o.map(|v| v != 0.0)),
+            )
         }
         _ => {
             if strict {
