@@ -372,6 +372,48 @@ impl PyColumn {
         })
     }
 
+    /// Power (self ** other). PySpark: col ** 2 or pow(col, exp). Enables col("x") ** 2 (fixes #405).
+    /// Modulo (third argument) is not supported; returns error if given.
+    fn __pow__(
+        &self,
+        other: &Bound<'_, pyo3::types::PyAny>,
+        modulo: Option<&Bound<'_, pyo3::types::PyAny>>,
+    ) -> PyResult<Self> {
+        if modulo.is_some() {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "pow() with modulo is not supported for Column",
+            ));
+        }
+        let other_col = py_any_to_column(other)?;
+        Ok(PyColumn {
+            inner: self.inner.pow_with(&other_col),
+        })
+    }
+
+    /// Reflected power (other ** self). Enables 2 ** col("x"). Modulo not supported.
+    fn __rpow__(
+        &self,
+        other: &Bound<'_, pyo3::types::PyAny>,
+        modulo: Option<&Bound<'_, pyo3::types::PyAny>>,
+    ) -> PyResult<Self> {
+        if modulo.is_some() {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "pow() with modulo is not supported for Column",
+            ));
+        }
+        let other_col = py_any_to_column(other)?;
+        Ok(PyColumn {
+            inner: other_col.pow_with(&self.inner),
+        })
+    }
+
+    /// Bitwise NOT (unary ~). PySpark: ~col for integer column (fixes #405).
+    fn __invert__(&self) -> Self {
+        PyColumn {
+            inner: self.inner.bitwise_not(),
+        }
+    }
+
     /// Logical AND with another boolean column.
     fn and_(&self, other: &PyColumn) -> Self {
         PyColumn {

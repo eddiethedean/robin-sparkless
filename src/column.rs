@@ -1389,6 +1389,11 @@ impl Column {
         Self::from_expr(self.expr().clone().pow(lit(exp)), None)
     }
 
+    /// Power with column or scalar exponent (for __pow__ / col ** other).
+    pub fn pow_with(&self, exponent: &Column) -> Column {
+        Self::from_expr(self.expr().clone().pow(exponent.expr().clone()), None)
+    }
+
     /// Alias for pow. PySpark power.
     pub fn power(&self, exp: i64) -> Column {
         self.pow(exp)
