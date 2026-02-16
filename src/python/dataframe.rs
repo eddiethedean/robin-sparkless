@@ -1215,6 +1215,40 @@ impl PyDataFrame {
         return Ok(PyDataFrame { inner: df });
     }
 
+    /// Stratified sample by column value. PySpark sampleBy(col, fractions, seed).
+    ///
+    /// Args:
+    ///     col: Column name to stratify by.
+    ///     fractions: Dict mapping value (int/float/str/bool) to sampling fraction (0.0–1.0) for that value.
+    ///     seed: Optional random seed.
+    ///
+    /// Returns:
+    ///     DataFrame with stratified sample.
+    #[pyo3(name = "sampleBy", signature = (col, fractions, seed=None))]
+    fn sample_by(
+        &self,
+        col: &str,
+        fractions: &Bound<'_, PyAny>,
+        seed: Option<u64>,
+    ) -> PyResult<PyDataFrame> {
+        let dict = fractions.downcast::<PyDict>().map_err(|_| {
+            pyo3::exceptions::PyTypeError::new_err(
+                "sampleBy fractions must be a dict (value -> fraction)",
+            )
+        })?;
+        let mut pairs: Vec<(Expr, f64)> = Vec::with_capacity(dict.len());
+        for (k, v) in dict.iter() {
+            let expr = py_any_to_expr(&k)?;
+            let frac: f64 = v.extract()?;
+            pairs.push((expr, frac));
+        }
+        let df = self
+            .inner
+            .sample_by(col, &pairs, seed)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        Ok(PyDataFrame { inner: df })
+    }
+
     /// Return the first row as a single-row DataFrame. Equivalent to ``head(1)``.
     ///
     /// Returns:
@@ -1769,6 +1803,26 @@ impl PyDataFrame {
         PyDataFrameStat {
             df: self.inner.clone(),
         }
+    }
+
+    /// Cross-tabulation of two columns. Returns DataFrame with col1, col2, count. PySpark crosstab.
+    fn crosstab(&self, col1: &str, col2: &str) -> PyResult<PyDataFrame> {
+        let df = self
+            .inner
+            .crosstab(col1, col2)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        Ok(PyDataFrame { inner: df })
+    }
+
+    /// Frequent items: one row with columns {col}_freqItems (array of values with frequency >= support). PySpark freqItems.
+    #[pyo3(name = "freqItems", signature = (columns, support=0.01))]
+    fn freq_items(&self, columns: Vec<String>, support: f64) -> PyResult<PyDataFrame> {
+        let refs: Vec<&str> = columns.iter().map(|s| s.as_str()).collect();
+        let df = self
+            .inner
+            .freq_items(&refs, support)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        Ok(PyDataFrame { inner: df })
     }
 
     /// Correlation matrix or scalar. PySpark: corr() -> matrix, corr(col1, col2) -> float.
