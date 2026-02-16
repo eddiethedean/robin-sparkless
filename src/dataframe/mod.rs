@@ -617,7 +617,13 @@ impl DataFrame {
             .map(|e| self.resolve_expr_column_names(e))
             .collect::<Result<Vec<_>, _>>()?;
         let disambiguated = aggregations::disambiguate_agg_output_names(resolved);
-        let pl_df = self.df.as_ref().clone().lazy().select(disambiguated).collect()?;
+        let pl_df = self
+            .df
+            .as_ref()
+            .clone()
+            .lazy()
+            .select(disambiguated)
+            .collect()?;
         Ok(Self::from_polars_with_options(pl_df, self.case_sensitive))
     }
 
