@@ -1026,9 +1026,14 @@ impl DataFrame {
         transformations::crosstab(self, col1, col2, self.case_sensitive)
     }
 
-    /// Unpivot (melt). PySpark melt (stub).
+    /// Unpivot (melt). PySpark melt. Long format: id columns + variable + value.
     pub fn melt(&self, id_vars: &[&str], value_vars: &[&str]) -> Result<DataFrame, PolarsError> {
         transformations::melt(self, id_vars, value_vars, self.case_sensitive)
+    }
+
+    /// Unpivot (wide to long). PySpark unpivot. Same as melt(ids, values).
+    pub fn unpivot(&self, ids: &[&str], values: &[&str]) -> Result<DataFrame, PolarsError> {
+        transformations::melt(self, ids, values, self.case_sensitive)
     }
 
     /// Pivot (wide format). PySpark pivot. Stub: not yet implemented; use crosstab for two-column count.
