@@ -1067,16 +1067,17 @@ impl PyDataFrame {
         return Ok(PyDataFrame { inner: df });
     }
 
-    /// Return the first n rows.
+    /// Return the first n rows (PySpark parity: head() defaults to 1 row).
     ///
     /// Args:
-    ///     n: Number of rows (non-negative integer).
+    ///     n: Number of rows (default 1). Non-negative integer.
     ///
     /// Returns:
     ///     DataFrame (lazy) with at most n rows.
     ///
     /// Raises:
     ///     RuntimeError: If execution fails.
+    #[pyo3(signature = (n=1))]
     fn head(&self, n: usize) -> PyResult<PyDataFrame> {
         let df = self
             .inner
