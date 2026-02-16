@@ -17,6 +17,22 @@ use super::column::PyColumn;
 use super::order::PySortOrder;
 use super::session::get_default_session;
 
+/// Normalize cube/rollup *cols: one list -> use it; else each arg as column name.
+fn normalize_cube_rollup_cols(cols: &Bound<'_, PyTuple>) -> PyResult<Vec<String>> {
+    if cols.len() == 1 {
+        let first = cols.get_item(0)?;
+        if let Ok(list) = first.downcast::<PyList>() {
+            return list
+                .iter()
+                .map(|ob| ob.extract::<String>())
+                .collect::<PyResult<Vec<_>>>();
+        }
+    }
+    (0..cols.len())
+        .map(|i| cols.get_item(i).and_then(|ob| ob.extract::<String>()))
+        .collect::<PyResult<Vec<_>>>()
+}
+
 fn py_any_to_expr(value: &pyo3::Bound<'_, pyo3::types::PyAny>) -> PyResult<Expr> {
     let expr = if value.is_none() {
         lit(NULL)
@@ -560,8 +576,10 @@ impl PyDataFrame {
     ///
     /// Raises:
     ///     RuntimeError: If a column is not in the schema.
-    fn cube(&self, cols: Vec<String>) -> PyResult<PyCubeRollupData> {
-        let refs: Vec<&str> = cols.iter().map(|s| s.as_str()).collect();
+    #[pyo3(signature = (*cols))]
+    fn cube(&self, cols: &Bound<'_, pyo3::types::PyTuple>) -> PyResult<PyCubeRollupData> {
+        let names = normalize_cube_rollup_cols(cols)?;
+        let refs: Vec<&str> = names.iter().map(|s| s.as_str()).collect();
         let cr = self
             .inner
             .cube(refs)
@@ -572,15 +590,17 @@ impl PyDataFrame {
     /// Create a ROLLUP grouping: aggregates at each level of the hierarchy (e.g. (a,b), (a), ()).
     ///
     /// Args:
-    ///     cols: Column names for the ROLLUP hierarchy, in order.
+    ///     cols: Column names for the ROLLUP hierarchy (variadic or single list), in order.
     ///
     /// Returns:
     ///     CubeRollupData: Call ``.agg(...)`` to compute aggregates.
     ///
     /// Raises:
     ///     RuntimeError: If a column is not in the schema.
-    fn rollup(&self, cols: Vec<String>) -> PyResult<PyCubeRollupData> {
-        let refs: Vec<&str> = cols.iter().map(|s| s.as_str()).collect();
+    #[pyo3(signature = (*cols))]
+    fn rollup(&self, cols: &Bound<'_, pyo3::types::PyTuple>) -> PyResult<PyCubeRollupData> {
+        let names = normalize_cube_rollup_cols(cols)?;
+        let refs: Vec<&str> = names.iter().map(|s| s.as_str()).collect();
         let cr = self
             .inner
             .rollup(refs)
