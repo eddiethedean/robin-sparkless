@@ -891,7 +891,7 @@ def test_select_nonexistent_column_raises() -> None:
 
 
 def test_read_api_and_write_parquet_csv_json() -> None:
-    """spark.read().csv/parquet/json and df.write.parquet/csv/json work (Phase C)."""
+    """spark.read.csv/parquet/json and df.write.parquet/csv/json work (Phase C)."""
     import tempfile
 
     import robin_sparkless as rs
@@ -903,25 +903,25 @@ def test_read_api_and_write_parquet_csv_json() -> None:
         # Write as parquet
         parquet_path = f"{tmpdir}/out.parquet"
         df.write.mode("overwrite").parquet(parquet_path)
-        back = spark.read().parquet(parquet_path)
+        back = spark.read.parquet(parquet_path)
         assert back.count() == 2
         assert back.collect()[0]["id"] == 1
 
         # Write as CSV
         csv_path = f"{tmpdir}/out.csv"
         df.write.mode("overwrite").option("header", "true").csv(csv_path)
-        back_csv = spark.read().option("header", "true").csv(csv_path)
+        back_csv = spark.read.option("header", "true").csv(csv_path)
         assert back_csv.count() == 2
 
         # Write as JSON
         json_path = f"{tmpdir}/out.json"
         df.write.mode("overwrite").json(json_path)
-        back_json = spark.read().json(json_path)
+        back_json = spark.read.json(json_path)
         assert back_json.count() == 2
 
         # format().save() still works
         df.write.mode("overwrite").format("parquet").save(f"{tmpdir}/via_save.parquet")
-        via_save = spark.read().format("parquet").load(f"{tmpdir}/via_save.parquet")
+        via_save = spark.read.format("parquet").load(f"{tmpdir}/via_save.parquet")
         assert via_save.count() == 2
 
 
@@ -1451,8 +1451,8 @@ def test_save_as_table_and_catalog() -> None:
         pytest.skip("sql feature not built (saveAsTable not available)")
     read_back = spark.table("t1")
     assert read_back.count() == 2
-    assert spark.catalog().tableExists("t1", None)
-    assert "t1" in spark.catalog().listTables(None)
+    assert spark.catalog.tableExists("t1", None)
+    assert "t1" in spark.catalog.listTables(None)
 
     # saveAsTable with mode overwrite
     df2 = spark.createDataFrame([(3, 30, "c")], ["id", "v", "name"])
@@ -1469,13 +1469,13 @@ def test_save_as_table_and_catalog() -> None:
     assert len(rows_x) == 1 and rows_x[0]["name"] == "temp"
 
     # listTables includes both
-    names = spark.catalog().listTables(None)
+    names = spark.catalog.listTables(None)
     assert "t1" in names and "x" in names
 
     # dropTable removes from saved tables only
-    spark.catalog().dropTable("t1")
-    assert not spark.catalog().tableExists("t1", None)
-    assert spark.catalog().tableExists("x", None)  # x is temp view, still there
+    spark.catalog.dropTable("t1")
+    assert not spark.catalog.tableExists("t1", None)
+    assert spark.catalog.tableExists("x", None)  # x is temp view, still there
 
     # read_delta by name (in-memory table)
     df3 = spark.createDataFrame([(1, 2, "d")], ["id", "v", "name"])
@@ -1498,9 +1498,9 @@ def test_global_temp_view_persists_across_sessions() -> None:
 
         spark2 = rs.SparkSession.builder().app_name("g2").get_or_create()
         assert spark2.table("global_temp.people").count() == 2
-        assert spark2.catalog().listTables("global_temp") == ["people"]
+        assert spark2.catalog.listTables("global_temp") == ["people"]
 
-        assert spark2.catalog().dropGlobalTempView("people") is True
+        assert spark2.catalog.dropGlobalTempView("people") is True
         with pytest.raises(Exception, match="not found"):
             spark2.table("global_temp.people")
     except AttributeError:
@@ -1626,7 +1626,7 @@ def test_phase_b_functions() -> None:
 
 
 def test_phase_c_reader_writer() -> None:
-    """Phase C: spark.read().option().csv, spark.read.table, df.write.mode().parquet — Reader/Writer API."""
+    """Phase C: spark.read.option().csv, spark.read.table, df.write.mode().parquet — Reader/Writer API."""
     import tempfile
 
     import robin_sparkless as rs
@@ -1637,15 +1637,15 @@ def test_phase_c_reader_writer() -> None:
         csv_path = f"{tmpdir}/data.csv"
         with open(csv_path, "w") as f:
             f.write("id,x,label\n1,10,a\n2,20,b\n")
-        read_df = spark.read().option("header", "true").csv(csv_path)
+        read_df = spark.read.option("header", "true").csv(csv_path)
         assert read_df.count() == 2
         parquet_path = f"{tmpdir}/out.parquet"
         df.write.mode("overwrite").parquet(parquet_path)
-        back = spark.read().parquet(parquet_path)
+        back = spark.read.parquet(parquet_path)
         assert back.count() == 2
     try:
         df.createOrReplaceTempView("phase_c_view")
-        tbl = spark.read().table("phase_c_view")
+        tbl = spark.read.table("phase_c_view")
         assert tbl.count() == 2
     except (AttributeError, RuntimeError) as e:
         if "sql" in str(e).lower():
@@ -1766,7 +1766,7 @@ def test_phase_e_spark_session_catalog() -> None:
 
     spark = rs.SparkSession.builder().app_name("phase_e").get_or_create()
     # catalog returns Catalog
-    cat = spark.catalog()
+    cat = spark.catalog
     assert cat is not None
     assert cat.currentDatabase() == "default"
     assert cat.currentCatalog() == "spark_catalog"
@@ -1817,10 +1817,10 @@ def test_phase_e_spark_session_catalog() -> None:
     df = spark2.createDataFrame([(1, 2, "a")], ["a", "b", "c"])
     try:
         df.createOrReplaceTempView("phase_e_v")
-        assert spark2.catalog().tableExists("phase_e_v", None) is True
-        assert "phase_e_v" in spark2.catalog().listTables(None)
-        spark2.catalog().dropTempView("phase_e_v")
-        assert spark2.catalog().tableExists("phase_e_v", None) is False
+        assert spark2.catalog.tableExists("phase_e_v", None) is True
+        assert "phase_e_v" in spark2.catalog.listTables(None)
+        spark2.catalog.dropTempView("phase_e_v")
+        assert spark2.catalog.tableExists("phase_e_v", None) is False
     except (AttributeError, RuntimeError) as e:
         if "sql" in str(e).lower():
             pytest.skip("sql feature not built")
@@ -2511,7 +2511,7 @@ def test_sql_create_schema_database_issue_347() -> None:
         assert out2.count() == 0
         assert out2.columns() == []
         # Persistence: created names appear in catalog.listDatabases() and databaseExists()
-        cat = spark.catalog()
+        cat = spark.catalog
         dbs = set(cat.listDatabases(None))
         assert "default" in dbs and "global_temp" in dbs
         assert "my_schema" in dbs

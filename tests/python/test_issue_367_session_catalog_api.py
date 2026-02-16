@@ -24,7 +24,7 @@ def test_catalog_list_databases() -> None:
     import robin_sparkless as rs
 
     spark = rs.SparkSession.builder().app_name("repro").get_or_create()
-    dbs = spark.catalog().listDatabases()
+    dbs = spark.catalog.listDatabases()
     assert isinstance(dbs, list)
     assert "default" in dbs
     assert "global_temp" in dbs
@@ -37,7 +37,7 @@ def test_catalog_create_database() -> None:
     import robin_sparkless as rs
 
     spark = rs.SparkSession.builder().app_name("repro").get_or_create()
-    cat = spark.catalog()
+    cat = spark.catalog
     # Use unique name so repeated test runs don't see leftover state
     db_name = f"test_db_367_{uuid.uuid4().hex[:8]}"
     # createDatabase adds name to listDatabases
