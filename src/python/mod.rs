@@ -72,7 +72,8 @@ pub(crate) use dataframe::{
     PyGroupedData, PyPivotedGroupedData,
 };
 pub(crate) use order::{
-    PyDenseRank, PyRowNumber, PySortOrder, PyThenBuilder, PyWhenBuilder, PyWhenThen, PyWindow,
+    PyChainedWhenBuilder, PyDenseRank, PyRowNumber, PySortOrder, PyThenBuilder, PyWhenBuilder,
+    PyWhenThen, PyWindow,
 };
 use session::parse_return_type;
 pub(crate) use session::{
@@ -411,6 +412,7 @@ fn robin_sparkless(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyWhenThen>()?;
     m.add_class::<PyWhenBuilder>()?;
     m.add_class::<PyThenBuilder>()?;
+    m.add_class::<PyChainedWhenBuilder>()?;
     m.add_class::<PyGroupedData>()?;
     m.add_class::<PyPivotedGroupedData>()?;
     m.add_class::<PyCubeRollupData>()?;

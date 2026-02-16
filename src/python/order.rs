@@ -2,11 +2,16 @@
 
 use crate::column::Column as RsColumn;
 use crate::functions::SortOrder;
-use polars::prelude::{col, Expr};
+use polars::prelude::{col, ChainedThen, ChainedWhen, Expr, Then};
 use pyo3::prelude::*;
 use pyo3::types::PyTuple;
 
 use super::column::PyColumn;
+
+enum PyWhenThenState {
+    Single(Then),
+    Chained(ChainedThen),
+}
 
 /// Convert a Python value (str or Column) to a partition column name (for partitionBy).
 fn py_to_partition_name(item: &Bound<'_, pyo3::types::PyAny>) -> PyResult<String> {
@@ -204,28 +209,47 @@ pub struct PyWhenBuilder {
 
 #[pymethods]
 impl PyWhenBuilder {
-    /// Set the value to use when the condition is true. Chain ``.otherwise(default)`` to complete the expression.
+    /// Set the value to use when the condition is true. Chain ``.otherwise(default)`` or ``.when(cond).then(val)`` to complete.
     ///
     /// Args:
     ///     value: Column expression for the "then" value.
     ///
     /// Returns:
-    ///     ThenBuilder: Call ``.otherwise(default)`` to get the final Column.
+    ///     ThenBuilder: Call ``.otherwise(default)`` or ``.when(cond).then(val)`` for chained when-then.
     fn then(&self, value: &PyColumn) -> PyThenBuilder {
         let when_then =
             polars::prelude::when(self.condition.clone()).then(value.inner.expr().clone());
-        PyThenBuilder { when_then }
+        PyThenBuilder {
+            state: PyWhenThenState::Single(when_then),
+        }
     }
 }
 
-/// Python wrapper for ThenBuilder (.otherwise(val)).
+/// Python wrapper for ThenBuilder (.when(cond).then(val) and .otherwise(val)).
 #[pyclass(name = "ThenBuilder")]
 pub struct PyThenBuilder {
-    when_then: polars::prelude::Then,
+    state: PyWhenThenState,
 }
 
 #[pymethods]
 impl PyThenBuilder {
+    /// Chain another when-then clause (PySpark: when(a).then(x).when(b).then(y).otherwise(z)).
+    ///
+    /// Args:
+    ///     condition: Boolean Column for the next branch.
+    ///
+    /// Returns:
+    ///     ChainedWhenBuilder: Call ``.then(value)`` to add the branch, then ``.when()`` or ``.otherwise()`` on the returned ThenBuilder.
+    fn when(&self, condition: &PyColumn) -> PyChainedWhenBuilder {
+        let chained_when = match &self.state {
+            PyWhenThenState::Single(t) => t.clone().when(condition.inner.expr().clone()),
+            PyWhenThenState::Chained(ct) => ct.clone().when(condition.inner.expr().clone()),
+        };
+        PyChainedWhenBuilder {
+            inner: chained_when,
+        }
+    }
+
     /// Set the default value when no when-then clause matches. Returns the complete conditional Column.
     ///
     /// Args:
@@ -234,9 +258,29 @@ impl PyThenBuilder {
     /// Returns:
     ///     Column: The full when-then-otherwise expression.
     fn otherwise(&self, value: &PyColumn) -> PyColumn {
-        let expr = self.when_then.clone().otherwise(value.inner.expr().clone());
+        let expr = match &self.state {
+            PyWhenThenState::Single(t) => t.clone().otherwise(value.inner.expr().clone()),
+            PyWhenThenState::Chained(ct) => ct.clone().otherwise(value.inner.expr().clone()),
+        };
         PyColumn {
             inner: RsColumn::from_expr(expr, None),
+        }
+    }
+}
+
+/// Python wrapper for chained when (when(a).then(x).when(b); call .then(y) to get back ThenBuilder).
+#[pyclass(name = "ChainedWhenBuilder")]
+pub struct PyChainedWhenBuilder {
+    inner: ChainedWhen,
+}
+
+#[pymethods]
+impl PyChainedWhenBuilder {
+    /// Set the value for this when clause. Returns ThenBuilder so you can call .when() again or .otherwise().
+    fn then(&self, value: &PyColumn) -> PyThenBuilder {
+        let chained_then = self.inner.clone().then(value.inner.expr().clone());
+        PyThenBuilder {
+            state: PyWhenThenState::Chained(chained_then),
         }
     }
 }
