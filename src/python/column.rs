@@ -91,11 +91,23 @@ impl PyColumn {
         }
     }
 
+    /// PySpark alias for is_null.
+    #[pyo3(name = "isNull")]
+    fn is_null_camel(&self) -> Self {
+        self.is_null()
+    }
+
     /// True where this column is not null.
     fn is_not_null(&self) -> Self {
         PyColumn {
             inner: self.inner.is_not_null(),
         }
+    }
+
+    /// PySpark alias for is_not_null.
+    #[pyo3(name = "isNotNull")]
+    fn is_not_null_camel(&self) -> Self {
+        self.is_not_null()
     }
 
     /// True where this column's value is in the given list (PySpark isin). Empty list yields false for all rows.

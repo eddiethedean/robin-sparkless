@@ -2,7 +2,7 @@
 #![allow(clippy::needless_return)] // many branches return Ok(...); clippy prefers trailing expr
 
 use crate::dataframe::JoinType;
-use crate::dataframe::{CubeRollupData, WriteFormat, WriteMode};
+use crate::dataframe::{CubeRollupData, SaveMode, WriteFormat, WriteMode};
 use crate::functions::SortOrder;
 #[cfg(feature = "pyo3")]
 use crate::python::udf::{execute_grouped_vectorized_aggs, GroupedAggSpec};
