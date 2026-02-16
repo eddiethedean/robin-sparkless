@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **#366 – Comparison coercion string/numeric and date/string (column-to-column)** — `df.filter(col("id") == col("label"))` when `id` is numeric and `label` is string now coerces (string parsed via `try_to_number`) instead of raising "cannot compare string with numeric type". Column-to-column comparisons in filter now use `coerce_for_pyspark_comparison` when both sides are columns with differing types (string–numeric, date/datetime–string). Fixes #366.
 - **#365 – regexp_extract support lookahead/lookbehind (PySpark parity)** — Patterns with `(?=...)`, `(?!...)`, `(?<=...)`, `(?<!...)` are now supported via the `fancy-regex` crate. Polars’ built-in regex does not support lookaround; when detected, extraction uses a UDF. Enables `df.select(rs.regexp_extract(rs.col("s"), r"(?<=hello )\w+", 0))` → `"world"`. Fixes #365.
 - **#363 – struct() accept multiple Column arguments (PySpark parity)** — `struct(*cols)` now accepts variadic Column arguments like PySpark `F.struct(col1, col2, ...)`. Previously only a single list argument was accepted. Enables `df.select(rs.struct(rs.col("a"), rs.col("b")).alias("s")).collect()`. Fixes #363.
 - **#364 – Row/result use column alias as key (PySpark parity)** — `collect()` Row objects use the column alias as the key when present (e.g. `df.select(rs.lit(42).alias("map_col")).collect()` → `rows[0]["map_col"] == 42`). Regression test added. Fixes #364.
