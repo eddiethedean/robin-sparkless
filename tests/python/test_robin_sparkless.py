@@ -453,16 +453,14 @@ def test_filter_literal_bool_from_rows_schema() -> None:
 
 
 def test_filter_condition_type_error() -> None:
-    """filter(condition) raises TypeError for non-Column, non-bool (fixes #185)."""
+    """filter(condition) raises TypeError for non-Column, non-str, non-bool (fixes #185, #393)."""
     import robin_sparkless as rs
 
     spark = rs.SparkSession.builder().app_name("test").get_or_create()
     df = spark.createDataFrame([(1, 2, "a")], ["id", "v", "name"])
-    with pytest.raises(TypeError, match="condition must be a Column or literal bool"):
+    with pytest.raises(TypeError, match="condition must be a Column"):
         df.filter(1)  # type: ignore[arg-type]
-    with pytest.raises(TypeError, match="condition must be a Column or literal bool"):
-        df.filter("age > 10")  # type: ignore[arg-type]
-    with pytest.raises(TypeError, match="condition must be a Column or literal bool"):
+    with pytest.raises(TypeError, match="condition must be a Column"):
         df.filter(None)  # type: ignore[arg-type]
 
 
