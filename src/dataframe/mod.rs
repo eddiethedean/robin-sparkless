@@ -99,6 +99,23 @@ impl DataFrame {
                 if alias_output_names.contains(name_str) {
                     return Ok(e);
                 }
+                // Struct field dot notation (PySpark col("struct_col.field")).
+                if name_str.contains('.') {
+                    let parts: Vec<&str> = name_str.split('.').collect();
+                    let first = parts[0];
+                    let rest = &parts[1..];
+                    if rest.is_empty() {
+                        return Err(PolarsError::ColumnNotFound(
+                            format!("Column '{}': trailing dot not allowed", name_str).into(),
+                        ));
+                    }
+                    let resolved = df.resolve_column_name(first)?;
+                    let mut expr = col(PlSmallStr::from(resolved.as_str()));
+                    for field in rest {
+                        expr = expr.struct_().field_by_name(field);
+                    }
+                    return Ok(expr);
+                }
                 let resolved = df.resolve_column_name(name_str)?;
                 return Ok(Expr::Column(PlSmallStr::from(resolved.as_str())));
             }
