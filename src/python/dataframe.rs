@@ -404,11 +404,22 @@ impl PyDataFrame {
             if let Ok(py_col) = item.extract::<PyRef<PyColumn>>() {
                 exprs.push(py_col.inner.expr().clone());
             } else if let Ok(name) = item.extract::<std::string::String>() {
-                let resolved = self
-                    .inner
-                    .resolve_column_name(&name)
-                    .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-                exprs.push(col(resolved.as_str()));
+                if name == "*" {
+                    // Expand "*" to all columns (fixes #404).
+                    let all_names = self
+                        .inner
+                        .columns()
+                        .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+                    for c in all_names {
+                        exprs.push(col(c.as_str()));
+                    }
+                } else {
+                    let resolved = self
+                        .inner
+                        .resolve_column_name(&name)
+                        .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+                    exprs.push(col(resolved.as_str()));
+                }
             } else {
                 return Err(pyo3::exceptions::PyTypeError::new_err(
                     "select() items must be str (column name), Column (expression), or (Column, Column) from posexplode(...).alias(...)",
