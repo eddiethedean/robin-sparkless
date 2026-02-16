@@ -683,6 +683,11 @@ impl DataFrame {
         transformations::union(self, other, self.case_sensitive)
     }
 
+    /// Alias for union (PySpark unionAll).
+    pub fn union_all(&self, other: &DataFrame) -> Result<DataFrame, PolarsError> {
+        self.union(other)
+    }
+
     /// Union by name: stack vertically, aligning columns by name. When allow_missing_columns is true, columns missing in other are filled with null.
     pub fn union_by_name(
         &self,
