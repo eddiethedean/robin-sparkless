@@ -67,6 +67,8 @@ mod order;
 mod session;
 mod udf;
 pub(crate) use column::PyColumn;
+#[cfg(feature = "sql")]
+pub(crate) use column::PyExprStr;
 pub(crate) use dataframe::{
     PyCubeRollupData, PyDataFrame, PyDataFrameNa, PyDataFrameStat, PyDataFrameWriter,
     PyGroupedData, PyPivotedGroupedData,
@@ -404,6 +406,8 @@ fn robin_sparkless(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyDataFrameStat>()?;
     m.add_class::<PyDataFrameNa>()?;
     m.add_class::<PyColumn>()?;
+    #[cfg(feature = "sql")]
+    m.add_class::<PyExprStr>()?;
     m.add_class::<PyPosexplodeResult>()?;
     m.add_class::<PySortOrder>()?;
     m.add_class::<PyWindow>()?;
@@ -418,6 +422,8 @@ fn robin_sparkless(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyCubeRollupData>()?;
     m.add_class::<PyDataFrameWriter>()?;
     m.add("col", wrap_pyfunction!(py_col, m)?)?;
+    #[cfg(feature = "sql")]
+    m.add("expr", wrap_pyfunction!(py_expr, m)?)?;
     m.add("concat", wrap_pyfunction!(py_concat, m)?)?;
     m.add("concat_ws", wrap_pyfunction!(py_concat_ws, m)?)?;
     m.add("row_number", wrap_pyfunction!(py_row_number, m)?)?;
@@ -835,6 +841,15 @@ fn robin_sparkless(m: &Bound<'_, PyModule>) -> PyResult<()> {
 #[pyfunction]
 fn py_col(col: &str) -> PyColumn {
     PyColumn { inner: rs_col(col) }
+}
+
+/// SQL expression string for use in select()/withColumn(). PySpark expr(). Resolved at evaluation with DataFrame context.
+#[cfg(feature = "sql")]
+#[pyfunction]
+fn py_expr(expr_sql: &str) -> PyExprStr {
+    PyExprStr {
+        expr_sql: expr_sql.to_string(),
+    }
 }
 
 /// Call a registered UDF by name. PySpark: F.call_udf(udfName, *cols).

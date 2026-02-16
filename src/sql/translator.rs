@@ -12,6 +12,53 @@ use sqlparser::ast::{
     TableFactor, Value,
 };
 
+use super::parser;
+
+/// Parse a single SQL expression string and convert to Polars Expr using the given DataFrame for column resolution.
+/// Used by selectExpr/expr() for PySpark parity. Parses "SELECT expr FROM __t" and returns the first select item's Expr.
+pub fn expr_string_to_polars(
+    expr_str: &str,
+    session: &SparkSession,
+    df: &DataFrame,
+) -> Result<Expr, PolarsError> {
+    let query = format!("SELECT {} FROM __selectexpr_t", expr_str);
+    let stmt = parser::parse_sql(&query)?;
+    let query_ast = match &stmt {
+        Statement::Query(q) => q.as_ref(),
+        _ => {
+            return Err(PolarsError::InvalidOperation(
+                "expr_string_to_polars: expected SELECT statement".into(),
+            ));
+        }
+    };
+    let body = match query_ast.body.as_ref() {
+        SetExpr::Select(s) => s.as_ref(),
+        _ => {
+            return Err(PolarsError::InvalidOperation(
+                "expr_string_to_polars: expected SELECT".into(),
+            ));
+        }
+    };
+    let first = body.projection.first().ok_or_else(|| {
+        PolarsError::InvalidOperation("expr_string_to_polars: empty SELECT list".into())
+    })?;
+    set_thread_udf_session(session.clone());
+    let (sql_expr, alias) = match first {
+        SelectItem::UnnamedExpr(e) => ((*e).clone(), None),
+        SelectItem::ExprWithAlias { expr, alias: a } => ((*expr).clone(), Some(a.value.as_str())),
+        _ => {
+            return Err(PolarsError::InvalidOperation(
+                format!("expr_string_to_polars: unsupported select item {:?}", first).into(),
+            ));
+        }
+    };
+    let expr = sql_expr_to_polars(&sql_expr, session, Some(df))?;
+    Ok(match alias {
+        Some(a) => expr.alias(a),
+        None => expr,
+    })
+}
+
 /// Translate a parsed Statement (Query or DDL) into a DataFrame using the session catalog.
 /// CREATE SCHEMA / CREATE DATABASE return empty DataFrame. DROP TABLE / DROP VIEW remove from session catalog.
 pub fn translate(
