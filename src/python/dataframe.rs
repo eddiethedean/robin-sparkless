@@ -386,6 +386,19 @@ impl PyDataFrame {
         };
         let mut exprs: Vec<Expr> = Vec::with_capacity(items.len());
         for item in items.iter() {
+            // Tuple of two Columns: posexplode(...).alias("pos", "val") (fixes #411).
+            if let Ok(tup) = item.downcast::<PyTuple>() {
+                if tup.len() == 2 {
+                    if let (Ok(a), Ok(b)) = (
+                        tup.get_item(0)?.extract::<PyRef<PyColumn>>(),
+                        tup.get_item(1)?.extract::<PyRef<PyColumn>>(),
+                    ) {
+                        exprs.push(a.inner.expr().clone());
+                        exprs.push(b.inner.expr().clone());
+                        continue;
+                    }
+                }
+            }
             // Try Column before str: PySpark Column objects are often convertible to str (e.g. "(2 + x)"),
             // so we must treat as expression first to support select(col("a") * 2, lit(3) + col("x")).
             if let Ok(py_col) = item.extract::<PyRef<PyColumn>>() {
@@ -398,7 +411,7 @@ impl PyDataFrame {
                 exprs.push(col(resolved.as_str()));
             } else {
                 return Err(pyo3::exceptions::PyTypeError::new_err(
-                    "select() items must be str (column name) or Column (expression)",
+                    "select() items must be str (column name), Column (expression), or (Column, Column) from posexplode(...).alias(...)",
                 ));
             }
         }
