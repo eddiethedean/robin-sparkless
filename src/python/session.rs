@@ -64,6 +64,59 @@ fn row_like_get_value<'py>(
     row.get_item(name).or_else(|_| row.getattr(name))
 }
 
+/// Describe JsonValue kind for error messages (fixes #420).
+fn json_value_kind(v: &JsonValue) -> &'static str {
+    match v {
+        JsonValue::Null => "null",
+        JsonValue::Bool(_) => "bool",
+        JsonValue::Number(_) => "number",
+        JsonValue::String(_) => "string",
+        JsonValue::Array(_) => "array",
+        JsonValue::Object(_) => "object",
+    }
+}
+
+/// Return true if JsonValue is valid for schema type_str (e.g. "bigint", "string"). Null always allowed.
+fn json_value_matches_type(v: &JsonValue, type_str: &str) -> bool {
+    let t = type_str.to_lowercase();
+    match v {
+        JsonValue::Null => true,
+        JsonValue::Bool(_) => t == "boolean" || t == "bool",
+        JsonValue::Number(_) => matches!(
+            t.as_str(),
+            "bigint" | "int" | "integer" | "long" | "double" | "float" | "numeric" | "decimal"
+        ),
+        JsonValue::String(_) => {
+            t == "string"
+                || t == "str"
+                || t.starts_with("date")
+                || t.starts_with("timestamp")
+                || t.starts_with("decimal")
+        }
+        JsonValue::Array(_) => t == "list" || t.starts_with("array"),
+        JsonValue::Object(_) => t.starts_with("struct") || t == "map",
+    }
+}
+
+/// When verify_schema is true, validate every row cell against schema; raise with clear message on mismatch (#420).
+fn verify_schema_rows(rows: &[Vec<JsonValue>], schema: &[(String, String)]) -> PyResult<()> {
+    for (row_idx, row) in rows.iter().enumerate() {
+        for (col_idx, (name, type_str)) in schema.iter().enumerate() {
+            let v = row.get(col_idx).unwrap_or(&JsonValue::Null);
+            if !json_value_matches_type(v, type_str) {
+                return Err(pyo3::exceptions::PyTypeError::new_err(format!(
+                    "Row {}, column '{}': expected {}, got {}",
+                    row_idx,
+                    name,
+                    type_str,
+                    json_value_kind(v)
+                )));
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Result of parsing the schema argument to createDataFrame.
 /// - NoSchema: infer names from data and types from rows.
 /// - NamesOnly(Vec<String>): use these column names, infer types.
@@ -105,6 +158,21 @@ fn parse_schema_param(
     };
     if schema_any.is_none() {
         return Ok(ParsedSchema::NoSchema);
+    }
+    // Try list of (name, type_str) pairs first so schema=[("a","string"),("b","bigint")] is FullSchema, not NamesOnly (#420).
+    if let Ok(list) = schema_any.downcast::<pyo3::types::PyList>() {
+        let len = list.len();
+        let mut schema_vec: Vec<(String, String)> = Vec::with_capacity(len);
+        for item in list.iter() {
+            if let Ok((name, dtype_str)) = item.extract::<(String, String)>() {
+                schema_vec.push((name, dtype_str.to_lowercase()));
+            } else {
+                break;
+            }
+        }
+        if schema_vec.len() == len && !schema_vec.is_empty() {
+            return Ok(ParsedSchema::FullSchema(schema_vec));
+        }
     }
     if let Ok(names) = schema_any.extract::<Vec<String>>() {
         return Ok(ParsedSchema::NamesOnly(names));
@@ -510,6 +578,10 @@ impl PySparkSession {
             ParsedSchema::FullSchema(s) => s.clone(),
             _ => SparkSession::infer_schema_from_json_rows(&rows, &names_ordered),
         };
+
+        if verify_schema && !schema_vec.is_empty() {
+            verify_schema_rows(&rows, &schema_vec)?;
+        }
 
         let df = self
             .inner
