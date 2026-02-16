@@ -628,6 +628,14 @@ impl PyDataFrame {
         }
     }
 
+    /// Return a DataFrame with the given alias (PySpark: df.alias("t")).
+    /// Used for subquery/join naming.
+    fn alias(&self, name: &str) -> PyDataFrame {
+        PyDataFrame {
+            inner: self.inner.alias(name),
+        }
+    }
+
     /// Register this DataFrame as a temp view (PySpark: df.createOrReplaceTempView(name)).
     /// Uses the default session from SparkSession.builder().get_or_create().
     #[cfg(feature = "sql")]
@@ -1892,6 +1900,7 @@ impl PyGroupedData {
                 &DataFrame {
                     df: std::sync::Arc::new(self.inner.df.clone()),
                     case_sensitive: self.inner.case_sensitive,
+                    alias: None,
                 },
                 &self.inner.grouping_cols,
                 &grouped_specs,

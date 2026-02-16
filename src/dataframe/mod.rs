@@ -35,6 +35,8 @@ pub struct DataFrame {
     pub(crate) df: Arc<PlDataFrame>,
     /// When false (default), column names are matched case-insensitively (PySpark behavior).
     pub(crate) case_sensitive: bool,
+    /// Optional alias for subquery/join (PySpark: df.alias("t")).
+    pub(crate) alias: Option<String>,
 }
 
 impl DataFrame {
@@ -43,6 +45,7 @@ impl DataFrame {
         DataFrame {
             df: Arc::new(df),
             case_sensitive: DEFAULT_CASE_SENSITIVE,
+            alias: None,
         }
     }
 
@@ -52,6 +55,7 @@ impl DataFrame {
         DataFrame {
             df: Arc::new(df),
             case_sensitive,
+            alias: None,
         }
     }
 
@@ -60,6 +64,17 @@ impl DataFrame {
         DataFrame {
             df: Arc::new(PlDataFrame::empty()),
             case_sensitive: DEFAULT_CASE_SENSITIVE,
+            alias: None,
+        }
+    }
+
+    /// Return a DataFrame with the given alias (PySpark: df.alias("t")).
+    /// Used for subquery/join naming; the alias is stored for future use in SQL or qualified column resolution.
+    pub fn alias(&self, name: &str) -> Self {
+        DataFrame {
+            df: self.df.clone(),
+            case_sensitive: self.case_sensitive,
+            alias: Some(name.to_string()),
         }
     }
 
@@ -1548,6 +1563,7 @@ impl Clone for DataFrame {
         DataFrame {
             df: self.df.clone(),
             case_sensitive: self.case_sensitive,
+            alias: self.alias.clone(),
         }
     }
 }
