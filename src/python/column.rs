@@ -1087,6 +1087,14 @@ impl PyColumn {
         }
     }
 
+    /// Add or replace a struct field (PySpark Column.withField).
+    #[pyo3(name = "withField")]
+    fn with_field(&self, name: &str, value: &PyColumn) -> Self {
+        PyColumn {
+            inner: self.inner.with_field(name, &value.inner),
+        }
+    }
+
     /// Column is not iterable (PySpark parity). Prevents "for x in col" from using __getitem__.
     fn __iter__(slf: PyRef<'_, Self>) -> PyResult<PyObject> {
         Err(pyo3::exceptions::PyTypeError::new_err(
