@@ -962,6 +962,39 @@ impl PyDataFrame {
         Ok(PyDataFrame { inner: df })
     }
 
+    /// Set intersection: rows that appear in both this and other (by all columns). PySpark intersect.
+    ///
+    /// Args:
+    ///     other: DataFrame or DataFrame-like (has ``.inner`` or ``._df``).
+    ///
+    /// Returns:
+    ///     DataFrame with distinct rows that appear in both.
+    fn intersect(&self, other: &Bound<'_, PyAny>) -> PyResult<PyDataFrame> {
+        let other_df = py_any_to_dataframe(other)?;
+        let df = self
+            .inner
+            .intersect(&other_df)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        Ok(PyDataFrame { inner: df })
+    }
+
+    /// Set difference keeping duplicates: rows in this DataFrame minus matching rows in other. PySpark exceptAll.
+    ///
+    /// Args:
+    ///     other: DataFrame or DataFrame-like (has ``.inner`` or ``._df``).
+    ///
+    /// Returns:
+    ///     DataFrame (duplicates preserved per PySpark exceptAll semantics).
+    #[pyo3(name = "exceptAll")]
+    fn except_all(&self, other: &Bound<'_, PyAny>) -> PyResult<PyDataFrame> {
+        let other_df = py_any_to_dataframe(other)?;
+        let df = self
+            .inner
+            .except_all(&other_df)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        Ok(PyDataFrame { inner: df })
+    }
+
     /// Return rows with duplicates removed. Optionally consider only a subset of columns for uniqueness.
     ///
     /// Args:
