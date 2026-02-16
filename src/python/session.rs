@@ -898,8 +898,26 @@ impl PyCatalog {
     }
 
     #[pyo3(name = "listDatabases")]
+    #[pyo3(signature = (_pattern=None))]
     fn list_databases(&self, _pattern: Option<&str>) -> Vec<String> {
         self.session.list_database_names()
+    }
+
+    /// Create a database/schema by name (PySpark: catalog.createDatabase).
+    /// Session-scoped; the name is included in listDatabases() and databaseExists(name) returns true.
+    #[pyo3(name = "createDatabase")]
+    #[pyo3(signature = (name, if_not_exists=false))]
+    fn create_database(&self, name: &str, if_not_exists: bool) -> PyResult<()> {
+        if if_not_exists && self.session.database_exists(name) {
+            return Ok(());
+        }
+        if !if_not_exists && self.session.database_exists(name) {
+            return Err(pyo3::exceptions::PyRuntimeError::new_err(format!(
+                "Database '{name}' already exists"
+            )));
+        }
+        self.session.register_database(name);
+        Ok(())
     }
 
     #[pyo3(name = "listCatalogs")]
@@ -1102,6 +1120,19 @@ impl PySparkSessionBuilder {
     /// Returns:
     ///     Self for chaining.
     fn config<'a>(mut slf: PyRefMut<'a, Self>, key: &str, value: &str) -> PyRefMut<'a, Self> {
+        slf.config.insert(key.to_string(), value.to_string());
+        slf
+    }
+
+    /// Set an option (PySpark: builder.option(key, value)). Alias for config for API compatibility.
+    ///
+    /// Args:
+    ///     key: Option key.
+    ///     value: Option value.
+    ///
+    /// Returns:
+    ///     Self for chaining.
+    fn option<'a>(mut slf: PyRefMut<'a, Self>, key: &str, value: &str) -> PyRefMut<'a, Self> {
         slf.config.insert(key.to_string(), value.to_string());
         slf
     }
