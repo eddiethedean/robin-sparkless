@@ -774,9 +774,10 @@ impl PySparkSession {
     ///
     /// Chain ``.option(key, value)``, ``.format("parquet"|"csv"|"json")``,
     /// then ``.csv(path)``, ``.parquet(path)``, ``.json(path)``, or ``.load(path)``.
-    fn read(slf: PyRef<'_, Self>) -> PyDataFrameReader {
+    #[getter]
+    fn read(&self) -> PyDataFrameReader {
         PyDataFrameReader {
-            session: slf.inner.clone(),
+            session: self.inner.clone(),
             options: RwLock::new(HashMap::new()),
             format: RwLock::new(None),
         }
@@ -942,6 +943,7 @@ impl PySparkSession {
     }
 
     /// Return the Catalog for table/view operations (PySpark: spark.catalog).
+    #[getter]
     fn catalog(&self) -> PyCatalog {
         PyCatalog {
             session: self.inner.clone(),
