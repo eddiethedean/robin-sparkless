@@ -814,6 +814,15 @@ impl Column {
         )
     }
 
+    /// Replace multiple (search, replacement) pairs in order (PySpark replace with dict/list).
+    pub fn replace_many(&self, pairs: &[(String, String)]) -> Column {
+        let mut out = self.clone();
+        for (search, replacement) in pairs {
+            out = out.replace(search, replacement);
+        }
+        out
+    }
+
     /// True if string starts with prefix (PySpark startswith).
     pub fn startswith(&self, prefix: &str) -> Column {
         use polars::prelude::*;

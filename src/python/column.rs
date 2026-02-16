@@ -965,10 +965,59 @@ impl PyColumn {
             inner: initcap(&self.inner),
         }
     }
-    fn replace(&self, search: &str, replacement: &str) -> Self {
-        PyColumn {
-            inner: rs_replace(&self.inner, search, replacement),
+    /// Replace literal search with replacement, or apply dict/list of replacements (PySpark replace).
+    #[pyo3(signature = (to_replace, replacement=None))]
+    fn replace(
+        &self,
+        to_replace: &Bound<'_, pyo3::types::PyAny>,
+        replacement: Option<&Bound<'_, pyo3::types::PyAny>>,
+    ) -> PyResult<Self> {
+        if let Some(rep) = replacement {
+            let search: String = to_replace.extract()?;
+            let repl: String = rep.extract()?;
+            return Ok(PyColumn {
+                inner: rs_replace(&self.inner, &search, &repl),
+            });
         }
+        // to_replace is dict or list of (old, new) pairs
+        let pairs: Vec<(String, String)> = if let Ok(d) =
+            to_replace.downcast::<pyo3::types::PyDict>()
+        {
+            d.iter()
+                .map(|(k, v)| Ok((k.extract::<String>()?, v.extract::<String>()?)))
+                .collect::<PyResult<Vec<_>>>()?
+        } else if let Ok(lst) = to_replace.downcast::<pyo3::types::PyList>() {
+            let mut out = Vec::with_capacity(lst.len());
+            for item in lst.iter() {
+                let tup = item.downcast::<pyo3::types::PyTuple>().map_err(|_| {
+                    pyo3::exceptions::PyTypeError::new_err(
+                        "replace: list must contain (old, new) tuples",
+                    )
+                })?;
+                if tup.len() != 2 {
+                    return Err(pyo3::exceptions::PyTypeError::new_err(
+                        "replace: each tuple must be (old, new)",
+                    ));
+                }
+                out.push((
+                    tup.get_item(0)?.extract::<String>()?,
+                    tup.get_item(1)?.extract::<String>()?,
+                ));
+            }
+            out
+        } else {
+            return Err(pyo3::exceptions::PyTypeError::new_err(
+                "replace: when replacement is None, to_replace must be a dict or list of (old, new) tuples",
+            ));
+        };
+        if pairs.is_empty() {
+            return Ok(PyColumn {
+                inner: self.inner.clone(),
+            });
+        }
+        Ok(PyColumn {
+            inner: self.inner.replace_many(&pairs),
+        })
     }
     fn startswith(&self, prefix: &str) -> Self {
         PyColumn {
