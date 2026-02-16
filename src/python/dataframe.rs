@@ -11,6 +11,8 @@ use polars::prelude::{col, lit, Expr, NULL};
 use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyDict, PyList, PyTuple};
 use std::path::Path;
+#[cfg(feature = "sql")]
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::RwLock;
 
 use crate::python::py_to_json_value;
@@ -19,6 +21,9 @@ use serde_json::Value as JsonValue;
 use super::column::PyColumn;
 use super::order::PySortOrder;
 use super::session::get_default_session;
+
+#[cfg(feature = "sql")]
+static FILTER_VIEW_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
 /// Normalize cube/rollup *cols: one list -> use it; else each arg as column name.
 fn normalize_cube_rollup_cols(cols: &Bound<'_, PyTuple>) -> PyResult<Vec<String>> {
@@ -375,34 +380,64 @@ impl PyDataFrame {
     /// Return a DataFrame with only rows where the condition is true.
     ///
     /// Args:
-    ///     condition: Boolean Column expression (e.g. ``col("age") > 18``), or literal
+    ///     condition: Boolean Column expression (e.g. ``col("age") > 18``), SQL expression string
+    ///         (e.g. ``"age > 18"``; requires sql feature and active session), or literal
     ///         ``True`` (no filter) / ``False`` (filter to zero rows) for PySpark parity.
     ///
     /// Returns:
     ///     DataFrame (lazy) with filtered rows.
     ///
     /// Raises:
-    ///     TypeError: If condition is not a Column or literal bool (True/False).
-    ///     RuntimeError: If the expression cannot be applied.
+    ///     TypeError: If condition is not a Column, str, or literal bool (True/False).
+    ///     RuntimeError: If the expression cannot be applied, or (for str) no active session / sql feature disabled.
     fn filter(&self, condition: &pyo3::Bound<'_, pyo3::types::PyAny>) -> PyResult<PyDataFrame> {
-        let expr: Expr = if let Ok(py_col) = condition.downcast::<PyColumn>() {
-            py_col.borrow().inner.expr().clone()
+        let expr: Option<Expr> = if let Ok(py_col) = condition.downcast::<PyColumn>() {
+            Some(py_col.borrow().inner.expr().clone())
         } else if let Ok(b) = condition.extract::<bool>() {
-            if b {
-                lit(true)
-            } else {
-                lit(false)
+            Some(if b { lit(true) } else { lit(false) })
+        } else if let Ok(s) = condition.extract::<String>() {
+            #[cfg(feature = "sql")]
+            {
+                let session = get_default_session().ok_or_else(|| {
+                    pyo3::exceptions::PyRuntimeError::new_err(
+                        "filter with SQL string requires an active SparkSession (e.g. builder().get_or_create())",
+                    )
+                })?;
+                let n = FILTER_VIEW_COUNTER.fetch_add(1, Ordering::SeqCst);
+                let view_name = format!("__robin_filter_{}", n);
+                session.create_or_replace_temp_view(&view_name, self.inner.clone());
+                let query = format!("SELECT * FROM {} WHERE {}", view_name, s);
+                let result = session.sql(&query);
+                session.drop_temp_view(&view_name);
+                let df =
+                    result.map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+                return Ok(PyDataFrame { inner: df });
+            }
+            #[cfg(not(feature = "sql"))]
+            {
+                return Err(pyo3::exceptions::PyRuntimeError::new_err(
+                    "filter with SQL expression string requires the 'sql' feature (pip install robin-sparkless[sql] or build with --features sql)",
+                ));
             }
         } else {
-            return Err(pyo3::exceptions::PyTypeError::new_err(
-                "condition must be a Column or literal bool (True/False)",
-            ));
+            None
         };
+        let expr = expr.ok_or_else(|| {
+            pyo3::exceptions::PyTypeError::new_err(
+                "condition must be a Column, SQL expression str (e.g. \"age > 18\"), or literal bool (True/False)",
+            )
+        })?;
         let df = self
             .inner
             .filter(expr)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        return Ok(PyDataFrame { inner: df });
+        Ok(PyDataFrame { inner: df })
+    }
+
+    /// Alias for ``filter()``. PySpark where.
+    #[pyo3(name = "where")]
+    fn where_(&self, condition: &pyo3::Bound<'_, pyo3::types::PyAny>) -> PyResult<PyDataFrame> {
+        self.filter(condition)
     }
 
     /// Return a DataFrame with the specified columns or expressions.
