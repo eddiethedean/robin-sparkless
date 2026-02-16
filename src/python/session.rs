@@ -1309,6 +1309,14 @@ impl PyRuntimeConfig {
     fn is_modifiable(&self, _key: &str) -> bool {
         false
     }
+
+    /// Whether SQL/column resolution is case-sensitive (PySpark: spark.conf.get(\"spark.sql.caseSensitive\")). Fixes #414.
+    fn is_case_sensitive(&self) -> bool {
+        self.config
+            .get("spark.sql.caseSensitive")
+            .map(|v| v.eq_ignore_ascii_case("true"))
+            .unwrap_or(false)
+    }
 }
 
 /// Python wrapper for SparkSessionBuilder.
