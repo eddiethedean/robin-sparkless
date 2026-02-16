@@ -38,6 +38,26 @@ enum ParsedSchema {
     FullSchema(Vec<(String, String)>),
 }
 
+/// True if the object is a pandas.DataFrame (PySpark parity: createDataFrame accepts pandas).
+fn is_pandas_dataframe(obj: &Bound<'_, pyo3::types::PyAny>) -> bool {
+    let Ok(class) = obj.getattr("__class__") else {
+        return false;
+    };
+    let Ok(module) = class
+        .getattr("__module__")
+        .and_then(|m| m.extract::<String>())
+    else {
+        return false;
+    };
+    let Ok(name) = class
+        .getattr("__name__")
+        .and_then(|n| n.extract::<String>())
+    else {
+        return false;
+    };
+    module == "pandas.core.frame" && name == "DataFrame"
+}
+
 /// Parse schema argument (None, list of str, or StructType-like) for createDataFrame.
 fn parse_schema_param(
     _py: Python<'_>,
@@ -204,9 +224,14 @@ impl PySparkSession {
         #[allow(unused_variables)] sampling_ratio: Option<f64>,
         #[allow(unused_variables)] verify_schema: bool,
     ) -> PyResult<PyDataFrame> {
-        let data_list: Vec<Bound<'_, pyo3::types::PyAny>> = data
-            .extract()
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        let data_list: Vec<Bound<'_, pyo3::types::PyAny>> = if is_pandas_dataframe(data) {
+            data.call_method1("to_dict", ("records",))
+                .and_then(|r| r.extract())
+                .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?
+        } else {
+            data.extract()
+                .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?
+        };
 
         let parsed = parse_schema_param(py, schema, &[])?;
 
