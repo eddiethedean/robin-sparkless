@@ -1825,6 +1825,28 @@ impl PyDataFrame {
         Ok(PyDataFrame { inner: df })
     }
 
+    /// Unpivot (melt): wide to long. Keeps id columns; value columns become rows with "variable" and "value" columns. PySpark melt.
+    fn melt(&self, id_vars: Vec<String>, value_vars: Vec<String>) -> PyResult<PyDataFrame> {
+        let id_refs: Vec<&str> = id_vars.iter().map(|s| s.as_str()).collect();
+        let value_refs: Vec<&str> = value_vars.iter().map(|s| s.as_str()).collect();
+        let df = self
+            .inner
+            .melt(&id_refs, &value_refs)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        Ok(PyDataFrame { inner: df })
+    }
+
+    /// Unpivot (wide to long). Same as melt(ids, values). PySpark unpivot.
+    fn unpivot(&self, ids: Vec<String>, values: Vec<String>) -> PyResult<PyDataFrame> {
+        let id_refs: Vec<&str> = ids.iter().map(|s| s.as_str()).collect();
+        let value_refs: Vec<&str> = values.iter().map(|s| s.as_str()).collect();
+        let df = self
+            .inner
+            .unpivot(&id_refs, &value_refs)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        Ok(PyDataFrame { inner: df })
+    }
+
     /// Correlation matrix or scalar. PySpark: corr() -> matrix, corr(col1, col2) -> float.
     #[pyo3(signature = (col1=None, col2=None))]
     fn corr(&self, col1: Option<&str>, col2: Option<&str>, py: Python<'_>) -> PyResult<PyObject> {
