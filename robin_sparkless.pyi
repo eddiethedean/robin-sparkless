@@ -388,12 +388,20 @@ class WhenThen:
     def otherwise(self, value: Column) -> Column: ...
 
 class WhenBuilder:
-    """Result of when(condition). Chain .then(value).otherwise(default)."""
+    """Result of when(condition). Chain .then(value).otherwise(default) or .then(value).when(cond).then(val)…"""
 
     def then(self, value: Column) -> ThenBuilder: ...
 
 class ThenBuilder:
+    """Result of when(cond).then(val). Chain .when(cond).then(val) for more branches or .otherwise(default)."""
+
+    def when(self, condition: Column) -> ChainedWhenBuilder: ...
     def otherwise(self, value: Column) -> Column: ...
+
+class ChainedWhenBuilder:
+    """Result of ThenBuilder.when(condition). Call .then(value) to add the branch (returns ThenBuilder)."""
+
+    def then(self, value: Column) -> ThenBuilder: ...
 
 class GroupedData:
     def count(self) -> DataFrame: ...

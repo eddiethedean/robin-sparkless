@@ -610,28 +610,57 @@ impl WhenBuilder {
 
 /// Builder for chaining when-then clauses before finalizing with otherwise
 pub struct ThenBuilder {
-    when_then: polars::prelude::Then, // The Polars WhenThen state
+    state: WhenThenState,
+}
+
+enum WhenThenState {
+    Single(Box<polars::prelude::Then>),
+    Chained(Box<polars::prelude::ChainedThen>),
+}
+
+/// Builder for an additional when-then clause (returned by ThenBuilder::when).
+pub struct ChainedWhenBuilder {
+    inner: polars::prelude::ChainedWhen,
 }
 
 impl ThenBuilder {
     fn new(when_then: polars::prelude::Then) -> Self {
-        ThenBuilder { when_then }
+        ThenBuilder {
+            state: WhenThenState::Single(Box::new(when_then)),
+        }
     }
 
-    /// Chain an additional when-then clause
-    /// Note: Chaining multiple when-then clauses is not yet fully supported.
-    /// For now, use a single when().then().otherwise() pattern.
-    /// Chaining multiple when-then (e.g. when(a).when(b).then(...)) is not yet supported.
-    /// Use a single when(cond).then(val).otherwise(fallback), or nest when/then in otherwise.
-    /// See docs/PYSPARK_DIFFERENCES.md for limitations.
-    pub fn when(self, _condition: &Column) -> ThenBuilder {
-        self
+    fn new_chained(chained: polars::prelude::ChainedThen) -> Self {
+        ThenBuilder {
+            state: WhenThenState::Chained(Box::new(chained)),
+        }
+    }
+
+    /// Chain an additional when-then clause (PySpark: when(a).then(x).when(b).then(y).otherwise(z)).
+    pub fn when(self, condition: &Column) -> ChainedWhenBuilder {
+        let chained_when = match self.state {
+            WhenThenState::Single(t) => t.when(condition.expr().clone()),
+            WhenThenState::Chained(ct) => ct.when(condition.expr().clone()),
+        };
+        ChainedWhenBuilder {
+            inner: chained_when,
+        }
     }
 
     /// Finalize the expression with the fallback value
     pub fn otherwise(self, value: &Column) -> Column {
-        let expr = self.when_then.otherwise(value.expr().clone());
+        let expr = match self.state {
+            WhenThenState::Single(t) => t.otherwise(value.expr().clone()),
+            WhenThenState::Chained(ct) => ct.otherwise(value.expr().clone()),
+        };
         crate::column::Column::from_expr(expr, None)
+    }
+}
+
+impl ChainedWhenBuilder {
+    /// Set the value for the current when clause.
+    pub fn then(self, value: &Column) -> ThenBuilder {
+        ThenBuilder::new_chained(self.inner.then(value.expr().clone()))
     }
 }
 
