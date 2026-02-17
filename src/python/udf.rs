@@ -29,7 +29,7 @@ pub(crate) fn execute_python_udf(
     let return_type = entry.return_type.clone();
 
     // Evaluate arg expressions in df context
-    let lf = df.df.as_ref().clone().lazy();
+    let lf = df.lazy_frame();
     let mut arg_exprs = Vec::with_capacity(args.len());
     for (i, arg) in args.iter().enumerate() {
         arg_exprs.push(arg.expr().clone().alias(format!("_udf_arg_{i}")));
@@ -242,10 +242,7 @@ pub(crate) fn execute_grouped_vectorized_aggs(
     if specs.is_empty() {
         // No UDF aggs: just return distinct groups.
         let lf = df
-            .df
-            .as_ref()
-            .clone()
-            .lazy()
+            .lazy_frame()
             .group_by(
                 grouping_cols
                     .iter()
@@ -269,10 +266,7 @@ pub(crate) fn execute_grouped_vectorized_aggs(
     }
 
     let lf = df
-        .df
-        .as_ref()
-        .clone()
-        .lazy()
+        .lazy_frame()
         .group_by(
             grouping_cols
                 .iter()

@@ -2366,11 +2366,10 @@ impl PyGroupedData {
                 )
             })?;
             let df = execute_grouped_vectorized_aggs(
-                &DataFrame {
-                    df: std::sync::Arc::new(self.inner.df.clone()),
-                    case_sensitive: self.inner.case_sensitive,
-                    alias: None,
-                },
+                &DataFrame::from_lazy_with_options(
+                    self.inner.lf.clone(),
+                    self.inner.case_sensitive,
+                ),
                 &self.inner.grouping_cols,
                 &grouped_specs,
                 self.inner.case_sensitive,

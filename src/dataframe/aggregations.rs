@@ -2,8 +2,8 @@
 
 use super::DataFrame;
 use polars::prelude::{
-    col, len, lit, when, DataFrame as PlDataFrame, DataType, Expr, LazyGroupBy, NamedFrom,
-    PolarsError, Series,
+    col, len, lit, when, DataFrame as PlDataFrame, DataType, Expr, LazyFrame, LazyGroupBy,
+    NamedFrom, PolarsError, Series,
 };
 use std::collections::HashMap;
 
@@ -35,13 +35,9 @@ pub(crate) fn disambiguate_agg_output_names(aggregations: Vec<Expr>) -> Vec<Expr
 }
 
 /// GroupedData - represents a DataFrame grouped by certain columns.
-/// Similar to PySpark's GroupedData
+/// Similar to PySpark's GroupedData. Holds LazyGroupBy for lazy agg.
 pub struct GroupedData {
-    // Underlying Polars DataFrame (before grouping). Used by some Python-only paths
-    // (e.g. grouped vectorized UDF execution). When the `pyo3` feature is not
-    // enabled this field is effectively unused, so we allow dead_code there.
-    #[cfg_attr(not(feature = "pyo3"), allow(dead_code))]
-    pub(crate) df: PlDataFrame,
+    pub(crate) lf: LazyFrame,
     pub(crate) lazy_grouped: LazyGroupBy,
     pub(crate) grouping_cols: Vec<String>,
     pub(crate) case_sensitive: bool,
@@ -583,7 +579,7 @@ impl GroupedData {
     /// Returns PivotedGroupedData; call .sum(column), .avg(column), etc. to run the aggregation.
     pub fn pivot(&self, pivot_col: &str, values: Option<Vec<String>>) -> PivotedGroupedData {
         PivotedGroupedData {
-            df: self.df.clone(),
+            lf: self.lf.clone(),
             grouping_cols: self.grouping_cols.clone(),
             pivot_col: pivot_col.to_string(),
             values,
@@ -594,7 +590,7 @@ impl GroupedData {
 
 /// Result of GroupedData.pivot(pivot_col); has .sum(), .avg(), etc. (PySpark pivot table).
 pub struct PivotedGroupedData {
-    pub(crate) df: PlDataFrame,
+    pub(crate) lf: LazyFrame,
     pub(crate) grouping_cols: Vec<String>,
     pub(crate) pivot_col: String,
     pub(crate) values: Option<Vec<String>>,
@@ -611,12 +607,17 @@ fn pivot_value_to_column_name(av: polars::prelude::AnyValue<'_>) -> String {
     }
 }
 
-fn pivot_values_from_df(pl_df: &PlDataFrame, pivot_col: &str) -> Result<Vec<String>, PolarsError> {
+fn pivot_values_from_lf(lf: &LazyFrame, pivot_col: &str) -> Result<Vec<String>, PolarsError> {
+    use polars::prelude::*;
+    let pl_df = lf
+        .clone()
+        .select([col(pivot_col)])
+        .unique(None, Default::default())
+        .collect()?;
     let s = pl_df.column(pivot_col)?;
-    let uniq = s.unique()?;
-    let mut out = Vec::with_capacity(uniq.len());
-    for i in 0..uniq.len() {
-        let av = uniq.get(i)?;
+    let mut out = Vec::with_capacity(s.len());
+    for i in 0..s.len() {
+        let av = s.get(i)?;
         out.push(pivot_value_to_column_name(av));
     }
     // PySpark parity: deterministic column order when values not provided (lexicographic)
@@ -629,7 +630,7 @@ impl PivotedGroupedData {
         if let Some(ref v) = self.values {
             return Ok(v.clone());
         }
-        pivot_values_from_df(&self.df, &self.pivot_col)
+        pivot_values_from_lf(&self.lf, &self.pivot_col)
     }
 
     fn pivot_agg(
@@ -641,7 +642,7 @@ impl PivotedGroupedData {
         let pivot_vals = self.pivot_values()?;
         if pivot_vals.is_empty() {
             let by: Vec<&str> = self.grouping_cols.iter().map(|s| s.as_str()).collect();
-            let lf = self.df.clone().lazy().group_by(by).agg(vec![]);
+            let lf = self.lf.clone().group_by(by).agg(vec![]);
             let pl_df = lf.collect()?;
             return Ok(super::DataFrame::from_polars_with_options(
                 pl_df,
@@ -677,7 +678,7 @@ impl PivotedGroupedData {
             agg_exprs.push(agg_expr);
         }
         let by: Vec<&str> = self.grouping_cols.iter().map(|s| s.as_str()).collect();
-        let lf = self.df.clone().lazy().group_by(by).agg(agg_exprs);
+        let lf = self.lf.clone().group_by(by).agg(agg_exprs);
         let mut pl_df = lf.collect()?;
         pl_df = reorder_groupby_columns(&mut pl_df, &self.grouping_cols)?;
         Ok(super::DataFrame::from_polars_with_options(
@@ -712,7 +713,7 @@ impl PivotedGroupedData {
         let pivot_vals = self.pivot_values()?;
         if pivot_vals.is_empty() {
             let by: Vec<&str> = self.grouping_cols.iter().map(|s| s.as_str()).collect();
-            let lf = self.df.clone().lazy().group_by(by).agg(vec![]);
+            let lf = self.lf.clone().group_by(by).agg(vec![]);
             let pl_df = lf.collect()?;
             return Ok(super::DataFrame::from_polars_with_options(
                 pl_df,
@@ -745,7 +746,7 @@ impl PivotedGroupedData {
             agg_exprs.push(agg_expr);
         }
         let by: Vec<&str> = self.grouping_cols.iter().map(|s| s.as_str()).collect();
-        let lf = self.df.clone().lazy().group_by(by).agg(agg_exprs);
+        let lf = self.lf.clone().group_by(by).agg(agg_exprs);
         let mut pl_df = lf.collect()?;
         pl_df = reorder_groupby_columns(&mut pl_df, &self.grouping_cols)?;
         Ok(super::DataFrame::from_polars_with_options(
@@ -757,7 +758,7 @@ impl PivotedGroupedData {
 
 /// Cube/rollup: multiple grouping sets then union (PySpark cube / rollup).
 pub struct CubeRollupData {
-    pub(super) df: PlDataFrame,
+    pub(super) lf: LazyFrame,
     pub(super) grouping_cols: Vec<String>,
     pub(super) case_sensitive: bool,
     pub(super) is_cube: bool,
@@ -795,12 +796,12 @@ impl CubeRollupData {
                 .collect()
         };
 
-        let schema = self.df.schema();
+        let schema = self.lf.clone().collect_schema()?;
         let mut parts: Vec<PlDataFrame> = Vec::with_capacity(subsets.len());
         for subset in subsets {
             if subset.is_empty() {
                 // Single row: no grouping keys, one row of aggregates over full table
-                let lf = self.df.clone().lazy().select(&aggregations);
+                let lf = self.lf.clone().select(&aggregations);
                 let mut part = lf.collect()?;
                 let n = part.height();
                 for gc in &self.grouping_cols {
@@ -819,9 +820,8 @@ impl CubeRollupData {
                 parts.push(part);
             } else {
                 let grouped = self
-                    .df
+                    .lf
                     .clone()
-                    .lazy()
                     .group_by(subset.iter().map(|s| col(s.as_str())).collect::<Vec<_>>());
                 let mut part = grouped.agg(aggregations.clone()).collect()?;
                 part = reorder_groupby_columns(&mut part, &subset)?;
