@@ -418,7 +418,11 @@ fn parse_aggs(aggs: &[Value], df: &DataFrame) -> Result<Vec<polars::prelude::Exp
             "max" => max(&c),
             _ => return Err(PlanError::InvalidPlan(format!("unsupported agg: {agg}"))),
         };
-        out.push(col_expr.into_expr());
+        let mut expr = col_expr.into_expr();
+        if let Some(alias) = obj.get("alias").and_then(Value::as_str) {
+            expr = expr.alias(alias);
+        }
+        out.push(expr);
     }
     Ok(out)
 }

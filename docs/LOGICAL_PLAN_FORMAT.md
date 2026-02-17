@@ -63,10 +63,11 @@ Example: `{"op": "withColumn", "payload": {"name": "upper_name", "expr": {"fn": 
 Each entry in `aggs` is one aggregation:
 
 ```json
-{ "agg": "sum"|"count"|"avg"|"min"|"max", "column": "<col>" }
+{ "agg": "sum"|"count"|"avg"|"min"|"max", "column": "<col>", "alias": "<output_col>" }
 ```
 
 - For `"count"`, `column` may be omitted or a column name.
+- Optional `alias`: output column name (e.g. `"sum(v)"`, `"count(v)"` for PySpark-style names).
 
 Grouped Python UDF aggregations (pandas_udf-style GROUPED_AGG) use a dedicated shape:
 
