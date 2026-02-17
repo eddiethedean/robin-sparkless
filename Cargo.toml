@@ -3,7 +3,7 @@ members = []
 
 [package]
 name = "robin-sparkless"
-version = "0.10.0"
+version = "0.11.0"
 edition = "2021"
 description = "PySpark-like DataFrame API in Rust on Polars; no JVM."
 readme = "README.md"
@@ -20,7 +20,7 @@ crate-type = ["rlib"]
 
 [features]
 default = []
-pyo3 = ["dep:pyo3"]
+pyo3 = ["dep:pyo3", "dep:spark-ddl-parser"]
 sql = ["dep:sqlparser"]
 delta = ["dep:deltalake", "dep:tokio"]
 
@@ -34,6 +34,7 @@ serde_json = "1.0"
 anyhow = "1.0"
 thiserror = "1.0"
 pyo3 = { version = "0.24", optional = true, features = ["abi3-py38", "extension-module"] }
+spark-ddl-parser = { version = "0.1", optional = true }
 sqlparser = { version = "0.45", optional = true }
 deltalake = { version = "0.30", optional = true }
 tokio = { version = "1", optional = true, features = ["rt", "rt-multi-thread", "fs", "io-util"] }

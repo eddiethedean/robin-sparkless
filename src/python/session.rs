@@ -220,32 +220,6 @@ fn ndarray_to_list_of_rows<'py>(
     }
 }
 
-/// Split a DDL string on top-level commas only (fixes #418). Commas inside <...> or (...) do not split.
-fn split_ddl_top_level(ddl: &str) -> Vec<String> {
-    let mut depth = 0i32;
-    let mut start = 0;
-    let mut result = Vec::new();
-    let bytes = ddl.as_bytes();
-    for (i, &b) in bytes.iter().enumerate() {
-        match b {
-            b'<' | b'(' => depth += 1,
-            b'>' | b')' => depth -= 1,
-            b',' if depth == 0 => {
-                result.push(ddl[start..i].trim().to_string());
-                start = i + 1;
-            }
-            _ => {}
-        }
-    }
-    if start <= bytes.len() {
-        let s = ddl[start..].trim();
-        if !s.is_empty() {
-            result.push(s.to_string());
-        }
-    }
-    result
-}
-
 /// Parse schema argument (None, list of str, or StructType-like) for createDataFrame.
 fn parse_schema_param(
     _py: Python<'_>,
@@ -276,45 +250,37 @@ fn parse_schema_param(
     if let Ok(names) = schema_any.extract::<Vec<String>>() {
         return Ok(ParsedSchema::NamesOnly(names));
     }
-    // PySpark DDL string: "name: string, age: int" or "name string, age int"
+    // PySpark DDL string: "name: string, age: int" or "name string, age int" or nested "addr struct<city:string>, tags array<string>"
     if let Ok(ddl) = schema_any.extract::<String>() {
         let ddl = ddl.trim();
         if ddl.is_empty() {
             return Ok(ParsedSchema::NoSchema);
         }
-        // Bracket-aware split: top-level commas only (fixes #418 nested struct/array in DDL).
-        let parts = split_ddl_top_level(ddl);
         // PySpark: single type string (e.g. "bigint", "string") -> one column named "value"
-        if parts.len() == 1 {
-            let p = &parts[0];
-            if !p.contains(':') && !p.contains(' ') {
-                return Ok(ParsedSchema::FullSchema(vec![(
-                    "value".to_string(),
-                    p.to_lowercase(),
-                )]));
-            }
+        if !ddl.contains(',') && !ddl.contains(':') && !ddl.contains(' ') {
+            return Ok(ParsedSchema::FullSchema(vec![(
+                "value".to_string(),
+                ddl.to_lowercase(),
+            )]));
         }
-        let mut schema_vec: Vec<(String, String)> = Vec::new();
-        for part in parts {
-            if part.is_empty() {
-                continue;
+        // Use spark-ddl-parser for full DDL (supports nested struct, array, map, decimal)
+        match spark_ddl_parser::parse_ddl_schema(ddl) {
+            Ok(schema) => {
+                let schema_vec: Vec<(String, String)> = schema
+                    .fields
+                    .into_iter()
+                    .map(|f| (f.name, format!("{}", f.data_type).to_lowercase()))
+                    .collect();
+                if !schema_vec.is_empty() {
+                    return Ok(ParsedSchema::FullSchema(schema_vec));
+                }
             }
-            // First colon or first space separates name from type (type may contain <...>).
-            let (name, type_str) = if let Some(colon) = part.find(": ") {
-                let (n, t) = part.split_at(colon);
-                (n.trim().to_string(), t[2..].trim().to_string())
-            } else if let Some(space) = part.find(' ') {
-                let (n, t) = part.split_at(space);
-                (n.trim().to_string(), t.trim().to_string())
-            } else {
-                (part.clone(), "string".to_string())
-            };
-            if !name.is_empty() {
-                schema_vec.push((name, type_str.to_lowercase()));
+            Err(e) => {
+                return Err(pyo3::exceptions::PyTypeError::new_err(format!(
+                    "invalid DDL schema '{}': {}",
+                    ddl, e
+                )));
             }
-        }
-        if !schema_vec.is_empty() {
-            return Ok(ParsedSchema::FullSchema(schema_vec));
         }
     }
     if let Ok(fields) = schema_any.getattr("fields") {

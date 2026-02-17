@@ -54,7 +54,7 @@ fn json_type_str_to_polars(type_str: &str) -> Option<DataType> {
         return Some(DataType::Float64);
     }
     match s.as_str() {
-        "int" | "bigint" | "long" => Some(DataType::Int64),
+        "int" | "integer" | "bigint" | "long" => Some(DataType::Int64),
         "double" | "float" | "double_precision" => Some(DataType::Float64),
         "string" | "str" | "varchar" => Some(DataType::String),
         "boolean" | "bool" => Some(DataType::Boolean),
@@ -873,7 +873,7 @@ impl SparkSession {
         for (col_idx, (name, type_str)) in schema.iter().enumerate() {
             let type_lower = type_str.trim().to_lowercase();
             let s = match type_lower.as_str() {
-                "int" | "bigint" | "long" => {
+                "int" | "integer" | "bigint" | "long" => {
                     let vals: Vec<Option<i64>> = rows
                         .iter()
                         .map(|row| {
