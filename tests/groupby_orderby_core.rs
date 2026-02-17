@@ -4,14 +4,11 @@
 //! These tests focus on the underlying grouping and ordering semantics
 //! using the Rust API (string-based group_by/order_by).
 
-use polars::prelude::df;
-use robin_sparkless::{DataFrame, SparkSession};
+mod common;
 
-fn spark() -> SparkSession {
-    SparkSession::builder()
-        .app_name("groupby_orderby_core_tests")
-        .get_or_create()
-}
+use common::spark;
+use polars::prelude::df;
+use robin_sparkless::SparkSession;
 
 #[test]
 fn group_by_column_then_agg_sum_core() {
@@ -139,4 +136,37 @@ fn order_by_column_and_list_core() {
         ),
         (2, 1)
     );
+}
+
+/// Group-by semantics when grouping keys contain NULL values. Mirrors
+/// PySpark's behavior of treating NULL as its own group.
+#[test]
+fn group_by_with_null_keys_core() {
+    let spark = spark();
+    let pl = df![
+        "dept" => &[Some("A"), Some("A"), None],
+        "salary" => &[100i64, 200i64, 300i64],
+    ]
+    .unwrap();
+    let df = spark.create_dataframe_from_polars(pl);
+
+    let gd = df.group_by(vec!["dept"]).unwrap();
+    let out_df = gd.sum("salary").unwrap();
+    let out = out_df.collect_as_json_rows().unwrap();
+
+    // Expect two groups: "A" and null.
+    assert_eq!(out.len(), 2);
+    let mut saw_a = false;
+    let mut saw_null = false;
+    for row in out {
+        if row["dept"].is_null() {
+            assert_eq!(row["sum(salary)"].as_i64().unwrap(), 300);
+            saw_null = true;
+        } else {
+            assert_eq!(row["dept"].as_str().unwrap(), "A");
+            assert_eq!(row["sum(salary)"].as_i64().unwrap(), 300);
+            saw_a = true;
+        }
+    }
+    assert!(saw_a && saw_null);
 }

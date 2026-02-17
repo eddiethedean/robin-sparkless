@@ -1,0 +1,46 @@
+{
+  "name": "with_column_math_and_string",
+  "input": {
+    "schema": [
+      { "name": "id", "type": "bigint" },
+      { "name": "x", "type": "double" },
+      { "name": "name", "type": "string" }
+    ],
+    "rows": [
+      [1, 1.0, "alice"],
+      [2, 2.0, "bob"]
+    ]
+  },
+  "plan": [
+    {
+      "op": "withColumn",
+      "payload": {
+        "name": "x_plus_one",
+        "expr": { "fn": "add", "args": [ { "col": "x" }, { "lit": 1.0 } ] }
+      }
+    },
+    {
+      "op": "withColumn",
+      "payload": {
+        "name": "name_upper",
+        "expr": { "fn": "upper", "args": [ { "col": "name" } ] }
+      }
+    },
+    {
+      "op": "select",
+      "payload": ["id", "x_plus_one", "name_upper"]
+    }
+  ],
+  "expected": {
+    "schema": [
+      { "name": "id", "type": "bigint" },
+      { "name": "x_plus_one", "type": "double" },
+      { "name": "name_upper", "type": "string" }
+    ],
+    "rows": [
+      [1, 2.0, "ALICE"],
+      [2, 3.0, "BOB"]
+    ]
+  }
+}
+
