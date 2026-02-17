@@ -136,9 +136,9 @@ fn apply_op(
                             }
                         })
                         .collect::<Result<Vec<_>, _>>()?;
-                    let has_concat = strings
-                        .iter()
-                        .any(|s| crate::plan::expr::try_parse_concat_expr_from_string(s.as_str()).is_some());
+                    let has_concat = strings.iter().any(|s| {
+                        crate::plan::expr::try_parse_concat_expr_from_string(s.as_str()).is_some()
+                    });
                     if !has_concat {
                         let names: Vec<String> = strings
                             .iter()
@@ -150,14 +150,17 @@ fn apply_op(
                     }
                     let mut exprs = Vec::with_capacity(strings.len());
                     for s in &strings {
-                        if let Some(expr) = crate::plan::expr::try_parse_concat_expr_from_string(s.as_str())
+                        if let Some(expr) =
+                            crate::plan::expr::try_parse_concat_expr_from_string(s.as_str())
                         {
                             let resolved = df
                                 .resolve_expr_column_names(expr)
                                 .map_err(PlanError::Session)?;
                             exprs.push(resolved.alias(s));
                         } else {
-                            let resolved = df.resolve_column_name(s.as_str()).map_err(PlanError::Session)?;
+                            let resolved = df
+                                .resolve_column_name(s.as_str())
+                                .map_err(PlanError::Session)?;
                             exprs.push(polars::prelude::col(resolved));
                         }
                     }
