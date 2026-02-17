@@ -39,6 +39,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Phase 26 – Publish crate**: Prepare and publish robin-sparkless to crates.io. See [ROADMAP.md](docs/ROADMAP.md) for details.
 
+## [0.11.5] - 2026-02-17
+
+### Fixed
+
+- **#512 – create_map() with zero arguments (PySpark parity)** — Plan interpreter `create_map` fn now accepts empty args `[]`; returns empty map `{}` per row. PySpark `F.create_map()` with no args is valid. Fixes #512.
+- **#513 – Inner join returns 0 rows (Sparkless plan format)** — Plan interpreter now accepts join `on` as single string (converted to array); schema fields as `fieldName`/`dataType`; `other_data` rows as dicts `[{"col":v},...]` in addition to arrays; and `on` at op level. Fixes #513.
+
 ## [0.11.4] - 2026-02-17
 
 ### Fixed
