@@ -3,7 +3,7 @@ members = []
 
 [package]
 name = "robin-sparkless"
-version = "0.11.2"
+version = "0.11.3"
 edition = "2021"
 description = "PySpark-like DataFrame API in Rust on Polars; no JVM."
 readme = "README.md"

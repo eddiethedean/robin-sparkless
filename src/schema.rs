@@ -237,7 +237,7 @@ mod tests {
             DataType::Array(inner) => {
                 assert!(matches!(*inner, DataType::Long));
             }
-            _ => panic!("Expected Array type"),
+            other => panic!("Expected Array type, got {other:?}"),
         }
     }
 
@@ -290,7 +290,7 @@ mod tests {
             PlDataType::List(inner) => {
                 assert_eq!(*inner, PlDataType::Int64);
             }
-            _ => panic!("Expected List type"),
+            other => panic!("Expected List type, got {other:?}"),
         }
     }
 

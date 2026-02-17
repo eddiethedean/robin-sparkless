@@ -242,12 +242,24 @@ fn json_values_to_series(
                     ov.as_ref().and_then(|v| match v {
                         JsonValue::String(s) => {
                             let parsed = NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S%.f")
-                                .or_else(|_| NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S"))
+                                .map_err(|e| PolarsError::ComputeError(e.to_string().into()))
                                 .or_else(|_| {
-                                    NaiveDate::parse_from_str(s, "%Y-%m-%d").map(|d| {
-                                        d.and_hms_opt(0, 0, 0)
-                                            .expect("0:0:0 time should be valid for any date")
-                                    })
+                                    NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S").map_err(
+                                        |e| PolarsError::ComputeError(e.to_string().into()),
+                                    )
+                                })
+                                .or_else(|_| {
+                                    NaiveDate::parse_from_str(s, "%Y-%m-%d")
+                                        .map_err(|e| {
+                                            PolarsError::ComputeError(e.to_string().into())
+                                        })
+                                        .and_then(|d| {
+                                            d.and_hms_opt(0, 0, 0).ok_or_else(|| {
+                                                PolarsError::ComputeError(
+                                                    "date to datetime (0:0:0)".into(),
+                                                )
+                                            })
+                                        })
                                 });
                             parsed.ok().map(|dt| dt.and_utc().timestamp_micros())
                         }
@@ -953,15 +965,27 @@ impl SparkSession {
                                             &s,
                                             "%Y-%m-%dT%H:%M:%S%.f",
                                         )
-                                        .or_else(|_| {
-                                            NaiveDateTime::parse_from_str(&s, "%Y-%m-%dT%H:%M:%S")
+                                        .map_err(|e| {
+                                            PolarsError::ComputeError(e.to_string().into())
                                         })
                                         .or_else(|_| {
-                                            NaiveDate::parse_from_str(&s, "%Y-%m-%d").map(|d| {
-                                                d.and_hms_opt(0, 0, 0).expect(
-                                                    "0:0:0 time should be valid for any date",
-                                                )
-                                            })
+                                            NaiveDateTime::parse_from_str(&s, "%Y-%m-%dT%H:%M:%S")
+                                                .map_err(|e| {
+                                                    PolarsError::ComputeError(e.to_string().into())
+                                                })
+                                        })
+                                        .or_else(|_| {
+                                            NaiveDate::parse_from_str(&s, "%Y-%m-%d")
+                                                .map_err(|e| {
+                                                    PolarsError::ComputeError(e.to_string().into())
+                                                })
+                                                .and_then(|d| {
+                                                    d.and_hms_opt(0, 0, 0).ok_or_else(|| {
+                                                        PolarsError::ComputeError(
+                                                            "date to datetime (0:0:0)".into(),
+                                                        )
+                                                    })
+                                                })
                                         });
                                         parsed.ok().map(|dt| dt.and_utc().timestamp_micros())
                                     }

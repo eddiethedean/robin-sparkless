@@ -5791,7 +5791,8 @@ fn plan_with_column_add_string_numeric() {
     assert_eq!(rows_out[1].get("x").and_then(|v| v.as_f64()), Some(23.0));
 }
 
-/// to print actual rand(42)/randn(42) values for tests/fixtures/with_rand_seed.json.
+/// Helper to regenerate rand fixture: prints rand(42)/randn(42) values for tests/fixtures/with_rand_seed.json.
+/// Run with: `cargo test print_rand_seed_42_values -- --ignored`
 #[test]
 #[ignore]
 fn print_rand_seed_42_values() {
