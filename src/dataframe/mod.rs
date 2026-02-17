@@ -725,7 +725,9 @@ impl DataFrame {
     }
 
     /// Order by columns (sort).
-    /// Column names are resolved according to case sensitivity.
+    /// When `spark.sql.caseSensitive` is false (default), column names are resolved
+    /// case-insensitively so that `order_by("value")` and `order_by("VALUE")` both
+    /// work when the schema has a column named `Value` (PySpark parity).
     pub fn order_by(
         &self,
         column_names: Vec<&str>,
