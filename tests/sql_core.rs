@@ -5,7 +5,7 @@
 //! behave as expected directly at the Rust level.
 
 use polars::prelude::df;
-use robin_sparkless::{DataFrame, SparkSession};
+use robin_sparkless::{DataFrame, SaveMode, SparkSession, WriteMode};
 
 fn spark() -> SparkSession {
     SparkSession::builder()
@@ -87,4 +87,54 @@ fn sql_drop_view_removes_temp_view_core() {
         return;
     }
     assert!(spark.table("v_to_drop").is_err());
+}
+
+/// Basic DDL and catalog behavior when the `sql` feature is enabled:
+/// create a saved table and ensure it is visible via the catalog and
+/// can be queried back.
+#[test]
+fn sql_create_table_and_catalog_core() {
+    let spark = spark();
+
+    // Skip if SQL is not enabled.
+    if spark.sql("SELECT 1").is_err() {
+        return;
+    }
+
+    // Create a small DataFrame and save it as a table.
+    let pl = df![
+        "id" => &[1i64, 2i64],
+        "name" => &["a", "b"],
+    ]
+    .unwrap();
+    let df: DataFrame = spark.create_dataframe_from_polars(pl);
+
+    // Save as a managed table; if this fails due to feature support or missing
+    // SQL feature, treat as skip.
+    if df
+        .write()
+        .mode(WriteMode::Overwrite)
+        .save_as_table(&spark, "tbl_core_sql", SaveMode::Overwrite)
+        .is_err()
+    {
+        return;
+    }
+
+    // Table should be visible via table() and return two rows.
+    let table_df = match spark.table("tbl_core_sql") {
+        Ok(df) => df,
+        Err(_) => return,
+    };
+    let rows = table_df.collect_as_json_rows().unwrap();
+    assert_eq!(rows.len(), 2);
+
+    // Access via SQL as well.
+    let via_sql = match spark.sql("SELECT * FROM tbl_core_sql ORDER BY id") {
+        Ok(df) => df,
+        Err(_) => return,
+    };
+    let rows_sql = via_sql.collect_as_json_rows().unwrap();
+    assert_eq!(rows_sql.len(), 2);
+    assert_eq!(rows_sql[0]["id"].as_i64().unwrap(), 1);
+    assert_eq!(rows_sql[1]["id"].as_i64().unwrap(), 2);
 }

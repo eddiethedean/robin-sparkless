@@ -110,13 +110,13 @@ You can also wrap an existing Polars `DataFrame` with `DataFrame::from_polars(po
 | `cargo test` | Run Rust tests |
 | `make test` | Run Rust tests (wrapper for `cargo test`) |
 | `make check` | Rust only: format check, clippy, audit, deny, Rust tests. Use `make -j5 check` to run the five jobs in parallel. |
+| `make check-full` | Full Rust check suite (what CI runs): `fmt --check`, clippy, audit, deny, tests. |
 | `make fmt` | Format Rust code (run before check if you want to fix formatting). |
-| `make test-parity-phase-a` … `make test-parity-phase-g` | Run parity fixtures for a specific phase (see [PARITY_STATUS](docs/PARITY_STATUS.md)) |
+| `make test-parity-phase-a` … `make test-parity-phase-g` | Run parity fixtures for a specific phase (see [PARITY_STATUS](docs/PARITY_STATUS.md)). |
+| `make test-parity-phases` | Run all parity phases (A–G) via the parity harness. |
+| `make sparkless-parity` | When `SPARKLESS_EXPECTED_OUTPUTS` is set and PySpark/Java are available, convert Sparkless fixtures, regenerate expected from PySpark, and run Rust parity tests. |
 | `cargo bench` | Benchmarks (robin-sparkless vs Polars) |
 | `cargo doc --open` | Build and open API docs |
-| `make gap-analysis` | PySpark gap analysis (clones Spark repo, extracts APIs, produces [docs/GAP_ANALYSIS_PYSPARK_REPO.md](docs/GAP_ANALYSIS_PYSPARK_REPO.md)) |
-| `make gap-analysis-quick` | Quick gap analysis (uses existing pyspark_api_from_repo.json) |
-| `make test-parity-phase-a` … `make test-parity-phase-g` | Run parity fixtures for a specific phase (see [PARITY_STATUS](docs/PARITY_STATUS.md)) |
 
 CI runs format, clippy, audit, deny, Rust tests, and parity tests on push/PR (see [.github/workflows/ci.yml](.github/workflows/ci.yml)).
 

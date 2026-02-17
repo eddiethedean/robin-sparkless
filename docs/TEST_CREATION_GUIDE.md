@@ -9,7 +9,11 @@ The goal is to:
 - Generate **JSON fixtures** from PySpark runs.
 - Consume those fixtures in **Rust tests** to ensure `robin-sparkless` matches PySpark.
 
-**Note:** Running the test suite (`make test`, `make check-full`) does **not** require PySpark or Java; Python tests use predetermined expectations. PySpark/Java 17+ are only required when **generating** new fixtures (e.g. `gen_pyspark_cases.py`) or when running `make sparkless-parity` with regeneration.
+**Note:** Running the Rust test suite (`make test`, `make check-full`) does
+**not** require PySpark or Java. PySpark/Java 17+ are only required when
+**generating or refreshing** fixtures (e.g. via `tests/convert_sparkless_fixtures.py`
+and `tests/regenerate_expected_from_pyspark.py`, or when running
+`make sparkless-parity` with regeneration enabled).
 
 ---
 
@@ -17,8 +21,8 @@ The goal is to:
 
 We separate the flow into three layers:
 
-1. **Scenario definition (Python + PySpark)**  
-   Small scripts that build PySpark `DataFrame`s, apply operations, and record the expected results.
+1. **Scenario definition (Python + PySpark, optional)**  
+   Small scripts that build PySpark `DataFrame`s, apply operations, and record the expected results when you need new fixtures or want to refresh existing ones.
 
 2. **Fixtures (JSON)**  
    A stable, machine-readable description of:
@@ -242,24 +246,7 @@ This makes it clear where Robin Sparkless truly emulates PySpark today and where
 
 ---
 
-## 7. PySpark Test Extractor
-
-The **Apache PySpark test extractor** parses Spark's `python/pyspark/sql/tests/` and produces fixture stubs and pytest stubs:
-
-```bash
-make extract-pyspark-tests
-# or: SPARK_REPO_PATH=/path/to/spark make extract-pyspark-tests
-```
-
-Output:
-- `tests/fixtures/pyspark_extracted/*.json` — minimal fixture stubs (add operations, then run `regenerate_expected_from_pyspark.py --include-skipped`)
-- `tests/python/test_pyspark_port_extracted.py` — pytest stubs for error/API tests
-
-See [PYSPARK_TEST_TRANSLATION.md](PYSPARK_TEST_TRANSLATION.md) for the extraction pipeline, classification rules, and coverage matrix.
-
----
-
-## 8. Sparkless Fixture Conversion
+## 7. Sparkless Fixture Conversion
 
 Sparkless uses a different fixture format (`input_data` as dict rows, `expected_output` with `schema`/`data`). A converter can:
 
