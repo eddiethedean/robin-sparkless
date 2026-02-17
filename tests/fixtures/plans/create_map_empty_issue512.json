@@ -1,0 +1,26 @@
+{
+  "name": "create_map_empty_issue512",
+  "input": {
+    "schema": [{"name": "id", "type": "bigint"}],
+    "rows": [[1], [2]]
+  },
+  "plan": [
+    {
+      "op": "withColumn",
+      "payload": {
+        "name": "m",
+        "expr": {"fn": "create_map", "args": []}
+      }
+    }
+  ],
+  "expected": {
+    "schema": [
+      {"name": "id", "type": "bigint"},
+      {"name": "m", "type": "map"}
+    ],
+    "rows": [
+      [1, {}],
+      [2, {}]
+    ]
+  }
+}
