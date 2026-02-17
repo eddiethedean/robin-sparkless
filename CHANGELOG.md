@@ -33,6 +33,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **GroupedData / PivotedGroupedData column resolution** — Aggregation methods (`sum`, `avg`, `min`, `max`, `first`, `last`, etc.) and pivot operations now resolve column names against the schema with case sensitivity. When `case_sensitive` is false, `grouped.sum("V")` works when the schema has `"v"`.
 - **subtract / intersect with different column casing** — `subtract` and `intersect` now align right-side column names to left when casing differs (case-sensitive or -insensitive), so set operations work when DataFrames have different column casing.
+- **#492 – case-insensitive orderBy on mixed-case column names (PySpark parity)** — Clarify and regression-test that when `spark.sql.caseSensitive` is false (default), `DataFrame::order_by` / `orderBy` resolve column names case-insensitively so `"value"` and `"VALUE"` work for schema column `"Value"`. Fixes #492.
 
 ### Planned
 
