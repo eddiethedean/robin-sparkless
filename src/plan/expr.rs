@@ -277,6 +277,20 @@ pub fn expr_from_value(v: &Value) -> Result<Expr, PlanExprError> {
                     .map_err(|e| PlanExprError(e.to_string()))?
                     .into_expr());
             }
+            "add" | "+" => {
+                // {"op": "add", "left": <expr>, "right": <expr>} - e.g. row_number().over(w) + 10
+                let left_v = obj
+                    .get("left")
+                    .ok_or_else(|| PlanExprError("op 'add' requires 'left'".to_string()))?;
+                let right_v = obj
+                    .get("right")
+                    .ok_or_else(|| PlanExprError("op 'add' requires 'right'".to_string()))?;
+                let l = expr_from_value(left_v)?;
+                let r = expr_from_value(right_v)?;
+                let a = expr_to_column(l);
+                let b = expr_to_column(r);
+                return Ok(a.add_pyspark(&b).into_expr());
+            }
             _ => {
                 return Err(PlanExprError(format!("unsupported expression op: {op}")));
             }
@@ -314,34 +328,63 @@ pub fn expr_from_value(v: &Value) -> Result<Expr, PlanExprError> {
         return expr_from_fn(fn_name, args);
     }
 
+    // type: "window" - Sparkless sends window expressions as {"type": "window", "fn": "row_number", "window": {...}}
+    if let Some(typ) = obj.get("type").and_then(Value::as_str) {
+        if typ == "window" {
+            let fn_name = obj
+                .get("fn")
+                .and_then(Value::as_str)
+                .ok_or_else(|| PlanExprError("type window requires 'fn'".to_string()))?;
+            let window_val = obj
+                .get("window")
+                .ok_or_else(|| PlanExprError("type window requires 'window'".to_string()))?;
+            if fn_name == "row_number" {
+                return expr_from_row_number_window(window_val);
+            }
+            return Err(PlanExprError(format!(
+                "type window: unsupported fn '{fn_name}' (only row_number)"
+            )));
+        }
+    }
+
     Err(PlanExprError(
-        "expression must have 'col', 'lit', 'op', or 'fn'".to_string(),
+        "expression must have 'col', 'lit', 'op', 'fn', or 'type'".to_string(),
     ))
 }
 
-/// Build row_number().over(partition_by) from {"partition_by": ["col", ...]}.
+/// Build row_number().over(partition_by) from {"partition_by": ["col", ...]} or
+/// {"order_by": ["val"]} (order-only, no partition).
 fn expr_from_row_number_window(v: &Value) -> Result<Expr, PlanExprError> {
     let obj = v
         .as_object()
         .ok_or_else(|| PlanExprError("row_number window must be object".to_string()))?;
-    let part_arr = obj
-        .get("partition_by")
-        .and_then(Value::as_array)
+    let order_arr = obj.get("order_by").and_then(Value::as_array);
+    let part_arr = obj.get("partition_by").and_then(Value::as_array);
+    // Prefer order_by for order column; fall back to partition_by
+    let order_cols: Vec<String> = order_arr
+        .or(part_arr)
         .ok_or_else(|| {
-            PlanExprError("row_number window must have partition_by array".to_string())
-        })?;
-    let part_cols: Vec<String> = part_arr
+            PlanExprError("row_number window must have partition_by or order_by array".to_string())
+        })?
         .iter()
         .filter_map(|x| x.as_str())
         .map(String::from)
         .collect();
-    if part_cols.is_empty() {
+    if order_cols.is_empty() {
         return Err(PlanExprError(
-            "row_number window partition_by must be non-empty".to_string(),
+            "row_number window order_by/partition_by must be non-empty".to_string(),
         ));
     }
+    let part_cols: Vec<String> = part_arr
+        .map(|a| {
+            a.iter()
+                .filter_map(|x| x.as_str())
+                .map(String::from)
+                .collect()
+        })
+        .unwrap_or_default();
     let part_refs: Vec<&str> = part_cols.iter().map(|s| s.as_str()).collect();
-    let order_col = crate::Column::new(part_cols[0].clone());
+    let order_col = crate::Column::new(order_cols[0].clone());
     let rn = order_col.row_number(false).over(&part_refs);
     Ok(rn.into_expr())
 }
@@ -2273,6 +2316,27 @@ mod tests {
         let v = json!({
             "op": "create_map",
             "args": [{"lit": "k"}, {"col": "a"}]
+        });
+        let _ = expr_from_value(&v).unwrap();
+    }
+
+    #[test]
+    fn test_type_window_row_number_order_by() {
+        let v = json!({
+            "type": "window",
+            "fn": "row_number",
+            "window": {"order_by": ["val"]}
+        });
+        let _ = expr_from_value(&v).unwrap();
+    }
+
+    #[test]
+    fn test_window_plus_literal_op() {
+        // (row_number().over(w) + 10) - add op with window as left
+        let v = json!({
+            "op": "add",
+            "left": {"type": "window", "fn": "row_number", "window": {"order_by": ["val"]}},
+            "right": {"lit": 10}
         });
         let _ = expr_from_value(&v).unwrap();
     }
