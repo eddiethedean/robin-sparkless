@@ -544,6 +544,7 @@ pub fn describe(df: &DataFrame, case_sensitive: bool) -> Result<DataFrame, Polar
 }
 
 /// Set difference: rows in left that are not in right (by all columns). PySpark subtract / except.
+/// Aligns right column names to left (case-insensitive) so subtract works when casing differs.
 pub fn subtract(
     left: &DataFrame,
     right: &DataFrame,
@@ -551,8 +552,36 @@ pub fn subtract(
 ) -> Result<DataFrame, PolarsError> {
     use polars::prelude::*;
     let left_names = left.columns()?;
+    let right_names = right.columns()?;
+    let right_on: Vec<Expr> = left_names
+        .iter()
+        .map(|ln| {
+            let resolved = if case_sensitive {
+                right_names
+                    .iter()
+                    .find(|rn| rn.as_str() == ln.as_str())
+                    .cloned()
+                    .ok_or_else(|| {
+                        PolarsError::ColumnNotFound(
+                            format!("subtract: column '{}' not found on right", ln).into(),
+                        )
+                    })?
+            } else {
+                let ln_lower = ln.to_lowercase();
+                right_names
+                    .iter()
+                    .find(|rn| rn.to_lowercase() == ln_lower)
+                    .cloned()
+                    .ok_or_else(|| {
+                        PolarsError::ColumnNotFound(
+                            format!("subtract: column '{}' not found on right", ln).into(),
+                        )
+                    })?
+            };
+            Ok(col(resolved.as_str()))
+        })
+        .collect::<Result<Vec<_>, PolarsError>>()?;
     let left_on: Vec<Expr> = left_names.iter().map(|n| col(n.as_str())).collect();
-    let right_on: Vec<Expr> = left_names.iter().map(|n| col(n.as_str())).collect();
     let right_lf = right.lazy_frame();
     let left_lf = left.lazy_frame();
     let anti = left_lf.join(right_lf, left_on, right_on, JoinArgs::new(JoinType::Anti));
@@ -563,6 +592,7 @@ pub fn subtract(
 }
 
 /// Set intersection: rows that appear in both DataFrames (by all columns). PySpark intersect.
+/// Aligns right column names to left (case-insensitive) so intersect works when casing differs.
 pub fn intersect(
     left: &DataFrame,
     right: &DataFrame,
@@ -570,8 +600,36 @@ pub fn intersect(
 ) -> Result<DataFrame, PolarsError> {
     use polars::prelude::*;
     let left_names = left.columns()?;
+    let right_names = right.columns()?;
+    let right_on: Vec<Expr> = left_names
+        .iter()
+        .map(|ln| {
+            let resolved = if case_sensitive {
+                right_names
+                    .iter()
+                    .find(|rn| rn.as_str() == ln.as_str())
+                    .cloned()
+                    .ok_or_else(|| {
+                        PolarsError::ColumnNotFound(
+                            format!("intersect: column '{}' not found on right", ln).into(),
+                        )
+                    })?
+            } else {
+                let ln_lower = ln.to_lowercase();
+                right_names
+                    .iter()
+                    .find(|rn| rn.to_lowercase() == ln_lower)
+                    .cloned()
+                    .ok_or_else(|| {
+                        PolarsError::ColumnNotFound(
+                            format!("intersect: column '{}' not found on right", ln).into(),
+                        )
+                    })?
+            };
+            Ok(col(resolved.as_str()))
+        })
+        .collect::<Result<Vec<_>, PolarsError>>()?;
     let left_on: Vec<Expr> = left_names.iter().map(|n| col(n.as_str())).collect();
-    let right_on: Vec<Expr> = left_names.iter().map(|n| col(n.as_str())).collect();
     let left_lf = left.lazy_frame();
     let right_lf = right.lazy_frame();
     let semi = left_lf
