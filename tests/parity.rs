@@ -5835,6 +5835,83 @@ fn plan_select_concat_string() {
     );
 }
 
+/// Empty DataFrame with schema via execute_plan: saveAsTable(Overwrite) then append (issue #509).
+/// Mirrors Sparkless flow: createDataFrame([], schema) -> saveAsTable -> table -> append -> table.
+#[test]
+fn plan_empty_df_save_as_table_append() {
+    use robin_sparkless::plan;
+    use robin_sparkless::SaveMode;
+    use serde_json::json;
+
+    let spark = SparkSession::builder()
+        .app_name("plan_empty_df_save_append")
+        .get_or_create();
+
+    let schema = vec![
+        ("id".to_string(), "bigint".to_string()),
+        ("name".to_string(), "string".to_string()),
+    ];
+
+    // Create empty DF via execute_plan (same as createDataFrame([], schema))
+    let empty_plan: Vec<serde_json::Value> = vec![];
+    let empty_df = plan::execute_plan(&spark, vec![], schema.clone(), &empty_plan).unwrap();
+    assert_eq!(empty_df.count().unwrap(), 0);
+
+    empty_df
+        .write()
+        .save_as_table(&spark, "t_plan_empty_append", SaveMode::Overwrite)
+        .unwrap();
+    let r1 = spark.table("t_plan_empty_append").unwrap();
+    assert_eq!(r1.count().unwrap(), 0);
+
+    let one_row = spark
+        .create_dataframe_from_rows(vec![vec![json!(1), json!("a")]], schema.clone())
+        .unwrap();
+    one_row
+        .write()
+        .save_as_table(&spark, "t_plan_empty_append", SaveMode::Append)
+        .unwrap();
+    let r2 = spark.table("t_plan_empty_append").unwrap();
+    assert_eq!(r2.count().unwrap(), 1);
+
+    // Warehouse path: empty DF -> saveAsTable(Overwrite) to disk -> append -> table (issue #509)
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use tempfile::TempDir;
+
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    let n = COUNTER.fetch_add(1, Ordering::SeqCst);
+    let dir = TempDir::new().unwrap();
+    let warehouse = dir.path().join(format!("wh_empty_{n}"));
+    std::fs::create_dir_all(&warehouse).unwrap();
+    let spark_wh = SparkSession::builder()
+        .app_name("plan_empty_wh")
+        .config(
+            "spark.sql.warehouse.dir",
+            warehouse.as_os_str().to_str().unwrap(),
+        )
+        .get_or_create();
+
+    let empty_plan_wh: Vec<serde_json::Value> = vec![];
+    let empty_df_wh =
+        plan::execute_plan(&spark_wh, vec![], schema.clone(), &empty_plan_wh).unwrap();
+    empty_df_wh
+        .write()
+        .save_as_table(&spark_wh, "t_empty_wh_plan", SaveMode::Overwrite)
+        .unwrap();
+    let r1_wh = spark_wh.table("t_empty_wh_plan").unwrap();
+    assert_eq!(r1_wh.count().unwrap(), 0);
+
+    let one_row_wh = spark_wh
+        .create_dataframe_from_rows(vec![vec![json!(2), json!("b")]], schema)
+        .unwrap();
+    one_row_wh
+        .write()
+        .save_as_table(&spark_wh, "t_empty_wh_plan", SaveMode::Append)
+        .unwrap();
+    let r2_wh = spark_wh.table("t_empty_wh_plan").unwrap();
+    assert_eq!(r2_wh.count().unwrap(), 1);
+}
+
 /// Plan withColumn with add(string, bigint) uses PySpark-style coercion (issue #201).
 #[test]
 fn plan_with_column_add_string_numeric() {
