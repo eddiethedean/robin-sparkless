@@ -79,14 +79,19 @@ fn apply_op(
             df.filter(expr).map_err(PlanError::Session)
         }
         "select" => {
-            if let Some(arr) = payload.as_array() {
+            // Accept payload as array or as object with "columns" (Sparkless: {"columns": [...]})
+            let arr = payload
+                .as_array()
+                .or_else(|| payload.get("columns").and_then(Value::as_array));
+            if let Some(arr) = arr {
                 if arr.is_empty() {
                     return Err(PlanError::InvalidPlan(
                         "select payload must be non-empty array".into(),
                     ));
                 }
                 let first = &arr[0];
-                if first.is_object() {
+                let is_expr_list = first.is_object() && first.get("expr").is_some();
+                if is_expr_list {
                     // Select with computed columns: [{"name": "<alias>", "expr": <expr>}, ...]
                     let mut exprs = Vec::with_capacity(arr.len());
                     for v in arr {
@@ -109,39 +114,50 @@ fn apply_op(
                     }
                     df.select_exprs(exprs).map_err(PlanError::Session)
                 } else {
-                    // List of column name strings; any may be concat/concat_ws expression strings
-                    let strings: Vec<&str> = arr
+                    // Column names: strings or {type, name} / {name} (Sparkless column refs)
+                    let strings: Vec<String> = arr
                         .iter()
                         .map(|v| {
-                            v.as_str().ok_or_else(|| {
-                                PlanError::InvalidPlan(
-                                    "select payload must be list of column name strings or list of {name, expr} objects".into(),
-                                )
-                            })
+                            if let Some(s) = v.as_str() {
+                                Ok(s.to_string())
+                            } else if let Some(obj) = v.as_object() {
+                                obj.get("name")
+                                    .and_then(Value::as_str)
+                                    .map(|s| s.to_string())
+                                    .ok_or_else(|| {
+                                        PlanError::InvalidPlan(
+                                            "select column item must have 'name' string".into(),
+                                        )
+                                    })
+                            } else {
+                                Err(PlanError::InvalidPlan(
+                                    "select payload must be list of column name strings or {name, expr} or {type, name} objects".into(),
+                                ))
+                            }
                         })
                         .collect::<Result<Vec<_>, _>>()?;
                     let has_concat = strings
                         .iter()
-                        .any(|s| crate::plan::expr::try_parse_concat_expr_from_string(s).is_some());
+                        .any(|s| crate::plan::expr::try_parse_concat_expr_from_string(s.as_str()).is_some());
                     if !has_concat {
                         let names: Vec<String> = strings
                             .iter()
-                            .map(|s| df.resolve_column_name(s))
+                            .map(|s| df.resolve_column_name(s.as_str()))
                             .collect::<Result<Vec<_>, _>>()
                             .map_err(PlanError::Session)?;
                         let refs: Vec<&str> = names.iter().map(|s| s.as_str()).collect();
                         return df.select(refs).map_err(PlanError::Session);
                     }
                     let mut exprs = Vec::with_capacity(strings.len());
-                    for s in strings {
-                        if let Some(expr) = crate::plan::expr::try_parse_concat_expr_from_string(s)
+                    for s in &strings {
+                        if let Some(expr) = crate::plan::expr::try_parse_concat_expr_from_string(s.as_str())
                         {
                             let resolved = df
                                 .resolve_expr_column_names(expr)
                                 .map_err(PlanError::Session)?;
                             exprs.push(resolved.alias(s));
                         } else {
-                            let resolved = df.resolve_column_name(s).map_err(PlanError::Session)?;
+                            let resolved = df.resolve_column_name(s.as_str()).map_err(PlanError::Session)?;
                             exprs.push(polars::prelude::col(resolved));
                         }
                     }
@@ -149,7 +165,7 @@ fn apply_op(
                 }
             } else {
                 Err(PlanError::InvalidPlan(
-                    "select payload must be array of column names or {name, expr} objects".into(),
+                    "select payload must be array of column names or {name, expr} objects, or object with 'columns' array".into(),
                 ))
             }
         }

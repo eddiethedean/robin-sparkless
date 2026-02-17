@@ -28,9 +28,13 @@ Example: `{"op": "filter", "payload": {"op": "gt", "left": {"col": "age"}, "righ
 
 - **payload**: Either:
   - A list of column name strings: `["col1", "col2"]` (project those columns), or
+  - An object `{"columns": [...]}` where the array is as above (Sparkless compatibility), or
   - A list of objects `{"name": "<output_col>", "expr": <expression tree>}` for computed columns.
 
-Example: `{"op": "select", "payload": ["name", "age"]}`
+Array items for column projection may be strings or objects with `"name"` (e.g. `{"type": "column", "name": "id"}`).
+
+Example: `{"op": "select", "payload": ["name", "age"]}`  
+Example (Sparkless): `{"op": "select", "payload": {"columns": [{"type": "column", "name": "id"}, {"type": "column", "name": "x"}]}}`
 
 ### withColumn
 
