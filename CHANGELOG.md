@@ -50,6 +50,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Python tests** — All Python tests converted from `create_dataframe` / `_create_dataframe_from_rows` to `createDataFrame`.
 - **Rust** — `infer_schema_from_json_rows` (session): fix clippy `needless_range_loop` by iterating with `schema.iter_mut().enumerate()`.
 - **Tests** — `test_issue_372_create_data_frame.py`: remove unused `pytest` import; use `df.columns()` instead of `print_schema()` for empty-schema assertion (mypy).
+- **Documentation** — Fix USER_GUIDE Rust filter example (use `.into_expr()` for filter API). Add `make run-examples` to run Rust examples + Python doc examples with real output. Add `scripts/run_doc_examples.py` for doc example verification.
 
 ## [0.9.2] - 2026-02-14
 
