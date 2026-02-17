@@ -416,6 +416,13 @@ impl PyDataFrame {
     fn filter(&self, condition: &pyo3::Bound<'_, pyo3::types::PyAny>) -> PyResult<PyDataFrame> {
         let expr: Option<Expr> = if let Ok(py_col) = condition.downcast::<PyColumn>() {
             Some(py_col.borrow().inner.expr().clone())
+        } else if let Ok(wrapped) = condition.getattr("_robin_column") {
+            // Sparkless/compat layers may wrap Robin's Column; accept objects with _robin_column
+            if let Ok(py_col) = wrapped.downcast::<PyColumn>() {
+                Some(py_col.borrow().inner.expr().clone())
+            } else {
+                None
+            }
         } else if let Ok(b) = condition.extract::<bool>() {
             Some(if b { lit(true) } else { lit(false) })
         } else if let Ok(s) = condition.extract::<String>() {

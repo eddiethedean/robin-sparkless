@@ -1334,18 +1334,35 @@ fn py_any_value(col: &PyColumn, ignorenulls: bool) -> PyColumn {
     }
 }
 
-/// Ascending sort order for use in ``order_by_exprs()`` (nulls last by default).
+/// Ascending sort order for use in ``order_by_exprs()`` or ``Window.orderBy()`` (nulls last by default).
 ///
 /// Args:
-///     col: Column to sort by.
+///     col: Column or column name (str) to sort by. PySpark: F.asc("col") or F.asc(col("col")).
 ///
 /// Returns:
-///     SortOrder to pass to ``DataFrame.order_by_exprs([...])``.
+///     SortOrder to pass to ``DataFrame.order_by_exprs([...])`` or ``Window.orderBy(asc("v"))``.
 #[pyfunction]
-fn py_asc(col: &PyColumn) -> PySortOrder {
-    PySortOrder {
-        inner: asc(&col.inner),
+fn py_asc(col: &pyo3::Bound<'_, pyo3::types::PyAny>) -> PyResult<PySortOrder> {
+    let rs_col = py_col_to_column(col)?;
+    Ok(PySortOrder {
+        inner: asc(&rs_col),
+    })
+}
+
+/// Helper: convert PyAny (str or Column) to Column for asc/desc.
+fn py_col_to_column(col: &pyo3::Bound<'_, pyo3::types::PyAny>) -> PyResult<crate::column::Column> {
+    if let Ok(py_col) = col.downcast::<PyColumn>() {
+        return Ok(py_col.borrow().inner.clone());
     }
+    if let Ok(name) = col.extract::<String>() {
+        return Ok(crate::column::Column::from_expr(
+            polars::prelude::col(name.as_str()),
+            None,
+        ));
+    }
+    Err(pyo3::exceptions::PyTypeError::new_err(
+        "asc/desc require a column name (str) or Column",
+    ))
 }
 
 /// Ascending sort order with nulls first.
@@ -1364,18 +1381,19 @@ fn py_asc_nulls_last(col: &PyColumn) -> PySortOrder {
     }
 }
 
-/// Descending sort order for use in ``order_by_exprs()`` (nulls first by default).
+/// Descending sort order for use in ``order_by_exprs()`` or ``Window.orderBy()`` (nulls first by default).
 ///
 /// Args:
-///     col: Column to sort by.
+///     col: Column or column name (str) to sort by. PySpark: F.desc("col") or F.desc(col("col")).
 ///
 /// Returns:
-///     SortOrder to pass to ``DataFrame.order_by_exprs([...])``.
+///     SortOrder to pass to ``DataFrame.order_by_exprs([...])`` or ``Window.orderBy(desc("v"))``.
 #[pyfunction]
-fn py_desc(col: &PyColumn) -> PySortOrder {
-    PySortOrder {
-        inner: desc(&col.inner),
-    }
+fn py_desc(col: &pyo3::Bound<'_, pyo3::types::PyAny>) -> PyResult<PySortOrder> {
+    let rs_col = py_col_to_column(col)?;
+    Ok(PySortOrder {
+        inner: desc(&rs_col),
+    })
 }
 
 /// Descending sort order with nulls first.
