@@ -83,20 +83,6 @@ pub fn with_column(
     case_sensitive: bool,
 ) -> Result<DataFrame, PolarsError> {
     // Python UDF: eager execution at UDF boundary
-    #[cfg(feature = "pyo3")]
-    if let Some((ref udf_name, ref args)) = column.udf_call {
-        if let Some(session) = crate::session::get_thread_udf_session() {
-            return crate::python::execute_python_udf(
-                df,
-                column_name,
-                udf_name,
-                args,
-                case_sensitive,
-                &session,
-            );
-        }
-    }
-
     if let Some(deferred) = column.deferred {
         match deferred {
             crate::column::DeferredRandom::Rand(seed) => {

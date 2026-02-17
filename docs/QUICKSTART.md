@@ -13,20 +13,7 @@ Robin-sparkless is a PySpark-like DataFrame library in Rust, with Polars as the 
 cargo build
 ```
 
-### Build with Python extension (optional)
-
-```bash
-pip install maturin
-maturin develop --features pyo3   # Editable install into current env
-# With optional SQL and/or Delta:
-maturin develop --features "pyo3,sql"       # spark.sql(), temp views
-maturin develop --features "pyo3,delta"      # read_delta, write_delta
-maturin develop --features "pyo3,sql,delta" # All optional features
-```
-
-**Delta Lake** (optional `delta` feature): No extra runtime dependencies. Build with `--features delta` (Rust) or `maturin develop --features "pyo3,delta"` (Python). Then use `spark.read_delta(path)`, `spark.read_delta_version(path, version)`, and `df.write_delta(path, overwrite)`. With the `sql` feature, `read_delta(name_or_path)` also accepts a **table name**: if the argument is not path-like, it resolves like `table(name)` (temp view first, then saved table), so you can `df.write_delta_table("t")` then `spark.read_delta("t")` without writing to disk.
-
-Then use the `robin_sparkless` Python module; see [PYTHON_API.md](PYTHON_API.md).
+**Delta Lake** (optional `delta` feature): No extra runtime dependencies. Build with `--features delta` on the Rust crate. Then use `spark.read_delta(path)`, `spark.read_delta_version(path, version)`, and `df.write_delta(path, overwrite)`. With the `sql` feature, `read_delta(name_or_path)` also accepts a **table name**: if the argument is not path-like, it resolves like `table(name)` (temp view first, then saved table), so you can `df.write_delta_table("t")` then `spark.read_delta("t")` without writing to disk.
 
 ### Add as a dependency
 
@@ -107,7 +94,7 @@ let df_with_rn = df.with_column("rn", &col("salary").row_number(true).over(&["de
 let df_with_lag = df.with_column("prev_salary", &col("salary").lag(1).over(&["dept"]))?;
 ```
 
-Supported window functions: `row_number()`, `rank()`, `dense_rank()`, `lag(n)`, `lead(n)` — each used with `.over(&["col1", "col2"])` for partitioning. Aggregations (e.g. `sum(col("x")).over(&["dept"])`) are also supported. Use **`with_column(name, &Column)`** for any `Column` (e.g. from `col()`, `rand(42)`); use **`with_column_expr(name, expr)`** when you have a raw Polars `Expr`. **Python**: Same API via `col("x").row_number().over(["dept"])`, `sum(col("amount")).over(["id"])`, etc. — see [PYTHON_API.md](PYTHON_API.md).
+Supported window functions: `row_number()`, `rank()`, `dense_rank()`, `lag(n)`, `lead(n)` — each used with `.over(&["col1", "col2"])` for partitioning. Aggregations (e.g. `sum(col("x")).over(&["dept"])`) are also supported. Use **`with_column(name, &Column)`** for any `Column` (e.g. from `col()`, `rand(42)`); use **`with_column_expr(name, expr)`** when you have a raw Polars `Expr`.
 
 ### String Functions
 
@@ -134,7 +121,7 @@ let df = df.with_column("r", &rand(Some(42)))?;   // uniform [0, 1), one value p
 let df = df.with_column("z", &randn(Some(42)))?;  // standard normal, one value per row
 ```
 
-Additional string: `length`, `trim`, `ltrim`, `rtrim`, `btrim`, `locate`, `conv`, `regexp_extract`, `regexp_replace`, `regexp_extract_all`, `regexp_like`, `split`, `initcap`, `mask`, `translate`, `substring_index` (Phase 10); **Phase 16**: `regexp_count`, `regexp_instr`, `regexp_substr`, `split_part`, `find_in_set`, `format_string`, `printf`; **Phase 21**: `btrim`, `locate`, `conv`. DataFrame methods (Phase 12): `sample`, `random_split`, `first`, `head`, `tail`, `take`, `is_empty`, `to_json`, `to_pandas`, `explain`, `print_schema`, `summary`, `to_df`, `select_expr`, `col_regex`, `with_columns`, `with_columns_renamed`, `stat()` (cov/corr), `na()` (fill/drop), `freq_items`, `approx_quantile`, `crosstab`, `melt`, `sample_by`, etc. See [PYTHON_API.md](PYTHON_API.md) for the full Python API.
+Additional string: `length`, `trim`, `ltrim`, `rtrim`, `btrim`, `locate`, `conv`, `regexp_extract`, `regexp_replace`, `regexp_extract_all`, `regexp_like`, `split`, `initcap`, `mask`, `translate`, `substring_index` (Phase 10); **Phase 16**: `regexp_count`, `regexp_instr`, `regexp_substr`, `split_part`, `find_in_set`, `format_string`, `printf`; **Phase 21**: `btrim`, `locate`, `conv`. DataFrame methods (Phase 12): `sample`, `random_split`, `first`, `head`, `tail`, `take`, `is_empty`, `to_json`, `to_pandas`, `explain`, `print_schema`, `summary`, `to_df`, `select_expr`, `col_regex`, `with_columns`, `with_columns_renamed`, `stat()` (cov/corr), `na()` (fill/drop), `freq_items`, `approx_quantile`, `crosstab`, `melt`, `sample_by`, etc.
 
 ### Datetime
 
@@ -146,7 +133,7 @@ Math (radians): `sin()`, `cos()`, `tan()`, `asin()`, `acos()`, `atan()`, `atan2(
 
 ### Parity
 
-Behavior is validated against PySpark on **159 parity fixtures** (~283+ functions); see [PARITY_STATUS.md](PARITY_STATUS.md). Known differences are in [PYSPARK_DIFFERENCES.md](PYSPARK_DIFFERENCES.md). CI (GitHub Actions) runs format, clippy, audit, deny, Rust tests, Python lint (ruff format, ruff check, mypy), and Python tests on every push/PR. Locally, run `make check-full` for the same full check.
+Behavior is validated against PySpark on **159 parity fixtures** (~283+ functions); see [PARITY_STATUS.md](PARITY_STATUS.md). Known differences are in [PYSPARK_DIFFERENCES.md](PYSPARK_DIFFERENCES.md). CI (GitHub Actions) runs format, clippy, audit, deny, Rust tests, and parity tests on every push/PR.
 
 For roadmap and Sparkless integration phases (Phases 12–22 completed; Phases 23–24 remaining), see [ROADMAP.md](ROADMAP.md).
 

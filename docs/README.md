@@ -11,9 +11,9 @@ This page is the **legacy doc index**. The full documentation is built with [MkD
 | [PARITY_STATUS](PARITY_STATUS.md) | PySpark parity coverage matrix (159 fixtures; 3 plan fixtures; Phases 12–25 + signature alignment + gap closure) |
 | [PYSPARK_DIFFERENCES](PYSPARK_DIFFERENCES.md) | Known divergences from PySpark (window, SQL, Delta, rand/randn semantics; DataFrame cube/rollup/write/saveAsTable and stubs; in-memory tables and catalog; Phase 8 + gap closure) |
 | [ROBIN_SPARKLESS_MISSING](ROBIN_SPARKLESS_MISSING.md) | What Sparkless has and robin-sparkless does not (or stub only); XML/XPath/sentences deferred |
-| [PYTHON_API](PYTHON_API.md) | Python API contract (Phase 4 PyO3 bridge): build, install, signatures; optional SQL and Delta |
+| [PYTHON_API](PYTHON_API.md) | Historical Python API contract for the now-removed in-tree PyO3 bridge; kept for reference only |
 | [SIGNATURE_GAP_ANALYSIS](SIGNATURE_GAP_ANALYSIS.md) | PySpark vs robin-sparkless signature gap analysis (params, types, defaults) and recommendations |
-| [SIGNATURE_ALIGNMENT_TASKS](SIGNATURE_ALIGNMENT_TASKS.md) | Checklist to align Python param names to PySpark (column→col, add optional, etc.) |
+| [SIGNATURE_ALIGNMENT_TASKS](SIGNATURE_ALIGNMENT_TASKS.md) | Checklist to align Python param names to PySpark (historical, for the previous Python bindings) |
 | [CONVERTER_STATUS](CONVERTER_STATUS.md) | Sparkless → robin-sparkless fixture converter |
 | [SPARKLESS_PARITY_STATUS](SPARKLESS_PARITY_STATUS.md) | Phase 5: pass/fail and failure reasons for converted fixtures |
 | [FULL_BACKEND_ROADMAP](FULL_BACKEND_ROADMAP.md) | Phased plan to full Sparkless backend replacement (Phases 12–25 + gap closure; ~295+ functions, 159 fixtures, plan interpreter; Phase 26 crate publish, Phase 27 Sparkless integration) |

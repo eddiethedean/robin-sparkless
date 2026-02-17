@@ -37,9 +37,6 @@ pub mod sql;
 #[cfg(feature = "delta")]
 pub mod delta;
 
-#[cfg(feature = "pyo3")]
-pub mod python;
-
 pub use column::Column;
 pub use dataframe::{
     CubeRollupData, DataFrame, GroupedData, JoinType, PivotedGroupedData, SaveMode, WriteFormat,

@@ -36,7 +36,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Planned
 
-- **Phase 26 – Publish crate**: Prepare and publish robin-sparkless to crates.io (and optionally PyPI via maturin). See [ROADMAP.md](docs/ROADMAP.md) for details.
+- **Phase 26 – Publish crate**: Prepare and publish robin-sparkless to crates.io. See [ROADMAP.md](docs/ROADMAP.md) for details.
 
 ## [0.11.0] - 2026-02-17
 

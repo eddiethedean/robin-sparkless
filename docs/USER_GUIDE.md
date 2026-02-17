@@ -11,7 +11,6 @@ Robin Sparkless is a **PySpark-style DataFrame library** that runs in Rust with 
 - Familiar APIs: `SparkSession`, `DataFrame`, `Column`, `filter`, `select`, `group_by`, etc.
 - **Lazy by default**: transformations extend the plan; only actions (`collect`, `show`, `count`, `write`) trigger execution—aligns with PySpark and enables Polars query optimization.
 - Fast execution on Polars
-- Rust-first with optional Python bindings (PyO3)
 
 ---
 
@@ -33,28 +32,11 @@ robin-sparkless = { version = "0.11.0", features = ["sql"] }   # spark.sql(), te
 robin-sparkless = { version = "0.11.0", features = ["delta"] }  # Delta Lake read/write
 ```
 
-### Python
-
-Install from PyPI:
-
-```bash
-pip install robin-sparkless
-```
-
-Or build from source with SQL support:
-
-```bash
-pip install maturin
-maturin develop --features "pyo3,sql"
-```
-
 ---
 
 ## Getting Started
 
 ### Your First Session
-
-**Rust**
 
 ```rust
 use robin_sparkless::SparkSession;
@@ -64,17 +46,7 @@ let spark = SparkSession::builder()
     .get_or_create();
 ```
 
-**Python**
-
-```python
-import robin_sparkless as rs
-
-spark = rs.SparkSession.builder().app_name("my_app").get_or_create()
-```
-
 ### Creating a DataFrame
-
-**From tuples (Rust, 3 columns: id, age, name)**
 
 ```rust
 let df = spark.create_dataframe(
@@ -85,32 +57,6 @@ let df = spark.create_dataframe(
     ],
     vec!["id", "age", "name"],
 )?;
-```
-
-**From tuples (Python)**
-
-```python
-df = spark.createDataFrame(
-    [(1, 25, "Alice"), (2, 30, "Bob"), (3, 35, "Charlie")],
-    ["id", "age", "name"],
-)
-```
-
-**From rows with arbitrary schema (Python)**
-
-Use `createDataFrame(data, schema=None)` for list of dicts (schema inferred), list of tuples with column names, DDL string (e.g. `"name: string, age: int"` or nested `addr struct<city:string>, tags array<string>`), or explicit schema:
-
-```python
-# List of dicts, schema inferred
-df = spark.createDataFrame([
-    {"id": 1, "name": "Alice", "score": 95.5},
-    {"id": 2, "name": "Bob", "score": 87.0},
-])
-
-# Or with explicit schema (list of (name, dtype_str))
-schema = [("id", "bigint"), ("name", "string"), ("score", "double")]
-rows = [{"id": 1, "name": "Alice", "score": 95.5}, {"id": 2, "name": "Bob", "score": 87.0}]
-df = spark.createDataFrame(rows, schema)
 ```
 
 **From files**
@@ -129,123 +75,41 @@ let df = spark.read_json("data.json")?;
 
 Keep rows that satisfy a condition.
 
-**Rust**
-
 ```rust
 use robin_sparkless::{col, lit_i64};
 
 let adults = df.filter(col("age").gt(lit_i64(25).into_expr()).into_expr())?;
 ```
 
-**Python**
-
-```python
-adults = df.filter(rs.col("age") > rs.lit(25))
-```
-
 ### Select
 
-Choose columns (and optionally transform them).
-
-```python
-# Select specific columns
-df2 = df.select(["id", "name"])
-
-# Select with expressions
-df2 = df.select([rs.upper(rs.col("name")).alias("name_upper"), rs.col("age")])
-```
+Choose columns (and optionally transform them) using `select` and expressions.
 
 ### With Column
 
-Add or replace a column.
+Add or replace a column with computed values using `with_column` or `with_column_expr`.
 
-```python
-df2 = df.with_column("age_next_year", rs.col("age") + 1)
-df2 = df.with_column("name_upper", rs.upper(rs.col("name")))
-```
+### Order By and Limit
 
-### Order By
-
-Sort by one or more columns.
-
-```python
-df2 = df.order_by(["age"], ascending=[False])  # oldest first
-```
-
-### Limit
-
-Take the first N rows.
-
-```python
-df2 = df.limit(10)
-```
+Sort by one or more columns and take the first N rows using `order_by` and `limit`.
 
 ---
 
 ## Joins
 
-Join two DataFrames on common columns.
-
-```python
-joined = left.join(right, ["dept_id"], "inner")
-joined = left.join(right, ["dept_id"], "left")
-```
-
-Join types: `"inner"`, `"left"`, `"right"`, `"outer"`.
+Join two DataFrames on common columns using `DataFrame::join` with `JoinType` (`Inner`, `Left`, `Right`, `Outer`).
 
 ---
 
 ## Aggregations
 
-### Group By and Aggregate
-
-```python
-# Count per group
-grouped = df.group_by(["dept"])
-result = grouped.count()
-
-# Custom aggregates
-result = grouped.agg([
-    rs.sum(rs.col("sales")).alias("total_sales"),
-    rs.avg(rs.col("score")).alias("avg_score"),
-])
-```
-
-### Common Aggregates
-
-- `count`, `sum`, `avg`, `min`, `max`
-- `count_distinct`, `approx_count_distinct`
-- `stddev`, `stddev_pop`, `var_pop`, `var_samp`
+Group and aggregate with `group_by` and `GroupedData` methods such as `count`, `sum`, `avg`, `min`, `max`, and more.
 
 ---
 
 ## Reading and Writing Data
 
-### Reading
-
-```python
-# CSV (infers schema)
-df = spark.read_csv("data.csv")
-
-# Parquet (schema from file)
-df = spark.read_parquet("data.parquet")
-
-# JSON (line-delimited)
-df = spark.read_json("data.json")
-```
-
-With options:
-
-```python
-df = spark.read().option("header", "true").option("delimiter", ";").format("csv").load("data.csv")
-```
-
-### Writing
-
-```python
-df.write().mode("overwrite").format("parquet").save("output.parquet")
-df.write().mode("append").format("csv").save("output.csv")
-```
+Use `SparkSession::read_csv`, `read_parquet`, and `read_json` to read data, and `DataFrame::write` (writer API) to write Parquet/CSV/JSON.
 
 ---
 
@@ -253,9 +117,9 @@ df.write().mode("append").format("csv").save("output.csv")
 
 With the `sql` feature, you can run SQL against temp views.
 
-```python
-df.createOrReplaceTempView("people")
-result = spark.sql("SELECT name, age FROM people WHERE age > 25 ORDER BY age")
+```rust
+spark.create_or_replace_temp_view("people", df.clone());
+let result = spark.sql("SELECT name, age FROM people WHERE age > 25 ORDER BY age")?;
 ```
 
 Supports: `SELECT`, `FROM`, `JOIN`, `WHERE`, `GROUP BY`, `ORDER BY`, `LIMIT`. Built-in functions (e.g. `UPPER`, `LOWER`) and registered UDFs work in SQL.
@@ -374,7 +238,7 @@ Example `collect()` output for the quick-start DataFrame (id, age, name):
 ## Next Steps
 
 - [Quickstart](QUICKSTART.md) — Build from source, more examples
-- [Python API](PYTHON_API.md) — Full Python API reference
+For end-to-end API details, see the Rust docs on docs.rs.
 - [UDF Guide](UDF_GUIDE.md) — Custom functions in detail
 - [Persistence Guide](PERSISTENCE_GUIDE.md) — Temp views, tables, warehouse
 - [PySpark Differences](PYSPARK_DIFFERENCES.md) — How Robin differs from PySpark

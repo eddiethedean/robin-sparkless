@@ -7,8 +7,6 @@ This document describes how to cut a release and publish the crate to [crates.io
 So that local development and CI use the same toolchains and tools:
 
 - **Rust**: [rust-toolchain.toml](../rust-toolchain.toml) pins the Rust version (e.g. 1.89.0). CI uses the same `toolchain` value in `.github/workflows/ci.yml` and `.github/workflows/release.yml`.
-- **Python**: [.python-version](../.python-version) specifies the Python version (e.g. 3.10). CI uses `python-version-file: ".python-version"` with `actions/setup-python@v5`.
-- **Python deps (CI)**: [requirements-ci.txt](../requirements-ci.txt) pins maturin, pytest, ruff, and mypy for the Python lint and test jobs.
 - **cargo-nextest**: CI installs a fixed version (e.g. 0.9.92) in the workflow. Use the same version locally if you use nextest.
 
 ## Prerequisites
@@ -37,6 +35,6 @@ So that local development and CI use the same toolchains and tools:
 - Tags must match the version in `Cargo.toml` (e.g. tag `v0.3.0` only when `version = "0.3.0"`).
 - Do not re-tag or overwrite tags; crates.io does not allow republishing the same version.
 
-## Optional: PyPI wheel
+## Optional: Other language bindings
 
-Phase 26 leaves PyPI publication as optional. To publish Python wheels via maturin in the future, add a step (or separate workflow) that runs `maturin publish --features "pyo3,sql,delta"` using a `PYPI_API_TOKEN` (or similar) secret after the crates.io publish step.
+Phase 26 leaves non-Rust bindings as optional. If you decide to add Python or other language bindings in the future, publish them from a separate repository that depends on this crate via FFI, with their own release workflows and package registries.

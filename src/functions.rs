@@ -932,16 +932,6 @@ pub fn call_udf(name: &str, cols: &[Column]) -> Result<Column, PolarsError> {
     })?;
     let case_sensitive = session.is_case_sensitive();
 
-    // Python UDF: eager execution via UdfCall
-    #[cfg(feature = "pyo3")]
-    if session
-        .udf_registry
-        .get_python_udf(name, case_sensitive)
-        .is_some()
-    {
-        return Ok(Column::from_udf_call(name.to_string(), cols.to_vec()));
-    }
-
     // Rust UDF: build lazy Expr
     let udf = session
         .udf_registry
