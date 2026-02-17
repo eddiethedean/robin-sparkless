@@ -1,0 +1,40 @@
+{
+  "name": "union_camelCase_issue510",
+  "input": {
+    "schema": [
+      {"name": "x", "type": "int"},
+      {"name": "y", "type": "string"}
+    ],
+    "rows": [
+      [1, "a"],
+      [2, "b"]
+    ]
+  },
+  "plan": [
+    {
+      "op": "unionByName",
+      "payload": {
+        "otherData": [
+          [3, "c"],
+          [4, "d"]
+        ],
+        "otherSchema": [
+          {"name": "x", "type": "int"},
+          {"name": "y", "type": "string"}
+        ]
+      }
+    }
+  ],
+  "expected": {
+    "schema": [
+      {"name": "x", "type": "int"},
+      {"name": "y", "type": "string"}
+    ],
+    "rows": [
+      [1, "a"],
+      [2, "b"],
+      [3, "c"],
+      [4, "d"]
+    ]
+  }
+}

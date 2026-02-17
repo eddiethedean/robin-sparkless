@@ -1,0 +1,40 @@
+{
+  "name": "union_by_name_issue510",
+  "input": {
+    "schema": [
+      {"name": "Name", "type": "string"},
+      {"name": "Value", "type": "int"}
+    ],
+    "rows": [
+      ["Alice", 1],
+      ["Bob", 2]
+    ]
+  },
+  "plan": [
+    {
+      "op": "unionByName",
+      "payload": {
+        "other_data": [
+          ["Charlie", 3],
+          ["Diana", 4]
+        ],
+        "other_schema": [
+          {"name": "Name", "type": "string"},
+          {"name": "Value", "type": "int"}
+        ]
+      }
+    }
+  ],
+  "expected": {
+    "schema": [
+      {"name": "Name", "type": "string"},
+      {"name": "Value", "type": "int"}
+    ],
+    "rows": [
+      ["Alice", 1],
+      ["Bob", 2],
+      ["Charlie", 3],
+      ["Diana", 4]
+    ]
+  }
+}

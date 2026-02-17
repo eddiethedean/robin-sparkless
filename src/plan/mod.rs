@@ -37,7 +37,12 @@ pub fn execute_plan(
             .get("op")
             .and_then(Value::as_str)
             .ok_or_else(|| PlanError::InvalidPlan("each plan step must have 'op' string".into()))?;
-        let payload = op_obj.get("payload").cloned().unwrap_or(Value::Null);
+        let mut payload = op_obj.get("payload").cloned().unwrap_or(Value::Null);
+        // Sparkless may put other_data/other_schema at op level (sibling to payload) or use camelCase.
+        // Merge into payload so apply_op finds them (issue #510).
+        if matches!(op_name, "join" | "union" | "unionByName") {
+            payload = merge_other_into_payload(payload, op_obj);
+        }
 
         df = apply_op(session, df, op_name, payload)?;
     }
@@ -66,6 +71,47 @@ impl std::fmt::Display for PlanError {
 }
 
 impl std::error::Error for PlanError {}
+
+/// Merge other_data/other_schema from op into payload if missing. Supports snake_case and camelCase.
+fn merge_other_into_payload(payload: Value, op: &serde_json::Map<String, Value>) -> Value {
+    fn get(obj: &serde_json::Map<String, Value>, snake: &str, camel: &str) -> Option<Value> {
+        obj.get(snake).or_else(|| obj.get(camel)).cloned()
+    }
+    let mut p = match payload {
+        Value::Object(m) => m,
+        _ => return payload,
+    };
+    if p.get("other_data").or_else(|| p.get("otherData")).is_none() {
+        if let Some(v) = get(op, "other_data", "otherData") {
+            p.insert("other_data".into(), v);
+        }
+    }
+    if p.get("other_schema")
+        .or_else(|| p.get("otherSchema"))
+        .is_none()
+    {
+        if let Some(v) = get(op, "other_schema", "otherSchema") {
+            p.insert("other_schema".into(), v);
+        }
+    }
+    Value::Object(p)
+}
+
+/// Get other_data from payload (snake_case or camelCase).
+fn get_other_data(payload: &Value) -> Option<&Vec<Value>> {
+    payload
+        .get("other_data")
+        .or_else(|| payload.get("otherData"))
+        .and_then(Value::as_array)
+}
+
+/// Get other_schema from payload (snake_case or camelCase).
+fn get_other_schema(payload: &Value) -> Option<&Vec<Value>> {
+    payload
+        .get("other_schema")
+        .or_else(|| payload.get("otherSchema"))
+        .and_then(Value::as_array)
+}
 
 fn apply_op(
     session: &SparkSession,
@@ -276,13 +322,9 @@ fn apply_op(
             }
         }
         "join" => {
-            let other_data = payload
-                .get("other_data")
-                .and_then(Value::as_array)
+            let other_data = get_other_data(&payload)
                 .ok_or_else(|| PlanError::InvalidPlan("join must have 'other_data'".into()))?;
-            let other_schema = payload
-                .get("other_schema")
-                .and_then(Value::as_array)
+            let other_schema = get_other_schema(&payload)
                 .ok_or_else(|| PlanError::InvalidPlan("join must have 'other_schema'".into()))?;
             let on = payload
                 .get("on")
@@ -329,13 +371,9 @@ fn apply_op(
                 .map_err(PlanError::Session)
         }
         "union" => {
-            let other_data = payload
-                .get("other_data")
-                .and_then(Value::as_array)
+            let other_data = get_other_data(&payload)
                 .ok_or_else(|| PlanError::InvalidPlan("union must have 'other_data'".into()))?;
-            let other_schema = payload
-                .get("other_schema")
-                .and_then(Value::as_array)
+            let other_schema = get_other_schema(&payload)
                 .ok_or_else(|| PlanError::InvalidPlan("union must have 'other_schema'".into()))?;
             let schema_vec: Vec<(String, String)> = other_schema
                 .iter()
@@ -356,18 +394,12 @@ fn apply_op(
             df.union(&other_df).map_err(PlanError::Session)
         }
         "unionByName" => {
-            let other_data = payload
-                .get("other_data")
-                .and_then(Value::as_array)
-                .ok_or_else(|| {
-                    PlanError::InvalidPlan("unionByName must have 'other_data'".into())
-                })?;
-            let other_schema = payload
-                .get("other_schema")
-                .and_then(Value::as_array)
-                .ok_or_else(|| {
-                    PlanError::InvalidPlan("unionByName must have 'other_schema'".into())
-                })?;
+            let other_data = get_other_data(&payload).ok_or_else(|| {
+                PlanError::InvalidPlan("unionByName must have 'other_data'".into())
+            })?;
+            let other_schema = get_other_schema(&payload).ok_or_else(|| {
+                PlanError::InvalidPlan("unionByName must have 'other_schema'".into())
+            })?;
             let schema_vec: Vec<(String, String)> = other_schema
                 .iter()
                 .filter_map(|v| {
