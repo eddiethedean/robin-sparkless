@@ -92,15 +92,15 @@ Grouped Python UDF aggregations (pandas_udf-style GROUPED_AGG) use a dedicated s
 
 ### join
 
-- **payload**: `{"other_data": [[...], ...], "other_schema": [{"name": "...", "type": "..."}, ...], "on": ["id"], "how": "inner"|"left"|"right"|"outer"}`. The right side is built from `other_data` and `other_schema`; join keys are `on`; `how` is the join type.
+- **payload**: `{"other_data": [[...], ...], "other_schema": [{"name": "...", "type": "..."}, ...], "on": ["id"], "how": "inner"|"left"|"right"|"outer"}`. The right side is built from `other_data` and `other_schema`; join keys are `on`; `how` is the join type. Accepts camelCase (`otherData`, `otherSchema`) and keys at op level (sibling to `payload`) for Sparkless compatibility (#510).
 
 ### union
 
-- **payload**: `{"other_data": [[...], ...], "other_schema": [{"name": "...", "type": "..."}, ...]}`. Schema must match the current DataFrame (column order and types). Concatenates rows.
+- **payload**: `{"other_data": [[...], ...], "other_schema": [{"name": "...", "type": "..."}, ...]}`. Schema must match the current DataFrame (column order and types). Concatenates rows. Accepts camelCase and op-level keys (#510).
 
 ### unionByName
 
-- **payload**: Same as **union**; columns are matched by name, allowing different order.
+- **payload**: Same as **union**; columns are matched by name, allowing different order. Accepts camelCase and op-level keys (#510).
 
 ### distinct
 
