@@ -39,6 +39,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Phase 26 – Publish crate**: Prepare and publish robin-sparkless to crates.io. See [ROADMAP.md](docs/ROADMAP.md) for details.
 
+## [0.11.2] - 2026-02-17
+
+### Added
+
+- **#497 – between, power (**), cast in logical plan (PySpark parity)** — Plan expression interpreter supports `between(left, lower, upper)` and binary op `**` / `pow` for filter/withColumn; cast already supported as fn. Plan fixture `between_power_cast.json`. Fixes #497.
+- **#496 – groupBy + agg alias in logical plan** — `parse_aggs` accepts optional `alias` per agg so PySpark-style names (e.g. `sum(v)`, `count(v)`) work. Plan fixture `groupby_agg_sum_count.json`. Fixes #496.
+- **#498 – row_number() over (partition by col) in logical plan** — Plan supports `{"fn": "row_number", "window": {"partition_by": ["col", ...]}}` in withColumn/select. Plan fixture `window_row_number.json`. Fixes #498.
+- **#495 – empty DataFrame with schema + parquet table append** — Regression tests for empty df with schema, saveAsTable(Overwrite), then append one row (in-memory and warehouse paths). Fixes #495.
+
 ## [0.11.1] - 2026-02-17
 
 ### Changed
