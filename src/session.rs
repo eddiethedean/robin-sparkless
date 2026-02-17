@@ -1980,6 +1980,89 @@ mod tests {
         assert_eq!(spark.table("t_append").unwrap().count().unwrap(), 2);
     }
 
+    /// Empty DataFrame with explicit schema: saveAsTable(Overwrite) then append one row (issue #495).
+    #[test]
+    fn test_save_as_table_empty_df_then_append() {
+        use crate::dataframe::SaveMode;
+        use serde_json::json;
+
+        let spark = SparkSession::builder().app_name("test").get_or_create();
+        let schema = vec![
+            ("id".to_string(), "bigint".to_string()),
+            ("name".to_string(), "string".to_string()),
+        ];
+        let empty_df = spark
+            .create_dataframe_from_rows(vec![], schema.clone())
+            .unwrap();
+        assert_eq!(empty_df.count().unwrap(), 0);
+
+        empty_df
+            .write()
+            .save_as_table(&spark, "t_empty_append", SaveMode::Overwrite)
+            .unwrap();
+        let r1 = spark.table("t_empty_append").unwrap();
+        assert_eq!(r1.count().unwrap(), 0);
+        let cols = r1.columns().unwrap();
+        assert!(cols.contains(&"id".to_string()));
+        assert!(cols.contains(&"name".to_string()));
+
+        let one_row = spark
+            .create_dataframe_from_rows(vec![vec![json!(1), json!("a")]], schema)
+            .unwrap();
+        one_row
+            .write()
+            .save_as_table(&spark, "t_empty_append", SaveMode::Append)
+            .unwrap();
+        let r2 = spark.table("t_empty_append").unwrap();
+        assert_eq!(r2.count().unwrap(), 1);
+    }
+
+    /// Empty DataFrame with schema + warehouse: saveAsTable(Overwrite) then append (issue #495 disk path).
+    #[test]
+    fn test_save_as_table_empty_df_warehouse_then_append() {
+        use crate::dataframe::SaveMode;
+        use serde_json::json;
+        use std::sync::atomic::{AtomicU64, Ordering};
+        use tempfile::TempDir;
+
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        let n = COUNTER.fetch_add(1, Ordering::SeqCst);
+        let dir = TempDir::new().unwrap();
+        let warehouse = dir.path().join(format!("wh_{n}"));
+        std::fs::create_dir_all(&warehouse).unwrap();
+        let spark = SparkSession::builder()
+            .app_name("test")
+            .config(
+                "spark.sql.warehouse.dir",
+                warehouse.as_os_str().to_str().unwrap(),
+            )
+            .get_or_create();
+
+        let schema = vec![
+            ("id".to_string(), "bigint".to_string()),
+            ("name".to_string(), "string".to_string()),
+        ];
+        let empty_df = spark
+            .create_dataframe_from_rows(vec![], schema.clone())
+            .unwrap();
+        empty_df
+            .write()
+            .save_as_table(&spark, "t_empty_wh", SaveMode::Overwrite)
+            .unwrap();
+        let r1 = spark.table("t_empty_wh").unwrap();
+        assert_eq!(r1.count().unwrap(), 0);
+
+        let one_row = spark
+            .create_dataframe_from_rows(vec![vec![json!(1), json!("a")]], schema)
+            .unwrap();
+        one_row
+            .write()
+            .save_as_table(&spark, "t_empty_wh", SaveMode::Append)
+            .unwrap();
+        let r2 = spark.table("t_empty_wh").unwrap();
+        assert_eq!(r2.count().unwrap(), 1);
+    }
+
     #[test]
     fn test_save_as_table_ignore() {
         use crate::dataframe::SaveMode;
