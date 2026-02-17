@@ -13,7 +13,7 @@ This document analyzes the [Sparkless](https://github.com/eddiethedean/sparkless
 | **API** | `from sparkless.sql import SparkSession` | `robin_sparkless::{SparkSession, DataFrame}` |
 | **Goal** | Run existing PySpark tests 10x faster | **Become the execution backend** for Sparkless |
 
-**Integration path**: Sparkless (Python) would use PyO3 or FFI to call robin-sparkless for DataFrame execution. Robin-sparkless implements the Polars-backed engine; Sparkless keeps the PySpark API surface, schema parsing, and Python compatibility. The **PyO3 bridge** (Phase 4) is implemented: optional `pyo3` feature exposes the `robin_sparkless` Python module; see [PYTHON_API.md](PYTHON_API.md) for the API contract.
+**Integration path**: Sparkless (Python) would use FFI to call robin-sparkless for DataFrame execution. Robin-sparkless implements the Polars-backed engine; Sparkless keeps the PySpark API surface, schema parsing, and Python compatibility. The focus of this repo is now the Rust engine and its parity fixtures; Python bindings live out-of-tree.
 
 ---
 
@@ -252,7 +252,7 @@ Operations are queued by Sparkless as `(op_name, payload)`. Payloads are **live 
 
 So a robin backend **cannot** be “send op name + JSON to Rust”. It must either:
 
-1. **Translate** Sparkless types to robin_sparkless types in Python: walk Column/ColumnOperation trees and build `robin_sparkless.Column` (and robin DataFrame API calls). This is comparable in spirit to `PolarsExpressionTranslator` + `PolarsOperationExecutor` but targeting the robin Python API. Op-level dispatch (filter → `df.filter`, select → `df.select`, …) is 1:1 with [PYTHON_API.md](PYTHON_API.md); the bulk of the work is **expression translation**.
+1. **Translate** Sparkless types to robin_sparkless types in Python or another host language: walk Column/ColumnOperation trees and build `robin_sparkless::Column` (and robin DataFrame API calls) via FFI. This is comparable in spirit to `PolarsExpressionTranslator` + `PolarsOperationExecutor`; the bulk of the work is **expression translation**.
 2. **Refactor Sparkless** to emit a serializable op format (e.g. expr strings or JSON) that backends interpret. Then robin could implement a thin interpreter. That would be a larger change in Sparkless.
 
 The surface to mirror for translation is:
@@ -286,13 +286,12 @@ The surface to mirror for translation is:
 
 ### 7.5 Dependency and install constraints (Sparkless → robin backend)
 
-When Sparkless is used with `backend_type="robin"` (e.g. `SparkSession.builder.config("spark.sparkless.backend", "robin").getOrCreate()` or `SPARKLESS_BACKEND=robin`), the **robin_sparkless** Python package must be available. It is an **optional** dependency of Sparkless:
+When Sparkless is used with `backend_type="robin"` (e.g. `SparkSession.builder.config("spark.sparkless.backend", "robin").getOrCreate()` or `SPARKLESS_BACKEND=robin`), it must be able to call the **robin-sparkless** Rust crate via FFI. The exact packaging of those bindings (e.g., a Python wheel maintained in the Sparkless repo) is intentionally left out-of-tree:
 
-- **Install from source (robin-sparkless repo)**: From the robin-sparkless repo root, run `maturin develop --features "pyo3,sql,delta"` (or `pyo3` only for minimal build). This builds the extension and installs it into the current environment. Requires Rust (stable) and Python 3.8+. Full check (Rust + Python lint + tests): `make check-full`.
-- **Install from PyPI (when published)**: `pip install robin_sparkless` will install the wheel. No Rust required.
-- **Build constraints**: The extension is built with PyO3 0.24. Python 3.8–3.12 are typically supported; check the robin-sparkless release for compatible manylinux/ABI tags.
+- **Rust dependency**: Sparkless (or a companion binding crate) depends on the `robin-sparkless` crate from crates.io and exposes a thin FFI surface.
+- **Python-facing package (optional, out-of-tree)**: If Sparkless wants to offer a `sparkless[robin]` extra, that extra would depend on a separately maintained Python package that wraps the Rust crate via FFI. That package is not built or published from this repository.
 
-If `robin_sparkless` is not installed and the user selects the robin backend, `BackendFactory.create_materializer("robin")` succeeds (the module is importable), but the first call to `RobinMaterializer.materialize(...)` will raise a clear `RuntimeError` asking to install robin_sparkless. Sparkless can document the robin backend in `docs/backend_selection.md` and add an optional extra, e.g. `pip install sparkless[robin]`, that depends on `robin_sparkless` when that package is published.
+If the FFI bindings are not available and the user selects the robin backend, `BackendFactory.create_materializer("robin")` should surface a clear error explaining how to enable the robin backend (for example, by installing the appropriate extra in the Sparkless project).
 
 ---
 

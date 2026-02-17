@@ -1,9 +1,0 @@
-# Pinned versions for CI; keep in sync with .github/workflows/ci.yml
-# Install with: pip install -r requirements-ci.txt
-maturin>=1.4,<2
-pytest>=8,<9
-ruff>=0.8
-# mypy 1.10+ dropped support for python_version = "3.8" in config; we support 3.8.
-mypy>=1.4,<1.10
-# PySpark (for regenerate_expected_from_pyspark.py and parity tests). Requires Java 17+.
-pyspark>=3.5

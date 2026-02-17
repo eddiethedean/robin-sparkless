@@ -433,14 +433,8 @@ pub struct SparkSession {
     pub(crate) tables: TableCatalog,
     /// Databases/schemas created via CREATE DATABASE / CREATE SCHEMA. Session-scoped; used by listDatabases/databaseExists.
     pub(crate) databases: DatabaseCatalog,
-    /// UDF registry: Rust and Python UDFs. Session-scoped.
+    /// UDF registry: Rust UDFs. Session-scoped.
     pub(crate) udf_registry: UdfRegistry,
-    /// Python UDF execution batch size for vectorized UDFs (non-grouped). usize::MAX = no chunking.
-    #[cfg(feature = "pyo3")]
-    pub(crate) python_udf_batch_size: usize,
-    /// Maximum concurrent Python UDF batches/groups to execute. 1 = serial.
-    #[cfg(feature = "pyo3")]
-    pub(crate) python_udf_max_concurrent_batches: usize,
 }
 
 impl SparkSession {
@@ -449,17 +443,6 @@ impl SparkSession {
         master: Option<String>,
         config: HashMap<String, String>,
     ) -> Self {
-        #[cfg(feature = "pyo3")]
-        let batch_size = config
-            .get("spark.robin.pythonUdf.batchSize")
-            .and_then(|s| s.parse::<usize>().ok())
-            .unwrap_or(usize::MAX);
-        #[cfg(feature = "pyo3")]
-        let max_concurrent = config
-            .get("spark.robin.pythonUdf.maxConcurrentBatches")
-            .and_then(|s| s.parse::<usize>().ok())
-            .unwrap_or(1);
-
         SparkSession {
             app_name,
             master,
@@ -468,10 +451,6 @@ impl SparkSession {
             tables: Arc::new(Mutex::new(HashMap::new())),
             databases: Arc::new(Mutex::new(HashSet::new())),
             udf_registry: UdfRegistry::new(),
-            #[cfg(feature = "pyo3")]
-            python_udf_batch_size: batch_size,
-            #[cfg(feature = "pyo3")]
-            python_udf_max_concurrent_batches: max_concurrent,
         }
     }
 
@@ -1536,10 +1515,6 @@ impl SparkSession {
             tables: self.tables.clone(),
             databases: self.databases.clone(),
             udf_registry: self.udf_registry.clone(),
-            #[cfg(feature = "pyo3")]
-            python_udf_batch_size: self.python_udf_batch_size,
-            #[cfg(feature = "pyo3")]
-            python_udf_max_concurrent_batches: self.python_udf_max_concurrent_batches,
         })
     }
 }

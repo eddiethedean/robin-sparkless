@@ -4,7 +4,7 @@
 
 **Primary Goal**: Implement a Rust crate whose behavior closely emulates PySpark's `SparkSession` / `DataFrame` / `Column` semantics, but runs entirely in Rust with Polars as the execution engine (no JVM, no Python runtime).
 
-**Sparkless Integration Goal**: Robin-sparkless is designed to **replace the backend logic** of [Sparkless](https://github.com/eddiethedean/sparkless) (the Python PySpark drop-in). Sparkless would call robin-sparkless via PyO3/FFI for DataFrame execution. See [SPARKLESS_INTEGRATION_ANALYSIS.md](SPARKLESS_INTEGRATION_ANALYSIS.md) for architecture mapping, structural learnings, and test conversion strategy.
+**Sparkless Integration Goal**: Robin-sparkless is designed to **replace the backend logic** of [Sparkless](https://github.com/eddiethedean/sparkless) (the Python PySpark drop-in). Sparkless would call robin-sparkless via FFI for DataFrame execution. See [SPARKLESS_INTEGRATION_ANALYSIS.md](SPARKLESS_INTEGRATION_ANALYSIS.md) for architecture mapping, structural learnings, and test conversion strategy.
 
 **Constraints**:
 - Use Polars as the underlying dataframe/expressions engine.
@@ -73,7 +73,7 @@ The path to full backend replacement is planned in [FULL_BACKEND_ROADMAP.md](FUL
 | **1. Foundation** | Structural alignment, case sensitivity, fixture converter | 2–3 weeks |
 | **2. High-Value Functions** | String (length, trim, regexp_*), datetime (to_date, date_add), math (stddev, variance) | 4–6 weeks |
 | **3. DataFrame Methods** | union, distinct, drop, fillna, limit, withColumnRenamed | 3–4 weeks |
-| **4. PyO3 Bridge** | Python bindings so Sparkless can call robin-sparkless | 4–6 weeks |
+| **4. (Historical) PyO3 Bridge** | Python bindings so Sparkless can call robin-sparkless (since removed from this repo; future bindings expected out-of-tree) | 4–6 weeks |
 | **5. Test Conversion** | Convert 50+ Sparkless tests, CI integration | 2–3 weeks |
 | **6. Broad Function Parity** | Array (array_position, array_remove, posexplode ✅; array_repeat, array_flatten ✅ Phase 8), Map/JSON/string 6.4/window ✅ | 8–12 weeks |
 | **7. SQL & Advanced** | SQL executor, Delta Lake, performance | ✅ **COMPLETED** (optional features) |
@@ -91,10 +91,9 @@ The path to full backend replacement is planned in [FULL_BACKEND_ROADMAP.md](FUL
    - union, unionByName, distinct, drop, dropna, fillna, limit, withColumnRenamed.
    - crossJoin, replace, describe, cache/persist.
 
-9. **PyO3 Bridge** (Phase 4) ✅ **COMPLETED**
-   - Optional `pyo3` feature; `robin_sparkless` Python module with SparkSession, DataFrame, Column, GroupedData.
-   - `create_dataframe`, `read_csv`/`read_parquet`/`read_json`, filter, select, join, group_by, collect (list of dicts), etc.
-   - See [PYTHON_API.md](PYTHON_API.md). Sparkless BackendFactory "robin" option lives in Sparkless repo.
+9. **Historical PyO3 Bridge** (Phase 4) ✅ **COMPLETED**
+   - Earlier phases included an optional `pyo3` feature and `robin_sparkless` Python module with SparkSession, DataFrame, Column, and GroupedData.
+   - That bridge and associated packaging have been removed from this repository; robin-sparkless is now Rust-only. Future Sparkless integration is expected to call the Rust crate via FFI, with bindings living in the Sparkless repo or another host.
 
 10. **Performance & Robustness** (Phase 7) ✅ **COMPLETED**
     - Benchmarks: `cargo bench` compares robin-sparkless vs plain Polars (filter → select → groupBy).
@@ -121,7 +120,7 @@ The path to full backend replacement is planned in [FULL_BACKEND_ROADMAP.md](FUL
 - **Phase 1 – Foundation**: Structural alignment (split dataframe.rs), case sensitivity, fixture converter. *Prereqs done: joins, windows, strings.*
 - **Phase 2 – High-Value Functions**: String (length, trim, regexp_*), datetime (to_date, date_add), math (stddev, variance)
 - **Phase 3 – DataFrame Methods**: union, unionByName, distinct, drop, dropna, fillna, limit, withColumnRenamed ✅ **COMPLETED**
-- **Phase 4 – PyO3 Bridge**: Python bindings for Sparkless to call robin-sparkless ✅ **COMPLETED** (see [PYTHON_API.md](PYTHON_API.md))
+- **Phase 4 – Historical PyO3 Bridge**: Python bindings for Sparkless to call robin-sparkless ✅ **COMPLETED** (bindings have since been removed from this repo; future bindings are expected to live out-of-tree)
 - **Phase 5 – Test Conversion**: Converter extended (join, window, withColumn, union, distinct, drop, dropna, fillna, limit, withColumnRenamed); parity discovers `tests/fixtures/` + `tests/fixtures/converted/`; `make sparkless-parity` (set SPARKLESS_EXPECTED_OUTPUTS); [SPARKLESS_PARITY_STATUS.md](SPARKLESS_PARITY_STATUS.md) for pass/fail; **159 passing** (50+ target met; +10 signature-alignment fixtures) ✅ **COMPLETED**
 - **Phase 6 – Broad Parity**: Array (6a ✅; array_position, array_remove, posexplode via list.eval; array_repeat, array_flatten ✅ Phase 8), Map (6b ✅ Phase 8), JSON (6c ✅), additional string (6e ✅; 6.4 soundex/levenshtein/crc32/xxhash64 ✅ Phase 8), window extensions (6d ✅; percent_rank/cume_dist/ntile/nth_value covered).
 - **Phase 7 – SQL & Advanced** ✅ **COMPLETED**: Optional **SQL** (`sql` feature: `spark.sql()`, temp views); optional **Delta** (`delta` feature: `read_delta`, `read_delta_with_version`, `write_delta`); benchmarks and error-message improvements. See [FULL_BACKEND_ROADMAP.md](FULL_BACKEND_ROADMAP.md) §7.
@@ -460,28 +459,27 @@ To reach **full Sparkless parity** (robin-sparkless as a complete backend replac
 
 ### Phase 26 – Prepare and publish robin-sparkless as a Rust crate (2–3 weeks)
 
-**Goal**: Make the library ready for public use as a Rust dependency and (optionally) a Python wheel before Sparkless integration.
+**Goal**: Make the library ready for public use as a Rust dependency before Sparkless integration.
 
 - **Crate metadata**: Finalize `Cargo.toml` (description, license, repository, keywords, categories); ensure semver and version are release-ready.
 - **API surface**: Review public API for stability; document breaking-change policy (e.g. semver for 0.x); consider `#[deprecated]` or feature flags for experimental APIs.
 - **Documentation**: `cargo doc` builds cleanly; add or expand crate-level and module docs; link from README to docs.rs (or hosted docs).
-- **Release workflow**: Tag releases; publish to [crates.io](https://crates.io) (`cargo publish`); optionally publish Python wheels to PyPI via maturin (e.g. `maturin publish --features "pyo3,sql,delta"`).
+- **Release workflow**: Tag releases; publish to [crates.io](https://crates.io) (`cargo publish`).
 - **CI**: Ensure CI runs full check (format, clippy, audit, deny, tests, benchmarks) on release branches/tags; document how to cut a release in CONTRIBUTING or README.
 
-**Outcome**: `robin-sparkless` is published on crates.io; consumers can add it as a dependency; optional PyPI wheel for Python users; clear release and versioning process.
+**Outcome**: `robin-sparkless` is published on crates.io; consumers can add it as a dependency; clear release and versioning process.
 
 ---
 
-### Phase 27 – Sparkless integration & PyO3 surface (4–6 weeks)
+### Phase 27 – Sparkless integration (4–6 weeks)
 
-**Goal**: Make robin-sparkless a runnable backend for Sparkless and keep the Python API in sync.
+**Goal**: Make robin-sparkless a runnable backend for Sparkless while keeping the Rust API stable.
 
-- **Sparkless repo**: Add "robin" backend option to BackendFactory; when selected, delegate DataFrame execution to robin-sparkless via PyO3 (using the published crate or wheel from Phase 26). After Sparkless refactor, wire `materialize_from_plan` to our `execute_plan`.
-- **Fallback**: When an operation is not supported, raise a clear error or fall back to Python Polars; document behavior.
+- **Sparkless repo**: Add "robin" backend option to BackendFactory; when selected, delegate DataFrame execution to robin-sparkless via FFI using the published Rust crate. After Sparkless refactor, wire `materialize_from_plan` to our `execute_plan`.
+- **Fallback**: When an operation is not supported, raise a clear error or fall back to Sparkless’s existing backend; document behavior.
 - **Target**: 200+ Sparkless tests passing with robin backend (current: 0).
-- **PyO3**: Expose new Rust functions (Phases 20–25) on Python `Column` and module-level API; keep [PYTHON_API.md](PYTHON_API.md) updated.
 
-**Outcome**: Sparkless can run against robin-sparkless; 200+ tests passing; Python API matches full function set.
+**Outcome**: Sparkless can run against robin-sparkless; 200+ tests passing; backend behavior matches the documented function set.
 
 ---
 
