@@ -99,6 +99,7 @@
     "filter_eq_lit",
     "select_reorder",
     "cross_join_small",
-    "select_id_age"
+    "select_id_age",
+    "filter_and_select_core"
   ]
 }
