@@ -1,0 +1,14 @@
+---
+description: Use longer timeouts for potentially long-running commands
+alwaysApply: true
+---
+
+# Command Timeout
+
+When running terminal commands, use a timeout of at least **180000ms (3 minutes)** for commands that may run a long time, such as:
+
+- `make check-full` or `make check`
+- `cargo test` (full suite)
+- Any test or build command that might take > 30 seconds
+
+The default 30-second timeout can cause useful commands to be killed. Use `timeout: 180000` or higher (up to 600000ms) for these cases.
