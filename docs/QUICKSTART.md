@@ -110,6 +110,16 @@ let df = df.with_column_expr("full", concat(&[&col("first"), &col("last")]).into
 let df = df.with_column_expr("joined", concat_ws("-", &[&col("a"), &col("b")]).into_expr())?;
 ```
 
+You can also combine string/regex functions with **select expressions** using
+`DataFrame::select_exprs`:
+
+```rust
+use robin_sparkless::{col, regexp_extract_all, DataFrame};
+
+let expr = regexp_extract_all(&col("s"), r"\\d+").alias("m").into_expr();
+let df2 = df.select_exprs(vec![expr])?;
+```
+
 ### Random (rand, randn)
 
 Use **`with_column`** or **`with_columns`** so each row gets a distinct value (PySpark-like). Optional seed gives reproducible results.
