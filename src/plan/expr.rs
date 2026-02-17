@@ -1,7 +1,7 @@
 //! Expression interpreter: turn serialized expression trees (JSON/serde) into Polars Expr.
 //! Used by the plan interpreter for filter, select, and withColumn payloads.
 
-use polars::prelude::{col, lit, DataType, Expr};
+use polars::prelude::{col, lit, DataType, Expr, Series};
 use serde_json::Value;
 use std::error::Error;
 use std::fmt;
@@ -172,6 +172,25 @@ pub fn expr_from_value(v: &Value) -> Result<Expr, PlanExprError> {
                 let left_col = expr_to_column(l);
                 let right_col = expr_to_column(r);
                 return Ok(left_col.pow_with(&right_col).into_expr());
+            }
+            "isin" => {
+                // {"op": "isin", "left": <col_expr>, "right": <list_expr>} or
+                // {"op": "isin", "left": <col_expr>, "values": [<lit>, ...]}
+                let left_v = obj
+                    .get("left")
+                    .ok_or_else(|| PlanExprError("op 'isin' requires 'left'".to_string()))?;
+                let left_expr = expr_from_value(left_v)?;
+                let values_expr =
+                    if let Some(values_arr) = obj.get("values").and_then(Value::as_array) {
+                        values_from_json_array(values_arr)?
+                    } else if let Some(right_v) = obj.get("right") {
+                        values_from_plan_value(right_v)?
+                    } else {
+                        return Err(PlanExprError(
+                            "op 'isin' requires 'right' or 'values'".to_string(),
+                        ));
+                    };
+                return Ok(left_expr.is_in(values_expr));
             }
             _ => {
                 return Err(PlanExprError(format!("unsupported expression op: {op}")));
@@ -352,6 +371,71 @@ fn lit_as_usize(v: &Value) -> Result<usize, PlanExprError> {
     }
     n.try_into()
         .map_err(|_| PlanExprError("literal out of usize range".to_string()))
+}
+
+/// Extract values for isin from JSON array. Each element: {"lit": v} or plain v. Returns Expr for is_in.
+fn values_from_json_array(arr: &[Value]) -> Result<Expr, PlanExprError> {
+    if arr.is_empty() {
+        let s: Series = Series::new_empty("".into(), &DataType::Int64);
+        return Ok(lit(s));
+    }
+    let mut i64_vals: Vec<i64> = Vec::new();
+    let mut str_vals: Vec<String> = Vec::new();
+    let mut use_str = false;
+    for v in arr {
+        let lit_val = if let Some(obj) = v.as_object() {
+            obj.get("lit").unwrap_or(v)
+        } else {
+            v
+        };
+        if lit_val.is_null() {
+            continue;
+        }
+        if let Some(s) = lit_val.as_str() {
+            use_str = true;
+            str_vals.push(s.to_string());
+        } else if let Some(n) = lit_val.as_i64() {
+            if !use_str {
+                i64_vals.push(n);
+            } else {
+                str_vals.push(n.to_string());
+            }
+        } else if let Some(n) = lit_val.as_f64() {
+            if !use_str {
+                i64_vals.push(n as i64);
+            } else {
+                str_vals.push(n.to_string());
+            }
+        }
+    }
+    if use_str {
+        let s: Series = Series::from_iter(str_vals.iter().map(|x| x.as_str()));
+        Ok(lit(s))
+    } else if !i64_vals.is_empty() {
+        let s: Series = Series::from_iter(i64_vals.iter().cloned());
+        Ok(lit(s))
+    } else {
+        let s: Series = Series::new_empty("".into(), &DataType::Int64);
+        Ok(lit(s))
+    }
+}
+
+/// Extract values for isin from plan value: {"lit": [1,2,3]} or array of {"lit": v}.
+fn values_from_plan_value(v: &Value) -> Result<Expr, PlanExprError> {
+    if let Some(lit_val) = v.get("lit") {
+        if let Some(arr) = lit_val.as_array() {
+            return values_from_json_array(arr);
+        }
+        // Single literal - wrap in array
+        #[allow(clippy::cloned_ref_to_slice_refs)]
+        return values_from_json_array(&[v.clone()]);
+    }
+    if let Some(arr) = v.as_array() {
+        return values_from_json_array(arr);
+    }
+    Err(PlanExprError(
+        "isin right/values must be array or {lit: [...]}".to_string(),
+    ))
 }
 
 /// Optional string literal: if `args[i]` is missing or null, return None; else require {"lit": "..."}.
@@ -1012,6 +1096,13 @@ fn expr_from_fn(name: &str, args: &[Value]) -> Result<Expr, PlanExprError> {
             let pair_delim: Option<String> = arg_lit_opt_str(args, 1)?;
             let key_value_delim: Option<String> = arg_lit_opt_str(args, 2)?;
             Ok(str_to_map(&c, pair_delim.as_deref(), key_value_delim.as_deref()).into_expr())
+        }
+        "isin" => {
+            // {"fn": "isin", "args": [col_expr, lit1, lit2, ...]} - col.isin(1, 3)
+            require_args_min(name, args, 2)?;
+            let col_expr = arg_expr(args, 0)?;
+            let values_expr = values_from_json_array(&args[1..])?;
+            Ok(col_expr.is_in(values_expr))
         }
         _ => expr_from_fn_rest(name, args),
     }
@@ -2030,6 +2121,25 @@ mod tests {
         let v = json!({
             "fn": "cast",
             "args": [{"col": "x"}, {"lit": "string"}]
+        });
+        let _ = expr_from_value(&v).unwrap();
+    }
+
+    #[test]
+    fn test_isin_op() {
+        let v = json!({
+            "op": "isin",
+            "left": {"col": "id"},
+            "right": {"lit": [1, 3]}
+        });
+        let _ = expr_from_value(&v).unwrap();
+    }
+
+    #[test]
+    fn test_isin_fn() {
+        let v = json!({
+            "fn": "isin",
+            "args": [{"col": "id"}, {"lit": 1}, {"lit": 3}]
         });
         let _ = expr_from_value(&v).unwrap();
     }
