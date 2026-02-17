@@ -29,7 +29,11 @@ fn issue_492_order_by_exact_case() {
         .collect_as_json_rows()
         .unwrap();
     let values: Vec<i64> = rows.iter().map(|r| r["Value"].as_i64().unwrap()).collect();
-    assert_eq!(values, expected_values_asc(), "order_by(\"Value\") should sort ascending");
+    assert_eq!(
+        values,
+        expected_values_asc(),
+        "order_by(\"Value\") should sort ascending"
+    );
 }
 
 #[test]
@@ -49,7 +53,11 @@ fn issue_492_order_by_lowercase() {
         .collect_as_json_rows()
         .unwrap();
     let values: Vec<i64> = rows.iter().map(|r| r["Value"].as_i64().unwrap()).collect();
-    assert_eq!(values, expected_values_asc(), "order_by(\"value\") should resolve to Value and sort ascending");
+    assert_eq!(
+        values,
+        expected_values_asc(),
+        "order_by(\"value\") should resolve to Value and sort ascending"
+    );
 }
 
 #[test]
@@ -69,5 +77,9 @@ fn issue_492_order_by_uppercase() {
         .collect_as_json_rows()
         .unwrap();
     let values: Vec<i64> = rows.iter().map(|r| r["Value"].as_i64().unwrap()).collect();
-    assert_eq!(values, expected_values_asc(), "order_by(\"VALUE\") should resolve to Value and sort ascending");
+    assert_eq!(
+        values,
+        expected_values_asc(),
+        "order_by(\"VALUE\") should resolve to Value and sort ascending"
+    );
 }
