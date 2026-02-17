@@ -110,6 +110,16 @@ let df = df.with_column_expr("full", concat(&[&col("first"), &col("last")]).into
 let df = df.with_column_expr("joined", concat_ws("-", &[&col("a"), &col("b")]).into_expr())?;
 ```
 
+You can also combine string/regex functions with **select expressions** using
+`DataFrame::select_exprs`:
+
+```rust
+use robin_sparkless::{col, regexp_extract_all, DataFrame};
+
+let expr = regexp_extract_all(&col("s"), r"\\d+").alias("m").into_expr();
+let df2 = df.select_exprs(vec![expr])?;
+```
+
 ### Random (rand, randn)
 
 Use **`with_column`** or **`with_columns`** so each row gets a distinct value (PySpark-like). Optional seed gives reproducible results.
@@ -157,3 +167,13 @@ For roadmap and Sparkless integration phases (Phases 12–22 completed; Phases 2
 ### Benchmarks
 
 Run `cargo bench` to compare robin-sparkless vs plain Polars on filter → select → groupBy pipelines. The goal is to stay within about 2x of Polars for supported operations.
+
+### Test commands (Rust-only)
+
+Common commands when working on robin-sparkless:
+
+- `make test` – run the Rust test suite (`cargo test`).
+- `make check-full` – full Rust check suite (format check, Clippy, `cargo audit`, `cargo deny`, tests); this is what CI runs.
+- `make test-parity-phase-a` … `make test-parity-phase-g` – run PySpark parity fixtures for a specific phase (see `docs/PARITY_STATUS.md`).
+- `make test-parity-phases` – run all parity phases (A–G).
+- `make sparkless-parity` – when `SPARKLESS_EXPECTED_OUTPUTS` is set and PySpark/Java are available, convert Sparkless fixtures, regenerate expected from PySpark, and run the Rust parity tests.

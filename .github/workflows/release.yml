@@ -176,8 +176,9 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
             ${{ runner.os }}-cargo-
-      - name: Test parity
-        run: cargo nextest run --test parity
+      - name: Test parity (phase G)
+        run: |
+          PARITY_PHASE=g cargo nextest run --test parity -- test_parity_phase_g
         env:
           NEXTEST_THREADS: "1"
 
