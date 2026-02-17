@@ -26,16 +26,29 @@ fn py_to_partition_name(item: &Bound<'_, pyo3::types::PyAny>) -> PyResult<String
     ))
 }
 
-/// Convert a Python value (str or Column) to a Column (for orderBy).
-fn py_to_order_column(item: &Bound<'_, pyo3::types::PyAny>) -> PyResult<RsColumn> {
+/// Order spec for Window: either a plain column (ascending) or a SortOrder (asc/desc with nulls).
+#[derive(Clone)]
+pub(crate) enum WindowOrderSpec {
+    Column(RsColumn),
+    SortOrder(SortOrder),
+}
+
+/// Convert a Python value (str, Column, or SortOrder) to WindowOrderSpec (for orderBy).
+fn py_to_order_spec(item: &Bound<'_, pyo3::types::PyAny>) -> PyResult<WindowOrderSpec> {
+    if let Ok(sort_order) = item.extract::<PyRef<'_, PySortOrder>>() {
+        return Ok(WindowOrderSpec::SortOrder(sort_order.inner.clone()));
+    }
     if let Ok(py_col) = item.downcast::<PyColumn>() {
-        return Ok(py_col.borrow().inner.clone());
+        return Ok(WindowOrderSpec::Column(py_col.borrow().inner.clone()));
     }
     if let Ok(name) = item.extract::<String>() {
-        return Ok(RsColumn::from_expr(col(name.as_str()), None));
+        return Ok(WindowOrderSpec::Column(RsColumn::from_expr(
+            col(name.as_str()),
+            None,
+        )));
     }
     Err(pyo3::exceptions::PyTypeError::new_err(
-        "Window.orderBy(*) requires column names (str) or Column expressions",
+        "Window.orderBy(*) requires column names (str), Column expressions, or SortOrder (asc/desc)",
     ))
 }
 
@@ -59,7 +72,7 @@ pub const WINDOW_UNBOUNDED_FOLLOWING: i64 = i64::MAX;
 #[pyclass(name = "Window")]
 pub struct PyWindow {
     pub(crate) partition_by: Vec<String>,
-    pub(crate) order_by: Option<RsColumn>,
+    pub(crate) order_by: Option<WindowOrderSpec>,
     /// Optional frame: ("rows", start, end) or ("range", start, end). Stored for API parity; Polars backend uses default frame for now.
     pub(crate) frame: Option<(String, i64, i64)>,
 }
@@ -103,11 +116,12 @@ impl PyWindow {
         })
     }
 
-    /// Set ordering column(s). Accepts column names (str) or Column expressions (PySpark: orderBy("col") or orderBy(col("col"))).
+    /// Set ordering column(s). Accepts column names (str), Column expressions, or SortOrder (F.asc/F.desc).
     ///
-    /// Currently supports a single column. PySpark-style usage:
+    /// PySpark-style usage:
     ///     win = Window.partitionBy("dept").orderBy("salary")
     ///     win = Window.partitionBy("dept").orderBy(col("salary"))
+    ///     win = Window.partitionBy("k").orderBy(desc("v"))  # F.desc("v")
     #[pyo3(name = "orderBy")]
     #[pyo3(signature = (*cols))]
     fn order_by(&self, cols: &Bound<'_, PyTuple>) -> PyResult<Self> {
@@ -121,10 +135,10 @@ impl PyWindow {
                 "Window.orderBy with multiple columns is not yet supported; use a single column",
             ));
         }
-        let order_col = py_to_order_column(&cols.get_item(0)?)?;
+        let order_spec = py_to_order_spec(&cols.get_item(0)?)?;
         Ok(Self {
             partition_by: self.partition_by.clone(),
-            order_by: Some(order_col),
+            order_by: Some(order_spec),
             frame: self.frame.clone(),
         })
     }
@@ -305,13 +319,19 @@ impl PyRowNumber {
     /// Returns:
     ///     Column: row_number over the given partition/order.
     fn over(&self, window: &PyWindow) -> PyResult<PyColumn> {
-        let order_col = window.order_by.as_ref().ok_or_else(|| {
+        let order_spec = window.order_by.as_ref().ok_or_else(|| {
             pyo3::exceptions::PyValueError::new_err(
                 "Window.orderBy(...) must be called before row_number().over(window)",
             )
         })?;
+        let (order_col, descending) = match order_spec {
+            WindowOrderSpec::Column(c) => (c.clone(), self.descending),
+            WindowOrderSpec::SortOrder(s) => {
+                (RsColumn::from_expr(s.expr().clone(), None), s.descending)
+            }
+        };
         let refs: Vec<&str> = window.partition_by.iter().map(|s| s.as_str()).collect();
-        let col = order_col.row_number(self.descending).over(&refs);
+        let col = order_col.row_number(descending).over(&refs);
         Ok(PyColumn { inner: col })
     }
 }
@@ -326,13 +346,19 @@ pub struct PyDenseRank {
 impl PyDenseRank {
     /// Apply this dense_rank() to a Window and return a Column expression.
     fn over(&self, window: &PyWindow) -> PyResult<PyColumn> {
-        let order_col = window.order_by.as_ref().ok_or_else(|| {
+        let order_spec = window.order_by.as_ref().ok_or_else(|| {
             pyo3::exceptions::PyValueError::new_err(
                 "Window.orderBy(...) must be called before dense_rank().over(window)",
             )
         })?;
+        let (order_col, descending) = match order_spec {
+            WindowOrderSpec::Column(c) => (c.clone(), self.descending),
+            WindowOrderSpec::SortOrder(s) => {
+                (RsColumn::from_expr(s.expr().clone(), None), s.descending)
+            }
+        };
         let refs: Vec<&str> = window.partition_by.iter().map(|s| s.as_str()).collect();
-        let col = order_col.dense_rank(self.descending).over(&refs);
+        let col = order_col.dense_rank(descending).over(&refs);
         Ok(PyColumn { inner: col })
     }
 }
