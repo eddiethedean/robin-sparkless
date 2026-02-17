@@ -192,6 +192,91 @@ pub fn expr_from_value(v: &Value) -> Result<Expr, PlanExprError> {
                     };
                 return Ok(left_expr.is_in(values_expr));
             }
+            "getItem" => {
+                // {"op": "getItem", "left": <col_expr>, "right": <index_lit>} - PySpark 0-based
+                let left_v = obj
+                    .get("left")
+                    .ok_or_else(|| PlanExprError("op 'getItem' requires 'left'".to_string()))?;
+                let right_v = obj
+                    .get("right")
+                    .ok_or_else(|| PlanExprError("op 'getItem' requires 'right'".to_string()))?;
+                let col_expr = expr_from_value(left_v)?;
+                let idx = lit_as_i64(right_v)?;
+                let col_c = expr_to_column(col_expr);
+                return Ok(col_c.get_item(idx).into_expr());
+            }
+            "startswith" => {
+                // {"op": "startswith", "left": col, "right": {"lit": "prefix"}}
+                let left_v = obj
+                    .get("left")
+                    .ok_or_else(|| PlanExprError("op 'startswith' requires 'left'".to_string()))?;
+                let right_v = obj
+                    .get("right")
+                    .ok_or_else(|| PlanExprError("op 'startswith' requires 'right'".to_string()))?;
+                let col_expr = expr_from_value(left_v)?;
+                let prefix = lit_as_string(right_v)?;
+                let col_c = expr_to_column(col_expr);
+                return Ok(crate::functions::startswith(&col_c, &prefix).into_expr());
+            }
+            "is_null" => {
+                let arg = obj
+                    .get("arg")
+                    .ok_or_else(|| PlanExprError("op 'is_null' requires 'arg'".to_string()))?;
+                return Ok(expr_from_value(arg)?.is_null());
+            }
+            "is_not_null" => {
+                let arg = obj
+                    .get("arg")
+                    .ok_or_else(|| PlanExprError("op 'is_not_null' requires 'arg'".to_string()))?;
+                return Ok(expr_from_value(arg)?.is_not_null());
+            }
+            "regexp_extract" => {
+                // {"op": "regexp_extract", "left": col, "pattern": {"lit": "..."}, "group": {"lit": 0}}
+                // or {"op": "regexp_extract", "args": [col, pattern, group]}
+                if let Some(args) = obj.get("args").and_then(Value::as_array) {
+                    require_args_min("regexp_extract", args, 3)?;
+                    let col_expr = expr_from_value(&args[0])?;
+                    let pattern = lit_as_string(&args[1])?;
+                    let group_idx = lit_as_usize(&args[2])?;
+                    let col_c = expr_to_column(col_expr);
+                    return Ok(
+                        crate::functions::regexp_extract(&col_c, &pattern, group_idx).into_expr(),
+                    );
+                }
+                let left_v = obj.get("left").ok_or_else(|| {
+                    PlanExprError("op 'regexp_extract' requires 'left'".to_string())
+                })?;
+                let col_expr = expr_from_value(left_v)?;
+                let pattern_v =
+                    obj.get("pattern")
+                        .or_else(|| obj.get("right"))
+                        .ok_or_else(|| {
+                            PlanExprError(
+                                "op 'regexp_extract' requires 'pattern' or 'right'".to_string(),
+                            )
+                        })?;
+                let pattern = lit_as_string(pattern_v)?;
+                let group_idx = obj
+                    .get("group")
+                    .and_then(|v| lit_as_usize(v).ok())
+                    .unwrap_or(0);
+                let col_c = expr_to_column(col_expr);
+                return Ok(
+                    crate::functions::regexp_extract(&col_c, &pattern, group_idx).into_expr(),
+                );
+            }
+            "create_map" => {
+                // {"op": "create_map", "args": [key1, val1, key2, val2, ...]}
+                let args_arr = obj.get("args").and_then(Value::as_array).ok_or_else(|| {
+                    PlanExprError("op 'create_map' requires 'args' array".to_string())
+                })?;
+                let exprs: Result<Vec<Expr>, _> = args_arr.iter().map(expr_from_value).collect();
+                let cols: Vec<crate::Column> = exprs?.into_iter().map(expr_to_column).collect();
+                let refs: Vec<&crate::Column> = cols.iter().collect();
+                return Ok(crate::functions::create_map(&refs)
+                    .map_err(|e| PlanExprError(e.to_string()))?
+                    .into_expr());
+            }
             _ => {
                 return Err(PlanExprError(format!("unsupported expression op: {op}")));
             }
@@ -2140,6 +2225,54 @@ mod tests {
         let v = json!({
             "fn": "isin",
             "args": [{"col": "id"}, {"lit": 1}, {"lit": 3}]
+        });
+        let _ = expr_from_value(&v).unwrap();
+    }
+
+    #[test]
+    fn test_get_item_op() {
+        let v = json!({"op": "getItem", "left": {"col": "arr"}, "right": {"lit": 1}});
+        let _ = expr_from_value(&v).unwrap();
+    }
+
+    #[test]
+    fn test_startswith_op() {
+        let v = json!({
+            "op": "startswith",
+            "left": {"col": "name"},
+            "right": {"lit": "A"}
+        });
+        let _ = expr_from_value(&v).unwrap();
+    }
+
+    #[test]
+    fn test_is_null_op() {
+        let v = json!({"op": "is_null", "arg": {"col": "x"}});
+        let _ = expr_from_value(&v).unwrap();
+    }
+
+    #[test]
+    fn test_is_not_null_op() {
+        let v = json!({"op": "is_not_null", "arg": {"col": "x"}});
+        let _ = expr_from_value(&v).unwrap();
+    }
+
+    #[test]
+    fn test_regexp_extract_op() {
+        let v = json!({
+            "op": "regexp_extract",
+            "left": {"col": "s"},
+            "pattern": {"lit": r"(\w+)"},
+            "group": {"lit": 1}
+        });
+        let _ = expr_from_value(&v).unwrap();
+    }
+
+    #[test]
+    fn test_create_map_op() {
+        let v = json!({
+            "op": "create_map",
+            "args": [{"lit": "k"}, {"col": "a"}]
         });
         let _ = expr_from_value(&v).unwrap();
     }
