@@ -1,0 +1,43 @@
+{
+  "name": "join_inner_dept_issue510",
+  "input": {
+    "schema": [
+      {"name": "Name", "type": "string"},
+      {"name": "Id", "type": "int"},
+      {"name": "Dept", "type": "string"}
+    ],
+    "rows": [
+      ["Alice", 1, "IT"],
+      ["Bob", 2, "HR"]
+    ]
+  },
+  "plan": [
+    {
+      "op": "join",
+      "payload": {
+        "other_data": [
+          ["IT", "Engineering"],
+          ["HR", "Human Resources"]
+        ],
+        "other_schema": [
+          {"name": "Dept", "type": "string"},
+          {"name": "Name", "type": "string"}
+        ],
+        "on": ["Dept"],
+        "how": "inner"
+      }
+    }
+  ],
+  "expected": {
+    "schema": [
+      {"name": "Name", "type": "string"},
+      {"name": "Id", "type": "int"},
+      {"name": "Dept", "type": "string"},
+      {"name": "Name_right", "type": "string"}
+    ],
+    "rows": [
+      ["Alice", 1, "IT", "Engineering"],
+      ["Bob", 2, "HR", "Human Resources"]
+    ]
+  }
+}
