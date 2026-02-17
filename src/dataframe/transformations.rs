@@ -6,7 +6,7 @@
 use super::DataFrame;
 use crate::functions::SortOrder;
 use polars::prelude::{
-    Expr, IntoLazy, IntoSeries, NamedFrom, PolarsError, Series, UnionArgs, UniqueKeepStrategy,
+    col, Expr, IntoLazy, IntoSeries, NamedFrom, PolarsError, Series, UnionArgs, UniqueKeepStrategy,
 };
 use std::collections::HashMap;
 
@@ -16,11 +16,13 @@ pub fn select(
     cols: Vec<&str>,
     case_sensitive: bool,
 ) -> Result<DataFrame, PolarsError> {
-    let selected = df.df.select(cols)?;
-    Ok(super::DataFrame::from_polars_with_options(
-        selected,
-        case_sensitive,
-    ))
+    let resolved: Vec<String> = cols
+        .iter()
+        .map(|c| df.resolve_column_name(c))
+        .collect::<Result<Vec<_>, _>>()?;
+    let exprs: Vec<Expr> = resolved.iter().map(|s| col(s.as_str())).collect();
+    let lf = df.lazy_frame().select(&exprs);
+    Ok(super::DataFrame::from_lazy_with_options(lf, case_sensitive))
 }
 
 /// Select using column expressions (e.g. F.regexp_extract_all(...).alias("m")). Preserves case_sensitive.
@@ -56,12 +58,8 @@ pub fn select_with_exprs(
             }
         })
         .collect();
-    let lf = df.df.as_ref().clone().lazy();
-    let out_df = lf.select(exprs).collect()?;
-    Ok(super::DataFrame::from_polars_with_options(
-        out_df,
-        case_sensitive,
-    ))
+    let lf = df.lazy_frame().select(&exprs);
+    Ok(super::DataFrame::from_lazy_with_options(lf, case_sensitive))
 }
 
 /// Filter rows using a Polars expression. Preserves case_sensitive on result.
@@ -73,12 +71,8 @@ pub fn filter(
 ) -> Result<DataFrame, PolarsError> {
     let condition = df.resolve_expr_column_names(condition)?;
     let condition = df.coerce_string_numeric_comparisons(condition)?;
-    let lf = df.df.as_ref().clone().lazy().filter(condition);
-    let out_df = lf.collect()?;
-    Ok(super::DataFrame::from_polars_with_options(
-        out_df,
-        case_sensitive,
-    ))
+    let lf = df.lazy_frame().filter(condition);
+    Ok(super::DataFrame::from_lazy_with_options(lf, case_sensitive))
 }
 
 /// Add or replace a column. Handles deferred rand/randn and Python UDF (UdfCall).
@@ -106,7 +100,8 @@ pub fn with_column(
     if let Some(deferred) = column.deferred {
         match deferred {
             crate::column::DeferredRandom::Rand(seed) => {
-                let mut pl_df = df.df.as_ref().clone();
+                let pl_df = df.collect_inner()?;
+                let mut pl_df = pl_df.as_ref().clone();
                 let n = pl_df.height();
                 let series = crate::udfs::series_rand_n(column_name, n, seed);
                 pl_df.with_column(series)?;
@@ -116,7 +111,8 @@ pub fn with_column(
                 ));
             }
             crate::column::DeferredRandom::Randn(seed) => {
-                let mut pl_df = df.df.as_ref().clone();
+                let pl_df = df.collect_inner()?;
+                let mut pl_df = pl_df.as_ref().clone();
                 let n = pl_df.height();
                 let series = crate::udfs::series_randn_n(column_name, n, seed);
                 pl_df.with_column(series)?;
@@ -129,13 +125,8 @@ pub fn with_column(
     }
     let expr = df.resolve_expr_column_names(column.expr().clone())?;
     let expr = df.coerce_string_numeric_comparisons(expr)?;
-    let lf = df.df.as_ref().clone().lazy();
-    let lf_with_col = lf.with_column(expr.alias(column_name));
-    let pl_df = lf_with_col.collect()?;
-    Ok(super::DataFrame::from_polars_with_options(
-        pl_df,
-        case_sensitive,
-    ))
+    let lf = df.lazy_frame().with_column(expr.alias(column_name));
+    Ok(super::DataFrame::from_lazy_with_options(lf, case_sensitive))
 }
 
 /// Order by columns (sort). Preserves case_sensitive on result.
@@ -151,18 +142,17 @@ pub fn order_by(
         asc.push(true);
     }
     asc.truncate(column_names.len());
-    let lf = df.df.as_ref().clone().lazy();
-    let exprs: Vec<Expr> = column_names.iter().map(|name| col(*name)).collect();
+    let resolved: Vec<String> = column_names
+        .iter()
+        .map(|c| df.resolve_column_name(c))
+        .collect::<Result<Vec<_>, _>>()?;
+    let exprs: Vec<Expr> = resolved.iter().map(|s| col(s.as_str())).collect();
     let descending: Vec<bool> = asc.iter().map(|&a| !a).collect();
-    let sorted = lf.sort_by_exprs(
+    let lf = df.lazy_frame().sort_by_exprs(
         exprs,
         SortMultipleOptions::new().with_order_descending_multi(descending),
     );
-    let pl_df = sorted.collect()?;
-    Ok(super::DataFrame::from_polars_with_options(
-        pl_df,
-        case_sensitive,
-    ))
+    Ok(super::DataFrame::from_lazy_with_options(lf, case_sensitive))
 }
 
 /// Order by sort expressions (asc/desc with nulls_first/last). Preserves case_sensitive on result.
@@ -174,8 +164,8 @@ pub fn order_by_exprs(
 ) -> Result<DataFrame, PolarsError> {
     use polars::prelude::*;
     if sort_orders.is_empty() {
-        return Ok(super::DataFrame::from_polars_with_options(
-            df.df.as_ref().clone(),
+        return Ok(super::DataFrame::from_lazy_with_options(
+            df.lazy_frame(),
             case_sensitive,
         ));
     }
@@ -188,13 +178,8 @@ pub fn order_by_exprs(
     let opts = SortMultipleOptions::new()
         .with_order_descending_multi(descending)
         .with_nulls_last_multi(nulls_last);
-    let lf = df.df.as_ref().clone().lazy();
-    let sorted = lf.sort_by_exprs(exprs, opts);
-    let pl_df = sorted.collect()?;
-    Ok(super::DataFrame::from_polars_with_options(
-        pl_df,
-        case_sensitive,
-    ))
+    let lf = df.lazy_frame().sort_by_exprs(exprs, opts);
+    Ok(super::DataFrame::from_lazy_with_options(lf, case_sensitive))
 }
 
 /// Union (unionAll): stack another DataFrame vertically. Schemas must match (same columns, same order).
@@ -203,10 +188,10 @@ pub fn union(
     right: &DataFrame,
     case_sensitive: bool,
 ) -> Result<DataFrame, PolarsError> {
-    let lf1 = left.df.as_ref().clone().lazy();
-    let lf2 = right.df.as_ref().clone().lazy();
-    let out = polars::prelude::concat([lf1, lf2], UnionArgs::default())?.collect()?;
-    Ok(super::DataFrame::from_polars_with_options(
+    let lf1 = left.lazy_frame();
+    let lf2 = right.lazy_frame();
+    let out = polars::prelude::concat([lf1, lf2], UnionArgs::default())?;
+    Ok(super::DataFrame::from_lazy_with_options(
         out,
         case_sensitive,
     ))
@@ -222,18 +207,8 @@ pub fn union_by_name(
     case_sensitive: bool,
 ) -> Result<DataFrame, PolarsError> {
     use polars::prelude::*;
-    let left_df = left.df.as_ref();
-    let right_df = right.df.as_ref();
-    let left_names: Vec<String> = left_df
-        .get_column_names()
-        .iter()
-        .map(|s| s.as_str().to_string())
-        .collect();
-    let right_names: Vec<String> = right_df
-        .get_column_names()
-        .iter()
-        .map(|s| s.as_str().to_string())
-        .collect();
+    let left_names = left.columns()?;
+    let right_names = right.columns()?;
     let contains = |names: &[String], name: &str| -> bool {
         if case_sensitive {
             names.iter().any(|n| n.as_str() == name)
@@ -273,9 +248,8 @@ pub fn union_by_name(
         .map(|c| match resolve(&left_names, c.as_str()) {
             Some(r) => col(r.as_str()).alias(c.as_str()),
             None => {
-                let dtype = resolve(&right_names, c.as_str())
-                    .and_then(|r| right_df.column(r.as_str()).ok())
-                    .map(|s| s.dtype().clone())
+                let dtype = right
+                    .get_column_dtype(c)
                     .unwrap_or(polars::prelude::DataType::Null);
                 Expr::Literal(polars::prelude::LiteralValue::Null)
                     .cast(dtype)
@@ -288,9 +262,8 @@ pub fn union_by_name(
         let expr = match resolve(&right_names, c.as_str()) {
             Some(r) => col(r.as_str()).alias(c.as_str()),
             None if allow_missing_columns => {
-                let dtype = resolve(&left_names, c.as_str())
-                    .and_then(|r| left_df.column(r.as_str()).ok())
-                    .map(|s| s.dtype().clone())
+                let dtype = left
+                    .get_column_dtype(c)
                     .unwrap_or(polars::prelude::DataType::Null);
                 Expr::Literal(polars::prelude::LiteralValue::Null)
                     .cast(dtype)
@@ -308,10 +281,10 @@ pub fn union_by_name(
         };
         right_exprs.push(expr);
     }
-    let lf1 = left_df.clone().lazy().select(left_exprs);
-    let lf2 = right_df.clone().lazy().select(right_exprs);
-    let out = polars::prelude::concat([lf1, lf2], UnionArgs::default())?.collect()?;
-    Ok(super::DataFrame::from_polars_with_options(
+    let lf1 = left.lazy_frame().select(&left_exprs);
+    let lf2 = right.lazy_frame().select(&right_exprs);
+    let out = polars::prelude::concat([lf1, lf2], UnionArgs::default())?;
+    Ok(super::DataFrame::from_lazy_with_options(
         out,
         case_sensitive,
     ))
@@ -323,15 +296,17 @@ pub fn distinct(
     subset: Option<Vec<&str>>,
     case_sensitive: bool,
 ) -> Result<DataFrame, PolarsError> {
-    let lf = df.df.as_ref().clone().lazy();
-    let subset_names: Option<Vec<String>> =
-        subset.map(|cols| cols.iter().map(|s| (*s).to_string()).collect());
-    let lf = lf.unique(subset_names, UniqueKeepStrategy::First);
-    let pl_df = lf.collect()?;
-    Ok(super::DataFrame::from_polars_with_options(
-        pl_df,
-        case_sensitive,
-    ))
+    let subset_names: Option<Vec<String>> = subset
+        .map(|cols| {
+            cols.iter()
+                .map(|s| df.resolve_column_name(s))
+                .collect::<Result<Vec<_>, _>>()
+        })
+        .transpose()?;
+    let lf = df
+        .lazy_frame()
+        .unique(subset_names, UniqueKeepStrategy::First);
+    Ok(super::DataFrame::from_lazy_with_options(lf, case_sensitive))
 }
 
 /// Drop one or more columns.
@@ -344,17 +319,14 @@ pub fn drop(
         .iter()
         .map(|c| df.resolve_column_name(c))
         .collect::<Result<Vec<_>, _>>()?;
-    let all_names = df.df.get_column_names();
-    let to_keep: Vec<&str> = all_names
+    let all_names = df.columns()?;
+    let to_keep: Vec<Expr> = all_names
         .iter()
         .filter(|n| !resolved.iter().any(|r| r == n.as_str()))
-        .map(|n| n.as_str())
+        .map(|n| col(n.as_str()))
         .collect();
-    let pl_df = df.df.select(to_keep)?;
-    Ok(super::DataFrame::from_polars_with_options(
-        pl_df,
-        case_sensitive,
-    ))
+    let lf = df.lazy_frame().select(&to_keep);
+    Ok(super::DataFrame::from_lazy_with_options(lf, case_sensitive))
 }
 
 /// Drop rows with nulls (all columns or subset). PySpark na.drop(subset, how, thresh).
@@ -368,40 +340,34 @@ pub fn dropna(
     case_sensitive: bool,
 ) -> Result<DataFrame, PolarsError> {
     use polars::prelude::*;
-    let lf = df.df.as_ref().clone().lazy();
-    let cols: Vec<&str> = match &subset {
-        Some(c) => c.as_slice().to_vec(),
-        None => df
-            .df
-            .get_column_names()
+    let cols: Vec<String> = match &subset {
+        Some(c) => c
             .iter()
-            .map(|n| n.as_str())
-            .collect(),
+            .map(|n| df.resolve_column_name(n))
+            .collect::<Result<Vec<_>, _>>()?,
+        None => df.columns()?,
     };
-    let col_exprs: Vec<Expr> = cols.iter().map(|c| col(*c)).collect();
+    let col_exprs: Vec<Expr> = cols.iter().map(|c| col(c.as_str())).collect();
+    let base_lf = df.lazy_frame();
     let lf = if let Some(n) = thresh {
         // Keep row if number of non-null in subset >= n
         let count_expr: Expr = col_exprs
             .iter()
             .map(|e| e.clone().is_not_null().cast(DataType::Int32))
             .fold(lit(0i32), |a, b| a + b);
-        lf.filter(count_expr.gt_eq(lit(n as i32)))
+        base_lf.filter(count_expr.gt_eq(lit(n as i32)))
     } else if how.eq_ignore_ascii_case("all") {
         // Drop only when all subset columns are null → keep when any is not null
         let any_not_null: Expr = col_exprs
             .into_iter()
             .map(|e| e.is_not_null())
             .fold(lit(false), |a, b| a.or(b));
-        lf.filter(any_not_null)
+        base_lf.filter(any_not_null)
     } else {
         // how == "any" (default): drop if any null in subset
-        lf.drop_nulls(Some(col_exprs))
+        base_lf.drop_nulls(Some(col_exprs))
     };
-    let pl_df = lf.collect()?;
-    Ok(super::DataFrame::from_polars_with_options(
-        pl_df,
-        case_sensitive,
-    ))
+    Ok(super::DataFrame::from_lazy_with_options(lf, case_sensitive))
 }
 
 /// Fill nulls with a literal expression. If subset is Some, only those columns are filled; else all.
@@ -422,32 +388,20 @@ pub fn fillna(
             })
             .collect::<Result<Vec<_>, PolarsError>>()?,
         None => df
-            .df
-            .get_column_names()
+            .columns()?
             .iter()
             .map(|n| col(n.as_str()).fill_null(value_expr.clone()))
             .collect(),
     };
-    let pl_df = df
-        .df
-        .as_ref()
-        .clone()
-        .lazy()
-        .with_columns(exprs)
-        .collect()?;
-    Ok(super::DataFrame::from_polars_with_options(
-        pl_df,
-        case_sensitive,
-    ))
+    let lf = df.lazy_frame().with_columns(exprs);
+    Ok(super::DataFrame::from_lazy_with_options(lf, case_sensitive))
 }
 
 /// Limit: return first n rows.
 pub fn limit(df: &DataFrame, n: usize, case_sensitive: bool) -> Result<DataFrame, PolarsError> {
-    let pl_df = df.df.as_ref().clone().head(Some(n));
-    Ok(super::DataFrame::from_polars_with_options(
-        pl_df,
-        case_sensitive,
-    ))
+    // limit is a transformation: slice(0, n) on lazy
+    let lf = df.lazy_frame().slice(0, n as u32);
+    Ok(super::DataFrame::from_lazy_with_options(lf, case_sensitive))
 }
 
 /// Rename a column (old_name -> new_name).
@@ -458,12 +412,10 @@ pub fn with_column_renamed(
     case_sensitive: bool,
 ) -> Result<DataFrame, PolarsError> {
     let resolved = df.resolve_column_name(old_name)?;
-    let mut pl_df = df.df.as_ref().clone();
-    pl_df.rename(resolved.as_str(), new_name.into())?;
-    Ok(super::DataFrame::from_polars_with_options(
-        pl_df,
-        case_sensitive,
-    ))
+    let lf = df
+        .lazy_frame()
+        .rename([resolved.as_str()], [new_name], true);
+    Ok(super::DataFrame::from_lazy_with_options(lf, case_sensitive))
 }
 
 /// Replace values in a column: where column == old_value, use new_value. PySpark replace (single column).
@@ -479,17 +431,8 @@ pub fn replace(
     let repl = when(col(resolved.as_str()).eq(old_value))
         .then(new_value)
         .otherwise(col(resolved.as_str()));
-    let pl_df = df
-        .df
-        .as_ref()
-        .clone()
-        .lazy()
-        .with_column(repl.alias(resolved.as_str()))
-        .collect()?;
-    Ok(super::DataFrame::from_polars_with_options(
-        pl_df,
-        case_sensitive,
-    ))
+    let lf = df.lazy_frame().with_column(repl.alias(resolved.as_str()));
+    Ok(super::DataFrame::from_lazy_with_options(lf, case_sensitive))
 }
 
 /// Cross join: cartesian product of two DataFrames. PySpark crossJoin.
@@ -498,12 +441,11 @@ pub fn cross_join(
     right: &DataFrame,
     case_sensitive: bool,
 ) -> Result<DataFrame, PolarsError> {
-    let lf_left = left.df.as_ref().clone().lazy();
-    let lf_right = right.df.as_ref().clone().lazy();
+    let lf_left = left.lazy_frame();
+    let lf_right = right.lazy_frame();
     let out = lf_left.cross_join(lf_right, None);
-    let pl_df = out.collect()?;
-    Ok(super::DataFrame::from_polars_with_options(
-        pl_df,
+    Ok(super::DataFrame::from_lazy_with_options(
+        out,
         case_sensitive,
     ))
 }
@@ -512,7 +454,7 @@ pub fn cross_join(
 /// Builds a summary DataFrame with a "summary" column (PySpark name) and one column per numeric input column.
 pub fn describe(df: &DataFrame, case_sensitive: bool) -> Result<DataFrame, PolarsError> {
     use polars::prelude::*;
-    let pl_df = df.df.as_ref().clone();
+    let pl_df = df.collect_inner()?.as_ref().clone();
     let mut stat_values: Vec<Column> = Vec::new();
     for col in pl_df.get_columns() {
         let s = col.as_materialized_series();
@@ -608,15 +550,14 @@ pub fn subtract(
     case_sensitive: bool,
 ) -> Result<DataFrame, PolarsError> {
     use polars::prelude::*;
-    let left_names = left.df.get_column_names();
+    let left_names = left.columns()?;
     let left_on: Vec<Expr> = left_names.iter().map(|n| col(n.as_str())).collect();
     let right_on: Vec<Expr> = left_names.iter().map(|n| col(n.as_str())).collect();
-    let right_lf = right.df.as_ref().clone().lazy();
-    let left_lf = left.df.as_ref().clone().lazy();
+    let right_lf = right.lazy_frame();
+    let left_lf = left.lazy_frame();
     let anti = left_lf.join(right_lf, left_on, right_on, JoinArgs::new(JoinType::Anti));
-    let pl_df = anti.collect()?;
-    Ok(super::DataFrame::from_polars_with_options(
-        pl_df,
+    Ok(super::DataFrame::from_lazy_with_options(
+        anti,
         case_sensitive,
     ))
 }
@@ -628,15 +569,16 @@ pub fn intersect(
     case_sensitive: bool,
 ) -> Result<DataFrame, PolarsError> {
     use polars::prelude::*;
-    let left_names = left.df.get_column_names();
+    let left_names = left.columns()?;
     let left_on: Vec<Expr> = left_names.iter().map(|n| col(n.as_str())).collect();
     let right_on: Vec<Expr> = left_names.iter().map(|n| col(n.as_str())).collect();
-    let left_lf = left.df.as_ref().clone().lazy();
-    let right_lf = right.df.as_ref().clone().lazy();
-    let semi = left_lf.join(right_lf, left_on, right_on, JoinArgs::new(JoinType::Semi));
-    let pl_df = semi.unique(None, UniqueKeepStrategy::First).collect()?;
-    Ok(super::DataFrame::from_polars_with_options(
-        pl_df,
+    let left_lf = left.lazy_frame();
+    let right_lf = right.lazy_frame();
+    let semi = left_lf
+        .join(right_lf, left_on, right_on, JoinArgs::new(JoinType::Semi))
+        .unique(None, UniqueKeepStrategy::First);
+    Ok(super::DataFrame::from_lazy_with_options(
+        semi,
         case_sensitive,
     ))
 }
@@ -652,18 +594,19 @@ pub fn sample(
     case_sensitive: bool,
 ) -> Result<DataFrame, PolarsError> {
     use polars::prelude::Series;
-    let n = df.df.height();
+    let pl = df.collect_inner()?;
+    let n = pl.height();
     if n == 0 {
-        return Ok(super::DataFrame::from_polars_with_options(
-            df.df.as_ref().clone(),
+        return Ok(super::DataFrame::from_lazy_with_options(
+            polars::prelude::DataFrame::empty().lazy(),
             case_sensitive,
         ));
     }
     let take_n = (n as f64 * fraction).round() as usize;
     let take_n = take_n.min(n).max(0);
     if take_n == 0 {
-        return Ok(super::DataFrame::from_polars_with_options(
-            df.df.as_ref().clone().head(Some(0)),
+        return Ok(super::DataFrame::from_lazy_with_options(
+            pl.as_ref().head(Some(0)).lazy(),
             case_sensitive,
         ));
     }
@@ -672,7 +615,7 @@ pub fn sample(
     let idx_ca = sampled_idx
         .u32()
         .map_err(|_| PolarsError::ComputeError("sample: expected u32 indices".into()))?;
-    let pl_df = df.df.as_ref().take(idx_ca)?;
+    let pl_df = pl.as_ref().take(idx_ca)?;
     Ok(super::DataFrame::from_polars_with_options(
         pl_df,
         case_sensitive,
@@ -692,7 +635,8 @@ pub fn random_split(
     if total <= 0.0 || weights.is_empty() {
         return Ok(Vec::new());
     }
-    let n = df.df.height();
+    let pl = df.collect_inner()?;
+    let n = pl.height();
     if n == 0 {
         return Ok(weights.iter().map(|_| super::DataFrame::empty()).collect());
     }
@@ -717,7 +661,7 @@ pub fn random_split(
             .unwrap_or(weights.len().saturating_sub(1));
         bucket_indices[bucket].push(i as u32);
     }
-    let pl = df.df.as_ref();
+    let pl = pl.as_ref();
     let mut out = Vec::with_capacity(weights.len());
     for indices in bucket_indices {
         if indices.is_empty() {
@@ -751,8 +695,8 @@ pub fn sample_by(
 ) -> Result<DataFrame, PolarsError> {
     use polars::prelude::*;
     if fractions.is_empty() {
-        return Ok(super::DataFrame::from_polars_with_options(
-            df.df.as_ref().clone().head(Some(0)),
+        return Ok(super::DataFrame::from_lazy_with_options(
+            df.lazy_frame().slice(0, 0),
             case_sensitive,
         ));
     }
@@ -760,7 +704,7 @@ pub fn sample_by(
     let mut parts = Vec::with_capacity(fractions.len());
     for (value_expr, frac) in fractions {
         let cond = col(resolved.as_str()).eq(value_expr.clone());
-        let filtered = df.df.as_ref().clone().lazy().filter(cond).collect()?;
+        let filtered = df.lazy_frame().filter(cond).collect()?;
         if filtered.height() == 0 {
             parts.push(filtered.head(Some(0)));
             continue;
@@ -772,7 +716,7 @@ pub fn sample_by(
             seed,
             case_sensitive,
         )?;
-        parts.push(sampled.df.as_ref().clone());
+        parts.push(sampled.collect_inner()?.as_ref().clone());
     }
     let mut out = parts
         .first()
@@ -789,7 +733,7 @@ pub fn sample_by(
 
 /// First row as a DataFrame (one row). PySpark first().
 pub fn first(df: &DataFrame, case_sensitive: bool) -> Result<DataFrame, PolarsError> {
-    let pl_df = df.df.as_ref().clone().head(Some(1));
+    let pl_df = df.collect_inner()?.as_ref().clone().head(Some(1));
     Ok(super::DataFrame::from_polars_with_options(
         pl_df,
         case_sensitive,
@@ -808,9 +752,10 @@ pub fn take(df: &DataFrame, n: usize, case_sensitive: bool) -> Result<DataFrame,
 
 /// Last n rows. PySpark tail(n).
 pub fn tail(df: &DataFrame, n: usize, case_sensitive: bool) -> Result<DataFrame, PolarsError> {
-    let total = df.df.height();
+    let pl = df.collect_inner()?;
+    let total = pl.height();
     let skip = total.saturating_sub(n);
-    let pl_df = df.df.as_ref().clone().slice(skip as i64, n);
+    let pl_df = pl.as_ref().clone().slice(skip as i64, n);
     Ok(super::DataFrame::from_polars_with_options(
         pl_df,
         case_sensitive,
@@ -819,7 +764,7 @@ pub fn tail(df: &DataFrame, n: usize, case_sensitive: bool) -> Result<DataFrame,
 
 /// Whether the DataFrame has zero rows. PySpark isEmpty.
 pub fn is_empty(df: &DataFrame) -> bool {
-    df.df.height() == 0
+    df.count().map(|n| n == 0).unwrap_or(true)
 }
 
 /// Rename columns. PySpark toDF(*colNames). Names must match length of columns.
@@ -828,7 +773,7 @@ pub fn to_df(
     names: &[&str],
     case_sensitive: bool,
 ) -> Result<DataFrame, PolarsError> {
-    let cols = df.df.get_column_names();
+    let cols = df.columns()?;
     if names.len() != cols.len() {
         return Err(PolarsError::ComputeError(
             format!(
@@ -839,7 +784,8 @@ pub fn to_df(
             .into(),
         ));
     }
-    let mut pl_df = df.df.as_ref().clone();
+    let pl_df = df.collect_inner()?;
+    let mut pl_df = pl_df.as_ref().clone();
     for (old, new) in cols.iter().zip(names.iter()) {
         pl_df.rename(old.as_str(), (*new).into())?;
     }
@@ -872,7 +818,8 @@ fn any_value_to_serde_value(av: &polars::prelude::AnyValue) -> serde_json::Value
 /// Collect rows as JSON strings (one JSON object per row). PySpark toJSON.
 pub fn to_json(df: &DataFrame) -> Result<Vec<String>, PolarsError> {
     use polars::prelude::*;
-    let pl = df.df.as_ref();
+    let collected = df.collect_inner()?;
+    let pl = collected.as_ref();
     let names = pl.get_column_names();
     let mut out = Vec::with_capacity(pl.height());
     for r in 0..pl.height() {
@@ -953,10 +900,10 @@ pub fn col_regex(
     let re = regex::Regex::new(pattern).map_err(|e| {
         PolarsError::ComputeError(format!("colRegex: invalid pattern {pattern:?}: {e}").into())
     })?;
-    let names = df.df.get_column_names();
+    let names = df.columns()?;
     let matched: Vec<&str> = names
         .iter()
-        .filter(|n| re.is_match(n.as_str()))
+        .filter(|n| re.is_match(n))
         .map(|s| s.as_str())
         .collect();
     if matched.is_empty() {
@@ -973,8 +920,8 @@ pub fn with_columns(
     exprs: &[(String, crate::column::Column)],
     case_sensitive: bool,
 ) -> Result<DataFrame, PolarsError> {
-    let mut current =
-        super::DataFrame::from_polars_with_options(df.df.as_ref().clone(), case_sensitive);
+    let pl = df.collect_inner()?.as_ref().clone();
+    let mut current = super::DataFrame::from_polars_with_options(pl, case_sensitive);
     for (name, col) in exprs {
         current = with_column(&current, name, col, case_sensitive)?;
     }
@@ -987,15 +934,16 @@ pub fn with_columns_renamed(
     renames: &[(String, String)],
     case_sensitive: bool,
 ) -> Result<DataFrame, PolarsError> {
-    let mut out = df.df.as_ref().clone();
+    let mut mapping = Vec::new();
     for (old_name, new_name) in renames {
         let resolved = df.resolve_column_name(old_name)?;
-        out.rename(resolved.as_str(), new_name.as_str().into())?;
+        mapping.push((resolved, new_name.clone()));
     }
-    Ok(super::DataFrame::from_polars_with_options(
-        out,
-        case_sensitive,
-    ))
+    let mut lf = df.lazy_frame();
+    for (old, new) in mapping {
+        lf = lf.rename([old.as_str()], [new.as_str()], true);
+    }
+    Ok(super::DataFrame::from_lazy_with_options(lf, case_sensitive))
 }
 
 /// NA sub-API builder. PySpark df.na().fill(...) / .drop(...).
@@ -1048,13 +996,8 @@ impl<'a> DataFrameNa<'a> {
 
 /// Skip first n rows. PySpark offset(n).
 pub fn offset(df: &DataFrame, n: usize, case_sensitive: bool) -> Result<DataFrame, PolarsError> {
-    let total = df.df.height();
-    let len = total.saturating_sub(n);
-    let pl_df = df.df.as_ref().clone().slice(n as i64, len);
-    Ok(super::DataFrame::from_polars_with_options(
-        pl_df,
-        case_sensitive,
-    ))
+    let lf = df.lazy_frame().slice(n as i64, u32::MAX);
+    Ok(super::DataFrame::from_lazy_with_options(lf, case_sensitive))
 }
 
 /// Transform DataFrame by a function. PySpark transform(func).
@@ -1075,13 +1018,14 @@ pub fn freq_items(
 ) -> Result<DataFrame, PolarsError> {
     use polars::prelude::SeriesMethods;
     if columns.is_empty() {
-        return Ok(super::DataFrame::from_polars_with_options(
-            df.df.as_ref().clone().head(Some(0)),
+        return Ok(super::DataFrame::from_lazy_with_options(
+            df.lazy_frame().slice(0, 0),
             case_sensitive,
         ));
     }
     let support = support.clamp(1e-4, 1.0);
-    let pl_df = df.df.as_ref();
+    let collected = df.collect_inner()?;
+    let pl_df = collected.as_ref();
     let n_total = pl_df.height() as f64;
     if n_total == 0.0 {
         let mut out = Vec::with_capacity(columns.len());
@@ -1172,9 +1116,8 @@ pub fn approx_quantile(
         ));
     }
     let resolved = df.resolve_column_name(column)?;
-    let s = df
-        .df
-        .as_ref()
+    let collected = df.collect_inner()?;
+    let s = collected
         .column(resolved.as_str())?
         .as_series()
         .ok_or_else(|| PolarsError::ComputeError("approx_quantile: column not a series".into()))?
@@ -1206,7 +1149,8 @@ pub fn crosstab(
     use polars::prelude::*;
     let c1 = df.resolve_column_name(col1)?;
     let c2 = df.resolve_column_name(col2)?;
-    let pl_df = df.df.as_ref();
+    let collected = df.collect_inner()?;
+    let pl_df = collected.as_ref();
     let grouped = pl_df
         .clone()
         .lazy()
@@ -1227,7 +1171,8 @@ pub fn melt(
     case_sensitive: bool,
 ) -> Result<DataFrame, PolarsError> {
     use polars::prelude::*;
-    let pl_df = df.df.as_ref();
+    let collected = df.collect_inner()?;
+    let pl_df = collected.as_ref();
     if value_vars.is_empty() {
         return Ok(super::DataFrame::from_polars_with_options(
             pl_df.head(Some(0)),
