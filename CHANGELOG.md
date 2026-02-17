@@ -38,6 +38,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Phase 26 – Publish crate**: Prepare and publish robin-sparkless to crates.io. See [ROADMAP.md](docs/ROADMAP.md) for details.
 
+## [0.11.1] - 2026-02-17
+
+### Changed
+
+- **#176 – QUICKSTART: regexp_extract_all with select expressions** — QUICKSTART.md now documents using `regexp_extract_all` with `DataFrame::select_exprs` for select-with-expressions workflows. Fixes #176.
+
 ## [0.11.0] - 2026-02-17
 
 ### Changed
