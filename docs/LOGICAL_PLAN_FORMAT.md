@@ -177,6 +177,12 @@ Input and expected schemas use a list of column specs:
 
 ---
 
+## Case sensitivity
+
+Column names in expressions and op payloads are resolved **case-insensitively** by default (PySpark parity). When `spark.sql.caseSensitive` is false (the default), `{"col": "ID"}` resolves to schema column `id` if present; `{"col": "id"}` and `{"col": "Id"}` also resolve to `id`. The SparkSession `create_dataframe_from_rows` and plan interpreter use `session.is_case_sensitive()` to set the DataFrame case-sensitivity flag. Sparkless adapters should ensure the session config propagates `spark.sql.caseSensitive` so that `col("ID")` when schema has `id` resolves correctly (issue #508).
+
+---
+
 ## Supported operations (Sparkless parity)
 
 Backends such as Sparkless can discover which plan operations robin-sparkless supports by calling:
