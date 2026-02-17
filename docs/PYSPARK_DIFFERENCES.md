@@ -44,10 +44,10 @@ This document lists **intentional or known divergences** from PySpark semantics 
 - **rdd**: Stub; raises `NotImplementedError` ("RDD is not supported in Sparkless").
 - **foreach**, **foreachPartition**: Stub; raise `NotImplementedError`.
 - **mapInPandas**, **mapPartitions**: Stub; raise `NotImplementedError`.
-- **storageLevel**: Stub; returns `None` (eager execution; no storage level).
+- **storageLevel**: Stub; returns `None` (DataFrame is lazy; no storage level).
 - **isStreaming**: Always returns `False`; streaming is not supported.
 - **withWatermark**: No-op; returns self. Streaming/watermark not supported.
-- **persist** / **unpersist**: No-op; return self (execution is eager).
+- **persist** / **unpersist**: No-op; return self. DataFrame execution is lazy by default (transformations extend the plan; only actions like `collect`, `show`, `count`, `write` materialize); persist/unpersist do not cache.
 
 ## SparkSession.createDataFrame / create_dataframe
 

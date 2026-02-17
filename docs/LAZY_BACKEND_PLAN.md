@@ -1,5 +1,7 @@
 # Plan: Convert Robin Sparkless Backend to Full Lazy Execution
 
+> **Implementation status (v0.10.x):** This plan has been **implemented** as of #438. DataFrame now uses Polars `LazyFrame` internally. Transformations extend the lazy plan; only actions (`collect`, `show`, `count`, `write`, etc.) trigger materialization. Data sources return lazy DataFrames. This document remains as historical context and architecture reference.
+
 ## Summary
 
 Convert the internal representation of `DataFrame` from **eager** Polars `DataFrame` to **lazy** Polars `LazyFrame`. Transformations would extend the lazy plan; only **actions** (e.g. `collect`, `show`, `write`, `count`) would trigger materialization. This aligns with PySpark semantics, enables Polars query optimization across the full pipeline, and reduces intermediate materializations.

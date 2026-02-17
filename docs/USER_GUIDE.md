@@ -9,6 +9,7 @@ This guide shows you how to use Robin Sparkless for everyday data work. It assum
 Robin Sparkless is a **PySpark-style DataFrame library** that runs in Rust with [Polars](https://www.pola.rs/) as the engine—**no JVM**. You get:
 
 - Familiar APIs: `SparkSession`, `DataFrame`, `Column`, `filter`, `select`, `group_by`, etc.
+- **Lazy by default**: transformations extend the plan; only actions (`collect`, `show`, `count`, `write`) trigger execution—aligns with PySpark and enables Polars query optimization.
 - Fast execution on Polars
 - Rust-first with optional Python bindings (PyO3)
 
@@ -133,7 +134,7 @@ Keep rows that satisfy a condition.
 ```rust
 use robin_sparkless::{col, lit_i64};
 
-let adults = df.filter(col("age").gt(lit_i64(25)))?;
+let adults = df.filter(col("age").gt(lit_i64(25).into_expr()).into_expr())?;
 ```
 
 **Python**

@@ -25,7 +25,7 @@
 
 | Area | What’s included |
 |------|------------------|
-| **Core** | `SparkSession`, `DataFrame`, `Column`; `filter`, `select`, `with_column`, `order_by`, `group_by`, joins |
+| **Core** | `SparkSession`, `DataFrame`, `Column`; lazy by default (transformations extend the plan; only actions like `collect`, `show`, `count`, `write` materialize); `filter`, `select`, `with_column`, `order_by`, `group_by`, joins |
 | **IO** | CSV, Parquet, JSON via `SparkSession::read_*` |
 | **Expressions** | `col()`, `lit()`, `when`/`then`/`otherwise`, `coalesce`, cast, type/conditional helpers |
 | **Aggregates** | `count`, `sum`, `avg`, `min`, `max`, and more; multi-column groupBy |
@@ -156,6 +156,7 @@ Output:
 | `cargo build --features pyo3` | Build with Python extension |
 | `cargo test` | Run Rust tests |
 | `make test` | Run Rust + Python tests (creates venv, `maturin develop --features pyo3,sql,delta`, `pytest`) |
+| `make run-examples` | Run all Rust examples + Python doc examples (shows real output) |
 | `make check` | Rust only: format check, clippy, audit, deny, Rust tests. Use `make -j5 check` to run the five jobs in parallel. |
 | `make check-full` | Full CI: check + Python lint (ruff, mypy) + Python tests. Use `make -j7 check-full` to run all 7 jobs in parallel (5 Rust + 2 Python), or `-j3` for the three top-level jobs. |
 | `make fmt` | Format Rust code (run before check if you want to fix formatting). |

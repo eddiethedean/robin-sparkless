@@ -39,6 +39,8 @@ Python module is only compiled when the `pyo3` feature is enabled. Default `carg
 
 ## Module surface
 
+DataFrame uses **lazy evaluation** (#438): transformations extend the plan; only actions (`collect`, `show`, `count`, `write`, etc.) trigger execution. Data sources (`read_csv`, `read_parquet`, `read_json`) return lazy DataFrames.
+
 | Rust type       | Python class / function | Notes |
 |-----------------|-------------------------|--------|
 | SparkSession    | `SparkSession`          | `builder()`, `get_or_create()`, `createDataFrame(data, schema=None, sampling_ratio=None, verify_schema=True)`, `read_csv`, `read_parquet`, `read_json`, `is_case_sensitive()`, `udf()`; with `sql`: `sql(query)`, `create_or_replace_temp_view(name, df)`, `table(name)` (temp view then saved table), `read_delta(name_or_path)` (path → Delta on disk; name → in-memory table), `catalog()` → `listTables(dbName=None)`, `tableExists(tableName, dbName=None)`, `dropTempView(name)`, `dropTable(tableName)`; with `delta`: `read_delta_version(path, version)` for path-based time travel |

@@ -21,7 +21,7 @@ Robin-sparkless is designed to **replace the backend logic** of [Sparkless](http
 - Optional **PyO3 bridge**: `pyo3` feature adds Python bindings; see [PYTHON_API.md](PYTHON_API.md).
 
 ### 2. Polars Integration
-- `DataFrame` wraps a Polars `DataFrame` internally.
+- `DataFrame` uses Polars `LazyFrame` internally (#438): transformations extend the lazy plan; only actions (`collect`, `show`, `count`, `write`, etc.) trigger materialization. Data sources (`read_csv`, `read_parquet`, `read_json`) return lazy DataFrames.
 - `Column` is a thin wrapper around Polars `Expr`.
 - Basic helpers implemented in `functions.rs` for literals and aggregates.
 

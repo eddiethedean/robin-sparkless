@@ -39,7 +39,7 @@ robin-sparkless = "0.10.0"
 
 ## Basic Usage
 
-The current API is intentionally small and focused on wrapping Polars types.
+The current API is intentionally small and focused on wrapping Polars types. **DataFrame uses lazy evaluation** (#438): transformations (filter, select, join, etc.) extend the plan; only actions (`collect`, `show`, `count`, `write`) trigger execution. This enables Polars query optimization across the full pipeline.
 
 ```rust
 use polars::prelude::*;
@@ -53,7 +53,7 @@ fn main() -> polars::prelude::PolarsResult<()> {
         "name" => &["Alice", "Bob", "Charlie"],
     )?;
 
-    // Wrap it
+    // Wrap it (stored as lazy internally; no materialization until an action)
     let df = DataFrame::from_polars(polars_df);
 
     // Introspect

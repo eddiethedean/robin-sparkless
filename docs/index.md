@@ -17,7 +17,7 @@ Robin Sparkless provides a **PySpark-like API** in Rust so you can write familia
 
 | Feature | Description |
 |--------|-------------|
-| **Core** | `SparkSession`, `DataFrame`, `Column`; filter, select, groupBy, joins |
+| **Core** | `SparkSession`, `DataFrame`, `Column`; lazy by default (transformations extend plan; actions materialize); filter, select, groupBy, joins |
 | **Engine** | [Polars](https://www.pola.rs/) for fast, native execution |
 | **Optional** | SQL (`spark.sql`, temp views, global temp views, `saveAsTable` in-memory or warehouse), Delta Lake (`read_delta` / `write_delta`) |
 | **Python** | `robin_sparkless` module built with maturin |

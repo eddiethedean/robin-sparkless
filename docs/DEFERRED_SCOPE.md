@@ -38,7 +38,7 @@ See also: [PYSPARK_DIFFERENCES.md](PYSPARK_DIFFERENCES.md), [ROBIN_SPARKLESS_MIS
 
 | APIs | Status | Rationale |
 |------|--------|-----------|
-| `withWatermark`, `session_window`, `isStreaming` | No-op / stub | Robin-sparkless uses eager execution only; no streaming execution model. |
+| `withWatermark`, `session_window`, `isStreaming` | No-op / stub | Robin-sparkless has no streaming execution model; DataFrame is lazy until actions run. |
 
 **Current behavior:** `isStreaming` always returns `False`; `withWatermark` is a no-op that returns the DataFrame unchanged.
 
@@ -64,7 +64,7 @@ See also: [PYSPARK_DIFFERENCES.md](PYSPARK_DIFFERENCES.md), [ROBIN_SPARKLESS_MIS
 
 | APIs | Status | Rationale |
 |------|--------|-----------|
-| `rdd`, `foreach`, `foreachPartition`, `mapInPandas`, `mapPartitions` | Stub (raise `NotImplementedError`) | Robin-sparkless is eager and single-process; no RDD or distributed execution. |
+| `rdd`, `foreach`, `foreachPartition`, `mapInPandas`, `mapPartitions` | Stub (raise `NotImplementedError`) | Robin-sparkless is single-process; no RDD or distributed execution. DataFrame is lazy (PySpark-like). |
 
 **Workaround:** Use `collect()`, `toLocalIterator()`, or `to_pandas()` for local access. For row-wise processing, materialize with `collect()` and iterate in Python/Rust.
 

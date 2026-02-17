@@ -83,7 +83,7 @@ For a consolidated view of deferred/optional scope (XML, UDF, streaming, RDD, sk
 - ~~**`repartitionByRange`**~~ — **implemented** (no-op).
 - **`sameSemantics`**, **`semanticHash`** — we have no-op stubs that return fixed values.
 - ~~**`sortWithinPartitions`**~~ — **implemented** (no-op).
-- **`storageLevel`** — PySpark; stub: returns `None` (eager execution).
+- **`storageLevel`** — PySpark; stub: returns `None` (DataFrame is lazy; no storage level).
 - **`to`** — PySpark generic writer; we have `write_delta` with delta feature.
 - ~~**`toLocalIterator`**~~ — **implemented** (best-effort: same as `collect()`, iterable of rows).
 - ~~**`unpersist`**~~ — we have it (no-op).
