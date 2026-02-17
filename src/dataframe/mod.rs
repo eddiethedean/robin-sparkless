@@ -18,8 +18,8 @@ use crate::schema::StructType;
 use crate::session::SparkSession;
 use crate::type_coercion::coerce_for_pyspark_comparison;
 use polars::prelude::{
-    col, lit, AnyValue, DataFrame as PlDataFrame, DataType, Expr, PlSmallStr, PolarsError,
-    SchemaNamesAndDtypes,
+    col, lit, AnyValue, DataFrame as PlDataFrame, DataType, Expr, IntoLazy, LazyFrame, PlSmallStr,
+    PolarsError, Schema, SchemaNamesAndDtypes,
 };
 use serde_json::Value as JsonValue;
 use std::collections::{HashMap, HashSet};
@@ -29,10 +29,20 @@ use std::sync::Arc;
 /// Default for `spark.sql.caseSensitive` (PySpark default is false = case-insensitive).
 const DEFAULT_CASE_SENSITIVE: bool = false;
 
+/// Inner representation: eager (legacy) or lazy (preferred).
+/// Transformations extend LazyFrame; only actions trigger collect.
+#[allow(clippy::large_enum_variant)]
+pub(crate) enum DataFrameInner {
+    #[allow(dead_code)]
+    Eager(Arc<PlDataFrame>),
+    Lazy(LazyFrame),
+}
+
 /// DataFrame - main tabular data structure.
-/// Thin wrapper around an eager Polars `DataFrame`.
+/// Wraps either an eager Polars `DataFrame` or a lazy `LazyFrame`.
+/// Transformations extend the plan; actions trigger materialization.
 pub struct DataFrame {
-    pub(crate) df: Arc<PlDataFrame>,
+    pub(crate) inner: DataFrameInner,
     /// When false (default), column names are matched case-insensitively (PySpark behavior).
     pub(crate) case_sensitive: bool,
     /// Optional alias for subquery/join (PySpark: df.alias("t")).
@@ -41,9 +51,11 @@ pub struct DataFrame {
 
 impl DataFrame {
     /// Create a new DataFrame from a Polars DataFrame (case-insensitive column matching by default).
+    /// Stores as Lazy for consistency with the lazy-by-default execution model.
     pub fn from_polars(df: PlDataFrame) -> Self {
+        let lf = df.lazy();
         DataFrame {
-            df: Arc::new(df),
+            inner: DataFrameInner::Lazy(lf),
             case_sensitive: DEFAULT_CASE_SENSITIVE,
             alias: None,
         }
@@ -52,8 +64,27 @@ impl DataFrame {
     /// Create a new DataFrame from a Polars DataFrame with explicit case sensitivity.
     /// When `case_sensitive` is false, column resolution is case-insensitive (PySpark default).
     pub fn from_polars_with_options(df: PlDataFrame, case_sensitive: bool) -> Self {
+        let lf = df.lazy();
         DataFrame {
-            df: Arc::new(df),
+            inner: DataFrameInner::Lazy(lf),
+            case_sensitive,
+            alias: None,
+        }
+    }
+
+    /// Create a DataFrame from a LazyFrame (no materialization).
+    pub fn from_lazy(lf: LazyFrame) -> Self {
+        DataFrame {
+            inner: DataFrameInner::Lazy(lf),
+            case_sensitive: DEFAULT_CASE_SENSITIVE,
+            alias: None,
+        }
+    }
+
+    /// Create a DataFrame from a LazyFrame with explicit case sensitivity.
+    pub fn from_lazy_with_options(lf: LazyFrame, case_sensitive: bool) -> Self {
+        DataFrame {
+            inner: DataFrameInner::Lazy(lf),
             case_sensitive,
             alias: None,
         }
@@ -62,17 +93,34 @@ impl DataFrame {
     /// Create an empty DataFrame
     pub fn empty() -> Self {
         DataFrame {
-            df: Arc::new(PlDataFrame::empty()),
+            inner: DataFrameInner::Lazy(PlDataFrame::empty().lazy()),
             case_sensitive: DEFAULT_CASE_SENSITIVE,
             alias: None,
+        }
+    }
+
+    /// Return the LazyFrame for plan extension. For Eager, converts via .lazy(); for Lazy, clones.
+    pub(crate) fn lazy_frame(&self) -> LazyFrame {
+        match &self.inner {
+            DataFrameInner::Eager(df) => df.as_ref().clone().lazy(),
+            DataFrameInner::Lazy(lf) => lf.clone(),
+        }
+    }
+
+    /// Materialize the plan. Single point of collect for all actions.
+    pub(crate) fn collect_inner(&self) -> Result<Arc<PlDataFrame>, PolarsError> {
+        match &self.inner {
+            DataFrameInner::Eager(df) => Ok(df.clone()),
+            DataFrameInner::Lazy(lf) => Ok(Arc::new(lf.clone().collect()?)),
         }
     }
 
     /// Return a DataFrame with the given alias (PySpark: df.alias("t")).
     /// Used for subquery/join naming; the alias is stored for future use in SQL or qualified column resolution.
     pub fn alias(&self, name: &str) -> Self {
+        let lf = self.lazy_frame();
         DataFrame {
-            df: self.df.clone(),
+            inner: DataFrameInner::Lazy(lf),
             case_sensitive: self.case_sensitive,
             alias: Some(name.to_string()),
         }
@@ -409,33 +457,40 @@ impl DataFrame {
         })
     }
 
+    /// Get schema from inner (Eager: df.schema(); Lazy: lf.collect_schema()).
+    fn schema_or_collect(&self) -> Result<Arc<Schema>, PolarsError> {
+        match &self.inner {
+            DataFrameInner::Eager(df) => Ok(Arc::new(df.schema())),
+            DataFrameInner::Lazy(lf) => Ok(lf.clone().collect_schema()?),
+        }
+    }
+
     /// Resolve a logical column name to the actual column name in the schema.
     /// When case_sensitive is false, matches case-insensitively.
     pub fn resolve_column_name(&self, name: &str) -> Result<String, PolarsError> {
-        let names = self.df.get_column_names();
+        let schema = self.schema_or_collect()?;
+        let names: Vec<String> = schema
+            .iter_names_and_dtypes()
+            .map(|(n, _)| n.to_string())
+            .collect();
         if self.case_sensitive {
-            if names.iter().any(|n| *n == name) {
+            if names.iter().any(|n| n == name) {
                 return Ok(name.to_string());
             }
         } else {
             let name_lower = name.to_lowercase();
-            for n in names {
+            for n in &names {
                 if n.to_lowercase() == name_lower {
-                    return Ok(n.to_string());
+                    return Ok(n.clone());
                 }
             }
         }
-        let available: Vec<String> = self
-            .df
-            .get_column_names()
-            .iter()
-            .map(|s| s.to_string())
-            .collect();
+        let available = names.join(", ");
         Err(PolarsError::ColumnNotFound(
             format!(
                 "Column '{}' not found. Available columns: [{}]. Check spelling and case sensitivity (spark.sql.caseSensitive).",
                 name,
-                available.join(", ")
+                available
             )
             .into(),
         ))
@@ -443,14 +498,15 @@ impl DataFrame {
 
     /// Get the schema of the DataFrame
     pub fn schema(&self) -> Result<StructType, PolarsError> {
-        Ok(StructType::from_polars_schema(&self.df.schema()))
+        let s = self.schema_or_collect()?;
+        Ok(StructType::from_polars_schema(&s))
     }
 
     /// Get the dtype of a column by name (after resolving case-insensitivity). Returns None if not found.
     pub fn get_column_dtype(&self, name: &str) -> Option<DataType> {
         let resolved = self.resolve_column_name(name).ok()?;
-        self.df
-            .schema()
+        self.schema_or_collect()
+            .ok()?
             .iter_names_and_dtypes()
             .find(|(n, _)| n.to_string() == resolved)
             .map(|(_, dt)| dt.clone())
@@ -458,41 +514,41 @@ impl DataFrame {
 
     /// Get column names
     pub fn columns(&self) -> Result<Vec<String>, PolarsError> {
-        Ok(self
-            .df
-            .get_column_names()
-            .iter()
-            .map(|s| s.to_string())
+        let schema = self.schema_or_collect()?;
+        Ok(schema
+            .iter_names_and_dtypes()
+            .map(|(n, _)| n.to_string())
             .collect())
     }
 
     /// Count the number of rows (action - triggers execution)
     pub fn count(&self) -> Result<usize, PolarsError> {
-        Ok(self.df.height())
+        Ok(self.collect_inner()?.height())
     }
 
     /// Show the first n rows
     pub fn show(&self, n: Option<usize>) -> Result<(), PolarsError> {
         let n = n.unwrap_or(20);
-        println!("{}", self.df.head(Some(n)));
+        let df = self.collect_inner()?;
+        println!("{}", df.head(Some(n)));
         Ok(())
     }
 
     /// Collect the DataFrame (action - triggers execution)
     pub fn collect(&self) -> Result<Arc<PlDataFrame>, PolarsError> {
-        Ok(self.df.clone())
+        self.collect_inner()
     }
 
     /// Collect as rows of column-name -> JSON value. For use by language bindings (Node, etc.).
     pub fn collect_as_json_rows(&self) -> Result<Vec<HashMap<String, JsonValue>>, PolarsError> {
-        let df = self.df.as_ref();
-        let names = df.get_column_names();
-        let nrows = df.height();
+        let collected = self.collect_inner()?;
+        let names = collected.get_column_names();
+        let nrows = collected.height();
         let mut rows = Vec::with_capacity(nrows);
         for i in 0..nrows {
             let mut row = HashMap::with_capacity(names.len());
             for (col_idx, name) in names.iter().enumerate() {
-                let s = df
+                let s = collected
                     .get_columns()
                     .get(col_idx)
                     .ok_or_else(|| PolarsError::ComputeError("column index out of range".into()))?;
@@ -569,10 +625,10 @@ impl DataFrame {
             .map(|c| self.resolve_column_name(c))
             .collect::<Result<Vec<_>, _>>()?;
         let exprs: Vec<Expr> = resolved.iter().map(|name| col(name.as_str())).collect();
-        let pl_df = self.df.as_ref().clone();
-        let lazy_grouped = pl_df.clone().lazy().group_by(exprs);
+        let lf = self.lazy_frame();
+        let lazy_grouped = lf.clone().group_by(exprs);
         Ok(GroupedData {
-            df: pl_df,
+            lf,
             lazy_grouped,
             grouping_cols: resolved,
             case_sensitive: self.case_sensitive,
@@ -601,10 +657,10 @@ impl DataFrame {
             .into_iter()
             .map(|e| self.resolve_expr_column_names(e))
             .collect::<Result<Vec<_>, _>>()?;
-        let pl_df = self.df.as_ref().clone();
-        let lazy_grouped = pl_df.clone().lazy().group_by(resolved);
+        let lf = self.lazy_frame();
+        let lazy_grouped = lf.clone().group_by(resolved);
         Ok(GroupedData {
-            df: pl_df,
+            lf,
             lazy_grouped,
             grouping_cols: grouping_col_names,
             case_sensitive: self.case_sensitive,
@@ -618,7 +674,7 @@ impl DataFrame {
             .map(|c| self.resolve_column_name(c))
             .collect::<Result<Vec<_>, _>>()?;
         Ok(CubeRollupData {
-            df: self.df.as_ref().clone(),
+            lf: self.lazy_frame(),
             grouping_cols: resolved,
             case_sensitive: self.case_sensitive,
             is_cube: true,
@@ -632,7 +688,7 @@ impl DataFrame {
             .map(|c| self.resolve_column_name(c))
             .collect::<Result<Vec<_>, _>>()?;
         Ok(CubeRollupData {
-            df: self.df.as_ref().clone(),
+            lf: self.lazy_frame(),
             grouping_cols: resolved,
             case_sensitive: self.case_sensitive,
             is_cube: false,
@@ -643,19 +699,12 @@ impl DataFrame {
     /// returning a single-row DataFrame (PySpark: df.agg(F.sum("x"), F.avg("y"))).
     /// Duplicate output names are disambiguated with _1, _2, ... (issue #368).
     pub fn agg(&self, aggregations: Vec<Expr>) -> Result<DataFrame, PolarsError> {
-        use polars::prelude::IntoLazy;
         let resolved: Vec<Expr> = aggregations
             .into_iter()
             .map(|e| self.resolve_expr_column_names(e))
             .collect::<Result<Vec<_>, _>>()?;
         let disambiguated = aggregations::disambiguate_agg_output_names(resolved);
-        let pl_df = self
-            .df
-            .as_ref()
-            .clone()
-            .lazy()
-            .select(disambiguated)
-            .collect()?;
+        let pl_df = self.lazy_frame().select(disambiguated).collect()?;
         Ok(Self::from_polars_with_options(pl_df, self.case_sensitive))
     }
 
@@ -924,7 +973,7 @@ impl DataFrame {
 
     /// Column names and dtype strings. PySpark dtypes. Returns (name, dtype_string) per column.
     pub fn dtypes(&self) -> Result<Vec<(String, String)>, PolarsError> {
-        let schema = self.df.schema();
+        let schema = self.schema_or_collect()?;
         Ok(schema
             .iter_names_and_dtypes()
             .map(|(name, dtype)| (name.to_string(), format!("{dtype:?}")))
@@ -1083,7 +1132,7 @@ impl DataFrame {
         path: impl AsRef<std::path::Path>,
         overwrite: bool,
     ) -> Result<(), PolarsError> {
-        crate::delta::write_delta(self.df.as_ref(), path, overwrite)
+        crate::delta::write_delta(self.collect_inner()?.as_ref(), path, overwrite)
     }
 
     /// Stub when `delta` feature is disabled.
@@ -1236,7 +1285,7 @@ impl<'a> DataFrameWriter<'a> {
             }
             SaveMode::Append => {
                 let existing_pl = if let Some(existing) = session.get_saved_table(name) {
-                    existing.df.as_ref().clone()
+                    existing.collect_inner()?.as_ref().clone()
                 } else if let (Some(ref p), true) = (warehouse_path.as_ref(), warehouse_exists) {
                     // Read from warehouse (data.parquet convention)
                     let data_file = p.join("data.parquet");
@@ -1264,7 +1313,7 @@ impl<'a> DataFrameWriter<'a> {
                     }
                     return Ok(());
                 };
-                let new_pl = self.df.df.as_ref().clone();
+                let new_pl = self.df.collect_inner()?.as_ref().clone();
                 let existing_cols: Vec<&str> = existing_pl
                     .get_column_names()
                     .iter()
@@ -1353,7 +1402,7 @@ impl<'a> DataFrameWriter<'a> {
         use polars::prelude::*;
         let path = path.as_ref();
         let to_write: PlDataFrame = match self.mode {
-            WriteMode::Overwrite => self.df.df.as_ref().clone(),
+            WriteMode::Overwrite => self.df.collect_inner()?.as_ref().clone(),
             WriteMode::Append => {
                 if self.partition_by.is_empty() {
                     let existing: Option<PlDataFrame> = if path.exists() && path.is_file() {
@@ -1378,14 +1427,16 @@ impl<'a> DataFrameWriter<'a> {
                     };
                     match existing {
                         Some(existing) => {
-                            let lfs: [LazyFrame; 2] =
-                                [existing.lazy(), self.df.df.as_ref().clone().lazy()];
+                            let lfs: [LazyFrame; 2] = [
+                                existing.clone().lazy(),
+                                self.df.collect_inner()?.as_ref().clone().lazy(),
+                            ];
                             concat(lfs, UnionArgs::default())?.collect()?
                         }
-                        None => self.df.df.as_ref().clone(),
+                        None => self.df.collect_inner()?.as_ref().clone(),
                     }
                 } else {
-                    self.df.df.as_ref().clone()
+                    self.df.collect_inner()?.as_ref().clone()
                 }
             }
         };
@@ -1588,7 +1639,10 @@ impl<'a> DataFrameWriter<'a> {
 impl Clone for DataFrame {
     fn clone(&self) -> Self {
         DataFrame {
-            df: self.df.clone(),
+            inner: match &self.inner {
+                DataFrameInner::Eager(df) => DataFrameInner::Eager(df.clone()),
+                DataFrameInner::Lazy(lf) => DataFrameInner::Lazy(lf.clone()),
+            },
             case_sensitive: self.case_sensitive,
             alias: self.alias.clone(),
         }
@@ -1693,5 +1747,37 @@ mod tests {
         let expr = col("str_col").eq(lit(123i64));
         let out = df.filter(expr).unwrap();
         assert_eq!(out.count().unwrap(), 1);
+    }
+
+    /// Lazy backend: schema, columns, resolve_column_name work on lazy DataFrame.
+    #[test]
+    fn lazy_schema_columns_resolve_before_collect() {
+        let spark = SparkSession::builder()
+            .app_name("lazy_mod_tests")
+            .get_or_create();
+        let df = spark
+            .create_dataframe(
+                vec![
+                    (1i64, 25i64, "a".to_string()),
+                    (2i64, 30i64, "b".to_string()),
+                ],
+                vec!["id", "age", "name"],
+            )
+            .unwrap();
+        assert_eq!(df.columns().unwrap(), vec!["id", "age", "name"]);
+        assert_eq!(df.resolve_column_name("AGE").unwrap(), "age");
+        assert!(df.get_column_dtype("id").unwrap().is_integer());
+    }
+
+    /// Lazy backend: from_lazy produces valid DataFrame.
+    #[test]
+    fn lazy_from_lazy_produces_valid_df() {
+        let spark = SparkSession::builder()
+            .app_name("lazy_mod_tests")
+            .get_or_create();
+        let pl_df = polars::prelude::df!("x" => &[1i64, 2, 3]).unwrap();
+        let df = DataFrame::from_lazy_with_options(pl_df.lazy(), false);
+        assert_eq!(df.columns().unwrap(), vec!["x"]);
+        assert_eq!(df.count().unwrap(), 3);
     }
 }
