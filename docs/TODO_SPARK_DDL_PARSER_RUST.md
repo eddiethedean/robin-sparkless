@@ -1,4 +1,8 @@
-# Todo: Rust Crate for Spark DDL Parser
+# Spark DDL Parser (Rust) – Integrated
+
+**Status: Done.** Robin-sparkless now uses the [spark-ddl-parser](https://crates.io/crates/spark-ddl-parser) crate from crates.io for DDL schema parsing in `createDataFrame(data, schema="...")`. The hand-rolled `split_ddl_top_level` logic has been replaced.
+
+## Original motivation
 
 Port the Python [spark-ddl-parser](https://github.com/eddiethedean/spark-ddl-parser) to a Rust crate so robin-sparkless (and others) can parse PySpark DDL schema strings in Rust without calling Python.
 

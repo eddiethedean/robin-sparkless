@@ -38,6 +38,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Phase 26 – Publish crate**: Prepare and publish robin-sparkless to crates.io (and optionally PyPI via maturin). See [ROADMAP.md](docs/ROADMAP.md) for details.
 
+## [0.11.0] - 2026-02-17
+
+### Changed
+
+- **DDL schema parsing** — Replace hand-rolled DDL parser with [spark-ddl-parser](https://crates.io/crates/spark-ddl-parser) crate. `createDataFrame(data, schema="...")` now uses the crate for full nested struct/array/map/decimal support in DDL strings. Added `"integer"` as alias for `"int"` in `create_dataframe_from_rows` (spark-ddl-parser canonical form).
+
 ## [0.10.0] - 2026-02-15
 
 ### Added
