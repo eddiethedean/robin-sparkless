@@ -29,9 +29,9 @@ pub fn join(
     how: JoinType,
     case_sensitive: bool,
 ) -> Result<DataFrame, PolarsError> {
-    use polars::prelude::{col, IntoLazy, JoinBuilder, JoinCoalesce};
-    let mut left_lf = left.df.as_ref().clone().lazy();
-    let mut right_lf = right.df.as_ref().clone().lazy();
+    use polars::prelude::{col, JoinBuilder, JoinCoalesce};
+    let mut left_lf = left.lazy_frame();
+    let mut right_lf = right.lazy_frame();
 
     // Coerce join keys to a common type when left/right dtypes differ (PySpark #274).
     let mut left_casts: Vec<Expr> = Vec::new();
@@ -64,31 +64,19 @@ pub fn join(
         JoinType::LeftSemi => PlJoinType::Semi,
         JoinType::LeftAnti => PlJoinType::Anti,
     };
-    let joined = JoinBuilder::new(left_lf)
+    let mut joined = JoinBuilder::new(left_lf)
         .with(right_lf)
         .how(polars_how)
         .on(&on_exprs)
         .coalesce(JoinCoalesce::CoalesceColumns)
         .finish();
-    let mut pl_df = joined.collect()?;
-    if matches!(how, JoinType::Right | JoinType::Outer) {
-        let left_names: Vec<String> = left
-            .df
-            .get_column_names()
-            .iter()
-            .map(|s| s.to_string())
-            .collect();
-        let right_names: Vec<String> = right
-            .df
-            .get_column_names()
-            .iter()
-            .map(|s| s.to_string())
-            .collect();
-        let result_names: std::collections::HashSet<String> = pl_df
-            .get_column_names()
-            .iter()
-            .map(|s| s.to_string())
-            .collect();
+    // For Right/Outer, reorder columns: keys, left non-keys, right non-keys (PySpark order).
+    let result_lf = if matches!(how, JoinType::Right | JoinType::Outer) {
+        let left_names = left.columns()?;
+        let right_names = right.columns()?;
+        let result_schema = joined.collect_schema()?;
+        let result_names: std::collections::HashSet<String> =
+            result_schema.iter_names().map(|s| s.to_string()).collect();
         let mut order: Vec<String> = Vec::new();
         for k in &on {
             order.push((*k).to_string());
@@ -109,14 +97,17 @@ pub fn join(
             }
         }
         if order.len() == result_names.len() {
-            let select_refs: Vec<&str> = order.iter().map(String::as_str).collect();
-            pl_df = pl_df.select(select_refs).map_err(|e| {
-                PolarsError::ComputeError(format!("join column reorder: {e}").into())
-            })?;
+            let select_exprs: Vec<polars::prelude::Expr> =
+                order.iter().map(|s| col(s.as_str())).collect();
+            joined.select(select_exprs.as_slice())
+        } else {
+            joined
         }
-    }
-    Ok(super::DataFrame::from_polars_with_options(
-        pl_df,
+    } else {
+        joined
+    };
+    Ok(super::DataFrame::from_lazy_with_options(
+        result_lf,
         case_sensitive,
     ))
 }

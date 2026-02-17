@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **#438 – Lazy backend (PySpark parity)** — DataFrame now uses Polars `LazyFrame` internally. Transformations (filter, select, with_column, order_by, join, union, etc.) extend the lazy plan; only actions (collect, show, count, write, stats) trigger materialization. Data sources (read_csv, read_parquet, read_json) return lazy DataFrames. Enables Polars query optimization across the full pipeline and aligns with PySpark lazy-by-default semantics. Fixes #438.
 - **#399 – Cast numeric (int/float) to boolean (PySpark parity)** — `cast` and `try_cast` now support casting numeric types (Int8, Int16, Int32, Int64, UInt8, UInt16, UInt32, UInt64, Float32, Float64) to boolean. Semantics: 0/0.0 → false, non-zero → true. Fixes #399.
 - **#400 – Window.orderBy accept F.desc/F.asc (PySpark parity)** — `Window.orderBy()` now accepts SortOrder from `desc(col)` and `asc(col)`, including `desc("v")` and `asc("v")` with column name strings. Enables `Window.partitionBy("k").orderBy(desc("v"))`. Fixes #400.
 - **#401 – filter/where accept Column expression (PySpark parity)** — `filter` and `where` now accept any Column expression (e.g. `col("x") > 1`) and objects with `_robin_column` (Sparkless compat). Fixes #401.

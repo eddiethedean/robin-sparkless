@@ -1152,6 +1152,11 @@ impl SparkSession {
     pub fn read_csv(&self, path: impl AsRef<Path>) -> Result<DataFrame, PolarsError> {
         use polars::prelude::*;
         let path = path.as_ref();
+        if !path.exists() {
+            return Err(PolarsError::ComputeError(
+                format!("read_csv: file not found: {}", path.display()).into(),
+            ));
+        }
         let path_display = path.display();
         // Use LazyCsvReader - call finish() to get LazyFrame, then collect
         let lf = LazyCsvReader::new(path)
@@ -1166,13 +1171,8 @@ impl SparkSession {
                     .into(),
                 )
             })?;
-        let pl_df = lf.collect().map_err(|e| {
-            PolarsError::ComputeError(
-                format!("read_csv({path_display}): collect failed: {e}").into(),
-            )
-        })?;
-        Ok(crate::dataframe::DataFrame::from_polars_with_options(
-            pl_df,
+        Ok(crate::dataframe::DataFrame::from_lazy_with_options(
+            lf,
             self.is_case_sensitive(),
         ))
     }
@@ -1193,11 +1193,15 @@ impl SparkSession {
     pub fn read_parquet(&self, path: impl AsRef<Path>) -> Result<DataFrame, PolarsError> {
         use polars::prelude::*;
         let path = path.as_ref();
+        if !path.exists() {
+            return Err(PolarsError::ComputeError(
+                format!("read_parquet: file not found: {}", path.display()).into(),
+            ));
+        }
         // Use LazyFrame::scan_parquet
         let lf = LazyFrame::scan_parquet(path, ScanArgsParquet::default())?;
-        let pl_df = lf.collect()?;
-        Ok(crate::dataframe::DataFrame::from_polars_with_options(
-            pl_df,
+        Ok(crate::dataframe::DataFrame::from_lazy_with_options(
+            lf,
             self.is_case_sensitive(),
         ))
     }
@@ -1219,13 +1223,17 @@ impl SparkSession {
         use polars::prelude::*;
         use std::num::NonZeroUsize;
         let path = path.as_ref();
+        if !path.exists() {
+            return Err(PolarsError::ComputeError(
+                format!("read_json: file not found: {}", path.display()).into(),
+            ));
+        }
         // Use LazyJsonLineReader - call finish() to get LazyFrame, then collect
         let lf = LazyJsonLineReader::new(path)
             .with_infer_schema_length(NonZeroUsize::new(100))
             .finish()?;
-        let pl_df = lf.collect()?;
-        Ok(crate::dataframe::DataFrame::from_polars_with_options(
-            pl_df,
+        Ok(crate::dataframe::DataFrame::from_lazy_with_options(
+            lf,
             self.is_case_sensitive(),
         ))
     }
@@ -1647,7 +1655,7 @@ mod tests {
         let result = spark.create_dataframe_from_rows(rows, schema);
         let df = result.unwrap();
         assert_eq!(df.count().unwrap(), 0);
-        assert_eq!(df.df.as_ref().get_column_names(), &["a", "b"]);
+        assert_eq!(df.collect_inner().unwrap().get_column_names(), &["a", "b"]);
     }
 
     #[test]
@@ -1658,7 +1666,7 @@ mod tests {
         let result = spark.create_dataframe_from_rows(rows, schema);
         let df = result.unwrap();
         assert_eq!(df.count().unwrap(), 0);
-        assert_eq!(df.df.as_ref().get_column_names().len(), 0);
+        assert_eq!(df.collect_inner().unwrap().get_column_names().len(), 0);
     }
 
     #[test]

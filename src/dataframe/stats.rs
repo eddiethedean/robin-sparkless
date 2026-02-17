@@ -15,16 +15,11 @@ impl<'a> DataFrameStat<'a> {
     pub fn cov(&self, col1: &str, col2: &str) -> Result<f64, PolarsError> {
         let c1 = self.df.resolve_column_name(col1)?;
         let c2 = self.df.resolve_column_name(col2)?;
-        let s1 = self
-            .df
-            .df
-            .as_ref()
+        let pl = self.df.collect_inner()?;
+        let s1 = pl
             .column(c1.as_str())?
             .cast(&polars::datatypes::DataType::Float64)?;
-        let s2 = self
-            .df
-            .df
-            .as_ref()
+        let s2 = pl
             .column(c2.as_str())?
             .cast(&polars::datatypes::DataType::Float64)?;
         let a = s1
@@ -58,16 +53,11 @@ impl<'a> DataFrameStat<'a> {
     pub fn corr(&self, col1: &str, col2: &str) -> Result<f64, PolarsError> {
         let c1 = self.df.resolve_column_name(col1)?;
         let c2 = self.df.resolve_column_name(col2)?;
-        let s1 = self
-            .df
-            .df
-            .as_ref()
+        let pl = self.df.collect_inner()?;
+        let s1 = pl
             .column(c1.as_str())?
             .cast(&polars::datatypes::DataType::Float64)?;
-        let s2 = self
-            .df
-            .df
-            .as_ref()
+        let s2 = pl
             .column(c2.as_str())?
             .cast(&polars::datatypes::DataType::Float64)?;
         let a = s1
@@ -109,7 +99,8 @@ impl<'a> DataFrameStat<'a> {
     /// Correlation matrix of all numeric columns. PySpark df.corr() returns a DataFrame of pairwise correlations.
     /// Returns a DataFrame with column names as first column and one column per numeric column with correlation values.
     pub fn corr_matrix(&self) -> Result<DataFrame, PolarsError> {
-        let pl_df = self.df.df.as_ref();
+        let collected = self.df.collect_inner()?;
+        let pl_df = collected.as_ref();
         let numeric_cols: Vec<String> = pl_df
             .get_columns()
             .iter()
