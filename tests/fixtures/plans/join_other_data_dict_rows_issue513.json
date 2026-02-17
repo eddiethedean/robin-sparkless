@@ -1,0 +1,41 @@
+{
+  "name": "join_other_data_dict_rows_issue513",
+  "input": {
+    "schema": [
+      {"name": "a", "type": "int"},
+      {"name": "b", "type": "string"}
+    ],
+    "rows": [
+      [1, "x"],
+      [2, "y"]
+    ]
+  },
+  "plan": [
+    {
+      "op": "join",
+      "payload": {
+        "other_data": [
+          {"a": 1, "c": "p"},
+          {"a": 2, "c": "q"}
+        ],
+        "other_schema": [
+          {"name": "a", "type": "int"},
+          {"name": "c", "type": "string"}
+        ],
+        "on": ["a"],
+        "how": "inner"
+      }
+    }
+  ],
+  "expected": {
+    "schema": [
+      {"name": "a", "type": "int"},
+      {"name": "b", "type": "string"},
+      {"name": "c", "type": "string"}
+    ],
+    "rows": [
+      [1, "x", "p"],
+      [2, "y", "q"]
+    ]
+  }
+}
