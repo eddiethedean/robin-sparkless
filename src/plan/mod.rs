@@ -94,6 +94,11 @@ fn merge_other_into_payload(payload: Value, op: &serde_json::Map<String, Value>)
             p.insert("other_schema".into(), v);
         }
     }
+    if p.get("on").is_none() {
+        if let Some(v) = get(op, "on", "on") {
+            p.insert("on".into(), v);
+        }
+    }
     Value::Object(p)
 }
 
@@ -111,6 +116,46 @@ fn get_other_schema(payload: &Value) -> Option<&Vec<Value>> {
         .get("other_schema")
         .or_else(|| payload.get("otherSchema"))
         .and_then(Value::as_array)
+}
+
+/// Convert other_data to rows. Accepts arrays [[v,v],[v,v]] or dicts [{"col":v},...] (Sparkless may send dict rows).
+fn other_data_to_rows(other_data: &[Value], schema_names: &[String]) -> Vec<Vec<Value>> {
+    other_data
+        .iter()
+        .filter_map(|v| {
+            if let Some(arr) = v.as_array() {
+                return Some(arr.clone());
+            }
+            if let Some(obj) = v.as_object() {
+                let row: Vec<Value> = schema_names
+                    .iter()
+                    .map(|n| obj.get(n).cloned().unwrap_or(Value::Null))
+                    .collect();
+                return Some(row);
+            }
+            None
+        })
+        .collect()
+}
+
+/// Parse (name, type) from schema field object. Supports {"name","type"} and {"fieldName","dataType"} (Sparkless).
+fn schema_field_to_pair(v: &Value) -> Option<(String, String)> {
+    let obj = v.as_object()?;
+    let name = obj
+        .get("name")
+        .or_else(|| obj.get("fieldName"))
+        .and_then(Value::as_str)?
+        .to_string();
+    let ty = obj
+        .get("type")
+        .or_else(|| obj.get("dataType"))
+        .and_then(Value::as_str)
+        .or_else(|| {
+            // dataType may be nested: {"type":"string"} or {"typeName":"string"}
+            obj.get("dataType")?.get("typeName").and_then(Value::as_str)
+        })?
+        .to_string();
+    Some((name, ty))
 }
 
 fn apply_op(
@@ -326,10 +371,18 @@ fn apply_op(
                 .ok_or_else(|| PlanError::InvalidPlan("join must have 'other_data'".into()))?;
             let other_schema = get_other_schema(&payload)
                 .ok_or_else(|| PlanError::InvalidPlan("join must have 'other_schema'".into()))?;
-            let on = payload
-                .get("on")
-                .and_then(Value::as_array)
-                .ok_or_else(|| PlanError::InvalidPlan("join must have 'on' array".into()))?;
+            let on = payload.get("on").ok_or_else(|| {
+                PlanError::InvalidPlan("join must have 'on' array or string".into())
+            })?;
+            let on_arr: Vec<Value> = if let Some(arr) = on.as_array() {
+                arr.clone()
+            } else if let Some(s) = on.as_str() {
+                vec![Value::String(s.to_string())]
+            } else {
+                return Err(PlanError::InvalidPlan(
+                    "join 'on' must be array of strings or single string".into(),
+                ));
+            };
             let how = payload
                 .get("how")
                 .and_then(Value::as_str)
@@ -337,22 +390,15 @@ fn apply_op(
 
             let schema_vec: Vec<(String, String)> = other_schema
                 .iter()
-                .filter_map(|v| {
-                    let obj = v.as_object()?;
-                    let name = obj.get("name")?.as_str()?.to_string();
-                    let ty = obj.get("type")?.as_str()?.to_string();
-                    Some((name, ty))
-                })
+                .filter_map(schema_field_to_pair)
                 .collect();
-            let rows: Vec<Vec<Value>> = other_data
-                .iter()
-                .filter_map(|v| v.as_array().cloned())
-                .collect();
+            let schema_names: Vec<String> = schema_vec.iter().map(|(n, _)| n.clone()).collect();
+            let rows = other_data_to_rows(other_data, &schema_names);
             let other_df = session
                 .create_dataframe_from_rows(rows, schema_vec)
                 .map_err(PlanError::Session)?;
 
-            let on_keys: Vec<String> = on
+            let on_keys: Vec<String> = on_arr
                 .iter()
                 .filter_map(|v| v.as_str())
                 .map(|s| df.resolve_column_name(s))
@@ -377,17 +423,10 @@ fn apply_op(
                 .ok_or_else(|| PlanError::InvalidPlan("union must have 'other_schema'".into()))?;
             let schema_vec: Vec<(String, String)> = other_schema
                 .iter()
-                .filter_map(|v| {
-                    let obj = v.as_object()?;
-                    let name = obj.get("name")?.as_str()?.to_string();
-                    let ty = obj.get("type")?.as_str()?.to_string();
-                    Some((name, ty))
-                })
+                .filter_map(schema_field_to_pair)
                 .collect();
-            let rows: Vec<Vec<Value>> = other_data
-                .iter()
-                .filter_map(|v| v.as_array().cloned())
-                .collect();
+            let schema_names: Vec<String> = schema_vec.iter().map(|(n, _)| n.clone()).collect();
+            let rows = other_data_to_rows(other_data, &schema_names);
             let other_df = session
                 .create_dataframe_from_rows(rows, schema_vec)
                 .map_err(PlanError::Session)?;
@@ -402,17 +441,10 @@ fn apply_op(
             })?;
             let schema_vec: Vec<(String, String)> = other_schema
                 .iter()
-                .filter_map(|v| {
-                    let obj = v.as_object()?;
-                    let name = obj.get("name")?.as_str()?.to_string();
-                    let ty = obj.get("type")?.as_str()?.to_string();
-                    Some((name, ty))
-                })
+                .filter_map(schema_field_to_pair)
                 .collect();
-            let rows: Vec<Vec<Value>> = other_data
-                .iter()
-                .filter_map(|v| v.as_array().cloned())
-                .collect();
+            let schema_names: Vec<String> = schema_vec.iter().map(|(n, _)| n.clone()).collect();
+            let rows = other_data_to_rows(other_data, &schema_names);
             let other_df = session
                 .create_dataframe_from_rows(rows, schema_vec)
                 .map_err(PlanError::Session)?;
