@@ -5711,6 +5711,81 @@ fn plan_column_resolution() {
     assert!(!rows_out[0].contains_key("Value"));
 }
 
+/// Plan interpreter resolves column names case-insensitively when schema has lowercase.
+/// df.select(F.col("ID")) when schema has "id" should succeed (issue #508).
+#[test]
+fn plan_column_resolution_uppercase_ref() {
+    use robin_sparkless::plan;
+    use serde_json::json;
+
+    let spark = SparkSession::builder()
+        .app_name("plan_column_resolution_uppercase")
+        .get_or_create();
+
+    // Schema has lowercase: id, name, value
+    let schema = vec![
+        ("id".to_string(), "bigint".to_string()),
+        ("name".to_string(), "string".to_string()),
+        ("value".to_string(), "double".to_string()),
+    ];
+    let rows = vec![
+        vec![json!(1), json!("a"), json!(100.0)],
+        vec![json!(2), json!("b"), json!(200.0)],
+        vec![json!(3), json!("c"), json!(300.0)],
+    ];
+
+    // Use uppercase in plan (ID, Value) — should resolve to id, value (case-insensitive)
+    let plan_select_expr = vec![json!({
+        "op": "select",
+        "payload": {
+            "columns": [
+                {"name": "id", "expr": {"col": "ID"}},
+                {"name": "value", "expr": {"col": "Value"}}
+            ]
+        }
+    })];
+
+    let result =
+        plan::execute_plan(&spark, rows.clone(), schema.clone(), &plan_select_expr).unwrap();
+    let rows_out = result.collect_as_json_rows().unwrap();
+    assert_eq!(rows_out.len(), 3);
+    assert_eq!(rows_out[0].get("id").and_then(|v| v.as_i64()), Some(1));
+    assert_eq!(
+        rows_out[0].get("value").and_then(|v| v.as_f64()),
+        Some(100.0)
+    );
+
+    // Select by column name strings (ID, value) — should resolve case-insensitively
+    let plan_select_names = vec![json!({
+        "op": "select",
+        "payload": ["ID", "value"]
+    })];
+    let result2 =
+        plan::execute_plan(&spark, rows.clone(), schema.clone(), &plan_select_names).unwrap();
+    let rows_out2 = result2.collect_as_json_rows().unwrap();
+    assert_eq!(rows_out2.len(), 3);
+    assert_eq!(
+        rows_out2[0]
+            .get("ID")
+            .or(rows_out2[0].get("id"))
+            .and_then(|v| v.as_i64()),
+        Some(1)
+    );
+
+    // Filter with col("ID") — should resolve to id (issue #508)
+    let plan_filter = vec![
+        json!({
+            "op": "filter",
+            "payload": {"op": "eq", "left": {"col": "ID"}, "right": {"lit": 2}}
+        }),
+        json!({"op": "select", "payload": ["id", "name", "value"]}),
+    ];
+    let result3 = plan::execute_plan(&spark, rows.clone(), schema.clone(), &plan_filter).unwrap();
+    let rows_out3 = result3.collect_as_json_rows().unwrap();
+    assert_eq!(rows_out3.len(), 1);
+    assert_eq!(rows_out3[0].get("id").and_then(|v| v.as_i64()), Some(2));
+}
+
 /// Plan select accepts concat/concat_ws expression strings (e.g. "concat(first_name, , last_name)")
 /// when Sparkless sends them as column names; they are parsed and evaluated. See issue #196.
 #[test]
