@@ -2129,7 +2129,7 @@ fn expr_from_fn_rest(name: &str, args: &[Value]) -> Result<Expr, PlanExprError> 
         }
         // --- Map / struct ---
         "create_map" => {
-            require_args_min(name, args, 1)?;
+            // PySpark F.create_map() with no args: empty map {} per row (#512).
             let exprs: Result<Vec<Expr>, _> = args.iter().map(expr_from_value).collect();
             let cols: Vec<Column> = exprs?.into_iter().map(expr_to_column).collect();
             let refs: Vec<&Column> = cols.iter().collect();
@@ -2317,6 +2317,13 @@ mod tests {
             "op": "create_map",
             "args": [{"lit": "k"}, {"col": "a"}]
         });
+        let _ = expr_from_value(&v).unwrap();
+    }
+
+    #[test]
+    fn test_create_map_fn_empty() {
+        // PySpark F.create_map() with no args: empty map {} per row (#512).
+        let v = json!({"fn": "create_map", "args": []});
         let _ = expr_from_value(&v).unwrap();
     }
 
