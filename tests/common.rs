@@ -11,6 +11,7 @@ pub fn spark() -> SparkSession {
 }
 
 /// Convenience helper for a small (id, age, name) test DataFrame.
+#[allow(dead_code)] // used by dataframe_core tests
 pub fn small_people_df() -> DataFrame {
     let spark = spark();
     let pl = df![

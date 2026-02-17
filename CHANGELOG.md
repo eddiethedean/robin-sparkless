@@ -39,6 +39,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Phase 26 – Publish crate**: Prepare and publish robin-sparkless to crates.io. See [ROADMAP.md](docs/ROADMAP.md) for details.
 
+## [0.11.3] - 2026-02-17
+
+### Added
+
+- **Column.try_with_field()** — Add `Column::try_with_field(name, col) -> Result<Column, PolarsError>` as a non-panicking variant of `Column::with_field` when the target column is not a struct.
+
+### Fixed
+
+- **#503 – select() with column names (Sparkless plan compatibility)** — Plan interpreter `select` now accepts `payload: {"columns": [...]}` (Sparkless format) and column refs as `{"type": "column", "name": "id"}` objects in addition to the documented array-of-strings format. Fixes #503.
+- **Timestamp/date-only parsing robustness** — When parsing timestamp/datetime values from JSON rows, date-only strings (`"YYYY-MM-DD"`) no longer rely on `expect()` for midnight conversion; invalid values now fail that cell parse instead of panicking.
+
 ## [0.11.2] - 2026-02-17
 
 ### Added

@@ -2232,18 +2232,27 @@ impl Column {
     }
 
     /// Add or replace a struct field (PySpark Column.withField).
+    ///
+    /// Panics if the column is not a struct type. If you need error handling, use
+    /// [`Column::try_with_field`].
     pub fn with_field(&self, name: &str, value: &Column) -> Column {
+        self.try_with_field(name, value)
+            .expect("with_field: column must be struct type")
+    }
+
+    /// Add or replace a struct field (PySpark Column.withField), returning an error if the
+    /// column is not a struct type.
+    pub fn try_with_field(
+        &self,
+        name: &str,
+        value: &Column,
+    ) -> Result<Column, polars::error::PolarsError> {
         let fields = vec![
             Expr::Field(Arc::from([PlSmallStr::from("*")])),
             value.expr().clone().alias(name),
         ];
-        let expr = self
-            .expr()
-            .clone()
-            .struct_()
-            .with_fields(fields)
-            .expect("with_field: column must be struct type");
-        Self::from_expr(expr, None)
+        let expr = self.expr().clone().struct_().with_fields(fields)?;
+        Ok(Self::from_expr(expr, None))
     }
 
     /// Sort list elements (PySpark array_sort). Ascending, nulls last.

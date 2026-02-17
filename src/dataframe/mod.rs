@@ -1774,7 +1774,7 @@ mod tests {
     /// Lazy backend: from_lazy produces valid DataFrame.
     #[test]
     fn lazy_from_lazy_produces_valid_df() {
-        let spark = SparkSession::builder()
+        let _spark = SparkSession::builder()
             .app_name("lazy_mod_tests")
             .get_or_create();
         let pl_df = polars::prelude::df!("x" => &[1i64, 2, 3]).unwrap();

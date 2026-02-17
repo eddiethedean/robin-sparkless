@@ -8,7 +8,6 @@ mod common;
 
 use common::spark;
 use polars::prelude::df;
-use robin_sparkless::SparkSession;
 
 #[test]
 fn group_by_column_then_agg_sum_core() {
