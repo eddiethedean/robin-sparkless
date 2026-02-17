@@ -6,7 +6,7 @@
 [![Documentation](https://readthedocs.org/projects/robin-sparkless/badge/?version=latest)](https://robin-sparkless.readthedocs.io/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 
-**PySpark-style DataFrames in Python—no JVM.** Uses [Polars](https://www.pola.rs/) under the hood for fast, native execution. 200+ operations validated against PySpark.
+**PySpark-style DataFrames in Python—no JVM.** Uses [Polars](https://www.pola.rs/) under the hood for fast, native execution. Lazy by default: transformations extend the plan; only actions (`collect`, `show`, `count`, `write`) trigger execution. 200+ operations validated against PySpark.
 
 ## Install
 

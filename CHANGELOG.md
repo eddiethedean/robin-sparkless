@@ -29,6 +29,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **#352 – group_by and order_by accept Column expressions (PySpark parity)** — `DataFrame.group_by(cols)` now accepts a single column name (str), a single Column (e.g. `group_by(col("dept"))`), or a list/tuple of str or Column. `DataFrame.order_by(cols)` now accepts a single Column or list of Column (treated as ascending), in addition to existing str, SortOrder, and list of SortOrder. Enables PySpark-style `df.groupBy(F.col("dept")).agg(F.sum(F.col("salary")))` and `df.orderBy(col("x"))`. Fixes #352.
 - **#353 – join on accept Column expression(s) (PySpark parity)** — `DataFrame.join(other, on=...)` now accepts `on` as a single Column (e.g. `join(right, col("id"))`) or list/tuple of str or Column, in addition to existing str or list/tuple of str. Enables PySpark-style `left.join(right, F.col("id"))`. Fixes #353.
 
+### Fixed
+
+- **GroupedData / PivotedGroupedData column resolution** — Aggregation methods (`sum`, `avg`, `min`, `max`, `first`, `last`, etc.) and pivot operations now resolve column names against the schema with case sensitivity. When `case_sensitive` is false, `grouped.sum("V")` works when the schema has `"v"`.
+- **subtract / intersect with different column casing** — `subtract` and `intersect` now align right-side column names to left when casing differs (case-sensitive or -insensitive), so set operations work when DataFrames have different column casing.
+
 ### Planned
 
 - **Phase 26 – Publish crate**: Prepare and publish robin-sparkless to crates.io (and optionally PyPI via maturin). See [ROADMAP.md](docs/ROADMAP.md) for details.

@@ -1,4 +1,4 @@
-.PHONY: build test test-rust test-python sparkless-parity pyspark-parity extract-pyspark-tests extract-pyspark-tests-expanded batch-regenerate-extracted test-parity-phase-a test-parity-phase-b test-parity-phase-c test-parity-phase-d test-parity-phase-e test-parity-phase-f test-parity-phase-g test-parity-phases bench-python clean check check-full fmt fmt-python fmt-check clippy audit outdated deny lint-python all gap-analysis gap-analysis-quick gap-analysis-runtime
+.PHONY: build test test-rust test-python run-examples sparkless-parity pyspark-parity extract-pyspark-tests extract-pyspark-tests-expanded batch-regenerate-extracted test-parity-phase-a test-parity-phase-b test-parity-phase-c test-parity-phase-d test-parity-phase-e test-parity-phase-f test-parity-phase-g test-parity-phases bench-python clean check check-full fmt fmt-python fmt-check clippy audit outdated deny lint-python all gap-analysis gap-analysis-quick gap-analysis-runtime
 
 # Use stable toolchain when no default is configured (override with RUSTUP_TOOLCHAIN=nightly etc.)
 export RUSTUP_TOOLCHAIN ?= stable
@@ -31,6 +31,21 @@ test-python:
 
 # Run all tests (Rust + Python)
 test: test-rust test-python
+
+# Run all examples (Rust + Python doc examples; shows real output for README/QUICKSTART verification)
+run-examples:
+	@echo "=== Rust: demo (README quickstart) ==="
+	@cargo run -q --example demo
+	@echo ""
+	@echo "=== Rust: quickstart_from_polars (QUICKSTART Basic Usage) ==="
+	@cargo run -q --example quickstart_from_polars
+	@echo ""
+	@echo "=== Rust: complex_filters ==="
+	@cargo run -q --example complex_filters
+	@echo ""
+	@echo "=== Python: doc examples ==="
+	@. .venv/bin/activate 2>/dev/null || (python3 -m venv .venv && . .venv/bin/activate && pip install -q maturin && maturin develop -q --features "pyo3,sql,delta")
+	@. .venv/bin/activate && python scripts/run_doc_examples.py
 
 # Compare robin-sparkless vs sparkless performance. Use .venv-sparkless for both backends (pip install sparkless + maturin develop).
 # Quick run (smaller sizes): . .venv-sparkless/bin/activate && python scripts/bench_robin_vs_sparkless.py --quick
