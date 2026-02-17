@@ -21,7 +21,7 @@ In your own crate:
 
 ```toml
 [dependencies]
-robin-sparkless = "0.11.3"
+robin-sparkless = "0.11.4"
 ```
 
 ## Basic Usage

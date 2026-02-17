@@ -39,6 +39,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Phase 26 – Publish crate**: Prepare and publish robin-sparkless to crates.io. See [ROADMAP.md](docs/ROADMAP.md) for details.
 
+## [0.11.4] - 2026-02-17
+
+### Fixed
+
+- **#510 – Join and union return wrong row counts (Sparkless plan format)** — Plan interpreter now accepts camelCase keys (`otherData`, `otherSchema`) and op-level placement of `other_data`/`other_schema` (sibling to `payload`) for join, union, and unionByName. Fixes incorrect row counts when Sparkless v4 sends plans in these formats. Fixes #510.
+
 ## [0.11.3] - 2026-02-17
 
 ### Added
