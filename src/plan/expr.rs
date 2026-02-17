@@ -145,6 +145,34 @@ pub fn expr_from_value(v: &Value) -> Result<Expr, PlanExprError> {
                     .ok_or_else(|| PlanExprError("op 'not' requires 'arg'".to_string()))?;
                 return Ok(expr_from_value(arg)?.not());
             }
+            "between" => {
+                let left_v = obj
+                    .get("left")
+                    .ok_or_else(|| PlanExprError("op 'between' requires 'left'".to_string()))?;
+                let lower_v = obj
+                    .get("lower")
+                    .ok_or_else(|| PlanExprError("op 'between' requires 'lower'".to_string()))?;
+                let upper_v = obj
+                    .get("upper")
+                    .ok_or_else(|| PlanExprError("op 'between' requires 'upper'".to_string()))?;
+                let left = expr_from_value(left_v)?;
+                let lower = expr_from_value(lower_v)?;
+                let upper = expr_from_value(upper_v)?;
+                return Ok(left.clone().gt_eq(lower).and(left.lt_eq(upper)));
+            }
+            "**" | "pow" => {
+                let left_v = obj
+                    .get("left")
+                    .ok_or_else(|| PlanExprError(format!("op '{op}' requires 'left'")))?;
+                let right_v = obj
+                    .get("right")
+                    .ok_or_else(|| PlanExprError(format!("op '{op}' requires 'right'")))?;
+                let l = expr_from_value(left_v)?;
+                let r = expr_from_value(right_v)?;
+                let left_col = expr_to_column(l);
+                let right_col = expr_to_column(r);
+                return Ok(left_col.pow_with(&right_col).into_expr());
+            }
             _ => {
                 return Err(PlanExprError(format!("unsupported expression op: {op}")));
             }
