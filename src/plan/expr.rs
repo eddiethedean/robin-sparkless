@@ -196,7 +196,13 @@ pub fn expr_from_value(v: &Value) -> Result<Expr, PlanExprError> {
     }
 
     // Function call: {"fn": "upper"|"lower"|"call_udf"|..., "args": [<expr>, ...]}
+    // Window form: {"fn": "row_number", "window": {"partition_by": ["col", ...]}}
     if let Some(fn_name) = obj.get("fn").and_then(Value::as_str) {
+        if fn_name == "row_number" {
+            if let Some(window_val) = obj.get("window") {
+                return expr_from_row_number_window(window_val);
+            }
+        }
         let args = obj
             .get("args")
             .and_then(Value::as_array)
@@ -207,6 +213,33 @@ pub fn expr_from_value(v: &Value) -> Result<Expr, PlanExprError> {
     Err(PlanExprError(
         "expression must have 'col', 'lit', 'op', or 'fn'".to_string(),
     ))
+}
+
+/// Build row_number().over(partition_by) from {"partition_by": ["col", ...]}.
+fn expr_from_row_number_window(v: &Value) -> Result<Expr, PlanExprError> {
+    let obj = v
+        .as_object()
+        .ok_or_else(|| PlanExprError("row_number window must be object".to_string()))?;
+    let part_arr = obj
+        .get("partition_by")
+        .and_then(Value::as_array)
+        .ok_or_else(|| {
+            PlanExprError("row_number window must have partition_by array".to_string())
+        })?;
+    let part_cols: Vec<String> = part_arr
+        .iter()
+        .filter_map(|x| x.as_str())
+        .map(String::from)
+        .collect();
+    if part_cols.is_empty() {
+        return Err(PlanExprError(
+            "row_number window partition_by must be non-empty".to_string(),
+        ));
+    }
+    let part_refs: Vec<&str> = part_cols.iter().map(|s| s.as_str()).collect();
+    let order_col = crate::Column::new(part_cols[0].clone());
+    let rn = order_col.row_number(false).over(&part_refs);
+    Ok(rn.into_expr())
 }
 
 fn lit_from_value(v: &Value) -> Result<Expr, PlanExprError> {
