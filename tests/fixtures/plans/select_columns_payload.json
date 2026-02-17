@@ -1,0 +1,1 @@
+{"name":"select_columns_payload","input":{"schema":[{"name":"id","type":"bigint"},{"name":"x","type":"bigint"}],"rows":[[1,2],[3,6],[5,10]]},"plan":[{"op":"select","payload":{"columns":[{"type":"column","name":"id"},{"type":"column","name":"x"}]}}],"expected":{"schema":[{"name":"id","type":"bigint"},{"name":"x","type":"bigint"}],"rows":[[1,2],[3,6],[5,10]]}}
