@@ -98,7 +98,7 @@ df = spark.createDataFrame(
 
 **From rows with arbitrary schema (Python)**
 
-Use `createDataFrame(data, schema=None)` for list of dicts (schema inferred), list of tuples with column names, or explicit schema:
+Use `createDataFrame(data, schema=None)` for list of dicts (schema inferred), list of tuples with column names, DDL string (e.g. `"name: string, age: int"` or nested `addr struct<city:string>, tags array<string>`), or explicit schema:
 
 ```python
 # List of dicts, schema inferred

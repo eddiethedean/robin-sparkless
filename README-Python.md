@@ -43,7 +43,7 @@ df = spark.read_parquet("data.parquet")
 df = spark.read_json("data.json")
 ```
 
-Filter, select, group, join, and use window functions with a PySpark-like API. Use `spark.createDataFrame(data, schema=None)` for list of dicts (schema inferred), list of tuples with column names, or explicit schema as list of `(name, dtype_str)`. See the [User Guide](docs/USER_GUIDE.md) and [full documentation](https://robin-sparkless.readthedocs.io/) for details.
+Filter, select, group, join, and use window functions with a PySpark-like API. Use `spark.createDataFrame(data, schema=None)` for list of dicts (schema inferred), list of tuples with column names, DDL string (including nested `struct<>`, `array<>`, `map<>`), or explicit schema as list of `(name, dtype_str)`. See the [User Guide](docs/USER_GUIDE.md) and [full documentation](https://robin-sparkless.readthedocs.io/) for details.
 
 ## UDFs and pandas_udf (Python)
 
@@ -83,6 +83,9 @@ From a clone of the repo:
 ```bash
 # Full CI-like check (Rust + Python lint + Python tests)
 make check-full
+
+# Run all examples (Rust + Python doc examples with real output)
+make run-examples
 ```
 
 Or step by step:

@@ -42,11 +42,11 @@ No missing parameters; optional args are present.
 | List of column names | ✅ | ✅ |
 | StructType / .fields | ✅ | ✅ |
 | List of (name, type_str) | (via StructType) | ✅ |
-| **DDL string** (flat) | ✅ e.g. `"name: string, age: int"` | ✅ (flat only; comma inside `struct<...>` not supported) |
-| **DDL string** (nested) | ✅ e.g. `addr struct<street:string,city:string>` | ❌ Current parser splits on every comma. Use **spark-ddl-parser** Rust crate (see TODO) for full DDL. |
+| **DDL string** (flat) | ✅ e.g. `"name: string, age: int"` | ✅ |
+| **DDL string** (nested) | ✅ e.g. `addr struct<street:string,city:string>` | ✅ (via [spark-ddl-parser](https://crates.io/crates/spark-ddl-parser) crate; struct, array, map, decimal) |
 | **Single DataType (non-struct)** | ✅ Wraps as single column `"value"`, row as tuple | ❌ Not supported. We require a full struct (multiple named columns). |
 
-**Summary:** Missing: (1) **nested DDL** (until Rust spark-ddl-parser is used), (2) **single-column schema** as a type (e.g. `schema="string"` or `schema=StringType()` with single column "value").
+**Summary:** Nested DDL is now supported (0.11.0). Missing: **single-column schema** as a type (e.g. `schema="string"` or `schema=StringType()` with single column "value").
 
 ---
 
@@ -68,7 +68,7 @@ No missing parameters; optional args are present.
 |---|----------|--------------|
 | 1 | **Pandas DataFrame** – Accept `pandas.DataFrame` as `data`; convert to list of dicts (or rows) and call existing path. High value for Python users. | [#416](https://github.com/eddiethedean/robin-sparkless/issues/416) |
 | 2 | **Row / namedtuple** – Explicitly support Row (and Row-like) and namedtuple: try dict-like (e.g. `get_item` / keys) then sequence-like so `[Row(a=1, b=2)]` works. | [#417](https://github.com/eddiethedean/robin-sparkless/issues/417) |
-| 3 | **Full DDL** – Integrate **spark-ddl-parser** Rust crate so nested `struct<>`, `array<>`, `map<>` in DDL work (see `docs/TODO_SPARK_DDL_PARSER_RUST.md`). | [#418](https://github.com/eddiethedean/robin-sparkless/issues/418) |
+| 3 | ~~**Full DDL**~~ – ✅ Done (0.11.0): spark-ddl-parser integrated; nested `struct<>`, `array<>`, `map<>` in DDL work. | [#418](https://github.com/eddiethedean/robin-sparkless/issues/418) |
 | 4 | **Single-column schema** – Allow schema = single type (or string) and treat as one column named `"value"`, wrapping each row in a single-element tuple. | [#419](https://github.com/eddiethedean/robin-sparkless/issues/419) |
 | 5 | **verify_schema** – When True, add an explicit per-row type check and raise with a clear message on mismatch. | [#420](https://github.com/eddiethedean/robin-sparkless/issues/420) |
 | 6 | **PyArrow Table / numpy** – Lower priority; accept pyarrow.Table and numpy.ndarray as data for better parity. | [#421](https://github.com/eddiethedean/robin-sparkless/issues/421) |
