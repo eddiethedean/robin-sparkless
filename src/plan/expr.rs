@@ -651,13 +651,13 @@ fn lit_as_usize(v: &Value) -> Result<usize, PlanExprError> {
 /// Extract values for isin from JSON array. Each element: {"lit": v} or plain v. Returns Expr for is_in.
 /// When arr is empty or parses to no values (e.g. all nulls), returns Ok(None) — caller uses lit(false)
 /// so that col.isin([]) is false for all rows (PySpark parity; issue #518).
+/// Mixed types / string vs numeric (issue #525): when list has strings we use string series; when list
+/// has only numbers we use string series too so that string column isin(1, 2) works (PySpark casts literals to column type).
 fn try_values_for_isin(arr: &[Value]) -> Result<Option<Expr>, PlanExprError> {
     if arr.is_empty() {
         return Ok(None);
     }
-    let mut i64_vals: Vec<i64> = Vec::new();
     let mut str_vals: Vec<String> = Vec::new();
-    let mut use_str = false;
     for v in arr {
         let lit_val = if let Some(obj) = v.as_object() {
             obj.get("lit").unwrap_or(v)
@@ -668,32 +668,18 @@ fn try_values_for_isin(arr: &[Value]) -> Result<Option<Expr>, PlanExprError> {
             continue;
         }
         if let Some(s) = lit_val.as_str() {
-            use_str = true;
             str_vals.push(s.to_string());
         } else if let Some(n) = lit_val.as_i64() {
-            if !use_str {
-                i64_vals.push(n);
-            } else {
-                str_vals.push(n.to_string());
-            }
+            str_vals.push(n.to_string());
         } else if let Some(n) = lit_val.as_f64() {
-            if !use_str {
-                i64_vals.push(n as i64);
-            } else {
-                str_vals.push(n.to_string());
-            }
+            str_vals.push(n.to_string());
         }
     }
-    if use_str {
-        let s: Series = Series::from_iter(str_vals.iter().map(|x| x.as_str()));
-        Ok(Some(lit(s)))
-    } else if !i64_vals.is_empty() {
-        let s: Series = Series::from_iter(i64_vals.iter().cloned());
-        Ok(Some(lit(s)))
-    } else {
-        // All elements were null or unparseable -> empty list semantics
-        Ok(None)
+    if str_vals.is_empty() {
+        return Ok(None);
     }
+    let s: Series = Series::from_iter(str_vals.iter().map(|x| x.as_str()));
+    Ok(Some(lit(s)))
 }
 
 /// Extract values for isin from plan value. Returns None when empty (caller uses lit(false)).
