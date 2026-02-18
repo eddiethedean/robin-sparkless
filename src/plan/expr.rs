@@ -1154,10 +1154,19 @@ fn expr_from_fn(name: &str, args: &[Value]) -> Result<Expr, PlanExprError> {
             Ok(xxhash64(&expr_to_column(arg_expr(args, 0)?)).into_expr())
         }
         "regexp_extract" => {
+            // Plan execution requires literal pattern and group index (issue #523).
             require_args(name, args, 3)?;
             let c = expr_to_column(arg_expr(args, 0)?);
-            let pattern = arg_lit_str(args, 1)?;
-            let group_index = arg_lit_usize(args, 2)?;
+            let pattern = arg_lit_str(args, 1).map_err(|_| {
+                PlanExprError(
+                    "regexp_extract in plan requires literal pattern at arg 2 (column refs not supported)".into(),
+                )
+            })?;
+            let group_index = arg_lit_usize(args, 2).map_err(|_| {
+                PlanExprError(
+                    "regexp_extract in plan requires literal group index at arg 3 (column refs not supported)".into(),
+                )
+            })?;
             Ok(regexp_extract(&c, &pattern, group_index).into_expr())
         }
         "regexp_replace" => {
