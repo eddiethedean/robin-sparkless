@@ -329,6 +329,28 @@ pub fn expr_from_value(v: &Value) -> Result<Expr, PlanExprError> {
                 let b = expr_to_column(r);
                 return Ok(a.add_pyspark(&b).into_expr());
             }
+            "udf" => {
+                // {"op": "udf", "udf"|"name": "udf_name", "args": [<expr>, ...]} (issue #545)
+                let udf_name = obj
+                    .get("udf")
+                    .or_else(|| obj.get("name"))
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| {
+                        PlanExprError("op 'udf' requires 'udf' or 'name'".to_string())
+                    })?;
+                let args = obj
+                    .get("args")
+                    .and_then(Value::as_array)
+                    .ok_or_else(|| PlanExprError("op 'udf' requires 'args' array".to_string()))?;
+                let col = column_from_udf_call(udf_name, args)?;
+                if col.udf_call.is_some() {
+                    return Err(PlanExprError(
+                        "Python/Vectorized UDFs are only supported in withColumn/select, not in filter/plan expressions"
+                            .into(),
+                    ));
+                }
+                return Ok(col.expr().clone());
+            }
             _ => {
                 return Err(PlanExprError(format!("unsupported expression op: {op}")));
             }
