@@ -631,13 +631,125 @@ fn projection_function_to_item(
     ))
 }
 
+/// Push one aggregate expression from a SQL function. `alias_override`: when Some (e.g. AS cnt), use it; when None use default (count, sum(col), etc).
+fn push_agg_function(
+    name: &sqlparser::ast::ObjectName,
+    args: &[sqlparser::ast::FunctionArg],
+    df: &DataFrame,
+    alias_override: Option<&str>,
+    agg: &mut Vec<Expr>,
+) -> Result<(), PolarsError> {
+    use polars::prelude::len;
+
+    let func_name = name.0.last().map(|i| i.value.as_str()).unwrap_or("");
+    let (expr, default_alias) = match func_name.to_uppercase().as_str() {
+        "COUNT" => {
+            let e = if args.is_empty() {
+                len()
+            } else {
+                match &args[0] {
+                    sqlparser::ast::FunctionArg::Unnamed(
+                        sqlparser::ast::FunctionArgExpr::Expr(SqlExpr::Wildcard),
+                    ) => len(),
+                    sqlparser::ast::FunctionArg::Unnamed(
+                        sqlparser::ast::FunctionArgExpr::Expr(SqlExpr::Identifier(ident)),
+                    ) => {
+                        let resolved = df.resolve_column_name(ident.value.as_str())?;
+                        col(resolved.as_str()).count()
+                    }
+                    _ => {
+                        return Err(PolarsError::InvalidOperation(
+                            "SQL: COUNT(*) or COUNT(column) only.".into(),
+                        ));
+                    }
+                }
+            };
+            (e, "count".to_string())
+        }
+        "SUM" => {
+            if let Some(sqlparser::ast::FunctionArg::Unnamed(
+                sqlparser::ast::FunctionArgExpr::Expr(SqlExpr::Identifier(ident)),
+            )) = args.first()
+            {
+                let resolved = df.resolve_column_name(ident.value.as_str())?;
+                (
+                    col(resolved.as_str()).sum(),
+                    format!("sum({})", ident.value),
+                )
+            } else {
+                return Err(PolarsError::InvalidOperation(
+                    "SQL: SUM(column) only.".into(),
+                ));
+            }
+        }
+        "AVG" | "MEAN" => {
+            if let Some(sqlparser::ast::FunctionArg::Unnamed(
+                sqlparser::ast::FunctionArgExpr::Expr(SqlExpr::Identifier(ident)),
+            )) = args.first()
+            {
+                let resolved = df.resolve_column_name(ident.value.as_str())?;
+                (
+                    col(resolved.as_str()).mean(),
+                    format!("avg({})", ident.value),
+                )
+            } else {
+                return Err(PolarsError::InvalidOperation(
+                    "SQL: AVG(column) only.".into(),
+                ));
+            }
+        }
+        "MIN" => {
+            if let Some(sqlparser::ast::FunctionArg::Unnamed(
+                sqlparser::ast::FunctionArgExpr::Expr(SqlExpr::Identifier(ident)),
+            )) = args.first()
+            {
+                let resolved = df.resolve_column_name(ident.value.as_str())?;
+                (
+                    col(resolved.as_str()).min(),
+                    format!("min({})", ident.value),
+                )
+            } else {
+                return Err(PolarsError::InvalidOperation(
+                    "SQL: MIN(column) only.".into(),
+                ));
+            }
+        }
+        "MAX" => {
+            if let Some(sqlparser::ast::FunctionArg::Unnamed(
+                sqlparser::ast::FunctionArgExpr::Expr(SqlExpr::Identifier(ident)),
+            )) = args.first()
+            {
+                let resolved = df.resolve_column_name(ident.value.as_str())?;
+                (
+                    col(resolved.as_str()).max(),
+                    format!("max({})", ident.value),
+                )
+            } else {
+                return Err(PolarsError::InvalidOperation(
+                    "SQL: MAX(column) only.".into(),
+                ));
+            }
+        }
+        _ => {
+            return Err(PolarsError::InvalidOperation(
+                format!(
+                    "SQL: unsupported aggregate in SELECT: {}. Use COUNT, SUM, AVG, MIN, MAX.",
+                    func_name
+                )
+                .into(),
+            ));
+        }
+    };
+    let name = alias_override.unwrap_or_else(|| default_alias.as_str());
+    agg.push(expr.alias(name));
+    Ok(())
+}
+
 fn projection_to_agg_exprs(
     projection: &[SelectItem],
     group_cols: &[String],
     df: &DataFrame,
 ) -> Result<Vec<Expr>, PolarsError> {
-    use polars::prelude::len;
-
     let mut agg = Vec::new();
     for item in projection {
         match item {
@@ -667,104 +779,47 @@ fn projection_to_agg_exprs(
                 }
             }
             SelectItem::UnnamedExpr(SqlExpr::Function(Function { name, args, .. })) => {
-                let func_name = name.0.last().map(|i| i.value.as_str()).unwrap_or("");
-                match func_name.to_uppercase().as_str() {
-                    "COUNT" => {
-                        let expr = if args.is_empty() {
-                            len().alias("count")
-                        } else {
-                            match &args[0] {
-                                sqlparser::ast::FunctionArg::Unnamed(
-                                    sqlparser::ast::FunctionArgExpr::Expr(SqlExpr::Wildcard),
-                                ) => len().alias("count"),
-                                sqlparser::ast::FunctionArg::Unnamed(
-                                    sqlparser::ast::FunctionArgExpr::Expr(SqlExpr::Identifier(
-                                        ident,
-                                    )),
-                                ) => {
-                                    let resolved = df.resolve_column_name(ident.value.as_str())?;
-                                    col(resolved.as_str()).count().alias("count")
-                                }
-                                _ => {
-                                    return Err(PolarsError::InvalidOperation(
-                                        "SQL: COUNT(*) or COUNT(column) only.".into(),
-                                    ));
-                                }
-                            }
-                        };
-                        agg.push(expr);
-                    }
-                    "SUM" => {
-                        if let Some(sqlparser::ast::FunctionArg::Unnamed(
-                            sqlparser::ast::FunctionArgExpr::Expr(SqlExpr::Identifier(ident)),
-                        )) = args.first()
-                        {
-                            let resolved = df.resolve_column_name(ident.value.as_str())?;
-                            agg.push(
-                                col(resolved.as_str())
-                                    .sum()
-                                    .alias(format!("sum({})", ident.value)),
-                            );
-                        } else {
+                push_agg_function(name, args, df, None, &mut agg)?;
+            }
+            SelectItem::ExprWithAlias { expr, alias } => {
+                let alias_str = alias.value.as_str();
+                match expr {
+                    SqlExpr::Identifier(ident) => {
+                        let resolved = df.resolve_column_name(ident.value.as_str())?;
+                        if !group_cols.iter().any(|c| c == &resolved) {
                             return Err(PolarsError::InvalidOperation(
-                                "SQL: SUM(column) only.".into(),
+                                format!(
+                                    "SQL: non-aggregated column '{}' must appear in GROUP BY.",
+                                    ident.value
+                                )
+                                .into(),
+                            ));
+                        }
+                        // Group column with alias (e.g. grp AS g): validation only; result keeps group column name from frame.
+                    }
+                    SqlExpr::CompoundIdentifier(parts) => {
+                        let name = parts.last().map(|i| i.value.as_str()).unwrap_or("");
+                        let resolved = df.resolve_column_name(name)?;
+                        if !group_cols.iter().any(|c| c == &resolved) {
+                            return Err(PolarsError::InvalidOperation(
+                                format!(
+                                    "SQL: non-aggregated column '{}' must appear in GROUP BY.",
+                                    name
+                                )
+                                .into(),
                             ));
                         }
                     }
-                    "AVG" | "MEAN" => {
-                        if let Some(sqlparser::ast::FunctionArg::Unnamed(
-                            sqlparser::ast::FunctionArgExpr::Expr(SqlExpr::Identifier(ident)),
-                        )) = args.first()
-                        {
-                            let resolved = df.resolve_column_name(ident.value.as_str())?;
-                            agg.push(
-                                col(resolved.as_str())
-                                    .mean()
-                                    .alias(format!("avg({})", ident.value)),
-                            );
-                        } else {
-                            return Err(PolarsError::InvalidOperation(
-                                "SQL: AVG(column) only.".into(),
-                            ));
-                        }
-                    }
-                    "MIN" => {
-                        if let Some(sqlparser::ast::FunctionArg::Unnamed(
-                            sqlparser::ast::FunctionArgExpr::Expr(SqlExpr::Identifier(ident)),
-                        )) = args.first()
-                        {
-                            let resolved = df.resolve_column_name(ident.value.as_str())?;
-                            agg.push(
-                                col(resolved.as_str())
-                                    .min()
-                                    .alias(format!("min({})", ident.value)),
-                            );
-                        } else {
-                            return Err(PolarsError::InvalidOperation(
-                                "SQL: MIN(column) only.".into(),
-                            ));
-                        }
-                    }
-                    "MAX" => {
-                        if let Some(sqlparser::ast::FunctionArg::Unnamed(
-                            sqlparser::ast::FunctionArgExpr::Expr(SqlExpr::Identifier(ident)),
-                        )) = args.first()
-                        {
-                            let resolved = df.resolve_column_name(ident.value.as_str())?;
-                            agg.push(
-                                col(resolved.as_str())
-                                    .max()
-                                    .alias(format!("max({})", ident.value)),
-                            );
-                        } else {
-                            return Err(PolarsError::InvalidOperation(
-                                "SQL: MAX(column) only.".into(),
-                            ));
-                        }
+                    SqlExpr::Function(Function { name, args, .. }) => {
+                        push_agg_function(&name, args.as_slice(), df, Some(alias_str), &mut agg)?;
                     }
                     _ => {
                         return Err(PolarsError::InvalidOperation(
-                            format!("SQL: unsupported aggregate in SELECT: {}. Use COUNT, SUM, AVG, MIN, MAX.", func_name).into(),
+                            format!(
+                                "SQL: unsupported aliased SELECT item in aggregation: {:?}",
+                                expr
+                            )
+                            .into(),
                         ));
                     }
                 }
