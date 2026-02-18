@@ -31,6 +31,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **#550 – Window function approx_count_distinct (PySpark parity)** — Plan interpreter now supports `approx_count_distinct(col).over(window)` in window expressions. Fixes #550.
 - **#549 – format_string and log() as expression op (PySpark parity)** — Plan interpreter now accepts `{"op": "format_string"|"formatString"|"log", "args": [...]}`. Fixes #549.
 - **#548 – date_trunc and to_date as expression op (PySpark parity)** — Plan interpreter now accepts `{"op": "date_trunc"|"dateTrunc"|"to_date"|"toDate", "args": [...]}`. Fixes #548.
 - **#547 – String functions as expression op (PySpark parity)** — Plan interpreter now accepts translate, substring_index, levenshtein, soundex, crc32, xxhash64, get_json_object, json_tuple, and regexp_extract_all when sent as `{"op": "<name>", "args": [...]}` (and camelCase variants substringIndex, getJsonObject, jsonTuple, regexpExtractAll). Also added get_json_object and json_tuple to expr_from_fn. Fixes #547.
