@@ -573,8 +573,22 @@ fn expr_from_window_fn(
             let partition_exprs: Vec<Expr> = part_refs.iter().map(|s| col(*s)).collect();
             Ok(mean_expr.over(partition_exprs))
         }
+        "approx_count_distinct" => {
+            let col_expr = expr_to_column(expr_from_value(
+                args.first().ok_or_else(|| {
+                    PlanExprError("approx_count_distinct window requires column arg".to_string())
+                })?,
+            )?);
+            let n_unique_expr = col_expr
+                .expr()
+                .clone()
+                .n_unique()
+                .cast(DataType::Int64);
+            let partition_exprs: Vec<Expr> = part_refs.iter().map(|s| col(*s)).collect();
+            Ok(n_unique_expr.over(partition_exprs))
+        }
         _ => Err(PlanExprError(format!(
-            "unsupported window fn '{fn_name}' (supported: row_number, rank, dense_rank, percent_rank, ntile, lag, lead, sum, avg)"
+            "unsupported window fn '{fn_name}' (supported: row_number, rank, dense_rank, percent_rank, ntile, lag, lead, sum, avg, approx_count_distinct)"
         ))),
     }
 }
