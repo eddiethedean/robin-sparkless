@@ -355,7 +355,7 @@ pub fn expr_from_value(v: &Value) -> Result<Expr, PlanExprError> {
             "translate" | "substring_index" | "substringIndex" | "levenshtein" | "soundex"
             | "crc32" | "xxhash64" | "get_json_object" | "getJsonObject" | "json_tuple"
             | "jsonTuple" | "regexp_extract_all" | "regexpExtractAll" | "date_trunc"
-            | "dateTrunc" | "to_date" | "toDate" => {
+            | "dateTrunc" | "to_date" | "toDate" | "format_string" | "formatString" | "log" => {
                 let args = obj
                     .get("args")
                     .and_then(Value::as_array)
@@ -367,6 +367,7 @@ pub fn expr_from_value(v: &Value) -> Result<Expr, PlanExprError> {
                     "regexpExtractAll" => "regexp_extract_all",
                     "dateTrunc" => "date_trunc",
                     "toDate" => "to_date",
+                    "formatString" => "format_string",
                     other => other,
                 };
                 return expr_from_fn(fn_name, args);
