@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **#580 – Join with column expression when both tables have same key name (PySpark parity)** — Joining on a column that has the same name on both sides (e.g. `emp.join(dept, emp.dept_id == dept.dept_id)`) no longer fails with "duplicate: column with name 'dept_id' has more than one occurrence". Right join keys are renamed to temp names and the join uses `left_on`/`right_on` so Polars produces a single key column. Fixes #580.
 - **#579 – first() after orderBy returns first row in sort order (PySpark parity)** — `DataFrame.first()` now uses `limit(1)` then collect so that the first row is the first in the applied plan (e.g. after `orderBy(col)`), not the first in storage/input order. Fixes #579.
 - **#578 – create_map() with zero arguments returns {} not null (PySpark parity)** — `collect_as_json_rows` now serializes List and Struct AnyValues; empty map column yields JSON `{}` per row instead of `null`. Fixes #578.
 
