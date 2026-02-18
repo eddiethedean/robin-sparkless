@@ -821,8 +821,11 @@ pub fn sample_by(
 }
 
 /// First row as a DataFrame (one row). PySpark first().
+/// Uses limit(1) then collect so that orderBy (and other plan steps) are applied before taking
+/// the first row (issue #579: first() after orderBy must return first in sort order, not storage order).
 pub fn first(df: &DataFrame, case_sensitive: bool) -> Result<DataFrame, PolarsError> {
-    let pl_df = df.collect_inner()?.as_ref().clone().head(Some(1));
+    let limited = limit(df, 1, case_sensitive)?;
+    let pl_df = limited.collect_inner()?.as_ref().clone();
     Ok(super::DataFrame::from_polars_with_options(
         pl_df,
         case_sensitive,
@@ -1328,7 +1331,7 @@ pub fn intersect_all(
 
 #[cfg(test)]
 mod tests {
-    use super::{distinct, drop, dropna, first, head, limit, offset};
+    use super::{distinct, drop, dropna, first, head, limit, offset, order_by};
     use crate::{DataFrame, SparkSession};
 
     fn test_df() -> DataFrame {
@@ -1378,6 +1381,27 @@ mod tests {
         let df = test_df();
         let out = first(&df, false).unwrap();
         assert_eq!(out.count().unwrap(), 1);
+    }
+
+    /// Issue #579: first() after orderBy must return first row in sort order, not storage order.
+    #[test]
+    fn first_after_order_by_returns_first_in_sort_order() {
+        use polars::prelude::df;
+        let spark = SparkSession::builder()
+            .app_name("transform_tests")
+            .get_or_create();
+        let pl = df![
+            "name" => ["Charlie", "Alice", "Bob"],
+            "value" => [3i64, 1i64, 2i64],
+        ]
+        .unwrap();
+        let df = spark.create_dataframe_from_polars(pl);
+        let ordered = order_by(&df, vec!["value"], vec![true], false).unwrap();
+        let one = first(&ordered, false).unwrap();
+        let collected = one.collect_inner().unwrap();
+        let name_series = collected.column("name").unwrap();
+        let first_name = name_series.str().unwrap().get(0).unwrap();
+        assert_eq!(first_name, "Alice", "first() after orderBy(value) must return row with min value (Alice=1), not first in storage (Charlie)");
     }
 
     #[test]
