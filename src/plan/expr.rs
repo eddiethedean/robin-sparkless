@@ -738,13 +738,17 @@ fn lit_as_usize(v: &Value) -> Result<usize, PlanExprError> {
 /// Extract values for isin from JSON array. Each element: {"lit": v} or plain v. Returns Expr for is_in.
 /// When arr is empty or parses to no values (e.g. all nulls), returns Ok(None) — caller uses lit(false)
 /// so that col.isin([]) is false for all rows (PySpark parity; issue #518).
-/// Mixed types / string vs numeric (issue #525): when list has strings we use string series; when list
-/// has only numbers we use string series too so that string column isin(1, 2) works (PySpark casts literals to column type).
+/// Type of series (issue #581): when all values are integers use Int64 series so Int64 column
+/// isin(1, 3) works; when all are floats use Float64; otherwise use String series for mixed/string.
 fn try_values_for_isin(arr: &[Value]) -> Result<Option<Expr>, PlanExprError> {
     if arr.is_empty() {
         return Ok(None);
     }
     let mut str_vals: Vec<String> = Vec::new();
+    let mut int_vals: Vec<i64> = Vec::new();
+    let mut float_vals: Vec<f64> = Vec::new();
+    let mut has_string = false;
+    let mut has_float = false;
     for v in arr {
         let lit_val = if let Some(obj) = v.as_object() {
             obj.get("lit").unwrap_or(v)
@@ -756,16 +760,28 @@ fn try_values_for_isin(arr: &[Value]) -> Result<Option<Expr>, PlanExprError> {
         }
         if let Some(s) = lit_val.as_str() {
             str_vals.push(s.to_string());
+            has_string = true;
         } else if let Some(n) = lit_val.as_i64() {
+            int_vals.push(n);
             str_vals.push(n.to_string());
         } else if let Some(n) = lit_val.as_f64() {
+            float_vals.push(n);
             str_vals.push(n.to_string());
+            has_float = true;
         }
     }
     if str_vals.is_empty() {
         return Ok(None);
     }
-    let s: Series = Series::from_iter(str_vals.iter().map(|x| x.as_str()));
+    let s: Series = if has_string {
+        Series::from_iter(str_vals.iter().map(|x| x.as_str()))
+    } else if !has_float && int_vals.len() == str_vals.len() {
+        Series::from_iter(int_vals)
+    } else if float_vals.len() == str_vals.len() {
+        Series::from_iter(float_vals)
+    } else {
+        Series::from_iter(str_vals.iter().map(|x| x.as_str()))
+    };
     Ok(Some(lit(s)))
 }
 
