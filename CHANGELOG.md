@@ -31,6 +31,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **#542 – create_map semantics / support (PySpark parity)** — Plan interpreter accepts `createMap` (camelCase) in addition to `create_map` for op and fn, so Sparkless create_map expressions are supported. Fixes #542.
 - **#541 – withField struct update (PySpark parity)** — Plan interpreter supports `withField` and `with_field` in expressions (args: struct column, field name, value). Also added `get_field` / `getField` for struct field extraction in plans. Fixes #541.
 - **#540 – orderBy nulls_first / nulls_last (PySpark parity)** — `order_by(refs, ascending)` now passes null placement to Polars: ASC → nulls first, DESC → nulls last. Plan interpreter `orderBy` accepts optional `nulls_last` array in payload for configurable null ordering. Fixes #540.
 - **GroupedData / PivotedGroupedData column resolution** — Aggregation methods (`sum`, `avg`, `min`, `max`, `first`, `last`, etc.) and pivot operations now resolve column names against the schema with case sensitivity. When `case_sensitive` is false, `grouped.sum("V")` works when the schema has `"v"`.

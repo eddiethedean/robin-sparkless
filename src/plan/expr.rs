@@ -303,10 +303,10 @@ pub fn expr_from_value(v: &Value) -> Result<Expr, PlanExprError> {
                     crate::functions::regexp_replace(&col_c, &pattern, &replacement).into_expr(),
                 );
             }
-            "create_map" => {
-                // {"op": "create_map", "args": [key1, val1, key2, val2, ...]}
+            "create_map" | "createMap" => {
+                // {"op": "create_map"|"createMap", "args": [key1, val1, key2, val2, ...]} (issue #542)
                 let args_arr = obj.get("args").and_then(Value::as_array).ok_or_else(|| {
-                    PlanExprError("op 'create_map' requires 'args' array".to_string())
+                    PlanExprError("op 'create_map'/'createMap' requires 'args' array".to_string())
                 })?;
                 let exprs: Result<Vec<Expr>, _> = args_arr.iter().map(expr_from_value).collect();
                 let cols: Vec<crate::Column> = exprs?.into_iter().map(expr_to_column).collect();
@@ -2275,8 +2275,8 @@ fn expr_from_fn_rest(name: &str, args: &[Value]) -> Result<Expr, PlanExprError> 
             Ok(array_sum(&expr_to_column(arg_expr(args, 0)?)).into_expr())
         }
         // --- Map / struct ---
-        "create_map" => {
-            // PySpark F.create_map() with no args: empty map {} per row (#512).
+        "create_map" | "createMap" => {
+            // PySpark F.create_map(key1, val1, ...) or empty map {} per row (#512, #542).
             let exprs: Result<Vec<Expr>, _> = args.iter().map(expr_from_value).collect();
             let cols: Vec<Column> = exprs?.into_iter().map(expr_to_column).collect();
             let refs: Vec<&Column> = cols.iter().collect();
