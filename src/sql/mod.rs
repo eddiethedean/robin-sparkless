@@ -152,6 +152,29 @@ mod tests {
     }
 
     #[test]
+    fn test_sql_having_agg() {
+        // Issue #589: HAVING with aggregate expression (e.g. HAVING AVG(salary) > 55000).
+        let spark = SparkSession::builder().app_name("test").get_or_create();
+        let df = spark
+            .create_dataframe(
+                vec![
+                    ("A".to_string(), 50000),
+                    ("A".to_string(), 60000),
+                    ("B".to_string(), 40000),
+                ],
+                vec!["dept", "salary"],
+            )
+            .unwrap();
+        spark.create_or_replace_temp_view("t", df);
+        let result = spark
+            .sql("SELECT dept, AVG(salary) as avg_sal FROM t GROUP BY dept HAVING AVG(salary) > 55000")
+            .unwrap();
+        assert_eq!(result.count().unwrap(), 1);
+        let rows = result.collect_as_json_rows().unwrap();
+        assert_eq!(rows[0].get("dept").and_then(|v| v.as_str()).unwrap(), "A");
+    }
+
+    #[test]
     fn test_sql_table_not_found() {
         let spark = SparkSession::builder().app_name("test").get_or_create();
         let result = spark.sql("SELECT 1 FROM nonexistent");
