@@ -620,6 +620,18 @@ impl SparkSession {
             .unwrap_or(false)
     }
 
+    /// Drop a database/schema by name (from DROP SCHEMA / DROP DATABASE). Removes from registered databases only.
+    /// Does not drop "default" or "global_temp". No-op if not present (or if_exists). Returns true if removed.
+    pub fn drop_database(&self, name: &str) -> bool {
+        if name.eq_ignore_ascii_case("default") || name.eq_ignore_ascii_case("global_temp") {
+            return false;
+        }
+        self.databases
+            .lock()
+            .map(|mut s| s.remove(name))
+            .unwrap_or(false)
+    }
+
     /// Parse "global_temp.xyz" into ("global_temp", "xyz"). Returns None for plain names.
     fn parse_global_temp_name(name: &str) -> Option<(&str, &str)> {
         if let Some(dot) = name.find('.') {

@@ -104,8 +104,22 @@ pub fn translate(
                 session.is_case_sensitive(),
             ))
         }
+        Statement::Drop {
+            object_type: ObjectType::Schema,
+            names,
+            ..
+        } => {
+            for obj_name in names {
+                session.drop_database(&obj_name.to_string());
+            }
+            Ok(DataFrame::from_polars_with_options(
+                PlDataFrame::empty(),
+                session.is_case_sensitive(),
+            ))
+        }
         _ => Err(PolarsError::InvalidOperation(
-            "SQL: only SELECT, CREATE SCHEMA/DATABASE, and DROP TABLE/VIEW are supported.".into(),
+            "SQL: only SELECT, CREATE SCHEMA/DATABASE, and DROP TABLE/VIEW/SCHEMA are supported."
+                .into(),
         )),
     }
 }
