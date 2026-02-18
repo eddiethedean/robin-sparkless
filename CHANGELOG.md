@@ -31,6 +31,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **#560 – first() and orderBy semantics (PySpark parity)** — Plan interpreter supports `first` and `last` in groupBy aggs; orderBy after groupBy orders the aggregated result. Fixes #560.
+- **#559 – unionByName diamond duplicate rows (PySpark parity)** — unionByName does not deduplicate; (A unionByName B) unionByName A correctly yields A’s rows twice and B’s once. Regression test added. Fixes #559.
+- **#558 – Join type coercion (PySpark parity)** — Join already coerces key columns to a common type when left/right dtypes differ (e.g. string vs long); regression test added. Fixes #558.
+- **#557 – substr/substring semantics (PySpark parity)** — `substr`/`substring` now use 1-based start; negative start counts from end (e.g. -3 = last 3 chars); length less than 1 returns empty string. Fixes #557.
 - **#556 – Reverse-operator arithmetic (PySpark parity)** — Plan interpreter now accepts `{"op": "sub"|"minus"|"-", "left": <expr>, "right": <expr>}` and `{"op": "mul"|"*", "left": <expr>, "right": <expr>}` so literal-on-left expressions like `(1 - col("x"))` and `(100 * col("x"))` work. Fixes #556.
 - **#555 – Case-insensitive column resolution in plan (PySpark parity)** — execute_plan uses case-insensitive column resolution by default; `col("age")` in select resolves to schema column `"Age"`. Regression test added. Fixes #555.
 - **#554 – Array column and explode (PySpark parity)** — Plan interpreter now accepts `{"op": "explode"|"explode_outer"|"explodeOuter", "args": [<expr>]}` so Sparkless plans using explode as expression op no longer report "unsupported expression op: explode". Fixes #554.

@@ -441,12 +441,27 @@ impl Column {
         self.upper()
     }
 
-    /// Substring with 1-based start (PySpark substring semantics)
+    /// Substring with 1-based start (PySpark substring/substr semantics).
+    /// - Positive start: 1-based index (1 = first char).
+    /// - Negative start: count from end (e.g. -3 = third char from end).
+    /// - Length less than 1: empty string.
     pub fn substr(&self, start: i64, length: Option<i64>) -> Column {
         use polars::prelude::*;
-        let offset = (start - 1).max(0);
-        let offset_expr = lit(offset);
-        let length_expr = length.map(lit).unwrap_or_else(|| lit(i64::MAX)); // No length = rest of string
+        // PySpark: len < 1 -> empty string
+        if length.map(|l| l < 1).unwrap_or(false) {
+            return Self::from_expr(lit(""), None);
+        }
+        let len_chars = self.expr().clone().str().len_chars();
+        // 1-based start: positive -> 0-based offset = (start - 1).max(0); negative -> from end: len + start (clamped to 0)
+        let offset_expr = if start >= 1 {
+            lit((start - 1).max(0))
+        } else {
+            let from_end = len_chars + lit(start);
+            when(from_end.clone().lt(lit(0i64)))
+                .then(lit(0i64))
+                .otherwise(from_end)
+        };
+        let length_expr = length.map(lit).unwrap_or_else(|| lit(i64::MAX));
         Self::from_expr(
             self.expr().clone().str().slice(offset_expr, length_expr),
             None,

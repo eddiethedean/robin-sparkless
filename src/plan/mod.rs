@@ -588,6 +588,8 @@ fn parse_aggs(aggs: &[Value], df: &DataFrame) -> Result<Vec<polars::prelude::Exp
             "avg" => avg(&c),
             "min" => min(&c),
             "max" => max(&c),
+            "first" => Column::from_expr(c.into_expr().first(), None),
+            "last" => Column::from_expr(c.into_expr().last(), None),
             _ => return Err(PlanError::InvalidPlan(format!("unsupported agg: {agg}"))),
         };
         let mut expr = col_expr.into_expr();
