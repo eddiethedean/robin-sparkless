@@ -230,6 +230,11 @@ fn apply_op(
     payload: Value,
 ) -> Result<DataFrame, PlanError> {
     match op_name {
+        "stop" => {
+            let _ = payload;
+            session.stop();
+            Ok(df)
+        }
         "filter" => {
             let expr = expr_from_value(&payload).map_err(PlanError::Expr)?;
             df.filter(expr).map_err(PlanError::Session)

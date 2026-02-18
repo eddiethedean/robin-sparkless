@@ -82,4 +82,13 @@ impl UdfRegistry {
         }
         false
     }
+
+    /// Clear all registered UDFs (used by SparkSession.stop()).
+    pub fn clear(&self) -> Result<(), PolarsError> {
+        self.rust_udfs
+            .write()
+            .map_err(|_| PolarsError::ComputeError("udf registry lock poisoned".into()))?
+            .clear();
+        Ok(())
+    }
 }
