@@ -151,15 +151,31 @@ fn translate_query(
     };
     let has_group_by = !group_exprs.is_empty();
     if has_group_by {
-        let group_cols: Vec<String> = group_exprs
+        // Support GROUP BY column name or expression, e.g. GROUP BY age or GROUP BY (age > 30) (issue #588).
+        let (group_exprs_polars, group_cols): (Vec<Expr>, Vec<String>) = group_exprs
             .iter()
-            .map(|e| {
-                let name = sql_expr_to_col_name(e)?;
-                df.resolve_column_name(&name)
+            .enumerate()
+            .map(|(i, e)| {
+                Ok(match e {
+                    SqlExpr::Identifier(ident) => {
+                        let name = ident.value.as_str();
+                        let resolved = df.resolve_column_name(name)?;
+                        (col(resolved.as_str()), resolved)
+                    }
+                    SqlExpr::CompoundIdentifier(parts) => {
+                        let name = parts.last().map(|i| i.value.as_str()).unwrap_or("");
+                        let resolved = df.resolve_column_name(name)?;
+                        (col(resolved.as_str()), resolved)
+                    }
+                    _ => {
+                        let expr = sql_expr_to_polars(e, session, Some(&df))?;
+                        let name = format!("group_{}", i);
+                        (expr.alias(&name), name)
+                    }
+                })
             })
-            .collect::<Result<Vec<_>, _>>()?;
-        let group_refs: Vec<&str> = group_cols.iter().map(|s| s.as_str()).collect();
-        let grouped = df.group_by(group_refs)?;
+            .collect::<Result<Vec<_>, PolarsError>>()?;
+        let grouped = df.group_by_exprs(group_exprs_polars, group_cols.clone())?;
         let agg_exprs = projection_to_agg_exprs(&body.projection, &group_cols, &df)?;
         if agg_exprs.is_empty() {
             df = grouped.count()?;
