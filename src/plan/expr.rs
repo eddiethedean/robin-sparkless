@@ -269,6 +269,40 @@ pub fn expr_from_value(v: &Value) -> Result<Expr, PlanExprError> {
                     crate::functions::regexp_extract(&col_c, &pattern, group_idx).into_expr(),
                 );
             }
+            "regexp_replace" => {
+                // {"op": "regexp_replace", "left": col, "pattern": {"lit": "..."}, "replacement": {"lit": "..."}}
+                // or {"op": "regexp_replace", "args": [col, pattern, replacement]} (issue #528)
+                if let Some(args) = obj.get("args").and_then(Value::as_array) {
+                    require_args_min("regexp_replace", args, 3)?;
+                    let col_expr = expr_from_value(&args[0])?;
+                    let pattern = lit_as_string(&args[1])?;
+                    let replacement = lit_as_string(&args[2])?;
+                    let col_c = expr_to_column(col_expr);
+                    return Ok(
+                        crate::functions::regexp_replace(&col_c, &pattern, &replacement)
+                            .into_expr(),
+                    );
+                }
+                let left_v = obj.get("left").ok_or_else(|| {
+                    PlanExprError("op 'regexp_replace' requires 'left'".to_string())
+                })?;
+                let col_expr = expr_from_value(left_v)?;
+                let pattern =
+                    lit_as_string(obj.get("pattern").or_else(|| obj.get("right")).ok_or_else(
+                        || {
+                            PlanExprError(
+                                "op 'regexp_replace' requires 'pattern' or 'right'".to_string(),
+                            )
+                        },
+                    )?)?;
+                let replacement = lit_as_string(obj.get("replacement").ok_or_else(|| {
+                    PlanExprError("op 'regexp_replace' requires 'replacement'".to_string())
+                })?)?;
+                let col_c = expr_to_column(col_expr);
+                return Ok(
+                    crate::functions::regexp_replace(&col_c, &pattern, &replacement).into_expr(),
+                );
+            }
             "create_map" => {
                 // {"op": "create_map", "args": [key1, val1, key2, val2, ...]}
                 let args_arr = obj.get("args").and_then(Value::as_array).ok_or_else(|| {
@@ -2352,6 +2386,22 @@ mod tests {
             "group": {"lit": 1}
         });
         let _ = expr_from_value(&v).unwrap();
+    }
+
+    #[test]
+    fn test_regexp_replace_op() {
+        let v = json!({
+            "op": "regexp_replace",
+            "left": {"col": "str"},
+            "pattern": {"lit": r"\d"},
+            "replacement": {"lit": "X"}
+        });
+        let _ = expr_from_value(&v).unwrap();
+        let v2 = json!({
+            "op": "regexp_replace",
+            "args": [{"col": "str"}, {"lit": r"\d"}, {"lit": "X"}]
+        });
+        let _ = expr_from_value(&v2).unwrap();
     }
 
     #[test]
