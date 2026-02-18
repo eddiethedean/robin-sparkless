@@ -329,6 +329,34 @@ pub fn expr_from_value(v: &Value) -> Result<Expr, PlanExprError> {
                 let b = expr_to_column(r);
                 return Ok(a.add_pyspark(&b).into_expr());
             }
+            "sub" | "minus" | "-" => {
+                // {"op": "sub", "left": <expr>, "right": <expr>} — e.g. (1 - col("x")) #556
+                let left_v = obj
+                    .get("left")
+                    .ok_or_else(|| PlanExprError("op 'sub' requires 'left'".to_string()))?;
+                let right_v = obj
+                    .get("right")
+                    .ok_or_else(|| PlanExprError("op 'sub' requires 'right'".to_string()))?;
+                let l = expr_from_value(left_v)?;
+                let r = expr_from_value(right_v)?;
+                let a = expr_to_column(l);
+                let b = expr_to_column(r);
+                return Ok(a.subtract(&b).into_expr());
+            }
+            "mul" | "*" => {
+                // {"op": "mul", "left": <expr>, "right": <expr>} — e.g. (100 * col("x")) #556
+                let left_v = obj
+                    .get("left")
+                    .ok_or_else(|| PlanExprError("op 'mul' requires 'left'".to_string()))?;
+                let right_v = obj
+                    .get("right")
+                    .ok_or_else(|| PlanExprError("op 'mul' requires 'right'".to_string()))?;
+                let l = expr_from_value(left_v)?;
+                let r = expr_from_value(right_v)?;
+                let a = expr_to_column(l);
+                let b = expr_to_column(r);
+                return Ok(a.multiply(&b).into_expr());
+            }
             "udf" => {
                 // {"op": "udf", "udf"|"name": "udf_name", "args": [<expr>, ...]} (issue #545)
                 let udf_name = obj

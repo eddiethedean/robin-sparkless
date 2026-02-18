@@ -31,6 +31,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **#556 – Reverse-operator arithmetic (PySpark parity)** — Plan interpreter now accepts `{"op": "sub"|"minus"|"-", "left": <expr>, "right": <expr>}` and `{"op": "mul"|"*", "left": <expr>, "right": <expr>}` so literal-on-left expressions like `(1 - col("x"))` and `(100 * col("x"))` work. Fixes #556.
 - **#555 – Case-insensitive column resolution in plan (PySpark parity)** — execute_plan uses case-insensitive column resolution by default; `col("age")` in select resolves to schema column `"Age"`. Regression test added. Fixes #555.
 - **#554 – Array column and explode (PySpark parity)** — Plan interpreter now accepts `{"op": "explode"|"explode_outer"|"explodeOuter", "args": [<expr>]}` so Sparkless plans using explode as expression op no longer report "unsupported expression op: explode". Fixes #554.
 - **#553 – Empty DataFrame schema and table ops (PySpark parity)** — Empty DataFrame with explicit schema is supported: `create_dataframe_from_rows([], schema)`, `saveAsTable`, and `spark.table()` work (PySpark raises "can not infer schema from empty dataset"). Regression test added. Fixes #553.
