@@ -1445,6 +1445,9 @@ impl DataFrameReader {
                     .and_then(|s| s.parse::<usize>().ok())
                     .unwrap_or(100);
                 r = r.with_infer_schema_length(Some(n));
+            } else {
+                // inferSchema=false: do not infer types (PySpark parity #543)
+                r = r.with_infer_schema_length(Some(0));
             }
         } else if let Some(v) = self.options.get("inferSchemaLength") {
             if let Ok(n) = v.parse::<usize>() {

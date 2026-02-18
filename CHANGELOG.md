@@ -31,6 +31,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **#543 – CSV inferSchema behavior (PySpark parity)** — read_csv() and read().option("inferSchema", true).csv() infer integer, double, and boolean from CSV. Option inferSchema=false now disables inference (0 rows). Regression tests verify inferred types. Fixes #543.
 - **#542 – create_map semantics / support (PySpark parity)** — Plan interpreter accepts `createMap` (camelCase) in addition to `create_map` for op and fn, so Sparkless create_map expressions are supported. Fixes #542.
 - **#541 – withField struct update (PySpark parity)** — Plan interpreter supports `withField` and `with_field` in expressions (args: struct column, field name, value). Also added `get_field` / `getField` for struct field extraction in plans. Fixes #541.
 - **#540 – orderBy nulls_first / nulls_last (PySpark parity)** — `order_by(refs, ascending)` now passes null placement to Polars: ASC → nulls first, DESC → nulls last. Plan interpreter `orderBy` accepts optional `nulls_last` array in payload for configurable null ordering. Fixes #540.
