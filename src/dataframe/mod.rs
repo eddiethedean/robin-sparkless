@@ -90,6 +90,16 @@ impl DataFrame {
         }
     }
 
+    /// Return a new DataFrame with the same data but case-insensitive column resolution.
+    /// Used by plan execution so that Sparkless plans (e.g. col("ID") with schema "id") resolve (issue #524).
+    pub(crate) fn with_case_insensitive_column_resolution(self) -> Self {
+        DataFrame {
+            inner: self.inner,
+            case_sensitive: false,
+            alias: self.alias,
+        }
+    }
+
     /// Create an empty DataFrame
     pub fn empty() -> Self {
         DataFrame {
