@@ -11,7 +11,7 @@ pub fn parse_sql(query: &str) -> Result<Statement, PolarsError> {
     let stmts = Parser::parse_sql(&dialect, query).map_err(|e| {
         PolarsError::InvalidOperation(
             format!(
-                "SQL parse error: {}. Hint: only SELECT and CREATE SCHEMA/DATABASE/DROP TABLE are supported.",
+                "SQL parse error: {}. Hint: only SELECT and CREATE SCHEMA/DATABASE/DROP TABLE/VIEW/SCHEMA are supported.",
                 e
             )
             .into(),
@@ -31,13 +31,16 @@ pub fn parse_sql(query: &str) -> Result<Statement, PolarsError> {
         Statement::Query(_) => {}
         Statement::CreateSchema { .. } | Statement::CreateDatabase { .. } => {}
         Statement::Drop {
-            object_type: sqlparser::ast::ObjectType::Table | sqlparser::ast::ObjectType::View,
+            object_type:
+                sqlparser::ast::ObjectType::Table
+                | sqlparser::ast::ObjectType::View
+                | sqlparser::ast::ObjectType::Schema,
             ..
         } => {}
         _ => {
             return Err(PolarsError::InvalidOperation(
                 format!(
-                    "SQL: only SELECT, CREATE SCHEMA/DATABASE, and DROP TABLE/VIEW are supported, got {:?}.",
+                    "SQL: only SELECT, CREATE SCHEMA/DATABASE, and DROP TABLE/VIEW/SCHEMA are supported, got {:?}.",
                     stmt
                 )
                 .into(),
