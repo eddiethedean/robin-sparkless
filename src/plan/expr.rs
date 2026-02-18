@@ -513,7 +513,8 @@ fn lit_as_usize(v: &Value) -> Result<usize, PlanExprError> {
 }
 
 /// Extract values for isin from JSON array. Each element: {"lit": v} or plain v. Returns Expr for is_in.
-/// When arr is empty or parses to no values, returns Ok(None) — caller should use lit(false) (issue #518).
+/// When arr is empty or parses to no values (e.g. all nulls), returns Ok(None) — caller uses lit(false)
+/// so that col.isin([]) is false for all rows (PySpark parity; issue #518).
 fn try_values_for_isin(arr: &[Value]) -> Result<Option<Expr>, PlanExprError> {
     if arr.is_empty() {
         return Ok(None);
