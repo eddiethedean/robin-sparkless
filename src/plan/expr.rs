@@ -351,6 +351,23 @@ pub fn expr_from_value(v: &Value) -> Result<Expr, PlanExprError> {
                 }
                 return Ok(col.expr().clone());
             }
+            // #547: Sparkless may send string/JSON functions as op with "args" (same semantics as fn)
+            "translate" | "substring_index" | "substringIndex" | "levenshtein" | "soundex"
+            | "crc32" | "xxhash64" | "get_json_object" | "getJsonObject" | "json_tuple"
+            | "jsonTuple" | "regexp_extract_all" | "regexpExtractAll" => {
+                let args = obj
+                    .get("args")
+                    .and_then(Value::as_array)
+                    .ok_or_else(|| PlanExprError(format!("op '{op}' requires 'args' array")))?;
+                let fn_name = match op {
+                    "substringIndex" => "substring_index",
+                    "getJsonObject" => "get_json_object",
+                    "jsonTuple" => "json_tuple",
+                    "regexpExtractAll" => "regexp_extract_all",
+                    other => other,
+                };
+                return expr_from_fn(fn_name, args);
+            }
             _ => {
                 return Err(PlanExprError(format!("unsupported expression op: {op}")));
             }
@@ -965,9 +982,9 @@ fn expr_from_fn(name: &str, args: &[Value]) -> Result<Expr, PlanExprError> {
         days, decode, degrees, e, element_at, elt, encode, endswith, equal_null, exp,
         explode_outer, extract, factorial, find_in_set, floor, format_number, format_string,
         from_unixtime, from_utc_timestamp, get, get_json_object, getbit, greatest, hash, hex, hour,
-        hypot, ilike, initcap, input_file_name, instr, isnan, last_day, lcase, least, left, length,
-        like, lit_str, ln, localtimestamp, locate, log, log10, log1p, log2, lower, lpad, make_date,
-        make_interval, make_timestamp, make_timestamp_ntz, mask, md5, minute,
+        hypot, ilike, initcap, input_file_name, instr, isnan, json_tuple, last_day, lcase, least,
+        left, length, like, lit_str, ln, localtimestamp, locate, log, log10, log1p, log2, lower,
+        lpad, make_date, make_interval, make_timestamp, make_timestamp_ntz, mask, md5, minute,
         monotonically_increasing_id, month, months_between, nanvl, negate, negative, next_day, now,
         nullif, nvl, nvl2, octet_length, overlay, parse_url, pi, pmod, positive, pow, power,
         quarter, radians, raise_error, rand, randn, regexp, regexp_count, regexp_extract,
@@ -1389,6 +1406,22 @@ fn expr_from_fn(name: &str, args: &[Value]) -> Result<Expr, PlanExprError> {
             let pair_delim: Option<String> = arg_lit_opt_str(args, 1)?;
             let key_value_delim: Option<String> = arg_lit_opt_str(args, 2)?;
             Ok(str_to_map(&c, pair_delim.as_deref(), key_value_delim.as_deref()).into_expr())
+        }
+        "get_json_object" => {
+            require_args(name, args, 2)?;
+            let c = expr_to_column(arg_expr(args, 0)?);
+            let path = arg_lit_str(args, 1)?;
+            Ok(get_json_object(&c, &path).into_expr())
+        }
+        "json_tuple" => {
+            require_args_min(name, args, 2)?;
+            let c = expr_to_column(arg_expr(args, 0)?);
+            let keys: Vec<String> = args[1..]
+                .iter()
+                .map(lit_as_string)
+                .collect::<Result<Vec<_>, _>>()?;
+            let key_refs: Vec<&str> = keys.iter().map(String::as_str).collect();
+            Ok(json_tuple(&c, &key_refs).into_expr())
         }
         "isin" => {
             // {"fn": "isin", "args": [col_expr, lit1, lit2, ...]} - col.isin(1, 3)
