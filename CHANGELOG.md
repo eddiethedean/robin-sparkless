@@ -13,7 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-(none yet)
+- **#578 – create_map() with zero arguments returns {} not null (PySpark parity)** — `collect_as_json_rows` now serializes List and Struct AnyValues; empty map column yields JSON `{}` per row instead of `null`. Fixes #578.
 
 ### Planned
 
