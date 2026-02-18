@@ -3,7 +3,7 @@ members = []
 
 [package]
 name = "robin-sparkless"
-version = "0.11.6"
+version = "0.11.7"
 edition = "2021"
 description = "PySpark-like DataFrame API in Rust on Polars; no JVM."
 readme = "README.md"
@@ -12,6 +12,12 @@ repository = "https://github.com/eddiethedean/robin-sparkless"
 keywords = ["pyspark", "polars", "dataframe", "spark", "etl"]
 categories = ["data-structures", "development-tools"]
 authors = ["Robin Sparkless contributors"]
+
+# docs.rs builds with rustc nightly; if the build fails with an ICE (e.g. in polars-core),
+# it is a compiler bug. Build docs locally: cargo doc --open
+[package.metadata.docs.rs]
+all-features = false
+features = ["sql"]
 
 [lib]
 name = "robin_sparkless"
