@@ -351,11 +351,12 @@ pub fn expr_from_value(v: &Value) -> Result<Expr, PlanExprError> {
                 }
                 return Ok(col.expr().clone());
             }
-            // #547: Sparkless may send string/JSON functions as op with "args" (same semantics as fn)
+            // #547, #554: Sparkless may send functions as op with "args" (same semantics as fn)
             "translate" | "substring_index" | "substringIndex" | "levenshtein" | "soundex"
             | "crc32" | "xxhash64" | "get_json_object" | "getJsonObject" | "json_tuple"
             | "jsonTuple" | "regexp_extract_all" | "regexpExtractAll" | "date_trunc"
-            | "dateTrunc" | "to_date" | "toDate" | "format_string" | "formatString" | "log" => {
+            | "dateTrunc" | "to_date" | "toDate" | "format_string" | "formatString" | "log"
+            | "explode" | "explode_outer" | "explodeOuter" => {
                 let args = obj
                     .get("args")
                     .and_then(Value::as_array)
@@ -368,6 +369,7 @@ pub fn expr_from_value(v: &Value) -> Result<Expr, PlanExprError> {
                     "dateTrunc" => "date_trunc",
                     "toDate" => "to_date",
                     "formatString" => "format_string",
+                    "explodeOuter" => "explode_outer",
                     other => other,
                 };
                 return expr_from_fn(fn_name, args);
