@@ -13,15 +13,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **#591 – SparkSession.stop() method (PySpark parity)** — Added support for calling `spark.stop()` in teardown code. `SparkSession.stop()` now clears session-scoped catalogs and UDF registry (best-effort), and the plan interpreter also accepts a `"stop"` op so language bindings can invoke it without raising an attribute/method error. Fixes #591.
-- **#581 – isin() on Int64 column with literal list (PySpark parity)** — Filtering with `col("value").isin(1, 3)` when `value` is Int64 no longer fails with "cannot check for String values in Int64 data". The plan now builds an Int64 series for integer-only value lists and Float64 for float-only lists, so numeric columns match correctly. Fixes #581.
-- **#580 – Join with column expression when both tables have same key name (PySpark parity)** — Joining on a column that has the same name on both sides (e.g. `emp.join(dept, emp.dept_id == dept.dept_id)`) no longer fails with "duplicate: column with name 'dept_id' has more than one occurrence". Right join keys are renamed to temp names and the join uses `left_on`/`right_on` so Polars produces a single key column. Fixes #580.
-- **#579 – first() after orderBy returns first row in sort order (PySpark parity)** — `DataFrame.first()` now uses `limit(1)` then collect so that the first row is the first in the applied plan (e.g. after `orderBy(col)`), not the first in storage/input order. Fixes #579.
-- **#578 – create_map() with zero arguments returns {} not null (PySpark parity)** — `collect_as_json_rows` now serializes List and Struct AnyValues; empty map column yields JSON `{}` per row instead of `null`. Fixes #578.
+(none yet)
 
-### Planned
+## [0.11.9] - 2026-02-18
 
-- **Phase 26 – Publish crate**: Prepare and publish robin-sparkless to crates.io. See [ROADMAP.md](docs/ROADMAP.md) for details.
+### Fixed
+
+- **#590 – WHERE LIKE and IN (PySpark parity)** — SQL WHERE clause now supports `LIKE` (and `NOT LIKE`) with string-literal pattern and `IN` / `NOT IN` with literal lists. Fixes #590.
+- **#589 – HAVING arbitrary aggregates (PySpark parity)** — HAVING clause now accepts arbitrary aggregate expressions (e.g. `HAVING AVG(salary) > 55000`). Aggregate calls in HAVING are added to the aggregation and substituted with result columns. Fixes #589.
+- **#588 – GROUP BY expression (PySpark parity)** — GROUP BY now accepts expressions (e.g. `GROUP BY (age > 30)`) in addition to column names. Fixes #588.
+- **#587 – SQL scalar aggregation (PySpark parity)** — `SELECT AVG(salary) FROM t` (no GROUP BY) now works; projection of only aggregate functions is executed as scalar aggregation. Fixes #587.
+- **#583 – concat and contains as expression ops (PySpark parity)** — Plan interpreter now accepts `concat` and `contains` when sent as op with args (e.g. `F.concat(a, b)`, `F.col("name").contains("lic")`). Fixes #583.
+- **#582 – regexp_extract literal pattern (PySpark parity)** — Plan interpreter now accepts bare string and number literals for regexp_extract args (pattern and group index), not only `{"lit": ...}`. Fixes #582.
 
 ## [0.11.8] - 2026-02-18
 
