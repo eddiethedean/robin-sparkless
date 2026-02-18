@@ -79,6 +79,27 @@ mod tests {
     }
 
     #[test]
+    fn test_sql_group_by_expression() {
+        // Issue #588: GROUP BY (age > 30) — expression instead of column name.
+        let spark = SparkSession::builder().app_name("test").get_or_create();
+        let df = spark
+            .create_dataframe(
+                vec![
+                    (1, 25, "a".to_string()),
+                    (2, 35, "b".to_string()),
+                    (3, 28, "c".to_string()),
+                ],
+                vec!["id", "age", "name"],
+            )
+            .unwrap();
+        spark.create_or_replace_temp_view("t", df);
+        let result = spark
+            .sql("SELECT COUNT(*) as count FROM t GROUP BY (age > 30)")
+            .unwrap();
+        assert_eq!(result.count().unwrap(), 2);
+    }
+
+    #[test]
     fn test_sql_scalar_aggregate() {
         // Issue #587: SELECT AVG(salary) FROM t (no GROUP BY) — scalar aggregation.
         let spark = SparkSession::builder().app_name("test").get_or_create();
