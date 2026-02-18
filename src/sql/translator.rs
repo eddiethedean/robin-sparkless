@@ -166,6 +166,11 @@ fn translate_query(
         } else {
             df = grouped.agg(agg_exprs)?;
         }
+    } else if projection_is_scalar_aggregate(&body.projection) {
+        // SELECT AVG(salary) FROM t (no GROUP BY) — scalar aggregation (issue #587).
+        let agg_exprs = projection_to_agg_exprs(&body.projection, &[], &df)?;
+        let pl_df = df.lazy_frame().select(agg_exprs).collect()?;
+        df = DataFrame::from_polars_with_options(pl_df, df.case_sensitive);
     } else {
         df = apply_projection(&df, &body.projection, session)?;
     }
@@ -743,6 +748,37 @@ fn push_agg_function(
     let name = alias_override.unwrap_or_else(|| default_alias.as_str());
     agg.push(expr.alias(name));
     Ok(())
+}
+
+/// True if the projection contains only aggregate function calls (COUNT, SUM, AVG, MIN, MAX).
+/// Used for scalar aggregation: SELECT AVG(salary) FROM t (issue #587).
+fn projection_is_scalar_aggregate(projection: &[SelectItem]) -> bool {
+    use sqlparser::ast::SelectItem;
+    if projection.is_empty() {
+        return false;
+    }
+    for item in projection {
+        let is_agg = match item {
+            SelectItem::UnnamedExpr(SqlExpr::Function(f)) => is_agg_function_name(f),
+            SelectItem::ExprWithAlias {
+                expr: SqlExpr::Function(f),
+                ..
+            } => is_agg_function_name(f),
+            _ => false,
+        };
+        if !is_agg {
+            return false;
+        }
+    }
+    true
+}
+
+fn is_agg_function_name(func: &Function) -> bool {
+    let name = func.name.0.last().map(|i| i.value.as_str()).unwrap_or("");
+    matches!(
+        name.to_uppercase().as_str(),
+        "COUNT" | "SUM" | "AVG" | "MEAN" | "MIN" | "MAX"
+    )
 }
 
 fn projection_to_agg_exprs(
