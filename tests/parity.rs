@@ -5861,6 +5861,38 @@ fn plan_filter_isin_empty() {
     assert_eq!(rows_out.len(), 0, "col.isin([]) should match 0 rows");
 }
 
+/// Int64 column isin(1, 3) must not fail with "cannot check for String values in Int64 data" (issue #581).
+#[test]
+fn plan_filter_isin_int64_column() {
+    use robin_sparkless::plan;
+    use serde_json::json;
+
+    let spark = SparkSession::builder()
+        .app_name("plan_filter_isin_int64")
+        .get_or_create();
+
+    let schema = vec![("value".to_string(), "bigint".to_string())];
+    let rows = vec![vec![json!(1)], vec![json!(2)], vec![json!(3)]];
+
+    let plan = vec![json!({
+        "op": "filter",
+        "payload": {"op": "isin", "left": {"col": "value"}, "right": {"lit": [1, 3]}}
+    })];
+
+    let result = plan::execute_plan(&spark, rows, schema, &plan).unwrap();
+    let rows_out = result.collect_as_json_rows().unwrap();
+    assert_eq!(
+        rows_out.len(),
+        2,
+        "col(\"value\").isin(1, 3) should match 2 rows"
+    );
+    let values: std::collections::HashSet<i64> = rows_out
+        .iter()
+        .map(|r| r.get("value").and_then(|v| v.as_i64()).unwrap())
+        .collect();
+    assert_eq!(values, [1, 3].into_iter().collect());
+}
+
 /// Empty DataFrame with schema via execute_plan: saveAsTable(Overwrite) then append (issue #509).
 /// Mirrors Sparkless flow: createDataFrame([], schema) -> saveAsTable -> table -> append -> table.
 #[test]
