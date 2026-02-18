@@ -379,12 +379,12 @@ pub fn expr_from_value(v: &Value) -> Result<Expr, PlanExprError> {
                 }
                 return Ok(col.expr().clone());
             }
-            // #547, #554: Sparkless may send functions as op with "args" (same semantics as fn)
+            // #547, #554, #583: Sparkless may send functions as op with "args" (same semantics as fn)
             "translate" | "substring_index" | "substringIndex" | "levenshtein" | "soundex"
             | "crc32" | "xxhash64" | "get_json_object" | "getJsonObject" | "json_tuple"
             | "jsonTuple" | "regexp_extract_all" | "regexpExtractAll" | "date_trunc"
             | "dateTrunc" | "to_date" | "toDate" | "format_string" | "formatString" | "log"
-            | "explode" | "explode_outer" | "explodeOuter" => {
+            | "explode" | "explode_outer" | "explodeOuter" | "concat" | "contains" => {
                 let args = obj
                     .get("args")
                     .and_then(Value::as_array)
@@ -2842,6 +2842,26 @@ mod tests {
         let v = json!({
             "fn": "concat",
             "args": [{"col": "first"}, {"lit": " "}, {"col": "last"}]
+        });
+        let _ = expr_from_value(&v).unwrap();
+    }
+
+    /// Issue #583: op form of concat (F.concat(a, b)).
+    #[test]
+    fn test_concat_op() {
+        let v = json!({
+            "op": "concat",
+            "args": [{"col": "a"}, {"col": "b"}]
+        });
+        let _ = expr_from_value(&v).unwrap();
+    }
+
+    /// Issue #583: op form of contains (F.col("name").contains("lic")).
+    #[test]
+    fn test_contains_op() {
+        let v = json!({
+            "op": "contains",
+            "args": [{"col": "name"}, {"lit": "lic"}]
         });
         let _ = expr_from_value(&v).unwrap();
     }
