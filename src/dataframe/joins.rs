@@ -3,6 +3,7 @@
 use super::DataFrame;
 use crate::type_coercion::find_common_type;
 use polars::prelude::Expr;
+use polars::prelude::IntoLazy;
 use polars::prelude::JoinType as PlJoinType;
 use polars::prelude::PolarsError;
 
@@ -39,13 +40,9 @@ pub fn join(
     let right_key_names: Vec<String> = on
         .iter()
         .map(|key| {
-            right
-                .resolve_column_name(key)
-                .map_err(|_| {
-                    PolarsError::ComputeError(
-                        format!("join key '{key}' not found on right").into(),
-                    )
-                })
+            right.resolve_column_name(key).map_err(|_| {
+                PolarsError::ComputeError(format!("join key '{key}' not found on right").into())
+            })
         })
         .collect::<Result<Vec<_>, PolarsError>>()?;
 
@@ -53,12 +50,16 @@ pub fn join(
     let right_join_key_temps: Vec<String> = (0..on.len())
         .map(|i| format!("__right_join_key_{i}"))
         .collect();
-    let right_has_same_key_names = on.iter()
+    let right_has_same_key_names = on
+        .iter()
         .zip(right_key_names.iter())
         .any(|(l, r)| *l == r.as_str());
     if right_has_same_key_names {
         right_lf = right_lf.rename(
-            right_key_names.iter().map(|s| s.as_str()).collect::<Vec<_>>(),
+            right_key_names
+                .iter()
+                .map(|s| s.as_str())
+                .collect::<Vec<_>>(),
             right_join_key_temps.clone(),
             true,
         );
@@ -107,10 +108,7 @@ pub fn join(
             .map(|s| col(s.as_str()))
             .collect()
     } else {
-        right_key_names
-            .iter()
-            .map(|s| col(s.as_str()))
-            .collect()
+        right_key_names.iter().map(|s| col(s.as_str())).collect()
     };
 
     let mut joined = if right_has_same_key_names {
@@ -129,9 +127,104 @@ pub fn join(
             .coalesce(JoinCoalesce::CoalesceColumns)
             .finish()
     };
+
+    // When we renamed right keys, result may have __right_join_key_* (e.g. Right join); alias them back to key names.
+    // For Right/Outer, lazy collect_schema() can report the left key name while execution outputs __right_join_key_*,
+    // so we use the executed schema and return an eager DataFrame to avoid schema/plan mismatch.
+    if right_has_same_key_names && matches!(how, JoinType::Right | JoinType::Outer) {
+        let pl_df = joined.clone().collect()?;
+        let schema = pl_df.schema();
+        let has_temp = schema
+            .iter_names()
+            .any(|n| n.to_string().starts_with("__right_join_key_"));
+        if has_temp {
+            let exprs: Vec<polars::prelude::Expr> = schema
+                .iter_names()
+                .map(|name| {
+                    let s = name.to_string();
+                    for (i, key) in on.iter().enumerate() {
+                        if s == format!("__right_join_key_{i}") {
+                            return col(s.as_str()).alias(*key);
+                        }
+                    }
+                    col(s.as_str())
+                })
+                .collect();
+            let fixed = pl_df.lazy().select(exprs.as_slice()).collect()?;
+            // Reorder to PySpark order: keys, left non-keys, right non-keys.
+            let left_names = left.columns()?;
+            let right_names = right.columns()?;
+            let fixed_names_set: std::collections::HashSet<String> = fixed
+                .get_column_names()
+                .iter()
+                .map(|s| s.to_string())
+                .collect();
+            let mut order: Vec<String> = Vec::new();
+            for k in on {
+                order.push((*k).to_string());
+            }
+            for n in &left_names {
+                if !on_set.contains(n.as_str()) {
+                    order.push(n.clone());
+                }
+            }
+            for n in &right_names {
+                let use_name = if left_names.iter().any(|l| l == n) {
+                    format!("{n}_right")
+                } else {
+                    n.clone()
+                };
+                if fixed_names_set.contains(&use_name) {
+                    order.push(use_name);
+                }
+            }
+            let fixed_names: Vec<String> = fixed
+                .get_column_names()
+                .iter()
+                .map(|s| s.to_string())
+                .collect();
+            if order.len() == fixed_names.len()
+                && order.iter().all(|o| fixed_names.iter().any(|f| f == o))
+            {
+                let reordered = fixed.select(order.iter().map(|s| s.as_str()))?;
+                return Ok(super::DataFrame::from_polars_with_options(
+                    reordered,
+                    case_sensitive,
+                ));
+            }
+            return Ok(super::DataFrame::from_polars_with_options(
+                fixed,
+                case_sensitive,
+            ));
+        }
+    }
+
+    // When we renamed right keys (non-Right/Outer), alias temp key columns if present in lazy schema.
+    if right_has_same_key_names {
+        let result_schema = joined.collect_schema()?;
+        let has_temp_keys = result_schema
+            .iter_names()
+            .any(|n| n.to_string().starts_with("__right_join_key_"));
+        if has_temp_keys {
+            let exprs: Vec<polars::prelude::Expr> = result_schema
+                .iter_names()
+                .map(|name| {
+                    let s = name.to_string();
+                    for (i, key) in on.iter().enumerate() {
+                        if s == format!("__right_join_key_{i}") {
+                            return col(s.as_str()).alias(*key);
+                        }
+                    }
+                    col(s.as_str())
+                })
+                .collect();
+            joined = joined.select(exprs.as_slice());
+        }
+    }
+
     // For Right/Outer, reorder columns: keys, left non-keys, right non-keys (PySpark order).
-    // When we renamed right keys (right_has_same_key_names), result schema may differ so we only reorder when we did not rename.
-    let result_lf = if matches!(how, JoinType::Right | JoinType::Outer) && !right_has_same_key_names {
+    let result_lf = if matches!(how, JoinType::Right | JoinType::Outer) && !right_has_same_key_names
+    {
         let left_names = left.columns()?;
         let right_names = right.columns()?;
         let result_schema = joined.collect_schema()?;
@@ -313,9 +406,16 @@ mod tests {
         let left = spark.create_dataframe_from_polars(emp);
         let right = spark.create_dataframe_from_polars(dept);
         let out = join(&left, &right, vec!["dept_id"], JoinType::Inner, false).unwrap();
-        assert_eq!(out.count().unwrap(), 3, "Alice, Bob, Charlie match dept 10, 20");
+        assert_eq!(
+            out.count().unwrap(),
+            3,
+            "Alice, Bob, Charlie match dept 10, 20"
+        );
         let cols = out.columns().unwrap();
-        assert!(cols.iter().any(|c| c == "dept_id"), "one dept_id column in result");
+        assert!(
+            cols.iter().any(|c| c == "dept_id"),
+            "one dept_id column in result"
+        );
         assert!(cols.iter().any(|c| c == "location"));
     }
 }
