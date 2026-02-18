@@ -371,31 +371,28 @@ fn window_col_from_value(x: &Value) -> Option<String> {
 
 /// Build row_number().over(partition_by) from {"partition_by": ["col", ...] or [{"col":"..."}, ...]} or
 /// {"order_by": ["val"] or [{"col": "val", "asc": true}, ...]} (issue #517).
+/// Empty partition_by and order_by are allowed (PySpark parity; issue #520): single partition, no ordering.
 fn expr_from_row_number_window(v: &Value) -> Result<Expr, PlanExprError> {
     let obj = v
         .as_object()
         .ok_or_else(|| PlanExprError("row_number window must be object".to_string()))?;
     let order_arr = obj.get("order_by").and_then(Value::as_array);
     let part_arr = obj.get("partition_by").and_then(Value::as_array);
-    // Prefer order_by for order column; fall back to partition_by
+    // Prefer order_by for order column; fall back to partition_by (issue #517)
     let order_cols: Vec<String> = order_arr
         .or(part_arr)
-        .ok_or_else(|| {
-            PlanExprError("row_number window must have partition_by or order_by array".to_string())
-        })?
-        .iter()
-        .filter_map(window_col_from_value)
-        .collect();
-    if order_cols.is_empty() {
-        return Err(PlanExprError(
-            "row_number window order_by/partition_by must be non-empty".to_string(),
-        ));
-    }
+        .map(|a| a.iter().filter_map(window_col_from_value).collect())
+        .unwrap_or_default();
     let part_cols: Vec<String> = part_arr
         .map(|a| a.iter().filter_map(window_col_from_value).collect())
         .unwrap_or_default();
     let part_refs: Vec<&str> = part_cols.iter().map(|s| s.as_str()).collect();
-    let order_col = crate::Column::new(order_cols[0].clone());
+    // When both are empty, use literal column for row_number (single partition; issue #520)
+    let order_col = if order_cols.is_empty() {
+        crate::Column::from_expr(lit(1i32), None)
+    } else {
+        crate::Column::new(order_cols[0].clone())
+    };
     let rn = order_col.row_number(false).over(&part_refs);
     Ok(rn.into_expr())
 }
@@ -2395,6 +2392,23 @@ mod tests {
             }
         });
         let _ = expr_from_value(&v).unwrap();
+    }
+
+    /// row_number() with empty partition_by and order_by (single partition; issue #520).
+    #[test]
+    fn test_row_number_window_empty() {
+        let v = json!({
+            "type": "window",
+            "fn": "row_number",
+            "window": {}
+        });
+        let _ = expr_from_value(&v).unwrap();
+        let v2 = json!({
+            "fn": "row_number",
+            "args": [],
+            "window": {"partition_by": [], "order_by": []}
+        });
+        let _ = expr_from_value(&v2).unwrap();
     }
 
     #[test]
