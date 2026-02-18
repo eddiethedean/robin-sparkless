@@ -827,10 +827,14 @@ fn arg_expr(args: &[Value], i: usize) -> Result<Expr, PlanExprError> {
     expr_from_value(v)
 }
 
+/// Accept string literal in either form: bare JSON string or {"lit": "..."} (issue #582).
 fn arg_lit_str(args: &[Value], i: usize) -> Result<String, PlanExprError> {
     let v = args
         .get(i)
         .ok_or_else(|| PlanExprError(format!("fn requires string literal at index {i}")))?;
+    if let Some(s) = v.as_str() {
+        return Ok(s.to_string());
+    }
     lit_as_string(v)
 }
 
@@ -862,10 +866,26 @@ fn arg_lit_f64(args: &[Value], i: usize) -> Result<f64, PlanExprError> {
     lit_as_f64(v)
 }
 
+/// Accept non-negative integer in either form: bare JSON number or {"lit": n} (issue #582).
 fn arg_lit_usize(args: &[Value], i: usize) -> Result<usize, PlanExprError> {
     let v = args
         .get(i)
         .ok_or_else(|| PlanExprError(format!("fn requires non-negative integer at index {i}")))?;
+    if let Some(n) = v.as_i64() {
+        if n < 0 {
+            return Err(PlanExprError(
+                "literal must be non-negative for usize".to_string(),
+            ));
+        }
+        return n
+            .try_into()
+            .map_err(|_| PlanExprError("literal out of usize range".to_string()));
+    }
+    if let Some(n) = v.as_u64() {
+        return n
+            .try_into()
+            .map_err(|_| PlanExprError("literal out of usize range".to_string()));
+    }
     lit_as_usize(v)
 }
 
@@ -2679,6 +2699,16 @@ mod tests {
             "left": {"col": "s"},
             "pattern": {"lit": r"(\w+)"},
             "group": {"lit": 1}
+        });
+        let _ = expr_from_value(&v).unwrap();
+    }
+
+    /// Issue #582: fn form with bare string and number (Sparkless may send literals without {"lit": ...}).
+    #[test]
+    fn test_regexp_extract_fn_bare_literals() {
+        let v = json!({
+            "fn": "regexp_extract",
+            "args": [{"col": "s"}, r"(\w+)", 1]
         });
         let _ = expr_from_value(&v).unwrap();
     }
