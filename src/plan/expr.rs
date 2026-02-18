@@ -2198,6 +2198,18 @@ fn expr_from_fn_rest(name: &str, args: &[Value]) -> Result<Expr, PlanExprError> 
             let key = expr_to_column(arg_expr(args, 1)?);
             Ok(get(&map_col, &key).into_expr())
         }
+        "get_item" => {
+            // Array: get_item(col, 0); map: get_item(col, "key") (issue #522)
+            require_args(name, args, 2)?;
+            let col_c = expr_to_column(arg_expr(args, 0)?);
+            let second = &args[1];
+            if let Some(idx) = second.get("lit").and_then(|v| v.as_i64()) {
+                Ok(col_c.get_item(idx).into_expr())
+            } else {
+                let key = expr_to_column(arg_expr(args, 1)?);
+                Ok(get(&col_c, &key).into_expr())
+            }
+        }
         "nvl2" => {
             require_args(name, args, 3)?;
             let col1 = expr_to_column(arg_expr(args, 0)?);
@@ -2347,6 +2359,14 @@ mod tests {
         });
         let expr2 = expr_from_value(&v2).unwrap();
         assert!(matches!(expr2, Expr::Literal(_)));
+    }
+
+    #[test]
+    fn test_get_item_fn() {
+        let v = json!({"fn": "get_item", "args": [{"col": "arr"}, {"lit": 0}]});
+        let _ = expr_from_value(&v).unwrap();
+        let v2 = json!({"fn": "get_item", "args": [{"col": "m"}, {"lit": "key"}]});
+        let _ = expr_from_value(&v2).unwrap();
     }
 
     #[test]
