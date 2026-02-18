@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **#579 – first() after orderBy returns first row in sort order (PySpark parity)** — `DataFrame.first()` now uses `limit(1)` then collect so that the first row is the first in the applied plan (e.g. after `orderBy(col)`), not the first in storage/input order. Fixes #579.
 - **#578 – create_map() with zero arguments returns {} not null (PySpark parity)** — `collect_as_json_rows` now serializes List and Struct AnyValues; empty map column yields JSON `{}` per row instead of `null`. Fixes #578.
 
 ### Planned
