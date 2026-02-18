@@ -5,8 +5,10 @@
 
 use super::DataFrame;
 use crate::functions::SortOrder;
+use crate::type_coercion::find_common_type;
 use polars::prelude::{
-    col, Expr, IntoLazy, IntoSeries, NamedFrom, PolarsError, Series, UnionArgs, UniqueKeepStrategy,
+    col, DataType, Expr, IntoLazy, IntoSeries, NamedFrom, PolarsError, Series, UnionArgs,
+    UniqueKeepStrategy,
 };
 use std::collections::HashMap;
 
@@ -173,13 +175,52 @@ pub fn order_by_exprs(
 }
 
 /// Union (unionAll): stack another DataFrame vertically. Schemas must match (same columns, same order).
+/// When column types differ (e.g. String vs Int64), both sides are coerced to a common type (PySpark parity #551).
 pub fn union(
     left: &DataFrame,
     right: &DataFrame,
     case_sensitive: bool,
 ) -> Result<DataFrame, PolarsError> {
-    let lf1 = left.lazy_frame();
-    let lf2 = right.lazy_frame();
+    let left_names = left.columns()?;
+    let right_names = right.columns()?;
+    if left_names != right_names {
+        return Err(PolarsError::InvalidOperation(
+            format!(
+                "union: column order/names must match. Left: {:?}, Right: {:?}",
+                left_names, right_names
+            )
+            .into(),
+        ));
+    }
+    let mut left_exprs: Vec<Expr> = Vec::with_capacity(left_names.len());
+    let mut right_exprs: Vec<Expr> = Vec::with_capacity(right_names.len());
+    for name in &left_names {
+        let resolved_left = left.resolve_column_name(name)?;
+        let resolved_right = right.resolve_column_name(name)?;
+        let left_dtype = left.get_column_dtype(name).unwrap_or(DataType::Null);
+        let right_dtype = right.get_column_dtype(name).unwrap_or(DataType::Null);
+        let target = if left_dtype == DataType::Null {
+            right_dtype.clone()
+        } else if right_dtype == DataType::Null || left_dtype == right_dtype {
+            left_dtype.clone()
+        } else {
+            find_common_type(&left_dtype, &right_dtype)?
+        };
+        let left_expr = if left_dtype == target {
+            col(resolved_left.as_str())
+        } else {
+            col(resolved_left.as_str()).cast(target.clone())
+        };
+        let right_expr = if right_dtype == target {
+            col(resolved_right.as_str())
+        } else {
+            col(resolved_right.as_str()).cast(target)
+        };
+        left_exprs.push(left_expr.alias(name.as_str()));
+        right_exprs.push(right_expr.alias(name.as_str()));
+    }
+    let lf1 = left.lazy_frame().select(&left_exprs);
+    let lf2 = right.lazy_frame().select(&right_exprs);
     let out = polars::prelude::concat([lf1, lf2], UnionArgs::default())?;
     Ok(super::DataFrame::from_lazy_with_options(
         out,
