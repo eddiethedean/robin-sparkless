@@ -1440,8 +1440,9 @@ pub fn cast(column: &Column, type_name: &str) -> Result<Column, String> {
     if dtype == DataType::Int32 || dtype == DataType::Int64 {
         use polars::prelude::GetOutput;
         let target = dtype.clone();
+        // cast: strict=true – invalid strings should error (PySpark parity).
         let expr = column.expr().clone().map(
-            move |col| crate::udfs::apply_string_to_int(col, false, target.clone()),
+            move |col| crate::udfs::apply_string_to_int(col, true, target.clone()),
             GetOutput::from_type(dtype),
         );
         return Ok(Column::from_expr(expr, None));
