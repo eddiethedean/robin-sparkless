@@ -39,6 +39,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Phase 26 – Publish crate**: Prepare and publish robin-sparkless to crates.io. See [ROADMAP.md](docs/ROADMAP.md) for details.
 
+## [0.11.7] - 2026-02-18
+
+### Added
+
+- **#521 – Window functions in plan execution** — Plan interpreter supports `rank`, `dense_rank`, `percent_rank`, `ntile`, `lag`, `lead`, `sum`, and `avg` in the same fn+window path as `row_number`. Enables Sparkless plans with these window functions. Fixes #521.
+- **#517 – Window expressions fn/function key** — Plan interpreter accepts `"function"` as alias for `"fn"` in window expressions (Sparkless may send either). Empty `args` allowed when `window` is present. Fixes #517.
+- **#522 – get_item in plan execution** — Plan expression interpreter supports `get_item` fn: `[col, index_or_key]`; integer literal → array index, otherwise map key. Fixes #522.
+- **#527 – struct/named_struct in plan execution** — Plan interpreter supports `struct` (args = column exprs) and `named_struct` (alternating name literal + value). Fixes #527.
+- **#526 – SQL DROP SCHEMA / DROP DATABASE** — Parser and translator support `DROP SCHEMA` / `DROP DATABASE`; session exposes `drop_database`. Fixes #526.
+
+### Fixed
+
+- **#520 – row_number() with empty partition_by/order_by** — Window spec allows empty `order_by` and `partition_by` (single partition, no ordering; PySpark parity). Fixes #520.
+- **#523 – regexp_extract non-literal pattern/idx** — Clearer errors when pattern or group index are not literals (column refs not supported). Fixes #523.
+- **#528 – regexp_replace op form** — Plan interpreter accepts op form `regexp_replace` (left/pattern/replacement or args array) in addition to fn form. Fixes #528.
+- **#524 – Case sensitivity in plan execution** — Plan execution always uses case-insensitive column resolution so `col("ID")` resolves when schema has `"id"`. Fixes #524.
+- **#525 – isin mixed types** — isin value list is produced as string series so string column with numeric literals (e.g. `col("s").isin(1, 2)`) works. Fixes #525.
+- **#519 – Empty DataFrame + parquet saveAsTable** — Documented that empty rows + non-empty schema yields an empty DataFrame with that schema for `write.format("parquet").saveAsTable()` and append. Fixes #519.
+
 ## [0.11.6] - 2026-02-17
 
 ### Fixed
