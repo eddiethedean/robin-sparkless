@@ -176,21 +176,25 @@ pub fn expr_from_value(v: &Value) -> Result<Expr, PlanExprError> {
             "isin" => {
                 // {"op": "isin", "left": <col_expr>, "right": <list_expr>} or
                 // {"op": "isin", "left": <col_expr>, "values": [<lit>, ...]}
+                // Empty list -> lit(false) for all rows (issue #518)
                 let left_v = obj
                     .get("left")
                     .ok_or_else(|| PlanExprError("op 'isin' requires 'left'".to_string()))?;
                 let left_expr = expr_from_value(left_v)?;
-                let values_expr =
+                let values_opt =
                     if let Some(values_arr) = obj.get("values").and_then(Value::as_array) {
-                        values_from_json_array(values_arr)?
+                        try_values_for_isin(values_arr)?
                     } else if let Some(right_v) = obj.get("right") {
-                        values_from_plan_value(right_v)?
+                        try_values_from_plan_value(right_v)?
                     } else {
                         return Err(PlanExprError(
                             "op 'isin' requires 'right' or 'values'".to_string(),
                         ));
                     };
-                return Ok(left_expr.is_in(values_expr));
+                return Ok(match values_opt {
+                    None => lit(false),
+                    Some(values_expr) => left_expr.is_in(values_expr),
+                });
             }
             "getItem" => {
                 // {"op": "getItem", "left": <col_expr>, "right": <index_lit>} - PySpark 0-based
@@ -352,8 +356,21 @@ pub fn expr_from_value(v: &Value) -> Result<Expr, PlanExprError> {
     ))
 }
 
-/// Build row_number().over(partition_by) from {"partition_by": ["col", ...]} or
-/// {"order_by": ["val"]} (order-only, no partition).
+/// Extract column name from window spec item: "col" or {"col": "name"} or {"col": "name", "asc": true} (issue #517).
+fn window_col_from_value(x: &Value) -> Option<String> {
+    if let Some(s) = x.as_str() {
+        return Some(s.to_string());
+    }
+    if let Some(obj) = x.as_object() {
+        if let Some(name) = obj.get("col").and_then(Value::as_str) {
+            return Some(name.to_string());
+        }
+    }
+    None
+}
+
+/// Build row_number().over(partition_by) from {"partition_by": ["col", ...] or [{"col":"..."}, ...]} or
+/// {"order_by": ["val"] or [{"col": "val", "asc": true}, ...]} (issue #517).
 fn expr_from_row_number_window(v: &Value) -> Result<Expr, PlanExprError> {
     let obj = v
         .as_object()
@@ -367,8 +384,7 @@ fn expr_from_row_number_window(v: &Value) -> Result<Expr, PlanExprError> {
             PlanExprError("row_number window must have partition_by or order_by array".to_string())
         })?
         .iter()
-        .filter_map(|x| x.as_str())
-        .map(String::from)
+        .filter_map(window_col_from_value)
         .collect();
     if order_cols.is_empty() {
         return Err(PlanExprError(
@@ -376,12 +392,7 @@ fn expr_from_row_number_window(v: &Value) -> Result<Expr, PlanExprError> {
         ));
     }
     let part_cols: Vec<String> = part_arr
-        .map(|a| {
-            a.iter()
-                .filter_map(|x| x.as_str())
-                .map(String::from)
-                .collect()
-        })
+        .map(|a| a.iter().filter_map(window_col_from_value).collect())
         .unwrap_or_default();
     let part_refs: Vec<&str> = part_cols.iter().map(|s| s.as_str()).collect();
     let order_col = crate::Column::new(order_cols[0].clone());
@@ -502,10 +513,10 @@ fn lit_as_usize(v: &Value) -> Result<usize, PlanExprError> {
 }
 
 /// Extract values for isin from JSON array. Each element: {"lit": v} or plain v. Returns Expr for is_in.
-fn values_from_json_array(arr: &[Value]) -> Result<Expr, PlanExprError> {
+/// When arr is empty or parses to no values, returns Ok(None) — caller should use lit(false) (issue #518).
+fn try_values_for_isin(arr: &[Value]) -> Result<Option<Expr>, PlanExprError> {
     if arr.is_empty() {
-        let s: Series = Series::new_empty("".into(), &DataType::Int64);
-        return Ok(lit(s));
+        return Ok(None);
     }
     let mut i64_vals: Vec<i64> = Vec::new();
     let mut str_vals: Vec<String> = Vec::new();
@@ -538,28 +549,28 @@ fn values_from_json_array(arr: &[Value]) -> Result<Expr, PlanExprError> {
     }
     if use_str {
         let s: Series = Series::from_iter(str_vals.iter().map(|x| x.as_str()));
-        Ok(lit(s))
+        Ok(Some(lit(s)))
     } else if !i64_vals.is_empty() {
         let s: Series = Series::from_iter(i64_vals.iter().cloned());
-        Ok(lit(s))
+        Ok(Some(lit(s)))
     } else {
-        let s: Series = Series::new_empty("".into(), &DataType::Int64);
-        Ok(lit(s))
+        // All elements were null or unparseable -> empty list semantics
+        Ok(None)
     }
 }
 
-/// Extract values for isin from plan value: {"lit": [1,2,3]} or array of {"lit": v}.
-fn values_from_plan_value(v: &Value) -> Result<Expr, PlanExprError> {
+/// Extract values for isin from plan value. Returns None when empty (caller uses lit(false)).
+fn try_values_from_plan_value(v: &Value) -> Result<Option<Expr>, PlanExprError> {
     if let Some(lit_val) = v.get("lit") {
         if let Some(arr) = lit_val.as_array() {
-            return values_from_json_array(arr);
+            return try_values_for_isin(arr);
         }
         // Single literal - wrap in array
         #[allow(clippy::cloned_ref_to_slice_refs)]
-        return values_from_json_array(&[v.clone()]);
+        return try_values_for_isin(&[v.clone()]);
     }
     if let Some(arr) = v.as_array() {
-        return values_from_json_array(arr);
+        return try_values_for_isin(arr);
     }
     Err(PlanExprError(
         "isin right/values must be array or {lit: [...]}".to_string(),
@@ -1227,10 +1238,14 @@ fn expr_from_fn(name: &str, args: &[Value]) -> Result<Expr, PlanExprError> {
         }
         "isin" => {
             // {"fn": "isin", "args": [col_expr, lit1, lit2, ...]} - col.isin(1, 3)
-            require_args_min(name, args, 2)?;
+            // Empty list or [col, {"lit": null}] -> lit(false) (issue #518)
+            require_args_min(name, args, 1)?;
             let col_expr = arg_expr(args, 0)?;
-            let values_expr = values_from_json_array(&args[1..])?;
-            Ok(col_expr.is_in(values_expr))
+            let values_opt = try_values_for_isin(&args[1..])?;
+            Ok(match values_opt {
+                None => lit(false),
+                Some(values_expr) => col_expr.is_in(values_expr),
+            })
         }
         _ => expr_from_fn_rest(name, args),
     }
@@ -2272,6 +2287,36 @@ mod tests {
         let _ = expr_from_value(&v).unwrap();
     }
 
+    /// col.isin([]) returns false for all rows (issue #518).
+    #[test]
+    fn test_isin_op_empty() {
+        let v = json!({
+            "op": "isin",
+            "left": {"col": "id"},
+            "right": {"lit": []}
+        });
+        let expr = expr_from_value(&v).unwrap();
+        // Should be lit(false), not is_in with empty series
+        assert!(matches!(expr, Expr::Literal(_)));
+    }
+
+    /// col.isin() with no values or col.isin(null) -> false (issue #518).
+    #[test]
+    fn test_isin_fn_empty() {
+        let v = json!({
+            "fn": "isin",
+            "args": [{"col": "id"}]
+        });
+        let expr = expr_from_value(&v).unwrap();
+        assert!(matches!(expr, Expr::Literal(_)));
+        let v2 = json!({
+            "fn": "isin",
+            "args": [{"col": "id"}, {"lit": null}]
+        });
+        let expr2 = expr_from_value(&v2).unwrap();
+        assert!(matches!(expr2, Expr::Literal(_)));
+    }
+
     #[test]
     fn test_get_item_op() {
         let v = json!({"op": "getItem", "left": {"col": "arr"}, "right": {"lit": 1}});
@@ -2333,6 +2378,20 @@ mod tests {
             "type": "window",
             "fn": "row_number",
             "window": {"order_by": ["val"]}
+        });
+        let _ = expr_from_value(&v).unwrap();
+    }
+
+    /// Sparkless format: fn + args + window; order_by as [{"col": "salary", "asc": true}] (issue #517).
+    #[test]
+    fn test_window_row_number_sparkless_format() {
+        let v = json!({
+            "fn": "row_number",
+            "args": [],
+            "window": {
+                "partition_by": ["dept"],
+                "order_by": [{"col": "salary", "asc": true}]
+            }
         });
         let _ = expr_from_value(&v).unwrap();
     }

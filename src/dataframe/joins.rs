@@ -166,11 +166,35 @@ mod tests {
     }
 
     #[test]
+    fn right_join() {
+        let left = left_df();
+        let right = right_df();
+        let out = join(&left, &right, vec!["id"], JoinType::Right, false).unwrap();
+        assert_eq!(out.count().unwrap(), 2); // right has id 1,3; left matches 1
+    }
+
+    #[test]
     fn outer_join() {
         let left = left_df();
         let right = right_df();
         let out = join(&left, &right, vec!["id"], JoinType::Outer, false).unwrap();
         assert_eq!(out.count().unwrap(), 3);
+    }
+
+    #[test]
+    fn left_semi_join() {
+        let left = left_df();
+        let right = right_df();
+        let out = join(&left, &right, vec!["id"], JoinType::LeftSemi, false).unwrap();
+        assert_eq!(out.count().unwrap(), 1); // left rows with match in right (id 1)
+    }
+
+    #[test]
+    fn left_anti_join() {
+        let left = left_df();
+        let right = right_df();
+        let out = join(&left, &right, vec!["id"], JoinType::LeftAnti, false).unwrap();
+        assert_eq!(out.count().unwrap(), 1); // left rows with no match (id 2)
     }
 
     #[test]

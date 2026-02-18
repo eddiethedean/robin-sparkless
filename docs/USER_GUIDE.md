@@ -22,14 +22,14 @@ Add to `Cargo.toml`:
 
 ```toml
 [dependencies]
-robin-sparkless = "0.11.5"
+robin-sparkless = "0.11.6"
 ```
 
 Optional features:
 
 ```toml
-robin-sparkless = { version = "0.11.5", features = ["sql"] }   # spark.sql(), temp views
-robin-sparkless = { version = "0.11.5", features = ["delta"] }  # Delta Lake read/write
+robin-sparkless = { version = "0.11.6", features = ["sql"] }   # spark.sql(), temp views
+robin-sparkless = { version = "0.11.6", features = ["delta"] }  # Delta Lake read/write
 ```
 
 ---
