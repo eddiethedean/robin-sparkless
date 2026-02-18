@@ -2210,6 +2210,33 @@ fn expr_from_fn_rest(name: &str, args: &[Value]) -> Result<Expr, PlanExprError> 
                 Ok(get(&col_c, &key).into_expr())
             }
         }
+        "struct" => {
+            // struct(col1, col2, ...) (issue #527)
+            require_args_min(name, args, 1)?;
+            let cols: Vec<crate::Column> = (0..args.len())
+                .map(|i| arg_expr(args, i).map(expr_to_column))
+                .collect::<Result<Vec<_>, _>>()?;
+            let refs: Vec<&crate::Column> = cols.iter().collect();
+            Ok(crate::functions::struct_(&refs).into_expr())
+        }
+        "named_struct" => {
+            // named_struct("name1", col1, "name2", col2, ...) (issue #527)
+            require_args_min(name, args, 2)?;
+            if !args.len().is_multiple_of(2) {
+                return Err(PlanExprError(
+                    "named_struct requires even number of args (name, value pairs)".into(),
+                ));
+            }
+            let mut names: Vec<String> = Vec::new();
+            let mut cols: Vec<crate::Column> = Vec::new();
+            for i in (0..args.len()).step_by(2) {
+                names.push(lit_as_string(&args[i])?);
+                cols.push(expr_to_column(arg_expr(args, i + 1)?));
+            }
+            let refs: Vec<(&str, &crate::Column)> =
+                names.iter().map(|s| s.as_str()).zip(cols.iter()).collect();
+            Ok(crate::functions::named_struct(&refs).into_expr())
+        }
         "nvl2" => {
             require_args(name, args, 3)?;
             let col1 = expr_to_column(arg_expr(args, 0)?);
@@ -2359,6 +2386,17 @@ mod tests {
         });
         let expr2 = expr_from_value(&v2).unwrap();
         assert!(matches!(expr2, Expr::Literal(_)));
+    }
+
+    #[test]
+    fn test_struct_named_struct_fn() {
+        let v = json!({"fn": "struct", "args": [{"col": "a"}, {"col": "b"}]});
+        let _ = expr_from_value(&v).unwrap();
+        let v2 = json!({
+            "fn": "named_struct",
+            "args": [{"lit": "x"}, {"col": "a"}, {"lit": "y"}, {"col": "b"}]
+        });
+        let _ = expr_from_value(&v2).unwrap();
     }
 
     #[test]
