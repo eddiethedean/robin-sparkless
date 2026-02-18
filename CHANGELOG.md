@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+(none yet)
+
+### Fixed
+
+(none yet)
+
+### Planned
+
+- **Phase 26 – Publish crate**: Prepare and publish robin-sparkless to crates.io. See [ROADMAP.md](docs/ROADMAP.md) for details.
+
+## [0.11.8] - 2026-02-18
+
+### Added
+
 - **#438 – Lazy backend (PySpark parity)** — DataFrame now uses Polars `LazyFrame` internally. Transformations (filter, select, with_column, order_by, join, union, etc.) extend the lazy plan; only actions (collect, show, count, write, stats) trigger materialization. Data sources (read_csv, read_parquet, read_json) return lazy DataFrames. Enables Polars query optimization across the full pipeline and aligns with PySpark lazy-by-default semantics. Fixes #438.
 - **#399 – Cast numeric (int/float) to boolean (PySpark parity)** — `cast` and `try_cast` now support casting numeric types (Int8, Int16, Int32, Int64, UInt8, UInt16, UInt32, UInt64, Float32, Float64) to boolean. Semantics: 0/0.0 → false, non-zero → true. Fixes #399.
 - **#400 – Window.orderBy accept F.desc/F.asc (PySpark parity)** — `Window.orderBy()` now accepts SortOrder from `desc(col)` and `asc(col)`, including `desc("v")` and `asc("v")` with column name strings. Enables `Window.partitionBy("k").orderBy(desc("v"))`. Fixes #400.
@@ -54,10 +68,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **GroupedData / PivotedGroupedData column resolution** — Aggregation methods (`sum`, `avg`, `min`, `max`, `first`, `last`, etc.) and pivot operations now resolve column names against the schema with case sensitivity. When `case_sensitive` is false, `grouped.sum("V")` works when the schema has `"v"`.
 - **subtract / intersect with different column casing** — `subtract` and `intersect` now align right-side column names to left when casing differs (case-sensitive or -insensitive), so set operations work when DataFrames have different column casing.
 - **#492 – case-insensitive orderBy on mixed-case column names (PySpark parity)** — Clarify and regression-test that when `spark.sql.caseSensitive` is false (default), `DataFrame::order_by` / `orderBy` resolve column names case-insensitively so `"value"` and `"VALUE"` work for schema column `"Value"`. Fixes #492.
-
-### Planned
-
-- **Phase 26 – Publish crate**: Prepare and publish robin-sparkless to crates.io. See [ROADMAP.md](docs/ROADMAP.md) for details.
 
 ## [0.11.7] - 2026-02-18
 
