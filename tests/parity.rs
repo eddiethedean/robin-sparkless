@@ -5835,6 +5835,32 @@ fn plan_select_concat_string() {
     );
 }
 
+/// col.isin([]) returns false for all rows -> filter yields 0 rows (issue #518).
+#[test]
+fn plan_filter_isin_empty() {
+    use robin_sparkless::plan;
+    use serde_json::json;
+
+    let spark = SparkSession::builder()
+        .app_name("plan_filter_isin_empty")
+        .get_or_create();
+
+    let schema = vec![
+        ("id".to_string(), "bigint".to_string()),
+        ("name".to_string(), "string".to_string()),
+    ];
+    let rows = vec![vec![json!(1), json!("a")], vec![json!(2), json!("b")]];
+
+    let plan = vec![json!({
+        "op": "filter",
+        "payload": {"op": "isin", "left": {"col": "id"}, "right": {"lit": []}}
+    })];
+
+    let result = plan::execute_plan(&spark, rows, schema, &plan).unwrap();
+    let rows_out = result.collect_as_json_rows().unwrap();
+    assert_eq!(rows_out.len(), 0, "col.isin([]) should match 0 rows");
+}
+
 /// Empty DataFrame with schema via execute_plan: saveAsTable(Overwrite) then append (issue #509).
 /// Mirrors Sparkless flow: createDataFrame([], schema) -> saveAsTable -> table -> append -> table.
 #[test]

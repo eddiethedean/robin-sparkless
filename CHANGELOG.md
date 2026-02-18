@@ -39,6 +39,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Phase 26 – Publish crate**: Prepare and publish robin-sparkless to crates.io. See [ROADMAP.md](docs/ROADMAP.md) for details.
 
+## [0.11.6] - 2026-02-17
+
+### Fixed
+
+- **#516 – Right, outer, semi, anti join row count** — DataFrame join tests added for right_join, left_semi_join, left_anti_join. All join types (Inner, Left, Right, Outer, LeftSemi, LeftAnti) now verified. Fixes #516.
+- **#517 – Window expressions Sparkless format** — Plan interpreter `expr_from_row_number_window` now accepts `order_by` and `partition_by` items as `{"col": "name"}` objects (in addition to string column names). Sparkless format `{"fn": "row_number", "args": [], "window": {"partition_by": ["x"], "order_by": [{"col": "y", "asc": true}]}}` is supported. Fixes #517.
+- **#518 – isin with empty list** — `col.isin([])` and `isin(col)` with no values now return `lit(false)` (0 rows match) instead of relying on empty-series semantics. Fixes #518.
+- **#519 – Empty DataFrame + parquet saveAsTable** — Regression test `test_write_parquet_empty_df_with_schema` added. Empty DataFrame with explicit schema can be written via `write.format("parquet").save(path)` without schema inference. Robin-sparkless uses explicit schema; PySpark fails with "can not infer schema from empty dataset". Fixes #519.
+
 ## [0.11.5] - 2026-02-17
 
 ### Fixed

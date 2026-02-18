@@ -2041,6 +2041,36 @@ mod tests {
         assert_eq!(r2.count().unwrap(), 1);
     }
 
+    /// Empty DataFrame with schema: write.format("parquet").save(path) must not fail (issue #519).
+    /// PySpark fails with "can not infer schema from empty dataset"; robin-sparkless uses explicit schema.
+    #[test]
+    fn test_write_parquet_empty_df_with_schema() {
+        let spark = SparkSession::builder().app_name("test").get_or_create();
+        let schema = vec![
+            ("id".to_string(), "bigint".to_string()),
+            ("name".to_string(), "string".to_string()),
+        ];
+        let empty_df = spark.create_dataframe_from_rows(vec![], schema).unwrap();
+        assert_eq!(empty_df.count().unwrap(), 0);
+
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("empty.parquet");
+        empty_df
+            .write()
+            .format(crate::dataframe::WriteFormat::Parquet)
+            .mode(crate::dataframe::WriteMode::Overwrite)
+            .save(&path)
+            .unwrap();
+        assert!(path.is_file());
+
+        // Read back and verify schema preserved
+        let read_df = spark.read().parquet(path.to_str().unwrap()).unwrap();
+        assert_eq!(read_df.count().unwrap(), 0);
+        let cols = read_df.columns().unwrap();
+        assert!(cols.contains(&"id".to_string()));
+        assert!(cols.contains(&"name".to_string()));
+    }
+
     /// Empty DataFrame with schema + warehouse: saveAsTable(Overwrite) then append (issue #495 disk path).
     #[test]
     fn test_save_as_table_empty_df_warehouse_then_append() {
