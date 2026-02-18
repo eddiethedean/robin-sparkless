@@ -31,6 +31,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **#546 – SQL alias in aggregation SELECT (PySpark parity)** — SQL now supports aliased aggregates (e.g. `SELECT grp, COUNT(v) AS cnt FROM t GROUP BY grp`). `ExprWithAlias` in the SELECT list is handled for group columns (validation) and aggregate functions (alias used as output column name). Fixes #546.
 - **#545 – UDF expression not supported (PySpark parity)** — Plan interpreter now accepts expression `{"op": "udf", "udf"|"name": "name", "args": [<expr>, ...]}`, so Sparkless plans that use UDF expressions no longer report "unsupported expression op: udf". Fixes #545.
 - **#543 – CSV inferSchema behavior (PySpark parity)** — read_csv() and read().option("inferSchema", true).csv() infer integer, double, and boolean from CSV. Option inferSchema=false now disables inference (0 rows). Regression tests verify inferred types. Fixes #543.
 - **#542 – create_map semantics / support (PySpark parity)** — Plan interpreter accepts `createMap` (camelCase) in addition to `create_map` for op and fn, so Sparkless create_map expressions are supported. Fixes #542.
