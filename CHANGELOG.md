@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **#591 – SparkSession.stop() method (PySpark parity)** — Added support for calling `spark.stop()` in teardown code. `SparkSession.stop()` now clears session-scoped catalogs and UDF registry (best-effort), and the plan interpreter also accepts a `"stop"` op so language bindings can invoke it without raising an attribute/method error. Fixes #591.
 - **#581 – isin() on Int64 column with literal list (PySpark parity)** — Filtering with `col("value").isin(1, 3)` when `value` is Int64 no longer fails with "cannot check for String values in Int64 data". The plan now builds an Int64 series for integer-only value lists and Float64 for float-only lists, so numeric columns match correctly. Fixes #581.
 - **#580 – Join with column expression when both tables have same key name (PySpark parity)** — Joining on a column that has the same name on both sides (e.g. `emp.join(dept, emp.dept_id == dept.dept_id)`) no longer fails with "duplicate: column with name 'dept_id' has more than one occurrence". Right join keys are renamed to temp names and the join uses `left_on`/`right_on` so Polars produces a single key column. Fixes #580.
 - **#579 – first() after orderBy returns first row in sort order (PySpark parity)** — `DataFrame.first()` now uses `limit(1)` then collect so that the first row is the first in the applied plan (e.g. after `orderBy(col)`), not the first in storage/input order. Fixes #579.
