@@ -220,6 +220,20 @@ mod tests {
     }
 
     #[test]
+    fn test_sql_drop_schema() {
+        let spark = SparkSession::builder().app_name("test").get_or_create();
+        // CREATE then DROP SCHEMA (issue #526; sqlparser 0.45 has no DROP DATABASE token)
+        spark
+            .sql("CREATE SCHEMA IF NOT EXISTS test_schema_to_drop")
+            .unwrap();
+        assert!(spark.database_exists("test_schema_to_drop"));
+        spark
+            .sql("DROP SCHEMA IF EXISTS test_schema_to_drop CASCADE")
+            .unwrap();
+        assert!(!spark.database_exists("test_schema_to_drop"));
+    }
+
+    #[test]
     fn test_sql_case_insensitive_columns() {
         let spark = SparkSession::builder().app_name("test").get_or_create();
         let df = spark
