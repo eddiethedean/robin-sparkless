@@ -31,6 +31,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **#554 – Array column and explode (PySpark parity)** — Plan interpreter now accepts `{"op": "explode"|"explode_outer"|"explodeOuter", "args": [<expr>]}` so Sparkless plans using explode as expression op no longer report "unsupported expression op: explode". Fixes #554.
 - **#553 – Empty DataFrame schema and table ops (PySpark parity)** — Empty DataFrame with explicit schema is supported: `create_dataframe_from_rows([], schema)`, `saveAsTable`, and `spark.table()` work (PySpark raises "can not infer schema from empty dataset"). Regression test added. Fixes #553.
 - **#552 – Inner/left join return 0 rows (PySpark parity)** — Plan interpreter now parses join `on` as array of column refs or eq expressions (Sparkless v4 format) and aligns right join key column names to left’s so inner/left join return correct row counts. Fixes #552.
 - **#551 – Union type coercion (PySpark parity)** — `union` now coerces columns to a common type when left and right have different dtypes (e.g. String vs Int64 → String). Fixes #551.
