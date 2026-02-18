@@ -122,6 +122,67 @@ fn get_other_schema(payload: &Value) -> Option<&Vec<Value>> {
         .and_then(Value::as_array)
 }
 
+/// Extract column name from expression if it is a simple column reference {"col": "name"}.
+fn expr_to_col_name(v: &Value) -> Option<String> {
+    let obj = v.as_object()?;
+    obj.get("col")
+        .or_else(|| obj.get("column"))
+        .and_then(Value::as_str)
+        .map(|s| s.to_string())
+}
+
+/// Parse join "on" into list of column names. Accepts:
+/// - string -> [s]; array of strings -> those; array of {"col": "x"} -> ["x"];
+/// - array of {"op": "eq", "left": {"col": "a"}, "right": {"col": "a"}} -> ["a"] (Sparkless v4 format, #552).
+fn parse_join_on(on: &Value, df: &DataFrame) -> Result<Vec<String>, PlanError> {
+    if let Some(s) = on.as_str() {
+        let resolved = df.resolve_column_name(s).map_err(PlanError::Session)?;
+        return Ok(vec![resolved]);
+    }
+    let arr = on.as_array().ok_or_else(|| {
+        PlanError::InvalidPlan(
+            "join 'on' must be string, array of strings, or array of column refs / eq expressions"
+                .into(),
+        )
+    })?;
+    let mut keys = Vec::with_capacity(arr.len());
+    for v in arr {
+        if let Some(s) = v.as_str() {
+            let resolved = df.resolve_column_name(s).map_err(PlanError::Session)?;
+            keys.push(resolved);
+            continue;
+        }
+        if let Some(obj) = v.as_object() {
+            // {"col": "x"} -> single key for both sides
+            if let Some(name) = expr_to_col_name(v) {
+                let resolved = df.resolve_column_name(&name).map_err(PlanError::Session)?;
+                keys.push(resolved);
+                continue;
+            }
+            // {"op": "eq"|"==", "left": {"col": "a"}, "right": {"col": "a"}} (Sparkless v4)
+            let op = obj
+                .get("op")
+                .or_else(|| obj.get("operator"))
+                .and_then(Value::as_str);
+            if op.map(|o| o == "eq" || o == "==").unwrap_or(false) {
+                let left = obj.get("left").and_then(expr_to_col_name);
+                let right = obj.get("right").and_then(expr_to_col_name);
+                if let (Some(l), Some(r)) = (left, right) {
+                    if l == r {
+                        let resolved = df.resolve_column_name(&l).map_err(PlanError::Session)?;
+                        keys.push(resolved);
+                        continue;
+                    }
+                }
+            }
+        }
+        return Err(PlanError::InvalidPlan(
+            "join 'on' element must be string, {\"col\": \"name\"}, or {\"op\": \"eq\", \"left\": {\"col\": \"x\"}, \"right\": {\"col\": \"x\"}}".into(),
+        ));
+    }
+    Ok(keys)
+}
+
 /// Convert other_data to rows. Accepts arrays [[v,v],[v,v]] or dicts [{"col":v},...] (Sparkless may send dict rows).
 fn other_data_to_rows(other_data: &[Value], schema_names: &[String]) -> Vec<Vec<Value>> {
     other_data
@@ -404,15 +465,6 @@ fn apply_op(
             let on = payload.get("on").ok_or_else(|| {
                 PlanError::InvalidPlan("join must have 'on' array or string".into())
             })?;
-            let on_arr: Vec<Value> = if let Some(arr) = on.as_array() {
-                arr.clone()
-            } else if let Some(s) = on.as_str() {
-                vec![Value::String(s.to_string())]
-            } else {
-                return Err(PlanError::InvalidPlan(
-                    "join 'on' must be array of strings or single string".into(),
-                ));
-            };
             let how = payload
                 .get("how")
                 .and_then(Value::as_str)
@@ -428,13 +480,20 @@ fn apply_op(
                 .create_dataframe_from_rows(rows, schema_vec)
                 .map_err(PlanError::Session)?;
 
-            let on_keys: Vec<String> = on_arr
-                .iter()
-                .filter_map(|v| v.as_str())
-                .map(|s| df.resolve_column_name(s))
-                .collect::<Result<Vec<_>, _>>()
-                .map_err(PlanError::Session)?;
-            let on_refs: Vec<&str> = on_keys.iter().map(|s| s.as_str()).collect();
+            let on_keys_left = parse_join_on(on, &df)?;
+            // Align right join key column names to left's (e.g. left "Dept_Id" vs right "dept_id" -> rename right to "Dept_Id") (#552).
+            let mut other_df = other_df;
+            let on_keys_right = parse_join_on(on, &other_df)?;
+            for (i, left_name) in on_keys_left.iter().enumerate() {
+                if let Some(right_name) = on_keys_right.get(i) {
+                    if left_name != right_name {
+                        other_df = other_df
+                            .with_column_renamed(right_name, left_name)
+                            .map_err(PlanError::Session)?;
+                    }
+                }
+            }
+            let on_refs: Vec<&str> = on_keys_left.iter().map(|s| s.as_str()).collect();
             let join_type = match how {
                 "left" => JoinType::Left,
                 "right" => JoinType::Right,
