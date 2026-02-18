@@ -5893,6 +5893,24 @@ fn plan_filter_isin_int64_column() {
     assert_eq!(values, [1, 3].into_iter().collect());
 }
 
+/// SparkSession.stop() should be callable in plan interpreter (issue #591).
+#[test]
+fn plan_spark_session_stop_noop() {
+    use robin_sparkless::plan;
+    use serde_json::json;
+
+    let spark = SparkSession::builder()
+        .app_name("plan_spark_session_stop")
+        .get_or_create();
+
+    let schema = vec![("id".to_string(), "bigint".to_string())];
+    let rows = vec![vec![json!(1)], vec![json!(2)], vec![json!(3)]];
+
+    let plan = vec![json!({ "op": "stop" })];
+    let result = plan::execute_plan(&spark, rows, schema, &plan).unwrap();
+    assert_eq!(result.count().unwrap(), 3);
+}
+
 /// Empty DataFrame with schema via execute_plan: saveAsTable(Overwrite) then append (issue #509).
 /// Mirrors Sparkless flow: createDataFrame([], schema) -> saveAsTable -> table -> append -> table.
 #[test]

@@ -368,6 +368,11 @@ pub(crate) fn get_thread_udf_session() -> Option<SparkSession> {
     THREAD_UDF_SESSION.with(|cell| cell.borrow().clone())
 }
 
+/// Clear the thread-local session used for UDF resolution.
+pub(crate) fn clear_thread_udf_session() {
+    THREAD_UDF_SESSION.with(|cell| *cell.borrow_mut() = None);
+}
+
 /// Catalog of global temporary views (process-scoped). Persists across sessions within the same process.
 /// PySpark: createOrReplaceGlobalTempView / spark.table("global_temp.name").
 static GLOBAL_TEMP_CATALOG: OnceLock<Arc<Mutex<HashMap<String, DataFrame>>>> = OnceLock::new();
@@ -1352,7 +1357,13 @@ impl SparkSession {
 
     /// Stop the session (cleanup resources)
     pub fn stop(&self) {
-        // Cleanup if needed
+        // Best-effort cleanup. This is primarily for PySpark parity so that `spark.stop()`
+        // exists and can be called in teardown.
+        let _ = self.catalog.lock().map(|mut m| m.clear());
+        let _ = self.tables.lock().map(|mut m| m.clear());
+        let _ = self.databases.lock().map(|mut s| s.clear());
+        let _ = self.udf_registry.clear();
+        clear_thread_udf_session();
     }
 }
 
