@@ -79,6 +79,29 @@ mod tests {
     }
 
     #[test]
+    fn test_sql_scalar_aggregate() {
+        // Issue #587: SELECT AVG(salary) FROM t (no GROUP BY) — scalar aggregation.
+        let spark = SparkSession::builder().app_name("test").get_or_create();
+        let df = spark
+            .create_dataframe(
+                vec![
+                    (1, "Alice".to_string(), 100.0),
+                    (2, "Bob".to_string(), 200.0),
+                ],
+                vec!["id", "name", "salary"],
+            )
+            .unwrap();
+        spark.create_or_replace_temp_view("test_table", df);
+        let result = spark
+            .sql("SELECT AVG(salary) as avg_salary FROM test_table")
+            .unwrap();
+        assert_eq!(result.count().unwrap(), 1);
+        let rows = result.collect_as_json_rows().unwrap();
+        let avg_val = rows[0].get("avg_salary").and_then(|v| v.as_f64()).unwrap();
+        assert!((avg_val - 150.0).abs() < 1e-9);
+    }
+
+    #[test]
     fn test_sql_having() {
         let spark = SparkSession::builder().app_name("test").get_or_create();
         let df = spark
