@@ -27,7 +27,8 @@ pub fn execute_plan(
     set_thread_udf_session(session.clone());
     let mut df = session
         .create_dataframe_from_rows(data, schema)
-        .map_err(PlanError::Session)?;
+        .map_err(PlanError::Session)?
+        .with_case_insensitive_column_resolution();
 
     for op_value in plan {
         let op_obj = op_value
