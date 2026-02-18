@@ -5,6 +5,9 @@
 mod expr;
 
 use crate::dataframe::{DataFrame, JoinType};
+use crate::functions::{
+    asc_nulls_first, asc_nulls_last, col, desc_nulls_first, desc_nulls_last, SortOrder,
+};
 use crate::plan::expr::{expr_from_value, try_column_from_udf_value};
 use crate::session::{set_thread_udf_session, SparkSession};
 pub use expr::PlanExprError;
@@ -292,8 +295,34 @@ fn apply_op(
                 .and_then(Value::as_array)
                 .map(|a| a.iter().filter_map(|v| v.as_bool()).collect::<Vec<_>>())
                 .unwrap_or_else(|| vec![true; col_names.len()]);
-            let refs: Vec<&str> = col_names.iter().map(|s| s.as_str()).collect();
-            df.order_by(refs, ascending).map_err(PlanError::Session)
+            let nulls_last = payload
+                .get("nulls_last")
+                .and_then(Value::as_array)
+                .map(|a| a.iter().filter_map(|v| v.as_bool()).collect::<Vec<_>>());
+            if let Some(nl) = nulls_last {
+                let mut sort_orders: Vec<SortOrder> = Vec::with_capacity(col_names.len());
+                for (i, name) in col_names.iter().enumerate() {
+                    let asc = ascending.get(i).copied().unwrap_or(true);
+                    let nlast = nl.get(i).copied().unwrap_or(asc);
+                    let column = col(name.as_str());
+                    let so = if asc {
+                        if nlast {
+                            asc_nulls_last(&column)
+                        } else {
+                            asc_nulls_first(&column)
+                        }
+                    } else if nlast {
+                        desc_nulls_last(&column)
+                    } else {
+                        desc_nulls_first(&column)
+                    };
+                    sort_orders.push(so);
+                }
+                df.order_by_exprs(sort_orders).map_err(PlanError::Session)
+            } else {
+                let refs: Vec<&str> = col_names.iter().map(|s| s.as_str()).collect();
+                df.order_by(refs, ascending).map_err(PlanError::Session)
+            }
         }
         "distinct" => df.distinct(None).map_err(PlanError::Session),
         "drop" => {

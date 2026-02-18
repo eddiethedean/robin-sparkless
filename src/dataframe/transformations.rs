@@ -134,9 +134,13 @@ pub fn order_by(
         .collect::<Result<Vec<_>, _>>()?;
     let exprs: Vec<Expr> = resolved.iter().map(|s| col(s.as_str())).collect();
     let descending: Vec<bool> = asc.iter().map(|&a| !a).collect();
+    // PySpark default: ASC nulls first (nulls_last=false), DESC nulls last (nulls_last=true).
+    let nulls_last: Vec<bool> = descending.clone();
     let lf = df.lazy_frame().sort_by_exprs(
         exprs,
-        SortMultipleOptions::new().with_order_descending_multi(descending),
+        SortMultipleOptions::new()
+            .with_order_descending_multi(descending)
+            .with_nulls_last_multi(nulls_last),
     );
     Ok(super::DataFrame::from_lazy_with_options(lf, case_sensitive))
 }
