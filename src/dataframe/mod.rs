@@ -563,7 +563,7 @@ impl DataFrame {
                     .get(col_idx)
                     .ok_or_else(|| PolarsError::ComputeError("column index out of range".into()))?;
                 let av = s.get(i)?;
-                let jv = any_value_to_json(av);
+                let jv = any_value_to_json(&av, s.dtype());
                 row.insert(name.to_string(), jv);
             }
             rows.push(row);
@@ -1724,23 +1724,110 @@ fn partition_row_to_filter_expr(
     Ok(pred.unwrap_or_else(|| lit(true)))
 }
 
+/// True if dtype is List(Struct{key, value}) (map column format).
+fn is_map_format(dtype: &DataType) -> bool {
+    if let DataType::List(inner) = dtype {
+        if let DataType::Struct(fields) = inner.as_ref() {
+            let has_key = fields.iter().any(|f| f.name == "key");
+            let has_value = fields.iter().any(|f| f.name == "value");
+            return has_key && has_value;
+        }
+    }
+    false
+}
+
 /// Convert Polars AnyValue to serde_json::Value for language bindings (Node, etc.).
-fn any_value_to_json(av: AnyValue<'_>) -> JsonValue {
+/// Handles List and Struct so that create_map() with no args yields {} not null (#578).
+fn any_value_to_json(av: &AnyValue<'_>, dtype: &DataType) -> JsonValue {
+    use serde_json::Map;
     match av {
         AnyValue::Null => JsonValue::Null,
-        AnyValue::Boolean(b) => JsonValue::Bool(b),
-        AnyValue::Int32(i) => JsonValue::Number(serde_json::Number::from(i)),
-        AnyValue::Int64(i) => JsonValue::Number(serde_json::Number::from(i)),
-        AnyValue::UInt32(u) => JsonValue::Number(serde_json::Number::from(u)),
-        AnyValue::UInt64(u) => JsonValue::Number(serde_json::Number::from(u)),
-        AnyValue::Float32(f) => serde_json::Number::from_f64(f64::from(f))
+        AnyValue::Boolean(b) => JsonValue::Bool(*b),
+        AnyValue::Int32(i) => JsonValue::Number(serde_json::Number::from(*i)),
+        AnyValue::Int64(i) => JsonValue::Number(serde_json::Number::from(*i)),
+        AnyValue::UInt32(u) => JsonValue::Number(serde_json::Number::from(*u)),
+        AnyValue::UInt64(u) => JsonValue::Number(serde_json::Number::from(*u)),
+        AnyValue::Float32(f) => serde_json::Number::from_f64(f64::from(*f))
             .map(JsonValue::Number)
             .unwrap_or(JsonValue::Null),
-        AnyValue::Float64(f) => serde_json::Number::from_f64(f)
+        AnyValue::Float64(f) => serde_json::Number::from_f64(*f)
             .map(JsonValue::Number)
             .unwrap_or(JsonValue::Null),
         AnyValue::String(s) => JsonValue::String(s.to_string()),
         AnyValue::StringOwned(s) => JsonValue::String(s.to_string()),
+        AnyValue::List(s) => {
+            if is_map_format(dtype) {
+                // List(Struct{key, value}) -> JSON object {} (PySpark empty map #578).
+                let mut obj = Map::new();
+                for i in 0..s.len() {
+                    if let Ok(elem) = s.get(i) {
+                        let (k, v) = match &elem {
+                            AnyValue::Struct(_, _, fields) => {
+                                let mut k = None;
+                                let mut v = None;
+                                for (fld_av, fld) in elem._iter_struct_av().zip(fields.iter()) {
+                                    if fld.name == "key" {
+                                        k = fld_av
+                                            .get_str()
+                                            .map(|s| s.to_string())
+                                            .or_else(|| Some(fld_av.to_string()));
+                                    } else if fld.name == "value" {
+                                        v = Some(any_value_to_json(&fld_av, &fld.dtype));
+                                    }
+                                }
+                                (k, v)
+                            }
+                            AnyValue::StructOwned(payload) => {
+                                let (values, fields) = &**payload;
+                                let mut k = None;
+                                let mut v = None;
+                                for (fld_av, fld) in values.iter().zip(fields.iter()) {
+                                    if fld.name == "key" {
+                                        k = fld_av
+                                            .get_str()
+                                            .map(|s| s.to_string())
+                                            .or_else(|| Some(fld_av.to_string()));
+                                    } else if fld.name == "value" {
+                                        v = Some(any_value_to_json(fld_av, &fld.dtype));
+                                    }
+                                }
+                                (k, v)
+                            }
+                            _ => (None, None),
+                        };
+                        if let (Some(key), Some(val)) = (k, v) {
+                            obj.insert(key, val);
+                        }
+                    }
+                }
+                JsonValue::Object(obj)
+            } else {
+                let inner_dtype = match dtype {
+                    DataType::List(inner) => inner.as_ref(),
+                    _ => dtype,
+                };
+                let arr: Vec<JsonValue> = (0..s.len())
+                    .filter_map(|i| s.get(i).ok())
+                    .map(|a| any_value_to_json(&a, inner_dtype))
+                    .collect();
+                JsonValue::Array(arr)
+            }
+        }
+        AnyValue::Struct(_, _, fields) => {
+            let mut obj = Map::new();
+            for (fld_av, fld) in av._iter_struct_av().zip(fields.iter()) {
+                obj.insert(fld.name.to_string(), any_value_to_json(&fld_av, &fld.dtype));
+            }
+            JsonValue::Object(obj)
+        }
+        AnyValue::StructOwned(payload) => {
+            let (values, fields) = &**payload;
+            let mut obj = Map::new();
+            for (fld_av, fld) in values.iter().zip(fields.iter()) {
+                obj.insert(fld.name.to_string(), any_value_to_json(fld_av, &fld.dtype));
+            }
+            JsonValue::Object(obj)
+        }
         _ => JsonValue::Null,
     }
 }

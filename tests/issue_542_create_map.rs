@@ -100,3 +100,26 @@ fn issue_542_plan_create_map_fn() {
         "create_map fn plan should produce one row"
     );
 }
+
+/// #578: create_map() with no args must return empty map {} per row, not null (PySpark parity).
+#[test]
+fn issue_578_create_map_empty_returns_empty_object_not_null() {
+    let spark = spark();
+    let df = spark
+        .create_dataframe_from_rows(
+            vec![vec![json!(1)]],
+            vec![("id".to_string(), "bigint".to_string())],
+        )
+        .unwrap();
+    let empty_map = create_map(&[]).unwrap();
+    let out = df.with_column("m", &empty_map).unwrap();
+    let rows = out.collect_as_json_rows().unwrap();
+    assert_eq!(rows.len(), 1);
+    let m = rows[0].get("m").expect("column m");
+    assert!(
+        !m.is_null(),
+        "create_map() with no args must yield empty object not null (#578)"
+    );
+    let obj = m.as_object().expect("m must be JSON object (empty map)");
+    assert!(obj.is_empty(), "empty create_map must be empty object");
+}
