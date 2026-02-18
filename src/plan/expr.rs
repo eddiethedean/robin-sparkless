@@ -2298,6 +2298,13 @@ fn expr_from_fn_rest(name: &str, args: &[Value]) -> Result<Expr, PlanExprError> 
             let key = expr_to_column(arg_expr(args, 1)?);
             Ok(get(&map_col, &key).into_expr())
         }
+        "get_field" | "getField" => {
+            // Struct field by name (PySpark Column.getField). Used e.g. to assert withField result (issue #541).
+            require_args(name, args, 2)?;
+            let struct_col = expr_to_column(arg_expr(args, 0)?);
+            let field_name = lit_as_string(&args[1])?;
+            Ok(struct_col.get_field(&field_name).into_expr())
+        }
         "get_item" => {
             // Array: get_item(col, 0); map: get_item(col, "key") (issue #522)
             require_args(name, args, 2)?;
@@ -2336,6 +2343,17 @@ fn expr_from_fn_rest(name: &str, args: &[Value]) -> Result<Expr, PlanExprError> 
             let refs: Vec<(&str, &crate::Column)> =
                 names.iter().map(|s| s.as_str()).zip(cols.iter()).collect();
             Ok(crate::functions::named_struct(&refs).into_expr())
+        }
+        "with_field" | "withField" => {
+            // withField(struct_col, field_name, value) - PySpark struct field add/replace (issue #541)
+            require_args(name, args, 3)?;
+            let struct_col = expr_to_column(arg_expr(args, 0)?);
+            let field_name = lit_as_string(&args[1])?;
+            let value_col = expr_to_column(arg_expr(args, 2)?);
+            let out = struct_col
+                .try_with_field(&field_name, &value_col)
+                .map_err(|e| PlanExprError(format!("with_field: {e}")))?;
+            Ok(out.into_expr())
         }
         "nvl2" => {
             require_args(name, args, 3)?;
