@@ -175,6 +175,32 @@ mod tests {
     }
 
     #[test]
+    fn test_sql_where_like_and_in() {
+        // Issue #590: WHERE with LIKE and IN.
+        let spark = SparkSession::builder().app_name("test").get_or_create();
+        let df = spark
+            .create_dataframe(
+                vec![
+                    (1, "Alice".to_string()),
+                    (2, "Bob".to_string()),
+                    (3, "Carol".to_string()),
+                ],
+                vec!["id", "name"],
+            )
+            .unwrap();
+        spark.create_or_replace_temp_view("t", df);
+        let like_result = spark.sql("SELECT * FROM t WHERE name LIKE 'A%'").unwrap();
+        assert_eq!(like_result.count().unwrap(), 1);
+        let rows = like_result.collect_as_json_rows().unwrap();
+        assert_eq!(
+            rows[0].get("name").and_then(|v| v.as_str()).unwrap(),
+            "Alice"
+        );
+        let in_result = spark.sql("SELECT * FROM t WHERE id IN (1, 2)").unwrap();
+        assert_eq!(in_result.count().unwrap(), 2);
+    }
+
+    #[test]
     fn test_sql_table_not_found() {
         let spark = SparkSession::builder().app_name("test").get_or_create();
         let result = spark.sql("SELECT 1 FROM nonexistent");
