@@ -351,13 +351,19 @@ pub fn expr_from_value(v: &Value) -> Result<Expr, PlanExprError> {
         return Ok(col.expr().clone());
     }
 
-    // Function call: {"fn": "upper"|"lower"|"call_udf"|..., "args": [<expr>, ...]}
-    // Window form: {"fn": "row_number", "window": {"partition_by": ["col", ...]}}
-    if let Some(fn_name) = obj.get("fn").and_then(Value::as_str) {
-        if fn_name == "row_number" {
-            if let Some(window_val) = obj.get("window") {
-                return expr_from_row_number_window(window_val);
-            }
+    // Function call: {"fn"|"function": "upper"|...|"row_number", "args": [<expr>, ...], optional "window": {...}}
+    // Sparkless may send "function" instead of "fn" (issue #517). Window fns allow empty args.
+    let fn_name = obj
+        .get("fn")
+        .or_else(|| obj.get("function"))
+        .and_then(Value::as_str);
+    if let Some(fn_name) = fn_name {
+        if let Some(window_val) = obj.get("window") {
+            return expr_from_window_fn(
+                fn_name,
+                window_val,
+                obj.get("args").and_then(Value::as_array),
+            );
         }
         let args = obj
             .get("args")
@@ -366,22 +372,21 @@ pub fn expr_from_value(v: &Value) -> Result<Expr, PlanExprError> {
         return expr_from_fn(fn_name, args);
     }
 
-    // type: "window" - Sparkless sends window expressions as {"type": "window", "fn": "row_number", "window": {...}}
+    // type: "window" - Sparkless: {"type": "window", "fn"|"function": "row_number", "window": {...}}
     if let Some(typ) = obj.get("type").and_then(Value::as_str) {
         if typ == "window" {
             let fn_name = obj
                 .get("fn")
+                .or_else(|| obj.get("function"))
                 .and_then(Value::as_str)
-                .ok_or_else(|| PlanExprError("type window requires 'fn'".to_string()))?;
+                .ok_or_else(|| {
+                    PlanExprError("type window requires 'fn' or 'function'".to_string())
+                })?;
             let window_val = obj
                 .get("window")
                 .ok_or_else(|| PlanExprError("type window requires 'window'".to_string()))?;
-            if fn_name == "row_number" {
-                return expr_from_row_number_window(window_val);
-            }
-            return Err(PlanExprError(format!(
-                "type window: unsupported fn '{fn_name}' (only row_number)"
-            )));
+            let args = obj.get("args").and_then(Value::as_array);
+            return expr_from_window_fn(fn_name, window_val, args);
         }
     }
 
@@ -403,32 +408,132 @@ fn window_col_from_value(x: &Value) -> Option<String> {
     None
 }
 
-/// Build row_number().over(partition_by) from {"partition_by": ["col", ...] or [{"col":"..."}, ...]} or
-/// {"order_by": ["val"] or [{"col": "val", "asc": true}, ...]} (issue #517).
-/// Empty partition_by and order_by are allowed (PySpark parity; issue #520): single partition, no ordering.
-fn expr_from_row_number_window(v: &Value) -> Result<Expr, PlanExprError> {
+/// Parse window spec object into (order_col_names, partition_by_col_names).
+/// order_by / partition_by can be arrays of "col" or {"col": "name", "asc": true}.
+/// Does not apply fallback; callers that need order column use order_cols.or(part_cols) (issue #517).
+fn parse_window_spec(v: &Value) -> Result<(Vec<String>, Vec<String>), PlanExprError> {
     let obj = v
         .as_object()
-        .ok_or_else(|| PlanExprError("row_number window must be object".to_string()))?;
+        .ok_or_else(|| PlanExprError("window spec must be object".to_string()))?;
     let order_arr = obj.get("order_by").and_then(Value::as_array);
     let part_arr = obj.get("partition_by").and_then(Value::as_array);
-    // Prefer order_by for order column; fall back to partition_by (issue #517)
     let order_cols: Vec<String> = order_arr
-        .or(part_arr)
         .map(|a| a.iter().filter_map(window_col_from_value).collect())
         .unwrap_or_default();
     let part_cols: Vec<String> = part_arr
         .map(|a| a.iter().filter_map(window_col_from_value).collect())
         .unwrap_or_default();
+    Ok((order_cols, part_cols))
+}
+
+/// Order column names for window: prefer order_by, fall back to partition_by (issue #517).
+fn window_order_cols(order_cols: &[String], part_cols: &[String]) -> Vec<String> {
+    if order_cols.is_empty() {
+        part_cols.to_vec()
+    } else {
+        order_cols.to_vec()
+    }
+}
+
+/// Build window expression for row_number (issue #517, #520).
+fn expr_from_row_number_window(v: &Value) -> Result<Expr, PlanExprError> {
+    let (order_cols, part_cols) = parse_window_spec(v)?;
     let part_refs: Vec<&str> = part_cols.iter().map(|s| s.as_str()).collect();
-    // When both are empty, use literal column for row_number (single partition; issue #520)
-    let order_col = if order_cols.is_empty() {
+    let effective_order = window_order_cols(&order_cols, &part_cols);
+    let order_col = if effective_order.is_empty() {
         crate::Column::from_expr(lit(1i32), None)
     } else {
-        crate::Column::new(order_cols[0].clone())
+        crate::Column::new(effective_order[0].clone())
     };
     let rn = order_col.row_number(false).over(&part_refs);
     Ok(rn.into_expr())
+}
+
+/// Dispatch window fn by name: row_number, rank, dense_rank, percent_rank, ntile, lag, lead, sum, avg (issues #517, #521).
+fn expr_from_window_fn(
+    fn_name: &str,
+    window_val: &Value,
+    args: Option<&Vec<Value>>,
+) -> Result<Expr, PlanExprError> {
+    use crate::Column;
+    let (order_cols, part_cols) = parse_window_spec(window_val)?;
+    let part_refs: Vec<&str> = part_cols.iter().map(|s| s.as_str()).collect();
+    let effective_order = window_order_cols(&order_cols, &part_cols);
+    let empty: &[Value] = &[];
+    let args: &[Value] = args.map_or(empty, |v| v);
+    let order_col = if effective_order.is_empty() {
+        Column::from_expr(lit(1i32), None)
+    } else {
+        Column::new(effective_order[0].clone())
+    };
+
+    match fn_name {
+        "row_number" => expr_from_row_number_window(window_val),
+        "rank" => {
+            let c = order_col.rank(false).over(&part_refs);
+            Ok(c.into_expr())
+        }
+        "dense_rank" => {
+            let c = order_col.dense_rank(false).over(&part_refs);
+            Ok(c.into_expr())
+        }
+        "percent_rank" => {
+            let c = order_col.percent_rank(&part_refs, false);
+            Ok(c.into_expr())
+        }
+        "ntile" => {
+            let n = args
+                .first()
+                .and_then(|v| v.get("lit").and_then(Value::as_i64))
+                .or_else(|| args.first().and_then(Value::as_i64))
+                .ok_or_else(|| PlanExprError("ntile window requires n (number of buckets)".to_string()))? as u32;
+            let c = order_col.ntile(n.max(1), &part_refs, false);
+            Ok(c.into_expr())
+        }
+        "lag" => {
+            let n = args
+                .get(1)
+                .and_then(|v| v.get("lit").and_then(Value::as_i64))
+                .or_else(|| args.get(1).and_then(Value::as_i64))
+                .unwrap_or(1);
+            let col_expr = expr_to_column(expr_from_value(
+                args.first().ok_or_else(|| PlanExprError("lag window requires column arg".to_string()))?,
+            )?);
+            let c = col_expr.lag(n).over(&part_refs);
+            Ok(c.into_expr())
+        }
+        "lead" => {
+            let n = args
+                .get(1)
+                .and_then(|v| v.get("lit").and_then(Value::as_i64))
+                .or_else(|| args.get(1).and_then(Value::as_i64))
+                .unwrap_or(1);
+            let col_expr = expr_to_column(expr_from_value(
+                args.first().ok_or_else(|| PlanExprError("lead window requires column arg".to_string()))?,
+            )?);
+            let c = col_expr.lead(n).over(&part_refs);
+            Ok(c.into_expr())
+        }
+        "sum" => {
+            let col_expr = expr_to_column(expr_from_value(
+                args.first().ok_or_else(|| PlanExprError("sum window requires column arg".to_string()))?,
+            )?);
+            let sum_expr = col_expr.expr().clone().sum();
+            let partition_exprs: Vec<Expr> = part_refs.iter().map(|s| col(*s)).collect();
+            Ok(sum_expr.over(partition_exprs))
+        }
+        "avg" | "mean" => {
+            let col_expr = expr_to_column(expr_from_value(
+                args.first().ok_or_else(|| PlanExprError("avg window requires column arg".to_string()))?,
+            )?);
+            let mean_expr = col_expr.expr().clone().mean();
+            let partition_exprs: Vec<Expr> = part_refs.iter().map(|s| col(*s)).collect();
+            Ok(mean_expr.over(partition_exprs))
+        }
+        _ => Err(PlanExprError(format!(
+            "unsupported window fn '{fn_name}' (supported: row_number, rank, dense_rank, percent_rank, ntile, lag, lead, sum, avg)"
+        ))),
+    }
 }
 
 fn lit_from_value(v: &Value) -> Result<Expr, PlanExprError> {
@@ -2524,6 +2629,34 @@ mod tests {
             "fn": "row_number",
             "args": [],
             "window": {"partition_by": [], "order_by": []}
+        });
+        let _ = expr_from_value(&v2).unwrap();
+    }
+
+    /// Sparkless may send "function" instead of "fn" (issue #517).
+    #[test]
+    fn test_type_window_function_key() {
+        let v = json!({
+            "type": "window",
+            "function": "row_number",
+            "window": {"partition_by": ["dept"]}
+        });
+        let _ = expr_from_value(&v).unwrap();
+    }
+
+    /// rank, dense_rank in plan execution (issue #521).
+    #[test]
+    fn test_window_rank_dense_rank() {
+        let v = json!({
+            "fn": "rank",
+            "args": [],
+            "window": {"partition_by": ["dept"], "order_by": ["salary"]}
+        });
+        let _ = expr_from_value(&v).unwrap();
+        let v2 = json!({
+            "type": "window",
+            "fn": "dense_rank",
+            "window": {"order_by": ["val"]}
         });
         let _ = expr_from_value(&v2).unwrap();
     }
