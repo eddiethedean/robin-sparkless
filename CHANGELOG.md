@@ -31,6 +31,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **#553 – Empty DataFrame schema and table ops (PySpark parity)** — Empty DataFrame with explicit schema is supported: `create_dataframe_from_rows([], schema)`, `saveAsTable`, and `spark.table()` work (PySpark raises "can not infer schema from empty dataset"). Regression test added. Fixes #553.
 - **#552 – Inner/left join return 0 rows (PySpark parity)** — Plan interpreter now parses join `on` as array of column refs or eq expressions (Sparkless v4 format) and aligns right join key column names to left’s so inner/left join return correct row counts. Fixes #552.
 - **#551 – Union type coercion (PySpark parity)** — `union` now coerces columns to a common type when left and right have different dtypes (e.g. String vs Int64 → String). Fixes #551.
 - **#550 – Window function approx_count_distinct (PySpark parity)** — Plan interpreter now supports `approx_count_distinct(col).over(window)` in window expressions. Fixes #550.
