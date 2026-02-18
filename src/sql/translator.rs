@@ -421,8 +421,42 @@ fn sql_expr_to_polars(
             }
             sql_function_to_expr(func, session, df)
         }
+        SqlExpr::Like {
+            negated,
+            expr: left,
+            pattern,
+            escape_char,
+        } => {
+            let col_expr = sql_expr_to_polars(left.as_ref(), session, df, having_agg_map)?;
+            let pattern_str = sql_expr_to_string_literal(pattern.as_ref())?;
+            let col_col = crate::column::Column::from_expr(col_expr, None);
+            let like_expr = col_col.like(&pattern_str, *escape_char).into_expr();
+            Ok(if *negated {
+                like_expr.not()
+            } else {
+                like_expr
+            })
+        }
+        SqlExpr::InList {
+            expr: left,
+            list,
+            negated,
+        } => {
+            use polars::prelude::{Series, IntoSeries};
+            let col_expr = sql_expr_to_polars(left.as_ref(), session, df, having_agg_map)?;
+            if list.is_empty() {
+                return Ok(lit(false));
+            }
+            let series = sql_in_list_to_series(list)?;
+            let in_expr = col_expr.is_in(lit(series));
+            Ok(if *negated {
+                in_expr.not()
+            } else {
+                in_expr
+            })
+        }
         _ => Err(PolarsError::InvalidOperation(
-            format!("SQL: unsupported expression in WHERE: {:?}. Use column, literal, =, <, >, AND, OR, IS NULL.", expr).into(),
+            format!("SQL: unsupported expression in WHERE: {:?}. Use column, literal, =, <, >, AND, OR, IS NULL, LIKE, IN.", expr).into(),
         )),
     }
 }
@@ -498,6 +532,73 @@ fn sql_expr_to_col_name(expr: &SqlExpr) -> Result<String, PolarsError> {
             format!("SQL: expected column name, got {:?}", expr).into(),
         )),
     }
+}
+
+/// Extract a string literal from a SQL expression (for LIKE pattern). Issue #590.
+fn sql_expr_to_string_literal(expr: &SqlExpr) -> Result<String, PolarsError> {
+    match expr {
+        SqlExpr::Value(Value::SingleQuotedString(s)) => Ok(s.clone()),
+        _ => Err(PolarsError::InvalidOperation(
+            format!("SQL: LIKE pattern must be a string literal, got {:?}", expr).into(),
+        )),
+    }
+}
+
+/// Build a Polars Series from SQL IN list literals (for WHERE col IN (1,2,3)). Issue #590.
+fn sql_in_list_to_series(list: &[SqlExpr]) -> Result<polars::prelude::Series, PolarsError> {
+    use polars::prelude::{IntoSeries, Series};
+    let mut str_vals: Vec<String> = Vec::new();
+    let mut int_vals: Vec<i64> = Vec::new();
+    let mut float_vals: Vec<f64> = Vec::new();
+    let mut has_string = false;
+    let mut has_float = false;
+    for e in list {
+        match e {
+            SqlExpr::Value(Value::SingleQuotedString(s)) => {
+                str_vals.push(s.clone());
+                has_string = true;
+            }
+            SqlExpr::Value(Value::Number(n, _)) => {
+                str_vals.push(n.clone());
+                if n.contains('.') {
+                    let v: f64 = n.parse().map_err(|_| {
+                        PolarsError::InvalidOperation(
+                            format!("SQL: invalid number in IN list '{}'", n).into(),
+                        )
+                    })?;
+                    float_vals.push(v);
+                    has_float = true;
+                } else {
+                    let v: i64 = n.parse().map_err(|_| {
+                        PolarsError::InvalidOperation(
+                            format!("SQL: invalid integer in IN list '{}'", n).into(),
+                        )
+                    })?;
+                    int_vals.push(v);
+                }
+            }
+            SqlExpr::Value(Value::Boolean(b)) => {
+                str_vals.push(b.to_string());
+                has_string = true;
+            }
+            SqlExpr::Value(Value::Null) => {}
+            _ => {
+                return Err(PolarsError::InvalidOperation(
+                    format!("SQL: IN list supports only literals, got {:?}", e).into(),
+                ));
+            }
+        }
+    }
+    let series = if has_string {
+        Series::from_iter(str_vals.iter().map(|s| s.as_str()))
+    } else if !has_float && int_vals.len() == str_vals.len() {
+        Series::from_iter(int_vals)
+    } else if float_vals.len() == str_vals.len() {
+        Series::from_iter(float_vals)
+    } else {
+        Series::from_iter(str_vals.iter().map(|s| s.as_str()))
+    };
+    Ok(series)
 }
 
 /// Projection item: either a plain Expr (built-in, Rust UDF, identifier) or Python UDF Column.
