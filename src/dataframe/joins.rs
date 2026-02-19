@@ -86,6 +86,29 @@ pub fn join(
     }
     if !right_casts.is_empty() {
         right_lf = right_lf.with_columns(right_casts);
+        // #614: Drop right's original key columns when we aliased to left names, so the result
+        // has only the left key name (e.g. "id") and collect does not fail with "not found: ID".
+        let drop_right: std::collections::HashSet<String> = on
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| left_key_names[*i] != right_key_names[*i])
+            .map(|(i, _)| right_key_names[i].clone())
+            .collect();
+        if !drop_right.is_empty() {
+            let right_names = right.columns()?;
+            let mut keep_names: Vec<&str> = right_names
+                .iter()
+                .filter(|n| !drop_right.contains(*n))
+                .map(String::as_str)
+                .collect();
+            for (i, name) in left_key_names.iter().enumerate() {
+                if left_key_names[i] != right_key_names[i] {
+                    keep_names.push(name.as_str());
+                }
+            }
+            let keep: Vec<Expr> = keep_names.iter().map(|s| col(*s)).collect();
+            right_lf = right_lf.select(&keep);
+        }
     }
 
     let on_set: std::collections::HashSet<String> = left_key_names.iter().cloned().collect();
