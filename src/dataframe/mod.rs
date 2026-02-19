@@ -529,7 +529,7 @@ impl DataFrame {
     }
 
     /// Get the column type as robin-sparkless schema type (Polars-free). Returns None if column not found.
-    /// Prefer this over [`get_column_dtype`] when building bindings that should not depend on Polars.
+    /// Prefer this over [`Self::get_column_dtype`] when building bindings that should not depend on Polars.
     pub fn get_column_data_type(&self, name: &str) -> Option<crate::schema::DataType> {
         let resolved = self.resolve_column_name(name).ok()?;
         let st = self.schema().ok()?;

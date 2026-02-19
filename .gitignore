@@ -25,7 +25,7 @@ wheels/
 .installed.cfg
 *.egg
 
-# Rust
+# Rust (includes target/doc from cargo doc)
 target/
 .cargo-home/
 Cargo.lock
