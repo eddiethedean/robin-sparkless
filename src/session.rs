@@ -4,8 +4,8 @@ use crate::udf_registry::UdfRegistry;
 use polars::chunked_array::StructChunked;
 use polars::chunked_array::builder::get_list_builder;
 use polars::prelude::{
-    DataFrame as PlDataFrame, DataType, IntoSeries, NamedFrom, PlSmallStr, PolarsError, Series,
-    TimeUnit,
+    DataFrame as PlDataFrame, DataType, Field, IntoSeries, NamedFrom, PlSmallStr, PolarsError,
+    Series, TimeUnit,
 };
 use serde_json::Value as JsonValue;
 use std::cell::RefCell;
@@ -39,6 +39,20 @@ fn parse_struct_fields(type_str: &str) -> Option<Vec<(String, String)>> {
         }
     }
     Some(out)
+}
+
+/// Parse "map<key_type,value_type>" to get (key_type, value_type). Returns None if not map<>.
+/// PySpark: MapType(StringType(), StringType()) -> "map<string,string>".
+fn parse_map_key_value_types(type_str: &str) -> Option<(String, String)> {
+    let s = type_str.trim().to_lowercase();
+    if !s.starts_with("map<") || !s.ends_with('>') {
+        return None;
+    }
+    let inner = s[4..s.len() - 1].trim();
+    let comma = inner.find(',')?;
+    let key_type = inner[..comma].trim().to_string();
+    let value_type = inner[comma + 1..].trim().to_string();
+    Some((key_type, value_type))
 }
 
 /// True if type string is Decimal(precision, scale), e.g. "decimal(10,2)".
@@ -429,6 +443,65 @@ fn json_object_or_array_to_struct_series(
         .map_err(|e| PolarsError::ComputeError(format!("struct from value: {e}").into()))?
         .into_series();
     Ok(Some(st))
+}
+
+/// Build a single row's map column value as List(Struct{key, value}) element from a JSON object.
+/// PySpark parity #627: create_dataframe_from_rows accepts dict for map columns.
+fn json_object_to_map_struct_series(
+    obj: &serde_json::Map<String, JsonValue>,
+    key_type: &str,
+    value_type: &str,
+    key_dtype: &DataType,
+    value_dtype: &DataType,
+    _name: &str,
+) -> Result<Series, PolarsError> {
+    if obj.is_empty() {
+        let key_series = Series::new("key".into(), Vec::<String>::new());
+        let value_series = Series::new_empty(PlSmallStr::EMPTY, value_dtype);
+        let st = StructChunked::from_series(
+            PlSmallStr::EMPTY,
+            0,
+            [&key_series, &value_series].iter().copied(),
+        )
+        .map_err(|e| PolarsError::ComputeError(format!("map struct empty: {e}").into()))?
+        .into_series();
+        return Ok(st);
+    }
+    let keys: Vec<String> = obj.keys().cloned().collect();
+    let mut value_series = None::<Series>;
+    for v in obj.values() {
+        let s = json_value_to_series_single(v, value_type, "value")?;
+        value_series = Some(match value_series.take() {
+            None => s,
+            Some(mut acc) => {
+                acc.extend(&s).map_err(|e| {
+                    PolarsError::ComputeError(format!("map value extend: {e}").into())
+                })?;
+                acc
+            }
+        });
+    }
+    let value_series =
+        value_series.unwrap_or_else(|| Series::new_empty(PlSmallStr::EMPTY, value_dtype));
+    let key_series = Series::new("key".into(), keys.clone());
+    let key_series = if key_type.trim().to_lowercase().as_str() == "string"
+        || key_type.trim().to_lowercase().as_str() == "str"
+        || key_type.trim().to_lowercase().as_str() == "varchar"
+    {
+        key_series
+    } else {
+        key_series
+            .cast(key_dtype)
+            .map_err(|e| PolarsError::ComputeError(format!("map key cast: {e}").into()))?
+    };
+    let st = StructChunked::from_series(
+        PlSmallStr::EMPTY,
+        key_series.len(),
+        [&key_series, &value_series].iter().copied(),
+    )
+    .map_err(|e| PolarsError::ComputeError(format!("map struct: {e}").into()))?
+    .into_series();
+    Ok(st)
 }
 
 use std::collections::{HashMap, HashSet};
@@ -1244,6 +1317,57 @@ impl SparkSession {
                                 PolarsError::ComputeError(format!("array elem: {e}").into())
                             })?;
                             builder.append_series(&s)?;
+                        }
+                    }
+                    builder.finish().into_series()
+                }
+                _ if parse_map_key_value_types(&type_lower).is_some() => {
+                    let (key_type, value_type) = parse_map_key_value_types(&type_lower)
+                        .unwrap_or_else(|| unreachable!("guard ensures Some"));
+                    let key_dtype = json_type_str_to_polars(&key_type).ok_or_else(|| {
+                        PolarsError::ComputeError(
+                            format!(
+                                "create_dataframe_from_rows: map key type '{key_type}' not supported"
+                            )
+                            .into(),
+                        )
+                    })?;
+                    let value_dtype = json_type_str_to_polars(&value_type).ok_or_else(|| {
+                        PolarsError::ComputeError(
+                            format!(
+                                "create_dataframe_from_rows: map value type '{value_type}' not supported"
+                            )
+                            .into(),
+                        )
+                    })?;
+                    let struct_dtype = DataType::Struct(vec![
+                        Field::new("key".into(), key_dtype.clone()),
+                        Field::new("value".into(), value_dtype.clone()),
+                    ]);
+                    let n = rows.len();
+                    let mut builder = get_list_builder(&struct_dtype, 64, n, name.as_str().into());
+                    for row in rows.iter() {
+                        let v = row.get(col_idx).cloned().unwrap_or(JsonValue::Null);
+                        if matches!(v, JsonValue::Null) {
+                            builder.append_null();
+                        } else if let Some(obj) = v.as_object() {
+                            let st = json_object_to_map_struct_series(
+                                obj,
+                                &key_type,
+                                &value_type,
+                                &key_dtype,
+                                &value_dtype,
+                                name,
+                            )?;
+                            builder.append_series(&st)?;
+                        } else {
+                            return Err(PolarsError::ComputeError(
+                                format!(
+                                    "create_dataframe_from_rows: map column '{name}' expects JSON object (dict), got {:?}",
+                                    v
+                                )
+                                .into(),
+                            ));
                         }
                     }
                     builder.finish().into_series()
@@ -2084,6 +2208,32 @@ mod tests {
         assert_eq!(df.count().unwrap(), 2);
         let collected = df.collect_inner().unwrap();
         assert_eq!(collected.get_column_names(), &["c0", "c1"]);
+    }
+
+    /// #627: create_dataframe_from_rows accepts map column (dict/object). PySpark MapType parity.
+    #[test]
+    fn test_create_dataframe_from_rows_map_column() {
+        use serde_json::json;
+
+        let spark = SparkSession::builder().app_name("test").get_or_create();
+        let schema = vec![
+            ("id".to_string(), "integer".to_string()),
+            ("m".to_string(), "map<string,string>".to_string()),
+        ];
+        let rows: Vec<Vec<JsonValue>> = vec![
+            vec![json!(1), json!({"a": "x", "b": "y"})],
+            vec![json!(2), json!({"c": "z"})],
+        ];
+        let df = spark.create_dataframe_from_rows(rows, schema).unwrap();
+        assert_eq!(df.count().unwrap(), 2);
+        let collected = df.collect_inner().unwrap();
+        assert_eq!(collected.get_column_names(), &["id", "m"]);
+        let m_col = collected.column("m").unwrap();
+        let list = m_col.list().unwrap();
+        let row0 = list.get(0).unwrap();
+        assert_eq!(row0.len(), 2, "row 0 map should have 2 entries");
+        let row1 = list.get(1).unwrap();
+        assert_eq!(row1.len(), 1, "row 1 map should have 1 entry");
     }
 
     /// #625: create_dataframe_from_rows accepts array column as JSON array or Object (Python list parity).
