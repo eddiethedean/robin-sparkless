@@ -154,11 +154,21 @@ fn json_values_to_series(
                     ));
                 }
             } else {
-                return Err(PolarsError::ComputeError(
-                    "array column value must be null or array (or string that parses as JSON array). \
-                     PySpark accepts Python lists for array columns."
-                        .into(),
-                ));
+                // #611: PySpark accepts single value as one-element list for array columns.
+                let single_arr = [v.clone().unwrap_or(JsonValue::Null)];
+                let elem_series: Vec<Series> = single_arr
+                    .iter()
+                    .map(|e| json_value_to_series_single(e, &elem_type, "elem"))
+                    .collect::<Result<Vec<_>, _>>()?;
+                let vals: Vec<_> = elem_series.iter().filter_map(|s| s.get(0).ok()).collect();
+                let arr_series = Series::from_any_values_and_dtype(
+                    PlSmallStr::EMPTY,
+                    &vals,
+                    &inner_dtype,
+                    false,
+                )
+                .map_err(|e| PolarsError::ComputeError(format!("array elem: {e}").into()))?;
+                builder.append_series(&arr_series)?;
             }
         }
         return Ok(builder.finish().into_series());
@@ -1154,11 +1164,24 @@ impl SparkSession {
                                 ));
                             }
                         } else {
-                            return Err(PolarsError::ComputeError(
-                                "array column value must be null or array (or string that parses as JSON array). \
-                                 PySpark accepts Python lists for array columns."
-                                    .into(),
-                            ));
+                            // #611: PySpark accepts single value as one-element list.
+                            let single_arr = [v];
+                            let elem_series: Vec<Series> = single_arr
+                                .iter()
+                                .map(|e| json_value_to_series_single(e, &elem_type, "elem"))
+                                .collect::<Result<Vec<_>, _>>()?;
+                            let vals: Vec<_> =
+                                elem_series.iter().filter_map(|s| s.get(0).ok()).collect();
+                            let s = Series::from_any_values_and_dtype(
+                                PlSmallStr::EMPTY,
+                                &vals,
+                                &inner_dtype,
+                                false,
+                            )
+                            .map_err(|e| {
+                                PolarsError::ComputeError(format!("array elem: {e}").into())
+                            })?;
+                            builder.append_series(&s)?;
                         }
                     }
                     builder.finish().into_series()
@@ -1233,11 +1256,24 @@ impl SparkSession {
                                 ));
                             }
                         } else {
-                            return Err(PolarsError::ComputeError(
-                                "array column value must be null or array (or string that parses as JSON array). \
-                                 PySpark accepts Python lists for array columns."
-                                    .into(),
-                            ));
+                            // #611: PySpark accepts single value as one-element list.
+                            let single_arr = [v];
+                            let elem_series: Vec<Series> = single_arr
+                                .iter()
+                                .map(|e| json_value_to_series_single(e, &elem_type, "elem"))
+                                .collect::<Result<Vec<_>, _>>()?;
+                            let vals: Vec<_> =
+                                elem_series.iter().filter_map(|s| s.get(0).ok()).collect();
+                            let s = Series::from_any_values_and_dtype(
+                                PlSmallStr::EMPTY,
+                                &vals,
+                                &inner_dtype,
+                                false,
+                            )
+                            .map_err(|e| {
+                                PolarsError::ComputeError(format!("array elem: {e}").into())
+                            })?;
+                            builder.append_series(&s)?;
                         }
                     }
                     builder.finish().into_series()
@@ -1911,6 +1947,36 @@ mod tests {
             .create_dataframe_from_rows(rows_array, schema)
             .unwrap();
         assert_eq!(df2.count().unwrap(), 1);
+    }
+
+    /// #611: create_dataframe_from_rows accepts single value as one-element array (PySpark parity).
+    #[test]
+    fn test_issue_611_array_column_single_value_as_one_element() {
+        use serde_json::json;
+
+        let spark = SparkSession::builder().app_name("test").get_or_create();
+        let schema = vec![
+            ("id".to_string(), "string".to_string()),
+            ("arr".to_string(), "array<bigint>".to_string()),
+        ];
+        // Single number as one-element list (PySpark accepts this).
+        let rows: Vec<Vec<JsonValue>> = vec![
+            vec![json!("x"), json!(42)],
+            vec![json!("y"), json!([1, 2, 3])],
+        ];
+        let df = spark.create_dataframe_from_rows(rows, schema).unwrap();
+        assert_eq!(df.count().unwrap(), 2);
+        let collected = df.collect_inner().unwrap();
+        let arr_col = collected.column("arr").unwrap();
+        let list = arr_col.list().unwrap();
+        let row0 = list.get(0).unwrap();
+        assert_eq!(
+            row0.len(),
+            1,
+            "#611: single value should become one-element list"
+        );
+        let row1 = list.get(1).unwrap();
+        assert_eq!(row1.len(), 3);
     }
 
     /// create_dataframe_from_rows: array column with JSON array and null. PySpark parity #601.
