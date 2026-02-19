@@ -298,6 +298,38 @@ impl Column {
             )
     }
 
+    /// Create a Column that is always a null boolean.
+    /// This is useful for downstream bindings (e.g. PyO3) that need a null literal
+    /// without depending directly on Polars types like `Expr` or `LiteralValue`.
+    pub fn null_boolean() -> Column {
+        Column::from_expr(Self::null_boolean_expr(), None)
+    }
+
+    /// Create a Column that is always a null value of the given type.
+    /// `dtype` is a type name string (e.g. `"boolean"`, `"string"`, `"bigint"`, `"double"`).
+    /// See [`crate::functions::parse_type_name`] for supported names.
+    /// Returns `Err` on unknown type name so bindings get a clear error.
+    pub fn lit_null(dtype: &str) -> Result<Column, String> {
+        use polars::prelude::{lit, NULL};
+        let dt = crate::functions::parse_type_name(dtype)?;
+        Ok(Column::from_expr(lit(NULL).cast(dt), None))
+    }
+
+    /// Create a Column from a boolean literal. Convenience for bindings that prefer method form.
+    pub fn from_bool(b: bool) -> Column {
+        crate::functions::lit_bool(b)
+    }
+
+    /// Create a Column from an i64 literal. Convenience for bindings that prefer method form.
+    pub fn from_i64(n: i64) -> Column {
+        crate::functions::lit_i64(n)
+    }
+
+    /// Create a Column from a string literal. Convenience for bindings that prefer method form.
+    pub fn from_string(s: &str) -> Column {
+        crate::functions::lit_str(s)
+    }
+
     /// PySpark-style greater-than comparison (NULL > value returns NULL)
     /// Any comparison involving NULL returns NULL
     pub fn gt_pyspark(&self, other: &Column) -> Column {
@@ -2984,6 +3016,20 @@ mod tests {
 
         let filtered = df.lazy().filter(result.into_expr()).collect().unwrap();
         assert_eq!(filtered.height(), 3); // 3 non-null values in column 'a'
+    }
+
+    #[test]
+    fn test_null_boolean_column_produces_null_bool_series() {
+        let df = test_df();
+        let expr = Column::null_boolean().into_expr();
+        let out = df
+            .lazy()
+            .select([expr.alias("null_bool")])
+            .collect()
+            .unwrap();
+        let s = out.column("null_bool").unwrap();
+        assert_eq!(s.dtype(), &polars::prelude::DataType::Boolean);
+        assert_eq!(s.null_count(), s.len());
     }
 
     #[test]

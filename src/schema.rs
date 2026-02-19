@@ -72,6 +72,17 @@ impl StructType {
     pub fn fields(&self) -> &[StructField] {
         &self.fields
     }
+
+    /// Serialize the schema to a JSON string (array of field objects with name, data_type, nullable).
+    /// Useful for bindings that need to expose schema to the host without Polars types.
+    pub fn to_json(&self) -> Result<String, serde_json::Error> {
+        serde_json::to_string(self)
+    }
+
+    /// Serialize the schema to a pretty-printed JSON string.
+    pub fn to_json_pretty(&self) -> Result<String, serde_json::Error> {
+        serde_json::to_string_pretty(self)
+    }
 }
 
 fn polars_type_to_data_type(polars_type: &PlDataType) -> DataType {
@@ -195,6 +206,23 @@ mod tests {
         for (orig, rt) in original.fields().iter().zip(roundtrip.fields().iter()) {
             assert_eq!(orig.name, rt.name);
         }
+    }
+
+    #[test]
+    fn test_struct_type_to_json() {
+        let fields = vec![
+            StructField::new("id".to_string(), DataType::Long, false),
+            StructField::new("name".to_string(), DataType::String, true),
+        ];
+        let schema = StructType::new(fields);
+        let json = schema.to_json().unwrap();
+        assert!(json.contains("\"name\":\"id\""));
+        assert!(json.contains("\"name\":\"name\""));
+        assert!(json.contains("\"data_type\""));
+        assert!(json.contains("\"nullable\""));
+        let _parsed: StructType = serde_json::from_str(&json).unwrap();
+        let pretty = schema.to_json_pretty().unwrap();
+        assert!(pretty.contains('\n'));
     }
 
     #[test]
