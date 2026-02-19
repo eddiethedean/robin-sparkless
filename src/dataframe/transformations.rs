@@ -231,13 +231,16 @@ pub fn union(
 /// Union by name: stack vertically, aligning columns by name.
 /// When allow_missing_columns is true: result has all columns from both sides (missing filled with null).
 /// When false: result has only left columns; right must have all left columns.
+/// When same-named columns have different types (e.g. String vs Int64), coerces to a common type (PySpark parity #603).
 pub fn union_by_name(
     left: &DataFrame,
     right: &DataFrame,
     allow_missing_columns: bool,
     case_sensitive: bool,
 ) -> Result<DataFrame, PolarsError> {
+    use crate::type_coercion::find_common_type;
     use polars::prelude::*;
+
     let left_names = left.columns()?;
     let right_names = right.columns()?;
     let contains = |names: &[String], name: &str| -> bool {
@@ -272,34 +275,37 @@ pub fn union_by_name(
     } else {
         left_names.clone()
     };
-    // Alias every expression to the canonical name `c` so that when left has "ID" and right has "id"
-    // (case-insensitive match), both sides produce the same column name in the result (#386).
-    let left_exprs: Vec<Expr> = all_columns
-        .iter()
-        .map(|c| match resolve(&left_names, c.as_str()) {
-            Some(r) => col(r.as_str()).alias(c.as_str()),
-            None => {
-                let dtype = right
-                    .get_column_dtype(c)
-                    .unwrap_or(polars::prelude::DataType::Null);
-                Expr::Literal(polars::prelude::LiteralValue::Null)
-                    .cast(dtype)
-                    .alias(c.as_str())
-            }
-        })
-        .collect();
+    // Per-column common type for coercion when left/right types differ (#603).
+    let mut left_exprs: Vec<Expr> = Vec::with_capacity(all_columns.len());
     let mut right_exprs: Vec<Expr> = Vec::with_capacity(all_columns.len());
     for c in &all_columns {
-        let expr = match resolve(&right_names, c.as_str()) {
-            Some(r) => col(r.as_str()).alias(c.as_str()),
-            None if allow_missing_columns => {
-                let dtype = left
-                    .get_column_dtype(c)
-                    .unwrap_or(polars::prelude::DataType::Null);
-                Expr::Literal(polars::prelude::LiteralValue::Null)
-                    .cast(dtype)
-                    .alias(c.as_str())
-            }
+        let left_has = resolve(&left_names, c.as_str());
+        let right_has = resolve(&right_names, c.as_str());
+        let left_dtype = left_has.as_ref().and_then(|r| left.get_column_dtype(r));
+        let right_dtype = right_has.as_ref().and_then(|r| right.get_column_dtype(r));
+        let common_dtype = match (&left_dtype, &right_dtype) {
+            (Some(lt), Some(rt)) if lt != rt => find_common_type(lt, rt).map_err(|e| {
+                PolarsError::ComputeError(
+                    format!("union_by_name: column '{}' type coercion: {}", c, e).into(),
+                )
+            })?,
+            (Some(lt), Some(_)) => lt.clone(),
+            (Some(lt), None) => lt.clone(),
+            (None, Some(rt)) => rt.clone(),
+            (None, None) => polars::prelude::DataType::Null,
+        };
+        let left_expr = match &left_has {
+            Some(r) => col(r.as_str()).cast(common_dtype.clone()).alias(c.as_str()),
+            None => Expr::Literal(polars::prelude::LiteralValue::Null)
+                .cast(common_dtype.clone())
+                .alias(c.as_str()),
+        };
+        left_exprs.push(left_expr);
+        let right_expr = match &right_has {
+            Some(r) => col(r.as_str()).cast(common_dtype.clone()).alias(c.as_str()),
+            None if allow_missing_columns => Expr::Literal(polars::prelude::LiteralValue::Null)
+                .cast(common_dtype)
+                .alias(c.as_str()),
             None => {
                 return Err(PolarsError::InvalidOperation(
                     format!(
@@ -310,7 +316,7 @@ pub fn union_by_name(
                 ));
             }
         };
-        right_exprs.push(expr);
+        right_exprs.push(right_expr);
     }
     let lf1 = left.lazy_frame().select(&left_exprs);
     let lf2 = right.lazy_frame().select(&right_exprs);
@@ -1331,8 +1337,9 @@ pub fn intersect_all(
 
 #[cfg(test)]
 mod tests {
-    use super::{distinct, drop, dropna, first, head, limit, offset, order_by};
+    use super::{distinct, drop, dropna, first, head, limit, offset, order_by, union_by_name};
     use crate::{DataFrame, SparkSession};
+    use serde_json::json;
 
     fn test_df() -> DataFrame {
         let spark = SparkSession::builder()
@@ -1432,6 +1439,28 @@ mod tests {
         let cols = out.columns().unwrap();
         assert!(!cols.contains(&"v".to_string()));
         assert_eq!(out.count().unwrap(), 3);
+    }
+
+    /// Issue #603: unionByName with same-named columns of different types (e.g. id Int vs id String) must coerce and succeed.
+    #[test]
+    fn union_by_name_coerces_different_column_types() {
+        use polars::prelude::df;
+
+        let spark = SparkSession::builder()
+            .app_name("transform_tests")
+            .get_or_create();
+        let left_pl = df!("id" => &[1i64], "name" => &["a"]).unwrap();
+        let left = spark.create_dataframe_from_polars(left_pl);
+        let schema = vec![
+            ("id".to_string(), "string".to_string()),
+            ("name".to_string(), "string".to_string()),
+        ];
+        let right = spark
+            .create_dataframe_from_rows(vec![vec![json!("2"), json!("b")]], schema)
+            .unwrap();
+        let out = union_by_name(&left, &right, true, false)
+            .expect("issue #603: union_by_name must coerce id Int64 vs String");
+        assert_eq!(out.count().unwrap(), 2);
     }
 
     #[test]
