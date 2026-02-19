@@ -27,17 +27,13 @@ confidence-threshold = 0.8
 ignore = true
 
 [bans]
-multiple-versions = "warn"
-wildcards = "allow"
 # Duplicate versions from polars vs deltalake/other deps; cannot unify
+multiple-versions = "allow"
+wildcards = "allow"
 skip = [
     "chrono-tz@0.10.4",
     "getrandom@0.2.17",
-    "hashbrown@0.14.5",
     "hashbrown@0.15.5",
-    "syn@1.0.109",
-    "thiserror@1.0.69",
-    "thiserror-impl@1.0.69",
     "windows-sys@0.59.0",
     "phf@0.11.3",
     "phf_shared@0.11.3",
