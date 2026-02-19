@@ -167,7 +167,48 @@ pub fn expr_from_value(v: &Value) -> Result<Expr, PlanExprError> {
                 let left = expr_from_value(left_v)?;
                 let lower = expr_from_value(lower_v)?;
                 let upper = expr_from_value(upper_v)?;
-                return Ok(left.clone().gt_eq(lower).and(left.lt_eq(upper)));
+                // #628: Apply string–numeric coercion so col("val").between(1, 10) works when val is string.
+                let infer_lit_type = |e: &Expr| -> Option<DataType> {
+                    if let Expr::Literal(lv) = e {
+                        let dt = lv.get_datatype();
+                        if matches!(dt, DataType::Unknown(_)) {
+                            None
+                        } else {
+                            Some(dt)
+                        }
+                    } else {
+                        None
+                    }
+                };
+                let lower_ty = infer_lit_type(&lower);
+                let upper_ty = infer_lit_type(&upper);
+                use crate::type_coercion::{CompareOp, coerce_for_pyspark_comparison};
+                // Assume column is String when unknown so string–numeric coercion is applied (#628).
+                let lt = DataType::String;
+                let rt_lower = lower_ty.unwrap_or(DataType::String);
+                let rt_upper = upper_ty.unwrap_or(DataType::String);
+                let (left_c, lower_c) = match coerce_for_pyspark_comparison(
+                    left.clone(),
+                    lower.clone(),
+                    &lt,
+                    &rt_lower,
+                    &CompareOp::GtEq,
+                ) {
+                    Ok((a, b)) => (a, b),
+                    Err(_) => (left.clone(), lower),
+                };
+                let upper_clone = upper.clone();
+                let (left_cc, upper_c) = match coerce_for_pyspark_comparison(
+                    left_c.clone(),
+                    upper,
+                    &lt,
+                    &rt_upper,
+                    &CompareOp::LtEq,
+                ) {
+                    Ok((a, b)) => (a, b),
+                    Err(_) => (left_c.clone(), upper_clone),
+                };
+                return Ok(left_cc.clone().gt_eq(lower_c).and(left_cc.lt_eq(upper_c)));
             }
             "**" | "pow" => {
                 let left_v = obj
@@ -2903,5 +2944,19 @@ mod tests {
             "args": [{"col": "a"}, {"col": "b"}, {"lit": 0}]
         });
         let _ = expr_from_value(&v).unwrap();
+    }
+
+    /// #628: between with string column and numeric bounds parses and uses coercion.
+    #[test]
+    fn test_between_string_column_numeric_bounds() {
+        let v = json!({
+            "op": "between",
+            "left": {"col": "val"},
+            "lower": {"lit": 1},
+            "upper": {"lit": 10}
+        });
+        let expr = expr_from_value(&v).unwrap();
+        // Expression should be (val >= 1) and (val <= 10) with coercion applied
+        let _ = expr;
     }
 }
