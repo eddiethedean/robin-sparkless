@@ -60,6 +60,6 @@ pub use dataframe::{
 };
 pub use error::EngineError;
 pub use functions::{SortOrder, *};
-pub use schema::{StructField, StructType};
+pub use schema::{schema_from_json, DataType, StructField, StructType};
 pub use session::{DataFrameReader, SparkSession, SparkSessionBuilder};
 pub use traits::{FromRobinDf, IntoRobinDf};

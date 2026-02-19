@@ -47,14 +47,14 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-robin-sparkless = "0.11.12"
+robin-sparkless = "0.12.0"
 ```
 
 Optional features:
 
 ```toml
-robin-sparkless = { version = "0.11.12", features = ["sql"] }   # spark.sql(), temp views
-robin-sparkless = { version = "0.11.12", features = ["delta"] }  # Delta Lake read/write
+robin-sparkless = { version = "0.12.0", features = ["sql"] }   # spark.sql(), temp views
+robin-sparkless = { version = "0.12.0", features = ["delta"] }  # Delta Lake read/write
 ```
 
 ## Quick start
@@ -106,7 +106,7 @@ Use the [prelude](https://docs.rs/robin-sparkless/latest/robin_sparkless/prelude
 
 ```toml
 [dependencies]
-robin-sparkless = "0.11.12"
+robin-sparkless = "0.12.0"
 ```
 
 ```rust
@@ -136,7 +136,7 @@ fn main() -> Result<(), robin_sparkless::EngineError> {
 }
 ```
 
-Run the [embed_basic](examples/embed_basic.rs) example: `cargo run --example embed_basic`. For a minimal FFI surface (no Polars types), use `robin_sparkless::prelude::embed`.
+Run the [embed_basic](examples/embed_basic.rs) example: `cargo run --example embed_basic`. For a minimal FFI surface (no Polars types), use `robin_sparkless::prelude::embed`; use the `*_engine()` methods and schema helpers (`StructType::to_json`, `schema_from_json`) so bindings rely only on `EngineError` and robin-sparkless types. See [docs/EMBEDDING.md](docs/EMBEDDING.md).
 
 ## Development
 
