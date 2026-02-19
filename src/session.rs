@@ -2760,6 +2760,32 @@ mod tests {
         assert_eq!(rows[0].get("name").and_then(|v| v.as_str()), Some("Temp"));
     }
 
+    /// #629: Exact reproduction – createDataFrame, createOrReplaceTempView, then table() must resolve.
+    #[test]
+    fn test_issue_629_temp_view_visible_after_create() {
+        use serde_json::json;
+
+        let spark = SparkSession::builder().app_name("repro").get_or_create();
+        let schema = vec![
+            ("id".to_string(), "long".to_string()),
+            ("name".to_string(), "string".to_string()),
+        ];
+        let rows: Vec<Vec<JsonValue>> =
+            vec![vec![json!(1), json!("a")], vec![json!(2), json!("b")]];
+        let df = spark.create_dataframe_from_rows(rows, schema).unwrap();
+        spark.create_or_replace_temp_view("my_view", df);
+        let result = spark
+            .table("my_view")
+            .unwrap()
+            .collect_as_json_rows()
+            .unwrap();
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].get("id").and_then(|v| v.as_i64()), Some(1));
+        assert_eq!(result[0].get("name").and_then(|v| v.as_str()), Some("a"));
+        assert_eq!(result[1].get("id").and_then(|v| v.as_i64()), Some(2));
+        assert_eq!(result[1].get("name").and_then(|v| v.as_str()), Some("b"));
+    }
+
     #[test]
     fn test_drop_table() {
         use crate::dataframe::SaveMode;

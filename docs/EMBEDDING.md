@@ -30,6 +30,10 @@ Where no `_engine` variant exists, use the existing method and `.map_err(EngineE
 - **`StructType::to_json()`** / **`StructType::to_json_pretty()`** — Serialize the schema to a JSON string. Returns `Result<String, serde_json::Error>`.
 - **`schema_from_json(json)`** — Parse a schema from a JSON string (e.g. from the host). Returns `Result<StructType, EngineError>`.
 
+## Temp views
+
+- **Temp views** are **session-scoped**. After `create_or_replace_temp_view(name, df)`, the same session must be used for `table(name)` and `spark.sql("SELECT ... FROM name")`. If your binding (e.g. PyO3) uses a different session handle for `table()` or `sql()` than for `create_or_replace_temp_view()`, the view will not be found. Ensure the same `SparkSession` instance is used for both registration and lookup.
+
 ## Error handling
 
 - **`EngineError`** — Unified error type with variants: `User`, `Internal`, `Io`, `Sql`, `NotFound`, `Other`. Implements `From<PolarsError>`, `From<serde_json::Error>`, and `From<std::io::Error>`. Use `*_engine()` methods to get `Result<_, EngineError>` directly, or `.map_err(EngineError::from)` on APIs that still return `PolarsError`.
