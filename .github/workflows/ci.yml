@@ -15,7 +15,7 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: 1.89.0
+          toolchain: 1.93.1
           components: rustfmt
       - name: Cache cargo
         uses: actions/cache@v4
@@ -38,7 +38,7 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: 1.89.0
+          toolchain: 1.93.1
           components: clippy
       - name: Cache cargo
         uses: actions/cache@v4
@@ -61,7 +61,7 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: 1.89.0
+          toolchain: 1.93.1
       - name: Install cargo-audit
         run: cargo install cargo-audit
       - name: Cache cargo
@@ -85,7 +85,7 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: 1.89.0
+          toolchain: 1.93.1
       - name: Install cargo-deny
         run: cargo install cargo-deny
       - name: Cache cargo
@@ -110,7 +110,7 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: 1.89.0
+          toolchain: 1.93.1
 
       - name: Cache cargo
         uses: actions/cache@v4
@@ -138,7 +138,7 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: 1.89.0
+          toolchain: 1.93.1
       - name: Install cargo-nextest
         run: cargo install cargo-nextest --version 0.9.92 --locked
       - name: Cache cargo
@@ -166,7 +166,7 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: 1.89.0
+          toolchain: 1.93.1
       - name: Install cargo-nextest
         run: cargo install cargo-nextest --version 0.9.92 --locked
       - name: Cache cargo
