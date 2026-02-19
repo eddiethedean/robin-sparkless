@@ -15,6 +15,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 (none yet)
 
+## [0.11.12] - 2026-02-19
+
+### Fixed
+
+- **#610 – create_dataframe_from_rows struct (object or array)** — Struct columns accept values that are JSON strings parsing to object or array (e.g. Python tuple as `"[1, \"y\"]"`). Fixes #610.
+- **#611 – create_dataframe_from_rows array column** — Array columns accept a single non-array value as a one-element list (PySpark parity). Fixes #611.
+- **#612 – Filter predicate string vs numeric coercion** — Plan expressions: when one side of a comparison is a literal and the other is a column, assume column is String so string–numeric coercion is applied. Fixes #612.
+- **#613 – unionByName type coercion** — `find_common_type` fallback for string vs other; when one side’s dtype is unknown, use String so string→int cast is never attempted. Fixes #613.
+- **#614 – Join column resolution / case sensitivity** — After aliasing right key to left name (e.g. ID → id), drop right’s original key column so the result has only the left key name and collect does not fail with "not found: ID". Fixes #614.
+- **#615 – Date vs datetime comparison** — When comparing Date with Datetime, cast Date to Datetime so both sides are comparable (PySpark: date as start-of-day). Fixes #615.
+
 ## [0.11.10] - 2026-02-18
 
 ### Fixed
