@@ -5,8 +5,8 @@
 //!
 //! # Getting started and embedding
 //!
-//! For application code and embedding, use the [prelude](prelude): `use robin_sparkless::prelude::*`.
-//! For a minimal FFI surface, use [prelude::embed](prelude::embed).
+//! For application code and embedding, use the [prelude]: `use robin_sparkless::prelude::*`.
+//! For a minimal FFI surface, use [prelude::embed].
 //!
 //! # Panics and errors
 //!
