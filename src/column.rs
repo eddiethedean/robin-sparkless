@@ -305,6 +305,31 @@ impl Column {
         Column::from_expr(Self::null_boolean_expr(), None)
     }
 
+    /// Create a Column that is always a null value of the given type.
+    /// `dtype` is a type name string (e.g. `"boolean"`, `"string"`, `"bigint"`, `"double"`).
+    /// See [`crate::functions::parse_type_name`] for supported names.
+    /// Returns `Err` on unknown type name so bindings get a clear error.
+    pub fn lit_null(dtype: &str) -> Result<Column, String> {
+        use polars::prelude::{lit, NULL};
+        let dt = crate::functions::parse_type_name(dtype)?;
+        Ok(Column::from_expr(lit(NULL).cast(dt), None))
+    }
+
+    /// Create a Column from a boolean literal. Convenience for bindings that prefer method form.
+    pub fn from_bool(b: bool) -> Column {
+        crate::functions::lit_bool(b)
+    }
+
+    /// Create a Column from an i64 literal. Convenience for bindings that prefer method form.
+    pub fn from_i64(n: i64) -> Column {
+        crate::functions::lit_i64(n)
+    }
+
+    /// Create a Column from a string literal. Convenience for bindings that prefer method form.
+    pub fn from_string(s: &str) -> Column {
+        crate::functions::lit_str(s)
+    }
+
     /// PySpark-style greater-than comparison (NULL > value returns NULL)
     /// Any comparison involving NULL returns NULL
     pub fn gt_pyspark(&self, other: &Column) -> Column {

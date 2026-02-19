@@ -13,6 +13,7 @@ pub use transformations::{
 };
 
 use crate::column::Column;
+use crate::error::EngineError;
 use crate::functions::SortOrder;
 use crate::schema::StructType;
 use crate::session::SparkSession;
@@ -569,6 +570,13 @@ impl DataFrame {
             rows.push(row);
         }
         Ok(rows)
+    }
+
+    /// Collect the DataFrame as a JSON array of row objects (string).
+    /// Convenient for embedders that want a single string without depending on Polars error types.
+    pub fn to_json_rows(&self) -> Result<String, EngineError> {
+        let rows = self.collect_as_json_rows()?;
+        serde_json::to_string(&rows).map_err(Into::into)
     }
 
     /// Select columns (returns a new DataFrame).

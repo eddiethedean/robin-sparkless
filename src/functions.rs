@@ -137,6 +137,12 @@ pub fn lit_str(value: &str) -> Column {
     Column::from_expr(expr, None)
 }
 
+/// Typed null literal column. Returns `Err` on unknown type name.
+/// See [`parse_type_name`] for supported type strings (e.g. `"boolean"`, `"string"`, `"bigint"`).
+pub fn lit_null(dtype: &str) -> Result<Column, String> {
+    Column::lit_null(dtype)
+}
+
 /// Count aggregation
 pub fn count(col: &Column) -> Column {
     Column::from_expr(col.expr().clone().count(), Some("count".to_string()))
