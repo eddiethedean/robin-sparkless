@@ -1,9 +1,11 @@
 //! Integration tests for issue #235: string–numeric comparison coercion in filter.
-//! And issue #265: date/datetime vs string comparison (PySpark implicit cast).
+//! Issue #265: date/datetime vs string comparison (PySpark implicit cast).
+//! Issue #602: filter predicate string vs numeric coercion (PySpark parity).
 //!
 //! These tests ensure that `df.filter(col("str_col") == lit(123))` (and symmetric form)
 //! is coerced so that the string column is compared numerically (PySpark parity), and
-//! that the filter runs without "cannot compare string with numeric type".
+//! that the filter runs without "cannot compare string with numeric type" or
+//! "filter predicate was not of type boolean".
 //! Issue #265: `df.filter(col("dt") == "2025-01-01")` on a date column is coerced so
 //! the string literal is cast to date (PySpark parity).
 
@@ -26,6 +28,22 @@ fn issue_235_string_eq_numeric_literal_in_filter() {
         out.count().unwrap(),
         1,
         "filter(str_col == 123) should return one row"
+    );
+}
+
+/// Issue #602: PySpark df.filter(df["s"] == 123) on string column must work (coercion).
+/// Must not fail with "cannot compare string with numeric type" or "filter predicate was not of type boolean".
+#[test]
+fn issue_602_filter_string_column_eq_numeric_literal() {
+    let df = df_with_string_column();
+    let expr = col("str_col").eq(lit_i64(123).into_expr()).into_expr();
+    let out = df
+        .filter(expr)
+        .expect("issue #602: filter(string_col == 123) must succeed with coercion");
+    assert_eq!(
+        out.count().unwrap(),
+        1,
+        "issue #602: expect one row [Row(s='123')]"
     );
 }
 
