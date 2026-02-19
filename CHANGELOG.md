@@ -15,6 +15,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 (none yet)
 
+## [0.12.1] - 2026-02-19
+
+### Fixed
+
+- **#624 – create_dataframe_from_rows empty schema with non-empty rows** — When schema is empty but rows are not (e.g. Sparkless/PyO3 sends empty schema), the crate now infers schema from the rows (column names `c0`, `c1`, … and types from first non-null per column). PySpark parity. Fixes #624.
+- **#625 – create_dataframe_from_rows array column (list/object)** — Array columns now accept JSON array, Object with `"0"`, `"1"`, … keys (Python list serialization), or string that parses as JSON array. PySpark accepts Python lists for array columns. Fixes #625.
+
 ## [0.12.0] - 2026-02-19
 
 ### Added
