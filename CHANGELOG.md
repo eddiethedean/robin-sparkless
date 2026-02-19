@@ -15,6 +15,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 (none yet)
 
+## [0.12.2] - 2026-02-19
+
+### Fixed
+
+- **#627 – create_dataframe_from_rows map type** — Map columns (e.g. `map<string,string>`) now accepted; JSON object (dict) per row, stored as List(Struct{key, value}). PySpark parity.
+- **#628 – between() string vs numeric** — Plan interpreter applies string–numeric coercion in `between(lower, upper)` so `col("val").between(1, 10)` works when `val` is string.
+- **#629 – Temp view resolution** — Added test and docs: temp views are session-scoped; bindings must use the same SparkSession for `create_or_replace_temp_view` and `table()` / `sql()`.
+
 ## [0.12.1] - 2026-02-19
 
 ### Fixed

@@ -47,14 +47,14 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-robin-sparkless = "0.12.0"
+robin-sparkless = "0.12.2"
 ```
 
 Optional features:
 
 ```toml
-robin-sparkless = { version = "0.12.0", features = ["sql"] }   # spark.sql(), temp views
-robin-sparkless = { version = "0.12.0", features = ["delta"] }  # Delta Lake read/write
+robin-sparkless = { version = "0.12.2", features = ["sql"] }   # spark.sql(), temp views
+robin-sparkless = { version = "0.12.2", features = ["delta"] }  # Delta Lake read/write
 ```
 
 ## Quick start
@@ -107,7 +107,7 @@ Use the [prelude](https://docs.rs/robin-sparkless/latest/robin_sparkless/prelude
 
 ```toml
 [dependencies]
-robin-sparkless = "0.12.0"
+robin-sparkless = "0.12.2"
 ```
 
 ```rust
