@@ -63,11 +63,45 @@ fn json_type_str_to_polars(type_str: &str) -> Option<DataType> {
     }
 }
 
+/// Normalize a JSON value to an array for array columns (PySpark parity #625).
+/// Accepts: Array, Object with "0","1",... keys (Python list serialization), String that parses as JSON array.
+/// Returns None for null or when value should be treated as single-element list (#611).
+fn json_value_to_array(v: &JsonValue) -> Option<Vec<JsonValue>> {
+    match v {
+        JsonValue::Null => None,
+        JsonValue::Array(arr) => Some(arr.clone()),
+        JsonValue::Object(obj) => {
+            // Python/serialization sometimes sends list as {"0": x, "1": y}. Build sorted by index.
+            let mut indices: Vec<usize> = obj
+                .keys()
+                .filter_map(|k| k.parse::<usize>().ok())
+                .collect();
+            indices.sort_unstable();
+            if indices.is_empty() {
+                return None;
+            }
+            let arr: Vec<JsonValue> = indices
+                .iter()
+                .filter_map(|i| obj.get(&i.to_string()).cloned())
+                .collect();
+            Some(arr)
+        }
+        JsonValue::String(s) => {
+            if let Ok(parsed) = serde_json::from_str::<JsonValue>(s) {
+                parsed.as_array().cloned()
+            } else {
+                None
+            }
+        }
+        _ => None,
+    }
+}
+
 /// Infer list element type from first non-null array in the column (for schema "list" / "array").
 fn infer_list_element_type(rows: &[Vec<JsonValue>], col_idx: usize) -> Option<(String, DataType)> {
     for row in rows {
         let v = row.get(col_idx)?;
-        let arr = v.as_array()?;
+        let arr = json_value_to_array(v)?;
         let first = arr.first()?;
         return Some(match first {
             JsonValue::String(_) => ("string".to_string(), DataType::String),
@@ -106,7 +140,8 @@ fn json_values_to_series(
         for v in values.iter() {
             if v.as_ref().is_none_or(|x| matches!(x, JsonValue::Null)) {
                 builder.append_null();
-            } else if let Some(arr) = v.as_ref().and_then(|x| x.as_array()) {
+            } else if let Some(arr) = v.as_ref().and_then(|x| json_value_to_array(x)) {
+                // #625: Array, Object with "0","1",..., or string that parses as JSON array (PySpark list parity).
                 let elem_series: Vec<Series> = arr
                     .iter()
                     .map(|e| json_value_to_series_single(e, &elem_type, "elem"))
@@ -120,40 +155,6 @@ fn json_values_to_series(
                 )
                 .map_err(|e| PolarsError::ComputeError(format!("array elem: {e}").into()))?;
                 builder.append_series(&s)?;
-            } else if let Some(str_val) = v.as_ref().and_then(|x| x.as_str()) {
-                // PySpark parity #601: accept string that parses as JSON array (e.g. "[1,2,3]").
-                if let Ok(parsed) = serde_json::from_str::<JsonValue>(str_val) {
-                    if let Some(arr) = parsed.as_array() {
-                        let elem_series: Vec<Series> = arr
-                            .iter()
-                            .map(|e| json_value_to_series_single(e, &elem_type, "elem"))
-                            .collect::<Result<Vec<_>, _>>()?;
-                        let vals: Vec<_> =
-                            elem_series.iter().filter_map(|s| s.get(0).ok()).collect();
-                        let arr_series = Series::from_any_values_and_dtype(
-                            PlSmallStr::EMPTY,
-                            &vals,
-                            &inner_dtype,
-                            false,
-                        )
-                        .map_err(|e| {
-                            PolarsError::ComputeError(format!("array elem: {e}").into())
-                        })?;
-                        builder.append_series(&arr_series)?;
-                    } else {
-                        return Err(PolarsError::ComputeError(
-                            "array column value must be null or array (or string that parses as JSON array). \
-                             PySpark accepts Python lists for array columns."
-                                .into(),
-                        ));
-                    }
-                } else {
-                    return Err(PolarsError::ComputeError(
-                        "array column value must be null or array (or string that parses as JSON array). \
-                         PySpark accepts Python lists for array columns."
-                            .into(),
-                    ));
-                }
             } else {
                 // #611: PySpark accepts single value as one-element list for array columns.
                 let single_arr = [v.clone().unwrap_or(JsonValue::Null)];
@@ -972,6 +973,15 @@ impl SparkSession {
         rows: Vec<Vec<JsonValue>>,
         schema: Vec<(String, String)>,
     ) -> Result<DataFrame, PolarsError> {
+        // #624: When schema is empty but rows are not, infer schema from rows (PySpark parity).
+        let schema = if schema.is_empty() && !rows.is_empty() {
+            let ncols = rows[0].len();
+            let names: Vec<String> = (0..ncols).map(|i| format!("c{i}")).collect();
+            Self::infer_schema_from_json_rows(&rows, &names)
+        } else {
+            schema
+        };
+
         if schema.is_empty() {
             if rows.is_empty() {
                 return Ok(DataFrame::from_polars_with_options(
@@ -1137,9 +1147,10 @@ impl SparkSession {
                     let mut builder = get_list_builder(&inner_dtype, 64, n, name.as_str().into());
                     for row in rows.iter() {
                         let v = row.get(col_idx).cloned().unwrap_or(JsonValue::Null);
-                        if let JsonValue::Null = v {
+                        if let JsonValue::Null = &v {
                             builder.append_null();
-                        } else if let Some(arr) = v.as_array() {
+                        } else if let Some(arr) = json_value_to_array(&v) {
+                            // #625: Array, Object with "0","1",..., or string that parses as JSON array (PySpark list parity).
                             let elem_series: Vec<Series> = arr
                                 .iter()
                                 .map(|e| json_value_to_series_single(e, &elem_type, "elem"))
@@ -1156,39 +1167,6 @@ impl SparkSession {
                                 PolarsError::ComputeError(format!("array elem: {e}").into())
                             })?;
                             builder.append_series(&s)?;
-                        } else if let Some(s) = v.as_str() {
-                            if let Ok(parsed) = serde_json::from_str::<JsonValue>(s) {
-                                if let Some(arr) = parsed.as_array() {
-                                    let elem_series: Vec<Series> = arr
-                                        .iter()
-                                        .map(|e| json_value_to_series_single(e, &elem_type, "elem"))
-                                        .collect::<Result<Vec<_>, _>>()?;
-                                    let vals: Vec<_> =
-                                        elem_series.iter().filter_map(|s| s.get(0).ok()).collect();
-                                    let s = Series::from_any_values_and_dtype(
-                                        PlSmallStr::EMPTY,
-                                        &vals,
-                                        &inner_dtype,
-                                        false,
-                                    )
-                                    .map_err(|e| {
-                                        PolarsError::ComputeError(format!("array elem: {e}").into())
-                                    })?;
-                                    builder.append_series(&s)?;
-                                } else {
-                                    return Err(PolarsError::ComputeError(
-                                        "array column value must be null or array (or string that parses as JSON array). \
-                                         PySpark accepts Python lists for array columns."
-                                            .into(),
-                                    ));
-                                }
-                            } else {
-                                return Err(PolarsError::ComputeError(
-                                    "array column value must be null or array (or string that parses as JSON array). \
-                                     PySpark accepts Python lists for array columns."
-                                        .into(),
-                                ));
-                            }
                         } else {
                             // #611: PySpark accepts single value as one-element list.
                             let single_arr = [v];
@@ -1229,9 +1207,10 @@ impl SparkSession {
                     let mut builder = get_list_builder(&inner_dtype, 64, n, name.as_str().into());
                     for row in rows.iter() {
                         let v = row.get(col_idx).cloned().unwrap_or(JsonValue::Null);
-                        if let JsonValue::Null = v {
+                        if let JsonValue::Null = &v {
                             builder.append_null();
-                        } else if let Some(arr) = v.as_array() {
+                        } else if let Some(arr) = json_value_to_array(&v) {
+                            // #625: Array, Object with "0","1",..., or string that parses as JSON array (PySpark list parity).
                             let elem_series: Vec<Series> = arr
                                 .iter()
                                 .map(|e| json_value_to_series_single(e, &elem_type, "elem"))
@@ -1248,39 +1227,6 @@ impl SparkSession {
                                 PolarsError::ComputeError(format!("array elem: {e}").into())
                             })?;
                             builder.append_series(&s)?;
-                        } else if let Some(s) = v.as_str() {
-                            if let Ok(parsed) = serde_json::from_str::<JsonValue>(s) {
-                                if let Some(arr) = parsed.as_array() {
-                                    let elem_series: Vec<Series> = arr
-                                        .iter()
-                                        .map(|e| json_value_to_series_single(e, &elem_type, "elem"))
-                                        .collect::<Result<Vec<_>, _>>()?;
-                                    let vals: Vec<_> =
-                                        elem_series.iter().filter_map(|s| s.get(0).ok()).collect();
-                                    let s = Series::from_any_values_and_dtype(
-                                        PlSmallStr::EMPTY,
-                                        &vals,
-                                        &inner_dtype,
-                                        false,
-                                    )
-                                    .map_err(|e| {
-                                        PolarsError::ComputeError(format!("array elem: {e}").into())
-                                    })?;
-                                    builder.append_series(&s)?;
-                                } else {
-                                    return Err(PolarsError::ComputeError(
-                                        "array column value must be null or array (or string that parses as JSON array). \
-                                         PySpark accepts Python lists for array columns."
-                                            .into(),
-                                    ));
-                                }
-                            } else {
-                                return Err(PolarsError::ComputeError(
-                                    "array column value must be null or array (or string that parses as JSON array). \
-                                     PySpark accepts Python lists for array columns."
-                                        .into(),
-                                ));
-                            }
                         } else {
                             // #611: PySpark accepts single value as one-element list.
                             let single_arr = [v];
@@ -2123,6 +2069,50 @@ mod tests {
             2,
             "issue #601: second row arr must have 2 elements [4,5]"
         );
+    }
+
+    /// #624: When schema is empty but rows are not, infer schema from rows (PySpark parity).
+    #[test]
+    fn test_issue_624_empty_schema_inferred_from_rows() {
+        use serde_json::json;
+
+        let spark = SparkSession::builder().app_name("test").get_or_create();
+        let schema: Vec<(String, String)> = vec![];
+        let rows: Vec<Vec<JsonValue>> = vec![
+            vec![json!("a"), json!(1)],
+            vec![json!("b"), json!(2)],
+        ];
+        let df = spark
+            .create_dataframe_from_rows(rows, schema)
+            .expect("#624: empty schema with non-empty rows should infer schema");
+        assert_eq!(df.count().unwrap(), 2);
+        let collected = df.collect_inner().unwrap();
+        assert_eq!(collected.get_column_names(), &["c0", "c1"]);
+    }
+
+    /// #625: create_dataframe_from_rows accepts array column as JSON array or Object (Python list parity).
+    #[test]
+    fn test_issue_625_array_column_list_or_object() {
+        use serde_json::json;
+
+        let spark = SparkSession::builder().app_name("test").get_or_create();
+        let schema = vec![
+            ("id".to_string(), "string".to_string()),
+            ("arr".to_string(), "array<bigint>".to_string()),
+        ];
+        // JSON array (Python list) and Object with "0","1","2" keys (some serializations).
+        let rows: Vec<Vec<JsonValue>> = vec![
+            vec![json!("x"), json!([1, 2, 3])],
+            vec![json!("y"), json!({"0": 4, "1": 5})],
+        ];
+        let df = spark
+            .create_dataframe_from_rows(rows, schema)
+            .expect("#625: array column must accept list/array or object representation");
+        assert_eq!(df.count().unwrap(), 2);
+        let collected = df.collect_inner().unwrap();
+        let list = collected.column("arr").unwrap().list().unwrap();
+        assert_eq!(list.get(0).unwrap().len(), 3);
+        assert_eq!(list.get(1).unwrap().len(), 2);
     }
 
     #[test]
