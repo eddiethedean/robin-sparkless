@@ -147,7 +147,9 @@ fn json_values_to_series(
                 }
             } else {
                 return Err(PolarsError::ComputeError(
-                    "struct value must be object or array".into(),
+                    "struct value must be object (by field name) or array (by position). \
+                     PySpark accepts dict or tuple/list for struct columns."
+                        .into(),
                 ));
             }
         }
@@ -335,7 +337,9 @@ fn json_object_or_array_to_struct_series(
             arr.get(idx).unwrap_or(&JsonValue::Null)
         } else {
             return Err(PolarsError::ComputeError(
-                "struct value must be object or array".into(),
+                "struct value must be object (by field name) or array (by position). \
+                 PySpark accepts dict or tuple/list for struct columns."
+                    .into(),
             ));
         };
         let s = json_value_to_series_single(fval, ftype, fname)?;
@@ -1693,6 +1697,52 @@ mod tests {
         let df = result.unwrap();
         assert_eq!(df.count().unwrap(), 0);
         assert_eq!(df.collect_inner().unwrap().get_column_names().len(), 0);
+    }
+
+    /// create_dataframe_from_rows: struct column as JSON object (by field name). PySpark parity #600.
+    #[test]
+    fn test_create_dataframe_from_rows_struct_as_object() {
+        use serde_json::json;
+
+        let spark = SparkSession::builder().app_name("test").get_or_create();
+        let schema = vec![
+            ("id".to_string(), "string".to_string()),
+            (
+                "nested".to_string(),
+                "struct<a:bigint,b:string>".to_string(),
+            ),
+        ];
+        let rows: Vec<Vec<JsonValue>> = vec![
+            vec![json!("x"), json!({"a": 1, "b": "y"})],
+            vec![json!("z"), json!({"a": 2, "b": "w"})],
+        ];
+        let df = spark.create_dataframe_from_rows(rows, schema).unwrap();
+        assert_eq!(df.count().unwrap(), 2);
+        let collected = df.collect_inner().unwrap();
+        assert_eq!(collected.get_column_names(), &["id", "nested"]);
+    }
+
+    /// create_dataframe_from_rows: struct column as JSON array (by position). PySpark parity #600.
+    #[test]
+    fn test_create_dataframe_from_rows_struct_as_array() {
+        use serde_json::json;
+
+        let spark = SparkSession::builder().app_name("test").get_or_create();
+        let schema = vec![
+            ("id".to_string(), "string".to_string()),
+            (
+                "nested".to_string(),
+                "struct<a:bigint,b:string>".to_string(),
+            ),
+        ];
+        let rows: Vec<Vec<JsonValue>> = vec![
+            vec![json!("x"), json!([1, "y"])],
+            vec![json!("z"), json!([2, "w"])],
+        ];
+        let df = spark.create_dataframe_from_rows(rows, schema).unwrap();
+        assert_eq!(df.count().unwrap(), 2);
+        let collected = df.collect_inner().unwrap();
+        assert_eq!(collected.get_column_names(), &["id", "nested"]);
     }
 
     #[test]
