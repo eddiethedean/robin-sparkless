@@ -1,4 +1,4 @@
-.PHONY: build build-release test test-rust check check-full fmt fmt-check clippy audit outdated deny \
+.PHONY: build build-release build-all-features test test-rust check check-full fmt fmt-check clippy audit outdated deny \
 	test-parity-phase-a test-parity-phase-b test-parity-phase-c test-parity-phase-d \
 	test-parity-phase-e test-parity-phase-f test-parity-phase-g test-parity-phases \
 	sparkless-parity all
@@ -16,6 +16,10 @@ build:
 build-release:
 	cargo build --release
 
+# Build with all optional features (sql, delta) so feature-gated code is compiled and checked
+build-all-features:
+	cargo build --all-features
+
 # Run Rust tests only
 test-rust:
 	cargo test
@@ -23,8 +27,8 @@ test-rust:
 # Run all tests (Rust only)
 test: test-rust
 
-# Run all Rust checks (format check, clippy, audit, deny, Rust tests).
-check: fmt-check clippy audit deny test-rust
+# Run all Rust checks (format check, clippy, audit, deny, build all features, Rust tests).
+check: fmt-check clippy audit deny build-all-features test-rust
 	@echo "All checks passed"
 
 # Backwards-compatible alias for full check suite (historically included Python).

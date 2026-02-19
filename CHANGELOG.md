@@ -15,6 +15,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 (none yet)
 
+## [0.11.10] - 2026-02-18
+
+### Fixed
+
+- **SQL translator (sql feature)** — GROUP BY expression collection now compiles correctly: collect into `Vec<(Expr, String)>` then unzip to `(Vec<Expr>, Vec<String>)`.
+
+### Changed
+
+- **Makefile** — `check-full` / `check` now runs `cargo build --all-features` so feature-gated code (sql, delta) is compiled and type errors are caught.
+
 ## [0.11.9] - 2026-02-18
 
 ### Fixed
