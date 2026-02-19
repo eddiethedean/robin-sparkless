@@ -72,22 +72,38 @@ pub fn expr_from_value(v: &Value) -> Result<Expr, PlanExprError> {
                 let l_ty = infer_lit_type(&l);
                 let r_ty = infer_lit_type(&r);
 
-                let expr = match (l_ty, r_ty) {
-                    (Some(lt), Some(rt)) => {
-                        use crate::type_coercion::{coerce_for_pyspark_comparison, CompareOp};
-                        let op_enum = match op {
-                            "eq" => CompareOp::Eq,
-                            "ne" => CompareOp::NotEq,
-                            "gt" => CompareOp::Gt,
-                            "ge" => CompareOp::GtEq,
-                            "lt" => CompareOp::Lt,
-                            "le" => CompareOp::LtEq,
+                // #612: When one side is a literal and the other is a column, assume column is String
+                // so string–numeric coercion is applied (PySpark parity: df.filter(df["s"] == 123)).
+                use crate::type_coercion::{coerce_for_pyspark_comparison, CompareOp};
+                let op_enum = match op {
+                    "eq" => CompareOp::Eq,
+                    "ne" => CompareOp::NotEq,
+                    "gt" => CompareOp::Gt,
+                    "ge" => CompareOp::GtEq,
+                    "lt" => CompareOp::Lt,
+                    "le" => CompareOp::LtEq,
+                    _ => unreachable!(),
+                };
+                let (lt, rt) = match (&l_ty, &r_ty) {
+                    (Some(lt), Some(rt)) => (lt.clone(), rt.clone()),
+                    (Some(lt), None) => (lt.clone(), DataType::String),
+                    (None, Some(rt)) => (DataType::String, rt.clone()),
+                    (None, None) => {
+                        // No type info; skip coercion (may error at runtime).
+                        return Ok(match op {
+                            "eq" => l.eq(r),
+                            "ne" => l.neq(r),
+                            "gt" => l.gt(r),
+                            "ge" => l.gt_eq(r),
+                            "lt" => l.lt(r),
+                            "le" => l.lt_eq(r),
                             _ => unreachable!(),
-                        };
-                        let (lc, rc) =
-                            coerce_for_pyspark_comparison(l.clone(), r.clone(), &lt, &rt, &op_enum)
-                                .map_err(|e| PlanExprError(e.to_string()))?;
-                        match op {
+                        });
+                    }
+                };
+                let expr =
+                    match coerce_for_pyspark_comparison(l.clone(), r.clone(), &lt, &rt, &op_enum) {
+                        Ok((lc, rc)) => match op {
                             "eq" => lc.eq(rc),
                             "ne" => lc.neq(rc),
                             "gt" => lc.gt(rc),
@@ -95,18 +111,17 @@ pub fn expr_from_value(v: &Value) -> Result<Expr, PlanExprError> {
                             "lt" => lc.lt(rc),
                             "le" => lc.lt_eq(rc),
                             _ => unreachable!(),
-                        }
-                    }
-                    _ => match op {
-                        "eq" => l.eq(r),
-                        "ne" => l.neq(r),
-                        "gt" => l.gt(r),
-                        "ge" => l.gt_eq(r),
-                        "lt" => l.lt(r),
-                        "le" => l.lt_eq(r),
-                        _ => unreachable!(),
-                    },
-                };
+                        },
+                        Err(_) => match op {
+                            "eq" => l.eq(r),
+                            "ne" => l.neq(r),
+                            "gt" => l.gt(r),
+                            "ge" => l.gt_eq(r),
+                            "lt" => l.lt(r),
+                            "le" => l.lt_eq(r),
+                            _ => unreachable!(),
+                        },
+                    };
 
                 return Ok(expr);
             }
