@@ -298,6 +298,13 @@ impl Column {
             )
     }
 
+    /// Create a Column that is always a null boolean.
+    /// This is useful for downstream bindings (e.g. PyO3) that need a null literal
+    /// without depending directly on Polars types like `Expr` or `LiteralValue`.
+    pub fn null_boolean() -> Column {
+        Column::from_expr(Self::null_boolean_expr(), None)
+    }
+
     /// PySpark-style greater-than comparison (NULL > value returns NULL)
     /// Any comparison involving NULL returns NULL
     pub fn gt_pyspark(&self, other: &Column) -> Column {
@@ -2984,6 +2991,20 @@ mod tests {
 
         let filtered = df.lazy().filter(result.into_expr()).collect().unwrap();
         assert_eq!(filtered.height(), 3); // 3 non-null values in column 'a'
+    }
+
+    #[test]
+    fn test_null_boolean_column_produces_null_bool_series() {
+        let df = test_df();
+        let expr = Column::null_boolean().into_expr();
+        let out = df
+            .lazy()
+            .select([expr.alias("null_bool")])
+            .collect()
+            .unwrap();
+        let s = out.column("null_bool").unwrap();
+        assert_eq!(s.dtype(), &polars::prelude::DataType::Boolean);
+        assert_eq!(s.null_count(), s.len());
     }
 
     #[test]

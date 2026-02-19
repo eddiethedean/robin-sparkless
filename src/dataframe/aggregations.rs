@@ -1,6 +1,7 @@
 //! GroupBy and aggregation operations.
 
 use super::DataFrame;
+use crate::column::Column;
 use polars::prelude::{
     col, len, lit, when, DataFrame as PlDataFrame, DataType, Expr, LazyFrame, LazyGroupBy,
     NamedFrom, PolarsError, SchemaNamesAndDtypes, Series,
@@ -656,6 +657,14 @@ impl GroupedData {
         ))
     }
 
+    /// Apply multiple aggregations expressed as robin-sparkless Columns.
+    /// This is a convenience for downstream bindings that work purely with
+    /// `Column` instead of `polars::Expr`, and wraps the generic `agg` API.
+    pub fn agg_columns(&self, aggregations: Vec<Column>) -> Result<DataFrame, PolarsError> {
+        let exprs: Vec<Expr> = aggregations.into_iter().map(|c| c.into_expr()).collect();
+        self.agg(exprs)
+    }
+
     /// Get grouping columns
     pub fn grouping_columns(&self) -> &[String] {
         &self.grouping_cols
@@ -1032,7 +1041,7 @@ pub(super) fn reorder_groupby_columns(
 
 #[cfg(test)]
 mod tests {
-    use crate::{DataFrame, SparkSession};
+    use crate::{functions, DataFrame, SparkSession};
 
     fn test_df() -> DataFrame {
         let spark = SparkSession::builder()
@@ -1083,16 +1092,31 @@ mod tests {
 
     #[test]
     fn group_by_agg_multi() {
-        use polars::prelude::*;
         let df = test_df();
         let grouped = df.group_by(vec!["k"]).unwrap();
         let out = grouped
-            .agg(vec![len().alias("cnt"), col("v").sum().alias("total")])
+            .agg(vec![
+                polars::prelude::len().alias("cnt"),
+                polars::prelude::col("v").sum().alias("total"),
+            ])
             .unwrap();
         assert_eq!(out.count().unwrap(), 2);
         let cols = out.columns().unwrap();
         assert!(cols.contains(&"k".to_string()));
         assert!(cols.contains(&"cnt".to_string()));
         assert!(cols.contains(&"total".to_string()));
+    }
+
+    #[test]
+    fn group_by_agg_columns_multi() {
+        let df = test_df();
+        let grouped = df.group_by(vec!["k"]).unwrap();
+        let v_col = functions::col("v");
+        let aggs = vec![functions::count(&v_col), functions::sum(&v_col)];
+        let out = grouped.agg_columns(aggs).unwrap();
+        assert_eq!(out.count().unwrap(), 2);
+        let cols = out.columns().unwrap();
+        assert!(cols.contains(&"k".to_string()));
+        assert_eq!(cols.len(), 3);
     }
 }
