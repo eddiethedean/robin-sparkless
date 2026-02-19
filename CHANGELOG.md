@@ -86,6 +86,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **subtract / intersect with different column casing** — `subtract` and `intersect` now align right-side column names to left when casing differs (case-sensitive or -insensitive), so set operations work when DataFrames have different column casing.
 - **#492 – case-insensitive orderBy on mixed-case column names (PySpark parity)** — Clarify and regression-test that when `spark.sql.caseSensitive` is false (default), `DataFrame::order_by` / `orderBy` resolve column names case-insensitively so `"value"` and `"VALUE"` work for schema column `"Value"`. Fixes #492.
 
+## [0.11.11] - 2026-02-19
+
+### Added
+
+- **#600 – create_dataframe_from_rows struct as object or array (PySpark parity)** — Struct columns accept JSON object (by field name) or array (by position). Clearer error message: "struct value must be object (by field name) or array (by position)". Tests: `test_create_dataframe_from_rows_struct_as_object`, `test_create_dataframe_from_rows_struct_as_array`. Fixes #600.
+- **#601 – create_dataframe_from_rows array column (PySpark parity)** — Array columns accept JSON array or string that parses as JSON array (e.g. `"[1,2,3]"`). Error message: "array column value must be null or array (or string that parses as JSON array)". Tests: `test_create_dataframe_from_rows_array_column`, `test_issue_601_array_column_pyspark_parity`. Fixes #601.
+- **#602 – filter string column eq numeric literal (PySpark parity)** — Test `issue_602_filter_string_column_eq_numeric_literal` ensures `df.filter(col("str_col") == 123)` succeeds with coercion. Fixes #602.
+- **#603 – unionByName type coercion** — `union_by_name` coerces left/right columns to a common type per column when types differ (e.g. Int64 vs String). Test: `union_by_name_coerces_different_column_types`. Fixes #603.
+- **#604 – join column resolution (case-insensitive key names)** — Join resolves keys on left and right to physical column names; aliases right key columns to left key names so result has one key name and `col("ID")`/`col("id")` both resolve. Test: `join_column_resolution_case_insensitive`. Fixes #604.
+
 ## [0.11.7] - 2026-02-18
 
 ### Added
