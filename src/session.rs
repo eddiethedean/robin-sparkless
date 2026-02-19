@@ -72,10 +72,8 @@ fn json_value_to_array(v: &JsonValue) -> Option<Vec<JsonValue>> {
         JsonValue::Array(arr) => Some(arr.clone()),
         JsonValue::Object(obj) => {
             // Python/serialization sometimes sends list as {"0": x, "1": y}. Build sorted by index.
-            let mut indices: Vec<usize> = obj
-                .keys()
-                .filter_map(|k| k.parse::<usize>().ok())
-                .collect();
+            let mut indices: Vec<usize> =
+                obj.keys().filter_map(|k| k.parse::<usize>().ok()).collect();
             indices.sort_unstable();
             if indices.is_empty() {
                 return None;
@@ -140,7 +138,7 @@ fn json_values_to_series(
         for v in values.iter() {
             if v.as_ref().is_none_or(|x| matches!(x, JsonValue::Null)) {
                 builder.append_null();
-            } else if let Some(arr) = v.as_ref().and_then(|x| json_value_to_array(x)) {
+            } else if let Some(arr) = v.as_ref().and_then(json_value_to_array) {
                 // #625: Array, Object with "0","1",..., or string that parses as JSON array (PySpark list parity).
                 let elem_series: Vec<Series> = arr
                     .iter()
@@ -2078,10 +2076,8 @@ mod tests {
 
         let spark = SparkSession::builder().app_name("test").get_or_create();
         let schema: Vec<(String, String)> = vec![];
-        let rows: Vec<Vec<JsonValue>> = vec![
-            vec![json!("a"), json!(1)],
-            vec![json!("b"), json!(2)],
-        ];
+        let rows: Vec<Vec<JsonValue>> =
+            vec![vec![json!("a"), json!(1)], vec![json!("b"), json!(2)]];
         let df = spark
             .create_dataframe_from_rows(rows, schema)
             .expect("#624: empty schema with non-empty rows should infer schema");
