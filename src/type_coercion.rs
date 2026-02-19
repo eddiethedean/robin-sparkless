@@ -223,6 +223,30 @@ pub fn coerce_for_pyspark_comparison(
         return Ok((left_out, right_out));
     }
 
+    // #615: Date vs datetime comparison (e.g. datetime_col < date_col): cast Date to Datetime
+    // so both sides are comparable (PySpark treats date as start-of-day timestamp).
+    let date_vs_datetime = (left_type == &DataType::Date
+        && matches!(right_type, DataType::Datetime(_, _)))
+        || (matches!(left_type, DataType::Datetime(_, _)) && right_type == &DataType::Date);
+    if date_vs_datetime {
+        let target_dt = if matches!(left_type, DataType::Datetime(_, _)) {
+            left_type.clone()
+        } else {
+            right_type.clone()
+        };
+        let left_out = if left_type == &DataType::Date {
+            coerce_to_type(left, target_dt.clone())
+        } else {
+            left
+        };
+        let right_out = if right_type == &DataType::Date {
+            coerce_to_type(right, target_dt)
+        } else {
+            right
+        };
+        return Ok((left_out, right_out));
+    }
+
     // Equal non-numeric types: leave as-is for now.
     if left_type == right_type && !is_numeric(left_type) {
         return Ok((left, right));
@@ -313,6 +337,46 @@ mod tests {
 
         // Only the first row matches ("123" == 123); " 45.5 " != 46, "abc" -> null (non-match).
         assert_eq!(out.height(), 1);
+        Ok(())
+    }
+
+    /// #615: datetime_col < date_col must return rows (PySpark: date as start-of-day for comparison).
+    #[test]
+    fn date_datetime_comparison_coerces_date_to_datetime() -> Result<(), PolarsError> {
+        use chrono::{NaiveDate, NaiveDateTime};
+        use polars::prelude::*;
+
+        let ts = NaiveDateTime::parse_from_str("2024-01-14 23:00:00", "%Y-%m-%d %H:%M:%S").unwrap();
+        let dt = NaiveDate::from_ymd_opt(2024, 1, 15).unwrap();
+        let df = df!(
+            "ts_col" => [ts],
+            "date_col" => [dt]
+        )?;
+        let df = df
+            .lazy()
+            .with_columns([
+                col("ts_col").cast(DataType::Datetime(TimeUnit::Microseconds, None)),
+                col("date_col").cast(DataType::Date),
+            ])
+            .collect()?;
+        let lf = df.lazy();
+
+        let ts_expr = col("ts_col");
+        let date_expr = col("date_col");
+        let (ts_c, date_c) = coerce_for_pyspark_comparison(
+            ts_expr,
+            date_expr,
+            &DataType::Datetime(TimeUnit::Microseconds, None),
+            &DataType::Date,
+            &CompareOp::Lt,
+        )?;
+
+        let out = lf.filter(ts_c.lt(date_c)).collect()?;
+        assert_eq!(
+            out.height(),
+            1,
+            "#615: datetime < date should return one row"
+        );
         Ok(())
     }
 }
