@@ -169,15 +169,33 @@ fn json_values_to_series(
             .map(|_| Vec::with_capacity(values.len()))
             .collect();
         for v in values.iter() {
-            if v.as_ref().is_none_or(|x| matches!(x, JsonValue::Null)) {
+            // #610: Accept string that parses as JSON object or array (e.g. Python tuple serialized as "[1, \"y\"]").
+            let effective: Option<JsonValue> = match v.as_ref() {
+                Some(JsonValue::String(s)) => {
+                    if let Ok(parsed) = serde_json::from_str::<JsonValue>(s) {
+                        if parsed.is_object() || parsed.is_array() {
+                            Some(parsed)
+                        } else {
+                            v.clone()
+                        }
+                    } else {
+                        v.clone()
+                    }
+                }
+                _ => v.clone(),
+            };
+            if effective
+                .as_ref()
+                .is_none_or(|x| matches!(x, JsonValue::Null))
+            {
                 for fc in &mut field_series_vec {
                     fc.push(None);
                 }
-            } else if let Some(obj) = v.as_ref().and_then(|x| x.as_object()) {
+            } else if let Some(obj) = effective.as_ref().and_then(|x| x.as_object()) {
                 for (fi, (fname, _)) in fields.iter().enumerate() {
                     field_series_vec[fi].push(obj.get(fname).cloned());
                 }
-            } else if let Some(arr) = v.as_ref().and_then(|x| x.as_array()) {
+            } else if let Some(arr) = effective.as_ref().and_then(|x| x.as_array()) {
                 for (fi, _) in fields.iter().enumerate() {
                     field_series_vec[fi].push(arr.get(fi).cloned());
                 }
@@ -364,11 +382,26 @@ fn json_object_or_array_to_struct_series(
     if matches!(value, JsonValue::Null) {
         return Ok(None);
     }
+    // #610: Accept string that parses as JSON object or array.
+    let effective = match value {
+        JsonValue::String(s) => {
+            if let Ok(parsed) = serde_json::from_str::<JsonValue>(s) {
+                if parsed.is_object() || parsed.is_array() {
+                    parsed
+                } else {
+                    value.clone()
+                }
+            } else {
+                value.clone()
+            }
+        }
+        _ => value.clone(),
+    };
     let mut field_series: Vec<Series> = Vec::with_capacity(fields.len());
     for (fname, ftype) in fields {
-        let fval = if let Some(obj) = value.as_object() {
+        let fval = if let Some(obj) = effective.as_object() {
             obj.get(fname).unwrap_or(&JsonValue::Null)
-        } else if let Some(arr) = value.as_array() {
+        } else if let Some(arr) = effective.as_array() {
             let idx = field_series.len();
             arr.get(idx).unwrap_or(&JsonValue::Null)
         } else {
@@ -1849,6 +1882,35 @@ mod tests {
         assert_eq!(df.count().unwrap(), 2);
         let collected = df.collect_inner().unwrap();
         assert_eq!(collected.get_column_names(), &["id", "nested"]);
+    }
+
+    /// #610: create_dataframe_from_rows accepts struct as string that parses to object or array (Sparkless/Python serialization).
+    #[test]
+    fn test_issue_610_struct_value_as_string_object_or_array() {
+        use serde_json::json;
+
+        let spark = SparkSession::builder().app_name("test").get_or_create();
+        let schema = vec![
+            ("id".to_string(), "string".to_string()),
+            (
+                "nested".to_string(),
+                "struct<a:bigint,b:string>".to_string(),
+            ),
+        ];
+        // Struct as string that parses to JSON object (e.g. Python dict serialized as string).
+        let rows_object: Vec<Vec<JsonValue>> =
+            vec![vec![json!("A"), json!(r#"{"a": 1, "b": "x"}"#)]];
+        let df1 = spark
+            .create_dataframe_from_rows(rows_object, schema.clone())
+            .unwrap();
+        assert_eq!(df1.count().unwrap(), 1);
+
+        // Struct as string that parses to JSON array (e.g. Python tuple (1, "y") serialized as "[1, \"y\"]").
+        let rows_array: Vec<Vec<JsonValue>> = vec![vec![json!("B"), json!(r#"[1, "y"]"#)]];
+        let df2 = spark
+            .create_dataframe_from_rows(rows_array, schema)
+            .unwrap();
+        assert_eq!(df2.count().unwrap(), 1);
     }
 
     /// create_dataframe_from_rows: array column with JSON array and null. PySpark parity #601.
