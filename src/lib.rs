@@ -31,6 +31,12 @@ pub mod type_coercion;
 pub(crate) mod udf_registry;
 pub(crate) mod udfs;
 
+/// Re-export the underlying expression and literal types so downstream
+/// bindings can depend on `robin_sparkless::Expr` / `LiteralValue`
+/// instead of importing Polars directly.
+pub type Expr = polars::prelude::Expr;
+pub type LiteralValue = polars::prelude::LiteralValue;
+
 #[cfg(feature = "sql")]
 pub mod sql;
 
