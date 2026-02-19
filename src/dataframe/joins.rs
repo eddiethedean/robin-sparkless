@@ -3,7 +3,6 @@
 use super::DataFrame;
 use crate::type_coercion::find_common_type;
 use polars::prelude::Expr;
-use polars::prelude::IntoLazy;
 use polars::prelude::JoinType as PlJoinType;
 use polars::prelude::PolarsError;
 
