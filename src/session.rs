@@ -1,8 +1,8 @@
 use crate::dataframe::DataFrame;
 use crate::error::EngineError;
 use crate::udf_registry::UdfRegistry;
-use polars::chunked_array::builder::get_list_builder;
 use polars::chunked_array::StructChunked;
+use polars::chunked_array::builder::get_list_builder;
 use polars::prelude::{
     DataFrame as PlDataFrame, DataType, IntoSeries, NamedFrom, PlSmallStr, PolarsError, Series,
     TimeUnit,
@@ -886,7 +886,7 @@ impl SparkSession {
         let col2: Vec<String> = data.iter().map(|t| t.2.clone()).collect();
         cols.push(Series::new(column_names[2].into(), col2));
 
-        let pl_df = PlDataFrame::new(cols.iter().map(|s| s.clone().into()).collect())?;
+        let pl_df = PlDataFrame::new_infer_height(cols.iter().map(|s| s.clone().into()).collect())?;
         Ok(DataFrame::from_polars_with_options(
             pl_df,
             self.is_case_sensitive(),
@@ -975,7 +975,7 @@ impl SparkSession {
         if schema.is_empty() {
             if rows.is_empty() {
                 return Ok(DataFrame::from_polars_with_options(
-                    PlDataFrame::new(vec![])?,
+                    PlDataFrame::new(0, vec![])?,
                     self.is_case_sensitive(),
                 ));
             }
@@ -1321,7 +1321,7 @@ impl SparkSession {
             cols.push(s);
         }
 
-        let pl_df = PlDataFrame::new(cols.iter().map(|s| s.clone().into()).collect())?;
+        let pl_df = PlDataFrame::new_infer_height(cols.iter().map(|s| s.clone().into()).collect())?;
         Ok(DataFrame::from_polars_with_options(
             pl_df,
             self.is_case_sensitive(),
@@ -1364,7 +1364,7 @@ impl SparkSession {
             }
         }
         let col = Series::new("id".into(), vals);
-        let pl_df = PlDataFrame::new(vec![col.into()])?;
+        let pl_df = PlDataFrame::new_infer_height(vec![col.into()])?;
         Ok(DataFrame::from_polars_with_options(
             pl_df,
             self.is_case_sensitive(),
@@ -1395,7 +1395,10 @@ impl SparkSession {
         }
         let path_display = path.display();
         // Use LazyCsvReader - call finish() to get LazyFrame, then collect
-        let lf = LazyCsvReader::new(path)
+        let pl_path = PlRefPath::try_from_path(path).map_err(|e| {
+            PolarsError::ComputeError(format!("read_csv({path_display}): path: {e}").into())
+        })?;
+        let lf = LazyCsvReader::new(pl_path)
             .with_has_header(true)
             .with_infer_schema_length(Some(100))
             .finish()
@@ -1440,7 +1443,9 @@ impl SparkSession {
             ));
         }
         // Use LazyFrame::scan_parquet
-        let lf = LazyFrame::scan_parquet(path, ScanArgsParquet::default())?;
+        let pl_path = PlRefPath::try_from_path(path)
+            .map_err(|e| PolarsError::ComputeError(format!("read_parquet: path: {e}").into()))?;
+        let lf = LazyFrame::scan_parquet(pl_path, ScanArgsParquet::default())?;
         Ok(crate::dataframe::DataFrame::from_lazy_with_options(
             lf,
             self.is_case_sensitive(),
@@ -1475,7 +1480,9 @@ impl SparkSession {
             ));
         }
         // Use LazyJsonLineReader - call finish() to get LazyFrame, then collect
-        let lf = LazyJsonLineReader::new(path)
+        let pl_path = PlRefPath::try_from_path(path)
+            .map_err(|e| PolarsError::ComputeError(format!("read_json: path: {e}").into()))?;
+        let lf = LazyJsonLineReader::new(pl_path)
             .with_infer_schema_length(NonZeroUsize::new(100))
             .finish()?;
         Ok(crate::dataframe::DataFrame::from_lazy_with_options(
@@ -1729,7 +1736,10 @@ impl DataFrameReader {
         use polars::prelude::*;
         let path = path.as_ref();
         let path_display = path.display();
-        let reader = LazyCsvReader::new(path);
+        let pl_path = PlRefPath::try_from_path(path).map_err(|e| {
+            PolarsError::ComputeError(format!("csv({path_display}): path: {e}").into())
+        })?;
+        let reader = LazyCsvReader::new(pl_path);
         let reader = if self.options.is_empty() {
             reader
                 .with_has_header(true)
@@ -1758,7 +1768,9 @@ impl DataFrameReader {
     pub fn parquet(&self, path: impl AsRef<std::path::Path>) -> Result<DataFrame, PolarsError> {
         use polars::prelude::*;
         let path = path.as_ref();
-        let lf = LazyFrame::scan_parquet(path, ScanArgsParquet::default())?;
+        let pl_path = PlRefPath::try_from_path(path)
+            .map_err(|e| PolarsError::ComputeError(format!("parquet: path: {e}").into()))?;
+        let lf = LazyFrame::scan_parquet(pl_path, ScanArgsParquet::default())?;
         let pl_df = lf.collect()?;
         Ok(crate::dataframe::DataFrame::from_polars_with_options(
             pl_df,
@@ -1770,7 +1782,9 @@ impl DataFrameReader {
         use polars::prelude::*;
         use std::num::NonZeroUsize;
         let path = path.as_ref();
-        let reader = LazyJsonLineReader::new(path);
+        let pl_path = PlRefPath::try_from_path(path)
+            .map_err(|e| PolarsError::ComputeError(format!("json: path: {e}").into()))?;
+        let reader = LazyJsonLineReader::new(pl_path);
         let reader = if self.options.is_empty() {
             reader.with_infer_schema_length(NonZeroUsize::new(100))
         } else {
@@ -2067,7 +2081,7 @@ mod tests {
         // Row 2: null list (representation may be None or empty)
         let row2 = list.get(2);
         assert!(
-            row2.is_none() || row2.as_ref().map(|a| a.len() == 0).unwrap_or(false),
+            row2.is_none() || row2.as_ref().map(|a| a.is_empty()).unwrap_or(false),
             "row 2 arr should be null or empty"
         );
     }

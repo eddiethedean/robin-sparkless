@@ -1,8 +1,14 @@
 use polars::prelude::{
-    col, lit, DataType, Expr, GetOutput, ListNameSpaceExtension, PlSmallStr, RankMethod,
-    RankOptions, TimeUnit,
+    DataType, Expr, Field, PolarsError, PolarsResult, RankMethod, RankOptions, TimeUnit, col, lit,
 };
-use std::sync::Arc;
+
+/// Unwrap UDF result to Column (map() expects Result<Column>, UDFs return Result<Option<Column>>).
+#[inline]
+pub(crate) fn expect_col(
+    r: PolarsResult<Option<polars::prelude::Column>>,
+) -> PolarsResult<polars::prelude::Column> {
+    r.and_then(|o| o.ok_or_else(|| PolarsError::ComputeError("expected column".into())))
+}
 
 /// Convert SQL LIKE pattern (% = any sequence, _ = one char) to regex. Escapes regex specials.
 /// When escape_char is Some(esc), esc + any char treats that char as literal (no %/_ expansion).
@@ -92,8 +98,8 @@ impl Column {
     /// Create a Column for rand(seed). When used in with_column, generates one value per row (PySpark-like).
     pub fn from_rand(seed: Option<u64>) -> Self {
         let expr = lit(1i64).cum_sum(false).map(
-            move |c| crate::udfs::apply_rand_with_seed(c, seed),
-            GetOutput::from_type(DataType::Float64),
+            move |c| expect_col(crate::udfs::apply_rand_with_seed(c, seed)),
+            |_schema, field| Ok(Field::new(field.name().clone(), DataType::Float64)),
         );
         Column {
             name: "rand".to_string(),
@@ -106,8 +112,8 @@ impl Column {
     /// Create a Column for randn(seed). When used in with_column, generates one value per row (PySpark-like).
     pub fn from_randn(seed: Option<u64>) -> Self {
         let expr = lit(1i64).cum_sum(false).map(
-            move |c| crate::udfs::apply_randn_with_seed(c, seed),
-            GetOutput::from_type(DataType::Float64),
+            move |c| expect_col(crate::udfs::apply_randn_with_seed(c, seed)),
+            |_schema, field| Ok(Field::new(field.name().clone(), DataType::Float64)),
         );
         Column {
             name: "randn".to_string(),
@@ -310,7 +316,7 @@ impl Column {
     /// See [`crate::functions::parse_type_name`] for supported names.
     /// Returns `Err` on unknown type name so bindings get a clear error.
     pub fn lit_null(dtype: &str) -> Result<Column, String> {
-        use polars::prelude::{lit, NULL};
+        use polars::prelude::{NULL, lit};
         let dt = crate::functions::parse_type_name(dtype)?;
         Ok(Column::from_expr(lit(NULL).cast(dt), None))
     }
@@ -535,8 +541,8 @@ impl Column {
     pub fn encode(&self, charset: &str) -> Column {
         let charset = charset.to_string();
         let expr = self.expr().clone().map(
-            move |s| crate::udfs::apply_encode(s, &charset),
-            GetOutput::from_type(DataType::String),
+            move |s| expect_col(crate::udfs::apply_encode(s, &charset)),
+            |_schema, field| Ok(Field::new(field.name().clone(), DataType::String)),
         );
         Self::from_expr(expr, None)
     }
@@ -545,8 +551,8 @@ impl Column {
     pub fn decode(&self, charset: &str) -> Column {
         let charset = charset.to_string();
         let expr = self.expr().clone().map(
-            move |s| crate::udfs::apply_decode(s, &charset),
-            GetOutput::from_type(DataType::String),
+            move |s| expect_col(crate::udfs::apply_decode(s, &charset)),
+            |_schema, field| Ok(Field::new(field.name().clone(), DataType::String)),
         );
         Self::from_expr(expr, None)
     }
@@ -555,8 +561,8 @@ impl Column {
     pub fn to_binary(&self, fmt: &str) -> Column {
         let fmt = fmt.to_string();
         let expr = self.expr().clone().map(
-            move |s| crate::udfs::apply_to_binary(s, &fmt),
-            GetOutput::from_type(DataType::String),
+            move |s| expect_col(crate::udfs::apply_to_binary(s, &fmt)),
+            |_schema, field| Ok(Field::new(field.name().clone(), DataType::String)),
         );
         Self::from_expr(expr, None)
     }
@@ -565,8 +571,8 @@ impl Column {
     pub fn try_to_binary(&self, fmt: &str) -> Column {
         let fmt = fmt.to_string();
         let expr = self.expr().clone().map(
-            move |s| crate::udfs::apply_try_to_binary(s, &fmt),
-            GetOutput::from_type(DataType::String),
+            move |s| expect_col(crate::udfs::apply_try_to_binary(s, &fmt)),
+            |_schema, field| Ok(Field::new(field.name().clone(), DataType::String)),
         );
         Self::from_expr(expr, None)
     }
@@ -575,8 +581,8 @@ impl Column {
     pub fn aes_encrypt(&self, key: &str) -> Column {
         let key = key.to_string();
         let expr = self.expr().clone().map(
-            move |s| crate::udfs::apply_aes_encrypt(s, &key),
-            GetOutput::from_type(DataType::String),
+            move |s| expect_col(crate::udfs::apply_aes_encrypt(s, &key)),
+            |_schema, field| Ok(Field::new(field.name().clone(), DataType::String)),
         );
         Self::from_expr(expr, None)
     }
@@ -585,8 +591,8 @@ impl Column {
     pub fn aes_decrypt(&self, key: &str) -> Column {
         let key = key.to_string();
         let expr = self.expr().clone().map(
-            move |s| crate::udfs::apply_aes_decrypt(s, &key),
-            GetOutput::from_type(DataType::String),
+            move |s| expect_col(crate::udfs::apply_aes_decrypt(s, &key)),
+            |_schema, field| Ok(Field::new(field.name().clone(), DataType::String)),
         );
         Self::from_expr(expr, None)
     }
@@ -595,8 +601,8 @@ impl Column {
     pub fn try_aes_decrypt(&self, key: &str) -> Column {
         let key = key.to_string();
         let expr = self.expr().clone().map(
-            move |s| crate::udfs::apply_try_aes_decrypt(s, &key),
-            GetOutput::from_type(DataType::String),
+            move |s| expect_col(crate::udfs::apply_try_aes_decrypt(s, &key)),
+            |_schema, field| Ok(Field::new(field.name().clone(), DataType::String)),
         );
         Self::from_expr(expr, None)
     }
@@ -605,8 +611,8 @@ impl Column {
     pub fn typeof_(&self) -> Column {
         Self::from_expr(
             self.expr().clone().map(
-                crate::udfs::apply_typeof,
-                GetOutput::from_type(DataType::String),
+                |s| expect_col(crate::udfs::apply_typeof(s)),
+                |_schema, field| Ok(Field::new(field.name().clone(), DataType::String)),
             ),
             None,
         )
@@ -661,8 +667,8 @@ impl Column {
     /// Base conversion (PySpark conv). num_str from from_base to to_base.
     pub fn conv(&self, from_base: i32, to_base: i32) -> Column {
         let expr = self.expr().clone().map(
-            move |s| crate::udfs::apply_conv(s, from_base, to_base),
-            GetOutput::from_type(DataType::String),
+            move |s| expect_col(crate::udfs::apply_conv(s, from_base, to_base)),
+            |_schema, field| Ok(Field::new(field.name().clone(), DataType::String)),
         );
         Self::from_expr(expr, None)
     }
@@ -670,8 +676,8 @@ impl Column {
     /// Convert to hex string (PySpark hex). Int or string input.
     pub fn hex(&self) -> Column {
         let expr = self.expr().clone().map(
-            crate::udfs::apply_hex,
-            GetOutput::from_type(DataType::String),
+            |s| expect_col(crate::udfs::apply_hex(s)),
+            |_schema, field| Ok(Field::new(field.name().clone(), DataType::String)),
         );
         Self::from_expr(expr, None)
     }
@@ -679,8 +685,8 @@ impl Column {
     /// Convert hex string to binary/string (PySpark unhex).
     pub fn unhex(&self) -> Column {
         let expr = self.expr().clone().map(
-            crate::udfs::apply_unhex,
-            GetOutput::from_type(DataType::String),
+            |s| expect_col(crate::udfs::apply_unhex(s)),
+            |_schema, field| Ok(Field::new(field.name().clone(), DataType::String)),
         );
         Self::from_expr(expr, None)
     }
@@ -688,8 +694,8 @@ impl Column {
     /// Convert integer to binary string (PySpark bin).
     pub fn bin(&self) -> Column {
         let expr = self.expr().clone().map(
-            crate::udfs::apply_bin,
-            GetOutput::from_type(DataType::String),
+            |s| expect_col(crate::udfs::apply_bin(s)),
+            |_schema, field| Ok(Field::new(field.name().clone(), DataType::String)),
         );
         Self::from_expr(expr, None)
     }
@@ -697,8 +703,8 @@ impl Column {
     /// Get bit at 0-based position (PySpark getbit).
     pub fn getbit(&self, pos: i64) -> Column {
         let expr = self.expr().clone().map(
-            move |s| crate::udfs::apply_getbit(s, pos),
-            GetOutput::from_type(DataType::Int64),
+            move |s| expect_col(crate::udfs::apply_getbit(s, pos)),
+            |_schema, field| Ok(Field::new(field.name().clone(), DataType::Int64)),
         );
         Self::from_expr(expr, None)
     }
@@ -707,9 +713,9 @@ impl Column {
     pub fn bit_and(&self, other: &Column) -> Column {
         let args = [other.expr().clone()];
         let expr = self.expr().clone().cast(DataType::Int64).map_many(
-            crate::udfs::apply_bit_and,
+            |cols| expect_col(crate::udfs::apply_bit_and(cols)),
             &args,
-            GetOutput::from_type(DataType::Int64),
+            |_schema, fields| Ok(Field::new(fields[0].name().clone(), DataType::Int64)),
         );
         Self::from_expr(expr, None)
     }
@@ -718,9 +724,9 @@ impl Column {
     pub fn bit_or(&self, other: &Column) -> Column {
         let args = [other.expr().clone()];
         let expr = self.expr().clone().cast(DataType::Int64).map_many(
-            crate::udfs::apply_bit_or,
+            |cols| expect_col(crate::udfs::apply_bit_or(cols)),
             &args,
-            GetOutput::from_type(DataType::Int64),
+            |_schema, fields| Ok(Field::new(fields[0].name().clone(), DataType::Int64)),
         );
         Self::from_expr(expr, None)
     }
@@ -729,9 +735,9 @@ impl Column {
     pub fn bit_xor(&self, other: &Column) -> Column {
         let args = [other.expr().clone()];
         let expr = self.expr().clone().cast(DataType::Int64).map_many(
-            crate::udfs::apply_bit_xor,
+            |cols| expect_col(crate::udfs::apply_bit_xor(cols)),
             &args,
-            GetOutput::from_type(DataType::Int64),
+            |_schema, fields| Ok(Field::new(fields[0].name().clone(), DataType::Int64)),
         );
         Self::from_expr(expr, None)
     }
@@ -739,8 +745,8 @@ impl Column {
     /// Count of set bits in the integer representation (PySpark bit_count).
     pub fn bit_count(&self) -> Column {
         let expr = self.expr().clone().map(
-            crate::udfs::apply_bit_count,
-            GetOutput::from_type(DataType::Int64),
+            |s| expect_col(crate::udfs::apply_bit_count(s)),
+            |_schema, field| Ok(Field::new(field.name().clone(), DataType::Int64)),
         );
         Self::from_expr(expr, None)
     }
@@ -750,8 +756,8 @@ impl Column {
     pub fn assert_true(&self, err_msg: Option<&str>) -> Column {
         let msg = err_msg.map(String::from);
         let expr = self.expr().clone().map(
-            move |c| crate::udfs::apply_assert_true(c, msg.as_deref()),
-            GetOutput::same_type(),
+            move |c| expect_col(crate::udfs::apply_assert_true(c, msg.as_deref())),
+            |_schema, field| Ok(field.clone()),
         );
         Self::from_expr(expr, None)
     }
@@ -768,8 +774,14 @@ impl Column {
         let pair_delim = pair_delim.to_string();
         let key_value_delim = key_value_delim.to_string();
         let expr = self.expr().clone().map(
-            move |s| crate::udfs::apply_str_to_map(s, &pair_delim, &key_value_delim),
-            GetOutput::same_type(),
+            move |s| {
+                expect_col(crate::udfs::apply_str_to_map(
+                    s,
+                    &pair_delim,
+                    &key_value_delim,
+                ))
+            },
+            |_schema, field| Ok(field.clone()),
         );
         Self::from_expr(expr, None)
     }
@@ -801,8 +813,10 @@ impl Column {
             let group = group_index;
             Self::from_expr(
                 self.expr().clone().map(
-                    move |s| crate::udfs::apply_regexp_extract_lookaround(s, &pat, group),
-                    GetOutput::from_type(DataType::String),
+                    move |s| {
+                        expect_col(crate::udfs::apply_regexp_extract_lookaround(s, &pat, group))
+                    },
+                    |_schema, field| Ok(Field::new(field.name().clone(), DataType::String)),
                 ),
                 None,
             )
@@ -913,8 +927,13 @@ impl Column {
             let delim = delimiter.to_string();
             let lim = limit.unwrap_or(0);
             let expr = self.expr().clone().map(
-                move |col| crate::udfs::apply_split_with_limit(col, &delim, lim),
-                GetOutput::from_type(DataType::List(Box::new(DataType::String))),
+                move |col| expect_col(crate::udfs::apply_split_with_limit(col, &delim, lim)),
+                |_schema, field| {
+                    Ok(Field::new(
+                        field.name().clone(),
+                        DataType::List(Box::new(DataType::String)),
+                    ))
+                },
             );
             Self::from_expr(expr, None)
         } else {
@@ -978,8 +997,8 @@ impl Column {
         let idx = group_idx.unwrap_or(0);
         let pattern = pattern.to_string();
         let expr = self.expr().clone().map(
-            move |s| crate::udfs::apply_regexp_instr(s, pattern.clone(), idx),
-            GetOutput::from_type(DataType::Int64),
+            move |s| expect_col(crate::udfs::apply_regexp_instr(s, pattern.clone(), idx)),
+            |_schema, field| Ok(Field::new(field.name().clone(), DataType::Int64)),
         );
         Self::from_expr(expr, None)
     }
@@ -988,9 +1007,9 @@ impl Column {
     pub fn find_in_set(&self, set_column: &Column) -> Column {
         let args = [set_column.expr().clone()];
         let expr = self.expr().clone().map_many(
-            crate::udfs::apply_find_in_set,
+            |cols| expect_col(crate::udfs::apply_find_in_set(cols)),
             &args,
-            GetOutput::from_type(DataType::Int64),
+            |_schema, fields| Ok(Field::new(fields[0].name().clone(), DataType::Int64)),
         );
         Self::from_expr(expr, None)
     }
@@ -1034,7 +1053,10 @@ impl Column {
         let pad_str = if pad.is_empty() { " " } else { pad };
         let fill = pad_str.chars().next().unwrap_or(' ');
         Self::from_expr(
-            self.expr().clone().str().pad_start(length as usize, fill),
+            self.expr()
+                .clone()
+                .str()
+                .pad_start(lit(length as i64), fill),
             None,
         )
     }
@@ -1044,7 +1066,7 @@ impl Column {
         let pad_str = if pad.is_empty() { " " } else { pad };
         let fill = pad_str.chars().next().unwrap_or(' ');
         Self::from_expr(
-            self.expr().clone().str().pad_end(length as usize, fill),
+            self.expr().clone().str().pad_end(lit(length as i64), fill),
             None,
         )
     }
@@ -1102,18 +1124,18 @@ impl Column {
     pub fn split_part(&self, delimiter: &str, part_num: i64) -> Column {
         use polars::prelude::*;
         if part_num == 0 {
-            return Self::from_expr(Expr::Literal(LiteralValue::Null), None);
+            return Self::from_expr(lit(NULL), None);
         }
         let use_regex = delimiter == "|";
         if use_regex {
             let pattern = delimiter.to_string();
             let part = part_num;
             let get_expr = self.expr().clone().map(
-                move |col| crate::udfs::apply_split_part_regex(col, &pattern, part),
-                GetOutput::from_type(DataType::String),
+                move |col| expect_col(crate::udfs::apply_split_part_regex(col, &pattern, part)),
+                |_schema, field| Ok(Field::new(field.name().clone(), DataType::String)),
             );
             let expr = when(self.expr().clone().is_null())
-                .then(Expr::Literal(LiteralValue::Null))
+                .then(lit(NULL))
                 .otherwise(get_expr.fill_null(lit("")));
             return Self::from_expr(expr, None);
         }
@@ -1126,7 +1148,7 @@ impl Column {
         };
         let get_expr = split_expr.list().get(index, true).fill_null(lit(""));
         let expr = when(self.expr().clone().is_null())
-            .then(Expr::Literal(LiteralValue::Null))
+            .then(lit(NULL))
             .otherwise(get_expr);
         Self::from_expr(expr, None)
     }
@@ -1161,10 +1183,10 @@ impl Column {
 
     /// Soundex code (PySpark soundex). Implemented via map UDF (strsim/soundex crates).
     pub fn soundex(&self) -> Column {
-        let expr = self
-            .expr()
-            .clone()
-            .map(crate::udfs::apply_soundex, GetOutput::same_type());
+        let expr = self.expr().clone().map(
+            |s| expect_col(crate::udfs::apply_soundex(s)),
+            |_schema, field| Ok(field.clone()),
+        );
         Self::from_expr(expr, None)
     }
 
@@ -1172,9 +1194,9 @@ impl Column {
     pub fn levenshtein(&self, other: &Column) -> Column {
         let args = [other.expr().clone()];
         let expr = self.expr().clone().map_many(
-            crate::udfs::apply_levenshtein,
+            |cols| expect_col(crate::udfs::apply_levenshtein(cols)),
             &args,
-            GetOutput::from_type(DataType::Int64),
+            |_schema, fields| Ok(Field::new(fields[0].name().clone(), DataType::Int64)),
         );
         Self::from_expr(expr, None)
     }
@@ -1182,8 +1204,8 @@ impl Column {
     /// CRC32 checksum of string bytes (PySpark crc32). Implemented via map UDF (crc32fast).
     pub fn crc32(&self) -> Column {
         let expr = self.expr().clone().map(
-            crate::udfs::apply_crc32,
-            GetOutput::from_type(DataType::Int64),
+            |s| expect_col(crate::udfs::apply_crc32(s)),
+            |_schema, field| Ok(Field::new(field.name().clone(), DataType::Int64)),
         );
         Self::from_expr(expr, None)
     }
@@ -1191,8 +1213,8 @@ impl Column {
     /// XXH64 hash of string (PySpark xxhash64). Implemented via map UDF (twox-hash).
     pub fn xxhash64(&self) -> Column {
         let expr = self.expr().clone().map(
-            crate::udfs::apply_xxhash64,
-            GetOutput::from_type(DataType::Int64),
+            |s| expect_col(crate::udfs::apply_xxhash64(s)),
+            |_schema, field| Ok(Field::new(field.name().clone(), DataType::Int64)),
         );
         Self::from_expr(expr, None)
     }
@@ -1200,8 +1222,8 @@ impl Column {
     /// ASCII value of first character (PySpark ascii). Returns Int32.
     pub fn ascii(&self) -> Column {
         let expr = self.expr().clone().map(
-            crate::udfs::apply_ascii,
-            GetOutput::from_type(DataType::Int32),
+            |s| expect_col(crate::udfs::apply_ascii(s)),
+            |_schema, field| Ok(Field::new(field.name().clone(), DataType::Int32)),
         );
         Self::from_expr(expr, None)
     }
@@ -1209,8 +1231,8 @@ impl Column {
     /// Format numeric as string with fixed decimal places (PySpark format_number).
     pub fn format_number(&self, decimals: u32) -> Column {
         let expr = self.expr().clone().map(
-            move |s| crate::udfs::apply_format_number(s, decimals),
-            GetOutput::from_type(DataType::String),
+            move |s| expect_col(crate::udfs::apply_format_number(s, decimals)),
+            |_schema, field| Ok(Field::new(field.name().clone(), DataType::String)),
         );
         Self::from_expr(expr, None)
     }
@@ -1218,8 +1240,8 @@ impl Column {
     /// Int to single-character string (PySpark char / chr). Valid codepoint only.
     pub fn char(&self) -> Column {
         let expr = self.expr().clone().map(
-            crate::udfs::apply_char,
-            GetOutput::from_type(DataType::String),
+            |s| expect_col(crate::udfs::apply_char(s)),
+            |_schema, field| Ok(Field::new(field.name().clone(), DataType::String)),
         );
         Self::from_expr(expr, None)
     }
@@ -1231,46 +1253,46 @@ impl Column {
 
     /// Base64 encode string bytes (PySpark base64).
     pub fn base64(&self) -> Column {
-        let expr = self
-            .expr()
-            .clone()
-            .map(crate::udfs::apply_base64, GetOutput::same_type());
+        let expr = self.expr().clone().map(
+            |s| expect_col(crate::udfs::apply_base64(s)),
+            |_schema, field| Ok(field.clone()),
+        );
         Self::from_expr(expr, None)
     }
 
     /// Base64 decode to string (PySpark unbase64). Invalid decode → null.
     pub fn unbase64(&self) -> Column {
-        let expr = self
-            .expr()
-            .clone()
-            .map(crate::udfs::apply_unbase64, GetOutput::same_type());
+        let expr = self.expr().clone().map(
+            |s| expect_col(crate::udfs::apply_unbase64(s)),
+            |_schema, field| Ok(field.clone()),
+        );
         Self::from_expr(expr, None)
     }
 
     /// SHA1 hash of string bytes, return hex string (PySpark sha1).
     pub fn sha1(&self) -> Column {
-        let expr = self
-            .expr()
-            .clone()
-            .map(crate::udfs::apply_sha1, GetOutput::same_type());
+        let expr = self.expr().clone().map(
+            |s| expect_col(crate::udfs::apply_sha1(s)),
+            |_schema, field| Ok(field.clone()),
+        );
         Self::from_expr(expr, None)
     }
 
     /// SHA2 hash; bit_length 256, 384, or 512 (PySpark sha2). Default 256.
     pub fn sha2(&self, bit_length: i32) -> Column {
         let expr = self.expr().clone().map(
-            move |s| crate::udfs::apply_sha2(s, bit_length),
-            GetOutput::same_type(),
+            move |s| expect_col(crate::udfs::apply_sha2(s, bit_length)),
+            |_schema, field| Ok(field.clone()),
         );
         Self::from_expr(expr, None)
     }
 
     /// MD5 hash of string bytes, return hex string (PySpark md5).
     pub fn md5(&self) -> Column {
-        let expr = self
-            .expr()
-            .clone()
-            .map(crate::udfs::apply_md5, GetOutput::same_type());
+        let expr = self.expr().clone().map(
+            |s| expect_col(crate::udfs::apply_md5(s)),
+            |_schema, field| Ok(field.clone()),
+        );
         Self::from_expr(expr, None)
     }
 
@@ -1325,8 +1347,8 @@ impl Column {
     /// numeric values (implicit cast to double then round; parity with PySpark).
     pub fn round(&self, decimals: u32) -> Column {
         let expr = self.expr().clone().map(
-            move |s| crate::udfs::apply_round(s, decimals),
-            GetOutput::from_type(DataType::Float64),
+            move |s| expect_col(crate::udfs::apply_round(s, decimals)),
+            |_schema, field| Ok(Field::new(field.name().clone(), DataType::Float64)),
         );
         Self::from_expr(expr, None)
     }
@@ -1334,8 +1356,8 @@ impl Column {
     /// Banker's rounding - round half to even (PySpark bround).
     pub fn bround(&self, scale: i32) -> Column {
         let expr = self.expr().clone().map(
-            move |s| crate::udfs::apply_bround(s, scale),
-            GetOutput::from_type(DataType::Float64),
+            move |s| expect_col(crate::udfs::apply_bround(s, scale)),
+            |_schema, field| Ok(Field::new(field.name().clone(), DataType::Float64)),
         );
         Self::from_expr(expr, None)
     }
@@ -1351,60 +1373,55 @@ impl Column {
     /// Both operands are coerced to Double when used from Python; string columns are parsed
     /// as doubles where possible, invalid strings become null.
     pub fn multiply_pyspark(&self, other: &Column) -> Column {
-        use polars::prelude::GetOutput;
         let args = [other.expr().clone()];
         let expr = self.expr().clone().map_many(
-            crate::udfs::apply_pyspark_multiply,
+            |cols| expect_col(crate::udfs::apply_pyspark_multiply(cols)),
             &args,
-            GetOutput::from_type(DataType::Float64),
+            |_schema, fields| Ok(Field::new(fields[0].name().clone(), DataType::Float64)),
         );
         Self::from_expr(expr, None)
     }
 
     /// Add with PySpark-style string/number coercion (used by Python Column operators).
     pub fn add_pyspark(&self, other: &Column) -> Column {
-        use polars::prelude::GetOutput;
         let args = [other.expr().clone()];
         let expr = self.expr().clone().map_many(
-            crate::udfs::apply_pyspark_add,
+            |cols| expect_col(crate::udfs::apply_pyspark_add(cols)),
             &args,
-            GetOutput::from_type(DataType::Float64),
+            |_schema, fields| Ok(Field::new(fields[0].name().clone(), DataType::Float64)),
         );
         Self::from_expr(expr, None)
     }
 
     /// Subtract with PySpark-style string/number coercion (used by Python Column operators).
     pub fn subtract_pyspark(&self, other: &Column) -> Column {
-        use polars::prelude::GetOutput;
         let args = [other.expr().clone()];
         let expr = self.expr().clone().map_many(
-            crate::udfs::apply_pyspark_subtract,
+            |cols| expect_col(crate::udfs::apply_pyspark_subtract(cols)),
             &args,
-            GetOutput::from_type(DataType::Float64),
+            |_schema, fields| Ok(Field::new(fields[0].name().clone(), DataType::Float64)),
         );
         Self::from_expr(expr, None)
     }
 
     /// Divide with PySpark-style string/number coercion (used by Python Column operators).
     pub fn divide_pyspark(&self, other: &Column) -> Column {
-        use polars::prelude::GetOutput;
         let args = [other.expr().clone()];
         let expr = self.expr().clone().map_many(
-            crate::udfs::apply_pyspark_divide,
+            |cols| expect_col(crate::udfs::apply_pyspark_divide(cols)),
             &args,
-            GetOutput::from_type(DataType::Float64),
+            |_schema, fields| Ok(Field::new(fields[0].name().clone(), DataType::Float64)),
         );
         Self::from_expr(expr, None)
     }
 
     /// Modulo with PySpark-style string/number coercion (used by Python Column operators).
     pub fn mod_pyspark(&self, other: &Column) -> Column {
-        use polars::prelude::GetOutput;
         let args = [other.expr().clone()];
         let expr = self.expr().clone().map_many(
-            crate::udfs::apply_pyspark_mod,
+            |cols| expect_col(crate::udfs::apply_pyspark_mod(cols)),
             &args,
-            GetOutput::from_type(DataType::Float64),
+            |_schema, fields| Ok(Field::new(fields[0].name().clone(), DataType::Float64)),
         );
         Self::from_expr(expr, None)
     }
@@ -1462,7 +1479,7 @@ impl Column {
 
     /// Natural logarithm (PySpark log)
     pub fn log(&self) -> Column {
-        Self::from_expr(self.expr().clone().log(std::f64::consts::E), None)
+        Self::from_expr(self.expr().clone().log(lit(std::f64::consts::E)), None)
     }
 
     /// Alias for log. PySpark ln.
@@ -1473,8 +1490,8 @@ impl Column {
     /// Sine (radians). PySpark sin.
     pub fn sin(&self) -> Column {
         let expr = self.expr().clone().map(
-            crate::udfs::apply_sin,
-            GetOutput::from_type(DataType::Float64),
+            |s| expect_col(crate::udfs::apply_sin(s)),
+            |_schema, field| Ok(Field::new(field.name().clone(), DataType::Float64)),
         );
         Self::from_expr(expr, None)
     }
@@ -1482,8 +1499,8 @@ impl Column {
     /// Cosine (radians). PySpark cos.
     pub fn cos(&self) -> Column {
         let expr = self.expr().clone().map(
-            crate::udfs::apply_cos,
-            GetOutput::from_type(DataType::Float64),
+            |s| expect_col(crate::udfs::apply_cos(s)),
+            |_schema, field| Ok(Field::new(field.name().clone(), DataType::Float64)),
         );
         Self::from_expr(expr, None)
     }
@@ -1491,8 +1508,8 @@ impl Column {
     /// Tangent (radians). PySpark tan.
     pub fn tan(&self) -> Column {
         let expr = self.expr().clone().map(
-            crate::udfs::apply_tan,
-            GetOutput::from_type(DataType::Float64),
+            |s| expect_col(crate::udfs::apply_tan(s)),
+            |_schema, field| Ok(Field::new(field.name().clone(), DataType::Float64)),
         );
         Self::from_expr(expr, None)
     }
@@ -1500,8 +1517,8 @@ impl Column {
     /// Cotangent: 1/tan (PySpark cot).
     pub fn cot(&self) -> Column {
         let expr = self.expr().clone().map(
-            crate::udfs::apply_cot,
-            GetOutput::from_type(DataType::Float64),
+            |s| expect_col(crate::udfs::apply_cot(s)),
+            |_schema, field| Ok(Field::new(field.name().clone(), DataType::Float64)),
         );
         Self::from_expr(expr, None)
     }
@@ -1509,8 +1526,8 @@ impl Column {
     /// Cosecant: 1/sin (PySpark csc).
     pub fn csc(&self) -> Column {
         let expr = self.expr().clone().map(
-            crate::udfs::apply_csc,
-            GetOutput::from_type(DataType::Float64),
+            |s| expect_col(crate::udfs::apply_csc(s)),
+            |_schema, field| Ok(Field::new(field.name().clone(), DataType::Float64)),
         );
         Self::from_expr(expr, None)
     }
@@ -1518,8 +1535,8 @@ impl Column {
     /// Secant: 1/cos (PySpark sec).
     pub fn sec(&self) -> Column {
         let expr = self.expr().clone().map(
-            crate::udfs::apply_sec,
-            GetOutput::from_type(DataType::Float64),
+            |s| expect_col(crate::udfs::apply_sec(s)),
+            |_schema, field| Ok(Field::new(field.name().clone(), DataType::Float64)),
         );
         Self::from_expr(expr, None)
     }
@@ -1527,8 +1544,8 @@ impl Column {
     /// Arc sine. PySpark asin.
     pub fn asin(&self) -> Column {
         let expr = self.expr().clone().map(
-            crate::udfs::apply_asin,
-            GetOutput::from_type(DataType::Float64),
+            |s| expect_col(crate::udfs::apply_asin(s)),
+            |_schema, field| Ok(Field::new(field.name().clone(), DataType::Float64)),
         );
         Self::from_expr(expr, None)
     }
@@ -1536,8 +1553,8 @@ impl Column {
     /// Arc cosine. PySpark acos.
     pub fn acos(&self) -> Column {
         let expr = self.expr().clone().map(
-            crate::udfs::apply_acos,
-            GetOutput::from_type(DataType::Float64),
+            |s| expect_col(crate::udfs::apply_acos(s)),
+            |_schema, field| Ok(Field::new(field.name().clone(), DataType::Float64)),
         );
         Self::from_expr(expr, None)
     }
@@ -1545,8 +1562,8 @@ impl Column {
     /// Arc tangent. PySpark atan.
     pub fn atan(&self) -> Column {
         let expr = self.expr().clone().map(
-            crate::udfs::apply_atan,
-            GetOutput::from_type(DataType::Float64),
+            |s| expect_col(crate::udfs::apply_atan(s)),
+            |_schema, field| Ok(Field::new(field.name().clone(), DataType::Float64)),
         );
         Self::from_expr(expr, None)
     }
@@ -1555,9 +1572,9 @@ impl Column {
     pub fn atan2(&self, x: &Column) -> Column {
         let args = [x.expr().clone()];
         let expr = self.expr().clone().map_many(
-            crate::udfs::apply_atan2,
+            |cols| expect_col(crate::udfs::apply_atan2(cols)),
             &args,
-            GetOutput::from_type(DataType::Float64),
+            |_schema, fields| Ok(Field::new(fields[0].name().clone(), DataType::Float64)),
         );
         Self::from_expr(expr, None)
     }
@@ -1565,8 +1582,8 @@ impl Column {
     /// Convert radians to degrees. PySpark degrees.
     pub fn degrees(&self) -> Column {
         let expr = self.expr().clone().map(
-            crate::udfs::apply_degrees,
-            GetOutput::from_type(DataType::Float64),
+            |s| expect_col(crate::udfs::apply_degrees(s)),
+            |_schema, field| Ok(Field::new(field.name().clone(), DataType::Float64)),
         );
         Self::from_expr(expr, None)
     }
@@ -1579,8 +1596,8 @@ impl Column {
     /// Convert degrees to radians. PySpark radians.
     pub fn radians(&self) -> Column {
         let expr = self.expr().clone().map(
-            crate::udfs::apply_radians,
-            GetOutput::from_type(DataType::Float64),
+            |s| expect_col(crate::udfs::apply_radians(s)),
+            |_schema, field| Ok(Field::new(field.name().clone(), DataType::Float64)),
         );
         Self::from_expr(expr, None)
     }
@@ -1593,8 +1610,8 @@ impl Column {
     /// Sign of the number (-1, 0, or 1). PySpark signum.
     pub fn signum(&self) -> Column {
         let expr = self.expr().clone().map(
-            crate::udfs::apply_signum,
-            GetOutput::from_type(DataType::Float64),
+            |s| expect_col(crate::udfs::apply_signum(s)),
+            |_schema, field| Ok(Field::new(field.name().clone(), DataType::Float64)),
         );
         Self::from_expr(expr, None)
     }
@@ -1602,96 +1619,96 @@ impl Column {
     /// Hyperbolic cosine. PySpark cosh.
     pub fn cosh(&self) -> Column {
         let expr = self.expr().clone().map(
-            crate::udfs::apply_cosh,
-            GetOutput::from_type(DataType::Float64),
+            |s| expect_col(crate::udfs::apply_cosh(s)),
+            |_schema, field| Ok(Field::new(field.name().clone(), DataType::Float64)),
         );
         Self::from_expr(expr, None)
     }
     /// Hyperbolic sine. PySpark sinh.
     pub fn sinh(&self) -> Column {
         let expr = self.expr().clone().map(
-            crate::udfs::apply_sinh,
-            GetOutput::from_type(DataType::Float64),
+            |s| expect_col(crate::udfs::apply_sinh(s)),
+            |_schema, field| Ok(Field::new(field.name().clone(), DataType::Float64)),
         );
         Self::from_expr(expr, None)
     }
     /// Hyperbolic tangent. PySpark tanh.
     pub fn tanh(&self) -> Column {
         let expr = self.expr().clone().map(
-            crate::udfs::apply_tanh,
-            GetOutput::from_type(DataType::Float64),
+            |s| expect_col(crate::udfs::apply_tanh(s)),
+            |_schema, field| Ok(Field::new(field.name().clone(), DataType::Float64)),
         );
         Self::from_expr(expr, None)
     }
     /// Inverse hyperbolic cosine. PySpark acosh.
     pub fn acosh(&self) -> Column {
         let expr = self.expr().clone().map(
-            crate::udfs::apply_acosh,
-            GetOutput::from_type(DataType::Float64),
+            |s| expect_col(crate::udfs::apply_acosh(s)),
+            |_schema, field| Ok(Field::new(field.name().clone(), DataType::Float64)),
         );
         Self::from_expr(expr, None)
     }
     /// Inverse hyperbolic sine. PySpark asinh.
     pub fn asinh(&self) -> Column {
         let expr = self.expr().clone().map(
-            crate::udfs::apply_asinh,
-            GetOutput::from_type(DataType::Float64),
+            |s| expect_col(crate::udfs::apply_asinh(s)),
+            |_schema, field| Ok(Field::new(field.name().clone(), DataType::Float64)),
         );
         Self::from_expr(expr, None)
     }
     /// Inverse hyperbolic tangent. PySpark atanh.
     pub fn atanh(&self) -> Column {
         let expr = self.expr().clone().map(
-            crate::udfs::apply_atanh,
-            GetOutput::from_type(DataType::Float64),
+            |s| expect_col(crate::udfs::apply_atanh(s)),
+            |_schema, field| Ok(Field::new(field.name().clone(), DataType::Float64)),
         );
         Self::from_expr(expr, None)
     }
     /// Cube root. PySpark cbrt.
     pub fn cbrt(&self) -> Column {
         let expr = self.expr().clone().map(
-            crate::udfs::apply_cbrt,
-            GetOutput::from_type(DataType::Float64),
+            |s| expect_col(crate::udfs::apply_cbrt(s)),
+            |_schema, field| Ok(Field::new(field.name().clone(), DataType::Float64)),
         );
         Self::from_expr(expr, None)
     }
     /// exp(x) - 1. PySpark expm1.
     pub fn expm1(&self) -> Column {
         let expr = self.expr().clone().map(
-            crate::udfs::apply_expm1,
-            GetOutput::from_type(DataType::Float64),
+            |s| expect_col(crate::udfs::apply_expm1(s)),
+            |_schema, field| Ok(Field::new(field.name().clone(), DataType::Float64)),
         );
         Self::from_expr(expr, None)
     }
     /// log(1 + x). PySpark log1p.
     pub fn log1p(&self) -> Column {
         let expr = self.expr().clone().map(
-            crate::udfs::apply_log1p,
-            GetOutput::from_type(DataType::Float64),
+            |s| expect_col(crate::udfs::apply_log1p(s)),
+            |_schema, field| Ok(Field::new(field.name().clone(), DataType::Float64)),
         );
         Self::from_expr(expr, None)
     }
     /// Base-10 logarithm. PySpark log10.
     pub fn log10(&self) -> Column {
         let expr = self.expr().clone().map(
-            crate::udfs::apply_log10,
-            GetOutput::from_type(DataType::Float64),
+            |s| expect_col(crate::udfs::apply_log10(s)),
+            |_schema, field| Ok(Field::new(field.name().clone(), DataType::Float64)),
         );
         Self::from_expr(expr, None)
     }
     /// Base-2 logarithm. PySpark log2.
     pub fn log2(&self) -> Column {
         let expr = self.expr().clone().map(
-            crate::udfs::apply_log2,
-            GetOutput::from_type(DataType::Float64),
+            |s| expect_col(crate::udfs::apply_log2(s)),
+            |_schema, field| Ok(Field::new(field.name().clone(), DataType::Float64)),
         );
         Self::from_expr(expr, None)
     }
     /// Round to nearest integer. PySpark rint.
     pub fn rint(&self) -> Column {
         let expr = self.expr().clone().map(
-            crate::udfs::apply_rint,
-            GetOutput::from_type(DataType::Float64),
+            |s| expect_col(crate::udfs::apply_rint(s)),
+            |_schema, field| Ok(Field::new(field.name().clone(), DataType::Float64)),
         );
         Self::from_expr(expr, None)
     }
@@ -1784,30 +1801,27 @@ impl Column {
 
     /// Extract hour from datetime column (PySpark hour). Accepts string timestamp (#403).
     pub fn hour(&self) -> Column {
-        use polars::prelude::GetOutput;
         let expr = self.expr().clone().map(
-            crate::udfs::apply_hour,
-            GetOutput::from_type(DataType::Int32),
+            |s| expect_col(crate::udfs::apply_hour(s)),
+            |_schema, field| Ok(Field::new(field.name().clone(), DataType::Int32)),
         );
         Self::from_expr(expr, None)
     }
 
     /// Extract minute from datetime column (PySpark minute). Accepts string timestamp (#403).
     pub fn minute(&self) -> Column {
-        use polars::prelude::GetOutput;
         let expr = self.expr().clone().map(
-            crate::udfs::apply_minute,
-            GetOutput::from_type(DataType::Int32),
+            |s| expect_col(crate::udfs::apply_minute(s)),
+            |_schema, field| Ok(Field::new(field.name().clone(), DataType::Int32)),
         );
         Self::from_expr(expr, None)
     }
 
     /// Extract second from datetime column (PySpark second). Accepts string timestamp (#403).
     pub fn second(&self) -> Column {
-        use polars::prelude::GetOutput;
         let expr = self.expr().clone().map(
-            crate::udfs::apply_second,
-            GetOutput::from_type(DataType::Int32),
+            |s| expect_col(crate::udfs::apply_second(s)),
+            |_schema, field| Ok(Field::new(field.name().clone(), DataType::Int32)),
         );
         Self::from_expr(expr, None)
     }
@@ -1858,8 +1872,8 @@ impl Column {
     /// Weekday name "Mon","Tue",... (PySpark dayname).
     pub fn dayname(&self) -> Column {
         let expr = self.expr().clone().map(
-            crate::udfs::apply_dayname,
-            GetOutput::from_type(DataType::String),
+            |s| expect_col(crate::udfs::apply_dayname(s)),
+            |_schema, field| Ok(Field::new(field.name().clone(), DataType::String)),
         );
         Self::from_expr(expr, None)
     }
@@ -1867,8 +1881,8 @@ impl Column {
     /// Weekday 0=Mon, 6=Sun (PySpark weekday).
     pub fn weekday(&self) -> Column {
         let expr = self.expr().clone().map(
-            crate::udfs::apply_weekday,
-            GetOutput::from_type(DataType::Int32),
+            |s| expect_col(crate::udfs::apply_weekday(s)),
+            |_schema, field| Ok(Field::new(field.name().clone(), DataType::Int32)),
         );
         Self::from_expr(expr, None)
     }
@@ -1894,7 +1908,7 @@ impl Column {
         use polars::prelude::*;
         let start = self.expr().clone().cast(DataType::Date);
         let end = other.expr().clone().cast(DataType::Date);
-        Self::from_expr((end - start).dt().total_days(), None)
+        Self::from_expr((end - start).dt().total_days(false), None)
     }
 
     /// Last day of the month for date/datetime column (PySpark last_day).
@@ -1924,11 +1938,11 @@ impl Column {
         let end = other.expr().clone();
         let diff = end - start;
         let expr = match unit.trim().to_uppercase().as_str() {
-            "HOUR" | "HOURS" => diff.dt().total_hours(),
-            "MINUTE" | "MINUTES" => diff.dt().total_minutes(),
-            "SECOND" | "SECONDS" => diff.dt().total_seconds(),
-            "DAY" | "DAYS" => diff.dt().total_days(),
-            _ => diff.dt().total_days(),
+            "HOUR" | "HOURS" => diff.dt().total_hours(false),
+            "MINUTE" | "MINUTES" => diff.dt().total_minutes(false),
+            "SECOND" | "SECONDS" => diff.dt().total_seconds(false),
+            "DAY" | "DAYS" => diff.dt().total_days(false),
+            _ => diff.dt().total_days(false),
         };
         Self::from_expr(expr, None)
     }
@@ -1937,8 +1951,8 @@ impl Column {
     pub fn from_utc_timestamp(&self, tz: &str) -> Column {
         let tz = tz.to_string();
         let expr = self.expr().clone().map(
-            move |s| crate::udfs::apply_from_utc_timestamp(s, &tz),
-            GetOutput::same_type(),
+            move |s| expect_col(crate::udfs::apply_from_utc_timestamp(s, &tz)),
+            |_schema, field| Ok(field.clone()),
         );
         Self::from_expr(expr, None)
     }
@@ -1947,8 +1961,8 @@ impl Column {
     pub fn to_utc_timestamp(&self, tz: &str) -> Column {
         let tz = tz.to_string();
         let expr = self.expr().clone().map(
-            move |s| crate::udfs::apply_to_utc_timestamp(s, &tz),
-            GetOutput::same_type(),
+            move |s| expect_col(crate::udfs::apply_to_utc_timestamp(s, &tz)),
+            |_schema, field| Ok(field.clone()),
         );
         Self::from_expr(expr, None)
     }
@@ -1965,8 +1979,8 @@ impl Column {
     /// Add n months to date/datetime column (PySpark add_months). Month-aware.
     pub fn add_months(&self, n: i32) -> Column {
         let expr = self.expr().clone().map(
-            move |col| crate::udfs::apply_add_months(col, n),
-            GetOutput::from_type(DataType::Date),
+            move |col| expect_col(crate::udfs::apply_add_months(col, n)),
+            |_schema, field| Ok(Field::new(field.name().clone(), DataType::Date)),
         );
         Self::from_expr(expr, None)
     }
@@ -1976,9 +1990,9 @@ impl Column {
     pub fn months_between(&self, start: &Column, round_off: bool) -> Column {
         let args = [start.expr().clone()];
         let expr = self.expr().clone().map_many(
-            move |cols| crate::udfs::apply_months_between(cols, round_off),
+            move |cols| expect_col(crate::udfs::apply_months_between(cols, round_off)),
             &args,
-            GetOutput::from_type(DataType::Float64),
+            |_schema, fields| Ok(Field::new(fields[0].name().clone(), DataType::Float64)),
         );
         Self::from_expr(expr, None)
     }
@@ -1987,8 +2001,8 @@ impl Column {
     pub fn next_day(&self, day_of_week: &str) -> Column {
         let day = day_of_week.to_string();
         let expr = self.expr().clone().map(
-            move |col| crate::udfs::apply_next_day(col, &day),
-            GetOutput::from_type(DataType::Date),
+            move |col| expect_col(crate::udfs::apply_next_day(col, &day)),
+            |_schema, field| Ok(Field::new(field.name().clone(), DataType::Date)),
         );
         Self::from_expr(expr, None)
     }
@@ -1997,8 +2011,8 @@ impl Column {
     pub fn unix_timestamp(&self, format: Option<&str>) -> Column {
         let fmt = format.map(String::from);
         let expr = self.expr().clone().map(
-            move |col| crate::udfs::apply_unix_timestamp(col, fmt.as_deref()),
-            GetOutput::from_type(DataType::Int64),
+            move |col| expect_col(crate::udfs::apply_unix_timestamp(col, fmt.as_deref())),
+            |_schema, field| Ok(Field::new(field.name().clone(), DataType::Int64)),
         );
         Self::from_expr(expr, None)
     }
@@ -2007,8 +2021,8 @@ impl Column {
     pub fn from_unixtime(&self, format: Option<&str>) -> Column {
         let fmt = format.map(String::from);
         let expr = self.expr().clone().map(
-            move |col| crate::udfs::apply_from_unixtime(col, fmt.as_deref()),
-            GetOutput::from_type(DataType::String),
+            move |col| expect_col(crate::udfs::apply_from_unixtime(col, fmt.as_deref())),
+            |_schema, field| Ok(Field::new(field.name().clone(), DataType::String)),
         );
         Self::from_expr(expr, None)
     }
@@ -2040,8 +2054,8 @@ impl Column {
     /// Date to days since 1970-01-01 (PySpark unix_date).
     pub fn unix_date(&self) -> Column {
         let expr = self.expr().clone().map(
-            crate::udfs::apply_unix_date,
-            GetOutput::from_type(DataType::Int32),
+            |s| expect_col(crate::udfs::apply_unix_date(s)),
+            |_schema, field| Ok(Field::new(field.name().clone(), DataType::Int32)),
         );
         Self::from_expr(expr, None)
     }
@@ -2049,8 +2063,8 @@ impl Column {
     /// Days since epoch to date (PySpark date_from_unix_date).
     pub fn date_from_unix_date(&self) -> Column {
         let expr = self.expr().clone().map(
-            crate::udfs::apply_date_from_unix_date,
-            GetOutput::from_type(DataType::Date),
+            |s| expect_col(crate::udfs::apply_date_from_unix_date(s)),
+            |_schema, field| Ok(Field::new(field.name().clone(), DataType::Date)),
         );
         Self::from_expr(expr, None)
     }
@@ -2059,9 +2073,9 @@ impl Column {
     pub fn pmod(&self, divisor: &Column) -> Column {
         let args = [divisor.expr().clone()];
         let expr = self.expr().clone().map_many(
-            crate::udfs::apply_pmod,
+            |cols| expect_col(crate::udfs::apply_pmod(cols)),
             &args,
-            GetOutput::from_type(DataType::Float64),
+            |_schema, fields| Ok(Field::new(fields[0].name().clone(), DataType::Float64)),
         );
         Self::from_expr(expr, None)
     }
@@ -2069,8 +2083,8 @@ impl Column {
     /// Factorial n! for n in 0..=20 (PySpark factorial).
     pub fn factorial(&self) -> Column {
         let expr = self.expr().clone().map(
-            crate::udfs::apply_factorial,
-            GetOutput::from_type(DataType::Int64),
+            |s| expect_col(crate::udfs::apply_factorial(s)),
+            |_schema, field| Ok(Field::new(field.name().clone(), DataType::Int64)),
         );
         Self::from_expr(expr, None)
     }
@@ -2205,7 +2219,7 @@ impl Column {
             .rank(opts, None)
             .over(partition_exprs.clone());
         let cond_col = Self::from_expr(rank_expr.eq(lit(n)), None);
-        let null_col = Self::from_expr(Expr::Literal(LiteralValue::Null), None);
+        let null_col = Self::from_expr(lit(NULL), None);
         let value_col = Self::from_expr(self.expr().clone(), None);
         let when_expr = crate::functions::when(&cond_col)
             .then(&value_col)
@@ -2231,7 +2245,7 @@ impl Column {
 
     /// Check if list contains value (PySpark array_contains).
     pub fn array_contains(&self, value: Expr) -> Column {
-        Self::from_expr(self.expr().clone().list().contains(value), None)
+        Self::from_expr(self.expr().clone().list().contains(value, false), None)
     }
 
     /// Join list of strings with separator (PySpark array_join).
@@ -2288,17 +2302,27 @@ impl Column {
     }
 
     /// Add or replace a struct field (PySpark Column.withField), returning an error if the
-    /// column is not a struct type.
+    /// column is not a struct type. Uses a map_many UDF so we don't rely on Polars "*" wildcard
+    /// (removed in 0.53).
     pub fn try_with_field(
         &self,
         name: &str,
         value: &Column,
     ) -> Result<Column, polars::error::PolarsError> {
-        let fields = vec![
-            Expr::Field(Arc::from([PlSmallStr::from("*")])),
-            value.expr().clone().alias(name),
-        ];
-        let expr = self.expr().clone().struct_().with_fields(fields)?;
+        let name = name.to_string();
+        let args = [value.expr().clone()];
+        let expr = self.expr().clone().map_many(
+            move |cols| {
+                // map_many passes [self, ...args]: self is struct, args[0] is value
+                expect_col(crate::udfs::apply_struct_with_field(
+                    cols[0].clone(),
+                    cols[1].clone(),
+                    &name,
+                ))
+            },
+            &args,
+            |_schema, fields| Ok(fields[0].clone()),
+        );
         Ok(Self::from_expr(expr, None))
     }
 
@@ -2316,8 +2340,8 @@ impl Column {
     /// Distinct elements in list (PySpark array_distinct). Preserves first-occurrence order.
     pub fn array_distinct(&self) -> Column {
         let expr = self.expr().clone().map(
-            crate::udfs::apply_array_distinct_first_order,
-            GetOutput::same_type(),
+            |s| expect_col(crate::udfs::apply_array_distinct_first_order(s)),
+            |_schema, field| Ok(field.clone()),
         );
         Self::from_expr(expr, None)
     }
@@ -2350,12 +2374,26 @@ impl Column {
 
     /// Explode list into one row per element (PySpark explode).
     pub fn explode(&self) -> Column {
-        Self::from_expr(self.expr().clone().explode(), None)
+        use polars::prelude::ExplodeOptions;
+        Self::from_expr(
+            self.expr().clone().explode(ExplodeOptions {
+                empty_as_null: false,
+                keep_nulls: false,
+            }),
+            None,
+        )
     }
 
     /// Explode list; null/empty produces one row with null (PySpark explode_outer).
     pub fn explode_outer(&self) -> Column {
-        Self::from_expr(self.expr().clone().explode(), None)
+        use polars::prelude::ExplodeOptions;
+        Self::from_expr(
+            self.expr().clone().explode(ExplodeOptions {
+                empty_as_null: true,
+                keep_nulls: true,
+            }),
+            None,
+        )
     }
 
     /// Posexplode with null preservation (PySpark posexplode_outer).
@@ -2367,9 +2405,9 @@ impl Column {
     pub fn arrays_zip(&self, other: &Column) -> Column {
         let args = [other.expr().clone()];
         let expr = self.expr().clone().map_many(
-            crate::udfs::apply_arrays_zip,
+            |cols| expect_col(crate::udfs::apply_arrays_zip(cols)),
             &args,
-            GetOutput::same_type(),
+            |_schema, fields| Ok(fields[0].clone()),
         );
         Self::from_expr(expr, None)
     }
@@ -2378,9 +2416,9 @@ impl Column {
     pub fn arrays_overlap(&self, other: &Column) -> Column {
         let args = [other.expr().clone()];
         let expr = self.expr().clone().map_many(
-            crate::udfs::apply_arrays_overlap,
+            |cols| expect_col(crate::udfs::apply_arrays_overlap(cols)),
             &args,
-            GetOutput::from_type(DataType::Boolean),
+            |_schema, fields| Ok(Field::new(fields[0].name().clone(), DataType::Boolean)),
         );
         Self::from_expr(expr, None)
     }
@@ -2406,7 +2444,7 @@ impl Column {
             .expr()
             .clone()
             .list()
-            .eval(idx_expr, false)
+            .eval(idx_expr)
             .list()
             .min()
             .fill_null(lit(0i64))
@@ -2436,7 +2474,7 @@ impl Column {
             .expr()
             .clone()
             .list()
-            .eval(elem_neq, false)
+            .eval(elem_neq)
             .list()
             .drop_nulls();
         Self::from_expr(list_expr, None)
@@ -2445,18 +2483,18 @@ impl Column {
     /// Repeat each element n times (PySpark array_repeat). Implemented via map UDF.
     pub fn array_repeat(&self, n: i64) -> Column {
         let expr = self.expr().clone().map(
-            move |c| crate::udfs::apply_array_repeat(c, n),
-            GetOutput::same_type(),
+            move |c| expect_col(crate::udfs::apply_array_repeat(c, n)),
+            |_schema, field| Ok(field.clone()),
         );
         Self::from_expr(expr, None)
     }
 
     /// Flatten list of lists to one list (PySpark flatten). Implemented via map UDF.
     pub fn array_flatten(&self) -> Column {
-        let expr = self
-            .expr()
-            .clone()
-            .map(crate::udfs::apply_array_flatten, GetOutput::same_type());
+        let expr = self.expr().clone().map(
+            |s| expect_col(crate::udfs::apply_array_flatten(s)),
+            |_schema, field| Ok(field.clone()),
+        );
         Self::from_expr(expr, None)
     }
 
@@ -2464,9 +2502,9 @@ impl Column {
     pub fn array_append(&self, elem: &Column) -> Column {
         let args = [elem.expr().clone()];
         let expr = self.expr().clone().map_many(
-            crate::udfs::apply_array_append,
+            |cols| expect_col(crate::udfs::apply_array_append(cols)),
             &args,
-            GetOutput::same_type(),
+            |_schema, fields| Ok(fields[0].clone()),
         );
         Self::from_expr(expr, None)
     }
@@ -2475,9 +2513,9 @@ impl Column {
     pub fn array_prepend(&self, elem: &Column) -> Column {
         let args = [elem.expr().clone()];
         let expr = self.expr().clone().map_many(
-            crate::udfs::apply_array_prepend,
+            |cols| expect_col(crate::udfs::apply_array_prepend(cols)),
             &args,
-            GetOutput::same_type(),
+            |_schema, fields| Ok(fields[0].clone()),
         );
         Self::from_expr(expr, None)
     }
@@ -2486,9 +2524,9 @@ impl Column {
     pub fn array_insert(&self, pos: &Column, elem: &Column) -> Column {
         let args = [pos.expr().clone(), elem.expr().clone()];
         let expr = self.expr().clone().map_many(
-            crate::udfs::apply_array_insert,
+            |cols| expect_col(crate::udfs::apply_array_insert(cols)),
             &args,
-            GetOutput::same_type(),
+            |_schema, fields| Ok(fields[0].clone()),
         );
         Self::from_expr(expr, None)
     }
@@ -2497,9 +2535,9 @@ impl Column {
     pub fn array_except(&self, other: &Column) -> Column {
         let args = [other.expr().clone()];
         let expr = self.expr().clone().map_many(
-            crate::udfs::apply_array_except,
+            |cols| expect_col(crate::udfs::apply_array_except(cols)),
             &args,
-            GetOutput::same_type(),
+            |_schema, fields| Ok(fields[0].clone()),
         );
         Self::from_expr(expr, None)
     }
@@ -2508,9 +2546,9 @@ impl Column {
     pub fn array_intersect(&self, other: &Column) -> Column {
         let args = [other.expr().clone()];
         let expr = self.expr().clone().map_many(
-            crate::udfs::apply_array_intersect,
+            |cols| expect_col(crate::udfs::apply_array_intersect(cols)),
             &args,
-            GetOutput::same_type(),
+            |_schema, fields| Ok(fields[0].clone()),
         );
         Self::from_expr(expr, None)
     }
@@ -2519,9 +2557,9 @@ impl Column {
     pub fn array_union(&self, other: &Column) -> Column {
         let args = [other.expr().clone()];
         let expr = self.expr().clone().map_many(
-            crate::udfs::apply_array_union,
+            |cols| expect_col(crate::udfs::apply_array_union(cols)),
             &args,
-            GetOutput::same_type(),
+            |_schema, fields| Ok(fields[0].clone()),
         );
         Self::from_expr(expr, None)
     }
@@ -2531,35 +2569,40 @@ impl Column {
     pub fn zip_with(&self, other: &Column, merge: Expr) -> Column {
         let args = [other.expr().clone()];
         let zip_expr = self.expr().clone().map_many(
-            crate::udfs::apply_zip_arrays_to_struct,
+            |cols| expect_col(crate::udfs::apply_zip_arrays_to_struct(cols)),
             &args,
-            GetOutput::same_type(),
+            |_schema, fields| {
+                let left_inner = match &fields[0].dtype {
+                    DataType::List(inner) => *inner.clone(),
+                    _ => DataType::Unknown(Default::default()),
+                };
+                let right_inner = match fields.get(1).map(|f| &f.dtype) {
+                    Some(DataType::List(inner)) => *inner.clone(),
+                    _ => DataType::Unknown(Default::default()),
+                };
+                let struct_dtype = DataType::Struct(vec![
+                    Field::new("left".into(), left_inner),
+                    Field::new("right".into(), right_inner),
+                ]);
+                Ok(Field::new(
+                    fields[0].name().clone(),
+                    DataType::List(Box::new(struct_dtype)),
+                ))
+            },
         );
-        let list_expr = zip_expr.list().eval(merge, false);
+        let list_expr = zip_expr.list().eval(merge);
         Self::from_expr(list_expr, None)
     }
 
     /// True if any list element satisfies the predicate (PySpark exists). Uses list.eval(pred).list().any().
     pub fn array_exists(&self, predicate: Expr) -> Column {
-        let pred_expr = self
-            .expr()
-            .clone()
-            .list()
-            .eval(predicate, false)
-            .list()
-            .any();
+        let pred_expr = self.expr().clone().list().eval(predicate).list().any();
         Self::from_expr(pred_expr, Some("exists".to_string()))
     }
 
     /// True if all list elements satisfy the predicate (PySpark forall). Uses list.eval(pred).list().all().
     pub fn array_forall(&self, predicate: Expr) -> Column {
-        let pred_expr = self
-            .expr()
-            .clone()
-            .list()
-            .eval(predicate, false)
-            .list()
-            .all();
+        let pred_expr = self.expr().clone().list().eval(predicate).list().all();
         Self::from_expr(pred_expr, Some("forall".to_string()))
     }
 
@@ -2576,7 +2619,7 @@ impl Column {
             .expr()
             .clone()
             .list()
-            .eval(elem_expr, false)
+            .eval(elem_expr)
             .list()
             .drop_nulls();
         Self::from_expr(list_expr, None)
@@ -2584,7 +2627,7 @@ impl Column {
 
     /// Transform list elements by expression (PySpark transform). list.eval(expr).
     pub fn array_transform(&self, f: Expr) -> Column {
-        let list_expr = self.expr().clone().list().eval(f, false);
+        let list_expr = self.expr().clone().list().eval(f);
         Self::from_expr(list_expr, None)
     }
 
@@ -2607,13 +2650,18 @@ impl Column {
     /// Explode list with position (PySpark posexplode). Returns (pos_col, value_col).
     /// pos is 1-based; uses list.eval(cum_count()).explode() and explode().
     pub fn posexplode(&self) -> (Column, Column) {
+        use polars::prelude::ExplodeOptions;
+        let opts = ExplodeOptions {
+            empty_as_null: false,
+            keep_nulls: false,
+        };
         let pos_expr = self
             .expr()
             .clone()
             .list()
-            .eval(col("").cum_count(false), false)
-            .explode();
-        let val_expr = self.expr().clone().explode();
+            .eval(col("").cum_count(false))
+            .explode(opts);
+        let val_expr = self.expr().clone().explode(opts);
         (
             Self::from_expr(pos_expr, Some("pos".to_string())),
             Self::from_expr(val_expr, Some("col".to_string())),
@@ -2623,14 +2671,14 @@ impl Column {
     /// Extract keys from a map column (PySpark map_keys). Map column is List(Struct{key, value}).
     pub fn map_keys(&self) -> Column {
         let elem_key = col("").struct_().field_by_name("key");
-        let list_expr = self.expr().clone().list().eval(elem_key, false);
+        let list_expr = self.expr().clone().list().eval(elem_key);
         Self::from_expr(list_expr, None)
     }
 
     /// Extract values from a map column (PySpark map_values). Map column is List(Struct{key, value}).
     pub fn map_values(&self) -> Column {
         let elem_val = col("").struct_().field_by_name("value");
-        let list_expr = self.expr().clone().list().eval(elem_val, false);
+        let list_expr = self.expr().clone().list().eval(elem_val);
         Self::from_expr(list_expr, None)
     }
 
@@ -2643,9 +2691,9 @@ impl Column {
     pub fn map_from_arrays(&self, values: &Column) -> Column {
         let args = [values.expr().clone()];
         let expr = self.expr().clone().map_many(
-            crate::udfs::apply_map_from_arrays,
+            |cols| expect_col(crate::udfs::apply_map_from_arrays(cols)),
             &args,
-            GetOutput::same_type(),
+            |_schema, fields| Ok(fields[0].clone()),
         );
         Self::from_expr(expr, None)
     }
@@ -2654,9 +2702,9 @@ impl Column {
     pub fn map_concat(&self, other: &Column) -> Column {
         let args = [other.expr().clone()];
         let expr = self.expr().clone().map_many(
-            crate::udfs::apply_map_concat,
+            |cols| expect_col(crate::udfs::apply_map_concat(cols)),
             &args,
-            GetOutput::same_type(),
+            |_schema, fields| Ok(fields[0].clone()),
         );
         Self::from_expr(expr, None)
     }
@@ -2666,7 +2714,7 @@ impl Column {
         use polars::prelude::as_struct;
         let value = col("").struct_().field_by_name("value");
         let new_struct = as_struct(vec![key_expr.alias("key"), value.alias("value")]);
-        let list_expr = self.expr().clone().list().eval(new_struct, false);
+        let list_expr = self.expr().clone().list().eval(new_struct);
         Self::from_expr(list_expr, None)
     }
 
@@ -2675,7 +2723,7 @@ impl Column {
         use polars::prelude::as_struct;
         let key = col("").struct_().field_by_name("key");
         let new_struct = as_struct(vec![key.alias("key"), value_expr.alias("value")]);
-        let list_expr = self.expr().clone().list().eval(new_struct, false);
+        let list_expr = self.expr().clone().list().eval(new_struct);
         Self::from_expr(list_expr, None)
     }
 
@@ -2685,14 +2733,44 @@ impl Column {
         use polars::prelude::as_struct;
         let args = [other.expr().clone()];
         let zip_expr = self.expr().clone().map_many(
-            crate::udfs::apply_map_zip_to_struct,
+            |cols| expect_col(crate::udfs::apply_map_zip_to_struct(cols)),
             &args,
-            GetOutput::same_type(),
+            |_schema, fields| {
+                let list_inner = match &fields[0].dtype {
+                    DataType::List(inner) => *inner.clone(),
+                    _ => return Ok(fields[0].clone()),
+                };
+                let (key_dtype, value_dtype) = match &list_inner {
+                    DataType::Struct(struct_fields) => {
+                        let k = struct_fields
+                            .iter()
+                            .find(|f| f.name.as_str() == "key")
+                            .map(|f| f.dtype.clone())
+                            .unwrap_or(DataType::String);
+                        let v = struct_fields
+                            .iter()
+                            .find(|f| f.name.as_str() == "value")
+                            .map(|f| f.dtype.clone())
+                            .unwrap_or(DataType::String);
+                        (k, v)
+                    }
+                    _ => (DataType::String, DataType::String),
+                };
+                let out_struct = DataType::Struct(vec![
+                    Field::new("key".into(), key_dtype),
+                    Field::new("value1".into(), value_dtype.clone()),
+                    Field::new("value2".into(), value_dtype),
+                ]);
+                Ok(Field::new(
+                    fields[0].name().clone(),
+                    DataType::List(Box::new(out_struct)),
+                ))
+            },
         );
         let key_field = col("").struct_().field_by_name("key").alias("key");
         let value_field = merge.alias("value");
         let merge_expr = as_struct(vec![key_field, value_field]);
-        let list_expr = zip_expr.list().eval(merge_expr, false);
+        let list_expr = zip_expr.list().eval(merge_expr);
         Self::from_expr(list_expr, None)
     }
 
@@ -2710,7 +2788,7 @@ impl Column {
             .expr()
             .clone()
             .list()
-            .eval(elem_expr, false)
+            .eval(elem_expr)
             .list()
             .drop_nulls();
         Self::from_expr(list_expr, None)
@@ -2725,9 +2803,9 @@ impl Column {
     pub fn map_contains_key(&self, key: &Column) -> Column {
         let args = [key.expr().clone()];
         let expr = self.expr().clone().map_many(
-            crate::udfs::apply_map_contains_key,
+            |cols| expect_col(crate::udfs::apply_map_contains_key(cols)),
             &args,
-            GetOutput::from_type(DataType::Boolean),
+            |_schema, fields| Ok(Field::new(fields[0].name().clone(), DataType::Boolean)),
         );
         Self::from_expr(expr, None)
     }
@@ -2735,10 +2813,11 @@ impl Column {
     /// Get value for key from map, or null (PySpark get).
     pub fn get(&self, key: &Column) -> Column {
         let args = [key.expr().clone()];
-        let expr =
-            self.expr()
-                .clone()
-                .map_many(crate::udfs::apply_get, &args, GetOutput::same_type());
+        let expr = self.expr().clone().map_many(
+            |cols| expect_col(crate::udfs::apply_get(cols)),
+            &args,
+            |_schema, fields| Ok(fields[0].clone()),
+        );
         Self::from_expr(expr, None)
     }
 
@@ -2751,7 +2830,9 @@ impl Column {
 
     /// Parse string column as JSON into struct (PySpark from_json). Uses Polars str().json_decode.
     pub fn from_json(&self, schema: Option<polars::datatypes::DataType>) -> Column {
-        let out = self.expr().clone().str().json_decode(schema, None);
+        use polars::prelude::DataType;
+        let dtype = schema.unwrap_or(DataType::String);
+        let out = self.expr().clone().str().json_decode(dtype);
         Self::from_expr(out, None)
     }
 
@@ -2765,8 +2846,8 @@ impl Column {
     pub fn json_array_length(&self, path: &str) -> Column {
         let path = path.to_string();
         let expr = self.expr().clone().map(
-            move |s| crate::udfs::apply_json_array_length(s, &path),
-            GetOutput::from_type(DataType::Int64),
+            move |s| expect_col(crate::udfs::apply_json_array_length(s, &path)),
+            |_schema, field| Ok(Field::new(field.name().clone(), DataType::Int64)),
         );
         Self::from_expr(expr, None)
     }
@@ -2774,8 +2855,13 @@ impl Column {
     /// Keys of JSON object (PySpark json_object_keys). Returns list of strings. UDF.
     pub fn json_object_keys(&self) -> Column {
         let expr = self.expr().clone().map(
-            crate::udfs::apply_json_object_keys,
-            GetOutput::from_type(DataType::List(Box::new(DataType::String))),
+            |s| expect_col(crate::udfs::apply_json_object_keys(s)),
+            |_schema, field| {
+                Ok(Field::new(
+                    field.name().clone(),
+                    DataType::List(Box::new(DataType::String)),
+                ))
+            },
         );
         Self::from_expr(expr, None)
     }
@@ -2788,8 +2874,13 @@ impl Column {
             .map(|k| polars::datatypes::Field::new(k.as_str().into(), DataType::String))
             .collect();
         let expr = self.expr().clone().map(
-            move |s| crate::udfs::apply_json_tuple(s, &keys_vec),
-            GetOutput::from_type(DataType::Struct(struct_fields)),
+            move |s| expect_col(crate::udfs::apply_json_tuple(s, &keys_vec)),
+            move |_schema, field| {
+                Ok(Field::new(
+                    field.name().clone(),
+                    DataType::Struct(struct_fields.clone()),
+                ))
+            },
         );
         Self::from_expr(expr, None)
     }
@@ -2797,8 +2888,8 @@ impl Column {
     /// Parse CSV string to struct (PySpark from_csv). Minimal: split by comma, up to 32 columns. UDF.
     pub fn from_csv(&self) -> Column {
         let expr = self.expr().clone().map(
-            crate::udfs::apply_from_csv,
-            GetOutput::from_type(DataType::Struct(vec![])),
+            |s| expect_col(crate::udfs::apply_from_csv(s)),
+            |_schema, field| Ok(Field::new(field.name().clone(), DataType::Struct(vec![]))),
         );
         Self::from_expr(expr, None)
     }
@@ -2806,8 +2897,8 @@ impl Column {
     /// Format struct as CSV string (PySpark to_csv). Minimal. UDF.
     pub fn to_csv(&self) -> Column {
         let expr = self.expr().clone().map(
-            crate::udfs::apply_to_csv,
-            GetOutput::from_type(DataType::String),
+            |s| expect_col(crate::udfs::apply_to_csv(s)),
+            |_schema, field| Ok(Field::new(field.name().clone(), DataType::String)),
         );
         Self::from_expr(expr, None)
     }
@@ -2818,8 +2909,8 @@ impl Column {
         let part = part.to_string();
         let key_owned = key.map(String::from);
         let expr = self.expr().clone().map(
-            move |s| crate::udfs::apply_parse_url(s, &part, key_owned.as_deref()),
-            GetOutput::from_type(DataType::String),
+            move |s| expect_col(crate::udfs::apply_parse_url(s, &part, key_owned.as_deref())),
+            |_schema, field| Ok(Field::new(field.name().clone(), DataType::String)),
         );
         Self::from_expr(expr, None)
     }
@@ -2827,23 +2918,23 @@ impl Column {
     /// Hash of column value (PySpark hash). Single-column version.
     pub fn hash(&self) -> Column {
         let expr = self.expr().clone().map(
-            crate::udfs::apply_hash_one,
-            GetOutput::from_type(DataType::Int64),
+            |s| expect_col(crate::udfs::apply_hash_one(s)),
+            |_schema, field| Ok(Field::new(field.name().clone(), DataType::Int64)),
         );
         Self::from_expr(expr, None)
     }
 
     /// Check if column values are in the other column's list/series (PySpark isin).
     pub fn isin(&self, other: &Column) -> Column {
-        let out = self.expr().clone().is_in(other.expr().clone());
+        let out = self.expr().clone().is_in(other.expr().clone(), false);
         Self::from_expr(out, None)
     }
 
     /// Percent-decode URL-encoded string (PySpark url_decode). Uses UDF.
     pub fn url_decode(&self) -> Column {
         let expr = self.expr().clone().map(
-            crate::udfs::apply_url_decode,
-            GetOutput::from_type(DataType::String),
+            |s| expect_col(crate::udfs::apply_url_decode(s)),
+            |_schema, field| Ok(Field::new(field.name().clone(), DataType::String)),
         );
         Self::from_expr(expr, None)
     }
@@ -2851,8 +2942,8 @@ impl Column {
     /// Percent-encode string for URL (PySpark url_encode). Uses UDF.
     pub fn url_encode(&self) -> Column {
         let expr = self.expr().clone().map(
-            crate::udfs::apply_url_encode,
-            GetOutput::from_type(DataType::String),
+            |s| expect_col(crate::udfs::apply_url_encode(s)),
+            |_schema, field| Ok(Field::new(field.name().clone(), DataType::String)),
         );
         Self::from_expr(expr, None)
     }
@@ -2880,8 +2971,8 @@ impl Column {
     /// Bitwise unsigned right shift (PySpark shiftRightUnsigned). Logical shift.
     pub fn shift_right_unsigned(&self, n: i32) -> Column {
         let expr = self.expr().clone().map(
-            move |s| crate::udfs::apply_shift_right_unsigned(s, n),
-            GetOutput::from_type(DataType::Int64),
+            move |s| expect_col(crate::udfs::apply_shift_right_unsigned(s, n)),
+            |_schema, field| Ok(Field::new(field.name().clone(), DataType::Int64)),
         );
         Self::from_expr(expr, None)
     }
@@ -2890,7 +2981,7 @@ impl Column {
 #[cfg(test)]
 mod tests {
     use super::Column;
-    use polars::prelude::{col, df, lit, IntoLazy};
+    use polars::prelude::{IntoLazy, col, df, lit};
 
     /// Helper to create a simple DataFrame for testing
     fn test_df() -> polars::prelude::DataFrame {

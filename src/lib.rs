@@ -24,6 +24,9 @@
 //! breaking changes in minor releases (e.g. 0.1 → 0.2) until 1.0. For behavioral caveats and
 //! intentional differences from PySpark, see the [repository documentation](https://github.com/eddiethedean/robin-sparkless/blob/main/docs/PYSPARK_DIFFERENCES.md).
 
+#![allow(clippy::collapsible_if)]
+#![allow(clippy::let_and_return)]
+
 pub mod column;
 pub mod config;
 pub mod dataframe;
@@ -60,6 +63,6 @@ pub use dataframe::{
 };
 pub use error::EngineError;
 pub use functions::{SortOrder, *};
-pub use schema::{schema_from_json, DataType, StructField, StructType};
+pub use schema::{DataType, StructField, StructType, schema_from_json};
 pub use session::{DataFrameReader, SparkSession, SparkSessionBuilder};
 pub use traits::{FromRobinDf, IntoRobinDf};

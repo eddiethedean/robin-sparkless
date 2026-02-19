@@ -4,7 +4,7 @@ members = []
 [package]
 name = "robin-sparkless"
 version = "0.12.0"
-edition = "2021"
+edition = "2024"
 description = "PySpark-like DataFrame API in Rust on Polars; no JVM."
 readme = "README.md"
 license = "MIT"
@@ -29,17 +29,17 @@ sql = ["dep:sqlparser"]
 delta = ["dep:deltalake", "dep:tokio"]
 
 [dependencies]
-polars = { version = "0.45", features = ["lazy", "csv", "parquet", "json", "temporal", "strings", "concat_str", "regex", "round_series", "abs", "dtype-categorical", "dtype-date", "dtype-datetime", "dtype-duration", "dtype-time", "rank", "is_in", "list_eval", "list_drop_nulls", "list_any_all", "cum_agg", "string_pad", "string_reverse", "repeat_by", "log", "month_end", "describe", "cross_join", "semi_anti_join", "extract_jsonpath", "dtype-struct", "random", "product", "moment"] }
-polars-plan = "0.45"
+polars = { version = "0.53", features = ["lazy", "csv", "parquet", "json", "temporal", "strings", "concat_str", "regex", "round_series", "abs", "dtype-categorical", "dtype-date", "dtype-datetime", "dtype-duration", "dtype-time", "rank", "is_in", "list_eval", "list_drop_nulls", "list_any_all", "cum_agg", "string_pad", "string_reverse", "repeat_by", "log", "month_end", "describe", "cross_join", "semi_anti_join", "extract_jsonpath", "dtype-struct", "random", "product", "moment"] }
+polars-plan = "0.53"
 serde = { version = "1.0", features = ["derive"] }
 chrono = "0.4"
 chrono-tz = "0.9"
 serde_json = "1.0"
 anyhow = "1.0"
-thiserror = "1.0"
+thiserror = "2.0"
 spark-ddl-parser = { version = "0.1", optional = false }
-sqlparser = { version = "0.45", optional = true }
-deltalake = { version = "0.30", optional = true }
+sqlparser = { version = "0.61", optional = true }
+deltalake = { version = "0.31", optional = true }
 tokio = { version = "1", optional = true, features = ["rt", "rt-multi-thread", "fs", "io-util"] }
 url = "2"
 # URL encode/decode
@@ -53,7 +53,7 @@ soundex = "0.2"
 # Pin to address RUSTSEC-2026-0007 (integer overflow in BytesMut::reserve; transitive via polars/deltalake)
 bytes = "1.11.1"
 # colRegex (column name pattern matching)
-regex = "1.11"
+regex = "1.12"
 # regexp_extract with lookahead/lookbehind (PySpark parity)
 fancy-regex = "0.13"
 # base64, binary hashes, encode/decode
@@ -79,7 +79,7 @@ anes = { path = "vendor/anes" }
 
 [dev-dependencies]
 chrono = "0.4"
-polars = { version = "0.45", features = ["lazy", "csv", "parquet", "json", "temporal", "strings", "concat_str", "regex", "round_series", "abs", "dtype-categorical", "dtype-date", "dtype-datetime", "dtype-duration", "dtype-time", "test", "rank", "is_in", "list_eval", "list_drop_nulls", "list_any_all", "cum_agg", "string_pad", "string_reverse", "repeat_by", "log", "month_end", "describe", "cross_join", "semi_anti_join", "extract_jsonpath", "dtype-struct", "product", "moment"] }
+polars = { version = "0.53", features = ["lazy", "csv", "parquet", "json", "temporal", "strings", "concat_str", "regex", "round_series", "abs", "dtype-categorical", "dtype-date", "dtype-datetime", "dtype-duration", "dtype-time", "test", "rank", "is_in", "list_eval", "list_drop_nulls", "list_any_all", "cum_agg", "string_pad", "string_reverse", "repeat_by", "log", "month_end", "describe", "cross_join", "semi_anti_join", "extract_jsonpath", "dtype-struct", "product", "moment"] }
 tempfile = "3"
 criterion = "0.5"
 

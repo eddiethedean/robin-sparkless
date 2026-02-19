@@ -206,7 +206,7 @@ pub fn try_avg(col: &Column) -> Column {
 
 /// Value of value_col in the row where ord_col is maximum (PySpark max_by). Use in groupBy.agg().
 pub fn max_by(value_col: &Column, ord_col: &Column) -> Column {
-    use polars::prelude::{as_struct, SortOptions};
+    use polars::prelude::{SortOptions, as_struct};
     let st = as_struct(vec![
         ord_col.expr().clone().alias("_ord"),
         value_col.expr().clone().alias("_val"),
@@ -221,7 +221,7 @@ pub fn max_by(value_col: &Column, ord_col: &Column) -> Column {
 
 /// Value of value_col in the row where ord_col is minimum (PySpark min_by). Use in groupBy.agg().
 pub fn min_by(value_col: &Column, ord_col: &Column) -> Column {
-    use polars::prelude::{as_struct, SortOptions};
+    use polars::prelude::{SortOptions, as_struct};
     let st = as_struct(vec![
         ord_col.expr().clone().alias("_ord"),
         value_col.expr().clone().alias("_val"),
@@ -579,7 +579,7 @@ pub fn when(condition: &Column) -> WhenBuilder {
 /// Two-arg when(condition, value): returns value where condition is true, null otherwise (PySpark when(cond, val)).
 pub fn when_then_otherwise_null(condition: &Column, value: &Column) -> Column {
     use polars::prelude::*;
-    let null_expr = Expr::Literal(LiteralValue::Null);
+    let null_expr = lit(NULL);
     let expr = polars::prelude::when(condition.expr().clone())
         .then(value.expr().clone())
         .otherwise(null_expr);
@@ -610,7 +610,9 @@ impl WhenBuilder {
     pub fn otherwise(self, _value: &Column) -> Column {
         // This should not be called directly - when().otherwise() without .then() is not supported
         // Users should use when(cond).then(val1).otherwise(val2)
-        panic!("when().otherwise() requires .then() to be called first. Use when(cond).then(val1).otherwise(val2)");
+        panic!(
+            "when().otherwise() requires .then() to be called first. Use when(cond).then(val1).otherwise(val2)"
+        );
     }
 }
 
@@ -818,10 +820,10 @@ pub fn bitmap_bucket_number(column: &Column) -> Column {
 
 /// Count set bits in a bitmap binary column (PySpark bitmap_count).
 pub fn bitmap_count(column: &Column) -> Column {
-    use polars::prelude::{DataType, GetOutput};
+    use polars::prelude::{DataType, Field};
     let expr = column.expr().clone().map(
-        crate::udfs::apply_bitmap_count,
-        GetOutput::from_type(DataType::Int64),
+        |s| crate::column::expect_col(crate::udfs::apply_bitmap_count(s)),
+        |_schema, field| Ok(Field::new(field.name().clone(), DataType::Int64)),
     );
     Column::from_expr(expr, None)
 }
@@ -829,19 +831,19 @@ pub fn bitmap_count(column: &Column) -> Column {
 /// Aggregate: bitwise OR of bit positions into one bitmap binary (PySpark bitmap_construct_agg).
 /// Use in group_by(...).agg([bitmap_construct_agg(col)]).
 pub fn bitmap_construct_agg(column: &Column) -> polars::prelude::Expr {
-    use polars::prelude::{DataType, GetOutput};
+    use polars::prelude::{DataType, Field};
     column.expr().clone().implode().map(
-        crate::udfs::apply_bitmap_construct_agg,
-        GetOutput::from_type(DataType::Binary),
+        |s| crate::column::expect_col(crate::udfs::apply_bitmap_construct_agg(s)),
+        |_schema, field| Ok(Field::new(field.name().clone(), DataType::Binary)),
     )
 }
 
 /// Aggregate: bitwise OR of bitmap binary column (PySpark bitmap_or_agg).
 pub fn bitmap_or_agg(column: &Column) -> polars::prelude::Expr {
-    use polars::prelude::{DataType, GetOutput};
+    use polars::prelude::{DataType, Field};
     column.expr().clone().implode().map(
-        crate::udfs::apply_bitmap_or_agg,
-        GetOutput::from_type(DataType::Binary),
+        |s| crate::column::expect_col(crate::udfs::apply_bitmap_or_agg(s)),
+        |_schema, field| Ok(Field::new(field.name().clone(), DataType::Binary)),
     )
 }
 
@@ -860,10 +862,10 @@ pub fn assert_true(column: &Column, err_msg: Option<&str>) -> Column {
 pub fn raise_error(message: &str) -> Column {
     let msg = message.to_string();
     let expr = lit(0i64).map(
-        move |_col| -> PolarsResult<Option<polars::prelude::Column>> {
+        move |_col| -> PolarsResult<polars::prelude::Column> {
             Err(PolarsError::ComputeError(msg.clone().into()))
         },
-        GetOutput::from_type(DataType::Int64),
+        |_schema, field| Ok(Field::new(field.name().clone(), DataType::Int64)),
     );
     Column::from_expr(expr, Some("raise_error".to_string()))
 }
@@ -954,10 +956,9 @@ pub fn call_udf(name: &str, cols: &[Column]) -> Result<Column, PolarsError> {
         exprs.into_iter().next().unwrap().map(
             move |c| {
                 let s = c.take_materialized_series();
-                udf.apply(&[s])
-                    .map(|out| Some(PlColumn::new("_".into(), out)))
+                udf.apply(&[s]).map(|out| PlColumn::new("_".into(), out))
             },
-            GetOutput::from_type(output_type),
+            move |_schema, field| Ok(Field::new(field.name().clone(), output_type.clone())),
         )
     } else {
         let udf = udf.clone();
@@ -969,11 +970,10 @@ pub fn call_udf(name: &str, cols: &[Column]) -> Result<Column, PolarsError> {
                     .iter_mut()
                     .map(|c| std::mem::take(c).take_materialized_series())
                     .collect();
-                udf.apply(&series)
-                    .map(|out| Some(PlColumn::new("_".into(), out)))
+                udf.apply(&series).map(|out| PlColumn::new("_".into(), out))
             },
             &rest,
-            GetOutput::from_type(output_type),
+            move |_schema, fields| Ok(Field::new(fields[0].name().clone(), output_type.clone())),
         )
     };
 
@@ -1090,9 +1090,11 @@ pub fn format_string(format: &str, columns: &[&Column]) -> Column {
     let format_owned = format.to_string();
     let args: Vec<Expr> = columns.iter().skip(1).map(|c| c.expr().clone()).collect();
     let expr = columns[0].expr().clone().map_many(
-        move |cols| crate::udfs::apply_format_string(cols, &format_owned),
+        move |cols| {
+            crate::column::expect_col(crate::udfs::apply_format_string(cols, &format_owned))
+        },
         &args,
-        GetOutput::from_type(DataType::String),
+        |_schema, fields| Ok(Field::new(fields[0].name().clone(), DataType::String)),
     );
     crate::column::Column::from_expr(expr, None)
 }
@@ -1364,7 +1366,7 @@ pub fn log(column: &Column) -> Column {
 
 /// Logarithm with given base (PySpark log(col, base)). base must be positive and not 1.
 pub fn log_with_base(column: &Column, base: f64) -> Column {
-    crate::column::Column::from_expr(column.expr().clone().log(base), None)
+    crate::column::Column::from_expr(column.expr().clone().log(lit(base)), None)
 }
 
 /// Sine in radians (PySpark sin)
@@ -1428,37 +1430,39 @@ pub fn sign(column: &Column) -> Column {
 pub fn cast(column: &Column, type_name: &str) -> Result<Column, String> {
     let dtype = parse_type_name(type_name)?;
     if dtype == DataType::Boolean {
-        use polars::prelude::GetOutput;
         let expr = column.expr().clone().map(
-            |col| crate::udfs::apply_string_to_boolean(col, true),
-            GetOutput::from_type(DataType::Boolean),
+            |col| crate::column::expect_col(crate::udfs::apply_string_to_boolean(col, true)),
+            |_schema, field| Ok(Field::new(field.name().clone(), DataType::Boolean)),
         );
         return Ok(Column::from_expr(expr, None));
     }
     if dtype == DataType::Date {
-        use polars::prelude::GetOutput;
         let expr = column.expr().clone().map(
-            |col| crate::udfs::apply_string_to_date(col, true),
-            GetOutput::from_type(DataType::Date),
+            |col| crate::column::expect_col(crate::udfs::apply_string_to_date(col, true)),
+            |_schema, field| Ok(Field::new(field.name().clone(), DataType::Date)),
         );
         return Ok(Column::from_expr(expr, None));
     }
     if dtype == DataType::Int32 || dtype == DataType::Int64 {
-        use polars::prelude::GetOutput;
         let target = dtype.clone();
         // cast: strict=true – invalid strings should error (PySpark parity).
         let expr = column.expr().clone().map(
-            move |col| crate::udfs::apply_string_to_int(col, true, target.clone()),
-            GetOutput::from_type(dtype),
+            move |col| {
+                crate::column::expect_col(crate::udfs::apply_string_to_int(
+                    col,
+                    true,
+                    target.clone(),
+                ))
+            },
+            move |_schema, field| Ok(Field::new(field.name().clone(), dtype.clone())),
         );
         return Ok(Column::from_expr(expr, None));
     }
     if dtype == DataType::Float64 {
-        use polars::prelude::GetOutput;
         // String-to-double uses custom parsing for Spark-style to_number semantics.
         let expr = column.expr().clone().map(
-            |col| crate::udfs::apply_string_to_double(col, true),
-            GetOutput::from_type(DataType::Float64),
+            |col| crate::column::expect_col(crate::udfs::apply_string_to_double(col, true)),
+            |_schema, field| Ok(Field::new(field.name().clone(), DataType::Float64)),
         );
         return Ok(Column::from_expr(expr, None));
     }
@@ -1474,35 +1478,37 @@ pub fn cast(column: &Column, type_name: &str) -> Result<Column, String> {
 pub fn try_cast(column: &Column, type_name: &str) -> Result<Column, String> {
     let dtype = parse_type_name(type_name)?;
     if dtype == DataType::Boolean {
-        use polars::prelude::GetOutput;
         let expr = column.expr().clone().map(
-            |col| crate::udfs::apply_string_to_boolean(col, false),
-            GetOutput::from_type(DataType::Boolean),
+            |col| crate::column::expect_col(crate::udfs::apply_string_to_boolean(col, false)),
+            |_schema, field| Ok(Field::new(field.name().clone(), DataType::Boolean)),
         );
         return Ok(Column::from_expr(expr, None));
     }
     if dtype == DataType::Date {
-        use polars::prelude::GetOutput;
         let expr = column.expr().clone().map(
-            |col| crate::udfs::apply_string_to_date(col, false),
-            GetOutput::from_type(DataType::Date),
+            |col| crate::column::expect_col(crate::udfs::apply_string_to_date(col, false)),
+            |_schema, field| Ok(Field::new(field.name().clone(), DataType::Date)),
         );
         return Ok(Column::from_expr(expr, None));
     }
     if dtype == DataType::Int32 || dtype == DataType::Int64 {
-        use polars::prelude::GetOutput;
         let target = dtype.clone();
         let expr = column.expr().clone().map(
-            move |col| crate::udfs::apply_string_to_int(col, false, target.clone()),
-            GetOutput::from_type(dtype),
+            move |col| {
+                crate::column::expect_col(crate::udfs::apply_string_to_int(
+                    col,
+                    false,
+                    target.clone(),
+                ))
+            },
+            move |_schema, field| Ok(Field::new(field.name().clone(), dtype.clone())),
         );
         return Ok(Column::from_expr(expr, None));
     }
     if dtype == DataType::Float64 {
-        use polars::prelude::GetOutput;
         let expr = column.expr().clone().map(
-            |col| crate::udfs::apply_string_to_double(col, false),
-            GetOutput::from_type(DataType::Float64),
+            |col| crate::column::expect_col(crate::udfs::apply_string_to_double(col, false)),
+            |_schema, field| Ok(Field::new(field.name().clone(), DataType::Float64)),
         );
         return Ok(Column::from_expr(expr, None));
     }
@@ -1541,11 +1547,22 @@ pub fn try_to_number(column: &Column, _format: Option<&str>) -> Result<Column, S
 /// Cast to timestamp, or parse with format when provided (PySpark to_timestamp).
 /// When format is None, parses string columns with default format "%Y-%m-%d %H:%M:%S" (PySpark parity #273).
 pub fn to_timestamp(column: &Column, format: Option<&str>) -> Result<Column, String> {
-    use polars::prelude::{DataType, GetOutput, TimeUnit};
+    use polars::prelude::{DataType, Field, TimeUnit};
     let fmt_owned = format.map(|s| s.to_string());
     let expr = column.expr().clone().map(
-        move |s| crate::udfs::apply_to_timestamp_format(s, fmt_owned.as_deref(), true),
-        GetOutput::from_type(DataType::Datetime(TimeUnit::Microseconds, None)),
+        move |s| {
+            crate::column::expect_col(crate::udfs::apply_to_timestamp_format(
+                s,
+                fmt_owned.as_deref(),
+                true,
+            ))
+        },
+        |_schema, field| {
+            Ok(Field::new(
+                field.name().clone(),
+                DataType::Datetime(TimeUnit::Microseconds, None),
+            ))
+        },
     );
     Ok(crate::column::Column::from_expr(expr, None))
 }
@@ -1556,22 +1573,44 @@ pub fn try_to_timestamp(column: &Column, format: Option<&str>) -> Result<Column,
     use polars::prelude::*;
     let fmt_owned = format.map(|s| s.to_string());
     let expr = column.expr().clone().map(
-        move |s| crate::udfs::apply_to_timestamp_format(s, fmt_owned.as_deref(), false),
-        GetOutput::from_type(DataType::Datetime(TimeUnit::Microseconds, None)),
+        move |s| {
+            crate::column::expect_col(crate::udfs::apply_to_timestamp_format(
+                s,
+                fmt_owned.as_deref(),
+                false,
+            ))
+        },
+        |_schema, field| {
+            Ok(Field::new(
+                field.name().clone(),
+                DataType::Datetime(TimeUnit::Microseconds, None),
+            ))
+        },
     );
     Ok(crate::column::Column::from_expr(expr, None))
 }
 
 /// Parse as timestamp in local timezone, return UTC (PySpark to_timestamp_ltz).
 pub fn to_timestamp_ltz(column: &Column, format: Option<&str>) -> Result<Column, String> {
-    use polars::prelude::{DataType, GetOutput, TimeUnit};
+    use polars::prelude::{DataType, Field, TimeUnit};
     match format {
         None => crate::cast(column, "timestamp"),
         Some(fmt) => {
             let fmt_owned = fmt.to_string();
             let expr = column.expr().clone().map(
-                move |s| crate::udfs::apply_to_timestamp_ltz_format(s, Some(&fmt_owned), true),
-                GetOutput::from_type(DataType::Datetime(TimeUnit::Microseconds, None)),
+                move |s| {
+                    crate::column::expect_col(crate::udfs::apply_to_timestamp_ltz_format(
+                        s,
+                        Some(&fmt_owned),
+                        true,
+                    ))
+                },
+                |_schema, field| {
+                    Ok(Field::new(
+                        field.name().clone(),
+                        DataType::Datetime(TimeUnit::Microseconds, None),
+                    ))
+                },
             );
             Ok(crate::column::Column::from_expr(expr, None))
         }
@@ -1580,14 +1619,25 @@ pub fn to_timestamp_ltz(column: &Column, format: Option<&str>) -> Result<Column,
 
 /// Parse as timestamp without timezone (PySpark to_timestamp_ntz). Returns Datetime(_, None).
 pub fn to_timestamp_ntz(column: &Column, format: Option<&str>) -> Result<Column, String> {
-    use polars::prelude::{DataType, GetOutput, TimeUnit};
+    use polars::prelude::{DataType, Field, TimeUnit};
     match format {
         None => crate::cast(column, "timestamp"),
         Some(fmt) => {
             let fmt_owned = fmt.to_string();
             let expr = column.expr().clone().map(
-                move |s| crate::udfs::apply_to_timestamp_ntz_format(s, Some(&fmt_owned), true),
-                GetOutput::from_type(DataType::Datetime(TimeUnit::Microseconds, None)),
+                move |s| {
+                    crate::column::expect_col(crate::udfs::apply_to_timestamp_ntz_format(
+                        s,
+                        Some(&fmt_owned),
+                        true,
+                    ))
+                },
+                |_schema, field| {
+                    Ok(Field::new(
+                        field.name().clone(),
+                        DataType::Datetime(TimeUnit::Microseconds, None),
+                    ))
+                },
             );
             Ok(crate::column::Column::from_expr(expr, None))
         }
@@ -1598,7 +1648,7 @@ pub fn to_timestamp_ntz(column: &Column, format: Option<&str>) -> Result<Column,
 pub fn try_divide(left: &Column, right: &Column) -> Column {
     use polars::prelude::*;
     let zero_cond = right.expr().clone().cast(DataType::Float64).eq(lit(0.0f64));
-    let null_expr = Expr::Literal(LiteralValue::Null);
+    let null_expr = lit(NULL);
     let div_expr =
         left.expr().clone().cast(DataType::Float64) / right.expr().clone().cast(DataType::Float64);
     let expr = polars::prelude::when(zero_cond)
@@ -1610,10 +1660,11 @@ pub fn try_divide(left: &Column, right: &Column) -> Column {
 /// Add that returns null on overflow (PySpark try_add). Uses checked arithmetic.
 pub fn try_add(left: &Column, right: &Column) -> Column {
     let args = [right.expr().clone()];
-    let expr =
-        left.expr()
-            .clone()
-            .map_many(crate::udfs::apply_try_add, &args, GetOutput::same_type());
+    let expr = left.expr().clone().map_many(
+        |cols| crate::column::expect_col(crate::udfs::apply_try_add(cols)),
+        &args,
+        |_schema, fields| Ok(fields[0].clone()),
+    );
     Column::from_expr(expr, None)
 }
 
@@ -1621,9 +1672,9 @@ pub fn try_add(left: &Column, right: &Column) -> Column {
 pub fn try_subtract(left: &Column, right: &Column) -> Column {
     let args = [right.expr().clone()];
     let expr = left.expr().clone().map_many(
-        crate::udfs::apply_try_subtract,
+        |cols| crate::column::expect_col(crate::udfs::apply_try_subtract(cols)),
         &args,
-        GetOutput::same_type(),
+        |_schema, fields| Ok(fields[0].clone()),
     );
     Column::from_expr(expr, None)
 }
@@ -1632,9 +1683,9 @@ pub fn try_subtract(left: &Column, right: &Column) -> Column {
 pub fn try_multiply(left: &Column, right: &Column) -> Column {
     let args = [right.expr().clone()];
     let expr = left.expr().clone().map_many(
-        crate::udfs::apply_try_multiply,
+        |cols| crate::column::expect_col(crate::udfs::apply_try_multiply(cols)),
         &args,
-        GetOutput::same_type(),
+        |_schema, fields| Ok(fields[0].clone()),
     );
     Column::from_expr(expr, None)
 }
@@ -1676,7 +1727,7 @@ pub fn elt(index: &Column, columns: &[&Column]) -> Column {
         panic!("elt requires at least one column");
     }
     let idx_expr = index.expr().clone();
-    let null_expr = Expr::Literal(LiteralValue::Null);
+    let null_expr = lit(NULL);
     let mut expr = null_expr;
     for (i, c) in columns.iter().enumerate().rev() {
         let n = (i + 1) as i64;
@@ -1728,7 +1779,11 @@ pub fn greatest(columns: &[&Column]) -> Result<Column, String> {
     let mut expr = columns[0].expr().clone();
     for c in columns.iter().skip(1) {
         let args = [c.expr().clone()];
-        expr = expr.map_many(crate::udfs::apply_greatest2, &args, GetOutput::same_type());
+        expr = expr.map_many(
+            |cols| crate::column::expect_col(crate::udfs::apply_greatest2(cols)),
+            &args,
+            |_schema, fields| Ok(fields[0].clone()),
+        );
     }
     Ok(Column::from_expr(expr, None))
 }
@@ -1744,7 +1799,11 @@ pub fn least(columns: &[&Column]) -> Result<Column, String> {
     let mut expr = columns[0].expr().clone();
     for c in columns.iter().skip(1) {
         let args = [c.expr().clone()];
-        expr = expr.map_many(crate::udfs::apply_least2, &args, GetOutput::same_type());
+        expr = expr.map_many(
+            |cols| crate::column::expect_col(crate::udfs::apply_least2(cols)),
+            &args,
+            |_schema, fields| Ok(fields[0].clone()),
+        );
     }
     Ok(Column::from_expr(expr, None))
 }
@@ -1766,11 +1825,16 @@ pub fn day(column: &Column) -> Column {
 
 /// Cast or parse to date (PySpark to_date). When format is None: cast date/datetime to date, parse string with default formats. When format is Some: parse string with given format.
 pub fn to_date(column: &Column, format: Option<&str>) -> Result<Column, String> {
-    use polars::prelude::GetOutput;
     let fmt = format.map(|s| s.to_string());
     let expr = column.expr().clone().map(
-        move |col| crate::udfs::apply_string_to_date_format(col, fmt.as_deref(), false),
-        GetOutput::from_type(DataType::Date),
+        move |col| {
+            crate::column::expect_col(crate::udfs::apply_string_to_date_format(
+                col,
+                fmt.as_deref(),
+                false,
+            ))
+        },
+        |_schema, field| Ok(Field::new(field.name().clone(), DataType::Date)),
     );
     Ok(Column::from_expr(expr, None))
 }
@@ -1787,7 +1851,10 @@ pub fn current_date() -> Column {
     use polars::prelude::*;
     let today = chrono::Utc::now().date_naive();
     let days = (today - crate::date_utils::epoch_naive_date()).num_days() as i32;
-    crate::column::Column::from_expr(Expr::Literal(LiteralValue::Date(days)), None)
+    crate::column::Column::from_expr(
+        Expr::Literal(LiteralValue::Scalar(Scalar::new_date(days))),
+        None,
+    )
 }
 
 /// Current timestamp (evaluation time). PySpark current_timestamp.
@@ -1795,7 +1862,11 @@ pub fn current_timestamp() -> Column {
     use polars::prelude::*;
     let ts = chrono::Utc::now().timestamp_micros();
     crate::column::Column::from_expr(
-        Expr::Literal(LiteralValue::DateTime(ts, TimeUnit::Microseconds, None)),
+        Expr::Literal(LiteralValue::Scalar(Scalar::new_datetime(
+            ts,
+            TimeUnit::Microseconds,
+            None,
+        ))),
         None,
     )
 }
@@ -1973,9 +2044,9 @@ pub fn make_date(year: &Column, month: &Column, day: &Column) -> Column {
     use polars::prelude::*;
     let args = [month.expr().clone(), day.expr().clone()];
     let expr = year.expr().clone().map_many(
-        crate::udfs::apply_make_date,
+        |cols| crate::column::expect_col(crate::udfs::apply_make_date(cols)),
         &args,
-        GetOutput::from_type(DataType::Date),
+        |_schema, fields| Ok(Field::new(fields[0].name().clone(), DataType::Date)),
     );
     crate::column::Column::from_expr(expr, None)
 }
@@ -2001,9 +2072,16 @@ pub fn make_timestamp(
         sec.expr().clone(),
     ];
     let expr = year.expr().clone().map_many(
-        move |cols| crate::udfs::apply_make_timestamp(cols, tz_owned.as_deref()),
+        move |cols| {
+            crate::column::expect_col(crate::udfs::apply_make_timestamp(cols, tz_owned.as_deref()))
+        },
         &args,
-        GetOutput::from_type(DataType::Datetime(TimeUnit::Microseconds, None)),
+        |_schema, fields| {
+            Ok(Field::new(
+                fields[0].name().clone(),
+                DataType::Datetime(TimeUnit::Microseconds, None),
+            ))
+        },
     );
     crate::column::Column::from_expr(expr, None)
 }
@@ -2058,8 +2136,12 @@ pub fn convert_timezone(source_tz: &str, target_tz: &str, column: &Column) -> Co
     let source_tz = source_tz.to_string();
     let target_tz = target_tz.to_string();
     let expr = column.expr().clone().map(
-        move |s| crate::udfs::apply_convert_timezone(s, &source_tz, &target_tz),
-        GetOutput::same_type(),
+        move |s| {
+            crate::column::expect_col(crate::udfs::apply_convert_timezone(
+                s, &source_tz, &target_tz,
+            ))
+        },
+        |_schema, field| Ok(field.clone()),
     );
     crate::column::Column::from_expr(expr, None)
 }
@@ -2274,7 +2356,7 @@ pub fn ifnull(column: &Column, value: &Column) -> Column {
 pub fn nullif(column: &Column, value: &Column) -> Column {
     use polars::prelude::*;
     let cond = column.expr().clone().eq(value.expr().clone());
-    let null_lit = Expr::Literal(LiteralValue::Null);
+    let null_lit = lit(NULL);
     let expr = when(cond).then(null_lit).otherwise(column.expr().clone());
     crate::column::Column::from_expr(expr, None)
 }
@@ -2487,7 +2569,7 @@ pub fn array_slice(column: &Column, start: i64, length: Option<i64>) -> Column {
 /// Generate array of numbers from start to stop (inclusive) with optional step (PySpark sequence).
 /// step defaults to 1.
 pub fn sequence(start: &Column, stop: &Column, step: Option<&Column>) -> Column {
-    use polars::prelude::{as_struct, lit, DataType, GetOutput};
+    use polars::prelude::{DataType, Field, as_struct, lit};
     let step_expr = step
         .map(|c| c.expr().clone().alias("2"))
         .unwrap_or_else(|| lit(1i64).alias("2"));
@@ -2497,17 +2579,19 @@ pub fn sequence(start: &Column, stop: &Column, step: Option<&Column>) -> Column 
         step_expr,
     ]);
     let out_dtype = DataType::List(Box::new(DataType::Int64));
-    let expr = struct_expr.map(crate::udfs::apply_sequence, GetOutput::from_type(out_dtype));
+    let expr = struct_expr.map(
+        |s| crate::column::expect_col(crate::udfs::apply_sequence(s)),
+        move |_schema, field| Ok(Field::new(field.name().clone(), out_dtype.clone())),
+    );
     crate::column::Column::from_expr(expr, None)
 }
 
 /// Random permutation of list elements (PySpark shuffle).
 pub fn shuffle(column: &Column) -> Column {
-    use polars::prelude::GetOutput;
-    let expr = column
-        .expr()
-        .clone()
-        .map(crate::udfs::apply_shuffle, GetOutput::same_type());
+    let expr = column.expr().clone().map(
+        |s| crate::column::expect_col(crate::udfs::apply_shuffle(s)),
+        |_schema, field| Ok(field.clone()),
+    );
     crate::column::Column::from_expr(expr, None)
 }
 
@@ -2600,7 +2684,7 @@ pub fn posexplode(column: &Column) -> (Column, Column) {
 /// With no args (or empty slice), returns a column of empty maps per row (PySpark parity #275).
 pub fn create_map(key_values: &[&Column]) -> Result<Column, PolarsError> {
     use polars::chunked_array::StructChunked;
-    use polars::prelude::{as_struct, concat_list, lit, IntoSeries, ListChunked};
+    use polars::prelude::{IntoSeries, ListChunked, as_struct, concat_list, lit};
     if key_values.is_empty() {
         // PySpark F.create_map() with no args: one empty map {} per row (broadcast literal).
         let key_s = Series::new("key".into(), Vec::<String>::new());
@@ -2835,13 +2919,13 @@ pub fn isin(column: &Column, other: &Column) -> Column {
 /// Check if column values are in the given i64 slice (PySpark isin with literal list).
 pub fn isin_i64(column: &Column, values: &[i64]) -> Column {
     let s = Series::from_iter(values.iter().cloned());
-    Column::from_expr(column.expr().clone().is_in(lit(s)), None)
+    Column::from_expr(column.expr().clone().is_in(lit(s), false), None)
 }
 
 /// Check if column values are in the given string slice (PySpark isin with literal list).
 pub fn isin_str(column: &Column, values: &[&str]) -> Column {
     let s: Series = Series::from_iter(values.iter().copied());
-    Column::from_expr(column.expr().clone().is_in(lit(s)), None)
+    Column::from_expr(column.expr().clone().is_in(lit(s), false), None)
 }
 
 /// Percent-decode URL-encoded string (PySpark url_decode).
@@ -2906,8 +2990,8 @@ pub fn hash(columns: &[&Column]) -> Column {
     let struct_expr = polars::prelude::as_struct(exprs);
     let name = columns[0].name().to_string();
     let expr = struct_expr.map(
-        crate::udfs::apply_hash_struct,
-        GetOutput::from_type(DataType::Int64),
+        |s| crate::column::expect_col(crate::udfs::apply_hash_struct(s)),
+        |_schema, field| Ok(Field::new(field.name().clone(), DataType::Int64)),
     );
     crate::column::Column::from_expr(expr, Some(name))
 }
@@ -2920,7 +3004,7 @@ pub fn stack(columns: &[&Column]) -> Column {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use polars::prelude::{df, IntoLazy};
+    use polars::prelude::{IntoLazy, df};
 
     #[test]
     fn test_col_creates_column() {

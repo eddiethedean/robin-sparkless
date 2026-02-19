@@ -7,10 +7,11 @@ use super::DataFrame;
 use crate::functions::SortOrder;
 use crate::type_coercion::find_common_type;
 use polars::prelude::{
-    col, DataType, Expr, IntoLazy, IntoSeries, NamedFrom, PolarsError, Series, UnionArgs,
-    UniqueKeepStrategy,
+    DataType, Expr, IntoLazy, IntoSeries, NamedFrom, PlSmallStr, PolarsError, Selector, Series,
+    UnionArgs, UniqueKeepStrategy, col,
 };
 use std::collections::HashMap;
+use std::sync::Arc;
 
 /// Select columns (returns a new DataFrame). Preserves case_sensitive on result.
 pub fn select(
@@ -92,7 +93,7 @@ pub fn with_column(
                 let mut pl_df = pl_df.as_ref().clone();
                 let n = pl_df.height();
                 let series = crate::udfs::series_rand_n(column_name, n, seed);
-                pl_df.with_column(series)?;
+                pl_df.with_column(series.into())?;
                 return Ok(super::DataFrame::from_polars_with_options(
                     pl_df,
                     case_sensitive,
@@ -103,7 +104,7 @@ pub fn with_column(
                 let mut pl_df = pl_df.as_ref().clone();
                 let n = pl_df.height();
                 let series = crate::udfs::series_randn_n(column_name, n, seed);
-                pl_df.with_column(series)?;
+                pl_df.with_column(series.into())?;
                 return Ok(super::DataFrame::from_polars_with_options(
                     pl_df,
                     case_sensitive,
@@ -304,14 +305,14 @@ pub fn union_by_name(
         };
         let left_expr = match &left_has {
             Some(r) => col(r.as_str()).cast(common_dtype.clone()).alias(c.as_str()),
-            None => Expr::Literal(polars::prelude::LiteralValue::Null)
+            None => polars::prelude::lit(polars::prelude::NULL)
                 .cast(common_dtype.clone())
                 .alias(c.as_str()),
         };
         left_exprs.push(left_expr);
         let right_expr = match &right_has {
             Some(r) => col(r.as_str()).cast(common_dtype.clone()).alias(c.as_str()),
-            None if allow_missing_columns => Expr::Literal(polars::prelude::LiteralValue::Null)
+            None if allow_missing_columns => polars::prelude::lit(polars::prelude::NULL)
                 .cast(common_dtype)
                 .alias(c.as_str()),
             None => {
@@ -348,9 +349,13 @@ pub fn distinct(
                 .collect::<Result<Vec<_>, _>>()
         })
         .transpose()?;
+    let subset_selector: Option<Selector> = subset_names.map(|names| Selector::ByName {
+        names: Arc::from(names.into_iter().map(PlSmallStr::from).collect::<Vec<_>>()),
+        strict: false,
+    });
     let lf = df
         .lazy_frame()
-        .unique(subset_names, UniqueKeepStrategy::First);
+        .unique(subset_selector, UniqueKeepStrategy::First);
     Ok(super::DataFrame::from_lazy_with_options(lf, case_sensitive))
 }
 
@@ -410,7 +415,15 @@ pub fn dropna(
         base_lf.filter(any_not_null)
     } else {
         // how == "any" (default): drop if any null in subset
-        base_lf.drop_nulls(Some(col_exprs))
+        let subset_selector = Selector::ByName {
+            names: Arc::from(
+                cols.iter()
+                    .map(|s| PlSmallStr::from(s.as_str()))
+                    .collect::<Vec<_>>(),
+            ),
+            strict: false,
+        };
+        base_lf.drop_nulls(Some(subset_selector))
     };
     Ok(super::DataFrame::from_lazy_with_options(lf, case_sensitive))
 }
@@ -501,7 +514,7 @@ pub fn describe(df: &DataFrame, case_sensitive: bool) -> Result<DataFrame, Polar
     use polars::prelude::*;
     let pl_df = df.collect_inner()?.as_ref().clone();
     let mut stat_values: Vec<Column> = Vec::new();
-    for col in pl_df.get_columns() {
+    for col in pl_df.columns() {
         let s = col.as_materialized_series();
         let dtype = s.dtype();
         if dtype.is_numeric() {
@@ -568,7 +581,7 @@ pub fn describe(df: &DataFrame, case_sensitive: bool) -> Result<DataFrame, Polar
         .into();
         let empty: Vec<f64> = Vec::new();
         let empty_series = Series::new("placeholder".into(), empty).into();
-        let out_pl = polars::prelude::DataFrame::new(vec![stat_col, empty_series])?;
+        let out_pl = polars::prelude::DataFrame::new_infer_height(vec![stat_col, empty_series])?;
         return Ok(super::DataFrame::from_polars_with_options(
             out_pl,
             case_sensitive,
@@ -581,7 +594,7 @@ pub fn describe(df: &DataFrame, case_sensitive: bool) -> Result<DataFrame, Polar
     .into();
     let mut cols: Vec<Column> = vec![summary_col];
     cols.extend(stat_values);
-    let out_pl = polars::prelude::DataFrame::new(cols)?;
+    let out_pl = polars::prelude::DataFrame::new_infer_height(cols)?;
     Ok(super::DataFrame::from_polars_with_options(
         out_pl,
         case_sensitive,
@@ -757,7 +770,7 @@ pub fn random_split(
     let mut rng = rand::rngs::StdRng::seed_from_u64(seed.unwrap_or(0));
     let mut bucket_indices: Vec<Vec<u32>> = (0..weights.len()).map(|_| Vec::new()).collect();
     for i in 0..n {
-        let r: f64 = rng.gen();
+        let r: f64 = rng.r#gen();
         let bucket = cum
             .iter()
             .position(|&c| r < c)
@@ -932,7 +945,7 @@ pub fn to_json(df: &DataFrame) -> Result<Vec<String>, PolarsError> {
         let mut row = serde_json::Map::new();
         for (i, name) in names.iter().enumerate() {
             let col = pl
-                .get_columns()
+                .columns()
                 .get(i)
                 .ok_or_else(|| PolarsError::ComputeError("to_json: column index".into()))?;
             let series = col.as_materialized_series();
@@ -1148,7 +1161,7 @@ pub fn freq_items(
             out.push(list_chunked.into_series().into());
         }
         return Ok(super::DataFrame::from_polars_with_options(
-            polars::prelude::DataFrame::new(out)?,
+            polars::prelude::DataFrame::new_infer_height(out)?,
             case_sensitive,
         ));
     }
@@ -1196,7 +1209,7 @@ pub fn freq_items(
         let list_row = list_chunked.into_series();
         out_series.push(list_row.into());
     }
-    let out_df = polars::prelude::DataFrame::new(out_series)?;
+    let out_df = polars::prelude::DataFrame::new_infer_height(out_series)?;
     Ok(super::DataFrame::from_polars_with_options(
         out_df,
         case_sensitive,
@@ -1213,11 +1226,9 @@ pub fn approx_quantile(
     use polars::prelude::{ChunkQuantile, QuantileMethod};
     if probabilities.is_empty() {
         return Ok(super::DataFrame::from_polars_with_options(
-            polars::prelude::DataFrame::new(vec![Series::new(
-                "quantile".into(),
-                Vec::<f64>::new(),
-            )
-            .into()])?,
+            polars::prelude::DataFrame::new_infer_height(vec![
+                Series::new("quantile".into(), Vec::<f64>::new()).into(),
+            ])?,
             case_sensitive,
         ));
     }
@@ -1237,8 +1248,9 @@ pub fn approx_quantile(
         let q = ca.quantile(p, QuantileMethod::Linear)?;
         quantiles.push(q.unwrap_or(f64::NAN));
     }
-    let out_df =
-        polars::prelude::DataFrame::new(vec![Series::new("quantile".into(), quantiles).into()])?;
+    let out_df = polars::prelude::DataFrame::new_infer_height(vec![
+        Series::new("quantile".into(), quantiles).into(),
+    ])?;
     Ok(super::DataFrame::from_polars_with_options(
         out_df,
         case_sensitive,
@@ -1302,7 +1314,7 @@ pub fn melt(
             .collect();
         let mut part = pl_df.select(select_cols)?;
         let var_series = Series::new("variable".into(), vec![vname.as_str(); part.height()]);
-        part.with_column(var_series)?;
+        part.with_column(var_series.into())?;
         part.rename(vname.as_str(), "value".into())?;
         parts.push(part);
     }
@@ -1416,7 +1428,10 @@ mod tests {
         let collected = one.collect_inner().unwrap();
         let name_series = collected.column("name").unwrap();
         let first_name = name_series.str().unwrap().get(0).unwrap();
-        assert_eq!(first_name, "Alice", "first() after orderBy(value) must return row with min value (Alice=1), not first in storage (Charlie)");
+        assert_eq!(
+            first_name, "Alice",
+            "first() after orderBy(value) must return row with min value (Alice=1), not first in storage (Charlie)"
+        );
     }
 
     #[test]

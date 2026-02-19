@@ -6,10 +6,10 @@ mod stats;
 mod transformations;
 
 pub use aggregations::{CubeRollupData, GroupedData, PivotedGroupedData};
-pub use joins::{join, JoinType};
+pub use joins::{JoinType, join};
 pub use stats::DataFrameStat;
 pub use transformations::{
-    filter, order_by, order_by_exprs, select, select_with_exprs, with_column, DataFrameNa,
+    DataFrameNa, filter, order_by, order_by_exprs, select, select_with_exprs, with_column,
 };
 
 use crate::column::Column;
@@ -19,8 +19,8 @@ use crate::schema::StructType;
 use crate::session::SparkSession;
 use crate::type_coercion::coerce_for_pyspark_comparison;
 use polars::prelude::{
-    col, lit, AnyValue, DataFrame as PlDataFrame, DataType, Expr, IntoLazy, LazyFrame, PlSmallStr,
-    PolarsError, Schema, SchemaNamesAndDtypes,
+    AnyValue, DataFrame as PlDataFrame, DataType, Expr, IntoLazy, LazyFrame, PlSmallStr,
+    PolarsError, Schema, SchemaNamesAndDtypes, UnknownKind, col, lit,
 };
 use serde_json::Value as JsonValue;
 use std::collections::{HashMap, HashSet};
@@ -158,6 +158,10 @@ impl DataFrame {
                 if alias_output_names.contains(name_str) {
                     return Ok(e);
                 }
+                // Empty name is a placeholder in list.eval (e.g. map_keys uses col("").struct_().field_by_name("key")).
+                if name_str.is_empty() {
+                    return Ok(e);
+                }
                 // Struct field dot notation (PySpark col("struct_col.field")).
                 if name_str.contains('.') {
                     let parts: Vec<&str> = name_str.split('.').collect();
@@ -194,31 +198,29 @@ impl DataFrame {
         use std::sync::Arc;
 
         fn is_numeric_literal(expr: &Expr) -> bool {
-            matches!(
-                expr,
-                Expr::Literal(
-                    LiteralValue::Int32(_)
-                        | LiteralValue::Int64(_)
-                        | LiteralValue::UInt32(_)
-                        | LiteralValue::UInt64(_)
-                        | LiteralValue::Float32(_)
-                        | LiteralValue::Float64(_)
-                        | LiteralValue::Int(_)   // dynamic int (e.g. lit(123) from some code paths)
-                        | LiteralValue::Float(_) // dynamic float
-                )
-            )
+            match expr {
+                Expr::Literal(lv) => {
+                    let dt = lv.get_datatype();
+                    dt.is_numeric()
+                        || matches!(
+                            dt,
+                            DataType::Unknown(UnknownKind::Int(_))
+                                | DataType::Unknown(UnknownKind::Float)
+                        )
+                }
+                _ => false,
+            }
         }
 
         fn literal_dtype(lv: &LiteralValue) -> DataType {
-            match lv {
-                LiteralValue::Int32(_) => DataType::Int32,
-                LiteralValue::Int64(_) => DataType::Int64,
-                LiteralValue::UInt32(_) => DataType::UInt32,
-                LiteralValue::UInt64(_) => DataType::UInt64,
-                LiteralValue::Float32(_) => DataType::Float32,
-                LiteralValue::Float64(_) => DataType::Float64,
-                LiteralValue::Int(_) | LiteralValue::Float(_) => DataType::Float64,
-                _ => DataType::Float64,
+            let dt = lv.get_datatype();
+            if matches!(
+                dt,
+                DataType::Unknown(UnknownKind::Int(_)) | DataType::Unknown(UnknownKind::Float)
+            ) {
+                DataType::Float64
+            } else {
+                dt
             }
         }
 
@@ -241,9 +243,14 @@ impl DataFrame {
                     matches!(&**left, Expr::Literal(_)) && is_numeric_literal(left.as_ref());
                 let right_is_numeric_lit =
                     matches!(&**right, Expr::Literal(_)) && is_numeric_literal(right.as_ref());
-                let left_is_string_lit = matches!(&**left, Expr::Literal(LiteralValue::String(_)));
-                let right_is_string_lit =
-                    matches!(&**right, Expr::Literal(LiteralValue::String(_)));
+                let left_is_string_lit = matches!(
+                    &**left,
+                    Expr::Literal(lv) if lv.get_datatype() == DataType::String
+                );
+                let right_is_string_lit = matches!(
+                    &**right,
+                    Expr::Literal(lv) if lv.get_datatype() == DataType::String
+                );
                 let root_is_col_vs_numeric = is_comparison_op
                     && ((left_is_col && right_is_numeric_lit)
                         || (right_is_col && left_is_numeric_lit));
@@ -380,8 +387,10 @@ impl DataFrame {
                 let right_is_col = matches!(&*right, Expr::Column(_));
                 let left_is_lit = matches!(&*left, Expr::Literal(_));
                 let right_is_lit = matches!(&*right, Expr::Literal(_));
-                let left_is_string_lit = matches!(&*left, Expr::Literal(LiteralValue::String(_)));
-                let right_is_string_lit = matches!(&*right, Expr::Literal(LiteralValue::String(_)));
+                let left_is_string_lit =
+                    matches!(&*left, Expr::Literal(lv) if lv.get_datatype() == DataType::String);
+                let right_is_string_lit =
+                    matches!(&*right, Expr::Literal(lv) if lv.get_datatype() == DataType::String);
 
                 let left_is_numeric_lit = left_is_lit && is_numeric_literal(left.as_ref());
                 let right_is_numeric_lit = right_is_lit && is_numeric_literal(right.as_ref());
@@ -471,7 +480,7 @@ impl DataFrame {
     /// Get schema from inner (Eager: df.schema(); Lazy: lf.collect_schema()).
     fn schema_or_collect(&self) -> Result<Arc<Schema>, PolarsError> {
         match &self.inner {
-            DataFrameInner::Eager(df) => Ok(Arc::new(df.schema())),
+            DataFrameInner::Eager(df) => Ok(Arc::clone(df.schema())),
             DataFrameInner::Lazy(lf) => Ok(lf.clone().collect_schema()?),
         }
     }
@@ -593,7 +602,7 @@ impl DataFrame {
             let mut row = HashMap::with_capacity(names.len());
             for (col_idx, name) in names.iter().enumerate() {
                 let s = collected
-                    .get_columns()
+                    .columns()
                     .get(col_idx)
                     .ok_or_else(|| PolarsError::ComputeError("column index out of range".into()))?;
                 let av = s.get(i)?;
@@ -1377,12 +1386,19 @@ impl<'a> DataFrameWriter<'a> {
                     } else {
                         p.as_ref()
                     };
-                    let lf = LazyFrame::scan_parquet(read_path, ScanArgsParquet::default())
-                        .map_err(|e| {
+                    let pl_path =
+                        polars::prelude::PlRefPath::try_from_path(read_path).map_err(|e| {
+                            PolarsError::ComputeError(
+                                format!("saveAsTable append: path: {e}").into(),
+                            )
+                        })?;
+                    let lf = LazyFrame::scan_parquet(pl_path, ScanArgsParquet::default()).map_err(
+                        |e| {
                             PolarsError::ComputeError(
                                 format!("saveAsTable append: read warehouse: {e}").into(),
                             )
-                        })?;
+                        },
+                    )?;
                     lf.collect().map_err(|e| {
                         PolarsError::ComputeError(
                             format!("saveAsTable append: collect: {e}").into(),
@@ -1490,20 +1506,30 @@ impl<'a> DataFrameWriter<'a> {
                 if self.partition_by.is_empty() {
                     let existing: Option<PlDataFrame> = if path.exists() && path.is_file() {
                         match self.format {
-                            WriteFormat::Parquet => {
-                                LazyFrame::scan_parquet(path, ScanArgsParquet::default())
-                                    .and_then(|lf| lf.collect())
-                                    .ok()
-                            }
-                            WriteFormat::Csv => LazyCsvReader::new(path)
-                                .with_has_header(true)
-                                .finish()
-                                .and_then(|lf| lf.collect())
-                                .ok(),
-                            WriteFormat::Json => LazyJsonLineReader::new(path)
-                                .finish()
-                                .and_then(|lf| lf.collect())
-                                .ok(),
+                            WriteFormat::Parquet => polars::prelude::PlRefPath::try_from_path(path)
+                                .ok()
+                                .and_then(|pl_path| {
+                                    LazyFrame::scan_parquet(pl_path, ScanArgsParquet::default())
+                                        .and_then(|lf| lf.collect())
+                                        .ok()
+                                }),
+                            WriteFormat::Csv => polars::prelude::PlRefPath::try_from_path(path)
+                                .ok()
+                                .and_then(|pl_path| {
+                                    LazyCsvReader::new(pl_path)
+                                        .with_has_header(true)
+                                        .finish()
+                                        .and_then(|lf| lf.collect())
+                                        .ok()
+                                }),
+                            WriteFormat::Json => polars::prelude::PlRefPath::try_from_path(path)
+                                .ok()
+                                .and_then(|pl_path| {
+                                    LazyJsonLineReader::new(pl_path)
+                                        .finish()
+                                        .and_then(|lf| lf.collect())
+                                        .ok()
+                                }),
                         }
                     } else {
                         None
@@ -1912,7 +1938,7 @@ mod tests {
     #[test]
     fn coerce_string_numeric_root_in_filter() {
         let s = Series::new("str_col".into(), &["123", "456"]);
-        let pl_df = polars::prelude::DataFrame::new(vec![s.into()]).unwrap();
+        let pl_df = polars::prelude::DataFrame::new_infer_height(vec![s.into()]).unwrap();
         let df = DataFrame::from_polars(pl_df);
         let expr = col("str_col").eq(lit(123i64));
         let out = df.filter(expr).unwrap();

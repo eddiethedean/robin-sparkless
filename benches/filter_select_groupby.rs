@@ -1,8 +1,8 @@
 //! Benchmarks: robin-sparkless vs plain Polars for filter → select → groupBy+count.
 //! Run with: cargo bench
 
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use polars::prelude::{col, len, DataFrame as PlDataFrame, IntoLazy, NamedFrom, Series};
+use criterion::{Criterion, black_box, criterion_group, criterion_main};
+use polars::prelude::{DataFrame as PlDataFrame, IntoLazy, NamedFrom, Series, col, len};
 use robin_sparkless::{DataFrame as RobinDataFrame, SparkSession};
 
 fn sample_data_robin(n: usize) -> (Vec<(i64, i64, String)>, Vec<&'static str>) {
@@ -21,7 +21,7 @@ fn sample_data_polars(n: usize) -> PlDataFrame {
     let id: Vec<i64> = (0..n as i64).collect();
     let age: Vec<i64> = (0..n).map(|i| (i % 80) as i64).collect();
     let name: Vec<String> = (0..n).map(|i| format!("user_{i}")).collect();
-    PlDataFrame::new(vec![
+    PlDataFrame::new_infer_height(vec![
         Series::new("id".into(), id).into(),
         Series::new("age".into(), age).into(),
         Series::new("name".into(), name).into(),

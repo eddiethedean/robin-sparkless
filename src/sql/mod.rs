@@ -102,14 +102,12 @@ mod tests {
     #[test]
     fn test_sql_scalar_aggregate() {
         // Issue #587: SELECT AVG(salary) FROM t (no GROUP BY) — scalar aggregation.
+        // create_dataframe takes (i64, i64, String) -> columns ["id", "salary", "name"]
         let spark = SparkSession::builder().app_name("test").get_or_create();
         let df = spark
             .create_dataframe(
-                vec![
-                    (1, "Alice".to_string(), 100.0),
-                    (2, "Bob".to_string(), 200.0),
-                ],
-                vec!["id", "name", "salary"],
+                vec![(1, 100, "Alice".to_string()), (2, 200, "Bob".to_string())],
+                vec!["id", "salary", "name"],
             )
             .unwrap();
         spark.create_or_replace_temp_view("test_table", df);
@@ -154,20 +152,21 @@ mod tests {
     #[test]
     fn test_sql_having_agg() {
         // Issue #589: HAVING with aggregate expression (e.g. HAVING AVG(salary) > 55000).
+        // create_dataframe takes (i64, i64, String) -> columns ["dummy", "salary", "dept"]
         let spark = SparkSession::builder().app_name("test").get_or_create();
         let df = spark
             .create_dataframe(
                 vec![
-                    ("A".to_string(), 50000),
-                    ("A".to_string(), 60000),
-                    ("B".to_string(), 40000),
+                    (0, 50000, "A".to_string()),
+                    (0, 60000, "A".to_string()),
+                    (0, 40000, "B".to_string()),
                 ],
-                vec!["dept", "salary"],
+                vec!["dummy", "salary", "dept"],
             )
             .unwrap();
         spark.create_or_replace_temp_view("t", df);
         let result = spark
-            .sql("SELECT dept, AVG(salary) as avg_sal FROM t GROUP BY dept HAVING AVG(salary) > 55000")
+            .sql("SELECT dept, AVG(salary) as avg_sal FROM t GROUP BY dept HAVING AVG(salary) >= 55000")
             .unwrap();
         assert_eq!(result.count().unwrap(), 1);
         let rows = result.collect_as_json_rows().unwrap();
@@ -177,15 +176,16 @@ mod tests {
     #[test]
     fn test_sql_where_like_and_in() {
         // Issue #590: WHERE with LIKE and IN.
+        // create_dataframe takes (i64, i64, String) -> columns ["id", "dummy", "name"]
         let spark = SparkSession::builder().app_name("test").get_or_create();
         let df = spark
             .create_dataframe(
                 vec![
-                    (1, "Alice".to_string()),
-                    (2, "Bob".to_string()),
-                    (3, "Carol".to_string()),
+                    (1, 0, "Alice".to_string()),
+                    (2, 0, "Bob".to_string()),
+                    (3, 0, "Carol".to_string()),
                 ],
-                vec!["id", "name"],
+                vec!["id", "dummy", "name"],
             )
             .unwrap();
         spark.create_or_replace_temp_view("t", df);
@@ -279,9 +279,11 @@ mod tests {
         assert_eq!(out.count().unwrap(), 0);
         assert!(out.columns().unwrap().is_empty());
         assert!(spark.database_exists("my_schema"));
-        assert!(spark
-            .list_database_names()
-            .contains(&"my_schema".to_string()));
+        assert!(
+            spark
+                .list_database_names()
+                .contains(&"my_schema".to_string())
+        );
     }
 
     #[test]

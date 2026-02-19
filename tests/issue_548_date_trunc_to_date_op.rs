@@ -21,7 +21,7 @@ fn issue_548_plan_op_to_date() {
     let df = plan::execute_plan(&session, data, schema, &plan_ops).unwrap();
     let rows = df.collect_as_json_rows().unwrap();
     assert_eq!(rows.len(), 1);
-    assert!(rows[0].get("dt").is_some());
+    assert!(rows[0].contains_key("dt"));
 }
 
 #[test]
@@ -49,5 +49,5 @@ fn issue_548_plan_op_date_trunc() {
     let df = plan::execute_plan(&session, data, schema, &plan_ops).unwrap();
     let rows = df.collect_as_json_rows().unwrap();
     assert_eq!(rows.len(), 1);
-    assert!(rows[0].get("truncated").is_some());
+    assert!(rows[0].contains_key("truncated"));
 }

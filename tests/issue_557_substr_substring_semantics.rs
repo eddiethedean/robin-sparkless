@@ -15,9 +15,9 @@ fn issue_557_substring_1based_positive_start() {
     let df = session
         .create_dataframe_from_rows(data, schema)
         .unwrap()
-        .select_exprs(vec![substring(&col("s"), 2, Some(3))
-            .alias("out")
-            .into_expr()])
+        .select_exprs(vec![
+            substring(&col("s"), 2, Some(3)).alias("out").into_expr(),
+        ])
         .unwrap();
     let rows = df.collect_as_json_rows().unwrap();
     assert_eq!(rows.len(), 1);
@@ -33,9 +33,9 @@ fn issue_557_substring_negative_start_from_end() {
     let df = session
         .create_dataframe_from_rows(data, schema)
         .unwrap()
-        .select_exprs(vec![substring(&col("s"), -3, None)
-            .alias("out")
-            .into_expr()])
+        .select_exprs(vec![
+            substring(&col("s"), -3, None).alias("out").into_expr(),
+        ])
         .unwrap();
     let rows = df.collect_as_json_rows().unwrap();
     assert_eq!(rows.len(), 1);
@@ -51,9 +51,9 @@ fn issue_557_substring_zero_length_empty_string() {
     let df = session
         .create_dataframe_from_rows(data, schema)
         .unwrap()
-        .select_exprs(vec![substring(&col("s"), 1, Some(0))
-            .alias("out")
-            .into_expr()])
+        .select_exprs(vec![
+            substring(&col("s"), 1, Some(0)).alias("out").into_expr(),
+        ])
         .unwrap();
     let rows = df.collect_as_json_rows().unwrap();
     assert_eq!(rows.len(), 1);
@@ -68,9 +68,9 @@ fn issue_557_substring_negative_length_empty_string() {
     let df = session
         .create_dataframe_from_rows(data, schema)
         .unwrap()
-        .select_exprs(vec![substring(&col("s"), 1, Some(-1))
-            .alias("out")
-            .into_expr()])
+        .select_exprs(vec![
+            substring(&col("s"), 1, Some(-1)).alias("out").into_expr(),
+        ])
         .unwrap();
     let rows = df.collect_as_json_rows().unwrap();
     assert_eq!(rows.len(), 1);

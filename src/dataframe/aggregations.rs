@@ -3,8 +3,8 @@
 use super::DataFrame;
 use crate::column::Column;
 use polars::prelude::{
-    col, len, lit, when, DataFrame as PlDataFrame, DataType, Expr, LazyFrame, LazyGroupBy,
-    NamedFrom, PolarsError, SchemaNamesAndDtypes, Series,
+    DataFrame as PlDataFrame, DataType, Expr, LazyFrame, LazyGroupBy, NamedFrom, PolarsError,
+    SchemaNamesAndDtypes, Series, col, len, lit, when,
 };
 use std::collections::HashMap;
 
@@ -202,12 +202,14 @@ impl GroupedData {
 
     /// Approximate count of distinct values in each group (uses n_unique; same as count_distinct for exact).
     pub fn approx_count_distinct(&self, column: &str) -> Result<DataFrame, PolarsError> {
-        use polars::prelude::{col, DataType};
+        use polars::prelude::{DataType, col};
         let c = self.resolve_column(column)?;
-        let agg_expr = vec![col(c.as_str())
-            .n_unique()
-            .cast(DataType::Int64)
-            .alias(format!("approx_count_distinct({column})"))];
+        let agg_expr = vec![
+            col(c.as_str())
+                .n_unique()
+                .cast(DataType::Int64)
+                .alias(format!("approx_count_distinct({column})")),
+        ];
         let lf = self.lazy_grouped.clone().agg(agg_expr);
         let mut pl_df = lf.collect()?;
         pl_df = reorder_groupby_columns(&mut pl_df, &self.grouping_cols)?;
@@ -221,9 +223,11 @@ impl GroupedData {
     pub fn any_value(&self, column: &str) -> Result<DataFrame, PolarsError> {
         use polars::prelude::*;
         let c = self.resolve_column(column)?;
-        let agg_expr = vec![col(c.as_str())
-            .first()
-            .alias(format!("any_value({column})"))];
+        let agg_expr = vec![
+            col(c.as_str())
+                .first()
+                .alias(format!("any_value({column})")),
+        ];
         let lf = self.lazy_grouped.clone().agg(agg_expr);
         let mut pl_df = lf.collect()?;
         pl_df = reorder_groupby_columns(&mut pl_df, &self.grouping_cols)?;
@@ -237,9 +241,11 @@ impl GroupedData {
     pub fn bool_and(&self, column: &str) -> Result<DataFrame, PolarsError> {
         use polars::prelude::*;
         let c = self.resolve_column(column)?;
-        let agg_expr = vec![col(c.as_str())
-            .all(true)
-            .alias(format!("bool_and({column})"))];
+        let agg_expr = vec![
+            col(c.as_str())
+                .all(true)
+                .alias(format!("bool_and({column})")),
+        ];
         let lf = self.lazy_grouped.clone().agg(agg_expr);
         let mut pl_df = lf.collect()?;
         pl_df = reorder_groupby_columns(&mut pl_df, &self.grouping_cols)?;
@@ -253,9 +259,11 @@ impl GroupedData {
     pub fn bool_or(&self, column: &str) -> Result<DataFrame, PolarsError> {
         use polars::prelude::*;
         let c = self.resolve_column(column)?;
-        let agg_expr = vec![col(c.as_str())
-            .any(true)
-            .alias(format!("bool_or({column})"))];
+        let agg_expr = vec![
+            col(c.as_str())
+                .any(true)
+                .alias(format!("bool_or({column})")),
+        ];
         let lf = self.lazy_grouped.clone().agg(agg_expr);
         let mut pl_df = lf.collect()?;
         pl_df = reorder_groupby_columns(&mut pl_df, &self.grouping_cols)?;
@@ -269,9 +277,11 @@ impl GroupedData {
     pub fn product(&self, column: &str) -> Result<DataFrame, PolarsError> {
         use polars::prelude::*;
         let c = self.resolve_column(column)?;
-        let agg_expr = vec![col(c.as_str())
-            .product()
-            .alias(format!("product({column})"))];
+        let agg_expr = vec![
+            col(c.as_str())
+                .product()
+                .alias(format!("product({column})")),
+        ];
         let lf = self.lazy_grouped.clone().agg(agg_expr);
         let mut pl_df = lf.collect()?;
         pl_df = reorder_groupby_columns(&mut pl_df, &self.grouping_cols)?;
@@ -285,9 +295,11 @@ impl GroupedData {
     pub fn collect_list(&self, column: &str) -> Result<DataFrame, PolarsError> {
         use polars::prelude::*;
         let c = self.resolve_column(column)?;
-        let agg_expr = vec![col(c.as_str())
-            .implode()
-            .alias(format!("collect_list({column})"))];
+        let agg_expr = vec![
+            col(c.as_str())
+                .implode()
+                .alias(format!("collect_list({column})")),
+        ];
         let lf = self.lazy_grouped.clone().agg(agg_expr);
         let mut pl_df = lf.collect()?;
         pl_df = reorder_groupby_columns(&mut pl_df, &self.grouping_cols)?;
@@ -301,10 +313,12 @@ impl GroupedData {
     pub fn collect_set(&self, column: &str) -> Result<DataFrame, PolarsError> {
         use polars::prelude::*;
         let c = self.resolve_column(column)?;
-        let agg_expr = vec![col(c.as_str())
-            .unique()
-            .implode()
-            .alias(format!("collect_set({column})"))];
+        let agg_expr = vec![
+            col(c.as_str())
+                .unique()
+                .implode()
+                .alias(format!("collect_set({column})")),
+        ];
         let lf = self.lazy_grouped.clone().agg(agg_expr);
         let mut pl_df = lf.collect()?;
         pl_df = reorder_groupby_columns(&mut pl_df, &self.grouping_cols)?;
@@ -318,10 +332,12 @@ impl GroupedData {
     pub fn count_if(&self, column: &str) -> Result<DataFrame, PolarsError> {
         use polars::prelude::*;
         let c = self.resolve_column(column)?;
-        let agg_expr = vec![col(c.as_str())
-            .cast(DataType::Int64)
-            .sum()
-            .alias(format!("count_if({column})"))];
+        let agg_expr = vec![
+            col(c.as_str())
+                .cast(DataType::Int64)
+                .sum()
+                .alias(format!("count_if({column})")),
+        ];
         let lf = self.lazy_grouped.clone().agg(agg_expr);
         let mut pl_df = lf.collect()?;
         pl_df = reorder_groupby_columns(&mut pl_df, &self.grouping_cols)?;
@@ -335,9 +351,11 @@ impl GroupedData {
     pub fn percentile(&self, column: &str, p: f64) -> Result<DataFrame, PolarsError> {
         use polars::prelude::*;
         let c = self.resolve_column(column)?;
-        let agg_expr = vec![col(c.as_str())
-            .quantile(lit(p), QuantileMethod::Linear)
-            .alias(format!("percentile({column}, {p})"))];
+        let agg_expr = vec![
+            col(c.as_str())
+                .quantile(lit(p), QuantileMethod::Linear)
+                .alias(format!("percentile({column}, {p})")),
+        ];
         let lf = self.lazy_grouped.clone().agg(agg_expr);
         let mut pl_df = lf.collect()?;
         pl_df = reorder_groupby_columns(&mut pl_df, &self.grouping_cols)?;
@@ -356,12 +374,13 @@ impl GroupedData {
             col(oc.as_str()).alias("_ord"),
             col(vc.as_str()).alias("_val"),
         ]);
-        let agg_expr = vec![st
-            .sort(SortOptions::default().with_order_descending(true))
-            .first()
-            .struct_()
-            .field_by_name("_val")
-            .alias(format!("max_by({value_col}, {ord_col})"))];
+        let agg_expr = vec![
+            st.sort(SortOptions::default().with_order_descending(true))
+                .first()
+                .struct_()
+                .field_by_name("_val")
+                .alias(format!("max_by({value_col}, {ord_col})")),
+        ];
         let lf = self.lazy_grouped.clone().agg(agg_expr);
         let mut pl_df = lf.collect()?;
         pl_df = reorder_groupby_columns(&mut pl_df, &self.grouping_cols)?;
@@ -380,12 +399,13 @@ impl GroupedData {
             col(oc.as_str()).alias("_ord"),
             col(vc.as_str()).alias("_val"),
         ]);
-        let agg_expr = vec![st
-            .sort(SortOptions::default())
-            .first()
-            .struct_()
-            .field_by_name("_val")
-            .alias(format!("min_by({value_col}, {ord_col})"))];
+        let agg_expr = vec![
+            st.sort(SortOptions::default())
+                .first()
+                .struct_()
+                .field_by_name("_val")
+                .alias(format!("min_by({value_col}, {ord_col})")),
+        ];
         let lf = self.lazy_grouped.clone().agg(agg_expr);
         let mut pl_df = lf.collect()?;
         pl_df = reorder_groupby_columns(&mut pl_df, &self.grouping_cols)?;
@@ -477,8 +497,10 @@ impl GroupedData {
     pub fn regr_count(&self, y_col: &str, x_col: &str) -> Result<DataFrame, PolarsError> {
         let yc = self.resolve_column(y_col)?;
         let xc = self.resolve_column(x_col)?;
-        let agg_expr = vec![crate::functions::regr_count_expr(yc.as_str(), xc.as_str())
-            .alias(format!("regr_count({y_col}, {x_col})"))];
+        let agg_expr = vec![
+            crate::functions::regr_count_expr(yc.as_str(), xc.as_str())
+                .alias(format!("regr_count({y_col}, {x_col})")),
+        ];
         let lf = self.lazy_grouped.clone().agg(agg_expr);
         let mut pl_df = lf.collect()?;
         pl_df = reorder_groupby_columns(&mut pl_df, &self.grouping_cols)?;
@@ -492,8 +514,10 @@ impl GroupedData {
     pub fn regr_avgx(&self, y_col: &str, x_col: &str) -> Result<DataFrame, PolarsError> {
         let yc = self.resolve_column(y_col)?;
         let xc = self.resolve_column(x_col)?;
-        let agg_expr = vec![crate::functions::regr_avgx_expr(yc.as_str(), xc.as_str())
-            .alias(format!("regr_avgx({y_col}, {x_col})"))];
+        let agg_expr = vec![
+            crate::functions::regr_avgx_expr(yc.as_str(), xc.as_str())
+                .alias(format!("regr_avgx({y_col}, {x_col})")),
+        ];
         let lf = self.lazy_grouped.clone().agg(agg_expr);
         let mut pl_df = lf.collect()?;
         pl_df = reorder_groupby_columns(&mut pl_df, &self.grouping_cols)?;
@@ -507,8 +531,10 @@ impl GroupedData {
     pub fn regr_avgy(&self, y_col: &str, x_col: &str) -> Result<DataFrame, PolarsError> {
         let yc = self.resolve_column(y_col)?;
         let xc = self.resolve_column(x_col)?;
-        let agg_expr = vec![crate::functions::regr_avgy_expr(yc.as_str(), xc.as_str())
-            .alias(format!("regr_avgy({y_col}, {x_col})"))];
+        let agg_expr = vec![
+            crate::functions::regr_avgy_expr(yc.as_str(), xc.as_str())
+                .alias(format!("regr_avgy({y_col}, {x_col})")),
+        ];
         let lf = self.lazy_grouped.clone().agg(agg_expr);
         let mut pl_df = lf.collect()?;
         pl_df = reorder_groupby_columns(&mut pl_df, &self.grouping_cols)?;
@@ -522,8 +548,10 @@ impl GroupedData {
     pub fn regr_slope(&self, y_col: &str, x_col: &str) -> Result<DataFrame, PolarsError> {
         let yc = self.resolve_column(y_col)?;
         let xc = self.resolve_column(x_col)?;
-        let agg_expr = vec![crate::functions::regr_slope_expr(yc.as_str(), xc.as_str())
-            .alias(format!("regr_slope({y_col}, {x_col})"))];
+        let agg_expr = vec![
+            crate::functions::regr_slope_expr(yc.as_str(), xc.as_str())
+                .alias(format!("regr_slope({y_col}, {x_col})")),
+        ];
         let lf = self.lazy_grouped.clone().agg(agg_expr);
         let mut pl_df = lf.collect()?;
         pl_df = reorder_groupby_columns(&mut pl_df, &self.grouping_cols)?;
@@ -554,8 +582,10 @@ impl GroupedData {
     pub fn regr_r2(&self, y_col: &str, x_col: &str) -> Result<DataFrame, PolarsError> {
         let yc = self.resolve_column(y_col)?;
         let xc = self.resolve_column(x_col)?;
-        let agg_expr = vec![crate::functions::regr_r2_expr(yc.as_str(), xc.as_str())
-            .alias(format!("regr_r2({y_col}, {x_col})"))];
+        let agg_expr = vec![
+            crate::functions::regr_r2_expr(yc.as_str(), xc.as_str())
+                .alias(format!("regr_r2({y_col}, {x_col})")),
+        ];
         let lf = self.lazy_grouped.clone().agg(agg_expr);
         let mut pl_df = lf.collect()?;
         pl_df = reorder_groupby_columns(&mut pl_df, &self.grouping_cols)?;
@@ -569,8 +599,10 @@ impl GroupedData {
     pub fn regr_sxx(&self, y_col: &str, x_col: &str) -> Result<DataFrame, PolarsError> {
         let yc = self.resolve_column(y_col)?;
         let xc = self.resolve_column(x_col)?;
-        let agg_expr = vec![crate::functions::regr_sxx_expr(yc.as_str(), xc.as_str())
-            .alias(format!("regr_sxx({y_col}, {x_col})"))];
+        let agg_expr = vec![
+            crate::functions::regr_sxx_expr(yc.as_str(), xc.as_str())
+                .alias(format!("regr_sxx({y_col}, {x_col})")),
+        ];
         let lf = self.lazy_grouped.clone().agg(agg_expr);
         let mut pl_df = lf.collect()?;
         pl_df = reorder_groupby_columns(&mut pl_df, &self.grouping_cols)?;
@@ -584,8 +616,10 @@ impl GroupedData {
     pub fn regr_syy(&self, y_col: &str, x_col: &str) -> Result<DataFrame, PolarsError> {
         let yc = self.resolve_column(y_col)?;
         let xc = self.resolve_column(x_col)?;
-        let agg_expr = vec![crate::functions::regr_syy_expr(yc.as_str(), xc.as_str())
-            .alias(format!("regr_syy({y_col}, {x_col})"))];
+        let agg_expr = vec![
+            crate::functions::regr_syy_expr(yc.as_str(), xc.as_str())
+                .alias(format!("regr_syy({y_col}, {x_col})")),
+        ];
         let lf = self.lazy_grouped.clone().agg(agg_expr);
         let mut pl_df = lf.collect()?;
         pl_df = reorder_groupby_columns(&mut pl_df, &self.grouping_cols)?;
@@ -599,8 +633,10 @@ impl GroupedData {
     pub fn regr_sxy(&self, y_col: &str, x_col: &str) -> Result<DataFrame, PolarsError> {
         let yc = self.resolve_column(y_col)?;
         let xc = self.resolve_column(x_col)?;
-        let agg_expr = vec![crate::functions::regr_sxy_expr(yc.as_str(), xc.as_str())
-            .alias(format!("regr_sxy({y_col}, {x_col})"))];
+        let agg_expr = vec![
+            crate::functions::regr_sxy_expr(yc.as_str(), xc.as_str())
+                .alias(format!("regr_sxy({y_col}, {x_col})")),
+        ];
         let lf = self.lazy_grouped.clone().agg(agg_expr);
         let mut pl_df = lf.collect()?;
         pl_df = reorder_groupby_columns(&mut pl_df, &self.grouping_cols)?;
@@ -614,10 +650,12 @@ impl GroupedData {
     pub fn kurtosis(&self, column: &str) -> Result<DataFrame, PolarsError> {
         use polars::prelude::*;
         let c = self.resolve_column(column)?;
-        let agg_expr = vec![col(c.as_str())
-            .cast(DataType::Float64)
-            .kurtosis(true, true)
-            .alias(format!("kurtosis({column})"))];
+        let agg_expr = vec![
+            col(c.as_str())
+                .cast(DataType::Float64)
+                .kurtosis(true, true)
+                .alias(format!("kurtosis({column})")),
+        ];
         let lf = self.lazy_grouped.clone().agg(agg_expr);
         let mut pl_df = lf.collect()?;
         pl_df = reorder_groupby_columns(&mut pl_df, &self.grouping_cols)?;
@@ -631,10 +669,12 @@ impl GroupedData {
     pub fn skewness(&self, column: &str) -> Result<DataFrame, PolarsError> {
         use polars::prelude::*;
         let c = self.resolve_column(column)?;
-        let agg_expr = vec![col(c.as_str())
-            .cast(DataType::Float64)
-            .skew(true)
-            .alias(format!("skewness({column})"))];
+        let agg_expr = vec![
+            col(c.as_str())
+                .cast(DataType::Float64)
+                .skew(true)
+                .alias(format!("skewness({column})")),
+        ];
         let lf = self.lazy_grouped.clone().agg(agg_expr);
         let mut pl_df = lf.collect()?;
         pl_df = reorder_groupby_columns(&mut pl_df, &self.grouping_cols)?;
@@ -776,7 +816,7 @@ impl PivotedGroupedData {
             ));
         }
         let mut agg_exprs: Vec<Expr> = Vec::with_capacity(pivot_vals.len());
-        use polars::prelude::{DataType, LiteralValue};
+        use polars::prelude::DataType;
         for v in &pivot_vals {
             // PySpark: pivot_col can be any type; compare as string for column names. Null → is_null().
             let pred = if v == "null" {
@@ -787,9 +827,7 @@ impl PivotedGroupedData {
                     .eq(lit(v.as_str()))
             };
             let then_expr = col(value_resolved.as_str());
-            let expr = when(pred)
-                .then(then_expr)
-                .otherwise(Expr::Literal(LiteralValue::Null));
+            let expr = when(pred).then(then_expr).otherwise(lit(NULL));
             // PySpark parity: pivot value with no matching rows → null (not 0)
             let has_any = expr
                 .clone()
@@ -799,7 +837,7 @@ impl PivotedGroupedData {
                 .gt(lit(0));
             let agg_expr = when(has_any)
                 .then(agg_fn(expr))
-                .otherwise(Expr::Literal(LiteralValue::Null))
+                .otherwise(lit(NULL))
                 .alias(v.as_str());
             agg_exprs.push(agg_expr);
         }
@@ -847,7 +885,7 @@ impl PivotedGroupedData {
             ));
         }
         let mut agg_exprs: Vec<Expr> = Vec::with_capacity(pivot_vals.len());
-        use polars::prelude::{DataType, LiteralValue};
+        use polars::prelude::DataType;
         let pivot_resolved = self.resolve_column(&self.pivot_col)?;
         for v in &pivot_vals {
             let pred = if v == "null" {
@@ -857,9 +895,7 @@ impl PivotedGroupedData {
                     .cast(DataType::String)
                     .eq(lit(v.as_str()))
             };
-            let expr = when(pred)
-                .then(lit(1))
-                .otherwise(Expr::Literal(LiteralValue::Null));
+            let expr = when(pred).then(lit(1)).otherwise(lit(NULL));
             let has_any = expr
                 .clone()
                 .is_not_null()
@@ -868,7 +904,7 @@ impl PivotedGroupedData {
                 .gt(lit(0));
             let agg_expr = when(has_any)
                 .then(expr.sum())
-                .otherwise(Expr::Literal(LiteralValue::Null))
+                .otherwise(lit(NULL))
                 .alias(v.as_str());
             agg_exprs.push(agg_expr);
         }
@@ -934,7 +970,7 @@ impl CubeRollupData {
                 for gc in &self.grouping_cols {
                     let dtype = schema.get(gc).cloned().unwrap_or(DataType::Null);
                     let null_series = null_series_for_dtype(gc.as_str(), n, &dtype)?;
-                    part.with_column(null_series)?;
+                    part.with_column(null_series.into())?;
                 }
                 // Reorder to [grouping_cols..., agg_cols]
                 let mut order: Vec<&str> = self.grouping_cols.iter().map(|s| s.as_str()).collect();
@@ -959,7 +995,7 @@ impl CubeRollupData {
                     }
                     let dtype = schema.get(gc).cloned().unwrap_or(DataType::Null);
                     let null_series = null_series_for_dtype(gc.as_str(), n, &dtype)?;
-                    part.with_column(null_series)?;
+                    part.with_column(null_series.into())?;
                 }
                 let mut order: Vec<&str> = self.grouping_cols.iter().map(|s| s.as_str()).collect();
                 for name in part.get_column_names() {
@@ -978,10 +1014,13 @@ impl CubeRollupData {
                 self.case_sensitive,
             ));
         }
-        let first_schema = parts[0].schema();
-        let order: Vec<&str> = first_schema.iter_names().map(|s| s.as_str()).collect();
+        let order: Vec<String> = parts[0]
+            .schema()
+            .iter_names()
+            .map(|s| s.to_string())
+            .collect();
         for p in parts.iter_mut().skip(1) {
-            *p = p.select(order.clone())?;
+            *p = p.select(order.as_slice())?;
         }
         let lazy_frames: Vec<_> = parts.into_iter().map(|p| p.lazy()).collect();
         let out = polars::prelude::concat(lazy_frames, UnionArgs::default())?.collect()?;
@@ -1041,7 +1080,7 @@ pub(super) fn reorder_groupby_columns(
 
 #[cfg(test)]
 mod tests {
-    use crate::{functions, DataFrame, SparkSession};
+    use crate::{DataFrame, SparkSession, functions};
 
     fn test_df() -> DataFrame {
         let spark = SparkSession::builder()

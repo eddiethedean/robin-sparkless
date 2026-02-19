@@ -28,7 +28,7 @@ fn issue_547_plan_op_regexp_extract_all() {
     let rows = df.collect_as_json_rows().unwrap();
     assert_eq!(rows.len(), 1);
     assert!(
-        rows[0].get("m").is_some(),
+        rows[0].contains_key("m"),
         "regexp_extract_all should produce column m"
     );
 }

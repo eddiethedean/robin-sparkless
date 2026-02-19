@@ -17,10 +17,9 @@ fn issue_544_int_to_string_cast() {
     let df = spark.create_dataframe_from_polars(pl);
 
     let out = df
-        .select_exprs(vec![cast(&col("x"), "string")
-            .unwrap()
-            .alias("s")
-            .into_expr()])
+        .select_exprs(vec![
+            cast(&col("x"), "string").unwrap().alias("s").into_expr(),
+        ])
         .unwrap();
     let rows = out.collect_as_json_rows().unwrap();
     assert_eq!(rows[0].get("s").and_then(|v| v.as_str()), Some("1"));
