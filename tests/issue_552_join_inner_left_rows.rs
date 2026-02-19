@@ -23,7 +23,7 @@ fn issue_552_plan_join_inner_and_left_row_counts() {
         ("dept_id".to_string(), "bigint".to_string()),
     ];
     // Right: dept (dept_id, name) — embedded in plan payload
-    let _dept_data = vec![
+    let _dept_data = [
         vec![json!(10), json!("IT")],
         vec![json!(20), json!("HR")],
         vec![json!(40), json!("Finance")],

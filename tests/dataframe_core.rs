@@ -8,7 +8,7 @@ mod common;
 
 use common::{small_people_df, spark};
 use polars::prelude::{col as pl_col, df, lit as pl_lit};
-use robin_sparkless::{col, lit_i64, JoinType};
+use robin_sparkless::{JoinType, col, lit_i64};
 
 /// Equivalent to `test_create_dataframe_and_collect` in
 /// `tests/python/test_robin_sparkless.py`.
@@ -37,9 +37,11 @@ fn filter_and_select_core() {
     assert_eq!(filtered.count().unwrap(), 2);
 
     let filtered_rows = filtered.collect_as_json_rows().unwrap();
-    assert!(filtered_rows
-        .iter()
-        .all(|r| r["age"].as_i64().unwrap() > 28));
+    assert!(
+        filtered_rows
+            .iter()
+            .all(|r| r["age"].as_i64().unwrap() > 28)
+    );
 
     // select columns
     let selected = df.select(vec!["id", "name"]).unwrap();

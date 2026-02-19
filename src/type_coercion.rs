@@ -258,20 +258,15 @@ pub fn coerce_for_pyspark_comparison(
 
 /// Infer DataType from an expression when it is a literal (for coercion heuristics).
 pub fn infer_type_from_expr(expr: &Expr) -> Option<DataType> {
-    use polars::prelude::LiteralValue;
     match expr {
-        Expr::Literal(lv) => Some(match lv {
-            LiteralValue::Boolean(_) => DataType::Boolean,
-            LiteralValue::Int32(_) => DataType::Int32,
-            LiteralValue::Int64(_) => DataType::Int64,
-            LiteralValue::UInt32(_) => DataType::UInt32,
-            LiteralValue::UInt64(_) => DataType::UInt64,
-            LiteralValue::Float32(_) => DataType::Float32,
-            LiteralValue::Float64(_) => DataType::Float64,
-            LiteralValue::String(_) => DataType::String,
-            LiteralValue::Int(_) | LiteralValue::Float(_) => DataType::Float64,
-            _ => DataType::String,
-        }),
+        Expr::Literal(lv) => {
+            let dt = lv.get_datatype();
+            Some(if matches!(dt, DataType::Unknown(_)) {
+                DataType::Float64
+            } else {
+                dt
+            })
+        }
         _ => None,
     }
 }
@@ -290,7 +285,7 @@ pub fn coerce_for_pyspark_eq_null_safe(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use polars::prelude::{df, IntoLazy};
+    use polars::prelude::{IntoLazy, df};
 
     #[test]
     fn numeric_numeric_uses_standard_coercion() -> Result<(), PolarsError> {

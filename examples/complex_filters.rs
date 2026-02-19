@@ -3,7 +3,7 @@
 /// This example shows how to use complex boolean expressions with AND, OR, NOT
 /// operators, nested conditions, and arithmetic expressions in filters and withColumn.
 use polars::prelude::*;
-use robin_sparkless::{col, SparkSession};
+use robin_sparkless::{SparkSession, col};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Note: SparkSession is created but not used in this example

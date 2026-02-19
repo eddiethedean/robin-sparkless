@@ -20,15 +20,20 @@ build-release:
 build-all-features:
 	cargo build --all-features
 
-# Run Rust tests only
+# Run Rust tests only (default features)
 test-rust:
 	cargo test
+
+# Run Rust tests with all features (sql, delta) - used by check
+test-rust-all-features:
+	cargo test --all-features
 
 # Run all tests (Rust only)
 test: test-rust
 
-# Run all Rust checks (format check, clippy, audit, deny, build all features, Rust tests).
-check: fmt-check clippy audit deny build-all-features test-rust
+# Run all Rust checks. Fast steps first (fmt, audit, deny), then one compile: clippy --all-targets
+# builds lib + tests with all features; cargo test reuses that and only runs tests.
+check: fmt-check audit deny clippy test-rust-all-features
 	@echo "All checks passed"
 
 # Backwards-compatible alias for full check suite (historically included Python).
@@ -45,9 +50,9 @@ fmt:
 fmt-check:
 	cargo fmt --check
 
-# Lint with Clippy
+# Lint with Clippy (all features, all targets including tests so one compile is reused by test)
 clippy:
-	cargo clippy -- -D warnings
+	cargo clippy --all-features --all-targets -- -D warnings
 
 # Security: scan for known vulnerabilities
 audit:

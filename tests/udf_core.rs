@@ -5,8 +5,8 @@
 //! that the Rust side correctly handles registration and lookup of
 //! UDFs exposed via `call_udf`, which underpins the Python API.
 
-use polars::prelude::{df, Series};
-use robin_sparkless::{col, DataFrame, SparkSession};
+use polars::prelude::{Series, df};
+use robin_sparkless::{DataFrame, SparkSession, col};
 
 fn spark() -> SparkSession {
     SparkSession::builder()
@@ -49,8 +49,7 @@ fn register_and_call_rust_udf_success() {
         .register_udf("add_ab", |cols: &[Series]| -> Result<Series, PolarsError> {
             let a = &cols[0];
             let b = &cols[1];
-            let sum = a + b;
-            Ok(sum?)
+            a + b
         })
         .expect("register_udf should succeed");
 

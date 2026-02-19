@@ -1,7 +1,7 @@
 //! Expression interpreter: turn serialized expression trees (JSON/serde) into Polars Expr.
 //! Used by the plan interpreter for filter, select, and withColumn payloads.
 
-use polars::prelude::{col, lit, DataType, Expr, Series};
+use polars::prelude::{DataType, Expr, Series, col, lit};
 use serde_json::Value;
 use std::error::Error;
 use std::fmt;
@@ -50,20 +50,14 @@ pub fn expr_from_value(v: &Value) -> Result<Expr, PlanExprError> {
 
                 // Best-effort type hints: literals we can infer directly; columns are left
                 // without types here and will be handled by the DataFrame-level rewriter.
-                use polars::prelude::LiteralValue;
                 let infer_lit_type = |e: &Expr| -> Option<DataType> {
                     if let Expr::Literal(lv) = e {
-                        Some(match lv {
-                            LiteralValue::Int32(_) => DataType::Int32,
-                            LiteralValue::Int64(_) => DataType::Int64,
-                            LiteralValue::UInt32(_) => DataType::UInt32,
-                            LiteralValue::UInt64(_) => DataType::UInt64,
-                            LiteralValue::Float32(_) => DataType::Float32,
-                            LiteralValue::Float64(_) => DataType::Float64,
-                            LiteralValue::Boolean(_) => DataType::Boolean,
-                            LiteralValue::String(_) => DataType::String,
-                            _ => return None,
-                        })
+                        let dt = lv.get_datatype();
+                        if matches!(dt, DataType::Unknown(_)) {
+                            None
+                        } else {
+                            Some(dt)
+                        }
                     } else {
                         None
                     }
@@ -74,7 +68,7 @@ pub fn expr_from_value(v: &Value) -> Result<Expr, PlanExprError> {
 
                 // #612: When one side is a literal and the other is a column, assume column is String
                 // so string–numeric coercion is applied (PySpark parity: df.filter(df["s"] == 123)).
-                use crate::type_coercion::{coerce_for_pyspark_comparison, CompareOp};
+                use crate::type_coercion::{CompareOp, coerce_for_pyspark_comparison};
                 let op_enum = match op {
                     "eq" => CompareOp::Eq,
                     "ne" => CompareOp::NotEq,
@@ -208,7 +202,7 @@ pub fn expr_from_value(v: &Value) -> Result<Expr, PlanExprError> {
                     };
                 return Ok(match values_opt {
                     None => lit(false),
-                    Some(values_expr) => left_expr.is_in(values_expr),
+                    Some(values_expr) => left_expr.is_in(values_expr, false),
                 });
             }
             "getItem" => {
@@ -574,7 +568,9 @@ fn expr_from_window_fn(
                 .first()
                 .and_then(|v| v.get("lit").and_then(Value::as_i64))
                 .or_else(|| args.first().and_then(Value::as_i64))
-                .ok_or_else(|| PlanExprError("ntile window requires n (number of buckets)".to_string()))? as u32;
+                .ok_or_else(|| {
+                    PlanExprError("ntile window requires n (number of buckets)".to_string())
+                })? as u32;
             let c = order_col.ntile(n.max(1), &part_refs, false);
             Ok(c.into_expr())
         }
@@ -584,9 +580,10 @@ fn expr_from_window_fn(
                 .and_then(|v| v.get("lit").and_then(Value::as_i64))
                 .or_else(|| args.get(1).and_then(Value::as_i64))
                 .unwrap_or(1);
-            let col_expr = expr_to_column(expr_from_value(
-                args.first().ok_or_else(|| PlanExprError("lag window requires column arg".to_string()))?,
-            )?);
+            let col_expr =
+                expr_to_column(expr_from_value(args.first().ok_or_else(|| {
+                    PlanExprError("lag window requires column arg".to_string())
+                })?)?);
             let c = col_expr.lag(n).over(&part_refs);
             Ok(c.into_expr())
         }
@@ -596,39 +593,36 @@ fn expr_from_window_fn(
                 .and_then(|v| v.get("lit").and_then(Value::as_i64))
                 .or_else(|| args.get(1).and_then(Value::as_i64))
                 .unwrap_or(1);
-            let col_expr = expr_to_column(expr_from_value(
-                args.first().ok_or_else(|| PlanExprError("lead window requires column arg".to_string()))?,
-            )?);
+            let col_expr =
+                expr_to_column(expr_from_value(args.first().ok_or_else(|| {
+                    PlanExprError("lead window requires column arg".to_string())
+                })?)?);
             let c = col_expr.lead(n).over(&part_refs);
             Ok(c.into_expr())
         }
         "sum" => {
-            let col_expr = expr_to_column(expr_from_value(
-                args.first().ok_or_else(|| PlanExprError("sum window requires column arg".to_string()))?,
-            )?);
+            let col_expr =
+                expr_to_column(expr_from_value(args.first().ok_or_else(|| {
+                    PlanExprError("sum window requires column arg".to_string())
+                })?)?);
             let sum_expr = col_expr.expr().clone().sum();
             let partition_exprs: Vec<Expr> = part_refs.iter().map(|s| col(*s)).collect();
             Ok(sum_expr.over(partition_exprs))
         }
         "avg" | "mean" => {
-            let col_expr = expr_to_column(expr_from_value(
-                args.first().ok_or_else(|| PlanExprError("avg window requires column arg".to_string()))?,
-            )?);
+            let col_expr =
+                expr_to_column(expr_from_value(args.first().ok_or_else(|| {
+                    PlanExprError("avg window requires column arg".to_string())
+                })?)?);
             let mean_expr = col_expr.expr().clone().mean();
             let partition_exprs: Vec<Expr> = part_refs.iter().map(|s| col(*s)).collect();
             Ok(mean_expr.over(partition_exprs))
         }
         "approx_count_distinct" => {
-            let col_expr = expr_to_column(expr_from_value(
-                args.first().ok_or_else(|| {
-                    PlanExprError("approx_count_distinct window requires column arg".to_string())
-                })?,
-            )?);
-            let n_unique_expr = col_expr
-                .expr()
-                .clone()
-                .n_unique()
-                .cast(DataType::Int64);
+            let col_expr = expr_to_column(expr_from_value(args.first().ok_or_else(|| {
+                PlanExprError("approx_count_distinct window requires column arg".to_string())
+            })?)?);
+            let n_unique_expr = col_expr.expr().clone().n_unique().cast(DataType::Int64);
             let partition_exprs: Vec<Expr> = part_refs.iter().map(|s| col(*s)).collect();
             Ok(n_unique_expr.over(partition_exprs))
         }
@@ -639,9 +633,9 @@ fn expr_from_window_fn(
 }
 
 fn lit_from_value(v: &Value) -> Result<Expr, PlanExprError> {
-    use polars::prelude::LiteralValue;
+    use polars::prelude::{NULL, lit};
     if v.is_null() {
-        return Ok(Expr::Literal(LiteralValue::Null));
+        return Ok(lit(NULL));
     }
     if let Some(n) = v.as_i64() {
         return Ok(lit(n));
@@ -1067,6 +1061,7 @@ pub fn try_column_from_udf_value(v: &Value) -> Option<Result<crate::Column, Plan
 }
 
 fn expr_from_fn(name: &str, args: &[Value]) -> Result<Expr, PlanExprError> {
+    use crate::Column;
     #[allow(unused_imports)]
     use crate::functions::{
         add_months, array_agg, array_append, array_compact, array_contains, array_distinct,
@@ -1082,7 +1077,7 @@ fn expr_from_fn(name: &str, args: &[Value]) -> Result<Expr, PlanExprError> {
         explode_outer, extract, factorial, find_in_set, floor, format_number, format_string,
         from_unixtime, from_utc_timestamp, get, get_json_object, getbit, greatest, hash, hex, hour,
         hypot, ilike, initcap, input_file_name, instr, isnan, json_tuple, last_day, lcase, least,
-        left, length, like, lit_str, ln, localtimestamp, locate, log, log10, log1p, log2, lower,
+        left, length, like, lit_str, ln, localtimestamp, locate, log, log1p, log2, log10, lower,
         lpad, make_date, make_interval, make_timestamp, make_timestamp_ntz, mask, md5, minute,
         monotonically_increasing_id, month, months_between, nanvl, negate, negative, next_day, now,
         nullif, nvl, nvl2, octet_length, overlay, parse_url, pi, pmod, positive, pow, power,
@@ -1099,7 +1094,6 @@ fn expr_from_fn(name: &str, args: &[Value]) -> Result<Expr, PlanExprError> {
         unix_timestamp, unix_timestamp_now, upper, url_decode, url_encode, user, version, weekday,
         weekofyear, when_then_otherwise_null, width_bucket, xxhash64, year,
     };
-    use crate::Column;
 
     match name {
         "call_udf" => {
@@ -1530,7 +1524,7 @@ fn expr_from_fn(name: &str, args: &[Value]) -> Result<Expr, PlanExprError> {
             let values_opt = try_values_for_isin(&args[1..])?;
             Ok(match values_opt {
                 None => lit(false),
-                Some(values_expr) => col_expr.is_in(values_expr),
+                Some(values_expr) => col_expr.is_in(values_expr, false),
             })
         }
         _ => expr_from_fn_rest(name, args),
@@ -1538,6 +1532,7 @@ fn expr_from_fn(name: &str, args: &[Value]) -> Result<Expr, PlanExprError> {
 }
 
 fn expr_from_fn_rest(name: &str, args: &[Value]) -> Result<Expr, PlanExprError> {
+    use crate::Column;
     #[allow(unused_imports)]
     use crate::functions::{
         abs, acos, add_months, array, array_agg, array_append, array_compact, array_contains,
@@ -1551,7 +1546,7 @@ fn expr_from_fn_rest(name: &str, args: &[Value]) -> Result<Expr, PlanExprError> 
         element_at, encode, equal_null, exp, explode, explode_outer, expm1, extract, factorial,
         floor, from_unixtime, from_utc_timestamp, get, get_json_object, greatest, grouping,
         grouping_id, hash, hour, hours, hypot, input_file_name, last_day, least, localtimestamp,
-        log, log10, log1p, log2, make_date, make_interval, make_timestamp, make_timestamp_ntz,
+        log, log1p, log2, log10, make_date, make_interval, make_timestamp, make_timestamp_ntz,
         map_keys, map_values, minute, minutes, monotonically_increasing_id, month, months,
         months_between, negate, next_day, now, nullif, nvl, nvl2, parse_url, pi, pmod, positive,
         pow, quarter, radians, rint, round, sec, second, shift_left, shift_right, signum, sin,
@@ -1563,7 +1558,6 @@ fn expr_from_fn_rest(name: &str, args: &[Value]) -> Result<Expr, PlanExprError> 
         unix_seconds, unix_timestamp, unix_timestamp_now, user, weekday, weekofyear, width_bucket,
         year, years,
     };
-    use crate::Column;
 
     // --- Math / numeric ---
     match name {

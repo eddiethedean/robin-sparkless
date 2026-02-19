@@ -4,17 +4,25 @@
 use std::collections::HashMap;
 
 use crate::column::Column;
-use crate::dataframe::{join, DataFrame, JoinType};
+use crate::dataframe::{DataFrame, JoinType, join};
 use crate::functions;
-use crate::session::{set_thread_udf_session, SparkSession};
-use polars::prelude::{col, lit, DataFrame as PlDataFrame, Expr, PolarsError};
+use crate::session::{SparkSession, set_thread_udf_session};
+use polars::prelude::{DataFrame as PlDataFrame, Expr, PolarsError, col, lit};
 use sqlparser::ast::{
-    BinaryOperator, Expr as SqlExpr, Function, FunctionArg, FunctionArgExpr, GroupByExpr,
-    JoinConstraint, JoinOperator, ObjectType, Query, Select, SelectItem, SetExpr, Statement,
-    TableFactor, Value,
+    BinaryOperator, Expr as SqlExpr, Function, FunctionArg, FunctionArgExpr, FunctionArguments,
+    GroupByExpr, JoinConstraint, JoinOperator, ObjectType, OrderByKind, Query, Select, SelectItem,
+    SetExpr, Statement, TableFactor, Value, ValueWithSpan,
 };
 
 use super::parser;
+
+/// Return a slice of positional function arguments for List variant; empty otherwise.
+fn function_args_slice(args: &FunctionArguments) -> &[FunctionArg] {
+    match args {
+        FunctionArguments::List(list) => &list.args,
+        _ => &[],
+    }
+}
 
 /// Parse a single SQL expression string and convert to Polars Expr using the given DataFrame for column resolution.
 /// Used by selectExpr/expr() for PySpark parity. Parses "SELECT expr FROM __t" and returns the first select item's Expr.
@@ -144,8 +152,8 @@ fn translate_query(
         df = df.filter(expr)?;
     }
     let group_exprs: &[SqlExpr] = match &body.group_by {
-        GroupByExpr::Expressions(exprs) => exprs.as_slice(),
-        GroupByExpr::All => {
+        GroupByExpr::Expressions(exprs, _) => exprs.as_slice(),
+        GroupByExpr::All(_) => {
             return Err(PolarsError::InvalidOperation(
                 "SQL: GROUP BY ALL is not supported. Use explicit GROUP BY columns.".into(),
             ));
@@ -186,7 +194,7 @@ fn translate_query(
             for (func, alias) in &having_list {
                 push_agg_function(
                     &func.name,
-                    &func.args,
+                    function_args_slice(&func.args),
                     &df,
                     Some(alias.as_str()),
                     &mut agg_exprs,
@@ -219,22 +227,26 @@ fn translate_query(
         )?;
         df = df.filter(having_polars)?;
     }
-    if !query.order_by.is_empty() {
-        let pairs: Vec<(String, bool)> = query
-            .order_by
-            .iter()
-            .map(|o| {
-                let col_name = sql_expr_to_col_name(&o.expr)?;
-                let resolved = df.resolve_column_name(&col_name)?;
-                let ascending = o.asc.unwrap_or(true);
-                Ok((resolved, ascending))
-            })
-            .collect::<Result<Vec<_>, PolarsError>>()?;
-        let (cols, asc): (Vec<String>, Vec<bool>) = pairs.into_iter().unzip();
-        let col_refs: Vec<&str> = cols.iter().map(|s| s.as_str()).collect();
-        df = df.order_by(col_refs, asc)?;
+    if let Some(order_by) = &query.order_by {
+        if let OrderByKind::Expressions(exprs) = &order_by.kind {
+            if !exprs.is_empty() {
+                let pairs: Vec<(String, bool)> = exprs
+                    .iter()
+                    .map(|o| {
+                        let col_name = sql_expr_to_col_name(&o.expr)?;
+                        let resolved = df.resolve_column_name(&col_name)?;
+                        let ascending = o.options.asc.unwrap_or(true);
+                        Ok((resolved, ascending))
+                    })
+                    .collect::<Result<Vec<_>, PolarsError>>()?;
+                let (cols, asc): (Vec<String>, Vec<bool>) = pairs.into_iter().unzip();
+                let col_refs: Vec<&str> = cols.iter().map(|s| s.as_str()).collect();
+                df = df.order_by(col_refs, asc)?;
+            }
+        }
     }
-    if let Some(limit_expr) = &query.limit {
+    let limit_expr = query.fetch.as_ref().and_then(|f| f.quantity.as_ref());
+    if let Some(limit_expr) = limit_expr {
         let n = sql_limit_to_usize(limit_expr)?;
         df = df.limit(n)?;
     }
@@ -285,16 +297,20 @@ fn resolve_table_factor(
 ) -> Result<crate::dataframe::DataFrame, PolarsError> {
     match factor {
         TableFactor::Table { name, .. } => {
-            // Build full name for global_temp.xyz (sqlparser: [Ident("global_temp"), Ident("people")])
+            // Build full name for global_temp.xyz (sqlparser: ObjectNamePart::Identifier(...))
             let table_name = if name.0.len() >= 2 {
-                let parts: Vec<&str> = name.0.iter().map(|i| i.value.as_str()).collect();
+                let parts: Vec<String> = name
+                    .0
+                    .iter()
+                    .filter_map(|p| p.as_ident().map(|i| i.value.clone()))
+                    .collect();
                 parts.join(".")
             } else {
                 name.0
                     .last()
-                    .map(|i| i.value.as_str())
-                    .unwrap_or("")
-                    .to_string()
+                    .and_then(|p| p.as_ident())
+                    .map(|i| i.value.clone())
+                    .unwrap_or_default()
             };
             session.table(&table_name)
         }
@@ -358,17 +374,14 @@ fn sql_expr_to_polars(
             Ok(col(resolved.as_str()))
         }
         SqlExpr::CompoundIdentifier(parts) => {
-            let name = parts
-                .last()
-                .map(|i| i.value.as_str())
-                .unwrap_or("");
+            let name = parts.last().map(|i| i.value.as_str()).unwrap_or("");
             let resolved = df
                 .map(|d| d.resolve_column_name(name))
                 .transpose()?
                 .unwrap_or_else(|| name.to_string());
             Ok(col(resolved.as_str()))
         }
-        SqlExpr::Value(Value::Number(s, _)) => {
+        SqlExpr::Value(ValueWithSpan { value: Value::Number(s, _), .. }) => {
             if s.contains('.') {
                 let v: f64 = s.parse().map_err(|_| {
                     PolarsError::InvalidOperation(format!("SQL: invalid number literal '{}'", s).into())
@@ -381,9 +394,9 @@ fn sql_expr_to_polars(
                 Ok(lit(v))
             }
         }
-        SqlExpr::Value(Value::SingleQuotedString(s)) => Ok(lit(s.as_str())),
-        SqlExpr::Value(Value::Boolean(b)) => Ok(lit(*b)),
-        SqlExpr::Value(Value::Null) => Ok(lit(polars::prelude::LiteralValue::Null)),
+        SqlExpr::Value(ValueWithSpan { value: Value::SingleQuotedString(s), .. }) => Ok(lit(s.as_str())),
+        SqlExpr::Value(ValueWithSpan { value: Value::Boolean(b), .. }) => Ok(lit(*b)),
+        SqlExpr::Value(ValueWithSpan { value: Value::Null, .. }) => Ok(lit(polars::prelude::NULL)),
         SqlExpr::BinaryOp { left, op, right } => {
             let l = sql_expr_to_polars(left, session, df, having_agg_map)?;
             let r = sql_expr_to_polars(right, session, df, having_agg_map)?;
@@ -401,6 +414,7 @@ fn sql_expr_to_polars(
                 )),
             }
         }
+        SqlExpr::Nested(inner) => sql_expr_to_polars(inner, session, df, having_agg_map),
         SqlExpr::IsNull(expr) => Ok(sql_expr_to_polars(expr, session, df, having_agg_map)?.is_null()),
         SqlExpr::IsNotNull(expr) => Ok(sql_expr_to_polars(expr, session, df, having_agg_map)?.is_not_null()),
         SqlExpr::UnaryOp { op, expr } => {
@@ -427,11 +441,16 @@ fn sql_expr_to_polars(
             expr: left,
             pattern,
             escape_char,
+            any: _,
         } => {
             let col_expr = sql_expr_to_polars(left.as_ref(), session, df, having_agg_map)?;
             let pattern_str = sql_expr_to_string_literal(pattern.as_ref())?;
             let col_col = crate::column::Column::from_expr(col_expr, None);
-            let like_expr = col_col.like(&pattern_str, *escape_char).into_expr();
+            let escape: Option<char> = escape_char.as_ref().and_then(|v| match v {
+                Value::SingleQuotedString(s) => s.chars().next(),
+                _ => None,
+            });
+            let like_expr = col_col.like(&pattern_str, escape).into_expr();
             Ok(if *negated {
                 like_expr.not()
             } else {
@@ -448,7 +467,7 @@ fn sql_expr_to_polars(
                 return Ok(lit(false));
             }
             let series = sql_in_list_to_series(list)?;
-            let in_expr = col_expr.is_in(lit(series));
+            let in_expr = col_expr.is_in(lit(series), false);
             Ok(if *negated {
                 in_expr.not()
             } else {
@@ -469,7 +488,13 @@ fn sql_function_to_expr(
     session: &SparkSession,
     df: Option<&DataFrame>,
 ) -> Result<Expr, PolarsError> {
-    let func_name = func.name.0.last().map(|i| i.value.as_str()).unwrap_or("");
+    let func_name = func
+        .name
+        .0
+        .last()
+        .and_then(|p| p.as_ident())
+        .map(|i| i.value.as_str())
+        .unwrap_or("");
     let args = sql_function_args_to_columns(func, session, df)?;
 
     let case_sensitive = session.is_case_sensitive();
@@ -508,7 +533,7 @@ fn sql_function_args_to_columns(
     df: Option<&DataFrame>,
 ) -> Result<Vec<Column>, PolarsError> {
     let mut cols = Vec::new();
-    for arg in &func.args {
+    for arg in function_args_slice(&func.args) {
         if let FunctionArg::Unnamed(FunctionArgExpr::Expr(expr)) = arg {
             let e = sql_expr_to_polars(expr, session, df, None)?;
             cols.push(Column::from_expr(e, None));
@@ -537,7 +562,10 @@ fn sql_expr_to_col_name(expr: &SqlExpr) -> Result<String, PolarsError> {
 /// Extract a string literal from a SQL expression (for LIKE pattern). Issue #590.
 fn sql_expr_to_string_literal(expr: &SqlExpr) -> Result<String, PolarsError> {
     match expr {
-        SqlExpr::Value(Value::SingleQuotedString(s)) => Ok(s.clone()),
+        SqlExpr::Value(ValueWithSpan {
+            value: Value::SingleQuotedString(s),
+            ..
+        }) => Ok(s.clone()),
         _ => Err(PolarsError::InvalidOperation(
             format!("SQL: LIKE pattern must be a string literal, got {:?}", expr).into(),
         )),
@@ -554,11 +582,17 @@ fn sql_in_list_to_series(list: &[SqlExpr]) -> Result<polars::prelude::Series, Po
     let mut has_float = false;
     for e in list {
         match e {
-            SqlExpr::Value(Value::SingleQuotedString(s)) => {
+            SqlExpr::Value(ValueWithSpan {
+                value: Value::SingleQuotedString(s),
+                ..
+            }) => {
                 str_vals.push(s.clone());
                 has_string = true;
             }
-            SqlExpr::Value(Value::Number(n, _)) => {
+            SqlExpr::Value(ValueWithSpan {
+                value: Value::Number(n, _),
+                ..
+            }) => {
                 str_vals.push(n.clone());
                 if n.contains('.') {
                     let v: f64 = n.parse().map_err(|_| {
@@ -577,11 +611,16 @@ fn sql_in_list_to_series(list: &[SqlExpr]) -> Result<polars::prelude::Series, Po
                     int_vals.push(v);
                 }
             }
-            SqlExpr::Value(Value::Boolean(b)) => {
+            SqlExpr::Value(ValueWithSpan {
+                value: Value::Boolean(b),
+                ..
+            }) => {
                 str_vals.push(b.to_string());
                 has_string = true;
             }
-            SqlExpr::Value(Value::Null) => {}
+            SqlExpr::Value(ValueWithSpan {
+                value: Value::Null, ..
+            }) => {}
             _ => {
                 return Err(PolarsError::InvalidOperation(
                     format!("SQL: IN list supports only literals, got {:?}", e).into(),
@@ -693,7 +732,7 @@ fn apply_projection(
     if has_python_udf {
         // Add Python UDF columns first, then select all in order
         for item in &items {
-            if let ProjItem::PythonUdf(ref col, ref alias) = item {
+            if let ProjItem::PythonUdf(col, alias) = item {
                 df = df.with_column(alias, col)?;
             }
         }
@@ -719,9 +758,14 @@ fn apply_projection(
 }
 
 fn sql_function_alias(func: &Function) -> String {
-    let func_name = func.name.0.last().map(|i| i.value.as_str()).unwrap_or("");
-    let arg_parts: Vec<String> = func
-        .args
+    let func_name = func
+        .name
+        .0
+        .last()
+        .and_then(|p| p.as_ident())
+        .map(|i| i.value.as_str())
+        .unwrap_or("");
+    let arg_parts: Vec<String> = function_args_slice(&func.args)
         .iter()
         .filter_map(|a| {
             if let FunctionArg::Unnamed(FunctionArgExpr::Expr(SqlExpr::Identifier(ident))) = a {
@@ -748,7 +792,13 @@ fn projection_function_to_item(
     session: &SparkSession,
     df: Option<&DataFrame>,
 ) -> Result<ProjItem, PolarsError> {
-    let func_name = func.name.0.last().map(|i| i.value.as_str()).unwrap_or("");
+    let func_name = func
+        .name
+        .0
+        .last()
+        .and_then(|p| p.as_ident())
+        .map(|i| i.value.as_str())
+        .unwrap_or("");
     let args = sql_function_args_to_columns(func, session, df)?;
     let case_sensitive = session.is_case_sensitive();
     let alias = sql_function_alias(func);
@@ -797,21 +847,33 @@ fn push_agg_function(
 ) -> Result<(), PolarsError> {
     use polars::prelude::len;
 
-    let func_name = name.0.last().map(|i| i.value.as_str()).unwrap_or("");
+    let func_name = name
+        .0
+        .last()
+        .and_then(|p| p.as_ident())
+        .map(|i| i.value.as_str())
+        .unwrap_or("");
     let (expr, default_alias) = match func_name.to_uppercase().as_str() {
         "COUNT" => {
             let e = if args.is_empty() {
                 len()
-            } else {
+            } else if args.len() == 1 {
+                use sqlparser::ast::FunctionArgExpr;
                 match &args[0] {
-                    sqlparser::ast::FunctionArg::Unnamed(
-                        sqlparser::ast::FunctionArgExpr::Expr(SqlExpr::Wildcard),
-                    ) => len(),
-                    sqlparser::ast::FunctionArg::Unnamed(
-                        sqlparser::ast::FunctionArgExpr::Expr(SqlExpr::Identifier(ident)),
-                    ) => {
-                        let resolved = df.resolve_column_name(ident.value.as_str())?;
-                        col(resolved.as_str()).count()
+                    sqlparser::ast::FunctionArg::Unnamed(FunctionArgExpr::Wildcard) => len(),
+                    sqlparser::ast::FunctionArg::Unnamed(FunctionArgExpr::Expr(e)) => {
+                        let expr = match e {
+                            SqlExpr::Nested(inner) => inner.as_ref(),
+                            other => other,
+                        };
+                        match expr {
+                            SqlExpr::Wildcard(_) => len(),
+                            SqlExpr::Identifier(ident) => {
+                                let resolved = df.resolve_column_name(ident.value.as_str())?;
+                                col(resolved.as_str()).count()
+                            }
+                            _ => len(), // COUNT(1) etc.
+                        }
                     }
                     _ => {
                         return Err(PolarsError::InvalidOperation(
@@ -819,6 +881,10 @@ fn push_agg_function(
                         ));
                     }
                 }
+            } else {
+                return Err(PolarsError::InvalidOperation(
+                    "SQL: COUNT takes at most one argument.".into(),
+                ));
             };
             (e, "count".to_string())
         }
@@ -896,7 +962,7 @@ fn push_agg_function(
             ));
         }
     };
-    let name = alias_override.unwrap_or_else(|| default_alias.as_str());
+    let name = alias_override.unwrap_or(default_alias.as_str());
     agg.push(expr.alias(name));
     Ok(())
 }
@@ -925,7 +991,13 @@ fn projection_is_scalar_aggregate(projection: &[SelectItem]) -> bool {
 }
 
 fn is_agg_function_name(func: &Function) -> bool {
-    let name = func.name.0.last().map(|i| i.value.as_str()).unwrap_or("");
+    let name = func
+        .name
+        .0
+        .last()
+        .and_then(|p| p.as_ident())
+        .map(|i| i.value.as_str())
+        .unwrap_or("");
     matches!(
         name.to_uppercase().as_str(),
         "COUNT" | "SUM" | "AVG" | "MEAN" | "MIN" | "MAX"
@@ -934,20 +1006,26 @@ fn is_agg_function_name(func: &Function) -> bool {
 
 /// Key for deduplicating aggregate function calls in HAVING (issue #589).
 fn agg_function_key(func: &Function) -> Option<(String, String)> {
-    let name = func.name.0.last().map(|i| i.value.as_str()).unwrap_or("");
+    let name = func
+        .name
+        .0
+        .last()
+        .and_then(|p| p.as_ident())
+        .map(|i| i.value.as_str())
+        .unwrap_or("");
     if !matches!(
         name.to_uppercase().as_str(),
         "COUNT" | "SUM" | "AVG" | "MEAN" | "MIN" | "MAX"
     ) {
         return None;
     }
-    let arg_desc = match func.args.first() {
+    let arg_desc = match function_args_slice(&func.args).first() {
         None => "*".to_string(),
         Some(sqlparser::ast::FunctionArg::Unnamed(sqlparser::ast::FunctionArgExpr::Expr(
             SqlExpr::Identifier(ident),
         ))) => ident.value.to_string(),
         Some(sqlparser::ast::FunctionArg::Unnamed(sqlparser::ast::FunctionArgExpr::Expr(
-            SqlExpr::Wildcard,
+            SqlExpr::Wildcard(_),
         ))) => "*".to_string(),
         _ => return None,
     };
@@ -963,18 +1041,15 @@ fn extract_having_agg_calls(expr: &SqlExpr) -> Vec<(Function, String)> {
         seen: &mut HashMap<(String, String), String>,
         list: &mut Vec<(Function, String)>,
     ) {
-        match e {
-            SqlExpr::Function(f) => {
-                if let Some(key) = agg_function_key(f) {
-                    if !seen.contains_key(&key) {
-                        let alias = format!("__having_{}", list.len());
-                        seen.insert(key.clone(), alias.clone());
-                        list.push((f.clone(), alias));
-                    }
-                    return;
+        if let SqlExpr::Function(f) = e {
+            if let Some(key) = agg_function_key(f) {
+                if !seen.contains_key(&key) {
+                    let alias = format!("__having_{}", list.len());
+                    seen.insert(key.clone(), alias.clone());
+                    list.push((f.clone(), alias));
                 }
+                return;
             }
-            _ => {}
         }
         match e {
             SqlExpr::BinaryOp { left, right, .. } => {
@@ -984,7 +1059,7 @@ fn extract_having_agg_calls(expr: &SqlExpr) -> Vec<(Function, String)> {
             SqlExpr::UnaryOp { expr: inner, .. } => walk(inner.as_ref(), seen, list),
             SqlExpr::IsNull(inner) | SqlExpr::IsNotNull(inner) => walk(inner.as_ref(), seen, list),
             SqlExpr::Function(f) => {
-                for arg in &f.args {
+                for arg in function_args_slice(&f.args) {
                     if let FunctionArg::Unnamed(FunctionArgExpr::Expr(a)) = arg {
                         walk(a, seen, list);
                     }
@@ -1031,7 +1106,7 @@ fn projection_to_agg_exprs(
                 }
             }
             SelectItem::UnnamedExpr(SqlExpr::Function(Function { name, args, .. })) => {
-                push_agg_function(name, args, df, None, &mut agg)?;
+                push_agg_function(name, function_args_slice(args), df, None, &mut agg)?;
             }
             SelectItem::ExprWithAlias { expr, alias } => {
                 let alias_str = alias.value.as_str();
@@ -1063,7 +1138,13 @@ fn projection_to_agg_exprs(
                         }
                     }
                     SqlExpr::Function(Function { name, args, .. }) => {
-                        push_agg_function(&name, args.as_slice(), df, Some(alias_str), &mut agg)?;
+                        push_agg_function(
+                            name,
+                            function_args_slice(args),
+                            df,
+                            Some(alias_str),
+                            &mut agg,
+                        )?;
                     }
                     _ => {
                         return Err(PolarsError::InvalidOperation(
@@ -1093,7 +1174,10 @@ fn projection_to_agg_exprs(
 
 fn sql_limit_to_usize(expr: &SqlExpr) -> Result<usize, PolarsError> {
     match expr {
-        SqlExpr::Value(Value::Number(s, _)) => {
+        SqlExpr::Value(ValueWithSpan {
+            value: Value::Number(s, _),
+            ..
+        }) => {
             let n: i64 = s.parse().map_err(|_| {
                 PolarsError::InvalidOperation(
                     format!("SQL: LIMIT must be a positive integer, got '{}'", s).into(),

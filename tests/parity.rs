@@ -1,3 +1,5 @@
+#![allow(clippy::collapsible_if)]
+
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
@@ -5,8 +7,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use chrono::{NaiveDate, NaiveDateTime};
 use polars::prelude::{
-    col, len, lit, DataFrame as PlDataFrame, DataType, Expr, NamedFrom, PolarsError, Series,
-    TimeUnit,
+    DataFrame as PlDataFrame, DataType, Expr, NULL, NamedFrom, PolarsError, Series, TimeUnit, col,
+    len, lit,
 };
 use robin_sparkless::plan;
 use robin_sparkless::{DataFrame, JoinType, SparkSession};
@@ -503,7 +505,7 @@ fn create_df_from_file_source(
         _ => {
             return Err(PolarsError::ComputeError(
                 format!("unsupported file format: {}", file_source.format).into(),
-            ))
+            ));
         }
     };
     static TEMP_COUNTER: AtomicUsize = AtomicUsize::new(0);
@@ -570,7 +572,7 @@ fn create_df_from_file_source(
         _ => {
             return Err(PolarsError::ComputeError(
                 format!("unsupported file format: {}", file_source.format).into(),
-            ))
+            ));
         }
     };
 
@@ -700,7 +702,7 @@ fn create_df_from_input_direct(input: &InputSection) -> Result<DataFrame, Polars
         }
     }
 
-    let pl_df = PlDataFrame::new(cols.iter().map(|s| s.clone().into()).collect())?;
+    let pl_df = PlDataFrame::new_infer_height(cols.iter().map(|s| s.clone().into()).collect())?;
     Ok(DataFrame::from_polars(pl_df))
 }
 
@@ -805,10 +807,7 @@ fn apply_operations(
                     g
                 } else {
                     // Global agg: add literal column, group by it, then drop after agg
-                    df = df.with_column_expr(
-                        "_gb_global",
-                        Expr::Literal(polars::prelude::LiteralValue::Int64(1)),
-                    )?;
+                    df = df.with_column_expr("_gb_global", lit(1i64))?;
                     df.group_by(vec!["_gb_global"])?
                 };
 
@@ -1469,7 +1468,7 @@ fn apply_operations(
                             "_nv_val",
                             polars::prelude::when(col("_nv_rn").eq(lit(n_val)))
                                 .then(robin_sparkless::col(val_col).into_expr())
-                                .otherwise(Expr::Literal(polars::prelude::LiteralValue::Null))
+                                .otherwise(lit(NULL))
                                 .max()
                                 .over(partition_exprs.clone()),
                         )?;
@@ -1477,7 +1476,7 @@ fn apply_operations(
                             col_name,
                             polars::prelude::when(col("_nv_rn").gt_eq(lit(n_val)))
                                 .then(col("_nv_val"))
-                                .otherwise(Expr::Literal(polars::prelude::LiteralValue::Null)),
+                                .otherwise(lit(NULL)),
                         )?;
                         df = df.drop(vec!["_nv_rn", "_nv_val"])?;
                     }
@@ -2237,7 +2236,6 @@ fn parse_column_or_literal_for_concat(part: &str) -> Result<robin_sparkless::Col
 
 /// Convert a JSON value to a Polars literal Expr for fillna.
 fn json_value_to_lit(v: &serde_json::Value) -> Result<Expr, String> {
-    use polars::prelude::LiteralValue;
     match v {
         serde_json::Value::Number(n) => {
             if let Some(i) = n.as_i64() {
@@ -2250,7 +2248,7 @@ fn json_value_to_lit(v: &serde_json::Value) -> Result<Expr, String> {
         }
         serde_json::Value::String(s) => Ok(lit(s.as_str())),
         serde_json::Value::Bool(b) => Ok(lit(*b)),
-        serde_json::Value::Null => Ok(Expr::Literal(LiteralValue::Null)),
+        serde_json::Value::Null => Ok(lit(NULL)),
         _ => Err("unsupported type for fillna (array/object)".to_string()),
     }
 }
@@ -2379,8 +2377,8 @@ fn parse_with_column_expr(src: &str, mock_dates: bool) -> Result<Expr, String> {
 
             let then_str = &after_then[..otherwise_pos];
             let after_otherwise = &after_then[otherwise_pos + 11..]; // Skip ").otherwise("
-                                                                     // The otherwise value should be a simple literal or column, find the closing paren
-                                                                     // For simple cases like otherwise('minor'), just find the last )
+            // The otherwise value should be a simple literal or column, find the closing paren
+            // For simple cases like otherwise('minor'), just find the last )
             let otherwise_end = after_otherwise
                 .rfind(')')
                 .ok_or("missing closing ) in otherwise()")?;
@@ -4232,11 +4230,7 @@ fn parse_with_column_expr(src: &str, mock_dates: bool) -> Result<Expr, String> {
         let parse_char = |i: usize| -> Option<char> {
             parts.get(i).and_then(|p| {
                 let t = p.trim().trim_matches(['\'', '"']);
-                if t.is_empty() {
-                    None
-                } else {
-                    t.chars().next()
-                }
+                if t.is_empty() { None } else { t.chars().next() }
             })
         };
         let upper = parse_char(1);
@@ -5081,7 +5075,7 @@ fn collect_to_simple_format(
     for row_idx in 0..num_rows {
         let mut row: Vec<Value> = Vec::with_capacity(num_cols);
         for col_idx in 0..num_cols {
-            let series = pl_df.get_columns().get(col_idx).ok_or_else(|| {
+            let series = pl_df.columns().get(col_idx).ok_or_else(|| {
                 PolarsError::ComputeError(format!("column index {col_idx} out of range").into())
             })?;
             let json_val = match series.get(row_idx) {
@@ -5915,8 +5909,8 @@ fn plan_spark_session_stop_noop() {
 /// Mirrors Sparkless flow: createDataFrame([], schema) -> saveAsTable -> table -> append -> table.
 #[test]
 fn plan_empty_df_save_as_table_append() {
-    use robin_sparkless::plan;
     use robin_sparkless::SaveMode;
+    use robin_sparkless::plan;
     use serde_json::json;
 
     let spark = SparkSession::builder()
@@ -6031,7 +6025,7 @@ fn print_rand_seed_42_values() {
     let dist = rand_distr::StandardNormal;
     println!("rand(42) 3 values:");
     for _ in 0..3 {
-        println!("  {}", rng.gen::<f64>());
+        println!("  {}", rng.r#gen::<f64>());
     }
     let mut rng2 = rand::rngs::StdRng::seed_from_u64(42);
     println!("randn(42) 3 values:");

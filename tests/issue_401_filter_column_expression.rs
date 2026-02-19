@@ -4,7 +4,7 @@
 //! can be used reliably in DataFrame::filter.
 
 use polars::prelude::df;
-use robin_sparkless::{col, SparkSession};
+use robin_sparkless::{SparkSession, col};
 
 fn spark() -> SparkSession {
     SparkSession::builder()

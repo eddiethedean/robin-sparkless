@@ -1,5 +1,5 @@
 //! Demo matching README quick start: create_dataframe, filter, show.
-use robin_sparkless::{col, lit_i64, SparkSession};
+use robin_sparkless::{SparkSession, col, lit_i64};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let spark = SparkSession::builder().app_name("demo").get_or_create();

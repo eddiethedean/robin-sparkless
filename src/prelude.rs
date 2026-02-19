@@ -13,9 +13,9 @@ pub use crate::dataframe::{
     WriteMode,
 };
 pub use crate::functions::{
-    asc, asc_nulls_first, asc_nulls_last, avg, coalesce, col, count, count_distinct, desc,
-    desc_nulls_first, desc_nulls_last, first, length, lit_bool, lit_f64, lit_i32, lit_i64, lit_str,
-    lower, max, mean, min, substring, sum, trim, upper, when, SortOrder,
+    SortOrder, asc, asc_nulls_first, asc_nulls_last, avg, coalesce, col, count, count_distinct,
+    desc, desc_nulls_first, desc_nulls_last, first, length, lit_bool, lit_f64, lit_i32, lit_i64,
+    lit_str, lower, max, mean, min, substring, sum, trim, upper, when,
 };
 pub use crate::schema::{DataType, StructField, StructType};
 pub use crate::session::{DataFrameReader, SparkSession, SparkSessionBuilder};

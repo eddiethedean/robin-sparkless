@@ -2,7 +2,7 @@
 //! Uses deltalake (delta-rs) with Polars for execution.
 
 use crate::dataframe::DataFrame;
-use polars::prelude::{LazyFrame, PolarsError, ScanArgsParquet, UnionArgs};
+use polars::prelude::{LazyFrame, PlRefPath, PolarsError, ScanArgsParquet, UnionArgs};
 use std::path::Path;
 use url::Url;
 
@@ -73,7 +73,10 @@ pub fn read_delta_with_version(
     let mut lfs: Vec<LazyFrame> = Vec::with_capacity(uris.len());
     for uri in &uris {
         let parquet_path = uri_to_parquet_path(uri)?;
-        let lf = LazyFrame::scan_parquet(parquet_path, ScanArgsParquet::default())?;
+        let pl_path = PlRefPath::try_from_path(&parquet_path).map_err(|e| {
+            PolarsError::ComputeError(format!("read_delta scan_parquet path: {e}").into())
+        })?;
+        let lf = LazyFrame::scan_parquet(pl_path, ScanArgsParquet::default())?;
         lfs.push(lf);
     }
 
@@ -231,8 +234,13 @@ pub fn write_delta(
                     let mut lfs: Vec<LazyFrame> = Vec::with_capacity(uris.len() + 1);
                     for uri in &uris {
                         let parquet_path = uri_to_parquet_path(uri)?;
+                        let pl_path = PlRefPath::try_from_path(&parquet_path).map_err(|e| {
+                            PolarsError::ComputeError(
+                                format!("write_delta scan_parquet path: {e}").into(),
+                            )
+                        })?;
                         lfs.push(LazyFrame::scan_parquet(
-                            parquet_path,
+                            pl_path,
                             ScanArgsParquet::default(),
                         )?);
                     }

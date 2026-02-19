@@ -102,7 +102,7 @@ impl<'a> DataFrameStat<'a> {
         let collected = self.df.collect_inner()?;
         let pl_df = collected.as_ref();
         let numeric_cols: Vec<String> = pl_df
-            .get_columns()
+            .columns()
             .iter()
             .filter(|s| {
                 matches!(
@@ -141,7 +141,8 @@ impl<'a> DataFrameStat<'a> {
             let series = Series::new(name_i.as_str().into(), row_vals);
             columns.push(series);
         }
-        let out_pl = PlDataFrame::new(columns.into_iter().map(|s| s.into()).collect())?;
+        let out_pl =
+            PlDataFrame::new_infer_height(columns.into_iter().map(|s| s.into()).collect())?;
         Ok(DataFrame::from_polars_with_options(
             out_pl,
             self.df.case_sensitive,

@@ -580,8 +580,8 @@ pub fn apply_arrays_zip(columns: &mut [Column]) -> PolarsResult<Option<Column>> 
         .collect::<PolarsResult<Vec<_>>>()?;
     let len = list_cas[0].len();
     let inner_dtype = list_cas[0].inner_dtype().clone();
-    use polars::chunked_array::builder::get_list_builder;
     use polars::chunked_array::StructChunked;
+    use polars::chunked_array::builder::get_list_builder;
     use polars::datatypes::Field;
     let struct_fields: Vec<Field> = (0..n)
         .map(|i| Field::new(format!("field_{i}").into(), inner_dtype.clone()))
@@ -770,8 +770,8 @@ pub fn apply_str_to_map(
     pair_delim: &str,
     key_value_delim: &str,
 ) -> PolarsResult<Option<Column>> {
-    use polars::chunked_array::builder::get_list_builder;
     use polars::chunked_array::StructChunked;
+    use polars::chunked_array::builder::get_list_builder;
     use polars::datatypes::Field;
     let name = column.field().into_owned().name;
     let series = column.take_materialized_series();
@@ -824,8 +824,8 @@ pub fn apply_str_to_map(
 
 /// Merge two map columns (PySpark map_concat). Last value wins for duplicate keys.
 pub fn apply_map_concat(columns: &mut [Column]) -> PolarsResult<Option<Column>> {
-    use polars::chunked_array::builder::get_list_builder;
     use polars::chunked_array::StructChunked;
+    use polars::chunked_array::builder::get_list_builder;
     use polars::datatypes::Field;
     if columns.len() < 2 {
         return Err(PolarsError::ComputeError(
@@ -1443,9 +1443,9 @@ pub fn apply_try_to_binary(column: Column, fmt: &str) -> PolarsResult<Option<Col
 
 /// AES-GCM encrypt (PySpark aes_encrypt). Key: UTF-8 string, 16 or 32 bytes for AES-128/256. Output: hex(nonce||ciphertext).
 fn aes_gcm_encrypt_one(plaintext: &[u8], key: &[u8]) -> Option<String> {
+    use aes_gcm::Aes128Gcm;
     use aes_gcm::aead::generic_array::GenericArray;
     use aes_gcm::aead::{Aead, KeyInit};
-    use aes_gcm::Aes128Gcm;
     use rand::RngCore;
     let key_arr: [u8; 16] = key
         .iter()
@@ -1467,9 +1467,9 @@ fn aes_gcm_encrypt_one(plaintext: &[u8], key: &[u8]) -> Option<String> {
 
 /// AES-GCM decrypt (PySpark aes_decrypt). Input: hex(nonce||ciphertext).
 fn aes_gcm_decrypt_one(hex_input: &str, key: &[u8]) -> Option<String> {
+    use aes_gcm::Aes128Gcm;
     use aes_gcm::aead::generic_array::GenericArray;
     use aes_gcm::aead::{Aead, KeyInit};
-    use aes_gcm::Aes128Gcm;
     let bytes = hex::decode(hex_input.as_bytes()).ok()?;
     if bytes.len() < 12 + 16 {
         return None; // nonce + at least tag
@@ -2050,10 +2050,10 @@ pub fn apply_rand_with_seed(column: Column, seed: Option<u64>) -> PolarsResult<O
     let n = series.len();
     let values: Vec<f64> = if let Some(s) = seed {
         let mut rng = rand::rngs::StdRng::seed_from_u64(s);
-        (0..n).map(|_| rng.gen::<f64>()).collect()
+        (0..n).map(|_| rng.r#gen::<f64>()).collect()
     } else {
         let mut rng = rand::thread_rng();
-        (0..n).map(|_| rng.gen::<f64>()).collect()
+        (0..n).map(|_| rng.r#gen::<f64>()).collect()
     };
     let out = Float64Chunked::from_vec(name.as_str().into(), values);
     Ok(Some(Column::new(name, out.into_series())))
@@ -2084,10 +2084,10 @@ pub fn series_rand_n(name: &str, n: usize, seed: Option<u64>) -> Series {
     use rand::SeedableRng;
     let values: Vec<f64> = if let Some(s) = seed {
         let mut rng = rand::rngs::StdRng::seed_from_u64(s);
-        (0..n).map(|_| rng.gen::<f64>()).collect()
+        (0..n).map(|_| rng.r#gen::<f64>()).collect()
     } else {
         let mut rng = rand::thread_rng();
-        (0..n).map(|_| rng.gen::<f64>()).collect()
+        (0..n).map(|_| rng.r#gen::<f64>()).collect()
     };
     Float64Chunked::from_vec(name.into(), values).into_series()
 }
@@ -2590,8 +2590,8 @@ pub fn apply_least2(columns: &mut [Column]) -> PolarsResult<Option<Column>> {
 
 /// Build map (list of structs {key, value}) from two list columns. PySpark map_from_arrays.
 pub fn apply_map_from_arrays(columns: &mut [Column]) -> PolarsResult<Option<Column>> {
-    use polars::chunked_array::builder::get_list_builder;
     use polars::chunked_array::StructChunked;
+    use polars::chunked_array::builder::get_list_builder;
     use polars::datatypes::Field;
     if columns.len() < 2 {
         return Err(PolarsError::ComputeError(
@@ -2661,8 +2661,8 @@ pub fn apply_map_from_arrays(columns: &mut [Column]) -> PolarsResult<Option<Colu
 
 /// Zip two array columns into List(Struct{left, right}) for zip_with. Shorter padded with null.
 pub fn apply_zip_arrays_to_struct(columns: &mut [Column]) -> PolarsResult<Option<Column>> {
-    use polars::chunked_array::builder::get_list_builder;
     use polars::chunked_array::StructChunked;
+    use polars::chunked_array::builder::get_list_builder;
     use polars::datatypes::Field;
     if columns.len() < 2 {
         return Err(PolarsError::ComputeError(
@@ -2792,8 +2792,8 @@ pub fn apply_zip_arrays_to_struct(columns: &mut [Column]) -> PolarsResult<Option
 
 /// Merge two maps into List(Struct{key, value1, value2}) for map_zip_with. Union of keys.
 pub fn apply_map_zip_to_struct(columns: &mut [Column]) -> PolarsResult<Option<Column>> {
-    use polars::chunked_array::builder::get_list_builder;
     use polars::chunked_array::StructChunked;
+    use polars::chunked_array::builder::get_list_builder;
     use polars::datatypes::Field;
     use std::collections::BTreeMap;
     if columns.len() < 2 {
@@ -3724,7 +3724,7 @@ pub fn apply_url_decode(column: Column) -> PolarsResult<Option<Column>> {
 
 /// url_encode(column) - percent-encode string for URL (PySpark url_encode).
 pub fn apply_url_encode(column: Column) -> PolarsResult<Option<Column>> {
-    use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
+    use percent_encoding::{NON_ALPHANUMERIC, utf8_percent_encode};
     let name = column.field().into_owned().name;
     let series = column.take_materialized_series();
     let ca = series
@@ -3835,7 +3835,7 @@ pub fn apply_json_tuple(column: Column, keys: &[String]) -> PolarsResult<Option<
         .zip(columns_per_key.iter())
         .map(|(k, vals)| Series::new(k.as_str().into(), vals.clone()))
         .collect();
-    let out_df = DataFrame::new(field_series.into_iter().map(|s| s.into()).collect())?;
+    let out_df = DataFrame::new_infer_height(field_series.into_iter().map(|s| s.into()).collect())?;
     let out_struct = out_df.into_struct(name.as_str().into());
     Ok(Some(Column::new(name, out_struct.into_series())))
 }
@@ -3861,7 +3861,7 @@ pub fn apply_from_csv(column: Column) -> PolarsResult<Option<Column>> {
     let field_series: Vec<Series> = (0..MAX_COLS)
         .map(|i| Series::new(format!("_c{i}").into(), columns[i].clone()))
         .collect();
-    let out_df = DataFrame::new(field_series.into_iter().map(|s| s.into()).collect())?;
+    let out_df = DataFrame::new_infer_height(field_series.into_iter().map(|s| s.into()).collect())?;
     let out_series = out_df.into_struct(name.as_str().into()).into_series();
     Ok(Some(Column::new(name, out_series)))
 }
@@ -4027,6 +4027,43 @@ pub fn apply_sequence(column: Column) -> PolarsResult<Option<Column>> {
         }
     }
     Ok(Some(Column::new(name, builder.finish().into_series())))
+}
+
+/// Replace or add a struct field (PySpark withField). Used when Polars 0.53+ no longer accepts "*" in with_fields.
+pub fn apply_struct_with_field(
+    struct_col: Column,
+    value_col: Column,
+    field_name: &str,
+) -> PolarsResult<Option<Column>> {
+    use polars::chunked_array::StructChunked;
+    let name = struct_col.field().into_owned().name;
+    let struct_series = struct_col.take_materialized_series();
+    let st = struct_series.struct_().map_err(|e| {
+        PolarsError::ComputeError(format!("with_field: expected struct column: {e}").into())
+    })?;
+    let len = st.len();
+    let fields_series = st.fields_as_series();
+    let value_series = value_col.take_materialized_series();
+    let mut new_fields: Vec<Series> = Vec::with_capacity(fields_series.len() + 1);
+    let mut replaced = false;
+    for s in &fields_series {
+        let fname = s.name().as_str();
+        let new_s = if fname == field_name {
+            replaced = true;
+            let mut v = value_series.clone();
+            v.rename(PlSmallStr::from(field_name));
+            v
+        } else {
+            s.clone()
+        };
+        new_fields.push(new_s);
+    }
+    if !replaced {
+        new_fields.push(value_series);
+    }
+    let out = StructChunked::from_series(name.as_str().into(), len, new_fields.iter())
+        .map_err(|e| PolarsError::ComputeError(format!("with_field: build struct: {e}").into()))?;
+    Ok(Some(Column::new(name, out.into_series())))
 }
 
 /// Random permutation of list elements (PySpark shuffle). Uses rand::seq::SliceRandom.

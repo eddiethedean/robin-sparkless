@@ -11,11 +11,11 @@
 
 use chrono::NaiveDate;
 use polars::prelude::{DataType, NamedFrom, Series};
-use robin_sparkless::{col, lit_i64, lit_str, DataFrame};
+use robin_sparkless::{DataFrame, col, lit_i64, lit_str};
 
 fn df_with_string_column() -> DataFrame {
     let s = Series::new("str_col".into(), &["123", "456"]);
-    let pl_df = polars::prelude::DataFrame::new(vec![s.into()]).unwrap();
+    let pl_df = polars::prelude::DataFrame::new_infer_height(vec![s.into()]).unwrap();
     DataFrame::from_polars(pl_df)
 }
 
@@ -74,7 +74,7 @@ fn issue_235_string_gt_numeric_literal_uses_numeric_semantics() {
 #[test]
 fn issue_235_string_eq_numeric_with_invalid_string_non_matching() {
     let s = Series::new("str_col".into(), &["abc", "123"]);
-    let pl_df = polars::prelude::DataFrame::new(vec![s.into()]).unwrap();
+    let pl_df = polars::prelude::DataFrame::new_infer_height(vec![s.into()]).unwrap();
     let df = DataFrame::from_polars(pl_df);
     let expr = col("str_col").eq(lit_i64(123).into_expr()).into_expr();
     let out = df.filter(expr).unwrap();
@@ -91,7 +91,7 @@ fn df_with_date_column() -> DataFrame {
     let s = Series::new("dt".into(), [d1, d2])
         .cast(&DataType::Date)
         .unwrap();
-    let pl_df = polars::prelude::DataFrame::new(vec![s.into()]).unwrap();
+    let pl_df = polars::prelude::DataFrame::new_infer_height(vec![s.into()]).unwrap();
     DataFrame::from_polars(pl_df)
 }
 

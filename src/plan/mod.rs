@@ -6,10 +6,10 @@ mod expr;
 
 use crate::dataframe::{DataFrame, JoinType};
 use crate::functions::{
-    asc_nulls_first, asc_nulls_last, col, desc_nulls_first, desc_nulls_last, SortOrder,
+    SortOrder, asc_nulls_first, asc_nulls_last, col, desc_nulls_first, desc_nulls_last,
 };
 use crate::plan::expr::{expr_from_value, try_column_from_udf_value};
-use crate::session::{set_thread_udf_session, SparkSession};
+use crate::session::{SparkSession, set_thread_udf_session};
 pub use expr::PlanExprError;
 use polars::prelude::PolarsError;
 use serde_json::Value;
@@ -550,8 +550,8 @@ fn apply_op(
 }
 
 fn parse_aggs(aggs: &[Value], df: &DataFrame) -> Result<Vec<polars::prelude::Expr>, PlanError> {
-    use crate::functions::{avg, count, max, min, sum as rs_sum};
     use crate::Column;
+    use crate::functions::{avg, count, max, min, sum as rs_sum};
 
     let mut out = Vec::with_capacity(aggs.len());
     for a in aggs {

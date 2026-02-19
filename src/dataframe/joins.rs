@@ -33,7 +33,7 @@ pub fn join(
     how: JoinType,
     case_sensitive: bool,
 ) -> Result<DataFrame, PolarsError> {
-    use polars::prelude::{col, JoinBuilder, JoinCoalesce};
+    use polars::prelude::{JoinBuilder, JoinCoalesce, col};
     let mut left_lf = left.lazy_frame();
     let mut right_lf = right.lazy_frame();
 
@@ -175,7 +175,7 @@ pub fn join(
 
 #[cfg(test)]
 mod tests {
-    use super::{join, JoinType};
+    use super::{JoinType, join};
     use crate::{DataFrame, SparkSession};
 
     fn left_df() -> DataFrame {
