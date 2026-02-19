@@ -56,13 +56,14 @@ pub fn find_common_type(left: &DataType, right: &DataType) -> Result<DataType, P
             }
         }
         _ => {
-            // If types don't match known precedence, try to find a common numeric type
+            // If types don't match known precedence, try to find a common type
             if is_numeric(left) && is_numeric(right) {
-                // For numeric types, prefer double for comparisons
                 Ok(DataType::Float64)
             } else if left == right {
-                // Same type, no coercion needed
                 Ok(left.clone())
+            } else if left == &DataType::String || right == &DataType::String {
+                // #613: unionByName string vs numeric -> coerce to String (PySpark parity)
+                Ok(DataType::String)
             } else {
                 Err(PolarsError::ComputeError(
                     format!(
