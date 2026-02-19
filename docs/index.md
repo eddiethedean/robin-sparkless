@@ -22,7 +22,7 @@ Robin Sparkless provides a **PySpark-like API** in Rust so you can write familia
 
 ## Documentation
 
-- **Getting started** — [Quickstart](QUICKSTART.md), [Persistence guide](PERSISTENCE_GUIDE.md), [Releasing](RELEASING.md)
+- **Getting started** — [Quickstart](QUICKSTART.md), [Persistence guide](PERSISTENCE_GUIDE.md), [Embedding](EMBEDDING.md) (bindings / FFI), [Releasing](RELEASING.md)
 - **Reference** — [PySpark differences](PYSPARK_DIFFERENCES.md), [Parity status](PARITY_STATUS.md), [Robin-Sparkless missing](ROBIN_SPARKLESS_MISSING.md)
 - **Testing** — Run `make check` for Rust checks and tests; `make test-parity-phase-X` for phase-specific parity. See [QUICKSTART](QUICKSTART.md) and [TEST_CREATION_GUIDE](TEST_CREATION_GUIDE.md).
 - **Sparkless integration** — [Integration analysis](SPARKLESS_INTEGRATION_ANALYSIS.md), [Full backend roadmap](FULL_BACKEND_ROADMAP.md), [Logical plan format](LOGICAL_PLAN_FORMAT.md)
