@@ -155,7 +155,7 @@ fn translate_query(
     let mut having_agg_map: HashMap<(String, String), String> = HashMap::new();
     if has_group_by {
         // Support GROUP BY column name or expression, e.g. GROUP BY age or GROUP BY (age > 30) (issue #588).
-        let (group_exprs_polars, group_cols): (Vec<Expr>, Vec<String>) = group_exprs
+        let pairs: Vec<(Expr, String)> = group_exprs
             .iter()
             .enumerate()
             .map(|(i, e)| {
@@ -178,6 +178,7 @@ fn translate_query(
                 })
             })
             .collect::<Result<Vec<_>, PolarsError>>()?;
+        let (group_exprs_polars, group_cols): (Vec<Expr>, Vec<String>) = pairs.into_iter().unzip();
         let grouped = df.group_by_exprs(group_exprs_polars, group_cols.clone())?;
         let mut agg_exprs = projection_to_agg_exprs(&body.projection, &group_cols, &df)?;
         if let Some(having_expr) = &body.having {
