@@ -5,6 +5,7 @@ This page is the **legacy doc index**. The full documentation is built with [MkD
 | Document | Description |
 |----------|-------------|
 | [QUICKSTART](QUICKSTART.md) | Build, install, basic usage, optional features (SQL, Delta), troubleshooting, benchmarks |
+| [EMBEDDING](EMBEDDING.md) | Embedding and bindings: prelude::embed, *_engine() API, schema helpers, traits; minimal FFI surface |
 | [ROADMAP](ROADMAP.md) | Development roadmap and Sparkless integration phases |
 | [RELEASING](RELEASING.md) | How to cut a release (version bump, tag, crates.io publish) |
 | [CHANGELOG](../CHANGELOG.md) | Version history and release notes |

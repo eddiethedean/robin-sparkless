@@ -39,6 +39,15 @@ Where no `_engine` variant exists, use the existing method and `.map_err(EngineE
 
 - **[examples/embed_basic.rs](../examples/embed_basic.rs)** — Creates a session from config, runs a simple pipeline (filter + groupBy + agg), and prints schema and JSON rows. Run with: `cargo run --example embed_basic`.
 
+  Example output (key order in JSON may vary):
+
+  ```
+  Schema: Ok(StructType { fields: [StructField { name: "id", data_type: Long, nullable: true }, StructField { name: "score", data_type: String, nullable: true }, StructField { name: "score_1", data_type: Long, nullable: true }] })
+  Rows (JSON): [{"score_1":300,"id":3,"score":1},{"score_1":200,"id":2,"score":1}]
+  ```
+
+- **[examples/embed_readme.rs](../examples/embed_readme.rs)** — Matches the README embedding snippet (filter by id, then `to_json_rows`). Run with: `cargo run --example embed_readme`. Example output: `[{"label":"b","value":20,"id":2},{"id":3,"value":30,"label":"c"}]` (key order may vary).
+
 ## Traits (optional)
 
 - **`IntoRobinDf`** — `fn into_robin_df(self, session: &SparkSession) -> Result<DataFrame, EngineError>`. Implemented for `Vec<(i64, i64, String)>`, `Vec<(i64, String)>`, and `Vec<(i64, i64, i64, String)>` (default column names `c0`, `c1`, …).

@@ -85,7 +85,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
-Output (from `show`):
+Output (from `show`; run with `cargo run --example demo`):
+
 ```
 shape: (2, 3)
 ┌─────┬─────┬─────────┐
@@ -134,6 +135,12 @@ fn main() -> Result<(), robin_sparkless::EngineError> {
     println!("{}", json);
     Ok(())
 }
+```
+
+Example output (from the snippet above or `cargo run --example embed_readme`; JSON key order may vary):
+
+```
+[{"id":2,"value":20,"label":"b"},{"id":3,"value":30,"label":"c"}]
 ```
 
 Run the [embed_basic](examples/embed_basic.rs) example: `cargo run --example embed_basic`. For a minimal FFI surface (no Polars types), use `robin_sparkless::prelude::embed`; use the `*_engine()` methods and schema helpers (`StructType::to_json`, `schema_from_json`) so bindings rely only on `EngineError` and robin-sparkless types. See [docs/EMBEDDING.md](docs/EMBEDDING.md).
