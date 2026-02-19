@@ -283,6 +283,8 @@ pub fn union_by_name(
         let right_has = resolve(&right_names, c.as_str());
         let left_dtype = left_has.as_ref().and_then(|r| left.get_column_dtype(r));
         let right_dtype = right_has.as_ref().and_then(|r| right.get_column_dtype(r));
+        // #613: When one side's dtype is unknown (None), use String as common type so we never
+        // cast string to int (which would fail); both columns can safely cast to String.
         let common_dtype = match (&left_dtype, &right_dtype) {
             (Some(lt), Some(rt)) if lt != rt => find_common_type(lt, rt).map_err(|e| {
                 PolarsError::ComputeError(
@@ -290,8 +292,14 @@ pub fn union_by_name(
                 )
             })?,
             (Some(lt), Some(_)) => lt.clone(),
-            (Some(lt), None) => lt.clone(),
-            (None, Some(rt)) => rt.clone(),
+            (Some(lt), None) | (None, Some(lt)) => {
+                // One side unknown: coerce to String so we never cast string→int (PySpark union promotes to string).
+                if lt == &polars::prelude::DataType::String {
+                    lt.clone()
+                } else {
+                    polars::prelude::DataType::String
+                }
+            }
             (None, None) => polars::prelude::DataType::Null,
         };
         let left_expr = match &left_has {
