@@ -509,6 +509,15 @@ impl SparkSessionBuilder {
         set_thread_udf_session(session.clone());
         session
     }
+
+    /// Apply configuration from a [`SparklessConfig`](crate::config::SparklessConfig).
+    /// Merges warehouse dir, case sensitivity, and extra keys into the builder config.
+    pub fn with_config(mut self, config: &crate::config::SparklessConfig) -> Self {
+        for (k, v) in config.to_session_config() {
+            self.config.insert(k, v);
+        }
+        self
+    }
 }
 
 /// Catalog of temporary view names to DataFrames (session-scoped). Uses Arc<Mutex<>> for Send+Sync (Python bindings).
@@ -798,6 +807,12 @@ impl SparkSession {
 
     pub fn builder() -> SparkSessionBuilder {
         SparkSessionBuilder::new()
+    }
+
+    /// Create a session from a [`SparklessConfig`](crate::config::SparklessConfig).
+    /// Equivalent to `SparkSession::builder().with_config(config).get_or_create()`.
+    pub fn from_config(config: &crate::config::SparklessConfig) -> SparkSession {
+        Self::builder().with_config(config).get_or_create()
     }
 
     /// Return a reference to the session config (for catalog/conf compatibility).

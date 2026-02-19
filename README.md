@@ -100,6 +100,44 @@ shape: (2, 3)
 
 You can also wrap an existing Polars `DataFrame` with `DataFrame::from_polars(polars_df)`. See [docs/QUICKSTART.md](docs/QUICKSTART.md) for joins, window functions, and more.
 
+### Embedding robin-sparkless in your app
+
+Use the [prelude](https://docs.rs/robin-sparkless/latest/robin_sparkless/prelude/index.html) for one-stop imports and optional [config from environment](https://docs.rs/robin-sparkless/latest/robin_sparkless/struct.SparklessConfig.html) for session setup. Results can be returned as JSON for bindings or CLI tools.
+
+```toml
+[dependencies]
+robin-sparkless = "0.11.12"
+```
+
+```rust
+use robin_sparkless::prelude::*;
+
+fn main() -> Result<(), robin_sparkless::EngineError> {
+    // Optional: configure from env (ROBIN_SPARKLESS_WAREHOUSE_DIR, etc.)
+    let config = SparklessConfig::from_env();
+    let spark = SparkSession::from_config(&config);
+
+    let df = spark
+        .create_dataframe(
+            vec![
+                (1i64, 10i64, "a".to_string()),
+                (2i64, 20i64, "b".to_string()),
+                (3i64, 30i64, "c".to_string()),
+            ],
+            vec!["id", "value", "label"],
+        )
+        .map_err(robin_sparkless::EngineError::from)?;
+    let filtered = df
+        .filter(col("id").gt(lit_i64(1).into_expr()).into_expr())
+        .map_err(robin_sparkless::EngineError::from)?;
+    let json = filtered.to_json_rows()?;
+    println!("{}", json);
+    Ok(())
+}
+```
+
+Run the [embed_basic](examples/embed_basic.rs) example: `cargo run --example embed_basic`. For a minimal FFI surface (no Polars types), use `robin_sparkless::prelude::embed`.
+
 ## Development
 
 **Prerequisites:** Rust (see [rust-toolchain.toml](rust-toolchain.toml)).
