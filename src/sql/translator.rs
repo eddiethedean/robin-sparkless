@@ -443,7 +443,6 @@ fn sql_expr_to_polars(
             list,
             negated,
         } => {
-            use polars::prelude::{Series, IntoSeries};
             let col_expr = sql_expr_to_polars(left.as_ref(), session, df, having_agg_map)?;
             if list.is_empty() {
                 return Ok(lit(false));
@@ -547,7 +546,7 @@ fn sql_expr_to_string_literal(expr: &SqlExpr) -> Result<String, PolarsError> {
 
 /// Build a Polars Series from SQL IN list literals (for WHERE col IN (1,2,3)). Issue #590.
 fn sql_in_list_to_series(list: &[SqlExpr]) -> Result<polars::prelude::Series, PolarsError> {
-    use polars::prelude::{IntoSeries, Series};
+    use polars::prelude::Series;
     let mut str_vals: Vec<String> = Vec::new();
     let mut int_vals: Vec<i64> = Vec::new();
     let mut float_vals: Vec<f64> = Vec::new();

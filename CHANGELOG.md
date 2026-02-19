@@ -15,6 +15,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 (none yet)
 
+## [0.12.0] - 2026-02-19
+
+### Added
+
+- **Embedding / bindings helpers** — Expanded surface so downstream bindings (PyO3, Node, CLI) can depend only on robin-sparkless without Polars types in the public API.
+  - **Schema:** `DataType` re-exported from crate root and prelude. `DataFrame::get_column_data_type(name)` returns `Option<schema::DataType>` (Polars-free). `StructType::to_json()` / `to_json_pretty()` serialize schema to JSON. `schema_from_json(json)` parses a schema from a JSON string (e.g. from host).
+  - **EngineError API:** New `*_engine()` methods that return `Result<T, EngineError>` instead of `PolarsError`: on **DataFrame** — `schema_engine`, `columns_engine`, `count_engine`, `select_engine`, `filter_engine`, `with_column_engine`, `group_by_engine`, `limit_engine`, `collect_as_json_rows_engine`; on **SparkSession** — `create_dataframe_engine`, `create_dataframe_from_rows_engine`, `read_csv_engine`, `read_parquet_engine`, `read_json_engine`, `table_engine`. Documented in `docs/EMBEDDING.md` as the recommended embedding API.
+  - **prelude::embed:** Now re-exports `StructType`, `StructField`, `DataType`, `SparklessConfig`, `EngineError`, `DataFrameReader`, and `lit_f64`, `lit_i32` in addition to existing types and functions.
+  - **Traits:** `IntoRobinDf` implemented for `Vec<(i64, String)>` and `Vec<(i64, i64, i64, String)>` (default column names `c0`, `c1`, …). `FromRobinDf` implemented for `Vec<Vec<JsonValue>>` (rows as arrays in column order). `FromRobinDf` for `Vec<HashMap<String, JsonValue>>` now uses `collect_as_json_rows_engine`.
+- **cargo-deny** — Allowed transitive git sources in `deny.toml` (RustCrypto traits/block-ciphers, dropbox rust-alloc-no-stdlib) so `cargo deny check` reports sources ok without warnings.
+
+### Fixed
+
+- **SQL (sql feature)** — Removed unused imports `Series` and `IntoSeries` in `src/sql/translator.rs`, eliminating compiler warnings under `--all-features`.
+
 ## [0.11.12] - 2026-02-19
 
 ### Fixed

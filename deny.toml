@@ -47,4 +47,9 @@ skip = [
 unknown-registry = "warn"
 unknown-git = "warn"
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
-allow-git = []
+# Transitive git deps (aead, aes from RustCrypto; alloc-no-stdlib from dropbox via polars/brotli)
+allow-git = [
+    "https://github.com/RustCrypto/traits",
+    "https://github.com/RustCrypto/block-ciphers",
+    "https://github.com/dropbox/rust-alloc-no-stdlib",
+]
