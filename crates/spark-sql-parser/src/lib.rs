@@ -68,6 +68,7 @@ pub fn parse_sql(query: &str) -> Result<Statement, ParseError> {
         | Statement::ShowViews { .. }
         | Statement::ShowCreate { .. } => {}
         Statement::Insert(_) | Statement::Directory { .. } | Statement::LoadData { .. } => {}
+        Statement::ExplainTable { .. } => {}
         _ => {
             return Err(ParseError(format!(
                 "SQL: statement type not supported, got {:?}.",
@@ -185,4 +186,11 @@ mod tests {
 
     // LOAD DATA is only parsed by dialects that support it (e.g. HiveDialect), not GenericDialect.
     // Statement::LoadData is allowed in the whitelist for when such a dialect is used.
+
+    #[test]
+    fn test_issue_658_describe_table() {
+        // With GenericDialect, TABLE keyword may not be consumed; use table name only
+        let stmt = parse_sql("DESCRIBE t").unwrap();
+        assert!(matches!(stmt, Statement::ExplainTable { .. }));
+    }
 }
