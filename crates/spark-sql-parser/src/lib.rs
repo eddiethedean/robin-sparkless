@@ -46,6 +46,13 @@ pub fn parse_sql(query: &str) -> Result<Statement, ParseError> {
         } => {}
         Statement::DropFunction(_) => {}
         Statement::Use(_) | Statement::Truncate(_) | Statement::Declare { .. } => {}
+        Statement::ShowTables { .. }
+        | Statement::ShowDatabases { .. }
+        | Statement::ShowSchemas { .. }
+        | Statement::ShowFunctions { .. }
+        | Statement::ShowColumns { .. }
+        | Statement::ShowViews { .. }
+        | Statement::ShowCreate { .. } => {}
         _ => {
             return Err(ParseError(format!(
                 "SQL: statement type not supported, got {:?}.",
@@ -123,5 +130,29 @@ mod tests {
         // sqlparser Declare is for cursor/statement list; variable declaration may differ
         let stmt = parse_sql("DECLARE c CURSOR FOR SELECT 1").unwrap();
         assert!(matches!(stmt, Statement::Declare { .. }));
+    }
+
+    #[test]
+    fn test_issue_656_show_tables() {
+        let stmt = parse_sql("SHOW TABLES").unwrap();
+        assert!(matches!(stmt, Statement::ShowTables { .. }));
+    }
+
+    #[test]
+    fn test_issue_656_show_databases() {
+        let stmt = parse_sql("SHOW DATABASES").unwrap();
+        assert!(matches!(stmt, Statement::ShowDatabases { .. }));
+    }
+
+    #[test]
+    fn test_issue_656_show_functions() {
+        let stmt = parse_sql("SHOW FUNCTIONS").unwrap();
+        assert!(matches!(stmt, Statement::ShowFunctions { .. }));
+    }
+
+    #[test]
+    fn test_issue_656_show_columns() {
+        let stmt = parse_sql("SHOW COLUMNS FROM t").unwrap();
+        assert!(matches!(stmt, Statement::ShowColumns { .. }));
     }
 }
