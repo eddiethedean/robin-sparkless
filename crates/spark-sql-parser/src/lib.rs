@@ -53,6 +53,7 @@ pub fn parse_sql(query: &str) -> Result<Statement, ParseError> {
         | Statement::ShowColumns { .. }
         | Statement::ShowViews { .. }
         | Statement::ShowCreate { .. } => {}
+        Statement::Insert(_) | Statement::Directory { .. } | Statement::LoadData { .. } => {}
         _ => {
             return Err(ParseError(format!(
                 "SQL: statement type not supported, got {:?}.",
@@ -155,4 +156,19 @@ mod tests {
         let stmt = parse_sql("SHOW COLUMNS FROM t").unwrap();
         assert!(matches!(stmt, Statement::ShowColumns { .. }));
     }
+
+    #[test]
+    fn test_issue_657_insert() {
+        let stmt = parse_sql("INSERT INTO t SELECT 1").unwrap();
+        assert!(matches!(stmt, Statement::Insert(_)));
+    }
+
+    #[test]
+    fn test_issue_657_directory() {
+        let stmt = parse_sql("INSERT OVERWRITE DIRECTORY '/path' SELECT 1").unwrap();
+        assert!(matches!(stmt, Statement::Directory { .. }));
+    }
+
+    // LOAD DATA is only parsed by dialects that support it (e.g. HiveDialect), not GenericDialect.
+    // Statement::LoadData is allowed in the whitelist for when such a dialect is used.
 }
