@@ -33,6 +33,8 @@ test: test-rust
 
 # Run all Rust checks. Fast steps first (fmt, audit, deny), then one compile: clippy --all-targets
 # builds lib + tests with all features; cargo test reuses that and only runs tests.
+# Cargo is incremental: only crates with changed sources (or dependents) recompile. Avoid
+# "cargo clean" so repeated "make check" reuses the previous build where possible.
 check: fmt-check audit deny clippy test-rust-all-features
 	@echo "All checks passed"
 
