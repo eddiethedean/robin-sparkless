@@ -85,145 +85,256 @@ pub fn parse_sql(query: &str) -> Result<Statement, ParseError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sqlparser::ast::Statement;
+    use sqlparser::ast::{ObjectType, Statement};
+
+    /// Assert that `sql` parses to the given statement variant.
+    fn assert_parses_to<F>(sql: &str, check: F)
+    where
+        F: FnOnce(&Statement) -> bool,
+    {
+        let stmt = parse_sql(sql).unwrap_or_else(|e| panic!("parse_sql failed: {e}"));
+        assert!(check(&stmt), "expected match for: {sql}");
+    }
+
+    // --- Error handling ---
+
+    #[test]
+    fn error_multiple_statements() {
+        let err = parse_sql("SELECT 1; SELECT 2").unwrap_err();
+        assert!(err.0.contains("expected exactly one statement"));
+        assert!(err.0.contains("2"));
+    }
+
+    #[test]
+    fn error_zero_statements() {
+        let err = parse_sql("").unwrap_err();
+        assert!(err.0.contains("expected exactly one statement") || err.0.contains("parse error"));
+    }
+
+    #[test]
+    fn error_unsupported_statement_type() {
+        // UPDATE is parsed by sqlparser but not in our whitelist
+        let err = parse_sql("UPDATE t SET x = 1").unwrap_err();
+        assert!(err.0.contains("not supported"));
+    }
+
+    #[test]
+    fn error_syntax() {
+        let err = parse_sql("SELECT FROM").unwrap_err();
+        assert!(!err.0.is_empty());
+    }
+
+    // --- Queries ---
+
+    #[test]
+    fn query_select_simple() {
+        assert_parses_to("SELECT 1", |s| matches!(s, Statement::Query(_)));
+    }
+
+    #[test]
+    fn query_select_with_from() {
+        assert_parses_to("SELECT a FROM t", |s| matches!(s, Statement::Query(_)));
+    }
+
+    #[test]
+    fn query_with_cte() {
+        assert_parses_to("WITH cte AS (SELECT 1) SELECT * FROM cte", |s| matches!(s, Statement::Query(_)));
+    }
+
+    #[test]
+    fn query_create_schema() {
+        assert_parses_to("CREATE SCHEMA s", |s| matches!(s, Statement::CreateSchema { .. }));
+    }
+
+    #[test]
+    fn query_create_database() {
+        assert_parses_to("CREATE DATABASE d", |s| matches!(s, Statement::CreateDatabase { .. }));
+    }
+
+    // --- DDL: CREATE (issue #652) ---
 
     #[test]
     fn test_issue_652_create_table() {
-        let stmt = parse_sql("CREATE TABLE t (a INT)").unwrap();
-        assert!(matches!(stmt, Statement::CreateTable(_)));
+        assert_parses_to("CREATE TABLE t (a INT)", |s| matches!(s, Statement::CreateTable(_)));
     }
 
     #[test]
     fn test_issue_652_create_view() {
-        let stmt = parse_sql("CREATE VIEW v AS SELECT 1").unwrap();
-        assert!(matches!(stmt, Statement::CreateView(_)));
+        assert_parses_to("CREATE VIEW v AS SELECT 1", |s| matches!(s, Statement::CreateView(_)));
     }
 
     #[test]
     fn test_issue_652_create_function() {
-        // sqlparser expects parentheses for the parameter list (possibly empty)
-        let stmt = parse_sql("CREATE FUNCTION f() AS 'com.example.UDF'").unwrap();
-        assert!(matches!(stmt, Statement::CreateFunction(_)));
+        assert_parses_to(
+            "CREATE FUNCTION f() AS 'com.example.UDF'",
+            |s| matches!(s, Statement::CreateFunction(_)),
+        );
     }
+
+    // --- DDL: ALTER (issue #653) ---
 
     #[test]
     fn test_issue_653_alter_table() {
-        let stmt = parse_sql("ALTER TABLE t ADD COLUMN c INT").unwrap();
-        assert!(matches!(stmt, Statement::AlterTable(_)));
+        assert_parses_to("ALTER TABLE t ADD COLUMN c INT", |s| matches!(s, Statement::AlterTable(_)));
     }
 
     #[test]
     fn test_issue_653_alter_view() {
-        let stmt = parse_sql("ALTER VIEW v AS SELECT 1").unwrap();
-        assert!(matches!(stmt, Statement::AlterView { .. }));
+        assert_parses_to("ALTER VIEW v AS SELECT 1", |s| matches!(s, Statement::AlterView { .. }));
     }
 
     #[test]
     fn test_issue_653_alter_schema() {
-        // sqlparser expects an operation like RENAME; SET LOCATION may not be supported
-        let stmt = parse_sql("ALTER SCHEMA db RENAME TO db2").unwrap();
-        assert!(matches!(stmt, Statement::AlterSchema(_)));
+        assert_parses_to(
+            "ALTER SCHEMA db RENAME TO db2",
+            |s| matches!(s, Statement::AlterSchema(_)),
+        );
+    }
+
+    // --- DDL: DROP (issue #654) ---
+
+    #[test]
+    fn test_issue_654_drop_table() {
+        let stmt = parse_sql("DROP TABLE t").unwrap();
+        match &stmt {
+            Statement::Drop { object_type: ObjectType::Table, .. } => {}
+            _ => panic!("expected Drop Table: {stmt:?}"),
+        }
+    }
+
+    #[test]
+    fn test_issue_654_drop_view() {
+        let stmt = parse_sql("DROP VIEW v").unwrap();
+        match &stmt {
+            Statement::Drop { object_type: ObjectType::View, .. } => {}
+            _ => panic!("expected Drop View: {stmt:?}"),
+        }
+    }
+
+    #[test]
+    fn test_issue_654_drop_schema() {
+        let stmt = parse_sql("DROP SCHEMA s").unwrap();
+        match &stmt {
+            Statement::Drop { object_type: ObjectType::Schema, .. } => {}
+            _ => panic!("expected Drop Schema: {stmt:?}"),
+        }
     }
 
     #[test]
     fn test_issue_654_drop_function() {
-        // DROP DATABASE is already supported via Drop(Schema)
-        let stmt = parse_sql("DROP FUNCTION f").unwrap();
-        assert!(matches!(stmt, Statement::DropFunction(_)));
+        assert_parses_to("DROP FUNCTION f", |s| matches!(s, Statement::DropFunction(_)));
     }
+
+    // --- Utility: USE, TRUNCATE, DECLARE (issue #655) ---
 
     #[test]
     fn test_issue_655_use() {
-        let stmt = parse_sql("USE db1").unwrap();
-        assert!(matches!(stmt, Statement::Use(_)));
+        assert_parses_to("USE db1", |s| matches!(s, Statement::Use(_)));
     }
 
     #[test]
     fn test_issue_655_truncate() {
-        let stmt = parse_sql("TRUNCATE TABLE t").unwrap();
-        assert!(matches!(stmt, Statement::Truncate(_)));
+        assert_parses_to("TRUNCATE TABLE t", |s| matches!(s, Statement::Truncate(_)));
     }
 
     #[test]
     fn test_issue_655_declare() {
-        // sqlparser Declare is for cursor/statement list; variable declaration may differ
-        let stmt = parse_sql("DECLARE c CURSOR FOR SELECT 1").unwrap();
-        assert!(matches!(stmt, Statement::Declare { .. }));
+        assert_parses_to(
+            "DECLARE c CURSOR FOR SELECT 1",
+            |s| matches!(s, Statement::Declare { .. }),
+        );
     }
+
+    // --- SHOW (issue #656) ---
 
     #[test]
     fn test_issue_656_show_tables() {
-        let stmt = parse_sql("SHOW TABLES").unwrap();
-        assert!(matches!(stmt, Statement::ShowTables { .. }));
+        assert_parses_to("SHOW TABLES", |s| matches!(s, Statement::ShowTables { .. }));
     }
 
     #[test]
     fn test_issue_656_show_databases() {
-        let stmt = parse_sql("SHOW DATABASES").unwrap();
-        assert!(matches!(stmt, Statement::ShowDatabases { .. }));
+        assert_parses_to("SHOW DATABASES", |s| matches!(s, Statement::ShowDatabases { .. }));
+    }
+
+    #[test]
+    fn test_issue_656_show_schemas() {
+        assert_parses_to("SHOW SCHEMAS", |s| matches!(s, Statement::ShowSchemas { .. }));
     }
 
     #[test]
     fn test_issue_656_show_functions() {
-        let stmt = parse_sql("SHOW FUNCTIONS").unwrap();
-        assert!(matches!(stmt, Statement::ShowFunctions { .. }));
+        assert_parses_to("SHOW FUNCTIONS", |s| matches!(s, Statement::ShowFunctions { .. }));
     }
 
     #[test]
     fn test_issue_656_show_columns() {
-        let stmt = parse_sql("SHOW COLUMNS FROM t").unwrap();
-        assert!(matches!(stmt, Statement::ShowColumns { .. }));
+        assert_parses_to("SHOW COLUMNS FROM t", |s| matches!(s, Statement::ShowColumns { .. }));
     }
 
     #[test]
+    fn test_issue_656_show_views() {
+        assert_parses_to("SHOW VIEWS", |s| matches!(s, Statement::ShowViews { .. }));
+    }
+
+    #[test]
+    fn test_issue_656_show_create_table() {
+        assert_parses_to("SHOW CREATE TABLE t", |s| matches!(s, Statement::ShowCreate { .. }));
+    }
+
+    // --- INSERT / DIRECTORY (issue #657) ---
+
+    #[test]
     fn test_issue_657_insert() {
-        let stmt = parse_sql("INSERT INTO t SELECT 1").unwrap();
-        assert!(matches!(stmt, Statement::Insert(_)));
+        assert_parses_to("INSERT INTO t SELECT 1", |s| matches!(s, Statement::Insert(_)));
     }
 
     #[test]
     fn test_issue_657_directory() {
-        let stmt = parse_sql("INSERT OVERWRITE DIRECTORY '/path' SELECT 1").unwrap();
-        assert!(matches!(stmt, Statement::Directory { .. }));
+        assert_parses_to(
+            "INSERT OVERWRITE DIRECTORY '/path' SELECT 1",
+            |s| matches!(s, Statement::Directory { .. }),
+        );
     }
 
-    // LOAD DATA is only parsed by dialects that support it (e.g. HiveDialect), not GenericDialect.
-    // Statement::LoadData is allowed in the whitelist for when such a dialect is used.
+    // --- DESCRIBE (issue #658) ---
 
     #[test]
     fn test_issue_658_describe_table() {
-        // With GenericDialect, TABLE keyword may not be consumed; use table name only
-        let stmt = parse_sql("DESCRIBE t").unwrap();
-        assert!(matches!(stmt, Statement::ExplainTable { .. }));
+        assert_parses_to("DESCRIBE t", |s| matches!(s, Statement::ExplainTable { .. }));
     }
+
+    // --- SET, RESET, CACHE, UNCACHE (issue #659) ---
 
     #[test]
     fn test_issue_659_set() {
-        let stmt = parse_sql("SET x = 1").unwrap();
-        assert!(matches!(stmt, Statement::Set(_)));
+        assert_parses_to("SET x = 1", |s| matches!(s, Statement::Set(_)));
     }
 
     #[test]
     fn test_issue_659_reset() {
-        let stmt = parse_sql("RESET x").unwrap();
-        assert!(matches!(stmt, Statement::Reset(_)));
+        assert_parses_to("RESET x", |s| matches!(s, Statement::Reset(_)));
     }
 
     #[test]
     fn test_issue_659_cache() {
-        let stmt = parse_sql("CACHE TABLE t").unwrap();
-        assert!(matches!(stmt, Statement::Cache { .. }));
+        assert_parses_to("CACHE TABLE t", |s| matches!(s, Statement::Cache { .. }));
     }
 
     #[test]
     fn test_issue_659_uncache() {
-        let stmt = parse_sql("UNCACHE TABLE t").unwrap();
-        assert!(matches!(stmt, Statement::UNCache { .. }));
+        assert_parses_to("UNCACHE TABLE t", |s| matches!(s, Statement::UNCache { .. }));
     }
 
     #[test]
+    fn test_issue_659_uncache_if_exists() {
+        assert_parses_to("UNCACHE TABLE IF EXISTS t", |s| matches!(s, Statement::UNCache { .. }));
+    }
+
+    // --- EXPLAIN (issue #660) ---
+
+    #[test]
     fn test_issue_660_explain() {
-        let stmt = parse_sql("EXPLAIN SELECT 1").unwrap();
-        assert!(matches!(stmt, Statement::Explain { .. }));
+        assert_parses_to("EXPLAIN SELECT 1", |s| matches!(s, Statement::Explain { .. }));
     }
 }
