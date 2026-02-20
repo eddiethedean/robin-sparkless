@@ -3,8 +3,8 @@
 //! Covers: filter with between(lower, upper), withColumn with power/**,
 //! groupBy with aggs (sum, count).
 
-use robin_sparkless::plan;
 use robin_sparkless::SparkSession;
+use robin_sparkless::plan;
 use serde_json::json;
 
 fn spark() -> SparkSession {
@@ -77,8 +77,14 @@ fn plan_groupby_sum() {
     let df = plan::execute_plan(&spark, rows, schema, &plan_steps).unwrap();
     let out = df.collect_as_json_rows_engine().unwrap();
     assert_eq!(out.len(), 2);
-    let g1 = out.iter().find(|r| r.get("grp").and_then(|v| v.as_str()) == Some("G1")).unwrap();
-    let g2 = out.iter().find(|r| r.get("grp").and_then(|v| v.as_str()) == Some("G2")).unwrap();
+    let g1 = out
+        .iter()
+        .find(|r| r.get("grp").and_then(|v| v.as_str()) == Some("G1"))
+        .unwrap();
+    let g2 = out
+        .iter()
+        .find(|r| r.get("grp").and_then(|v| v.as_str()) == Some("G2"))
+        .unwrap();
     assert_eq!(g1.get("total").and_then(|v| v.as_i64()), Some(30));
     assert_eq!(g2.get("total").and_then(|v| v.as_i64()), Some(30));
 }

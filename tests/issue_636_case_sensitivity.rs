@@ -2,8 +2,8 @@
 //!
 //! Column names in plan resolve case-insensitively (e.g. col("ID") when schema has "id").
 
-use robin_sparkless::plan;
 use robin_sparkless::SparkSession;
+use robin_sparkless::plan;
 use serde_json::json;
 
 fn spark() -> SparkSession {
@@ -20,10 +20,7 @@ fn plan_filter_case_insensitive_column_ref() {
         ("id".to_string(), "bigint".to_string()),
         ("name".to_string(), "string".to_string()),
     ];
-    let rows = vec![
-        vec![json!(1), json!("a")],
-        vec![json!(2), json!("b")],
-    ];
+    let rows = vec![vec![json!(1), json!("a")], vec![json!(2), json!("b")]];
     let plan_steps = vec![json!({
         "op": "filter",
         "payload": {"op": "gt", "left": {"col": "ID"}, "right": {"lit": 1}}

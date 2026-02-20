@@ -1,7 +1,7 @@
 //! Tests for PR7: Window row_number in plan (Fixes #642).
 
-use robin_sparkless::plan;
 use robin_sparkless::SparkSession;
+use robin_sparkless::plan;
 use serde_json::json;
 
 fn spark() -> SparkSession {
