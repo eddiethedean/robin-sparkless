@@ -2,8 +2,8 @@
 //!
 //! Plan join (inner, left, right, outer) must return correct row counts.
 
-use robin_sparkless::plan;
 use robin_sparkless::SparkSession;
+use robin_sparkless::plan;
 use serde_json::json;
 
 fn spark() -> SparkSession {
@@ -47,10 +47,7 @@ fn plan_join_inner_row_count() {
 #[test]
 fn plan_join_left_row_count() {
     let spark = spark();
-    let left_data = vec![
-        vec![json!(1), json!(10)],
-        vec![json!(2), json!(99)],
-    ];
+    let left_data = vec![vec![json!(1), json!(10)], vec![json!(2), json!(99)]];
     let left_schema = vec![
         ("id".to_string(), "bigint".to_string()),
         ("fk".to_string(), "bigint".to_string()),
@@ -70,5 +67,9 @@ fn plan_join_left_row_count() {
     })];
     let df = plan::execute_plan(&spark, left_data, left_schema, &plan_steps).unwrap();
     let out = df.collect_as_json_rows_engine().unwrap();
-    assert_eq!(out.len(), 2, "left join: 2 left rows (fk=99 has null right)");
+    assert_eq!(
+        out.len(),
+        2,
+        "left join: 2 left rows (fk=99 has null right)"
+    );
 }

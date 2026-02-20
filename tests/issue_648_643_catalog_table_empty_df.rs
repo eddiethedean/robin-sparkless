@@ -3,8 +3,8 @@
 //! Empty DataFrame with schema: saveAsTable then table() returns 0 rows;
 //! temp view name resolution.
 
-use robin_sparkless::SparkSession;
 use robin_sparkless::SaveMode;
+use robin_sparkless::SparkSession;
 use serde_json::json;
 
 fn spark() -> SparkSession {
