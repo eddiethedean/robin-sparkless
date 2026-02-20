@@ -3,15 +3,16 @@
 //! These tests verify that robin-sparkless returns appropriate errors
 //! for invalid operations and edge cases.
 
+mod common;
+
+use common::spark;
 use polars::prelude::PolarsError;
 use robin_sparkless::functions::col;
-use robin_sparkless::{DataFrame, JoinType, SparkSession};
+use robin_sparkless::{DataFrame, JoinType};
 
 /// Helper to create a simple test DataFrame
 fn test_df() -> DataFrame {
-    let spark = SparkSession::builder()
-        .app_name("error_tests")
-        .get_or_create();
+    let spark = spark();
     let tuples = vec![
         (1i64, 25i64, "Alice".to_string()),
         (2i64, 35i64, "Bob".to_string()),
@@ -144,9 +145,7 @@ fn test_multiple_operations_on_same_dataframe() {
 
 #[test]
 fn test_join_nonexistent_column_error() {
-    let spark = SparkSession::builder()
-        .app_name("error_tests")
-        .get_or_create();
+    let spark = spark();
     let left = spark
         .create_dataframe(
             vec![(1i64, 10i64, "a".to_string())],
@@ -180,9 +179,7 @@ fn test_limit_zero_returns_empty() {
 
 #[test]
 fn test_union_with_empty_dataframe() {
-    let spark = SparkSession::builder()
-        .app_name("error_tests")
-        .get_or_create();
+    let spark = spark();
     let non_empty = spark
         .create_dataframe(
             vec![(1i64, 25i64, "Alice".to_string())],
