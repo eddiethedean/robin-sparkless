@@ -41,7 +41,7 @@ serde_json = "1.0"
 anyhow = "1.0"
 thiserror = "2.0"
 spark-ddl-parser = { version = "0.1", optional = false }
-spark-sql-parser = { version = "0.1", path = "crates/spark-sql-parser", optional = true }
+spark-sql-parser = { version = "0.2", path = "crates/spark-sql-parser", optional = true }
 sqlparser = { version = "0.61", optional = true }
 deltalake = { version = "0.31", optional = true }
 tokio = { version = "1", optional = true, features = ["rt", "rt-multi-thread", "fs", "io-util"] }
