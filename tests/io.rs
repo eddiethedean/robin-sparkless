@@ -6,10 +6,10 @@ mod common;
 
 use common::spark;
 use polars::prelude::DataType;
-use robin_sparkless::plan;
-use robin_sparkless::schema::schema_from_json;
-use robin_sparkless::schema::StructType;
 use robin_sparkless::DataFrame;
+use robin_sparkless::plan;
+use robin_sparkless::schema::StructType;
+use robin_sparkless::schema::schema_from_json;
 use serde_json::json;
 use std::fs;
 use std::io::Write;
@@ -183,7 +183,10 @@ fn write_and_read_delta_round_trip_core() {
         panic!("unexpected error from write_delta: {msg}");
     }
 
-    assert!(fs::metadata(&path).is_ok(), "delta path should exist after write");
+    assert!(
+        fs::metadata(&path).is_ok(),
+        "delta path should exist after write"
+    );
 
     let back = spark.read_delta_from_path(&path);
     let back = match back {

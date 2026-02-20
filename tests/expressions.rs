@@ -8,9 +8,9 @@ mod common;
 use chrono::NaiveDate;
 use common::spark;
 use polars::prelude::{DataType, NamedFrom, Series};
-use robin_sparkless::plan;
 use robin_sparkless::functions::{col, create_map, lit_i64, lit_str, named_struct, substring};
-use robin_sparkless::{cast, try_cast, DataFrame};
+use robin_sparkless::plan;
+use robin_sparkless::{DataFrame, cast, try_cast};
 use serde_json::json;
 
 // ---------- issue_235 (helpers: no common) ----------
@@ -190,7 +190,10 @@ fn issue_541_rust_api_with_field() {
         .unwrap();
     let rows = extracted.collect_as_json_rows().unwrap();
     assert_eq!(rows.len(), 1);
-    assert_eq!(rows[0].get("value_1_out").and_then(|v| v.as_i64()), Some(99));
+    assert_eq!(
+        rows[0].get("value_1_out").and_then(|v| v.as_i64()),
+        Some(99)
+    );
 }
 
 #[test]
@@ -230,7 +233,10 @@ fn issue_541_plan_with_field() {
     let df = plan::execute_plan(&session, data, schema, &plan).unwrap();
     let rows = df.collect_as_json_rows().unwrap();
     assert_eq!(rows.len(), 1);
-    assert_eq!(rows[0].get("value_1_out").and_then(|v| v.as_i64()), Some(99));
+    assert_eq!(
+        rows[0].get("value_1_out").and_then(|v| v.as_i64()),
+        Some(99)
+    );
 }
 
 // ---------- issue_542 ----------
@@ -641,7 +647,10 @@ fn plan_filter_isin_op_string() {
         .iter()
         .filter_map(|r| r.get("name").and_then(|v| v.as_str()).map(String::from))
         .collect();
-    assert_eq!(names, ["alice".into(), "carol".into()].into_iter().collect());
+    assert_eq!(
+        names,
+        ["alice".into(), "carol".into()].into_iter().collect()
+    );
 }
 
 // ---------- issue_555 ----------
