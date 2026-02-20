@@ -65,7 +65,10 @@ impl From<PolarsError> for EngineError {
                 // Fixes #646: surface clear message when filter predicate is not Boolean.
                 let lower = msg.to_lowercase();
                 if lower.contains("filter") || lower.contains("predicate") {
-                    if lower.contains("boolean") || lower.contains("bool") || lower.contains("string") {
+                    if lower.contains("boolean")
+                        || lower.contains("bool")
+                        || lower.contains("string")
+                    {
                         return EngineError::User(format!(
                             "filter predicate must be Boolean, got non-Boolean expression: {}",
                             msg

@@ -3,8 +3,8 @@
 //! Covers: plan "filter" with isin (op and fn forms), empty list → 0 rows,
 //! Int64 column isin(lit values), string column isin(lit values).
 
-use robin_sparkless::plan;
 use robin_sparkless::SparkSession;
+use robin_sparkless::plan;
 use serde_json::json;
 
 fn spark() -> SparkSession {
@@ -36,11 +36,7 @@ fn plan_filter_isin_op_int64() {
 fn plan_filter_isin_fn_int64() {
     let spark = spark();
     let schema = vec![("id".to_string(), "bigint".to_string())];
-    let rows = vec![
-        vec![json!(10)],
-        vec![json!(20)],
-        vec![json!(30)],
-    ];
+    let rows = vec![vec![json!(10)], vec![json!(20)], vec![json!(30)]];
     let plan = vec![json!({
         "op": "filter",
         "payload": {"fn": "isin", "args": [{"col": "id"}, {"lit": 10}, {"lit": 30}]}
@@ -92,5 +88,8 @@ fn plan_filter_isin_op_string() {
         .iter()
         .filter_map(|r| r.get("name").and_then(|v| v.as_str()).map(String::from))
         .collect();
-    assert_eq!(names, ["alice".into(), "carol".into()].into_iter().collect());
+    assert_eq!(
+        names,
+        ["alice".into(), "carol".into()].into_iter().collect()
+    );
 }

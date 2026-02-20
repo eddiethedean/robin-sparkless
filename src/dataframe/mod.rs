@@ -9,8 +9,8 @@ pub use aggregations::{CubeRollupData, GroupedData, PivotedGroupedData};
 pub use joins::{JoinType, join};
 pub use stats::DataFrameStat;
 pub use transformations::{
-    DataFrameNa, filter, order_by, order_by_exprs, select, select_items, select_with_exprs,
-    SelectItem, with_column,
+    DataFrameNa, SelectItem, filter, order_by, order_by_exprs, select, select_items,
+    select_with_exprs, with_column,
 };
 
 use crate::column::Column;

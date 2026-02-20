@@ -28,9 +28,9 @@ pub fn expr_from_value(v: &Value) -> Result<Expr, PlanExprError> {
         return Ok(col(name));
     }
 
-    let obj = v
-        .as_object()
-        .ok_or_else(|| PlanExprError("expression must be a JSON object or column name string".to_string()))?;
+    let obj = v.as_object().ok_or_else(|| {
+        PlanExprError("expression must be a JSON object or column name string".to_string())
+    })?;
 
     // Column reference: {"col": "name"}
     if let Some(name) = obj.get("col").and_then(Value::as_str) {
