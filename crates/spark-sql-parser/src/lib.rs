@@ -36,6 +36,7 @@ pub fn parse_sql(query: &str) -> Result<Statement, ParseError> {
         Statement::Query(_) => {}
         Statement::CreateSchema { .. } | Statement::CreateDatabase { .. } => {}
         Statement::CreateTable(_) | Statement::CreateView(_) | Statement::CreateFunction(_) => {}
+        Statement::AlterTable(_) | Statement::AlterView { .. } | Statement::AlterSchema(_) => {}
         Statement::Drop {
             object_type:
                 sqlparser::ast::ObjectType::Table
@@ -75,5 +76,24 @@ mod tests {
         // sqlparser expects parentheses for the parameter list (possibly empty)
         let stmt = parse_sql("CREATE FUNCTION f() AS 'com.example.UDF'").unwrap();
         assert!(matches!(stmt, Statement::CreateFunction(_)));
+    }
+
+    #[test]
+    fn test_issue_653_alter_table() {
+        let stmt = parse_sql("ALTER TABLE t ADD COLUMN c INT").unwrap();
+        assert!(matches!(stmt, Statement::AlterTable(_)));
+    }
+
+    #[test]
+    fn test_issue_653_alter_view() {
+        let stmt = parse_sql("ALTER VIEW v AS SELECT 1").unwrap();
+        assert!(matches!(stmt, Statement::AlterView { .. }));
+    }
+
+    #[test]
+    fn test_issue_653_alter_schema() {
+        // sqlparser expects an operation like RENAME; SET LOCATION may not be supported
+        let stmt = parse_sql("ALTER SCHEMA db RENAME TO db2").unwrap();
+        assert!(matches!(stmt, Statement::AlterSchema(_)));
     }
 }
