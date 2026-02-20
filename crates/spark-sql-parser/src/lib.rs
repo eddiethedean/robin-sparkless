@@ -45,6 +45,7 @@ pub fn parse_sql(query: &str) -> Result<Statement, ParseError> {
             ..
         } => {}
         Statement::DropFunction(_) => {}
+        Statement::Use(_) | Statement::Truncate(_) | Statement::Declare { .. } => {}
         _ => {
             return Err(ParseError(format!(
                 "SQL: statement type not supported, got {:?}.",
@@ -103,5 +104,24 @@ mod tests {
         // DROP DATABASE is already supported via Drop(Schema)
         let stmt = parse_sql("DROP FUNCTION f").unwrap();
         assert!(matches!(stmt, Statement::DropFunction(_)));
+    }
+
+    #[test]
+    fn test_issue_655_use() {
+        let stmt = parse_sql("USE db1").unwrap();
+        assert!(matches!(stmt, Statement::Use(_)));
+    }
+
+    #[test]
+    fn test_issue_655_truncate() {
+        let stmt = parse_sql("TRUNCATE TABLE t").unwrap();
+        assert!(matches!(stmt, Statement::Truncate(_)));
+    }
+
+    #[test]
+    fn test_issue_655_declare() {
+        // sqlparser Declare is for cursor/statement list; variable declaration may differ
+        let stmt = parse_sql("DECLARE c CURSOR FOR SELECT 1").unwrap();
+        assert!(matches!(stmt, Statement::Declare { .. }));
     }
 }
