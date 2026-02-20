@@ -9,7 +9,8 @@ pub use aggregations::{CubeRollupData, GroupedData, PivotedGroupedData};
 pub use joins::{JoinType, join};
 pub use stats::DataFrameStat;
 pub use transformations::{
-    DataFrameNa, filter, order_by, order_by_exprs, select, select_with_exprs, with_column,
+    DataFrameNa, filter, order_by, order_by_exprs, select, select_items, select_with_exprs,
+    SelectItem, with_column,
 };
 
 use crate::column::Column;
@@ -651,6 +652,11 @@ impl DataFrame {
     /// Same as [`select`](Self::select) but returns [`EngineError`]. Use in bindings to avoid Polars.
     pub fn select_engine(&self, cols: Vec<&str>) -> Result<DataFrame, EngineError> {
         self.select(cols).map_err(EngineError::from)
+    }
+
+    /// Select using a mix of column names and expressions (PySpark: select("a", col("b").alias("x"))).
+    pub fn select_items(&self, items: Vec<SelectItem<'_>>) -> Result<DataFrame, PolarsError> {
+        transformations::select_items(self, items, self.case_sensitive)
     }
 
     /// Filter rows using a Polars expression.

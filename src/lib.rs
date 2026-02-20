@@ -61,8 +61,8 @@ pub mod delta;
 
 pub use config::SparklessConfig;
 pub use dataframe::{
-    CubeRollupData, DataFrame, GroupedData, JoinType, PivotedGroupedData, SaveMode, WriteFormat,
-    WriteMode,
+    CubeRollupData, DataFrame, GroupedData, JoinType, PivotedGroupedData, SaveMode, SelectItem,
+    WriteFormat, WriteMode,
 };
 pub use error::EngineError;
 pub use functions::{SortOrder, *};

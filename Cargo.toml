@@ -38,39 +38,18 @@ serde = { version = "1.0", features = ["derive"] }
 chrono = "0.4"
 chrono-tz = "0.9"
 serde_json = "1.0"
-anyhow = "1.0"
-thiserror = "2.0"
-spark-ddl-parser = { version = "0.1", optional = false }
 spark-sql-parser = { version = "0.2", path = "crates/spark-sql-parser", optional = true }
 sqlparser = { version = "0.61", optional = true }
 deltalake = { version = "0.31", optional = true }
 tokio = { version = "1", optional = true, features = ["rt", "rt-multi-thread", "fs", "io-util"] }
 url = "2"
-# URL encode/decode
-percent-encoding = "2"
-# String UDFs and list helpers (used in map closures)
-strsim = "0.11"
-crc32fast = "1.4"
-twox-hash = "1.6"
-murmur3 = "0.5"
-soundex = "0.2"
 # Pin to address RUSTSEC-2026-0007 (integer overflow in BytesMut::reserve; transitive via polars/deltalake)
 bytes = "1.11.1"
 # colRegex (column name pattern matching)
 regex = "1.12"
-# regexp_extract with lookahead/lookbehind (PySpark parity)
-fancy-regex = "0.13"
-# base64, binary hashes, encode/decode
-base64 = "0.22"
-hex = "0.4"
-sha1 = "0.10"
-sha2 = "0.10"
-md5 = "0.7"
 # rand/randn with seed support
 rand = "0.8"
 rand_distr = "0.4"
-# AES crypto (PySpark aes_encrypt/aes_decrypt)
-aes-gcm = "0.10"
 
 # Use git sources when crates.io/cache is broken (e.g. "no targets specified" in manifest,
 # or missing example bin in published tarball).

@@ -19,11 +19,18 @@ impl fmt::Display for PlanExprError {
 impl Error for PlanExprError {}
 
 /// Convert a serialized expression tree (JSON Value) into a Polars Expr.
-/// Supports: col, lit, comparison ops (eq, ne, gt, ge, lt, le), logical (and, or), not, and a subset of functions.
+/// Supports: bare string (column reference), col, lit, comparison ops (eq, ne, gt, ge, lt, le),
+/// logical (and, or), not, and a subset of functions.
+/// (Fixes #644: accept bare string as column reference so embedders can pass column names.)
 pub fn expr_from_value(v: &Value) -> Result<Expr, PlanExprError> {
+    // Bare string: treat as column reference (PySpark parity: select/filter with column name).
+    if let Some(name) = v.as_str() {
+        return Ok(col(name));
+    }
+
     let obj = v
         .as_object()
-        .ok_or_else(|| PlanExprError("expression must be a JSON object".to_string()))?;
+        .ok_or_else(|| PlanExprError("expression must be a JSON object or column name string".to_string()))?;
 
     // Column reference: {"col": "name"}
     if let Some(name) = obj.get("col").and_then(Value::as_str) {
@@ -2577,6 +2584,14 @@ fn require_args_min(name: &str, args: &[Value], n: usize) -> Result<(), PlanExpr
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn test_bare_string_column_ref() {
+        // Fixes #644: bare string as column reference
+        let v = json!("age");
+        let e = expr_from_value(&v).unwrap();
+        assert!(matches!(e, polars::prelude::Expr::Column(_)));
+    }
 
     #[test]
     fn test_col() {
