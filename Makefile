@@ -1,4 +1,5 @@
 .PHONY: build build-release build-all-features test test-rust check check-full check-crate fmt fmt-check clippy audit outdated deny \
+	clean \
 	test-parity-phase-a test-parity-phase-b test-parity-phase-c test-parity-phase-d \
 	test-parity-phase-e test-parity-phase-f test-parity-phase-g test-parity-phases \
 	sparkless-parity all
@@ -31,12 +32,16 @@ test-rust-all-features:
 # Run all tests (Rust only)
 test: test-rust
 
-# Run all Rust checks. Fast steps first (fmt, audit, deny), then one compile: clippy --all-targets
-# builds lib + tests with all features; cargo test reuses that and only runs tests.
-# Cargo is incremental: only crates with changed sources (or dependents) recompile. Avoid
-# "cargo clean" so repeated "make check" reuses the previous build where possible.
-check: fmt-check audit deny clippy test-rust-all-features
+# Run all Rust checks. Clean first so old binaries don't accumulate (each run is a full rebuild).
+# Then fast steps (fmt, audit, deny), then one compile: clippy --all-targets builds lib + tests
+# with all features; cargo test reuses that and only runs tests.
+check: clean fmt-check audit deny clippy test-rust-all-features
 	@echo "All checks passed"
+
+# Remove all build artifacts (target/). Use when target/ grows large from repeated
+# check-full runs (incremental + debug + all-features + all-targets). Next build will be a full rebuild.
+clean:
+	cargo clean
 
 # Run checks for a single crate only (faster when editing one crate).
 # Usage: make check-crate CRATE=spark-sql-parser

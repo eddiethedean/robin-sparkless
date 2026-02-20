@@ -1,34 +1,46 @@
 [package]
-name = "robin-sparkless-expr"
+name = "robin-sparkless-polars"
 version = "0.14.0"
 edition = "2024"
-description = "Column, expressions, functions, and UDFs for robin-sparkless (Polars-based)."
+description = "Polars-backed DataFrame, Session, and expression layer for robin-sparkless."
 license = "MIT"
 repository = "https://github.com/eddiethedean/robin-sparkless"
 
+[features]
+default = []
+sql = ["dep:spark-sql-parser", "dep:sqlparser"]
+delta = ["dep:deltalake", "dep:tokio"]
+
 [dependencies]
-# version required for crates.io; path used for local workspace
 robin-sparkless-core = { version = "0.14", path = "../robin-sparkless-core" }
 polars = { version = "0.53", features = ["lazy", "csv", "parquet", "json", "temporal", "strings", "concat_str", "regex", "round_series", "abs", "dtype-categorical", "dtype-date", "dtype-datetime", "dtype-duration", "dtype-time", "rank", "is_in", "list_eval", "list_drop_nulls", "list_any_all", "cum_agg", "string_pad", "string_reverse", "repeat_by", "log", "month_end", "describe", "cross_join", "semi_anti_join", "extract_jsonpath", "dtype-struct", "random", "product", "moment"] }
+polars-plan = "0.53"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 chrono = "0.4"
 chrono-tz = "0.9"
 url = "2"
+bytes = "1.11.1"
+regex = "1.12"
+rand = "0.8"
+rand_distr = "0.4"
 percent-encoding = "2"
 strsim = "0.11"
 crc32fast = "1.4"
 twox-hash = "1.6"
 murmur3 = "0.5"
 soundex = "0.2"
-bytes = "1.11.1"
-regex = "1.12"
 fancy-regex = "0.13"
 base64 = "0.22"
 hex = "0.4"
 sha1 = "0.10"
 sha2 = "0.10"
 md5 = "0.7"
-rand = "0.8"
-rand_distr = "0.4"
 aes-gcm = "0.10"
+spark-sql-parser = { version = "0.2", path = "../spark-sql-parser", optional = true }
+sqlparser = { version = "0.61", optional = true }
+deltalake = { version = "0.31", optional = true }
+tokio = { version = "1", optional = true, features = ["rt", "rt-multi-thread", "fs", "io-util"] }
+
+[dev-dependencies]
+tempfile = "3"

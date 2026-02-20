@@ -4,18 +4,21 @@ This guide summarizes how to embed robin-sparkless in your app or binding (e.g. 
 
 ## Recommended embedding API
 
-Use **`prelude::embed`** and the **`*_engine()`** methods plus schema helpers so your binding never depends on Polars error or schema types:
+Use the **engine-agnostic ExprIr API** and **`*_engine()`** methods so your binding never depends on Polars types. Import expression builders from the **crate root** (they build `ExprIr`), not from `prelude` (which gives `Column`).
 
+- **Expressions:** From the crate root: `col`, `lit_i64`, `lit_str`, `lit_bool`, `when`, `gt`, `eq`, `sum`, `count`, `min`, `max`, `mean`, `alias`, etc. These build an `ExprIr` tree.
+- **DataFrame ops:** `filter_expr_ir(&ExprIr)`, `select_expr_ir(&[ExprIr])`, `with_column_expr_ir(name, &ExprIr)`, `collect_rows() -> CollectedRows` (JSON-like rows). For aggregations: `GroupedData::agg_expr_ir(&[ExprIr])`.
 - **Session:** `create_dataframe_engine`, `create_dataframe_from_rows_engine`, `read_csv_engine`, `read_parquet_engine`, `read_json_engine`, `table_engine`.
-- **DataFrame:** `schema_engine`, `columns_engine`, `count_engine`, `select_engine`, `filter_engine`, `with_column_engine`, `group_by_engine`, `limit_engine`, `collect_as_json_rows_engine`, `to_json_rows` (already returns `EngineError`). Use `get_column_data_type(name)` for a Polars-free column type.
-- **Schema:** `StructType::to_json()` / `to_json_pretty()`, `schema_from_json(json)` to parse schema from the host, and re-exported `DataType` for building or interpreting schemas.
+- **DataFrame (other):** `schema_engine`, `columns_engine`, `count_engine`, `select_engine`, `filter_engine`, `with_column_engine`, `group_by_engine`, `limit_engine`, `collect_as_json_rows_engine`, `to_json_rows` (returns `EngineError`). Use `get_column_data_type(name)` for a Polars-free column type.
+- **Schema:** `StructType::to_json()` / `to_json_pretty()`, `schema_from_json(json)`, and re-exported `DataType`.
 
-Where no `_engine` variant exists, use the existing method and `.map_err(EngineError::from)`.
+Where a method still returns `PolarsError`, convert with **`robin_sparkless::to_engine_error(e)`** (the root crate does not implement `From<PolarsError>` for `EngineError`).
 
-## Prelude vs prelude::embed
+## Prelude vs prelude::embed vs crate root
 
-- **`use robin_sparkless::prelude::*`** — One-stop import for application code: session, DataFrame, Column, GroupedData, common functions (`col`, `lit_*`, aggregates, string helpers), and config. Use this when you want the full convenience API in Rust.
-- **`use robin_sparkless::prelude::embed::*`** — Minimal surface for FFI/embedding crates. Re-exports: `SparkSession`, `SparkSessionBuilder`, `DataFrame`, `GroupedData`, `DataFrameReader`, `Column`, `Expr`, `LiteralValue`, `StructType`, `StructField`, `DataType`, `SparklessConfig`, `EngineError`, and functions `col`, `lit_i64`, `lit_bool`, `lit_str`, `lit_null`, `lit_f64`, `lit_i32`, `count`, `sum`, `avg`, `min`, `max`. Kept small and stable so bindings can depend only on robin-sparkless types and avoid Polars imports.
+- **Crate root (ExprIr)** — For embedding: `use robin_sparkless::{col, lit_i64, gt, ...};` — these build `ExprIr`. Use with `filter_expr_ir`, `select_expr_ir`, `with_column_expr_ir`, `collect_rows`, `agg_expr_ir`, and `*_engine()` methods. No Polars types in signatures; errors are `EngineError`.
+- **`use robin_sparkless::prelude::*`** — Full application API: session, DataFrame, Column, GroupedData, and functions that return `Column`/`Expr` (`col`, `lit_*`, aggregates, string helpers). Use when you want the full PySpark-like API in Rust.
+- **`use robin_sparkless::prelude::embed::*`** — Minimal re-exports for FFI: `SparkSession`, `DataFrame`, `GroupedData`, `DataFrameReader`, `StructType`, `DataType`, `EngineError`, etc. For expressions in bindings, use the crate root (`col`, `lit_i64`, `gt`, …) to build `ExprIr` and the `*_expr_ir` / `*_engine` methods.
 
 ## Config
 
@@ -36,12 +39,12 @@ Where no `_engine` variant exists, use the existing method and `.map_err(EngineE
 
 ## Error handling
 
-- **`EngineError`** — Unified error type with variants: `User`, `Internal`, `Io`, `Sql`, `NotFound`, `Other`. Implements `From<PolarsError>`, `From<serde_json::Error>`, and `From<std::io::Error>`. Use `*_engine()` methods to get `Result<_, EngineError>` directly, or `.map_err(EngineError::from)` on APIs that still return `PolarsError`.
+- **`EngineError`** — Unified error type with variants: `User`, `Internal`, `Io`, `Sql`, `NotFound`, `Other`. Use `*_engine()` and `*_expr_ir` methods to get `Result<_, EngineError>` directly. For APIs that still return `PolarsError`, use **`robin_sparkless::to_engine_error(e)`** (the root crate does not implement `From<PolarsError>` for `EngineError`).
 - **`DataFrame::to_json_rows()`** — Returns `Result<String, EngineError>`: collects rows as a JSON array of objects.
 
 ## Examples
 
-- **[examples/embed_basic.rs](../examples/embed_basic.rs)** — Creates a session from config, runs a simple pipeline (filter + groupBy + agg), and prints schema and JSON rows. Run with: `cargo run --example embed_basic`.
+- **[examples/embed_basic.rs](../examples/embed_basic.rs)** — Uses the ExprIr API: `create_dataframe_engine`, `filter_expr_ir`, `group_by_engine`, `agg_expr_ir`. Creates a session from config, runs a simple pipeline (filter + groupBy + agg), and prints schema and JSON rows. Run with: `cargo run --example embed_basic`.
 
   Example output (key order in JSON may vary):
 
@@ -50,7 +53,7 @@ Where no `_engine` variant exists, use the existing method and `.map_err(EngineE
   Rows (JSON): [{"score_1":300,"id":3,"score":1},{"score_1":200,"id":2,"score":1}]
   ```
 
-- **[examples/embed_readme.rs](../examples/embed_readme.rs)** — Matches the README embedding snippet (filter by id, then `to_json_rows`). Run with: `cargo run --example embed_readme`. Example output: `[{"label":"b","value":20,"id":2},{"id":3,"value":30,"label":"c"}]` (key order may vary).
+- **[examples/embed_readme.rs](../examples/embed_readme.rs)** — Matches the README embedding snippet using ExprIr: `create_dataframe_engine`, `filter_expr_ir(&gt(col("id"), lit_i64(1)))`, then `to_json_rows`. Run with: `cargo run --example embed_readme`. Example output: `[{"label":"b","value":20,"id":2},{"id":3,"value":30,"label":"c"}]` (key order may vary).
 
 ## Traits (optional)
 

@@ -26,11 +26,34 @@ robin-sparkless = "0.14.0"
 
 ## Basic Usage
 
-The current API is intentionally small and focused on wrapping Polars types. **DataFrame uses lazy evaluation** (#438): transformations (filter, select, join, etc.) extend the plan; only actions (`collect`, `show`, `count`, `write`) trigger execution. This enables Polars query optimization across the full pipeline.
+**DataFrame uses lazy evaluation**: transformations (filter, select, join, etc.) extend the plan; only actions (`collect`, `show`, `count`, `write`) trigger execution. This enables Polars query optimization across the full pipeline.
+
+You can use either the **ExprIr API** (engine-agnostic; from the crate root) or the **Column API** (Polars-backed; from `prelude` or `robin_sparkless::functions`). For new code and embeddings, prefer ExprIr: `col`, `lit_i64`, `gt`, etc. from the root build `ExprIr`; use `filter_expr_ir`, `select_expr_ir`, `collect_rows`, `agg_expr_ir`, and `*_engine()` methods.
+
+### Using ExprIr (engine-agnostic)
+
+```rust
+use robin_sparkless::{col, lit_i64, gt, SparkSession, DataFrame};
+
+fn main() -> Result<(), robin_sparkless::EngineError> {
+    let spark = SparkSession::builder().app_name("demo").get_or_create();
+    let df = spark.create_dataframe_engine(
+        vec![(1, 25, "Alice".to_string()), (2, 30, "Bob".to_string()), (3, 35, "Charlie".to_string())],
+        vec!["id", "age", "name"],
+    )?;
+    let adults = df.filter_expr_ir(&gt(col("age"), lit_i64(18)))?;
+    adults.show(Some(10)).map_err(robin_sparkless::to_engine_error)?;
+    Ok(())
+}
+```
+
+### Using Column (Polars)
+
+Use the **prelude** so `col` and `lit_i64` return `Column` (not ExprIr):
 
 ```rust
 use polars::prelude::*;
-use robin_sparkless::{col, lit_i64, DataFrame};
+use robin_sparkless::prelude::*;
 
 fn main() -> polars::prelude::PolarsResult<()> {
     // Build a Polars DataFrame

@@ -4,7 +4,8 @@
 //! for invalid operations and edge cases.
 
 use polars::prelude::PolarsError;
-use robin_sparkless::{DataFrame, JoinType, SparkSession, col};
+use robin_sparkless::functions::col;
+use robin_sparkless::{DataFrame, JoinType, SparkSession};
 
 /// Helper to create a simple test DataFrame
 fn test_df() -> DataFrame {

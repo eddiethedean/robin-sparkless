@@ -5,7 +5,8 @@
 //! dependency) but exercises several randomly generated inputs.
 
 use rand::Rng;
-use robin_sparkless::{SparkSession, col, lit_i64};
+use robin_sparkless::functions::{col, lit_i64};
+use robin_sparkless::SparkSession;
 
 fn spark() -> SparkSession {
     SparkSession::builder()

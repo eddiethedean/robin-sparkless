@@ -1,46 +1,68 @@
 # Plan: Splitting robin-sparkless into Sub-crates
 
-This document outlines a plan to split the single `robin-sparkless` crate into multiple workspace crates. The main goal is **faster iterative compilation**: avoid recompiling Polars and other heavy dependencies when changing only a subset of the codebase.
+This document outlines the split of `robin-sparkless` into multiple workspace crates. The main goal is **faster iterative compilation**: avoid recompiling Polars when changing only a subset of the codebase.
+
+**Current layout (as implemented):** All Polars-using code lives in **robin-sparkless-polars**; the root **robin-sparkless** is a thin facade with no direct Polars dependency. The former **robin-sparkless-expr** crate was merged into robin-sparkless-polars.
 
 ---
 
 ## 1. Rationale
 
-- **Current pain**: One large crate means any code change can trigger a full or near-full rebuild, including Polars and its many features. Polars is a large dependency; recompiling it dominates iteration time.
-- **Goal**: By splitting into crates with clear dependency boundaries:
-  - Changes to **Polars-free** code (e.g. config, schema types, error) do not trigger a Polars rebuild.
-  - Changes to the **expression layer** (column, functions, udfs) recompile only that crate and dependents, not the entire tree.
-  - Changes to **session** or **dataframe** recompile only the main library crate (and optional sql/delta), not the expression crate.
+- **Goal**: Only one crate (**robin-sparkless-polars**) depends on the `polars` library. Changes to **robin-sparkless-core** (config, schema types, error types, date_utils) do not trigger a Polars rebuild.
+- **robin-sparkless** (root) is a facade: it re-exports the public API from core and robin-sparkless-polars so existing dependents do not need to change.
 
 ---
 
-## 2. Current Structure (Summary)
+## 2. Current Crate Layout (Implemented)
 
-- **Single crate** `robin-sparkless` (~40k lines across 26 `.rs` files under `src/`).
-- **Heavy Polars usage** in: `session`, `dataframe`, `column`, `functions`, `udfs`, `udf_registry`, `plan` (including `plan/expr`), `schema` (conversion to/from Polars), `expression`, `type_coercion`.
-- **Polars-free or minimal**: `config`, `error` (API is Polars-free; `From<PolarsError>` ties it to Polars), `traits` (use DataFrame/Session so stay with main lib), `date_utils` (chrono only), and the **type definitions** in `schema` (DataType, StructField, StructType as enums/structs; conversion functions use Polars).
-- **Feature-gated**: `sql` (sqlparser + translator), `delta` (deltalake, tokio).
+### 2.1 Crate List
 
-Rough size by area:
+| Crate                    | Purpose                                      | Polars? | Notes |
+|--------------------------|----------------------------------------------|---------|-------|
+| **robin-sparkless-core** | Schema types, config, EngineError, date_utils | No      | Unchanged. |
+| **robin-sparkless-polars** | Column, functions, UDFs, DataFrame, Session, Plan, schema conversion, traits, sql, delta | Yes | **Only** crate that depends on `polars`. Contains former expr + main-crate Polars code. |
+| **robin-sparkless**      | Facade: re-exports from core and polars      | No      | No direct polars dependency. |
+| **spark-sql-parser**     | SQL parsing                                  | No      | Used by robin-sparkless-polars when feature `sql` is enabled. |
 
-| Area              | Approx. lines | Polars usage      |
-|-------------------|---------------|-------------------|
-| session           | ~2.7k         | Heavy             |
-| column            | ~3.2k         | Heavy             |
-| functions         | ~3.3k         | Heavy             |
-| udfs              | ~4.7k         | Heavy             |
-| dataframe/*       | ~4.2k         | Heavy             |
-| plan (mod + expr) | ~3.5k         | Heavy             |
-| schema            | ~360          | Types + conversion |
-| type_coercion     | ~380          | Uses Column/Expr  |
-| error, config     | ~140          | Minimal / none   |
-| rest              | smaller       | Mixed             |
+- **robin-sparkless-expr** has been **removed**; its code lives in robin-sparkless-polars.
+- **sql** and **delta** are optional features on robin-sparkless-polars (and forwarded from the root crate).
+
+### 2.2 Dependency Diagram
+
+```
+                    ┌─────────────────────────┐
+                    │ robin-sparkless-core    │  (no Polars)
+                    │ schema types, config,   │
+                    │ EngineError, date_utils │
+                    └───────────┬─────────────┘
+                                │
+                                ▼
+                    ┌─────────────────────────┐
+                    │ robin-sparkless-polars   │  (only Polars dependency)
+                    │ column, functions, udfs,│
+                    │ dataframe, session,     │
+                    │ plan, schema_conv,      │
+                    │ traits, sql, delta      │
+                    └───────────┬─────────────┘
+                                │
+                                ▼
+                    ┌─────────────────────────┐
+                    │ robin-sparkless         │  (facade; re-exports)
+                    │ config, prelude, schema │
+                    └─────────────────────────┘
+```
+
+- **core** does not depend on Polars.
+- **robin-sparkless-polars** is the only crate that depends on `polars`. It contains all expression, DataFrame, Session, and plan execution code.
+- **robin-sparkless** (root) depends only on core and robin-sparkless-polars; it re-exports the public API so `robin_sparkless::*` and `robin_sparkless::prelude::*` are unchanged.
 
 ---
 
-## 3. Proposed Crate Layout
+## 3. Legacy / Original Proposed Layout (Pre–Polars isolation)
 
-### 3.1 Crate List
+The following described an earlier split (core + expr + main). It has been superseded by the **Polars isolation** (core + robin-sparkless-polars + facade), but is kept for reference.
+
+### 3.1 Original Crate List
 
 | Crate                    | Purpose                         | Polars? | Approx. size |
 |--------------------------|---------------------------------|---------|--------------|
@@ -50,84 +72,47 @@ Rough size by area:
 | **robin-sparkless-sql**  | SQL parsing and translation    | Via main| Medium       |
 | **robin-sparkless-delta**| Delta Lake I/O                  | Via main| Medium       |
 
-- **robin-sparkless** remains the main library and **facade**: it re-exports the public API from `core` and `expr` so existing dependents do not need to change.
-- **robin-sparkless-sql** and **robin-sparkless-delta** stay optional (features or separate crates).
-
-### 3.2 Dependency Diagram
+### 3.2 Original Dependency Diagram
 
 ```
                     ┌─────────────────────────┐
                     │ robin-sparkless-core    │  (no Polars)
-                    │ schema types, config,   │
-                    │ EngineError, date_utils │
                     └───────────┬─────────────┘
                                 │
         ┌───────────────────────┼───────────────────────┐
-        │                       │                       │
         ▼                       ▼                       │
 ┌───────────────┐     ┌─────────────────┐              │
 │ robin-        │     │ robin-sparkless  │              │
-│ sparkless-expr│     │ (main / facade)  │◄─────────────┘
-│ column,       │     │ dataframe,       │
-│ functions,    │────►│ session, plan,   │
-│ udfs,         │     │ schema convert,  │
-│ type_coercion │     │ traits, prelude  │
+│ sparkless-expr│────►│ (main / facade)  │◄─────────────┘
 └───────────────┘     └────────┬────────┘
         │                      │
-        │              ┌───────┴───────┐
-        │              ▼               ▼
-        │     robin-sparkless-sql   robin-sparkless-delta
-        │     (optional)            (optional)
-        │
-        └── All "expr" and "main" crates depend on polars (and core).
+        └── expr and main both depended on polars.
 ```
-
-- **core** does not depend on Polars. So edits to config/schema types/error only rebuild core and then dependents (expr, main); Polars is not rebuilt.
-- **expr** depends on **core** and **polars**. Edits to session/dataframe/plan only rebuild the main crate (and optional sql/delta); expr (and Polars for that crate) are not rebuilt.
-- **main** depends on **core**, **expr**, and **polars**. It holds DataFrame, Session, Plan, schema conversion, traits, prelude.
 
 ---
 
-## 4. Module → Crate Mapping
+## 4. Module → Crate Mapping (Current)
 
 ### robin-sparkless-core (no Polars)
 
-- **schema types only**: `DataType`, `StructField`, `StructType` (the enum/struct definitions and methods that do not touch Polars). No `from_polars_schema` / `to_polars_schema` here.
-- **config**: `SparklessConfig` (from `config.rs`).
-- **error**: `EngineError` (variant definitions and `Display`/`Error`; `From<std::io::Error>`, `From<serde_json::Error>`). Do **not** put `From<PolarsError>` here; that impl lives in the main crate (which has Polars).
+- **schema types**: `DataType`, `StructField`, `StructType`. No Polars conversion here.
+- **config**: `SparklessConfig`.
+- **error**: `EngineError` (variant definitions, `Display`/`Error`; `From<std::io::Error>`, `From<serde_json::Error>`). No `From<PolarsError>` (that impl lives in robin-sparkless-polars).
 - **date_utils**: Chrono-only helpers.
-- **Dependencies**: `serde`, `serde_json`, `chrono` (for date_utils). No Polars.
+- **Dependencies**: `serde`, `serde_json`, `chrono`. No Polars.
 
-### robin-sparkless-expr (Polars)
+### robin-sparkless-polars (only Polars crate)
 
-- **column**: `Column` and Expr construction.
-- **functions**: All `functions.rs` (col, lit, when, aggregations, etc.).
-- **expression**: Thin helpers (`column_to_expr`, `lit_*`).
-- **type_coercion**: Coercion and comparison helpers (use `Column`/Expr).
-- **udf_registry**: `UdfRegistry`, `RustUdf` (uses Polars `Series`).
-- **udfs**: All built-in UDFs (string, list, hash, etc.).
-- **Dependencies**: `robin-sparkless-core`, `polars` (same feature set as today). Plus existing UDF deps (regex, base64, rand, etc.).
+- **column**, **expression**, **functions**, **type_coercion**, **udf_registry**, **udfs**: Former robin-sparkless-expr contents.
+- **dataframe**, **session**, **plan** (mod + expr), **schema_conv**, **traits**, **error** (with `From<PolarsError>` for EngineError), **schema** (re-exports core types + StructTypePolarsExt, schema_from_json).
+- **sql**, **delta**: Feature-gated modules (optional).
+- **Dependencies**: `robin-sparkless-core`, `polars`, `polars-plan`, and all UDF/expression deps. Optional: spark-sql-parser, sqlparser (sql), deltalake, tokio (delta).
 
-### robin-sparkless (main / facade)
+### robin-sparkless (facade)
 
-- **schema (conversion)**: Keep `StructType::from_polars_schema`, `StructType::to_polars_schema`, `polars_type_to_data_type`, `data_type_to_polars_type`, and `schema_from_json` in the main crate. Re-export `DataType`, `StructField`, `StructType` from `core` so the public API is unchanged.
-- **dataframe**: All of `dataframe/` (mod, transformations, joins, aggregations, stats).
-- **session**: `SparkSession`, `SparkSessionBuilder`, `DataFrameReader`, session-scoped UDF wiring.
-- **plan**: `plan/mod.rs` and `plan/expr.rs` (execute_plan, apply_op, expression tree from JSON).
-- **traits**: `FromRobinDf`, `IntoRobinDf` (they use DataFrame/Session).
-- **prelude**: Re-exports from core, expr, and main (column, config, dataframe, error, functions, schema, session, Expr, LiteralValue).
-- **lib.rs**: Same public surface as today; feature gates for `sql` and `delta`.
-- **Dependencies**: `robin-sparkless-core`, `robin-sparkless-expr`, `polars`, and existing deps (e.g. spark-ddl-parser, url, etc.). Optional: sqlparser (sql), deltalake + tokio (delta).
-
-### robin-sparkless-sql (optional)
-
-- **sql**: `sql/mod.rs`, `sql/parser.rs`, `sql/translator.rs`.
-- **Dependencies**: `robin-sparkless` (or core + expr + main), `sqlparser`. Can be a separate crate or a feature that compiles a subfolder of the main crate; the plan prefers a **separate crate** so that default `cargo build` does not pull sqlparser.
-
-### robin-sparkless-delta (optional)
-
-- **delta**: `delta/mod.rs`.
-- **Dependencies**: `robin-sparkless`, `deltalake`, `tokio`. Same as today’s `delta` feature; can be a separate crate for clarity and to avoid pulling deltalake when not needed.
+- **config**, **prelude**, **schema**: Thin modules; re-export from core and/or robin-sparkless-polars.
+- **lib.rs**: Re-exports from `robin_sparkless_core` and `robin_sparkless_polars` so `robin_sparkless::*` and `robin_sparkless::prelude::*` are unchanged. Feature `sql` / `delta` forwarded to robin-sparkless-polars.
+- **Dependencies**: `robin-sparkless-core`, `robin-sparkless-polars` only. No direct `polars` dependency.
 
 ---
 
@@ -193,14 +178,12 @@ This gives clear boundaries and reduces the amount of code (and especially Polar
 
 ---
 
-## 10. Summary
+## 10. Summary (Current State)
 
-| Step | Action |
-|------|--------|
-| 1 | Add workspace; create **robin-sparkless-core** (schema types, config, error, date_utils; no Polars). |
-| 2 | Create **robin-sparkless-expr** (column, functions, expression, type_coercion, udf_registry, udfs; with Polars). |
-| 3 | Refactor **robin-sparkless** to depend on core + expr; keep dataframe, session, plan, schema conversion, traits, prelude; preserve public API. |
-| 4 | Optionally extract **robin-sparkless-sql** and **robin-sparkless-delta** as separate crates. |
-| 5 | Update CI, docs, and release process for the workspace. |
+| Crate | Role |
+|-------|------|
+| **robin-sparkless-core** | Schema types, config, EngineError, date_utils; no Polars. |
+| **robin-sparkless-polars** | All Polars-using code (column, functions, udfs, dataframe, session, plan, schema conversion, traits, sql, delta). **Only** crate that depends on `polars`. |
+| **robin-sparkless** | Facade: depends only on core and robin-sparkless-polars; re-exports public API. No direct Polars dependency. |
 
-This plan prioritizes the split that gives the largest compile-time benefit: a Polars-free **core** and a dedicated **expr** crate so that Polars-heavy code is isolated and not all rebuilt when only session/dataframe/plan change.
+Polars is isolated in **robin-sparkless-polars**. The former **robin-sparkless-expr** crate was merged into it. The root crate is a thin re-export layer so the public API (`robin_sparkless::*`) is unchanged. See [docs/POLARS_CRATE_ISOLATION.md](POLARS_CRATE_ISOLATION.md) for the isolation design.

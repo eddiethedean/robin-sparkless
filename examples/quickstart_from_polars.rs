@@ -1,6 +1,7 @@
 //! Run QUICKSTART Basic Usage: from_polars, columns(), filter, show.
 use polars::prelude::*;
-use robin_sparkless::{DataFrame, col, lit_i64};
+use robin_sparkless::functions::{col, lit_i64};
+use robin_sparkless::DataFrame;
 
 fn main() -> PolarsResult<()> {
     let polars_df = df!(

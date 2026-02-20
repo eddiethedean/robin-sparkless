@@ -23,7 +23,7 @@
 
 | Area | What’s included |
 |------|------------------|
-| **Core** | `SparkSession`, `DataFrame`, `Column`; lazy by default (transformations extend the plan; only actions like `collect`, `show`, `count`, `write` materialize); `filter`, `select`, `with_column`, `order_by`, `group_by`, joins |
+| **Core** | `SparkSession`, `DataFrame`; lazy by default. **Two expression APIs:** (1) **ExprIr** (engine-agnostic): `col`, `lit_i64`, `gt`, `when`, … from crate root → `filter_expr_ir`, `select_expr_ir`, `collect_rows`, `agg_expr_ir`; (2) **Column/Expr** (Polars): `prelude` or `functions` → `filter`, `with_column`, `select_exprs`. Plus `order_by`, `group_by`, joins |
 | **IO** | CSV, Parquet, JSON via `SparkSession::read_*` |
 | **Expressions** | `col()`, `lit()`, `when`/`then`/`otherwise`, `coalesce`, cast, type/conditional helpers |
 | **Aggregates** | `count`, `sum`, `avg`, `min`, `max`, and more; multi-column groupBy |
@@ -61,13 +61,34 @@ robin-sparkless = { version = "0.14.0", features = ["delta"] }  # Delta Lake rea
 
 ### Rust
 
+**Engine-agnostic (ExprIr) API** — recommended for new code and embeddings; uses only `EngineError` and robin-sparkless types:
+
 ```rust
-use robin_sparkless::{col, lit_i64, SparkSession};
+use robin_sparkless::{col, lit_i64, gt, SparkSession};
+
+fn main() -> Result<(), robin_sparkless::EngineError> {
+    let spark = SparkSession::builder().app_name("demo").get_or_create();
+    let df = spark.create_dataframe_engine(
+        vec![
+            (1, 25, "Alice".to_string()),
+            (2, 30, "Bob".to_string()),
+            (3, 35, "Charlie".to_string()),
+        ],
+        vec!["id", "age", "name"],
+    )?;
+    let adults = df.filter_expr_ir(&gt(col("age"), lit_i64(26)))?;
+    adults.show(Some(10)).map_err(robin_sparkless::to_engine_error)?;
+    Ok(())
+}
+```
+
+**Column (Polars) API** — full PySpark-like API with `Column` and `Expr`:
+
+```rust
+use robin_sparkless::prelude::*;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let spark = SparkSession::builder().app_name("demo").get_or_create();
-
-    // Create a DataFrame from rows (id, age, name)
     let df = spark.create_dataframe(
         vec![
             (1, 25, "Alice".to_string()),
@@ -76,11 +97,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ],
         vec!["id", "age", "name"],
     )?;
-
-    // Filter and show (Expr for filter: use .into_expr() on Column)
     let adults = df.filter(col("age").gt(lit_i64(26).into_expr()).into_expr())?;
     adults.show(Some(10))?;
-
     Ok(())
 }
 ```
@@ -103,7 +121,7 @@ You can also wrap an existing Polars `DataFrame` with `DataFrame::from_polars(po
 
 ### Embedding robin-sparkless in your app
 
-Use the [prelude](https://docs.rs/robin-sparkless/latest/robin_sparkless/prelude/index.html) for one-stop imports and optional [config from environment](https://docs.rs/robin-sparkless/latest/robin_sparkless/struct.SparklessConfig.html) for session setup. Results can be returned as JSON for bindings or CLI tools.
+Use the **engine-agnostic ExprIr API** and `*_engine()` methods so your public surface does not depend on Polars types. Use [prelude](https://docs.rs/robin-sparkless/latest/robin_sparkless/prelude/index.html) for the full Column API, or root imports for ExprIr; optional [config from environment](https://docs.rs/robin-sparkless/latest/robin_sparkless/struct.SparklessConfig.html) for session setup. Results can be returned as JSON for bindings or CLI tools.
 
 ```toml
 [dependencies]
@@ -111,26 +129,21 @@ robin-sparkless = "0.14.0"
 ```
 
 ```rust
-use robin_sparkless::prelude::*;
+use robin_sparkless::{col, lit_i64, gt, SparkSession, SparklessConfig, to_engine_error};
 
 fn main() -> Result<(), robin_sparkless::EngineError> {
-    // Optional: configure from env (ROBIN_SPARKLESS_WAREHOUSE_DIR, etc.)
     let config = SparklessConfig::from_env();
     let spark = SparkSession::from_config(&config);
 
-    let df = spark
-        .create_dataframe(
-            vec![
-                (1i64, 10i64, "a".to_string()),
-                (2i64, 20i64, "b".to_string()),
-                (3i64, 30i64, "c".to_string()),
-            ],
-            vec!["id", "value", "label"],
-        )
-        .map_err(robin_sparkless::EngineError::from)?;
-    let filtered = df
-        .filter(col("id").gt(lit_i64(1).into_expr()).into_expr())
-        .map_err(robin_sparkless::EngineError::from)?;
+    let df = spark.create_dataframe_engine(
+        vec![
+            (1i64, 10i64, "a".to_string()),
+            (2i64, 20i64, "b".to_string()),
+            (3i64, 30i64, "c".to_string()),
+        ],
+        vec!["id", "value", "label"],
+    )?;
+    let filtered = df.filter_expr_ir(&gt(col("id"), lit_i64(1)))?;
     let json = filtered.to_json_rows()?;
     println!("{}", json);
     Ok(())
@@ -143,13 +156,13 @@ Example output (from the snippet above or `cargo run --example embed_readme`; JS
 [{"id":2,"value":20,"label":"b"},{"id":3,"value":30,"label":"c"}]
 ```
 
-Run the [embed_basic](examples/embed_basic.rs) example: `cargo run --example embed_basic`. For a minimal FFI surface (no Polars types), use `robin_sparkless::prelude::embed`; use the `*_engine()` methods and schema helpers (`StructType::to_json`, `schema_from_json`) so bindings rely only on `EngineError` and robin-sparkless types. See [docs/EMBEDDING.md](docs/EMBEDDING.md).
+Run the [embed_basic](examples/embed_basic.rs) example: `cargo run --example embed_basic`. For a minimal FFI surface, use `robin_sparkless::prelude::embed` and the ExprIr API: `create_dataframe_engine`, `filter_expr_ir`, `select_expr_ir`, `collect_rows`, `agg_expr_ir`, plus schema helpers (`StructType::to_json`, `schema_from_json`). Convert Polars errors with `to_engine_error`. See [docs/EMBEDDING.md](docs/EMBEDDING.md).
 
 ## Development
 
 **Prerequisites:** Rust (see [rust-toolchain.toml](rust-toolchain.toml)).
 
-This repository is a **Cargo workspace**. The main library is **robin-sparkless** (the facade); most users depend only on it. The workspace also includes **robin-sparkless-core** (shared types, config, error; no Polars) and **robin-sparkless-expr** (Column, functions, UDFs; Polars-based). These are publishable for advanced or minimal-use cases. `make check` and CI build the whole workspace.
+This repository is a **Cargo workspace**. The main library is **robin-sparkless** (the facade); most users depend only on it. The workspace also includes **robin-sparkless-core** (engine-agnostic types, expression IR, config, error; no Polars) and **robin-sparkless-polars** (Polars backend: Column, functions, UDFs). These are publishable for advanced or minimal-use cases. `make check` and CI build the whole workspace.
 
 | Command | Description |
 |---------|-------------|
@@ -159,6 +172,7 @@ This repository is a **Cargo workspace**. The main library is **robin-sparkless*
 | `make test` | Run Rust tests (wrapper for `cargo test --workspace`) |
 | `make check` | Rust only: format check, clippy, audit, deny, Rust tests. Use `make -j5 check` to run the five jobs in parallel. |
 | `make check-full` | Full Rust check suite (what CI runs): `fmt --check`, clippy, audit, deny, tests. |
+| `make clean` | Remove `target/` (e.g. to free disk without running check; `check-full` already cleans before each run so binaries don't accumulate). |
 | `make fmt` | Format Rust code (run before check if you want to fix formatting). |
 | `make test-parity-phase-a` … `make test-parity-phase-g` | Run parity fixtures for a specific phase (see [PARITY_STATUS](docs/PARITY_STATUS.md)). |
 | `make test-parity-phases` | Run all parity phases (A–G) via the parity harness. |

@@ -5,7 +5,7 @@
 mod common;
 
 use common::spark;
-use robin_sparkless::{col, lit_i64, named_struct};
+use robin_sparkless::functions::{col, lit_i64, named_struct};
 use serde_json::json;
 
 #[test]

@@ -8,7 +8,8 @@
 mod common;
 
 use common::spark;
-use robin_sparkless::{cast, col, try_cast};
+use robin_sparkless::functions::col;
+use robin_sparkless::{cast, try_cast};
 
 #[test]
 fn issue_544_int_to_string_cast() {

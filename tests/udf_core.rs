@@ -6,7 +6,8 @@
 //! UDFs exposed via `call_udf`, which underpins the Python API.
 
 use polars::prelude::{Series, df};
-use robin_sparkless::{DataFrame, SparkSession, col};
+use robin_sparkless::functions::col;
+use robin_sparkless::{DataFrame, SparkSession};
 
 fn spark() -> SparkSession {
     SparkSession::builder()

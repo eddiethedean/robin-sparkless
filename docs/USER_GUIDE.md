@@ -8,9 +8,16 @@ This guide shows you how to use Robin Sparkless for everyday data work. It assum
 
 Robin Sparkless is a **PySpark-style DataFrame library** that runs in Rust with [Polars](https://www.pola.rs/) as the engine—**no JVM**. You get:
 
-- Familiar APIs: `SparkSession`, `DataFrame`, `Column`, `filter`, `select`, `group_by`, etc.
+- Familiar APIs: `SparkSession`, `DataFrame`, `filter`, `select`, `group_by`, etc.
 - **Lazy by default**: transformations extend the plan; only actions (`collect`, `show`, `count`, `write`) trigger execution—aligns with PySpark and enables Polars query optimization.
 - Fast execution on Polars
+
+### Two expression APIs
+
+- **ExprIr (engine-agnostic):** Use `col`, `lit_i64`, `gt`, `when`, etc. from the **crate root**; they build an `ExprIr` tree. Use `filter_expr_ir`, `select_expr_ir`, `with_column_expr_ir`, `collect_rows`, and `GroupedData::agg_expr_ir`. Prefer this for new code and embeddings; errors are `EngineError`, and the public API does not expose Polars types.
+- **Column / Expr (Polars):** Use the **prelude** or `robin_sparkless::functions` for `col`, `lit_i64`, etc., which return `Column`. Use `filter`, `with_column`, `select_exprs`, and the full set of string/window/aggregate functions. Use this when you need the full PySpark-like API or are porting existing Column-based code.
+
+The rest of this guide shows the **Column API** (prelude) for maximum familiarity; you can substitute the ExprIr equivalents where noted.
 
 ---
 
