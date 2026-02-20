@@ -44,6 +44,7 @@ pub fn parse_sql(query: &str) -> Result<Statement, ParseError> {
                 | sqlparser::ast::ObjectType::Schema,
             ..
         } => {}
+        Statement::DropFunction(_) => {}
         _ => {
             return Err(ParseError(format!(
                 "SQL: statement type not supported, got {:?}.",
@@ -95,5 +96,12 @@ mod tests {
         // sqlparser expects an operation like RENAME; SET LOCATION may not be supported
         let stmt = parse_sql("ALTER SCHEMA db RENAME TO db2").unwrap();
         assert!(matches!(stmt, Statement::AlterSchema(_)));
+    }
+
+    #[test]
+    fn test_issue_654_drop_function() {
+        // DROP DATABASE is already supported via Drop(Schema)
+        let stmt = parse_sql("DROP FUNCTION f").unwrap();
+        assert!(matches!(stmt, Statement::DropFunction(_)));
     }
 }
