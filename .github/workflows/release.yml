@@ -51,7 +51,7 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-
       - name: Clippy
-        run: cargo clippy -- -D warnings
+        run: cargo clippy --workspace --all-features --all-targets -- -D warnings
 
   audit:
     name: Audit
@@ -121,7 +121,7 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-
       - name: Build test binaries
-        run: cargo build --tests
+        run: cargo build --workspace --all-features --tests
         env:
           CARGO_BUILD_JOBS: 1
 
@@ -203,9 +203,12 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-
       - name: Build docs
-        run: cargo doc --no-deps
-      - name: Publish to crates.io
-        run: cargo publish --token ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: cargo doc --workspace --no-deps
+      - name: Publish to crates.io (core, then expr, then main)
+        run: |
+          cargo publish -p robin-sparkless-core --token ${{ secrets.CARGO_REGISTRY_TOKEN }}
+          cargo publish -p robin-sparkless-expr --token ${{ secrets.CARGO_REGISTRY_TOKEN }}
+          cargo publish -p robin-sparkless --token ${{ secrets.CARGO_REGISTRY_TOKEN }}
 
   # Python linting, tests, and PyPI publishing have been removed from
   # the release workflow; only the Rust crate publish step remains.

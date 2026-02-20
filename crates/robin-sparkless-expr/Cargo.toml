@@ -1,13 +1,14 @@
 [package]
 name = "robin-sparkless-expr"
-version = "0.12.2"
+version = "0.13.0"
 edition = "2024"
 description = "Column, expressions, functions, and UDFs for robin-sparkless (Polars-based)."
 license = "MIT"
 repository = "https://github.com/eddiethedean/robin-sparkless"
 
 [dependencies]
-robin-sparkless-core = { path = "../robin-sparkless-core" }
+# version required for crates.io; path used for local workspace
+robin-sparkless-core = { version = "0.13", path = "../robin-sparkless-core" }
 polars = { version = "0.53", features = ["lazy", "csv", "parquet", "json", "temporal", "strings", "concat_str", "regex", "round_series", "abs", "dtype-categorical", "dtype-date", "dtype-datetime", "dtype-duration", "dtype-time", "rank", "is_in", "list_eval", "list_drop_nulls", "list_any_all", "cum_agg", "string_pad", "string_reverse", "repeat_by", "log", "month_end", "describe", "cross_join", "semi_anti_join", "extract_jsonpath", "dtype-struct", "random", "product", "moment"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
