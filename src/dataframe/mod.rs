@@ -15,7 +15,7 @@ pub use transformations::{
 use crate::column::Column;
 use crate::error::EngineError;
 use crate::functions::SortOrder;
-use crate::schema::StructType;
+use crate::schema::{StructType, StructTypePolarsExt};
 use crate::session::SparkSession;
 use crate::type_coercion::coerce_for_pyspark_comparison;
 use polars::prelude::{

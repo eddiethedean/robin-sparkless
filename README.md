@@ -149,11 +149,14 @@ Run the [embed_basic](examples/embed_basic.rs) example: `cargo run --example emb
 
 **Prerequisites:** Rust (see [rust-toolchain.toml](rust-toolchain.toml)).
 
+This repository is a **Cargo workspace**. The main library is **robin-sparkless** (the facade); most users depend only on it. The workspace also includes **robin-sparkless-core** (shared types, config, error; no Polars) and **robin-sparkless-expr** (Column, functions, UDFs; Polars-based). These are publishable for advanced or minimal-use cases. `make check` and CI build the whole workspace.
+
 | Command | Description |
 |---------|-------------|
 | `cargo build` | Build (Rust only) |
+| `cargo build --workspace --all-features` | Build all workspace crates with optional features |
 | `cargo test` | Run Rust tests |
-| `make test` | Run Rust tests (wrapper for `cargo test`) |
+| `make test` | Run Rust tests (wrapper for `cargo test --workspace`) |
 | `make check` | Rust only: format check, clippy, audit, deny, Rust tests. Use `make -j5 check` to run the five jobs in parallel. |
 | `make check-full` | Full Rust check suite (what CI runs): `fmt --check`, clippy, audit, deny, tests. |
 | `make fmt` | Format Rust code (run before check if you want to fix formatting). |

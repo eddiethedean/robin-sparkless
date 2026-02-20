@@ -1,14 +1,15 @@
 use crate::dataframe::DataFrame;
 use crate::error::EngineError;
-use crate::udf_registry::UdfRegistry;
 use polars::chunked_array::StructChunked;
 use polars::chunked_array::builder::get_list_builder;
 use polars::prelude::{
     DataFrame as PlDataFrame, DataType, Field, IntoSeries, NamedFrom, PlSmallStr, PolarsError,
     Series, TimeUnit,
 };
+use robin_sparkless_expr::UdfRegistry;
 use serde_json::Value as JsonValue;
 use std::cell::RefCell;
+use std::sync::Arc;
 
 /// Parse "array<element_type>" to get inner type string. Returns None if not array<>.
 fn parse_array_element_type(type_str: &str) -> Option<String> {
@@ -506,7 +507,7 @@ fn json_object_to_map_struct_series(
 
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Mutex, OnceLock};
 use std::thread_local;
 
 thread_local! {
@@ -516,10 +517,15 @@ thread_local! {
 
 /// Set the thread-local session for UDF resolution (call_udf). Used by get_or_create.
 pub(crate) fn set_thread_udf_session(session: SparkSession) {
+    robin_sparkless_expr::set_thread_udf_context(
+        Arc::new(session.udf_registry.clone()),
+        session.is_case_sensitive(),
+    );
     THREAD_UDF_SESSION.with(|cell| *cell.borrow_mut() = Some(session));
 }
 
-/// Get the thread-local session for UDF resolution. Used by call_udf.
+/// Get the thread-local session for UDF resolution. (call_udf uses expr's thread context; this is kept for compatibility.)
+#[allow(dead_code)]
 pub(crate) fn get_thread_udf_session() -> Option<SparkSession> {
     THREAD_UDF_SESSION.with(|cell| cell.borrow().clone())
 }

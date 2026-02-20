@@ -2,6 +2,8 @@
 
 This document describes how to cut a release and publish the crate to [crates.io](https://crates.io).
 
+The repository is a **Cargo workspace** with members: `robin-sparkless` (root, main facade), `crates/robin-sparkless-core`, and `crates/robin-sparkless-expr`. The primary dependency for users is **robin-sparkless**; `robin-sparkless-core` and `robin-sparkless-expr` may be published for advanced or minimal-use cases. `make check` and CI build the whole workspace (`cargo build --workspace --all-features`, `cargo test --workspace --all-features`).
+
 ## Version pinning (CI and local)
 
 So that local development and CI use the same toolchains and tools:

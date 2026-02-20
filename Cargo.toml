@@ -1,5 +1,5 @@
 [workspace]
-members = []
+members = ["crates/robin-sparkless-core", "crates/robin-sparkless-expr", "."]
 
 [package]
 name = "robin-sparkless"
@@ -29,6 +29,8 @@ sql = ["dep:sqlparser"]
 delta = ["dep:deltalake", "dep:tokio"]
 
 [dependencies]
+robin-sparkless-core = { path = "crates/robin-sparkless-core" }
+robin-sparkless-expr = { path = "crates/robin-sparkless-expr" }
 polars = { version = "0.53", features = ["lazy", "csv", "parquet", "json", "temporal", "strings", "concat_str", "regex", "round_series", "abs", "dtype-categorical", "dtype-date", "dtype-datetime", "dtype-duration", "dtype-time", "rank", "is_in", "list_eval", "list_drop_nulls", "list_any_all", "cum_agg", "string_pad", "string_reverse", "repeat_by", "log", "month_end", "describe", "cross_join", "semi_anti_join", "extract_jsonpath", "dtype-struct", "random", "product", "moment"] }
 polars-plan = "0.53"
 serde = { version = "1.0", features = ["derive"] }
