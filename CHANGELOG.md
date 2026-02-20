@@ -15,6 +15,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 (none yet)
 
+## [0.13.0] - 2026-02-20
+
+### Added
+
+- **Workspace / crate split** — The crate is now a Cargo workspace with three publishable crates: `robin-sparkless` (root, main facade), `robin-sparkless-core` (schema, config, error, date utils), and `robin-sparkless-expr` (column, expressions, functions, type coercion, UDFs). The root crate re-exports the public API; advanced or minimal-use cases can depend on the subcrates directly. Release workflow publishes core, then expr, then main to crates.io in order.
+
+### Changed
+
+- **RELEASING.md** — Updated for workspace: version bump in all three `Cargo.toml` files, tag triggers CI which publishes all three crates.
+- **cargo audit** — Ignore bincode unmaintained advisory (RUSTSEC-2025-0141) in `.cargo/audit.toml` so `cargo audit` is quiet when used with polars 0.53.
+
 ## [0.12.2] - 2026-02-19
 
 ### Fixed
