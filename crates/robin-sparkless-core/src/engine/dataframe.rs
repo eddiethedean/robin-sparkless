@@ -25,7 +25,11 @@ pub trait DataFrameBackend: Send + Sync {
     fn filter(&self, condition: &ExprIr) -> Result<Box<dyn DataFrameBackend>, EngineError>;
     fn select(&self, exprs: &[ExprIr]) -> Result<Box<dyn DataFrameBackend>, EngineError>;
     fn select_columns(&self, columns: &[&str]) -> Result<Box<dyn DataFrameBackend>, EngineError>;
-    fn with_column(&self, name: &str, expr: &ExprIr) -> Result<Box<dyn DataFrameBackend>, EngineError>;
+    fn with_column(
+        &self,
+        name: &str,
+        expr: &ExprIr,
+    ) -> Result<Box<dyn DataFrameBackend>, EngineError>;
     fn join(
         &self,
         other: &dyn DataFrameBackend,
@@ -39,21 +43,25 @@ pub trait DataFrameBackend: Send + Sync {
         ascending: &[bool],
     ) -> Result<Box<dyn DataFrameBackend>, EngineError>;
     fn limit(&self, n: usize) -> Result<Box<dyn DataFrameBackend>, EngineError>;
-    fn union(&self, other: &dyn DataFrameBackend) -> Result<Box<dyn DataFrameBackend>, EngineError>;
+    fn union(&self, other: &dyn DataFrameBackend)
+    -> Result<Box<dyn DataFrameBackend>, EngineError>;
     fn union_by_name(
         &self,
         other: &dyn DataFrameBackend,
         allow_missing_columns: bool,
     ) -> Result<Box<dyn DataFrameBackend>, EngineError>;
-    fn distinct(&self, subset: Option<Vec<&str>>) -> Result<Box<dyn DataFrameBackend>, EngineError>;
+    fn distinct(&self, subset: Option<Vec<&str>>)
+    -> Result<Box<dyn DataFrameBackend>, EngineError>;
     fn drop_columns(&self, columns: &[&str]) -> Result<Box<dyn DataFrameBackend>, EngineError>;
     fn with_column_renamed(
         &self,
         old_name: &str,
         new_name: &str,
     ) -> Result<Box<dyn DataFrameBackend>, EngineError>;
-    fn cross_join(&self, other: &dyn DataFrameBackend)
-        -> Result<Box<dyn DataFrameBackend>, EngineError>;
+    fn cross_join(
+        &self,
+        other: &dyn DataFrameBackend,
+    ) -> Result<Box<dyn DataFrameBackend>, EngineError>;
 
     fn collect(&self) -> Result<CollectedRows, EngineError>;
     fn schema(&self) -> Result<StructType, EngineError>;

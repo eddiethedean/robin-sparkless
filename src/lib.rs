@@ -62,9 +62,9 @@ pub mod plan {
 // Engine-agnostic types and expression IR from core (no Polars in public API).
 pub use robin_sparkless_core::engine::CollectedRows;
 pub use robin_sparkless_core::expr::{
-    alias, call, col, count, eq, ge, gt, le, lit_bool, lit_f64, lit_i32, lit_i64, lit_null,
-    lit_str, lt, max, mean, min, ne, not_, or_, and_, is_in, is_null, sum, ExprIr, LiteralValue,
-    WhenBuilder, WhenThenBuilder, when, between,
+    ExprIr, LiteralValue, WhenBuilder, WhenThenBuilder, alias, and_, between, call, col, count, eq,
+    ge, gt, is_in, is_null, le, lit_bool, lit_f64, lit_i32, lit_i64, lit_null, lit_str, lt, max,
+    mean, min, ne, not_, or_, sum, when,
 };
 pub use robin_sparkless_core::{DataType, EngineError, StructField, StructType};
 pub use robin_sparkless_polars::{

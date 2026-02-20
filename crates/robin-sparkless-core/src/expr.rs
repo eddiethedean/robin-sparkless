@@ -137,9 +137,7 @@ impl WhenThenBuilder {
 
 /// Start a when(condition).then(...).otherwise(...) chain.
 pub fn when(condition: ExprIr) -> WhenBuilder {
-    WhenBuilder {
-        condition,
-    }
+    WhenBuilder { condition }
 }
 
 // ---------- Common binary ops as ExprIr builders ----------

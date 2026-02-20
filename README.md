@@ -170,8 +170,8 @@ This repository is a **Cargo workspace**. The main library is **robin-sparkless*
 | `cargo build --workspace --all-features` | Build all workspace crates with optional features |
 | `cargo test` | Run Rust tests |
 | `make test` | Run Rust tests (wrapper for `cargo test --workspace`) |
-| `make check` | Rust only: format check, clippy, audit, deny, Rust tests. Use `make -j5 check` to run the five jobs in parallel. |
-| `make check-full` | Full Rust check suite (what CI runs): `fmt --check`, clippy, audit, deny, tests. |
+| `make check` | Rust only: format check, clippy, audit, deny, Rust tests. Runs fmt-check, audit, deny, and clippy in parallel (-j4), then tests. |
+| `make check-full` | Full Rust check suite (what CI runs): clean, then fmt-check/clippy/audit/deny in parallel, then tests. |
 | `make clean` | Remove `target/` (e.g. to free disk without running check; `check-full` already cleans before each run so binaries don't accumulate). |
 | `make fmt` | Format Rust code (run before check if you want to fix formatting). |
 | `make test-parity-phase-a` … `make test-parity-phase-g` | Run parity fixtures for a specific phase (see [PARITY_STATUS](docs/PARITY_STATUS.md)). |

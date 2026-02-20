@@ -8,8 +8,8 @@ mod common;
 
 use common::{small_people_df, spark};
 use polars::prelude::{col as pl_col, df, lit as pl_lit};
-use robin_sparkless::functions::{col, lit_i64};
 use robin_sparkless::JoinType;
+use robin_sparkless::functions::{col, lit_i64};
 
 /// Equivalent to `test_create_dataframe_and_collect` in
 /// `tests/python/test_robin_sparkless.py`.

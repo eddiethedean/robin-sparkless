@@ -13,15 +13,14 @@ fn main() -> Result<(), robin_sparkless::EngineError> {
     let config = SparklessConfig::from_env();
     let spark = SparkSession::from_config(&config);
 
-    let df = spark
-        .create_dataframe_engine(
-            vec![
-                (1i64, 100i64, "Alice".to_string()),
-                (2i64, 200i64, "Bob".to_string()),
-                (3i64, 300i64, "Charlie".to_string()),
-            ],
-            vec!["id", "score", "name"],
-        )?;
+    let df = spark.create_dataframe_engine(
+        vec![
+            (1i64, 100i64, "Alice".to_string()),
+            (2i64, 200i64, "Bob".to_string()),
+            (3i64, 300i64, "Charlie".to_string()),
+        ],
+        vec!["id", "score", "name"],
+    )?;
 
     // Simple pipeline: filter (ExprIr), then aggregate (ExprIr)
     let filtered = df.filter_expr_ir(&gt(col("id"), lit_i64(1)))?;

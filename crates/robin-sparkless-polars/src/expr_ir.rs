@@ -1,13 +1,13 @@
 //! Convert core ExprIr to Polars Expr. Used when the root API passes ExprIr into the backend.
 
-use polars::prelude::{col, lit, when, Expr};
+use polars::prelude::{Expr, col, lit, when};
 use robin_sparkless_core::{EngineError, ExprIr, LiteralValue};
 
 /// Convert engine-agnostic ExprIr into a Polars Expr.
 pub fn expr_ir_to_expr(ir: &ExprIr) -> Result<Expr, EngineError> {
     match ir {
         ExprIr::Column(name) => Ok(col(name)),
-        ExprIr::Lit(lv) => lit_from_core(lv).map_err(|e| EngineError::Internal(e)),
+        ExprIr::Lit(lv) => lit_from_core(lv).map_err(EngineError::Internal),
 
         ExprIr::Eq(a, b) => {
             let l = expr_ir_to_expr(a)?;
@@ -152,7 +152,11 @@ fn call_to_expr(name: &str, args: &[ExprIr]) -> Result<Expr, EngineError> {
             let e = expr_ir_to_expr(a)?;
             let name = match &args[1] {
                 ExprIr::Lit(LiteralValue::Str(s)) => s.as_str(),
-                _ => return Err(EngineError::User("alias second arg must be string literal".into())),
+                _ => {
+                    return Err(EngineError::User(
+                        "alias second arg must be string literal".into(),
+                    ));
+                }
             };
             Ok(e.alias(name))
         }

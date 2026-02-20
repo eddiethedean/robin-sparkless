@@ -1493,11 +1493,15 @@ fn apply_operations(
                                 .over(&partition_refs),
                             "lag" => {
                                 let val_col = value_column.as_deref().unwrap_or(order_col);
-                                robin_sparkless::functions::col(val_col).lag(1).over(&partition_refs)
+                                robin_sparkless::functions::col(val_col)
+                                    .lag(1)
+                                    .over(&partition_refs)
                             }
                             "lead" => {
                                 let val_col = value_column.as_deref().unwrap_or(order_col);
-                                robin_sparkless::functions::col(val_col).lead(1).over(&partition_refs)
+                                robin_sparkless::functions::col(val_col)
+                                    .lead(1)
+                                    .over(&partition_refs)
                             }
                             "first_value" => {
                                 let val_col = value_column.as_deref().unwrap_or(order_col);
@@ -2284,7 +2288,7 @@ fn parse_with_column_expr(src: &str, mock_dates: bool) -> Result<Expr, String> {
         try_divide, try_multiply, try_subtract, try_to_number, try_to_timestamp, typeof_, ucase,
         unbase64, unhex, unix_date, unix_micros, unix_millis, unix_seconds, unix_timestamp,
         unix_timestamp_now, upper, url_decode, url_encode, user, version, weekday, weekofyear,
-        when, when_then_otherwise_null, width_bucket, zip_with,
+        when_then_otherwise_null, width_bucket, zip_with,
     };
 
     let s = src.trim();
@@ -2409,7 +2413,8 @@ fn parse_with_column_expr(src: &str, mock_dates: bool) -> Result<Expr, String> {
 
             // For when(cond).otherwise(val), use condition as both condition and "then"
             // This is a simplified interpretation
-            let when_expr = robin_sparkless::functions::when(&condition_col).otherwise(&otherwise_col);
+            let when_expr =
+                robin_sparkless::functions::when(&condition_col).otherwise(&otherwise_col);
             return Ok(when_expr.into_expr());
         } else {
             return Err("when expression must have .then() or .otherwise()".to_string());
