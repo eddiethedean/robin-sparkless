@@ -21,7 +21,7 @@ pub fn parse_sql(query: &str) -> Result<Statement, ParseError> {
     let dialect = GenericDialect {};
     let stmts = Parser::parse_sql(&dialect, query).map_err(|e| {
         ParseError(format!(
-            "SQL parse error: {}. Hint: only SELECT and CREATE SCHEMA/DATABASE/DROP TABLE/VIEW/SCHEMA are supported.",
+            "SQL parse error: {}. Hint: supported statements include SELECT, CREATE TABLE/VIEW/FUNCTION/SCHEMA/DATABASE, DROP TABLE/VIEW/SCHEMA.",
             e
         ))
     })?;
@@ -35,6 +35,7 @@ pub fn parse_sql(query: &str) -> Result<Statement, ParseError> {
     match &stmt {
         Statement::Query(_) => {}
         Statement::CreateSchema { .. } | Statement::CreateDatabase { .. } => {}
+        Statement::CreateTable(_) | Statement::CreateView(_) | Statement::CreateFunction(_) => {}
         Statement::Drop {
             object_type:
                 sqlparser::ast::ObjectType::Table
@@ -44,10 +45,35 @@ pub fn parse_sql(query: &str) -> Result<Statement, ParseError> {
         } => {}
         _ => {
             return Err(ParseError(format!(
-                "SQL: only SELECT, CREATE SCHEMA/DATABASE, and DROP TABLE/VIEW/SCHEMA are supported, got {:?}.",
+                "SQL: statement type not supported, got {:?}.",
                 stmt
             )));
         }
     }
     Ok(stmt)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sqlparser::ast::Statement;
+
+    #[test]
+    fn test_issue_652_create_table() {
+        let stmt = parse_sql("CREATE TABLE t (a INT)").unwrap();
+        assert!(matches!(stmt, Statement::CreateTable(_)));
+    }
+
+    #[test]
+    fn test_issue_652_create_view() {
+        let stmt = parse_sql("CREATE VIEW v AS SELECT 1").unwrap();
+        assert!(matches!(stmt, Statement::CreateView(_)));
+    }
+
+    #[test]
+    fn test_issue_652_create_function() {
+        // sqlparser expects parentheses for the parameter list (possibly empty)
+        let stmt = parse_sql("CREATE FUNCTION f() AS 'com.example.UDF'").unwrap();
+        assert!(matches!(stmt, Statement::CreateFunction(_)));
+    }
 }
