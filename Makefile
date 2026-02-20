@@ -1,4 +1,4 @@
-.PHONY: build build-release build-all-features test test-rust check check-full fmt fmt-check clippy audit outdated deny \
+.PHONY: build build-release build-all-features test test-rust check check-full check-crate fmt fmt-check clippy audit outdated deny \
 	test-parity-phase-a test-parity-phase-b test-parity-phase-c test-parity-phase-d \
 	test-parity-phase-e test-parity-phase-f test-parity-phase-g test-parity-phases \
 	sparkless-parity all
@@ -38,10 +38,29 @@ test: test-rust
 check: fmt-check audit deny clippy test-rust-all-features
 	@echo "All checks passed"
 
+# Run checks for a single crate only (faster when editing one crate).
+# Usage: make check-crate CRATE=spark-sql-parser
+# Runs: fmt-check, audit, deny, then clippy and test for that package only.
+check-crate:
+	@if [ -z "$(CRATE)" ]; then echo "Usage: make check-crate CRATE=<package-name>"; exit 1; fi
+	$(MAKE) fmt-check
+	$(MAKE) audit
+	$(MAKE) deny
+	cargo clippy -p $(CRATE) --all-features --all-targets -- -D warnings
+	cargo test -p $(CRATE) --all-features
+	@echo "check-crate ($(CRATE)): format, clippy, audit, deny, tests passed"
+
 # Backwards-compatible alias for full check suite (historically included Python).
-# Now runs the Rust-only checks defined in `check`.
-check-full: check
-	@echo "check-full (Rust-only): format, clippy, audit, deny, tests"
+# With CRATE set, runs checks for that package only (faster when editing one crate).
+# Usage: make check-full  OR  make check-full CRATE=spark-sql-parser
+check-full:
+	@if [ -n "$(CRATE)" ]; then \
+	  $(MAKE) check-crate CRATE=$(CRATE); \
+	  echo "check-full (crate $(CRATE)): format, clippy, audit, deny, tests"; \
+	else \
+	  $(MAKE) check; \
+	  echo "check-full (Rust-only): format, clippy, audit, deny, tests"; \
+	fi
 
 # Format code
 fmt:
