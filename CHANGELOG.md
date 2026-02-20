@@ -15,6 +15,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 (none yet)
 
+## [0.14.0] - 2026-02-20
+
+### Added
+
+- **spark-sql-parser** — SQL parsing extracted to a separate crate `spark-sql-parser`; robin-sparkless uses it when the `sql` feature is enabled. Release CI now publishes spark-sql-parser, then core, expr, and main.
+
+### Changed
+
+- **Release workflow** — Publish order: spark-sql-parser, robin-sparkless-core, robin-sparkless-expr, robin-sparkless. See docs/RELEASING.md.
+
 ## [0.13.0] - 2026-02-20
 
 ### Added

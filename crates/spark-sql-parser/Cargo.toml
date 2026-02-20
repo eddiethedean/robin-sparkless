@@ -1,0 +1,11 @@
+[package]
+name = "spark-sql-parser"
+version = "0.1.0"
+edition = "2024"
+description = "Parse SQL into sqlparser AST (Spark-style: SELECT, CREATE SCHEMA/DATABASE, DROP TABLE/VIEW/SCHEMA)."
+license = "MIT"
+repository = "https://github.com/eddiethedean/robin-sparkless"
+
+[dependencies]
+sqlparser = "0.61"
+thiserror = "2.0"
