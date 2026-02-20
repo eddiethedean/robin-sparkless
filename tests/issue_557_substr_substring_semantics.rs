@@ -3,7 +3,7 @@
 mod common;
 
 use common::spark;
-use robin_sparkless::{col, substring};
+use robin_sparkless::functions::{col, substring};
 use serde_json::json;
 
 #[test]

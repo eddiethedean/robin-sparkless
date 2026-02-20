@@ -7,7 +7,8 @@ mod translator;
 use crate::dataframe::DataFrame;
 use crate::session::SparkSession;
 use polars::prelude::PolarsError;
-use sqlparser::ast::Statement;
+/// SQL AST statement type; re-exported for API consumers (e.g. root crate).
+pub use sqlparser::ast::Statement;
 
 /// Parse a single SQL statement using [spark_sql_parser]. Returns PolarsError for compatibility with session/translator.
 fn parse_sql_to_statement(query: &str) -> Result<Statement, PolarsError> {

@@ -6,7 +6,7 @@
 mod common;
 
 use common::spark;
-use robin_sparkless::{col, desc_nulls_last};
+use robin_sparkless::functions::{col, desc_nulls_last};
 
 #[test]
 fn issue_540_desc_nulls_last() {

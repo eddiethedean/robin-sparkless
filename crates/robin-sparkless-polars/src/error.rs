@@ -1,15 +1,9 @@
-//! Engine error type for embedders.
-//!
-//! Use [`EngineError`] when you want to map robin-sparkless and Polars errors
-//! to a single type (e.g. for FFI or CLI) without depending on Polars error types.
+//! Engine error type for embedders (Polars conversion in this crate).
 
 use polars::error::PolarsError;
 use std::fmt;
 
 /// Unified error type for robin-sparkless operations.
-///
-/// Embedders (Python, Node, CLI) can map these variants to native errors
-/// without depending on `PolarsError`.
 #[derive(Debug)]
 pub enum EngineError {
     /// User-facing error (invalid input, unsupported operation).
@@ -55,6 +49,20 @@ impl From<robin_sparkless_core::EngineError> for EngineError {
     }
 }
 
+impl From<EngineError> for robin_sparkless_core::EngineError {
+    fn from(e: EngineError) -> Self {
+        use robin_sparkless_core::EngineError as Core;
+        match e {
+            EngineError::User(s) => Core::User(s),
+            EngineError::Internal(s) => Core::Internal(s),
+            EngineError::Io(s) => Core::Io(s),
+            EngineError::Sql(s) => Core::Sql(s),
+            EngineError::NotFound(s) => Core::NotFound(s),
+            EngineError::Other(s) => Core::Other(s),
+        }
+    }
+}
+
 impl From<PolarsError> for EngineError {
     fn from(e: PolarsError) -> Self {
         let msg = e.to_string();
@@ -62,7 +70,6 @@ impl From<PolarsError> for EngineError {
             PolarsError::ColumnNotFound(_) => EngineError::NotFound(msg),
             PolarsError::InvalidOperation(_) => EngineError::User(msg),
             PolarsError::ComputeError(_) => {
-                // Fixes #646: surface clear message when filter predicate is not Boolean.
                 let lower = msg.to_lowercase();
                 if lower.contains("filter") || lower.contains("predicate") {
                     if lower.contains("boolean")
@@ -92,5 +99,32 @@ impl From<serde_json::Error> for EngineError {
 impl From<std::io::Error> for EngineError {
     fn from(e: std::io::Error) -> Self {
         EngineError::Io(e.to_string())
+    }
+}
+
+/// Map PolarsError to core EngineError for trait boundaries (core trait methods return core::EngineError).
+pub fn polars_to_core_error(e: PolarsError) -> robin_sparkless_core::EngineError {
+    use robin_sparkless_core::EngineError as Core;
+    let msg = e.to_string();
+    match &e {
+        PolarsError::ColumnNotFound(_) => Core::NotFound(msg),
+        PolarsError::InvalidOperation(_) => Core::User(msg),
+        PolarsError::ComputeError(_) => {
+            let lower = msg.to_lowercase();
+            if lower.contains("filter") || lower.contains("predicate") {
+                if lower.contains("boolean")
+                    || lower.contains("bool")
+                    || lower.contains("string")
+                {
+                    return Core::User(format!(
+                        "filter predicate must be Boolean, got non-Boolean expression: {}",
+                        msg
+                    ));
+                }
+            }
+            Core::Internal(msg)
+        }
+        PolarsError::IO { .. } => Core::Io(msg),
+        _ => Core::Other(msg),
     }
 }

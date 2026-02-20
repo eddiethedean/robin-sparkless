@@ -11,6 +11,13 @@ pub struct DataFrameStat<'a> {
 }
 
 impl<'a> DataFrameStat<'a> {
+    /// Create from a reference to a DataFrame (for root crate wrapper).
+    pub fn new(df: &'a DataFrame) -> Self {
+        DataFrameStat { df }
+    }
+}
+
+impl<'a> DataFrameStat<'a> {
     /// Sample covariance between two columns. PySpark stat.cov. ddof=1 for sample covariance.
     pub fn cov(&self, col1: &str, col2: &str) -> Result<f64, PolarsError> {
         let c1 = self.df.resolve_column_name(col1)?;

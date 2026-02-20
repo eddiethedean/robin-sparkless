@@ -564,7 +564,7 @@ pub fn regr_r2_expr(y_col: &str, x_col: &str) -> Expr {
 ///
 /// # Example
 /// ```
-/// use robin_sparkless_expr::functions::{col, lit_i64, lit_str, when};
+/// use robin_sparkless_polars::functions::{col, lit_i64, lit_str, when};
 ///
 /// // when(condition).then(value).otherwise(fallback)
 /// let expr = when(&col("age").gt(lit_i64(18).into_expr()))
@@ -2256,7 +2256,7 @@ pub fn concat_ws(separator: &str, columns: &[&Column]) -> Column {
 ///
 /// # Example
 /// ```
-/// use robin_sparkless_expr::{col, Column};
+/// use robin_sparkless_polars::{col, Column};
 /// let salary_col = col("salary");
 /// let rn = salary_col.row_number(true).over(&["dept"]);
 /// ```
@@ -2318,7 +2318,7 @@ pub fn nth_value(column: &Column, n: i64, partition_by: &[&str], descending: boo
 ///
 /// # Example
 /// ```
-/// use robin_sparkless_expr::functions::{col, lit_i64, coalesce};
+/// use robin_sparkless_polars::functions::{col, lit_i64, coalesce};
 ///
 /// // coalesce(col("a"), col("b"), lit(0))
 /// let expr = coalesce(&[&col("a"), &col("b"), &lit_i64(0)]);

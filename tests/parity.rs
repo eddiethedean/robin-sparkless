@@ -10,6 +10,9 @@ use polars::prelude::{
     DataFrame as PlDataFrame, DataType, Expr, NULL, NamedFrom, PolarsError, Series, TimeUnit, col,
     len, lit,
 };
+use robin_sparkless::functions::{
+    asc_nulls_first, asc_nulls_last, col as rs_col, desc_nulls_first, desc_nulls_last,
+};
 use robin_sparkless::plan;
 use robin_sparkless::{DataFrame, JoinType, SparkSession};
 use serde::Deserialize;
@@ -764,14 +767,11 @@ fn apply_operations(
                     ));
                 }
                 if let Some(nf) = nulls_first {
-                    use robin_sparkless::{
-                        asc_nulls_first, asc_nulls_last, col, desc_nulls_first, desc_nulls_last,
-                    };
                     let mut sort_orders = Vec::with_capacity(columns.len());
                     for (i, col_name) in columns.iter().enumerate() {
                         let asc = ascending.get(i).copied().unwrap_or(true);
                         let nf_val = nf.get(i).copied().unwrap_or(true);
-                        let c = col(col_name);
+                        let c = rs_col(col_name);
                         let order = if asc {
                             if nf_val {
                                 asc_nulls_first(&c)
@@ -1392,7 +1392,7 @@ fn apply_operations(
                     "percent_rank" => {
                         df = df.with_column_expr(
                             "_pr_rank",
-                            robin_sparkless::col(order_col)
+                            robin_sparkless::functions::col(order_col)
                                 .rank(descending)
                                 .over(&partition_refs)
                                 .into_expr(),
@@ -1411,7 +1411,7 @@ fn apply_operations(
                     "cume_dist" => {
                         df = df.with_column_expr(
                             "_cd_rn",
-                            robin_sparkless::col(order_col)
+                            robin_sparkless::functions::col(order_col)
                                 .row_number(descending)
                                 .over(&partition_refs)
                                 .into_expr(),
@@ -1431,7 +1431,7 @@ fn apply_operations(
                         let n_buckets = n.unwrap_or(4);
                         df = df.with_column_expr(
                             "_nt_rank",
-                            robin_sparkless::col(order_col)
+                            robin_sparkless::functions::col(order_col)
                                 .row_number(descending)
                                 .over(&partition_refs)
                                 .into_expr(),
@@ -1459,7 +1459,7 @@ fn apply_operations(
                         // nth_value = value at rank n in the frame, or null if current row < n.
                         df = df.with_column_expr(
                             "_nv_rn",
-                            robin_sparkless::col(order_col)
+                            robin_sparkless::functions::col(order_col)
                                 .row_number(descending)
                                 .over(&partition_refs)
                                 .into_expr(),
@@ -1467,7 +1467,7 @@ fn apply_operations(
                         df = df.with_column_expr(
                             "_nv_val",
                             polars::prelude::when(col("_nv_rn").eq(lit(n_val)))
-                                .then(robin_sparkless::col(val_col).into_expr())
+                                .then(robin_sparkless::functions::col(val_col).into_expr())
                                 .otherwise(lit(NULL))
                                 .max()
                                 .over(partition_exprs.clone()),
@@ -1482,26 +1482,26 @@ fn apply_operations(
                     }
                     _ => {
                         let window_expr = match func.as_str() {
-                            "row_number" => robin_sparkless::col(order_col)
+                            "row_number" => robin_sparkless::functions::col(order_col)
                                 .row_number(descending)
                                 .over(&partition_refs),
-                            "rank" => robin_sparkless::col(order_col)
+                            "rank" => robin_sparkless::functions::col(order_col)
                                 .rank(descending)
                                 .over(&partition_refs),
-                            "dense_rank" => robin_sparkless::col(order_col)
+                            "dense_rank" => robin_sparkless::functions::col(order_col)
                                 .dense_rank(descending)
                                 .over(&partition_refs),
                             "lag" => {
                                 let val_col = value_column.as_deref().unwrap_or(order_col);
-                                robin_sparkless::col(val_col).lag(1).over(&partition_refs)
+                                robin_sparkless::functions::col(val_col).lag(1).over(&partition_refs)
                             }
                             "lead" => {
                                 let val_col = value_column.as_deref().unwrap_or(order_col);
-                                robin_sparkless::col(val_col).lead(1).over(&partition_refs)
+                                robin_sparkless::functions::col(val_col).lead(1).over(&partition_refs)
                             }
                             "first_value" => {
                                 let val_col = value_column.as_deref().unwrap_or(order_col);
-                                robin_sparkless::col(val_col)
+                                robin_sparkless::functions::col(val_col)
                                     .first_value()
                                     .over(&partition_refs)
                             }
@@ -1509,7 +1509,7 @@ fn apply_operations(
                                 let val_col = value_column.as_deref().unwrap_or(order_col);
                                 // PySpark default frame is ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW;
                                 // last_value in that frame is the value at the current row (identity).
-                                robin_sparkless::col(val_col)
+                                robin_sparkless::functions::col(val_col)
                             }
                             other => {
                                 return Err(PolarsError::ComputeError(
@@ -2002,7 +2002,7 @@ fn parse_comparison_expr(
         } else {
             right_col_name_raw.to_string()
         };
-        use robin_sparkless::col as robin_col;
+        use robin_sparkless::functions::col as robin_col;
         robin_col(right_col_name.as_str()).into_expr()
     } else if (right_side.starts_with('\'') && right_side.ends_with('\''))
         || (right_side.starts_with('"') && right_side.ends_with('"'))
@@ -2029,7 +2029,7 @@ fn parse_comparison_expr(
     let expr = if right_expr_is_column {
         // Column-to-column comparison: use null-aware _pyspark methods
         use polars::prelude::DataType;
-        use robin_sparkless::col as robin_col;
+        use robin_sparkless::functions::col as robin_col;
         let left_col = robin_col(col_name.as_str());
         let right_col = robin_sparkless::Column::from_expr(right_expr, None);
 
@@ -2212,7 +2212,7 @@ fn parse_comma_separated_args(inner: &str) -> Vec<&str> {
 
 /// Parse col/lit from a part string
 fn parse_column_or_literal_for_concat(part: &str) -> Result<robin_sparkless::Column, String> {
-    use robin_sparkless::{col, lit_i64, lit_str};
+    use robin_sparkless::functions::{col, lit_i64, lit_str};
     let part = part.trim();
     if part.starts_with("col(") {
         let content = &part[4..part.len() - 1];
@@ -2256,12 +2256,13 @@ fn json_value_to_lit(v: &serde_json::Value) -> Result<Expr, String> {
 /// Parse expressions for withColumn operations (when, coalesce, string funcs, array funcs, etc.)
 fn parse_with_column_expr(src: &str, mock_dates: bool) -> Result<Expr, String> {
     use polars::prelude::concat_list;
+    use robin_sparkless::functions::{col, lit_i64, lit_str};
     use robin_sparkless::{
         abs, acos, add_months, array_append, array_compact, array_contains, array_distinct,
         array_except, array_insert, array_intersect, array_prepend, array_size, array_sum,
         array_union, arrays_overlap, arrays_zip, ascii, asin, assert_true, atan, atan2, base64,
         bin, bit_and, bit_count, bit_get, bit_length, bit_or, bit_xor, bitwise_not, bround, btrim,
-        cast, cbrt, ceiling, char as rs_char, char_length, chr, coalesce, col, concat, concat_ws,
+        cast, cbrt, ceiling, char as rs_char, char_length, chr, coalesce, concat, concat_ws,
         contains, conv, cos, cosh, cot, create_map, csc, curdate, current_catalog,
         current_database, current_date, current_schema, current_timestamp, current_user, date_add,
         date_format, date_from_unix_date, date_sub, datediff, day, dayname, dayofmonth, dayofweek,
@@ -2269,7 +2270,7 @@ fn parse_with_column_expr(src: &str, mock_dates: bool) -> Result<Expr, String> {
         find_in_set, format_number, format_string, from_unixtime, from_utc_timestamp, get, getbit,
         greatest, hash, hex, hour, hypot, ilike, initcap, input_file_name, instr, isin_i64,
         isin_str, isnan, isnotnull, isnull, json_array_length, last_day, lcase, least, left,
-        length, like, lit_str, ln, localtimestamp, locate, log, log10, lower, lpad, make_date,
+        length, like, ln, localtimestamp, locate, log, log10, lower, lpad, make_date,
         make_timestamp, map_concat, map_contains_key, map_filter, map_from_entries, map_zip_with,
         md5, minute, monotonically_increasing_id, months_between, named_struct, nanvl, negate,
         next_day, now, nullif, nvl, nvl2, octet_length, overlay, parse_url, pi, pmod, positive,
@@ -2296,7 +2297,7 @@ fn parse_with_column_expr(src: &str, mock_dates: bool) -> Result<Expr, String> {
         let err_msg = parts
             .get(1)
             .map(|p| p.trim_matches(['\'', '"']).to_string());
-        let c = col(col_name);
+        let c = robin_sparkless::functions::col(col_name);
         return Ok(assert_true(&c, err_msg.as_deref()).into_expr());
     }
 
@@ -2388,10 +2389,10 @@ fn parse_with_column_expr(src: &str, mock_dates: bool) -> Result<Expr, String> {
             let then_val = parse_column_or_literal(then_str.trim())?;
             let otherwise_val = parse_column_or_literal(otherwise_str)?;
 
-            // Build when expression
+            // Build when expression (use functions::when for Column API)
             let then_col = robin_sparkless::Column::from_expr(then_val, None);
             let otherwise_col = robin_sparkless::Column::from_expr(otherwise_val, None);
-            let when_expr = when(&condition_col)
+            let when_expr = robin_sparkless::functions::when(&condition_col)
                 .then(&then_col)
                 .otherwise(&otherwise_col);
             return Ok(when_expr.into_expr());
@@ -2408,7 +2409,7 @@ fn parse_with_column_expr(src: &str, mock_dates: bool) -> Result<Expr, String> {
 
             // For when(cond).otherwise(val), use condition as both condition and "then"
             // This is a simplified interpretation
-            let when_expr = when(&condition_col).otherwise(&otherwise_col);
+            let when_expr = robin_sparkless::functions::when(&condition_col).otherwise(&otherwise_col);
             return Ok(when_expr.into_expr());
         } else {
             return Err("when expression must have .then() or .otherwise()".to_string());
@@ -3845,7 +3846,6 @@ fn parse_with_column_expr(src: &str, mock_dates: bool) -> Result<Expr, String> {
                     columns.push(lit_str(lit_val));
                 } else if let Ok(num) = part.parse::<i64>() {
                     // Numeric literal
-                    use robin_sparkless::lit_i64;
                     columns.push(lit_i64(num));
                 } else {
                     return Err(format!("unexpected part in coalesce: {part}"));
@@ -4847,7 +4847,7 @@ fn parse_with_column_expr(src: &str, mock_dates: bool) -> Result<Expr, String> {
 
 /// Parse a column reference or literal value
 fn parse_column_or_literal(s: &str) -> Result<Expr, String> {
-    use robin_sparkless::{col, lit_i64, lit_str};
+    use robin_sparkless::functions::{col, lit_i64, lit_str};
     let s = s.trim();
 
     if s.starts_with("col(") {
@@ -4890,7 +4890,7 @@ fn parse_column_or_literal(s: &str) -> Result<Expr, String> {
             Err(format!("col(...) must wrap a quoted column name, got: {s}"))
         }
     } else if s.starts_with("lit(") {
-        use robin_sparkless::lit_f64;
+        use robin_sparkless::functions::{lit_f64, lit_i64, lit_str};
         let lit_content = s[4..s.len() - 1].trim();
         // Handle lit(None) for null literals
         if lit_content == "None" {

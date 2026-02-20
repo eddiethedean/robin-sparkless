@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/robin-sparkless-core", "crates/robin-sparkless-expr", "crates/spark-sql-parser", "."]
+members = ["crates/robin-sparkless-core", "crates/robin-sparkless-polars", "crates/spark-sql-parser", "."]
 
 [package]
 name = "robin-sparkless"
@@ -25,31 +25,13 @@ crate-type = ["rlib"]
 
 [features]
 default = []
-sql = ["dep:spark-sql-parser", "dep:sqlparser"]
-delta = ["dep:deltalake", "dep:tokio"]
+sql = ["robin-sparkless-polars/sql"]
+delta = ["robin-sparkless-polars/delta"]
 
 [dependencies]
-# version required for crates.io; path used for local workspace
 robin-sparkless-core = { version = "0.14", path = "crates/robin-sparkless-core" }
-robin-sparkless-expr = { version = "0.14", path = "crates/robin-sparkless-expr" }
-polars = { version = "0.53", features = ["lazy", "csv", "parquet", "json", "temporal", "strings", "concat_str", "regex", "round_series", "abs", "dtype-categorical", "dtype-date", "dtype-datetime", "dtype-duration", "dtype-time", "rank", "is_in", "list_eval", "list_drop_nulls", "list_any_all", "cum_agg", "string_pad", "string_reverse", "repeat_by", "log", "month_end", "describe", "cross_join", "semi_anti_join", "extract_jsonpath", "dtype-struct", "random", "product", "moment"] }
-polars-plan = "0.53"
-serde = { version = "1.0", features = ["derive"] }
-chrono = "0.4"
-chrono-tz = "0.9"
+robin-sparkless-polars = { version = "0.14", path = "crates/robin-sparkless-polars" }
 serde_json = "1.0"
-spark-sql-parser = { version = "0.2", path = "crates/spark-sql-parser", optional = true }
-sqlparser = { version = "0.61", optional = true }
-deltalake = { version = "0.31", optional = true }
-tokio = { version = "1", optional = true, features = ["rt", "rt-multi-thread", "fs", "io-util"] }
-url = "2"
-# Pin to address RUSTSEC-2026-0007 (integer overflow in BytesMut::reserve; transitive via polars/deltalake)
-bytes = "1.11.1"
-# colRegex (column name pattern matching)
-regex = "1.12"
-# rand/randn with seed support
-rand = "0.8"
-rand_distr = "0.4"
 
 # Use git sources when crates.io/cache is broken (e.g. "no targets specified" in manifest,
 # or missing example bin in published tarball).
@@ -63,6 +45,10 @@ anes = { path = "vendor/anes" }
 [dev-dependencies]
 chrono = "0.4"
 polars = { version = "0.53", features = ["lazy", "csv", "parquet", "json", "temporal", "strings", "concat_str", "regex", "round_series", "abs", "dtype-categorical", "dtype-date", "dtype-datetime", "dtype-duration", "dtype-time", "test", "rank", "is_in", "list_eval", "list_drop_nulls", "list_any_all", "cum_agg", "string_pad", "string_reverse", "repeat_by", "log", "month_end", "describe", "cross_join", "semi_anti_join", "extract_jsonpath", "dtype-struct", "product", "moment"] }
+rand = "0.8"
+rand_distr = "0.4"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
 tempfile = "3"
 criterion = "0.5"
 

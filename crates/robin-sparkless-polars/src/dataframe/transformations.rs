@@ -1103,6 +1103,11 @@ pub struct DataFrameNa<'a> {
 }
 
 impl<'a> DataFrameNa<'a> {
+    /// Create from a reference to a DataFrame (for root crate wrapper).
+    pub fn new(df: &'a DataFrame) -> Self {
+        DataFrameNa { df }
+    }
+
     /// Fill nulls with the given value. PySpark na.fill(value, subset=...).
     pub fn fill(&self, value: Expr, subset: Option<Vec<&str>>) -> Result<DataFrame, PolarsError> {
         fillna(self.df, value, subset, self.df.case_sensitive)

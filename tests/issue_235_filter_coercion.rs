@@ -11,7 +11,8 @@
 
 use chrono::NaiveDate;
 use polars::prelude::{DataType, NamedFrom, Series};
-use robin_sparkless::{DataFrame, col, lit_i64, lit_str};
+use robin_sparkless::functions::{col, lit_i64, lit_str};
+use robin_sparkless::DataFrame;
 
 fn df_with_string_column() -> DataFrame {
     let s = Series::new("str_col".into(), &["123", "456"]);

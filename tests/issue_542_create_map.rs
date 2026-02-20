@@ -5,7 +5,7 @@
 mod common;
 
 use common::spark;
-use robin_sparkless::{col, create_map, lit_str};
+use robin_sparkless::functions::{col, create_map, lit_str};
 use serde_json::json;
 
 #[test]

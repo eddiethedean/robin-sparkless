@@ -1,8 +1,8 @@
-//! Traits for conversion to and from root-owned DataFrames.
+//! Traits for idiomatic conversion to and from robin-sparkless DataFrames.
 
 use crate::dataframe::DataFrame;
+use crate::error::EngineError;
 use crate::session::SparkSession;
-use crate::EngineError;
 use serde_json::Value as JsonValue;
 use std::collections::HashMap;
 
@@ -13,7 +13,9 @@ pub trait IntoRobinDf {
 
 impl IntoRobinDf for Vec<(i64, i64, String)> {
     fn into_robin_df(self, session: &SparkSession) -> Result<DataFrame, EngineError> {
-        session.create_dataframe_engine(self, vec!["c0", "c1", "c2"])
+        session
+            .create_dataframe(self, vec!["c0", "c1", "c2"])
+            .map_err(Into::into)
     }
 }
 
@@ -67,6 +69,7 @@ impl FromRobinDf for Vec<HashMap<String, JsonValue>> {
     }
 }
 
+/// Rows as arrays of values in column order (order from [`DataFrame::columns`]).
 impl FromRobinDf for Vec<Vec<JsonValue>> {
     fn from_robin_df(df: &DataFrame) -> Result<Self, EngineError> {
         let names = df.columns_engine()?;

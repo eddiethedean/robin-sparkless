@@ -6,7 +6,8 @@
 
 use robin_sparkless::dataframe::SelectItem;
 use robin_sparkless::plan;
-use robin_sparkless::{SparkSession, col};
+use robin_sparkless::functions::col;
+use robin_sparkless::SparkSession;
 use serde_json::Value as JsonValue;
 use serde_json::json;
 

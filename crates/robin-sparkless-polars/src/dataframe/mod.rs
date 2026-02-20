@@ -1935,6 +1935,11 @@ fn any_value_to_json(av: &AnyValue<'_>, dtype: &DataType) -> JsonValue {
     }
 }
 
+/// Broadcast hint - no-op that returns the same DataFrame (PySpark broadcast).
+pub fn broadcast(df: &DataFrame) -> DataFrame {
+    df.clone()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
