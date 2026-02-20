@@ -3,8 +3,8 @@
 //! Covers: plan select/withColumn with cast and try_cast expressions,
 //! int->string, string->bigint (try_cast null on invalid).
 
-use robin_sparkless::plan;
 use robin_sparkless::SparkSession;
+use robin_sparkless::plan;
 use serde_json::json;
 
 fn spark() -> SparkSession {
