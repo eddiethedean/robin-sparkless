@@ -6,7 +6,7 @@
 
 use robin_sparkless::dataframe::SelectItem;
 use robin_sparkless::plan;
-use robin_sparkless::{col, SparkSession};
+use robin_sparkless::{SparkSession, col};
 use serde_json::Value as JsonValue;
 use serde_json::json;
 
@@ -14,10 +14,7 @@ use serde_json::json;
 fn test_plan_filter_with_bare_string_column_ref() {
     // #644: plan "filter" with payload as bare column name (string) should be accepted as column ref.
     let spark = SparkSession::builder().get_or_create();
-    let rows = vec![
-        vec![json!(1), json!("a")],
-        vec![json!(2), json!("b")],
-    ];
+    let rows = vec![vec![json!(1), json!("a")], vec![json!(2), json!("b")]];
     let schema = vec![
         ("id".to_string(), "bigint".to_string()),
         ("name".to_string(), "string".to_string()),
@@ -43,20 +40,15 @@ fn test_plan_filter_with_bare_string_column_ref() {
 fn test_plan_filter_with_object_column_ref() {
     // Filter with proper boolean expression.
     let spark = SparkSession::builder().get_or_create();
-    let rows = vec![
-        vec![json!(1), json!("a")],
-        vec![json!(2), json!("b")],
-    ];
+    let rows = vec![vec![json!(1), json!("a")], vec![json!(2), json!("b")]];
     let schema = vec![
         ("id".to_string(), "bigint".to_string()),
         ("name".to_string(), "string".to_string()),
     ];
-    let plan_steps = vec![
-        json!({
-            "op": "filter",
-            "payload": {"op": "gt", "left": {"col": "id"}, "right": {"lit": 1}}
-        }),
-    ];
+    let plan_steps = vec![json!({
+        "op": "filter",
+        "payload": {"op": "gt", "left": {"col": "id"}, "right": {"lit": 1}}
+    })];
     let df = plan::execute_plan(&spark, rows, schema, &plan_steps).unwrap();
     let out = df.collect_as_json_rows_engine().unwrap();
     assert_eq!(out.len(), 1);
@@ -67,15 +59,14 @@ fn test_plan_filter_with_object_column_ref() {
 fn test_select_items_mixed_names_and_exprs() {
     // #645: select with mix of column names and expressions.
     let spark = SparkSession::builder().get_or_create();
-    let rows = vec![
-        vec![json!(1), json!(10)],
-        vec![json!(2), json!(20)],
-    ];
+    let rows = vec![vec![json!(1), json!(10)], vec![json!(2), json!(20)]];
     let schema = vec![
         ("a".to_string(), "bigint".to_string()),
         ("b".to_string(), "bigint".to_string()),
     ];
-    let df = spark.create_dataframe_from_rows_engine(rows, schema).unwrap();
+    let df = spark
+        .create_dataframe_from_rows_engine(rows, schema)
+        .unwrap();
     let items = vec![
         SelectItem::ColumnName("a"),
         SelectItem::Expr(col("b").alias("b_doubled").into_expr()),
@@ -90,7 +81,9 @@ fn test_select_items_mixed_names_and_exprs() {
         Some(1)
     );
     assert_eq!(
-        rows[0].get("b_doubled").and_then(|v: &JsonValue| v.as_i64()),
+        rows[0]
+            .get("b_doubled")
+            .and_then(|v: &JsonValue| v.as_i64()),
         Some(10)
     );
 }

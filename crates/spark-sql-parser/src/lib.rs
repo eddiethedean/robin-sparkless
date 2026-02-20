@@ -138,57 +138,69 @@ mod tests {
 
     #[test]
     fn query_with_cte() {
-        assert_parses_to("WITH cte AS (SELECT 1) SELECT * FROM cte", |s| matches!(s, Statement::Query(_)));
+        assert_parses_to("WITH cte AS (SELECT 1) SELECT * FROM cte", |s| {
+            matches!(s, Statement::Query(_))
+        });
     }
 
     #[test]
     fn query_create_schema() {
-        assert_parses_to("CREATE SCHEMA s", |s| matches!(s, Statement::CreateSchema { .. }));
+        assert_parses_to("CREATE SCHEMA s", |s| {
+            matches!(s, Statement::CreateSchema { .. })
+        });
     }
 
     #[test]
     fn query_create_database() {
-        assert_parses_to("CREATE DATABASE d", |s| matches!(s, Statement::CreateDatabase { .. }));
+        assert_parses_to("CREATE DATABASE d", |s| {
+            matches!(s, Statement::CreateDatabase { .. })
+        });
     }
 
     // --- DDL: CREATE (issue #652) ---
 
     #[test]
     fn test_issue_652_create_table() {
-        assert_parses_to("CREATE TABLE t (a INT)", |s| matches!(s, Statement::CreateTable(_)));
+        assert_parses_to("CREATE TABLE t (a INT)", |s| {
+            matches!(s, Statement::CreateTable(_))
+        });
     }
 
     #[test]
     fn test_issue_652_create_view() {
-        assert_parses_to("CREATE VIEW v AS SELECT 1", |s| matches!(s, Statement::CreateView(_)));
+        assert_parses_to("CREATE VIEW v AS SELECT 1", |s| {
+            matches!(s, Statement::CreateView(_))
+        });
     }
 
     #[test]
     fn test_issue_652_create_function() {
-        assert_parses_to(
-            "CREATE FUNCTION f() AS 'com.example.UDF'",
-            |s| matches!(s, Statement::CreateFunction(_)),
-        );
+        assert_parses_to("CREATE FUNCTION f() AS 'com.example.UDF'", |s| {
+            matches!(s, Statement::CreateFunction(_))
+        });
     }
 
     // --- DDL: ALTER (issue #653) ---
 
     #[test]
     fn test_issue_653_alter_table() {
-        assert_parses_to("ALTER TABLE t ADD COLUMN c INT", |s| matches!(s, Statement::AlterTable(_)));
+        assert_parses_to("ALTER TABLE t ADD COLUMN c INT", |s| {
+            matches!(s, Statement::AlterTable(_))
+        });
     }
 
     #[test]
     fn test_issue_653_alter_view() {
-        assert_parses_to("ALTER VIEW v AS SELECT 1", |s| matches!(s, Statement::AlterView { .. }));
+        assert_parses_to("ALTER VIEW v AS SELECT 1", |s| {
+            matches!(s, Statement::AlterView { .. })
+        });
     }
 
     #[test]
     fn test_issue_653_alter_schema() {
-        assert_parses_to(
-            "ALTER SCHEMA db RENAME TO db2",
-            |s| matches!(s, Statement::AlterSchema(_)),
-        );
+        assert_parses_to("ALTER SCHEMA db RENAME TO db2", |s| {
+            matches!(s, Statement::AlterSchema(_))
+        });
     }
 
     // --- DDL: DROP (issue #654) ---
@@ -197,7 +209,10 @@ mod tests {
     fn test_issue_654_drop_table() {
         let stmt = parse_sql("DROP TABLE t").unwrap();
         match &stmt {
-            Statement::Drop { object_type: ObjectType::Table, .. } => {}
+            Statement::Drop {
+                object_type: ObjectType::Table,
+                ..
+            } => {}
             _ => panic!("expected Drop Table: {stmt:?}"),
         }
     }
@@ -206,7 +221,10 @@ mod tests {
     fn test_issue_654_drop_view() {
         let stmt = parse_sql("DROP VIEW v").unwrap();
         match &stmt {
-            Statement::Drop { object_type: ObjectType::View, .. } => {}
+            Statement::Drop {
+                object_type: ObjectType::View,
+                ..
+            } => {}
             _ => panic!("expected Drop View: {stmt:?}"),
         }
     }
@@ -215,14 +233,19 @@ mod tests {
     fn test_issue_654_drop_schema() {
         let stmt = parse_sql("DROP SCHEMA s").unwrap();
         match &stmt {
-            Statement::Drop { object_type: ObjectType::Schema, .. } => {}
+            Statement::Drop {
+                object_type: ObjectType::Schema,
+                ..
+            } => {}
             _ => panic!("expected Drop Schema: {stmt:?}"),
         }
     }
 
     #[test]
     fn test_issue_654_drop_function() {
-        assert_parses_to("DROP FUNCTION f", |s| matches!(s, Statement::DropFunction(_)));
+        assert_parses_to("DROP FUNCTION f", |s| {
+            matches!(s, Statement::DropFunction(_))
+        });
     }
 
     // --- Utility: USE, TRUNCATE, DECLARE (issue #655) ---
@@ -239,10 +262,9 @@ mod tests {
 
     #[test]
     fn test_issue_655_declare() {
-        assert_parses_to(
-            "DECLARE c CURSOR FOR SELECT 1",
-            |s| matches!(s, Statement::Declare { .. }),
-        );
+        assert_parses_to("DECLARE c CURSOR FOR SELECT 1", |s| {
+            matches!(s, Statement::Declare { .. })
+        });
     }
 
     // --- SHOW (issue #656) ---
@@ -254,22 +276,30 @@ mod tests {
 
     #[test]
     fn test_issue_656_show_databases() {
-        assert_parses_to("SHOW DATABASES", |s| matches!(s, Statement::ShowDatabases { .. }));
+        assert_parses_to("SHOW DATABASES", |s| {
+            matches!(s, Statement::ShowDatabases { .. })
+        });
     }
 
     #[test]
     fn test_issue_656_show_schemas() {
-        assert_parses_to("SHOW SCHEMAS", |s| matches!(s, Statement::ShowSchemas { .. }));
+        assert_parses_to("SHOW SCHEMAS", |s| {
+            matches!(s, Statement::ShowSchemas { .. })
+        });
     }
 
     #[test]
     fn test_issue_656_show_functions() {
-        assert_parses_to("SHOW FUNCTIONS", |s| matches!(s, Statement::ShowFunctions { .. }));
+        assert_parses_to("SHOW FUNCTIONS", |s| {
+            matches!(s, Statement::ShowFunctions { .. })
+        });
     }
 
     #[test]
     fn test_issue_656_show_columns() {
-        assert_parses_to("SHOW COLUMNS FROM t", |s| matches!(s, Statement::ShowColumns { .. }));
+        assert_parses_to("SHOW COLUMNS FROM t", |s| {
+            matches!(s, Statement::ShowColumns { .. })
+        });
     }
 
     #[test]
@@ -279,29 +309,34 @@ mod tests {
 
     #[test]
     fn test_issue_656_show_create_table() {
-        assert_parses_to("SHOW CREATE TABLE t", |s| matches!(s, Statement::ShowCreate { .. }));
+        assert_parses_to("SHOW CREATE TABLE t", |s| {
+            matches!(s, Statement::ShowCreate { .. })
+        });
     }
 
     // --- INSERT / DIRECTORY (issue #657) ---
 
     #[test]
     fn test_issue_657_insert() {
-        assert_parses_to("INSERT INTO t SELECT 1", |s| matches!(s, Statement::Insert(_)));
+        assert_parses_to("INSERT INTO t SELECT 1", |s| {
+            matches!(s, Statement::Insert(_))
+        });
     }
 
     #[test]
     fn test_issue_657_directory() {
-        assert_parses_to(
-            "INSERT OVERWRITE DIRECTORY '/path' SELECT 1",
-            |s| matches!(s, Statement::Directory { .. }),
-        );
+        assert_parses_to("INSERT OVERWRITE DIRECTORY '/path' SELECT 1", |s| {
+            matches!(s, Statement::Directory { .. })
+        });
     }
 
     // --- DESCRIBE (issue #658) ---
 
     #[test]
     fn test_issue_658_describe_table() {
-        assert_parses_to("DESCRIBE t", |s| matches!(s, Statement::ExplainTable { .. }));
+        assert_parses_to("DESCRIBE t", |s| {
+            matches!(s, Statement::ExplainTable { .. })
+        });
     }
 
     // --- SET, RESET, CACHE, UNCACHE (issue #659) ---
@@ -323,18 +358,24 @@ mod tests {
 
     #[test]
     fn test_issue_659_uncache() {
-        assert_parses_to("UNCACHE TABLE t", |s| matches!(s, Statement::UNCache { .. }));
+        assert_parses_to("UNCACHE TABLE t", |s| {
+            matches!(s, Statement::UNCache { .. })
+        });
     }
 
     #[test]
     fn test_issue_659_uncache_if_exists() {
-        assert_parses_to("UNCACHE TABLE IF EXISTS t", |s| matches!(s, Statement::UNCache { .. }));
+        assert_parses_to("UNCACHE TABLE IF EXISTS t", |s| {
+            matches!(s, Statement::UNCache { .. })
+        });
     }
 
     // --- EXPLAIN (issue #660) ---
 
     #[test]
     fn test_issue_660_explain() {
-        assert_parses_to("EXPLAIN SELECT 1", |s| matches!(s, Statement::Explain { .. }));
+        assert_parses_to("EXPLAIN SELECT 1", |s| {
+            matches!(s, Statement::Explain { .. })
+        });
     }
 }
