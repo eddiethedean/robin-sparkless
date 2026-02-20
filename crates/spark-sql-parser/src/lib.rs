@@ -69,6 +69,8 @@ pub fn parse_sql(query: &str) -> Result<Statement, ParseError> {
         | Statement::ShowCreate { .. } => {}
         Statement::Insert(_) | Statement::Directory { .. } | Statement::LoadData { .. } => {}
         Statement::ExplainTable { .. } => {}
+        Statement::Set(_) | Statement::Reset(_) => {}
+        Statement::Cache { .. } | Statement::UNCache { .. } => {}
         _ => {
             return Err(ParseError(format!(
                 "SQL: statement type not supported, got {:?}.",
@@ -192,5 +194,29 @@ mod tests {
         // With GenericDialect, TABLE keyword may not be consumed; use table name only
         let stmt = parse_sql("DESCRIBE t").unwrap();
         assert!(matches!(stmt, Statement::ExplainTable { .. }));
+    }
+
+    #[test]
+    fn test_issue_659_set() {
+        let stmt = parse_sql("SET x = 1").unwrap();
+        assert!(matches!(stmt, Statement::Set(_)));
+    }
+
+    #[test]
+    fn test_issue_659_reset() {
+        let stmt = parse_sql("RESET x").unwrap();
+        assert!(matches!(stmt, Statement::Reset(_)));
+    }
+
+    #[test]
+    fn test_issue_659_cache() {
+        let stmt = parse_sql("CACHE TABLE t").unwrap();
+        assert!(matches!(stmt, Statement::Cache { .. }));
+    }
+
+    #[test]
+    fn test_issue_659_uncache() {
+        let stmt = parse_sql("UNCACHE TABLE t").unwrap();
+        assert!(matches!(stmt, Statement::UNCache { .. }));
     }
 }
