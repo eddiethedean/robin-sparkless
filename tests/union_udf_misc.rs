@@ -5,11 +5,11 @@
 mod common;
 
 use common::spark;
+use polars::prelude::{PolarsError, Series, df};
 use rand::Rng;
-use polars::prelude::{df, PolarsError, Series};
+use robin_sparkless::DataFrame;
 use robin_sparkless::functions::{col, lit_i64};
 use robin_sparkless::plan;
-use robin_sparkless::DataFrame;
 use serde_json::json;
 
 // ---------- issue_551 ----------
