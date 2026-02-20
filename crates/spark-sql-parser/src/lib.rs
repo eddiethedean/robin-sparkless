@@ -71,6 +71,7 @@ pub fn parse_sql(query: &str) -> Result<Statement, ParseError> {
         Statement::ExplainTable { .. } => {}
         Statement::Set(_) | Statement::Reset(_) => {}
         Statement::Cache { .. } | Statement::UNCache { .. } => {}
+        Statement::Explain { .. } => {}
         _ => {
             return Err(ParseError(format!(
                 "SQL: statement type not supported, got {:?}.",
@@ -218,5 +219,11 @@ mod tests {
     fn test_issue_659_uncache() {
         let stmt = parse_sql("UNCACHE TABLE t").unwrap();
         assert!(matches!(stmt, Statement::UNCache { .. }));
+    }
+
+    #[test]
+    fn test_issue_660_explain() {
+        let stmt = parse_sql("EXPLAIN SELECT 1").unwrap();
+        assert!(matches!(stmt, Statement::Explain { .. }));
     }
 }
