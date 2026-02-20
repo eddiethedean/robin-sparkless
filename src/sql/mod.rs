@@ -1,22 +1,34 @@
 //! SQL parsing and translation to DataFrame operations.
+//! Parsing is provided by the `spark-sql-parser` crate; this module translates AST to DataFrame ops.
 //! Compiled only when the `sql` feature is enabled.
 
-mod parser;
 mod translator;
 
 use crate::dataframe::DataFrame;
 use crate::session::SparkSession;
 use polars::prelude::PolarsError;
+use sqlparser::ast::Statement;
+
+/// Parse a single SQL statement using [spark_sql_parser]. Returns PolarsError for compatibility with session/translator.
+fn parse_sql_to_statement(query: &str) -> Result<Statement, PolarsError> {
+    spark_sql_parser::parse_sql(query)
+        .map_err(|e| PolarsError::InvalidOperation(e.to_string().into()))
+}
+
+/// Parse a single SQL statement (SELECT or DDL: CREATE SCHEMA / CREATE DATABASE / DROP TABLE).
+/// Delegates to the [spark-sql-parser](https://crates.io/crates/spark-sql-parser) crate.
+pub fn parse_sql(query: &str) -> Result<Statement, PolarsError> {
+    parse_sql_to_statement(query)
+}
 
 /// Parse a SQL string and execute it using the session's catalog.
 /// Supports: SELECT (columns or *), FROM single table or two-table JOIN,
 /// WHERE (basic predicates), GROUP BY + aggregates, ORDER BY, LIMIT.
 pub fn execute_sql(session: &SparkSession, query: &str) -> Result<DataFrame, PolarsError> {
-    let stmt = parser::parse_sql(query)?;
+    let stmt = parse_sql_to_statement(query)?;
     translator::translate(session, &stmt)
 }
 
-pub use parser::parse_sql;
 pub use translator::{expr_string_to_polars, translate};
 
 #[cfg(test)]

@@ -1,9 +1,9 @@
 [workspace]
-members = ["crates/robin-sparkless-core", "crates/robin-sparkless-expr", "."]
+members = ["crates/robin-sparkless-core", "crates/robin-sparkless-expr", "crates/spark-sql-parser", "."]
 
 [package]
 name = "robin-sparkless"
-version = "0.13.0"
+version = "0.14.0"
 edition = "2024"
 description = "PySpark-like DataFrame API in Rust on Polars; no JVM."
 readme = "README.md"
@@ -25,13 +25,13 @@ crate-type = ["rlib"]
 
 [features]
 default = []
-sql = ["dep:sqlparser"]
+sql = ["dep:spark-sql-parser", "dep:sqlparser"]
 delta = ["dep:deltalake", "dep:tokio"]
 
 [dependencies]
 # version required for crates.io; path used for local workspace
-robin-sparkless-core = { version = "0.13", path = "crates/robin-sparkless-core" }
-robin-sparkless-expr = { version = "0.13", path = "crates/robin-sparkless-expr" }
+robin-sparkless-core = { version = "0.14", path = "crates/robin-sparkless-core" }
+robin-sparkless-expr = { version = "0.14", path = "crates/robin-sparkless-expr" }
 polars = { version = "0.53", features = ["lazy", "csv", "parquet", "json", "temporal", "strings", "concat_str", "regex", "round_series", "abs", "dtype-categorical", "dtype-date", "dtype-datetime", "dtype-duration", "dtype-time", "rank", "is_in", "list_eval", "list_drop_nulls", "list_any_all", "cum_agg", "string_pad", "string_reverse", "repeat_by", "log", "month_end", "describe", "cross_join", "semi_anti_join", "extract_jsonpath", "dtype-struct", "random", "product", "moment"] }
 polars-plan = "0.53"
 serde = { version = "1.0", features = ["derive"] }
@@ -41,6 +41,7 @@ serde_json = "1.0"
 anyhow = "1.0"
 thiserror = "2.0"
 spark-ddl-parser = { version = "0.1", optional = false }
+spark-sql-parser = { version = "0.1", path = "crates/spark-sql-parser", optional = true }
 sqlparser = { version = "0.61", optional = true }
 deltalake = { version = "0.31", optional = true }
 tokio = { version = "1", optional = true, features = ["rt", "rt-multi-thread", "fs", "io-util"] }

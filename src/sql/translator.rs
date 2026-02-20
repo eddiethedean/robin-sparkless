@@ -14,8 +14,6 @@ use sqlparser::ast::{
     SetExpr, Statement, TableFactor, Value, ValueWithSpan,
 };
 
-use super::parser;
-
 /// Return a slice of positional function arguments for List variant; empty otherwise.
 fn function_args_slice(args: &FunctionArguments) -> &[FunctionArg] {
     match args {
@@ -32,7 +30,8 @@ pub fn expr_string_to_polars(
     df: &DataFrame,
 ) -> Result<Expr, PolarsError> {
     let query = format!("SELECT {} FROM __selectexpr_t", expr_str);
-    let stmt = parser::parse_sql(&query)?;
+    let stmt = spark_sql_parser::parse_sql(&query)
+        .map_err(|e| PolarsError::InvalidOperation(e.to_string().into()))?;
     let query_ast = match &stmt {
         Statement::Query(q) => q.as_ref(),
         _ => {
