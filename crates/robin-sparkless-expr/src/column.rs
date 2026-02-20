@@ -58,9 +58,9 @@ pub struct Column {
     name: String,
     expr: Expr, // Polars expression for lazy evaluation
     /// When Some, with_column generates a full-length random series instead of using expr (PySpark-like per-row rand/randn).
-    pub(crate) deferred: Option<DeferredRandom>,
+    pub deferred: Option<DeferredRandom>,
     /// When Some, with_column executes Python UDF eagerly (name, arg columns).
-    pub(crate) udf_call: Option<(String, Vec<Column>)>,
+    pub udf_call: Option<(String, Vec<Column>)>,
 }
 
 impl Column {

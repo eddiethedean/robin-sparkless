@@ -18,15 +18,15 @@ build-release:
 
 # Build with all optional features (sql, delta) so feature-gated code is compiled and checked
 build-all-features:
-	cargo build --all-features
+	cargo build --workspace --all-features
 
 # Run Rust tests only (default features)
 test-rust:
-	cargo test
+	cargo test --workspace
 
 # Run Rust tests with all features (sql, delta) - used by check
 test-rust-all-features:
-	cargo test --all-features
+	cargo test --workspace --all-features
 
 # Run all tests (Rust only)
 test: test-rust
@@ -46,13 +46,13 @@ fmt:
 	cargo fmt
 	@echo "Formatted"
 
-# Check format without modifying
+# Check format without modifying (workspace is formatted as a whole from root)
 fmt-check:
 	cargo fmt --check
 
 # Lint with Clippy (all features, all targets including tests so one compile is reused by test)
 clippy:
-	cargo clippy --all-features --all-targets -- -D warnings
+	cargo clippy --workspace --all-features --all-targets -- -D warnings
 
 # Security: scan for known vulnerabilities
 audit:
@@ -62,7 +62,7 @@ audit:
 outdated:
 	cargo outdated
 
-# Advisory, bans, sources checks (skip licenses - needs per-crate clarifications)
+# Advisory, bans, sources checks (skip licenses - needs per-crate clarifications). Workspace-aware.
 deny:
 	cargo deny check advisories bans sources
 
@@ -89,7 +89,7 @@ test-parity-phase-g:
 	PARITY_PHASE=g cargo test pyspark_parity_fixtures
 
 test-parity-phases:
-	cargo test pyspark_parity_fixtures
+	cargo test --workspace --all-features pyspark_parity_fixtures
 
 # Convert Sparkless fixtures (when SPARKLESS_EXPECTED_OUTPUTS is set), regenerate
 # expected results from PySpark, then run Rust parity tests.

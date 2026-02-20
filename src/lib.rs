@@ -27,21 +27,25 @@
 #![allow(clippy::collapsible_if)]
 #![allow(clippy::let_and_return)]
 
-pub mod column;
 pub mod config;
 pub mod dataframe;
-pub(crate) mod date_utils;
 pub mod error;
-pub mod expression;
 pub mod functions;
 pub mod plan;
 pub mod prelude;
 pub mod schema;
+pub(crate) mod schema_conv;
 pub mod session;
 pub mod traits;
-pub mod type_coercion;
-pub(crate) mod udf_registry;
-pub(crate) mod udfs;
+
+pub use robin_sparkless_expr::column;
+pub use robin_sparkless_expr::expression;
+pub use robin_sparkless_expr::type_coercion;
+pub use robin_sparkless_expr::{Column, RustUdf, UdfRegistry};
+
+pub(crate) use robin_sparkless_expr::udfs;
+
+pub(crate) use robin_sparkless_core::date_utils;
 
 /// Re-export the underlying expression and literal types so downstream
 /// bindings can depend on `robin_sparkless::Expr` / `LiteralValue`
@@ -55,7 +59,6 @@ pub mod sql;
 #[cfg(feature = "delta")]
 pub mod delta;
 
-pub use column::Column;
 pub use config::SparklessConfig;
 pub use dataframe::{
     CubeRollupData, DataFrame, GroupedData, JoinType, PivotedGroupedData, SaveMode, WriteFormat,

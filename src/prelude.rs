@@ -17,6 +17,6 @@ pub use crate::functions::{
     desc, desc_nulls_first, desc_nulls_last, first, length, lit_bool, lit_f64, lit_i32, lit_i64,
     lit_str, lower, max, mean, min, substring, sum, trim, upper, when,
 };
-pub use crate::schema::{DataType, StructField, StructType};
+pub use crate::schema::{DataType, StructField, StructType, StructTypePolarsExt};
 pub use crate::session::{DataFrameReader, SparkSession, SparkSessionBuilder};
 pub use crate::{Expr, LiteralValue};

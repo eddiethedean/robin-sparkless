@@ -1,0 +1,33 @@
+[package]
+name = "robin-sparkless-expr"
+version = "0.12.2"
+edition = "2024"
+description = "Column, expressions, functions, and UDFs for robin-sparkless (Polars-based)."
+license = "MIT"
+repository = "https://github.com/eddiethedean/robin-sparkless"
+
+[dependencies]
+robin-sparkless-core = { path = "../robin-sparkless-core" }
+polars = { version = "0.53", features = ["lazy", "csv", "parquet", "json", "temporal", "strings", "concat_str", "regex", "round_series", "abs", "dtype-categorical", "dtype-date", "dtype-datetime", "dtype-duration", "dtype-time", "rank", "is_in", "list_eval", "list_drop_nulls", "list_any_all", "cum_agg", "string_pad", "string_reverse", "repeat_by", "log", "month_end", "describe", "cross_join", "semi_anti_join", "extract_jsonpath", "dtype-struct", "random", "product", "moment"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+chrono = "0.4"
+chrono-tz = "0.9"
+url = "2"
+percent-encoding = "2"
+strsim = "0.11"
+crc32fast = "1.4"
+twox-hash = "1.6"
+murmur3 = "0.5"
+soundex = "0.2"
+bytes = "1.11.1"
+regex = "1.12"
+fancy-regex = "0.13"
+base64 = "0.22"
+hex = "0.4"
+sha1 = "0.10"
+sha2 = "0.10"
+md5 = "0.7"
+rand = "0.8"
+rand_distr = "0.4"
+aes-gcm = "0.10"

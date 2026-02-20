@@ -2,8 +2,10 @@
 //!
 //! Use [`EngineError`] when you want to map robin-sparkless and Polars errors
 //! to a single type (e.g. for FFI or CLI) without depending on Polars error types.
+//!
+//! Note: `From<PolarsError>` for `EngineError` is implemented in the main robin-sparkless
+//! crate, which has a Polars dependency.
 
-use polars::error::PolarsError;
 use std::fmt;
 
 /// Unified error type for robin-sparkless operations.
@@ -40,33 +42,6 @@ impl fmt::Display for EngineError {
 }
 
 impl std::error::Error for EngineError {}
-
-impl From<robin_sparkless_core::EngineError> for EngineError {
-    fn from(e: robin_sparkless_core::EngineError) -> Self {
-        use robin_sparkless_core::EngineError as Core;
-        match e {
-            Core::User(s) => EngineError::User(s),
-            Core::Internal(s) => EngineError::Internal(s),
-            Core::Io(s) => EngineError::Io(s),
-            Core::Sql(s) => EngineError::Sql(s),
-            Core::NotFound(s) => EngineError::NotFound(s),
-            Core::Other(s) => EngineError::Other(s),
-        }
-    }
-}
-
-impl From<PolarsError> for EngineError {
-    fn from(e: PolarsError) -> Self {
-        let msg = e.to_string();
-        match &e {
-            PolarsError::ColumnNotFound(_) => EngineError::NotFound(msg),
-            PolarsError::InvalidOperation(_) => EngineError::User(msg),
-            PolarsError::ComputeError(_) => EngineError::Internal(msg),
-            PolarsError::IO { .. } => EngineError::Io(msg),
-            _ => EngineError::Other(msg),
-        }
-    }
-}
 
 impl From<serde_json::Error> for EngineError {
     fn from(e: serde_json::Error) -> Self {

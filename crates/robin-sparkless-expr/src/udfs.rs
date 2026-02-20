@@ -1585,12 +1585,12 @@ fn date_series_to_days(series: &Series) -> PolarsResult<Int32Chunked> {
 }
 
 fn days_to_naive_date(days: i32) -> Option<chrono::NaiveDate> {
-    let base = crate::date_utils::epoch_naive_date();
+    let base = robin_sparkless_core::date_utils::epoch_naive_date();
     base.checked_add_signed(chrono::TimeDelta::days(days as i64))
 }
 
 fn naivedate_to_days(d: chrono::NaiveDate) -> i32 {
-    let base = crate::date_utils::epoch_naive_date();
+    let base = robin_sparkless_core::date_utils::epoch_naive_date();
     (d.signed_duration_since(base).num_days()) as i32
 }
 
@@ -4424,7 +4424,7 @@ pub fn apply_string_to_double(column: Column, strict: bool) -> PolarsResult<Opti
 pub fn apply_string_to_date(column: Column, strict: bool) -> PolarsResult<Option<Column>> {
     let name = column.field().into_owned().name;
     let series = column.take_materialized_series();
-    let epoch = crate::date_utils::epoch_naive_date();
+    let epoch = robin_sparkless_core::date_utils::epoch_naive_date();
     let out: Series = match series.dtype() {
         DataType::String => {
             let ca = series
@@ -4487,7 +4487,7 @@ pub fn apply_string_to_date_format(
 ) -> PolarsResult<Option<Column>> {
     let name = column.field().into_owned().name;
     let series = column.take_materialized_series();
-    let epoch = crate::date_utils::epoch_naive_date();
+    let epoch = robin_sparkless_core::date_utils::epoch_naive_date();
     let out: Series = match series.dtype() {
         DataType::String => {
             let ca = series
