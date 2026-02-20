@@ -1,7 +1,21 @@
 //! Parse SQL into [sqlparser] AST.
 //!
 //! Supports a Spark-style subset: single-statement SELECT, CREATE SCHEMA/DATABASE,
-//! and DROP TABLE/VIEW/SCHEMA.
+//! and DROP TABLE/VIEW/SCHEMA, plus many DDL and utility statements (CREATE/ALTER/DROP
+//! TABLE/VIEW/FUNCTION/SCHEMA, SHOW, INSERT, DESCRIBE, SET, RESET, CACHE, EXPLAIN, etc.).
+//!
+//! # SELECT and query compatibility
+//!
+//! Any statement that [sqlparser] parses as a `Query` (e.g. `SELECT`, `WITH ... SELECT`)
+//! is accepted. Clause support is determined by [sqlparser] and the dialect in use
+//! (this crate uses [GenericDialect](sqlparser::dialect::GenericDialect)).
+//!
+//! ## Known gaps
+//!
+//! Spark-specific query clauses such as `DISTRIBUTE BY`, `CLUSTER BY`, `SORT BY`
+//! may not be recognized by the parser or may be rejected; behavior depends on
+//! the upstream dialect and parser. Use single-statement queries only (one statement
+//! per call).
 
 use sqlparser::ast::Statement;
 use sqlparser::dialect::GenericDialect;
