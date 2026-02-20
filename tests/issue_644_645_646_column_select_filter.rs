@@ -4,10 +4,10 @@
 //! - #645: select expects Column or str — select_items accepts mix of names and exprs.
 //! - #646: filter predicate must be Boolean — clearer error when predicate is non-Boolean.
 
-use robin_sparkless::dataframe::SelectItem;
-use robin_sparkless::plan;
-use robin_sparkless::functions::col;
 use robin_sparkless::SparkSession;
+use robin_sparkless::dataframe::SelectItem;
+use robin_sparkless::functions::col;
+use robin_sparkless::plan;
 use serde_json::Value as JsonValue;
 use serde_json::json;
 

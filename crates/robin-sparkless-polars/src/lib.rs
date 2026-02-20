@@ -5,8 +5,8 @@
 
 pub mod column;
 pub mod dataframe;
-pub mod error;
 pub mod engine_backend;
+pub mod error;
 pub mod expr_ir;
 pub mod expression;
 pub mod functions;

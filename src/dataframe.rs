@@ -1,8 +1,9 @@
 //! Root-owned DataFrame API; delegates to robin-sparkless-polars for execution.
 
+use robin_sparkless_core::EngineError;
 use robin_sparkless_core::engine::{CollectedRows, DataFrameBackend, GroupedDataBackend};
 use robin_sparkless_core::expr::ExprIr;
-use robin_sparkless_core::EngineError;
+use robin_sparkless_core::{DataType, StructType};
 use robin_sparkless_polars::dataframe::{
     DataFrameNa as PolarsDataFrameNa, DataFrameStat as PolarsDataFrameStat,
     DataFrameWriter as PolarsDataFrameWriter,
@@ -13,7 +14,6 @@ use robin_sparkless_polars::{
     GroupedData as PolarsGroupedData, LazyFrame, PivotedGroupedData as PolarsPivotedGroupedData,
     PlDataFrame, PolarsError,
 };
-use robin_sparkless_core::{DataType, StructType};
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
@@ -187,7 +187,10 @@ impl DataFrame {
     }
 
     pub fn select_engine(&self, cols: Vec<&str>) -> Result<DataFrame, EngineError> {
-        self.0.select_engine(cols).map(DataFrame).map_err(Into::into)
+        self.0
+            .select_engine(cols)
+            .map(DataFrame)
+            .map_err(Into::into)
     }
 
     pub fn select_items(&self, items: Vec<SelectItem<'_>>) -> Result<DataFrame, PolarsError> {
@@ -199,7 +202,10 @@ impl DataFrame {
     }
 
     pub fn filter_engine(&self, condition: Expr) -> Result<DataFrame, EngineError> {
-        self.0.filter_engine(condition).map(DataFrame).map_err(Into::into)
+        self.0
+            .filter_engine(condition)
+            .map(DataFrame)
+            .map_err(Into::into)
     }
 
     pub fn column(&self, name: &str) -> Result<Column, PolarsError> {

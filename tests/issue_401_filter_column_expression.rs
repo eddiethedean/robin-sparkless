@@ -4,8 +4,8 @@
 //! can be used reliably in DataFrame::filter.
 
 use polars::prelude::df;
-use robin_sparkless::functions::{col, lit_i64};
 use robin_sparkless::SparkSession;
+use robin_sparkless::functions::{col, lit_i64};
 
 fn spark() -> SparkSession {
     SparkSession::builder()
@@ -24,9 +24,7 @@ fn issue_401_filter_with_boolean_column_expression() {
     let df = spark.create_dataframe_from_polars(pl);
 
     // Build a boolean expression column and use it in filter.
-    let expr = col("v")
-        .gt_eq(lit_i64(20).into_expr())
-        .into_expr();
+    let expr = col("v").gt_eq(lit_i64(20).into_expr()).into_expr();
     let filtered = df.filter(expr).unwrap();
     let rows = filtered.collect_as_json_rows().unwrap();
 

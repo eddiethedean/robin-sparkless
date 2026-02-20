@@ -112,10 +112,7 @@ pub fn polars_to_core_error(e: PolarsError) -> robin_sparkless_core::EngineError
         PolarsError::ComputeError(_) => {
             let lower = msg.to_lowercase();
             if lower.contains("filter") || lower.contains("predicate") {
-                if lower.contains("boolean")
-                    || lower.contains("bool")
-                    || lower.contains("string")
-                {
+                if lower.contains("boolean") || lower.contains("bool") || lower.contains("string") {
                     return Core::User(format!(
                         "filter predicate must be Boolean, got non-Boolean expression: {}",
                         msg

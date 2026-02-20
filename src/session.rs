@@ -1,11 +1,11 @@
 //! Root-owned Session API; delegates to robin-sparkless-polars for execution.
 
+use crate::EngineError;
 use robin_sparkless_core::SparklessConfig;
 use robin_sparkless_polars::{
     DataFrameReader as PolarsDataFrameReader, PlDataFrame, PolarsError,
     SparkSession as PolarsSparkSession, SparkSessionBuilder as PolarsSparkSessionBuilder,
 };
-use crate::EngineError;
 use std::collections::HashMap;
 use std::path::Path;
 
@@ -215,7 +215,10 @@ impl SparkSession {
     }
 
     pub fn read_csv_engine(&self, path: impl AsRef<Path>) -> Result<DataFrame, EngineError> {
-        self.0.read_csv_engine(path).map(DataFrame).map_err(Into::into)
+        self.0
+            .read_csv_engine(path)
+            .map(DataFrame)
+            .map_err(Into::into)
     }
 
     pub fn read_parquet(&self, path: impl AsRef<Path>) -> Result<DataFrame, PolarsError> {
@@ -223,7 +226,10 @@ impl SparkSession {
     }
 
     pub fn read_parquet_engine(&self, path: impl AsRef<Path>) -> Result<DataFrame, EngineError> {
-        self.0.read_parquet_engine(path).map(DataFrame).map_err(Into::into)
+        self.0
+            .read_parquet_engine(path)
+            .map(DataFrame)
+            .map_err(Into::into)
     }
 
     pub fn read_json(&self, path: impl AsRef<Path>) -> Result<DataFrame, PolarsError> {
@@ -231,7 +237,10 @@ impl SparkSession {
     }
 
     pub fn read_json_engine(&self, path: impl AsRef<Path>) -> Result<DataFrame, EngineError> {
-        self.0.read_json_engine(path).map(DataFrame).map_err(Into::into)
+        self.0
+            .read_json_engine(path)
+            .map(DataFrame)
+            .map_err(Into::into)
     }
 
     pub fn sql(&self, query: &str) -> Result<DataFrame, PolarsError> {

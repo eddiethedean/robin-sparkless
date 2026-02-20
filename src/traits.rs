@@ -1,8 +1,8 @@
 //! Traits for conversion to and from root-owned DataFrames.
 
+use crate::EngineError;
 use crate::dataframe::DataFrame;
 use crate::session::SparkSession;
-use crate::EngineError;
 use serde_json::Value as JsonValue;
 use std::collections::HashMap;
 

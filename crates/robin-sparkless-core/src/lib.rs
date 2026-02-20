@@ -14,8 +14,8 @@ pub use engine::{
 };
 pub use error::EngineError;
 pub use expr::{
-    alias, between, call, col, count, eq, ge, gt, le, lit_bool, lit_f64, lit_i32, lit_i64,
-    lit_null, lit_str, lt, max, mean, min, ne, not_, or_, and_, is_in, is_null, sum, ExprIr,
-    LiteralValue, WhenBuilder, WhenThenBuilder, when,
+    ExprIr, LiteralValue, WhenBuilder, WhenThenBuilder, alias, and_, between, call, col, count, eq,
+    ge, gt, is_in, is_null, le, lit_bool, lit_f64, lit_i32, lit_i64, lit_null, lit_str, lt, max,
+    mean, min, ne, not_, or_, sum, when,
 };
 pub use schema::{DataType, StructField, StructType};

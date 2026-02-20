@@ -33,9 +33,11 @@ test-rust-all-features:
 test: test-rust
 
 # Run all Rust checks. Clean first so old binaries don't accumulate (each run is a full rebuild).
-# Then fast steps (fmt, audit, deny), then one compile: clippy --all-targets builds lib + tests
-# with all features; cargo test reuses that and only runs tests.
-check: clean fmt-check audit deny clippy test-rust-all-features
+# Then run fmt-check, audit, deny, and clippy in parallel (they are independent); then tests
+# (tests reuse clippy's build). Use -j4 to overlap the four jobs.
+check: clean
+	@$(MAKE) -j4 fmt-check audit deny clippy
+	$(MAKE) test-rust-all-features
 	@echo "All checks passed"
 
 # Remove all build artifacts (target/). Use when target/ grows large from repeated
