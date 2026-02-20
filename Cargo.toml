@@ -3,7 +3,7 @@ members = ["crates/robin-sparkless-core", "crates/robin-sparkless-expr", "crates
 
 [package]
 name = "robin-sparkless"
-version = "0.14.0"
+version = "0.14.1"
 edition = "2024"
 description = "PySpark-like DataFrame API in Rust on Polars; no JVM."
 readme = "README.md"
