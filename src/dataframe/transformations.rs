@@ -65,6 +65,38 @@ pub fn select_with_exprs(
     Ok(super::DataFrame::from_lazy_with_options(lf, case_sensitive))
 }
 
+/// Select item: either a column name (str) or an expression (PySpark parity: select("a", col("b").alias("x"))).
+/// Fixes #645: select expects Column or str.
+#[derive(Clone)]
+pub enum SelectItem<'a> {
+    /// Column name; resolved per DataFrame case sensitivity.
+    ColumnName(&'a str),
+    /// Expression (e.g. from col("x").cast(...).alias("y")).
+    Expr(Expr),
+}
+
+/// Select using a mix of column names and expressions. Preserves case_sensitive on result.
+pub fn select_items(
+    df: &DataFrame,
+    items: Vec<SelectItem<'_>>,
+    case_sensitive: bool,
+) -> Result<DataFrame, PolarsError> {
+    let mut exprs = Vec::with_capacity(items.len());
+    for item in items {
+        match item {
+            SelectItem::ColumnName(name) => {
+                let resolved = df.resolve_column_name(name)?;
+                exprs.push(col(resolved));
+            }
+            SelectItem::Expr(e) => {
+                let resolved = df.resolve_expr_column_names(e)?;
+                exprs.push(resolved);
+            }
+        }
+    }
+    select_with_exprs(df, exprs, case_sensitive)
+}
+
 /// Filter rows using a Polars expression. Preserves case_sensitive on result.
 /// Column names in the condition are resolved per df's case sensitivity (PySpark parity).
 pub fn filter(
