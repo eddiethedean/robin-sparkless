@@ -129,7 +129,7 @@ impl DataFrame {
     }
 
     pub fn schema_engine(&self) -> Result<StructType, EngineError> {
-        self.0.schema_engine().map_err(Into::into)
+        self.0.schema_engine()
     }
 
     pub fn get_column_dtype(&self, name: &str) -> Option<robin_sparkless_polars::PlDataType> {
@@ -145,7 +145,7 @@ impl DataFrame {
     }
 
     pub fn columns_engine(&self) -> Result<Vec<String>, EngineError> {
-        self.0.columns_engine().map_err(Into::into)
+        self.0.columns_engine()
     }
 
     pub fn count(&self) -> Result<usize, PolarsError> {
@@ -153,7 +153,7 @@ impl DataFrame {
     }
 
     pub fn count_engine(&self) -> Result<usize, EngineError> {
-        self.0.count_engine().map_err(Into::into)
+        self.0.count_engine()
     }
 
     pub fn show(&self, n: Option<usize>) -> Result<(), PolarsError> {
@@ -167,7 +167,7 @@ impl DataFrame {
     pub fn collect_as_json_rows_engine(
         &self,
     ) -> Result<Vec<HashMap<String, JsonValue>>, EngineError> {
-        self.0.collect_as_json_rows_engine().map_err(Into::into)
+        self.0.collect_as_json_rows_engine()
     }
 
     pub fn collect_as_json_rows(&self) -> Result<Vec<HashMap<String, JsonValue>>, PolarsError> {
@@ -175,7 +175,7 @@ impl DataFrame {
     }
 
     pub fn to_json_rows(&self) -> Result<String, EngineError> {
-        self.0.to_json_rows().map_err(Into::into)
+        self.0.to_json_rows()
     }
 
     pub fn select_exprs(&self, exprs: Vec<Expr>) -> Result<DataFrame, PolarsError> {
@@ -187,10 +187,7 @@ impl DataFrame {
     }
 
     pub fn select_engine(&self, cols: Vec<&str>) -> Result<DataFrame, EngineError> {
-        self.0
-            .select_engine(cols)
-            .map(DataFrame)
-            .map_err(Into::into)
+        self.0.select_engine(cols).map(DataFrame)
     }
 
     pub fn select_items(&self, items: Vec<SelectItem<'_>>) -> Result<DataFrame, PolarsError> {
@@ -202,10 +199,7 @@ impl DataFrame {
     }
 
     pub fn filter_engine(&self, condition: Expr) -> Result<DataFrame, EngineError> {
-        self.0
-            .filter_engine(condition)
-            .map(DataFrame)
-            .map_err(Into::into)
+        self.0.filter_engine(condition).map(DataFrame)
     }
 
     pub fn column(&self, name: &str) -> Result<Column, PolarsError> {
@@ -221,10 +215,7 @@ impl DataFrame {
         column_name: &str,
         col: &Column,
     ) -> Result<DataFrame, EngineError> {
-        self.0
-            .with_column_engine(column_name, col)
-            .map(DataFrame)
-            .map_err(Into::into)
+        self.0.with_column_engine(column_name, col).map(DataFrame)
     }
 
     pub fn with_column_expr(
@@ -240,10 +231,7 @@ impl DataFrame {
     }
 
     pub fn group_by_engine(&self, column_names: Vec<&str>) -> Result<GroupedData, EngineError> {
-        self.0
-            .group_by_engine(column_names)
-            .map(GroupedData)
-            .map_err(Into::into)
+        self.0.group_by_engine(column_names).map(GroupedData)
     }
 
     pub fn group_by_exprs(
@@ -333,7 +321,7 @@ impl DataFrame {
     }
 
     pub fn limit_engine(&self, n: usize) -> Result<DataFrame, EngineError> {
-        self.0.limit_engine(n).map(DataFrame).map_err(Into::into)
+        self.0.limit_engine(n).map(DataFrame)
     }
 
     pub fn with_column_renamed(

@@ -1,7 +1,7 @@
 //! Join operations for DataFrame.
 
 use super::DataFrame;
-use crate::type_coercion::find_common_type;
+use crate::type_coercion::coerce_expr_pair;
 use polars::prelude::Expr;
 use polars::prelude::JoinType as PlJoinType;
 use polars::prelude::PolarsError;
@@ -70,13 +70,15 @@ pub fn join(
         })?;
         let target_name = left_name.as_str();
         if left_dtype != right_dtype {
-            let common = find_common_type(&left_dtype, &right_dtype)?;
-            left_casts.push(
-                col(left_name.as_str())
-                    .cast(common.clone())
-                    .alias(target_name),
-            );
-            right_casts.push(col(right_name.as_str()).cast(common).alias(target_name));
+            let (l, r) = coerce_expr_pair(
+                left_name.as_str(),
+                right_name.as_str(),
+                &left_dtype,
+                &right_dtype,
+                target_name,
+            )?;
+            left_casts.push(l);
+            right_casts.push(r);
         } else if left_name != right_name {
             right_casts.push(col(right_name.as_str()).alias(target_name));
         }

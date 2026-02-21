@@ -11,7 +11,8 @@ pub fn spark() -> SparkSession {
 }
 
 /// Convenience helper for a small (id, age, name) test DataFrame.
-#[allow(dead_code)] // used by dataframe_core tests
+/// Use in tests that need a standard 3-row table; see core_dataframe.rs.
+#[allow(dead_code)] // not used by every test binary (e.g. io, windows)
 pub fn small_people_df() -> DataFrame {
     let spark = spark();
     let pl = df![

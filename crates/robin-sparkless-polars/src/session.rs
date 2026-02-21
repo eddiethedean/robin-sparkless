@@ -1,5 +1,5 @@
 use crate::dataframe::DataFrame;
-use crate::error::EngineError;
+use crate::error::{EngineError, polars_to_core_error};
 use crate::udf_registry::UdfRegistry;
 use polars::chunked_array::StructChunked;
 use polars::chunked_array::builder::get_list_builder;
@@ -979,7 +979,7 @@ impl SparkSession {
         column_names: Vec<&str>,
     ) -> Result<DataFrame, EngineError> {
         self.create_dataframe(data, column_names)
-            .map_err(EngineError::from)
+            .map_err(polars_to_core_error)
     }
 
     /// Create a DataFrame from a Polars DataFrame
@@ -1410,7 +1410,7 @@ impl SparkSession {
         schema: Vec<(String, String)>,
     ) -> Result<DataFrame, EngineError> {
         self.create_dataframe_from_rows(rows, schema)
-            .map_err(EngineError::from)
+            .map_err(polars_to_core_error)
     }
 
     /// Create a DataFrame with a single column `id` (bigint) containing values from start to end (exclusive) with step.
@@ -1493,7 +1493,7 @@ impl SparkSession {
 
     /// Same as [`read_csv`](Self::read_csv) but returns [`EngineError`]. Use in bindings to avoid Polars.
     pub fn read_csv_engine(&self, path: impl AsRef<Path>) -> Result<DataFrame, EngineError> {
-        self.read_csv(path).map_err(EngineError::from)
+        self.read_csv(path).map_err(polars_to_core_error)
     }
 
     /// Read a Parquet file.
@@ -1529,7 +1529,7 @@ impl SparkSession {
 
     /// Same as [`read_parquet`](Self::read_parquet) but returns [`EngineError`]. Use in bindings to avoid Polars.
     pub fn read_parquet_engine(&self, path: impl AsRef<Path>) -> Result<DataFrame, EngineError> {
-        self.read_parquet(path).map_err(EngineError::from)
+        self.read_parquet(path).map_err(polars_to_core_error)
     }
 
     /// Read a JSON file (JSONL format - one JSON object per line).
@@ -1568,7 +1568,7 @@ impl SparkSession {
 
     /// Same as [`read_json`](Self::read_json) but returns [`EngineError`]. Use in bindings to avoid Polars.
     pub fn read_json_engine(&self, path: impl AsRef<Path>) -> Result<DataFrame, EngineError> {
-        self.read_json(path).map_err(EngineError::from)
+        self.read_json(path).map_err(polars_to_core_error)
     }
 
     /// Execute a SQL query (SELECT only). Tables must be registered with `create_or_replace_temp_view`.
@@ -1589,7 +1589,7 @@ impl SparkSession {
 
     /// Same as [`table`](Self::table) but returns [`EngineError`]. Use in bindings to avoid Polars.
     pub fn table_engine(&self, name: &str) -> Result<DataFrame, EngineError> {
-        self.table(name).map_err(EngineError::from)
+        self.table(name).map_err(polars_to_core_error)
     }
 
     /// Returns true if the string looks like a filesystem path (has separators or path exists).

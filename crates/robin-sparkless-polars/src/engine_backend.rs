@@ -23,6 +23,15 @@ fn to_core(e: robin_sparkless_core::EngineError) -> CoreEngineError {
     e
 }
 
+fn downcast_df<'a>(
+    other: &'a dyn DataFrameBackend,
+    op: &str,
+) -> Result<&'a DataFrame, CoreEngineError> {
+    other.as_any().downcast_ref::<DataFrame>().ok_or_else(|| {
+        CoreEngineError::User(format!("{} only supported with same backend (Polars)", op))
+    })
+}
+
 impl DataFrameBackend for DataFrame {
     fn as_any(&self) -> &(dyn std::any::Any + Send + Sync) {
         self
@@ -68,9 +77,7 @@ impl DataFrameBackend for DataFrame {
         on: &[&str],
         how: robin_sparkless_core::engine::JoinType,
     ) -> Result<Box<dyn DataFrameBackend>, CoreEngineError> {
-        let right = other.as_any().downcast_ref::<DataFrame>().ok_or_else(|| {
-            CoreEngineError::User("join only supported with same backend (Polars)".into())
-        })?;
+        let right = downcast_df(other, "join")?;
         let pl_how = match how {
             robin_sparkless_core::engine::JoinType::Inner => PlJoinType::Inner,
             robin_sparkless_core::engine::JoinType::Left => PlJoinType::Left,
@@ -114,9 +121,7 @@ impl DataFrameBackend for DataFrame {
         &self,
         other: &dyn DataFrameBackend,
     ) -> Result<Box<dyn DataFrameBackend>, CoreEngineError> {
-        let right = other.as_any().downcast_ref::<DataFrame>().ok_or_else(|| {
-            CoreEngineError::User("union only supported with same backend (Polars)".into())
-        })?;
+        let right = downcast_df(other, "union")?;
         let df = self.union(right).map_err(map_err)?;
         Ok(Box::new(df))
     }
@@ -126,9 +131,7 @@ impl DataFrameBackend for DataFrame {
         other: &dyn DataFrameBackend,
         allow_missing_columns: bool,
     ) -> Result<Box<dyn DataFrameBackend>, CoreEngineError> {
-        let right = other.as_any().downcast_ref::<DataFrame>().ok_or_else(|| {
-            CoreEngineError::User("union_by_name only supported with same backend (Polars)".into())
-        })?;
+        let right = downcast_df(other, "union_by_name")?;
         let df = self
             .union_by_name(right, allow_missing_columns)
             .map_err(map_err)?;
@@ -163,9 +166,7 @@ impl DataFrameBackend for DataFrame {
         &self,
         other: &dyn DataFrameBackend,
     ) -> Result<Box<dyn DataFrameBackend>, CoreEngineError> {
-        let right = other.as_any().downcast_ref::<DataFrame>().ok_or_else(|| {
-            CoreEngineError::User("cross_join only supported with same backend (Polars)".into())
-        })?;
+        let right = downcast_df(other, "cross_join")?;
         let df = self.cross_join(right).map_err(map_err)?;
         Ok(Box::new(df))
     }

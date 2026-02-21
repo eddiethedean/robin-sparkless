@@ -178,7 +178,6 @@ impl SparkSession {
         self.0
             .create_dataframe_engine(data, column_names)
             .map(DataFrame)
-            .map_err(Into::into)
     }
 
     pub fn create_dataframe_from_polars(&self, df: PlDataFrame) -> DataFrame {
@@ -203,7 +202,6 @@ impl SparkSession {
         self.0
             .create_dataframe_from_rows_engine(rows, schema)
             .map(DataFrame)
-            .map_err(Into::into)
     }
 
     pub fn range(&self, start: i64, end: i64, step: i64) -> Result<DataFrame, PolarsError> {
@@ -215,10 +213,7 @@ impl SparkSession {
     }
 
     pub fn read_csv_engine(&self, path: impl AsRef<Path>) -> Result<DataFrame, EngineError> {
-        self.0
-            .read_csv_engine(path)
-            .map(DataFrame)
-            .map_err(Into::into)
+        self.0.read_csv_engine(path).map(DataFrame)
     }
 
     pub fn read_parquet(&self, path: impl AsRef<Path>) -> Result<DataFrame, PolarsError> {
@@ -226,10 +221,7 @@ impl SparkSession {
     }
 
     pub fn read_parquet_engine(&self, path: impl AsRef<Path>) -> Result<DataFrame, EngineError> {
-        self.0
-            .read_parquet_engine(path)
-            .map(DataFrame)
-            .map_err(Into::into)
+        self.0.read_parquet_engine(path).map(DataFrame)
     }
 
     pub fn read_json(&self, path: impl AsRef<Path>) -> Result<DataFrame, PolarsError> {
@@ -237,10 +229,7 @@ impl SparkSession {
     }
 
     pub fn read_json_engine(&self, path: impl AsRef<Path>) -> Result<DataFrame, EngineError> {
-        self.0
-            .read_json_engine(path)
-            .map(DataFrame)
-            .map_err(Into::into)
+        self.0.read_json_engine(path).map(DataFrame)
     }
 
     pub fn sql(&self, query: &str) -> Result<DataFrame, PolarsError> {
@@ -248,7 +237,7 @@ impl SparkSession {
     }
 
     pub fn table_engine(&self, name: &str) -> Result<DataFrame, EngineError> {
-        self.0.table_engine(name).map(DataFrame).map_err(Into::into)
+        self.0.table_engine(name).map(DataFrame)
     }
 
     #[cfg(feature = "delta")]

@@ -14,6 +14,35 @@ use sqlparser::ast::{
     SetExpr, Statement, TableFactor, Value, ValueWithSpan,
 };
 
+/// Parsed SQL number literal: integer or float.
+enum SqlNumberVal {
+    Int(i64),
+    Float(f64),
+}
+
+fn parse_sql_number_val(s: &str, context: &str) -> Result<SqlNumberVal, PolarsError> {
+    if s.contains('.') {
+        let v: f64 = s.parse().map_err(|_| {
+            PolarsError::InvalidOperation(format!("SQL: invalid number {} '{}'", context, s).into())
+        })?;
+        Ok(SqlNumberVal::Float(v))
+    } else {
+        let v: i64 = s.parse().map_err(|_| {
+            PolarsError::InvalidOperation(
+                format!("SQL: invalid integer {} '{}'", context, s).into(),
+            )
+        })?;
+        Ok(SqlNumberVal::Int(v))
+    }
+}
+
+fn parse_sql_number_expr(s: &str) -> Result<Expr, PolarsError> {
+    match parse_sql_number_val(s, "literal")? {
+        SqlNumberVal::Int(i) => Ok(lit(i)),
+        SqlNumberVal::Float(f) => Ok(lit(f)),
+    }
+}
+
 /// Return a slice of positional function arguments for List variant; empty otherwise.
 fn function_args_slice(args: &FunctionArguments) -> &[FunctionArg] {
     match args {
@@ -381,17 +410,7 @@ fn sql_expr_to_polars(
             Ok(col(resolved.as_str()))
         }
         SqlExpr::Value(ValueWithSpan { value: Value::Number(s, _), .. }) => {
-            if s.contains('.') {
-                let v: f64 = s.parse().map_err(|_| {
-                    PolarsError::InvalidOperation(format!("SQL: invalid number literal '{}'", s).into())
-                })?;
-                Ok(lit(v))
-            } else {
-                let v: i64 = s.parse().map_err(|_| {
-                    PolarsError::InvalidOperation(format!("SQL: invalid integer literal '{}'", s).into())
-                })?;
-                Ok(lit(v))
-            }
+            parse_sql_number_expr(s)
         }
         SqlExpr::Value(ValueWithSpan { value: Value::SingleQuotedString(s), .. }) => Ok(lit(s.as_str())),
         SqlExpr::Value(ValueWithSpan { value: Value::Boolean(b), .. }) => Ok(lit(*b)),
@@ -593,21 +612,12 @@ fn sql_in_list_to_series(list: &[SqlExpr]) -> Result<polars::prelude::Series, Po
                 ..
             }) => {
                 str_vals.push(n.clone());
-                if n.contains('.') {
-                    let v: f64 = n.parse().map_err(|_| {
-                        PolarsError::InvalidOperation(
-                            format!("SQL: invalid number in IN list '{}'", n).into(),
-                        )
-                    })?;
-                    float_vals.push(v);
-                    has_float = true;
-                } else {
-                    let v: i64 = n.parse().map_err(|_| {
-                        PolarsError::InvalidOperation(
-                            format!("SQL: invalid integer in IN list '{}'", n).into(),
-                        )
-                    })?;
-                    int_vals.push(v);
+                match parse_sql_number_val(n, "IN list")? {
+                    SqlNumberVal::Int(v) => int_vals.push(v),
+                    SqlNumberVal::Float(v) => {
+                        float_vals.push(v);
+                        has_float = true;
+                    }
                 }
             }
             SqlExpr::Value(ValueWithSpan {
