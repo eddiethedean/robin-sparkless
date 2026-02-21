@@ -15,15 +15,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 (none yet)
 
+## [0.15.0] - 2026-02-18
+
+### Changed
+
+- **Version** — Bump to 0.15.0 across robin-sparkless, robin-sparkless-core, and robin-sparkless-polars.
+- **Docs** — READMEs and docs updated for 0.15.0; RELEASING.md and POLARS_CRATE_ISOLATION.md current-state references updated.
+
 ## [0.14.0] - 2026-02-20
 
 ### Added
 
-- **spark-sql-parser** — SQL parsing extracted to a separate crate `spark-sql-parser`; robin-sparkless uses it when the `sql` feature is enabled. Release CI now publishes spark-sql-parser, then core, expr, and main.
+- **spark-sql-parser** — SQL parsing extracted to a separate crate `spark-sql-parser`; robin-sparkless uses it when the `sql` feature is enabled. Release CI now publishes spark-sql-parser, then core, polars, and main.
 
 ### Changed
 
-- **Release workflow** — Publish order: spark-sql-parser, robin-sparkless-core, robin-sparkless-expr, robin-sparkless. See docs/RELEASING.md.
+- **Release workflow** — Publish order: spark-sql-parser, robin-sparkless-core, robin-sparkless-polars, robin-sparkless. See docs/RELEASING.md.
 
 ## [0.13.0] - 2026-02-20
 

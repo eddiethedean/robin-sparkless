@@ -3,7 +3,7 @@ members = ["crates/robin-sparkless-core", "crates/robin-sparkless-polars", "crat
 
 [package]
 name = "robin-sparkless"
-version = "0.14.1"
+version = "0.15.0"
 edition = "2024"
 description = "PySpark-like DataFrame API in Rust on Polars; no JVM."
 readme = "README.md"
@@ -29,8 +29,8 @@ sql = ["robin-sparkless-polars/sql"]
 delta = ["robin-sparkless-polars/delta"]
 
 [dependencies]
-robin-sparkless-core = { version = "0.14", path = "crates/robin-sparkless-core" }
-robin-sparkless-polars = { version = "0.14", path = "crates/robin-sparkless-polars" }
+robin-sparkless-core = { version = "0.15", path = "crates/robin-sparkless-core" }
+robin-sparkless-polars = { version = "0.15", path = "crates/robin-sparkless-polars" }
 serde_json = "1.0"
 
 # Use git sources when crates.io/cache is broken (e.g. "no targets specified" in manifest,
