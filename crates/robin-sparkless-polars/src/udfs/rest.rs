@@ -1,12 +1,6 @@
-//! Helpers for element-wise UDFs used by map() expressions (soundex, levenshtein, crc32, xxhash64, array_flatten, array_repeat).
-//! These run at plan execution time when Polars invokes the closure.
-
+//! UDF implementations (string, array, map, encoding, date, math, bit, etc.).
+use super::compute_err;
 use chrono::{Datelike, TimeZone};
-
-fn compute_err(context: &str, e: impl std::fmt::Display) -> PolarsError {
-    PolarsError::ComputeError(format!("{}: {}", context, e).into())
-}
-
 use chrono_tz::Tz;
 use polars::prelude::*;
 use regex::Regex;

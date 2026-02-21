@@ -1,146 +1,7 @@
+//! Remaining expression builders: agg, when, string, bit, datetime, struct/map/array, cast, hash, misc.
+use super::types::parse_type_name;
 use crate::column::Column;
 use polars::prelude::*;
-
-// -----------------------------------------------------------------------------
-// -----------------------------------------------------------------------------
-
-/// Sort order specification for use in orderBy/sort. Holds expr + direction + null placement.
-#[derive(Debug, Clone)]
-pub struct SortOrder {
-    pub(crate) expr: Expr,
-    pub descending: bool,
-    pub nulls_last: bool,
-}
-
-impl SortOrder {
-    pub fn expr(&self) -> &Expr {
-        &self.expr
-    }
-}
-
-/// Ascending sort, nulls first (Spark default for ASC).
-pub fn asc(column: &Column) -> SortOrder {
-    SortOrder {
-        expr: column.expr().clone(),
-        descending: false,
-        nulls_last: false,
-    }
-}
-
-/// Ascending sort, nulls first.
-pub fn asc_nulls_first(column: &Column) -> SortOrder {
-    SortOrder {
-        expr: column.expr().clone(),
-        descending: false,
-        nulls_last: false,
-    }
-}
-
-/// Ascending sort, nulls last.
-pub fn asc_nulls_last(column: &Column) -> SortOrder {
-    SortOrder {
-        expr: column.expr().clone(),
-        descending: false,
-        nulls_last: true,
-    }
-}
-
-/// Descending sort, nulls last (Spark default for DESC).
-pub fn desc(column: &Column) -> SortOrder {
-    SortOrder {
-        expr: column.expr().clone(),
-        descending: true,
-        nulls_last: true,
-    }
-}
-
-/// Descending sort, nulls first.
-pub fn desc_nulls_first(column: &Column) -> SortOrder {
-    SortOrder {
-        expr: column.expr().clone(),
-        descending: true,
-        nulls_last: false,
-    }
-}
-
-/// Descending sort, nulls last.
-pub fn desc_nulls_last(column: &Column) -> SortOrder {
-    SortOrder {
-        expr: column.expr().clone(),
-        descending: true,
-        nulls_last: true,
-    }
-}
-
-// -----------------------------------------------------------------------------
-
-/// Parse PySpark-like type name to Polars DataType.
-/// Decimal(precision, scale) is mapped to Float64 for schema parity (Polars dtype-decimal not enabled).
-pub fn parse_type_name(name: &str) -> Result<DataType, String> {
-    let s = name.trim().to_lowercase();
-    if s.starts_with("decimal(") && s.contains(')') {
-        return Ok(DataType::Float64);
-    }
-    Ok(match s.as_str() {
-        "int" | "integer" => DataType::Int32,
-        "long" | "bigint" => DataType::Int64,
-        "float" => DataType::Float32,
-        "double" => DataType::Float64,
-        "string" | "str" => DataType::String,
-        "boolean" | "bool" => DataType::Boolean,
-        "date" => DataType::Date,
-        "timestamp" => DataType::Datetime(TimeUnit::Microseconds, None),
-        _ => return Err(format!("unknown type name: {name}")),
-    })
-}
-
-/// Get a column by name
-pub fn col(name: &str) -> Column {
-    Column::new(name.to_string())
-}
-
-/// Grouping set marker (PySpark grouping). Stub: returns 0 (no GROUPING SETS in robin-sparkless).
-pub fn grouping(column: &Column) -> Column {
-    let _ = column;
-    Column::from_expr(lit(0i32), Some("grouping".to_string()))
-}
-
-/// Grouping set id (PySpark grouping_id). Stub: returns 0.
-pub fn grouping_id(_columns: &[Column]) -> Column {
-    Column::from_expr(lit(0i64), Some("grouping_id".to_string()))
-}
-
-/// Create a literal column from a value
-pub fn lit_i32(value: i32) -> Column {
-    let expr: Expr = lit(value);
-    Column::from_expr(expr, None)
-}
-
-pub fn lit_i64(value: i64) -> Column {
-    let expr: Expr = lit(value);
-    Column::from_expr(expr, None)
-}
-
-pub fn lit_f64(value: f64) -> Column {
-    let expr: Expr = lit(value);
-    Column::from_expr(expr, None)
-}
-
-pub fn lit_bool(value: bool) -> Column {
-    let expr: Expr = lit(value);
-    Column::from_expr(expr, None)
-}
-
-pub fn lit_str(value: &str) -> Column {
-    let expr: Expr = lit(value);
-    Column::from_expr(expr, None)
-}
-
-/// Typed null literal column. Returns `Err` on unknown type name.
-/// See [`parse_type_name`] for supported type strings (e.g. `"boolean"`, `"string"`, `"bigint"`).
-pub fn lit_null(dtype: &str) -> Result<Column, String> {
-    Column::lit_null(dtype)
-}
 
 /// Count aggregation
 pub fn count(col: &Column) -> Column {
@@ -2958,6 +2819,7 @@ pub fn stack(columns: &[&Column]) -> Column {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::functions::{col, lit_bool, lit_f64, lit_i32, lit_i64, lit_str};
     use polars::prelude::{IntoLazy, df};
 
     #[test]
