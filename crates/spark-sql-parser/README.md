@@ -1,8 +1,10 @@
 # spark-sql-parser
 
-Parse SQL into [sqlparser](https://github.com/sqlparser-rs/sqlparser-rs) AST with a Spark-style subset of statements.
+Parse SQL into [sqlparser](https://github.com/sqlparser-rs/sqlparser-rs) AST with a Spark-style subset of statements. Part of [robin-sparkless](https://github.com/eddiethedean/robin-sparkless).
 
-Part of [robin-sparkless](https://github.com/eddiethedean/robin-sparkless).
+[![crates.io](https://img.shields.io/crates/v/spark-sql-parser.svg)](https://crates.io/crates/spark-sql-parser)
+[![docs.rs](https://docs.rs/spark-sql-parser/badge.svg)](https://docs.rs/spark-sql-parser)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://github.com/eddiethedean/robin-sparkless/blob/main/LICENSE)
 
 ## Usage
 
