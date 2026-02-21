@@ -45,7 +45,7 @@ pub fn parse_sql(query: &str) -> Result<Statement, ParseError> {
             stmts.len()
         )));
     }
-    let stmt = stmts.into_iter().next().unwrap();
+    let stmt = stmts.into_iter().next().expect("len == 1");
     match &stmt {
         Statement::Query(_) => {}
         Statement::CreateSchema { .. } | Statement::CreateDatabase { .. } => {}

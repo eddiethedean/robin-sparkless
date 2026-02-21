@@ -1,3 +1,9 @@
+//! SparkSession and catalog (temp views, tables, databases).
+//!
+//! Catalog and table operations use mutexes. If a lock is poisoned (e.g. a thread panicked while
+//! holding it), mutations may no-op and lookups may return empty/None; a message is emitted to
+//! stderr in that case. These methods are best-effort when the process is in a bad state.
+
 use crate::dataframe::DataFrame;
 use crate::error::{EngineError, polars_to_core_error};
 use crate::udf_registry::UdfRegistry;
@@ -596,114 +602,209 @@ impl SparkSession {
 
     /// Register a DataFrame as a temporary view (PySpark: createOrReplaceTempView).
     /// The view is session-scoped and is dropped when the session is dropped.
+    /// If the catalog lock is poisoned (e.g. a thread panicked while holding it), the operation is best-effort and a message is emitted to stderr.
     pub fn create_or_replace_temp_view(&self, name: &str, df: DataFrame) {
-        let _ = self
-            .catalog
-            .lock()
-            .map(|mut m| m.insert(name.to_string(), df));
+        match self.catalog.lock() {
+            Ok(mut m) => {
+                m.insert(name.to_string(), df);
+            }
+            Err(_) => {
+                eprintln!(
+                    "robin-sparkless-polars: catalog lock poisoned, create_or_replace_temp_view may have failed"
+                );
+            }
+        }
     }
 
     /// Global temp view (PySpark: createGlobalTempView). Persists across sessions within the same process.
+    /// If the global catalog lock is poisoned, the operation is best-effort and a message is emitted to stderr.
     pub fn create_global_temp_view(&self, name: &str, df: DataFrame) {
-        let _ = global_temp_catalog()
-            .lock()
-            .map(|mut m| m.insert(name.to_string(), df));
+        match global_temp_catalog().lock() {
+            Ok(mut m) => {
+                m.insert(name.to_string(), df);
+            }
+            Err(_) => {
+                eprintln!(
+                    "robin-sparkless-polars: global temp catalog lock poisoned, create_global_temp_view may have failed"
+                );
+            }
+        }
     }
 
     /// Global temp view (PySpark: createOrReplaceGlobalTempView). Persists across sessions within the same process.
+    /// If the global catalog lock is poisoned, the operation is best-effort and a message is emitted to stderr.
     pub fn create_or_replace_global_temp_view(&self, name: &str, df: DataFrame) {
-        let _ = global_temp_catalog()
-            .lock()
-            .map(|mut m| m.insert(name.to_string(), df));
+        match global_temp_catalog().lock() {
+            Ok(mut m) => {
+                m.insert(name.to_string(), df);
+            }
+            Err(_) => {
+                eprintln!(
+                    "robin-sparkless-polars: global temp catalog lock poisoned, create_or_replace_global_temp_view may have failed"
+                );
+            }
+        }
     }
 
     /// Drop a temporary view by name (PySpark: catalog.dropTempView).
     /// No error if the view does not exist.
+    /// If the catalog lock is poisoned, the operation is best-effort and a message is emitted to stderr.
     pub fn drop_temp_view(&self, name: &str) {
-        let _ = self.catalog.lock().map(|mut m| m.remove(name));
+        match self.catalog.lock() {
+            Ok(mut m) => {
+                m.remove(name);
+            }
+            Err(_) => {
+                eprintln!(
+                    "robin-sparkless-polars: catalog lock poisoned, drop_temp_view may have failed"
+                );
+            }
+        }
     }
 
     /// Drop a global temporary view (PySpark: catalog.dropGlobalTempView). Removes from process-wide catalog.
+    /// If the global catalog lock is poisoned, returns false and a message is emitted to stderr.
     pub fn drop_global_temp_view(&self, name: &str) -> bool {
-        global_temp_catalog()
-            .lock()
-            .map(|mut m| m.remove(name).is_some())
-            .unwrap_or(false)
+        match global_temp_catalog().lock() {
+            Ok(mut m) => m.remove(name).is_some(),
+            Err(_) => {
+                eprintln!(
+                    "robin-sparkless-polars: global temp catalog lock poisoned, drop_global_temp_view may have failed"
+                );
+                false
+            }
+        }
     }
 
     /// Register a DataFrame as a saved table (PySpark: saveAsTable). Inserts into the tables catalog only.
+    /// If the tables lock is poisoned, the operation is best-effort and a message is emitted to stderr.
     pub fn register_table(&self, name: &str, df: DataFrame) {
-        let _ = self
-            .tables
-            .lock()
-            .map(|mut m| m.insert(name.to_string(), df));
+        match self.tables.lock() {
+            Ok(mut m) => {
+                m.insert(name.to_string(), df);
+            }
+            Err(_) => {
+                eprintln!(
+                    "robin-sparkless-polars: tables lock poisoned, register_table may have failed"
+                );
+            }
+        }
     }
 
     /// Register a database/schema name (from CREATE DATABASE / CREATE SCHEMA). Persisted in session for listDatabases/databaseExists.
+    /// If the databases lock is poisoned, the operation is best-effort and a message is emitted to stderr.
     pub fn register_database(&self, name: &str) {
-        let _ = self.databases.lock().map(|mut s| {
-            s.insert(name.to_string());
-        });
+        match self.databases.lock() {
+            Ok(mut s) => {
+                s.insert(name.to_string());
+            }
+            Err(_) => {
+                eprintln!(
+                    "robin-sparkless-polars: databases lock poisoned, register_database may have failed"
+                );
+            }
+        }
     }
 
     /// List database names: built-in "default", "global_temp", plus any created via CREATE DATABASE / CREATE SCHEMA.
+    /// If the databases lock is poisoned, returns only the built-in names and a message is emitted to stderr.
     pub fn list_database_names(&self) -> Vec<String> {
         let mut names: Vec<String> = vec!["default".to_string(), "global_temp".to_string()];
-        if let Ok(guard) = self.databases.lock() {
-            let mut created: Vec<String> = guard.iter().cloned().collect();
-            created.sort();
-            names.extend(created);
+        match self.databases.lock() {
+            Ok(guard) => {
+                let mut created: Vec<String> = guard.iter().cloned().collect();
+                created.sort();
+                names.extend(created);
+            }
+            Err(_) => {
+                eprintln!(
+                    "robin-sparkless-polars: databases lock poisoned, list_database_names may be incomplete"
+                );
+            }
         }
         names
     }
 
     /// True if the database name exists (default, global_temp, or created via CREATE DATABASE / CREATE SCHEMA).
+    /// If the databases lock is poisoned, returns false for custom names and a message is emitted to stderr.
     pub fn database_exists(&self, name: &str) -> bool {
         if name.eq_ignore_ascii_case("default") || name.eq_ignore_ascii_case("global_temp") {
             return true;
         }
-        self.databases
-            .lock()
-            .map(|s| s.iter().any(|n| n.eq_ignore_ascii_case(name)))
-            .unwrap_or(false)
+        match self.databases.lock() {
+            Ok(s) => s.iter().any(|n| n.eq_ignore_ascii_case(name)),
+            Err(_) => {
+                eprintln!(
+                    "robin-sparkless-polars: databases lock poisoned, database_exists may be wrong"
+                );
+                false
+            }
+        }
     }
 
     /// Get a saved table by name (tables map only). Returns None if not in saved tables (temp views not checked).
+    /// If the tables lock is poisoned, returns None and a message is emitted to stderr.
     pub fn get_saved_table(&self, name: &str) -> Option<DataFrame> {
-        self.tables.lock().ok().and_then(|m| m.get(name).cloned())
+        match self.tables.lock() {
+            Ok(m) => m.get(name).cloned(),
+            Err(_) => {
+                eprintln!(
+                    "robin-sparkless-polars: tables lock poisoned, get_saved_table may have failed"
+                );
+                None
+            }
+        }
     }
 
     /// True if the name exists in the saved-tables map (not temp views).
+    /// If the tables lock is poisoned, returns false and a message is emitted to stderr.
     pub fn saved_table_exists(&self, name: &str) -> bool {
-        self.tables
-            .lock()
-            .map(|m| m.contains_key(name))
-            .unwrap_or(false)
+        match self.tables.lock() {
+            Ok(m) => m.contains_key(name),
+            Err(_) => {
+                eprintln!(
+                    "robin-sparkless-polars: tables lock poisoned, saved_table_exists may be wrong"
+                );
+                false
+            }
+        }
     }
 
     /// Check if a table or temp view exists (PySpark: catalog.tableExists). True if name is in temp views, saved tables, global temp, or warehouse.
+    /// If a catalog lock is poisoned, returns false for that source and a message is emitted to stderr.
     pub fn table_exists(&self, name: &str) -> bool {
         // global_temp.xyz
         if let Some((_db, tbl)) = Self::parse_global_temp_name(name) {
-            return global_temp_catalog()
-                .lock()
-                .map(|m| m.contains_key(tbl))
-                .unwrap_or(false);
+            return match global_temp_catalog().lock() {
+                Ok(m) => m.contains_key(tbl),
+                Err(_) => {
+                    eprintln!(
+                        "robin-sparkless-polars: global temp catalog lock poisoned, table_exists may be wrong"
+                    );
+                    false
+                }
+            };
         }
-        if self
-            .catalog
-            .lock()
-            .map(|m| m.contains_key(name))
-            .unwrap_or(false)
-        {
+        if match self.catalog.lock() {
+            Ok(m) => m.contains_key(name),
+            Err(_) => {
+                eprintln!(
+                    "robin-sparkless-polars: catalog lock poisoned, table_exists may be wrong"
+                );
+                false
+            }
+        } {
             return true;
         }
-        if self
-            .tables
-            .lock()
-            .map(|m| m.contains_key(name))
-            .unwrap_or(false)
-        {
+        if match self.tables.lock() {
+            Ok(m) => m.contains_key(name),
+            Err(_) => {
+                eprintln!(
+                    "robin-sparkless-polars: tables lock poisoned, table_exists may be wrong"
+                );
+                false
+            }
+        } {
             return true;
         }
         // Warehouse fallback
@@ -717,47 +818,77 @@ impl SparkSession {
     }
 
     /// Return global temp view names (process-scoped). PySpark: catalog.listTables(dbName="global_temp").
+    /// If the global catalog lock is poisoned, returns empty and a message is emitted to stderr.
     pub fn list_global_temp_view_names(&self) -> Vec<String> {
-        global_temp_catalog()
-            .lock()
-            .map(|m| m.keys().cloned().collect())
-            .unwrap_or_default()
+        match global_temp_catalog().lock() {
+            Ok(m) => m.keys().cloned().collect(),
+            Err(_) => {
+                eprintln!(
+                    "robin-sparkless-polars: global temp catalog lock poisoned, list_global_temp_view_names may be incomplete"
+                );
+                Vec::new()
+            }
+        }
     }
 
     /// Return temporary view names in this session.
+    /// If the catalog lock is poisoned, returns empty and a message is emitted to stderr.
     pub fn list_temp_view_names(&self) -> Vec<String> {
-        self.catalog
-            .lock()
-            .map(|m| m.keys().cloned().collect())
-            .unwrap_or_default()
+        match self.catalog.lock() {
+            Ok(m) => m.keys().cloned().collect(),
+            Err(_) => {
+                eprintln!(
+                    "robin-sparkless-polars: catalog lock poisoned, list_temp_view_names may be incomplete"
+                );
+                Vec::new()
+            }
+        }
     }
 
     /// Return saved table names in this session (saveAsTable / write_delta_table).
+    /// If the tables lock is poisoned, returns empty and a message is emitted to stderr.
     pub fn list_table_names(&self) -> Vec<String> {
-        self.tables
-            .lock()
-            .map(|m| m.keys().cloned().collect())
-            .unwrap_or_default()
+        match self.tables.lock() {
+            Ok(m) => m.keys().cloned().collect(),
+            Err(_) => {
+                eprintln!(
+                    "robin-sparkless-polars: tables lock poisoned, list_table_names may be incomplete"
+                );
+                Vec::new()
+            }
+        }
     }
 
     /// Drop a saved table by name (removes from tables catalog only). No-op if not present.
+    /// If the tables lock is poisoned, returns false and a message is emitted to stderr.
     pub fn drop_table(&self, name: &str) -> bool {
-        self.tables
-            .lock()
-            .map(|mut m| m.remove(name).is_some())
-            .unwrap_or(false)
+        match self.tables.lock() {
+            Ok(mut m) => m.remove(name).is_some(),
+            Err(_) => {
+                eprintln!(
+                    "robin-sparkless-polars: tables lock poisoned, drop_table may have failed"
+                );
+                false
+            }
+        }
     }
 
     /// Drop a database/schema by name (from DROP SCHEMA / DROP DATABASE). Removes from registered databases only.
     /// Does not drop "default" or "global_temp". No-op if not present (or if_exists). Returns true if removed.
+    /// If the databases lock is poisoned, returns false and a message is emitted to stderr.
     pub fn drop_database(&self, name: &str) -> bool {
         if name.eq_ignore_ascii_case("default") || name.eq_ignore_ascii_case("global_temp") {
             return false;
         }
-        self.databases
-            .lock()
-            .map(|mut s| s.remove(name))
-            .unwrap_or(false)
+        match self.databases.lock() {
+            Ok(mut s) => s.remove(name),
+            Err(_) => {
+                eprintln!(
+                    "robin-sparkless-polars: databases lock poisoned, drop_database may have failed"
+                );
+                false
+            }
+        }
     }
 
     /// Parse "global_temp.xyz" into ("global_temp", "xyz"). Returns None for plain names.
@@ -1624,12 +1755,26 @@ impl SparkSession {
     }
 
     /// Stop the session (cleanup resources)
+    /// Best-effort cleanup. If any catalog lock is poisoned, a message is emitted to stderr and cleanup may be partial.
     pub fn stop(&self) {
-        // Best-effort cleanup. This is primarily for PySpark parity so that `spark.stop()`
-        // exists and can be called in teardown.
-        let _ = self.catalog.lock().map(|mut m| m.clear());
-        let _ = self.tables.lock().map(|mut m| m.clear());
-        let _ = self.databases.lock().map(|mut s| s.clear());
+        match self.catalog.lock() {
+            Ok(mut m) => m.clear(),
+            Err(_) => eprintln!(
+                "robin-sparkless-polars: catalog lock poisoned, stop() cleanup may be partial"
+            ),
+        }
+        match self.tables.lock() {
+            Ok(mut m) => m.clear(),
+            Err(_) => eprintln!(
+                "robin-sparkless-polars: tables lock poisoned, stop() cleanup may be partial"
+            ),
+        }
+        match self.databases.lock() {
+            Ok(mut s) => s.clear(),
+            Err(_) => eprintln!(
+                "robin-sparkless-polars: databases lock poisoned, stop() cleanup may be partial"
+            ),
+        }
         let _ = self.udf_registry.clear();
         clear_thread_udf_session();
     }

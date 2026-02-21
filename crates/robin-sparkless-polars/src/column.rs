@@ -2161,7 +2161,10 @@ impl Column {
         let count_expr = self.expr().clone().count().over(partition_exprs.clone());
         let rank_f = (rank_expr - lit(1i64)).cast(DataType::Float64);
         let count_f = (count_expr - lit(1i64)).cast(DataType::Float64);
-        let pct = rank_f / count_f;
+        // Avoid division by zero: single-row partition -> 0.0 (PySpark parity)
+        let pct = when(count_f.clone().gt(lit(1.0)))
+            .then(rank_f / count_f)
+            .otherwise(lit(0.0));
         Self::from_expr(pct, None)
     }
 
@@ -2179,8 +2182,12 @@ impl Column {
             .rank(opts, None)
             .over(partition_exprs.clone());
         let count_expr = self.expr().clone().count().over(partition_exprs.clone());
-        let cume = row_num / count_expr;
-        Self::from_expr(cume.cast(DataType::Float64), None)
+        // Avoid division by zero when partition is empty
+        let count_f = count_expr.clone().cast(DataType::Float64);
+        let cume = when(count_f.clone().eq(lit(0.0)))
+            .then(lit(0.0))
+            .otherwise(row_num.cast(DataType::Float64) / count_f);
+        Self::from_expr(cume, None)
     }
 
     /// Ntile: bucket 1..n by rank within partition (ceil(rank * n / count)). Window is applied; do not call .over() again.
@@ -2200,7 +2207,10 @@ impl Column {
         let n_expr = lit(n as f64);
         let rank_f = rank_expr.cast(DataType::Float64);
         let count_f = count_expr.cast(DataType::Float64);
-        let bucket = (rank_f * n_expr / count_f).ceil();
+        // Avoid division by zero when partition is empty: use bucket 1
+        let bucket = when(count_f.clone().eq(lit(0.0)))
+            .then(lit(1.0))
+            .otherwise((rank_f * n_expr / count_f).ceil());
         let clamped = bucket.clip(lit(1.0), lit(n as f64));
         Self::from_expr(clamped.cast(DataType::Int32), None)
     }

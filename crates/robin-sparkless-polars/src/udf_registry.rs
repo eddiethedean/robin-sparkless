@@ -61,9 +61,17 @@ impl UdfRegistry {
     }
 
     /// Look up a Rust UDF by name. Case sensitivity follows session config.
-    pub fn get_rust_udf(&self, name: &str, case_sensitive: bool) -> Option<Arc<dyn RustUdf>> {
-        let guard = self.rust_udfs.read().ok()?;
-        if case_sensitive {
+    /// Returns `Err` if the registry lock is poisoned (e.g. a thread panicked while holding it).
+    pub fn get_rust_udf(
+        &self,
+        name: &str,
+        case_sensitive: bool,
+    ) -> Result<Option<Arc<dyn RustUdf>>, PolarsError> {
+        let guard = self
+            .rust_udfs
+            .read()
+            .map_err(|_| PolarsError::ComputeError("udf registry lock poisoned".into()))?;
+        Ok(if case_sensitive {
             guard.get(name).cloned()
         } else {
             let name_lower = name.to_lowercase();
@@ -71,16 +79,13 @@ impl UdfRegistry {
                 .iter()
                 .find(|(k, _)| k.to_lowercase() == name_lower)
                 .map(|(_, v)| v.clone())
-        }
+        })
     }
 
-    /// Check if a Rust UDF exists.
+    /// Check if a Rust UDF exists. Returns `Err` if the registry lock is poisoned.
     #[allow(dead_code)] // used by SQL translator
-    pub fn has_udf(&self, name: &str, case_sensitive: bool) -> bool {
-        if self.get_rust_udf(name, case_sensitive).is_some() {
-            return true;
-        }
-        false
+    pub fn has_udf(&self, name: &str, case_sensitive: bool) -> Result<bool, PolarsError> {
+        self.get_rust_udf(name, case_sensitive).map(|o| o.is_some())
     }
 
     /// Clear all registered UDFs (used by SparkSession.stop()).
