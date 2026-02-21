@@ -1,3 +1,5 @@
+# CI for the workspace: robin-sparkless (root), robin-sparkless-core, robin-sparkless-polars, spark-sql-parser.
+# All jobs use --workspace so every crate is built, formatted, and tested.
 name: CI
 
 on:
