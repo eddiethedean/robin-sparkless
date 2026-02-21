@@ -76,6 +76,22 @@ pub fn find_common_type(left: &DataType, right: &DataType) -> Result<DataType, P
     }
 }
 
+/// Build (left_expr, right_expr) that cast two columns to a common type and alias to the same name.
+/// Use in join key coercion and union_by_name when both sides have the column but types differ.
+pub fn coerce_expr_pair(
+    left_name: &str,
+    right_name: &str,
+    left_dtype: &DataType,
+    right_dtype: &DataType,
+    alias: &str,
+) -> Result<(Expr, Expr), PolarsError> {
+    let common = find_common_type(left_dtype, right_dtype)?;
+    Ok((
+        col(left_name).cast(common.clone()).alias(alias),
+        col(right_name).cast(common).alias(alias),
+    ))
+}
+
 /// Check if a DataType is numeric
 fn is_numeric(dtype: &DataType) -> bool {
     matches!(

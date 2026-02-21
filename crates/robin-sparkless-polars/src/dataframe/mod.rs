@@ -14,7 +14,7 @@ pub use transformations::{
 };
 
 use crate::column::Column;
-use crate::error::EngineError;
+use crate::error::{EngineError, polars_to_core_error};
 use crate::functions::SortOrder;
 use crate::schema::{StructType, StructTypePolarsExt};
 use crate::session::SparkSession;
@@ -525,7 +525,7 @@ impl DataFrame {
 
     /// Same as [`schema`](Self::schema) but returns [`EngineError`]. Use in bindings to avoid Polars.
     pub fn schema_engine(&self) -> Result<StructType, EngineError> {
-        self.schema().map_err(EngineError::from)
+        self.schema().map_err(polars_to_core_error)
     }
 
     /// Get the dtype of a column by name (after resolving case-insensitivity). Returns None if not found.
@@ -560,7 +560,7 @@ impl DataFrame {
 
     /// Same as [`columns`](Self::columns) but returns [`EngineError`]. Use in bindings to avoid Polars.
     pub fn columns_engine(&self) -> Result<Vec<String>, EngineError> {
-        self.columns().map_err(EngineError::from)
+        self.columns().map_err(polars_to_core_error)
     }
 
     /// Count the number of rows (action - triggers execution)
@@ -570,7 +570,7 @@ impl DataFrame {
 
     /// Same as [`count`](Self::count) but returns [`EngineError`]. Use in bindings to avoid Polars.
     pub fn count_engine(&self) -> Result<usize, EngineError> {
-        self.count().map_err(EngineError::from)
+        self.count().map_err(polars_to_core_error)
     }
 
     /// Show the first n rows
@@ -590,7 +590,7 @@ impl DataFrame {
     pub fn collect_as_json_rows_engine(
         &self,
     ) -> Result<Vec<HashMap<String, JsonValue>>, EngineError> {
-        self.collect_as_json_rows().map_err(EngineError::from)
+        self.collect_as_json_rows().map_err(polars_to_core_error)
     }
 
     /// Collect as rows of column-name -> JSON value. For use by language bindings (Node, etc.).
@@ -618,7 +618,7 @@ impl DataFrame {
     /// Collect the DataFrame as a JSON array of row objects (string).
     /// Convenient for embedders that want a single string without depending on Polars error types.
     pub fn to_json_rows(&self) -> Result<String, EngineError> {
-        let rows = self.collect_as_json_rows()?;
+        let rows = self.collect_as_json_rows().map_err(polars_to_core_error)?;
         serde_json::to_string(&rows).map_err(Into::into)
     }
 
@@ -651,7 +651,7 @@ impl DataFrame {
 
     /// Same as [`select`](Self::select) but returns [`EngineError`]. Use in bindings to avoid Polars.
     pub fn select_engine(&self, cols: Vec<&str>) -> Result<DataFrame, EngineError> {
-        self.select(cols).map_err(EngineError::from)
+        self.select(cols).map_err(polars_to_core_error)
     }
 
     /// Select using a mix of column names and expressions (PySpark: select("a", col("b").alias("x"))).
@@ -666,7 +666,7 @@ impl DataFrame {
 
     /// Same as [`filter`](Self::filter) but returns [`EngineError`]. Use in bindings to avoid Polars.
     pub fn filter_engine(&self, condition: Expr) -> Result<DataFrame, EngineError> {
-        self.filter(condition).map_err(EngineError::from)
+        self.filter(condition).map_err(polars_to_core_error)
     }
 
     /// Get a column reference by name (for building expressions).
@@ -689,7 +689,7 @@ impl DataFrame {
         col: &Column,
     ) -> Result<DataFrame, EngineError> {
         self.with_column(column_name, col)
-            .map_err(EngineError::from)
+            .map_err(polars_to_core_error)
     }
 
     /// Add or replace a column using an expression. Prefer [`with_column`](Self::with_column) with a `Column` for rand/randn (per-row values).
@@ -723,7 +723,7 @@ impl DataFrame {
 
     /// Same as [`group_by`](Self::group_by) but returns [`EngineError`]. Use in bindings to avoid Polars.
     pub fn group_by_engine(&self, column_names: Vec<&str>) -> Result<GroupedData, EngineError> {
-        self.group_by(column_names).map_err(EngineError::from)
+        self.group_by(column_names).map_err(polars_to_core_error)
     }
 
     /// Group by expressions (e.g. col("a") or col("a").alias("x")). PySpark parity for groupBy(Column).
@@ -888,7 +888,7 @@ impl DataFrame {
 
     /// Same as [`limit`](Self::limit) but returns [`EngineError`]. Use in bindings to avoid Polars.
     pub fn limit_engine(&self, n: usize) -> Result<DataFrame, EngineError> {
-        self.limit(n).map_err(EngineError::from)
+        self.limit(n).map_err(polars_to_core_error)
     }
 
     /// Rename a column (old_name -> new_name).

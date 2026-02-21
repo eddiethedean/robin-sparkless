@@ -363,41 +363,26 @@ pub fn skewness(col: &Column) -> Column {
     )
 }
 
-/// Population covariance aggregation (PySpark covar_pop). Returns Expr for use in groupBy.agg().
-pub fn covar_pop_expr(col1: &str, col2: &str) -> Expr {
-    use polars::prelude::{col as pl_col, len};
-    let c1 = pl_col(col1).cast(DataType::Float64);
-    let c2 = pl_col(col2).cast(DataType::Float64);
+fn covar_pop_expr_impl(e1: Expr, e2: Expr) -> Expr {
+    use polars::prelude::len;
+    let c1 = e1.clone().cast(DataType::Float64);
+    let c2 = e2.clone().cast(DataType::Float64);
     let n = len().cast(DataType::Float64);
     let sum_ab = (c1.clone() * c2.clone()).sum();
-    let sum_a = pl_col(col1).sum().cast(DataType::Float64);
-    let sum_b = pl_col(col2).sum().cast(DataType::Float64);
+    let sum_a = e1.sum().cast(DataType::Float64);
+    let sum_b = e2.sum().cast(DataType::Float64);
     (sum_ab - sum_a * sum_b / n.clone()) / n
 }
 
-/// Population covariance aggregation (PySpark covar_pop). Module-level; use in groupBy.agg() with two columns.
-pub fn covar_pop(col1: &Column, col2: &Column) -> Column {
-    use polars::prelude::len;
-    let c1 = col1.expr().clone().cast(DataType::Float64);
-    let c2 = col2.expr().clone().cast(DataType::Float64);
-    let n = len().cast(DataType::Float64);
-    let sum_ab = (c1.clone() * c2.clone()).sum();
-    let sum_a = col1.expr().clone().sum().cast(DataType::Float64);
-    let sum_b = col2.expr().clone().sum().cast(DataType::Float64);
-    let e = (sum_ab - sum_a * sum_b / n.clone()) / n;
-    Column::from_expr(e, Some("covar_pop".to_string()))
-}
-
-/// Pearson correlation aggregation (PySpark corr). Module-level; use in groupBy.agg() with two columns.
-pub fn corr(col1: &Column, col2: &Column) -> Column {
+fn corr_expr_impl(e1: Expr, e2: Expr) -> Expr {
     use polars::prelude::{len, lit, when};
-    let c1 = col1.expr().clone().cast(DataType::Float64);
-    let c2 = col2.expr().clone().cast(DataType::Float64);
+    let c1 = e1.clone().cast(DataType::Float64);
+    let c2 = e2.clone().cast(DataType::Float64);
     let n = len().cast(DataType::Float64);
     let n1 = (len() - lit(1)).cast(DataType::Float64);
     let sum_ab = (c1.clone() * c2.clone()).sum();
-    let sum_a = col1.expr().clone().sum().cast(DataType::Float64);
-    let sum_b = col2.expr().clone().sum().cast(DataType::Float64);
+    let sum_a = e1.sum().cast(DataType::Float64);
+    let sum_b = e2.sum().cast(DataType::Float64);
     let sum_a2 = (c1.clone() * c1).sum();
     let sum_b2 = (c2.clone() * c2).sum();
     let cov_samp = (sum_ab - sum_a.clone() * sum_b.clone() / n.clone()) / n1.clone();
@@ -405,46 +390,56 @@ pub fn corr(col1: &Column, col2: &Column) -> Column {
     let var_b = (sum_b2 - sum_b.clone() * sum_b / n.clone()) / n1.clone();
     let std_a = var_a.sqrt();
     let std_b = var_b.sqrt();
-    let e = when(len().gt(lit(1)))
+    when(len().gt(lit(1)))
         .then(cov_samp / (std_a * std_b))
-        .otherwise(lit(f64::NAN));
-    Column::from_expr(e, Some("corr".to_string()))
+        .otherwise(lit(f64::NAN))
 }
 
-/// Sample covariance aggregation (PySpark covar_samp). Returns Expr for use in groupBy.agg().
-pub fn covar_samp_expr(col1: &str, col2: &str) -> Expr {
-    use polars::prelude::{col as pl_col, len, lit, when};
-    let c1 = pl_col(col1).cast(DataType::Float64);
-    let c2 = pl_col(col2).cast(DataType::Float64);
+fn covar_samp_expr_impl(e1: Expr, e2: Expr) -> Expr {
+    use polars::prelude::{len, lit, when};
+    let c1 = e1.clone().cast(DataType::Float64);
+    let c2 = e2.clone().cast(DataType::Float64);
     let n = len().cast(DataType::Float64);
     let sum_ab = (c1.clone() * c2.clone()).sum();
-    let sum_a = pl_col(col1).sum().cast(DataType::Float64);
-    let sum_b = pl_col(col2).sum().cast(DataType::Float64);
+    let sum_a = e1.sum().cast(DataType::Float64);
+    let sum_b = e2.sum().cast(DataType::Float64);
     when(len().gt(lit(1)))
         .then((sum_ab - sum_a * sum_b / n.clone()) / (len() - lit(1)).cast(DataType::Float64))
         .otherwise(lit(f64::NAN))
 }
 
+/// Population covariance aggregation (PySpark covar_pop). Returns Expr for use in groupBy.agg().
+pub fn covar_pop_expr(col1: &str, col2: &str) -> Expr {
+    use polars::prelude::col as pl_col;
+    covar_pop_expr_impl(pl_col(col1), pl_col(col2))
+}
+
+/// Population covariance aggregation (PySpark covar_pop). Module-level; use in groupBy.agg() with two columns.
+pub fn covar_pop(col1: &Column, col2: &Column) -> Column {
+    Column::from_expr(
+        covar_pop_expr_impl(col1.expr().clone(), col2.expr().clone()),
+        Some("covar_pop".to_string()),
+    )
+}
+
+/// Pearson correlation aggregation (PySpark corr). Module-level; use in groupBy.agg() with two columns.
+pub fn corr(col1: &Column, col2: &Column) -> Column {
+    Column::from_expr(
+        corr_expr_impl(col1.expr().clone(), col2.expr().clone()),
+        Some("corr".to_string()),
+    )
+}
+
+/// Sample covariance aggregation (PySpark covar_samp). Returns Expr for use in groupBy.agg().
+pub fn covar_samp_expr(col1: &str, col2: &str) -> Expr {
+    use polars::prelude::col as pl_col;
+    covar_samp_expr_impl(pl_col(col1), pl_col(col2))
+}
+
 /// Pearson correlation aggregation (PySpark corr). Returns Expr for use in groupBy.agg().
 pub fn corr_expr(col1: &str, col2: &str) -> Expr {
-    use polars::prelude::{col as pl_col, len, lit, when};
-    let c1 = pl_col(col1).cast(DataType::Float64);
-    let c2 = pl_col(col2).cast(DataType::Float64);
-    let n = len().cast(DataType::Float64);
-    let n1 = (len() - lit(1)).cast(DataType::Float64);
-    let sum_ab = (c1.clone() * c2.clone()).sum();
-    let sum_a = pl_col(col1).sum().cast(DataType::Float64);
-    let sum_b = pl_col(col2).sum().cast(DataType::Float64);
-    let sum_a2 = (c1.clone() * c1).sum();
-    let sum_b2 = (c2.clone() * c2).sum();
-    let cov_samp = (sum_ab - sum_a.clone() * sum_b.clone() / n.clone()) / n1.clone();
-    let var_a = (sum_a2 - sum_a.clone() * sum_a / n.clone()) / n1.clone();
-    let var_b = (sum_b2 - sum_b.clone() * sum_b / n.clone()) / n1.clone();
-    let std_a = var_a.sqrt();
-    let std_b = var_b.sqrt();
-    when(len().gt(lit(1)))
-        .then(cov_samp / (std_a * std_b))
-        .otherwise(lit(f64::NAN))
+    use polars::prelude::col as pl_col;
+    corr_expr_impl(pl_col(col1), pl_col(col2))
 }
 
 // --- Regression aggregates (PySpark regr_*). y = col1, x = col2; only pairs where both non-null. ---
@@ -1415,33 +1410,29 @@ pub fn sign(column: &Column) -> Column {
     signum(column)
 }
 
-/// Cast column to the given type (PySpark cast). Fails on invalid conversion.
-/// String-to-boolean uses custom parsing ("true"/"false"/"1"/"0") since Polars does not support Utf8->Boolean.
-/// String-to-date accepts date and datetime strings (e.g. "2025-01-01 10:30:00" truncates to date) for Spark parity.
-pub fn cast(column: &Column, type_name: &str) -> Result<Column, String> {
+fn cast_impl(column: &Column, type_name: &str, strict: bool) -> Result<Column, String> {
     let dtype = parse_type_name(type_name)?;
     if dtype == DataType::Boolean {
         let expr = column.expr().clone().map(
-            |col| crate::column::expect_col(crate::udfs::apply_string_to_boolean(col, true)),
+            move |col| crate::column::expect_col(crate::udfs::apply_string_to_boolean(col, strict)),
             |_schema, field| Ok(Field::new(field.name().clone(), DataType::Boolean)),
         );
         return Ok(Column::from_expr(expr, None));
     }
     if dtype == DataType::Date {
         let expr = column.expr().clone().map(
-            |col| crate::column::expect_col(crate::udfs::apply_string_to_date(col, true)),
+            move |col| crate::column::expect_col(crate::udfs::apply_string_to_date(col, strict)),
             |_schema, field| Ok(Field::new(field.name().clone(), DataType::Date)),
         );
         return Ok(Column::from_expr(expr, None));
     }
     if dtype == DataType::Int32 || dtype == DataType::Int64 {
         let target = dtype.clone();
-        // cast: strict=true – invalid strings should error (PySpark parity).
         let expr = column.expr().clone().map(
             move |col| {
                 crate::column::expect_col(crate::udfs::apply_string_to_int(
                     col,
-                    true,
+                    strict,
                     target.clone(),
                 ))
             },
@@ -1450,60 +1441,32 @@ pub fn cast(column: &Column, type_name: &str) -> Result<Column, String> {
         return Ok(Column::from_expr(expr, None));
     }
     if dtype == DataType::Float64 {
-        // String-to-double uses custom parsing for Spark-style to_number semantics.
         let expr = column.expr().clone().map(
-            |col| crate::column::expect_col(crate::udfs::apply_string_to_double(col, true)),
+            move |col| crate::column::expect_col(crate::udfs::apply_string_to_double(col, strict)),
             |_schema, field| Ok(Field::new(field.name().clone(), DataType::Float64)),
         );
         return Ok(Column::from_expr(expr, None));
     }
-    Ok(Column::from_expr(
-        column.expr().clone().strict_cast(dtype),
-        None,
-    ))
+    let expr = if strict {
+        column.expr().clone().strict_cast(dtype)
+    } else {
+        column.expr().clone().cast(dtype)
+    };
+    Ok(Column::from_expr(expr, None))
+}
+
+/// Cast column to the given type (PySpark cast). Fails on invalid conversion.
+/// String-to-boolean uses custom parsing ("true"/"false"/"1"/"0") since Polars does not support Utf8->Boolean.
+/// String-to-date accepts date and datetime strings (e.g. "2025-01-01 10:30:00" truncates to date) for Spark parity.
+pub fn cast(column: &Column, type_name: &str) -> Result<Column, String> {
+    cast_impl(column, type_name, true)
 }
 
 /// Cast column to the given type, returning null on invalid conversion (PySpark try_cast).
 /// String-to-boolean uses custom parsing ("true"/"false"/"1"/"0") since Polars does not support Utf8->Boolean.
 /// String-to-date accepts date and datetime strings; invalid strings become null.
 pub fn try_cast(column: &Column, type_name: &str) -> Result<Column, String> {
-    let dtype = parse_type_name(type_name)?;
-    if dtype == DataType::Boolean {
-        let expr = column.expr().clone().map(
-            |col| crate::column::expect_col(crate::udfs::apply_string_to_boolean(col, false)),
-            |_schema, field| Ok(Field::new(field.name().clone(), DataType::Boolean)),
-        );
-        return Ok(Column::from_expr(expr, None));
-    }
-    if dtype == DataType::Date {
-        let expr = column.expr().clone().map(
-            |col| crate::column::expect_col(crate::udfs::apply_string_to_date(col, false)),
-            |_schema, field| Ok(Field::new(field.name().clone(), DataType::Date)),
-        );
-        return Ok(Column::from_expr(expr, None));
-    }
-    if dtype == DataType::Int32 || dtype == DataType::Int64 {
-        let target = dtype.clone();
-        let expr = column.expr().clone().map(
-            move |col| {
-                crate::column::expect_col(crate::udfs::apply_string_to_int(
-                    col,
-                    false,
-                    target.clone(),
-                ))
-            },
-            move |_schema, field| Ok(Field::new(field.name().clone(), dtype.clone())),
-        );
-        return Ok(Column::from_expr(expr, None));
-    }
-    if dtype == DataType::Float64 {
-        let expr = column.expr().clone().map(
-            |col| crate::column::expect_col(crate::udfs::apply_string_to_double(col, false)),
-            |_schema, field| Ok(Field::new(field.name().clone(), DataType::Float64)),
-        );
-        return Ok(Column::from_expr(expr, None));
-    }
-    Ok(Column::from_expr(column.expr().clone().cast(dtype), None))
+    cast_impl(column, type_name, false)
 }
 
 /// Cast to string, optionally with format for datetime (PySpark to_char, to_varchar).

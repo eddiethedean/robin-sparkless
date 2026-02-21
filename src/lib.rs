@@ -97,7 +97,7 @@ pub use config::SparklessConfig;
 
 /// Convert PolarsError to EngineError (for APIs that still return PolarsError).
 pub fn to_engine_error(e: PolarsError) -> EngineError {
-    robin_sparkless_core::EngineError::from(robin_sparkless_polars::EngineError::from(e))
+    robin_sparkless_polars::polars_to_core_error(e)
 }
 
 #[cfg(feature = "sql")]

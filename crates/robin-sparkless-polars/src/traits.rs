@@ -1,7 +1,7 @@
 //! Traits for idiomatic conversion to and from robin-sparkless DataFrames.
 
 use crate::dataframe::DataFrame;
-use crate::error::EngineError;
+use crate::error::{EngineError, polars_to_core_error};
 use crate::session::SparkSession;
 use serde_json::Value as JsonValue;
 use std::collections::HashMap;
@@ -15,7 +15,7 @@ impl IntoRobinDf for Vec<(i64, i64, String)> {
     fn into_robin_df(self, session: &SparkSession) -> Result<DataFrame, EngineError> {
         session
             .create_dataframe(self, vec!["c0", "c1", "c2"])
-            .map_err(Into::into)
+            .map_err(polars_to_core_error)
     }
 }
 

@@ -5,12 +5,20 @@
 
 use super::DataFrame;
 use crate::functions::SortOrder;
-use crate::type_coercion::find_common_type;
+use crate::type_coercion::{coerce_expr_pair, find_common_type};
 use polars::prelude::{
-    DataType, Expr, IntoLazy, IntoSeries, NamedFrom, PlSmallStr, PolarsError, Selector, Series,
-    UnionArgs, UniqueKeepStrategy, col,
+    DataType, Expr, Float64Chunked, IntoLazy, IntoSeries, NamedFrom, PlSmallStr, PolarsError,
+    Selector, Series, UnionArgs, UniqueKeepStrategy, col,
 };
 use std::collections::HashMap;
+
+fn series_as_f64_ca(s: &Series, context: &str) -> Result<Float64Chunked, PolarsError> {
+    let s_f64 = s.cast(&DataType::Float64)?;
+    let ca = s_f64.f64().map_err(|_| {
+        PolarsError::ComputeError(format!("{}: need numeric/f64 column", context).into())
+    })?;
+    Ok(ca.clone())
+}
 use std::sync::Arc;
 
 /// Select columns (returns a new DataFrame). Preserves case_sensitive on result.
@@ -316,6 +324,21 @@ pub fn union_by_name(
         let right_has = resolve(&right_names, c.as_str());
         let left_dtype = left_has.as_ref().and_then(|r| left.get_column_dtype(r));
         let right_dtype = right_has.as_ref().and_then(|r| right.get_column_dtype(r));
+        // When both sides have the column and types differ, use shared coercion helper.
+        if let (Some(l), Some(r)) = (&left_has, &right_has) {
+            if let (Some(lt), Some(rt)) = (&left_dtype, &right_dtype) {
+                if lt != rt {
+                    let (le, re) = coerce_expr_pair(l, r, lt, rt, c).map_err(|e| {
+                        PolarsError::ComputeError(
+                            format!("union_by_name: column '{}' type coercion: {}", c, e).into(),
+                        )
+                    })?;
+                    left_exprs.push(le);
+                    right_exprs.push(re);
+                    continue;
+                }
+            }
+        }
         // #613: When one side's dtype is unknown (None), use String as common type so we never
         // cast string to int (which would fail); both columns can safely cast to String.
         let common_dtype = match (&left_dtype, &right_dtype) {
@@ -554,10 +577,7 @@ pub fn describe(df: &DataFrame, case_sensitive: bool) -> Result<DataFrame, Polar
             let count = s.len() as i64 - s.null_count() as i64;
             let mean_f = s.mean().unwrap_or(f64::NAN);
             let std_f = s.std(1).unwrap_or(f64::NAN);
-            let s_f64 = s.cast(&DataType::Float64)?;
-            let ca = s_f64
-                .f64()
-                .map_err(|_| PolarsError::ComputeError("cast to f64 failed".into()))?;
+            let ca = series_as_f64_ca(s, "describe")?;
             let min_f = ca.min().unwrap_or(f64::NAN);
             let max_f = ca.max().unwrap_or(f64::NAN);
             // PySpark describe/summary returns string type for value columns
@@ -1276,10 +1296,7 @@ pub fn approx_quantile(
         .as_series()
         .ok_or_else(|| PolarsError::ComputeError("approx_quantile: column not a series".into()))?
         .clone();
-    let s_f64 = s.cast(&polars::prelude::DataType::Float64)?;
-    let ca = s_f64
-        .f64()
-        .map_err(|_| PolarsError::ComputeError("approx_quantile: need numeric column".into()))?;
+    let ca = series_as_f64_ca(&s, "approx_quantile")?;
     let mut quantiles = Vec::with_capacity(probabilities.len());
     for &p in probabilities {
         let q = ca.quantile(p, QuantileMethod::Linear)?;
