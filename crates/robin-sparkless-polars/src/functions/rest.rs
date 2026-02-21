@@ -1,4 +1,7 @@
 //! Remaining expression builders: agg, when, string, bit, datetime, struct/map/array, cast, hash, misc.
+//!
+//! Some builders (e.g. `format_string`, `concat`, `coalesce`, `struct_`, `named_struct`) **panic** if given
+//! an empty column list; this is intentional programmer-error handling. Use non-empty slices at call sites.
 use super::types::parse_type_name;
 use crate::column::Column;
 use polars::prelude::*;
@@ -791,9 +794,11 @@ pub fn call_udf(name: &str, cols: &[Column]) -> Result<Column, PolarsError> {
         })?;
 
     // Rust UDF: build lazy Expr
-    let udf = registry.get_rust_udf(name, case_sensitive).ok_or_else(|| {
-        PolarsError::InvalidOperation(format!("call_udf: UDF '{name}' not found").into())
-    })?;
+    let udf = registry
+        .get_rust_udf(name, case_sensitive)?
+        .ok_or_else(|| {
+            PolarsError::InvalidOperation(format!("call_udf: UDF '{name}' not found").into())
+        })?;
 
     let exprs: Vec<Expr> = cols.iter().map(|c| c.expr().clone()).collect();
     let output_type = DataType::String; // PySpark default
@@ -928,7 +933,7 @@ pub fn find_in_set(str_column: &Column, set_column: &Column) -> Column {
     str_column.clone().find_in_set(set_column)
 }
 
-/// Printf-style format (PySpark format_string). Supports %s, %d, %i, %f, %g, %%.
+/// Printf-style format (PySpark format_string). Supports %s, %d, %i, %f, %g, %%. **Panics** if `columns` is empty.
 pub fn format_string(format: &str, columns: &[&Column]) -> Column {
     use polars::prelude::*;
     if columns.is_empty() {
@@ -1536,6 +1541,7 @@ pub fn width_bucket(value: &Column, min_val: f64, max_val: f64, num_bucket: i64)
 }
 
 /// Return column at 1-based index (PySpark elt). elt(2, a, b, c) returns b.
+/// Element at 1-based index from list of columns (PySpark elt). **Panics** if `columns` is empty.
 pub fn elt(index: &Column, columns: &[&Column]) -> Column {
     use polars::prelude::*;
     if columns.is_empty() {
@@ -2056,6 +2062,7 @@ pub fn factorial(column: &Column) -> Column {
 }
 
 /// Concatenate string columns without separator (PySpark concat)
+/// Concatenate string columns (PySpark concat). **Panics** if `columns` is empty.
 pub fn concat(columns: &[&Column]) -> Column {
     use polars::prelude::*;
     if columns.is_empty() {
@@ -2066,6 +2073,7 @@ pub fn concat(columns: &[&Column]) -> Column {
 }
 
 /// Concatenate string columns with separator (PySpark concat_ws)
+/// Concatenate with separator (PySpark concat_ws). **Panics** if `columns` is empty.
 pub fn concat_ws(separator: &str, columns: &[&Column]) -> Column {
     use polars::prelude::*;
     if columns.is_empty() {
@@ -2147,6 +2155,7 @@ pub fn nth_value(column: &Column, n: i64, partition_by: &[&str], descending: boo
 /// // coalesce(col("a"), col("b"), lit(0))
 /// let expr = coalesce(&[&col("a"), &col("b"), &lit_i64(0)]);
 /// ```
+/// First non-null value across columns (PySpark coalesce). **Panics** if `columns` is empty.
 pub fn coalesce(columns: &[&Column]) -> Column {
     use polars::prelude::*;
     if columns.is_empty() {
@@ -2618,6 +2627,7 @@ pub fn map_filter_value_gt(map_col: &Column, threshold: f64) -> Column {
 }
 
 /// Create struct from columns using column names as field names (PySpark struct).
+/// Struct from columns (PySpark struct). **Panics** if `columns` is empty.
 pub fn struct_(columns: &[&Column]) -> Column {
     use polars::prelude::as_struct;
     if columns.is_empty() {
@@ -2628,6 +2638,7 @@ pub fn struct_(columns: &[&Column]) -> Column {
 }
 
 /// Create struct with explicit field names (PySpark named_struct). Pairs of (name, column).
+/// Struct from (name, column) pairs (PySpark named_struct). **Panics** if `pairs` is empty.
 pub fn named_struct(pairs: &[(&str, &Column)]) -> Column {
     use polars::prelude::as_struct;
     if pairs.is_empty() {

@@ -530,7 +530,7 @@ fn sql_function_to_expr(
     }
 
     // UDF lookup
-    if session.udf_registry.has_udf(func_name, case_sensitive) {
+    if session.udf_registry.has_udf(func_name, case_sensitive)? {
         let col = functions::call_udf(func_name, &args)?;
         if col.udf_call.is_some() {
             return Err(PolarsError::InvalidOperation(
@@ -829,7 +829,7 @@ fn projection_function_to_item(
     }
 
     // UDF lookup
-    if session.udf_registry.has_udf(func_name, case_sensitive) {
+    if session.udf_registry.has_udf(func_name, case_sensitive)? {
         let col = functions::call_udf(func_name, &args)?;
         if col.udf_call.is_some() {
             return Ok(ProjItem::PythonUdf(col, alias));
