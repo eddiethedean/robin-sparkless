@@ -8,15 +8,15 @@ This document describes how to put **all** Polars-using code into a single crate
 - **Preserve public API**: Existing `robin_sparkless::*` and `robin_sparkless::prelude::*` remain unchanged for downstream users.
 - **Faster non-Polars iteration**: Changes to core (config, schema types, error types, date_utils) do not trigger a Polars rebuild.
 
-## Current State
+## Current State (as implemented)
 
 | Crate / location | Polars usage |
 |------------------|--------------|
 | **robin-sparkless-core** | None |
-| **robin-sparkless-expr** | Column, functions, UDFs, type_coercion, expression (all `Expr`/`Series`) |
-| **robin-sparkless** (root) | DataFrame, Session, plan, schema_conv, traits, error (`From<PolarsError>`), functions (`broadcast`) |
+| **robin-sparkless-polars** | Column, functions, UDFs, type_coercion, expression, DataFrame, Session, plan, schema_conv, traits, error (`From<PolarsError>`) — the only crate that depends on Polars |
+| **robin-sparkless** (root) | Facade only; re-exports from core and robin-sparkless-polars. No direct Polars dependency. |
 
-So today Polars is used in both `robin-sparkless-expr` and the root crate.
+Polars is used only in **robin-sparkless-polars**. The former **robin-sparkless-expr** crate was merged into robin-sparkless-polars.
 
 ## Target Layout
 
@@ -75,7 +75,7 @@ robin-sparkless  (facade; re-exports core + robin-sparkless-polars)
   - Same extra deps as current root + expr (serde, chrono, regex, rand, etc.).
   - Features `sql` and `delta` mirror current root (spark-sql-parser/sqlparser, deltalake/tokio).
 - **robin-sparkless** (root):
-  - `[dependencies]`: `robin-sparkless-core`, `robin-sparkless-polars` (with optional features for sql/delta). No `polars` or `robin-sparkless-expr`.
+  - `[dependencies]`: `robin-sparkless-core`, `robin-sparkless-polars` (with optional features for sql/delta). No direct `polars` dependency.
   - `[features]`: `sql` and `delta` forwarded to `robin-sparkless-polars`.
 
 ### Tests and examples

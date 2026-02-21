@@ -23,12 +23,12 @@ So that local development and CI use the same toolchains and tools:
    - [crates/robin-sparkless-core/Cargo.toml](../crates/robin-sparkless-core/Cargo.toml)
    - [crates/robin-sparkless-polars/Cargo.toml](../crates/robin-sparkless-polars/Cargo.toml)
    - [crates/spark-sql-parser/Cargo.toml](../crates/spark-sql-parser/Cargo.toml)
-   Use the same version for the three robin-sparkless crates (e.g. `0.12.3`, `0.13.0`). `spark-sql-parser` can use the same version or its own (e.g. `0.1.0`). Update the `version` in root and in the crates; if you publish the subcrates, also update the dependency version in root (e.g. `robin-sparkless-core = { version = "0.12", path = "..." }`, `robin-sparkless-polars = { version = "0.12", path = "..." }`). Commit and push to `main`.
+   Use the same version for the three robin-sparkless crates (e.g. `0.15.0`). `spark-sql-parser` can use the same version or its own (e.g. `0.2.0`). Update the `version` in root and in the crates; if you publish the subcrates, also update the dependency version in root (e.g. `robin-sparkless-core = { version = "0.15", path = "..." }`, `robin-sparkless-polars = { version = "0.15", path = "..." }`). Commit and push to `main`.
 
 2. **Create and push a tag** matching the version with a `v` prefix:
    ```bash
-   git tag v0.12.3
-   git push origin v0.12.3
+   git tag v0.15.0
+   git push origin v0.15.0
    ```
 
 3. **CI runs automatically** on the tag push (see [.github/workflows/release.yml](../.github/workflows/release.yml)):
@@ -43,9 +43,9 @@ So that local development and CI use the same toolchains and tools:
 
 ## Version policy
 
-- Tags must match the version in the root `Cargo.toml` (e.g. tag `v0.12.3` only when root and both crates have `version = "0.12.3"`).
+- Tags must match the version in the root `Cargo.toml` (e.g. tag `v0.15.0` only when root and both crates have `version = "0.15.0"`).
 - Do not re-tag or overwrite tags; crates.io does not allow republishing the same version.
-- The three robin-sparkless crates are published with the same version number so that the main crate can depend on `robin-sparkless-core = "0.12"` and `robin-sparkless-polars = "0.12"` and resolve to the matching release. `spark-sql-parser` may use a separate version (e.g. `0.1.x`).
+- The three robin-sparkless crates are published with the same version number so that the main crate can depend on `robin-sparkless-core = "0.15"` and `robin-sparkless-polars = "0.15"` and resolve to the matching release. `spark-sql-parser` may use a separate version (e.g. `0.2.x`).
 
 ## Manual publish (optional)
 
