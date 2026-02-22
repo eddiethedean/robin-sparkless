@@ -3067,6 +3067,30 @@ mod tests {
         assert_eq!(vals, vec![Some(123.0), Some(45.5), None, None]);
     }
 
+    /// #649: cast/try_cast double to int: truncation; NaN/inf -> null (try_cast) or error (cast).
+    #[test]
+    fn test_cast_double_to_int_nan_to_null() {
+        use polars::prelude::df;
+
+        let df = df!(
+            "x" => &[1.7, 2.3, f64::NAN, f64::INFINITY]
+        )
+        .unwrap();
+
+        let col_x = col("x");
+        let try_cast_col = try_cast(&col_x, "int").unwrap();
+
+        let out = df
+            .lazy()
+            .with_column(try_cast_col.into_expr().alias("v"))
+            .collect()
+            .unwrap();
+
+        let v = out.column("v").unwrap();
+        let vals: Vec<Option<i32>> = v.i32().unwrap().into_iter().collect();
+        assert_eq!(vals, vec![Some(1), Some(2), None, None]);
+    }
+
     #[test]
     fn test_to_number_and_try_to_number_numerics_and_strings() {
         // Mixed numeric types should be cast to double; invalid strings become null only for try_to_number.
