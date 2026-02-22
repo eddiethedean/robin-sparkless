@@ -1977,7 +1977,11 @@ mod tests {
         let df = spark.create_dataframe_from_rows(rows, schema).unwrap();
         let cond: polars::prelude::Expr = col("name").contains("lic").into_expr();
         let filtered = df.filter(cond).unwrap();
-        assert_eq!(filtered.count().unwrap(), 1, "filter(name.contains(\"lic\")) should return one row (alice)");
+        assert_eq!(
+            filtered.count().unwrap(),
+            1,
+            "filter(name.contains(\"lic\")) should return one row (alice)"
+        );
     }
 
     /// Lazy backend: schema, columns, resolve_column_name work on lazy DataFrame.

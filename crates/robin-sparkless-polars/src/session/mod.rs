@@ -230,7 +230,7 @@ fn json_values_to_series(
                 }
             } else if let Some(arr) = effective
                 .as_ref()
-                .and_then(|x| x.as_array().map(|a| a.clone()))
+                .and_then(|x| x.as_array().cloned())
                 .or_else(|| effective.as_ref().and_then(json_value_to_array))
             {
                 // #634: Array or object with "0","1",... keys (Python tuple serialization) — positional.
