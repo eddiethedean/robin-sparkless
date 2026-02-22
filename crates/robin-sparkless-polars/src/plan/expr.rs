@@ -156,10 +156,12 @@ pub fn expr_from_value(v: &Value) -> Result<Expr, PlanExprError> {
                 return Ok(expr_from_value(left)?.or(expr_from_value(right)?));
             }
             "not" => {
+                // #682: Cast to Boolean before .not() so Unknown(Any) or non-Boolean columns work (PySpark parity).
                 let arg = obj
                     .get("arg")
                     .ok_or_else(|| PlanExprError("op 'not' requires 'arg'".to_string()))?;
-                return Ok(expr_from_value(arg)?.not());
+                let arg_expr = expr_from_value(arg)?;
+                return Ok(arg_expr.cast(DataType::Boolean).not());
             }
             "between" => {
                 let left_v = obj
@@ -2959,6 +2961,15 @@ mod tests {
             "args": [{"col": "a"}, {"col": "b"}, {"lit": 0}]
         });
         let _ = expr_from_value(&v).unwrap();
+    }
+
+    /// #682: op "not" parses and casts to Boolean so Unknown(Any) columns work (bitwise not in when).
+    #[test]
+    fn test_op_not_parses() {
+        let v = json!({"op": "not", "arg": {"col": "flag"}});
+        let expr = expr_from_value(&v).unwrap();
+        // Expression should be (flag.cast(Boolean)).not()
+        let _ = expr;
     }
 
     /// #628: between with string column and numeric bounds parses and uses coercion.
