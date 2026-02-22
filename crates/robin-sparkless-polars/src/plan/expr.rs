@@ -416,6 +416,20 @@ pub fn expr_from_value(v: &Value) -> Result<Expr, PlanExprError> {
                 let b = expr_to_column(r);
                 return Ok(a.multiply(&b).into_expr());
             }
+            "div" | "/" | "divide" => {
+                // #683: PySpark-style division with string/numeric coercion (op form from Sparkless).
+                let left_v = obj
+                    .get("left")
+                    .ok_or_else(|| PlanExprError("op 'div' requires 'left'".to_string()))?;
+                let right_v = obj
+                    .get("right")
+                    .ok_or_else(|| PlanExprError("op 'div' requires 'right'".to_string()))?;
+                let l = expr_from_value(left_v)?;
+                let r = expr_from_value(right_v)?;
+                let a = expr_to_column(l);
+                let b = expr_to_column(r);
+                return Ok(a.divide_pyspark(&b).into_expr());
+            }
             "udf" => {
                 // {"op": "udf", "udf"|"name": "udf_name", "args": [<expr>, ...]} (issue #545)
                 let udf_name = obj
@@ -2961,6 +2975,18 @@ mod tests {
             "args": [{"col": "a"}, {"col": "b"}, {"lit": 0}]
         });
         let _ = expr_from_value(&v).unwrap();
+    }
+
+    /// #683: op "div" parses and uses divide_pyspark so string/string division works.
+    #[test]
+    fn test_op_div_parses() {
+        let v = json!({
+            "op": "div",
+            "left": {"col": "a"},
+            "right": {"col": "b"}
+        });
+        let expr = expr_from_value(&v).unwrap();
+        let _ = expr;
     }
 
     /// #682: op "not" parses and casts to Boolean so Unknown(Any) columns work (bitwise not in when).
