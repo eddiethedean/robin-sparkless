@@ -599,13 +599,15 @@ fn parse_aggs(aggs: &[Value], df: &DataFrame) -> Result<Vec<polars::prelude::Exp
         };
         let mut expr = col_expr.into_expr();
         // #672: PySpark-style result column names (e.g. avg(Value)) when plan does not set alias.
-        let alias = obj.get("alias").and_then(Value::as_str).map(String::from).unwrap_or_else(|| {
-            match (agg, col_name) {
+        let alias = obj
+            .get("alias")
+            .and_then(Value::as_str)
+            .map(String::from)
+            .unwrap_or_else(|| match (agg, col_name) {
                 ("count", None) => "count".to_string(),
                 (a, Some(col)) => format!("{}({})", a, col),
                 (a, None) => format!("{}({})", a, ""),
-            }
-        });
+            });
         expr = expr.alias(&alias);
         out.push(expr);
     }
@@ -643,7 +645,7 @@ mod tests {
         let out = df.collect_inner().unwrap();
         let names = out.get_column_names();
         assert!(
-            names.iter().any(|s| s.to_string() == "avg(Value)"),
+            names.iter().any(|s| s.as_str() == "avg(Value)"),
             "expected column 'avg(Value)' in {:?}",
             names
         );

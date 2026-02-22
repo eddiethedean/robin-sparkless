@@ -24,8 +24,38 @@ pub fn parse_sql(query: &str) -> Result<Statement, PolarsError> {
 
 /// Parse a SQL string and execute it using the session's catalog.
 /// Supports: SELECT (columns or *), FROM single table or two-table JOIN,
-/// WHERE (basic predicates), GROUP BY + aggregates, ORDER BY, LIMIT.
+/// WHERE (basic predicates), GROUP BY + aggregates, ORDER BY, LIMIT,
+/// DESCRIBE DETAIL table_name (Delta Lake; requires delta feature).
 pub fn execute_sql(session: &SparkSession, query: &str) -> Result<DataFrame, PolarsError> {
+    #[cfg(feature = "delta")]
+    {
+        const PREFIX: &str = "DESCRIBE DETAIL ";
+        let q = query.trim();
+        if q.len() > PREFIX.len()
+            && q.get(..PREFIX.len())
+                .map(|s| s.eq_ignore_ascii_case(PREFIX))
+                == Some(true)
+        {
+            let table_name = q[PREFIX.len()..].trim();
+            if !table_name.is_empty() {
+                if let Some(path) = session.resolve_delta_table_path(table_name) {
+                    return crate::delta::describe_delta_detail(
+                        path,
+                        Some(table_name),
+                        session.is_case_sensitive(),
+                    );
+                }
+                return Err(PolarsError::InvalidOperation(
+                    format!(
+                        "DESCRIBE DETAIL: table '{table_name}' is not a Delta table in the warehouse. \
+                         Set spark.sql.warehouse.dir and use a Delta table at {{warehouse}}/{table_name}."
+                    )
+                    .into(),
+                ));
+            }
+        }
+    }
+
     let stmt = parse_sql_to_statement(query)?;
     translator::translate(session, &stmt)
 }
@@ -339,6 +369,53 @@ mod tests {
             .sql("DROP SCHEMA IF EXISTS test_schema_to_drop CASCADE")
             .unwrap();
         assert!(!spark.database_exists("test_schema_to_drop"));
+    }
+
+    /// DESCRIBE DETAIL for Delta Lake (issue #678).
+    #[cfg(feature = "delta")]
+    #[test]
+    fn test_sql_describe_detail_delta() {
+        let dir = tempfile::tempdir().unwrap();
+        let warehouse = dir.path().join("wh");
+        std::fs::create_dir_all(&warehouse).unwrap();
+        let table_path = warehouse.join("test_detail_basic");
+
+        let spark = SparkSession::builder()
+            .app_name("test")
+            .config(
+                "spark.sql.warehouse.dir",
+                warehouse.as_os_str().to_str().unwrap(),
+            )
+            .get_or_create();
+
+        let df = spark
+            .create_dataframe(
+                vec![(1, 25, "Alice".to_string()), (2, 30, "Bob".to_string())],
+                vec!["id", "age", "name"],
+            )
+            .unwrap();
+        crate::delta::write_delta(df.collect_inner().unwrap().as_ref(), &table_path, true).unwrap();
+
+        let result = spark.sql("DESCRIBE DETAIL test_detail_basic").unwrap();
+        assert_eq!(result.count().unwrap(), 1);
+        let rows = result.collect_as_json_rows().unwrap();
+        let row = &rows[0];
+        assert_eq!(row.get("format").and_then(|v| v.as_str()), Some("delta"));
+        assert!(
+            row.get("name")
+                .and_then(|v| v.as_str())
+                .map(|s| s.contains("test_detail_basic"))
+                == Some(true)
+        );
+        assert!(row.get("numFiles").and_then(|v| v.as_i64()).unwrap_or(-1) >= 0);
+        assert!(
+            row.get("sizeInBytes")
+                .and_then(|v| v.as_i64())
+                .unwrap_or(-1)
+                >= 0
+        );
+        assert!(row.get("minReaderVersion").is_some());
+        assert!(row.get("minWriterVersion").is_some());
     }
 
     #[test]
