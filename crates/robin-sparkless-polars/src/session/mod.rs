@@ -920,6 +920,19 @@ impl SparkSession {
             .filter(|s| !s.is_empty())
     }
 
+    /// Resolve a table name to a Delta table path (warehouse/name if it contains _delta_log).
+    /// Returns None if the table is not a warehouse-backed Delta table (DESCRIBE DETAIL support).
+    #[cfg(feature = "delta")]
+    pub fn resolve_delta_table_path(&self, table_name: &str) -> Option<std::path::PathBuf> {
+        let warehouse = self.warehouse_dir()?;
+        let path = Path::new(warehouse).join(table_name);
+        if path.is_dir() && path.join("_delta_log").is_dir() {
+            Some(path)
+        } else {
+            None
+        }
+    }
+
     /// Look up a table or temp view by name (PySpark: table(name)).
     /// Resolution order: (1) global_temp.xyz from global catalog, (2) temp view, (3) saved table, (4) warehouse.
     pub fn table(&self, name: &str) -> Result<DataFrame, PolarsError> {
