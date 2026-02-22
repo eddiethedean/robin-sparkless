@@ -228,13 +228,18 @@ fn json_values_to_series(
                 for fc in &mut field_series_vec {
                     fc.push(None);
                 }
+            } else if let Some(arr) = effective
+                .as_ref()
+                .and_then(|x| x.as_array().map(|a| a.clone()))
+                .or_else(|| effective.as_ref().and_then(json_value_to_array))
+            {
+                // #634: Array or object with "0","1",... keys (Python tuple serialization) — positional.
+                for (fi, _) in fields.iter().enumerate() {
+                    field_series_vec[fi].push(arr.get(fi).cloned());
+                }
             } else if let Some(obj) = effective.as_ref().and_then(|x| x.as_object()) {
                 for (fi, (fname, _)) in fields.iter().enumerate() {
                     field_series_vec[fi].push(obj.get(fname).cloned());
-                }
-            } else if let Some(arr) = effective.as_ref().and_then(|x| x.as_array()) {
-                for (fi, _) in fields.iter().enumerate() {
-                    field_series_vec[fi].push(arr.get(fi).cloned());
                 }
             } else {
                 return Err(PolarsError::ComputeError(
@@ -435,12 +440,17 @@ fn json_object_or_array_to_struct_series(
         _ => value.clone(),
     };
     let mut field_series: Vec<Series> = Vec::with_capacity(fields.len());
-    for (fname, ftype) in fields {
-        let fval = if let Some(obj) = effective.as_object() {
-            obj.get(fname).unwrap_or(&JsonValue::Null)
-        } else if let Some(arr) = effective.as_array() {
-            let idx = field_series.len();
+    // #634: Positional struct from array or from object with "0","1",... keys (Python tuple).
+    let pos_arr_owned: Option<Vec<JsonValue>> = effective
+        .as_array()
+        .cloned()
+        .or_else(|| json_value_to_array(&effective));
+    let pos_arr = pos_arr_owned.as_deref();
+    for (idx, (fname, ftype)) in fields.iter().enumerate() {
+        let fval = if let Some(arr) = pos_arr {
             arr.get(idx).unwrap_or(&JsonValue::Null)
+        } else if let Some(obj) = effective.as_object() {
+            obj.get(fname).unwrap_or(&JsonValue::Null)
         } else {
             return Err(PolarsError::ComputeError(
                 "struct value must be object (by field name) or array (by position). \
@@ -1959,6 +1969,29 @@ mod tests {
         let rows: Vec<Vec<JsonValue>> = vec![
             vec![json!("x"), json!([1, "y"])],
             vec![json!("z"), json!([2, "w"])],
+        ];
+        let df = spark.create_dataframe_from_rows(rows, schema).unwrap();
+        assert_eq!(df.count().unwrap(), 2);
+        let collected = df.collect_inner().unwrap();
+        assert_eq!(collected.get_column_names(), &["id", "nested"]);
+    }
+
+    /// #634: create_dataframe_from_rows accepts struct as object with "0","1",... keys (Python tuple serialization).
+    #[test]
+    fn test_create_dataframe_from_rows_struct_as_object_numeric_keys() {
+        use serde_json::json;
+
+        let spark = SparkSession::builder().app_name("test").get_or_create();
+        let schema = vec![
+            ("id".to_string(), "string".to_string()),
+            (
+                "nested".to_string(),
+                "struct<a:bigint,b:string>".to_string(),
+            ),
+        ];
+        let rows: Vec<Vec<JsonValue>> = vec![
+            vec![json!("x"), json!({"0": 1, "1": "y"})],
+            vec![json!("z"), json!({"0": 2, "1": "w"})],
         ];
         let df = spark.create_dataframe_from_rows(rows, schema).unwrap();
         assert_eq!(df.count().unwrap(), 2);
