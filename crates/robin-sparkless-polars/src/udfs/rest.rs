@@ -4018,7 +4018,7 @@ pub fn apply_string_to_int(
             // #649: f64/f32 -> i32/i64 with truncation; NaN/inf -> null (try_cast) or error (cast).
             let casted = series.cast(&DataType::Float64)?;
             let ca = casted.f64()?;
-            let vals_f64: Vec<Option<f64>> = ca.into_iter().map(|o| o).collect();
+            let vals_f64: Vec<Option<f64>> = ca.into_iter().collect();
             let mut results: Vec<Option<i64>> = Vec::with_capacity(vals_f64.len());
             for opt_v in vals_f64 {
                 let v: Option<i64> = match opt_v {
@@ -4066,12 +4066,19 @@ pub fn apply_string_to_int(
                 DataType::Int32 => {
                     let vals: Vec<Option<i32>> = results
                         .into_iter()
-                        .map(|o| o.and_then(|n| (n >= i64::from(i32::MIN) && n <= i64::from(i32::MAX)).then_some(n as i32)))
+                        .map(|o| {
+                            o.and_then(|n| {
+                                (n >= i64::from(i32::MIN) && n <= i64::from(i32::MAX))
+                                    .then_some(n as i32)
+                            })
+                        })
                         .collect();
-                    Int32Chunked::from_iter_options(name.as_str().into(), vals.into_iter()).into_series()
+                    Int32Chunked::from_iter_options(name.as_str().into(), vals.into_iter())
+                        .into_series()
                 }
                 DataType::Int64 => {
-                    Int64Chunked::from_iter_options(name.as_str().into(), results.into_iter()).into_series()
+                    Int64Chunked::from_iter_options(name.as_str().into(), results.into_iter())
+                        .into_series()
                 }
                 _ => unreachable!("target is Int32 or Int64"),
             };
