@@ -107,6 +107,7 @@ pub fn select_items(
 
 /// Filter rows using a Polars expression. Preserves case_sensitive on result.
 /// Column names in the condition are resolved per df's case sensitivity (PySpark parity).
+/// #646: Coerce predicate to Boolean so Polars never receives a non-Boolean filter (e.g. string-involving predicates).
 pub fn filter(
     df: &DataFrame,
     condition: Expr,
@@ -114,6 +115,7 @@ pub fn filter(
 ) -> Result<DataFrame, PolarsError> {
     let condition = df.resolve_expr_column_names(condition)?;
     let condition = df.coerce_string_numeric_comparisons(condition)?;
+    let condition = condition.cast(DataType::Boolean);
     let lf = df.lazy_frame().filter(condition);
     Ok(super::DataFrame::from_lazy_with_options(lf, case_sensitive))
 }
