@@ -1956,6 +1956,30 @@ mod tests {
         assert_eq!(out.count().unwrap(), 1);
     }
 
+    /// #646: filter with string predicate (contains) must receive Boolean; cast ensures parity.
+    #[test]
+    fn filter_with_string_contains_predicate() {
+        use crate::functions::col;
+        use serde_json::json;
+
+        let spark = crate::session::SparkSession::builder()
+            .app_name("filter_contains_test")
+            .get_or_create();
+        let schema = vec![
+            ("id".to_string(), "bigint".to_string()),
+            ("name".to_string(), "string".to_string()),
+        ];
+        let rows = vec![
+            vec![json!(1), json!("alice")],
+            vec![json!(2), json!("bob")],
+            vec![json!(3), json!("charlie")],
+        ];
+        let df = spark.create_dataframe_from_rows(rows, schema).unwrap();
+        let cond: polars::prelude::Expr = col("name").contains("lic").into_expr();
+        let filtered = df.filter(cond).unwrap();
+        assert_eq!(filtered.count().unwrap(), 1, "filter(name.contains(\"lic\")) should return one row (alice)");
+    }
+
     /// Lazy backend: schema, columns, resolve_column_name work on lazy DataFrame.
     #[test]
     fn lazy_schema_columns_resolve_before_collect() {
