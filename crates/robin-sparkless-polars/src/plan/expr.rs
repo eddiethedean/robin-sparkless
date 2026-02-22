@@ -1202,7 +1202,9 @@ fn expr_from_fn(name: &str, args: &[Value]) -> Result<Expr, PlanExprError> {
                     "fn '{name}' two-arg form requires [condition, then_expr]"
                 )));
             }
-            let cond = expr_to_column(arg_expr(args, 0)?);
+            // #680: only the condition must be Boolean; then/else can be any type
+            let cond_expr = arg_expr(args, 0)?.cast(DataType::Boolean);
+            let cond = expr_to_column(cond_expr);
             let then_val = expr_to_column(arg_expr(args, 1)?);
             Ok(when_then_otherwise_null(&cond, &then_val).into_expr())
         }

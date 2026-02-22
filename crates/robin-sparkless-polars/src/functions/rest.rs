@@ -430,15 +430,17 @@ pub fn regr_r2_expr(y_col: &str, x_col: &str) -> Expr {
 ///     .then(&lit_str("adult"))
 ///     .otherwise(&lit_str("minor"));
 /// ```
+/// Condition must be Boolean; then/else can be any type (#680).
 pub fn when(condition: &Column) -> WhenBuilder {
-    WhenBuilder::new(condition.expr().clone())
+    WhenBuilder::new(condition.expr().clone().cast(DataType::Boolean))
 }
 
 /// Two-arg when(condition, value): returns value where condition is true, null otherwise (PySpark when(cond, val)).
+/// Condition must be Boolean; value can be any type (#680).
 pub fn when_then_otherwise_null(condition: &Column, value: &Column) -> Column {
     use polars::prelude::*;
     let null_expr = lit(NULL);
-    let expr = polars::prelude::when(condition.expr().clone())
+    let expr = polars::prelude::when(condition.expr().clone().cast(DataType::Boolean))
         .then(value.expr().clone())
         .otherwise(null_expr);
     crate::column::Column::from_expr(expr, None)
@@ -454,7 +456,7 @@ impl WhenBuilder {
         WhenBuilder { condition }
     }
 
-    /// Specify the value when condition is true
+    /// Specify the value when condition is true (condition already cast to Boolean in when()).
     pub fn then(self, value: &Column) -> ThenBuilder {
         use polars::prelude::*;
         let when_then = when(self.condition).then(value.expr().clone());
@@ -503,10 +505,12 @@ impl ThenBuilder {
     }
 
     /// Chain an additional when-then clause (PySpark: when(a).then(x).when(b).then(y).otherwise(z)).
+    /// Condition must be Boolean (#680).
     pub fn when(self, condition: &Column) -> ChainedWhenBuilder {
+        let cond = condition.expr().clone().cast(DataType::Boolean);
         let chained_when = match self.state {
-            WhenThenState::Single(t) => t.when(condition.expr().clone()),
-            WhenThenState::Chained(ct) => ct.when(condition.expr().clone()),
+            WhenThenState::Single(t) => t.when(cond),
+            WhenThenState::Chained(ct) => ct.when(cond),
         };
         ChainedWhenBuilder {
             inner: chained_when,
@@ -2954,6 +2958,22 @@ mod tests {
         assert_eq!(values[0], Some("minor")); // age 15 < 18
         assert_eq!(values[1], Some("adult")); // age 25 > 18
         assert_eq!(values[2], Some("adult")); // age 35 > 18
+    }
+
+    /// #680: when/then/otherwise with numeric then/else (condition Boolean, then/else any type).
+    #[test]
+    fn test_when_then_otherwise_numeric_then_else() {
+        let df = df!("a" => &[1i64, 3, 5]).unwrap();
+        let condition = col("a").gt(polars::prelude::lit(2));
+        let result = when(&condition).then(&lit_i64(100)).otherwise(&lit_i64(0));
+        let result_df = df
+            .lazy()
+            .with_column(result.into_expr().alias("out"))
+            .collect()
+            .unwrap();
+        let out = result_df.column("out").unwrap();
+        let values: Vec<Option<i64>> = out.i64().unwrap().into_iter().collect();
+        assert_eq!(values, vec![Some(0), Some(100), Some(100)]);
     }
 
     #[test]
