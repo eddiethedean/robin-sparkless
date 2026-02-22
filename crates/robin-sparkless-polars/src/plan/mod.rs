@@ -598,10 +598,54 @@ fn parse_aggs(aggs: &[Value], df: &DataFrame) -> Result<Vec<polars::prelude::Exp
             _ => return Err(PlanError::InvalidPlan(format!("unsupported agg: {agg}"))),
         };
         let mut expr = col_expr.into_expr();
-        if let Some(alias) = obj.get("alias").and_then(Value::as_str) {
-            expr = expr.alias(alias);
-        }
+        // #672: PySpark-style result column names (e.g. avg(Value)) when plan does not set alias.
+        let alias = obj.get("alias").and_then(Value::as_str).map(String::from).unwrap_or_else(|| {
+            match (agg, col_name) {
+                ("count", None) => "count".to_string(),
+                (a, Some(col)) => format!("{}({})", a, col),
+                (a, None) => format!("{}({})", a, ""),
+            }
+        });
+        expr = expr.alias(&alias);
         out.push(expr);
     }
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    /// #672: groupBy + agg without alias produces PySpark-style column name (e.g. avg(Value)).
+    #[test]
+    fn test_groupby_agg_column_name_avg_value() {
+        let session = crate::session::SparkSession::builder()
+            .app_name("plan_agg_alias")
+            .get_or_create();
+        let data = vec![
+            vec![json!("Alice"), json!(5.0)],
+            vec![json!("Alice"), json!(6.0)],
+            vec![json!("Bob"), json!(5.0)],
+        ];
+        let schema = vec![
+            ("Name".to_string(), "string".to_string()),
+            ("Value".to_string(), "double".to_string()),
+        ];
+        let plan = vec![json!({
+            "op": "groupBy",
+            "payload": {
+                "group_by": ["Name"],
+                "aggs": [{"agg": "avg", "column": "Value"}]
+            }
+        })];
+        let df = execute_plan(&session, data, schema, &plan).unwrap();
+        let out = df.collect_inner().unwrap();
+        let names = out.get_column_names();
+        assert!(
+            names.iter().any(|s| s.to_string() == "avg(Value)"),
+            "expected column 'avg(Value)' in {:?}",
+            names
+        );
+    }
 }
