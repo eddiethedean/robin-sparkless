@@ -32,8 +32,21 @@ fn dtype_to_precedence(dtype: &DataType) -> Option<TypePrecedence> {
 }
 
 /// Determine the common type for two columns based on PySpark's type precedence rules
-/// Returns the tightest (highest precedence) common type that both can be coerced to
+/// Returns the tightest (highest precedence) common type that both can be coerced to.
+/// #681: Unknown dtype is treated as String so join/union with Int64 vs Unknown coerce to String (PySpark parity).
 pub fn find_common_type(left: &DataType, right: &DataType) -> Result<DataType, PolarsError> {
+    let left_norm = if matches!(left, DataType::Unknown(_)) {
+        DataType::String
+    } else {
+        left.clone()
+    };
+    let right_norm = if matches!(right, DataType::Unknown(_)) {
+        DataType::String
+    } else {
+        right.clone()
+    };
+    let left = &left_norm;
+    let right = &right_norm;
     let left_prec = dtype_to_precedence(left);
     let right_prec = dtype_to_precedence(right);
 
