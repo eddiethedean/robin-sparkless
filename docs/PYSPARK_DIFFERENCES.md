@@ -16,6 +16,7 @@ This document lists **intentional or known divergences** from PySpark semantics 
 
 - **Tables and views**: Three namespaces — **temp views** (session-scoped), **saved tables** (`saveAsTable`), and **global temp views** (`createOrReplaceGlobalTempView`, process-scoped). Resolution order for `table(name)`: (1) `global_temp.xyz` → global catalog, (2) temp view, (3) saved table, (4) warehouse (when `spark.sql.warehouse.dir` is set). Global temp views persist across sessions within the same process. Saved tables can optionally persist to disk when `spark.sql.warehouse.dir` is configured.
 - **Supported**: single `SELECT`, `FROM` (single table or JOIN), `WHERE`, `GROUP BY` + aggregates, `HAVING`, `ORDER BY`, `LIMIT`, and temporary views (`createOrReplaceTempView`, `table()`). Unsupported constructs produce clear errors.
+- **Parse errors (#706, #701)**: Queries that use unsupported statement types (e.g. DML, some DDL) may yield parser errors such as "Expected: end" or "only SELECT, CREATE SCHEMA/DATABASE, and DR...". Use supported statements only; see Unsupported below.
 - **Unsupported (tracked in #141)**: DDL (`CREATE/DROP DATABASE`, `CREATE/DROP TABLE`, `CREATE SCHEMA`, `SET CURRENT DATABASE`, etc.), DML (`INSERT INTO`, `UPDATE`, `DELETE FROM`), subqueries in `FROM`, CTEs.
 
 ## Delta Lake (optional `delta` feature)
