@@ -586,10 +586,15 @@ impl DataFrame {
         }
     }
 
-    /// Write to Delta table (requires delta feature). Delegates to backend.
+    /// Write to Delta table (requires delta feature). When appending, `merge_schema` merges schemas (#851).
     #[cfg(feature = "delta")]
-    pub fn write_delta(&self, path: impl AsRef<Path>, overwrite: bool) -> Result<(), PolarsError> {
-        self.0.write_delta(path, overwrite)
+    pub fn write_delta(
+        &self,
+        path: impl AsRef<Path>,
+        overwrite: bool,
+        merge_schema: bool,
+    ) -> Result<(), PolarsError> {
+        self.0.write_delta(path, overwrite, merge_schema)
     }
 
     #[cfg(not(feature = "delta"))]
@@ -597,6 +602,7 @@ impl DataFrame {
         &self,
         _path: impl AsRef<Path>,
         _overwrite: bool,
+        _merge_schema: bool,
     ) -> Result<(), PolarsError> {
         Err(PolarsError::InvalidOperation(
             "Delta Lake requires the 'delta' feature. Build with --features delta.".into(),
