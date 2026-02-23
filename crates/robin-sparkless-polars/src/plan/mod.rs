@@ -796,4 +796,34 @@ mod tests {
         let df2 = execute_plan(&session, data, schema, &plan2).unwrap();
         assert_eq!(df2.collect_inner().unwrap().height(), 3);
     }
+
+    /// PR-1/#860,#874,#876: sin, cos, tan are supported in plan (expr_from_value); regression test.
+    #[test]
+    fn test_plan_select_sin_cos_tan() {
+        let session = crate::session::SparkSession::builder()
+            .app_name("plan_trig")
+            .get_or_create();
+        let pi_2 = std::f64::consts::FRAC_PI_2;
+        let data = vec![vec![json!(0.0)], vec![json!(pi_2)]];
+        let schema = vec![("x".to_string(), "double".to_string())];
+        let plan = vec![json!({
+            "op": "select",
+            "payload": [
+                {"name": "x", "expr": {"col": "x"}},
+                {"name": "s", "expr": {"fn": "sin", "args": [{"col": "x"}]}},
+                {"name": "c", "expr": {"fn": "cos", "args": [{"col": "x"}]}},
+                {"name": "t", "expr": {"fn": "tan", "args": [{"col": "x"}]}}
+            ]
+        })];
+        let df = execute_plan(&session, data, schema, &plan).unwrap();
+        assert_eq!(df.count().unwrap(), 2);
+        let out = df.collect_inner().unwrap();
+        assert_eq!(out.height(), 2);
+        // sin(0)=0, cos(0)=1, tan(0)=0; sin(pi/2)=1, cos(pi/2)~0
+        let s_col = out.column("s").unwrap();
+        let c_col = out.column("c").unwrap();
+        assert_eq!(s_col.f64().unwrap().get(0), Some(0.0));
+        assert!((c_col.f64().unwrap().get(0).unwrap() - 1.0).abs() < 1e-10);
+        assert!((s_col.f64().unwrap().get(1).unwrap() - 1.0).abs() < 1e-10);
+    }
 }
