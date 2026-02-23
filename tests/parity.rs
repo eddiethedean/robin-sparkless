@@ -457,33 +457,24 @@ fn create_df_from_input(
         return create_df_from_file_source(spark, file_source, input);
     }
 
-    // Convert input to (i64, i64, String) tuples for create_dataframe
-    // This assumes the first two columns are int-like and third is string
-    // Only use create_dataframe if the pattern matches exactly
+    // PR1: Preserve null in numeric columns — use create_dataframe_from_rows so null is not turned into 0/0.0.
+    // (Previously we used create_dataframe(tuples) for 3-column int-int-string and unwrap_or(0) lost nulls.)
     if input.schema.len() == 3 {
         let type0 = input.schema[0].r#type.as_str();
         let type1 = input.schema[1].r#type.as_str();
         let type2 = input.schema[2].r#type.as_str();
 
-        // Check if pattern matches (int, int, string)
         let is_int_int_string = (type0 == "int" || type0 == "bigint" || type0 == "long")
             && (type1 == "int" || type1 == "bigint" || type1 == "long")
             && (type2 == "string" || type2 == "str" || type2 == "varchar");
 
         if is_int_int_string {
-            let mut tuples: Vec<(i64, i64, String)> = Vec::new();
-            for row in &input.rows {
-                let v0 = row.first().and_then(|v| v.as_i64()).unwrap_or(0);
-                let v1 = row.get(1).and_then(|v| v.as_i64()).unwrap_or(0);
-                let v2 = row
-                    .get(2)
-                    .and_then(|v| v.as_str())
-                    .map(|s| s.to_string())
-                    .unwrap_or_else(|| "".to_string());
-                tuples.push((v0, v1, v2));
-            }
-            let col_names: Vec<&str> = input.schema.iter().map(|s| s.name.as_str()).collect();
-            return spark.create_dataframe(tuples, col_names);
+            let schema_vec: Vec<(String, String)> = input
+                .schema
+                .iter()
+                .map(|s| (s.name.clone(), s.r#type.clone()))
+                .collect();
+            return spark.create_dataframe_from_rows(input.rows.clone(), schema_vec);
         }
     }
 
@@ -3834,10 +3825,14 @@ fn parse_with_column_expr(src: &str, mock_dates: bool) -> Result<Expr, String> {
                 let col_name = content.trim_matches(['\'', '"']);
                 columns.push(col(col_name));
             } else if part.starts_with("lit(") {
-                // Extract literal value: lit('value') or lit("value")
-                let content = &part[4..part.len() - 1]; // Skip "lit(" and ")"
+                // Extract literal: lit(5), lit('x'), or lit("x")
+                let content = &part[4..part.len() - 1].trim(); // Skip "lit(" and ")"
                 let lit_val = content.trim_matches(['\'', '"']);
-                columns.push(lit_str(lit_val));
+                if let Ok(n) = lit_val.parse::<i64>() {
+                    columns.push(lit_i64(n));
+                } else {
+                    columns.push(lit_str(lit_val));
+                }
             } else if part.starts_with("when(") {
                 // Recursively parse when() expression
                 let expr = parse_with_column_expr(part, mock_dates)?;
