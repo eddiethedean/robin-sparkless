@@ -101,6 +101,7 @@
     "cross_join_small",
     "select_id_age",
     "filter_and_select_core",
-    "collect_null_preservation"
+    "collect_null_preservation",
+    "groupby_avg_column_name"
   ]
 }
