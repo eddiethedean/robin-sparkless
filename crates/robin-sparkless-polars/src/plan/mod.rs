@@ -44,7 +44,7 @@ pub fn execute_plan(
         let mut payload = op_obj.get("payload").cloned().unwrap_or(Value::Null);
         // Sparkless may put other_data/other_schema at op level (sibling to payload) or use camelCase.
         // Merge into payload so apply_op finds them (issue #510).
-        if matches!(op_name, "join" | "union" | "unionByName") {
+        if matches!(op_name, "join" | "union" | "unionByName" | "crossJoin") {
             payload = merge_other_into_payload(payload, op_obj);
         }
 
@@ -561,6 +561,24 @@ fn apply_op(
             df.union_by_name(&other_df, true)
                 .map_err(PlanError::Session)
         }
+        "crossJoin" | "cross_join" => {
+            let other_data = get_other_data(&payload).ok_or_else(|| {
+                PlanError::InvalidPlan("crossJoin must have 'other_data'".into())
+            })?;
+            let other_schema = get_other_schema(&payload).ok_or_else(|| {
+                PlanError::InvalidPlan("crossJoin must have 'other_schema'".into())
+            })?;
+            let schema_vec: Vec<(String, String)> = other_schema
+                .iter()
+                .filter_map(schema_field_to_pair)
+                .collect();
+            let schema_names: Vec<String> = schema_vec.iter().map(|(n, _)| n.clone()).collect();
+            let rows = other_data_to_rows(other_data, &schema_names);
+            let other_df = session
+                .create_dataframe_from_rows(rows, schema_vec)
+                .map_err(PlanError::Session)?;
+            df.cross_join(&other_df).map_err(PlanError::Session)
+        }
         _ => Err(PlanError::UnsupportedOp(op_name.to_string())),
     }
 }
@@ -675,5 +693,27 @@ mod tests {
             "expected column 'avg(Value)' in {:?}",
             names
         );
+    }
+
+    #[test]
+    fn test_cross_join_plan() {
+        let session = crate::session::SparkSession::builder()
+            .app_name("plan_cross_join")
+            .get_or_create();
+        let data = vec![vec![json!(1)], vec![json!(2)]];
+        let schema = vec![("a".to_string(), "bigint".to_string())];
+        let plan = vec![
+            json!({
+                "op": "crossJoin",
+                "payload": {
+                    "other_data": [[3], [4]],
+                    "other_schema": [{"name": "b", "type": "bigint"}]
+                }
+            }),
+        ];
+        let df = execute_plan(&session, data, schema, &plan).unwrap();
+        let out = df.collect_inner().unwrap();
+        assert_eq!(out.height(), 4, "cross join 2x2 = 4 rows");
+        assert_eq!(out.get_column_names(), &["a", "b"]);
     }
 }
