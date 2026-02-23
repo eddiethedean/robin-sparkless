@@ -368,8 +368,8 @@ fn translate_select_from(
             _ => {
                 let join_type = match &join_spec.join_operator {
                     JoinOperator::Inner(_) => JoinType::Inner,
-                    JoinOperator::LeftOuter(_) => JoinType::Left,
-                    JoinOperator::RightOuter(_) => JoinType::Right,
+                    JoinOperator::Left(_) | JoinOperator::LeftOuter(_) => JoinType::Left,
+                    JoinOperator::Right(_) | JoinOperator::RightOuter(_) => JoinType::Right,
                     JoinOperator::FullOuter(_) => JoinType::Outer,
                     JoinOperator::LeftSemi(_) => JoinType::LeftSemi,
                     JoinOperator::LeftAnti(_) => JoinType::LeftAnti,
@@ -433,7 +433,9 @@ fn join_condition_to_on_columns(
 ) -> Result<(Vec<String>, Vec<String>), PolarsError> {
     let constraint = match join_op {
         JoinOperator::Inner(c)
+        | JoinOperator::Left(c)
         | JoinOperator::LeftOuter(c)
+        | JoinOperator::Right(c)
         | JoinOperator::RightOuter(c)
         | JoinOperator::FullOuter(c)
         | JoinOperator::LeftSemi(c)

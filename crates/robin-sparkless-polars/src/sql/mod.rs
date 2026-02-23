@@ -557,6 +557,38 @@ mod tests {
         assert_eq!(rows[0].get("tag").and_then(|v| v.as_str()), Some("x"));
     }
 
+    /// Batch 4 / #708: LEFT JOIN supported; returns all left rows with nulls for non-matching right.
+    #[test]
+    fn test_sql_left_join_supported() {
+        let spark = SparkSession::builder().app_name("test").get_or_create();
+        let left = spark
+            .create_dataframe(
+                vec![
+                    (1i64, 0i64, "a".to_string()),
+                    (2i64, 0i64, "b".to_string()),
+                    (3i64, 0i64, "c".to_string()),
+                ],
+                vec!["id", "_v", "name"],
+            )
+            .unwrap();
+        let right = spark
+            .create_dataframe(
+                vec![(1i64, 0i64, "X".to_string()), (3i64, 0i64, "Z".to_string())],
+                vec!["id", "_v", "tag"],
+            )
+            .unwrap();
+        spark.create_or_replace_temp_view("l", left);
+        spark.create_or_replace_temp_view("r", right);
+        let result = spark
+            .sql("SELECT l.id, l.name, r.tag FROM l LEFT JOIN r ON l.id = r.id")
+            .unwrap();
+        assert_eq!(result.count().unwrap(), 3);
+        let rows = result.collect_as_json_rows().unwrap();
+        assert_eq!(rows[0].get("tag").and_then(|v| v.as_str()), Some("X"));
+        assert_eq!(rows[1].get("tag"), Some(&serde_json::Value::Null));
+        assert_eq!(rows[2].get("tag").and_then(|v| v.as_str()), Some("Z"));
+    }
+
     /// PR-B/#774: SQL UNION and UNION ALL.
     #[test]
     fn test_sql_union_all() {
