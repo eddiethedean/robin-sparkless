@@ -48,6 +48,10 @@ pub fn select_with_exprs(
         .into_iter()
         .map(|e| df.resolve_expr_column_names(e))
         .collect::<Result<Vec<_>, _>>()?;
+    let exprs: Vec<Expr> = exprs
+        .into_iter()
+        .map(|e| df.coerce_string_numeric_comparisons(e))
+        .collect::<Result<Vec<_>, _>>()?;
     let mut name_count: HashMap<String, u32> = HashMap::new();
     let exprs: Vec<Expr> = exprs
         .into_iter()
@@ -98,7 +102,8 @@ pub fn select_items(
             }
             SelectItem::Expr(e) => {
                 let resolved = df.resolve_expr_column_names(e)?;
-                exprs.push(resolved);
+                let coerced = df.coerce_string_numeric_comparisons(resolved)?;
+                exprs.push(coerced);
             }
         }
     }
