@@ -102,6 +102,7 @@
     "select_id_age",
     "filter_and_select_core",
     "collect_null_preservation",
+    "coalesce_numeric_null",
     "groupby_avg_column_name",
     "select_agg_column_after_groupby",
     "collect_array_column_format",
