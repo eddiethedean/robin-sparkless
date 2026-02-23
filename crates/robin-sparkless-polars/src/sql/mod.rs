@@ -478,6 +478,39 @@ mod tests {
         assert_eq!(rows[2].get("label").and_then(|v| v.as_str()), Some("other"));
     }
 
+    /// PR-3/#730,#744: UPDATE and DELETE return clear unsupported error.
+    #[test]
+    fn test_sql_update_delete_unsupported() {
+        let spark = SparkSession::builder().app_name("test").get_or_create();
+        let df = spark
+            .create_dataframe(
+                vec![(1i64, 10i64, "a".to_string())],
+                vec!["id", "v", "name"],
+            )
+            .unwrap();
+        spark.create_or_replace_temp_view("t", df);
+        let err = match spark.sql("UPDATE t SET v = 2") {
+            Ok(_) => panic!("expected UPDATE to return error"),
+            Err(e) => e,
+        };
+        assert!(
+            err.to_string()
+                .contains("UPDATE and DELETE are not supported"),
+            "expected UPDATE error message, got: {}",
+            err
+        );
+        let err2 = match spark.sql("DELETE FROM t") {
+            Ok(_) => panic!("expected DELETE to return error"),
+            Err(e) => e,
+        };
+        assert!(
+            err2.to_string()
+                .contains("UPDATE and DELETE are not supported"),
+            "expected DELETE error message, got: {}",
+            err2
+        );
+    }
+
     /// PR-2/#743: JOIN ON with different column names (e.g. a.id = b.other_id).
     #[test]
     fn test_sql_join_on_different_column_names() {
