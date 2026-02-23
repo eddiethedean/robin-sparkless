@@ -2099,6 +2099,20 @@ mod tests {
         );
     }
 
+    /// Batch 8 / #789: spark.conf().get("spark.app.name") returns the app name set in builder.
+    #[test]
+    fn test_spark_session_conf_returns_app_name() {
+        let spark = SparkSession::builder()
+            .app_name("test_fixture")
+            .get_or_create();
+        let conf = spark.get_config();
+        assert_eq!(
+            conf.get("spark.app.name"),
+            Some(&"test_fixture".to_string()),
+            "conf should expose spark.app.name for PySpark parity"
+        );
+    }
+
     #[test]
     fn test_spark_session_default() {
         let spark = SparkSession::default();
