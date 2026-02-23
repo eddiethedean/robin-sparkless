@@ -766,6 +766,19 @@ impl SparkSession {
         }
     }
 
+    /// Return a DataFrame of table names (and optional database) in this session. PySpark: catalog.listTables().
+    /// Columns: "name" (string). Schema-qualified names like "my_schema.my_table" are listed as-is.
+    /// If the tables lock is poisoned, returns an empty DataFrame and a message is emitted to stderr.
+    pub fn list_tables(&self) -> Result<DataFrame, PolarsError> {
+        let names = self.list_table_names();
+        let rows: Vec<Vec<JsonValue>> = names
+            .into_iter()
+            .map(|n| vec![JsonValue::String(n)])
+            .collect();
+        let schema = vec![("name".to_string(), "string".to_string())];
+        self.create_dataframe_from_rows(rows, schema)
+    }
+
     /// True if the name exists in the saved-tables map (not temp views).
     /// If the tables lock is poisoned, returns false and a message is emitted to stderr.
     pub fn saved_table_exists(&self, name: &str) -> bool {
@@ -2792,6 +2805,44 @@ mod tests {
         assert!(spark.table("t_drop").is_err());
         // drop again is no-op, returns false
         assert!(!spark.drop_table("t_drop"));
+    }
+
+    /// PR15: list_tables returns DataFrame with "name" column; schema-qualified table names work.
+    #[test]
+    fn test_list_tables_and_schema_qualified_name() {
+        use crate::dataframe::SaveMode;
+
+        let spark = SparkSession::builder().app_name("test").get_or_create();
+        let df = spark
+            .create_dataframe(
+                vec![(1, 10, "a".to_string())],
+                vec!["id", "x", "name"],
+            )
+            .unwrap();
+        df.write()
+            .save_as_table(&spark, "t_plain", SaveMode::ErrorIfExists)
+            .unwrap();
+        df.write()
+            .save_as_table(&spark, "my_schema.my_table", SaveMode::ErrorIfExists)
+            .unwrap();
+
+        let list_df = spark.list_tables().unwrap();
+        assert_eq!(list_df.count().unwrap(), 2);
+        let names: Vec<String> = list_df
+            .collect_as_json_rows()
+            .unwrap()
+            .into_iter()
+            .map(|r| r.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string())
+            .collect();
+        assert!(names.contains(&"t_plain".to_string()));
+        assert!(names.contains(&"my_schema.my_table".to_string()));
+
+        assert_eq!(spark.table("t_plain").unwrap().count().unwrap(), 1);
+        assert_eq!(
+            spark.table("my_schema.my_table").unwrap().count().unwrap(),
+            1,
+            "schema-qualified table name must resolve"
+        );
     }
 
     #[test]
