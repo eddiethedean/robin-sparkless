@@ -480,6 +480,7 @@ impl Column {
     }
 
     /// Substring with 1-based start (PySpark substring/substr semantics).
+    /// - Start 0: 0-based (first char), for Sparkless/Python parity (#875).
     /// - Positive start: 1-based index (1 = first char).
     /// - Negative start: count from end (e.g. -3 = third char from end).
     /// - Length less than 1: empty string.
@@ -490,8 +491,10 @@ impl Column {
             return Self::from_expr(lit(""), None);
         }
         let len_chars = self.expr().clone().str().len_chars();
-        // 1-based start: positive -> 0-based offset = (start - 1).max(0); negative -> from end: len + start (clamped to 0)
-        let offset_expr = if start >= 1 {
+        // Start 0: 0-based (substr(0, 3) = "Hel"); start >= 1: 1-based; negative: from end.
+        let offset_expr = if start == 0 {
+            lit(0i64)
+        } else if start >= 1 {
             lit((start - 1).max(0))
         } else {
             let from_end = len_chars + lit(start);
