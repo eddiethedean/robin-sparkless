@@ -45,7 +45,12 @@ impl SparkSessionBuilder {
     }
 
     pub fn get_or_create(self) -> SparkSession {
-        let session = SparkSession::new(self.app_name, self.master, self.config);
+        let mut config = self.config;
+        // Batch 8 / #789: spark.conf().get("spark.app.name") should return the app name.
+        if let Some(name) = &self.app_name {
+            config.insert("spark.app.name".to_string(), name.clone());
+        }
+        let session = SparkSession::new(self.app_name, self.master, config);
         set_thread_udf_session(session.clone());
         session
     }
