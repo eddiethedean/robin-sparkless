@@ -4,6 +4,18 @@ This document lists **intentional or known divergences** from PySpark semantics 
 
 **Unimplemented API surface:** For a full list of functions and methods present in Sparkless 3.28.0 but not yet implemented in robin-sparkless, see [GAP_ANALYSIS_SPARKLESS_3.28.md](GAP_ANALYSIS_SPARKLESS_3.28.md). That list is **scoped to PySpark parity**: all listed items are standard PySpark APIs (or direct Sparkless equivalents); see [ROBIN_SPARKLESS_MISSING.md](ROBIN_SPARKLESS_MISSING.md) for the canonical “missing vs PySpark” list with PySpark references.
 
+## Array and list collect
+
+- **Collect**: List/array columns are serialized as JSON arrays in collect/to_json_rows (#846, #845). If Sparkless sees a string like `"['a', 'b']"` instead of `["a","b"]`, the source may be sending a stringified list; use JSON array in create_dataframe_from_rows or plan input.
+
+## Date and datetime
+
+- **create_dataframe_from_rows**: Schema types `date`, `timestamp`, `datetime`, `timestamp_ntz` are supported; values can be ISO date strings (`%Y-%m-%d`), ISO datetime strings, or (for timestamp) micros as number. Collect serializes Date as `"YYYY-MM-DD"` and Datetime as ISO strings (#841, #840, #839, #751, #849).
+
+## Ordering (orderBy)
+
+- **Default null ordering (#838)**: Robin follows Spark SQL default: ASC nulls first, DESC nulls last. Tests that expect nulls last for ascending sort should use `asc_nulls_last()` / `order_by_exprs([asc_nulls_last(&col("x"))])` or, when using the plan interpreter, pass `"nulls_last": [true]` in the orderBy payload.
+
 ## Window functions
 
 - **percent_rank, cume_dist, ntile, nth_value**: The **API** is implemented (Rust and Python). Parity fixtures for these (`percent_rank_window`, `cume_dist_window`, `ntile_window`, `nth_value_window`) are **covered** via a multi-step workaround in the harness (computing in separate columns then combining). See [PARITY_STATUS.md](PARITY_STATUS.md).
