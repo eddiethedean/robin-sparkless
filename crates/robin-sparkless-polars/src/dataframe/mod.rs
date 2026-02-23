@@ -1988,8 +1988,27 @@ fn any_value_to_json(av: &AnyValue<'_>, dtype: &DataType) -> JsonValue {
         AnyValue::UInt64(u) => JsonValue::Number(serde_json::Number::from(*u)),
         AnyValue::Float32(f) => float_to_json_number(f64::from(*f)),
         AnyValue::Float64(f) => float_to_json_number(*f),
-        AnyValue::String(s) => JsonValue::String(s.to_string()),
-        AnyValue::StringOwned(s) => JsonValue::String(s.to_string()),
+        AnyValue::String(s) => {
+            // List column may be stringified in some paths; parse back to array (#846, #845).
+            if matches!(dtype, DataType::List(_)) {
+                if let Ok(parsed) = serde_json::from_str::<JsonValue>(s) {
+                    if parsed.is_array() {
+                        return parsed;
+                    }
+                }
+            }
+            JsonValue::String(s.to_string())
+        }
+        AnyValue::StringOwned(s) => {
+            if matches!(dtype, DataType::List(_)) {
+                if let Ok(parsed) = serde_json::from_str::<JsonValue>(s.as_ref()) {
+                    if parsed.is_array() {
+                        return parsed;
+                    }
+                }
+            }
+            JsonValue::String(s.to_string())
+        }
         AnyValue::List(s) => {
             if is_map_format(dtype) {
                 // List(Struct{key, value}) -> JSON object {} (PySpark empty map #578).
