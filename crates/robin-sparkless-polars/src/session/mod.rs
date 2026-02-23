@@ -1244,9 +1244,19 @@ impl SparkSession {
         schema: Vec<(String, String)>,
     ) -> Result<DataFrame, PolarsError> {
         // #624: When schema is empty but rows are not, infer schema from rows (PySpark parity).
+        // #731, #769, #772: When schema is only column names (all types "string"), infer from data so
+        // createDataFrame(rows, ["name", "age"]) yields int/double/bool columns, not all string.
         let schema = if schema.is_empty() && !rows.is_empty() {
             let ncols = rows[0].len();
             let names: Vec<String> = (0..ncols).map(|i| format!("c{i}")).collect();
+            Self::infer_schema_from_json_rows(&rows, &names)
+        } else if !schema.is_empty()
+            && !rows.is_empty()
+            && schema
+                .iter()
+                .all(|(_, t)| t.trim().eq_ignore_ascii_case("string"))
+        {
+            let names: Vec<String> = schema.iter().map(|(n, _)| n.clone()).collect();
             Self::infer_schema_from_json_rows(&rows, &names)
         } else {
             schema
@@ -1290,6 +1300,7 @@ impl SparkSession {
                             let v = row.get(col_idx).cloned().unwrap_or(JsonValue::Null);
                             match v {
                                 JsonValue::Number(n) => n.as_i64(),
+                                JsonValue::String(s) => s.parse::<i64>().ok(),
                                 JsonValue::Null => None,
                                 _ => None,
                             }
@@ -1304,6 +1315,7 @@ impl SparkSession {
                             let v = row.get(col_idx).cloned().unwrap_or(JsonValue::Null);
                             match v {
                                 JsonValue::Number(n) => n.as_f64(),
+                                JsonValue::String(s) => s.parse::<f64>().ok(),
                                 JsonValue::Null => None,
                                 _ => None,
                             }
@@ -1346,6 +1358,15 @@ impl SparkSession {
                             let v = row.get(col_idx).cloned().unwrap_or(JsonValue::Null);
                             match v {
                                 JsonValue::Bool(b) => Some(b),
+                                JsonValue::String(s) => {
+                                    if s.eq_ignore_ascii_case("true") {
+                                        Some(true)
+                                    } else if s.eq_ignore_ascii_case("false") {
+                                        Some(false)
+                                    } else {
+                                        None
+                                    }
+                                }
                                 JsonValue::Null => None,
                                 _ => None,
                             }
@@ -2185,6 +2206,35 @@ mod tests {
             ),
             Ok(_) => panic!("expected error for duplicate column names in schema"),
         }
+    }
+
+    /// #731, #769, #772: create_dataframe_from_rows with schema that is only column names (all "string")
+    /// infers types from data; collect returns int/double/bool not strings.
+    #[test]
+    fn test_create_dataframe_from_rows_all_string_schema_infers_types() {
+        use serde_json::json;
+
+        let spark = SparkSession::builder().app_name("test").get_or_create();
+        let rows: Vec<Vec<JsonValue>> = vec![
+            vec![json!("Alice"), json!(25), json!(50000.5), json!(true)],
+            vec![json!("Bob"), json!(30), json!(60000.0), json!(false)],
+        ];
+        let schema = vec![
+            ("name".to_string(), "string".to_string()),
+            ("age".to_string(), "string".to_string()),
+            ("salary".to_string(), "string".to_string()),
+            ("active".to_string(), "string".to_string()),
+        ];
+        let df = spark.create_dataframe_from_rows(rows, schema).unwrap();
+        assert_eq!(df.count().unwrap(), 2);
+        let rows_out = df.collect_as_json_rows().unwrap();
+        assert_eq!(rows_out.len(), 2);
+        // age/salary/active must be number/bool in JSON, not string
+        let r0 = &rows_out[0];
+        assert_eq!(r0.get("name").and_then(|v| v.as_str()), Some("Alice"));
+        assert_eq!(r0.get("age").and_then(|v| v.as_i64()), Some(25));
+        assert_eq!(r0.get("salary").and_then(|v| v.as_f64()), Some(50000.5));
+        assert_eq!(r0.get("active").and_then(|v| v.as_bool()), Some(true));
     }
 
     /// PR13: create_dataframe_from_rows with empty schema infers struct when column values are JSON objects.
