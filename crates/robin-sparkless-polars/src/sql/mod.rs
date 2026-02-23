@@ -419,7 +419,13 @@ mod tests {
                 vec!["id", "age", "name"],
             )
             .unwrap();
-        crate::delta::write_delta(df.collect_inner().unwrap().as_ref(), &table_path, true).unwrap();
+        crate::delta::write_delta(
+            df.collect_inner().unwrap().as_ref(),
+            &table_path,
+            true,
+            false,
+        )
+        .unwrap();
 
         let result = spark.sql("DESCRIBE DETAIL test_detail_basic").unwrap();
         assert_eq!(result.count().unwrap(), 1);
