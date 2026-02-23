@@ -487,10 +487,12 @@ fn apply_op(
                 .map_err(PlanError::Session)
         }
         "withColumn" => {
+            // #767, #766: column name from "name" or "alias" so cast column appears in schema.
             let name = payload
                 .get("name")
+                .or_else(|| payload.get("alias"))
                 .and_then(Value::as_str)
-                .ok_or_else(|| PlanError::InvalidPlan("withColumn must have 'name'".into()))?;
+                .ok_or_else(|| PlanError::InvalidPlan("withColumn must have 'name' or 'alias'".into()))?;
             let expr_val = payload
                 .get("expr")
                 .ok_or_else(|| PlanError::InvalidPlan("withColumn must have 'expr'".into()))?;

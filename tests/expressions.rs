@@ -744,6 +744,56 @@ fn plan_select_cast_with_alias() {
     assert_eq!(out[0].get("b").and_then(|v| v.as_i64()), Some(2));
 }
 
+/// #767, #766: Cast column must appear in schema after withColumn(cast(...)).
+#[test]
+fn plan_with_column_cast_column_in_schema() {
+    let spark = spark();
+    let schema = vec![
+        ("id".to_string(), "bigint".to_string()),
+        ("value".to_string(), "string".to_string()),
+    ];
+    let rows = vec![vec![json!(1), json!("a")], vec![json!(2), json!("b")]];
+    let plan_steps = vec![
+        json!({
+            "op": "withColumn",
+            "payload": {
+                "name": "id_str",
+                "expr": {"fn": "cast", "args": [{"col": "id"}, {"lit": "string"}]}
+            }
+        }),
+        json!({
+            "op": "withColumn",
+            "payload": {
+                "name": "value_int",
+                "expr": {"fn": "try_cast", "args": [{"col": "value"}, {"lit": "int"}]}
+            }
+        }),
+    ];
+    let df = plan::execute_plan(&spark, rows, schema, &plan_steps).unwrap();
+    let columns = df.columns_engine().unwrap();
+    assert!(
+        columns.contains(&"id_str".to_string()),
+        "Cast column 'id_str' must be in schema (issue #767, #766); got: {:?}",
+        columns
+    );
+    assert!(
+        columns.contains(&"value_int".to_string()),
+        "try_cast column 'value_int' must be in schema; got: {:?}",
+        columns
+    );
+    let st = df.schema_engine().unwrap();
+    let names: Vec<&str> = st.fields().iter().map(|f| f.name.as_str()).collect();
+    assert!(
+        names.contains(&"id_str"),
+        "id_str must be in StructType; got: {:?}",
+        names
+    );
+    assert!(
+        names.contains(&"value_int"),
+        "value_int must be in StructType"
+    );
+}
+
 // ---------- issue_636 ----------
 
 #[test]
