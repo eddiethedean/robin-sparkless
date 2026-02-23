@@ -1034,14 +1034,27 @@ impl SparkSession {
         {
             return Ok(df);
         }
-        // Warehouse fallback (disk-backed saveAsTable)
+        // Warehouse fallback (disk-backed saveAsTable). #760: schema-qualified name try both
+        // "schema.table" as single dir and "schema/table" (schema as subdir).
         if let Some(warehouse) = self.warehouse_dir() {
-            let dir = Path::new(warehouse).join(name);
+            let wh = Path::new(warehouse);
+            let dir = wh.join(name);
             if dir.is_dir() {
-                // Read data.parquet (our convention) or the dir (Polars accepts dirs with parquet files)
                 let data_file = dir.join("data.parquet");
                 let read_path = if data_file.is_file() { data_file } else { dir };
                 return self.read_parquet(&read_path);
+            }
+            if name.contains('.') {
+                let dir_qualified = wh.join(name.replace('.', std::path::MAIN_SEPARATOR_STR));
+                if dir_qualified.is_dir() {
+                    let data_file = dir_qualified.join("data.parquet");
+                    let read_path = if data_file.is_file() {
+                        data_file
+                    } else {
+                        dir_qualified
+                    };
+                    return self.read_parquet(&read_path);
+                }
             }
         }
         Err(PolarsError::InvalidOperation(
