@@ -693,8 +693,12 @@ fn expr_from_window_fn(
             let partition_exprs: Vec<Expr> = part_refs.iter().map(|s| col(*s)).collect();
             Ok(n_unique_expr.over(partition_exprs))
         }
+        "cume_dist" => {
+            let c = order_col.cume_dist(&part_refs, false);
+            Ok(c.into_expr())
+        }
         _ => Err(PlanExprError(format!(
-            "unsupported window fn '{fn_name}' (supported: row_number, rank, dense_rank, percent_rank, ntile, lag, lead, sum, avg, approx_count_distinct)"
+            "unsupported window fn '{fn_name}' (supported: row_number, rank, dense_rank, percent_rank, cume_dist, ntile, lag, lead, sum, avg, approx_count_distinct)"
         ))),
     }
 }
@@ -2488,7 +2492,7 @@ fn expr_from_fn_rest(name: &str, args: &[Value]) -> Result<Expr, PlanExprError> 
                 .map_err(|e| PlanExprError(e.to_string()))?
                 .into_expr())
         }
-        "map_keys" => {
+        "map_keys" | "keys" => {
             require_args(name, args, 1)?;
             Ok(map_keys(&expr_to_column(arg_expr(args, 0)?)).into_expr())
         }
