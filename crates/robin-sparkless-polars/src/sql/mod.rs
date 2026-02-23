@@ -419,6 +419,41 @@ mod tests {
     }
 
     #[test]
+    fn test_sql_left_anti_join() {
+        let spark = SparkSession::builder().app_name("test").get_or_create();
+        let left = spark
+            .create_dataframe(
+                vec![
+                    (1i64, 10i64, "a".to_string()),
+                    (2i64, 20i64, "b".to_string()),
+                    (3i64, 30i64, "c".to_string()),
+                ],
+                vec!["id", "v", "name"],
+            )
+            .unwrap();
+        let right = spark
+            .create_dataframe(
+                vec![(1i64, 100i64, "x".to_string())],
+                vec!["id", "v", "label"],
+            )
+            .unwrap();
+        spark.create_or_replace_temp_view("l", left);
+        spark.create_or_replace_temp_view("r", right);
+        // LEFT ANTI: rows in l with no match in r on id -> id 2 and 3
+        let result = spark
+            .sql("SELECT l.id, l.name FROM l LEFT ANTI JOIN r ON l.id = r.id")
+            .unwrap();
+        assert_eq!(result.count().unwrap(), 2);
+        let rows = result.collect_as_json_rows().unwrap();
+        let ids: Vec<i64> = rows
+            .iter()
+            .filter_map(|r| r.get("id").and_then(|v| v.as_i64()))
+            .collect();
+        assert!(ids.contains(&2));
+        assert!(ids.contains(&3));
+    }
+
+    #[test]
     fn test_sql_case_insensitive_columns() {
         let spark = SparkSession::builder().app_name("test").get_or_create();
         let df = spark
