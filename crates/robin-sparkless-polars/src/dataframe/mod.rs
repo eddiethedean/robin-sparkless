@@ -393,7 +393,7 @@ impl DataFrame {
         };
 
         // Then walk the tree for nested comparisons (e.g. (col("a")==1) & (col("b")==2)).
-        let mut expr = expr.try_map_expr(move |e| {
+        let expr = expr.try_map_expr(move |e| {
             if let Expr::BinaryExpr { left, op, right } = e {
                 let is_comparison_op = matches!(
                     op,
@@ -500,56 +500,7 @@ impl DataFrame {
                 Ok(e)
             }
         })?;
-        // PR-E: Coerce string to numeric for binary arithmetic (div, mul, add, sub) so "str" / 2 works.
-        expr = expr.try_map_expr(|e| {
-            if let Expr::BinaryExpr { left, op, right } = &e {
-                let is_arithmetic = matches!(
-                    op,
-                    Operator::Plus
-                        | Operator::Minus
-                        | Operator::Multiply
-                        | Operator::TrueDivide
-                        | Operator::FloorDivide
-                );
-                if !is_arithmetic {
-                    return Ok(e);
-                }
-                let col_name_and_string = |expr: &Expr| -> Option<(String, bool)> {
-                    if let Expr::Column(n) = expr {
-                        let name = n.as_str();
-                        let dt = self.get_column_dtype(name)?;
-                        Some((name.to_string(), dt == DataType::String))
-                    } else {
-                        None
-                    }
-                };
-                let left_info = col_name_and_string(left.as_ref());
-                let right_info = col_name_and_string(right.as_ref());
-                let wrap_string_to_number = |expr: Expr| {
-                    let col = crate::column::Column::from_expr(expr, None);
-                    crate::functions::try_to_number(&col, None)
-                        .map(|c| c.into_expr())
-                        .map_err(|e| PolarsError::ComputeError(e.into()))
-                };
-                if let Some((_, true)) = left_info {
-                    let new_left = wrap_string_to_number((**left).clone())?;
-                    return Ok(Expr::BinaryExpr {
-                        left: Arc::new(new_left),
-                        op: *op,
-                        right: right.clone(),
-                    });
-                }
-                if let Some((_, true)) = right_info {
-                    let new_right = wrap_string_to_number((**right).clone())?;
-                    return Ok(Expr::BinaryExpr {
-                        left: left.clone(),
-                        op: *op,
-                        right: Arc::new(new_right),
-                    });
-                }
-            }
-            Ok(e)
-        })?;
+        // #697: PySpark does not allow arithmetic on string and numeric; do not coerce (reject at runtime).
         Ok(expr)
     }
 
