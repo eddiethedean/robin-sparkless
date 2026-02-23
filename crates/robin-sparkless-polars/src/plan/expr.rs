@@ -252,7 +252,12 @@ pub fn expr_from_value(v: &Value) -> Result<Expr, PlanExprError> {
                     };
                 return Ok(match values_opt {
                     None => lit(false),
-                    Some(values_expr) => left_expr.is_in(values_expr, false),
+                    Some(values_expr) => {
+                        // #742, #854: values are string series; cast left to string so string and numeric columns both work
+                        left_expr
+                            .cast(DataType::String)
+                            .is_in(values_expr, false)
+                    }
                 });
             }
             "getItem" => {
@@ -818,10 +823,6 @@ fn try_values_for_isin(arr: &[Value]) -> Result<Option<Expr>, PlanExprError> {
         return Ok(None);
     }
     let mut str_vals: Vec<String> = Vec::new();
-    let mut int_vals: Vec<i64> = Vec::new();
-    let mut float_vals: Vec<f64> = Vec::new();
-    let mut has_string = false;
-    let mut has_float = false;
     for v in arr {
         let lit_val = if let Some(obj) = v.as_object() {
             obj.get("lit").unwrap_or(v)
@@ -833,28 +834,18 @@ fn try_values_for_isin(arr: &[Value]) -> Result<Option<Expr>, PlanExprError> {
         }
         if let Some(s) = lit_val.as_str() {
             str_vals.push(s.to_string());
-            has_string = true;
         } else if let Some(n) = lit_val.as_i64() {
-            int_vals.push(n);
             str_vals.push(n.to_string());
         } else if let Some(n) = lit_val.as_f64() {
-            float_vals.push(n);
             str_vals.push(n.to_string());
-            has_float = true;
         }
     }
     if str_vals.is_empty() {
         return Ok(None);
     }
-    let s: Series = if has_string {
-        Series::from_iter(str_vals.iter().map(|x| x.as_str()))
-    } else if !has_float && int_vals.len() == str_vals.len() {
-        Series::from_iter(int_vals)
-    } else if float_vals.len() == str_vals.len() {
-        Series::from_iter(float_vals)
-    } else {
-        Series::from_iter(str_vals.iter().map(|x| x.as_str()))
-    };
+    // #742, #854: Use string series for is_in so string column isin([1,2,3]) works (compare as strings).
+    // Numeric columns still work via Polars coercion when comparing to string list.
+    let s: Series = Series::from_iter(str_vals.iter().map(|x| x.as_str()));
     Ok(Some(lit(s)))
 }
 
@@ -1585,12 +1576,15 @@ fn expr_from_fn(name: &str, args: &[Value]) -> Result<Expr, PlanExprError> {
         "isin" => {
             // {"fn": "isin", "args": [col_expr, lit1, lit2, ...]} - col.isin(1, 3)
             // Empty list or [col, {"lit": null}] -> lit(false) (issue #518)
+            // #742, #854: values as string series; cast col to string so string and numeric columns work
             require_args_min(name, args, 1)?;
             let col_expr = arg_expr(args, 0)?;
             let values_opt = try_values_for_isin(&args[1..])?;
             Ok(match values_opt {
                 None => lit(false),
-                Some(values_expr) => col_expr.is_in(values_expr, false),
+                Some(values_expr) => col_expr
+                    .cast(DataType::String)
+                    .is_in(values_expr, false),
             })
         }
         _ => expr_from_fn_rest(name, args),
