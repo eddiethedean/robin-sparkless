@@ -61,67 +61,76 @@ pub fn expr_from_value(v: &Value) -> Result<Expr, PlanExprError> {
     }
 
     // Binary op: {"op": "gt"|"eq"|..., "left": <expr>, "right": <expr>}
+    // When "op" is "coalesce"|"nvl" with "args", treat as function (handled below via fn_name).
     if let Some(op) = obj.get("op").and_then(Value::as_str) {
-        match op {
-            "eq" | "ne" | "gt" | "ge" | "lt" | "le" => {
-                let left_v = obj
-                    .get("left")
-                    .ok_or_else(|| PlanExprError(format!("op '{op}' requires 'left'")))?;
-                let right_v = obj
-                    .get("right")
-                    .ok_or_else(|| PlanExprError(format!("op '{op}' requires 'right'")))?;
-                let l = expr_from_value(left_v)?;
-                let r = expr_from_value(right_v)?;
+        let args_present = obj.get("args").and_then(Value::as_array).is_some();
+        let fn_style_with_args = args_present && matches!(op, "coalesce" | "nvl");
+        if !fn_style_with_args {
+            match op {
+                "eq" | "ne" | "gt" | "ge" | "lt" | "le" => {
+                    let left_v = obj
+                        .get("left")
+                        .ok_or_else(|| PlanExprError(format!("op '{op}' requires 'left'")))?;
+                    let right_v = obj
+                        .get("right")
+                        .ok_or_else(|| PlanExprError(format!("op '{op}' requires 'right'")))?;
+                    let l = expr_from_value(left_v)?;
+                    let r = expr_from_value(right_v)?;
 
-                // Best-effort type hints: literals we can infer directly; columns are left
-                // without types here and will be handled by the DataFrame-level rewriter.
-                let infer_lit_type = |e: &Expr| -> Option<DataType> {
-                    if let Expr::Literal(lv) = e {
-                        let dt = lv.get_datatype();
-                        if matches!(dt, DataType::Unknown(_)) {
-                            None
+                    // Best-effort type hints: literals we can infer directly; columns are left
+                    // without types here and will be handled by the DataFrame-level rewriter.
+                    let infer_lit_type = |e: &Expr| -> Option<DataType> {
+                        if let Expr::Literal(lv) = e {
+                            let dt = lv.get_datatype();
+                            if matches!(dt, DataType::Unknown(_)) {
+                                None
+                            } else {
+                                Some(dt)
+                            }
                         } else {
-                            Some(dt)
+                            None
                         }
-                    } else {
-                        None
-                    }
-                };
+                    };
 
-                let l_ty = infer_lit_type(&l);
-                let r_ty = infer_lit_type(&r);
+                    let l_ty = infer_lit_type(&l);
+                    let r_ty = infer_lit_type(&r);
 
-                // #612: When one side is a literal and the other is a column, assume column is String
-                // so string–numeric coercion is applied (PySpark parity: df.filter(df["s"] == 123)).
-                use crate::type_coercion::{CompareOp, coerce_for_pyspark_comparison};
-                let op_enum = match op {
-                    "eq" => CompareOp::Eq,
-                    "ne" => CompareOp::NotEq,
-                    "gt" => CompareOp::Gt,
-                    "ge" => CompareOp::GtEq,
-                    "lt" => CompareOp::Lt,
-                    "le" => CompareOp::LtEq,
-                    _ => unreachable!(),
-                };
-                let (lt, rt) = match (&l_ty, &r_ty) {
-                    (Some(lt), Some(rt)) => (lt.clone(), rt.clone()),
-                    (Some(lt), None) => (lt.clone(), DataType::String),
-                    (None, Some(rt)) => (DataType::String, rt.clone()),
-                    (None, None) => {
-                        // No type info; skip coercion (may error at runtime).
-                        return Ok(match op {
-                            "eq" => l.eq(r),
-                            "ne" => l.neq(r),
-                            "gt" => l.gt(r),
-                            "ge" => l.gt_eq(r),
-                            "lt" => l.lt(r),
-                            "le" => l.lt_eq(r),
-                            _ => unreachable!(),
-                        });
-                    }
-                };
-                let expr =
-                    match coerce_for_pyspark_comparison(l.clone(), r.clone(), &lt, &rt, &op_enum) {
+                    // #612: When one side is a literal and the other is a column, assume column is String
+                    // so string–numeric coercion is applied (PySpark parity: df.filter(df["s"] == 123)).
+                    use crate::type_coercion::{CompareOp, coerce_for_pyspark_comparison};
+                    let op_enum = match op {
+                        "eq" => CompareOp::Eq,
+                        "ne" => CompareOp::NotEq,
+                        "gt" => CompareOp::Gt,
+                        "ge" => CompareOp::GtEq,
+                        "lt" => CompareOp::Lt,
+                        "le" => CompareOp::LtEq,
+                        _ => unreachable!(),
+                    };
+                    let (lt, rt) = match (&l_ty, &r_ty) {
+                        (Some(lt), Some(rt)) => (lt.clone(), rt.clone()),
+                        (Some(lt), None) => (lt.clone(), DataType::String),
+                        (None, Some(rt)) => (DataType::String, rt.clone()),
+                        (None, None) => {
+                            // No type info; skip coercion (may error at runtime).
+                            return Ok(match op {
+                                "eq" => l.eq(r),
+                                "ne" => l.neq(r),
+                                "gt" => l.gt(r),
+                                "ge" => l.gt_eq(r),
+                                "lt" => l.lt(r),
+                                "le" => l.lt_eq(r),
+                                _ => unreachable!(),
+                            });
+                        }
+                    };
+                    let expr = match coerce_for_pyspark_comparison(
+                        l.clone(),
+                        r.clone(),
+                        &lt,
+                        &rt,
+                        &op_enum,
+                    ) {
                         Ok((lc, rc)) => match op {
                             "eq" => lc.eq(rc),
                             "ne" => lc.neq(rc),
@@ -142,362 +151,370 @@ pub fn expr_from_value(v: &Value) -> Result<Expr, PlanExprError> {
                         },
                     };
 
-                return Ok(expr);
-            }
-            "eq_null_safe" => {
-                let left = obj.get("left").ok_or_else(|| {
-                    PlanExprError("op 'eq_null_safe' requires 'left'".to_string())
-                })?;
-                let right = obj.get("right").ok_or_else(|| {
-                    PlanExprError("op 'eq_null_safe' requires 'right'".to_string())
-                })?;
-                let l = expr_from_value(left)?;
-                let r = expr_from_value(right)?;
-                return eq_null_safe_expr(l, r);
-            }
-            "and" => {
-                let left = obj
-                    .get("left")
-                    .ok_or_else(|| PlanExprError("op 'and' requires 'left'".to_string()))?;
-                let right = obj
-                    .get("right")
-                    .ok_or_else(|| PlanExprError("op 'and' requires 'right'".to_string()))?;
-                return Ok(expr_from_value(left)?.and(expr_from_value(right)?));
-            }
-            "or" => {
-                let left = obj
-                    .get("left")
-                    .ok_or_else(|| PlanExprError("op 'or' requires 'left'".to_string()))?;
-                let right = obj
-                    .get("right")
-                    .ok_or_else(|| PlanExprError("op 'or' requires 'right'".to_string()))?;
-                return Ok(expr_from_value(left)?.or(expr_from_value(right)?));
-            }
-            "not" => {
-                // #682: Coerce to Boolean before .not() so Unknown(Any) or string columns work (PySpark parity; string->boolean via expr_coerce_to_boolean).
-                let arg = obj
-                    .get("arg")
-                    .ok_or_else(|| PlanExprError("op 'not' requires 'arg'".to_string()))?;
-                let arg_expr = expr_from_value(arg)?;
-                return Ok(crate::functions::expr_coerce_to_boolean(arg_expr).not());
-            }
-            "between" => {
-                let left_v = obj
-                    .get("left")
-                    .ok_or_else(|| PlanExprError("op 'between' requires 'left'".to_string()))?;
-                let lower_v = obj
-                    .get("lower")
-                    .ok_or_else(|| PlanExprError("op 'between' requires 'lower'".to_string()))?;
-                let upper_v = obj
-                    .get("upper")
-                    .ok_or_else(|| PlanExprError("op 'between' requires 'upper'".to_string()))?;
-                let left = expr_from_value(left_v)?;
-                let lower = expr_from_value(lower_v)?;
-                let upper = expr_from_value(upper_v)?;
-                // #628: Apply string–numeric coercion so col("val").between(1, 10) works when val is string.
-                let infer_lit_type = |e: &Expr| -> Option<DataType> {
-                    if let Expr::Literal(lv) = e {
-                        let dt = lv.get_datatype();
-                        if matches!(dt, DataType::Unknown(_)) {
-                            None
+                    return Ok(expr);
+                }
+                "eq_null_safe" => {
+                    let left = obj.get("left").ok_or_else(|| {
+                        PlanExprError("op 'eq_null_safe' requires 'left'".to_string())
+                    })?;
+                    let right = obj.get("right").ok_or_else(|| {
+                        PlanExprError("op 'eq_null_safe' requires 'right'".to_string())
+                    })?;
+                    let l = expr_from_value(left)?;
+                    let r = expr_from_value(right)?;
+                    return eq_null_safe_expr(l, r);
+                }
+                "and" => {
+                    let left = obj
+                        .get("left")
+                        .ok_or_else(|| PlanExprError("op 'and' requires 'left'".to_string()))?;
+                    let right = obj
+                        .get("right")
+                        .ok_or_else(|| PlanExprError("op 'and' requires 'right'".to_string()))?;
+                    return Ok(expr_from_value(left)?.and(expr_from_value(right)?));
+                }
+                "or" => {
+                    let left = obj
+                        .get("left")
+                        .ok_or_else(|| PlanExprError("op 'or' requires 'left'".to_string()))?;
+                    let right = obj
+                        .get("right")
+                        .ok_or_else(|| PlanExprError("op 'or' requires 'right'".to_string()))?;
+                    return Ok(expr_from_value(left)?.or(expr_from_value(right)?));
+                }
+                "not" => {
+                    // #682: Coerce to Boolean before .not() so Unknown(Any) or string columns work (PySpark parity; string->boolean via expr_coerce_to_boolean).
+                    let arg = obj
+                        .get("arg")
+                        .ok_or_else(|| PlanExprError("op 'not' requires 'arg'".to_string()))?;
+                    let arg_expr = expr_from_value(arg)?;
+                    return Ok(crate::functions::expr_coerce_to_boolean(arg_expr).not());
+                }
+                "between" => {
+                    let left_v = obj
+                        .get("left")
+                        .ok_or_else(|| PlanExprError("op 'between' requires 'left'".to_string()))?;
+                    let lower_v = obj.get("lower").ok_or_else(|| {
+                        PlanExprError("op 'between' requires 'lower'".to_string())
+                    })?;
+                    let upper_v = obj.get("upper").ok_or_else(|| {
+                        PlanExprError("op 'between' requires 'upper'".to_string())
+                    })?;
+                    let left = expr_from_value(left_v)?;
+                    let lower = expr_from_value(lower_v)?;
+                    let upper = expr_from_value(upper_v)?;
+                    // #628: Apply string–numeric coercion so col("val").between(1, 10) works when val is string.
+                    let infer_lit_type = |e: &Expr| -> Option<DataType> {
+                        if let Expr::Literal(lv) = e {
+                            let dt = lv.get_datatype();
+                            if matches!(dt, DataType::Unknown(_)) {
+                                None
+                            } else {
+                                Some(dt)
+                            }
                         } else {
-                            Some(dt)
+                            None
                         }
-                    } else {
-                        None
-                    }
-                };
-                let lower_ty = infer_lit_type(&lower);
-                let upper_ty = infer_lit_type(&upper);
-                use crate::type_coercion::{CompareOp, coerce_for_pyspark_comparison};
-                // Assume column is String when unknown so string–numeric coercion is applied (#628).
-                let lt = DataType::String;
-                let rt_lower = lower_ty.unwrap_or(DataType::String);
-                let rt_upper = upper_ty.unwrap_or(DataType::String);
-                let (left_c, lower_c) = match coerce_for_pyspark_comparison(
-                    left.clone(),
-                    lower.clone(),
-                    &lt,
-                    &rt_lower,
-                    &CompareOp::GtEq,
-                ) {
-                    Ok((a, b)) => (a, b),
-                    Err(_) => (left.clone(), lower),
-                };
-                let upper_clone = upper.clone();
-                let (left_cc, upper_c) = match coerce_for_pyspark_comparison(
-                    left_c.clone(),
-                    upper,
-                    &lt,
-                    &rt_upper,
-                    &CompareOp::LtEq,
-                ) {
-                    Ok((a, b)) => (a, b),
-                    Err(_) => (left_c.clone(), upper_clone),
-                };
-                return Ok(left_cc.clone().gt_eq(lower_c).and(left_cc.lt_eq(upper_c)));
-            }
-            "**" | "pow" => {
-                let left_v = obj
-                    .get("left")
-                    .ok_or_else(|| PlanExprError(format!("op '{op}' requires 'left'")))?;
-                let right_v = obj
-                    .get("right")
-                    .ok_or_else(|| PlanExprError(format!("op '{op}' requires 'right'")))?;
-                let l = expr_from_value(left_v)?;
-                let r = expr_from_value(right_v)?;
-                let left_col = expr_to_column(l);
-                let right_col = expr_to_column(r);
-                return Ok(left_col.pow_with(&right_col).into_expr());
-            }
-            "isin" => {
-                // {"op": "isin", "left": <col_expr>, "right": <list_expr>} or
-                // {"op": "isin", "left": <col_expr>, "values": [<lit>, ...]}
-                // Empty list -> lit(false) for all rows (issue #518)
-                let left_v = obj
-                    .get("left")
-                    .ok_or_else(|| PlanExprError("op 'isin' requires 'left'".to_string()))?;
-                let left_expr = expr_from_value(left_v)?;
-                let values_opt =
-                    if let Some(values_arr) = obj.get("values").and_then(Value::as_array) {
-                        try_values_for_isin(values_arr)?
-                    } else if let Some(right_v) = obj.get("right") {
-                        try_values_from_plan_value(right_v)?
-                    } else {
-                        return Err(PlanExprError(
-                            "op 'isin' requires 'right' or 'values'".to_string(),
-                        ));
                     };
-                return Ok(match values_opt {
-                    None => lit(false),
-                    Some(values_expr) => {
-                        // #742, #854: values are string series; cast left to string so string and numeric columns both work
-                        left_expr.cast(DataType::String).is_in(values_expr, false)
+                    let lower_ty = infer_lit_type(&lower);
+                    let upper_ty = infer_lit_type(&upper);
+                    use crate::type_coercion::{CompareOp, coerce_for_pyspark_comparison};
+                    // Assume column is String when unknown so string–numeric coercion is applied (#628).
+                    let lt = DataType::String;
+                    let rt_lower = lower_ty.unwrap_or(DataType::String);
+                    let rt_upper = upper_ty.unwrap_or(DataType::String);
+                    let (left_c, lower_c) = match coerce_for_pyspark_comparison(
+                        left.clone(),
+                        lower.clone(),
+                        &lt,
+                        &rt_lower,
+                        &CompareOp::GtEq,
+                    ) {
+                        Ok((a, b)) => (a, b),
+                        Err(_) => (left.clone(), lower),
+                    };
+                    let upper_clone = upper.clone();
+                    let (left_cc, upper_c) = match coerce_for_pyspark_comparison(
+                        left_c.clone(),
+                        upper,
+                        &lt,
+                        &rt_upper,
+                        &CompareOp::LtEq,
+                    ) {
+                        Ok((a, b)) => (a, b),
+                        Err(_) => (left_c.clone(), upper_clone),
+                    };
+                    return Ok(left_cc.clone().gt_eq(lower_c).and(left_cc.lt_eq(upper_c)));
+                }
+                "**" | "pow" => {
+                    let left_v = obj
+                        .get("left")
+                        .ok_or_else(|| PlanExprError(format!("op '{op}' requires 'left'")))?;
+                    let right_v = obj
+                        .get("right")
+                        .ok_or_else(|| PlanExprError(format!("op '{op}' requires 'right'")))?;
+                    let l = expr_from_value(left_v)?;
+                    let r = expr_from_value(right_v)?;
+                    let left_col = expr_to_column(l);
+                    let right_col = expr_to_column(r);
+                    return Ok(left_col.pow_with(&right_col).into_expr());
+                }
+                "isin" => {
+                    // {"op": "isin", "left": <col_expr>, "right": <list_expr>} or
+                    // {"op": "isin", "left": <col_expr>, "values": [<lit>, ...]}
+                    // Empty list -> lit(false) for all rows (issue #518)
+                    let left_v = obj
+                        .get("left")
+                        .ok_or_else(|| PlanExprError("op 'isin' requires 'left'".to_string()))?;
+                    let left_expr = expr_from_value(left_v)?;
+                    let values_opt =
+                        if let Some(values_arr) = obj.get("values").and_then(Value::as_array) {
+                            try_values_for_isin(values_arr)?
+                        } else if let Some(right_v) = obj.get("right") {
+                            try_values_from_plan_value(right_v)?
+                        } else {
+                            return Err(PlanExprError(
+                                "op 'isin' requires 'right' or 'values'".to_string(),
+                            ));
+                        };
+                    return Ok(match values_opt {
+                        None => lit(false),
+                        Some(values_expr) => {
+                            // #742, #854: values are string series; cast left to string so string and numeric columns both work
+                            left_expr.cast(DataType::String).is_in(values_expr, false)
+                        }
+                    });
+                }
+                "getItem" => {
+                    // {"op": "getItem", "left": <col_expr>, "right": <index_lit>} - PySpark 0-based
+                    let left_v = obj
+                        .get("left")
+                        .ok_or_else(|| PlanExprError("op 'getItem' requires 'left'".to_string()))?;
+                    let right_v = obj.get("right").ok_or_else(|| {
+                        PlanExprError("op 'getItem' requires 'right'".to_string())
+                    })?;
+                    let col_expr = expr_from_value(left_v)?;
+                    let idx = lit_as_i64(right_v)?;
+                    let col_c = expr_to_column(col_expr);
+                    return Ok(col_c.get_item(idx).into_expr());
+                }
+                "startswith" => {
+                    // {"op": "startswith", "left": col, "right": {"lit": "prefix"}}
+                    let left_v = obj.get("left").ok_or_else(|| {
+                        PlanExprError("op 'startswith' requires 'left'".to_string())
+                    })?;
+                    let right_v = obj.get("right").ok_or_else(|| {
+                        PlanExprError("op 'startswith' requires 'right'".to_string())
+                    })?;
+                    let col_expr = expr_from_value(left_v)?;
+                    let prefix = lit_as_string(right_v)?;
+                    let col_c = expr_to_column(col_expr);
+                    return Ok(crate::functions::startswith(&col_c, &prefix).into_expr());
+                }
+                "is_null" => {
+                    let arg = obj
+                        .get("arg")
+                        .ok_or_else(|| PlanExprError("op 'is_null' requires 'arg'".to_string()))?;
+                    return Ok(expr_from_value(arg)?.is_null());
+                }
+                "is_not_null" => {
+                    let arg = obj.get("arg").ok_or_else(|| {
+                        PlanExprError("op 'is_not_null' requires 'arg'".to_string())
+                    })?;
+                    return Ok(expr_from_value(arg)?.is_not_null());
+                }
+                "regexp_extract" => {
+                    // {"op": "regexp_extract", "left": col, "pattern": {"lit": "..."}, "group": {"lit": 0}}
+                    // or {"op": "regexp_extract", "args": [col, pattern, group]}
+                    if let Some(args) = obj.get("args").and_then(Value::as_array) {
+                        require_args_min("regexp_extract", args, 3)?;
+                        let col_expr = expr_from_value(&args[0])?;
+                        let pattern = lit_as_string(&args[1])?;
+                        let group_idx = lit_as_usize(&args[2])?;
+                        let col_c = expr_to_column(col_expr);
+                        return Ok(
+                            crate::functions::regexp_extract(&col_c, &pattern, group_idx)
+                                .into_expr(),
+                        );
                     }
-                });
-            }
-            "getItem" => {
-                // {"op": "getItem", "left": <col_expr>, "right": <index_lit>} - PySpark 0-based
-                let left_v = obj
-                    .get("left")
-                    .ok_or_else(|| PlanExprError("op 'getItem' requires 'left'".to_string()))?;
-                let right_v = obj
-                    .get("right")
-                    .ok_or_else(|| PlanExprError("op 'getItem' requires 'right'".to_string()))?;
-                let col_expr = expr_from_value(left_v)?;
-                let idx = lit_as_i64(right_v)?;
-                let col_c = expr_to_column(col_expr);
-                return Ok(col_c.get_item(idx).into_expr());
-            }
-            "startswith" => {
-                // {"op": "startswith", "left": col, "right": {"lit": "prefix"}}
-                let left_v = obj
-                    .get("left")
-                    .ok_or_else(|| PlanExprError("op 'startswith' requires 'left'".to_string()))?;
-                let right_v = obj
-                    .get("right")
-                    .ok_or_else(|| PlanExprError("op 'startswith' requires 'right'".to_string()))?;
-                let col_expr = expr_from_value(left_v)?;
-                let prefix = lit_as_string(right_v)?;
-                let col_c = expr_to_column(col_expr);
-                return Ok(crate::functions::startswith(&col_c, &prefix).into_expr());
-            }
-            "is_null" => {
-                let arg = obj
-                    .get("arg")
-                    .ok_or_else(|| PlanExprError("op 'is_null' requires 'arg'".to_string()))?;
-                return Ok(expr_from_value(arg)?.is_null());
-            }
-            "is_not_null" => {
-                let arg = obj
-                    .get("arg")
-                    .ok_or_else(|| PlanExprError("op 'is_not_null' requires 'arg'".to_string()))?;
-                return Ok(expr_from_value(arg)?.is_not_null());
-            }
-            "regexp_extract" => {
-                // {"op": "regexp_extract", "left": col, "pattern": {"lit": "..."}, "group": {"lit": 0}}
-                // or {"op": "regexp_extract", "args": [col, pattern, group]}
-                if let Some(args) = obj.get("args").and_then(Value::as_array) {
-                    require_args_min("regexp_extract", args, 3)?;
-                    let col_expr = expr_from_value(&args[0])?;
-                    let pattern = lit_as_string(&args[1])?;
-                    let group_idx = lit_as_usize(&args[2])?;
+                    let left_v = obj.get("left").ok_or_else(|| {
+                        PlanExprError("op 'regexp_extract' requires 'left'".to_string())
+                    })?;
+                    let col_expr = expr_from_value(left_v)?;
+                    let pattern_v =
+                        obj.get("pattern")
+                            .or_else(|| obj.get("right"))
+                            .ok_or_else(|| {
+                                PlanExprError(
+                                    "op 'regexp_extract' requires 'pattern' or 'right'".to_string(),
+                                )
+                            })?;
+                    let pattern = lit_as_string(pattern_v)?;
+                    let group_idx = obj
+                        .get("group")
+                        .and_then(|v| lit_as_usize(v).ok())
+                        .unwrap_or(0);
                     let col_c = expr_to_column(col_expr);
                     return Ok(
                         crate::functions::regexp_extract(&col_c, &pattern, group_idx).into_expr(),
                     );
                 }
-                let left_v = obj.get("left").ok_or_else(|| {
-                    PlanExprError("op 'regexp_extract' requires 'left'".to_string())
-                })?;
-                let col_expr = expr_from_value(left_v)?;
-                let pattern_v =
-                    obj.get("pattern")
-                        .or_else(|| obj.get("right"))
-                        .ok_or_else(|| {
-                            PlanExprError(
-                                "op 'regexp_extract' requires 'pattern' or 'right'".to_string(),
-                            )
-                        })?;
-                let pattern = lit_as_string(pattern_v)?;
-                let group_idx = obj
-                    .get("group")
-                    .and_then(|v| lit_as_usize(v).ok())
-                    .unwrap_or(0);
-                let col_c = expr_to_column(col_expr);
-                return Ok(
-                    crate::functions::regexp_extract(&col_c, &pattern, group_idx).into_expr(),
-                );
-            }
-            "regexp_replace" => {
-                // {"op": "regexp_replace", "left": col, "pattern": {"lit": "..."}, "replacement": {"lit": "..."}}
-                // or {"op": "regexp_replace", "args": [col, pattern, replacement]} (issue #528)
-                if let Some(args) = obj.get("args").and_then(Value::as_array) {
-                    require_args_min("regexp_replace", args, 3)?;
-                    let col_expr = expr_from_value(&args[0])?;
-                    let pattern = lit_as_string(&args[1])?;
-                    let replacement = lit_as_string(&args[2])?;
+                "regexp_replace" => {
+                    // {"op": "regexp_replace", "left": col, "pattern": {"lit": "..."}, "replacement": {"lit": "..."}}
+                    // or {"op": "regexp_replace", "args": [col, pattern, replacement]} (issue #528)
+                    if let Some(args) = obj.get("args").and_then(Value::as_array) {
+                        require_args_min("regexp_replace", args, 3)?;
+                        let col_expr = expr_from_value(&args[0])?;
+                        let pattern = lit_as_string(&args[1])?;
+                        let replacement = lit_as_string(&args[2])?;
+                        let col_c = expr_to_column(col_expr);
+                        return Ok(crate::functions::regexp_replace(
+                            &col_c,
+                            &pattern,
+                            &replacement,
+                        )
+                        .into_expr());
+                    }
+                    let left_v = obj.get("left").ok_or_else(|| {
+                        PlanExprError("op 'regexp_replace' requires 'left'".to_string())
+                    })?;
+                    let col_expr = expr_from_value(left_v)?;
+                    let pattern = lit_as_string(
+                        obj.get("pattern")
+                            .or_else(|| obj.get("right"))
+                            .ok_or_else(|| {
+                                PlanExprError(
+                                    "op 'regexp_replace' requires 'pattern' or 'right'".to_string(),
+                                )
+                            })?,
+                    )?;
+                    let replacement = lit_as_string(obj.get("replacement").ok_or_else(|| {
+                        PlanExprError("op 'regexp_replace' requires 'replacement'".to_string())
+                    })?)?;
                     let col_c = expr_to_column(col_expr);
                     return Ok(
                         crate::functions::regexp_replace(&col_c, &pattern, &replacement)
                             .into_expr(),
                     );
                 }
-                let left_v = obj.get("left").ok_or_else(|| {
-                    PlanExprError("op 'regexp_replace' requires 'left'".to_string())
-                })?;
-                let col_expr = expr_from_value(left_v)?;
-                let pattern =
-                    lit_as_string(obj.get("pattern").or_else(|| obj.get("right")).ok_or_else(
-                        || {
-                            PlanExprError(
-                                "op 'regexp_replace' requires 'pattern' or 'right'".to_string(),
-                            )
-                        },
-                    )?)?;
-                let replacement = lit_as_string(obj.get("replacement").ok_or_else(|| {
-                    PlanExprError("op 'regexp_replace' requires 'replacement'".to_string())
-                })?)?;
-                let col_c = expr_to_column(col_expr);
-                return Ok(
-                    crate::functions::regexp_replace(&col_c, &pattern, &replacement).into_expr(),
-                );
-            }
-            "create_map" | "createMap" => {
-                // {"op": "create_map"|"createMap", "args": [key1, val1, key2, val2, ...]} (issue #542)
-                let args_arr = obj.get("args").and_then(Value::as_array).ok_or_else(|| {
-                    PlanExprError("op 'create_map'/'createMap' requires 'args' array".to_string())
-                })?;
-                let exprs: Result<Vec<Expr>, _> = args_arr.iter().map(expr_from_value).collect();
-                let cols: Vec<crate::Column> = exprs?.into_iter().map(expr_to_column).collect();
-                let refs: Vec<&crate::Column> = cols.iter().collect();
-                return Ok(crate::functions::create_map(&refs)
-                    .map_err(|e| PlanExprError(e.to_string()))?
-                    .into_expr());
-            }
-            "add" | "+" => {
-                // {"op": "add", "left": <expr>, "right": <expr>} - e.g. row_number().over(w) + 10
-                let left_v = obj
-                    .get("left")
-                    .ok_or_else(|| PlanExprError("op 'add' requires 'left'".to_string()))?;
-                let right_v = obj
-                    .get("right")
-                    .ok_or_else(|| PlanExprError("op 'add' requires 'right'".to_string()))?;
-                let l = expr_from_value(left_v)?;
-                let r = expr_from_value(right_v)?;
-                let a = expr_to_column(l);
-                let b = expr_to_column(r);
-                return Ok(a.add_pyspark(&b).into_expr());
-            }
-            "sub" | "minus" | "-" => {
-                // {"op": "sub", "left": <expr>, "right": <expr>} — e.g. (1 - col("x")) #556
-                let left_v = obj
-                    .get("left")
-                    .ok_or_else(|| PlanExprError("op 'sub' requires 'left'".to_string()))?;
-                let right_v = obj
-                    .get("right")
-                    .ok_or_else(|| PlanExprError("op 'sub' requires 'right'".to_string()))?;
-                let l = expr_from_value(left_v)?;
-                let r = expr_from_value(right_v)?;
-                let a = expr_to_column(l);
-                let b = expr_to_column(r);
-                return Ok(a.subtract(&b).into_expr());
-            }
-            "mul" | "*" => {
-                // {"op": "mul", "left": <expr>, "right": <expr>} — e.g. (100 * col("x")) #556
-                let left_v = obj
-                    .get("left")
-                    .ok_or_else(|| PlanExprError("op 'mul' requires 'left'".to_string()))?;
-                let right_v = obj
-                    .get("right")
-                    .ok_or_else(|| PlanExprError("op 'mul' requires 'right'".to_string()))?;
-                let l = expr_from_value(left_v)?;
-                let r = expr_from_value(right_v)?;
-                let a = expr_to_column(l);
-                let b = expr_to_column(r);
-                return Ok(a.multiply(&b).into_expr());
-            }
-            "div" | "/" | "divide" => {
-                // #683: PySpark-style division with string/numeric coercion (op form from Sparkless).
-                let left_v = obj
-                    .get("left")
-                    .ok_or_else(|| PlanExprError("op 'div' requires 'left'".to_string()))?;
-                let right_v = obj
-                    .get("right")
-                    .ok_or_else(|| PlanExprError("op 'div' requires 'right'".to_string()))?;
-                let l = expr_from_value(left_v)?;
-                let r = expr_from_value(right_v)?;
-                let a = expr_to_column(l);
-                let b = expr_to_column(r);
-                return Ok(a.divide_pyspark(&b).into_expr());
-            }
-            "udf" => {
-                // {"op": "udf", "udf"|"name": "udf_name", "args": [<expr>, ...]} (issue #545)
-                let udf_name = obj
-                    .get("udf")
-                    .or_else(|| obj.get("name"))
-                    .and_then(Value::as_str)
-                    .ok_or_else(|| {
-                        PlanExprError("op 'udf' requires 'udf' or 'name'".to_string())
+                "create_map" | "createMap" => {
+                    // {"op": "create_map"|"createMap", "args": [key1, val1, key2, val2, ...]} (issue #542)
+                    let args_arr = obj.get("args").and_then(Value::as_array).ok_or_else(|| {
+                        PlanExprError(
+                            "op 'create_map'/'createMap' requires 'args' array".to_string(),
+                        )
                     })?;
-                let args = obj
-                    .get("args")
-                    .and_then(Value::as_array)
-                    .ok_or_else(|| PlanExprError("op 'udf' requires 'args' array".to_string()))?;
-                let col = column_from_udf_call(udf_name, args)?;
-                if col.udf_call.is_some() {
-                    return Err(PlanExprError(
+                    let exprs: Result<Vec<Expr>, _> =
+                        args_arr.iter().map(expr_from_value).collect();
+                    let cols: Vec<crate::Column> = exprs?.into_iter().map(expr_to_column).collect();
+                    let refs: Vec<&crate::Column> = cols.iter().collect();
+                    return Ok(crate::functions::create_map(&refs)
+                        .map_err(|e| PlanExprError(e.to_string()))?
+                        .into_expr());
+                }
+                "add" | "+" => {
+                    // {"op": "add", "left": <expr>, "right": <expr>} - e.g. row_number().over(w) + 10
+                    let left_v = obj
+                        .get("left")
+                        .ok_or_else(|| PlanExprError("op 'add' requires 'left'".to_string()))?;
+                    let right_v = obj
+                        .get("right")
+                        .ok_or_else(|| PlanExprError("op 'add' requires 'right'".to_string()))?;
+                    let l = expr_from_value(left_v)?;
+                    let r = expr_from_value(right_v)?;
+                    let a = expr_to_column(l);
+                    let b = expr_to_column(r);
+                    return Ok(a.add_pyspark(&b).into_expr());
+                }
+                "sub" | "minus" | "-" => {
+                    // {"op": "sub", "left": <expr>, "right": <expr>} — e.g. (1 - col("x")) #556
+                    let left_v = obj
+                        .get("left")
+                        .ok_or_else(|| PlanExprError("op 'sub' requires 'left'".to_string()))?;
+                    let right_v = obj
+                        .get("right")
+                        .ok_or_else(|| PlanExprError("op 'sub' requires 'right'".to_string()))?;
+                    let l = expr_from_value(left_v)?;
+                    let r = expr_from_value(right_v)?;
+                    let a = expr_to_column(l);
+                    let b = expr_to_column(r);
+                    return Ok(a.subtract(&b).into_expr());
+                }
+                "mul" | "*" => {
+                    // {"op": "mul", "left": <expr>, "right": <expr>} — e.g. (100 * col("x")) #556
+                    let left_v = obj
+                        .get("left")
+                        .ok_or_else(|| PlanExprError("op 'mul' requires 'left'".to_string()))?;
+                    let right_v = obj
+                        .get("right")
+                        .ok_or_else(|| PlanExprError("op 'mul' requires 'right'".to_string()))?;
+                    let l = expr_from_value(left_v)?;
+                    let r = expr_from_value(right_v)?;
+                    let a = expr_to_column(l);
+                    let b = expr_to_column(r);
+                    return Ok(a.multiply(&b).into_expr());
+                }
+                "div" | "/" | "divide" => {
+                    // #683: PySpark-style division with string/numeric coercion (op form from Sparkless).
+                    let left_v = obj
+                        .get("left")
+                        .ok_or_else(|| PlanExprError("op 'div' requires 'left'".to_string()))?;
+                    let right_v = obj
+                        .get("right")
+                        .ok_or_else(|| PlanExprError("op 'div' requires 'right'".to_string()))?;
+                    let l = expr_from_value(left_v)?;
+                    let r = expr_from_value(right_v)?;
+                    let a = expr_to_column(l);
+                    let b = expr_to_column(r);
+                    return Ok(a.divide_pyspark(&b).into_expr());
+                }
+                "udf" => {
+                    // {"op": "udf", "udf"|"name": "udf_name", "args": [<expr>, ...]} (issue #545)
+                    let udf_name = obj
+                        .get("udf")
+                        .or_else(|| obj.get("name"))
+                        .and_then(Value::as_str)
+                        .ok_or_else(|| {
+                            PlanExprError("op 'udf' requires 'udf' or 'name'".to_string())
+                        })?;
+                    let args = obj.get("args").and_then(Value::as_array).ok_or_else(|| {
+                        PlanExprError("op 'udf' requires 'args' array".to_string())
+                    })?;
+                    let col = column_from_udf_call(udf_name, args)?;
+                    if col.udf_call.is_some() {
+                        return Err(PlanExprError(
                         "Python/Vectorized UDFs are only supported in withColumn/select, not in filter/plan expressions"
                             .into(),
                     ));
+                    }
+                    return Ok(col.expr().clone());
                 }
-                return Ok(col.expr().clone());
-            }
-            // #547, #554, #583: Sparkless may send functions as op with "args" (same semantics as fn)
-            "translate" | "substring_index" | "substringIndex" | "levenshtein" | "soundex"
-            | "crc32" | "xxhash64" | "get_json_object" | "getJsonObject" | "json_tuple"
-            | "jsonTuple" | "regexp_extract_all" | "regexpExtractAll" | "date_trunc"
-            | "dateTrunc" | "to_date" | "toDate" | "format_string" | "formatString" | "log"
-            | "explode" | "explode_outer" | "explodeOuter" | "concat" | "contains" => {
-                let args = obj
-                    .get("args")
-                    .and_then(Value::as_array)
-                    .ok_or_else(|| PlanExprError(format!("op '{op}' requires 'args' array")))?;
-                let fn_name = match op {
-                    "substringIndex" => "substring_index",
-                    "getJsonObject" => "get_json_object",
-                    "jsonTuple" => "json_tuple",
-                    "regexpExtractAll" => "regexp_extract_all",
-                    "dateTrunc" => "date_trunc",
-                    "toDate" => "to_date",
-                    "formatString" => "format_string",
-                    "explodeOuter" => "explode_outer",
-                    other => other,
-                };
-                return expr_from_fn(fn_name, args);
-            }
-            _ => {
-                return Err(PlanExprError(format!("unsupported expression op: {op}")));
+                // #547, #554, #583: Sparkless may send functions as op with "args" (same semantics as fn)
+                "translate" | "substring_index" | "substringIndex" | "levenshtein" | "soundex"
+                | "crc32" | "xxhash64" | "get_json_object" | "getJsonObject" | "json_tuple"
+                | "jsonTuple" | "regexp_extract_all" | "regexpExtractAll" | "date_trunc"
+                | "dateTrunc" | "to_date" | "toDate" | "format_string" | "formatString" | "log"
+                | "explode" | "explode_outer" | "explodeOuter" | "concat" | "contains" => {
+                    let args = obj
+                        .get("args")
+                        .and_then(Value::as_array)
+                        .ok_or_else(|| PlanExprError(format!("op '{op}' requires 'args' array")))?;
+                    let fn_name = match op {
+                        "substringIndex" => "substring_index",
+                        "getJsonObject" => "get_json_object",
+                        "jsonTuple" => "json_tuple",
+                        "regexpExtractAll" => "regexp_extract_all",
+                        "dateTrunc" => "date_trunc",
+                        "toDate" => "to_date",
+                        "formatString" => "format_string",
+                        "explodeOuter" => "explode_outer",
+                        other => other,
+                    };
+                    return expr_from_fn(fn_name, args);
+                }
+                _ => {
+                    return Err(PlanExprError(format!("unsupported expression op: {op}")));
+                }
             }
         }
     }
