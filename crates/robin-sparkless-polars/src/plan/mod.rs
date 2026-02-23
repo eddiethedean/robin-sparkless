@@ -122,6 +122,45 @@ fn get_other_schema(payload: &Value) -> Option<&Vec<Value>> {
         .and_then(Value::as_array)
 }
 
+/// Parse one orderBy column element into zero or more (column_name, ascending) pairs.
+/// Accepts: "col", "col DESC", "col ASC", "['a','b']" (Python repr), {"col":"x"}, {"name":"x"}.
+fn parse_order_by_element(v: &Value) -> Option<Vec<(String, bool)>> {
+    if let Some(s) = v.as_str() {
+        let s = s.trim();
+        if s.eq_ignore_ascii_case("desc") || s.eq_ignore_ascii_case("asc") {
+            return None;
+        }
+        if s.to_uppercase().ends_with(" DESC") {
+            let name = s[..s.len().saturating_sub(5)].trim().to_string();
+            return if name.is_empty() { None } else { Some(vec![(name, false)]) };
+        }
+        if s.to_uppercase().ends_with(" ASC") {
+            let name = s[..s.len().saturating_sub(4)].trim().to_string();
+            return if name.is_empty() { None } else { Some(vec![(name, true)]) };
+        }
+        if s.starts_with('[') && s.ends_with(']') {
+            let inner = s[1..s.len() - 1].trim();
+            if inner.is_empty() {
+                return Some(vec![]);
+            }
+            let names: Vec<(String, bool)> = inner
+                .split(',')
+                .map(|p| (p.trim().trim_matches('\'').trim_matches('"').to_string(), true))
+                .filter(|(n, _)| !n.is_empty())
+                .collect();
+            return Some(names);
+        }
+        return Some(vec![(s.to_string(), true)]);
+    }
+    let obj = v.as_object()?;
+    let name = obj
+        .get("col")
+        .or_else(|| obj.get("name"))
+        .and_then(Value::as_str)
+        .map(|s| s.to_string())?;
+    Some(vec![(name, true)])
+}
+
 /// Extract column name from expression if it is a simple column reference {"col": "name"}.
 fn expr_to_col_name(v: &Value) -> Option<String> {
     let obj = v.as_object()?;
@@ -350,25 +389,24 @@ fn apply_op(
                 .ok_or_else(|| {
                     PlanError::InvalidPlan("orderBy payload must have 'columns' array".into())
                 })?;
-            // Each element: string (column name) or object {"col": "name"} / {"type": "column", "name": "x"} (PR2).
-            let col_names: Vec<String> = columns
+            // Each element: string ("col", "col DESC", "col ASC", "['a','b']"), or object {"col":"name"} / {"name":"x"} (PR-D).
+            let mut pairs: Vec<(String, bool)> = Vec::new();
+            for v in columns.iter() {
+                if let Some(parsed) = parse_order_by_element(v) {
+                    pairs.extend(parsed);
+                }
+            }
+            if pairs.is_empty() {
+                return Err(PlanError::InvalidPlan(
+                    "orderBy columns could not be parsed (expect column names, 'col ASC'/'col DESC', or ['a','b'])".into(),
+                ));
+            }
+            let col_names: Vec<String> = pairs
                 .iter()
-                .filter_map(|v| {
-                    v.as_str()
-                        .map(|s| s.to_string())
-                        .or_else(|| {
-                            v.get("col").and_then(Value::as_str).map(|s| s.to_string())
-                                .or_else(|| v.get("name").and_then(Value::as_str).map(|s| s.to_string()))
-                        })
-                })
-                .map(|s| df.resolve_column_name(s.as_str()))
+                .map(|(s, _)| df.resolve_column_name(s.as_str()))
                 .collect::<Result<Vec<_>, _>>()
                 .map_err(PlanError::Session)?;
-            let ascending = payload
-                .get("ascending")
-                .and_then(Value::as_array)
-                .map(|a| a.iter().filter_map(|v| v.as_bool()).collect::<Vec<_>>())
-                .unwrap_or_else(|| vec![true; col_names.len()]);
+            let ascending: Vec<bool> = pairs.iter().map(|(_, asc)| *asc).collect();
             let nulls_last = payload
                 .get("nulls_last")
                 .and_then(Value::as_array)
@@ -715,5 +753,39 @@ mod tests {
         let out = df.collect_inner().unwrap();
         assert_eq!(out.height(), 4, "cross join 2x2 = 4 rows");
         assert_eq!(out.get_column_names(), &["a", "b"]);
+    }
+
+    #[test]
+    fn test_order_by_col_desc_and_list_format() {
+        let session = crate::session::SparkSession::builder()
+            .app_name("plan_orderby_desc")
+            .get_or_create();
+        let data = vec![
+            vec![json!(1), json!("z")],
+            vec![json!(2), json!("a")],
+            vec![json!(3), json!("m")],
+        ];
+        let schema = vec![
+            ("id".to_string(), "bigint".to_string()),
+            ("name".to_string(), "string".to_string()),
+        ];
+        let plan = vec![
+            json!({
+                "op": "orderBy",
+                "payload": { "columns": ["name DESC"] }
+            }),
+        ];
+        let df = execute_plan(&session, data.clone(), schema.clone(), &plan).unwrap();
+        assert_eq!(df.count().unwrap(), 3);
+        let rows = df.collect_as_json_rows().unwrap();
+        assert_eq!(rows[0].get("name").and_then(|v| v.as_str()), Some("z"));
+        let plan2 = vec![
+            json!({
+                "op": "orderBy",
+                "payload": { "columns": ["['id','name']"] }
+            }),
+        ];
+        let df2 = execute_plan(&session, data, schema, &plan2).unwrap();
+        assert_eq!(df2.collect_inner().unwrap().height(), 3);
     }
 }
