@@ -381,6 +381,11 @@ fn json_values_to_series(
                                     )
                                 })
                                 .or_else(|_| {
+                                    NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S").map_err(
+                                        |e| PolarsError::ComputeError(e.to_string().into()),
+                                    )
+                                })
+                                .or_else(|_| {
                                     NaiveDate::parse_from_str(s, "%Y-%m-%d")
                                         .map_err(|e| {
                                             PolarsError::ComputeError(e.to_string().into())
@@ -1410,6 +1415,12 @@ impl SparkSession {
                                         })
                                         .or_else(|_| {
                                             NaiveDateTime::parse_from_str(&s, "%Y-%m-%dT%H:%M:%S")
+                                                .map_err(|e| {
+                                                    PolarsError::ComputeError(e.to_string().into())
+                                                })
+                                        })
+                                        .or_else(|_| {
+                                            NaiveDateTime::parse_from_str(&s, "%Y-%m-%d %H:%M:%S")
                                                 .map_err(|e| {
                                                     PolarsError::ComputeError(e.to_string().into())
                                                 })

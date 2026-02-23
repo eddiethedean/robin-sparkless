@@ -1824,6 +1824,13 @@ fn expr_from_fn_rest(name: &str, args: &[Value]) -> Result<Expr, PlanExprError> 
             let type_name = arg_lit_str(args, 1)?;
             Ok(try_cast(&c, &type_name).map_err(PlanExprError)?.into_expr())
         }
+        // #753: astype with null-on-invalid (PySpark astype returns null for invalid conversions).
+        "astype" => {
+            require_args(name, args, 2)?;
+            let c = expr_to_column(arg_expr(args, 0)?);
+            let type_name = arg_lit_str(args, 1)?;
+            Ok(try_cast(&c, &type_name).map_err(PlanExprError)?.into_expr())
+        }
         "nvl" | "ifnull" => {
             require_args(name, args, 2)?;
             let a = expr_to_column(arg_expr(args, 0)?);

@@ -2082,6 +2082,16 @@ pub fn apply_bit_or(columns: &mut [Column]) -> PolarsResult<Option<Column>> {
     Ok(Some(Column::new(name, out.into_series())))
 }
 
+/// Coerce column to Int64 for bitwise_not. Handles Unknown(Any) from when/otherwise (#859).
+pub fn apply_coerce_to_int64_for_bitwise(column: Column) -> PolarsResult<Option<Column>> {
+    let name = column.field().into_owned().name;
+    let series = column.take_materialized_series();
+    let out = series.cast(&DataType::Int64).or_else(|_| {
+        Series::new_null(PlSmallStr::from(name.as_str()), series.len()).cast(&DataType::Int64)
+    })?;
+    Ok(Some(Column::new(name, out)))
+}
+
 /// Apply bitwise XOR for two integer columns (PySpark bit_xor).
 pub fn apply_bit_xor(columns: &mut [Column]) -> PolarsResult<Option<Column>> {
     if columns.len() < 2 {
