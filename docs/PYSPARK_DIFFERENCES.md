@@ -12,6 +12,10 @@ This document lists **intentional or known divergences** from PySpark semantics 
 
 - **Null keys and empty groups**: groupBy + aggregates are tested with fixtures `groupby_null_keys`, `groupby_single_group`, and `groupby_single_row_groups`. Behavior is aligned with PySpark for these cases (nulls in grouping keys produce one group per null; single-group and single-row groups behave as in PySpark). Any future divergence discovered will be listed here.
 
+## Join
+
+- **Join on expression (#704, #698)**: Join with an expression (e.g. `df1.a == df2.b`) is not supported; use column names in the join key list. Conditions involving `array_contains` or other functions in the join key are not supported and may report "Column 'array_contains(...)' not found".
+
 ## SQL (optional `sql` feature)
 
 - **Tables and views**: Three namespaces — **temp views** (session-scoped), **saved tables** (`saveAsTable`), and **global temp views** (`createOrReplaceGlobalTempView`, process-scoped). Resolution order for `table(name)`: (1) `global_temp.xyz` → global catalog, (2) temp view, (3) saved table, (4) warehouse (when `spark.sql.warehouse.dir` is set). Global temp views persist across sessions within the same process. Saved tables can optionally persist to disk when `spark.sql.warehouse.dir` is configured.
