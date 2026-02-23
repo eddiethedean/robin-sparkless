@@ -568,8 +568,10 @@ fn apply_op(
 fn parse_aggs(aggs: &[Value], df: &DataFrame) -> Result<Vec<polars::prelude::Expr>, PlanError> {
     use crate::Column;
     use crate::functions::{avg, count, max, min, sum as rs_sum};
+    use std::collections::HashMap;
 
     let mut out = Vec::with_capacity(aggs.len());
+    let mut alias_count: HashMap<String, u32> = HashMap::new();
     for a in aggs {
         let obj = a
             .as_object()
@@ -615,7 +617,8 @@ fn parse_aggs(aggs: &[Value], df: &DataFrame) -> Result<Vec<polars::prelude::Exp
         };
         let mut expr = col_expr.into_expr();
         // #672: PySpark-style result column names (e.g. avg(Value)) when plan does not set alias.
-        let alias = obj
+        // #777: Deduplicate aliases so multiple count() etc. get count, count_1, count_2, ...
+        let base_alias = obj
             .get("alias")
             .and_then(Value::as_str)
             .map(String::from)
@@ -624,6 +627,13 @@ fn parse_aggs(aggs: &[Value], df: &DataFrame) -> Result<Vec<polars::prelude::Exp
                 (a, Some(col)) => format!("{}({})", a, col),
                 (a, None) => format!("{}({})", a, ""),
             });
+        let count = alias_count.entry(base_alias.clone()).or_insert(0);
+        *count += 1;
+        let alias = if *count == 1 {
+            base_alias
+        } else {
+            format!("{}_{}", base_alias, *count - 1)
+        };
         expr = expr.alias(&alias);
         out.push(expr);
     }
