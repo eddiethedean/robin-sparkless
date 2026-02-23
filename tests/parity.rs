@@ -2006,8 +2006,12 @@ fn parse_comparison_expr(
         let str_val = &right_side[1..right_side.len() - 1];
         lit(str_val)
     } else {
-        // Try to parse as integer or float
-        if let Ok(lit_val) = right_side.parse::<i64>() {
+        // Try to parse as boolean, integer, or float (PR8: filter with boolean literal).
+        if right_side.eq_ignore_ascii_case("true") {
+            lit(true)
+        } else if right_side.eq_ignore_ascii_case("false") {
+            lit(false)
+        } else if let Ok(lit_val) = right_side.parse::<i64>() {
             lit(lit_val)
         } else if let Ok(lit_val) = right_side.parse::<f64>() {
             lit(lit_val)
