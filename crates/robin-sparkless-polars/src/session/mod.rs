@@ -446,10 +446,47 @@ fn json_value_to_series_single(
             let s = Series::new(name.into(), vec![days]).cast(&DataType::Date)?;
             Ok(s)
         }
+        (JsonValue::String(s), "timestamp" | "datetime" | "timestamp_ntz") => {
+            let micros = parse_timestamp_str_to_micros(s)?;
+            let s = Series::new(name.into(), vec![Some(micros)])
+                .cast(&DataType::Datetime(TimeUnit::Microseconds, None))?;
+            Ok(s)
+        }
+        (JsonValue::Number(n), "timestamp" | "datetime" | "timestamp_ntz") => {
+            let micros = n.as_i64();
+            let s = Series::new(name.into(), vec![micros])
+                .cast(&DataType::Datetime(TimeUnit::Microseconds, None))?;
+            Ok(s)
+        }
         _ => Err(PolarsError::ComputeError(
             format!("json_value_to_series: unsupported {type_str} for {value:?}").into(),
         )),
     }
+}
+
+/// Parse a single timestamp string to microseconds since epoch (for json_value_to_series_single).
+fn parse_timestamp_str_to_micros(s: &str) -> Result<i64, PolarsError> {
+    use chrono::{NaiveDate, NaiveDateTime};
+    let s = s.trim();
+    NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S%.f")
+        .map_err(|e| PolarsError::ComputeError(e.to_string().into()))
+        .or_else(|_| {
+            NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S")
+                .map_err(|e| PolarsError::ComputeError(e.to_string().into()))
+        })
+        .or_else(|_| {
+            NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S")
+                .map_err(|e| PolarsError::ComputeError(e.to_string().into()))
+        })
+        .or_else(|_| {
+            NaiveDate::parse_from_str(s, "%Y-%m-%d")
+                .map_err(|e| PolarsError::ComputeError(e.to_string().into()))
+                .and_then(|d| {
+                    d.and_hms_opt(0, 0, 0)
+                        .ok_or_else(|| PolarsError::ComputeError("date to datetime (0:0:0)".into()))
+                })
+        })
+        .map(|dt| dt.and_utc().timestamp_micros())
 }
 
 /// Build a struct Series from JsonValue::Object or JsonValue::Array (field-order) or Null.
