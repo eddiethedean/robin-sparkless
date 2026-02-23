@@ -1202,6 +1202,18 @@ impl SparkSession {
                     .into(),
             ));
         }
+        // PR17: PySpark raises when schema has duplicate column names.
+        let mut seen = std::collections::HashSet::new();
+        for (name, _) in &schema {
+            if !seen.insert(name.clone()) {
+                return Err(PolarsError::InvalidOperation(
+                    format!(
+                        "create_dataframe_from_rows: duplicate column name '{name}' in schema (PySpark raises)"
+                    )
+                    .into(),
+                ));
+            }
+        }
         use chrono::{NaiveDate, NaiveDateTime};
 
         let mut cols: Vec<Series> = Vec::with_capacity(schema.len());
@@ -2036,6 +2048,29 @@ mod tests {
         assert_eq!(df.count().unwrap(), 2);
         let collected = df.collect_inner().unwrap();
         assert_eq!(collected.get_column_names(), &["id", "nested"]);
+    }
+
+    /// PR17: create_dataframe_from_rows raises when schema has duplicate column names (PySpark parity).
+    #[test]
+    fn test_create_dataframe_from_rows_duplicate_column_names_raises() {
+        use serde_json::json;
+
+        let spark = SparkSession::builder().app_name("test").get_or_create();
+        let rows = vec![vec![json!(1), json!("a"), json!(true)]];
+        let schema = vec![
+            ("a".to_string(), "bigint".to_string()),
+            ("b".to_string(), "string".to_string()),
+            ("a".to_string(), "boolean".to_string()),
+        ];
+        let result = spark.create_dataframe_from_rows(rows, schema);
+        match &result {
+            Err(e) => assert!(
+                e.to_string().contains("duplicate column name"),
+                "expected duplicate column error, got: {}",
+                e
+            ),
+            Ok(_) => panic!("expected error for duplicate column names in schema"),
+        }
     }
 
     /// PR13: create_dataframe_from_rows with empty schema infers struct when column values are JSON objects.
