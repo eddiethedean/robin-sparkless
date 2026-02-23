@@ -815,6 +815,19 @@ impl SparkSession {
         self.create_dataframe_from_rows(rows, schema)
     }
 
+    /// Return a DataFrame of database names. PySpark: catalog.listDatabases().
+    /// Column: "name" (string). Includes "default", "global_temp", and any created via CREATE DATABASE / CREATE SCHEMA.
+    /// PR-C/#799,#798,#797,#796: Tests that assert 'test_schema' or 'test_db' in list expect this DataFrame.
+    pub fn list_databases(&self) -> Result<DataFrame, PolarsError> {
+        let names = self.list_database_names();
+        let rows: Vec<Vec<JsonValue>> = names
+            .into_iter()
+            .map(|n| vec![JsonValue::String(n)])
+            .collect();
+        let schema = vec![("name".to_string(), "string".to_string())];
+        self.create_dataframe_from_rows(rows, schema)
+    }
+
     /// True if the name exists in the saved-tables map (not temp views).
     /// If the tables lock is poisoned, returns false and a message is emitted to stderr.
     pub fn saved_table_exists(&self, name: &str) -> bool {
@@ -3010,6 +3023,31 @@ mod tests {
             1,
             "schema-qualified table name must resolve"
         );
+    }
+
+    /// PR-C: list_databases() returns DataFrame with "name" column; CREATE SCHEMA adds to list.
+    #[test]
+    fn test_list_databases_returns_dataframe() {
+        let spark = SparkSession::builder().app_name("test").get_or_create();
+        let db_df = spark.list_databases().unwrap();
+        let names: Vec<String> = db_df
+            .collect_as_json_rows()
+            .unwrap()
+            .into_iter()
+            .map(|r| r.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string())
+            .collect();
+        assert!(names.contains(&"default".to_string()));
+        assert!(names.contains(&"global_temp".to_string()));
+        // CREATE SCHEMA adds to list
+        let _ = spark.sql("CREATE SCHEMA IF NOT EXISTS test_schema_for_list_db");
+        let db_df2 = spark.list_databases().unwrap();
+        let names2: Vec<String> = db_df2
+            .collect_as_json_rows()
+            .unwrap()
+            .into_iter()
+            .map(|r| r.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string())
+            .collect();
+        assert!(names2.contains(&"test_schema_for_list_db".to_string()));
     }
 
     #[test]
