@@ -62,6 +62,7 @@ This document lists **intentional or known divergences** from PySpark semantics 
 
 ## DataFrame: cube, rollup, write, saveAsTable, and stubs
 
+- **DataFrame equivalence (#695)**: Assertions that two DataFrames are "equivalent" (e.g. `assert_dataframes_equal`, `.equals()`) can fail due to **column order**, **schema type naming** (e.g. IntegerType vs LongType; see schema Int32/Int64), or **row order**. When comparing with PySpark or across backends, normalize: ensure same column order (e.g. select in a fixed order), align types (Robin reports Int32→Integer, Int64→Long), and sort rows if order is not guaranteed.
 - **cube / rollup**: Implemented. `df.cube("a", "b").agg(...)` and `df.rollup("a", "b").agg(...)` run multiple grouping sets and union results (missing keys become null), matching PySpark semantics.
 - **write**: Implemented. `df.write().mode("overwrite"|"append").format("parquet"|"csv"|"json").save(path)` uses Polars IO. Append for JSON is supported (NDJSON/JsonLines).
 - **saveAsTable(name, format=None, mode=None, partitionBy=None, **options)**: Implemented. Registers the DataFrame in the session's **saved-tables** namespace. Mode semantics match PySpark: default `"error"` (throw if exists), `"overwrite"`, `"append"`, `"ignore"`. **In-memory by default**; when `spark.sql.warehouse.dir` is set, tables persist to disk at `{warehouse}/{name}/data.parquet` for cross-session and cross-process access. `format`, `partitionBy`, and `**options` are accepted for API compatibility but **ignored** for persistence (Parquet only).
