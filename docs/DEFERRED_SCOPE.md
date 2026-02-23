@@ -85,6 +85,12 @@ See also: [PYSPARK_DIFFERENCES.md](PYSPARK_DIFFERENCES.md), [ROBIN_SPARKLESS_MIS
 
 ---
 
+## Sparkless adapter "not implemented" codes (#764, #765)
+
+When the Sparkless adapter reports "2 is not implemented" or "4 is not implemented for the Robin backend", the number is an adapter-specific enum or method id. Robin does not define or interpret these codes. Fix or extend the Sparkless adapter to map the requested operation to a Robin plan/API that is supported (e.g. window functions, group_by with expr). See [PYSPARK_DIFFERENCES.md](PYSPARK_DIFFERENCES.md) for supported operations.
+
+---
+
 ## Related
 
 - **JVM / runtime stubs:** `broadcast`, `spark_partition_id`, `input_file_name`, `monotonically_increasing_id`, `current_catalog`, `current_user` — implemented as stubs for API compatibility; see [PYSPARK_DIFFERENCES.md](PYSPARK_DIFFERENCES.md#jvm--runtime-stubs).
