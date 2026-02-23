@@ -430,17 +430,17 @@ pub fn regr_r2_expr(y_col: &str, x_col: &str) -> Expr {
 ///     .then(&lit_str("adult"))
 ///     .otherwise(&lit_str("minor"));
 /// ```
-/// Condition must be Boolean; then/else can be any type (#680).
+/// Condition must be Boolean; then/else can be any type (#680). String conditions coerced via expr_coerce_to_boolean.
 pub fn when(condition: &Column) -> WhenBuilder {
-    WhenBuilder::new(condition.expr().clone().cast(DataType::Boolean))
+    WhenBuilder::new(expr_coerce_to_boolean(condition.expr().clone()))
 }
 
 /// Two-arg when(condition, value): returns value where condition is true, null otherwise (PySpark when(cond, val)).
-/// Condition must be Boolean; value can be any type (#680).
+/// Condition must be Boolean; value can be any type (#680). String conditions coerced via expr_coerce_to_boolean.
 pub fn when_then_otherwise_null(condition: &Column, value: &Column) -> Column {
     use polars::prelude::*;
     let null_expr = lit(NULL);
-    let expr = polars::prelude::when(condition.expr().clone().cast(DataType::Boolean))
+    let expr = polars::prelude::when(expr_coerce_to_boolean(condition.expr().clone()))
         .then(value.expr().clone())
         .otherwise(null_expr);
     crate::column::Column::from_expr(expr, None)
@@ -505,9 +505,9 @@ impl ThenBuilder {
     }
 
     /// Chain an additional when-then clause (PySpark: when(a).then(x).when(b).then(y).otherwise(z)).
-    /// Condition must be Boolean (#680).
+    /// Condition must be Boolean (#680). String conditions coerced via expr_coerce_to_boolean.
     pub fn when(self, condition: &Column) -> ChainedWhenBuilder {
-        let cond = condition.expr().clone().cast(DataType::Boolean);
+        let cond = expr_coerce_to_boolean(condition.expr().clone());
         let chained_when = match self.state {
             WhenThenState::Single(t) => t.when(cond),
             WhenThenState::Chained(ct) => ct.when(cond),
@@ -1278,6 +1278,16 @@ pub fn signum(column: &Column) -> Column {
 /// Alias for signum (PySpark sign).
 pub fn sign(column: &Column) -> Column {
     signum(column)
+}
+
+/// Coerce expression to Boolean (PySpark semantics). String -> boolean via "true"/"false"/"1"/"0";
+/// numeric -> boolean (0/0.0 false, else true); already Boolean passed through.
+/// Use for filter predicates and when/not conditions so string columns never hit Polars' unsupported Utf8->Boolean cast.
+pub fn expr_coerce_to_boolean(expr: Expr) -> Expr {
+    expr.map(
+        move |col| crate::column::expect_col(crate::udfs::apply_string_to_boolean(col, false)),
+        |_schema, field| Ok(Field::new(field.name().clone(), DataType::Boolean)),
+    )
 }
 
 fn cast_impl(column: &Column, type_name: &str, strict: bool) -> Result<Column, String> {
@@ -2972,7 +2982,9 @@ mod tests {
             .collect()
             .unwrap();
         let out = result_df.column("out").unwrap();
-        let values: Vec<Option<i64>> = out.i64().unwrap().into_iter().collect();
+        // Polars may infer i32 for when/then/otherwise with small literals; cast to i64 for stable assertion.
+        let out_i64 = out.cast(&DataType::Int64).unwrap();
+        let values: Vec<Option<i64>> = out_i64.i64().unwrap().into_iter().collect();
         assert_eq!(values, vec![Some(0), Some(100), Some(100)]);
     }
 
