@@ -32,6 +32,29 @@ use std::sync::Arc;
 /// Default for `spark.sql.caseSensitive` (PySpark default is false = case-insensitive).
 const DEFAULT_CASE_SENSITIVE: bool = false;
 
+/// Map Polars DataType to PySpark type name for schema alignment (#790, #734).
+fn pyspark_type_name(dtype: &DataType) -> String {
+    use polars::datatypes::DataType as PlDataType;
+    match dtype {
+        PlDataType::Int32 => "IntegerType".to_string(),
+        PlDataType::Int64 => "LongType".to_string(),
+        PlDataType::String => "StringType".to_string(),
+        PlDataType::Float32 | PlDataType::Float64 => "DoubleType".to_string(),
+        PlDataType::Boolean => "BooleanType".to_string(),
+        PlDataType::Date => "DateType".to_string(),
+        PlDataType::Datetime(_, _) => "TimestampType".to_string(),
+        PlDataType::List(inner) => format!("ArrayType({})", pyspark_type_name(inner)),
+        PlDataType::Struct(fields) => {
+            let parts: Vec<String> = fields
+                .iter()
+                .map(|f| format!("{}: {}", f.name(), pyspark_type_name(f.dtype())))
+                .collect();
+            format!("StructType([{}])", parts.join(", "))
+        }
+        _ => format!("{dtype:?}"),
+    }
+}
+
 /// Inner representation: eager (legacy) or lazy (preferred).
 /// Transformations extend LazyFrame; only actions trigger collect.
 #[allow(clippy::large_enum_variant)]
@@ -1128,12 +1151,12 @@ impl DataFrame {
         Ok(self.clone())
     }
 
-    /// Column names and dtype strings. PySpark dtypes. Returns (name, dtype_string) per column.
+    /// Column names and dtype strings. PySpark type names (LongType, StringType, etc.) for schema alignment (#790, #734).
     pub fn dtypes(&self) -> Result<Vec<(String, String)>, PolarsError> {
         let schema = self.schema_or_collect()?;
         Ok(schema
             .iter_names_and_dtypes()
-            .map(|(name, dtype)| (name.to_string(), format!("{dtype:?}")))
+            .map(|(name, dtype)| (name.to_string(), pyspark_type_name(dtype)))
             .collect())
     }
 
