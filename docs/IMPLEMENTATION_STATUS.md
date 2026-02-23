@@ -61,11 +61,8 @@ Robin-sparkless is designed to **replace the backend logic** of [Sparkless](http
    - ✅ Parity fixtures: `row_number_window`, `rank_window`, `lag_lead_window`
    - ✅ `SparkSession::sql()` implemented (optional `sql` feature); temp views and in-memory saved tables (`saveAsTable`, `write_delta_table`); catalog `listTables`, `tableExists`, `dropTempView`, `dropTable`; see [QUICKSTART.md](QUICKSTART.md), [PYTHON_API.md](PYTHON_API.md).
 
-6. **PyO3 Bridge** ✅ **COMPLETED** (Phase 4)
-   - Optional `pyo3` feature (PyO3 0.24); `src/python/mod.rs` exposes `robin_sparkless` Python module.
-   - SparkSession, DataFrame, Column, GroupedData; create_dataframe, filter, select, join, group_by, collect (list of dicts), read_csv/parquet/json, etc.
-   - `maturin develop --features "pyo3,sql,delta"`; Python tests in `tests/python/` (45 tests); `make test` runs Rust + Python tests; `make check-full` adds ruff, mypy, and full CI.
-   - API contract: [PYTHON_API.md](PYTHON_API.md).
+6. **Language bindings** (out-of-tree)
+   - Python bindings and PyO3 bridge have been removed from this repo. Sparkless (or another host) maintains bindings that call the Rust crate via FFI. See [EMBEDDING.md](EMBEDDING.md) and [PYTHON_API.md](PYTHON_API.md) (historical contract).
 
 7. **Phase 5 Test Conversion** ✅ **COMPLETED**
    - Fixture converter maps Sparkless `expected_outputs` to robin-sparkless format (join, window, withColumn, union, distinct, drop, dropna, fillna, limit, withColumnRenamed, etc.).

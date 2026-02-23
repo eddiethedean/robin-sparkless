@@ -29,7 +29,7 @@ impl IntoRobinDf for Vec<(i64, String)> {
             ("c0".to_string(), "bigint".to_string()),
             ("c1".to_string(), "string".to_string()),
         ];
-        session.create_dataframe_from_rows_engine(rows, schema)
+        session.create_dataframe_from_rows_engine(rows, schema, false)
     }
 }
 
@@ -52,7 +52,7 @@ impl IntoRobinDf for Vec<(i64, i64, i64, String)> {
             ("c2".to_string(), "bigint".to_string()),
             ("c3".to_string(), "string".to_string()),
         ];
-        session.create_dataframe_from_rows_engine(rows, schema)
+        session.create_dataframe_from_rows_engine(rows, schema, false)
     }
 }
 

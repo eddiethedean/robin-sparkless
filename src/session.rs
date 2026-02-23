@@ -188,9 +188,10 @@ impl SparkSession {
         &self,
         rows: Vec<Vec<serde_json::Value>>,
         schema: Vec<(String, String)>,
+        verify_schema: bool,
     ) -> Result<DataFrame, PolarsError> {
         self.0
-            .create_dataframe_from_rows(rows, schema)
+            .create_dataframe_from_rows(rows, schema, verify_schema)
             .map(DataFrame)
     }
 
@@ -198,9 +199,21 @@ impl SparkSession {
         &self,
         rows: Vec<Vec<serde_json::Value>>,
         schema: Vec<(String, String)>,
+        verify_schema: bool,
     ) -> Result<DataFrame, EngineError> {
         self.0
-            .create_dataframe_from_rows_engine(rows, schema)
+            .create_dataframe_from_rows_engine(rows, schema, verify_schema)
+            .map(DataFrame)
+    }
+
+    /// #419: Create a DataFrame with a single column "value" from scalar values (e.g. createDataFrame([1,2,3], "bigint")).
+    pub fn create_dataframe_from_single_column(
+        &self,
+        values: Vec<serde_json::Value>,
+        type_str: &str,
+    ) -> Result<DataFrame, PolarsError> {
+        self.0
+            .create_dataframe_from_single_column(values, type_str)
             .map(DataFrame)
     }
 

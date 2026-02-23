@@ -165,7 +165,9 @@ fn issue_553_empty_df_save_as_table_then_table_count_zero() {
         ("id".to_string(), "int".to_string()),
         ("name".to_string(), "string".to_string()),
     ];
-    let empty = session.create_dataframe_from_rows(vec![], schema).unwrap();
+    let empty = session
+        .create_dataframe_from_rows(vec![], schema, false)
+        .unwrap();
     empty
         .write()
         .save_as_table(&session, "my_table", SaveMode::Overwrite)
@@ -186,7 +188,7 @@ fn empty_df_save_as_table_then_table_count_zero() {
         ("v".to_string(), "string".to_string()),
     ];
     let empty = session
-        .create_dataframe_from_rows_engine(vec![], schema)
+        .create_dataframe_from_rows_engine(vec![], schema, false)
         .unwrap();
     empty
         .write()
@@ -202,7 +204,7 @@ fn table_name_temp_view_then_table() {
     let schema = vec![("x".to_string(), "bigint".to_string())];
     let rows = vec![vec![json!(1)], vec![json!(2)]];
     let df = session
-        .create_dataframe_from_rows_engine(rows, schema)
+        .create_dataframe_from_rows_engine(rows, schema, false)
         .unwrap();
     session.create_or_replace_temp_view("my_view", df);
     let t = session.table_engine("my_view").unwrap();

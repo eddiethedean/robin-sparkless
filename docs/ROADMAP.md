@@ -142,7 +142,7 @@ We know we're on track if:
 | Functions | ~283 | ~280 (Sparkless 3.28) | ~280 |
 | DataFrame methods | ~55+ | ~55+ | 85 |
 | Sparkless tests passing (robin backend) | 0 | — | 200+ |
-| PyO3 bridge | ✅ Yes (optional) | Yes | Yes |
+| Language bindings | Out-of-tree (Sparkless or host repo) | Out-of-tree | Out-of-tree |
 
 ## Current Status (February 2026)
 
@@ -164,7 +164,7 @@ We know we're on track if:
 - ✅ String functions: `upper()`, `lower()`, `substring()`, `concat()`, `concat_ws()`, `length`, `trim`, `regexp_extract`, `regexp_replace`, `regexp_extract_all`, `regexp_like`, `split`
 - ✅ Datetime: `year()`, `month()`, `day()`, `to_date()`, `date_format(format)` (chrono strftime)
 - ✅ DataFrame methods: `union`, `union_by_name`, `distinct`, `drop`, `dropna`, `fillna`, `limit`, `with_column_renamed`
-- ✅ **PyO3 bridge** (optional `pyo3` feature): Python module `robin_sparkless` with SparkSession, DataFrame, Column, GroupedData; **`createDataFrame(data, schema=None)`**, `create_dataframe` (3-tuple), filter, select, join, group_by, collect (list of dicts), etc. Build: `maturin develop --features "pyo3,sql,delta"`. Tests: `make test` runs Rust + Python tests; `make check-full` runs full CI (Rust + ruff + mypy + Python tests). See [PYTHON_API.md](PYTHON_API.md).
+- ✅ **Rust API for bindings**: Full surface for Sparkless or other hosts: `SparkSession`, `create_dataframe_from_rows`, `create_dataframe_from_single_column` (single-column schema, verify_schema), `execute_plan`, `DataFrame::collect_as_json_rows`, etc. Python bindings are maintained out-of-tree (e.g. in Sparkless). See [EMBEDDING.md](EMBEDDING.md) and [PYTHON_API.md](PYTHON_API.md) (historical contract).
 - ✅ **Phase 9** (high-value functions & DataFrame methods): Datetime (`current_date`, `current_timestamp`, `date_add`, `date_sub`, `hour`, `minute`, `second`, `datediff`, `last_day`, `trunc`); string (`repeat`, `reverse`, `instr`, `lpad`, `rpad`); math (`sqrt`, `pow`, `exp`, `log`); conditional (`nvl`/`ifnull`, `nullif`, `nanvl`); GroupedData (`first`, `last`, `approx_count_distinct`); DataFrame (`replace`, `cross_join`, `describe`, `cache`/`persist`/`unpersist`, `subtract`, `intersect`).
 - ✅ Parity test harness with 159 passing fixtures:
   - `filter_age_gt_30`: filter + select + orderBy
@@ -233,7 +233,7 @@ To reach **full Sparkless parity** (robin-sparkless as a complete backend replac
 | **24** | Full parity 5: bit, control, JVM stubs, random, crypto | ✅ **COMPLETED** |
 | **25** | Readiness for post-refactor merge (plan interpreter, expression interpreter for all scalar functions, plan schema, 3 plan fixtures, create_dataframe_from_rows) | ✅ **COMPLETED** |
 | **26** | Prepare and publish robin-sparkless as a Rust crate (crates.io, API stability, docs, release) | 2–3 weeks |
-| **27** | Sparkless integration (BackendFactory "robin", 200+ tests), PyO3 surface | 4–6 weeks |
+| **27** | Sparkless integration (BackendFactory "robin", 200+ tests), FFI/bindings surface | 4–6 weeks |
 
 ---
 
@@ -274,7 +274,7 @@ To reach **full Sparkless parity** (robin-sparkless as a complete backend replac
 - **Parity harness**: Date/datetime and boolean column support in fixture input ([tests/parity.rs](tests/parity.rs)); `dtype_to_string` and `collect_to_simple_format` for Date/Datetime/Int8; `types_compatible` for date/timestamp.
 - **Fixture growth**: 73 → 80 (Phase 11) → 82 (Phase 12–13) → 88 (Phase 14–15) → **93** (Phase 16) fixtures (Phase 16: regexp_count, regexp_substr, regexp_instr, split_part, find_in_set, format_string; array_distinct skipped).
 - **Converter**: Date/timestamp type mapping added in [tests/convert_sparkless_fixtures.py](tests/convert_sparkless_fixtures.py).
-- **CI**: [.github/workflows/ci.yml](.github/workflows/ci.yml) runs format, clippy, audit, deny, Rust tests (including `pyspark_parity_fixtures`), Python lint (ruff, mypy), and Python tests (PyO3 with sql, delta). Locally: `make check-full`.
+- **CI**: [.github/workflows/ci.yml](.github/workflows/ci.yml) runs format, clippy, audit, deny, and Rust tests (including `pyspark_parity_fixtures`). Locally: `make check-full` (Rust-only). Python tests and bindings live out-of-tree.
 - **Docs**: [TEST_CREATION_GUIDE.md](TEST_CREATION_GUIDE.md) documents date/timestamp fixture format; [SPARKLESS_PARITY_STATUS.md](SPARKLESS_PARITY_STATUS.md) updated with CI note.
 
 **Outcome**: 93 parity fixtures passing; CI runs parity; SPARKLESS_PARITY_STATUS kept current.
