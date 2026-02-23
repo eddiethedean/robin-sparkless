@@ -11,7 +11,7 @@ use polars::prelude::{DataFrame as PlDataFrame, Expr, PolarsError, col, lit};
 use sqlparser::ast::{
     BinaryOperator, Expr as SqlExpr, Function, FunctionArg, FunctionArgExpr, FunctionArguments,
     GroupByExpr, JoinConstraint, JoinOperator, ObjectType, OrderByKind, Query, Select, SelectItem,
-    SetExpr, Statement, TableFactor, Value, ValueWithSpan,
+    SetExpr, SetOperator, Statement, TableFactor, Value, ValueWithSpan,
 };
 
 /// Parsed SQL number literal: integer or float.
@@ -179,18 +179,51 @@ pub fn translate(
     }
 }
 
-fn translate_query(
+/// Translate a SetExpr (SELECT, Query, or SetOperation) to a DataFrame.
+/// PR-B/#774: UNION [ALL] supported; EXCEPT/INTERSECT return a clear error.
+fn translate_set_expr(
     session: &SparkSession,
-    query: &Query,
+    body: &SetExpr,
 ) -> Result<crate::dataframe::DataFrame, PolarsError> {
-    let body = match query.body.as_ref() {
-        SetExpr::Select(select) => select.as_ref(),
-        _ => {
-            return Err(PolarsError::InvalidOperation(
-                "SQL: only SELECT (no UNION/EXCEPT/INTERSECT) is supported.".into(),
-            ));
+    match body {
+        SetExpr::Select(select) => translate_select_body(session, select.as_ref()),
+        SetExpr::Query(q) => translate_query(session, q.as_ref()),
+        SetExpr::SetOperation {
+            op,
+            left,
+            right,
+            set_quantifier,
+        } => {
+            match op {
+                SetOperator::Union => {}
+                SetOperator::Except | SetOperator::Intersect | SetOperator::Minus => {
+                    return Err(PolarsError::InvalidOperation(
+                        "SQL: EXCEPT, INTERSECT, and MINUS are not yet supported. Use UNION or UNION ALL."
+                            .into(),
+                    ));
+                }
+            }
+            let left_df = translate_set_expr(session, left.as_ref())?;
+            let right_df = translate_set_expr(session, right.as_ref())?;
+            let mut df = left_df.union(&right_df)?;
+            // DISTINCT (default for UNION) => drop duplicates; ALL => keep all rows.
+            let is_distinct = matches!(set_quantifier, sqlparser::ast::SetQuantifier::Distinct);
+            if is_distinct {
+                df = df.distinct(None)?;
+            }
+            Ok(df)
         }
-    };
+        _ => Err(PolarsError::InvalidOperation(
+            "SQL: only SELECT and UNION are supported (no VALUES, INSERT, etc.).".into(),
+        )),
+    }
+}
+
+/// Translate a single Select (FROM, WHERE, GROUP BY, projection, HAVING) to a DataFrame.
+fn translate_select_body(
+    session: &SparkSession,
+    body: &Select,
+) -> Result<crate::dataframe::DataFrame, PolarsError> {
     let mut df = translate_select_from(session, body)?;
     if let Some(selection) = &body.selection {
         let expr = sql_expr_to_polars(selection, session, Some(&df), None)?;
@@ -272,6 +305,14 @@ fn translate_query(
         )?;
         df = df.filter(having_polars)?;
     }
+    Ok(df)
+}
+
+fn translate_query(
+    session: &SparkSession,
+    query: &Query,
+) -> Result<crate::dataframe::DataFrame, PolarsError> {
+    let mut df = translate_set_expr(session, query.body.as_ref())?;
     if let Some(order_by) = &query.order_by {
         if let OrderByKind::Expressions(exprs) = &order_by.kind {
             if !exprs.is_empty() {
