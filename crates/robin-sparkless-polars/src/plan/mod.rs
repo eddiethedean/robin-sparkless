@@ -631,7 +631,15 @@ fn apply_op(
                 .map_err(PlanError::Session)?;
             df.cross_join(&other_df).map_err(PlanError::Session)
         }
-        _ => Err(PlanError::UnsupportedOp(op_name.to_string())),
+        "rollup" => Err(PlanError::UnsupportedOp(
+            "Plan op 'rollup' is not yet supported. Use groupBy for now. See docs for supported operations.".into(),
+        )),
+        "cube" => Err(PlanError::UnsupportedOp(
+            "Plan op 'cube' is not yet supported. Use groupBy for now. See docs for supported operations.".into(),
+        )),
+        _ => Err(PlanError::UnsupportedOp(format!(
+            "Plan op '{op_name}' is not supported. See docs for supported operations (e.g. select, filter, groupBy, join, orderBy, limit)."
+        ))),
     }
 }
 
