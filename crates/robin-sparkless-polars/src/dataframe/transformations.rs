@@ -1619,4 +1619,20 @@ mod tests {
         let out = dropna(&df, None, "any", None, false).unwrap();
         assert_eq!(out.count().unwrap(), 3);
     }
+
+    /// #722: na.drop(subset=["NonExistentColumn"]) must raise (column not found).
+    #[test]
+    fn dropna_invalid_subset_column_raises() {
+        let df = test_df();
+        let result = dropna(&df, Some(vec!["NonExistentColumn"]), "any", None, false);
+        match &result {
+            Err(e) => assert!(
+                e.to_string().to_lowercase().contains("not found")
+                    || e.to_string().to_lowercase().contains("column"),
+                "expected column-not-found error, got: {}",
+                e
+            ),
+            Ok(_) => panic!("expected error for dropna with non-existent subset column"),
+        }
+    }
 }
