@@ -88,12 +88,16 @@ fn python_dict_repr_to_json(s: &str) -> Option<JsonValue> {
     serde_json::from_str(&step3).ok()
 }
 
-/// Map schema type string to Polars DataType (primitives only for nested use).
+/// Map schema type string to Polars DataType (primitives and list for nested use).
 /// Decimal(p,s) is mapped to Float64 (Polars dtype-decimal feature not enabled).
+/// PR-G/#710: array<element_type> and nested array<array<...>> supported.
 fn json_type_str_to_polars(type_str: &str) -> Option<DataType> {
     let s = type_str.trim().to_lowercase();
     if is_decimal_type_str(&s) {
         return Some(DataType::Float64);
+    }
+    if let Some(elem_type) = parse_array_element_type(&s) {
+        return json_type_str_to_polars(&elem_type).map(|inner| DataType::List(Box::new(inner)));
     }
     match s.as_str() {
         "int" | "integer" | "bigint" | "long" => Some(DataType::Int64),
@@ -181,10 +185,16 @@ fn json_values_to_series(
                 builder.append_null();
             } else if let Some(arr) = v.as_ref().and_then(json_value_to_array) {
                 // #625: Array, Object with "0","1",..., or string that parses as JSON array (PySpark list parity).
-                let elem_series: Vec<Series> = arr
-                    .iter()
-                    .map(|e| json_value_to_series_single(e, &elem_type, "elem"))
-                    .collect::<Result<Vec<_>, _>>()?;
+                // #710/PR-G: Nested array (elem_type is array<...>): one list series per element, then vals + from_any_values.
+                let elem_series: Vec<Series> = if parse_array_element_type(&elem_type).is_some() {
+                    arr.iter()
+                        .map(|e| json_values_to_series(&[Some(e.clone())], &elem_type, "elem"))
+                        .collect::<Result<Vec<_>, _>>()?
+                } else {
+                    arr.iter()
+                        .map(|e| json_value_to_series_single(e, &elem_type, "elem"))
+                        .collect::<Result<Vec<_>, _>>()?
+                };
                 let vals: Vec<_> = elem_series.iter().filter_map(|s| s.get(0).ok()).collect();
                 let s = Series::from_any_values_and_dtype(
                     PlSmallStr::EMPTY,
@@ -197,10 +207,17 @@ fn json_values_to_series(
             } else {
                 // #611: PySpark accepts single value as one-element list for array columns.
                 let single_arr = [v.clone().unwrap_or(JsonValue::Null)];
-                let elem_series: Vec<Series> = single_arr
-                    .iter()
-                    .map(|e| json_value_to_series_single(e, &elem_type, "elem"))
-                    .collect::<Result<Vec<_>, _>>()?;
+                let elem_series: Vec<Series> = if parse_array_element_type(&elem_type).is_some() {
+                    single_arr
+                        .iter()
+                        .map(|e| json_values_to_series(&[Some(e.clone())], &elem_type, "elem"))
+                        .collect::<Result<Vec<_>, _>>()?
+                } else {
+                    single_arr
+                        .iter()
+                        .map(|e| json_value_to_series_single(e, &elem_type, "elem"))
+                        .collect::<Result<Vec<_>, _>>()?
+                };
                 let vals: Vec<_> = elem_series.iter().filter_map(|s| s.get(0).ok()).collect();
                 let arr_series = Series::from_any_values_and_dtype(
                     PlSmallStr::EMPTY,
@@ -1450,10 +1467,22 @@ impl SparkSession {
                             builder.append_null();
                         } else if let Some(arr) = json_value_to_array(&v) {
                             // #625: Array, Object with "0","1",..., or string that parses as JSON array (PySpark list parity).
-                            let elem_series: Vec<Series> = arr
-                                .iter()
-                                .map(|e| json_value_to_series_single(e, &elem_type, "elem"))
-                                .collect::<Result<Vec<_>, _>>()?;
+                            // #710/PR-G: Nested array: one list series per element, then vals + from_any_values.
+                            let elem_series: Vec<Series> = if parse_array_element_type(&elem_type).is_some() {
+                                arr.iter()
+                                    .map(|e| {
+                                        json_values_to_series(
+                                            &[Some(e.clone())],
+                                            &elem_type,
+                                            "elem",
+                                        )
+                                    })
+                                    .collect::<Result<Vec<_>, _>>()?
+                            } else {
+                                arr.iter()
+                                    .map(|e| json_value_to_series_single(e, &elem_type, "elem"))
+                                    .collect::<Result<Vec<_>, _>>()?
+                            };
                             let vals: Vec<_> =
                                 elem_series.iter().filter_map(|s| s.get(0).ok()).collect();
                             let s = Series::from_any_values_and_dtype(
@@ -1469,10 +1498,23 @@ impl SparkSession {
                         } else {
                             // #611: PySpark accepts single value as one-element list.
                             let single_arr = [v];
-                            let elem_series: Vec<Series> = single_arr
-                                .iter()
-                                .map(|e| json_value_to_series_single(e, &elem_type, "elem"))
-                                .collect::<Result<Vec<_>, _>>()?;
+                            let elem_series: Vec<Series> = if parse_array_element_type(&elem_type).is_some() {
+                                single_arr
+                                    .iter()
+                                    .map(|e| {
+                                        json_values_to_series(
+                                            &[Some(e.clone())],
+                                            &elem_type,
+                                            "elem",
+                                        )
+                                    })
+                                    .collect::<Result<Vec<_>, _>>()?
+                            } else {
+                                single_arr
+                                    .iter()
+                                    .map(|e| json_value_to_series_single(e, &elem_type, "elem"))
+                                    .collect::<Result<Vec<_>, _>>()?
+                            };
                             let vals: Vec<_> =
                                 elem_series.iter().filter_map(|s| s.get(0).ok()).collect();
                             let s = Series::from_any_values_and_dtype(
@@ -2184,6 +2226,32 @@ mod tests {
             .create_dataframe_from_rows(rows, schema)
             .unwrap();
         assert_eq!(df.count().unwrap(), 1);
+    }
+
+    /// #710/PR-G: create_dataframe_from_rows with nested array type (array<array<bigint>>).
+    #[test]
+    fn test_issue_710_nested_array_type() {
+        use serde_json::json;
+
+        let spark = SparkSession::builder().app_name("test").get_or_create();
+        let schema = vec![
+            ("id".to_string(), "string".to_string()),
+            (
+                "arr".to_string(),
+                "array<array<bigint>>".to_string(),
+            ),
+        ];
+        // One row: id="x", arr=[[1,2],[3,4]]
+        let rows: Vec<Vec<JsonValue>> = vec![vec![json!("x"), json!([[1, 2], [3, 4]])]];
+        let df = spark
+            .create_dataframe_from_rows(rows, schema)
+            .unwrap();
+        assert_eq!(df.count().unwrap(), 1);
+        let collected = df.collect_inner().unwrap();
+        let arr_col = collected.column("arr").unwrap();
+        assert!(arr_col.dtype().is_list());
+        let list = arr_col.list().unwrap();
+        assert_eq!(list.len(), 1);
     }
 
     /// #611: create_dataframe_from_rows accepts single value as one-element array (PySpark parity).
