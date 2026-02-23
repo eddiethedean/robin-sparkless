@@ -451,10 +451,18 @@ fn apply_op(
                 .ok_or_else(|| {
                     PlanError::InvalidPlan("groupBy must have 'group_by' array".into())
                 })?;
+            // Each element: string or object {"col": "name"} / {"name": "x"} (PR10).
             let cols: Vec<String> = group_by
                 .iter()
-                .filter_map(|v| v.as_str())
-                .map(|s| df.resolve_column_name(s))
+                .filter_map(|v| {
+                    v.as_str()
+                        .map(|s| s.to_string())
+                        .or_else(|| {
+                            v.get("col").and_then(Value::as_str).map(|s| s.to_string())
+                                .or_else(|| v.get("name").and_then(Value::as_str).map(|s| s.to_string()))
+                        })
+                })
+                .map(|s| df.resolve_column_name(s.as_str()))
                 .collect::<Result<Vec<_>, _>>()
                 .map_err(PlanError::Session)?;
             let refs: Vec<&str> = cols.iter().map(|s| s.as_str()).collect();
