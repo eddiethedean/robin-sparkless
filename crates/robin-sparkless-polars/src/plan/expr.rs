@@ -22,14 +22,32 @@ impl Error for PlanExprError {}
 /// Supports: bare string (column reference), col, lit, comparison ops (eq, ne, gt, ge, lt, le),
 /// logical (and, or), not, and a subset of functions.
 /// (Fixes #644: accept bare string as column reference so embedders can pass column names.)
+/// Bare number, bool, null are treated as literals (coalesce/nvl args from Sparkless; fixes #828–#838 etc.).
 pub fn expr_from_value(v: &Value) -> Result<Expr, PlanExprError> {
     // Bare string: treat as column reference (PySpark parity: select/filter with column name).
     if let Some(name) = v.as_str() {
         return Ok(col(name));
     }
 
+    // Bare literals: number, bool, null (e.g. coalesce(col("a"), col("b"), 4.5) when args include 4.5).
+    if v.is_null() {
+        return Ok(lit(polars::prelude::NULL));
+    }
+    if let Some(n) = v.as_i64() {
+        return Ok(lit(n));
+    }
+    if let Some(n) = v.as_f64() {
+        return Ok(lit(n));
+    }
+    if let Some(b) = v.as_bool() {
+        return Ok(lit(b));
+    }
+
     let obj = v.as_object().ok_or_else(|| {
-        PlanExprError("expression must be a JSON object or column name string".to_string())
+        PlanExprError(
+            "expression must be a JSON object, column name string, or literal (number/bool/null)"
+                .to_string(),
+        )
     })?;
 
     // Column reference: {"col": "name"}
@@ -501,10 +519,14 @@ pub fn expr_from_value(v: &Value) -> Result<Expr, PlanExprError> {
     }
 
     // Function call: {"fn"|"function": "upper"|...|"row_number", "args": [<expr>, ...], optional "window": {...}}
-    // Sparkless may send "function" instead of "fn" (issue #517). Window fns allow empty args.
+    // Sparkless may send "function" instead of "fn" (issue #517). Also accept {"op": "coalesce"|"nvl"|..., "args": [...]} (fixes #828–#838).
     let fn_name = obj
         .get("fn")
         .or_else(|| obj.get("function"))
+        .or_else(|| {
+            // When "args" is present, "op" may denote a function (e.g. coalesce, nvl) rather than a binary op.
+            obj.get("args").and_then(|_| obj.get("op"))
+        })
         .and_then(Value::as_str);
     if let Some(fn_name) = fn_name {
         if let Some(window_val) = obj.get("window") {
@@ -1636,8 +1658,8 @@ fn expr_from_fn_rest(name: &str, args: &[Value]) -> Result<Expr, PlanExprError> 
         "round" => {
             require_args_min(name, args, 1)?;
             let c = expr_to_column(arg_expr(args, 0)?);
-            let decimals = opt_lit_i64(args, 1).map(|n| n as u32).unwrap_or(0);
-            Ok(round(&c, decimals).into_expr())
+            let scale = opt_lit_i64(args, 1).unwrap_or(0) as i32;
+            Ok(round(&c, scale).into_expr())
         }
         "bround" => {
             require_args_min(name, args, 1)?;
@@ -2976,6 +2998,26 @@ mod tests {
         let v = json!({
             "fn": "coalesce",
             "args": [{"col": "a"}, {"col": "b"}, {"lit": 0}]
+        });
+        let _ = expr_from_value(&v).unwrap();
+    }
+
+    /// Bare literals in coalesce args (fixes #828–#838): Sparkless may send 4.5 or 0 instead of {"lit": 4.5}.
+    #[test]
+    fn test_coalesce_bare_literal_arg() {
+        let v = json!({
+            "fn": "coalesce",
+            "args": [{"col": "a"}, {"col": "b"}, 4.5]
+        });
+        let _ = expr_from_value(&v).unwrap();
+    }
+
+    /// op+args form for coalesce (fixes #828–#838): Sparkless may send {"op": "coalesce", "args": [...]}.
+    #[test]
+    fn test_coalesce_op_args_form() {
+        let v = json!({
+            "op": "coalesce",
+            "args": [{"col": "x"}, {"lit": "default"}]
         });
         let _ = expr_from_value(&v).unwrap();
     }

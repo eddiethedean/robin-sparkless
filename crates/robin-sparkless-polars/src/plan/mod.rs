@@ -521,7 +521,11 @@ fn apply_op(
                 .map_err(PlanError::Session)?;
             let refs: Vec<&str> = cols.iter().map(|s| s.as_str()).collect();
             let grouped = df.group_by(refs).map_err(PlanError::Session)?;
-            let aggs = payload.get("aggs").and_then(Value::as_array);
+            // Sparkless may send "aggregations" instead of "aggs" (fixes #828–#838).
+            let aggs = payload
+                .get("aggs")
+                .or_else(|| payload.get("aggregations"))
+                .and_then(Value::as_array);
             match aggs {
                 Some(aggs_arr) => {
                     let agg_exprs = parse_aggs(aggs_arr, &df)?;
@@ -655,10 +659,12 @@ fn parse_aggs(aggs: &[Value], df: &DataFrame) -> Result<Vec<polars::prelude::Exp
         let obj = a
             .as_object()
             .ok_or_else(|| PlanError::InvalidPlan("each agg must be an object".into()))?;
+        // Sparkless may send "func" instead of "agg" (e.g. groupby_first_last; fixes #828–#838).
         let agg = obj
             .get("agg")
+            .or_else(|| obj.get("func"))
             .and_then(Value::as_str)
-            .ok_or_else(|| PlanError::InvalidPlan("agg must have 'agg' string".into()))?;
+            .ok_or_else(|| PlanError::InvalidPlan("agg must have 'agg' or 'func' string".into()))?;
 
         if agg == "python_grouped_udf" {
             // Grouped Python UDF aggregations are not expressible as pure Expr; the plan
