@@ -1116,12 +1116,13 @@ impl SparkSession {
                 }
             }
             JsonValue::Array(_) => Some("array".to_string()),
-            JsonValue::Object(_) => Some("string".to_string()), // struct inference not implemented; treat as string for safety
+            JsonValue::Object(_) => None, // struct type is inferred in infer_schema_from_json_rows from object keys
         }
     }
 
     /// Infer schema (name, dtype_str) from JSON rows by scanning the first non-null value per column.
     /// Used by createDataFrame(data, schema=None) when schema is omitted or only column names given.
+    /// When the first non-null value is a JSON object, infers struct<k1:string,k2:string,...> (PR13 / struct parity).
     pub fn infer_schema_from_json_rows(
         rows: &[Vec<JsonValue>],
         names: &[String],
@@ -1136,6 +1137,17 @@ impl SparkSession {
         for (col_idx, (_, dtype_str)) in schema.iter_mut().enumerate() {
             for row in rows {
                 let v = row.get(col_idx).unwrap_or(&JsonValue::Null);
+                if let JsonValue::Object(obj) = v {
+                    let mut keys: Vec<&str> = obj.keys().map(|k| k.as_str()).collect();
+                    keys.sort();
+                    let inner = keys
+                        .iter()
+                        .map(|k| format!("{}:string", k))
+                        .collect::<Vec<_>>()
+                        .join(",");
+                    *dtype_str = format!("struct<{}>", inner);
+                    break;
+                }
                 if let Some(dtype) = Self::infer_dtype_from_json_value(v) {
                     *dtype_str = dtype;
                     break;
@@ -1827,6 +1839,7 @@ impl Default for SparkSession {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use polars::prelude::SchemaExt;
 
     #[test]
     fn test_spark_session_builder_basic() {
@@ -2010,6 +2023,26 @@ mod tests {
         assert_eq!(df.count().unwrap(), 2);
         let collected = df.collect_inner().unwrap();
         assert_eq!(collected.get_column_names(), &["id", "nested"]);
+    }
+
+    /// PR13: create_dataframe_from_rows with empty schema infers struct when column values are JSON objects.
+    #[test]
+    fn test_create_dataframe_from_rows_infer_struct_from_objects() {
+        use serde_json::json;
+
+        let spark = SparkSession::builder().app_name("test").get_or_create();
+        let rows: Vec<Vec<JsonValue>> = vec![
+            vec![json!("id1"), json!({"a": 1, "b": "x"})],
+            vec![json!("id2"), json!({"a": 2, "b": "y"})],
+        ];
+        let schema = vec![];
+        let df = spark.create_dataframe_from_rows(rows, schema).unwrap();
+        assert_eq!(df.count().unwrap(), 2);
+        let collected = df.collect_inner().unwrap();
+        assert_eq!(collected.get_column_names(), &["c0", "c1"]);
+        // Second column inferred as struct<a:string,b:string> (object keys, string types)
+        let dtype1 = &collected.schema().get_field("c1").unwrap().dtype;
+        assert!(matches!(dtype1, polars::datatypes::DataType::Struct(_)));
     }
 
     /// #610: create_dataframe_from_rows accepts struct as string that parses to object or array (Sparkless/Python serialization).
