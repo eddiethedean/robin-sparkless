@@ -828,6 +828,34 @@ fn plan_select_concat_as_full_name() {
     );
 }
 
+/// #779, #746, #736: Boolean and substring in collect (not null/not False when value present).
+#[test]
+fn plan_collect_boolean_and_substring() {
+    let spark = spark();
+    let schema = vec![
+        ("name".to_string(), "string".to_string()),
+        ("flag".to_string(), "boolean".to_string()),
+    ];
+    let rows = vec![
+        vec![json!("Alice"), json!(true)],
+        vec![json!("Hello"), json!(false)],
+    ];
+    let plan_steps = vec![json!({
+        "op": "withColumn",
+        "payload": {
+            "name": "sub",
+            "expr": {"fn": "substring", "args": [{"col": "name"}, {"lit": 1}, {"lit": 3}]}
+        }
+    })];
+    let df = plan::execute_plan(&spark, rows, schema, &plan_steps).unwrap();
+    let out = df.collect_as_json_rows_engine().unwrap();
+    assert_eq!(out.len(), 2);
+    assert_eq!(out[0].get("sub").and_then(|v| v.as_str()), Some("Ali"));
+    assert_eq!(out[1].get("sub").and_then(|v| v.as_str()), Some("Hel"));
+    assert_eq!(out[0].get("flag").and_then(|v| v.as_bool()), Some(true));
+    assert_eq!(out[1].get("flag").and_then(|v| v.as_bool()), Some(false));
+}
+
 /// #752, #778: List column must serialize as JSON array (not stringified list).
 #[test]
 fn plan_collect_list_as_json_array() {
