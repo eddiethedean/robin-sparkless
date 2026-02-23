@@ -122,6 +122,8 @@ pub fn filter(
     let condition = df.resolve_expr_column_names(condition)?;
     let condition = df.coerce_string_numeric_comparisons(condition)?;
     let condition = crate::functions::expr_coerce_to_boolean(condition);
+    // #725, #713, #702: Ensure Polars always receives Boolean (cast safety net for any edge case).
+    let condition = condition.cast(DataType::Boolean);
     let lf = df.lazy_frame().filter(condition);
     Ok(super::DataFrame::from_lazy_with_options(lf, case_sensitive))
 }
