@@ -19,7 +19,14 @@ This document lists **intentional or known divergences** from PySpark semantics 
 ## Window functions
 
 - **percent_rank, cume_dist, ntile, nth_value**: The **API** is implemented (Rust and Python). Parity fixtures for these (`percent_rank_window`, `cume_dist_window`, `ntile_window`, `nth_value_window`) are **covered** via a multi-step workaround in the harness (computing in separate columns then combining). See [PARITY_STATUS.md](PARITY_STATUS.md).
-- **row_number, dense_rank, percent_rank, over() (#699, #755, #721, #718)**: Implemented in the Rust plan/expr layer; if the Sparkless adapter reports "not implemented", ensure it forwards window calls to the Robin backend. See docs for plan format.
+- **row_number, dense_rank, percent_rank, over() (#699, #755, #721, #718)**: Implemented in the Rust plan/expr layer; if the Sparkless adapter reports "not implemented", ensure it forwards window calls to the Robin backend. See [LOGICAL_PLAN_FORMAT.md](LOGICAL_PLAN_FORMAT.md) for plan format.
+- **to_timestamp, try_to_timestamp (#728)**: Implemented in plan/expr (`fn` `to_timestamp` / `try_to_timestamp` with args `[col, format?]`). Adapter should forward to Robin; see plan format.
+- **isnan (#720)**: Implemented in plan/expr (`fn` `isnan`, args `[col]`). Adapter should forward.
+- **array_distinct (#705)**: Implemented in plan/expr (`fn` `array_distinct`). Adapter should forward.
+- **posexplode (#703)**: Implemented in Rust (returns pos + value columns). Plan usage: use `explode` for single column or two `withColumn`/select exprs for pos and value if the plan format supports multi-column table functions; see LOGICAL_PLAN_FORMAT.md.
+- **struct / named_struct (#696)**: Implemented in plan/expr (`fn` `struct_` or `named_struct` with column refs). Adapter should forward.
+- **expr / Column in select (#700)**: Select payload accepts `{"name": "<out>", "expr": <expression tree>}`. Adapter should send Column-like expressions in this form.
+- **UDF (#690)**: Implemented in plan/expr (`{"udf": "<name>", "args": [...]}` or `{"fn": "call_udf", "args": [{"lit": "<name>"}, ...]}`). Python UDF in withColumn only; Rust UDF in filter/withColumn. Adapter should forward.
 
 ## GroupBy
 
