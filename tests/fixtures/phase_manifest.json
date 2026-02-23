@@ -104,6 +104,7 @@
     "collect_null_preservation",
     "collect_null_string",
     "collect_null_date_datetime",
+    "collect_null_boolean",
     "coalesce_numeric_null",
     "groupby_avg_column_name",
     "select_agg_column_after_groupby",
