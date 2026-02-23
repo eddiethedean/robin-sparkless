@@ -7,6 +7,7 @@ This document lists **intentional or known divergences** from PySpark semantics 
 ## Window functions
 
 - **percent_rank, cume_dist, ntile, nth_value**: The **API** is implemented (Rust and Python). Parity fixtures for these (`percent_rank_window`, `cume_dist_window`, `ntile_window`, `nth_value_window`) are **covered** via a multi-step workaround in the harness (computing in separate columns then combining). See [PARITY_STATUS.md](PARITY_STATUS.md).
+- **row_number, dense_rank, percent_rank, over() (#699, #755, #721, #718)**: Implemented in the Rust plan/expr layer; if the Sparkless adapter reports "not implemented", ensure it forwards window calls to the Robin backend. See docs for plan format.
 
 ## GroupBy
 
