@@ -1291,6 +1291,20 @@ impl SparkSession {
                 ));
             }
         }
+        // #711: PySpark raises when row length differs from schema (LENGTH_SHOULD_BE_THE_SAME).
+        let expected_len = schema.len();
+        for (row_idx, row) in rows.iter().enumerate() {
+            let got = row.len();
+            if got != expected_len {
+                return Err(PolarsError::InvalidOperation(
+                    format!(
+                        "create_dataframe_from_rows: length should be the same. Expected {} fields, got {} (row index {}).",
+                        expected_len, got, row_idx
+                    )
+                    .into(),
+                ));
+            }
+        }
         use chrono::{NaiveDate, NaiveDateTime};
 
         let mut cols: Vec<Series> = Vec::with_capacity(schema.len());
@@ -2216,6 +2230,59 @@ mod tests {
                 e
             ),
             Ok(_) => panic!("expected error for duplicate column names in schema"),
+        }
+    }
+
+    /// #711: create_dataframe_from_rows raises when row length differs from schema (PySpark LENGTH_SHOULD_BE_THE_SAME).
+    #[test]
+    fn test_create_dataframe_from_rows_mismatched_row_length_raises() {
+        use serde_json::json;
+
+        let spark = SparkSession::builder().app_name("test").get_or_create();
+        let schema = vec![
+            ("Name".to_string(), "string".to_string()),
+            ("Value".to_string(), "integer".to_string()),
+        ];
+        // Row 0 has 1 element, schema has 2
+        let rows_short = vec![vec![json!("Alice")], vec![json!("Bob"), json!(2)]];
+        let result = spark.create_dataframe_from_rows(rows_short, schema.clone());
+        match &result {
+            Err(e) => {
+                let msg = e.to_string();
+                assert!(
+                    msg.to_lowercase().contains("length"),
+                    "expected length error, got: {}",
+                    msg
+                );
+                assert!(
+                    msg.contains("1") && msg.contains("2"),
+                    "expected 1 and 2 in message, got: {}",
+                    msg
+                );
+            }
+            Ok(_) => panic!("expected error for mismatched row length"),
+        }
+        // Row 1 has 3 elements, schema has 2
+        let rows_long = vec![
+            vec![json!("Alice"), json!(1)],
+            vec![json!("Bob"), json!(2), json!(100)],
+        ];
+        let result2 = spark.create_dataframe_from_rows(rows_long, schema);
+        match &result2 {
+            Err(e) => {
+                let msg = e.to_string();
+                assert!(
+                    msg.to_lowercase().contains("length"),
+                    "expected length error, got: {}",
+                    msg
+                );
+                assert!(
+                    msg.contains("3") && msg.contains("2"),
+                    "expected 3 and 2 in message, got: {}",
+                    msg
+                );
+            }
+            Ok(_) => panic!("expected error for mismatched row length (too long)"),
         }
     }
 
