@@ -828,6 +828,30 @@ fn plan_select_concat_as_full_name() {
     );
 }
 
+/// #786, #785: Mixed-case column names (e.g. NaMe) must appear in columns() as provided in schema.
+#[test]
+fn plan_columns_preserve_mixed_case() {
+    let spark = spark();
+    let schema = vec![
+        ("NaMe".to_string(), "string".to_string()),
+        ("value".to_string(), "bigint".to_string()),
+        ("score".to_string(), "double".to_string()),
+    ];
+    let rows = vec![
+        vec![json!("Alice"), json!(10), json!(3.5)],
+        vec![json!("Bob"), json!(20), json!(4.0)],
+    ];
+    let df = plan::execute_plan(&spark, rows, schema, &[]).unwrap();
+    let columns = df.columns_engine().unwrap();
+    assert!(
+        columns.contains(&"NaMe".to_string()),
+        "NaMe must be in columns (#786, #785); got: {:?}",
+        columns
+    );
+    assert!(columns.contains(&"value".to_string()));
+    assert!(columns.contains(&"score".to_string()));
+}
+
 // ---------- issue_636 ----------
 
 #[test]
