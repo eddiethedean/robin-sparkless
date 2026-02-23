@@ -133,4 +133,6 @@ The following are **not implemented** or are **stubs**; tracked in GitHub issues
 - **sentences / NLP (#148)**: `sentences` and JVM/UDTF helpers — deferred; could be implemented as string split + list of lists.
 - **JVM / runtime stubs (#154)**: See section **JVM / runtime stubs** above — `broadcast`, `spark_partition_id`, `input_file_name`, `monotonically_increasing_id`, `current_catalog`, `current_user`, etc. are stubs for API compatibility.
 
+- **Wrong result value (#709, #707)**: If a Sparkless test fails with e.g. `assert False` or `assert 0 == 1`, the root cause may be filter predicate, aggregate (e.g. count), or collect/serialization. Reproduce in Robin (plan or session test) to fix; check filter expr, agg result column, and `any_value_to_json` for the affected type.
+
 See [ROADMAP.md](ROADMAP.md) and [FULL_BACKEND_ROADMAP.md](FULL_BACKEND_ROADMAP.md) for the full list.
