@@ -172,6 +172,12 @@ pub fn translate(
                 session.is_case_sensitive(),
             ))
         }
+        Statement::Update(_) => Err(PolarsError::InvalidOperation(
+            "SQL: UPDATE and DELETE are not supported. Use DataFrame API or Spark for DML.".into(),
+        )),
+        Statement::Delete(_) => Err(PolarsError::InvalidOperation(
+            "SQL: UPDATE and DELETE are not supported. Use DataFrame API or Spark for DML.".into(),
+        )),
         _ => Err(PolarsError::InvalidOperation(
             "SQL: only SELECT, CREATE SCHEMA/DATABASE, and DROP TABLE/VIEW/SCHEMA are supported."
                 .into(),
@@ -593,6 +599,15 @@ fn sql_expr_to_polars(
             }
             Ok(expr)
         }
+        SqlExpr::InSubquery { .. } => Err(PolarsError::InvalidOperation(
+            "SQL: subquery in WHERE (e.g. col IN (SELECT ...)) is not yet supported.".into(),
+        )),
+        SqlExpr::Exists { .. } => Err(PolarsError::InvalidOperation(
+            "SQL: subquery in WHERE (EXISTS (SELECT ...)) is not yet supported.".into(),
+        )),
+        SqlExpr::Subquery(_) => Err(PolarsError::InvalidOperation(
+            "SQL: subquery in WHERE is not yet supported.".into(),
+        )),
         _ => Err(PolarsError::InvalidOperation(
             format!("SQL: unsupported expression in WHERE: {:?}. Use column, literal, =, <, >, AND, OR, IS NULL, LIKE, IN.", expr).into(),
         )),
