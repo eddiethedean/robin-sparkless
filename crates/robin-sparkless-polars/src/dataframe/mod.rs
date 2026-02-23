@@ -863,7 +863,14 @@ impl DataFrame {
             .map(|c| self.resolve_column_name(c))
             .collect::<Result<Vec<_>, _>>()?;
         let on_refs: Vec<&str> = resolved.iter().map(|s| s.as_str()).collect();
-        join(self, other, on_refs, how, self.case_sensitive)
+        join(
+            self,
+            other,
+            on_refs.clone(),
+            on_refs,
+            how,
+            self.case_sensitive,
+        )
     }
 
     /// Order by columns (sort).
