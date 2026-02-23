@@ -1982,8 +1982,19 @@ fn any_value_to_json(av: &AnyValue<'_>, dtype: &DataType) -> JsonValue {
         AnyValue::Int64(i) if matches!(dtype, DataType::Datetime(_, _)) => {
             datetime_anyvalue_to_json_iso(*i, &TimeUnit::Microseconds)
         }
+        // Float column may yield Int from coalesce/agg; serialize as number (#837, #835, #812, #804, #802).
+        AnyValue::Int32(i) if matches!(dtype, DataType::Float32 | DataType::Float64) => {
+            float_to_json_number(*i as f64)
+        }
+        AnyValue::Int64(i) if matches!(dtype, DataType::Float32 | DataType::Float64) => {
+            float_to_json_number(*i as f64)
+        }
+        AnyValue::Int8(i) => JsonValue::Number(serde_json::Number::from(*i)),
+        AnyValue::Int16(i) => JsonValue::Number(serde_json::Number::from(*i)),
         AnyValue::Int32(i) => JsonValue::Number(serde_json::Number::from(*i)),
         AnyValue::Int64(i) => JsonValue::Number(serde_json::Number::from(*i)),
+        AnyValue::UInt8(u) => JsonValue::Number(serde_json::Number::from(*u)),
+        AnyValue::UInt16(u) => JsonValue::Number(serde_json::Number::from(*u)),
         AnyValue::UInt32(u) => JsonValue::Number(serde_json::Number::from(*u)),
         AnyValue::UInt64(u) => JsonValue::Number(serde_json::Number::from(*u)),
         AnyValue::Float32(f) => float_to_json_number(f64::from(*f)),
