@@ -27,24 +27,30 @@ pub fn parse_sql(query: &str) -> Result<Statement, PolarsError> {
 /// WHERE (basic predicates), GROUP BY + aggregates, ORDER BY, LIMIT,
 /// DESCRIBE DETAIL table_name (Delta Lake; requires delta feature).
 pub fn execute_sql(session: &SparkSession, query: &str) -> Result<DataFrame, PolarsError> {
-    #[cfg(feature = "delta")]
+    // Handle DESCRIBE DETAIL before parsing so we return Delta/table-not-found errors, not SQL parse error (#768, #773).
+    const PREFIX: &str = "DESCRIBE DETAIL ";
+    let q = query.trim();
+    if q.len() > PREFIX.len()
+        && q.get(..PREFIX.len())
+            .map(|s| s.eq_ignore_ascii_case(PREFIX))
+            == Some(true)
     {
-        const PREFIX: &str = "DESCRIBE DETAIL ";
-        let q = query.trim();
-        if q.len() > PREFIX.len()
-            && q.get(..PREFIX.len())
-                .map(|s| s.eq_ignore_ascii_case(PREFIX))
-                == Some(true)
+        let table_name = q[PREFIX.len()..].trim();
+        if table_name.is_empty() {
+            return Err(PolarsError::InvalidOperation(
+                "DESCRIBE DETAIL requires a table name.".into(),
+            ));
+        }
+        #[cfg(feature = "delta")]
         {
-            let table_name = q[PREFIX.len()..].trim();
-            if !table_name.is_empty() {
-                if let Some(path) = session.resolve_delta_table_path(table_name) {
-                    return crate::delta::describe_delta_detail(
-                        path,
-                        Some(table_name),
-                        session.is_case_sensitive(),
-                    );
-                }
+            if let Some(path) = session.resolve_delta_table_path(table_name) {
+                return crate::delta::describe_delta_detail(
+                    path,
+                    Some(table_name),
+                    session.is_case_sensitive(),
+                );
+            }
+            if session.table(table_name).is_ok() {
                 return Err(PolarsError::InvalidOperation(
                     format!(
                         "DESCRIBE DETAIL: table '{table_name}' is not a Delta table in the warehouse. \
@@ -54,6 +60,19 @@ pub fn execute_sql(session: &SparkSession, query: &str) -> Result<DataFrame, Pol
                 ));
             }
         }
+        #[cfg(not(feature = "delta"))]
+        {
+            return Err(PolarsError::InvalidOperation(
+                "DESCRIBE DETAIL requires the delta feature.".into(),
+            ));
+        }
+        // Delta feature on but table missing or not Delta: return table-not-found (nonexistent) or not-Delta (existing).
+        return Err(PolarsError::InvalidOperation(
+            format!(
+                "Table or view '{table_name}' not found. Register it with create_or_replace_temp_view or saveAsTable."
+            )
+            .into(),
+        ));
     }
 
     let stmt = parse_sql_to_statement(query)?;
