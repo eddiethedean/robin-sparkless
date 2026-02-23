@@ -78,6 +78,7 @@ This document lists **intentional or known divergences** from PySpark semantics 
   - **verify_schema**: Accepted (default True); data is validated when building the DataFrame.
   - Use **`spark.createDataFrame(data, schema)`** for all cases (list of dicts, list of tuples with column names, DDL schema, or explicit schema).
 - **Robin-sparkless (Rust)** — **`create_dataframe(data, column_names)`** accepts only 3-tuples `(i64, i64, String)` and three column names. For arbitrary schemas use **`create_dataframe_from_rows(rows, schema)`** (Rust).
+- **Column name case (#786, #785)**: Column names from the schema are preserved as returned by `columns()` and in collect row keys. Pass the exact case you need (e.g. `NaMe`) in the schema so `'NaMe' in df.columns` succeeds.
 
 ## JVM / runtime stubs
 
