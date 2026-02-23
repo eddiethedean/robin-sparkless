@@ -828,6 +828,34 @@ fn plan_select_concat_as_full_name() {
     );
 }
 
+/// #771, #770: hour() on timestamp column must return non-null (e.g. hour=4).
+#[test]
+fn plan_hour_timestamp_returns_value() {
+    let spark = spark();
+    let schema = vec![("ts".to_string(), "timestamp".to_string())];
+    let rows = vec![
+        vec![json!("2024-01-01T04:00:00")],
+        vec![json!("2024-01-01T14:30:00")],
+    ];
+    let plan_steps = vec![json!({
+        "op": "withColumn",
+        "payload": {
+            "name": "hour",
+            "expr": {"fn": "hour", "args": [{"col": "ts"}]}
+        }
+    })];
+    let df = plan::execute_plan(&spark, rows, schema, &plan_steps).unwrap();
+    let out = df.collect_as_json_rows_engine().unwrap();
+    assert_eq!(out.len(), 2);
+    assert_eq!(
+        out[0].get("hour").and_then(|v| v.as_i64()),
+        Some(4),
+        "hour of 04:00 must be 4 (#771, #770); got: {:?}",
+        out[0].get("hour")
+    );
+    assert_eq!(out[1].get("hour").and_then(|v| v.as_i64()), Some(14));
+}
+
 /// #787, #751: Date/datetime columns must serialize as ISO strings (not 'None').
 #[test]
 fn plan_collect_date_datetime_iso_string() {
