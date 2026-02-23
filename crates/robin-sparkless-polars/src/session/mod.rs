@@ -74,6 +74,20 @@ fn is_decimal_type_str(type_str: &str) -> bool {
     s.starts_with("decimal(") && s.contains(')')
 }
 
+/// Try to parse a string as Python dict repr (e.g. `"{'E1': 1, 'E2': 'A'}"`) into JSON Value.
+/// PR-F / #691: Sparkless can send struct/map values as single-quoted Python repr.
+fn python_dict_repr_to_json(s: &str) -> Option<JsonValue> {
+    let s = s.trim();
+    if !s.starts_with('{') || !s.ends_with('}') {
+        return None;
+    }
+    // Protect escaped single quotes, then convert single quotes to double, then restore.
+    let step1 = s.replace("\\'", "\u{0001}");
+    let step2 = step1.replace('\'', "\"");
+    let step3 = step2.replace('\u{0001}', "\\\"");
+    serde_json::from_str(&step3).ok()
+}
+
 /// Map schema type string to Polars DataType (primitives only for nested use).
 /// Decimal(p,s) is mapped to Float64 (Polars dtype-decimal feature not enabled).
 fn json_type_str_to_polars(type_str: &str) -> Option<DataType> {
@@ -207,6 +221,7 @@ fn json_values_to_series(
             .collect();
         for v in values.iter() {
             // #610: Accept string that parses as JSON object or array (e.g. Python tuple serialized as "[1, \"y\"]").
+            // #691/PR-F: Accept Python dict repr string (e.g. "{'a': 1, 'b': 'x'}").
             let effective: Option<JsonValue> = match v.as_ref() {
                 Some(JsonValue::String(s)) => {
                     if let Ok(parsed) = serde_json::from_str::<JsonValue>(s) {
@@ -215,6 +230,8 @@ fn json_values_to_series(
                         } else {
                             v.clone()
                         }
+                    } else if let Some(parsed) = python_dict_repr_to_json(s) {
+                        Some(parsed)
                     } else {
                         v.clone()
                     }
@@ -424,7 +441,7 @@ fn json_object_or_array_to_struct_series(
     if matches!(value, JsonValue::Null) {
         return Ok(None);
     }
-    // #610: Accept string that parses as JSON object or array.
+    // #610: Accept string that parses as JSON object or array. #691/PR-F: Python dict repr.
     let effective = match value {
         JsonValue::String(s) => {
             if let Ok(parsed) = serde_json::from_str::<JsonValue>(s) {
@@ -433,6 +450,8 @@ fn json_object_or_array_to_struct_series(
                 } else {
                     value.clone()
                 }
+            } else if let Some(parsed) = python_dict_repr_to_json(s) {
+                parsed
             } else {
                 value.clone()
             }
@@ -1509,6 +1528,31 @@ impl SparkSession {
                                 name,
                             )?;
                             builder.append_series(&st)?;
+                        } else if let JsonValue::String(s) = &v {
+                            // #691/PR-F: Map value as string (e.g. Python dict repr "{'k': 'v'}").
+                            let parsed = serde_json::from_str::<JsonValue>(s)
+                                .ok()
+                                .filter(|p| p.is_object())
+                                .or_else(|| python_dict_repr_to_json(s));
+                            if let Some(parsed) = parsed.and_then(|p| p.as_object().cloned()) {
+                                let st = json_object_to_map_struct_series(
+                                    &parsed,
+                                    &key_type,
+                                    &value_type,
+                                    &key_dtype,
+                                    &value_dtype,
+                                    name,
+                                )?;
+                                builder.append_series(&st)?;
+                            } else {
+                                return Err(PolarsError::ComputeError(
+                                    format!(
+                                        "create_dataframe_from_rows: map column '{name}' expects JSON object (dict), got {:?}",
+                                        v
+                                    )
+                                    .into(),
+                                ));
+                            }
                         } else {
                             return Err(PolarsError::ComputeError(
                                 format!(
@@ -2120,6 +2164,26 @@ mod tests {
             .create_dataframe_from_rows(rows_array, schema)
             .unwrap();
         assert_eq!(df2.count().unwrap(), 1);
+    }
+
+    /// #691/PR-F: create_dataframe_from_rows accepts struct column as Python dict repr string (e.g. "{'a': 1, 'b': 'x'}").
+    #[test]
+    fn test_issue_691_struct_value_as_python_dict_repr_string() {
+        use serde_json::json;
+
+        let spark = SparkSession::builder().app_name("test").get_or_create();
+        let schema = vec![
+            ("id".to_string(), "string".to_string()),
+            (
+                "nested".to_string(),
+                "struct<a:bigint,b:string>".to_string(),
+            ),
+        ];
+        let rows: Vec<Vec<JsonValue>> = vec![vec![json!("x"), json!("{'a': 1, 'b': 'x'}")]];
+        let df = spark
+            .create_dataframe_from_rows(rows, schema)
+            .unwrap();
+        assert_eq!(df.count().unwrap(), 1);
     }
 
     /// #611: create_dataframe_from_rows accepts single value as one-element array (PySpark parity).
