@@ -657,6 +657,7 @@ fn apply_op(
 fn parse_aggs(aggs: &[Value], df: &DataFrame) -> Result<Vec<polars::prelude::Expr>, PlanError> {
     use crate::Column;
     use crate::functions::{avg, count, first as rs_first, max, min, sum as rs_sum};
+    use polars::prelude::len;
     use std::collections::HashMap;
 
     let mut out = Vec::with_capacity(aggs.len());
@@ -696,7 +697,11 @@ fn parse_aggs(aggs: &[Value], df: &DataFrame) -> Result<Vec<polars::prelude::Exp
                 }
             }
         };
+        // count() without column = row count per group (PySpark count(*)); use len() (#825, #824, #822, #816, #815, #814, #806).
         let col_expr = match agg {
+            "count" if col_name.map(|s| s.is_empty()).unwrap_or(true) => {
+                Column::from_expr(len(), Some("count".to_string()))
+            }
             "count" => count(&c),
             "sum" => rs_sum(&c),
             "avg" => avg(&c),
