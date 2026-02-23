@@ -112,6 +112,8 @@
     "select_then_groupby",
     "collect_array_column_format",
     "filter_row_count_parity",
-    "filter_boolean_column"
+    "filter_boolean_column",
+    "semi_join",
+    "anti_join"
   ]
 }

@@ -83,3 +83,68 @@ fn plan_with_column_row_number_window() {
     assert_eq!(out[1].get("rn").and_then(|v| v.as_i64()), Some(2));
     assert_eq!(out[2].get("rn").and_then(|v| v.as_i64()), Some(1));
 }
+
+/// PR 11 / window: dense_rank and percent_rank via execute_plan; assert partition ordering and values.
+#[test]
+fn plan_window_dense_rank_percent_rank() {
+    let spark = spark();
+    let schema = vec![
+        ("dept".to_string(), "string".to_string()),
+        ("salary".to_string(), "bigint".to_string()),
+    ];
+    let rows = vec![
+        vec![json!("A"), json!(10)],
+        vec![json!("A"), json!(20)],
+        vec![json!("A"), json!(20)],
+        vec![json!("B"), json!(5)],
+    ];
+    let plan_steps = vec![
+        json!({
+            "op": "withColumn",
+            "payload": {
+                "name": "dr",
+                "expr": {
+                    "fn": "dense_rank",
+                    "args": [],
+                    "window": {"partition_by": ["dept"], "order_by": ["salary"]}
+                }
+            }
+        }),
+        json!({
+            "op": "withColumn",
+            "payload": {
+                "name": "pr",
+                "expr": {
+                    "fn": "percent_rank",
+                    "args": [],
+                    "window": {"partition_by": ["dept"], "order_by": ["salary"]}
+                }
+            }
+        }),
+        json!({"op": "select", "payload": ["dept", "salary", "dr", "pr"]}),
+    ];
+    let df = plan::execute_plan(&spark, rows, schema, &plan_steps).unwrap();
+    let out = df.collect_as_json_rows().unwrap();
+    assert_eq!(out.len(), 4);
+    // A: salary 10,20,20 -> dense_rank 1,2,2; percent_rank (rank-1)/(count-1) -> 0, 0.5, 0.5
+    let a_rows: Vec<_> = out
+        .iter()
+        .filter(|r| r.get("dept").and_then(|v| v.as_str()) == Some("A"))
+        .collect();
+    assert_eq!(a_rows.len(), 3);
+    assert_eq!(a_rows[0].get("dr").and_then(|v| v.as_i64()), Some(1));
+    assert_eq!(a_rows[1].get("dr").and_then(|v| v.as_i64()), Some(2));
+    assert_eq!(a_rows[2].get("dr").and_then(|v| v.as_i64()), Some(2));
+    let pr0 = a_rows[0].get("pr").and_then(|v| v.as_f64()).unwrap();
+    let pr1 = a_rows[1].get("pr").and_then(|v| v.as_f64()).unwrap();
+    assert!((pr0 - 0.0).abs() < 1e-9);
+    assert!((pr1 - 0.5).abs() < 1e-9);
+    // B: one row -> dense_rank 1, percent_rank 0
+    let b_rows: Vec<_> = out
+        .iter()
+        .filter(|r| r.get("dept").and_then(|v| v.as_str()) == Some("B"))
+        .collect();
+    assert_eq!(b_rows.len(), 1);
+    assert_eq!(b_rows[0].get("dr").and_then(|v| v.as_i64()), Some(1));
+    assert!((b_rows[0].get("pr").and_then(|v| v.as_f64()).unwrap() - 0.0).abs() < 1e-9);
+}

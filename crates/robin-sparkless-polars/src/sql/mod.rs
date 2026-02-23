@@ -11,9 +11,15 @@ use polars::prelude::PolarsError;
 pub use sqlparser::ast::Statement;
 
 /// Parse a single SQL statement using [spark_sql_parser]. Returns PolarsError for compatibility with session/translator.
+/// On parse failure, error message includes supported statements (#706, #701).
 fn parse_sql_to_statement(query: &str) -> Result<Statement, PolarsError> {
-    spark_sql_parser::parse_sql(query)
-        .map_err(|e| PolarsError::InvalidOperation(e.to_string().into()))
+    spark_sql_parser::parse_sql(query).map_err(|e| {
+        let msg = e.to_string();
+        let hint = " Only SELECT, CREATE SCHEMA/DATABASE, and DROP TABLE/VIEW/SCHEMA are supported for execution.";
+        PolarsError::InvalidOperation(
+            format!("{msg}{hint}").into(),
+        )
+    })
 }
 
 /// Parse a single SQL statement (SELECT or DDL: CREATE SCHEMA / CREATE DATABASE / DROP TABLE).
@@ -644,5 +650,31 @@ mod tests {
         let rows = result.collect_as_json_rows().unwrap();
         assert_eq!(rows[0].get("name").and_then(|v| v.as_str()), Some("Bob"));
         assert_eq!(rows[0].get("age").and_then(|v| v.as_i64()), Some(30));
+    }
+
+    /// #706, #701: Unsupported SQL returns clear error mentioning supported statements.
+    #[test]
+    fn test_sql_unsupported_statement_clear_error() {
+        let spark = SparkSession::builder().app_name("test").get_or_create();
+        let err = match spark.sql("INSERT INTO t SELECT 1") {
+            Ok(_) => panic!("INSERT should not be supported"),
+            Err(e) => e,
+        };
+        let msg = err.to_string();
+        assert!(
+            msg.contains("supported") || msg.contains("SELECT"),
+            "error should mention supported statements: {}",
+            msg
+        );
+        let err2 = match spark.sql("COMMIT") {
+            Ok(_) => panic!("COMMIT should not be supported"),
+            Err(e) => e,
+        };
+        let msg2 = err2.to_string();
+        assert!(
+            msg2.contains("supported") || msg2.contains("not supported"),
+            "error should mention supported/not supported: {}",
+            msg2
+        );
     }
 }

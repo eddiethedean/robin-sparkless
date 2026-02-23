@@ -178,6 +178,45 @@ fn issue_554_plan_op_explode() {
     assert_eq!(x_vals, vec![1, 2, 3, 10, 20]);
 }
 
+/// PR 12 / array: array_distinct via execute_plan; assert deduplicated list values.
+#[test]
+fn plan_op_array_distinct() {
+    let session = spark();
+    // Polars list column: arr = [1,1,2], [2,2], [3]
+    let data = vec![
+        vec![json!([1_i64, 1, 2])],
+        vec![json!([2_i64, 2])],
+        vec![json!([3_i64])],
+    ];
+    let schema = vec![("arr".to_string(), "array".to_string())];
+    let plan_ops = vec![json!({
+        "op": "withColumn",
+        "payload": {
+            "name": "distinct_arr",
+            "expr": {"fn": "array_distinct", "args": [{"col": "arr"}]}
+        }
+    })];
+    let df = plan::execute_plan(&session, data, schema, &plan_ops).unwrap();
+    let rows = df.collect_as_json_rows().unwrap();
+    assert_eq!(rows.len(), 3);
+    // Row 0: [1,1,2] -> [1,2]; row 1: [2,2] -> [2]; row 2: [3] -> [3]
+    let d0 = rows[0]
+        .get("distinct_arr")
+        .and_then(|v| v.as_array())
+        .map(|a| a.iter().filter_map(|v| v.as_i64()).collect::<Vec<_>>());
+    let d1 = rows[1]
+        .get("distinct_arr")
+        .and_then(|v| v.as_array())
+        .map(|a| a.iter().filter_map(|v| v.as_i64()).collect::<Vec<_>>());
+    let d2 = rows[2]
+        .get("distinct_arr")
+        .and_then(|v| v.as_array())
+        .map(|a| a.iter().filter_map(|v| v.as_i64()).collect::<Vec<_>>());
+    assert_eq!(d0.as_deref(), Some(&[1_i64, 2][..]));
+    assert_eq!(d1.as_deref(), Some(&[2_i64][..]));
+    assert_eq!(d2.as_deref(), Some(&[3_i64][..]));
+}
+
 // ---------- property_type_coercion ----------
 
 #[test]

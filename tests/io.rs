@@ -82,7 +82,7 @@ fn create_dataframe_from_rows_empty_schema_infers_from_json_rows() {
         vec![json!("world"), json!(0), json!(false)],
     ];
     let df = spark
-        .create_dataframe_from_rows_engine(rows, schema)
+        .create_dataframe_from_rows_engine(rows, schema, false)
         .expect("empty schema + non-empty rows should infer schema");
     assert_eq!(df.count_engine().unwrap(), 2);
     let names = df.columns_engine().unwrap();
@@ -104,7 +104,7 @@ fn create_dataframe_from_rows_collect_as_json_roundtrip() {
     let rows: Vec<Vec<serde_json::Value>> =
         vec![vec![json!(1), json!("a")], vec![json!(2), json!("b")]];
     let df = spark
-        .create_dataframe_from_rows_engine(rows.clone(), schema)
+        .create_dataframe_from_rows_engine(rows.clone(), schema, false)
         .unwrap();
     let collected = df.collect_as_json_rows_engine().unwrap();
     assert_eq!(collected.len(), 2);
@@ -153,7 +153,7 @@ fn schema_from_json_and_create_dataframe_from_rows() {
     let rows: Vec<Vec<serde_json::Value>> =
         vec![vec![json!(1), json!("alice")], vec![json!(2), json!("bob")]];
     let df = spark
-        .create_dataframe_from_rows_engine(rows, schema)
+        .create_dataframe_from_rows_engine(rows, schema, false)
         .unwrap();
     assert_eq!(df.count_engine().unwrap(), 2);
 }

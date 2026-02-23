@@ -7,7 +7,7 @@ This document compares **signatures** (parameters, types, defaults) of the publi
 ## Method
 
 - **PySpark signatures**: Obtained by introspecting an installed PySpark (`inspect.signature`, optional type hints) for `pyspark.sql.functions`, `SparkSession`, `SparkSession.builder`, `DataFrame`, `GroupedData`, `Column`, `DataFrameStat`, and `DataFrameNa`.
-- **Robin-sparkless signatures**: Same approach on the built `robin_sparkless` module (requires `maturin develop --features pyo3`).
+- **Robin-sparkless signatures**: Extract from Rust source (e.g. `scripts/extract_robin_api_from_source.py`) or from an out-of-tree build of the `robin_sparkless` module.
 - **PySpark version used**: 3.5.0
 - **Cross-check**: PySpark [official API docs](https://spark.apache.org/docs/latest/api/python/reference/pyspark.sql/index.html) can be used to fill or correct parameter names and defaults where introspection is incomplete.
 

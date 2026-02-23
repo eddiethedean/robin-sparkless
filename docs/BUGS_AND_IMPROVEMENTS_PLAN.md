@@ -14,7 +14,7 @@ A repeatable plan for finding **bugs** and **needed improvements** in robin-spar
 |------|---------|------------------|
 | Rust unit + integration | `cargo test` | Regressions, doc tests |
 | Parity (all phases) | `make test-parity-phases` or `cargo test pyspark_parity_fixtures` | Behavioral drift vs PySpark fixtures |
-| Python | `make test-python` | PyO3 bindings, expression semantics |
+| Python | Out-of-tree (e.g. Sparkless); no in-repo `make test-python` | Bindings, expression semantics |
 | Full CI | `make check-full` | Format, clippy, audit, deny, Rust tests, Python lint, Python tests |
 
 Fix any failing tests first; add a test for every bug you fix.
@@ -50,11 +50,10 @@ Past fixes include `PyDataFrameWriter` lock handling in [src/python/dataframe.rs
 
 Check that invalid input (wrong schema, missing columns, bad plan JSON) produces clear errors, not panics.
 
-### A5. Python bindings (PyO3)
+### A5. Python bindings (out-of-tree)
 
-- **Types**: `Option<T>`, `None`, and Python `None`/int/float/bool/str round-trip correctly in `collect()`, `create_dataframe`, `py_to_json_value`, plan execution.
-- **Extraction order**: As in #182, check that we try the “expression” type before “string” (or other coercible type) where both are valid.
-- **Locks**: Any `RwLock`/`Mutex` read in code called from Python should handle poisoned state (e.g. fallback instead of `.expect()`).
+- Python bindings are maintained outside this repo (e.g. in Sparkless). When adding or changing Rust API used by bindings: document optional/Result types and JSON-friendly row shapes; keep error messages clear for FFI callers.
+- **Rust surface**: `create_dataframe_from_rows`, `create_dataframe_from_single_column`, `verify_schema`, `collect_as_json_rows`, `execute_plan` are the main entry points for bindings. (Historical: extraction order #182, locks in code called from Python.)
 
 ### A6. Parity and known gaps
 

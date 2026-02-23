@@ -12,6 +12,7 @@ pub trait SparkSessionBackend: Send + Sync {
         &self,
         rows: Vec<Vec<JsonValue>>,
         schema: Vec<(String, String)>,
+        verify_schema: bool,
     ) -> Result<Box<dyn DataFrameBackend>, EngineError>;
     fn create_dataframe(
         &self,
