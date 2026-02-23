@@ -1481,21 +1481,22 @@ impl SparkSession {
                         } else if let Some(arr) = json_value_to_array(&v) {
                             // #625: Array, Object with "0","1",..., or string that parses as JSON array (PySpark list parity).
                             // #710/PR-G: Nested array: one list series per element, then vals + from_any_values.
-                            let elem_series: Vec<Series> = if parse_array_element_type(&elem_type).is_some() {
-                                arr.iter()
-                                    .map(|e| {
-                                        json_values_to_series(
-                                            &[Some(e.clone())],
-                                            &elem_type,
-                                            "elem",
-                                        )
-                                    })
-                                    .collect::<Result<Vec<_>, _>>()?
-                            } else {
-                                arr.iter()
-                                    .map(|e| json_value_to_series_single(e, &elem_type, "elem"))
-                                    .collect::<Result<Vec<_>, _>>()?
-                            };
+                            let elem_series: Vec<Series> =
+                                if parse_array_element_type(&elem_type).is_some() {
+                                    arr.iter()
+                                        .map(|e| {
+                                            json_values_to_series(
+                                                &[Some(e.clone())],
+                                                &elem_type,
+                                                "elem",
+                                            )
+                                        })
+                                        .collect::<Result<Vec<_>, _>>()?
+                                } else {
+                                    arr.iter()
+                                        .map(|e| json_value_to_series_single(e, &elem_type, "elem"))
+                                        .collect::<Result<Vec<_>, _>>()?
+                                };
                             let vals: Vec<_> =
                                 elem_series.iter().filter_map(|s| s.get(0).ok()).collect();
                             let s = Series::from_any_values_and_dtype(
@@ -1511,23 +1512,24 @@ impl SparkSession {
                         } else {
                             // #611: PySpark accepts single value as one-element list.
                             let single_arr = [v];
-                            let elem_series: Vec<Series> = if parse_array_element_type(&elem_type).is_some() {
-                                single_arr
-                                    .iter()
-                                    .map(|e| {
-                                        json_values_to_series(
-                                            &[Some(e.clone())],
-                                            &elem_type,
-                                            "elem",
-                                        )
-                                    })
-                                    .collect::<Result<Vec<_>, _>>()?
-                            } else {
-                                single_arr
-                                    .iter()
-                                    .map(|e| json_value_to_series_single(e, &elem_type, "elem"))
-                                    .collect::<Result<Vec<_>, _>>()?
-                            };
+                            let elem_series: Vec<Series> =
+                                if parse_array_element_type(&elem_type).is_some() {
+                                    single_arr
+                                        .iter()
+                                        .map(|e| {
+                                            json_values_to_series(
+                                                &[Some(e.clone())],
+                                                &elem_type,
+                                                "elem",
+                                            )
+                                        })
+                                        .collect::<Result<Vec<_>, _>>()?
+                                } else {
+                                    single_arr
+                                        .iter()
+                                        .map(|e| json_value_to_series_single(e, &elem_type, "elem"))
+                                        .collect::<Result<Vec<_>, _>>()?
+                                };
                             let vals: Vec<_> =
                                 elem_series.iter().filter_map(|s| s.get(0).ok()).collect();
                             let s = Series::from_any_values_and_dtype(
@@ -2235,9 +2237,7 @@ mod tests {
             ),
         ];
         let rows: Vec<Vec<JsonValue>> = vec![vec![json!("x"), json!("{'a': 1, 'b': 'x'}")]];
-        let df = spark
-            .create_dataframe_from_rows(rows, schema)
-            .unwrap();
+        let df = spark.create_dataframe_from_rows(rows, schema).unwrap();
         assert_eq!(df.count().unwrap(), 1);
     }
 
@@ -2249,16 +2249,11 @@ mod tests {
         let spark = SparkSession::builder().app_name("test").get_or_create();
         let schema = vec![
             ("id".to_string(), "string".to_string()),
-            (
-                "arr".to_string(),
-                "array<array<bigint>>".to_string(),
-            ),
+            ("arr".to_string(), "array<array<bigint>>".to_string()),
         ];
         // One row: id="x", arr=[[1,2],[3,4]]
         let rows: Vec<Vec<JsonValue>> = vec![vec![json!("x"), json!([[1, 2], [3, 4]])]];
-        let df = spark
-            .create_dataframe_from_rows(rows, schema)
-            .unwrap();
+        let df = spark.create_dataframe_from_rows(rows, schema).unwrap();
         assert_eq!(df.count().unwrap(), 1);
         let collected = df.collect_inner().unwrap();
         let arr_col = collected.column("arr").unwrap();
@@ -2994,10 +2989,7 @@ mod tests {
 
         let spark = SparkSession::builder().app_name("test").get_or_create();
         let df = spark
-            .create_dataframe(
-                vec![(1, 10, "a".to_string())],
-                vec!["id", "x", "name"],
-            )
+            .create_dataframe(vec![(1, 10, "a".to_string())], vec!["id", "x", "name"])
             .unwrap();
         df.write()
             .save_as_table(&spark, "t_plain", SaveMode::ErrorIfExists)
@@ -3012,7 +3004,12 @@ mod tests {
             .collect_as_json_rows()
             .unwrap()
             .into_iter()
-            .map(|r| r.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string())
+            .map(|r| {
+                r.get("name")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string()
+            })
             .collect();
         assert!(names.contains(&"t_plain".to_string()));
         assert!(names.contains(&"my_schema.my_table".to_string()));
@@ -3034,7 +3031,12 @@ mod tests {
             .collect_as_json_rows()
             .unwrap()
             .into_iter()
-            .map(|r| r.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string())
+            .map(|r| {
+                r.get("name")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string()
+            })
             .collect();
         assert!(names.contains(&"default".to_string()));
         assert!(names.contains(&"global_temp".to_string()));
@@ -3045,7 +3047,12 @@ mod tests {
             .collect_as_json_rows()
             .unwrap()
             .into_iter()
-            .map(|r| r.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string())
+            .map(|r| {
+                r.get("name")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string()
+            })
             .collect();
         assert!(names2.contains(&"test_schema_for_list_db".to_string()));
     }

@@ -132,11 +132,19 @@ fn parse_order_by_element(v: &Value) -> Option<Vec<(String, bool)>> {
         }
         if s.to_uppercase().ends_with(" DESC") {
             let name = s[..s.len().saturating_sub(5)].trim().to_string();
-            return if name.is_empty() { None } else { Some(vec![(name, false)]) };
+            return if name.is_empty() {
+                None
+            } else {
+                Some(vec![(name, false)])
+            };
         }
         if s.to_uppercase().ends_with(" ASC") {
             let name = s[..s.len().saturating_sub(4)].trim().to_string();
-            return if name.is_empty() { None } else { Some(vec![(name, true)]) };
+            return if name.is_empty() {
+                None
+            } else {
+                Some(vec![(name, true)])
+            };
         }
         if s.starts_with('[') && s.ends_with(']') {
             let inner = s[1..s.len() - 1].trim();
@@ -145,7 +153,12 @@ fn parse_order_by_element(v: &Value) -> Option<Vec<(String, bool)>> {
             }
             let names: Vec<(String, bool)> = inner
                 .split(',')
-                .map(|p| (p.trim().trim_matches('\'').trim_matches('"').to_string(), true))
+                .map(|p| {
+                    (
+                        p.trim().trim_matches('\'').trim_matches('"').to_string(),
+                        true,
+                    )
+                })
                 .filter(|(n, _)| !n.is_empty())
                 .collect();
             return Some(names);
@@ -493,12 +506,14 @@ fn apply_op(
             let cols: Vec<String> = group_by
                 .iter()
                 .filter_map(|v| {
-                    v.as_str()
-                        .map(|s| s.to_string())
-                        .or_else(|| {
-                            v.get("col").and_then(Value::as_str).map(|s| s.to_string())
-                                .or_else(|| v.get("name").and_then(Value::as_str).map(|s| s.to_string()))
-                        })
+                    v.as_str().map(|s| s.to_string()).or_else(|| {
+                        v.get("col")
+                            .and_then(Value::as_str)
+                            .map(|s| s.to_string())
+                            .or_else(|| {
+                                v.get("name").and_then(Value::as_str).map(|s| s.to_string())
+                            })
+                    })
                 })
                 .map(|s| df.resolve_column_name(s.as_str()))
                 .collect::<Result<Vec<_>, _>>()
@@ -600,9 +615,8 @@ fn apply_op(
                 .map_err(PlanError::Session)
         }
         "crossJoin" | "cross_join" => {
-            let other_data = get_other_data(&payload).ok_or_else(|| {
-                PlanError::InvalidPlan("crossJoin must have 'other_data'".into())
-            })?;
+            let other_data = get_other_data(&payload)
+                .ok_or_else(|| PlanError::InvalidPlan("crossJoin must have 'other_data'".into()))?;
             let other_schema = get_other_schema(&payload).ok_or_else(|| {
                 PlanError::InvalidPlan("crossJoin must have 'other_schema'".into())
             })?;
@@ -740,15 +754,13 @@ mod tests {
             .get_or_create();
         let data = vec![vec![json!(1)], vec![json!(2)]];
         let schema = vec![("a".to_string(), "bigint".to_string())];
-        let plan = vec![
-            json!({
-                "op": "crossJoin",
-                "payload": {
-                    "other_data": [[3], [4]],
-                    "other_schema": [{"name": "b", "type": "bigint"}]
-                }
-            }),
-        ];
+        let plan = vec![json!({
+            "op": "crossJoin",
+            "payload": {
+                "other_data": [[3], [4]],
+                "other_schema": [{"name": "b", "type": "bigint"}]
+            }
+        })];
         let df = execute_plan(&session, data, schema, &plan).unwrap();
         let out = df.collect_inner().unwrap();
         assert_eq!(out.height(), 4, "cross join 2x2 = 4 rows");
@@ -769,22 +781,18 @@ mod tests {
             ("id".to_string(), "bigint".to_string()),
             ("name".to_string(), "string".to_string()),
         ];
-        let plan = vec![
-            json!({
-                "op": "orderBy",
-                "payload": { "columns": ["name DESC"] }
-            }),
-        ];
+        let plan = vec![json!({
+            "op": "orderBy",
+            "payload": { "columns": ["name DESC"] }
+        })];
         let df = execute_plan(&session, data.clone(), schema.clone(), &plan).unwrap();
         assert_eq!(df.count().unwrap(), 3);
         let rows = df.collect_as_json_rows().unwrap();
         assert_eq!(rows[0].get("name").and_then(|v| v.as_str()), Some("z"));
-        let plan2 = vec![
-            json!({
-                "op": "orderBy",
-                "payload": { "columns": ["['id','name']"] }
-            }),
-        ];
+        let plan2 = vec![json!({
+            "op": "orderBy",
+            "payload": { "columns": ["['id','name']"] }
+        })];
         let df2 = execute_plan(&session, data, schema, &plan2).unwrap();
         assert_eq!(df2.collect_inner().unwrap().height(), 3);
     }
