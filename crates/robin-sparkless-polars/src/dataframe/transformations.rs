@@ -1413,7 +1413,9 @@ pub fn intersect_all(
 
 #[cfg(test)]
 mod tests {
-    use super::{distinct, drop, dropna, first, head, limit, offset, order_by, union_by_name};
+    use super::{
+        distinct, drop, dropna, first, head, limit, offset, order_by, union, union_by_name,
+    };
     use crate::{DataFrame, SparkSession};
     use serde_json::json;
 
@@ -1518,6 +1520,26 @@ mod tests {
         let cols = out.columns().unwrap();
         assert!(!cols.contains(&"v".to_string()));
         assert_eq!(out.count().unwrap(), 3);
+    }
+
+    /// #681: union (same column order) with Int64 vs String in same position coerces to common type.
+    #[test]
+    fn union_coerces_int_str_same_position() {
+        use polars::prelude::df;
+
+        let spark = SparkSession::builder()
+            .app_name("transform_tests")
+            .get_or_create();
+        let left_pl = df!("id" => &[1i64, 2i64], "name" => &["a", "b"]).unwrap();
+        let right_pl = df!("id" => &["3", "4"], "name" => &["c", "d"]).unwrap();
+        let left = spark.create_dataframe_from_polars(left_pl);
+        let right = spark.create_dataframe_from_polars(right_pl);
+        let out = union(&left, &right, false).expect("#681: union must coerce id Int64 vs String");
+        assert_eq!(out.count().unwrap(), 4);
+        let cols = out.columns().unwrap();
+        assert_eq!(cols.len(), 2);
+        assert!(cols.contains(&"id".to_string()));
+        assert!(cols.contains(&"name".to_string()));
     }
 
     /// Issue #603: unionByName with same-named columns of different types (e.g. id Int vs id String) must coerce and succeed.
