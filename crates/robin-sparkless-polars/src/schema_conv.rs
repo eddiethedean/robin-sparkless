@@ -41,7 +41,8 @@ impl StructTypePolarsExt for StructType {
 fn polars_type_to_data_type(polars_type: &PlDataType) -> DataType {
     match polars_type {
         PlDataType::String => DataType::String,
-        PlDataType::Int32 | PlDataType::Int64 => DataType::Long,
+        PlDataType::Int32 => DataType::Integer,
+        PlDataType::Int64 => DataType::Long,
         PlDataType::Float32 | PlDataType::Float64 => DataType::Double,
         PlDataType::Boolean => DataType::Boolean,
         PlDataType::Date => DataType::Date,
