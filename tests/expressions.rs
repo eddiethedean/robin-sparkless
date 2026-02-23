@@ -828,6 +828,34 @@ fn plan_select_concat_as_full_name() {
     );
 }
 
+/// #735, #749, #750, #780, #781, #782: Numeric and string scalar/collect must not be null.
+#[test]
+fn plan_collect_numeric_and_string_not_null() {
+    let spark = spark();
+    let schema = vec![
+        ("int_col".to_string(), "bigint".to_string()),
+        ("str_zero".to_string(), "string".to_string()),
+        ("str_num".to_string(), "string".to_string()),
+        ("float_col".to_string(), "double".to_string()),
+    ];
+    let rows = vec![
+        vec![json!(4), json!("0"), json!("999"), json!(10.0)],
+        vec![json!(1), json!("1234"), json!("null-456"), json!(0.5)],
+    ];
+    let df = plan::execute_plan(&spark, rows, schema, &[]).unwrap();
+    let out = df.collect_as_json_rows_engine().unwrap();
+    assert_eq!(out.len(), 2);
+    assert_eq!(out[0].get("int_col").and_then(|v| v.as_i64()), Some(4));
+    assert_eq!(out[0].get("str_zero").and_then(|v| v.as_str()), Some("0"));
+    assert_eq!(out[0].get("str_num").and_then(|v| v.as_str()), Some("999"));
+    assert!(out[0].get("float_col").and_then(|v| v.as_f64()).is_some());
+    assert_eq!(
+        out[1].get("str_num").and_then(|v| v.as_str()),
+        Some("null-456")
+    );
+    assert_eq!(out[1].get("int_col").and_then(|v| v.as_i64()), Some(1));
+}
+
 /// #786, #785: Mixed-case column names (e.g. NaMe) must appear in columns() as provided in schema.
 #[test]
 fn plan_columns_preserve_mixed_case() {
