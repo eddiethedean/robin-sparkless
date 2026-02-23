@@ -223,8 +223,9 @@ pub fn order_by_exprs(
     Ok(super::DataFrame::from_lazy_with_options(lf, case_sensitive))
 }
 
-/// Union (unionAll): stack another DataFrame vertically. Schemas must match (same columns, same order).
-/// When column types differ (e.g. String vs Int64), both sides are coerced to a common type (PySpark parity #551).
+/// Union (unionAll): stack another DataFrame vertically. Schemas must match: same set of column names
+/// (order may differ; right is reordered to left's order by name). When column types differ,
+/// both sides are coerced to a common type (PySpark parity #551).
 pub fn union(
     left: &DataFrame,
     right: &DataFrame,
@@ -232,14 +233,32 @@ pub fn union(
 ) -> Result<DataFrame, PolarsError> {
     let left_names = left.columns()?;
     let right_names = right.columns()?;
-    if left_names != right_names {
+    if left_names.len() != right_names.len() {
         return Err(PolarsError::InvalidOperation(
             format!(
-                "union: column order/names must match. Left: {:?}, Right: {:?}",
+                "union: column count must match. Left: {:?}, Right: {:?}",
                 left_names, right_names
             )
             .into(),
         ));
+    }
+    // Same set of names (order may differ): use left's order for both sides (reorder right by name).
+    let right_names_set: std::collections::HashSet<_> = if case_sensitive {
+        right_names.iter().cloned().collect()
+    } else {
+        right_names.iter().map(|s| s.to_lowercase()).collect()
+    };
+    for n in &left_names {
+        let key = if case_sensitive { n.clone() } else { n.to_lowercase() };
+        if !right_names_set.contains(&key) {
+            return Err(PolarsError::InvalidOperation(
+                format!(
+                    "union: column order/names must match. Left: {:?}, Right: {:?}",
+                    left_names, right_names
+                )
+                .into(),
+            ));
+        }
     }
     let mut left_exprs: Vec<Expr> = Vec::with_capacity(left_names.len());
     let mut right_exprs: Vec<Expr> = Vec::with_capacity(right_names.len());
@@ -1547,6 +1566,25 @@ mod tests {
         assert_eq!(cols.len(), 2);
         assert!(cols.contains(&"id".to_string()));
         assert!(cols.contains(&"name".to_string()));
+    }
+
+    /// Union with same column names in different order: right reordered to left's order (PR1).
+    #[test]
+    fn union_same_names_different_order() {
+        use polars::prelude::df;
+
+        let spark = SparkSession::builder()
+            .app_name("transform_tests")
+            .get_or_create();
+        let left_pl = df!("a" => &[1i64, 2i64], "b" => &["x", "y"]).unwrap();
+        let right_pl = df!("b" => &["p", "q"], "a" => &[3i64, 4i64]).unwrap();
+        let left = spark.create_dataframe_from_polars(left_pl);
+        let right = spark.create_dataframe_from_polars(right_pl);
+        let out = union(&left, &right, false).expect("union by name set should reorder right");
+        assert_eq!(out.count().unwrap(), 4);
+        let cols = out.columns().unwrap();
+        assert_eq!(cols[0], "a");
+        assert_eq!(cols[1], "b");
     }
 
     /// Issue #603: unionByName with same-named columns of different types (e.g. id Int vs id String) must coerce and succeed.
