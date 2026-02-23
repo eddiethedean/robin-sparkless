@@ -103,6 +103,7 @@
     "filter_and_select_core",
     "collect_null_preservation",
     "groupby_avg_column_name",
-    "select_agg_column_after_groupby"
+    "select_agg_column_after_groupby",
+    "collect_array_column_format"
   ]
 }
