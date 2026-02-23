@@ -2112,6 +2112,27 @@ mod tests {
         assert_eq!(df.count().unwrap(), 3);
     }
 
+    /// Batch 1 / Sparkless parity: null cells must serialize as JsonValue::Null (Python None).
+    #[test]
+    fn collect_preserves_null_as_json_null() {
+        use serde_json::Value as JsonValue;
+
+        let _spark = SparkSession::builder()
+            .app_name("collect_null_test")
+            .get_or_create();
+        let s_id = Series::new("id".into(), &[1i64, 2i64, 3i64]);
+        let s_val = Series::new("value".into(), vec![Some(10i64), None, Some(30i64)]);
+        let pl_df =
+            polars::prelude::DataFrame::new_infer_height(vec![s_id.into(), s_val.into()]).unwrap();
+        let df = DataFrame::from_polars(pl_df);
+        let rows = df.collect_as_json_rows().unwrap();
+        assert_eq!(rows.len(), 3);
+        assert_eq!(rows[0].get("value").and_then(|v| v.as_i64()), Some(10));
+        assert!(rows[1].contains_key("value"));
+        assert!(matches!(rows[1].get("value"), Some(JsonValue::Null)));
+        assert_eq!(rows[2].get("value").and_then(|v| v.as_i64()), Some(30));
+    }
+
     /// #747, #748: collect rounds floats that are close to integers (e.g. 2**3 => 8 not 7.999...).
     #[test]
     fn collect_rounds_float_near_integer() {
