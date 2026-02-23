@@ -828,6 +828,28 @@ fn plan_select_concat_as_full_name() {
     );
 }
 
+/// #784: orderBy name ascending: first row must be Alice (not Bob).
+#[test]
+fn plan_order_by_first_row_expected() {
+    let spark = spark();
+    let schema = vec![("name".to_string(), "string".to_string())];
+    let rows = vec![vec![json!("Bob")], vec![json!("Alice")]];
+    let plan_steps = vec![json!({
+        "op": "orderBy",
+        "payload": {"columns": ["name"], "ascending": [true]}
+    })];
+    let df = plan::execute_plan(&spark, rows, schema, &plan_steps).unwrap();
+    let out = df.collect_as_json_rows_engine().unwrap();
+    assert_eq!(out.len(), 2);
+    assert_eq!(
+        out[0].get("name").and_then(|v| v.as_str()),
+        Some("Alice"),
+        "first row after orderBy name ASC must be Alice (#784); got: {:?}",
+        out[0].get("name")
+    );
+    assert_eq!(out[1].get("name").and_then(|v| v.as_str()), Some("Bob"));
+}
+
 /// #779, #746, #736: Boolean and substring in collect (not null/not False when value present).
 #[test]
 fn plan_collect_boolean_and_substring() {
