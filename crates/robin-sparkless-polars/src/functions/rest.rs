@@ -1150,9 +1150,9 @@ pub fn floor(column: &Column) -> Column {
     column.clone().floor()
 }
 
-/// Round (PySpark round)
-pub fn round(column: &Column, decimals: u32) -> Column {
-    column.clone().round(decimals)
+/// Round (PySpark round). scale can be negative to round to left of decimal (e.g. -3 => thousands).
+pub fn round(column: &Column, scale: i32) -> Column {
+    column.clone().round(scale)
 }
 
 /// Banker's rounding - round half to even (PySpark bround).

@@ -1351,11 +1351,11 @@ impl Column {
         Self::from_expr(self.expr().clone().floor(), None)
     }
 
-    /// Round to given decimal places (PySpark round). Supports string columns containing
-    /// numeric values (implicit cast to double then round; parity with PySpark).
-    pub fn round(&self, decimals: u32) -> Column {
+    /// Round to given decimal places (PySpark round). scale can be negative (e.g. -3 rounds to thousands).
+    /// Supports string columns containing numeric values (implicit cast to double then round; parity with PySpark).
+    pub fn round(&self, scale: i32) -> Column {
         let expr = self.expr().clone().map(
-            move |s| expect_col(crate::udfs::apply_round(s, decimals)),
+            move |s| expect_col(crate::udfs::apply_round(s, scale)),
             |_schema, field| Ok(Field::new(field.name().clone(), DataType::Float64)),
         );
         Self::from_expr(expr, None)
@@ -1471,8 +1471,15 @@ impl Column {
     }
 
     /// Power with column or scalar exponent (for __pow__ / col ** other).
+    /// Uses float pow so fractional exponents work (#817); handles 0^positive=0 (#863).
     pub fn pow_with(&self, exponent: &Column) -> Column {
-        Self::from_expr(self.expr().clone().pow(exponent.expr().clone()), None)
+        let args = [exponent.expr().clone()];
+        let expr = self.expr().clone().map_many(
+            move |cols| expect_col(crate::udfs::apply_pow_pyspark(cols)),
+            &args,
+            |_schema, fields| Ok(Field::new(fields[0].name().clone(), DataType::Float64)),
+        );
+        Self::from_expr(expr, None)
     }
 
     /// Alias for pow. PySpark power.
