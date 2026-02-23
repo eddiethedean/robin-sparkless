@@ -519,8 +519,8 @@ fn apply_op(
                 "left" => JoinType::Left,
                 "right" => JoinType::Right,
                 "outer" => JoinType::Outer,
-                "left_semi" | "semi" => JoinType::LeftSemi,
-                "left_anti" | "anti" => JoinType::LeftAnti,
+                "left_semi" | "leftsemi" | "semi" => JoinType::LeftSemi,
+                "left_anti" | "leftanti" | "anti" => JoinType::LeftAnti,
                 _ => JoinType::Inner,
             };
             df.join(&other_df, on_refs, join_type)
