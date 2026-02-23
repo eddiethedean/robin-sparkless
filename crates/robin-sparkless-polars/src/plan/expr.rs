@@ -156,12 +156,12 @@ pub fn expr_from_value(v: &Value) -> Result<Expr, PlanExprError> {
                 return Ok(expr_from_value(left)?.or(expr_from_value(right)?));
             }
             "not" => {
-                // #682: Cast to Boolean before .not() so Unknown(Any) or non-Boolean columns work (PySpark parity).
+                // #682: Coerce to Boolean before .not() so Unknown(Any) or string columns work (PySpark parity; string->boolean via expr_coerce_to_boolean).
                 let arg = obj
                     .get("arg")
                     .ok_or_else(|| PlanExprError("op 'not' requires 'arg'".to_string()))?;
                 let arg_expr = expr_from_value(arg)?;
-                return Ok(arg_expr.cast(DataType::Boolean).not());
+                return Ok(crate::functions::expr_coerce_to_boolean(arg_expr).not());
             }
             "between" => {
                 let left_v = obj
@@ -1202,8 +1202,8 @@ fn expr_from_fn(name: &str, args: &[Value]) -> Result<Expr, PlanExprError> {
                     "fn '{name}' two-arg form requires [condition, then_expr]"
                 )));
             }
-            // #680: only the condition must be Boolean; then/else can be any type
-            let cond_expr = arg_expr(args, 0)?.cast(DataType::Boolean);
+            // #680: only the condition must be Boolean; then/else can be any type (string->boolean via expr_coerce_to_boolean).
+            let cond_expr = crate::functions::expr_coerce_to_boolean(arg_expr(args, 0)?);
             let cond = expr_to_column(cond_expr);
             let then_val = expr_to_column(arg_expr(args, 1)?);
             Ok(when_then_otherwise_null(&cond, &then_val).into_expr())
