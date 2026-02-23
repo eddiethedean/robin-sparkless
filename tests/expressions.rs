@@ -828,6 +828,27 @@ fn plan_select_concat_as_full_name() {
     );
 }
 
+/// #752, #778: List column must serialize as JSON array (not stringified list).
+#[test]
+fn plan_collect_list_as_json_array() {
+    let spark = spark();
+    let schema = vec![("arr".to_string(), "array<string>".to_string())];
+    let rows = vec![vec![json!(["a", "b"])], vec![json!(["E1", "E2"])]];
+    let df = plan::execute_plan(&spark, rows, schema, &[]).unwrap();
+    let out = df.collect_as_json_rows_engine().unwrap();
+    assert_eq!(out.len(), 2);
+    let first = out[0].get("arr").and_then(|v| v.as_array());
+    assert!(
+        first.is_some(),
+        "arr must be JSON array (#752, #778); got: {:?}",
+        out[0].get("arr")
+    );
+    assert_eq!(first.unwrap().len(), 2);
+    let second = out[1].get("arr").and_then(|v| v.as_array()).unwrap();
+    assert_eq!(second[0].as_str(), Some("E1"));
+    assert_eq!(second[1].as_str(), Some("E2"));
+}
+
 /// #771, #770: hour() on timestamp column must return non-null (e.g. hour=4).
 #[test]
 fn plan_hour_timestamp_returns_value() {
