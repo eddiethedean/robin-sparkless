@@ -109,6 +109,7 @@
     "groupby_avg_column_name",
     "agg_result_column_names",
     "select_agg_column_after_groupby",
+    "select_then_groupby",
     "collect_array_column_format",
     "filter_row_count_parity"
   ]
