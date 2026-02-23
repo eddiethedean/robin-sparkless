@@ -1728,7 +1728,7 @@ pub fn apply_pow_pyspark(columns: &mut [Column]) -> PolarsResult<Option<Column>>
     } else {
         Float64Chunked::from_iter_options(
             name.as_str().into(),
-            base_ca.into_iter().zip(exp_ca.into_iter()).map(|(b, e)| {
+            base_ca.into_iter().zip(&exp_ca).map(|(b, e)| {
                 let (b, e): (f64, f64) = match (b, e) {
                     (Some(bb), Some(ee)) => (bb, ee),
                     _ => return None,
