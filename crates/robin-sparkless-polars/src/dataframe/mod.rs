@@ -1899,8 +1899,9 @@ fn is_map_format(dtype: &DataType) -> bool {
 }
 
 /// Round float to integer for JSON when within epsilon of an integer (#747, #748: 2**3 => 8 not 7.999...).
+/// Use scale-tolerant epsilon so large power results (e.g. 2**30, 3**5) also round (#818, #820, #821, #823, #827).
 fn float_to_json_number(f: f64) -> JsonValue {
-    const EPSILON: f64 = 1e-10;
+    const EPSILON: f64 = 1e-6;
     if f.is_finite() {
         let r = f.round();
         if (f - r).abs() < EPSILON {
