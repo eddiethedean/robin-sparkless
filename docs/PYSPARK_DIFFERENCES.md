@@ -23,6 +23,7 @@ This document lists **intentional or known divergences** from PySpark semantics 
 
 ## GroupBy
 
+- **Column/expr in group_by (#756)**: The plan interpreter accepts group_by elements as strings, `{"col":"name"}`, `{"name":"x"}`, or `{"expr": <expr>}` (Column-like). Use the expr form when the Sparkless adapter sends Column objects.
 - **Null keys and empty groups**: groupBy + aggregates are tested with fixtures `groupby_null_keys`, `groupby_single_group`, and `groupby_single_row_groups`. Behavior is aligned with PySpark for these cases (nulls in grouping keys produce one group per null; single-group and single-row groups behave as in PySpark). Any future divergence discovered will be listed here.
 
 ## Join
