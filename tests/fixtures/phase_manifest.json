@@ -102,6 +102,7 @@
     "select_id_age",
     "filter_and_select_core",
     "collect_null_preservation",
-    "groupby_avg_column_name"
+    "groupby_avg_column_name",
+    "select_agg_column_after_groupby"
   ]
 }
