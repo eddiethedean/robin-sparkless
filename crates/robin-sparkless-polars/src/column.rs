@@ -766,9 +766,14 @@ impl Column {
     }
 
     /// Bitwise NOT of an integer/boolean column (PySpark bitwise_not / bitwiseNOT).
+    /// #859: Coerce via map so Unknown(Any) from when/otherwise is cast to Int64 at execution time.
     pub fn bitwise_not(&self) -> Column {
-        // Use arithmetic identity: !n == -1 - n for two's-complement integers.
-        let expr = (lit(-1i64) - self.expr().clone().cast(DataType::Int64)).cast(DataType::Int64);
+        use polars::prelude::Field;
+        let expr = self.expr().clone().map(
+            move |col| expect_col(crate::udfs::apply_coerce_to_int64_for_bitwise(col)),
+            |_schema, field| Ok(Field::new(field.name().clone(), DataType::Int64)),
+        );
+        let expr = (lit(-1i64) - expr).cast(DataType::Int64);
         Self::from_expr(expr, None)
     }
 
