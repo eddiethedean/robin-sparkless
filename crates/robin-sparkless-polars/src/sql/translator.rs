@@ -155,6 +155,23 @@ pub fn translate(
                 session.is_case_sensitive(),
             ))
         }
+        Statement::Drop { names, .. } => {
+            // Any other DROP (e.g. MaterializedView): treat as table/view drop for parity (#745).
+            for obj_name in names {
+                let name = obj_name.to_string();
+                if name.starts_with("global_temp.") {
+                    if let Some(suffix) = name.strip_prefix("global_temp.") {
+                        session.drop_global_temp_view(suffix);
+                    }
+                }
+                session.drop_temp_view(&name);
+                session.drop_table(&name);
+            }
+            Ok(DataFrame::from_polars_with_options(
+                PlDataFrame::empty(),
+                session.is_case_sensitive(),
+            ))
+        }
         _ => Err(PolarsError::InvalidOperation(
             "SQL: only SELECT, CREATE SCHEMA/DATABASE, and DROP TABLE/VIEW/SCHEMA are supported."
                 .into(),
