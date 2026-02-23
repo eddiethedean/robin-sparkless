@@ -7,7 +7,7 @@ use crate::column::Column;
 use crate::dataframe::{DataFrame, JoinType, join};
 use crate::functions;
 use crate::session::{SparkSession, set_thread_udf_session};
-use polars::prelude::{DataFrame as PlDataFrame, Expr, PolarsError, col, lit};
+use polars::prelude::{DataFrame as PlDataFrame, Expr, PolarsError, col, lit, when};
 use sqlparser::ast::{
     BinaryOperator, Expr as SqlExpr, Function, FunctionArg, FunctionArgExpr, FunctionArguments,
     GroupByExpr, JoinConstraint, JoinOperator, ObjectType, OrderByKind, Query, Select, SelectItem,
@@ -375,12 +375,14 @@ fn translate_select_from(
                         ));
                     }
                 };
-                let on_cols = join_condition_to_on_columns(&join_spec.join_operator)?;
-                let on_refs: Vec<&str> = on_cols.iter().map(|s| s.as_str()).collect();
+                let (left_on, right_on) = join_condition_to_on_columns(&join_spec.join_operator)?;
+                let left_refs: Vec<&str> = left_on.iter().map(|s| s.as_str()).collect();
+                let right_refs: Vec<&str> = right_on.iter().map(|s| s.as_str()).collect();
                 df = join(
                     &df,
                     &right_df,
-                    on_refs,
+                    left_refs,
+                    right_refs,
                     join_type,
                     session.is_case_sensitive(),
                 )?;
@@ -419,7 +421,10 @@ fn resolve_table_factor(
     }
 }
 
-fn join_condition_to_on_columns(join_op: &JoinOperator) -> Result<Vec<String>, PolarsError> {
+/// Returns (left_column_names, right_column_names) for JOIN ON. Same length; may differ (e.g. a.id = b.other_id) (#743).
+fn join_condition_to_on_columns(
+    join_op: &JoinOperator,
+) -> Result<(Vec<String>, Vec<String>), PolarsError> {
     let constraint = match join_op {
         JoinOperator::Inner(c)
         | JoinOperator::LeftOuter(c)
@@ -429,7 +434,7 @@ fn join_condition_to_on_columns(join_op: &JoinOperator) -> Result<Vec<String>, P
         | JoinOperator::LeftAnti(c)
         | JoinOperator::Semi(c)
         | JoinOperator::Anti(c) => c,
-        JoinOperator::CrossJoin(_) => return Ok(vec![]),
+        JoinOperator::CrossJoin(_) => return Ok((vec![], vec![])),
         _ => {
             return Err(PolarsError::InvalidOperation(
                 "SQL: only INNER/LEFT/RIGHT/FULL/LEFT SEMI/LEFT ANTI/CROSS JOIN with ON are supported.".into(),
@@ -445,12 +450,7 @@ fn join_condition_to_on_columns(join_op: &JoinOperator) -> Result<Vec<String>, P
             } => {
                 let l = sql_expr_to_col_name(left.as_ref())?;
                 let r = sql_expr_to_col_name(right.as_ref())?;
-                if l != r {
-                    return Err(PolarsError::InvalidOperation(
-                            "SQL: JOIN ON must use same column name on both sides (e.g. a.id = b.id where both become 'id').".into(),
-                        ));
-                }
-                Ok(vec![l])
+                Ok((vec![l], vec![r]))
             }
             _ => Err(PolarsError::InvalidOperation(
                 "SQL: JOIN ON must be a single equality (col = col).".into(),
@@ -567,6 +567,31 @@ fn sql_expr_to_polars(
             } else {
                 in_expr
             })
+        }
+        SqlExpr::Case {
+            operand,
+            conditions,
+            else_result,
+            ..
+        } => {
+            // Simple CASE: CASE x WHEN a THEN b -> when(x.eq(a)).then(b). Searched CASE: CASE WHEN p THEN b -> when(p).then(b).
+            // Build from the end so we stay in Expr type: else_e = else; for (cond, res) in reverse, else_e = when(cond).then(res).otherwise(else_e).
+            let else_e = match else_result {
+                Some(e) => sql_expr_to_polars(e.as_ref(), session, df, having_agg_map)?,
+                None => lit(polars::prelude::NULL),
+            };
+            let mut expr = else_e;
+            for cw in conditions.iter().rev() {
+                let cond = if let Some(op) = &operand {
+                    sql_expr_to_polars(op.as_ref(), session, df, having_agg_map)?
+                        .eq(sql_expr_to_polars(&cw.condition, session, df, having_agg_map)?)
+                } else {
+                    sql_expr_to_polars(&cw.condition, session, df, having_agg_map)?
+                };
+                let res = sql_expr_to_polars(&cw.result, session, df, having_agg_map)?;
+                expr = when(cond).then(res).otherwise(expr);
+            }
+            Ok(expr)
         }
         _ => Err(PolarsError::InvalidOperation(
             format!("SQL: unsupported expression in WHERE: {:?}. Use column, literal, =, <, >, AND, OR, IS NULL, LIKE, IN.", expr).into(),
@@ -782,6 +807,11 @@ fn apply_projection(
                             ProjItem::PythonUdf(c, _) => ProjItem::PythonUdf(c, alias_str),
                         };
                         item
+                    }
+                    SqlExpr::Case { .. } => {
+                        // CASE ... END AS alias (#776)
+                        let e = sql_expr_to_polars(expr, session, Some(df), None)?;
+                        ProjItem::Expr(e, alias_str)
                     }
                     _ => {
                         return Err(PolarsError::InvalidOperation(

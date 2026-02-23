@@ -453,6 +453,58 @@ mod tests {
         assert!(ids.contains(&3));
     }
 
+    /// PR-2/#776: CASE ... END AS alias in SELECT.
+    #[test]
+    fn test_sql_case_with_alias() {
+        let spark = SparkSession::builder().app_name("test").get_or_create();
+        let df = spark
+            .create_dataframe(
+                vec![
+                    (1i64, 10i64, "".to_string()),
+                    (2i64, 20i64, "".to_string()),
+                    (3i64, 30i64, "".to_string()),
+                ],
+                vec!["id", "v", "x"],
+            )
+            .unwrap();
+        spark.create_or_replace_temp_view("t", df);
+        let result = spark
+            .sql("SELECT id, CASE WHEN id = 1 THEN 'one' WHEN id = 2 THEN 'two' ELSE 'other' END AS label FROM t")
+            .unwrap();
+        assert_eq!(result.count().unwrap(), 3);
+        let rows = result.collect_as_json_rows().unwrap();
+        assert_eq!(rows[0].get("label").and_then(|v| v.as_str()), Some("one"));
+        assert_eq!(rows[1].get("label").and_then(|v| v.as_str()), Some("two"));
+        assert_eq!(rows[2].get("label").and_then(|v| v.as_str()), Some("other"));
+    }
+
+    /// PR-2/#743: JOIN ON with different column names (e.g. a.id = b.other_id).
+    #[test]
+    fn test_sql_join_on_different_column_names() {
+        let spark = SparkSession::builder().app_name("test").get_or_create();
+        let left = spark
+            .create_dataframe(
+                vec![(1i64, 0i64, "a".to_string()), (2i64, 0i64, "b".to_string())],
+                vec!["id", "v", "name"],
+            )
+            .unwrap();
+        let right = spark
+            .create_dataframe(
+                vec![(1i64, 0i64, "x".to_string()), (3i64, 0i64, "z".to_string())],
+                vec!["other_id", "v", "tag"],
+            )
+            .unwrap();
+        spark.create_or_replace_temp_view("l", left);
+        spark.create_or_replace_temp_view("r", right);
+        let result = spark
+            .sql("SELECT l.id, l.name, r.tag FROM l INNER JOIN r ON l.id = r.other_id")
+            .unwrap();
+        assert_eq!(result.count().unwrap(), 1);
+        let rows = result.collect_as_json_rows().unwrap();
+        assert_eq!(rows[0].get("id").and_then(|v| v.as_i64()), Some(1));
+        assert_eq!(rows[0].get("tag").and_then(|v| v.as_str()), Some("x"));
+    }
+
     /// PR-B/#774: SQL UNION and UNION ALL.
     #[test]
     fn test_sql_union_all() {
