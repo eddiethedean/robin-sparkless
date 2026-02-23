@@ -354,8 +354,15 @@ fn apply_op(
                             }
                         })
                         .collect::<Result<Vec<_>, _>>()?;
+                    // #794: "concat(a, b) as full_name" -> expr_str = "concat(a, b)", alias = "full_name".
                     let has_concat = strings.iter().any(|s| {
-                        crate::plan::expr::try_parse_concat_expr_from_string(s.as_str()).is_some()
+                        let s = s.trim();
+                        let expr_str = if let Some(ix) = s.rfind(" as ") {
+                            s[..ix].trim()
+                        } else {
+                            s
+                        };
+                        crate::plan::expr::try_parse_concat_expr_from_string(expr_str).is_some()
                     });
                     if !has_concat {
                         let names: Vec<String> = strings
@@ -368,16 +375,23 @@ fn apply_op(
                     }
                     let mut exprs = Vec::with_capacity(strings.len());
                     for s in &strings {
+                        let s = s.trim();
+                        let (expr_str, alias_override) = if let Some(ix) = s.rfind(" as ") {
+                            (s[..ix].trim(), Some(s[ix + 4..].trim())) // 4 = len(" as ")
+                        } else {
+                            (s, None)
+                        };
                         if let Some(expr) =
-                            crate::plan::expr::try_parse_concat_expr_from_string(s.as_str())
+                            crate::plan::expr::try_parse_concat_expr_from_string(expr_str)
                         {
                             let resolved = df
                                 .resolve_expr_column_names(expr)
                                 .map_err(PlanError::Session)?;
-                            exprs.push(resolved.alias(s));
+                            let alias = alias_override.unwrap_or(s);
+                            exprs.push(resolved.alias(alias));
                         } else {
                             let resolved = df
-                                .resolve_column_name(s.as_str())
+                                .resolve_column_name(s)
                                 .map_err(PlanError::Session)?;
                             exprs.push(polars::prelude::col(resolved));
                         }
@@ -732,10 +746,12 @@ fn parse_aggs(aggs: &[Value], df: &DataFrame) -> Result<Vec<polars::prelude::Exp
             _ => return Err(PlanError::InvalidPlan(format!("unsupported agg: {agg}"))),
         };
         let mut expr = col_expr.into_expr();
-        // #672: PySpark-style result column names (e.g. avg(Value)) when plan does not set alias.
+        // #672, #791: PySpark-style result column names (e.g. avg(Value)) when plan does not set alias.
         // #777: Deduplicate aliases so multiple count() etc. get count, count_1, count_2, ...
+        // Accept "name" as fallback for "alias" (Sparkless may send either).
         let base_alias = obj
             .get("alias")
+            .or_else(|| obj.get("name"))
             .and_then(Value::as_str)
             .map(String::from)
             .unwrap_or_else(|| match (agg, col_name) {
