@@ -1668,7 +1668,88 @@ pub fn apply_months_between(
     Ok(Some(Column::new(name, out.into_series())))
 }
 
-// --- Math (trig, degrees, radians, signum) ---
+// --- Math (trig, degrees, radians, signum, pow) ---
+
+/// PySpark-style power: base^exp with float exponent and 0^positive=0 (#817 fractional exponent, #863 zero base).
+/// Broadcasts scalar (length-1) base or exponent to match the other column's length.
+pub fn apply_pow_pyspark(columns: &mut [Column]) -> PolarsResult<Option<Column>> {
+    if columns.len() < 2 {
+        return Err(PolarsError::ComputeError(
+            "pow_pyspark needs base and exponent columns".into(),
+        ));
+    }
+    let name = columns[0].field().into_owned().name;
+    let base_series = std::mem::take(&mut columns[0]).take_materialized_series();
+    let exp_series = std::mem::take(&mut columns[1]).take_materialized_series();
+    let base_ca = float_series_to_f64(&base_series)?;
+    let exp_ca = float_series_to_f64(&exp_series)?;
+    let scalar_exp = (exp_ca.len() == 1).then(|| exp_ca.get(0));
+    let scalar_base = (base_ca.len() == 1).then(|| base_ca.get(0));
+    let out = if let Some(Some(e)) = scalar_exp {
+        // Broadcast exponent to match base length
+        Float64Chunked::from_iter_options(
+            name.as_str().into(),
+            base_ca.into_iter().map(|b| {
+                let b = b?;
+                let result = if b == 0.0 {
+                    if e > 0.0 {
+                        0.0
+                    } else if e == 0.0 {
+                        1.0
+                    } else {
+                        f64::INFINITY
+                    }
+                } else {
+                    b.powf(e)
+                };
+                Some(result)
+            }),
+        )
+    } else if let Some(Some(b)) = scalar_base {
+        // Broadcast base to match exponent length
+        Float64Chunked::from_iter_options(
+            name.as_str().into(),
+            exp_ca.into_iter().map(|e| {
+                let e = e?;
+                let result = if b == 0.0 {
+                    if e > 0.0 {
+                        0.0
+                    } else if e == 0.0 {
+                        1.0
+                    } else {
+                        f64::INFINITY
+                    }
+                } else {
+                    b.powf(e)
+                };
+                Some(result)
+            }),
+        )
+    } else {
+        Float64Chunked::from_iter_options(
+            name.as_str().into(),
+            base_ca.into_iter().zip(exp_ca.into_iter()).map(|(b, e)| {
+                let (b, e): (f64, f64) = match (b, e) {
+                    (Some(bb), Some(ee)) => (bb, ee),
+                    _ => return None,
+                };
+                let result = if b == 0.0 {
+                    if e > 0.0 {
+                        0.0
+                    } else if e == 0.0 {
+                        1.0
+                    } else {
+                        f64::INFINITY
+                    }
+                } else {
+                    b.powf(e)
+                };
+                Some(result)
+            }),
+        )
+    };
+    Ok(Some(Column::new(name, out.into_series())))
+}
 
 fn float_series_to_f64(series: &Series) -> PolarsResult<Float64Chunked> {
     if series.dtype() == &DataType::String {
@@ -2120,13 +2201,12 @@ pub fn apply_bit_xor(columns: &mut [Column]) -> PolarsResult<Option<Column>> {
     Ok(Some(Column::new(name, out.into_series())))
 }
 
-/// Apply round to given decimal places. Supports numeric and string columns (PySpark parity:
-/// string columns containing numeric values are implicitly cast to double then rounded).
-pub fn apply_round(column: Column, decimals: u32) -> PolarsResult<Option<Column>> {
+/// Apply round to given scale (decimal places). scale can be negative (e.g. -3 => round to thousands).
+/// Supports numeric and string columns (PySpark parity). Fixes #869: round(col, -3) no longer triggers integral conversion error.
+pub fn apply_round(column: Column, scale: i32) -> PolarsResult<Option<Column>> {
     let name = column.field().into_owned().name;
     let series = column.take_materialized_series();
     let ca = float_series_to_f64(&series)?;
-    let scale = decimals as i32;
     let factor = 10_f64.powi(scale);
     let out = ca
         .apply_values(|x| (x * factor).round() / factor)
