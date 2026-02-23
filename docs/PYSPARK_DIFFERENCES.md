@@ -33,6 +33,7 @@ This document lists **intentional or known divergences** from PySpark semantics 
 ## Array
 
 - **array_distinct order**: Implemented with first-occurrence order to match PySpark (via UDF; parity fixture enabled).
+- **explode, posexplode, array_distinct (#692, #703, #705)**: Implemented in plan/expr; adapter should forward to Robin backend. Add plan fixtures or see docs for plan format.
 
 ## Control functions (assert_true, raise_error)
 
