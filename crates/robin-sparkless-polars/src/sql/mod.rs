@@ -453,6 +453,34 @@ mod tests {
         assert!(ids.contains(&3));
     }
 
+    /// PR-B/#774: SQL UNION and UNION ALL.
+    #[test]
+    fn test_sql_union_all() {
+        let spark = SparkSession::builder().app_name("test").get_or_create();
+        let a = spark
+            .create_dataframe(
+                vec![
+                    (1i64, 10i64, "x".to_string()),
+                    (2i64, 20i64, "y".to_string()),
+                ],
+                vec!["id", "v", "name"],
+            )
+            .unwrap();
+        let b = spark
+            .create_dataframe(vec![(3i64, 30i64, "z".to_string())], vec!["id", "v", "name"])
+            .unwrap();
+        spark.create_or_replace_temp_view("a", a);
+        spark.create_or_replace_temp_view("b", b);
+        let result = spark
+            .sql("SELECT id, name FROM a UNION ALL SELECT id, name FROM b")
+            .unwrap();
+        assert_eq!(result.count().unwrap(), 3);
+        let result_union = spark
+            .sql("SELECT id FROM a UNION SELECT id FROM b")
+            .unwrap();
+        assert_eq!(result_union.count().unwrap(), 3);
+    }
+
     #[test]
     fn test_sql_case_insensitive_columns() {
         let spark = SparkSession::builder().app_name("test").get_or_create();
