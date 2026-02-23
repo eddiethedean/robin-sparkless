@@ -327,24 +327,23 @@ fn apply_op(
                     }
                     df.select_exprs(exprs).map_err(PlanError::Session)
                 } else {
-                    // Column names: strings or {type, name} / {name} (Sparkless column refs)
+                    // Column names: strings or {col/column/name} (Sparkless column refs; #873, #884, PR-5)
                     let strings: Vec<String> = arr
                         .iter()
                         .map(|v| {
                             if let Some(s) = v.as_str() {
                                 Ok(s.to_string())
                             } else if let Some(obj) = v.as_object() {
-                                obj.get("name")
-                                    .and_then(Value::as_str)
-                                    .map(|s| s.to_string())
+                                expr_to_col_name(v)
+                                    .or_else(|| obj.get("name").and_then(Value::as_str).map(String::from))
                                     .ok_or_else(|| {
                                         PlanError::InvalidPlan(
-                                            "select column item must have 'name' string".into(),
+                                            "select column item must be string or have 'col', 'column', or 'name'".into(),
                                         )
                                     })
                             } else {
                                 Err(PlanError::InvalidPlan(
-                                    "select payload must be list of column name strings or {name, expr} or {type, name} objects".into(),
+                                    "select payload must be list of column name strings or {name, expr} or {col/column/name} objects".into(),
                                 ))
                             }
                         })
@@ -459,8 +458,10 @@ fn apply_op(
                 })?;
             let names: Vec<String> = columns
                 .iter()
-                .filter_map(|v| v.as_str())
-                .map(|s| df.resolve_column_name(s))
+                .filter_map(|v| {
+                    v.as_str().map(String::from).or_else(|| expr_to_col_name(v))
+                })
+                .map(|s| df.resolve_column_name(s.as_str()))
                 .collect::<Result<Vec<_>, _>>()
                 .map_err(PlanError::Session)?;
             let refs: Vec<&str> = names.iter().map(|s| s.as_str()).collect();
@@ -833,5 +834,39 @@ mod tests {
         assert_eq!(s_col.f64().unwrap().get(0), Some(0.0));
         assert!((c_col.f64().unwrap().get(0).unwrap() - 1.0).abs() < 1e-10);
         assert!((s_col.f64().unwrap().get(1).unwrap() - 1.0).abs() < 1e-10);
+    }
+
+    /// PR-5/#873,#884: select and drop accept column refs as {"col": "name"} (Sparkless PyColumn).
+    #[test]
+    fn test_plan_select_drop_column_ref_objects() {
+        let session = crate::session::SparkSession::builder()
+            .app_name("plan_select_col_ref")
+            .get_or_create();
+        let data = vec![
+            vec![json!(1), json!("x"), json!(10)],
+            vec![json!(2), json!("y"), json!(20)],
+        ];
+        let schema = vec![
+            ("a".to_string(), "bigint".to_string()),
+            ("b".to_string(), "string".to_string()),
+            ("c".to_string(), "bigint".to_string()),
+        ];
+        // Select using [{"col": "a"}, {"col": "b"}] instead of ["a", "b"]
+        let plan_select = vec![json!({
+            "op": "select",
+            "payload": [{"col": "a"}, {"col": "b"}]
+        })];
+        let df = execute_plan(&session, data.clone(), schema.clone(), &plan_select).unwrap();
+        let out = df.collect_inner().unwrap();
+        assert_eq!(out.get_column_names(), &["a", "b"]);
+        assert_eq!(out.height(), 2);
+        // Drop using [{"col": "b"}] to leave a, c
+        let plan_drop = vec![
+            json!({"op": "select", "payload": [{"col": "a"}, {"col": "b"}, {"col": "c"}]}),
+            json!({"op": "drop", "payload": {"columns": [{"col": "b"}]}}),
+        ];
+        let df2 = execute_plan(&session, data, schema, &plan_drop).unwrap();
+        let out2 = df2.collect_inner().unwrap();
+        assert_eq!(out2.get_column_names(), &["a", "c"]);
     }
 }
