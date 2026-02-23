@@ -1930,9 +1930,10 @@ fn any_value_to_json(av: &AnyValue<'_>, dtype: &DataType) -> JsonValue {
         AnyValue::Boolean(b) => JsonValue::Bool(*b),
         // Date/Datetime columns may appear as Int32/Int64 from plan; serialize as ISO strings (#849, #841, #840, #839).
         AnyValue::Int32(i) if matches!(dtype, DataType::Date) => date_days_to_json(*i),
-        AnyValue::Int64(i) if matches!(dtype, DataType::Datetime(_, _)) => {
-            datetime_anyvalue_to_json_iso(*i, &TimeUnit::Microseconds)
-        }
+        AnyValue::Int64(i) if matches!(dtype, DataType::Datetime(_, _)) => match dtype {
+            DataType::Datetime(unit, _) => datetime_anyvalue_to_json_iso(*i, unit),
+            _ => datetime_anyvalue_to_json_iso(*i, &TimeUnit::Microseconds),
+        },
         // Float column may yield Int from coalesce/agg; serialize as number (#837, #835, #812, #804, #802).
         AnyValue::Int32(i) if matches!(dtype, DataType::Float32 | DataType::Float64) => {
             float_to_json_number(*i as f64)
