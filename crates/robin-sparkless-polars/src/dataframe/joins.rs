@@ -23,22 +23,29 @@ pub enum JoinType {
 /// When join key types differ (e.g. str vs int), coerces both sides to a common type (PySpark parity #274).
 /// When both tables have the same join key column name(s), renames the right's keys to temp names and
 /// uses left_on/right_on so Polars does not error with "duplicate column" (issue #580, PySpark parity).
-/// When left/right key names differ in casing (e.g. "id" vs "ID"), aliases right keys to left names
-/// so the result has one key column name and col("ID")/col("id") both resolve (PySpark parity #604).
+/// When left/right key names differ in casing or name (e.g. "id" vs "ID" or "id" vs "other_id"), aliases right keys to left names
+/// so the result has one key column name (PySpark parity #604, #743).
 /// For Right and Outer, reorders columns to match PySpark: key(s), then left non-key, then right non-key.
+/// `left_on` and `right_on` must have the same length; keys are matched by position.
 pub fn join(
     left: &DataFrame,
     right: &DataFrame,
-    on: Vec<&str>,
+    left_on: Vec<&str>,
+    right_on: Vec<&str>,
     how: JoinType,
     case_sensitive: bool,
 ) -> Result<DataFrame, PolarsError> {
     use polars::prelude::{JoinBuilder, JoinCoalesce, col};
+    if left_on.len() != right_on.len() {
+        return Err(PolarsError::ComputeError(
+            "join: left_on and right_on must have the same length".into(),
+        ));
+    }
     let mut left_lf = left.lazy_frame();
     let mut right_lf = right.lazy_frame();
 
-    // Resolve key names on both sides so we can alias right keys to left names (#604).
-    let left_key_names: Vec<String> = on
+    // Resolve key names on both sides so we can alias right keys to left names (#604, #743).
+    let left_key_names: Vec<String> = left_on
         .iter()
         .map(|k| {
             left.resolve_column_name(k).map_err(|e| {
@@ -46,7 +53,7 @@ pub fn join(
             })
         })
         .collect::<Result<_, _>>()?;
-    let right_key_names: Vec<String> = on
+    let right_key_names: Vec<String> = right_on
         .iter()
         .map(|k| {
             right.resolve_column_name(k).map_err(|e| {
@@ -56,10 +63,10 @@ pub fn join(
         .collect::<Result<_, _>>()?;
 
     // Coerce join keys to a common type when left/right dtypes differ (PySpark #274).
-    // Alias right keys to left key names so result has one key column name (#604).
+    // Alias right keys to left key names so result has one key column name (#604, #743).
     let mut left_casts: Vec<Expr> = Vec::new();
     let mut right_casts: Vec<Expr> = Vec::new();
-    for (i, key) in on.iter().enumerate() {
+    for (i, key) in left_on.iter().enumerate() {
         let left_name = &left_key_names[i];
         let right_name = &right_key_names[i];
         let left_dtype = left.get_column_dtype(left_name.as_str()).ok_or_else(|| {
@@ -90,7 +97,7 @@ pub fn join(
         right_lf = right_lf.with_columns(right_casts);
         // #614: Drop right's original key columns when we aliased to left names, so the result
         // has only the left key name (e.g. "id") and collect does not fail with "not found: ID".
-        let drop_right: std::collections::HashSet<String> = on
+        let drop_right: std::collections::HashSet<String> = left_on
             .iter()
             .enumerate()
             .filter(|(i, _)| left_key_names[*i] != right_key_names[*i])
@@ -214,7 +221,15 @@ mod tests {
     fn inner_join() {
         let left = left_df();
         let right = right_df();
-        let out = join(&left, &right, vec!["id"], JoinType::Inner, false).unwrap();
+        let out = join(
+            &left,
+            &right,
+            vec!["id"],
+            vec!["id"],
+            JoinType::Inner,
+            false,
+        )
+        .unwrap();
         assert_eq!(out.count().unwrap(), 1);
         let cols = out.columns().unwrap();
         assert!(cols.iter().any(|c| c == "id" || c.ends_with("_right")));
@@ -224,7 +239,7 @@ mod tests {
     fn left_join() {
         let left = left_df();
         let right = right_df();
-        let out = join(&left, &right, vec!["id"], JoinType::Left, false).unwrap();
+        let out = join(&left, &right, vec!["id"], vec!["id"], JoinType::Left, false).unwrap();
         assert_eq!(out.count().unwrap(), 2);
     }
 
@@ -232,7 +247,15 @@ mod tests {
     fn right_join() {
         let left = left_df();
         let right = right_df();
-        let out = join(&left, &right, vec!["id"], JoinType::Right, false).unwrap();
+        let out = join(
+            &left,
+            &right,
+            vec!["id"],
+            vec!["id"],
+            JoinType::Right,
+            false,
+        )
+        .unwrap();
         assert_eq!(out.count().unwrap(), 2); // right has id 1,3; left matches 1
     }
 
@@ -240,7 +263,15 @@ mod tests {
     fn outer_join() {
         let left = left_df();
         let right = right_df();
-        let out = join(&left, &right, vec!["id"], JoinType::Outer, false).unwrap();
+        let out = join(
+            &left,
+            &right,
+            vec!["id"],
+            vec!["id"],
+            JoinType::Outer,
+            false,
+        )
+        .unwrap();
         assert_eq!(out.count().unwrap(), 3);
     }
 
@@ -248,7 +279,15 @@ mod tests {
     fn left_semi_join() {
         let left = left_df();
         let right = right_df();
-        let out = join(&left, &right, vec!["id"], JoinType::LeftSemi, false).unwrap();
+        let out = join(
+            &left,
+            &right,
+            vec!["id"],
+            vec!["id"],
+            JoinType::LeftSemi,
+            false,
+        )
+        .unwrap();
         assert_eq!(out.count().unwrap(), 1); // left rows with match in right (id 1)
     }
 
@@ -256,7 +295,15 @@ mod tests {
     fn left_anti_join() {
         let left = left_df();
         let right = right_df();
-        let out = join(&left, &right, vec!["id"], JoinType::LeftAnti, false).unwrap();
+        let out = join(
+            &left,
+            &right,
+            vec!["id"],
+            vec!["id"],
+            JoinType::LeftAnti,
+            false,
+        )
+        .unwrap();
         assert_eq!(out.count().unwrap(), 1); // left rows with no match (id 2)
     }
 
@@ -269,7 +316,15 @@ mod tests {
         let right = spark
             .create_dataframe(vec![] as Vec<(i64, i64, String)>, vec!["id", "w", "tag"])
             .unwrap();
-        let out = join(&left, &right, vec!["id"], JoinType::Inner, false).unwrap();
+        let out = join(
+            &left,
+            &right,
+            vec!["id"],
+            vec!["id"],
+            JoinType::Inner,
+            false,
+        )
+        .unwrap();
         assert_eq!(out.count().unwrap(), 0);
     }
 
@@ -284,7 +339,15 @@ mod tests {
         let right_pl = df!("id" => &[1i64], "x" => &[10i64]).unwrap();
         let left = spark.create_dataframe_from_polars(left_pl);
         let right = spark.create_dataframe_from_polars(right_pl);
-        let out = join(&left, &right, vec!["id"], JoinType::Inner, false).unwrap();
+        let out = join(
+            &left,
+            &right,
+            vec!["id"],
+            vec!["id"],
+            JoinType::Inner,
+            false,
+        )
+        .unwrap();
         assert_eq!(out.count().unwrap(), 1);
         let rows = out.collect().unwrap();
         assert_eq!(rows.height(), 1);
@@ -304,7 +367,15 @@ mod tests {
         let right_pl = df!("id" => &["1", "3"], "value" => &[100i64, 300i64]).unwrap();
         let left = spark.create_dataframe_from_polars(left_pl);
         let right = spark.create_dataframe_from_polars(right_pl);
-        let out = join(&left, &right, vec!["id"], JoinType::Inner, false).unwrap();
+        let out = join(
+            &left,
+            &right,
+            vec!["id"],
+            vec!["id"],
+            JoinType::Inner,
+            false,
+        )
+        .unwrap();
         assert_eq!(out.count().unwrap(), 1, "inner join on id: 1 match (id=1)");
         let rows = out.collect().unwrap();
         assert_eq!(rows.height(), 1);
@@ -324,8 +395,15 @@ mod tests {
         let right_pl = df!("ID" => &[1i64], "other" => &["x"]).unwrap();
         let left = spark.create_dataframe_from_polars(left_pl);
         let right = spark.create_dataframe_from_polars(right_pl);
-        let out = join(&left, &right, vec!["id"], JoinType::Inner, false)
-            .expect("issue #604: join on id/ID must succeed");
+        let out = join(
+            &left,
+            &right,
+            vec!["id"],
+            vec!["id"],
+            JoinType::Inner,
+            false,
+        )
+        .expect("issue #604: join on id/ID must succeed");
         assert_eq!(out.count().unwrap(), 1);
         let rows = out
             .collect()
