@@ -1946,6 +1946,15 @@ fn float_to_json_number(f: f64) -> JsonValue {
         .unwrap_or(JsonValue::Null)
 }
 
+/// Format days since epoch as ISO date string (#849, #841, #840, #839: collect Date so Python gets non-null).
+fn date_days_to_json(days: i32) -> JsonValue {
+    let epoch = robin_sparkless_core::date_utils::epoch_naive_date();
+    epoch
+        .checked_add_signed(chrono::TimeDelta::days(days as i64))
+        .map(|d| JsonValue::String(d.format("%Y-%m-%d").to_string()))
+        .unwrap_or(JsonValue::Null)
+}
+
 /// Convert Polars Datetime AnyValue (i64 + TimeUnit) to ISO string for collect (#842, #843, #849).
 fn datetime_anyvalue_to_json_iso(val: i64, unit: &TimeUnit) -> JsonValue {
     let micros = match unit {
@@ -1968,6 +1977,11 @@ fn any_value_to_json(av: &AnyValue<'_>, dtype: &DataType) -> JsonValue {
     match av {
         AnyValue::Null => JsonValue::Null,
         AnyValue::Boolean(b) => JsonValue::Bool(*b),
+        // Date/Datetime columns may appear as Int32/Int64 from plan; serialize as ISO strings (#849, #841, #840, #839).
+        AnyValue::Int32(i) if matches!(dtype, DataType::Date) => date_days_to_json(*i),
+        AnyValue::Int64(i) if matches!(dtype, DataType::Datetime(_, _)) => {
+            datetime_anyvalue_to_json_iso(*i, &TimeUnit::Microseconds)
+        }
         AnyValue::Int32(i) => JsonValue::Number(serde_json::Number::from(*i)),
         AnyValue::Int64(i) => JsonValue::Number(serde_json::Number::from(*i)),
         AnyValue::UInt32(u) => JsonValue::Number(serde_json::Number::from(*u)),
@@ -2049,13 +2063,7 @@ fn any_value_to_json(av: &AnyValue<'_>, dtype: &DataType) -> JsonValue {
             }
             JsonValue::Object(obj)
         }
-        AnyValue::Date(days) => {
-            let epoch = robin_sparkless_core::date_utils::epoch_naive_date();
-            epoch
-                .checked_add_signed(chrono::TimeDelta::days(*days as i64))
-                .map(|d| JsonValue::String(d.format("%Y-%m-%d").to_string()))
-                .unwrap_or(JsonValue::Null)
-        }
+        AnyValue::Date(days) => date_days_to_json(*days),
         AnyValue::Datetime(val, unit, _) => datetime_anyvalue_to_json_iso(*val, unit),
         AnyValue::DatetimeOwned(val, unit, _) => datetime_anyvalue_to_json_iso(*val, unit),
         _ => JsonValue::Null,

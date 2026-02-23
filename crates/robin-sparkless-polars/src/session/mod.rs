@@ -444,6 +444,7 @@ fn json_values_to_series(
                                 });
                             parsed.ok().map(|dt| dt.and_utc().timestamp_micros())
                         }
+                        JsonValue::Object(obj) => parse_datetime_from_json_object(obj),
                         JsonValue::Number(n) => n.as_i64(),
                         JsonValue::Null => None,
                         _ => None,
@@ -490,6 +491,13 @@ fn json_value_to_series_single(
             let s = Series::new(name.into(), vec![days]).cast(&DataType::Date)?;
             Ok(s)
         }
+        (JsonValue::Object(obj), "date") => {
+            let days = parse_date_from_json_object(obj).ok_or_else(|| {
+                PolarsError::ComputeError("date object: missing year/month/day".into())
+            })?;
+            let s = Series::new(name.into(), vec![days]).cast(&DataType::Date)?;
+            Ok(s)
+        }
         (JsonValue::String(s), "timestamp" | "datetime" | "timestamp_ntz") => {
             let micros = parse_timestamp_str_to_micros(s)?;
             let s = Series::new(name.into(), vec![Some(micros)])
@@ -502,10 +510,40 @@ fn json_value_to_series_single(
                 .cast(&DataType::Datetime(TimeUnit::Microseconds, None))?;
             Ok(s)
         }
+        (JsonValue::Object(obj), "timestamp" | "datetime" | "timestamp_ntz") => {
+            let micros = parse_datetime_from_json_object(obj).ok_or_else(|| {
+                PolarsError::ComputeError("datetime object: missing year/month/day".into())
+            })?;
+            let s = Series::new(name.into(), vec![Some(micros)])
+                .cast(&DataType::Datetime(TimeUnit::Microseconds, None))?;
+            Ok(s)
+        }
         _ => Err(PolarsError::ComputeError(
             format!("json_value_to_series: unsupported {type_str} for {value:?}").into(),
         )),
     }
+}
+
+/// Parse date from JSON object with year, month, day (e.g. Python datetime.date serialization). Returns days since epoch.
+fn parse_date_from_json_object(obj: &serde_json::Map<String, JsonValue>) -> Option<i32> {
+    let year = obj.get("year").and_then(|v| v.as_i64())? as i32;
+    let month = obj.get("month").and_then(|v| v.as_i64()).unwrap_or(1) as u32;
+    let day = obj.get("day").and_then(|v| v.as_i64()).unwrap_or(1) as u32;
+    let epoch = date_utils::epoch_naive_date();
+    chrono::NaiveDate::from_ymd_opt(year, month, day).map(|d| (d - epoch).num_days() as i32)
+}
+
+/// Parse datetime from JSON object (year, month, day, hour?, minute?, second?). Returns microseconds since epoch.
+fn parse_datetime_from_json_object(obj: &serde_json::Map<String, JsonValue>) -> Option<i64> {
+    let year = obj.get("year").and_then(|v| v.as_i64())? as i32;
+    let month = obj.get("month").and_then(|v| v.as_i64()).unwrap_or(1) as u32;
+    let day = obj.get("day").and_then(|v| v.as_i64()).unwrap_or(1) as u32;
+    let hour = obj.get("hour").and_then(|v| v.as_i64()).unwrap_or(0) as u32;
+    let min = obj.get("minute").and_then(|v| v.as_i64()).unwrap_or(0) as u32;
+    let sec = obj.get("second").and_then(|v| v.as_i64()).unwrap_or(0) as u32;
+    let d = chrono::NaiveDate::from_ymd_opt(year, month, day)?;
+    let dt = d.and_hms_opt(hour, min, sec)?;
+    Some(dt.and_utc().timestamp_micros())
 }
 
 /// Parse a single timestamp string to microseconds since epoch (for json_value_to_series_single).
@@ -1503,6 +1541,7 @@ impl SparkSession {
                                 JsonValue::String(s) => NaiveDate::parse_from_str(&s, "%Y-%m-%d")
                                     .ok()
                                     .map(|d| (d - epoch).num_days() as i32),
+                                JsonValue::Object(obj) => parse_date_from_json_object(&obj),
                                 JsonValue::Null => None,
                                 _ => None,
                             }
@@ -1554,6 +1593,7 @@ impl SparkSession {
                                         });
                                         parsed.ok().map(|dt| dt.and_utc().timestamp_micros())
                                     }
+                                    JsonValue::Object(obj) => parse_datetime_from_json_object(&obj),
                                     JsonValue::Number(n) => n.as_i64(),
                                     JsonValue::Null => None,
                                     _ => None,
