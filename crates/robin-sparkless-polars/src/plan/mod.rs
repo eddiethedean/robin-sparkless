@@ -350,10 +350,18 @@ fn apply_op(
                 .ok_or_else(|| {
                     PlanError::InvalidPlan("orderBy payload must have 'columns' array".into())
                 })?;
+            // Each element: string (column name) or object {"col": "name"} / {"type": "column", "name": "x"} (PR2).
             let col_names: Vec<String> = columns
                 .iter()
-                .filter_map(|v| v.as_str())
-                .map(|s| df.resolve_column_name(s))
+                .filter_map(|v| {
+                    v.as_str()
+                        .map(|s| s.to_string())
+                        .or_else(|| {
+                            v.get("col").and_then(Value::as_str).map(|s| s.to_string())
+                                .or_else(|| v.get("name").and_then(Value::as_str).map(|s| s.to_string()))
+                        })
+                })
+                .map(|s| df.resolve_column_name(s.as_str()))
                 .collect::<Result<Vec<_>, _>>()
                 .map_err(PlanError::Session)?;
             let ascending = payload
