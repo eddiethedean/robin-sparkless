@@ -254,9 +254,7 @@ pub fn expr_from_value(v: &Value) -> Result<Expr, PlanExprError> {
                     None => lit(false),
                     Some(values_expr) => {
                         // #742, #854: values are string series; cast left to string so string and numeric columns both work
-                        left_expr
-                            .cast(DataType::String)
-                            .is_in(values_expr, false)
+                        left_expr.cast(DataType::String).is_in(values_expr, false)
                     }
                 });
             }
@@ -1582,9 +1580,7 @@ fn expr_from_fn(name: &str, args: &[Value]) -> Result<Expr, PlanExprError> {
             let values_opt = try_values_for_isin(&args[1..])?;
             Ok(match values_opt {
                 None => lit(false),
-                Some(values_expr) => col_expr
-                    .cast(DataType::String)
-                    .is_in(values_expr, false),
+                Some(values_expr) => col_expr.cast(DataType::String).is_in(values_expr, false),
             })
         }
         _ => expr_from_fn_rest(name, args),

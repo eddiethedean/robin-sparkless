@@ -249,7 +249,11 @@ pub fn union(
         right_names.iter().map(|s| s.to_lowercase()).collect()
     };
     for n in &left_names {
-        let key = if case_sensitive { n.clone() } else { n.to_lowercase() };
+        let key = if case_sensitive {
+            n.clone()
+        } else {
+            n.to_lowercase()
+        };
         if !right_names_set.contains(&key) {
             return Err(PolarsError::InvalidOperation(
                 format!(

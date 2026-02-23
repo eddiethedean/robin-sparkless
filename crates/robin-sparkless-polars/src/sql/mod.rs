@@ -467,7 +467,10 @@ mod tests {
             )
             .unwrap();
         let b = spark
-            .create_dataframe(vec![(3i64, 30i64, "z".to_string())], vec!["id", "v", "name"])
+            .create_dataframe(
+                vec![(3i64, 30i64, "z".to_string())],
+                vec!["id", "v", "name"],
+            )
             .unwrap();
         spark.create_or_replace_temp_view("a", a);
         spark.create_or_replace_temp_view("b", b);
