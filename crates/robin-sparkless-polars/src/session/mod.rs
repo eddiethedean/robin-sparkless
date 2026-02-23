@@ -1221,7 +1221,7 @@ impl SparkSession {
         for (col_idx, (name, type_str)) in schema.iter().enumerate() {
             let type_lower = type_str.trim().to_lowercase();
             let s = match type_lower.as_str() {
-                "int" | "integer" | "bigint" | "long" => {
+                "int" | "integer" | "bigint" | "long" | "smallint" | "tinyint" => {
                     let vals: Vec<Option<i64>> = rows
                         .iter()
                         .map(|row| {
