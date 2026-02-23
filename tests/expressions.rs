@@ -828,6 +828,46 @@ fn plan_select_concat_as_full_name() {
     );
 }
 
+/// #787, #751: Date/datetime columns must serialize as ISO strings (not 'None').
+#[test]
+fn plan_collect_date_datetime_iso_string() {
+    let spark = spark();
+    let schema = vec![
+        ("d".to_string(), "date".to_string()),
+        ("ts".to_string(), "timestamp".to_string()),
+    ];
+    let rows = vec![
+        vec![
+            json!({"year": 2026, "month": 1, "day": 1}),
+            json!("2026-01-01T12:00:00"),
+        ],
+        vec![
+            json!({"year": 2024, "month": 1, "day": 1}),
+            json!("2024-01-01T00:00:00"),
+        ],
+    ];
+    let df = plan::execute_plan(&spark, rows, schema, &[]).unwrap();
+    let out = df.collect_as_json_rows_engine().unwrap();
+    assert_eq!(out.len(), 2);
+    assert!(
+        out[0]
+            .get("d")
+            .and_then(|v| v.as_str())
+            .map(|s| s.starts_with("2026-01-01"))
+            .unwrap_or(false),
+        "date column must be ISO string (#787); got: {:?}",
+        out[0].get("d")
+    );
+    assert!(
+        out[1]
+            .get("d")
+            .and_then(|v| v.as_str())
+            .map(|s| s.starts_with("2024-01-01"))
+            .unwrap_or(false),
+        "date column must be ISO string (#751)"
+    );
+}
+
 /// #735, #749, #750, #780, #781, #782: Numeric and string scalar/collect must not be null.
 #[test]
 fn plan_collect_numeric_and_string_not_null() {
