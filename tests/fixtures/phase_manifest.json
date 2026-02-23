@@ -103,6 +103,7 @@
     "filter_and_select_core",
     "collect_null_preservation",
     "collect_null_string",
+    "collect_null_date_datetime",
     "coalesce_numeric_null",
     "groupby_avg_column_name",
     "select_agg_column_after_groupby",
