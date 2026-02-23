@@ -89,6 +89,34 @@ pub fn find_common_type(left: &DataType, right: &DataType) -> Result<DataType, P
     }
 }
 
+/// Common type for join keys (#850). When one side is numeric and the other is String, prefer the
+/// numeric type so the result schema has a numeric key column (PySpark parity).
+pub fn find_common_type_for_join(
+    left: &DataType,
+    right: &DataType,
+) -> Result<DataType, PolarsError> {
+    let left_norm = if matches!(left, DataType::Unknown(_)) {
+        DataType::String
+    } else {
+        left.clone()
+    };
+    let right_norm = if matches!(right, DataType::Unknown(_)) {
+        DataType::String
+    } else {
+        right.clone()
+    };
+    let left = &left_norm;
+    let right = &right_norm;
+    // Prefer numeric when one is numeric and one is string (PySpark result schema has numeric key).
+    if is_numeric(left) && right == &DataType::String {
+        return Ok(left.clone());
+    }
+    if left == &DataType::String && is_numeric(right) {
+        return Ok(right.clone());
+    }
+    find_common_type(left, right)
+}
+
 /// Build (left_expr, right_expr) that cast two columns to a common type and alias to the same name.
 /// Use in join key coercion and union_by_name when both sides have the column but types differ.
 pub fn coerce_expr_pair(
@@ -99,6 +127,21 @@ pub fn coerce_expr_pair(
     alias: &str,
 ) -> Result<(Expr, Expr), PolarsError> {
     let common = find_common_type(left_dtype, right_dtype)?;
+    Ok((
+        col(left_name).cast(common.clone()).alias(alias),
+        col(right_name).cast(common).alias(alias),
+    ))
+}
+
+/// Like coerce_expr_pair but uses find_common_type_for_join so join result key is numeric when one side is numeric (#850).
+pub fn coerce_expr_pair_for_join(
+    left_name: &str,
+    right_name: &str,
+    left_dtype: &DataType,
+    right_dtype: &DataType,
+    alias: &str,
+) -> Result<(Expr, Expr), PolarsError> {
+    let common = find_common_type_for_join(left_dtype, right_dtype)?;
     Ok((
         col(left_name).cast(common.clone()).alias(alias),
         col(right_name).cast(common).alias(alias),

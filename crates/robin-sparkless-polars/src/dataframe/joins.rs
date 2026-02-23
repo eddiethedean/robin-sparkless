@@ -1,7 +1,7 @@
 //! Join operations for DataFrame.
 
 use super::DataFrame;
-use crate::type_coercion::coerce_expr_pair;
+use crate::type_coercion::coerce_expr_pair_for_join;
 use polars::prelude::Expr;
 use polars::prelude::JoinType as PlJoinType;
 use polars::prelude::PolarsError;
@@ -77,7 +77,7 @@ pub fn join(
         })?;
         let target_name = left_name.as_str();
         if left_dtype != right_dtype {
-            let (l, r) = coerce_expr_pair(
+            let (l, r) = coerce_expr_pair_for_join(
                 left_name.as_str(),
                 right_name.as_str(),
                 &left_dtype,

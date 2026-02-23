@@ -36,10 +36,14 @@ pub fn min(col: &Column) -> Column {
     Column::from_expr(col.expr().clone().min(), Some("min".to_string()))
 }
 
-/// First value in group (PySpark first). Use in groupBy.agg(). ignorenulls: when true, first non-null; Polars 0.45 uses .first() only (ignorenulls reserved for API compatibility).
+/// First value in group (PySpark first). Use in groupBy.agg(). ignorenulls: when true, first non-null (Polars first_non_null); otherwise first value in group order.
 pub fn first(col: &Column, ignorenulls: bool) -> Column {
-    let _ = ignorenulls;
-    Column::from_expr(col.expr().clone().first(), None)
+    let expr = if ignorenulls {
+        col.expr().clone().first_non_null()
+    } else {
+        col.expr().clone().first()
+    };
+    Column::from_expr(expr, None)
 }
 
 /// Any value from the group (PySpark any_value). Use in groupBy.agg(). ignorenulls reserved for API compatibility.

@@ -656,7 +656,7 @@ fn apply_op(
 
 fn parse_aggs(aggs: &[Value], df: &DataFrame) -> Result<Vec<polars::prelude::Expr>, PlanError> {
     use crate::Column;
-    use crate::functions::{avg, count, max, min, sum as rs_sum};
+    use crate::functions::{avg, count, first as rs_first, max, min, sum as rs_sum};
     use std::collections::HashMap;
 
     let mut out = Vec::with_capacity(aggs.len());
@@ -702,7 +702,13 @@ fn parse_aggs(aggs: &[Value], df: &DataFrame) -> Result<Vec<polars::prelude::Exp
             "avg" => avg(&c),
             "min" => min(&c),
             "max" => max(&c),
-            "first" => Column::from_expr(c.into_expr().first(), None),
+            "first" => {
+                let ignorenulls = obj
+                    .get("ignorenulls")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false);
+                rs_first(&c, ignorenulls)
+            }
             "last" => Column::from_expr(c.into_expr().last(), None),
             _ => return Err(PlanError::InvalidPlan(format!("unsupported agg: {agg}"))),
         };
