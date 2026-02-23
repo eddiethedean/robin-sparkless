@@ -2075,25 +2075,31 @@ pub fn factorial(column: &Column) -> Column {
     column.clone().factorial()
 }
 
-/// Concatenate string columns without separator (PySpark concat)
-/// Concatenate string columns (PySpark concat). **Panics** if `columns` is empty.
+/// Concatenate columns as strings (PySpark concat). Numeric columns are cast to string (#852).
+/// **Panics** if `columns` is empty.
 pub fn concat(columns: &[&Column]) -> Column {
     use polars::prelude::*;
     if columns.is_empty() {
         panic!("concat requires at least one column");
     }
-    let exprs: Vec<Expr> = columns.iter().map(|c| c.expr().clone()).collect();
+    let exprs: Vec<Expr> = columns
+        .iter()
+        .map(|c| c.expr().clone().cast(DataType::String))
+        .collect();
     crate::column::Column::from_expr(concat_str(&exprs, "", false), None)
 }
 
-/// Concatenate string columns with separator (PySpark concat_ws)
-/// Concatenate with separator (PySpark concat_ws). **Panics** if `columns` is empty.
+/// Concatenate columns as strings with separator (PySpark concat_ws). Numeric columns cast to string (#852).
+/// **Panics** if `columns` is empty.
 pub fn concat_ws(separator: &str, columns: &[&Column]) -> Column {
     use polars::prelude::*;
     if columns.is_empty() {
         panic!("concat_ws requires at least one column");
     }
-    let exprs: Vec<Expr> = columns.iter().map(|c| c.expr().clone()).collect();
+    let exprs: Vec<Expr> = columns
+        .iter()
+        .map(|c| c.expr().clone().cast(DataType::String))
+        .collect();
     crate::column::Column::from_expr(concat_str(&exprs, separator, false), None)
 }
 
