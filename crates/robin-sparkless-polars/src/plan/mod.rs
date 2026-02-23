@@ -29,7 +29,7 @@ pub fn execute_plan(
 ) -> Result<DataFrame, PlanError> {
     set_thread_udf_session(session.clone());
     let mut df = session
-        .create_dataframe_from_rows(data, schema)
+        .create_dataframe_from_rows(data, schema, false)
         .map_err(PlanError::Session)?
         .with_case_insensitive_column_resolution();
 
@@ -186,8 +186,14 @@ fn expr_to_col_name(v: &Value) -> Option<String> {
 /// Parse join "on" into list of column names. Accepts:
 /// - string -> [s]; array of strings -> those; array of {"col": "x"} -> ["x"];
 /// - array of {"op": "eq", "left": {"col": "a"}, "right": {"col": "a"}} -> ["a"] (Sparkless v4 format, #552).
+///   #704, #698: Reject expression-like strings (e.g. array_contains(...)) with clear error.
 fn parse_join_on(on: &Value, df: &DataFrame) -> Result<Vec<String>, PlanError> {
     if let Some(s) = on.as_str() {
+        if s.contains('(') {
+            return Err(PlanError::InvalidPlan(
+                "join on expression (e.g. array_contains(...) or column expr) is not supported; use column names only".into(),
+            ));
+        }
         let resolved = df.resolve_column_name(s).map_err(PlanError::Session)?;
         return Ok(vec![resolved]);
     }
@@ -556,7 +562,7 @@ fn apply_op(
             let schema_names: Vec<String> = schema_vec.iter().map(|(n, _)| n.clone()).collect();
             let rows = other_data_to_rows(other_data, &schema_names);
             let other_df = session
-                .create_dataframe_from_rows(rows, schema_vec)
+                .create_dataframe_from_rows(rows, schema_vec, false)
                 .map_err(PlanError::Session)?;
 
             let on_keys_left = parse_join_on(on, &df)?;
@@ -596,7 +602,7 @@ fn apply_op(
             let schema_names: Vec<String> = schema_vec.iter().map(|(n, _)| n.clone()).collect();
             let rows = other_data_to_rows(other_data, &schema_names);
             let other_df = session
-                .create_dataframe_from_rows(rows, schema_vec)
+                .create_dataframe_from_rows(rows, schema_vec, false)
                 .map_err(PlanError::Session)?;
             df.union(&other_df).map_err(PlanError::Session)
         }
@@ -614,7 +620,7 @@ fn apply_op(
             let schema_names: Vec<String> = schema_vec.iter().map(|(n, _)| n.clone()).collect();
             let rows = other_data_to_rows(other_data, &schema_names);
             let other_df = session
-                .create_dataframe_from_rows(rows, schema_vec)
+                .create_dataframe_from_rows(rows, schema_vec, false)
                 .map_err(PlanError::Session)?;
             df.union_by_name(&other_df, true)
                 .map_err(PlanError::Session)
@@ -632,7 +638,7 @@ fn apply_op(
             let schema_names: Vec<String> = schema_vec.iter().map(|(n, _)| n.clone()).collect();
             let rows = other_data_to_rows(other_data, &schema_names);
             let other_df = session
-                .create_dataframe_from_rows(rows, schema_vec)
+                .create_dataframe_from_rows(rows, schema_vec, false)
                 .map_err(PlanError::Session)?;
             df.cross_join(&other_df).map_err(PlanError::Session)
         }
@@ -780,6 +786,39 @@ mod tests {
         let out = df.collect_inner().unwrap();
         assert_eq!(out.height(), 4, "cross join 2x2 = 4 rows");
         assert_eq!(out.get_column_names(), &["a", "b"]);
+    }
+
+    /// #704, #698: Join with expression in "on" (e.g. array_contains) returns clear error.
+    #[test]
+    fn test_join_on_expression_returns_clear_error() {
+        let session = crate::session::SparkSession::builder()
+            .app_name("plan_join_on_expr")
+            .get_or_create();
+        let data = vec![vec![json!(1), json!("a")]];
+        let schema = vec![
+            ("id".to_string(), "bigint".to_string()),
+            ("x".to_string(), "string".to_string()),
+        ];
+        let plan = vec![json!({
+            "op": "join",
+            "payload": {
+                "on": "array_contains(col, x)",
+                "how": "inner",
+                "other_data": [[1, "b"]],
+                "other_schema": [{"name": "id", "type": "bigint"}, {"name": "x", "type": "string"}]
+            }
+        })];
+        let result = execute_plan(&session, data, schema, &plan);
+        let err = match result {
+            Ok(_) => panic!("join on expression should fail"),
+            Err(e) => e,
+        };
+        let msg = err.to_string();
+        assert!(
+            msg.contains("join on expression") || msg.contains("use column names only"),
+            "error should explain join-on expression not supported: {}",
+            msg
+        );
     }
 
     #[test]

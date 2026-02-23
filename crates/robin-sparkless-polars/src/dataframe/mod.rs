@@ -2093,7 +2093,9 @@ mod tests {
             vec![json!(2), json!("bob")],
             vec![json!(3), json!("charlie")],
         ];
-        let df = spark.create_dataframe_from_rows(rows, schema).unwrap();
+        let df = spark
+            .create_dataframe_from_rows(rows, schema, false)
+            .unwrap();
         let cond: polars::prelude::Expr = col("name").contains("lic").into_expr();
         let filtered = df.filter(cond).unwrap();
         assert_eq!(
@@ -2154,6 +2156,33 @@ mod tests {
         assert!(rows[1].contains_key("value"));
         assert!(matches!(rows[1].get("value"), Some(JsonValue::Null)));
         assert_eq!(rows[2].get("value").and_then(|v| v.as_i64()), Some(30));
+    }
+
+    /// #156: DataFrame.pivot is a stub; must return clear error (use crosstab).
+    #[test]
+    fn pivot_raises_not_implemented() {
+        let spark = SparkSession::builder()
+            .app_name("pivot_stub_test")
+            .get_or_create();
+        let df = spark
+            .create_dataframe(
+                vec![
+                    (1i64, 25i64, "a".to_string()),
+                    (2i64, 30i64, "b".to_string()),
+                ],
+                vec!["id", "age", "name"],
+            )
+            .unwrap();
+        let err = match df.pivot("name", None) {
+            Ok(_) => panic!("pivot should not be implemented"),
+            Err(e) => e,
+        };
+        let msg = err.to_string();
+        assert!(
+            msg.contains("pivot is not yet implemented") && msg.contains("crosstab"),
+            "pivot stub should mention crosstab: {}",
+            msg
+        );
     }
 
     /// #747, #748: collect rounds floats that are close to integers (e.g. 2**3 => 8 not 7.999...).

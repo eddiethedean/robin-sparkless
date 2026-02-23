@@ -332,6 +332,7 @@ fn issue_578_create_map_empty_returns_empty_object_not_null() {
         .create_dataframe_from_rows(
             vec![vec![json!(1)]],
             vec![("id".to_string(), "bigint".to_string())],
+            false,
         )
         .unwrap();
     let empty_map = create_map(&[]).unwrap();
@@ -508,7 +509,7 @@ fn issue_557_substring_1based_positive_start() {
     let data = vec![vec![json!("Hello")]];
     let schema = vec![("s".to_string(), "string".to_string())];
     let df = session
-        .create_dataframe_from_rows(data, schema)
+        .create_dataframe_from_rows(data, schema, false)
         .unwrap()
         .select_exprs(vec![
             substring(&col("s"), 2, Some(3)).alias("out").into_expr(),
@@ -525,7 +526,7 @@ fn issue_557_substring_negative_start_from_end() {
     let data = vec![vec![json!("Spark SQL")]];
     let schema = vec![("s".to_string(), "string".to_string())];
     let df = session
-        .create_dataframe_from_rows(data, schema)
+        .create_dataframe_from_rows(data, schema, false)
         .unwrap()
         .select_exprs(vec![
             substring(&col("s"), -3, None).alias("out").into_expr(),
@@ -542,7 +543,7 @@ fn issue_557_substring_zero_length_empty_string() {
     let data = vec![vec![json!("Hello")]];
     let schema = vec![("s".to_string(), "string".to_string())];
     let df = session
-        .create_dataframe_from_rows(data, schema)
+        .create_dataframe_from_rows(data, schema, false)
         .unwrap()
         .select_exprs(vec![
             substring(&col("s"), 1, Some(0)).alias("out").into_expr(),
@@ -559,7 +560,7 @@ fn issue_557_substring_negative_length_empty_string() {
     let data = vec![vec![json!("Hello")]];
     let schema = vec![("s".to_string(), "string".to_string())];
     let df = session
-        .create_dataframe_from_rows(data, schema)
+        .create_dataframe_from_rows(data, schema, false)
         .unwrap()
         .select_exprs(vec![
             substring(&col("s"), 1, Some(-1)).alias("out").into_expr(),
