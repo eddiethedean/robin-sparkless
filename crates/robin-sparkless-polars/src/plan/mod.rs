@@ -875,4 +875,30 @@ mod tests {
         let out2 = df2.collect_inner().unwrap();
         assert_eq!(out2.get_column_names(), &["a", "c"]);
     }
+
+    /// Batch 6 / #714: create_dataframe_from_rows with null in rows then plan filter/select.
+    #[test]
+    fn test_plan_create_dataframe_from_rows_with_nulls() {
+        let session = crate::session::SparkSession::builder()
+            .app_name("plan_nulls")
+            .get_or_create();
+        let data = vec![
+            vec![json!(1), json!("a"), serde_json::Value::Null],
+            vec![json!(2), serde_json::Value::Null, json!(20)],
+        ];
+        let schema = vec![
+            ("id".to_string(), "bigint".to_string()),
+            ("name".to_string(), "string".to_string()),
+            ("value".to_string(), "bigint".to_string()),
+        ];
+        let plan = vec![
+            json!({"op": "filter", "payload": {"op": "gt", "left": {"col": "id"}, "right": {"lit": 0}}}),
+            json!({"op": "select", "payload": ["id", "name", "value"]}),
+        ];
+        let df = execute_plan(&session, data, schema, &plan).unwrap();
+        assert_eq!(df.count().unwrap(), 2);
+        let rows = df.collect_as_json_rows().unwrap();
+        assert_eq!(rows[0].get("value"), Some(&serde_json::Value::Null));
+        assert_eq!(rows[1].get("name"), Some(&serde_json::Value::Null));
+    }
 }
