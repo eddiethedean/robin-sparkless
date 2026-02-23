@@ -293,6 +293,26 @@ mod tests {
         assert!(rows.column("x").is_ok());
     }
 
+    /// #681: Join when key types differ (Int64 on left, String on right): coerces to common type (String).
+    #[test]
+    fn join_key_type_coercion_int_str() {
+        use polars::prelude::df;
+        let spark = SparkSession::builder()
+            .app_name("join_tests")
+            .get_or_create();
+        let left_pl = df!("id" => &[1i64, 2i64], "name" => &["alice", "bob"]).unwrap();
+        let right_pl = df!("id" => &["1", "3"], "value" => &[100i64, 300i64]).unwrap();
+        let left = spark.create_dataframe_from_polars(left_pl);
+        let right = spark.create_dataframe_from_polars(right_pl);
+        let out = join(&left, &right, vec!["id"], JoinType::Inner, false).unwrap();
+        assert_eq!(out.count().unwrap(), 1, "inner join on id: 1 match (id=1)");
+        let rows = out.collect().unwrap();
+        assert_eq!(rows.height(), 1);
+        assert!(rows.column("id").is_ok());
+        assert!(rows.column("name").is_ok());
+        assert!(rows.column("value").is_ok());
+    }
+
     /// Issue #604: join when key names differ in case (left "id", right "ID"); collect must not fail with "not found: ID".
     #[test]
     fn join_column_resolution_case_insensitive() {
