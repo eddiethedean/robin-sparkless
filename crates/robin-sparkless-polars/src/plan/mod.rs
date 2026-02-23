@@ -509,18 +509,30 @@ fn apply_op(
                 .ok_or_else(|| {
                     PlanError::InvalidPlan("groupBy must have 'group_by' array".into())
                 })?;
-            // Each element: string or object {"col": "name"} / {"name": "x"} (PR10).
+            // Each element: string, {"col"/"name": "x"}, or {"expr": <expr>} (#800: Column/expr as group key).
             let cols: Vec<String> = group_by
                 .iter()
                 .filter_map(|v| {
-                    v.as_str().map(|s| s.to_string()).or_else(|| {
-                        v.get("col")
-                            .and_then(Value::as_str)
-                            .map(|s| s.to_string())
-                            .or_else(|| {
-                                v.get("name").and_then(Value::as_str).map(|s| s.to_string())
-                            })
-                    })
+                    v.as_str()
+                        .map(|s| s.to_string())
+                        .or_else(|| {
+                            v.get("col")
+                                .and_then(Value::as_str)
+                                .map(|s| s.to_string())
+                                .or_else(|| {
+                                    v.get("name").and_then(Value::as_str).map(|s| s.to_string())
+                                })
+                        })
+                        .or_else(|| {
+                            // Expression form: resolve to output column name for group key.
+                            v.get("expr")
+                                .and_then(|e| expr_from_value(e).ok())
+                                .and_then(|expr| {
+                                    polars_plan::utils::expr_output_name(&expr)
+                                        .ok()
+                                        .map(|s| s.as_str().to_string())
+                                })
+                        })
                 })
                 .map(|s| df.resolve_column_name(s.as_str()))
                 .collect::<Result<Vec<_>, _>>()

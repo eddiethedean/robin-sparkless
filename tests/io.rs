@@ -314,9 +314,14 @@ fn write_delta_append_merge_schema_851() {
         .iter()
         .map(|f| f.name.clone())
         .collect();
-    let expected: std::collections::HashSet<String> =
-        ["age", "city", "name"].into_iter().map(String::from).collect();
-    assert_eq!(schema_names, expected, "mergeSchema should add city to schema");
+    let expected: std::collections::HashSet<String> = ["age", "city", "name"]
+        .into_iter()
+        .map(String::from)
+        .collect();
+    assert_eq!(
+        schema_names, expected,
+        "mergeSchema should add city to schema"
+    );
 
     let rows = back.collect_as_json_rows().unwrap();
     assert_eq!(rows.len(), 3);
