@@ -104,6 +104,7 @@
     "collect_null_preservation",
     "groupby_avg_column_name",
     "select_agg_column_after_groupby",
-    "collect_array_column_format"
+    "collect_array_column_format",
+    "filter_row_count_parity"
   ]
 }
