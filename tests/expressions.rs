@@ -794,6 +794,40 @@ fn plan_with_column_cast_column_in_schema() {
     );
 }
 
+/// #794: concat(...) as full_name -> column "full_name" in schema.
+#[test]
+fn plan_select_concat_as_full_name() {
+    let spark = spark();
+    let schema = vec![
+        ("first_name".to_string(), "string".to_string()),
+        ("last_name".to_string(), "string".to_string()),
+    ];
+    let rows = vec![
+        vec![json!("Alice"), json!("Smith")],
+        vec![json!("Bob"), json!("Jones")],
+    ];
+    let plan_steps = vec![json!({
+        "op": "select",
+        "payload": ["concat(first_name, last_name) as full_name"]
+    })];
+    let df = plan::execute_plan(&spark, rows, schema, &plan_steps).unwrap();
+    let columns = df.columns_engine().unwrap();
+    assert!(
+        columns.contains(&"full_name".to_string()),
+        "full_name must be in schema (#794); got: {:?}",
+        columns
+    );
+    let out = df.collect_as_json_rows_engine().unwrap();
+    assert_eq!(
+        out[0].get("full_name").and_then(|v| v.as_str()),
+        Some("AliceSmith")
+    );
+    assert_eq!(
+        out[1].get("full_name").and_then(|v| v.as_str()),
+        Some("BobJones")
+    );
+}
+
 // ---------- issue_636 ----------
 
 #[test]
