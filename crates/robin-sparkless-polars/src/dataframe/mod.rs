@@ -1897,8 +1897,25 @@ fn is_map_format(dtype: &DataType) -> bool {
     false
 }
 
+/// Round float to integer for JSON when within epsilon of an integer (#747, #748: 2**3 => 8 not 7.999...).
+fn float_to_json_number(f: f64) -> JsonValue {
+    const EPSILON: f64 = 1e-10;
+    if f.is_finite() {
+        let r = f.round();
+        if (f - r).abs() < EPSILON {
+            if let Some(n) = serde_json::Number::from_f64(r) {
+                return JsonValue::Number(n);
+            }
+        }
+    }
+    serde_json::Number::from_f64(f)
+        .map(JsonValue::Number)
+        .unwrap_or(JsonValue::Null)
+}
+
 /// Convert Polars AnyValue to serde_json::Value for language bindings (Node, etc.).
 /// Handles List and Struct so that create_map() with no args yields {} not null (#578).
+/// Float values close to integers are rounded for collect parity (#747, #748).
 fn any_value_to_json(av: &AnyValue<'_>, dtype: &DataType) -> JsonValue {
     use serde_json::Map;
     match av {
@@ -1908,12 +1925,8 @@ fn any_value_to_json(av: &AnyValue<'_>, dtype: &DataType) -> JsonValue {
         AnyValue::Int64(i) => JsonValue::Number(serde_json::Number::from(*i)),
         AnyValue::UInt32(u) => JsonValue::Number(serde_json::Number::from(*u)),
         AnyValue::UInt64(u) => JsonValue::Number(serde_json::Number::from(*u)),
-        AnyValue::Float32(f) => serde_json::Number::from_f64(f64::from(*f))
-            .map(JsonValue::Number)
-            .unwrap_or(JsonValue::Null),
-        AnyValue::Float64(f) => serde_json::Number::from_f64(*f)
-            .map(JsonValue::Number)
-            .unwrap_or(JsonValue::Null),
+        AnyValue::Float32(f) => float_to_json_number(f64::from(*f)),
+        AnyValue::Float64(f) => float_to_json_number(*f),
         AnyValue::String(s) => JsonValue::String(s.to_string()),
         AnyValue::StringOwned(s) => JsonValue::String(s.to_string()),
         AnyValue::List(s) => {
@@ -2072,5 +2085,20 @@ mod tests {
         let df = DataFrame::from_lazy_with_options(pl_df.lazy(), false);
         assert_eq!(df.columns().unwrap(), vec!["x"]);
         assert_eq!(df.count().unwrap(), 3);
+    }
+
+    /// #747, #748: collect rounds floats that are close to integers (e.g. 2**3 => 8 not 7.999...).
+    #[test]
+    fn collect_rounds_float_near_integer() {
+        let _spark = SparkSession::builder()
+            .app_name("float_round_test")
+            .get_or_create();
+        let s = Series::new("result".into(), &[7.999_999_999_999_998_f64, 8.0]);
+        let pl_df = polars::prelude::DataFrame::new_infer_height(vec![s.into()]).unwrap();
+        let df = DataFrame::from_polars(pl_df);
+        let rows = df.collect_as_json_rows().unwrap();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].get("result").and_then(|v| v.as_f64()), Some(8.0));
+        assert_eq!(rows[1].get("result").and_then(|v| v.as_f64()), Some(8.0));
     }
 }
