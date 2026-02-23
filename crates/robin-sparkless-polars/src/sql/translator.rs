@@ -312,26 +312,39 @@ fn translate_select_from(
     let mut df = resolve_table_factor(session, &first_tj.relation)?;
     for join_spec in &first_tj.joins {
         let right_df = resolve_table_factor(session, &join_spec.relation)?;
-        let join_type = match &join_spec.join_operator {
-            JoinOperator::Inner(_) => JoinType::Inner,
-            JoinOperator::LeftOuter(_) => JoinType::Left,
-            JoinOperator::RightOuter(_) => JoinType::Right,
-            JoinOperator::FullOuter(_) => JoinType::Outer,
-            _ => {
-                return Err(PolarsError::InvalidOperation(
-                    "SQL: only INNER, LEFT, RIGHT, FULL JOIN are supported.".into(),
-                ));
+        match &join_spec.join_operator {
+            JoinOperator::CrossJoin(_) => {
+                df = df.cross_join(&right_df).map_err(|e| {
+                    PolarsError::InvalidOperation(format!("SQL: CROSS JOIN failed: {e}").into())
+                })?;
             }
-        };
-        let on_cols = join_condition_to_on_columns(&join_spec.join_operator)?;
-        let on_refs: Vec<&str> = on_cols.iter().map(|s| s.as_str()).collect();
-        df = join(
-            &df,
-            &right_df,
-            on_refs,
-            join_type,
-            session.is_case_sensitive(),
-        )?;
+            _ => {
+                let join_type = match &join_spec.join_operator {
+                    JoinOperator::Inner(_) => JoinType::Inner,
+                    JoinOperator::LeftOuter(_) => JoinType::Left,
+                    JoinOperator::RightOuter(_) => JoinType::Right,
+                    JoinOperator::FullOuter(_) => JoinType::Outer,
+                    JoinOperator::LeftSemi(_) => JoinType::LeftSemi,
+                    JoinOperator::LeftAnti(_) => JoinType::LeftAnti,
+                    JoinOperator::Semi(_) => JoinType::LeftSemi,
+                    JoinOperator::Anti(_) => JoinType::LeftAnti,
+                    _ => {
+                        return Err(PolarsError::InvalidOperation(
+                            "SQL: only INNER, LEFT, RIGHT, FULL, LEFT SEMI, LEFT ANTI, CROSS JOIN are supported.".into(),
+                        ));
+                    }
+                };
+                let on_cols = join_condition_to_on_columns(&join_spec.join_operator)?;
+                let on_refs: Vec<&str> = on_cols.iter().map(|s| s.as_str()).collect();
+                df = join(
+                    &df,
+                    &right_df,
+                    on_refs,
+                    join_type,
+                    session.is_case_sensitive(),
+                )?;
+            }
+        }
     }
     Ok(df)
 }
@@ -370,10 +383,15 @@ fn join_condition_to_on_columns(join_op: &JoinOperator) -> Result<Vec<String>, P
         JoinOperator::Inner(c)
         | JoinOperator::LeftOuter(c)
         | JoinOperator::RightOuter(c)
-        | JoinOperator::FullOuter(c) => c,
+        | JoinOperator::FullOuter(c)
+        | JoinOperator::LeftSemi(c)
+        | JoinOperator::LeftAnti(c)
+        | JoinOperator::Semi(c)
+        | JoinOperator::Anti(c) => c,
+        JoinOperator::CrossJoin(_) => return Ok(vec![]),
         _ => {
             return Err(PolarsError::InvalidOperation(
-                "SQL: only INNER/LEFT/RIGHT/FULL JOIN with ON are supported.".into(),
+                "SQL: only INNER/LEFT/RIGHT/FULL/LEFT SEMI/LEFT ANTI/CROSS JOIN with ON are supported.".into(),
             ));
         }
     };
