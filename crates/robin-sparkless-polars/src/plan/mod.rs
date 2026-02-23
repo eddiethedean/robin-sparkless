@@ -725,11 +725,12 @@ fn parse_aggs(aggs: &[Value], df: &DataFrame) -> Result<Vec<polars::prelude::Exp
                 }
             }
         };
-        // count() without column = row count per group (PySpark count(*)); use len() (#825, #824, #822, #816, #815, #814, #806).
+        // count() without column = row count per group (PySpark count(*)); use len() (#825, #824). Cast to Int64 for LongType (#734).
         let col_expr = match agg {
-            "count" if col_name.map(|s| s.is_empty()).unwrap_or(true) => {
-                Column::from_expr(len(), Some("count".to_string()))
-            }
+            "count" if col_name.map(|s| s.is_empty()).unwrap_or(true) => Column::from_expr(
+                len().cast(polars::prelude::DataType::Int64),
+                Some("count".to_string()),
+            ),
             "count" => count(&c),
             "sum" => rs_sum(&c),
             "avg" => avg(&c),

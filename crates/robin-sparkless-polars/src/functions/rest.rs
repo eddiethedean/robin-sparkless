@@ -6,9 +6,12 @@ use super::types::parse_type_name;
 use crate::column::Column;
 use polars::prelude::*;
 
-/// Count aggregation
+/// Count aggregation (PySpark LongType; cast to Int64 for schema parity #734).
 pub fn count(col: &Column) -> Column {
-    Column::from_expr(col.expr().clone().count(), Some("count".to_string()))
+    Column::from_expr(
+        col.expr().clone().count().cast(DataType::Int64),
+        Some("count".to_string()),
+    )
 }
 
 /// Sum aggregation
