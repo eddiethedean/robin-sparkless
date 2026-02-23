@@ -23,6 +23,7 @@ use polars::prelude::{
     AnyValue, DataFrame as PlDataFrame, DataType, Expr, IntoLazy, LazyFrame, PlSmallStr,
     PolarsError, Schema, SchemaNamesAndDtypes, UnknownKind, col, lit,
 };
+use polars::datatypes::TimeUnit;
 use serde_json::Value as JsonValue;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
@@ -1913,9 +1914,23 @@ fn float_to_json_number(f: f64) -> JsonValue {
         .unwrap_or(JsonValue::Null)
 }
 
+/// Convert Polars Datetime AnyValue (i64 + TimeUnit) to ISO string for collect (#842, #843, #849).
+fn datetime_anyvalue_to_json_iso(val: i64, unit: &TimeUnit) -> JsonValue {
+    let micros = match unit {
+        TimeUnit::Nanoseconds => val.checked_div(1000),
+        TimeUnit::Microseconds => Some(val),
+        TimeUnit::Milliseconds => val.checked_mul(1000),
+    };
+    micros
+        .and_then(|m| chrono::DateTime::from_timestamp_micros(m))
+        .map(|dt| JsonValue::String(dt.format("%Y-%m-%dT%H:%M:%S%.6f").to_string()))
+        .unwrap_or(JsonValue::Null)
+}
+
 /// Convert Polars AnyValue to serde_json::Value for language bindings (Node, etc.).
 /// Handles List and Struct so that create_map() with no args yields {} not null (#578).
 /// Float values close to integers are rounded for collect parity (#747, #748).
+/// Date and Datetime output ISO strings so Python bindings get date/datetime (#842, #843, #849).
 fn any_value_to_json(av: &AnyValue<'_>, dtype: &DataType) -> JsonValue {
     use serde_json::Map;
     match av {
@@ -2002,6 +2017,15 @@ fn any_value_to_json(av: &AnyValue<'_>, dtype: &DataType) -> JsonValue {
             }
             JsonValue::Object(obj)
         }
+        AnyValue::Date(days) => {
+            let epoch = robin_sparkless_core::date_utils::epoch_naive_date();
+            epoch
+                .checked_add_signed(chrono::TimeDelta::days(*days as i64))
+                .map(|d| JsonValue::String(d.format("%Y-%m-%d").to_string()))
+                .unwrap_or(JsonValue::Null)
+        }
+        AnyValue::Datetime(val, unit, _) => datetime_anyvalue_to_json_iso(*val, unit),
+        AnyValue::DatetimeOwned(val, unit, _) => datetime_anyvalue_to_json_iso(*val, unit),
         _ => JsonValue::Null,
     }
 }
