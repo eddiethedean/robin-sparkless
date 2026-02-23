@@ -19,11 +19,11 @@ use crate::functions::SortOrder;
 use crate::schema::{StructType, StructTypePolarsExt};
 use crate::session::SparkSession;
 use crate::type_coercion::coerce_for_pyspark_comparison;
+use polars::datatypes::TimeUnit;
 use polars::prelude::{
     AnyValue, DataFrame as PlDataFrame, DataType, Expr, IntoLazy, LazyFrame, PlSmallStr,
     PolarsError, Schema, SchemaNamesAndDtypes, UnknownKind, col, lit,
 };
-use polars::datatypes::TimeUnit;
 use serde_json::Value as JsonValue;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
@@ -1923,7 +1923,7 @@ fn datetime_anyvalue_to_json_iso(val: i64, unit: &TimeUnit) -> JsonValue {
         TimeUnit::Milliseconds => val.checked_mul(1000),
     };
     micros
-        .and_then(|m| chrono::DateTime::from_timestamp_micros(m))
+        .and_then(chrono::DateTime::from_timestamp_micros)
         .map(|dt| JsonValue::String(dt.format("%Y-%m-%dT%H:%M:%S%.6f").to_string()))
         .unwrap_or(JsonValue::Null)
 }
