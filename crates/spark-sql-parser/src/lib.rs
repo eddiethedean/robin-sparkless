@@ -68,6 +68,7 @@ pub fn parse_sql(query: &str) -> Result<Statement, ParseError> {
         | Statement::ShowViews { .. }
         | Statement::ShowCreate { .. } => {}
         Statement::Insert(_) | Statement::Directory { .. } | Statement::LoadData { .. } => {}
+        Statement::Update(_) | Statement::Delete(_) => {}
         Statement::ExplainTable { .. } => {}
         Statement::Set(_) | Statement::Reset(_) => {}
         Statement::Cache { .. } | Statement::UNCache { .. } => {}
@@ -113,8 +114,8 @@ mod tests {
 
     #[test]
     fn error_unsupported_statement_type() {
-        // UPDATE is parsed by sqlparser but not in our whitelist
-        let err = parse_sql("UPDATE t SET x = 1").unwrap_err();
+        // COMMIT is parsed by sqlparser but not in our whitelist
+        let err = parse_sql("COMMIT").unwrap_err();
         assert!(err.0.contains("not supported"));
     }
 
