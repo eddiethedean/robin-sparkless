@@ -588,21 +588,22 @@ pub fn describe(df: &DataFrame, case_sensitive: bool) -> Result<DataFrame, Polar
             let ca = series_as_f64_ca(s, "describe")?;
             let min_f = ca.min().unwrap_or(f64::NAN);
             let max_f = ca.max().unwrap_or(f64::NAN);
-            // PySpark describe/summary returns string type for value columns
+            // PySpark describe/summary returns string type for value columns.
+            // Use "null" for NaN so JSON/parity consumers get proper null (not string "None").
             let is_float = matches!(dtype, DataType::Float64 | DataType::Float32);
             let count_s = count.to_string();
             let mean_s = if mean_f.is_nan() {
-                "None".to_string()
+                "null".to_string()
             } else {
                 format!("{:.1}", mean_f)
             };
             let std_s = if std_f.is_nan() {
-                "None".to_string()
+                "null".to_string()
             } else {
                 format!("{:.1}", std_f)
             };
             let min_s = if min_f.is_nan() {
-                "None".to_string()
+                "null".to_string()
             } else if min_f.fract() == 0.0 && is_float {
                 format!("{:.1}", min_f)
             } else if min_f.fract() == 0.0 {
@@ -611,7 +612,7 @@ pub fn describe(df: &DataFrame, case_sensitive: bool) -> Result<DataFrame, Polar
                 format!("{min_f}")
             };
             let max_s = if max_f.is_nan() {
-                "None".to_string()
+                "null".to_string()
             } else if max_f.fract() == 0.0 && is_float {
                 format!("{:.1}", max_f)
             } else if max_f.fract() == 0.0 {
