@@ -236,14 +236,79 @@ pub fn describe_delta_detail(
     ))
 }
 
+/// Align two DataFrames to a merged column order, adding null columns for missing columns.
+/// merged_columns: existing names first, then new names not in existing (PySpark mergeSchema order).
+#[cfg(feature = "delta")]
+fn align_to_merged_schema(
+    existing: &polars::prelude::DataFrame,
+    new_df: &polars::prelude::DataFrame,
+) -> Result<(polars::prelude::DataFrame, polars::prelude::DataFrame), PolarsError> {
+    use polars::prelude::*;
+    let existing_names: Vec<String> = existing
+        .get_column_names()
+        .iter()
+        .map(|s| s.as_str().to_string())
+        .collect();
+    let new_names: Vec<String> = new_df
+        .get_column_names()
+        .iter()
+        .map(|s| s.as_str().to_string())
+        .collect();
+    let existing_set: std::collections::HashSet<&str> =
+        existing_names.iter().map(String::as_str).collect();
+    let mut merged: Vec<String> = existing_names.clone();
+    for n in &new_names {
+        if !existing_set.contains(n.as_str()) {
+            merged.push(n.clone());
+        }
+    }
+    let n_existing = existing.height();
+    let n_new = new_df.height();
+    let schema_existing = existing.schema();
+    let schema_new = new_df.schema();
+    let name_into = |n: &String| n.as_str().into();
+    let mut cols_existing: Vec<polars::prelude::Column> = Vec::with_capacity(merged.len());
+    let mut cols_new: Vec<polars::prelude::Column> = Vec::with_capacity(merged.len());
+    for name in &merged {
+        if let Some(dtype) = schema_existing.get(name) {
+            if let Some(idx) = existing.get_column_index(name) {
+                cols_existing.push(existing.columns()[idx].clone());
+            } else {
+                cols_existing.push(Series::full_null(name_into(name), n_existing, dtype).into());
+            }
+        } else if let Some(dtype) = schema_new.get(name) {
+            cols_existing.push(Series::full_null(name_into(name), n_existing, dtype).into());
+        } else {
+            cols_existing
+                .push(Series::full_null(name_into(name), n_existing, &DataType::String).into());
+        }
+        if let Some(dtype) = schema_new.get(name) {
+            if let Some(idx) = new_df.get_column_index(name) {
+                cols_new.push(new_df.columns()[idx].clone());
+            } else {
+                cols_new.push(Series::full_null(name_into(name), n_new, dtype).into());
+            }
+        } else if let Some(dtype) = schema_existing.get(name) {
+            cols_new.push(Series::full_null(name_into(name), n_new, dtype).into());
+        } else {
+            cols_new.push(Series::full_null(name_into(name), n_new, &DataType::String).into());
+        }
+    }
+    let aligned_existing = polars::prelude::DataFrame::new_infer_height(cols_existing)?;
+    let aligned_new = polars::prelude::DataFrame::new_infer_height(cols_new)?;
+    Ok((aligned_existing, aligned_new))
+}
+
 /// Write this DataFrame to a Delta table at the given path.
 /// If `overwrite` is true, replaces the table; otherwise appends.
+/// When `merge_schema` is true and appending, the result schema is the union of existing and new columns (missing columns filled with null). Fixes #851.
 /// Uses Parquet write + convert_to_delta for new/overwrite; appends by reading existing table, concatenating, then overwriting.
 #[cfg(feature = "delta")]
 pub fn write_delta(
     df: &polars::prelude::DataFrame,
     path: impl AsRef<Path>,
     overwrite: bool,
+    merge_schema: bool,
 ) -> Result<(), PolarsError> {
     use deltalake::operations::convert_to_delta::ConvertToDeltaBuilder;
     use std::fs;
@@ -338,7 +403,17 @@ pub fn write_delta(
                     } else {
                         concat_lazy_frames(lfs)?.collect()?
                     };
-                    combined.vstack_mut(df)?;
+                    let to_append = if merge_schema && combined.width() > 0 {
+                        let (aligned_existing, aligned_new) =
+                            align_to_merged_schema(&combined, df)?;
+                        let mut out = aligned_existing;
+                        out.vstack_mut(&aligned_new)?;
+                        out
+                    } else {
+                        combined.vstack_mut(df)?;
+                        combined
+                    };
+                    let mut combined = to_append;
                     let _ = fs::remove_dir_all(path);
                     fs::create_dir_all(path).map_err(|e| {
                         PolarsError::ComputeError(

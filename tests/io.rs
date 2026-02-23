@@ -174,7 +174,7 @@ fn write_and_read_delta_round_trip_core() {
     .unwrap();
     let df: DataFrame = spark.create_dataframe_from_polars(pl);
 
-    let write_result = df.write_delta(&path, true);
+    let write_result = df.write_delta(&path, true, false);
     if let Err(e) = write_result {
         let msg = format!("{e}");
         if msg.contains("requires the 'delta' feature") {
@@ -227,7 +227,7 @@ fn write_delta_append_and_overwrite_core() {
     let df1: DataFrame = spark.create_dataframe_from_polars(pl1);
     let df2: DataFrame = spark.create_dataframe_from_polars(pl2);
 
-    if let Err(e) = df1.write_delta(&path, true) {
+    if let Err(e) = df1.write_delta(&path, true, false) {
         let msg = format!("{e}");
         if msg.contains("requires the 'delta' feature") {
             return;
@@ -235,7 +235,7 @@ fn write_delta_append_and_overwrite_core() {
         panic!("unexpected error from first write_delta: {msg}");
     }
 
-    if let Err(e) = df2.write_delta(&path, false) {
+    if let Err(e) = df2.write_delta(&path, false, false) {
         let msg = format!("{e}");
         if msg.contains("requires the 'delta' feature") {
             return;
@@ -253,6 +253,70 @@ fn write_delta_append_and_overwrite_core() {
             panic!("unexpected error from read_delta_from_path: {msg}");
         }
     };
+
+    let rows = back.collect_as_json_rows().unwrap();
+    assert_eq!(rows.len(), 3);
+}
+
+/// Delta append with mergeSchema: existing (name, age), new (name, age, city) -> result has (name, age, city). #851
+#[test]
+fn write_delta_append_merge_schema_851() {
+    let spark = spark();
+    let tmp_dir = tempfile::tempdir().unwrap();
+    let path: PathBuf = tmp_dir.path().join("delta_merge_schema");
+
+    let pl1 = polars::prelude::df![
+        "name" => &["a", "b"],
+        "age" => &[10i32, 20i32],
+    ]
+    .unwrap();
+    let pl2 = polars::prelude::df![
+        "name" => &["c"],
+        "age" => &[30i32],
+        "city" => &["NY"],
+    ]
+    .unwrap();
+
+    let df1: DataFrame = spark.create_dataframe_from_polars(pl1);
+    let df2: DataFrame = spark.create_dataframe_from_polars(pl2);
+
+    if let Err(e) = df1.write_delta(&path, true, false) {
+        let msg = format!("{e}");
+        if msg.contains("requires the 'delta' feature") {
+            return;
+        }
+        panic!("unexpected error from first write_delta: {msg}");
+    }
+
+    if let Err(e) = df2.write_delta(&path, false, true) {
+        let msg = format!("{e}");
+        if msg.contains("requires the 'delta' feature") {
+            return;
+        }
+        panic!("unexpected error from append write_delta merge_schema: {msg}");
+    }
+
+    let back = match spark.read_delta_from_path(&path) {
+        Ok(df) => df,
+        Err(e) => {
+            let msg = format!("{e}");
+            if msg.contains("requires the 'delta' feature") {
+                return;
+            }
+            panic!("unexpected error from read_delta_from_path: {msg}");
+        }
+    };
+
+    let schema_names: std::collections::HashSet<String> = back
+        .schema()
+        .unwrap()
+        .fields()
+        .iter()
+        .map(|f| f.name.clone())
+        .collect();
+    let expected: std::collections::HashSet<String> =
+        ["age", "city", "name"].into_iter().map(String::from).collect();
+    assert_eq!(schema_names, expected, "mergeSchema should add city to schema");
 
     let rows = back.collect_as_json_rows().unwrap();
     assert_eq!(rows.len(), 3);

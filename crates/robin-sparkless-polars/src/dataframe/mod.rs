@@ -1306,13 +1306,20 @@ impl DataFrame {
 
     /// Write this DataFrame to a Delta table at the given path.
     /// Requires the `delta` feature. If `overwrite` is true, replaces the table; otherwise appends.
+    /// When appending, `merge_schema` merges existing and new schemas (union of columns, nulls for missing). See #851.
     #[cfg(feature = "delta")]
     pub fn write_delta(
         &self,
         path: impl AsRef<std::path::Path>,
         overwrite: bool,
+        merge_schema: bool,
     ) -> Result<(), PolarsError> {
-        crate::delta::write_delta(self.collect_inner()?.as_ref(), path, overwrite)
+        crate::delta::write_delta(
+            self.collect_inner()?.as_ref(),
+            path,
+            overwrite,
+            merge_schema,
+        )
     }
 
     /// Stub when `delta` feature is disabled.
@@ -1321,6 +1328,7 @@ impl DataFrame {
         &self,
         _path: impl AsRef<std::path::Path>,
         _overwrite: bool,
+        _merge_schema: bool,
     ) -> Result<(), PolarsError> {
         Err(PolarsError::InvalidOperation(
             "Delta Lake requires the 'delta' feature. Build with --features delta.".into(),
