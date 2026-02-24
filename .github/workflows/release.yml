@@ -205,11 +205,19 @@ jobs:
       - name: Build docs
         run: cargo doc --workspace --no-deps
       - name: "Publish to crates.io (dependency order: spark-sql-parser, core, polars, main)"
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: |
-          cargo publish -p spark-sql-parser --token ${{ secrets.CARGO_REGISTRY_TOKEN }}
-          cargo publish -p robin-sparkless-core --token ${{ secrets.CARGO_REGISTRY_TOKEN }}
-          cargo publish -p robin-sparkless-polars --token ${{ secrets.CARGO_REGISTRY_TOKEN }}
-          cargo publish -p robin-sparkless --token ${{ secrets.CARGO_REGISTRY_TOKEN }}
+          cargo publish -p spark-sql-parser --token "$CARGO_REGISTRY_TOKEN"
+          spark_exit=$?
+          if [ "$spark_exit" -eq 101 ]; then
+            echo "spark-sql-parser version already on crates.io, skipping"
+          elif [ "$spark_exit" -ne 0 ]; then
+            exit "$spark_exit"
+          fi
+          cargo publish -p robin-sparkless-core --token "$CARGO_REGISTRY_TOKEN"
+          cargo publish -p robin-sparkless-polars --token "$CARGO_REGISTRY_TOKEN"
+          cargo publish -p robin-sparkless --token "$CARGO_REGISTRY_TOKEN"
 
   # Python linting, tests, and PyPI publishing have been removed from
   # the release workflow; only the Rust crate publish step remains.
