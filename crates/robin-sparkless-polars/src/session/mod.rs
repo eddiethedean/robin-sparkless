@@ -421,13 +421,29 @@ fn json_values_to_series(
         return Ok(st);
     }
 
+    // #978: Support integer/smallint/tinyint, double_precision, and decimal(...,...) so json_value_to_series doesn't hit "unsupported type".
+    if is_decimal_type_str(&type_lower) {
+        let vals: Vec<Option<f64>> = values
+            .iter()
+            .map(|ov| {
+                ov.as_ref().and_then(|v| match v {
+                    JsonValue::Number(n) => n.as_f64(),
+                    JsonValue::Null => None,
+                    _ => None,
+                })
+            })
+            .collect();
+        return Ok(Series::new(name.into(), vals));
+    }
+
     match type_lower.as_str() {
-        "int" | "bigint" | "long" => {
+        "int" | "integer" | "bigint" | "long" | "smallint" | "tinyint" => {
             let vals: Vec<Option<i64>> = values
                 .iter()
                 .map(|ov| {
                     ov.as_ref().and_then(|v| match v {
                         JsonValue::Number(n) => n.as_i64(),
+                        JsonValue::String(s) => s.parse::<i64>().ok(),
                         JsonValue::Null => None,
                         _ => None,
                     })
@@ -435,12 +451,13 @@ fn json_values_to_series(
                 .collect();
             Ok(Series::new(name.into(), vals))
         }
-        "double" | "float" => {
+        "double" | "float" | "double_precision" => {
             let vals: Vec<Option<f64>> = values
                 .iter()
                 .map(|ov| {
                     ov.as_ref().and_then(|v| match v {
                         JsonValue::Number(n) => n.as_f64(),
+                        JsonValue::String(s) => s.parse::<f64>().ok(),
                         JsonValue::Null => None,
                         _ => None,
                     })
@@ -464,11 +481,24 @@ fn json_values_to_series(
             Ok(Series::new(name.into(), owned))
         }
         "boolean" | "bool" => {
+            // #978: Accept Bool, Number(0/1), and String("true"/"false"/"1"/"0") for boolean column.
             let vals: Vec<Option<bool>> = values
                 .iter()
                 .map(|ov| {
                     ov.as_ref().and_then(|v| match v {
                         JsonValue::Bool(b) => Some(*b),
+                        JsonValue::Number(n) => n
+                            .as_i64()
+                            .map(|i| i != 0)
+                            .or_else(|| n.as_f64().map(|f| f != 0.0)),
+                        JsonValue::String(s) => {
+                            let s = s.trim().to_lowercase();
+                            match s.as_str() {
+                                "true" | "1" => Some(true),
+                                "false" | "0" => Some(false),
+                                _ => None,
+                            }
+                        }
                         JsonValue::Null => None,
                         _ => None,
                     })
@@ -553,11 +583,25 @@ fn json_value_to_series_single(
     let epoch = date_utils::epoch_naive_date();
     match (value, type_str.trim().to_lowercase().as_str()) {
         (JsonValue::Null, _) => Ok(Series::new_null(name.into(), 1)),
-        (JsonValue::Number(n), "int" | "bigint" | "long") => {
+        (JsonValue::Number(n), "int" | "integer" | "bigint" | "long" | "smallint" | "tinyint") => {
             Ok(Series::new(name.into(), vec![n.as_i64()]))
         }
-        (JsonValue::Number(n), "double" | "float") => {
+        (JsonValue::String(s), "int" | "integer" | "bigint" | "long" | "smallint" | "tinyint") => {
+            let i = s
+                .trim()
+                .parse::<i64>()
+                .map_err(|e| PolarsError::ComputeError(format!("int parse: {e}").into()))?;
+            Ok(Series::new(name.into(), vec![Some(i)]))
+        }
+        (JsonValue::Number(n), "double" | "float" | "double_precision") => {
             Ok(Series::new(name.into(), vec![n.as_f64()]))
+        }
+        (JsonValue::String(s), "double" | "float" | "double_precision") => {
+            let f = s
+                .trim()
+                .parse::<f64>()
+                .map_err(|e| PolarsError::ComputeError(format!("float parse: {e}").into()))?;
+            Ok(Series::new(name.into(), vec![Some(f)]))
         }
         (JsonValue::Number(n), t) if is_decimal_type_str(t) => {
             Ok(Series::new(name.into(), vec![n.as_f64()]))
@@ -575,6 +619,26 @@ fn json_value_to_series_single(
             Ok(Series::new(name.into(), vec![s.as_str()]))
         }
         (JsonValue::Bool(b), "boolean" | "bool") => Ok(Series::new(name.into(), vec![*b])),
+        (JsonValue::Number(n), "boolean" | "bool") => {
+            let b = n
+                .as_i64()
+                .map(|i| i != 0)
+                .or_else(|| n.as_f64().map(|f| f != 0.0))
+                .unwrap_or(false);
+            Ok(Series::new(name.into(), vec![b]))
+        }
+        (JsonValue::String(s), "boolean" | "bool") => {
+            let b = match s.trim().to_lowercase().as_str() {
+                "true" | "1" => true,
+                "false" | "0" => false,
+                _ => {
+                    return Err(PolarsError::ComputeError(
+                        format!("boolean parse: expected true/false/1/0, got {:?}", s).into(),
+                    ));
+                }
+            };
+            Ok(Series::new(name.into(), vec![b]))
+        }
         (JsonValue::String(s), "date") => {
             let d = NaiveDate::parse_from_str(s, "%Y-%m-%d")
                 .map_err(|e| PolarsError::ComputeError(format!("date parse: {e}").into()))?;
