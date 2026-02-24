@@ -41,6 +41,16 @@
 
 ## Installation
 
+### Python (sparkless 4.0.0)
+
+A Python package **sparkless** provides a PySpark-like API with no JVM, backed by robin-sparkless:
+
+```bash
+pip install ./python
+```
+
+See [python/README.md](python/README.md) for usage and `from sparkless.sql import SparkSession`.
+
 ### Rust
 
 Add to your `Cargo.toml`:

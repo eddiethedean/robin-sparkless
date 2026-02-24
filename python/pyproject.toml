@@ -1,0 +1,32 @@
+[project]
+name = "sparkless"
+version = "4.0.0"
+description = "PySpark-like DataFrame API in Python—no JVM. Uses robin-sparkless (Rust/Polars) as the execution engine."
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.9"
+keywords = ["pyspark", "polars", "dataframe", "spark", "etl"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Rust",
+    "Topic :: Scientific/Engineering",
+]
+
+[project.optional-dependencies]
+dev = ["pytest", "pandas"]
+
+[build-system]
+requires = ["maturin>=1.4,<2"]
+build-backend = "maturin"
+
+[tool.maturin]
+module-name = "sparkless._native"
+python-source = "sparkless"
+manifest-path = "Cargo.toml"
