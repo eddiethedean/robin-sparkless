@@ -362,6 +362,93 @@ fn plan_filter_between() {
     assert_eq!(out[0].get("b").and_then(|v| v.as_i64()), Some(20));
 }
 
+/// #990: String column arithmetic (div, add, mul) — PySpark coerces strings to numeric.
+#[test]
+fn plan_string_arithmetic_with_string_columns() {
+    let spark = spark();
+    let schema = vec![
+        ("string_1".to_string(), "string".to_string()),
+        ("string_2".to_string(), "string".to_string()),
+    ];
+    let rows = vec![
+        vec![json!("10.5"), json!("2")],
+        vec![json!("20"), json!("4")],
+    ];
+    let plan_steps = vec![
+        json!({
+            "op": "withColumn",
+            "payload": {"name": "div", "expr": {"op": "div", "left": {"col": "string_1"}, "right": {"col": "string_2"}}}
+        }),
+        json!({
+            "op": "withColumn",
+            "payload": {"name": "add", "expr": {"op": "add", "left": {"col": "string_1"}, "right": {"col": "string_2"}}}
+        }),
+        json!({
+            "op": "withColumn",
+            "payload": {"name": "mul", "expr": {"op": "mul", "left": {"col": "string_1"}, "right": {"col": "string_2"}}}
+        }),
+    ];
+    let df = plan::execute_plan(&spark, rows, schema, &plan_steps).unwrap();
+    let out = df.collect_as_json_rows_engine().unwrap();
+    assert_eq!(out.len(), 2);
+    // 10.5/2=5.25, 10.5+2=12.5, 10.5*2=21
+    assert_eq!(out[0].get("div").and_then(|v| v.as_f64()), Some(5.25));
+    assert_eq!(out[0].get("add").and_then(|v| v.as_f64()), Some(12.5));
+    assert_eq!(out[0].get("mul").and_then(|v| v.as_f64()), Some(21.0));
+    // 20/4=5, 20+4=24, 20*4=80
+    assert_eq!(out[1].get("div").and_then(|v| v.as_f64()), Some(5.0));
+    assert_eq!(out[1].get("add").and_then(|v| v.as_f64()), Some(24.0));
+    assert_eq!(out[1].get("mul").and_then(|v| v.as_f64()), Some(80.0));
+}
+
+/// #987: between with string column and numeric bounds in select/withColumn (PySpark coerces).
+#[test]
+fn plan_between_string_column_numeric_bounds_in_select() {
+    let spark = spark();
+    let schema = vec![("val".to_string(), "string".to_string())];
+    let rows = vec![vec![json!("5")], vec![json!("15")], vec![json!("25")]];
+    let plan_steps = vec![json!({
+        "op": "withColumn",
+        "payload": {
+            "name": "in_range",
+            "expr": {"op": "between", "left": {"col": "val"}, "lower": {"lit": 1}, "upper": {"lit": 20}}
+        }
+    })];
+    let df = plan::execute_plan(&spark, rows, schema, &plan_steps).unwrap();
+    let out = df.collect_as_json_rows_engine().unwrap();
+    assert_eq!(out.len(), 3);
+    assert_eq!(out[0].get("in_range").and_then(|v| v.as_bool()), Some(true));
+    assert_eq!(out[1].get("in_range").and_then(|v| v.as_bool()), Some(true));
+    assert_eq!(
+        out[2].get("in_range").and_then(|v| v.as_bool()),
+        Some(false)
+    );
+}
+
+/// #991: op "not" is bitwise NOT; not(5) = -6, not(0) = -1 (PySpark ~ parity).
+#[test]
+fn plan_op_not_bitwise_semantics() {
+    let spark = spark();
+    let schema = vec![
+        ("Name".to_string(), "string".to_string()),
+        ("Value1".to_string(), "bigint".to_string()),
+    ];
+    let rows = vec![
+        vec![json!("Alice"), json!(5)],
+        vec![json!("Bob"), json!(10)],
+    ];
+    let plan_steps = vec![json!({
+        "op": "withColumn",
+        "payload": {"name": "result", "expr": {"op": "not", "arg": {"col": "Value1"}}}
+    })];
+    let df = plan::execute_plan(&spark, rows, schema, &plan_steps).unwrap();
+    let out = df.collect_as_json_rows_engine().unwrap();
+    assert_eq!(out.len(), 2);
+    // ~5 = -6, ~10 = -11 (two's complement)
+    assert_eq!(out[0].get("result").and_then(|v| v.as_i64()), Some(-6));
+    assert_eq!(out[1].get("result").and_then(|v| v.as_i64()), Some(-11));
+}
+
 #[test]
 fn plan_with_column_power_op() {
     let spark = spark();

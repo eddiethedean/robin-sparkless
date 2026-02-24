@@ -187,12 +187,23 @@ pub fn expr_from_value(v: &Value) -> Result<Expr, PlanExprError> {
                     return Ok(expr_from_value(left)?.or(expr_from_value(right)?));
                 }
                 "not" => {
-                    // #682: Coerce to Boolean before .not() so Unknown(Any) or string columns work (PySpark parity; string->boolean via expr_coerce_to_boolean).
+                    // #991: Sparkless sends Python ~ (bitwise NOT) as "not". Use bitwise_not so Unknown(Any)
+                    // from when/otherwise is coerced to Int64 and ~x = -1 - x (PySpark parity).
                     let arg = obj
                         .get("arg")
                         .ok_or_else(|| PlanExprError("op 'not' requires 'arg'".to_string()))?;
                     let arg_expr = expr_from_value(arg)?;
-                    return Ok(crate::functions::expr_coerce_to_boolean(arg_expr).not());
+                    let arg_col = expr_to_column(arg_expr);
+                    return Ok(arg_col.bitwise_not().into_expr());
+                }
+                "bitwise_not" => {
+                    // Explicit bitwise NOT (e.g. if Sparkless sends "bitwise_not" for ~).
+                    let arg = obj.get("arg").ok_or_else(|| {
+                        PlanExprError("op 'bitwise_not' requires 'arg'".to_string())
+                    })?;
+                    let arg_expr = expr_from_value(arg)?;
+                    let arg_col = expr_to_column(arg_expr);
+                    return Ok(arg_col.bitwise_not().into_expr());
                 }
                 "between" => {
                     let left_v = obj
@@ -432,6 +443,7 @@ pub fn expr_from_value(v: &Value) -> Result<Expr, PlanExprError> {
                 }
                 "sub" | "minus" | "-" => {
                     // {"op": "sub", "left": <expr>, "right": <expr>} — e.g. (1 - col("x")) #556
+                    // #990: Use subtract_pyspark so string/string or string/numeric coerces (PySpark parity).
                     let left_v = obj
                         .get("left")
                         .ok_or_else(|| PlanExprError("op 'sub' requires 'left'".to_string()))?;
@@ -442,10 +454,11 @@ pub fn expr_from_value(v: &Value) -> Result<Expr, PlanExprError> {
                     let r = expr_from_value(right_v)?;
                     let a = expr_to_column(l);
                     let b = expr_to_column(r);
-                    return Ok(a.subtract(&b).into_expr());
+                    return Ok(a.subtract_pyspark(&b).into_expr());
                 }
                 "mul" | "*" => {
                     // {"op": "mul", "left": <expr>, "right": <expr>} — e.g. (100 * col("x")) #556
+                    // #990: Use multiply_pyspark so string/string or string/numeric coerces (PySpark parity).
                     let left_v = obj
                         .get("left")
                         .ok_or_else(|| PlanExprError("op 'mul' requires 'left'".to_string()))?;
@@ -456,7 +469,7 @@ pub fn expr_from_value(v: &Value) -> Result<Expr, PlanExprError> {
                     let r = expr_from_value(right_v)?;
                     let a = expr_to_column(l);
                     let b = expr_to_column(r);
-                    return Ok(a.multiply(&b).into_expr());
+                    return Ok(a.multiply_pyspark(&b).into_expr());
                 }
                 "div" | "/" | "divide" => {
                     // #683: PySpark-style division with string/numeric coercion (op form from Sparkless).
@@ -600,22 +613,24 @@ fn window_col_from_value(x: &Value) -> Option<String> {
     None
 }
 
-/// Parse window spec object into (order_col_names, partition_by_col_names).
+/// Parse window spec object into (order_col_names, partition_by_col_names, order_by_explicitly_empty).
 /// order_by / partition_by can be arrays of "col" or {"col": "name", "asc": true}.
 /// Does not apply fallback; callers that need order column use order_cols.or(part_cols) (issue #517).
-fn parse_window_spec(v: &Value) -> Result<(Vec<String>, Vec<String>), PlanExprError> {
+/// order_by_explicitly_empty is true when "order_by" key is present and its value is an empty array (#985).
+fn parse_window_spec(v: &Value) -> Result<(Vec<String>, Vec<String>, bool), PlanExprError> {
     let obj = v
         .as_object()
         .ok_or_else(|| PlanExprError("window spec must be object".to_string()))?;
     let order_arr = obj.get("order_by").and_then(Value::as_array);
     let part_arr = obj.get("partition_by").and_then(Value::as_array);
+    let order_by_explicitly_empty = order_arr.map(|a| a.is_empty()).unwrap_or(false);
     let order_cols: Vec<String> = order_arr
         .map(|a| a.iter().filter_map(window_col_from_value).collect())
         .unwrap_or_default();
     let part_cols: Vec<String> = part_arr
         .map(|a| a.iter().filter_map(window_col_from_value).collect())
         .unwrap_or_default();
-    Ok((order_cols, part_cols))
+    Ok((order_cols, part_cols, order_by_explicitly_empty))
 }
 
 /// Order column names for window: prefer order_by, fall back to partition_by (issue #517).
@@ -628,8 +643,14 @@ fn window_order_cols(order_cols: &[String], part_cols: &[String]) -> Vec<String>
 }
 
 /// Build window expression for row_number (issue #517, #520).
+/// #985: When order_by is explicitly empty (and no partition_by to fall back to), error so PySpark/Sparkless tests see "At least one column must be specified".
 fn expr_from_row_number_window(v: &Value) -> Result<Expr, PlanExprError> {
-    let (order_cols, part_cols) = parse_window_spec(v)?;
+    let (order_cols, part_cols, order_by_explicitly_empty) = parse_window_spec(v)?;
+    if order_by_explicitly_empty && order_cols.is_empty() && part_cols.is_empty() {
+        return Err(PlanExprError(
+            "At least one column must be specified for orderBy".to_string(),
+        ));
+    }
     let part_refs: Vec<&str> = part_cols.iter().map(|s| s.as_str()).collect();
     let effective_order = window_order_cols(&order_cols, &part_cols);
     let order_col = if effective_order.is_empty() {
@@ -642,13 +663,19 @@ fn expr_from_row_number_window(v: &Value) -> Result<Expr, PlanExprError> {
 }
 
 /// Dispatch window fn by name: row_number, rank, dense_rank, percent_rank, ntile, lag, lead, sum, avg (issues #517, #521).
+/// #985: When order_by is explicitly empty and no fallback, error with "At least one column must be specified for orderBy".
 fn expr_from_window_fn(
     fn_name: &str,
     window_val: &Value,
     args: Option<&Vec<Value>>,
 ) -> Result<Expr, PlanExprError> {
     use crate::Column;
-    let (order_cols, part_cols) = parse_window_spec(window_val)?;
+    let (order_cols, part_cols, order_by_explicitly_empty) = parse_window_spec(window_val)?;
+    if order_by_explicitly_empty && order_cols.is_empty() && part_cols.is_empty() {
+        return Err(PlanExprError(
+            "At least one column must be specified for orderBy".to_string(),
+        ));
+    }
     let part_refs: Vec<&str> = part_cols.iter().map(|s| s.as_str()).collect();
     let effective_order = window_order_cols(&order_cols, &part_cols);
     let empty: &[Value] = &[];
@@ -2913,7 +2940,7 @@ mod tests {
         let _ = expr_from_value(&v).unwrap();
     }
 
-    /// row_number() with empty partition_by and order_by (single partition; issue #520).
+    /// row_number() with empty partition_by and order_by: window {} has no key so no "explicitly empty" (#520).
     #[test]
     fn test_row_number_window_empty() {
         let v = json!({
@@ -2922,12 +2949,25 @@ mod tests {
             "window": {}
         });
         let _ = expr_from_value(&v).unwrap();
-        let v2 = json!({
+    }
+
+    /// #985: order_by explicitly [] with no partition_by must error with "At least one column must be specified for orderBy".
+    #[test]
+    fn test_window_order_by_empty_list_error() {
+        let v = json!({
             "fn": "row_number",
             "args": [],
             "window": {"partition_by": [], "order_by": []}
         });
-        let _ = expr_from_value(&v2).unwrap();
+        let res = expr_from_value(&v);
+        let err = res.unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("At least one column must be specified")
+                || msg.contains("must be specified"),
+            "expected error message to contain 'At least one column must be specified' or 'must be specified', got: {}",
+            msg
+        );
     }
 
     /// Sparkless may send "function" instead of "fn" (issue #517).
@@ -3072,12 +3112,11 @@ mod tests {
         let _ = expr;
     }
 
-    /// #682: op "not" parses and casts to Boolean so Unknown(Any) columns work (bitwise not in when).
+    /// #991: op "not" uses bitwise_not so Unknown(Any) from when/otherwise works (PySpark ~ parity).
     #[test]
     fn test_op_not_parses() {
         let v = json!({"op": "not", "arg": {"col": "flag"}});
         let expr = expr_from_value(&v).unwrap();
-        // Expression should be (flag.cast(Boolean)).not()
         let _ = expr;
     }
 
