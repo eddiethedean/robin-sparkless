@@ -518,7 +518,7 @@ impl Column {
     pub fn bit_length(&self) -> Column {
         use polars::prelude::*;
         let len_bytes = self.expr().clone().str().len_bytes().cast(DataType::Int32);
-        Self::from_expr(len_bytes * lit(8i32), None)
+        Self::from_expr((len_bytes * lit(8i32)).cast(DataType::Int32), None)
     }
 
     /// Length of string in bytes (PySpark octet_length).
@@ -661,10 +661,10 @@ impl Column {
         let start = (pos - 1).max(0);
         let slice_expr = self.expr().clone().str().slice(lit(start), lit(i64::MAX));
         let found = slice_expr.str().find_literal(lit(substr.to_string()));
-        Self::from_expr(
-            (found.cast(DataType::Int64) + lit(start + 1)).fill_null(lit(0i64)),
-            None,
-        )
+        let expr = (found.cast(DataType::Int64) + lit(start + 1))
+            .fill_null(lit(0i64))
+            .cast(DataType::Int64);
+        Self::from_expr(expr, None)
     }
 
     /// Base conversion (PySpark conv). num_str from from_base to to_base.
@@ -1790,8 +1790,9 @@ impl Column {
     /// Day of week: 1 = Sunday, 2 = Monday, ..., 7 = Saturday (PySpark dayofweek).
     /// Polars weekday is Mon=1..Sun=7; we convert to Sun=1..Sat=7.
     pub fn dayofweek(&self) -> Column {
-        let w = self.expr().clone().dt().weekday();
-        let dayofweek = (w % lit(7i32)) + lit(1i32); // 7->1 (Sun), 1->2 (Mon), ..., 6->7 (Sat)
+        use polars::prelude::*;
+        let w = self.expr().clone().dt().weekday().cast(DataType::Int32);
+        let dayofweek = ((w % lit(7i32)) + lit(1i32)).cast(DataType::Int32);
         Self::from_expr(dayofweek, None)
     }
 
