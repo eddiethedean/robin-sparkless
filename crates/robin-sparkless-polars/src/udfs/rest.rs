@@ -4021,6 +4021,26 @@ pub fn apply_shuffle(column: Column) -> PolarsResult<Option<Column>> {
 /// Size of bitmap in bytes (32768 bits).
 const BITMAP_BYTES: usize = 4096;
 
+/// Parse string to datetime (micros since epoch). Accepts ISO and "YYYY-MM-DD HH:MM:SS", "YYYY-MM-DD" (midnight). #982.
+fn parse_str_to_datetime_micros(s: &str) -> Option<i64> {
+    use chrono::{NaiveDate, NaiveDateTime};
+    let s = s.trim();
+    NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S%.f")
+        .ok()
+        .or_else(|| NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S").ok())
+        .or_else(|| NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S").ok())
+        .or_else(|| {
+            if s.len() >= 10 {
+                NaiveDate::parse_from_str(&s[0..10], "%Y-%m-%d")
+                    .ok()
+                    .and_then(|d| d.and_hms_opt(0, 0, 0))
+            } else {
+                None
+            }
+        })
+        .map(|dt| dt.and_utc().timestamp_micros())
+}
+
 /// Parse string to date (PySpark cast string->date). Accepts "YYYY-MM-DD" and "YYYY-MM-DD HH:MM:SS" (truncates to date).
 fn parse_str_to_date(s: &str) -> Option<chrono::NaiveDate> {
     use chrono::{NaiveDate, NaiveDateTime};
@@ -4438,6 +4458,64 @@ pub fn apply_string_to_date(column: Column, strict: bool) -> PolarsResult<Option
                 (0..series.len()).map(|_| None::<i32>),
             );
             days.into_series().cast(&DataType::Date)?
+        }
+    };
+    Ok(Some(Column::new(name, out)))
+}
+
+/// Apply string-to-datetime cast (#982). Handles string (parse common formats); passes through Datetime; Date->Datetime at midnight; others error (cast) or null (try_cast).
+pub fn apply_string_to_datetime(column: Column, strict: bool) -> PolarsResult<Option<Column>> {
+    use polars::datatypes::TimeUnit;
+    let name = column.field().into_owned().name;
+    let series = column.take_materialized_series();
+    let dtype_out = DataType::Datetime(TimeUnit::Microseconds, None);
+    let out: Series = match series.dtype() {
+        DataType::String => {
+            let ca = series
+                .str()
+                .map_err(|e| compute_err("string to datetime", e))?;
+            let mut results = Vec::with_capacity(ca.len());
+            for opt_s in ca.into_iter() {
+                let v = opt_s.and_then(parse_str_to_datetime_micros);
+                if strict {
+                    if let Some(s) = opt_s {
+                        if v.is_none() {
+                            return Err(PolarsError::ComputeError(
+                                format!(
+                                    "conversion from `str` to `datetime` failed in column '{}' for value \"{s}\"",
+                                    name.as_str()
+                                )
+                                .into(),
+                            ));
+                        }
+                    }
+                }
+                results.push(v);
+            }
+            let chunked =
+                Int64Chunked::from_iter_options(name.as_str().into(), results.into_iter());
+            chunked.into_series().cast(&dtype_out)?
+        }
+        DataType::Datetime(_, _) => series.cast(&dtype_out)?,
+        DataType::Date => series.cast(&dtype_out)?,
+        DataType::Null => {
+            let micros = Int64Chunked::from_iter_options(
+                name.as_str().into(),
+                (0..series.len()).map(|_| None::<i64>),
+            );
+            micros.into_series().cast(&dtype_out)?
+        }
+        _ => {
+            if strict {
+                return Err(PolarsError::ComputeError(
+                    format!("casting from {} to datetime not supported", series.dtype()).into(),
+                ));
+            }
+            let micros = Int64Chunked::from_iter_options(
+                name.as_str().into(),
+                (0..series.len()).map(|_| None::<i64>),
+            );
+            micros.into_series().cast(&dtype_out)?
         }
     };
     Ok(Some(Column::new(name, out)))
