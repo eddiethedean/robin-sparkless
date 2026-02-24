@@ -347,6 +347,33 @@ fn json_values_to_series(
                     });
                     field_series_vec[fi].push(val.cloned());
                 }
+            } else if let Some(JsonValue::String(s)) = v.as_ref() {
+                // #973: final attempt — parse string as object or array (tuple/list serialization).
+                let trimmed = s.trim();
+                let parsed_obj = string_to_json_object(trimmed);
+                let parsed_arr: Option<Vec<JsonValue>> = serde_json::from_str(trimmed)
+                    .ok()
+                    .and_then(|j: JsonValue| j.as_array().cloned());
+                if let Some(obj) = parsed_obj {
+                    for (fi, (fname, _)) in fields.iter().enumerate() {
+                        let val = obj.get(fname).or_else(|| {
+                            obj.keys()
+                                .find(|k| k.eq_ignore_ascii_case(fname))
+                                .and_then(|k| obj.get(k))
+                        });
+                        field_series_vec[fi].push(val.cloned());
+                    }
+                } else if let Some(arr) = parsed_arr {
+                    for (fi, _) in fields.iter().enumerate() {
+                        field_series_vec[fi].push(arr.get(fi).cloned());
+                    }
+                } else {
+                    return Err(PolarsError::ComputeError(
+                        "struct value must be object (by field name) or array (by position). \
+                         PySpark accepts dict or tuple/list for struct columns."
+                            .into(),
+                    ));
+                }
             } else {
                 return Err(PolarsError::ComputeError(
                     "struct value must be object (by field name) or array (by position). \
