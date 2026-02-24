@@ -18,7 +18,9 @@ pub fn parse_type_name(name: &str) -> Result<DataType, String> {
         "string" | "str" => DataType::String,
         "boolean" | "bool" => DataType::Boolean,
         "date" => DataType::Date,
-        "timestamp" => DataType::Datetime(TimeUnit::Microseconds, None),
+        "timestamp" | "datetime" | "timestamp_ntz" => {
+            DataType::Datetime(TimeUnit::Microseconds, None)
+        }
         _ => return Err(format!("unknown type name: {name}")),
     })
 }

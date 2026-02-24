@@ -1313,6 +1313,21 @@ fn cast_impl(column: &Column, type_name: &str, strict: bool) -> Result<Column, S
         );
         return Ok(Column::from_expr(expr, None));
     }
+    if matches!(dtype, DataType::Datetime(_, _)) {
+        use polars::datatypes::TimeUnit;
+        let expr = column.expr().clone().map(
+            move |col| {
+                crate::column::expect_col(crate::udfs::apply_string_to_datetime(col, strict))
+            },
+            |_schema, field| {
+                Ok(Field::new(
+                    field.name().clone(),
+                    DataType::Datetime(TimeUnit::Microseconds, None),
+                ))
+            },
+        );
+        return Ok(Column::from_expr(expr, None));
+    }
     if dtype == DataType::Int32 || dtype == DataType::Int64 {
         let target = dtype.clone();
         let expr = column.expr().clone().map(
