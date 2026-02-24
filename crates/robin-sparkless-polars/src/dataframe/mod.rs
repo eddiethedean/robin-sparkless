@@ -500,7 +500,68 @@ impl DataFrame {
                 Ok(e)
             }
         })?;
-        // #697: PySpark does not allow arithmetic on string and numeric; do not coerce (reject at runtime).
+        // #974: Coerce string–numeric for arithmetic (+, -, *, /, %) so PySpark-style 2.0 * col("Value") works when Value is string.
+        let expr = expr.try_map_expr(move |e| {
+            if let Expr::BinaryExpr {
+                ref left,
+                ref op,
+                ref right,
+            } = e
+            {
+                let is_arithmetic_op = matches!(
+                    op,
+                    Operator::Plus
+                        | Operator::Minus
+                        | Operator::Multiply
+                        | Operator::TrueDivide
+                        | Operator::FloorDivide
+                        | Operator::RustDivide
+                        | Operator::Modulus
+                );
+                if !is_arithmetic_op {
+                    return Ok(e);
+                }
+                let left_ty = crate::type_coercion::infer_type_from_expr(left.as_ref())
+                    .or_else(|| {
+                        if let Expr::Column(n) = &**left {
+                            self.get_column_dtype(n.as_str())
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap_or(DataType::String);
+                let right_ty = crate::type_coercion::infer_type_from_expr(right.as_ref())
+                    .or_else(|| {
+                        if let Expr::Column(n) = &**right {
+                            self.get_column_dtype(n.as_str())
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap_or(DataType::String);
+                if (left_ty == DataType::String
+                    && crate::type_coercion::is_numeric_public(&right_ty))
+                    || (right_ty == DataType::String
+                        && crate::type_coercion::is_numeric_public(&left_ty))
+                {
+                    if let Ok((new_left, new_right)) =
+                        crate::type_coercion::coerce_for_pyspark_arithmetic(
+                            (**left).clone(),
+                            (**right).clone(),
+                            &left_ty,
+                            &right_ty,
+                        )
+                    {
+                        return Ok(Expr::BinaryExpr {
+                            left: Arc::new(new_left),
+                            op: *op,
+                            right: Arc::new(new_right),
+                        });
+                    }
+                }
+            }
+            Ok(e)
+        })?;
         Ok(expr)
     }
 
