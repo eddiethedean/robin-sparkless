@@ -13,10 +13,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **#419 – Single-column schema (createDataFrame)** — `create_dataframe_from_single_column(values, type_str)` and session API: when schema is a single type string (e.g. `"bigint"`, `"string"`) and data is a list of scalars, create a one-column DataFrame with column name `"value"`. PySpark parity. Fixes #419.
-- **#420 – verify_schema per-row validation** — `create_dataframe_from_rows(..., verify_schema: true)` runs an explicit per-row type check and returns a clear error (e.g. "Row 1: column 'age' expected type bigint but …") on mismatch. Fixes #420.
-- **#701, #706 – SQL unsupported statement error** — Unsupported SQL statement types (e.g. INSERT, COMMIT) now return a clear error message mentioning supported statements (SELECT, CREATE SCHEMA/DATABASE, DROP TABLE/VIEW/SCHEMA). Fixes #701, #706.
-- **#698, #704 – Join on expression error** — Join with expression-like string in `on` (e.g. `array_contains(...)`) is rejected with a clear `InvalidPlan` error instead of a confusing "Column not found". Fixes #698, #704.
+(none yet)
+
+## [0.17.0] - 2026-02-24
+
+### Fixed
+
+- **#985 – Window orderBy empty list** — Clear error when `Window.orderBy()` is called with an empty list.
+- **#986 – isin with string column and numeric values** — Plan interpreter and Column API: `isin` with a string column and numeric literals now coerces correctly (string column vs numeric list).
+- **#987 – between with string column and numeric bounds** — Plan interpreter applies string–numeric coercion so `col("val").between(1, 10)` works when `val` is string.
+- **#988 – Numeric column == string literal** — Comparison with numeric column and string literal now coerces (e.g. string parsed to number) instead of type error.
+- **#989 – String to boolean cast (empty string)** — Casting empty string to boolean now yields `false` (PySpark parity).
+- **#990 – String column arithmetic** — Plan interpreter rejects or coerces string arithmetic appropriately; error messages improved.
+- **#991 – Bitwise NOT on CaseWhen (Unknown)** — Bitwise NOT (`~`) on `when().then().otherwise()` expressions with unknown type now works.
+- **Parity type mismatches** — `width_bucket`, `bit_length`, `dayofweek`, and `position`/`locate` now return int/bigint (explicit casts) so parity schema checks pass (datetime_quarter_week, width_bucket, position_start, bit_length_function fixtures).
 
 ## [0.15.0] - 2026-02-18
 
