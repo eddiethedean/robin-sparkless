@@ -1,6 +1,6 @@
 //! Convert core ExprIr to Polars Expr. Used when the root API passes ExprIr into the backend.
 
-use polars::prelude::{coalesce, DataType, Expr, QuantileMethod, col, lit, when};
+use polars::prelude::{DataType, Expr, QuantileMethod, coalesce, col, lit, when};
 use robin_sparkless_core::{EngineError, ExprIr, LiteralValue};
 
 /// Convert engine-agnostic ExprIr into a Polars Expr.
@@ -173,23 +173,18 @@ fn call_to_expr(name: &str, args: &[ExprIr]) -> Result<Expr, EngineError> {
         ("last", [a]) => Ok(expr_ir_to_expr(a)?.last()),
         ("try_sum", [a]) => Ok(expr_ir_to_expr(a)?.sum()),
         ("try_avg", [a]) => Ok(expr_ir_to_expr(a)?.mean()),
-        ("stddev" | "std" | "stddev_samp", [a]) => {
-            Ok(expr_ir_to_expr(a)?.std(1))
-        }
+        ("stddev" | "std" | "stddev_samp", [a]) => Ok(expr_ir_to_expr(a)?.std(1)),
         ("stddev_pop", [a]) => Ok(expr_ir_to_expr(a)?.std(0)),
         ("variance" | "var_samp", [a]) => Ok(expr_ir_to_expr(a)?.var(1)),
         ("var_pop", [a]) => Ok(expr_ir_to_expr(a)?.var(0)),
-        ("count_distinct" | "approx_count_distinct", [a]) => Ok(expr_ir_to_expr(a)?
-            .n_unique()
-            .cast(DataType::Int64)),
+        ("count_distinct" | "approx_count_distinct", [a]) => {
+            Ok(expr_ir_to_expr(a)?.n_unique().cast(DataType::Int64))
+        }
         ("collect_list", [a]) => Ok(expr_ir_to_expr(a)?.implode()),
         ("collect_set", [a]) => Ok(expr_ir_to_expr(a)?.unique().implode()),
         ("bool_and" | "every", [a]) => Ok(expr_ir_to_expr(a)?.all(true)),
-        ("median", [a]) => Ok(expr_ir_to_expr(a)?
-            .quantile(lit(0.5), QuantileMethod::Linear)),
-        ("count_if", [a]) => Ok(expr_ir_to_expr(a)?
-            .cast(DataType::Int64)
-            .sum()),
+        ("median", [a]) => Ok(expr_ir_to_expr(a)?.quantile(lit(0.5), QuantileMethod::Linear)),
+        ("count_if", [a]) => Ok(expr_ir_to_expr(a)?.cast(DataType::Int64).sum()),
         ("mode", [a]) => {
             let e = expr_ir_to_expr(a)?;
             let col = crate::column::Column::from_expr(e, None);
@@ -198,9 +193,7 @@ fn call_to_expr(name: &str, args: &[ExprIr]) -> Result<Expr, EngineError> {
         ("kurtosis", [a]) => Ok(expr_ir_to_expr(a)?
             .cast(DataType::Float64)
             .kurtosis(true, true)),
-        ("skewness", [a]) => Ok(expr_ir_to_expr(a)?
-            .cast(DataType::Float64)
-            .skew(true)),
+        ("skewness", [a]) => Ok(expr_ir_to_expr(a)?.cast(DataType::Float64).skew(true)),
         ("approx_percentile" | "percentile_approx", [a, b]) => {
             let e = expr_ir_to_expr(a)?;
             let p = lit_to_f64(b)?;
@@ -233,8 +226,7 @@ fn call_to_expr(name: &str, args: &[ExprIr]) -> Result<Expr, EngineError> {
             };
             let e = expr_ir_to_expr(a)?;
             let col = crate::column::Column::from_expr(e, None);
-            let out = crate::functions::cast(&col, type_name)
-                .map_err(EngineError::User)?;
+            let out = crate::functions::cast(&col, type_name).map_err(EngineError::User)?;
             Ok(out.into_expr())
         }
         ("try_cast", [a, _b]) => {
@@ -248,8 +240,7 @@ fn call_to_expr(name: &str, args: &[ExprIr]) -> Result<Expr, EngineError> {
             };
             let e = expr_ir_to_expr(a)?;
             let col = crate::column::Column::from_expr(e, None);
-            let out = crate::functions::try_cast(&col, type_name)
-                .map_err(EngineError::User)?;
+            let out = crate::functions::try_cast(&col, type_name).map_err(EngineError::User)?;
             Ok(out.into_expr())
         }
 
@@ -258,12 +249,8 @@ fn call_to_expr(name: &str, args: &[ExprIr]) -> Result<Expr, EngineError> {
         ("lower", [a]) => Ok(expr_ir_to_expr(a)?.str().to_lowercase()),
         ("length", [a]) => Ok(expr_ir_to_expr(a)?.str().len_chars()),
         ("trim", [a]) => Ok(expr_ir_to_expr(a)?.str().strip_chars(lit(" \t\n\r"))),
-        ("ltrim", [a]) => {
-            Ok(expr_ir_to_expr(a)?.str().strip_chars_start(lit(" \t\n\r")))
-        }
-        ("rtrim", [a]) => {
-            Ok(expr_ir_to_expr(a)?.str().strip_chars_end(lit(" \t\n\r")))
-        }
+        ("ltrim", [a]) => Ok(expr_ir_to_expr(a)?.str().strip_chars_start(lit(" \t\n\r"))),
+        ("rtrim", [a]) => Ok(expr_ir_to_expr(a)?.str().strip_chars_end(lit(" \t\n\r"))),
         ("substring" | "substr", args) if args.len() >= 2 => {
             let col_expr = expr_ir_to_expr(&args[0])?;
             let start = lit_to_i64(&args[1])?;
@@ -274,8 +261,7 @@ fn call_to_expr(name: &str, args: &[ExprIr]) -> Result<Expr, EngineError> {
 
         // --- Coalesce / nvl ---
         ("coalesce" | "nvl", args) if !args.is_empty() => {
-            let exprs: Result<Vec<Expr>, _> =
-                args.iter().map(expr_ir_to_expr).collect();
+            let exprs: Result<Vec<Expr>, _> = args.iter().map(expr_ir_to_expr).collect();
             Ok(coalesce(&exprs?))
         }
 
