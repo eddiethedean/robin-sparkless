@@ -231,6 +231,160 @@ pub fn mean(expr: ExprIr) -> ExprIr {
     }
 }
 
+pub fn first(expr: ExprIr) -> ExprIr {
+    ExprIr::Call {
+        name: "first".to_string(),
+        args: vec![expr],
+    }
+}
+
+pub fn last(expr: ExprIr) -> ExprIr {
+    ExprIr::Call {
+        name: "last".to_string(),
+        args: vec![expr],
+    }
+}
+
+pub fn stddev(expr: ExprIr) -> ExprIr {
+    ExprIr::Call {
+        name: "stddev".to_string(),
+        args: vec![expr],
+    }
+}
+
+pub fn stddev_pop(expr: ExprIr) -> ExprIr {
+    ExprIr::Call {
+        name: "stddev_pop".to_string(),
+        args: vec![expr],
+    }
+}
+
+pub fn std(expr: ExprIr) -> ExprIr {
+    ExprIr::Call {
+        name: "std".to_string(),
+        args: vec![expr],
+    }
+}
+
+pub fn stddev_samp(expr: ExprIr) -> ExprIr {
+    ExprIr::Call {
+        name: "stddev_samp".to_string(),
+        args: vec![expr],
+    }
+}
+
+pub fn variance(expr: ExprIr) -> ExprIr {
+    ExprIr::Call {
+        name: "variance".to_string(),
+        args: vec![expr],
+    }
+}
+
+pub fn var_pop(expr: ExprIr) -> ExprIr {
+    ExprIr::Call {
+        name: "var_pop".to_string(),
+        args: vec![expr],
+    }
+}
+
+pub fn var_samp(expr: ExprIr) -> ExprIr {
+    ExprIr::Call {
+        name: "var_samp".to_string(),
+        args: vec![expr],
+    }
+}
+
+pub fn count_distinct(expr: ExprIr) -> ExprIr {
+    ExprIr::Call {
+        name: "count_distinct".to_string(),
+        args: vec![expr],
+    }
+}
+
+pub fn approx_count_distinct(expr: ExprIr) -> ExprIr {
+    ExprIr::Call {
+        name: "approx_count_distinct".to_string(),
+        args: vec![expr],
+    }
+}
+
+pub fn collect_list(expr: ExprIr) -> ExprIr {
+    ExprIr::Call {
+        name: "collect_list".to_string(),
+        args: vec![expr],
+    }
+}
+
+pub fn collect_set(expr: ExprIr) -> ExprIr {
+    ExprIr::Call {
+        name: "collect_set".to_string(),
+        args: vec![expr],
+    }
+}
+
+pub fn bool_and(expr: ExprIr) -> ExprIr {
+    ExprIr::Call {
+        name: "bool_and".to_string(),
+        args: vec![expr],
+    }
+}
+
+pub fn every(expr: ExprIr) -> ExprIr {
+    ExprIr::Call {
+        name: "every".to_string(),
+        args: vec![expr],
+    }
+}
+
+pub fn median(expr: ExprIr) -> ExprIr {
+    ExprIr::Call {
+        name: "median".to_string(),
+        args: vec![expr],
+    }
+}
+
+pub fn try_sum(expr: ExprIr) -> ExprIr {
+    ExprIr::Call {
+        name: "try_sum".to_string(),
+        args: vec![expr],
+    }
+}
+
+pub fn try_avg(expr: ExprIr) -> ExprIr {
+    ExprIr::Call {
+        name: "try_avg".to_string(),
+        args: vec![expr],
+    }
+}
+
+pub fn count_if(expr: ExprIr) -> ExprIr {
+    ExprIr::Call {
+        name: "count_if".to_string(),
+        args: vec![expr],
+    }
+}
+
+pub fn mode(expr: ExprIr) -> ExprIr {
+    ExprIr::Call {
+        name: "mode".to_string(),
+        args: vec![expr],
+    }
+}
+
+pub fn kurtosis(expr: ExprIr) -> ExprIr {
+    ExprIr::Call {
+        name: "kurtosis".to_string(),
+        args: vec![expr],
+    }
+}
+
+pub fn skewness(expr: ExprIr) -> ExprIr {
+    ExprIr::Call {
+        name: "skewness".to_string(),
+        args: vec![expr],
+    }
+}
+
 /// Alias an expression with a new output name.
 pub fn alias(expr: ExprIr, name: &str) -> ExprIr {
     ExprIr::Call {
