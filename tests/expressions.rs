@@ -8,7 +8,9 @@ mod common;
 use chrono::NaiveDate;
 use common::spark;
 use polars::prelude::{DataType, NamedFrom, Series};
-use robin_sparkless::functions::{col, create_map, lit_i64, lit_str, named_struct, substring};
+use robin_sparkless::functions::{
+    col, create_map, isin_i64, lit_i64, lit_str, named_struct, substring,
+};
 use robin_sparkless::plan;
 use robin_sparkless::{DataFrame, cast, try_cast};
 use serde_json::json;
@@ -157,6 +159,29 @@ fn issue_544_string_to_boolean_cast_and_try_cast() {
     assert_eq!(rows[2].get("b").and_then(|v| v.as_bool()), Some(true));
     assert_eq!(rows[3].get("b").and_then(|v| v.as_bool()), Some(false));
     assert!(rows[4].get("b").unwrap().is_null());
+}
+
+/// #989: Empty string casts to false (Python bool("") parity).
+#[test]
+fn issue_989_astype_string_empty_to_boolean() {
+    let spark = spark();
+    let pl = polars::prelude::df!["bool_str" => &["true", "false", ""]].unwrap();
+    let df = spark.create_dataframe_from_polars(pl);
+    let cast_bool = cast(&col("bool_str"), "boolean").unwrap();
+    let out = df
+        .select_exprs(vec![cast_bool.alias("as_bool").into_expr()])
+        .unwrap();
+    let rows = out.collect_as_json_rows().unwrap();
+    assert_eq!(rows.len(), 3);
+    assert_eq!(rows[0].get("as_bool").and_then(|v| v.as_bool()), Some(true));
+    assert_eq!(
+        rows[1].get("as_bool").and_then(|v| v.as_bool()),
+        Some(false)
+    );
+    assert_eq!(
+        rows[2].get("as_bool").and_then(|v| v.as_bool()),
+        Some(false)
+    );
 }
 
 // ---------- issue_541 ----------
@@ -478,8 +503,9 @@ fn issue_556_plan_lit_minus_col() {
     let df = plan::execute_plan(&session, data, schema, &plan_ops).unwrap();
     let rows = df.collect_as_json_rows().unwrap();
     assert_eq!(rows.len(), 2);
-    assert_eq!(rows[0].get("rev").and_then(|v| v.as_i64()), Some(-9));
-    assert_eq!(rows[1].get("rev").and_then(|v| v.as_i64()), Some(-19));
+    // sub uses subtract_pyspark which returns Float64 (#990)
+    assert_eq!(rows[0].get("rev").and_then(|v| v.as_f64()), Some(-9.0));
+    assert_eq!(rows[1].get("rev").and_then(|v| v.as_f64()), Some(-19.0));
 }
 
 #[test]
@@ -497,8 +523,9 @@ fn issue_556_plan_lit_times_col() {
     let df = plan::execute_plan(&session, data, schema, &plan_ops).unwrap();
     let rows = df.collect_as_json_rows().unwrap();
     assert_eq!(rows.len(), 2);
-    assert_eq!(rows[0].get("scaled").and_then(|v| v.as_i64()), Some(300));
-    assert_eq!(rows[1].get("scaled").and_then(|v| v.as_i64()), Some(500));
+    // mul uses multiply_pyspark which returns Float64 (#990)
+    assert_eq!(rows[0].get("scaled").and_then(|v| v.as_f64()), Some(300.0));
+    assert_eq!(rows[1].get("scaled").and_then(|v| v.as_f64()), Some(500.0));
 }
 
 // ---------- issue_557 ----------
@@ -652,6 +679,24 @@ fn plan_filter_isin_op_string() {
         names,
         ["alice".into(), "carol".into()].into_iter().collect()
     );
+}
+
+/// #986: String column isin(1, 2) must match rows with value "1" or "2" (PySpark parity).
+#[test]
+fn issue_986_isin_string_column_numeric_values() {
+    let spark = spark();
+    let pl = polars::prelude::df!["value" => &["1", "2", "test"]].unwrap();
+    let df = spark.create_dataframe_from_polars(pl);
+    let filtered = df
+        .filter(isin_i64(&col("value"), &[1, 2]).into_expr())
+        .unwrap();
+    let rows = filtered.collect_as_json_rows().unwrap();
+    assert_eq!(rows.len(), 2);
+    let vals: std::collections::HashSet<String> = rows
+        .iter()
+        .filter_map(|r| r.get("value").and_then(|v| v.as_str()).map(String::from))
+        .collect();
+    assert_eq!(vals, ["1".into(), "2".into()].into_iter().collect());
 }
 
 // ---------- issue_555 ----------
