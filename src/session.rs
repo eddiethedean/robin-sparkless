@@ -16,6 +16,7 @@ use crate::dataframe::DataFrame;
 pub struct SparkSession(pub(crate) PolarsSparkSession);
 
 /// Root-owned SparkSessionBuilder; delegates to the Polars backend.
+#[derive(Clone)]
 pub struct SparkSessionBuilder(pub(crate) PolarsSparkSessionBuilder);
 
 /// Root-owned DataFrameReader; delegates to the Polars backend.

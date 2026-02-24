@@ -1,5 +1,6 @@
 .PHONY: build build-release build-all-features test test-rust check check-full check-crate fmt fmt-check clippy audit outdated deny \
 	clean \
+	build-python test-python \
 	test-parity-phase-a test-parity-phase-b test-parity-phase-c test-parity-phase-d \
 	test-parity-phase-e test-parity-phase-f test-parity-phase-g test-parity-phases \
 	sparkless-parity all
@@ -129,6 +130,15 @@ sparkless-parity:
 	python tests/convert_sparkless_fixtures.py --batch "$$SPARKLESS_EXPECTED_OUTPUTS" tests/fixtures --output-subdir converted --dedupe
 	python tests/regenerate_expected_from_pyspark.py tests/fixtures/converted
 	cargo test pyspark_parity_fixtures
+
+# Python package (sparkless 4.0.0)
+build-python:
+	cd python && maturin build
+
+# Run Python smoke test (requires maturin develop or pip install ./python; uses .venv if present)
+test-python:
+	@PYTHON=$$(test -f .venv/bin/python && echo .venv/bin/python || echo python); \
+	$$PYTHON -c "from sparkless.sql import SparkSession; from sparkless.sql.functions import col, lit_i64; s = SparkSession.builder.app_name('test').get_or_create(); df = s.create_dataframe([(1, 2, 'a')], ['x', 'y', 'z']); assert df.count() == 1; print('sparkless OK')"
 
 # Run everything: format, lint, security, deny, tests
 all: check
