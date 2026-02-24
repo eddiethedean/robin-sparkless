@@ -1572,7 +1572,8 @@ pub fn width_bucket(value: &Column, min_val: f64, max_val: f64, num_bucket: i64)
         .then(lit(0i64))
         .when(v.gt_eq(max_expr))
         .then(lit(num_bucket + 1))
-        .otherwise(bucket_clamped);
+        .otherwise(bucket_clamped)
+        .cast(DataType::Int64);
     crate::column::Column::from_expr(expr, None)
 }
 
