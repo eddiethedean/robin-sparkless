@@ -88,6 +88,23 @@ fn python_dict_repr_to_json(s: &str) -> Option<JsonValue> {
     serde_json::from_str(&step3).ok()
 }
 
+/// #971: Parse a string that may be a JSON object, a JSON-encoded string (one extra quote layer),
+/// or a Python dict repr, into an optional JSON object for struct/map columns.
+fn string_to_json_object(s: &str) -> Option<serde_json::Map<String, JsonValue>> {
+    let s = s.trim();
+    // Direct JSON object
+    if let Ok(v) = serde_json::from_str::<JsonValue>(s) {
+        if let Some(obj) = v.as_object() {
+            return Some(obj.clone());
+        }
+        // One level of JSON string encoding (e.g. "\"{'E1': 1, 'E2': 'A'}\"")
+        if let Some(inner) = v.as_str() {
+            return string_to_json_object(inner);
+        }
+    }
+    python_dict_repr_to_json(s).and_then(|v| v.as_object().cloned())
+}
+
 /// Map schema type string to Polars DataType (primitives and list for nested use).
 /// Decimal(p,s) is mapped to Float64 (Polars dtype-decimal feature not enabled).
 /// PR-G/#710: array<element_type> and nested array<array<...>> supported.
@@ -283,16 +300,21 @@ fn json_values_to_series(
         for v in values.iter() {
             // #610: Accept string that parses as JSON object or array (e.g. Python tuple serialized as "[1, \"y\"]").
             // #691/PR-F: Accept Python dict repr string (e.g. "{'a': 1, 'b': 'x'}").
+            // #610/#691/#971: Accept string that parses as JSON object/array or Python dict repr; allow one level of JSON encoding.
             let effective: Option<JsonValue> = match v.as_ref() {
                 Some(JsonValue::String(s)) => {
                     if let Ok(parsed) = serde_json::from_str::<JsonValue>(s) {
                         if parsed.is_object() || parsed.is_array() {
                             Some(parsed)
+                        } else if let Some(inner) = parsed.as_str() {
+                            string_to_json_object(inner)
+                                .map(JsonValue::Object)
+                                .or_else(|| v.clone())
                         } else {
                             v.clone()
                         }
-                    } else if let Some(parsed) = python_dict_repr_to_json(s) {
-                        Some(parsed)
+                    } else if let Some(obj) = string_to_json_object(s) {
+                        Some(JsonValue::Object(obj))
                     } else {
                         v.clone()
                     }
@@ -316,8 +338,14 @@ fn json_values_to_series(
                     field_series_vec[fi].push(arr.get(fi).cloned());
                 }
             } else if let Some(obj) = effective.as_ref().and_then(|x| x.as_object()) {
+                // #971: case-insensitive field lookup (Python dict may have "E1"/"E2", schema "e1"/"e2").
                 for (fi, (fname, _)) in fields.iter().enumerate() {
-                    field_series_vec[fi].push(obj.get(fname).cloned());
+                    let val = obj.get(fname).or_else(|| {
+                        obj.keys()
+                            .find(|k| k.eq_ignore_ascii_case(fname))
+                            .and_then(|k| obj.get(k))
+                    });
+                    field_series_vec[fi].push(val.cloned());
                 }
             } else {
                 return Err(PolarsError::ComputeError(
@@ -481,6 +509,15 @@ fn json_value_to_series_single(
             Ok(Series::new(name.into(), vec![n.as_f64()]))
         }
         (JsonValue::String(s), "string" | "str" | "varchar") => {
+            Ok(Series::new(name.into(), vec![s.as_str()]))
+        }
+        (JsonValue::Number(n), "string" | "str" | "varchar") => {
+            // #971: map<string,*> values may be numbers when Python sends dict with mixed types; coerce to string.
+            let s = n
+                .as_f64()
+                .map(|f| f.to_string())
+                .or_else(|| n.as_i64().map(|i| i.to_string()))
+                .unwrap_or_else(|| "null".to_string());
             Ok(Series::new(name.into(), vec![s.as_str()]))
         }
         (JsonValue::Bool(b), "boolean" | "bool") => Ok(Series::new(name.into(), vec![*b])),
@@ -1785,12 +1822,9 @@ impl SparkSession {
                             )?;
                             builder.append_series(&st)?;
                         } else if let JsonValue::String(s) = &v {
-                            // #691/PR-F: Map value as string (e.g. Python dict repr "{'k': 'v'}").
-                            let parsed = serde_json::from_str::<JsonValue>(s)
-                                .ok()
-                                .filter(|p| p.is_object())
-                                .or_else(|| python_dict_repr_to_json(s));
-                            if let Some(parsed) = parsed.and_then(|p| p.as_object().cloned()) {
+                            // #691/PR-F: Map value as string (e.g. Python dict repr "{'k': 'v'}"). #971: also double-encoded or Python repr.
+                            let parsed = string_to_json_object(s);
+                            if let Some(parsed) = parsed {
                                 let st = json_object_to_map_struct_series(
                                     &parsed,
                                     &key_type,
