@@ -1158,11 +1158,31 @@ impl SparkSession {
         } {
             return true;
         }
+        // #984: schema-qualified name — try unqualified table name
+        if name.contains('.') {
+            let unqualified = name.rsplit_once('.').map(|(_, tbl)| tbl).unwrap_or(name);
+            if match self.catalog.lock() {
+                Ok(m) => m.contains_key(unqualified),
+                Err(_) => false,
+            } || match self.tables.lock() {
+                Ok(m) => m.contains_key(unqualified),
+                Err(_) => false,
+            } {
+                return true;
+            }
+        }
         // Warehouse fallback
         if let Some(warehouse) = self.warehouse_dir() {
             let path = Path::new(warehouse).join(name);
             if path.is_dir() {
                 return true;
+            }
+            if name.contains('.') {
+                let path_qualified =
+                    Path::new(warehouse).join(name.replace('.', std::path::MAIN_SEPARATOR_STR));
+                if path_qualified.is_dir() {
+                    return true;
+                }
             }
         }
         false
@@ -1312,6 +1332,28 @@ impl SparkSession {
             .cloned()
         {
             return Ok(df);
+        }
+        // #984: schema-qualified name (e.g. test_schema.test_table): try unqualified table name so table("test_schema.test_table") finds a table registered as "test_table".
+        if name.contains('.') {
+            let unqualified = name.rsplit_once('.').map(|(_, tbl)| tbl).unwrap_or(name);
+            if let Some(df) = self
+                .catalog
+                .lock()
+                .map_err(|_| PolarsError::InvalidOperation("catalog lock poisoned".into()))?
+                .get(unqualified)
+                .cloned()
+            {
+                return Ok(df);
+            }
+            if let Some(df) = self
+                .tables
+                .lock()
+                .map_err(|_| PolarsError::InvalidOperation("catalog lock poisoned".into()))?
+                .get(unqualified)
+                .cloned()
+            {
+                return Ok(df);
+            }
         }
         // Warehouse fallback (disk-backed saveAsTable). #760: schema-qualified name try both
         // "schema.table" as single dir and "schema/table" (schema as subdir).
