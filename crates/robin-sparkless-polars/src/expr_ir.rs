@@ -186,9 +186,19 @@ fn call_to_expr(name: &str, args: &[ExprIr]) -> Result<Expr, EngineError> {
         }
         ("collect_list", [a]) => Ok(expr_ir_to_expr(a)?.implode()),
         ("collect_set", [a]) => Ok(expr_ir_to_expr(a)?.unique().implode()),
-        ("bool_and" | "every", [a]) => Ok(expr_ir_to_expr(a)?.all(true)),
+        ("bool_and" | "every", [a]) => {
+            // #980: Polars .all() requires Boolean; coerce so string/i64 etc. never passed.
+            Ok(crate::functions::expr_coerce_to_boolean(expr_ir_to_expr(a)?).all(true))
+        }
         ("median", [a]) => Ok(expr_ir_to_expr(a)?.quantile(lit(0.5), QuantileMethod::Linear)),
-        ("count_if", [a]) => Ok(expr_ir_to_expr(a)?.cast(DataType::Int64).sum()),
+        ("count_if", [a]) => {
+            // #981: count_if counts where condition is true; Polars cast(Int64) on Boolean; coerce condition to Boolean.
+            Ok(
+                crate::functions::expr_coerce_to_boolean(expr_ir_to_expr(a)?)
+                    .cast(DataType::Int64)
+                    .sum(),
+            )
+        }
         ("mode", [a]) => {
             let e = expr_ir_to_expr(a)?;
             let col = crate::column::Column::from_expr(e, None);
