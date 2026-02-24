@@ -14,10 +14,10 @@ pub use engine::{
 };
 pub use error::EngineError;
 pub use expr::{
-    alias, and_, approx_count_distinct, between, bool_and, call, collect_list, collect_set, col,
-    count, count_distinct, count_if, eq, every, first, ge, gt, is_in, is_null, kurtosis, le,
-    lit_bool, lit_f64, lit_i32, lit_i64, lit_null, lit_str, lt, max, mean, median, min, mode, ne,
-    not_, or_, skewness, std, stddev, stddev_pop, stddev_samp, sum, try_avg, try_sum, var_pop,
-    var_samp, variance, when, ExprIr, LiteralValue, WhenBuilder, WhenThenBuilder,
+    ExprIr, LiteralValue, WhenBuilder, WhenThenBuilder, alias, and_, approx_count_distinct,
+    between, bool_and, call, col, collect_list, collect_set, count, count_distinct, count_if, eq,
+    every, first, ge, gt, is_in, is_null, kurtosis, le, lit_bool, lit_f64, lit_i32, lit_i64,
+    lit_null, lit_str, lt, max, mean, median, min, mode, ne, not_, or_, skewness, std, stddev,
+    stddev_pop, stddev_samp, sum, try_avg, try_sum, var_pop, var_samp, variance, when,
 };
 pub use schema::{DataType, StructField, StructType};

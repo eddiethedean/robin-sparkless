@@ -50,8 +50,12 @@ pub fn expr_from_value(v: &Value) -> Result<Expr, PlanExprError> {
         )
     })?;
 
-    // Column reference: {"col": "name"}
-    if let Some(name) = obj.get("col").and_then(Value::as_str) {
+    // Column reference: {"col": "name"} or {"column": "name"} (PySpark/Sparkless parity; #969).
+    if let Some(name) = obj
+        .get("col")
+        .or_else(|| obj.get("column"))
+        .and_then(Value::as_str)
+    {
         return Ok(col(name));
     }
 
@@ -2655,6 +2659,14 @@ mod tests {
     fn test_col() {
         let v = json!({"col": "age"});
         let _e = expr_from_value(&v).unwrap();
+    }
+
+    /// #969: Sparkless may send {"column": "name"} (PySpark Column); accept as column ref.
+    #[test]
+    fn test_column_key_as_col_ref() {
+        let v = json!({"column": "age"});
+        let e = expr_from_value(&v).unwrap();
+        assert!(matches!(e, polars::prelude::Expr::Column(_)));
     }
 
     #[test]
