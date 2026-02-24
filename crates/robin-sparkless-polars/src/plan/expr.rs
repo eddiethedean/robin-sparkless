@@ -1244,6 +1244,15 @@ fn expr_from_fn(name: &str, args: &[Value]) -> Result<Expr, PlanExprError> {
             let then_val = expr_to_column(arg_expr(args, 1)?);
             Ok(when_then_otherwise_null(&cond, &then_val).into_expr())
         }
+        "assert_true" => {
+            // #979: assert_true requires Boolean; coerce so string/numeric columns work (PySpark parity).
+            require_args_min(name, args, 1)?;
+            let cond_expr = crate::functions::expr_coerce_to_boolean(arg_expr(args, 0)?);
+            let c = expr_to_column(cond_expr);
+            let err_msg_opt: Option<String> = arg_lit_opt_str(args, 1)?;
+            let err_msg = err_msg_opt.as_deref();
+            Ok(assert_true(&c, err_msg).into_expr())
+        }
         // --- String ---
         "length" | "char_length" | "character_length" => {
             require_args(name, args, 1)?;
