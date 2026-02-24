@@ -3410,7 +3410,9 @@ mod tests {
     }
 
     /// PR-C: list_databases() returns DataFrame with "name" column; CREATE SCHEMA adds to list.
+    /// Only runs when the `sql` feature is enabled (spark.sql() is required).
     #[test]
+    #[cfg(feature = "sql")]
     fn test_list_databases_returns_dataframe() {
         let spark = SparkSession::builder().app_name("test").get_or_create();
         let db_df = spark.list_databases().unwrap();
@@ -3427,8 +3429,10 @@ mod tests {
             .collect();
         assert!(names.contains(&"default".to_string()));
         assert!(names.contains(&"global_temp".to_string()));
-        // CREATE SCHEMA adds to list
-        let _ = spark.sql("CREATE SCHEMA IF NOT EXISTS test_schema_for_list_db");
+        // CREATE SCHEMA adds to list (no IF NOT EXISTS: sqlparser may not support it for CREATE SCHEMA)
+        spark
+            .sql("CREATE SCHEMA test_schema_for_list_db")
+            .expect("CREATE SCHEMA must succeed");
         let db_df2 = spark.list_databases().unwrap();
         let names2: Vec<String> = db_df2
             .collect_as_json_rows()
@@ -3441,7 +3445,11 @@ mod tests {
                     .to_string()
             })
             .collect();
-        assert!(names2.contains(&"test_schema_for_list_db".to_string()));
+        assert!(
+            names2.contains(&"test_schema_for_list_db".to_string()),
+            "list_databases() should include schema created by CREATE SCHEMA; got: {:?}",
+            names2
+        );
     }
 
     #[test]
