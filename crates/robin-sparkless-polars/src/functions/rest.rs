@@ -2785,9 +2785,18 @@ pub fn isin(column: &Column, other: &Column) -> Column {
 }
 
 /// Check if column values are in the given i64 slice (PySpark isin with literal list).
+/// #986: Use string series and cast column to string so string column isin(1, 2) works (PySpark parity).
 pub fn isin_i64(column: &Column, values: &[i64]) -> Column {
-    let s = Series::from_iter(values.iter().cloned());
-    Column::from_expr(column.expr().clone().is_in(lit(s), false), None)
+    let str_vals: Vec<String> = values.iter().map(|n| n.to_string()).collect();
+    let s: Series = Series::from_iter(str_vals.iter().map(String::as_str));
+    Column::from_expr(
+        column
+            .expr()
+            .clone()
+            .cast(DataType::String)
+            .is_in(lit(s), false),
+        None,
+    )
 }
 
 /// Check if column values are in the given string slice (PySpark isin with literal list).
