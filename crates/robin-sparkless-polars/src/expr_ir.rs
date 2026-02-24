@@ -118,7 +118,8 @@ pub fn expr_ir_to_expr(ir: &ExprIr) -> Result<Expr, EngineError> {
             then_expr,
             otherwise,
         } => {
-            let cond = expr_ir_to_expr(condition)?;
+            // #975: Polars when() requires Boolean condition; coerce so i64/string/etc. never passed as condition.
+            let cond = crate::functions::expr_coerce_to_boolean(expr_ir_to_expr(condition)?);
             let then_e = expr_ir_to_expr(then_expr)?;
             let else_e = expr_ir_to_expr(otherwise)?;
             Ok(polars::prelude::when(cond).then(then_e).otherwise(else_e))
