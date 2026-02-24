@@ -108,13 +108,15 @@ fn string_to_json_object(s: &str) -> Option<serde_json::Map<String, JsonValue>> 
 /// Map schema type string to Polars DataType (primitives and list for nested use).
 /// Decimal(p,s) is mapped to Float64 (Polars dtype-decimal feature not enabled).
 /// PR-G/#710: array<element_type> and nested array<array<...>> supported.
+/// #976: Nested array (e.g. array<array<long>>) recurses; elem_type "array<long>" maps to List(Int64).
 fn json_type_str_to_polars(type_str: &str) -> Option<DataType> {
     let s = type_str.trim().to_lowercase();
     if is_decimal_type_str(&s) {
         return Some(DataType::Float64);
     }
     if let Some(elem_type) = parse_array_element_type(&s) {
-        return json_type_str_to_polars(&elem_type).map(|inner| DataType::List(Box::new(inner)));
+        let inner = json_type_str_to_polars(elem_type.trim())?;
+        return Some(DataType::List(Box::new(inner)));
     }
     match s.as_str() {
         "int" | "integer" | "bigint" | "long" => Some(DataType::Int64),
@@ -202,6 +204,7 @@ fn json_value_to_array(v: &JsonValue) -> Option<Vec<JsonValue>> {
 }
 
 /// Infer list element type from first non-null array in the column (for schema "list" / "array").
+/// #976: When first element is itself an array (nested array), infer inner type and return ("array<inner>", List(inner_dtype)).
 fn infer_list_element_type(rows: &[Vec<JsonValue>], col_idx: usize) -> Option<(String, DataType)> {
     for row in rows {
         let v = row.get(col_idx)?;
@@ -218,6 +221,30 @@ fn infer_list_element_type(rows: &[Vec<JsonValue>], col_idx: usize) -> Option<(S
             }
             JsonValue::Bool(_) => ("boolean".to_string(), DataType::Boolean),
             JsonValue::Null => continue,
+            _ if json_value_to_array(first).is_some() => {
+                // Nested array: infer inner element type from first inner element.
+                let inner_arr = json_value_to_array(first).unwrap();
+                let inner_first = match inner_arr.first() {
+                    Some(f) => f,
+                    None => continue,
+                };
+                let (inner_type, inner_dtype) = match inner_first {
+                    JsonValue::Number(n) => {
+                        if n.as_i64().is_some() {
+                            ("bigint".to_string(), DataType::Int64)
+                        } else {
+                            ("double".to_string(), DataType::Float64)
+                        }
+                    }
+                    JsonValue::String(_) => ("string".to_string(), DataType::String),
+                    JsonValue::Bool(_) => ("boolean".to_string(), DataType::Boolean),
+                    _ => ("string".to_string(), DataType::String),
+                };
+                (
+                    format!("array<{inner_type}>"),
+                    DataType::List(Box::new(inner_dtype)),
+                )
+            }
             _ => ("string".to_string(), DataType::String),
         });
     }
