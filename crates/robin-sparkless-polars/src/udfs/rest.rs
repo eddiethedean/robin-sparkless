@@ -4062,12 +4062,28 @@ fn parse_str_to_date(s: &str) -> Option<chrono::NaiveDate> {
 }
 
 /// Parse string to integer (Spark parity). Empty/whitespace/invalid -> None. Otherwise parse as i64.
+/// #983: Also accept float-like strings (e.g. "3.14", "3.0") and truncate to int (PySpark cast str->int).
 fn parse_str_to_int(s: &str) -> Option<i64> {
     let s = s.trim();
     if s.is_empty() {
         return None;
     }
-    s.parse::<i64>().ok()
+    s.parse::<i64>()
+        .ok()
+        .or_else(|| s.parse::<f64>().ok().and_then(f64_to_int_trunc))
+}
+
+/// Truncate f64 to i64 for cast; None if out of range or NaN/Inf.
+fn f64_to_int_trunc(f: f64) -> Option<i64> {
+    if f.is_nan() || f.is_infinite() {
+        return None;
+    }
+    let truncated = f.trunc();
+    if truncated >= i64::MIN as f64 && truncated <= i64::MAX as f64 {
+        Some(truncated as i64)
+    } else {
+        None
+    }
 }
 
 /// Apply string-to-int cast. Handles string columns: empty/invalid -> null (Spark parity); passes through int columns; others error (strict) or null.
