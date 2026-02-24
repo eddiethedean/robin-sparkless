@@ -18,7 +18,7 @@ use crate::error::{EngineError, polars_to_core_error};
 use crate::functions::SortOrder;
 use crate::schema::{StructType, StructTypePolarsExt};
 use crate::session::SparkSession;
-use crate::type_coercion::coerce_for_pyspark_comparison;
+use crate::type_coercion::{coerce_for_pyspark_comparison, is_numeric_public};
 use polars::datatypes::TimeUnit;
 use polars::prelude::{
     AnyValue, DataFrame as PlDataFrame, DataType, Expr, IntoLazy, LazyFrame, PlSmallStr,
@@ -329,6 +329,27 @@ impl DataFrame {
                     };
                     if let Some(col_dtype) = self.get_column_dtype(col_name) {
                         if matches!(col_dtype, DataType::Date | DataType::Datetime(_, _)) {
+                            let (left_ty, right_ty) = if left_is_col {
+                                (col_dtype.clone(), DataType::String)
+                            } else {
+                                (DataType::String, col_dtype.clone())
+                            };
+                            let (new_left, new_right) = coerce_for_pyspark_comparison(
+                                (*left).as_ref().clone(),
+                                (*right).as_ref().clone(),
+                                &left_ty,
+                                &right_ty,
+                                op,
+                            )
+                            .map_err(|e| PolarsError::ComputeError(e.to_string().into()))?;
+                            return Ok(Expr::BinaryExpr {
+                                left: Arc::new(new_left),
+                                op: *op,
+                                right: Arc::new(new_right),
+                            });
+                        }
+                        // #988: Numeric column vs string literal -> coerce string to numeric (PySpark parity).
+                        if is_numeric_public(&col_dtype) {
                             let (left_ty, right_ty) = if left_is_col {
                                 (col_dtype.clone(), DataType::String)
                             } else {
@@ -2132,6 +2153,19 @@ mod tests {
         let expr = col("str_col").eq(lit(123i64));
         let out = df.filter(expr).unwrap();
         assert_eq!(out.count().unwrap(), 1);
+    }
+
+    /// #988: Numeric column == string literal: coerce string to numeric (PySpark parity).
+    #[test]
+    fn coerce_numeric_column_eq_string_literal() {
+        let s = Series::new("value".into(), &[100i64, 200i64, 50i64]);
+        let pl_df = polars::prelude::DataFrame::new_infer_height(vec![s.into()]).unwrap();
+        let df = DataFrame::from_polars(pl_df);
+        let expr = col("value").eq(lit("100"));
+        let out = df.filter(expr).unwrap();
+        assert_eq!(out.count().unwrap(), 1);
+        let rows = out.collect_as_json_rows().unwrap();
+        assert_eq!(rows[0].get("value").and_then(|v| v.as_i64()), Some(100));
     }
 
     /// #646: filter with string predicate (contains) must receive Boolean; cast ensures parity.

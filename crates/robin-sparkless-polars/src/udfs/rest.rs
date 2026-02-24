@@ -4228,9 +4228,13 @@ pub fn apply_string_to_int(
 }
 
 /// Parse string to boolean (PySpark cast string->boolean). "true"/"false"/"1"/"0" case-insensitive.
+/// Empty or whitespace-only string -> false (Python bool("") parity; #989).
 /// For try_cast: invalid strings -> null. For cast: invalid strings -> error.
 fn parse_str_to_bool(s: &str, strict: bool) -> Option<bool> {
     let lower = s.trim().to_lowercase();
+    if lower.is_empty() {
+        return Some(false);
+    }
     match lower.as_str() {
         "true" | "1" | "yes" => Some(true),
         "false" | "0" | "no" => Some(false),
