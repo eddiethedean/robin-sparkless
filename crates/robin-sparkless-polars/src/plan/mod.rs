@@ -310,7 +310,7 @@ fn apply_op(
                     ));
                 }
                 let mut exprs = Vec::with_capacity(arr.len());
-                for v in arr {
+                for (idx, v) in arr.iter().enumerate() {
                     if let Some(obj) = v.as_object() {
                         if let Some(expr_val) = obj.get("expr") {
                             // Column-like expression: {name: "<alias>", expr: <expr>}
@@ -324,6 +324,25 @@ fn apply_op(
                                 .map_err(PlanError::Session)?;
                             exprs.push(resolved.alias(name));
                             continue;
+                        }
+                        // #970: accept bare expression object (e.g. {"fn": "alias", "args": [...]} or {"op": "add", ...})
+                        if obj.contains_key("fn") || obj.contains_key("op") {
+                            if let Ok(expr) = expr_from_value(v) {
+                                let resolved = df
+                                    .resolve_expr_column_names(expr)
+                                    .map_err(PlanError::Session)?;
+                                let alias = obj
+                                    .get("fn")
+                                    .and_then(Value::as_str)
+                                    .filter(|s| *s == "alias")
+                                    .and_then(|_| obj.get("args").and_then(Value::as_array))
+                                    .and_then(|a| a.last())
+                                    .and_then(Value::as_str)
+                                    .map(String::from)
+                                    .unwrap_or_else(|| format!("_c{idx}"));
+                                exprs.push(resolved.alias(alias));
+                                continue;
+                            }
                         }
                     }
                     // Column name: string or {col/column/name}
