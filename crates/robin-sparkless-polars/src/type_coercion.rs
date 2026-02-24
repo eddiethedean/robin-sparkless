@@ -165,6 +165,11 @@ fn is_numeric(dtype: &DataType) -> bool {
     )
 }
 
+/// Public wrapper for use in DataFrame coercion (#974).
+pub fn is_numeric_public(dtype: &DataType) -> bool {
+    is_numeric(dtype)
+}
+
 /// Check if a DataType is date/datetime (temporal types that we can cast from string via try_cast).
 fn is_date_or_datetime(dtype: &DataType) -> bool {
     matches!(dtype, DataType::Date | DataType::Datetime(_, _))
@@ -352,6 +357,42 @@ pub fn coerce_for_pyspark_eq_null_safe(
     let left_ty = infer_type_from_expr(&left).unwrap_or(DataType::String);
     let right_ty = infer_type_from_expr(&right).unwrap_or(DataType::String);
     coerce_for_pyspark_comparison(left, right, &left_ty, &right_ty, &CompareOp::Eq)
+}
+
+/// #974: Coerce string–numeric for arithmetic (+, -, *, /, %, **). String side is cast via try_to_number to Float64.
+pub fn coerce_for_pyspark_arithmetic(
+    left: Expr,
+    right: Expr,
+    left_type: &DataType,
+    right_type: &DataType,
+) -> Result<(Expr, Expr), PolarsError> {
+    use crate::column::Column;
+    fn wrap_try_to_number(expr: Expr) -> Result<Expr, PolarsError> {
+        let col = Column::from_expr(expr, None);
+        let coerced = crate::functions::try_to_number(&col, None)
+            .map_err(|e| PolarsError::ComputeError(e.into()))?;
+        Ok(coerced.into_expr())
+    }
+    let string_numeric = (left_type == &DataType::String && is_numeric(right_type))
+        || (right_type == &DataType::String && is_numeric(left_type));
+    if !string_numeric {
+        return Ok((left, right));
+    }
+    let left_out = if left_type == &DataType::String {
+        wrap_try_to_number(left)?
+    } else if is_numeric(left_type) {
+        coerce_to_type(left, DataType::Float64)
+    } else {
+        left
+    };
+    let right_out = if right_type == &DataType::String {
+        wrap_try_to_number(right)?
+    } else if is_numeric(right_type) {
+        coerce_to_type(right, DataType::Float64)
+    } else {
+        right
+    };
+    Ok((left_out, right_out))
 }
 
 #[cfg(test)]
