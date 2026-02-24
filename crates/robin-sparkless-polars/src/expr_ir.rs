@@ -57,17 +57,20 @@ pub fn expr_ir_to_expr(ir: &ExprIr) -> Result<Expr, EngineError> {
         }
 
         ExprIr::And(a, b) => {
-            let l = expr_ir_to_expr(a)?;
-            let r = expr_ir_to_expr(b)?;
+            // #977: Polars .and() requires Boolean; coerce so string/i64 etc. never passed.
+            let l = crate::functions::expr_coerce_to_boolean(expr_ir_to_expr(a)?);
+            let r = crate::functions::expr_coerce_to_boolean(expr_ir_to_expr(b)?);
             Ok(l.and(r))
         }
         ExprIr::Or(a, b) => {
-            let l = expr_ir_to_expr(a)?;
-            let r = expr_ir_to_expr(b)?;
+            // #977: Polars .or() requires Boolean; coerce so string/i64 etc. never passed.
+            let l = crate::functions::expr_coerce_to_boolean(expr_ir_to_expr(a)?);
+            let r = crate::functions::expr_coerce_to_boolean(expr_ir_to_expr(b)?);
             Ok(l.or(r))
         }
         ExprIr::Not(a) => {
-            let x = expr_ir_to_expr(a)?;
+            // #977: Polars .not() requires Boolean; coerce so string/i64 etc. never passed.
+            let x = crate::functions::expr_coerce_to_boolean(expr_ir_to_expr(a)?);
             Ok(x.not())
         }
 
