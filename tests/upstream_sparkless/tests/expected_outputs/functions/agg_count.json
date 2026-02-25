@@ -1,0 +1,68 @@
+{
+  "test_id": "agg_count",
+  "pyspark_version": "3.5",
+  "generated_at": "2025-10-27T14:13:13.132693",
+  "input_data": [
+    {
+      "id": 1,
+      "name": "Alice",
+      "age": 25,
+      "salary": 50000.0,
+      "active": true,
+      "email": "alice@example.com"
+    },
+    {
+      "id": 2,
+      "name": "Bob",
+      "age": 30,
+      "salary": 60000.0,
+      "active": false,
+      "email": "bob@test.com"
+    },
+    {
+      "id": 3,
+      "name": "Charlie",
+      "age": 35,
+      "salary": 70000.0,
+      "active": true,
+      "email": "charlie@company.org"
+    }
+  ],
+  "operation": "DataFrame operation: agg_count",
+  "expected_output": {
+    "schema": {
+      "field_count": 2,
+      "field_names": [
+        "active",
+        "count(id)"
+      ],
+      "field_types": [
+        "boolean",
+        "long"
+      ],
+      "fields": [
+        {
+          "name": "active",
+          "type": "boolean",
+          "nullable": true
+        },
+        {
+          "name": "count(id)",
+          "type": "long",
+          "nullable": false
+        }
+      ]
+    },
+    "data": [
+      {
+        "active": true,
+        "count(id)": 2
+      },
+      {
+        "active": false,
+        "count(id)": 1
+      }
+    ],
+    "row_count": 2
+  }
+}

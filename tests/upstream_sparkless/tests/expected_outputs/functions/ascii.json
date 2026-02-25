@@ -1,0 +1,56 @@
+{
+  "test_id": "ascii",
+  "pyspark_version": "3.5",
+  "generated_at": "2025-10-27T14:13:23.310980",
+  "input_data": [
+    {
+      "id": 1,
+      "name": "Alice",
+      "text": "Hello World",
+      "email": "alice@example.com"
+    },
+    {
+      "id": 2,
+      "name": "Bob",
+      "text": "Test String",
+      "email": "bob@test.com"
+    },
+    {
+      "id": 3,
+      "name": "Charlie",
+      "text": "Python Data",
+      "email": "charlie@company.org"
+    }
+  ],
+  "operation": "DataFrame operation: ascii",
+  "expected_output": {
+    "schema": {
+      "field_count": 1,
+      "field_names": [
+        "ascii(name)"
+      ],
+      "field_types": [
+        "integer"
+      ],
+      "fields": [
+        {
+          "name": "ascii(name)",
+          "type": "integer",
+          "nullable": true
+        }
+      ]
+    },
+    "data": [
+      {
+        "ascii(name)": 65
+      },
+      {
+        "ascii(name)": 66
+      },
+      {
+        "ascii(name)": 67
+      }
+    ],
+    "row_count": 3
+  }
+}

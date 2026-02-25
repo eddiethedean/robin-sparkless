@@ -1,0 +1,77 @@
+{
+  "test_id": "element_at",
+  "pyspark_version": "3.5",
+  "generated_at": "2025-10-27T14:13:17.137662",
+  "input_data": [
+    {
+      "id": 1,
+      "name": "Alice",
+      "scores": [
+        85,
+        90,
+        78
+      ],
+      "tags": [
+        "python",
+        "data"
+      ]
+    },
+    {
+      "id": 2,
+      "name": "Bob",
+      "scores": [
+        92,
+        88,
+        95
+      ],
+      "tags": [
+        "java",
+        "backend"
+      ]
+    },
+    {
+      "id": 3,
+      "name": "Charlie",
+      "scores": [
+        76,
+        82,
+        89
+      ],
+      "tags": [
+        "python",
+        "ml"
+      ]
+    }
+  ],
+  "operation": "DataFrame operation: element_at",
+  "expected_output": {
+    "schema": {
+      "field_count": 1,
+      "field_names": [
+        "element_at(scores, 2)"
+      ],
+      "field_types": [
+        "long"
+      ],
+      "fields": [
+        {
+          "name": "element_at(scores, 2)",
+          "type": "long",
+          "nullable": true
+        }
+      ]
+    },
+    "data": [
+      {
+        "element_at(scores, 2)": 90
+      },
+      {
+        "element_at(scores, 2)": 88
+      },
+      {
+        "element_at(scores, 2)": 82
+      }
+    ],
+    "row_count": 3
+  }
+}

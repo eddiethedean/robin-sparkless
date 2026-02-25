@@ -1,0 +1,53 @@
+{
+  "test_id": "overlay",
+  "pyspark_version": "3.5",
+  "generated_at": "2025-10-27T14:13:29.262952",
+  "input_data": [
+    {
+      "id": 1,
+      "name": "Alice",
+      "text": "Hello World"
+    },
+    {
+      "id": 2,
+      "name": "Bob",
+      "text": "Test"
+    },
+    {
+      "id": 3,
+      "name": "Charlie",
+      "text": "Python"
+    }
+  ],
+  "operation": "DataFrame operation: overlay",
+  "expected_output": {
+    "schema": {
+      "field_count": 1,
+      "field_names": [
+        "overlay(text, X, 1, 1)"
+      ],
+      "field_types": [
+        "string"
+      ],
+      "fields": [
+        {
+          "name": "overlay(text, X, 1, 1)",
+          "type": "string",
+          "nullable": true
+        }
+      ]
+    },
+    "data": [
+      {
+        "overlay(text, X, 1, 1)": "Xello World"
+      },
+      {
+        "overlay(text, X, 1, 1)": "Xest"
+      },
+      {
+        "overlay(text, X, 1, 1)": "Xython"
+      }
+    ],
+    "row_count": 3
+  }
+}

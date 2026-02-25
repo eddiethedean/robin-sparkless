@@ -1,0 +1,56 @@
+{
+  "test_id": "column_lit",
+  "pyspark_version": "3.5",
+  "generated_at": "2025-10-27T14:25:48.618859",
+  "input_data": [
+    {
+      "id": 1,
+      "name": "Alice",
+      "age": 25,
+      "salary": 50000.0
+    },
+    {
+      "id": 2,
+      "name": "Bob",
+      "age": 30,
+      "salary": 60000.0
+    },
+    {
+      "id": 3,
+      "name": "Charlie",
+      "age": 35,
+      "salary": 70000.0
+    }
+  ],
+  "operation": "DataFrame operation: column_lit",
+  "expected_output": {
+    "schema": {
+      "field_count": 1,
+      "field_names": [
+        "test"
+      ],
+      "field_types": [
+        "string"
+      ],
+      "fields": [
+        {
+          "name": "test",
+          "type": "string",
+          "nullable": false
+        }
+      ]
+    },
+    "data": [
+      {
+        "test": "test"
+      },
+      {
+        "test": "test"
+      },
+      {
+        "test": "test"
+      }
+    ],
+    "row_count": 3
+  }
+}

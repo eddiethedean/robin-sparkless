@@ -8,6 +8,7 @@ use crate::dataframe::{DataFrame, JoinType, join};
 use crate::functions;
 use crate::session::{SparkSession, set_thread_udf_session};
 use polars::prelude::{DataFrame as PlDataFrame, Expr, PolarsError, col, lit, when};
+use serde_json::Value as JsonValue;
 use sqlparser::ast::{
     BinaryOperator, Expr as SqlExpr, Function, FunctionArg, FunctionArgExpr, FunctionArguments,
     GroupByExpr, JoinConstraint, JoinOperator, ObjectType, OrderByKind, Query, Select, SelectItem,
@@ -106,6 +107,54 @@ pub fn translate(
     set_thread_udf_session(session.clone());
     match stmt {
         Statement::Query(q) => translate_query(session, q.as_ref()),
+        Statement::CreateTable(create_table) => {
+            let table_name = create_table.name.to_string();
+            if session.table_exists(&table_name) {
+                if create_table.if_not_exists {
+                    return Ok(DataFrame::from_polars_with_options(
+                        PlDataFrame::empty(),
+                        session.is_case_sensitive(),
+                    ));
+                }
+                return Err(PolarsError::InvalidOperation(
+                    format!("SQL: table already exists: {table_name}").into(),
+                ));
+            }
+
+            fn dtype_to_schema_str(dt: &sqlparser::ast::DataType) -> String {
+                let s = dt.to_string().to_lowercase();
+                if s.starts_with("int") || s.starts_with("integer") || s == "int4" {
+                    "int".to_string()
+                } else if s.starts_with("bigint") || s == "int8" || s == "long" {
+                    "long".to_string()
+                } else if s.starts_with("double") {
+                    "double".to_string()
+                } else if s.starts_with("float") {
+                    "float".to_string()
+                } else if s.starts_with("bool") {
+                    "boolean".to_string()
+                } else if s.starts_with("date") {
+                    "date".to_string()
+                } else if s.starts_with("timestamp") {
+                    "timestamp".to_string()
+                } else {
+                    // STRING, VARCHAR, CHAR, etc.
+                    "string".to_string()
+                }
+            }
+
+            let schema: Vec<(String, String)> = create_table
+                .columns
+                .iter()
+                .map(|c| (c.name.value.clone(), dtype_to_schema_str(&c.data_type)))
+                .collect();
+            let df = session.create_dataframe_from_rows(Vec::<Vec<JsonValue>>::new(), schema, false)?;
+            session.register_table(&table_name, df);
+            Ok(DataFrame::from_polars_with_options(
+                PlDataFrame::empty(),
+                session.is_case_sensitive(),
+            ))
+        }
         Statement::CreateSchema { schema_name, .. } => {
             let name = schema_name.to_string();
             session.register_database(&name);

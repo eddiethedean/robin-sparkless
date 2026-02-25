@@ -1,0 +1,62 @@
+{
+  "test_id": "string_concat",
+  "pyspark_version": "3.5",
+  "generated_at": "2025-10-27T14:13:11.952331",
+  "input_data": [
+    {
+      "id": 1,
+      "name": "Alice",
+      "age": 25,
+      "salary": 50000.0,
+      "active": true,
+      "email": "alice@example.com"
+    },
+    {
+      "id": 2,
+      "name": "Bob",
+      "age": 30,
+      "salary": 60000.0,
+      "active": false,
+      "email": "bob@test.com"
+    },
+    {
+      "id": 3,
+      "name": "Charlie",
+      "age": 35,
+      "salary": 70000.0,
+      "active": true,
+      "email": "charlie@company.org"
+    }
+  ],
+  "operation": "DataFrame operation: string_concat",
+  "expected_output": {
+    "schema": {
+      "field_count": 1,
+      "field_names": [
+        "concat(name,  - , email)"
+      ],
+      "field_types": [
+        "string"
+      ],
+      "fields": [
+        {
+          "name": "concat(name,  - , email)",
+          "type": "string",
+          "nullable": true
+        }
+      ]
+    },
+    "data": [
+      {
+        "concat(name,  - , email)": "Alice - alice@example.com"
+      },
+      {
+        "concat(name,  - , email)": "Bob - bob@test.com"
+      },
+      {
+        "concat(name,  - , email)": "Charlie - charlie@company.org"
+      }
+    ],
+    "row_count": 3
+  }
+}

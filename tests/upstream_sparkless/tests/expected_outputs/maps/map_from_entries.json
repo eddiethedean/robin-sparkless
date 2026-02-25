@@ -1,0 +1,78 @@
+{
+  "test_id": "map_from_entries",
+  "pyspark_version": "3.5",
+  "generated_at": "2025-10-27T14:13:24.810535",
+  "input_data": [
+    {
+      "id": 1,
+      "map1": {
+        "a": 1,
+        "b": 2
+      },
+      "map2": {
+        "c": 3,
+        "d": 4
+      },
+      "key": "a"
+    },
+    {
+      "id": 2,
+      "map1": {
+        "x": 10,
+        "y": 20
+      },
+      "map2": {
+        "z": 30
+      },
+      "key": "x"
+    },
+    {
+      "id": 3,
+      "map1": {
+        "p": 100,
+        "q": 200
+      },
+      "map2": {
+        "r": 300
+      },
+      "key": "p"
+    }
+  ],
+  "operation": "DataFrame operation: map_from_entries",
+  "expected_output": {
+    "schema": {
+      "field_count": 1,
+      "field_names": [
+        "map_from_entries(array(struct(a, 1)))"
+      ],
+      "field_types": [
+        "map"
+      ],
+      "fields": [
+        {
+          "name": "map_from_entries(array(struct(a, 1)))",
+          "type": "map",
+          "nullable": false
+        }
+      ]
+    },
+    "data": [
+      {
+        "map_from_entries(array(struct(a, 1)))": {
+          "a": 1
+        }
+      },
+      {
+        "map_from_entries(array(struct(a, 1)))": {
+          "a": 1
+        }
+      },
+      {
+        "map_from_entries(array(struct(a, 1)))": {
+          "a": 1
+        }
+      }
+    ],
+    "row_count": 3
+  }
+}

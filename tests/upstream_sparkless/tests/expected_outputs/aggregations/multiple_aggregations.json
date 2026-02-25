@@ -1,0 +1,105 @@
+{
+  "test_id": "multiple_aggregations",
+  "pyspark_version": "3.5",
+  "generated_at": "2024-01-15T10:30:00Z",
+  "input_data": [
+    {
+      "id": 1,
+      "name": "Alice",
+      "department": "IT",
+      "salary": 50000,
+      "age": 25
+    },
+    {
+      "id": 2,
+      "name": "Bob",
+      "department": "HR",
+      "salary": 60000,
+      "age": 30
+    },
+    {
+      "id": 3,
+      "name": "Charlie",
+      "department": "IT",
+      "salary": 70000,
+      "age": 35
+    },
+    {
+      "id": 4,
+      "name": "David",
+      "department": "Finance",
+      "salary": 80000,
+      "age": 40
+    }
+  ],
+  "expected_output": {
+    "schema": {
+      "field_count": 5,
+      "field_names": [
+        "department",
+        "total_salary",
+        "avg_salary",
+        "employee_count",
+        "max_age"
+      ],
+      "field_types": [
+        "StringType()",
+        "LongType()",
+        "DoubleType()",
+        "LongType()",
+        "LongType()"
+      ],
+      "fields": [
+        {
+          "name": "department",
+          "type": "StringType()",
+          "nullable": true
+        },
+        {
+          "name": "total_salary",
+          "type": "LongType()",
+          "nullable": true
+        },
+        {
+          "name": "avg_salary",
+          "type": "DoubleType()",
+          "nullable": true
+        },
+        {
+          "name": "employee_count",
+          "type": "LongType()",
+          "nullable": false
+        },
+        {
+          "name": "max_age",
+          "type": "LongType()",
+          "nullable": true
+        }
+      ]
+    },
+    "data": [
+      {
+        "department": "HR",
+        "total_salary": 60000,
+        "avg_salary": 60000.0,
+        "employee_count": 1,
+        "max_age": 30
+      },
+      {
+        "department": "Finance",
+        "total_salary": 80000,
+        "avg_salary": 80000.0,
+        "employee_count": 1,
+        "max_age": 40
+      },
+      {
+        "department": "IT",
+        "total_salary": 120000,
+        "avg_salary": 60000.0,
+        "employee_count": 2,
+        "max_age": 35
+      }
+    ],
+    "row_count": 3
+  }
+}

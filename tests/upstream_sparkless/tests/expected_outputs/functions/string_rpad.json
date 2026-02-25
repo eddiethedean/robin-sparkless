@@ -1,0 +1,53 @@
+{
+  "test_id": "string_rpad",
+  "pyspark_version": "3.5",
+  "generated_at": "2025-10-27T14:13:12.089941",
+  "input_data": [
+    {
+      "id": 1,
+      "name": "  Alice  ",
+      "age": 25
+    },
+    {
+      "id": 2,
+      "name": "Bob",
+      "age": 30
+    },
+    {
+      "id": 3,
+      "name": "  Charlie",
+      "age": 35
+    }
+  ],
+  "operation": "DataFrame operation: string_rpad",
+  "expected_output": {
+    "schema": {
+      "field_count": 1,
+      "field_names": [
+        "rpad(name, 10,  )"
+      ],
+      "field_types": [
+        "string"
+      ],
+      "fields": [
+        {
+          "name": "rpad(name, 10,  )",
+          "type": "string",
+          "nullable": true
+        }
+      ]
+    },
+    "data": [
+      {
+        "rpad(name, 10,  )": "  Alice   "
+      },
+      {
+        "rpad(name, 10,  )": "Bob       "
+      },
+      {
+        "rpad(name, 10,  )": "  Charlie "
+      }
+    ],
+    "row_count": 3
+  }
+}

@@ -1,0 +1,95 @@
+{
+  "test_id": "array_intersect",
+  "pyspark_version": "3.5",
+  "generated_at": "2025-10-27T14:13:24.281839",
+  "input_data": [
+    {
+      "id": 1,
+      "arr1": [
+        1,
+        2,
+        3
+      ],
+      "arr2": [
+        4,
+        5
+      ],
+      "arr3": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "value": 2
+    },
+    {
+      "id": 2,
+      "arr1": [
+        10,
+        20
+      ],
+      "arr2": [
+        30,
+        40,
+        50
+      ],
+      "arr3": [
+        10,
+        20,
+        30
+      ],
+      "value": 20
+    },
+    {
+      "id": 3,
+      "arr1": [
+        5,
+        10,
+        15
+      ],
+      "arr2": [
+        20,
+        25
+      ],
+      "arr3": [
+        5,
+        5,
+        10,
+        10
+      ],
+      "value": 5
+    }
+  ],
+  "operation": "DataFrame operation: array_intersect",
+  "expected_output": {
+    "schema": {
+      "field_count": 1,
+      "field_names": [
+        "array_intersect(arr1, arr2)"
+      ],
+      "field_types": [
+        "array"
+      ],
+      "fields": [
+        {
+          "name": "array_intersect(arr1, arr2)",
+          "type": "array",
+          "nullable": true
+        }
+      ]
+    },
+    "data": [
+      {
+        "array_intersect(arr1, arr2)": []
+      },
+      {
+        "array_intersect(arr1, arr2)": []
+      },
+      {
+        "array_intersect(arr1, arr2)": []
+      }
+    ],
+    "row_count": 3
+  }
+}

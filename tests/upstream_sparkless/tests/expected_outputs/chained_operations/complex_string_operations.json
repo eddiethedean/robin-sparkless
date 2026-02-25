@@ -1,0 +1,98 @@
+{
+  "test_id": "complex_string_operations",
+  "pyspark_version": "3.5",
+  "generated_at": "2025-10-27T14:13:23.273795",
+  "input_data": [
+    {
+      "id": 1,
+      "name": "Alice",
+      "age": 25,
+      "salary": 50000.0,
+      "department": "IT",
+      "hire_date": "2020-01-15"
+    },
+    {
+      "id": 2,
+      "name": "Bob",
+      "age": 30,
+      "salary": 60000.0,
+      "department": "HR",
+      "hire_date": "2019-03-10"
+    },
+    {
+      "id": 3,
+      "name": "Charlie",
+      "age": 35,
+      "salary": 70000.0,
+      "department": "IT",
+      "hire_date": "2021-07-22"
+    },
+    {
+      "id": 4,
+      "name": "David",
+      "age": 40,
+      "salary": 80000.0,
+      "department": "Finance",
+      "hire_date": "2018-11-05"
+    },
+    {
+      "id": 5,
+      "name": "Eve",
+      "age": 28,
+      "salary": 55000.0,
+      "department": "IT",
+      "hire_date": "2022-02-14"
+    }
+  ],
+  "operation": "DataFrame operation: complex_string_operations",
+  "expected_output": {
+    "schema": {
+      "field_count": 3,
+      "field_names": [
+        "name_upper",
+        "name_dept",
+        "name_length"
+      ],
+      "field_types": [
+        "string",
+        "string",
+        "integer"
+      ],
+      "fields": [
+        {
+          "name": "name_upper",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "name_dept",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "name_length",
+          "type": "integer",
+          "nullable": true
+        }
+      ]
+    },
+    "data": [
+      {
+        "name_upper": "ALICE",
+        "name_dept": "Alice (IT)",
+        "name_length": 5
+      },
+      {
+        "name_upper": "CHARLIE",
+        "name_dept": "Charlie (IT)",
+        "name_length": 7
+      },
+      {
+        "name_upper": "DAVID",
+        "name_dept": "David (Finance)",
+        "name_length": 5
+      }
+    ],
+    "row_count": 3
+  }
+}

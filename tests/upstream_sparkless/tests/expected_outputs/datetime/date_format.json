@@ -1,0 +1,56 @@
+{
+  "test_id": "date_format",
+  "pyspark_version": "3.5",
+  "generated_at": "2025-10-27T14:13:17.423977",
+  "input_data": [
+    {
+      "id": 1,
+      "name": "Alice",
+      "hire_date": "2020-01-15",
+      "birth_date": "1990-05-20"
+    },
+    {
+      "id": 2,
+      "name": "Bob",
+      "hire_date": "2019-03-10",
+      "birth_date": "1985-12-03"
+    },
+    {
+      "id": 3,
+      "name": "Charlie",
+      "hire_date": "2021-07-22",
+      "birth_date": "1992-08-14"
+    }
+  ],
+  "operation": "DataFrame operation: date_format",
+  "expected_output": {
+    "schema": {
+      "field_count": 1,
+      "field_names": [
+        "date_format(hire_date, yyyy-MM)"
+      ],
+      "field_types": [
+        "string"
+      ],
+      "fields": [
+        {
+          "name": "date_format(hire_date, yyyy-MM)",
+          "type": "string",
+          "nullable": true
+        }
+      ]
+    },
+    "data": [
+      {
+        "date_format(hire_date, yyyy-MM)": "2020-01"
+      },
+      {
+        "date_format(hire_date, yyyy-MM)": "2019-03"
+      },
+      {
+        "date_format(hire_date, yyyy-MM)": "2021-07"
+      }
+    ],
+    "row_count": 3
+  }
+}

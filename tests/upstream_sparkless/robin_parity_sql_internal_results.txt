@@ -1,0 +1,352 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.11.13, pytest-8.4.2, pluggy-1.6.0 -- /Users/odosmatthews/.pyenv/versions/3.11.13/bin/python
+cachedir: .pytest_cache
+hypothesis profile 'ci' -> database=None, deadline=None, print_blob=True, derandomize=True, suppress_health_check=(HealthCheck.too_slow,)
+rootdir: /Users/odosmatthews/Documents/coding/sparkless
+configfile: pyproject.toml
+plugins: anyio-4.11.0, cov-7.0.0, green-light-0.2.0, asyncio-1.2.0, xdist-3.8.0, timeout-2.4.0, hypothesis-6.148.7, alt-pytest-asyncio-0.9.3, async-sqlalchemy-0.2.0
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+timeout: 300.0s
+timeout method: thread
+timeout func_only: False
+collecting ... collected 55 items
+
+tests/parity/sql/test_advanced.py::TestSQLAdvancedParity::test_sql_with_inner_join FAILED [  1%]
+tests/parity/sql/test_advanced.py::TestSQLAdvancedParity::test_sql_with_left_join FAILED [  3%]
+tests/parity/sql/test_advanced.py::TestSQLAdvancedParity::test_sql_with_order_by FAILED [  5%]
+tests/parity/sql/test_advanced.py::TestSQLAdvancedParity::test_sql_with_limit PASSED [  7%]
+tests/parity/sql/test_advanced.py::TestSQLAdvancedParity::test_sql_with_having FAILED [  9%]
+tests/parity/sql/test_advanced.py::TestSQLAdvancedParity::test_sql_with_union FAILED [ 10%]
+tests/parity/sql/test_advanced.py::TestSQLAdvancedParity::test_sql_with_subquery FAILED [ 12%]
+tests/parity/sql/test_advanced.py::TestSQLAdvancedParity::test_sql_with_case_when FAILED [ 14%]
+tests/parity/sql/test_advanced.py::TestSQLAdvancedParity::test_sql_with_like FAILED [ 16%]
+tests/parity/sql/test_advanced.py::TestSQLAdvancedParity::test_sql_with_in_clause FAILED [ 18%]
+tests/parity/sql/test_ddl.py::TestSQLDDLParity::test_create_database PASSED [ 20%]
+tests/parity/sql/test_ddl.py::TestSQLDDLParity::test_create_database_if_not_exists PASSED [ 21%]
+tests/parity/sql/test_ddl.py::TestSQLDDLParity::test_drop_database PASSED [ 23%]
+tests/parity/sql/test_ddl.py::TestSQLDDLParity::test_create_table_from_dataframe FAILED [ 25%]
+tests/parity/sql/test_ddl.py::TestSQLDDLParity::test_create_table_with_select FAILED [ 27%]
+tests/parity/sql/test_ddl.py::TestSQLDDLParity::test_drop_table PASSED   [ 29%]
+tests/parity/sql/test_ddl.py::TestSQLDDLParity::test_drop_table_if_exists PASSED [ 30%]
+tests/parity/sql/test_ddl.py::TestSQLDDLParity::test_create_schema PASSED [ 32%]
+tests/parity/sql/test_ddl.py::TestSQLDDLParity::test_set_current_database PASSED [ 34%]
+tests/parity/sql/test_ddl.py::TestSQLDDLParity::test_table_in_specific_database PASSED [ 36%]
+tests/parity/sql/test_dml.py::TestSQLDMLParity::test_insert_into_table FAILED [ 38%]
+tests/parity/sql/test_dml.py::TestSQLDMLParity::test_insert_into_specific_columns FAILED [ 40%]
+tests/parity/sql/test_dml.py::TestSQLDMLParity::test_insert_multiple_values FAILED [ 41%]
+tests/parity/sql/test_dml.py::TestSQLDMLParity::test_update_table FAILED [ 43%]
+tests/parity/sql/test_dml.py::TestSQLDMLParity::test_update_multiple_columns FAILED [ 45%]
+tests/parity/sql/test_dml.py::TestSQLDMLParity::test_delete_from_table FAILED [ 47%]
+tests/parity/sql/test_dml.py::TestSQLDMLParity::test_delete_all_rows PASSED [ 49%]
+tests/parity/sql/test_dml.py::TestSQLDMLParity::test_insert_from_select FAILED [ 50%]
+tests/parity/sql/test_queries.py::TestSQLQueriesParity::test_basic_select FAILED [ 52%]
+tests/parity/sql/test_queries.py::TestSQLQueriesParity::test_filtered_select FAILED [ 54%]
+tests/parity/sql/test_queries.py::TestSQLQueriesParity::test_group_by FAILED [ 56%]
+tests/parity/sql/test_queries.py::TestSQLQueriesParity::test_aggregation PASSED [ 58%]
+tests/parity/sql/test_show_describe.py::TestSQLShowDescribeParity::test_show_databases PASSED [ 60%]
+tests/parity/sql/test_show_describe.py::TestSQLShowDescribeParity::test_show_tables PASSED [ 61%]
+tests/parity/sql/test_show_describe.py::TestSQLShowDescribeParity::test_show_tables_in_database PASSED [ 63%]
+tests/parity/sql/test_show_describe.py::TestSQLShowDescribeParity::test_describe_table PASSED [ 65%]
+tests/parity/sql/test_show_describe.py::TestSQLShowDescribeParity::test_describe_extended PASSED [ 67%]
+tests/parity/sql/test_show_describe.py::TestSQLShowDescribeParity::test_describe_column PASSED [ 69%]
+tests/parity/sql/test_show_describe.py::TestSQLShowDescribeParity::test_show_columns PASSED [ 70%]
+tests/parity/internal/test_catalog.py::TestCatalogParity::test_list_databases PASSED [ 72%]
+tests/parity/internal/test_catalog.py::TestCatalogParity::test_create_database_catalog PASSED [ 74%]
+tests/parity/internal/test_catalog.py::TestCatalogParity::test_drop_database_catalog PASSED [ 76%]
+tests/parity/internal/test_catalog.py::TestCatalogParity::test_set_current_database PASSED [ 78%]
+tests/parity/internal/test_catalog.py::TestCatalogParity::test_list_tables PASSED [ 80%]
+tests/parity/internal/test_catalog.py::TestCatalogParity::test_list_tables_in_database PASSED [ 81%]
+tests/parity/internal/test_catalog.py::TestCatalogParity::test_table_exists PASSED [ 83%]
+tests/parity/internal/test_catalog.py::TestCatalogParity::test_table_exists_in_database PASSED [ 85%]
+tests/parity/internal/test_catalog.py::TestCatalogParity::test_get_table PASSED [ 87%]
+tests/parity/internal/test_catalog.py::TestCatalogParity::test_get_table_in_database PASSED [ 89%]
+tests/parity/internal/test_catalog.py::TestCatalogParity::test_cache_table FAILED [ 90%]
+tests/parity/internal/test_catalog.py::TestCatalogParity::test_uncache_table FAILED [ 92%]
+tests/parity/internal/test_catalog.py::TestCatalogParity::test_is_cached PASSED [ 94%]
+tests/parity/internal/test_session.py::TestSessionParity::test_createDataFrame_from_list_of_dicts PASSED [ 96%]
+tests/parity/internal/test_session.py::TestSessionParity::test_createDataFrame_with_explicit_schema PASSED [ 98%]
+tests/parity/internal/test_session.py::TestSessionParity::test_createDataFrame_empty PASSED [100%]
+
+=================================== FAILURES ===================================
+/Users/odosmatthews/Documents/coding/sparkless/sparkless/dataframe/lazy.py:495: sparkless.core.exceptions.operation.SparkUnsupportedOperationError: Operation 'Operations: join, select' is not supported
+/Users/odosmatthews/Documents/coding/sparkless/sparkless/dataframe/lazy.py:495: sparkless.core.exceptions.operation.SparkUnsupportedOperationError: Operation 'Operations: join, select' is not supported
+/Users/odosmatthews/Documents/coding/sparkless/sparkless/dataframe/lazy.py:495: sparkless.core.exceptions.operation.SparkUnsupportedOperationError: Operation 'Operations: orderBy' is not supported
+/Users/odosmatthews/Documents/coding/sparkless/sparkless/backend/robin/materializer.py:118: TypeError: '>' not supported between instances of 'builtins.Column' and 'builtins.Column'
+/Users/odosmatthews/Documents/coding/sparkless/sparkless/session/sql/executor.py:150: sparkless.core.exceptions.execution.QueryExecutionException: Failed to execute query: Operation 'Operations: select' is not supported
+/Users/odosmatthews/Documents/coding/sparkless/sparkless/backend/robin/materializer.py:118: TypeError: '>' not supported between instances of 'builtins.Column' and 'builtins.Column'
+/Users/odosmatthews/Documents/coding/sparkless/sparkless/dataframe/lazy.py:495: sparkless.core.exceptions.operation.SparkUnsupportedOperationError: Operation 'Operations: select' is not supported
+/Users/odosmatthews/Documents/coding/sparkless/sparkless/dataframe/lazy.py:495: sparkless.core.exceptions.operation.SparkUnsupportedOperationError: Operation 'Operations: filter' is not supported
+/Users/odosmatthews/Documents/coding/sparkless/sparkless/dataframe/lazy.py:495: sparkless.core.exceptions.operation.SparkUnsupportedOperationError: Operation 'Operations: filter' is not supported
+/Users/odosmatthews/Documents/coding/sparkless/tests/parity/sql/test_ddl.py:76: assert 6 == 3
+/Users/odosmatthews/Documents/coding/sparkless/sparkless/session/sql/executor.py:150: sparkless.core.exceptions.execution.QueryExecutionException: Failed to execute query: Operation 'Operations: select' is not supported
+/Users/odosmatthews/Documents/coding/sparkless/sparkless/dataframe/lazy.py:495: sparkless.core.exceptions.operation.SparkUnsupportedOperationError: Operation 'Operations: orderBy' is not supported
+/Users/odosmatthews/Documents/coding/sparkless/sparkless/dataframe/lazy.py:495: sparkless.core.exceptions.operation.SparkUnsupportedOperationError: Operation 'Operations: orderBy' is not supported
+/Users/odosmatthews/Documents/coding/sparkless/sparkless/dataframe/lazy.py:495: sparkless.core.exceptions.operation.SparkUnsupportedOperationError: Operation 'Operations: orderBy' is not supported
+/Users/odosmatthews/Documents/coding/sparkless/sparkless/backend/robin/materializer.py:348: TypeError: argument 'condition': 'bool' object cannot be converted to 'Column'
+/Users/odosmatthews/Documents/coding/sparkless/sparkless/backend/robin/materializer.py:348: TypeError: argument 'condition': 'bool' object cannot be converted to 'Column'
+/Users/odosmatthews/Documents/coding/sparkless/sparkless/dataframe/lazy.py:495: sparkless.core.exceptions.operation.SparkUnsupportedOperationError: Operation 'Operations: orderBy' is not supported
+/Users/odosmatthews/Documents/coding/sparkless/sparkless/session/sql/executor.py:150: sparkless.core.exceptions.execution.QueryExecutionException: Failed to execute query: Operation 'Operations: select' is not supported
+/Users/odosmatthews/Documents/coding/sparkless/tests/tools/comparison_utils.py:798: AssertionError: DataFrames are not equivalent:
+/Users/odosmatthews/Documents/coding/sparkless/tests/tools/comparison_utils.py:798: AssertionError: DataFrames are not equivalent:
+/Users/odosmatthews/Documents/coding/sparkless/sparkless/session/sql/executor.py:150: sparkless.core.exceptions.execution.QueryExecutionException: Failed to execute query: not found: age > 30
+/Users/odosmatthews/Documents/coding/sparkless/tests/parity/internal/test_catalog.py:237: assert 4 == 2
+/Users/odosmatthews/Documents/coding/sparkless/tests/parity/internal/test_catalog.py:258: assert 2 == 1
+================================ tests coverage ================================
+______________ coverage: platform darwin, python 3.11.13-final-0 _______________
+
+Name                                                                 Stmts   Miss  Cover   Missing
+--------------------------------------------------------------------------------------------------
+sparkless/__init__.py                                                   24      0   100%
+sparkless/_version.py                                                    8      4    50%   10-12, 16-19
+sparkless/backend/__init__.py                                            3      0   100%
+sparkless/backend/factory.py                                           131     56    57%   55-63, 72-74, 76-79, 90, 118-126, 129-131, 134-136, 147, 163-165, 167-175, 178-180, 183-185, 192-196, 218-238, 249, 266, 280-281, 296-297
+sparkless/backend/polars/__init__.py                                     4      0   100%
+sparkless/backend/polars/_over_compat.py                                19      5    74%   25-26, 38-40
+sparkless/backend/polars/executors/__init__.py                           1      1     0%   13
+sparkless/backend/polars/export.py                                      36     28    22%   27-53, 67-76, 88-89, 102-103, 113-114
+sparkless/backend/polars/expression_translator.py                     2118    962    55%   69-72, 75-77, 83-109, 127-130, 147, 165-167, 209-214, 277, 280, 283, 289, 295, 303, 396, 435, 456, 465-471, 501-503, 517, 544, 554-572, 575, 581-592, 600, 607, 621, 626-630, 634, 648, 653-657, 668, 673, 712-714, 717-737, 746, 749-752, 849-923, 944, 988, 996, 1011, 1051, 1075-1076, 1082-1086, 1123-1126, 1129-1130, 1141, 1148, 1152-1156, 1204-1215, 1271, 1339, 1366-1376, 1392-1400, 1405-1437, 1464-1499, 1521-1523, 1532-1534, 1545, 1548, 1550, 1552, 1564, 1568-1581, 1595, 1628, 1637-1639, 1645-1666, 1685-1693, 1737-1745, 1776, 1785-1787, 1803, 1806-1808, 1825-1829, 1837, 1840, 1855, 1875, 1925-1955, 1962, 1994, 2052, 2057-2107, 2134, 2144-2154, 2182, 2200-2240, 2251, 2267-2268, 2278-2292, 2316-2318, 2326, 2344-2348, 2351-2352, 2355-2356, 2359-2363, 2366-2370, 2373-2377, 2389-2390, 2393-2395, 2400-2401, 2404-2406, 2409-2416, 2419-2425, 2429, 2432-2437, 2440-2444, 2447-2451, 2455-2459, 2462-2466, 2469-2474, 2478-2480, 2488, 2492, 2515-2533, 2537, 2540, 2543, 2546-2548, 2566-2582, 2586, 2600, 2614, 2617, 2624, 2632, 2635-2637, 2640-2641, 2648, 2654, 2657, 2660-2661, 2683-2688, 2706-2710, 2715-2746, 2777, 2816, 2822, 2828-2829, 2834, 2842-2859, 2870-2880, 2891, 2907, 2915, 2921, 2929-2934, 2942-2951, 2954-2965, 2970-2980, 3013, 3017-3022, 3036, 3042, 3048, 3060-3061, 3068-3069, 3080, 3094-3095, 3100-3103, 3107-3110, 3113-3120, 3123-3138, 3145, 3149, 3153, 3157-3159, 3173-3180, 3199-3202, 3216-3219, 3234, 3237-3239, 3243-3248, 3251-3283, 3290, 3295-3299, 3302-3306, 3338, 3343-3344, 3354-3385, 3392-3393, 3400-3401, 3408-3409, 3416-3417, 3426-3440, 3448-3449, 3463, 3477-3481, 3487, 3491-3504, 3514, 3546, 3577-3614, 3638, 3641-3649, 3656, 3663, 3670, 3715-3717, 3731-3733, 3747-3755, 3770, 3777, 3779, 3791, 3794-3797, 3801, 3803, 3806, 3808, 3811, 3814, 3825, 3827, 3852, 3854, 3884, 3886, 3889, 3905, 3912-3935, 3940, 3947, 3950, 3956, 3962, 3964-3968, 3970, 3972, 3977, 3979, 3982-3983, 3990, 3993-3996, 4004, 4006, 4011-4012, 4024, 4057, 4080, 4107-4154, 4432-4438, 4465, 4480-4490, 4523, 4526, 4580, 4588, 4607-4653, 4666-4694, 4705-4729, 4759, 4793, 4814-4861, 4865, 4888-4895, 4908-4957, 4969-4976, 4988-5022, 5038, 5042-5044, 5066, 5089-5093
+sparkless/backend/polars/materializer.py                               813    275    66%   66-68, 90, 143, 152-171, 181, 221-226, 247-252, 312-317, 359, 390, 427-432, 466-521, 528-587, 646-650, 664-668, 697, 742, 878-896, 919, 935-944, 948-968, 973-986, 1017, 1025, 1067-1083, 1106, 1132, 1159, 1214-1231, 1293-1308, 1342, 1349-1350, 1354-1365, 1415, 1423-1443, 1453-1456, 1471-1475, 1516-1561, 1575-1621, 1631, 1638-1642, 1681-1683, 1692-1693, 1696-1700, 1703-1715, 1735-1750, 1769, 1772, 1775, 1777, 1794, 1797, 1799, 1826, 1835, 1842, 1845
+sparkless/backend/polars/operation_executor.py                        2032    838    59%   64, 147-149, 220, 222, 224, 226, 229-238, 262-268, 284-286, 305, 307, 309, 311, 313, 320-322, 332-347, 381-384, 391-394, 398-561, 566, 591-597, 606-609, 611, 621, 640, 643, 711, 726, 762-773, 804-881, 908-916, 928, 933-939, 954, 956, 967-972, 977-993, 1006-1008, 1028, 1036-1037, 1051-1055, 1079-1082, 1107-1108, 1111-1112, 1114-1115, 1117-1118, 1120-1121, 1132-1135, 1186, 1197-1220, 1233-1237, 1248, 1290-1292, 1310-1311, 1320-1322, 1330-1353, 1380-1385, 1401, 1435, 1501, 1521, 1530-1542, 1548-1585, 1606, 1677-1683, 1700, 1708-1709, 1715, 1730-1731, 1744-1749, 1757, 1769-1770, 1797-1837, 1846, 1860-1861, 1896-1933, 1942-1962, 1995, 1997, 1999, 2005-2020, 2025-2046, 2051-2055, 2060-2068, 2071-2084, 2087-2102, 2105-2108, 2113-2125, 2128-2147, 2184-2186, 2204-2209, 2218-2222, 2241-2244, 2271-2272, 2274-2275, 2277-2278, 2280-2281, 2288-2291, 2320-2343, 2360, 2367-2375, 2377-2380, 2382, 2444-2466, 2472-2507, 2522-2534, 2562-2571, 2581, 2587, 2653-2673, 2693-2747, 2858-2859, 2864-2866, 2949-2999, 3017-3133, 3155, 3159, 3192-3198, 3206, 3247-3248, 3292-3298, 3312-3313, 3349, 3353, 3361-3365, 3372, 3432, 3489, 3524, 3531-3536, 3545, 3552, 3576, 3584, 3593-3598, 3643, 3673-3674, 3686-3687, 3693-3696, 3698, 3702, 3738, 3777-3781, 3788, 3794, 3802, 3808, 3815, 3820-3822, 3827, 3833, 3843, 3851, 3897-3904, 4015-4017, 4022, 4025, 4035-4050, 4076-4089, 4128-4129, 4156-4203, 4268, 4335-4336, 4340-4341, 4362-4420, 4432, 4444, 4461-4484, 4495, 4507, 4522
+sparkless/backend/polars/parquet_storage.py                             41     41     0%   8-119
+sparkless/backend/polars/plan_interpreter.py                           381    206    46%   21-23, 31-45, 62-63, 66-68, 71-75, 95-99, 107-152, 161, 168-171, 179, 192-208, 211, 213, 230, 244, 246, 248, 252, 256, 258, 260, 262, 264, 266, 268, 271-287, 290, 294-296, 304-313, 322, 328, 339-342, 349-367, 369, 376-379, 392, 394, 396, 399-407, 417, 436, 445, 452-453, 455-457, 459, 461-464, 466-472, 476-489, 491-500, 511-514, 518, 521, 527, 530
+sparkless/backend/polars/schema_registry.py                             73     55    25%   42-43, 59-94, 110-190, 203-207, 220-222
+sparkless/backend/polars/schema_utils.py                                31      7    77%   19, 31-38, 53
+sparkless/backend/polars/storage.py                                    350    127    64%   61, 68-69, 82-83, 87-94, 98-103, 108, 149-152, 170-171, 183-185, 189-196, 206, 225-226, 242, 274, 289-290, 302, 306-307, 311-315, 325-349, 376, 389-400, 441, 453-457, 477-481, 497-507, 512-518, 522-538, 553, 574, 578, 607, 611, 627, 669, 682, 686, 702-703, 707, 714, 724, 728, 741-743
+sparkless/backend/polars/translators/__init__.py                         1      0   100%
+sparkless/backend/polars/translators/arithmetic_translator.py           17      3    82%   45, 53, 70
+sparkless/backend/polars/translators/string_translator.py              145     84    42%   39-43, 48-57, 70-80, 92-97, 118-119, 126, 132-143, 153-164, 170-206, 221-222, 232, 240-241, 262-263, 270, 273-274, 281-302
+sparkless/backend/polars/translators/type_translator.py                107     99     7%   35-190
+sparkless/backend/polars/type_mapper.py                                 97     24    75%   60, 65, 78-92, 116, 124, 126, 146, 148, 154, 157, 160, 169
+sparkless/backend/polars/window_handler.py                             290     85    71%   21, 39, 43, 59, 102, 105, 108-109, 160-167, 169, 176-183, 185, 214-222, 234, 242-254, 269-275, 280-292, 303-309, 329, 357-359, 385-394, 400-406, 412-414, 420-422, 429-431, 440-442, 451-453, 473, 477, 496, 500, 510-514, 533-543, 558
+sparkless/backend/protocols.py                                          14      0   100%
+sparkless/backend/robin/__init__.py                                      4      0   100%
+sparkless/backend/robin/export.py                                       15      7    53%   18-20, 23, 26, 31, 40, 43
+sparkless/backend/robin/materializer.py                                279    131    53%   42-43, 53-56, 62-63, 82, 91-95, 97-101, 106, 109, 113, 120, 122, 124, 127-129, 143, 145-147, 159, 162-169, 183, 190-224, 253, 257-260, 263-269, 273, 278, 281, 283, 285-286, 289, 293, 299, 310, 328, 334, 350-353, 357-363, 369-406
+sparkless/backend/robin/storage.py                                      47      4    91%   29, 73, 90, 95
+sparkless/compat/__init__.py                                             2      0   100%
+sparkless/compat/datetime.py                                            74     53    28%   43, 55-57, 61-67, 73-81, 96-103, 115-122, 128-133, 141-146, 162-182
+sparkless/config.py                                                     55     10    82%   45-57, 68, 77, 79, 105
+sparkless/core/__init__.py                                               9      0   100%
+sparkless/core/column_resolver.py                                       33      0   100%
+sparkless/core/condition_evaluator.py                                  764    730     4%   27-34, 49-56, 71-245, 260-541, 556-576, 591-604, 619-781, 795-1203, 1218-1229, 1245-1274, 1290-1311, 1324-1340, 1353, 1366-1370, 1384-1403
+sparkless/core/data_validation.py                                       80     41    49%   56-85, 91-113, 129, 136-137, 177-185, 205-206, 220-221
+sparkless/core/ddl_adapter.py                                           31      8    74%   94, 98-106
+sparkless/core/exceptions/__init__.py                                    6      0   100%
+sparkless/core/exceptions/analysis.py                                  100     57    43%   51, 57, 91, 109, 142, 145-154, 170-202, 230-245, 269-272, 302-323
+sparkless/core/exceptions/base.py                                       22      4    82%   31, 61, 76, 91
+sparkless/core/exceptions/execution.py                                  29     12    59%   45, 63, 87-90, 114-117, 135, 153
+sparkless/core/exceptions/operation.py                                  87     55    37%   24-34, 49-58, 72-82, 96-106, 120-129, 152, 173-183
+sparkless/core/exceptions/py4j_compat.py                                10     10     0%   8-41
+sparkless/core/exceptions/runtime.py                                    41     24    41%   53-57, 75, 101-107, 131-134, 158-161, 187-193
+sparkless/core/exceptions/validation.py                                 44     24    45%   63, 81, 107-111, 141-147, 171-174, 202-207
+sparkless/core/interfaces/__init__.py                                    5      0   100%
+sparkless/core/interfaces/dataframe.py                                 180     56    69%   20, 26, 31, 36, 41, 46, 51, 56, 61, 66, 71, 76, 81, 86, 91, 98, 103, 110, 115, 120, 125, 130, 136, 142, 151, 156, 161, 166, 171, 176, 181, 190, 195, 200, 205, 212, 217, 222, 227, 232, 241, 246, 251, 256, 261, 266, 275, 280, 285, 290, 295, 300, 305, 310, 315, 320
+sparkless/core/interfaces/functions.py                                 186     56    70%   23, 28, 33, 42, 47, 56, 61, 70, 75, 84, 89, 94, 99, 108, 113, 118, 123, 130, 135, 144, 149, 154, 159, 164, 173, 178, 185, 192, 197, 202, 207, 212, 221, 226, 231, 236, 241, 250, 255, 263, 273, 278, 283, 288, 293, 298, 303, 308, 313, 318, 323, 328, 333, 338, 343, 348
+sparkless/core/interfaces/session.py                                   117     34    71%   20, 26, 32, 38, 44, 50, 59, 64, 69, 76, 81, 86, 96, 101, 106, 115, 120, 125, 136, 141, 146, 151, 156, 161, 166, 171, 176, 185, 190, 195, 200, 209, 214, 219
+sparkless/core/interfaces/storage.py                                   126     38    70%   29, 34, 39, 44, 54, 59, 64, 69, 76, 83, 90, 97, 102, 106, 110, 114, 120, 126, 136, 142, 148, 153, 158, 163, 168, 173, 186, 192, 198, 204, 210, 215, 220, 229, 234, 239, 248, 253
+sparkless/core/protocols.py                                             42      0   100%
+sparkless/core/safe_evaluator.py                                       125     83    34%   45-50, 66-67, 86, 88, 90, 95, 97-103, 105-134, 145-147, 150-152, 157-164, 169, 171, 173, 176-179, 184-215
+sparkless/core/schema_inference.py                                     107     23    79%   73, 132, 199, 218-237, 242-251, 256-265, 297, 307
+sparkless/core/type_utils.py                                            86     51    41%   20-21, 91-93, 117, 140-144, 164-168, 187-199, 223-259, 278, 290-292, 304
+sparkless/core/types/__init__.py                                         4      0   100%
+sparkless/core/types/data_types.py                                     139     38    73%   22, 27, 32, 37, 42, 47, 52, 57, 66, 76, 81, 91, 97, 102, 111, 121, 127, 132, 141, 146, 155, 160, 170, 175, 180, 190, 196, 201, 206, 211, 221, 226, 231, 240, 249, 254, 259, 264
+sparkless/core/types/metadata.py                                       166     47    72%   18, 23, 28, 33, 38, 43, 48, 53, 58, 63, 73, 79, 85, 91, 97, 103, 108, 113, 118, 128, 134, 140, 145, 150, 160, 166, 172, 177, 182, 187, 197, 203, 209, 215, 220, 225, 230, 239, 244, 249, 254, 259, 268, 273, 278, 283, 288
+sparkless/core/types/schema.py                                         121     36    70%   22, 28, 34, 40, 45, 50, 55, 60, 70, 75, 80, 85, 90, 95, 100, 105, 110, 115, 125, 130, 135, 140, 145, 150, 155, 160, 165, 170, 185, 190, 195, 200, 209, 214, 221, 226
+sparkless/data_generation/__init__.py                                    4      4     0%   8-12
+sparkless/data_generation/builder.py                                    28     28     0%   8-85
+sparkless/data_generation/convenience.py                                 9      9     0%   8-64
+sparkless/data_generation/generator.py                                 174    174     0%   8-337
+sparkless/dataframe/__init__.py                                          6      0   100%
+sparkless/dataframe/aggregations/__init__.py                             2      2     0%   8-10
+sparkless/dataframe/aggregations/operations.py                          75     75     0%   8-208
+sparkless/dataframe/assertions/__init__.py                               3      3     0%   7-10
+sparkless/dataframe/assertions/assertions.py                            26     26     0%   8-88
+sparkless/dataframe/assertions/operations.py                            16     16     0%   8-45
+sparkless/dataframe/attribute_handler.py                                62     12    81%   176, 190-196, 213-217, 223-224
+sparkless/dataframe/casting/__init__.py                                  2      0   100%
+sparkless/dataframe/casting/type_converter.py                           95     60    37%   62-64, 66, 69-92, 95-110, 132-153, 158-180
+sparkless/dataframe/collection_handler.py                               29      9    69%   27-29, 36, 47-53, 81
+sparkless/dataframe/condition_handler.py                                52     34    35%   58-64, 80, 109-122, 136-180
+sparkless/dataframe/dataframe.py                                       513    155    70%   187-191, 219-224, 243, 262-265, 317, 345, 377, 381, 394, 432, 440, 486, 490, 507-508, 524, 532, 555-561, 565, 569, 621, 625, 630, 634, 638, 642, 700, 715, 719, 723, 742, 746, 750, 756, 760, 780, 791, 803, 809, 813, 817, 821, 829, 835, 839, 843, 847, 852, 856, 860, 864, 875, 894, 960-969, 997, 1002, 1078-1097, 1103, 1152-1153, 1161-1162, 1201-1206, 1210, 1216, 1225, 1250, 1258, 1269, 1284, 1292, 1303, 1311, 1323, 1329, 1335, 1347-1353, 1368-1379, 1383, 1403-1411, 1420-1460
+sparkless/dataframe/display/__init__.py                                  3      3     0%   3-6
+sparkless/dataframe/display/formatter.py                                37     37     0%   3-57
+sparkless/dataframe/display/operations.py                              118    118     0%   8-274
+sparkless/dataframe/evaluation/__init__.py                               2      0   100%
+sparkless/dataframe/evaluation/evaluators/__init__.py                    1      0   100%
+sparkless/dataframe/evaluation/evaluators/conditional_evaluator.py      22      1    95%   63
+sparkless/dataframe/evaluation/expression_evaluator.py                2600   2077    20%   111, 118, 122, 128-130, 145-146, 150, 170-171, 195, 204-205, 218, 222, 227, 239-257, 292, 298-300, 307, 317-319, 340-343, 360, 383, 387-390, 400, 413-416, 423, 432, 438, 443-448, 459, 485-494, 514, 521, 527, 568-657, 664, 687-702, 707-740, 744-808, 815-865, 873, 885-937, 945, 949-974, 978, 982, 986, 988, 991, 997-999, 1029, 1032, 1036-1041, 1044, 1052-1237, 1256, 1265-1268, 1279-1320, 1344-1347, 1351, 1353, 1357, 1360, 1364-1365, 1371-1422, 1428-1514, 1519-1535, 1542-1554, 1558-1573, 1577-1592, 1596-1611, 1615-1630, 1644, 1646, 1652, 1664, 1666, 1668-1673, 1928, 1932-1936, 1940-1944, 1948-1952, 1956-1969, 1973-1980, 1984-1994, 1998-2008, 2012-2014, 2020-2023, 2027-2030, 2034-2041, 2045-2050, 2065-2123, 2127-2132, 2143-2187, 2191-2202, 2206-2214, 2220-2222, 2226-2231, 2235-2237, 2241-2243, 2249, 2253-2259, 2263, 2267-2272, 2276-2278, 2282-2284, 2288, 2292, 2296, 2304, 2312-2315, 2319-2321, 2325-2330, 2334-2337, 2341-2353, 2360, 2364-2396, 2400-2405, 2409-2431, 2435-2457, 2463-2479, 2483-2514, 2520-2555, 2561-2568, 2572-2592, 2596-2639, 2643-2660, 2664-2677, 2682, 2686-2687, 2691, 2695, 2699, 2705-2714, 2718-2727, 2731-2738, 2744, 2748-2762, 2766-2773, 2777-2791, 2795-2802, 2806-2813, 2817-2824, 2828-2837, 2841-2850, 2854-2863, 2867-2874, 2878-2885, 2889-2896, 2900-2907, 2911-2918, 2924, 2928-2937, 2942, 2947, 2952-2984, 2988-2997, 3003, 3009, 3013-3024, 3030, 3037, 3042, 3048, 3053-3077, 3082, 3087, 3092, 3101-3133, 3137-3181, 3185-3229, 3233-3260, 3265-3286, 3294-3356, 3360-3367, 3371-3391, 3397, 3403, 3408, 3413-3416, 3418-3423, 3427-3452, 3457-3476, 3479-3492, 3495-3510, 3520-3522, 3527-3538, 3542-3551, 3555, 3559, 3563, 3567, 3571, 3575, 3579, 3583-3588, 3592-3598, 3602-3607, 3611-3616, 3625, 3639-3673, 3679, 3683-3690, 3694-3705, 3710-3719, 3725-3734, 3740-3745, 3751-3756, 3762-3770, 3776-3784, 3788, 3792-3798, 3802-3813, 3817-3820, 3824-3830, 3834-3836, 3841, 3846-3858, 3862, 3866-3872, 3876-3882, 3888-3898, 3902-3909, 3914, 3918-3920, 3924-3947, 3951-3974, 3979, 3984, 3989, 3994, 3999, 4004, 4008-4020, 4026-4033, 4039-4046, 4050-4059, 4065-4072, 4078-4085, 4091-4098, 4106-4120, 4124-4131, 4135-4142, 4147-4162, 4166-4181, 4201, 4206, 4211, 4217-4228, 4235-4238, 4244-4247, 4253-4258, 4263-4267, 4271-4288, 4294-4309, 4315-4330, 4336-4339, 4343-4345, 4350-4358, 4364-4391, 4396-4405, 4409-4411, 4415-4417, 4422-4441, 4445-4462, 4466-4483, 4487-4504, 4508-4513, 4519-4530, 4534-4545, 4549-4554
+sparkless/dataframe/export.py                                           15     15     0%   8-46
+sparkless/dataframe/grouped/__init__.py                                  5      0   100%
+sparkless/dataframe/grouped/base.py                                   1053    603    43%   95, 103, 111-113, 115-117, 122-144, 181, 188, 192-196, 271, 302-307, 314-322, 328, 360, 367, 372-389, 419, 439-442, 465-466, 583-600, 609-624, 642, 650, 673-689, 711-722, 736-765, 802, 811-812, 814-815, 845-848, 855, 857-860, 877, 879-886, 888-889, 919-922, 929, 931-934, 962-963, 989-990, 1003-1009, 1011-1017, 1035, 1058-1077, 1080-1097, 1111-1129, 1131-1151, 1153-1159, 1161-1167, 1170-1183, 1186-1199, 1203-1258, 1261-1267, 1303-1648, 1710, 1716, 1721-1730, 1751, 1757, 1764, 1782, 1816, 1834-1842, 1844-1854, 1856-1866, 1868-1878, 1880-1890, 1895-1901, 1903-1909, 1912-1917, 1919-1925, 1927-1933, 1946-1953, 2004-2008, 2019-2026, 2037-2044, 2055-2064, 2075-2084, 2095-2104, 2115-2124, 2135-2144, 2155-2164, 2175-2202, 2213-2240, 2269, 2304-2371, 2393-2448
+sparkless/dataframe/grouped/cube.py                                     86     22    74%   68-74, 87-96, 123-129, 142-151, 166, 201-209
+sparkless/dataframe/grouped/pivot.py                                   482    227    53%   101, 113-119, 142-174, 181-184, 205-215, 236-237, 254, 273-274, 279, 285-289, 291-328, 356, 362-397, 420, 422-425, 435, 437-440, 449-450, 486-492, 498, 530-536, 538-547, 557-633, 641-802, 817, 837, 870-874, 888, 908
+sparkless/dataframe/grouped/rollup.py                                   87     22    75%   73-79, 90-99, 128-134, 147-156, 171, 206-214
+sparkless/dataframe/joins/__init__.py                                    2      2     0%   8-10
+sparkless/dataframe/joins/operations.py                                146    146     0%   8-396
+sparkless/dataframe/lazy.py                                           1140    879    23%   59-61, 86-103, 154-158, 165-166, 175-190, 197-210, 230-231, 236-248, 272, 281-286, 355-368, 386-400, 406-442, 448-457, 470-472, 476, 523-524, 531-533, 612, 670, 683, 717-800, 834, 844, 858-869, 891, 894, 899, 903, 950-953, 963, 973-977, 983, 992-1001, 1035-2115, 2128-2389, 2402-2458, 2473-2701, 2717-2729
+sparkless/dataframe/logical_plan.py                                    221     86    61%   23-33, 46, 73, 75-85, 94, 105-112, 120-123, 142, 166-215, 222, 228, 235, 245-250, 268, 272-273, 275-276, 290, 313-314, 321-323, 332-333, 398-403, 411-412, 421, 436-437, 450
+sparkless/dataframe/operations/__init__.py                               2      0   100%
+sparkless/dataframe/operations/aggregation_operations.py               128    128     0%   3-313
+sparkless/dataframe/operations/join_operations.py                      157    157     0%   3-329
+sparkless/dataframe/operations/misc.py                                 516    472     9%   56-77, 103-145, 167-215, 236-250, 267-308, 323-407, 421-501, 518-549, 566-593, 615-630, 643-659, 678-685, 710-742, 770-831, 863-922, 949-986, 1023-1074, 1082-1113, 1117-1135, 1149-1176, 1191-1196, 1216, 1232-1234, 1248-1255, 1266-1267, 1276, 1295-1304, 1323-1324, 1340-1345, 1353, 1366-1369, 1377, 1382, 1391-1392, 1401, 1415-1427
+sparkless/dataframe/operations/set_operations.py                       168    140    17%   28-94, 99, 140, 160-290, 296-316, 322-339, 344-346
+sparkless/dataframe/protocols.py                                        49      0   100%
+sparkless/dataframe/rdd.py                                              83     40    52%   69-70, 118-120, 136-143, 155-166, 174, 185, 193, 201, 209, 217, 229, 240-243, 254-261, 269, 277
+sparkless/dataframe/reader.py                                          188    101    46%   129-138, 165-172, 175, 181, 192, 209-262, 272-280, 284-291, 299, 302, 308-313, 319-354, 358-362, 366-369, 384, 403, 411-412, 423, 431, 446, 461, 478-480
+sparkless/dataframe/schema/__init__.py                                   3      0   100%
+sparkless/dataframe/schema/operations.py                                22      9    59%   23-31, 39-41, 46, 51
+sparkless/dataframe/schema/schema_manager.py                           487    164    66%   58, 101-116, 216, 258-259, 262, 268-284, 323, 362, 409-421, 425-430, 438, 447, 449, 465-466, 470-473, 486, 519, 529, 546, 647-663, 672, 693, 695, 711-712, 716-719, 725, 736-746, 751-787, 791-794, 798-801, 805-823, 827-835, 853-857, 870-878, 908-912, 923-926, 945, 949, 957-967
+sparkless/dataframe/services/__init__.py                                 8      0   100%
+sparkless/dataframe/services/aggregation_service.py                     99     26    74%   37, 133, 148, 181, 196, 224-250
+sparkless/dataframe/services/assertion_service.py                       17      8    53%   25-27, 33-35, 41-43, 49-51
+sparkless/dataframe/services/display_service.py                        126     63    50%   40-50, 78, 94, 101, 120-167, 171-174, 182-186, 195-204, 220, 223, 227-232, 238-240, 244-250, 264-267, 280
+sparkless/dataframe/services/join_service.py                           248     35    86%   114, 129, 206, 226, 232, 238, 417, 426-428, 460, 510-534, 606-628
+sparkless/dataframe/services/misc_service.py                           613    356    42%   57, 67-73, 166, 251, 264-268, 304-352, 376, 387-389, 417-458, 476-560, 574-654, 683-685, 687-689, 753-755, 802-817, 830-846, 865-872, 897-929, 955-1016, 1066, 1077, 1153-1190, 1227-1277, 1285-1318, 1322-1340, 1355-1357, 1419, 1435-1437, 1451-1458, 1469-1472, 1481, 1499-1503, 1518, 1529-1534, 1540, 1551-1554, 1562, 1567, 1576-1577, 1586, 1600-1612
+sparkless/dataframe/services/schema_service.py                           4      0   100%
+sparkless/dataframe/services/transformation_service.py                 346     56    84%   83, 90, 140, 167, 174-178, 236-237, 249-253, 283, 305, 358, 367, 375-376, 399-404, 411-415, 421, 430-431, 438-442, 446-448, 500, 523-533, 658, 665-667, 698, 757-759, 764, 768, 875-895
+sparkless/dataframe/transformations/__init__.py                          2      2     0%   8-10
+sparkless/dataframe/transformations/operations.py                      224    224     0%   8-624
+sparkless/dataframe/types.py                                             8      8     0%   8-25
+sparkless/dataframe/validation/__init__.py                               2      0   100%
+sparkless/dataframe/validation/column_validator.py                     168     37    78%   101, 110-112, 137, 150-151, 185-198, 218, 247-279, 289, 337, 348, 384, 456, 468, 497, 524-541, 552-554, 561
+sparkless/dataframe/validation_handler.py                               21      2    90%   75-76
+sparkless/dataframe/window_handler.py                                  315    315     0%   8-698
+sparkless/dataframe/writer.py                                          393    208    47%   114-116, 130, 160-161, 193-195, 209-211, 229-233, 236-239, 259, 289, 295-297, 359-361, 417, 419, 470-494, 508, 520, 536, 548, 560, 572, 579-585, 589-605, 609-612, 618-627, 631-636, 639-646, 649-652, 655-671, 676-691, 695-700, 721-754, 793-796, 803-866, 889-893, 897, 913-918, 943-1023
+sparkless/delta.py                                                     308    240    22%   46-51, 61-74, 104, 112, 121-122, 127, 131-132, 137-152, 156-185, 189, 198, 210, 281-283, 300-341, 345, 348-352, 355-357, 360-368, 373-379, 384-408, 421-430, 434, 438, 441-446, 449-450, 455-456, 459-461, 464-466, 470-514, 517-523, 526-540, 547-551, 563-576, 581-584, 589-593, 601-629, 637-657
+sparkless/error_simulation.py                                           89     89     0%   29-338
+sparkless/errors.py                                                     28     10    64%   57, 62, 67, 72, 79, 86, 91, 96, 101, 106
+sparkless/functions/__init__.py                                         29      4    86%   562-566
+sparkless/functions/aggregate.py                                       323    147    54%   64-66, 299-300, 315-316, 331-332, 370-371, 386-387, 439-443, 461-472, 490-501, 516-517, 534-535, 552-553, 570-571, 591-597, 617-623, 640-641, 658-659, 769-770, 787-788, 803-807, 825-826, 843-844, 857-859, 874-890, 904-912, 930-940, 958-967, 985-994, 1014-1026, 1044-1053, 1071-1080, 1098-1107, 1125-1134, 1152-1161, 1182-1222
+sparkless/functions/array.py                                           272    133    51%   61, 83-88, 112, 114, 139-144, 166, 190, 218-224, 250-256, 282-288, 314-320, 351-361, 390-401, 423-426, 445-448, 471, 491-495, 516-519, 543-546, 566-569, 585, 631-634, 649-652, 703-706, 721-724, 742-747, 816-835, 858-888, 905-908, 969, 1002-1005, 1023-1027, 1045-1048, 1063-1064, 1079-1091, 1103-1105, 1117-1121
+sparkless/functions/base.py                                            135     56    59%   121, 137, 150-161, 165-171, 175-184, 188-201, 205-217, 221-233, 281, 289, 293, 297, 302, 312, 317, 322
+sparkless/functions/bitwise.py                                         108     67    38%   31-34, 50-53, 71, 86-89, 107-110, 125-128, 143-146, 161-168, 183-198, 213-228, 243-258, 276-283, 300-307, 324-331, 347-350, 367-370, 387-390, 405-408, 425-428
+sparkless/functions/conditional.py                                     396    259    35%   33-115, 147, 152, 295-300, 304-367, 381-384, 396-412, 426-455, 499, 515, 534, 553, 570-603, 622, 637-648, 670, 673, 707-722, 737-752, 767-782, 797-812, 827-842, 854-861, 873-880, 895-908, 923-939, 954-970, 985-1001
+sparkless/functions/core/__init__.py                                     6      0   100%
+sparkless/functions/core/column.py                                     455     95    79%   43, 216, 224, 336, 389, 399, 468-470, 474-476, 480-482, 490, 498-508, 516-526, 534-544, 552-562, 570-580, 588-598, 607, 704, 738, 742, 746, 750-752, 754, 758, 762, 766, 770, 774, 778, 782, 786, 805, 816-823, 827, 834, 836-840, 842-846, 848-852, 854-858, 878, 956, 989, 992
+sparkless/functions/core/expressions.py                                109     74    32%   28-32, 55, 73, 91-94, 108-115, 127-129, 141-143, 155-157, 169-171, 188-228, 240-247, 259-266, 278-285, 297-304, 320-323
+sparkless/functions/core/lambda_parser.py                              146    126    14%   58-134, 142-148, 167-175, 189-247, 260-274, 285-298, 309-314, 327-332, 359-361, 369, 377, 381-385
+sparkless/functions/core/literals.py                                   131     66    50%   65-76, 86, 108-110, 117-119, 123-125, 129-131, 135-137, 141-143, 147-149, 153-155, 159-161, 171-173, 177-179, 183-185, 189-191, 195-197, 201-203, 207-209, 213, 217, 227-229, 233-240, 244-246, 250-252, 256-258, 272-274, 278-280, 306-308, 312-314, 318-320
+sparkless/functions/core/operations.py                                 106     67    37%   27-29, 33-35, 39-41, 45-47, 51-53, 57-59, 63-65, 69, 73, 77-79, 83-85, 89-91, 95-97, 101-103, 107-109, 122, 126, 130, 134, 145, 150-154, 158, 162, 176-189, 199, 203, 211, 219-221, 225-227, 235-237
+sparkless/functions/core/sql_expr_parser.py                            294     58    80%   66, 71-74, 145, 147-153, 196-200, 205-222, 246, 310, 321, 327-355, 373, 375, 379, 393, 402, 511, 513
+sparkless/functions/crypto.py                                           48     39    19%   49-71, 91-113, 133-155
+sparkless/functions/datetime.py                                        474    258    46%   52, 98, 107, 119-125, 137-143, 155-161, 173-179, 188-189, 205-218, 231-237, 262-301, 327-366, 390-429, 455-500, 520-549, 564-580, 595-601, 616-622, 637-646, 658-664, 676-682, 694-700, 712-718, 730-736, 748-754, 775, 783, 823, 836, 872-876, 889, 905, 921, 937, 954-960, 972-978, 990-994, 1039-1048, 1063-1074, 1088, 1107, 1126, 1149-1159, 1179-1191, 1211-1222, 1231-1234, 1248-1253, 1262-1273, 1283-1294, 1317-1320, 1340-1343, 1368-1372, 1393-1396, 1424, 1429, 1435, 1439, 1442-1445, 1451, 1492-1497, 1524, 1529, 1535, 1557-1560, 1576-1579, 1600-1603, 1622-1627, 1646-1647, 1664-1665, 1685-1693, 1711-1727, 1745-1761
+sparkless/functions/functions.py                                      1547    451    71%   67-77, 133-136, 142-162, 168-187, 193-212, 218-238, 259, 264, 341, 346, 351, 356, 361, 366, 371, 376, 381, 394-396, 401, 408, 415, 422, 427, 432, 437, 442, 447, 452, 457, 462, 467, 472, 483, 490, 497, 502, 507, 523, 533, 543, 548, 593, 598, 605, 627, 637, 642, 652, 657, 664, 695, 726, 731, 736, 741, 755, 760, 765, 785, 790, 795, 800, 805, 810, 817, 822, 827, 832, 837, 842, 847, 852, 857, 862, 867, 872, 877, 882, 892, 902, 907, 912, 917, 922, 927, 932, 1002, 1007, 1012, 1023, 1028, 1045, 1052, 1059, 1092, 1097, 1104, 1109, 1114, 1119, 1128, 1133, 1138, 1143, 1148, 1155, 1162, 1167, 1172, 1202-1205, 1224, 1231, 1238, 1248, 1296, 1301, 1311, 1316, 1321, 1326, 1331, 1336, 1341, 1346, 1378-1420, 1435, 1442, 1466, 1471, 1483, 1496, 1501, 1506, 1511, 1516, 1521, 1533-1538, 1549, 1556, 1563, 1579-1586, 1595-1597, 1706-1713, 1814, 1819, 1824, 1829, 1841, 1855, 1873, 1880, 1887, 1894, 1904, 1913, 1919, 1924, 1934, 1939, 1946, 1951, 1963, 1973, 1978, 1993, 2020, 2029, 2034, 2040, 2045, 2050, 2055, 2062, 2073, 2078, 2085, 2092, 2099, 2108, 2115, 2128-2129, 2152-2158, 2169, 2174, 2179, 2185, 2190, 2195, 2200, 2205, 2210, 2215, 2220, 2225, 2233, 2242-2243, 2248, 2253, 2259, 2264, 2269, 2279, 2285, 2290, 2297, 2302, 2316-2318, 2326-2328, 2336-2338, 2346-2348, 2353-2355, 2360-2362, 2369-2371, 2378-2380, 2387-2389, 2396-2398, 2404, 2409, 2414, 2419, 2424, 2429, 2434, 2439, 2444, 2449, 2454, 2464-2466, 2471-2473, 2492-2494, 2503-2505, 2510-2512, 2517-2519, 2532-2534, 2539-2541, 2546-2548, 2553-2555, 2568-2570, 2575-2577, 2582-2584, 2589-2591, 2596-2598, 2603-2605, 2661, 2716-2741, 2765-2772, 2789-2791, 2797, 2804, 2809, 2814, 2821, 2828, 2833, 2842, 2847, 2854, 2861, 2866, 2871, 2879, 2884, 2891, 2898, 2905, 2913, 2920, 2927, 2933, 2938, 2945, 2950, 2962, 2975, 2989, 3004, 3016, 3023, 3030, 3037, 3044, 3049, 3054, 3059, 3064, 3069, 3074, 3080, 3085, 3090, 3097, 3102, 3107, 3112, 3117, 3122, 3130, 3135, 3140, 3149, 3155, 3160, 3165, 3170, 3175, 3196-3213
+sparkless/functions/json_csv.py                                         41     16    61%   31-34, 51-54, 105-107, 127-130, 144-147, 159-161
+sparkless/functions/map.py                                              99     50    49%   51-54, 69-72, 87-90, 107-115, 138-143, 200-203, 215, 239-242, 262-265, 288-294, 320-326, 352-358, 387-396, 419-426
+sparkless/functions/math.py                                            320    139    57%   51, 66-70, 82-86, 118, 133, 146, 178, 207, 211, 216, 219, 246-249, 264-267, 284-287, 304-307, 349, 362, 378, 394, 409-414, 427, 452, 476-477, 489-490, 505-506, 518-519, 531-532, 544-545, 567-574, 586-587, 599-600, 612-613, 625-626, 638-639, 651-652, 664-665, 677-679, 696-698, 715-716, 729-730, 745-748, 774, 776, 809-810, 823-824, 836-837, 849-850, 859-862, 871-874, 886-887, 902-907, 921-926, 941-960, 972, 990-1003, 1026-1067
+sparkless/functions/metadata.py                                         33     13    61%   32, 45, 59, 71, 87-90, 102-109
+sparkless/functions/ordering.py                                         28     12    57%   39-42, 56-59, 73-76, 90-93
+sparkless/functions/pandas_types.py                                      6      0   100%
+sparkless/functions/string.py                                          547    260    52%   66, 82, 97-103, 115-121, 134, 150, 166, 184-196, 209-218, 231-237, 250-256, 268-274, 287-296, 309-318, 332, 350-356, 370-379, 395, 411-420, 435-450, 462-468, 480-484, 496, 508, 521-534, 551, 579, 629, 655, 706, 722, 737-741, 792, 795-796, 819, 839, 860, 900-903, 923-926, 941-944, 963, 1004, 1054-1057, 1075-1078, 1099-1102, 1125, 1147, 1202-1223, 1235-1238, 1251, 1265-1268, 1280-1299, 1329-1332, 1352-1355, 1370-1373, 1391-1394, 1414-1417, 1432-1435, 1451-1457, 1492-1495, 1508-1514, 1529-1540, 1553-1562, 1575-1584, 1601-1610, 1627-1636, 1649-1655, 1673-1684, 1698-1710, 1725-1731, 1746-1752, 1764-1768, 1781-1792, 1807, 1832-1854, 1872-1879, 1897-1902, 1918-1927, 1939-1940
+sparkless/functions/udf.py                                              51      1    98%   138
+sparkless/functions/window_execution.py                                651    329    49%   58-67, 393, 395, 397, 399, 401, 409, 411, 413, 415, 424, 433, 448, 465, 491-492, 494-495, 502-503, 505-506, 508-509, 511-512, 517-518, 523-530, 557-607, 614, 620, 629, 633-694, 698-742, 746-790, 794-845, 850, 855, 887, 891, 921, 936, 953, 957, 973, 987-1024, 1029, 1044, 1061, 1092, 1101-1146, 1151, 1156, 1171, 1184, 1201-1216, 1235, 1240, 1252-1253, 1258, 1269, 1285, 1297, 1308-1372, 1376-1420, 1424-1468
+sparkless/functions/xml.py                                              65     39    40%   25-28, 50-64, 84-87, 107-110, 131-134, 155-158, 179-182, 203-206, 227-230, 251-254, 275-278
+sparkless/optimizer/__init__.py                                          3      0   100%
+sparkless/optimizer/optimization_rules.py                              174     20    89%   17, 84, 132-140, 151, 162, 193, 242, 264, 278, 287, 299, 342, 376
+sparkless/optimizer/query_optimizer.py                                 256    179    30%   48, 50, 52, 54, 56, 58, 67, 72, 80-125, 129-130, 135, 147-174, 178-179, 183-206, 214-234, 238-239, 245-248, 256-288, 292, 297, 305-330, 334, 339-342, 379-392, 403-408, 413, 418-456, 459-472, 477-504, 508, 512, 518
+sparkless/performance_simulation.py                                     91      1    99%   150
+sparkless/session/__init__.py                                            4      0   100%
+sparkless/session/catalog.py                                           258    132    49%   43, 47, 65, 69, 111, 131-133, 150, 170, 173, 178, 187-190, 212, 215, 225, 230-233, 251-253, 267, 272, 275, 278, 281, 296-299, 309-312, 315-318, 338, 341, 344, 349-352, 374, 386-414, 431, 434, 438-443, 463, 466, 470-475, 484, 499, 502, 506-511, 528, 537, 546, 566-575, 606, 617, 630, 633, 636, 640-644, 651, 654, 658-659, 666, 683-716
+sparkless/session/config/__init__.py                                     2      0   100%
+sparkless/session/config/configuration.py                               54     21    61%   85-86, 94, 102, 110, 118-119, 130, 141, 146, 150, 188, 199-200, 211-212, 224-225, 236-237, 245
+sparkless/session/context.py                                            36     10    72%   47, 51, 55, 92, 101, 110, 119, 123, 127, 131
+sparkless/session/core/__init__.py                                       4      0   100%
+sparkless/session/core/builder.py                                       30      2    93%   54, 71
+sparkless/session/core/session.py                                      227     64    72%   12-13, 122, 174-177, 187, 237-239, 249-254, 258-260, 273, 277, 287, 293, 306-308, 350, 368, 380, 391, 414, 421-436, 444-446, 468, 480, 509-510, 544, 553-555, 578-580, 597, 604, 611, 621, 628, 633-643, 652, 661-662, 667
+sparkless/session/performance_tracker.py                                39     19    51%   57, 87-109, 117
+sparkless/session/services/__init__.py                                   6      0   100%
+sparkless/session/services/dataframe_factory.py                        216     83    62%   14-15, 77-78, 97-99, 102-103, 106, 119, 152, 163-164, 190, 206, 211, 218, 255, 271, 281, 313, 323, 343, 350, 361-364, 403, 428, 440, 447, 465-472, 490-506, 517-587
+sparkless/session/services/lifecycle_manager.py                         21     10    52%   32-34, 42-43, 55-59
+sparkless/session/services/mocking_coordinator.py                       32     21    34%   39-57, 69-72, 84-86, 102-104, 109
+sparkless/session/services/protocols.py                                 20      0   100%
+sparkless/session/services/sql_parameter_binder.py                      29     25    14%   28-51, 62-74
+sparkless/session/session.py                                             0      0   100%
+sparkless/session/sql/__init__.py                                        5      0   100%
+sparkless/session/sql/executor.py                                     1280    380    70%   83-90, 140-143, 149, 179-190, 204-211, 232-239, 281, 284, 289, 310-352, 366-381, 419, 514, 517-520, 544-545, 556-569, 609-612, 628-630, 643, 648-652, 654-658, 668, 698-720, 730-733, 751-754, 793-820, 825-841, 851-867, 875-910, 965-1011, 1053-1061, 1081-1129, 1221-1243, 1303, 1310, 1319-1326, 1329-1336, 1344-1346, 1390, 1405-1415, 1425-1432, 1451-1453, 1462-1465, 1472-1473, 1510, 1517-1519, 1554, 1560, 1565, 1588, 1603, 1611, 1628, 1633-1641, 1658, 1680, 1690, 1692, 1700-1705, 1729, 1738-1740, 1760-1761, 1802, 1805, 1807, 1811, 1816-1829, 1839, 1853, 1871-1872, 1906, 1915, 1950-1951, 1967, 2002-2030, 2102, 2123, 2194-2249, 2273, 2299-2302, 2314, 2443, 2484, 2566-2576, 2609-2610, 2619-2627, 2637, 2700, 2707-2708, 2711, 2731, 2742-2748, 2768, 2771-2779, 2813-2816, 2860-2867, 2943-2945, 2955, 2963-2971, 2976-2985, 2990, 2995, 2997-3001
+sparkless/session/sql/optimizer.py                                      65      0   100%
+sparkless/session/sql/parser.py                                        496     59    88%   45, 49, 263, 271-272, 303, 305, 310-315, 358, 486, 509, 562, 564, 599, 601, 603, 674-677, 734-735, 755-765, 790, 820-821, 833, 892, 915, 993, 1019, 1027, 1046-1047, 1049-1050, 1094, 1101, 1121-1141, 1338, 1360-1361
+sparkless/session/sql/validation.py                                     85      0   100%
+sparkless/spark_types.py                                               390    151    61%   60-74, 111, 115, 123, 368, 439-440, 443, 450-451, 454, 475-477, 480, 489-491, 494, 503-505, 508, 539-544, 570-575, 585-590, 593, 605-606, 654-656, 660, 664-665, 673, 685, 698, 704-713, 718-733, 738-739, 802-805, 819-827, 838-841, 847, 850-859, 865-867, 871-878, 882-889, 893, 897-922, 936-957, 962-963, 974-976, 990-991
+sparkless/sql/__init__.py                                               10      0   100%
+sparkless/sql/functions.py                                              30      5    83%   70-72, 84-92
+sparkless/sql/types.py                                                   2      0   100%
+sparkless/sql/utils.py                                                   7      0   100%
+sparkless/storage/__init__.py                                           10      0   100%
+sparkless/storage/backends/__init__.py                                   0      0   100%
+sparkless/storage/backends/file.py                                     199    137    31%   26-34, 39, 44, 49, 53-56, 64-69, 77-78, 87-101, 112-119, 127, 135-138, 142, 146, 150, 154-155, 159-161, 174-177, 188-191, 202-203, 211-216, 224-232, 238, 242, 246, 250, 254, 258, 262-264, 268, 272, 276, 288-291, 299-300, 311, 320-327, 335, 347-349, 364-367, 376-377, 389-393, 408-413, 428-430, 442-448, 460, 470-481, 492-501, 505-509, 515-520, 527
+sparkless/storage/backends/memory.py                                   133     60    55%   34, 44, 54, 57-59, 72-77, 93, 97, 101, 105, 109-110, 114-115, 160-161, 169, 208-209, 217, 230, 247, 258-259, 290-295, 310-312, 330, 342, 352-370, 381-390, 402-406, 418-423, 430
+sparkless/storage/manager.py                                           135     86    36%   40-45, 58, 70, 82, 94-98, 108, 119, 128-130, 138, 142-149, 153-159, 171, 186, 195, 208, 223, 237, 249, 258, 269, 283, 295, 303, 312, 325, 336, 344-349, 353-358, 366-378, 382, 390-400, 411-432
+sparkless/storage/models.py                                             67      1    99%   77
+sparkless/storage/serialization/__init__.py                              0      0   100%
+sparkless/storage/serialization/csv.py                                  46     32    30%   23-30, 42-47, 57-62, 76-92, 104-120
+sparkless/storage/serialization/json.py                                 39     25    36%   23-24, 36-41, 51-63, 75-90, 102-118
+sparkless/utils/profiling.py                                            96     40    58%   47-48, 58, 61, 71-76, 85, 88-90, 94, 99, 102, 118-135, 161-172, 182, 188
+sparkless/window.py                                                     67      8    88%   78, 91, 114, 127, 148, 167, 234, 239
+--------------------------------------------------------------------------------------------------
+TOTAL                                                                32894  16597    50%
+Coverage HTML written to dir htmlcov
+Coverage XML written to file coverage.xml
+=========================== short test summary info ============================
+FAILED tests/parity/sql/test_advanced.py::TestSQLAdvancedParity::test_sql_with_inner_join - sparkless.core.exceptions.operation.SparkUnsupportedOperationError: Operation 'Operations: join, select' is not supported
+Reason: Backend 'robin' does not support these operations
+Alternative: Consider using _materialize_manual() or a different backend
+FAILED tests/parity/sql/test_advanced.py::TestSQLAdvancedParity::test_sql_with_left_join - sparkless.core.exceptions.operation.SparkUnsupportedOperationError: Operation 'Operations: join, select' is not supported
+Reason: Backend 'robin' does not support these operations
+Alternative: Consider using _materialize_manual() or a different backend
+FAILED tests/parity/sql/test_advanced.py::TestSQLAdvancedParity::test_sql_with_order_by - sparkless.core.exceptions.operation.SparkUnsupportedOperationError: Operation 'Operations: orderBy' is not supported
+Reason: Backend 'robin' does not support these operations
+Alternative: Consider using _materialize_manual() or a different backend
+FAILED tests/parity/sql/test_advanced.py::TestSQLAdvancedParity::test_sql_with_having - TypeError: '>' not supported between instances of 'builtins.Column' and 'builtins.Column'
+FAILED tests/parity/sql/test_advanced.py::TestSQLAdvancedParity::test_sql_with_union - sparkless.core.exceptions.execution.QueryExecutionException: Failed to execute query: Operation 'Operations: select' is not supported
+Reason: Backend 'robin' does not support these operations
+Alternative: Consider using _materialize_manual() or a different backend
+FAILED tests/parity/sql/test_advanced.py::TestSQLAdvancedParity::test_sql_with_subquery - TypeError: '>' not supported between instances of 'builtins.Column' and 'builtins.Column'
+FAILED tests/parity/sql/test_advanced.py::TestSQLAdvancedParity::test_sql_with_case_when - sparkless.core.exceptions.operation.SparkUnsupportedOperationError: Operation 'Operations: select' is not supported
+Reason: Backend 'robin' does not support these operations
+Alternative: Consider using _materialize_manual() or a different backend
+FAILED tests/parity/sql/test_advanced.py::TestSQLAdvancedParity::test_sql_with_like - sparkless.core.exceptions.operation.SparkUnsupportedOperationError: Operation 'Operations: filter' is not supported
+Reason: Backend 'robin' does not support these operations
+Alternative: Consider using _materialize_manual() or a different backend
+FAILED tests/parity/sql/test_advanced.py::TestSQLAdvancedParity::test_sql_with_in_clause - sparkless.core.exceptions.operation.SparkUnsupportedOperationError: Operation 'Operations: filter' is not supported
+Reason: Backend 'robin' does not support these operations
+Alternative: Consider using _materialize_manual() or a different backend
+FAILED tests/parity/sql/test_ddl.py::TestSQLDDLParity::test_create_table_from_dataframe - assert 6 == 3
+ +  where 6 = count()
+ +    where count = DataFrame[6 rows, 2 columns].count
+FAILED tests/parity/sql/test_ddl.py::TestSQLDDLParity::test_create_table_with_select - sparkless.core.exceptions.execution.QueryExecutionException: Failed to execute query: Operation 'Operations: select' is not supported
+Reason: Backend 'robin' does not support these operations
+Alternative: Consider using _materialize_manual() or a different backend
+FAILED tests/parity/sql/test_dml.py::TestSQLDMLParity::test_insert_into_table - sparkless.core.exceptions.operation.SparkUnsupportedOperationError: Operation 'Operations: orderBy' is not supported
+Reason: Backend 'robin' does not support these operations
+Alternative: Consider using _materialize_manual() or a different backend
+FAILED tests/parity/sql/test_dml.py::TestSQLDMLParity::test_insert_into_specific_columns - sparkless.core.exceptions.operation.SparkUnsupportedOperationError: Operation 'Operations: orderBy' is not supported
+Reason: Backend 'robin' does not support these operations
+Alternative: Consider using _materialize_manual() or a different backend
+FAILED tests/parity/sql/test_dml.py::TestSQLDMLParity::test_insert_multiple_values - sparkless.core.exceptions.operation.SparkUnsupportedOperationError: Operation 'Operations: orderBy' is not supported
+Reason: Backend 'robin' does not support these operations
+Alternative: Consider using _materialize_manual() or a different backend
+FAILED tests/parity/sql/test_dml.py::TestSQLDMLParity::test_update_table - TypeError: argument 'condition': 'bool' object cannot be converted to 'Column'
+FAILED tests/parity/sql/test_dml.py::TestSQLDMLParity::test_update_multiple_columns - TypeError: argument 'condition': 'bool' object cannot be converted to 'Column'
+FAILED tests/parity/sql/test_dml.py::TestSQLDMLParity::test_delete_from_table - sparkless.core.exceptions.operation.SparkUnsupportedOperationError: Operation 'Operations: orderBy' is not supported
+Reason: Backend 'robin' does not support these operations
+Alternative: Consider using _materialize_manual() or a different backend
+FAILED tests/parity/sql/test_dml.py::TestSQLDMLParity::test_insert_from_select - sparkless.core.exceptions.execution.QueryExecutionException: Failed to execute query: Operation 'Operations: select' is not supported
+Reason: Backend 'robin' does not support these operations
+Alternative: Consider using _materialize_manual() or a different backend
+FAILED tests/parity/sql/test_queries.py::TestSQLQueriesParity::test_basic_select - AssertionError: DataFrames are not equivalent:
+Row count mismatch: mock=0, expected=3
+FAILED tests/parity/sql/test_queries.py::TestSQLQueriesParity::test_filtered_select - AssertionError: DataFrames are not equivalent:
+Row count mismatch: mock=0, expected=1
+FAILED tests/parity/sql/test_queries.py::TestSQLQueriesParity::test_group_by - sparkless.core.exceptions.execution.QueryExecutionException: Failed to execute query: not found: age > 30
+
+Resolved plan until failure:
+
+	---> FAILED HERE RESOLVING 'with_columns' <---
+DF ["age", "id", "name", "salary"]; PROJECT */5 COLUMNS; SELECTION: None
+FAILED tests/parity/internal/test_catalog.py::TestCatalogParity::test_cache_table - assert 4 == 2
+ +  where 4 = count()
+ +    where count = DataFrame[4 rows, 2 columns].count
+FAILED tests/parity/internal/test_catalog.py::TestCatalogParity::test_uncache_table - assert 2 == 1
+ +  where 2 = count()
+ +    where count = DataFrame[2 rows, 2 columns].count
+======================== 23 failed, 32 passed in 48.60s ========================

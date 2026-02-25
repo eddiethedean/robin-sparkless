@@ -1,0 +1,56 @@
+{
+  "test_id": "md5",
+  "pyspark_version": "3.5",
+  "generated_at": "2025-10-27T14:13:23.520776",
+  "input_data": [
+    {
+      "id": 1,
+      "name": "Alice",
+      "text": "Hello World",
+      "email": "alice@example.com"
+    },
+    {
+      "id": 2,
+      "name": "Bob",
+      "text": "Test String",
+      "email": "bob@test.com"
+    },
+    {
+      "id": 3,
+      "name": "Charlie",
+      "text": "Python Data",
+      "email": "charlie@company.org"
+    }
+  ],
+  "operation": "DataFrame operation: md5",
+  "expected_output": {
+    "schema": {
+      "field_count": 1,
+      "field_names": [
+        "md5(text)"
+      ],
+      "field_types": [
+        "string"
+      ],
+      "fields": [
+        {
+          "name": "md5(text)",
+          "type": "string",
+          "nullable": true
+        }
+      ]
+    },
+    "data": [
+      {
+        "md5(text)": "b10a8db164e0754105b7a99be72e3fe5"
+      },
+      {
+        "md5(text)": "bd08ba3c982eaad768602536fb8e1184"
+      },
+      {
+        "md5(text)": "c9032ffdea596c7889d15f84cf39b0de"
+      }
+    ],
+    "row_count": 3
+  }
+}

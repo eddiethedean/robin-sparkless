@@ -1,0 +1,72 @@
+# Dockerfile template for compatibility testing
+# Build args: PYTHON_VERSION, PYSPARK_VERSION, JAVA_VERSION
+ARG PYTHON_VERSION=3.9
+FROM python:${PYTHON_VERSION}-slim
+
+# Install Java (version depends on PySpark version)
+ARG JAVA_VERSION=11
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    wget \
+    ca-certificates \
+    gnupg \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install OpenJDK using Adoptium/Temurin
+RUN if [ "$JAVA_VERSION" = "11" ]; then \
+    JAVA_DOWNLOAD_URL="https://github.com/adoptium/temurin11-binaries/releases/download/jdk-11.0.23%2B9/OpenJDK11U-jdk_aarch64_linux_hotspot_11.0.23_9.tar.gz" && \
+    wget -O /tmp/jdk.tar.gz "$JAVA_DOWNLOAD_URL" && \
+    mkdir -p /usr/lib/jvm && \
+    tar -xzf /tmp/jdk.tar.gz -C /usr/lib/jvm && \
+    rm /tmp/jdk.tar.gz && \
+    JAVA_HOME="/usr/lib/jvm/jdk-11.0.23+9" && \
+    ln -s "$JAVA_HOME" /usr/lib/jvm/java-11-openjdk; \
+    elif [ "$JAVA_VERSION" = "17" ]; then \
+    JAVA_DOWNLOAD_URL="https://github.com/adoptium/temurin17-binaries/releases/download/jdk-17.0.11%2B9/OpenJDK17U-jdk_aarch64_linux_hotspot_17.0.11_9.tar.gz" && \
+    wget -O /tmp/jdk.tar.gz "$JAVA_DOWNLOAD_URL" && \
+    mkdir -p /usr/lib/jvm && \
+    tar -xzf /tmp/jdk.tar.gz -C /usr/lib/jvm && \
+    rm /tmp/jdk.tar.gz && \
+    JAVA_HOME="/usr/lib/jvm/jdk-17.0.11+9" && \
+    ln -s "$JAVA_HOME" /usr/lib/jvm/java-17-openjdk; \
+    fi
+
+# Set Java environment
+ENV JAVA_HOME=/usr/lib/jvm/java-${JAVA_VERSION}-openjdk
+ENV PATH=$JAVA_HOME/bin:$PATH
+
+# Set working directory
+WORKDIR /app
+
+# Copy dependency files
+COPY pyproject.toml ./
+COPY mock_spark ./mock_spark
+
+# Install mock-spark dependencies
+RUN pip install --no-cache-dir -e .
+
+# Install PySpark
+ARG PYSPARK_VERSION=3.2.0
+RUN pip install --no-cache-dir pyspark==${PYSPARK_VERSION}
+
+# Install test dependencies
+RUN pip install --no-cache-dir pytest pytest-cov pytest-xdist pandas
+
+# Copy test files
+COPY tests/unit/test_basic_operations.py /app/tests/unit/
+COPY tests/unit/test_data_types.py /app/tests/unit/
+COPY tests/unit/test_sql_ddl_catalog.py /app/tests/unit/
+COPY tests/compatibility/test_basic_compatibility.py /app/tests/compatibility/
+COPY tests/compatibility/conftest.py /app/tests/compatibility/
+COPY tests/compatibility/utils /app/tests/compatibility/utils
+COPY tests/conftest.py /app/tests/
+COPY tests/__init__.py /app/tests/
+COPY tests/unit/__init__.py /app/tests/unit/
+COPY tests/compatibility/__init__.py /app/tests/compatibility/
+
+# Copy test runner script
+COPY tests/compatibility_matrix/test_runner.sh /app/
+RUN chmod +x /app/test_runner.sh
+
+# Run tests
+CMD ["/app/test_runner.sh"]
+

@@ -1,0 +1,77 @@
+{
+  "test_id": "array_contains",
+  "pyspark_version": "3.5",
+  "generated_at": "2025-10-27T14:13:17.093830",
+  "input_data": [
+    {
+      "id": 1,
+      "name": "Alice",
+      "scores": [
+        85,
+        90,
+        78
+      ],
+      "tags": [
+        "python",
+        "data"
+      ]
+    },
+    {
+      "id": 2,
+      "name": "Bob",
+      "scores": [
+        92,
+        88,
+        95
+      ],
+      "tags": [
+        "java",
+        "backend"
+      ]
+    },
+    {
+      "id": 3,
+      "name": "Charlie",
+      "scores": [
+        76,
+        82,
+        89
+      ],
+      "tags": [
+        "python",
+        "ml"
+      ]
+    }
+  ],
+  "operation": "DataFrame operation: array_contains",
+  "expected_output": {
+    "schema": {
+      "field_count": 1,
+      "field_names": [
+        "array_contains(scores, 90)"
+      ],
+      "field_types": [
+        "boolean"
+      ],
+      "fields": [
+        {
+          "name": "array_contains(scores, 90)",
+          "type": "boolean",
+          "nullable": true
+        }
+      ]
+    },
+    "data": [
+      {
+        "array_contains(scores, 90)": true
+      },
+      {
+        "array_contains(scores, 90)": false
+      },
+      {
+        "array_contains(scores, 90)": false
+      }
+    ],
+    "row_count": 3
+  }
+}

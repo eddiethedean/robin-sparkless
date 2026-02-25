@@ -1,0 +1,77 @@
+{
+  "test_id": "array_position",
+  "pyspark_version": "3.5",
+  "generated_at": "2025-10-27T14:13:17.108089",
+  "input_data": [
+    {
+      "id": 1,
+      "name": "Alice",
+      "scores": [
+        85,
+        90,
+        78
+      ],
+      "tags": [
+        "python",
+        "data"
+      ]
+    },
+    {
+      "id": 2,
+      "name": "Bob",
+      "scores": [
+        92,
+        88,
+        95
+      ],
+      "tags": [
+        "java",
+        "backend"
+      ]
+    },
+    {
+      "id": 3,
+      "name": "Charlie",
+      "scores": [
+        76,
+        82,
+        89
+      ],
+      "tags": [
+        "python",
+        "ml"
+      ]
+    }
+  ],
+  "operation": "DataFrame operation: array_position",
+  "expected_output": {
+    "schema": {
+      "field_count": 1,
+      "field_names": [
+        "array_position(scores, 90)"
+      ],
+      "field_types": [
+        "long"
+      ],
+      "fields": [
+        {
+          "name": "array_position(scores, 90)",
+          "type": "long",
+          "nullable": true
+        }
+      ]
+    },
+    "data": [
+      {
+        "array_position(scores, 90)": 2
+      },
+      {
+        "array_position(scores, 90)": 0
+      },
+      {
+        "array_position(scores, 90)": 0
+      }
+    ],
+    "row_count": 3
+  }
+}

@@ -906,6 +906,10 @@ pub struct SparkSession {
     pub(crate) databases: DatabaseCatalog,
     /// UDF registry: Rust UDFs. Session-scoped.
     pub(crate) udf_registry: UdfRegistry,
+    /// Current database/schema name for this session (PySpark: catalog.currentDatabase()).
+    pub(crate) current_database: Arc<Mutex<String>>,
+    /// Best-effort cache flags (PySpark: catalog.cacheTable / isCached). No execution impact today.
+    pub(crate) cached_tables: Arc<Mutex<HashSet<String>>>,
 }
 
 impl SparkSession {
@@ -922,7 +926,86 @@ impl SparkSession {
             tables: Arc::new(Mutex::new(HashMap::new())),
             databases: Arc::new(Mutex::new(HashSet::new())),
             udf_registry: UdfRegistry::new(),
+            current_database: Arc::new(Mutex::new("default".to_string())),
+            cached_tables: Arc::new(Mutex::new(HashSet::new())),
         }
+    }
+
+    /// Return the application name for this session (if set).
+    pub fn app_name(&self) -> Option<String> {
+        self.app_name.clone()
+    }
+
+    /// Create a new logical session with isolated catalogs/state (PySpark: SparkSession.newSession()).
+    /// Global temp views remain process-scoped; everything else is session-scoped.
+    pub fn new_session(&self) -> Self {
+        let current_db = self.current_database();
+        SparkSession {
+            app_name: self.app_name.clone(),
+            master: self.master.clone(),
+            config: self.config.clone(),
+            catalog: Arc::new(Mutex::new(HashMap::new())),
+            tables: Arc::new(Mutex::new(HashMap::new())),
+            databases: Arc::new(Mutex::new(HashSet::new())),
+            udf_registry: UdfRegistry::new(),
+            current_database: Arc::new(Mutex::new(current_db)),
+            cached_tables: Arc::new(Mutex::new(HashSet::new())),
+        }
+    }
+
+    /// Return the current database for this session. Defaults to "default".
+    pub fn current_database(&self) -> String {
+        match self.current_database.lock() {
+            Ok(guard) => guard.clone(),
+            Err(_) => "default".to_string(),
+        }
+    }
+
+    /// Set the current database for this session. Errors if the name does not exist.
+    pub fn set_current_database(&self, name: &str) -> Result<(), EngineError> {
+        if name.is_empty() {
+            return Err(EngineError::User("database name cannot be empty".to_string()));
+        }
+        if !self.database_exists(name) {
+            return Err(EngineError::NotFound(format!(
+                "Database '{name}' does not exist"
+            )));
+        }
+        match self.current_database.lock() {
+            Ok(mut guard) => {
+                *guard = name.to_string();
+                Ok(())
+            }
+            Err(_) => Ok(()),
+        }
+    }
+
+    pub fn cache_table(&self, name: &str) {
+        if name.is_empty() {
+            return;
+        }
+        if let Ok(mut guard) = self.cached_tables.lock() {
+            guard.insert(name.to_string());
+        }
+    }
+
+    pub fn uncache_table(&self, name: &str) {
+        if name.is_empty() {
+            return;
+        }
+        if let Ok(mut guard) = self.cached_tables.lock() {
+            guard.remove(name);
+        }
+    }
+
+    pub fn is_cached(&self, name: &str) -> bool {
+        if name.is_empty() {
+            return false;
+        }
+        self.cached_tables
+            .lock()
+            .map(|g| g.contains(name))
+            .unwrap_or(false)
     }
 
     /// Register a DataFrame as a temporary view (PySpark: createOrReplaceTempView).
@@ -1057,7 +1140,7 @@ impl SparkSession {
             return true;
         }
         match self.databases.lock() {
-            Ok(s) => s.iter().any(|n| n.eq_ignore_ascii_case(name)),
+            Ok(s) => s.contains(name),
             Err(_) => {
                 eprintln!(
                     "robin-sparkless-polars: databases lock poisoned, database_exists may be wrong"
@@ -1250,6 +1333,10 @@ impl SparkSession {
     pub fn drop_database(&self, name: &str) -> bool {
         if name.eq_ignore_ascii_case("default") || name.eq_ignore_ascii_case("global_temp") {
             return false;
+        }
+        // Best-effort: if dropping current db, reset to default.
+        if self.current_database().eq(name) {
+            let _ = self.set_current_database("default");
         }
         match self.databases.lock() {
             Ok(mut s) => s.remove(name),
@@ -2358,6 +2445,8 @@ impl SparkSession {
             tables: self.tables.clone(),
             databases: self.databases.clone(),
             udf_registry: self.udf_registry.clone(),
+            current_database: self.current_database.clone(),
+            cached_tables: self.cached_tables.clone(),
         })
     }
 }

@@ -1,0 +1,59 @@
+{
+  "test_id": "math_log10",
+  "pyspark_version": "3.5",
+  "generated_at": "2025-10-27T14:13:24.015234",
+  "input_data": [
+    {
+      "id": 1,
+      "x": 0.5,
+      "y": 1.2,
+      "angle": 0.785,
+      "value": 4.5
+    },
+    {
+      "id": 2,
+      "x": 1.0,
+      "y": 2.5,
+      "angle": 1.57,
+      "value": 3.2
+    },
+    {
+      "id": 3,
+      "x": 2.0,
+      "y": 3.0,
+      "angle": 0.0,
+      "value": 7.8
+    }
+  ],
+  "operation": "DataFrame operation: math_log10",
+  "expected_output": {
+    "schema": {
+      "field_count": 1,
+      "field_names": [
+        "LOG10(value)"
+      ],
+      "field_types": [
+        "double"
+      ],
+      "fields": [
+        {
+          "name": "LOG10(value)",
+          "type": "double",
+          "nullable": true
+        }
+      ]
+    },
+    "data": [
+      {
+        "LOG10(value)": 0.6532125137753437
+      },
+      {
+        "LOG10(value)": 0.505149978319906
+      },
+      {
+        "LOG10(value)": 0.8920946026904804
+      }
+    ],
+    "row_count": 3
+  }
+}

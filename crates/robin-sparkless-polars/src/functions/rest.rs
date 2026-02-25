@@ -14,9 +14,11 @@ pub fn count(col: &Column) -> Column {
     )
 }
 
-/// Sum aggregation
+/// Sum aggregation. Carries source column for running-window conversion when orderBy differs from partitionBy.
 pub fn sum(col: &Column) -> Column {
-    Column::from_expr(col.expr().clone().sum(), Some("sum".to_string()))
+    let mut c = Column::from_expr(col.expr().clone().sum(), Some("sum".to_string()));
+    c.source_for_running = Some(col.name().to_string());
+    c
 }
 
 /// Average aggregation
@@ -1405,6 +1407,11 @@ pub fn try_to_number(column: &Column, _format: Option<&str>) -> Result<Column, S
 pub fn to_timestamp(column: &Column, format: Option<&str>) -> Result<Column, String> {
     use polars::prelude::{DataType, Field, TimeUnit};
     let fmt_owned = format.map(|s| s.to_string());
+    let out_name = match format {
+        None => format!("to_timestamp({})", column.name()),
+        Some(f) => format!("to_timestamp({}, {f})", column.name()),
+    };
+    let out_name2 = out_name.clone();
     let expr = column.expr().clone().map(
         move |s| {
             crate::column::expect_col(crate::udfs::apply_to_timestamp_format(
@@ -1413,14 +1420,26 @@ pub fn to_timestamp(column: &Column, format: Option<&str>) -> Result<Column, Str
                 true,
             ))
         },
-        |_schema, field| {
-            Ok(Field::new(
-                field.name().clone(),
-                DataType::Datetime(TimeUnit::Microseconds, None),
-            ))
+        move |_schema, field| {
+            // Validate input types early (during planning), so errors surface at withColumn time.
+            match field.dtype() {
+                DataType::String
+                | DataType::Date
+                | DataType::Datetime(_, _)
+                | DataType::Int32
+                | DataType::Int64
+                | DataType::Float64 => Ok(Field::new(
+                    out_name2.clone().into(),
+                    DataType::Datetime(TimeUnit::Microseconds, None),
+                )),
+                _ => Err(polars::prelude::PolarsError::ComputeError(
+                    "to_timestamp requires StringType, TimestampType, IntegerType, LongType, DateType, or DoubleType"
+                        .into(),
+                )),
+            }
         },
     );
-    Ok(crate::column::Column::from_expr(expr, None))
+    Ok(crate::column::Column::from_expr(expr.alias(&out_name), Some(out_name)))
 }
 
 /// Cast to timestamp, null on invalid, or parse with format when provided (PySpark try_to_timestamp).
@@ -1684,6 +1703,11 @@ pub fn day(column: &Column) -> Column {
 /// Cast or parse to date (PySpark to_date). When format is None: cast date/datetime to date, parse string with default formats. When format is Some: parse string with given format.
 pub fn to_date(column: &Column, format: Option<&str>) -> Result<Column, String> {
     let fmt = format.map(|s| s.to_string());
+    let out_name = match format {
+        None => format!("to_date({})", column.name()),
+        Some(f) => format!("to_date({}, {f})", column.name()),
+    };
+    let out_name2 = out_name.clone();
     let expr = column.expr().clone().map(
         move |col| {
             crate::column::expect_col(crate::udfs::apply_string_to_date_format(
@@ -1692,16 +1716,22 @@ pub fn to_date(column: &Column, format: Option<&str>) -> Result<Column, String> 
                 false,
             ))
         },
-        |_schema, field| Ok(Field::new(field.name().clone(), DataType::Date)),
+        move |_schema, _field| Ok(Field::new(out_name2.clone().into(), DataType::Date)),
     );
-    Ok(Column::from_expr(expr, None))
+    Ok(Column::from_expr(expr.alias(&out_name), Some(out_name)))
 }
 
 /// Format date/datetime as string (PySpark date_format). Accepts PySpark/Java SimpleDateFormat style (e.g. "yyyy-MM") and converts to chrono strftime internally.
 pub fn date_format(column: &Column, format: &str) -> Column {
-    column
-        .clone()
-        .date_format(&crate::udfs::pyspark_format_to_chrono(format))
+    use polars::prelude::*;
+    let out_name = format!("date_format({}, {format})", column.name());
+    let chrono_fmt = crate::udfs::pyspark_format_to_chrono(format);
+    let parsed = column.expr().clone().map(
+        |s| crate::column::expect_col(crate::udfs::apply_string_to_date_format(s, None, false)),
+        |_schema, field| Ok(Field::new(field.name().clone(), DataType::Date)),
+    );
+    let expr = parsed.dt().strftime(&chrono_fmt).alias(&out_name);
+    crate::column::Column::from_expr(expr, Some(out_name))
 }
 
 /// Current date (evaluation time). PySpark current_date.
@@ -2280,7 +2310,7 @@ pub fn ucase(column: &Column) -> Column {
 
 /// Alias for day. PySpark dayofmonth.
 pub fn dayofmonth(column: &Column) -> Column {
-    day(column)
+    column.clone().dayofmonth()
 }
 
 /// Alias for degrees. PySpark toDegrees.

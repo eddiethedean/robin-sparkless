@@ -1,0 +1,53 @@
+{
+  "test_id": "isnan",
+  "pyspark_version": "3.5",
+  "generated_at": "2025-10-27T14:13:29.236745",
+  "input_data": [
+    {
+      "id": 1,
+      "name": "Alice",
+      "text": "Hello World"
+    },
+    {
+      "id": 2,
+      "name": "Bob",
+      "text": "Test"
+    },
+    {
+      "id": 3,
+      "name": "Charlie",
+      "text": "Python"
+    }
+  ],
+  "operation": "DataFrame operation: isnan",
+  "expected_output": {
+    "schema": {
+      "field_count": 1,
+      "field_names": [
+        "isnan(NaN)"
+      ],
+      "field_types": [
+        "boolean"
+      ],
+      "fields": [
+        {
+          "name": "isnan(NaN)",
+          "type": "boolean",
+          "nullable": false
+        }
+      ]
+    },
+    "data": [
+      {
+        "isnan(NaN)": true
+      },
+      {
+        "isnan(NaN)": true
+      },
+      {
+        "isnan(NaN)": true
+      }
+    ],
+    "row_count": 3
+  }
+}

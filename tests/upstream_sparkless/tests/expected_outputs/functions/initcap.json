@@ -1,0 +1,56 @@
+{
+  "test_id": "initcap",
+  "pyspark_version": "3.5",
+  "generated_at": "2025-10-27T14:13:23.424250",
+  "input_data": [
+    {
+      "id": 1,
+      "name": "Alice",
+      "text": "Hello World",
+      "email": "alice@example.com"
+    },
+    {
+      "id": 2,
+      "name": "Bob",
+      "text": "Test String",
+      "email": "bob@test.com"
+    },
+    {
+      "id": 3,
+      "name": "Charlie",
+      "text": "Python Data",
+      "email": "charlie@company.org"
+    }
+  ],
+  "operation": "DataFrame operation: initcap",
+  "expected_output": {
+    "schema": {
+      "field_count": 1,
+      "field_names": [
+        "initcap(text)"
+      ],
+      "field_types": [
+        "string"
+      ],
+      "fields": [
+        {
+          "name": "initcap(text)",
+          "type": "string",
+          "nullable": true
+        }
+      ]
+    },
+    "data": [
+      {
+        "initcap(text)": "Hello World"
+      },
+      {
+        "initcap(text)": "Test String"
+      },
+      {
+        "initcap(text)": "Python Data"
+      }
+    ],
+    "row_count": 3
+  }
+}

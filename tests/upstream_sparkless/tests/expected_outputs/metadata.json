@@ -1,0 +1,18 @@
+{
+  "generated_at": "2025-10-27T14:13:29.263482",
+  "pyspark_version": "3.5",
+  "categories": [
+    "dataframe_operations",
+    "functions",
+    "window_operations",
+    "sql_operations",
+    "joins",
+    "arrays",
+    "datetime",
+    "windows",
+    "null_handling",
+    "set_operations",
+    "chained_operations"
+  ],
+  "total_tests": 220
+}

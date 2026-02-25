@@ -1,0 +1,62 @@
+{
+  "test_id": "math_log",
+  "pyspark_version": "3.5",
+  "generated_at": "2025-10-27T14:13:12.244896",
+  "input_data": [
+    {
+      "id": 1,
+      "name": "Alice",
+      "age": 25,
+      "salary": 50000.0,
+      "active": true,
+      "email": "alice@example.com"
+    },
+    {
+      "id": 2,
+      "name": "Bob",
+      "age": 30,
+      "salary": 60000.0,
+      "active": false,
+      "email": "bob@test.com"
+    },
+    {
+      "id": 3,
+      "name": "Charlie",
+      "age": 35,
+      "salary": 70000.0,
+      "active": true,
+      "email": "charlie@company.org"
+    }
+  ],
+  "operation": "DataFrame operation: math_log",
+  "expected_output": {
+    "schema": {
+      "field_count": 1,
+      "field_names": [
+        "ln(salary)"
+      ],
+      "field_types": [
+        "double"
+      ],
+      "fields": [
+        {
+          "name": "ln(salary)",
+          "type": "double",
+          "nullable": true
+        }
+      ]
+    },
+    "data": [
+      {
+        "ln(salary)": 10.819778284410283
+      },
+      {
+        "ln(salary)": 11.002099841204238
+      },
+      {
+        "ln(salary)": 11.156250521031495
+      }
+    ],
+    "row_count": 3
+  }
+}

@@ -1,5 +1,5 @@
 use polars::prelude::{
-    DataType, Expr, Field, PolarsError, PolarsResult, RankMethod, RankOptions, TimeUnit, col, lit,
+    DataType, Expr, Field, PolarsError, PolarsResult, RankMethod, RankOptions, SortOptions, TimeUnit, WindowMapping, col, lit,
 };
 
 /// Unwrap UDF result to Column (map() expects Result<Column>, UDFs return Result<Option<Column>>).
@@ -61,6 +61,8 @@ pub struct Column {
     pub deferred: Option<DeferredRandom>,
     /// When Some, with_column executes Python UDF eagerly (name, arg columns).
     pub udf_call: Option<(String, Vec<Column>)>,
+    /// When Some, this aggregate (e.g. sum) can use cum_sum for running window when orderBy differs from partitionBy.
+    pub source_for_running: Option<String>,
 }
 
 impl Column {
@@ -71,6 +73,7 @@ impl Column {
             expr: col(&name),
             deferred: None,
             udf_call: None,
+            source_for_running: None,
         }
     }
 
@@ -82,6 +85,7 @@ impl Column {
             expr,
             deferred: None,
             udf_call: None,
+            source_for_running: None,
         }
     }
 
@@ -92,6 +96,7 @@ impl Column {
             expr: lit(0i32), // dummy, never used
             deferred: None,
             udf_call: Some((name, args)),
+            source_for_running: None,
         }
     }
 
@@ -106,6 +111,7 @@ impl Column {
             expr,
             deferred: Some(DeferredRandom::Rand(seed)),
             udf_call: None,
+            source_for_running: None,
         }
     }
 
@@ -120,6 +126,7 @@ impl Column {
             expr,
             deferred: Some(DeferredRandom::Randn(seed)),
             udf_call: None,
+            source_for_running: None,
         }
     }
 
@@ -145,6 +152,7 @@ impl Column {
             expr: self.expr.clone().alias(name),
             deferred: self.deferred,
             udf_call: self.udf_call.clone(),
+            source_for_running: self.source_for_running.clone(),
         }
     }
 
@@ -185,6 +193,7 @@ impl Column {
             expr: self.expr.clone().is_null(),
             deferred: None,
             udf_call: None,
+            source_for_running: None,
         }
     }
 
@@ -195,6 +204,7 @@ impl Column {
             expr: self.expr.clone().is_not_null(),
             deferred: None,
             udf_call: None,
+            source_for_running: None,
         }
     }
 
@@ -970,9 +980,43 @@ impl Column {
         )
     }
 
+    /// Extract all matches of regex with capture group index (PySpark regexp_extract_all(col, pattern, idx)).
+    /// idx=0 returns whole match; idx>0 returns capture group.
+    pub fn regexp_extract_all_group(&self, pattern: &str, group_index: usize) -> Column {
+        if group_index == 0 {
+            return self.regexp_extract_all(pattern);
+        }
+        use polars::prelude::*;
+        let pat = pattern.to_string();
+        let idx = group_index;
+        let expr = self.expr().clone().map(
+            move |s| expect_col(crate::udfs::apply_regexp_extract_all_group(s, &pat, idx)),
+            |_schema, field| {
+                Ok(Field::new(
+                    field.name().clone(),
+                    DataType::List(Box::new(DataType::String)),
+                ))
+            },
+        );
+        Self::from_expr(expr, None)
+    }
+
     /// Check if string matches regex (PySpark regexp_like / rlike).
     pub fn regexp_like(&self, pattern: &str) -> Column {
         use polars::prelude::*;
+        // Polars regex engine (regex crate) does not support lookaround; use fancy-regex fallback.
+        if pattern.contains("(?=")
+            || pattern.contains("(?!")
+            || pattern.contains("(?<=")
+            || pattern.contains("(?<!")
+        {
+            let pat = pattern.to_string();
+            let expr = self.expr().clone().map(
+                move |s| expect_col(crate::udfs::apply_regexp_like_lookaround(s, &pat)),
+                |_schema, field| Ok(Field::new(field.name().clone(), DataType::Boolean)),
+            );
+            return Self::from_expr(expr, None);
+        }
         Self::from_expr(
             self.expr()
                 .clone()
@@ -1754,12 +1798,24 @@ impl Column {
 
     /// Extract year from datetime column (PySpark year)
     pub fn year(&self) -> Column {
-        Self::from_expr(self.expr().clone().dt().year(), None)
+        let name = format!("year({})", self.name());
+        use polars::prelude::*;
+        let parsed = self.expr().clone().map(
+            |s| expect_col(crate::udfs::apply_string_to_date_format(s, None, false)),
+            |_schema, field| Ok(Field::new(field.name().clone(), DataType::Date)),
+        );
+        Self::from_expr(parsed.dt().year().alias(&name), Some(name))
     }
 
     /// Extract month from datetime column (PySpark month)
     pub fn month(&self) -> Column {
-        Self::from_expr(self.expr().clone().dt().month(), None)
+        let name = format!("month({})", self.name());
+        use polars::prelude::*;
+        let parsed = self.expr().clone().map(
+            |s| expect_col(crate::udfs::apply_string_to_date_format(s, None, false)),
+            |_schema, field| Ok(Field::new(field.name().clone(), DataType::Date)),
+        );
+        Self::from_expr(parsed.dt().month().alias(&name), Some(name))
     }
 
     /// Extract day of month from datetime column (PySpark day)
@@ -1769,7 +1825,13 @@ impl Column {
 
     /// Alias for day. PySpark dayofmonth.
     pub fn dayofmonth(&self) -> Column {
-        self.day()
+        let name = format!("dayofmonth({})", self.name());
+        use polars::prelude::*;
+        let parsed = self.expr().clone().map(
+            |s| expect_col(crate::udfs::apply_string_to_date_format(s, None, false)),
+            |_schema, field| Ok(Field::new(field.name().clone(), DataType::Date)),
+        );
+        Self::from_expr(parsed.dt().day().alias(&name), Some(name))
     }
 
     /// Extract quarter (1-4) from date/datetime column (PySpark quarter).
@@ -1791,9 +1853,14 @@ impl Column {
     /// Polars weekday is Mon=1..Sun=7; we convert to Sun=1..Sat=7.
     pub fn dayofweek(&self) -> Column {
         use polars::prelude::*;
-        let w = self.expr().clone().dt().weekday().cast(DataType::Int32);
+        let parsed = self.expr().clone().map(
+            |s| expect_col(crate::udfs::apply_string_to_date_format(s, None, false)),
+            |_schema, field| Ok(Field::new(field.name().clone(), DataType::Date)),
+        );
+        let w = parsed.dt().weekday().cast(DataType::Int32);
         let dayofweek = ((w % lit(7i32)) + lit(1i32)).cast(DataType::Int32);
-        Self::from_expr(dayofweek, None)
+        let name = format!("dayofweek({})", self.name());
+        Self::from_expr(dayofweek.alias(&name), Some(name))
     }
 
     /// Day of year (1-366) (PySpark dayofyear).
@@ -1906,17 +1973,25 @@ impl Column {
     /// Add n days to date/datetime column (PySpark date_add).
     pub fn date_add(&self, n: i32) -> Column {
         use polars::prelude::*;
-        let date_expr = self.expr().clone().cast(DataType::Date);
+        let date_expr = self.expr().clone().map(
+            |s| expect_col(crate::udfs::apply_string_to_date_format(s, None, false)),
+            |_schema, field| Ok(Field::new(field.name().clone(), DataType::Date)),
+        );
         let dur = duration(DurationArgs::new().with_days(lit(n as i64)));
-        Self::from_expr(date_expr + dur, None)
+        let name = format!("date_add({}, {n})", self.name());
+        Self::from_expr((date_expr + dur).alias(&name), Some(name))
     }
 
     /// Subtract n days from date/datetime column (PySpark date_sub).
     pub fn date_sub(&self, n: i32) -> Column {
         use polars::prelude::*;
-        let date_expr = self.expr().clone().cast(DataType::Date);
+        let date_expr = self.expr().clone().map(
+            |s| expect_col(crate::udfs::apply_string_to_date_format(s, None, false)),
+            |_schema, field| Ok(Field::new(field.name().clone(), DataType::Date)),
+        );
         let dur = duration(DurationArgs::new().with_days(lit(n as i64)));
-        Self::from_expr(date_expr - dur, None)
+        let name = format!("date_sub({}, {n})", self.name());
+        Self::from_expr((date_expr - dur).alias(&name), Some(name))
     }
 
     /// Number of days between two date/datetime columns (PySpark datediff). (end - start).
@@ -2110,8 +2185,59 @@ impl Column {
     /// Apply window partitioning. Returns a new Column with `.over(partition_by)`.
     /// Use after rank(), dense_rank(), row_number(), lag(), lead().
     pub fn over(&self, partition_by: &[&str]) -> Column {
-        let partition_exprs: Vec<Expr> = partition_by.iter().map(|s| col(*s)).collect();
+        let partition_exprs: Vec<Expr> = if partition_by.is_empty() {
+            vec![lit(1i32)]
+        } else {
+            partition_by.iter().map(|s| col(*s)).collect()
+        };
         Self::from_expr(self.expr().clone().over(partition_exprs), None)
+    }
+
+    /// Apply window with optional order-by for running aggregates (e.g. sum, count).
+    /// `order_by_encoded`: e.g. ["value"] for asc, ["-value"] for desc.
+    /// When `use_running_aggregate` is true and we have `source_for_running`, use cum_sum for running semantics.
+    pub fn over_window(
+        &self,
+        partition_by: &[&str],
+        order_by_encoded: &[String],
+        use_running_aggregate: bool,
+    ) -> Result<Column, PolarsError> {
+        let partition_exprs: Vec<Expr> = if partition_by.is_empty() {
+            vec![lit(1i32)]
+        } else {
+            partition_by.iter().map(|s| col(*s)).collect()
+        };
+        let base_expr = if use_running_aggregate {
+            if let Some(ref src) = self.source_for_running {
+                col(src).cum_sum(false)
+            } else {
+                self.expr().clone()
+            }
+        } else {
+            self.expr().clone()
+        };
+        let expr = if order_by_encoded.is_empty() {
+            base_expr.over(partition_exprs)
+        } else {
+            let first = &order_by_encoded[0];
+            let (name, descending) = if let Some(stripped) = first.strip_prefix('-') {
+                (stripped, true)
+            } else {
+                (first.as_str(), false)
+            };
+            let sort_opts = SortOptions {
+                descending,
+                nulls_last: descending,
+                ..Default::default()
+            };
+            let order_expr = col(name).sort(sort_opts);
+            base_expr.over_with_options(
+                Some(partition_exprs),
+                Some((vec![order_expr], sort_opts)),
+                WindowMapping::default(),
+            )?
+        };
+        Ok(Self::from_expr(expr, None))
     }
 
     /// Rank (with ties, gaps). Use with `.over(partition_by)`.

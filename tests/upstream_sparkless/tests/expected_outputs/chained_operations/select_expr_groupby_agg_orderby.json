@@ -1,0 +1,93 @@
+{
+  "test_id": "select_expr_groupby_agg_orderby",
+  "pyspark_version": "3.5",
+  "generated_at": "2025-10-27T14:13:23.242361",
+  "input_data": [
+    {
+      "id": 1,
+      "name": "Alice",
+      "age": 25,
+      "salary": 50000.0,
+      "department": "IT",
+      "hire_date": "2020-01-15"
+    },
+    {
+      "id": 2,
+      "name": "Bob",
+      "age": 30,
+      "salary": 60000.0,
+      "department": "HR",
+      "hire_date": "2019-03-10"
+    },
+    {
+      "id": 3,
+      "name": "Charlie",
+      "age": 35,
+      "salary": 70000.0,
+      "department": "IT",
+      "hire_date": "2021-07-22"
+    },
+    {
+      "id": 4,
+      "name": "David",
+      "age": 40,
+      "salary": 80000.0,
+      "department": "Finance",
+      "hire_date": "2018-11-05"
+    },
+    {
+      "id": 5,
+      "name": "Eve",
+      "age": 28,
+      "salary": 55000.0,
+      "department": "IT",
+      "hire_date": "2022-02-14"
+    }
+  ],
+  "operation": "DataFrame operation: select_expr_groupby_agg_orderby",
+  "expected_output": {
+    "schema": {
+      "field_count": 3,
+      "field_names": [
+        "level",
+        "count",
+        "avg_salary"
+      ],
+      "field_types": [
+        "string",
+        "long",
+        "double"
+      ],
+      "fields": [
+        {
+          "name": "level",
+          "type": "string",
+          "nullable": false
+        },
+        {
+          "name": "count",
+          "type": "long",
+          "nullable": false
+        },
+        {
+          "name": "avg_salary",
+          "type": "double",
+          "nullable": true
+        }
+      ]
+    },
+    "data": [
+      {
+        "level": "Junior",
+        "count": 3,
+        "avg_salary": 55000.0
+      },
+      {
+        "level": "Senior",
+        "count": 2,
+        "avg_salary": 75000.0
+      }
+    ],
+    "row_count": 2
+  }
+}

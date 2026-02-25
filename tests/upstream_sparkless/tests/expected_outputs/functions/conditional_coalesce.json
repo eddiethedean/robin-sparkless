@@ -1,0 +1,62 @@
+{
+  "test_id": "conditional_coalesce",
+  "pyspark_version": "3.5",
+  "generated_at": "2025-10-27T14:13:13.603437",
+  "input_data": [
+    {
+      "id": 1,
+      "age": 25,
+      "salary": 50000,
+      "col1": null,
+      "col2": "backup",
+      "col3": "default"
+    },
+    {
+      "id": 2,
+      "age": 35,
+      "salary": null,
+      "col1": "primary",
+      "col2": null,
+      "col3": "default"
+    },
+    {
+      "id": 3,
+      "age": 45,
+      "salary": 70000,
+      "col1": "primary",
+      "col2": "backup",
+      "col3": null
+    }
+  ],
+  "operation": "DataFrame operation: conditional_coalesce",
+  "expected_output": {
+    "schema": {
+      "field_count": 1,
+      "field_names": [
+        "first_non_null"
+      ],
+      "field_types": [
+        "string"
+      ],
+      "fields": [
+        {
+          "name": "first_non_null",
+          "type": "string",
+          "nullable": true
+        }
+      ]
+    },
+    "data": [
+      {
+        "first_non_null": "backup"
+      },
+      {
+        "first_non_null": "primary"
+      },
+      {
+        "first_non_null": "primary"
+      }
+    ],
+    "row_count": 3
+  }
+}

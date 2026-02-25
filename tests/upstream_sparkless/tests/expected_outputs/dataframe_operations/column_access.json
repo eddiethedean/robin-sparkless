@@ -1,0 +1,91 @@
+{
+  "test_id": "column_access",
+  "pyspark_version": "3.5",
+  "generated_at": "2025-10-27T14:13:11.109555",
+  "input_data": [
+    {
+      "id": 1,
+      "name": "Alice",
+      "age": 25,
+      "salary": 50000.0,
+      "department": "IT"
+    },
+    {
+      "id": 2,
+      "name": "Bob",
+      "age": 30,
+      "salary": 60000.0,
+      "department": "HR"
+    },
+    {
+      "id": 3,
+      "name": "Charlie",
+      "age": 35,
+      "salary": 70000.0,
+      "department": "IT"
+    },
+    {
+      "id": 4,
+      "name": "David",
+      "age": 40,
+      "salary": 80000.0,
+      "department": "Finance"
+    }
+  ],
+  "operation": "DataFrame operation: column_access",
+  "expected_output": {
+    "schema": {
+      "field_count": 3,
+      "field_names": [
+        "id",
+        "name",
+        "salary"
+      ],
+      "field_types": [
+        "long",
+        "string",
+        "double"
+      ],
+      "fields": [
+        {
+          "name": "id",
+          "type": "long",
+          "nullable": true
+        },
+        {
+          "name": "name",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "salary",
+          "type": "double",
+          "nullable": true
+        }
+      ]
+    },
+    "data": [
+      {
+        "id": 1,
+        "name": "Alice",
+        "salary": 50000.0
+      },
+      {
+        "id": 2,
+        "name": "Bob",
+        "salary": 60000.0
+      },
+      {
+        "id": 3,
+        "name": "Charlie",
+        "salary": 70000.0
+      },
+      {
+        "id": 4,
+        "name": "David",
+        "salary": 80000.0
+      }
+    ],
+    "row_count": 4
+  }
+}

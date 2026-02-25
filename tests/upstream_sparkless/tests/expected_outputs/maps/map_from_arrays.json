@@ -1,0 +1,81 @@
+{
+  "test_id": "map_from_arrays",
+  "pyspark_version": "3.5",
+  "generated_at": "2025-10-27T14:13:24.793937",
+  "input_data": [
+    {
+      "id": 1,
+      "map1": {
+        "a": 1,
+        "b": 2
+      },
+      "map2": {
+        "c": 3,
+        "d": 4
+      },
+      "key": "a"
+    },
+    {
+      "id": 2,
+      "map1": {
+        "x": 10,
+        "y": 20
+      },
+      "map2": {
+        "z": 30
+      },
+      "key": "x"
+    },
+    {
+      "id": 3,
+      "map1": {
+        "p": 100,
+        "q": 200
+      },
+      "map2": {
+        "r": 300
+      },
+      "key": "p"
+    }
+  ],
+  "operation": "DataFrame operation: map_from_arrays",
+  "expected_output": {
+    "schema": {
+      "field_count": 1,
+      "field_names": [
+        "map_from_arrays(array(a, b), array(1, 2))"
+      ],
+      "field_types": [
+        "map"
+      ],
+      "fields": [
+        {
+          "name": "map_from_arrays(array(a, b), array(1, 2))",
+          "type": "map",
+          "nullable": false
+        }
+      ]
+    },
+    "data": [
+      {
+        "map_from_arrays(array(a, b), array(1, 2))": {
+          "a": 1,
+          "b": 2
+        }
+      },
+      {
+        "map_from_arrays(array(a, b), array(1, 2))": {
+          "a": 1,
+          "b": 2
+        }
+      },
+      {
+        "map_from_arrays(array(a, b), array(1, 2))": {
+          "a": 1,
+          "b": 2
+        }
+      }
+    ],
+    "row_count": 3
+  }
+}

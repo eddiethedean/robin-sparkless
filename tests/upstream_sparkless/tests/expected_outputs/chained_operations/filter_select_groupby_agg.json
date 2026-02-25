@@ -1,0 +1,84 @@
+{
+  "test_id": "filter_select_groupby_agg",
+  "pyspark_version": "3.5",
+  "generated_at": "2025-10-27T14:13:22.693175",
+  "input_data": [
+    {
+      "id": 1,
+      "name": "Alice",
+      "age": 25,
+      "salary": 50000.0,
+      "department": "IT",
+      "hire_date": "2020-01-15"
+    },
+    {
+      "id": 2,
+      "name": "Bob",
+      "age": 30,
+      "salary": 60000.0,
+      "department": "HR",
+      "hire_date": "2019-03-10"
+    },
+    {
+      "id": 3,
+      "name": "Charlie",
+      "age": 35,
+      "salary": 70000.0,
+      "department": "IT",
+      "hire_date": "2021-07-22"
+    },
+    {
+      "id": 4,
+      "name": "David",
+      "age": 40,
+      "salary": 80000.0,
+      "department": "Finance",
+      "hire_date": "2018-11-05"
+    },
+    {
+      "id": 5,
+      "name": "Eve",
+      "age": 28,
+      "salary": 55000.0,
+      "department": "IT",
+      "hire_date": "2022-02-14"
+    }
+  ],
+  "operation": "DataFrame operation: filter_select_groupby_agg",
+  "expected_output": {
+    "schema": {
+      "field_count": 2,
+      "field_names": [
+        "department",
+        "avg_salary"
+      ],
+      "field_types": [
+        "string",
+        "double"
+      ],
+      "fields": [
+        {
+          "name": "department",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "avg_salary",
+          "type": "double",
+          "nullable": true
+        }
+      ]
+    },
+    "data": [
+      {
+        "department": "Finance",
+        "avg_salary": 80000.0
+      },
+      {
+        "department": "IT",
+        "avg_salary": 70000.0
+      }
+    ],
+    "row_count": 2
+  }
+}

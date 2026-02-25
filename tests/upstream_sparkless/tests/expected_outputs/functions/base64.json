@@ -1,0 +1,56 @@
+{
+  "test_id": "base64",
+  "pyspark_version": "3.5",
+  "generated_at": "2025-10-27T14:13:23.396462",
+  "input_data": [
+    {
+      "id": 1,
+      "name": "Alice",
+      "text": "Hello World",
+      "email": "alice@example.com"
+    },
+    {
+      "id": 2,
+      "name": "Bob",
+      "text": "Test String",
+      "email": "bob@test.com"
+    },
+    {
+      "id": 3,
+      "name": "Charlie",
+      "text": "Python Data",
+      "email": "charlie@company.org"
+    }
+  ],
+  "operation": "DataFrame operation: base64",
+  "expected_output": {
+    "schema": {
+      "field_count": 1,
+      "field_names": [
+        "base64(name)"
+      ],
+      "field_types": [
+        "string"
+      ],
+      "fields": [
+        {
+          "name": "base64(name)",
+          "type": "string",
+          "nullable": true
+        }
+      ]
+    },
+    "data": [
+      {
+        "base64(name)": "QWxpY2U="
+      },
+      {
+        "base64(name)": "Qm9i"
+      },
+      {
+        "base64(name)": "Q2hhcmxpZQ=="
+      }
+    ],
+    "row_count": 3
+  }
+}

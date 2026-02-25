@@ -1,0 +1,56 @@
+{
+  "test_id": "column_expr",
+  "pyspark_version": "3.5",
+  "generated_at": "2025-10-27T14:25:48.665755",
+  "input_data": [
+    {
+      "id": 1,
+      "name": "Alice",
+      "age": 25,
+      "salary": 50000.0
+    },
+    {
+      "id": 2,
+      "name": "Bob",
+      "age": 30,
+      "salary": 60000.0
+    },
+    {
+      "id": 3,
+      "name": "Charlie",
+      "age": 35,
+      "salary": 70000.0
+    }
+  ],
+  "operation": "DataFrame operation: column_expr",
+  "expected_output": {
+    "schema": {
+      "field_count": 1,
+      "field_names": [
+        "(age + 1)"
+      ],
+      "field_types": [
+        "long"
+      ],
+      "fields": [
+        {
+          "name": "(age + 1)",
+          "type": "long",
+          "nullable": true
+        }
+      ]
+    },
+    "data": [
+      {
+        "(age + 1)": 26
+      },
+      {
+        "(age + 1)": 31
+      },
+      {
+        "(age + 1)": 36
+      }
+    ],
+    "row_count": 3
+  }
+}

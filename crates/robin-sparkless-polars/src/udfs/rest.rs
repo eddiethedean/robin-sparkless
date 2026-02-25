@@ -1189,6 +1189,72 @@ pub fn apply_regexp_extract_lookaround(
     Ok(Some(Column::new(name, out.into_series())))
 }
 
+/// regexp_extract_all(column, pattern, group_index) using fancy-regex for capture groups and lookaround.
+/// Returns list of strings; null input -> null output; non-matching -> empty list.
+pub fn apply_regexp_extract_all_group(
+    column: Column,
+    pattern: &str,
+    group_index: usize,
+) -> PolarsResult<Option<Column>> {
+    use fancy_regex::Regex;
+    use polars::prelude::*;
+    let name = column.field().into_owned().name;
+    let series = column.take_materialized_series();
+    let ca = series
+        .str()
+        .map_err(|e| compute_err("regexp_extract_all", e))?;
+    let re = Regex::new(pattern).map_err(|e| {
+        compute_err(
+            &format!("regexp_extract_all invalid regex '{pattern}'"),
+            e,
+        )
+    })?;
+
+    let mut out: ListChunked = ca
+        .into_iter()
+        .map(|opt_s| {
+            opt_s.map(|s| {
+                let mut vals: Vec<String> = Vec::new();
+                for cap_res in re.captures_iter(s) {
+                    if let Ok(caps) = cap_res {
+                        if let Some(m) = caps.get(group_index) {
+                            vals.push(m.as_str().to_string());
+                        }
+                    }
+                }
+                Series::new(PlSmallStr::EMPTY, vals)
+            })
+        })
+        .collect();
+    out.rename(name.clone());
+    Ok(Some(Column::new(name, out.into_series())))
+}
+
+/// regexp_like / rlike using fancy-regex when pattern needs lookaround support.
+pub fn apply_regexp_like_lookaround(column: Column, pattern: &str) -> PolarsResult<Option<Column>> {
+    use fancy_regex::Regex;
+    use polars::prelude::*;
+    let name = column.field().into_owned().name;
+    let series = column.take_materialized_series();
+    let casted = if series.dtype() == &DataType::String {
+        series
+    } else {
+        series
+            .cast(&DataType::String)
+            .map_err(|e| compute_err("rlike cast", e))?
+    };
+    let ca = casted.str().map_err(|e| compute_err("rlike", e))?;
+    let re = Regex::new(pattern)
+        .map_err(|e| compute_err(&format!("rlike invalid regex '{pattern}'"), e))?;
+    let out = BooleanChunked::from_iter_options(
+        name.as_str().into(),
+        ca.into_iter().map(|opt_s| {
+            opt_s.map(|s| re.is_match(s).unwrap_or(false))
+        }),
+    );
+    Ok(Some(Column::new(name, out.into_series())))
+}
+
 /// Regexp instr: 1-based position of first regex match (PySpark regexp_instr).
 /// group_idx: 0 = full match, 1+ = capture group. Returns null if no match.
 pub fn apply_regexp_instr(
@@ -3303,17 +3369,57 @@ pub fn apply_unix_timestamp(column: Column, format: Option<&str>) -> PolarsResul
         .unwrap_or_else(|| "%Y-%m-%d %H:%M:%S".to_string());
     let name = column.field().into_owned().name;
     let series = column.take_materialized_series();
-    let ca = series.str().map_err(|e| compute_err("unix_timestamp", e))?;
-    let out = Int64Chunked::from_iter_options(
-        name.as_str().into(),
-        ca.into_iter().map(|opt_s| {
-            opt_s.and_then(|s| {
-                NaiveDateTime::parse_from_str(s, &chrono_fmt)
-                    .ok()
-                    .map(|ndt| DateTime::<Utc>::from_naive_utc_and_offset(ndt, Utc).timestamp())
-            })
-        }),
-    );
+    let out = match series.dtype() {
+        DataType::String => {
+            let ca = series.str().map_err(|e| compute_err("unix_timestamp", e))?;
+            Int64Chunked::from_iter_options(
+                name.as_str().into(),
+                ca.into_iter().map(|opt_s| {
+                    opt_s.and_then(|s| {
+                        NaiveDateTime::parse_from_str(s, &chrono_fmt)
+                            .ok()
+                            .map(|ndt| DateTime::<Utc>::from_naive_utc_and_offset(ndt, Utc).timestamp())
+                    })
+                }),
+            )
+        }
+        DataType::Datetime(_, _) => {
+            // Polars stores datetimes as i64 in the given timeunit (we use micros). Convert to seconds.
+            let casted = series
+                .cast(&DataType::Int64)
+                .map_err(|e| compute_err("unix_timestamp datetime cast", e))?;
+            let ca = casted
+                .i64()
+                .map_err(|e| compute_err("unix_timestamp datetime", e))?;
+            Int64Chunked::from_iter_options(
+                name.as_str().into(),
+                ca.into_iter().map(|opt_us| opt_us.map(|us| us / 1_000_000)),
+            )
+        }
+        DataType::Date => {
+            // Date is stored as days since epoch. Convert to seconds at midnight UTC.
+            let casted = series
+                .cast(&DataType::Int32)
+                .map_err(|e| compute_err("unix_timestamp date cast", e))?;
+            let ca = casted
+                .i32()
+                .map_err(|e| compute_err("unix_timestamp date", e))?;
+            Int64Chunked::from_iter_options(
+                name.as_str().into(),
+                ca.into_iter().map(|opt_days| opt_days.map(|d| (d as i64) * 86_400)),
+            )
+        }
+        _ => {
+            return Err(PolarsError::ComputeError(
+                format!(
+                    "unix_timestamp: invalid series dtype: expected `String`, got `{}` for series with name `{}`",
+                    series.dtype(),
+                    name.as_str()
+                )
+                .into(),
+            ))
+        }
+    };
     Ok(Some(Column::new(name, out.into_series())))
 }
 
@@ -3414,8 +3520,49 @@ pub fn apply_to_timestamp_format(
     let name = column.field().into_owned().name;
     let series = column.take_materialized_series();
     if series.dtype() != &DataType::String {
-        let out_series = series.cast(&DataType::Datetime(TimeUnit::Microseconds, None))?;
-        return Ok(Some(Column::new(name, out_series)));
+        // Accept: timestamp/date (pass-through/cast), integer/long/double as unix seconds.
+        let dtype = series.dtype();
+        match dtype {
+            DataType::Datetime(_, _) => {
+                let out_series = series.cast(&DataType::Datetime(TimeUnit::Microseconds, None))?;
+                return Ok(Some(Column::new(name, out_series)));
+            }
+            DataType::Date => {
+                let out_series = series.cast(&DataType::Datetime(TimeUnit::Microseconds, None))?;
+                return Ok(Some(Column::new(name, out_series)));
+            }
+            DataType::Int32 | DataType::Int64 => {
+                let casted = series.cast(&DataType::Int64)?;
+                let ca = casted.i64().map_err(|e| compute_err("to_timestamp", e))?;
+                let out = Int64Chunked::from_iter_options(
+                    name.as_str().into(),
+                    ca.into_iter().map(|opt_s| opt_s.map(|secs| secs * 1_000_000)),
+                );
+                let out_series = out
+                    .into_series()
+                    .cast(&DataType::Datetime(TimeUnit::Microseconds, None))?;
+                return Ok(Some(Column::new(name, out_series)));
+            }
+            DataType::Float64 => {
+                let ca = series.f64().map_err(|e| compute_err("to_timestamp", e))?;
+                let out = Int64Chunked::from_iter_options(
+                    name.as_str().into(),
+                    ca.into_iter().map(|opt_s| {
+                        opt_s.map(|secs| (secs * 1_000_000.0).round() as i64)
+                    }),
+                );
+                let out_series = out
+                    .into_series()
+                    .cast(&DataType::Datetime(TimeUnit::Microseconds, None))?;
+                return Ok(Some(Column::new(name, out_series)));
+            }
+            _ => {
+                return Err(PolarsError::ComputeError(
+                    "to_timestamp requires StringType, TimestampType, IntegerType, LongType, DateType, or DoubleType"
+                        .into(),
+                ))
+            }
+        }
     }
     let chrono_fmt = format
         .map(pyspark_format_to_chrono)

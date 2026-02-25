@@ -1,0 +1,74 @@
+{
+  "test_id": "map_filter",
+  "pyspark_version": "3.5",
+  "generated_at": "2025-10-27T14:13:24.776004",
+  "input_data": [
+    {
+      "id": 1,
+      "map1": {
+        "a": 1,
+        "b": 2
+      },
+      "map2": {
+        "c": 3,
+        "d": 4
+      },
+      "key": "a"
+    },
+    {
+      "id": 2,
+      "map1": {
+        "x": 10,
+        "y": 20
+      },
+      "map2": {
+        "z": 30
+      },
+      "key": "x"
+    },
+    {
+      "id": 3,
+      "map1": {
+        "p": 100,
+        "q": 200
+      },
+      "map2": {
+        "r": 300
+      },
+      "key": "p"
+    }
+  ],
+  "operation": "DataFrame operation: map_filter",
+  "expected_output": {
+    "schema": {
+      "field_count": 1,
+      "field_names": [
+        "map_filter(map1, lambdafunction((namedlambdavariable() = a), namedlambdavariable(), namedlambdavariable()))"
+      ],
+      "field_types": [
+        "map"
+      ],
+      "fields": [
+        {
+          "name": "map_filter(map1, lambdafunction((namedlambdavariable() = a), namedlambdavariable(), namedlambdavariable()))",
+          "type": "map",
+          "nullable": true
+        }
+      ]
+    },
+    "data": [
+      {
+        "map_filter(map1, lambdafunction((namedlambdavariable() = a), namedlambdavariable(), namedlambdavariable()))": {
+          "a": 1
+        }
+      },
+      {
+        "map_filter(map1, lambdafunction((namedlambdavariable() = a), namedlambdavariable(), namedlambdavariable()))": {}
+      },
+      {
+        "map_filter(map1, lambdafunction((namedlambdavariable() = a), namedlambdavariable(), namedlambdavariable()))": {}
+      }
+    ],
+    "row_count": 3
+  }
+}

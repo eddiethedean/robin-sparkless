@@ -1,0 +1,67 @@
+{
+  "test_id": "global_aggregation",
+  "pyspark_version": "3.5",
+  "generated_at": "2024-01-15T10:30:00Z",
+  "input_data": [
+    {
+      "id": 1,
+      "name": "Alice",
+      "salary": 50000
+    },
+    {
+      "id": 2,
+      "name": "Bob",
+      "salary": 60000
+    },
+    {
+      "id": 3,
+      "name": "Charlie",
+      "salary": 70000
+    },
+    {
+      "id": 4,
+      "name": "David",
+      "salary": 80000
+    }
+  ],
+  "expected_output": {
+    "schema": {
+      "field_count": 3,
+      "field_names": [
+        "total_salary",
+        "avg_salary",
+        "total_employees"
+      ],
+      "field_types": [
+        "LongType()",
+        "DoubleType()",
+        "LongType()"
+      ],
+      "fields": [
+        {
+          "name": "total_salary",
+          "type": "LongType()",
+          "nullable": true
+        },
+        {
+          "name": "avg_salary",
+          "type": "DoubleType()",
+          "nullable": true
+        },
+        {
+          "name": "total_employees",
+          "type": "LongType()",
+          "nullable": false
+        }
+      ]
+    },
+    "data": [
+      {
+        "total_salary": 260000,
+        "avg_salary": 65000.0,
+        "total_employees": 4
+      }
+    ],
+    "row_count": 1
+  }
+}

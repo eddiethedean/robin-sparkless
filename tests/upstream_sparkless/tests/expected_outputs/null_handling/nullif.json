@@ -1,0 +1,69 @@
+{
+  "test_id": "nullif",
+  "pyspark_version": "3.5",
+  "generated_at": "2025-10-27T14:13:20.743262",
+  "input_data": [
+    {
+      "id": 1,
+      "name": "Alice",
+      "age": 25,
+      "salary": 50000.0,
+      "department": "IT"
+    },
+    {
+      "id": 2,
+      "name": null,
+      "age": 30,
+      "salary": null,
+      "department": "HR"
+    },
+    {
+      "id": 3,
+      "name": "Charlie",
+      "age": null,
+      "salary": 70000.0,
+      "department": null
+    },
+    {
+      "id": 4,
+      "name": "David",
+      "age": 40,
+      "salary": 80000.0,
+      "department": "Finance"
+    }
+  ],
+  "operation": "DataFrame operation: nullif",
+  "expected_output": {
+    "schema": {
+      "field_count": 1,
+      "field_names": [
+        "CASE WHEN (age = 30) THEN NULL ELSE age END"
+      ],
+      "field_types": [
+        "long"
+      ],
+      "fields": [
+        {
+          "name": "CASE WHEN (age = 30) THEN NULL ELSE age END",
+          "type": "long",
+          "nullable": true
+        }
+      ]
+    },
+    "data": [
+      {
+        "CASE WHEN (age = 30) THEN NULL ELSE age END": 25
+      },
+      {
+        "CASE WHEN (age = 30) THEN NULL ELSE age END": null
+      },
+      {
+        "CASE WHEN (age = 30) THEN NULL ELSE age END": null
+      },
+      {
+        "CASE WHEN (age = 30) THEN NULL ELSE age END": 40
+      }
+    ],
+    "row_count": 4
+  }
+}

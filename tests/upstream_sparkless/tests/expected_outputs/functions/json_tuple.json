@@ -1,0 +1,66 @@
+{
+  "test_id": "json_tuple",
+  "pyspark_version": "3.5",
+  "generated_at": "2025-10-27T14:13:23.703372",
+  "input_data": [
+    {
+      "id": 1,
+      "name": "Alice",
+      "text": "Hello World",
+      "email": "alice@example.com"
+    },
+    {
+      "id": 2,
+      "name": "Bob",
+      "text": "Test String",
+      "email": "bob@test.com"
+    },
+    {
+      "id": 3,
+      "name": "Charlie",
+      "text": "Python Data",
+      "email": "charlie@company.org"
+    }
+  ],
+  "operation": "DataFrame operation: json_tuple",
+  "expected_output": {
+    "schema": {
+      "field_count": 2,
+      "field_names": [
+        "c0",
+        "c1"
+      ],
+      "field_types": [
+        "string",
+        "string"
+      ],
+      "fields": [
+        {
+          "name": "c0",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "c1",
+          "type": "string",
+          "nullable": true
+        }
+      ]
+    },
+    "data": [
+      {
+        "c0": "Alice",
+        "c1": "25"
+      },
+      {
+        "c0": "Alice",
+        "c1": "25"
+      },
+      {
+        "c0": "Alice",
+        "c1": "25"
+      }
+    ],
+    "row_count": 3
+  }
+}

@@ -1,0 +1,60 @@
+{
+  "test_id": "mean",
+  "pyspark_version": "3.5",
+  "generated_at": "2025-10-27T14:13:28.781565",
+  "input_data": [
+    {
+      "id": 1,
+      "name": "Alice",
+      "age": 25,
+      "salary": 50000.0,
+      "dept": "IT"
+    },
+    {
+      "id": 2,
+      "name": "Bob",
+      "age": 30,
+      "salary": 60000.0,
+      "dept": "HR"
+    },
+    {
+      "id": 3,
+      "name": "Charlie",
+      "age": 35,
+      "salary": 70000.0,
+      "dept": "IT"
+    },
+    {
+      "id": 4,
+      "name": "David",
+      "age": 40,
+      "salary": 80000.0,
+      "dept": "IT"
+    }
+  ],
+  "operation": "DataFrame operation: mean",
+  "expected_output": {
+    "schema": {
+      "field_count": 1,
+      "field_names": [
+        "avg(salary)"
+      ],
+      "field_types": [
+        "double"
+      ],
+      "fields": [
+        {
+          "name": "avg(salary)",
+          "type": "double",
+          "nullable": true
+        }
+      ]
+    },
+    "data": [
+      {
+        "avg(salary)": 65000.0
+      }
+    ],
+    "row_count": 1
+  }
+}

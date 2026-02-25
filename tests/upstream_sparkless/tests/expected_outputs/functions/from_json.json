@@ -1,0 +1,53 @@
+{
+  "test_id": "from_json",
+  "pyspark_version": "3.5",
+  "generated_at": "2025-10-27T14:13:29.057206",
+  "input_data": [
+    {
+      "id": 1,
+      "json_str": "{\"name\":\"Alice\",\"age\":25}",
+      "name": "Alice",
+      "age": 25
+    },
+    {
+      "id": 2,
+      "json_str": "{\"name\":\"Bob\",\"age\":30}",
+      "name": "Bob",
+      "age": 30
+    }
+  ],
+  "operation": "DataFrame operation: from_json",
+  "expected_output": {
+    "schema": {
+      "field_count": 1,
+      "field_names": [
+        "from_json(json_str)"
+      ],
+      "field_types": [
+        "struct"
+      ],
+      "fields": [
+        {
+          "name": "from_json(json_str)",
+          "type": "struct",
+          "nullable": true
+        }
+      ]
+    },
+    "data": [
+      {
+        "from_json(json_str)": {
+          "name": "Alice",
+          "age": 25
+        }
+      },
+      {
+        "from_json(json_str)": {
+          "name": "Bob",
+          "age": 30
+        }
+      }
+    ],
+    "row_count": 2
+  }
+}

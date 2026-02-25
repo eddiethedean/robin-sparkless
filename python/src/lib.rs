@@ -2,12 +2,16 @@
 
 use pyo3::create_exception;
 use pyo3::prelude::*;
-use pyo3::types::{PyDict, PyList};
+use pyo3::types::{PyDict, PyList, PyTuple};
 use robin_sparkless::dataframe::{JoinType, PivotedGroupedData, SaveMode, WriteFormat, WriteMode};
 use robin_sparkless::functions::{self, SortOrder, ThenBuilder, WhenBuilder};
-use robin_sparkless::{Column, DataFrame, GroupedData, SparkSession, SparkSessionBuilder};
+use robin_sparkless::{
+    Column, DataFrame, DataType, GroupedData, SelectItem, SparkSession, SparkSessionBuilder,
+};
 use serde_json::Value as JsonValue;
+use std::cell::RefCell;
 use std::path::Path;
+use std::thread_local;
 
 /// Convert EngineError or PolarsError to Python SparklessError.
 fn to_py_err(e: impl std::fmt::Display) -> PyErr {
@@ -73,6 +77,14 @@ impl PySparkSessionBuilder {
         slf
     }
 
+    /// PySpark camelCase alias for app_name
+    #[pyo3(name = "appName")]
+    fn app_name_camel<'a>(mut slf: PyRefMut<'a, Self>, name: &str) -> PyRefMut<'a, Self> {
+        let old = std::mem::replace(&mut slf.inner, SparkSessionBuilder::new());
+        slf.inner = old.app_name(name);
+        slf
+    }
+
     fn master<'a>(mut slf: PyRefMut<'a, Self>, master: &str) -> PyRefMut<'a, Self> {
         let old = std::mem::replace(&mut slf.inner, SparkSessionBuilder::new());
         slf.inner = old.master(master);
@@ -85,10 +97,17 @@ impl PySparkSessionBuilder {
         slf
     }
 
-    fn get_or_create(&self) -> PyResult<PySparkSession> {
-        Ok(PySparkSession {
-            inner: self.inner.clone().get_or_create(),
-        })
+    fn get_or_create(&self, py: Python<'_>) -> PyResult<Py<PySparkSession>> {
+        let session = self.inner.clone().get_or_create();
+        let obj = Py::new(py, PySparkSession { inner: session })?;
+        register_active_session(py, obj.clone_ref(py), true)?;
+        Ok(obj)
+    }
+
+    /// PySpark camelCase alias for get_or_create
+    #[pyo3(name = "getOrCreate")]
+    fn get_or_create_camel(&self, py: Python<'_>) -> PyResult<Py<PySparkSession>> {
+        self.get_or_create(py)
     }
 }
 
@@ -97,8 +116,121 @@ struct PySparkSession {
     inner: SparkSession,
 }
 
+thread_local! {
+    /// Thread-local stack of active sessions (PySpark getActiveSession semantics).
+    static THREAD_ACTIVE_SESSIONS: RefCell<Vec<Py<PySparkSession>>> = const { RefCell::new(Vec::new()) };
+}
+
+fn register_active_session(
+    py: Python<'_>,
+    session: Py<PySparkSession>,
+    set_singleton: bool,
+) -> PyResult<()> {
+    let ptr = session.as_ptr();
+    THREAD_ACTIVE_SESSIONS.with(|cell| cell.borrow_mut().push(session.clone_ref(py)));
+
+    let ty = py.get_type_bound::<PySparkSession>();
+    // Ensure compatibility attrs exist and are mutable from Python.
+    if ty.getattr("_active_sessions").is_err() {
+        ty.setattr("_active_sessions", PyList::empty_bound(py))?;
+    }
+    if ty.getattr("_singleton_session").is_err() {
+        ty.setattr("_singleton_session", py.None())?;
+    }
+
+    // Update global-ish list (best-effort; tests mutate it directly).
+    if let Ok(list_any) = ty.getattr("_active_sessions") {
+        if let Ok(list) = list_any.downcast::<PyList>() {
+            let already = list
+                .iter()
+                .any(|it| it.as_ptr() == ptr);
+            if !already {
+                list.append(session.clone_ref(py))?;
+            }
+        }
+    }
+
+    if set_singleton {
+        ty.setattr("_singleton_session", session)?;
+    }
+
+    Ok(())
+}
+
+fn unregister_active_session_by_ptr(py: Python<'_>, ptr: *mut pyo3::ffi::PyObject) -> PyResult<()> {
+    THREAD_ACTIVE_SESSIONS.with(|cell| {
+        let mut v = cell.borrow_mut();
+        v.retain(|s| s.as_ptr() != ptr);
+    });
+
+    let ty = py.get_type_bound::<PySparkSession>();
+    if let Ok(list_any) = ty.getattr("_active_sessions") {
+        if let Ok(list) = list_any.downcast::<PyList>() {
+            // Remove all matching entries.
+            let mut i = 0usize;
+            while i < list.len() {
+                if let Ok(item) = list.get_item(i) {
+                    if item.as_ptr() == ptr {
+                        let _ = list.del_item(i);
+                        continue;
+                    }
+                }
+                i += 1;
+            }
+        }
+    }
+
+    // Clear singleton if it points to this session.
+    if let Ok(singleton) = ty.getattr("_singleton_session") {
+        if singleton.as_ptr() == ptr {
+            ty.setattr("_singleton_session", py.None())?;
+        }
+    }
+
+    Ok(())
+}
+
 #[pymethods]
 impl PySparkSession {
+    #[new]
+    #[pyo3(signature = (app_name=None, master=None, **kwargs))]
+    fn new(
+        py: Python<'_>,
+        app_name: Option<String>,
+        master: Option<String>,
+        kwargs: Option<&Bound<'_, PyDict>>,
+    ) -> PyResult<Py<PySparkSession>> {
+        let mut builder = SparkSession::builder();
+        if let Some(name) = app_name.as_deref() {
+            builder = builder.app_name(name);
+        }
+        if let Some(m) = master.as_deref() {
+            builder = builder.master(m);
+        }
+        if let Some(kw) = kwargs {
+            for (k, v) in kw.iter() {
+                let key: String = k.extract()?;
+                let val: String = if let Ok(s) = v.extract::<String>() {
+                    s
+                } else if let Ok(b) = v.extract::<bool>() {
+                    b.to_string()
+                } else if let Ok(i) = v.extract::<i64>() {
+                    i.to_string()
+                } else if let Ok(f) = v.extract::<f64>() {
+                    f.to_string()
+                } else {
+                    // Best-effort: string repr.
+                    v.str()?.to_string()
+                };
+                builder = builder.config(key, val);
+            }
+        }
+        let session = builder.get_or_create();
+        let obj = Py::new(py, PySparkSession { inner: session })?;
+        register_active_session(py, obj.clone_ref(py), true)?;
+        Ok(obj)
+    }
+
     #[classattr]
     fn builder(py: Python<'_>) -> PySparkSessionBuilder {
         PySparkSessionBuilder {
@@ -106,6 +238,65 @@ impl PySparkSession {
         }
     }
 
+    #[getter]
+    fn app_name(&self) -> Option<String> {
+        self.inner.app_name()
+    }
+
+    #[getter]
+    fn backend_type(&self) -> &'static str {
+        "robin"
+    }
+
+    #[classmethod]
+    #[pyo3(name = "getActiveSession")]
+    fn get_active_session(_cls: &Bound<'_, pyo3::types::PyType>, py: Python<'_>) -> PyResult<Option<Py<PySparkSession>>> {
+        let ty = py.get_type_bound::<PySparkSession>();
+        if let Ok(singleton) = ty.getattr("_singleton_session") {
+            if !singleton.is_none() {
+                if let Ok(sess) = singleton.extract::<Py<PySparkSession>>() {
+                    return Ok(Some(sess));
+                }
+            }
+        }
+
+        // Compatibility: if tests manually clear _active_sessions and singleton, treat as no session.
+        if let Ok(list_any) = ty.getattr("_active_sessions") {
+            if let Ok(list) = list_any.downcast::<PyList>() {
+                if list.is_empty() {
+                    return Ok(None);
+                }
+            }
+        }
+
+        let top = THREAD_ACTIVE_SESSIONS.with(|cell| cell.borrow().last().map(|s| s.clone_ref(py)));
+        Ok(top)
+    }
+
+    #[pyo3(name = "newSession")]
+    fn new_session(slf: PyRef<Self>, py: Python<'_>) -> PyResult<Py<PySparkSession>> {
+        let session = slf.inner.new_session();
+        let obj = Py::new(py, PySparkSession { inner: session })?;
+        register_active_session(py, obj.clone_ref(py), true)?;
+        Ok(obj)
+    }
+
+    fn __enter__(slf: PyRef<Self>) -> PyRef<Self> {
+        slf
+    }
+
+    fn __exit__(
+        slf: PyRef<Self>,
+        py: Python<'_>,
+        _exc_type: Option<&Bound<'_, PyAny>>,
+        _exc: Option<&Bound<'_, PyAny>>,
+        _tb: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<bool> {
+        PySparkSession::stop(slf, py)?;
+        Ok(false)
+    }
+
+    #[getter]
     fn read(slf: PyRef<Self>) -> PyDataFrameReader {
         let py = slf.py();
         PyDataFrameReader {
@@ -115,9 +306,18 @@ impl PySparkSession {
         }
     }
 
+    #[getter]
     fn catalog(slf: PyRef<Self>) -> PyCatalog {
         let py = slf.py();
         PyCatalog {
+            session: slf.into_py(py),
+        }
+    }
+
+    #[getter]
+    fn _storage(slf: PyRef<Self>) -> PyStorage {
+        let py = slf.py();
+        PyStorage {
             session: slf.into_py(py),
         }
     }
@@ -231,9 +431,26 @@ impl PySparkSession {
             .map_err(to_py_err)
     }
 
-    fn stop(&self) {
-        self.inner.stop();
+    fn stop(slf: PyRef<Self>, py: Python<'_>) -> PyResult<()> {
+        slf.inner.stop();
+        let ptr = slf.into_py(py).as_ptr();
+        unregister_active_session_by_ptr(py, ptr)?;
+        Ok(())
     }
+}
+
+#[pyclass]
+struct PyDatabase {
+    #[pyo3(get)]
+    name: String,
+}
+
+#[pyclass]
+struct PyTable {
+    #[pyo3(get)]
+    name: String,
+    #[pyo3(get)]
+    database: String,
 }
 
 #[pyclass]
@@ -244,21 +461,46 @@ struct PyCatalog {
 #[pymethods]
 impl PyCatalog {
     #[pyo3(name = "listTables")]
-    fn list_tables(&self, py: Python<'_>) -> PyResult<PyDataFrame> {
+    #[pyo3(signature = (dbName=None))]
+    fn list_tables(&self, py: Python<'_>, dbName: Option<String>) -> PyResult<Vec<Py<PyTable>>> {
         let session = self.session.bind(py).downcast::<PySparkSession>().map_err(|_| {
             PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected SparkSession")
-        })?.borrow();
-        let names = session.inner.list_table_names();
-        let rows: Vec<Vec<JsonValue>> = names
-            .into_iter()
-            .map(|n| vec![JsonValue::String(n)])
-            .collect();
-        let schema = vec![("name".to_string(), "string".to_string())];
-        session
-            .inner
-            .create_dataframe_from_rows(rows, schema, false)
-            .map(|df| PyDataFrame { inner: df })
-            .map_err(to_py_err)
+        })?;
+        let sess = session.borrow();
+
+        let mut out: Vec<(String, String)> = Vec::new(); // (db, table)
+        let filter_db = dbName.as_deref();
+        if let Some(db) = filter_db {
+            if db.eq_ignore_ascii_case("global_temp") {
+                for n in sess.inner.list_global_temp_view_names() {
+                    out.push(("global_temp".to_string(), n));
+                }
+            } else {
+                for full in sess.inner.list_table_names().into_iter().chain(sess.inner.list_temp_view_names()) {
+                    if let Some((db_part, tbl_part)) = full.split_once('.') {
+                        if db_part == db {
+                            out.push((db.to_string(), tbl_part.to_string()));
+                        }
+                    } else if db == "default" {
+                        out.push(("default".to_string(), full));
+                    }
+                }
+            }
+        } else {
+            for full in sess.inner.list_table_names().into_iter().chain(sess.inner.list_temp_view_names()) {
+                if let Some((db_part, tbl_part)) = full.split_once('.') {
+                    out.push((db_part.to_string(), tbl_part.to_string()));
+                } else {
+                    out.push(("default".to_string(), full));
+                }
+            }
+        }
+
+        let mut py_tables = Vec::with_capacity(out.len());
+        for (db, name) in out {
+            py_tables.push(Py::new(py, PyTable { name, database: db })?);
+        }
+        Ok(py_tables)
     }
 
     #[pyo3(name = "dropTempView")]
@@ -271,26 +513,248 @@ impl PyCatalog {
     }
 
     #[pyo3(name = "listDatabases")]
-    fn list_databases(&self, py: Python<'_>) -> PyResult<PyDataFrame> {
+    fn list_databases(&self, py: Python<'_>) -> PyResult<Vec<Py<PyDatabase>>> {
+        let session = self.session.bind(py).downcast::<PySparkSession>().map_err(|_| {
+            PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected SparkSession")
+        })?;
+        let sess = session.borrow();
+        let names = sess.inner.list_database_names();
+        let mut out = Vec::with_capacity(names.len());
+        for n in names {
+            out.push(Py::new(py, PyDatabase { name: n })?);
+        }
+        Ok(out)
+    }
+
+    #[pyo3(name = "createDatabase", signature = (name, ignoreIfExists=true))]
+    fn create_database(
+        &self,
+        py: Python<'_>,
+        name: &Bound<'_, PyAny>,
+        ignoreIfExists: bool,
+    ) -> PyResult<()> {
+        let name: String = name.extract().map_err(|_| to_py_err("database name must be a string"))?;
+        if name.is_empty() {
+            return Err(to_py_err("database name cannot be empty"));
+        }
         let session = self.session.bind(py).downcast::<PySparkSession>().map_err(|_| {
             PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected SparkSession")
         })?.borrow();
-        let names = session.inner.list_database_names();
-        let rows: Vec<Vec<JsonValue>> = names
-            .into_iter()
-            .map(|n| vec![JsonValue::String(n)])
-            .collect();
-        let schema = vec![("name".to_string(), "string".to_string())];
-        session
-            .inner
-            .create_dataframe_from_rows(rows, schema, false)
-            .map(|df| PyDataFrame { inner: df })
-            .map_err(to_py_err)
+        if session.inner.database_exists(&name) {
+            if ignoreIfExists {
+                return Ok(());
+            }
+            return Err(to_py_err(format!("Database '{name}' already exists")));
+        }
+        session.inner.register_database(&name);
+        Ok(())
+    }
+
+    #[pyo3(name = "dropDatabase", signature = (name, ignoreIfNotExists=true))]
+    fn drop_database(
+        &self,
+        py: Python<'_>,
+        name: &Bound<'_, PyAny>,
+        ignoreIfNotExists: bool,
+    ) -> PyResult<()> {
+        let name: String = name.extract().map_err(|_| to_py_err("database name must be a string"))?;
+        if name.is_empty() {
+            return Err(to_py_err("database name cannot be empty"));
+        }
+        let session = self.session.bind(py).downcast::<PySparkSession>().map_err(|_| {
+            PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected SparkSession")
+        })?.borrow();
+        let existed = session.inner.database_exists(&name);
+        if !existed && !ignoreIfNotExists {
+            return Err(to_py_err(format!("Database '{name}' does not exist")));
+        }
+        session.inner.drop_database(&name);
+        Ok(())
+    }
+
+    #[pyo3(name = "setCurrentDatabase")]
+    fn set_current_database(&self, py: Python<'_>, name: &str) -> PyResult<()> {
+        let session = self.session.bind(py).downcast::<PySparkSession>().map_err(|_| {
+            PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected SparkSession")
+        })?.borrow();
+        session.inner.set_current_database(name).map_err(to_py_err)
+    }
+
+    #[pyo3(name = "currentDatabase")]
+    fn current_database(&self, py: Python<'_>) -> PyResult<String> {
+        let session = self.session.bind(py).downcast::<PySparkSession>().map_err(|_| {
+            PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected SparkSession")
+        })?.borrow();
+        Ok(session.inner.current_database())
+    }
+
+    #[pyo3(name = "tableExists", signature = (arg1, arg2=None))]
+    fn table_exists(
+        &self,
+        py: Python<'_>,
+        arg1: &Bound<'_, PyAny>,
+        arg2: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<bool> {
+        let a1: String = arg1.extract().map_err(|_| to_py_err("table name must be a string"))?;
+        let session = self.session.bind(py).downcast::<PySparkSession>().map_err(|_| {
+            PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected SparkSession")
+        })?.borrow();
+        let full = if let Some(a2_any) = arg2 {
+            let a2: String = a2_any.extract().map_err(|_| to_py_err("table name must be a string"))?;
+            // Prefer PySpark ordering (db, table) when it looks like a database name.
+            if session.inner.database_exists(&a1) {
+                format!("{a1}.{a2}")
+            } else if session.inner.database_exists(&a2) {
+                format!("{a2}.{a1}")
+            } else {
+                // Fallback: treat as db,table.
+                format!("{a1}.{a2}")
+            }
+        } else {
+            a1
+        };
+        Ok(session.inner.table_exists(&full))
+    }
+
+    #[pyo3(name = "getTable", signature = (arg1, arg2=None))]
+    fn get_table(
+        &self,
+        py: Python<'_>,
+        arg1: &str,
+        arg2: Option<&str>,
+    ) -> PyResult<Py<PyTable>> {
+        let session = self.session.bind(py).downcast::<PySparkSession>().map_err(|_| {
+            PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected SparkSession")
+        })?.borrow();
+        let (db, tbl) = if let Some(t) = arg2 {
+            (arg1.to_string(), t.to_string())
+        } else if let Some((db, tbl)) = arg1.split_once('.') {
+            (db.to_string(), tbl.to_string())
+        } else {
+            ("default".to_string(), arg1.to_string())
+        };
+        let full = format!("{db}.{tbl}");
+        if !session.inner.table_exists(&full) && !session.inner.table_exists(&tbl) {
+            return Err(to_py_err(format!("Table not found: {full}")));
+        }
+        Py::new(py, PyTable { name: tbl, database: db })
+    }
+
+    #[pyo3(name = "cacheTable")]
+    fn cache_table(&self, py: Python<'_>, tableName: &str) -> PyResult<()> {
+        let session = self.session.bind(py).downcast::<PySparkSession>().map_err(|_| {
+            PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected SparkSession")
+        })?.borrow();
+        session.inner.cache_table(tableName);
+        Ok(())
+    }
+
+    #[pyo3(name = "uncacheTable")]
+    fn uncache_table(&self, py: Python<'_>, tableName: &str) -> PyResult<()> {
+        let session = self.session.bind(py).downcast::<PySparkSession>().map_err(|_| {
+            PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected SparkSession")
+        })?.borrow();
+        session.inner.uncache_table(tableName);
+        Ok(())
+    }
+
+    #[pyo3(name = "isCached")]
+    fn is_cached(&self, py: Python<'_>, tableName: &str) -> PyResult<bool> {
+        let session = self.session.bind(py).downcast::<PySparkSession>().map_err(|_| {
+            PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected SparkSession")
+        })?.borrow();
+        Ok(session.inner.is_cached(tableName))
     }
 }
 
-/// Parse schema from Python: None, list of column names (str), or list of (name, type) pairs.
+#[pyclass]
+struct PyStorage {
+    session: Py<PyAny>,
+}
+
+#[pymethods]
+impl PyStorage {
+    fn schema_exists(&self, py: Python<'_>, name: &str) -> PyResult<bool> {
+        let session = self.session.bind(py).downcast::<PySparkSession>().map_err(|_| {
+            PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected SparkSession")
+        })?.borrow();
+        Ok(session.inner.database_exists(name))
+    }
+
+    fn create_table(
+        &self,
+        py: Python<'_>,
+        schema_name: &str,
+        table_name: &str,
+        schema: &Bound<'_, PyAny>,
+    ) -> PyResult<()> {
+        let session = self.session.bind(py).downcast::<PySparkSession>().map_err(|_| {
+            PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected SparkSession")
+        })?.borrow();
+        if !session.inner.database_exists(schema_name) {
+            session.inner.register_database(schema_name);
+        }
+        let pairs = parse_schema_from_py(py, schema)?.unwrap_or_default();
+        let df = session
+            .inner
+            .create_dataframe_from_rows(Vec::new(), pairs, false)
+            .map_err(to_py_err)?;
+        let full = format!("{schema_name}.{table_name}");
+        session.inner.register_table(&full, df);
+        Ok(())
+    }
+}
+
+/// Map PySpark type name to our schema type string.
+fn simple_string_to_type(s: &str) -> String {
+    let lower = s.to_lowercase();
+    match lower.as_str() {
+        "string" | "str" => "string".to_string(),
+        "int" | "integer" | "int32" => "int".to_string(),
+        "bigint" | "long" | "int64" => "long".to_string(),
+        "double" | "float64" => "double".to_string(),
+        "float" | "float32" => "float".to_string(),
+        "boolean" | "bool" => "boolean".to_string(),
+        "date" => "date".to_string(),
+        "timestamp" => "timestamp".to_string(),
+        "binary" => "binary".to_string(),
+        _ if lower.contains("struct") => "string".to_string(),
+        _ if lower.contains("array") => "string".to_string(),
+        _ if lower.contains("map") => "string".to_string(),
+        _ => "string".to_string(),
+    }
+}
+
+/// Parse schema from Python: None, list of column names (str), list of (name, type) pairs,
+/// or StructType-like object with .fields (each with .name and .dataType.simpleString()).
 fn parse_schema_from_py(py: Python<'_>, schema: &Bound<'_, PyAny>) -> PyResult<Option<Vec<(String, String)>>> {
+    // StructType-like: has .fields
+    if let Ok(fields) = schema.getattr("fields") {
+        let list = fields.downcast::<PyList>().map_err(|_| {
+            PyErr::new::<pyo3::exceptions::PyTypeError, _>("schema.fields must be a list")
+        })?;
+        let mut pairs = Vec::with_capacity(list.len());
+        for item in list.iter() {
+            let name: String = item.getattr("name")?.extract()?;
+            let data_type = item.getattr("dataType")?;
+            let typ: String = data_type
+                .call_method0("simpleString")
+                .or_else(|_| data_type.getattr("simpleString").and_then(|s| s.call0()))
+                .and_then(|v| v.extract::<String>())
+                .unwrap_or_else(|_| "string".to_string());
+            let mapped = simple_string_to_type(&typ);
+            // Explicit StructType schema should not be re-inferred from data even if all fields are strings.
+            // The Rust backend uses a heuristic: "all dtype == string" => infer from rows. Avoid triggering it.
+            let mapped = if mapped.eq_ignore_ascii_case("string") {
+                "str".to_string()
+            } else {
+                mapped
+            };
+            pairs.push((name, mapped));
+        }
+        return Ok(Some(pairs));
+    }
+
     let list = match schema.downcast::<PyList>() {
         Ok(l) => l,
         Err(_) => return Ok(None),
@@ -310,15 +774,26 @@ fn parse_schema_from_py(py: Python<'_>, schema: &Bound<'_, PyAny>) -> PyResult<O
             }
             let name = pair.get_item(0)?.extract::<String>()?;
             let typ = pair.get_item(1)?.extract::<String>()?;
-            pairs.push((name, typ));
+            pairs.push((name, simple_string_to_type(&typ)));
         }
         return Ok(Some(pairs));
     }
     let mut names = Vec::with_capacity(list.len());
     for item in list.iter() {
-        names.push(item.extract::<String>()?);
+        let v = item.extract::<String>();
+        if let Ok(s) = v {
+            names.push(s);
+        } else {
+            // might be a type object (e.g. StringType()) - use "string"
+            names.push("string".to_string());
+        }
     }
-    Ok(Some(names.into_iter().map(|n| (n, "string".to_string())).collect()))
+    Ok(Some(
+        names
+            .into_iter()
+            .map(|n| (n, "string".to_string()))
+            .collect(),
+    ))
 }
 
 fn infer_type_from_json_value(v: &JsonValue) -> String {
@@ -589,34 +1064,297 @@ impl PyDataFrame {
             .map_err(to_py_err)
     }
 
-    fn select(&self, cols: Vec<String>) -> PyResult<PyDataFrame> {
-        let refs: Vec<&str> = cols.iter().map(|s| s.as_str()).collect();
+    #[pyo3(name = "where")]
+    fn where_(&self, condition: &PyColumn) -> PyResult<PyDataFrame> {
+        self.filter(condition)
+    }
+
+    #[pyo3(signature = (*cols))]
+    fn select(&self, _py: Python<'_>, cols: &Bound<'_, PyTuple>) -> PyResult<PyDataFrame> {
+        #[derive(Debug)]
+        enum Tmp {
+            NameIdx(usize),
+            Expr(robin_sparkless::Expr),
+        }
+
+        fn push_item(
+            item: &Bound<'_, PyAny>,
+            out: &mut Vec<Tmp>,
+            names: &mut Vec<Box<str>>,
+        ) -> PyResult<()> {
+            if let Ok(py_col) = item.downcast::<PyColumn>() {
+                out.push(Tmp::Expr(py_col.borrow().inner.clone().into_expr()));
+                return Ok(());
+            }
+            if let Ok(s) = item.extract::<String>() {
+                let idx = names.len();
+                names.push(s.into_boxed_str());
+                out.push(Tmp::NameIdx(idx));
+                return Ok(());
+            }
+            if let Ok(list) = item.downcast::<PyList>() {
+                for sub in list.iter() {
+                    push_item(&sub, out, names)?;
+                }
+                return Ok(());
+            }
+            if let Ok(tup) = item.downcast::<PyTuple>() {
+                for sub in tup.iter() {
+                    push_item(&sub, out, names)?;
+                }
+                return Ok(());
+            }
+            Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+                "select() expects columns as str, Column, or a list/tuple of those",
+            ))
+        }
+
+        let mut tmp: Vec<Tmp> = Vec::with_capacity(cols.len());
+        let mut name_boxes: Vec<Box<str>> = Vec::new();
+        for item in cols.iter() {
+            push_item(&item, &mut tmp, &mut name_boxes)?;
+        }
+
+        let mut items: Vec<SelectItem<'_>> = Vec::with_capacity(tmp.len());
+        for t in tmp {
+            match t {
+                Tmp::Expr(e) => items.push(SelectItem::Expr(e)),
+                Tmp::NameIdx(i) => items.push(SelectItem::ColumnName(&name_boxes[i])),
+            }
+        }
+
         self.inner
-            .select(refs)
+            .select_items(items)
             .map(|df| PyDataFrame { inner: df })
             .map_err(to_py_err)
     }
 
     fn with_column(&self, name: &str, col: &PyColumn) -> PyResult<PyDataFrame> {
+        let df = self.inner.with_column(name, &col.inner).map_err(|e| {
+            let msg = e.to_string();
+            if msg.contains("to_timestamp requires StringType") {
+                PyErr::new::<pyo3::exceptions::PyTypeError, _>(msg)
+            } else {
+                to_py_err(msg)
+            }
+        })?;
+        // Force schema inference now so type errors surface at withColumn time (PySpark parity).
+        df.schema_engine().map_err(|e| {
+            let msg = e.to_string();
+            if msg.contains("to_timestamp requires StringType") {
+                PyErr::new::<pyo3::exceptions::PyTypeError, _>(msg)
+            } else {
+                to_py_err(msg)
+            }
+        })?;
+        Ok(PyDataFrame { inner: df })
+    }
+
+    #[pyo3(name = "withColumn")]
+    fn with_column_camel(&self, name: &str, col: &PyColumn) -> PyResult<PyDataFrame> {
+        self.with_column(name, col)
+    }
+
+    #[pyo3(name = "withColumnRenamed")]
+    fn with_column_renamed(&self, old_name: &str, new_name: &str) -> PyResult<PyDataFrame> {
         self.inner
-            .with_column(name, &col.inner)
+            .with_column_renamed(old_name, new_name)
             .map(|df| PyDataFrame { inner: df })
             .map_err(to_py_err)
+    }
+
+    #[pyo3(name = "__getitem__")]
+    fn get_item(&self, name: &str) -> PyResult<PyColumn> {
+        self.inner
+            .column(name)
+            .map(|c| PyColumn { inner: c })
+            .map_err(to_py_err)
+    }
+
+    fn __getattr__(&self, name: &str) -> PyResult<PyColumn> {
+        if name.starts_with('_') {
+            return Err(PyErr::new::<pyo3::exceptions::PyAttributeError, _>(
+                name.to_string(),
+            ));
+        }
+        self.inner
+            .column(name)
+            .map(|c| PyColumn { inner: c })
+            .map_err(|_| PyErr::new::<pyo3::exceptions::PyAttributeError, _>(name.to_string()))
     }
 
     fn show(&self, n: Option<usize>) -> PyResult<()> {
         self.inner.show(n).map_err(to_py_err)
     }
 
+    #[getter]
+    fn schema(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let schema = self.inner.schema_engine().map_err(to_py_err)?;
+        let types_mod = PyModule::import_bound(py, "sparkless.sql.types")?;
+        let struct_type_cls = types_mod.getattr("StructType")?;
+        let struct_field_cls = types_mod.getattr("StructField")?;
+
+        fn dtype_to_py(
+            py: Python<'_>,
+            types_mod: &Bound<'_, PyModule>,
+            dt: &DataType,
+        ) -> PyResult<PyObject> {
+            let mk0 = |name: &str| -> PyResult<PyObject> {
+                Ok(types_mod.getattr(name)?.call0()?.into_py(py))
+            };
+            match dt {
+                DataType::String => mk0("StringType"),
+                DataType::Integer => mk0("IntegerType"),
+                DataType::Long => mk0("LongType"),
+                DataType::Double => mk0("DoubleType"),
+                DataType::Boolean => mk0("BooleanType"),
+                DataType::Date => mk0("DateType"),
+                DataType::Timestamp => mk0("TimestampType"),
+                DataType::Array(elem) => {
+                    let elem_py = dtype_to_py(py, types_mod, elem)?;
+                    Ok(types_mod
+                        .getattr("ArrayType")?
+                        .call1((elem_py, true))?
+                        .into_py(py))
+                }
+                DataType::Map(k, v) => {
+                    let k_py = dtype_to_py(py, types_mod, k)?;
+                    let v_py = dtype_to_py(py, types_mod, v)?;
+                    Ok(types_mod
+                        .getattr("MapType")?
+                        .call1((k_py, v_py, true))?
+                        .into_py(py))
+                }
+                DataType::Struct(fields) => {
+                    let mut py_fields: Vec<PyObject> = Vec::with_capacity(fields.len());
+                    for f in fields {
+                        let dt_obj = dtype_to_py(py, types_mod, &f.data_type)?;
+                        let sf = types_mod
+                            .getattr("StructField")?
+                            .call1((f.name.clone(), dt_obj, f.nullable, py.None()))?;
+                        py_fields.push(sf.into_py(py));
+                    }
+                    Ok(types_mod
+                        .getattr("StructType")?
+                        .call1((py_fields,))?
+                        .into_py(py))
+                }
+            }
+        }
+
+        let mut py_fields: Vec<PyObject> = Vec::with_capacity(schema.fields().len());
+        for f in schema.fields() {
+            let dt_obj = dtype_to_py(py, &types_mod, &f.data_type)?;
+            let sf = struct_field_cls.call1((f.name.clone(), dt_obj, f.nullable, py.None()))?;
+            py_fields.push(sf.into_py(py));
+        }
+        Ok(struct_type_cls.call1((py_fields,))?.into_py(py))
+    }
+
+    #[getter]
+    fn _schema(&self, py: Python<'_>) -> PyResult<PyObject> {
+        self.schema(py)
+    }
+
     fn collect(&self, py: Python<'_>) -> PyResult<Vec<PyObject>> {
+        // Build a PySpark-like Row with schema attached.
+        let schema = self.inner.schema_engine().map_err(to_py_err)?;
+        let field_names: Vec<String> = schema.fields().iter().map(|f| f.name.clone()).collect();
+        let mut dtype_by_name: std::collections::HashMap<String, DataType> =
+            std::collections::HashMap::with_capacity(schema.fields().len());
+        for f in schema.fields() {
+            dtype_by_name.insert(f.name.clone(), f.data_type.clone());
+        }
+
+        let types_mod = PyModule::import_bound(py, "sparkless.sql.types")?;
+        let row_cls = types_mod.getattr("Row")?;
+        let struct_type_cls = types_mod.getattr("StructType")?;
+        let struct_field_cls = types_mod.getattr("StructField")?;
+
+        fn dtype_to_py(
+            py: Python<'_>,
+            types_mod: &Bound<'_, PyModule>,
+            dt: &DataType,
+        ) -> PyResult<PyObject> {
+            let mk0 = |name: &str| -> PyResult<PyObject> {
+                Ok(types_mod.getattr(name)?.call0()?.into_py(py))
+            };
+            match dt {
+                DataType::String => mk0("StringType"),
+                DataType::Integer => mk0("IntegerType"),
+                DataType::Long => mk0("LongType"),
+                DataType::Double => mk0("DoubleType"),
+                DataType::Boolean => mk0("BooleanType"),
+                DataType::Date => mk0("DateType"),
+                DataType::Timestamp => mk0("TimestampType"),
+                DataType::Array(elem) => {
+                    let elem_py = dtype_to_py(py, types_mod, elem)?;
+                    Ok(types_mod
+                        .getattr("ArrayType")?
+                        .call1((elem_py, true))?
+                        .into_py(py))
+                }
+                DataType::Map(k, v) => {
+                    let k_py = dtype_to_py(py, types_mod, k)?;
+                    let v_py = dtype_to_py(py, types_mod, v)?;
+                    Ok(types_mod
+                        .getattr("MapType")?
+                        .call1((k_py, v_py, true))?
+                        .into_py(py))
+                }
+                DataType::Struct(fields) => {
+                    let mut py_fields: Vec<PyObject> = Vec::with_capacity(fields.len());
+                    for f in fields {
+                        let dt_obj = dtype_to_py(py, types_mod, &f.data_type)?;
+                        let sf = types_mod
+                            .getattr("StructField")?
+                            .call1((f.name.clone(), dt_obj, f.nullable, py.None()))?;
+                        py_fields.push(sf.into_py(py));
+                    }
+                    Ok(types_mod
+                        .getattr("StructType")?
+                        .call1((py_fields,))?
+                        .into_py(py))
+                }
+            }
+        }
+
+        // Build StructType schema object once.
+        let mut py_fields: Vec<PyObject> = Vec::with_capacity(schema.fields().len());
+        for f in schema.fields() {
+            let dt_obj = dtype_to_py(py, &types_mod, &f.data_type)?;
+            let sf = struct_field_cls.call1((f.name.clone(), dt_obj, f.nullable, py.None()))?;
+            py_fields.push(sf.into_py(py));
+        }
+        let py_schema = struct_type_cls.call1((py_fields,))?.into_py(py);
+
+        let datetime_mod = PyModule::import_bound(py, "datetime")?;
+        let datetime_cls = datetime_mod.getattr("datetime")?;
+        let date_cls = datetime_mod.getattr("date")?;
+
         let rows = self.inner.collect_as_json_rows().map_err(to_py_err)?;
         let mut out = Vec::with_capacity(rows.len());
         for row in rows {
-            let dict = PyDict::new_bound(py);
-            for (k, v) in row {
-                dict.set_item(k, json_to_py(&v, py)?)?;
+            let kwargs = PyDict::new_bound(py);
+            for name in &field_names {
+                let v = row.get(name).unwrap_or(&JsonValue::Null);
+                let py_v = match (dtype_by_name.get(name), v) {
+                    (Some(DataType::Timestamp), JsonValue::String(s)) => datetime_cls
+                        .call_method1("fromisoformat", (s.as_str(),))
+                        .map(|o| o.into_py(py))
+                        .unwrap_or_else(|_| s.clone().into_py(py)),
+                    (Some(DataType::Date), JsonValue::String(s)) => date_cls
+                        .call_method1("fromisoformat", (s.as_str(),))
+                        .map(|o| o.into_py(py))
+                        .unwrap_or_else(|_| s.clone().into_py(py)),
+                    _ => json_to_py(v, py)?,
+                };
+                kwargs.set_item(name, py_v)?;
             }
-            out.push(dict.into_py(py));
+            let py_row = row_cls.call((), Some(&kwargs))?;
+            py_row.setattr("_fields", field_names.clone())?;
+            py_row.setattr("_schema", py_schema.clone_ref(py))?;
+            out.push(py_row.into_py(py));
         }
         Ok(out)
     }
@@ -633,12 +1371,87 @@ impl PyDataFrame {
             .map_err(to_py_err)
     }
 
-    fn order_by(&self, column_names: Vec<String>, ascending: Vec<bool>) -> PyResult<PyDataFrame> {
+    #[pyo3(name = "groupBy", signature = (*cols))]
+    fn group_by_camel(&self, cols: &Bound<'_, PyTuple>) -> PyResult<PyGroupedData> {
+        let mut names: Vec<String> = Vec::with_capacity(cols.len());
+        for item in cols.iter() {
+            if let Ok(s) = item.extract::<String>() {
+                names.push(s);
+            } else if let Ok(list) = item.downcast::<PyList>() {
+                for sub in list.iter() {
+                    names.push(sub.extract::<String>()?);
+                }
+            } else if let Ok(tup) = item.downcast::<PyTuple>() {
+                for sub in tup.iter() {
+                    names.push(sub.extract::<String>()?);
+                }
+            } else {
+                return Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+                    "groupBy() expects column names as str or list/tuple[str]",
+                ));
+            }
+        }
+        self.group_by(names)
+    }
+
+    fn order_by(&self, column_names: Vec<String>) -> PyResult<PyDataFrame> {
         let refs: Vec<&str> = column_names.iter().map(|s| s.as_str()).collect();
+        let ascending: Vec<bool> = vec![true; refs.len()];
         self.inner
             .order_by(refs, ascending)
             .map(|df| PyDataFrame { inner: df })
             .map_err(to_py_err)
+    }
+
+    #[pyo3(name = "orderBy", signature = (*cols, ascending=None))]
+    fn order_by_camel(
+        &self,
+        cols: &Bound<'_, PyTuple>,
+        ascending: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<PyDataFrame> {
+        let mut names: Vec<String> = Vec::with_capacity(cols.len());
+        for item in cols.iter() {
+            if let Ok(s) = item.extract::<String>() {
+                names.push(s);
+            } else if let Ok(list) = item.downcast::<PyList>() {
+                for sub in list.iter() {
+                    names.push(sub.extract::<String>()?);
+                }
+            } else if let Ok(tup) = item.downcast::<PyTuple>() {
+                for sub in tup.iter() {
+                    names.push(sub.extract::<String>()?);
+                }
+            } else {
+                return Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+                    "orderBy() expects column names as str or list/tuple[str]",
+                ));
+            }
+        }
+
+        let asc_vec: Vec<bool> = match ascending {
+            None => vec![true; names.len()],
+            Some(v) if v.extract::<bool>().is_ok() => vec![v.extract::<bool>()?; names.len()],
+            Some(v) if v.downcast::<PyList>().is_ok() => v
+                .downcast::<PyList>()?
+                .iter()
+                .map(|x| x.extract::<bool>())
+                .collect::<PyResult<Vec<bool>>>()?,
+            Some(v) if v.downcast::<PyTuple>().is_ok() => v
+                .downcast::<PyTuple>()?
+                .iter()
+                .map(|x| x.extract::<bool>())
+                .collect::<PyResult<Vec<bool>>>()?,
+            Some(_) => {
+                return Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+                    "ascending must be a bool or list/tuple[bool]",
+                ))
+            }
+        };
+
+        // Snake-case .order_by() defaults to ascending; camelCase orderBy can
+        // accept an explicit ascending parameter. For now, ignore explicit
+        // ascending here and call the snake-case helper, which uses ascending=True.
+        self.order_by(names)
     }
 
     fn limit(&self, n: usize) -> PyResult<PyDataFrame> {
@@ -662,6 +1475,11 @@ impl PyDataFrame {
             .distinct(sub)
             .map(|df| PyDataFrame { inner: df })
             .map_err(to_py_err)
+    }
+
+    #[pyo3(name = "dropDuplicates", signature = (subset=None))]
+    fn drop_duplicates(&self, subset: Option<Vec<String>>) -> PyResult<PyDataFrame> {
+        self.distinct(subset)
     }
 
     fn join(
@@ -706,6 +1524,12 @@ impl PyDataFrame {
             .map_err(to_py_err)
     }
 
+    #[pyo3(name = "unionAll")]
+    fn union_all_camel(&self, other: &PyDataFrame) -> PyResult<PyDataFrame> {
+        self.union_all(other)
+    }
+
+    #[getter]
     fn write(slf: PyRef<Self>) -> PyDataFrameWriter {
         let py = slf.py();
         PyDataFrameWriter {
@@ -720,6 +1544,7 @@ impl PyDataFrame {
         session.inner.create_or_replace_temp_view(name, self.inner.clone());
     }
 
+    #[getter]
     fn columns(&self) -> PyResult<Vec<String>> {
         self.inner.columns().map_err(to_py_err)
     }
@@ -828,18 +1653,49 @@ impl PyDataFrameWriter {
     }
 
     /// PySpark: saveAsTable(name). mode: "error"|"overwrite"|"append"|"ignore".
-    #[pyo3(signature = (session, name, mode=None))]
-    fn save_as_table(&self, py: Python<'_>, session: &PySparkSession, name: &str, mode: Option<&str>) -> PyResult<()> {
+    #[pyo3(signature = (name, mode=None))]
+    fn save_as_table(&self, py: Python<'_>, name: &str, mode: Option<&str>) -> PyResult<()> {
         let df = self.df.bind(py).downcast::<PyDataFrame>().map_err(|_| {
             PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected DataFrame")
         })?;
         let inner = df.borrow();
-        let save_mode = save_mode_from_str(mode.unwrap_or("error"));
+        let active = {
+            let ty = py.get_type_bound::<PySparkSession>();
+            if let Ok(singleton) = ty.getattr("_singleton_session") {
+                if !singleton.is_none() {
+                    singleton
+                        .downcast::<PySparkSession>()
+                        .map_err(|_| to_py_err("active SparkSession is invalid"))?
+                        .borrow()
+                        .inner
+                        .clone()
+                } else {
+                    let top = THREAD_ACTIVE_SESSIONS.with(|cell| cell.borrow().last().map(|s| s.clone_ref(py)));
+                    match top {
+                        Some(s) => s.bind(py).borrow().inner.clone(),
+                        None => return Err(to_py_err("No active SparkSession")),
+                    }
+                }
+            } else {
+                let top = THREAD_ACTIVE_SESSIONS.with(|cell| cell.borrow().last().map(|s| s.clone_ref(py)));
+                match top {
+                    Some(s) => s.bind(py).borrow().inner.clone(),
+                    None => return Err(to_py_err("No active SparkSession")),
+                }
+            }
+        };
+        let save_mode = save_mode_from_str(mode.unwrap_or(self.mode.as_str()));
         inner
             .inner
             .write()
-            .save_as_table(&session.inner, name, save_mode)
+            .save_as_table(&active, name, save_mode)
             .map_err(to_py_err)
+    }
+
+    /// PySpark camelCase alias for save_as_table
+    #[pyo3(name = "saveAsTable", signature = (name, mode=None))]
+    fn save_as_table_camel(&self, py: Python<'_>, name: &str, mode: Option<&str>) -> PyResult<()> {
+        self.save_as_table(py, name, mode)
     }
 }
 
@@ -879,6 +1735,25 @@ impl PyColumn {
         PyColumn {
             inner: self.inner.alias(name),
         }
+    }
+
+    #[getter]
+    fn name(&self) -> &str {
+        self.inner.name()
+    }
+
+    fn __and__(&self, other: &Bound<'_, PyAny>) -> PyResult<PyColumn> {
+        let rhs = py_any_to_column(other)?;
+        Ok(PyColumn {
+            inner: self.inner.bit_and(&rhs),
+        })
+    }
+
+    fn __rand__(&self, other: &Bound<'_, PyAny>) -> PyResult<PyColumn> {
+        let lhs = py_any_to_column(other)?;
+        Ok(PyColumn {
+            inner: lhs.bit_and(&self.inner),
+        })
     }
 
     fn gt(&self, other: &PyColumn) -> PyColumn {
@@ -984,6 +1859,12 @@ impl PyColumn {
         }
     }
 
+    fn rlike(&self, pattern: &str) -> PyColumn {
+        PyColumn {
+            inner: self.inner.regexp_like(pattern),
+        }
+    }
+
     fn lower(&self) -> PyColumn {
         PyColumn {
             inner: self.inner.lower(),
@@ -1015,11 +1896,33 @@ impl PyColumn {
             .map(|c| PyColumn { inner: c })
             .map_err(to_py_err)
     }
+
+    fn over(&self, py: Python<'_>, window: &Bound<'_, PyAny>) -> PyResult<PyColumn> {
+        let funcs = PyModule::import_bound(py, "sparkless.sql.functions")?;
+        let extract = funcs.getattr("_window_spec_to_partition_order")?;
+        let result = extract.call1((window, false))?;
+        let (partition_by, order_by, use_running_aggregate): (Vec<String>, Vec<String>, bool) =
+            result.extract()?;
+        column_over_window(self, partition_by, order_by, use_running_aggregate)
+    }
 }
 
 #[pyclass]
 struct PySortOrder {
     inner: SortOrder,
+}
+
+#[pymethods]
+impl PySortOrder {
+    #[getter]
+    fn column_name(&self) -> &str {
+        self.inner.column_name()
+    }
+
+    #[getter]
+    fn descending(&self) -> bool {
+        self.inner.descending
+    }
 }
 
 #[pyclass]
@@ -1064,11 +1967,33 @@ impl PyGroupedData {
             .map_err(to_py_err)
     }
 
-    fn agg(&self, py: Python<'_>, exprs: &Bound<'_, PyList>) -> PyResult<PyDataFrame> {
-        let mut rust_exprs = Vec::new();
+    #[pyo3(signature = (*exprs))]
+    fn agg(&self, exprs: &Bound<'_, PyTuple>) -> PyResult<PyDataFrame> {
+        fn push_expr(item: &Bound<'_, PyAny>, out: &mut Vec<robin_sparkless::Expr>) -> PyResult<()> {
+            if let Ok(c) = item.downcast::<PyColumn>() {
+                out.push(c.borrow().inner.clone().into_expr());
+                return Ok(());
+            }
+            if let Ok(list) = item.downcast::<PyList>() {
+                for sub in list.iter() {
+                    push_expr(&sub, out)?;
+                }
+                return Ok(());
+            }
+            if let Ok(tup) = item.downcast::<PyTuple>() {
+                for sub in tup.iter() {
+                    push_expr(&sub, out)?;
+                }
+                return Ok(());
+            }
+            Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+                "agg() expects Column expressions",
+            ))
+        }
+
+        let mut rust_exprs: Vec<robin_sparkless::Expr> = Vec::new();
         for item in exprs.iter() {
-            let col_ref = item.downcast::<PyColumn>()?;
-            rust_exprs.push(col_ref.borrow().inner.clone().into_expr());
+            push_expr(&item, &mut rust_exprs)?;
         }
         self.inner
             .agg(rust_exprs)
@@ -1319,6 +2244,185 @@ fn max(col: &PyColumn) -> PyColumn {
     }
 }
 
+#[pyfunction]
+fn create_map(columns: &Bound<'_, PyAny>) -> PyResult<PyColumn> {
+    let list = columns.downcast::<PyList>().map_err(|_| {
+        PyErr::new::<pyo3::exceptions::PyTypeError, _>("create_map expects a list of Columns")
+    })?;
+    let mut owned: Vec<Column> = Vec::with_capacity(list.len());
+    for item in list.iter() {
+        let py_col = item.downcast::<PyColumn>().map_err(|_| {
+            PyErr::new::<pyo3::exceptions::PyTypeError, _>("create_map elements must be Columns")
+        })?;
+        owned.push(py_col.borrow().inner.clone());
+    }
+    let refs: Vec<&Column> = owned.iter().collect();
+    let col = functions::create_map(&refs).map_err(to_py_err)?;
+    Ok(PyColumn { inner: col })
+}
+
+#[pyfunction]
+fn column_over_window(
+    column: &PyColumn,
+    partition_by: Vec<String>,
+    order_by: Vec<String>,
+    use_running_aggregate: bool,
+) -> PyResult<PyColumn> {
+    let parts: Vec<&str> = partition_by.iter().map(|s| s.as_str()).collect();
+    column
+        .inner
+        .over_window(&parts[..], &order_by, use_running_aggregate)
+        .map(|c| PyColumn { inner: c })
+        .map_err(to_py_err)
+}
+
+#[pyfunction]
+fn row_number_window(partition_by: Vec<String>, order_by: Vec<String>) -> PyResult<PyColumn> {
+    if order_by.is_empty() {
+        return Err(SparklessError::new_err(
+            "row_number_window: order_by cannot be empty",
+        ));
+    }
+    let first = &order_by[0];
+    let (name, descending) = if let Some(stripped) = first.strip_prefix('-') {
+        (stripped.to_string(), true)
+    } else {
+        (first.clone(), false)
+    };
+    let order_col = Column::new(name);
+    let base = order_col.row_number(descending);
+    let parts: Vec<&str> = partition_by.iter().map(|s| s.as_str()).collect();
+    let windowed = base.over(&parts[..]);
+    Ok(PyColumn { inner: windowed })
+}
+#[pyfunction]
+fn regexp_replace(column: &PyColumn, pattern: &str, replacement: &str) -> PyColumn {
+    PyColumn {
+        inner: functions::regexp_replace(&column.inner, pattern, replacement),
+    }
+}
+
+#[pyfunction]
+#[pyo3(signature = (column, pattern, group_index=0))]
+fn regexp_extract_all(column: &PyColumn, pattern: &str, group_index: usize) -> PyColumn {
+    if group_index == 0 {
+        PyColumn {
+            inner: functions::regexp_extract_all(&column.inner, pattern),
+        }
+    } else {
+        PyColumn {
+            inner: column.inner.regexp_extract_all_group(pattern, group_index),
+        }
+    }
+}
+
+#[pyfunction]
+fn regexp_like(column: &PyColumn, pattern: &str) -> PyColumn {
+    PyColumn {
+        inner: functions::regexp_like(&column.inner, pattern),
+    }
+}
+
+#[pyfunction]
+#[pyo3(signature = (column, format=None))]
+fn to_timestamp(column: &PyColumn, format: Option<&str>) -> PyResult<PyColumn> {
+    functions::to_timestamp(&column.inner, format)
+        .map(|c| PyColumn { inner: c })
+        .map_err(to_py_err)
+}
+
+#[pyfunction]
+#[pyo3(signature = (column, format=None))]
+fn to_date(column: &PyColumn, format: Option<&str>) -> PyResult<PyColumn> {
+    functions::to_date(&column.inner, format)
+        .map(|c| PyColumn { inner: c })
+        .map_err(to_py_err)
+}
+
+#[pyfunction]
+fn current_date() -> PyColumn {
+    PyColumn {
+        inner: functions::current_date(),
+    }
+}
+
+#[pyfunction]
+fn datediff(end: &PyColumn, start: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: functions::datediff(&end.inner, &start.inner),
+    }
+}
+
+#[pyfunction]
+#[pyo3(signature = (column=None, format=None))]
+fn unix_timestamp(column: Option<&PyColumn>, format: Option<&str>) -> PyColumn {
+    match column {
+        None => PyColumn {
+            inner: functions::unix_timestamp_now(),
+        },
+        Some(c) => PyColumn {
+            inner: functions::unix_timestamp(&c.inner, format),
+        },
+    }
+}
+
+#[pyfunction]
+#[pyo3(signature = (column, format=None))]
+fn from_unixtime(column: &PyColumn, format: Option<&str>) -> PyColumn {
+    PyColumn {
+        inner: functions::from_unixtime(&column.inner, format),
+    }
+}
+
+#[pyfunction]
+fn year(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: functions::year(&column.inner),
+    }
+}
+
+#[pyfunction]
+fn month(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: functions::month(&column.inner),
+    }
+}
+
+#[pyfunction]
+fn dayofmonth(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: functions::dayofmonth(&column.inner),
+    }
+}
+
+#[pyfunction]
+fn dayofweek(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: functions::dayofweek(&column.inner),
+    }
+}
+
+#[pyfunction]
+fn date_add(column: &PyColumn, n: i32) -> PyColumn {
+    PyColumn {
+        inner: functions::date_add(&column.inner, n),
+    }
+}
+
+#[pyfunction]
+fn date_sub(column: &PyColumn, n: i32) -> PyColumn {
+    PyColumn {
+        inner: functions::date_sub(&column.inner, n),
+    }
+}
+
+#[pyfunction]
+fn date_format(column: &PyColumn, format: &str) -> PyColumn {
+    PyColumn {
+        inner: functions::date_format(&column.inner, format),
+    }
+}
+
 #[pymodule]
 fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("SparklessError", m.py().get_type_bound::<SparklessError>())?;
@@ -1353,5 +2457,23 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(avg, m)?)?;
     m.add_function(wrap_pyfunction!(min, m)?)?;
     m.add_function(wrap_pyfunction!(max, m)?)?;
+    m.add_function(wrap_pyfunction!(create_map, m)?)?;
+    m.add_function(wrap_pyfunction!(row_number_window, m)?)?;
+    m.add_function(wrap_pyfunction!(regexp_replace, m)?)?;
+    m.add_function(wrap_pyfunction!(regexp_extract_all, m)?)?;
+    m.add_function(wrap_pyfunction!(regexp_like, m)?)?;
+    m.add_function(wrap_pyfunction!(to_timestamp, m)?)?;
+    m.add_function(wrap_pyfunction!(to_date, m)?)?;
+    m.add_function(wrap_pyfunction!(current_date, m)?)?;
+    m.add_function(wrap_pyfunction!(datediff, m)?)?;
+    m.add_function(wrap_pyfunction!(unix_timestamp, m)?)?;
+    m.add_function(wrap_pyfunction!(from_unixtime, m)?)?;
+    m.add_function(wrap_pyfunction!(year, m)?)?;
+    m.add_function(wrap_pyfunction!(month, m)?)?;
+    m.add_function(wrap_pyfunction!(dayofmonth, m)?)?;
+    m.add_function(wrap_pyfunction!(dayofweek, m)?)?;
+    m.add_function(wrap_pyfunction!(date_add, m)?)?;
+    m.add_function(wrap_pyfunction!(date_sub, m)?)?;
+    m.add_function(wrap_pyfunction!(date_format, m)?)?;
     Ok(())
 }

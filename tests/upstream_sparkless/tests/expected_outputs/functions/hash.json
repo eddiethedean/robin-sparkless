@@ -1,0 +1,53 @@
+{
+  "test_id": "hash",
+  "pyspark_version": "3.5",
+  "generated_at": "2025-10-27T14:13:29.209172",
+  "input_data": [
+    {
+      "id": 1,
+      "name": "Alice",
+      "text": "Hello World"
+    },
+    {
+      "id": 2,
+      "name": "Bob",
+      "text": "Test"
+    },
+    {
+      "id": 3,
+      "name": "Charlie",
+      "text": "Python"
+    }
+  ],
+  "operation": "DataFrame operation: hash",
+  "expected_output": {
+    "schema": {
+      "field_count": 1,
+      "field_names": [
+        "hash(name)"
+      ],
+      "field_types": [
+        "integer"
+      ],
+      "fields": [
+        {
+          "name": "hash(name)",
+          "type": "integer",
+          "nullable": false
+        }
+      ]
+    },
+    "data": [
+      {
+        "hash(name)": -1597477876
+      },
+      {
+        "hash(name)": 549595493
+      },
+      {
+        "hash(name)": 906014075
+      }
+    ],
+    "row_count": 3
+  }
+}

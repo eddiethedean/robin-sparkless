@@ -1,0 +1,78 @@
+{
+  "test_id": "create_map",
+  "pyspark_version": "3.5",
+  "generated_at": "2025-10-27T14:13:24.717574",
+  "input_data": [
+    {
+      "id": 1,
+      "map1": {
+        "a": 1,
+        "b": 2
+      },
+      "map2": {
+        "c": 3,
+        "d": 4
+      },
+      "key": "a"
+    },
+    {
+      "id": 2,
+      "map1": {
+        "x": 10,
+        "y": 20
+      },
+      "map2": {
+        "z": 30
+      },
+      "key": "x"
+    },
+    {
+      "id": 3,
+      "map1": {
+        "p": 100,
+        "q": 200
+      },
+      "map2": {
+        "r": 300
+      },
+      "key": "p"
+    }
+  ],
+  "operation": "DataFrame operation: create_map",
+  "expected_output": {
+    "schema": {
+      "field_count": 1,
+      "field_names": [
+        "map(key, value)"
+      ],
+      "field_types": [
+        "map"
+      ],
+      "fields": [
+        {
+          "name": "map(key, value)",
+          "type": "map",
+          "nullable": false
+        }
+      ]
+    },
+    "data": [
+      {
+        "map(key, value)": {
+          "key": "value"
+        }
+      },
+      {
+        "map(key, value)": {
+          "key": "value"
+        }
+      },
+      {
+        "map(key, value)": {
+          "key": "value"
+        }
+      }
+    ],
+    "row_count": 3
+  }
+}

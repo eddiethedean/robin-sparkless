@@ -1,0 +1,56 @@
+{
+  "test_id": "regexp_replace",
+  "pyspark_version": "3.5",
+  "generated_at": "2025-10-27T14:13:23.604997",
+  "input_data": [
+    {
+      "id": 1,
+      "name": "Alice",
+      "text": "Hello World",
+      "email": "alice@example.com"
+    },
+    {
+      "id": 2,
+      "name": "Bob",
+      "text": "Test String",
+      "email": "bob@test.com"
+    },
+    {
+      "id": 3,
+      "name": "Charlie",
+      "text": "Python Data",
+      "email": "charlie@company.org"
+    }
+  ],
+  "operation": "DataFrame operation: regexp_replace",
+  "expected_output": {
+    "schema": {
+      "field_count": 1,
+      "field_names": [
+        "regexp_replace(text, World, Universe, 1)"
+      ],
+      "field_types": [
+        "string"
+      ],
+      "fields": [
+        {
+          "name": "regexp_replace(text, World, Universe, 1)",
+          "type": "string",
+          "nullable": true
+        }
+      ]
+    },
+    "data": [
+      {
+        "regexp_replace(text, World, Universe, 1)": "Hello Universe"
+      },
+      {
+        "regexp_replace(text, World, Universe, 1)": "Test String"
+      },
+      {
+        "regexp_replace(text, World, Universe, 1)": "Python Data"
+      }
+    ],
+    "row_count": 3
+  }
+}

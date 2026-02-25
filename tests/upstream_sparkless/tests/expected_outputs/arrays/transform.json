@@ -1,0 +1,106 @@
+{
+  "test_id": "transform",
+  "pyspark_version": "3.5",
+  "generated_at": "2025-10-27T14:13:24.665967",
+  "input_data": [
+    {
+      "id": 1,
+      "arr1": [
+        1,
+        2,
+        3
+      ],
+      "arr2": [
+        4,
+        5
+      ],
+      "arr3": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "value": 2
+    },
+    {
+      "id": 2,
+      "arr1": [
+        10,
+        20
+      ],
+      "arr2": [
+        30,
+        40,
+        50
+      ],
+      "arr3": [
+        10,
+        20,
+        30
+      ],
+      "value": 20
+    },
+    {
+      "id": 3,
+      "arr1": [
+        5,
+        10,
+        15
+      ],
+      "arr2": [
+        20,
+        25
+      ],
+      "arr3": [
+        5,
+        5,
+        10,
+        10
+      ],
+      "value": 5
+    }
+  ],
+  "operation": "DataFrame operation: transform",
+  "expected_output": {
+    "schema": {
+      "field_count": 1,
+      "field_names": [
+        "transform(arr1, lambdafunction((namedlambdavariable() * 2), namedlambdavariable()))"
+      ],
+      "field_types": [
+        "array"
+      ],
+      "fields": [
+        {
+          "name": "transform(arr1, lambdafunction((namedlambdavariable() * 2), namedlambdavariable()))",
+          "type": "array",
+          "nullable": true
+        }
+      ]
+    },
+    "data": [
+      {
+        "transform(arr1, lambdafunction((namedlambdavariable() * 2), namedlambdavariable()))": [
+          2,
+          4,
+          6
+        ]
+      },
+      {
+        "transform(arr1, lambdafunction((namedlambdavariable() * 2), namedlambdavariable()))": [
+          20,
+          40
+        ]
+      },
+      {
+        "transform(arr1, lambdafunction((namedlambdavariable() * 2), namedlambdavariable()))": [
+          10,
+          20,
+          30
+        ]
+      }
+    ],
+    "row_count": 3
+  }
+}

@@ -1,0 +1,53 @@
+{
+  "test_id": "monotonically_increasing_id",
+  "pyspark_version": "3.5",
+  "generated_at": "2025-10-27T14:13:29.247652",
+  "input_data": [
+    {
+      "id": 1,
+      "name": "Alice",
+      "text": "Hello World"
+    },
+    {
+      "id": 2,
+      "name": "Bob",
+      "text": "Test"
+    },
+    {
+      "id": 3,
+      "name": "Charlie",
+      "text": "Python"
+    }
+  ],
+  "operation": "DataFrame operation: monotonically_increasing_id",
+  "expected_output": {
+    "schema": {
+      "field_count": 1,
+      "field_names": [
+        "monotonically_increasing_id()"
+      ],
+      "field_types": [
+        "long"
+      ],
+      "fields": [
+        {
+          "name": "monotonically_increasing_id()",
+          "type": "long",
+          "nullable": false
+        }
+      ]
+    },
+    "data": [
+      {
+        "monotonically_increasing_id()": 0
+      },
+      {
+        "monotonically_increasing_id()": 1
+      },
+      {
+        "monotonically_increasing_id()": 2
+      }
+    ],
+    "row_count": 3
+  }
+}

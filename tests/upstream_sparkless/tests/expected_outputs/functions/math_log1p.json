@@ -1,0 +1,59 @@
+{
+  "test_id": "math_log1p",
+  "pyspark_version": "3.5",
+  "generated_at": "2025-10-27T14:13:23.973974",
+  "input_data": [
+    {
+      "id": 1,
+      "x": 0.5,
+      "y": 1.2,
+      "angle": 0.785,
+      "value": 4.5
+    },
+    {
+      "id": 2,
+      "x": 1.0,
+      "y": 2.5,
+      "angle": 1.57,
+      "value": 3.2
+    },
+    {
+      "id": 3,
+      "x": 2.0,
+      "y": 3.0,
+      "angle": 0.0,
+      "value": 7.8
+    }
+  ],
+  "operation": "DataFrame operation: math_log1p",
+  "expected_output": {
+    "schema": {
+      "field_count": 1,
+      "field_names": [
+        "LOG1P(x)"
+      ],
+      "field_types": [
+        "double"
+      ],
+      "fields": [
+        {
+          "name": "LOG1P(x)",
+          "type": "double",
+          "nullable": true
+        }
+      ]
+    },
+    "data": [
+      {
+        "LOG1P(x)": 0.4054651081081644
+      },
+      {
+        "LOG1P(x)": 0.6931471805599453
+      },
+      {
+        "LOG1P(x)": 1.0986122886681096
+      }
+    ],
+    "row_count": 3
+  }
+}
