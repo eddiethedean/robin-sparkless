@@ -583,6 +583,18 @@ impl DataFrame {
         self.0.crosstab(col1, col2).map(DataFrame)
     }
 
+    pub fn melt(
+        &self,
+        id_vars: &[&str],
+        value_vars: &[&str],
+    ) -> Result<DataFrame, PolarsError> {
+        self.0.melt(id_vars, value_vars).map(DataFrame)
+    }
+
+    pub fn unpivot(&self, ids: &[&str], values: &[&str]) -> Result<DataFrame, PolarsError> {
+        self.0.unpivot(ids, values).map(DataFrame)
+    }
+
     /// Write this DataFrame to path (returns root-owned writer).
     pub fn write(&self) -> DataFrameWriter<'_> {
         DataFrameWriter {
