@@ -134,6 +134,8 @@ struct PySparkSession {
 thread_local! {
     /// Thread-local stack of active sessions (PySpark getActiveSession semantics).
     static THREAD_ACTIVE_SESSIONS: RefCell<Vec<Py<PySparkSession>>> = const { RefCell::new(Vec::new()) };
+    /// Optional Python callable to run Python UDFs when with_column sees a UDF column. Set by Python on session creation.
+    static PYTHON_UDF_EXECUTOR: RefCell<Option<Py<PyAny>>> = const { RefCell::new(None) };
 }
 
 fn register_active_session(
@@ -1413,8 +1415,26 @@ impl PyDataFrame {
             .map_err(to_py_err)
     }
 
-    fn with_column(&self, name: &str, col: &PyColumn) -> PyResult<PyDataFrame> {
-        let df = self.inner.with_column(name, &col.inner).map_err(|e| {
+    fn with_column(slf: PyRef<Self>, py: Python<'_>, name: &str, col: &PyColumn) -> PyResult<PyDataFrame> {
+        if let Some((udf_name, arg_names)) = col.inner.udf_call_info() {
+            let arg_names_py = PyList::new_bound(py, arg_names.iter());
+            if let Some(result_df) = PYTHON_UDF_EXECUTOR.with(|cell| -> PyResult<Option<PyDataFrame>> {
+                let cb = cell.borrow();
+                let callback = match cb.as_ref() {
+                    Some(c) => c,
+                    None => return Ok(None),
+                };
+                let df_obj: Bound<'_, PyAny> = unsafe { Bound::from_borrowed_ptr(py, slf.as_ptr()) };
+                let result = callback.bind(py).call1((df_obj, name, udf_name, arg_names_py))?;
+                let py_df = result.downcast::<PyDataFrame>()?;
+                Ok(Some(PyDataFrame {
+                    inner: py_df.borrow().inner.clone(),
+                }))
+            })? {
+                return Ok(result_df);
+            }
+        }
+        let df = slf.inner.with_column(name, &col.inner).map_err(|e| {
             let msg = e.to_string();
             if msg.contains("to_timestamp requires StringType") {
                 PyErr::new::<pyo3::exceptions::PyTypeError, _>(msg)
@@ -1435,8 +1455,8 @@ impl PyDataFrame {
     }
 
     #[pyo3(name = "withColumn")]
-    fn with_column_camel(&self, name: &str, col: &PyColumn) -> PyResult<PyDataFrame> {
-        self.with_column(name, col)
+    fn with_column_camel(slf: PyRef<Self>, py: Python<'_>, name: &str, col: &PyColumn) -> PyResult<PyDataFrame> {
+        Self::with_column(slf, py, name, col)
     }
 
     #[pyo3(name = "withColumnRenamed")]
@@ -2506,6 +2526,11 @@ impl PyColumn {
         self.inner.name()
     }
 
+    /// Returns (udf_name, arg_column_names) if this column is a Python UDF call, else None. Used by Python UDF executor.
+    fn get_udf_call_info(&self) -> Option<(String, Vec<String>)> {
+        self.inner.udf_call_info()
+    }
+
     fn __and__(&self, other: &Bound<'_, PyAny>) -> PyResult<PyColumn> {
         let rhs = py_any_to_column(other)?;
         Ok(PyColumn {
@@ -3462,6 +3487,28 @@ fn column(name: &str) -> PyColumn {
     PyColumn {
         inner: robin_sparkless::functions::col(name),
     }
+}
+
+/// Create a Column that represents a Python UDF call. When used in with_column, the Python UDF executor runs the callable per row.
+#[pyfunction]
+fn create_udf_column(udf_name: String, columns: &Bound<'_, PyList>) -> PyResult<PyColumn> {
+    let mut args: Vec<Column> = Vec::with_capacity(columns.len());
+    for item in columns.iter() {
+        let py_col = item.downcast::<PyColumn>()?;
+        args.push(py_col.borrow().inner.clone());
+    }
+    Ok(PyColumn {
+        inner: Column::from_udf_call(udf_name, args),
+    })
+}
+
+/// Set the Python callable that runs when with_column sees a UDF column. Signature: (df, column_name, udf_name, arg_names) -> new_df. Called from Python on session creation.
+#[pyfunction]
+fn set_python_udf_executor(py: Python<'_>, callback: &Bound<'_, PyAny>) -> PyResult<()> {
+    PYTHON_UDF_EXECUTOR.with(|cell| {
+        *cell.borrow_mut() = Some(callback.into_py(py));
+    });
+    Ok(())
 }
 
 #[pyfunction]
@@ -4478,6 +4525,8 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyChainedWhenBuilder>()?;
     m.add_function(wrap_pyfunction!(spark_session_builder, m)?)?;
     m.add_function(wrap_pyfunction!(column, m)?)?;
+    m.add_function(wrap_pyfunction!(create_udf_column, m)?)?;
+    m.add_function(wrap_pyfunction!(set_python_udf_executor, m)?)?;
     m.add_function(wrap_pyfunction!(lit, m)?)?;
     m.add_function(wrap_pyfunction!(lit_i64, m)?)?;
     m.add_function(wrap_pyfunction!(lit_str, m)?)?;

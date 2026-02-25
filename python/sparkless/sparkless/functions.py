@@ -24,3 +24,23 @@ __all__ = list(getattr(_f, "__all__", [])) + ["F", "Functions"]
 for _name in getattr(_f, "__all__", []):
     if hasattr(_f, _name):
         globals()[_name] = getattr(_f, _name)
+
+
+# Submodule sparkless.functions.udf for "from sparkless.functions.udf import UserDefinedFunction"
+class UserDefinedFunction:
+    """PySpark-style UDF class. Use F.udf(f, returnType) or this class for withColumn(..., udf(*cols))."""
+
+    def __init__(self, f, returnType, name=None):
+        self._f = f
+        self._returnType = returnType
+        self._name = name
+        self._wrapped = _f.udf(f, returnType)
+
+    def __call__(self, *cols):
+        return self._wrapped(*cols)
+
+
+_udf_mod = __import__("types").ModuleType("sparkless.functions.udf")
+_udf_mod.__package__ = "sparkless.functions"
+_udf_mod.UserDefinedFunction = UserDefinedFunction
+sys.modules["sparkless.functions.udf"] = _udf_mod
