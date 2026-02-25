@@ -2259,12 +2259,25 @@ impl Column {
     }
 
     /// Row number (1, 2, 3 by this column's order). Use with `.over(partition_by)`.
+    /// Nulls in the order column get a rank (PySpark parity: nulls last for asc, nulls first for desc).
     pub fn row_number(&self, descending: bool) -> Column {
+        use polars::prelude::*;
         let opts = RankOptions {
             method: RankMethod::Ordinal,
             descending,
         };
-        Self::from_expr(self.expr().clone().rank(opts, None), None)
+        // Fill nulls so rank returns a value: ascending -> nulls last (fill with inf); descending -> nulls first (fill with -inf)
+        let rank_expr = self
+            .expr()
+            .clone()
+            .cast(DataType::Float64)
+            .fill_null(lit(if descending {
+                f64::NEG_INFINITY
+            } else {
+                f64::INFINITY
+            }))
+            .rank(opts, None);
+        Self::from_expr(rank_expr, None)
     }
 
     /// Lag: value from n rows before. Use with `.over(partition_by)`.
@@ -2304,7 +2317,8 @@ impl Column {
         let rank_f = (rank_expr - lit(1i64)).cast(DataType::Float64);
         let count_f = (count_expr - lit(1i64)).cast(DataType::Float64);
         // Avoid division by zero: single-row partition -> 0.0 (PySpark parity)
-        let pct = when(count_f.clone().gt(lit(1.0)))
+        // When count=2, count_f=1.0; use gt(0) not gt(1) so we compute (rank-1)/1 correctly
+        let pct = when(count_f.clone().gt(lit(0.0)))
             .then(rank_f / count_f)
             .otherwise(lit(0.0));
         Self::from_expr(pct, None)
@@ -2335,7 +2349,11 @@ impl Column {
     /// Ntile: bucket 1..n by rank within partition (ceil(rank * n / count)). Window is applied; do not call .over() again.
     pub fn ntile(&self, n: u32, partition_by: &[&str], descending: bool) -> Column {
         use polars::prelude::*;
-        let partition_exprs: Vec<Expr> = partition_by.iter().map(|s| col(*s)).collect();
+        let partition_exprs: Vec<Expr> = if partition_by.is_empty() {
+            vec![lit(1i32)]
+        } else {
+            partition_by.iter().map(|s| col(*s)).collect()
+        };
         let opts = RankOptions {
             method: RankMethod::Ordinal,
             descending,

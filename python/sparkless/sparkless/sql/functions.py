@@ -97,6 +97,12 @@ __all__ = [
     "current_catalog",
     "current_user",
     "row_number",
+    "percent_rank",
+    "rank",
+    "dense_rank",
+    "ntile",
+    "lag",
+    "lead",
     "create_map",
     "asc",
     "desc",
@@ -280,6 +286,97 @@ class _RowNumberExpr:
 def row_number():
     """Window row_number() expression; use with .over(Window.partitionBy(...).orderBy(...))."""
     return _RowNumberExpr()
+
+
+class _PercentRankExpr:
+    def over(self, window):
+        import sparkless._native as _native
+
+        partition_by, encoded, _ = _window_spec_to_partition_order(window)
+        return _native.percent_rank_window(partition_by, encoded)
+
+
+def percent_rank():
+    """Window percent_rank() expression; use with .over(Window.partitionBy(...).orderBy(...))."""
+    return _PercentRankExpr()
+
+
+class _RankExpr:
+    def over(self, window):
+        import sparkless._native as _native
+
+        partition_by, encoded, _ = _window_spec_to_partition_order(window)
+        return _native.rank_window(partition_by, encoded)
+
+
+def rank():
+    """Window rank() expression; use with .over(Window.partitionBy(...).orderBy(...))."""
+    return _RankExpr()
+
+
+class _DenseRankExpr:
+    def over(self, window):
+        import sparkless._native as _native
+
+        partition_by, encoded, _ = _window_spec_to_partition_order(window)
+        return _native.dense_rank_window(partition_by, encoded)
+
+
+def dense_rank():
+    """Window dense_rank() expression; use with .over(Window.partitionBy(...).orderBy(...))."""
+    return _DenseRankExpr()
+
+
+class _NtileExpr:
+    def __init__(self, n):
+        self._n = n
+
+    def over(self, window):
+        import sparkless._native as _native
+
+        partition_by, encoded, _ = _window_spec_to_partition_order(window)
+        return _native.ntile_window(self._n, partition_by, encoded)
+
+
+def ntile(n):
+    """Window ntile(n) expression; use with .over(Window.partitionBy(...).orderBy(...))."""
+    return _NtileExpr(n)
+
+
+class _LagExpr:
+    def __init__(self, col_or_name, offset=1):
+        self._col_or_name = col_or_name
+        self._offset = offset
+
+    def over(self, window):
+        import sparkless._native as _native
+
+        partition_by, encoded, _ = _window_spec_to_partition_order(window)
+        name = _col_name(self._col_or_name)
+        return _native.lag_window(name, self._offset, partition_by, encoded)
+
+
+def lag(col_or_name, offset=1):
+    """Window lag(col, offset) expression; use with .over(Window.partitionBy(...).orderBy(...))."""
+    return _LagExpr(col_or_name, offset)
+
+
+class _LeadExpr:
+    def __init__(self, col_or_name, offset=1):
+        self._col_or_name = col_or_name
+        self._offset = offset
+
+    def over(self, window):
+        import sparkless._native as _native
+
+        partition_by, encoded, _ = _window_spec_to_partition_order(window)
+        name = _col_name(self._col_or_name)
+        return _native.lead_window(name, self._offset, partition_by, encoded)
+
+
+def lead(col_or_name, offset=1):
+    """Window lead(col, offset) expression; use with .over(Window.partitionBy(...).orderBy(...))."""
+    return _LeadExpr(col_or_name, offset)
 
 
 class _SortKey:

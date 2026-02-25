@@ -56,10 +56,27 @@ def _install_backend_shim():
     """Stub sparkless.backend.factory so tests that import it at module level still collect."""
     import types
     factory = types.ModuleType("sparkless.backend.factory")
+    # Minimal materializer stub: when tests/materialization code calls create_materializer,
+    # return an object that won't crash. Robin-sparkless DataFrames execute directly;
+    # this stub exists only so upstream code paths that reference BackendFactory don't raise.
+    class _StubMaterializer:
+        def materialize(self, *args, **kwargs):
+            raise NotImplementedError(
+                "BackendFactory.create_materializer stub: robin-sparkless DataFrames "
+                "execute directly; this path should not be reached."
+            )
+        def can_handle_operations(self, ops):
+            return True, []
+
+    class _StubStorageBackend:
+        pass
+
     class BackendFactory:
         _robin_available = staticmethod(lambda: True)
         validate_backend_type = staticmethod(lambda _: None)
         get_backend_type = staticmethod(lambda _: "polars")  # stub for upstream code paths
+        create_materializer = staticmethod(lambda _: _StubMaterializer())
+        create_storage_backend = staticmethod(lambda _: _StubStorageBackend())
     factory.BackendFactory = BackendFactory
     sys.modules["sparkless.backend"] = types.ModuleType("sparkless.backend")
     sys.modules["sparkless.backend"].factory = factory

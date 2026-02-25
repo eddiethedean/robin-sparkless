@@ -35,6 +35,9 @@ def _normalize_sort_keys(cols):
             keys.append(_SortKey(c, True))
         elif isinstance(c, _Column):
             keys.append(_SortKey(c.name, True))
+        elif hasattr(c, "column_name") and hasattr(c, "descending"):
+            # PySortOrder from col.asc() / col.desc()
+            keys.append(_SortKey(c.column_name, not c.descending))
         else:
             raise TypeError(f"Unsupported orderBy key: {type(c)!r}")
     return keys
@@ -78,4 +81,16 @@ class Window:
     @staticmethod
     def partitionBy(*cols):
         return WindowSpec().partitionBy(*cols)
+
+    @staticmethod
+    def orderBy(*cols):
+        return WindowSpec().orderBy(*cols)
+
+    @staticmethod
+    def rowsBetween(start, end):
+        return WindowSpec().rowsBetween(start, end)
+
+    @staticmethod
+    def rangeBetween(start, end):
+        return WindowSpec().rangeBetween(start, end)
 
