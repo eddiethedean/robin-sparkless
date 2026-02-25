@@ -20,8 +20,11 @@ from sparkless import (
     min as _min,
     max as _max,
     regexp_replace as _regexp_replace,
+    regexp_extract as _regexp_extract,
     regexp_extract_all as _regexp_extract_all,
     regexp_like as _regexp_like,
+    split as _split,
+    coalesce as _coalesce,
     to_timestamp as _to_timestamp,
     to_date as _to_date,
     current_date as _current_date,
@@ -89,8 +92,11 @@ __all__ = [
     "date_format",
     "floor",
     "regexp_replace",
+    "regexp_extract",
     "regexp_extract_all",
     "regexp_like",
+    "split",
+    "coalesce",
     "expr",
     "current_database",
     "current_schema",
@@ -138,12 +144,29 @@ def regexp_replace(column, pattern, replacement):
     return _regexp_replace(_as_col(column), pattern, replacement)
 
 
+def regexp_extract(column, pattern, idx=0):
+    """Extract first regex match (PySpark regexp_extract). idx=0 is full match, 1+ is capture group."""
+    return _regexp_extract(_as_col(column), pattern, idx)
+
+
 def regexp_extract_all(column, pattern, idx=0):
     return _regexp_extract_all(_as_col(column), pattern, idx)
 
 
 def regexp_like(column, pattern):
     return _regexp_like(_as_col(column), pattern)
+
+
+def split(column, pattern, limit=-1):
+    """Split string by delimiter (PySpark split). limit=-1 means no limit."""
+    return _split(_as_col(column), pattern, limit)
+
+
+def coalesce(*cols):
+    """Return first non-null value from columns (PySpark coalesce)."""
+    if not cols:
+        raise ValueError("coalesce requires at least one column")
+    return _coalesce(*[_as_col(c) for c in cols])
 
 
 def expr(sql_expr: str):
@@ -266,12 +289,20 @@ def current_user():
 def create_map(*cols):
     """Build a map column from alternating key/value expressions (PySpark create_map).
 
-    With no args, returns a column of empty maps per row.
+    With no args or create_map([]), returns a column of empty maps per row.
     """
     import sparkless._native as _native
 
-    key_values = [_as_col(c) for c in cols]
-    # Native create_map expects a list of Columns; empty list -> empty map literal
+    # PySpark: create_map() or create_map([]) -> empty map
+    expanded = []
+    for c in cols:
+        if isinstance(c, (list, tuple)):
+            expanded.extend(c)
+        else:
+            expanded.append(c)
+    if len(expanded) % 2 != 0:
+        raise ValueError("create_map requires an even number of arguments (key-value pairs)")
+    key_values = [_as_col(x) for x in expanded]
     return _native.create_map(key_values)
 
 

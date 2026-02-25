@@ -8,8 +8,8 @@ try:
         "column", "lit_i64", "lit_str", "lit_bool", "lit_f64", "lit_null",
         "upper", "lower", "substring", "trim", "cast", "when",
         "count", "sum", "avg", "min", "max",
-        "regexp_replace",
-        "regexp_extract_all", "regexp_like",
+        "regexp_replace", "regexp_extract", "regexp_extract_all", "regexp_like",
+        "split", "coalesce",
         "to_timestamp", "to_date", "current_date", "datediff", "unix_timestamp", "from_unixtime",
         "year", "month", "dayofmonth", "dayofweek", "date_add", "date_sub", "date_format",
     ])
@@ -20,8 +20,8 @@ except ImportError:
         "column", "lit_i64", "lit_str", "lit_bool", "lit_f64", "lit_null",
         "upper", "lower", "substring", "trim", "cast", "when",
         "count", "sum", "avg", "min", "max",
-        "regexp_replace",
-        "regexp_extract_all", "regexp_like",
+        "regexp_replace", "regexp_extract", "regexp_extract_all", "regexp_like",
+        "split", "coalesce",
         "to_timestamp", "to_date", "current_date", "datediff", "unix_timestamp", "from_unixtime",
         "year", "month", "dayofmonth", "dayofweek", "date_add", "date_sub", "date_format",
     ])
@@ -54,8 +54,11 @@ min = _mod.min
 max = _mod.max
 
 regexp_replace = _mod.regexp_replace
+regexp_extract = _mod.regexp_extract
 regexp_extract_all = _mod.regexp_extract_all
 regexp_like = _mod.regexp_like
+split = _mod.split
+coalesce = _mod.coalesce
 to_timestamp = _mod.to_timestamp
 to_date = _mod.to_date
 current_date = _mod.current_date
