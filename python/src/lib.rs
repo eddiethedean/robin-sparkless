@@ -1936,6 +1936,127 @@ impl PyDataFrame {
             .map_err(to_py_err)
     }
 
+    fn describe(&self) -> PyResult<PyDataFrame> {
+        self.inner
+            .describe()
+            .map(|df| PyDataFrame { inner: df })
+            .map_err(to_py_err)
+    }
+
+    fn persist(&self) -> PyResult<PyDataFrame> {
+        self.inner
+            .persist()
+            .map(|df| PyDataFrame { inner: df })
+            .map_err(to_py_err)
+    }
+
+    fn subtract(&self, other: &PyDataFrame) -> PyResult<PyDataFrame> {
+        self.inner
+            .subtract(&other.inner)
+            .map(|df| PyDataFrame { inner: df })
+            .map_err(to_py_err)
+    }
+
+    #[pyo3(name = "sampleBy", signature = (col, fractions, seed=None))]
+    fn sample_by(
+        &self,
+        py: Python<'_>,
+        col: &str,
+        fractions: &Bound<'_, PyAny>,
+        seed: Option<u64>,
+    ) -> PyResult<PyDataFrame> {
+        let dict = fractions.downcast::<PyDict>().map_err(|_| {
+            PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+                "sampleBy fractions must be a dict of {value: fraction}",
+            )
+        })?;
+        let mut fracs: Vec<(robin_sparkless::Expr, f64)> = Vec::with_capacity(dict.len());
+        for (k, v) in dict.iter() {
+            let frac = v.extract::<f64>()?;
+            let lit_col = py_any_to_column(&k)?;
+            fracs.push((lit_col.into_expr(), frac));
+        }
+        self.inner
+            .sample_by(col, &fracs, seed)
+            .map(|df| PyDataFrame { inner: df })
+            .map_err(to_py_err)
+    }
+
+    fn crosstab(&self, col1: &str, col2: &str) -> PyResult<PyDataFrame> {
+        self.inner
+            .crosstab(col1, col2)
+            .map(|df| PyDataFrame { inner: df })
+            .map_err(to_py_err)
+    }
+
+    #[pyo3(name = "freqItems", signature = (columns, support=0.01))]
+    fn freq_items(&self, columns: Vec<String>, support: f64) -> PyResult<PyDataFrame> {
+        let cols: Vec<&str> = columns.iter().map(|s| s.as_str()).collect();
+        self.inner
+            .freq_items(&cols, support)
+            .map(|df| PyDataFrame { inner: df })
+            .map_err(to_py_err)
+    }
+
+    fn melt(
+        &self,
+        id_vars: Vec<String>,
+        value_vars: Vec<String>,
+    ) -> PyResult<PyDataFrame> {
+        let ids: Vec<&str> = id_vars.iter().map(|s| s.as_str()).collect();
+        let vals: Vec<&str> = value_vars.iter().map(|s| s.as_str()).collect();
+        self.inner
+            .melt(&ids, &vals)
+            .map(|df| PyDataFrame { inner: df })
+            .map_err(to_py_err)
+    }
+
+    fn unpivot(&self, ids: Vec<String>, values: Vec<String>) -> PyResult<PyDataFrame> {
+        let id_refs: Vec<&str> = ids.iter().map(|s| s.as_str()).collect();
+        let val_refs: Vec<&str> = values.iter().map(|s| s.as_str()).collect();
+        self.inner
+            .unpivot(&id_refs, &val_refs)
+            .map(|df| PyDataFrame { inner: df })
+            .map_err(to_py_err)
+    }
+
+    #[pyo3(name = "flatMap")]
+    fn flat_map_impl(
+        &self,
+        py: Python<'_>,
+        func: &Bound<'_, PyAny>,
+    ) -> PyResult<PyDataFrame> {
+        let rows = self.collect(py)?;
+        let mut out_rows: Vec<PyObject> = Vec::new();
+        for row in rows {
+            let row_bound = row.bind(py);
+            let result = func.call1((row_bound,))?;
+            for item in result.iter()? {
+                let item: pyo3::Bound<'_, PyAny> = item?;
+                out_rows.push(item.into_py(py));
+            }
+        }
+        let session = THREAD_ACTIVE_SESSIONS
+            .with(|cell| cell.borrow().last().map(|s| s.clone_ref(py)))
+            .ok_or_else(|| to_py_err("No active SparkSession for flatMap"))?;
+        let session_ref = session.bind(py).downcast::<PySparkSession>().map_err(|_| {
+            PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected SparkSession")
+        })?;
+        let list = PyList::new_bound(py, out_rows);
+        let (rows_data, schema) = python_data_and_schema(py, list.as_ref(), None, false)?;
+        let df = session_ref
+            .borrow()
+            .inner
+            .create_dataframe_from_rows(rows_data, schema, false)
+            .map_err(to_py_err)?;
+        Ok(PyDataFrame { inner: df })
+    }
+
+    #[pyo3(name = "flat_map")]
+    fn flat_map(&self, py: Python<'_>, func: &Bound<'_, PyAny>) -> PyResult<PyDataFrame> {
+        self.flat_map_impl(py, func)
+    }
+
     fn with_columns_renamed(&self, cols_map: &Bound<'_, PyAny>) -> PyResult<PyDataFrame> {
         let dict = cols_map.downcast::<PyDict>().map_err(|_| {
             PyErr::new::<pyo3::exceptions::PyTypeError, _>(
