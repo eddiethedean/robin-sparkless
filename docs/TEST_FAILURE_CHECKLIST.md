@@ -27,8 +27,8 @@ This checklist tracks fixes needed to reduce test failures. Items are grouped by
 - **Error:** `TypeError: orderBy() expects column names as str or list/tuple[str]`
 
 ### 4. `cast()` type object support
-- [ ] Accept type objects (e.g. `IntegerType()`) in `cast()`, not just strings
-- [ ] Convert via `type_obj.simpleString()` or equivalent before passing to Rust
+- [x] Accept type objects (e.g. `IntegerType()`) in `cast()`, not just strings
+- [x] Convert via `type_obj.simpleString()` or equivalent before passing to Rust
 - **Affected:** ~15 tests in `test_issue_453_alias_cast_withcolumn.py`, `test_withfield.py`
 - **Error:** `TypeError: argument 'type_name': 'IntegerType' object cannot be converted to 'PyString'`
 
@@ -181,7 +181,7 @@ Tests expecting errors that are not raised:
 | CSV options           | ~60   | ~60   | 0         |
 | when() API            | ~15   | ~15   | 0         |
 | orderBy               | ~25   | ~25   | 0         |
-| cast() type           | ~15   | 0     | ~15       |
+| cast() type           | ~15   | ~15   | 0         |
 | na.fill               | ~25   | 0     | ~25       |
 | fillna types          | ~15   | 0     | ~15       |
 | astype               | ~20   | 0     | ~20       |
