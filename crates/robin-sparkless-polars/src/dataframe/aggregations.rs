@@ -3,8 +3,8 @@
 use super::DataFrame;
 use crate::column::Column;
 use polars::prelude::{
-    DataFrame as PlDataFrame, DataType, Expr, LazyFrame, LazyGroupBy, NamedFrom, PolarsError,
-    SchemaNamesAndDtypes, Series, col, len, lit, when,
+    DataFrame as PlDataFrame, DataType, Expr, LazyFrame, LazyGroupBy, NamedFrom, PlSmallStr,
+    PolarsError, SchemaNamesAndDtypes, Series, col, len, lit, when,
 };
 use std::collections::HashMap;
 
@@ -72,6 +72,50 @@ impl GroupedData {
             )
             .into(),
         ))
+    }
+
+    /// Resolve column names in an expression against the grouped schema (case-sensitive or -insensitive).
+    /// Mirrors DataFrame::resolve_expr_column_names for agg expressions.
+    fn resolve_expr_column_names(&self, expr: Expr) -> Result<Expr, PolarsError> {
+        use std::collections::HashSet;
+        let mut alias_output_names: HashSet<String> = HashSet::new();
+        let _ = expr.clone().try_map_expr(|e| {
+            if let Expr::Alias(_, name) = &e {
+                alias_output_names.insert(name.as_str().to_string());
+            }
+            Ok(e)
+        })?;
+        let gd = self;
+        expr.try_map_expr(move |e| {
+            if let Expr::Column(name) = &e {
+                let name_str = name.as_str();
+                if alias_output_names.contains(name_str) {
+                    return Ok(e);
+                }
+                if name_str.is_empty() {
+                    return Ok(e);
+                }
+                if name_str.contains('.') {
+                    let parts: Vec<&str> = name_str.split('.').collect();
+                    let first = parts[0];
+                    let rest = &parts[1..];
+                    if rest.is_empty() {
+                        return Err(PolarsError::ColumnNotFound(
+                            format!("Column '{}': trailing dot not allowed", name_str).into(),
+                        ));
+                    }
+                    let resolved = gd.resolve_column(first)?;
+                    let mut expr = col(PlSmallStr::from(resolved.as_str()));
+                    for field in rest {
+                        expr = expr.struct_().field_by_name(field);
+                    }
+                    return Ok(expr);
+                }
+                let resolved = gd.resolve_column(name_str)?;
+                return Ok(Expr::Column(PlSmallStr::from(resolved.as_str())));
+            }
+            Ok(e)
+        })
     }
 
     /// Count rows in each group
@@ -686,8 +730,13 @@ impl GroupedData {
 
     /// Apply multiple aggregations at once (generic agg method).
     /// Duplicate output names are disambiguated with _1, _2, ... (PySpark parity, issue #368).
+    /// Column names in expressions are resolved case-insensitively when spark.sql.caseSensitive is false.
     pub fn agg(&self, aggregations: Vec<Expr>) -> Result<DataFrame, PolarsError> {
-        let disambiguated = disambiguate_agg_output_names(aggregations);
+        let resolved: Vec<Expr> = aggregations
+            .into_iter()
+            .map(|e| self.resolve_expr_column_names(e))
+            .collect::<Result<Vec<_>, _>>()?;
+        let disambiguated = disambiguate_agg_output_names(resolved);
         let lf = self.lazy_grouped.clone().agg(disambiguated);
         let mut pl_df = lf.collect()?;
         pl_df = reorder_groupby_columns(&mut pl_df, &self.grouping_cols)?;
