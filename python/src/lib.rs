@@ -1128,11 +1128,34 @@ struct PyDataFrameReader {
     format: Option<String>,
 }
 
+/// Convert PySpark option value to string (bool -> "true"/"false", int/float -> string, str as-is).
+fn option_value_to_string(value: &Bound<'_, PyAny>) -> PyResult<String> {
+    if value.is_none() {
+        return Ok("".to_string());
+    }
+    if let Ok(b) = value.extract::<bool>() {
+        return Ok(if b { "true" } else { "false" }.to_string());
+    }
+    if let Ok(i) = value.extract::<i64>() {
+        return Ok(i.to_string());
+    }
+    if let Ok(f) = value.extract::<f64>() {
+        return Ok(f.to_string());
+    }
+    if let Ok(s) = value.extract::<String>() {
+        return Ok(s);
+    }
+    Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+        "option value must be str, bool, int, or float",
+    ))
+}
+
 #[pymethods]
 impl PyDataFrameReader {
-    fn option<'a>(mut slf: PyRefMut<'a, Self>, key: &str, value: &str) -> PyRefMut<'a, Self> {
-        slf.options.push((key.to_string(), value.to_string()));
-        slf
+    fn option<'a>(mut slf: PyRefMut<'a, Self>, key: &str, value: &Bound<'_, PyAny>) -> PyResult<PyRefMut<'a, Self>> {
+        let s = option_value_to_string(value)?;
+        slf.options.push((key.to_string(), s));
+        Ok(slf)
     }
 
     /// PySpark: options(**kwargs). opts: dict of key -> value.
@@ -1142,7 +1165,7 @@ impl PyDataFrameReader {
         })?;
         for (k, v) in dict.iter() {
             let key = k.extract::<String>()?;
-            let value = v.extract::<String>()?;
+            let value = option_value_to_string(&v)?;
             slf.options.push((key, value));
         }
         Ok(slf)
