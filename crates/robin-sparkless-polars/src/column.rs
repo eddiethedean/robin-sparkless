@@ -145,6 +145,16 @@ impl Column {
         &self.name
     }
 
+    /// If this column is a Python UDF call, return (udf_name, arg_column_names). Used by Python to run UDFs at with_column.
+    pub fn udf_call_info(&self) -> Option<(String, Vec<String>)> {
+        self.udf_call.as_ref().map(|(name, args)| {
+            (
+                name.clone(),
+                args.iter().map(|c| c.name().to_string()).collect(),
+            )
+        })
+    }
+
     /// Alias the column
     pub fn alias(&self, name: &str) -> Column {
         Column {
