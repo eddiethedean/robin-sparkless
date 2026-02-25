@@ -155,6 +155,28 @@ impl Column {
         })
     }
 
+    /// If this column is a literal expression, return its value as JSON string for Python UDF executor (literal args).
+    pub fn literal_as_json_string(&self) -> Option<String> {
+        match &self.expr {
+            Expr::Literal(lv) => crate::dataframe::literal_value_to_serde_value(lv)
+                .and_then(|v| serde_json::to_string(&v).ok()),
+            _ => None,
+        }
+    }
+
+    /// If this column is a Python UDF call, return (udf_name, arg_names, arg_literal_json_strings).
+    /// For each arg: None = use row[arg_name]; Some(json) = literal value (not in row).
+    pub fn udf_call_info_with_literals(&self) -> Option<(String, Vec<String>, Vec<Option<String>>)> {
+        self.udf_call.as_ref().map(|(name, args)| {
+            let arg_names: Vec<String> = args.iter().map(|c| c.name().to_string()).collect();
+            let literals: Vec<Option<String>> = args
+                .iter()
+                .map(|c| c.literal_as_json_string())
+                .collect();
+            (name.clone(), arg_names, literals)
+        })
+    }
+
     /// Alias the column
     pub fn alias(&self, name: &str) -> Column {
         Column {

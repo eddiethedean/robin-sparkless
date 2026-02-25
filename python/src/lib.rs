@@ -1333,16 +1333,55 @@ struct PyDataFrame {
 
 #[pymethods]
 impl PyDataFrame {
-    fn filter(&self, condition: &PyColumn) -> PyResult<PyDataFrame> {
-        self.inner
+    fn filter(slf: PyRef<Self>, py: Python<'_>, condition: &PyColumn) -> PyResult<PyDataFrame> {
+        if let Some((udf_name, arg_names, literal_jsons)) = condition.inner.udf_call_info_with_literals() {
+            let temp_name = format!("_udf_filter_{}", uuid::Uuid::new_v4().simple());
+            let arg_names_py = PyList::new_bound(py, arg_names.iter());
+            let literals_py = PyList::empty_bound(py);
+            for opt in &literal_jsons {
+                let item: Bound<'_, PyAny> = match opt {
+                    Some(s) => pyo3::types::PyString::new_bound(py, s.as_str()).into_any(),
+                    None => py.None().into_bound(py),
+                };
+                literals_py.append(item)?;
+            }
+            if let Some(df_with_col) = PYTHON_UDF_EXECUTOR.with(|cell| -> PyResult<Option<PyDataFrame>> {
+                let cb = cell.borrow();
+                let callback = match cb.as_ref() {
+                    Some(c) => c,
+                    None => return Ok(None),
+                };
+                let df_obj: Bound<'_, PyAny> = unsafe { Bound::from_borrowed_ptr(py, slf.as_ptr()) };
+                let result = callback
+                    .bind(py)
+                    .call1((df_obj, &temp_name, udf_name, arg_names_py, literals_py))?;
+                let py_df = result.downcast::<PyDataFrame>()?;
+                Ok(Some(PyDataFrame {
+                    inner: py_df.borrow().inner.clone(),
+                }))
+            })? {
+                let filter_expr = robin_sparkless::Column::new(temp_name.clone()).into_expr();
+                let filtered = df_with_col
+                    .inner
+                    .filter(filter_expr)
+                    .map_err(to_py_err)?;
+                let out = filtered
+                    .drop(vec![temp_name.as_str()])
+                    .map_err(to_py_err)?;
+                return Ok(PyDataFrame { inner: out });
+            }
+        }
+        let df = slf
+            .inner
             .filter(condition.inner.clone().into_expr())
             .map(|df| PyDataFrame { inner: df })
-            .map_err(to_py_err)
+            .map_err(to_py_err)?;
+        Ok(df)
     }
 
     #[pyo3(name = "where")]
-    fn where_(&self, condition: &PyColumn) -> PyResult<PyDataFrame> {
-        self.filter(condition)
+    fn where_(slf: PyRef<Self>, py: Python<'_>, condition: &PyColumn) -> PyResult<PyDataFrame> {
+        Self::filter(slf, py, condition)
     }
 
     #[pyo3(signature = (*cols))]
@@ -1416,8 +1455,16 @@ impl PyDataFrame {
     }
 
     fn with_column(slf: PyRef<Self>, py: Python<'_>, name: &str, col: &PyColumn) -> PyResult<PyDataFrame> {
-        if let Some((udf_name, arg_names)) = col.inner.udf_call_info() {
+        if let Some((udf_name, arg_names, literal_jsons)) = col.inner.udf_call_info_with_literals() {
             let arg_names_py = PyList::new_bound(py, arg_names.iter());
+            let literals_py = PyList::empty_bound(py);
+            for opt in &literal_jsons {
+                let item: Bound<'_, PyAny> = match opt {
+                    Some(s) => pyo3::types::PyString::new_bound(py, s.as_str()).into_any(),
+                    None => py.None().into_bound(py),
+                };
+                literals_py.append(item)?;
+            }
             if let Some(result_df) = PYTHON_UDF_EXECUTOR.with(|cell| -> PyResult<Option<PyDataFrame>> {
                 let cb = cell.borrow();
                 let callback = match cb.as_ref() {
@@ -1425,7 +1472,9 @@ impl PyDataFrame {
                     None => return Ok(None),
                 };
                 let df_obj: Bound<'_, PyAny> = unsafe { Bound::from_borrowed_ptr(py, slf.as_ptr()) };
-                let result = callback.bind(py).call1((df_obj, name, udf_name, arg_names_py))?;
+                let result = callback
+                    .bind(py)
+                    .call1((df_obj, name, udf_name, arg_names_py, literals_py))?;
                 let py_df = result.downcast::<PyDataFrame>()?;
                 Ok(Some(PyDataFrame {
                     inner: py_df.borrow().inner.clone(),
@@ -2001,6 +2050,16 @@ impl PyDataFrame {
                 .map(|df| PyDataFrame { inner: df })
                 .map_err(to_py_err)
         } else if let Some(on_arg) = on {
+            if let Ok(condition) = on_arg.downcast::<PyColumn>() {
+                let crossed = self
+                    .inner
+                    .cross_join(&other.inner)
+                    .map_err(to_py_err)?;
+                let filtered = crossed
+                    .filter(condition.borrow().inner.clone().into_expr())
+                    .map_err(to_py_err)?;
+                return Ok(PyDataFrame { inner: filtered });
+            }
             let on_vec = py_join_on_to_vec(on_arg)?;
             let on_refs: Vec<&str> = on_vec.iter().map(|s| s.as_str()).collect();
             self.inner

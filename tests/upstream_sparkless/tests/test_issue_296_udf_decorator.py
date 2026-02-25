@@ -121,7 +121,6 @@ class TestIssue296UdfDecorator:
         finally:
             spark.stop()
 
-    @pytest.mark.skip(reason="UDF in filter not yet supported (filter uses expr, not Python UDF)")
     def test_udf_decorator_in_filter(self):
         """Test UDF decorator used in filter operation."""
         spark = SparkSession.builder.appName("issue-296").getOrCreate()
@@ -433,14 +432,15 @@ class TestIssue296UdfDecorator:
         finally:
             spark.stop()
 
-    @pytest.mark.skip(reason="createDataFrame may infer date_str as date; UDF expects str for strptime")
     def test_udf_decorator_with_date_type(self):
         """Test UDF decorator with DateType return type."""
         spark = SparkSession.builder.appName("issue-296").getOrCreate()
         try:
             from datetime import date
 
-            df = spark.createDataFrame([{"date_str": "2023-01-15"}])
+            # Explicit schema so date_str stays string (UDF strptime expects str)
+            schema = T.StructType([T.StructField("date_str", T.StringType(), True)])
+            df = spark.createDataFrame([{"date_str": "2023-01-15"}], schema=schema)
 
             @udf(T.DateType())
             def parse_date(x):

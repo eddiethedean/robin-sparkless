@@ -12,6 +12,7 @@ pub use transformations::{
     DataFrameNa, SelectItem, filter, order_by, order_by_exprs, select, select_items,
     select_with_exprs, with_column,
 };
+pub(crate) use transformations::literal_value_to_serde_value;
 
 use crate::column::Column;
 use crate::error::{EngineError, polars_to_core_error};
