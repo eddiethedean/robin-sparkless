@@ -5,11 +5,12 @@ try:
     _mod = __import__("sparkless._native", fromlist=[
         "SparklessError", "PySparkSession", "PySparkSessionBuilder", "PyDataFrame",
         "PyColumn", "PyGroupedData", "PyDataFrameReader", "PyDataFrameWriter",
-        "column", "lit_i64", "lit_str", "lit_bool", "lit_f64", "lit_null",
+        "column", "lit", "lit_i64", "lit_str", "lit_bool", "lit_f64", "lit_null",
         "upper", "lower", "substring", "trim", "cast", "when",
         "count", "sum", "avg", "min", "max",
         "regexp_replace", "regexp_extract", "regexp_extract_all", "regexp_like",
-        "split", "coalesce",
+        "split", "coalesce", "format_string", "greatest", "least",
+        "array_distinct", "posexplode",
         "to_timestamp", "to_date", "current_date", "datediff", "unix_timestamp", "from_unixtime",
         "year", "month", "dayofmonth", "dayofweek", "date_add", "date_sub", "date_format",
     ])
@@ -17,11 +18,12 @@ except ImportError:
     _mod = __import__("_native", fromlist=[
         "SparklessError", "PySparkSession", "PySparkSessionBuilder", "PyDataFrame",
         "PyColumn", "PyGroupedData", "PyDataFrameReader", "PyDataFrameWriter",
-        "column", "lit_i64", "lit_str", "lit_bool", "lit_f64", "lit_null",
+        "column", "lit", "lit_i64", "lit_str", "lit_bool", "lit_f64", "lit_null",
         "upper", "lower", "substring", "trim", "cast", "when",
         "count", "sum", "avg", "min", "max",
         "regexp_replace", "regexp_extract", "regexp_extract_all", "regexp_like",
-        "split", "coalesce",
+        "split", "coalesce", "format_string", "greatest", "least",
+        "array_distinct", "posexplode",
         "to_timestamp", "to_date", "current_date", "datediff", "unix_timestamp", "from_unixtime",
         "year", "month", "dayofmonth", "dayofweek", "date_add", "date_sub", "date_format",
     ])
@@ -36,6 +38,7 @@ _DataFrameReader = _mod.PyDataFrameReader
 _DataFrameWriter = _mod.PyDataFrameWriter
 column = _mod.column
 col = column  # PySpark alias
+lit = _mod.lit
 lit_i64 = _mod.lit_i64
 lit_str = _mod.lit_str
 lit_bool = _mod.lit_bool
@@ -59,6 +62,33 @@ regexp_extract_all = _mod.regexp_extract_all
 regexp_like = _mod.regexp_like
 split = _mod.split
 coalesce = _mod.coalesce
+format_string = _mod.format_string
+printf = format_string  # PySpark alias
+greatest = _mod.greatest
+least = _mod.least
+array_distinct = _mod.array_distinct
+
+
+def posexplode(col_or_name):
+    """Explode array with position. Accepts column name (str) or Column. Returns (pos_col, val_col) or wrapper with .alias(pos_name, val_name) for select."""
+    if isinstance(col_or_name, str):
+        col_or_name = column(col_or_name)
+    pos_col, val_col = _mod.posexplode(col_or_name)
+
+    class _PosexplodeResult:
+        def __init__(self, pos, val):
+            self._pos = pos
+            self._val = val
+
+        def alias(self, pos_name, val_name):
+            return (self._pos.alias(pos_name), self._val.alias(val_name))
+
+        def __iter__(self):
+            return iter((self._pos, self._val))
+
+    return _PosexplodeResult(pos_col, val_col)
+
+
 to_timestamp = _mod.to_timestamp
 to_date = _mod.to_date
 current_date = _mod.current_date

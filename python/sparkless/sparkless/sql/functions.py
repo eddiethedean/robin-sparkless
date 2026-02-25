@@ -3,11 +3,18 @@ import getpass
 
 from sparkless import (
     column as col,
+    lit,
     lit_i64,
     lit_str,
     lit_bool,
     lit_f64,
     lit_null,
+    format_string as _format_string,
+    printf as _printf,
+    greatest as _greatest,
+    least as _least,
+    array_distinct as _array_distinct,
+    posexplode as _posexplode,
     upper,
     lower,
     substring,
@@ -97,6 +104,12 @@ __all__ = [
     "regexp_like",
     "split",
     "coalesce",
+    "format_string",
+    "printf",
+    "greatest",
+    "least",
+    "array_distinct",
+    "posexplode",
     "expr",
     "current_database",
     "current_schema",
@@ -167,6 +180,40 @@ def coalesce(*cols):
     if not cols:
         raise ValueError("coalesce requires at least one column")
     return _coalesce(*[_as_col(c) for c in cols])
+
+
+def format_string(fmt, *cols):
+    """Printf-style format (PySpark format_string)."""
+    if not cols:
+        raise ValueError("format_string requires at least one column")
+    return _format_string(fmt, *[_as_col(c) for c in cols])
+
+
+printf = format_string  # PySpark alias
+
+
+def greatest(*cols):
+    """Greatest of columns per row (PySpark greatest)."""
+    if not cols:
+        raise ValueError("greatest requires at least one column")
+    return _greatest(*[_as_col(c) for c in cols])
+
+
+def least(*cols):
+    """Least of columns per row (PySpark least)."""
+    if not cols:
+        raise ValueError("least requires at least one column")
+    return _least(*[_as_col(c) for c in cols])
+
+
+def array_distinct(col):
+    """Distinct elements in array column (PySpark array_distinct)."""
+    return _array_distinct(_as_col(col))
+
+
+def posexplode(col):
+    """Explode array with position (PySpark posexplode). Returns (pos_col, val_col) or wrapper with .alias()."""
+    return _posexplode(col)
 
 
 def expr(sql_expr: str):
@@ -241,20 +288,7 @@ def date_sub(column, n):
 def date_format(column, fmt):
     return _date_format(_as_col(column), fmt)
 
-# Alias for PySpark compatibility
-def lit(value):
-    """Return a Column with the given value. Use lit_i64, lit_str, lit_bool, lit_f64 for typed literals."""
-    if isinstance(value, bool):
-        return lit_bool(value)
-    if isinstance(value, int):
-        return lit_i64(value)
-    if isinstance(value, float):
-        return lit_f64(value)
-    if value is None:
-        return lit_null("string")
-    if isinstance(value, str):
-        return lit_str(value)
-    return lit_str(str(value))
+# lit is imported from sparkless (native polymorphic implementation)
 
 
 def _active_session():
