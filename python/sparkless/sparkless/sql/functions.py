@@ -35,6 +35,7 @@ from sparkless import (
     date_add as _date_add,
     date_sub as _date_sub,
     date_format as _date_format,
+    concat as _concat,
 )
 from sparkless.errors import PySparkValueError
 
@@ -87,6 +88,7 @@ __all__ = [
     "date_add",
     "date_sub",
     "date_format",
+    "concat",
     "floor",
     "regexp_replace",
     "regexp_extract_all",
@@ -106,6 +108,11 @@ __all__ = [
 # --- Argument coercions (PySpark parity) ---
 def _as_col(c):
     return col(c) if isinstance(c, str) else c
+
+
+def concat(*columns):
+    """Concatenate columns as strings (PySpark concat)."""
+    return _concat(*columns)
 
 
 def count(c="*"):
