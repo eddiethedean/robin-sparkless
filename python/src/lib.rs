@@ -18,6 +18,20 @@ fn to_py_err(e: impl std::fmt::Display) -> PyErr {
     SparklessError::new_err(e.to_string())
 }
 
+/// Extract allowMissingColumns (PySpark camelCase) or allow_missing_columns from kwargs.
+fn extract_allow_missing_columns(kwargs: Option<&Bound<'_, PyDict>>) -> PyResult<bool> {
+    let Some(kw) = kwargs else {
+        return Ok(false);
+    };
+    if let Some(v) = kw.get_item("allowMissingColumns")? {
+        return v.extract::<bool>();
+    }
+    if let Some(v) = kw.get_item("allow_missing_columns")? {
+        return v.extract::<bool>();
+    }
+    Ok(false)
+}
+
 create_exception!(_native, SparklessError, pyo3::exceptions::PyRuntimeError, "Sparkless error");
 
 /// Convert serde_json::Value to Python object.
@@ -1622,9 +1636,13 @@ impl PyDataFrame {
         self.union_all(other)
     }
 
-    #[pyo3(name = "unionByName")]
-    fn union_by_name(&self, other: &PyDataFrame, allow_missing_columns: Option<bool>) -> PyResult<PyDataFrame> {
-        let allow = allow_missing_columns.unwrap_or(false);
+    #[pyo3(name = "unionByName", signature = (other, **kwargs))]
+    fn union_by_name(
+        &self,
+        other: &PyDataFrame,
+        kwargs: Option<&Bound<'_, PyDict>>,
+    ) -> PyResult<PyDataFrame> {
+        let allow = extract_allow_missing_columns(kwargs)?;
         self.inner
             .union_by_name(&other.inner, allow)
             .map(|df| PyDataFrame { inner: df })
