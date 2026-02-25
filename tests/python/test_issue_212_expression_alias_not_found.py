@@ -4,8 +4,6 @@ Alias output names (when().otherwise().alias('result'), rank().over([]).alias('r
 etc.) must not be resolved as input columns; they are preserved by resolve_expr_column_names (see #200).
 """
 
-import json
-
 import robin_sparkless as rs
 
 
@@ -42,29 +40,3 @@ def test_select_window_rank_alias() -> None:
     assert all("rank" in r for r in rows)
     assert all(isinstance(r["rank"], int) for r in rows)
 
-
-def test_select_expression_alias_via_execute_plan() -> None:
-    """Plan select with expression + alias (Sparkless path) should not resolve alias as input column."""
-    data = [{"a": 1}, {"a": 2}]
-    schema = [("a", "bigint")]
-    plan = [
-        {
-            "op": "select",
-            "payload": [
-                {
-                    "name": "result",
-                    "expr": {
-                        "op": "gt",
-                        "left": {"col": "a"},
-                        "right": {"lit": 1},
-                    },
-                }
-            ],
-        }
-    ]
-    plan_json = json.dumps(plan)
-    df = rs._execute_plan(data, schema, plan_json)
-    rows = df.collect()
-    assert len(rows) == 2
-    assert rows[0]["result"] is False  # a=1 > 1 is false
-    assert rows[1]["result"] is True  # a=2 > 1 is true

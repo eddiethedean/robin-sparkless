@@ -144,6 +144,12 @@ def __getattr__(name):
     if name == "lead":
         import sparkless.sql.functions as f
         return f.lead
+    if name == "first_value":
+        import sparkless.sql.functions as f
+        return f.first_value
+    if name == "last_value":
+        import sparkless.sql.functions as f
+        return f.last_value
     if name in ("asc", "desc"):
         import sparkless.sql.functions as f
         return getattr(f, name)
@@ -165,6 +171,8 @@ __all__ = [
     "ntile",
     "lag",
     "lead",
+    "first_value",
+    "last_value",
 ]
 
 
