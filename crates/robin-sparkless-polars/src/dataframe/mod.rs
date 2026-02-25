@@ -930,6 +930,27 @@ impl DataFrame {
         )
     }
 
+    /// Join with different column names on left and right (PySpark left_on/right_on).
+    pub fn join_with_keys(
+        &self,
+        other: &DataFrame,
+        left_on: Vec<&str>,
+        right_on: Vec<&str>,
+        how: JoinType,
+    ) -> Result<DataFrame, PolarsError> {
+        let left_resolved: Vec<String> = left_on
+            .iter()
+            .map(|c| self.resolve_column_name(c))
+            .collect::<Result<Vec<_>, _>>()?;
+        let right_resolved: Vec<String> = right_on
+            .iter()
+            .map(|c| other.resolve_column_name(c))
+            .collect::<Result<Vec<_>, _>>()?;
+        let left_refs: Vec<&str> = left_resolved.iter().map(|s| s.as_str()).collect();
+        let right_refs: Vec<&str> = right_resolved.iter().map(|s| s.as_str()).collect();
+        join(self, other, left_refs, right_refs, how, self.case_sensitive)
+    }
+
     /// Order by columns (sort).
     /// When `spark.sql.caseSensitive` is false (default), column names are resolved
     /// case-insensitively so that `order_by("value")` and `order_by("VALUE")` both
@@ -1962,6 +1983,18 @@ fn is_map_format(dtype: &DataType) -> bool {
     false
 }
 
+/// When map value was unified to String by concat_list, try to recover number/bool by parsing as JSON (#3.6).
+fn map_value_string_to_json(s: &str) -> JsonValue {
+    if let Ok(parsed) = serde_json::from_str::<JsonValue>(s) {
+        match &parsed {
+            JsonValue::Number(_) | JsonValue::Bool(_) => return parsed,
+            JsonValue::String(_) => return parsed,
+            _ => {}
+        }
+    }
+    JsonValue::String(s.to_string())
+}
+
 /// Round float to integer for JSON when within epsilon of an integer (#747, #748: 2**3 => 8 not 7.999...).
 /// Use scale-tolerant epsilon so large power results (e.g. 2**30, 3**5) also round (#818, #820, #821, #823, #827).
 fn float_to_json_number(f: f64) -> JsonValue {
@@ -2071,7 +2104,17 @@ fn any_value_to_json(av: &AnyValue<'_>, dtype: &DataType) -> JsonValue {
                                             .map(|s| s.to_string())
                                             .or_else(|| Some(fld_av.to_string()));
                                     } else if fld.name == "value" {
-                                        v = Some(any_value_to_json(&fld_av, &fld.dtype));
+                                        v = Some(
+                                            if matches!(fld.dtype, DataType::String) {
+                                                if let Some(s) = fld_av.get_str() {
+                                                    map_value_string_to_json(s)
+                                                } else {
+                                                    any_value_to_json(&fld_av, &fld.dtype)
+                                                }
+                                            } else {
+                                                any_value_to_json(&fld_av, &fld.dtype)
+                                            },
+                                        );
                                     }
                                 }
                                 (k, v)
@@ -2087,7 +2130,17 @@ fn any_value_to_json(av: &AnyValue<'_>, dtype: &DataType) -> JsonValue {
                                             .map(|s| s.to_string())
                                             .or_else(|| Some(fld_av.to_string()));
                                     } else if fld.name == "value" {
-                                        v = Some(any_value_to_json(fld_av, &fld.dtype));
+                                        v = Some(
+                                            if matches!(fld.dtype, DataType::String) {
+                                                if let Some(s) = fld_av.get_str() {
+                                                    map_value_string_to_json(s)
+                                                } else {
+                                                    any_value_to_json(fld_av, &fld.dtype)
+                                                }
+                                            } else {
+                                                any_value_to_json(fld_av, &fld.dtype)
+                                            },
+                                        );
                                     }
                                 }
                                 (k, v)

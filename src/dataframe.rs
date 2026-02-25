@@ -265,6 +265,19 @@ impl DataFrame {
         self.0.join(&other.0, on, how).map(DataFrame)
     }
 
+    /// Join with different column names on left and right (PySpark left_on/right_on).
+    pub fn join_with_keys(
+        &self,
+        other: &DataFrame,
+        left_on: Vec<&str>,
+        right_on: Vec<&str>,
+        how: JoinType,
+    ) -> Result<DataFrame, PolarsError> {
+        self.0
+            .join_with_keys(&other.0, left_on, right_on, how)
+            .map(DataFrame)
+    }
+
     pub fn order_by(
         &self,
         column_names: Vec<&str>,
@@ -782,5 +795,41 @@ impl PivotedGroupedData {
 
     pub fn max(&self, value_col: &str) -> Result<DataFrame, PolarsError> {
         self.0.max(value_col).map(DataFrame)
+    }
+
+    pub fn count_distinct(&self, value_col: &str) -> Result<DataFrame, PolarsError> {
+        self.0.count_distinct(value_col).map(DataFrame)
+    }
+
+    pub fn collect_list(&self, value_col: &str) -> Result<DataFrame, PolarsError> {
+        self.0.collect_list(value_col).map(DataFrame)
+    }
+
+    pub fn collect_set(&self, value_col: &str) -> Result<DataFrame, PolarsError> {
+        self.0.collect_set(value_col).map(DataFrame)
+    }
+
+    pub fn first(&self, value_col: &str) -> Result<DataFrame, PolarsError> {
+        self.0.first(value_col).map(DataFrame)
+    }
+
+    pub fn last(&self, value_col: &str) -> Result<DataFrame, PolarsError> {
+        self.0.last(value_col).map(DataFrame)
+    }
+
+    pub fn stddev(&self, value_col: &str) -> Result<DataFrame, PolarsError> {
+        self.0.stddev(value_col).map(DataFrame)
+    }
+
+    pub fn variance(&self, value_col: &str) -> Result<DataFrame, PolarsError> {
+        self.0.variance(value_col).map(DataFrame)
+    }
+
+    pub fn mean(&self, value_col: &str) -> Result<DataFrame, PolarsError> {
+        self.0.mean(value_col).map(DataFrame)
+    }
+
+    pub fn agg(&self, exprs: Vec<Expr>) -> Result<DataFrame, PolarsError> {
+        self.0.agg(exprs).map(DataFrame)
     }
 }

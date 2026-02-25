@@ -2,7 +2,7 @@
 
 use pyo3::create_exception;
 use pyo3::prelude::*;
-use pyo3::types::{PyDict, PyList, PyTuple};
+use pyo3::types::{PyBytes, PyDict, PyList, PyTuple};
 use robin_sparkless::dataframe::{JoinType, PivotedGroupedData, SaveMode, WriteFormat, WriteMode};
 use robin_sparkless::functions::{self, asc_from_name, SortOrder, ThenBuilder, WhenBuilder};
 use robin_sparkless::{
@@ -1048,6 +1048,12 @@ fn py_any_to_json(py: Python<'_>, v: &Bound<'_, PyAny>) -> PyResult<JsonValue> {
     if let Ok(s) = v.extract::<String>() {
         return Ok(JsonValue::String(s));
     }
+    if let Ok(bytes) = v.downcast::<PyBytes>() {
+        use base64::Engine;
+        let b: &[u8] = bytes.as_bytes();
+        let encoded = base64::engine::general_purpose::STANDARD.encode(b);
+        return Ok(JsonValue::String(encoded));
+    }
     if let Ok(list) = v.downcast::<PyList>() {
         let mut arr = Vec::with_capacity(list.len());
         for item in list.iter() {
@@ -1076,7 +1082,31 @@ fn infer_schema_from_first_row(
     if !from_pandas {
         keys.sort();
     }
-    Some(keys.into_iter().map(|k| (k.clone(), "string".to_string())).collect())
+    let mut out = Vec::with_capacity(keys.len());
+    for k in &keys {
+        let typ = dict.get_item(k.as_str()).ok().flatten().map(|v| infer_type_from_py_value(&v)).unwrap_or_else(|| "string".to_string());
+        out.push((k.clone(), typ));
+    }
+    Some(out)
+}
+
+fn infer_type_from_py_value(v: &Bound<'_, PyAny>) -> String {
+    if v.is_none() {
+        return "string".to_string();
+    }
+    if v.extract::<bool>().is_ok() {
+        return "boolean".to_string();
+    }
+    if v.extract::<i64>().is_ok() {
+        return "long".to_string();
+    }
+    if v.extract::<f64>().is_ok() {
+        return "double".to_string();
+    }
+    if v.downcast::<PyBytes>().is_ok() {
+        return "binary".to_string();
+    }
+    "string".to_string()
 }
 
 /// PySpark drop(*cols): single str or list of str -> Vec<String>
@@ -1464,6 +1494,7 @@ impl PyDataFrame {
                 DataType::Boolean => mk0("BooleanType"),
                 DataType::Date => mk0("DateType"),
                 DataType::Timestamp => mk0("TimestampType"),
+                DataType::Binary => mk0("BinaryType"),
                 DataType::Array(elem) => {
                     let elem_py = dtype_to_py(py, types_mod, elem)?;
                     Ok(types_mod
@@ -1541,6 +1572,7 @@ impl PyDataFrame {
                 DataType::Boolean => mk0("BooleanType"),
                 DataType::Date => mk0("DateType"),
                 DataType::Timestamp => mk0("TimestampType"),
+                DataType::Binary => mk0("BinaryType"),
                 DataType::Array(elem) => {
                     let elem_py = dtype_to_py(py, types_mod, elem)?;
                     Ok(types_mod
@@ -1914,15 +1946,15 @@ impl PyDataFrame {
         self.distinct(subset)
     }
 
-    #[pyo3(signature = (other, on, how="inner"))]
+    #[pyo3(signature = (other, on=None, how="inner", left_on=None, right_on=None))]
     fn join(
         &self,
         other: &PyDataFrame,
-        on: &Bound<'_, PyAny>,
+        on: Option<&Bound<'_, PyAny>>,
         how: &str,
+        left_on: Option<&Bound<'_, PyAny>>,
+        right_on: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<PyDataFrame> {
-        let on_vec = py_join_on_to_vec(on)?;
-        let on_refs: Vec<&str> = on_vec.iter().map(|s| s.as_str()).collect();
         let how_lower = how.to_lowercase();
         if how_lower == "cross" {
             return self
@@ -1938,10 +1970,28 @@ impl PyDataFrame {
             "outer" | "full" | "full_outer" => JoinType::Outer,
             _ => JoinType::Inner,
         };
-        self.inner
-            .join(&other.inner, on_refs, join_type)
-            .map(|df| PyDataFrame { inner: df })
-            .map_err(to_py_err)
+        let use_left_right = left_on.is_some() && right_on.is_some();
+        if use_left_right {
+            let left_vec = py_join_on_to_vec(left_on.unwrap())?;
+            let right_vec = py_join_on_to_vec(right_on.unwrap())?;
+            let left_refs: Vec<&str> = left_vec.iter().map(|s| s.as_str()).collect();
+            let right_refs: Vec<&str> = right_vec.iter().map(|s| s.as_str()).collect();
+            self.inner
+                .join_with_keys(&other.inner, left_refs, right_refs, join_type)
+                .map(|df| PyDataFrame { inner: df })
+                .map_err(to_py_err)
+        } else if let Some(on_arg) = on {
+            let on_vec = py_join_on_to_vec(on_arg)?;
+            let on_refs: Vec<&str> = on_vec.iter().map(|s| s.as_str()).collect();
+            self.inner
+                .join(&other.inner, on_refs, join_type)
+                .map(|df| PyDataFrame { inner: df })
+                .map_err(to_py_err)
+        } else {
+            Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
+                "join() requires either on= or (left_on= and right_on=)",
+            ))
+        }
     }
 
     #[pyo3(name = "crossJoin")]
@@ -2672,9 +2722,20 @@ impl PyColumn {
                 inner: self.inner.get(&key_col),
             });
         }
+        if let Ok(key_col) = index_or_key.downcast::<PyColumn>() {
+            return Ok(PyColumn {
+                inner: self.inner.get(&key_col.borrow().inner),
+            });
+        }
         Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
-            "getItem expects int (array index) or str (map key)",
+            "getItem expects int (array index), str (map key), or Column (map key)",
         ))
+    }
+
+    /// col[key] -> map get or array getItem. Key: int (array index), str (map key), or Column (map key).
+    #[pyo3(name = "__getitem__")]
+    fn getitem(&self, index_or_key: &Bound<'_, PyAny>) -> PyResult<PyColumn> {
+        self.get_item_camel(index_or_key)
     }
 
     fn array_distinct(&self) -> PyColumn {
@@ -3290,6 +3351,100 @@ impl PyPivotedGroupedData {
     fn count(&self) -> PyResult<PyDataFrame> {
         self.inner
             .count()
+            .map(|df| PyDataFrame { inner: df })
+            .map_err(to_py_err)
+    }
+
+    fn count_distinct(&self, value_col: &str) -> PyResult<PyDataFrame> {
+        self.inner
+            .count_distinct(value_col)
+            .map(|df| PyDataFrame { inner: df })
+            .map_err(to_py_err)
+    }
+
+    fn collect_list(&self, value_col: &str) -> PyResult<PyDataFrame> {
+        self.inner
+            .collect_list(value_col)
+            .map(|df| PyDataFrame { inner: df })
+            .map_err(to_py_err)
+    }
+
+    fn collect_set(&self, value_col: &str) -> PyResult<PyDataFrame> {
+        self.inner
+            .collect_set(value_col)
+            .map(|df| PyDataFrame { inner: df })
+            .map_err(to_py_err)
+    }
+
+    fn first(&self, value_col: &str) -> PyResult<PyDataFrame> {
+        self.inner
+            .first(value_col)
+            .map(|df| PyDataFrame { inner: df })
+            .map_err(to_py_err)
+    }
+
+    fn last(&self, value_col: &str) -> PyResult<PyDataFrame> {
+        self.inner
+            .last(value_col)
+            .map(|df| PyDataFrame { inner: df })
+            .map_err(to_py_err)
+    }
+
+    fn stddev(&self, value_col: &str) -> PyResult<PyDataFrame> {
+        self.inner
+            .stddev(value_col)
+            .map(|df| PyDataFrame { inner: df })
+            .map_err(to_py_err)
+    }
+
+    fn variance(&self, value_col: &str) -> PyResult<PyDataFrame> {
+        self.inner
+            .variance(value_col)
+            .map(|df| PyDataFrame { inner: df })
+            .map_err(to_py_err)
+    }
+
+    fn mean(&self, value_col: &str) -> PyResult<PyDataFrame> {
+        self.inner
+            .mean(value_col)
+            .map(|df| PyDataFrame { inner: df })
+            .map_err(to_py_err)
+    }
+
+    #[pyo3(signature = (*exprs))]
+    fn agg(&self, exprs: &Bound<'_, PyTuple>) -> PyResult<PyDataFrame> {
+        fn push_expr(item: &Bound<'_, PyAny>, out: &mut Vec<robin_sparkless::Expr>) -> PyResult<()> {
+            if let Ok(c) = item.downcast::<PyColumn>() {
+                out.push(c.borrow().inner.clone().into_expr());
+                return Ok(());
+            }
+            if let Ok(list) = item.downcast::<PyList>() {
+                for sub in list.iter() {
+                    push_expr(&sub, out)?;
+                }
+                return Ok(());
+            }
+            if let Ok(tup) = item.downcast::<PyTuple>() {
+                for sub in tup.iter() {
+                    push_expr(&sub, out)?;
+                }
+                return Ok(());
+            }
+            Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+                "pivot.agg() expects Column expressions (e.g. F.sum(\"col\").alias(\"name\"))",
+            ))
+        }
+        if exprs.len() == 0 {
+            return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
+                "pivot.agg() requires at least one expression",
+            ));
+        }
+        let mut rust_exprs: Vec<robin_sparkless::Expr> = Vec::new();
+        for item in exprs.iter() {
+            push_expr(&item, &mut rust_exprs)?;
+        }
+        self.inner
+            .agg(rust_exprs)
             .map(|df| PyDataFrame { inner: df })
             .map_err(to_py_err)
     }
@@ -4094,15 +4249,35 @@ fn concat_ws(separator: &str, columns: &Bound<'_, PyTuple>) -> PyResult<PyColumn
     })
 }
 
+/// Convert a single Python value to Column: PyColumn -> as-is, str -> col(name), else -> lit(value).
+fn array_item_to_column(item: &Bound<'_, PyAny>) -> PyResult<Column> {
+    if let Ok(py_col) = item.downcast::<PyColumn>() {
+        return Ok(py_col.borrow().inner.clone());
+    }
+    if let Ok(name) = item.extract::<String>() {
+        return Ok(robin_sparkless::functions::col(&name));
+    }
+    // Literals: int, float, bool, etc. -> lit(value)
+    let lit_col = lit(item)?;
+    Ok(lit_col.inner)
+}
+
 #[pyfunction]
 #[pyo3(signature = (*columns))]
 fn array(columns: &Bound<'_, PyTuple>) -> PyResult<PyColumn> {
-    let mut cols: Vec<Column> = Vec::with_capacity(columns.len());
+    let mut cols: Vec<Column> = Vec::new();
     for item in columns.iter() {
-        let py_col = item.downcast::<PyColumn>().map_err(|_| {
-            PyErr::new::<pyo3::exceptions::PyTypeError, _>("array expects Column expressions")
-        })?;
-        cols.push(py_col.borrow().inner.clone());
+        if let Ok(list) = item.downcast::<PyList>() {
+            for sub in list.iter() {
+                cols.push(array_item_to_column(&sub)?);
+            }
+        } else if let Ok(tup) = item.downcast::<PyTuple>() {
+            for sub in tup.iter() {
+                cols.push(array_item_to_column(&sub)?);
+            }
+        } else {
+            cols.push(array_item_to_column(&item)?);
+        }
     }
     let refs: Vec<&Column> = cols.iter().collect();
     functions::array(&refs)

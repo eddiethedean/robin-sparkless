@@ -9,6 +9,7 @@ pub enum DataType {
     Boolean,
     Date,
     Timestamp,
+    Binary,
     Array(Box<DataType>),
     Map(Box<DataType>, Box<DataType>),
     Struct(Vec<StructField>),

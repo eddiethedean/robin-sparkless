@@ -71,46 +71,37 @@ This checklist tracks fixes needed to reduce test failures. Items are grouped by
 ## Lower Priority
 
 ### 10. Map column subscript
-- [ ] Implement `col["key"]` for map columns (PyColumn `__getitem__`)
+- [x] Implement `col["key"]` for map columns (PyColumn `__getitem__`); get_item_camel accepts PyColumn key
 - **Affected:** ~5 tests in `test_issue_441_map_column_subscript.py`, `test_issue_440_create_map_list.py`
-- **Error:** `TypeError: 'builtins.PyColumn' object is not subscriptable`
+- **Note:** Some failures remain (backend map repr as struct / UDF output type).
 
 ### 11. Pivot API methods
-- [ ] Add `count_distinct` to PyPivotedGroupedData
-- [ ] Add `collect_list`
-- [ ] Add `collect_set`
-- [ ] Add `first`
-- [ ] Add `last`
-- [ ] Add `agg`
-- [ ] Add `stddev`
-- [ ] Add `variance`
-- [ ] Add `mean`
-- **Affected:** ~10 tests in `test_pivot_grouped_data.py`
+- [x] Add `count_distinct`, `collect_list`, `collect_set`, `first`, `last`, `stddev`, `variance`, `mean`, `agg` to PyPivotedGroupedData
+- **Affected:** ~10 tests in `test_pivot_grouped_data.py` — all 16 pivot tests pass.
 
 ### 12. Join `left_on` / `right_on`
-- [ ] Support join with `left_on` and `right_on` (different column names)
+- [x] Support join with `left_on` and `right_on` (different column names); `join(other, on=None, how=..., left_on=None, right_on=None)`
 - **Affected:** ~2 tests in `test_join_type_coercion.py`
-- **Error:** `TypeError: join(on=...) expects str or list of str`
+- **Note:** Condition form `join(other, left_col == right_col)` still unsupported.
 
 ### 13. Struct type support in createDataFrame
-- [ ] Support nested struct types in `create_dataframe_from_rows`
-- [ ] Fix `json_values_to_series: unsupported type 'struct<...'`
+- [x] Support nested struct types in `create_dataframe_from_rows`
+- [x] Fix `json_values_to_series: unsupported type 'struct<...'` (bracket-aware `parse_struct_fields` for nested `struct<...>`)
 - **Affected:** ~15 tests in `test_withfield.py`, `test_array_type_robust.py`
+- **Note:** Some withfield tests still fail: schema reporting (StructType vs StringType after withColumn) and null struct as `None` vs `{field: None, ...}`.
 
 ### 14. `array()` with literals
-- [ ] Support `array(1, 2, 3)` and `array([1, 2, 3])` (literals, not just Columns)
+- [x] Support `array(1, 2, 3)` and `array([1, 2, 3])` (literals, not just Columns)
 - **Affected:** ~8 tests in `test_array_parameter_formats.py`
-- **Error:** `TypeError: array expects Column expressions`
+- **Note:** A few failures remain from mixed-type array elements being stringified on collect (row serialization), not the array() API.
 
 ### 15. `create_map` type preservation
-- [ ] Preserve numeric types in map values (not stringify)
-- **Affected:** ~3 tests in `test_create_map.py`
-- **Error:** `AssertionError: assert {'key2': '1'} == {'key2': 1}`
+- [x] Preserve numeric types in map values (not stringify) — map value strings parsed as JSON on collect when dtype was unified to String
+- **Affected:** ~3 tests in `test_create_map.py` — all 43 create_map tests pass.
 
 ### 16. BinaryType
-- [ ] Add `BinaryType` to spark_types and export
-- **Affected:** 1 test
-- **Error:** `ImportError: cannot import name 'BinaryType' from 'sparkless.spark_types'`
+- [x] Add `BinaryType` to spark_types and sql/types; infer bytes as binary in createDataFrame; schema exposes BinaryType
+- **Affected:** 1 test — `test_create_dataframe_with_bytes` passes.
 
 ---
 
