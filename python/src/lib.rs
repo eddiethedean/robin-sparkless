@@ -1252,11 +1252,21 @@ impl PyDataFrame {
             push_item(&item, &mut tmp, &mut name_boxes)?;
         }
 
+        let all_columns = self.inner.columns().map_err(to_py_err)?;
         let mut items: Vec<SelectItem<'_>> = Vec::with_capacity(tmp.len());
         for t in tmp {
             match t {
                 Tmp::Expr(e) => items.push(SelectItem::Expr(e)),
-                Tmp::NameIdx(i) => items.push(SelectItem::ColumnName(&name_boxes[i])),
+                Tmp::NameIdx(i) => {
+                    let name = name_boxes[i].as_ref();
+                    if name == "*" {
+                        for c in &all_columns {
+                            items.push(SelectItem::ColumnName(c.as_str()));
+                        }
+                    } else {
+                        items.push(SelectItem::ColumnName(name));
+                    }
+                }
             }
         }
 
