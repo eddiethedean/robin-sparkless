@@ -515,6 +515,16 @@ impl Column {
         Self::from_expr(self.expr().clone().neq(other), None)
     }
 
+    /// Logical AND of two boolean columns (PySpark and_).
+    pub fn and_(&self, other: &Column) -> Column {
+        Self::from_expr(self.expr().clone().and(other.expr().clone()), None)
+    }
+
+    /// Logical OR of two boolean columns (PySpark or_).
+    pub fn or_(&self, other: &Column) -> Column {
+        Self::from_expr(self.expr().clone().or(other.expr().clone()), None)
+    }
+
     // Equality comparison with special handling for string-vs-numeric literals (issue #235).
     //
     // When comparing a column to a numeric literal (e.g. col("s") == lit(123)), Polars

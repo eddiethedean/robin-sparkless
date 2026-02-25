@@ -2337,15 +2337,29 @@ impl PyColumn {
     fn __and__(&self, other: &Bound<'_, PyAny>) -> PyResult<PyColumn> {
         let rhs = py_any_to_column(other)?;
         Ok(PyColumn {
-            inner: self.inner.bit_and(&rhs),
+            inner: self.inner.and_(&rhs),
         })
     }
 
     fn __rand__(&self, other: &Bound<'_, PyAny>) -> PyResult<PyColumn> {
         let lhs = py_any_to_column(other)?;
         Ok(PyColumn {
-            inner: lhs.bit_and(&self.inner),
+            inner: lhs.and_(&self.inner),
         })
+    }
+
+    /// Logical AND of two boolean columns. PySpark and_.
+    fn and_(&self, other: &PyColumn) -> PyColumn {
+        PyColumn {
+            inner: self.inner.and_(&other.inner),
+        }
+    }
+
+    /// Logical OR of two boolean columns. PySpark or_.
+    fn or_(&self, other: &PyColumn) -> PyColumn {
+        PyColumn {
+            inner: self.inner.or_(&other.inner),
+        }
     }
 
     fn gt(&self, other: &PyColumn) -> PyColumn {
@@ -2629,6 +2643,21 @@ impl PyColumn {
     fn rlike(&self, pattern: &str) -> PyColumn {
         PyColumn {
             inner: self.inner.regexp_like(pattern),
+        }
+    }
+
+    /// Extract first match of regex pattern. PySpark regexp_extract. idx=0 is full match.
+    #[pyo3(signature = (pattern, idx=0))]
+    fn regexp_extract(&self, pattern: &str, idx: usize) -> PyColumn {
+        PyColumn {
+            inner: self.inner.regexp_extract(pattern, idx),
+        }
+    }
+
+    /// Replace first match of regex pattern. PySpark regexp_replace.
+    fn regexp_replace(&self, pattern: &str, replacement: &str) -> PyColumn {
+        PyColumn {
+            inner: self.inner.regexp_replace(pattern, replacement),
         }
     }
 
