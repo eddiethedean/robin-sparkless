@@ -46,7 +46,7 @@ lower = _mod.lower
 substring = _mod.substring
 trim = _mod.trim
 cast = _mod.cast
-when = _mod.when
+_native_when = _mod.when
 count = _mod.count
 sum = _mod.sum
 avg = _mod.avg
@@ -60,7 +60,6 @@ to_timestamp = _mod.to_timestamp
 to_date = _mod.to_date
 current_date = _mod.current_date
 datediff = _mod.datediff
-concat = _mod.concat
 unix_timestamp = _mod.unix_timestamp
 from_unixtime = _mod.from_unixtime
 year = _mod.year
@@ -70,6 +69,7 @@ dayofweek = _mod.dayofweek
 date_add = _mod.date_add
 date_sub = _mod.date_sub
 date_format = _mod.date_format
+concat = _mod.concat
 
 # PySpark-style names
 SparkSession = _SparkSession
@@ -97,6 +97,12 @@ def __getattr__(name):
     if name in ("asc", "desc"):
         import sparkless.sql.functions as f
         return getattr(f, name)
+    if name == "lit":
+        import sparkless.sql.functions as f
+        return f.lit
+    if name == "udf":
+        import sparkless.sql.functions as f
+        return f.udf
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
@@ -105,11 +111,19 @@ __all__ = [
     "SparklessError",
     "sql",
     "col",
+    "lit",
     "F",
     "functions",
     "Window",
     "row_number",
+    "udf",
 ]
+
+
+def when(condition, value=None):
+    """PySpark-compatible when(). Accepts Column or str condition, optional value."""
+    from sparkless.sql.functions import when as _when
+    return _when(condition, value)
 
 
 def create_map(*cols):

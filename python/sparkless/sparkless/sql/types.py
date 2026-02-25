@@ -96,8 +96,12 @@ class MapType(DataType):
 
 
 class DecimalType(DataType):
+    def __init__(self, precision=10, scale=0):
+        self.precision = precision
+        self.scale = scale
+
     def simpleString(self) -> str:
-        return "decimal"
+        return f"decimal({self.precision},{self.scale})"
 
 
 class StructField:
@@ -185,8 +189,8 @@ class Row(tuple):
         return list(self)
 
     def __iter__(self):
-        # Iterate over keys so that set(Row) and dict(Row) behave mapping-like in tests.
-        return iter(self.__dict__.get("_fields", []))
+        # Iterate over tuple values (PySpark parity: list(row) gives values).
+        return super().__iter__()
 
 
 __all__ = [
