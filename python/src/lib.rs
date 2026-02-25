@@ -1631,7 +1631,7 @@ impl PyDataFrame {
             .map_err(to_py_err)
     }
 
-    #[pyo3(name = "selectExpr")]
+    #[pyo3(name = "selectExpr", signature = (*exprs))]
     fn select_expr(&self, _py: Python<'_>, exprs: &Bound<'_, PyTuple>) -> PyResult<PyDataFrame> {
         let mut exprs_vec: Vec<String> = Vec::with_capacity(exprs.len());
         for item in exprs.iter() {
