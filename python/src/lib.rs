@@ -2120,6 +2120,17 @@ impl PyColumn {
         ))
     }
 
+    fn array_distinct(&self) -> PyColumn {
+        PyColumn {
+            inner: functions::array_distinct(&self.inner),
+        }
+    }
+
+    fn posexplode(&self) -> (PyColumn, PyColumn) {
+        let (pos, val) = functions::posexplode(&self.inner);
+        (PyColumn { inner: pos }, PyColumn { inner: val })
+    }
+
     #[pyo3(signature = (*values))]
     fn isin(&self, values: &Bound<'_, PyTuple>) -> PyResult<PyColumn> {
         let mut expanded: Vec<Py<PyAny>> = Vec::new();
@@ -2420,6 +2431,50 @@ fn lit_f64(value: f64) -> PyColumn {
 fn lit_null(dtype: &str) -> PyResult<PyColumn> {
     let c = robin_sparkless::functions::lit_null(dtype).map_err(to_py_err)?;
     Ok(PyColumn { inner: c })
+}
+
+/// Polymorphic lit: dispatches to lit_i64, lit_str, lit_f64, lit_bool based on Python type.
+#[pyfunction]
+fn lit(value: &Bound<'_, PyAny>) -> PyResult<PyColumn> {
+    let py = value.py();
+    if value.is_none() {
+        return lit_null("string");
+    }
+    if let Ok(b) = value.extract::<bool>() {
+        return Ok(PyColumn {
+            inner: robin_sparkless::functions::lit_bool(b),
+        });
+    }
+    if let Ok(i) = value.extract::<i64>() {
+        return Ok(PyColumn {
+            inner: robin_sparkless::functions::lit_i64(i),
+        });
+    }
+    if let Ok(f) = value.extract::<f64>() {
+        return Ok(PyColumn {
+            inner: robin_sparkless::functions::lit_f64(f),
+        });
+    }
+    if let Ok(s) = value.extract::<String>() {
+        return Ok(PyColumn {
+            inner: robin_sparkless::functions::lit_str(&s),
+        });
+    }
+    // datetime.date, datetime.datetime: convert to string for now (full support later)
+    if let Ok(obj) = value.getattr("isoformat") {
+        if obj.is_callable() {
+            if let Ok(s) = obj.call0() {
+                if let Ok(iso) = s.extract::<String>() {
+                    return Ok(PyColumn {
+                        inner: robin_sparkless::functions::lit_str(&iso),
+                    });
+                }
+            }
+        }
+    }
+    Ok(PyColumn {
+        inner: robin_sparkless::functions::lit_str(&value.repr()?.to_string()),
+    })
 }
 
 #[pyfunction]
@@ -2793,6 +2848,85 @@ fn coalesce(columns: &Bound<'_, PyTuple>) -> PyResult<PyColumn> {
 }
 
 #[pyfunction]
+#[pyo3(signature = (format, *columns))]
+fn format_string(format: &str, columns: &Bound<'_, PyTuple>) -> PyResult<PyColumn> {
+    let mut cols: Vec<Column> = Vec::with_capacity(columns.len());
+    for item in columns.iter() {
+        let py_col = item.downcast::<PyColumn>().map_err(|_| {
+            PyErr::new::<pyo3::exceptions::PyTypeError, _>("format_string expects Column expressions")
+        })?;
+        cols.push(py_col.borrow().inner.clone());
+    }
+    if cols.is_empty() {
+        return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
+            "format_string requires at least one column",
+        ));
+    }
+    let refs: Vec<&Column> = cols.iter().collect();
+    Ok(PyColumn {
+        inner: functions::format_string(format, &refs),
+    })
+}
+
+#[pyfunction]
+#[pyo3(signature = (*columns))]
+fn greatest(columns: &Bound<'_, PyTuple>) -> PyResult<PyColumn> {
+    let mut cols: Vec<Column> = Vec::with_capacity(columns.len());
+    for item in columns.iter() {
+        let py_col = item.downcast::<PyColumn>().map_err(|_| {
+            PyErr::new::<pyo3::exceptions::PyTypeError, _>("greatest expects Column expressions")
+        })?;
+        cols.push(py_col.borrow().inner.clone());
+    }
+    if cols.is_empty() {
+        return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
+            "greatest requires at least one column",
+        ));
+    }
+    let refs: Vec<&Column> = cols.iter().collect();
+    functions::greatest(&refs)
+        .map(|c| PyColumn { inner: c })
+        .map_err(to_py_err)
+}
+
+#[pyfunction]
+#[pyo3(signature = (*columns))]
+fn least(columns: &Bound<'_, PyTuple>) -> PyResult<PyColumn> {
+    let mut cols: Vec<Column> = Vec::with_capacity(columns.len());
+    for item in columns.iter() {
+        let py_col = item.downcast::<PyColumn>().map_err(|_| {
+            PyErr::new::<pyo3::exceptions::PyTypeError, _>("least expects Column expressions")
+        })?;
+        cols.push(py_col.borrow().inner.clone());
+    }
+    if cols.is_empty() {
+        return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
+            "least requires at least one column",
+        ));
+    }
+    let refs: Vec<&Column> = cols.iter().collect();
+    functions::least(&refs)
+        .map(|c| PyColumn { inner: c })
+        .map_err(to_py_err)
+}
+
+#[pyfunction]
+fn array_distinct(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: functions::array_distinct(&column.inner),
+    }
+}
+
+#[pyfunction]
+fn posexplode(column: &PyColumn) -> (PyColumn, PyColumn) {
+    let (pos, val) = functions::posexplode(&column.inner);
+    (
+        PyColumn { inner: pos },
+        PyColumn { inner: val },
+    )
+}
+
+#[pyfunction]
 fn regexp_like(column: &PyColumn, pattern: &str) -> PyColumn {
     PyColumn {
         inner: functions::regexp_like(&column.inner, pattern),
@@ -2917,6 +3051,7 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyChainedWhenBuilder>()?;
     m.add_function(wrap_pyfunction!(spark_session_builder, m)?)?;
     m.add_function(wrap_pyfunction!(column, m)?)?;
+    m.add_function(wrap_pyfunction!(lit, m)?)?;
     m.add_function(wrap_pyfunction!(lit_i64, m)?)?;
     m.add_function(wrap_pyfunction!(lit_str, m)?)?;
     m.add_function(wrap_pyfunction!(lit_bool, m)?)?;
@@ -2947,6 +3082,11 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(regexp_like, m)?)?;
     m.add_function(wrap_pyfunction!(split, m)?)?;
     m.add_function(wrap_pyfunction!(coalesce, m)?)?;
+    m.add_function(wrap_pyfunction!(format_string, m)?)?;
+    m.add_function(wrap_pyfunction!(greatest, m)?)?;
+    m.add_function(wrap_pyfunction!(least, m)?)?;
+    m.add_function(wrap_pyfunction!(array_distinct, m)?)?;
+    m.add_function(wrap_pyfunction!(posexplode, m)?)?;
     m.add_function(wrap_pyfunction!(to_timestamp, m)?)?;
     m.add_function(wrap_pyfunction!(to_date, m)?)?;
     m.add_function(wrap_pyfunction!(current_date, m)?)?;
