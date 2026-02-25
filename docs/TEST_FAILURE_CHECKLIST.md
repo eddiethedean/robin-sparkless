@@ -21,8 +21,8 @@ This checklist tracks fixes needed to reduce test failures. Items are grouped by
 - **Error:** `TypeError: when() takes 1 positional arguments but 2 were given`
 
 ### 3. `orderBy` with Column expressions
-- [ ] Accept Column expressions in `orderBy()` (e.g. `F.col("x").desc_nulls_last()`)
-- [ ] Add overload or `sort()` that accepts Column objects
+- [x] Accept Column expressions in `orderBy()` (e.g. `F.col("x").desc_nulls_last()`)
+- [x] Add overload or `sort()` that accepts Column objects
 - **Affected:** ~25 tests in `test_column_ordering.py`, `test_column_substr.py`, `test_chained_arithmetic.py`
 - **Error:** `TypeError: orderBy() expects column names as str or list/tuple[str]`
 
@@ -180,7 +180,7 @@ Tests expecting errors that are not raised:
 |-----------------------|-------|-------|-----------|
 | CSV options           | ~60   | ~60   | 0         |
 | when() API            | ~15   | ~15   | 0         |
-| orderBy               | ~25   | 0     | ~25       |
+| orderBy               | ~25   | ~25   | 0         |
 | cast() type           | ~15   | 0     | ~15       |
 | na.fill               | ~25   | 0     | ~25       |
 | fillna types          | ~15   | 0     | ~15       |
