@@ -1943,6 +1943,21 @@ impl PyDataFrame {
             .map_err(to_py_err)
     }
 
+    #[pyo3(signature = (mode=None))]
+    fn explain(&self, mode: Option<&str>) -> PyResult<String> {
+        let _ = mode; // accepted for API parity; not yet used
+        Ok(self.inner.explain())
+    }
+
+    fn print_schema(&self) -> PyResult<String> {
+        self.inner.print_schema().map_err(to_py_err)
+    }
+
+    #[pyo3(name = "printSchema")]
+    fn print_schema_camel(&self) -> PyResult<String> {
+        self.print_schema()
+    }
+
     fn persist(&self) -> PyResult<PyDataFrame> {
         self.inner
             .persist()
