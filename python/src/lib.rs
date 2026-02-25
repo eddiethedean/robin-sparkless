@@ -1829,6 +1829,61 @@ impl PyColumn {
         })
     }
 
+    /// PySpark: col + scalar, col + col (WindowFunction arithmetic parity)
+    fn __add__(&self, other: &Bound<'_, PyAny>) -> PyResult<PyColumn> {
+        let rhs = py_any_to_column(other)?;
+        Ok(PyColumn {
+            inner: self.inner.add(&rhs),
+        })
+    }
+    fn __radd__(&self, other: &Bound<'_, PyAny>) -> PyResult<PyColumn> {
+        let lhs = py_any_to_column(other)?;
+        Ok(PyColumn {
+            inner: lhs.add(&self.inner),
+        })
+    }
+    fn __sub__(&self, other: &Bound<'_, PyAny>) -> PyResult<PyColumn> {
+        let rhs = py_any_to_column(other)?;
+        Ok(PyColumn {
+            inner: self.inner.subtract(&rhs),
+        })
+    }
+    fn __rsub__(&self, other: &Bound<'_, PyAny>) -> PyResult<PyColumn> {
+        let lhs = py_any_to_column(other)?;
+        Ok(PyColumn {
+            inner: lhs.subtract(&self.inner),
+        })
+    }
+    fn __mul__(&self, other: &Bound<'_, PyAny>) -> PyResult<PyColumn> {
+        let rhs = py_any_to_column(other)?;
+        Ok(PyColumn {
+            inner: self.inner.multiply(&rhs),
+        })
+    }
+    fn __rmul__(&self, other: &Bound<'_, PyAny>) -> PyResult<PyColumn> {
+        let lhs = py_any_to_column(other)?;
+        Ok(PyColumn {
+            inner: lhs.multiply(&self.inner),
+        })
+    }
+    fn __truediv__(&self, other: &Bound<'_, PyAny>) -> PyResult<PyColumn> {
+        let rhs = py_any_to_column(other)?;
+        Ok(PyColumn {
+            inner: self.inner.divide(&rhs),
+        })
+    }
+    fn __rtruediv__(&self, other: &Bound<'_, PyAny>) -> PyResult<PyColumn> {
+        let lhs = py_any_to_column(other)?;
+        Ok(PyColumn {
+            inner: lhs.divide(&self.inner),
+        })
+    }
+    fn __neg__(&self) -> PyResult<PyColumn> {
+        Ok(PyColumn {
+            inner: self.inner.negate(),
+        })
+    }
+
     fn is_null(&self) -> PyColumn {
         PyColumn {
             inner: self.inner.is_null(),
@@ -2295,6 +2350,122 @@ fn row_number_window(partition_by: Vec<String>, order_by: Vec<String>) -> PyResu
     let windowed = base.over(&parts[..]);
     Ok(PyColumn { inner: windowed })
 }
+
+#[pyfunction]
+fn percent_rank_window(partition_by: Vec<String>, order_by: Vec<String>) -> PyResult<PyColumn> {
+    if order_by.is_empty() {
+        return Err(SparklessError::new_err(
+            "percent_rank_window: order_by cannot be empty",
+        ));
+    }
+    let first = &order_by[0];
+    let (name, descending) = if let Some(stripped) = first.strip_prefix('-') {
+        (stripped.to_string(), true)
+    } else {
+        (first.clone(), false)
+    };
+    let order_col = Column::new(name);
+    let parts: Vec<&str> = partition_by.iter().map(|s| s.as_str()).collect();
+    let windowed = order_col.percent_rank(&parts[..], descending);
+    Ok(PyColumn { inner: windowed })
+}
+
+#[pyfunction]
+fn rank_window(partition_by: Vec<String>, order_by: Vec<String>) -> PyResult<PyColumn> {
+    if order_by.is_empty() {
+        return Err(SparklessError::new_err(
+            "rank_window: order_by cannot be empty",
+        ));
+    }
+    let first = &order_by[0];
+    let (name, descending) = if let Some(stripped) = first.strip_prefix('-') {
+        (stripped.to_string(), true)
+    } else {
+        (first.clone(), false)
+    };
+    let order_col = Column::new(name);
+    let base = order_col.rank(descending);
+    let parts: Vec<&str> = partition_by.iter().map(|s| s.as_str()).collect();
+    let windowed = base.over(&parts[..]);
+    Ok(PyColumn { inner: windowed })
+}
+
+#[pyfunction]
+fn dense_rank_window(partition_by: Vec<String>, order_by: Vec<String>) -> PyResult<PyColumn> {
+    if order_by.is_empty() {
+        return Err(SparklessError::new_err(
+            "dense_rank_window: order_by cannot be empty",
+        ));
+    }
+    let first = &order_by[0];
+    let (name, descending) = if let Some(stripped) = first.strip_prefix('-') {
+        (stripped.to_string(), true)
+    } else {
+        (first.clone(), false)
+    };
+    let order_col = Column::new(name);
+    let base = order_col.dense_rank(descending);
+    let parts: Vec<&str> = partition_by.iter().map(|s| s.as_str()).collect();
+    let windowed = base.over(&parts[..]);
+    Ok(PyColumn { inner: windowed })
+}
+
+#[pyfunction]
+fn ntile_window(n: u32, partition_by: Vec<String>, order_by: Vec<String>) -> PyResult<PyColumn> {
+    if order_by.is_empty() {
+        return Err(SparklessError::new_err(
+            "ntile_window: order_by cannot be empty",
+        ));
+    }
+    let first = &order_by[0];
+    let (name, descending) = if let Some(stripped) = first.strip_prefix('-') {
+        (stripped.to_string(), true)
+    } else {
+        (first.clone(), false)
+    };
+    let order_col = Column::new(name);
+    let parts: Vec<&str> = partition_by.iter().map(|s| s.as_str()).collect();
+    let windowed = order_col.ntile(n, &parts[..], descending);
+    Ok(PyColumn { inner: windowed })
+}
+
+#[pyfunction]
+fn lag_window(
+    column_name: String,
+    offset: i64,
+    partition_by: Vec<String>,
+    order_by: Vec<String>,
+) -> PyResult<PyColumn> {
+    if order_by.is_empty() {
+        return Err(SparklessError::new_err(
+            "lag_window: order_by cannot be empty",
+        ));
+    }
+    let col_expr = Column::new(column_name);
+    let lagged = col_expr.lag(offset);
+    let parts: Vec<&str> = partition_by.iter().map(|s| s.as_str()).collect();
+    let windowed = lagged.over(&parts[..]);
+    Ok(PyColumn { inner: windowed })
+}
+
+#[pyfunction]
+fn lead_window(
+    column_name: String,
+    offset: i64,
+    partition_by: Vec<String>,
+    order_by: Vec<String>,
+) -> PyResult<PyColumn> {
+    if order_by.is_empty() {
+        return Err(SparklessError::new_err(
+            "lead_window: order_by cannot be empty",
+        ));
+    }
+    let col_expr = Column::new(column_name);
+    let led = col_expr.lead(offset);
+    let parts: Vec<&str> = partition_by.iter().map(|s| s.as_str()).collect();
+    let windowed = led.over(&parts[..]);
+    Ok(PyColumn { inner: windowed })
+}
 #[pyfunction]
 fn regexp_replace(column: &PyColumn, pattern: &str, replacement: &str) -> PyColumn {
     PyColumn {
@@ -2459,6 +2630,12 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(max, m)?)?;
     m.add_function(wrap_pyfunction!(create_map, m)?)?;
     m.add_function(wrap_pyfunction!(row_number_window, m)?)?;
+    m.add_function(wrap_pyfunction!(percent_rank_window, m)?)?;
+    m.add_function(wrap_pyfunction!(rank_window, m)?)?;
+    m.add_function(wrap_pyfunction!(dense_rank_window, m)?)?;
+    m.add_function(wrap_pyfunction!(ntile_window, m)?)?;
+    m.add_function(wrap_pyfunction!(lag_window, m)?)?;
+    m.add_function(wrap_pyfunction!(lead_window, m)?)?;
     m.add_function(wrap_pyfunction!(regexp_replace, m)?)?;
     m.add_function(wrap_pyfunction!(regexp_extract_all, m)?)?;
     m.add_function(wrap_pyfunction!(regexp_like, m)?)?;

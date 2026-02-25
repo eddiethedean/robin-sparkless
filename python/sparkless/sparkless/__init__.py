@@ -93,6 +93,24 @@ def __getattr__(name):
     if name == "row_number":
         import sparkless.sql.functions as f
         return f.row_number
+    if name == "percent_rank":
+        import sparkless.sql.functions as f
+        return f.percent_rank
+    if name == "rank":
+        import sparkless.sql.functions as f
+        return f.rank
+    if name == "dense_rank":
+        import sparkless.sql.functions as f
+        return f.dense_rank
+    if name == "ntile":
+        import sparkless.sql.functions as f
+        return f.ntile
+    if name == "lag":
+        import sparkless.sql.functions as f
+        return f.lag
+    if name == "lead":
+        import sparkless.sql.functions as f
+        return f.lead
     if name in ("asc", "desc"):
         import sparkless.sql.functions as f
         return getattr(f, name)
@@ -108,6 +126,12 @@ __all__ = [
     "functions",
     "Window",
     "row_number",
+    "percent_rank",
+    "rank",
+    "dense_rank",
+    "ntile",
+    "lag",
+    "lead",
 ]
 
 
