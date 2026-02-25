@@ -4757,7 +4757,7 @@ pub fn apply_string_to_date_format(
         _ => {
             if strict {
                 return Err(PolarsError::ComputeError(
-                    format!("to_date from {} not supported", series.dtype()).into(),
+                    "to_date requires StringType, TimestampType, or DateType input".into(),
                 ));
             }
             let days = Int32Chunked::from_iter_options(

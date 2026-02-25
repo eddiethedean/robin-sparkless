@@ -11,7 +11,7 @@ try:
         "regexp_replace", "regexp_extract", "regexp_extract_all", "regexp_like",
         "split", "coalesce", "format_string", "greatest", "least",
         "array_distinct", "posexplode",
-        "to_timestamp", "to_date", "current_date", "input_file_name", "datediff", "unix_timestamp", "from_unixtime",
+        "to_timestamp", "to_date", "current_date", "current_timestamp", "input_file_name", "datediff", "unix_timestamp", "from_unixtime",
         "year", "month", "dayofmonth", "dayofweek", "date_add", "date_sub", "date_format",
         "length", "floor", "round", "ltrim", "hour", "minute",
         "soundex", "repeat", "levenshtein", "try_cast", "try_add",
@@ -31,7 +31,7 @@ except ImportError:
         "regexp_replace", "regexp_extract", "regexp_extract_all", "regexp_like",
         "split", "coalesce", "format_string", "greatest", "least",
         "array_distinct", "posexplode",
-        "to_timestamp", "to_date", "current_date", "input_file_name", "datediff", "unix_timestamp", "from_unixtime",
+        "to_timestamp", "to_date", "current_date", "current_timestamp", "input_file_name", "datediff", "unix_timestamp", "from_unixtime",
         "year", "month", "dayofmonth", "dayofweek", "date_add", "date_sub", "date_format",
         "length", "floor", "round", "ltrim", "hour", "minute",
         "soundex", "repeat", "levenshtein", "try_cast", "try_add",
@@ -106,6 +106,7 @@ def posexplode(col_or_name):
 to_timestamp = _mod.to_timestamp
 to_date = _mod.to_date
 current_date = _mod.current_date
+current_timestamp = _mod.current_timestamp
 input_file_name = _mod.input_file_name
 datediff = _mod.datediff
 unix_timestamp = _mod.unix_timestamp

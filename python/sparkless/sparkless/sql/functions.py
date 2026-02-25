@@ -35,6 +35,7 @@ from sparkless import (
     to_timestamp as _to_timestamp,
     to_date as _to_date,
     current_date as _current_date,
+    current_timestamp as _current_timestamp,
     input_file_name as _input_file_name,
     datediff as _datediff,
     unix_timestamp as _unix_timestamp,
@@ -248,6 +249,7 @@ __all__ = [
     "to_date",
     "datediff",
     "current_date",
+    "current_timestamp",
     "input_file_name",
     "unix_timestamp",
     "from_unixtime",
@@ -446,8 +448,27 @@ def datediff(end, start):
     return _datediff(_as_col(end), _as_col(start))
 
 
+def _require_session_for_datetime():
+    """Raise RuntimeError if no active SparkSession (PySpark parity for datetime functions)."""
+    from sparkless.sql import SparkSession
+
+    sess = None
+    if hasattr(SparkSession, "getActiveSession"):
+        sess = SparkSession.getActiveSession()
+    if sess is None:
+        sess = getattr(SparkSession, "_singleton_session", None)
+    if sess is None:
+        raise RuntimeError("No active SparkSession found")
+
+
 def current_date():
+    _require_session_for_datetime()
     return _current_date()
+
+
+def current_timestamp():
+    _require_session_for_datetime()
+    return _current_timestamp()  # noqa: F821 - _current_timestamp from sparkless import
 
 
 def input_file_name():

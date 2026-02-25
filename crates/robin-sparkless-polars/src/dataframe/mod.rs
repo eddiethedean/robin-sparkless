@@ -2241,7 +2241,7 @@ mod tests {
             vec![json!(3), json!("charlie")],
         ];
         let df = spark
-            .create_dataframe_from_rows(rows, schema, false)
+            .create_dataframe_from_rows(rows, schema, false, false)
             .unwrap();
         let cond: polars::prelude::Expr = col("name").contains("lic").into_expr();
         let filtered = df.filter(cond).unwrap();

@@ -14,9 +14,19 @@ use std::cell::RefCell;
 use std::path::Path;
 use std::thread_local;
 
-/// Convert EngineError or PolarsError to Python SparklessError.
+/// Convert EngineError or PolarsError to Python exception (SparklessError or TypeError for known validation errors).
 fn to_py_err(e: impl std::fmt::Display) -> PyErr {
-    SparklessError::new_err(e.to_string())
+    let msg = e.to_string();
+    if msg.contains("to_date requires StringType, TimestampType, or DateType input") {
+        return pyo3::exceptions::PyTypeError::new_err(msg);
+    }
+    if msg.contains("Can not merge type") || msg.contains("Can not merge types") {
+        return pyo3::exceptions::PyTypeError::new_err(msg);
+    }
+    if msg.contains("Some of types cannot be determined") {
+        return pyo3::exceptions::PyValueError::new_err(msg);
+    }
+    SparklessError::new_err(msg)
 }
 
 /// Extract allowMissingColumns (PySpark camelCase) or allow_missing_columns from kwargs.
@@ -395,9 +405,9 @@ impl PySparkSession {
         schema: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<PyDataFrame> {
         let (data, from_pandas) = normalize_create_dataframe_input(py, data)?;
-        let (rows, schema) = python_data_and_schema(py, &data, schema, from_pandas)?;
+        let (rows, schema, schema_was_inferred) = python_data_and_schema(py, &data, schema, from_pandas)?;
         self.inner
-            .create_dataframe_from_rows(rows, schema, false)
+            .create_dataframe_from_rows(rows, schema, false, schema_was_inferred)
             .map(|df| PyDataFrame { inner: df })
             .map_err(to_py_err)
     }
@@ -748,7 +758,7 @@ impl PyStorage {
         let pairs = parse_schema_from_py(py, schema)?.unwrap_or_default();
         let df = session
             .inner
-            .create_dataframe_from_rows(Vec::new(), pairs, false)
+            .create_dataframe_from_rows(Vec::new(), pairs, false, false)
             .map_err(to_py_err)?;
         let full = format!("{schema_name}.{table_name}");
         session.inner.register_table(&full, df);
@@ -942,7 +952,7 @@ fn python_data_and_schema(
     data: &Bound<'_, PyAny>,
     schema: Option<&Bound<'_, PyAny>>,
     from_pandas: bool,
-) -> PyResult<(Vec<Vec<JsonValue>>, Vec<(String, String)>)> {
+) -> PyResult<(Vec<Vec<JsonValue>>, Vec<(String, String)>, bool)> {
     let list = data.downcast::<PyList>().map_err(|_| {
         PyErr::new::<pyo3::exceptions::PyTypeError, _>("data must be a list (or pandas.DataFrame)")
     })?;
@@ -965,6 +975,7 @@ fn python_data_and_schema(
         .map(|s| parse_schema_from_py(py, s))
         .transpose()?
         .and_then(|o| o);
+    let schema_was_inferred = schema_res.is_none();
     let mut schema = schema_res
         .or(inferred_schema)
         .unwrap_or_else(|| {
@@ -983,7 +994,7 @@ fn python_data_and_schema(
                 .collect();
         }
     }
-    Ok((rows, schema))
+    Ok((rows, schema, schema_was_inferred))
 }
 
 fn python_row_to_json(
@@ -2309,11 +2320,11 @@ impl PyDataFrame {
             PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected SparkSession")
         })?;
         let list = PyList::new_bound(py, out_rows);
-        let (rows_data, schema) = python_data_and_schema(py, list.as_ref(), None, false)?;
+        let (rows_data, schema, schema_was_inferred) = python_data_and_schema(py, list.as_ref(), None, false)?;
         let df = session_ref
             .borrow()
             .inner
-            .create_dataframe_from_rows(rows_data, schema, false)
+            .create_dataframe_from_rows(rows_data, schema, false, schema_was_inferred)
             .map_err(to_py_err)?;
         Ok(PyDataFrame { inner: df })
     }
@@ -4150,6 +4161,13 @@ fn current_date() -> PyColumn {
 }
 
 #[pyfunction]
+fn current_timestamp() -> PyColumn {
+    PyColumn {
+        inner: functions::current_timestamp(),
+    }
+}
+
+#[pyfunction]
 fn input_file_name() -> PyColumn {
     PyColumn {
         inner: functions::input_file_name(),
@@ -4625,6 +4643,7 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(to_timestamp, m)?)?;
     m.add_function(wrap_pyfunction!(to_date, m)?)?;
     m.add_function(wrap_pyfunction!(current_date, m)?)?;
+    m.add_function(wrap_pyfunction!(current_timestamp, m)?)?;
     m.add_function(wrap_pyfunction!(input_file_name, m)?)?;
     m.add_function(wrap_pyfunction!(datediff, m)?)?;
     m.add_function(wrap_pyfunction!(unix_timestamp, m)?)?;

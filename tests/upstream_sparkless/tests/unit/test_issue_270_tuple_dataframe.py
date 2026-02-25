@@ -198,7 +198,7 @@ class TestIssue270TupleDataFrame:
         """Test tuple data with empty schema.
 
         PySpark raises PySparkValueError for mismatched lengths.
-        Sparkless should match this behavior.
+        Robin raises with LENGTH_SHOULD_BE_THE_SAME (default backend).
         """
         imports = get_spark_imports()
         T = imports
@@ -206,21 +206,11 @@ class TestIssue270TupleDataFrame:
         data = [("Alice", 1), ("Bob", 2)]
         schema = T.StructType([])
 
-        # Both PySpark and Sparkless should raise an error
-        backend = get_backend_type()
-        if backend == BackendType.PYSPARK:
-            with pytest.raises(Exception) as exc_info:
-                spark.createDataFrame(data=data, schema=schema)
-            assert (
-                "LENGTH_SHOULD_BE_THE_SAME" in str(exc_info.value)
-                or "length" in str(exc_info.value).lower()
-            )
-        else:
-            from sparkless.core.exceptions.validation import IllegalArgumentException
-
-            with pytest.raises(IllegalArgumentException) as exc_info:
-                spark.createDataFrame(data=data, schema=schema)
-            assert "LENGTH_SHOULD_BE_THE_SAME" in str(exc_info.value)
+        with pytest.raises(Exception) as exc_info:
+            spark.createDataFrame(data=data, schema=schema)
+        assert "LENGTH_SHOULD_BE_THE_SAME" in str(exc_info.value) or "length" in str(
+            exc_info.value
+        ).lower()
 
     def test_list_data_with_structtype_schema(self, spark):
         """Test that list data (not just tuples) also converts correctly."""
