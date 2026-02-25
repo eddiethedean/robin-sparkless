@@ -141,8 +141,16 @@ pub fn select_items(
     for item in items {
         match item {
             SelectItem::ColumnName(name) => {
-                let resolved = df.resolve_column_name(name)?;
-                exprs.push(col(resolved));
+                // Dot notation (e.g. "Person.name") is struct field access; resolve as expression and keep dotted name as column name.
+                if name.contains('.') {
+                    let e = col(name);
+                    let resolved = df.resolve_expr_column_names(e)?;
+                    let coerced = df.coerce_string_numeric_comparisons(resolved)?;
+                    exprs.push(coerced.alias(name));
+                } else {
+                    let resolved = df.resolve_column_name(name)?;
+                    exprs.push(col(resolved));
+                }
             }
             SelectItem::Expr(e) => {
                 let resolved = df.resolve_expr_column_names(e)?;
@@ -1142,25 +1150,80 @@ pub fn print_schema(df: &DataFrame) -> Result<String, PolarsError> {
 
 // ---------- Batch D: selectExpr, colRegex, withColumns, withColumnsRenamed, na ----------
 
-/// Select by expression strings. Minimal support: comma-separated column names. PySpark selectExpr.
+/// Parse simple "col op literal" expression for selectExpr (e.g. "age * 2", "salary + 100").
+fn parse_simple_expr(
+    df: &DataFrame,
+    s: &str,
+) -> Result<Option<Expr>, PolarsError> {
+    let s = s.trim();
+    for (op, kind) in [
+        (" * ", "mul"),
+        ("*", "mul"),
+        (" + ", "add"),
+        ("+", "add"),
+        (" - ", "sub"),
+        (" / ", "div"),
+        ("/", "div"),
+    ] {
+        if let Some((a, b)) = s.split_once(op) {
+            let a = a.trim();
+            let b = b.trim();
+            let (col_part, num_part, col_on_left) = if df.resolve_column_name(a).is_ok() && b.parse::<f64>().is_ok() {
+                (a, b, true)
+            } else if df.resolve_column_name(b).is_ok() && a.parse::<f64>().is_ok() {
+                (b, a, false)
+            } else {
+                continue;
+            };
+            let resolved = df.resolve_column_name(col_part)?;
+            let col_expr = col(resolved.as_str());
+            let num: f64 = num_part.parse().map_err(|_| {
+                PolarsError::ComputeError(format!("selectExpr: could not parse literal {num_part:?}").into())
+            })?;
+            let lit_expr = lit(num);
+            let expr = match kind {
+                "mul" => col_expr * lit_expr,
+                "add" => col_expr + lit_expr,
+                "sub" => {
+                    if col_on_left {
+                        col_expr - lit_expr
+                    } else {
+                        lit_expr - col_expr
+                    }
+                }
+                "div" => col_expr / lit_expr,
+                _ => continue,
+            };
+            return Ok(Some(expr));
+        }
+    }
+    Ok(None)
+}
+
+/// Select by expression strings. Supports column names, "col as alias", and simple "col op num as alias". PySpark selectExpr.
 pub fn select_expr(
     df: &DataFrame,
     exprs: &[String],
     case_sensitive: bool,
 ) -> Result<DataFrame, PolarsError> {
-    let mut cols = Vec::new();
+    let mut select_exprs: Vec<Expr> = Vec::new();
     for e in exprs {
         let e = e.trim();
         if let Some((left, right)) = e.split_once(" as ") {
-            let col_name = left.trim();
-            let _alias = right.trim();
-            cols.push(df.resolve_column_name(col_name)?);
+            let left = left.trim();
+            let alias = right.trim();
+            if let Some(expr) = parse_simple_expr(df, left)? {
+                select_exprs.push(expr.alias(alias));
+            } else {
+                let resolved = df.resolve_column_name(left)?;
+                select_exprs.push(col(resolved.as_str()).alias(alias));
+            }
         } else {
-            cols.push(df.resolve_column_name(e)?);
+            let resolved = df.resolve_column_name(e)?;
+            select_exprs.push(col(resolved.as_str()));
         }
     }
-    let refs: Vec<&str> = cols.iter().map(|s| s.as_str()).collect();
-    select(df, refs, case_sensitive)
+    select_with_exprs(df, select_exprs, case_sensitive)
 }
 
 /// Select columns whose names match the regex pattern. PySpark colRegex.

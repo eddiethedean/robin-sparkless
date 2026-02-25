@@ -5,6 +5,15 @@ class DataType:
     def simpleString(self) -> str:
         return "string"
 
+    def __eq__(self, other):
+        """Phase 7: type equality so ArrayType().element_type == StringType() in tests."""
+        if type(self) is not type(other):
+            return False
+        # Simple types (StringType, LongType, etc.) have no instance attrs to compare
+        if not hasattr(self, "__dict__") or not hasattr(other, "__dict__"):
+            return True
+        return self.__dict__ == other.__dict__
+
 
 class StringType(DataType):
     def simpleString(self) -> str:
@@ -204,6 +213,12 @@ class Row(tuple):
             lowered = {f.lower(): i for i, f in enumerate(fields)}
             if item.lower() in lowered:
                 return super().__getitem__(lowered[item.lower()])
+            # Dotted key (e.g. "Person.name"): match by suffix when struct field select yields single column named "name"
+            if "." in item and fields:
+                suffix = item.rsplit(".", 1)[-1]
+                for i, f in enumerate(fields):
+                    if f.lower() == suffix.lower():
+                        return super().__getitem__(i)
             raise KeyError(item)
         return super().__getitem__(item)
 

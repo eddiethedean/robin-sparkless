@@ -122,6 +122,16 @@ pub fn translate(
                 ));
             }
 
+            // CREATE TABLE ... AS SELECT: run query and register result (Phase 7 / BUG-011).
+            if let Some(ref q) = create_table.query {
+                let df = translate_query(session, q)?;
+                session.register_table(&table_name, df);
+                return Ok(DataFrame::from_polars_with_options(
+                    PlDataFrame::empty(),
+                    session.is_case_sensitive(),
+                ));
+            }
+
             fn dtype_to_schema_str(dt: &sqlparser::ast::DataType) -> String {
                 let s = dt.to_string().to_lowercase();
                 if s.starts_with("int") || s.starts_with("integer") || s == "int4" {

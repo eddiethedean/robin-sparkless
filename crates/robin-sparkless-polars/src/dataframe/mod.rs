@@ -188,7 +188,7 @@ impl DataFrame {
                 if name_str.is_empty() {
                     return Ok(e);
                 }
-                // Struct field dot notation (PySpark col("struct_col.field")).
+                // Struct field dot notation (PySpark col("struct_col.field")). Resolve struct field names case-insensitively.
                 if name_str.contains('.') {
                     let parts: Vec<&str> = name_str.split('.').collect();
                     let first = parts[0];
@@ -201,7 +201,9 @@ impl DataFrame {
                     let resolved = df.resolve_column_name(first)?;
                     let mut expr = col(PlSmallStr::from(resolved.as_str()));
                     for field in rest {
-                        expr = expr.struct_().field_by_name(field);
+                        let resolved_field =
+                            df.resolve_struct_field_name(resolved.as_str(), field)?;
+                        expr = expr.struct_().field_by_name(&resolved_field);
                     }
                     return Ok(expr);
                 }
@@ -645,6 +647,52 @@ impl DataFrame {
             .iter_names_and_dtypes()
             .find(|(n, _)| n.to_string() == resolved)
             .map(|(_, dt)| dt.clone())
+    }
+
+    /// Resolve a struct field name case-insensitively (for col("Person.name") when struct has "Name").
+    pub fn resolve_struct_field_name(
+        &self,
+        struct_col_name: &str,
+        field_name: &str,
+    ) -> Result<String, PolarsError> {
+        let dt = self
+            .get_column_dtype(struct_col_name)
+            .ok_or_else(|| {
+                PolarsError::ColumnNotFound(
+                    format!("Column '{}' not found", struct_col_name).into(),
+                )
+            })?;
+        if let DataType::Struct(fields) = dt {
+            if self.case_sensitive {
+                if fields.iter().any(|f| f.name.as_str() == field_name) {
+                    return Ok(field_name.to_string());
+                }
+            } else {
+                let field_lower = field_name.to_lowercase();
+                for f in &fields {
+                    if f.name.to_string().to_lowercase() == field_lower {
+                        return Ok(f.name.to_string());
+                    }
+                }
+            }
+            let available: Vec<String> = fields.iter().map(|f| f.name.to_string()).collect();
+            return Err(PolarsError::ColumnNotFound(
+                format!(
+                    "Struct field '{}' not found in '{}'. Available: [{}].",
+                    field_name,
+                    struct_col_name,
+                    available.join(", ")
+                )
+                .into(),
+            ));
+        }
+        Err(PolarsError::ColumnNotFound(
+            format!(
+                "Column '{}' is not a struct; cannot access field '{}'.",
+                struct_col_name, field_name
+            )
+            .into(),
+        ))
     }
 
     /// Get the column type as robin-sparkless schema type (Polars-free). Returns None if column not found.

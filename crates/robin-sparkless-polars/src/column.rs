@@ -590,12 +590,15 @@ impl Column {
     /// - Start 0: 0-based (first char), for Sparkless/Python parity (#875).
     /// - Positive start: 1-based index (1 = first char).
     /// - Negative start: count from end (e.g. -3 = third char from end).
-    /// - Length less than 1: empty string.
+    /// - Length less than 1: empty string; null input yields null (Phase 7 / PySpark parity).
     pub fn substr(&self, start: i64, length: Option<i64>) -> Column {
         use polars::prelude::*;
-        // PySpark: len < 1 -> empty string
+        // PySpark: len < 1 -> empty string; null input must stay null (test_substr_pyspark_parity_comprehensive)
         if length.map(|l| l < 1).unwrap_or(false) {
-            return Self::from_expr(lit(""), None);
+            let expr = when(self.expr().clone().is_null())
+                .then(lit(NULL))
+                .otherwise(lit(""));
+            return Self::from_expr(expr, None);
         }
         let len_chars = self.expr().clone().str().len_chars();
         // Start 0: 0-based (substr(0, 3) = "Hel"); start >= 1: 1-based; negative: from end.

@@ -783,15 +783,12 @@ pub struct PivotedGroupedData {
     pub(crate) case_sensitive: bool,
 }
 
-/// Parse a simple pivot agg expr: Alias(Agg(Sum/Mean/Min/Max(Column(name))), alias) -> (alias, agg_kind, value_col).
+/// Parse a simple pivot agg expr: Alias(Agg(Sum/Mean/Min/Max(Column(name))), alias) or bare Agg(...) -> (alias, agg_kind, value_col).
+/// When no alias is present, use a default like "sum(salary)" (PySpark parity).
 fn parse_pivot_agg_expr(expr: &Expr) -> Option<(String, &'static str, String)> {
-    let alias = match expr {
-        Expr::Alias(inner, name) => name.as_str().to_string(),
-        _ => return None,
-    };
-    let inner = match expr {
-        Expr::Alias(inner, _) => inner.as_ref(),
-        _ => return None,
+    let (inner, alias_opt) = match expr {
+        Expr::Alias(inner, name) => (inner.as_ref(), Some(name.as_str().to_string())),
+        other => (other, None),
     };
     let (agg_kind, input_expr) = match inner {
         Expr::Agg(agg) => match agg {
@@ -807,6 +804,7 @@ fn parse_pivot_agg_expr(expr: &Expr) -> Option<(String, &'static str, String)> {
         Expr::Column(name) => name.as_str().to_string(),
         _ => return None,
     };
+    let alias = alias_opt.unwrap_or_else(|| format!("{}({})", agg_kind, value_col));
     Some((alias, agg_kind, value_col))
 }
 
@@ -1240,8 +1238,14 @@ impl CubeRollupData {
 
     /// Run aggregation on each grouping set and union results. Missing keys become null.
     /// Duplicate agg output names are disambiguated (issue #368).
+    /// Column names in agg expressions are resolved case-insensitively when case_sensitive is false.
     pub fn agg(&self, aggregations: Vec<Expr>) -> Result<DataFrame, PolarsError> {
         use polars::prelude::*;
+        let df = super::DataFrame::from_lazy_with_options(self.lf.clone(), self.case_sensitive);
+        let aggregations: Vec<Expr> = aggregations
+            .into_iter()
+            .map(|e| df.resolve_expr_column_names(e))
+            .collect::<Result<Vec<_>, _>>()?;
         let aggregations = disambiguate_agg_output_names(aggregations);
         let subsets: Vec<Vec<String>> = if self.is_cube {
             // All subsets of grouping_cols (2^n)
