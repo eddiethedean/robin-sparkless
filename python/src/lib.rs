@@ -4,7 +4,7 @@ use pyo3::create_exception;
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList, PyTuple};
 use robin_sparkless::dataframe::{JoinType, PivotedGroupedData, SaveMode, WriteFormat, WriteMode};
-use robin_sparkless::functions::{self, SortOrder, ThenBuilder, WhenBuilder};
+use robin_sparkless::functions::{self, asc_from_name, SortOrder, ThenBuilder, WhenBuilder};
 use robin_sparkless::{
     Column, CubeRollupData, DataFrame, DataType, GroupedData, SelectItem,
     SparkSession, SparkSessionBuilder,
@@ -1724,43 +1724,65 @@ impl PyDataFrame {
         self.group_by(names)
     }
 
-    fn order_by(&self, column_names: Vec<String>) -> PyResult<PyDataFrame> {
+    fn order_by_names(&self, column_names: Vec<String>, ascending: Vec<bool>) -> PyResult<PyDataFrame> {
         let refs: Vec<&str> = column_names.iter().map(|s| s.as_str()).collect();
-        let ascending: Vec<bool> = vec![true; refs.len()];
+        let mut asc = ascending;
+        while asc.len() < refs.len() {
+            asc.push(true);
+        }
+        asc.truncate(refs.len());
         self.inner
-            .order_by(refs, ascending)
+            .order_by(refs, asc)
             .map(|df| PyDataFrame { inner: df })
             .map_err(to_py_err)
     }
 
-    #[pyo3(name = "orderBy", signature = (*cols, ascending=None))]
-    fn order_by_camel(
+    fn do_order_by(
         &self,
         cols: &Bound<'_, PyTuple>,
         ascending: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<PyDataFrame> {
-        let mut names: Vec<String> = Vec::with_capacity(cols.len());
+        // Flatten: single item may be list/tuple of columns
+        let mut flat: Vec<Bound<'_, PyAny>> = Vec::new();
         for item in cols.iter() {
-            if let Ok(s) = item.extract::<String>() {
-                names.push(s);
-            } else if let Ok(list) = item.downcast::<PyList>() {
+            if let Ok(list) = item.downcast::<PyList>() {
                 for sub in list.iter() {
-                    names.push(sub.extract::<String>()?);
+                    flat.push(sub.clone());
                 }
             } else if let Ok(tup) = item.downcast::<PyTuple>() {
                 for sub in tup.iter() {
-                    names.push(sub.extract::<String>()?);
+                    flat.push(sub.clone());
                 }
             } else {
-                return Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
-                    "orderBy() expects column names as str or list/tuple[str]",
-                ));
+                flat.push(item.clone());
+            }
+        }
+
+        // Try to build sort orders from Column/SortOrder/string (for order_by_exprs)
+        let mut sort_orders: Vec<SortOrder> = Vec::with_capacity(flat.len());
+        let mut names_only: Vec<String> = Vec::with_capacity(flat.len());
+        let mut all_strings = true;
+        for item in &flat {
+            if let Ok(ps) = item.downcast::<PySortOrder>() {
+                sort_orders.push(ps.borrow().inner.clone());
+                all_strings = false;
+            } else if let Ok(pc) = item.downcast::<PyColumn>() {
+                sort_orders.push(pc.borrow().inner.asc());
+                all_strings = false;
+            } else if let Ok(s) = item.extract::<String>() {
+                sort_orders.push(asc_from_name(&s));
+                names_only.push(s);
+            } else {
+                sort_orders.clear();
+                names_only.clear();
+                all_strings = false;
+                break;
             }
         }
 
         let asc_vec: Vec<bool> = match ascending {
-            None => vec![true; names.len()],
-            Some(v) if v.extract::<bool>().is_ok() => vec![v.extract::<bool>()?; names.len()],
+            None => vec![true; flat.len()],
+            Some(v) if v.extract::<bool>().is_ok() => vec![v.extract::<bool>()?; flat.len()],
             Some(v) if v.downcast::<PyList>().is_ok() => v
                 .downcast::<PyList>()?
                 .iter()
@@ -1778,10 +1800,48 @@ impl PyDataFrame {
             }
         };
 
-        // Snake-case .order_by() defaults to ascending; camelCase orderBy can
-        // accept an explicit ascending parameter. For now, ignore explicit
-        // ascending here and call the snake-case helper, which uses ascending=True.
-        self.order_by(names)
+        if sort_orders.len() == flat.len() {
+            if all_strings {
+                return self.order_by_names(names_only, asc_vec);
+            }
+            return self
+                .inner
+                .order_by_exprs(sort_orders)
+                .map(|df| PyDataFrame { inner: df })
+                .map_err(to_py_err);
+        }
+
+        // Fallback: all column names as str (e.g. list of strings from a different structure)
+        let mut names: Vec<String> = Vec::with_capacity(flat.len());
+        for item in &flat {
+            if let Ok(s) = item.extract::<String>() {
+                names.push(s);
+            } else {
+                return Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+                    "orderBy() expects column names as str or Column/SortOrder expressions",
+                ));
+            }
+        }
+
+        self.order_by_names(names, asc_vec)
+    }
+
+    #[pyo3(signature = (*cols, ascending=None))]
+    fn order_by(
+        &self,
+        cols: &Bound<'_, PyTuple>,
+        ascending: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<PyDataFrame> {
+        self.do_order_by(cols, ascending)
+    }
+
+    #[pyo3(name = "orderBy", signature = (*cols, ascending=None))]
+    fn order_by_camel(
+        &self,
+        cols: &Bound<'_, PyTuple>,
+        ascending: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<PyDataFrame> {
+        self.do_order_by(cols, ascending)
     }
 
     fn limit(&self, n: usize) -> PyResult<PyDataFrame> {
@@ -2341,7 +2401,7 @@ fn py_any_to_column(other: &Bound<'_, PyAny>) -> PyResult<Column> {
 
 #[pyclass]
 struct PyColumn {
-    inner: Column,
+    pub(crate) inner: Column,
 }
 
 #[pymethods]
@@ -2899,7 +2959,7 @@ impl PyColumn {
 
 #[pyclass]
 struct PySortOrder {
-    inner: SortOrder,
+    pub(crate) inner: SortOrder,
 }
 
 #[pymethods]

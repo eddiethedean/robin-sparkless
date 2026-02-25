@@ -81,3 +81,8 @@ pub fn desc_nulls_last(column: &Column) -> SortOrder {
         column_name: column.name().to_string(),
     }
 }
+
+/// Ascending sort by column name (for orderBy with mixed string/Column exprs).
+pub fn asc_from_name(name: &str) -> SortOrder {
+    asc(&Column::new(name.to_string()))
+}
