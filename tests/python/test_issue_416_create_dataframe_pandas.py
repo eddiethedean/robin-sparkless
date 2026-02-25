@@ -14,7 +14,14 @@ pandas = pytest.importorskip("pandas")
 
 
 def _spark() -> rs.SparkSession:
-    return rs.SparkSession.builder().app_name("issue_416").get_or_create()
+    try:
+        return rs.SparkSession("issue_416")
+    except TypeError:
+        pass
+    builder = rs.SparkSession.builder
+    if callable(builder):
+        builder = builder()
+    return builder.app_name("issue_416").get_or_create()
 
 
 def test_create_dataframe_from_pandas() -> None:
@@ -24,5 +31,8 @@ def test_create_dataframe_from_pandas() -> None:
     df = spark.createDataFrame(pdf)
     out = df.collect()
     assert len(out) == 2
-    assert out[0] == {"a": 1, "b": 3}
-    assert out[1] == {"a": 2, "b": 4}
+    # Row or dict both acceptable (sparkless returns Row, native returns dict)
+    def v(r, k):
+        return r[k] if isinstance(r, dict) else getattr(r, k)
+    assert v(out[0], "a") == 1 and v(out[0], "b") == 3
+    assert v(out[1], "a") == 2 and v(out[1], "b") == 4

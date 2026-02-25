@@ -360,8 +360,9 @@ impl PySparkSession {
             .map_err(to_py_err)
     }
 
-    /// createDataFrame(data, schema=None). data: list of dicts or list of tuples (same length).
+    /// createDataFrame(data, schema=None). data: list of dicts, list of tuples, or pandas.DataFrame.
     /// schema: optional list of (name, type_str) or list of column names (types inferred).
+    /// Pandas DataFrame is converted via to_dict("records"); column order is preserved.
     #[pyo3(signature = (data, schema=None))]
     fn create_dataframe_from_rows(
         &self,
@@ -369,7 +370,8 @@ impl PySparkSession {
         data: &Bound<'_, PyAny>,
         schema: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<PyDataFrame> {
-        let (rows, schema) = python_data_and_schema(py, data, schema)?;
+        let (data, from_pandas) = maybe_convert_pandas_to_list(py, data)?;
+        let (rows, schema) = python_data_and_schema(py, &data, schema, from_pandas)?;
         self.inner
             .create_dataframe_from_rows(rows, schema, false)
             .map(|df| PyDataFrame { inner: df })
@@ -813,21 +815,48 @@ fn infer_type_from_json_value(v: &JsonValue) -> String {
     }
 }
 
+/// If data is a pandas DataFrame, convert to list of dicts via to_dict("records").
+/// Returns (converted list or original data, true if from pandas).
+fn maybe_convert_pandas_to_list<'py>(
+    py: Python<'py>,
+    data: &Bound<'py, PyAny>,
+) -> PyResult<(Bound<'py, PyAny>, bool)> {
+    let to_dict = match data.getattr("to_dict") {
+        Ok(attr) => attr,
+        Err(_) => return Ok((data.clone(), false)),
+    };
+    if !to_dict.is_callable() {
+        return Ok((data.clone(), false));
+    }
+    let records = match to_dict.call1(("records",)) {
+        Ok(r) => r,
+        Err(_) => return Ok((data.clone(), false)),
+    };
+    if records.downcast::<PyList>().is_ok() {
+        Ok((records, true))
+    } else {
+        Ok((data.clone(), false))
+    }
+}
+
 fn python_data_and_schema(
     py: Python<'_>,
     data: &Bound<'_, PyAny>,
     schema: Option<&Bound<'_, PyAny>>,
+    from_pandas: bool,
 ) -> PyResult<(Vec<Vec<JsonValue>>, Vec<(String, String)>)> {
     let list = data.downcast::<PyList>().map_err(|_| {
-        PyErr::new::<pyo3::exceptions::PyTypeError, _>("data must be a list")
+        PyErr::new::<pyo3::exceptions::PyTypeError, _>("data must be a list (or pandas.DataFrame)")
     })?;
     let mut rows: Vec<Vec<JsonValue>> = Vec::with_capacity(list.len());
     let mut inferred_schema: Option<Vec<(String, String)>> = None;
+    let mut column_order: Option<Vec<String>> = None;
 
     for (idx, item) in list.iter().enumerate() {
-        let row = python_row_to_json(py, &item, idx)?;
+        let row = python_row_to_json(py, &item, idx, column_order.as_deref(), from_pandas)?;
         if inferred_schema.is_none() && !row.is_empty() {
-            if let Some(cols) = infer_schema_from_first_row(py, &item) {
+            if let Some(cols) = infer_schema_from_first_row(py, &item, from_pandas) {
+                column_order = Some(cols.iter().map(|(n, _)| n.clone()).collect());
                 inferred_schema = Some(cols);
             }
         }
@@ -857,10 +886,22 @@ fn python_data_and_schema(
     Ok((rows, schema))
 }
 
-fn python_row_to_json(py: Python<'_>, item: &Bound<'_, PyAny>, row_idx: usize) -> PyResult<Vec<JsonValue>> {
+fn python_row_to_json(
+    py: Python<'_>,
+    item: &Bound<'_, PyAny>,
+    row_idx: usize,
+    column_order: Option<&[String]>,
+    from_pandas: bool,
+) -> PyResult<Vec<JsonValue>> {
     if let Ok(dict) = item.downcast::<PyDict>() {
-        let mut keys: Vec<String> = dict.keys().iter().map(|k| k.extract::<String>().unwrap_or_default()).collect();
-        keys.sort();
+        let mut keys: Vec<String> = if let Some(order) = column_order {
+            order.to_vec()
+        } else {
+            dict.keys().iter().map(|k| k.extract::<String>().unwrap_or_default()).collect()
+        };
+        if column_order.is_none() && !from_pandas {
+            keys.sort();
+        }
         let mut values = Vec::with_capacity(keys.len());
         for k in &keys {
             match dict.get_item(k.as_str()) {
@@ -927,10 +968,16 @@ fn py_any_to_json(py: Python<'_>, v: &Bound<'_, PyAny>) -> PyResult<JsonValue> {
     Ok(JsonValue::String(v.to_string()))
 }
 
-fn infer_schema_from_first_row(py: Python<'_>, item: &Bound<'_, PyAny>) -> Option<Vec<(String, String)>> {
+fn infer_schema_from_first_row(
+    py: Python<'_>,
+    item: &Bound<'_, PyAny>,
+    from_pandas: bool,
+) -> Option<Vec<(String, String)>> {
     let dict = item.downcast::<PyDict>().ok()?;
     let mut keys: Vec<String> = dict.keys().iter().filter_map(|k| k.extract::<String>().ok()).collect();
-    keys.sort();
+    if !from_pandas {
+        keys.sort();
+    }
     Some(keys.into_iter().map(|k| (k.clone(), "string".to_string())).collect())
 }
 
