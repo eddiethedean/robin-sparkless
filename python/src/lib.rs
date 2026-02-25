@@ -1128,6 +1128,30 @@ struct PyDataFrameReader {
     format: Option<String>,
 }
 
+/// Normalize subset to Option<Vec<String>>: "col" -> Some(vec!["col".into()]), ["a","b"] -> as-is.
+fn normalize_subset(subset: Option<&Bound<'_, PyAny>>) -> PyResult<Option<Vec<String>>> {
+    let Some(s) = subset else {
+        return Ok(None);
+    };
+    if s.is_none() {
+        return Ok(None);
+    }
+    if let Ok(one) = s.extract::<String>() {
+        return Ok(Some(vec![one]));
+    }
+    if let Ok(list) = s.downcast::<PyList>() {
+        let v: Vec<String> = list.iter().map(|x| x.extract()).collect::<PyResult<_>>()?;
+        return Ok(Some(v));
+    }
+    if let Ok(tup) = s.downcast::<PyTuple>() {
+        let v: Vec<String> = tup.iter().map(|x| x.extract()).collect::<PyResult<_>>()?;
+        return Ok(Some(v));
+    }
+    Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+        "subset must be str or list/tuple of str",
+    ))
+}
+
 /// Resolve cast type argument: string as-is, or type object's simpleString() (e.g. IntegerType()).
 fn resolve_cast_type_name(value: &Bound<'_, PyAny>) -> PyResult<String> {
     if let Ok(s) = value.extract::<String>() {
@@ -1601,6 +1625,7 @@ impl PyDataFrame {
             .map_err(to_py_err)
     }
 
+    #[getter]
     fn na(slf: PyRef<Self>) -> PyDataFrameNaFunctions {
         let py = slf.py();
         PyDataFrameNaFunctions {
@@ -2013,9 +2038,13 @@ impl PyDataFrame {
             .map_err(to_py_err)
     }
 
-    fn fillna(&self, value: &Bound<'_, PyAny>, subset: Option<Vec<String>>) -> PyResult<PyDataFrame> {
+    #[pyo3(signature = (value, subset=None))]
+    fn fillna(&self, value: &Bound<'_, PyAny>, subset: Option<&Bound<'_, PyAny>>) -> PyResult<PyDataFrame> {
         let value_expr = py_any_to_column(value)?.into_expr();
-        let sub: Option<Vec<&str>> = subset.as_ref().map(|v| v.iter().map(|s| s.as_str()).collect());
+        let sub_vec = normalize_subset(subset)?;
+        let sub: Option<Vec<&str>> = sub_vec
+            .as_ref()
+            .map(|v| v.iter().map(|s| s.as_str()).collect());
         self.inner
             .fillna(value_expr, sub)
             .map(|df| PyDataFrame { inner: df })
@@ -2914,6 +2943,32 @@ impl PyColumn {
             .map_err(to_py_err)
     }
 
+    /// PySpark astype(dtype): alias for cast(dtype).
+    fn astype(&self, dtype: &Bound<'_, PyAny>) -> PyResult<PyColumn> {
+        self.cast(dtype)
+    }
+
+    /// Ascending sort, nulls first. PySpark asc_nulls_first.
+    fn asc_nulls_first(&self) -> PySortOrder {
+        PySortOrder {
+            inner: self.inner.asc_nulls_first(),
+        }
+    }
+
+    /// Ascending sort, nulls last. PySpark asc_nulls_last.
+    fn asc_nulls_last(&self) -> PySortOrder {
+        PySortOrder {
+            inner: self.inner.asc_nulls_last(),
+        }
+    }
+
+    /// Descending sort, nulls first. PySpark desc_nulls_first.
+    fn desc_nulls_first(&self) -> PySortOrder {
+        PySortOrder {
+            inner: self.inner.desc_nulls_first(),
+        }
+    }
+
     fn row_number(&self, descending: bool) -> PyColumn {
         PyColumn {
             inner: self.inner.row_number(descending),
@@ -3003,14 +3058,16 @@ impl PyDataFrameNaFunctions {
         &self,
         py: Python<'_>,
         value: &Bound<'_, PyAny>,
-        subset: Option<Vec<String>>,
+        subset: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<PyDataFrame> {
         let df_ref = self.df.bind(py).downcast::<PyDataFrame>().map_err(|_| {
             PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected DataFrame")
         })?.borrow();
         let value_col = lit(value)?;
-        let subset_refs: Option<Vec<&str>> =
-            subset.as_ref().map(|v| v.iter().map(|s| s.as_str()).collect());
+        let sub_vec = normalize_subset(subset)?;
+        let subset_refs: Option<Vec<&str>> = sub_vec
+            .as_ref()
+            .map(|v| v.iter().map(|s| s.as_str()).collect());
         let na = df_ref.inner.na();
         na.fill(value_col.inner.into_expr(), subset_refs)
             .map(|df| PyDataFrame { inner: df })
