@@ -240,7 +240,7 @@ class TestIssue290UdfMultipleArguments:
         finally:
             spark.stop()
 
-    @pytest.mark.skip(reason="UDF with literal/computed expr not yet supported (arg '<expr>' not in row dict)")
+    @pytest.mark.skip(reason="UDF with expression args (e.g. F.col('x')*2) not supported; arg name '<expr>' not in row")
     def test_udf_with_computed_columns(self):
         """Test UDF with computed column expressions.
 
@@ -380,7 +380,7 @@ class TestIssue290UdfMultipleArguments:
         finally:
             spark.stop()
 
-    @pytest.mark.skip(reason="UDF in filter not yet supported (filter uses expr, not Python UDF)")
+    @pytest.mark.skip(reason="Filter condition is (UDF > literal); only bare UDF column in filter is supported")
     def test_udf_in_filter(self):
         """Test UDF with multiple arguments in filter/where clause."""
         spark = SparkSession.builder.appName("issue-290").getOrCreate()
@@ -483,7 +483,7 @@ class TestIssue290UdfMultipleArguments:
         finally:
             spark.stop()
 
-    @pytest.mark.skip(reason="UDF with literal/computed expr not yet supported (arg '<expr>' not in row dict)")
+    @pytest.mark.skip(reason="UDF with expression args (e.g. F.col('a')+1) not supported; arg name '<expr>' not in row")
     def test_udf_nested_with_arithmetic(self):
         """Test UDF with nested arithmetic expressions.
 
@@ -512,7 +512,7 @@ class TestIssue290UdfMultipleArguments:
         finally:
             spark.stop()
 
-    @pytest.mark.skip(reason="UDF with date ops: type coercion / literal handling not yet supported")
+    @pytest.mark.skip(reason="UDF date diff expects date objects; createDataFrame may infer string")
     def test_udf_with_date_operations(self):
         """Test UDF with date/timestamp operations."""
         spark = SparkSession.builder.appName("issue-290").getOrCreate()
@@ -538,7 +538,6 @@ class TestIssue290UdfMultipleArguments:
         finally:
             spark.stop()
 
-    @pytest.mark.skip(reason="UDF in join condition not yet supported (join expects column names)")
     def test_udf_in_join_condition(self):
         """Test UDF with multiple arguments used in join condition.
 

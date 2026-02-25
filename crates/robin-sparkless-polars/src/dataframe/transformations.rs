@@ -1077,8 +1077,14 @@ fn any_value_to_serde_value(av: &polars::prelude::AnyValue) -> serde_json::Value
             .map(serde_json::Value::Number)
             .unwrap_or(serde_json::Value::Null),
         AnyValue::String(v) => serde_json::Value::String(v.to_string()),
+        AnyValue::StringOwned(v) => serde_json::Value::String(v.to_string()),
         _ => serde_json::Value::String(format!("{av:?}")),
     }
+}
+
+/// Convert a literal expression value to JSON for Python UDF executor (literal args).
+pub(crate) fn literal_value_to_serde_value(lv: &polars::prelude::LiteralValue) -> Option<serde_json::Value> {
+    lv.to_any_value().as_ref().map(any_value_to_serde_value)
 }
 
 /// Collect rows as JSON strings (one JSON object per row). PySpark toJSON.

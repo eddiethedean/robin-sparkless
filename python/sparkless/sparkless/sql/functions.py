@@ -101,8 +101,11 @@ def _ensure_udf_executor_registered():
     _ensure_udf_executor_registered._registered = True
 
 
-def _python_udf_executor(df, column_name, udf_name, arg_names):
-    """Run a registered Python UDF over the DataFrame: collect, apply per row, create new DataFrame. Called from Rust with_column."""
+def _python_udf_executor(df, column_name, udf_name, arg_names, arg_literal_jsons=None):
+    """Run a registered Python UDF over the DataFrame: collect, apply per row, create new DataFrame. Called from Rust with_column.
+    arg_literal_jsons: optional list of Optional[str]; if arg_literal_jsons[i] is not None, use json.loads(...) as the arg value (literal column)."""
+    import json as _json
+
     import sparkless.sql.types as T
 
     if udf_name not in _PYTHON_UDF_REGISTRY:
@@ -126,7 +129,16 @@ def _python_udf_executor(df, column_name, udf_name, arg_names):
     # Build dicts from schema + row values. Row.__iter__ yields keys (_fields), so use positional indexing.
     row_dicts = [{field_names[i]: row[i] for i in range(len(field_names))} for row in rows]
     arg_names_list = list(arg_names)
-    new_vals = [func(*[d[n] for n in arg_names_list]) for d in row_dicts]
+    literals = (arg_literal_jsons if arg_literal_jsons is not None else [None] * len(arg_names_list))
+    if len(literals) < len(arg_names_list):
+        literals = list(literals) + [None] * (len(arg_names_list) - len(literals))
+
+    def arg_value(d, i):
+        if literals[i] is not None:
+            return _json.loads(literals[i])
+        return d[arg_names_list[i]]
+
+    new_vals = [func(*[arg_value(d, i) for i in range(len(arg_names_list))]) for d in row_dicts]
     for i, d in enumerate(row_dicts):
         d[column_name] = new_vals[i]
     # Replace existing column if column_name already in schema, else append (PySpark withColumn semantics).
