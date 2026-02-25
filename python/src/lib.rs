@@ -6,7 +6,8 @@ use pyo3::types::{PyDict, PyList, PyTuple};
 use robin_sparkless::dataframe::{JoinType, PivotedGroupedData, SaveMode, WriteFormat, WriteMode};
 use robin_sparkless::functions::{self, SortOrder, ThenBuilder, WhenBuilder};
 use robin_sparkless::{
-    Column, DataFrame, DataType, GroupedData, SelectItem, SparkSession, SparkSessionBuilder,
+    Column, CubeRollupData, DataFrame, DataType, GroupedData, SelectItem,
+    SparkSession, SparkSessionBuilder,
 };
 use serde_json::Value as JsonValue;
 use std::cell::RefCell;
@@ -328,6 +329,13 @@ impl PySparkSession {
         }
     }
 
+    fn conf(slf: PyRef<Self>) -> PyRuntimeConfig {
+        let py = slf.py();
+        PyRuntimeConfig {
+            session: slf.into_py(py),
+        }
+    }
+
     #[getter]
     fn _storage(slf: PyRef<Self>) -> PyStorage {
         let py = slf.py();
@@ -467,6 +475,31 @@ struct PyTable {
     name: String,
     #[pyo3(get)]
     database: String,
+}
+
+#[pyclass]
+struct PyRuntimeConfig {
+    session: Py<PyAny>,
+}
+
+#[pymethods]
+impl PyRuntimeConfig {
+    fn get(&self, py: Python<'_>, key: &str) -> PyResult<Option<String>> {
+        let session = self.session.bind(py).downcast::<PySparkSession>().map_err(|_| {
+            PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected SparkSession")
+        })?;
+        let sess = session.borrow();
+        let config = sess.inner.get_config();
+        Ok(config.get(key).cloned())
+    }
+
+    fn is_case_sensitive(&self, py: Python<'_>) -> PyResult<bool> {
+        let session = self.session.bind(py).downcast::<PySparkSession>().map_err(|_| {
+            PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected SparkSession")
+        })?;
+        let sess = session.borrow();
+        Ok(sess.inner.is_case_sensitive())
+    }
 }
 
 #[pyclass]
@@ -1467,6 +1500,31 @@ impl PyDataFrame {
         self.inner.count().map_err(to_py_err)
     }
 
+    #[pyo3(signature = (n=1))]
+    fn head(&self, n: usize) -> PyResult<PyDataFrame> {
+        self.inner
+            .head(n)
+            .map(|df| PyDataFrame { inner: df })
+            .map_err(to_py_err)
+    }
+
+    fn na(slf: PyRef<Self>) -> PyDataFrameNaFunctions {
+        let py = slf.py();
+        PyDataFrameNaFunctions {
+            df: slf.into_py(py),
+        }
+    }
+
+    #[pyo3(signature = (*cols))]
+    fn cube(&self, cols: &Bound<'_, PyTuple>) -> PyResult<PyCubeRollupData> {
+        let names = py_tuple_or_single_to_vec_string(cols)?;
+        let refs: Vec<&str> = names.iter().map(|s| s.as_str()).collect();
+        self.inner
+            .cube(refs)
+            .map(|cr| PyCubeRollupData { inner: cr })
+            .map_err(to_py_err)
+    }
+
     fn group_by(&self, column_names: Vec<String>) -> PyResult<PyGroupedData> {
         let refs: Vec<&str> = column_names.iter().map(|s| s.as_str()).collect();
         self.inner
@@ -2259,6 +2317,126 @@ impl PySortOrder {
 }
 
 #[pyclass]
+struct PyDataFrameNaFunctions {
+    df: Py<PyAny>,
+}
+
+#[pymethods]
+impl PyDataFrameNaFunctions {
+    #[pyo3(signature = (value, subset=None))]
+    fn fill(
+        &self,
+        py: Python<'_>,
+        value: &Bound<'_, PyAny>,
+        subset: Option<Vec<String>>,
+    ) -> PyResult<PyDataFrame> {
+        let df_ref = self.df.bind(py).downcast::<PyDataFrame>().map_err(|_| {
+            PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected DataFrame")
+        })?.borrow();
+        let value_col = lit(value)?;
+        let subset_refs: Option<Vec<&str>> =
+            subset.as_ref().map(|v| v.iter().map(|s| s.as_str()).collect());
+        let na = df_ref.inner.na();
+        na.fill(value_col.inner.into_expr(), subset_refs)
+            .map(|df| PyDataFrame { inner: df })
+            .map_err(to_py_err)
+    }
+
+    #[pyo3(signature = (subset=None, how="any", thresh=None))]
+    fn drop(
+        &self,
+        py: Python<'_>,
+        subset: Option<Vec<String>>,
+        how: &str,
+        thresh: Option<usize>,
+    ) -> PyResult<PyDataFrame> {
+        let df_ref = self.df.bind(py).downcast::<PyDataFrame>().map_err(|_| {
+            PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected DataFrame")
+        })?.borrow();
+        let subset_refs: Option<Vec<&str>> =
+            subset.as_ref().map(|v| v.iter().map(|s| s.as_str()).collect());
+        let na = df_ref.inner.na();
+        na.drop(subset_refs, how, thresh)
+            .map(|df| PyDataFrame { inner: df })
+            .map_err(to_py_err)
+    }
+
+    #[pyo3(signature = (to_replace, value, subset=None))]
+    fn replace(
+        &self,
+        py: Python<'_>,
+        to_replace: &Bound<'_, PyAny>,
+        value: &Bound<'_, PyAny>,
+        subset: Option<Vec<String>>,
+    ) -> PyResult<PyDataFrame> {
+        let df_ref = self.df.bind(py).downcast::<PyDataFrame>().map_err(|_| {
+            PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected DataFrame")
+        })?.borrow();
+        let old_col = lit(to_replace)?;
+        let new_col = lit(value)?;
+        let subset_refs: Option<Vec<&str>> =
+            subset.as_ref().map(|v| v.iter().map(|s| s.as_str()).collect());
+        let na = df_ref.inner.na();
+        na.replace(
+            old_col.inner.into_expr(),
+            new_col.inner.into_expr(),
+            subset_refs,
+        )
+        .map(|df| PyDataFrame { inner: df })
+        .map_err(to_py_err)
+    }
+}
+
+#[pyclass]
+struct PyCubeRollupData {
+    inner: CubeRollupData,
+}
+
+#[pymethods]
+impl PyCubeRollupData {
+    fn count(&self) -> PyResult<PyDataFrame> {
+        self.inner
+            .count()
+            .map(|df| PyDataFrame { inner: df })
+            .map_err(to_py_err)
+    }
+
+    #[pyo3(signature = (*exprs))]
+    fn agg(&self, exprs: &Bound<'_, PyTuple>) -> PyResult<PyDataFrame> {
+        fn push_expr(item: &Bound<'_, PyAny>, out: &mut Vec<robin_sparkless::Expr>) -> PyResult<()> {
+            if let Ok(c) = item.downcast::<PyColumn>() {
+                out.push(c.borrow().inner.clone().into_expr());
+                return Ok(());
+            }
+            if let Ok(list) = item.downcast::<PyList>() {
+                for sub in list.iter() {
+                    push_expr(&sub, out)?;
+                }
+                return Ok(());
+            }
+            if let Ok(tup) = item.downcast::<PyTuple>() {
+                for sub in tup.iter() {
+                    push_expr(&sub, out)?;
+                }
+                return Ok(());
+            }
+            Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+                "agg() expects Column expressions",
+            ))
+        }
+
+        let mut rust_exprs: Vec<robin_sparkless::Expr> = Vec::new();
+        for item in exprs.iter() {
+            push_expr(&item, &mut rust_exprs)?;
+        }
+        self.inner
+            .agg(rust_exprs)
+            .map(|df| PyDataFrame { inner: df })
+            .map_err(to_py_err)
+    }
+}
+
+#[pyclass]
 struct PyGroupedData {
     inner: GroupedData,
 }
@@ -3045,6 +3223,9 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PySortOrder>()?;
     m.add_class::<PyGroupedData>()?;
     m.add_class::<PyPivotedGroupedData>()?;
+    m.add_class::<PyDataFrameNaFunctions>()?;
+    m.add_class::<PyCubeRollupData>()?;
+    m.add_class::<PyRuntimeConfig>()?;
     m.add_class::<PyCatalog>()?;
     m.add_class::<PyWhenBuilder>()?;
     m.add_class::<PyThenBuilder>()?;
