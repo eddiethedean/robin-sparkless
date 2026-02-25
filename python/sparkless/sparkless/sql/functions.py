@@ -69,6 +69,18 @@ from sparkless import (
     months_between as _months_between,
     timestamp_seconds as _timestamp_seconds,
     to_utc_timestamp as _to_utc_timestamp,
+    approx_count_distinct as _approx_count_distinct,
+    date_trunc as _date_trunc,
+    first as _first_agg,
+    translate as _translate,
+    substring_index as _substring_index,
+    crc32 as _crc32,
+    xxhash64 as _xxhash64,
+    get_json_object as _get_json_object,
+    json_tuple as _json_tuple,
+    size as _size,
+    array_contains as _array_contains,
+    explode as _explode,
 )
 from sparkless.errors import PySparkValueError
 
@@ -146,6 +158,18 @@ __all__ = [
     "least",
     "array_distinct",
     "posexplode",
+    "approx_count_distinct",
+    "date_trunc",
+    "first",
+    "translate",
+    "substring_index",
+    "crc32",
+    "xxhash64",
+    "get_json_object",
+    "json_tuple",
+    "size",
+    "array_contains",
+    "explode",
     "expr",
     "current_database",
     "current_schema",
@@ -450,6 +474,72 @@ def timestamp_seconds(column):
 def to_utc_timestamp(column, tz):
     """Interpret timestamp as in tz, convert to UTC (PySpark to_utc_timestamp)."""
     return _to_utc_timestamp(_as_col(column), tz)
+
+
+def approx_count_distinct(col, rsd=None):
+    """Approximate distinct count (PySpark approx_count_distinct); use in groupBy().agg()."""
+    return _approx_count_distinct(_as_col(col), rsd)
+
+
+def date_trunc(format, column):
+    """Truncate date/timestamp to unit (PySpark date_trunc)."""
+    return _date_trunc(format, _as_col(column))
+
+
+def first(col, ignorenulls=True):
+    """First value in group (PySpark first); use in groupBy().agg()."""
+    return _first_agg(_as_col(col), ignorenulls)
+
+
+def translate(column, from_str, to_str):
+    """Character-by-character translation (PySpark translate)."""
+    return _translate(_as_col(column), from_str, to_str)
+
+
+def substring_index(column, delimiter, count):
+    """Substring before/after nth delimiter (PySpark substring_index). count > 0: before nth from left; count < 0: after nth from right."""
+    return _substring_index(_as_col(column), delimiter, count)
+
+
+def crc32(column):
+    """CRC32 checksum of string bytes (PySpark crc32)."""
+    return _crc32(_as_col(column))
+
+
+def xxhash64(column):
+    """XXH64 hash of string (PySpark xxhash64)."""
+    return _xxhash64(_as_col(column))
+
+
+def get_json_object(column, path):
+    """Extract JSON path from string column (PySpark get_json_object)."""
+    return _get_json_object(_as_col(column), path)
+
+
+def json_tuple(column, *keys):
+    """Extract keys from JSON as struct (PySpark json_tuple)."""
+    return _json_tuple(_as_col(column), keys)
+
+
+def size(column):
+    """Number of elements in array column (PySpark size)."""
+    return _size(_as_col(column))
+
+
+def array_contains(column, value):
+    """True if array contains value (PySpark array_contains). value can be column name, Column, or literal."""
+    if isinstance(value, str):
+        v = col(value)
+    elif hasattr(value, "inner"):  # PyColumn
+        v = value
+    else:
+        v = lit(value)
+    return _array_contains(_as_col(column), v)
+
+
+def explode(column):
+    """Explode array into one row per element (PySpark explode)."""
+    return _explode(_as_col(column))
 
 
 # lit is imported from sparkless (native polymorphic implementation)

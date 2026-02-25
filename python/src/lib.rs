@@ -4342,6 +4342,100 @@ fn to_utc_timestamp(column: &PyColumn, tz: &str) -> PyColumn {
     }
 }
 
+// Phase 4: Missing functions (checklist) — expose for F.approx_count_distinct, F.date_trunc, etc.
+#[pyfunction]
+#[pyo3(signature = (col, rsd=None))]
+fn approx_count_distinct(col: &PyColumn, rsd: Option<f64>) -> PyColumn {
+    PyColumn {
+        inner: functions::approx_count_distinct(&col.inner, rsd),
+    }
+}
+
+#[pyfunction]
+fn date_trunc(format: &str, column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: functions::date_trunc(format, &column.inner),
+    }
+}
+
+#[pyfunction]
+#[pyo3(signature = (col, ignorenulls=true))]
+fn first(col: &PyColumn, ignorenulls: bool) -> PyColumn {
+    PyColumn {
+        inner: functions::first(&col.inner, ignorenulls),
+    }
+}
+
+#[pyfunction]
+fn translate(column: &PyColumn, from_str: &str, to_str: &str) -> PyColumn {
+    PyColumn {
+        inner: functions::translate(&column.inner, from_str, to_str),
+    }
+}
+
+#[pyfunction]
+fn substring_index(column: &PyColumn, delimiter: &str, count: i64) -> PyColumn {
+    PyColumn {
+        inner: functions::substring_index(&column.inner, delimiter, count),
+    }
+}
+
+#[pyfunction]
+fn crc32(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: functions::crc32(&column.inner),
+    }
+}
+
+#[pyfunction]
+fn xxhash64(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: functions::xxhash64(&column.inner),
+    }
+}
+
+#[pyfunction]
+fn get_json_object(column: &PyColumn, path: &str) -> PyColumn {
+    PyColumn {
+        inner: functions::get_json_object(&column.inner, path),
+    }
+}
+
+#[pyfunction]
+#[pyo3(signature = (column, *keys))]
+fn json_tuple(column: &PyColumn, keys: &Bound<'_, PyTuple>) -> PyResult<PyColumn> {
+    let keys_str: Vec<String> = keys
+        .iter()
+        .map(|o| o.extract::<String>())
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|_| PyErr::new::<pyo3::exceptions::PyTypeError, _>("json_tuple keys must be strings"))?;
+    let keys_refs: Vec<&str> = keys_str.iter().map(|s| s.as_str()).collect();
+    Ok(PyColumn {
+        inner: functions::json_tuple(&column.inner, &keys_refs),
+    })
+}
+
+#[pyfunction]
+fn size(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: functions::size(&column.inner),
+    }
+}
+
+#[pyfunction]
+fn array_contains(column: &PyColumn, value: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: functions::array_contains(&column.inner, &value.inner),
+    }
+}
+
+#[pyfunction]
+fn explode(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: functions::explode(&column.inner),
+    }
+}
+
 #[pyfunction]
 #[pyo3(signature = (*columns))]
 fn struct_(columns: &Bound<'_, PyTuple>) -> PyResult<PyColumn> {
@@ -4457,5 +4551,18 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(months_between, m)?)?;
     m.add_function(wrap_pyfunction!(timestamp_seconds, m)?)?;
     m.add_function(wrap_pyfunction!(to_utc_timestamp, m)?)?;
+    // Phase 4: missing functions (checklist)
+    m.add_function(wrap_pyfunction!(approx_count_distinct, m)?)?;
+    m.add_function(wrap_pyfunction!(date_trunc, m)?)?;
+    m.add_function(wrap_pyfunction!(first, m)?)?;
+    m.add_function(wrap_pyfunction!(translate, m)?)?;
+    m.add_function(wrap_pyfunction!(substring_index, m)?)?;
+    m.add_function(wrap_pyfunction!(crc32, m)?)?;
+    m.add_function(wrap_pyfunction!(xxhash64, m)?)?;
+    m.add_function(wrap_pyfunction!(get_json_object, m)?)?;
+    m.add_function(wrap_pyfunction!(json_tuple, m)?)?;
+    m.add_function(wrap_pyfunction!(size, m)?)?;
+    m.add_function(wrap_pyfunction!(array_contains, m)?)?;
+    m.add_function(wrap_pyfunction!(explode, m)?)?;
     Ok(())
 }

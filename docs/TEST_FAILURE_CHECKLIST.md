@@ -105,22 +105,22 @@ This checklist tracks fixes needed to reduce test failures. Items are grouped by
 
 ---
 
-## Missing Functions
+## Missing Functions (Phase 4)
 
 Export or implement in `sparkless.sql.functions`:
 
-- [ ] `approx_count_distinct` (~8 tests)
-- [ ] `date_trunc` (~4 tests)
-- [ ] `first` (aggregate) (~20 tests)
-- [ ] `translate` (~1 test)
-- [ ] `substring_index` (~1 test)
-- [ ] `crc32` (~1 test)
-- [ ] `xxhash64` (~1 test)
-- [ ] `get_json_object` (~1 test)
-- [ ] `json_tuple` (~1 test)
-- [ ] `size` (~2 tests)
-- [ ] `array_contains` (~1 test)
-- [ ] `explode` (~1 test, `posexplode` exists)
+- [x] `approx_count_distinct` (~8 tests) — Phase 4: exposed in F + native
+- [x] `date_trunc` (~4 tests) — Phase 4: exposed (alias for trunc)
+- [x] `first` (aggregate) (~20 tests) — Phase 4: exposed for groupBy().agg()
+- [x] `translate` (~1 test) — Phase 4: exposed
+- [x] `substring_index` (~1 test) — Phase 4: exposed
+- [x] `crc32` (~1 test) — Phase 4: exposed
+- [x] `xxhash64` (~1 test) — Phase 4: exposed
+- [x] `get_json_object` (~1 test) — Phase 4: exposed
+- [x] `json_tuple` (~1 test) — Phase 4: exposed (F.json_tuple(col, *keys))
+- [x] `size` (~2 tests) — Phase 4: exposed (alias for array_size)
+- [x] `array_contains` (~1 test) — Phase 4: exposed; value can be column or literal
+- [x] `explode` (~1 test) — Phase 4: exposed (`posexplode` already existed)
 
 ---
 

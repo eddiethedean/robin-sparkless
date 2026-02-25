@@ -18,6 +18,8 @@ try:
         "concat", "concat_ws", "array", "struct_",
         "asinh", "atanh", "cosh", "sinh",
         "last_day", "months_between", "timestamp_seconds", "to_utc_timestamp",
+        "approx_count_distinct", "date_trunc", "first", "translate", "substring_index",
+        "crc32", "xxhash64", "get_json_object", "json_tuple", "size", "array_contains", "explode",
     ])
 except ImportError:
     _mod = __import__("_native", fromlist=[
@@ -36,6 +38,8 @@ except ImportError:
         "concat", "concat_ws", "array", "struct_",
         "asinh", "atanh", "cosh", "sinh",
         "last_day", "months_between", "timestamp_seconds", "to_utc_timestamp",
+        "approx_count_distinct", "date_trunc", "first", "translate", "substring_index",
+        "crc32", "xxhash64", "get_json_object", "json_tuple", "size", "array_contains", "explode",
     ])
 
 SparklessError = _mod.SparklessError
@@ -136,6 +140,18 @@ last_day = _mod.last_day
 months_between = _mod.months_between
 timestamp_seconds = _mod.timestamp_seconds
 to_utc_timestamp = _mod.to_utc_timestamp
+approx_count_distinct = _mod.approx_count_distinct
+date_trunc = _mod.date_trunc
+first = _mod.first
+translate = _mod.translate
+substring_index = _mod.substring_index
+crc32 = _mod.crc32
+xxhash64 = _mod.xxhash64
+get_json_object = _mod.get_json_object
+json_tuple = _mod.json_tuple
+size = _mod.size
+array_contains = _mod.array_contains
+explode = _mod.explode
 
 # PySpark-style names
 SparkSession = _SparkSession
