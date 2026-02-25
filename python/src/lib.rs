@@ -1128,6 +1128,16 @@ struct PyDataFrameReader {
     format: Option<String>,
 }
 
+/// Resolve cast type argument: string as-is, or type object's simpleString() (e.g. IntegerType()).
+fn resolve_cast_type_name(value: &Bound<'_, PyAny>) -> PyResult<String> {
+    if let Ok(s) = value.extract::<String>() {
+        return Ok(s);
+    }
+    let simple_string = value.getattr("simpleString")?;
+    let s: String = simple_string.call0()?.extract()?;
+    Ok(s)
+}
+
 /// Convert PySpark option value to string (bool -> "true"/"false", int/float -> string, str as-is).
 fn option_value_to_string(value: &Bound<'_, PyAny>) -> PyResult<String> {
     if value.is_none() {
@@ -2896,9 +2906,10 @@ impl PyColumn {
         }
     }
 
-    fn cast(&self, type_name: &str) -> PyResult<PyColumn> {
+    fn cast(&self, type_name: &Bound<'_, PyAny>) -> PyResult<PyColumn> {
+        let name = resolve_cast_type_name(type_name)?;
         self.inner
-            .cast_to(type_name)
+            .cast_to(&name)
             .map(|c| PyColumn { inner: c })
             .map_err(to_py_err)
     }
@@ -3349,8 +3360,9 @@ fn trim(col: &PyColumn) -> PyColumn {
 }
 
 #[pyfunction]
-fn cast(col: &PyColumn, type_name: &str) -> PyResult<PyColumn> {
-    robin_sparkless::functions::cast(&col.inner, type_name)
+fn cast(col: &PyColumn, type_name: &Bound<'_, PyAny>) -> PyResult<PyColumn> {
+    let name = resolve_cast_type_name(type_name)?;
+    robin_sparkless::functions::cast(&col.inner, &name)
         .map(|c| PyColumn { inner: c })
         .map_err(to_py_err)
 }
