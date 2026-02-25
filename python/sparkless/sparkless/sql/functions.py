@@ -45,19 +45,23 @@ from sparkless import (
     date_add as _date_add,
     date_sub as _date_sub,
     date_format as _date_format,
+    length as _length,
+    floor as _floor,
+    round as _round,
+    ltrim as _ltrim,
+    hour as _hour,
+    minute as _minute,
+    soundex as _soundex,
+    repeat as _repeat,
+    levenshtein as _levenshtein,
+    try_cast as _try_cast,
+    try_add as _try_add,
+    concat as _concat,
+    concat_ws as _concat_ws,
+    array as _array,
+    struct as _struct,
 )
 from sparkless.errors import PySparkValueError
-
-def _not_implemented(name):
-    def _fn(*args, **kwargs):
-        raise NotImplementedError(f"{name} is not yet implemented in robin-sparkless")
-
-    _fn.__name__ = name
-    return _fn
-
-
-# Still missing (tracked by later todos)
-floor = _not_implemented("floor")
 
 
 def udf(*args, **kwargs):
@@ -97,7 +101,21 @@ __all__ = [
     "date_add",
     "date_sub",
     "date_format",
+    "length",
     "floor",
+    "round",
+    "ltrim",
+    "hour",
+    "minute",
+    "soundex",
+    "repeat",
+    "levenshtein",
+    "try_cast",
+    "try_add",
+    "concat",
+    "concat_ws",
+    "array",
+    "struct",
     "regexp_replace",
     "regexp_extract",
     "regexp_extract_all",
@@ -289,6 +307,88 @@ def date_sub(column, n):
 
 def date_format(column, fmt):
     return _date_format(_as_col(column), fmt)
+
+
+def length(column):
+    """String length in characters (PySpark length)."""
+    return _length(_as_col(column))
+
+
+def floor(column):
+    """Floor to nearest integer (PySpark floor)."""
+    return _floor(_as_col(column))
+
+
+def round(column, scale=0):
+    """Round to given decimal places (PySpark round). scale=0 by default."""
+    return _round(_as_col(column), scale)
+
+
+def ltrim(column):
+    """Trim leading whitespace (PySpark ltrim)."""
+    return _ltrim(_as_col(column))
+
+
+def hour(column):
+    """Extract hour from datetime (PySpark hour)."""
+    return _hour(_as_col(column))
+
+
+def minute(column):
+    """Extract minute from datetime (PySpark minute)."""
+    return _minute(_as_col(column))
+
+
+def soundex(column):
+    """American Soundex code (PySpark soundex)."""
+    return _soundex(_as_col(column))
+
+
+def repeat(column, n):
+    """Repeat string n times (PySpark repeat)."""
+    return _repeat(_as_col(column), n)
+
+
+def levenshtein(column, other):
+    """Levenshtein distance between two strings (PySpark levenshtein)."""
+    return _levenshtein(_as_col(column), _as_col(other))
+
+
+def try_cast(column, type_name):
+    """Cast to type, null on invalid (PySpark try_cast)."""
+    return _try_cast(_as_col(column), type_name)
+
+
+def try_add(left, right):
+    """Add that returns null on overflow (PySpark try_add)."""
+    return _try_add(_as_col(left), _as_col(right))
+
+
+def concat(*cols):
+    """Concatenate columns as strings (PySpark concat)."""
+    if not cols:
+        raise ValueError("concat requires at least one column")
+    return _concat(*[_as_col(c) for c in cols])
+
+
+def concat_ws(separator, *cols):
+    """Concatenate columns with separator (PySpark concat_ws)."""
+    if not cols:
+        raise ValueError("concat_ws requires at least one column")
+    return _concat_ws(separator, *[_as_col(c) for c in cols])
+
+
+def array(*cols):
+    """Create array column from columns (PySpark array)."""
+    return _array(*[_as_col(c) for c in cols])
+
+
+def struct(*cols):
+    """Create struct from columns (PySpark struct)."""
+    if not cols:
+        raise ValueError("struct requires at least one column")
+    return _struct(*[_as_col(c) for c in cols])
+
 
 # lit is imported from sparkless (native polymorphic implementation)
 

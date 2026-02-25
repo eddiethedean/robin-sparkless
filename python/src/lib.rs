@@ -2335,6 +2335,62 @@ impl PyColumn {
         }
     }
 
+    fn floor(&self) -> PyColumn {
+        PyColumn {
+            inner: self.inner.floor(),
+        }
+    }
+
+    #[pyo3(signature = (scale=0))]
+    fn round(&self, scale: i32) -> PyColumn {
+        PyColumn {
+            inner: self.inner.round(scale),
+        }
+    }
+
+    fn ltrim(&self) -> PyColumn {
+        PyColumn {
+            inner: self.inner.ltrim(),
+        }
+    }
+
+    fn hour(&self) -> PyColumn {
+        PyColumn {
+            inner: self.inner.hour(),
+        }
+    }
+
+    fn minute(&self) -> PyColumn {
+        PyColumn {
+            inner: self.inner.minute(),
+        }
+    }
+
+    fn soundex(&self) -> PyColumn {
+        PyColumn {
+            inner: self.inner.soundex(),
+        }
+    }
+
+    fn repeat(&self, n: i32) -> PyColumn {
+        PyColumn {
+            inner: self.inner.repeat(n),
+        }
+    }
+
+    fn levenshtein(&self, other: &PyColumn) -> PyColumn {
+        PyColumn {
+            inner: self.inner.levenshtein(&other.inner),
+        }
+    }
+
+    fn try_cast(&self, type_name: &str) -> PyResult<PyColumn> {
+        self.inner
+            .try_cast_to(type_name)
+            .map(|c| PyColumn { inner: c })
+            .map_err(to_py_err)
+    }
+
     fn trim(&self) -> PyColumn {
         PyColumn {
             inner: self.inner.trim(),
@@ -3315,6 +3371,165 @@ fn date_format(column: &PyColumn, format: &str) -> PyColumn {
     }
 }
 
+#[pyfunction]
+fn length(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: functions::length(&column.inner),
+    }
+}
+
+#[pyfunction]
+fn floor(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: functions::floor(&column.inner),
+    }
+}
+
+#[pyfunction]
+#[pyo3(signature = (column, scale=0))]
+fn round(column: &PyColumn, scale: i32) -> PyColumn {
+    PyColumn {
+        inner: functions::round(&column.inner, scale),
+    }
+}
+
+#[pyfunction]
+fn ltrim(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: functions::ltrim(&column.inner),
+    }
+}
+
+#[pyfunction]
+fn hour(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: functions::hour(&column.inner),
+    }
+}
+
+#[pyfunction]
+fn minute(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: functions::minute(&column.inner),
+    }
+}
+
+#[pyfunction]
+fn soundex(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: functions::soundex(&column.inner),
+    }
+}
+
+#[pyfunction]
+fn repeat(column: &PyColumn, n: i32) -> PyColumn {
+    PyColumn {
+        inner: functions::repeat(&column.inner, n),
+    }
+}
+
+#[pyfunction]
+fn levenshtein(column: &PyColumn, other: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: functions::levenshtein(&column.inner, &other.inner),
+    }
+}
+
+#[pyfunction]
+fn try_cast(column: &PyColumn, type_name: &str) -> PyResult<PyColumn> {
+    functions::try_cast(&column.inner, type_name)
+        .map(|c| PyColumn { inner: c })
+        .map_err(to_py_err)
+}
+
+#[pyfunction]
+fn try_add(left: &PyColumn, right: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: functions::try_add(&left.inner, &right.inner),
+    }
+}
+
+#[pyfunction]
+#[pyo3(signature = (*columns))]
+fn concat(columns: &Bound<'_, PyTuple>) -> PyResult<PyColumn> {
+    let mut cols: Vec<Column> = Vec::with_capacity(columns.len());
+    for item in columns.iter() {
+        let py_col = item.downcast::<PyColumn>().map_err(|_| {
+            PyErr::new::<pyo3::exceptions::PyTypeError, _>("concat expects Column expressions")
+        })?;
+        cols.push(py_col.borrow().inner.clone());
+    }
+    if cols.is_empty() {
+        return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
+            "concat requires at least one column",
+        ));
+    }
+    let refs: Vec<&Column> = cols.iter().collect();
+    Ok(PyColumn {
+        inner: functions::concat(&refs),
+    })
+}
+
+#[pyfunction]
+#[pyo3(signature = (separator, *columns))]
+fn concat_ws(separator: &str, columns: &Bound<'_, PyTuple>) -> PyResult<PyColumn> {
+    let mut cols: Vec<Column> = Vec::with_capacity(columns.len());
+    for item in columns.iter() {
+        let py_col = item.downcast::<PyColumn>().map_err(|_| {
+            PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+                "concat_ws expects Column expressions",
+            )
+        })?;
+        cols.push(py_col.borrow().inner.clone());
+    }
+    if cols.is_empty() {
+        return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
+            "concat_ws requires at least one column",
+        ));
+    }
+    let refs: Vec<&Column> = cols.iter().collect();
+    Ok(PyColumn {
+        inner: functions::concat_ws(separator, &refs),
+    })
+}
+
+#[pyfunction]
+#[pyo3(signature = (*columns))]
+fn array(columns: &Bound<'_, PyTuple>) -> PyResult<PyColumn> {
+    let mut cols: Vec<Column> = Vec::with_capacity(columns.len());
+    for item in columns.iter() {
+        let py_col = item.downcast::<PyColumn>().map_err(|_| {
+            PyErr::new::<pyo3::exceptions::PyTypeError, _>("array expects Column expressions")
+        })?;
+        cols.push(py_col.borrow().inner.clone());
+    }
+    let refs: Vec<&Column> = cols.iter().collect();
+    functions::array(&refs)
+        .map(|c| PyColumn { inner: c })
+        .map_err(to_py_err)
+}
+
+#[pyfunction]
+#[pyo3(signature = (*columns))]
+fn struct_(columns: &Bound<'_, PyTuple>) -> PyResult<PyColumn> {
+    let mut cols: Vec<Column> = Vec::with_capacity(columns.len());
+    for item in columns.iter() {
+        let py_col = item.downcast::<PyColumn>().map_err(|_| {
+            PyErr::new::<pyo3::exceptions::PyTypeError, _>("struct expects Column expressions")
+        })?;
+        cols.push(py_col.borrow().inner.clone());
+    }
+    if cols.is_empty() {
+        return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
+            "struct requires at least one column",
+        ));
+    }
+    let refs: Vec<&Column> = cols.iter().collect();
+    Ok(PyColumn {
+        inner: functions::struct_(&refs),
+    })
+}
+
 #[pymodule]
 fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("SparklessError", m.py().get_type_bound::<SparklessError>())?;
@@ -3385,5 +3600,20 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(date_add, m)?)?;
     m.add_function(wrap_pyfunction!(date_sub, m)?)?;
     m.add_function(wrap_pyfunction!(date_format, m)?)?;
+    m.add_function(wrap_pyfunction!(length, m)?)?;
+    m.add_function(wrap_pyfunction!(floor, m)?)?;
+    m.add_function(wrap_pyfunction!(round, m)?)?;
+    m.add_function(wrap_pyfunction!(ltrim, m)?)?;
+    m.add_function(wrap_pyfunction!(hour, m)?)?;
+    m.add_function(wrap_pyfunction!(minute, m)?)?;
+    m.add_function(wrap_pyfunction!(soundex, m)?)?;
+    m.add_function(wrap_pyfunction!(repeat, m)?)?;
+    m.add_function(wrap_pyfunction!(levenshtein, m)?)?;
+    m.add_function(wrap_pyfunction!(try_cast, m)?)?;
+    m.add_function(wrap_pyfunction!(try_add, m)?)?;
+    m.add_function(wrap_pyfunction!(concat, m)?)?;
+    m.add_function(wrap_pyfunction!(concat_ws, m)?)?;
+    m.add_function(wrap_pyfunction!(array, m)?)?;
+    m.add_function(wrap_pyfunction!(struct_, m)?)?;
     Ok(())
 }

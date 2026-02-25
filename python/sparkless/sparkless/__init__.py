@@ -13,6 +13,9 @@ try:
         "array_distinct", "posexplode",
         "to_timestamp", "to_date", "current_date", "datediff", "unix_timestamp", "from_unixtime",
         "year", "month", "dayofmonth", "dayofweek", "date_add", "date_sub", "date_format",
+        "length", "floor", "round", "ltrim", "hour", "minute",
+        "soundex", "repeat", "levenshtein", "try_cast", "try_add",
+        "concat", "concat_ws", "array", "struct_",
     ])
 except ImportError:
     _mod = __import__("_native", fromlist=[
@@ -26,6 +29,9 @@ except ImportError:
         "array_distinct", "posexplode",
         "to_timestamp", "to_date", "current_date", "datediff", "unix_timestamp", "from_unixtime",
         "year", "month", "dayofmonth", "dayofweek", "date_add", "date_sub", "date_format",
+        "length", "floor", "round", "ltrim", "hour", "minute",
+        "soundex", "repeat", "levenshtein", "try_cast", "try_add",
+        "concat", "concat_ws", "array", "struct_",
     ])
 
 SparklessError = _mod.SparklessError
@@ -102,6 +108,21 @@ dayofweek = _mod.dayofweek
 date_add = _mod.date_add
 date_sub = _mod.date_sub
 date_format = _mod.date_format
+length = _mod.length
+floor = _mod.floor
+round = _mod.round
+ltrim = _mod.ltrim
+hour = _mod.hour
+minute = _mod.minute
+soundex = _mod.soundex
+repeat = _mod.repeat
+levenshtein = _mod.levenshtein
+try_cast = _mod.try_cast
+try_add = _mod.try_add
+concat = _mod.concat
+concat_ws = _mod.concat_ws
+array = _mod.array
+struct = _mod.struct_  # PySpark alias (Rust uses struct_)
 
 # PySpark-style names
 SparkSession = _SparkSession
@@ -153,6 +174,9 @@ def __getattr__(name):
     if name in ("asc", "desc"):
         import sparkless.sql.functions as f
         return getattr(f, name)
+    if name == "expr":
+        import sparkless.sql.functions as f
+        return f.expr
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
