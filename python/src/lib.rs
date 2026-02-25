@@ -722,6 +722,7 @@ impl PyStorage {
 }
 
 /// Map PySpark type name to our schema type string.
+/// Pass through array<...>, map<...>, struct<...> so createDataFrame preserves List/Map/Struct columns.
 fn simple_string_to_type(s: &str) -> String {
     let lower = s.to_lowercase();
     match lower.as_str() {
@@ -734,9 +735,9 @@ fn simple_string_to_type(s: &str) -> String {
         "date" => "date".to_string(),
         "timestamp" => "timestamp".to_string(),
         "binary" => "binary".to_string(),
-        _ if lower.contains("struct") => "string".to_string(),
-        _ if lower.contains("array") => "string".to_string(),
-        _ if lower.contains("map") => "string".to_string(),
+        _ if lower.starts_with("array<") && lower.ends_with('>') => s.to_string(),
+        _ if lower.starts_with("map<") && lower.ends_with('>') => s.to_string(),
+        _ if lower.starts_with("struct<") && lower.ends_with('>') => s.to_string(),
         _ => "string".to_string(),
     }
 }
