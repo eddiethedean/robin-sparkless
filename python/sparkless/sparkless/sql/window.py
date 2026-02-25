@@ -79,3 +79,15 @@ class Window:
     def partitionBy(*cols):
         return WindowSpec().partitionBy(*cols)
 
+    @staticmethod
+    def orderBy(*cols):
+        return WindowSpec().orderBy(*cols)
+
+    @staticmethod
+    def rowsBetween(start, end):
+        return WindowSpec().rowsBetween(start, end)
+
+    @staticmethod
+    def rangeBetween(start, end):
+        return WindowSpec().rangeBetween(start, end)
+
