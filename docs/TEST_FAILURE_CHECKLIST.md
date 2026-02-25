@@ -132,8 +132,8 @@ Export or implement in `sparkless.sql.functions`:
 
 ### SQL / DML
 - [ ] SQL join types: only INNER, LEFT, RIGHT, FULL, LEFT SEMI, LEFT ANTI, CROSS supported
-- [ ] UPDATE and DELETE not supported
-- **Affected:** ~5 tests in `test_sql_cte_robust.py`, `test_sql_update.py`
+- [x] UPDATE and DELETE supported (single table; modify table in session catalog; return empty DataFrame)
+- **Affected:** `test_sql_update.py` — passes with robin backend
 
 ---
 

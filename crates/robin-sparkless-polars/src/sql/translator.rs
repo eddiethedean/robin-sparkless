@@ -10,9 +10,10 @@ use crate::session::{SparkSession, set_thread_udf_session};
 use polars::prelude::{DataFrame as PlDataFrame, Expr, PolarsError, col, lit, when};
 use serde_json::Value as JsonValue;
 use sqlparser::ast::{
-    BinaryOperator, Expr as SqlExpr, Function, FunctionArg, FunctionArgExpr, FunctionArguments,
-    GroupByExpr, JoinConstraint, JoinOperator, ObjectType, OrderByKind, Query, Select, SelectItem,
-    SetExpr, SetOperator, Statement, TableFactor, Value, ValueWithSpan,
+    AssignmentTarget, BinaryOperator, Expr as SqlExpr, FromTable, Function, FunctionArg,
+    FunctionArgExpr, FunctionArguments, GroupByExpr, JoinConstraint, JoinOperator, ObjectType,
+    OrderByKind, Query, Select, SelectItem, SetExpr, SetOperator, Statement, TableFactor, Value,
+    ValueWithSpan,
 };
 
 /// Parsed SQL number literal: integer or float.
@@ -221,12 +222,8 @@ pub fn translate(
                 session.is_case_sensitive(),
             ))
         }
-        Statement::Update(_) => Err(PolarsError::InvalidOperation(
-            "SQL: UPDATE and DELETE are not supported. Use DataFrame API or Spark for DML.".into(),
-        )),
-        Statement::Delete(_) => Err(PolarsError::InvalidOperation(
-            "SQL: UPDATE and DELETE are not supported. Use DataFrame API or Spark for DML.".into(),
-        )),
+        Statement::Update(u) => translate_update(session, u),
+        Statement::Delete(d) => translate_delete(session, d),
         _ => Err(PolarsError::InvalidOperation(
             "SQL: only SELECT, CREATE SCHEMA/DATABASE, and DROP TABLE/VIEW/SCHEMA are supported."
                 .into(),
@@ -272,6 +269,88 @@ fn translate_set_expr(
             "SQL: only SELECT and UNION are supported (no VALUES, INSERT, etc.).".into(),
         )),
     }
+}
+
+/// Translate UPDATE table SET col = expr [WHERE condition]. Modifies the table in the session catalog.
+fn translate_update(
+    session: &SparkSession,
+    update: &sqlparser::ast::Update,
+) -> Result<crate::dataframe::DataFrame, PolarsError> {
+    if !update.table.joins.is_empty() {
+        return Err(PolarsError::InvalidOperation(
+            "SQL: UPDATE with JOIN is not supported. Use a single table.".into(),
+        ));
+    }
+    let table_name = table_name_from_factor(&update.table.relation)?;
+    let mut df = session.table(&table_name)?;
+
+    let where_expr = match &update.selection {
+        Some(sel) => sql_expr_to_polars(sel, session, Some(&df), None)?,
+        None => lit(true),
+    };
+
+    for assign in &update.assignments {
+        let (col_name, value_expr) = match &assign.target {
+            AssignmentTarget::ColumnName(name) => {
+                let cn = table_name_from_object_name(name);
+                let value = sql_expr_to_polars(&assign.value, session, Some(&df), None)?;
+                (cn, value)
+            }
+            AssignmentTarget::Tuple(_) => {
+                return Err(PolarsError::InvalidOperation(
+                    "SQL: UPDATE with tuple assignment is not supported.".into(),
+                ));
+            }
+        };
+        let resolved = df.resolve_column_name(&col_name)?;
+        let new_expr = when(where_expr.clone())
+            .then(value_expr)
+            .otherwise(col(resolved.as_str()));
+        df = df.with_column_expr(&resolved, new_expr)?;
+    }
+
+    session.create_or_replace_temp_view(&table_name, df.clone());
+    session.register_table(&table_name, df);
+    Ok(DataFrame::from_polars_with_options(
+        PlDataFrame::empty(),
+        session.is_case_sensitive(),
+    ))
+}
+
+/// Translate DELETE FROM table [WHERE condition]. Removes matching rows from the table in the session catalog.
+fn translate_delete(
+    session: &SparkSession,
+    delete: &sqlparser::ast::Delete,
+) -> Result<crate::dataframe::DataFrame, PolarsError> {
+    let tables = match &delete.from {
+        FromTable::WithFromKeyword(t) | FromTable::WithoutKeyword(t) => t,
+    };
+    let first = tables.first().ok_or_else(|| {
+        PolarsError::InvalidOperation("SQL: DELETE FROM requires a table.".into())
+    })?;
+    if !first.joins.is_empty() {
+        return Err(PolarsError::InvalidOperation(
+            "SQL: DELETE with JOIN is not supported. Use a single table.".into(),
+        ));
+    }
+    let table_name = table_name_from_factor(&first.relation)?;
+    let df = session.table(&table_name)?;
+
+    let keep_condition = match &delete.selection {
+        Some(sel) => {
+            let pred = sql_expr_to_polars(sel, session, Some(&df), None)?;
+            pred.not()
+        }
+        None => lit(false),
+    };
+    let new_df = df.filter(keep_condition)?;
+
+    session.create_or_replace_temp_view(&table_name, new_df.clone());
+    session.register_table(&table_name, new_df);
+    Ok(DataFrame::from_polars_with_options(
+        PlDataFrame::empty(),
+        session.is_case_sensitive(),
+    ))
 }
 
 /// Translate a single Select (FROM, WHERE, GROUP BY, projection, HAVING) to a DataFrame.
@@ -447,27 +526,39 @@ fn translate_select_from(
     Ok(df)
 }
 
+fn table_name_from_object_name(name: &sqlparser::ast::ObjectName) -> String {
+    if name.0.len() >= 2 {
+        let parts: Vec<String> = name
+            .0
+            .iter()
+            .filter_map(|p| p.as_ident().map(|i| i.value.clone()))
+            .collect();
+        parts.join(".")
+    } else {
+        name.0
+            .last()
+            .and_then(|p| p.as_ident())
+            .map(|i| i.value.clone())
+            .unwrap_or_default()
+    }
+}
+
+fn table_name_from_factor(factor: &TableFactor) -> Result<String, PolarsError> {
+    match factor {
+        TableFactor::Table { name, .. } => Ok(table_name_from_object_name(name)),
+        _ => Err(PolarsError::InvalidOperation(
+            "SQL: only plain table names are supported for UPDATE/DELETE.".into(),
+        )),
+    }
+}
+
 fn resolve_table_factor(
     session: &SparkSession,
     factor: &TableFactor,
 ) -> Result<crate::dataframe::DataFrame, PolarsError> {
     match factor {
         TableFactor::Table { name, .. } => {
-            // Build full name for global_temp.xyz (sqlparser: ObjectNamePart::Identifier(...))
-            let table_name = if name.0.len() >= 2 {
-                let parts: Vec<String> = name
-                    .0
-                    .iter()
-                    .filter_map(|p| p.as_ident().map(|i| i.value.clone()))
-                    .collect();
-                parts.join(".")
-            } else {
-                name.0
-                    .last()
-                    .and_then(|p| p.as_ident())
-                    .map(|i| i.value.clone())
-                    .unwrap_or_default()
-            };
+            let table_name = table_name_from_object_name(name);
             session.table(&table_name)
         }
         _ => Err(PolarsError::InvalidOperation(
