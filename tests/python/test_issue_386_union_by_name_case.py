@@ -11,7 +11,7 @@ def test_union_by_name_case_insensitive_matching() -> None:
     # Default is case-insensitive; left has "ID", right has "id"
     left = spark.createDataFrame([(1,)], ["ID"])
     right = spark.createDataFrame([(2,)], ["id"])
-    out = left.union_by_name(right, allow_missing_columns=True)
+    out = left.unionByName(right, allowMissingColumns=True)
     rows = out.collect()
     assert len(rows) == 2
     # Result should have one column (name from left, "ID")
@@ -26,7 +26,7 @@ def test_union_by_name_same_case() -> None:
     spark = rs.SparkSession.builder().app_name("issue_386").get_or_create()
     left = spark.createDataFrame([(1, "a")], ["id", "label"])
     right = spark.createDataFrame([(2, "b")], ["id", "label"])
-    out = left.union_by_name(right)
+    out = left.unionByName(right)
     rows = out.collect()
     assert len(rows) == 2
     assert rows[0]["id"] == 1 and rows[0]["label"] == "a"
