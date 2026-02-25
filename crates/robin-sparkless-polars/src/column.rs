@@ -450,6 +450,61 @@ impl Column {
         Self::from_expr(self.expr().clone().lt_eq(other), None)
     }
 
+    /// True if column value is between lower and upper (inclusive). PySpark between(low, high).
+    /// Applies string–numeric coercion so col("val").between(1, 10) works when val is string (#628).
+    pub fn between(&self, lower: &Column, upper: &Column) -> Column {
+        use crate::type_coercion::{coerce_for_pyspark_comparison, CompareOp};
+        use polars::prelude::*;
+
+        let left = self.expr().clone();
+        let lower_expr = lower.expr().clone();
+        let upper_expr = upper.expr().clone();
+
+        let infer_lit_type = |e: &Expr| -> Option<DataType> {
+            if let Expr::Literal(lv) = e {
+                let dt = lv.get_datatype();
+                if matches!(dt, DataType::Unknown(_)) {
+                    None
+                } else {
+                    Some(dt)
+                }
+            } else {
+                None
+            }
+        };
+
+        let lower_ty = infer_lit_type(&lower_expr).unwrap_or(DataType::String);
+        let upper_ty = infer_lit_type(&upper_expr).unwrap_or(DataType::String);
+        let lt = DataType::String;
+
+        let (left_c, lower_c) = match coerce_for_pyspark_comparison(
+            left.clone(),
+            lower_expr.clone(),
+            &lt,
+            &lower_ty,
+            &CompareOp::GtEq,
+        ) {
+            Ok((a, b)) => (a, b),
+            Err(_) => (left.clone(), lower_expr),
+        };
+
+        let upper_clone = upper.expr().clone();
+        let (left_cc, upper_c) = match coerce_for_pyspark_comparison(
+            left_c.clone(),
+            upper_expr,
+            &lt,
+            &upper_ty,
+            &CompareOp::LtEq,
+        ) {
+            Ok((a, b)) => (a, b),
+            Err(_) => (left_c.clone(), upper_clone),
+        };
+
+        let ge = left_cc.clone().gt_eq(lower_c);
+        let le = left_cc.lt_eq(upper_c);
+        Self::from_expr(ge.and(le), None)
+    }
+
     /// Equality comparison
     pub fn eq(&self, other: Expr) -> Column {
         Self::from_expr(self.expr().clone().eq(other), None)

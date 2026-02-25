@@ -2378,6 +2378,29 @@ impl PyColumn {
         }
     }
 
+    /// Null-safe equality (NULL <=> NULL returns True). PySpark eqNullSafe.
+    fn eq_null_safe(&self, other: &PyColumn) -> PyColumn {
+        PyColumn {
+            inner: self.inner.eq_null_safe(&other.inner),
+        }
+    }
+
+    /// PySpark camelCase alias for eq_null_safe.
+    #[pyo3(name = "eqNullSafe")]
+    fn eq_null_safe_camel(&self, other: &PyColumn) -> PyColumn {
+        self.eq_null_safe(other)
+    }
+
+    /// True if column value is between lower and upper (inclusive). PySpark between(low, high).
+    /// Accepts Column or scalar (int, float, str, bool, None) for lower/upper.
+    fn between(&self, lower: &Bound<'_, PyAny>, upper: &Bound<'_, PyAny>) -> PyResult<PyColumn> {
+        let lower_col = py_any_to_column(lower)?;
+        let upper_col = py_any_to_column(upper)?;
+        Ok(PyColumn {
+            inner: self.inner.between(&lower_col, &upper_col),
+        })
+    }
+
     /// Python: col("x") > 1
     fn __gt__(&self, other: &Bound<'_, PyAny>) -> PyResult<PyColumn> {
         let other_col = py_any_to_column(other)?;
@@ -2584,6 +2607,19 @@ impl PyColumn {
         }
     }
 
+    /// Descending sort, nulls last. PySpark desc_nulls_last.
+    fn desc_nulls_last(&self) -> PySortOrder {
+        PySortOrder {
+            inner: self.inner.desc_nulls_last(),
+        }
+    }
+
+    /// PySpark camelCase alias for desc_nulls_last.
+    #[pyo3(name = "descNullsLast")]
+    fn desc_nulls_last_camel(&self) -> PySortOrder {
+        self.desc_nulls_last()
+    }
+
     fn upper(&self) -> PyColumn {
         PyColumn {
             inner: self.inner.upper(),
@@ -2612,6 +2648,15 @@ impl PyColumn {
     fn length(&self) -> PyColumn {
         PyColumn {
             inner: self.inner.length(),
+        }
+    }
+
+    /// Split string by delimiter. PySpark split. limit=-1 means no limit.
+    #[pyo3(signature = (delimiter, limit=-1))]
+    fn split(&self, delimiter: &str, limit: i32) -> PyColumn {
+        let lim = if limit < 0 { None } else { Some(limit) };
+        PyColumn {
+            inner: self.inner.split(delimiter, lim),
         }
     }
 
@@ -2669,6 +2714,19 @@ impl PyColumn {
             .try_cast_to(type_name)
             .map(|c| PyColumn { inner: c })
             .map_err(to_py_err)
+    }
+
+    /// Add or replace a struct field. PySpark withField.
+    fn with_field(&self, name: &str, value: &PyColumn) -> PyColumn {
+        PyColumn {
+            inner: self.inner.with_field(name, &value.inner),
+        }
+    }
+
+    /// PySpark camelCase alias for with_field.
+    #[pyo3(name = "withField")]
+    fn with_field_camel(&self, name: &str, value: &PyColumn) -> PyColumn {
+        self.with_field(name, value)
     }
 
     fn asinh(&self) -> PyColumn {

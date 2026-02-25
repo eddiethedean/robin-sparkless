@@ -4128,7 +4128,9 @@ pub fn apply_struct_with_field(
         new_fields.push(new_s);
     }
     if !replaced {
-        new_fields.push(value_series);
+        let mut v = value_series.clone();
+        v.rename(PlSmallStr::from(field_name));
+        new_fields.push(v);
     }
     let out = StructChunked::from_series(name.as_str().into(), len, new_fields.iter())
         .map_err(|e| compute_err("with_field: build struct", e))?;
