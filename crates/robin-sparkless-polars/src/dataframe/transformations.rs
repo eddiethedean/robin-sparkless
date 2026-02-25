@@ -567,6 +567,7 @@ pub fn dropna(
 }
 
 /// Fill nulls with a literal expression. If subset is Some, only those columns are filled; else all.
+/// Casts fill value to each column's dtype to preserve type (e.g. fill 0 -> int 0, not string "0").
 /// PySpark na.fill(value, subset=...).
 pub fn fillna(
     df: &DataFrame,
@@ -580,13 +581,23 @@ pub fn fillna(
             .iter()
             .map(|n| {
                 let resolved = df.resolve_column_name(n)?;
-                Ok(col(resolved.as_str()).fill_null(value_expr.clone()))
+                let fill = match df.get_column_dtype(resolved.as_str()) {
+                    Some(dt) => value_expr.clone().cast(dt),
+                    None => value_expr.clone(),
+                };
+                Ok(col(resolved.as_str()).fill_null(fill))
             })
             .collect::<Result<Vec<_>, PolarsError>>()?,
         None => df
             .columns()?
             .iter()
-            .map(|n| col(n.as_str()).fill_null(value_expr.clone()))
+            .map(|n| {
+                let fill = match df.get_column_dtype(n) {
+                    Some(dt) => value_expr.clone().cast(dt),
+                    None => value_expr.clone(),
+                };
+                col(n.as_str()).fill_null(fill)
+            })
             .collect(),
     };
     let lf = df.lazy_frame().with_columns(exprs);

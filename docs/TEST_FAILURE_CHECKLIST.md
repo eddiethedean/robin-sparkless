@@ -37,31 +37,31 @@ This checklist tracks fixes needed to reduce test failures. Items are grouped by
 ## Medium Priority
 
 ### 5. `na.fill` vs `fillna` API
-- [ ] Add `df.na` property returning object with `fill()` method
-- [ ] Delegate `na.fill(...)` to `fillna(...)`
+- [x] Add `df.na` property returning object with `fill()` method
+- [x] Delegate `na.fill(...)` to `fillna(...)`
 - **Affected:** ~25 tests in `test_na_fill.py`, `test_na_fill_robust.py`
 - **Error:** `AttributeError: 'builtin_function_or_method' object has no attribute 'fill'`
 
 ### 6. `fillna` type preservation
-- [ ] Preserve numeric types when filling (e.g. fill with 0, not "0")
-- [ ] Cast fill value to column dtype before applying
+- [x] Preserve numeric types when filling (e.g. fill with 0, not "0")
+- [x] Cast fill value to column dtype before applying
 - **Affected:** ~15 tests in `test_fillna_subset.py`
 - **Error:** `AssertionError: assert '0' == 0`
 
 ### 7. `fillna` subset parameter
-- [ ] Accept `subset="col"` (single string) as well as `subset=["col"]`
+- [x] Accept `subset="col"` (single string) as well as `subset=["col"]`
 - **Affected:** 2 tests
 - **Error:** `TypeError: argument 'subset': Can't extract 'str' to 'Vec'`
 
 ### 8. Column `astype` method
-- [ ] Add `astype(dtype)` as alias for `cast(dtype)` on PyColumn
+- [x] Add `astype(dtype)` as alias for `cast(dtype)` on PyColumn
 - **Affected:** ~20 tests in `test_column_astype.py`
 - **Error:** `AttributeError: 'builtins.PyColumn' object has no attribute 'astype'`
 
 ### 9. Nulls-ordering methods on Column
-- [ ] Add `asc_nulls_first`
-- [ ] Add `asc_nulls_last`
-- [ ] Add `desc_nulls_first`
+- [x] Add `asc_nulls_first`
+- [x] Add `asc_nulls_last`
+- [x] Add `desc_nulls_first`
 - **Note:** `desc_nulls_last` exists
 - **Affected:** ~20 tests in `test_column_ordering.py`
 - **Error:** `AttributeError: 'builtins.PyColumn' object has no attribute 'asc_nulls_first'`
@@ -182,10 +182,10 @@ Tests expecting errors that are not raised:
 | when() API            | ~15   | ~15   | 0         |
 | orderBy               | ~25   | ~25   | 0         |
 | cast() type           | ~15   | ~15   | 0         |
-| na.fill               | ~25   | 0     | ~25       |
-| fillna types          | ~15   | 0     | ~15       |
-| astype               | ~20   | 0     | ~20       |
-| nulls-ordering       | ~20   | 0     | ~20       |
+| na.fill               | ~25   | ~25   | 0         |
+| fillna types          | ~15   | ~15   | 0         |
+| astype               | ~20   | ~20   | 0         |
+| nulls-ordering       | ~20   | ~20   | 0         |
 | Map subscript        | ~5    | 0     | ~5        |
 | Pivot methods        | ~10   | 0     | ~10       |
 | Missing functions    | ~50   | 0     | ~50       |
