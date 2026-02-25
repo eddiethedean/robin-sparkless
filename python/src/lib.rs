@@ -1791,6 +1791,11 @@ impl PyDataFrame {
         self.distinct(subset)
     }
 
+    #[pyo3(name = "drop_duplicates", signature = (subset=None))]
+    fn drop_duplicates_snake(&self, subset: Option<Vec<String>>) -> PyResult<PyDataFrame> {
+        self.distinct(subset)
+    }
+
     #[pyo3(signature = (other, on, how="inner"))]
     fn join(
         &self,
@@ -1817,6 +1822,29 @@ impl PyDataFrame {
         };
         self.inner
             .join(&other.inner, on_refs, join_type)
+            .map(|df| PyDataFrame { inner: df })
+            .map_err(to_py_err)
+    }
+
+    #[pyo3(name = "crossJoin")]
+    fn cross_join(&self, other: &PyDataFrame) -> PyResult<PyDataFrame> {
+        self.inner
+            .cross_join(&other.inner)
+            .map(|df| PyDataFrame { inner: df })
+            .map_err(to_py_err)
+    }
+
+    fn intersect(&self, other: &PyDataFrame) -> PyResult<PyDataFrame> {
+        self.inner
+            .intersect(&other.inner)
+            .map(|df| PyDataFrame { inner: df })
+            .map_err(to_py_err)
+    }
+
+    #[pyo3(name = "exceptAll")]
+    fn except_all(&self, other: &PyDataFrame) -> PyResult<PyDataFrame> {
+        self.inner
+            .except_all(&other.inner)
             .map(|df| PyDataFrame { inner: df })
             .map_err(to_py_err)
     }
@@ -1924,6 +1952,37 @@ impl PyDataFrame {
             .with_columns_renamed(&renames)
             .map(|df| PyDataFrame { inner: df })
             .map_err(to_py_err)
+    }
+
+    #[pyo3(name = "withColumnsRenamed")]
+    fn with_columns_renamed_camel(&self, cols_map: &Bound<'_, PyAny>) -> PyResult<PyDataFrame> {
+        self.with_columns_renamed(cols_map)
+    }
+
+    #[pyo3(name = "withColumns")]
+    fn with_columns(&self, cols_map: &Bound<'_, PyAny>) -> PyResult<PyDataFrame> {
+        let dict = cols_map.downcast::<PyDict>().map_err(|_| {
+            PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+                "withColumns expects a dict of {name: Column}",
+            )
+        })?;
+        let mut exprs: Vec<(String, Column)> = Vec::with_capacity(dict.len());
+        for (k, v) in dict.iter() {
+            let name = k.extract::<String>()?;
+            let col = py_any_to_column(&v)?;
+            exprs.push((name, col));
+        }
+        self.inner
+            .with_columns(&exprs)
+            .map(|df| PyDataFrame { inner: df })
+            .map_err(to_py_err)
+    }
+
+    #[pyo3(name = "writeTo")]
+    fn write_to(&self, _table: &str) -> PyResult<()> {
+        Err(PyErr::new::<pyo3::exceptions::PyNotImplementedError, _>(
+            "writeTo (DataFrameWriterV2) is not yet implemented",
+        ))
     }
 
     #[getter]

@@ -373,6 +373,10 @@ impl DataFrame {
         self.0.intersect(&other.0).map(DataFrame)
     }
 
+    pub fn except_all(&self, other: &DataFrame) -> Result<DataFrame, PolarsError> {
+        self.0.except_all(&other.0).map(DataFrame)
+    }
+
     pub fn sample(
         &self,
         with_replacement: bool,
