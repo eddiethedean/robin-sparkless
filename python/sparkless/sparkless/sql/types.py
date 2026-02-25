@@ -13,18 +13,31 @@ class StringType(DataType):
 
 class CharType(DataType):
     """Char(n) type; we treat as string for schema parsing."""
+
+    def __init__(self, length: int = 1):
+        self.length = length
+
     def simpleString(self) -> str:
         return "string"
 
 
 class VarcharType(DataType):
     """Varchar(n) type; we treat as string for schema parsing."""
+
+    def __init__(self, length: int = 1):
+        self.length = length
+
     def simpleString(self) -> str:
         return "string"
 
 
 class IntervalType(DataType):
     """Interval type; we treat as string for schema parsing."""
+
+    def __init__(self, start_field: str = "month", end_field: str = "month"):
+        self.start_field = start_field
+        self.end_field = end_field
+
     def simpleString(self) -> str:
         return "interval"
 
@@ -65,9 +78,28 @@ class TimestampType(DataType):
 
 
 class ArrayType(DataType):
-    def __init__(self, elementType, containsNull=True):
-        self.elementType = elementType
-        self.containsNull = containsNull
+    def __init__(
+        self,
+        elementType=None,
+        containsNull=True,
+        *,
+        element_type=None,
+        nullable=None,
+    ):
+        if elementType is not None and element_type is not None:
+            raise TypeError("Cannot specify both elementType and element_type")
+        elem = elementType if elementType is not None else element_type
+        if elem is None:
+            raise TypeError("elementType or element_type is required")
+        self.elementType = elem
+        self.containsNull = containsNull if nullable is None else nullable
+        # PySpark alias: nullable as property
+        self.nullable = self.containsNull
+
+    @property
+    def element_type(self):
+        """PySpark parity: element type of array (alias for elementType)."""
+        return self.elementType
 
     def simpleString(self) -> str:
         try:
@@ -83,6 +115,16 @@ class MapType(DataType):
         self.valueType = valueType
         self.valueContainsNull = valueContainsNull
 
+    @property
+    def key_type(self):
+        """PySpark parity: key type of map (alias for keyType)."""
+        return self.keyType
+
+    @property
+    def value_type(self):
+        """PySpark parity: value type of map (alias for valueType)."""
+        return self.valueType
+
     def simpleString(self) -> str:
         try:
             k = self.keyType.simpleString()
@@ -96,8 +138,15 @@ class MapType(DataType):
 
 
 class DecimalType(DataType):
+    def __init__(self, precision: int = 10, scale: int = 0):
+        self.precision = precision
+        self.scale = scale
+
     def simpleString(self) -> str:
-        return "decimal"
+        try:
+            return f"decimal({self.precision},{self.scale})"
+        except AttributeError:
+            return "decimal"
 
 
 class StructField:
@@ -111,6 +160,10 @@ class StructField:
 class StructType(DataType):
     def __init__(self, fields=None):
         self.fields = list(fields or [])
+
+    def fieldNames(self):
+        """PySpark parity: returns all field names in a list."""
+        return [f.name for f in self.fields]
 
     def simpleString(self) -> str:
         if not self.fields:

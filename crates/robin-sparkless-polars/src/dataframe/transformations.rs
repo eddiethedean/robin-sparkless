@@ -4,13 +4,50 @@
 //! sample, random_split, first, head, take, tail, is_empty, to_df.
 
 use super::DataFrame;
+use crate::column::expect_col;
 use crate::functions::SortOrder;
 use crate::type_coercion::{coerce_expr_pair, find_common_type};
+use crate::udfs;
 use polars::prelude::{
-    DataType, Expr, Float64Chunked, IntoLazy, IntoSeries, NamedFrom, PlSmallStr, PolarsError,
-    Selector, Series, UnionArgs, UniqueKeepStrategy, col,
+    DataType, Expr, Float64Chunked, IntoLazy, IntoSeries, NamedFrom, PlSmallStr,
+    PolarsError, Selector, Series, UnionArgs, UniqueKeepStrategy, col, len, lit, repeat,
 };
 use std::collections::HashMap;
+
+/// Replace a pure literal expr with a column-referencing expr so Polars produces correct row count.
+/// Polars lit() in select-only or empty-df contexts yields 1 row; we need N rows (or 0 for empty).
+fn expand_pure_literal_to_rows(
+    expr: Expr,
+    first_col: Option<&str>,
+) -> Result<Expr, PolarsError> {
+    let (inner, alias): (Expr, Option<PlSmallStr>) = match &expr {
+        Expr::Alias(e, name) => (e.as_ref().clone(), Some(name.clone())),
+        _ => (expr.clone(), None),
+    };
+    let (lit_val, out_dtype): (String, DataType) = match &inner {
+        Expr::Literal(lv) if lv.get_datatype() == DataType::String => {
+            let s = lv.extract_str().unwrap_or("");
+            (s.to_string(), DataType::String)
+        }
+        _ => return Ok(expr),
+    };
+    let expanded = if let Some(fc) = first_col {
+        let fc = fc.to_string();
+        use polars::datatypes::Field;
+        col(PlSmallStr::from(fc.as_str())).map(
+            move |c| expect_col(udfs::apply_literal_string_repeat(c, &lit_val)),
+            move |_schema, _field| Ok(Field::new("literal".into(), out_dtype.clone())),
+        )
+    } else {
+        // No columns (e.g. empty schema): use repeat(lit(""), len()) so empty df yields 0 rows
+        repeat(lit(lit_val), len().cast(DataType::UInt32))
+    };
+    Ok(if let Some(name) = alias {
+        expanded.alias(name.as_str())
+    } else {
+        expanded
+    })
+}
 
 fn series_as_f64_ca(s: &Series, context: &str) -> Result<Float64Chunked, PolarsError> {
     let s_f64 = s.cast(&DataType::Float64)?;
@@ -52,6 +89,13 @@ pub fn select_with_exprs(
         .into_iter()
         .map(|e| df.coerce_string_numeric_comparisons(e))
         .collect::<Result<Vec<_>, _>>()?;
+    let first_col = df.columns().ok().and_then(|cols| cols.into_iter().next());
+    let exprs: Vec<Expr> = exprs
+        .into_iter()
+        .map(|e| {
+            expand_pure_literal_to_rows(e.clone(), first_col.as_deref()).unwrap_or(e)
+        })
+        .collect();
     let mut name_count: HashMap<String, u32> = HashMap::new();
     let exprs: Vec<Expr> = exprs
         .into_iter()
@@ -162,8 +206,14 @@ pub fn with_column(
             }
         }
     }
-    let expr = df.resolve_expr_column_names(column.expr().clone())?;
-    let expr = df.coerce_string_numeric_comparisons(expr)?;
+    let mut expr = df.resolve_expr_column_names(column.expr().clone())?;
+    expr = df.coerce_string_numeric_comparisons(expr)?;
+    if let Ok(cols) = df.columns() {
+        let first_col = cols.into_iter().next();
+        if let Ok(expanded) = expand_pure_literal_to_rows(expr.clone(), first_col.as_deref()) {
+            expr = expanded;
+        }
+    }
     let lf = df.lazy_frame().with_column(expr.alias(column_name));
     Ok(super::DataFrame::from_lazy_with_options(lf, case_sensitive))
 }

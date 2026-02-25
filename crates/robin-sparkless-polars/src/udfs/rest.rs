@@ -73,6 +73,19 @@ pub fn apply_split_part_regex(
     Ok(Some(Column::new(name, out.into_series())))
 }
 
+/// Repeat a string literal to match the length of a column (for input_file_name, etc.).
+/// Polars lit() in select-only or empty-df contexts produces wrong row count; this fixes it.
+pub fn apply_literal_string_repeat(column: Column, value: &str) -> PolarsResult<Option<Column>> {
+    let name = column.field().into_owned().name;
+    let series = column.take_materialized_series();
+    let len = series.len();
+    let out = StringChunked::from_iter_options(
+        name.as_str().into(),
+        (0..len).map(|_| Some(value.to_string())),
+    );
+    Ok(Some(Column::new(name, out.into_series())))
+}
+
 /// American Soundex code (4 chars). Matches PySpark soundex semantics.
 fn soundex_one(s: &str) -> Cow<'_, str> {
     use soundex::american_soundex;
