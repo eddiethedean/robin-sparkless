@@ -2391,6 +2391,55 @@ impl PyColumn {
             .map_err(to_py_err)
     }
 
+    fn asinh(&self) -> PyColumn {
+        PyColumn {
+            inner: self.inner.asinh(),
+        }
+    }
+
+    fn atanh(&self) -> PyColumn {
+        PyColumn {
+            inner: self.inner.atanh(),
+        }
+    }
+
+    fn cosh(&self) -> PyColumn {
+        PyColumn {
+            inner: self.inner.cosh(),
+        }
+    }
+
+    fn sinh(&self) -> PyColumn {
+        PyColumn {
+            inner: self.inner.sinh(),
+        }
+    }
+
+    fn last_day(&self) -> PyColumn {
+        PyColumn {
+            inner: self.inner.last_day(),
+        }
+    }
+
+    #[pyo3(signature = (start, round_off=true))]
+    fn months_between(&self, start: &PyColumn, round_off: bool) -> PyColumn {
+        PyColumn {
+            inner: self.inner.months_between(&start.inner, round_off),
+        }
+    }
+
+    fn timestamp_seconds(&self) -> PyColumn {
+        PyColumn {
+            inner: self.inner.timestamp_seconds(),
+        }
+    }
+
+    fn to_utc_timestamp(&self, tz: &str) -> PyColumn {
+        PyColumn {
+            inner: self.inner.to_utc_timestamp(tz),
+        }
+    }
+
     fn trim(&self) -> PyColumn {
         PyColumn {
             inner: self.inner.trim(),
@@ -3510,6 +3559,63 @@ fn array(columns: &Bound<'_, PyTuple>) -> PyResult<PyColumn> {
 }
 
 #[pyfunction]
+fn asinh(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: functions::asinh(&column.inner),
+    }
+}
+
+#[pyfunction]
+fn atanh(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: functions::atanh(&column.inner),
+    }
+}
+
+#[pyfunction]
+fn cosh(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: functions::cosh(&column.inner),
+    }
+}
+
+#[pyfunction]
+fn sinh(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: functions::sinh(&column.inner),
+    }
+}
+
+#[pyfunction]
+fn last_day(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: functions::last_day(&column.inner),
+    }
+}
+
+#[pyfunction]
+#[pyo3(signature = (end, start, round_off=true))]
+fn months_between(end: &PyColumn, start: &PyColumn, round_off: bool) -> PyColumn {
+    PyColumn {
+        inner: functions::months_between(&end.inner, &start.inner, round_off),
+    }
+}
+
+#[pyfunction]
+fn timestamp_seconds(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: functions::timestamp_seconds(&column.inner),
+    }
+}
+
+#[pyfunction]
+fn to_utc_timestamp(column: &PyColumn, tz: &str) -> PyColumn {
+    PyColumn {
+        inner: functions::to_utc_timestamp(&column.inner, tz),
+    }
+}
+
+#[pyfunction]
 #[pyo3(signature = (*columns))]
 fn struct_(columns: &Bound<'_, PyTuple>) -> PyResult<PyColumn> {
     let mut cols: Vec<Column> = Vec::with_capacity(columns.len());
@@ -3615,5 +3721,13 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(concat_ws, m)?)?;
     m.add_function(wrap_pyfunction!(array, m)?)?;
     m.add_function(wrap_pyfunction!(struct_, m)?)?;
+    m.add_function(wrap_pyfunction!(asinh, m)?)?;
+    m.add_function(wrap_pyfunction!(atanh, m)?)?;
+    m.add_function(wrap_pyfunction!(cosh, m)?)?;
+    m.add_function(wrap_pyfunction!(sinh, m)?)?;
+    m.add_function(wrap_pyfunction!(last_day, m)?)?;
+    m.add_function(wrap_pyfunction!(months_between, m)?)?;
+    m.add_function(wrap_pyfunction!(timestamp_seconds, m)?)?;
+    m.add_function(wrap_pyfunction!(to_utc_timestamp, m)?)?;
     Ok(())
 }

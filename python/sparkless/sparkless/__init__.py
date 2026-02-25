@@ -16,6 +16,8 @@ try:
         "length", "floor", "round", "ltrim", "hour", "minute",
         "soundex", "repeat", "levenshtein", "try_cast", "try_add",
         "concat", "concat_ws", "array", "struct_",
+        "asinh", "atanh", "cosh", "sinh",
+        "last_day", "months_between", "timestamp_seconds", "to_utc_timestamp",
     ])
 except ImportError:
     _mod = __import__("_native", fromlist=[
@@ -32,6 +34,8 @@ except ImportError:
         "length", "floor", "round", "ltrim", "hour", "minute",
         "soundex", "repeat", "levenshtein", "try_cast", "try_add",
         "concat", "concat_ws", "array", "struct_",
+        "asinh", "atanh", "cosh", "sinh",
+        "last_day", "months_between", "timestamp_seconds", "to_utc_timestamp",
     ])
 
 SparklessError = _mod.SparklessError
@@ -123,6 +127,14 @@ concat = _mod.concat
 concat_ws = _mod.concat_ws
 array = _mod.array
 struct = _mod.struct_  # PySpark alias (Rust uses struct_)
+asinh = _mod.asinh
+atanh = _mod.atanh
+cosh = _mod.cosh
+sinh = _mod.sinh
+last_day = _mod.last_day
+months_between = _mod.months_between
+timestamp_seconds = _mod.timestamp_seconds
+to_utc_timestamp = _mod.to_utc_timestamp
 
 # PySpark-style names
 SparkSession = _SparkSession

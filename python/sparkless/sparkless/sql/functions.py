@@ -60,6 +60,14 @@ from sparkless import (
     concat_ws as _concat_ws,
     array as _array,
     struct as _struct,
+    asinh as _asinh,
+    atanh as _atanh,
+    cosh as _cosh,
+    sinh as _sinh,
+    last_day as _last_day,
+    months_between as _months_between,
+    timestamp_seconds as _timestamp_seconds,
+    to_utc_timestamp as _to_utc_timestamp,
 )
 from sparkless.errors import PySparkValueError
 
@@ -116,6 +124,14 @@ __all__ = [
     "concat_ws",
     "array",
     "struct",
+    "asinh",
+    "atanh",
+    "cosh",
+    "sinh",
+    "last_day",
+    "months_between",
+    "timestamp_seconds",
+    "to_utc_timestamp",
     "regexp_replace",
     "regexp_extract",
     "regexp_extract_all",
@@ -388,6 +404,46 @@ def struct(*cols):
     if not cols:
         raise ValueError("struct requires at least one column")
     return _struct(*[_as_col(c) for c in cols])
+
+
+def asinh(column):
+    """Inverse hyperbolic sine (PySpark asinh)."""
+    return _asinh(_as_col(column))
+
+
+def atanh(column):
+    """Inverse hyperbolic tangent (PySpark atanh)."""
+    return _atanh(_as_col(column))
+
+
+def cosh(column):
+    """Hyperbolic cosine (PySpark cosh)."""
+    return _cosh(_as_col(column))
+
+
+def sinh(column):
+    """Hyperbolic sine (PySpark sinh)."""
+    return _sinh(_as_col(column))
+
+
+def last_day(column):
+    """Last day of month for date column (PySpark last_day)."""
+    return _last_day(_as_col(column))
+
+
+def months_between(end, start, round_off=True):
+    """Months between end and start dates (PySpark months_between)."""
+    return _months_between(_as_col(end), _as_col(start), round_off)
+
+
+def timestamp_seconds(column):
+    """Convert seconds since epoch to timestamp (PySpark timestamp_seconds)."""
+    return _timestamp_seconds(_as_col(column))
+
+
+def to_utc_timestamp(column, tz):
+    """Interpret timestamp as in tz, convert to UTC (PySpark to_utc_timestamp)."""
+    return _to_utc_timestamp(_as_col(column), tz)
 
 
 # lit is imported from sparkless (native polymorphic implementation)
