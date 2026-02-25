@@ -106,15 +106,15 @@ def isolated_session():
 
 @pytest.fixture
 def spark(request):
-    """Unified SparkSession fixture that works with both mock-spark and PySpark.
+    """Unified SparkSession fixture that works with Robin (default), mock-spark, and PySpark.
 
     Backend selection priority:
     1. pytest marker: @pytest.mark.backend('mock'|'pyspark'|'both'|'robin')
     2. Environment variable: MOCK_SPARK_TEST_BACKEND or SPARKLESS_TEST_BACKEND
-    3. Default: mock-spark
+    3. Default: Robin (mock mode — native robin-sparkless backend)
 
     Examples:
-        # Use mock-spark (default)
+        # Use Robin (default)
         def test_something(spark):
             df = spark.createDataFrame([{"id": 1}])
 
@@ -138,8 +138,8 @@ def spark(request):
     try:
         backend = get_backend_type(request)
     except (AttributeError, TypeError):
-        # Fallback for backward compatibility
-        backend = BackendType.MOCK
+        # Fallback: use Robin (mock mode)
+        backend = BackendType.ROBIN
 
     if backend == BackendType.BOTH:
         # For comparison mode, return mock-spark by default
@@ -270,12 +270,11 @@ def temp_file_storage_path():
 
 
 def pytest_configure(config):
-    """Configure pytest with custom markers and enforce robin mode when requested."""
-    # When robin mode is requested, sync SPARKLESS_BACKEND so no test silently runs in polars/mock.
-    # If robin is not installed, we do not exit: all tests run and those that need a session will
-    # fail (no silent skip or fallback to polars).
+    """Configure pytest with custom markers. Default backend is Robin (mock mode)."""
+    # Use Robin by default; sync SPARKLESS_BACKEND so session creation uses robin-sparkless.
+    # If SPARKLESS_TEST_BACKEND is set to mock/pyspark, leave SPARKLESS_BACKEND unset or as-is.
     _test_backend = (os.environ.get("SPARKLESS_TEST_BACKEND") or "").strip().lower()
-    if _test_backend == "robin":
+    if _test_backend in ("", "robin"):
         os.environ["SPARKLESS_BACKEND"] = "robin"
 
     config.addinivalue_line(

@@ -1675,7 +1675,7 @@ mod tests {
             ("name".to_string(), "string".to_string()),
         ];
         let right = spark
-            .create_dataframe_from_rows(vec![vec![json!("2"), json!("b")]], schema, false)
+            .create_dataframe_from_rows(vec![vec![json!("2"), json!("b")]], schema, false, false)
             .unwrap();
         let out = union_by_name(&left, &right, true, false)
             .expect("issue #603: union_by_name must coerce id Int64 vs String");

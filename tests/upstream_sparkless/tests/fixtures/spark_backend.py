@@ -106,7 +106,7 @@ def get_backend_from_marker(request: pytest.FixtureRequest) -> Optional[BackendT
 
 
 def get_backend_type(request: Optional[pytest.FixtureRequest] = None) -> BackendType:
-    """Get backend type from marker, environment, or default to mock.
+    """Get backend type from marker, environment, or default to Robin (mock mode).
 
     Args:
         request: Optional pytest fixture request for marker checking.
@@ -129,8 +129,8 @@ def get_backend_type(request: Optional[pytest.FixtureRequest] = None) -> Backend
     if env_backend is not None:
         return env_backend
 
-    # Default to mock-spark
-    return BackendType.MOCK
+    # Default to Robin (mock mode): use native robin-sparkless backend for all tests
+    return BackendType.ROBIN
 
 
 class SparkBackend:

@@ -218,9 +218,10 @@ impl SparkSession {
         rows: Vec<Vec<serde_json::Value>>,
         schema: Vec<(String, String)>,
         verify_schema: bool,
+        schema_was_inferred: bool,
     ) -> Result<DataFrame, PolarsError> {
         self.0
-            .create_dataframe_from_rows(rows, schema, verify_schema)
+            .create_dataframe_from_rows(rows, schema, verify_schema, schema_was_inferred)
             .map(DataFrame)
     }
 
@@ -229,9 +230,10 @@ impl SparkSession {
         rows: Vec<Vec<serde_json::Value>>,
         schema: Vec<(String, String)>,
         verify_schema: bool,
+        schema_was_inferred: bool,
     ) -> Result<DataFrame, EngineError> {
         self.0
-            .create_dataframe_from_rows_engine(rows, schema, verify_schema)
+            .create_dataframe_from_rows_engine(rows, schema, verify_schema, schema_was_inferred)
             .map(DataFrame)
     }
 

@@ -29,7 +29,7 @@ pub fn execute_plan(
 ) -> Result<DataFrame, PlanError> {
     set_thread_udf_session(session.clone());
     let mut df = session
-        .create_dataframe_from_rows(data, schema, false)
+        .create_dataframe_from_rows(data, schema, false, false)
         .map_err(PlanError::Session)?
         .with_case_insensitive_column_resolution();
 
@@ -576,7 +576,7 @@ fn apply_op(
             let schema_names: Vec<String> = schema_vec.iter().map(|(n, _)| n.clone()).collect();
             let rows = other_data_to_rows(other_data, &schema_names);
             let other_df = session
-                .create_dataframe_from_rows(rows, schema_vec, false)
+                .create_dataframe_from_rows(rows, schema_vec, false, false)
                 .map_err(PlanError::Session)?;
 
             let on_keys_left = parse_join_on(on, &df)?;
@@ -616,7 +616,7 @@ fn apply_op(
             let schema_names: Vec<String> = schema_vec.iter().map(|(n, _)| n.clone()).collect();
             let rows = other_data_to_rows(other_data, &schema_names);
             let other_df = session
-                .create_dataframe_from_rows(rows, schema_vec, false)
+                .create_dataframe_from_rows(rows, schema_vec, false, false)
                 .map_err(PlanError::Session)?;
             df.union(&other_df).map_err(PlanError::Session)
         }
@@ -634,7 +634,7 @@ fn apply_op(
             let schema_names: Vec<String> = schema_vec.iter().map(|(n, _)| n.clone()).collect();
             let rows = other_data_to_rows(other_data, &schema_names);
             let other_df = session
-                .create_dataframe_from_rows(rows, schema_vec, false)
+                .create_dataframe_from_rows(rows, schema_vec, false, false)
                 .map_err(PlanError::Session)?;
             df.union_by_name(&other_df, true)
                 .map_err(PlanError::Session)
@@ -652,7 +652,7 @@ fn apply_op(
             let schema_names: Vec<String> = schema_vec.iter().map(|(n, _)| n.clone()).collect();
             let rows = other_data_to_rows(other_data, &schema_names);
             let other_df = session
-                .create_dataframe_from_rows(rows, schema_vec, false)
+                .create_dataframe_from_rows(rows, schema_vec, false, false)
                 .map_err(PlanError::Session)?;
             df.cross_join(&other_df).map_err(PlanError::Session)
         }

@@ -268,9 +268,10 @@ impl SparkSessionBackend for SparkSession {
         rows: Vec<Vec<serde_json::Value>>,
         schema: Vec<(String, String)>,
         verify_schema: bool,
+        schema_was_inferred: bool,
     ) -> Result<Box<dyn DataFrameBackend>, CoreEngineError> {
         let df = self
-            .create_dataframe_from_rows(rows, schema, verify_schema)
+            .create_dataframe_from_rows(rows, schema, verify_schema, schema_was_inferred)
             .map_err(map_err)?;
         Ok(Box::new(df))
     }

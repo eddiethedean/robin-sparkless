@@ -1214,7 +1214,7 @@ impl SparkSession {
             .map(|n| vec![JsonValue::String(n)])
             .collect();
         let schema = vec![("name".to_string(), "string".to_string())];
-        self.create_dataframe_from_rows(rows, schema, false)
+        self.create_dataframe_from_rows(rows, schema, false, false)
     }
 
     /// Return a DataFrame of database names. PySpark: catalog.listDatabases().
@@ -1227,7 +1227,7 @@ impl SparkSession {
             .map(|n| vec![JsonValue::String(n)])
             .collect();
         let schema = vec![("name".to_string(), "string".to_string())];
-        self.create_dataframe_from_rows(rows, schema, false)
+        self.create_dataframe_from_rows(rows, schema, false, false)
     }
 
     /// True if the name exists in the saved-tables map (not temp views).
@@ -1685,6 +1685,7 @@ impl SparkSession {
     /// `rows`: each inner vec is one row; length must match schema length. Values are JSON-like (i64, f64, string, bool, null, object, array).
     /// `schema`: list of (column_name, dtype_string), e.g. `[("id", "bigint"), ("name", "string")]`.
     /// `verify_schema`: when true (#420), validate each cell type against schema and return a clear error (e.g. "Row 1: column 'age' expected bigint, got string").
+    /// `schema_was_inferred`: when true (Python passed no schema), run Phase 6 validation: all-null column and mixed int/float raise.
     /// Supported dtype strings: bigint, int, long, double, float, string, str, varchar, boolean, bool, date, timestamp, datetime, list, array, array<element_type>, struct<field:type,...>.
     /// When `rows` is empty and `schema` is non-empty, returns an empty DataFrame with that schema (issue #519). Use with `write.format("parquet").saveAsTable(...)` then append; PySpark would fail with "can not infer schema from empty dataset".
     pub fn create_dataframe_from_rows(
@@ -1692,25 +1693,74 @@ impl SparkSession {
         rows: Vec<Vec<JsonValue>>,
         schema: Vec<(String, String)>,
         verify_schema: bool,
+        schema_was_inferred: bool,
     ) -> Result<DataFrame, PolarsError> {
-        // #624: When schema is empty but rows are not, infer schema from rows (PySpark parity).
-        // #731, #769, #772: When schema is only column names (all types "string"), infer from data so
-        // createDataFrame(rows, ["name", "age"]) yields int/double/bool columns, not all string.
-        let schema = if schema.is_empty() && !rows.is_empty() {
-            let ncols = rows[0].len();
-            let names: Vec<String> = (0..ncols).map(|i| format!("c{i}")).collect();
-            Self::infer_schema_from_json_rows(&rows, &names)
-        } else if !schema.is_empty()
+        // When schema is explicitly empty and rows are not, fail with LENGTH_SHOULD_BE_THE_SAME (Phase 6 / PySpark parity).
+        if schema.is_empty() && !rows.is_empty() {
+            let got = rows[0].len();
+            return Err(PolarsError::InvalidOperation(
+                format!(
+                    "create_dataframe_from_rows: LENGTH_SHOULD_BE_THE_SAME. Expected 0 fields, got {} (row index 0).",
+                    got
+                )
+                    .into(),
+            ));
+        }
+        // #624: When schema is only column names (all "string"), infer from data (PySpark parity).
+        // #731, #769, #772: createDataFrame(rows, ["name", "age"]) yields int/double/bool columns.
+        let schema_inferred_in_rust = !schema.is_empty()
             && !rows.is_empty()
-            && schema
-                .iter()
-                .all(|(_, t)| t.trim().eq_ignore_ascii_case("string"))
-        {
+            && schema.iter().all(|(_, t)| t.trim().eq_ignore_ascii_case("string"));
+        let schema = if schema_inferred_in_rust {
             let names: Vec<String> = schema.iter().map(|(n, _)| n.clone()).collect();
             Self::infer_schema_from_json_rows(&rows, &names)
         } else {
             schema
         };
+
+        // Phase 6 validation: reject all-null columns and mixed int/float (PySpark parity). Run when schema was inferred (Python or Rust).
+        let run_inferred_validation = schema_was_inferred || schema_inferred_in_rust;
+        if run_inferred_validation && !rows.is_empty() {
+            for (col_idx, (_name, dtype_str)) in schema.iter().enumerate() {
+                let mut has_null_only = true;
+                let mut has_int = false;
+                let mut has_float = false;
+                for row in &rows {
+                    let v = row.get(col_idx).unwrap_or(&JsonValue::Null);
+                    match v {
+                        JsonValue::Null => {}
+                        JsonValue::Number(n) => {
+                            has_null_only = false;
+                            if n.is_i64() {
+                                has_int = true;
+                            } else {
+                                has_float = true;
+                            }
+                        }
+                        _ => {
+                            has_null_only = false;
+                        }
+                    }
+                }
+                if has_null_only {
+                    return Err(PolarsError::InvalidOperation(
+                        "Some of types cannot be determined because the column is all null. Use explicit schema.".into(),
+                    ));
+                }
+                let type_lower = dtype_str.trim().to_lowercase();
+                let is_numeric = type_lower.as_str() == "bigint"
+                    || type_lower.as_str() == "long"
+                    || type_lower.as_str() == "double"
+                    || type_lower.as_str() == "float"
+                    || type_lower.as_str() == "int"
+                    || type_lower.as_str() == "integer";
+                if is_numeric && has_int && has_float {
+                    return Err(PolarsError::InvalidOperation(
+                        "Can not merge type DoubleType and LongType. Use explicit schema or consistent types.".into(),
+                    ));
+                }
+            }
+        }
 
         if schema.is_empty() {
             if rows.is_empty() {
@@ -1743,7 +1793,7 @@ impl SparkSession {
             if got != expected_len {
                 return Err(PolarsError::InvalidOperation(
                     format!(
-                        "create_dataframe_from_rows: length should be the same. Expected {} fields, got {} (row index {}).",
+                        "create_dataframe_from_rows: LENGTH_SHOULD_BE_THE_SAME. length should be the same. Expected {} fields, got {} (row index {}).",
                         expected_len, got, row_idx
                     )
                     .into(),
@@ -2180,7 +2230,7 @@ impl SparkSession {
     ) -> Result<DataFrame, PolarsError> {
         let schema = vec![("value".to_string(), type_str.to_string())];
         let rows: Vec<Vec<JsonValue>> = values.into_iter().map(|v| vec![v]).collect();
-        self.create_dataframe_from_rows(rows, schema, false)
+        self.create_dataframe_from_rows(rows, schema, false, false)
     }
 
     /// Same as [`create_dataframe_from_rows`](Self::create_dataframe_from_rows) but returns [`EngineError`]. Use in bindings to avoid Polars.
@@ -2189,8 +2239,9 @@ impl SparkSession {
         rows: Vec<Vec<JsonValue>>,
         schema: Vec<(String, String)>,
         verify_schema: bool,
+        schema_was_inferred: bool,
     ) -> Result<DataFrame, EngineError> {
-        self.create_dataframe_from_rows(rows, schema, verify_schema)
+        self.create_dataframe_from_rows(rows, schema, verify_schema, schema_was_inferred)
             .map_err(polars_to_core_error)
     }
 
@@ -2605,7 +2656,7 @@ mod tests {
         let spark = SparkSession::builder().app_name("test").get_or_create();
         let rows: Vec<Vec<JsonValue>> = vec![vec![]];
         let schema: Vec<(String, String)> = vec![];
-        let result = spark.create_dataframe_from_rows(rows, schema, false);
+        let result = spark.create_dataframe_from_rows(rows, schema, false, false);
         match &result {
             Err(e) => assert!(e.to_string().contains("schema must not be empty")),
             Ok(_) => panic!("expected error for empty schema with non-empty rows"),
@@ -2620,7 +2671,7 @@ mod tests {
             ("a".to_string(), "int".to_string()),
             ("b".to_string(), "string".to_string()),
         ];
-        let result = spark.create_dataframe_from_rows(rows, schema, false);
+        let result = spark.create_dataframe_from_rows(rows, schema, false, false);
         let df = result.unwrap();
         assert_eq!(df.count().unwrap(), 0);
         assert_eq!(df.collect_inner().unwrap().get_column_names(), &["a", "b"]);
@@ -2658,7 +2709,7 @@ mod tests {
             ("name".to_string(), "string".to_string()),
             ("age".to_string(), "bigint".to_string()),
         ];
-        let result = spark.create_dataframe_from_rows(rows, schema, true);
+        let result = spark.create_dataframe_from_rows(rows, schema, true, false);
         let err = match &result {
             Ok(_) => panic!("expected error when verify_schema=true and type mismatch"),
             Err(e) => e.to_string(),
@@ -2685,7 +2736,7 @@ mod tests {
         let spark = SparkSession::builder().app_name("test").get_or_create();
         let rows: Vec<Vec<JsonValue>> = vec![];
         let schema: Vec<(String, String)> = vec![];
-        let result = spark.create_dataframe_from_rows(rows, schema, false);
+        let result = spark.create_dataframe_from_rows(rows, schema, false, false);
         let df = result.unwrap();
         assert_eq!(df.count().unwrap(), 0);
         assert_eq!(df.collect_inner().unwrap().get_column_names().len(), 0);
@@ -2709,7 +2760,7 @@ mod tests {
             vec![json!("z"), json!({"a": 2, "b": "w"})],
         ];
         let df = spark
-            .create_dataframe_from_rows(rows, schema, false)
+            .create_dataframe_from_rows(rows, schema, false, false)
             .unwrap();
         assert_eq!(df.count().unwrap(), 2);
         let collected = df.collect_inner().unwrap();
@@ -2734,7 +2785,7 @@ mod tests {
             vec![json!("z"), json!([2, "w"])],
         ];
         let df = spark
-            .create_dataframe_from_rows(rows, schema, false)
+            .create_dataframe_from_rows(rows, schema, false, false)
             .unwrap();
         assert_eq!(df.count().unwrap(), 2);
         let collected = df.collect_inner().unwrap();
@@ -2759,7 +2810,7 @@ mod tests {
             vec![json!("z"), json!({"0": 2, "1": "w"})],
         ];
         let df = spark
-            .create_dataframe_from_rows(rows, schema, false)
+            .create_dataframe_from_rows(rows, schema, false, false)
             .unwrap();
         assert_eq!(df.count().unwrap(), 2);
         let collected = df.collect_inner().unwrap();
@@ -2778,7 +2829,7 @@ mod tests {
             ("b".to_string(), "string".to_string()),
             ("a".to_string(), "boolean".to_string()),
         ];
-        let result = spark.create_dataframe_from_rows(rows, schema, false);
+        let result = spark.create_dataframe_from_rows(rows, schema, false, false);
         match &result {
             Err(e) => assert!(
                 e.to_string().contains("duplicate column name"),
@@ -2801,7 +2852,7 @@ mod tests {
         ];
         // Row 0 has 1 element, schema has 2
         let rows_short = vec![vec![json!("Alice")], vec![json!("Bob"), json!(2)]];
-        let result = spark.create_dataframe_from_rows(rows_short, schema.clone(), false);
+        let result = spark.create_dataframe_from_rows(rows_short, schema.clone(), false, false);
         match &result {
             Err(e) => {
                 let msg = e.to_string();
@@ -2823,7 +2874,7 @@ mod tests {
             vec![json!("Alice"), json!(1)],
             vec![json!("Bob"), json!(2), json!(100)],
         ];
-        let result2 = spark.create_dataframe_from_rows(rows_long, schema, false);
+        let result2 = spark.create_dataframe_from_rows(rows_long, schema, false, false);
         match &result2 {
             Err(e) => {
                 let msg = e.to_string();
@@ -2860,7 +2911,7 @@ mod tests {
             ("active".to_string(), "string".to_string()),
         ];
         let df = spark
-            .create_dataframe_from_rows(rows, schema, false)
+            .create_dataframe_from_rows(rows, schema, false, false)
             .unwrap();
         assert_eq!(df.count().unwrap(), 2);
         let rows_out = df.collect_as_json_rows().unwrap();
@@ -2885,7 +2936,7 @@ mod tests {
         ];
         let schema = vec![];
         let df = spark
-            .create_dataframe_from_rows(rows, schema, false)
+            .create_dataframe_from_rows(rows, schema, false, false)
             .unwrap();
         assert_eq!(df.count().unwrap(), 2);
         let collected = df.collect_inner().unwrap();
@@ -2912,14 +2963,14 @@ mod tests {
         let rows_object: Vec<Vec<JsonValue>> =
             vec![vec![json!("A"), json!(r#"{"a": 1, "b": "x"}"#)]];
         let df1 = spark
-            .create_dataframe_from_rows(rows_object, schema.clone(), false)
+            .create_dataframe_from_rows(rows_object, schema.clone(), false, false)
             .unwrap();
         assert_eq!(df1.count().unwrap(), 1);
 
         // Struct as string that parses to JSON array (e.g. Python tuple (1, "y") serialized as "[1, \"y\"]").
         let rows_array: Vec<Vec<JsonValue>> = vec![vec![json!("B"), json!(r#"[1, "y"]"#)]];
         let df2 = spark
-            .create_dataframe_from_rows(rows_array, schema, false)
+            .create_dataframe_from_rows(rows_array, schema, false, false)
             .unwrap();
         assert_eq!(df2.count().unwrap(), 1);
     }
@@ -2939,7 +2990,7 @@ mod tests {
         ];
         let rows: Vec<Vec<JsonValue>> = vec![vec![json!("x"), json!("{'a': 1, 'b': 'x'}")]];
         let df = spark
-            .create_dataframe_from_rows(rows, schema, false)
+            .create_dataframe_from_rows(rows, schema, false, false)
             .unwrap();
         assert_eq!(df.count().unwrap(), 1);
     }
@@ -2957,7 +3008,7 @@ mod tests {
         // One row: id="x", arr=[[1,2],[3,4]]
         let rows: Vec<Vec<JsonValue>> = vec![vec![json!("x"), json!([[1, 2], [3, 4]])]];
         let df = spark
-            .create_dataframe_from_rows(rows, schema, false)
+            .create_dataframe_from_rows(rows, schema, false, false)
             .unwrap();
         assert_eq!(df.count().unwrap(), 1);
         let collected = df.collect_inner().unwrap();
@@ -2983,7 +3034,7 @@ mod tests {
             vec![json!("y"), json!([1, 2, 3])],
         ];
         let df = spark
-            .create_dataframe_from_rows(rows, schema, false)
+            .create_dataframe_from_rows(rows, schema, false, false)
             .unwrap();
         assert_eq!(df.count().unwrap(), 2);
         let collected = df.collect_inner().unwrap();
@@ -3015,7 +3066,7 @@ mod tests {
             vec![json!("z"), json!(null)],
         ];
         let df = spark
-            .create_dataframe_from_rows(rows, schema, false)
+            .create_dataframe_from_rows(rows, schema, false, false)
             .unwrap();
         assert_eq!(df.count().unwrap(), 3);
         let collected = df.collect_inner().unwrap();
@@ -3055,7 +3106,7 @@ mod tests {
             vec![json!("y"), json!([4, 5])],
         ];
         let df = spark
-            .create_dataframe_from_rows(rows, schema, false)
+            .create_dataframe_from_rows(rows, schema, false, false)
             .expect("issue #601: create_dataframe_from_rows must accept array column (JSON array)");
         let n = df.count().unwrap();
         assert_eq!(n, 2, "issue #601: expected 2 rows");
@@ -3087,7 +3138,7 @@ mod tests {
         let rows: Vec<Vec<JsonValue>> =
             vec![vec![json!("a"), json!(1)], vec![json!("b"), json!(2)]];
         let df = spark
-            .create_dataframe_from_rows(rows, schema, false)
+            .create_dataframe_from_rows(rows, schema, false, false)
             .expect("#624: empty schema with non-empty rows should infer schema");
         assert_eq!(df.count().unwrap(), 2);
         let collected = df.collect_inner().unwrap();
@@ -3109,7 +3160,7 @@ mod tests {
             vec![json!(2), json!({"c": "z"})],
         ];
         let df = spark
-            .create_dataframe_from_rows(rows, schema, false)
+            .create_dataframe_from_rows(rows, schema, false, false)
             .unwrap();
         assert_eq!(df.count().unwrap(), 2);
         let collected = df.collect_inner().unwrap();
@@ -3138,7 +3189,7 @@ mod tests {
             vec![json!("y"), json!({"0": 4, "1": 5})],
         ];
         let df = spark
-            .create_dataframe_from_rows(rows, schema, false)
+            .create_dataframe_from_rows(rows, schema, false, false)
             .expect("#625: array column must accept list/array or object representation");
         assert_eq!(df.count().unwrap(), 2);
         let collected = df.collect_inner().unwrap();
@@ -3495,7 +3546,7 @@ mod tests {
             ("name".to_string(), "string".to_string()),
         ];
         let empty_df = spark
-            .create_dataframe_from_rows(vec![], schema.clone(), false)
+            .create_dataframe_from_rows(vec![], schema.clone(), false, false)
             .unwrap();
         assert_eq!(empty_df.count().unwrap(), 0);
 
@@ -3510,7 +3561,7 @@ mod tests {
         assert!(cols.contains(&"name".to_string()));
 
         let one_row = spark
-            .create_dataframe_from_rows(vec![vec![json!(1), json!("a")]], schema, false)
+            .create_dataframe_from_rows(vec![vec![json!(1), json!("a")]], schema, false, false)
             .unwrap();
         one_row
             .write()
@@ -3530,7 +3581,7 @@ mod tests {
             ("name".to_string(), "string".to_string()),
         ];
         let empty_df = spark
-            .create_dataframe_from_rows(vec![], schema, false)
+            .create_dataframe_from_rows(vec![], schema, false, false)
             .unwrap();
         assert_eq!(empty_df.count().unwrap(), 0);
 
@@ -3578,7 +3629,7 @@ mod tests {
             ("name".to_string(), "string".to_string()),
         ];
         let empty_df = spark
-            .create_dataframe_from_rows(vec![], schema.clone(), false)
+            .create_dataframe_from_rows(vec![], schema.clone(), false, false)
             .unwrap();
         empty_df
             .write()
@@ -3588,7 +3639,7 @@ mod tests {
         assert_eq!(r1.count().unwrap(), 0);
 
         let one_row = spark
-            .create_dataframe_from_rows(vec![vec![json!(1), json!("a")]], schema, false)
+            .create_dataframe_from_rows(vec![vec![json!(1), json!("a")]], schema, false, false)
             .unwrap();
         one_row
             .write()
@@ -3661,7 +3712,7 @@ mod tests {
         let rows: Vec<Vec<JsonValue>> =
             vec![vec![json!(1), json!("a")], vec![json!(2), json!("b")]];
         let df = spark
-            .create_dataframe_from_rows(rows, schema, false)
+            .create_dataframe_from_rows(rows, schema, false, false)
             .unwrap();
         spark.create_or_replace_temp_view("my_view", df);
         let result = spark
