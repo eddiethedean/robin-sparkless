@@ -1575,6 +1575,91 @@ impl PyDataFrame {
         }
     }
 
+    fn alias(&self, name: &str) -> PyDataFrame {
+        PyDataFrame {
+            inner: self.inner.alias(name),
+        }
+    }
+
+    #[pyo3(signature = (*exprs))]
+    fn agg(&self, exprs: &Bound<'_, PyTuple>) -> PyResult<PyDataFrame> {
+        fn push_expr(item: &Bound<'_, PyAny>, out: &mut Vec<robin_sparkless::Expr>) -> PyResult<()> {
+            if let Ok(c) = item.downcast::<PyColumn>() {
+                out.push(c.borrow().inner.clone().into_expr());
+                return Ok(());
+            }
+            if let Ok(list) = item.downcast::<PyList>() {
+                for sub in list.iter() {
+                    push_expr(&sub, out)?;
+                }
+                return Ok(());
+            }
+            if let Ok(tup) = item.downcast::<PyTuple>() {
+                for sub in tup.iter() {
+                    push_expr(&sub, out)?;
+                }
+                return Ok(());
+            }
+            Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+                "agg() expects Column expressions",
+            ))
+        }
+
+        let mut rust_exprs: Vec<robin_sparkless::Expr> = Vec::new();
+        for item in exprs.iter() {
+            push_expr(&item, &mut rust_exprs)?;
+        }
+        self.inner
+            .agg(rust_exprs)
+            .map(|df| PyDataFrame { inner: df })
+            .map_err(to_py_err)
+    }
+
+    fn cache(&self) -> PyResult<PyDataFrame> {
+        self.inner
+            .cache()
+            .map(|df| PyDataFrame { inner: df })
+            .map_err(to_py_err)
+    }
+
+    #[pyo3(signature = (*cols))]
+    fn rollup(&self, cols: &Bound<'_, PyTuple>) -> PyResult<PyCubeRollupData> {
+        let names = py_tuple_or_single_to_vec_string(cols)?;
+        let refs: Vec<&str> = names.iter().map(|s| s.as_str()).collect();
+        self.inner
+            .rollup(refs)
+            .map(|cr| PyCubeRollupData { inner: cr })
+            .map_err(to_py_err)
+    }
+
+    #[pyo3(signature = (*cols, ascending=None))]
+    fn sort(
+        &self,
+        cols: &Bound<'_, PyTuple>,
+        ascending: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<PyDataFrame> {
+        self.order_by_camel(cols, ascending)
+    }
+
+    #[pyo3(name = "groupby", signature = (*cols))]
+    fn groupby(&self, cols: &Bound<'_, PyTuple>) -> PyResult<PyGroupedData> {
+        self.group_by_camel(cols)
+    }
+
+    #[getter]
+    fn rdd(&self) -> PyResult<PyDataFrame> {
+        Err(PyErr::new::<pyo3::exceptions::PyNotImplementedError, _>(
+            "rdd is not yet implemented in robin-sparkless",
+        ))
+    }
+
+    #[getter]
+    fn storage(&self) -> PyResult<PyDataFrame> {
+        Err(PyErr::new::<pyo3::exceptions::PyNotImplementedError, _>(
+            "storage is not yet implemented in robin-sparkless",
+        ))
+    }
+
     #[pyo3(signature = (*cols))]
     fn cube(&self, cols: &Bound<'_, PyTuple>) -> PyResult<PyCubeRollupData> {
         let names = py_tuple_or_single_to_vec_string(cols)?;
@@ -2532,6 +2617,11 @@ struct PyDataFrameNaFunctions {
 
 #[pymethods]
 impl PyDataFrameNaFunctions {
+    /// Allow df.na()() - return self so chaining works.
+    fn __call__(slf: PyRef<Self>) -> PyRef<Self> {
+        slf
+    }
+
     #[pyo3(signature = (value, subset=None))]
     fn fill(
         &self,
