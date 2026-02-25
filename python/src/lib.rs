@@ -1363,6 +1363,40 @@ impl PyDataFrame {
         self.inner.count().map_err(to_py_err)
     }
 
+    /// PySpark: df.agg(F.sum("x"), F.avg("y")) — global aggregation (no groupBy).
+    #[pyo3(signature = (*exprs))]
+    fn agg(&self, exprs: &Bound<'_, PyTuple>) -> PyResult<PyDataFrame> {
+        fn push_expr(item: &Bound<'_, PyAny>, out: &mut Vec<robin_sparkless::Expr>) -> PyResult<()> {
+            if let Ok(c) = item.downcast::<PyColumn>() {
+                out.push(c.borrow().inner.clone().into_expr());
+                return Ok(());
+            }
+            if let Ok(list) = item.downcast::<PyList>() {
+                for sub in list.iter() {
+                    push_expr(&sub, out)?;
+                }
+                return Ok(());
+            }
+            if let Ok(tup) = item.downcast::<PyTuple>() {
+                for sub in tup.iter() {
+                    push_expr(&sub, out)?;
+                }
+                return Ok(());
+            }
+            Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+                "agg() expects Column expressions",
+            ))
+        }
+        let mut rust_exprs: Vec<robin_sparkless::Expr> = Vec::new();
+        for item in exprs.iter() {
+            push_expr(&item, &mut rust_exprs)?;
+        }
+        self.inner
+            .agg(rust_exprs)
+            .map(|df| PyDataFrame { inner: df })
+            .map_err(to_py_err)
+    }
+
     fn group_by(&self, column_names: Vec<String>) -> PyResult<PyGroupedData> {
         let refs: Vec<&str> = column_names.iter().map(|s| s.as_str()).collect();
         self.inner
@@ -1529,12 +1563,26 @@ impl PyDataFrame {
         self.union_all(other)
     }
 
+    #[pyo3(signature = (other, allow_missing_columns=false))]
+    fn union_by_name(&self, other: &PyDataFrame, allow_missing_columns: bool) -> PyResult<PyDataFrame> {
+        self.inner
+            .union_by_name(&other.inner, allow_missing_columns)
+            .map(|df| PyDataFrame { inner: df })
+            .map_err(to_py_err)
+    }
+
+    #[pyo3(name = "unionByName", signature = (other, allow_missing_columns=false))]
+    fn union_by_name_camel(&self, other: &PyDataFrame, allow_missing_columns: bool) -> PyResult<PyDataFrame> {
+        self.union_by_name(other, allow_missing_columns)
+    }
+
     #[getter]
     fn write(slf: PyRef<Self>) -> PyDataFrameWriter {
         let py = slf.py();
         PyDataFrameWriter {
             df: slf.into_py(py),
             mode: "overwrite".to_string(),
+            format: None,
             options: Vec::new(),
             partition_by: Vec::new(),
         }
@@ -1542,6 +1590,38 @@ impl PyDataFrame {
 
     fn create_or_replace_temp_view(&self, session: &PySparkSession, name: &str) {
         session.inner.create_or_replace_temp_view(name, self.inner.clone());
+    }
+
+    /// PySpark: df.createOrReplaceTempView("name") — uses active SparkSession.
+    #[pyo3(name = "createOrReplaceTempView")]
+    fn create_or_replace_temp_view_camel(&self, py: Python<'_>, name: &str) -> PyResult<()> {
+        let active = {
+            let ty = py.get_type_bound::<PySparkSession>();
+            if let Ok(singleton) = ty.getattr("_singleton_session") {
+                if !singleton.is_none() {
+                    singleton
+                        .downcast::<PySparkSession>()
+                        .map_err(|_| to_py_err("active SparkSession is invalid"))?
+                        .borrow()
+                        .inner
+                        .clone()
+                } else {
+                    let top = THREAD_ACTIVE_SESSIONS.with(|cell| cell.borrow().last().map(|s| s.clone_ref(py)));
+                    match top {
+                        Some(s) => s.bind(py).borrow().inner.clone(),
+                        None => return Err(to_py_err("No active SparkSession")),
+                    }
+                }
+            } else {
+                let top = THREAD_ACTIVE_SESSIONS.with(|cell| cell.borrow().last().map(|s| s.clone_ref(py)));
+                match top {
+                    Some(s) => s.bind(py).borrow().inner.clone(),
+                    None => return Err(to_py_err("No active SparkSession")),
+                }
+            }
+        };
+        active.create_or_replace_temp_view(name, self.inner.clone());
+        Ok(())
     }
 
     #[getter]
@@ -1554,6 +1634,7 @@ impl PyDataFrame {
 struct PyDataFrameWriter {
     df: Py<PyAny>,
     mode: String,
+    format: Option<String>,
     options: Vec<(String, String)>,
     partition_by: Vec<String>,
 }
@@ -1574,10 +1655,24 @@ fn save_mode_from_str(mode: &str) -> SaveMode {
     }
 }
 
+fn write_format_from_str(fmt: &str) -> WriteFormat {
+    match fmt.to_lowercase().as_str() {
+        "csv" => WriteFormat::Csv,
+        "json" => WriteFormat::Json,
+        _ => WriteFormat::Parquet,
+    }
+}
+
 #[pymethods]
 impl PyDataFrameWriter {
     fn mode<'a>(mut slf: PyRefMut<'a, Self>, mode: &str) -> PyRefMut<'a, Self> {
         slf.mode = mode.to_string();
+        slf
+    }
+
+    /// PySpark: writer.format("parquet"|"csv"|"json"|"delta"). Used by save().
+    fn format<'a>(mut slf: PyRefMut<'a, Self>, fmt: &str) -> PyRefMut<'a, Self> {
+        slf.format = Some(fmt.to_string());
         slf
     }
 
@@ -1636,13 +1731,14 @@ impl PyDataFrameWriter {
         w.save(Path::new(path)).map_err(to_py_err)
     }
 
-    /// PySpark: save(path). Uses current format (parquet default when using .parquet/.csv/.json).
+    /// PySpark: save(path). Uses current format (set by .format(...), default parquet).
     fn save(&self, py: Python<'_>, path: &str) -> PyResult<()> {
         let df = self.df.bind(py).downcast::<PyDataFrame>().map_err(|_| {
             PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected DataFrame")
         })?;
         let inner = df.borrow();
-        let mut w = inner.inner.write().mode(write_mode_from_str(&self.mode)).format(WriteFormat::Parquet);
+        let fmt = write_format_from_str(self.format.as_deref().unwrap_or("parquet"));
+        let mut w = inner.inner.write().mode(write_mode_from_str(&self.mode)).format(fmt);
         for (k, v) in &self.options {
             w = w.option(k, v);
         }
@@ -1742,17 +1838,49 @@ impl PyColumn {
         self.inner.name()
     }
 
+    /// Logical AND (PySpark: (col("a") > 1) & (col("b") < 2)).
     fn __and__(&self, other: &Bound<'_, PyAny>) -> PyResult<PyColumn> {
         let rhs = py_any_to_column(other)?;
+        use robin_sparkless::Column;
         Ok(PyColumn {
-            inner: self.inner.bit_and(&rhs),
+            inner: Column::from_expr(
+                self.inner.expr().clone().and(rhs.expr().clone()),
+                None,
+            ),
         })
     }
 
     fn __rand__(&self, other: &Bound<'_, PyAny>) -> PyResult<PyColumn> {
         let lhs = py_any_to_column(other)?;
+        use robin_sparkless::Column;
         Ok(PyColumn {
-            inner: lhs.bit_and(&self.inner),
+            inner: Column::from_expr(
+                lhs.expr().clone().and(self.inner.expr().clone()),
+                None,
+            ),
+        })
+    }
+
+    /// Logical OR (PySpark: (col("a") > 1) | (col("b") < 2)).
+    fn __or__(&self, other: &Bound<'_, PyAny>) -> PyResult<PyColumn> {
+        let rhs = py_any_to_column(other)?;
+        use robin_sparkless::Column;
+        Ok(PyColumn {
+            inner: Column::from_expr(
+                self.inner.expr().clone().or(rhs.expr().clone()),
+                None,
+            ),
+        })
+    }
+
+    fn __ror__(&self, other: &Bound<'_, PyAny>) -> PyResult<PyColumn> {
+        let lhs = py_any_to_column(other)?;
+        use robin_sparkless::Column;
+        Ok(PyColumn {
+            inner: Column::from_expr(
+                lhs.expr().clone().or(self.inner.expr().clone()),
+                None,
+            ),
         })
     }
 
@@ -2354,6 +2482,26 @@ fn datediff(end: &PyColumn, start: &PyColumn) -> PyColumn {
 }
 
 #[pyfunction]
+#[pyo3(signature = (*columns))]
+fn concat(columns: &Bound<'_, PyTuple>) -> PyResult<PyColumn> {
+    if columns.is_empty() {
+        return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>("concat requires at least one column"));
+    }
+    let cols: Vec<Column> = columns
+        .iter()
+        .map(|item| {
+            item.downcast::<PyColumn>()
+                .map_err(|_| PyErr::new::<pyo3::exceptions::PyTypeError, _>("concat expects Column expressions"))
+                .map(|c| c.borrow().inner.clone())
+        })
+        .collect::<PyResult<Vec<_>>>()?;
+    let refs: Vec<&Column> = cols.iter().collect();
+    Ok(PyColumn {
+        inner: functions::concat(&refs),
+    })
+}
+
+#[pyfunction]
 #[pyo3(signature = (column=None, format=None))]
 fn unix_timestamp(column: Option<&PyColumn>, format: Option<&str>) -> PyColumn {
     match column {
@@ -2466,6 +2614,7 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(to_date, m)?)?;
     m.add_function(wrap_pyfunction!(current_date, m)?)?;
     m.add_function(wrap_pyfunction!(datediff, m)?)?;
+    m.add_function(wrap_pyfunction!(concat, m)?)?;
     m.add_function(wrap_pyfunction!(unix_timestamp, m)?)?;
     m.add_function(wrap_pyfunction!(from_unixtime, m)?)?;
     m.add_function(wrap_pyfunction!(year, m)?)?;

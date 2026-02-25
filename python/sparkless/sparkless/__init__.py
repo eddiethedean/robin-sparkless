@@ -10,7 +10,7 @@ try:
         "count", "sum", "avg", "min", "max",
         "regexp_replace",
         "regexp_extract_all", "regexp_like",
-        "to_timestamp", "to_date", "current_date", "datediff", "unix_timestamp", "from_unixtime",
+        "to_timestamp", "to_date", "current_date", "datediff", "concat", "unix_timestamp", "from_unixtime",
         "year", "month", "dayofmonth", "dayofweek", "date_add", "date_sub", "date_format",
     ])
 except ImportError:
@@ -22,7 +22,7 @@ except ImportError:
         "count", "sum", "avg", "min", "max",
         "regexp_replace",
         "regexp_extract_all", "regexp_like",
-        "to_timestamp", "to_date", "current_date", "datediff", "unix_timestamp", "from_unixtime",
+        "to_timestamp", "to_date", "current_date", "datediff", "concat", "unix_timestamp", "from_unixtime",
         "year", "month", "dayofmonth", "dayofweek", "date_add", "date_sub", "date_format",
     ])
 
@@ -60,6 +60,7 @@ to_timestamp = _mod.to_timestamp
 to_date = _mod.to_date
 current_date = _mod.current_date
 datediff = _mod.datediff
+concat = _mod.concat
 unix_timestamp = _mod.unix_timestamp
 from_unixtime = _mod.from_unixtime
 year = _mod.year
