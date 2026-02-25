@@ -392,7 +392,7 @@ impl PySparkSession {
         data: &Bound<'_, PyAny>,
         schema: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<PyDataFrame> {
-        let (data, from_pandas) = maybe_convert_pandas_to_list(py, data)?;
+        let (data, from_pandas) = normalize_create_dataframe_input(py, data)?;
         let (rows, schema) = python_data_and_schema(py, &data, schema, from_pandas)?;
         self.inner
             .create_dataframe_from_rows(rows, schema, false)
@@ -863,6 +863,54 @@ fn infer_type_from_json_value(v: &JsonValue) -> String {
     }
 }
 
+/// Normalize createDataFrame input: convert pandas, PyArrow Table, or NumPy ndarray to list.
+/// Returns (converted list or original data, from_pandas flag for column order).
+fn normalize_create_dataframe_input<'py>(
+    py: Python<'py>,
+    data: &Bound<'py, PyAny>,
+) -> PyResult<(Bound<'py, PyAny>, bool)> {
+    // 1. PyArrow Table: to_pylist() returns list of dicts
+    if let Ok(to_pylist) = data.getattr("to_pylist") {
+        if to_pylist.is_callable() {
+            let list = to_pylist.call0()?;
+            if list.downcast::<PyList>().is_ok() {
+                return Ok((list, true));
+            }
+        }
+    }
+
+    // 2. NumPy ndarray: tolist() + handle 1D (wrap each element as single-column row)
+    if let Ok(ndim_attr) = data.getattr("ndim") {
+        if let Ok(ndim) = ndim_attr.extract::<i32>() {
+            if let Ok(tolist) = data.getattr("tolist") {
+                if tolist.is_callable() {
+                    let list = tolist.call0()?;
+                    if ndim == 1 {
+                        let py_list = list.downcast::<PyList>().map_err(|_| {
+                            PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+                                "numpy 1D array tolist() must return a list",
+                            )
+                        })?;
+                        let out = PyList::empty_bound(py);
+                        for item in py_list.iter() {
+                            let row = PyList::empty_bound(py);
+                            row.append(item)?;
+                            out.append(row)?;
+                        }
+                        return Ok((out.into_any(), false));
+                    }
+                    if ndim == 2 && list.downcast::<PyList>().is_ok() {
+                        return Ok((list, false));
+                    }
+                }
+            }
+        }
+    }
+
+    // 3. Pandas DataFrame: to_dict("records")
+    maybe_convert_pandas_to_list(py, data)
+}
+
 /// If data is a pandas DataFrame, convert to list of dicts via to_dict("records").
 /// Returns (converted list or original data, true if from pandas).
 fn maybe_convert_pandas_to_list<'py>(
@@ -919,7 +967,9 @@ fn python_data_and_schema(
         .or(inferred_schema)
         .unwrap_or_else(|| {
             rows.first().map(|r| {
-                (0..r.len()).map(|i| (format!("_{}", i), "string".to_string())).collect()
+                (0..r.len())
+                    .map(|i| (format!("_{}", i + 1), "string".to_string()))
+                    .collect()
             }).unwrap_or_default()
         });
     if let (Some(first_row), true) = (rows.first(), schema.iter().all(|(_, t)| t == "string")) {
