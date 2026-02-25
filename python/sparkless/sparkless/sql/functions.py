@@ -35,6 +35,7 @@ from sparkless import (
     to_timestamp as _to_timestamp,
     to_date as _to_date,
     current_date as _current_date,
+    input_file_name as _input_file_name,
     datediff as _datediff,
     unix_timestamp as _unix_timestamp,
     from_unixtime as _from_unixtime,
@@ -100,6 +101,7 @@ __all__ = [
     "to_date",
     "datediff",
     "current_date",
+    "input_file_name",
     "unix_timestamp",
     "from_unixtime",
     "year",
@@ -287,6 +289,10 @@ def datediff(end, start):
 
 def current_date():
     return _current_date()
+
+
+def input_file_name():
+    return _input_file_name()
 
 
 def unix_timestamp(column=None, fmt=None):

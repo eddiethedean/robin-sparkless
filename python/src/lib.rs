@@ -3716,6 +3716,13 @@ fn current_date() -> PyColumn {
 }
 
 #[pyfunction]
+fn input_file_name() -> PyColumn {
+    PyColumn {
+        inner: functions::input_file_name(),
+    }
+}
+
+#[pyfunction]
 fn datediff(end: &PyColumn, start: &PyColumn) -> PyColumn {
     PyColumn {
         inner: functions::datediff(&end.inner, &start.inner),
@@ -4068,6 +4075,7 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(to_timestamp, m)?)?;
     m.add_function(wrap_pyfunction!(to_date, m)?)?;
     m.add_function(wrap_pyfunction!(current_date, m)?)?;
+    m.add_function(wrap_pyfunction!(input_file_name, m)?)?;
     m.add_function(wrap_pyfunction!(datediff, m)?)?;
     m.add_function(wrap_pyfunction!(unix_timestamp, m)?)?;
     m.add_function(wrap_pyfunction!(from_unixtime, m)?)?;
