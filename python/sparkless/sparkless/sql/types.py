@@ -67,6 +67,13 @@ class BooleanType(DataType):
         return "boolean"
 
 
+class BinaryType(DataType):
+    """Binary (bytes) type. PySpark parity."""
+
+    def simpleString(self) -> str:
+        return "binary"
+
+
 class DateType(DataType):
     def simpleString(self) -> str:
         return "date"

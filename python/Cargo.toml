@@ -12,6 +12,7 @@ delta = ["robin-sparkless/delta"]
 robin-sparkless = { path = "..", features = ["sql"] }
 pyo3 = { version = "0.22", features = ["extension-module", "abi3"] }
 serde_json = "1.0"
+base64 = "0.22"
 
 [lib]
 name = "sparkless_native"

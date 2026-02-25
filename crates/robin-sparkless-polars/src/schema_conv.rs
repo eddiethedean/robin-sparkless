@@ -47,6 +47,7 @@ fn polars_type_to_data_type(polars_type: &PlDataType) -> DataType {
         PlDataType::Boolean => DataType::Boolean,
         PlDataType::Date => DataType::Date,
         PlDataType::Datetime(_, _) => DataType::Timestamp,
+        PlDataType::Binary => DataType::Binary,
         PlDataType::List(inner) => DataType::Array(Box::new(polars_type_to_data_type(inner))),
         _ => DataType::String,
     }
@@ -61,6 +62,7 @@ pub(super) fn data_type_to_polars_type(data_type: &DataType) -> PlDataType {
         DataType::Boolean => PlDataType::Boolean,
         DataType::Date => PlDataType::Date,
         DataType::Timestamp => PlDataType::Datetime(TimeUnit::Microseconds, None),
+        DataType::Binary => PlDataType::Binary,
         DataType::Array(inner) => PlDataType::List(Box::new(data_type_to_polars_type(inner))),
         _ => PlDataType::String,
     }

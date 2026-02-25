@@ -13,6 +13,7 @@ use polars::prelude::{
     DataFrame as PlDataFrame, DataType, Field, IntoSeries, NamedFrom, PlSmallStr, PolarsError,
     Series, TimeUnit,
 };
+use base64::Engine;
 use robin_sparkless_core::{SparklessConfig, date_utils};
 use serde_json::Value as JsonValue;
 use std::cell::RefCell;
@@ -32,7 +33,29 @@ fn parse_array_element_type(type_str: &str) -> Option<String> {
     Some(s[6..s.len() - 1].trim().to_string())
 }
 
-/// Parse "struct<field:type,...>" to get field (name, type) pairs. Simple parsing, no nested structs.
+/// Split by commas only at top level (not inside < >). Used for struct<...> and map<...>.
+fn split_at_top_level_commas(s: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut depth = 0i32;
+    let mut start = 0;
+    for (i, c) in s.char_indices() {
+        match c {
+            '<' => depth += 1,
+            '>' => depth -= 1,
+            ',' if depth == 0 => {
+                out.push(s[start..i].trim().to_string());
+                start = i + 1;
+            }
+            _ => {}
+        }
+    }
+    if start <= s.len() {
+        out.push(s[start..].trim().to_string());
+    }
+    out
+}
+
+/// Parse "struct<field:type,...>" to get field (name, type) pairs. Supports nested struct/map/array.
 fn parse_struct_fields(type_str: &str) -> Option<Vec<(String, String)>> {
     let s = type_str.trim();
     if !s.to_lowercase().starts_with("struct<") || !s.ends_with('>') {
@@ -43,7 +66,7 @@ fn parse_struct_fields(type_str: &str) -> Option<Vec<(String, String)>> {
         return Some(Vec::new());
     }
     let mut out = Vec::new();
-    for part in inner.split(',') {
+    for part in split_at_top_level_commas(inner) {
         let part = part.trim();
         if let Some(idx) = part.find(':') {
             let name = part[..idx].trim().to_string();
@@ -566,6 +589,23 @@ fn json_values_to_series(
             let s = Series::new(name.into(), vals);
             s.cast(&DataType::Datetime(TimeUnit::Microseconds, None))
                 .map_err(|e| PolarsError::ComputeError(format!("datetime cast: {e}").into()))
+        }
+        "binary" => {
+            let vals: Vec<Option<Vec<u8>>> = values
+                .iter()
+                .map(|ov| {
+                    ov.as_ref().and_then(|v| match v {
+                        JsonValue::String(s) => {
+                            base64::engine::general_purpose::STANDARD
+                                .decode(s.as_bytes())
+                                .ok()
+                        }
+                        JsonValue::Null => None,
+                        _ => None,
+                    })
+                })
+                .collect();
+            Ok(Series::new(name.into(), vals))
         }
         _ => Err(PolarsError::ComputeError(
             format!("json_values_to_series: unsupported type '{type_str}'").into(),
@@ -2103,6 +2143,11 @@ impl SparkSession {
                     builder.finish().into_series()
                 }
                 _ if parse_struct_fields(&type_lower).is_some() => {
+                    let values: Vec<Option<JsonValue>> =
+                        rows.iter().map(|row| row.get(col_idx).cloned()).collect();
+                    json_values_to_series(&values, &type_lower, name)?
+                }
+                _ if type_lower == "binary" => {
                     let values: Vec<Option<JsonValue>> =
                         rows.iter().map(|row| row.get(col_idx).cloned()).collect();
                     json_values_to_series(&values, &type_lower, name)?
