@@ -509,37 +509,35 @@ mod tests {
         assert_eq!(rows[2].get("label").and_then(|v| v.as_str()), Some("other"));
     }
 
-    /// PR-3/#730,#744: UPDATE and DELETE return clear unsupported error.
+    /// PR-3/#730,#744: UPDATE and DELETE are supported; they modify the table in the session catalog.
     #[test]
-    fn test_sql_update_delete_unsupported() {
+    fn test_sql_update_delete_supported() {
         let spark = SparkSession::builder().app_name("test").get_or_create();
         let df = spark
             .create_dataframe(
-                vec![(1i64, 10i64, "a".to_string())],
+                vec![
+                    (1i64, 10i64, "a".to_string()),
+                    (2i64, 20i64, "b".to_string()),
+                ],
                 vec!["id", "v", "name"],
             )
             .unwrap();
         spark.create_or_replace_temp_view("t", df);
-        let err = match spark.sql("UPDATE t SET v = 2") {
-            Ok(_) => panic!("expected UPDATE to return error"),
-            Err(e) => e,
-        };
-        assert!(
-            err.to_string()
-                .contains("UPDATE and DELETE are not supported"),
-            "expected UPDATE error message, got: {}",
-            err
-        );
-        let err2 = match spark.sql("DELETE FROM t") {
-            Ok(_) => panic!("expected DELETE to return error"),
-            Err(e) => e,
-        };
-        assert!(
-            err2.to_string()
-                .contains("UPDATE and DELETE are not supported"),
-            "expected DELETE error message, got: {}",
-            err2
-        );
+
+        // UPDATE: set v = 2 where name = 'a'
+        spark.sql("UPDATE t SET v = 2 WHERE name = 'a'").unwrap();
+        let result = spark.sql("SELECT id, v, name FROM t ORDER BY id").unwrap();
+        let rows = result.collect_as_json_rows().unwrap();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].get("v").and_then(|v| v.as_i64()), Some(2));
+        assert_eq!(rows[1].get("v").and_then(|v| v.as_i64()), Some(20));
+
+        // DELETE: remove row where id = 1
+        spark.sql("DELETE FROM t WHERE id = 1").unwrap();
+        let result2 = spark.sql("SELECT id, v, name FROM t ORDER BY id").unwrap();
+        let rows2 = result2.collect_as_json_rows().unwrap();
+        assert_eq!(rows2.len(), 1);
+        assert_eq!(rows2[0].get("id").and_then(|v| v.as_i64()), Some(2));
     }
 
     /// PR-2/#743: JOIN ON with different column names (e.g. a.id = b.other_id).
