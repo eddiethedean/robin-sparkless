@@ -3362,9 +3362,30 @@ impl PyChainedWhenBuilder {
 }
 
 #[pyfunction]
-fn when(condition: &PyColumn) -> PyWhenBuilder {
-    PyWhenBuilder {
-        inner: Some(robin_sparkless::functions::when(&condition.inner)),
+#[pyo3(signature = (condition, value=None))]
+fn when(
+    py: Python<'_>,
+    condition: &PyColumn,
+    value: Option<&PyColumn>,
+) -> PyResult<PyObject> {
+    if let Some(v) = value {
+        // when(cond, val) -> when(cond).then(val), so .otherwise() can be chained
+        let then_builder = robin_sparkless::functions::when(&condition.inner).then(&v.inner);
+        Ok(Py::new(
+            py,
+            PyThenBuilder {
+                inner: Some(then_builder),
+            },
+        )?
+        .into_py(py))
+    } else {
+        Ok(Py::new(
+            py,
+            PyWhenBuilder {
+                inner: Some(robin_sparkless::functions::when(&condition.inner)),
+            },
+        )?
+        .into_py(py))
     }
 }
 

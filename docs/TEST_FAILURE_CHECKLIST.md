@@ -16,7 +16,7 @@ This checklist tracks fixes needed to reduce test failures. Items are grouped by
 - **Error:** `TypeError: argument 'value': 'bool' object cannot be converted to 'PyString'`
 
 ### 2. `when()` API mismatch
-- [ ] Support `when(condition, value)` in addition to `when(condition).then(value)`
+- [x] Support `when(condition, value)` in addition to `when(condition).then(value)`
 - **Affected:** ~15 tests in `test_casewhen_windowfunction_cast.py`, `test_withfield.py`, `test_create_map.py`
 - **Error:** `TypeError: when() takes 1 positional arguments but 2 were given`
 
@@ -179,7 +179,7 @@ Tests expecting errors that are not raised:
 | Category              | Total | Fixed | Remaining |
 |-----------------------|-------|-------|-----------|
 | CSV options           | ~60   | ~60   | 0         |
-| when() API            | ~15   | 0     | ~15       |
+| when() API            | ~15   | ~15   | 0         |
 | orderBy               | ~25   | 0     | ~25       |
 | cast() type           | ~15   | 0     | ~15       |
 | na.fill               | ~25   | 0     | ~25       |
