@@ -1,0 +1,86 @@
+{
+  "test_id": "array_distinct",
+  "pyspark_version": "3.5",
+  "generated_at": "2025-10-27T14:13:17.195542",
+  "input_data": [
+    {
+      "id": 1,
+      "name": "Alice",
+      "scores": [
+        85,
+        90,
+        78
+      ],
+      "tags": [
+        "python",
+        "data"
+      ]
+    },
+    {
+      "id": 2,
+      "name": "Bob",
+      "scores": [
+        92,
+        88,
+        95
+      ],
+      "tags": [
+        "java",
+        "backend"
+      ]
+    },
+    {
+      "id": 3,
+      "name": "Charlie",
+      "scores": [
+        76,
+        82,
+        89
+      ],
+      "tags": [
+        "python",
+        "ml"
+      ]
+    }
+  ],
+  "operation": "DataFrame operation: array_distinct",
+  "expected_output": {
+    "schema": {
+      "field_count": 1,
+      "field_names": [
+        "array_distinct(tags)"
+      ],
+      "field_types": [
+        "array"
+      ],
+      "fields": [
+        {
+          "name": "array_distinct(tags)",
+          "type": "array",
+          "nullable": true
+        }
+      ]
+    },
+    "data": [
+      {
+        "array_distinct(tags)": [
+          "data",
+          "python"
+        ]
+      },
+      {
+        "array_distinct(tags)": [
+          "backend",
+          "java"
+        ]
+      },
+      {
+        "array_distinct(tags)": [
+          "ml",
+          "python"
+        ]
+      }
+    ],
+    "row_count": 3
+  }
+}

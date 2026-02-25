@@ -1,0 +1,59 @@
+{
+  "test_id": "math_bround",
+  "pyspark_version": "3.5",
+  "generated_at": "2025-10-27T14:13:24.045793",
+  "input_data": [
+    {
+      "id": 1,
+      "x": 0.5,
+      "y": 1.2,
+      "angle": 0.785,
+      "value": 4.5
+    },
+    {
+      "id": 2,
+      "x": 1.0,
+      "y": 2.5,
+      "angle": 1.57,
+      "value": 3.2
+    },
+    {
+      "id": 3,
+      "x": 2.0,
+      "y": 3.0,
+      "angle": 0.0,
+      "value": 7.8
+    }
+  ],
+  "operation": "DataFrame operation: math_bround",
+  "expected_output": {
+    "schema": {
+      "field_count": 1,
+      "field_names": [
+        "bround(value, 2)"
+      ],
+      "field_types": [
+        "double"
+      ],
+      "fields": [
+        {
+          "name": "bround(value, 2)",
+          "type": "double",
+          "nullable": true
+        }
+      ]
+    },
+    "data": [
+      {
+        "bround(value, 2)": 4.5
+      },
+      {
+        "bround(value, 2)": 3.2
+      },
+      {
+        "bround(value, 2)": 7.8
+      }
+    ],
+    "row_count": 3
+  }
+}

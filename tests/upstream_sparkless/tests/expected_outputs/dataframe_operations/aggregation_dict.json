@@ -1,0 +1,87 @@
+{
+  "test_id": "aggregation",
+  "pyspark_version": "3.5",
+  "generated_at": "2025-12-12T13:37:00.000000",
+  "input_data": [
+    {
+      "id": 1,
+      "name": "Alice",
+      "age": 25,
+      "salary": 50000.0,
+      "department": "IT"
+    },
+    {
+      "id": 2,
+      "name": "Bob",
+      "age": 30,
+      "salary": 60000.0,
+      "department": "HR"
+    },
+    {
+      "id": 3,
+      "name": "Charlie",
+      "age": 35,
+      "salary": 70000.0,
+      "department": "IT"
+    },
+    {
+      "id": 4,
+      "name": "David",
+      "age": 40,
+      "salary": 80000.0,
+      "department": "Finance"
+    }
+  ],
+  "operation": "DataFrame operation: aggregation",
+  "expected_output": {
+    "schema": {
+      "field_count": 3,
+      "field_names": [
+        "department",
+        "count(id)",
+        "avg_salary"
+      ],
+      "field_types": [
+        "StringType()",
+        "LongType()",
+        "DoubleType()"
+      ],
+      "fields": [
+        {
+          "name": "department",
+          "type": "StringType()",
+          "nullable": true
+        },
+        {
+          "name": "count(id)",
+          "type": "LongType()",
+          "nullable": false
+        },
+        {
+          "name": "avg_salary",
+          "type": "DoubleType()",
+          "nullable": true
+        }
+      ]
+    },
+    "data": [
+      {
+        "department": "Finance",
+        "count(id)": 1,
+        "avg_salary": 80000.0
+      },
+      {
+        "department": "HR",
+        "count(id)": 1,
+        "avg_salary": 60000.0
+      },
+      {
+        "department": "IT",
+        "count(id)": 2,
+        "avg_salary": 60000.0
+      }
+    ],
+    "row_count": 3
+  }
+}
+

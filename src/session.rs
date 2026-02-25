@@ -127,6 +127,34 @@ impl SparkSession {
         self.0.list_table_names()
     }
 
+    pub fn app_name(&self) -> Option<String> {
+        self.0.app_name()
+    }
+
+    pub fn new_session(&self) -> SparkSession {
+        SparkSession(self.0.new_session())
+    }
+
+    pub fn current_database(&self) -> String {
+        self.0.current_database()
+    }
+
+    pub fn set_current_database(&self, name: &str) -> Result<(), EngineError> {
+        self.0.set_current_database(name)
+    }
+
+    pub fn cache_table(&self, name: &str) {
+        self.0.cache_table(name)
+    }
+
+    pub fn uncache_table(&self, name: &str) {
+        self.0.uncache_table(name)
+    }
+
+    pub fn is_cached(&self, name: &str) -> bool {
+        self.0.is_cached(name)
+    }
+
     pub fn drop_table(&self, name: &str) -> bool {
         self.0.drop_table(name)
     }

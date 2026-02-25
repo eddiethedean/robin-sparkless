@@ -1,0 +1,59 @@
+{
+  "test_id": "math_atan",
+  "pyspark_version": "3.5",
+  "generated_at": "2025-10-27T14:13:23.790176",
+  "input_data": [
+    {
+      "id": 1,
+      "x": 0.5,
+      "y": 1.2,
+      "angle": 0.785,
+      "value": 4.5
+    },
+    {
+      "id": 2,
+      "x": 1.0,
+      "y": 2.5,
+      "angle": 1.57,
+      "value": 3.2
+    },
+    {
+      "id": 3,
+      "x": 2.0,
+      "y": 3.0,
+      "angle": 0.0,
+      "value": 7.8
+    }
+  ],
+  "operation": "DataFrame operation: math_atan",
+  "expected_output": {
+    "schema": {
+      "field_count": 1,
+      "field_names": [
+        "ATAN(x)"
+      ],
+      "field_types": [
+        "double"
+      ],
+      "fields": [
+        {
+          "name": "ATAN(x)",
+          "type": "double",
+          "nullable": true
+        }
+      ]
+    },
+    "data": [
+      {
+        "ATAN(x)": 0.4636476090008061
+      },
+      {
+        "ATAN(x)": 0.7853981633974483
+      },
+      {
+        "ATAN(x)": 1.1071487177940904
+      }
+    ],
+    "row_count": 3
+  }
+}

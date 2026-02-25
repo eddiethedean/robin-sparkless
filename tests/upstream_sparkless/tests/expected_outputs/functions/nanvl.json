@@ -1,0 +1,62 @@
+{
+  "test_id": "nanvl",
+  "pyspark_version": "3.5",
+  "generated_at": "2025-10-27T14:13:29.187695",
+  "input_data": [
+    {
+      "id": 1,
+      "age": 25,
+      "salary": 50000,
+      "col1": null,
+      "col2": "backup",
+      "col3": "default"
+    },
+    {
+      "id": 2,
+      "age": 35,
+      "salary": null,
+      "col1": "primary",
+      "col2": null,
+      "col3": "default"
+    },
+    {
+      "id": 3,
+      "age": 45,
+      "salary": 70000,
+      "col1": "primary",
+      "col2": "backup",
+      "col3": null
+    }
+  ],
+  "operation": "DataFrame operation: nanvl",
+  "expected_output": {
+    "schema": {
+      "field_count": 1,
+      "field_names": [
+        "CASE WHEN (NOT (salary = salary)) THEN 0 ELSE salary END"
+      ],
+      "field_types": [
+        "long"
+      ],
+      "fields": [
+        {
+          "name": "CASE WHEN (NOT (salary = salary)) THEN 0 ELSE salary END",
+          "type": "long",
+          "nullable": true
+        }
+      ]
+    },
+    "data": [
+      {
+        "CASE WHEN (NOT (salary = salary)) THEN 0 ELSE salary END": 50000
+      },
+      {
+        "CASE WHEN (NOT (salary = salary)) THEN 0 ELSE salary END": null
+      },
+      {
+        "CASE WHEN (NOT (salary = salary)) THEN 0 ELSE salary END": 70000
+      }
+    ],
+    "row_count": 3
+  }
+}

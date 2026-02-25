@@ -1,0 +1,53 @@
+{
+  "test_id": "group_by",
+  "pyspark_version": "3.5",
+  "generated_at": "2025-10-27T14:13:15.634716",
+  "input_data": [
+    {
+      "id": 1,
+      "name": "Alice",
+      "age": 25,
+      "salary": 50000.0
+    },
+    {
+      "id": 2,
+      "name": "Bob",
+      "age": 30,
+      "salary": 60000.0
+    },
+    {
+      "id": 3,
+      "name": "Charlie",
+      "age": 35,
+      "salary": 70000.0
+    }
+  ],
+  "operation": "SELECT COUNT(*) as count FROM employees GROUP BY (age > 30)",
+  "expected_output": {
+    "schema": {
+      "field_count": 1,
+      "field_names": [
+        "count"
+      ],
+      "field_types": [
+        "long"
+      ],
+      "fields": [
+        {
+          "name": "count",
+          "type": "long",
+          "nullable": false
+        }
+      ]
+    },
+    "data": [
+      {
+        "count": 1
+      },
+      {
+        "count": 2
+      }
+    ],
+    "row_count": 2
+  }
+}

@@ -1,0 +1,7 @@
+# Centralized xfail list for vendored upstream sparkless tests.
+# One pattern per line; blank lines and # comments ignored.
+# Pattern is matched against the test node id (e.g. path/to/file.py::test_name).
+# Add test path fragments for known unsupported APIs or parity gaps.
+# Burn down this list as we add support.
+
+# (Backend/core/optimizer internals tests have been removed.)

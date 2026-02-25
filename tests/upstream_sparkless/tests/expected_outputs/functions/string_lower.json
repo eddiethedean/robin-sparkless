@@ -1,0 +1,62 @@
+{
+  "test_id": "string_lower",
+  "pyspark_version": "3.5",
+  "generated_at": "2025-10-27T14:13:11.884028",
+  "input_data": [
+    {
+      "id": 1,
+      "name": "Alice",
+      "age": 25,
+      "salary": 50000.0,
+      "active": true,
+      "email": "alice@example.com"
+    },
+    {
+      "id": 2,
+      "name": "Bob",
+      "age": 30,
+      "salary": 60000.0,
+      "active": false,
+      "email": "bob@test.com"
+    },
+    {
+      "id": 3,
+      "name": "Charlie",
+      "age": 35,
+      "salary": 70000.0,
+      "active": true,
+      "email": "charlie@company.org"
+    }
+  ],
+  "operation": "DataFrame operation: string_lower",
+  "expected_output": {
+    "schema": {
+      "field_count": 1,
+      "field_names": [
+        "lower(name)"
+      ],
+      "field_types": [
+        "string"
+      ],
+      "fields": [
+        {
+          "name": "lower(name)",
+          "type": "string",
+          "nullable": true
+        }
+      ]
+    },
+    "data": [
+      {
+        "lower(name)": "alice"
+      },
+      {
+        "lower(name)": "bob"
+      },
+      {
+        "lower(name)": "charlie"
+      }
+    ],
+    "row_count": 3
+  }
+}

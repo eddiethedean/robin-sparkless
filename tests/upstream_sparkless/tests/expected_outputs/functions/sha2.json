@@ -1,0 +1,56 @@
+{
+  "test_id": "sha2",
+  "pyspark_version": "3.5",
+  "generated_at": "2025-10-27T14:13:23.565963",
+  "input_data": [
+    {
+      "id": 1,
+      "name": "Alice",
+      "text": "Hello World",
+      "email": "alice@example.com"
+    },
+    {
+      "id": 2,
+      "name": "Bob",
+      "text": "Test String",
+      "email": "bob@test.com"
+    },
+    {
+      "id": 3,
+      "name": "Charlie",
+      "text": "Python Data",
+      "email": "charlie@company.org"
+    }
+  ],
+  "operation": "DataFrame operation: sha2",
+  "expected_output": {
+    "schema": {
+      "field_count": 1,
+      "field_names": [
+        "sha2(text, 256)"
+      ],
+      "field_types": [
+        "string"
+      ],
+      "fields": [
+        {
+          "name": "sha2(text, 256)",
+          "type": "string",
+          "nullable": true
+        }
+      ]
+    },
+    "data": [
+      {
+        "sha2(text, 256)": "a591a6d40bf420404a011733cfb7b190d62c65bf0bcda32b57b277d9ad9f146e"
+      },
+      {
+        "sha2(text, 256)": "30c6ff7a44f7035af933babaea771bf177fc38f06482ad06434cbcc04de7ac14"
+      },
+      {
+        "sha2(text, 256)": "bf51577b590f777cf4fdc9d0d76bd828c89eb745857f1bb1ad9da98abdcdcf02"
+      }
+    ],
+    "row_count": 3
+  }
+}

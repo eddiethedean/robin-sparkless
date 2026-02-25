@@ -1,0 +1,74 @@
+{
+  "test_id": "filtered_select",
+  "pyspark_version": "3.5",
+  "generated_at": "2025-10-27T14:13:15.403899",
+  "input_data": [
+    {
+      "id": 1,
+      "name": "Alice",
+      "age": 25,
+      "salary": 50000.0
+    },
+    {
+      "id": 2,
+      "name": "Bob",
+      "age": 30,
+      "salary": 60000.0
+    },
+    {
+      "id": 3,
+      "name": "Charlie",
+      "age": 35,
+      "salary": 70000.0
+    }
+  ],
+  "operation": "SELECT * FROM employees WHERE age > 30",
+  "expected_output": {
+    "schema": {
+      "field_count": 4,
+      "field_names": [
+        "age",
+        "id",
+        "name",
+        "salary"
+      ],
+      "field_types": [
+        "long",
+        "long",
+        "string",
+        "double"
+      ],
+      "fields": [
+        {
+          "name": "age",
+          "type": "long",
+          "nullable": true
+        },
+        {
+          "name": "id",
+          "type": "long",
+          "nullable": true
+        },
+        {
+          "name": "name",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "salary",
+          "type": "double",
+          "nullable": true
+        }
+      ]
+    },
+    "data": [
+      {
+        "age": 35,
+        "id": 3,
+        "name": "Charlie",
+        "salary": 70000.0
+      }
+    ],
+    "row_count": 1
+  }
+}

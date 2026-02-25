@@ -1,0 +1,81 @@
+{
+  "test_id": "transform_values",
+  "pyspark_version": "3.5",
+  "generated_at": "2025-10-27T14:13:24.914404",
+  "input_data": [
+    {
+      "id": 1,
+      "map1": {
+        "a": 1,
+        "b": 2
+      },
+      "map2": {
+        "c": 3,
+        "d": 4
+      },
+      "key": "a"
+    },
+    {
+      "id": 2,
+      "map1": {
+        "x": 10,
+        "y": 20
+      },
+      "map2": {
+        "z": 30
+      },
+      "key": "x"
+    },
+    {
+      "id": 3,
+      "map1": {
+        "p": 100,
+        "q": 200
+      },
+      "map2": {
+        "r": 300
+      },
+      "key": "p"
+    }
+  ],
+  "operation": "DataFrame operation: transform_values",
+  "expected_output": {
+    "schema": {
+      "field_count": 1,
+      "field_names": [
+        "transform_values(map1, lambdafunction((namedlambdavariable() * 2), namedlambdavariable(), namedlambdavariable()))"
+      ],
+      "field_types": [
+        "map"
+      ],
+      "fields": [
+        {
+          "name": "transform_values(map1, lambdafunction((namedlambdavariable() * 2), namedlambdavariable(), namedlambdavariable()))",
+          "type": "map",
+          "nullable": true
+        }
+      ]
+    },
+    "data": [
+      {
+        "transform_values(map1, lambdafunction((namedlambdavariable() * 2), namedlambdavariable(), namedlambdavariable()))": {
+          "a": 2,
+          "b": 4
+        }
+      },
+      {
+        "transform_values(map1, lambdafunction((namedlambdavariable() * 2), namedlambdavariable(), namedlambdavariable()))": {
+          "x": 20,
+          "y": 40
+        }
+      },
+      {
+        "transform_values(map1, lambdafunction((namedlambdavariable() * 2), namedlambdavariable(), namedlambdavariable()))": {
+          "p": 200,
+          "q": 400
+        }
+      }
+    ],
+    "row_count": 3
+  }
+}

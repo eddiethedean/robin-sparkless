@@ -1,0 +1,47 @@
+{
+  "test_id": "type_string_type",
+  "pyspark_version": "3.5",
+  "generated_at": "2025-10-27T14:25:54.623267",
+  "input_data": [
+    {
+      "id": 1,
+      "name": "Alice",
+      "age": 25,
+      "salary": 50000.0
+    },
+    {
+      "id": 2,
+      "name": "Bob",
+      "age": 30,
+      "salary": 60000.0
+    }
+  ],
+  "operation": "DataFrame operation: type_string_type",
+  "expected_output": {
+    "schema": {
+      "field_count": 1,
+      "field_names": [
+        "name"
+      ],
+      "field_types": [
+        "string"
+      ],
+      "fields": [
+        {
+          "name": "name",
+          "type": "string",
+          "nullable": true
+        }
+      ]
+    },
+    "data": [
+      {
+        "name": "Alice"
+      },
+      {
+        "name": "Bob"
+      }
+    ],
+    "row_count": 2
+  }
+}

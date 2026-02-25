@@ -1,0 +1,59 @@
+{
+  "test_id": "math_rand",
+  "pyspark_version": "3.5",
+  "generated_at": "2025-10-27T14:13:24.124032",
+  "input_data": [
+    {
+      "id": 1,
+      "x": 0.5,
+      "y": 1.2,
+      "angle": 0.785,
+      "value": 4.5
+    },
+    {
+      "id": 2,
+      "x": 1.0,
+      "y": 2.5,
+      "angle": 1.57,
+      "value": 3.2
+    },
+    {
+      "id": 3,
+      "x": 2.0,
+      "y": 3.0,
+      "angle": 0.0,
+      "value": 7.8
+    }
+  ],
+  "operation": "DataFrame operation: math_rand",
+  "expected_output": {
+    "schema": {
+      "field_count": 1,
+      "field_names": [
+        "rand(4369873967342901743)"
+      ],
+      "field_types": [
+        "double"
+      ],
+      "fields": [
+        {
+          "name": "rand(4369873967342901743)",
+          "type": "double",
+          "nullable": false
+        }
+      ]
+    },
+    "data": [
+      {
+        "rand(4369873967342901743)": 0.7735754775002532
+      },
+      {
+        "rand(4369873967342901743)": 0.28842724692633237
+      },
+      {
+        "rand(4369873967342901743)": 0.2889250255962357
+      }
+    ],
+    "row_count": 3
+  }
+}

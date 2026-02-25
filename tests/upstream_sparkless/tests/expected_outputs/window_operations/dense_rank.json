@@ -1,0 +1,109 @@
+{
+  "test_id": "dense_rank",
+  "pyspark_version": "3.5",
+  "generated_at": "2025-10-27T14:13:14.569926",
+  "input_data": [
+    {
+      "id": 1,
+      "name": "Alice",
+      "department": "IT",
+      "salary": 50000
+    },
+    {
+      "id": 2,
+      "name": "Bob",
+      "department": "HR",
+      "salary": 60000
+    },
+    {
+      "id": 3,
+      "name": "Charlie",
+      "department": "IT",
+      "salary": 70000
+    },
+    {
+      "id": 4,
+      "name": "David",
+      "department": "IT",
+      "salary": 55000
+    }
+  ],
+  "operation": "DataFrame operation: dense_rank",
+  "expected_output": {
+    "schema": {
+      "field_count": 5,
+      "field_names": [
+        "department",
+        "id",
+        "name",
+        "salary",
+        "dense_rank"
+      ],
+      "field_types": [
+        "string",
+        "long",
+        "string",
+        "long",
+        "integer"
+      ],
+      "fields": [
+        {
+          "name": "department",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "id",
+          "type": "long",
+          "nullable": true
+        },
+        {
+          "name": "name",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "salary",
+          "type": "long",
+          "nullable": true
+        },
+        {
+          "name": "dense_rank",
+          "type": "integer",
+          "nullable": false
+        }
+      ]
+    },
+    "data": [
+      {
+        "department": "HR",
+        "id": 2,
+        "name": "Bob",
+        "salary": 60000,
+        "dense_rank": 1
+      },
+      {
+        "department": "IT",
+        "id": 1,
+        "name": "Alice",
+        "salary": 50000,
+        "dense_rank": 1
+      },
+      {
+        "department": "IT",
+        "id": 4,
+        "name": "David",
+        "salary": 55000,
+        "dense_rank": 2
+      },
+      {
+        "department": "IT",
+        "id": 3,
+        "name": "Charlie",
+        "salary": 70000,
+        "dense_rank": 3
+      }
+    ],
+    "row_count": 4
+  }
+}

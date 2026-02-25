@@ -1,0 +1,156 @@
+{
+  "test_id": "summary",
+  "pyspark_version": "3.5",
+  "generated_at": "2025-10-27T14:26:14.955365",
+  "input_data": [
+    {
+      "id": 1,
+      "name": "Alice",
+      "age": 25,
+      "salary": 50000.0,
+      "department": "IT"
+    },
+    {
+      "id": 2,
+      "name": "Bob",
+      "age": 30,
+      "salary": 60000.0,
+      "department": "HR"
+    },
+    {
+      "id": 3,
+      "name": "Charlie",
+      "age": 35,
+      "salary": 70000.0,
+      "department": "IT"
+    },
+    {
+      "id": 4,
+      "name": "David",
+      "age": 40,
+      "salary": 80000.0,
+      "department": "Finance"
+    }
+  ],
+  "operation": "DataFrame operation: summary",
+  "expected_output": {
+    "schema": {
+      "field_count": 6,
+      "field_names": [
+        "summary",
+        "age",
+        "department",
+        "id",
+        "name",
+        "salary"
+      ],
+      "field_types": [
+        "string",
+        "string",
+        "string",
+        "string",
+        "string",
+        "string"
+      ],
+      "fields": [
+        {
+          "name": "summary",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "age",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "department",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "id",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "name",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "salary",
+          "type": "string",
+          "nullable": true
+        }
+      ]
+    },
+    "data": [
+      {
+        "summary": "count",
+        "age": "4",
+        "department": "4",
+        "id": "4",
+        "name": "4",
+        "salary": "4"
+      },
+      {
+        "summary": "mean",
+        "age": "32.5",
+        "department": null,
+        "id": "2.5",
+        "name": null,
+        "salary": "65000.0"
+      },
+      {
+        "summary": "stddev",
+        "age": "6.454972243679028",
+        "department": null,
+        "id": "1.2909944487358056",
+        "name": null,
+        "salary": "12909.944487358056"
+      },
+      {
+        "summary": "min",
+        "age": "25",
+        "department": "Finance",
+        "id": "1",
+        "name": "Alice",
+        "salary": "50000.0"
+      },
+      {
+        "summary": "25%",
+        "age": "25",
+        "department": null,
+        "id": "1",
+        "name": null,
+        "salary": "50000.0"
+      },
+      {
+        "summary": "50%",
+        "age": "30",
+        "department": null,
+        "id": "2",
+        "name": null,
+        "salary": "60000.0"
+      },
+      {
+        "summary": "75%",
+        "age": "35",
+        "department": null,
+        "id": "3",
+        "name": null,
+        "salary": "70000.0"
+      },
+      {
+        "summary": "max",
+        "age": "40",
+        "department": "IT",
+        "id": "4",
+        "name": "David",
+        "salary": "80000.0"
+      }
+    ],
+    "row_count": 8
+  }
+}

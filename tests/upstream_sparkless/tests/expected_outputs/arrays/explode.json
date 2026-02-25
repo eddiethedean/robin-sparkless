@@ -1,0 +1,111 @@
+{
+  "test_id": "explode",
+  "pyspark_version": "3.5",
+  "generated_at": "2025-10-27T14:13:17.216954",
+  "input_data": [
+    {
+      "id": 1,
+      "name": "Alice",
+      "scores": [
+        85,
+        90,
+        78
+      ],
+      "tags": [
+        "python",
+        "data"
+      ]
+    },
+    {
+      "id": 2,
+      "name": "Bob",
+      "scores": [
+        92,
+        88,
+        95
+      ],
+      "tags": [
+        "java",
+        "backend"
+      ]
+    },
+    {
+      "id": 3,
+      "name": "Charlie",
+      "scores": [
+        76,
+        82,
+        89
+      ],
+      "tags": [
+        "python",
+        "ml"
+      ]
+    }
+  ],
+  "operation": "DataFrame operation: explode",
+  "expected_output": {
+    "schema": {
+      "field_count": 2,
+      "field_names": [
+        "name",
+        "score"
+      ],
+      "field_types": [
+        "string",
+        "long"
+      ],
+      "fields": [
+        {
+          "name": "name",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "score",
+          "type": "long",
+          "nullable": true
+        }
+      ]
+    },
+    "data": [
+      {
+        "name": "Alice",
+        "score": 85
+      },
+      {
+        "name": "Alice",
+        "score": 90
+      },
+      {
+        "name": "Alice",
+        "score": 78
+      },
+      {
+        "name": "Bob",
+        "score": 92
+      },
+      {
+        "name": "Bob",
+        "score": 88
+      },
+      {
+        "name": "Bob",
+        "score": 95
+      },
+      {
+        "name": "Charlie",
+        "score": 76
+      },
+      {
+        "name": "Charlie",
+        "score": 82
+      },
+      {
+        "name": "Charlie",
+        "score": 89
+      }
+    ],
+    "row_count": 9
+  }
+}

@@ -1,0 +1,27 @@
+# PySpark-style: from sparkless.sql.utils import AnalysisException, ParseException, ...
+try:
+    from sparkless._native import SparklessError
+except ImportError:
+    SparklessError = RuntimeError
+
+AnalysisException = SparklessError
+ParseException = SparklessError
+IllegalArgumentException = SparklessError
+QueryExecutionException = SparklessError
+SparkUpgradeException = SparklessError
+PySparkAttributeError = SparklessError
+PySparkValueError = SparklessError
+PySparkTypeError = SparklessError
+PySparkRuntimeError = SparklessError
+
+__all__ = [
+    "AnalysisException",
+    "ParseException",
+    "IllegalArgumentException",
+    "QueryExecutionException",
+    "SparkUpgradeException",
+    "PySparkAttributeError",
+    "PySparkValueError",
+    "PySparkTypeError",
+    "PySparkRuntimeError",
+]

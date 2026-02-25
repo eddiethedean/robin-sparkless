@@ -9,11 +9,16 @@ pub struct SortOrder {
     pub(crate) expr: Expr,
     pub descending: bool,
     pub nulls_last: bool,
+    pub(crate) column_name: String,
 }
 
 impl SortOrder {
     pub fn expr(&self) -> &Expr {
         &self.expr
+    }
+
+    pub fn column_name(&self) -> &str {
+        &self.column_name
     }
 }
 
@@ -23,6 +28,7 @@ pub fn asc(column: &Column) -> SortOrder {
         expr: column.expr().clone(),
         descending: false,
         nulls_last: false,
+        column_name: column.name().to_string(),
     }
 }
 
@@ -32,6 +38,7 @@ pub fn asc_nulls_first(column: &Column) -> SortOrder {
         expr: column.expr().clone(),
         descending: false,
         nulls_last: false,
+        column_name: column.name().to_string(),
     }
 }
 
@@ -41,6 +48,7 @@ pub fn asc_nulls_last(column: &Column) -> SortOrder {
         expr: column.expr().clone(),
         descending: false,
         nulls_last: true,
+        column_name: column.name().to_string(),
     }
 }
 
@@ -50,6 +58,7 @@ pub fn desc(column: &Column) -> SortOrder {
         expr: column.expr().clone(),
         descending: true,
         nulls_last: true,
+        column_name: column.name().to_string(),
     }
 }
 
@@ -59,6 +68,7 @@ pub fn desc_nulls_first(column: &Column) -> SortOrder {
         expr: column.expr().clone(),
         descending: true,
         nulls_last: false,
+        column_name: column.name().to_string(),
     }
 }
 
@@ -68,5 +78,6 @@ pub fn desc_nulls_last(column: &Column) -> SortOrder {
         expr: column.expr().clone(),
         descending: true,
         nulls_last: true,
+        column_name: column.name().to_string(),
     }
 }

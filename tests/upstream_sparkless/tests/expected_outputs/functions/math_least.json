@@ -1,0 +1,62 @@
+{
+  "test_id": "math_least",
+  "pyspark_version": "3.5",
+  "generated_at": "2025-10-27T14:13:12.377365",
+  "input_data": [
+    {
+      "id": 1,
+      "a": 5,
+      "b": 3,
+      "c": 7,
+      "angle": 0.785,
+      "value": 4.5
+    },
+    {
+      "id": 2,
+      "a": 2,
+      "b": 8,
+      "c": 1,
+      "angle": 1.57,
+      "value": 3.2
+    },
+    {
+      "id": 3,
+      "a": 9,
+      "b": 4,
+      "c": 6,
+      "angle": 0.0,
+      "value": 7.8
+    }
+  ],
+  "operation": "DataFrame operation: math_least",
+  "expected_output": {
+    "schema": {
+      "field_count": 1,
+      "field_names": [
+        "least(a, b, c)"
+      ],
+      "field_types": [
+        "long"
+      ],
+      "fields": [
+        {
+          "name": "least(a, b, c)",
+          "type": "long",
+          "nullable": true
+        }
+      ]
+    },
+    "data": [
+      {
+        "least(a, b, c)": 3
+      },
+      {
+        "least(a, b, c)": 1
+      },
+      {
+        "least(a, b, c)": 4
+      }
+    ],
+    "row_count": 3
+  }
+}

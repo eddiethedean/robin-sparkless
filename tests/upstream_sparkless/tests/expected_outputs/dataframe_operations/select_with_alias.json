@@ -1,0 +1,80 @@
+{
+  "test_id": "select_with_alias",
+  "pyspark_version": "3.5",
+  "generated_at": "2025-10-27T14:13:10.148606",
+  "input_data": [
+    {
+      "id": 1,
+      "name": "Alice",
+      "age": 25,
+      "salary": 50000.0,
+      "department": "IT"
+    },
+    {
+      "id": 2,
+      "name": "Bob",
+      "age": 30,
+      "salary": 60000.0,
+      "department": "HR"
+    },
+    {
+      "id": 3,
+      "name": "Charlie",
+      "age": 35,
+      "salary": 70000.0,
+      "department": "IT"
+    },
+    {
+      "id": 4,
+      "name": "David",
+      "age": 40,
+      "salary": 80000.0,
+      "department": "Finance"
+    }
+  ],
+  "operation": "DataFrame operation: select_with_alias",
+  "expected_output": {
+    "schema": {
+      "field_count": 2,
+      "field_names": [
+        "user_id",
+        "full_name"
+      ],
+      "field_types": [
+        "long",
+        "string"
+      ],
+      "fields": [
+        {
+          "name": "user_id",
+          "type": "long",
+          "nullable": true
+        },
+        {
+          "name": "full_name",
+          "type": "string",
+          "nullable": true
+        }
+      ]
+    },
+    "data": [
+      {
+        "user_id": 1,
+        "full_name": "Alice"
+      },
+      {
+        "user_id": 2,
+        "full_name": "Bob"
+      },
+      {
+        "user_id": 3,
+        "full_name": "Charlie"
+      },
+      {
+        "user_id": 4,
+        "full_name": "David"
+      }
+    ],
+    "row_count": 4
+  }
+}

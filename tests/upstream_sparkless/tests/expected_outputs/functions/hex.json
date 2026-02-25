@@ -1,0 +1,56 @@
+{
+  "test_id": "hex",
+  "pyspark_version": "3.5",
+  "generated_at": "2025-10-27T14:13:23.365526",
+  "input_data": [
+    {
+      "id": 1,
+      "name": "Alice",
+      "text": "Hello World",
+      "email": "alice@example.com"
+    },
+    {
+      "id": 2,
+      "name": "Bob",
+      "text": "Test String",
+      "email": "bob@test.com"
+    },
+    {
+      "id": 3,
+      "name": "Charlie",
+      "text": "Python Data",
+      "email": "charlie@company.org"
+    }
+  ],
+  "operation": "DataFrame operation: hex",
+  "expected_output": {
+    "schema": {
+      "field_count": 1,
+      "field_names": [
+        "hex(name)"
+      ],
+      "field_types": [
+        "string"
+      ],
+      "fields": [
+        {
+          "name": "hex(name)",
+          "type": "string",
+          "nullable": true
+        }
+      ]
+    },
+    "data": [
+      {
+        "hex(name)": "416C696365"
+      },
+      {
+        "hex(name)": "426F62"
+      },
+      {
+        "hex(name)": "436861726C6965"
+      }
+    ],
+    "row_count": 3
+  }
+}

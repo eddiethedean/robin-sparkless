@@ -1,0 +1,53 @@
+{
+  "test_id": "string_ltrim",
+  "pyspark_version": "3.5",
+  "generated_at": "2025-10-27T14:13:12.031882",
+  "input_data": [
+    {
+      "id": 1,
+      "name": "  Alice  ",
+      "age": 25
+    },
+    {
+      "id": 2,
+      "name": "Bob",
+      "age": 30
+    },
+    {
+      "id": 3,
+      "name": "  Charlie",
+      "age": 35
+    }
+  ],
+  "operation": "DataFrame operation: string_ltrim",
+  "expected_output": {
+    "schema": {
+      "field_count": 1,
+      "field_names": [
+        "ltrim(name)"
+      ],
+      "field_types": [
+        "string"
+      ],
+      "fields": [
+        {
+          "name": "ltrim(name)",
+          "type": "string",
+          "nullable": true
+        }
+      ]
+    },
+    "data": [
+      {
+        "ltrim(name)": "Alice  "
+      },
+      {
+        "ltrim(name)": "Bob"
+      },
+      {
+        "ltrim(name)": "Charlie"
+      }
+    ],
+    "row_count": 3
+  }
+}

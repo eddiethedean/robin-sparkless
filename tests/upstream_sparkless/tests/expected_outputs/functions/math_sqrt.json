@@ -1,0 +1,62 @@
+{
+  "test_id": "math_sqrt",
+  "pyspark_version": "3.5",
+  "generated_at": "2025-10-27T14:13:12.207482",
+  "input_data": [
+    {
+      "id": 1,
+      "name": "Alice",
+      "age": 25,
+      "salary": 50000.0,
+      "active": true,
+      "email": "alice@example.com"
+    },
+    {
+      "id": 2,
+      "name": "Bob",
+      "age": 30,
+      "salary": 60000.0,
+      "active": false,
+      "email": "bob@test.com"
+    },
+    {
+      "id": 3,
+      "name": "Charlie",
+      "age": 35,
+      "salary": 70000.0,
+      "active": true,
+      "email": "charlie@company.org"
+    }
+  ],
+  "operation": "DataFrame operation: math_sqrt",
+  "expected_output": {
+    "schema": {
+      "field_count": 1,
+      "field_names": [
+        "SQRT(salary)"
+      ],
+      "field_types": [
+        "double"
+      ],
+      "fields": [
+        {
+          "name": "SQRT(salary)",
+          "type": "double",
+          "nullable": true
+        }
+      ]
+    },
+    "data": [
+      {
+        "SQRT(salary)": 223.60679774997897
+      },
+      {
+        "SQRT(salary)": 244.94897427831782
+      },
+      {
+        "SQRT(salary)": 264.5751311064591
+      }
+    ],
+    "row_count": 3
+  }
+}

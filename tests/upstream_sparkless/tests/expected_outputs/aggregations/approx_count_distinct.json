@@ -1,0 +1,60 @@
+{
+  "test_id": "approx_count_distinct",
+  "pyspark_version": "3.5",
+  "generated_at": "2025-10-27T14:13:28.000451",
+  "input_data": [
+    {
+      "id": 1,
+      "name": "Alice",
+      "age": 25,
+      "salary": 50000.0,
+      "dept": "IT"
+    },
+    {
+      "id": 2,
+      "name": "Bob",
+      "age": 30,
+      "salary": 60000.0,
+      "dept": "HR"
+    },
+    {
+      "id": 3,
+      "name": "Charlie",
+      "age": 35,
+      "salary": 70000.0,
+      "dept": "IT"
+    },
+    {
+      "id": 4,
+      "name": "David",
+      "age": 40,
+      "salary": 80000.0,
+      "dept": "IT"
+    }
+  ],
+  "operation": "DataFrame operation: approx_count_distinct",
+  "expected_output": {
+    "schema": {
+      "field_count": 1,
+      "field_names": [
+        "approx_count_distinct(age)"
+      ],
+      "field_types": [
+        "long"
+      ],
+      "fields": [
+        {
+          "name": "approx_count_distinct(age)",
+          "type": "long",
+          "nullable": false
+        }
+      ]
+    },
+    "data": [
+      {
+        "approx_count_distinct(age)": 4
+      }
+    ],
+    "row_count": 1
+  }
+}

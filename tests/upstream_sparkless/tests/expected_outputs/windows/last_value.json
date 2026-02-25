@@ -1,0 +1,124 @@
+{
+  "test_id": "last_value",
+  "pyspark_version": "3.5",
+  "generated_at": "2025-10-27T14:13:26.433454",
+  "input_data": [
+    {
+      "id": 1,
+      "name": "Alice",
+      "dept": "IT",
+      "salary": 50000,
+      "hire_date": "2020-01-15"
+    },
+    {
+      "id": 2,
+      "name": "Bob",
+      "dept": "HR",
+      "salary": 60000,
+      "hire_date": "2019-03-10"
+    },
+    {
+      "id": 3,
+      "name": "Charlie",
+      "dept": "IT",
+      "salary": 70000,
+      "hire_date": "2021-07-22"
+    },
+    {
+      "id": 4,
+      "name": "David",
+      "dept": "IT",
+      "salary": 55000,
+      "hire_date": "2020-11-05"
+    }
+  ],
+  "operation": "DataFrame operation: last_value",
+  "expected_output": {
+    "schema": {
+      "field_count": 6,
+      "field_names": [
+        "dept",
+        "hire_date",
+        "id",
+        "name",
+        "salary",
+        "last_salary"
+      ],
+      "field_types": [
+        "string",
+        "string",
+        "long",
+        "string",
+        "long",
+        "long"
+      ],
+      "fields": [
+        {
+          "name": "dept",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "hire_date",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "id",
+          "type": "long",
+          "nullable": true
+        },
+        {
+          "name": "name",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "salary",
+          "type": "long",
+          "nullable": true
+        },
+        {
+          "name": "last_salary",
+          "type": "long",
+          "nullable": true
+        }
+      ]
+    },
+    "data": [
+      {
+        "dept": "HR",
+        "hire_date": "2019-03-10",
+        "id": 2,
+        "name": "Bob",
+        "salary": 60000,
+        "last_salary": 60000
+      },
+      {
+        "dept": "IT",
+        "hire_date": "2020-01-15",
+        "id": 1,
+        "name": "Alice",
+        "salary": 50000,
+        "last_salary": 50000
+      },
+      {
+        "dept": "IT",
+        "hire_date": "2020-11-05",
+        "id": 4,
+        "name": "David",
+        "salary": 55000,
+        "last_salary": 55000
+      },
+      {
+        "dept": "IT",
+        "hire_date": "2021-07-22",
+        "id": 3,
+        "name": "Charlie",
+        "salary": 70000,
+        "last_salary": 70000
+      }
+    ],
+    "row_count": 4
+  }
+}

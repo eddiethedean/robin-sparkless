@@ -1,0 +1,59 @@
+{
+  "test_id": "math_sinh",
+  "pyspark_version": "3.5",
+  "generated_at": "2025-10-27T14:13:23.871476",
+  "input_data": [
+    {
+      "id": 1,
+      "x": 0.5,
+      "y": 1.2,
+      "angle": 0.785,
+      "value": 4.5
+    },
+    {
+      "id": 2,
+      "x": 1.0,
+      "y": 2.5,
+      "angle": 1.57,
+      "value": 3.2
+    },
+    {
+      "id": 3,
+      "x": 2.0,
+      "y": 3.0,
+      "angle": 0.0,
+      "value": 7.8
+    }
+  ],
+  "operation": "DataFrame operation: math_sinh",
+  "expected_output": {
+    "schema": {
+      "field_count": 1,
+      "field_names": [
+        "SINH(x)"
+      ],
+      "field_types": [
+        "double"
+      ],
+      "fields": [
+        {
+          "name": "SINH(x)",
+          "type": "double",
+          "nullable": true
+        }
+      ]
+    },
+    "data": [
+      {
+        "SINH(x)": 0.5210953054937474
+      },
+      {
+        "SINH(x)": 1.1752011936438014
+      },
+      {
+        "SINH(x)": 3.626860407847019
+      }
+    ],
+    "row_count": 3
+  }
+}

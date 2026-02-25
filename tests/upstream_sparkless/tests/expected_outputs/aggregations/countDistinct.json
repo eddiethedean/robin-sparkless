@@ -1,0 +1,60 @@
+{
+  "test_id": "countDistinct",
+  "pyspark_version": "3.5",
+  "generated_at": "2025-10-27T14:13:28.729106",
+  "input_data": [
+    {
+      "id": 1,
+      "name": "Alice",
+      "age": 25,
+      "salary": 50000.0,
+      "dept": "IT"
+    },
+    {
+      "id": 2,
+      "name": "Bob",
+      "age": 30,
+      "salary": 60000.0,
+      "dept": "HR"
+    },
+    {
+      "id": 3,
+      "name": "Charlie",
+      "age": 35,
+      "salary": 70000.0,
+      "dept": "IT"
+    },
+    {
+      "id": 4,
+      "name": "David",
+      "age": 40,
+      "salary": 80000.0,
+      "dept": "IT"
+    }
+  ],
+  "operation": "DataFrame operation: countDistinct",
+  "expected_output": {
+    "schema": {
+      "field_count": 1,
+      "field_names": [
+        "count(dept)"
+      ],
+      "field_types": [
+        "long"
+      ],
+      "fields": [
+        {
+          "name": "count(dept)",
+          "type": "long",
+          "nullable": false
+        }
+      ]
+    },
+    "data": [
+      {
+        "count(dept)": 2
+      }
+    ],
+    "row_count": 1
+  }
+}

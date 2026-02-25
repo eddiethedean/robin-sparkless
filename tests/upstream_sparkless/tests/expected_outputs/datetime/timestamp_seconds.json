@@ -1,0 +1,53 @@
+{
+  "test_id": "timestamp_seconds",
+  "pyspark_version": "3.5",
+  "generated_at": "2025-10-27T14:13:25.122591",
+  "input_data": [
+    {
+      "id": 1,
+      "date": "2020-01-15",
+      "timestamp": "2020-01-15 10:30:00"
+    },
+    {
+      "id": 2,
+      "date": "2019-03-10",
+      "timestamp": "2019-03-10 14:20:00"
+    },
+    {
+      "id": 3,
+      "date": "2021-07-22",
+      "timestamp": "2021-07-22 08:15:00"
+    }
+  ],
+  "operation": "DataFrame operation: timestamp_seconds",
+  "expected_output": {
+    "schema": {
+      "field_count": 1,
+      "field_names": [
+        "timestamp_seconds(1577836800)"
+      ],
+      "field_types": [
+        "timestamp"
+      ],
+      "fields": [
+        {
+          "name": "timestamp_seconds(1577836800)",
+          "type": "timestamp",
+          "nullable": false
+        }
+      ]
+    },
+    "data": [
+      {
+        "timestamp_seconds(1577836800)": "2019-12-31 19:00:00"
+      },
+      {
+        "timestamp_seconds(1577836800)": "2019-12-31 19:00:00"
+      },
+      {
+        "timestamp_seconds(1577836800)": "2019-12-31 19:00:00"
+      }
+    ],
+    "row_count": 3
+  }
+}

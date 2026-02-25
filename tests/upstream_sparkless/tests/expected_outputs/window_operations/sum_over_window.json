@@ -1,0 +1,109 @@
+{
+  "test_id": "sum_over_window",
+  "pyspark_version": "3.5",
+  "generated_at": "2025-10-27T14:13:15.341148",
+  "input_data": [
+    {
+      "id": 1,
+      "name": "Alice",
+      "department": "IT",
+      "salary": 50000
+    },
+    {
+      "id": 2,
+      "name": "Bob",
+      "department": "HR",
+      "salary": 60000
+    },
+    {
+      "id": 3,
+      "name": "Charlie",
+      "department": "IT",
+      "salary": 70000
+    },
+    {
+      "id": 4,
+      "name": "David",
+      "department": "IT",
+      "salary": 55000
+    }
+  ],
+  "operation": "DataFrame operation: sum_over_window",
+  "expected_output": {
+    "schema": {
+      "field_count": 5,
+      "field_names": [
+        "department",
+        "id",
+        "name",
+        "salary",
+        "dept_total"
+      ],
+      "field_types": [
+        "string",
+        "long",
+        "string",
+        "long",
+        "long"
+      ],
+      "fields": [
+        {
+          "name": "department",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "id",
+          "type": "long",
+          "nullable": true
+        },
+        {
+          "name": "name",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "salary",
+          "type": "long",
+          "nullable": true
+        },
+        {
+          "name": "dept_total",
+          "type": "long",
+          "nullable": true
+        }
+      ]
+    },
+    "data": [
+      {
+        "department": "HR",
+        "id": 2,
+        "name": "Bob",
+        "salary": 60000,
+        "dept_total": 60000
+      },
+      {
+        "department": "IT",
+        "id": 1,
+        "name": "Alice",
+        "salary": 50000,
+        "dept_total": 175000
+      },
+      {
+        "department": "IT",
+        "id": 3,
+        "name": "Charlie",
+        "salary": 70000,
+        "dept_total": 175000
+      },
+      {
+        "department": "IT",
+        "id": 4,
+        "name": "David",
+        "salary": 55000,
+        "dept_total": 175000
+      }
+    ],
+    "row_count": 4
+  }
+}

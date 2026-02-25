@@ -1,0 +1,62 @@
+{
+  "test_id": "math_round",
+  "pyspark_version": "3.5",
+  "generated_at": "2025-10-27T14:13:12.188963",
+  "input_data": [
+    {
+      "id": 1,
+      "name": "Alice",
+      "age": 25,
+      "salary": 50000.0,
+      "active": true,
+      "email": "alice@example.com"
+    },
+    {
+      "id": 2,
+      "name": "Bob",
+      "age": 30,
+      "salary": 60000.0,
+      "active": false,
+      "email": "bob@test.com"
+    },
+    {
+      "id": 3,
+      "name": "Charlie",
+      "age": 35,
+      "salary": 70000.0,
+      "active": true,
+      "email": "charlie@company.org"
+    }
+  ],
+  "operation": "DataFrame operation: math_round",
+  "expected_output": {
+    "schema": {
+      "field_count": 1,
+      "field_names": [
+        "round(salary, -3)"
+      ],
+      "field_types": [
+        "double"
+      ],
+      "fields": [
+        {
+          "name": "round(salary, -3)",
+          "type": "double",
+          "nullable": true
+        }
+      ]
+    },
+    "data": [
+      {
+        "round(salary, -3)": 50000.0
+      },
+      {
+        "round(salary, -3)": 60000.0
+      },
+      {
+        "round(salary, -3)": 70000.0
+      }
+    ],
+    "row_count": 3
+  }
+}

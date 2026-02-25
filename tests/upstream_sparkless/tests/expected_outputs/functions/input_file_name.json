@@ -1,0 +1,53 @@
+{
+  "test_id": "input_file_name",
+  "pyspark_version": "3.5",
+  "generated_at": "2025-10-27T14:13:29.223600",
+  "input_data": [
+    {
+      "id": 1,
+      "name": "Alice",
+      "text": "Hello World"
+    },
+    {
+      "id": 2,
+      "name": "Bob",
+      "text": "Test"
+    },
+    {
+      "id": 3,
+      "name": "Charlie",
+      "text": "Python"
+    }
+  ],
+  "operation": "DataFrame operation: input_file_name",
+  "expected_output": {
+    "schema": {
+      "field_count": 1,
+      "field_names": [
+        "input_file_name()"
+      ],
+      "field_types": [
+        "string"
+      ],
+      "fields": [
+        {
+          "name": "input_file_name()",
+          "type": "string",
+          "nullable": false
+        }
+      ]
+    },
+    "data": [
+      {
+        "input_file_name()": ""
+      },
+      {
+        "input_file_name()": ""
+      },
+      {
+        "input_file_name()": ""
+      }
+    ],
+    "row_count": 3
+  }
+}

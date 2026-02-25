@@ -1,0 +1,47 @@
+{
+  "test_id": "to_csv",
+  "pyspark_version": "3.5",
+  "generated_at": "2025-10-27T14:13:29.129238",
+  "input_data": [
+    {
+      "id": 1,
+      "json_str": "{\"name\":\"Alice\",\"age\":25}",
+      "name": "Alice",
+      "age": 25
+    },
+    {
+      "id": 2,
+      "json_str": "{\"name\":\"Bob\",\"age\":30}",
+      "name": "Bob",
+      "age": 30
+    }
+  ],
+  "operation": "DataFrame operation: to_csv",
+  "expected_output": {
+    "schema": {
+      "field_count": 1,
+      "field_names": [
+        "to_csv(struct(name, age))"
+      ],
+      "field_types": [
+        "string"
+      ],
+      "fields": [
+        {
+          "name": "to_csv(struct(name, age))",
+          "type": "string",
+          "nullable": true
+        }
+      ]
+    },
+    "data": [
+      {
+        "to_csv(struct(name, age))": "Alice,25"
+      },
+      {
+        "to_csv(struct(name, age))": "Bob,30"
+      }
+    ],
+    "row_count": 2
+  }
+}

@@ -1,0 +1,56 @@
+{
+  "test_id": "year",
+  "pyspark_version": "3.5",
+  "generated_at": "2025-10-27T14:13:17.252710",
+  "input_data": [
+    {
+      "id": 1,
+      "name": "Alice",
+      "hire_date": "2020-01-15",
+      "birth_date": "1990-05-20"
+    },
+    {
+      "id": 2,
+      "name": "Bob",
+      "hire_date": "2019-03-10",
+      "birth_date": "1985-12-03"
+    },
+    {
+      "id": 3,
+      "name": "Charlie",
+      "hire_date": "2021-07-22",
+      "birth_date": "1992-08-14"
+    }
+  ],
+  "operation": "DataFrame operation: year",
+  "expected_output": {
+    "schema": {
+      "field_count": 1,
+      "field_names": [
+        "year(hire_date)"
+      ],
+      "field_types": [
+        "integer"
+      ],
+      "fields": [
+        {
+          "name": "year(hire_date)",
+          "type": "integer",
+          "nullable": true
+        }
+      ]
+    },
+    "data": [
+      {
+        "year(hire_date)": 2020
+      },
+      {
+        "year(hire_date)": 2019
+      },
+      {
+        "year(hire_date)": 2021
+      }
+    ],
+    "row_count": 3
+  }
+}

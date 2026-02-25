@@ -1,0 +1,53 @@
+{
+  "test_id": "string_rlike",
+  "pyspark_version": "3.5",
+  "generated_at": "2025-10-27T14:13:12.142325",
+  "input_data": [
+    {
+      "id": 1,
+      "name": "  Alice  ",
+      "age": 25
+    },
+    {
+      "id": 2,
+      "name": "Bob",
+      "age": 30
+    },
+    {
+      "id": 3,
+      "name": "  Charlie",
+      "age": 35
+    }
+  ],
+  "operation": "DataFrame operation: string_rlike",
+  "expected_output": {
+    "schema": {
+      "field_count": 1,
+      "field_names": [
+        "RLIKE(name, ^[A-Z])"
+      ],
+      "field_types": [
+        "boolean"
+      ],
+      "fields": [
+        {
+          "name": "RLIKE(name, ^[A-Z])",
+          "type": "boolean",
+          "nullable": true
+        }
+      ]
+    },
+    "data": [
+      {
+        "RLIKE(name, ^[A-Z])": false
+      },
+      {
+        "RLIKE(name, ^[A-Z])": true
+      },
+      {
+        "RLIKE(name, ^[A-Z])": false
+      }
+    ],
+    "row_count": 3
+  }
+}

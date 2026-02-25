@@ -20,7 +20,7 @@ classifiers = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest", "pandas"]
+dev = ["pytest", "pandas", "pytest-xdist", "hypothesis", "pytest-timeout", "polars"]
 
 [build-system]
 requires = ["maturin>=1.4,<2"]

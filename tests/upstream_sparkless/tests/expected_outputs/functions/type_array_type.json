@@ -1,0 +1,53 @@
+{
+  "test_id": "type_array_type",
+  "pyspark_version": "3.5",
+  "generated_at": "2025-10-27T14:25:54.697909",
+  "input_data": [
+    {
+      "id": 1,
+      "name": "Alice",
+      "age": 25,
+      "salary": 50000.0
+    },
+    {
+      "id": 2,
+      "name": "Bob",
+      "age": 30,
+      "salary": 60000.0
+    }
+  ],
+  "operation": "DataFrame operation: type_array_type",
+  "expected_output": {
+    "schema": {
+      "field_count": 1,
+      "field_names": [
+        "array(1, 2)"
+      ],
+      "field_types": [
+        "array"
+      ],
+      "fields": [
+        {
+          "name": "array(1, 2)",
+          "type": "array",
+          "nullable": false
+        }
+      ]
+    },
+    "data": [
+      {
+        "array(1, 2)": [
+          1,
+          2
+        ]
+      },
+      {
+        "array(1, 2)": [
+          1,
+          2
+        ]
+      }
+    ],
+    "row_count": 2
+  }
+}

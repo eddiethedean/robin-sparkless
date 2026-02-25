@@ -1,0 +1,78 @@
+{
+  "test_id": "subtract",
+  "pyspark_version": "3.5",
+  "generated_at": "2025-10-27T14:13:22.484299",
+  "input_data": [
+    {
+      "id": 1,
+      "name": "Alice",
+      "age": 25
+    },
+    {
+      "id": 2,
+      "name": "Bob",
+      "age": 30
+    },
+    {
+      "id": 3,
+      "name": "Charlie",
+      "age": 35
+    },
+    {
+      "id": 2,
+      "name": "Bob",
+      "age": 30
+    },
+    {
+      "id": 3,
+      "name": "Charlie",
+      "age": 35
+    },
+    {
+      "id": 4,
+      "name": "David",
+      "age": 40
+    }
+  ],
+  "operation": "DataFrame operation: subtract",
+  "expected_output": {
+    "schema": {
+      "field_count": 3,
+      "field_names": [
+        "age",
+        "id",
+        "name"
+      ],
+      "field_types": [
+        "long",
+        "long",
+        "string"
+      ],
+      "fields": [
+        {
+          "name": "age",
+          "type": "long",
+          "nullable": true
+        },
+        {
+          "name": "id",
+          "type": "long",
+          "nullable": true
+        },
+        {
+          "name": "name",
+          "type": "string",
+          "nullable": true
+        }
+      ]
+    },
+    "data": [
+      {
+        "age": 25,
+        "id": 1,
+        "name": "Alice"
+      }
+    ],
+    "row_count": 1
+  }
+}

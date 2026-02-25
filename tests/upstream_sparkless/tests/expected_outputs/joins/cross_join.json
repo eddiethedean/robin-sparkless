@@ -1,0 +1,194 @@
+{
+  "test_id": "cross_join",
+  "pyspark_version": "3.5",
+  "generated_at": "2025-10-27T14:13:16.640617",
+  "input_data": [
+    {
+      "id": 1,
+      "name": "Alice",
+      "dept_id": 10,
+      "salary": 50000
+    },
+    {
+      "id": 2,
+      "name": "Bob",
+      "dept_id": 20,
+      "salary": 60000
+    },
+    {
+      "id": 3,
+      "name": "Charlie",
+      "dept_id": 10,
+      "salary": 70000
+    },
+    {
+      "id": 4,
+      "name": "David",
+      "dept_id": 30,
+      "salary": 55000
+    },
+    {
+      "dept_id": 10,
+      "name": "IT",
+      "location": "NYC"
+    },
+    {
+      "dept_id": 20,
+      "name": "HR",
+      "location": "LA"
+    },
+    {
+      "dept_id": 40,
+      "name": "Finance",
+      "location": "Chicago"
+    }
+  ],
+  "operation": "DataFrame operation: cross_join",
+  "expected_output": {
+    "schema": {
+      "field_count": 7,
+      "field_names": [
+        "dept_id",
+        "id",
+        "name",
+        "salary",
+        "dept_id",
+        "location",
+        "name"
+      ],
+      "field_types": [
+        "long",
+        "long",
+        "string",
+        "long",
+        "long",
+        "string",
+        "string"
+      ],
+      "fields": [
+        {
+          "name": "dept_id",
+          "type": "long",
+          "nullable": true
+        },
+        {
+          "name": "id",
+          "type": "long",
+          "nullable": true
+        },
+        {
+          "name": "name",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "salary",
+          "type": "long",
+          "nullable": true
+        },
+        {
+          "name": "dept_id",
+          "type": "long",
+          "nullable": true
+        },
+        {
+          "name": "location",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "name",
+          "type": "string",
+          "nullable": true
+        }
+      ]
+    },
+    "data": [
+      {
+        "dept_id": 10,
+        "id": 1,
+        "name": "IT",
+        "salary": 50000,
+        "location": "NYC"
+      },
+      {
+        "dept_id": 20,
+        "id": 1,
+        "name": "HR",
+        "salary": 50000,
+        "location": "LA"
+      },
+      {
+        "dept_id": 40,
+        "id": 1,
+        "name": "Finance",
+        "salary": 50000,
+        "location": "Chicago"
+      },
+      {
+        "dept_id": 10,
+        "id": 2,
+        "name": "IT",
+        "salary": 60000,
+        "location": "NYC"
+      },
+      {
+        "dept_id": 20,
+        "id": 2,
+        "name": "HR",
+        "salary": 60000,
+        "location": "LA"
+      },
+      {
+        "dept_id": 40,
+        "id": 2,
+        "name": "Finance",
+        "salary": 60000,
+        "location": "Chicago"
+      },
+      {
+        "dept_id": 10,
+        "id": 3,
+        "name": "IT",
+        "salary": 70000,
+        "location": "NYC"
+      },
+      {
+        "dept_id": 20,
+        "id": 3,
+        "name": "HR",
+        "salary": 70000,
+        "location": "LA"
+      },
+      {
+        "dept_id": 40,
+        "id": 3,
+        "name": "Finance",
+        "salary": 70000,
+        "location": "Chicago"
+      },
+      {
+        "dept_id": 10,
+        "id": 4,
+        "name": "IT",
+        "salary": 55000,
+        "location": "NYC"
+      },
+      {
+        "dept_id": 20,
+        "id": 4,
+        "name": "HR",
+        "salary": 55000,
+        "location": "LA"
+      },
+      {
+        "dept_id": 40,
+        "id": 4,
+        "name": "Finance",
+        "salary": 55000,
+        "location": "Chicago"
+      }
+    ],
+    "row_count": 12
+  }
+}

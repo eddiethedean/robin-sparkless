@@ -1,0 +1,53 @@
+{
+  "test_id": "string_like",
+  "pyspark_version": "3.5",
+  "generated_at": "2025-10-27T14:13:12.116710",
+  "input_data": [
+    {
+      "id": 1,
+      "name": "  Alice  ",
+      "age": 25
+    },
+    {
+      "id": 2,
+      "name": "Bob",
+      "age": 30
+    },
+    {
+      "id": 3,
+      "name": "  Charlie",
+      "age": 35
+    }
+  ],
+  "operation": "DataFrame operation: string_like",
+  "expected_output": {
+    "schema": {
+      "field_count": 1,
+      "field_names": [
+        "name LIKE %a%"
+      ],
+      "field_types": [
+        "boolean"
+      ],
+      "fields": [
+        {
+          "name": "name LIKE %a%",
+          "type": "boolean",
+          "nullable": true
+        }
+      ]
+    },
+    "data": [
+      {
+        "name LIKE %a%": false
+      },
+      {
+        "name LIKE %a%": false
+      },
+      {
+        "name LIKE %a%": true
+      }
+    ],
+    "row_count": 3
+  }
+}

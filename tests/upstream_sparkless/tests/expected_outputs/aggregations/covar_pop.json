@@ -1,0 +1,60 @@
+{
+  "test_id": "covar_pop",
+  "pyspark_version": "3.5",
+  "generated_at": "2025-10-27T14:13:28.110225",
+  "input_data": [
+    {
+      "id": 1,
+      "name": "Alice",
+      "age": 25,
+      "salary": 50000.0,
+      "dept": "IT"
+    },
+    {
+      "id": 2,
+      "name": "Bob",
+      "age": 30,
+      "salary": 60000.0,
+      "dept": "HR"
+    },
+    {
+      "id": 3,
+      "name": "Charlie",
+      "age": 35,
+      "salary": 70000.0,
+      "dept": "IT"
+    },
+    {
+      "id": 4,
+      "name": "David",
+      "age": 40,
+      "salary": 80000.0,
+      "dept": "IT"
+    }
+  ],
+  "operation": "DataFrame operation: covar_pop",
+  "expected_output": {
+    "schema": {
+      "field_count": 1,
+      "field_names": [
+        "covar_pop(age, salary)"
+      ],
+      "field_types": [
+        "double"
+      ],
+      "fields": [
+        {
+          "name": "covar_pop(age, salary)",
+          "type": "double",
+          "nullable": true
+        }
+      ]
+    },
+    "data": [
+      {
+        "covar_pop(age, salary)": 62500.0
+      }
+    ],
+    "row_count": 1
+  }
+}

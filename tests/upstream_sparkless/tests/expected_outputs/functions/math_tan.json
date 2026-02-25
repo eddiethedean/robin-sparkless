@@ -1,0 +1,62 @@
+{
+  "test_id": "math_tan",
+  "pyspark_version": "3.5",
+  "generated_at": "2025-10-27T14:13:12.309871",
+  "input_data": [
+    {
+      "id": 1,
+      "a": 5,
+      "b": 3,
+      "c": 7,
+      "angle": 0.785,
+      "value": 4.5
+    },
+    {
+      "id": 2,
+      "a": 2,
+      "b": 8,
+      "c": 1,
+      "angle": 1.57,
+      "value": 3.2
+    },
+    {
+      "id": 3,
+      "a": 9,
+      "b": 4,
+      "c": 6,
+      "angle": 0.0,
+      "value": 7.8
+    }
+  ],
+  "operation": "DataFrame operation: math_tan",
+  "expected_output": {
+    "schema": {
+      "field_count": 1,
+      "field_names": [
+        "TAN(angle)"
+      ],
+      "field_types": [
+        "double"
+      ],
+      "fields": [
+        {
+          "name": "TAN(angle)",
+          "type": "double",
+          "nullable": true
+        }
+      ]
+    },
+    "data": [
+      {
+        "TAN(angle)": 0.9992039901050427
+      },
+      {
+        "TAN(angle)": 1255.7655915007897
+      },
+      {
+        "TAN(angle)": 0.0
+      }
+    ],
+    "row_count": 3
+  }
+}

@@ -1,0 +1,56 @@
+{
+  "test_id": "soundex",
+  "pyspark_version": "3.5",
+  "generated_at": "2025-10-27T14:13:23.463593",
+  "input_data": [
+    {
+      "id": 1,
+      "name": "Alice",
+      "text": "Hello World",
+      "email": "alice@example.com"
+    },
+    {
+      "id": 2,
+      "name": "Bob",
+      "text": "Test String",
+      "email": "bob@test.com"
+    },
+    {
+      "id": 3,
+      "name": "Charlie",
+      "text": "Python Data",
+      "email": "charlie@company.org"
+    }
+  ],
+  "operation": "DataFrame operation: soundex",
+  "expected_output": {
+    "schema": {
+      "field_count": 1,
+      "field_names": [
+        "soundex(name)"
+      ],
+      "field_types": [
+        "string"
+      ],
+      "fields": [
+        {
+          "name": "soundex(name)",
+          "type": "string",
+          "nullable": true
+        }
+      ]
+    },
+    "data": [
+      {
+        "soundex(name)": "A420"
+      },
+      {
+        "soundex(name)": "B100"
+      },
+      {
+        "soundex(name)": "C640"
+      }
+    ],
+    "row_count": 3
+  }
+}

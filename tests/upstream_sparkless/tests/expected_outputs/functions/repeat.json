@@ -1,0 +1,56 @@
+{
+  "test_id": "repeat",
+  "pyspark_version": "3.5",
+  "generated_at": "2025-10-27T14:13:23.439713",
+  "input_data": [
+    {
+      "id": 1,
+      "name": "Alice",
+      "text": "Hello World",
+      "email": "alice@example.com"
+    },
+    {
+      "id": 2,
+      "name": "Bob",
+      "text": "Test String",
+      "email": "bob@test.com"
+    },
+    {
+      "id": 3,
+      "name": "Charlie",
+      "text": "Python Data",
+      "email": "charlie@company.org"
+    }
+  ],
+  "operation": "DataFrame operation: repeat",
+  "expected_output": {
+    "schema": {
+      "field_count": 1,
+      "field_names": [
+        "repeat(name, 2)"
+      ],
+      "field_types": [
+        "string"
+      ],
+      "fields": [
+        {
+          "name": "repeat(name, 2)",
+          "type": "string",
+          "nullable": true
+        }
+      ]
+    },
+    "data": [
+      {
+        "repeat(name, 2)": "AliceAlice"
+      },
+      {
+        "repeat(name, 2)": "BobBob"
+      },
+      {
+        "repeat(name, 2)": "CharlieCharlie"
+      }
+    ],
+    "row_count": 3
+  }
+}

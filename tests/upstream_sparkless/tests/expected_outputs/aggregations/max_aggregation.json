@@ -1,0 +1,71 @@
+{
+  "test_id": "max_aggregation",
+  "pyspark_version": "3.5",
+  "generated_at": "2024-01-15T10:30:00Z",
+  "input_data": [
+    {
+      "id": 1,
+      "name": "Alice",
+      "department": "IT",
+      "salary": 50000
+    },
+    {
+      "id": 2,
+      "name": "Bob",
+      "department": "HR",
+      "salary": 60000
+    },
+    {
+      "id": 3,
+      "name": "Charlie",
+      "department": "IT",
+      "salary": 70000
+    },
+    {
+      "id": 4,
+      "name": "David",
+      "department": "Finance",
+      "salary": 80000
+    }
+  ],
+  "expected_output": {
+    "schema": {
+      "field_count": 2,
+      "field_names": [
+        "department",
+        "max_salary"
+      ],
+      "field_types": [
+        "StringType()",
+        "LongType()"
+      ],
+      "fields": [
+        {
+          "name": "department",
+          "type": "StringType()",
+          "nullable": true
+        },
+        {
+          "name": "max_salary",
+          "type": "LongType()",
+          "nullable": true
+        }
+      ]
+    },
+    "data": [
+      {
+        "department": "HR",
+        "max_salary": 60000
+      },
+      {
+        "department": "Finance",
+        "max_salary": 80000
+      },
+      {
+        "department": "IT",
+        "max_salary": 70000
+      }
+    ],
+    "row_count": 3
+  }
+}

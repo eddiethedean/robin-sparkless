@@ -1,0 +1,53 @@
+{
+  "test_id": "bitwise_bitwise_not",
+  "pyspark_version": "3.5",
+  "generated_at": "2025-10-27T14:13:28.990291",
+  "input_data": [
+    {
+      "id": 1,
+      "num": 5,
+      "num2": 3
+    },
+    {
+      "id": 2,
+      "num": 10,
+      "num2": 7
+    },
+    {
+      "id": 3,
+      "num": 15,
+      "num2": 12
+    }
+  ],
+  "operation": "DataFrame operation: bitwise_bitwise_not",
+  "expected_output": {
+    "schema": {
+      "field_count": 1,
+      "field_names": [
+        "~num"
+      ],
+      "field_types": [
+        "long"
+      ],
+      "fields": [
+        {
+          "name": "~num",
+          "type": "long",
+          "nullable": true
+        }
+      ]
+    },
+    "data": [
+      {
+        "~num": -6
+      },
+      {
+        "~num": -11
+      },
+      {
+        "~num": -16
+      }
+    ],
+    "row_count": 3
+  }
+}

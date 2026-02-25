@@ -1,0 +1,85 @@
+{
+  "test_id": "groupby_multiple_columns",
+  "pyspark_version": "3.5",
+  "generated_at": "2024-01-15T10:30:00Z",
+  "input_data": [
+    {
+      "id": 1,
+      "name": "Alice",
+      "department": "IT",
+      "level": "Senior",
+      "salary": 50000
+    },
+    {
+      "id": 2,
+      "name": "Bob",
+      "department": "HR",
+      "level": "Junior",
+      "salary": 60000
+    },
+    {
+      "id": 3,
+      "name": "Charlie",
+      "department": "IT",
+      "level": "Senior",
+      "salary": 70000
+    },
+    {
+      "id": 4,
+      "name": "David",
+      "department": "IT",
+      "level": "Junior",
+      "salary": 45000
+    }
+  ],
+  "expected_output": {
+    "schema": {
+      "field_count": 3,
+      "field_names": [
+        "department",
+        "level",
+        "avg_salary"
+      ],
+      "field_types": [
+        "StringType()",
+        "StringType()",
+        "DoubleType()"
+      ],
+      "fields": [
+        {
+          "name": "department",
+          "type": "StringType()",
+          "nullable": true
+        },
+        {
+          "name": "level",
+          "type": "StringType()",
+          "nullable": true
+        },
+        {
+          "name": "avg_salary",
+          "type": "DoubleType()",
+          "nullable": true
+        }
+      ]
+    },
+    "data": [
+      {
+        "department": "IT",
+        "level": "Senior",
+        "avg_salary": 60000.0
+      },
+      {
+        "department": "IT",
+        "level": "Junior",
+        "avg_salary": 45000.0
+      },
+      {
+        "department": "HR",
+        "level": "Junior",
+        "avg_salary": 60000.0
+      }
+    ],
+    "row_count": 3
+  }
+}
