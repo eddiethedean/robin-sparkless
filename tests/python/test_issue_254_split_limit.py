@@ -18,8 +18,8 @@ def test_split_with_limit_two_parts() -> None:
     out = df.select(rs.split(rs.col("s"), ",", 2)).collect()
     assert len(out) == 1
     row = out[0]
-    # Column name is typically "split(s, ,, 2)" or similar
-    parts = [v for v in row.values() if isinstance(v, list)]
+    # Use items() for Row/dict compatibility
+    parts = [v for _, v in row.items() if isinstance(v, list)]
     assert len(parts) == 1
     assert parts[0] == ["a", "b,c"]
 
@@ -30,7 +30,7 @@ def test_split_without_limit_unchanged() -> None:
     df = spark.createDataFrame([{"s": "a,b,c"}], [("s", "string")])
     out = df.select(rs.split(rs.col("s"), ",")).collect()
     assert len(out) == 1
-    parts = [v for v in out[0].values() if isinstance(v, list)]
+    parts = [v for _, v in out[0].items() if isinstance(v, list)]
     assert len(parts) == 1
     assert parts[0] == ["a", "b", "c"]
 
@@ -41,6 +41,6 @@ def test_column_split_with_limit() -> None:
     df = spark.createDataFrame([{"s": "a,b,c"}], [("s", "string")])
     out = df.select(rs.col("s").split(",", 2)).collect()
     assert len(out) == 1
-    parts = [v for v in out[0].values() if isinstance(v, list)]
+    parts = [v for _, v in out[0].items() if isinstance(v, list)]
     assert len(parts) == 1
     assert parts[0] == ["a", "b,c"]
