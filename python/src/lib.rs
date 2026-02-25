@@ -934,6 +934,48 @@ fn infer_schema_from_first_row(py: Python<'_>, item: &Bound<'_, PyAny>) -> Optio
     Some(keys.into_iter().map(|k| (k.clone(), "string".to_string())).collect())
 }
 
+/// PySpark drop(*cols): single str or list of str -> Vec<String>
+fn py_tuple_or_single_to_vec_string(tup: &Bound<'_, PyTuple>) -> PyResult<Vec<String>> {
+    if tup.len() == 0 {
+        return Ok(Vec::new());
+    }
+    if tup.len() == 1 {
+        let item = tup.get_item(0)?;
+        if let Ok(list) = item.downcast::<PyList>() {
+            let mut out = Vec::with_capacity(list.len());
+            for x in list.iter() {
+                out.push(x.extract::<String>()?);
+            }
+            return Ok(out);
+        }
+        if let Ok(s) = item.extract::<String>() {
+            return Ok(vec![s]);
+        }
+    }
+    let mut out = Vec::with_capacity(tup.len());
+    for item in tup.iter() {
+        out.push(item.extract::<String>()?);
+    }
+    Ok(out)
+}
+
+/// PySpark join(on=...): str or list of str -> Vec<String>
+fn py_join_on_to_vec(on: &Bound<'_, PyAny>) -> PyResult<Vec<String>> {
+    if let Ok(s) = on.extract::<String>() {
+        return Ok(vec![s]);
+    }
+    if let Ok(list) = on.downcast::<PyList>() {
+        let mut out = Vec::with_capacity(list.len());
+        for item in list.iter() {
+            out.push(item.extract::<String>()?);
+        }
+        return Ok(out);
+    }
+    Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+        "join(on=...) expects str or list of str",
+    ))
+}
+
 #[pyclass]
 struct PyDataFrameReader {
     session: Py<PyAny>,
@@ -1461,8 +1503,10 @@ impl PyDataFrame {
             .map_err(to_py_err)
     }
 
-    fn drop(&self, columns: Vec<String>) -> PyResult<PyDataFrame> {
-        let refs: Vec<&str> = columns.iter().map(|s| s.as_str()).collect();
+    #[pyo3(signature = (*columns))]
+    fn drop(&self, columns: &Bound<'_, PyTuple>) -> PyResult<PyDataFrame> {
+        let col_names = py_tuple_or_single_to_vec_string(columns)?;
+        let refs: Vec<&str> = col_names.iter().map(|s| s.as_str()).collect();
         self.inner
             .drop(refs)
             .map(|df| PyDataFrame { inner: df })
@@ -1482,13 +1526,15 @@ impl PyDataFrame {
         self.distinct(subset)
     }
 
+    #[pyo3(signature = (other, on, how="inner"))]
     fn join(
         &self,
         other: &PyDataFrame,
-        on: Vec<String>,
+        on: &Bound<'_, PyAny>,
         how: &str,
     ) -> PyResult<PyDataFrame> {
-        let on_refs: Vec<&str> = on.iter().map(|s| s.as_str()).collect();
+        let on_vec = py_join_on_to_vec(on)?;
+        let on_refs: Vec<&str> = on_vec.iter().map(|s| s.as_str()).collect();
         let how_lower = how.to_lowercase();
         if how_lower == "cross" {
             return self
@@ -1527,6 +1573,88 @@ impl PyDataFrame {
     #[pyo3(name = "unionAll")]
     fn union_all_camel(&self, other: &PyDataFrame) -> PyResult<PyDataFrame> {
         self.union_all(other)
+    }
+
+    #[pyo3(name = "unionByName")]
+    fn union_by_name(&self, other: &PyDataFrame, allow_missing_columns: Option<bool>) -> PyResult<PyDataFrame> {
+        let allow = allow_missing_columns.unwrap_or(false);
+        self.inner
+            .union_by_name(&other.inner, allow)
+            .map(|df| PyDataFrame { inner: df })
+            .map_err(to_py_err)
+    }
+
+    #[pyo3(name = "selectExpr")]
+    fn select_expr(&self, _py: Python<'_>, exprs: &Bound<'_, PyTuple>) -> PyResult<PyDataFrame> {
+        let mut exprs_vec: Vec<String> = Vec::with_capacity(exprs.len());
+        for item in exprs.iter() {
+            exprs_vec.push(item.extract::<String>()?);
+        }
+        self.inner
+            .select_expr(&exprs_vec)
+            .map(|df| PyDataFrame { inner: df })
+            .map_err(to_py_err)
+    }
+
+    #[pyo3(name = "createOrReplaceTempView")]
+    fn create_or_replace_temp_view_camel(&self, py: Python<'_>, name: &str) -> PyResult<()> {
+        let session = THREAD_ACTIVE_SESSIONS
+            .with(|cell| cell.borrow().last().map(|s| s.clone_ref(py)))
+            .ok_or_else(|| to_py_err("No active SparkSession for createOrReplaceTempView"))?;
+        let session_ref = session.bind(py).downcast::<PySparkSession>().map_err(|_| {
+            PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected SparkSession")
+        })?;
+        session_ref.borrow().inner.create_or_replace_temp_view(name, self.inner.clone());
+        Ok(())
+    }
+
+    #[pyo3(name = "dropna")]
+    fn dropna(
+        &self,
+        subset: Option<Vec<String>>,
+        how: Option<&str>,
+        thresh: Option<usize>,
+    ) -> PyResult<PyDataFrame> {
+        let how_str = how.unwrap_or("any");
+        let sub: Option<Vec<&str>> = subset.as_ref().map(|v| v.iter().map(|s| s.as_str()).collect());
+        self.inner
+            .dropna(sub, how_str, thresh)
+            .map(|df| PyDataFrame { inner: df })
+            .map_err(to_py_err)
+    }
+
+    fn fillna(&self, value: &Bound<'_, PyAny>, subset: Option<Vec<String>>) -> PyResult<PyDataFrame> {
+        let value_expr = py_any_to_column(value)?.into_expr();
+        let sub: Option<Vec<&str>> = subset.as_ref().map(|v| v.iter().map(|s| s.as_str()).collect());
+        self.inner
+            .fillna(value_expr, sub)
+            .map(|df| PyDataFrame { inner: df })
+            .map_err(to_py_err)
+    }
+
+    fn first(&self) -> PyResult<PyDataFrame> {
+        self.inner
+            .first()
+            .map(|df| PyDataFrame { inner: df })
+            .map_err(to_py_err)
+    }
+
+    fn with_columns_renamed(&self, cols_map: &Bound<'_, PyAny>) -> PyResult<PyDataFrame> {
+        let dict = cols_map.downcast::<PyDict>().map_err(|_| {
+            PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+                "withColumnsRenamed expects a dict of {old_name: new_name}",
+            )
+        })?;
+        let mut renames: Vec<(String, String)> = Vec::with_capacity(dict.len());
+        for (k, v) in dict.iter() {
+            let old_name = k.extract::<String>()?;
+            let new_name = v.extract::<String>()?;
+            renames.push((old_name, new_name));
+        }
+        self.inner
+            .with_columns_renamed(&renames)
+            .map(|df| PyDataFrame { inner: df })
+            .map_err(to_py_err)
     }
 
     #[getter]
@@ -1884,10 +2012,83 @@ impl PyColumn {
         })
     }
 
+    fn __mod__(&self, other: &Bound<'_, PyAny>) -> PyResult<PyColumn> {
+        let rhs = py_any_to_column(other)?;
+        Ok(PyColumn {
+            inner: self.inner.mod_(&rhs),
+        })
+    }
+    fn __rmod__(&self, other: &Bound<'_, PyAny>) -> PyResult<PyColumn> {
+        let lhs = py_any_to_column(other)?;
+        Ok(PyColumn {
+            inner: lhs.mod_(&self.inner),
+        })
+    }
+
     fn is_null(&self) -> PyColumn {
         PyColumn {
             inner: self.inner.is_null(),
         }
+    }
+
+    #[pyo3(name = "isNull")]
+    fn is_null_camel(&self) -> PyColumn {
+        self.is_null()
+    }
+
+    #[pyo3(name = "getItem")]
+    fn get_item_camel(&self, index_or_key: &Bound<'_, PyAny>) -> PyResult<PyColumn> {
+        if let Ok(i) = index_or_key.extract::<i64>() {
+            return Ok(PyColumn {
+                inner: self.inner.get_item(i),
+            });
+        }
+        if let Ok(s) = index_or_key.extract::<String>() {
+            let key_col = robin_sparkless::functions::lit_str(&s);
+            return Ok(PyColumn {
+                inner: self.inner.get(&key_col),
+            });
+        }
+        Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+            "getItem expects int (array index) or str (map key)",
+        ))
+    }
+
+    #[pyo3(signature = (*values))]
+    fn isin(&self, values: &Bound<'_, PyTuple>) -> PyResult<PyColumn> {
+        let mut expanded: Vec<Py<PyAny>> = Vec::new();
+        for item in values.iter() {
+            if let Ok(list) = item.downcast::<PyList>() {
+                for x in list.iter() {
+                    expanded.push(x.unbind());
+                }
+            } else {
+                expanded.push(item.unbind());
+            }
+        }
+        if expanded.is_empty() {
+            return Ok(PyColumn {
+                inner: robin_sparkless::functions::lit_bool(false),
+            });
+        }
+        let py = values.py();
+        let first = expanded[0].bind(py);
+        if first.extract::<i64>().is_ok() {
+            let vals: Vec<i64> = expanded
+                .iter()
+                .filter_map(|v| v.bind(py).extract::<i64>().ok())
+                .collect();
+            if vals.len() == expanded.len() {
+                return Ok(PyColumn {
+                    inner: functions::isin_i64(&self.inner, &vals),
+                });
+            }
+        }
+        let vals: Vec<String> = expanded.iter().map(|v| v.bind(py).to_string()).collect();
+        let refs: Vec<&str> = vals.iter().map(|s| s.as_str()).collect();
+        Ok(PyColumn {
+            inner: functions::isin_str(&self.inner, &refs),
+        })
     }
 
     fn is_not_null(&self) -> PyColumn {
@@ -2488,6 +2689,44 @@ fn regexp_extract_all(column: &PyColumn, pattern: &str, group_index: usize) -> P
 }
 
 #[pyfunction]
+#[pyo3(signature = (column, pattern, idx=0))]
+fn regexp_extract(column: &PyColumn, pattern: &str, idx: usize) -> PyColumn {
+    PyColumn {
+        inner: functions::regexp_extract(&column.inner, pattern, idx),
+    }
+}
+
+#[pyfunction]
+#[pyo3(signature = (column, pattern, limit=-1))]
+fn split(column: &PyColumn, pattern: &str, limit: i32) -> PyColumn {
+    let lim = if limit < 0 { None } else { Some(limit) };
+    PyColumn {
+        inner: functions::split(&column.inner, pattern, lim),
+    }
+}
+
+#[pyfunction]
+#[pyo3(signature = (*columns))]
+fn coalesce(columns: &Bound<'_, PyTuple>) -> PyResult<PyColumn> {
+    let mut cols: Vec<Column> = Vec::with_capacity(columns.len());
+    for item in columns.iter() {
+        let py_col = item.downcast::<PyColumn>().map_err(|_| {
+            PyErr::new::<pyo3::exceptions::PyTypeError, _>("coalesce expects Column expressions")
+        })?;
+        cols.push(py_col.borrow().inner.clone());
+    }
+    if cols.is_empty() {
+        return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
+            "coalesce requires at least one column",
+        ));
+    }
+    let refs: Vec<&Column> = cols.iter().collect();
+    Ok(PyColumn {
+        inner: functions::coalesce(&refs),
+    })
+}
+
+#[pyfunction]
 fn regexp_like(column: &PyColumn, pattern: &str) -> PyColumn {
     PyColumn {
         inner: functions::regexp_like(&column.inner, pattern),
@@ -2637,8 +2876,11 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(lag_window, m)?)?;
     m.add_function(wrap_pyfunction!(lead_window, m)?)?;
     m.add_function(wrap_pyfunction!(regexp_replace, m)?)?;
+    m.add_function(wrap_pyfunction!(regexp_extract, m)?)?;
     m.add_function(wrap_pyfunction!(regexp_extract_all, m)?)?;
     m.add_function(wrap_pyfunction!(regexp_like, m)?)?;
+    m.add_function(wrap_pyfunction!(split, m)?)?;
+    m.add_function(wrap_pyfunction!(coalesce, m)?)?;
     m.add_function(wrap_pyfunction!(to_timestamp, m)?)?;
     m.add_function(wrap_pyfunction!(to_date, m)?)?;
     m.add_function(wrap_pyfunction!(current_date, m)?)?;
