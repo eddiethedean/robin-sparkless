@@ -87,7 +87,11 @@ pub fn apply_literal_string_repeat(column: Column, value: &str) -> PolarsResult<
 }
 
 /// American Soundex code (4 chars). Matches PySpark soundex semantics.
+/// Null/empty: PySpark returns null for null, '' for empty string (Phase 7 / test_soundex_null_and_empty).
 fn soundex_one(s: &str) -> Cow<'_, str> {
+    if s.is_empty() {
+        return Cow::Borrowed("");
+    }
     use soundex::american_soundex;
     let code = american_soundex(s);
     Cow::Owned(code.chars().take(4).collect::<String>())

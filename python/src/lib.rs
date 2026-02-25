@@ -956,25 +956,28 @@ fn python_data_and_schema(
     let list = data.downcast::<PyList>().map_err(|_| {
         PyErr::new::<pyo3::exceptions::PyTypeError, _>("data must be a list (or pandas.DataFrame)")
     })?;
+    // Parse explicit schema first so we can use its field order when building rows from dicts (Phase 7 / issue_247).
+    let schema_res: Option<Vec<(String, String)>> = schema
+        .map(|s| parse_schema_from_py(py, s))
+        .transpose()?
+        .and_then(|o| o);
+    let column_order: Option<Vec<String>> = schema_res
+        .as_ref()
+        .map(|s| s.iter().map(|(n, _)| n.clone()).collect());
+
     let mut rows: Vec<Vec<JsonValue>> = Vec::with_capacity(list.len());
     let mut inferred_schema: Option<Vec<(String, String)>> = None;
-    let mut column_order: Option<Vec<String>> = None;
 
     for (idx, item) in list.iter().enumerate() {
         let row = python_row_to_json(py, &item, idx, column_order.as_deref(), from_pandas)?;
-        if inferred_schema.is_none() && !row.is_empty() {
+        if inferred_schema.is_none() && schema_res.is_none() && !row.is_empty() {
             if let Some(cols) = infer_schema_from_first_row(py, &item, from_pandas) {
-                column_order = Some(cols.iter().map(|(n, _)| n.clone()).collect());
                 inferred_schema = Some(cols);
             }
         }
         rows.push(row);
     }
 
-    let schema_res: Option<Vec<(String, String)>> = schema
-        .map(|s| parse_schema_from_py(py, s))
-        .transpose()?
-        .and_then(|o| o);
     let schema_was_inferred = schema_res.is_none();
     let mut schema = schema_res
         .or(inferred_schema)
@@ -993,6 +996,23 @@ fn python_data_and_schema(
                 .map(|((name, _), v)| (name, infer_type_from_json_value(v)))
                 .collect();
         }
+    }
+    // When schema was inferred, prefer first non-null value's type per column (fixes fillna(0) on column with null in first row).
+    if schema_was_inferred && schema.len() > 0 {
+        let mut refined: Vec<(String, String)> = schema
+            .iter()
+            .enumerate()
+            .map(|(i, (name, typ))| {
+                let better = rows
+                    .iter()
+                    .filter_map(|r| r.get(i))
+                    .find(|v| !matches!(v, JsonValue::Null))
+                    .map(infer_type_from_json_value);
+                let final_typ = better.unwrap_or_else(|| typ.clone());
+                (name.clone(), final_typ)
+            })
+            .collect();
+        schema = refined;
     }
     Ok((rows, schema, schema_was_inferred))
 }
@@ -1720,6 +1740,8 @@ impl PyDataFrame {
             let py_row = row_cls.call((), Some(&kwargs))?;
             py_row.setattr("_fields", field_names.clone())?;
             py_row.setattr("_schema", py_schema.clone_ref(py))?;
+            // PySpark parity: Row has _data_dict for dict-like access in tests (e.g. "full_name" in result[0].__dict__["_data_dict"]).
+            py_row.setattr("_data_dict", kwargs.clone())?;
             out.push(py_row.into_py(py));
         }
         Ok(out)
@@ -2180,6 +2202,18 @@ impl PyDataFrame {
 
     #[pyo3(signature = (value, subset=None))]
     fn fillna(&self, value: &Bound<'_, PyAny>, subset: Option<&Bound<'_, PyAny>>) -> PyResult<PyDataFrame> {
+        // PySpark: fillna(scalar) or fillna({col: value, ...}); subset only with scalar.
+        if let Ok(dict) = value.downcast::<PyDict>() {
+            let mut df = self.inner.clone();
+            for item in dict.iter() {
+                let col_name: String = item.0.extract().map_err(|_| {
+                    PyErr::new::<pyo3::exceptions::PyTypeError, _>("fillna dict keys must be str")
+                })?;
+                let val_expr = py_any_to_column(&item.1)?.into_expr();
+                df = df.fillna(val_expr, Some(vec![col_name.as_str()])).map_err(to_py_err)?;
+            }
+            return Ok(PyDataFrame { inner: df });
+        }
         let value_expr = py_any_to_column(value)?.into_expr();
         let sub_vec = normalize_subset(subset)?;
         let sub: Option<Vec<&str>> = sub_vec
@@ -2191,11 +2225,33 @@ impl PyDataFrame {
             .map_err(to_py_err)
     }
 
-    fn first(&self) -> PyResult<PyDataFrame> {
+    /// Replace value in columns. PySpark df.replace(to_replace, value, subset=...).
+    #[pyo3(signature = (to_replace, value, subset=None))]
+    fn replace(
+        &self,
+        to_replace: &Bound<'_, PyAny>,
+        value: &Bound<'_, PyAny>,
+        subset: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<PyDataFrame> {
+        let old_expr = py_any_to_column(to_replace)?.into_expr();
+        let new_expr = py_any_to_column(value)?.into_expr();
+        let sub_vec = normalize_subset(subset)?;
+        let sub: Option<Vec<&str>> = sub_vec
+            .as_ref()
+            .map(|v| v.iter().map(|s| s.as_str()).collect());
         self.inner
-            .first()
+            .na()
+            .replace(old_expr, new_expr, sub)
             .map(|df| PyDataFrame { inner: df })
             .map_err(to_py_err)
+    }
+
+    /// Return the first row as a Row, or None if empty (Phase 7.8 / PySpark first() semantics).
+    fn first(&self, py: Python<'_>) -> PyResult<Option<PyObject>> {
+        let one = self.inner.first().map_err(to_py_err)?;
+        let wrapper = PyDataFrame { inner: one };
+        let rows = wrapper.collect(py)?;
+        Ok(rows.into_iter().next())
     }
 
     fn describe(&self) -> PyResult<PyDataFrame> {
@@ -2921,6 +2977,13 @@ impl PyColumn {
     fn rlike(&self, pattern: &str) -> PyColumn {
         PyColumn {
             inner: self.inner.regexp_like(pattern),
+        }
+    }
+
+    /// True if string starts with prefix (PySpark startswith).
+    fn startswith(&self, prefix: &str) -> PyColumn {
+        PyColumn {
+            inner: self.inner.startswith(prefix),
         }
     }
 
@@ -3731,13 +3794,14 @@ impl PyThenBuilder {
         })
     }
 
-    fn otherwise(&mut self, value: &PyColumn) -> PyResult<PyColumn> {
+    fn otherwise(&mut self, value: &Bound<'_, PyAny>) -> PyResult<PyColumn> {
         let tb = self
             .inner
             .take()
             .ok_or_else(|| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>("otherwise() already called"))?;
+        let col = py_any_to_column(value)?;
         Ok(PyColumn {
-            inner: tb.otherwise(&value.inner),
+            inner: tb.otherwise(&col),
         })
     }
 }
@@ -3751,13 +3815,14 @@ struct PyChainedWhenBuilder {
 
 #[pymethods]
 impl PyChainedWhenBuilder {
-    fn then(&mut self, value: &PyColumn) -> PyResult<PyThenBuilder> {
+    fn then(&mut self, value: &Bound<'_, PyAny>) -> PyResult<PyThenBuilder> {
         let cwb = self
             .inner
             .take()
             .ok_or_else(|| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>("then() already called"))?;
+        let col = py_any_to_column(value)?;
         Ok(PyThenBuilder {
-            inner: Some(cwb.then(&value.inner)),
+            inner: Some(cwb.then(&col)),
         })
     }
 }
@@ -3767,11 +3832,12 @@ impl PyChainedWhenBuilder {
 fn when(
     py: Python<'_>,
     condition: &PyColumn,
-    value: Option<&PyColumn>,
+    value: Option<&Bound<'_, PyAny>>,
 ) -> PyResult<PyObject> {
     if let Some(v) = value {
-        // when(cond, val) -> when(cond).then(val), so .otherwise() can be chained
-        let then_builder = robin_sparkless::functions::when(&condition.inner).then(&v.inner);
+        // when(cond, val) -> when(cond).then(val), so .otherwise() can be chained; val can be str/int/float/Column (PySpark parity).
+        let col = py_any_to_column(v)?;
+        let then_builder = robin_sparkless::functions::when(&condition.inner).then(&col);
         Ok(Py::new(
             py,
             PyThenBuilder {

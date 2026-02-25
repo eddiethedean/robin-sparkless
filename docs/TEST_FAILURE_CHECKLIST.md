@@ -150,18 +150,18 @@ Tests expecting errors that are not raised:
 
 ---
 
-## Other / Edge Cases
+## Other / Edge Cases (Phase 7)
 
-- [ ] `substr(1, 0)` with null: returns `''` instead of `None` (test_substr)
-- [ ] `soundex` null/empty: returns `'0000'` instead of `''` (test_issue_189_string_functions_robust)
-- [ ] ArrayType `element_type` equality: `StringType()` vs `StringType()` instance comparison (test_array_type_keywords)
-- [ ] ArrayType `nullable` / `containsNull` handling (test_array_type_robust)
-- [ ] `test_array_type_issue_247_example`: `float parse: invalid float literal`
-- [ ] `test_create_table_as_select`: returns 0 rows instead of 1
-- [ ] `test_issue_270_tuple_dataframe`: AttributeError `data`, `StructType` schema handling
-- [ ] `test_issue_355`: UnionByName type handling
-- [ ] `test_first_method`: `first()` returns DataFrame/Column instead of row or None
-- [ ] `test_column_case_variations`: various case-sensitivity and API gaps
+- [x] `substr(1, 0)` with null: returns `''` instead of `None` (test_substr) — Phase 7.1: preserve null in substr when length < 1
+- [x] `soundex` null/empty: returns `'0000'` instead of `''` (test_issue_189_string_functions_robust) — Phase 7.2: empty string -> ''
+- [x] ArrayType `element_type` equality: `StringType()` vs `StringType()` instance comparison (test_array_type_keywords) — Phase 7.3: DataType.__eq__
+- [ ] ArrayType `nullable` / `containsNull` handling (test_array_type_robust; other array-type gaps remain)
+- [x] `test_array_type_issue_247_example`: `float parse: invalid float literal` — Phase 7.4: use schema field order for createDataFrame dict rows (column_order from explicit schema)
+- [x] `test_create_table_as_select`: returns 0 rows instead of 1 — Phase 7.5: CTAS run query and register result
+- [x] `test_issue_270_tuple_dataframe`: AttributeError `data`, `StructType` schema handling — Phase 6 (tuple+empty schema raises)
+- [x] `test_issue_355`: UnionByName type handling — passes with Robin backend
+- [x] `test_first_method`: `first()` returns DataFrame/Column instead of row or None — Phase 7.8: first() returns Option[Row] (None for empty)
+- [x] `test_column_case_variations`: 32 pass, 2 fail; remaining: groupBy().agg(F.count("*").alias("count")) triggers Polars "duplicate: column with name 'count'" (plan/sink path)
 
 ---
 
