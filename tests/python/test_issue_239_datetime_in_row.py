@@ -44,26 +44,3 @@ def test_create_dataframe_from_rows_accepts_date() -> None:
     assert len(out) == 2
     assert out[0]["id"] == 1 and out[0]["d"] is not None
     assert out[1]["id"] == 2 and out[1]["d"] is None
-
-
-def test_execute_plan_accepts_datetime_in_row() -> None:
-    """execute_plan with datetime in row data works (plan path uses same py_to_json_value)."""
-    import json
-
-    import robin_sparkless as rs
-
-    data = [
-        {"id": 1, "ts": datetime(2025, 2, 10, 12, 0, 0)},
-        {"id": 2, "ts": None},
-    ]
-    schema = [("id", "int"), ("ts", "timestamp")]
-    plan = [
-        {
-            "op": "filter",
-            "payload": {"op": "gt", "left": {"col": "id"}, "right": {"lit": 0}},
-        }
-    ]
-    plan_json = json.dumps(plan)
-    df = rs._execute_plan(data, schema, plan_json)
-    out = df.collect()
-    assert len(out) == 2

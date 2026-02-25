@@ -122,6 +122,8 @@ __all__ = [
     "ntile",
     "lag",
     "lead",
+    "first_value",
+    "last_value",
     "create_map",
     "asc",
     "desc",
@@ -444,6 +446,38 @@ def lead(col_or_name, offset=1):
     return _LeadExpr(col_or_name, offset)
 
 
+class _FirstValueExpr:
+    def __init__(self, col_or_name):
+        self._col_or_name = col_or_name
+
+    def over(self, window):
+        from sparkless import column as col
+
+        c = col(self._col_or_name) if isinstance(self._col_or_name, str) else self._col_or_name
+        return c.first_value().over(window)
+
+
+def first_value(col_or_name):
+    """Window first_value(col) expression; use with .over(Window.partitionBy(...))."""
+    return _FirstValueExpr(col_or_name)
+
+
+class _LastValueExpr:
+    def __init__(self, col_or_name):
+        self._col_or_name = col_or_name
+
+    def over(self, window):
+        from sparkless import column as col
+
+        c = col(self._col_or_name) if isinstance(self._col_or_name, str) else self._col_or_name
+        return c.last_value().over(window)
+
+
+def last_value(col_or_name):
+    """Window last_value(col) expression; use with .over(Window.partitionBy(...))."""
+    return _LastValueExpr(col_or_name)
+
+
 class _SortKey:
     def __init__(self, name: str, ascending: bool):
         self.name = name
@@ -463,7 +497,11 @@ def _col_name(arg):
 def _window_spec_to_partition_order(window, require_order=True):
     """Extract partition_by and order_by from WindowSpec for window functions.
     If require_order=False, order_by can be empty (for partition-only aggregate windows).
+    Accepts a list of column names as shorthand for partition-only window (e.g. .over(["dept"])).
     """
+    if isinstance(window, (list, tuple)):
+        partition_names = [c if isinstance(c, str) else _col_name(c) for c in window]
+        return partition_names, [], False
     if not hasattr(window, "_partition_by") or not hasattr(window, "_order_by"):
         raise PySparkValueError("window function .over() expects a WindowSpec")
     partition_by = list(getattr(window, "_partition_by", []) or [])

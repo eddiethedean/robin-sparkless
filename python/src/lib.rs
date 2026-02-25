@@ -2288,6 +2288,50 @@ impl PyColumn {
             .map_err(to_py_err)
     }
 
+    fn row_number(&self, descending: bool) -> PyColumn {
+        PyColumn {
+            inner: self.inner.row_number(descending),
+        }
+    }
+
+    fn rank(&self, descending: bool) -> PyColumn {
+        PyColumn {
+            inner: self.inner.rank(descending),
+        }
+    }
+
+    fn dense_rank(&self, descending: bool) -> PyColumn {
+        PyColumn {
+            inner: self.inner.dense_rank(descending),
+        }
+    }
+
+    #[pyo3(signature = (offset=1))]
+    fn lag(&self, offset: i64) -> PyColumn {
+        PyColumn {
+            inner: self.inner.lag(offset),
+        }
+    }
+
+    #[pyo3(signature = (offset=1))]
+    fn lead(&self, offset: i64) -> PyColumn {
+        PyColumn {
+            inner: self.inner.lead(offset),
+        }
+    }
+
+    fn first_value(&self) -> PyColumn {
+        PyColumn {
+            inner: self.inner.first_value(),
+        }
+    }
+
+    fn last_value(&self) -> PyColumn {
+        PyColumn {
+            inner: self.inner.last_value(),
+        }
+    }
+
     fn over(&self, py: Python<'_>, window: &Bound<'_, PyAny>) -> PyResult<PyColumn> {
         let funcs = PyModule::import_bound(py, "sparkless.sql.functions")?;
         let extract = funcs.getattr("_window_spec_to_partition_order")?;
