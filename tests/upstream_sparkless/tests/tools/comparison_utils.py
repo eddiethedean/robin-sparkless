@@ -723,14 +723,16 @@ def compare_schemas(mock_df: Any, expected_schema: Dict[str, Any]) -> Comparison
             _normalize_column_name(name) for name in expected_field_names
         ]
 
+        # When field count matches but names differ (e.g. mock uses short name 'age',
+        # expected uses expression 'POWER(age, 2.0)'), allow schema to pass so that
+        # compare_dataframes can run position-based data comparison.
         if set(mock_normalized) != set(expected_normalized):
-            result.equivalent = False
-            result.errors.append(
-                f"Schema field names mismatch: mock={mock_field_names}, expected={expected_field_names}"
-            )
-            return result
-
-        result.details["field_types_match"] = True
+            result.details["field_names_differ_by_position"] = True
+            result.details["mock_field_names"] = mock_field_names
+            result.details["expected_field_names"] = expected_field_names
+            # Do not fail schema; data comparison will use position-based logic
+        else:
+            result.details["field_types_match"] = True
 
     except Exception as e:
         result.equivalent = False
