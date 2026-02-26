@@ -15,7 +15,7 @@ try:
         "year", "month", "dayofmonth", "dayofweek", "date_add", "date_sub", "date_format",
         "length", "floor", "round", "ltrim", "rtrim", "hour", "minute", "second",
         "reverse", "exp",
-        "soundex", "repeat", "levenshtein", "try_cast", "try_add",
+        "soundex", "repeat", "initcap", "levenshtein", "try_cast", "try_add",
         "concat", "concat_ws", "array", "struct_",
         "asinh", "atanh", "cosh", "sinh",
         "last_day", "months_between", "timestamp_seconds", "to_utc_timestamp",
@@ -36,7 +36,7 @@ except ImportError:
         "year", "month", "dayofmonth", "dayofweek", "date_add", "date_sub", "date_format",
         "length", "floor", "round", "ltrim", "rtrim", "hour", "minute", "second",
         "reverse", "exp",
-        "soundex", "repeat", "levenshtein", "try_cast", "try_add",
+        "soundex", "repeat", "initcap", "levenshtein", "try_cast", "try_add",
         "concat", "concat_ws", "array", "struct_",
         "asinh", "atanh", "cosh", "sinh",
         "last_day", "months_between", "timestamp_seconds", "to_utc_timestamp",
@@ -132,6 +132,7 @@ minute = _mod.minute
 second = _mod.second
 soundex = _mod.soundex
 repeat = _mod.repeat
+initcap = _mod.initcap
 levenshtein = _mod.levenshtein
 try_cast = _mod.try_cast
 try_add = _mod.try_add
