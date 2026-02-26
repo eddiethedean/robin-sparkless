@@ -637,10 +637,9 @@ def posexplode(col):
 
 def expr(sql_expr: str):
     """
-    Minimal F.expr() support for REGEXP/RLIKE predicates used by upstream tests.
-    Examples:
-      - "Value REGEXP 'sales|tech'"
-      - "Value RLIKE 'sales|tech'"
+    F.expr() support: SQL expression string resolved in select() context (PySpark parity).
+    - REGEXP/RLIKE: "col REGEXP 'pat'" -> col(col).rlike(pat)
+    - Other expressions (e.g. "upper(x) as up") -> expr_str; resolved when used in df.select().
     """
     import re
 
@@ -649,11 +648,11 @@ def expr(sql_expr: str):
         sql_expr,
         re.IGNORECASE,
     )
-    if not m:
-        raise NotImplementedError(f"expr() is not yet implemented for: {sql_expr!r}")
-    col_name = m.group(1)
-    pattern = m.group(3)
-    return col(col_name).rlike(pattern)
+    if m:
+        col_name = m.group(1)
+        pattern = m.group(3)
+        return col(col_name).rlike(pattern)
+    return _native.expr_str(sql_expr)
 
 
 def to_timestamp(column, fmt=None):

@@ -277,16 +277,29 @@ fn core_data_type_to_str(dt: &CoreDataType) -> String {
     }
 }
 
-/// DESCRIBE table_name: return a DataFrame with col_name, data_type (PySpark DESCRIBE parity).
-fn translate_describe_table(
+/// DESCRIBE table_name [col_name]: return a DataFrame with col_name, data_type (PySpark 3.5 parity).
+pub(crate) fn translate_describe_table_optional_col(
     session: &SparkSession,
-    table_name: &sqlparser::ast::ObjectName,
+    table_name: &str,
+    col_name: Option<&str>,
 ) -> Result<crate::dataframe::DataFrame, PolarsError> {
-    let name = table_name_from_object_name(table_name);
-    let df = session.table(&name)?;
+    let df = session.table(table_name)?;
     let schema: StructType = df.schema()?;
-    let rows: Vec<Vec<JsonValue>> = schema
+    let case_sensitive = session.is_case_sensitive();
+    let fields: Vec<_> = schema
         .fields()
+        .iter()
+        .filter(|f| {
+            col_name.is_none_or(|c| {
+                if case_sensitive {
+                    f.name == c
+                } else {
+                    f.name.eq_ignore_ascii_case(c)
+                }
+            })
+        })
+        .collect();
+    let rows: Vec<Vec<JsonValue>> = fields
         .iter()
         .map(|f| {
             vec![
@@ -300,6 +313,15 @@ fn translate_describe_table(
         ("data_type".to_string(), "string".to_string()),
     ];
     session.create_dataframe_from_rows(rows, out_schema, false, false)
+}
+
+/// DESCRIBE table_name (parsed form): delegate to optional-col form.
+fn translate_describe_table(
+    session: &SparkSession,
+    table_name: &sqlparser::ast::ObjectName,
+) -> Result<crate::dataframe::DataFrame, PolarsError> {
+    let name = table_name_from_object_name(table_name);
+    translate_describe_table_optional_col(session, &name, None)
 }
 
 /// Translate a SetExpr (SELECT, Query, or SetOperation) to a DataFrame.

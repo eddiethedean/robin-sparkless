@@ -1881,50 +1881,103 @@ impl PyDataFrame {
     }
 
     #[pyo3(signature = (*cols))]
-    fn select(&self, _py: Python<'_>, cols: &Bound<'_, PyTuple>) -> PyResult<PyDataFrame> {
+    fn select(&self, py: Python<'_>, cols: &Bound<'_, PyTuple>) -> PyResult<PyDataFrame> {
         #[derive(Debug)]
         enum Tmp {
             NameIdx(usize),
             Expr(robin_sparkless::Expr),
         }
+        #[derive(Debug)]
+        enum ItemOrExprStr {
+            Resolved(Tmp),
+            ExprStr(String),
+        }
 
         fn push_item(
             item: &Bound<'_, PyAny>,
-            out: &mut Vec<Tmp>,
+            out: &mut Vec<ItemOrExprStr>,
             names: &mut Vec<Box<str>>,
+            py: Python<'_>,
         ) -> PyResult<()> {
             if let Ok(py_col) = item.downcast::<PyColumn>() {
-                out.push(Tmp::Expr(py_col.borrow().inner.clone().into_expr()));
+                out.push(ItemOrExprStr::Resolved(Tmp::Expr(
+                    py_col.borrow().inner.clone().into_expr(),
+                )));
+                return Ok(());
+            }
+            if let Ok(py_expr_str) = item.downcast::<PyExprStr>() {
+                out.push(ItemOrExprStr::ExprStr(py_expr_str.borrow().sql.clone()));
                 return Ok(());
             }
             if let Ok(s) = item.extract::<String>() {
                 let idx = names.len();
                 names.push(s.into_boxed_str());
-                out.push(Tmp::NameIdx(idx));
+                out.push(ItemOrExprStr::Resolved(Tmp::NameIdx(idx)));
                 return Ok(());
             }
             if let Ok(list) = item.downcast::<PyList>() {
                 for sub in list.iter() {
-                    push_item(&sub, out, names)?;
+                    push_item(&sub, out, names, py)?;
                 }
                 return Ok(());
             }
             if let Ok(tup) = item.downcast::<PyTuple>() {
                 for sub in tup.iter() {
-                    push_item(&sub, out, names)?;
+                    push_item(&sub, out, names, py)?;
                 }
                 return Ok(());
             }
             Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
-                "select() expects columns as str, Column, or a list/tuple of those",
+                "select() expects columns as str, Column, expr(str), or a list/tuple of those",
             ))
         }
 
-        let mut tmp: Vec<Tmp> = Vec::with_capacity(cols.len());
+        let mut raw: Vec<ItemOrExprStr> = Vec::with_capacity(cols.len());
         let mut name_boxes: Vec<Box<str>> = Vec::new();
         for item in cols.iter() {
-            push_item(&item, &mut tmp, &mut name_boxes)?;
+            push_item(&item, &mut raw, &mut name_boxes, py)?;
         }
+
+        let tmp: Vec<Tmp> = if raw.iter().any(|x| matches!(x, ItemOrExprStr::ExprStr(_))) {
+            let session = THREAD_ACTIVE_SESSIONS
+                .with(|cell| cell.borrow().last().map(|s| s.clone_ref(py)))
+                .ok_or_else(|| {
+                    PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
+                        "select() with expr() requires an active SparkSession",
+                    )
+                })?;
+            let session_ref = session.bind(py).downcast::<PySparkSession>().map_err(|_| {
+                PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected SparkSession")
+            })?;
+            session_ref
+                .borrow()
+                .inner
+                .create_or_replace_temp_view("__selectexpr_t", self.inner.clone());
+            let mut resolved: Vec<Tmp> = Vec::with_capacity(raw.len());
+            for x in raw {
+                match x {
+                    ItemOrExprStr::Resolved(t) => resolved.push(t),
+                    ItemOrExprStr::ExprStr(s) => {
+                        let expr = robin_sparkless::sql::expr_string_to_polars(
+                            &s,
+                            &session_ref.borrow().inner,
+                            &self.inner,
+                        )
+                        .map_err(to_py_err)?;
+                        resolved.push(Tmp::Expr(expr));
+                    }
+                }
+            }
+            session_ref.borrow().inner.drop_temp_view("__selectexpr_t");
+            resolved
+        } else {
+            raw.into_iter()
+                .map(|x| match x {
+                    ItemOrExprStr::Resolved(t) => t,
+                    ItemOrExprStr::ExprStr(_) => unreachable!(),
+                })
+                .collect()
+        };
 
         let all_columns = self.inner.columns().map_err(to_py_err)?;
         let mut items: Vec<SelectItem<'_>> = Vec::with_capacity(tmp.len());
@@ -2698,10 +2751,23 @@ impl PyDataFrame {
     }
 
     #[pyo3(name = "selectExpr", signature = (*exprs))]
-    fn select_expr(&self, _py: Python<'_>, exprs: &Bound<'_, PyTuple>) -> PyResult<PyDataFrame> {
+    fn select_expr(&self, py: Python<'_>, exprs: &Bound<'_, PyTuple>) -> PyResult<PyDataFrame> {
         let mut exprs_vec: Vec<String> = Vec::with_capacity(exprs.len());
         for item in exprs.iter() {
             exprs_vec.push(item.extract::<String>()?);
+        }
+        // Prefer SQL-based parsing when session is available (e.g. "upper(Name) as u").
+        let session_opt =
+            THREAD_ACTIVE_SESSIONS.with(|cell| cell.borrow().last().map(|s| s.clone_ref(py)));
+        if let Some(session) = session_opt {
+            if let Ok(session_ref) = session.bind(py).downcast::<PySparkSession>() {
+                if let Ok(df) = self
+                    .inner
+                    .select_expr_with_session(&session_ref.borrow().inner, &exprs_vec)
+                {
+                    return Ok(PyDataFrame { inner: df });
+                }
+            }
         }
         self.inner
             .select_expr(&exprs_vec)
@@ -4120,6 +4186,20 @@ impl PyColumn {
     }
 }
 
+/// Wrapper for F.expr("sql") so select() can resolve via SQL (e.g. "upper(x) as up"). PySpark expr() parity.
+#[pyclass]
+struct PyExprStr {
+    sql: String,
+}
+
+#[pymethods]
+impl PyExprStr {
+    #[getter]
+    fn sql(&self) -> &str {
+        &self.sql
+    }
+}
+
 #[pyclass]
 struct PySortOrder {
     pub(crate) inner: SortOrder,
@@ -4576,6 +4656,14 @@ fn spark_session_builder() -> PySparkSessionBuilder {
 fn column(name: &str) -> PyColumn {
     PyColumn {
         inner: robin_sparkless::functions::col(name),
+    }
+}
+
+/// Create an expr-string for use in select() (e.g. expr("upper(x) as up")). Resolved when the DataFrame is selected. PySpark F.expr() parity.
+#[pyfunction]
+fn expr_str(sql: &str) -> PyExprStr {
+    PyExprStr {
+        sql: sql.to_string(),
     }
 }
 
@@ -6015,8 +6103,10 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyWhenBuilder>()?;
     m.add_class::<PyThenBuilder>()?;
     m.add_class::<PyChainedWhenBuilder>()?;
+    m.add_class::<PyExprStr>()?;
     m.add_function(wrap_pyfunction!(spark_session_builder, m)?)?;
     m.add_function(wrap_pyfunction!(column, m)?)?;
+    m.add_function(wrap_pyfunction!(expr_str, m)?)?;
     m.add_function(wrap_pyfunction!(create_udf_column, m)?)?;
     m.add_function(wrap_pyfunction!(set_python_udf_executor, m)?)?;
     m.add_function(wrap_pyfunction!(lit, m)?)?;

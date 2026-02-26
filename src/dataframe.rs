@@ -548,6 +548,18 @@ impl DataFrame {
         self.0.select_expr(exprs).map(DataFrame)
     }
 
+    /// Select by expression strings using SQL parsing (e.g. "upper(Name) as u"). Requires active session; use when session is available for full selectExpr parity.
+    #[cfg(feature = "sql")]
+    pub fn select_expr_with_session(
+        &self,
+        session: &crate::session::SparkSession,
+        exprs: &[String],
+    ) -> Result<DataFrame, PolarsError> {
+        self.0
+            .select_expr_with_session(&session.0, exprs)
+            .map(DataFrame)
+    }
+
     pub fn col_regex(&self, pattern: &str) -> Result<DataFrame, PolarsError> {
         self.0.col_regex(pattern).map(DataFrame)
     }
