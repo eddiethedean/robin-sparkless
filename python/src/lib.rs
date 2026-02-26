@@ -29,6 +29,10 @@ fn to_py_err(e: impl std::fmt::Display) -> PyErr {
     if msg.contains("Some of types cannot be determined") {
         return pyo3::exceptions::PyValueError::new_err(msg);
     }
+    // create_dataframe_from_rows with verify_schema: type mismatch -> TypeError (PySpark parity)
+    if (msg.contains("Row ") || msg.contains("row ")) && msg.contains("expected type") {
+        return pyo3::exceptions::PyTypeError::new_err(msg);
+    }
     SparklessError::new_err(msg)
 }
 
@@ -153,8 +157,7 @@ fn json_value_to_py_with_schema(
             }
         }
         (Some(DataType::String), JsonValue::String(s)) => {
-            try_coerce_string_to_numeric_or_bool(py, s)
-                .unwrap_or_else(|| s.clone().into_py(py))
+            try_coerce_string_to_numeric_or_bool(py, s).unwrap_or_else(|| s.clone().into_py(py))
         }
         (Some(DataType::Array(elem_type)), JsonValue::Array(arr)) => {
             let list = PyList::empty_bound(py);
@@ -560,34 +563,41 @@ impl PySparkSession {
             .map_err(to_py_err)
     }
 
-    /// createDataFrame(data, schema=None). data: list of dicts, list of tuples, or pandas.DataFrame.
+    /// createDataFrame(data, schema=None, verify_schema=True, sampling_ratio=None).
+    /// data: list of dicts, list of tuples, or pandas.DataFrame.
     /// schema: optional list of (name, type_str) or list of column names (types inferred).
-    /// Pandas DataFrame is converted via to_dict("records"); column order is preserved.
-    #[pyo3(signature = (data, schema=None))]
+    /// verify_schema: when True, validate row values against schema types (PySpark parity).
+    /// sampling_ratio: accepted for API parity; ignored for list/dict data.
+    #[pyo3(signature = (data, schema=None, verify_schema=true, sampling_ratio=None))]
     fn create_dataframe_from_rows(
         &self,
         py: Python<'_>,
         data: &Bound<'_, PyAny>,
         schema: Option<&Bound<'_, PyAny>>,
+        verify_schema: bool,
+        sampling_ratio: Option<f64>,
     ) -> PyResult<PyDataFrame> {
+        let _ = sampling_ratio; // no-op for list/dict data; PySpark uses for CSV inference
         let (data, from_pandas) = normalize_create_dataframe_input(py, data)?;
         let (rows, schema, schema_was_inferred) =
             python_data_and_schema(py, &data, schema, from_pandas)?;
         self.inner
-            .create_dataframe_from_rows(rows, schema, false, schema_was_inferred)
+            .create_dataframe_from_rows(rows, schema, verify_schema, schema_was_inferred)
             .map(|df| PyDataFrame { inner: df })
             .map_err(to_py_err)
     }
 
     /// PySpark alias: createDataFrame -> create_dataframe_from_rows
-    #[pyo3(name = "createDataFrame", signature = (data, schema=None))]
+    #[pyo3(name = "createDataFrame", signature = (data, schema=None, verify_schema=true, sampling_ratio=None))]
     fn create_data_frame_camel(
         &self,
         py: Python<'_>,
         data: &Bound<'_, PyAny>,
         schema: Option<&Bound<'_, PyAny>>,
+        verify_schema: bool,
+        sampling_ratio: Option<f64>,
     ) -> PyResult<PyDataFrame> {
-        self.create_dataframe_from_rows(py, data, schema)
+        self.create_dataframe_from_rows(py, data, schema, verify_schema, sampling_ratio)
     }
 
     fn range(&self, start: i64, end: i64, step: i64) -> PyResult<PyDataFrame> {
