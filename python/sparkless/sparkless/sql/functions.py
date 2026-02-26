@@ -104,6 +104,14 @@ def _ensure_udf_executor_registered():
 def _as_col(c):
     return col(c) if isinstance(c, str) else c
 
+
+def _not_implemented(name):
+    """Return a callable that raises NotImplementedError when called (for stub functions)."""
+    def _raiser(*args, **kwargs):
+        raise NotImplementedError(f"{name!r} is not yet implemented")
+    return _raiser
+
+
 def _ni(name):
     return _not_implemented(name)
 
@@ -231,7 +239,7 @@ overlay = _ni("overlay")
 # --- Window functions (stubs) ---
 dense_rank = _ni("dense_rank")
 rank = _ni("rank")
-percent_rank = _ni("percent_rank")
+# percent_rank defined below as real implementation returning _PercentRankExpr()
 cume_dist = _ni("cume_dist")
 ntile = _ni("ntile")
 lag = _ni("lag")
