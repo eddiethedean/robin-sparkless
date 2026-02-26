@@ -1,9 +1,34 @@
 # Test Failure Checklist
 
-**Last run:** pytest -n 10  
-**Result:** 2105 failed, 1423 passed, 66 skipped
+**Last run:** `pytest tests/python tests/upstream_sparkless -n 10`  
+**Result:** 862 failed, 1944 passed, 25 skipped (2831 total)
 
 This checklist tracks fixes needed to reduce test failures. Items are grouped by category and ordered by estimated impact.
+
+---
+
+## Latest run failure buckets (by error type)
+
+| Bucket | Approx. count | Example error / cause |
+|--------|----------------|------------------------|
+| **Row / comparison: str vs int** | ~80+ | `TypeError: '<' not supported between instances of 'str' and 'int'` — Row or sort comparing mixed types (Row as tuple vs dict, or schema string vs int in Row) |
+| **Collect/Row: expect string, got number** | ~50+ | `AssertionError: assert 100 == '100'`, `assert 123 == '123'`, `assert True == '1'` — tests expect string-typed column in Row; we return int/float/bool (schema-string preservation or cast-to-string) |
+| **simpleString missing** | ~5+ | `AttributeError: 'IntegerType' object has no attribute 'simpleString'` — PySpark type API (simpleString) |
+| **json_tuple API** | ~3+ | `TypeError: json_tuple keys must be strings` — json_tuple key type / signature |
+| **SparklessError: duplicate column** | ~5+ | `duplicate: column with name 'count'` / `duplicate output name 'manager_id'` — plan producing duplicate names |
+| **SparklessError: string vs numeric** | ~2+ | `cannot compare string with numeric type (i64)` — coercion still needed (e.g. eq_null_safe path) |
+| **date_trunc / duration** | ~5+ | `expected leading integer in the duration string, found 'm'`; `round operation not supported for dtype str` — date_trunc unit/period handling |
+| **replace() API** | ~5+ | `replace() missing 1 required positional argument: 'value'`; `PyColumn.replace() missing 1 required positional argument: 'replacement'` — DataFrame/Column replace signature |
+| **regexp_extract_all + list** | ~5+ | `TypeError: unhashable type: 'list'` — select/expr with list (regexp_extract_all) |
+| **head() return type** | ~2 | `AttributeError: 'list' object has no attribute 'collect'` — head() returns list, test expects DataFrame |
+| **orderBy direction** | ~2+ | `assert [1,2,3] == [3,2,1]` — ascending=False / order direction |
+| **DESCRIBE EXTENDED** | ~1 | `Table or view 'EXTENDED' not found` — DESCRIBE EXTENDED parsed as table name |
+| **approx_count_distinct** | ~2 | `KeyError: 'approx_count_distinct(value)'` — agg result column naming |
+| **Struct/Array/Map types** | ~10+ | withField null, elementtype, map/struct from JSON, ArrayType nullable |
+| **first / ignorenulls** | ~2+ | `assert 'A' is None` — first() default vs ignorenulls |
+| **Row format (tuple vs dict)** | ~10+ | `assert [(1,10,1,20)] == [{'id': 1, ...}]` — collect returns tuple-like; test expects dict |
+| **DDL / createDataFrame** | ~10+ | `KeyError: 'name'`, `'list' object is not callable` — DDL schema parsing, create_data_frame API |
+| **Misc (pow, union, spark context, etc.)** | ~20+ | pow/bitwise, union DataFrame-like, spark_context.version, substring_index, xxhash64, etc. |
 
 ---
 

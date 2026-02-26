@@ -253,6 +253,48 @@ class Row(tuple):
             return self.asDict() == dict(other)
         return super().__eq__(other)
 
+    def _order_key(self, v):
+        """Normalize value for ordering so mixed types (str vs int) never raise TypeError."""
+        if v is None:
+            return (0, "")
+        return (1, (type(v).__name__, repr(v)))
+
+    def __lt__(self, other):
+        if not isinstance(other, Row) or len(self) != len(other):
+            return NotImplemented
+        for a, b in zip(self, other):
+            ka, kb = self._order_key(a), self._order_key(b)
+            if ka != kb:
+                return ka < kb
+        return False
+
+    def __le__(self, other):
+        if not isinstance(other, Row) or len(self) != len(other):
+            return NotImplemented
+        for a, b in zip(self, other):
+            ka, kb = self._order_key(a), self._order_key(b)
+            if ka != kb:
+                return ka < kb
+        return True
+
+    def __gt__(self, other):
+        if not isinstance(other, Row) or len(self) != len(other):
+            return NotImplemented
+        for a, b in zip(self, other):
+            ka, kb = self._order_key(a), self._order_key(b)
+            if ka != kb:
+                return ka > kb
+        return False
+
+    def __ge__(self, other):
+        if not isinstance(other, Row) or len(self) != len(other):
+            return NotImplemented
+        for a, b in zip(self, other):
+            ka, kb = self._order_key(a), self._order_key(b)
+            if ka != kb:
+                return ka > kb
+        return True
+
     # Make Row behave like a mapping for test helpers that expect dict-like rows.
     def keys(self):
         return list(self.__dict__.get("_fields", []))
