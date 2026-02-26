@@ -10,6 +10,7 @@ IllegalArgumentException = SparklessError
 QueryExecutionException = SparklessError
 SparkUpgradeException = SparklessError
 PySparkAttributeError = SparklessError
+ConfigurationException = SparklessError
 PySparkValueError = SparklessError
 PySparkTypeError = SparklessError
 PySparkRuntimeError = SparklessError
@@ -21,6 +22,7 @@ __all__ = [
     "QueryExecutionException",
     "SparkUpgradeException",
     "PySparkAttributeError",
+    "ConfigurationException",
     "PySparkValueError",
     "PySparkTypeError",
     "PySparkRuntimeError",
