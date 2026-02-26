@@ -1531,54 +1531,86 @@ struct PyDataFrame {
 
 #[pymethods]
 impl PyDataFrame {
-    fn filter(slf: PyRef<Self>, py: Python<'_>, condition: &PyColumn) -> PyResult<PyDataFrame> {
-        if let Some((udf_name, arg_names, literal_jsons)) = condition.inner.udf_call_info_with_literals() {
-            let temp_name = format!("_udf_filter_{}", uuid::Uuid::new_v4().simple());
-            let arg_names_py = PyList::new_bound(py, arg_names.iter());
-            let literals_py = PyList::empty_bound(py);
-            for opt in &literal_jsons {
-                let item: Bound<'_, PyAny> = match opt {
-                    Some(s) => pyo3::types::PyString::new_bound(py, s.as_str()).into_any(),
-                    None => py.None().into_bound(py),
-                };
-                literals_py.append(item)?;
+    fn filter(slf: PyRef<Self>, py: Python<'_>, condition: &Bound<'_, PyAny>) -> PyResult<PyDataFrame> {
+        if let Ok(py_col) = condition.downcast::<PyColumn>() {
+            let col_ref = py_col.borrow();
+            if let Some((udf_name, arg_names, literal_jsons)) = col_ref.inner.udf_call_info_with_literals() {
+                let temp_name = format!("_udf_filter_{}", uuid::Uuid::new_v4().simple());
+                let arg_names_py = PyList::new_bound(py, arg_names.iter());
+                let literals_py = PyList::empty_bound(py);
+                for opt in &literal_jsons {
+                    let item: Bound<'_, PyAny> = match opt {
+                        Some(s) => pyo3::types::PyString::new_bound(py, s.as_str()).into_any(),
+                        None => py.None().into_bound(py),
+                    };
+                    literals_py.append(item)?;
+                }
+                if let Some(df_with_col) = PYTHON_UDF_EXECUTOR.with(|cell| -> PyResult<Option<PyDataFrame>> {
+                    let cb = cell.borrow();
+                    let callback = match cb.as_ref() {
+                        Some(c) => c,
+                        None => return Ok(None),
+                    };
+                    let df_obj: Bound<'_, PyAny> = unsafe { Bound::from_borrowed_ptr(py, slf.as_ptr()) };
+                    let result = callback
+                        .bind(py)
+                        .call1((df_obj, &temp_name, udf_name, arg_names_py, literals_py))?;
+                    let py_df = result.downcast::<PyDataFrame>()?;
+                    Ok(Some(PyDataFrame {
+                        inner: py_df.borrow().inner.clone(),
+                    }))
+                })? {
+                    let filter_expr = robin_sparkless::Column::new(temp_name.clone()).into_expr();
+                    let filtered = df_with_col
+                        .inner
+                        .filter(filter_expr)
+                        .map_err(to_py_err)?;
+                    let out = filtered
+                        .drop(vec![temp_name.as_str()])
+                        .map_err(to_py_err)?;
+                    return Ok(PyDataFrame { inner: out });
+                }
             }
-            if let Some(df_with_col) = PYTHON_UDF_EXECUTOR.with(|cell| -> PyResult<Option<PyDataFrame>> {
-                let cb = cell.borrow();
-                let callback = match cb.as_ref() {
-                    Some(c) => c,
-                    None => return Ok(None),
-                };
-                let df_obj: Bound<'_, PyAny> = unsafe { Bound::from_borrowed_ptr(py, slf.as_ptr()) };
-                let result = callback
-                    .bind(py)
-                    .call1((df_obj, &temp_name, udf_name, arg_names_py, literals_py))?;
-                let py_df = result.downcast::<PyDataFrame>()?;
-                Ok(Some(PyDataFrame {
-                    inner: py_df.borrow().inner.clone(),
-                }))
-            })? {
-                let filter_expr = robin_sparkless::Column::new(temp_name.clone()).into_expr();
-                let filtered = df_with_col
-                    .inner
-                    .filter(filter_expr)
-                    .map_err(to_py_err)?;
-                let out = filtered
-                    .drop(vec![temp_name.as_str()])
-                    .map_err(to_py_err)?;
-                return Ok(PyDataFrame { inner: out });
-            }
+            let df = slf
+                .inner
+                .filter(col_ref.inner.clone().into_expr())
+                .map(|df| PyDataFrame { inner: df })
+                .map_err(to_py_err)?;
+            return Ok(df);
         }
-        let df = slf
-            .inner
-            .filter(condition.inner.clone().into_expr())
-            .map(|df| PyDataFrame { inner: df })
+        if let Ok(expr_str) = condition.extract::<String>() {
+            let session = THREAD_ACTIVE_SESSIONS
+                .with(|cell| cell.borrow().last().map(|s| s.clone_ref(py)))
+                .ok_or_else(|| {
+                    PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
+                        "filter with string expression requires an active SparkSession",
+                    )
+                })?;
+            let session_ref = session
+                .bind(py)
+                .downcast::<PySparkSession>()
+                .map_err(|_| {
+                    PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected SparkSession")
+                })?;
+            let expr = robin_sparkless::sql::expr_string_to_polars(
+                &expr_str,
+                &session_ref.borrow().inner,
+                &slf.inner,
+            )
             .map_err(to_py_err)?;
-        Ok(df)
+            return slf
+                .inner
+                .filter(expr)
+                .map(|df| PyDataFrame { inner: df })
+                .map_err(to_py_err);
+        }
+        Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+            "filter condition must be a Column or a string expression",
+        ))
     }
 
     #[pyo3(name = "where")]
-    fn where_(slf: PyRef<Self>, py: Python<'_>, condition: &PyColumn) -> PyResult<PyDataFrame> {
+    fn where_(slf: PyRef<Self>, py: Python<'_>, condition: &Bound<'_, PyAny>) -> PyResult<PyDataFrame> {
         Self::filter(slf, py, condition)
     }
 
@@ -1918,12 +1950,25 @@ impl PyDataFrame {
         self.inner.count().map_err(to_py_err)
     }
 
-    #[pyo3(signature = (n=1))]
-    fn head(&self, n: usize) -> PyResult<PyDataFrame> {
-        self.inner
-            .head(n)
-            .map(|df| PyDataFrame { inner: df })
-            .map_err(to_py_err)
+    /// PySpark parity: head() returns the first Row; head(n) returns a list of up to n Rows.
+    #[pyo3(signature = (n=None))]
+    fn head(&self, py: Python<'_>, n: Option<usize>) -> PyResult<PyObject> {
+        match n {
+            None => {
+                let first_df = self.inner.first().map_err(to_py_err)?;
+                let wrapper = PyDataFrame { inner: first_df };
+                let rows = wrapper.collect(py)?;
+                rows.into_iter()
+                    .next()
+                    .ok_or_else(|| PyErr::new::<pyo3::exceptions::PyValueError, _>("empty DataFrame"))
+            }
+            Some(k) => {
+                let head_df = self.inner.head(k).map_err(to_py_err)?;
+                let wrapper = PyDataFrame { inner: head_df };
+                let rows = wrapper.collect(py)?;
+                Ok(PyList::new_bound(py, rows).into_py(py))
+            }
+        }
     }
 
     #[getter]
@@ -2411,23 +2456,44 @@ impl PyDataFrame {
             .map_err(to_py_err)
     }
 
-    /// Replace value in columns. PySpark df.replace(to_replace, value, subset=...).
-    #[pyo3(signature = (to_replace, value, subset=None))]
+    /// Replace value in columns. PySpark df.replace(to_replace, value=None, subset=...).
+    /// When value is None and to_replace is a dict, apply each key->value replacement.
+    #[pyo3(signature = (to_replace, value=None, subset=None))]
     fn replace(
         &self,
         to_replace: &Bound<'_, PyAny>,
-        value: &Bound<'_, PyAny>,
+        value: Option<&Bound<'_, PyAny>>,
         subset: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<PyDataFrame> {
-        let old_expr = py_any_to_column(to_replace)?.into_expr();
-        let new_expr = py_any_to_column(value)?.into_expr();
         let sub_vec = normalize_subset(subset)?;
         let sub: Option<Vec<&str>> = sub_vec
             .as_ref()
             .map(|v| v.iter().map(|s| s.as_str()).collect());
+
+        if value.is_none() {
+            if let Ok(dict) = to_replace.downcast::<PyDict>() {
+                let mut current = self.inner.clone();
+                for (k, v) in dict.iter() {
+                    let old_expr = py_any_to_column(&k)?.into_expr();
+                    let new_expr = py_any_to_column(&v)?.into_expr();
+                    current = current
+                        .na()
+                        .replace(old_expr, new_expr, sub.as_ref().map(|v| v.iter().map(|s| *s).collect()))
+                        .map_err(to_py_err)?;
+                }
+                return Ok(PyDataFrame { inner: current });
+            }
+            return Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+                "replace() missing 1 required positional argument: 'value'. When to_replace is not a dict, value must be provided.",
+            ));
+        }
+
+        let value = value.unwrap();
+        let old_expr = py_any_to_column(to_replace)?.into_expr();
+        let new_expr = py_any_to_column(value)?.into_expr();
         self.inner
             .na()
-            .replace(old_expr, new_expr, sub)
+            .replace(old_expr, new_expr, sub.as_ref().map(|v| v.iter().map(|s| *s).collect()))
             .map(|df| PyDataFrame { inner: df })
             .map_err(to_py_err)
     }
@@ -3228,6 +3294,25 @@ impl PyColumn {
         ))
     }
 
+    /// Get struct field by name (PySpark Column.getField).
+    fn get_field(&self, name: &str) -> PyColumn {
+        PyColumn {
+            inner: self.inner.get_field(name),
+        }
+    }
+
+    #[pyo3(name = "getField")]
+    fn get_field_camel(&self, name: &str) -> PyColumn {
+        self.get_field(name)
+    }
+
+    /// String column contains substring (PySpark Column.contains).
+    fn contains(&self, literal: &str) -> PyColumn {
+        PyColumn {
+            inner: self.inner.contains(literal),
+        }
+    }
+
     /// col[key] -> map get or array getItem. Key: int (array index), str (map key), or Column (map key).
 
     fn array_distinct(&self) -> PyColumn {
@@ -3677,21 +3762,43 @@ impl PyDataFrameNaFunctions {
             .map_err(to_py_err)
     }
 
-    #[pyo3(signature = (to_replace, value, subset=None))]
+    #[pyo3(signature = (to_replace, value=None, subset=None))]
     fn replace(
         &self,
         py: Python<'_>,
         to_replace: &Bound<'_, PyAny>,
-        value: &Bound<'_, PyAny>,
-        subset: Option<Vec<String>>,
+        value: Option<&Bound<'_, PyAny>>,
+        subset: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<PyDataFrame> {
         let df_ref = self.df.bind(py).downcast::<PyDataFrame>().map_err(|_| {
             PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected DataFrame")
         })?.borrow();
+        let sub_vec = normalize_subset(subset)?;
+        let subset_refs: Option<Vec<&str>> = sub_vec
+            .as_ref()
+            .map(|v| v.iter().map(|s| s.as_str()).collect());
+
+        if value.is_none() {
+            if let Ok(dict) = to_replace.downcast::<PyDict>() {
+                let mut current = df_ref.inner.clone();
+                for (k, v) in dict.iter() {
+                    let old_expr = py_any_to_column(&k)?.into_expr();
+                    let new_expr = py_any_to_column(&v)?.into_expr();
+                    current = current
+                        .na()
+                        .replace(old_expr, new_expr, subset_refs.as_ref().map(|v| v.iter().map(|s| *s).collect()))
+                        .map_err(to_py_err)?;
+                }
+                return Ok(PyDataFrame { inner: current });
+            }
+            return Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+                "replace() missing 1 required positional argument: 'value'. When to_replace is not a dict, value must be provided.",
+            ));
+        }
+
+        let value = value.unwrap();
         let old_col = lit(to_replace)?;
         let new_col = lit(value)?;
-        let subset_refs: Option<Vec<&str>> =
-            subset.as_ref().map(|v| v.iter().map(|s| s.as_str()).collect());
         let na = df_ref.inner.na();
         na.replace(
             old_col.inner.into_expr(),
@@ -4776,6 +4883,274 @@ fn floor(column: &PyColumn) -> PyColumn {
 }
 
 #[pyfunction]
+fn ceil(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: functions::ceil(&column.inner),
+    }
+}
+
+#[pyfunction]
+fn abs(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: functions::abs(&column.inner),
+    }
+}
+
+#[pyfunction]
+fn sqrt(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: functions::sqrt(&column.inner),
+    }
+}
+
+#[pyfunction]
+fn log(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: functions::log(&column.inner),
+    }
+}
+
+#[pyfunction]
+fn log_with_base(column: &PyColumn, base: f64) -> PyColumn {
+    PyColumn {
+        inner: functions::log_with_base(&column.inner, base),
+    }
+}
+
+#[pyfunction]
+fn exp(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: functions::exp(&column.inner),
+    }
+}
+
+#[pyfunction]
+fn pow(column: &PyColumn, exp: i64) -> PyColumn {
+    PyColumn {
+        inner: functions::pow(&column.inner, exp),
+    }
+}
+
+#[pyfunction]
+fn signum(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: functions::signum(&column.inner),
+    }
+}
+
+#[pyfunction]
+fn sin(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: functions::sin(&column.inner),
+    }
+}
+
+#[pyfunction]
+fn cos(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: functions::cos(&column.inner),
+    }
+}
+
+#[pyfunction]
+fn tan(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: functions::tan(&column.inner),
+    }
+}
+
+#[pyfunction]
+fn asin(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: functions::asin(&column.inner),
+    }
+}
+
+#[pyfunction]
+fn acos(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: functions::acos(&column.inner),
+    }
+}
+
+#[pyfunction]
+fn atan(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: functions::atan(&column.inner),
+    }
+}
+
+#[pyfunction]
+fn atan2(y: &PyColumn, x: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: functions::atan2(&y.inner, &x.inner),
+    }
+}
+
+#[pyfunction]
+fn degrees(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: functions::degrees(&column.inner),
+    }
+}
+
+#[pyfunction]
+fn radians(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: functions::radians(&column.inner),
+    }
+}
+
+#[pyfunction]
+fn log2(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: functions::log2(&column.inner),
+    }
+}
+
+#[pyfunction]
+fn log10(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: functions::log10(&column.inner),
+    }
+}
+
+#[pyfunction]
+fn stddev(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: functions::stddev(&column.inner),
+    }
+}
+
+#[pyfunction]
+fn stddev_pop(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: functions::stddev_pop(&column.inner),
+    }
+}
+
+#[pyfunction]
+fn stddev_samp(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: functions::stddev_samp(&column.inner),
+    }
+}
+
+#[pyfunction]
+fn variance(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: functions::variance(&column.inner),
+    }
+}
+
+#[pyfunction]
+fn var_pop(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: functions::var_pop(&column.inner),
+    }
+}
+
+#[pyfunction]
+fn var_samp(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: functions::var_samp(&column.inner),
+    }
+}
+
+#[pyfunction]
+fn count_distinct(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: functions::count_distinct(&column.inner),
+    }
+}
+
+#[pyfunction]
+fn corr(col1: &PyColumn, col2: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: functions::corr(&col1.inner, &col2.inner),
+    }
+}
+
+#[pyfunction]
+fn explode_outer(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: functions::explode_outer(&column.inner),
+    }
+}
+
+#[pyfunction]
+#[pyo3(signature = (column, index))]
+fn element_at(column: &PyColumn, index: i64) -> PyColumn {
+    PyColumn {
+        inner: functions::element_at(&column.inner, index),
+    }
+}
+
+#[pyfunction]
+fn array_sort(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: functions::array_sort(&column.inner),
+    }
+}
+
+#[pyfunction]
+#[pyo3(signature = (column, separator))]
+fn array_join(column: &PyColumn, separator: &str) -> PyColumn {
+    PyColumn {
+        inner: functions::array_join(&column.inner, separator),
+    }
+}
+
+#[pyfunction]
+fn array_max(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: functions::array_max(&column.inner),
+    }
+}
+
+#[pyfunction]
+fn array_min(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: functions::array_min(&column.inner),
+    }
+}
+
+#[pyfunction]
+fn collect_list(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: functions::collect_list(&column.inner),
+    }
+}
+
+#[pyfunction]
+fn collect_set(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: functions::collect_set(&column.inner),
+    }
+}
+
+#[pyfunction]
+fn flatten(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: functions::array_flatten(&column.inner),
+    }
+}
+
+#[pyfunction]
+fn reverse(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: functions::reverse(&column.inner),
+    }
+}
+
+#[pyfunction]
+fn hex(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: functions::hex(&column.inner),
+    }
+}
+
+#[pyfunction]
 #[pyo3(signature = (column, scale=0))]
 fn round(column: &PyColumn, scale: i32) -> PyColumn {
     PyColumn {
@@ -5178,6 +5553,44 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(date_format, m)?)?;
     m.add_function(wrap_pyfunction!(length, m)?)?;
     m.add_function(wrap_pyfunction!(floor, m)?)?;
+    m.add_function(wrap_pyfunction!(ceil, m)?)?;
+    m.add_function(wrap_pyfunction!(abs, m)?)?;
+    m.add_function(wrap_pyfunction!(sqrt, m)?)?;
+    m.add_function(wrap_pyfunction!(log, m)?)?;
+    m.add_function(wrap_pyfunction!(log_with_base, m)?)?;
+    m.add_function(wrap_pyfunction!(exp, m)?)?;
+    m.add_function(wrap_pyfunction!(pow, m)?)?;
+    m.add_function(wrap_pyfunction!(signum, m)?)?;
+    m.add_function(wrap_pyfunction!(sin, m)?)?;
+    m.add_function(wrap_pyfunction!(cos, m)?)?;
+    m.add_function(wrap_pyfunction!(tan, m)?)?;
+    m.add_function(wrap_pyfunction!(asin, m)?)?;
+    m.add_function(wrap_pyfunction!(acos, m)?)?;
+    m.add_function(wrap_pyfunction!(atan, m)?)?;
+    m.add_function(wrap_pyfunction!(atan2, m)?)?;
+    m.add_function(wrap_pyfunction!(degrees, m)?)?;
+    m.add_function(wrap_pyfunction!(radians, m)?)?;
+    m.add_function(wrap_pyfunction!(log2, m)?)?;
+    m.add_function(wrap_pyfunction!(log10, m)?)?;
+    m.add_function(wrap_pyfunction!(stddev, m)?)?;
+    m.add_function(wrap_pyfunction!(stddev_pop, m)?)?;
+    m.add_function(wrap_pyfunction!(stddev_samp, m)?)?;
+    m.add_function(wrap_pyfunction!(variance, m)?)?;
+    m.add_function(wrap_pyfunction!(var_pop, m)?)?;
+    m.add_function(wrap_pyfunction!(var_samp, m)?)?;
+    m.add_function(wrap_pyfunction!(count_distinct, m)?)?;
+    m.add_function(wrap_pyfunction!(corr, m)?)?;
+    m.add_function(wrap_pyfunction!(explode_outer, m)?)?;
+    m.add_function(wrap_pyfunction!(element_at, m)?)?;
+    m.add_function(wrap_pyfunction!(array_sort, m)?)?;
+    m.add_function(wrap_pyfunction!(array_join, m)?)?;
+    m.add_function(wrap_pyfunction!(array_max, m)?)?;
+    m.add_function(wrap_pyfunction!(array_min, m)?)?;
+    m.add_function(wrap_pyfunction!(collect_list, m)?)?;
+    m.add_function(wrap_pyfunction!(collect_set, m)?)?;
+    m.add_function(wrap_pyfunction!(flatten, m)?)?;
+    m.add_function(wrap_pyfunction!(reverse, m)?)?;
+    m.add_function(wrap_pyfunction!(hex, m)?)?;
     m.add_function(wrap_pyfunction!(round, m)?)?;
     m.add_function(wrap_pyfunction!(ltrim, m)?)?;
     m.add_function(wrap_pyfunction!(native_rtrim, m)?)?;

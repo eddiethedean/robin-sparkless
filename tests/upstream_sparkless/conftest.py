@@ -95,6 +95,7 @@ def _install_core_exceptions_shim():
         SparklessError = RuntimeError  # fallback if not installed
     operation = types.ModuleType("sparkless.core.exceptions.operation")
     operation.SparkColumnNotFoundError = SparklessError
+    operation.SparkUnsupportedOperationError = SparklessError
     analysis = types.ModuleType("sparkless.core.exceptions.analysis")
     analysis.AnalysisException = SparklessError
     analysis.ColumnNotFoundException = SparklessError

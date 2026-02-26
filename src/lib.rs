@@ -111,6 +111,15 @@ pub mod sql {
 
     pub use robin_sparkless_polars::sql::{Statement, execute_sql, parse_sql};
 
+    /// Parse a single SQL expression string to Polars Expr using the session and DataFrame for resolution.
+    pub fn expr_string_to_polars(
+        expr_str: &str,
+        session: &SparkSession,
+        df: &DataFrame,
+    ) -> Result<robin_sparkless_polars::Expr, PolarsError> {
+        robin_sparkless_polars::sql::expr_string_to_polars(expr_str, &session.0, &df.0)
+    }
+
     /// Execute SQL and return root-owned DataFrame.
     pub fn execute_sql_root(session: &SparkSession, query: &str) -> Result<DataFrame, PolarsError> {
         robin_sparkless_polars::sql::execute_sql(&session.0, query).map(DataFrame)
