@@ -136,12 +136,13 @@ pub fn select_items(
     for item in items {
         match item {
             SelectItem::ColumnName(name) => {
-                // Dot notation (e.g. "Person.name") is struct field access; resolve as expression and keep dotted name as column name.
+                // Dot notation (e.g. "Person.name") is struct field access; output column name is last segment (PySpark parity: row["name"]).
                 if name.contains('.') {
                     let e = col(name);
                     let resolved = df.resolve_expr_column_names(e)?;
                     let coerced = df.coerce_string_numeric_comparisons(resolved)?;
-                    exprs.push(coerced.alias(name));
+                    let last_part = name.split('.').next_back().unwrap_or(name);
+                    exprs.push(coerced.alias(last_part));
                 } else {
                     let resolved = df.resolve_column_name(name)?;
                     exprs.push(col(resolved));
