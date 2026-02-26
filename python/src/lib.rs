@@ -140,7 +140,7 @@ impl PySparkSessionBuilder {
             py,
             PySparkSession {
                 inner: session,
-                backend_type: DEFAULT_BACKEND_TYPE.to_string(),
+                backend_type: RefCell::new(DEFAULT_BACKEND_TYPE.to_string()),
             },
         )?;
         register_active_session(py, obj.clone_ref(py), true)?;
@@ -160,8 +160,8 @@ const DEFAULT_BACKEND_TYPE: &str = "robin";
 #[pyclass]
 struct PySparkSession {
     inner: SparkSession,
-    #[pyo3(get, set)]
-    backend_type: String,
+    /// Writable from Python so conftest/fixtures can set backend_type = "robin" (e.g. under pytest-xdist).
+    backend_type: RefCell<String>,
 }
 
 thread_local! {
@@ -280,7 +280,7 @@ impl PySparkSession {
             py,
             PySparkSession {
                 inner: session,
-                backend_type: DEFAULT_BACKEND_TYPE.to_string(),
+                backend_type: RefCell::new(DEFAULT_BACKEND_TYPE.to_string()),
             },
         )?;
         register_active_session(py, obj.clone_ref(py), true)?;
@@ -292,6 +292,17 @@ impl PySparkSession {
         PySparkSessionBuilder {
             inner: SparkSession::builder(),
         }
+    }
+
+    #[getter]
+    fn backend_type(&self) -> String {
+        self.backend_type.borrow().clone()
+    }
+
+    #[setter]
+    fn set_backend_type(slf: PyRefMut<Self>, value: String) -> PyResult<()> {
+        *slf.backend_type.borrow_mut() = value;
+        Ok(())
     }
 
     #[getter]
@@ -327,12 +338,12 @@ impl PySparkSession {
     #[pyo3(name = "newSession")]
     fn new_session(slf: PyRef<Self>, py: Python<'_>) -> PyResult<Py<PySparkSession>> {
         let session = slf.inner.new_session();
-        let backend_type = slf.backend_type.clone();
+        let backend_type = slf.backend_type.borrow().clone();
         let obj = Py::new(
             py,
             PySparkSession {
                 inner: session,
-                backend_type,
+                backend_type: RefCell::new(backend_type),
             },
         )?;
         register_active_session(py, obj.clone_ref(py), true)?;
