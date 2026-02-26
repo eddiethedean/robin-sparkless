@@ -65,7 +65,11 @@ def cleanup_after_each_test():
 def _ensure_robin_backend_type(session):
     """Set backend_type='robin' on session when SPARKLESS_TEST_BACKEND=robin (for pytest-xdist)."""
     if (os.environ.get("SPARKLESS_TEST_BACKEND") or "").strip().lower() == "robin":
-        setattr(session, "backend_type", "robin")
+        try:
+            setattr(session, "backend_type", "robin")
+        except AttributeError:
+            # Native PySparkSession exposes backend_type read-only; value is already 'robin' at construction.
+            pass
 
 
 @pytest.fixture
@@ -171,9 +175,12 @@ def spark(request):
             request=request if hasattr(request, "node") else None,
             **kwargs,
         )
-        # Set backend_type on session so validation passes (robin-sparkless does not set it natively)
+        # Set backend_type on session so validation passes (robin-sparkless sets it at construction; setattr may be read-only)
         if backend == BackendType.ROBIN:
-            setattr(session, "backend_type", "robin")
+            try:
+                setattr(session, "backend_type", "robin")
+            except AttributeError:
+                pass
         # Ensure we never silently run in wrong backend when robin was requested
         if backend == BackendType.ROBIN:
             actual = getattr(session, "backend_type", None)
