@@ -2466,173 +2466,9 @@ impl PyDataFrame {
         session.inner.create_or_replace_temp_view(name, self.inner.clone());
     }
 
-    #[pyo3(name = "createOrReplaceTempView")]
-    fn create_or_replace_temp_view_camel(&self, py: Python<'_>, name: &str) -> PyResult<()> {
-        let active = {
-            let ty = py.get_type_bound::<PySparkSession>();
-            if let Ok(singleton) = ty.getattr("_singleton_session") {
-                if !singleton.is_none() {
-                    singleton
-                        .downcast::<PySparkSession>()
-                        .map_err(|_| to_py_err("active SparkSession is invalid"))?
-                        .borrow()
-                        .inner
-                        .clone()
-                } else {
-                    let top = THREAD_ACTIVE_SESSIONS.with(|cell| cell.borrow().last().map(|s| s.clone_ref(py)));
-                    match top {
-                        Some(s) => s.bind(py).borrow().inner.clone(),
-                        None => return Err(to_py_err("No active SparkSession")),
-                    }
-                }
-            } else {
-                let top = THREAD_ACTIVE_SESSIONS.with(|cell| cell.borrow().last().map(|s| s.clone_ref(py)));
-                match top {
-                    Some(s) => s.bind(py).borrow().inner.clone(),
-                    None => return Err(to_py_err("No active SparkSession")),
-                }
-            }
-        };
-        active.create_or_replace_temp_view(name, self.inner.clone());
-        Ok(())
-    }
-
     #[getter]
     fn columns(&self) -> PyResult<Vec<String>> {
         self.inner.columns().map_err(to_py_err)
-    }
-
-    #[pyo3(signature = (other, allow_missing_columns=false))]
-    fn union_by_name(
-        &self,
-        other: &PyDataFrame,
-        allow_missing_columns: bool,
-    ) -> PyResult<PyDataFrame> {
-        self.inner
-            .union_by_name(&other.inner, allow_missing_columns)
-            .map(|df| PyDataFrame { inner: df })
-            .map_err(to_py_err)
-    }
-
-    #[pyo3(name = "unionByName", signature = (other, allowMissingColumns=false))]
-    fn union_by_name_camel(&self, other: &PyDataFrame, allowMissingColumns: bool) -> PyResult<PyDataFrame> {
-        self.union_by_name(other, allowMissingColumns)
-    }
-
-    #[pyo3(name = "selectExpr", signature = (*exprs))]
-    fn select_expr(&self, py: Python<'_>, exprs: &Bound<'_, PyTuple>) -> PyResult<PyDataFrame> {
-        let mut sql_strs: Vec<String> = Vec::new();
-        for item in exprs.iter() {
-            sql_strs.push(item.extract::<String>()?);
-        }
-        let combined = sql_strs.join(", ");
-        let query = format!("SELECT {} FROM __self__", combined);
-        Err(to_py_err(format!("selectExpr is not yet fully implemented")))
-    }
-
-    #[pyo3(name = "withColumnsRenamed")]
-    fn with_columns_renamed(&self, col_map: &Bound<'_, PyDict>) -> PyResult<PyDataFrame> {
-        let mut df = self.inner.clone();
-        for (k, v) in col_map.iter() {
-            let old: String = k.extract()?;
-            let new: String = v.extract()?;
-            df = df.with_column_renamed(&old, &new).map_err(to_py_err)?;
-        }
-        Ok(PyDataFrame { inner: df })
-    }
-
-    #[pyo3(name = "fillna", signature = (value, subset=None))]
-    fn fillna(&self, py: Python<'_>, value: &Bound<'_, PyAny>, subset: Option<Vec<String>>) -> PyResult<PyDataFrame> {
-        let col_names: Vec<String> = match subset {
-            Some(s) => s,
-            None => self.inner.columns().map_err(to_py_err)?,
-        };
-
-        if let Ok(dict) = value.downcast::<PyDict>() {
-            let mut df = self.inner.clone();
-            for (k, v) in dict.iter() {
-                let col_name: String = k.extract()?;
-                let fill_col = py_any_to_column(&v)?;
-                let cond = Column::new(col_name.clone()).is_null();
-                let filled = robin_sparkless::functions::when(&cond)
-                    .then(&fill_col)
-                    .otherwise(&Column::new(col_name.clone()));
-                df = df.with_column(&col_name, &filled).map_err(to_py_err)?;
-            }
-            return Ok(PyDataFrame { inner: df });
-        }
-
-        let fill_val = py_any_to_column(value)?;
-        let mut df = self.inner.clone();
-        for col_name in &col_names {
-            let cond = Column::new(col_name.clone()).is_null();
-            let filled = robin_sparkless::functions::when(&cond)
-                .then(&fill_val)
-                .otherwise(&Column::new(col_name.clone()));
-            df = df.with_column(col_name, &filled).map_err(to_py_err)?;
-        }
-        Ok(PyDataFrame { inner: df })
-    }
-
-    #[pyo3(name = "dropna", signature = (how="any", thresh=None, subset=None))]
-    fn dropna(
-        &self,
-        how: &str,
-        thresh: Option<usize>,
-        subset: Option<Vec<String>>,
-    ) -> PyResult<PyDataFrame> {
-        Err(to_py_err("dropna is not yet implemented"))
-    }
-
-    #[getter]
-    fn na(slf: PyRef<Self>, py: Python<'_>) -> PyResult<PyObject> {
-        let na_mod = PyModule::import_bound(py, "sparkless.dataframe.na")?;
-        let cls = na_mod.getattr("DataFrameNaFunctions")?;
-        let obj = cls.call1((slf.into_py(py),))?;
-        Ok(obj.into_py(py))
-    }
-
-    #[pyo3(name = "agg", signature = (*exprs))]
-    fn agg(&self, exprs: &Bound<'_, PyTuple>) -> PyResult<PyDataFrame> {
-        let names: Vec<String> = Vec::new();
-        let gd = self.inner.group_by(Vec::<&str>::new()).map_err(to_py_err)?;
-        let mut rust_exprs: Vec<robin_sparkless::Expr> = Vec::new();
-        for item in exprs.iter() {
-            if let Ok(c) = item.downcast::<PyColumn>() {
-                rust_exprs.push(c.borrow().inner.clone().into_expr());
-            } else if let Ok(dict) = item.downcast::<PyDict>() {
-                for (k, v) in dict.iter() {
-                    let col_name: String = k.extract()?;
-                    let func_name: String = v.extract()?;
-                    let c = Column::new(col_name);
-                    let expr_col = match func_name.as_str() {
-                        "sum" => functions::sum(&c),
-                        "avg" | "mean" => functions::avg(&c),
-                        "min" => functions::min(&c),
-                        "max" => functions::max(&c),
-                        "count" => functions::count(&c),
-                        _ => return Err(to_py_err(format!("unsupported agg function: {func_name}"))),
-                    };
-                    rust_exprs.push(expr_col.into_expr());
-                }
-            } else {
-                return Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
-                    "agg() expects Column expressions or dict",
-                ));
-            }
-        }
-        gd.agg(rust_exprs)
-            .map(|df| PyDataFrame { inner: df })
-            .map_err(to_py_err)
-    }
-
-    #[pyo3(name = "sort", signature = (*cols, ascending=None))]
-    fn sort(
-        &self,
-        cols: &Bound<'_, PyTuple>,
-        ascending: Option<&Bound<'_, PyAny>>,
-    ) -> PyResult<PyDataFrame> {
-        self.order_by_camel(cols, ascending)
     }
 
     #[pyo3(name = "toDF", signature = (*col_names))]
@@ -2670,24 +2506,10 @@ impl PyDataFrame {
         Ok(df.into_py(py))
     }
 
-    #[pyo3(name = "printSchema")]
-    fn print_schema(&self) -> PyResult<()> {
-        let schema = self.inner.schema_engine().map_err(to_py_err)?;
-        println!("root");
-        for f in schema.fields() {
-            println!(" |-- {}: {:?} (nullable = {})", f.name, f.data_type, f.nullable);
-        }
-        Ok(())
-    }
-
     #[getter]
     fn dtypes(&self) -> PyResult<Vec<(String, String)>> {
         let schema = self.inner.schema_engine().map_err(to_py_err)?;
         Ok(schema.fields().iter().map(|f| (f.name.clone(), format!("{:?}", f.data_type))).collect())
-    }
-
-    fn describe(&self) -> PyResult<PyDataFrame> {
-        Err(to_py_err("describe is not yet implemented"))
     }
 
     fn coalesce(&self, n: usize) -> PyResult<PyDataFrame> {
@@ -2698,48 +2520,9 @@ impl PyDataFrame {
         Ok(PyDataFrame { inner: self.inner.clone() })
     }
 
-    fn cache(&self) -> PyResult<PyDataFrame> {
-        Ok(PyDataFrame { inner: self.inner.clone() })
-    }
-
-    fn persist(&self) -> PyResult<PyDataFrame> {
-        Ok(PyDataFrame { inner: self.inner.clone() })
-    }
-
-    fn unpersist(&self) -> PyResult<PyDataFrame> {
-        Ok(PyDataFrame { inner: self.inner.clone() })
-    }
-
     #[pyo3(name = "isEmpty")]
     fn is_empty(&self) -> PyResult<bool> {
         self.inner.count().map(|c| c == 0).map_err(to_py_err)
-    }
-
-    fn first(&self, py: Python<'_>) -> PyResult<PyObject> {
-        let limited = self.inner.limit(1).map_err(to_py_err)?;
-        let df = PyDataFrame { inner: limited };
-        let rows = df.collect(py)?;
-        if rows.is_empty() {
-            Ok(py.None())
-        } else {
-            Ok(rows.into_iter().next().unwrap())
-        }
-    }
-
-    fn head(&self, py: Python<'_>, n: Option<usize>) -> PyResult<PyObject> {
-        let n = n.unwrap_or(1);
-        let limited = self.inner.limit(n).map_err(to_py_err)?;
-        let df = PyDataFrame { inner: limited };
-        let rows = df.collect(py)?;
-        if n == 1 {
-            if rows.is_empty() {
-                Ok(py.None())
-            } else {
-                Ok(rows.into_iter().next().unwrap())
-            }
-        } else {
-            Ok(PyList::new_bound(py, rows).into_py(py))
-        }
     }
 
     fn take(&self, py: Python<'_>, n: usize) -> PyResult<Vec<PyObject>> {
@@ -3229,74 +3012,6 @@ impl PyColumn {
         })
     }
 
-    /// PySpark: col + scalar, col + col (WindowFunction arithmetic parity)
-    fn __add__(&self, other: &Bound<'_, PyAny>) -> PyResult<PyColumn> {
-        let rhs = py_any_to_column(other)?;
-        Ok(PyColumn {
-            inner: self.inner.add(&rhs),
-        })
-    }
-    fn __radd__(&self, other: &Bound<'_, PyAny>) -> PyResult<PyColumn> {
-        let lhs = py_any_to_column(other)?;
-        Ok(PyColumn {
-            inner: lhs.add(&self.inner),
-        })
-    }
-    fn __sub__(&self, other: &Bound<'_, PyAny>) -> PyResult<PyColumn> {
-        let rhs = py_any_to_column(other)?;
-        Ok(PyColumn {
-            inner: self.inner.subtract(&rhs),
-        })
-    }
-    fn __rsub__(&self, other: &Bound<'_, PyAny>) -> PyResult<PyColumn> {
-        let lhs = py_any_to_column(other)?;
-        Ok(PyColumn {
-            inner: lhs.subtract(&self.inner),
-        })
-    }
-    fn __mul__(&self, other: &Bound<'_, PyAny>) -> PyResult<PyColumn> {
-        let rhs = py_any_to_column(other)?;
-        Ok(PyColumn {
-            inner: self.inner.multiply(&rhs),
-        })
-    }
-    fn __rmul__(&self, other: &Bound<'_, PyAny>) -> PyResult<PyColumn> {
-        let lhs = py_any_to_column(other)?;
-        Ok(PyColumn {
-            inner: lhs.multiply(&self.inner),
-        })
-    }
-    fn __truediv__(&self, other: &Bound<'_, PyAny>) -> PyResult<PyColumn> {
-        let rhs = py_any_to_column(other)?;
-        Ok(PyColumn {
-            inner: self.inner.divide(&rhs),
-        })
-    }
-    fn __rtruediv__(&self, other: &Bound<'_, PyAny>) -> PyResult<PyColumn> {
-        let lhs = py_any_to_column(other)?;
-        Ok(PyColumn {
-            inner: lhs.divide(&self.inner),
-        })
-    }
-    fn __neg__(&self) -> PyResult<PyColumn> {
-        Ok(PyColumn {
-            inner: self.inner.negate(),
-        })
-    }
-
-    fn __mod__(&self, other: &Bound<'_, PyAny>) -> PyResult<PyColumn> {
-        let rhs = py_any_to_column(other)?;
-        Ok(PyColumn {
-            inner: self.inner.mod_(&rhs),
-        })
-    }
-    fn __rmod__(&self, other: &Bound<'_, PyAny>) -> PyResult<PyColumn> {
-        let lhs = py_any_to_column(other)?;
-        Ok(PyColumn {
-            inner: lhs.mod_(&self.inner),
-        })
-    }
-
     fn is_null(&self) -> PyColumn {
         PyColumn {
             inner: self.inner.is_null(),
@@ -3332,10 +3047,6 @@ impl PyColumn {
     }
 
     /// col[key] -> map get or array getItem. Key: int (array index), str (map key), or Column (map key).
-    #[pyo3(name = "__getitem__")]
-    fn getitem(&self, index_or_key: &Bound<'_, PyAny>) -> PyResult<PyColumn> {
-        self.get_item_camel(index_or_key)
-    }
 
     fn array_distinct(&self) -> PyColumn {
         PyColumn {
@@ -3392,13 +3103,11 @@ impl PyColumn {
     }
 
     fn asc(&self) -> PySortOrder {
-        let name = self.inner.name().to_string();
-        PySortOrder { inner: self.inner.asc(), col_name: name }
+        PySortOrder { inner: self.inner.asc() }
     }
 
     fn desc(&self) -> PySortOrder {
-        let name = self.inner.name().to_string();
-        PySortOrder { inner: self.inner.desc(), col_name: name }
+        PySortOrder { inner: self.inner.desc() }
     }
 
     /// Descending sort, nulls last. PySpark desc_nulls_last.
@@ -3684,7 +3393,11 @@ impl PyColumn {
         let result = extract.call1((window, false))?;
         let (partition_by, order_by, use_running_aggregate): (Vec<String>, Vec<String>, bool) =
             result.extract()?;
-        column_over_window(self, partition_by, order_by, use_running_aggregate)
+        let partition_strs: Vec<&str> = partition_by.iter().map(|s| s.as_str()).collect();
+        self.inner
+            .over_window(&partition_strs[..], &order_by, use_running_aggregate)
+            .map(|c| PyColumn { inner: c })
+            .map_err(to_py_err)
     }
 }
 
@@ -4917,27 +4630,6 @@ fn try_add(left: &PyColumn, right: &PyColumn) -> PyColumn {
 }
 
 #[pyfunction]
-#[pyo3(signature = (*columns))]
-fn concat(columns: &Bound<'_, PyTuple>) -> PyResult<PyColumn> {
-    let mut cols: Vec<Column> = Vec::with_capacity(columns.len());
-    for item in columns.iter() {
-        let py_col = item.downcast::<PyColumn>().map_err(|_| {
-            PyErr::new::<pyo3::exceptions::PyTypeError, _>("concat expects Column expressions")
-        })?;
-        cols.push(py_col.borrow().inner.clone());
-    }
-    if cols.is_empty() {
-        return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
-            "concat requires at least one column",
-        ));
-    }
-    let refs: Vec<&Column> = cols.iter().collect();
-    Ok(PyColumn {
-        inner: functions::concat(&refs),
-    })
-}
-
-#[pyfunction]
 #[pyo3(signature = (separator, *columns))]
 fn concat_ws(separator: &str, columns: &Bound<'_, PyTuple>) -> PyResult<PyColumn> {
     let mut cols: Vec<Column> = Vec::with_capacity(columns.len());
@@ -5166,7 +4858,7 @@ fn struct_(columns: &Bound<'_, PyTuple>) -> PyResult<PyColumn> {
     Ok(PyColumn {
         inner: functions::struct_(&refs),
     })
-
+}
 
 #[pymodule]
 fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
