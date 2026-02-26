@@ -15,7 +15,7 @@ pub use sqlparser::ast::Statement;
 fn parse_sql_to_statement(query: &str) -> Result<Statement, PolarsError> {
     spark_sql_parser::parse_sql(query).map_err(|e| {
         let msg = e.to_string();
-        let hint = " Only SELECT, CREATE SCHEMA/DATABASE, and DROP TABLE/VIEW/SCHEMA are supported for execution.";
+        let hint = " Only SELECT, CREATE SCHEMA/DATABASE, and DROP TABLE/VIEW/SCHEMA/DATABASE are supported for execution.";
         PolarsError::InvalidOperation(
             format!("{msg}{hint}").into(),
         )

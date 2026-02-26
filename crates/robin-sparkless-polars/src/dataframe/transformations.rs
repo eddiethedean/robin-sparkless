@@ -678,6 +678,7 @@ pub fn with_column_renamed(
 }
 
 /// Replace values in a column: where column == old_value, use new_value. PySpark replace (single column).
+/// Coerces the equality so string–numeric comparisons (e.g. int column vs string literal) work like PySpark.
 pub fn replace(
     df: &DataFrame,
     column_name: &str,
@@ -687,7 +688,9 @@ pub fn replace(
 ) -> Result<DataFrame, PolarsError> {
     use polars::prelude::*;
     let resolved = df.resolve_column_name(column_name)?;
-    let repl = when(col(resolved.as_str()).eq(old_value))
+    let eq_expr = col(resolved.as_str()).eq(old_value);
+    let coerced_eq = df.coerce_string_numeric_comparisons(eq_expr)?;
+    let repl = when(coerced_eq)
         .then(new_value)
         .otherwise(col(resolved.as_str()));
     let lf = df.lazy_frame().with_column(repl.alias(resolved.as_str()));

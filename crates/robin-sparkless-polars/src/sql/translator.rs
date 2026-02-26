@@ -221,6 +221,19 @@ pub fn translate(
                 session.is_case_sensitive(),
             ))
         }
+        Statement::Drop {
+            object_type: ObjectType::Database,
+            names,
+            ..
+        } => {
+            for obj_name in names {
+                session.drop_database(&obj_name.to_string());
+            }
+            Ok(DataFrame::from_polars_with_options(
+                PlDataFrame::empty(),
+                session.is_case_sensitive(),
+            ))
+        }
         Statement::Drop { names, .. } => {
             // Any other DROP (e.g. MaterializedView): treat as table/view drop for parity (#745).
             for obj_name in names {
@@ -242,7 +255,7 @@ pub fn translate(
         Statement::Delete(d) => translate_delete(session, d),
         Statement::ExplainTable { table_name, .. } => translate_describe_table(session, table_name),
         _ => Err(PolarsError::InvalidOperation(
-            "SQL: only SELECT, CREATE SCHEMA/DATABASE, DROP TABLE/VIEW/SCHEMA, and DESCRIBE are supported."
+            "SQL: only SELECT, CREATE SCHEMA/DATABASE, DROP TABLE/VIEW/SCHEMA/DATABASE, and DESCRIBE are supported."
                 .into(),
         )),
     }

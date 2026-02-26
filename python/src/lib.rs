@@ -160,6 +160,8 @@ fn json_value_to_py_with_schema(
         (Some(DataType::String), JsonValue::String(s)) => {
             try_coerce_string_to_numeric_or_bool(py, s).unwrap_or_else(|| s.clone().into_py(py))
         }
+        // Schema says String but engine sent number (e.g. cast to string, inference): preserve string type in Row.
+        (Some(DataType::String), JsonValue::Number(n)) => n.to_string().into_py(py),
         (Some(DataType::Array(elem_type)), JsonValue::Array(arr)) => {
             let list = PyList::empty_bound(py);
             for v in arr {
@@ -1471,6 +1473,13 @@ fn py_tuple_or_single_to_vec_string(tup: &Bound<'_, PyTuple>) -> PyResult<Vec<St
         if let Ok(list) = item.downcast::<PyList>() {
             let mut out = Vec::with_capacity(list.len());
             for x in list.iter() {
+                out.push(x.extract::<String>()?);
+            }
+            return Ok(out);
+        }
+        if let Ok(inner_tup) = item.downcast::<PyTuple>() {
+            let mut out = Vec::with_capacity(inner_tup.len());
+            for x in inner_tup.iter() {
                 out.push(x.extract::<String>()?);
             }
             return Ok(out);
@@ -3888,6 +3897,13 @@ impl PyColumn {
         }
     }
 
+    /// SQL LIKE pattern match (PySpark like). Supports % and _ wildcards.
+    fn like(&self, pattern: &str) -> PyColumn {
+        PyColumn {
+            inner: self.inner.like(pattern, None),
+        }
+    }
+
     /// True if string starts with prefix (PySpark startswith).
     fn startswith(&self, prefix: &str) -> PyColumn {
         PyColumn {
@@ -5766,6 +5782,12 @@ fn ltrim(column: &PyColumn) -> PyColumn {
 }
 
 #[pyfunction]
+#[pyo3(name = "native_ltrim")]
+fn native_ltrim(column: &PyColumn) -> PyColumn {
+    ltrim(column)
+}
+
+#[pyfunction]
 #[pyo3(name = "native_rtrim")]
 fn native_rtrim(column: &PyColumn) -> PyColumn {
     PyColumn {
@@ -5845,6 +5867,46 @@ fn native_length(column: &PyColumn) -> PyColumn {
 fn repeat(column: &PyColumn, n: i32) -> PyColumn {
     PyColumn {
         inner: functions::repeat(&column.inner, n),
+    }
+}
+
+#[pyfunction]
+#[pyo3(name = "native_lpad")]
+fn native_lpad(column: &PyColumn, length: i32, pad: &str) -> PyColumn {
+    PyColumn {
+        inner: functions::lpad(&column.inner, length, pad),
+    }
+}
+
+#[pyfunction]
+#[pyo3(name = "native_rpad")]
+fn native_rpad(column: &PyColumn, length: i32, pad: &str) -> PyColumn {
+    PyColumn {
+        inner: functions::rpad(&column.inner, length, pad),
+    }
+}
+
+#[pyfunction]
+#[pyo3(name = "native_array_union")]
+fn native_array_union(a: &PyColumn, b: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: functions::array_union(&a.inner, &b.inner),
+    }
+}
+
+#[pyfunction]
+#[pyo3(name = "native_array_intersect")]
+fn native_array_intersect(a: &PyColumn, b: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: functions::array_intersect(&a.inner, &b.inner),
+    }
+}
+
+#[pyfunction]
+#[pyo3(name = "native_array_except")]
+fn native_array_except(a: &PyColumn, b: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: functions::array_except(&a.inner, &b.inner),
     }
 }
 
@@ -6220,6 +6282,7 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(hex, m)?)?;
     m.add_function(wrap_pyfunction!(round, m)?)?;
     m.add_function(wrap_pyfunction!(ltrim, m)?)?;
+    m.add_function(wrap_pyfunction!(native_ltrim, m)?)?;
     m.add_function(wrap_pyfunction!(native_rtrim, m)?)?;
     m.add_function(wrap_pyfunction!(rtrim, m)?)?;
     m.add_function(wrap_pyfunction!(initcap, m)?)?;
@@ -6233,6 +6296,11 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(soundex, m)?)?;
     m.add_function(wrap_pyfunction!(repeat, m)?)?;
     m.add_function(wrap_pyfunction!(levenshtein, m)?)?;
+    m.add_function(wrap_pyfunction!(native_lpad, m)?)?;
+    m.add_function(wrap_pyfunction!(native_rpad, m)?)?;
+    m.add_function(wrap_pyfunction!(native_array_union, m)?)?;
+    m.add_function(wrap_pyfunction!(native_array_intersect, m)?)?;
+    m.add_function(wrap_pyfunction!(native_array_except, m)?)?;
     m.add_function(wrap_pyfunction!(try_cast, m)?)?;
     m.add_function(wrap_pyfunction!(try_add, m)?)?;
     m.add_function(wrap_pyfunction!(concat, m)?)?;

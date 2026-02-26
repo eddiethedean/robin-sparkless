@@ -1,4 +1,16 @@
-from sparkless.errors import AnalysisException, IllegalArgumentException
+from sparkless.errors import (
+    AnalysisException,
+    IllegalArgumentException,
+    PySparkRuntimeError,
+    PySparkTypeError,
+    PySparkValueError,
+)
 
-__all__ = ["AnalysisException", "IllegalArgumentException"]
+__all__ = [
+    "AnalysisException",
+    "IllegalArgumentException",
+    "PySparkValueError",
+    "PySparkTypeError",
+    "PySparkRuntimeError",
+]
 
