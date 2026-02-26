@@ -43,6 +43,9 @@ fn polars_type_to_data_type(polars_type: &PlDataType) -> DataType {
         PlDataType::String => DataType::String,
         PlDataType::Int32 => DataType::Integer,
         PlDataType::Int64 => DataType::Long,
+        // Polars rank(), row_number(), dense_rank() return UInt32; map to Integer for PySpark parity (int not str).
+        PlDataType::UInt32 => DataType::Integer,
+        PlDataType::UInt64 => DataType::Long,
         PlDataType::Float32 | PlDataType::Float64 => DataType::Double,
         PlDataType::Boolean => DataType::Boolean,
         PlDataType::Date => DataType::Date,
@@ -111,5 +114,21 @@ mod tests {
         let polars_schema = original.to_polars_schema();
         let roundtrip = StructType::from_polars_schema(&polars_schema);
         assert_eq!(roundtrip.fields().len(), original.fields().len());
+    }
+
+    /// Window rank/row_number return UInt32 in Polars; we map to Integer for PySpark parity (int in Row, not str).
+    #[test]
+    fn test_window_uint_maps_to_integer_long() {
+        let polars_schema = Schema::from_iter(vec![
+            Field::new("rn".into(), PlDataType::UInt32),
+            Field::new("rank".into(), PlDataType::UInt64),
+        ]);
+        let struct_type = StructType::from_polars_schema(&polars_schema);
+        assert_eq!(struct_type.fields().len(), 2);
+        assert!(matches!(
+            struct_type.fields()[0].data_type,
+            DataType::Integer
+        ));
+        assert!(matches!(struct_type.fields()[1].data_type, DataType::Long));
     }
 }
