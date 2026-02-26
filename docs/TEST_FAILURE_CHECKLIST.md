@@ -1,7 +1,7 @@
 # Test Failure Checklist
 
-**Last run:** `pytest tests/python tests/upstream_sparkless -n 10`  
-**Result:** 700 failed, 2106 passed, 25 skipped (2831 total)
+**Last run:** `pytest tests/python tests/upstream_sparkless -n 10` (after `maturin develop --release`)  
+**Result:** 656 failed, 2150 passed, 25 skipped (2831 total)
 
 This checklist tracks fixes needed to reduce test failures. Items are grouped by category and ordered by estimated impact.
 
@@ -12,17 +12,17 @@ This checklist tracks fixes needed to reduce test failures. Items are grouped by
 | Bucket | Approx. count | Example error / cause |
 |--------|----------------|------------------------|
 | **DataFrames are not equivalent** | ~24 | Row count, value, or remaining schema/parity diffs (was ~68; reduced by relaxing schema when field count matches but names differ) |
-| **Window/rank: expect int, got string** | ~30+ | `assert '1' == 1`, `Row 0 key 'rn': '1' != 1` — window rank/dense_rank/row_number return string; tests expect int |
+| **Window/rank: expect int, got string** | ~3 | Remaining edge cases (was ~30+; fixed by mapping Polars UInt32/UInt64 → Integer/Long in schema_conv) |
 | **KeyError** | ~17 | agg column naming, DDL/schema parsing (`'name'`, `'a'`, etc.) |
 | **simpleString missing** | 3 | `AttributeError: 'IntegerType' object has no attribute 'simpleString'` — PySpark type API |
 | **json_tuple API** | 2 | `TypeError: json_tuple keys must be strings` |
 | **SparklessError: duplicate column** | ~5 | `duplicate: column with name 'count'` / `duplicate output name 'manager_id'` |
 | **SparklessError: string vs numeric** | 7 | `cannot compare string with numeric type (i64)` — eq_null_safe / coercion paths |
-| **replace() API** | 5 | `replace() missing 1 required positional argument: 'value'`; `PyColumn.replace() missing ... 'replacement'` |
+| **replace() API** | 3 | `replace() missing 1 required positional argument: 'value'`; `PyColumn.replace() missing ... 'replacement'` |
 | **ImportError: PySparkValueError** | 3 | `cannot import name 'PySparkValueError' from 'sparkless.core.exceptions'` |
 | **orderBy direction** | 2 | `assert [1,2,3] == [3,2,1]` — ascending=False not applied |
 | **head() return type** | 2 | `'list' object has no attribute 'collect'` — head() returns list |
-| **DESCRIBE EXTENDED** | 1 | `Table or view 'EXTENDED' not found` |
+| **DESCRIBE EXTENDED** | 0 | `Table or view 'EXTENDED' not found` (if any) |
 | **Struct/Array/Map / first / Row format / DDL / Misc** | remainder | withField, first/ignorenulls, tuple vs dict, create_data_frame DDL, pow, union, spark_context, etc. |
 
 *Note: Row/comparison str vs int and Collect/Row string-vs-number buckets were fixed in prior commits (Row __lt__/__ge__, assert_rows_equal keys, json_value_to_py_with_schema String preservation).*
@@ -59,6 +59,11 @@ This checklist tracks fixes needed to reduce test failures. Items are grouped by
 - [x] In `compare_schemas`, do not fail on name mismatch; allow position-based data comparison in `compare_dataframes`.
 - **Affected:** ~44 parity tests (math, string, null handling, etc.)
 - **Change:** `tests/upstream_sparkless/tests/tools/comparison_utils.py`
+
+### 4c. Window/rank: return int not string
+- [x] Map Polars UInt32/UInt64 to Integer/Long in `polars_type_to_data_type` so rank/row_number/dense_rank columns have numeric schema; collect then emits Python int.
+- **Affected:** ~27 tests (window function comparisons, row_number/rank in Row).
+- **Change:** `crates/robin-sparkless-polars/src/schema_conv.rs`
 
 ---
 
