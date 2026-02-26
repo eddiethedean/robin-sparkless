@@ -122,6 +122,18 @@ impl PySparkSessionBuilder {
         slf
     }
 
+    /// PySpark builder.option(key, value); value can be str, bool, int, etc. (stringified).
+    fn option<'a>(
+        mut slf: PyRefMut<'a, Self>,
+        key: &str,
+        value: &Bound<'_, PyAny>,
+    ) -> PyResult<PyRefMut<'a, Self>> {
+        let s = option_value_to_string(value)?;
+        let old = std::mem::replace(&mut slf.inner, SparkSessionBuilder::new());
+        slf.inner = old.config(key, &s);
+        Ok(slf)
+    }
+
     fn get_or_create(&self, py: Python<'_>) -> PyResult<Py<PySparkSession>> {
         let session = self.inner.clone().get_or_create();
         let obj = Py::new(py, PySparkSession { inner: session })?;
@@ -336,9 +348,19 @@ impl PySparkSession {
         }
     }
 
+    #[getter]
     fn conf(slf: PyRef<Self>) -> PyRuntimeConfig {
         let py = slf.py();
         PyRuntimeConfig {
+            session: slf.into_py(py),
+        }
+    }
+
+    #[getter]
+    #[pyo3(name = "sparkContext")]
+    fn spark_context(slf: PyRef<Self>) -> PySparkContext {
+        let py = slf.py();
+        PySparkContext {
             session: slf.into_py(py),
         }
     }
@@ -491,6 +513,11 @@ struct PyRuntimeConfig {
 
 #[pymethods]
 impl PyRuntimeConfig {
+    /// Allow spark.conf() as well as spark.conf (property); returns self.
+    fn __call__(slf: PyRef<Self>, py: Python<'_>) -> Py<PyAny> {
+        slf.into_py(py)
+    }
+
     fn get(&self, py: Python<'_>, key: &str) -> PyResult<Option<String>> {
         let session = self.session.bind(py).downcast::<PySparkSession>().map_err(|_| {
             PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected SparkSession")
@@ -506,6 +533,32 @@ impl PyRuntimeConfig {
         })?;
         let sess = session.borrow();
         Ok(sess.inner.is_case_sensitive())
+    }
+}
+
+/// Minimal stub for PySpark compatibility: spark.sparkContext.appName / .version
+#[pyclass]
+struct PySparkContext {
+    session: Py<PyAny>,
+}
+
+#[pymethods]
+impl PySparkContext {
+    #[getter]
+    fn app_name(&self, py: Python<'_>) -> PyResult<String> {
+        let session = self.session.bind(py).downcast::<PySparkSession>().map_err(|_| {
+            PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected SparkSession")
+        })?;
+        let sess = session.borrow();
+        Ok(sess
+            .inner
+            .app_name()
+            .unwrap_or_else(|| "sparkless".to_string()))
+    }
+
+    #[getter]
+    fn version(&self, _py: Python<'_>) -> String {
+        env!("CARGO_PKG_VERSION").to_string()
     }
 }
 
@@ -1162,20 +1215,102 @@ fn py_tuple_or_single_to_vec_string(tup: &Bound<'_, PyTuple>) -> PyResult<Vec<St
     Ok(out)
 }
 
-/// PySpark join(on=...): str or list of str -> Vec<String>
-fn py_join_on_to_vec(on: &Bound<'_, PyAny>) -> PyResult<Vec<String>> {
-    if let Ok(s) = on.extract::<String>() {
+/// Normalize column spec to Vec<String>: "x" | col("x") | ["x","y"] | (col("a"),) -> Vec<String>
+fn py_cols_to_vec(any: &Bound<'_, PyAny>) -> PyResult<Vec<String>> {
+    if any.is_none() {
+        return Ok(Vec::new());
+    }
+    if let Ok(s) = any.extract::<String>() {
         return Ok(vec![s]);
     }
-    if let Ok(list) = on.downcast::<PyList>() {
-        let mut out = Vec::with_capacity(list.len());
+    if let Ok(c) = any.downcast::<PyColumn>() {
+        return Ok(vec![c.borrow().inner.name().to_string()]);
+    }
+    if let Ok(list) = any.downcast::<PyList>() {
+        let mut out = Vec::new();
         for item in list.iter() {
-            out.push(item.extract::<String>()?);
+            out.extend(py_one_or_many_cols(&item)?);
+        }
+        return Ok(out);
+    }
+    if let Ok(tup) = any.downcast::<PyTuple>() {
+        let mut out = Vec::new();
+        for item in tup.iter() {
+            out.extend(py_one_or_many_cols(&item)?);
         }
         return Ok(out);
     }
     Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
-        "join(on=...) expects str or list of str",
+        "group_by/groupBy expects str, Column, or list/tuple of str or Column",
+    ))
+}
+
+fn py_one_or_many_cols(item: &Bound<'_, PyAny>) -> PyResult<Vec<String>> {
+    if let Ok(s) = item.extract::<String>() {
+        return Ok(vec![s]);
+    }
+    if let Ok(c) = item.downcast::<PyColumn>() {
+        return Ok(vec![c.borrow().inner.name().to_string()]);
+    }
+    if let Ok(list) = item.downcast::<PyList>() {
+        let mut out = Vec::new();
+        for sub in list.iter() {
+            out.extend(py_one_or_many_cols(&sub)?);
+        }
+        return Ok(out);
+    }
+    if let Ok(tup) = item.downcast::<PyTuple>() {
+        let mut out = Vec::new();
+        for sub in tup.iter() {
+            out.extend(py_one_or_many_cols(&sub)?);
+        }
+        return Ok(out);
+    }
+    Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+        "groupBy() expects column names as str, Column, or list/tuple of those",
+    ))
+}
+
+/// PySpark join(on=...): str, Column, or list of str/Column -> Vec<String>
+fn py_join_on_to_vec(on: &Bound<'_, PyAny>) -> PyResult<Vec<String>> {
+    if let Ok(s) = on.extract::<String>() {
+        return Ok(vec![s]);
+    }
+    if let Ok(col) = on.downcast::<PyColumn>() {
+        return Ok(vec![col.borrow().inner.name().to_string()]);
+    }
+    if let Ok(list) = on.downcast::<PyList>() {
+        let mut out = Vec::with_capacity(list.len());
+        for item in list.iter() {
+            if let Ok(s) = item.extract::<String>() {
+                out.push(s);
+            } else if let Ok(c) = item.downcast::<PyColumn>() {
+                out.push(c.borrow().inner.name().to_string());
+            } else {
+                return Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+                    "join(on=...) list elements must be str or Column",
+                ));
+            }
+        }
+        return Ok(out);
+    }
+    if let Ok(tup) = on.downcast::<PyTuple>() {
+        let mut out = Vec::with_capacity(tup.len());
+        for item in tup.iter() {
+            if let Ok(s) = item.extract::<String>() {
+                out.push(s);
+            } else if let Ok(c) = item.downcast::<PyColumn>() {
+                out.push(c.borrow().inner.name().to_string());
+            } else {
+                return Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+                    "join(on=...) tuple elements must be str or Column",
+                ));
+            }
+        }
+        return Ok(out);
+    }
+    Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+        "join(on=...) expects str, Column, or list/tuple of str or Column",
     ))
 }
 
@@ -1857,8 +1992,10 @@ impl PyDataFrame {
             .map_err(to_py_err)
     }
 
-    fn group_by(&self, column_names: Vec<String>) -> PyResult<PyGroupedData> {
-        let refs: Vec<&str> = column_names.iter().map(|s| s.as_str()).collect();
+    #[pyo3(signature = (column_names))]
+    fn group_by(&self, column_names: &Bound<'_, PyAny>) -> PyResult<PyGroupedData> {
+        let names = py_cols_to_vec(column_names)?;
+        let refs: Vec<&str> = names.iter().map(|s| s.as_str()).collect();
         self.inner
             .group_by(refs)
             .map(|gd| PyGroupedData { inner: gd })
@@ -1869,30 +2006,8 @@ impl PyDataFrame {
     fn group_by_camel(&self, cols: &Bound<'_, PyTuple>) -> PyResult<PyGroupedData> {
         let mut names: Vec<String> = Vec::with_capacity(cols.len());
         for item in cols.iter() {
-            if let Ok(s) = item.extract::<String>() {
-                names.push(s);
-            } else if let Ok(c) = item.downcast::<PyColumn>() {
-                names.push(c.borrow().inner.name().to_string());
-            } else if let Ok(list) = item.downcast::<PyList>() {
-                for sub in list.iter() {
-                    if let Ok(s) = sub.extract::<String>() {
-                        names.push(s);
-                    } else if let Ok(c) = sub.downcast::<PyColumn>() {
-                        names.push(c.borrow().inner.name().to_string());
-                    }
-                }
-            } else if let Ok(tup) = item.downcast::<PyTuple>() {
-                for sub in tup.iter() {
-                    if let Ok(s) = sub.extract::<String>() {
-                        names.push(s);
-                    } else if let Ok(c) = sub.downcast::<PyColumn>() {
-                        names.push(c.borrow().inner.name().to_string());
-                    }
-                }
-            } else {
-                return Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
-                    "groupBy() expects column names as str, Column, or list/tuple of those",
-                ));
+            for n in py_one_or_many_cols(item)? {
+                names.push(n);
             }
         }
         let refs: Vec<&str> = names.iter().map(|s| s.as_str()).collect();
@@ -2270,6 +2385,11 @@ impl PyDataFrame {
             .describe()
             .map(|df| PyDataFrame { inner: df })
             .map_err(to_py_err)
+    }
+
+    /// PySpark alias for describe().
+    fn summary(&self) -> PyResult<PyDataFrame> {
+        self.describe()
     }
 
     #[pyo3(signature = (mode=None))]
@@ -2947,15 +3067,17 @@ impl PyColumn {
     }
 
     /// Null-safe equality (NULL <=> NULL returns True). PySpark eqNullSafe.
-    fn eq_null_safe(&self, other: &PyColumn) -> PyColumn {
-        PyColumn {
-            inner: self.inner.eq_null_safe(&other.inner),
-        }
+    /// Accepts Column or scalar (int, float, str, bool, None) so .eqNullSafe(lit(x)) or .eqNullSafe(x) work.
+    fn eq_null_safe(&self, other: &Bound<'_, PyAny>) -> PyResult<PyColumn> {
+        let other_col = py_any_to_column(other)?;
+        Ok(PyColumn {
+            inner: self.inner.eq_null_safe(&other_col),
+        })
     }
 
     /// PySpark camelCase alias for eq_null_safe.
     #[pyo3(name = "eqNullSafe")]
-    fn eq_null_safe_camel(&self, other: &PyColumn) -> PyColumn {
+    fn eq_null_safe_camel(&self, other: &Bound<'_, PyAny>) -> PyResult<PyColumn> {
         self.eq_null_safe(other)
     }
 
@@ -3102,6 +3224,11 @@ impl PyColumn {
         }
     }
 
+    #[pyo3(name = "isNotNull")]
+    fn is_not_null_camel(&self) -> PyColumn {
+        self.is_not_null()
+    }
+
     fn asc(&self) -> PySortOrder {
         PySortOrder { inner: self.inner.asc() }
     }
@@ -3157,6 +3284,13 @@ impl PyColumn {
         }
     }
 
+    /// PySpark Column.replace(search, replacement) - literal string replace.
+    fn replace(&self, search: &str, replacement: &str) -> PyColumn {
+        PyColumn {
+            inner: self.inner.replace(search, replacement),
+        }
+    }
+
     fn lower(&self) -> PyColumn {
         PyColumn {
             inner: self.inner.lower(),
@@ -3201,6 +3335,18 @@ impl PyColumn {
     fn ltrim(&self) -> PyColumn {
         PyColumn {
             inner: self.inner.ltrim(),
+        }
+    }
+
+    fn rtrim(&self) -> PyColumn {
+        PyColumn {
+            inner: self.inner.rtrim(),
+        }
+    }
+
+    fn second(&self) -> PyColumn {
+        PyColumn {
+            inner: self.inner.second(),
         }
     }
 
@@ -4581,6 +4727,36 @@ fn ltrim(column: &PyColumn) -> PyColumn {
 }
 
 #[pyfunction]
+#[pyo3(name = "native_rtrim")]
+fn native_rtrim(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: functions::rtrim(&column.inner),
+    }
+}
+
+#[pyfunction]
+fn rtrim(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: functions::rtrim(&column.inner),
+    }
+}
+
+#[pyfunction]
+#[pyo3(name = "native_second")]
+fn native_second(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: functions::second(&column.inner),
+    }
+}
+
+#[pyfunction]
+fn second(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: functions::second(&column.inner),
+    }
+}
+
+#[pyfunction]
 fn hour(column: &PyColumn) -> PyColumn {
     PyColumn {
         inner: functions::hour(&column.inner),
@@ -4875,6 +5051,7 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyDataFrameNaFunctions>()?;
     m.add_class::<PyCubeRollupData>()?;
     m.add_class::<PyRuntimeConfig>()?;
+    m.add_class::<PySparkContext>()?;
     m.add_class::<PyCatalog>()?;
     m.add_class::<PyWhenBuilder>()?;
     m.add_class::<PyThenBuilder>()?;
@@ -4939,6 +5116,10 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(floor, m)?)?;
     m.add_function(wrap_pyfunction!(round, m)?)?;
     m.add_function(wrap_pyfunction!(ltrim, m)?)?;
+    m.add_function(wrap_pyfunction!(native_rtrim, m)?)?;
+    m.add_function(wrap_pyfunction!(rtrim, m)?)?;
+    m.add_function(wrap_pyfunction!(native_second, m)?)?;
+    m.add_function(wrap_pyfunction!(second, m)?)?;
     m.add_function(wrap_pyfunction!(hour, m)?)?;
     m.add_function(wrap_pyfunction!(minute, m)?)?;
     m.add_function(wrap_pyfunction!(soundex, m)?)?;

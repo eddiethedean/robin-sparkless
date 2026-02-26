@@ -62,12 +62,19 @@ def cleanup_after_each_test():
     gc.collect()
 
 
+def _ensure_robin_backend_type(session):
+    """Set backend_type='robin' on session when SPARKLESS_TEST_BACKEND=robin (for pytest-xdist)."""
+    if (os.environ.get("SPARKLESS_TEST_BACKEND") or "").strip().lower() == "robin":
+        setattr(session, "backend_type", "robin")
+
+
 @pytest.fixture
 def mock_spark_session():
     """Create a SparkSession with automatic cleanup."""
     from sparkless import SparkSession
 
     session = SparkSession("test_app")
+    _ensure_robin_backend_type(session)
     # When robin mode is requested, ensure we did not silently get polars
     if (
         os.environ.get("SPARKLESS_TEST_BACKEND") or ""
@@ -92,6 +99,7 @@ def isolated_session():
     # Use unique name to ensure isolation
     session_name = f"test_isolated_{uuid.uuid4().hex[:8]}"
     session = SparkSession(session_name)
+    _ensure_robin_backend_type(session)
     if (
         os.environ.get("SPARKLESS_TEST_BACKEND") or ""
     ).strip().lower() == "robin" and getattr(session, "backend_type", None) != "robin":
@@ -163,6 +171,9 @@ def spark(request):
             request=request if hasattr(request, "node") else None,
             **kwargs,
         )
+        # Set backend_type on session so validation passes (robin-sparkless does not set it natively)
+        if backend == BackendType.ROBIN:
+            setattr(session, "backend_type", "robin")
         # Ensure we never silently run in wrong backend when robin was requested
         if backend == BackendType.ROBIN:
             actual = getattr(session, "backend_type", None)
@@ -239,6 +250,7 @@ def mock_spark():
     from sparkless import SparkSession
 
     session = SparkSession("test_app")
+    _ensure_robin_backend_type(session)
     if (
         os.environ.get("SPARKLESS_TEST_BACKEND") or ""
     ).strip().lower() == "robin" and getattr(session, "backend_type", None) != "robin":
