@@ -1,4 +1,7 @@
 //! PyO3 bindings for sparkless Python package. Exposes robin-sparkless as a native module.
+//! Parameter names follow PySpark camelCase where the Python API exposes them.
+
+#![allow(non_snake_case)]
 
 use pyo3::create_exception;
 use pyo3::prelude::*;
@@ -6,8 +9,8 @@ use pyo3::types::{PyBytes, PyDict, PyList, PyTuple};
 use robin_sparkless::dataframe::{JoinType, PivotedGroupedData, SaveMode, WriteFormat, WriteMode};
 use robin_sparkless::functions::{self, asc_from_name, SortOrder, ThenBuilder, WhenBuilder};
 use robin_sparkless::{
-    Column, CubeRollupData, DataFrame, DataType, GroupedData, SelectItem,
-    SparkSession, SparkSessionBuilder,
+    Column, CubeRollupData, DataFrame, DataType, GroupedData, SelectItem, SparkSession,
+    SparkSessionBuilder,
 };
 use serde_json::Value as JsonValue;
 use std::cell::RefCell;
@@ -43,7 +46,12 @@ fn extract_allow_missing_columns(kwargs: Option<&Bound<'_, PyDict>>) -> PyResult
     Ok(false)
 }
 
-create_exception!(_native, SparklessError, pyo3::exceptions::PyRuntimeError, "Sparkless error");
+create_exception!(
+    _native,
+    SparklessError,
+    pyo3::exceptions::PyRuntimeError,
+    "Sparkless error"
+);
 
 /// Convert serde_json::Value to Python object.
 fn json_to_py(value: &JsonValue, py: Python<'_>) -> PyResult<PyObject> {
@@ -191,9 +199,7 @@ fn register_active_session(
     // Update global-ish list (best-effort; tests mutate it directly).
     if let Ok(list_any) = ty.getattr("_active_sessions") {
         if let Ok(list) = list_any.downcast::<PyList>() {
-            let already = list
-                .iter()
-                .any(|it| it.as_ptr() == ptr);
+            let already = list.iter().any(|it| it.as_ptr() == ptr);
             if !already {
                 list.append(session.clone_ref(py))?;
             }
@@ -312,7 +318,10 @@ impl PySparkSession {
 
     #[classmethod]
     #[pyo3(name = "getActiveSession")]
-    fn get_active_session(_cls: &Bound<'_, pyo3::types::PyType>, py: Python<'_>) -> PyResult<Option<Py<PySparkSession>>> {
+    fn get_active_session(
+        _cls: &Bound<'_, pyo3::types::PyType>,
+        py: Python<'_>,
+    ) -> PyResult<Option<Py<PySparkSession>>> {
         let ty = py.get_type_bound::<PySparkSession>();
         if let Ok(singleton) = ty.getattr("_singleton_session") {
             if !singleton.is_none() {
@@ -409,11 +418,13 @@ impl PySparkSession {
     }
 
     fn create_or_replace_temp_view(&self, name: &str, df: &PyDataFrame) {
-        self.inner.create_or_replace_temp_view(name, df.inner.clone());
+        self.inner
+            .create_or_replace_temp_view(name, df.inner.clone());
     }
 
     fn create_or_replace_global_temp_view(&self, name: &str, df: &PyDataFrame) {
-        self.inner.create_or_replace_global_temp_view(name, df.inner.clone());
+        self.inner
+            .create_or_replace_global_temp_view(name, df.inner.clone());
     }
 
     fn drop_temp_view(&self, name: &str) {
@@ -457,7 +468,8 @@ impl PySparkSession {
         schema: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<PyDataFrame> {
         let (data, from_pandas) = normalize_create_dataframe_input(py, data)?;
-        let (rows, schema, schema_was_inferred) = python_data_and_schema(py, &data, schema, from_pandas)?;
+        let (rows, schema, schema_was_inferred) =
+            python_data_and_schema(py, &data, schema, from_pandas)?;
         self.inner
             .create_dataframe_from_rows(rows, schema, false, schema_was_inferred)
             .map(|df| PyDataFrame { inner: df })
@@ -512,7 +524,11 @@ impl PySparkSession {
     }
 
     #[cfg(feature = "delta")]
-    fn read_delta_with_version(&self, name_or_path: &str, version: Option<i64>) -> PyResult<PyDataFrame> {
+    fn read_delta_with_version(
+        &self,
+        name_or_path: &str,
+        version: Option<i64>,
+    ) -> PyResult<PyDataFrame> {
         self.inner
             .read_delta_with_version(name_or_path, version)
             .map(|df| PyDataFrame { inner: df })
@@ -554,18 +570,22 @@ impl PyRuntimeConfig {
     }
 
     fn get(&self, py: Python<'_>, key: &str) -> PyResult<Option<String>> {
-        let session = self.session.bind(py).downcast::<PySparkSession>().map_err(|_| {
-            PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected SparkSession")
-        })?;
+        let session = self
+            .session
+            .bind(py)
+            .downcast::<PySparkSession>()
+            .map_err(|_| PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected SparkSession"))?;
         let sess = session.borrow();
         let config = sess.inner.get_config();
         Ok(config.get(key).cloned())
     }
 
     fn is_case_sensitive(&self, py: Python<'_>) -> PyResult<bool> {
-        let session = self.session.bind(py).downcast::<PySparkSession>().map_err(|_| {
-            PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected SparkSession")
-        })?;
+        let session = self
+            .session
+            .bind(py)
+            .downcast::<PySparkSession>()
+            .map_err(|_| PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected SparkSession"))?;
         let sess = session.borrow();
         Ok(sess.inner.is_case_sensitive())
     }
@@ -581,9 +601,11 @@ struct PySparkContext {
 impl PySparkContext {
     #[getter]
     fn app_name(&self, py: Python<'_>) -> PyResult<String> {
-        let session = self.session.bind(py).downcast::<PySparkSession>().map_err(|_| {
-            PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected SparkSession")
-        })?;
+        let session = self
+            .session
+            .bind(py)
+            .downcast::<PySparkSession>()
+            .map_err(|_| PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected SparkSession"))?;
         let sess = session.borrow();
         Ok(sess
             .inner
@@ -607,9 +629,11 @@ impl PyCatalog {
     #[pyo3(name = "listTables")]
     #[pyo3(signature = (dbName=None))]
     fn list_tables(&self, py: Python<'_>, dbName: Option<String>) -> PyResult<Vec<Py<PyTable>>> {
-        let session = self.session.bind(py).downcast::<PySparkSession>().map_err(|_| {
-            PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected SparkSession")
-        })?;
+        let session = self
+            .session
+            .bind(py)
+            .downcast::<PySparkSession>()
+            .map_err(|_| PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected SparkSession"))?;
         let sess = session.borrow();
 
         let mut out: Vec<(String, String)> = Vec::new(); // (db, table)
@@ -620,7 +644,12 @@ impl PyCatalog {
                     out.push(("global_temp".to_string(), n));
                 }
             } else {
-                for full in sess.inner.list_table_names().into_iter().chain(sess.inner.list_temp_view_names()) {
+                for full in sess
+                    .inner
+                    .list_table_names()
+                    .into_iter()
+                    .chain(sess.inner.list_temp_view_names())
+                {
                     if let Some((db_part, tbl_part)) = full.split_once('.') {
                         if db_part == db {
                             out.push((db.to_string(), tbl_part.to_string()));
@@ -631,7 +660,12 @@ impl PyCatalog {
                 }
             }
         } else {
-            for full in sess.inner.list_table_names().into_iter().chain(sess.inner.list_temp_view_names()) {
+            for full in sess
+                .inner
+                .list_table_names()
+                .into_iter()
+                .chain(sess.inner.list_temp_view_names())
+            {
                 if let Some((db_part, tbl_part)) = full.split_once('.') {
                     out.push((db_part.to_string(), tbl_part.to_string()));
                 } else {
@@ -649,18 +683,23 @@ impl PyCatalog {
 
     #[pyo3(name = "dropTempView")]
     fn drop_temp_view(&self, py: Python<'_>, name: &str) -> PyResult<()> {
-        let session = self.session.bind(py).downcast::<PySparkSession>().map_err(|_| {
-            PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected SparkSession")
-        })?.borrow();
+        let session = self
+            .session
+            .bind(py)
+            .downcast::<PySparkSession>()
+            .map_err(|_| PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected SparkSession"))?
+            .borrow();
         session.inner.drop_temp_view(name);
         Ok(())
     }
 
     #[pyo3(name = "listDatabases")]
     fn list_databases(&self, py: Python<'_>) -> PyResult<Vec<Py<PyDatabase>>> {
-        let session = self.session.bind(py).downcast::<PySparkSession>().map_err(|_| {
-            PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected SparkSession")
-        })?;
+        let session = self
+            .session
+            .bind(py)
+            .downcast::<PySparkSession>()
+            .map_err(|_| PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected SparkSession"))?;
         let sess = session.borrow();
         let names = sess.inner.list_database_names();
         let mut out = Vec::with_capacity(names.len());
@@ -677,13 +716,18 @@ impl PyCatalog {
         name: &Bound<'_, PyAny>,
         ignoreIfExists: bool,
     ) -> PyResult<()> {
-        let name: String = name.extract().map_err(|_| to_py_err("database name must be a string"))?;
+        let name: String = name
+            .extract()
+            .map_err(|_| to_py_err("database name must be a string"))?;
         if name.is_empty() {
             return Err(to_py_err("database name cannot be empty"));
         }
-        let session = self.session.bind(py).downcast::<PySparkSession>().map_err(|_| {
-            PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected SparkSession")
-        })?.borrow();
+        let session = self
+            .session
+            .bind(py)
+            .downcast::<PySparkSession>()
+            .map_err(|_| PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected SparkSession"))?
+            .borrow();
         if session.inner.database_exists(&name) {
             if ignoreIfExists {
                 return Ok(());
@@ -701,13 +745,18 @@ impl PyCatalog {
         name: &Bound<'_, PyAny>,
         ignoreIfNotExists: bool,
     ) -> PyResult<()> {
-        let name: String = name.extract().map_err(|_| to_py_err("database name must be a string"))?;
+        let name: String = name
+            .extract()
+            .map_err(|_| to_py_err("database name must be a string"))?;
         if name.is_empty() {
             return Err(to_py_err("database name cannot be empty"));
         }
-        let session = self.session.bind(py).downcast::<PySparkSession>().map_err(|_| {
-            PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected SparkSession")
-        })?.borrow();
+        let session = self
+            .session
+            .bind(py)
+            .downcast::<PySparkSession>()
+            .map_err(|_| PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected SparkSession"))?
+            .borrow();
         let existed = session.inner.database_exists(&name);
         if !existed && !ignoreIfNotExists {
             return Err(to_py_err(format!("Database '{name}' does not exist")));
@@ -718,17 +767,23 @@ impl PyCatalog {
 
     #[pyo3(name = "setCurrentDatabase")]
     fn set_current_database(&self, py: Python<'_>, name: &str) -> PyResult<()> {
-        let session = self.session.bind(py).downcast::<PySparkSession>().map_err(|_| {
-            PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected SparkSession")
-        })?.borrow();
+        let session = self
+            .session
+            .bind(py)
+            .downcast::<PySparkSession>()
+            .map_err(|_| PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected SparkSession"))?
+            .borrow();
         session.inner.set_current_database(name).map_err(to_py_err)
     }
 
     #[pyo3(name = "currentDatabase")]
     fn current_database(&self, py: Python<'_>) -> PyResult<String> {
-        let session = self.session.bind(py).downcast::<PySparkSession>().map_err(|_| {
-            PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected SparkSession")
-        })?.borrow();
+        let session = self
+            .session
+            .bind(py)
+            .downcast::<PySparkSession>()
+            .map_err(|_| PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected SparkSession"))?
+            .borrow();
         Ok(session.inner.current_database())
     }
 
@@ -739,12 +794,19 @@ impl PyCatalog {
         arg1: &Bound<'_, PyAny>,
         arg2: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<bool> {
-        let a1: String = arg1.extract().map_err(|_| to_py_err("table name must be a string"))?;
-        let session = self.session.bind(py).downcast::<PySparkSession>().map_err(|_| {
-            PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected SparkSession")
-        })?.borrow();
+        let a1: String = arg1
+            .extract()
+            .map_err(|_| to_py_err("table name must be a string"))?;
+        let session = self
+            .session
+            .bind(py)
+            .downcast::<PySparkSession>()
+            .map_err(|_| PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected SparkSession"))?
+            .borrow();
         let full = if let Some(a2_any) = arg2 {
-            let a2: String = a2_any.extract().map_err(|_| to_py_err("table name must be a string"))?;
+            let a2: String = a2_any
+                .extract()
+                .map_err(|_| to_py_err("table name must be a string"))?;
             // Prefer PySpark ordering (db, table) when it looks like a database name.
             if session.inner.database_exists(&a1) {
                 format!("{a1}.{a2}")
@@ -761,15 +823,13 @@ impl PyCatalog {
     }
 
     #[pyo3(name = "getTable", signature = (arg1, arg2=None))]
-    fn get_table(
-        &self,
-        py: Python<'_>,
-        arg1: &str,
-        arg2: Option<&str>,
-    ) -> PyResult<Py<PyTable>> {
-        let session = self.session.bind(py).downcast::<PySparkSession>().map_err(|_| {
-            PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected SparkSession")
-        })?.borrow();
+    fn get_table(&self, py: Python<'_>, arg1: &str, arg2: Option<&str>) -> PyResult<Py<PyTable>> {
+        let session = self
+            .session
+            .bind(py)
+            .downcast::<PySparkSession>()
+            .map_err(|_| PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected SparkSession"))?
+            .borrow();
         let (db, tbl) = if let Some(t) = arg2 {
             (arg1.to_string(), t.to_string())
         } else if let Some((db, tbl)) = arg1.split_once('.') {
@@ -781,32 +841,47 @@ impl PyCatalog {
         if !session.inner.table_exists(&full) && !session.inner.table_exists(&tbl) {
             return Err(to_py_err(format!("Table not found: {full}")));
         }
-        Py::new(py, PyTable { name: tbl, database: db })
+        Py::new(
+            py,
+            PyTable {
+                name: tbl,
+                database: db,
+            },
+        )
     }
 
     #[pyo3(name = "cacheTable")]
     fn cache_table(&self, py: Python<'_>, tableName: &str) -> PyResult<()> {
-        let session = self.session.bind(py).downcast::<PySparkSession>().map_err(|_| {
-            PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected SparkSession")
-        })?.borrow();
+        let session = self
+            .session
+            .bind(py)
+            .downcast::<PySparkSession>()
+            .map_err(|_| PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected SparkSession"))?
+            .borrow();
         session.inner.cache_table(tableName);
         Ok(())
     }
 
     #[pyo3(name = "uncacheTable")]
     fn uncache_table(&self, py: Python<'_>, tableName: &str) -> PyResult<()> {
-        let session = self.session.bind(py).downcast::<PySparkSession>().map_err(|_| {
-            PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected SparkSession")
-        })?.borrow();
+        let session = self
+            .session
+            .bind(py)
+            .downcast::<PySparkSession>()
+            .map_err(|_| PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected SparkSession"))?
+            .borrow();
         session.inner.uncache_table(tableName);
         Ok(())
     }
 
     #[pyo3(name = "isCached")]
     fn is_cached(&self, py: Python<'_>, tableName: &str) -> PyResult<bool> {
-        let session = self.session.bind(py).downcast::<PySparkSession>().map_err(|_| {
-            PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected SparkSession")
-        })?.borrow();
+        let session = self
+            .session
+            .bind(py)
+            .downcast::<PySparkSession>()
+            .map_err(|_| PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected SparkSession"))?
+            .borrow();
         Ok(session.inner.is_cached(tableName))
     }
 }
@@ -819,9 +894,12 @@ struct PyStorage {
 #[pymethods]
 impl PyStorage {
     fn schema_exists(&self, py: Python<'_>, name: &str) -> PyResult<bool> {
-        let session = self.session.bind(py).downcast::<PySparkSession>().map_err(|_| {
-            PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected SparkSession")
-        })?.borrow();
+        let session = self
+            .session
+            .bind(py)
+            .downcast::<PySparkSession>()
+            .map_err(|_| PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected SparkSession"))?
+            .borrow();
         Ok(session.inner.database_exists(name))
     }
 
@@ -832,9 +910,12 @@ impl PyStorage {
         table_name: &str,
         schema: &Bound<'_, PyAny>,
     ) -> PyResult<()> {
-        let session = self.session.bind(py).downcast::<PySparkSession>().map_err(|_| {
-            PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected SparkSession")
-        })?.borrow();
+        let session = self
+            .session
+            .bind(py)
+            .downcast::<PySparkSession>()
+            .map_err(|_| PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected SparkSession"))?
+            .borrow();
         if !session.inner.database_exists(schema_name) {
             session.inner.register_database(schema_name);
         }
@@ -872,7 +953,10 @@ fn simple_string_to_type(s: &str) -> String {
 
 /// Parse schema from Python: None, list of column names (str), list of (name, type) pairs,
 /// or StructType-like object with .fields (each with .name and .dataType.simpleString()).
-fn parse_schema_from_py(py: Python<'_>, schema: &Bound<'_, PyAny>) -> PyResult<Option<Vec<(String, String)>>> {
+fn parse_schema_from_py(
+    py: Python<'_>,
+    schema: &Bound<'_, PyAny>,
+) -> PyResult<Option<Vec<(String, String)>>> {
     // StructType-like: has .fields
     if let Ok(fields) = schema.getattr("fields") {
         let list = fields.downcast::<PyList>().map_err(|_| {
@@ -912,10 +996,14 @@ fn parse_schema_from_py(py: Python<'_>, schema: &Bound<'_, PyAny>) -> PyResult<O
         let mut pairs = Vec::with_capacity(list.len());
         for item in list.iter() {
             let pair = item.downcast::<pyo3::types::PyTuple>().map_err(|_| {
-                PyErr::new::<pyo3::exceptions::PyTypeError, _>("schema must be list of column names or list of (name, type)")
+                PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+                    "schema must be list of column names or list of (name, type)",
+                )
             })?;
             if pair.len() != 2 {
-                return Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>("schema pair must be (name, type)"));
+                return Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+                    "schema pair must be (name, type)",
+                ));
             }
             let name = pair.get_item(0)?.extract::<String>()?;
             let typ = pair.get_item(1)?.extract::<String>()?;
@@ -1062,15 +1150,15 @@ fn python_data_and_schema(
     }
 
     let schema_was_inferred = schema_res.is_none();
-    let mut schema = schema_res
-        .or(inferred_schema)
-        .unwrap_or_else(|| {
-            rows.first().map(|r| {
+    let mut schema = schema_res.or(inferred_schema).unwrap_or_else(|| {
+        rows.first()
+            .map(|r| {
                 (0..r.len())
                     .map(|i| (format!("_{}", i + 1), "string".to_string()))
                     .collect()
-            }).unwrap_or_default()
-        });
+            })
+            .unwrap_or_default()
+    });
     if let (Some(first_row), true) = (rows.first(), schema.iter().all(|(_, t)| t == "string")) {
         if first_row.len() == schema.len() {
             schema = schema
@@ -1111,7 +1199,10 @@ fn python_row_to_json(
         let mut keys: Vec<String> = if let Some(order) = column_order {
             order.to_vec()
         } else {
-            dict.keys().iter().map(|k| k.extract::<String>().unwrap_or_default()).collect()
+            dict.keys()
+                .iter()
+                .map(|k| k.extract::<String>().unwrap_or_default())
+                .collect()
         };
         if column_order.is_none() && !from_pandas {
             keys.sort();
@@ -1194,13 +1285,22 @@ fn infer_schema_from_first_row(
     from_pandas: bool,
 ) -> Option<Vec<(String, String)>> {
     let dict = item.downcast::<PyDict>().ok()?;
-    let mut keys: Vec<String> = dict.keys().iter().filter_map(|k| k.extract::<String>().ok()).collect();
+    let mut keys: Vec<String> = dict
+        .keys()
+        .iter()
+        .filter_map(|k| k.extract::<String>().ok())
+        .collect();
     if !from_pandas {
         keys.sort();
     }
     let mut out = Vec::with_capacity(keys.len());
     for k in &keys {
-        let typ = dict.get_item(k.as_str()).ok().flatten().map(|v| infer_type_from_py_value(&v)).unwrap_or_else(|| "string".to_string());
+        let typ = dict
+            .get_item(k.as_str())
+            .ok()
+            .flatten()
+            .map(|v| infer_type_from_py_value(&v))
+            .unwrap_or_else(|| "string".to_string());
         out.push((k.clone(), typ));
     }
     Some(out)
@@ -1427,14 +1527,22 @@ fn option_value_to_string(value: &Bound<'_, PyAny>) -> PyResult<String> {
 
 #[pymethods]
 impl PyDataFrameReader {
-    fn option<'a>(mut slf: PyRefMut<'a, Self>, key: &str, value: &Bound<'_, PyAny>) -> PyResult<PyRefMut<'a, Self>> {
+    fn option<'a>(
+        mut slf: PyRefMut<'a, Self>,
+        key: &str,
+        value: &Bound<'_, PyAny>,
+    ) -> PyResult<PyRefMut<'a, Self>> {
         let s = option_value_to_string(value)?;
         slf.options.push((key.to_string(), s));
         Ok(slf)
     }
 
     /// PySpark: options(**kwargs). opts: dict of key -> value.
-    fn options<'a>(mut slf: PyRefMut<'a, Self>, py: Python<'_>, opts: &Bound<'_, PyAny>) -> PyResult<PyRefMut<'a, Self>> {
+    fn options<'a>(
+        mut slf: PyRefMut<'a, Self>,
+        py: Python<'_>,
+        opts: &Bound<'_, PyAny>,
+    ) -> PyResult<PyRefMut<'a, Self>> {
         let dict = opts.downcast::<PyDict>().map_err(|_| {
             PyErr::new::<pyo3::exceptions::PyTypeError, _>("options() requires a dict")
         })?;
@@ -1453,9 +1561,12 @@ impl PyDataFrameReader {
     }
 
     fn load(&self, py: Python<'_>, path: &str) -> PyResult<PyDataFrame> {
-        let session = self.session.bind(py).downcast::<PySparkSession>().map_err(|_| {
-            PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected SparkSession")
-        })?.borrow();
+        let session = self
+            .session
+            .bind(py)
+            .downcast::<PySparkSession>()
+            .map_err(|_| PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected SparkSession"))?
+            .borrow();
         let mut reader = session.inner.read();
         for (k, v) in &self.options {
             reader = reader.option(k.as_str(), v.as_str());
@@ -1470,9 +1581,12 @@ impl PyDataFrameReader {
     }
 
     fn csv(&self, py: Python<'_>, path: &str) -> PyResult<PyDataFrame> {
-        let session = self.session.bind(py).downcast::<PySparkSession>().map_err(|_| {
-            PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected SparkSession")
-        })?.borrow();
+        let session = self
+            .session
+            .bind(py)
+            .downcast::<PySparkSession>()
+            .map_err(|_| PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected SparkSession"))?
+            .borrow();
         let mut reader = session.inner.read();
         for (k, v) in &self.options {
             reader = reader.option(k.clone(), v.clone());
@@ -1484,9 +1598,12 @@ impl PyDataFrameReader {
     }
 
     fn parquet(&self, py: Python<'_>, path: &str) -> PyResult<PyDataFrame> {
-        let session = self.session.bind(py).downcast::<PySparkSession>().map_err(|_| {
-            PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected SparkSession")
-        })?.borrow();
+        let session = self
+            .session
+            .bind(py)
+            .downcast::<PySparkSession>()
+            .map_err(|_| PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected SparkSession"))?
+            .borrow();
         let mut reader = session.inner.read();
         for (k, v) in &self.options {
             reader = reader.option(k.clone(), v.clone());
@@ -1498,9 +1615,12 @@ impl PyDataFrameReader {
     }
 
     fn json(&self, py: Python<'_>, path: &str) -> PyResult<PyDataFrame> {
-        let session = self.session.bind(py).downcast::<PySparkSession>().map_err(|_| {
-            PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected SparkSession")
-        })?.borrow();
+        let session = self
+            .session
+            .bind(py)
+            .downcast::<PySparkSession>()
+            .map_err(|_| PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected SparkSession"))?
+            .borrow();
         let mut reader = session.inner.read();
         for (k, v) in &self.options {
             reader = reader.option(k.clone(), v.clone());
@@ -1512,10 +1632,14 @@ impl PyDataFrameReader {
     }
 
     fn table(&self, py: Python<'_>, name: &str) -> PyResult<PyDataFrame> {
-        let session = self.session.bind(py).downcast::<PySparkSession>().map_err(|_| {
-            PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected SparkSession")
-        })?.borrow();
-        session.inner
+        let session = self
+            .session
+            .bind(py)
+            .downcast::<PySparkSession>()
+            .map_err(|_| PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected SparkSession"))?
+            .borrow();
+        session
+            .inner
             .table(name)
             .map(|df| PyDataFrame { inner: df })
             .map_err(to_py_err)
@@ -1523,9 +1647,12 @@ impl PyDataFrameReader {
 
     #[cfg(feature = "delta")]
     fn delta(&self, py: Python<'_>, path: &str) -> PyResult<PyDataFrame> {
-        let session = self.session.bind(py).downcast::<PySparkSession>().map_err(|_| {
-            PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected SparkSession")
-        })?.borrow();
+        let session = self
+            .session
+            .bind(py)
+            .downcast::<PySparkSession>()
+            .map_err(|_| PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected SparkSession"))?
+            .borrow();
         session
             .inner
             .read()
@@ -1542,10 +1669,16 @@ struct PyDataFrame {
 
 #[pymethods]
 impl PyDataFrame {
-    fn filter(slf: PyRef<Self>, py: Python<'_>, condition: &Bound<'_, PyAny>) -> PyResult<PyDataFrame> {
+    fn filter(
+        slf: PyRef<Self>,
+        py: Python<'_>,
+        condition: &Bound<'_, PyAny>,
+    ) -> PyResult<PyDataFrame> {
         if let Ok(py_col) = condition.downcast::<PyColumn>() {
             let col_ref = py_col.borrow();
-            if let Some((udf_name, arg_names, literal_jsons)) = col_ref.inner.udf_call_info_with_literals() {
+            if let Some((udf_name, arg_names, literal_jsons)) =
+                col_ref.inner.udf_call_info_with_literals()
+            {
                 let temp_name = format!("_udf_filter_{}", uuid::Uuid::new_v4().simple());
                 let arg_names_py = PyList::new_bound(py, arg_names.iter());
                 let literals_py = PyList::empty_bound(py);
@@ -1556,29 +1689,31 @@ impl PyDataFrame {
                     };
                     literals_py.append(item)?;
                 }
-                if let Some(df_with_col) = PYTHON_UDF_EXECUTOR.with(|cell| -> PyResult<Option<PyDataFrame>> {
-                    let cb = cell.borrow();
-                    let callback = match cb.as_ref() {
-                        Some(c) => c,
-                        None => return Ok(None),
-                    };
-                    let df_obj: Bound<'_, PyAny> = unsafe { Bound::from_borrowed_ptr(py, slf.as_ptr()) };
-                    let result = callback
-                        .bind(py)
-                        .call1((df_obj, &temp_name, udf_name, arg_names_py, literals_py))?;
-                    let py_df = result.downcast::<PyDataFrame>()?;
-                    Ok(Some(PyDataFrame {
-                        inner: py_df.borrow().inner.clone(),
-                    }))
-                })? {
+                if let Some(df_with_col) =
+                    PYTHON_UDF_EXECUTOR.with(|cell| -> PyResult<Option<PyDataFrame>> {
+                        let cb = cell.borrow();
+                        let callback = match cb.as_ref() {
+                            Some(c) => c,
+                            None => return Ok(None),
+                        };
+                        let df_obj: Bound<'_, PyAny> =
+                            unsafe { Bound::from_borrowed_ptr(py, slf.as_ptr()) };
+                        let result = callback.bind(py).call1((
+                            df_obj,
+                            &temp_name,
+                            udf_name,
+                            arg_names_py,
+                            literals_py,
+                        ))?;
+                        let py_df = result.downcast::<PyDataFrame>()?;
+                        Ok(Some(PyDataFrame {
+                            inner: py_df.borrow().inner.clone(),
+                        }))
+                    })?
+                {
                     let filter_expr = robin_sparkless::Column::new(temp_name.clone()).into_expr();
-                    let filtered = df_with_col
-                        .inner
-                        .filter(filter_expr)
-                        .map_err(to_py_err)?;
-                    let out = filtered
-                        .drop(vec![temp_name.as_str()])
-                        .map_err(to_py_err)?;
+                    let filtered = df_with_col.inner.filter(filter_expr).map_err(to_py_err)?;
+                    let out = filtered.drop(vec![temp_name.as_str()]).map_err(to_py_err)?;
                     return Ok(PyDataFrame { inner: out });
                 }
             }
@@ -1597,12 +1732,9 @@ impl PyDataFrame {
                         "filter with string expression requires an active SparkSession",
                     )
                 })?;
-            let session_ref = session
-                .bind(py)
-                .downcast::<PySparkSession>()
-                .map_err(|_| {
-                    PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected SparkSession")
-                })?;
+            let session_ref = session.bind(py).downcast::<PySparkSession>().map_err(|_| {
+                PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected SparkSession")
+            })?;
             let expr = robin_sparkless::sql::expr_string_to_polars(
                 &expr_str,
                 &session_ref.borrow().inner,
@@ -1621,7 +1753,11 @@ impl PyDataFrame {
     }
 
     #[pyo3(name = "where")]
-    fn where_(slf: PyRef<Self>, py: Python<'_>, condition: &Bound<'_, PyAny>) -> PyResult<PyDataFrame> {
+    fn where_(
+        slf: PyRef<Self>,
+        py: Python<'_>,
+        condition: &Bound<'_, PyAny>,
+    ) -> PyResult<PyDataFrame> {
         Self::filter(slf, py, condition)
     }
 
@@ -1695,8 +1831,14 @@ impl PyDataFrame {
             .map_err(to_py_err)
     }
 
-    fn with_column(slf: PyRef<Self>, py: Python<'_>, name: &str, col: &PyColumn) -> PyResult<PyDataFrame> {
-        if let Some((udf_name, arg_names, literal_jsons)) = col.inner.udf_call_info_with_literals() {
+    fn with_column(
+        slf: PyRef<Self>,
+        py: Python<'_>,
+        name: &str,
+        col: &PyColumn,
+    ) -> PyResult<PyDataFrame> {
+        if let Some((udf_name, arg_names, literal_jsons)) = col.inner.udf_call_info_with_literals()
+        {
             let arg_names_py = PyList::new_bound(py, arg_names.iter());
             let literals_py = PyList::empty_bound(py);
             for opt in &literal_jsons {
@@ -1706,21 +1848,28 @@ impl PyDataFrame {
                 };
                 literals_py.append(item)?;
             }
-            if let Some(result_df) = PYTHON_UDF_EXECUTOR.with(|cell| -> PyResult<Option<PyDataFrame>> {
-                let cb = cell.borrow();
-                let callback = match cb.as_ref() {
-                    Some(c) => c,
-                    None => return Ok(None),
-                };
-                let df_obj: Bound<'_, PyAny> = unsafe { Bound::from_borrowed_ptr(py, slf.as_ptr()) };
-                let result = callback
-                    .bind(py)
-                    .call1((df_obj, name, udf_name, arg_names_py, literals_py))?;
-                let py_df = result.downcast::<PyDataFrame>()?;
-                Ok(Some(PyDataFrame {
-                    inner: py_df.borrow().inner.clone(),
-                }))
-            })? {
+            if let Some(result_df) =
+                PYTHON_UDF_EXECUTOR.with(|cell| -> PyResult<Option<PyDataFrame>> {
+                    let cb = cell.borrow();
+                    let callback = match cb.as_ref() {
+                        Some(c) => c,
+                        None => return Ok(None),
+                    };
+                    let df_obj: Bound<'_, PyAny> =
+                        unsafe { Bound::from_borrowed_ptr(py, slf.as_ptr()) };
+                    let result = callback.bind(py).call1((
+                        df_obj,
+                        name,
+                        udf_name,
+                        arg_names_py,
+                        literals_py,
+                    ))?;
+                    let py_df = result.downcast::<PyDataFrame>()?;
+                    Ok(Some(PyDataFrame {
+                        inner: py_df.borrow().inner.clone(),
+                    }))
+                })?
+            {
                 return Ok(result_df);
             }
         }
@@ -1745,7 +1894,12 @@ impl PyDataFrame {
     }
 
     #[pyo3(name = "withColumn")]
-    fn with_column_camel(slf: PyRef<Self>, py: Python<'_>, name: &str, col: &PyColumn) -> PyResult<PyDataFrame> {
+    fn with_column_camel(
+        slf: PyRef<Self>,
+        py: Python<'_>,
+        name: &str,
+        col: &PyColumn,
+    ) -> PyResult<PyDataFrame> {
         Self::with_column(slf, py, name, col)
     }
 
@@ -1824,9 +1978,12 @@ impl PyDataFrame {
                     let mut py_fields: Vec<PyObject> = Vec::with_capacity(fields.len());
                     for f in fields {
                         let dt_obj = dtype_to_py(py, types_mod, &f.data_type)?;
-                        let sf = types_mod
-                            .getattr("StructField")?
-                            .call1((f.name.clone(), dt_obj, f.nullable, py.None()))?;
+                        let sf = types_mod.getattr("StructField")?.call1((
+                            f.name.clone(),
+                            dt_obj,
+                            f.nullable,
+                            py.None(),
+                        ))?;
                         py_fields.push(sf.into_py(py));
                     }
                     Ok(types_mod
@@ -1902,9 +2059,12 @@ impl PyDataFrame {
                     let mut py_fields: Vec<PyObject> = Vec::with_capacity(fields.len());
                     for f in fields {
                         let dt_obj = dtype_to_py(py, types_mod, &f.data_type)?;
-                        let sf = types_mod
-                            .getattr("StructField")?
-                            .call1((f.name.clone(), dt_obj, f.nullable, py.None()))?;
+                        let sf = types_mod.getattr("StructField")?.call1((
+                            f.name.clone(),
+                            dt_obj,
+                            f.nullable,
+                            py.None(),
+                        ))?;
                         py_fields.push(sf.into_py(py));
                     }
                     Ok(types_mod
@@ -1969,9 +2129,9 @@ impl PyDataFrame {
                 let first_df = self.inner.first().map_err(to_py_err)?;
                 let wrapper = PyDataFrame { inner: first_df };
                 let rows = wrapper.collect(py)?;
-                rows.into_iter()
-                    .next()
-                    .ok_or_else(|| PyErr::new::<pyo3::exceptions::PyValueError, _>("empty DataFrame"))
+                rows.into_iter().next().ok_or_else(|| {
+                    PyErr::new::<pyo3::exceptions::PyValueError, _>("empty DataFrame")
+                })
             }
             Some(k) => {
                 let head_df = self.inner.head(k).map_err(to_py_err)?;
@@ -1998,7 +2158,10 @@ impl PyDataFrame {
 
     #[pyo3(signature = (*exprs))]
     fn agg(&self, exprs: &Bound<'_, PyTuple>) -> PyResult<PyDataFrame> {
-        fn push_expr(item: &Bound<'_, PyAny>, out: &mut Vec<robin_sparkless::Expr>) -> PyResult<()> {
+        fn push_expr(
+            item: &Bound<'_, PyAny>,
+            out: &mut Vec<robin_sparkless::Expr>,
+        ) -> PyResult<()> {
             if let Ok(c) = item.downcast::<PyColumn>() {
                 out.push(c.borrow().inner.clone().into_expr());
                 return Ok(());
@@ -2110,7 +2273,11 @@ impl PyDataFrame {
             .map_err(to_py_err)
     }
 
-    fn order_by_names(&self, column_names: Vec<String>, ascending: Vec<bool>) -> PyResult<PyDataFrame> {
+    fn order_by_names(
+        &self,
+        column_names: Vec<String>,
+        ascending: Vec<bool>,
+    ) -> PyResult<PyDataFrame> {
         let refs: Vec<&str> = column_names.iter().map(|s| s.as_str()).collect();
         let mut asc = ascending;
         while asc.len() < refs.len() {
@@ -2215,7 +2382,9 @@ impl PyDataFrame {
     /// order_by_exprs([col("a").asc(), col("b").desc_nulls_last()]) - order by SortOrder expressions.
     fn order_by_exprs(&self, exprs: &Bound<'_, PyAny>) -> PyResult<PyDataFrame> {
         let list = exprs.downcast::<PyList>().map_err(|_| {
-            PyErr::new::<pyo3::exceptions::PyTypeError, _>("order_by_exprs expects a list of Column or SortOrder")
+            PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+                "order_by_exprs expects a list of Column or SortOrder",
+            )
         })?;
         let mut sort_orders: Vec<SortOrder> = Vec::with_capacity(list.len());
         for item in list.iter() {
@@ -2271,7 +2440,9 @@ impl PyDataFrame {
     }
 
     fn distinct(&self, subset: Option<Vec<String>>) -> PyResult<PyDataFrame> {
-        let sub: Option<Vec<&str>> = subset.as_ref().map(|v| v.iter().map(|s| s.as_str()).collect());
+        let sub: Option<Vec<&str>> = subset
+            .as_ref()
+            .map(|v| v.iter().map(|s| s.as_str()).collect());
         self.inner
             .distinct(sub)
             .map(|df| PyDataFrame { inner: df })
@@ -2326,10 +2497,7 @@ impl PyDataFrame {
                 .map_err(to_py_err)
         } else if let Some(on_arg) = on {
             if let Ok(condition) = on_arg.downcast::<PyColumn>() {
-                let crossed = self
-                    .inner
-                    .cross_join(&other.inner)
-                    .map_err(to_py_err)?;
+                let crossed = self.inner.cross_join(&other.inner).map_err(to_py_err)?;
                 let filtered = crossed
                     .filter(condition.borrow().inner.clone().into_expr())
                     .map_err(to_py_err)?;
@@ -2420,10 +2588,14 @@ impl PyDataFrame {
         let session = THREAD_ACTIVE_SESSIONS
             .with(|cell| cell.borrow().last().map(|s| s.clone_ref(py)))
             .ok_or_else(|| to_py_err("No active SparkSession for createOrReplaceTempView"))?;
-        let session_ref = session.bind(py).downcast::<PySparkSession>().map_err(|_| {
-            PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected SparkSession")
-        })?;
-        session_ref.borrow().inner.create_or_replace_temp_view(name, self.inner.clone());
+        let session_ref = session
+            .bind(py)
+            .downcast::<PySparkSession>()
+            .map_err(|_| PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected SparkSession"))?;
+        session_ref
+            .borrow()
+            .inner
+            .create_or_replace_temp_view(name, self.inner.clone());
         Ok(())
     }
 
@@ -2435,7 +2607,9 @@ impl PyDataFrame {
         thresh: Option<usize>,
     ) -> PyResult<PyDataFrame> {
         let how_str = how.unwrap_or("any");
-        let sub: Option<Vec<&str>> = subset.as_ref().map(|v| v.iter().map(|s| s.as_str()).collect());
+        let sub: Option<Vec<&str>> = subset
+            .as_ref()
+            .map(|v| v.iter().map(|s| s.as_str()).collect());
         self.inner
             .dropna(sub, how_str, thresh)
             .map(|df| PyDataFrame { inner: df })
@@ -2443,7 +2617,11 @@ impl PyDataFrame {
     }
 
     #[pyo3(signature = (value, subset=None))]
-    fn fillna(&self, value: &Bound<'_, PyAny>, subset: Option<&Bound<'_, PyAny>>) -> PyResult<PyDataFrame> {
+    fn fillna(
+        &self,
+        value: &Bound<'_, PyAny>,
+        subset: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<PyDataFrame> {
         // PySpark: fillna(scalar) or fillna({col: value, ...}); subset only with scalar.
         if let Ok(dict) = value.downcast::<PyDict>() {
             let mut df = self.inner.clone();
@@ -2452,7 +2630,9 @@ impl PyDataFrame {
                     PyErr::new::<pyo3::exceptions::PyTypeError, _>("fillna dict keys must be str")
                 })?;
                 let val_expr = py_any_to_column(&item.1)?.into_expr();
-                df = df.fillna(val_expr, Some(vec![col_name.as_str()])).map_err(to_py_err)?;
+                df = df
+                    .fillna(val_expr, Some(vec![col_name.as_str()]))
+                    .map_err(to_py_err)?;
             }
             return Ok(PyDataFrame { inner: df });
         }
@@ -2489,7 +2669,11 @@ impl PyDataFrame {
                     let new_expr = py_any_to_column(&v)?.into_expr();
                     current = current
                         .na()
-                        .replace(old_expr, new_expr, sub.as_ref().map(|v| v.iter().map(|s| *s).collect()))
+                        .replace(
+                            old_expr,
+                            new_expr,
+                            sub.as_ref().map(|v| v.iter().map(|s| *s).collect()),
+                        )
                         .map_err(to_py_err)?;
                 }
                 return Ok(PyDataFrame { inner: current });
@@ -2504,7 +2688,11 @@ impl PyDataFrame {
         let new_expr = py_any_to_column(value)?.into_expr();
         self.inner
             .na()
-            .replace(old_expr, new_expr, sub.as_ref().map(|v| v.iter().map(|s| *s).collect()))
+            .replace(
+                old_expr,
+                new_expr,
+                sub.as_ref().map(|v| v.iter().map(|s| *s).collect()),
+            )
             .map(|df| PyDataFrame { inner: df })
             .map_err(to_py_err)
     }
@@ -2599,11 +2787,7 @@ impl PyDataFrame {
             .map_err(to_py_err)
     }
 
-    fn melt(
-        &self,
-        id_vars: Vec<String>,
-        value_vars: Vec<String>,
-    ) -> PyResult<PyDataFrame> {
+    fn melt(&self, id_vars: Vec<String>, value_vars: Vec<String>) -> PyResult<PyDataFrame> {
         let ids: Vec<&str> = id_vars.iter().map(|s| s.as_str()).collect();
         let vals: Vec<&str> = value_vars.iter().map(|s| s.as_str()).collect();
         self.inner
@@ -2622,11 +2806,7 @@ impl PyDataFrame {
     }
 
     #[pyo3(name = "flatMap")]
-    fn flat_map_impl(
-        &self,
-        py: Python<'_>,
-        func: &Bound<'_, PyAny>,
-    ) -> PyResult<PyDataFrame> {
+    fn flat_map_impl(&self, py: Python<'_>, func: &Bound<'_, PyAny>) -> PyResult<PyDataFrame> {
         let rows = self.collect(py)?;
         let mut out_rows: Vec<PyObject> = Vec::new();
         for row in rows {
@@ -2640,11 +2820,13 @@ impl PyDataFrame {
         let session = THREAD_ACTIVE_SESSIONS
             .with(|cell| cell.borrow().last().map(|s| s.clone_ref(py)))
             .ok_or_else(|| to_py_err("No active SparkSession for flatMap"))?;
-        let session_ref = session.bind(py).downcast::<PySparkSession>().map_err(|_| {
-            PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected SparkSession")
-        })?;
+        let session_ref = session
+            .bind(py)
+            .downcast::<PySparkSession>()
+            .map_err(|_| PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected SparkSession"))?;
         let list = PyList::new_bound(py, out_rows);
-        let (rows_data, schema, schema_was_inferred) = python_data_and_schema(py, list.as_ref(), None, false)?;
+        let (rows_data, schema, schema_was_inferred) =
+            python_data_and_schema(py, list.as_ref(), None, false)?;
         let df = session_ref
             .borrow()
             .inner
@@ -2720,7 +2902,9 @@ impl PyDataFrame {
     }
 
     fn create_or_replace_temp_view(&self, session: &PySparkSession, name: &str) {
-        session.inner.create_or_replace_temp_view(name, self.inner.clone());
+        session
+            .inner
+            .create_or_replace_temp_view(name, self.inner.clone());
     }
 
     #[getter]
@@ -2731,7 +2915,9 @@ impl PyDataFrame {
     #[pyo3(name = "toDF", signature = (*col_names))]
     fn to_df(&self, col_names: &Bound<'_, PyTuple>) -> PyResult<PyDataFrame> {
         if col_names.is_empty() {
-            return Ok(PyDataFrame { inner: self.inner.clone() });
+            return Ok(PyDataFrame {
+                inner: self.inner.clone(),
+            });
         }
         let mut df = self.inner.clone();
         let current = df.columns().map_err(to_py_err)?;
@@ -2740,7 +2926,9 @@ impl PyDataFrame {
                 break;
             }
             let new_name: String = item.extract()?;
-            df = df.with_column_renamed(&current[i], &new_name).map_err(to_py_err)?;
+            df = df
+                .with_column_renamed(&current[i], &new_name)
+                .map_err(to_py_err)?;
         }
         Ok(PyDataFrame { inner: df })
     }
@@ -2766,15 +2954,23 @@ impl PyDataFrame {
     #[getter]
     fn dtypes(&self) -> PyResult<Vec<(String, String)>> {
         let schema = self.inner.schema_engine().map_err(to_py_err)?;
-        Ok(schema.fields().iter().map(|f| (f.name.clone(), format!("{:?}", f.data_type))).collect())
+        Ok(schema
+            .fields()
+            .iter()
+            .map(|f| (f.name.clone(), format!("{:?}", f.data_type)))
+            .collect())
     }
 
     fn coalesce(&self, n: usize) -> PyResult<PyDataFrame> {
-        Ok(PyDataFrame { inner: self.inner.clone() })
+        Ok(PyDataFrame {
+            inner: self.inner.clone(),
+        })
     }
 
     fn repartition(&self, n: usize) -> PyResult<PyDataFrame> {
-        Ok(PyDataFrame { inner: self.inner.clone() })
+        Ok(PyDataFrame {
+            inner: self.inner.clone(),
+        })
     }
 
     #[pyo3(name = "isEmpty")]
@@ -2844,11 +3040,16 @@ impl PyDataFrameWriter {
     }
 
     fn parquet(&self, py: Python<'_>, path: &str) -> PyResult<()> {
-        let df = self.df.bind(py).downcast::<PyDataFrame>().map_err(|_| {
-            PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected DataFrame")
-        })?;
+        let df =
+            self.df.bind(py).downcast::<PyDataFrame>().map_err(|_| {
+                PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected DataFrame")
+            })?;
         let inner = df.borrow();
-        let mut w = inner.inner.write().mode(write_mode_from_str(&self.mode)).format(WriteFormat::Parquet);
+        let mut w = inner
+            .inner
+            .write()
+            .mode(write_mode_from_str(&self.mode))
+            .format(WriteFormat::Parquet);
         for (k, v) in &self.options {
             w = w.option(k, v);
         }
@@ -2859,11 +3060,16 @@ impl PyDataFrameWriter {
     }
 
     fn csv(&self, py: Python<'_>, path: &str) -> PyResult<()> {
-        let df = self.df.bind(py).downcast::<PyDataFrame>().map_err(|_| {
-            PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected DataFrame")
-        })?;
+        let df =
+            self.df.bind(py).downcast::<PyDataFrame>().map_err(|_| {
+                PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected DataFrame")
+            })?;
         let inner = df.borrow();
-        let mut w = inner.inner.write().mode(write_mode_from_str(&self.mode)).format(WriteFormat::Csv);
+        let mut w = inner
+            .inner
+            .write()
+            .mode(write_mode_from_str(&self.mode))
+            .format(WriteFormat::Csv);
         for (k, v) in &self.options {
             w = w.option(k, v);
         }
@@ -2874,11 +3080,16 @@ impl PyDataFrameWriter {
     }
 
     fn json(&self, py: Python<'_>, path: &str) -> PyResult<()> {
-        let df = self.df.bind(py).downcast::<PyDataFrame>().map_err(|_| {
-            PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected DataFrame")
-        })?;
+        let df =
+            self.df.bind(py).downcast::<PyDataFrame>().map_err(|_| {
+                PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected DataFrame")
+            })?;
         let inner = df.borrow();
-        let mut w = inner.inner.write().mode(write_mode_from_str(&self.mode)).format(WriteFormat::Json);
+        let mut w = inner
+            .inner
+            .write()
+            .mode(write_mode_from_str(&self.mode))
+            .format(WriteFormat::Json);
         for (k, v) in &self.options {
             w = w.option(k, v);
         }
@@ -2890,11 +3101,16 @@ impl PyDataFrameWriter {
 
     /// PySpark: save(path). Uses current format (parquet default when using .parquet/.csv/.json).
     fn save(&self, py: Python<'_>, path: &str) -> PyResult<()> {
-        let df = self.df.bind(py).downcast::<PyDataFrame>().map_err(|_| {
-            PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected DataFrame")
-        })?;
+        let df =
+            self.df.bind(py).downcast::<PyDataFrame>().map_err(|_| {
+                PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected DataFrame")
+            })?;
         let inner = df.borrow();
-        let mut w = inner.inner.write().mode(write_mode_from_str(&self.mode)).format(WriteFormat::Parquet);
+        let mut w = inner
+            .inner
+            .write()
+            .mode(write_mode_from_str(&self.mode))
+            .format(WriteFormat::Parquet);
         for (k, v) in &self.options {
             w = w.option(k, v);
         }
@@ -2907,9 +3123,10 @@ impl PyDataFrameWriter {
     /// PySpark: saveAsTable(name). mode: "error"|"overwrite"|"append"|"ignore".
     #[pyo3(signature = (name, mode=None))]
     fn save_as_table(&self, py: Python<'_>, name: &str, mode: Option<&str>) -> PyResult<()> {
-        let df = self.df.bind(py).downcast::<PyDataFrame>().map_err(|_| {
-            PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected DataFrame")
-        })?;
+        let df =
+            self.df.bind(py).downcast::<PyDataFrame>().map_err(|_| {
+                PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected DataFrame")
+            })?;
         let inner = df.borrow();
         let active = {
             let ty = py.get_type_bound::<PySparkSession>();
@@ -2922,14 +3139,16 @@ impl PyDataFrameWriter {
                         .inner
                         .clone()
                 } else {
-                    let top = THREAD_ACTIVE_SESSIONS.with(|cell| cell.borrow().last().map(|s| s.clone_ref(py)));
+                    let top = THREAD_ACTIVE_SESSIONS
+                        .with(|cell| cell.borrow().last().map(|s| s.clone_ref(py)));
                     match top {
                         Some(s) => s.bind(py).borrow().inner.clone(),
                         None => return Err(to_py_err("No active SparkSession")),
                     }
                 }
             } else {
-                let top = THREAD_ACTIVE_SESSIONS.with(|cell| cell.borrow().last().map(|s| s.clone_ref(py)));
+                let top = THREAD_ACTIVE_SESSIONS
+                    .with(|cell| cell.borrow().last().map(|s| s.clone_ref(py)));
                 match top {
                     Some(s) => s.bind(py).borrow().inner.clone(),
                     None => return Err(to_py_err("No active SparkSession")),
@@ -3025,7 +3244,10 @@ fn py_any_to_column(other: &Bound<'_, PyAny>) -> PyResult<Column> {
         }
         let first = list.get_item(0)?;
         if first.extract::<i64>().is_ok() {
-            let vals: Vec<i64> = list.iter().filter_map(|x| x.extract::<i64>().ok()).collect();
+            let vals: Vec<i64> = list
+                .iter()
+                .filter_map(|x| x.extract::<i64>().ok())
+                .collect();
             return Ok(robin_sparkless::functions::lit_str(&format!("{:?}", vals)));
         }
     }
@@ -3063,56 +3285,78 @@ impl PyColumn {
 
     fn __add__(&self, other: &Bound<'_, PyAny>) -> PyResult<PyColumn> {
         let rhs = py_any_to_column(other)?;
-        Ok(PyColumn { inner: self.inner.add_pyspark(&rhs) })
+        Ok(PyColumn {
+            inner: self.inner.add_pyspark(&rhs),
+        })
     }
 
     fn __radd__(&self, other: &Bound<'_, PyAny>) -> PyResult<PyColumn> {
         let lhs = py_any_to_column(other)?;
-        Ok(PyColumn { inner: lhs.add_pyspark(&self.inner) })
+        Ok(PyColumn {
+            inner: lhs.add_pyspark(&self.inner),
+        })
     }
 
     fn __sub__(&self, other: &Bound<'_, PyAny>) -> PyResult<PyColumn> {
         let rhs = py_any_to_column(other)?;
-        Ok(PyColumn { inner: self.inner.subtract_pyspark(&rhs) })
+        Ok(PyColumn {
+            inner: self.inner.subtract_pyspark(&rhs),
+        })
     }
 
     fn __rsub__(&self, other: &Bound<'_, PyAny>) -> PyResult<PyColumn> {
         let lhs = py_any_to_column(other)?;
-        Ok(PyColumn { inner: lhs.subtract_pyspark(&self.inner) })
+        Ok(PyColumn {
+            inner: lhs.subtract_pyspark(&self.inner),
+        })
     }
 
     fn __mul__(&self, other: &Bound<'_, PyAny>) -> PyResult<PyColumn> {
         let rhs = py_any_to_column(other)?;
-        Ok(PyColumn { inner: self.inner.multiply_pyspark(&rhs) })
+        Ok(PyColumn {
+            inner: self.inner.multiply_pyspark(&rhs),
+        })
     }
 
     fn __rmul__(&self, other: &Bound<'_, PyAny>) -> PyResult<PyColumn> {
         let lhs = py_any_to_column(other)?;
-        Ok(PyColumn { inner: lhs.multiply_pyspark(&self.inner) })
+        Ok(PyColumn {
+            inner: lhs.multiply_pyspark(&self.inner),
+        })
     }
 
     fn __truediv__(&self, other: &Bound<'_, PyAny>) -> PyResult<PyColumn> {
         let rhs = py_any_to_column(other)?;
-        Ok(PyColumn { inner: self.inner.divide_pyspark(&rhs) })
+        Ok(PyColumn {
+            inner: self.inner.divide_pyspark(&rhs),
+        })
     }
 
     fn __rtruediv__(&self, other: &Bound<'_, PyAny>) -> PyResult<PyColumn> {
         let lhs = py_any_to_column(other)?;
-        Ok(PyColumn { inner: lhs.divide_pyspark(&self.inner) })
+        Ok(PyColumn {
+            inner: lhs.divide_pyspark(&self.inner),
+        })
     }
 
     fn __mod__(&self, other: &Bound<'_, PyAny>) -> PyResult<PyColumn> {
         let rhs = py_any_to_column(other)?;
-        Ok(PyColumn { inner: self.inner.mod_pyspark(&rhs) })
+        Ok(PyColumn {
+            inner: self.inner.mod_pyspark(&rhs),
+        })
     }
 
     fn __rmod__(&self, other: &Bound<'_, PyAny>) -> PyResult<PyColumn> {
         let lhs = py_any_to_column(other)?;
-        Ok(PyColumn { inner: lhs.mod_pyspark(&self.inner) })
+        Ok(PyColumn {
+            inner: lhs.mod_pyspark(&self.inner),
+        })
     }
 
     fn __neg__(&self) -> PyColumn {
-        PyColumn { inner: self.inner.negate() }
+        PyColumn {
+            inner: self.inner.negate(),
+        }
     }
 
     fn __and__(&self, other: &Bound<'_, PyAny>) -> PyResult<PyColumn> {
@@ -3131,28 +3375,40 @@ impl PyColumn {
 
     fn __or__(&self, other: &Bound<'_, PyAny>) -> PyResult<PyColumn> {
         let rhs = py_any_to_column(other)?;
-        Ok(PyColumn { inner: self.inner.bit_or(&rhs) })
+        Ok(PyColumn {
+            inner: self.inner.bit_or(&rhs),
+        })
     }
 
     fn __ror__(&self, other: &Bound<'_, PyAny>) -> PyResult<PyColumn> {
         let lhs = py_any_to_column(other)?;
-        Ok(PyColumn { inner: lhs.bit_or(&self.inner) })
+        Ok(PyColumn {
+            inner: lhs.bit_or(&self.inner),
+        })
     }
 
     fn __invert__(&self) -> PyColumn {
-        PyColumn { inner: self.inner.bitwise_not() }
+        PyColumn {
+            inner: self.inner.bitwise_not(),
+        }
     }
 
     fn __getitem__(&self, key: &Bound<'_, PyAny>) -> PyResult<PyColumn> {
         if let Ok(idx) = key.extract::<i64>() {
-            return Ok(PyColumn { inner: self.inner.get_item(idx) });
+            return Ok(PyColumn {
+                inner: self.inner.get_item(idx),
+            });
         }
         if let Ok(name) = key.extract::<String>() {
-            return Ok(PyColumn { inner: self.inner.get_field(&name) });
+            return Ok(PyColumn {
+                inner: self.inner.get_field(&name),
+            });
         }
         if let Ok(py_col) = key.downcast::<PyColumn>() {
             let name = py_col.borrow().inner.name().to_string();
-            return Ok(PyColumn { inner: self.inner.get_field(&name) });
+            return Ok(PyColumn {
+                inner: self.inner.get_field(&name),
+            });
         }
         Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
             "Column subscript key must be int, str, or Column",
@@ -3386,11 +3642,15 @@ impl PyColumn {
     }
 
     fn asc(&self) -> PySortOrder {
-        PySortOrder { inner: self.inner.asc() }
+        PySortOrder {
+            inner: self.inner.asc(),
+        }
     }
 
     fn desc(&self) -> PySortOrder {
-        PySortOrder { inner: self.inner.desc() }
+        PySortOrder {
+            inner: self.inner.desc(),
+        }
     }
 
     /// Descending sort, nulls last. PySpark desc_nulls_last.
@@ -3740,9 +4000,12 @@ impl PyDataFrameNaFunctions {
         value: &Bound<'_, PyAny>,
         subset: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<PyDataFrame> {
-        let df_ref = self.df.bind(py).downcast::<PyDataFrame>().map_err(|_| {
-            PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected DataFrame")
-        })?.borrow();
+        let df_ref = self
+            .df
+            .bind(py)
+            .downcast::<PyDataFrame>()
+            .map_err(|_| PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected DataFrame"))?
+            .borrow();
         let value_col = lit(value)?;
         let sub_vec = normalize_subset(subset)?;
         let subset_refs: Option<Vec<&str>> = sub_vec
@@ -3762,11 +4025,15 @@ impl PyDataFrameNaFunctions {
         how: &str,
         thresh: Option<usize>,
     ) -> PyResult<PyDataFrame> {
-        let df_ref = self.df.bind(py).downcast::<PyDataFrame>().map_err(|_| {
-            PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected DataFrame")
-        })?.borrow();
-        let subset_refs: Option<Vec<&str>> =
-            subset.as_ref().map(|v| v.iter().map(|s| s.as_str()).collect());
+        let df_ref = self
+            .df
+            .bind(py)
+            .downcast::<PyDataFrame>()
+            .map_err(|_| PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected DataFrame"))?
+            .borrow();
+        let subset_refs: Option<Vec<&str>> = subset
+            .as_ref()
+            .map(|v| v.iter().map(|s| s.as_str()).collect());
         let na = df_ref.inner.na();
         na.drop(subset_refs, how, thresh)
             .map(|df| PyDataFrame { inner: df })
@@ -3781,9 +4048,12 @@ impl PyDataFrameNaFunctions {
         value: Option<&Bound<'_, PyAny>>,
         subset: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<PyDataFrame> {
-        let df_ref = self.df.bind(py).downcast::<PyDataFrame>().map_err(|_| {
-            PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected DataFrame")
-        })?.borrow();
+        let df_ref = self
+            .df
+            .bind(py)
+            .downcast::<PyDataFrame>()
+            .map_err(|_| PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected DataFrame"))?
+            .borrow();
         let sub_vec = normalize_subset(subset)?;
         let subset_refs: Option<Vec<&str>> = sub_vec
             .as_ref()
@@ -3797,7 +4067,11 @@ impl PyDataFrameNaFunctions {
                     let new_expr = py_any_to_column(&v)?.into_expr();
                     current = current
                         .na()
-                        .replace(old_expr, new_expr, subset_refs.as_ref().map(|v| v.iter().map(|s| *s).collect()))
+                        .replace(
+                            old_expr,
+                            new_expr,
+                            subset_refs.as_ref().map(|v| v.iter().map(|s| *s).collect()),
+                        )
                         .map_err(to_py_err)?;
                 }
                 return Ok(PyDataFrame { inner: current });
@@ -3837,7 +4111,10 @@ impl PyCubeRollupData {
 
     #[pyo3(signature = (*exprs))]
     fn agg(&self, exprs: &Bound<'_, PyTuple>) -> PyResult<PyDataFrame> {
-        fn push_expr(item: &Bound<'_, PyAny>, out: &mut Vec<robin_sparkless::Expr>) -> PyResult<()> {
+        fn push_expr(
+            item: &Bound<'_, PyAny>,
+            out: &mut Vec<robin_sparkless::Expr>,
+        ) -> PyResult<()> {
             if let Ok(c) = item.downcast::<PyColumn>() {
                 out.push(c.borrow().inner.clone().into_expr());
                 return Ok(());
@@ -3922,7 +4199,10 @@ impl PyGroupedData {
 
     #[pyo3(signature = (*exprs))]
     fn agg(&self, exprs: &Bound<'_, PyTuple>) -> PyResult<PyDataFrame> {
-        fn push_expr(item: &Bound<'_, PyAny>, out: &mut Vec<robin_sparkless::Expr>) -> PyResult<()> {
+        fn push_expr(
+            item: &Bound<'_, PyAny>,
+            out: &mut Vec<robin_sparkless::Expr>,
+        ) -> PyResult<()> {
             if let Ok(c) = item.downcast::<PyColumn>() {
                 out.push(c.borrow().inner.clone().into_expr());
                 return Ok(());
@@ -3945,7 +4225,9 @@ impl PyGroupedData {
                         PyErr::new::<pyo3::exceptions::PyTypeError, _>("agg dict keys must be str")
                     })?;
                     let func_name: String = v.extract().map_err(|_| {
-                        PyErr::new::<pyo3::exceptions::PyTypeError, _>("agg dict values must be str")
+                        PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+                            "agg dict values must be str",
+                        )
                     })?;
                     let c = Column::new(col_name);
                     let expr_col = match func_name.as_str() {
@@ -3955,7 +4237,9 @@ impl PyGroupedData {
                         "max" => functions::max(&c),
                         "count" => functions::count(&c),
                         "first" => c, // best effort
-                        _ => return Err(to_py_err(format!("unsupported agg function: {func_name}"))),
+                        _ => {
+                            return Err(to_py_err(format!("unsupported agg function: {func_name}")))
+                        }
                     };
                     out.push(expr_col.into_expr());
                 }
@@ -4084,7 +4368,10 @@ impl PyPivotedGroupedData {
 
     #[pyo3(signature = (*exprs))]
     fn agg(&self, exprs: &Bound<'_, PyTuple>) -> PyResult<PyDataFrame> {
-        fn push_expr(item: &Bound<'_, PyAny>, out: &mut Vec<robin_sparkless::Expr>) -> PyResult<()> {
+        fn push_expr(
+            item: &Bound<'_, PyAny>,
+            out: &mut Vec<robin_sparkless::Expr>,
+        ) -> PyResult<()> {
             if let Ok(c) = item.downcast::<PyColumn>() {
                 out.push(c.borrow().inner.clone().into_expr());
                 return Ok(());
@@ -4250,26 +4537,34 @@ fn coerce_to_column(v: &Bound<'_, PyAny>) -> PyResult<Column> {
 #[pyfunction]
 fn upper(col: &Bound<'_, PyAny>) -> PyResult<PyColumn> {
     let c = coerce_to_column(col)?;
-    Ok(PyColumn { inner: robin_sparkless::functions::upper(&c) })
+    Ok(PyColumn {
+        inner: robin_sparkless::functions::upper(&c),
+    })
 }
 
 #[pyfunction]
 fn lower(col: &Bound<'_, PyAny>) -> PyResult<PyColumn> {
     let c = coerce_to_column(col)?;
-    Ok(PyColumn { inner: robin_sparkless::functions::lower(&c) })
+    Ok(PyColumn {
+        inner: robin_sparkless::functions::lower(&c),
+    })
 }
 
 #[pyfunction]
 #[pyo3(signature = (column, start, length=None))]
 fn substring(column: &Bound<'_, PyAny>, start: i64, length: Option<i64>) -> PyResult<PyColumn> {
     let c = coerce_to_column(column)?;
-    Ok(PyColumn { inner: robin_sparkless::functions::substring(&c, start, length) })
+    Ok(PyColumn {
+        inner: robin_sparkless::functions::substring(&c, start, length),
+    })
 }
 
 #[pyfunction]
 fn trim(col: &Bound<'_, PyAny>) -> PyResult<PyColumn> {
     let c = coerce_to_column(col)?;
-    Ok(PyColumn { inner: robin_sparkless::functions::trim(&c) })
+    Ok(PyColumn {
+        inner: robin_sparkless::functions::trim(&c),
+    })
 }
 
 #[pyfunction]
@@ -4288,10 +4583,9 @@ struct PyWhenBuilder {
 #[pymethods]
 impl PyWhenBuilder {
     fn then(&mut self, value: &Bound<'_, PyAny>) -> PyResult<PyThenBuilder> {
-        let wb = self
-            .inner
-            .take()
-            .ok_or_else(|| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>("when().then() already called"))?;
+        let wb = self.inner.take().ok_or_else(|| {
+            PyErr::new::<pyo3::exceptions::PyRuntimeError, _>("when().then() already called")
+        })?;
         let val = py_any_to_column(value)?;
         Ok(PyThenBuilder {
             inner: Some(wb.then(&val)),
@@ -4306,13 +4600,18 @@ struct PyThenBuilder {
 
 #[pymethods]
 impl PyThenBuilder {
-    fn when(&mut self, condition: &Bound<'_, PyAny>, value: Option<&Bound<'_, PyAny>>) -> PyResult<PyObject> {
-        let tb = self
-            .inner
-            .take()
-            .ok_or_else(|| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>("otherwise() already called"))?;
+    fn when(
+        &mut self,
+        condition: &Bound<'_, PyAny>,
+        value: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<PyObject> {
+        let tb = self.inner.take().ok_or_else(|| {
+            PyErr::new::<pyo3::exceptions::PyRuntimeError, _>("otherwise() already called")
+        })?;
         let cond = py_any_to_column(condition).or_else(|_| {
-            condition.extract::<String>().map(|s| robin_sparkless::functions::col(&s))
+            condition
+                .extract::<String>()
+                .map(|s| robin_sparkless::functions::col(&s))
         })?;
         let cwb = tb.when(&cond);
         let py = condition.py();
@@ -4320,19 +4619,22 @@ impl PyThenBuilder {
             Some(val) => {
                 let val_col = py_any_to_column(val)?;
                 let new_tb = cwb.then(&val_col);
-                Ok(Py::new(py, PyThenBuilder { inner: Some(new_tb) })?.into_py(py))
+                Ok(Py::new(
+                    py,
+                    PyThenBuilder {
+                        inner: Some(new_tb),
+                    },
+                )?
+                .into_py(py))
             }
-            None => {
-                Ok(Py::new(py, PyChainedWhenBuilder { inner: Some(cwb) })?.into_py(py))
-            }
+            None => Ok(Py::new(py, PyChainedWhenBuilder { inner: Some(cwb) })?.into_py(py)),
         }
     }
 
     fn otherwise(&mut self, value: &Bound<'_, PyAny>) -> PyResult<PyColumn> {
-        let tb = self
-            .inner
-            .take()
-            .ok_or_else(|| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>("otherwise() already called"))?;
+        let tb = self.inner.take().ok_or_else(|| {
+            PyErr::new::<pyo3::exceptions::PyRuntimeError, _>("otherwise() already called")
+        })?;
         let col = py_any_to_column(value)?;
         Ok(PyColumn {
             inner: tb.otherwise(&col),
@@ -4350,10 +4652,9 @@ struct PyChainedWhenBuilder {
 #[pymethods]
 impl PyChainedWhenBuilder {
     fn then(&mut self, value: &Bound<'_, PyAny>) -> PyResult<PyThenBuilder> {
-        let cwb = self
-            .inner
-            .take()
-            .ok_or_else(|| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>("then() already called"))?;
+        let cwb = self.inner.take().ok_or_else(|| {
+            PyErr::new::<pyo3::exceptions::PyRuntimeError, _>("then() already called")
+        })?;
         let col = py_any_to_column(value)?;
         Ok(PyThenBuilder {
             inner: Some(cwb.then(&col)),
@@ -4393,31 +4694,41 @@ fn when(
 #[pyfunction]
 fn count(col: &Bound<'_, PyAny>) -> PyResult<PyColumn> {
     let c = coerce_to_column(col)?;
-    Ok(PyColumn { inner: functions::count(&c) })
+    Ok(PyColumn {
+        inner: functions::count(&c),
+    })
 }
 
 #[pyfunction]
 fn sum(col: &Bound<'_, PyAny>) -> PyResult<PyColumn> {
     let c = coerce_to_column(col)?;
-    Ok(PyColumn { inner: functions::sum(&c) })
+    Ok(PyColumn {
+        inner: functions::sum(&c),
+    })
 }
 
 #[pyfunction]
 fn avg(col: &Bound<'_, PyAny>) -> PyResult<PyColumn> {
     let c = coerce_to_column(col)?;
-    Ok(PyColumn { inner: functions::avg(&c) })
+    Ok(PyColumn {
+        inner: functions::avg(&c),
+    })
 }
 
 #[pyfunction]
 fn min(col: &Bound<'_, PyAny>) -> PyResult<PyColumn> {
     let c = coerce_to_column(col)?;
-    Ok(PyColumn { inner: functions::min(&c) })
+    Ok(PyColumn {
+        inner: functions::min(&c),
+    })
 }
 
 #[pyfunction]
 fn max(col: &Bound<'_, PyAny>) -> PyResult<PyColumn> {
     let c = coerce_to_column(col)?;
-    Ok(PyColumn { inner: functions::max(&c) })
+    Ok(PyColumn {
+        inner: functions::max(&c),
+    })
 }
 
 #[pyfunction]
@@ -4480,7 +4791,9 @@ fn column_over_window(
     };
     let partition_strs: Vec<&str> = partition_by.iter().map(|s| s.as_str()).collect();
     if order_by.is_empty() {
-        return Ok(PyColumn { inner: agg_col.over(&partition_strs) });
+        return Ok(PyColumn {
+            inner: agg_col.over(&partition_strs),
+        });
     }
     let use_running = true;
     agg_col
@@ -4625,19 +4938,33 @@ fn lead_window(
     Ok(PyColumn { inner: windowed })
 }
 #[pyfunction]
-fn regexp_replace(column: &Bound<'_, PyAny>, pattern: &str, replacement: &str) -> PyResult<PyColumn> {
+fn regexp_replace(
+    column: &Bound<'_, PyAny>,
+    pattern: &str,
+    replacement: &str,
+) -> PyResult<PyColumn> {
     let c = coerce_to_column(column)?;
-    Ok(PyColumn { inner: functions::regexp_replace(&c, pattern, replacement) })
+    Ok(PyColumn {
+        inner: functions::regexp_replace(&c, pattern, replacement),
+    })
 }
 
 #[pyfunction]
 #[pyo3(signature = (column, pattern, group_index=0))]
-fn regexp_extract_all(column: &Bound<'_, PyAny>, pattern: &str, group_index: usize) -> PyResult<PyColumn> {
+fn regexp_extract_all(
+    column: &Bound<'_, PyAny>,
+    pattern: &str,
+    group_index: usize,
+) -> PyResult<PyColumn> {
     let c = coerce_to_column(column)?;
     if group_index == 0 {
-        Ok(PyColumn { inner: functions::regexp_extract_all(&c, pattern) })
+        Ok(PyColumn {
+            inner: functions::regexp_extract_all(&c, pattern),
+        })
     } else {
-        Ok(PyColumn { inner: c.regexp_extract_all_group(pattern, group_index) })
+        Ok(PyColumn {
+            inner: c.regexp_extract_all_group(pattern, group_index),
+        })
     }
 }
 
@@ -4685,7 +5012,9 @@ fn format_string(format: &str, columns: &Bound<'_, PyTuple>) -> PyResult<PyColum
     let mut cols: Vec<Column> = Vec::with_capacity(columns.len());
     for item in columns.iter() {
         let py_col = item.downcast::<PyColumn>().map_err(|_| {
-            PyErr::new::<pyo3::exceptions::PyTypeError, _>("format_string expects Column expressions")
+            PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+                "format_string expects Column expressions",
+            )
         })?;
         cols.push(py_col.borrow().inner.clone());
     }
@@ -4752,10 +5081,7 @@ fn array_distinct(column: &PyColumn) -> PyColumn {
 #[pyfunction]
 fn posexplode(column: &PyColumn) -> (PyColumn, PyColumn) {
     let (pos, val) = functions::posexplode(&column.inner);
-    (
-        PyColumn { inner: pos },
-        PyColumn { inner: val },
-    )
+    (PyColumn { inner: pos }, PyColumn { inner: val })
 }
 
 #[pyfunction]
@@ -5261,9 +5587,7 @@ fn concat_ws(separator: &str, columns: &Bound<'_, PyTuple>) -> PyResult<PyColumn
     let mut cols: Vec<Column> = Vec::with_capacity(columns.len());
     for item in columns.iter() {
         let py_col = item.downcast::<PyColumn>().map_err(|_| {
-            PyErr::new::<pyo3::exceptions::PyTypeError, _>(
-                "concat_ws expects Column expressions",
-            )
+            PyErr::new::<pyo3::exceptions::PyTypeError, _>("concat_ws expects Column expressions")
         })?;
         cols.push(py_col.borrow().inner.clone());
     }
@@ -5437,7 +5761,9 @@ fn json_tuple(column: &PyColumn, keys: &Bound<'_, PyTuple>) -> PyResult<PyColumn
         .iter()
         .map(|o| o.extract::<String>())
         .collect::<Result<Vec<_>, _>>()
-        .map_err(|_| PyErr::new::<pyo3::exceptions::PyTypeError, _>("json_tuple keys must be strings"))?;
+        .map_err(|_| {
+            PyErr::new::<pyo3::exceptions::PyTypeError, _>("json_tuple keys must be strings")
+        })?;
     let keys_refs: Vec<&str> = keys_str.iter().map(|s| s.as_str()).collect();
     Ok(PyColumn {
         inner: functions::json_tuple(&column.inner, &keys_refs),

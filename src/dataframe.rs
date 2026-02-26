@@ -596,11 +596,7 @@ impl DataFrame {
         self.0.crosstab(col1, col2).map(DataFrame)
     }
 
-    pub fn melt(
-        &self,
-        id_vars: &[&str],
-        value_vars: &[&str],
-    ) -> Result<DataFrame, PolarsError> {
+    pub fn melt(&self, id_vars: &[&str], value_vars: &[&str]) -> Result<DataFrame, PolarsError> {
         self.0.melt(id_vars, value_vars).map(DataFrame)
     }
 

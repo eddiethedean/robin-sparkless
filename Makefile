@@ -79,9 +79,9 @@ fmt:
 fmt-check:
 	cargo fmt --check
 
-# Lint with Clippy (all features, all targets including tests so one compile is reused by test)
+# Lint with Clippy (Rust crates only; sparkless-native has PyO3 bindings with different lint conventions)
 clippy:
-	cargo clippy --workspace --all-features --all-targets -- -D warnings
+	cargo clippy -p robin-sparkless -p robin-sparkless-core -p robin-sparkless-polars -p spark-sql-parser --all-features --all-targets -- -D warnings
 
 # Security: scan for known vulnerabilities
 audit:

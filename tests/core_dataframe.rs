@@ -488,7 +488,7 @@ fn test_select_items_mixed_names_and_exprs() {
         ("b".to_string(), "bigint".to_string()),
     ];
     let df = spark
-        .create_dataframe_from_rows_engine(rows, schema, false)
+        .create_dataframe_from_rows_engine(rows, schema, false, false)
         .unwrap();
     let items = vec![
         SelectItem::ColumnName("a"),

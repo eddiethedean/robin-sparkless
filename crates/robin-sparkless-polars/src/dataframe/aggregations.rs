@@ -3,12 +3,11 @@
 use super::DataFrame;
 use crate::column::Column;
 use polars::prelude::{
-    DataFrame as PlDataFrame, DataType, Expr, LazyFrame, LazyGroupBy, NamedFrom, PlSmallStr,
+    DataFrame as PlDataFrame, DataType, Expr, LazyFrame, LazyGroupBy, NULL, NamedFrom, PlSmallStr,
     PolarsError, SchemaNamesAndDtypes, Series, col, len, lit, when,
 };
 use polars_plan::dsl::AggExpr;
 use std::collections::HashMap;
-use std::sync::Arc;
 
 /// Disambiguate duplicate output names in aggregation expressions (PySpark parity: issue #368).
 /// When multiple aggs produce the same name (e.g. sum("value"), avg("value") both "value"),
@@ -1007,19 +1006,16 @@ impl PivotedGroupedData {
 
     /// Pivot then last (PySpark: groupBy(...).pivot(...).last(column)).
     pub fn last(&self, value_col: &str) -> Result<DataFrame, PolarsError> {
-        use polars::prelude::*;
         self.pivot_agg(value_col, Expr::last)
     }
 
     /// Pivot then stddev (PySpark: groupBy(...).pivot(...).stddev(column)). Sample std (ddof=1).
     pub fn stddev(&self, value_col: &str) -> Result<DataFrame, PolarsError> {
-        use polars::prelude::*;
         self.pivot_agg(value_col, |e| e.std(1))
     }
 
     /// Pivot then variance (PySpark: groupBy(...).pivot(...).variance(column)). Sample var (ddof=1).
     pub fn variance(&self, value_col: &str) -> Result<DataFrame, PolarsError> {
-        use polars::prelude::*;
         self.pivot_agg(value_col, |e| e.var(1))
     }
 
@@ -1031,17 +1027,15 @@ impl PivotedGroupedData {
     /// Pivot with multiple aggregations (PySpark: groupBy(...).pivot(...).agg(F.sum("v").alias("total"), ...)).
     /// Each expr must be Alias(Agg(Sum/Mean/Min/Max(Column(name))), alias). With one expr: column named by alias; with multiple: columns {pivot_val}_{alias}.
     pub fn agg(&self, exprs: Vec<Expr>) -> Result<DataFrame, PolarsError> {
-        use polars::prelude::*;
         let mut parsed = Vec::with_capacity(exprs.len());
         for e in &exprs {
             match parse_pivot_agg_expr(e) {
                 Some(t) => parsed.push(t),
                 None => {
                     return Err(PolarsError::ComputeError(
-                        format!(
-                            "pivot.agg expects expressions like F.sum(\"col\").alias(\"name\"); got unsupported expr"
-                        )
-                        .into(),
+                        "pivot.agg expects expressions like F.sum(\"col\").alias(\"name\"); got unsupported expr"
+                            .to_string()
+                            .into(),
                     ));
                 }
             }

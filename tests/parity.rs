@@ -474,7 +474,7 @@ fn create_df_from_input(
                 .iter()
                 .map(|s| (s.name.clone(), s.r#type.clone()))
                 .collect();
-            return spark.create_dataframe_from_rows(input.rows.clone(), schema_vec, false);
+            return spark.create_dataframe_from_rows(input.rows.clone(), schema_vec, false, false);
         }
     }
 
@@ -5939,7 +5939,12 @@ fn plan_empty_df_save_as_table_append() {
     assert_eq!(r1.count().unwrap(), 0);
 
     let one_row = spark
-        .create_dataframe_from_rows(vec![vec![json!(1), json!("a")]], schema.clone(), false)
+        .create_dataframe_from_rows(
+            vec![vec![json!(1), json!("a")]],
+            schema.clone(),
+            false,
+            false,
+        )
         .unwrap();
     one_row
         .write()
@@ -5976,7 +5981,7 @@ fn plan_empty_df_save_as_table_append() {
     assert_eq!(r1_wh.count().unwrap(), 0);
 
     let one_row_wh = spark_wh
-        .create_dataframe_from_rows(vec![vec![json!(2), json!("b")]], schema, false)
+        .create_dataframe_from_rows(vec![vec![json!(2), json!("b")]], schema, false, false)
         .unwrap();
     one_row_wh
         .write()
