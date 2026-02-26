@@ -8,11 +8,11 @@ mod transformations;
 pub use aggregations::{CubeRollupData, GroupedData, PivotedGroupedData};
 pub use joins::{JoinType, join};
 pub use stats::DataFrameStat;
+pub(crate) use transformations::literal_value_to_serde_value;
 pub use transformations::{
     DataFrameNa, SelectItem, filter, order_by, order_by_exprs, select, select_items,
     select_with_exprs, with_column,
 };
-pub(crate) use transformations::literal_value_to_serde_value;
 
 use crate::column::Column;
 use crate::error::{EngineError, polars_to_core_error};
@@ -655,13 +655,9 @@ impl DataFrame {
         struct_col_name: &str,
         field_name: &str,
     ) -> Result<String, PolarsError> {
-        let dt = self
-            .get_column_dtype(struct_col_name)
-            .ok_or_else(|| {
-                PolarsError::ColumnNotFound(
-                    format!("Column '{}' not found", struct_col_name).into(),
-                )
-            })?;
+        let dt = self.get_column_dtype(struct_col_name).ok_or_else(|| {
+            PolarsError::ColumnNotFound(format!("Column '{}' not found", struct_col_name).into())
+        })?;
         if let DataType::Struct(fields) = dt {
             if self.case_sensitive {
                 if fields.iter().any(|f| f.name.as_str() == field_name) {
@@ -2153,17 +2149,15 @@ fn any_value_to_json(av: &AnyValue<'_>, dtype: &DataType) -> JsonValue {
                                             .map(|s| s.to_string())
                                             .or_else(|| Some(fld_av.to_string()));
                                     } else if fld.name == "value" {
-                                        v = Some(
-                                            if matches!(fld.dtype, DataType::String) {
-                                                if let Some(s) = fld_av.get_str() {
-                                                    map_value_string_to_json(s)
-                                                } else {
-                                                    any_value_to_json(&fld_av, &fld.dtype)
-                                                }
+                                        v = Some(if matches!(fld.dtype, DataType::String) {
+                                            if let Some(s) = fld_av.get_str() {
+                                                map_value_string_to_json(s)
                                             } else {
                                                 any_value_to_json(&fld_av, &fld.dtype)
-                                            },
-                                        );
+                                            }
+                                        } else {
+                                            any_value_to_json(&fld_av, &fld.dtype)
+                                        });
                                     }
                                 }
                                 (k, v)
@@ -2179,17 +2173,15 @@ fn any_value_to_json(av: &AnyValue<'_>, dtype: &DataType) -> JsonValue {
                                             .map(|s| s.to_string())
                                             .or_else(|| Some(fld_av.to_string()));
                                     } else if fld.name == "value" {
-                                        v = Some(
-                                            if matches!(fld.dtype, DataType::String) {
-                                                if let Some(s) = fld_av.get_str() {
-                                                    map_value_string_to_json(s)
-                                                } else {
-                                                    any_value_to_json(fld_av, &fld.dtype)
-                                                }
+                                        v = Some(if matches!(fld.dtype, DataType::String) {
+                                            if let Some(s) = fld_av.get_str() {
+                                                map_value_string_to_json(s)
                                             } else {
                                                 any_value_to_json(fld_av, &fld.dtype)
-                                            },
-                                        );
+                                            }
+                                        } else {
+                                            any_value_to_json(fld_av, &fld.dtype)
+                                        });
                                     }
                                 }
                                 (k, v)

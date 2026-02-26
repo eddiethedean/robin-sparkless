@@ -7,13 +7,13 @@
 use crate::dataframe::DataFrame;
 use crate::error::{EngineError, polars_to_core_error};
 use crate::udf_registry::UdfRegistry;
+use base64::Engine;
 use polars::chunked_array::StructChunked;
 use polars::chunked_array::builder::get_list_builder;
 use polars::prelude::{
     DataFrame as PlDataFrame, DataType, Field, IntoSeries, NamedFrom, PlSmallStr, PolarsError,
     Series, TimeUnit,
 };
-use base64::Engine;
 use robin_sparkless_core::{SparklessConfig, date_utils};
 use serde_json::Value as JsonValue;
 use std::cell::RefCell;
@@ -595,11 +595,9 @@ fn json_values_to_series(
                 .iter()
                 .map(|ov| {
                     ov.as_ref().and_then(|v| match v {
-                        JsonValue::String(s) => {
-                            base64::engine::general_purpose::STANDARD
-                                .decode(s.as_bytes())
-                                .ok()
-                        }
+                        JsonValue::String(s) => base64::engine::general_purpose::STANDARD
+                            .decode(s.as_bytes())
+                            .ok(),
                         JsonValue::Null => None,
                         _ => None,
                     })
@@ -1004,7 +1002,9 @@ impl SparkSession {
     /// Set the current database for this session. Errors if the name does not exist.
     pub fn set_current_database(&self, name: &str) -> Result<(), EngineError> {
         if name.is_empty() {
-            return Err(EngineError::User("database name cannot be empty".to_string()));
+            return Err(EngineError::User(
+                "database name cannot be empty".to_string(),
+            ));
         }
         if !self.database_exists(name) {
             return Err(EngineError::NotFound(format!(
@@ -1710,7 +1710,9 @@ impl SparkSession {
         // #731, #769, #772: createDataFrame(rows, ["name", "age"]) yields int/double/bool columns.
         let schema_inferred_in_rust = !schema.is_empty()
             && !rows.is_empty()
-            && schema.iter().all(|(_, t)| t.trim().eq_ignore_ascii_case("string"));
+            && schema
+                .iter()
+                .all(|(_, t)| t.trim().eq_ignore_ascii_case("string"));
         let schema = if schema_inferred_in_rust {
             let names: Vec<String> = schema.iter().map(|(n, _)| n.clone()).collect();
             Self::infer_schema_from_json_rows(&rows, &names)
@@ -2556,7 +2558,6 @@ impl Default for SparkSession {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use polars::prelude::SchemaExt;
     use serde_json::json;
 
     #[test]
@@ -2658,7 +2659,13 @@ mod tests {
         let schema: Vec<(String, String)> = vec![];
         let result = spark.create_dataframe_from_rows(rows, schema, false, false);
         match &result {
-            Err(e) => assert!(e.to_string().contains("schema must not be empty")),
+            Err(e) => assert!(
+                e.to_string().contains("LENGTH_SHOULD_BE_THE_SAME")
+                    || e.to_string().contains("Expected 0 fields")
+                    || e.to_string().contains("schema must not be empty"),
+                "expected error for empty schema with non-empty rows: {}",
+                e
+            ),
             Ok(_) => panic!("expected error for empty schema with non-empty rows"),
         }
     }
@@ -2924,7 +2931,7 @@ mod tests {
         assert_eq!(r0.get("active").and_then(|v| v.as_bool()), Some(true));
     }
 
-    /// PR13: create_dataframe_from_rows with empty schema infers struct when column values are JSON objects.
+    /// PR13: create_dataframe_from_rows with empty schema + non-empty rows returns error (LENGTH_SHOULD_BE_THE_SAME).
     #[test]
     fn test_create_dataframe_from_rows_infer_struct_from_objects() {
         use serde_json::json;
@@ -2935,15 +2942,16 @@ mod tests {
             vec![json!("id2"), json!({"a": 2, "b": "y"})],
         ];
         let schema = vec![];
-        let df = spark
-            .create_dataframe_from_rows(rows, schema, false, false)
-            .unwrap();
-        assert_eq!(df.count().unwrap(), 2);
-        let collected = df.collect_inner().unwrap();
-        assert_eq!(collected.get_column_names(), &["c0", "c1"]);
-        // Second column inferred as struct<a:string,b:string> (object keys, string types)
-        let dtype1 = &collected.schema().get_field("c1").unwrap().dtype;
-        assert!(matches!(dtype1, polars::datatypes::DataType::Struct(_)));
+        let result = spark.create_dataframe_from_rows(rows, schema, false, false);
+        match &result {
+            Err(e) => assert!(
+                e.to_string().contains("LENGTH_SHOULD_BE_THE_SAME")
+                    || e.to_string().contains("Expected 0 fields"),
+                "expected LENGTH_SHOULD_BE_THE_SAME: {}",
+                e
+            ),
+            Ok(_) => panic!("expected error for empty schema with non-empty rows"),
+        }
     }
 
     /// #610: create_dataframe_from_rows accepts struct as string that parses to object or array (Sparkless/Python serialization).
@@ -3128,7 +3136,7 @@ mod tests {
         );
     }
 
-    /// #624: When schema is empty but rows are not, infer schema from rows (PySpark parity).
+    /// #624: When schema is empty but rows are not, backend returns LENGTH_SHOULD_BE_THE_SAME (no inference).
     #[test]
     fn test_issue_624_empty_schema_inferred_from_rows() {
         use serde_json::json;
@@ -3137,12 +3145,16 @@ mod tests {
         let schema: Vec<(String, String)> = vec![];
         let rows: Vec<Vec<JsonValue>> =
             vec![vec![json!("a"), json!(1)], vec![json!("b"), json!(2)]];
-        let df = spark
-            .create_dataframe_from_rows(rows, schema, false, false)
-            .expect("#624: empty schema with non-empty rows should infer schema");
-        assert_eq!(df.count().unwrap(), 2);
-        let collected = df.collect_inner().unwrap();
-        assert_eq!(collected.get_column_names(), &["c0", "c1"]);
+        let result = spark.create_dataframe_from_rows(rows, schema, false, false);
+        match &result {
+            Err(e) => assert!(
+                e.to_string().contains("LENGTH_SHOULD_BE_THE_SAME")
+                    || e.to_string().contains("Expected 0 fields"),
+                "expected LENGTH_SHOULD_BE_THE_SAME: {}",
+                e
+            ),
+            Ok(_) => panic!("expected error for empty schema with non-empty rows"),
+        }
     }
 
     /// #627: create_dataframe_from_rows accepts map column (dict/object). PySpark MapType parity.

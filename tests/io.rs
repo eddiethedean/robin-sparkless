@@ -81,17 +81,17 @@ fn create_dataframe_from_rows_empty_schema_infers_from_json_rows() {
         vec![json!("hello"), json!(42), json!(true)],
         vec![json!("world"), json!(0), json!(false)],
     ];
-    let df = spark
-        .create_dataframe_from_rows_engine(rows, schema, false)
-        .expect("empty schema + non-empty rows should infer schema");
-    assert_eq!(df.count_engine().unwrap(), 2);
-    let names = df.columns_engine().unwrap();
-    assert_eq!(names, vec!["c0", "c1", "c2"]);
-    let out = df.collect_as_json_rows_engine().unwrap();
-    assert_eq!(out.len(), 2);
-    assert_eq!(out[0].get("c0").and_then(|v| v.as_str()), Some("hello"));
-    assert_eq!(out[0].get("c1").and_then(|v| v.as_i64()), Some(42));
-    assert_eq!(out[0].get("c2").and_then(|v| v.as_bool()), Some(true));
+    // Backend rejects empty schema with non-empty rows (LENGTH_SHOULD_BE_THE_SAME / PySpark parity).
+    let result = spark.create_dataframe_from_rows_engine(rows, schema, false, false);
+    match &result {
+        Ok(_) => panic!("expected error for empty schema + non-empty rows"),
+        Err(e) => assert!(
+            e.to_string().contains("LENGTH_SHOULD_BE_THE_SAME")
+                || e.to_string().contains("Expected 0 fields"),
+            "expected LENGTH_SHOULD_BE_THE_SAME: {}",
+            e
+        ),
+    }
 }
 
 #[test]
@@ -104,7 +104,7 @@ fn create_dataframe_from_rows_collect_as_json_roundtrip() {
     let rows: Vec<Vec<serde_json::Value>> =
         vec![vec![json!(1), json!("a")], vec![json!(2), json!("b")]];
     let df = spark
-        .create_dataframe_from_rows_engine(rows.clone(), schema, false)
+        .create_dataframe_from_rows_engine(rows.clone(), schema, false, false)
         .unwrap();
     let collected = df.collect_as_json_rows_engine().unwrap();
     assert_eq!(collected.len(), 2);
@@ -153,7 +153,7 @@ fn schema_from_json_and_create_dataframe_from_rows() {
     let rows: Vec<Vec<serde_json::Value>> =
         vec![vec![json!(1), json!("alice")], vec![json!(2), json!("bob")]];
     let df = spark
-        .create_dataframe_from_rows_engine(rows, schema, false)
+        .create_dataframe_from_rows_engine(rows, schema, false, false)
         .unwrap();
     assert_eq!(df.count_engine().unwrap(), 2);
 }

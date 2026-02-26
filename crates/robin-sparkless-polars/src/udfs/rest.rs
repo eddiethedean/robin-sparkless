@@ -1220,23 +1220,17 @@ pub fn apply_regexp_extract_all_group(
     let ca = series
         .str()
         .map_err(|e| compute_err("regexp_extract_all", e))?;
-    let re = Regex::new(pattern).map_err(|e| {
-        compute_err(
-            &format!("regexp_extract_all invalid regex '{pattern}'"),
-            e,
-        )
-    })?;
+    let re = Regex::new(pattern)
+        .map_err(|e| compute_err(&format!("regexp_extract_all invalid regex '{pattern}'"), e))?;
 
     let mut out: ListChunked = ca
         .into_iter()
         .map(|opt_s| {
             opt_s.map(|s| {
                 let mut vals: Vec<String> = Vec::new();
-                for cap_res in re.captures_iter(s) {
-                    if let Ok(caps) = cap_res {
-                        if let Some(m) = caps.get(group_index) {
-                            vals.push(m.as_str().to_string());
-                        }
+                for caps in re.captures_iter(s).flatten() {
+                    if let Some(m) = caps.get(group_index) {
+                        vals.push(m.as_str().to_string());
                     }
                 }
                 Series::new(PlSmallStr::EMPTY, vals)
@@ -1265,9 +1259,8 @@ pub fn apply_regexp_like_lookaround(column: Column, pattern: &str) -> PolarsResu
         .map_err(|e| compute_err(&format!("rlike invalid regex '{pattern}'"), e))?;
     let out = BooleanChunked::from_iter_options(
         name.as_str().into(),
-        ca.into_iter().map(|opt_s| {
-            opt_s.map(|s| re.is_match(s).unwrap_or(false))
-        }),
+        ca.into_iter()
+            .map(|opt_s| opt_s.map(|s| re.is_match(s).unwrap_or(false))),
     );
     Ok(Some(Column::new(name, out.into_series())))
 }

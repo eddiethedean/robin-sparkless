@@ -159,7 +159,12 @@ pub fn translate(
                 .iter()
                 .map(|c| (c.name.value.clone(), dtype_to_schema_str(&c.data_type)))
                 .collect();
-            let df = session.create_dataframe_from_rows(Vec::<Vec<JsonValue>>::new(), schema, false, false)?;
+            let df = session.create_dataframe_from_rows(
+                Vec::<Vec<JsonValue>>::new(),
+                schema,
+                false,
+                false,
+            )?;
             session.register_table(&table_name, df);
             Ok(DataFrame::from_polars_with_options(
                 PlDataFrame::empty(),

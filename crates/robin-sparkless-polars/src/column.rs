@@ -1,5 +1,6 @@
 use polars::prelude::{
-    DataType, Expr, Field, PolarsError, PolarsResult, RankMethod, RankOptions, SortOptions, TimeUnit, WindowMapping, col, lit,
+    DataType, Expr, Field, PolarsError, PolarsResult, RankMethod, RankOptions, SortOptions,
+    TimeUnit, WindowMapping, col, lit,
 };
 
 /// Unwrap UDF result to Column (map() expects Result<Column>, UDFs return Result<Option<Column>>).
@@ -166,13 +167,13 @@ impl Column {
 
     /// If this column is a Python UDF call, return (udf_name, arg_names, arg_literal_json_strings).
     /// For each arg: None = use row[arg_name]; Some(json) = literal value (not in row).
-    pub fn udf_call_info_with_literals(&self) -> Option<(String, Vec<String>, Vec<Option<String>>)> {
+    pub fn udf_call_info_with_literals(
+        &self,
+    ) -> Option<(String, Vec<String>, Vec<Option<String>>)> {
         self.udf_call.as_ref().map(|(name, args)| {
             let arg_names: Vec<String> = args.iter().map(|c| c.name().to_string()).collect();
-            let literals: Vec<Option<String>> = args
-                .iter()
-                .map(|c| c.literal_as_json_string())
-                .collect();
+            let literals: Vec<Option<String>> =
+                args.iter().map(|c| c.literal_as_json_string()).collect();
             (name.clone(), arg_names, literals)
         })
     }
@@ -485,7 +486,7 @@ impl Column {
     /// True if column value is between lower and upper (inclusive). PySpark between(low, high).
     /// Applies string–numeric coercion so col("val").between(1, 10) works when val is string (#628).
     pub fn between(&self, lower: &Column, upper: &Column) -> Column {
-        use crate::type_coercion::{coerce_for_pyspark_comparison, CompareOp};
+        use crate::type_coercion::{CompareOp, coerce_for_pyspark_comparison};
         use polars::prelude::*;
 
         let left = self.expr().clone();

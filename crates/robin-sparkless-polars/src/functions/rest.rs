@@ -1439,7 +1439,10 @@ pub fn to_timestamp(column: &Column, format: Option<&str>) -> Result<Column, Str
             }
         },
     );
-    Ok(crate::column::Column::from_expr(expr.alias(&out_name), Some(out_name)))
+    Ok(crate::column::Column::from_expr(
+        expr.alias(&out_name),
+        Some(out_name),
+    ))
 }
 
 /// Cast to timestamp, null on invalid, or parse with format when provided (PySpark try_to_timestamp).

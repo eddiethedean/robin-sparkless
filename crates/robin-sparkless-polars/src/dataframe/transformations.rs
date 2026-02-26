@@ -9,17 +9,14 @@ use crate::functions::SortOrder;
 use crate::type_coercion::{coerce_expr_pair, find_common_type};
 use crate::udfs;
 use polars::prelude::{
-    DataType, Expr, Float64Chunked, IntoLazy, IntoSeries, NamedFrom, PlSmallStr,
-    PolarsError, Selector, Series, UnionArgs, UniqueKeepStrategy, col, len, lit, repeat,
+    DataType, Expr, Float64Chunked, IntoLazy, IntoSeries, NamedFrom, PlSmallStr, PolarsError,
+    Selector, Series, UnionArgs, UniqueKeepStrategy, col, len, lit, repeat,
 };
 use std::collections::HashMap;
 
 /// Replace a pure literal expr with a column-referencing expr so Polars produces correct row count.
 /// Polars lit() in select-only or empty-df contexts yields 1 row; we need N rows (or 0 for empty).
-fn expand_pure_literal_to_rows(
-    expr: Expr,
-    first_col: Option<&str>,
-) -> Result<Expr, PolarsError> {
+fn expand_pure_literal_to_rows(expr: Expr, first_col: Option<&str>) -> Result<Expr, PolarsError> {
     let (inner, alias): (Expr, Option<PlSmallStr>) = match &expr {
         Expr::Alias(e, name) => (e.as_ref().clone(), Some(name.clone())),
         _ => (expr.clone(), None),
@@ -92,9 +89,7 @@ pub fn select_with_exprs(
     let first_col = df.columns().ok().and_then(|cols| cols.into_iter().next());
     let exprs: Vec<Expr> = exprs
         .into_iter()
-        .map(|e| {
-            expand_pure_literal_to_rows(e.clone(), first_col.as_deref()).unwrap_or(e)
-        })
+        .map(|e| expand_pure_literal_to_rows(e.clone(), first_col.as_deref()).unwrap_or(e))
         .collect();
     let mut name_count: HashMap<String, u32> = HashMap::new();
     let exprs: Vec<Expr> = exprs
@@ -1091,7 +1086,9 @@ fn any_value_to_serde_value(av: &polars::prelude::AnyValue) -> serde_json::Value
 }
 
 /// Convert a literal expression value to JSON for Python UDF executor (literal args).
-pub(crate) fn literal_value_to_serde_value(lv: &polars::prelude::LiteralValue) -> Option<serde_json::Value> {
+pub(crate) fn literal_value_to_serde_value(
+    lv: &polars::prelude::LiteralValue,
+) -> Option<serde_json::Value> {
     lv.to_any_value().as_ref().map(any_value_to_serde_value)
 }
 
@@ -1151,10 +1148,7 @@ pub fn print_schema(df: &DataFrame) -> Result<String, PolarsError> {
 // ---------- Batch D: selectExpr, colRegex, withColumns, withColumnsRenamed, na ----------
 
 /// Parse simple "col op literal" expression for selectExpr (e.g. "age * 2", "salary + 100").
-fn parse_simple_expr(
-    df: &DataFrame,
-    s: &str,
-) -> Result<Option<Expr>, PolarsError> {
+fn parse_simple_expr(df: &DataFrame, s: &str) -> Result<Option<Expr>, PolarsError> {
     let s = s.trim();
     for (op, kind) in [
         (" * ", "mul"),
@@ -1168,17 +1162,20 @@ fn parse_simple_expr(
         if let Some((a, b)) = s.split_once(op) {
             let a = a.trim();
             let b = b.trim();
-            let (col_part, num_part, col_on_left) = if df.resolve_column_name(a).is_ok() && b.parse::<f64>().is_ok() {
-                (a, b, true)
-            } else if df.resolve_column_name(b).is_ok() && a.parse::<f64>().is_ok() {
-                (b, a, false)
-            } else {
-                continue;
-            };
+            let (col_part, num_part, col_on_left) =
+                if df.resolve_column_name(a).is_ok() && b.parse::<f64>().is_ok() {
+                    (a, b, true)
+                } else if df.resolve_column_name(b).is_ok() && a.parse::<f64>().is_ok() {
+                    (b, a, false)
+                } else {
+                    continue;
+                };
             let resolved = df.resolve_column_name(col_part)?;
             let col_expr = col(resolved.as_str());
             let num: f64 = num_part.parse().map_err(|_| {
-                PolarsError::ComputeError(format!("selectExpr: could not parse literal {num_part:?}").into())
+                PolarsError::ComputeError(
+                    format!("selectExpr: could not parse literal {num_part:?}").into(),
+                )
             })?;
             let lit_expr = lit(num);
             let expr = match kind {
