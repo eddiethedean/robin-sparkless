@@ -58,9 +58,10 @@ def assert_rows_equal(
         for i, (a, e) in enumerate(zip(actual, expected)):
             _assert_row_equal(a, e, index=i)
     else:
-        # Sort by stringified row for stable comparison
+        # Sort by stringified row for stable comparison. Use _sort_key_val so we never
+        # compare str vs int (e.g. (k, 50000) vs (k, "IT") in sorted()).
         def key_fn(r: dict) -> str:
-            return str(sorted((k, _norm_val(v)) for k, v in r.items()))
+            return str(sorted((k, _sort_key_val(v)) for k, v in r.items()))
 
         actual_sorted = sorted(actual, key=key_fn)
         expected_sorted = sorted(expected, key=key_fn)
@@ -75,9 +76,18 @@ def _norm_val(v: object) -> object:
     return v
 
 
+def _sort_key_val(v: object) -> tuple:
+    """Value as comparable tuple for sort key; avoids str vs int TypeError."""
+    if v is None:
+        return (0, "")
+    return (1, (type(v).__name__, repr(v)))
+
+
 def _assert_row_equal(actual: dict, expected: dict, index: int = 0) -> None:
-    """Compare two row dicts; raise AssertionError on first difference."""
-    keys = set(actual) | set(expected)
+    """Compare two row dicts; raise AssertionError on first difference.
+    actual/expected may be dict or Row (use .keys() so we sort key names, not values).
+    """
+    keys = set(actual.keys()) | set(expected.keys())
     for k in sorted(keys):
         if k not in actual:
             raise AssertionError(f"Row {index}: missing key '{k}' in actual")

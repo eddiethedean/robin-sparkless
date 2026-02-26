@@ -92,6 +92,8 @@ fn json_to_py(value: &JsonValue, py: Python<'_>) -> PyResult<PyObject> {
 
 /// Best-effort coerce a string to int, float, or bool when it looks like one (e.g. coalesce
 /// results or stringified array elements). Returns None to keep as string.
+/// Kept for potential use when schema is numeric but engine sent string.
+#[allow(dead_code)]
 fn try_coerce_string_to_numeric_or_bool(py: Python<'_>, s: &str) -> Option<PyObject> {
     let s = s.trim();
     let lower = s.to_lowercase();
@@ -157,11 +159,12 @@ fn json_value_to_py_with_schema(
                 s.clone().into_py(py)
             }
         }
-        (Some(DataType::String), JsonValue::String(s)) => {
-            try_coerce_string_to_numeric_or_bool(py, s).unwrap_or_else(|| s.clone().into_py(py))
-        }
-        // Schema says String but engine sent number (e.g. cast to string, inference): preserve string type in Row.
+        // Schema says String: preserve string in Row (do not coerce "123" -> 123; tests expect '100' not 100).
+        (Some(DataType::String), JsonValue::String(s)) => s.clone().into_py(py),
+        // Schema says String but engine sent number (e.g. cast to string, inference): emit string.
         (Some(DataType::String), JsonValue::Number(n)) => n.to_string().into_py(py),
+        // Schema says String but engine sent bool: emit "True"/"False".
+        (Some(DataType::String), JsonValue::Bool(b)) => b.to_string().into_py(py),
         (Some(DataType::Array(elem_type)), JsonValue::Array(arr)) => {
             let list = PyList::empty_bound(py);
             for v in arr {
@@ -1401,7 +1404,7 @@ fn py_any_to_json(py: Python<'_>, v: &Bound<'_, PyAny>) -> PyResult<JsonValue> {
 }
 
 fn infer_schema_from_first_row(
-    py: Python<'_>,
+    _py: Python<'_>,
     item: &Bound<'_, PyAny>,
     from_pandas: bool,
 ) -> Option<Vec<(String, String)>> {
