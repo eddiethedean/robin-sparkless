@@ -196,7 +196,12 @@ class StructType(DataType):
 
 
 class Row(tuple):
-    """Minimal Row type for collect() compatibility; can be extended."""
+    """PySpark-like Row type returned by DataFrame.collect().
+
+    Contract: collect() returns a list of Row. Each Row preserves types (int, float, bool,
+    str, None, date, datetime, list, dict). Use row[name], row[idx], row.asDict(), or
+    attribute access (row.column_name). Row is tuple-like (iterable, indexable by int).
+    """
 
     def __new__(cls, *args, **kwargs):
         if kwargs:

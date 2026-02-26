@@ -85,6 +85,109 @@ fn json_to_py(value: &JsonValue, py: Python<'_>) -> PyResult<PyObject> {
     }
 }
 
+/// Best-effort coerce a string to int, float, or bool when it looks like one (e.g. coalesce
+/// results or stringified array elements). Returns None to keep as string.
+fn try_coerce_string_to_numeric_or_bool(py: Python<'_>, s: &str) -> Option<PyObject> {
+    let s = s.trim();
+    let lower = s.to_lowercase();
+    if lower == "true" || lower == "1" {
+        return Some(true.into_py(py));
+    }
+    if lower == "false" || lower == "0" {
+        return Some(false.into_py(py));
+    }
+    if let Ok(i) = s.parse::<i64>() {
+        return Some(i.into_py(py));
+    }
+    if let Ok(f) = s.parse::<f64>() {
+        return Some(f.into_py(py));
+    }
+    None
+}
+
+/// Convert JSON value to Python with optional schema-based coercion so that numeric/boolean
+/// types are preserved even when the engine sent a string (e.g. string-inferred schema).
+/// Recurses for Array and Struct so nested values are coerced too.
+/// When schema is String, best-effort coerces to int/float/bool when the value looks like one
+/// (e.g. coalesce() results or mixed-type array elements stringified by the engine).
+fn json_value_to_py_with_schema(
+    py: Python<'_>,
+    value: &JsonValue,
+    dtype: Option<&DataType>,
+    datetime_cls: &Bound<'_, PyAny>,
+    date_cls: &Bound<'_, PyAny>,
+) -> PyResult<PyObject> {
+    Ok(match (dtype, value) {
+        (Some(DataType::Timestamp), JsonValue::String(s)) => datetime_cls
+            .call_method1("fromisoformat", (s.as_str(),))
+            .map(|o| o.into_py(py))
+            .unwrap_or_else(|_| s.clone().into_py(py)),
+        (Some(DataType::Date), JsonValue::String(s)) => date_cls
+            .call_method1("fromisoformat", (s.as_str(),))
+            .map(|o| o.into_py(py))
+            .unwrap_or_else(|_| s.clone().into_py(py)),
+        (Some(DataType::Integer) | Some(DataType::Long), JsonValue::String(s)) => {
+            let s = s.trim();
+            if let Ok(i) = s.parse::<i64>() {
+                i.into_py(py)
+            } else {
+                s.to_string().into_py(py)
+            }
+        }
+        (Some(DataType::Double), JsonValue::String(s)) => {
+            let s = s.trim();
+            if let Ok(f) = s.parse::<f64>() {
+                f.into_py(py)
+            } else {
+                s.to_string().into_py(py)
+            }
+        }
+        (Some(DataType::Boolean), JsonValue::String(s)) => {
+            let lower = s.trim().to_lowercase();
+            if lower == "true" || lower == "1" {
+                true.into_py(py)
+            } else if lower == "false" || lower == "0" {
+                false.into_py(py)
+            } else {
+                s.clone().into_py(py)
+            }
+        }
+        (Some(DataType::String), JsonValue::String(s)) => {
+            try_coerce_string_to_numeric_or_bool(py, s)
+                .unwrap_or_else(|| s.clone().into_py(py))
+        }
+        (Some(DataType::Array(elem_type)), JsonValue::Array(arr)) => {
+            let list = PyList::empty_bound(py);
+            for v in arr {
+                list.append(json_value_to_py_with_schema(
+                    py,
+                    v,
+                    Some(elem_type),
+                    datetime_cls,
+                    date_cls,
+                )?)?;
+            }
+            list.into_py(py)
+        }
+        (Some(DataType::Struct(fields)), JsonValue::Object(obj)) => {
+            let dict = PyDict::new_bound(py);
+            for f in fields {
+                let v = obj.get(&f.name).unwrap_or(&JsonValue::Null);
+                let py_v = json_value_to_py_with_schema(
+                    py,
+                    v,
+                    Some(&f.data_type),
+                    datetime_cls,
+                    date_cls,
+                )?;
+                dict.set_item(&f.name, py_v)?;
+            }
+            dict.into_py(py)
+        }
+        _ => json_to_py(value, py)?,
+    })
+}
+
 #[pyclass]
 struct PySparkSessionBuilder {
     inner: SparkSessionBuilder,
@@ -2008,8 +2111,16 @@ impl PyDataFrame {
         self.schema(py)
     }
 
+    /// Collect all rows as a list of Row objects (PySpark parity).
+    ///
+    /// **Contract:** Returns `list[Row]`. Each Row is tuple-like with attribute and name-based
+    /// access; types are preserved (int, float, bool, str, None, date, datetime, list, dict).
+    /// Use `row.asDict()` for a dict of column name -> value, or iterate for values in order.
+    /// String-typed columns are best-effort coerced to int/float/bool when the value looks like
+    /// one (e.g. coalesce() results or mixed-type array elements stringified by the engine).
     fn collect(&self, py: Python<'_>) -> PyResult<Vec<PyObject>> {
-        // Build a PySpark-like Row with schema attached.
+        // Build a PySpark-like Row with schema attached. Preserve numeric/boolean/date types;
+        // when the engine returns a string but schema says numeric/boolean, coerce for parity.
         let schema = self.inner.schema_engine().map_err(to_py_err)?;
         let field_names: Vec<String> = schema.fields().iter().map(|f| f.name.clone()).collect();
         let mut dtype_by_name: std::collections::HashMap<String, DataType> =
@@ -2094,17 +2205,13 @@ impl PyDataFrame {
             let kwargs = PyDict::new_bound(py);
             for name in &field_names {
                 let v = row.get(name).unwrap_or(&JsonValue::Null);
-                let py_v = match (dtype_by_name.get(name), v) {
-                    (Some(DataType::Timestamp), JsonValue::String(s)) => datetime_cls
-                        .call_method1("fromisoformat", (s.as_str(),))
-                        .map(|o| o.into_py(py))
-                        .unwrap_or_else(|_| s.clone().into_py(py)),
-                    (Some(DataType::Date), JsonValue::String(s)) => date_cls
-                        .call_method1("fromisoformat", (s.as_str(),))
-                        .map(|o| o.into_py(py))
-                        .unwrap_or_else(|_| s.clone().into_py(py)),
-                    _ => json_to_py(v, py)?,
-                };
+                let py_v = json_value_to_py_with_schema(
+                    py,
+                    v,
+                    dtype_by_name.get(name),
+                    &datetime_cls,
+                    &date_cls,
+                )?;
                 kwargs.set_item(name, py_v)?;
             }
             let py_row = row_cls.call((), Some(&kwargs))?;

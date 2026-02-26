@@ -44,7 +44,7 @@ Use `SparkSession.builder` or `SparkSession.builder()`; `create_dataframe` / `cr
 ## API
 
 - **SparkSession**: `builder` / `builder()`, `config`, `read`, `create_dataframe`, `createDataFrame`, `table`, `sql`, `range`, `read_csv`, `read_parquet`, `read_json`, `read_delta`, `read_delta_with_version`, temp/global temp views, `catalog()`, `stop`.
-- **DataFrame**: `filter`, `select`, `with_column`, `show`, `collect`, `count`, `group_by`, `order_by`, `limit`, `drop`, `distinct`, `join`, `union`, `union_all`, `write`, `create_or_replace_temp_view`, `columns`.
+- **DataFrame**: `filter`, `select`, `with_column`, `show`, `collect`, `count`, `group_by`, `order_by`, `limit`, `drop`, `distinct`, `join`, `union`, `union_all`, `write`, `create_or_replace_temp_view`, `columns`. `collect()` returns a list of `Row` objects with types preserved (int, float, bool, str, None, date, datetime, list, dict); use `row.asDict()` for a dict or attribute access for columns.
 - **Column**: `alias`, `gt`, `ge`, `lt`, `le`, `eq`, `is_null`, `is_not_null`, `asc`, `desc`, `upper`, `lower`, `substr`, `length`, `trim`, `cast`; and `col("x") > 1`, `col("x") == 2` etc.
 - **GroupedData**: `count`, `sum`, `avg`, `min`, `max`, `agg`, `pivot`.
 - **PivotedGroupedData**: `sum`, `avg`, `min`, `max`, `count` (by value column).
