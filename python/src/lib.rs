@@ -3897,6 +3897,36 @@ impl PyColumn {
         }
     }
 
+    fn reverse(&self) -> PyColumn {
+        PyColumn {
+            inner: self.inner.reverse(),
+        }
+    }
+
+    fn exp(&self) -> PyColumn {
+        PyColumn {
+            inner: self.inner.exp(),
+        }
+    }
+
+    fn crc32(&self) -> PyColumn {
+        PyColumn {
+            inner: self.inner.crc32(),
+        }
+    }
+
+    fn xxhash64(&self) -> PyColumn {
+        PyColumn {
+            inner: self.inner.xxhash64(),
+        }
+    }
+
+    fn initcap(&self) -> PyColumn {
+        PyColumn {
+            inner: self.inner.initcap(),
+        }
+    }
+
     fn levenshtein(&self, other: &PyColumn) -> PyColumn {
         PyColumn {
             inner: self.inner.levenshtein(&other.inner),
@@ -5661,6 +5691,31 @@ fn soundex(column: &PyColumn) -> PyColumn {
 }
 
 #[pyfunction]
+fn initcap(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: functions::initcap(&column.inner),
+    }
+}
+
+#[pyfunction]
+#[pyo3(name = "native_initcap")]
+fn native_initcap(column: &PyColumn) -> PyColumn {
+    initcap(column)
+}
+
+#[pyfunction]
+#[pyo3(name = "native_reverse")]
+fn native_reverse(column: &PyColumn) -> PyColumn {
+    reverse(column)
+}
+
+#[pyfunction]
+#[pyo3(name = "native_length")]
+fn native_length(column: &PyColumn) -> PyColumn {
+    length(column)
+}
+
+#[pyfunction]
 fn repeat(column: &PyColumn, n: i32) -> PyColumn {
     PyColumn {
         inner: functions::repeat(&column.inner, n),
@@ -6039,6 +6094,10 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(ltrim, m)?)?;
     m.add_function(wrap_pyfunction!(native_rtrim, m)?)?;
     m.add_function(wrap_pyfunction!(rtrim, m)?)?;
+    m.add_function(wrap_pyfunction!(initcap, m)?)?;
+    m.add_function(wrap_pyfunction!(native_initcap, m)?)?;
+    m.add_function(wrap_pyfunction!(native_reverse, m)?)?;
+    m.add_function(wrap_pyfunction!(native_length, m)?)?;
     m.add_function(wrap_pyfunction!(native_second, m)?)?;
     m.add_function(wrap_pyfunction!(second, m)?)?;
     m.add_function(wrap_pyfunction!(hour, m)?)?;
