@@ -400,6 +400,9 @@ impl PySparkSession {
         Ok(obj)
     }
 
+    /// PySpark: SparkSession.builder returns a builder instance.
+    /// We expose it as a class attribute so both `SparkSession.builder.appName(...)`
+    /// and `SparkSession.builder().appName(...)` work (the builder itself is callable).
     #[classattr]
     fn builder(_py: Python<'_>) -> PySparkSessionBuilder {
         PySparkSessionBuilder {
