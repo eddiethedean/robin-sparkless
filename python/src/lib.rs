@@ -1399,28 +1399,45 @@ fn py_any_to_json(py: Python<'_>, v: &Bound<'_, PyAny>) -> PyResult<JsonValue> {
 }
 
 fn infer_schema_from_first_row(
-    _py: Python<'_>,
+    py: Python<'_>,
     item: &Bound<'_, PyAny>,
     from_pandas: bool,
 ) -> Option<Vec<(String, String)>> {
-    let dict = item.downcast::<PyDict>().ok()?;
-    let mut keys: Vec<String> = dict
-        .keys()
-        .iter()
-        .filter_map(|k| k.extract::<String>().ok())
-        .collect();
-    if !from_pandas {
-        keys.sort();
+    if let Ok(dict) = item.downcast::<PyDict>() {
+        let mut keys: Vec<String> = dict
+            .keys()
+            .iter()
+            .filter_map(|k| k.extract::<String>().ok())
+            .collect();
+        if !from_pandas {
+            keys.sort();
+        }
+        let mut out = Vec::with_capacity(keys.len());
+        for k in &keys {
+            let typ = dict
+                .get_item(k.as_str())
+                .ok()
+                .flatten()
+                .map(|v| infer_type_from_py_value(&v))
+                .unwrap_or_else(|| "string".to_string());
+            out.push((k.clone(), typ));
+        }
+        return Some(out);
     }
-    let mut out = Vec::with_capacity(keys.len());
-    for k in &keys {
-        let typ = dict
-            .get_item(k.as_str())
-            .ok()
-            .flatten()
-            .map(|v| infer_type_from_py_value(&v))
-            .unwrap_or_else(|| "string".to_string());
-        out.push((k.clone(), typ));
+    // Namedtuple (and tuple-like with _fields): use _fields as column names so collect() returns row["a"], row["b"] (PySpark parity).
+    let fields_attr = item.getattr("_fields").ok()?;
+    let n: usize = fields_attr.len().ok()?.try_into().ok()?;
+    let mut names: Vec<String> = Vec::with_capacity(n);
+    for i in 0..n {
+        let f = fields_attr.get_item(i).ok()?;
+        let s = f.extract::<String>().ok()?;
+        names.push(s);
+    }
+    let mut out = Vec::with_capacity(names.len());
+    for (i, name) in names.iter().enumerate() {
+        let val = item.get_item(i).ok()?;
+        let typ = infer_type_from_py_value(&val);
+        out.push((name.clone(), typ));
     }
     Some(out)
 }

@@ -12,7 +12,22 @@ use polars::prelude::{
     DataType, Expr, Float64Chunked, IntoLazy, IntoSeries, NamedFrom, PlSmallStr, PolarsError,
     Selector, Series, UnionArgs, UniqueKeepStrategy, col, len, lit, repeat,
 };
+use std::cell::RefCell;
 use std::collections::HashMap;
+
+/// Returns true if the expression tree contains a reference to the given column name (so we must not drop it before adding).
+fn expr_refs_column(expr: &Expr, column_name: &str) -> bool {
+    let found = RefCell::new(false);
+    let _ = expr.clone().try_map_expr(|e| {
+        if let Expr::Column(n) = &e {
+            if n.as_str() == column_name {
+                *found.borrow_mut() = true;
+            }
+        }
+        Ok(e)
+    });
+    *found.borrow()
+}
 
 /// Replace a pure literal expr with a column-referencing expr so Polars produces correct row count.
 /// Polars lit() in select-only or empty-df contexts yields 1 row; we need N rows (or 0 for empty).
@@ -218,11 +233,43 @@ pub fn with_column(
             expr = expanded;
         }
     }
-    let lf = df.lazy_frame().with_column(expr.alias(column_name));
+    // PySpark withColumn replaces if column exists; avoid duplicate output name (e.g. CTE self-join).
+    // If the new expr references the column being replaced, replace in one select so the column stays in scope.
+    let lf = df.lazy_frame();
+    let lf = if let Ok(existing) = df.resolve_column_name(column_name) {
+        let all = df.columns()?;
+        let existing_str = existing.as_str();
+        if expr_refs_column(&expr, existing_str) {
+            // Replace in one shot: select all columns but use expr for the replaced name.
+            let select_exprs: Vec<Expr> = all
+                .iter()
+                .map(|n| {
+                    if n.as_str() == existing_str {
+                        expr.clone().alias(column_name)
+                    } else {
+                        col(n.as_str())
+                    }
+                })
+                .collect();
+            lf.select(select_exprs)
+        } else {
+            let to_keep: Vec<Expr> = all
+                .iter()
+                .filter(|n| n.as_str() != existing_str)
+                .map(|n| col(n.as_str()))
+                .collect();
+            lf.select(&to_keep).with_column(expr.alias(column_name))
+        }
+    } else {
+        lf.with_column(expr.alias(column_name))
+    };
     Ok(super::DataFrame::from_lazy_with_options(lf, case_sensitive))
 }
 
 /// Order by columns (sort). Preserves case_sensitive on result.
+/// Note: We do not coerce string sort columns to Float64 here (unlike filter/join) so that
+/// genuine string sort (e.g. by name) is preserved. A future improvement could apply
+/// coercion only when the column is numeric-looking (e.g. try_parse to number).
 pub fn order_by(
     df: &DataFrame,
     column_names: Vec<&str>,
@@ -254,6 +301,7 @@ pub fn order_by(
 
 /// Order by sort expressions (asc/desc with nulls_first/last). Preserves case_sensitive on result.
 /// Column names in sort expressions are resolved per df's case sensitivity (PySpark parity).
+/// Note: String sort columns are not coerced to numeric (see order_by) to avoid breaking string sort.
 pub fn order_by_exprs(
     df: &DataFrame,
     sort_orders: Vec<SortOrder>,

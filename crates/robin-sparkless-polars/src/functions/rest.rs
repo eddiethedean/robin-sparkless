@@ -15,15 +15,18 @@ pub fn count(col: &Column) -> Column {
 }
 
 /// Sum aggregation. Carries source column for running-window conversion when orderBy differs from partitionBy.
+/// Output name PySpark-style sum(column_name) so row["sum(salary)"] works.
 pub fn sum(col: &Column) -> Column {
-    let mut c = Column::from_expr(col.expr().clone().sum(), Some("sum".to_string()));
+    let name = format!("sum({})", col.name());
+    let mut c = Column::from_expr(col.expr().clone().sum(), Some(name));
     c.source_for_running = Some(col.name().to_string());
     c
 }
 
-/// Average aggregation
+/// Average aggregation. Output name PySpark-style avg(column_name).
 pub fn avg(col: &Column) -> Column {
-    Column::from_expr(col.expr().clone().mean(), Some("avg".to_string()))
+    let name = format!("avg({})", col.name());
+    Column::from_expr(col.expr().clone().mean(), Some(name))
 }
 
 /// Alias for avg (PySpark mean).
@@ -31,14 +34,16 @@ pub fn mean(col: &Column) -> Column {
     avg(col)
 }
 
-/// Maximum aggregation
+/// Maximum aggregation. Output name PySpark-style max(column_name) so row["max(salary)"] works.
 pub fn max(col: &Column) -> Column {
-    Column::from_expr(col.expr().clone().max(), Some("max".to_string()))
+    let name = format!("max({})", col.name());
+    Column::from_expr(col.expr().clone().max(), Some(name))
 }
 
-/// Minimum aggregation
+/// Minimum aggregation. Output name PySpark-style min(column_name).
 pub fn min(col: &Column) -> Column {
-    Column::from_expr(col.expr().clone().min(), Some("min".to_string()))
+    let name = format!("min({})", col.name());
+    Column::from_expr(col.expr().clone().min(), Some(name))
 }
 
 /// First value in group (PySpark first). Use in groupBy.agg(). ignorenulls: when true, first non-null (Polars first_non_null); otherwise first value in group order.
@@ -199,40 +204,45 @@ pub fn mode(col: &Column) -> Column {
     col.clone().mode()
 }
 
-/// Count distinct aggregation (PySpark countDistinct)
+/// Count distinct aggregation (PySpark countDistinct). Output name PySpark-style count_distinct(column_name).
 pub fn count_distinct(col: &Column) -> Column {
     use polars::prelude::DataType;
+    let name = format!("count_distinct({})", col.name());
     Column::from_expr(
         col.expr().clone().n_unique().cast(DataType::Int64),
-        Some("count_distinct".to_string()),
+        Some(name),
     )
 }
 
 /// Approximate count distinct (PySpark approx_count_distinct). Use in groupBy.agg(). rsd reserved for API compatibility; Polars uses exact n_unique.
+/// Output name is PySpark-style approx_count_distinct(column_name) so row["approx_count_distinct(value)"] works.
 pub fn approx_count_distinct(col: &Column, _rsd: Option<f64>) -> Column {
     use polars::prelude::DataType;
+    let name = format!("approx_count_distinct({})", col.name());
     Column::from_expr(
         col.expr().clone().n_unique().cast(DataType::Int64),
-        Some("approx_count_distinct".to_string()),
+        Some(name),
     )
 }
 
-/// Kurtosis aggregation (PySpark kurtosis). Fisher definition, bias=true. Use in groupBy.agg().
+/// Kurtosis aggregation (PySpark kurtosis). Fisher definition, bias=true. Use in groupBy.agg(). Output name PySpark-style kurtosis(column_name).
 pub fn kurtosis(col: &Column) -> Column {
+    let name = format!("kurtosis({})", col.name());
     Column::from_expr(
         col.expr()
             .clone()
             .cast(DataType::Float64)
             .kurtosis(true, true),
-        Some("kurtosis".to_string()),
+        Some(name),
     )
 }
 
-/// Skewness aggregation (PySpark skewness). bias=true. Use in groupBy.agg().
+/// Skewness aggregation (PySpark skewness). bias=true. Use in groupBy.agg(). Output name PySpark-style skewness(column_name).
 pub fn skewness(col: &Column) -> Column {
+    let name = format!("skewness({})", col.name());
     Column::from_expr(
         col.expr().clone().cast(DataType::Float64).skew(true),
-        Some("skewness".to_string()),
+        Some(name),
     )
 }
 
@@ -2986,28 +2996,28 @@ mod tests {
     fn test_sum_aggregation() {
         let column = col("value");
         let result = sum(&column);
-        assert_eq!(result.name(), "sum");
+        assert_eq!(result.name(), "sum(value)");
     }
 
     #[test]
     fn test_avg_aggregation() {
         let column = col("value");
         let result = avg(&column);
-        assert_eq!(result.name(), "avg");
+        assert_eq!(result.name(), "avg(value)");
     }
 
     #[test]
     fn test_max_aggregation() {
         let column = col("value");
         let result = max(&column);
-        assert_eq!(result.name(), "max");
+        assert_eq!(result.name(), "max(value)");
     }
 
     #[test]
     fn test_min_aggregation() {
         let column = col("value");
         let result = min(&column);
-        assert_eq!(result.name(), "min");
+        assert_eq!(result.name(), "min(value)");
     }
 
     #[test]
