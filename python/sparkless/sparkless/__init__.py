@@ -14,6 +14,7 @@ try:
         "to_timestamp", "to_date", "current_date", "current_timestamp", "input_file_name", "datediff", "unix_timestamp", "from_unixtime",
         "year", "month", "dayofmonth", "dayofweek", "date_add", "date_sub", "date_format",
         "length", "floor", "round", "ltrim", "rtrim", "hour", "minute", "second",
+        "reverse", "exp",
         "soundex", "repeat", "levenshtein", "try_cast", "try_add",
         "concat", "concat_ws", "array", "struct_",
         "asinh", "atanh", "cosh", "sinh",
@@ -34,6 +35,7 @@ except ImportError:
         "to_timestamp", "to_date", "current_date", "current_timestamp", "input_file_name", "datediff", "unix_timestamp", "from_unixtime",
         "year", "month", "dayofmonth", "dayofweek", "date_add", "date_sub", "date_format",
         "length", "floor", "round", "ltrim", "rtrim", "hour", "minute", "second",
+        "reverse", "exp",
         "soundex", "repeat", "levenshtein", "try_cast", "try_add",
         "concat", "concat_ws", "array", "struct_",
         "asinh", "atanh", "cosh", "sinh",
@@ -123,6 +125,8 @@ floor = _mod.floor
 round = _mod.round
 ltrim = _mod.ltrim
 rtrim = _mod.rtrim
+reverse = _mod.reverse
+exp = _mod.exp
 hour = _mod.hour
 minute = _mod.minute
 second = _mod.second

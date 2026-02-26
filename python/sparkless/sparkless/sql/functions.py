@@ -85,6 +85,7 @@ from sparkless import (
     explode as _explode,
 )
 from sparkless.errors import PySparkValueError
+from sparkless import DataFrame
 
 # Registry for Python UDFs: udf_name -> (callable, return_type). Populated by udf() / @udf.
 _PYTHON_UDF_REGISTRY = {}
@@ -106,6 +107,11 @@ def _as_col(c):
     return col(c) if isinstance(c, str) else c
 
 
+def _native_fn(name):
+    """Get function from _native: try native_<name> first (e.g. native_floor), then <name> (e.g. floor)."""
+    return getattr(_native, "native_" + name, None) or getattr(_native, name, None)
+
+
 def _not_implemented(name):
     """Return a callable that raises NotImplementedError when called (for stub functions)."""
     def _raiser(*args, **kwargs):
@@ -117,35 +123,35 @@ def _ni(name):
     return _not_implemented(name)
 
 # --- Math functions (native-backed) ---
-def floor(c): return _native.native_floor(_as_col(c))
-def ceil(c): return _native.native_ceil(_as_col(c))
+def floor(c): return _native_fn("floor")(_as_col(c))
+def ceil(c): return _native_fn("ceil")(_as_col(c))
 ceiling = ceil
-def abs(c): return _native.native_abs(_as_col(c))
-def sqrt(c): return _native.native_sqrt(_as_col(c))
-def log(c, base=None): return _native.native_log(_as_col(c))
-def exp(c): return _native.native_exp(_as_col(c))
-def pow(col1, col2): return _native.native_pow(_as_col(col1), int(col2))
+def abs(c): return _native_fn("abs")(_as_col(c))
+def sqrt(c): return _native_fn("sqrt")(_as_col(c))
+def log(c, base=None): return _native_fn("log")(_as_col(c)) if base is None else _native_fn("log_with_base")(_as_col(c), base)
+def exp(c): return _native_fn("exp")(_as_col(c))
+def pow(col1, col2): return _native_fn("pow")(_as_col(col1), int(col2))
 power = pow
-def round(c, scale=0): return _native.native_round(_as_col(c), scale)
-def signum(c): return _native.native_signum(_as_col(c))
-def sin(c): return _native.native_sin(_as_col(c))
-def cos(c): return _native.native_cos(_as_col(c))
-def tan(c): return _native.native_tan(_as_col(c))
-def asin(c): return _native.native_asin(_as_col(c))
-def acos(c): return _native.native_acos(_as_col(c))
-def atan(c): return _native.native_atan(_as_col(c))
-def atan2(y, x): return _native.native_atan2(_as_col(y), _as_col(x))
-def degrees(c): return _native.native_degrees(_as_col(c))
-def radians(c): return _native.native_radians(_as_col(c))
-def log2(c): return _native.native_log2(_as_col(c))
-def log10(c): return _native.native_log10(_as_col(c))
-def greatest(*cols): return _native.native_greatest([_as_col(c) for c in cols])
-def least(*cols): return _native.native_least([_as_col(c) for c in cols])
-def coalesce(*cols): return _native.native_coalesce([_as_col(c) for c in cols])
+def round(c, scale=0): return _native_fn("round")(_as_col(c), scale)
+def signum(c): return _native_fn("signum")(_as_col(c))
+def sin(c): return _native_fn("sin")(_as_col(c))
+def cos(c): return _native_fn("cos")(_as_col(c))
+def tan(c): return _native_fn("tan")(_as_col(c))
+def asin(c): return _native_fn("asin")(_as_col(c))
+def acos(c): return _native_fn("acos")(_as_col(c))
+def atan(c): return _native_fn("atan")(_as_col(c))
+def atan2(y, x): return _native_fn("atan2")(_as_col(y), _as_col(x))
+def degrees(c): return _native_fn("degrees")(_as_col(c))
+def radians(c): return _native_fn("radians")(_as_col(c))
+def log2(c): return _native_fn("log2")(_as_col(c))
+def log10(c): return _native_fn("log10")(_as_col(c))
+def greatest(*cols): return _native_fn("greatest")(tuple([_as_col(c) for c in cols]))
+def least(*cols): return _native_fn("least")(tuple([_as_col(c) for c in cols]))
+def coalesce(*cols): return _native_fn("coalesce")(tuple([_as_col(c) for c in cols]))
 
 nanvl = _ni("nanvl")
 isnan = _ni("isnan")
-isnull = _ni("isnull")
+# isnull defined above (before __all__)
 monotonically_increasing_id = _ni("monotonically_increasing_id")
 input_file_name = _ni("input_file_name")
 spark_partition_id = _ni("spark_partition_id")
@@ -170,35 +176,35 @@ def format_number(c, d): return _native.native_format_number(_as_col(c), d)
 # --- Array / collection functions (native-backed) ---
 array = _ni("array")
 struct = _ni("struct")
-def explode(col_or_name): return _native.native_explode(_as_col(col_or_name))
-def explode_outer(col_or_name): return _native.native_explode_outer(_as_col(col_or_name))
-def posexplode(col_or_name): return _native.native_posexplode(_as_col(col_or_name))
+def explode(col_or_name): return _native_fn("explode")(_as_col(col_or_name))
+def explode_outer(col_or_name): return _native_fn("explode_outer")(_as_col(col_or_name))
+def posexplode(col_or_name): return _native_fn("posexplode")(_as_col(col_or_name))
 posexplode_outer = _ni("posexplode_outer")
-def flatten(col_or_name): return _native.native_flatten(_as_col(col_or_name))
+def flatten(col_or_name): return _native_fn("flatten")(_as_col(col_or_name))
 def split(str_col, pattern, limit=-1):
-    lim = limit if limit != -1 else None
-    return _native.native_split(_as_col(str_col), pattern, lim)
-def format_string(fmt, *cols): return _native.native_format_string(fmt, [_as_col(c) for c in cols])
+    lim = limit if limit != -1 else -1  # Rust uses -1 for "no limit"
+    return _native_fn("split")(_as_col(str_col), pattern, lim)
+def format_string(fmt, *cols): return _native_fn("format_string")(fmt, tuple([_as_col(c) for c in cols]))
 concat_ws = _ni("concat_ws")
 
 # --- Aggregate functions (native-backed) ---
 def mean(col_or_name): return avg(col_or_name)
-def first(col_or_name, ignorenulls=False): return _native.native_first(_as_col(col_or_name), ignorenulls)
+def first(col_or_name, ignorenulls=False): return _native_fn("first")(_as_col(col_or_name), ignorenulls)
 last = _ni("last")
-def collect_list(col_or_name): return _native.native_collect_list(_as_col(col_or_name))
-def collect_set(col_or_name): return _native.native_collect_set(_as_col(col_or_name))
+def collect_list(col_or_name): return _native_fn("collect_list")(_as_col(col_or_name))
+def collect_set(col_or_name): return _native_fn("collect_set")(_as_col(col_or_name))
 def array_contains(col_or_name, value):
     v = _as_col(value) if not isinstance(value, (int, float, bool, str)) else lit(value)
-    return _native.native_array_contains(_as_col(col_or_name), v)
-def array_distinct(col_or_name): return _native.native_array_distinct(_as_col(col_or_name))
-def array_sort(col_or_name): return _native.native_array_sort(_as_col(col_or_name))
-def array_join(col_or_name, delimiter, null_replacement=None): return _native.native_array_join(_as_col(col_or_name), delimiter)
-def array_max(col_or_name): return _native.native_array_max(_as_col(col_or_name))
-def array_min(col_or_name): return _native.native_array_min(_as_col(col_or_name))
-def element_at(col_or_name, extraction): return _native.native_element_at(_as_col(col_or_name), extraction)
-def size(col_or_name): return _native.native_size(_as_col(col_or_name))
+    return _native_fn("array_contains")(_as_col(col_or_name), v)
+def array_distinct(col_or_name): return _native_fn("array_distinct")(_as_col(col_or_name))
+def array_sort(col_or_name): return _native_fn("array_sort")(_as_col(col_or_name))
+def array_join(col_or_name, delimiter, null_replacement=None): return _native_fn("array_join")(_as_col(col_or_name), delimiter)
+def array_max(col_or_name): return _native_fn("array_max")(_as_col(col_or_name))
+def array_min(col_or_name): return _native_fn("array_min")(_as_col(col_or_name))
+def element_at(col_or_name, extraction): return _native_fn("element_at")(_as_col(col_or_name), extraction)
+def size(col_or_name): return _native_fn("size")(_as_col(col_or_name))
 slice = _ni("slice")
-def sort_array(col_or_name, asc=True): return _native.native_array_sort(_as_col(col_or_name))
+def sort_array(col_or_name, asc=True): return _native_fn("array_sort")(_as_col(col_or_name))
 def array_union(col1, col2): return _native.native_array_union(_as_col(col1), _as_col(col2))
 def array_intersect(col1, col2): return _native.native_array_intersect(_as_col(col1), _as_col(col2))
 def array_except(col1, col2): return _native.native_array_except(_as_col(col1), _as_col(col2))
@@ -208,17 +214,17 @@ map_from_arrays = _ni("map_from_arrays")
 sumDistinct = _ni("sumDistinct")
 def count_distinct(*cols):
     if len(cols) == 1:
-        return _native.native_count_distinct(_as_col(cols[0]))
+        return _native_fn("count_distinct")(_as_col(cols[0]))
     raise NotImplementedError("count_distinct with multiple columns is not yet implemented")
 countDistinct = count_distinct
-def approx_count_distinct(col_or_name, rsd=0.05): return _native.native_approx_count_distinct(_as_col(col_or_name), rsd)
-def stddev(col_or_name): return _native.native_stddev(_as_col(col_or_name))
-def stddev_pop(col_or_name): return _native.native_stddev_pop(_as_col(col_or_name))
-def stddev_samp(col_or_name): return _native.native_stddev_samp(_as_col(col_or_name))
-def variance(col_or_name): return _native.native_variance(_as_col(col_or_name))
-def var_pop(col_or_name): return _native.native_var_pop(_as_col(col_or_name))
-def var_samp(col_or_name): return _native.native_var_samp(_as_col(col_or_name))
-def corr(col1, col2): return _native.native_corr(_as_col(col1), _as_col(col2))
+def approx_count_distinct(col_or_name, rsd=0.05): return _native_fn("approx_count_distinct")(_as_col(col_or_name), rsd)
+def stddev(col_or_name): return _native_fn("stddev")(_as_col(col_or_name))
+def stddev_pop(col_or_name): return _native_fn("stddev_pop")(_as_col(col_or_name))
+def stddev_samp(col_or_name): return _native_fn("stddev_samp")(_as_col(col_or_name))
+def variance(col_or_name): return _native_fn("variance")(_as_col(col_or_name))
+def var_pop(col_or_name): return _native_fn("var_pop")(_as_col(col_or_name))
+def var_samp(col_or_name): return _native_fn("var_samp")(_as_col(col_or_name))
+def corr(col1, col2): return _native_fn("corr")(_as_col(col1), _as_col(col2))
 percentile_approx = _ni("percentile_approx")
 
 # --- String functions (native-backed) ---
@@ -400,9 +406,36 @@ def udf(f=None, returnType=None):
     return register_and_wrap(f, return_type)
 
 
+def isnull(col_or_name):
+    """Return a boolean column that is true when the column is null. PySpark: F.isnull(col)."""
+    return _as_col(col_or_name).isNull()
+
+
+def isnotnull(col_or_name):
+    """Return a boolean column that is true when the column is not null. PySpark: F.isnotnull(col)."""
+    return _as_col(col_or_name).isNotNull()
+
+
+def nvl(col_or_name, replacement):
+    """Replace null with replacement. PySpark: F.nvl(col, replacement)."""
+    c = _as_col(col_or_name)
+    rep = lit(replacement) if isinstance(replacement, (int, float, bool, str, type(None))) else _as_col(replacement)
+    return coalesce(c, rep)
+
+
+def nullif(col1, col2):
+    """Return null if col1 equals col2, else col1. PySpark: F.nullif(col1, col2). Stub: not yet implemented."""
+    return _ni("nullif")(col1, col2)
+
+
 __all__ = [
     "col",
     "lit",
+    "mean",
+    "isnull",
+    "isnotnull",
+    "nvl",
+    "nullif",
     "lit_i64",
     "lit_str",
     "lit_bool",
@@ -499,6 +532,10 @@ __all__ = [
     "asc",
     "desc",
     "udf",
+    "stddev",
+    "cume_dist",
+    "countDistinct",
+    "DataFrame",
 ]
 
 def when(condition, value=None):
