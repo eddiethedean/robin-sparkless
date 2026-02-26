@@ -132,6 +132,7 @@ fn string_to_json_object(s: &str) -> Option<serde_json::Map<String, JsonValue>> 
 /// Decimal(p,s) is mapped to Float64 (Polars dtype-decimal feature not enabled).
 /// PR-G/#710: array<element_type> and nested array<array<...>> supported.
 /// #976: Nested array (e.g. array<array<long>>) recurses; elem_type "array<long>" maps to List(Int64).
+/// Array element types timestamp, date, struct<...>, map<...> supported for create_dataframe_from_rows parity.
 fn json_type_str_to_polars(type_str: &str) -> Option<DataType> {
     let s = type_str.trim().to_lowercase();
     if is_decimal_type_str(&s) {
@@ -141,11 +142,33 @@ fn json_type_str_to_polars(type_str: &str) -> Option<DataType> {
         let inner = json_type_str_to_polars(elem_type.trim())?;
         return Some(DataType::List(Box::new(inner)));
     }
+    if let Some(fields) = parse_struct_fields(&s) {
+        let polars_fields: Vec<Field> = fields
+            .into_iter()
+            .map(|(name, typ)| {
+                let inner = json_type_str_to_polars(typ.trim())?;
+                Some(Field::new(name.into(), inner))
+            })
+            .collect::<Option<Vec<_>>>()?;
+        return Some(DataType::Struct(polars_fields));
+    }
+    if let Some((key_type, value_type)) = parse_map_key_value_types(&s) {
+        let key_dtype = json_type_str_to_polars(key_type.trim())?;
+        let value_dtype = json_type_str_to_polars(value_type.trim())?;
+        return Some(DataType::Struct(vec![
+            Field::new("key".into(), key_dtype),
+            Field::new("value".into(), value_dtype),
+        ]));
+    }
     match s.as_str() {
         "int" | "integer" | "bigint" | "long" => Some(DataType::Int64),
         "double" | "float" | "double_precision" => Some(DataType::Float64),
         "string" | "str" | "varchar" => Some(DataType::String),
         "boolean" | "bool" => Some(DataType::Boolean),
+        "date" => Some(DataType::Date),
+        "timestamp" | "datetime" | "timestamp_ntz" => {
+            Some(DataType::Datetime(TimeUnit::Microseconds, None))
+        }
         _ => None,
     }
 }
@@ -742,7 +765,7 @@ fn parse_datetime_from_json_object(obj: &serde_json::Map<String, JsonValue>) -> 
 /// Parse a single timestamp string to microseconds since epoch (for json_value_to_series_single).
 fn parse_timestamp_str_to_micros(s: &str) -> Result<i64, PolarsError> {
     use chrono::{NaiveDate, NaiveDateTime};
-    let s = s.trim();
+    let s = s.trim().trim_end_matches('Z');
     NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S%.f")
         .map_err(|e| PolarsError::ComputeError(e.to_string().into()))
         .or_else(|_| {
@@ -3095,6 +3118,31 @@ mod tests {
             row2.is_none() || row2.as_ref().map(|a| a.is_empty()).unwrap_or(false),
             "row 2 arr should be null or empty"
         );
+    }
+
+    /// create_dataframe_from_rows: array<timestamp> and array<date> element types (PySpark parity).
+    #[test]
+    fn test_create_dataframe_from_rows_array_timestamp() {
+        use serde_json::json;
+
+        let spark = SparkSession::builder().app_name("test").get_or_create();
+        let schema = vec![
+            ("id".to_string(), "string".to_string()),
+            ("ts_arr".to_string(), "array<timestamp>".to_string()),
+        ];
+        let rows: Vec<Vec<JsonValue>> = vec![
+            vec![
+                json!("a"),
+                json!(["2025-01-15T10:00:00Z", "2025-01-16T12:00:00"]),
+            ],
+            vec![json!("b"), json!(null)],
+        ];
+        let df = spark
+            .create_dataframe_from_rows(rows, schema, false, false)
+            .expect("array<timestamp> should be supported");
+        assert_eq!(df.count().unwrap(), 2);
+        let collected = df.collect_inner().unwrap();
+        assert_eq!(collected.get_column_names(), &["id", "ts_arr"]);
     }
 
     /// Issue #601: PySpark createDataFrame([(\"x\", [1,2,3]), (\"y\", [4,5])], schema) with ArrayType.

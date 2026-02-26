@@ -189,7 +189,7 @@ impl DataFrame {
                 if name_str.is_empty() {
                     return Ok(e);
                 }
-                // Struct field dot notation (PySpark col("struct_col.field")). Resolve struct field names case-insensitively.
+                // Struct field dot notation (PySpark col("struct_col.field") and nested col("outer.inner.leaf")).
                 if name_str.contains('.') {
                     let parts: Vec<&str> = name_str.split('.').collect();
                     let first = parts[0];
@@ -201,10 +201,22 @@ impl DataFrame {
                     }
                     let resolved = df.resolve_column_name(first)?;
                     let mut expr = col(PlSmallStr::from(resolved.as_str()));
+                    let mut current_dtype =
+                        df.get_column_dtype(resolved.as_str()).ok_or_else(|| {
+                            PolarsError::ColumnNotFound(
+                                format!("Column '{}' not found", resolved).into(),
+                            )
+                        })?;
+                    let mut context_name = resolved.to_string();
                     for field in rest {
-                        let resolved_field =
-                            df.resolve_struct_field_name(resolved.as_str(), field)?;
+                        let (resolved_field, field_dtype) = df.resolve_struct_field_from_type(
+                            &current_dtype,
+                            field,
+                            &context_name,
+                        )?;
                         expr = expr.struct_().field_by_name(&resolved_field);
+                        context_name = format!("{}.{}", context_name, resolved_field);
+                        current_dtype = field_dtype;
                     }
                     return Ok(expr);
                 }
@@ -650,6 +662,49 @@ impl DataFrame {
             .map(|(_, dt)| dt.clone())
     }
 
+    /// Resolve a struct field from a struct type (for nested col("outer.inner.leaf")). Returns (resolved_field_name, field_dtype).
+    fn resolve_struct_field_from_type(
+        &self,
+        struct_dtype: &DataType,
+        field_name: &str,
+        context_name: &str,
+    ) -> Result<(String, DataType), PolarsError> {
+        let fields = match struct_dtype {
+            DataType::Struct(f) => f,
+            _ => {
+                return Err(PolarsError::ColumnNotFound(
+                    format!(
+                        "Expected struct for nested access '{}'; got non-struct type.",
+                        context_name
+                    )
+                    .into(),
+                ));
+            }
+        };
+        if self.case_sensitive {
+            if let Some(f) = fields.iter().find(|f| f.name.as_str() == field_name) {
+                return Ok((f.name.to_string(), f.dtype.clone()));
+            }
+        } else {
+            let field_lower = field_name.to_lowercase();
+            for f in fields {
+                if f.name.to_string().to_lowercase() == field_lower {
+                    return Ok((f.name.to_string(), f.dtype.clone()));
+                }
+            }
+        }
+        let available: Vec<String> = fields.iter().map(|f| f.name.to_string()).collect();
+        Err(PolarsError::ColumnNotFound(
+            format!(
+                "Struct field '{}' not found in '{}'. Available: [{}].",
+                field_name,
+                context_name,
+                available.join(", ")
+            )
+            .into(),
+        ))
+    }
+
     /// Resolve a struct field name case-insensitively (for col("Person.name") when struct has "Name").
     pub fn resolve_struct_field_name(
         &self,
@@ -659,37 +714,17 @@ impl DataFrame {
         let dt = self.get_column_dtype(struct_col_name).ok_or_else(|| {
             PolarsError::ColumnNotFound(format!("Column '{}' not found", struct_col_name).into())
         })?;
-        if let DataType::Struct(fields) = dt {
-            if self.case_sensitive {
-                if fields.iter().any(|f| f.name.as_str() == field_name) {
-                    return Ok(field_name.to_string());
-                }
-            } else {
-                let field_lower = field_name.to_lowercase();
-                for f in &fields {
-                    if f.name.to_string().to_lowercase() == field_lower {
-                        return Ok(f.name.to_string());
-                    }
-                }
-            }
-            let available: Vec<String> = fields.iter().map(|f| f.name.to_string()).collect();
+        if !matches!(dt, DataType::Struct(_)) {
             return Err(PolarsError::ColumnNotFound(
                 format!(
-                    "Struct field '{}' not found in '{}'. Available: [{}].",
-                    field_name,
-                    struct_col_name,
-                    available.join(", ")
+                    "Column '{}' is not a struct; cannot access field '{}'.",
+                    struct_col_name, field_name
                 )
                 .into(),
             ));
         }
-        Err(PolarsError::ColumnNotFound(
-            format!(
-                "Column '{}' is not a struct; cannot access field '{}'.",
-                struct_col_name, field_name
-            )
-            .into(),
-        ))
+        self.resolve_struct_field_from_type(&dt, field_name, struct_col_name)
+            .map(|(name, _)| name)
     }
 
     /// Get the column type as robin-sparkless schema type (Polars-free). Returns None if column not found.
@@ -785,7 +820,20 @@ impl DataFrame {
 
     /// Select columns by name (returns a new DataFrame).
     /// Column names are resolved according to case sensitivity.
+    /// Dotted names (e.g. "outer.inner.leaf") select nested struct fields (PySpark parity).
     pub fn select(&self, cols: Vec<&str>) -> Result<DataFrame, PolarsError> {
+        let has_dots = cols.iter().any(|c| c.contains('.'));
+        if has_dots {
+            let exprs: Vec<Expr> = cols
+                .iter()
+                .map(|c| {
+                    let e = self.column_name_to_expr(c)?;
+                    let last_part = c.split('.').next_back().unwrap_or(c);
+                    Ok::<Expr, PolarsError>(e.alias(last_part))
+                })
+                .collect::<Result<Vec<_>, PolarsError>>()?;
+            return transformations::select_with_exprs(self, exprs, self.case_sensitive);
+        }
         let resolved: Vec<String> = cols
             .iter()
             .map(|c| self.resolve_column_name(c))
@@ -801,6 +849,11 @@ impl DataFrame {
             }
         }
         Ok(result)
+    }
+
+    /// Build an expression for a column name, including dotted struct field access (e.g. "outer.inner.leaf").
+    fn column_name_to_expr(&self, name: &str) -> Result<Expr, PolarsError> {
+        self.resolve_expr_column_names(Expr::Column(PlSmallStr::from(name)))
     }
 
     /// Same as [`select`](Self::select) but returns [`EngineError`]. Use in bindings to avoid Polars.
@@ -1315,6 +1368,17 @@ impl DataFrame {
     /// Select by expression strings (minimal: column names, optionally "col as alias"). PySpark selectExpr.
     pub fn select_expr(&self, exprs: &[String]) -> Result<DataFrame, PolarsError> {
         transformations::select_expr(self, exprs, self.case_sensitive)
+    }
+
+    /// Select by expression strings using SQL parsing (e.g. "upper(Name) as u"). Use when session is available for full selectExpr parity.
+    #[cfg(feature = "sql")]
+    pub fn select_expr_with_session(
+        &self,
+        session: &SparkSession,
+        exprs: &[String],
+    ) -> Result<DataFrame, PolarsError> {
+        let parsed = crate::sql::parse_select_exprs(session, self, exprs)?;
+        self.select_exprs(parsed)
     }
 
     /// Select columns whose names match the regex. PySpark colRegex.
@@ -2386,5 +2450,31 @@ mod tests {
         assert_eq!(rows.len(), 2);
         assert_eq!(rows[0].get("result").and_then(|v| v.as_f64()), Some(8.0));
         assert_eq!(rows[1].get("result").and_then(|v| v.as_f64()), Some(8.0));
+    }
+
+    /// Nested struct field access: select("outer.inner.leaf") when outer is struct<inner:struct<leaf:int>>.
+    #[test]
+    fn select_nested_struct_field_outer_inner_leaf() {
+        use serde_json::json;
+
+        let spark = SparkSession::builder()
+            .app_name("nested_struct_test")
+            .get_or_create();
+        let schema = vec![(
+            "outer".to_string(),
+            "struct<inner:struct<leaf:int>>".to_string(),
+        )];
+        let rows = vec![vec![json!({"inner": {"leaf": 7}})]];
+        let df = spark
+            .create_dataframe_from_rows(rows, schema, false, false)
+            .unwrap();
+        let out = df.select(vec!["outer.inner.leaf"]).unwrap();
+        let out_rows = out.collect_as_json_rows().unwrap();
+        assert_eq!(out_rows.len(), 1);
+        assert_eq!(
+            out_rows[0].get("leaf").and_then(|v| v.as_i64()),
+            Some(7),
+            "nested struct field outer.inner.leaf should resolve to 7"
+        );
     }
 }

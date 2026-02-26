@@ -80,8 +80,65 @@ pub fn execute_sql(session: &SparkSession, query: &str) -> Result<DataFrame, Pol
         }
     }
 
+    // DESCRIBE table_name [col_name] (PySpark 3.5: optional column). Parser only accepts "DESCRIBE t".
+    const DESCRIBE_PREFIX: &str = "DESCRIBE ";
+    const DESC_PREFIX: &str = "DESC ";
+    const DESC_DETAIL_PREFIX: &str = "DESC DETAIL ";
+    let is_describe = q.len() >= DESCRIBE_PREFIX.len()
+        && q.get(..DESCRIBE_PREFIX.len())
+            .map(|s| s.eq_ignore_ascii_case(DESCRIBE_PREFIX))
+            == Some(true)
+        && q.get(..PREFIX.len())
+            .map(|s| s.eq_ignore_ascii_case(PREFIX))
+            != Some(true);
+    let is_desc = q.len() >= DESC_PREFIX.len()
+        && q.get(..DESC_PREFIX.len())
+            .map(|s| s.eq_ignore_ascii_case(DESC_PREFIX))
+            == Some(true)
+        && (q.len() < DESC_DETAIL_PREFIX.len()
+            || q.get(..DESC_DETAIL_PREFIX.len())
+                .map(|s| s.eq_ignore_ascii_case(DESC_DETAIL_PREFIX))
+                != Some(true));
+    let rest = if is_describe {
+        q[DESCRIBE_PREFIX.len()..].trim()
+    } else if is_desc {
+        q[DESC_PREFIX.len()..].trim()
+    } else {
+        ""
+    };
+    if !rest.is_empty() && (is_describe || is_desc) {
+        let parts: Vec<&str> = rest.split_whitespace().collect();
+        let table_name = parts.first().copied().unwrap_or("");
+        let col_name = parts.get(1).copied();
+        if !table_name.is_empty() {
+            return translator::translate_describe_table_optional_col(
+                session, table_name, col_name,
+            );
+        }
+    }
+
     let stmt = parse_sql_to_statement(query)?;
     translator::translate(session, &stmt)
+}
+
+/// Parse multiple selectExpr strings via SQL (e.g. "upper(Name) as u"). Registers df as __selectexpr_t, parses each expr, then drops the temp view. PySpark selectExpr parity.
+pub fn parse_select_exprs(
+    session: &SparkSession,
+    df: &DataFrame,
+    exprs: &[String],
+) -> Result<Vec<polars::prelude::Expr>, PolarsError> {
+    const TMP_VIEW: &str = "__selectexpr_t";
+    session.create_or_replace_temp_view(TMP_VIEW, df.clone());
+    let mut result = Vec::with_capacity(exprs.len());
+    let ok = (|| {
+        for e in exprs {
+            result.push(translator::expr_string_to_polars(e, session, df)?);
+        }
+        Ok::<(), PolarsError>(())
+    })();
+    session.drop_temp_view(TMP_VIEW);
+    ok?;
+    Ok(result)
 }
 
 pub use translator::{expr_string_to_polars, translate};
@@ -512,6 +569,33 @@ mod tests {
         assert_eq!(
             rows[2].get("data_type").and_then(|v| v.as_str()),
             Some("string")
+        );
+    }
+
+    /// DESCRIBE table_name col_name: returns single column row (PySpark 3.5 parity).
+    #[test]
+    fn test_sql_describe_table_column() {
+        let spark = SparkSession::builder().app_name("test").get_or_create();
+        let df = spark
+            .create_dataframe(
+                vec![
+                    (1i64, 25i64, "Alice".to_string()),
+                    (2i64, 30i64, "Bob".to_string()),
+                ],
+                vec!["id", "age", "name"],
+            )
+            .unwrap();
+        spark.create_or_replace_temp_view("t", df);
+        let result = spark.sql("DESCRIBE t age").unwrap();
+        let rows = result.collect_as_json_rows().unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(
+            rows[0].get("col_name").and_then(|v| v.as_str()),
+            Some("age")
+        );
+        assert_eq!(
+            rows[0].get("data_type").and_then(|v| v.as_str()),
+            Some("long")
         );
     }
 
