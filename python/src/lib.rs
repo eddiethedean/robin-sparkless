@@ -2,6 +2,7 @@
 //! Parameter names follow PySpark camelCase where the Python API exposes them.
 
 #![allow(non_snake_case)]
+#![allow(unexpected_cfgs)] // pyo3 create_exception! uses cfg(gil-refs)
 
 use pyo3::create_exception;
 use pyo3::prelude::*;
@@ -400,7 +401,7 @@ impl PySparkSession {
     }
 
     #[classattr]
-    fn builder(py: Python<'_>) -> PySparkSessionBuilder {
+    fn builder(_py: Python<'_>) -> PySparkSessionBuilder {
         PySparkSessionBuilder {
             inner: SparkSession::builder(),
         }
@@ -469,6 +470,7 @@ impl PySparkSession {
         slf
     }
 
+    #[pyo3(signature = (_exc_type=None, _exc=None, _tb=None))]
     fn __exit__(
         slf: PyRef<Self>,
         py: Python<'_>,
@@ -637,6 +639,7 @@ impl PySparkSession {
     }
 
     #[cfg(feature = "delta")]
+    #[pyo3(signature = (name_or_path, version=None))]
     fn read_delta_with_version(
         &self,
         name_or_path: &str,
@@ -1067,7 +1070,7 @@ fn simple_string_to_type(s: &str) -> String {
 /// Parse schema from Python: None, list of column names (str), list of (name, type) pairs,
 /// or StructType-like object with .fields (each with .name and .dataType.simpleString()).
 fn parse_schema_from_py(
-    py: Python<'_>,
+    _py: Python<'_>,
     schema: &Bound<'_, PyAny>,
 ) -> PyResult<Option<Vec<(String, String)>>> {
     // StructType-like: has .fields
@@ -1210,7 +1213,7 @@ fn normalize_create_dataframe_input<'py>(
 /// If data is a pandas DataFrame, convert to list of dicts via to_dict("records").
 /// Returns (converted list or original data, true if from pandas).
 fn maybe_convert_pandas_to_list<'py>(
-    py: Python<'py>,
+    _py: Python<'py>,
     data: &Bound<'py, PyAny>,
 ) -> PyResult<(Bound<'py, PyAny>, bool)> {
     let to_dict = match data.getattr("to_dict") {
@@ -1283,7 +1286,7 @@ fn python_data_and_schema(
     }
     // When schema was inferred, prefer first non-null value's type per column (fixes fillna(0) on column with null in first row).
     if schema_was_inferred && schema.len() > 0 {
-        let mut refined: Vec<(String, String)> = schema
+        let refined: Vec<(String, String)> = schema
             .iter()
             .enumerate()
             .map(|(i, (name, typ))| {
@@ -1393,7 +1396,7 @@ fn py_any_to_json(py: Python<'_>, v: &Bound<'_, PyAny>) -> PyResult<JsonValue> {
 }
 
 fn infer_schema_from_first_row(
-    py: Python<'_>,
+    _py: Python<'_>,
     item: &Bound<'_, PyAny>,
     from_pandas: bool,
 ) -> Option<Vec<(String, String)>> {
@@ -1653,7 +1656,7 @@ impl PyDataFrameReader {
     /// PySpark: options(**kwargs). opts: dict of key -> value.
     fn options<'a>(
         mut slf: PyRefMut<'a, Self>,
-        py: Python<'_>,
+        _py: Python<'_>,
         opts: &Bound<'_, PyAny>,
     ) -> PyResult<PyRefMut<'a, Self>> {
         let dict = opts.downcast::<PyDict>().map_err(|_| {
@@ -2044,6 +2047,7 @@ impl PyDataFrame {
             .map_err(|_| PyErr::new::<pyo3::exceptions::PyAttributeError, _>(name.to_string()))
     }
 
+    #[pyo3(signature = (n=None))]
     fn show(&self, n: Option<usize>) -> PyResult<()> {
         self.inner.show(n).map_err(to_py_err)
     }
@@ -2407,6 +2411,7 @@ impl PyDataFrame {
             .map_err(to_py_err)
     }
 
+    #[pyo3(signature = (cols, ascending=None))]
     fn do_order_by(
         &self,
         cols: &Bound<'_, PyTuple>,
@@ -2556,6 +2561,7 @@ impl PyDataFrame {
             .map_err(to_py_err)
     }
 
+    #[pyo3(signature = (subset=None))]
     fn distinct(&self, subset: Option<Vec<String>>) -> PyResult<PyDataFrame> {
         let sub: Option<Vec<&str>> = subset
             .as_ref()
@@ -2716,7 +2722,7 @@ impl PyDataFrame {
         Ok(())
     }
 
-    #[pyo3(name = "dropna")]
+    #[pyo3(name = "dropna", signature = (subset=None, how=None, thresh=None))]
     fn dropna(
         &self,
         subset: Option<Vec<String>>,
@@ -2866,7 +2872,7 @@ impl PyDataFrame {
     #[pyo3(name = "sampleBy", signature = (col, fractions, seed=None))]
     fn sample_by(
         &self,
-        py: Python<'_>,
+        _py: Python<'_>,
         col: &str,
         fractions: &Bound<'_, PyAny>,
         seed: Option<u64>,
@@ -3078,13 +3084,13 @@ impl PyDataFrame {
             .collect())
     }
 
-    fn coalesce(&self, n: usize) -> PyResult<PyDataFrame> {
+    fn coalesce(&self, _n: usize) -> PyResult<PyDataFrame> {
         Ok(PyDataFrame {
             inner: self.inner.clone(),
         })
     }
 
-    fn repartition(&self, n: usize) -> PyResult<PyDataFrame> {
+    fn repartition(&self, _n: usize) -> PyResult<PyDataFrame> {
         Ok(PyDataFrame {
             inner: self.inner.clone(),
         })
@@ -3289,6 +3295,7 @@ impl PyDataFrameWriter {
 
 /// Extract a list of column name strings from a join `on` parameter.
 /// Accepts: None, str, Column, list[str], list[Column].
+#[allow(dead_code)]
 fn extract_string_list_from_on(on: Option<&Bound<'_, PyAny>>) -> PyResult<Vec<String>> {
     let on = match on {
         Some(v) => v,
@@ -4628,7 +4635,7 @@ fn lit_null(dtype: &str) -> PyResult<PyColumn> {
 /// Polymorphic lit: dispatches to lit_i64, lit_str, lit_f64, lit_bool based on Python type.
 #[pyfunction]
 fn lit(value: &Bound<'_, PyAny>) -> PyResult<PyColumn> {
-    let py = value.py();
+    let _py = value.py();
     if value.is_none() {
         return lit_null("string");
     }
@@ -4747,6 +4754,7 @@ struct PyThenBuilder {
 
 #[pymethods]
 impl PyThenBuilder {
+    #[pyo3(signature = (condition, value=None))]
     fn when(
         &mut self,
         condition: &Bound<'_, PyAny>,
