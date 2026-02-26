@@ -5,6 +5,7 @@ mod joins;
 mod stats;
 mod transformations;
 
+pub(crate) use aggregations::disambiguate_agg_output_names;
 pub use aggregations::{CubeRollupData, GroupedData, PivotedGroupedData};
 pub use joins::{JoinType, join};
 pub use stats::DataFrameStat;

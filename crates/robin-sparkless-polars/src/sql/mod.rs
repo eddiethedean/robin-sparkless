@@ -65,6 +65,12 @@ pub fn execute_sql(session: &SparkSession, query: &str) -> Result<DataFrame, Pol
                     .into(),
                 ));
             }
+            return Err(PolarsError::InvalidOperation(
+                format!(
+                    "Table or view '{table_name}' not found. Register it with create_or_replace_temp_view or saveAsTable."
+                )
+                .into(),
+            ));
         }
         #[cfg(not(feature = "delta"))]
         {
@@ -72,13 +78,6 @@ pub fn execute_sql(session: &SparkSession, query: &str) -> Result<DataFrame, Pol
                 "DESCRIBE DETAIL requires the delta feature.".into(),
             ));
         }
-        // Delta feature on but table missing or not Delta: return table-not-found (nonexistent) or not-Delta (existing).
-        return Err(PolarsError::InvalidOperation(
-            format!(
-                "Table or view '{table_name}' not found. Register it with create_or_replace_temp_view or saveAsTable."
-            )
-            .into(),
-        ));
     }
 
     let stmt = parse_sql_to_statement(query)?;
@@ -165,6 +164,33 @@ mod tests {
             .sql("SELECT COUNT(*) as count FROM t GROUP BY (age > 30)")
             .unwrap();
         assert_eq!(result.count().unwrap(), 2);
+    }
+
+    /// Duplicate output names (e.g. two COUNT(*)) are disambiguated to count, count_1.
+    #[test]
+    fn test_sql_duplicate_agg_aliases() {
+        let spark = SparkSession::builder().app_name("test").get_or_create();
+        let df = spark
+            .create_dataframe(
+                vec![
+                    (1i64, 10i64, "a".to_string()),
+                    (2i64, 20i64, "b".to_string()),
+                ],
+                vec!["id", "v", "name"],
+            )
+            .unwrap();
+        spark.create_or_replace_temp_view("t", df);
+        let result = spark
+            .sql("SELECT COUNT(*) AS count, COUNT(id) AS count FROM t")
+            .unwrap();
+        let cols = result.columns().unwrap();
+        assert_eq!(cols.len(), 2);
+        assert!(cols.contains(&"count".to_string()));
+        assert!(cols.contains(&"count_1".to_string()));
+        let rows = result.collect_as_json_rows().unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].get("count").and_then(|v| v.as_i64()), Some(2));
+        assert_eq!(rows[0].get("count_1").and_then(|v| v.as_i64()), Some(2));
     }
 
     #[test]
@@ -447,6 +473,46 @@ mod tests {
         );
         assert!(row.get("minReaderVersion").is_some());
         assert!(row.get("minWriterVersion").is_some());
+    }
+
+    /// DESCRIBE table_name: returns col_name, data_type (PySpark DESCRIBE parity).
+    #[test]
+    fn test_sql_describe_table() {
+        let spark = SparkSession::builder().app_name("test").get_or_create();
+        let df = spark
+            .create_dataframe(
+                vec![
+                    (1i64, 25i64, "Alice".to_string()),
+                    (2i64, 30i64, "Bob".to_string()),
+                ],
+                vec!["id", "age", "name"],
+            )
+            .unwrap();
+        spark.create_or_replace_temp_view("t", df);
+        let result = spark.sql("DESCRIBE t").unwrap();
+        let rows = result.collect_as_json_rows().unwrap();
+        assert_eq!(rows.len(), 3);
+        assert_eq!(rows[0].get("col_name").and_then(|v| v.as_str()), Some("id"));
+        assert_eq!(
+            rows[0].get("data_type").and_then(|v| v.as_str()),
+            Some("long")
+        );
+        assert_eq!(
+            rows[1].get("col_name").and_then(|v| v.as_str()),
+            Some("age")
+        );
+        assert_eq!(
+            rows[1].get("data_type").and_then(|v| v.as_str()),
+            Some("long")
+        );
+        assert_eq!(
+            rows[2].get("col_name").and_then(|v| v.as_str()),
+            Some("name")
+        );
+        assert_eq!(
+            rows[2].get("data_type").and_then(|v| v.as_str()),
+            Some("string")
+        );
     }
 
     #[test]

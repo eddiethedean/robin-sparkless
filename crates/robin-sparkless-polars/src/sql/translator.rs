@@ -4,8 +4,9 @@
 use std::collections::HashMap;
 
 use crate::column::Column;
-use crate::dataframe::{DataFrame, JoinType, join};
+use crate::dataframe::{DataFrame, JoinType, disambiguate_agg_output_names, join};
 use crate::functions;
+use crate::schema::{DataType as CoreDataType, StructType};
 use crate::session::{SparkSession, set_thread_udf_session};
 use polars::prelude::{DataFrame as PlDataFrame, Expr, PolarsError, col, lit, when};
 use serde_json::Value as JsonValue;
@@ -239,11 +240,66 @@ pub fn translate(
         }
         Statement::Update(u) => translate_update(session, u),
         Statement::Delete(d) => translate_delete(session, d),
+        Statement::ExplainTable { table_name, .. } => translate_describe_table(session, table_name),
         _ => Err(PolarsError::InvalidOperation(
-            "SQL: only SELECT, CREATE SCHEMA/DATABASE, and DROP TABLE/VIEW/SCHEMA are supported."
+            "SQL: only SELECT, CREATE SCHEMA/DATABASE, DROP TABLE/VIEW/SCHEMA, and DESCRIBE are supported."
                 .into(),
         )),
     }
+}
+
+/// Convert robin_sparkless_core DataType to schema type string (DESCRIBE / PySpark simpleString).
+fn core_data_type_to_str(dt: &CoreDataType) -> String {
+    match dt {
+        CoreDataType::String => "string".to_string(),
+        CoreDataType::Integer => "int".to_string(),
+        CoreDataType::Long => "long".to_string(),
+        CoreDataType::Double => "double".to_string(),
+        CoreDataType::Boolean => "boolean".to_string(),
+        CoreDataType::Date => "date".to_string(),
+        CoreDataType::Timestamp => "timestamp".to_string(),
+        CoreDataType::Binary => "binary".to_string(),
+        CoreDataType::Array(inner) => format!("array<{}>", core_data_type_to_str(inner)),
+        CoreDataType::Map(k, v) => {
+            format!(
+                "map<{},{}>",
+                core_data_type_to_str(k),
+                core_data_type_to_str(v)
+            )
+        }
+        CoreDataType::Struct(fields) => {
+            let parts: Vec<String> = fields
+                .iter()
+                .map(|f| format!("{}:{}", f.name, core_data_type_to_str(&f.data_type)))
+                .collect();
+            format!("struct<{}>", parts.join(","))
+        }
+    }
+}
+
+/// DESCRIBE table_name: return a DataFrame with col_name, data_type (PySpark DESCRIBE parity).
+fn translate_describe_table(
+    session: &SparkSession,
+    table_name: &sqlparser::ast::ObjectName,
+) -> Result<crate::dataframe::DataFrame, PolarsError> {
+    let name = table_name_from_object_name(table_name);
+    let df = session.table(&name)?;
+    let schema: StructType = df.schema()?;
+    let rows: Vec<Vec<JsonValue>> = schema
+        .fields()
+        .iter()
+        .map(|f| {
+            vec![
+                JsonValue::String(f.name.clone()),
+                JsonValue::String(core_data_type_to_str(&f.data_type)),
+            ]
+        })
+        .collect();
+    let out_schema = vec![
+        ("col_name".to_string(), "string".to_string()),
+        ("data_type".to_string(), "string".to_string()),
+    ];
+    session.create_dataframe_from_rows(rows, out_schema, false, false)
 }
 
 /// Translate a SetExpr (SELECT, Query, or SetOperation) to a DataFrame.
@@ -440,6 +496,7 @@ fn translate_select_body(
     } else if projection_is_scalar_aggregate(&body.projection) {
         // SELECT AVG(salary) FROM t (no GROUP BY) — scalar aggregation (issue #587).
         let agg_exprs = projection_to_agg_exprs(&body.projection, &[], &df)?;
+        let agg_exprs = disambiguate_agg_output_names(agg_exprs);
         let pl_df = df.lazy_frame().select(agg_exprs).collect()?;
         df = DataFrame::from_polars_with_options(pl_df, df.case_sensitive);
     } else {
@@ -510,7 +567,7 @@ fn translate_select_from(
             }
             _ => {
                 let join_type = match &join_spec.join_operator {
-                    JoinOperator::Inner(_) => JoinType::Inner,
+                    JoinOperator::Join(_) | JoinOperator::Inner(_) => JoinType::Inner,
                     JoinOperator::Left(_) | JoinOperator::LeftOuter(_) => JoinType::Left,
                     JoinOperator::Right(_) | JoinOperator::RightOuter(_) => JoinType::Right,
                     JoinOperator::FullOuter(_) => JoinType::Outer,
@@ -587,7 +644,8 @@ fn join_condition_to_on_columns(
     join_op: &JoinOperator,
 ) -> Result<(Vec<String>, Vec<String>), PolarsError> {
     let constraint = match join_op {
-        JoinOperator::Inner(c)
+        JoinOperator::Join(c)
+        | JoinOperator::Inner(c)
         | JoinOperator::Left(c)
         | JoinOperator::LeftOuter(c)
         | JoinOperator::Right(c)
@@ -928,17 +986,52 @@ enum ProjItem {
     PythonUdf(Column, String),
 }
 
+impl ProjItem {
+    fn alias(&self) -> &str {
+        match self {
+            ProjItem::Expr(_, a) => a.as_str(),
+            ProjItem::PythonUdf(_, a) => a.as_str(),
+        }
+    }
+}
+
+/// Disambiguate duplicate output aliases (e.g. multiple aggs named "count" -> count, count_1, count_2).
+fn disambiguate_aliases(aliases: &[String]) -> Vec<String> {
+    let mut seen: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    let mut out = Vec::with_capacity(aliases.len());
+    for alias in aliases {
+        let count = seen.entry(alias.clone()).or_insert(0);
+        let name = if *count == 0 {
+            alias.clone()
+        } else {
+            format!("{}_{}", alias, count)
+        };
+        *count += 1;
+        out.push(name);
+    }
+    out
+}
+
 fn apply_projection(
     df: &crate::dataframe::DataFrame,
     projection: &[SelectItem],
     session: &SparkSession,
 ) -> Result<crate::dataframe::DataFrame, PolarsError> {
-    // Wildcard: expand to all columns
+    // Wildcard: expand to all columns (disambiguate if JOIN produced duplicate names)
     for item in projection {
         if matches!(item, SelectItem::Wildcard(_)) {
-            let column_names = df.columns()?;
-            let all_col_names: Vec<&str> = column_names.iter().map(|s| s.as_str()).collect();
-            return df.select(all_col_names);
+            let column_names: Vec<String> = df.columns()?.into_iter().collect();
+            let unique_aliases = disambiguate_aliases(&column_names);
+            if unique_aliases == column_names {
+                let refs: Vec<&str> = column_names.iter().map(|s| s.as_str()).collect();
+                return df.select(refs);
+            }
+            let exprs: Vec<Expr> = column_names
+                .iter()
+                .zip(unique_aliases.iter())
+                .map(|(c, alias)| col(c.as_str()).alias(alias))
+                .collect();
+            return df.select_exprs(exprs);
         }
     }
 
@@ -1011,32 +1104,39 @@ fn apply_projection(
         ));
     }
 
+    let aliases: Vec<String> = items.iter().map(|i| i.alias().to_string()).collect();
+    let final_aliases = disambiguate_aliases(&aliases);
+
     // Check if any Python UDF (requires with_column path)
     let has_python_udf = items.iter().any(|i| matches!(i, ProjItem::PythonUdf(_, _)));
 
     let mut df = df.clone();
 
     if has_python_udf {
-        // Add Python UDF columns first, then select all in order
-        for item in &items {
-            if let ProjItem::PythonUdf(col, alias) = item {
-                df = df.with_column(alias, col)?;
+        // Add Python UDF columns first (with disambiguated names), then select all in order
+        for (i, item) in items.iter().enumerate() {
+            if let ProjItem::PythonUdf(col, _) = item {
+                df = df.with_column(&final_aliases[i], col)?;
             }
         }
         let exprs: Vec<Expr> = items
             .iter()
-            .map(|i| match i {
-                ProjItem::Expr(e, alias) => e.clone().alias(alias),
-                ProjItem::PythonUdf(_, alias) => col(alias.as_str()).alias(alias),
+            .enumerate()
+            .map(|(i, item)| match item {
+                ProjItem::Expr(e, _) => e.clone().alias(&final_aliases[i]),
+                ProjItem::PythonUdf(_, _) => {
+                    col(final_aliases[i].as_str()).alias(&final_aliases[i])
+                }
             })
             .collect();
         df.select_exprs(exprs)
     } else {
-        // All exprs: use select_with_exprs
+        // All exprs: use select_with_exprs (disambiguated aliases avoid duplicate column names)
         let exprs: Vec<Expr> = items
             .iter()
-            .map(|i| match i {
-                ProjItem::Expr(e, alias) => e.clone().alias(alias),
+            .enumerate()
+            .map(|(i, item)| match item {
+                ProjItem::Expr(e, _) => e.clone().alias(&final_aliases[i]),
                 ProjItem::PythonUdf(_, _) => unreachable!(),
             })
             .collect();
