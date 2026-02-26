@@ -136,7 +136,13 @@ impl PySparkSessionBuilder {
 
     fn get_or_create(&self, py: Python<'_>) -> PyResult<Py<PySparkSession>> {
         let session = self.inner.clone().get_or_create();
-        let obj = Py::new(py, PySparkSession { inner: session })?;
+        let obj = Py::new(
+            py,
+            PySparkSession {
+                inner: session,
+                backend_type: DEFAULT_BACKEND_TYPE.to_string(),
+            },
+        )?;
         register_active_session(py, obj.clone_ref(py), true)?;
         Ok(obj)
     }
@@ -148,9 +154,14 @@ impl PySparkSessionBuilder {
     }
 }
 
+/// Default backend type so tests that read session.backend_type always get a value (e.g. "robin").
+const DEFAULT_BACKEND_TYPE: &str = "robin";
+
 #[pyclass]
 struct PySparkSession {
     inner: SparkSession,
+    #[pyo3(get, set)]
+    backend_type: String,
 }
 
 thread_local! {
@@ -265,7 +276,13 @@ impl PySparkSession {
             }
         }
         let session = builder.get_or_create();
-        let obj = Py::new(py, PySparkSession { inner: session })?;
+        let obj = Py::new(
+            py,
+            PySparkSession {
+                inner: session,
+                backend_type: DEFAULT_BACKEND_TYPE.to_string(),
+            },
+        )?;
         register_active_session(py, obj.clone_ref(py), true)?;
         Ok(obj)
     }
@@ -310,7 +327,14 @@ impl PySparkSession {
     #[pyo3(name = "newSession")]
     fn new_session(slf: PyRef<Self>, py: Python<'_>) -> PyResult<Py<PySparkSession>> {
         let session = slf.inner.new_session();
-        let obj = Py::new(py, PySparkSession { inner: session })?;
+        let backend_type = slf.backend_type.clone();
+        let obj = Py::new(
+            py,
+            PySparkSession {
+                inner: session,
+                backend_type,
+            },
+        )?;
         register_active_session(py, obj.clone_ref(py), true)?;
         Ok(obj)
     }
@@ -1216,6 +1240,19 @@ fn py_tuple_or_single_to_vec_string(tup: &Bound<'_, PyTuple>) -> PyResult<Vec<St
 }
 
 /// Normalize column spec to Vec<String>: "x" | col("x") | ["x","y"] | (col("a"),) -> Vec<String>
+/// Resolve a single column spec to a column name (str or Column -> name). Used by GroupedData.avg/sum/min/max.
+fn py_col_to_name(any: &Bound<'_, PyAny>) -> PyResult<String> {
+    if let Ok(s) = any.extract::<String>() {
+        return Ok(s);
+    }
+    if let Ok(c) = any.downcast::<PyColumn>() {
+        return Ok(c.borrow().inner.name().to_string());
+    }
+    Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+        "expected column name (str) or Column",
+    ))
+}
+
 fn py_cols_to_vec(any: &Bound<'_, PyAny>) -> PyResult<Vec<String>> {
     if any.is_none() {
         return Ok(Vec::new());
@@ -2006,7 +2043,7 @@ impl PyDataFrame {
     fn group_by_camel(&self, cols: &Bound<'_, PyTuple>) -> PyResult<PyGroupedData> {
         let mut names: Vec<String> = Vec::with_capacity(cols.len());
         for item in cols.iter() {
-            for n in py_one_or_many_cols(item)? {
+            for n in py_one_or_many_cols(&item)? {
                 names.push(n);
             }
         }
@@ -2117,6 +2154,29 @@ impl PyDataFrame {
         }
 
         self.order_by_names(names, asc_vec)
+    }
+
+    /// order_by_exprs([col("a").asc(), col("b").desc_nulls_last()]) - order by SortOrder expressions.
+    fn order_by_exprs(&self, exprs: &Bound<'_, PyAny>) -> PyResult<PyDataFrame> {
+        let list = exprs.downcast::<PyList>().map_err(|_| {
+            PyErr::new::<pyo3::exceptions::PyTypeError, _>("order_by_exprs expects a list of Column or SortOrder")
+        })?;
+        let mut sort_orders: Vec<SortOrder> = Vec::with_capacity(list.len());
+        for item in list.iter() {
+            if let Ok(ps) = item.downcast::<PySortOrder>() {
+                sort_orders.push(ps.borrow().inner.clone());
+            } else if let Ok(pc) = item.downcast::<PyColumn>() {
+                sort_orders.push(pc.borrow().inner.asc());
+            } else {
+                return Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+                    "order_by_exprs list elements must be Column or SortOrder (e.g. col('x').asc())",
+                ));
+            }
+        }
+        self.inner
+            .order_by_exprs(sort_orders)
+            .map(|df| PyDataFrame { inner: df })
+            .map_err(to_py_err)
     }
 
     #[pyo3(signature = (*cols, ascending=None))]
@@ -3706,34 +3766,38 @@ impl PyGroupedData {
             .map_err(to_py_err)
     }
 
-    fn sum(&self, col_name: &str) -> PyResult<PyDataFrame> {
+    fn sum(&self, col_name: &Bound<'_, PyAny>) -> PyResult<PyDataFrame> {
+        let name = py_col_to_name(col_name)?;
         self.inner
-            .sum(col_name)
+            .sum(&name)
             .map(|df| PyDataFrame { inner: df })
             .map_err(to_py_err)
     }
 
-    fn avg(&self, col_name: &str) -> PyResult<PyDataFrame> {
+    fn avg(&self, col_name: &Bound<'_, PyAny>) -> PyResult<PyDataFrame> {
+        let name = py_col_to_name(col_name)?;
         self.inner
-            .avg(&[col_name])
+            .avg(&[name.as_str()])
             .map(|df| PyDataFrame { inner: df })
             .map_err(to_py_err)
     }
 
-    fn mean(&self, col_name: &str) -> PyResult<PyDataFrame> {
+    fn mean(&self, col_name: &Bound<'_, PyAny>) -> PyResult<PyDataFrame> {
         self.avg(col_name)
     }
 
-    fn min(&self, col_name: &str) -> PyResult<PyDataFrame> {
+    fn min(&self, col_name: &Bound<'_, PyAny>) -> PyResult<PyDataFrame> {
+        let name = py_col_to_name(col_name)?;
         self.inner
-            .min(col_name)
+            .min(&name)
             .map(|df| PyDataFrame { inner: df })
             .map_err(to_py_err)
     }
 
-    fn max(&self, col_name: &str) -> PyResult<PyDataFrame> {
+    fn max(&self, col_name: &Bound<'_, PyAny>) -> PyResult<PyDataFrame> {
+        let name = py_col_to_name(col_name)?;
         self.inner
-            .max(col_name)
+            .max(&name)
             .map(|df| PyDataFrame { inner: df })
             .map_err(to_py_err)
     }

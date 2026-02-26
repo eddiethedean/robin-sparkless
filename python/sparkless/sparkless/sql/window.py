@@ -13,7 +13,9 @@ def _partition_names(cols):
 
     out = []
     for c in cols:
-        if isinstance(c, str):
+        if isinstance(c, (list, tuple)):
+            out.extend(_partition_names(c))
+        elif isinstance(c, str):
             out.append(c)
         elif isinstance(c, _Column):
             out.append(c.name)
@@ -29,7 +31,9 @@ def _normalize_sort_keys(cols):
 
     keys = []
     for c in cols:
-        if isinstance(c, _FnSortKey):
+        if isinstance(c, (list, tuple)):
+            keys.extend(_normalize_sort_keys(c))
+        elif isinstance(c, _FnSortKey):
             keys.append(_SortKey(c.name, c.ascending))
         elif isinstance(c, str):
             keys.append(_SortKey(c, True))

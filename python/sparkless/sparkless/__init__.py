@@ -13,7 +13,7 @@ try:
         "array_distinct", "posexplode",
         "to_timestamp", "to_date", "current_date", "current_timestamp", "input_file_name", "datediff", "unix_timestamp", "from_unixtime",
         "year", "month", "dayofmonth", "dayofweek", "date_add", "date_sub", "date_format",
-        "length", "floor", "round", "ltrim", "hour", "minute",
+        "length", "floor", "round", "ltrim", "rtrim", "hour", "minute", "second",
         "soundex", "repeat", "levenshtein", "try_cast", "try_add",
         "concat", "concat_ws", "array", "struct_",
         "asinh", "atanh", "cosh", "sinh",
@@ -33,7 +33,7 @@ except ImportError:
         "array_distinct", "posexplode",
         "to_timestamp", "to_date", "current_date", "current_timestamp", "input_file_name", "datediff", "unix_timestamp", "from_unixtime",
         "year", "month", "dayofmonth", "dayofweek", "date_add", "date_sub", "date_format",
-        "length", "floor", "round", "ltrim", "hour", "minute",
+        "length", "floor", "round", "ltrim", "rtrim", "hour", "minute", "second",
         "soundex", "repeat", "levenshtein", "try_cast", "try_add",
         "concat", "concat_ws", "array", "struct_",
         "asinh", "atanh", "cosh", "sinh",
@@ -122,8 +122,10 @@ length = _mod.length
 floor = _mod.floor
 round = _mod.round
 ltrim = _mod.ltrim
+rtrim = _mod.rtrim
 hour = _mod.hour
 minute = _mod.minute
+second = _mod.second
 soundex = _mod.soundex
 repeat = _mod.repeat
 levenshtein = _mod.levenshtein

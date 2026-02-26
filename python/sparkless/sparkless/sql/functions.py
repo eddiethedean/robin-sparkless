@@ -1,6 +1,7 @@
 # PySpark-style: from sparkless.sql.functions import col, lit, when, count, sum, ...
 import getpass
 
+from sparkless import _native
 from sparkless import (
     column as col,
     lit,
