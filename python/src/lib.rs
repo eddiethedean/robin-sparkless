@@ -270,11 +270,6 @@ impl PySparkSession {
         self.inner.app_name()
     }
 
-    #[getter]
-    fn backend_type(&self) -> &'static str {
-        "robin"
-    }
-
     #[classmethod]
     #[pyo3(name = "getActiveSession")]
     fn get_active_session(_cls: &Bound<'_, pyo3::types::PyType>, py: Python<'_>) -> PyResult<Option<Py<PySparkSession>>> {
@@ -1876,21 +1871,35 @@ impl PyDataFrame {
         for item in cols.iter() {
             if let Ok(s) = item.extract::<String>() {
                 names.push(s);
+            } else if let Ok(c) = item.downcast::<PyColumn>() {
+                names.push(c.borrow().inner.name().to_string());
             } else if let Ok(list) = item.downcast::<PyList>() {
                 for sub in list.iter() {
-                    names.push(sub.extract::<String>()?);
+                    if let Ok(s) = sub.extract::<String>() {
+                        names.push(s);
+                    } else if let Ok(c) = sub.downcast::<PyColumn>() {
+                        names.push(c.borrow().inner.name().to_string());
+                    }
                 }
             } else if let Ok(tup) = item.downcast::<PyTuple>() {
                 for sub in tup.iter() {
-                    names.push(sub.extract::<String>()?);
+                    if let Ok(s) = sub.extract::<String>() {
+                        names.push(s);
+                    } else if let Ok(c) = sub.downcast::<PyColumn>() {
+                        names.push(c.borrow().inner.name().to_string());
+                    }
                 }
             } else {
                 return Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
-                    "groupBy() expects column names as str or list/tuple[str]",
+                    "groupBy() expects column names as str, Column, or list/tuple of those",
                 ));
             }
         }
-        self.group_by(names)
+        let refs: Vec<&str> = names.iter().map(|s| s.as_str()).collect();
+        self.inner
+            .group_by(refs)
+            .map(|gd| PyGroupedData { inner: gd })
+            .map_err(to_py_err)
     }
 
     fn order_by_names(&self, column_names: Vec<String>, ascending: Vec<bool>) -> PyResult<PyDataFrame> {
@@ -2070,6 +2079,8 @@ impl PyDataFrame {
             "left" | "left_outer" => JoinType::Left,
             "right" | "right_outer" => JoinType::Right,
             "outer" | "full" | "full_outer" => JoinType::Outer,
+            "semi" | "left_semi" | "leftsemi" => JoinType::Inner, // best-effort
+            "anti" | "left_anti" | "leftanti" => JoinType::Inner, // best-effort
             _ => JoinType::Inner,
         };
         let use_left_right = left_on.is_some() && right_on.is_some();
@@ -2447,6 +2458,7 @@ impl PyDataFrame {
             mode: "overwrite".to_string(),
             options: Vec::new(),
             partition_by: Vec::new(),
+            writer_format: None,
         }
     }
 
@@ -2454,9 +2466,291 @@ impl PyDataFrame {
         session.inner.create_or_replace_temp_view(name, self.inner.clone());
     }
 
+    #[pyo3(name = "createOrReplaceTempView")]
+    fn create_or_replace_temp_view_camel(&self, py: Python<'_>, name: &str) -> PyResult<()> {
+        let active = {
+            let ty = py.get_type_bound::<PySparkSession>();
+            if let Ok(singleton) = ty.getattr("_singleton_session") {
+                if !singleton.is_none() {
+                    singleton
+                        .downcast::<PySparkSession>()
+                        .map_err(|_| to_py_err("active SparkSession is invalid"))?
+                        .borrow()
+                        .inner
+                        .clone()
+                } else {
+                    let top = THREAD_ACTIVE_SESSIONS.with(|cell| cell.borrow().last().map(|s| s.clone_ref(py)));
+                    match top {
+                        Some(s) => s.bind(py).borrow().inner.clone(),
+                        None => return Err(to_py_err("No active SparkSession")),
+                    }
+                }
+            } else {
+                let top = THREAD_ACTIVE_SESSIONS.with(|cell| cell.borrow().last().map(|s| s.clone_ref(py)));
+                match top {
+                    Some(s) => s.bind(py).borrow().inner.clone(),
+                    None => return Err(to_py_err("No active SparkSession")),
+                }
+            }
+        };
+        active.create_or_replace_temp_view(name, self.inner.clone());
+        Ok(())
+    }
+
     #[getter]
     fn columns(&self) -> PyResult<Vec<String>> {
         self.inner.columns().map_err(to_py_err)
+    }
+
+    #[pyo3(signature = (other, allow_missing_columns=false))]
+    fn union_by_name(
+        &self,
+        other: &PyDataFrame,
+        allow_missing_columns: bool,
+    ) -> PyResult<PyDataFrame> {
+        self.inner
+            .union_by_name(&other.inner, allow_missing_columns)
+            .map(|df| PyDataFrame { inner: df })
+            .map_err(to_py_err)
+    }
+
+    #[pyo3(name = "unionByName", signature = (other, allowMissingColumns=false))]
+    fn union_by_name_camel(&self, other: &PyDataFrame, allowMissingColumns: bool) -> PyResult<PyDataFrame> {
+        self.union_by_name(other, allowMissingColumns)
+    }
+
+    #[pyo3(name = "selectExpr", signature = (*exprs))]
+    fn select_expr(&self, py: Python<'_>, exprs: &Bound<'_, PyTuple>) -> PyResult<PyDataFrame> {
+        let mut sql_strs: Vec<String> = Vec::new();
+        for item in exprs.iter() {
+            sql_strs.push(item.extract::<String>()?);
+        }
+        let combined = sql_strs.join(", ");
+        let query = format!("SELECT {} FROM __self__", combined);
+        Err(to_py_err(format!("selectExpr is not yet fully implemented")))
+    }
+
+    #[pyo3(name = "withColumnsRenamed")]
+    fn with_columns_renamed(&self, col_map: &Bound<'_, PyDict>) -> PyResult<PyDataFrame> {
+        let mut df = self.inner.clone();
+        for (k, v) in col_map.iter() {
+            let old: String = k.extract()?;
+            let new: String = v.extract()?;
+            df = df.with_column_renamed(&old, &new).map_err(to_py_err)?;
+        }
+        Ok(PyDataFrame { inner: df })
+    }
+
+    #[pyo3(name = "fillna", signature = (value, subset=None))]
+    fn fillna(&self, py: Python<'_>, value: &Bound<'_, PyAny>, subset: Option<Vec<String>>) -> PyResult<PyDataFrame> {
+        let col_names: Vec<String> = match subset {
+            Some(s) => s,
+            None => self.inner.columns().map_err(to_py_err)?,
+        };
+
+        if let Ok(dict) = value.downcast::<PyDict>() {
+            let mut df = self.inner.clone();
+            for (k, v) in dict.iter() {
+                let col_name: String = k.extract()?;
+                let fill_col = py_any_to_column(&v)?;
+                let cond = Column::new(col_name.clone()).is_null();
+                let filled = robin_sparkless::functions::when(&cond)
+                    .then(&fill_col)
+                    .otherwise(&Column::new(col_name.clone()));
+                df = df.with_column(&col_name, &filled).map_err(to_py_err)?;
+            }
+            return Ok(PyDataFrame { inner: df });
+        }
+
+        let fill_val = py_any_to_column(value)?;
+        let mut df = self.inner.clone();
+        for col_name in &col_names {
+            let cond = Column::new(col_name.clone()).is_null();
+            let filled = robin_sparkless::functions::when(&cond)
+                .then(&fill_val)
+                .otherwise(&Column::new(col_name.clone()));
+            df = df.with_column(col_name, &filled).map_err(to_py_err)?;
+        }
+        Ok(PyDataFrame { inner: df })
+    }
+
+    #[pyo3(name = "dropna", signature = (how="any", thresh=None, subset=None))]
+    fn dropna(
+        &self,
+        how: &str,
+        thresh: Option<usize>,
+        subset: Option<Vec<String>>,
+    ) -> PyResult<PyDataFrame> {
+        Err(to_py_err("dropna is not yet implemented"))
+    }
+
+    #[getter]
+    fn na(slf: PyRef<Self>, py: Python<'_>) -> PyResult<PyObject> {
+        let na_mod = PyModule::import_bound(py, "sparkless.dataframe.na")?;
+        let cls = na_mod.getattr("DataFrameNaFunctions")?;
+        let obj = cls.call1((slf.into_py(py),))?;
+        Ok(obj.into_py(py))
+    }
+
+    #[pyo3(name = "agg", signature = (*exprs))]
+    fn agg(&self, exprs: &Bound<'_, PyTuple>) -> PyResult<PyDataFrame> {
+        let names: Vec<String> = Vec::new();
+        let gd = self.inner.group_by(Vec::<&str>::new()).map_err(to_py_err)?;
+        let mut rust_exprs: Vec<robin_sparkless::Expr> = Vec::new();
+        for item in exprs.iter() {
+            if let Ok(c) = item.downcast::<PyColumn>() {
+                rust_exprs.push(c.borrow().inner.clone().into_expr());
+            } else if let Ok(dict) = item.downcast::<PyDict>() {
+                for (k, v) in dict.iter() {
+                    let col_name: String = k.extract()?;
+                    let func_name: String = v.extract()?;
+                    let c = Column::new(col_name);
+                    let expr_col = match func_name.as_str() {
+                        "sum" => functions::sum(&c),
+                        "avg" | "mean" => functions::avg(&c),
+                        "min" => functions::min(&c),
+                        "max" => functions::max(&c),
+                        "count" => functions::count(&c),
+                        _ => return Err(to_py_err(format!("unsupported agg function: {func_name}"))),
+                    };
+                    rust_exprs.push(expr_col.into_expr());
+                }
+            } else {
+                return Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+                    "agg() expects Column expressions or dict",
+                ));
+            }
+        }
+        gd.agg(rust_exprs)
+            .map(|df| PyDataFrame { inner: df })
+            .map_err(to_py_err)
+    }
+
+    #[pyo3(name = "sort", signature = (*cols, ascending=None))]
+    fn sort(
+        &self,
+        cols: &Bound<'_, PyTuple>,
+        ascending: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<PyDataFrame> {
+        self.order_by_camel(cols, ascending)
+    }
+
+    #[pyo3(name = "toDF", signature = (*col_names))]
+    fn to_df(&self, col_names: &Bound<'_, PyTuple>) -> PyResult<PyDataFrame> {
+        if col_names.is_empty() {
+            return Ok(PyDataFrame { inner: self.inner.clone() });
+        }
+        let mut df = self.inner.clone();
+        let current = df.columns().map_err(to_py_err)?;
+        for (i, item) in col_names.iter().enumerate() {
+            if i >= current.len() {
+                break;
+            }
+            let new_name: String = item.extract()?;
+            df = df.with_column_renamed(&current[i], &new_name).map_err(to_py_err)?;
+        }
+        Ok(PyDataFrame { inner: df })
+    }
+
+    #[pyo3(name = "toPandas")]
+    fn to_pandas(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let pd = PyModule::import_bound(py, "pandas")?;
+        let rows = self.inner.collect_as_json_rows().map_err(to_py_err)?;
+        let cols = self.inner.columns().map_err(to_py_err)?;
+        let data_dict = PyDict::new_bound(py);
+        for col_name in &cols {
+            let vals = PyList::empty_bound(py);
+            for row in &rows {
+                let v = row.get(col_name).unwrap_or(&JsonValue::Null);
+                vals.append(json_to_py(v, py)?)?;
+            }
+            data_dict.set_item(col_name, vals)?;
+        }
+        let df = pd.call_method1("DataFrame", (data_dict,))?;
+        Ok(df.into_py(py))
+    }
+
+    #[pyo3(name = "printSchema")]
+    fn print_schema(&self) -> PyResult<()> {
+        let schema = self.inner.schema_engine().map_err(to_py_err)?;
+        println!("root");
+        for f in schema.fields() {
+            println!(" |-- {}: {:?} (nullable = {})", f.name, f.data_type, f.nullable);
+        }
+        Ok(())
+    }
+
+    #[getter]
+    fn dtypes(&self) -> PyResult<Vec<(String, String)>> {
+        let schema = self.inner.schema_engine().map_err(to_py_err)?;
+        Ok(schema.fields().iter().map(|f| (f.name.clone(), format!("{:?}", f.data_type))).collect())
+    }
+
+    fn describe(&self) -> PyResult<PyDataFrame> {
+        Err(to_py_err("describe is not yet implemented"))
+    }
+
+    fn coalesce(&self, n: usize) -> PyResult<PyDataFrame> {
+        Ok(PyDataFrame { inner: self.inner.clone() })
+    }
+
+    fn repartition(&self, n: usize) -> PyResult<PyDataFrame> {
+        Ok(PyDataFrame { inner: self.inner.clone() })
+    }
+
+    fn cache(&self) -> PyResult<PyDataFrame> {
+        Ok(PyDataFrame { inner: self.inner.clone() })
+    }
+
+    fn persist(&self) -> PyResult<PyDataFrame> {
+        Ok(PyDataFrame { inner: self.inner.clone() })
+    }
+
+    fn unpersist(&self) -> PyResult<PyDataFrame> {
+        Ok(PyDataFrame { inner: self.inner.clone() })
+    }
+
+    #[pyo3(name = "isEmpty")]
+    fn is_empty(&self) -> PyResult<bool> {
+        self.inner.count().map(|c| c == 0).map_err(to_py_err)
+    }
+
+    fn first(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let limited = self.inner.limit(1).map_err(to_py_err)?;
+        let df = PyDataFrame { inner: limited };
+        let rows = df.collect(py)?;
+        if rows.is_empty() {
+            Ok(py.None())
+        } else {
+            Ok(rows.into_iter().next().unwrap())
+        }
+    }
+
+    fn head(&self, py: Python<'_>, n: Option<usize>) -> PyResult<PyObject> {
+        let n = n.unwrap_or(1);
+        let limited = self.inner.limit(n).map_err(to_py_err)?;
+        let df = PyDataFrame { inner: limited };
+        let rows = df.collect(py)?;
+        if n == 1 {
+            if rows.is_empty() {
+                Ok(py.None())
+            } else {
+                Ok(rows.into_iter().next().unwrap())
+            }
+        } else {
+            Ok(PyList::new_bound(py, rows).into_py(py))
+        }
+    }
+
+    fn take(&self, py: Python<'_>, n: usize) -> PyResult<Vec<PyObject>> {
+        let limited = self.inner.limit(n).map_err(to_py_err)?;
+        let df = PyDataFrame { inner: limited };
+        df.collect(py)
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        let cols = self.inner.columns().map_err(to_py_err)?;
+        Ok(format!("DataFrame[{}]", cols.join(", ")))
     }
 }
 
@@ -2466,6 +2760,7 @@ struct PyDataFrameWriter {
     mode: String,
     options: Vec<(String, String)>,
     partition_by: Vec<String>,
+    writer_format: Option<String>,
 }
 
 fn write_mode_from_str(mode: &str) -> WriteMode {
@@ -2496,8 +2791,15 @@ impl PyDataFrameWriter {
         slf
     }
 
+    #[pyo3(name = "partitionBy")]
     fn partition_by<'a>(mut slf: PyRefMut<'a, Self>, cols: Vec<String>) -> PyRefMut<'a, Self> {
         slf.partition_by = cols;
+        slf
+    }
+
+    #[pyo3(name = "format")]
+    fn writer_format<'a>(mut slf: PyRefMut<'a, Self>, fmt: &str) -> PyRefMut<'a, Self> {
+        slf.writer_format = Some(fmt.to_string());
         slf
     }
 
@@ -2609,7 +2911,55 @@ impl PyDataFrameWriter {
     }
 }
 
-/// Convert Python value (int, float, str, bool, None) or PyColumn to robin_sparkless Column.
+/// Extract a list of column name strings from a join `on` parameter.
+/// Accepts: None, str, Column, list[str], list[Column].
+fn extract_string_list_from_on(on: Option<&Bound<'_, PyAny>>) -> PyResult<Vec<String>> {
+    let on = match on {
+        Some(v) => v,
+        None => return Ok(Vec::new()),
+    };
+    if let Ok(s) = on.extract::<String>() {
+        return Ok(vec![s]);
+    }
+    if let Ok(py_col) = on.downcast::<PyColumn>() {
+        return Ok(vec![py_col.borrow().inner.name().to_string()]);
+    }
+    if let Ok(list) = on.downcast::<PyList>() {
+        let mut out = Vec::with_capacity(list.len());
+        for item in list.iter() {
+            if let Ok(s) = item.extract::<String>() {
+                out.push(s);
+            } else if let Ok(c) = item.downcast::<PyColumn>() {
+                out.push(c.borrow().inner.name().to_string());
+            } else {
+                return Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+                    "join 'on' list elements must be str or Column",
+                ));
+            }
+        }
+        return Ok(out);
+    }
+    if let Ok(tup) = on.downcast::<PyTuple>() {
+        let mut out = Vec::with_capacity(tup.len());
+        for item in tup.iter() {
+            if let Ok(s) = item.extract::<String>() {
+                out.push(s);
+            } else if let Ok(c) = item.downcast::<PyColumn>() {
+                out.push(c.borrow().inner.name().to_string());
+            } else {
+                return Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+                    "join 'on' tuple elements must be str or Column",
+                ));
+            }
+        }
+        return Ok(out);
+    }
+    Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+        "join 'on' must be str, Column, or list/tuple of str/Column",
+    ))
+}
+
+/// Convert Python value (int, float, str, bool, None, list) or PyColumn to robin_sparkless Column.
 fn py_any_to_column(other: &Bound<'_, PyAny>) -> PyResult<Column> {
     if let Ok(py_col) = other.downcast::<PyColumn>() {
         return Ok(py_col.borrow().inner.clone());
@@ -2628,6 +2978,20 @@ fn py_any_to_column(other: &Bound<'_, PyAny>) -> PyResult<Column> {
     }
     if let Ok(s) = other.extract::<String>() {
         return Ok(robin_sparkless::functions::lit_str(&s));
+    }
+    if let Ok(list) = other.downcast::<PyList>() {
+        if list.is_empty() {
+            return Ok(robin_sparkless::functions::lit_str("[]"));
+        }
+        let first = list.get_item(0)?;
+        if first.extract::<i64>().is_ok() {
+            let vals: Vec<i64> = list.iter().filter_map(|x| x.extract::<i64>().ok()).collect();
+            return Ok(robin_sparkless::functions::lit_str(&format!("{:?}", vals)));
+        }
+    }
+    // Best effort: treat as string
+    if let Ok(s) = other.str() {
+        return Ok(robin_sparkless::functions::lit_str(&s.to_string()));
     }
     Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
         "comparison rhs must be Column, int, float, str, bool, or None",
@@ -2657,6 +3021,60 @@ impl PyColumn {
         self.inner.udf_call_info()
     }
 
+    fn __add__(&self, other: &Bound<'_, PyAny>) -> PyResult<PyColumn> {
+        let rhs = py_any_to_column(other)?;
+        Ok(PyColumn { inner: self.inner.add_pyspark(&rhs) })
+    }
+
+    fn __radd__(&self, other: &Bound<'_, PyAny>) -> PyResult<PyColumn> {
+        let lhs = py_any_to_column(other)?;
+        Ok(PyColumn { inner: lhs.add_pyspark(&self.inner) })
+    }
+
+    fn __sub__(&self, other: &Bound<'_, PyAny>) -> PyResult<PyColumn> {
+        let rhs = py_any_to_column(other)?;
+        Ok(PyColumn { inner: self.inner.subtract_pyspark(&rhs) })
+    }
+
+    fn __rsub__(&self, other: &Bound<'_, PyAny>) -> PyResult<PyColumn> {
+        let lhs = py_any_to_column(other)?;
+        Ok(PyColumn { inner: lhs.subtract_pyspark(&self.inner) })
+    }
+
+    fn __mul__(&self, other: &Bound<'_, PyAny>) -> PyResult<PyColumn> {
+        let rhs = py_any_to_column(other)?;
+        Ok(PyColumn { inner: self.inner.multiply_pyspark(&rhs) })
+    }
+
+    fn __rmul__(&self, other: &Bound<'_, PyAny>) -> PyResult<PyColumn> {
+        let lhs = py_any_to_column(other)?;
+        Ok(PyColumn { inner: lhs.multiply_pyspark(&self.inner) })
+    }
+
+    fn __truediv__(&self, other: &Bound<'_, PyAny>) -> PyResult<PyColumn> {
+        let rhs = py_any_to_column(other)?;
+        Ok(PyColumn { inner: self.inner.divide_pyspark(&rhs) })
+    }
+
+    fn __rtruediv__(&self, other: &Bound<'_, PyAny>) -> PyResult<PyColumn> {
+        let lhs = py_any_to_column(other)?;
+        Ok(PyColumn { inner: lhs.divide_pyspark(&self.inner) })
+    }
+
+    fn __mod__(&self, other: &Bound<'_, PyAny>) -> PyResult<PyColumn> {
+        let rhs = py_any_to_column(other)?;
+        Ok(PyColumn { inner: self.inner.mod_pyspark(&rhs) })
+    }
+
+    fn __rmod__(&self, other: &Bound<'_, PyAny>) -> PyResult<PyColumn> {
+        let lhs = py_any_to_column(other)?;
+        Ok(PyColumn { inner: lhs.mod_pyspark(&self.inner) })
+    }
+
+    fn __neg__(&self) -> PyColumn {
+        PyColumn { inner: self.inner.negate() }
+    }
+
     fn __and__(&self, other: &Bound<'_, PyAny>) -> PyResult<PyColumn> {
         let rhs = py_any_to_column(other)?;
         Ok(PyColumn {
@@ -2669,6 +3087,36 @@ impl PyColumn {
         Ok(PyColumn {
             inner: lhs.and_(&self.inner),
         })
+    }
+
+    fn __or__(&self, other: &Bound<'_, PyAny>) -> PyResult<PyColumn> {
+        let rhs = py_any_to_column(other)?;
+        Ok(PyColumn { inner: self.inner.bit_or(&rhs) })
+    }
+
+    fn __ror__(&self, other: &Bound<'_, PyAny>) -> PyResult<PyColumn> {
+        let lhs = py_any_to_column(other)?;
+        Ok(PyColumn { inner: lhs.bit_or(&self.inner) })
+    }
+
+    fn __invert__(&self) -> PyColumn {
+        PyColumn { inner: self.inner.bitwise_not() }
+    }
+
+    fn __getitem__(&self, key: &Bound<'_, PyAny>) -> PyResult<PyColumn> {
+        if let Ok(idx) = key.extract::<i64>() {
+            return Ok(PyColumn { inner: self.inner.get_item(idx) });
+        }
+        if let Ok(name) = key.extract::<String>() {
+            return Ok(PyColumn { inner: self.inner.get_field(&name) });
+        }
+        if let Ok(py_col) = key.downcast::<PyColumn>() {
+            let name = py_col.borrow().inner.name().to_string();
+            return Ok(PyColumn { inner: self.inner.get_field(&name) });
+        }
+        Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+            "Column subscript key must be int, str, or Column",
+        ))
     }
 
     /// Logical AND of two boolean columns. PySpark and_.
@@ -2944,15 +3392,13 @@ impl PyColumn {
     }
 
     fn asc(&self) -> PySortOrder {
-        PySortOrder {
-            inner: self.inner.asc(),
-        }
+        let name = self.inner.name().to_string();
+        PySortOrder { inner: self.inner.asc(), col_name: name }
     }
 
     fn desc(&self) -> PySortOrder {
-        PySortOrder {
-            inner: self.inner.desc(),
-        }
+        let name = self.inner.name().to_string();
+        PySortOrder { inner: self.inner.desc(), col_name: name }
     }
 
     /// Descending sort, nulls last. PySpark desc_nulls_last.
@@ -3415,6 +3861,10 @@ impl PyGroupedData {
             .map_err(to_py_err)
     }
 
+    fn mean(&self, col_name: &str) -> PyResult<PyDataFrame> {
+        self.avg(col_name)
+    }
+
     fn min(&self, col_name: &str) -> PyResult<PyDataFrame> {
         self.inner
             .min(col_name)
@@ -3448,8 +3898,30 @@ impl PyGroupedData {
                 }
                 return Ok(());
             }
+            if let Ok(dict) = item.downcast::<PyDict>() {
+                for (k, v) in dict.iter() {
+                    let col_name: String = k.extract().map_err(|_| {
+                        PyErr::new::<pyo3::exceptions::PyTypeError, _>("agg dict keys must be str")
+                    })?;
+                    let func_name: String = v.extract().map_err(|_| {
+                        PyErr::new::<pyo3::exceptions::PyTypeError, _>("agg dict values must be str")
+                    })?;
+                    let c = Column::new(col_name);
+                    let expr_col = match func_name.as_str() {
+                        "sum" => functions::sum(&c),
+                        "avg" | "mean" => functions::avg(&c),
+                        "min" => functions::min(&c),
+                        "max" => functions::max(&c),
+                        "count" => functions::count(&c),
+                        "first" => c, // best effort
+                        _ => return Err(to_py_err(format!("unsupported agg function: {func_name}"))),
+                    };
+                    out.push(expr_col.into_expr());
+                }
+                return Ok(());
+            }
             Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
-                "agg() expects Column expressions",
+                "agg() expects Column expressions or dict",
             ))
         }
 
@@ -3722,33 +4194,41 @@ fn lit(value: &Bound<'_, PyAny>) -> PyResult<PyColumn> {
     })
 }
 
-#[pyfunction]
-fn upper(col: &PyColumn) -> PyColumn {
-    PyColumn {
-        inner: robin_sparkless::functions::upper(&col.inner),
+fn coerce_to_column(v: &Bound<'_, PyAny>) -> PyResult<Column> {
+    if let Ok(c) = v.downcast::<PyColumn>() {
+        return Ok(c.borrow().inner.clone());
     }
+    if let Ok(s) = v.extract::<String>() {
+        return Ok(robin_sparkless::functions::col(&s));
+    }
+    Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+        "expected Column or column name string",
+    ))
 }
 
 #[pyfunction]
-fn lower(col: &PyColumn) -> PyColumn {
-    PyColumn {
-        inner: robin_sparkless::functions::lower(&col.inner),
-    }
+fn upper(col: &Bound<'_, PyAny>) -> PyResult<PyColumn> {
+    let c = coerce_to_column(col)?;
+    Ok(PyColumn { inner: robin_sparkless::functions::upper(&c) })
+}
+
+#[pyfunction]
+fn lower(col: &Bound<'_, PyAny>) -> PyResult<PyColumn> {
+    let c = coerce_to_column(col)?;
+    Ok(PyColumn { inner: robin_sparkless::functions::lower(&c) })
 }
 
 #[pyfunction]
 #[pyo3(signature = (column, start, length=None))]
-fn substring(column: &PyColumn, start: i64, length: Option<i64>) -> PyColumn {
-    PyColumn {
-        inner: robin_sparkless::functions::substring(&column.inner, start, length),
-    }
+fn substring(column: &Bound<'_, PyAny>, start: i64, length: Option<i64>) -> PyResult<PyColumn> {
+    let c = coerce_to_column(column)?;
+    Ok(PyColumn { inner: robin_sparkless::functions::substring(&c, start, length) })
 }
 
 #[pyfunction]
-fn trim(col: &PyColumn) -> PyColumn {
-    PyColumn {
-        inner: robin_sparkless::functions::trim(&col.inner),
-    }
+fn trim(col: &Bound<'_, PyAny>) -> PyResult<PyColumn> {
+    let c = coerce_to_column(col)?;
+    Ok(PyColumn { inner: robin_sparkless::functions::trim(&c) })
 }
 
 #[pyfunction]
@@ -3766,13 +4246,14 @@ struct PyWhenBuilder {
 
 #[pymethods]
 impl PyWhenBuilder {
-    fn then(&mut self, value: &PyColumn) -> PyResult<PyThenBuilder> {
+    fn then(&mut self, value: &Bound<'_, PyAny>) -> PyResult<PyThenBuilder> {
         let wb = self
             .inner
             .take()
             .ok_or_else(|| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>("when().then() already called"))?;
+        let val = py_any_to_column(value)?;
         Ok(PyThenBuilder {
-            inner: Some(wb.then(&value.inner)),
+            inner: Some(wb.then(&val)),
         })
     }
 }
@@ -3784,14 +4265,26 @@ struct PyThenBuilder {
 
 #[pymethods]
 impl PyThenBuilder {
-    fn when(&mut self, condition: &PyColumn) -> PyResult<PyChainedWhenBuilder> {
+    fn when(&mut self, condition: &Bound<'_, PyAny>, value: Option<&Bound<'_, PyAny>>) -> PyResult<PyObject> {
         let tb = self
             .inner
             .take()
             .ok_or_else(|| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>("otherwise() already called"))?;
-        Ok(PyChainedWhenBuilder {
-            inner: Some(tb.when(&condition.inner)),
-        })
+        let cond = py_any_to_column(condition).or_else(|_| {
+            condition.extract::<String>().map(|s| robin_sparkless::functions::col(&s))
+        })?;
+        let cwb = tb.when(&cond);
+        let py = condition.py();
+        match value {
+            Some(val) => {
+                let val_col = py_any_to_column(val)?;
+                let new_tb = cwb.then(&val_col);
+                Ok(Py::new(py, PyThenBuilder { inner: Some(new_tb) })?.into_py(py))
+            }
+            None => {
+                Ok(Py::new(py, PyChainedWhenBuilder { inner: Some(cwb) })?.into_py(py))
+            }
+        }
     }
 
     fn otherwise(&mut self, value: &Bound<'_, PyAny>) -> PyResult<PyColumn> {
@@ -3857,38 +4350,33 @@ fn when(
 }
 
 #[pyfunction]
-fn count(col: &PyColumn) -> PyColumn {
-    PyColumn {
-        inner: functions::count(&col.inner),
-    }
+fn count(col: &Bound<'_, PyAny>) -> PyResult<PyColumn> {
+    let c = coerce_to_column(col)?;
+    Ok(PyColumn { inner: functions::count(&c) })
 }
 
 #[pyfunction]
-fn sum(col: &PyColumn) -> PyColumn {
-    PyColumn {
-        inner: functions::sum(&col.inner),
-    }
+fn sum(col: &Bound<'_, PyAny>) -> PyResult<PyColumn> {
+    let c = coerce_to_column(col)?;
+    Ok(PyColumn { inner: functions::sum(&c) })
 }
 
 #[pyfunction]
-fn avg(col: &PyColumn) -> PyColumn {
-    PyColumn {
-        inner: functions::avg(&col.inner),
-    }
+fn avg(col: &Bound<'_, PyAny>) -> PyResult<PyColumn> {
+    let c = coerce_to_column(col)?;
+    Ok(PyColumn { inner: functions::avg(&c) })
 }
 
 #[pyfunction]
-fn min(col: &PyColumn) -> PyColumn {
-    PyColumn {
-        inner: functions::min(&col.inner),
-    }
+fn min(col: &Bound<'_, PyAny>) -> PyResult<PyColumn> {
+    let c = coerce_to_column(col)?;
+    Ok(PyColumn { inner: functions::min(&c) })
 }
 
 #[pyfunction]
-fn max(col: &PyColumn) -> PyColumn {
-    PyColumn {
-        inner: functions::max(&col.inner),
-    }
+fn max(col: &Bound<'_, PyAny>) -> PyResult<PyColumn> {
+    let c = coerce_to_column(col)?;
+    Ok(PyColumn { inner: functions::max(&c) })
 }
 
 #[pyfunction]
@@ -3898,10 +4386,14 @@ fn create_map(columns: &Bound<'_, PyAny>) -> PyResult<PyColumn> {
     })?;
     let mut owned: Vec<Column> = Vec::with_capacity(list.len());
     for item in list.iter() {
-        let py_col = item.downcast::<PyColumn>().map_err(|_| {
-            PyErr::new::<pyo3::exceptions::PyTypeError, _>("create_map elements must be Columns")
-        })?;
-        owned.push(py_col.borrow().inner.clone());
+        if let Ok(py_col) = item.downcast::<PyColumn>() {
+            owned.push(py_col.borrow().inner.clone());
+        } else if let Ok(s) = item.extract::<String>() {
+            owned.push(robin_sparkless::functions::col(&s));
+        } else {
+            let col = py_any_to_column(&item)?;
+            owned.push(col);
+        }
     }
     let refs: Vec<&Column> = owned.iter().collect();
     let col = functions::create_map(&refs).map_err(to_py_err)?;
@@ -3909,16 +4401,49 @@ fn create_map(columns: &Bound<'_, PyAny>) -> PyResult<PyColumn> {
 }
 
 #[pyfunction]
+#[pyo3(signature = (*columns))]
+fn concat(columns: &Bound<'_, PyTuple>) -> PyResult<PyColumn> {
+    let mut owned: Vec<Column> = Vec::new();
+    for item in columns.iter() {
+        if let Ok(c) = item.downcast::<PyColumn>() {
+            owned.push(c.borrow().inner.clone());
+        } else if let Ok(s) = item.extract::<String>() {
+            owned.push(functions::col(&s));
+        } else {
+            return Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+                "concat() arguments must be Column or str",
+            ));
+        }
+    }
+    let refs: Vec<&Column> = owned.iter().collect();
+    Ok(PyColumn {
+        inner: functions::concat(&refs),
+    })
+}
+
+#[pyfunction]
 fn column_over_window(
-    column: &PyColumn,
+    col_name: &str,
+    agg_fn: &str,
     partition_by: Vec<String>,
     order_by: Vec<String>,
-    use_running_aggregate: bool,
 ) -> PyResult<PyColumn> {
-    let parts: Vec<&str> = partition_by.iter().map(|s| s.as_str()).collect();
-    column
-        .inner
-        .over_window(&parts[..], &order_by, use_running_aggregate)
+    let c = Column::new(col_name.to_string());
+    let agg_col = match agg_fn {
+        "sum" => functions::sum(&c),
+        "avg" | "mean" => functions::avg(&c),
+        "min" => functions::min(&c),
+        "max" => functions::max(&c),
+        "count" => functions::count(&c),
+        _ => return Err(to_py_err(format!("unsupported agg for over(): {agg_fn}"))),
+    };
+    let partition_strs: Vec<&str> = partition_by.iter().map(|s| s.as_str()).collect();
+    if order_by.is_empty() {
+        return Ok(PyColumn { inner: agg_col.over(&partition_strs) });
+    }
+    let use_running = true;
+    agg_col
+        .over_window(&partition_strs, &order_by, use_running)
         .map(|c| PyColumn { inner: c })
         .map_err(to_py_err)
 }
@@ -4059,23 +4584,19 @@ fn lead_window(
     Ok(PyColumn { inner: windowed })
 }
 #[pyfunction]
-fn regexp_replace(column: &PyColumn, pattern: &str, replacement: &str) -> PyColumn {
-    PyColumn {
-        inner: functions::regexp_replace(&column.inner, pattern, replacement),
-    }
+fn regexp_replace(column: &Bound<'_, PyAny>, pattern: &str, replacement: &str) -> PyResult<PyColumn> {
+    let c = coerce_to_column(column)?;
+    Ok(PyColumn { inner: functions::regexp_replace(&c, pattern, replacement) })
 }
 
 #[pyfunction]
 #[pyo3(signature = (column, pattern, group_index=0))]
-fn regexp_extract_all(column: &PyColumn, pattern: &str, group_index: usize) -> PyColumn {
+fn regexp_extract_all(column: &Bound<'_, PyAny>, pattern: &str, group_index: usize) -> PyResult<PyColumn> {
+    let c = coerce_to_column(column)?;
     if group_index == 0 {
-        PyColumn {
-            inner: functions::regexp_extract_all(&column.inner, pattern),
-        }
+        Ok(PyColumn { inner: functions::regexp_extract_all(&c, pattern) })
     } else {
-        PyColumn {
-            inner: column.inner.regexp_extract_all_group(pattern, group_index),
-        }
+        Ok(PyColumn { inner: c.regexp_extract_all_group(pattern, group_index) })
     }
 }
 
@@ -4645,7 +5166,7 @@ fn struct_(columns: &Bound<'_, PyTuple>) -> PyResult<PyColumn> {
     Ok(PyColumn {
         inner: functions::struct_(&refs),
     })
-}
+
 
 #[pymodule]
 fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
@@ -4688,6 +5209,7 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(min, m)?)?;
     m.add_function(wrap_pyfunction!(max, m)?)?;
     m.add_function(wrap_pyfunction!(create_map, m)?)?;
+    m.add_function(wrap_pyfunction!(column_over_window, m)?)?;
     m.add_function(wrap_pyfunction!(row_number_window, m)?)?;
     m.add_function(wrap_pyfunction!(percent_rank_window, m)?)?;
     m.add_function(wrap_pyfunction!(rank_window, m)?)?;

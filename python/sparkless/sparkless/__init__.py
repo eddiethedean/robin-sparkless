@@ -63,7 +63,7 @@ lower = _mod.lower
 substring = _mod.substring
 trim = _mod.trim
 cast = _mod.cast
-when = _mod.when
+_native_when = _mod.when
 count = _mod.count
 sum = _mod.sum
 avg = _mod.avg
@@ -207,6 +207,12 @@ def __getattr__(name):
     if name == "expr":
         import sparkless.sql.functions as f
         return f.expr
+    if name == "lit":
+        import sparkless.sql.functions as f
+        return f.lit
+    if name == "udf":
+        import sparkless.sql.functions as f
+        return f.udf
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
@@ -215,6 +221,7 @@ __all__ = [
     "SparklessError",
     "sql",
     "col",
+    "lit",
     "F",
     "functions",
     "Window",
@@ -227,7 +234,14 @@ __all__ = [
     "lead",
     "first_value",
     "last_value",
+    "udf",
 ]
+
+
+def when(condition, value=None):
+    """PySpark-compatible when(). Accepts Column or str condition, optional value."""
+    from sparkless.sql.functions import when as _when
+    return _when(condition, value)
 
 
 def create_map(*cols):

@@ -260,8 +260,8 @@ class Row(tuple):
         return list(self)
 
     def __iter__(self):
-        # Iterate over keys so that set(Row) and dict(Row) behave mapping-like in tests.
-        return iter(self.__dict__.get("_fields", []))
+        # Iterate over tuple values (PySpark parity: list(row) gives values).
+        return super().__iter__()
 
 
 __all__ = [

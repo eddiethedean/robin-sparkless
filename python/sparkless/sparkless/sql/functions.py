@@ -20,7 +20,7 @@ from sparkless import (
     substring,
     trim,
     cast,
-    when,
+    _native_when,
     count as _count,
     sum as _sum,
     avg as _avg,
@@ -101,6 +101,171 @@ def _ensure_udf_executor_registered():
     _native.set_python_udf_executor(_python_udf_executor)
     _ensure_udf_executor_registered._registered = True
 
+def _as_col(c):
+    return col(c) if isinstance(c, str) else c
+
+def _ni(name):
+    return _not_implemented(name)
+
+# --- Math functions (native-backed) ---
+def floor(c): return _native.native_floor(_as_col(c))
+def ceil(c): return _native.native_ceil(_as_col(c))
+ceiling = ceil
+def abs(c): return _native.native_abs(_as_col(c))
+def sqrt(c): return _native.native_sqrt(_as_col(c))
+def log(c, base=None): return _native.native_log(_as_col(c))
+def exp(c): return _native.native_exp(_as_col(c))
+def pow(col1, col2): return _native.native_pow(_as_col(col1), int(col2))
+power = pow
+def round(c, scale=0): return _native.native_round(_as_col(c), scale)
+def signum(c): return _native.native_signum(_as_col(c))
+def sin(c): return _native.native_sin(_as_col(c))
+def cos(c): return _native.native_cos(_as_col(c))
+def tan(c): return _native.native_tan(_as_col(c))
+def asin(c): return _native.native_asin(_as_col(c))
+def acos(c): return _native.native_acos(_as_col(c))
+def atan(c): return _native.native_atan(_as_col(c))
+def atan2(y, x): return _native.native_atan2(_as_col(y), _as_col(x))
+def degrees(c): return _native.native_degrees(_as_col(c))
+def radians(c): return _native.native_radians(_as_col(c))
+def log2(c): return _native.native_log2(_as_col(c))
+def log10(c): return _native.native_log10(_as_col(c))
+def greatest(*cols): return _native.native_greatest([_as_col(c) for c in cols])
+def least(*cols): return _native.native_least([_as_col(c) for c in cols])
+def coalesce(*cols): return _native.native_coalesce([_as_col(c) for c in cols])
+
+nanvl = _ni("nanvl")
+isnan = _ni("isnan")
+isnull = _ni("isnull")
+monotonically_increasing_id = _ni("monotonically_increasing_id")
+input_file_name = _ni("input_file_name")
+spark_partition_id = _ni("spark_partition_id")
+broadcast = _ni("broadcast")
+hash = _ni("hash")
+
+# --- Hash / encoding functions (native-backed) ---
+def xxhash64(c): return _native.native_xxhash64(_as_col(c))
+def md5(c): return _native.native_md5(_as_col(c))
+def sha1(c): return _native.native_sha1(_as_col(c))
+def sha2(c, numBits): return _native.native_sha2(_as_col(c), numBits)
+def crc32(c): return _native.native_crc32(_as_col(c))
+def base64(c): return _native.native_base64(_as_col(c))
+def unbase64(c): return _native.native_unbase64(_as_col(c))
+def ascii(c): return _native.native_ascii(_as_col(c))
+def hex(c): return _native.native_hex(_as_col(c))
+def unhex(c): return _native.native_unhex(_as_col(c))
+def bin(c): return _native.native_bin(_as_col(c))
+def conv(c, fromBase, toBase): return _native.native_conv(_as_col(c), fromBase, toBase)
+def format_number(c, d): return _native.native_format_number(_as_col(c), d)
+
+# --- Array / collection functions (native-backed) ---
+array = _ni("array")
+struct = _ni("struct")
+def explode(col_or_name): return _native.native_explode(_as_col(col_or_name))
+def explode_outer(col_or_name): return _native.native_explode_outer(_as_col(col_or_name))
+def posexplode(col_or_name): return _native.native_posexplode(_as_col(col_or_name))
+posexplode_outer = _ni("posexplode_outer")
+def flatten(col_or_name): return _native.native_flatten(_as_col(col_or_name))
+def split(str_col, pattern, limit=-1):
+    lim = limit if limit != -1 else None
+    return _native.native_split(_as_col(str_col), pattern, lim)
+def format_string(fmt, *cols): return _native.native_format_string(fmt, [_as_col(c) for c in cols])
+concat_ws = _ni("concat_ws")
+
+# --- Aggregate functions (native-backed) ---
+def mean(col_or_name): return avg(col_or_name)
+def first(col_or_name, ignorenulls=False): return _native.native_first(_as_col(col_or_name), ignorenulls)
+last = _ni("last")
+def collect_list(col_or_name): return _native.native_collect_list(_as_col(col_or_name))
+def collect_set(col_or_name): return _native.native_collect_set(_as_col(col_or_name))
+def array_contains(col_or_name, value):
+    v = _as_col(value) if not isinstance(value, (int, float, bool, str)) else lit(value)
+    return _native.native_array_contains(_as_col(col_or_name), v)
+def array_distinct(col_or_name): return _native.native_array_distinct(_as_col(col_or_name))
+def array_sort(col_or_name): return _native.native_array_sort(_as_col(col_or_name))
+def array_join(col_or_name, delimiter, null_replacement=None): return _native.native_array_join(_as_col(col_or_name), delimiter)
+def array_max(col_or_name): return _native.native_array_max(_as_col(col_or_name))
+def array_min(col_or_name): return _native.native_array_min(_as_col(col_or_name))
+def element_at(col_or_name, extraction): return _native.native_element_at(_as_col(col_or_name), extraction)
+def size(col_or_name): return _native.native_size(_as_col(col_or_name))
+slice = _ni("slice")
+def sort_array(col_or_name, asc=True): return _native.native_array_sort(_as_col(col_or_name))
+def array_union(col1, col2): return _native.native_array_union(_as_col(col1), _as_col(col2))
+def array_intersect(col1, col2): return _native.native_array_intersect(_as_col(col1), _as_col(col2))
+def array_except(col1, col2): return _native.native_array_except(_as_col(col1), _as_col(col2))
+def map_keys(col_or_name): return _native.native_map_keys(_as_col(col_or_name))
+def map_values(col_or_name): return _native.native_map_values(_as_col(col_or_name))
+map_from_arrays = _ni("map_from_arrays")
+sumDistinct = _ni("sumDistinct")
+def count_distinct(*cols):
+    if len(cols) == 1:
+        return _native.native_count_distinct(_as_col(cols[0]))
+    raise NotImplementedError("count_distinct with multiple columns is not yet implemented")
+countDistinct = count_distinct
+def approx_count_distinct(col_or_name, rsd=0.05): return _native.native_approx_count_distinct(_as_col(col_or_name), rsd)
+def stddev(col_or_name): return _native.native_stddev(_as_col(col_or_name))
+def stddev_pop(col_or_name): return _native.native_stddev_pop(_as_col(col_or_name))
+def stddev_samp(col_or_name): return _native.native_stddev_samp(_as_col(col_or_name))
+def variance(col_or_name): return _native.native_variance(_as_col(col_or_name))
+def var_pop(col_or_name): return _native.native_var_pop(_as_col(col_or_name))
+def var_samp(col_or_name): return _native.native_var_samp(_as_col(col_or_name))
+def corr(col1, col2): return _native.native_corr(_as_col(col1), _as_col(col2))
+percentile_approx = _ni("percentile_approx")
+
+# --- String functions (native-backed) ---
+def lpad(col_or_name, len, pad): return _native.native_lpad(_as_col(col_or_name), len, pad)
+def rpad(col_or_name, len, pad): return _native.native_rpad(_as_col(col_or_name), len, pad)
+def ltrim(col_or_name): return _native.native_ltrim(_as_col(col_or_name))
+def rtrim(col_or_name): return _native.native_rtrim(_as_col(col_or_name))
+def initcap(col_or_name): return _native.native_initcap(_as_col(col_or_name))
+def soundex(col_or_name): return _native.native_soundex(_as_col(col_or_name))
+def length(col_or_name): return _native.native_length(_as_col(col_or_name))
+def reverse(col_or_name): return _native.native_reverse(_as_col(col_or_name))
+def translate(col_or_name, matching, replace): return _native.native_translate(_as_col(col_or_name), matching, replace)
+def instr(col_or_name, substr): return _native.native_instr(_as_col(col_or_name), substr)
+def locate(substr, col_or_name, pos=1): return _native.native_locate(substr, _as_col(col_or_name), pos)
+def repeat(col_or_name, n): return _native.native_repeat(_as_col(col_or_name), n)
+def regexp_extract(col_or_name, pattern, idx=0): return _native.native_regexp_extract(_as_col(col_or_name), pattern, idx)
+overlay = _ni("overlay")
+
+# --- Window functions (stubs) ---
+dense_rank = _ni("dense_rank")
+rank = _ni("rank")
+percent_rank = _ni("percent_rank")
+cume_dist = _ni("cume_dist")
+ntile = _ni("ntile")
+lag = _ni("lag")
+lead = _ni("lead")
+window = _ni("window")
+
+# --- JSON functions (stubs) ---
+from_json = _ni("from_json")
+to_json = _ni("to_json")
+schema_of_json = _ni("schema_of_json")
+get_json_object = _ni("get_json_object")
+json_tuple = _ni("json_tuple")
+decode = _ni("decode")
+encode = _ni("encode")
+char = _ni("char")
+factorial = _ni("factorial")
+cbrt = _ni("cbrt")
+hypot = _ni("hypot")
+
+# --- Date/time functions (native-backed) ---
+def add_months(start, months): return _native.native_add_months(_as_col(start), months)
+def months_between(date1, date2, roundOff=True): return _native.native_months_between(_as_col(date1), _as_col(date2), roundOff)
+def next_day(date, dayOfWeek): return _native.native_next_day(_as_col(date), dayOfWeek)
+def last_day(date): return _native.native_last_day(_as_col(date))
+def trunc(date, fmt): return _native.native_trunc(_as_col(date), fmt)
+def date_trunc(fmt, timestamp): return _native.native_date_trunc(fmt, _as_col(timestamp))
+def hour(col_or_name): return _native.native_hour(_as_col(col_or_name))
+def minute(col_or_name): return _native.native_minute(_as_col(col_or_name))
+def second(col_or_name): return _native.native_second(_as_col(col_or_name))
+def quarter(col_or_name): return _native.native_quarter(_as_col(col_or_name))
+def dayofyear(col_or_name): return _native.native_dayofyear(_as_col(col_or_name))
+def weekofyear(col_or_name): return _native.native_weekofyear(_as_col(col_or_name))
+make_date = _ni("make_date")
+typeof = _ni("typeof")
 
 def _python_udf_executor(df, column_name, udf_name, arg_names, arg_literal_jsons=None):
     """Run a registered Python UDF over the DataFrame: collect, apply per row, create new DataFrame. Called from Rust with_column.
@@ -327,9 +492,18 @@ __all__ = [
     "udf",
 ]
 
-# --- Argument coercions (PySpark parity) ---
-def _as_col(c):
-    return col(c) if isinstance(c, str) else c
+def when(condition, value=None):
+    """PySpark-compatible when(). Accepts Column or str condition, optional value."""
+    cond = _as_col(condition)
+    if value is not None:
+        val = _as_col(value) if not isinstance(value, (int, float, bool, str)) else lit(value)
+        return _native_when(cond, val)
+    return _native_when(cond)
+
+
+def concat(*columns):
+    """Concatenate columns as strings (PySpark concat)."""
+    return _concat(*columns)
 
 
 def count(c="*"):
@@ -899,6 +1073,10 @@ def _col_name(arg):
         return arg
     if isinstance(arg, _Column):
         return arg.name
+    if hasattr(arg, 'name') and hasattr(arg, 'ascending'):
+        return arg.name
+    if hasattr(arg, 'column_name'):
+        return arg.column_name
     raise TypeError(f"Unsupported sort key: {type(arg)!r}")
 
 
