@@ -942,7 +942,12 @@ impl Column {
         } else {
             let pat = pattern.to_string();
             Self::from_expr(
-                self.expr().clone().str().extract(lit(pat), group_index),
+                // PySpark implicitly casts non-string inputs to string for regex functions.
+                self.expr()
+                    .clone()
+                    .cast(DataType::String)
+                    .str()
+                    .extract(lit(pat), group_index),
                 None,
             )
         }
@@ -954,7 +959,12 @@ impl Column {
         let pat = pattern.to_string();
         let rep = replacement.to_string();
         Self::from_expr(
-            self.expr().clone().str().replace(lit(pat), lit(rep), false),
+            // PySpark implicitly casts non-string inputs to string for regex functions.
+            self.expr()
+                .clone()
+                .cast(DataType::String)
+                .str()
+                .replace(lit(pat), lit(rep), false),
             None,
         )
     }
