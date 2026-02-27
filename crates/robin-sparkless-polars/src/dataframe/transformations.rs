@@ -570,8 +570,9 @@ pub fn union_by_name(
                 }
             }
         }
-        // #613: When one side's dtype is unknown (None), use String as common type so we never
-        // cast string to int (which would fail); both columns can safely cast to String.
+        // #613 / #603: When both sides have dtypes, use a common type helper. When only one
+        // side has a dtype, keep that dtype so columns that exist on only one side (and are
+        // null on the other) preserve their natural type (e.g. Int64 id, Double aggregates).
         let common_dtype = match (&left_dtype, &right_dtype) {
             (Some(lt), Some(rt)) if lt != rt => find_common_type(lt, rt).map_err(|e| {
                 PolarsError::ComputeError(
@@ -579,14 +580,10 @@ pub fn union_by_name(
                 )
             })?,
             (Some(lt), Some(_)) => lt.clone(),
-            (Some(lt), None) | (None, Some(lt)) => {
-                // One side unknown: coerce to String so we never cast string→int (PySpark union promotes to string).
-                if lt == &polars::prelude::DataType::String {
-                    lt.clone()
-                } else {
-                    polars::prelude::DataType::String
-                }
-            }
+            // One side unknown: keep the known dtype. If the known side is String, we still
+            // get String here; if it's numeric, we avoid upcasting to String and changing
+            // semantics for columns that are null on the other side.
+            (Some(lt), None) | (None, Some(lt)) => lt.clone(),
             (None, None) => polars::prelude::DataType::Null,
         };
         let left_expr = match &left_has {
