@@ -2356,25 +2356,14 @@ impl PyDataFrame {
         self.inner.count().map_err(to_py_err)
     }
 
-    /// PySpark parity: head() returns the first Row; head(n) returns a list of up to n Rows.
+    /// PySpark parity: head() and head(n) return a DataFrame (limit 1 / limit n) so .collect() works.
     #[pyo3(signature = (n=None))]
-    fn head(&self, py: Python<'_>, n: Option<usize>) -> PyResult<PyObject> {
-        match n {
-            None => {
-                let first_df = self.inner.first().map_err(to_py_err)?;
-                let wrapper = PyDataFrame { inner: first_df };
-                let rows = wrapper.collect(py)?;
-                rows.into_iter().next().ok_or_else(|| {
-                    PyErr::new::<pyo3::exceptions::PyValueError, _>("empty DataFrame")
-                })
-            }
-            Some(k) => {
-                let head_df = self.inner.head(k).map_err(to_py_err)?;
-                let wrapper = PyDataFrame { inner: head_df };
-                let rows = wrapper.collect(py)?;
-                Ok(PyList::new_bound(py, rows).into_py(py))
-            }
-        }
+    fn head(&self, n: Option<usize>) -> PyResult<PyDataFrame> {
+        let k = n.unwrap_or(1);
+        self.inner
+            .limit(k)
+            .map(|df| PyDataFrame { inner: df })
+            .map_err(to_py_err)
     }
 
     #[getter]
@@ -2740,6 +2729,20 @@ impl PyDataFrame {
                 .map(|df| PyDataFrame { inner: df })
                 .map_err(to_py_err)
         } else if let Some(on_arg) = on {
+            // Try to use normal join when on is simple column name(s) (PySpark parity: one key column in result).
+            if let Ok(on_vec) = py_join_on_to_vec(on_arg) {
+                let use_normal_join = !on_vec.is_empty()
+                    && !on_vec.iter().any(|n| n == "<expr>" || n.is_empty());
+                if use_normal_join {
+                    let on_refs: Vec<&str> = on_vec.iter().map(|s| s.as_str()).collect();
+                    return self
+                        .inner
+                        .join(&other.inner, on_refs, join_type)
+                        .map(|df| PyDataFrame { inner: df })
+                        .map_err(to_py_err);
+                }
+            }
+            // Complex expression (e.g. col("a") == col("b")): cross join then filter.
             if let Ok(condition) = on_arg.downcast::<PyColumn>() {
                 let crossed = self.inner.cross_join(&other.inner).map_err(to_py_err)?;
                 let filtered = crossed
@@ -2935,9 +2938,17 @@ impl PyDataFrame {
                 }
                 return Ok(PyDataFrame { inner: current });
             }
-            return Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
-                "replace() missing 1 required positional argument: 'value'. When to_replace is not a dict, value must be provided.",
-            ));
+            // PySpark: na.replace("a", None) replaces "a" with null.
+            let null_expr = robin_sparkless::functions::lit_null("string")
+                .map_err(to_py_err)?
+                .into_expr();
+            let old_expr = py_any_to_column(to_replace)?.into_expr();
+            return self
+                .inner
+                .na()
+                .replace(old_expr, null_expr, sub.as_ref().map(|v| v.iter().map(|s| *s).collect()))
+                .map(|df| PyDataFrame { inner: df })
+                .map_err(to_py_err);
         }
 
         let value = value.unwrap();
@@ -3581,6 +3592,29 @@ impl PyColumn {
         Ok(PyColumn {
             inner: lhs.multiply_pyspark(&self.inner),
         })
+    }
+
+    /// col ** 2 (PySpark pow). Supports int and float exponent. Ignores modulo (PySpark has no modulo for pow).
+    fn __pow__(&self, other: &Bound<'_, PyAny>, _modulo: Option<&Bound<'_, PyAny>>) -> PyResult<PyColumn> {
+        if let Ok(exp_i) = other.extract::<i64>() {
+            return Ok(PyColumn {
+                inner: self.inner.pow(exp_i),
+            });
+        }
+        if let Ok(exp_i) = other.extract::<i32>() {
+            return Ok(PyColumn {
+                inner: self.inner.pow(exp_i as i64),
+            });
+        }
+        if let Ok(_exp_f) = other.extract::<f64>() {
+            let exp_col = py_any_to_column(other)?;
+            return Ok(PyColumn {
+                inner: self.inner.pow_with(&exp_col),
+            });
+        }
+        Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+            "pow exponent must be int or float",
+        ))
     }
 
     fn __truediv__(&self, other: &Bound<'_, PyAny>) -> PyResult<PyColumn> {
@@ -4444,9 +4478,21 @@ impl PyDataFrameNaFunctions {
                 }
                 return Ok(PyDataFrame { inner: current });
             }
-            return Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
-                "replace() missing 1 required positional argument: 'value'. When to_replace is not a dict, value must be provided.",
-            ));
+            // PySpark: na.replace("a", None) replaces "a" with null.
+            let null_expr = robin_sparkless::functions::lit_null("string")
+                .map_err(to_py_err)?
+                .into_expr();
+            let old_expr = py_any_to_column(to_replace)?.into_expr();
+            return df_ref
+                .inner
+                .na()
+                .replace(
+                    old_expr,
+                    null_expr,
+                    subset_refs.as_ref().map(|v| v.iter().map(|s| *s).collect()),
+                )
+                .map(|df| PyDataFrame { inner: df })
+                .map_err(to_py_err);
         }
 
         let value = value.unwrap();

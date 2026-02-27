@@ -217,6 +217,9 @@ def __getattr__(name):
     if name == "lit":
         import sparkless.sql.functions as f
         return f.lit
+    if name in ("pow", "power"):
+        import sparkless.sql.functions as f
+        return getattr(f, name)
     if name == "udf":
         import sparkless.sql.functions as f
         return f.udf
