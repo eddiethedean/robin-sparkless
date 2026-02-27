@@ -1646,6 +1646,11 @@ fn infer_type_from_py_value(v: &Bound<'_, PyAny>) -> String {
     if v.extract::<f64>().is_ok() {
         return "double".to_string();
     }
+    // Treat Python list/tuple as array so createDataFrame infers List dtype
+    // for columns backed by sequence values (PySpark parity for array columns).
+    if v.downcast::<PyList>().is_ok() || v.downcast::<PyTuple>().is_ok() {
+        return "array".to_string();
+    }
     if v.downcast::<PyBytes>().is_ok() {
         return "binary".to_string();
     }

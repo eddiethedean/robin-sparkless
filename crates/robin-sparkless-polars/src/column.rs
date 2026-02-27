@@ -2770,7 +2770,29 @@ impl Column {
 
     /// Posexplode with null preservation (PySpark posexplode_outer).
     pub fn posexplode_outer(&self) -> (Column, Column) {
-        self.posexplode()
+        use polars::prelude::{DataType, ExplodeOptions, Field};
+        let opts = ExplodeOptions {
+            empty_as_null: true,
+            keep_nulls: true,
+        };
+        let pos_expr = self
+            .expr()
+            .clone()
+            .map(
+                |col| expect_col(crate::udfs::apply_posexplode_positions(col)),
+                |_schema, field| {
+                    Ok(Field::new(
+                        field.name().clone(),
+                        DataType::List(Box::new(DataType::Int64)),
+                    ))
+                },
+            )
+            .explode(opts);
+        let val_expr = self.expr().clone().explode(opts);
+        (
+            Self::from_expr(pos_expr, Some("pos".to_string())),
+            Self::from_expr(val_expr, Some("col".to_string())),
+        )
     }
 
     /// Zip two arrays element-wise into array of structs (PySpark arrays_zip).
@@ -3020,9 +3042,9 @@ impl Column {
     }
 
     /// Explode list with position (PySpark posexplode). Returns (pos_col, value_col).
-    /// pos is 1-based; uses list.eval(cum_count()).explode() and explode().
+    /// pos is 0-based; implemented via UDF to avoid list.eval limitations on i64.
     pub fn posexplode(&self) -> (Column, Column) {
-        use polars::prelude::ExplodeOptions;
+        use polars::prelude::{DataType, ExplodeOptions, Field};
         let opts = ExplodeOptions {
             empty_as_null: false,
             keep_nulls: false,
@@ -3030,8 +3052,15 @@ impl Column {
         let pos_expr = self
             .expr()
             .clone()
-            .list()
-            .eval(col("").cum_count(false))
+            .map(
+                |col| expect_col(crate::udfs::apply_posexplode_positions(col)),
+                |_schema, field| {
+                    Ok(Field::new(
+                        field.name().clone(),
+                        DataType::List(Box::new(DataType::Int64)),
+                    ))
+                },
+            )
             .explode(opts);
         let val_expr = self.expr().clone().explode(opts);
         (

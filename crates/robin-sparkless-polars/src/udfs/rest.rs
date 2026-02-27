@@ -276,6 +276,39 @@ pub fn apply_array_flatten(column: Column) -> PolarsResult<Option<Column>> {
     Ok(Some(Column::new(name, out.into_series())))
 }
 
+/// Build per-row position lists for posexplode (0-based indices).
+/// Input must be a List column; each list [v0, v1, ..., v{n-1}] yields [0, 1, ..., n-1].
+/// Used by Column::posexplode / posexplode_outer to avoid list.eval limitations on i64.
+pub fn apply_posexplode_positions(column: Column) -> PolarsResult<Option<Column>> {
+    let name = column.field().into_owned().name;
+    let series = column.take_materialized_series();
+    let list_ca = series
+        .list()
+        .map_err(|e| compute_err("posexplode_positions", e))?;
+
+    // Heuristic capacity: assume small average list length.
+    let values_capacity = list_ca.len().saturating_mul(4);
+    let mut builder = ListPrimitiveChunkedBuilder::<Int64Type>::new(
+        name.as_str().into(),
+        list_ca.len(),
+        values_capacity,
+        DataType::Int64,
+    );
+
+    for opt_s in list_ca.into_iter() {
+        match opt_s {
+            Some(s) => {
+                let len = s.len();
+                builder.append_iter((0..len).map(|i| Some(i as i64)));
+            }
+            None => builder.append_null(),
+        }
+    }
+
+    let out = builder.finish().into_series();
+    Ok(Some(Column::new(name, out)))
+}
+
 /// Distinct elements in list preserving first-occurrence order (PySpark array_distinct parity).
 pub fn apply_array_distinct_first_order(column: Column) -> PolarsResult<Option<Column>> {
     let name = column.field().into_owned().name;
