@@ -217,8 +217,17 @@ fn value_type_name(v: &JsonValue) -> &'static str {
     }
 }
 
+/// Convert Python repr to JSON-like string for parsing (#1016: "[True, False, True]" -> "[true, false, true]").
+fn python_repr_to_json_like(s: &str) -> String {
+    let mut out = s.to_string();
+    // Word-boundary safe: replace Python literals that appear as list elements (comma or bracket before/after).
+    out = out.replace("True", "true").replace("False", "false").replace("None", "null");
+    out
+}
+
 /// Normalize a JSON value to an array for array columns (PySpark parity #625).
 /// Accepts: Array, Object with "0","1",... keys (Python list serialization), String that parses as JSON array.
+/// #1016: String may be Python repr (e.g. "[True, False, True]"); convert to JSON-like and parse.
 /// Returns None for null or when value should be treated as single-element list (#611).
 fn json_value_to_array(v: &JsonValue) -> Option<Vec<JsonValue>> {
     match v {
@@ -242,7 +251,9 @@ fn json_value_to_array(v: &JsonValue) -> Option<Vec<JsonValue>> {
             if let Ok(parsed) = serde_json::from_str::<JsonValue>(s) {
                 parsed.as_array().cloned()
             } else {
-                None
+                // #1016: Python repr e.g. "[True, False, True]" — not valid JSON; normalize and retry.
+                let json_like = python_repr_to_json_like(s);
+                serde_json::from_str::<JsonValue>(&json_like).ok().and_then(|p| p.as_array().cloned())
             }
         }
         _ => None,
@@ -3205,6 +3216,30 @@ mod tests {
             2,
             "issue #601: second row arr must have 2 elements [4,5]"
         );
+    }
+
+    /// #1016: create_dataframe_from_rows accepts array<boolean> as Python repr string "[True, False, True]".
+    #[test]
+    fn test_issue_1016_array_boolean_python_repr() {
+        let spark = SparkSession::builder().app_name("test").get_or_create();
+        let schema = vec![
+            ("id".to_string(), "string".to_string()),
+            ("flags".to_string(), "array<boolean>".to_string()),
+        ];
+        let rows: Vec<Vec<JsonValue>> = vec![
+            vec![JsonValue::String("a".into()), JsonValue::String("[True, False, True]".into())],
+            vec![JsonValue::String("b".into()), JsonValue::String("[False, True]".into())],
+        ];
+        let df = spark
+            .create_dataframe_from_rows(rows, schema, false, false)
+            .expect("#1016: array<boolean> from Python repr string must parse");
+        let collected = df.collect_inner().unwrap();
+        let flags_col = collected.column("flags").unwrap();
+        let list = flags_col.list().unwrap();
+        let row0 = list.get(0).unwrap();
+        assert_eq!(row0.len(), 3, "#1016: [True, False, True] -> 3 elements");
+        let row1 = list.get(1).unwrap();
+        assert_eq!(row1.len(), 2, "#1016: [False, True] -> 2 elements");
     }
 
     /// #624: When schema is empty but rows are not, backend returns LENGTH_SHOULD_BE_THE_SAME (no inference).
