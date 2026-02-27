@@ -784,8 +784,22 @@ impl DataFrame {
 
     /// Collect as rows of column-name -> JSON value. For use by language bindings (Node, etc.).
     pub fn collect_as_json_rows(&self) -> Result<Vec<HashMap<String, JsonValue>>, PolarsError> {
+        self.collect_as_json_rows_with_names().map(|(_, rows)| rows)
+    }
+
+    /// Same as [`collect_as_json_rows`](Self::collect_as_json_rows) but returns output column names
+    /// (in order) so bindings can build Row keys that match the actual result (PySpark parity:
+    /// row keys match select/alias names, not internal schema names like "Person.name").
+    #[allow(clippy::type_complexity)]
+    pub fn collect_as_json_rows_with_names(
+        &self,
+    ) -> Result<(Vec<String>, Vec<HashMap<String, JsonValue>>), PolarsError> {
         let collected = self.collect_inner()?;
-        let names = collected.get_column_names();
+        let names: Vec<String> = collected
+            .get_column_names()
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
         let nrows = collected.height();
         let mut rows = Vec::with_capacity(nrows);
         for i in 0..nrows {
@@ -797,11 +811,11 @@ impl DataFrame {
                     .ok_or_else(|| PolarsError::ComputeError("column index out of range".into()))?;
                 let av = s.get(i)?;
                 let jv = any_value_to_json(&av, s.dtype());
-                row.insert(name.to_string(), jv);
+                row.insert(name.clone(), jv);
             }
             rows.push(row);
         }
-        Ok(rows)
+        Ok((names, rows))
     }
 
     /// Collect the DataFrame as a JSON array of row objects (string).

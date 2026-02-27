@@ -2556,11 +2556,17 @@ impl PyDataFrame {
         let datetime_cls = datetime_mod.getattr("datetime")?;
         let date_cls = datetime_mod.getattr("date")?;
 
-        let rows = self.inner.collect_as_json_rows().map_err(to_py_err)?;
+        // Use output column names from the collected result so Row keys match select/alias names
+        // (PySpark parity #1025: avoid "Key 'Person.name' not found in row" when schema has
+        // qualified names but result has alias names like "ID", "name").
+        let (output_names, rows) = self
+            .inner
+            .collect_as_json_rows_with_names()
+            .map_err(to_py_err)?;
         let mut out = Vec::with_capacity(rows.len());
         for row in rows {
             let kwargs = PyDict::new_bound(py);
-            for name in &field_names {
+            for name in &output_names {
                 let v = row.get(name).unwrap_or(&JsonValue::Null);
                 let py_v = json_value_to_py_with_schema(
                     py,
@@ -2572,7 +2578,7 @@ impl PyDataFrame {
                 kwargs.set_item(name, py_v)?;
             }
             let py_row = row_cls.call((), Some(&kwargs))?;
-            py_row.setattr("_fields", field_names.clone())?;
+            py_row.setattr("_fields", output_names.clone())?;
             py_row.setattr("_schema", py_schema.clone_ref(py))?;
             // PySpark parity: Row has _data_dict for dict-like access in tests (e.g. "full_name" in result[0].__dict__["_data_dict"]).
             py_row.setattr("_data_dict", kwargs.clone())?;
