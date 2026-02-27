@@ -4723,24 +4723,25 @@ impl PyDataFrameNaFunctions {
                 }
                 return Ok(PyDataFrame { inner: current });
             }
-            // PySpark: na.replace("a", None) replaces "a" with null.
-            let null_expr = robin_sparkless::functions::lit_null("string")
-                .map_err(to_py_err)?
-                .into_expr();
-            let old_expr = py_any_to_column(to_replace)?.into_expr();
-            return df_ref
-                .inner
-                .na()
-                .replace(
-                    old_expr,
-                    null_expr,
-                    subset_refs.as_ref().map(|v| v.iter().map(|s| *s).collect()),
-                )
-                .map(|df| PyDataFrame { inner: df })
-                .map_err(to_py_err);
+            // PySpark: na.replace(scalar, None) or na.replace(list, None) raises PySparkValueError.
+            return Err(to_py_err("value is required when to_replace is not a dict"));
         }
 
         let value = value.unwrap();
+        // PySpark: na.replace([a,b], [x]) with mismatched lengths raises PySparkValueError.
+        if let (Ok(old_list), Ok(new_list)) = (
+            to_replace.downcast::<pyo3::types::PyList>(),
+            value.downcast::<pyo3::types::PyList>(),
+        ) {
+            if old_list.len() != new_list.len() {
+                return Err(to_py_err(format!(
+                    "to_replace and value lists must be the same length ({} vs {})",
+                    old_list.len(),
+                    new_list.len()
+                )));
+            }
+        }
+
         let old_col = lit(to_replace)?;
         let new_col = lit(value)?;
         let na = df_ref.inner.na();

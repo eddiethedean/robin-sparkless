@@ -1,4 +1,5 @@
 # Upstream exception names for test compatibility.
+# mypy: disable-error-code=import-untyped
 try:
     from sparkless._native import SparklessError
 except ImportError:

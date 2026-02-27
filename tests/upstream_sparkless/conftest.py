@@ -113,6 +113,11 @@ def _install_core_exceptions_shim():
     validation = types.ModuleType("sparkless.core.exceptions.validation")
     validation.IllegalArgumentException = SparklessError
     exceptions = types.ModuleType("sparkless.core.exceptions")
+    exceptions.PySparkValueError = SparklessError
+    exceptions.AnalysisException = SparklessError
+    exceptions.PySparkRuntimeError = SparklessError
+    exceptions.PySparkTypeError = SparklessError
+    exceptions.IllegalArgumentException = SparklessError
     exceptions.operation = operation
     exceptions.analysis = analysis
     exceptions.validation = validation

@@ -4,7 +4,7 @@
 
 mod expr;
 
-use crate::dataframe::{DataFrame, JoinType};
+use crate::dataframe::{DataFrame, JoinType, disambiguate_agg_output_names};
 use crate::functions::{
     SortOrder, asc_nulls_first, asc_nulls_last, col, desc_nulls_first, desc_nulls_last,
 };
@@ -549,7 +549,8 @@ fn apply_op(
             match aggs {
                 Some(aggs_arr) => {
                     let agg_exprs = parse_aggs(aggs_arr, &df)?;
-                    grouped.agg(agg_exprs).map_err(PlanError::Session)
+                    let disambiguated = disambiguate_agg_output_names(agg_exprs);
+                    grouped.agg(disambiguated).map_err(PlanError::Session)
                 }
                 None => Err(PlanError::InvalidPlan(
                     "groupBy payload must include 'aggs' array (e.g. [{\"agg\": \"sum\", \"column\": \"b\"}])".into(),
