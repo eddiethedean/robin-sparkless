@@ -136,9 +136,10 @@ impl Column {
         &self.expr
     }
 
-    /// Convert to Polars Expr (consumes self)
+    /// Convert to Polars Expr (consumes self).
+    /// Applies the Column's display name as alias so row keys match (PySpark parity #1014, #1017, #1022).
     pub fn into_expr(self) -> Expr {
-        self.expr
+        self.expr.alias(&self.name)
     }
 
     /// Get the column name

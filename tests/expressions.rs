@@ -1085,6 +1085,7 @@ fn plan_filter_case_insensitive_column_ref() {
     assert_eq!(out[0].get("id").and_then(|v| v.as_i64()), Some(2));
 }
 
+/// #1014, #1022: Row keys use requested column name (e.g. "name") so key matches what the user asked for.
 #[test]
 fn plan_select_case_insensitive_column_name() {
     let spark = spark();
@@ -1097,7 +1098,7 @@ fn plan_select_case_insensitive_column_name() {
     let df = plan::execute_plan(&spark, rows, schema, &plan_steps).unwrap();
     let out = df.collect_as_json_rows_engine().unwrap();
     assert_eq!(out.len(), 1);
-    assert_eq!(out[0].get("Name").and_then(|v| v.as_str()), Some("Alice"));
+    assert_eq!(out[0].get("name").and_then(|v| v.as_str()), Some("Alice"));
 }
 
 // ---------- issue_548 ----------
