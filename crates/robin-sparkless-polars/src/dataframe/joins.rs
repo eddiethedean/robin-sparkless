@@ -5,6 +5,7 @@ use crate::type_coercion::coerce_expr_pair_for_join;
 use polars::prelude::Expr;
 use polars::prelude::JoinType as PlJoinType;
 use polars::prelude::PolarsError;
+use polars_plan::dsl::functions::nth;
 
 /// Join type for DataFrame joins (PySpark-compatible)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -140,6 +141,30 @@ pub fn join(
         .on(&on_exprs)
         .coalesce(JoinCoalesce::CoalesceColumns)
         .finish();
+
+    // When left and right share join key names (e.g. both "id"), result can have duplicate column names.
+    // Keep only the first occurrence of each name so collect() returns one value per name (PySpark parity).
+    // Select by index (Expr::Nth) so we pick the first of each duplicate name; col("id") would be ambiguous.
+    let result_schema = joined.collect_schema()?;
+    let names: Vec<String> = result_schema.iter_names().map(|s| s.to_string()).collect();
+    let mut seen = std::collections::HashSet::new();
+    let mut unique_order: Vec<String> = Vec::new();
+    for n in &names {
+        if seen.insert(n.clone()) {
+            unique_order.push(n.clone());
+        }
+    }
+    if unique_order.len() < names.len() {
+        let exprs: Vec<Expr> = unique_order
+            .iter()
+            .map(|name| {
+                let idx = names.iter().position(|n| n == name).unwrap();
+                nth(idx as i64).as_expr().alias(name.as_str())
+            })
+            .collect();
+        joined = joined.select(&exprs);
+    }
+
     // For Right/Outer, reorder columns: keys, left non-keys, right non-keys (PySpark order).
     let result_lf = if matches!(how, JoinType::Right | JoinType::Outer) {
         let left_names = left.columns()?;
