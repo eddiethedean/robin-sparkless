@@ -1288,8 +1288,22 @@ def get_json_object(column, path):
 
 
 def json_tuple(column, *keys):
-    """Extract keys from JSON as struct (PySpark json_tuple)."""
-    return _json_tuple(_as_col(column), keys)
+    """Extract keys from JSON as columns (PySpark json_tuple).
+
+    Returns one string column per key, named c0, c1, ... in the order of keys.
+    """
+    if not keys:
+        raise ValueError("json_tuple requires at least one key")
+    cols = []
+    for idx, key in enumerate(keys):
+        # Use get_json_object to extract each key as a separate string column, then
+        # alias to PySpark-style c0, c1, ... so df.select(F.json_tuple(...)) yields
+        # the expected unnamed columns.
+        c = get_json_object(column, f"$.{key}")
+        cols.append(c.alias(f"c{idx}"))
+    # df.select() flattens tuples/lists of Columns, so returning a tuple here
+    # produces multiple top-level columns matching PySpark's json_tuple behavior.
+    return tuple(cols)
 
 
 def size(column):
