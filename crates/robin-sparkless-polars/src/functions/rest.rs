@@ -1369,11 +1369,17 @@ fn cast_impl(column: &Column, type_name: &str, strict: bool) -> Result<Column, S
     Ok(Column::from_expr(expr, None))
 }
 
-/// Cast column to the given type (PySpark cast). Fails on invalid conversion.
+/// Cast column to the given type (PySpark cast).
+/// String-to-numeric uses try_cast semantics (invalid/empty string → null) for PySpark parity.
 /// String-to-boolean uses custom parsing ("true"/"false"/"1"/"0") since Polars does not support Utf8->Boolean.
 /// String-to-date accepts date and datetime strings (e.g. "2025-01-01 10:30:00" truncates to date) for Spark parity.
 pub fn cast(column: &Column, type_name: &str) -> Result<Column, String> {
-    cast_impl(column, type_name, true)
+    let dtype = parse_type_name(type_name)?;
+    let strict = !matches!(
+        dtype,
+        DataType::Int32 | DataType::Int64 | DataType::Float64
+    );
+    cast_impl(column, type_name, strict)
 }
 
 /// Cast column to the given type, returning null on invalid conversion (PySpark try_cast).
