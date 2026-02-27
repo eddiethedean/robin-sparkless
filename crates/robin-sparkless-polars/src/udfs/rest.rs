@@ -236,7 +236,7 @@ pub fn apply_levenshtein(columns: &mut [Column]) -> PolarsResult<Option<Column>>
             let a = a_ca.get(ia);
             let b = b_ca.get(ib);
             match (a, b) {
-                (Some(a), Some(b)) => Some(levenshtein(&a, &b) as i64),
+                (Some(a), Some(b)) => Some(levenshtein(a, b) as i64),
                 _ => None,
             }
         }),
@@ -324,8 +324,7 @@ pub fn apply_array_contains(columns: &mut [Column]) -> PolarsResult<Option<Colum
     let inner_dtype = list_ca.inner_dtype().clone();
     let value_casted = value_series.cast(&inner_dtype)?;
     let elem_len = value_casted.len();
-    let elem_vec: Vec<Option<AnyValue>> =
-        (0..elem_len).map(|i| value_casted.get(i).ok()).collect();
+    let elem_vec: Vec<Option<AnyValue>> = (0..elem_len).map(|i| value_casted.get(i).ok()).collect();
     let mut results: Vec<bool> = Vec::with_capacity(list_ca.len());
     for (row_idx, opt_list) in list_ca.amortized_iter().enumerate() {
         let ei = if elem_len == 1 { 0 } else { row_idx };

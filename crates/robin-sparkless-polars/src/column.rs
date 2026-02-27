@@ -2424,11 +2424,12 @@ impl Column {
         let all_asc = order_by_encoded.iter().all(|s| !s.starts_with('-'));
         // Row number = ordinal rank of the order key within partition. For multi-column all-asc, rank the struct so (Type, Score, Name) order is respected.
         let rank_expr = if order_by_encoded.len() == 1 {
-            let (first_name, first_desc) = if let Some(stripped) = order_by_encoded[0].strip_prefix('-') {
-                (stripped, true)
-            } else {
-                (order_by_encoded[0].as_str(), false)
-            };
+            let (first_name, first_desc) =
+                if let Some(stripped) = order_by_encoded[0].strip_prefix('-') {
+                    (stripped, true)
+                } else {
+                    (order_by_encoded[0].as_str(), false)
+                };
             let opts = RankOptions {
                 method: RankMethod::Ordinal,
                 descending: first_desc,
@@ -2442,18 +2443,20 @@ impl Column {
                 }))
                 .rank(opts, None)
         } else if all_asc {
-            let struct_fields: Vec<Expr> = order_by_encoded
-                .iter()
-                .map(|s| col(s.as_str()))
-                .collect();
-            let opts = RankOptions { method: RankMethod::Ordinal, descending: false };
+            let struct_fields: Vec<Expr> =
+                order_by_encoded.iter().map(|s| col(s.as_str())).collect();
+            let opts = RankOptions {
+                method: RankMethod::Ordinal,
+                descending: false,
+            };
             as_struct(struct_fields).rank(opts, None)
         } else {
-            let (first_name, first_desc) = if let Some(stripped) = order_by_encoded[0].strip_prefix('-') {
-                (stripped, true)
-            } else {
-                (order_by_encoded[0].as_str(), false)
-            };
+            let (first_name, first_desc) =
+                if let Some(stripped) = order_by_encoded[0].strip_prefix('-') {
+                    (stripped, true)
+                } else {
+                    (order_by_encoded[0].as_str(), false)
+                };
             let opts = RankOptions {
                 method: RankMethod::Ordinal,
                 descending: first_desc,
@@ -2622,9 +2625,7 @@ impl Column {
         // Cast elements to String via list.eval before joining.
         let elem_to_str = col("").cast(DataType::String);
         let list_expr = self.expr().clone().list().eval(elem_to_str);
-        let joined = list_expr
-            .list()
-            .join(lit(separator.to_string()), false);
+        let joined = list_expr.list().join(lit(separator.to_string()), false);
         Self::from_expr(joined, None)
     }
 

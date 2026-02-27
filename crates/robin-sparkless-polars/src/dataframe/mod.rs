@@ -1001,7 +1001,7 @@ impl DataFrame {
             .into_iter()
             .map(|e| self.resolve_expr_column_names(e))
             .collect::<Result<Vec<_>, _>>()?;
-        let disambiguated = aggregations::disambiguate_agg_output_names(resolved);
+        let disambiguated = disambiguate_agg_output_names(resolved);
         let pl_df = self.lazy_frame().select(disambiguated).collect()?;
         Ok(Self::from_polars_with_options(pl_df, self.case_sensitive))
     }

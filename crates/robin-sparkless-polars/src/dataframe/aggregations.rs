@@ -742,11 +742,8 @@ impl GroupedData {
         let mut lf = self.lazy_grouped.clone().agg(disambiguated);
         // PySpark parity: groupBy().agg() results are ordered by grouping columns (lexicographic).
         if !self.grouping_cols.is_empty() {
-            let sort_exprs: Vec<Expr> = self
-                .grouping_cols
-                .iter()
-                .map(|g| col(g.as_str()))
-                .collect();
+            let sort_exprs: Vec<Expr> =
+                self.grouping_cols.iter().map(|g| col(g.as_str())).collect();
             let descending = vec![false; sort_exprs.len()];
             let nulls_last = vec![false; sort_exprs.len()];
             let opts = SortMultipleOptions::new()

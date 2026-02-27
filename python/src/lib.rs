@@ -2928,10 +2928,7 @@ impl PyDataFrame {
                     let left_refs: Vec<&str> = left_cols.iter().map(|s| s.as_str()).collect();
                     let filtered_left = filtered.select(left_refs).map_err(to_py_err)?;
                     // Unmatched left rows (set difference by all left columns)
-                    let unmatched_left = self
-                        .inner
-                        .subtract(&filtered_left)
-                        .map_err(to_py_err)?;
+                    let unmatched_left = self.inner.subtract(&filtered_left).map_err(to_py_err)?;
                     // Add null right columns to unmatched_left so schema matches filtered.
                     let all_cols = filtered.columns().map_err(to_py_err)?;
                     let mut augmented = unmatched_left;
@@ -2940,14 +2937,15 @@ impl PyDataFrame {
                         if left_cols.iter().any(|c| c.as_str() == col_name.as_str()) {
                             continue;
                         }
-                        let dtype_opt = filtered
-                            .get_column_dtype(col_name.as_str())
-                            .ok_or_else(|| {
-                                to_py_err(format!(
-                                    "join: failed to get dtype for column '{}'",
-                                    col_name
-                                ))
-                            })?;
+                        let dtype_opt =
+                            filtered
+                                .get_column_dtype(col_name.as_str())
+                                .ok_or_else(|| {
+                                    to_py_err(format!(
+                                        "join: failed to get dtype for column '{}'",
+                                        col_name
+                                    ))
+                                })?;
                         // Heuristic mapping from engine dtype to PySpark type string.
                         let dtype_str = dtype_opt.to_string().to_lowercase();
                         let null_col = if dtype_str.contains("int") {
@@ -2962,8 +2960,7 @@ impl PyDataFrame {
                             .map_err(to_py_err)?;
                     }
                     // Reorder columns on augmented to match filtered, then union (no type promotion).
-                    let all_refs: Vec<&str> =
-                        all_cols.iter().map(|s| s.as_str()).collect();
+                    let all_refs: Vec<&str> = all_cols.iter().map(|s| s.as_str()).collect();
                     let augmented = augmented.select(all_refs).map_err(to_py_err)?;
                     let all = filtered.union(&augmented).map_err(to_py_err)?;
                     return Ok(PyDataFrame { inner: all });
