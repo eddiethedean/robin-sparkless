@@ -2308,15 +2308,6 @@ impl PyDataFrame {
                 PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected SparkSession")
             })?;
             // Use a temp view so expr_string_to_polars can resolve column names against this DataFrame.
-            let arg_names_py = PyList::new_bound(py, arg_names.iter());
-            let literals_py = PyList::empty_bound(py);
-            for opt in &literal_jsons {
-                let item: Bound<'_, PyAny> = match opt {
-                    Some(s) => pyo3::types::PyString::new_bound(py, s.as_str()).into_any(),
-                    None => py.None().into_bound(py),
-                };
-                literals_py.append(item)?;
-            }
             session_ref
                 .borrow()
                 .inner
