@@ -165,6 +165,24 @@ fn json_value_to_py_with_schema(
         (Some(DataType::String), JsonValue::Number(n)) => n.to_string().into_py(py),
         // Schema says String but engine sent bool: emit "True"/"False".
         (Some(DataType::String), JsonValue::Bool(b)) => b.to_string().into_py(py),
+        // No schema (e.g. coalesce output): best-effort parse string to int/float/bool for PySpark parity.
+        (None, JsonValue::String(s)) => {
+            let s = s.trim();
+            if let Ok(i) = s.parse::<i64>() {
+                i.into_py(py)
+            } else if let Ok(f) = s.parse::<f64>() {
+                f.into_py(py)
+            } else {
+                let lower = s.to_lowercase();
+                if lower == "true" || lower == "1" {
+                    true.into_py(py)
+                } else if lower == "false" || lower == "0" {
+                    false.into_py(py)
+                } else {
+                    s.to_string().into_py(py)
+                }
+            }
+        },
         (Some(DataType::Array(elem_type)), JsonValue::Array(arr)) => {
             let list = PyList::empty_bound(py);
             for v in arr {
@@ -1641,14 +1659,25 @@ fn normalize_subset(subset: Option<&Bound<'_, PyAny>>) -> PyResult<Option<Vec<St
     ))
 }
 
-/// Resolve cast type argument: string as-is, or type object's simpleString() (e.g. IntegerType()).
+/// Resolve cast type argument: string as-is, or type object's simpleString() or typeName() (e.g. IntegerType()).
 fn resolve_cast_type_name(value: &Bound<'_, PyAny>) -> PyResult<String> {
     if let Ok(s) = value.extract::<String>() {
         return Ok(s);
     }
-    let simple_string = value.getattr("simpleString")?;
-    let s: String = simple_string.call0()?.extract()?;
-    Ok(s)
+    // PySpark types have simpleString(); minimal types may only have typeName().
+    if let Ok(meth) = value.getattr("simpleString") {
+        if let Ok(s) = meth.call0().and_then(|v| v.extract::<String>()) {
+            return Ok(s);
+        }
+    }
+    if let Ok(meth) = value.getattr("typeName") {
+        if let Ok(s) = meth.call0().and_then(|v| v.extract::<String>()) {
+            return Ok(s);
+        }
+    }
+    Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+        "cast type must be string or type object with simpleString() or typeName()",
+    ))
 }
 
 /// Convert PySpark option value to string (bool -> "true"/"false", int/float -> string, str as-is).
@@ -2518,28 +2547,7 @@ impl PyDataFrame {
             }
         }
 
-        // Try to build sort orders from Column/SortOrder/string (for order_by_exprs)
-        let mut sort_orders: Vec<SortOrder> = Vec::with_capacity(flat.len());
-        let mut names_only: Vec<String> = Vec::with_capacity(flat.len());
-        let mut all_strings = true;
-        for item in &flat {
-            if let Ok(ps) = item.downcast::<PySortOrder>() {
-                sort_orders.push(ps.borrow().inner.clone());
-                all_strings = false;
-            } else if let Ok(pc) = item.downcast::<PyColumn>() {
-                sort_orders.push(pc.borrow().inner.asc());
-                all_strings = false;
-            } else if let Ok(s) = item.extract::<String>() {
-                sort_orders.push(asc_from_name(&s));
-                names_only.push(s);
-            } else {
-                sort_orders.clear();
-                names_only.clear();
-                all_strings = false;
-                break;
-            }
-        }
-
+        // Ascending per column (needed for Column path so we apply it to sort orders).
         let asc_vec: Vec<bool> = match ascending {
             None => vec![true; flat.len()],
             Some(v) if v.extract::<bool>().is_ok() => vec![v.extract::<bool>()?; flat.len()],
@@ -2559,6 +2567,34 @@ impl PyDataFrame {
                 ))
             }
         };
+
+        // Try to build sort orders from Column/SortOrder/string (for order_by_exprs).
+        let mut sort_orders: Vec<SortOrder> = Vec::with_capacity(flat.len());
+        let mut names_only: Vec<String> = Vec::with_capacity(flat.len());
+        let mut all_strings = true;
+        for (i, item) in flat.iter().enumerate() {
+            let asc = asc_vec.get(i).copied().unwrap_or(true);
+            if let Ok(ps) = item.downcast::<PySortOrder>() {
+                sort_orders.push(ps.borrow().inner.clone());
+                all_strings = false;
+            } else if let Ok(pc) = item.downcast::<PyColumn>() {
+                let so = if asc {
+                    pc.borrow().inner.asc()
+                } else {
+                    pc.borrow().inner.desc()
+                };
+                sort_orders.push(so);
+                all_strings = false;
+            } else if let Ok(s) = item.extract::<String>() {
+                sort_orders.push(asc_from_name(&s));
+                names_only.push(s);
+            } else {
+                sort_orders.clear();
+                names_only.clear();
+                all_strings = false;
+                break;
+            }
+        }
 
         if sort_orders.len() == flat.len() {
             if all_strings {
@@ -3930,10 +3966,69 @@ impl PyColumn {
     }
 
     /// PySpark Column.replace(search, replacement) - literal string replace.
-    fn replace(&self, search: &str, replacement: &str) -> PyColumn {
-        PyColumn {
-            inner: self.inner.replace(search, replacement),
+    /// PySpark Column.replace: (search, replacement) or replace({old: new, ...}) or replace([(old, new), ...]).
+    #[pyo3(signature = (to_replace, replacement=None))]
+    fn replace(
+        &self,
+        to_replace: &Bound<'_, PyAny>,
+        replacement: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<PyColumn> {
+        if let Ok(search) = to_replace.extract::<String>() {
+            let rep = replacement.ok_or_else(|| {
+                PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+                    "replace() missing 1 required positional argument: 'replacement'. When to_replace is not a dict, value must be provided.",
+                )
+            })?;
+            let rep_str: String = rep.extract().map_err(|_| {
+                PyErr::new::<pyo3::exceptions::PyTypeError, _>("replacement must be str")
+            })?;
+            return Ok(PyColumn {
+                inner: self.inner.replace(&search, &rep_str),
+            });
         }
+        if let Ok(dict) = to_replace.downcast::<PyDict>() {
+            let mut pairs: Vec<(String, String)> = Vec::new();
+            for (k, v) in dict.iter() {
+                let s: String = k.extract().map_err(|_| {
+                    PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+                        "replace dict keys must be str",
+                    )
+                })?;
+                let r: String = v.extract().map_err(|_| {
+                    PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+                        "replace dict values must be str",
+                    )
+                })?;
+                pairs.push((s, r));
+            }
+            return Ok(PyColumn {
+                inner: self.inner.replace_many(&pairs),
+            });
+        }
+        if let Ok(list) = to_replace.downcast::<PyList>() {
+            let mut pairs: Vec<(String, String)> = Vec::new();
+            for item in list.iter() {
+                let tup = item.downcast::<PyTuple>().map_err(|_| {
+                    PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+                        "replace list must contain (old, new) tuples",
+                    )
+                })?;
+                if tup.len() != 2 {
+                    return Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+                        "replace tuple must be (old, new)",
+                    ));
+                }
+                let s: String = tup.get_item(0)?.extract()?;
+                let r: String = tup.get_item(1)?.extract()?;
+                pairs.push((s, r));
+            }
+            return Ok(PyColumn {
+                inner: self.inner.replace_many(&pairs),
+            });
+        }
+        Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+            "replace to_replace must be str, dict, or list of (str, str) tuples",
+        ))
     }
 
     fn lower(&self) -> PyColumn {
@@ -4442,16 +4537,28 @@ impl PyGroupedData {
             .map_err(to_py_err)
     }
 
-    fn avg(&self, col_name: &Bound<'_, PyAny>) -> PyResult<PyDataFrame> {
-        let name = py_col_to_name(col_name)?;
+    #[pyo3(signature = (*cols))]
+    fn avg(&self, cols: &Bound<'_, PyTuple>) -> PyResult<PyDataFrame> {
+        let mut names = Vec::new();
+        for item in cols.iter() {
+            names.extend(py_one_or_many_cols(&item)?);
+        }
+        if names.is_empty() {
+            return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
+                "avg requires at least one column",
+            ));
+        }
+        let refs: Vec<&str> = names.iter().map(|s| s.as_str()).collect();
         self.inner
-            .avg(&[name.as_str()])
+            .avg(&refs)
             .map(|df| PyDataFrame { inner: df })
             .map_err(to_py_err)
     }
 
-    fn mean(&self, col_name: &Bound<'_, PyAny>) -> PyResult<PyDataFrame> {
-        self.avg(col_name)
+    /// PySpark groupBy().mean(*cols). Accepts one or more column names or Columns.
+    #[pyo3(signature = (*cols))]
+    fn mean(&self, cols: &Bound<'_, PyTuple>) -> PyResult<PyDataFrame> {
+        self.avg(cols)
     }
 
     fn min(&self, col_name: &Bound<'_, PyAny>) -> PyResult<PyDataFrame> {
@@ -5286,6 +5393,35 @@ fn coalesce(columns: &Bound<'_, PyTuple>) -> PyResult<PyColumn> {
     Ok(PyColumn {
         inner: functions::coalesce(&refs),
     })
+}
+
+#[pyfunction]
+fn nullif(column: &PyColumn, value: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: functions::nullif(&column.inner, &value.inner),
+    }
+}
+
+#[pyfunction]
+fn nanvl(column: &PyColumn, value: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: functions::nanvl(&column.inner, &value.inner),
+    }
+}
+
+#[pyfunction]
+fn isnan(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: functions::isnan(&column.inner),
+    }
+}
+
+#[pyfunction]
+#[pyo3(signature = (column, value))]
+fn array_position(column: &PyColumn, value: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: functions::array_position(&column.inner, &value.inner),
+    }
 }
 
 #[pyfunction]
@@ -6223,6 +6359,10 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(regexp_like, m)?)?;
     m.add_function(wrap_pyfunction!(split, m)?)?;
     m.add_function(wrap_pyfunction!(coalesce, m)?)?;
+    m.add_function(wrap_pyfunction!(nullif, m)?)?;
+    m.add_function(wrap_pyfunction!(nanvl, m)?)?;
+    m.add_function(wrap_pyfunction!(isnan, m)?)?;
+    m.add_function(wrap_pyfunction!(array_position, m)?)?;
     m.add_function(wrap_pyfunction!(format_string, m)?)?;
     m.add_function(wrap_pyfunction!(greatest, m)?)?;
     m.add_function(wrap_pyfunction!(least, m)?)?;

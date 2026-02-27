@@ -2,16 +2,15 @@
 Test to reproduce issue #160 by testing nested operations and lazy frame reuse.
 
 The bug might occur when:
-1. Operations create a lazy Polars DataFrame
+1. Operations create a lazy DataFrame
 2. Columns are dropped via select
-3. The lazy DataFrame's execution plan still references the dropped columns
-4. When operations are chained, the lazy frame is reused and fails
+3. The execution plan still references the dropped columns
+4. When operations are chained, the frame is reused and fails
 """
 
 import os
 import pytest
 from sparkless import SparkSession, functions as F
-import polars as pl
 
 
 @pytest.fixture
@@ -95,10 +94,11 @@ def test_nested_operations_with_drop(enable_cache):
 
 def test_lazy_frame_reuse_after_select(enable_cache):
     """
-    Test if a lazy Polars DataFrame created before select still references dropped columns.
+    Test that after select() drops columns, subsequent operations do not reference dropped columns.
 
-    This test manually creates a Polars lazy DataFrame and checks if it preserves
-    column references after columns are dropped via select.
+    Uses only sparkless: build a chain that uses a column, drops it via select, then
+    continues. Materializing should succeed; if the engine still references the dropped
+    column we get a "not found" / "cannot resolve" error.
     """
     spark = SparkSession.builder.appName("lazy_reuse").getOrCreate()
 
@@ -106,54 +106,37 @@ def test_lazy_frame_reuse_after_select(enable_cache):
         (f"imp_{i:03d}", f"2024-01-15T10:30:45.{i:06d}", f"campaign_{i}")
         for i in range(200)
     ]
-    spark.createDataFrame(data, ["impression_id", "impression_date", "campaign_id"])
-
-    # Create a Polars DataFrame and convert to lazy
-    polars_df = pl.DataFrame(
-        [
-            {
-                "impression_id": f"imp_{i:03d}",
-                "impression_date": f"2024-01-15T10:30:45.{i:06d}",
-                "campaign_id": f"campaign_{i}",
-            }
-            for i in range(200)
-        ]
+    df = spark.createDataFrame(
+        data, ["impression_id", "impression_date", "campaign_id"]
     )
 
-    # Create a lazy frame with operations that reference impression_date
-    lazy_df = polars_df.lazy().with_columns(
-        [pl.col("impression_date").str.replace(r"\.\d+", "").alias("date_cleaned")]
+    # Use impression_date, then drop it via select, then more operations
+    df_result = (
+        df.withColumn(
+            "date_cleaned", F.regexp_replace(F.col("impression_date"), r"\.\d+", "")
+        )
+        .select("impression_id", "campaign_id", "date_cleaned")  # drop impression_date
+        .withColumn("id_copy", F.col("impression_id"))
+        .filter(F.col("campaign_id").isNotNull())
     )
 
-    # Now drop impression_date from the original DataFrame
-    polars_df_dropped = polars_df.select("impression_id", "campaign_id")
+    assert "impression_date" not in df_result.columns
 
-    # Try to use the lazy frame (which still references impression_date) on the dropped DataFrame
-    # This should fail because the lazy frame's execution plan references a column that doesn't exist
     try:
-        # Convert dropped DataFrame to lazy and try to use the cached lazy frame operations
-        # Actually, we can't directly reuse the lazy frame, but we can check if Polars
-        # preserves column references in the execution plan
-        lazy_df.collect()
-        # If we get here, the lazy frame worked with the original columns
-
-        # Now try to create a new lazy frame from the dropped DataFrame and see if it fails
-        lazy_df_dropped = polars_df_dropped.lazy()
-
-        # Try to apply similar operations - if cached expressions are reused, this might fail
-        try:
-            lazy_df_dropped.with_columns(
-                [pl.col("impression_id").alias("id")]
-            ).collect()
-        except pl.exceptions.ColumnNotFoundError as e:
-            if "impression_date" in str(e):
-                pytest.fail(
-                    f"BUG REPRODUCED! Lazy frame execution plan references dropped column: {e}"
-                )
-            raise
-    except pl.exceptions.ColumnNotFoundError as e:
-        if "impression_date" in str(e):
-            pytest.fail(f"BUG REPRODUCED! Lazy frame references dropped column: {e}")
+        count = df_result.count()
+        assert count == 200
+        rows = df_result.collect()
+        assert len(rows) == 200
+    except Exception as e:
+        error_msg = str(e).lower()
+        if ("impression_date" in error_msg) and (
+            "cannot resolve" in error_msg
+            or "not found" in error_msg
+            or "unable to find" in error_msg
+        ):
+            pytest.fail(
+                f"BUG REPRODUCED! Execution plan still references dropped column: {e}"
+            )
         raise
 
     spark.stop()

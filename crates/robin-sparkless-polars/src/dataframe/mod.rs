@@ -633,7 +633,7 @@ impl DataFrame {
         let available = names.join(", ");
         Err(PolarsError::ColumnNotFound(
             format!(
-                "Column '{}' not found. Available columns: [{}]. Check spelling and case sensitivity (spark.sql.caseSensitive).",
+                "cannot resolve: column '{}' not found. Available columns: [{}]. Check spelling and case sensitivity (spark.sql.caseSensitive).",
                 name,
                 available
             )

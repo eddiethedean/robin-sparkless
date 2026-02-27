@@ -149,8 +149,12 @@ def greatest(*cols): return _native_fn("greatest")(tuple([_as_col(c) for c in co
 def least(*cols): return _native_fn("least")(tuple([_as_col(c) for c in cols]))
 def coalesce(*cols): return _native_fn("coalesce")(tuple([_as_col(c) for c in cols]))
 
-nanvl = _ni("nanvl")
-isnan = _ni("isnan")
+def nanvl(col1, col2):
+    """Replace NaN with value. PySpark: F.nanvl(col1, col2)."""
+    return _native_fn("nanvl")(_as_col(col1), _as_col(col2))
+def isnan(c):
+    """True where the float value is NaN. PySpark: F.isnan(col)."""
+    return _native_fn("isnan")(_as_col(c))
 # isnull defined above (before __all__)
 monotonically_increasing_id = _ni("monotonically_increasing_id")
 input_file_name = _ni("input_file_name")
@@ -201,6 +205,10 @@ def array_sort(col_or_name): return _native_fn("array_sort")(_as_col(col_or_name
 def array_join(col_or_name, delimiter, null_replacement=None): return _native_fn("array_join")(_as_col(col_or_name), delimiter)
 def array_max(col_or_name): return _native_fn("array_max")(_as_col(col_or_name))
 def array_min(col_or_name): return _native_fn("array_min")(_as_col(col_or_name))
+def array_position(col_or_name, value):
+    """1-based index of first occurrence of value in list, or 0 if not found. PySpark: F.array_position(col, value)."""
+    v = _as_col(value) if not isinstance(value, (int, float, bool, str, type(None))) else lit(value)
+    return _native_fn("array_position")(_as_col(col_or_name), v)
 def element_at(col_or_name, extraction): return _native_fn("element_at")(_as_col(col_or_name), extraction)
 def size(col_or_name): return _native_fn("size")(_as_col(col_or_name))
 slice = _ni("slice")
@@ -424,8 +432,8 @@ def nvl(col_or_name, replacement):
 
 
 def nullif(col1, col2):
-    """Return null if col1 equals col2, else col1. PySpark: F.nullif(col1, col2). Stub: not yet implemented."""
-    return _ni("nullif")(col1, col2)
+    """Return null if col1 equals col2, else col1. PySpark: F.nullif(col1, col2)."""
+    return _native_fn("nullif")(_as_col(col1), _as_col(col2))
 
 
 __all__ = [
@@ -513,6 +521,7 @@ __all__ = [
     "json_tuple",
     "size",
     "array_contains",
+    "array_position",
     "explode",
     "expr",
     "current_database",
