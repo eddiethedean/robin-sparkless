@@ -2479,7 +2479,6 @@ impl PyDataFrame {
         // Build a PySpark-like Row with schema attached. Preserve numeric/boolean/date types;
         // when the engine returns a string but schema says numeric/boolean, coerce for parity.
         let schema = self.inner.schema_engine().map_err(to_py_err)?;
-        let field_names: Vec<String> = schema.fields().iter().map(|f| f.name.clone()).collect();
         let mut dtype_by_name: std::collections::HashMap<String, DataType> =
             std::collections::HashMap::with_capacity(schema.fields().len());
         for f in schema.fields() {
