@@ -1531,7 +1531,8 @@ impl SparkSession {
         }
         Err(PolarsError::InvalidOperation(
             format!(
-                "Table or view '{name}' not found. Register it with create_or_replace_temp_view or saveAsTable."
+                "Table or view '{name}' not found. Register it with create_or_replace_temp_view or saveAsTable. \
+                (Schema-qualified names like 'schema.table' are supported; use the same name when saving and when calling table().)"
             )
             .into(),
         ))
