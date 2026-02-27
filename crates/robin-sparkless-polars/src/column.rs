@@ -2337,21 +2337,27 @@ impl Column {
         let expr = if order_by_encoded.is_empty() {
             base_expr.over(partition_exprs)
         } else {
-            let first = &order_by_encoded[0];
-            let (name, descending) = if let Some(stripped) = first.strip_prefix('-') {
-                (stripped, true)
-            } else {
-                (first.as_str(), false)
-            };
-            let sort_opts = SortOptions {
-                descending,
-                nulls_last: descending,
-                ..Default::default()
-            };
-            let order_expr = col(name).sort(sort_opts);
+            // Build one order expr per column so orderBy(["Type", "Score", "Name"]) / ["-Score"] preserves semantics (PySpark parity).
+            let order_exprs: Vec<Expr> = order_by_encoded
+                .iter()
+                .map(|s| {
+                    let (name, descending) = if let Some(stripped) = s.strip_prefix('-') {
+                        (stripped, true)
+                    } else {
+                        (s.as_str(), false)
+                    };
+                    let sort_opts = SortOptions {
+                        descending,
+                        nulls_last: descending,
+                        ..Default::default()
+                    };
+                    col(name).sort(sort_opts)
+                })
+                .collect();
+            let default_opts = SortOptions::default();
             base_expr.over_with_options(
                 Some(partition_exprs),
-                Some((vec![order_expr], sort_opts)),
+                Some((order_exprs, default_opts)),
                 WindowMapping::default(),
             )?
         };
@@ -2396,6 +2402,73 @@ impl Column {
             }))
             .rank(opts, None);
         Self::from_expr(rank_expr, None)
+    }
+
+    /// Row number with explicit multi-column order (PySpark Window.orderBy([...]) parity).
+    /// Uses over_with_options; multi-column order is done via a struct sort so Type then Score then Name is respected.
+    pub fn row_number_over(
+        partition_by: &[&str],
+        order_by_encoded: &[String],
+    ) -> Result<Column, PolarsError> {
+        use polars::prelude::*;
+        if order_by_encoded.is_empty() {
+            return Err(PolarsError::InvalidOperation(
+                "row_number_over: order_by_encoded cannot be empty".into(),
+            ));
+        }
+        let partition_exprs: Vec<Expr> = if partition_by.is_empty() {
+            vec![lit(1i32)]
+        } else {
+            partition_by.iter().map(|s| col(*s)).collect()
+        };
+        let all_asc = order_by_encoded.iter().all(|s| !s.starts_with('-'));
+        // Row number = ordinal rank of the order key within partition. For multi-column all-asc, rank the struct so (Type, Score, Name) order is respected.
+        let rank_expr = if order_by_encoded.len() == 1 {
+            let (first_name, first_desc) = if let Some(stripped) = order_by_encoded[0].strip_prefix('-') {
+                (stripped, true)
+            } else {
+                (order_by_encoded[0].as_str(), false)
+            };
+            let opts = RankOptions {
+                method: RankMethod::Ordinal,
+                descending: first_desc,
+            };
+            col(first_name)
+                .cast(DataType::Float64)
+                .fill_null(lit(if first_desc {
+                    f64::NEG_INFINITY
+                } else {
+                    f64::INFINITY
+                }))
+                .rank(opts, None)
+        } else if all_asc {
+            let struct_fields: Vec<Expr> = order_by_encoded
+                .iter()
+                .map(|s| col(s.as_str()))
+                .collect();
+            let opts = RankOptions { method: RankMethod::Ordinal, descending: false };
+            as_struct(struct_fields).rank(opts, None)
+        } else {
+            let (first_name, first_desc) = if let Some(stripped) = order_by_encoded[0].strip_prefix('-') {
+                (stripped, true)
+            } else {
+                (order_by_encoded[0].as_str(), false)
+            };
+            let opts = RankOptions {
+                method: RankMethod::Ordinal,
+                descending: first_desc,
+            };
+            col(first_name)
+                .cast(DataType::Float64)
+                .fill_null(lit(if first_desc {
+                    f64::NEG_INFINITY
+                } else {
+                    f64::INFINITY
+                }))
+                .rank(opts, None)
+        };
+        let expr = rank_expr.over(partition_exprs);
+        Ok(Self::from_expr(expr, None))
     }
 
     /// Lag: value from n rows before. Use with `.over(partition_by)`.

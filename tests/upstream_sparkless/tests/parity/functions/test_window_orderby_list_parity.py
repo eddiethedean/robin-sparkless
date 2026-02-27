@@ -62,11 +62,12 @@ class TestWindowOrderByListParity:
             rows = result.collect()
 
             assert len(rows) == 3
-            # Within each Type partition, should be ordered by Score, then Name
+            # Within each Type partition, orderBy assigns Rank by Type, Score, Name
             type_a_rows = [row for row in rows if row["Type"] == "A"]
             assert len(type_a_rows) == 2
-            assert type_a_rows[0]["Score"] == 90  # Bob first (lower score)
-            assert type_a_rows[1]["Score"] == 100  # Alice second
+            by_rank = sorted(type_a_rows, key=lambda r: r["Rank"])
+            assert by_rank[0]["Score"] == 90  # Bob gets Rank 1 (lower score)
+            assert by_rank[1]["Score"] == 100  # Alice second
         finally:
             spark.stop()
 
