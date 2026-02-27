@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, NoReturn
+from typing import TYPE_CHECKING, Dict, List, NoReturn, Optional, Union
 
 if TYPE_CHECKING:
     from sparkless import DataFrame
@@ -14,23 +14,23 @@ class DataFrameNaFunctions:
 
     def fill(
         self,
-        value: int | float | str | bool | None,
-        subset: list[str] | None = None,
+        value: Union[int, float, str, bool, None],
+        subset: Optional[List[str]] = None,
     ) -> DataFrame:
         return self._df.fillna(value, subset=subset)
 
     def drop(
         self,
         how: str = "any",
-        thresh: int | None = None,
-        subset: list[str] | None = None,
+        thresh: Optional[int] = None,
+        subset: Optional[List[str]] = None,
     ) -> DataFrame:
         return self._df.dropna(how=how, thresh=thresh, subset=subset)
 
     def replace(
         self,
-        to_replace: str | list[str] | dict[str, str | int | float | bool | None],
-        value: str | int | float | bool | None = None,
-        subset: list[str] | None = None,
+        to_replace: Union[str, List[str], Dict[str, Union[str, int, float, bool, None]]],
+        value: Optional[Union[str, int, float, bool, None]] = None,
+        subset: Optional[List[str]] = None,
     ) -> NoReturn:
         raise NotImplementedError("DataFrameNaFunctions.replace is not yet implemented")

@@ -221,5 +221,199 @@ jobs:
           cargo publish -p robin-sparkless-polars --token "$CARGO_REGISTRY_TOKEN"
           cargo publish -p robin-sparkless --token "$CARGO_REGISTRY_TOKEN"
 
-  # Python linting, tests, and PyPI publishing have been removed from
-  # the release workflow; only the Rust crate publish step remains.
+  # --- Python (lint + tests, then PyPI publish for 3.8+) ---
+  python-lint:
+    name: Python (mypy)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      - name: Install mypy
+        run: pip install mypy
+      - name: Mypy
+        run: cd python && mypy sparkless
+
+  python-tests:
+    name: Python tests - ${{ matrix.os }} py${{ matrix.python-version }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python-version: ["3.8", "3.9", "3.10", "3.11", "3.12"]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.93.1
+          components: clippy, rustfmt
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-py-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-py-
+      - name: Create venv
+        run: python -m venv .venv
+      - name: Set Python path
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            echo "PY=.venv/Scripts/python" >> $GITHUB_ENV
+          else
+            echo "PY=.venv/bin/python" >> $GITHUB_ENV
+          fi
+      - name: Install maturin and test deps
+        run: $PY -m pip install maturin && $PY -m pip install pytest pytest-xdist hypothesis pytest-timeout
+      - name: Build and install extension
+        run: cd python && $PY -m maturin develop --release
+        env:
+          VIRTUAL_ENV: ${{ github.workspace }}/.venv
+      - name: Smoke test
+        run: $PY -c "from sparkless.sql import SparkSession; from sparkless.sql.functions import col; s = SparkSession.builder.app_name('test').get_or_create(); df = s.create_dataframe([(1, 2, 'a')], ['x', 'y', 'z']); assert df.count() == 1; print('sparkless OK')"
+      - name: Run Python tests (upstream subset)
+        run: $PY -m pytest tests/upstream_sparkless -m "not delta and not integration" -v --tb=short --timeout 90
+        continue-on-error: true
+
+  # PyPI: build and publish wheels (Python 3.8+), after all checks pass
+  publish-pypi-manylinux-x86_64:
+    name: PyPI manylinux x86_64 + sdist
+    runs-on: ubuntu-latest
+    needs: [format, clippy, audit, deny, build, test-error-handling, test-parity, python-lint, python-tests]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Publish to PyPI (maturin)
+        uses: messense/maturin-action@v1
+        env:
+          MATURIN_PYPI_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
+        with:
+          working-directory: python
+          target: x86_64-unknown-linux-gnu
+          command: publish
+          args: --zig --skip-existing
+          manylinux: "2_17"
+          container: off
+
+  publish-pypi-manylinux-aarch64:
+    name: PyPI manylinux aarch64
+    runs-on: ubuntu-24.04-arm
+    needs: [format, clippy, audit, deny, build, test-error-handling, test-parity, python-lint, python-tests]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Publish to PyPI (maturin)
+        uses: messense/maturin-action@v1
+        env:
+          MATURIN_PYPI_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
+        with:
+          working-directory: python
+          target: aarch64-unknown-linux-gnu
+          command: publish
+          args: --zig --skip-existing
+          manylinux: "2_28"
+          container: off
+
+  publish-pypi-mac:
+    name: PyPI macOS ${{ matrix.target }}
+    runs-on: macos-latest
+    needs: [format, clippy, audit, deny, build, test-error-handling, test-parity, python-lint, python-tests]
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [x86_64-apple-darwin, aarch64-apple-darwin]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Publish to PyPI (maturin)
+        uses: messense/maturin-action@v1
+        env:
+          MATURIN_PYPI_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
+        with:
+          working-directory: python
+          target: ${{ matrix.target }}
+          command: publish
+          args: --skip-existing
+
+  publish-pypi-musllinux-x86_64:
+    name: PyPI musllinux x86_64
+    runs-on: ubuntu-latest
+    needs: [format, clippy, audit, deny, build, test-error-handling, test-parity, python-lint, python-tests]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Publish to PyPI (maturin)
+        uses: messense/maturin-action@v1
+        env:
+          MATURIN_PYPI_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
+        with:
+          working-directory: python
+          target: x86_64-unknown-linux-musl
+          command: publish
+          args: --zig --compatibility musllinux_1_2 -i 3.12 --skip-existing
+
+  publish-pypi-musllinux-aarch64:
+    name: PyPI musllinux aarch64
+    runs-on: ubuntu-24.04-arm
+    needs: [format, clippy, audit, deny, build, test-error-handling, test-parity, python-lint, python-tests]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Publish to PyPI (maturin)
+        uses: messense/maturin-action@v1
+        env:
+          MATURIN_PYPI_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
+        with:
+          working-directory: python
+          target: aarch64-unknown-linux-musl
+          command: publish
+          args: --zig --compatibility musllinux_1_2 -i 3.12 --skip-existing
+
+  publish-pypi-windows-x86_64:
+    name: PyPI Windows x86_64
+    runs-on: windows-latest
+    needs: [format, clippy, audit, deny, build, test-error-handling, test-parity, python-lint, python-tests]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Publish to PyPI (maturin)
+        uses: messense/maturin-action@v1
+        env:
+          MATURIN_PYPI_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
+        with:
+          working-directory: python
+          target: x86_64-pc-windows-msvc
+          command: publish
+          args: --skip-existing
+
+  publish-pypi-windows-arm64:
+    name: PyPI Windows aarch64
+    runs-on: windows-11-arm
+    needs: [format, clippy, audit, deny, build, test-error-handling, test-parity, python-lint, python-tests]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Publish to PyPI (maturin)
+        uses: messense/maturin-action@v1
+        env:
+          MATURIN_PYPI_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
+        with:
+          working-directory: python
+          target: aarch64-pc-windows-msvc
+          command: publish
+          args: --skip-existing

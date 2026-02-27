@@ -89,7 +89,7 @@ from sparkless import (
 )
 from sparkless.errors import PySparkValueError
 from sparkless import DataFrame
-from typing import Any, Callable, Dict, Tuple, Union, cast
+from typing import Any, Callable, Dict, Optional, Tuple, Union, cast
 
 # Column or column name (str); used for function params that accept either.
 ColumnOrName = Union[_ColumnType, str]
@@ -162,7 +162,7 @@ def sqrt(c: ColumnOrName) -> _ColumnType:
     return _col_result( _native_fn("sqrt")(_as_col(c)))
 
 
-def log(col_or_base: ColumnOrName, base_or_col: ColumnOrName | int | float | None = None) -> _ColumnType:
+def log(col_or_base: ColumnOrName, base_or_col: Optional[Union[ColumnOrName, int, float]] = None) -> _ColumnType:
     """Natural log, or log with base. PySpark: log(column) or log(base, column)."""
     if base_or_col is None:
         return _col_result( _native_fn("log")(_as_col(col_or_base)))
@@ -180,7 +180,7 @@ def exp(c: ColumnOrName) -> _ColumnType:
     return _col_result( _native_fn("exp")(_as_col(c)))
 
 
-def pow(col1: ColumnOrName, col2: int | float) -> _ColumnType:
+def pow(col1: ColumnOrName, col2: Union[int, float]) -> _ColumnType:
     return _col_result( _native_fn("pow")(_as_col(col1), int(col2)))
 
 
@@ -378,7 +378,7 @@ def collect_set(col_or_name: ColumnOrName) -> _ColumnType:
     return _col_result( _native_fn("collect_set")(_as_col(col_or_name)))
 
 
-def array_contains(col_or_name: ColumnOrName, value: ColumnOrName | int | float | bool | str) -> _ColumnType:
+def array_contains(col_or_name: ColumnOrName, value: Union[ColumnOrName, int, float, bool, str]) -> _ColumnType:
     v = _as_col(value) if not isinstance(value, (int, float, bool, str)) else lit(value)
     return _col_result( _native_fn("array_contains")(_as_col(col_or_name), v))
 
@@ -397,7 +397,7 @@ def array_sort(col_or_name: ColumnOrName) -> _ColumnType:
     return _col_result( _native_fn("array_sort")(_as_col(col_or_name)))
 
 
-def array_join(col_or_name: ColumnOrName, delimiter: str, null_replacement: str | None = None) -> _ColumnType:
+def array_join(col_or_name: ColumnOrName, delimiter: str, null_replacement: Optional[str] = None) -> _ColumnType:
     return _col_result( _native_fn("array_join")(_as_col(col_or_name), delimiter))
 
 
@@ -409,7 +409,7 @@ def array_min(col_or_name: ColumnOrName) -> _ColumnType:
     return _col_result( _native_fn("array_min")(_as_col(col_or_name)))
 
 
-def array_position(col_or_name: ColumnOrName, value: ColumnOrName | int | float | bool | str | None) -> _ColumnType:
+def array_position(col_or_name: ColumnOrName, value: Optional[Union[ColumnOrName, int, float, bool, str]] = None) -> _ColumnType:
     """1-based index of first occurrence of value in list, or 0 if not found. PySpark: F.array_position(col, value)."""
     v = (
         _as_col(value)
@@ -419,14 +419,14 @@ def array_position(col_or_name: ColumnOrName, value: ColumnOrName | int | float 
     return _col_result( _native_fn("array_position")(_as_col(col_or_name), v))
 
 
-def array_remove(col_or_name: ColumnOrName, value: ColumnOrName | int | float | bool | str | None) -> _ColumnType:
+def array_remove(col_or_name: ColumnOrName, value: Optional[Union[ColumnOrName, int, float, bool, str]] = None) -> _ColumnType:
     """Remove all elements equal to value from the array. PySpark: F.array_remove(col, element)."""
     v = (
         _as_col(value)
         if not isinstance(value, (int, float, bool, str, type(None)))
         else lit(value)
     )
-    return _native.array_remove(_as_col(col_or_name), v)
+    return _col_result(_native.array_remove(_as_col(col_or_name), v))
 
 
 def element_at(col_or_name: ColumnOrName, extraction: int) -> _ColumnType:

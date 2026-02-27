@@ -1,7 +1,10 @@
 # Minimal config for upstream test compatibility (e.g. feature flags).
 from __future__ import annotations
 
-def _load_feature_flag_overrides() -> dict[str, bool | str | int]:
+from typing import Dict, Union
+
+
+def _load_feature_flag_overrides() -> Dict[str, Union[bool, str, int]]:
     return {}
 
 
