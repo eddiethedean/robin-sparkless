@@ -24,6 +24,7 @@ import pytest
 # Compatibility: use sparkless package as robin_sparkless when available
 try:
     import sparkless
+
     sys.modules["robin_sparkless"] = sparkless
 except ImportError:
     pass

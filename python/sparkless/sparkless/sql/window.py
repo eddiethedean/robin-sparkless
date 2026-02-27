@@ -27,7 +27,9 @@ def _partition_names(cols):
 def _normalize_sort_keys(cols):
     # Lazy import inside to avoid cycles
     from sparkless.sql.functions import _SortKey as _FnSortKey  # type: ignore[attr-defined]
-    from sparkless import Column as _Column  # avoid circular import at module import time
+    from sparkless import (
+        Column as _Column,
+    )  # avoid circular import at module import time
 
     keys = []
     for c in cols:
@@ -55,11 +57,15 @@ class WindowSpec:
 
     def partitionBy(self, *cols):
         names = _partition_names(cols)
-        return WindowSpec(partition_by=names, order_by=self._order_by, frame=self._frame)
+        return WindowSpec(
+            partition_by=names, order_by=self._order_by, frame=self._frame
+        )
 
     def orderBy(self, *cols):
         keys = _normalize_sort_keys(cols)
-        return WindowSpec(partition_by=self._partition_by, order_by=keys, frame=self._frame)
+        return WindowSpec(
+            partition_by=self._partition_by, order_by=keys, frame=self._frame
+        )
 
     def rowsBetween(self, start, end):
         return WindowSpec(
@@ -97,4 +103,3 @@ class Window:
     @staticmethod
     def rangeBetween(start, end):
         return WindowSpec().rangeBetween(start, end)
-

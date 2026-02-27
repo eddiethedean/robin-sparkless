@@ -208,9 +208,10 @@ class TestIssue270TupleDataFrame:
 
         with pytest.raises(Exception) as exc_info:
             spark.createDataFrame(data=data, schema=schema)
-        assert "LENGTH_SHOULD_BE_THE_SAME" in str(exc_info.value) or "length" in str(
-            exc_info.value
-        ).lower()
+        assert (
+            "LENGTH_SHOULD_BE_THE_SAME" in str(exc_info.value)
+            or "length" in str(exc_info.value).lower()
+        )
 
     def test_list_data_with_structtype_schema(self, spark):
         """Test that list data (not just tuples) also converts correctly."""

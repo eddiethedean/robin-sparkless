@@ -5,7 +5,6 @@ PySpark supports UDFs defined with the @udf decorator pattern. This test verifie
 that Sparkless supports the same decorator interface.
 """
 
-import pytest
 
 from sparkless.sql import SparkSession
 import sparkless.sql.types as T

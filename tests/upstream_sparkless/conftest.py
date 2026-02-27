@@ -15,10 +15,12 @@ _UPSTREAM_ROOT = os.path.abspath(os.path.dirname(__file__))
 if _UPSTREAM_ROOT not in sys.path:
     sys.path.insert(0, _UPSTREAM_ROOT)
 
+
 # Shim: upstream uses SparkSession(app_name) or SparkSession(app_name, backend_type="robin").
 # Our package exposes SparkSession.builder.app_name(name).get_or_create().
 def _install_sparkless_shim():
     import sparkless
+
     # If our SparkSession is already a proper class with a compatible constructor,
     # do not override it. (Older shims replaced it with a factory function.)
     if isinstance(getattr(sparkless, "SparkSession", None), type):
@@ -36,7 +38,9 @@ def _install_sparkless_shim():
             os.environ["SPARKLESS_BACKEND"] = backend_type
             try:
                 b = set_app(app_name)
-                return (getattr(b, "get_or_create", None) or getattr(b, "getOrCreate"))()
+                return (
+                    getattr(b, "get_or_create", None) or getattr(b, "getOrCreate")
+                )()
             finally:
                 if old is None:
                     os.environ.pop("SPARKLESS_BACKEND", None)
@@ -55,7 +59,9 @@ _install_sparkless_shim()
 def _install_backend_shim():
     """Stub sparkless.backend.factory so tests that import it at module level still collect."""
     import types
+
     factory = types.ModuleType("sparkless.backend.factory")
+
     # Minimal materializer stub: when tests/materialization code calls create_materializer,
     # return an object that won't crash. Robin-sparkless DataFrames execute directly;
     # this stub exists only so upstream code paths that reference BackendFactory don't raise.
@@ -65,6 +71,7 @@ def _install_backend_shim():
                 "BackendFactory.create_materializer stub: robin-sparkless DataFrames "
                 "execute directly; this path should not be reached."
             )
+
         def can_handle_operations(self, ops):
             return True, []
 
@@ -74,9 +81,12 @@ def _install_backend_shim():
     class BackendFactory:
         _robin_available = staticmethod(lambda: True)
         validate_backend_type = staticmethod(lambda _: None)
-        get_backend_type = staticmethod(lambda _: "polars")  # stub for upstream code paths
+        get_backend_type = staticmethod(
+            lambda _: "polars"
+        )  # stub for upstream code paths
         create_materializer = staticmethod(lambda _: _StubMaterializer())
         create_storage_backend = staticmethod(lambda _: _StubStorageBackend())
+
     factory.BackendFactory = BackendFactory
     sys.modules["sparkless.backend"] = types.ModuleType("sparkless.backend")
     sys.modules["sparkless.backend"].factory = factory
@@ -89,6 +99,7 @@ _install_backend_shim()
 def _install_core_exceptions_shim():
     """Provide SparkColumnNotFoundError, AnalysisException for tests that expect upstream exception types."""
     import types
+
     try:
         from sparkless._native import SparklessError
     except ImportError:
@@ -142,6 +153,8 @@ def pytest_collection_modifyitems(config, items):
         for pat in patterns:
             if pat in nodeid:
                 item.add_marker(
-                    pytest.mark.xfail(strict=False, reason="known unsupported API / parity gap")
+                    pytest.mark.xfail(
+                        strict=False, reason="known unsupported API / parity gap"
+                    )
                 )
                 break
