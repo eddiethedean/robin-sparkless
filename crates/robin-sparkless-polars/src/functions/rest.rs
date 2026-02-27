@@ -219,10 +219,13 @@ pub fn count_distinct(col: &Column) -> Column {
 pub fn approx_count_distinct(col: &Column, _rsd: Option<f64>) -> Column {
     use polars::prelude::DataType;
     let name = format!("approx_count_distinct({})", col.name());
-    Column::from_expr(
-        col.expr().clone().n_unique().cast(DataType::Int64),
-        Some(name),
-    )
+    let expr = col
+        .expr()
+        .clone()
+        .n_unique()
+        .cast(DataType::Int64)
+        .alias(&name);
+    Column::from_expr(expr, Some(name))
 }
 
 /// Kurtosis aggregation (PySpark kurtosis). Fisher definition, bias=true. Use in groupBy.agg(). Output name PySpark-style kurtosis(column_name).
