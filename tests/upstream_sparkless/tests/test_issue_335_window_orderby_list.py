@@ -293,7 +293,9 @@ class TestIssue335WindowOrderByList:
             assert len(rows) == 3
             type_a_rows = [row for row in rows if row["Type"] == "A"]
             by_rank = sorted(type_a_rows, key=lambda r: r["Rank"])
-            assert by_rank[0]["Rank"] == 1 and by_rank[0]["Score"] == 90  # Lower score gets rank 1
+            assert (
+                by_rank[0]["Rank"] == 1 and by_rank[0]["Score"] == 90
+            )  # Lower score gets rank 1
             assert by_rank[1]["Rank"] == 2
         finally:
             spark.stop()
