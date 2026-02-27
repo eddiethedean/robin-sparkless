@@ -1202,7 +1202,9 @@ pub fn apply_format_string(columns: &mut [Column], format: &str) -> PolarsResult
     Ok(Some(Column::new(name, out.into_series())))
 }
 
+/// PySpark format_string: null in any column is rendered as the literal string "null", not as null result.
 fn format_string_row(format: &str, values: &[Option<String>]) -> Option<String> {
+    const NULL_STR: &str = "null";
     let mut out = String::new();
     let mut idx = 0;
     let mut chars = format.chars().peekable();
@@ -1216,7 +1218,7 @@ fn format_string_row(format: &str, values: &[Option<String>]) -> Option<String> 
                     }
                     match &values[idx] {
                         Some(v) => out.push_str(v),
-                        None => return None,
+                        None => out.push_str(NULL_STR),
                     }
                     idx += 1;
                 }
@@ -1226,7 +1228,7 @@ fn format_string_row(format: &str, values: &[Option<String>]) -> Option<String> 
                     }
                     match &values[idx] {
                         Some(v) => out.push_str(v),
-                        None => return None,
+                        None => out.push_str(NULL_STR),
                     }
                     idx += 1;
                 }
@@ -1236,7 +1238,7 @@ fn format_string_row(format: &str, values: &[Option<String>]) -> Option<String> 
                     }
                     match &values[idx] {
                         Some(v) => out.push_str(v),
-                        None => return None,
+                        None => out.push_str(NULL_STR),
                     }
                     idx += 1;
                 }
