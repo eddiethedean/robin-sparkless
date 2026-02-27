@@ -67,7 +67,8 @@ pub fn execute_sql(session: &SparkSession, query: &str) -> Result<DataFrame, Pol
             }
             return Err(PolarsError::InvalidOperation(
                 format!(
-                    "Table or view '{table_name}' not found. Register it with create_or_replace_temp_view or saveAsTable."
+                    "Table or view '{table_name}' not found. Register it with create_or_replace_temp_view or saveAsTable. \
+                    (Schema-qualified names like 'schema.table' are supported.)"
                 )
                 .into(),
             ));
