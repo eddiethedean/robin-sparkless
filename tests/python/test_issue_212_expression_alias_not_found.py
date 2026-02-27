@@ -39,4 +39,3 @@ def test_select_window_rank_alias() -> None:
     assert len(rows) == 3
     assert all("rank" in r for r in rows)
     assert all(isinstance(r["rank"], int) for r in rows)
-

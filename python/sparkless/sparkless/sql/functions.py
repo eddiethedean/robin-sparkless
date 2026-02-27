@@ -11,7 +11,6 @@ from sparkless import (
     lit_f64,
     lit_null,
     format_string as _format_string,
-    printf as _printf,
     greatest as _greatest,
     least as _least,
     array_distinct as _array_distinct,
@@ -103,6 +102,7 @@ def _ensure_udf_executor_registered():
     _native.set_python_udf_executor(_python_udf_executor)
     _ensure_udf_executor_registered._registered = True
 
+
 def _as_col(c):
     return col(c) if isinstance(c, str) else c
 
@@ -114,47 +114,130 @@ def _native_fn(name):
 
 def _not_implemented(name):
     """Return a callable that raises NotImplementedError when called (for stub functions)."""
+
     def _raiser(*args, **kwargs):
         raise NotImplementedError(f"{name!r} is not yet implemented")
+
     return _raiser
 
 
 def _ni(name):
     return _not_implemented(name)
 
+
 # --- Math functions (native-backed) ---
-def floor(c): return _native_fn("floor")(_as_col(c))
-def ceil(c): return _native_fn("ceil")(_as_col(c))
+def floor(c):
+    return _native_fn("floor")(_as_col(c))
+
+
+def ceil(c):
+    return _native_fn("ceil")(_as_col(c))
+
+
 ceiling = ceil
-def abs(c): return _native_fn("abs")(_as_col(c))
-def sqrt(c): return _native_fn("sqrt")(_as_col(c))
-def log(c, base=None): return _native_fn("log")(_as_col(c)) if base is None else _native_fn("log_with_base")(_as_col(c), base)
-def exp(c): return _native_fn("exp")(_as_col(c))
-def pow(col1, col2): return _native_fn("pow")(_as_col(col1), int(col2))
+
+
+def abs(c):
+    return _native_fn("abs")(_as_col(c))
+
+
+def sqrt(c):
+    return _native_fn("sqrt")(_as_col(c))
+
+
+def log(c, base=None):
+    return (
+        _native_fn("log")(_as_col(c))
+        if base is None
+        else _native_fn("log_with_base")(_as_col(c), base)
+    )
+
+
+def exp(c):
+    return _native_fn("exp")(_as_col(c))
+
+
+def pow(col1, col2):
+    return _native_fn("pow")(_as_col(col1), int(col2))
+
+
 power = pow
-def round(c, scale=0): return _native_fn("round")(_as_col(c), scale)
-def signum(c): return _native_fn("signum")(_as_col(c))
-def sin(c): return _native_fn("sin")(_as_col(c))
-def cos(c): return _native_fn("cos")(_as_col(c))
-def tan(c): return _native_fn("tan")(_as_col(c))
-def asin(c): return _native_fn("asin")(_as_col(c))
-def acos(c): return _native_fn("acos")(_as_col(c))
-def atan(c): return _native_fn("atan")(_as_col(c))
-def atan2(y, x): return _native_fn("atan2")(_as_col(y), _as_col(x))
-def degrees(c): return _native_fn("degrees")(_as_col(c))
-def radians(c): return _native_fn("radians")(_as_col(c))
-def log2(c): return _native_fn("log2")(_as_col(c))
-def log10(c): return _native_fn("log10")(_as_col(c))
-def greatest(*cols): return _native_fn("greatest")(tuple([_as_col(c) for c in cols]))
-def least(*cols): return _native_fn("least")(tuple([_as_col(c) for c in cols]))
-def coalesce(*cols): return _native_fn("coalesce")(tuple([_as_col(c) for c in cols]))
+
+
+def round(c, scale=0):
+    return _native_fn("round")(_as_col(c), scale)
+
+
+def signum(c):
+    return _native_fn("signum")(_as_col(c))
+
+
+def sin(c):
+    return _native_fn("sin")(_as_col(c))
+
+
+def cos(c):
+    return _native_fn("cos")(_as_col(c))
+
+
+def tan(c):
+    return _native_fn("tan")(_as_col(c))
+
+
+def asin(c):
+    return _native_fn("asin")(_as_col(c))
+
+
+def acos(c):
+    return _native_fn("acos")(_as_col(c))
+
+
+def atan(c):
+    return _native_fn("atan")(_as_col(c))
+
+
+def atan2(y, x):
+    return _native_fn("atan2")(_as_col(y), _as_col(x))
+
+
+def degrees(c):
+    return _native_fn("degrees")(_as_col(c))
+
+
+def radians(c):
+    return _native_fn("radians")(_as_col(c))
+
+
+def log2(c):
+    return _native_fn("log2")(_as_col(c))
+
+
+def log10(c):
+    return _native_fn("log10")(_as_col(c))
+
+
+def greatest(*cols):
+    return _native_fn("greatest")(tuple([_as_col(c) for c in cols]))
+
+
+def least(*cols):
+    return _native_fn("least")(tuple([_as_col(c) for c in cols]))
+
+
+def coalesce(*cols):
+    return _native_fn("coalesce")(tuple([_as_col(c) for c in cols]))
+
 
 def nanvl(col1, col2):
     """Replace NaN with value. PySpark: F.nanvl(col1, col2)."""
     return _native_fn("nanvl")(_as_col(col1), _as_col(col2))
+
+
 def isnan(c):
     """True where the float value is NaN. PySpark: F.isnan(col)."""
     return _native_fn("isnan")(_as_col(c))
+
+
 # isnull defined above (before __all__)
 monotonically_increasing_id = _ni("monotonically_increasing_id")
 input_file_name = _ni("input_file_name")
@@ -162,93 +245,289 @@ spark_partition_id = _ni("spark_partition_id")
 broadcast = _ni("broadcast")
 hash = _ni("hash")
 
+
 # --- Hash / encoding functions (native-backed) ---
-def xxhash64(c): return _native.native_xxhash64(_as_col(c))
-def md5(c): return _native.native_md5(_as_col(c))
-def sha1(c): return _native.native_sha1(_as_col(c))
-def sha2(c, numBits): return _native.native_sha2(_as_col(c), numBits)
-def crc32(c): return _native.native_crc32(_as_col(c))
-def base64(c): return _native.native_base64(_as_col(c))
-def unbase64(c): return _native.native_unbase64(_as_col(c))
-def ascii(c): return _native.native_ascii(_as_col(c))
-def hex(c): return _native.native_hex(_as_col(c))
-def unhex(c): return _native.native_unhex(_as_col(c))
-def bin(c): return _native.native_bin(_as_col(c))
-def conv(c, fromBase, toBase): return _native.native_conv(_as_col(c), fromBase, toBase)
-def format_number(c, d): return _native.native_format_number(_as_col(c), d)
+def xxhash64(c):
+    return _native.native_xxhash64(_as_col(c))
+
+
+def md5(c):
+    return _native.native_md5(_as_col(c))
+
+
+def sha1(c):
+    return _native.native_sha1(_as_col(c))
+
+
+def sha2(c, numBits):
+    return _native.native_sha2(_as_col(c), numBits)
+
+
+def crc32(c):
+    return _native.native_crc32(_as_col(c))
+
+
+def base64(c):
+    return _native.native_base64(_as_col(c))
+
+
+def unbase64(c):
+    return _native.native_unbase64(_as_col(c))
+
+
+def ascii(c):
+    return _native.native_ascii(_as_col(c))
+
+
+def hex(c):
+    return _native.native_hex(_as_col(c))
+
+
+def unhex(c):
+    return _native.native_unhex(_as_col(c))
+
+
+def bin(c):
+    return _native.native_bin(_as_col(c))
+
+
+def conv(c, fromBase, toBase):
+    return _native.native_conv(_as_col(c), fromBase, toBase)
+
+
+def format_number(c, d):
+    return _native.native_format_number(_as_col(c), d)
+
 
 # --- Array / collection functions (native-backed) ---
 array = _ni("array")
 struct = _ni("struct")
-def explode(col_or_name): return _native_fn("explode")(_as_col(col_or_name))
-def explode_outer(col_or_name): return _native_fn("explode_outer")(_as_col(col_or_name))
-def posexplode(col_or_name): return _native_fn("posexplode")(_as_col(col_or_name))
+
+
+def explode(col_or_name):
+    return _native_fn("explode")(_as_col(col_or_name))
+
+
+def explode_outer(col_or_name):
+    return _native_fn("explode_outer")(_as_col(col_or_name))
+
+
+def posexplode(col_or_name):
+    return _native_fn("posexplode")(_as_col(col_or_name))
+
+
 posexplode_outer = _ni("posexplode_outer")
-def flatten(col_or_name): return _native_fn("flatten")(_as_col(col_or_name))
+
+
+def flatten(col_or_name):
+    return _native_fn("flatten")(_as_col(col_or_name))
+
+
 def split(str_col, pattern, limit=-1):
     lim = limit if limit != -1 else -1  # Rust uses -1 for "no limit"
     return _native_fn("split")(_as_col(str_col), pattern, lim)
-def format_string(fmt, *cols): return _native_fn("format_string")(fmt, tuple([_as_col(c) for c in cols]))
+
+
+def format_string(fmt, *cols):
+    return _native_fn("format_string")(fmt, tuple([_as_col(c) for c in cols]))
+
+
 concat_ws = _ni("concat_ws")
 
+
 # --- Aggregate functions (native-backed) ---
-def mean(col_or_name): return avg(col_or_name)
-def first(col_or_name, ignorenulls=False): return _native_fn("first")(_as_col(col_or_name), ignorenulls)
+def mean(col_or_name):
+    return avg(col_or_name)
+
+
+def first(col_or_name, ignorenulls=False):
+    return _native_fn("first")(_as_col(col_or_name), ignorenulls)
+
+
 last = _ni("last")
-def collect_list(col_or_name): return _native_fn("collect_list")(_as_col(col_or_name))
-def collect_set(col_or_name): return _native_fn("collect_set")(_as_col(col_or_name))
+
+
+def collect_list(col_or_name):
+    return _native_fn("collect_list")(_as_col(col_or_name))
+
+
+def collect_set(col_or_name):
+    return _native_fn("collect_set")(_as_col(col_or_name))
+
+
 def array_contains(col_or_name, value):
     v = _as_col(value) if not isinstance(value, (int, float, bool, str)) else lit(value)
     return _native_fn("array_contains")(_as_col(col_or_name), v)
-def array_distinct(col_or_name): return _native_fn("array_distinct")(_as_col(col_or_name))
-def array_sort(col_or_name): return _native_fn("array_sort")(_as_col(col_or_name))
-def array_join(col_or_name, delimiter, null_replacement=None): return _native_fn("array_join")(_as_col(col_or_name), delimiter)
-def array_max(col_or_name): return _native_fn("array_max")(_as_col(col_or_name))
-def array_min(col_or_name): return _native_fn("array_min")(_as_col(col_or_name))
+
+
+def array_distinct(col_or_name):
+    return _native_fn("array_distinct")(_as_col(col_or_name))
+
+
+def array_sort(col_or_name):
+    return _native_fn("array_sort")(_as_col(col_or_name))
+
+
+def array_join(col_or_name, delimiter, null_replacement=None):
+    return _native_fn("array_join")(_as_col(col_or_name), delimiter)
+
+
+def array_max(col_or_name):
+    return _native_fn("array_max")(_as_col(col_or_name))
+
+
+def array_min(col_or_name):
+    return _native_fn("array_min")(_as_col(col_or_name))
+
+
 def array_position(col_or_name, value):
     """1-based index of first occurrence of value in list, or 0 if not found. PySpark: F.array_position(col, value)."""
-    v = _as_col(value) if not isinstance(value, (int, float, bool, str, type(None))) else lit(value)
+    v = (
+        _as_col(value)
+        if not isinstance(value, (int, float, bool, str, type(None)))
+        else lit(value)
+    )
     return _native_fn("array_position")(_as_col(col_or_name), v)
-def element_at(col_or_name, extraction): return _native_fn("element_at")(_as_col(col_or_name), extraction)
-def size(col_or_name): return _native_fn("size")(_as_col(col_or_name))
+
+
+def element_at(col_or_name, extraction):
+    return _native_fn("element_at")(_as_col(col_or_name), extraction)
+
+
+def size(col_or_name):
+    return _native_fn("size")(_as_col(col_or_name))
+
+
 slice = _ni("slice")
-def sort_array(col_or_name, asc=True): return _native_fn("array_sort")(_as_col(col_or_name))
-def array_union(col1, col2): return _native.native_array_union(_as_col(col1), _as_col(col2))
-def array_intersect(col1, col2): return _native.native_array_intersect(_as_col(col1), _as_col(col2))
-def array_except(col1, col2): return _native.native_array_except(_as_col(col1), _as_col(col2))
-def map_keys(col_or_name): return _native.native_map_keys(_as_col(col_or_name))
-def map_values(col_or_name): return _native.native_map_values(_as_col(col_or_name))
+
+
+def sort_array(col_or_name, asc=True):
+    return _native_fn("array_sort")(_as_col(col_or_name))
+
+
+def array_union(col1, col2):
+    return _native.native_array_union(_as_col(col1), _as_col(col2))
+
+
+def array_intersect(col1, col2):
+    return _native.native_array_intersect(_as_col(col1), _as_col(col2))
+
+
+def array_except(col1, col2):
+    return _native.native_array_except(_as_col(col1), _as_col(col2))
+
+
+def map_keys(col_or_name):
+    return _native.native_map_keys(_as_col(col_or_name))
+
+
+def map_values(col_or_name):
+    return _native.native_map_values(_as_col(col_or_name))
+
+
 map_from_arrays = _ni("map_from_arrays")
 sumDistinct = _ni("sumDistinct")
+
+
 def count_distinct(*cols):
     if len(cols) == 1:
         return _native_fn("count_distinct")(_as_col(cols[0]))
-    raise NotImplementedError("count_distinct with multiple columns is not yet implemented")
+    raise NotImplementedError(
+        "count_distinct with multiple columns is not yet implemented"
+    )
+
+
 countDistinct = count_distinct
-def approx_count_distinct(col_or_name, rsd=0.05): return _native_fn("approx_count_distinct")(_as_col(col_or_name), rsd)
-def stddev(col_or_name): return _native_fn("stddev")(_as_col(col_or_name))
-def stddev_pop(col_or_name): return _native_fn("stddev_pop")(_as_col(col_or_name))
-def stddev_samp(col_or_name): return _native_fn("stddev_samp")(_as_col(col_or_name))
-def variance(col_or_name): return _native_fn("variance")(_as_col(col_or_name))
-def var_pop(col_or_name): return _native_fn("var_pop")(_as_col(col_or_name))
-def var_samp(col_or_name): return _native_fn("var_samp")(_as_col(col_or_name))
-def corr(col1, col2): return _native_fn("corr")(_as_col(col1), _as_col(col2))
+
+
+def approx_count_distinct(col_or_name, rsd=0.05):
+    return _native_fn("approx_count_distinct")(_as_col(col_or_name), rsd)
+
+
+def stddev(col_or_name):
+    return _native_fn("stddev")(_as_col(col_or_name))
+
+
+def stddev_pop(col_or_name):
+    return _native_fn("stddev_pop")(_as_col(col_or_name))
+
+
+def stddev_samp(col_or_name):
+    return _native_fn("stddev_samp")(_as_col(col_or_name))
+
+
+def variance(col_or_name):
+    return _native_fn("variance")(_as_col(col_or_name))
+
+
+def var_pop(col_or_name):
+    return _native_fn("var_pop")(_as_col(col_or_name))
+
+
+def var_samp(col_or_name):
+    return _native_fn("var_samp")(_as_col(col_or_name))
+
+
+def corr(col1, col2):
+    return _native_fn("corr")(_as_col(col1), _as_col(col2))
+
+
 percentile_approx = _ni("percentile_approx")
 
+
 # --- String functions (native-backed) ---
-def lpad(col_or_name, len, pad): return _native.native_lpad(_as_col(col_or_name), len, pad)
-def rpad(col_or_name, len, pad): return _native.native_rpad(_as_col(col_or_name), len, pad)
-def ltrim(col_or_name): return _native.native_ltrim(_as_col(col_or_name))
-def rtrim(col_or_name): return _native.native_rtrim(_as_col(col_or_name))
-def initcap(col_or_name): return _native.native_initcap(_as_col(col_or_name))
-def soundex(col_or_name): return _native.native_soundex(_as_col(col_or_name))
-def length(col_or_name): return _native.native_length(_as_col(col_or_name))
-def reverse(col_or_name): return _native.native_reverse(_as_col(col_or_name))
-def translate(col_or_name, matching, replace): return _native.native_translate(_as_col(col_or_name), matching, replace)
-def instr(col_or_name, substr): return _native.native_instr(_as_col(col_or_name), substr)
-def locate(substr, col_or_name, pos=1): return _native.native_locate(substr, _as_col(col_or_name), pos)
-def repeat(col_or_name, n): return _native.native_repeat(_as_col(col_or_name), n)
-def regexp_extract(col_or_name, pattern, idx=0): return _native.native_regexp_extract(_as_col(col_or_name), pattern, idx)
+def lpad(col_or_name, len, pad):
+    return _native.native_lpad(_as_col(col_or_name), len, pad)
+
+
+def rpad(col_or_name, len, pad):
+    return _native.native_rpad(_as_col(col_or_name), len, pad)
+
+
+def ltrim(col_or_name):
+    return _native.native_ltrim(_as_col(col_or_name))
+
+
+def rtrim(col_or_name):
+    return _native.native_rtrim(_as_col(col_or_name))
+
+
+def initcap(col_or_name):
+    return _native.native_initcap(_as_col(col_or_name))
+
+
+def soundex(col_or_name):
+    return _native.native_soundex(_as_col(col_or_name))
+
+
+def length(col_or_name):
+    return _native.native_length(_as_col(col_or_name))
+
+
+def reverse(col_or_name):
+    return _native.native_reverse(_as_col(col_or_name))
+
+
+def translate(col_or_name, matching, replace):
+    return _native.native_translate(_as_col(col_or_name), matching, replace)
+
+
+def instr(col_or_name, substr):
+    return _native.native_instr(_as_col(col_or_name), substr)
+
+
+def locate(substr, col_or_name, pos=1):
+    return _native.native_locate(substr, _as_col(col_or_name), pos)
+
+
+def repeat(col_or_name, n):
+    return _native.native_repeat(_as_col(col_or_name), n)
+
+
+def regexp_extract(col_or_name, pattern, idx=0):
+    return _native.native_regexp_extract(_as_col(col_or_name), pattern, idx)
+
+
 overlay = _ni("overlay")
 
 # --- Window functions (stubs) ---
@@ -274,21 +553,59 @@ factorial = _ni("factorial")
 cbrt = _ni("cbrt")
 hypot = _ni("hypot")
 
+
 # --- Date/time functions (native-backed) ---
-def add_months(start, months): return _native.native_add_months(_as_col(start), months)
-def months_between(date1, date2, roundOff=True): return _native.native_months_between(_as_col(date1), _as_col(date2), roundOff)
-def next_day(date, dayOfWeek): return _native.native_next_day(_as_col(date), dayOfWeek)
-def last_day(date): return _native.native_last_day(_as_col(date))
-def trunc(date, fmt): return _native.native_trunc(_as_col(date), fmt)
-def date_trunc(fmt, timestamp): return _native.native_date_trunc(fmt, _as_col(timestamp))
-def hour(col_or_name): return _native.native_hour(_as_col(col_or_name))
-def minute(col_or_name): return _native.native_minute(_as_col(col_or_name))
-def second(col_or_name): return _native.native_second(_as_col(col_or_name))
-def quarter(col_or_name): return _native.native_quarter(_as_col(col_or_name))
-def dayofyear(col_or_name): return _native.native_dayofyear(_as_col(col_or_name))
-def weekofyear(col_or_name): return _native.native_weekofyear(_as_col(col_or_name))
+def add_months(start, months):
+    return _native.native_add_months(_as_col(start), months)
+
+
+def months_between(date1, date2, roundOff=True):
+    return _native.native_months_between(_as_col(date1), _as_col(date2), roundOff)
+
+
+def next_day(date, dayOfWeek):
+    return _native.native_next_day(_as_col(date), dayOfWeek)
+
+
+def last_day(date):
+    return _native.native_last_day(_as_col(date))
+
+
+def trunc(date, fmt):
+    return _native.native_trunc(_as_col(date), fmt)
+
+
+def date_trunc(fmt, timestamp):
+    return _native.native_date_trunc(fmt, _as_col(timestamp))
+
+
+def hour(col_or_name):
+    return _native.native_hour(_as_col(col_or_name))
+
+
+def minute(col_or_name):
+    return _native.native_minute(_as_col(col_or_name))
+
+
+def second(col_or_name):
+    return _native.native_second(_as_col(col_or_name))
+
+
+def quarter(col_or_name):
+    return _native.native_quarter(_as_col(col_or_name))
+
+
+def dayofyear(col_or_name):
+    return _native.native_dayofyear(_as_col(col_or_name))
+
+
+def weekofyear(col_or_name):
+    return _native.native_weekofyear(_as_col(col_or_name))
+
+
 make_date = _ni("make_date")
 typeof = _ni("typeof")
+
 
 def _python_udf_executor(df, column_name, udf_name, arg_names, arg_literal_jsons=None):
     """Run a registered Python UDF over the DataFrame: collect, apply per row, create new DataFrame. Called from Rust with_column.
@@ -307,18 +624,30 @@ def _python_udf_executor(df, column_name, udf_name, arg_names, arg_literal_jsons
         existing_names = [f.name for f in df.schema.fields]
         if column_name in existing_names:
             extended_fields = [
-                T.StructField(f.name, return_type if f.name == column_name else f.dataType, f.nullable if f.name != column_name else True)
+                T.StructField(
+                    f.name,
+                    return_type if f.name == column_name else f.dataType,
+                    f.nullable if f.name != column_name else True,
+                )
                 for f in df.schema.fields
             ]
         else:
-            extended_fields = list(df.schema.fields) + [T.StructField(column_name, return_type, True)]
+            extended_fields = list(df.schema.fields) + [
+                T.StructField(column_name, return_type, True)
+            ]
         extended_schema = T.StructType(extended_fields)
         return session.createDataFrame([], schema=extended_schema)
     field_names = [f.name for f in df.schema.fields]
     # Build dicts from schema + row values. Row.__iter__ yields keys (_fields), so use positional indexing.
-    row_dicts = [{field_names[i]: row[i] for i in range(len(field_names))} for row in rows]
+    row_dicts = [
+        {field_names[i]: row[i] for i in range(len(field_names))} for row in rows
+    ]
     arg_names_list = list(arg_names)
-    literals = (arg_literal_jsons if arg_literal_jsons is not None else [None] * len(arg_names_list))
+    literals = (
+        arg_literal_jsons
+        if arg_literal_jsons is not None
+        else [None] * len(arg_names_list)
+    )
     if len(literals) < len(arg_names_list):
         literals = list(literals) + [None] * (len(arg_names_list) - len(literals))
 
@@ -327,18 +656,26 @@ def _python_udf_executor(df, column_name, udf_name, arg_names, arg_literal_jsons
             return _json.loads(literals[i])
         return d[arg_names_list[i]]
 
-    new_vals = [func(*[arg_value(d, i) for i in range(len(arg_names_list))]) for d in row_dicts]
+    new_vals = [
+        func(*[arg_value(d, i) for i in range(len(arg_names_list))]) for d in row_dicts
+    ]
     for i, d in enumerate(row_dicts):
         d[column_name] = new_vals[i]
     # Replace existing column if column_name already in schema, else append (PySpark withColumn semantics).
     existing_names = [f.name for f in df.schema.fields]
     if column_name in existing_names:
         extended_fields = [
-            T.StructField(f.name, return_type if f.name == column_name else f.dataType, f.nullable if f.name != column_name else True)
+            T.StructField(
+                f.name,
+                return_type if f.name == column_name else f.dataType,
+                f.nullable if f.name != column_name else True,
+            )
             for f in df.schema.fields
         ]
     else:
-        extended_fields = list(df.schema.fields) + [T.StructField(column_name, return_type, True)]
+        extended_fields = list(df.schema.fields) + [
+            T.StructField(column_name, return_type, True)
+        ]
     extended_schema = T.StructType(extended_fields)
     # Pass rows as list-of-lists in schema order so createDataFrame does not reorder by sorted dict keys.
     row_lists = [[d[f.name] for f in extended_schema.fields] for d in row_dicts]
@@ -372,7 +709,11 @@ def udf(f=None, returnType=None):
         def wrapper(*cols):
             # When used as instance method (e.g. self.add(F.col('a'), F.col('b'))), first arg is self; drop it.
             # When descriptor is accessed on the class (e.g. C.add during class build), first arg can be the class; return wrapper so the attribute stays callable.
-            if cols and not isinstance(cols[0], str) and not getattr(cols[0], "get_udf_call_info", None):
+            if (
+                cols
+                and not isinstance(cols[0], str)
+                and not getattr(cols[0], "get_udf_call_info", None)
+            ):
                 first = cols[0]
                 if isinstance(first, type):
                     return wrapper
@@ -380,7 +721,11 @@ def udf(f=None, returnType=None):
             # If we were called with no column args (e.g. wrapper() or wrapper(owner) after strip), do not return a UDF column; return wrapper so decorator leaves the name as the callable.
             if not cols:
                 return wrapper
-            if len(cols) == 1 and callable(cols[0]) and not getattr(cols[0], "get_udf_call_info", None):
+            if (
+                len(cols) == 1
+                and callable(cols[0])
+                and not getattr(cols[0], "get_udf_call_info", None)
+            ):
                 raise TypeError(
                     "UDF must be called with Column(s), e.g. my_udf(F.col('a'), F.col('b')). "
                     "Got a single callable - ensure you call the UDF with column arguments."
@@ -401,7 +746,9 @@ def udf(f=None, returnType=None):
     # @udf(returnType) with single arg: that arg is the return type (decorator). Distinguish from F.udf(func).
     if returnType is None and f is not None:
         # Type-like: a class or an instance of a type (e.g. IntegerType(), StringType())
-        is_return_type = isinstance(f, type) or getattr(type(f), "__name__", "").endswith("Type")
+        is_return_type = isinstance(f, type) or getattr(
+            type(f), "__name__", ""
+        ).endswith("Type")
         if is_return_type:
             return_type = f
 
@@ -427,7 +774,11 @@ def isnotnull(col_or_name):
 def nvl(col_or_name, replacement):
     """Replace null with replacement. PySpark: F.nvl(col, replacement)."""
     c = _as_col(col_or_name)
-    rep = lit(replacement) if isinstance(replacement, (int, float, bool, str, type(None))) else _as_col(replacement)
+    rep = (
+        lit(replacement)
+        if isinstance(replacement, (int, float, bool, str, type(None)))
+        else _as_col(replacement)
+    )
     return coalesce(c, rep)
 
 
@@ -547,11 +898,16 @@ __all__ = [
     "DataFrame",
 ]
 
+
 def when(condition, value=None):
     """PySpark-compatible when(). Accepts Column or str condition, optional value."""
     cond = _as_col(condition)
     if value is not None:
-        val = _as_col(value) if not isinstance(value, (int, float, bool, str)) else lit(value)
+        val = (
+            _as_col(value)
+            if not isinstance(value, (int, float, bool, str))
+            else lit(value)
+        )
         return _native_when(cond, val)
     return _native_when(cond)
 
@@ -973,7 +1329,9 @@ def create_map(*cols):
         else:
             expanded.append(c)
     if len(expanded) % 2 != 0:
-        raise ValueError("create_map requires an even number of arguments (key-value pairs)")
+        raise ValueError(
+            "create_map requires an even number of arguments (key-value pairs)"
+        )
     key_values = [_as_col(x) for x in expanded]
     return _native.create_map(key_values)
 
@@ -1089,7 +1447,11 @@ class _FirstValueExpr:
     def over(self, window):
         from sparkless import column as col
 
-        c = col(self._col_or_name) if isinstance(self._col_or_name, str) else self._col_or_name
+        c = (
+            col(self._col_or_name)
+            if isinstance(self._col_or_name, str)
+            else self._col_or_name
+        )
         return c.first_value().over(window)
 
 
@@ -1105,7 +1467,11 @@ class _LastValueExpr:
     def over(self, window):
         from sparkless import column as col
 
-        c = col(self._col_or_name) if isinstance(self._col_or_name, str) else self._col_or_name
+        c = (
+            col(self._col_or_name)
+            if isinstance(self._col_or_name, str)
+            else self._col_or_name
+        )
         return c.last_value().over(window)
 
 
@@ -1127,9 +1493,9 @@ def _col_name(arg):
         return arg
     if isinstance(arg, _Column):
         return arg.name
-    if hasattr(arg, 'name') and hasattr(arg, 'ascending'):
+    if hasattr(arg, "name") and hasattr(arg, "ascending"):
         return arg.name
-    if hasattr(arg, 'column_name'):
+    if hasattr(arg, "column_name"):
         return arg.column_name
     raise TypeError(f"Unsupported sort key: {type(arg)!r}")
 
@@ -1148,7 +1514,9 @@ def _window_spec_to_partition_order(window, require_order=True):
     order_keys = list(getattr(window, "_order_by", []) or [])
     if not order_keys and require_order:
         raise PySparkValueError("window function .over() requires Window.orderBy(...)")
-    partition_names = [_col_name(c) if not isinstance(c, str) else c for c in partition_by]
+    partition_names = [
+        _col_name(c) if not isinstance(c, str) else c for c in partition_by
+    ]
     flat_keys = []
     for k in order_keys:
         if isinstance(k, (list, tuple)):

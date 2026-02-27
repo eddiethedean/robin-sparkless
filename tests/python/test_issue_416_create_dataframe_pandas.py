@@ -31,8 +31,10 @@ def test_create_dataframe_from_pandas() -> None:
     df = spark.createDataFrame(pdf)
     out = df.collect()
     assert len(out) == 2
+
     # Row or dict both acceptable (sparkless returns Row, native returns dict)
     def v(r, k):
         return r[k] if isinstance(r, dict) else getattr(r, k)
+
     assert v(out[0], "a") == 1 and v(out[0], "b") == 3
     assert v(out[1], "a") == 2 and v(out[1], "b") == 4

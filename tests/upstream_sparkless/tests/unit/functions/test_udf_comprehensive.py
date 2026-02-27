@@ -4,7 +4,6 @@ Comprehensive tests for UDF functionality in Sparkless.
 Tests cover various data types, operations, edge cases, and usage patterns.
 """
 
-import pytest
 
 import sparkless.sql.functions as F
 import sparkless.sql.types as T

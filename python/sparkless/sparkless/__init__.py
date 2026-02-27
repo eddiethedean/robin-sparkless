@@ -2,47 +2,201 @@
 __version__ = "4.0.0"
 
 try:
-    _mod = __import__("sparkless._native", fromlist=[
-        "SparklessError", "PySparkSession", "PySparkSessionBuilder", "PyDataFrame",
-        "PyColumn", "PyGroupedData", "PyDataFrameReader", "PyDataFrameWriter",
-        "column", "lit", "lit_i64", "lit_str", "lit_bool", "lit_f64", "lit_null",
-        "upper", "lower", "substring", "trim", "cast", "when",
-        "count", "sum", "avg", "min", "max",
-        "regexp_replace", "regexp_extract", "regexp_extract_all", "regexp_like",
-        "split", "coalesce", "format_string", "greatest", "least",
-        "array_distinct", "posexplode",
-        "to_timestamp", "to_date", "current_date", "current_timestamp", "input_file_name", "datediff", "unix_timestamp", "from_unixtime",
-        "year", "month", "dayofmonth", "dayofweek", "date_add", "date_sub", "date_format",
-        "length", "floor", "round", "ltrim", "rtrim", "hour", "minute", "second",
-        "reverse", "exp",
-        "soundex", "repeat", "initcap", "levenshtein", "try_cast", "try_add",
-        "concat", "concat_ws", "array", "struct_",
-        "asinh", "atanh", "cosh", "sinh",
-        "last_day", "months_between", "timestamp_seconds", "to_utc_timestamp",
-        "approx_count_distinct", "date_trunc", "first", "translate", "substring_index",
-        "crc32", "xxhash64", "get_json_object", "json_tuple", "size", "array_contains", "explode",
-    ])
+    _mod = __import__(
+        "sparkless._native",
+        fromlist=[
+            "SparklessError",
+            "PySparkSession",
+            "PySparkSessionBuilder",
+            "PyDataFrame",
+            "PyColumn",
+            "PyGroupedData",
+            "PyDataFrameReader",
+            "PyDataFrameWriter",
+            "column",
+            "lit",
+            "lit_i64",
+            "lit_str",
+            "lit_bool",
+            "lit_f64",
+            "lit_null",
+            "upper",
+            "lower",
+            "substring",
+            "trim",
+            "cast",
+            "when",
+            "count",
+            "sum",
+            "avg",
+            "min",
+            "max",
+            "regexp_replace",
+            "regexp_extract",
+            "regexp_extract_all",
+            "regexp_like",
+            "split",
+            "coalesce",
+            "format_string",
+            "greatest",
+            "least",
+            "array_distinct",
+            "posexplode",
+            "to_timestamp",
+            "to_date",
+            "current_date",
+            "current_timestamp",
+            "input_file_name",
+            "datediff",
+            "unix_timestamp",
+            "from_unixtime",
+            "year",
+            "month",
+            "dayofmonth",
+            "dayofweek",
+            "date_add",
+            "date_sub",
+            "date_format",
+            "length",
+            "floor",
+            "round",
+            "ltrim",
+            "rtrim",
+            "hour",
+            "minute",
+            "second",
+            "reverse",
+            "exp",
+            "soundex",
+            "repeat",
+            "initcap",
+            "levenshtein",
+            "try_cast",
+            "try_add",
+            "concat",
+            "concat_ws",
+            "array",
+            "struct_",
+            "asinh",
+            "atanh",
+            "cosh",
+            "sinh",
+            "last_day",
+            "months_between",
+            "timestamp_seconds",
+            "to_utc_timestamp",
+            "approx_count_distinct",
+            "date_trunc",
+            "first",
+            "translate",
+            "substring_index",
+            "crc32",
+            "xxhash64",
+            "get_json_object",
+            "json_tuple",
+            "size",
+            "array_contains",
+            "explode",
+        ],
+    )
 except ImportError:
-    _mod = __import__("_native", fromlist=[
-        "SparklessError", "PySparkSession", "PySparkSessionBuilder", "PyDataFrame",
-        "PyColumn", "PyGroupedData", "PyDataFrameReader", "PyDataFrameWriter",
-        "column", "lit", "lit_i64", "lit_str", "lit_bool", "lit_f64", "lit_null",
-        "upper", "lower", "substring", "trim", "cast", "when",
-        "count", "sum", "avg", "min", "max",
-        "regexp_replace", "regexp_extract", "regexp_extract_all", "regexp_like",
-        "split", "coalesce", "format_string", "greatest", "least",
-        "array_distinct", "posexplode",
-        "to_timestamp", "to_date", "current_date", "current_timestamp", "input_file_name", "datediff", "unix_timestamp", "from_unixtime",
-        "year", "month", "dayofmonth", "dayofweek", "date_add", "date_sub", "date_format",
-        "length", "floor", "round", "ltrim", "rtrim", "hour", "minute", "second",
-        "reverse", "exp",
-        "soundex", "repeat", "initcap", "levenshtein", "try_cast", "try_add",
-        "concat", "concat_ws", "array", "struct_",
-        "asinh", "atanh", "cosh", "sinh",
-        "last_day", "months_between", "timestamp_seconds", "to_utc_timestamp",
-        "approx_count_distinct", "date_trunc", "first", "translate", "substring_index",
-        "crc32", "xxhash64", "get_json_object", "json_tuple", "size", "array_contains", "explode",
-    ])
+    _mod = __import__(
+        "_native",
+        fromlist=[
+            "SparklessError",
+            "PySparkSession",
+            "PySparkSessionBuilder",
+            "PyDataFrame",
+            "PyColumn",
+            "PyGroupedData",
+            "PyDataFrameReader",
+            "PyDataFrameWriter",
+            "column",
+            "lit",
+            "lit_i64",
+            "lit_str",
+            "lit_bool",
+            "lit_f64",
+            "lit_null",
+            "upper",
+            "lower",
+            "substring",
+            "trim",
+            "cast",
+            "when",
+            "count",
+            "sum",
+            "avg",
+            "min",
+            "max",
+            "regexp_replace",
+            "regexp_extract",
+            "regexp_extract_all",
+            "regexp_like",
+            "split",
+            "coalesce",
+            "format_string",
+            "greatest",
+            "least",
+            "array_distinct",
+            "posexplode",
+            "to_timestamp",
+            "to_date",
+            "current_date",
+            "current_timestamp",
+            "input_file_name",
+            "datediff",
+            "unix_timestamp",
+            "from_unixtime",
+            "year",
+            "month",
+            "dayofmonth",
+            "dayofweek",
+            "date_add",
+            "date_sub",
+            "date_format",
+            "length",
+            "floor",
+            "round",
+            "ltrim",
+            "rtrim",
+            "hour",
+            "minute",
+            "second",
+            "reverse",
+            "exp",
+            "soundex",
+            "repeat",
+            "initcap",
+            "levenshtein",
+            "try_cast",
+            "try_add",
+            "concat",
+            "concat_ws",
+            "array",
+            "struct_",
+            "asinh",
+            "atanh",
+            "cosh",
+            "sinh",
+            "last_day",
+            "months_between",
+            "timestamp_seconds",
+            "to_utc_timestamp",
+            "approx_count_distinct",
+            "date_trunc",
+            "first",
+            "translate",
+            "substring_index",
+            "crc32",
+            "xxhash64",
+            "get_json_object",
+            "json_tuple",
+            "size",
+            "array_contains",
+            "explode",
+        ],
+    )
 
 SparklessError = _mod.SparklessError
 _SparkSession = _mod.PySparkSession
@@ -170,58 +324,94 @@ GroupedData = _GroupedData
 DataFrameReader = _DataFrameReader
 DataFrameWriter = _DataFrameWriter
 
+
 # PySpark-style: from sparkless import F, functions, StringType, ...
 def __getattr__(name):
     if name in ("F", "functions"):
         import sparkless.sql.functions as f
+
         return f
-    if name in ("StringType", "StructType", "StructField", "Row", "IntegerType", "LongType", "DoubleType", "FloatType", "BooleanType", "DateType", "TimestampType", "ArrayType", "MapType", "DecimalType", "CharType", "VarcharType", "DataType"):
+    if name in (
+        "StringType",
+        "StructType",
+        "StructField",
+        "Row",
+        "IntegerType",
+        "LongType",
+        "DoubleType",
+        "FloatType",
+        "BooleanType",
+        "DateType",
+        "TimestampType",
+        "ArrayType",
+        "MapType",
+        "DecimalType",
+        "CharType",
+        "VarcharType",
+        "DataType",
+    ):
         from sparkless.sql import types as t
+
         return getattr(t, name)
     if name == "Window":
         from sparkless.sql.window import Window
+
         return Window
     if name == "row_number":
         import sparkless.sql.functions as f
+
         return f.row_number
     if name == "percent_rank":
         import sparkless.sql.functions as f
+
         return f.percent_rank
     if name == "rank":
         import sparkless.sql.functions as f
+
         return f.rank
     if name == "dense_rank":
         import sparkless.sql.functions as f
+
         return f.dense_rank
     if name == "ntile":
         import sparkless.sql.functions as f
+
         return f.ntile
     if name == "lag":
         import sparkless.sql.functions as f
+
         return f.lag
     if name == "lead":
         import sparkless.sql.functions as f
+
         return f.lead
     if name == "first_value":
         import sparkless.sql.functions as f
+
         return f.first_value
     if name == "last_value":
         import sparkless.sql.functions as f
+
         return f.last_value
     if name in ("asc", "desc"):
         import sparkless.sql.functions as f
+
         return getattr(f, name)
     if name == "expr":
         import sparkless.sql.functions as f
+
         return f.expr
     if name == "lit":
         import sparkless.sql.functions as f
+
         return f.lit
     if name in ("pow", "power"):
         import sparkless.sql.functions as f
+
         return getattr(f, name)
     if name == "udf":
         import sparkless.sql.functions as f
+
         return f.udf
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
@@ -251,6 +441,7 @@ __all__ = [
 def when(condition, value=None):
     """PySpark-compatible when(). Accepts Column or str condition, optional value."""
     from sparkless.sql.functions import when as _when
+
     return _when(condition, value)
 
 
@@ -295,6 +486,7 @@ class _SQLModule:
     @property
     def functions(self):
         import sparkless.sql.functions as f
+
         return f
 
 
