@@ -251,6 +251,34 @@ mod tests {
         assert_eq!(rows[0].get("count_1").and_then(|v| v.as_i64()), Some(2));
     }
 
+    /// #1019: SELECT with duplicate output names (e.g. self-join l.manager_id, r.manager_id) disambiguates to manager_id, manager_id_1.
+    #[test]
+    fn test_sql_duplicate_projection_aliases() {
+        use serde_json::json;
+        let spark = SparkSession::builder().app_name("test").get_or_create();
+        let schema = vec![
+            ("id".to_string(), "bigint".to_string()),
+            ("name".to_string(), "string".to_string()),
+            ("manager_id".to_string(), "bigint".to_string()),
+        ];
+        let rows = vec![
+            vec![json!(1), json!("Alice"), json!(0)],
+            vec![json!(2), json!("Bob"), json!(1)],
+        ];
+        let emp = spark
+            .create_dataframe_from_rows(rows, schema, false, false)
+            .unwrap();
+        spark.create_or_replace_temp_view("e", emp.clone());
+        spark.create_or_replace_temp_view("m", emp);
+        let result = spark
+            .sql("SELECT e.manager_id, m.manager_id FROM e LEFT JOIN m ON e.manager_id = m.id")
+            .unwrap();
+        let cols = result.columns().unwrap();
+        assert_eq!(cols.len(), 2, "disambiguate duplicate manager_id to manager_id, manager_id_1");
+        assert!(cols.contains(&"manager_id".to_string()));
+        assert!(cols.contains(&"manager_id_1".to_string()));
+    }
+
     #[test]
     fn test_sql_scalar_aggregate() {
         // Issue #587: SELECT AVG(salary) FROM t (no GROUP BY) — scalar aggregation.

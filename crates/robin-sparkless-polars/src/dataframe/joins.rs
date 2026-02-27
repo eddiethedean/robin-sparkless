@@ -63,6 +63,31 @@ pub fn join(
         })
         .collect::<Result<_, _>>()?;
 
+    // #1009, #1019: When aliasing right key to left name, right may already have a column with that name (e.g. self-join).
+    // Rename right's conflicting non-key column so we don't create duplicate output names (LazyFrame: use select with alias).
+    let right_names: Vec<String> = right.columns()?.into_iter().collect();
+    let mut renames: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    for (i, _) in left_on.iter().enumerate() {
+        let target_name = &left_key_names[i];
+        let right_key = &right_key_names[i];
+        if target_name != right_key && right_names.iter().any(|n| n == target_name) {
+            renames.insert(target_name.clone(), format!("{}_right", target_name));
+        }
+    }
+    if !renames.is_empty() {
+        let exprs: Vec<Expr> = right_names
+            .iter()
+            .map(|n| {
+                if let Some(suffix) = renames.get(n) {
+                    col(n.as_str()).alias(suffix.as_str())
+                } else {
+                    col(n.as_str())
+                }
+            })
+            .collect();
+        right_lf = right_lf.select(&exprs);
+    }
+
     // Coerce join keys to a common type when left/right dtypes differ (PySpark #274).
     // Alias right keys to left key names so result has one key column name (#604, #743).
     let mut left_casts: Vec<Expr> = Vec::new();
@@ -98,6 +123,7 @@ pub fn join(
         right_lf = right_lf.with_columns(right_casts);
         // #614: Drop right's original key columns when we aliased to left names, so the result
         // has only the left key name (e.g. "id") and collect does not fail with "not found: ID".
+        // Use current right_lf schema (after renames) so we keep manager_id_right etc.
         let drop_right: std::collections::HashSet<String> = left_on
             .iter()
             .enumerate()
@@ -105,17 +131,14 @@ pub fn join(
             .map(|(i, _)| right_key_names[i].clone())
             .collect();
         if !drop_right.is_empty() {
-            let right_names = right.columns()?;
-            let mut keep_names: Vec<&str> = right_names
+            let current_right_names: Vec<String> = right_lf
+                .collect_schema()
+                .map(|s| s.iter_names().map(|n| n.to_string()).collect())?;
+            let keep_names: Vec<&str> = current_right_names
                 .iter()
                 .filter(|n| !drop_right.contains(*n))
                 .map(String::as_str)
                 .collect();
-            for (i, name) in left_key_names.iter().enumerate() {
-                if left_key_names[i] != right_key_names[i] {
-                    keep_names.push(name.as_str());
-                }
-            }
             let keep: Vec<Expr> = keep_names.iter().map(|s| col(*s)).collect();
             right_lf = right_lf.select(&keep);
         }
