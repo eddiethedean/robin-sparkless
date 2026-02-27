@@ -76,11 +76,13 @@ class TestIssue335WindowOrderByList:
             rows = result.collect()
 
             assert len(rows) == 3
-            # Within each Type partition, should be ordered by Score, then Name
+            # Within each Type partition, orderBy(["Type", "Score", "Name"]) assigns Rank by Score then Name
             type_a_rows = [row for row in rows if row["Type"] == "A"]
             assert len(type_a_rows) == 2
-            assert type_a_rows[0]["Score"] == 90  # Bob first (lower score)
-            assert type_a_rows[1]["Score"] == 100  # Alice second
+            # Assert by Rank (collect() row order is not guaranteed; Rank 1 = lowest Score)
+            by_rank = sorted(type_a_rows, key=lambda r: r["Rank"])
+            assert by_rank[0]["Score"] == 90  # Bob gets Rank 1 (lower score)
+            assert by_rank[1]["Score"] == 100  # Alice gets Rank 2
         finally:
             spark.stop()
 
@@ -129,10 +131,11 @@ class TestIssue335WindowOrderByList:
 
             assert len(rows) == 3
             type_a_rows = [row for row in rows if row["Type"] == "A"]
-            assert type_a_rows[0]["Score"] == 90  # Lower score first
-            assert type_a_rows[0]["Rank"] == 1
-            assert type_a_rows[1]["Score"] == 100
-            assert type_a_rows[1]["Rank"] == 2
+            by_rank = sorted(type_a_rows, key=lambda r: r["Rank"])
+            assert by_rank[0]["Score"] == 90  # Lower score gets Rank 1
+            assert by_rank[0]["Rank"] == 1
+            assert by_rank[1]["Score"] == 100
+            assert by_rank[1]["Rank"] == 2
         finally:
             spark.stop()
 
@@ -289,8 +292,9 @@ class TestIssue335WindowOrderByList:
 
             assert len(rows) == 3
             type_a_rows = [row for row in rows if row["Type"] == "A"]
-            assert type_a_rows[0]["Rank"] == 1  # Lower score gets rank 1
-            assert type_a_rows[1]["Rank"] == 2
+            by_rank = sorted(type_a_rows, key=lambda r: r["Rank"])
+            assert by_rank[0]["Rank"] == 1 and by_rank[0]["Score"] == 90  # Lower score gets rank 1
+            assert by_rank[1]["Rank"] == 2
         finally:
             spark.stop()
 

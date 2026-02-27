@@ -5494,16 +5494,8 @@ fn row_number_window(partition_by: Vec<String>, order_by: Vec<String>) -> PyResu
             "row_number_window: order_by cannot be empty",
         ));
     }
-    let first = &order_by[0];
-    let (name, descending) = if let Some(stripped) = first.strip_prefix('-') {
-        (stripped.to_string(), true)
-    } else {
-        (first.clone(), false)
-    };
-    let order_col = Column::new(name);
-    let base = order_col.row_number(descending);
     let parts: Vec<&str> = partition_by.iter().map(|s| s.as_str()).collect();
-    let windowed = base.over(&parts[..]);
+    let windowed = Column::row_number_over(&parts[..], &order_by).map_err(to_py_err)?;
     Ok(PyColumn { inner: windowed })
 }
 
