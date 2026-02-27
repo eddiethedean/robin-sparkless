@@ -1,7 +1,7 @@
 # PySpark-style: from sparkless.sql.functions import col, lit, when, count, sum, ...
 import getpass
 
-from sparkless import _native
+from sparkless import _native, _Column
 from sparkless import (
     column as col,
     lit,
@@ -373,7 +373,13 @@ def array_contains(col_or_name, value):
 
 
 def array_distinct(col_or_name):
-    return _native_fn("array_distinct")(_as_col(col_or_name))
+    """Distinct elements in array (PySpark array_distinct). Output column name matches PySpark: array_distinct(col)."""
+    col_obj = _as_col(col_or_name)
+    base_name = getattr(col_obj, "name", None)
+    out = _native_fn("array_distinct")(col_obj)
+    if base_name is not None:
+        return out.alias(f"array_distinct({base_name})")
+    return out
 
 
 def array_sort(col_or_name):
@@ -894,6 +900,7 @@ __all__ = [
     "json_tuple",
     "size",
     "array_contains",
+    "arrays_overlap",
     "array_position",
     "array_remove",
     "explode",
@@ -1013,8 +1020,8 @@ def least(*cols):
     return _least(*[_as_col(c) for c in cols])
 
 
-def array_distinct(col):
-    """Distinct elements in array column (PySpark array_distinct)."""
+def _array_distinct_column(col):
+    """Internal helper: distinct elements in array column."""
     return _array_distinct(_as_col(col))
 
 
@@ -1293,11 +1300,18 @@ def array_contains(column, value):
     """True if array contains value (PySpark array_contains). value can be column name, Column, or literal."""
     if isinstance(value, str):
         v = col(value)
-    elif hasattr(value, "inner"):  # PyColumn
-        v = value
-    else:
-        v = lit(value)
+        return _array_contains(_as_col(column), v)
+    if isinstance(value, _Column):  # Column argument, e.g. join condition
+        # Implement via arrays_overlap(array_col, array(value_col)) so we avoid list.eval on named columns.
+        return arrays_overlap(_as_col(column), array(value))
+    # Literal value
+    v = lit(value)
     return _array_contains(_as_col(column), v)
+
+
+def arrays_overlap(col1, col2):
+    """True if two array columns have any element in common (PySpark arrays_overlap)."""
+    return _native.arrays_overlap(_as_col(col1), _as_col(col2))
 
 
 def explode(column):

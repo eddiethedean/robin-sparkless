@@ -2533,19 +2533,26 @@ impl Column {
 
     /// Check if list contains value (PySpark array_contains).
     pub fn array_contains(&self, value: Expr) -> Column {
-        Self::from_expr(self.expr().clone().list().contains(value, false), None)
+        let args = [value];
+        let expr = self.expr().clone().map_many(
+            |cols| expect_col(crate::udfs::apply_array_contains(cols)),
+            &args,
+            |_schema, fields| Ok(Field::new(fields[0].name().clone(), DataType::Boolean)),
+        );
+        Self::from_expr(expr, None)
     }
 
     /// Join list of strings with separator (PySpark array_join).
     pub fn array_join(&self, separator: &str) -> Column {
         use polars::prelude::*;
-        Self::from_expr(
-            self.expr()
-                .clone()
-                .list()
-                .join(lit(separator.to_string()), false),
-            None,
-        )
+        // PySpark array_join accepts arrays of any element type and stringifies elements.
+        // Cast elements to String via list.eval before joining.
+        let elem_to_str = col("").cast(DataType::String);
+        let list_expr = self.expr().clone().list().eval(elem_to_str);
+        let joined = list_expr
+            .list()
+            .join(lit(separator.to_string()), false);
+        Self::from_expr(joined, None)
     }
 
     /// Maximum element in list (PySpark array_max).
@@ -2629,7 +2636,10 @@ impl Column {
     pub fn array_distinct(&self) -> Column {
         let expr = self.expr().clone().map(
             |s| expect_col(crate::udfs::apply_array_distinct_first_order(s)),
-            |_schema, field| Ok(field.clone()),
+            |_schema, field| {
+                let new_name = format!("array_distinct({})", field.name());
+                Ok(Field::new(new_name.into(), field.dtype().clone()))
+            },
         );
         Self::from_expr(expr, None)
     }

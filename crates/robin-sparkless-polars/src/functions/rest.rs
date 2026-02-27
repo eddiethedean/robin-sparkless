@@ -1309,21 +1309,37 @@ pub fn expr_coerce_to_boolean(expr: Expr) -> Expr {
     )
 }
 
+/// Canonical display name for cast target type in column names (e.g. CAST(avg(x) AS STRING)).
+fn cast_display_type(dtype: &DataType, raw_type_name: &str) -> String {
+    match dtype {
+        DataType::Int32 => "INT".to_string(),
+        DataType::Int64 => "LONG".to_string(),
+        DataType::Float64 => "DOUBLE".to_string(),
+        DataType::Float32 => "FLOAT".to_string(),
+        DataType::String => "STRING".to_string(),
+        _ => raw_type_name.to_uppercase(),
+    }
+}
+
 fn cast_impl(column: &Column, type_name: &str, strict: bool) -> Result<Column, String> {
     let dtype = parse_type_name(type_name)?;
+    let display_type = cast_display_type(&dtype, type_name);
+    let base_name = column.name();
+    let cast_name = format!("CAST({} AS {})", base_name, display_type);
+
     if dtype == DataType::Boolean {
         let expr = column.expr().clone().map(
             move |col| crate::column::expect_col(crate::udfs::apply_string_to_boolean(col, strict)),
             |_schema, field| Ok(Field::new(field.name().clone(), DataType::Boolean)),
         );
-        return Ok(Column::from_expr(expr, None));
+        return Ok(Column::from_expr(expr.alias(&cast_name), Some(cast_name)));
     }
     if dtype == DataType::Date {
         let expr = column.expr().clone().map(
             move |col| crate::column::expect_col(crate::udfs::apply_string_to_date(col, strict)),
             |_schema, field| Ok(Field::new(field.name().clone(), DataType::Date)),
         );
-        return Ok(Column::from_expr(expr, None));
+        return Ok(Column::from_expr(expr.alias(&cast_name), Some(cast_name)));
     }
     if matches!(dtype, DataType::Datetime(_, _)) {
         use polars::datatypes::TimeUnit;
@@ -1338,7 +1354,7 @@ fn cast_impl(column: &Column, type_name: &str, strict: bool) -> Result<Column, S
                 ))
             },
         );
-        return Ok(Column::from_expr(expr, None));
+        return Ok(Column::from_expr(expr.alias(&cast_name), Some(cast_name)));
     }
     if dtype == DataType::Int32 || dtype == DataType::Int64 {
         let target = dtype.clone();
@@ -1352,21 +1368,21 @@ fn cast_impl(column: &Column, type_name: &str, strict: bool) -> Result<Column, S
             },
             move |_schema, field| Ok(Field::new(field.name().clone(), dtype.clone())),
         );
-        return Ok(Column::from_expr(expr, None));
+        return Ok(Column::from_expr(expr.alias(&cast_name), Some(cast_name)));
     }
     if dtype == DataType::Float64 {
         let expr = column.expr().clone().map(
             move |col| crate::column::expect_col(crate::udfs::apply_string_to_double(col, strict)),
             |_schema, field| Ok(Field::new(field.name().clone(), DataType::Float64)),
         );
-        return Ok(Column::from_expr(expr, None));
+        return Ok(Column::from_expr(expr.alias(&cast_name), Some(cast_name)));
     }
     let expr = if strict {
         column.expr().clone().strict_cast(dtype)
     } else {
         column.expr().clone().cast(dtype)
     };
-    Ok(Column::from_expr(expr, None))
+    Ok(Column::from_expr(expr.alias(&cast_name), Some(cast_name)))
 }
 
 /// Cast column to the given type (PySpark cast).
