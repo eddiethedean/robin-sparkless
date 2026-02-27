@@ -423,9 +423,11 @@ pub fn order_by_exprs(
     Ok(super::DataFrame::from_lazy_with_options(lf, case_sensitive))
 }
 
-/// Union (unionAll): stack another DataFrame vertically. Schemas must match: same set of column names
-/// (order may differ; right is reordered to left's order by name). When column types differ,
-/// both sides are coerced to a common type (PySpark parity #551).
+/// Union (unionAll): stack another DataFrame vertically.
+/// When column names match (set equality, order may differ): use left's order, reorder right by name (#551).
+/// When column count matches but names differ: union by position (PySpark/createDataFrame parity #1018):
+/// align by index, result uses left's column names.
+/// When column types differ, both sides are coerced to a common type.
 pub fn union(
     left: &DataFrame,
     right: &DataFrame,
@@ -442,55 +444,85 @@ pub fn union(
             .into(),
         ));
     }
-    // Same set of names (order may differ): use left's order for both sides (reorder right by name).
     let right_names_set: std::collections::HashSet<_> = if case_sensitive {
         right_names.iter().cloned().collect()
     } else {
         right_names.iter().map(|s| s.to_lowercase()).collect()
     };
-    for n in &left_names {
+    let names_match = left_names.iter().all(|n| {
         let key = if case_sensitive {
             n.clone()
         } else {
             n.to_lowercase()
         };
-        if !right_names_set.contains(&key) {
-            return Err(PolarsError::InvalidOperation(
-                format!(
-                    "union: column order/names must match. Left: {:?}, Right: {:?}",
-                    left_names, right_names
-                )
-                .into(),
-            ));
+        right_names_set.contains(&key)
+    });
+
+    let (left_exprs, right_exprs) = if names_match {
+        // Same set of names: use left's order for both sides (reorder right by name).
+        let mut left_exprs = Vec::with_capacity(left_names.len());
+        let mut right_exprs = Vec::with_capacity(right_names.len());
+        for name in &left_names {
+            let resolved_left = left.resolve_column_name(name)?;
+            let resolved_right = right.resolve_column_name(name)?;
+            let left_dtype = left.get_column_dtype(name).unwrap_or(DataType::Null);
+            let right_dtype = right.get_column_dtype(name).unwrap_or(DataType::Null);
+            let target = if left_dtype == DataType::Null {
+                right_dtype.clone()
+            } else if right_dtype == DataType::Null || left_dtype == right_dtype {
+                left_dtype.clone()
+            } else {
+                find_common_type(&left_dtype, &right_dtype)?
+            };
+            let left_expr = if left_dtype == target {
+                col(resolved_left.as_str())
+            } else {
+                col(resolved_left.as_str()).cast(target.clone())
+            };
+            let right_expr = if right_dtype == target {
+                col(resolved_right.as_str())
+            } else {
+                col(resolved_right.as_str()).cast(target)
+            };
+            left_exprs.push(left_expr.alias(name.as_str()));
+            right_exprs.push(right_expr.alias(name.as_str()));
         }
-    }
-    let mut left_exprs: Vec<Expr> = Vec::with_capacity(left_names.len());
-    let mut right_exprs: Vec<Expr> = Vec::with_capacity(right_names.len());
-    for name in &left_names {
-        let resolved_left = left.resolve_column_name(name)?;
-        let resolved_right = right.resolve_column_name(name)?;
-        let left_dtype = left.get_column_dtype(name).unwrap_or(DataType::Null);
-        let right_dtype = right.get_column_dtype(name).unwrap_or(DataType::Null);
-        let target = if left_dtype == DataType::Null {
-            right_dtype.clone()
-        } else if right_dtype == DataType::Null || left_dtype == right_dtype {
-            left_dtype.clone()
-        } else {
-            find_common_type(&left_dtype, &right_dtype)?
-        };
-        let left_expr = if left_dtype == target {
-            col(resolved_left.as_str())
-        } else {
-            col(resolved_left.as_str()).cast(target.clone())
-        };
-        let right_expr = if right_dtype == target {
-            col(resolved_right.as_str())
-        } else {
-            col(resolved_right.as_str()).cast(target)
-        };
-        left_exprs.push(left_expr.alias(name.as_str()));
-        right_exprs.push(right_expr.alias(name.as_str()));
-    }
+        (left_exprs, right_exprs)
+    } else {
+        // #1018: Union by position — same column count, different names; align by index, use left's names.
+        let mut left_exprs = Vec::with_capacity(left_names.len());
+        let mut right_exprs = Vec::with_capacity(right_names.len());
+        for (i, left_name) in left_names.iter().enumerate() {
+            let right_name = right_names.get(i).ok_or_else(|| {
+                PolarsError::InvalidOperation("union by position: index out of range".into())
+            })?;
+            let resolved_left = left.resolve_column_name(left_name)?;
+            let resolved_right = right.resolve_column_name(right_name)?;
+            let left_dtype = left.get_column_dtype(left_name).unwrap_or(DataType::Null);
+            let right_dtype = right.get_column_dtype(right_name).unwrap_or(DataType::Null);
+            let target = if left_dtype == DataType::Null {
+                right_dtype.clone()
+            } else if right_dtype == DataType::Null || left_dtype == right_dtype {
+                left_dtype.clone()
+            } else {
+                find_common_type(&left_dtype, &right_dtype)?
+            };
+            let left_expr = if left_dtype == target {
+                col(resolved_left.as_str())
+            } else {
+                col(resolved_left.as_str()).cast(target.clone())
+            };
+            let right_expr = if right_dtype == target {
+                col(resolved_right.as_str())
+            } else {
+                col(resolved_right.as_str()).cast(target)
+            };
+            left_exprs.push(left_expr.alias(left_name.as_str()));
+            right_exprs.push(right_expr.alias(left_name.as_str()));
+        }
+        (left_exprs, right_exprs)
+    };
+
     let lf1 = left.lazy_frame().select(&left_exprs);
     let lf2 = right.lazy_frame().select(&right_exprs);
     let out = polars::prelude::concat([lf1, lf2], UnionArgs::default())?;
