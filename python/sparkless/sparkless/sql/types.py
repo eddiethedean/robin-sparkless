@@ -1,11 +1,29 @@
 # PySpark-style types for schema and Row. Used by createDataFrame(schema=StructType(...)).
+from __future__ import annotations
+
+from datetime import date, datetime
+from typing import Dict, Iterator, List, Tuple, Union, cast
+
+# Values that can appear in a Row (collect() output). Recursive for nested structs/arrays.
+RowValue = Union[
+    int, float, str, bool, None,
+    date, datetime,
+    List["RowValue"],
+    Dict[str, "RowValue"],
+]
+
+# Spark struct field metadata: string keys, values are typically str, int, bool, or list of str.
+StructMetadata = Dict[str, Union[str, int, bool, List[str]]]
+
+# Return type of Row.__getitem__ (single element or slice).
+RowGetItemReturn = Union[RowValue, Tuple[RowValue, ...]]
 
 
 class DataType:
     def simpleString(self) -> str:
         return "string"
 
-    def __eq__(self, other):
+    def __eq__(self, other: object) -> bool:
         """Phase 7: type equality so ArrayType().element_type == StringType() in tests."""
         if type(self) is not type(other):
             return False
@@ -96,12 +114,12 @@ class TimestampType(DataType):
 class ArrayType(DataType):
     def __init__(
         self,
-        elementType=None,
-        containsNull=True,
+        elementType: DataType | None = None,
+        containsNull: bool = True,
         *,
-        element_type=None,
-        nullable=None,
-    ):
+        element_type: DataType | None = None,
+        nullable: bool | None = None,
+    ) -> None:
         if elementType is not None and element_type is not None:
             raise TypeError("Cannot specify both elementType and element_type")
         elem = elementType if elementType is not None else element_type
@@ -113,7 +131,7 @@ class ArrayType(DataType):
         self.nullable = self.containsNull
 
     @property
-    def element_type(self):
+    def element_type(self) -> DataType:
         """PySpark parity: element type of array (alias for elementType)."""
         return self.elementType
 
@@ -126,18 +144,23 @@ class ArrayType(DataType):
 
 
 class MapType(DataType):
-    def __init__(self, keyType, valueType, valueContainsNull=True):
+    def __init__(
+        self,
+        keyType: DataType,
+        valueType: DataType,
+        valueContainsNull: bool = True,
+    ) -> None:
         self.keyType = keyType
         self.valueType = valueType
         self.valueContainsNull = valueContainsNull
 
     @property
-    def key_type(self):
+    def key_type(self) -> DataType:
         """PySpark parity: key type of map (alias for keyType)."""
         return self.keyType
 
     @property
-    def value_type(self):
+    def value_type(self) -> DataType:
         """PySpark parity: value type of map (alias for valueType)."""
         return self.valueType
 
@@ -166,7 +189,13 @@ class DecimalType(DataType):
 
 
 class StructField:
-    def __init__(self, name, dataType, nullable=True, metadata=None):
+    def __init__(
+        self,
+        name: str,
+        dataType: DataType,
+        nullable: bool = True,
+        metadata: StructMetadata | None = None,
+    ) -> None:
         self.name = name
         self.dataType = dataType
         self.nullable = nullable
@@ -174,10 +203,10 @@ class StructField:
 
 
 class StructType(DataType):
-    def __init__(self, fields=None):
+    def __init__(self, fields: list[StructField] | None = None) -> None:
         self.fields = list(fields or [])
 
-    def fieldNames(self):
+    def fieldNames(self) -> list[str]:
         """PySpark parity: returns all field names in a list."""
         return [f.name for f in self.fields]
 
@@ -203,7 +232,7 @@ class Row(tuple):
     attribute access (row.column_name). Row is tuple-like (iterable, indexable by int).
     """
 
-    def __new__(cls, *args, **kwargs):
+    def __new__(cls: type[Row], *args: RowValue, **kwargs: RowValue) -> Row:
         # Support kwargs-style initialization: Row(a=1, b=2)
         if kwargs:
             obj = super().__new__(cls, list(kwargs.values()))
@@ -230,26 +259,26 @@ class Row(tuple):
         # Iterate underlying tuple values regardless of Row.__iter__ override.
         return super().__iter__()
 
-    def __getitem__(self, item):
+    def __getitem__(self, item: int | str | slice) -> RowGetItemReturn:  # type: ignore[override]
         # PySpark parity: Row supports both positional and name-based indexing.
         if isinstance(item, str):
             fields = self.__dict__.get("_fields", [])
             if item in fields:
-                return super().__getitem__(fields.index(item))
+                return cast(RowValue, super().__getitem__(fields.index(item)))
             # Case-insensitive fallback (common in tests)
             lowered = {f.lower(): i for i, f in enumerate(fields)}
             if item.lower() in lowered:
-                return super().__getitem__(lowered[item.lower()])
+                return cast(RowValue, super().__getitem__(lowered[item.lower()]))
             # Dotted key (e.g. "Person.name"): match by suffix when struct field select yields single column named "name"
             if "." in item and fields:
                 suffix = item.rsplit(".", 1)[-1]
                 for i, f in enumerate(fields):
                     if f.lower() == suffix.lower():
-                        return super().__getitem__(i)
+                        return cast(RowValue, super().__getitem__(i))
             raise KeyError(item)
-        return super().__getitem__(item)
+        return cast(RowGetItemReturn, super().__getitem__(item))
 
-    def __contains__(self, item):
+    def __contains__(self, item: object) -> bool:
         if isinstance(item, str):
             fields = self.__dict__.get("_fields", [])
             if item in fields:
@@ -257,18 +286,18 @@ class Row(tuple):
             return item.lower() in {f.lower() for f in fields}
         return super().__contains__(item)
 
-    def __getattr__(self, name):
+    def __getattr__(self, name: str) -> RowValue:
         try:
             idx = self.__dict__["_fields"].index(name)
-            return self[idx]
+            return cast(RowValue, self[idx])
         except (KeyError, ValueError):
             raise AttributeError(name)
 
-    def asDict(self):
+    def asDict(self) -> dict[str, RowValue]:
         fields = self.__dict__.get("_fields", [])
         return dict(zip(fields, list(self._iter_values())))
 
-    def __eq__(self, other):
+    def __eq__(self, other: object) -> bool:
         # Allow direct comparison to dicts/mappings in tests.
         from collections.abc import Mapping
 
@@ -276,13 +305,13 @@ class Row(tuple):
             return self.asDict() == dict(other)
         return super().__eq__(other)
 
-    def _order_key(self, v):
+    def _order_key(self, v: RowValue) -> tuple[int, str | tuple[str, str]]:
         """Normalize value for ordering so mixed types (str vs int) never raise TypeError."""
         if v is None:
             return (0, "")
         return (1, (type(v).__name__, repr(v)))
 
-    def __lt__(self, other):
+    def __lt__(self, other: object) -> bool:
         if not isinstance(other, Row) or len(self) != len(other):
             return NotImplemented
         for a, b in zip(self._iter_values(), other._iter_values()):
@@ -291,7 +320,7 @@ class Row(tuple):
                 return ka < kb
         return False
 
-    def __le__(self, other):
+    def __le__(self, other: object) -> bool:
         if not isinstance(other, Row) or len(self) != len(other):
             return NotImplemented
         for a, b in zip(self._iter_values(), other._iter_values()):
@@ -300,7 +329,7 @@ class Row(tuple):
                 return ka < kb
         return True
 
-    def __gt__(self, other):
+    def __gt__(self, other: object) -> bool:
         if not isinstance(other, Row) or len(self) != len(other):
             return NotImplemented
         for a, b in zip(self._iter_values(), other._iter_values()):
@@ -309,7 +338,7 @@ class Row(tuple):
                 return ka > kb
         return False
 
-    def __ge__(self, other):
+    def __ge__(self, other: object) -> bool:
         if not isinstance(other, Row) or len(self) != len(other):
             return NotImplemented
         for a, b in zip(self._iter_values(), other._iter_values()):
@@ -319,26 +348,26 @@ class Row(tuple):
         return True
 
     # Make Row behave like a mapping for test helpers that expect dict-like rows.
-    def keys(self):
+    def keys(self) -> list[str]:
         return list(self.__dict__.get("_fields", []))
 
-    def items(self):
+    def items(self) -> list[tuple[str, RowValue]]:
         fields = self.__dict__.get("_fields", [])
-        return [(name, self[i]) for i, name in enumerate(fields)]
+        return [(name, cast(RowValue, self[i])) for i, name in enumerate(fields)]
 
-    def values(self):
+    def values(self) -> list[RowValue]:
         return list(self._iter_values())
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[str]:
         # Dict-like iteration (keys). Tests often treat Row like Mapping.
         # Use row.values() / tuple(row._iter_values()) for values.
         return iter(self.__dict__.get("_fields", []))
 
 
-class _ColumnsList(list):
+class _ColumnsList(list[str]):
     """PySpark parity: df.columns and df.columns() both return the list of column names."""
 
-    def __call__(self):
+    def __call__(self) -> _ColumnsList:
         return self
 
 

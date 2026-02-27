@@ -1,13 +1,19 @@
 from __future__ import annotations
 
+from typing import Sequence, Union
+
 
 class _SortKey:
-    def __init__(self, name: str, ascending: bool):
+    def __init__(self, name: str, ascending: bool) -> None:
         self.name = name
         self.ascending = ascending
 
 
-def _partition_names(cols):
+# Partition/order spec: sequence of column names or _SortKey. Column (from sparkless) accepted at runtime.
+PartitionOrOrderSpec = Sequence[Union[str, _SortKey]]
+
+
+def _partition_names(cols: PartitionOrOrderSpec) -> list[str]:
     # Lazy import to avoid circular imports at module import time
     from sparkless import Column as _Column
 
@@ -24,9 +30,9 @@ def _partition_names(cols):
     return out
 
 
-def _normalize_sort_keys(cols):
+def _normalize_sort_keys(cols: PartitionOrOrderSpec) -> list[_SortKey]:
     # Lazy import inside to avoid cycles
-    from sparkless.sql.functions import _SortKey as _FnSortKey  # type: ignore[attr-defined]
+    from sparkless.sql.functions import _SortKey as _FnSortKey
     from sparkless import (
         Column as _Column,
     )  # avoid circular import at module import time
@@ -50,31 +56,36 @@ def _normalize_sort_keys(cols):
 
 
 class WindowSpec:
-    def __init__(self, partition_by=None, order_by=None, frame=None):
+    def __init__(
+        self,
+        partition_by: list[str] | None = None,
+        order_by: list[_SortKey] | None = None,
+        frame: tuple[str, int, int] | None = None,
+    ) -> None:
         self._partition_by = list(partition_by or [])
         self._order_by = list(order_by or [])
         self._frame = frame
 
-    def partitionBy(self, *cols):
+    def partitionBy(self, *cols: Union[str, _SortKey]) -> WindowSpec:
         names = _partition_names(cols)
         return WindowSpec(
             partition_by=names, order_by=self._order_by, frame=self._frame
         )
 
-    def orderBy(self, *cols):
+    def orderBy(self, *cols: Union[str, _SortKey]) -> WindowSpec:
         keys = _normalize_sort_keys(cols)
         return WindowSpec(
             partition_by=self._partition_by, order_by=keys, frame=self._frame
         )
 
-    def rowsBetween(self, start, end):
+    def rowsBetween(self, start: int, end: int) -> WindowSpec:
         return WindowSpec(
             partition_by=self._partition_by,
             order_by=self._order_by,
             frame=("rows", start, end),
         )
 
-    def rangeBetween(self, start, end):
+    def rangeBetween(self, start: int, end: int) -> WindowSpec:
         return WindowSpec(
             partition_by=self._partition_by,
             order_by=self._order_by,
@@ -84,22 +95,22 @@ class WindowSpec:
 
 class Window:
     # PySpark constants (Long.MIN_VALUE / Long.MAX_VALUE)
-    unboundedPreceding = -(2**63)
-    currentRow = 0
-    unboundedFollowing = 2**63 - 1
+    unboundedPreceding: int = -(2**63)
+    currentRow: int = 0
+    unboundedFollowing: int = 2**63 - 1
 
     @staticmethod
-    def partitionBy(*cols):
+    def partitionBy(*cols: Union[str, _SortKey]) -> WindowSpec:
         return WindowSpec().partitionBy(*cols)
 
     @staticmethod
-    def orderBy(*cols):
+    def orderBy(*cols: Union[str, _SortKey]) -> WindowSpec:
         return WindowSpec().orderBy(*cols)
 
     @staticmethod
-    def rowsBetween(start, end):
+    def rowsBetween(start: int, end: int) -> WindowSpec:
         return WindowSpec().rowsBetween(start, end)
 
     @staticmethod
-    def rangeBetween(start, end):
+    def rangeBetween(start: int, end: int) -> WindowSpec:
         return WindowSpec().rangeBetween(start, end)
