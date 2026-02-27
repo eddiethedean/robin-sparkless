@@ -5,3 +5,24 @@
 # Burn down this list as we add support.
 
 # (Backend/core/optimizer internals tests have been removed.)
+
+# RDD not implemented
+test_issue_361_createDataFrame_rdd
+test_issue_408_rdd_flatmap
+
+# posexplode_outer not implemented
+posexplode_outer
+
+# cume_dist not implemented
+cume_dist
+
+# SQL / DDL not supported
+test_sql_ddl
+test_create_database
+test_drop_database
+test_set_current_database
+test_table_in_specific_database
+
+# Subquery in WHERE not supported
+test_sql_with_subquery
+

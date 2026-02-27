@@ -7,11 +7,20 @@ use crate::column::Column;
 use polars::prelude::*;
 
 /// Count aggregation (PySpark LongType; cast to Int64 for schema parity #734).
+/// When the input column is the special `"*"` (count(*)), use `len()` so we count
+/// all rows (including nulls) and avoid Polars duplicate-name issues with `col("*")`.
 pub fn count(col: &Column) -> Column {
-    Column::from_expr(
-        col.expr().clone().count().cast(DataType::Int64),
-        Some("count".to_string()),
-    )
+    use polars::prelude::len;
+
+    if col.name() == "*" {
+        let expr = len().cast(DataType::Int64);
+        Column::from_expr(expr, Some("count".to_string()))
+    } else {
+        Column::from_expr(
+            col.expr().clone().count().cast(DataType::Int64),
+            Some("count".to_string()),
+        )
+    }
 }
 
 /// Sum aggregation. Carries source column for running-window conversion when orderBy differs from partitionBy.

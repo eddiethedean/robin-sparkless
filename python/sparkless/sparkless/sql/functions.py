@@ -1,7 +1,9 @@
 # PySpark-style: from sparkless.sql.functions import col, lit, when, count, sum, ...
+# mypy: disable-error-code=no-redef
+# ruff: noqa: F811
 import getpass
 
-from sparkless import _native, _Column
+from sparkless import _native, _Column  # type: ignore[import-untyped]
 from sparkless import (
     column as col,
     lit,
@@ -78,16 +80,16 @@ from sparkless import (
     crc32 as _crc32,
     xxhash64 as _xxhash64,
     get_json_object as _get_json_object,
-    json_tuple as _json_tuple,
     size as _size,
     array_contains as _array_contains,
     explode as _explode,
 )
 from sparkless.errors import PySparkValueError
 from sparkless import DataFrame
+from typing import Any, Callable, Dict, Tuple
 
 # Registry for Python UDFs: udf_name -> (callable, return_type). Populated by udf() / @udf.
-_PYTHON_UDF_REGISTRY = {}
+_PYTHON_UDF_REGISTRY: Dict[str, Tuple[Callable[..., Any], Any]] = {}
 
 # Default return type when @udf() is used without arguments (PySpark uses StringType).
 _DEFAULT_UDF_RETURN_TYPE = None  # Set below after importing types
@@ -162,7 +164,9 @@ def log(col_or_base, base_or_col=None):
         return _native_fn("log_with_base")(col_arg, base_val)
     except (TypeError, ValueError):
         pass
-    raise TypeError("log(base, column) or log(column, base): one argument must be a numeric base (int/float), the other a Column")
+    raise TypeError(
+        "log(base, column) or log(column, base): one argument must be a numeric base (int/float), the other a Column"
+    )
 
 
 def exp(c):
@@ -1371,7 +1375,7 @@ def create_map(*cols):
 
     With no args or create_map([]), returns a column of empty maps per row.
     """
-    import sparkless._native as _native
+    import sparkless._native as _native  # type: ignore[import-untyped]
 
     # PySpark: create_map() or create_map([]) -> empty map
     expanded = []
@@ -1390,7 +1394,7 @@ def create_map(*cols):
 
 class _RowNumberExpr:
     def over(self, window):
-        import sparkless._native as _native
+        import sparkless._native as _native  # type: ignore[import-untyped]
 
         partition_by, encoded, _ = _window_spec_to_partition_order(window)
         return _native.row_number_window(partition_by, encoded)
@@ -1403,7 +1407,7 @@ def row_number():
 
 class _PercentRankExpr:
     def over(self, window):
-        import sparkless._native as _native
+        import sparkless._native as _native  # type: ignore[import-untyped]
 
         partition_by, encoded, _ = _window_spec_to_partition_order(window)
         return _native.percent_rank_window(partition_by, encoded)
@@ -1416,7 +1420,7 @@ def percent_rank():
 
 class _RankExpr:
     def over(self, window):
-        import sparkless._native as _native
+        import sparkless._native as _native  # type: ignore[import-untyped]
 
         partition_by, encoded, _ = _window_spec_to_partition_order(window)
         return _native.rank_window(partition_by, encoded)
@@ -1429,7 +1433,7 @@ def rank():
 
 class _DenseRankExpr:
     def over(self, window):
-        import sparkless._native as _native
+        import sparkless._native as _native  # type: ignore[import-untyped]
 
         partition_by, encoded, _ = _window_spec_to_partition_order(window)
         return _native.dense_rank_window(partition_by, encoded)
@@ -1445,7 +1449,7 @@ class _NtileExpr:
         self._n = n
 
     def over(self, window):
-        import sparkless._native as _native
+        import sparkless._native as _native  # type: ignore[import-untyped]
 
         partition_by, encoded, _ = _window_spec_to_partition_order(window)
         return _native.ntile_window(self._n, partition_by, encoded)
@@ -1462,7 +1466,7 @@ class _LagExpr:
         self._offset = offset
 
     def over(self, window):
-        import sparkless._native as _native
+        import sparkless._native as _native  # type: ignore[import-untyped]
 
         partition_by, encoded, _ = _window_spec_to_partition_order(window)
         name = _col_name(self._col_or_name)
