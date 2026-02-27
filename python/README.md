@@ -59,6 +59,6 @@ Rust UDFs can be registered in the engine (see the main repo’s [UDF guide](../
 
 ## Packaging
 
-`maturin build` in the `python/` directory produces abi3 wheels for manylinux, macOS, and Windows. Use `requires-python = ">=3.9"` (or as set in `pyproject.toml`). Optional dev deps: `pip install -e ".[dev]"` for pytest and pandas.
+`maturin build` in the `python/` directory produces abi3 wheels for manylinux, macOS, and Windows. Use `requires-python = ">=3.8"` (or as set in `pyproject.toml`). Optional dev deps: `pip install -e ".[dev]"` for pytest and pandas.
 
 Known differences from PySpark are documented in the main repo: [docs/PYSPARK_DIFFERENCES.md](../docs/PYSPARK_DIFFERENCES.md).

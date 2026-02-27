@@ -4,13 +4,14 @@ version = "4.0.0"
 description = "PySpark-like DataFrame API in Python—no JVM. Uses robin-sparkless (Rust/Polars) as the execution engine."
 readme = "README.md"
 license = { text = "MIT" }
-requires-python = ">=3.9"
+requires-python = ">=3.8"
 keywords = ["pyspark", "polars", "dataframe", "spark", "etl"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
     "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
@@ -32,13 +33,13 @@ python-source = "sparkless"
 manifest-path = "Cargo.toml"
 
 [tool.mypy]
-python_version = "3.9"
+python_version = "3.8"
 warn_return_any = true
 warn_unused_ignores = true
 exclude = ["tests/", ".*/tests/", "upstream_sparkless/"]
 
 
 [tool.pyright]
-pythonVersion = "3.9"
+pythonVersion = "3.8"
 typeCheckingMode = "basic"
 exclude = ["tests", "**/tests", "**/upstream_sparkless"]

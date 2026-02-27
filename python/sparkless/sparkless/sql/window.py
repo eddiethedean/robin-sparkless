@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Sequence, Union
+from typing import List, Optional, Sequence, Tuple, Union
 
 
 class _SortKey:
@@ -13,7 +13,7 @@ class _SortKey:
 PartitionOrOrderSpec = Sequence[Union[str, _SortKey]]
 
 
-def _partition_names(cols: PartitionOrOrderSpec) -> list[str]:
+def _partition_names(cols: PartitionOrOrderSpec) -> List[str]:
     # Lazy import to avoid circular imports at module import time
     from sparkless import Column as _Column
 
@@ -30,7 +30,7 @@ def _partition_names(cols: PartitionOrOrderSpec) -> list[str]:
     return out
 
 
-def _normalize_sort_keys(cols: PartitionOrOrderSpec) -> list[_SortKey]:
+def _normalize_sort_keys(cols: PartitionOrOrderSpec) -> List[_SortKey]:
     # Lazy import inside to avoid cycles
     from sparkless.sql.functions import _SortKey as _FnSortKey
     from sparkless import (
@@ -58,9 +58,9 @@ def _normalize_sort_keys(cols: PartitionOrOrderSpec) -> list[_SortKey]:
 class WindowSpec:
     def __init__(
         self,
-        partition_by: list[str] | None = None,
-        order_by: list[_SortKey] | None = None,
-        frame: tuple[str, int, int] | None = None,
+        partition_by: Optional[List[str]] = None,
+        order_by: Optional[List[_SortKey]] = None,
+        frame: Optional[Tuple[str, int, int]] = None,
     ) -> None:
         self._partition_by = list(partition_by or [])
         self._order_by = list(order_by or [])

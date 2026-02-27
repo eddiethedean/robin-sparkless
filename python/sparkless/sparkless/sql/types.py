@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime
-from typing import Dict, Iterator, List, Tuple, Union, cast
+from typing import Dict, Iterator, List, Optional, Tuple, Type, Union, cast
 
 # Values that can appear in a Row (collect() output). Recursive for nested structs/arrays.
 RowValue = Union[
@@ -114,11 +114,11 @@ class TimestampType(DataType):
 class ArrayType(DataType):
     def __init__(
         self,
-        elementType: DataType | None = None,
+        elementType: Optional[DataType] = None,
         containsNull: bool = True,
         *,
-        element_type: DataType | None = None,
-        nullable: bool | None = None,
+        element_type: Optional[DataType] = None,
+        nullable: Optional[bool] = None,
     ) -> None:
         if elementType is not None and element_type is not None:
             raise TypeError("Cannot specify both elementType and element_type")
@@ -194,7 +194,7 @@ class StructField:
         name: str,
         dataType: DataType,
         nullable: bool = True,
-        metadata: StructMetadata | None = None,
+        metadata: Optional[StructMetadata] = None,
     ) -> None:
         self.name = name
         self.dataType = dataType
@@ -203,10 +203,10 @@ class StructField:
 
 
 class StructType(DataType):
-    def __init__(self, fields: list[StructField] | None = None) -> None:
+    def __init__(self, fields: Optional[List[StructField]] = None) -> None:
         self.fields = list(fields or [])
 
-    def fieldNames(self) -> list[str]:
+    def fieldNames(self) -> List[str]:
         """PySpark parity: returns all field names in a list."""
         return [f.name for f in self.fields]
 
@@ -232,7 +232,7 @@ class Row(tuple):
     attribute access (row.column_name). Row is tuple-like (iterable, indexable by int).
     """
 
-    def __new__(cls: type[Row], *args: RowValue, **kwargs: RowValue) -> Row:
+    def __new__(cls: Type["Row"], *args: RowValue, **kwargs: RowValue) -> "Row":
         # Support kwargs-style initialization: Row(a=1, b=2)
         if kwargs:
             obj = super().__new__(cls, list(kwargs.values()))
@@ -259,7 +259,7 @@ class Row(tuple):
         # Iterate underlying tuple values regardless of Row.__iter__ override.
         return super().__iter__()
 
-    def __getitem__(self, item: int | str | slice) -> RowGetItemReturn:  # type: ignore[override]
+    def __getitem__(self, item: Union[int, str, slice]) -> RowGetItemReturn:  # type: ignore[override]
         # PySpark parity: Row supports both positional and name-based indexing.
         if isinstance(item, str):
             fields = self.__dict__.get("_fields", [])
@@ -293,7 +293,7 @@ class Row(tuple):
         except (KeyError, ValueError):
             raise AttributeError(name)
 
-    def asDict(self) -> dict[str, RowValue]:
+    def asDict(self) -> Dict[str, RowValue]:
         fields = self.__dict__.get("_fields", [])
         return dict(zip(fields, list(self._iter_values())))
 
@@ -305,7 +305,7 @@ class Row(tuple):
             return self.asDict() == dict(other)
         return super().__eq__(other)
 
-    def _order_key(self, v: RowValue) -> tuple[int, str | tuple[str, str]]:
+    def _order_key(self, v: RowValue) -> Tuple[int, Union[str, Tuple[str, str]]]:
         """Normalize value for ordering so mixed types (str vs int) never raise TypeError."""
         if v is None:
             return (0, "")
@@ -348,14 +348,14 @@ class Row(tuple):
         return True
 
     # Make Row behave like a mapping for test helpers that expect dict-like rows.
-    def keys(self) -> list[str]:
+    def keys(self) -> List[str]:
         return list(self.__dict__.get("_fields", []))
 
-    def items(self) -> list[tuple[str, RowValue]]:
+    def items(self) -> List[Tuple[str, RowValue]]:
         fields = self.__dict__.get("_fields", [])
         return [(name, cast(RowValue, self[i])) for i, name in enumerate(fields)]
 
-    def values(self) -> list[RowValue]:
+    def values(self) -> List[RowValue]:
         return list(self._iter_values())
 
     def __iter__(self) -> Iterator[str]:
@@ -364,10 +364,11 @@ class Row(tuple):
         return iter(self.__dict__.get("_fields", []))
 
 
-class _ColumnsList(list[str]):
-    """PySpark parity: df.columns and df.columns() both return the list of column names."""
+class _ColumnsList(list):
+    """PySpark parity: df.columns and df.columns() both return the list of column names.
+    Typing: behaves as List[str] (column names)."""
 
-    def __call__(self) -> _ColumnsList:
+    def __call__(self) -> "_ColumnsList":
         return self
 
 
