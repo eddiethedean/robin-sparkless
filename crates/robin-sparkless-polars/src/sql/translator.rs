@@ -817,8 +817,20 @@ fn sql_expr_to_polars(
             if list.is_empty() {
                 return Ok(lit(false));
             }
-            let series = sql_in_list_to_series(list)?;
-            let in_expr = col_expr.is_in(lit(series), false);
+
+            // Build IN as a disjunction of equality comparisons so we can reuse
+            // the full PySpark-style type coercion logic for string–numeric
+            // comparisons in DataFrame::coerce_string_numeric_comparisons
+            // (issue #1030 / issue #419).
+            let mut iter = list.iter();
+            let first = iter.next().unwrap();
+            let mut in_expr =
+                col_expr.clone().eq(sql_expr_to_polars(first, session, df, having_agg_map)?);
+            for e in iter {
+                let rhs = sql_expr_to_polars(e, session, df, having_agg_map)?;
+                in_expr = in_expr.or(col_expr.clone().eq(rhs));
+            }
+
             Ok(if *negated {
                 in_expr.not()
             } else {
@@ -955,65 +967,6 @@ fn sql_expr_to_string_literal(expr: &SqlExpr) -> Result<String, PolarsError> {
             format!("SQL: LIKE pattern must be a string literal, got {:?}", expr).into(),
         )),
     }
-}
-
-/// Build a Polars Series from SQL IN list literals (for WHERE col IN (1,2,3)). Issue #590.
-fn sql_in_list_to_series(list: &[SqlExpr]) -> Result<polars::prelude::Series, PolarsError> {
-    use polars::prelude::Series;
-    let mut str_vals: Vec<String> = Vec::new();
-    let mut int_vals: Vec<i64> = Vec::new();
-    let mut float_vals: Vec<f64> = Vec::new();
-    let mut has_string = false;
-    let mut has_float = false;
-    for e in list {
-        match e {
-            SqlExpr::Value(ValueWithSpan {
-                value: Value::SingleQuotedString(s),
-                ..
-            }) => {
-                str_vals.push(s.clone());
-                has_string = true;
-            }
-            SqlExpr::Value(ValueWithSpan {
-                value: Value::Number(n, _),
-                ..
-            }) => {
-                str_vals.push(n.clone());
-                match parse_sql_number_val(n, "IN list")? {
-                    SqlNumberVal::Int(v) => int_vals.push(v),
-                    SqlNumberVal::Float(v) => {
-                        float_vals.push(v);
-                        has_float = true;
-                    }
-                }
-            }
-            SqlExpr::Value(ValueWithSpan {
-                value: Value::Boolean(b),
-                ..
-            }) => {
-                str_vals.push(b.to_string());
-                has_string = true;
-            }
-            SqlExpr::Value(ValueWithSpan {
-                value: Value::Null, ..
-            }) => {}
-            _ => {
-                return Err(PolarsError::InvalidOperation(
-                    format!("SQL: IN list supports only literals, got {:?}", e).into(),
-                ));
-            }
-        }
-    }
-    let series = if has_string {
-        Series::from_iter(str_vals.iter().map(|s| s.as_str()))
-    } else if !has_float && int_vals.len() == str_vals.len() {
-        Series::from_iter(int_vals)
-    } else if float_vals.len() == str_vals.len() {
-        Series::from_iter(float_vals)
-    } else {
-        Series::from_iter(str_vals.iter().map(|s| s.as_str()))
-    };
-    Ok(series)
 }
 
 /// Projection item: either a plain Expr (built-in, Rust UDF, identifier) or Python UDF Column.

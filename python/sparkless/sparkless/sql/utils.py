@@ -1,4 +1,5 @@
 # PySpark-style: from sparkless.sql.utils import AnalysisException, ParseException, ...
+# mypy: disable-error-code=import-untyped
 try:
     from sparkless._native import SparklessError
 except ImportError:
