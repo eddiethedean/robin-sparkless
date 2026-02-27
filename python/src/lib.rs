@@ -182,7 +182,7 @@ fn json_value_to_py_with_schema(
                     s.to_string().into_py(py)
                 }
             }
-        },
+        }
         (Some(DataType::Array(elem_type)), JsonValue::Array(arr)) => {
             let list = PyList::empty_bound(py);
             for v in arr {
@@ -1253,7 +1253,10 @@ fn parse_schema_from_py(
         .call_method0("simpleString")
         .and_then(|v| v.extract::<String>())
     {
-        return Ok(Some(vec![("value".to_string(), simple_string_to_type(&ss))]));
+        return Ok(Some(vec![(
+            "value".to_string(),
+            simple_string_to_type(&ss),
+        )]));
     }
 
     let list = schema.downcast::<PyList>().map_err(|_| {
@@ -1420,7 +1423,9 @@ fn python_data_and_schema(
     for (idx, item) in list.iter().enumerate() {
         let kind = if item.downcast::<PyDict>().is_ok() {
             "dict"
-        } else if item.downcast::<PyList>().is_ok() || item.downcast::<pyo3::types::PyTuple>().is_ok() {
+        } else if item.downcast::<PyList>().is_ok()
+            || item.downcast::<pyo3::types::PyTuple>().is_ok()
+        {
             "seq"
         } else {
             "scalar"
@@ -2897,8 +2902,8 @@ impl PyDataFrame {
         } else if let Some(on_arg) = on {
             // Try to use normal join when on is simple column name(s) (PySpark parity: one key column in result).
             if let Ok(on_vec) = py_join_on_to_vec(on_arg) {
-                let use_normal_join = !on_vec.is_empty()
-                    && !on_vec.iter().any(|n| n == "<expr>" || n.is_empty());
+                let use_normal_join =
+                    !on_vec.is_empty() && !on_vec.iter().any(|n| n == "<expr>" || n.is_empty());
                 if use_normal_join {
                     let on_refs: Vec<&str> = on_vec.iter().map(|s| s.as_str()).collect();
                     return self
@@ -3115,7 +3120,11 @@ impl PyDataFrame {
             return self
                 .inner
                 .na()
-                .replace(old_expr, null_expr, sub.as_ref().map(|v| v.iter().map(|s| *s).collect()))
+                .replace(
+                    old_expr,
+                    null_expr,
+                    sub.as_ref().map(|v| v.iter().map(|s| *s).collect()),
+                )
                 .map(|df| PyDataFrame { inner: df })
                 .map_err(to_py_err);
         }
@@ -3783,7 +3792,11 @@ impl PyColumn {
     }
 
     /// col ** 2 (PySpark pow). Supports int and float exponent. Ignores modulo (PySpark has no modulo for pow).
-    fn __pow__(&self, other: &Bound<'_, PyAny>, _modulo: Option<&Bound<'_, PyAny>>) -> PyResult<PyColumn> {
+    fn __pow__(
+        &self,
+        other: &Bound<'_, PyAny>,
+        _modulo: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<PyColumn> {
         if let Ok(exp_i) = other.extract::<i64>() {
             return Ok(PyColumn {
                 inner: self.inner.pow(exp_i),
@@ -4212,9 +4225,7 @@ impl PyColumn {
             let mut pairs: Vec<(String, String)> = Vec::new();
             for (k, v) in dict.iter() {
                 let s: String = k.extract().map_err(|_| {
-                    PyErr::new::<pyo3::exceptions::PyTypeError, _>(
-                        "replace dict keys must be str",
-                    )
+                    PyErr::new::<pyo3::exceptions::PyTypeError, _>("replace dict keys must be str")
                 })?;
                 let r: String = v.extract().map_err(|_| {
                     PyErr::new::<pyo3::exceptions::PyTypeError, _>(
