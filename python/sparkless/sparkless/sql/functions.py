@@ -469,7 +469,8 @@ countDistinct = count_distinct
 
 
 def approx_count_distinct(col_or_name, rsd=0.05):
-    return _native_fn("approx_count_distinct")(_as_col(col_or_name), rsd)
+    """Approximate distinct count (PySpark approx_count_distinct). rsd is optional; when omitted, behaves like exact count_distinct with PySpark-style column naming."""
+    return _approx_count_distinct(_as_col(col_or_name), rsd)
 
 
 def stddev(col_or_name):
