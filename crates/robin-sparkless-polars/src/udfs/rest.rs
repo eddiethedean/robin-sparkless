@@ -4377,6 +4377,10 @@ pub fn apply_string_to_int(
     let name = column.field().into_owned().name;
     let series = column.take_materialized_series();
     let out: Series = match series.dtype() {
+        DataType::Null => {
+            // PySpark parity (#1028): lit(None).cast(\"int\"/\"long\") yields a typed null column.
+            Series::new_null(name.clone(), series.len()).cast(&target)?
+        }
         DataType::String => {
             let ca = series.str().map_err(|e| compute_err("string to int", e))?;
             let mut results: Vec<Option<i64>> = Vec::with_capacity(ca.len());
