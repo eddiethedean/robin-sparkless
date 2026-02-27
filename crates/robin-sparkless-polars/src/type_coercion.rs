@@ -354,6 +354,15 @@ pub fn coerce_for_pyspark_eq_null_safe(
     left: Expr,
     right: Expr,
 ) -> Result<(Expr, Expr), PolarsError> {
+    // If either side is a null literal, leave expressions as-is.
+    // Comparing any dtype to a null literal is well-defined, and attempting string/numeric
+    // coercion here can introduce invalid comparisons (e.g. string vs i64) in Polars planning.
+    if matches!(infer_type_from_expr(&left), Some(DataType::Null))
+        || matches!(infer_type_from_expr(&right), Some(DataType::Null))
+    {
+        return Ok((left, right));
+    }
+
     let left_ty = infer_type_from_expr(&left).unwrap_or(DataType::String);
     let right_ty = infer_type_from_expr(&right).unwrap_or(DataType::String);
     coerce_for_pyspark_comparison(left, right, &left_ty, &right_ty, &CompareOp::Eq)

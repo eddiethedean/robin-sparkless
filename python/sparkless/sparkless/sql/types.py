@@ -204,9 +204,31 @@ class Row(tuple):
     """
 
     def __new__(cls, *args, **kwargs):
+        # Support kwargs-style initialization: Row(a=1, b=2)
         if kwargs:
-            return super().__new__(cls, list(kwargs.values()))
+            obj = super().__new__(cls, list(kwargs.values()))
+            obj.__dict__["_fields"] = list(kwargs.keys())
+            obj.__dict__["_data_dict"] = dict(kwargs)
+            return obj
+
+        # Support dict-style initialization: Row({"a": 1, "b": 2})
+        if len(args) == 1 and isinstance(args[0], dict):
+            d = args[0]
+            obj = super().__new__(cls, list(d.values()))
+            obj.__dict__["_fields"] = list(d.keys())
+            obj.__dict__["_data_dict"] = dict(d)
+            return obj
+
+        # PySpark parity: Row() with no args/kwargs is an error.
+        if not args:
+            raise TypeError("Row() requires at least one value or named field")
+
+        # Positional initialization: Row(1,2,3) (unnamed fields)
         return super().__new__(cls, args)
+
+    def _iter_values(self):
+        # Iterate underlying tuple values regardless of Row.__iter__ override.
+        return super().__iter__()
 
     def __getitem__(self, item):
         # PySpark parity: Row supports both positional and name-based indexing.
@@ -243,7 +265,8 @@ class Row(tuple):
             raise AttributeError(name)
 
     def asDict(self):
-        return dict(zip(self.__dict__.get("_fields", []), self))
+        fields = self.__dict__.get("_fields", [])
+        return dict(zip(fields, list(self._iter_values())))
 
     def __eq__(self, other):
         # Allow direct comparison to dicts/mappings in tests.
@@ -262,7 +285,7 @@ class Row(tuple):
     def __lt__(self, other):
         if not isinstance(other, Row) or len(self) != len(other):
             return NotImplemented
-        for a, b in zip(self, other):
+        for a, b in zip(self._iter_values(), other._iter_values()):
             ka, kb = self._order_key(a), self._order_key(b)
             if ka != kb:
                 return ka < kb
@@ -271,7 +294,7 @@ class Row(tuple):
     def __le__(self, other):
         if not isinstance(other, Row) or len(self) != len(other):
             return NotImplemented
-        for a, b in zip(self, other):
+        for a, b in zip(self._iter_values(), other._iter_values()):
             ka, kb = self._order_key(a), self._order_key(b)
             if ka != kb:
                 return ka < kb
@@ -280,7 +303,7 @@ class Row(tuple):
     def __gt__(self, other):
         if not isinstance(other, Row) or len(self) != len(other):
             return NotImplemented
-        for a, b in zip(self, other):
+        for a, b in zip(self._iter_values(), other._iter_values()):
             ka, kb = self._order_key(a), self._order_key(b)
             if ka != kb:
                 return ka > kb
@@ -289,7 +312,7 @@ class Row(tuple):
     def __ge__(self, other):
         if not isinstance(other, Row) or len(self) != len(other):
             return NotImplemented
-        for a, b in zip(self, other):
+        for a, b in zip(self._iter_values(), other._iter_values()):
             ka, kb = self._order_key(a), self._order_key(b)
             if ka != kb:
                 return ka > kb
@@ -304,11 +327,12 @@ class Row(tuple):
         return [(name, self[i]) for i, name in enumerate(fields)]
 
     def values(self):
-        return list(self)
+        return list(self._iter_values())
 
     def __iter__(self):
-        # Iterate over tuple values (PySpark parity: list(row) gives values).
-        return super().__iter__()
+        # Dict-like iteration (keys). Tests often treat Row like Mapping.
+        # Use row.values() / tuple(row._iter_values()) for values.
+        return iter(self.__dict__.get("_fields", []))
 
 
 class _ColumnsList(list):

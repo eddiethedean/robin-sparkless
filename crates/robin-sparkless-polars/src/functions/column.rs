@@ -1,7 +1,7 @@
 //! Column reference and literal builders.
 
 use crate::column::Column;
-use polars::prelude::{Expr, lit};
+use polars::prelude::{Expr, NULL, lit};
 
 /// Get a column by name
 pub fn col(name: &str) -> Column {
@@ -49,4 +49,10 @@ pub fn lit_str(value: &str) -> Column {
 /// See [`parse_type_name`](super::types::parse_type_name) for supported type strings (e.g. `"boolean"`, `"string"`, `"bigint"`).
 pub fn lit_null(dtype: &str) -> Result<Column, String> {
     Column::lit_null(dtype)
+}
+
+/// Untyped null literal column (dtype = Null). Useful for comparisons with `None` where
+/// we want the null to be compatible with any column dtype (PySpark parity).
+pub fn lit_null_untyped() -> Column {
+    Column::from_expr(lit(NULL), None)
 }

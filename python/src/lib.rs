@@ -196,6 +196,25 @@ fn json_value_to_py_with_schema(
             }
             list.into_py(py)
         }
+        // Engine may stringify list columns in some paths (e.g. "[1,2]"); parse back when schema says Array.
+        (Some(DataType::Array(elem_type)), JsonValue::String(s)) => {
+            if let Ok(parsed) = serde_json::from_str::<JsonValue>(s) {
+                if let JsonValue::Array(arr) = parsed {
+                    let list = PyList::empty_bound(py);
+                    for v in &arr {
+                        list.append(json_value_to_py_with_schema(
+                            py,
+                            v,
+                            Some(elem_type),
+                            datetime_cls,
+                            date_cls,
+                        )?)?;
+                    }
+                    return Ok(list.into_py(py));
+                }
+            }
+            s.clone().into_py(py)
+        }
         (Some(DataType::Struct(fields)), JsonValue::Object(obj)) => {
             let dict = PyDict::new_bound(py);
             for f in fields {
@@ -755,8 +774,7 @@ impl PySparkContext {
             .unwrap_or_else(|| "sparkless".to_string()))
     }
 
-    #[getter]
-    fn version(&self, _py: Python<'_>) -> String {
+    fn version(&self) -> String {
         env!("CARGO_PKG_VERSION").to_string()
     }
 }
@@ -1086,6 +1104,7 @@ fn simple_string_to_type(s: &str) -> String {
         "date" => "date".to_string(),
         "timestamp" => "timestamp".to_string(),
         "binary" => "binary".to_string(),
+        "list" | "array" => lower,
         _ if lower.starts_with("array<") && lower.ends_with('>') => s.to_string(),
         _ if lower.starts_with("map<") && lower.ends_with('>') => s.to_string(),
         _ if lower.starts_with("struct<") && lower.ends_with('>') => s.to_string(),
@@ -1095,19 +1114,80 @@ fn simple_string_to_type(s: &str) -> String {
 
 /// Parse DDL schema string (e.g. "name: string, age: int" or "a string, b int") into (name, type) pairs.
 fn parse_ddl_schema_string(ddl: &str) -> Vec<(String, String)> {
+    fn split_top_level_commas(s: &str) -> Vec<String> {
+        let mut parts: Vec<String> = Vec::new();
+        let mut buf = String::new();
+        let mut depth: i32 = 0; // struct<...>, array<...>, map<...>
+        for ch in s.chars() {
+            match ch {
+                '<' => {
+                    depth += 1;
+                    buf.push(ch);
+                }
+                '>' => {
+                    depth = (depth - 1).max(0);
+                    buf.push(ch);
+                }
+                ',' if depth == 0 => {
+                    let part = buf.trim();
+                    if !part.is_empty() {
+                        parts.push(part.to_string());
+                    }
+                    buf.clear();
+                }
+                _ => buf.push(ch),
+            }
+        }
+        let part = buf.trim();
+        if !part.is_empty() {
+            parts.push(part.to_string());
+        }
+        parts
+    }
+
+    fn find_top_level_char(s: &str, target: char) -> Option<usize> {
+        let mut depth: i32 = 0;
+        for (i, ch) in s.char_indices() {
+            match ch {
+                '<' => depth += 1,
+                '>' => depth = (depth - 1).max(0),
+                _ => {}
+            }
+            if depth == 0 && ch == target {
+                return Some(i);
+            }
+        }
+        None
+    }
+
+    fn rfind_top_level_space(s: &str) -> Option<usize> {
+        let mut depth: i32 = 0;
+        for (i, ch) in s.char_indices().rev() {
+            match ch {
+                '>' => depth += 1,
+                '<' => depth = (depth - 1).max(0),
+                _ => {}
+            }
+            if depth == 0 && ch == ' ' {
+                return Some(i);
+            }
+        }
+        None
+    }
+
     let mut pairs = Vec::new();
-    for part in ddl.split(',') {
+    for part in split_top_level_commas(ddl) {
         let part = part.trim();
         if part.is_empty() {
             continue;
         }
-        let (name, typ) = if let Some(colon) = part.find(':') {
+        let (name, typ) = if let Some(colon) = find_top_level_char(part, ':') {
             let name = part[..colon].trim().to_string();
             let typ = part[colon + 1..].trim().to_string();
             (name, typ)
         } else {
             // "name type" format: last space separates name and type
-            match part.rfind(' ') {
+            match rfind_top_level_space(part) {
                 Some(i) => (
                     part[..i].trim().to_string(),
                     part[i + 1..].trim().to_string(),
@@ -1155,15 +1235,32 @@ fn parse_schema_from_py(
     }
 
     // DDL string: "name: string, age: int" or "a string, b int"
+    // OR single-column dtype string: "bigint", "int", "string", etc. (issue #419 parity).
     if let Ok(ddl) = schema.extract::<String>() {
-        let pairs = parse_ddl_schema_string(&ddl);
+        let ddl = ddl.trim();
+        if !ddl.contains(',') && !ddl.contains(':') && !ddl.contains(' ') {
+            return Ok(Some(vec![(
+                "value".to_string(),
+                simple_string_to_type(ddl),
+            )]));
+        }
+        let pairs = parse_ddl_schema_string(ddl);
         return Ok(Some(pairs));
     }
 
-    let list = match schema.downcast::<PyList>() {
-        Ok(l) => l,
-        Err(_) => return Ok(None),
-    };
+    // DataType-like object (e.g. IntegerType()): has .simpleString()
+    if let Ok(ss) = schema
+        .call_method0("simpleString")
+        .and_then(|v| v.extract::<String>())
+    {
+        return Ok(Some(vec![("value".to_string(), simple_string_to_type(&ss))]));
+    }
+
+    let list = schema.downcast::<PyList>().map_err(|_| {
+        PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+            "schema must be None, str (DDL or dtype), list, or StructType-like",
+        )
+    })?;
     if list.is_empty() {
         return Ok(Some(Vec::new()));
     }
@@ -1304,6 +1401,10 @@ fn python_data_and_schema(
         PyErr::new::<pyo3::exceptions::PyTypeError, _>("data must be a list (or pandas.DataFrame)")
     })?;
     // Parse explicit schema first so we can use its field order when building rows from dicts (Phase 7 / issue_247).
+    let schema_names_only: bool = schema
+        .and_then(|s| s.downcast::<PyList>().ok())
+        .map(|l| l.iter().all(|it| it.extract::<String>().is_ok()))
+        .unwrap_or(false);
     let schema_res: Option<Vec<(String, String)>> = schema
         .map(|s| parse_schema_from_py(py, s))
         .transpose()?
@@ -1314,8 +1415,29 @@ fn python_data_and_schema(
 
     let mut rows: Vec<Vec<JsonValue>> = Vec::with_capacity(list.len());
     let mut inferred_schema: Option<Vec<(String, String)>> = None;
+    let mut row_kind: Option<&'static str> = None;
 
     for (idx, item) in list.iter().enumerate() {
+        let kind = if item.downcast::<PyDict>().is_ok() {
+            "dict"
+        } else if item.downcast::<PyList>().is_ok() || item.downcast::<pyo3::types::PyTuple>().is_ok() {
+            "seq"
+        } else {
+            "scalar"
+        };
+        if let Some(first) = row_kind {
+            // Disallow mixing dict and seq rows when schema is not explicit (PySpark parity).
+            // When schema is explicit (StructType/DDL/pairs), allow mixing: tuple rows are positional, dict rows use schema order.
+            if schema_res.is_none()
+                && ((first == "dict" && kind == "seq") || (first == "seq" && kind == "dict"))
+            {
+                return Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+                    "createDataFrame: all rows must be the same shape (dict rows or list/tuple rows)",
+                ));
+            }
+        } else {
+            row_kind = Some(kind);
+        }
         let row = python_row_to_json(py, &item, idx, column_order.as_deref(), from_pandas)?;
         if inferred_schema.is_none() && schema_res.is_none() && !row.is_empty() {
             if let Some(cols) = infer_schema_from_first_row(py, &item, from_pandas) {
@@ -1325,7 +1447,8 @@ fn python_data_and_schema(
         rows.push(row);
     }
 
-    let schema_was_inferred = schema_res.is_none();
+    // Names-only list schema should still infer types from data (PySpark parity).
+    let schema_was_inferred = schema_res.is_none() || schema_names_only;
     let mut schema = schema_res.or(inferred_schema).unwrap_or_else(|| {
         rows.first()
             .map(|r| {
@@ -1406,6 +1529,10 @@ fn python_row_to_json(
             values.push(py_any_to_json(py, &v)?);
         }
         return Ok(values);
+    }
+    // Scalar row: allow when schema is explicit single-column (e.g. createDataFrame([1,2,3], "bigint")).
+    if column_order.map(|o| o.len() == 1).unwrap_or(false) {
+        return Ok(vec![py_any_to_json(py, item)?]);
     }
     Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(format!(
         "row {}: expected dict, list, or tuple",
@@ -2825,34 +2952,37 @@ impl PyDataFrame {
             .map_err(to_py_err)
     }
 
-    fn union(&self, other: &PyDataFrame) -> PyResult<PyDataFrame> {
+    fn union(&self, other: &Bound<'_, PyAny>) -> PyResult<PyDataFrame> {
+        let other_inner = py_any_to_dataframe_inner(other)?;
         self.inner
-            .union(&other.inner)
+            .union(&other_inner)
             .map(|df| PyDataFrame { inner: df })
             .map_err(to_py_err)
     }
 
-    fn union_all(&self, other: &PyDataFrame) -> PyResult<PyDataFrame> {
+    fn union_all(&self, other: &Bound<'_, PyAny>) -> PyResult<PyDataFrame> {
+        let other_inner = py_any_to_dataframe_inner(other)?;
         self.inner
-            .union_all(&other.inner)
+            .union_all(&other_inner)
             .map(|df| PyDataFrame { inner: df })
             .map_err(to_py_err)
     }
 
     #[pyo3(name = "unionAll")]
-    fn union_all_camel(&self, other: &PyDataFrame) -> PyResult<PyDataFrame> {
+    fn union_all_camel(&self, other: &Bound<'_, PyAny>) -> PyResult<PyDataFrame> {
         self.union_all(other)
     }
 
     #[pyo3(name = "unionByName", signature = (other, **kwargs))]
     fn union_by_name(
         &self,
-        other: &PyDataFrame,
+        other: &Bound<'_, PyAny>,
         kwargs: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<PyDataFrame> {
         let allow = extract_allow_missing_columns(kwargs)?;
+        let other_inner = py_any_to_dataframe_inner(other)?;
         self.inner
-            .union_by_name(&other.inner, allow)
+            .union_by_name(&other_inner, allow)
             .map(|df| PyDataFrame { inner: df })
             .map_err(to_py_err)
     }
@@ -3536,7 +3666,7 @@ fn py_any_to_column(other: &Bound<'_, PyAny>) -> PyResult<Column> {
         return Ok(py_col.borrow().inner.clone());
     }
     if other.is_none() {
-        return robin_sparkless::functions::lit_null("string").map_err(to_py_err);
+        return Ok(robin_sparkless::functions::lit_null_untyped());
     }
     if let Ok(b) = other.extract::<bool>() {
         return Ok(robin_sparkless::functions::lit_bool(b));
@@ -3569,6 +3699,21 @@ fn py_any_to_column(other: &Bound<'_, PyAny>) -> PyResult<Column> {
     }
     Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
         "comparison rhs must be Column, int, float, str, bool, or None",
+    ))
+}
+
+/// Accept either a DataFrame or an object with `.inner` DataFrame (DataFrame-like wrapper).
+fn py_any_to_dataframe_inner(other: &Bound<'_, PyAny>) -> PyResult<DataFrame> {
+    if let Ok(df) = other.downcast::<PyDataFrame>() {
+        return Ok(df.borrow().inner.clone());
+    }
+    if let Ok(inner) = other.getattr("inner") {
+        if let Ok(df) = inner.downcast::<PyDataFrame>() {
+            return Ok(df.borrow().inner.clone());
+        }
+    }
+    Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+        "argument 'other': expected DataFrame or object with .inner DataFrame",
     ))
 }
 
@@ -4451,13 +4596,13 @@ impl PyDataFrameNaFunctions {
             .downcast::<PyDataFrame>()
             .map_err(|_| PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected DataFrame"))?
             .borrow();
-        let value_col = lit(value)?;
+        let value_col = py_any_to_column(value)?;
         let sub_vec = normalize_subset(subset)?;
         let subset_refs: Option<Vec<&str>> = sub_vec
             .as_ref()
             .map(|v| v.iter().map(|s| s.as_str()).collect());
         let na = df_ref.inner.na();
-        na.fill(value_col.inner.into_expr(), subset_refs)
+        na.fill(value_col.into_expr(), subset_refs)
             .map(|df| PyDataFrame { inner: df })
             .map_err(to_py_err)
     }
@@ -4960,7 +5105,9 @@ fn lit_null(dtype: &str) -> PyResult<PyColumn> {
 fn lit(value: &Bound<'_, PyAny>) -> PyResult<PyColumn> {
     let _py = value.py();
     if value.is_none() {
-        return lit_null("string");
+        return Ok(PyColumn {
+            inner: robin_sparkless::functions::lit_null_untyped(),
+        });
     }
     if let Ok(b) = value.extract::<bool>() {
         return Ok(PyColumn {
