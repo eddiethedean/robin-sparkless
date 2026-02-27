@@ -145,12 +145,24 @@ def sqrt(c):
     return _native_fn("sqrt")(_as_col(c))
 
 
-def log(c, base=None):
-    return (
-        _native_fn("log")(_as_col(c))
-        if base is None
-        else _native_fn("log_with_base")(_as_col(c), base)
-    )
+def log(col_or_base, base_or_col=None):
+    """Natural log, or log with base. PySpark: log(column) or log(base, column)."""
+    if base_or_col is None:
+        return _native_fn("log")(_as_col(col_or_base))
+    # Two args: PySpark uses log(base, column); accept (base, column) or (column, base)
+    try:
+        col_arg = _as_col(col_or_base)
+        base_val = float(base_or_col)
+        return _native_fn("log_with_base")(col_arg, base_val)
+    except (TypeError, ValueError):
+        pass
+    try:
+        col_arg = _as_col(base_or_col)
+        base_val = float(col_or_base)
+        return _native_fn("log_with_base")(col_arg, base_val)
+    except (TypeError, ValueError):
+        pass
+    raise TypeError("log(base, column) or log(column, base): one argument must be a numeric base (int/float), the other a Column")
 
 
 def exp(c):
@@ -388,6 +400,16 @@ def array_position(col_or_name, value):
         else lit(value)
     )
     return _native_fn("array_position")(_as_col(col_or_name), v)
+
+
+def array_remove(col_or_name, value):
+    """Remove all elements equal to value from the array. PySpark: F.array_remove(col, element)."""
+    v = (
+        _as_col(value)
+        if not isinstance(value, (int, float, bool, str, type(None)))
+        else lit(value)
+    )
+    return _native.array_remove(_as_col(col_or_name), v)
 
 
 def element_at(col_or_name, extraction):
@@ -873,6 +895,7 @@ __all__ = [
     "size",
     "array_contains",
     "array_position",
+    "array_remove",
     "explode",
     "expr",
     "current_database",

@@ -1564,9 +1564,9 @@ fn py_any_to_json(py: Python<'_>, v: &Bound<'_, PyAny>) -> PyResult<JsonValue> {
         return Ok(JsonValue::String(s));
     }
     if let Ok(bytes) = v.downcast::<PyBytes>() {
-        use base64::Engine;
+        use ::base64::Engine;
         let b: &[u8] = bytes.as_bytes();
-        let encoded = base64::engine::general_purpose::STANDARD.encode(b);
+        let encoded = ::base64::engine::general_purpose::STANDARD.encode(b);
         return Ok(JsonValue::String(encoded));
     }
     if let Ok(list) = v.downcast::<PyList>() {
@@ -6153,6 +6153,59 @@ fn hex(column: &PyColumn) -> PyColumn {
 }
 
 #[pyfunction]
+#[pyo3(name = "native_hex")]
+fn native_hex(column: &PyColumn) -> PyColumn {
+    hex(column)
+}
+
+#[pyfunction]
+fn ascii(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: functions::ascii(&column.inner),
+    }
+}
+
+#[pyfunction]
+#[pyo3(name = "native_ascii")]
+fn native_ascii(column: &PyColumn) -> PyColumn {
+    ascii(column)
+}
+
+#[pyfunction]
+#[pyo3(name = "base64")]
+fn base64_encode(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: functions::base64(&column.inner),
+    }
+}
+
+#[pyfunction]
+#[pyo3(name = "native_base64")]
+fn native_base64(column: &PyColumn) -> PyColumn {
+    base64_encode(column)
+}
+
+#[pyfunction]
+fn unbase64(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: functions::unbase64(&column.inner),
+    }
+}
+
+#[pyfunction]
+#[pyo3(name = "native_unbase64")]
+fn native_unbase64(column: &PyColumn) -> PyColumn {
+    unbase64(column)
+}
+
+#[pyfunction]
+fn array_remove(column: &PyColumn, value: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: functions::array_remove(&column.inner, &value.inner),
+    }
+}
+
+#[pyfunction]
 #[pyo3(signature = (column, scale=0))]
 fn round(column: &PyColumn, scale: i32) -> PyColumn {
     PyColumn {
@@ -6495,11 +6548,8 @@ fn get_json_object(column: &PyColumn, path: &str) -> PyColumn {
 fn json_tuple(column: &PyColumn, keys: &Bound<'_, PyTuple>) -> PyResult<PyColumn> {
     let keys_str: Vec<String> = keys
         .iter()
-        .map(|o| o.extract::<String>())
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|_| {
-            PyErr::new::<pyo3::exceptions::PyTypeError, _>("json_tuple keys must be strings")
-        })?;
+        .map(|o| o.extract::<String>().unwrap_or_else(|_| o.to_string()))
+        .collect();
     let keys_refs: Vec<&str> = keys_str.iter().map(|s| s.as_str()).collect();
     Ok(PyColumn {
         inner: functions::json_tuple(&column.inner, &keys_refs),
@@ -6670,6 +6720,14 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(flatten, m)?)?;
     m.add_function(wrap_pyfunction!(reverse, m)?)?;
     m.add_function(wrap_pyfunction!(hex, m)?)?;
+    m.add_function(wrap_pyfunction!(native_hex, m)?)?;
+    m.add_function(wrap_pyfunction!(ascii, m)?)?;
+    m.add_function(wrap_pyfunction!(native_ascii, m)?)?;
+    m.add_function(wrap_pyfunction!(base64_encode, m)?)?;
+    m.add_function(wrap_pyfunction!(native_base64, m)?)?;
+    m.add_function(wrap_pyfunction!(unbase64, m)?)?;
+    m.add_function(wrap_pyfunction!(native_unbase64, m)?)?;
+    m.add_function(wrap_pyfunction!(array_remove, m)?)?;
     m.add_function(wrap_pyfunction!(round, m)?)?;
     m.add_function(wrap_pyfunction!(ltrim, m)?)?;
     m.add_function(wrap_pyfunction!(native_ltrim, m)?)?;
