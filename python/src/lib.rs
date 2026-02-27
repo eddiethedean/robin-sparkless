@@ -3,6 +3,7 @@
 
 #![allow(non_snake_case)]
 #![allow(unexpected_cfgs)] // pyo3 create_exception! uses cfg(gil-refs)
+#![allow(clippy::useless_conversion)] // PyO3 PyResult<T> / PyErr false positives (fixed in pyo3 0.23+)
 
 use pyo3::create_exception;
 use pyo3::prelude::*;
@@ -198,20 +199,18 @@ fn json_value_to_py_with_schema(
         }
         // Engine may stringify list columns in some paths (e.g. "[1,2]"); parse back when schema says Array.
         (Some(DataType::Array(elem_type)), JsonValue::String(s)) => {
-            if let Ok(parsed) = serde_json::from_str::<JsonValue>(s) {
-                if let JsonValue::Array(arr) = parsed {
-                    let list = PyList::empty_bound(py);
-                    for v in &arr {
-                        list.append(json_value_to_py_with_schema(
-                            py,
-                            v,
-                            Some(elem_type),
-                            datetime_cls,
-                            date_cls,
-                        )?)?;
-                    }
-                    return Ok(list.into_py(py));
+            if let Ok(JsonValue::Array(arr)) = serde_json::from_str::<JsonValue>(s) {
+                let list = PyList::empty_bound(py);
+                for v in &arr {
+                    list.append(json_value_to_py_with_schema(
+                        py,
+                        v,
+                        Some(elem_type),
+                        datetime_cls,
+                        date_cls,
+                    )?)?;
                 }
+                return Ok(list.into_py(py));
             }
             s.clone().into_py(py)
         }
@@ -1267,7 +1266,7 @@ fn parse_schema_from_py(
     if list.is_empty() {
         return Ok(Some(Vec::new()));
     }
-    let first = list.get_item(0).map_err(|e| e)?;
+    let first = list.get_item(0)?;
     if first.downcast::<PyList>().is_ok() || first.downcast::<pyo3::types::PyTuple>().is_ok() {
         let mut pairs = Vec::with_capacity(list.len());
         for item in list.iter() {
@@ -1396,6 +1395,7 @@ fn maybe_convert_pandas_to_list<'py>(
     }
 }
 
+#[allow(clippy::type_complexity)]
 fn python_data_and_schema(
     py: Python<'_>,
     data: &Bound<'_, PyAny>,
@@ -1475,7 +1475,7 @@ fn python_data_and_schema(
         }
     }
     // When schema was inferred, prefer first non-null value's type per column (fixes fillna(0) on column with null in first row).
-    if schema_was_inferred && schema.len() > 0 {
+    if schema_was_inferred && !schema.is_empty() {
         let refined: Vec<(String, String)> = schema
             .iter()
             .enumerate()
@@ -1547,7 +1547,7 @@ fn python_row_to_json(
     )))
 }
 
-fn py_any_to_json(py: Python<'_>, v: &Bound<'_, PyAny>) -> PyResult<JsonValue> {
+fn py_any_to_json(_py: Python<'_>, v: &Bound<'_, PyAny>) -> PyResult<JsonValue> {
     if v.is_none() {
         return Ok(JsonValue::Null);
     }
@@ -1574,7 +1574,7 @@ fn py_any_to_json(py: Python<'_>, v: &Bound<'_, PyAny>) -> PyResult<JsonValue> {
     if let Ok(list) = v.downcast::<PyList>() {
         let mut arr = Vec::with_capacity(list.len());
         for item in list.iter() {
-            arr.push(py_any_to_json(py, &item)?);
+            arr.push(py_any_to_json(_py, &item)?);
         }
         return Ok(JsonValue::Array(arr));
     }
@@ -1582,7 +1582,7 @@ fn py_any_to_json(py: Python<'_>, v: &Bound<'_, PyAny>) -> PyResult<JsonValue> {
         let mut obj = serde_json::Map::new();
         for (k, val) in dict.iter() {
             let key = k.extract::<String>().unwrap_or_else(|_| k.to_string());
-            obj.insert(key, py_any_to_json(py, &val)?);
+            obj.insert(key, py_any_to_json(_py, &val)?);
         }
         return Ok(JsonValue::Object(obj));
     }
@@ -2128,7 +2128,7 @@ impl PyDataFrame {
             item: &Bound<'_, PyAny>,
             out: &mut Vec<ItemOrExprStr>,
             names: &mut Vec<Box<str>>,
-            py: Python<'_>,
+            _py: Python<'_>,
         ) -> PyResult<()> {
             if let Ok(py_col) = item.downcast::<PyColumn>() {
                 out.push(ItemOrExprStr::Resolved(Tmp::Expr(
@@ -2148,13 +2148,13 @@ impl PyDataFrame {
             }
             if let Ok(list) = item.downcast::<PyList>() {
                 for sub in list.iter() {
-                    push_item(&sub, out, names, py)?;
+                    push_item(&sub, out, names, _py)?;
                 }
                 return Ok(());
             }
             if let Ok(tup) = item.downcast::<PyTuple>() {
                 for sub in tup.iter() {
-                    push_item(&sub, out, names, py)?;
+                    push_item(&sub, out, names, _py)?;
                 }
                 return Ok(());
             }
@@ -3218,7 +3218,7 @@ impl PyDataFrame {
                         .replace(
                             old_expr,
                             new_expr,
-                            sub.as_ref().map(|v| v.iter().map(|s| *s).collect()),
+                            sub.as_ref().map(|v| v.to_vec()),
                         )
                         .map_err(to_py_err)?;
                 }
@@ -3235,7 +3235,7 @@ impl PyDataFrame {
                 .replace(
                     old_expr,
                     null_expr,
-                    sub.as_ref().map(|v| v.iter().map(|s| *s).collect()),
+                    sub.as_ref().map(|v| v.to_vec()),
                 )
                 .map(|df| PyDataFrame { inner: df })
                 .map_err(to_py_err);
@@ -3249,7 +3249,7 @@ impl PyDataFrame {
             .replace(
                 old_expr,
                 new_expr,
-                sub.as_ref().map(|v| v.iter().map(|s| *s).collect()),
+                sub.as_ref().map(|v| v.to_vec()),
             )
             .map(|df| PyDataFrame { inner: df })
             .map_err(to_py_err)
@@ -4186,7 +4186,6 @@ impl PyColumn {
     }
 
     /// col[key] -> map get or array getItem. Key: int (array index), str (map key), or Column (map key).
-
     fn array_distinct(&self) -> PyColumn {
         PyColumn {
             inner: functions::array_distinct(&self.inner),
@@ -4789,7 +4788,7 @@ impl PyDataFrameNaFunctions {
                         .replace(
                             old_expr,
                             new_expr,
-                            subset_refs.as_ref().map(|v| v.iter().map(|s| *s).collect()),
+                            subset_refs.as_ref().map(|v| v.to_vec()),
                         )
                         .map_err(to_py_err)?;
                 }
