@@ -109,8 +109,12 @@ pub fn execute_sql(session: &SparkSession, query: &str) -> Result<DataFrame, Pol
     };
     if !rest.is_empty() && (is_describe || is_desc) {
         let parts: Vec<&str> = rest.split_whitespace().collect();
-        let table_name = parts.first().copied().unwrap_or("");
-        let col_name = parts.get(1).copied();
+        // #1013: DESCRIBE [TABLE] [EXTENDED] table_name [col_name] — skip TABLE/EXTENDED to get table name.
+        let idx = parts.iter().position(|p| {
+            !p.eq_ignore_ascii_case("TABLE") && !p.eq_ignore_ascii_case("EXTENDED")
+        });
+        let table_name = idx.and_then(|i| parts.get(i)).copied().unwrap_or("");
+        let col_name = idx.and_then(|i| parts.get(i + 1)).copied();
         if !table_name.is_empty() {
             return translator::translate_describe_table_optional_col(
                 session, table_name, col_name,
@@ -626,6 +630,49 @@ mod tests {
             rows[0].get("data_type").and_then(|v| v.as_str()),
             Some("long")
         );
+    }
+
+    /// DESCRIBE TABLE EXTENDED table_name (#1013): TABLE/EXTENDED skipped to get table name.
+    #[test]
+    fn test_sql_describe_table_extended() {
+        let spark = SparkSession::builder().app_name("test").get_or_create();
+        let df = spark
+            .create_dataframe(
+                vec![(1i64, 25i64, "a".to_string())],
+                vec!["id", "age", "name"],
+            )
+            .unwrap();
+        spark.create_or_replace_temp_view("t", df);
+        let result = spark.sql("DESCRIBE TABLE EXTENDED t").unwrap();
+        let rows = result.collect_as_json_rows().unwrap();
+        assert_eq!(rows.len(), 3);
+        assert_eq!(rows[0].get("col_name").and_then(|v| v.as_str()), Some("id"));
+        assert_eq!(rows[1].get("col_name").and_then(|v| v.as_str()), Some("age"));
+        assert_eq!(rows[2].get("col_name").and_then(|v| v.as_str()), Some("name"));
+    }
+
+    /// CREATE OR REPLACE TEMP VIEW ... AS SELECT (#1011).
+    #[test]
+    fn test_sql_create_or_replace_temp_view() {
+        let spark = SparkSession::builder().app_name("test").get_or_create();
+        let df = spark
+            .create_dataframe(
+                vec![
+                    (1i64, 10i64, "x".to_string()),
+                    (2i64, 20i64, "y".to_string()),
+                ],
+                vec!["id", "age", "label"],
+            )
+            .unwrap();
+        spark.create_or_replace_temp_view("base", df);
+        spark
+            .sql("CREATE OR REPLACE TEMP VIEW v AS SELECT id, label FROM base WHERE id > 1")
+            .unwrap();
+        let result = spark.sql("SELECT * FROM v").unwrap();
+        let rows = result.collect_as_json_rows().unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].get("id"), Some(&serde_json::json!(2)));
+        assert_eq!(rows[0].get("label"), Some(&serde_json::json!("y")));
     }
 
     #[test]
