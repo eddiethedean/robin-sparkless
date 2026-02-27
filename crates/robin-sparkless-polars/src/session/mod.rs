@@ -366,7 +366,8 @@ fn json_values_to_series(
         return Ok(builder.finish().into_series());
     }
 
-    if let Some(fields) = parse_struct_fields(&type_lower) {
+    // Use type_str (not type_lower) so struct field names preserve case (e.g. E1, E2); col("StructValue.E1") then resolves when case_sensitive.
+    if let Some(fields) = parse_struct_fields(type_str.trim()) {
         let mut field_series_vec: Vec<Vec<Option<JsonValue>>> = (0..fields.len())
             .map(|_| Vec::with_capacity(values.len()))
             .collect();
@@ -1688,7 +1689,13 @@ impl SparkSession {
                     keys.sort();
                     let inner = keys
                         .iter()
-                        .map(|k| format!("{}:string", k))
+                        .map(|k| {
+                            let field_typ = obj
+                                .get(*k)
+                                .and_then(Self::infer_dtype_from_json_value)
+                                .unwrap_or_else(|| "string".to_string());
+                            format!("{}:{}", k, field_typ)
+                        })
                         .collect::<Vec<_>>()
                         .join(",");
                     *dtype_str = format!("struct<{}>", inner);
@@ -1736,12 +1743,27 @@ impl SparkSession {
             && schema
                 .iter()
                 .all(|(_, t)| t.trim().eq_ignore_ascii_case("string"));
-        let schema = if schema_inferred_in_rust {
+        let mut schema = if schema_inferred_in_rust {
             let names: Vec<String> = schema.iter().map(|(n, _)| n.clone()).collect();
             Self::infer_schema_from_json_rows(&rows, &names)
         } else {
             schema
         };
+        // When schema was not all-string (e.g. ID:bigint, StructValue:string), still upgrade any "string"
+        // column that has Object in the data to struct (so createDataFrame([{"ID":1,"StructValue":{...}}]) gets struct).
+        if !schema_inferred_in_rust && !rows.is_empty() {
+            let names: Vec<String> = schema.iter().map(|(n, _)| n.clone()).collect();
+            let inferred = Self::infer_schema_from_json_rows(&rows, &names);
+            for (col_idx, (_, dtype_str)) in schema.iter_mut().enumerate() {
+                if dtype_str.trim().eq_ignore_ascii_case("string")
+                    && inferred.get(col_idx).map(|(_, t)| t) != Some(&"string".to_string())
+                {
+                    if let Some((_, inferred_type)) = inferred.get(col_idx) {
+                        *dtype_str = inferred_type.clone();
+                    }
+                }
+            }
+        }
 
         // Phase 6 validation: reject all-null columns and mixed int/float (PySpark parity). Run when schema was inferred (Python or Rust).
         let run_inferred_validation = schema_was_inferred || schema_inferred_in_rust;
@@ -2220,7 +2242,7 @@ impl SparkSession {
                 _ if parse_struct_fields(&type_lower).is_some() => {
                     let values: Vec<Option<JsonValue>> =
                         rows.iter().map(|row| row.get(col_idx).cloned()).collect();
-                    json_values_to_series(&values, &type_lower, name)?
+                    json_values_to_series(&values, type_str, name)?
                 }
                 _ if type_lower == "binary" => {
                     let values: Vec<Option<JsonValue>> =
