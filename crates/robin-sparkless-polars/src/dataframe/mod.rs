@@ -283,8 +283,28 @@ impl DataFrame {
 
         // Apply root-level coercion first so the top-level filter condition (e.g. col("str_col") == lit(123))
         // is always rewritten even if try_map_expr traversal does not hit the root in the expected order.
+        // #1023: Unwrap Alias from Column::into_expr() so we coerce the inner BinaryExpr (string vs numeric).
+        let (expr_to_coerce, alias_after) = match &expr {
+            Expr::Alias(inner, name) => (inner.as_ref().clone(), Some(name.clone())),
+            _ => (expr.clone(), None),
+        };
+        fn wrap_expr_with_alias(expr: Expr, alias_name: Option<&polars::prelude::PlSmallStr>) -> Expr {
+            match alias_name {
+                Some(name) => Expr::Alias(Arc::new(expr), name.clone()),
+                None => expr,
+            }
+        }
         let expr = {
-            if let Expr::BinaryExpr { left, op, right } = &expr {
+            if let Expr::BinaryExpr { left, op, right } = &expr_to_coerce {
+                // Unwrap one Alias so we recognize col/lit when wrapped (e.g. lit(123).into_expr() -> Alias(Literal)).
+                let left_inner: &Expr = match &**left {
+                    Expr::Alias(inner, _) => inner.as_ref(),
+                    _ => &**left,
+                };
+                let right_inner: &Expr = match &**right {
+                    Expr::Alias(inner, _) => inner.as_ref(),
+                    _ => &**right,
+                };
                 let is_comparison_op = matches!(
                     op,
                     Operator::Eq
@@ -294,18 +314,18 @@ impl DataFrame {
                         | Operator::Gt
                         | Operator::GtEq
                 );
-                let left_is_col = matches!(&**left, Expr::Column(_));
-                let right_is_col = matches!(&**right, Expr::Column(_));
+                let left_is_col = matches!(left_inner, Expr::Column(_));
+                let right_is_col = matches!(right_inner, Expr::Column(_));
                 let left_is_numeric_lit =
-                    matches!(&**left, Expr::Literal(_)) && is_numeric_literal(left.as_ref());
+                    matches!(left_inner, Expr::Literal(_)) && is_numeric_literal(left_inner);
                 let right_is_numeric_lit =
-                    matches!(&**right, Expr::Literal(_)) && is_numeric_literal(right.as_ref());
+                    matches!(right_inner, Expr::Literal(_)) && is_numeric_literal(right_inner);
                 let left_is_string_lit = matches!(
-                    &**left,
+                    left_inner,
                     Expr::Literal(lv) if lv.get_datatype() == DataType::String
                 );
                 let right_is_string_lit = matches!(
-                    &**right,
+                    right_inner,
                     Expr::Literal(lv) if lv.get_datatype() == DataType::String
                 );
                 let root_is_col_vs_numeric = is_comparison_op
@@ -316,26 +336,26 @@ impl DataFrame {
                         || (right_is_col && left_is_string_lit));
                 if root_is_col_vs_numeric {
                     let (new_left, new_right) = if left_is_col && right_is_numeric_lit {
-                        let lit_ty = match &**right {
+                        let lit_ty = match right_inner {
                             Expr::Literal(lv) => literal_dtype(lv),
                             _ => DataType::Float64,
                         };
                         coerce_for_pyspark_comparison(
-                            (*left).as_ref().clone(),
-                            (*right).as_ref().clone(),
+                            left_inner.clone(),
+                            right_inner.clone(),
                             &DataType::String,
                             &lit_ty,
                             op,
                         )
                         .map_err(|e| PolarsError::ComputeError(e.to_string().into()))?
                     } else {
-                        let lit_ty = match &**left {
+                        let lit_ty = match left_inner {
                             Expr::Literal(lv) => literal_dtype(lv),
                             _ => DataType::Float64,
                         };
                         coerce_for_pyspark_comparison(
-                            (*left).as_ref().clone(),
-                            (*right).as_ref().clone(),
+                            left_inner.clone(),
+                            right_inner.clone(),
                             &lit_ty,
                             &DataType::String,
                             op,
@@ -349,12 +369,12 @@ impl DataFrame {
                     }
                 } else if root_is_col_vs_string {
                     let col_name = if left_is_col {
-                        if let Expr::Column(n) = &**left {
+                        if let Expr::Column(n) = left_inner {
                             n.as_str()
                         } else {
                             unreachable!()
                         }
-                    } else if let Expr::Column(n) = &**right {
+                    } else if let Expr::Column(n) = right_inner {
                         n.as_str()
                     } else {
                         unreachable!()
@@ -367,18 +387,19 @@ impl DataFrame {
                                 (DataType::String, col_dtype.clone())
                             };
                             let (new_left, new_right) = coerce_for_pyspark_comparison(
-                                (*left).as_ref().clone(),
-                                (*right).as_ref().clone(),
+                                left_inner.clone(),
+                                right_inner.clone(),
                                 &left_ty,
                                 &right_ty,
                                 op,
                             )
                             .map_err(|e| PolarsError::ComputeError(e.to_string().into()))?;
-                            return Ok(Expr::BinaryExpr {
+                            let e = Expr::BinaryExpr {
                                 left: Arc::new(new_left),
                                 op: *op,
                                 right: Arc::new(new_right),
-                            });
+                            };
+                            return Ok(wrap_expr_with_alias(e, alias_after.as_ref()));
                         }
                         // #988: Numeric column vs string literal -> coerce string to numeric (PySpark parity).
                         if is_numeric_public(&col_dtype) {
@@ -388,30 +409,31 @@ impl DataFrame {
                                 (DataType::String, col_dtype.clone())
                             };
                             let (new_left, new_right) = coerce_for_pyspark_comparison(
-                                (*left).as_ref().clone(),
-                                (*right).as_ref().clone(),
+                                left_inner.clone(),
+                                right_inner.clone(),
                                 &left_ty,
                                 &right_ty,
                                 op,
                             )
                             .map_err(|e| PolarsError::ComputeError(e.to_string().into()))?;
-                            return Ok(Expr::BinaryExpr {
+                            let e = Expr::BinaryExpr {
                                 left: Arc::new(new_left),
                                 op: *op,
                                 right: Arc::new(new_right),
-                            });
+                            };
+                            return Ok(wrap_expr_with_alias(e, alias_after.as_ref()));
                         }
                     }
-                    expr
+                    expr_to_coerce.clone()
                 } else if is_comparison_op && left_is_col && right_is_col {
                     // Column-to-column: col("id") == col("label") where id is int, label is string.
                     // Get both column types and coerce string-numeric / date-string for PySpark parity.
-                    let left_name = if let Expr::Column(n) = &**left {
+                    let left_name = if let Expr::Column(n) = left_inner {
                         n.as_str()
                     } else {
                         unreachable!()
                     };
-                    let right_name = if let Expr::Column(n) = &**right {
+                    let right_name = if let Expr::Column(n) = right_inner {
                         n.as_str()
                     } else {
                         unreachable!()
@@ -422,28 +444,30 @@ impl DataFrame {
                     ) {
                         if left_ty != right_ty {
                             if let Ok((new_left, new_right)) = coerce_for_pyspark_comparison(
-                                (*left).as_ref().clone(),
-                                (*right).as_ref().clone(),
+                                left_inner.clone(),
+                                right_inner.clone(),
                                 &left_ty,
                                 &right_ty,
                                 op,
                             ) {
-                                return Ok(Expr::BinaryExpr {
+                                let e = Expr::BinaryExpr {
                                     left: Arc::new(new_left),
                                     op: *op,
                                     right: Arc::new(new_right),
-                                });
+                                };
+                                return Ok(wrap_expr_with_alias(e, alias_after.as_ref()));
                             }
                         }
                     }
-                    expr
+                    expr_to_coerce.clone()
                 } else {
-                    expr
+                    expr_to_coerce.clone()
                 }
             } else {
-                expr
+                expr_to_coerce.clone()
             }
         };
+        let expr = wrap_expr_with_alias(expr, alias_after.as_ref());
 
         // Then walk the tree for nested comparisons (e.g. (col("a")==1) & (col("b")==2)).
         let expr = expr.try_map_expr(move |e| {
