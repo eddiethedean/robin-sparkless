@@ -1,7 +1,10 @@
 # Upstream exception names for test compatibility.
-# mypy: disable-error-code=import-untyped
+from typing import Type
+
+SparklessError: Type[BaseException]
 try:
-    from sparkless._native import SparklessError
+    from sparkless._native import SparklessError as _SE
+    SparklessError = _SE
 except ImportError:
     SparklessError = RuntimeError
 
