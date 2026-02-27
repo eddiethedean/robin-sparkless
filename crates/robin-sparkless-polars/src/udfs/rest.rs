@@ -224,11 +224,21 @@ pub fn apply_levenshtein(columns: &mut [Column]) -> PolarsResult<Option<Column>>
     let b_series = std::mem::take(&mut columns[1]).take_materialized_series();
     let a_ca = a_series.str().map_err(|e| compute_err("levenshtein", e))?;
     let b_ca = b_series.str().map_err(|e| compute_err("levenshtein", e))?;
+    let len_a = a_ca.len();
+    let len_b = b_ca.len();
+    let len = len_a.max(len_b);
+    // Broadcast constant side (e.g. levenshtein(col, lit("Alice"))) so output row count matches the longer column.
     let out = Int64Chunked::from_iter_options(
         name.as_str().into(),
-        a_ca.into_iter().zip(b_ca).map(|(a, b)| match (a, b) {
-            (Some(a), Some(b)) => Some(levenshtein(a, b) as i64),
-            _ => None,
+        (0..len).map(|i| {
+            let ia = if len_a == 1 { 0 } else { i };
+            let ib = if len_b == 1 { 0 } else { i };
+            let a = a_ca.get(ia);
+            let b = b_ca.get(ib);
+            match (a, b) {
+                (Some(a), Some(b)) => Some(levenshtein(&a, &b) as i64),
+                _ => None,
+            }
         }),
     );
     Ok(Some(Column::new(name, out.into_series())))
