@@ -218,7 +218,8 @@ impl DataFrame {
                         context_name = format!("{}.{}", context_name, resolved_field);
                         current_dtype = field_dtype;
                     }
-                    return Ok(expr);
+                    // PySpark: col("StructValue.E1") without alias yields column name "StructValue.E1".
+                    return Ok(expr.alias(PlSmallStr::from(name_str)));
                 }
                 let resolved = df.resolve_column_name(name_str)?;
                 return Ok(Expr::Column(PlSmallStr::from(resolved.as_str())));
@@ -681,16 +682,15 @@ impl DataFrame {
                 ));
             }
         };
-        if self.case_sensitive {
-            if let Some(f) = fields.iter().find(|f| f.name.as_str() == field_name) {
+        // Exact match first (respects case_sensitive for column names; struct fields often need case-insensitive).
+        if let Some(f) = fields.iter().find(|f| f.name.as_str() == field_name) {
+            return Ok((f.name.to_string(), f.dtype.clone()));
+        }
+        // Struct field lookup: always try case-insensitive so col("StructValue.E1") works when struct has "e1" (e.g. from inferred schema).
+        let field_lower = field_name.to_lowercase();
+        for f in fields {
+            if f.name.to_string().to_lowercase() == field_lower {
                 return Ok((f.name.to_string(), f.dtype.clone()));
-            }
-        } else {
-            let field_lower = field_name.to_lowercase();
-            for f in fields {
-                if f.name.to_string().to_lowercase() == field_lower {
-                    return Ok((f.name.to_string(), f.dtype.clone()));
-                }
             }
         }
         let available: Vec<String> = fields.iter().map(|f| f.name.to_string()).collect();
