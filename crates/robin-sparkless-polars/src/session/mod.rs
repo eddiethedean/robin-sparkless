@@ -424,12 +424,15 @@ fn json_values_to_series(
                 }
             } else if let Some(obj) = effective.as_ref().and_then(|x| x.as_object()) {
                 // #971: case-insensitive field lookup (Python dict may have "E1"/"E2", schema "e1"/"e2").
+                // #1015: Sparkless may send struct as {"E1": v1, "E2": v2}; fallback by position so we build with schema names (a, b) and collect() yields row["nested"]["a"].
                 for (fi, (fname, _)) in fields.iter().enumerate() {
-                    let val = obj.get(fname).or_else(|| {
-                        obj.keys()
-                            .find(|k| k.eq_ignore_ascii_case(fname))
-                            .and_then(|k| obj.get(k))
-                    });
+                    let val = obj.get(fname)
+                        .or_else(|| {
+                            obj.keys()
+                                .find(|k| k.eq_ignore_ascii_case(fname))
+                                .and_then(|k| obj.get(k))
+                        })
+                        .or_else(|| obj.get(&format!("E{}", fi + 1)));
                     field_series_vec[fi].push(val.cloned());
                 }
             } else if let Some(JsonValue::String(s)) = v.as_ref() {
@@ -441,11 +444,13 @@ fn json_values_to_series(
                     .and_then(|j: JsonValue| j.as_array().cloned());
                 if let Some(obj) = parsed_obj {
                     for (fi, (fname, _)) in fields.iter().enumerate() {
-                        let val = obj.get(fname).or_else(|| {
-                            obj.keys()
-                                .find(|k| k.eq_ignore_ascii_case(fname))
-                                .and_then(|k| obj.get(k))
-                        });
+                        let val = obj.get(fname)
+                            .or_else(|| {
+                                obj.keys()
+                                    .find(|k| k.eq_ignore_ascii_case(fname))
+                                    .and_then(|k| obj.get(k))
+                            })
+                            .or_else(|| obj.get(&format!("E{}", fi + 1)));
                         field_series_vec[fi].push(val.cloned());
                     }
                 } else if let Some(arr) = parsed_arr {
@@ -838,7 +843,10 @@ fn json_object_or_array_to_struct_series(
         let fval = if let Some(arr) = pos_arr {
             arr.get(idx).unwrap_or(&JsonValue::Null)
         } else if let Some(obj) = effective.as_object() {
-            obj.get(fname).unwrap_or(&JsonValue::Null)
+            // #1015: object may have E1,E2 keys (Sparkless); use schema name then positional so struct has names (a, b).
+            obj.get(fname)
+                .or_else(|| obj.get(&format!("E{}", idx + 1)))
+                .unwrap_or(&JsonValue::Null)
         } else {
             return Err(PolarsError::ComputeError(
                 "struct value must be object (by field name) or array (by position). \
@@ -2879,6 +2887,34 @@ mod tests {
         assert_eq!(df.count().unwrap(), 2);
         let collected = df.collect_inner().unwrap();
         assert_eq!(collected.get_column_names(), &["id", "nested"]);
+    }
+
+    /// #1015: When row data has E1/E2 keys (Sparkless serialization), struct is built with schema names (a, b) so collect() yields row["nested"]["a"].
+    #[test]
+    fn test_issue_1015_collect_struct_field_names() {
+        use serde_json::json;
+
+        let spark = SparkSession::builder().app_name("test").get_or_create();
+        let schema = vec![
+            ("id".to_string(), "string".to_string()),
+            (
+                "nested".to_string(),
+                "struct<a:bigint,b:string>".to_string(),
+            ),
+        ];
+        let rows: Vec<Vec<JsonValue>> = vec![
+            vec![json!("x"), json!({"E1": 1, "E2": "y"})],
+        ];
+        let df = spark
+            .create_dataframe_from_rows(rows, schema, false, false)
+            .unwrap();
+        let rows_out = df.collect_as_json_rows().unwrap();
+        assert_eq!(rows_out.len(), 1);
+        let nested = rows_out[0].get("nested").and_then(|v| v.as_object()).expect("nested");
+        assert!(nested.contains_key("a"), "#1015: collect should use schema field name 'a', not E1");
+        assert!(nested.contains_key("b"), "#1015: collect should use schema field name 'b', not E2");
+        assert_eq!(nested.get("a"), Some(&json!(1)));
+        assert_eq!(nested.get("b"), Some(&json!("y")));
     }
 
     /// PR17: create_dataframe_from_rows raises when schema has duplicate column names (PySpark parity).
