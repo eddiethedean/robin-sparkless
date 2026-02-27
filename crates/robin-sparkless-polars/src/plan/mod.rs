@@ -380,7 +380,8 @@ fn apply_op(
                         let resolved = df
                             .resolve_column_name(expr_str)
                             .map_err(PlanError::Session)?;
-                        exprs.push(polars::prelude::col(resolved));
+                        // #1014, #1022: Preserve requested column name as output (e.g. "NaMe") so row keys match.
+                        exprs.push(polars::prelude::col(resolved).alias(name_str.as_str()));
                     }
                 }
                 df.select_exprs(exprs).map_err(PlanError::Session)
