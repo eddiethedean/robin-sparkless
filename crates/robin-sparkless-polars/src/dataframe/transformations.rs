@@ -114,6 +114,40 @@ pub fn select_with_exprs(
         .into_iter()
         .map(|e| expand_pure_literal_to_rows(e.clone(), first_col).unwrap_or(e))
         .collect();
+
+    // Detect simple explode expressions (e.g. F.explode(col(\"scores\")).alias(\"score\"))
+    // and rewrite them to use LazyFrame.explode so other columns are replicated correctly.
+    let mut explode_target: Option<(PlSmallStr, polars::prelude::ExplodeOptions)> = None;
+    let exprs: Vec<Expr> = exprs
+        .into_iter()
+        .map(|e| match e {
+            Expr::Alias(inner, name) => {
+                if let Expr::Explode { input, options } = inner.as_ref() {
+                    if let Expr::Column(col_name) = input.as_ref() {
+                        if explode_target.is_none() {
+                            explode_target = Some((col_name.clone(), *options));
+                        }
+                        Expr::Alias(Arc::new(Expr::Column(col_name.clone())), name)
+                    } else {
+                        Expr::Alias(inner, name)
+                    }
+                } else {
+                    Expr::Alias(inner, name)
+                }
+            }
+            Expr::Explode { input, options } => {
+                if let Expr::Column(col_name) = input.as_ref() {
+                    if explode_target.is_none() {
+                        explode_target = Some((col_name.clone(), options));
+                    }
+                    Expr::Column(col_name.clone())
+                } else {
+                    Expr::Explode { input, options }
+                }
+            }
+            other => other,
+        })
+        .collect();
     let mut name_count: HashMap<String, u32> = HashMap::new();
     let mut output_names: Vec<String> = Vec::new();
     let exprs: Vec<Expr> = exprs
@@ -140,7 +174,17 @@ pub fn select_with_exprs(
 
     // When every expression references no column from the frame, Polars select yields 1 row.
     // Cross-join with a single key column to get N rows (PySpark parity).
-    let lf = df.lazy_frame();
+    let mut lf = df.lazy_frame();
+
+    // If we saw an explode expression on a single column, apply frame-level explode first so
+    // non-exploded columns are replicated correctly (PySpark explode parity).
+    if let Some((explode_col, options)) = explode_target {
+        let selector = Selector::ByName {
+            names: Arc::from([explode_col]),
+            strict: true,
+        };
+        lf = lf.explode(selector, options);
+    }
     let no_col_refs = first_col.is_some()
         && exprs.iter().all(|e| {
             expr_referenced_columns(e)

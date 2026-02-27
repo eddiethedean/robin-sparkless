@@ -1317,7 +1317,9 @@ fn infer_type_from_json_value(v: &JsonValue) -> String {
             }
         }
         JsonValue::String(_) => "string".to_string(),
-        JsonValue::Array(_) => "string".to_string(),
+        // Treat JSON arrays as array type so list columns (e.g. scores, tags) are inferred
+        // as List/Array instead of String when creating DataFrames from Python data.
+        JsonValue::Array(_) => "array".to_string(),
         JsonValue::Object(_) => "string".to_string(),
     }
 }
@@ -2913,12 +2915,59 @@ impl PyDataFrame {
                         .map_err(to_py_err);
                 }
             }
-            // Complex expression (e.g. col("a") == col("b")): cross join then filter.
+            // Complex expression (e.g. col("a") == col("b") or array_contains(...)): expression-based join.
             if let Ok(condition) = on_arg.downcast::<PyColumn>() {
                 let crossed = self.inner.cross_join(&other.inner).map_err(to_py_err)?;
                 let filtered = crossed
                     .filter(condition.borrow().inner.clone().into_expr())
                     .map_err(to_py_err)?;
+                // For left/outer joins, include unmatched left rows with nulls on right columns (best-effort PySpark parity).
+                if matches!(join_type, JoinType::Left | JoinType::Outer) {
+                    // Columns coming from left side
+                    let left_cols = self.inner.columns().map_err(to_py_err)?;
+                    let left_refs: Vec<&str> = left_cols.iter().map(|s| s.as_str()).collect();
+                    let filtered_left = filtered.select(left_refs).map_err(to_py_err)?;
+                    // Unmatched left rows (set difference by all left columns)
+                    let unmatched_left = self
+                        .inner
+                        .subtract(&filtered_left)
+                        .map_err(to_py_err)?;
+                    // Add null right columns to unmatched_left so schema matches filtered.
+                    let all_cols = filtered.columns().map_err(to_py_err)?;
+                    let mut augmented = unmatched_left;
+                    for col_name in &all_cols {
+                        // Skip columns that already exist on the left side.
+                        if left_cols.iter().any(|c| c.as_str() == col_name.as_str()) {
+                            continue;
+                        }
+                        let dtype_opt = filtered
+                            .get_column_dtype(col_name.as_str())
+                            .ok_or_else(|| {
+                                to_py_err(format!(
+                                    "join: failed to get dtype for column '{}'",
+                                    col_name
+                                ))
+                            })?;
+                        // Heuristic mapping from engine dtype to PySpark type string.
+                        let dtype_str = dtype_opt.to_string().to_lowercase();
+                        let null_col = if dtype_str.contains("int") {
+                            functions::lit_null("bigint").map_err(to_py_err)?
+                        } else if dtype_str.contains("string") {
+                            functions::lit_null("string").map_err(to_py_err)?
+                        } else {
+                            functions::lit_null_untyped()
+                        };
+                        augmented = augmented
+                            .with_column(col_name.as_str(), &null_col)
+                            .map_err(to_py_err)?;
+                    }
+                    // Reorder columns on augmented to match filtered, then union (no type promotion).
+                    let all_refs: Vec<&str> =
+                        all_cols.iter().map(|s| s.as_str()).collect();
+                    let augmented = augmented.select(all_refs).map_err(to_py_err)?;
+                    let all = filtered.union(&augmented).map_err(to_py_err)?;
+                    return Ok(PyDataFrame { inner: all });
+                }
                 return Ok(PyDataFrame { inner: filtered });
             }
             let on_vec = py_join_on_to_vec(on_arg)?;
@@ -6571,6 +6620,13 @@ fn array_contains(column: &PyColumn, value: &PyColumn) -> PyColumn {
 }
 
 #[pyfunction]
+fn arrays_overlap(left: &PyColumn, right: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: functions::arrays_overlap(&left.inner, &right.inner),
+    }
+}
+
+#[pyfunction]
 fn explode(column: &PyColumn) -> PyColumn {
     PyColumn {
         inner: functions::explode(&column.inner),
@@ -6775,6 +6831,7 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(json_tuple, m)?)?;
     m.add_function(wrap_pyfunction!(size, m)?)?;
     m.add_function(wrap_pyfunction!(array_contains, m)?)?;
+    m.add_function(wrap_pyfunction!(arrays_overlap, m)?)?;
     m.add_function(wrap_pyfunction!(explode, m)?)?;
     Ok(())
 }

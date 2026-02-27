@@ -738,7 +738,22 @@ impl GroupedData {
             .map(|e| self.resolve_expr_column_names(e))
             .collect::<Result<Vec<_>, _>>()?;
         let disambiguated = disambiguate_agg_output_names(resolved);
-        let lf = self.lazy_grouped.clone().agg(disambiguated);
+        use polars::prelude::*;
+        let mut lf = self.lazy_grouped.clone().agg(disambiguated);
+        // PySpark parity: groupBy().agg() results are ordered by grouping columns (lexicographic).
+        if !self.grouping_cols.is_empty() {
+            let sort_exprs: Vec<Expr> = self
+                .grouping_cols
+                .iter()
+                .map(|g| col(g.as_str()))
+                .collect();
+            let descending = vec![false; sort_exprs.len()];
+            let nulls_last = vec![false; sort_exprs.len()];
+            let opts = SortMultipleOptions::new()
+                .with_order_descending_multi(descending)
+                .with_nulls_last_multi(nulls_last);
+            lf = lf.sort_by_exprs(sort_exprs, opts);
+        }
         let mut pl_df = lf.collect()?;
         pl_df = reorder_groupby_columns(&mut pl_df, &self.grouping_cols)?;
         Ok(super::DataFrame::from_polars_with_options(

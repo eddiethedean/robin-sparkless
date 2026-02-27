@@ -297,6 +297,52 @@ pub fn apply_array_distinct_first_order(column: Column) -> PolarsResult<Option<C
     Ok(Some(Column::new(name, out.into_series())))
 }
 
+/// True if list contains value (PySpark array_contains). Supports column or literal values.
+pub fn apply_array_contains(columns: &mut [Column]) -> PolarsResult<Option<Column>> {
+    use polars::prelude::{AnyValue, BooleanChunked};
+    if columns.len() < 2 {
+        return Err(PolarsError::ComputeError(
+            "array_contains needs two columns (array, value)".into(),
+        ));
+    }
+    let name = columns[0].field().into_owned().name;
+    let list_series = std::mem::take(&mut columns[0]).take_materialized_series();
+    let value_series = std::mem::take(&mut columns[1]).take_materialized_series();
+    let list_ca = list_series
+        .list()
+        .map_err(|e| compute_err("array_contains", e))?;
+    let inner_dtype = list_ca.inner_dtype().clone();
+    let value_casted = value_series.cast(&inner_dtype)?;
+    let elem_len = value_casted.len();
+    let elem_vec: Vec<Option<AnyValue>> =
+        (0..elem_len).map(|i| value_casted.get(i).ok()).collect();
+    let mut results: Vec<bool> = Vec::with_capacity(list_ca.len());
+    for (row_idx, opt_list) in list_ca.amortized_iter().enumerate() {
+        let ei = if elem_len == 1 { 0 } else { row_idx };
+        let contains = match (opt_list, elem_vec.get(ei)) {
+            (Some(amort), Some(Some(av))) => {
+                let val_series = any_value_to_single_series(av.clone(), &inner_dtype)?;
+                let val_key = series_to_set_key(&val_series);
+                let list_s = amort.as_ref().as_list();
+                let mut found = false;
+                for e in list_s.amortized_iter().flatten() {
+                    let key = series_to_set_key(&e.deep_clone());
+                    if key == val_key {
+                        found = true;
+                        break;
+                    }
+                }
+                found
+            }
+            _ => false,
+        };
+        results.push(contains);
+    }
+    let out =
+        BooleanChunked::from_iter_options(name.as_str().into(), results.into_iter().map(Some));
+    Ok(Some(Column::new(name, out.into_series())))
+}
+
 /// Repeat each element n times (PySpark array_repeat).
 /// Supports both: (1) scalar column (string, int, etc.) - create array of n copies; (2) List column - repeat each element within the list.
 pub fn apply_array_repeat(column: Column, n: i64) -> PolarsResult<Option<Column>> {
