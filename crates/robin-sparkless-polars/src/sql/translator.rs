@@ -110,6 +110,16 @@ pub fn translate(
     set_thread_udf_session(session.clone());
     match stmt {
         Statement::Query(q) => translate_query(session, q.as_ref()),
+        Statement::CreateView(create_view) => {
+            // CREATE [OR REPLACE] [TEMP] VIEW name AS SELECT ... (#1011).
+            let view_name = table_name_from_object_name(&create_view.name);
+            let df = translate_query(session, create_view.query.as_ref())?;
+            session.create_or_replace_temp_view(&view_name, df);
+            Ok(DataFrame::from_polars_with_options(
+                PlDataFrame::empty(),
+                session.is_case_sensitive(),
+            ))
+        }
         Statement::CreateTable(create_table) => {
             let table_name = create_table.name.to_string();
             if session.table_exists(&table_name) {
@@ -256,7 +266,7 @@ pub fn translate(
         Statement::Delete(d) => translate_delete(session, d),
         Statement::ExplainTable { table_name, .. } => translate_describe_table(session, table_name),
         _ => Err(PolarsError::InvalidOperation(
-            "SQL: only SELECT, CREATE SCHEMA/DATABASE, DROP TABLE/VIEW/SCHEMA/DATABASE, and DESCRIBE are supported."
+            "SQL: only SELECT, CREATE TABLE/VIEW, CREATE SCHEMA/DATABASE, DROP TABLE/VIEW/SCHEMA/DATABASE, and DESCRIBE are supported."
                 .into(),
         )),
     }
@@ -611,9 +621,13 @@ fn translate_select_from(
                     JoinOperator::LeftAnti(_) => JoinType::LeftAnti,
                     JoinOperator::Semi(_) => JoinType::LeftSemi,
                     JoinOperator::Anti(_) => JoinType::LeftAnti,
-                    _ => {
+                    other => {
                         return Err(PolarsError::InvalidOperation(
-                            "SQL: only INNER, LEFT, RIGHT, FULL, LEFT SEMI, LEFT ANTI, CROSS JOIN are supported.".into(),
+                            format!(
+                                "SQL: unsupported join type {:?}; only INNER, LEFT, RIGHT, FULL, LEFT SEMI, LEFT ANTI, CROSS JOIN are supported.",
+                                other
+                            )
+                            .into(),
                         ));
                     }
                 };
@@ -692,9 +706,13 @@ fn join_condition_to_on_columns(
         | JoinOperator::Semi(c)
         | JoinOperator::Anti(c) => c,
         JoinOperator::CrossJoin(_) => return Ok((vec![], vec![])),
-        _ => {
+        other => {
             return Err(PolarsError::InvalidOperation(
-                "SQL: only INNER/LEFT/RIGHT/FULL/LEFT SEMI/LEFT ANTI/CROSS JOIN with ON are supported.".into(),
+                format!(
+                    "SQL: unsupported join type {:?}; only INNER/LEFT/RIGHT/FULL/LEFT SEMI/LEFT ANTI/CROSS JOIN with ON are supported.",
+                    other
+                )
+                .into(),
             ));
         }
     };
