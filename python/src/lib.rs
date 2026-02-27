@@ -2233,10 +2233,81 @@ impl PyDataFrame {
         slf: PyRef<Self>,
         py: Python<'_>,
         name: &str,
-        col: &PyColumn,
+        col_any: &Bound<'_, PyAny>,
     ) -> PyResult<PyDataFrame> {
-        if let Some((udf_name, arg_names, literal_jsons)) = col.inner.udf_call_info_with_literals()
-        {
+        // Case 1: regular Column (including Python UDF columns)
+        if let Ok(py_col) = col_any.downcast::<PyColumn>() {
+            let col = py_col.borrow();
+            if let Some((udf_name, arg_names, literal_jsons)) =
+                col.inner.udf_call_info_with_literals()
+            {
+                let arg_names_py = PyList::new_bound(py, arg_names.iter());
+                let literals_py = PyList::empty_bound(py);
+                for opt in &literal_jsons {
+                    let item: Bound<'_, PyAny> = match opt {
+                        Some(s) => pyo3::types::PyString::new_bound(py, s.as_str()).into_any(),
+                        None => py.None().into_bound(py),
+                    };
+                    literals_py.append(item)?;
+                }
+                if let Some(result_df) =
+                    PYTHON_UDF_EXECUTOR.with(|cell| -> PyResult<Option<PyDataFrame>> {
+                        let cb = cell.borrow();
+                        let callback = match cb.as_ref() {
+                            Some(c) => c,
+                            None => return Ok(None),
+                        };
+                        let df_obj: Bound<'_, PyAny> =
+                            unsafe { Bound::from_borrowed_ptr(py, slf.as_ptr()) };
+                        let result = callback.bind(py).call1((
+                            df_obj,
+                            name,
+                            udf_name,
+                            arg_names_py,
+                            literals_py,
+                        ))?;
+                        let py_df = result.downcast::<PyDataFrame>()?;
+                        Ok(Some(PyDataFrame {
+                            inner: py_df.borrow().inner.clone(),
+                        }))
+                    })?
+                {
+                    return Ok(result_df);
+                }
+            }
+            let df = slf.inner.with_column(name, &col.inner).map_err(|e| {
+                let msg = e.to_string();
+                if msg.contains("to_timestamp requires StringType") {
+                    PyErr::new::<pyo3::exceptions::PyTypeError, _>(msg)
+                } else {
+                    to_py_err(msg)
+                }
+            })?;
+            // Force schema inference now so type errors surface at withColumn time (PySpark parity).
+            df.schema_engine().map_err(|e| {
+                let msg = e.to_string();
+                if msg.contains("to_timestamp requires StringType") {
+                    PyErr::new::<pyo3::exceptions::PyTypeError, _>(msg)
+                } else {
+                    to_py_err(msg)
+                }
+            })?;
+            return Ok(PyDataFrame { inner: df });
+        }
+
+        // Case 2: expr-string from F.expr(...)
+        if let Ok(py_expr_str) = col_any.downcast::<PyExprStr>() {
+            let session = THREAD_ACTIVE_SESSIONS
+                .with(|cell| cell.borrow().last().map(|s| s.clone_ref(py)))
+                .ok_or_else(|| {
+                    PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
+                        "withColumn(expr) requires an active SparkSession",
+                    )
+                })?;
+            let session_ref = session.bind(py).downcast::<PySparkSession>().map_err(|_| {
+                PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected SparkSession")
+            })?;
+            // Use a temp view so expr_string_to_polars can resolve column names against this DataFrame.
             let arg_names_py = PyList::new_bound(py, arg_names.iter());
             let literals_py = PyList::empty_bound(py);
             for opt in &literal_jsons {
@@ -2246,49 +2317,43 @@ impl PyDataFrame {
                 };
                 literals_py.append(item)?;
             }
-            if let Some(result_df) =
-                PYTHON_UDF_EXECUTOR.with(|cell| -> PyResult<Option<PyDataFrame>> {
-                    let cb = cell.borrow();
-                    let callback = match cb.as_ref() {
-                        Some(c) => c,
-                        None => return Ok(None),
-                    };
-                    let df_obj: Bound<'_, PyAny> =
-                        unsafe { Bound::from_borrowed_ptr(py, slf.as_ptr()) };
-                    let result = callback.bind(py).call1((
-                        df_obj,
-                        name,
-                        udf_name,
-                        arg_names_py,
-                        literals_py,
-                    ))?;
-                    let py_df = result.downcast::<PyDataFrame>()?;
-                    Ok(Some(PyDataFrame {
-                        inner: py_df.borrow().inner.clone(),
-                    }))
-                })?
-            {
-                return Ok(result_df);
-            }
+            session_ref
+                .borrow()
+                .inner
+                .create_or_replace_temp_view("__withcol_expr_t", slf.inner.clone());
+            let expr = robin_sparkless::sql::expr_string_to_polars(
+                &py_expr_str.borrow().sql,
+                &session_ref.borrow().inner,
+                &slf.inner,
+            )
+            .map_err(to_py_err)?;
+            session_ref
+                .borrow()
+                .inner
+                .drop_temp_view("__withcol_expr_t");
+            let col = Column::from_expr(expr, None);
+            let df = slf.inner.with_column(name, &col).map_err(|e| {
+                let msg = e.to_string();
+                if msg.contains("to_timestamp requires StringType") {
+                    PyErr::new::<pyo3::exceptions::PyTypeError, _>(msg)
+                } else {
+                    to_py_err(msg)
+                }
+            })?;
+            df.schema_engine().map_err(|e| {
+                let msg = e.to_string();
+                if msg.contains("to_timestamp requires StringType") {
+                    PyErr::new::<pyo3::exceptions::PyTypeError, _>(msg)
+                } else {
+                    to_py_err(msg)
+                }
+            })?;
+            return Ok(PyDataFrame { inner: df });
         }
-        let df = slf.inner.with_column(name, &col.inner).map_err(|e| {
-            let msg = e.to_string();
-            if msg.contains("to_timestamp requires StringType") {
-                PyErr::new::<pyo3::exceptions::PyTypeError, _>(msg)
-            } else {
-                to_py_err(msg)
-            }
-        })?;
-        // Force schema inference now so type errors surface at withColumn time (PySpark parity).
-        df.schema_engine().map_err(|e| {
-            let msg = e.to_string();
-            if msg.contains("to_timestamp requires StringType") {
-                PyErr::new::<pyo3::exceptions::PyTypeError, _>(msg)
-            } else {
-                to_py_err(msg)
-            }
-        })?;
-        Ok(PyDataFrame { inner: df })
+
+        Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+            "withColumn expects a Column or expr() result",
+        ))
     }
 
     #[pyo3(name = "withColumn")]
@@ -2296,7 +2361,7 @@ impl PyDataFrame {
         slf: PyRef<Self>,
         py: Python<'_>,
         name: &str,
-        col: &PyColumn,
+        col: &Bound<'_, PyAny>,
     ) -> PyResult<PyDataFrame> {
         Self::with_column(slf, py, name, col)
     }
@@ -4607,6 +4672,12 @@ impl PyExprStr {
     #[getter]
     fn sql(&self) -> &str {
         &self.sql
+    }
+
+    fn alias(&self, name: &str) -> PyExprStr {
+        PyExprStr {
+            sql: format!("{} AS {}", self.sql, name),
+        }
     }
 }
 
