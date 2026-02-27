@@ -9,6 +9,7 @@ use crate::functions;
 use crate::schema::{DataType as CoreDataType, StructType};
 use crate::session::{SparkSession, set_thread_udf_session};
 use polars::prelude::{DataFrame as PlDataFrame, Expr, PolarsError, col, lit, when};
+use polars_plan::dsl::functions::nth;
 use serde_json::Value as JsonValue;
 use sqlparser::ast::{
     AssignmentTarget, BinaryOperator, Expr as SqlExpr, FromTable, Function, FunctionArg,
@@ -1061,10 +1062,9 @@ fn apply_projection(
                 let refs: Vec<&str> = column_names.iter().map(|s| s.as_str()).collect();
                 return df.select(refs);
             }
-            let exprs: Vec<Expr> = column_names
-                .iter()
-                .zip(unique_aliases.iter())
-                .map(|(c, alias)| col(c.as_str()).alias(alias))
+            // Duplicate names: select by index then alias (col("x") would be ambiguous).
+            let exprs: Vec<Expr> = (0..column_names.len())
+                .map(|i| nth(i as i64).as_expr().alias(unique_aliases[i].as_str()))
                 .collect();
             return df.select_exprs(exprs);
         }

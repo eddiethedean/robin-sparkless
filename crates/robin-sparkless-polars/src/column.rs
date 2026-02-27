@@ -1900,9 +1900,13 @@ impl Column {
         crate::functions::try_cast(self, type_name)
     }
 
-    /// True where the float value is NaN (PySpark isnan).
+    /// True where the float value is NaN (PySpark isnan). Non-float columns (e.g. string) return all False.
     pub fn is_nan(&self) -> Column {
-        Self::from_expr(self.expr().clone().is_nan(), None)
+        let expr = self.expr().clone().map(
+            |s| expect_col(crate::udfs::apply_isnan_pyspark_parity(s)),
+            |_schema, field| Ok(Field::new(field.name().clone(), DataType::Boolean)),
+        );
+        Self::from_expr(expr, None)
     }
 
     // --- Datetime functions ---

@@ -97,6 +97,34 @@ fn soundex_one(s: &str) -> Cow<'_, str> {
     Cow::Owned(code.chars().take(4).collect::<String>())
 }
 
+/// PySpark parity: isnan on string (and other non-float) columns returns all False (no error).
+pub fn apply_isnan_pyspark_parity(column: Column) -> PolarsResult<Option<Column>> {
+    let name = column.field().into_owned().name;
+    let series = column.take_materialized_series();
+    let out = match series.dtype() {
+        DataType::Float32 | DataType::Float64 => {
+            series.is_nan().map_err(|e| compute_err("isnan", e))?.into_series()
+        }
+        // PySpark special case: string "NaN" is treated as NaN (true), all other strings false.
+        // This also covers our JSON serialization path where float NaN becomes the string "nan".
+        DataType::String => {
+            let ca = series.str().map_err(|e| compute_err("isnan", e))?;
+            let out = BooleanChunked::from_iter_options(
+                name.as_str().into(),
+                ca.into_iter()
+                    .map(|opt_s| Some(opt_s.map(|s| s.trim().eq_ignore_ascii_case("nan")).unwrap_or(false))),
+            );
+            out.into_series()
+        }
+        _ => BooleanChunked::from_iter_options(
+            name.as_str().into(),
+            (0..series.len()).map(|_| Some(false)),
+        )
+        .into_series(),
+    };
+    Ok(Some(Column::new(name, out)))
+}
+
 /// Apply soundex to a string column; returns a new Column (Series).
 pub fn apply_soundex(column: Column) -> PolarsResult<Option<Column>> {
     let name = column.field().into_owned().name;

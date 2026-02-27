@@ -311,6 +311,13 @@ class Row(tuple):
         return super().__iter__()
 
 
+class _ColumnsList(list):
+    """PySpark parity: df.columns and df.columns() both return the list of column names."""
+
+    def __call__(self):
+        return self
+
+
 __all__ = [
     "StructType",
     "StructField",

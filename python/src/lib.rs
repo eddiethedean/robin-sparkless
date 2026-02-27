@@ -1093,8 +1093,37 @@ fn simple_string_to_type(s: &str) -> String {
     }
 }
 
+/// Parse DDL schema string (e.g. "name: string, age: int" or "a string, b int") into (name, type) pairs.
+fn parse_ddl_schema_string(ddl: &str) -> Vec<(String, String)> {
+    let mut pairs = Vec::new();
+    for part in ddl.split(',') {
+        let part = part.trim();
+        if part.is_empty() {
+            continue;
+        }
+        let (name, typ) = if let Some(colon) = part.find(':') {
+            let name = part[..colon].trim().to_string();
+            let typ = part[colon + 1..].trim().to_string();
+            (name, typ)
+        } else {
+            // "name type" format: last space separates name and type
+            match part.rfind(' ') {
+                Some(i) => (
+                    part[..i].trim().to_string(),
+                    part[i + 1..].trim().to_string(),
+                ),
+                None => (part.to_string(), "string".to_string()),
+            }
+        };
+        if !name.is_empty() {
+            pairs.push((name, simple_string_to_type(&typ)));
+        }
+    }
+    pairs
+}
+
 /// Parse schema from Python: None, list of column names (str), list of (name, type) pairs,
-/// or StructType-like object with .fields (each with .name and .dataType.simpleString()).
+/// DDL string (e.g. "name: string, age: int"), or StructType-like object with .fields.
 fn parse_schema_from_py(
     _py: Python<'_>,
     schema: &Bound<'_, PyAny>,
@@ -1115,7 +1144,6 @@ fn parse_schema_from_py(
                 .unwrap_or_else(|_| "string".to_string());
             let mapped = simple_string_to_type(&typ);
             // Explicit StructType schema should not be re-inferred from data even if all fields are strings.
-            // The Rust backend uses a heuristic: "all dtype == string" => infer from rows. Avoid triggering it.
             let mapped = if mapped.eq_ignore_ascii_case("string") {
                 "str".to_string()
             } else {
@@ -1123,6 +1151,12 @@ fn parse_schema_from_py(
             };
             pairs.push((name, mapped));
         }
+        return Ok(Some(pairs));
+    }
+
+    // DDL string: "name: string, age: int" or "a string, b int"
+    if let Ok(ddl) = schema.extract::<String>() {
+        let pairs = parse_ddl_schema_string(&ddl);
         return Ok(Some(pairs));
     }
 
@@ -2356,6 +2390,11 @@ impl PyDataFrame {
         self.inner.count().map_err(to_py_err)
     }
 
+    /// PySpark parity: len(df) returns row count.
+    fn __len__(&self) -> PyResult<usize> {
+        self.inner.count().map_err(to_py_err)
+    }
+
     /// PySpark parity: head() and head(n) return a DataFrame (limit 1 / limit n) so .collect() works.
     #[pyo3(signature = (n=None))]
     fn head(&self, n: Option<usize>) -> PyResult<PyDataFrame> {
@@ -3176,8 +3215,12 @@ impl PyDataFrame {
     }
 
     #[getter]
-    fn columns(&self) -> PyResult<Vec<String>> {
-        self.inner.columns().map_err(to_py_err)
+    fn columns(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let names = self.inner.columns().map_err(to_py_err)?;
+        let py_list = PyList::new_bound(py, names.clone());
+        let types_mod = PyModule::import_bound(py, "sparkless.sql.types")?;
+        let wrap = types_mod.getattr("_ColumnsList")?.call1((py_list,))?;
+        Ok(wrap.into_py(py))
     }
 
     #[pyo3(name = "toDF", signature = (*col_names))]
