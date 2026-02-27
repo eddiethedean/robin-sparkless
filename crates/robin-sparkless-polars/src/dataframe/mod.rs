@@ -179,6 +179,21 @@ impl DataFrame {
             }
             Ok(e)
         })?;
+        // #1008: Expr's default output name (e.g. to_timestamp_timestamp_str) must not be resolved as input column.
+        // Only add when it does not match any schema column (case-insensitive), so col("age") still resolves to "Age".
+        if let Ok(out_name) = polars_plan::utils::expr_output_name(&expr) {
+            let out_str = out_name.as_str();
+            let matches_schema = self
+                .columns()
+                .map(|cols| {
+                    cols.iter()
+                        .any(|c| c.eq_ignore_ascii_case(out_str))
+                })
+                .unwrap_or(false);
+            if !matches_schema {
+                alias_output_names.insert(out_str.to_string());
+            }
+        }
         expr.try_map_expr(move |e| {
             if let Expr::Column(name) = &e {
                 let name_str = name.as_str();
