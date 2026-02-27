@@ -283,16 +283,45 @@ def _row_to_dict(row: Any, columns: Sequence[str]) -> Dict[str, Any]:
     Note: When there are duplicate column names, dictionaries can only store one value per key.
     For duplicate columns, we use positional access to get the correct value.
     """
+    # Prefer asDict() for Row-like objects (e.g. Sparkless Row) so we get values not keys.
+    # Sparkless Row.__iter__ yields field names (dict-like); use asDict() or _iter_values() for values.
+    if hasattr(row, "asDict"):
+        try:
+            base = row.asDict(recursive=True)
+        except TypeError:
+            base = row.asDict()
+        normalized_base = _normalize_row_to_dict(base)
+        if isinstance(normalized_base, dict):
+            return {col: normalized_base.get(col) for col in columns}
+    if hasattr(row, "_iter_values") and callable(getattr(row, "_iter_values")):
+        try:
+            row_values = list(row._iter_values())
+            if row_values and len(row_values) >= len(columns):
+                result_dict = {
+                    col: row_values[idx]
+                    for idx, col in enumerate(columns)
+                    if idx < len(row_values)
+                }
+                normalized = _normalize_row_to_dict(result_dict)
+                if isinstance(normalized, dict):
+                    return normalized
+        except (TypeError, AttributeError):
+            pass
+
     # Handle duplicate column names by using positional access
     # If row is a Sequence (like Row), access by index to preserve all values
     if isinstance(row, Sequence) and not isinstance(row, (str, bytes, bytearray)):
-        # Get all values from the row by position
+        # Get all values from the row by position. For Row-like objects that iterate keys,
+        # use _iter_values() if available; otherwise list(row) may yield keys not values.
         try:
-            row_values = (
-                list(row)
-                if hasattr(row, "__iter__") and not isinstance(row, dict)
-                else None
-            )
+            if hasattr(row, "_iter_values") and callable(getattr(row, "_iter_values")):
+                row_values = list(row._iter_values())
+            else:
+                row_values = (
+                    list(row)
+                    if hasattr(row, "__iter__") and not isinstance(row, dict)
+                    else None
+                )
             if row_values and len(row_values) >= len(columns):
                 # Use positional access for all columns (handles duplicates correctly)
                 result_dict = {
@@ -308,18 +337,15 @@ def _row_to_dict(row: Any, columns: Sequence[str]) -> Dict[str, Any]:
         except (TypeError, AttributeError):
             pass
 
-    # Fallback to asDict() method
+    # Fallback to asDict() for Row-like objects not handled above
     if hasattr(row, "asDict"):
         try:
             base = row.asDict(recursive=True)
         except TypeError:
             base = row.asDict()
-        # Normalize nested Row objects to dicts
         normalized_base = _normalize_row_to_dict(base)
-        if not isinstance(normalized_base, dict):
-            normalized_base = {}
-        # Fallback to dict lookup (will only get last value for duplicates)
-        return {col: normalized_base.get(col) for col in columns}
+        if isinstance(normalized_base, dict):
+            return {col: normalized_base.get(col) for col in columns}
 
     if isinstance(row, dict):
         normalized_row = _normalize_row_to_dict(row)

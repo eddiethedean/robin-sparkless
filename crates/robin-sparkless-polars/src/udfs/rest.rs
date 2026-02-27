@@ -159,7 +159,10 @@ pub fn apply_crc32(column: Column) -> PolarsResult<Option<Column>> {
     Ok(Some(Column::new(name, out.into_series())))
 }
 
-/// Apply XXH64 hash (PySpark xxhash64).
+/// Spark XXH64 seed (PySpark xxhash64 uses 42).
+const XXH64_SEED: u64 = 42;
+
+/// Apply XXH64 hash (PySpark xxhash64). Uses seed 42 to match Spark.
 pub fn apply_xxhash64(column: Column) -> PolarsResult<Option<Column>> {
     use std::hash::Hasher;
     use twox_hash::XxHash64;
@@ -170,12 +173,41 @@ pub fn apply_xxhash64(column: Column) -> PolarsResult<Option<Column>> {
         name.as_str().into(),
         ca.into_iter().map(|opt_s| {
             opt_s.map(|s| {
-                let mut hasher = XxHash64::default();
+                let mut hasher = XxHash64::with_seed(XXH64_SEED);
                 hasher.write(s.as_bytes());
                 hasher.finish() as i64
             })
         }),
     );
+    Ok(Some(Column::new(name, out.into_series())))
+}
+
+/// Title case: first letter of each word uppercase, rest lowercase (PySpark initcap).
+fn initcap_str(s: &str) -> Cow<'_, str> {
+    let mut out = String::with_capacity(s.len());
+    let mut word_start = true;
+    for c in s.chars() {
+        if c.is_alphabetic() || c.is_numeric() {
+            if word_start {
+                out.extend(c.to_uppercase());
+                word_start = false;
+            } else {
+                out.extend(c.to_lowercase());
+            }
+        } else {
+            out.push(c);
+            word_start = true;
+        }
+    }
+    Cow::Owned(out)
+}
+
+/// Apply initcap (PySpark initcap).
+pub fn apply_initcap(column: Column) -> PolarsResult<Option<Column>> {
+    let name = column.field().into_owned().name;
+    let series = column.take_materialized_series();
+    let ca = series.str().map_err(|e| compute_err("initcap", e))?;
+    let out = ca.apply_values(initcap_str);
     Ok(Some(Column::new(name, out.into_series())))
 }
 

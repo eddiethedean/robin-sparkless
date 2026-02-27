@@ -1073,10 +1073,13 @@ impl Column {
         }
     }
 
-    /// Title case: first letter of each word uppercase (PySpark initcap).
-    /// Approximates with lowercase when Polars to_titlecase is not enabled.
+    /// Title case: first letter of each word uppercase (PySpark initcap). Uses UDF; Polars has no to_titlecase in 0.53.
     pub fn initcap(&self) -> Column {
-        Self::from_expr(self.expr().clone().str().to_lowercase(), None)
+        let expr = self.expr().clone().map(
+            |s| expect_col(crate::udfs::apply_initcap(s)),
+            |_schema, field| Ok(Field::new(field.name().clone(), DataType::String)),
+        );
+        Self::from_expr(expr, None)
     }
 
     /// Extract all matches of regex (PySpark regexp_extract_all). Returns list of strings.

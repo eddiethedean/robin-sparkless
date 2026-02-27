@@ -13,20 +13,23 @@ use polars::prelude::{
     Selector, Series, UnionArgs, UniqueKeepStrategy, col, len, lit, repeat,
 };
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
-/// Returns true if the expression tree contains a reference to the given column name (so we must not drop it before adding).
-fn expr_refs_column(expr: &Expr, column_name: &str) -> bool {
-    let found = RefCell::new(false);
+/// Returns the set of column names referenced in the expression tree.
+fn expr_referenced_columns(expr: &Expr) -> HashSet<String> {
+    let refs = RefCell::new(HashSet::<String>::new());
     let _ = expr.clone().try_map_expr(|e| {
         if let Expr::Column(n) = &e {
-            if n.as_str() == column_name {
-                *found.borrow_mut() = true;
-            }
+            refs.borrow_mut().insert(n.as_str().to_string());
         }
         Ok(e)
     });
-    *found.borrow()
+    refs.into_inner()
+}
+
+/// Returns true if the expression tree contains a reference to the given column name (so we must not drop it before adding).
+fn expr_refs_column(expr: &Expr, column_name: &str) -> bool {
+    expr_referenced_columns(expr).contains(column_name)
 }
 
 /// Replace a pure literal expr with a column-referencing expr so Polars produces correct row count.
@@ -101,12 +104,18 @@ pub fn select_with_exprs(
         .into_iter()
         .map(|e| df.coerce_string_numeric_comparisons(e))
         .collect::<Result<Vec<_>, _>>()?;
-    let first_col = df.columns().ok().and_then(|cols| cols.into_iter().next());
+    let df_columns: HashSet<String> = df
+        .columns()
+        .ok()
+        .map(|c| c.into_iter().map(|s| s.as_str().to_string()).collect())
+        .unwrap_or_default();
+    let first_col = df_columns.iter().next().map(String::as_str);
     let exprs: Vec<Expr> = exprs
         .into_iter()
-        .map(|e| expand_pure_literal_to_rows(e.clone(), first_col.as_deref()).unwrap_or(e))
+        .map(|e| expand_pure_literal_to_rows(e.clone(), first_col).unwrap_or(e))
         .collect();
     let mut name_count: HashMap<String, u32> = HashMap::new();
+    let mut output_names: Vec<String> = Vec::new();
     let exprs: Vec<Expr> = exprs
         .into_iter()
         .map(|e| {
@@ -116,10 +125,11 @@ pub fn select_with_exprs(
             let count = name_count.entry(base_name.clone()).or_insert(0);
             *count += 1;
             let final_name = if *count == 1 {
-                base_name
+                base_name.clone()
             } else {
                 format!("{}_{}", base_name, *count - 1)
             };
+            output_names.push(final_name.clone());
             if *count == 1 {
                 e
             } else {
@@ -127,7 +137,27 @@ pub fn select_with_exprs(
             }
         })
         .collect();
-    let lf = df.lazy_frame().select(&exprs);
+
+    // When every expression references no column from the frame, Polars select yields 1 row.
+    // Cross-join with a single key column to get N rows (PySpark parity).
+    let lf = df.lazy_frame();
+    let no_col_refs = first_col.is_some()
+        && exprs.iter().all(|e| {
+            expr_referenced_columns(e)
+                .intersection(&df_columns)
+                .next()
+                .is_none()
+        });
+    let lf = if no_col_refs {
+        let first = first_col.unwrap();
+        let lf_key = lf.clone().select([col(first)]);
+        let lf_vals = lf.select(&exprs);
+        let joined = lf_key.cross_join(lf_vals, None);
+        let right_exprs: Vec<Expr> = output_names.iter().map(|n| col(n.as_str())).collect();
+        joined.select(right_exprs)
+    } else {
+        lf.select(&exprs)
+    };
     Ok(super::DataFrame::from_lazy_with_options(lf, case_sensitive))
 }
 
@@ -235,23 +265,45 @@ pub fn with_column(
     }
     // PySpark withColumn replaces if column exists; avoid duplicate output name (e.g. CTE self-join).
     // If the new expr references the column being replaced, replace in one select so the column stays in scope.
+    // When replacing with explode(col(name)), use LazyFrame.explode() so other columns are replicated (PySpark parity).
     let lf = df.lazy_frame();
     let lf = if let Ok(existing) = df.resolve_column_name(column_name) {
         let all = df.columns()?;
         let existing_str = existing.as_str();
         if expr_refs_column(&expr, existing_str) {
-            // Replace in one shot: select all columns but use expr for the replaced name.
-            let select_exprs: Vec<Expr> = all
-                .iter()
-                .map(|n| {
-                    if n.as_str() == existing_str {
-                        expr.clone().alias(column_name)
-                    } else {
-                        col(n.as_str())
-                    }
-                })
-                .collect();
-            lf.select(select_exprs)
+            let inner = match &expr {
+                Expr::Alias(e, _) => e.as_ref(),
+                e => e,
+            };
+            // Use LazyFrame.explode() when replacing a column with explode(that column) so other columns replicate.
+            let refs = expr_referenced_columns(inner);
+            let use_frame_explode = refs.len() == 1
+                && refs.contains(existing_str)
+                && matches!(inner, Expr::Explode { .. });
+            if use_frame_explode {
+                let options = match inner {
+                    Expr::Explode { options, .. } => *options,
+                    _ => unreachable!(),
+                };
+                let selector = Selector::ByName {
+                    names: Arc::from([PlSmallStr::from(existing_str)]),
+                    strict: true,
+                };
+                lf.explode(selector, options)
+            } else {
+                // Replace in one shot: select all columns but use expr for the replaced name.
+                let select_exprs: Vec<Expr> = all
+                    .iter()
+                    .map(|n| {
+                        if n.as_str() == existing_str {
+                            expr.clone().alias(column_name)
+                        } else {
+                            col(n.as_str())
+                        }
+                    })
+                    .collect();
+                lf.select(select_exprs)
+            }
         } else {
             let to_keep: Vec<Expr> = all
                 .iter()
