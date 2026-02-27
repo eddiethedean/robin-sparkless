@@ -2955,7 +2955,7 @@ pub fn stack(columns: &[&Column]) -> Column {
 mod tests {
     use super::*;
     use crate::functions::{col, lit_bool, lit_f64, lit_i32, lit_i64, lit_str};
-    use polars::prelude::{IntoLazy, df};
+    use polars::prelude::{DataType, IntoLazy, Series, df};
 
     #[test]
     fn test_col_creates_column() {
@@ -2992,6 +2992,27 @@ mod tests {
     fn test_lit_str() {
         let column = lit_str("hello");
         assert_eq!(column.name(), "<expr>");
+    }
+
+    #[test]
+    fn cast_null_literal_to_int_and_long() {
+        // Simulate F.lit(None).cast(IntegerType/LongType): casting from Null to Int32/Int64
+        // should yield typed null columns instead of erroring (#1028).
+        let s = Series::new_null("x".into(), 3);
+
+        // Cast via the lower-level helper to be explicit about the target type.
+        let col_i32 =
+            crate::udfs::apply_string_to_int(s.clone().into_column(), true, DataType::Int32)
+                .expect("cast to Int32 should succeed")
+                .expect("column should be present");
+        let col_i64 = crate::udfs::apply_string_to_int(s.into_column(), true, DataType::Int64)
+            .expect("cast to Int64 should succeed")
+            .expect("column should be present");
+
+        assert_eq!(col_i32.dtype(), &DataType::Int32);
+        assert_eq!(col_i64.dtype(), &DataType::Int64);
+        assert!(col_i32.is_null().all());
+        assert!(col_i64.is_null().all());
     }
 
     #[test]
