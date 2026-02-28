@@ -100,6 +100,7 @@ def _col_result(x: Any) -> _ColumnType:
     out: _ColumnType = cast(_ColumnType, x)
     return out
 
+
 # Registry for Python UDFs: udf_name -> (callable, return_type). Populated by udf() / @udf.
 _PYTHON_UDF_REGISTRY: Dict[str, Tuple[Callable[..., object], object]] = {}
 
@@ -144,121 +145,128 @@ def _ni(name: str) -> Callable[..., None]:
 
 # --- Math functions (native-backed) ---
 def floor(c: ColumnOrName) -> _ColumnType:
-    return _col_result( _native_fn("floor")(_as_col(c)))
+    return _col_result(_native_fn("floor")(_as_col(c)))
 
 
 def ceil(c: ColumnOrName) -> _ColumnType:
-    return _col_result( _native_fn("ceil")(_as_col(c)))
+    return _col_result(_native_fn("ceil")(_as_col(c)))
 
 
 ceiling = ceil
 
 
 def abs(c: ColumnOrName) -> _ColumnType:
-    return _col_result( _native_fn("abs")(_as_col(c)))
+    return _col_result(_native_fn("abs")(_as_col(c)))
 
 
 def sqrt(c: ColumnOrName) -> _ColumnType:
-    return _col_result( _native_fn("sqrt")(_as_col(c)))
+    return _col_result(_native_fn("sqrt")(_as_col(c)))
 
 
-def log(col_or_base: ColumnOrName, base_or_col: Optional[Union[ColumnOrName, int, float]] = None) -> _ColumnType:
+def log(
+    col_or_base: ColumnOrName,
+    base_or_col: Optional[Union[ColumnOrName, int, float]] = None,
+) -> _ColumnType:
     """Natural log, or log with base. PySpark: log(column) or log(base, column)."""
     if base_or_col is None:
-        return _col_result( _native_fn("log")(_as_col(col_or_base)))
+        return _col_result(_native_fn("log")(_as_col(col_or_base)))
     # Two args: PySpark uses log(base, column); accept (base, column) or (column, base)
     if isinstance(base_or_col, (int, float)):
-        return _col_result( _native_fn("log_with_base")(_as_col(col_or_base), float(base_or_col)))
+        return _col_result(
+            _native_fn("log_with_base")(_as_col(col_or_base), float(base_or_col))
+        )
     if isinstance(col_or_base, (int, float)):
-        return _col_result( _native_fn("log_with_base")(_as_col(base_or_col), float(col_or_base)))
+        return _col_result(
+            _native_fn("log_with_base")(_as_col(base_or_col), float(col_or_base))
+        )
     raise TypeError(
         "log(base, column) or log(column, base): one argument must be a numeric base (int/float), the other a Column"
     )
 
 
 def exp(c: ColumnOrName) -> _ColumnType:
-    return _col_result( _native_fn("exp")(_as_col(c)))
+    return _col_result(_native_fn("exp")(_as_col(c)))
 
 
 def pow(col1: ColumnOrName, col2: Union[int, float]) -> _ColumnType:
-    return _col_result( _native_fn("pow")(_as_col(col1), int(col2)))
+    return _col_result(_native_fn("pow")(_as_col(col1), int(col2)))
 
 
 power = pow
 
 
 def round(c: ColumnOrName, scale: int = 0) -> _ColumnType:
-    return _col_result( _native_fn("round")(_as_col(c), scale))
+    return _col_result(_native_fn("round")(_as_col(c), scale))
 
 
 def signum(c: ColumnOrName) -> _ColumnType:
-    return _col_result( _native_fn("signum")(_as_col(c)))
+    return _col_result(_native_fn("signum")(_as_col(c)))
 
 
 def sin(c: ColumnOrName) -> _ColumnType:
-    return _col_result( _native_fn("sin")(_as_col(c)))
+    return _col_result(_native_fn("sin")(_as_col(c)))
 
 
 def cos(c: ColumnOrName) -> _ColumnType:
-    return _col_result( _native_fn("cos")(_as_col(c)))
+    return _col_result(_native_fn("cos")(_as_col(c)))
 
 
 def tan(c: ColumnOrName) -> _ColumnType:
-    return _col_result( _native_fn("tan")(_as_col(c)))
+    return _col_result(_native_fn("tan")(_as_col(c)))
 
 
 def asin(c: ColumnOrName) -> _ColumnType:
-    return _col_result( _native_fn("asin")(_as_col(c)))
+    return _col_result(_native_fn("asin")(_as_col(c)))
 
 
 def acos(c: ColumnOrName) -> _ColumnType:
-    return _col_result( _native_fn("acos")(_as_col(c)))
+    return _col_result(_native_fn("acos")(_as_col(c)))
 
 
 def atan(c: ColumnOrName) -> _ColumnType:
-    return _col_result( _native_fn("atan")(_as_col(c)))
+    return _col_result(_native_fn("atan")(_as_col(c)))
 
 
 def atan2(y: ColumnOrName, x: ColumnOrName) -> _ColumnType:
-    return _col_result( _native_fn("atan2")(_as_col(y), _as_col(x)))
+    return _col_result(_native_fn("atan2")(_as_col(y), _as_col(x)))
 
 
 def degrees(c: ColumnOrName) -> _ColumnType:
-    return _col_result( _native_fn("degrees")(_as_col(c)))
+    return _col_result(_native_fn("degrees")(_as_col(c)))
 
 
 def radians(c: ColumnOrName) -> _ColumnType:
-    return _col_result( _native_fn("radians")(_as_col(c)))
+    return _col_result(_native_fn("radians")(_as_col(c)))
 
 
 def log2(c: ColumnOrName) -> _ColumnType:
-    return _col_result( _native_fn("log2")(_as_col(c)))
+    return _col_result(_native_fn("log2")(_as_col(c)))
 
 
 def log10(c: ColumnOrName) -> _ColumnType:
-    return _col_result( _native_fn("log10")(_as_col(c)))
+    return _col_result(_native_fn("log10")(_as_col(c)))
 
 
 def greatest(*cols: ColumnOrName) -> _ColumnType:
-    return _col_result( _native_fn("greatest")(tuple([_as_col(c) for c in cols])))
+    return _col_result(_native_fn("greatest")(tuple([_as_col(c) for c in cols])))
 
 
 def least(*cols: ColumnOrName) -> _ColumnType:
-    return _col_result( _native_fn("least")(tuple([_as_col(c) for c in cols])))
+    return _col_result(_native_fn("least")(tuple([_as_col(c) for c in cols])))
 
 
 def coalesce(*cols: ColumnOrName) -> _ColumnType:
-    return _col_result( _native_fn("coalesce")(tuple([_as_col(c) for c in cols])))
+    return _col_result(_native_fn("coalesce")(tuple([_as_col(c) for c in cols])))
 
 
 def nanvl(col1: ColumnOrName, col2: ColumnOrName) -> _ColumnType:
     """Replace NaN with value. PySpark: F.nanvl(col1, col2)."""
-    return _col_result( _native_fn("nanvl")(_as_col(col1), _as_col(col2)))
+    return _col_result(_native_fn("nanvl")(_as_col(col1), _as_col(col2)))
 
 
 def isnan(c: ColumnOrName) -> _ColumnType:
     """True where the float value is NaN. PySpark: F.isnan(col)."""
-    return _col_result( _native_fn("isnan")(_as_col(c)))
+    return _col_result(_native_fn("isnan")(_as_col(c)))
 
 
 # isnull defined above (before __all__)
@@ -328,31 +336,33 @@ struct = _ni("struct")
 
 
 def explode(col_or_name: ColumnOrName) -> _ColumnType:
-    return _col_result( _native_fn("explode")(_as_col(col_or_name)))
+    return _col_result(_native_fn("explode")(_as_col(col_or_name)))
 
 
 def explode_outer(col_or_name: ColumnOrName) -> _ColumnType:
-    return _col_result( _native_fn("explode_outer")(_as_col(col_or_name)))
+    return _col_result(_native_fn("explode_outer")(_as_col(col_or_name)))
 
 
 def posexplode(col_or_name: ColumnOrName) -> _ColumnType:
-    return _col_result( _native_fn("posexplode")(_as_col(col_or_name)))
+    return _col_result(_native_fn("posexplode")(_as_col(col_or_name)))
 
 
 posexplode_outer = _ni("posexplode_outer")
 
 
 def flatten(col_or_name: ColumnOrName) -> _ColumnType:
-    return _col_result( _native_fn("flatten")(_as_col(col_or_name)))
+    return _col_result(_native_fn("flatten")(_as_col(col_or_name)))
 
 
 def split(str_col: ColumnOrName, pattern: str, limit: int = -1) -> _ColumnType:
     lim = limit if limit != -1 else -1  # Rust uses -1 for "no limit"
-    return _col_result( _native_fn("split")(_as_col(str_col), pattern, lim))
+    return _col_result(_native_fn("split")(_as_col(str_col), pattern, lim))
 
 
 def format_string(fmt: str, *cols: ColumnOrName) -> _ColumnType:
-    return _col_result( _native_fn("format_string")(fmt, tuple([_as_col(c) for c in cols])))
+    return _col_result(
+        _native_fn("format_string")(fmt, tuple([_as_col(c) for c in cols]))
+    )
 
 
 concat_ws = _ni("concat_ws")
@@ -360,27 +370,29 @@ concat_ws = _ni("concat_ws")
 
 # --- Aggregate functions (native-backed) ---
 def mean(col_or_name: ColumnOrName) -> _ColumnType:
-    return _col_result( avg(col_or_name))
+    return _col_result(avg(col_or_name))
 
 
 def first(col_or_name: ColumnOrName, ignorenulls: bool = False) -> _ColumnType:
-    return _col_result( _native_fn("first")(_as_col(col_or_name), ignorenulls))
+    return _col_result(_native_fn("first")(_as_col(col_or_name), ignorenulls))
 
 
 last = _ni("last")
 
 
 def collect_list(col_or_name: ColumnOrName) -> _ColumnType:
-    return _col_result( _native_fn("collect_list")(_as_col(col_or_name)))
+    return _col_result(_native_fn("collect_list")(_as_col(col_or_name)))
 
 
 def collect_set(col_or_name: ColumnOrName) -> _ColumnType:
-    return _col_result( _native_fn("collect_set")(_as_col(col_or_name)))
+    return _col_result(_native_fn("collect_set")(_as_col(col_or_name)))
 
 
-def array_contains(col_or_name: ColumnOrName, value: Union[ColumnOrName, int, float, bool, str]) -> _ColumnType:
+def array_contains(
+    col_or_name: ColumnOrName, value: Union[ColumnOrName, int, float, bool, str]
+) -> _ColumnType:
     v = _as_col(value) if not isinstance(value, (int, float, bool, str)) else lit(value)
-    return _col_result( _native_fn("array_contains")(_as_col(col_or_name), v))
+    return _col_result(_native_fn("array_contains")(_as_col(col_or_name), v))
 
 
 def array_distinct(col_or_name: ColumnOrName) -> _ColumnType:
@@ -394,32 +406,40 @@ def array_distinct(col_or_name: ColumnOrName) -> _ColumnType:
 
 
 def array_sort(col_or_name: ColumnOrName) -> _ColumnType:
-    return _col_result( _native_fn("array_sort")(_as_col(col_or_name)))
+    return _col_result(_native_fn("array_sort")(_as_col(col_or_name)))
 
 
-def array_join(col_or_name: ColumnOrName, delimiter: str, null_replacement: Optional[str] = None) -> _ColumnType:
-    return _col_result( _native_fn("array_join")(_as_col(col_or_name), delimiter))
+def array_join(
+    col_or_name: ColumnOrName, delimiter: str, null_replacement: Optional[str] = None
+) -> _ColumnType:
+    return _col_result(_native_fn("array_join")(_as_col(col_or_name), delimiter))
 
 
 def array_max(col_or_name: ColumnOrName) -> _ColumnType:
-    return _col_result( _native_fn("array_max")(_as_col(col_or_name)))
+    return _col_result(_native_fn("array_max")(_as_col(col_or_name)))
 
 
 def array_min(col_or_name: ColumnOrName) -> _ColumnType:
-    return _col_result( _native_fn("array_min")(_as_col(col_or_name)))
+    return _col_result(_native_fn("array_min")(_as_col(col_or_name)))
 
 
-def array_position(col_or_name: ColumnOrName, value: Optional[Union[ColumnOrName, int, float, bool, str]] = None) -> _ColumnType:
+def array_position(
+    col_or_name: ColumnOrName,
+    value: Optional[Union[ColumnOrName, int, float, bool, str]] = None,
+) -> _ColumnType:
     """1-based index of first occurrence of value in list, or 0 if not found. PySpark: F.array_position(col, value)."""
     v = (
         _as_col(value)
         if not isinstance(value, (int, float, bool, str, type(None)))
         else lit(value)
     )
-    return _col_result( _native_fn("array_position")(_as_col(col_or_name), v))
+    return _col_result(_native_fn("array_position")(_as_col(col_or_name), v))
 
 
-def array_remove(col_or_name: ColumnOrName, value: Optional[Union[ColumnOrName, int, float, bool, str]] = None) -> _ColumnType:
+def array_remove(
+    col_or_name: ColumnOrName,
+    value: Optional[Union[ColumnOrName, int, float, bool, str]] = None,
+) -> _ColumnType:
     """Remove all elements equal to value from the array. PySpark: F.array_remove(col, element)."""
     v = (
         _as_col(value)
@@ -430,26 +450,26 @@ def array_remove(col_or_name: ColumnOrName, value: Optional[Union[ColumnOrName, 
 
 
 def element_at(col_or_name: ColumnOrName, extraction: int) -> _ColumnType:
-    return _col_result( _native_fn("element_at")(_as_col(col_or_name), extraction))
+    return _col_result(_native_fn("element_at")(_as_col(col_or_name), extraction))
 
 
 def size(col_or_name: ColumnOrName) -> _ColumnType:
-    return _col_result( _native_fn("size")(_as_col(col_or_name)))
+    return _col_result(_native_fn("size")(_as_col(col_or_name)))
 
 
 slice = _ni("slice")
 
 
 def sort_array(col_or_name: ColumnOrName, asc: bool = True) -> _ColumnType:
-    return _col_result( _native_fn("array_sort")(_as_col(col_or_name)))
+    return _col_result(_native_fn("array_sort")(_as_col(col_or_name)))
 
 
 def array_union(col1: ColumnOrName, col2: ColumnOrName) -> _ColumnType:
-    return _col_result( _native.native_array_union(_as_col(col1), _as_col(col2)))
+    return _col_result(_native.native_array_union(_as_col(col1), _as_col(col2)))
 
 
 def array_intersect(col1: ColumnOrName, col2: ColumnOrName) -> _ColumnType:
-    return _col_result( _native.native_array_intersect(_as_col(col1), _as_col(col2)))
+    return _col_result(_native.native_array_intersect(_as_col(col1), _as_col(col2)))
 
 
 def array_except(col1, col2):
@@ -470,7 +490,7 @@ sumDistinct = _ni("sumDistinct")
 
 def count_distinct(*cols):
     if len(cols) == 1:
-        return _col_result( _native_fn("count_distinct")(_as_col(cols[0])))
+        return _col_result(_native_fn("count_distinct")(_as_col(cols[0])))
     raise NotImplementedError(
         "count_distinct with multiple columns is not yet implemented"
     )
@@ -485,31 +505,31 @@ def approx_count_distinct(col_or_name, rsd=0.05):
 
 
 def stddev(col_or_name):
-    return _col_result( _native_fn("stddev")(_as_col(col_or_name)))
+    return _col_result(_native_fn("stddev")(_as_col(col_or_name)))
 
 
 def stddev_pop(col_or_name):
-    return _col_result( _native_fn("stddev_pop")(_as_col(col_or_name)))
+    return _col_result(_native_fn("stddev_pop")(_as_col(col_or_name)))
 
 
 def stddev_samp(col_or_name):
-    return _col_result( _native_fn("stddev_samp")(_as_col(col_or_name)))
+    return _col_result(_native_fn("stddev_samp")(_as_col(col_or_name)))
 
 
 def variance(col_or_name):
-    return _col_result( _native_fn("variance")(_as_col(col_or_name)))
+    return _col_result(_native_fn("variance")(_as_col(col_or_name)))
 
 
 def var_pop(col_or_name):
-    return _col_result( _native_fn("var_pop")(_as_col(col_or_name)))
+    return _col_result(_native_fn("var_pop")(_as_col(col_or_name)))
 
 
 def var_samp(col_or_name):
-    return _col_result( _native_fn("var_samp")(_as_col(col_or_name)))
+    return _col_result(_native_fn("var_samp")(_as_col(col_or_name)))
 
 
 def corr(col1, col2):
-    return _col_result( _native_fn("corr")(_as_col(col1), _as_col(col2)))
+    return _col_result(_native_fn("corr")(_as_col(col1), _as_col(col2)))
 
 
 percentile_approx = _ni("percentile_approx")
@@ -824,7 +844,7 @@ def nvl(col_or_name, replacement):
 
 def nullif(col1, col2):
     """Return null if col1 equals col2, else col1. PySpark: F.nullif(col1, col2)."""
-    return _col_result( _native_fn("nullif")(_as_col(col1), _as_col(col2)))
+    return _col_result(_native_fn("nullif")(_as_col(col1), _as_col(col2)))
 
 
 __all__ = [
@@ -1268,8 +1288,8 @@ def date_trunc(format, column):
     return _date_trunc(format, _as_col(column))
 
 
-def first(col, ignorenulls=True):
-    """First value in group (PySpark first); use in groupBy().agg()."""
+def first(col, ignorenulls=False):
+    """First value in group (PySpark first); use in groupBy().agg(). Default ignorenulls=False."""
     return _first_agg(_as_col(col), ignorenulls)
 
 

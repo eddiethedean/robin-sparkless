@@ -185,10 +185,7 @@ impl DataFrame {
             let out_str = out_name.as_str();
             let matches_schema = self
                 .columns()
-                .map(|cols| {
-                    cols.iter()
-                        .any(|c| c.eq_ignore_ascii_case(out_str))
-                })
+                .map(|cols| cols.iter().any(|c| c.eq_ignore_ascii_case(out_str)))
                 .unwrap_or(false);
             if !matches_schema {
                 alias_output_names.insert(out_str.to_string());
@@ -288,7 +285,10 @@ impl DataFrame {
             Expr::Alias(inner, name) => (inner.as_ref().clone(), Some(name.clone())),
             _ => (expr.clone(), None),
         };
-        fn wrap_expr_with_alias(expr: Expr, alias_name: Option<&polars::prelude::PlSmallStr>) -> Expr {
+        fn wrap_expr_with_alias(
+            expr: Expr,
+            alias_name: Option<&polars::prelude::PlSmallStr>,
+        ) -> Expr {
             match alias_name {
                 Some(name) => Expr::Alias(Arc::new(expr), name.clone()),
                 None => expr,
@@ -297,13 +297,13 @@ impl DataFrame {
         let expr = {
             if let Expr::BinaryExpr { left, op, right } = &expr_to_coerce {
                 // Unwrap one Alias so we recognize col/lit when wrapped (e.g. lit(123).into_expr() -> Alias(Literal)).
-                let left_inner: &Expr = match &**left {
+                let left_inner: &Expr = match left.as_ref() {
                     Expr::Alias(inner, _) => inner.as_ref(),
-                    _ => &**left,
+                    _ => left,
                 };
-                let right_inner: &Expr = match &**right {
+                let right_inner: &Expr = match right.as_ref() {
                     Expr::Alias(inner, _) => inner.as_ref(),
-                    _ => &**right,
+                    _ => right,
                 };
                 let is_comparison_op = matches!(
                     op,

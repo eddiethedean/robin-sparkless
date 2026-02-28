@@ -29,7 +29,9 @@ class DataFrameNaFunctions:
 
     def replace(
         self,
-        to_replace: Union[str, List[str], Dict[str, Union[str, int, float, bool, None]]],
+        to_replace: Union[
+            str, List[str], Dict[str, Union[str, int, float, bool, None]]
+        ],
         value: Optional[Union[str, int, float, bool, None]] = None,
         subset: Optional[List[str]] = None,
     ) -> NoReturn:

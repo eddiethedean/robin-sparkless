@@ -3283,8 +3283,51 @@ fn pyspark_binary_arith(
     Ok(Some(Column::new(name, out)))
 }
 
-/// PySpark-style addition with string/number coercion for Python Column operators.
+/// PySpark-style addition: string + string => concat; numeric + numeric => add (Python Column + operator).
 pub fn apply_pyspark_add(columns: &mut [Column]) -> PolarsResult<Option<Column>> {
+    if columns.len() < 2 {
+        return Err(PolarsError::ComputeError(
+            "pyspark_add needs two columns".into(),
+        ));
+    }
+    let both_string = columns[0].field().dtype() == &DataType::String
+        && columns[1].field().dtype() == &DataType::String;
+    if both_string {
+        let name = columns[0].field().into_owned().name;
+        let a_s = std::mem::take(&mut columns[0]).take_materialized_series();
+        let b_s = std::mem::take(&mut columns[1]).take_materialized_series();
+        let ca_a = a_s.str().map_err(|e| compute_err("pyspark_add str", e))?;
+        let ca_b = b_s.str().map_err(|e| compute_err("pyspark_add str", e))?;
+        let len_a = ca_a.len();
+        let len_b = ca_b.len();
+        #[allow(clippy::type_complexity)]
+        let (iter_a, iter_b): (
+            Box<dyn Iterator<Item = Option<&str>>>,
+            Box<dyn Iterator<Item = Option<&str>>>,
+        ) = if len_a == 1 && len_b > 1 {
+            let v = ca_a.get(0);
+            (
+                Box::new(std::iter::repeat_n(v, len_b)),
+                Box::new(ca_b.into_iter()),
+            )
+        } else if len_b == 1 && len_a > 1 {
+            let v = ca_b.get(0);
+            (
+                Box::new(ca_a.into_iter()),
+                Box::new(std::iter::repeat_n(v, len_a)),
+            )
+        } else {
+            (Box::new(ca_a.into_iter()), Box::new(ca_b.into_iter()))
+        };
+        let out = StringChunked::from_iter_options(
+            name.as_str().into(),
+            iter_a
+                .zip(iter_b)
+                .map(|(oa, ob)| oa.and_then(|a| ob.map(|b| format!("{a}{b}")))),
+        )
+        .into_series();
+        return Ok(Some(Column::new(name, out)));
+    }
     pyspark_binary_arith(columns, "pyspark_add", |a, b| a + b)
 }
 

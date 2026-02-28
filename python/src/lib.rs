@@ -3215,11 +3215,7 @@ impl PyDataFrame {
                     let new_expr = py_any_to_column(&v)?.into_expr();
                     current = current
                         .na()
-                        .replace(
-                            old_expr,
-                            new_expr,
-                            sub.as_ref().map(|v| v.to_vec()),
-                        )
+                        .replace(old_expr, new_expr, sub.as_ref().map(|v| v.to_vec()))
                         .map_err(to_py_err)?;
                 }
                 return Ok(PyDataFrame { inner: current });
@@ -3232,11 +3228,7 @@ impl PyDataFrame {
             return self
                 .inner
                 .na()
-                .replace(
-                    old_expr,
-                    null_expr,
-                    sub.as_ref().map(|v| v.to_vec()),
-                )
+                .replace(old_expr, null_expr, sub.as_ref().map(|v| v.to_vec()))
                 .map(|df| PyDataFrame { inner: df })
                 .map_err(to_py_err);
         }
@@ -3246,11 +3238,7 @@ impl PyDataFrame {
         let new_expr = py_any_to_column(value)?.into_expr();
         self.inner
             .na()
-            .replace(
-                old_expr,
-                new_expr,
-                sub.as_ref().map(|v| v.to_vec()),
-            )
+            .replace(old_expr, new_expr, sub.as_ref().map(|v| v.to_vec()))
             .map(|df| PyDataFrame { inner: df })
             .map_err(to_py_err)
     }
@@ -4785,11 +4773,7 @@ impl PyDataFrameNaFunctions {
                     let new_expr = py_any_to_column(&v)?.into_expr();
                     current = current
                         .na()
-                        .replace(
-                            old_expr,
-                            new_expr,
-                            subset_refs.as_ref().map(|v| v.to_vec()),
-                        )
+                        .replace(old_expr, new_expr, subset_refs.as_ref().map(|v| v.to_vec()))
                         .map_err(to_py_err)?;
                 }
                 return Ok(PyDataFrame { inner: current });
@@ -6611,7 +6595,7 @@ fn date_trunc(format: &str, column: &PyColumn) -> PyColumn {
 }
 
 #[pyfunction]
-#[pyo3(signature = (col, ignorenulls=true))]
+#[pyo3(signature = (col, ignorenulls=false))]
 fn first(col: &PyColumn, ignorenulls: bool) -> PyColumn {
     PyColumn {
         inner: functions::first(&col.inner, ignorenulls),
