@@ -68,7 +68,7 @@ impl GroupedData {
         let available = names.join(", ");
         Err(PolarsError::ColumnNotFound(
             format!(
-                "Column '{}' not found in grouped DataFrame. Available: [{}].",
+                "cannot resolve: column '{}' not found in grouped DataFrame. Available: [{}].",
                 name, available
             )
             .into(),
@@ -102,7 +102,7 @@ impl GroupedData {
                     let rest = &parts[1..];
                     if rest.is_empty() {
                         return Err(PolarsError::ColumnNotFound(
-                            format!("Column '{}': trailing dot not allowed", name_str).into(),
+                            format!("cannot resolve: Column '{}': trailing dot not allowed", name_str).into(),
                         ));
                     }
                     let resolved = gd.resolve_column(first)?;
@@ -869,7 +869,7 @@ impl PivotedGroupedData {
         let available = names.join(", ");
         Err(PolarsError::ColumnNotFound(
             format!(
-                "Column '{}' not found in pivot DataFrame. Available: [{}].",
+                "cannot resolve: column '{}' not found in pivot DataFrame. Available: [{}].",
                 name, available
             )
             .into(),
