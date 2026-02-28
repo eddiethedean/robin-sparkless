@@ -50,9 +50,9 @@ class TestIssue158DroppedColumnError:
         with pytest.raises(SparkColumnNotFoundError) as exc_info:
             df_transformed.select("impression_date")
 
-        # Verify the error message format (PySpark: "cannot resolve"; robin: "not found")
+        # Verify the error message format (PySpark parity: must contain "cannot resolve")
         error_msg = str(exc_info.value).lower()
-        assert "cannot resolve" in error_msg or "not found" in error_msg
+        assert "cannot resolve" in error_msg
         assert "impression_date" in error_msg
         assert "impression_id" in error_msg or "campaign_id" in error_msg
 
@@ -70,9 +70,9 @@ class TestIssue158DroppedColumnError:
         with pytest.raises(SparkColumnNotFoundError) as exc_info:
             df_dropped.select(F.col("col2")).collect()
 
-        # Verify the error message format (PySpark: "cannot resolve"; robin: "not found")
+        # Verify the error message format (PySpark parity: must contain "cannot resolve")
         error_msg = str(exc_info.value).lower()
-        assert "cannot resolve" in error_msg or "not found" in error_msg
+        assert "cannot resolve" in error_msg
         assert "col2" in error_msg
         assert "col1" in error_msg
 
@@ -91,9 +91,9 @@ class TestIssue158DroppedColumnError:
         with pytest.raises(SparkColumnNotFoundError) as exc_info:
             df_dropped.filter(F.col("col2").isNotNull())
 
-        # Verify the error message format (PySpark: "cannot resolve"; robin: "not found")
+        # Verify the error message format (PySpark parity: must contain "cannot resolve")
         error_msg = str(exc_info.value).lower()
-        assert "cannot resolve" in error_msg or "not found" in error_msg
+        assert "cannot resolve" in error_msg
         assert "col2" in error_msg
         assert "col1" in error_msg
 
@@ -111,8 +111,8 @@ class TestIssue158DroppedColumnError:
         with pytest.raises(SparkColumnNotFoundError) as exc_info:
             df_dropped.select("col2")
 
-        # Verify the error message format (PySpark: "cannot resolve"; robin: "not found")
+        # Verify the error message format (PySpark parity: must contain "cannot resolve")
         error_msg = str(exc_info.value).lower()
-        assert "cannot resolve" in error_msg or "not found" in error_msg
+        assert "cannot resolve" in error_msg
         assert "col2" in error_msg
         assert "col1" in error_msg
