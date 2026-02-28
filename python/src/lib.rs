@@ -6611,7 +6611,7 @@ fn date_trunc(format: &str, column: &PyColumn) -> PyColumn {
 }
 
 #[pyfunction]
-#[pyo3(signature = (col, ignorenulls=true))]
+#[pyo3(signature = (col, ignorenulls=false))]
 fn first(col: &PyColumn, ignorenulls: bool) -> PyColumn {
     PyColumn {
         inner: functions::first(&col.inner, ignorenulls),

@@ -1268,8 +1268,8 @@ def date_trunc(format, column):
     return _date_trunc(format, _as_col(column))
 
 
-def first(col, ignorenulls=True):
-    """First value in group (PySpark first); use in groupBy().agg()."""
+def first(col, ignorenulls=False):
+    """First value in group (PySpark first); use in groupBy().agg(). Default ignorenulls=False."""
     return _first_agg(_as_col(col), ignorenulls)
 
 

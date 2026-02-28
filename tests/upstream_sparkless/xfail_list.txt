@@ -26,3 +26,5 @@ test_table_in_specific_database
 # Subquery in WHERE not supported
 test_sql_with_subquery
 
+# Issue #1059 misc: to_timestamp with regexp_replace format returns None for some rows
+test_to_timestamp_returns_actual_values
