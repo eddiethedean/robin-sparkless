@@ -3300,25 +3300,25 @@ pub fn apply_pyspark_add(columns: &mut [Column]) -> PolarsResult<Option<Column>>
         let ca_b = b_s.str().map_err(|e| compute_err("pyspark_add str", e))?;
         let len_a = ca_a.len();
         let len_b = ca_b.len();
-        let (iter_a, iter_b): (Box<dyn Iterator<Item = Option<&str>>>, Box<dyn Iterator<Item = Option<&str>>>) =
-            if len_a == 1 && len_b > 1 {
-                let v = ca_a.get(0);
-                (
-                    Box::new(std::iter::repeat(v).take(len_b)),
-                    Box::new(ca_b.into_iter()),
-                )
-            } else if len_b == 1 && len_a > 1 {
-                let v = ca_b.get(0);
-                (
-                    Box::new(ca_a.into_iter()),
-                    Box::new(std::iter::repeat(v).take(len_a)),
-                )
-            } else {
-                (
-                    Box::new(ca_a.into_iter()),
-                    Box::new(ca_b.into_iter()),
-                )
-            };
+        #[allow(clippy::type_complexity)]
+        let (iter_a, iter_b): (
+            Box<dyn Iterator<Item = Option<&str>>>,
+            Box<dyn Iterator<Item = Option<&str>>>,
+        ) = if len_a == 1 && len_b > 1 {
+            let v = ca_a.get(0);
+            (
+                Box::new(std::iter::repeat_n(v, len_b)),
+                Box::new(ca_b.into_iter()),
+            )
+        } else if len_b == 1 && len_a > 1 {
+            let v = ca_b.get(0);
+            (
+                Box::new(ca_a.into_iter()),
+                Box::new(std::iter::repeat_n(v, len_a)),
+            )
+        } else {
+            (Box::new(ca_a.into_iter()), Box::new(ca_b.into_iter()))
+        };
         let out = StringChunked::from_iter_options(
             name.as_str().into(),
             iter_a

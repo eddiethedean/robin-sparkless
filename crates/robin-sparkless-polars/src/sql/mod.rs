@@ -110,9 +110,9 @@ pub fn execute_sql(session: &SparkSession, query: &str) -> Result<DataFrame, Pol
     if !rest.is_empty() && (is_describe || is_desc) {
         let parts: Vec<&str> = rest.split_whitespace().collect();
         // #1013: DESCRIBE [TABLE] [EXTENDED] table_name [col_name] — skip TABLE/EXTENDED to get table name.
-        let idx = parts.iter().position(|p| {
-            !p.eq_ignore_ascii_case("TABLE") && !p.eq_ignore_ascii_case("EXTENDED")
-        });
+        let idx = parts
+            .iter()
+            .position(|p| !p.eq_ignore_ascii_case("TABLE") && !p.eq_ignore_ascii_case("EXTENDED"));
         let table_name = idx.and_then(|i| parts.get(i)).copied().unwrap_or("");
         let col_name = idx.and_then(|i| parts.get(i + 1)).copied();
         if !table_name.is_empty() {
@@ -278,7 +278,11 @@ mod tests {
             .sql("SELECT e.manager_id, m.manager_id FROM e LEFT JOIN m ON e.manager_id = m.id")
             .unwrap();
         let cols = result.columns().unwrap();
-        assert_eq!(cols.len(), 2, "disambiguate duplicate manager_id to manager_id, manager_id_1");
+        assert_eq!(
+            cols.len(),
+            2,
+            "disambiguate duplicate manager_id to manager_id, manager_id_1"
+        );
         assert!(cols.contains(&"manager_id".to_string()));
         assert!(cols.contains(&"manager_id_1".to_string()));
     }
@@ -647,8 +651,14 @@ mod tests {
         let rows = result.collect_as_json_rows().unwrap();
         assert_eq!(rows.len(), 3);
         assert_eq!(rows[0].get("col_name").and_then(|v| v.as_str()), Some("id"));
-        assert_eq!(rows[1].get("col_name").and_then(|v| v.as_str()), Some("age"));
-        assert_eq!(rows[2].get("col_name").and_then(|v| v.as_str()), Some("name"));
+        assert_eq!(
+            rows[1].get("col_name").and_then(|v| v.as_str()),
+            Some("age")
+        );
+        assert_eq!(
+            rows[2].get("col_name").and_then(|v| v.as_str()),
+            Some("name")
+        );
     }
 
     /// CREATE OR REPLACE TEMP VIEW ... AS SELECT (#1011).

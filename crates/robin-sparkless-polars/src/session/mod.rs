@@ -221,7 +221,10 @@ fn value_type_name(v: &JsonValue) -> &'static str {
 fn python_repr_to_json_like(s: &str) -> String {
     let mut out = s.to_string();
     // Word-boundary safe: replace Python literals that appear as list elements (comma or bracket before/after).
-    out = out.replace("True", "true").replace("False", "false").replace("None", "null");
+    out = out
+        .replace("True", "true")
+        .replace("False", "false")
+        .replace("None", "null");
     out
 }
 
@@ -253,7 +256,9 @@ fn json_value_to_array(v: &JsonValue) -> Option<Vec<JsonValue>> {
             } else {
                 // #1016: Python repr e.g. "[True, False, True]" — not valid JSON; normalize and retry.
                 let json_like = python_repr_to_json_like(s);
-                serde_json::from_str::<JsonValue>(&json_like).ok().and_then(|p| p.as_array().cloned())
+                serde_json::from_str::<JsonValue>(&json_like)
+                    .ok()
+                    .and_then(|p| p.as_array().cloned())
             }
         }
         _ => None,
@@ -426,7 +431,8 @@ fn json_values_to_series(
                 // #971: case-insensitive field lookup (Python dict may have "E1"/"E2", schema "e1"/"e2").
                 // #1015: Sparkless may send struct as {"E1": v1, "E2": v2}; fallback by position so we build with schema names (a, b) and collect() yields row["nested"]["a"].
                 for (fi, (fname, _)) in fields.iter().enumerate() {
-                    let val = obj.get(fname)
+                    let val = obj
+                        .get(fname)
                         .or_else(|| {
                             obj.keys()
                                 .find(|k| k.eq_ignore_ascii_case(fname))
@@ -444,7 +450,8 @@ fn json_values_to_series(
                     .and_then(|j: JsonValue| j.as_array().cloned());
                 if let Some(obj) = parsed_obj {
                     for (fi, (fname, _)) in fields.iter().enumerate() {
-                        let val = obj.get(fname)
+                        let val = obj
+                            .get(fname)
                             .or_else(|| {
                                 obj.keys()
                                     .find(|k| k.eq_ignore_ascii_case(fname))
@@ -2902,17 +2909,24 @@ mod tests {
                 "struct<a:bigint,b:string>".to_string(),
             ),
         ];
-        let rows: Vec<Vec<JsonValue>> = vec![
-            vec![json!("x"), json!({"E1": 1, "E2": "y"})],
-        ];
+        let rows: Vec<Vec<JsonValue>> = vec![vec![json!("x"), json!({"E1": 1, "E2": "y"})]];
         let df = spark
             .create_dataframe_from_rows(rows, schema, false, false)
             .unwrap();
         let rows_out = df.collect_as_json_rows().unwrap();
         assert_eq!(rows_out.len(), 1);
-        let nested = rows_out[0].get("nested").and_then(|v| v.as_object()).expect("nested");
-        assert!(nested.contains_key("a"), "#1015: collect should use schema field name 'a', not E1");
-        assert!(nested.contains_key("b"), "#1015: collect should use schema field name 'b', not E2");
+        let nested = rows_out[0]
+            .get("nested")
+            .and_then(|v| v.as_object())
+            .expect("nested");
+        assert!(
+            nested.contains_key("a"),
+            "#1015: collect should use schema field name 'a', not E1"
+        );
+        assert!(
+            nested.contains_key("b"),
+            "#1015: collect should use schema field name 'b', not E2"
+        );
         assert_eq!(nested.get("a"), Some(&json!(1)));
         assert_eq!(nested.get("b"), Some(&json!("y")));
     }
@@ -3263,8 +3277,14 @@ mod tests {
             ("flags".to_string(), "array<boolean>".to_string()),
         ];
         let rows: Vec<Vec<JsonValue>> = vec![
-            vec![JsonValue::String("a".into()), JsonValue::String("[True, False, True]".into())],
-            vec![JsonValue::String("b".into()), JsonValue::String("[False, True]".into())],
+            vec![
+                JsonValue::String("a".into()),
+                JsonValue::String("[True, False, True]".into()),
+            ],
+            vec![
+                JsonValue::String("b".into()),
+                JsonValue::String("[False, True]".into()),
+            ],
         ];
         let df = spark
             .create_dataframe_from_rows(rows, schema, false, false)

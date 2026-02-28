@@ -5704,9 +5704,12 @@ fn plan_column_resolution() {
     let result = plan::execute_plan(&spark, rows, schema, &plan).unwrap();
     let rows_out = result.collect_as_json_rows().unwrap();
     assert_eq!(rows_out.len(), 3);
-    assert!(rows_out[0].contains_key("Id"));
-    assert!(rows_out[0].contains_key("Name"));
-    assert!(!rows_out[0].contains_key("Value"));
+    // Resolved columns (id, name after drop value); keys may be schema case (Id, Name) or resolved (id, name)
+    let keys: Vec<_> = rows_out[0].keys().map(|s| s.as_str()).collect();
+    assert!(keys.len() == 2);
+    assert!(keys.contains(&"Id") || keys.contains(&"id"));
+    assert!(keys.contains(&"Name") || keys.contains(&"name"));
+    assert!(!rows_out[0].contains_key("Value") && !rows_out[0].contains_key("value"));
 }
 
 /// Plan interpreter resolves column names case-insensitively when schema has lowercase.

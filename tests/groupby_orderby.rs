@@ -391,13 +391,12 @@ fn plan_string_arithmetic_with_string_columns() {
     let df = plan::execute_plan(&spark, rows, schema, &plan_steps).unwrap();
     let out = df.collect_as_json_rows_engine().unwrap();
     assert_eq!(out.len(), 2);
-    // 10.5/2=5.25, 10.5+2=12.5, 10.5*2=21
+    // div/mul: string columns coerced to numeric. add: PySpark string+string => concat.
     assert_eq!(out[0].get("div").and_then(|v| v.as_f64()), Some(5.25));
-    assert_eq!(out[0].get("add").and_then(|v| v.as_f64()), Some(12.5));
+    assert_eq!(out[0].get("add").and_then(|v| v.as_str()), Some("10.52"));
     assert_eq!(out[0].get("mul").and_then(|v| v.as_f64()), Some(21.0));
-    // 20/4=5, 20+4=24, 20*4=80
     assert_eq!(out[1].get("div").and_then(|v| v.as_f64()), Some(5.0));
-    assert_eq!(out[1].get("add").and_then(|v| v.as_f64()), Some(24.0));
+    assert_eq!(out[1].get("add").and_then(|v| v.as_str()), Some("204"));
     assert_eq!(out[1].get("mul").and_then(|v| v.as_f64()), Some(80.0));
 }
 
