@@ -377,11 +377,13 @@ fn apply_op(
                         let alias = alias_override.unwrap_or(s);
                         exprs.push(resolved.alias(alias));
                     } else {
+                        // #1055: col("StructValue.E1") / dot notation – resolve as expression so struct field access works.
+                        let col_expr = polars::prelude::col::<&str>(&*expr_str);
                         let resolved = df
-                            .resolve_column_name(expr_str)
+                            .resolve_expr_column_names(col_expr)
                             .map_err(PlanError::Session)?;
-                        // #1014, #1022: Preserve requested column name as output (e.g. "NaMe") so row keys match.
-                        exprs.push(polars::prelude::col(resolved).alias(name_str.as_str()));
+                        // #1014, #1022: Preserve requested column name as output (e.g. "NaMe", "StructValue.E1") so row keys match.
+                        exprs.push(resolved.alias(name_str.as_str()));
                     }
                 }
                 df.select_exprs(exprs).map_err(PlanError::Session)
