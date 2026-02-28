@@ -784,6 +784,8 @@ impl PySparkContext {
             .unwrap_or_else(|| "sparkless".to_string()))
     }
 
+    /// PySpark parity: version is a property (read-only string), not a method.
+    #[getter]
     fn version(&self) -> String {
         env!("CARGO_PKG_VERSION").to_string()
     }
@@ -6032,10 +6034,26 @@ fn exp(column: &PyColumn) -> PyColumn {
 }
 
 #[pyfunction]
-fn pow(column: &PyColumn, exp: i64) -> PyColumn {
-    PyColumn {
-        inner: functions::pow(&column.inner, exp),
+fn pow(column: &PyColumn, exp: &Bound<'_, PyAny>) -> PyResult<PyColumn> {
+    if let Ok(exp_i) = exp.extract::<i64>() {
+        return Ok(PyColumn {
+            inner: functions::pow(&column.inner, exp_i),
+        });
     }
+    if let Ok(exp_i) = exp.extract::<i32>() {
+        return Ok(PyColumn {
+            inner: functions::pow(&column.inner, exp_i as i64),
+        });
+    }
+    if let Ok(exp_f) = exp.extract::<f64>() {
+        let lit_col = functions::lit_f64(exp_f);
+        return Ok(PyColumn {
+            inner: column.inner.pow_with(&lit_col),
+        });
+    }
+    Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+        "pow exponent must be int or float",
+    ))
 }
 
 #[pyfunction]
