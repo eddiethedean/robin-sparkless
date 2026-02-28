@@ -208,7 +208,7 @@ impl DataFrame {
                     let rest = &parts[1..];
                     if rest.is_empty() {
                         return Err(PolarsError::ColumnNotFound(
-                            format!("Column '{}': trailing dot not allowed", name_str).into(),
+                            format!("cannot resolve: Column '{}': trailing dot not allowed", name_str).into(),
                         ));
                     }
                     let resolved = df.resolve_column_name(first)?;
@@ -216,7 +216,7 @@ impl DataFrame {
                     let mut current_dtype =
                         df.get_column_dtype(resolved.as_str()).ok_or_else(|| {
                             PolarsError::ColumnNotFound(
-                                format!("Column '{}' not found", resolved).into(),
+                                format!("cannot resolve: column '{}' not found", resolved).into(),
                             )
                         })?;
                     let mut context_name = resolved.to_string();
@@ -714,7 +714,7 @@ impl DataFrame {
             _ => {
                 return Err(PolarsError::ColumnNotFound(
                     format!(
-                        "Expected struct for nested access '{}'; got non-struct type.",
+                        "cannot resolve: Expected struct for nested access '{}'; got non-struct type.",
                         context_name
                     )
                     .into(),
@@ -735,7 +735,7 @@ impl DataFrame {
         let available: Vec<String> = fields.iter().map(|f| f.name.to_string()).collect();
         Err(PolarsError::ColumnNotFound(
             format!(
-                "Struct field '{}' not found in '{}'. Available: [{}].",
+                "cannot resolve: Struct field '{}' not found in '{}'. Available: [{}].",
                 field_name,
                 context_name,
                 available.join(", ")
@@ -751,12 +751,14 @@ impl DataFrame {
         field_name: &str,
     ) -> Result<String, PolarsError> {
         let dt = self.get_column_dtype(struct_col_name).ok_or_else(|| {
-            PolarsError::ColumnNotFound(format!("Column '{}' not found", struct_col_name).into())
+            PolarsError::ColumnNotFound(
+                format!("cannot resolve: column '{}' not found", struct_col_name).into(),
+            )
         })?;
         if !matches!(dt, DataType::Struct(_)) {
             return Err(PolarsError::ColumnNotFound(
                 format!(
-                    "Column '{}' is not a struct; cannot access field '{}'.",
+                    "cannot resolve: Column '{}' is not a struct; cannot access field '{}'.",
                     struct_col_name, field_name
                 )
                 .into(),

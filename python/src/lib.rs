@@ -20,6 +20,7 @@ use std::path::Path;
 use std::thread_local;
 
 /// Convert EngineError or PolarsError to Python exception (SparklessError or TypeError for known validation errors).
+/// Column-not-found messages are normalized to include "cannot resolve" for PySpark parity (issue #1058).
 fn to_py_err(e: impl std::fmt::Display) -> PyErr {
     let msg = e.to_string();
     if msg.contains("to_date requires StringType, TimestampType, or DateType input") {
@@ -35,6 +36,16 @@ fn to_py_err(e: impl std::fmt::Display) -> PyErr {
     if (msg.contains("Row ") || msg.contains("row ")) && msg.contains("expected type") {
         return pyo3::exceptions::PyTypeError::new_err(msg);
     }
+    // Ensure column-not-found errors contain "cannot resolve" (PySpark parity; Polars may emit "unable to find column").
+    let msg = if !msg.to_lowercase().contains("cannot resolve")
+        && (msg.contains("unable to find column")
+            || (msg.contains("not found") && msg.to_lowercase().contains("column"))
+            || msg.contains("valid columns"))
+    {
+        format!("cannot resolve: {msg}")
+    } else {
+        msg
+    };
     SparklessError::new_err(msg)
 }
 
