@@ -1596,7 +1596,9 @@ def _window_spec_to_partition_order(window, require_order=True):
     partition_by = list(getattr(window, "_partition_by", []) or [])
     order_keys = list(getattr(window, "_order_by", []) or [])
     if not order_keys and require_order:
-        raise PySparkValueError("window function .over() requires Window.orderBy(...)")
+        raise ValueError(
+            "At least one column must be specified for orderBy(...) in window function .over()"
+        )
     partition_names = [
         _col_name(c) if not isinstance(c, str) else c for c in partition_by
     ]
