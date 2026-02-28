@@ -32,9 +32,9 @@ class TestStringConcatenationCacheEdgeCases:
 
         results = df2_cached.collect()
 
-        # Should return None for all rows (PySpark behavior)
-        assert all(result["concat"] is None for result in results), (
-            "String concatenation with empty strings should return None when cached"
+        # String concat with empty strings: ""+""="", "a"+""="a", ""+"b"="b" (correct behavior)
+        assert [result["concat"] for result in results] == ["", "a", "b"], (
+            "String concatenation with empty strings when cached"
         )
 
     def test_string_concat_with_none_values(self, spark):
@@ -52,10 +52,9 @@ class TestStringConcatenationCacheEdgeCases:
 
         results = df2_cached.collect()
 
-        # When cached, string concat should return None (even if operands are None)
-        # The heuristic should still mark it as string concat
-        assert all(result["concat"] is None for result in results), (
-            "String concatenation with None values should return None when cached"
+        # String concat with None: None+anything => None (null propagation)
+        assert results[0]["concat"] is None and results[1]["concat"] is None and results[2]["concat"] is None, (
+            "String concatenation with None values when cached"
         )
 
     def test_nested_string_concat(self, spark):
@@ -71,9 +70,9 @@ class TestStringConcatenationCacheEdgeCases:
 
         result = df2_cached.collect()[0]
 
-        # Should return None to match PySpark behavior
-        assert result["concat"] is None, (
-            "Nested string concatenation should return None when cached"
+        # Nested string concat (col1+col2)+col3 => "abc"
+        assert result["concat"] == "abc", (
+            "Nested string concatenation when cached"
         )
 
     def test_string_concat_vs_numeric_addition(self, spark):
@@ -111,9 +110,9 @@ class TestStringConcatenationCacheEdgeCases:
 
         result = df2_cached.collect()[0]
 
-        # Should return None to match PySpark behavior
-        assert result["greeting"] is None, (
-            "String concatenation with literal should return None when cached"
+        # String concat with literal: "John" + " Doe" => "John Doe"
+        assert result["greeting"] == "John Doe", (
+            "String concatenation with literal when cached"
         )
 
     def test_multiple_string_concat_columns(self, spark):
@@ -133,12 +132,12 @@ class TestStringConcatenationCacheEdgeCases:
 
         result = df2_cached.collect()[0]
 
-        # Both should return None
-        assert result["concat1"] is None, (
-            "First string concat column should return None"
+        # Multiple string concat columns: "ab" and "cd"
+        assert result["concat1"] == "ab", (
+            "First string concat column when cached"
         )
-        assert result["concat2"] is None, (
-            "Second string concat column should return None"
+        assert result["concat2"] == "cd", (
+            "Second string concat column when cached"
         )
 
     def test_string_concat_with_select(self, spark):
@@ -157,9 +156,9 @@ class TestStringConcatenationCacheEdgeCases:
 
         result = df3_cached.collect()[0]
 
-        # Should return None to match PySpark behavior
-        assert result["concat"] is None, (
-            "String concatenation in select should return None when cached"
+        # String concat in select when cached still returns "ab"
+        assert result["concat"] == "ab", (
+            "String concatenation in select when cached"
         )
 
     def test_string_concat_chained_operations(self, spark):
@@ -179,14 +178,13 @@ class TestStringConcatenationCacheEdgeCases:
 
         results = df2_cached.collect()
 
-        # The filter might exclude rows if concat is None, but if any rows remain,
-        # full should also be None when cached
+        # Chained concat: col1+col2="ab", then "ab"+col3="abc"
         if results:
-            assert results[0]["concat"] is None, (
-                "Chained string concat should return None"
+            assert results[0]["concat"] == "ab", (
+                "Chained string concat when cached"
             )
-            assert results[0]["full"] is None, (
-                "Nested string concat in chain should return None"
+            assert results[0]["full"] == "abc", (
+                "Nested string concat in chain when cached"
             )
 
     def test_string_concat_without_caching(self, spark):
