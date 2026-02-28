@@ -19,9 +19,9 @@ def test_spark_context_exists() -> None:
 
 
 def test_spark_context_version() -> None:
-    """SparkContext.version() returns a string."""
+    """SparkContext.version is a string property (PySpark parity)."""
     spark = _spark()
     ctx = spark.sparkContext
-    v = ctx.version()
+    v = ctx.version  # property, not method (PySpark: sc.version)
     assert isinstance(v, str)
     assert len(v) >= 1
