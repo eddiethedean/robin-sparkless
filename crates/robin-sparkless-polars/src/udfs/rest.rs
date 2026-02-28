@@ -3853,6 +3853,79 @@ pub fn apply_second(column: Column) -> PolarsResult<Option<Column>> {
     Ok(Some(Column::new(name, out)))
 }
 
+/// date_trunc/trunc: coerce to datetime (including from string) then truncate by duration (1y, 1mo, 1d, 1h, etc.).
+pub fn apply_date_trunc(column: Column, polars_duration: &str) -> PolarsResult<Option<Column>> {
+    use chrono::{Datelike, NaiveDateTime, TimeZone, Timelike};
+    use polars::datatypes::TimeUnit;
+    let name = column.field().into_owned().name;
+    let series = column.take_materialized_series();
+    let dt_series = series_to_datetime_micros(&series)?;
+    let ca = dt_series.datetime().map_err(|e| compute_err("date_trunc", e))?;
+    let truncate_by = match polars_duration.to_lowercase().as_str() {
+        "1y" => 0,
+        "1mo" => 1,
+        "1w" => 2,
+        "1d" => 3,
+        "1h" => 4,
+        "1m" => 5,
+        "1s" => 6,
+        _ => {
+            return Err(PolarsError::ComputeError(
+                format!("date_trunc: unsupported duration {:?}", polars_duration).into(),
+            ))
+        }
+    };
+    let results: Vec<Option<i64>> = ca
+        .phys
+        .iter()
+        .map(|opt: Option<i64>| {
+            opt.and_then(|t_us| {
+                let dt = match chrono::Utc.timestamp_micros(t_us) {
+                    chrono::LocalResult::Single(d) => d,
+                    _ => return None,
+                };
+                let ndt = dt.naive_utc();
+                let (y, mo, d, h, min, s) = (
+                    ndt.year(),
+                    ndt.month(),
+                    ndt.day(),
+                    ndt.hour(),
+                    ndt.minute(),
+                    ndt.second(),
+                );
+                let (tr_y, tr_mo, tr_d, tr_h, tr_min, tr_s) = match truncate_by {
+                    0 => (y, 1, 1, 0, 0, 0),
+                    1 => (y, mo, 1, 0, 0, 0),
+                    2 => {
+                        let w = ndt.date().week(chrono::Weekday::Mon);
+                        let start = w.first_day();
+                        (start.year(), start.month(), start.day(), 0, 0, 0)
+                    }
+                    3 => (y, mo, d, 0, 0, 0),
+                    4 => (y, mo, d, h, 0, 0),
+                    5 => (y, mo, d, h, min, 0),
+                    6 => (y, mo, d, h, min, s),
+                    _ => (y, mo, d, h, min, s),
+                };
+                let truncated = NaiveDateTime::parse_from_str(
+                    &format!(
+                        "{:04}-{:02}-{:02} {:02}:{:02}:{:02}",
+                        tr_y, tr_mo, tr_d, tr_h, tr_min, tr_s
+                    ),
+                    "%Y-%m-%d %H:%M:%S",
+                )
+                .ok()?;
+                Some(chrono::Utc.from_utc_datetime(&truncated).timestamp_micros())
+            })
+        })
+        .collect();
+    let chunked = Int64Chunked::from_iter_options(name.as_str().into(), results.into_iter());
+    let out = chunked
+        .into_series()
+        .cast(&DataType::Datetime(TimeUnit::Microseconds, None))?;
+    Ok(Some(Column::new(name, out)))
+}
+
 /// make_date(year, month, day) - three columns to date.
 pub fn apply_make_date(columns: &mut [Column]) -> PolarsResult<Option<Column>> {
     use chrono::NaiveDate;

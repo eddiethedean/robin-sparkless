@@ -44,6 +44,22 @@ fn like_pattern_to_regex(pattern: &str, escape_char: Option<char>) -> String {
     format!("^{out}$")
 }
 
+/// Map PySpark date_trunc/trunc format (year, month, day, hour, etc.) to Polars duration string (1y, 1mo, 1d, 1h).
+/// Polars dt.truncate expects a leading integer; PySpark uses unit names without a number.
+fn pyspark_trunc_format_to_polars_duration(format: &str) -> String {
+    match format.to_lowercase().as_str() {
+        "year" | "years" => "1y".to_string(),
+        "month" | "months" => "1mo".to_string(),
+        "week" | "weeks" | "wk" => "1w".to_string(),
+        "day" | "days" => "1d".to_string(),
+        "hour" | "hours" => "1h".to_string(),
+        "minute" | "minutes" | "min" => "1m".to_string(),
+        "second" | "seconds" | "sec" => "1s".to_string(),
+        "quarter" | "quarters" | "q" => "1q".to_string(),
+        _ => format.to_string(), // already Polars-style (e.g. 1d) or pass through
+    }
+}
+
 /// Deferred random column: when added via with_column, we generate a full-length series in one go (PySpark-like).
 #[derive(Debug, Clone, Copy)]
 pub enum DeferredRandom {
@@ -2177,13 +2193,23 @@ impl Column {
         Self::from_expr(expr, None)
     }
 
-    /// Truncate date/datetime to unit (e.g. "mo", "wk", "day"). PySpark trunc.
+    /// Truncate date/datetime to unit. PySpark date_trunc/trunc use "year", "month", "day", "hour";
+    /// Polars dt.truncate expects duration strings like "1y", "1mo", "1d", "1h". We map PySpark names.
+    /// Uses a UDF path so string columns (e.g. from createDataFrame with Python datetime) are coerced to datetime then truncated.
     pub fn trunc(&self, format: &str) -> Column {
         use polars::prelude::*;
-        Self::from_expr(
-            self.expr().clone().dt().truncate(lit(format.to_string())),
-            None,
-        )
+        let polars_duration = pyspark_trunc_format_to_polars_duration(format);
+        let duration = polars_duration.clone();
+        let expr = self.expr().clone().map(
+            move |c| expect_col(crate::udfs::apply_date_trunc(c, &duration)),
+            |_schema, field| {
+                Ok(Field::new(
+                    field.name().clone(),
+                    DataType::Datetime(TimeUnit::Microseconds, None),
+                ))
+            },
+        );
+        Self::from_expr(expr, Some(self.name().to_string()))
     }
 
     /// Add n months to date/datetime column (PySpark add_months). Month-aware.
