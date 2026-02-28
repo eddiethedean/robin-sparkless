@@ -6,8 +6,13 @@ from typing import Dict, Iterator, List, Optional, Tuple, Type, Union, cast
 
 # Values that can appear in a Row (collect() output). Recursive for nested structs/arrays.
 RowValue = Union[
-    int, float, str, bool, None,
-    date, datetime,
+    int,
+    float,
+    str,
+    bool,
+    None,
+    date,
+    datetime,
     List["RowValue"],
     Dict[str, "RowValue"],
 ]
