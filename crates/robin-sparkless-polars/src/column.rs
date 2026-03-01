@@ -2365,30 +2365,25 @@ impl Column {
         let expr = if order_by_encoded.is_empty() {
             base_expr.over(partition_exprs)
         } else {
-            // Build one order expr per column so orderBy(["Type", "Score", "Name"]) / ["-Score"] preserves semantics (PySpark parity).
-            // For running aggregates, order by string so lexicographic sort is used (PySpark: "10","15","5" -> 10,25,30; without this, numeric-like strings can be sorted numerically giving 5,20,30).
-            let order_exprs: Vec<Expr> = order_by_encoded
-                .iter()
-                .map(|s| {
-                    let (name, descending) = if let Some(stripped) = s.strip_prefix('-') {
-                        (stripped, true)
-                    } else {
-                        (s.as_str(), false)
-                    };
-                    let sort_opts = SortOptions {
-                        descending,
-                        nulls_last: descending,
-                        ..Default::default()
-                    };
-                    let order_col = if use_running_aggregate {
-                        col(name).cast(DataType::String)
-                    } else {
-                        col(name)
-                    };
-                    order_col.sort(sort_opts)
-                })
-                .collect();
-            let default_opts = SortOptions::default();
+            // Build order exprs and sort options. Polars over_with_options uses (order_exprs, sort_options).
+            // Use column as-is (no String cast) so numeric columns sort 80,90,100 (issue #1052).
+            let mut order_exprs: Vec<Expr> = Vec::with_capacity(order_by_encoded.len());
+            let mut descending_multi: Vec<bool> = Vec::with_capacity(order_by_encoded.len());
+            for s in order_by_encoded.iter() {
+                let (name, descending) = if let Some(stripped) = s.strip_prefix('-') {
+                    (stripped, true)
+                } else {
+                    (s.as_str(), false)
+                };
+                order_exprs.push(col(name));
+                descending_multi.push(descending);
+            }
+            // Single sort_options for the window: use first column's direction. Polars may use this for the whole order.
+            let default_opts = SortOptions {
+                descending: descending_multi.first().copied().unwrap_or(false),
+                nulls_last: descending_multi.first().copied().unwrap_or(false),
+                ..Default::default()
+            };
             base_expr.over_with_options(
                 Some(partition_exprs),
                 Some((order_exprs, default_opts)),
