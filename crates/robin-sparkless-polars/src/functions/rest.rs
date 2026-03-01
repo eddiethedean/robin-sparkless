@@ -1373,12 +1373,13 @@ fn cast_impl(column: &Column, type_name: &str, strict: bool) -> Result<Column, S
         return Ok(Column::from_expr(expr.alias(&cast_name), Some(cast_name)));
     }
     if dtype == DataType::Int32 || dtype == DataType::Int64 {
+        // PySpark parity (#1048): cast(string -> int/long) returns NULL for invalid strings, not error.
         let target = dtype.clone();
         let expr = column.expr().clone().map(
             move |col| {
                 crate::column::expect_col(crate::udfs::apply_string_to_int(
                     col,
-                    strict,
+                    false, // always null on invalid for int/long (Spark semantics)
                     target.clone(),
                 ))
             },
@@ -1402,7 +1403,7 @@ fn cast_impl(column: &Column, type_name: &str, strict: bool) -> Result<Column, S
 }
 
 /// Cast column to the given type (PySpark cast).
-/// Invalid string-to-numeric or string-to-boolean conversion fails; use try_cast for null on invalid.
+/// String-to-int/long: invalid values become null (PySpark parity, #1048). Other invalid string-to-numeric or string-to-boolean conversion fails; use try_cast for null on invalid.
 /// String-to-boolean uses custom parsing ("true"/"false"/"1"/"0") since Polars does not support Utf8->Boolean.
 /// String-to-date accepts date and datetime strings (e.g. "2025-01-01 10:30:00" truncates to date) for Spark parity.
 pub fn cast(column: &Column, type_name: &str) -> Result<Column, String> {
@@ -3043,7 +3044,7 @@ mod tests {
     fn test_count_aggregation() {
         let column = col("value");
         let result = count(&column);
-        assert_eq!(result.name(), "count");
+        assert_eq!(result.name(), "count(value)");
     }
 
     #[test]
