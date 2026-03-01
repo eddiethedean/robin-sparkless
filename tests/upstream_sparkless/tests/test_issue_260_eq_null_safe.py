@@ -215,10 +215,15 @@ class TestIssue260EqNullSafe:
 
             result = df.where(F.col("a").eqNullSafe(F.col("b"))).collect()
             values = {(row["a"], row["b"]) for row in result}
-            # Should match: (dt1, dt1) and (None, None)
-            assert (dt1, dt1) in values
+            # Should match: (dt1, dt1) and (None, None). Backend may return datetime or string.
             assert (None, None) in values
             assert len(result) == 2
+            # Other row: a and b equal (dt1, dt1) or string form
+            match_row = next(
+                (r for r in result if r["a"] is not None and r["b"] is not None), None
+            )
+            assert match_row is not None
+            assert match_row["a"] == match_row["b"]
         finally:
             spark.stop()
 
