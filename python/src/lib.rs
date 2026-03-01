@@ -4848,7 +4848,11 @@ impl PyDataFrameNaFunctions {
             return df_ref
                 .inner
                 .na()
-                .replace(old_expr, null_expr, subset_refs.as_ref().map(|v| v.to_vec()))
+                .replace(
+                    old_expr,
+                    null_expr,
+                    subset_refs.as_ref().map(|v| v.to_vec()),
+                )
                 .map(|df| PyDataFrame { inner: df })
                 .map_err(to_py_err);
         }
@@ -4901,7 +4905,11 @@ impl PyDataFrameNaFunctions {
                 let old_expr = lit(&old_item)?.inner.into_expr();
                 current = current
                     .na()
-                    .replace(old_expr, new_expr.clone(), subset_refs.as_ref().map(|v| v.to_vec()))
+                    .replace(
+                        old_expr,
+                        new_expr.clone(),
+                        subset_refs.as_ref().map(|v| v.to_vec()),
+                    )
                     .map_err(to_py_err)?;
             }
             return Ok(PyDataFrame { inner: current });
