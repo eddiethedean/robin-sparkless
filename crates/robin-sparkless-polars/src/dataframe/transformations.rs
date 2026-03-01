@@ -982,7 +982,11 @@ pub fn subtract(
                     .cloned()
                     .ok_or_else(|| {
                         PolarsError::ColumnNotFound(
-                            format!("cannot resolve: subtract: column '{}' not found on right", ln).into(),
+                            format!(
+                                "cannot resolve: subtract: column '{}' not found on right",
+                                ln
+                            )
+                            .into(),
                         )
                     })?
             } else {
@@ -993,7 +997,11 @@ pub fn subtract(
                     .cloned()
                     .ok_or_else(|| {
                         PolarsError::ColumnNotFound(
-                            format!("cannot resolve: subtract: column '{}' not found on right", ln).into(),
+                            format!(
+                                "cannot resolve: subtract: column '{}' not found on right",
+                                ln
+                            )
+                            .into(),
                         )
                     })?
             };
@@ -1030,7 +1038,11 @@ pub fn intersect(
                     .cloned()
                     .ok_or_else(|| {
                         PolarsError::ColumnNotFound(
-                            format!("cannot resolve: intersect: column '{}' not found on right", ln).into(),
+                            format!(
+                                "cannot resolve: intersect: column '{}' not found on right",
+                                ln
+                            )
+                            .into(),
                         )
                     })?
             } else {
@@ -1041,7 +1053,11 @@ pub fn intersect(
                     .cloned()
                     .ok_or_else(|| {
                         PolarsError::ColumnNotFound(
-                            format!("cannot resolve: intersect: column '{}' not found on right", ln).into(),
+                            format!(
+                                "cannot resolve: intersect: column '{}' not found on right",
+                                ln
+                            )
+                            .into(),
                         )
                     })?
             };

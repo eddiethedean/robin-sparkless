@@ -82,7 +82,7 @@ pub struct DataFrame {
 #[derive(Clone)]
 pub enum GroupBySpec {
     Name(String),
-    Column(Column),
+    Column(Box<Column>),
 }
 
 impl DataFrame {
@@ -229,7 +229,11 @@ impl DataFrame {
                     let rest = &parts[1..];
                     if rest.is_empty() {
                         return Err(PolarsError::ColumnNotFound(
-                            format!("cannot resolve: Column '{}': trailing dot not allowed", name_str).into(),
+                            format!(
+                                "cannot resolve: Column '{}': trailing dot not allowed",
+                                name_str
+                            )
+                            .into(),
                         ));
                     }
                     let resolved = df.resolve_column_name(first)?;
@@ -718,19 +722,15 @@ impl DataFrame {
     pub fn get_column_dtype(&self, name: &str) -> Option<DataType> {
         let resolved = self.resolve_column_name(name).ok()?;
         let pl_schema = self.schema_or_collect().ok()?;
-        if let Some(dt) = pl_schema
-            .get(resolved.as_str())
-            .cloned()
-            .or_else(|| {
-                pl_schema
-                    .iter_names_and_dtypes()
-                    .find(|(n, _)| {
-                        let s = n.to_string();
-                        s == resolved || s.eq_ignore_ascii_case(resolved.as_str())
-                    })
-                    .map(|(_, dt)| dt.clone())
-            })
-        {
+        if let Some(dt) = pl_schema.get(resolved.as_str()).cloned().or_else(|| {
+            pl_schema
+                .iter_names_and_dtypes()
+                .find(|(n, _)| {
+                    let s = n.to_string();
+                    s == resolved || s.eq_ignore_ascii_case(resolved.as_str())
+                })
+                .map(|(_, dt)| dt.clone())
+        }) {
             return Some(dt);
         }
         self.schema()
@@ -1072,7 +1072,7 @@ impl DataFrame {
                     names.push(resolved);
                 }
                 GroupBySpec::Column(c) => {
-                    let expr = c.into_expr();
+                    let expr = (*c).into_expr();
                     let out_name = polars_plan::utils::expr_output_name(&expr)
                         .map(|s| s.to_string())
                         .unwrap_or_else(|_| "_".to_string());

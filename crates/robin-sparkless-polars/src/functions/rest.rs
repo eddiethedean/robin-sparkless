@@ -36,7 +36,10 @@ pub fn sum(col: &Column) -> Column {
 /// String columns are cast to Float64 before mean (PySpark parity, issue #437).
 pub fn avg(col: &Column) -> Column {
     let name = format!("avg({})", col.name());
-    Column::from_expr(col.expr().clone().cast(DataType::Float64).mean(), Some(name))
+    Column::from_expr(
+        col.expr().clone().cast(DataType::Float64).mean(),
+        Some(name),
+    )
 }
 
 /// Alias for avg (PySpark mean).
