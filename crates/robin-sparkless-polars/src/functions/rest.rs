@@ -2871,7 +2871,7 @@ pub fn isin_i64(column: &Column, values: &[i64]) -> Column {
             .expr()
             .clone()
             .cast(DataType::String)
-            .is_in(lit(s), false),
+            .is_in(lit(s).implode(), false),
         None,
     )
 }
@@ -2879,7 +2879,7 @@ pub fn isin_i64(column: &Column, values: &[i64]) -> Column {
 /// Check if column values are in the given string slice (PySpark isin with literal list).
 pub fn isin_str(column: &Column, values: &[&str]) -> Column {
     let s: Series = Series::from_iter(values.iter().copied());
-    Column::from_expr(column.expr().clone().is_in(lit(s), false), None)
+    Column::from_expr(column.expr().clone().is_in(lit(s).implode(), false), None)
 }
 
 /// Percent-decode URL-encoded string (PySpark url_decode).
