@@ -391,7 +391,42 @@ pub fn with_column(
             lf.select(&to_keep).with_column(expr.alias(column_name))
         }
     } else {
-        lf.with_column(expr.alias(column_name))
+        // Adding a new column. If expr is explode(some_column), use frame-level explode so row count matches (PySpark parity).
+        // Preserve the original list column: add a copy with column_name, then explode it (so Name/Value stay, ExplodedValue expands).
+        let inner = match &expr {
+            Expr::Alias(e, _) => e.as_ref(),
+            e => e,
+        };
+        if let Expr::Explode {
+            input,
+            options: explode_opts,
+        } = inner
+        {
+            if let Expr::Column(explode_col) = input.as_ref() {
+                let refs = expr_referenced_columns(inner);
+                if refs.len() == 1 {
+                    let explode_col_str = explode_col.as_str();
+                    if df.resolve_column_name(explode_col_str).is_ok() {
+                        // Add new column as copy of list, then explode it so original column is preserved.
+                        let lf_with_copy =
+                            lf.with_column(col(explode_col.as_str()).alias(column_name));
+                        let selector = Selector::ByName {
+                            names: Arc::from([PlSmallStr::from(column_name)]),
+                            strict: true,
+                        };
+                        lf_with_copy.explode(selector, *explode_opts)
+                    } else {
+                        lf.with_column(expr.alias(column_name))
+                    }
+                } else {
+                    lf.with_column(expr.alias(column_name))
+                }
+            } else {
+                lf.with_column(expr.alias(column_name))
+            }
+        } else {
+            lf.with_column(expr.alias(column_name))
+        }
     };
     Ok(super::DataFrame::from_lazy_with_options(lf, case_sensitive))
 }
@@ -1801,7 +1836,9 @@ pub fn intersect_all(
 mod tests {
     use super::{
         distinct, drop, dropna, first, head, limit, offset, order_by, union, union_by_name,
+        with_column,
     };
+    use crate::functions;
     use crate::{DataFrame, SparkSession};
     use serde_json::json;
 
@@ -1876,6 +1913,31 @@ mod tests {
             first_name, "Alice",
             "first() after orderBy(value) must return row with min value (Alice=1), not first in storage (Charlie)"
         );
+    }
+
+    /// Issue #1054 / #293: with_column(explode(col)) must expand rows and preserve original list column.
+    #[test]
+    fn with_column_explode_adds_column_and_expands_rows() {
+        use polars::chunked_array::builder::ListStringChunkedBuilder;
+        use polars::prelude::{IntoSeries, ListBuilderTrait, NamedFrom, Series};
+        let spark = SparkSession::builder()
+            .app_name("with_column_explode_test")
+            .get_or_create();
+        let names = Series::new("Name".into(), &["Alice", "Bob", "Charlie"]);
+        let mut list_builder = ListStringChunkedBuilder::new("Value".into(), 3, 16);
+        list_builder.append_values_iter(["1", "2"].iter().copied());
+        list_builder.append_values_iter(["2", "3"].iter().copied());
+        list_builder.append_values_iter(["4", "5"].iter().copied());
+        let value_series = list_builder.finish().into_series();
+        let pl = polars::prelude::DataFrame::new_infer_height(vec![names.into(), value_series.into()]).unwrap();
+        let df = spark.create_dataframe_from_polars(pl);
+        let col_explode = functions::explode(&df.column("Value").unwrap());
+        let out = with_column(&df, "ExplodedValue", &col_explode, false).unwrap();
+        assert_eq!(out.count().unwrap(), 6, "explode should produce 6 rows (2+2+2)");
+        let cols = out.columns().unwrap();
+        assert!(cols.iter().any(|c| c == "Name"));
+        assert!(cols.iter().any(|c| c == "Value"));
+        assert!(cols.iter().any(|c| c == "ExplodedValue"));
     }
 
     #[test]
