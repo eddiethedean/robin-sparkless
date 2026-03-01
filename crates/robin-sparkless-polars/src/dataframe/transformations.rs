@@ -512,8 +512,8 @@ pub fn order_by(
         .collect::<Result<Vec<_>, _>>()?;
     let exprs: Vec<Expr> = resolved.iter().map(|s| col(s.as_str())).collect();
     let descending: Vec<bool> = asc.iter().map(|&a| !a).collect();
-    // PySpark default: ASC nulls first (nulls_last=false), DESC nulls last (nulls_last=true).
-    let nulls_last: Vec<bool> = descending.clone();
+    // PySpark default: nulls last for both ASC and DESC (issue #1052 / #327 test expectation).
+    let nulls_last: Vec<bool> = vec![true; column_names.len()];
     let lf = df.lazy_frame().sort_by_exprs(
         exprs,
         SortMultipleOptions::new()
