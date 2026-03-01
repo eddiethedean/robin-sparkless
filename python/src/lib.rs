@@ -2859,7 +2859,7 @@ impl PyDataFrame {
                 all_strings = false;
             } else if let Ok(pc) = item.downcast::<PyColumn>() {
                 let so = if asc {
-                    pc.borrow().inner.asc()
+                    pc.borrow().inner.asc_nulls_last()
                 } else {
                     pc.borrow().inner.desc()
                 };
