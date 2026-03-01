@@ -116,7 +116,11 @@ impl GroupedData {
                     let rest = &parts[1..];
                     if rest.is_empty() {
                         return Err(PolarsError::ColumnNotFound(
-                            format!("cannot resolve: Column '{}': trailing dot not allowed", name_str).into(),
+                            format!(
+                                "cannot resolve: Column '{}': trailing dot not allowed",
+                                name_str
+                            )
+                            .into(),
                         ));
                     }
                     let resolved = gd.resolve_column(first)?;

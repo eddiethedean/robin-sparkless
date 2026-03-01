@@ -11,8 +11,8 @@ use pyo3::types::{PyBytes, PyDict, PyList, PyTuple};
 use robin_sparkless::dataframe::{JoinType, PivotedGroupedData, SaveMode, WriteFormat, WriteMode};
 use robin_sparkless::functions::{self, asc_from_name, SortOrder, ThenBuilder, WhenBuilder};
 use robin_sparkless::{
-    Column, CubeRollupData, DataFrame, DataType, GroupBySpec, GroupedData, SelectItem, SparkSession,
-    SparkSessionBuilder,
+    Column, CubeRollupData, DataFrame, DataType, GroupBySpec, GroupedData, SelectItem,
+    SparkSession, SparkSessionBuilder,
 };
 use serde_json::Value as JsonValue;
 use std::cell::RefCell;
@@ -1778,7 +1778,9 @@ fn py_group_by_specs(item: &Bound<'_, PyAny>) -> PyResult<Vec<GroupBySpec>> {
         return Ok(vec![GroupBySpec::Name(s)]);
     }
     if let Ok(c) = item.downcast::<PyColumn>() {
-        return Ok(vec![GroupBySpec::Column(c.borrow().inner.clone())]);
+        return Ok(vec![GroupBySpec::Column(Box::new(
+            c.borrow().inner.clone(),
+        ))]);
     }
     if let Ok(list) = item.downcast::<PyList>() {
         let mut out = Vec::new();
