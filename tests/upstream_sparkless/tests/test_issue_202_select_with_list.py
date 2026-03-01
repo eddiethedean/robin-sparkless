@@ -7,8 +7,12 @@ def _assert_schema_consistent(result_schema, expected_schema, allow_int_long_swa
     assert len(result_schema.fields) == len(expected_schema.fields)
     for i, (r_f, e_f) in enumerate(zip(result_schema.fields, expected_schema.fields)):
         assert r_f.name == e_f.name, f"field {i}: name {r_f.name!r} != {e_f.name!r}"
-        r_s = getattr(r_f.dataType, "simpleString", lambda: type(r_f.dataType).__name__)()
-        e_s = getattr(e_f.dataType, "simpleString", lambda: type(e_f.dataType).__name__)()
+        r_s = getattr(
+            r_f.dataType, "simpleString", lambda: type(r_f.dataType).__name__
+        )()
+        e_s = getattr(
+            e_f.dataType, "simpleString", lambda: type(e_f.dataType).__name__
+        )()
         if allow_int_long_swap and r_s in ("int", "long") and e_s in ("int", "long"):
             continue
         assert r_s == e_s, f"field {i} {r_f.name}: type {r_s!r} != {e_s!r}"

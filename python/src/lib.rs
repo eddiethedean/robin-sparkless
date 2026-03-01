@@ -11,8 +11,8 @@ use pyo3::types::{PyBytes, PyDict, PyList, PyTuple};
 use robin_sparkless::dataframe::{JoinType, PivotedGroupedData, SaveMode, WriteFormat, WriteMode};
 use robin_sparkless::functions::{self, asc_from_name, SortOrder, ThenBuilder, WhenBuilder};
 use robin_sparkless::{
-    Column, CubeRollupData, DataFrame, DataType, GroupedData, SelectItem, SparkSession,
-    SparkSessionBuilder,
+    Column, CubeRollupData, DataFrame, DataType, GroupBySpec, GroupedData, SelectItem,
+    SparkSession, SparkSessionBuilder,
 };
 use serde_json::Value as JsonValue;
 use std::cell::RefCell;
@@ -1771,6 +1771,36 @@ fn py_one_or_many_cols(item: &Bound<'_, PyAny>) -> PyResult<Vec<String>> {
     ))
 }
 
+/// Convert groupBy(*cols) item to Vec<GroupBySpec>. Supports str, Column, or list/tuple of those.
+/// PySpark parity: groupBy("dept") vs groupBy(F.col("Name").alias("Key")).
+fn py_group_by_specs(item: &Bound<'_, PyAny>) -> PyResult<Vec<GroupBySpec>> {
+    if let Ok(s) = item.extract::<String>() {
+        return Ok(vec![GroupBySpec::Name(s)]);
+    }
+    if let Ok(c) = item.downcast::<PyColumn>() {
+        return Ok(vec![GroupBySpec::Column(Box::new(
+            c.borrow().inner.clone(),
+        ))]);
+    }
+    if let Ok(list) = item.downcast::<PyList>() {
+        let mut out = Vec::new();
+        for sub in list.iter() {
+            out.extend(py_group_by_specs(&sub)?);
+        }
+        return Ok(out);
+    }
+    if let Ok(tup) = item.downcast::<PyTuple>() {
+        let mut out = Vec::new();
+        for sub in tup.iter() {
+            out.extend(py_group_by_specs(&sub)?);
+        }
+        return Ok(out);
+    }
+    Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+        "groupBy() expects column names as str, Column, or list/tuple of those",
+    ))
+}
+
 /// PySpark join(on=...): str, Column, or list of str/Column -> Vec<String>
 fn py_join_on_to_vec(on: &Bound<'_, PyAny>) -> PyResult<Vec<String>> {
     if let Ok(s) = on.extract::<String>() {
@@ -2608,14 +2638,24 @@ impl PyDataFrame {
         self.inner.count().map_err(to_py_err)
     }
 
-    /// PySpark parity: head() and head(n) return a DataFrame (limit 1 / limit n) so .collect() works.
+    /// PySpark parity: head() returns first Row (or None); head(n) returns list of first n rows.
     #[pyo3(signature = (n=None))]
-    fn head(&self, n: Option<usize>) -> PyResult<PyDataFrame> {
+    fn head(&self, py: Python<'_>, n: Option<usize>) -> PyResult<PyObject> {
         let k = n.unwrap_or(1);
-        self.inner
-            .limit(k)
-            .map(|df| PyDataFrame { inner: df })
-            .map_err(to_py_err)
+        let limited = self.inner.limit(k).map_err(to_py_err)?;
+        let limited_py = PyDataFrame { inner: limited };
+        let rows = limited_py.collect(py)?;
+        if n.is_none() {
+            // head() without arg: single Row or None
+            Ok(rows
+                .into_iter()
+                .next()
+                .map(|r| r.into_py(py))
+                .unwrap_or_else(|| py.None().into_py(py)))
+        } else {
+            // head(n): list of rows
+            Ok(PyList::new_bound(py, rows).into_py(py))
+        }
     }
 
     #[getter]
@@ -2736,15 +2776,14 @@ impl PyDataFrame {
 
     #[pyo3(name = "groupBy", signature = (*cols))]
     fn group_by_camel(&self, cols: &Bound<'_, PyTuple>) -> PyResult<PyGroupedData> {
-        let mut names: Vec<String> = Vec::with_capacity(cols.len());
+        let mut specs: Vec<GroupBySpec> = Vec::with_capacity(cols.len());
         for item in cols.iter() {
-            for n in py_one_or_many_cols(&item)? {
-                names.push(n);
+            for spec in py_group_by_specs(&item)? {
+                specs.push(spec);
             }
         }
-        let refs: Vec<&str> = names.iter().map(|s| s.as_str()).collect();
         self.inner
-            .group_by(refs)
+            .group_by_specs(specs)
             .map(|gd| PyGroupedData { inner: gd })
             .map_err(to_py_err)
     }

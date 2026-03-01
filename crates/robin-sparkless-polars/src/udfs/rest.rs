@@ -3860,7 +3860,9 @@ pub fn apply_date_trunc(column: Column, polars_duration: &str) -> PolarsResult<O
     let name = column.field().into_owned().name;
     let series = column.take_materialized_series();
     let dt_series = series_to_datetime_micros(&series)?;
-    let ca = dt_series.datetime().map_err(|e| compute_err("date_trunc", e))?;
+    let ca = dt_series
+        .datetime()
+        .map_err(|e| compute_err("date_trunc", e))?;
     let truncate_by = match polars_duration.to_lowercase().as_str() {
         "1y" => 0,
         "1mo" => 1,
@@ -3872,7 +3874,7 @@ pub fn apply_date_trunc(column: Column, polars_duration: &str) -> PolarsResult<O
         _ => {
             return Err(PolarsError::ComputeError(
                 format!("date_trunc: unsupported duration {:?}", polars_duration).into(),
-            ))
+            ));
         }
     };
     let results: Vec<Option<i64>> = ca

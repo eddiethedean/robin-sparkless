@@ -76,8 +76,8 @@ pub use robin_sparkless_polars::{
 
 // Root-owned entry-point types (delegate to robin-sparkless-polars).
 pub use dataframe::{
-    CubeRollupData, DataFrame, DataFrameNa, DataFrameStat, DataFrameWriter, GroupedData, JoinType,
-    PivotedGroupedData, SaveMode, SelectItem, WriteFormat, WriteMode,
+    CubeRollupData, DataFrame, DataFrameNa, DataFrameStat, DataFrameWriter, GroupBySpec,
+    GroupedData, JoinType, PivotedGroupedData, SaveMode, SelectItem, WriteFormat, WriteMode,
 };
 pub use session::{DataFrameReader, SparkSession, SparkSessionBuilder};
 

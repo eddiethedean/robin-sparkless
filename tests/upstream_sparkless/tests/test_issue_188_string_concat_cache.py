@@ -53,9 +53,11 @@ class TestStringConcatenationCacheEdgeCases:
         results = df2_cached.collect()
 
         # String concat with None: None+anything => None (null propagation)
-        assert results[0]["concat"] is None and results[1]["concat"] is None and results[2]["concat"] is None, (
-            "String concatenation with None values when cached"
-        )
+        assert (
+            results[0]["concat"] is None
+            and results[1]["concat"] is None
+            and results[2]["concat"] is None
+        ), "String concatenation with None values when cached"
 
     def test_nested_string_concat(self, spark):
         """Test nested string concatenation operations in cached DataFrame."""
@@ -71,9 +73,7 @@ class TestStringConcatenationCacheEdgeCases:
         result = df2_cached.collect()[0]
 
         # Nested string concat (col1+col2)+col3 => "abc"
-        assert result["concat"] == "abc", (
-            "Nested string concatenation when cached"
-        )
+        assert result["concat"] == "abc", "Nested string concatenation when cached"
 
     def test_string_concat_vs_numeric_addition(self, spark):
         """Test that numeric addition is NOT treated as string concatenation."""
@@ -133,12 +133,8 @@ class TestStringConcatenationCacheEdgeCases:
         result = df2_cached.collect()[0]
 
         # Multiple string concat columns: "ab" and "cd"
-        assert result["concat1"] == "ab", (
-            "First string concat column when cached"
-        )
-        assert result["concat2"] == "cd", (
-            "Second string concat column when cached"
-        )
+        assert result["concat1"] == "ab", "First string concat column when cached"
+        assert result["concat2"] == "cd", "Second string concat column when cached"
 
     def test_string_concat_with_select(self, spark):
         """Test string concatenation followed by select in cached DataFrame."""
@@ -157,9 +153,7 @@ class TestStringConcatenationCacheEdgeCases:
         result = df3_cached.collect()[0]
 
         # String concat in select when cached still returns "ab"
-        assert result["concat"] == "ab", (
-            "String concatenation in select when cached"
-        )
+        assert result["concat"] == "ab", "String concatenation in select when cached"
 
     def test_string_concat_chained_operations(self, spark):
         """Test string concatenation with chained operations in cached DataFrame."""
@@ -180,9 +174,7 @@ class TestStringConcatenationCacheEdgeCases:
 
         # Chained concat: col1+col2="ab", then "ab"+col3="abc"
         if results:
-            assert results[0]["concat"] == "ab", (
-                "Chained string concat when cached"
-            )
+            assert results[0]["concat"] == "ab", "Chained string concat when cached"
             assert results[0]["full"] == "abc", (
                 "Nested string concat in chain when cached"
             )
