@@ -116,18 +116,59 @@ pub fn select_with_exprs(
         .collect();
 
     // Detect simple explode expressions (e.g. F.explode(col(\"scores\")).alias(\"score\"))
-    // and rewrite them to use LazyFrame.explode so other columns are replicated correctly.
-    let mut explode_target: Option<(PlSmallStr, polars::prelude::ExplodeOptions)> = None;
+    // and rewrite to use LazyFrame.explode. When alias != source column, add a copy then explode
+    // so the original list column is preserved (PySpark select(Name, Value, explode(Value).alias("ExplodedValue"))).
+    // Python Column.into_expr() does expr.alias(name), so explode(col).alias("x") becomes Alias(Alias(Explode(...), "x"), "x"); peel one more Alias.
+    type ExplodeTarget = (
+        PlSmallStr,
+        Option<PlSmallStr>,
+        polars::prelude::ExplodeOptions,
+    );
+    let mut explode_target: Option<ExplodeTarget> = None;
     let exprs: Vec<Expr> = exprs
         .into_iter()
         .map(|e| match e {
             Expr::Alias(inner, name) => {
-                if let Expr::Explode { input, options } = inner.as_ref() {
+                let inner_ref = inner.as_ref();
+                let (explode_input, options): (Option<Arc<Expr>>, polars::prelude::ExplodeOptions) =
+                    if let Expr::Explode { input, options } = inner_ref {
+                        (Some(input.clone()), *options)
+                    } else if let Expr::Alias(inner2, _) = inner_ref {
+                        if let Expr::Explode { input, options } = inner2.as_ref() {
+                            (Some(input.clone()), *options)
+                        } else {
+                            (
+                                None,
+                                polars::prelude::ExplodeOptions {
+                                    empty_as_null: false,
+                                    keep_nulls: false,
+                                },
+                            )
+                        }
+                    } else {
+                        (
+                            None,
+                            polars::prelude::ExplodeOptions {
+                                empty_as_null: false,
+                                keep_nulls: false,
+                            },
+                        )
+                    };
+                if let (Some(input), options) = (explode_input, options) {
                     if let Expr::Column(col_name) = input.as_ref() {
                         if explode_target.is_none() {
-                            explode_target = Some((col_name.clone(), *options));
+                            let alias_name = if col_name.as_str() != name.as_str() {
+                                Some(name.clone())
+                            } else {
+                                None
+                            };
+                            explode_target = Some((col_name.clone(), alias_name, options));
                         }
-                        Expr::Alias(Arc::new(Expr::Column(col_name.clone())), name)
+                        let out_col = explode_target
+                            .as_ref()
+                            .and_then(|(_, a, _)| a.clone())
+                            .unwrap_or_else(|| col_name.clone());
+                        Expr::Alias(Arc::new(Expr::Column(out_col)), name)
                     } else {
                         Expr::Alias(inner, name)
                     }
@@ -138,9 +179,11 @@ pub fn select_with_exprs(
             Expr::Explode { input, options } => {
                 if let Expr::Column(col_name) = input.as_ref() {
                     if explode_target.is_none() {
-                        explode_target = Some((col_name.clone(), options));
+                        explode_target = Some((col_name.clone(), None, options));
                     }
-                    Expr::Column(col_name.clone())
+                    let (_, alias_name, _) = explode_target.as_ref().unwrap();
+                    let out_col = alias_name.clone().unwrap_or_else(|| col_name.clone());
+                    Expr::Column(out_col)
                 } else {
                     Expr::Explode { input, options }
                 }
@@ -175,17 +218,33 @@ pub fn select_with_exprs(
     // When every expression references no column from the frame, Polars select yields 1 row.
     // Cross-join with a single key column to get N rows (PySpark parity).
     let mut lf = df.lazy_frame();
+    let had_explode = explode_target.is_some();
 
     // If we saw an explode expression on a single column, apply frame-level explode first so
     // non-exploded columns are replicated correctly (PySpark explode parity).
-    if let Some((explode_col, options)) = explode_target {
-        let selector = Selector::ByName {
-            names: Arc::from([explode_col]),
-            strict: true,
-        };
-        lf = lf.explode(selector, options);
+    // When alias != source (e.g. select(Name, Value, explode(Value).alias("ExplodedValue"))),
+    // add a copy column then explode it so the original list column is preserved.
+    if let Some((explode_col, alias_name, options)) = explode_target {
+        if let Some(alias) = &alias_name {
+            lf = lf.with_column(col(explode_col.as_str()).alias(alias.as_str()));
+            let selector = Selector::ByName {
+                names: Arc::from([alias.clone()]),
+                strict: true,
+            };
+            lf = lf.explode(selector, options);
+        } else {
+            let selector = Selector::ByName {
+                names: Arc::from([explode_col]),
+                strict: true,
+            };
+            lf = lf.explode(selector, options);
+        }
     }
-    let no_col_refs = first_col.is_some()
+    // When we applied explode, the frame was already expanded; rewritten exprs may reference only
+    // the new column (e.g. "x"), so we must not use the no-col-refs cross_join path (it would
+    // wrongly cross-join and multiply rows).
+    let no_col_refs = !had_explode
+        && first_col.is_some()
         && exprs.iter().all(|e| {
             expr_referenced_columns(e)
                 .intersection(&df_columns)
@@ -391,7 +450,42 @@ pub fn with_column(
             lf.select(&to_keep).with_column(expr.alias(column_name))
         }
     } else {
-        lf.with_column(expr.alias(column_name))
+        // Adding a new column. If expr is explode(some_column), use frame-level explode so row count matches (PySpark parity).
+        // Preserve the original list column: add a copy with column_name, then explode it (so Name/Value stay, ExplodedValue expands).
+        let inner = match &expr {
+            Expr::Alias(e, _) => e.as_ref(),
+            e => e,
+        };
+        if let Expr::Explode {
+            input,
+            options: explode_opts,
+        } = inner
+        {
+            if let Expr::Column(explode_col) = input.as_ref() {
+                let refs = expr_referenced_columns(inner);
+                if refs.len() == 1 {
+                    let explode_col_str = explode_col.as_str();
+                    if df.resolve_column_name(explode_col_str).is_ok() {
+                        // Add new column as copy of list, then explode it so original column is preserved.
+                        let lf_with_copy =
+                            lf.with_column(col(explode_col.as_str()).alias(column_name));
+                        let selector = Selector::ByName {
+                            names: Arc::from([PlSmallStr::from(column_name)]),
+                            strict: true,
+                        };
+                        lf_with_copy.explode(selector, *explode_opts)
+                    } else {
+                        lf.with_column(expr.alias(column_name))
+                    }
+                } else {
+                    lf.with_column(expr.alias(column_name))
+                }
+            } else {
+                lf.with_column(expr.alias(column_name))
+            }
+        } else {
+            lf.with_column(expr.alias(column_name))
+        }
     };
     Ok(super::DataFrame::from_lazy_with_options(lf, case_sensitive))
 }
@@ -1800,8 +1894,10 @@ pub fn intersect_all(
 #[cfg(test)]
 mod tests {
     use super::{
-        distinct, drop, dropna, first, head, limit, offset, order_by, union, union_by_name,
+        SelectItem, distinct, drop, dropna, first, head, limit, offset, order_by, select_items,
+        union, union_by_name, with_column,
     };
+    use crate::functions;
     use crate::{DataFrame, SparkSession};
     use serde_json::json;
 
@@ -1876,6 +1972,77 @@ mod tests {
             first_name, "Alice",
             "first() after orderBy(value) must return row with min value (Alice=1), not first in storage (Charlie)"
         );
+    }
+
+    /// Issue #1054 / #293: with_column(explode(col)) must expand rows and preserve original list column.
+    #[test]
+    fn with_column_explode_adds_column_and_expands_rows() {
+        use polars::chunked_array::builder::ListStringChunkedBuilder;
+        use polars::prelude::{IntoSeries, ListBuilderTrait, NamedFrom, Series};
+        let spark = SparkSession::builder()
+            .app_name("with_column_explode_test")
+            .get_or_create();
+        let names = Series::new("Name".into(), &["Alice", "Bob", "Charlie"]);
+        let mut list_builder = ListStringChunkedBuilder::new("Value".into(), 3, 16);
+        list_builder.append_values_iter(["1", "2"].iter().copied());
+        list_builder.append_values_iter(["2", "3"].iter().copied());
+        list_builder.append_values_iter(["4", "5"].iter().copied());
+        let value_series = list_builder.finish().into_series();
+        let pl =
+            polars::prelude::DataFrame::new_infer_height(vec![names.into(), value_series.into()])
+                .unwrap();
+        let df = spark.create_dataframe_from_polars(pl);
+        let col_explode = functions::explode(&df.column("Value").unwrap());
+        let out = with_column(&df, "ExplodedValue", &col_explode, false).unwrap();
+        assert_eq!(
+            out.count().unwrap(),
+            6,
+            "explode should produce 6 rows (2+2+2)"
+        );
+        let cols = out.columns().unwrap();
+        assert!(cols.iter().any(|c| c == "Name"));
+        assert!(cols.iter().any(|c| c == "Value"));
+        assert!(cols.iter().any(|c| c == "ExplodedValue"));
+    }
+
+    /// Issue #1054: select(Name, Value, explode(Value).alias("ExplodedValue")) must preserve list column and expand rows.
+    #[test]
+    fn select_with_explode_alias_preserves_list_column() {
+        use polars::chunked_array::builder::ListStringChunkedBuilder;
+        use polars::prelude::{ExplodeOptions, IntoSeries, ListBuilderTrait, NamedFrom, Series};
+        let spark = SparkSession::builder()
+            .app_name("select_explode_test")
+            .get_or_create();
+        let names = Series::new("Name".into(), &["Alice", "Bob"]);
+        let mut list_builder = ListStringChunkedBuilder::new("Value".into(), 2, 8);
+        list_builder.append_values_iter(["1", "2"].iter().copied());
+        list_builder.append_values_iter(["2", "3"].iter().copied());
+        let value_series = list_builder.finish().into_series();
+        let pl =
+            polars::prelude::DataFrame::new_infer_height(vec![names.into(), value_series.into()])
+                .unwrap();
+        let df = spark.create_dataframe_from_polars(pl);
+        let explode_expr = polars::prelude::col("Value")
+            .explode(ExplodeOptions {
+                empty_as_null: false,
+                keep_nulls: false,
+            })
+            .alias("ExplodedValue");
+        let items = vec![
+            SelectItem::ColumnName("Name"),
+            SelectItem::ColumnName("Value"),
+            SelectItem::Expr(explode_expr),
+        ];
+        let out = select_items(&df, items, false).unwrap();
+        assert_eq!(
+            out.count().unwrap(),
+            4,
+            "select with explode should produce 4 rows (2+2)"
+        );
+        let cols = out.columns().unwrap();
+        assert!(cols.iter().any(|c| c == "Name"));
+        assert!(cols.iter().any(|c| c == "Value"));
+        assert!(cols.iter().any(|c| c == "ExplodedValue"));
     }
 
     #[test]
