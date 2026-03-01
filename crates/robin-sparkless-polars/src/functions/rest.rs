@@ -3044,7 +3044,7 @@ mod tests {
     fn test_count_aggregation() {
         let column = col("value");
         let result = count(&column);
-        assert_eq!(result.name(), "count");
+        assert_eq!(result.name(), "count(value)");
     }
 
     #[test]
