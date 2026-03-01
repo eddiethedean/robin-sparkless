@@ -121,11 +121,15 @@ fn issue_544_string_to_int_cast_and_try_cast() {
     let pl = polars::prelude::df!["x" => &["1", "2", "not_int"]].unwrap();
     let df = spark.create_dataframe_from_polars(pl);
 
+    // PySpark parity (#1048): cast(string -> int/long) yields null for invalid strings, not error.
     let cast_res = cast(&col("x"), "bigint").unwrap();
     let out = df
         .select_exprs(vec![cast_res.alias("y").into_expr()])
-        .and_then(|d| d.collect_as_json_rows());
-    assert!(out.is_err());
+        .unwrap();
+    let rows = out.collect_as_json_rows().unwrap();
+    assert_eq!(rows[0].get("y").and_then(|v| v.as_i64()), Some(1));
+    assert_eq!(rows[1].get("y").and_then(|v| v.as_i64()), Some(2));
+    assert!(rows[2].get("y").unwrap().is_null());
 
     let try_col = try_cast(&col("x"), "bigint").unwrap();
     let out_ok = df
