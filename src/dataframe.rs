@@ -44,7 +44,7 @@ pub struct PivotedGroupedData(pub(crate) PolarsPivotedGroupedData);
 
 /// Re-export for API compatibility.
 pub use robin_sparkless_polars::dataframe::{
-    JoinType, SaveMode, SelectItem, WriteFormat, WriteMode,
+    GroupBySpec, JoinType, SaveMode, SelectItem, WriteFormat, WriteMode,
 };
 
 /// Root-owned DataFrameStat; delegates to the Polars backend.
@@ -250,6 +250,10 @@ impl DataFrame {
         self.0
             .group_by_exprs(exprs, grouping_col_names)
             .map(GroupedData)
+    }
+
+    pub fn group_by_specs(&self, specs: Vec<GroupBySpec>) -> Result<GroupedData, PolarsError> {
+        self.0.group_by_specs(specs).map(GroupedData)
     }
 
     pub fn cube(&self, column_names: Vec<&str>) -> Result<CubeRollupData, PolarsError> {

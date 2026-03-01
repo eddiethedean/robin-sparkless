@@ -7,35 +7,36 @@ use crate::column::Column;
 use polars::prelude::*;
 
 /// Count aggregation (PySpark LongType; cast to Int64 for schema parity #734).
-/// When the input column is the special `"*"` (count(*)), use `len()` so we count
-/// all rows (including nulls) and avoid Polars duplicate-name issues with `col("*")`.
+/// Use len() so we count all rows (including nulls), matching test_arithmetic_with_nulls
+/// and row["count(Value)"] semantics. When the input is "*", output name is "count(1)" for parity.
 pub fn count(col: &Column) -> Column {
     use polars::prelude::len;
 
-    if col.name() == "*" {
-        let expr = len().cast(DataType::Int64);
-        Column::from_expr(expr, Some("count".to_string()))
+    let expr = len().cast(DataType::Int64);
+    let name = if col.name() == "*" {
+        "count(1)".to_string()
     } else {
-        Column::from_expr(
-            col.expr().clone().count().cast(DataType::Int64),
-            Some("count".to_string()),
-        )
-    }
+        format!("count({})", col.name())
+    };
+    Column::from_expr(expr, Some(name))
 }
 
 /// Sum aggregation. Carries source column for running-window conversion when orderBy differs from partitionBy.
 /// Output name PySpark-style sum(column_name) so row["sum(salary)"] works.
+/// String columns are cast to Float64 before sum (PySpark parity, issue #393).
 pub fn sum(col: &Column) -> Column {
     let name = format!("sum({})", col.name());
-    let mut c = Column::from_expr(col.expr().clone().sum(), Some(name));
+    let expr = col.expr().clone().cast(DataType::Float64).sum();
+    let mut c = Column::from_expr(expr, Some(name));
     c.source_for_running = Some(col.name().to_string());
     c
 }
 
 /// Average aggregation. Output name PySpark-style avg(column_name).
+/// String columns are cast to Float64 before mean (PySpark parity, issue #437).
 pub fn avg(col: &Column) -> Column {
     let name = format!("avg({})", col.name());
-    Column::from_expr(col.expr().clone().mean(), Some(name))
+    Column::from_expr(col.expr().clone().cast(DataType::Float64).mean(), Some(name))
 }
 
 /// Alias for avg (PySpark mean).

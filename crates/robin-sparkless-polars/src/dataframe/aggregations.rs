@@ -47,7 +47,21 @@ pub struct GroupedData {
 
 impl GroupedData {
     /// Resolve aggregation column name against LazyFrame schema (case-sensitive or -insensitive).
+    /// Grouping output names (e.g. from groupBy(col("Name").alias("Key"))) are valid even when not in the input schema.
     fn resolve_column(&self, name: &str) -> Result<String, PolarsError> {
+        // Grouping columns by output name (e.g. "Key" after alias) are valid for agg/sort (issue #397).
+        if self.case_sensitive {
+            if self.grouping_cols.iter().any(|g| g == name) {
+                return Ok(name.to_string());
+            }
+        } else {
+            let name_lower = name.to_lowercase();
+            for g in &self.grouping_cols {
+                if g.to_lowercase() == name_lower {
+                    return Ok(g.clone());
+                }
+            }
+        }
         let schema = self.lf.clone().collect_schema()?;
         let names: Vec<String> = schema
             .iter_names_and_dtypes()
@@ -794,7 +808,16 @@ pub struct PivotedGroupedData {
     pub(crate) case_sensitive: bool,
 }
 
-/// Parse a simple pivot agg expr: Alias(Agg(Sum/Mean/Min/Max(Column(name))), alias) or bare Agg(...) -> (alias, agg_kind, value_col).
+/// Extract column name from an expr that may be Column(name) or Cast(Column(name), _) (e.g. sum casts to Float64 for string cols).
+fn pivot_agg_input_column_name(input_expr: &Expr) -> Option<String> {
+    match input_expr {
+        Expr::Column(name) => Some(name.as_str().to_string()),
+        Expr::Cast { expr: inner, .. } => pivot_agg_input_column_name(inner.as_ref()),
+        _ => None,
+    }
+}
+
+/// Parse a simple pivot agg expr: Alias(Agg(Sum/Mean/Min/Max(Column(name) or Cast(Column, _))), alias) or bare Agg(...) -> (alias, agg_kind, value_col).
 /// When no alias is present, use a default like "sum(salary)" (PySpark parity).
 fn parse_pivot_agg_expr(expr: &Expr) -> Option<(String, &'static str, String)> {
     let (inner, alias_opt) = match expr {
@@ -811,10 +834,7 @@ fn parse_pivot_agg_expr(expr: &Expr) -> Option<(String, &'static str, String)> {
         },
         _ => return None,
     };
-    let value_col = match input_expr {
-        Expr::Column(name) => name.as_str().to_string(),
-        _ => return None,
-    };
+    let value_col = pivot_agg_input_column_name(input_expr)?;
     let alias = alias_opt.unwrap_or_else(|| format!("{}({})", agg_kind, value_col));
     Some((alias, agg_kind, value_col))
 }

@@ -41,8 +41,8 @@ pub use polars::prelude::Series;
 
 pub use column::Column;
 pub use dataframe::{
-    CubeRollupData, DataFrame, GroupedData, JoinType, PivotedGroupedData, SaveMode, SelectItem,
-    WriteFormat, WriteMode, broadcast,
+    CubeRollupData, DataFrame, GroupBySpec, GroupedData, JoinType, PivotedGroupedData, SaveMode,
+    SelectItem, WriteFormat, WriteMode, broadcast,
 };
 pub use error::{EngineError, polars_to_core_error};
 pub use expression::{column_to_expr, lit_bool, lit_f64, lit_i32, lit_i64, lit_str};
