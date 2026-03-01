@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Dict, List, NoReturn, Optional, Union
+from typing import TYPE_CHECKING, Dict, List, Optional, Union
 
 if TYPE_CHECKING:
     from sparkless import DataFrame
@@ -34,5 +34,6 @@ class DataFrameNaFunctions:
         ],
         value: Optional[Union[str, int, float, bool, None]] = None,
         subset: Optional[List[str]] = None,
-    ) -> NoReturn:
-        raise NotImplementedError("DataFrameNaFunctions.replace is not yet implemented")
+    ) -> DataFrame:
+        """Replace values in columns. PySpark na.replace(to_replace, value, subset)."""
+        return self._df.replace(to_replace, value=value, subset=subset)

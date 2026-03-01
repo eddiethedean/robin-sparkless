@@ -350,6 +350,7 @@ pub fn infer_type_from_expr(expr: &Expr) -> Option<DataType> {
 
 /// Coerce left/right for eq_null_safe so string–numeric compares like PySpark (try_to_number on string side).
 /// Infers types from literals; assumes String for column (so string–numeric gets coerced).
+/// When both sides are column refs (no type info), cast both to string so string vs numeric compares (e.g. "100" and 100).
 pub fn coerce_for_pyspark_eq_null_safe(
     left: Expr,
     right: Expr,
@@ -365,6 +366,14 @@ pub fn coerce_for_pyspark_eq_null_safe(
 
     let left_ty = infer_type_from_expr(&left).unwrap_or(DataType::String);
     let right_ty = infer_type_from_expr(&right).unwrap_or(DataType::String);
+
+    // Both unknown (column refs): cast both to string so string vs numeric doesn't error (PySpark coercion).
+    if infer_type_from_expr(&left).is_none() && infer_type_from_expr(&right).is_none() {
+        let left_str = left.cast(DataType::String);
+        let right_str = right.cast(DataType::String);
+        return Ok((left_str, right_str));
+    }
+
     coerce_for_pyspark_comparison(left, right, &left_ty, &right_ty, &CompareOp::Eq)
 }
 
