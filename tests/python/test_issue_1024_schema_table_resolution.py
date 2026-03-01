@@ -33,9 +33,13 @@ def test_schema_qualified_table_append_then_read() -> None:
     """saveAsTable(schema.table) overwrite then append; table(schema.table) sees both."""
     spark = _spark()
     spark.sql("CREATE SCHEMA IF NOT EXISTS test_schema")
-    df1 = spark.createDataFrame([{"id": 1, "name": "x"}], [("id", "int"), ("name", "string")])
+    df1 = spark.createDataFrame(
+        [{"id": 1, "name": "x"}], [("id", "int"), ("name", "string")]
+    )
     df1.write.mode("overwrite").saveAsTable("test_schema.test_table")
-    df2 = spark.createDataFrame([{"id": 2, "name": "y"}], [("id", "int"), ("name", "string")])
+    df2 = spark.createDataFrame(
+        [{"id": 2, "name": "y"}], [("id", "int"), ("name", "string")]
+    )
     df2.write.mode("append").saveAsTable("test_schema.test_table")
     result = spark.table("test_schema.test_table")
     assert result.count() == 2

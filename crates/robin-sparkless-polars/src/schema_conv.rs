@@ -52,11 +52,23 @@ fn polars_type_to_data_type(polars_type: &PlDataType) -> DataType {
         PlDataType::Datetime(_, _) => DataType::Timestamp,
         PlDataType::Binary => DataType::Binary,
         PlDataType::List(inner) => DataType::Array(Box::new(polars_type_to_data_type(inner))),
+        PlDataType::Struct(fields) => DataType::Struct(
+            fields
+                .iter()
+                .map(|f| {
+                    StructField::new(
+                        f.name().to_string(),
+                        polars_type_to_data_type(f.dtype()),
+                        true,
+                    )
+                })
+                .collect(),
+        ),
         _ => DataType::String,
     }
 }
 
-pub(super) fn data_type_to_polars_type(data_type: &DataType) -> PlDataType {
+pub(crate) fn data_type_to_polars_type(data_type: &DataType) -> PlDataType {
     match data_type {
         DataType::String => PlDataType::String,
         DataType::Integer => PlDataType::Int32,
@@ -67,6 +79,17 @@ pub(super) fn data_type_to_polars_type(data_type: &DataType) -> PlDataType {
         DataType::Timestamp => PlDataType::Datetime(TimeUnit::Microseconds, None),
         DataType::Binary => PlDataType::Binary,
         DataType::Array(inner) => PlDataType::List(Box::new(data_type_to_polars_type(inner))),
+        DataType::Struct(fields) => PlDataType::Struct(
+            fields
+                .iter()
+                .map(|f| {
+                    Field::new(
+                        f.name.as_str().into(),
+                        data_type_to_polars_type(&f.data_type),
+                    )
+                })
+                .collect(),
+        ),
         _ => PlDataType::String,
     }
 }

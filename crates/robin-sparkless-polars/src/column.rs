@@ -2354,7 +2354,8 @@ impl Column {
         };
         let base_expr = if use_running_aggregate {
             if let Some(ref src) = self.source_for_running {
-                col(src).cum_sum(false)
+                // Cast to Float64 so string columns work (PySpark parity, issue #393).
+                col(src).cast(DataType::Float64).cum_sum(false)
             } else {
                 self.expr().clone()
             }
@@ -2365,6 +2366,7 @@ impl Column {
             base_expr.over(partition_exprs)
         } else {
             // Build one order expr per column so orderBy(["Type", "Score", "Name"]) / ["-Score"] preserves semantics (PySpark parity).
+            // For running aggregates, order by string so lexicographic sort is used (PySpark: "10","15","5" -> 10,25,30; without this, numeric-like strings can be sorted numerically giving 5,20,30).
             let order_exprs: Vec<Expr> = order_by_encoded
                 .iter()
                 .map(|s| {
@@ -2378,7 +2380,12 @@ impl Column {
                         nulls_last: descending,
                         ..Default::default()
                     };
-                    col(name).sort(sort_opts)
+                    let order_col = if use_running_aggregate {
+                        col(name).cast(DataType::String)
+                    } else {
+                        col(name)
+                    };
+                    order_col.sort(sort_opts)
                 })
                 .collect();
             let default_opts = SortOptions::default();

@@ -8,7 +8,7 @@ use common::spark;
 use polars::prelude::df;
 use robin_sparkless::functions::{col, desc_nulls_last};
 use robin_sparkless::plan;
-use serde_json::json;
+use serde_json::{Value as JsonValue, json};
 
 fn expected_values_asc() -> Vec<i64> {
     vec![5, 10, 20]
@@ -494,6 +494,12 @@ fn plan_groupby_sum() {
         .iter()
         .find(|r| r.get("grp").and_then(|v| v.as_str()) == Some("G2"))
         .unwrap();
-    assert_eq!(g1.get("total").and_then(|v| v.as_i64()), Some(30));
-    assert_eq!(g2.get("total").and_then(|v| v.as_i64()), Some(30));
+    // Sum column may be named "total" (from plan alias) or "sum(n)" (PySpark-style); value may be i64 or f64
+    let sum_val = |r: &std::collections::HashMap<String, JsonValue>| {
+        r.get("total")
+            .or_else(|| r.get("sum(n)"))
+            .and_then(|v| v.as_i64().or_else(|| v.as_f64().map(|f| f as i64)))
+    };
+    assert_eq!(sum_val(g1), Some(30));
+    assert_eq!(sum_val(g2), Some(30));
 }

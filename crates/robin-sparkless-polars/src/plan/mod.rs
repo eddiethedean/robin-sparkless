@@ -378,7 +378,7 @@ fn apply_op(
                         exprs.push(resolved.alias(alias));
                     } else {
                         // #1055: col("StructValue.E1") / dot notation – resolve as expression so struct field access works.
-                        let col_expr = polars::prelude::col::<&str>(&*expr_str);
+                        let col_expr = polars::prelude::col::<&str>(expr_str);
                         let resolved = df
                             .resolve_expr_column_names(col_expr)
                             .map_err(PlanError::Session)?;
@@ -722,7 +722,24 @@ fn parse_aggs(aggs: &[Value], df: &DataFrame) -> Result<Vec<polars::prelude::Exp
                 Some("count".to_string()),
             ),
             "count" => count(&c),
-            "sum" => rs_sum(&c),
+            "sum" => {
+                // Integer columns: keep Int64 (PySpark sum of int -> long). Else cast to Float64 (string/numeric parity #393).
+                let keep_int = col_name
+                    .and_then(|n| df.get_column_data_type(n))
+                    .map(|dt| {
+                        matches!(
+                            dt,
+                            crate::schema::DataType::Long | crate::schema::DataType::Integer
+                        )
+                    })
+                    .unwrap_or(false);
+                if keep_int {
+                    let name = c.name().to_string();
+                    Column::from_expr(c.into_expr().sum(), Some(format!("sum({})", name)))
+                } else {
+                    rs_sum(&c)
+                }
+            }
             "avg" => avg(&c),
             "min" => min(&c),
             "max" => max(&c),

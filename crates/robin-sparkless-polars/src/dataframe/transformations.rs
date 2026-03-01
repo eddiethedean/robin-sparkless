@@ -215,6 +215,11 @@ pub enum SelectItem<'a> {
     Expr(Expr),
 }
 
+/// Safe output name for struct field select: Polars can resolve dotted aliases as column lookups, so use a placeholder (no dot) and rename after select to the desired output name (e.g. "Person.name").
+fn struct_field_safe_alias(dotted_name: &str) -> String {
+    format!("__sf_{}", dotted_name.replace('.', "_"))
+}
+
 /// Select using a mix of column names and expressions. Preserves case_sensitive on result.
 pub fn select_items(
     df: &DataFrame,
@@ -222,6 +227,7 @@ pub fn select_items(
     case_sensitive: bool,
 ) -> Result<DataFrame, PolarsError> {
     let mut exprs = Vec::with_capacity(items.len());
+    let mut rename_after: Vec<(String, String)> = Vec::new();
     for item in items {
         match item {
             SelectItem::ColumnName(name) => {
@@ -230,20 +236,49 @@ pub fn select_items(
                     let e = col(name);
                     let resolved = df.resolve_expr_column_names(e)?;
                     let coerced = df.coerce_string_numeric_comparisons(resolved)?;
-                    exprs.push(coerced.alias(name));
+                    let safe = struct_field_safe_alias(name);
+                    rename_after.push((safe.clone(), name.to_string()));
+                    exprs.push(coerced.alias(safe));
                 } else {
                     let resolved = df.resolve_column_name(name)?;
                     exprs.push(col(resolved));
                 }
             }
             SelectItem::Expr(e) => {
+                let name_for_alias = if let polars::prelude::Expr::Column(n) = &e {
+                    let s = n.as_str();
+                    if s.contains('.') {
+                        Some(s.to_string())
+                    } else {
+                        None
+                    }
+                } else if let polars::prelude::Expr::Alias(_, n) = &e {
+                    let s = n.as_str();
+                    if s.contains('.') {
+                        Some(s.to_string())
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
                 let resolved = df.resolve_expr_column_names(e)?;
                 let coerced = df.coerce_string_numeric_comparisons(resolved)?;
-                exprs.push(coerced);
+                if let Some(name) = name_for_alias {
+                    let safe = struct_field_safe_alias(&name);
+                    rename_after.push((safe.clone(), name));
+                    exprs.push(coerced.alias(safe));
+                } else {
+                    exprs.push(coerced);
+                }
             }
         }
     }
-    select_with_exprs(df, exprs, case_sensitive)
+    let mut result = select_with_exprs(df, exprs, case_sensitive)?;
+    for (from, to) in rename_after {
+        result = result.with_column_renamed(&from, &to)?;
+    }
+    Ok(result)
 }
 
 /// Filter rows using a Polars expression. Preserves case_sensitive on result.
@@ -947,7 +982,11 @@ pub fn subtract(
                     .cloned()
                     .ok_or_else(|| {
                         PolarsError::ColumnNotFound(
-                            format!("cannot resolve: subtract: column '{}' not found on right", ln).into(),
+                            format!(
+                                "cannot resolve: subtract: column '{}' not found on right",
+                                ln
+                            )
+                            .into(),
                         )
                     })?
             } else {
@@ -958,7 +997,11 @@ pub fn subtract(
                     .cloned()
                     .ok_or_else(|| {
                         PolarsError::ColumnNotFound(
-                            format!("cannot resolve: subtract: column '{}' not found on right", ln).into(),
+                            format!(
+                                "cannot resolve: subtract: column '{}' not found on right",
+                                ln
+                            )
+                            .into(),
                         )
                     })?
             };
@@ -995,7 +1038,11 @@ pub fn intersect(
                     .cloned()
                     .ok_or_else(|| {
                         PolarsError::ColumnNotFound(
-                            format!("cannot resolve: intersect: column '{}' not found on right", ln).into(),
+                            format!(
+                                "cannot resolve: intersect: column '{}' not found on right",
+                                ln
+                            )
+                            .into(),
                         )
                     })?
             } else {
@@ -1006,7 +1053,11 @@ pub fn intersect(
                     .cloned()
                     .ok_or_else(|| {
                         PolarsError::ColumnNotFound(
-                            format!("cannot resolve: intersect: column '{}' not found on right", ln).into(),
+                            format!(
+                                "cannot resolve: intersect: column '{}' not found on right",
+                                ln
+                            )
+                            .into(),
                         )
                     })?
             };
