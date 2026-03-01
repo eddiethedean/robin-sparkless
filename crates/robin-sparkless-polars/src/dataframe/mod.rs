@@ -77,6 +77,14 @@ pub struct DataFrame {
     pub(crate) alias: Option<String>,
 }
 
+/// Spec for groupBy: either a column name (str) or a Column expression (e.g. col("a").alias("x")).
+/// PySpark parity: groupBy("dept") vs groupBy(F.col("Name").alias("Key")).
+#[derive(Clone)]
+pub enum GroupBySpec {
+    Name(String),
+    Column(Column),
+}
+
 impl DataFrame {
     /// Create a new DataFrame from a Polars DataFrame (case-insensitive column matching by default).
     /// Stores as Lazy for consistency with the lazy-by-default execution model.
@@ -192,10 +200,23 @@ impl DataFrame {
             }
         }
         expr.try_map_expr(move |e| {
+            // Recurse into Alias so col("Person.name") inside F.col("Person.name").alias(...) gets resolved (struct field access).
+            if let Expr::Alias(inner, name) = &e {
+                let new_inner = df.resolve_expr_column_names(inner.as_ref().clone())?;
+                return Ok(Expr::Alias(Arc::new(new_inner), name.clone()));
+            }
             if let Expr::Column(name) = &e {
                 let name_str = name.as_str();
+                // Skip resolution only when this name is an alias output and not a schema column (case-insensitive).
+                // So col("name").alias("name") still resolves "name" to "Name" when schema has "Name" (issue #1053).
                 if alias_output_names.contains(name_str) {
-                    return Ok(e);
+                    let matches_schema = df
+                        .columns()
+                        .map(|cols| cols.iter().any(|c| c.eq_ignore_ascii_case(name_str)))
+                        .unwrap_or(false);
+                    if !matches_schema {
+                        return Ok(e);
+                    }
                 }
                 // Empty name is a placeholder in list.eval (e.g. map_keys uses col("").struct_().field_by_name("key")).
                 if name_str.is_empty() {
@@ -693,13 +714,31 @@ impl DataFrame {
     }
 
     /// Get the dtype of a column by name (after resolving case-insensitivity). Returns None if not found.
+    /// Tries Polars schema (get + iter fallback); then our StructType so struct columns are found (e.g. select("Person.name")).
     pub fn get_column_dtype(&self, name: &str) -> Option<DataType> {
         let resolved = self.resolve_column_name(name).ok()?;
-        self.schema_or_collect()
+        let pl_schema = self.schema_or_collect().ok()?;
+        if let Some(dt) = pl_schema
+            .get(resolved.as_str())
+            .cloned()
+            .or_else(|| {
+                pl_schema
+                    .iter_names_and_dtypes()
+                    .find(|(n, _)| {
+                        let s = n.to_string();
+                        s == resolved || s.eq_ignore_ascii_case(resolved.as_str())
+                    })
+                    .map(|(_, dt)| dt.clone())
+            })
+        {
+            return Some(dt);
+        }
+        self.schema()
             .ok()?
-            .iter_names_and_dtypes()
-            .find(|(n, _)| n.to_string() == resolved)
-            .map(|(_, dt)| dt.clone())
+            .fields()
+            .iter()
+            .find(|f| f.name.eq_ignore_ascii_case(resolved.as_str()))
+            .map(|f| crate::schema_conv::data_type_to_polars_type(&f.data_type))
     }
 
     /// Resolve a struct field from a struct type (for nested col("outer.inner.leaf")). Returns (resolved_field_name, field_dtype).
@@ -1018,6 +1057,31 @@ impl DataFrame {
             grouping_cols: grouping_col_names,
             case_sensitive: self.case_sensitive,
         })
+    }
+
+    /// Group by mixed specs (names and/or Column expressions). Use when groupBy receives F.col("x").alias("y").
+    pub fn group_by_specs(&self, specs: Vec<GroupBySpec>) -> Result<GroupedData, PolarsError> {
+        use polars::prelude::*;
+        let mut exprs = Vec::with_capacity(specs.len());
+        let mut names = Vec::with_capacity(specs.len());
+        for spec in specs {
+            match spec {
+                GroupBySpec::Name(s) => {
+                    let resolved = self.resolve_column_name(s.as_str())?;
+                    exprs.push(col(resolved.as_str()));
+                    names.push(resolved);
+                }
+                GroupBySpec::Column(c) => {
+                    let expr = c.into_expr();
+                    let out_name = polars_plan::utils::expr_output_name(&expr)
+                        .map(|s| s.to_string())
+                        .unwrap_or_else(|_| "_".to_string());
+                    exprs.push(expr);
+                    names.push(out_name);
+                }
+            }
+        }
+        self.group_by_exprs(exprs, names)
     }
 
     /// Cube: multiple grouping sets (all subsets of columns), then union (PySpark cube).
