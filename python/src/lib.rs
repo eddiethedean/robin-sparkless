@@ -5664,6 +5664,25 @@ fn dense_rank_window(partition_by: Vec<String>, order_by: Vec<String>) -> PyResu
 }
 
 #[pyfunction]
+fn cume_dist_window(partition_by: Vec<String>, order_by: Vec<String>) -> PyResult<PyColumn> {
+    if order_by.is_empty() {
+        return Err(SparklessError::new_err(
+            "cume_dist_window: order_by cannot be empty",
+        ));
+    }
+    let first = &order_by[0];
+    let (name, descending) = if let Some(stripped) = first.strip_prefix('-') {
+        (stripped.to_string(), true)
+    } else {
+        (first.clone(), false)
+    };
+    let order_col = Column::new(name);
+    let parts: Vec<&str> = partition_by.iter().map(|s| s.as_str()).collect();
+    let windowed = order_col.cume_dist(&parts[..], descending);
+    Ok(PyColumn { inner: windowed })
+}
+
+#[pyfunction]
 fn ntile_window(n: u32, partition_by: Vec<String>, order_by: Vec<String>) -> PyResult<PyColumn> {
     if order_by.is_empty() {
         return Err(SparklessError::new_err(
@@ -5682,6 +5701,26 @@ fn ntile_window(n: u32, partition_by: Vec<String>, order_by: Vec<String>) -> PyR
     Ok(PyColumn { inner: windowed })
 }
 
+/// Column value over an ordered window. Used for last_value with orderBy so "last in frame" = current row (PySpark default frame).
+#[pyfunction]
+fn column_value_over_window(
+    column_name: String,
+    partition_by: Vec<String>,
+    order_by: Vec<String>,
+) -> PyResult<PyColumn> {
+    if order_by.is_empty() {
+        return Err(SparklessError::new_err(
+            "column_value_over_window: order_by cannot be empty",
+        ));
+    }
+    let col_expr = Column::new(column_name);
+    let parts: Vec<&str> = partition_by.iter().map(|s| s.as_str()).collect();
+    let windowed = col_expr
+        .over_window(&parts[..], &order_by, false)
+        .map_err(to_py_err)?;
+    Ok(PyColumn { inner: windowed })
+}
+
 #[pyfunction]
 fn lag_window(
     column_name: String,
@@ -5697,7 +5736,9 @@ fn lag_window(
     let col_expr = Column::new(column_name);
     let lagged = col_expr.lag(offset);
     let parts: Vec<&str> = partition_by.iter().map(|s| s.as_str()).collect();
-    let windowed = lagged.over(&parts[..]);
+    let windowed = lagged
+        .over_window(&parts[..], &order_by, false)
+        .map_err(to_py_err)?;
     Ok(PyColumn { inner: windowed })
 }
 
@@ -5716,7 +5757,9 @@ fn lead_window(
     let col_expr = Column::new(column_name);
     let led = col_expr.lead(offset);
     let parts: Vec<&str> = partition_by.iter().map(|s| s.as_str()).collect();
-    let windowed = led.over(&parts[..]);
+    let windowed = led
+        .over_window(&parts[..], &order_by, false)
+        .map_err(to_py_err)?;
     Ok(PyColumn { inner: windowed })
 }
 #[pyfunction]
@@ -6816,7 +6859,9 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(percent_rank_window, m)?)?;
     m.add_function(wrap_pyfunction!(rank_window, m)?)?;
     m.add_function(wrap_pyfunction!(dense_rank_window, m)?)?;
+    m.add_function(wrap_pyfunction!(cume_dist_window, m)?)?;
     m.add_function(wrap_pyfunction!(ntile_window, m)?)?;
+    m.add_function(wrap_pyfunction!(column_value_over_window, m)?)?;
     m.add_function(wrap_pyfunction!(lag_window, m)?)?;
     m.add_function(wrap_pyfunction!(lead_window, m)?)?;
     m.add_function(wrap_pyfunction!(regexp_replace, m)?)?;

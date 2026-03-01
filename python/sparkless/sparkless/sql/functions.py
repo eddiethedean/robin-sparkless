@@ -594,7 +594,7 @@ overlay = _ni("overlay")
 dense_rank = _ni("dense_rank")
 rank = _ni("rank")
 # percent_rank defined below as real implementation returning _PercentRankExpr()
-cume_dist = _ni("cume_dist")
+# cume_dist defined below as real implementation returning _CumeDistExpr()
 ntile = _ni("ntile")
 lag = _ni("lag")
 lead = _ni("lead")
@@ -1471,6 +1471,19 @@ def dense_rank():
     return _DenseRankExpr()
 
 
+class _CumeDistExpr:
+    def over(self, window):
+        import sparkless._native as _native
+
+        partition_by, encoded, _ = _window_spec_to_partition_order(window)
+        return _native.cume_dist_window(partition_by, encoded)
+
+
+def cume_dist():
+    """Window cume_dist() expression; use with .over(Window.partitionBy(...).orderBy(...))."""
+    return _CumeDistExpr()
+
+
 class _NtileExpr:
     def __init__(self, n):
         self._n = n
@@ -1548,6 +1561,14 @@ class _LastValueExpr:
         self._col_or_name = col_or_name
 
     def over(self, window):
+        import sparkless._native as _native
+
+        partition_by, order_by, _ = _window_spec_to_partition_order(window, require_order=False)
+        # With orderBy, PySpark default frame is RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW,
+        # so last_value = current row's value. Use column value over ordered window (issue #1052).
+        if order_by:
+            name = _col_name(self._col_or_name)
+            return _native.column_value_over_window(name, partition_by, order_by)
         from sparkless import column as col
 
         c = (
