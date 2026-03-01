@@ -45,6 +45,7 @@ pub struct PivotedGroupedData(pub(crate) PolarsPivotedGroupedData);
 /// Re-export for API compatibility.
 pub use robin_sparkless_polars::dataframe::{
     GroupBySpec, JoinType, SaveMode, SelectItem, WriteFormat, WriteMode,
+    try_extract_join_eq_columns,
 };
 
 /// Root-owned DataFrameStat; delegates to the Polars backend.

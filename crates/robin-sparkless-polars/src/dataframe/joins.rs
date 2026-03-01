@@ -2,10 +2,43 @@
 
 use super::DataFrame;
 use crate::type_coercion::coerce_expr_pair_for_join;
-use polars::prelude::Expr;
-use polars::prelude::JoinType as PlJoinType;
-use polars::prelude::PolarsError;
+use polars::prelude::{Expr, JoinType as PlJoinType, Operator, PolarsError};
 use polars_plan::dsl::functions::nth;
+
+fn expr_to_column_name(expr: &Expr) -> Option<String> {
+    use polars::prelude::Expr as PlExpr;
+    let mut e = expr;
+    loop {
+        match e {
+            PlExpr::Column(n) => return Some(n.as_str().to_string()),
+            PlExpr::Alias(inner, _) | PlExpr::Cast { expr: inner, .. } => e = inner.as_ref(),
+            _ => return None,
+        }
+    }
+}
+
+/// If `expr` is an equality between two column refs (e.g. left.dept_id == right.dept_id),
+/// returns Some((left_col_name, right_col_name)) so the caller can use key-based join.
+/// Peels Alias and matches Eq or EqValidity. Used for PySpark parity (#1049).
+pub fn try_extract_join_eq_columns(expr: &Expr) -> Option<(String, String)> {
+    use polars::prelude::Expr as PlExpr;
+    let mut current = expr;
+    while let PlExpr::Alias(e, _) = current {
+        current = e.as_ref();
+    }
+    let inner = current;
+    if let PlExpr::BinaryExpr {
+        left,
+        op: Operator::Eq | Operator::EqValidity,
+        right,
+    } = inner
+    {
+        let left_name = expr_to_column_name(left.as_ref())?;
+        let right_name = expr_to_column_name(right.as_ref())?;
+        return Some((left_name, right_name));
+    }
+    None
+}
 
 /// Join type for DataFrame joins (PySpark-compatible)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -232,8 +265,27 @@ pub fn join(
 
 #[cfg(test)]
 mod tests {
-    use super::{JoinType, join};
+    use super::{JoinType, join, try_extract_join_eq_columns};
+    use crate::functions::col;
     use crate::{DataFrame, SparkSession};
+
+    #[test]
+    fn extract_join_eq_columns_from_eq_expr() {
+        let left = col("dept_id");
+        let right = col("dept_id");
+        let eq_expr = left.eq(right.into_expr());
+        let expr = eq_expr.into_expr();
+        let out = try_extract_join_eq_columns(&expr);
+        assert_eq!(out, Some(("dept_id".to_string(), "dept_id".to_string())));
+    }
+
+    #[test]
+    fn extract_join_eq_columns_from_aliased_eq() {
+        let eq_expr = col("a").eq(col("b").into_expr());
+        let expr = eq_expr.into_expr(); // adds Alias(..., "<expr>")
+        let out = try_extract_join_eq_columns(&expr);
+        assert_eq!(out, Some(("a".to_string(), "b".to_string())));
+    }
 
     fn left_df() -> DataFrame {
         let spark = SparkSession::builder()

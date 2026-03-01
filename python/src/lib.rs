@@ -8,7 +8,9 @@
 use pyo3::create_exception;
 use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyDict, PyList, PyTuple};
-use robin_sparkless::dataframe::{JoinType, PivotedGroupedData, SaveMode, WriteFormat, WriteMode};
+use robin_sparkless::dataframe::{
+    try_extract_join_eq_columns, JoinType, PivotedGroupedData, SaveMode, WriteFormat, WriteMode,
+};
 use robin_sparkless::functions::{self, asc_from_name, SortOrder, ThenBuilder, WhenBuilder};
 use robin_sparkless::{
     Column, CubeRollupData, DataFrame, DataType, GroupBySpec, GroupedData, SelectItem,
@@ -3005,8 +3007,8 @@ impl PyDataFrame {
             "left" | "left_outer" => JoinType::Left,
             "right" | "right_outer" => JoinType::Right,
             "outer" | "full" | "full_outer" => JoinType::Outer,
-            "semi" | "left_semi" | "leftsemi" => JoinType::Inner, // best-effort
-            "anti" | "left_anti" | "leftanti" => JoinType::Inner, // best-effort
+            "semi" | "left_semi" | "leftsemi" => JoinType::LeftSemi,
+            "anti" | "left_anti" | "leftanti" => JoinType::LeftAnti,
             _ => JoinType::Inner,
         };
         let use_left_right = left_on.is_some() && right_on.is_some();
@@ -3033,12 +3035,24 @@ impl PyDataFrame {
                         .map_err(to_py_err);
                 }
             }
-            // Complex expression (e.g. col("a") == col("b") or array_contains(...)): expression-based join.
+            // Complex expression (e.g. left.dept_id == right.dept_id): try key-based join first (#1049).
             if let Ok(condition) = on_arg.downcast::<PyColumn>() {
+                let expr = condition.borrow().inner.clone().into_expr();
+                if let Some((left_key, right_key)) = try_extract_join_eq_columns(&expr) {
+                    return self
+                        .inner
+                        .join_with_keys(
+                            &other.inner,
+                            vec![left_key.as_str()],
+                            vec![right_key.as_str()],
+                            join_type,
+                        )
+                        .map(|df| PyDataFrame { inner: df })
+                        .map_err(to_py_err);
+                }
+                // Non-eq expression: cross + filter (ambiguous duplicate column names may apply).
                 let crossed = self.inner.cross_join(&other.inner).map_err(to_py_err)?;
-                let filtered = crossed
-                    .filter(condition.borrow().inner.clone().into_expr())
-                    .map_err(to_py_err)?;
+                let filtered = crossed.filter(expr).map_err(to_py_err)?;
                 // For left/outer joins, include unmatched left rows with nulls on right columns (best-effort PySpark parity).
                 if matches!(join_type, JoinType::Left | JoinType::Outer) {
                     // Columns coming from left side
