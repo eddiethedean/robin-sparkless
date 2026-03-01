@@ -1563,7 +1563,9 @@ class _LastValueExpr:
     def over(self, window):
         import sparkless._native as _native
 
-        partition_by, order_by, _ = _window_spec_to_partition_order(window, require_order=False)
+        partition_by, order_by, _ = _window_spec_to_partition_order(
+            window, require_order=False
+        )
         # With orderBy, PySpark default frame is RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW,
         # so last_value = current row's value. Use column value over ordered window (issue #1052).
         if order_by:

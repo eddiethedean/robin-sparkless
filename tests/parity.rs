@@ -757,30 +757,29 @@ fn apply_operations(
                         "orderBy cannot be applied to GroupedData, must aggregate first".into(),
                     ));
                 }
-                if let Some(nf) = nulls_first {
-                    let mut sort_orders = Vec::with_capacity(columns.len());
-                    for (i, col_name) in columns.iter().enumerate() {
-                        let asc = ascending.get(i).copied().unwrap_or(true);
-                        let nf_val = nf.get(i).copied().unwrap_or(true);
-                        let c = rs_col(col_name);
-                        let order = if asc {
-                            if nf_val {
-                                asc_nulls_first(&c)
-                            } else {
-                                asc_nulls_last(&c)
-                            }
-                        } else if nf_val {
-                            desc_nulls_first(&c)
+                // When nulls_first is omitted, use PySpark default: nulls first for ASC, nulls last for DESC.
+                let mut sort_orders = Vec::with_capacity(columns.len());
+                for (i, col_name) in columns.iter().enumerate() {
+                    let asc = ascending.get(i).copied().unwrap_or(true);
+                    let nf_val = nulls_first
+                        .as_ref()
+                        .and_then(|nf| nf.get(i).copied())
+                        .unwrap_or(asc); // default: nulls first when asc, nulls last when desc
+                    let c = rs_col(col_name);
+                    let order = if asc {
+                        if nf_val {
+                            asc_nulls_first(&c)
                         } else {
-                            desc_nulls_last(&c)
-                        };
-                        sort_orders.push(order);
-                    }
-                    df = df.order_by_exprs(sort_orders)?;
-                } else {
-                    let cols: Vec<&str> = columns.iter().map(|s| s.as_str()).collect();
-                    df = df.order_by(cols, ascending.clone())?;
+                            asc_nulls_last(&c)
+                        }
+                    } else if nf_val {
+                        desc_nulls_first(&c)
+                    } else {
+                        desc_nulls_last(&c)
+                    };
+                    sort_orders.push(order);
                 }
+                df = df.order_by_exprs(sort_orders)?;
             }
             Operation::GroupBy { columns } => {
                 if grouped.is_some() {
