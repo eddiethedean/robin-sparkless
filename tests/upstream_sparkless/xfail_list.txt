@@ -13,9 +13,6 @@ test_issue_408_rdd_flatmap
 # posexplode_outer not implemented
 posexplode_outer
 
-# cume_dist not implemented
-cume_dist
-
 # SQL / DDL not supported
 test_sql_ddl
 test_create_database
