@@ -4817,6 +4817,7 @@ impl PyDataFrameNaFunctions {
             .as_ref()
             .map(|v| v.iter().map(|s| s.as_str()).collect());
 
+        // value is None: dict -> apply each; only str to_replace can be replaced with null (PySpark: replace(1, None) raises)
         if value.is_none() {
             if let Ok(dict) = to_replace.downcast::<PyDict>() {
                 let mut current = df_ref.inner.clone();
@@ -4830,12 +4831,42 @@ impl PyDataFrameNaFunctions {
                 }
                 return Ok(PyDataFrame { inner: current });
             }
-            // PySpark: na.replace(scalar, None) or na.replace(list, None) raises PySparkValueError.
-            return Err(to_py_err("value is required when to_replace is not a dict"));
+            // PySpark: replace("a", None) works (replace with null); replace(1, None) or replace([1,2], None) raises
+            if to_replace.downcast::<PyList>().is_ok() {
+                return Err(to_py_err("value is required when to_replace is a list"));
+            }
+            if to_replace.extract::<i64>().is_ok()
+                || to_replace.extract::<f64>().is_ok()
+                || to_replace.extract::<bool>().is_ok()
+            {
+                return Err(to_py_err("value is required when to_replace is not a dict"));
+            }
+            let null_expr = robin_sparkless::functions::lit_null("string")
+                .map_err(to_py_err)?
+                .into_expr();
+            let old_expr = py_any_to_column(to_replace)?.into_expr();
+            return df_ref
+                .inner
+                .na()
+                .replace(old_expr, null_expr, subset_refs.as_ref().map(|v| v.to_vec()))
+                .map(|df| PyDataFrame { inner: df })
+                .map_err(to_py_err);
         }
 
         let value = value.unwrap();
-        // PySpark: na.replace([a,b], [x]) with mismatched lengths raises PySparkValueError.
+
+        // to_replace is None: replace null with value (fillna)
+        if to_replace.is_none() {
+            let value_col = py_any_to_column(value)?;
+            return df_ref
+                .inner
+                .na()
+                .fill(value_col.into_expr(), subset_refs)
+                .map(|df| PyDataFrame { inner: df })
+                .map_err(to_py_err);
+        }
+
+        // to_replace is list and value is list: replace each pair in order
         if let (Ok(old_list), Ok(new_list)) = (
             to_replace.downcast::<pyo3::types::PyList>(),
             value.downcast::<pyo3::types::PyList>(),
@@ -4847,18 +4878,44 @@ impl PyDataFrameNaFunctions {
                     new_list.len()
                 )));
             }
+            let mut current = df_ref.inner.clone();
+            for i in 0..old_list.len() {
+                let old_item = old_list.get_item(i)?;
+                let new_item = new_list.get_item(i)?;
+                let old_expr = lit(&old_item)?.inner.into_expr();
+                let new_expr = lit(&new_item)?.inner.into_expr();
+                current = current
+                    .na()
+                    .replace(old_expr, new_expr, subset_refs.as_ref().map(|v| v.to_vec()))
+                    .map_err(to_py_err)?;
+            }
+            return Ok(PyDataFrame { inner: current });
         }
 
-        let old_col = lit(to_replace)?;
-        let new_col = lit(value)?;
-        let na = df_ref.inner.na();
-        na.replace(
-            old_col.inner.into_expr(),
-            new_col.inner.into_expr(),
-            subset_refs,
-        )
-        .map(|df| PyDataFrame { inner: df })
-        .map_err(to_py_err)
+        // to_replace is list and value is scalar: replace each old with value
+        if let Ok(old_list) = to_replace.downcast::<pyo3::types::PyList>() {
+            let mut current = df_ref.inner.clone();
+            let new_expr = lit(value)?.inner.into_expr();
+            for i in 0..old_list.len() {
+                let old_item = old_list.get_item(i)?;
+                let old_expr = lit(&old_item)?.inner.into_expr();
+                current = current
+                    .na()
+                    .replace(old_expr, new_expr.clone(), subset_refs.as_ref().map(|v| v.to_vec()))
+                    .map_err(to_py_err)?;
+            }
+            return Ok(PyDataFrame { inner: current });
+        }
+
+        // Single scalar/scalar replace
+        let old_expr = lit(to_replace)?.inner.into_expr();
+        let new_expr = lit(value)?.inner.into_expr();
+        df_ref
+            .inner
+            .na()
+            .replace(old_expr, new_expr, subset_refs)
+            .map(|df| PyDataFrame { inner: df })
+            .map_err(to_py_err)
     }
 }
 
