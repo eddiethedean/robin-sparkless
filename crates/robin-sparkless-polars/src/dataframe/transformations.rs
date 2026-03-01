@@ -119,7 +119,11 @@ pub fn select_with_exprs(
     // and rewrite to use LazyFrame.explode. When alias != source column, add a copy then explode
     // so the original list column is preserved (PySpark select(Name, Value, explode(Value).alias("ExplodedValue"))).
     // Python Column.into_expr() does expr.alias(name), so explode(col).alias("x") becomes Alias(Alias(Explode(...), "x"), "x"); peel one more Alias.
-    type ExplodeTarget = (PlSmallStr, Option<PlSmallStr>, polars::prelude::ExplodeOptions);
+    type ExplodeTarget = (
+        PlSmallStr,
+        Option<PlSmallStr>,
+        polars::prelude::ExplodeOptions,
+    );
     let mut explode_target: Option<ExplodeTarget> = None;
     let exprs: Vec<Expr> = exprs
         .into_iter()
@@ -133,19 +137,37 @@ pub fn select_with_exprs(
                         if let Expr::Explode { input, options } = inner2.as_ref() {
                             (Some(input.clone()), *options)
                         } else {
-                            (None, polars::prelude::ExplodeOptions { empty_as_null: false, keep_nulls: false })
+                            (
+                                None,
+                                polars::prelude::ExplodeOptions {
+                                    empty_as_null: false,
+                                    keep_nulls: false,
+                                },
+                            )
                         }
                     } else {
-                        (None, polars::prelude::ExplodeOptions { empty_as_null: false, keep_nulls: false })
+                        (
+                            None,
+                            polars::prelude::ExplodeOptions {
+                                empty_as_null: false,
+                                keep_nulls: false,
+                            },
+                        )
                     };
                 if let (Some(input), options) = (explode_input, options) {
                     if let Expr::Column(col_name) = input.as_ref() {
                         if explode_target.is_none() {
-                            let alias_name =
-                                if col_name.as_str() != name.as_str() { Some(name.clone()) } else { None };
+                            let alias_name = if col_name.as_str() != name.as_str() {
+                                Some(name.clone())
+                            } else {
+                                None
+                            };
                             explode_target = Some((col_name.clone(), alias_name, options));
                         }
-                        let out_col = explode_target.as_ref().and_then(|(_, a, _)| a.clone()).unwrap_or_else(|| col_name.clone());
+                        let out_col = explode_target
+                            .as_ref()
+                            .and_then(|(_, a, _)| a.clone())
+                            .unwrap_or_else(|| col_name.clone());
                         Expr::Alias(Arc::new(Expr::Column(out_col)), name)
                     } else {
                         Expr::Alias(inner, name)
@@ -196,6 +218,7 @@ pub fn select_with_exprs(
     // When every expression references no column from the frame, Polars select yields 1 row.
     // Cross-join with a single key column to get N rows (PySpark parity).
     let mut lf = df.lazy_frame();
+    let had_explode = explode_target.is_some();
 
     // If we saw an explode expression on a single column, apply frame-level explode first so
     // non-exploded columns are replicated correctly (PySpark explode parity).
@@ -217,7 +240,11 @@ pub fn select_with_exprs(
             lf = lf.explode(selector, options);
         }
     }
-    let no_col_refs = first_col.is_some()
+    // When we applied explode, the frame was already expanded; rewritten exprs may reference only
+    // the new column (e.g. "x"), so we must not use the no-col-refs cross_join path (it would
+    // wrongly cross-join and multiply rows).
+    let no_col_refs = !had_explode
+        && first_col.is_some()
         && exprs.iter().all(|e| {
             expr_referenced_columns(e)
                 .intersection(&df_columns)
@@ -1867,8 +1894,8 @@ pub fn intersect_all(
 #[cfg(test)]
 mod tests {
     use super::{
-        distinct, drop, dropna, first, head, limit, offset, order_by, select_items, union,
-        union_by_name, with_column, SelectItem,
+        SelectItem, distinct, drop, dropna, first, head, limit, offset, order_by, select_items,
+        union, union_by_name, with_column,
     };
     use crate::functions;
     use crate::{DataFrame, SparkSession};
@@ -1961,11 +1988,17 @@ mod tests {
         list_builder.append_values_iter(["2", "3"].iter().copied());
         list_builder.append_values_iter(["4", "5"].iter().copied());
         let value_series = list_builder.finish().into_series();
-        let pl = polars::prelude::DataFrame::new_infer_height(vec![names.into(), value_series.into()]).unwrap();
+        let pl =
+            polars::prelude::DataFrame::new_infer_height(vec![names.into(), value_series.into()])
+                .unwrap();
         let df = spark.create_dataframe_from_polars(pl);
         let col_explode = functions::explode(&df.column("Value").unwrap());
         let out = with_column(&df, "ExplodedValue", &col_explode, false).unwrap();
-        assert_eq!(out.count().unwrap(), 6, "explode should produce 6 rows (2+2+2)");
+        assert_eq!(
+            out.count().unwrap(),
+            6,
+            "explode should produce 6 rows (2+2+2)"
+        );
         let cols = out.columns().unwrap();
         assert!(cols.iter().any(|c| c == "Name"));
         assert!(cols.iter().any(|c| c == "Value"));
@@ -1985,7 +2018,9 @@ mod tests {
         list_builder.append_values_iter(["1", "2"].iter().copied());
         list_builder.append_values_iter(["2", "3"].iter().copied());
         let value_series = list_builder.finish().into_series();
-        let pl = polars::prelude::DataFrame::new_infer_height(vec![names.into(), value_series.into()]).unwrap();
+        let pl =
+            polars::prelude::DataFrame::new_infer_height(vec![names.into(), value_series.into()])
+                .unwrap();
         let df = spark.create_dataframe_from_polars(pl);
         let explode_expr = polars::prelude::col("Value")
             .explode(ExplodeOptions {
@@ -1999,7 +2034,11 @@ mod tests {
             SelectItem::Expr(explode_expr),
         ];
         let out = select_items(&df, items, false).unwrap();
-        assert_eq!(out.count().unwrap(), 4, "select with explode should produce 4 rows (2+2)");
+        assert_eq!(
+            out.count().unwrap(),
+            4,
+            "select with explode should produce 4 rows (2+2)"
+        );
         let cols = out.columns().unwrap();
         assert!(cols.iter().any(|c| c == "Name"));
         assert!(cols.iter().any(|c| c == "Value"));
