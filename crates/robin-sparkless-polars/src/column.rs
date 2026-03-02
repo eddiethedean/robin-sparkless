@@ -2851,9 +2851,9 @@ impl Column {
             keep_nulls: true,
         };
 
-        // In list.eval context, col("") is the current list element and cum_count(false)
-        // gives a 0-based index per element within the list.
-        let pos_inner = col("").cum_count(false).alias("pos");
+        // In list.eval context, col("") is the current list element. cum_count(false)
+        // yields 1-based positions, so subtract 1 for 0-based PySpark posexplode parity.
+        let pos_inner = (col("").cum_count(false) - lit(1i64)).alias("pos");
         let val_inner = col("").alias("col");
         let struct_expr = as_struct(vec![pos_inner, val_inner]);
 
@@ -3133,9 +3133,9 @@ impl Column {
             keep_nulls: false,
         };
 
-        // In list.eval context, col("") is the current list element and cum_count(false)
-        // gives a 0-based index per element within the list.
-        let pos_inner = col("").cum_count(false).alias("pos");
+        // In list.eval context, col("") is the current list element. cum_count(false)
+        // yields 1-based positions, so subtract 1 for 0-based PySpark posexplode parity.
+        let pos_inner = (col("").cum_count(false) - lit(1i64)).alias("pos");
         let val_inner = col("").alias("col");
         let struct_expr = as_struct(vec![pos_inner, val_inner]);
 
