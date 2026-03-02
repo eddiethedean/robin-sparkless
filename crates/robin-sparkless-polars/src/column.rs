@@ -2840,11 +2840,11 @@ impl Column {
     /// Implementation detail:
     /// - Build a list of structs per row: [{pos, col}, {pos, col}, ...].
     /// - Explode that single list column once, then project struct fields "pos" and "col".
-    /// This avoids applying two separate explode() expressions on the same list column,
-    /// which can lead to length mismatches when both position and value are selected
-    /// in the same DataFrame.select call.
+    ///   This avoids applying two separate explode() expressions on the same list column,
+    ///   which can lead to length mismatches when both position and value are selected
+    ///   in the same DataFrame.select call.
     pub fn posexplode_outer(&self) -> (Column, Column) {
-        use polars::prelude::{as_struct, ExplodeOptions};
+        use polars::prelude::{ExplodeOptions, as_struct};
 
         let opts = ExplodeOptions {
             empty_as_null: true,
@@ -3122,11 +3122,11 @@ impl Column {
     /// Implementation detail:
     /// - Build a list of structs per row: [{pos, col}, {pos, col}, ...].
     /// - Explode that single list column once, then project struct fields "pos" and "col".
-    /// This ensures that selecting both position and value in the same DataFrame.select
-    /// call yields a single exploded DataFrame (matching PySpark posexplode semantics)
-    /// instead of attempting two independent explode() calls on the same list column.
+    ///   This ensures that selecting both position and value in the same DataFrame.select
+    ///   call yields a single exploded DataFrame (matching PySpark posexplode semantics)
+    ///   instead of attempting two independent explode() calls on the same list column.
     pub fn posexplode(&self) -> (Column, Column) {
-        use polars::prelude::{as_struct, ExplodeOptions};
+        use polars::prelude::{ExplodeOptions, as_struct};
 
         let opts = ExplodeOptions {
             empty_as_null: false,
