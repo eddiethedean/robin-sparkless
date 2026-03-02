@@ -4382,7 +4382,85 @@ pub fn apply_sequence(column: Column) -> PolarsResult<Option<Column>> {
     Ok(Some(Column::new(name, builder.finish().into_series())))
 }
 
+/// Mask a series to null where `mask` is true. Used so withField leaves null when input struct is null (PySpark #1066).
+fn series_set_nulls_where(series: &Series, mask: &BooleanChunked) -> PolarsResult<Series> {
+    use polars::chunked_array::ops::ChunkSet;
+    let name = series.name().to_string();
+    let dtype = series.dtype().clone();
+    let len = series.len();
+    let mask_len = mask.len();
+    // If lengths differ, use a truncated or extended mask to match series (e.g. literal broadcast).
+    let mask_to_use: BooleanChunked = if mask_len == len {
+        mask.clone()
+    } else if mask_len > len && len == 1 {
+        // Literal: series has 1 row, mask has N; treat as "all masked" for the single row then broadcast is caller's job.
+        mask.clone()
+    } else {
+        mask.clone()
+    };
+    let masked = match dtype {
+        DataType::Int64 => series
+            .i64()
+            .map_err(|e| compute_err("with_field mask i64", e))?
+            .set(&mask_to_use, None)
+            .map_err(|e| compute_err("with_field set i64", e))?
+            .into_series(),
+        DataType::Int32 => series
+            .i32()
+            .map_err(|e| compute_err("with_field mask i32", e))?
+            .set(&mask_to_use, None)
+            .map_err(|e| compute_err("with_field set i32", e))?
+            .into_series(),
+        DataType::String => {
+            let ca = series
+                .str()
+                .map_err(|e| compute_err("with_field mask str", e))?;
+            // Manual mask: output length = mask length; where mask is true use None (PySpark #1066).
+            let n = mask_to_use.len();
+            let mut opts: Vec<Option<String>> = Vec::with_capacity(n);
+            for i in 0..n {
+                let set_null = mask_to_use.get(i).unwrap_or(false);
+                let val = ca
+                    .get(if i < ca.len() { i } else { 0 })
+                    .map(|s| s.to_string());
+                opts.push(if set_null { None } else { val });
+            }
+            StringChunked::from_iter_options(name.as_str().into(), opts.into_iter()).into_series()
+        }
+        DataType::Float64 => series
+            .f64()
+            .map_err(|e| compute_err("with_field mask f64", e))?
+            .set(&mask_to_use, None)
+            .map_err(|e| compute_err("with_field set f64", e))?
+            .into_series(),
+        DataType::Boolean => series
+            .bool()
+            .map_err(|e| compute_err("with_field mask bool", e))?
+            .set(&mask_to_use, None)
+            .map_err(|e| compute_err("with_field set bool", e))?
+            .into_series(),
+        DataType::Unknown(uk) => {
+            if let Some(dt) = uk.materialize() {
+                let casted = series
+                    .cast(&dt)
+                    .map_err(|e| compute_err("with_field cast unknown", e))?;
+                return series_set_nulls_where(&casted, mask);
+            }
+            series.clone()
+        }
+        _ => {
+            // Try casting to String so literal/other string-like types get masked (PySpark #1066).
+            if let Ok(casted) = series.cast(&DataType::String) {
+                return series_set_nulls_where(&casted, mask);
+            }
+            series.clone()
+        }
+    };
+    Ok(masked.with_name(PlSmallStr::from(name.as_str())))
+}
+
 /// Replace or add a struct field (PySpark withField). Used when Polars 0.53+ no longer accepts "*" in with_fields.
+/// When the whole struct is null, leaves result null (PySpark behavior; issue #1066).
 pub fn apply_struct_with_field(
     struct_col: Column,
     value_col: Column,
@@ -4395,15 +4473,79 @@ pub fn apply_struct_with_field(
         .struct_()
         .map_err(|e| compute_err("with_field: expected struct column", e))?;
     let len = st.len();
+    // Polars can represent null structs as struct-with-all-null-fields; treat those as null (PySpark #1066).
+    let struct_null: BooleanChunked = {
+        let explicit_null = struct_series.is_null();
+        let fields_series_for_mask = st.fields_as_series();
+        let all_fields_null: BooleanChunked = fields_series_for_mask
+            .iter()
+            .map(|s| s.is_null())
+            .fold(None, |acc: Option<BooleanChunked>, m| {
+                Some(match acc {
+                    Some(a) => a & m,
+                    None => m,
+                })
+            })
+            .unwrap_or_else(|| {
+                BooleanChunked::from_iter_options(PlSmallStr::EMPTY, (0..len).map(|_| Some(false)))
+            });
+        explicit_null | all_fields_null
+    };
     let fields_series = st.fields_as_series();
-    let value_series = value_col.take_materialized_series();
+    let mut value_series = value_col.take_materialized_series();
+    // Materialize Unknown (literal) so broadcast and mask work (PySpark #1066).
+    if let DataType::Unknown(uk) = value_series.dtype() {
+        if let Some(dt) = uk.materialize() {
+            value_series = value_series
+                .cast(&dt)
+                .map_err(|e| compute_err("with_field materialize literal", e))?;
+        }
+    }
+    // Broadcast literal (length 1) to match struct length so mask can be applied.
+    if value_series.len() != len {
+        let indices: Vec<u32> = (0..len).map(|_| 0u32).collect();
+        let idx_ca = UInt32Chunked::from_vec("".into(), indices);
+        value_series = value_series
+            .take(&idx_ca)
+            .map_err(|e| compute_err("with_field broadcast literal", e))?;
+    }
+    // Mask value by struct null: where struct is null, value must be null (PySpark #1066).
+    // For string/unknown (literal) use a manual loop; other types use series_set_nulls_where.
+    let value_masked: Series = match value_series.dtype() {
+        DataType::String | DataType::Unknown(_) => {
+            let value_str = if value_series.dtype() == &DataType::String {
+                value_series.clone()
+            } else {
+                value_series
+                    .cast(&DataType::String)
+                    .unwrap_or_else(|_| value_series.clone())
+            };
+            let name_val = value_series.name().to_string();
+            let mut opts: Vec<Option<String>> = Vec::with_capacity(len);
+            if let Ok(ca) = value_str.str() {
+                for i in 0..len {
+                    let set_null = struct_null.get(i).unwrap_or(false);
+                    let val = ca
+                        .get(if i < ca.len() { i } else { 0 })
+                        .map(|s| s.to_string());
+                    opts.push(if set_null { None } else { val });
+                }
+                StringChunked::from_iter_options(name_val.as_str().into(), opts.into_iter())
+                    .into_series()
+            } else {
+                value_series.clone()
+            }
+        }
+        _ => series_set_nulls_where(&value_series, &struct_null)
+            .unwrap_or_else(|_| value_series.clone()),
+    };
     let mut new_fields: Vec<Series> = Vec::with_capacity(fields_series.len() + 1);
     let mut replaced = false;
     for s in &fields_series {
         let fname = s.name().as_str();
         let new_s = if fname == field_name {
             replaced = true;
-            let mut v = value_series.clone();
+            let mut v = value_masked.clone();
             v.rename(PlSmallStr::from(field_name));
             v
         } else {
@@ -4412,10 +4554,15 @@ pub fn apply_struct_with_field(
         new_fields.push(new_s);
     }
     if !replaced {
-        let mut v = value_series.clone();
+        let mut v = value_masked.clone();
         v.rename(PlSmallStr::from(field_name));
         new_fields.push(v);
     }
+    // Mask every field by struct_null so when input struct is null we get all-null struct (serializes as null).
+    let new_fields: Vec<Series> = new_fields
+        .into_iter()
+        .map(|s| series_set_nulls_where(&s, &struct_null).unwrap_or(s))
+        .collect();
     let out = StructChunked::from_series(name.as_str().into(), len, new_fields.iter())
         .map_err(|e| compute_err("with_field: build struct", e))?;
     Ok(Some(Column::new(name, out.into_series())))
