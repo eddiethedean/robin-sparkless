@@ -108,6 +108,17 @@ impl DataFrame {
         }
     }
 
+    /// Create a DataFrame from an eager Polars DataFrame without converting to Lazy.
+    /// Used by create_dataframe_from_rows so schema (including struct types) is immediately
+    /// available for dotted column resolution (e.g. select("StructValue.e1")) (#1076).
+    pub(crate) fn from_eager_with_options(df: PlDataFrame, case_sensitive: bool) -> Self {
+        DataFrame {
+            inner: DataFrameInner::Eager(Arc::new(df)),
+            case_sensitive,
+            alias: None,
+        }
+    }
+
     /// Create a DataFrame from a LazyFrame (no materialization).
     pub fn from_lazy(lf: LazyFrame) -> Self {
         DataFrame {

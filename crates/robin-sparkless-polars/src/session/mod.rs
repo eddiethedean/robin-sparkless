@@ -1989,7 +1989,7 @@ impl SparkSession {
 
         if schema.is_empty() {
             if rows.is_empty() {
-                return Ok(DataFrame::from_polars_with_options(
+                return Ok(DataFrame::from_eager_with_options(
                     PlDataFrame::new(0, vec![])?,
                     self.is_case_sensitive(),
                 ));
@@ -2440,7 +2440,8 @@ impl SparkSession {
         }
 
         let pl_df = PlDataFrame::new_infer_height(cols.iter().map(|s| s.clone().into()).collect())?;
-        Ok(DataFrame::from_polars_with_options(
+        // Keep eager so schema (including struct types) is available for dotted select (#1076).
+        Ok(DataFrame::from_eager_with_options(
             pl_df,
             self.is_case_sensitive(),
         ))
