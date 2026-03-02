@@ -2836,26 +2836,35 @@ impl Column {
     }
 
     /// Posexplode with null preservation (PySpark posexplode_outer).
+    ///
+    /// Implementation detail:
+    /// - Build a list of structs per row: [{pos, col}, {pos, col}, ...].
+    /// - Explode that single list column once, then project struct fields "pos" and "col".
+    /// This avoids applying two separate explode() expressions on the same list column,
+    /// which can lead to length mismatches when both position and value are selected
+    /// in the same DataFrame.select call.
     pub fn posexplode_outer(&self) -> (Column, Column) {
-        use polars::prelude::{DataType, ExplodeOptions, Field};
+        use polars::prelude::{as_struct, ExplodeOptions};
+
         let opts = ExplodeOptions {
             empty_as_null: true,
             keep_nulls: true,
         };
-        let pos_expr = self
-            .expr()
-            .clone()
-            .map(
-                |col| expect_col(crate::udfs::apply_posexplode_positions(col)),
-                |_schema, field| {
-                    Ok(Field::new(
-                        field.name().clone(),
-                        DataType::List(Box::new(DataType::Int64)),
-                    ))
-                },
-            )
-            .explode(opts);
-        let val_expr = self.expr().clone().explode(opts);
+
+        // In list.eval context, col("") is the current list element and cum_count(false)
+        // gives a 0-based index per element within the list.
+        let pos_inner = col("").cum_count(false).alias("pos");
+        let val_inner = col("").alias("col");
+        let struct_expr = as_struct(vec![pos_inner, val_inner]);
+
+        // list of structs [{pos, col}, ...] per input row
+        let list_struct_expr = self.expr().clone().list().eval(struct_expr);
+        // explode once to get a struct column with one row per element (or null/empty handling via opts)
+        let struct_exploded = list_struct_expr.explode(opts);
+
+        let pos_expr = struct_exploded.clone().struct_().field_by_name("pos");
+        let val_expr = struct_exploded.struct_().field_by_name("col");
+
         (
             Self::from_expr(pos_expr, Some("pos".to_string())),
             Self::from_expr(val_expr, Some("col".to_string())),
@@ -3109,27 +3118,35 @@ impl Column {
     }
 
     /// Explode list with position (PySpark posexplode). Returns (pos_col, value_col).
-    /// pos is 0-based; implemented via UDF to avoid list.eval limitations on i64.
+    ///
+    /// Implementation detail:
+    /// - Build a list of structs per row: [{pos, col}, {pos, col}, ...].
+    /// - Explode that single list column once, then project struct fields "pos" and "col".
+    /// This ensures that selecting both position and value in the same DataFrame.select
+    /// call yields a single exploded DataFrame (matching PySpark posexplode semantics)
+    /// instead of attempting two independent explode() calls on the same list column.
     pub fn posexplode(&self) -> (Column, Column) {
-        use polars::prelude::{DataType, ExplodeOptions, Field};
+        use polars::prelude::{as_struct, ExplodeOptions};
+
         let opts = ExplodeOptions {
             empty_as_null: false,
             keep_nulls: false,
         };
-        let pos_expr = self
-            .expr()
-            .clone()
-            .map(
-                |col| expect_col(crate::udfs::apply_posexplode_positions(col)),
-                |_schema, field| {
-                    Ok(Field::new(
-                        field.name().clone(),
-                        DataType::List(Box::new(DataType::Int64)),
-                    ))
-                },
-            )
-            .explode(opts);
-        let val_expr = self.expr().clone().explode(opts);
+
+        // In list.eval context, col("") is the current list element and cum_count(false)
+        // gives a 0-based index per element within the list.
+        let pos_inner = col("").cum_count(false).alias("pos");
+        let val_inner = col("").alias("col");
+        let struct_expr = as_struct(vec![pos_inner, val_inner]);
+
+        // list of structs [{pos, col}, ...] per input row
+        let list_struct_expr = self.expr().clone().list().eval(struct_expr);
+        // explode once to get a struct column with one row per element
+        let struct_exploded = list_struct_expr.explode(opts);
+
+        let pos_expr = struct_exploded.clone().struct_().field_by_name("pos");
+        let val_expr = struct_exploded.struct_().field_by_name("col");
+
         (
             Self::from_expr(pos_expr, Some("pos".to_string())),
             Self::from_expr(val_expr, Some("col".to_string())),
