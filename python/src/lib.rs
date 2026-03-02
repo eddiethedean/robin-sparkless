@@ -243,9 +243,7 @@ fn parse_struct_string_to_json(s: &str, fields: &[StructField]) -> Option<JsonVa
     }
     if !by_name.is_empty() {
         for f in fields {
-            by_name
-                .entry(f.name.clone())
-                .or_insert(JsonValue::Null);
+            by_name.entry(f.name.clone()).or_insert(JsonValue::Null);
         }
         return Some(JsonValue::Object(by_name));
     }
