@@ -670,8 +670,7 @@ fn json_value_to_series_single(
     let epoch = date_utils::epoch_naive_date();
     let type_lower = type_str.trim().to_lowercase();
     // #1066: Nested array (e.g. createDataFrame with {"matrix": [[1,2,3],[4,5,6]]}) when type is array<...>.
-    if let (JsonValue::Array(arr), Some(elem_type)) =
-        (value, parse_array_element_type(&type_lower))
+    if let (JsonValue::Array(arr), Some(elem_type)) = (value, parse_array_element_type(&type_lower))
     {
         let inner_dtype = json_type_str_to_polars(&elem_type).ok_or_else(|| {
             PolarsError::ComputeError(
@@ -688,13 +687,8 @@ fn json_value_to_series_single(
                 .collect::<Result<Vec<_>, _>>()?
         };
         let vals: Vec<_> = elem_series.iter().filter_map(|s| s.get(0).ok()).collect();
-        let s = Series::from_any_values_and_dtype(
-            PlSmallStr::EMPTY,
-            &vals,
-            &inner_dtype,
-            false,
-        )
-        .map_err(|e| PolarsError::ComputeError(format!("array elem: {e}").into()))?;
+        let s = Series::from_any_values_and_dtype(PlSmallStr::EMPTY, &vals, &inner_dtype, false)
+            .map_err(|e| PolarsError::ComputeError(format!("array elem: {e}").into()))?;
         let mut builder = get_list_builder(&inner_dtype, 64, 1, name.into());
         builder.append_series(&s)?;
         return Ok(builder.finish().into_series());
@@ -1733,13 +1727,19 @@ impl SparkSession {
         keys.sort();
         keys.iter()
             .map(|k| {
-                let field_typ = obj.get(*k).map(|v| match v {
-                    JsonValue::Object(inner_obj) => {
-                        format!("struct<{}>", Self::infer_struct_dtype_from_json_object(inner_obj))
-                    }
-                    _ => Self::infer_dtype_from_json_value(v)
-                        .unwrap_or_else(|| "string".to_string()),
-                }).unwrap_or_else(|| "string".to_string());
+                let field_typ = obj
+                    .get(*k)
+                    .map(|v| match v {
+                        JsonValue::Object(inner_obj) => {
+                            format!(
+                                "struct<{}>",
+                                Self::infer_struct_dtype_from_json_object(inner_obj)
+                            )
+                        }
+                        _ => Self::infer_dtype_from_json_value(v)
+                            .unwrap_or_else(|| "string".to_string()),
+                    })
+                    .unwrap_or_else(|| "string".to_string());
                 format!("{}:{}", k, field_typ)
             })
             .collect::<Vec<_>>()
@@ -1782,13 +1782,19 @@ impl SparkSession {
         let inner = keys
             .iter()
             .map(|k| {
-                let field_typ = key_to_first_non_null.get(*k).map(|val| match val {
-                    JsonValue::Object(inner_obj) => {
-                        format!("struct<{}>", Self::infer_struct_dtype_from_json_object(inner_obj))
-                    }
-                    _ => Self::infer_dtype_from_json_value(val)
-                        .unwrap_or_else(|| "string".to_string()),
-                }).unwrap_or_else(|| "string".to_string());
+                let field_typ = key_to_first_non_null
+                    .get(*k)
+                    .map(|val| match val {
+                        JsonValue::Object(inner_obj) => {
+                            format!(
+                                "struct<{}>",
+                                Self::infer_struct_dtype_from_json_object(inner_obj)
+                            )
+                        }
+                        _ => Self::infer_dtype_from_json_value(val)
+                            .unwrap_or_else(|| "string".to_string()),
+                    })
+                    .unwrap_or_else(|| "string".to_string());
                 format!("{}:{}", k.as_str(), field_typ)
             })
             .collect::<Vec<_>>()

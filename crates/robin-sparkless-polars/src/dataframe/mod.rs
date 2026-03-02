@@ -285,20 +285,18 @@ impl DataFrame {
             // Resolve struct field names in chained subscript (e.g. F.col("Outer")["Inner"]["E1"]) (#339, #1066).
             if let Expr::Function {
                 input,
-                function: polars::prelude::FunctionExpr::StructExpr(
-                    polars::prelude::StructFunction::FieldByName(name),
-                ),
+                function:
+                    polars::prelude::FunctionExpr::StructExpr(
+                        polars::prelude::StructFunction::FieldByName(name),
+                    ),
             } = &e
             {
                 if input.len() == 1 {
                     if let Some(input_dt) = df.get_expr_output_dtype(&input[0]) {
-                        if let Ok((resolved_name, _)) = df
-                            .resolve_struct_field_from_type(&input_dt, name.as_str(), "struct")
+                        if let Ok((resolved_name, _)) =
+                            df.resolve_struct_field_from_type(&input_dt, name.as_str(), "struct")
                         {
-                            return Ok(input[0]
-                                .clone()
-                                .struct_()
-                                .field_by_name(&resolved_name));
+                            return Ok(input[0].clone().struct_().field_by_name(&resolved_name));
                         }
                     }
                 }
@@ -898,9 +896,9 @@ impl DataFrame {
                 if let FunctionExpr::StructExpr(StructFunction::FieldByName(name)) = function {
                     if let Some(first) = input.first() {
                         let input_dt = self.get_expr_output_dtype(first)?;
-                        let (_, field_dt) =
-                            self.resolve_struct_field_from_type(&input_dt, name.as_str(), "?")
-                                .ok()?;
+                        let (_, field_dt) = self
+                            .resolve_struct_field_from_type(&input_dt, name.as_str(), "?")
+                            .ok()?;
                         return Some(field_dt);
                     }
                 }
@@ -2309,7 +2307,7 @@ fn partition_row_to_filter_expr(
             Some(p) => p.and(clause),
         });
     }
-        Ok(pred.unwrap_or_else(|| lit(true)))
+    Ok(pred.unwrap_or_else(|| lit(true)))
 }
 
 /// True if dtype is List(Struct{key, value}) (map column format).

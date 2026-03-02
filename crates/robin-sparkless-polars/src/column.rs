@@ -2758,7 +2758,7 @@ impl Column {
                         known_value_dtype,
                     ));
                 }
-                let out_dtype = DataType::Struct(new_fields.into());
+                let out_dtype = DataType::Struct(new_fields);
                 Ok(Field::new(struct_field.name().clone(), out_dtype))
             },
         );
