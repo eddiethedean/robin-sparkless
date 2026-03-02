@@ -3236,9 +3236,11 @@ impl PyDataFrame {
         for (i, item) in flat.iter().enumerate() {
             let asc = asc_vec.get(i).copied().unwrap_or(true);
             if let Ok(ps) = item.downcast::<PySortOrder>() {
+                // Explicit SortOrder (e.g. col("x").desc()), use as-is.
                 sort_orders.push(ps.borrow().inner.clone());
                 all_strings = false;
             } else if let Ok(pc) = item.downcast::<PyColumn>() {
+                // Bare Column: apply ascending/descending from asc_vec.
                 let so = if asc {
                     pc.borrow().inner.asc_nulls_last()
                 } else {
@@ -3246,10 +3248,26 @@ impl PyDataFrame {
                 };
                 sort_orders.push(so);
                 all_strings = false;
+            } else if let (Ok(name_attr), Ok(asc_attr)) =
+                (item.getattr("name"), item.getattr("ascending"))
+            {
+                // Sort-key object from sparkless.sql.functions.desc/asc: has .name and .ascending.
+                let name: String = name_attr.extract()?;
+                let ascending_flag: bool = asc_attr.extract()?;
+                let col = Column::new(name.clone());
+                let so = if ascending_flag {
+                    functions::asc(&col)
+                } else {
+                    functions::desc(&col)
+                };
+                sort_orders.push(so);
+                all_strings = false;
             } else if let Ok(s) = item.extract::<String>() {
+                // Plain column name string.
                 sort_orders.push(asc_from_name(&s));
                 names_only.push(s);
             } else {
+                // Fallback: give up on mixed types; try pure string path below.
                 sort_orders.clear();
                 names_only.clear();
                 all_strings = false;

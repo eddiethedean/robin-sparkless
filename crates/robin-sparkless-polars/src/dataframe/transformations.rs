@@ -923,11 +923,17 @@ pub fn with_column_renamed(
     new_name: &str,
     case_sensitive: bool,
 ) -> Result<DataFrame, PolarsError> {
-    let resolved = df.resolve_column_name(old_name)?;
-    let lf = df
-        .lazy_frame()
-        .rename([resolved.as_str()], [new_name], true);
-    Ok(super::DataFrame::from_lazy_with_options(lf, case_sensitive))
+    match df.resolve_column_name(old_name) {
+        Ok(resolved) => {
+            let lf = df
+                .lazy_frame()
+                .rename([resolved.as_str()], [new_name], true);
+            Ok(super::DataFrame::from_lazy_with_options(lf, case_sensitive))
+        }
+        // PySpark parity: renaming a non-existent column is a no-op.
+        Err(PolarsError::ColumnNotFound(_)) => Ok(df.clone()),
+        Err(e) => Err(e),
+    }
 }
 
 /// Replace values in a column: where column == old_value, use new_value. PySpark replace (single column).
@@ -1627,14 +1633,25 @@ pub fn with_columns_renamed(
     renames: &[(String, String)],
     case_sensitive: bool,
 ) -> Result<DataFrame, PolarsError> {
-    let mut mapping = Vec::new();
-    for (old_name, new_name) in renames {
-        let resolved = df.resolve_column_name(old_name)?;
-        mapping.push((resolved, new_name.clone()));
-    }
+    // Apply renames one by one; skip columns that do not exist (no-op for missing),
+    // matching PySpark withColumnsRenamed behavior for non-existent columns.
     let mut lf = df.lazy_frame();
-    for (old, new) in mapping {
-        lf = lf.rename([old.as_str()], [new.as_str()], true);
+    let mut applied_any = false;
+    for (old_name, new_name) in renames {
+        match df.resolve_column_name(old_name) {
+            Ok(resolved) => {
+                lf = lf.rename([resolved.as_str()], [new_name.as_str()], true);
+                applied_any = true;
+            }
+            Err(PolarsError::ColumnNotFound(_)) => {
+                // Non-existent column: leave DataFrame unchanged for this entry.
+                continue;
+            }
+            Err(e) => return Err(e),
+        }
+    }
+    if !applied_any {
+        return Ok(df.clone());
     }
     Ok(super::DataFrame::from_lazy_with_options(lf, case_sensitive))
 }
