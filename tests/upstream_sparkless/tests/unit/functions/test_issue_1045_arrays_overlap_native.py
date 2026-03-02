@@ -40,4 +40,3 @@ def test_arrays_overlap_native_basic_behavior() -> None:
         assert values == [True, False]
     finally:
         spark.stop()
-
