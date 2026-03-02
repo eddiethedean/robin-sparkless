@@ -45,6 +45,7 @@ pub struct PivotedGroupedData(pub(crate) PolarsPivotedGroupedData);
 /// Re-export for API compatibility.
 pub use robin_sparkless_polars::dataframe::{
     GroupBySpec, JoinType, SaveMode, SelectItem, WriteFormat, WriteMode,
+    try_extract_join_eq_columns,
 };
 
 /// Root-owned DataFrameStat; delegates to the Polars backend.
@@ -90,6 +91,11 @@ impl DataFrame {
     /// Return a DataFrame with the given alias.
     pub fn alias(&self, name: &str) -> Self {
         DataFrame(self.0.alias(name))
+    }
+
+    /// Return the table alias if set (e.g. from df.alias("t")). Used for join condition resolution (#374).
+    pub fn get_alias(&self) -> Option<String> {
+        self.0.get_alias()
     }
 
     /// Filter rows using an engine-agnostic expression (ExprIr).

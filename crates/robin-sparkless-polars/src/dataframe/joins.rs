@@ -2,10 +2,43 @@
 
 use super::DataFrame;
 use crate::type_coercion::coerce_expr_pair_for_join;
-use polars::prelude::Expr;
-use polars::prelude::JoinType as PlJoinType;
-use polars::prelude::PolarsError;
+use polars::prelude::{Expr, JoinType as PlJoinType, Operator, PolarsError};
 use polars_plan::dsl::functions::nth;
+
+fn expr_to_column_name(expr: &Expr) -> Option<String> {
+    use polars::prelude::Expr as PlExpr;
+    let mut e = expr;
+    loop {
+        match e {
+            PlExpr::Column(n) => return Some(n.as_str().to_string()),
+            PlExpr::Alias(inner, _) | PlExpr::Cast { expr: inner, .. } => e = inner.as_ref(),
+            _ => return None,
+        }
+    }
+}
+
+/// If `expr` is an equality between two column refs (e.g. left.dept_id == right.dept_id),
+/// returns Some((left_col_name, right_col_name)) so the caller can use key-based join.
+/// Peels Alias and matches Eq or EqValidity. Used for PySpark parity (#1049).
+pub fn try_extract_join_eq_columns(expr: &Expr) -> Option<(String, String)> {
+    use polars::prelude::Expr as PlExpr;
+    let mut current = expr;
+    while let PlExpr::Alias(e, _) = current {
+        current = e.as_ref();
+    }
+    let inner = current;
+    if let PlExpr::BinaryExpr {
+        left,
+        op: Operator::Eq | Operator::EqValidity,
+        right,
+    } = inner
+    {
+        let left_name = expr_to_column_name(left.as_ref())?;
+        let right_name = expr_to_column_name(right.as_ref())?;
+        return Some((left_name, right_name));
+    }
+    None
+}
 
 /// Join type for DataFrame joins (PySpark-compatible)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -28,6 +61,10 @@ pub enum JoinType {
 /// so the result has one key column name (PySpark parity #604, #743).
 /// For Right and Outer, reorders columns to match PySpark: key(s), then left non-key, then right non-key.
 /// `left_on` and `right_on` must have the same length; keys are matched by position.
+///
+/// When `coalesce_same_name_keys` is true (e.g. join(right, "id") or join(right, [col("id")])), duplicate
+/// key columns are coalesced into one so the result has a single key column (PySpark parity #1049, #353).
+/// When false (e.g. condition join left.x == right.x), both key columns are kept (dept_id, dept_id_right).
 pub fn join(
     left: &DataFrame,
     right: &DataFrame,
@@ -35,6 +72,7 @@ pub fn join(
     right_on: Vec<&str>,
     how: JoinType,
     case_sensitive: bool,
+    coalesce_same_name_keys: bool,
 ) -> Result<DataFrame, PolarsError> {
     use polars::prelude::{JoinBuilder, JoinCoalesce, col};
     if left_on.len() != right_on.len() {
@@ -63,92 +101,89 @@ pub fn join(
         })
         .collect::<Result<_, _>>()?;
 
-    // #1009, #1019: When aliasing right key to left name, right may already have a column with that name (e.g. self-join).
-    // Rename right's conflicting non-key column so we don't create duplicate output names (LazyFrame: use select with alias).
-    let right_names: Vec<String> = right.columns()?.into_iter().collect();
-    let mut renames: std::collections::HashMap<String, String> = std::collections::HashMap::new();
-    for (i, _) in left_on.iter().enumerate() {
-        let target_name = &left_key_names[i];
-        let right_key = &right_key_names[i];
-        if target_name != right_key && right_names.iter().any(|n| n == target_name) {
-            renames.insert(target_name.clone(), format!("{}_right", target_name));
-        }
-    }
-    if !renames.is_empty() {
-        let exprs: Vec<Expr> = right_names
-            .iter()
-            .map(|n| {
-                if let Some(suffix) = renames.get(n) {
-                    col(n.as_str()).alias(suffix.as_str())
-                } else {
-                    col(n.as_str())
-                }
-            })
-            .collect();
-        right_lf = right_lf.select(&exprs);
-    }
+    let keys_differ = left_key_names != right_key_names;
 
-    // Coerce join keys to a common type when left/right dtypes differ (PySpark #274).
-    // Alias right keys to left key names so result has one key column name (#604, #743).
-    let mut left_casts: Vec<Expr> = Vec::new();
-    let mut right_casts: Vec<Expr> = Vec::new();
-    for (i, key) in left_on.iter().enumerate() {
-        let left_name = &left_key_names[i];
-        let right_name = &right_key_names[i];
-        let left_dtype = left.get_column_dtype(left_name.as_str()).ok_or_else(|| {
-            PolarsError::ComputeError(format!("join key '{key}' not found on left").into())
-        })?;
-        let right_dtype = right.get_column_dtype(right_name.as_str()).ok_or_else(|| {
-            PolarsError::ComputeError(format!("join key '{key}' not found on right").into())
-        })?;
-        let target_name = left_name.as_str();
-        if left_dtype != right_dtype {
-            let (l, r) = coerce_expr_pair_for_join(
-                left_name.as_str(),
-                right_name.as_str(),
-                &left_dtype,
-                &right_dtype,
-                target_name,
-            )?;
-            left_casts.push(l);
-            right_casts.push(r);
-        } else if left_name != right_name {
-            right_casts.push(col(right_name.as_str()).alias(target_name));
+    if !keys_differ {
+        // #1009, #1019: When aliasing right key to left name, right may already have a column with that name (e.g. self-join).
+        let right_names: Vec<String> = right.columns()?.into_iter().collect();
+        let mut renames: std::collections::HashMap<String, String> =
+            std::collections::HashMap::new();
+        for (i, _) in left_on.iter().enumerate() {
+            let target_name = &left_key_names[i];
+            let right_key = &right_key_names[i];
+            if target_name != right_key && right_names.iter().any(|n| n == target_name) {
+                renames.insert(target_name.clone(), format!("{}_right", target_name));
+            }
         }
-    }
-    if !left_casts.is_empty() {
-        left_lf = left_lf.with_columns(left_casts);
-    }
-    if !right_casts.is_empty() {
-        right_lf = right_lf.with_columns(right_casts);
-        // #614: Drop right's original key columns when we aliased to left names, so the result
-        // has only the left key name (e.g. "id") and collect does not fail with "not found: ID".
-        // Use current right_lf schema (after renames) so we keep manager_id_right etc.
-        let drop_right: std::collections::HashSet<String> = left_on
-            .iter()
-            .enumerate()
-            .filter(|(i, _)| left_key_names[*i] != right_key_names[*i])
-            .map(|(i, _)| right_key_names[i].clone())
-            .collect();
-        if !drop_right.is_empty() {
-            let current_right_names: Vec<String> = right_lf
-                .collect_schema()
-                .map(|s| s.iter_names().map(|n| n.to_string()).collect())?;
-            let keep_names: Vec<&str> = current_right_names
+        if !renames.is_empty() {
+            let exprs: Vec<Expr> = right_names
                 .iter()
-                .filter(|n| !drop_right.contains(*n))
-                .map(String::as_str)
+                .map(|n| {
+                    if let Some(suffix) = renames.get(n) {
+                        col(n.as_str()).alias(suffix.as_str())
+                    } else {
+                        col(n.as_str())
+                    }
+                })
                 .collect();
-            let keep: Vec<Expr> = keep_names.iter().map(|s| col(*s)).collect();
-            right_lf = right_lf.select(&keep);
+            right_lf = right_lf.select(&exprs);
+        }
+
+        // Coerce join keys to a common type when left/right dtypes differ (PySpark #274).
+        // Alias right keys to left key names so result has one key column name (#604, #743).
+        let mut left_casts: Vec<Expr> = Vec::new();
+        let mut right_casts: Vec<Expr> = Vec::new();
+        for (i, key) in left_on.iter().enumerate() {
+            let left_name = &left_key_names[i];
+            let right_name = &right_key_names[i];
+            let left_dtype = left.get_column_dtype(left_name.as_str()).ok_or_else(|| {
+                PolarsError::ComputeError(format!("join key '{key}' not found on left").into())
+            })?;
+            let right_dtype = right.get_column_dtype(right_name.as_str()).ok_or_else(|| {
+                PolarsError::ComputeError(format!("join key '{key}' not found on right").into())
+            })?;
+            let target_name = left_name.as_str();
+            if left_dtype != right_dtype {
+                let (l, r) = coerce_expr_pair_for_join(
+                    left_name.as_str(),
+                    right_name.as_str(),
+                    &left_dtype,
+                    &right_dtype,
+                    target_name,
+                )?;
+                left_casts.push(l);
+                right_casts.push(r);
+            } else if left_name != right_name {
+                right_casts.push(col(right_name.as_str()).alias(target_name));
+            }
+        }
+        if !left_casts.is_empty() {
+            left_lf = left_lf.with_columns(left_casts);
+        }
+        if !right_casts.is_empty() {
+            right_lf = right_lf.with_columns(right_casts);
+            let drop_right: std::collections::HashSet<String> = left_on
+                .iter()
+                .enumerate()
+                .filter(|(i, _)| left_key_names[*i] != right_key_names[*i])
+                .map(|(i, _)| right_key_names[i].clone())
+                .collect();
+            if !drop_right.is_empty() {
+                let current_right_names: Vec<String> = right_lf
+                    .collect_schema()
+                    .map(|s| s.iter_names().map(|n| n.to_string()).collect())?;
+                let keep_names: Vec<&str> = current_right_names
+                    .iter()
+                    .filter(|n| !drop_right.contains(*n))
+                    .map(String::as_str)
+                    .collect();
+                let keep: Vec<Expr> = keep_names.iter().map(|s| col(*s)).collect();
+                right_lf = right_lf.select(&keep);
+            }
         }
     }
 
     let on_set: std::collections::HashSet<String> = left_key_names.iter().cloned().collect();
-    let on_exprs: Vec<polars::prelude::Expr> = left_key_names
-        .iter()
-        .map(|name| col(name.as_str()))
-        .collect();
     let polars_how: PlJoinType = match how {
         JoinType::Inner => PlJoinType::Inner,
         JoinType::Left => PlJoinType::Left,
@@ -158,16 +193,35 @@ pub fn join(
         JoinType::LeftAnti => PlJoinType::Anti,
     };
 
+    let left_on_exprs: Vec<Expr> = left_key_names.iter().map(|n| col(n.as_str())).collect();
+    let right_on_exprs: Vec<Expr> = right_key_names.iter().map(|n| col(n.as_str())).collect();
+    // When coalesce_same_name_keys (join(right, "id")), coalesce so result has one key column (#1049, #353).
+    // When condition join (left.x == right.x), keep both columns for parity fixture.
+    let coalesce = if keys_differ {
+        JoinCoalesce::KeepColumns
+    } else if coalesce_same_name_keys
+        && matches!(
+            how,
+            JoinType::Inner | JoinType::Left | JoinType::Right | JoinType::Outer
+        )
+    {
+        JoinCoalesce::CoalesceColumns
+    } else if matches!(
+        how,
+        JoinType::Inner | JoinType::Left | JoinType::Right | JoinType::Outer
+    ) {
+        JoinCoalesce::KeepColumns
+    } else {
+        JoinCoalesce::CoalesceColumns
+    };
     let mut joined = JoinBuilder::new(left_lf)
         .with(right_lf)
         .how(polars_how)
-        .on(&on_exprs)
-        .coalesce(JoinCoalesce::CoalesceColumns)
+        .left_on(&left_on_exprs)
+        .right_on(&right_on_exprs)
+        .coalesce(coalesce)
         .finish();
 
-    // When left and right share join key names (e.g. both "id"), result can have duplicate column names.
-    // Keep only the first occurrence of each name so collect() returns one value per name (PySpark parity).
-    // Select by index (Expr::Nth) so we pick the first of each duplicate name; col("id") would be ambiguous.
     let result_schema = joined.collect_schema()?;
     let names: Vec<String> = result_schema.iter_names().map(|s| s.to_string()).collect();
     let mut seen = std::collections::HashSet::new();
@@ -187,7 +241,6 @@ pub fn join(
             .collect();
         joined = joined.select(&exprs);
     }
-
     // For Right/Outer, reorder columns: keys, left non-keys, right non-keys (PySpark order).
     let result_lf = if matches!(how, JoinType::Right | JoinType::Outer) {
         let left_names = left.columns()?;
@@ -232,8 +285,27 @@ pub fn join(
 
 #[cfg(test)]
 mod tests {
-    use super::{JoinType, join};
+    use super::{JoinType, join, try_extract_join_eq_columns};
+    use crate::functions::col;
     use crate::{DataFrame, SparkSession};
+
+    #[test]
+    fn extract_join_eq_columns_from_eq_expr() {
+        let left = col("dept_id");
+        let right = col("dept_id");
+        let eq_expr = left.eq(right.into_expr());
+        let expr = eq_expr.into_expr();
+        let out = try_extract_join_eq_columns(&expr);
+        assert_eq!(out, Some(("dept_id".to_string(), "dept_id".to_string())));
+    }
+
+    #[test]
+    fn extract_join_eq_columns_from_aliased_eq() {
+        let eq_expr = col("a").eq(col("b").into_expr());
+        let expr = eq_expr.into_expr(); // adds Alias(..., "<expr>")
+        let out = try_extract_join_eq_columns(&expr);
+        assert_eq!(out, Some(("a".to_string(), "b".to_string())));
+    }
 
     fn left_df() -> DataFrame {
         let spark = SparkSession::builder()
@@ -276,6 +348,7 @@ mod tests {
             vec!["id"],
             JoinType::Inner,
             false,
+            false,
         )
         .unwrap();
         assert_eq!(out.count().unwrap(), 1);
@@ -287,7 +360,16 @@ mod tests {
     fn left_join() {
         let left = left_df();
         let right = right_df();
-        let out = join(&left, &right, vec!["id"], vec!["id"], JoinType::Left, false).unwrap();
+        let out = join(
+            &left,
+            &right,
+            vec!["id"],
+            vec!["id"],
+            JoinType::Left,
+            false,
+            false,
+        )
+        .unwrap();
         assert_eq!(out.count().unwrap(), 2);
     }
 
@@ -301,6 +383,7 @@ mod tests {
             vec!["id"],
             vec!["id"],
             JoinType::Right,
+            false,
             false,
         )
         .unwrap();
@@ -318,6 +401,7 @@ mod tests {
             vec!["id"],
             JoinType::Outer,
             false,
+            false,
         )
         .unwrap();
         assert_eq!(out.count().unwrap(), 3);
@@ -334,6 +418,7 @@ mod tests {
             vec!["id"],
             JoinType::LeftSemi,
             false,
+            false,
         )
         .unwrap();
         assert_eq!(out.count().unwrap(), 1); // left rows with match in right (id 1)
@@ -349,6 +434,7 @@ mod tests {
             vec!["id"],
             vec!["id"],
             JoinType::LeftAnti,
+            false,
             false,
         )
         .unwrap();
@@ -370,6 +456,7 @@ mod tests {
             vec!["id"],
             vec!["id"],
             JoinType::Inner,
+            false,
             false,
         )
         .unwrap();
@@ -393,6 +480,7 @@ mod tests {
             vec!["id"],
             vec!["id"],
             JoinType::Inner,
+            false,
             false,
         )
         .unwrap();
@@ -422,6 +510,7 @@ mod tests {
             vec!["id"],
             JoinType::Inner,
             false,
+            false,
         )
         .unwrap();
         assert_eq!(out.count().unwrap(), 1, "inner join on id: 1 match (id=1)");
@@ -449,6 +538,7 @@ mod tests {
             vec!["id"],
             vec!["id"],
             JoinType::Inner,
+            false,
             false,
         )
         .expect("issue #604: join on id/ID must succeed");
