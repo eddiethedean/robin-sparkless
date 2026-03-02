@@ -15,7 +15,7 @@ use sqlparser::ast::{
     AssignmentTarget, BinaryOperator, Expr as SqlExpr, FromTable, Function, FunctionArg,
     FunctionArgExpr, FunctionArguments, GroupByExpr, JoinConstraint, JoinOperator, ObjectType,
     OrderByKind, Query, Select, SelectItem, SetExpr, SetOperator, Statement, TableAlias,
-    TableFactor, Value, ValueWithSpan,
+    TableFactor, TableObject, Value, ValueWithSpan,
 };
 
 /// Parsed SQL number literal: integer or float.
@@ -44,6 +44,35 @@ fn parse_sql_number_expr(s: &str) -> Result<Expr, PolarsError> {
     match parse_sql_number_val(s, "literal")? {
         SqlNumberVal::Int(i) => Ok(lit(i)),
         SqlNumberVal::Float(f) => Ok(lit(f)),
+    }
+}
+
+/// Convert a simple SQL literal expression into a JSON value for create_dataframe_from_rows.
+/// Supports the literal forms used in INSERT ... VALUES in the parity tests:
+/// string, numeric, and NULL.
+fn sql_literal_expr_to_json(expr: &SqlExpr) -> Result<JsonValue, PolarsError> {
+    match expr {
+        SqlExpr::Value(ValueWithSpan {
+            value: Value::SingleQuotedString(s),
+            ..
+        })
+        | SqlExpr::Value(ValueWithSpan {
+            value: Value::DoubleQuotedString(s),
+            ..
+        }) => Ok(JsonValue::String(s.clone())),
+        SqlExpr::Value(ValueWithSpan {
+            value: Value::Number(s, _),
+            ..
+        }) => match parse_sql_number_val(s, "literal")? {
+            SqlNumberVal::Int(i) => Ok(JsonValue::from(i)),
+            SqlNumberVal::Float(f) => Ok(JsonValue::from(f)),
+        },
+        SqlExpr::Value(ValueWithSpan {
+            value: Value::Null, ..
+        }) => Ok(JsonValue::Null),
+        _ => Err(PolarsError::InvalidOperation(
+            format!("SQL: INSERT VALUES only supports literal expressions, got '{expr:?}'").into(),
+        )),
     }
 }
 
@@ -183,6 +212,7 @@ pub fn translate(
                 session.is_case_sensitive(),
             ))
         }
+        Statement::Insert(insert) => translate_insert(session, insert),
         Statement::CreateSchema { schema_name, .. } => {
             let name = schema_name.to_string();
             session.register_database(&name);
@@ -272,6 +302,110 @@ pub fn translate(
                 .into(),
         )),
     }
+}
+
+/// Translate INSERT INTO table [(col1, col2, ...)] {VALUES (...), (...)} or
+/// INSERT INTO table SELECT ... . Appends rows to an existing catalog table.
+fn translate_insert(
+    session: &SparkSession,
+    insert: &sqlparser::ast::Insert,
+) -> Result<crate::dataframe::DataFrame, PolarsError> {
+    // Only support INSERT INTO <table_name> ... (no TABLE FUNCTION targets).
+    let table_name = match &insert.table {
+        TableObject::TableName(name) => table_name_from_object_name(name),
+        _ => {
+            return Err(PolarsError::InvalidOperation(
+                "SQL: INSERT INTO only supports table name targets (no TABLE FUNCTION).".into(),
+            ));
+        }
+    };
+
+    let target_df = session.table(&table_name)?;
+    let target_schema: StructType = target_df.schema()?;
+    let target_cols: Vec<String> = target_schema
+        .fields()
+        .iter()
+        .map(|f| f.name.clone())
+        .collect();
+
+    // Column list for INSERT: explicit list, or all target columns by default.
+    let insert_cols: Vec<String> = if !insert.columns.is_empty() {
+        insert.columns.iter().map(|id| id.value.clone()).collect()
+    } else {
+        target_cols.clone()
+    };
+
+    // Map insert position -> target column index (respecting case-sensitivity).
+    let mut index_map: Vec<usize> = Vec::with_capacity(insert_cols.len());
+    for col_name in &insert_cols {
+        let resolved = target_df.resolve_column_name(col_name)?;
+        let idx = target_cols
+            .iter()
+            .position(|c| c == &resolved)
+            .ok_or_else(|| {
+                PolarsError::InvalidOperation(
+                    format!("SQL: column '{resolved}' not found in target table '{table_name}'")
+                        .into(),
+                )
+            })?;
+        index_map.push(idx);
+    }
+
+    // Build DataFrame of rows to append.
+    let new_rows_df: DataFrame = match &insert.source {
+        Some(query) => match query.body.as_ref() {
+            // INSERT INTO t VALUES (...), (...).
+            SetExpr::Values(values) => {
+                let mut rows: Vec<Vec<JsonValue>> = Vec::with_capacity(values.rows.len());
+                for (row_idx, row_exprs) in values.rows.iter().enumerate() {
+                    if row_exprs.len() != insert_cols.len() {
+                        return Err(PolarsError::InvalidOperation(
+                            format!(
+                                "SQL: INSERT INTO {} expected {} values, got {} (row {}).",
+                                table_name,
+                                insert_cols.len(),
+                                row_exprs.len(),
+                                row_idx
+                            )
+                            .into(),
+                        ));
+                    }
+                    // Start with all-null row in target schema order.
+                    let mut row: Vec<JsonValue> = vec![JsonValue::Null; target_cols.len()];
+                    for (val_pos, expr) in row_exprs.iter().enumerate() {
+                        let v = sql_literal_expr_to_json(expr)?;
+                        let target_idx = index_map[val_pos];
+                        row[target_idx] = v;
+                    }
+                    rows.push(row);
+                }
+
+                let schema: Vec<(String, String)> = target_schema
+                    .fields()
+                    .iter()
+                    .map(|f| (f.name.clone(), core_data_type_to_str(&f.data_type)))
+                    .collect();
+                session.create_dataframe_from_rows(rows, schema, false, false)?
+            }
+            // INSERT INTO t SELECT ... : rely on query translation.
+            _ => translate_query(session, query.as_ref())?,
+        },
+        None => {
+            return Err(PolarsError::InvalidOperation(
+                "SQL: INSERT INTO without VALUES or SELECT is not supported.".into(),
+            ));
+        }
+    };
+
+    // Append rows to existing table.
+    let appended = target_df.union(&new_rows_df)?;
+    session.create_or_replace_temp_view(&table_name, appended.clone());
+    session.register_table(&table_name, appended);
+
+    Ok(DataFrame::from_polars_with_options(
+        PlDataFrame::empty(),
+        session.is_case_sensitive(),
+    ))
 }
 
 /// Convert robin_sparkless_core DataType to schema type string (DESCRIBE / PySpark simpleString).
