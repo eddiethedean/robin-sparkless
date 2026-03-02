@@ -1248,48 +1248,172 @@ pub fn apply_format_string(columns: &mut [Column], format: &str) -> PolarsResult
 fn format_string_row(format: &str, values: &[Option<String>]) -> Option<String> {
     const NULL_STR: &str = "null";
     let mut out = String::new();
-    let mut idx = 0;
+    let mut idx = 0usize;
     let mut chars = format.chars().peekable();
+
     while let Some(c) = chars.next() {
-        if c == '%' {
-            match chars.next() {
-                Some('%') => out.push('%'),
-                Some('s') => {
-                    if idx >= values.len() {
-                        return None;
-                    }
-                    match &values[idx] {
-                        Some(v) => out.push_str(v),
-                        None => out.push_str(NULL_STR),
-                    }
-                    idx += 1;
-                }
-                Some('d') | Some('i') => {
-                    if idx >= values.len() {
-                        return None;
-                    }
-                    match &values[idx] {
-                        Some(v) => out.push_str(v),
-                        None => out.push_str(NULL_STR),
-                    }
-                    idx += 1;
-                }
-                Some('f') | Some('g') | Some('e') => {
-                    if idx >= values.len() {
-                        return None;
-                    }
-                    match &values[idx] {
-                        Some(v) => out.push_str(v),
-                        None => out.push_str(NULL_STR),
-                    }
-                    idx += 1;
-                }
-                _ => return None,
-            }
-        } else {
+        if c != '%' {
             out.push(c);
+            continue;
+        }
+
+        // "%%" -> literal '%'
+        if let Some('%') = chars.peek().copied() {
+            chars.next();
+            out.push('%');
+            continue;
+        }
+
+        // Parse flags
+        let mut flags = String::new();
+        while let Some(ch) = chars.peek().copied() {
+            if "-+ 0#".contains(ch) {
+                flags.push(ch);
+                chars.next();
+            } else {
+                break;
+            }
+        }
+
+        // Parse width
+        let mut width_str = String::new();
+        while let Some(ch) = chars.peek().copied() {
+            if ch.is_ascii_digit() {
+                width_str.push(ch);
+                chars.next();
+            } else {
+                break;
+            }
+        }
+        let width = width_str.parse::<usize>().ok();
+
+        // Parse precision
+        let mut precision: Option<usize> = None;
+        if let Some('.') = chars.peek().copied() {
+            chars.next();
+            let mut prec_str = String::new();
+            while let Some(ch) = chars.peek().copied() {
+                if ch.is_ascii_digit() {
+                    prec_str.push(ch);
+                    chars.next();
+                } else {
+                    break;
+                }
+            }
+            precision = prec_str.parse::<usize>().ok();
+        }
+
+        // Ignore length modifiers (h, l, L)
+        while let Some(ch) = chars.peek().copied() {
+            if matches!(ch, 'h' | 'l' | 'L') {
+                chars.next();
+            } else {
+                break;
+            }
+        }
+
+        let spec = match chars.next() {
+            Some(ch) => ch,
+            None => return None,
+        };
+
+        if idx >= values.len() {
+            return None;
+        }
+        let val_opt = &values[idx];
+        idx += 1;
+
+        let zero_pad = flags.contains('0');
+
+        match spec {
+            's' => {
+                let s = val_opt.as_deref().unwrap_or(NULL_STR);
+                out.push_str(s);
+            }
+            'd' | 'i' | 'o' | 'x' | 'X' => {
+                if val_opt.is_none() {
+                    out.push_str(NULL_STR);
+                    continue;
+                }
+                let s_raw = val_opt.as_deref().unwrap();
+                let mut n: i64 = match s_raw.parse() {
+                    Ok(v) => v,
+                    Err(_) => {
+                        out.push_str(s_raw);
+                        continue;
+                    }
+                };
+                let negative = n < 0;
+                if negative {
+                    n = -n;
+                }
+                let mut s = match spec {
+                    'd' | 'i' => format!("{n}"),
+                    'o' => format!("{n:o}"),
+                    'x' => format!("{n:x}"),
+                    'X' => format!("{n:X}"),
+                    _ => unreachable!(),
+                };
+                if let Some(w) = width {
+                    if s.len() < w {
+                        let pad_len = w - s.len();
+                        let pad_char = if zero_pad { '0' } else { ' ' };
+                        let pad: String = std::iter::repeat(pad_char).take(pad_len).collect();
+                        s = format!("{pad}{s}");
+                    }
+                }
+                if negative {
+                    if zero_pad {
+                        if let Some(w) = width {
+                            if s.len() < w {
+                                let pad_len = w - s.len();
+                                let pad: String = std::iter::repeat('0').take(pad_len).collect();
+                                s = format!("-{pad}{s}");
+                            } else {
+                                s = format!("-{s}");
+                            }
+                        } else {
+                            s = format!("-{s}");
+                        }
+                    } else {
+                        s = format!("-{s}");
+                    }
+                }
+                out.push_str(&s);
+            }
+            'f' | 'g' | 'e' | 'E' => {
+                if val_opt.is_none() {
+                    out.push_str(NULL_STR);
+                    continue;
+                }
+                let s_raw = val_opt.as_deref().unwrap();
+                let v: f64 = match s_raw.parse() {
+                    Ok(v) => v,
+                    Err(_) => {
+                        out.push_str(s_raw);
+                        continue;
+                    }
+                };
+                let prec = precision.unwrap_or(6);
+                let formatted = match spec {
+                    'f' => format!("{v:.prec$}"),
+                    'g' => format!("{v:.prec$}"),
+                    'e' => format!("{v:.prec$e}"),
+                    'E' => format!("{v:.prec$E}"),
+                    _ => unreachable!(),
+                };
+                out.push_str(&formatted);
+            }
+            '%' => {
+                out.push('%');
+            }
+            _ => {
+                // Unsupported specifier: treat as null result.
+                return None;
+            }
         }
     }
+
     Some(out)
 }
 
