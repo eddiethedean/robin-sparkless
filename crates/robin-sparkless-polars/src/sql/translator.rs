@@ -265,6 +265,8 @@ pub fn translate(
         Statement::Update(u) => translate_update(session, u),
         Statement::Delete(d) => translate_delete(session, d),
         Statement::ExplainTable { table_name, .. } => translate_describe_table(session, table_name),
+        Statement::ShowDatabases { .. } => translate_show_databases(session),
+        Statement::ShowTables { .. } => translate_show_tables(session, None),
         _ => Err(PolarsError::InvalidOperation(
             "SQL: only SELECT, CREATE TABLE/VIEW, CREATE SCHEMA/DATABASE, DROP TABLE/VIEW/SCHEMA/DATABASE, and DESCRIBE are supported."
                 .into(),
@@ -337,6 +339,68 @@ pub(crate) fn translate_describe_table_optional_col(
         ("data_type".to_string(), "string".to_string()),
     ];
     session.create_dataframe_from_rows(rows, out_schema, false, false)
+}
+
+/// SHOW DATABASES: return a DataFrame with databaseName column (PySpark parity for #1046).
+pub(crate) fn translate_show_databases(
+    session: &SparkSession,
+) -> Result<crate::dataframe::DataFrame, PolarsError> {
+    let names = session.list_database_names();
+    let rows: Vec<Vec<JsonValue>> = names
+        .into_iter()
+        .map(|n| vec![JsonValue::String(n)])
+        .collect();
+    let schema = vec![("databaseName".to_string(), "string".to_string())];
+    session.create_dataframe_from_rows(rows, schema, false, false)
+}
+
+/// SHOW TABLES [IN db] / [FROM db]: return a DataFrame with database, tableName, isTemporary columns.
+pub(crate) fn translate_show_tables(
+    session: &SparkSession,
+    db: Option<&str>,
+) -> Result<crate::dataframe::DataFrame, PolarsError> {
+    let current_db = session.current_database();
+    let requested_db = db.unwrap_or(&current_db);
+    let names = session.list_table_names();
+
+    fn split_qualified(name: &str) -> (Option<&str>, &str) {
+        if let Some(idx) = name.rfind('.') {
+            let (db, tbl) = name.split_at(idx);
+            // tbl starts with '.', skip it.
+            (Some(db), &tbl[1..])
+        } else {
+            (None, name)
+        }
+    }
+
+    let mut rows: Vec<Vec<JsonValue>> = Vec::new();
+    for full_name in names {
+        let (db_part, tbl) = split_qualified(&full_name);
+        let db_matches = match db {
+            Some(db_name) => db_part
+                .map(|d| d.eq_ignore_ascii_case(db_name))
+                .unwrap_or(false),
+            None => db_part
+                .map(|d| d.eq_ignore_ascii_case(&current_db))
+                .unwrap_or(current_db.eq_ignore_ascii_case("default")),
+        };
+        if !db_matches {
+            continue;
+        }
+        let db_value = db_part.unwrap_or(requested_db).to_string();
+        rows.push(vec![
+            JsonValue::String(db_value),
+            JsonValue::String(tbl.to_string()),
+            JsonValue::Bool(false), // isTemporary: catalog-backed tables only.
+        ]);
+    }
+
+    let schema = vec![
+        ("database".to_string(), "string".to_string()),
+        ("tableName".to_string(), "string".to_string()),
+        ("isTemporary".to_string(), "boolean".to_string()),
+    ];
+    session.create_dataframe_from_rows(rows, schema, false, false)
 }
 
 /// DESCRIBE table_name (parsed form): delegate to optional-col form.

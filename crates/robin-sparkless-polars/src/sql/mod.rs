@@ -81,6 +81,31 @@ pub fn execute_sql(session: &SparkSession, query: &str) -> Result<DataFrame, Pol
         }
     }
 
+    // SHOW DATABASES / SHOW TABLES [IN db] (PySpark parity; issue #1046).
+    let q_upper = q.to_ascii_uppercase();
+    const SHOW_DATABASES_PREFIX: &str = "SHOW DATABASES";
+    if q_upper.len() >= SHOW_DATABASES_PREFIX.len()
+        && q_upper.get(..SHOW_DATABASES_PREFIX.len()) == Some(SHOW_DATABASES_PREFIX)
+    {
+        return translator::translate_show_databases(session);
+    }
+    const SHOW_TABLES_PREFIX: &str = "SHOW TABLES";
+    if q_upper.len() >= SHOW_TABLES_PREFIX.len()
+        && q_upper.get(..SHOW_TABLES_PREFIX.len()) == Some(SHOW_TABLES_PREFIX)
+    {
+        let rest = q[SHOW_TABLES_PREFIX.len()..].trim();
+        let mut db: Option<&str> = None;
+        if !rest.is_empty() {
+            let parts: Vec<&str> = rest.split_whitespace().collect();
+            if parts.len() >= 2
+                && (parts[0].eq_ignore_ascii_case("IN") || parts[0].eq_ignore_ascii_case("FROM"))
+            {
+                db = Some(parts[1]);
+            }
+        }
+        return translator::translate_show_tables(session, db);
+    }
+
     // DESCRIBE table_name [col_name] (PySpark 3.5: optional column). Parser only accepts "DESCRIBE t".
     const DESCRIBE_PREFIX: &str = "DESCRIBE ";
     const DESC_PREFIX: &str = "DESC ";
@@ -150,6 +175,8 @@ pub use translator::{expr_string_to_polars, translate};
 
 #[cfg(test)]
 mod tests {
+    use super::Statement;
+    use crate::sql::parse_sql;
     use crate::SparkSession;
 
     #[test]
@@ -226,6 +253,14 @@ mod tests {
             .sql("SELECT COUNT(*) as count FROM t GROUP BY (age > 30)")
             .unwrap();
         assert_eq!(result.count().unwrap(), 2);
+    }
+
+    #[test]
+    fn test_sql_show_statement_variants() {
+        let stmt_db = parse_sql("SHOW DATABASES").unwrap();
+        println!("SHOW DATABASES parsed as: {:?}", stmt_db);
+        let stmt_tables = parse_sql("SHOW TABLES").unwrap();
+        println!("SHOW TABLES parsed as: {:?}", stmt_tables);
     }
 
     /// Duplicate output names (e.g. two COUNT(*)) are disambiguated to count, count_1.
