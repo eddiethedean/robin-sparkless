@@ -280,16 +280,37 @@ class Row(tuple):
                 for i, f in enumerate(fields):
                     if f.lower() == suffix.lower():
                         return cast(RowValue, super().__getitem__(i))
-            # CAST wrapper: allow row["x"] to match column named "CAST(x AS BOOLEAN)" etc. (issue #399/#1080).
-            # We only look at simple CAST(col AS type) patterns and match by inner column name.
+            # Disambiguation for duplicate select columns (issue #213/#215/#399/#1080):
+            # Support virtual names like "x", "x_1", "x_2" as aliases for positional
+            # columns, and map simple CAST(x AS TYPE) back to base column name "x".
             if fields:
-                key_lower = item.lower()
+                # 1) name_N -> positional column N if it exists (x_1 -> second column, etc.)
+                if "_" in item:
+                    base, _, idx_str = item.rpartition("_")
+                    if base and idx_str.isdigit():
+                        idx = int(idx_str)
+                        if 0 <= idx < len(self):
+                            return cast(RowValue, super().__getitem__(idx))
+
+                # 2) CAST wrapper: row["x"] or row["x_1"] for columns named "CAST(x AS ...)".
+                key = item
+                base, _, idx_str = key.rpartition("_")
+                target_idx = 0
+                key_for_cast = key
+                if base and idx_str.isdigit():
+                    key_for_cast = base
+                    target_idx = int(idx_str)
+
+                key_lower = key_for_cast.lower()
+                candidates = []
                 for i, f in enumerate(fields):
                     fl = f.lower()
                     if fl.startswith("cast(") and " as " in fl:
                         inner = fl[5 : fl.index(" as ")].strip()
                         if inner == key_lower:
-                            return cast(RowValue, super().__getitem__(i))
+                            candidates.append(i)
+                if candidates and 0 <= target_idx < len(candidates):
+                    return cast(RowValue, super().__getitem__(candidates[target_idx]))
             raise KeyError(item)
         return cast(RowGetItemReturn, super().__getitem__(item))
 
@@ -298,7 +319,35 @@ class Row(tuple):
             fields = self.__dict__.get("_fields", [])
             if item in fields:
                 return True
-            return item.lower() in {f.lower() for f in fields}
+            lowered_fields = {f.lower() for f in fields}
+            if item.lower() in lowered_fields:
+                return True
+            # Support virtual names like "x_1", "x_2" based on position.
+            if "_" in item:
+                base, _, idx_str = item.rpartition("_")
+                if base and idx_str.isdigit():
+                    idx = int(idx_str)
+                    if 0 <= idx < len(self):
+                        return True
+            # CAST wrapper aliases: "x" / "x_1" for "CAST(x AS ...)".
+            key = item
+            base, _, idx_str = key.rpartition("_")
+            target_idx = 0
+            key_for_cast = key
+            if base and idx_str.isdigit():
+                key_for_cast = base
+                target_idx = int(idx_str)
+            key_lower = key_for_cast.lower()
+            candidates = []
+            for i, f in enumerate(fields):
+                fl = f.lower()
+                if fl.startswith("cast(") and " as " in fl:
+                    inner = fl[5 : fl.index(" as ")].strip()
+                    if inner == key_lower:
+                        candidates.append(i)
+            if candidates and 0 <= target_idx < len(candidates):
+                return True
+            return False
         return super().__contains__(item)
 
     def __getattr__(self, name: str) -> RowValue:
