@@ -126,7 +126,10 @@ pub fn expr_string_to_polars(
     let expr = sql_expr_to_polars(&sql_expr, session, Some(df), None)?;
     Ok(match alias {
         Some(a) => expr.alias(a),
-        None => expr,
+        // Default output name for expr() is the original SQL expression string so tests
+        // can access columns by that name (e.g. "ltrim(rtrim(Value))") irrespective of
+        // internal expression output names.
+        None => expr.alias(expr_str),
     })
 }
 
@@ -1076,6 +1079,24 @@ fn sql_expr_to_polars(
                 )),
             }
         }
+        SqlExpr::Trim {
+            expr: inner,
+            trim_where,
+            trim_what,
+            trim_characters,
+        } => {
+            // Support TRIM(expr) used in F.expr() and SELECT. PySpark-style TRIM with no
+            // extra arguments trims leading and trailing spaces only.
+            if trim_where.is_none() && trim_what.is_none() && trim_characters.is_none() {
+                let inner_expr = sql_expr_to_polars(inner, session, df, having_agg_map)?;
+                let col = Column::from_expr(inner_expr, None);
+                Ok(functions::trim(&col).expr().clone())
+            } else {
+                Err(PolarsError::InvalidOperation(
+                    "SQL: TRIM with explicit trim specification is not yet supported.".into(),
+                ))
+            }
+        }
         SqlExpr::Function(func) => {
             if let Some(map) = having_agg_map {
                 if let Some(key) = agg_function_key(func) {
@@ -1200,6 +1221,9 @@ fn sql_function_to_expr(
         let builtin_expr = match func_name.to_uppercase().as_str() {
             "UPPER" | "UCASE" if args.len() == 1 => Some(functions::upper(col).expr().clone()),
             "LOWER" | "LCASE" if args.len() == 1 => Some(functions::lower(col).expr().clone()),
+            "TRIM" if args.len() == 1 => Some(functions::trim(col).expr().clone()),
+            "LTRIM" if args.len() == 1 => Some(functions::ltrim(col).expr().clone()),
+            "RTRIM" if args.len() == 1 => Some(functions::rtrim(col).expr().clone()),
             _ => None,
         };
         if let Some(e) = builtin_expr {
