@@ -32,6 +32,7 @@ Cargo.lock
 **/*.rs.bk
 
 # IDE
+.cursor/
 .vscode/
 .idea/
 *.swp
