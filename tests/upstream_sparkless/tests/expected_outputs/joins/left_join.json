@@ -52,9 +52,9 @@
         "id",
         "name",
         "salary",
-        "dept_id",
+        "dept_id_right",
         "location",
-        "name"
+        "name_right"
       ],
       "field_types": [
         "long",
@@ -87,7 +87,7 @@
           "nullable": true
         },
         {
-          "name": "dept_id",
+          "name": "dept_id_right",
           "type": "long",
           "nullable": true
         },
@@ -97,7 +97,7 @@
           "nullable": true
         },
         {
-          "name": "name",
+          "name": "name_right",
           "type": "string",
           "nullable": true
         }
@@ -107,30 +107,38 @@
       {
         "dept_id": 10,
         "id": 1,
-        "name": "IT",
+        "name": "Alice",
         "salary": 50000,
-        "location": "NYC"
-      },
-      {
-        "dept_id": 10,
-        "id": 3,
-        "name": "IT",
-        "salary": 70000,
-        "location": "NYC"
-      },
-      {
-        "dept_id": null,
-        "id": 4,
-        "name": null,
-        "salary": 55000,
-        "location": null
+        "dept_id_right": 10,
+        "location": "NYC",
+        "name_right": "IT"
       },
       {
         "dept_id": 20,
         "id": 2,
-        "name": "HR",
+        "name": "Bob",
         "salary": 60000,
-        "location": "LA"
+        "dept_id_right": 20,
+        "location": "LA",
+        "name_right": "HR"
+      },
+      {
+        "dept_id": 10,
+        "id": 3,
+        "name": "Charlie",
+        "salary": 70000,
+        "dept_id_right": 10,
+        "location": "NYC",
+        "name_right": "IT"
+      },
+      {
+        "dept_id": 30,
+        "id": 4,
+        "name": "David",
+        "salary": 55000,
+        "dept_id_right": null,
+        "location": null,
+        "name_right": null
       }
     ],
     "row_count": 4
