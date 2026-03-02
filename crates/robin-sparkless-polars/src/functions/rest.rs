@@ -1344,11 +1344,16 @@ fn cast_impl(column: &Column, type_name: &str, strict: bool) -> Result<Column, S
     let cast_name = format!("CAST({} AS {})", base_name, display_type);
 
     if dtype == DataType::Boolean {
+        let out_name = base_name.to_string();
         let expr = column.expr().clone().map(
             move |col| crate::column::expect_col(crate::udfs::apply_string_to_boolean(col, strict)),
-            |_schema, field| Ok(Field::new(field.name().clone(), DataType::Boolean)),
+            move |_schema, _field| Ok(Field::new(out_name.clone().into(), DataType::Boolean)),
         );
-        return Ok(Column::from_expr(expr.alias(&cast_name), Some(cast_name)));
+        // PySpark: col("x").cast("boolean") keeps output column name "x".
+        return Ok(Column::from_expr(
+            expr.alias(base_name),
+            Some(base_name.to_string()),
+        ));
     }
     if dtype == DataType::Date {
         let expr = column.expr().clone().map(

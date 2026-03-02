@@ -280,6 +280,16 @@ class Row(tuple):
                 for i, f in enumerate(fields):
                     if f.lower() == suffix.lower():
                         return cast(RowValue, super().__getitem__(i))
+            # CAST wrapper: allow row["x"] to match column named "CAST(x AS BOOLEAN)" etc. (issue #399/#1080).
+            # We only look at simple CAST(col AS type) patterns and match by inner column name.
+            if fields:
+                key_lower = item.lower()
+                for i, f in enumerate(fields):
+                    fl = f.lower()
+                    if fl.startswith("cast(") and " as " in fl:
+                        inner = fl[5 : fl.index(" as ")].strip()
+                        if inner == key_lower:
+                            return cast(RowValue, super().__getitem__(i))
             raise KeyError(item)
         return cast(RowGetItemReturn, super().__getitem__(item))
 
