@@ -951,18 +951,58 @@ pub fn replace(
 }
 
 /// Cross join: cartesian product of two DataFrames. PySpark crossJoin.
+/// Reorders columns so common names (e.g. dept_id) come first on each side. Renames right-side
+/// columns that duplicate left names with _right suffix so result has unique column names (#1049).
 pub fn cross_join(
     left: &DataFrame,
     right: &DataFrame,
     case_sensitive: bool,
 ) -> Result<DataFrame, PolarsError> {
-    let lf_left = left.lazy_frame();
-    let lf_right = right.lazy_frame();
+    use polars::prelude::col;
+    let left_names = left.columns()?;
+    let right_names = right.columns()?;
+    let right_set: std::collections::HashSet<&str> =
+        right_names.iter().map(|s| s.as_str()).collect();
+    let left_set: std::collections::HashSet<&str> = left_names.iter().map(|s| s.as_str()).collect();
+    // Put columns that exist on both sides first (e.g. dept_id), then rest (PySpark cross order).
+    let left_ordered = order_columns_common_first(&left_names, &right_set);
+    let right_ordered = order_columns_common_first(&right_names, &left_set);
+    let exprs_left: Vec<_> = left_ordered.iter().map(|s| col(*s)).collect();
+    // Suffix right columns that duplicate left so result has unique names (parity fixture comparison).
+    let exprs_right: Vec<_> = right_ordered
+        .iter()
+        .map(|s| {
+            if left_set.contains(*s) {
+                col(*s).alias(format!("{}_right", s))
+            } else {
+                col(*s)
+            }
+        })
+        .collect();
+    let lf_left = left.lazy_frame().select(&exprs_left);
+    let lf_right = right.lazy_frame().select(&exprs_right);
     let out = lf_left.cross_join(lf_right, None);
     Ok(super::DataFrame::from_lazy_with_options(
         out,
         case_sensitive,
     ))
+}
+
+fn order_columns_common_first<'a>(
+    names: &'a [String],
+    other: &std::collections::HashSet<&str>,
+) -> Vec<&'a str> {
+    let mut common = Vec::new();
+    let mut rest = Vec::new();
+    for n in names {
+        let s = n.as_str();
+        if other.contains(s) {
+            common.push(s);
+        } else {
+            rest.push(s);
+        }
+    }
+    common.into_iter().chain(rest).collect()
 }
 
 /// Summary statistics (count, mean, std, min, max). PySpark describe.
