@@ -638,28 +638,6 @@ impl DataFrame {
                             });
                         }
                     }
-                    // #1084: Fallback: cast string literal to timestamp so datetime col vs string
-                    // literal works when schema is lazy or unknown (e.g. Python datetime.isoformat()).
-                    use polars::datatypes::TimeUnit;
-                    let dt = DataType::Datetime(TimeUnit::Microseconds, None);
-                    let (left_ty, right_ty) = if left_is_col {
-                        (dt.clone(), DataType::String)
-                    } else {
-                        (DataType::String, dt)
-                    };
-                    if let Ok((new_l, new_r)) = coerce_for_pyspark_comparison(
-                        (*left).clone(),
-                        (*right).clone(),
-                        &left_ty,
-                        &right_ty,
-                        &op,
-                    ) {
-                        return Ok(Expr::BinaryExpr {
-                            left: Arc::new(new_l),
-                            op,
-                            right: Arc::new(new_r),
-                        });
-                    }
                     return Ok(Expr::BinaryExpr { left, op, right });
                 } else {
                     // Leave other comparison forms (col-col, lit-lit, non-numeric) unchanged.
