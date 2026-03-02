@@ -3919,23 +3919,85 @@ pub fn apply_to_timestamp_format(
     }
 }
 
-/// Coerce series to Datetime(Microseconds) for date-part extraction (#403). String parsed as "%Y-%m-%d %H:%M:%S".
+/// Parse a single timestamp string with multiple formats (#1084). Returns micros since epoch (UTC).
+pub(crate) fn parse_timestamp_string_flexible(s: &str) -> Option<i64> {
+    use chrono::{NaiveDate, NaiveDateTime};
+    let s = s.trim();
+    // Strip trailing timezone for naive parse (e.g. +0000, -0500, Z)
+    let s_no_tz = s
+        .strip_suffix('Z')
+        .or_else(|| s.strip_suffix("z"))
+        .unwrap_or(s);
+    let s_no_tz = if s_no_tz.len() >= 5 {
+        let rest = &s_no_tz[s_no_tz.len() - 5..];
+        if (rest.starts_with('+') || rest.starts_with('-'))
+            && rest[1..].chars().all(|c| c.is_ascii_digit())
+        {
+            &s_no_tz[..s_no_tz.len() - 5]
+        } else if s_no_tz.len() >= 6 {
+            let rest = &s_no_tz[s_no_tz.len() - 6..];
+            if (rest.starts_with('+') || rest.starts_with('-'))
+                && !rest.contains(':')
+                && rest[1..].chars().all(|c| c.is_ascii_digit())
+            {
+                &s_no_tz[..s_no_tz.len() - 6]
+            } else {
+                s_no_tz
+            }
+        } else {
+            s_no_tz
+        }
+    } else {
+        s_no_tz
+    };
+    // Try formats with fractional seconds by parsing the part before '.' and optional subsecs
+    if let Some(dot) = s_no_tz.find('.') {
+        let base = &s_no_tz[..dot];
+        let subsec = &s_no_tz[dot + 1..];
+        let subsec_digits: String = subsec.chars().take_while(|c| c.is_ascii_digit()).collect();
+        if let Ok(ndt) = NaiveDateTime::parse_from_str(base, "%Y-%m-%dT%H:%M:%S")
+            .or_else(|_| NaiveDateTime::parse_from_str(base, "%Y-%m-%d %H:%M:%S"))
+        {
+            let micros = if subsec_digits.is_empty() {
+                0_i64
+            } else {
+                let frac = subsec_digits.parse::<u32>().unwrap_or(0) as i64;
+                let digits = subsec_digits.len();
+                (if digits <= 6 {
+                    frac * 10_i64.pow((6 - digits) as u32)
+                } else {
+                    frac / 10_i64.pow((digits - 6) as u32)
+                })
+                .min(999_999)
+            };
+            let ndt = ndt + chrono::TimeDelta::microseconds(micros);
+            return Some(ndt.and_utc().timestamp_micros());
+        }
+    }
+    const FORMATS: &[&str] = &["%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d"];
+    for fmt in FORMATS {
+        if let Ok(ndt) = NaiveDateTime::parse_from_str(s_no_tz, fmt) {
+            return Some(ndt.and_utc().timestamp_micros());
+        }
+    }
+    if let Ok(d) = NaiveDate::parse_from_str(s_no_tz, "%Y-%m-%d") {
+        let ndt = d.and_hms_opt(0, 0, 0).unwrap();
+        return Some(ndt.and_utc().timestamp_micros());
+    }
+    None
+}
+
+/// Coerce series to Datetime(Microseconds) for date-part extraction (#403, #1084).
+/// String parsed with multiple formats (ISO with T, space, timezone stripped, date-only).
 fn series_to_datetime_micros(series: &Series) -> PolarsResult<Series> {
-    use chrono::NaiveDateTime;
     use polars::datatypes::TimeUnit;
     if series.dtype() == &DataType::String {
         let name = series.name().as_str().into();
         let ca = series.str().map_err(|e| compute_err("date on string", e))?;
-        const FMT: &str = "%Y-%m-%d %H:%M:%S";
         let out = Int64Chunked::from_iter_options(
             name,
-            ca.into_iter().map(|opt_s| {
-                opt_s.and_then(|s| {
-                    NaiveDateTime::parse_from_str(s.trim(), FMT)
-                        .ok()
-                        .map(|ndt| ndt.and_utc().timestamp_micros())
-                })
-            }),
+            ca.into_iter()
+                .map(|opt_s| opt_s.and_then(parse_timestamp_string_flexible)),
         );
         out.into_series()
             .cast(&DataType::Datetime(TimeUnit::Microseconds, None))
@@ -5456,4 +5518,19 @@ pub fn apply_to_timestamp_ntz_format(
         .cast(&DataType::Datetime(TimeUnit::Microseconds, None))?;
     let _ = strict;
     Ok(Some(Column::new(name, out_series)))
+}
+
+#[cfg(test)]
+mod tests_parse_timestamp {
+    use super::parse_timestamp_string_flexible;
+
+    #[test]
+    fn test_parse_iso_with_tz() {
+        let s = "2023-02-07T04:00:01.730+0000";
+        let micros = parse_timestamp_string_flexible(s);
+        assert!(micros.is_some(), "expected Some for {s:?}");
+        let t = micros.unwrap();
+        let hour = (t / 1_000_000 / 3600) % 24;
+        assert_eq!(hour, 4, "hour should be 4 for {s:?}");
+    }
 }

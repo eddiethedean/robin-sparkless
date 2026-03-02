@@ -111,9 +111,23 @@ pub fn expr_from_value(v: &Value) -> Result<Expr, PlanExprError> {
                         "le" => CompareOp::LtEq,
                         _ => unreachable!(),
                     };
+                    // #1084: When one side is a column (no type at plan time) and the other is a
+                    // string literal, skip coercion here so the DataFrame-level coerce_string_numeric_comparisons
+                    // (in filter()) can cast the string literal to date/datetime using the actual schema.
                     let (lt, rt) = match (&l_ty, &r_ty) {
                         (Some(lt), Some(rt)) => (lt.clone(), rt.clone()),
                         (Some(lt), None) => (lt.clone(), DataType::String),
+                        (None, Some(rt)) if *rt == DataType::String => {
+                            return Ok(match op {
+                                "eq" => l.eq(r),
+                                "ne" => l.neq(r),
+                                "gt" => l.gt(r),
+                                "ge" => l.gt_eq(r),
+                                "lt" => l.lt(r),
+                                "le" => l.lt_eq(r),
+                                _ => unreachable!(),
+                            });
+                        }
                         (None, Some(rt)) => (DataType::String, rt.clone()),
                         (None, None) => {
                             // No type info; skip coercion (may error at runtime).

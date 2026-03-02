@@ -1706,7 +1706,14 @@ impl SparkSession {
                 }
             }
             JsonValue::String(s) => {
-                if chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").is_ok() {
+                // #1084: Only infer date when string strictly matches YYYY-MM-DD (e.g. 10 chars,
+                // two-digit month/day) so "2024-01-2" stays string and comparisons remain lexicographic.
+                let s = s.trim();
+                if s.len() == 10
+                    && s.as_bytes().get(4) == Some(&b'-')
+                    && s.as_bytes().get(7) == Some(&b'-')
+                    && chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").is_ok()
+                {
                     Some("date".to_string())
                 } else if chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S%.f").is_ok()
                     || chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S").is_ok()
@@ -1802,9 +1809,11 @@ impl SparkSession {
         Some(format!("struct<{}>", inner))
     }
 
-    /// Infer schema (name, dtype_str) from JSON rows by scanning the first non-null value per column.
+    /// Infer schema (name, dtype_str) from JSON rows by scanning values per column.
     /// Used by createDataFrame(data, schema=None) when schema is omitted or only column names given.
-    /// When the first non-null value is a JSON object, infers struct<k1:string,k2:string,...> (PR13 / struct parity).
+    /// When the first non-null value is a JSON object, infers struct (PR13 / struct parity).
+    /// #1084: If any value in a column infers as string (e.g. "2024-01-2" with single-digit day),
+    /// use string for the column so date-like strings stay string and comparisons remain lexicographic.
     pub fn infer_schema_from_json_rows(
         rows: &[Vec<JsonValue>],
         names: &[String],
@@ -1817,6 +1826,8 @@ impl SparkSession {
             .map(|n| (n.clone(), "string".to_string()))
             .collect();
         for (col_idx, (_, dtype_str)) in schema.iter_mut().enumerate() {
+            let mut first_non_string: Option<String> = None;
+            let mut has_string = false;
             for row in rows {
                 let v = row.get(col_idx).unwrap_or(&JsonValue::Null);
                 if let JsonValue::Object(_) = v {
@@ -1826,9 +1837,17 @@ impl SparkSession {
                     break;
                 }
                 if let Some(dtype) = Self::infer_dtype_from_json_value(v) {
-                    *dtype_str = dtype;
-                    break;
+                    if dtype == "string" {
+                        has_string = true;
+                        break;
+                    }
+                    first_non_string.get_or_insert(dtype);
                 }
+            }
+            if has_string {
+                *dtype_str = "string".to_string();
+            } else if let Some(d) = first_non_string {
+                *dtype_str = d;
             }
         }
         schema
