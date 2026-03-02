@@ -4434,6 +4434,19 @@ impl PyColumn {
         ))
     }
 
+    fn __rpow__(
+        &self,
+        other: &Bound<'_, PyAny>,
+        _modulo: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<PyColumn> {
+        // Support Python scalar ** PyColumn, e.g. 2.0 ** (-col("Value")) (issue #291/#1082).
+        // Treat the Python value as the base column and this PyColumn as the exponent.
+        let base_col = py_any_to_column(other)?;
+        Ok(PyColumn {
+            inner: base_col.pow_with(&self.inner),
+        })
+    }
+
     fn __truediv__(&self, other: &Bound<'_, PyAny>) -> PyResult<PyColumn> {
         let rhs = py_any_to_column(other)?;
         Ok(PyColumn {
