@@ -290,13 +290,15 @@ pub fn select_items(
     for item in items {
         match item {
             SelectItem::ColumnName(name) => {
-                // #1055: Dot notation (e.g. "StructValue.E1") is struct field access. Preserve full name as output (PySpark: col("StructValue.E1") yields column "StructValue.E1").
+                // #1055, #1076: Dot notation (e.g. "StructValue.e1") is struct field access.
+                // PySpark: select("StructValue.e1") yields output column "e1" (last segment), not full dotted name.
                 if name.contains('.') {
                     let e = col(name);
                     let resolved = df.resolve_expr_column_names(e)?;
                     let coerced = df.coerce_string_numeric_comparisons(resolved)?;
                     let safe = struct_field_safe_alias(name);
-                    rename_after.push((safe.clone(), name.to_string()));
+                    let last_segment = name.split('.').next_back().unwrap_or(name);
+                    rename_after.push((safe.clone(), last_segment.to_string()));
                     exprs.push(coerced.alias(safe));
                 } else {
                     let resolved = df.resolve_column_name(name)?;
@@ -325,7 +327,8 @@ pub fn select_items(
                 let coerced = df.coerce_string_numeric_comparisons(resolved)?;
                 if let Some(name) = name_for_alias {
                     let safe = struct_field_safe_alias(&name);
-                    rename_after.push((safe.clone(), name));
+                    let last_segment = name.split('.').next_back().unwrap_or(&name).to_string();
+                    rename_after.push((safe.clone(), last_segment));
                     exprs.push(coerced.alias(safe));
                 } else {
                     exprs.push(coerced);
