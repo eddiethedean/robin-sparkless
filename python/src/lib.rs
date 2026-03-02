@@ -1658,10 +1658,8 @@ fn python_data_and_schema(
         .and_then(|o| o);
     // Scalar rows (e.g. [1,2,3]) are only allowed when there is an explicit single-column schema
     // such as "bigint" or DateType() (PySpark parity for single-type createDataFrame).
-    let allow_scalar_single_column: bool = schema_res
-        .as_ref()
-        .map(|s| s.len() == 1)
-        .unwrap_or(false);
+    let allow_scalar_single_column: bool =
+        schema_res.as_ref().map(|s| s.len() == 1).unwrap_or(false);
     // Column order for dict rows: prefer explicit schema order; otherwise, for dict-only data,
     // use union of all keys across rows sorted alphabetically so sparse rows still include all keys.
     let mut column_order: Option<Vec<String>> = schema_res
@@ -1721,11 +1719,7 @@ fn python_data_and_schema(
         )?;
         // For dict rows without explicit schema, infer full schema from all rows/keys later so we
         // can include sparse keys (issue #372). For other row kinds, infer from the first row.
-        if inferred_schema.is_none()
-            && schema_res.is_none()
-            && kind != "dict"
-            && !row.is_empty()
-        {
+        if inferred_schema.is_none() && schema_res.is_none() && kind != "dict" && !row.is_empty() {
             if let Some(cols) = infer_schema_from_first_row(py, &item, from_pandas) {
                 inferred_schema = Some(cols);
             }
@@ -2288,6 +2282,17 @@ impl PyDataFrameReader {
             .map_err(|_| PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected SparkSession"))?
             .borrow();
         let mut reader = session.inner.read();
+        // PySpark parity: spark.read.csv() defaults to inferSchema=False (all strings) unless
+        // the user explicitly sets inferSchema. Core Robin Sparkless defaults to inferring
+        // types, so we override here at the Python binding layer only when no inferSchema
+        // option has been provided.
+        let has_infer_schema = self
+            .options
+            .iter()
+            .any(|(k, _)| k.eq_ignore_ascii_case("inferSchema"));
+        if !has_infer_schema {
+            reader = reader.option("inferSchema", "false");
+        }
         for (k, v) in &self.options {
             reader = reader.option(k.clone(), v.clone());
         }
