@@ -1312,10 +1312,7 @@ fn format_string_row(format: &str, values: &[Option<String>]) -> Option<String> 
             }
         }
 
-        let spec = match chars.next() {
-            Some(ch) => ch,
-            None => return None,
-        };
+        let spec = chars.next()?;
 
         if idx >= values.len() {
             return None;
@@ -1358,7 +1355,7 @@ fn format_string_row(format: &str, values: &[Option<String>]) -> Option<String> 
                     if s.len() < w {
                         let pad_len = w - s.len();
                         let pad_char = if zero_pad { '0' } else { ' ' };
-                        let pad: String = std::iter::repeat(pad_char).take(pad_len).collect();
+                        let pad = pad_char.to_string().repeat(pad_len);
                         s = format!("{pad}{s}");
                     }
                 }
@@ -1367,7 +1364,7 @@ fn format_string_row(format: &str, values: &[Option<String>]) -> Option<String> 
                         if let Some(w) = width {
                             if s.len() < w {
                                 let pad_len = w - s.len();
-                                let pad: String = std::iter::repeat('0').take(pad_len).collect();
+                                let pad = "0".repeat(pad_len);
                                 s = format!("-{pad}{s}");
                             } else {
                                 s = format!("-{s}");
