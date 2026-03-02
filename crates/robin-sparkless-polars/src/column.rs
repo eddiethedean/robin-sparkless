@@ -2707,7 +2707,7 @@ impl Column {
         name: &str,
         value: &Column,
     ) -> Result<Column, polars::error::PolarsError> {
-        let name = name.to_string();
+        let field_name = name.to_string();
         let args = [value.expr().clone()];
         let expr = self.expr().clone().map_many(
             move |cols| {
@@ -2715,7 +2715,7 @@ impl Column {
                 expect_col(crate::udfs::apply_struct_with_field(
                     cols[0].clone(),
                     cols[1].clone(),
-                    &name,
+                    &field_name,
                 ))
             },
             &args,

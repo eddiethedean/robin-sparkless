@@ -666,7 +666,38 @@ fn json_value_to_series_single(
 ) -> Result<Series, PolarsError> {
     use chrono::NaiveDate;
     let epoch = date_utils::epoch_naive_date();
-    match (value, type_str.trim().to_lowercase().as_str()) {
+    let type_lower = type_str.trim().to_lowercase();
+    // #1066: Nested array (e.g. createDataFrame with {"matrix": [[1,2,3],[4,5,6]]}) when type is array<...>.
+    if let (JsonValue::Array(arr), Some(elem_type)) =
+        (value, parse_array_element_type(&type_lower))
+    {
+        let inner_dtype = json_type_str_to_polars(&elem_type).ok_or_else(|| {
+            PolarsError::ComputeError(
+                format!("array element type '{elem_type}' not supported").into(),
+            )
+        })?;
+        let elem_series: Vec<Series> = if parse_array_element_type(&elem_type).is_some() {
+            arr.iter()
+                .map(|e| json_values_to_series(&[Some(e.clone())], &elem_type, "elem"))
+                .collect::<Result<Vec<_>, _>>()?
+        } else {
+            arr.iter()
+                .map(|e| json_value_to_series_single(e, &elem_type, "elem"))
+                .collect::<Result<Vec<_>, _>>()?
+        };
+        let vals: Vec<_> = elem_series.iter().filter_map(|s| s.get(0).ok()).collect();
+        let s = Series::from_any_values_and_dtype(
+            PlSmallStr::EMPTY,
+            &vals,
+            &inner_dtype,
+            false,
+        )
+        .map_err(|e| PolarsError::ComputeError(format!("array elem: {e}").into()))?;
+        let mut builder = get_list_builder(&inner_dtype, 64, 1, name.into());
+        builder.append_series(&s)?;
+        return Ok(builder.finish().into_series());
+    }
+    match (value, type_lower.as_str()) {
         (JsonValue::Null, _) => Ok(Series::new_null(name.into(), 1)),
         (JsonValue::Number(n), "int" | "integer" | "bigint" | "long" | "smallint" | "tinyint") => {
             Ok(Series::new(name.into(), vec![n.as_i64()]))
