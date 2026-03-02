@@ -1959,13 +1959,12 @@ impl SparkSession {
                 // values with non-numeric (e.g. int and string), raise a TypeError-style
                 // message "Can not merge type ..." instead of silently coercing.
                 if is_numeric && (has_int || has_float) && has_non_number {
-                    let numeric_type = if type_lower.as_str() == "double"
-                        || type_lower.as_str() == "float"
-                    {
-                        "DoubleType"
-                    } else {
-                        "LongType"
-                    };
+                    let numeric_type =
+                        if type_lower.as_str() == "double" || type_lower.as_str() == "float" {
+                            "DoubleType"
+                        } else {
+                            "LongType"
+                        };
                     let other_type = first_non_number
                         .map(value_type_name)
                         .unwrap_or("non-numeric");
