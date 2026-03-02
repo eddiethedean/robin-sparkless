@@ -749,34 +749,29 @@ impl Column {
         )
     }
 
-    /// Trim leading and trailing whitespace (PySpark trim)
+    /// Trim leading and trailing whitespace (PySpark trim). Default behavior trims ASCII space only
+    /// so tabs are preserved when using nested LTRIM/RTRIM (issue #434 / #1078).
     pub fn trim(&self) -> Column {
         use polars::prelude::*;
-        Self::from_expr(self.expr().clone().str().strip_chars(lit(" \t\n\r")), None)
+        Self::from_expr(self.expr().clone().str().strip_chars(lit(" ")), None)
     }
 
     /// Trim leading whitespace (PySpark ltrim)
     pub fn ltrim(&self) -> Column {
         use polars::prelude::*;
-        Self::from_expr(
-            self.expr().clone().str().strip_chars_start(lit(" \t\n\r")),
-            None,
-        )
+        Self::from_expr(self.expr().clone().str().strip_chars_start(lit(" ")), None)
     }
 
     /// Trim trailing whitespace (PySpark rtrim)
     pub fn rtrim(&self) -> Column {
         use polars::prelude::*;
-        Self::from_expr(
-            self.expr().clone().str().strip_chars_end(lit(" \t\n\r")),
-            None,
-        )
+        Self::from_expr(self.expr().clone().str().strip_chars_end(lit(" ")), None)
     }
 
     /// Trim leading and trailing characters (PySpark btrim). trim_str defaults to whitespace.
     pub fn btrim(&self, trim_str: Option<&str>) -> Column {
         use polars::prelude::*;
-        let chars = trim_str.unwrap_or(" \t\n\r");
+        let chars = trim_str.unwrap_or(" ");
         Self::from_expr(self.expr().clone().str().strip_chars(lit(chars)), None)
     }
 
