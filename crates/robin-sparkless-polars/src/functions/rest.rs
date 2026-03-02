@@ -1351,7 +1351,7 @@ fn cast_impl(column: &Column, type_name: &str, strict: bool) -> Result<Column, S
         );
         // PySpark: col("x").cast("boolean") keeps output column name "x".
         return Ok(Column::from_expr(
-            expr.alias(&base_name),
+            expr.alias(base_name),
             Some(base_name.to_string()),
         ));
     }
