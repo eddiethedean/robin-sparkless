@@ -1641,6 +1641,12 @@ fn python_data_and_schema(
     let list = data.downcast::<PyList>().map_err(|_| {
         PyErr::new::<pyo3::exceptions::PyTypeError, _>("data must be a list (or pandas.DataFrame)")
     })?;
+    // PySpark parity: createDataFrame([]) without explicit schema raises ValueError.
+    if list.is_empty() && schema.is_none() {
+        return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
+            "can not infer schema from empty dataset",
+        ));
+    }
     // Parse explicit schema first so we can use its field order when building rows from dicts (Phase 7 / issue_247).
     let schema_names_only: bool = schema
         .and_then(|s| s.downcast::<PyList>().ok())
@@ -1650,9 +1656,33 @@ fn python_data_and_schema(
         .map(|s| parse_schema_from_py(py, s))
         .transpose()?
         .and_then(|o| o);
-    let column_order: Option<Vec<String>> = schema_res
+    // Scalar rows (e.g. [1,2,3]) are only allowed when there is an explicit single-column schema
+    // such as "bigint" or DateType() (PySpark parity for single-type createDataFrame).
+    let allow_scalar_single_column: bool = schema_res
+        .as_ref()
+        .map(|s| s.len() == 1)
+        .unwrap_or(false);
+    // Column order for dict rows: prefer explicit schema order; otherwise, for dict-only data,
+    // use union of all keys across rows sorted alphabetically so sparse rows still include all keys.
+    let mut column_order: Option<Vec<String>> = schema_res
         .as_ref()
         .map(|s| s.iter().map(|(n, _)| n.clone()).collect());
+    if column_order.is_none() && schema_res.is_none() && !list.is_empty() {
+        use std::collections::BTreeSet;
+        let mut keys_union: BTreeSet<String> = BTreeSet::new();
+        for item in list.iter() {
+            if let Ok(dict) = item.downcast::<PyDict>() {
+                for (k, _) in dict.iter() {
+                    if let Ok(name) = k.extract::<String>() {
+                        keys_union.insert(name);
+                    }
+                }
+            }
+        }
+        if !keys_union.is_empty() {
+            column_order = Some(keys_union.into_iter().collect());
+        }
+    }
 
     let mut rows: Vec<Vec<JsonValue>> = Vec::with_capacity(list.len());
     let mut inferred_schema: Option<Vec<(String, String)>> = None;
@@ -1681,8 +1711,21 @@ fn python_data_and_schema(
         } else {
             row_kind = Some(kind);
         }
-        let row = python_row_to_json(py, &item, idx, column_order.as_deref(), from_pandas)?;
-        if inferred_schema.is_none() && schema_res.is_none() && !row.is_empty() {
+        let row = python_row_to_json(
+            py,
+            &item,
+            idx,
+            column_order.as_deref(),
+            from_pandas,
+            allow_scalar_single_column,
+        )?;
+        // For dict rows without explicit schema, infer full schema from all rows/keys later so we
+        // can include sparse keys (issue #372). For other row kinds, infer from the first row.
+        if inferred_schema.is_none()
+            && schema_res.is_none()
+            && kind != "dict"
+            && !row.is_empty()
+        {
             if let Some(cols) = infer_schema_from_first_row(py, &item, from_pandas) {
                 inferred_schema = Some(cols);
             }
@@ -1692,15 +1735,46 @@ fn python_data_and_schema(
 
     // Names-only list schema should still infer types from data (PySpark parity).
     let schema_was_inferred = schema_res.is_none() || schema_names_only;
-    let mut schema = schema_res.or(inferred_schema).unwrap_or_else(|| {
-        rows.first()
-            .map(|r| {
-                (0..r.len())
-                    .map(|i| (format!("_{}", i + 1), "string".to_string()))
-                    .collect()
-            })
-            .unwrap_or_default()
-    });
+    // When schema is not explicit and rows are dicts, build schema from the union of keys so
+    // sparse rows (different keys) still include all columns, ordered alphabetically, and infer
+    // types from the underlying Python values (so bytes -> BinaryType, etc.).
+    let mut schema = if schema_res.is_none() && matches!(row_kind, Some("dict")) {
+        let names: Vec<String> = if let Some(order) = &column_order {
+            order.clone()
+        } else {
+            rows.first()
+                .map(|r| {
+                    (0..r.len())
+                        .map(|i| format!("_{}", i + 1))
+                        .collect::<Vec<String>>()
+                })
+                .unwrap_or_default()
+        };
+        let mut out: Vec<(String, String)> = Vec::with_capacity(names.len());
+        for name in &names {
+            let mut dtype = "string".to_string();
+            for item in list.iter() {
+                if let Ok(dict) = item.downcast::<PyDict>() {
+                    if let Ok(Some(v)) = dict.get_item(name) {
+                        dtype = infer_type_from_py_value(&v);
+                        break;
+                    }
+                }
+            }
+            out.push((name.clone(), dtype));
+        }
+        out
+    } else {
+        schema_res.or(inferred_schema).unwrap_or_else(|| {
+            rows.first()
+                .map(|r| {
+                    (0..r.len())
+                        .map(|i| (format!("_{}", i + 1), "string".to_string()))
+                        .collect()
+                })
+                .unwrap_or_default()
+        })
+    };
     if let (Some(first_row), true) = (rows.first(), schema.iter().all(|(_, t)| t == "string")) {
         if first_row.len() == schema.len() {
             schema = schema
@@ -1721,7 +1795,16 @@ fn python_data_and_schema(
                     .filter_map(|r| r.get(i))
                     .find(|v| !matches!(v, JsonValue::Null))
                     .map(infer_type_from_json_value);
-                let final_typ = better.unwrap_or_else(|| typ.clone());
+                // Only refine columns that were originally inferred as string-like; keep
+                // explicit non-string types such as binary/boolean/numeric unchanged.
+                let final_typ = if typ.eq_ignore_ascii_case("string")
+                    || typ.eq_ignore_ascii_case("str")
+                    || typ.eq_ignore_ascii_case("varchar")
+                {
+                    better.unwrap_or_else(|| typ.clone())
+                } else {
+                    typ.clone()
+                };
                 (name.clone(), final_typ)
             })
             .collect();
@@ -1736,6 +1819,7 @@ fn python_row_to_json(
     row_idx: usize,
     column_order: Option<&[String]>,
     from_pandas: bool,
+    allow_scalar_single_column: bool,
 ) -> PyResult<Vec<JsonValue>> {
     if let Ok(dict) = item.downcast::<PyDict>() {
         let mut keys: Vec<String> = if let Some(order) = column_order {
@@ -1774,7 +1858,7 @@ fn python_row_to_json(
         return Ok(values);
     }
     // Scalar row: allow when schema is explicit single-column (e.g. createDataFrame([1,2,3], "bigint")).
-    if column_order.map(|o| o.len() == 1).unwrap_or(false) {
+    if allow_scalar_single_column && column_order.map(|o| o.len() == 1).unwrap_or(false) {
         return Ok(vec![py_any_to_json(py, item)?]);
     }
     Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(format!(
@@ -3886,7 +3970,22 @@ impl PyDataFrame {
         Ok(schema
             .fields()
             .iter()
-            .map(|f| (f.name.clone(), format!("{:?}", f.data_type)))
+            .map(|f| {
+                let ty = match &f.data_type {
+                    DataType::String => "string",
+                    DataType::Integer => "int",
+                    DataType::Long => "long",
+                    DataType::Double => "double",
+                    DataType::Boolean => "boolean",
+                    DataType::Date => "date",
+                    DataType::Timestamp => "timestamp",
+                    DataType::Binary => "binary",
+                    DataType::Array(_) => "array",
+                    DataType::Map(_, _) => "map",
+                    DataType::Struct(_) => "struct",
+                };
+                (f.name.clone(), ty.to_string())
+            })
             .collect())
     }
 

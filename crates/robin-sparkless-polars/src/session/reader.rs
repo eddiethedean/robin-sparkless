@@ -86,6 +86,7 @@ impl DataFrameReader {
     ) -> polars::prelude::LazyCsvReader {
         use polars::prelude::NullValues;
         let mut r = reader;
+        let mut infer_set = false;
         if let Some(v) = self.options.get("header") {
             let has_header = v.eq_ignore_ascii_case("true") || v == "1";
             r = r.with_has_header(has_header);
@@ -98,14 +99,21 @@ impl DataFrameReader {
                     .and_then(|s| s.parse::<usize>().ok())
                     .unwrap_or(100);
                 r = r.with_infer_schema_length(Some(n));
+                infer_set = true;
             } else {
                 // inferSchema=false: do not infer types (PySpark parity #543)
                 r = r.with_infer_schema_length(Some(0));
+                infer_set = true;
             }
         } else if let Some(v) = self.options.get("inferSchemaLength") {
             if let Ok(n) = v.parse::<usize>() {
                 r = r.with_infer_schema_length(Some(n));
+                infer_set = true;
             }
+        }
+        // Default: inferSchema=False when not specified (all columns as strings).
+        if !infer_set {
+            r = r.with_infer_schema_length(Some(0));
         }
         if let Some(sep) = self.options.get("sep") {
             if let Some(b) = sep.bytes().next() {
@@ -143,13 +151,10 @@ impl DataFrameReader {
         let reader = if self.options.is_empty() {
             reader
                 .with_has_header(true)
-                .with_infer_schema_length(Some(100))
+                // Default inferSchema=False (no type inference, all strings).
+                .with_infer_schema_length(Some(0))
         } else {
-            self.apply_csv_options(
-                reader
-                    .with_has_header(true)
-                    .with_infer_schema_length(Some(100)),
-            )
+            self.apply_csv_options(reader.with_has_header(true))
         };
         let lf = reader.finish().map_err(|e| {
             PolarsError::ComputeError(format!("read csv({path_display}): {e}").into())
