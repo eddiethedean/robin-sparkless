@@ -1896,6 +1896,8 @@ impl SparkSession {
                 let mut has_null_only = true;
                 let mut has_int = false;
                 let mut has_float = false;
+                let mut has_non_number = false;
+                let mut first_non_number: Option<&JsonValue> = None;
                 for row in &rows {
                     let v = row.get(col_idx).unwrap_or(&JsonValue::Null);
                     match v {
@@ -1908,8 +1910,31 @@ impl SparkSession {
                                 has_float = true;
                             }
                         }
+                        JsonValue::String(s) => {
+                            has_null_only = false;
+                            // Treat textual inf/-inf/nan/NaN/Infinity as numeric (DoubleType)
+                            // for validation, so createDataFrame with float("inf") / NaN passes.
+                            let lower = s.to_ascii_lowercase();
+                            if lower == "inf"
+                                || lower == "+inf"
+                                || lower == "-inf"
+                                || lower == "infinity"
+                                || lower == "+infinity"
+                                || lower == "-infinity"
+                                || lower == "nan"
+                            {
+                                has_float = true;
+                            } else if !has_non_number {
+                                has_non_number = true;
+                                first_non_number = Some(v);
+                            }
+                        }
                         _ => {
                             has_null_only = false;
+                            if !has_non_number {
+                                has_non_number = true;
+                                first_non_number = Some(v);
+                            }
                         }
                     }
                 }
@@ -1928,6 +1953,36 @@ impl SparkSession {
                 if is_numeric && has_int && has_float {
                     return Err(PolarsError::InvalidOperation(
                         "Can not merge type DoubleType and LongType. Use explicit schema or consistent types.".into(),
+                    ));
+                }
+                // PySpark parity: when schema is inferred as numeric but data mixes numeric
+                // values with non-numeric (e.g. int and string), raise a TypeError-style
+                // message "Can not merge type ..." instead of silently coercing.
+                if is_numeric && (has_int || has_float) && has_non_number {
+                    let numeric_type = if type_lower.as_str() == "double"
+                        || type_lower.as_str() == "float"
+                    {
+                        "DoubleType"
+                    } else {
+                        "LongType"
+                    };
+                    let other_type = first_non_number
+                        .map(value_type_name)
+                        .unwrap_or("non-numeric");
+                    return Err(PolarsError::InvalidOperation(
+                        format!(
+                            "Can not merge type {numeric} and {other}. Use explicit schema or consistent types.",
+                            numeric = numeric_type,
+                            other = match other_type {
+                                "string" => "StringType",
+                                "boolean" => "BooleanType",
+                                "array" => "ArrayType",
+                                "object" => "StructType",
+                                "null" => "NullType",
+                                other => other,
+                            }
+                        )
+                        .into(),
                     ));
                 }
             }

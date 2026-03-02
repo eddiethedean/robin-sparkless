@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from datetime import date, datetime
 
+import pytest
 import robin_sparkless as rs
 
 
@@ -64,10 +65,10 @@ def test_create_data_frame_schema_list_of_tuples_name_type() -> None:
 
 
 def test_create_data_frame_empty_data_no_schema() -> None:
-    """createDataFrame([], schema=None) returns empty DataFrame."""
+    """createDataFrame([], schema=None) raises ValueError (cannot infer schema)."""
     spark = _spark()
-    df = spark.createDataFrame([])
-    assert df.collect() == []
+    with pytest.raises(ValueError, match="can not infer schema from empty dataset"):
+        spark.createDataFrame([])
 
 
 def test_create_data_frame_empty_data_with_schema() -> None:
