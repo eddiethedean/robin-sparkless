@@ -135,12 +135,16 @@ pub fn execute_sql(session: &SparkSession, query: &str) -> Result<DataFrame, Pol
     if !rest.is_empty() && (is_describe || is_desc) {
         let parts: Vec<&str> = rest.split_whitespace().collect();
         // #1013: DESCRIBE [TABLE] [EXTENDED] table_name [col_name] — skip TABLE/EXTENDED to get table name.
+        let has_extended = parts.iter().any(|p| p.eq_ignore_ascii_case("EXTENDED"));
         let idx = parts
             .iter()
             .position(|p| !p.eq_ignore_ascii_case("TABLE") && !p.eq_ignore_ascii_case("EXTENDED"));
         let table_name = idx.and_then(|i| parts.get(i)).copied().unwrap_or("");
         let col_name = idx.and_then(|i| parts.get(i + 1)).copied();
         if !table_name.is_empty() {
+            if has_extended && col_name.is_none() {
+                return translator::translate_describe_table_extended(session, table_name);
+            }
             return translator::translate_describe_table_optional_col(
                 session, table_name, col_name,
             );
@@ -176,8 +180,8 @@ pub use translator::{expr_string_to_polars, translate};
 #[cfg(test)]
 mod tests {
     use super::Statement;
-    use crate::sql::parse_sql;
     use crate::SparkSession;
+    use crate::sql::parse_sql;
 
     #[test]
     fn test_sql_select_from_temp_view() {
