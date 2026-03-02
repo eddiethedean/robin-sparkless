@@ -134,7 +134,8 @@ fn string_to_json_object(s: &str) -> Option<serde_json::Map<String, JsonValue>> 
 /// #976: Nested array (e.g. array<array<long>>) recurses; elem_type "array<long>" maps to List(Int64).
 /// Array element types timestamp, date, struct<...>, map<...> supported for create_dataframe_from_rows parity.
 fn json_type_str_to_polars(type_str: &str) -> Option<DataType> {
-    let s = type_str.trim().to_lowercase();
+    let trimmed = type_str.trim();
+    let s = trimmed.to_lowercase();
     if is_decimal_type_str(&s) {
         return Some(DataType::Float64);
     }
@@ -142,7 +143,8 @@ fn json_type_str_to_polars(type_str: &str) -> Option<DataType> {
         let inner = json_type_str_to_polars(elem_type.trim())?;
         return Some(DataType::List(Box::new(inner)));
     }
-    if let Some(fields) = parse_struct_fields(&s) {
+    // Preserve struct field name casing (e.g. "Inner", "E1") for subscript resolution (#339, #1066).
+    if let Some(fields) = parse_struct_fields(trimmed) {
         let polars_fields: Vec<Field> = fields
             .into_iter()
             .map(|(name, typ)| {
@@ -666,7 +668,32 @@ fn json_value_to_series_single(
 ) -> Result<Series, PolarsError> {
     use chrono::NaiveDate;
     let epoch = date_utils::epoch_naive_date();
-    match (value, type_str.trim().to_lowercase().as_str()) {
+    let type_lower = type_str.trim().to_lowercase();
+    // #1066: Nested array (e.g. createDataFrame with {"matrix": [[1,2,3],[4,5,6]]}) when type is array<...>.
+    if let (JsonValue::Array(arr), Some(elem_type)) = (value, parse_array_element_type(&type_lower))
+    {
+        let inner_dtype = json_type_str_to_polars(&elem_type).ok_or_else(|| {
+            PolarsError::ComputeError(
+                format!("array element type '{elem_type}' not supported").into(),
+            )
+        })?;
+        let elem_series: Vec<Series> = if parse_array_element_type(&elem_type).is_some() {
+            arr.iter()
+                .map(|e| json_values_to_series(&[Some(e.clone())], &elem_type, "elem"))
+                .collect::<Result<Vec<_>, _>>()?
+        } else {
+            arr.iter()
+                .map(|e| json_value_to_series_single(e, &elem_type, "elem"))
+                .collect::<Result<Vec<_>, _>>()?
+        };
+        let vals: Vec<_> = elem_series.iter().filter_map(|s| s.get(0).ok()).collect();
+        let s = Series::from_any_values_and_dtype(PlSmallStr::EMPTY, &vals, &inner_dtype, false)
+            .map_err(|e| PolarsError::ComputeError(format!("array elem: {e}").into()))?;
+        let mut builder = get_list_builder(&inner_dtype, 64, 1, name.into());
+        builder.append_series(&s)?;
+        return Ok(builder.finish().into_series());
+    }
+    match (value, type_lower.as_str()) {
         (JsonValue::Null, _) => Ok(Series::new_null(name.into(), 1)),
         (JsonValue::Number(n), "int" | "integer" | "bigint" | "long" | "smallint" | "tinyint") => {
             Ok(Series::new(name.into(), vec![n.as_i64()]))
@@ -1694,6 +1721,87 @@ impl SparkSession {
         }
     }
 
+    /// Infer a struct type string from a JSON object (for nested struct inference in createDataFrame).
+    fn infer_struct_dtype_from_json_object(obj: &serde_json::Map<String, JsonValue>) -> String {
+        let mut keys: Vec<&str> = obj.keys().map(|k| k.as_str()).collect();
+        keys.sort();
+        keys.iter()
+            .map(|k| {
+                let field_typ = obj
+                    .get(*k)
+                    .map(|v| match v {
+                        JsonValue::Object(inner_obj) => {
+                            format!(
+                                "struct<{}>",
+                                Self::infer_struct_dtype_from_json_object(inner_obj)
+                            )
+                        }
+                        _ => Self::infer_dtype_from_json_value(v)
+                            .unwrap_or_else(|| "string".to_string()),
+                    })
+                    .unwrap_or_else(|| "string".to_string());
+                format!("{}:{}", k, field_typ)
+            })
+            .collect::<Vec<_>>()
+            .join(",")
+    }
+
+    /// Infer struct type from a column of objects by using the first non-null value per key across all rows.
+    /// Fixes E2 when row0 has E2=null and row1 has E2=4 so E2 is inferred as bigint (#339 null_field).
+    fn infer_struct_dtype_from_json_rows(
+        rows: &[Vec<JsonValue>],
+        col_idx: usize,
+    ) -> Option<String> {
+        let mut all_keys: std::collections::HashSet<String> = std::collections::HashSet::new();
+        for row in rows {
+            if let Some(JsonValue::Object(obj)) = row.get(col_idx) {
+                for k in obj.keys() {
+                    all_keys.insert(k.clone());
+                }
+            }
+        }
+        let mut key_to_first_non_null: std::collections::HashMap<String, JsonValue> =
+            std::collections::HashMap::new();
+        for row in rows {
+            let Some(JsonValue::Object(obj)) = row.get(col_idx) else {
+                continue; // skip null or non-object rows so struct type is inferred from object rows
+            };
+            for k in &all_keys {
+                if key_to_first_non_null.contains_key(k) {
+                    continue;
+                }
+                if let Some(val) = obj.get(k) {
+                    if !matches!(val, JsonValue::Null) {
+                        key_to_first_non_null.insert(k.clone(), val.clone());
+                    }
+                }
+            }
+        }
+        let mut keys: Vec<&String> = all_keys.iter().collect();
+        keys.sort();
+        let inner = keys
+            .iter()
+            .map(|k| {
+                let field_typ = key_to_first_non_null
+                    .get(*k)
+                    .map(|val| match val {
+                        JsonValue::Object(inner_obj) => {
+                            format!(
+                                "struct<{}>",
+                                Self::infer_struct_dtype_from_json_object(inner_obj)
+                            )
+                        }
+                        _ => Self::infer_dtype_from_json_value(val)
+                            .unwrap_or_else(|| "string".to_string()),
+                    })
+                    .unwrap_or_else(|| "string".to_string());
+                format!("{}:{}", k.as_str(), field_typ)
+            })
+            .collect::<Vec<_>>()
+            .join(",");
+        Some(format!("struct<{}>", inner))
+    }
+
     /// Infer schema (name, dtype_str) from JSON rows by scanning the first non-null value per column.
     /// Used by createDataFrame(data, schema=None) when schema is omitted or only column names given.
     /// When the first non-null value is a JSON object, infers struct<k1:string,k2:string,...> (PR13 / struct parity).
@@ -1711,21 +1819,10 @@ impl SparkSession {
         for (col_idx, (_, dtype_str)) in schema.iter_mut().enumerate() {
             for row in rows {
                 let v = row.get(col_idx).unwrap_or(&JsonValue::Null);
-                if let JsonValue::Object(obj) = v {
-                    let mut keys: Vec<&str> = obj.keys().map(|k| k.as_str()).collect();
-                    keys.sort();
-                    let inner = keys
-                        .iter()
-                        .map(|k| {
-                            let field_typ = obj
-                                .get(*k)
-                                .and_then(Self::infer_dtype_from_json_value)
-                                .unwrap_or_else(|| "string".to_string());
-                            format!("{}:{}", k, field_typ)
-                        })
-                        .collect::<Vec<_>>()
-                        .join(",");
-                    *dtype_str = format!("struct<{}>", inner);
+                if let JsonValue::Object(_) = v {
+                    if let Some(ty) = Self::infer_struct_dtype_from_json_rows(rows, col_idx) {
+                        *dtype_str = ty;
+                    }
                     break;
                 }
                 if let Some(dtype) = Self::infer_dtype_from_json_value(v) {
