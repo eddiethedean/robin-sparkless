@@ -4382,7 +4382,52 @@ pub fn apply_sequence(column: Column) -> PolarsResult<Option<Column>> {
     Ok(Some(Column::new(name, builder.finish().into_series())))
 }
 
+/// Mask a series to null where `mask` is true. Used so withField leaves null when input struct is null (PySpark #1066).
+fn series_set_nulls_where(series: &Series, mask: &BooleanChunked) -> PolarsResult<Series> {
+    use polars::chunked_array::ops::ChunkSet;
+    let name = series.name().to_string();
+    let dtype = series.dtype().clone();
+    let masked = match dtype {
+        DataType::Int64 => series
+            .i64()
+            .map_err(|e| compute_err("with_field mask i64", e))?
+            .set(mask, None)
+            .map_err(|e| compute_err("with_field set i64", e))?
+            .into_series(),
+        DataType::Int32 => series
+            .i32()
+            .map_err(|e| compute_err("with_field mask i32", e))?
+            .set(mask, None)
+            .map_err(|e| compute_err("with_field set i32", e))?
+            .into_series(),
+        DataType::String => series
+            .str()
+            .map_err(|e| compute_err("with_field mask str", e))?
+            .set(mask, None)
+            .map_err(|e| compute_err("with_field set str", e))?
+            .into_series(),
+        DataType::Float64 => series
+            .f64()
+            .map_err(|e| compute_err("with_field mask f64", e))?
+            .set(mask, None)
+            .map_err(|e| compute_err("with_field set f64", e))?
+            .into_series(),
+        DataType::Boolean => series
+            .bool()
+            .map_err(|e| compute_err("with_field mask bool", e))?
+            .set(mask, None)
+            .map_err(|e| compute_err("with_field set bool", e))?
+            .into_series(),
+        _ => {
+            // For other dtypes, clone as-is (null struct may not propagate).
+            series.clone()
+        }
+    };
+    Ok(masked.with_name(PlSmallStr::from(name.as_str())))
+}
+
 /// Replace or add a struct field (PySpark withField). Used when Polars 0.53+ no longer accepts "*" in with_fields.
+/// When the whole struct is null, leaves result null (PySpark behavior; issue #1066).
 pub fn apply_struct_with_field(
     struct_col: Column,
     value_col: Column,
@@ -4395,15 +4440,18 @@ pub fn apply_struct_with_field(
         .struct_()
         .map_err(|e| compute_err("with_field: expected struct column", e))?;
     let len = st.len();
+    let struct_null = struct_series.is_null();
     let fields_series = st.fields_as_series();
     let value_series = value_col.take_materialized_series();
+    let value_masked =
+        series_set_nulls_where(&value_series, &struct_null).unwrap_or_else(|_| value_series.clone());
     let mut new_fields: Vec<Series> = Vec::with_capacity(fields_series.len() + 1);
     let mut replaced = false;
     for s in &fields_series {
         let fname = s.name().as_str();
         let new_s = if fname == field_name {
             replaced = true;
-            let mut v = value_series.clone();
+            let mut v = value_masked.clone();
             v.rename(PlSmallStr::from(field_name));
             v
         } else {
@@ -4412,7 +4460,7 @@ pub fn apply_struct_with_field(
         new_fields.push(new_s);
     }
     if !replaced {
-        let mut v = value_series.clone();
+        let mut v = value_masked.clone();
         v.rename(PlSmallStr::from(field_name));
         new_fields.push(v);
     }

@@ -4312,16 +4312,27 @@ impl PyColumn {
         ))
     }
 
-    /// Get struct field by name (PySpark Column.getField).
-    fn get_field(&self, name: &str) -> PyColumn {
-        PyColumn {
-            inner: self.inner.get_field(name),
+    /// Get struct field by name or array element by index (PySpark Column.getField).
+    /// Accepts int (array index, 0-based) or str (struct field name). Issue #1066.
+    fn get_field(&self, name_or_index: &Bound<'_, PyAny>) -> PyResult<PyColumn> {
+        if let Ok(i) = name_or_index.extract::<i64>() {
+            return Ok(PyColumn {
+                inner: self.inner.get_item(i),
+            });
         }
+        if let Ok(name) = name_or_index.extract::<String>() {
+            return Ok(PyColumn {
+                inner: self.inner.get_field(&name),
+            });
+        }
+        Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+            "getField expects int (array index) or str (struct field name)",
+        ))
     }
 
     #[pyo3(name = "getField")]
-    fn get_field_camel(&self, name: &str) -> PyColumn {
-        self.get_field(name)
+    fn get_field_camel(&self, name_or_index: &Bound<'_, PyAny>) -> PyResult<PyColumn> {
+        self.get_field(name_or_index)
     }
 
     /// String column contains substring (PySpark Column.contains).
