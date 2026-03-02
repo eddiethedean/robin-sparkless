@@ -14,8 +14,8 @@ use serde_json::Value as JsonValue;
 use sqlparser::ast::{
     AssignmentTarget, BinaryOperator, Expr as SqlExpr, FromTable, Function, FunctionArg,
     FunctionArgExpr, FunctionArguments, GroupByExpr, JoinConstraint, JoinOperator, ObjectType,
-    OrderByKind, Query, Select, SelectItem, SetExpr, SetOperator, Statement, TableFactor, TableAlias,
-    Value, ValueWithSpan,
+    OrderByKind, Query, Select, SelectItem, SetExpr, SetOperator, Statement, TableAlias,
+    TableFactor, Value, ValueWithSpan,
 };
 
 /// Parsed SQL number literal: integer or float.
@@ -697,16 +697,14 @@ fn table_alias_from_factor(factor: &TableFactor) -> Option<String> {
     match factor {
         TableFactor::Table {
             name,
-            alias: Some(TableAlias { name: alias_name, .. }),
+            alias: Some(TableAlias {
+                name: alias_name, ..
+            }),
             ..
         } => {
             let table_name = table_name_from_object_name(name);
             let a = alias_name.value.clone();
-            if a == table_name {
-                None
-            } else {
-                Some(a)
-            }
+            if a == table_name { None } else { Some(a) }
         }
         TableFactor::Table { alias: None, .. } => None,
         _ => None,
@@ -1038,13 +1036,10 @@ fn sql_expr_to_qualified_col_name(
                 .unwrap_or(col_name))
         }
         SqlExpr::CompoundIdentifier(parts) => {
-            let last = parts
-                .last()
-                .map(|i| i.value.clone())
-                .ok_or_else(|| PolarsError::InvalidOperation("SQL: empty compound identifier.".into()))?;
-            Ok(alias_opt
-                .map(|a| format!("{}_{}", a, last))
-                .unwrap_or(last))
+            let last = parts.last().map(|i| i.value.clone()).ok_or_else(|| {
+                PolarsError::InvalidOperation("SQL: empty compound identifier.".into())
+            })?;
+            Ok(alias_opt.map(|a| format!("{}_{}", a, last)).unwrap_or(last))
         }
         _ => Err(PolarsError::InvalidOperation(
             format!("SQL: expected column name, got {:?}", expr).into(),

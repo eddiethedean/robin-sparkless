@@ -255,11 +255,12 @@ impl DataFrame {
                                 })?;
                             let mut context_name = resolved.to_string();
                             for field in rest {
-                                let (resolved_field, field_dtype) = df.resolve_struct_field_from_type(
-                                    &current_dtype,
-                                    field,
-                                    &context_name,
-                                )?;
+                                let (resolved_field, field_dtype) = df
+                                    .resolve_struct_field_from_type(
+                                        &current_dtype,
+                                        field,
+                                        &context_name,
+                                    )?;
                                 expr = expr.struct_().field_by_name(&resolved_field);
                                 context_name = format!("{}.{}", context_name, resolved_field);
                                 current_dtype = field_dtype;

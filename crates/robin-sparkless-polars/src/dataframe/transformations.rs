@@ -963,8 +963,7 @@ pub fn cross_join(
     let right_names = right.columns()?;
     let right_set: std::collections::HashSet<&str> =
         right_names.iter().map(|s| s.as_str()).collect();
-    let left_set: std::collections::HashSet<&str> =
-        left_names.iter().map(|s| s.as_str()).collect();
+    let left_set: std::collections::HashSet<&str> = left_names.iter().map(|s| s.as_str()).collect();
     // Put columns that exist on both sides first (e.g. dept_id), then rest (PySpark cross order).
     let left_ordered = order_columns_common_first(&left_names, &right_set);
     let right_ordered = order_columns_common_first(&right_names, &left_set);

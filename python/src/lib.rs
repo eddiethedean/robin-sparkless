@@ -2116,16 +2116,10 @@ fn resolve_join_keys_with_aliases(
             let b_in_l = get_matching(sb, left_cols).is_some();
             let b_in_r = get_matching(sb, right_cols).is_some();
             if a_in_l && b_in_r {
-                return (
-                    get_matching(sa, left_cols),
-                    get_matching(sb, right_cols),
-                );
+                return (get_matching(sa, left_cols), get_matching(sb, right_cols));
             }
             if a_in_r && b_in_l {
-                return (
-                    get_matching(sb, left_cols),
-                    get_matching(sa, right_cols),
-                );
+                return (get_matching(sb, left_cols), get_matching(sa, right_cols));
             }
         }
     }
