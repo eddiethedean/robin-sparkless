@@ -377,7 +377,16 @@ def first(col_or_name: ColumnOrName, ignorenulls: bool = False) -> _ColumnType:
     return _col_result(_native_fn("first")(_as_col(col_or_name), ignorenulls))
 
 
-last = _ni("last")
+def last(col_or_name: ColumnOrName, ignorenulls: bool = False) -> _ColumnType:
+    """Last value aggregate/window function (PySpark last).
+
+    GroupBy: use in df.groupBy().agg(F.last("col")) – implemented via last_value semantics.
+    Window: use with .over(Window.partitionBy(...).orderBy(...)) and optional frame; when
+    orderBy is present, default RANGE UNBOUNDED PRECEDING..CURRENT ROW makes last() == current row.
+    """
+    # For window usage, reuse last_value() expression helper so
+    # F.last(\"salary\").over(window_spec) matches last_value semantics.
+    return _col_result(last_value(col_or_name))
 
 
 def collect_list(col_or_name: ColumnOrName) -> _ColumnType:
