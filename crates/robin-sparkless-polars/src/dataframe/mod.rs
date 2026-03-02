@@ -172,6 +172,11 @@ impl DataFrame {
         }
     }
 
+    /// Return the table alias if set (e.g. from df.alias("t")). Used for join condition resolution (#374).
+    pub fn get_alias(&self) -> Option<String> {
+        self.alias.clone()
+    }
+
     /// Resolve column names in a Polars expression against this DataFrame's schema.
     /// When case_sensitive is false, column references (e.g. col("name")) are resolved
     /// case-insensitively (PySpark default). Use before filter/select_with_exprs/order_by_exprs.
@@ -209,7 +214,8 @@ impl DataFrame {
                 let name_str = name.as_str();
                 // Skip resolution only when this name is an alias output and not a schema column (case-insensitive).
                 // So col("name").alias("name") still resolves "name" to "Name" when schema has "Name" (issue #1053).
-                if alias_output_names.contains(name_str) {
+                // Do not skip qualified names (e.g. "sm.taxonomy_id"): they must be resolved via suffix/alias.column (#374).
+                if !name_str.contains('.') && alias_output_names.contains(name_str) {
                     let matches_schema = df
                         .columns()
                         .map(|cols| cols.iter().any(|c| c.eq_ignore_ascii_case(name_str)))
@@ -222,7 +228,7 @@ impl DataFrame {
                 if name_str.is_empty() {
                     return Ok(e);
                 }
-                // Struct field dot notation (PySpark col("struct_col.field") and nested col("outer.inner.leaf")).
+                // Struct field dot notation (PySpark col("struct_col.field")) or alias.column (e.g. col("sm.taxonomy_id") after join with alias "sm") (#374).
                 if name_str.contains('.') {
                     let parts: Vec<&str> = name_str.split('.').collect();
                     let first = parts[0];
@@ -236,27 +242,41 @@ impl DataFrame {
                             .into(),
                         ));
                     }
-                    let resolved = df.resolve_column_name(first)?;
-                    let mut expr = col(PlSmallStr::from(resolved.as_str()));
-                    let mut current_dtype =
-                        df.get_column_dtype(resolved.as_str()).ok_or_else(|| {
-                            PolarsError::ColumnNotFound(
-                                format!("cannot resolve: column '{}' not found", resolved).into(),
-                            )
-                        })?;
-                    let mut context_name = resolved.to_string();
-                    for field in rest {
-                        let (resolved_field, field_dtype) = df.resolve_struct_field_from_type(
-                            &current_dtype,
-                            field,
-                            &context_name,
-                        )?;
-                        expr = expr.struct_().field_by_name(&resolved_field);
-                        context_name = format!("{}.{}", context_name, resolved_field);
-                        current_dtype = field_dtype;
+                    // Try struct field path first (first part is a column name).
+                    match df.resolve_column_name(first) {
+                        Ok(resolved) => {
+                            let mut expr = col(PlSmallStr::from(resolved.as_str()));
+                            let mut current_dtype =
+                                df.get_column_dtype(resolved.as_str()).ok_or_else(|| {
+                                    PolarsError::ColumnNotFound(
+                                        format!("cannot resolve: column '{}' not found", resolved)
+                                            .into(),
+                                    )
+                                })?;
+                            let mut context_name = resolved.to_string();
+                            for field in rest {
+                                let (resolved_field, field_dtype) = df.resolve_struct_field_from_type(
+                                    &current_dtype,
+                                    field,
+                                    &context_name,
+                                )?;
+                                expr = expr.struct_().field_by_name(&resolved_field);
+                                context_name = format!("{}.{}", context_name, resolved_field);
+                                current_dtype = field_dtype;
+                            }
+                            return Ok(expr.alias(PlSmallStr::from(name_str)));
+                        }
+                        Err(_) => {
+                            // First part not a column: alias.column after join (e.g. col("sm.taxonomy_id")); resolve_column_name does suffix fallback (#374).
+                            if let Ok(suffix_resolved) = df.resolve_column_name(name_str) {
+                                return Ok(col(PlSmallStr::from(suffix_resolved.as_str()))
+                                    .alias(PlSmallStr::from(name_str)));
+                            }
+                            return Err(PolarsError::ColumnNotFound(
+                                format!("cannot resolve: column '{}' not found", first).into(),
+                            ));
+                        }
                     }
-                    // PySpark: col("StructValue.E1") without alias yields column name "StructValue.E1".
-                    return Ok(expr.alias(PlSmallStr::from(name_str)));
                 }
                 let resolved = df.resolve_column_name(name_str)?;
                 return Ok(Expr::Column(PlSmallStr::from(resolved.as_str())));
@@ -692,6 +712,45 @@ impl DataFrame {
             for n in &names {
                 if n.to_lowercase() == name_lower {
                     return Ok(n.clone());
+                }
+            }
+        }
+        // Qualified name (e.g. "sm.taxonomy_id" or "l.location_id" after multi-join): try suffix (#374).
+        // When both "suffix" and "suffix_right" exist (e.g. from multiple joins), prefer _right so alias refers to the right table.
+        if let Some((_prefix, suffix)) = name.split_once('.') {
+            if !suffix.is_empty() {
+                let suffix_right = format!("{}_right", suffix);
+                let matches: Vec<&String> = if self.case_sensitive {
+                    names
+                        .iter()
+                        .filter(|n| n.as_str() == suffix || n.as_str() == suffix_right.as_str())
+                        .collect()
+                } else {
+                    let suffix_lower = suffix.to_lowercase();
+                    let suffix_right_lower = suffix_right.to_lowercase();
+                    names
+                        .iter()
+                        .filter(|n| {
+                            let nl = n.to_lowercase();
+                            nl == suffix_lower || nl == suffix_right_lower
+                        })
+                        .collect()
+                };
+                if matches.len() == 1 {
+                    return Ok(matches[0].clone());
+                }
+                if matches.len() >= 2 {
+                    // Prefer _right so "l.location_id" -> location_id_right after join (right table).
+                    let right_match = matches.iter().find(|n| {
+                        if self.case_sensitive {
+                            n.ends_with("_right")
+                        } else {
+                            n.to_lowercase().ends_with("_right")
+                        }
+                    });
+                    if let Some(m) = right_match {
+                        return Ok((*m).clone());
+                    }
                 }
             }
         }
@@ -1145,6 +1204,7 @@ impl DataFrame {
             on_refs,
             how,
             self.case_sensitive,
+            true, // coalesce so join(right, "id") yields one key column (#1049, #353)
         )
     }
 
@@ -1166,7 +1226,15 @@ impl DataFrame {
             .collect::<Result<Vec<_>, _>>()?;
         let left_refs: Vec<&str> = left_resolved.iter().map(|s| s.as_str()).collect();
         let right_refs: Vec<&str> = right_resolved.iter().map(|s| s.as_str()).collect();
-        join(self, other, left_refs, right_refs, how, self.case_sensitive)
+        join(
+            self,
+            other,
+            left_refs,
+            right_refs,
+            how,
+            self.case_sensitive,
+            false, // keep both key columns for condition join (parity fixture)
+        )
     }
 
     /// Order by columns (sort).

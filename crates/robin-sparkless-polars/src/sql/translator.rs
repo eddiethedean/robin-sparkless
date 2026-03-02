@@ -14,8 +14,8 @@ use serde_json::Value as JsonValue;
 use sqlparser::ast::{
     AssignmentTarget, BinaryOperator, Expr as SqlExpr, FromTable, Function, FunctionArg,
     FunctionArgExpr, FunctionArguments, GroupByExpr, JoinConstraint, JoinOperator, ObjectType,
-    OrderByKind, Query, Select, SelectItem, SetExpr, SetOperator, Statement, TableFactor, Value,
-    ValueWithSpan,
+    OrderByKind, Query, Select, SelectItem, SetExpr, SetOperator, Statement, TableFactor, TableAlias,
+    Value, ValueWithSpan,
 };
 
 /// Parsed SQL number literal: integer or float.
@@ -603,8 +603,18 @@ fn translate_select_from(
     }
     let first_tj = &select.from[0];
     let mut df = resolve_table_factor(session, &first_tj.relation)?;
+    let left_alias_opt = table_alias_from_factor(&first_tj.relation);
+    if let Some(ref prefix) = left_alias_opt {
+        df = df_prefix_columns(&df, prefix)?;
+    }
+    let mut current_left_alias = left_alias_opt.as_deref();
     for join_spec in &first_tj.joins {
-        let right_df = resolve_table_factor(session, &join_spec.relation)?;
+        let mut right_df = resolve_table_factor(session, &join_spec.relation)?;
+        let right_alias_opt = table_alias_from_factor(&join_spec.relation);
+        if let Some(ref prefix) = right_alias_opt {
+            right_df = df_prefix_columns(&right_df, prefix)?;
+        }
+        let right_alias_ref = right_alias_opt.as_deref();
         match &join_spec.join_operator {
             JoinOperator::CrossJoin(_) => {
                 df = df.cross_join(&right_df).map_err(|e| {
@@ -631,7 +641,11 @@ fn translate_select_from(
                         ));
                     }
                 };
-                let (left_on, right_on) = join_condition_to_on_columns(&join_spec.join_operator)?;
+                let (left_on, right_on) = join_condition_to_on_columns(
+                    &join_spec.join_operator,
+                    current_left_alias,
+                    right_alias_ref,
+                )?;
                 let left_refs: Vec<&str> = left_on.iter().map(|s| s.as_str()).collect();
                 let right_refs: Vec<&str> = right_on.iter().map(|s| s.as_str()).collect();
                 df = join(
@@ -641,9 +655,12 @@ fn translate_select_from(
                     right_refs,
                     join_type,
                     session.is_case_sensitive(),
+                    false, // SQL join condition: keep both key columns
                 )?;
             }
         }
+        // After joining, "left" for the next join is the current result; we don't support chained alias for the merged result, so clear.
+        current_left_alias = None;
     }
     Ok(df)
 }
@@ -674,6 +691,38 @@ fn table_name_from_factor(factor: &TableFactor) -> Result<String, PolarsError> {
     }
 }
 
+/// Table alias from FROM/JOIN (e.g. "e" in "FROM employees e"). Used to prefix column names so SELECT e.name resolves to e_name (#152).
+/// When the only identifier is the table name (e.g. "FROM l") we treat as no alias so columns stay unpretended.
+fn table_alias_from_factor(factor: &TableFactor) -> Option<String> {
+    match factor {
+        TableFactor::Table {
+            name,
+            alias: Some(TableAlias { name: alias_name, .. }),
+            ..
+        } => {
+            let table_name = table_name_from_object_name(name);
+            let a = alias_name.value.clone();
+            if a == table_name {
+                None
+            } else {
+                Some(a)
+            }
+        }
+        TableFactor::Table { alias: None, .. } => None,
+        _ => None,
+    }
+}
+
+/// Prefix all column names with "prefix_". Used when FROM has alias so qualified refs (e.name) become e_name.
+fn df_prefix_columns(df: &DataFrame, prefix: &str) -> Result<DataFrame, PolarsError> {
+    let names = df.columns()?;
+    let renames: Vec<(String, String)> = names
+        .iter()
+        .map(|n| (n.clone(), format!("{}_{}", prefix, n)))
+        .collect();
+    df.with_columns_renamed(renames.as_slice())
+}
+
 fn resolve_table_factor(
     session: &SparkSession,
     factor: &TableFactor,
@@ -689,9 +738,11 @@ fn resolve_table_factor(
     }
 }
 
-/// Returns (left_column_names, right_column_names) for JOIN ON. Same length; may differ (e.g. a.id = b.other_id) (#743).
+/// Returns (left_column_names, right_column_names) for JOIN ON. When table aliases are used, names are prefixed (e.g. e_dept_id, d_id) (#152).
 fn join_condition_to_on_columns(
     join_op: &JoinOperator,
+    left_alias: Option<&str>,
+    right_alias: Option<&str>,
 ) -> Result<(Vec<String>, Vec<String>), PolarsError> {
     let constraint = match join_op {
         JoinOperator::Join(c)
@@ -723,8 +774,8 @@ fn join_condition_to_on_columns(
                 op: BinaryOperator::Eq,
                 right,
             } => {
-                let l = sql_expr_to_col_name(left.as_ref())?;
-                let r = sql_expr_to_col_name(right.as_ref())?;
+                let l = sql_expr_to_qualified_col_name(left.as_ref(), left_alias)?;
+                let r = sql_expr_to_qualified_col_name(right.as_ref(), right_alias)?;
                 Ok((vec![l], vec![r]))
             }
             _ => Err(PolarsError::InvalidOperation(
@@ -974,6 +1025,33 @@ fn sql_expr_to_col_name(expr: &SqlExpr) -> Result<String, PolarsError> {
     }
 }
 
+/// Column name for JOIN ON. When a table alias was applied (alias_opt is Some), use prefix_column form (e.g. "e_dept_id"); otherwise bare column (#152).
+fn sql_expr_to_qualified_col_name(
+    expr: &SqlExpr,
+    alias_opt: Option<&str>,
+) -> Result<String, PolarsError> {
+    match expr {
+        SqlExpr::Identifier(ident) => {
+            let col_name = ident.value.clone();
+            Ok(alias_opt
+                .map(|a| format!("{}_{}", a, col_name))
+                .unwrap_or(col_name))
+        }
+        SqlExpr::CompoundIdentifier(parts) => {
+            let last = parts
+                .last()
+                .map(|i| i.value.clone())
+                .ok_or_else(|| PolarsError::InvalidOperation("SQL: empty compound identifier.".into()))?;
+            Ok(alias_opt
+                .map(|a| format!("{}_{}", a, last))
+                .unwrap_or(last))
+        }
+        _ => Err(PolarsError::InvalidOperation(
+            format!("SQL: expected column name, got {:?}", expr).into(),
+        )),
+    }
+}
+
 /// Extract a string literal from a SQL expression (for LIKE pattern). Issue #590.
 fn sql_expr_to_string_literal(expr: &SqlExpr) -> Result<String, PolarsError> {
     match expr {
@@ -1050,9 +1128,22 @@ fn apply_projection(
                 ProjItem::Expr(col(resolved.as_str()), name.to_string())
             }
             SelectItem::UnnamedExpr(SqlExpr::CompoundIdentifier(parts)) => {
-                let name = parts.last().map(|i| i.value.as_str()).unwrap_or("");
-                let resolved = df.resolve_column_name(name)?;
-                ProjItem::Expr(col(resolved.as_str()), name.to_string())
+                // Qualified column (e.g. e.name): try alias_column form (e_name) first for aliased JOIN (#152); else bare column.
+                let qualified = parts
+                    .iter()
+                    .map(|i| i.value.as_str())
+                    .collect::<Vec<_>>()
+                    .join("_");
+                let last = parts.last().map(|i| i.value.as_str()).unwrap_or("");
+                let resolved = df
+                    .resolve_column_name(&qualified)
+                    .or_else(|_| df.resolve_column_name(last))?;
+                let output_name = if df.resolve_column_name(&qualified).is_ok() {
+                    qualified
+                } else {
+                    last.to_string()
+                };
+                ProjItem::Expr(col(resolved.as_str()), output_name)
             }
             SelectItem::UnnamedExpr(SqlExpr::Function(func)) => {
                 projection_function_to_item(func, session, Some(df))?
@@ -1066,8 +1157,15 @@ fn apply_projection(
                         ProjItem::Expr(col(resolved.as_str()), alias_str)
                     }
                     SqlExpr::CompoundIdentifier(parts) => {
-                        let name = parts.last().map(|i| i.value.as_str()).unwrap_or("");
-                        let resolved = df.resolve_column_name(name)?;
+                        let qualified = parts
+                            .iter()
+                            .map(|i| i.value.as_str())
+                            .collect::<Vec<_>>()
+                            .join("_");
+                        let last = parts.last().map(|i| i.value.as_str()).unwrap_or("");
+                        let resolved = df
+                            .resolve_column_name(&qualified)
+                            .or_else(|_| df.resolve_column_name(last))?;
                         ProjItem::Expr(col(resolved.as_str()), alias_str)
                     }
                     SqlExpr::Function(func) => {

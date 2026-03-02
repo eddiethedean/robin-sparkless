@@ -93,6 +93,11 @@ impl DataFrame {
         DataFrame(self.0.alias(name))
     }
 
+    /// Return the table alias if set (e.g. from df.alias("t")). Used for join condition resolution (#374).
+    pub fn get_alias(&self) -> Option<String> {
+        self.0.get_alias()
+    }
+
     /// Filter rows using an engine-agnostic expression (ExprIr).
     pub fn filter_expr_ir(&self, condition: &ExprIr) -> Result<DataFrame, EngineError> {
         downcast_df(DataFrameBackend::filter(&self.0, condition)?)

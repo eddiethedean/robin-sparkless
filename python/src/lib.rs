@@ -2057,6 +2057,81 @@ impl PyDataFrameReader {
     }
 }
 
+/// Resolve (key_a, key_b) from join condition to (left_on, right_on). Strips alias prefix (e.g. "sm.brand_id" -> "brand_id") and assigns by which side has the column (#374, #421).
+/// When alias is None (e.g. right from .alias("b").select(...) loses alias), try suffix after "." so "b.code" matches right "code".
+fn resolve_join_keys_with_aliases(
+    key_a: &str,
+    key_b: &str,
+    left_cols: &std::collections::HashSet<String>,
+    right_cols: &std::collections::HashSet<String>,
+    left_alias: Option<&str>,
+    right_alias: Option<&str>,
+) -> (Option<String>, Option<String>) {
+    fn strip_alias(key: &str, alias: Option<&str>) -> String {
+        let Some(alias) = alias else {
+            return key.to_string();
+        };
+        let prefix = format!("{alias}.");
+        if key.starts_with(&prefix) {
+            key[prefix.len()..].to_string()
+        } else {
+            key.to_string()
+        }
+    }
+    /// For "alias.col" when alias is None, use suffix so "b.code" matches "code" (#374).
+    fn suffix_if_dot(key: &str) -> Option<&str> {
+        key.split('.').last().filter(|s| !s.is_empty())
+    }
+    fn get_matching(name: &str, set: &std::collections::HashSet<String>) -> Option<String> {
+        set.iter().find(|c| c.eq_ignore_ascii_case(name)).cloned()
+    }
+    let bare_a_left = strip_alias(key_a, left_alias);
+    let bare_a_right = strip_alias(key_a, right_alias);
+    let bare_b_left = strip_alias(key_b, left_alias);
+    let bare_b_right = strip_alias(key_b, right_alias);
+    let a_in_left = get_matching(&bare_a_left, left_cols).is_some();
+    let a_in_right = get_matching(&bare_a_right, right_cols).is_some();
+    let b_in_left = get_matching(&bare_b_left, left_cols).is_some();
+    let b_in_right = get_matching(&bare_b_right, right_cols).is_some();
+    let (left_key, right_key) = if a_in_left && b_in_right {
+        (
+            get_matching(&bare_a_left, left_cols),
+            get_matching(&bare_b_right, right_cols),
+        )
+    } else if a_in_right && b_in_left {
+        (
+            get_matching(&bare_b_left, left_cols),
+            get_matching(&bare_a_right, right_cols),
+        )
+    } else {
+        (None, None)
+    };
+    // Fallback: alias was lost (e.g. .alias("b").select(...)); match by suffix after "." (#374).
+    if left_key.is_none() || right_key.is_none() {
+        let a_suffix = suffix_if_dot(key_a);
+        let b_suffix = suffix_if_dot(key_b);
+        if let (Some(sa), Some(sb)) = (a_suffix, b_suffix) {
+            let a_in_l = get_matching(sa, left_cols).is_some();
+            let a_in_r = get_matching(sa, right_cols).is_some();
+            let b_in_l = get_matching(sb, left_cols).is_some();
+            let b_in_r = get_matching(sb, right_cols).is_some();
+            if a_in_l && b_in_r {
+                return (
+                    get_matching(sa, left_cols),
+                    get_matching(sb, right_cols),
+                );
+            }
+            if a_in_r && b_in_l {
+                return (
+                    get_matching(sb, left_cols),
+                    get_matching(sa, right_cols),
+                );
+            }
+        }
+    }
+    (left_key, right_key)
+}
+
 #[pyclass]
 struct PyDataFrame {
     inner: DataFrame,
@@ -3038,17 +3113,40 @@ impl PyDataFrame {
             // Complex expression (e.g. left.dept_id == right.dept_id): try key-based join first (#1049).
             if let Ok(condition) = on_arg.downcast::<PyColumn>() {
                 let expr = condition.borrow().inner.clone().into_expr();
-                if let Some((left_key, right_key)) = try_extract_join_eq_columns(&expr) {
-                    return self
+                if let Some((key_a, key_b)) = try_extract_join_eq_columns(&expr) {
+                    // Resolve which key belongs to left vs right (issue #421: F.col("Key") == F.col("Name") with Key on right).
+                    let left_cols: std::collections::HashSet<String> = self
                         .inner
-                        .join_with_keys(
-                            &other.inner,
-                            vec![left_key.as_str()],
-                            vec![right_key.as_str()],
-                            join_type,
-                        )
-                        .map(|df| PyDataFrame { inner: df })
-                        .map_err(to_py_err);
+                        .columns()
+                        .map_err(to_py_err)?
+                        .into_iter()
+                        .collect();
+                    let right_cols: std::collections::HashSet<String> = other
+                        .inner
+                        .columns()
+                        .map_err(to_py_err)?
+                        .into_iter()
+                        .collect();
+                    let (left_key, right_key) = resolve_join_keys_with_aliases(
+                        &key_a,
+                        &key_b,
+                        &left_cols,
+                        &right_cols,
+                        self.inner.get_alias().as_deref(),
+                        other.inner.get_alias().as_deref(),
+                    );
+                    if let Some((lk, rk)) = left_key.zip(right_key) {
+                        return self
+                            .inner
+                            .join_with_keys(
+                                &other.inner,
+                                vec![lk.as_str()],
+                                vec![rk.as_str()],
+                                join_type,
+                            )
+                            .map(|df| PyDataFrame { inner: df })
+                            .map_err(to_py_err);
+                    }
                 }
                 // Non-eq expression: cross + filter (ambiguous duplicate column names may apply).
                 let crossed = self.inner.cross_join(&other.inner).map_err(to_py_err)?;
