@@ -2590,10 +2590,12 @@ impl Column {
         let n_expr = lit(n as f64);
         let rank_f = rank_expr.cast(DataType::Float64);
         let count_f = count_expr.cast(DataType::Float64);
-        // Avoid division by zero when partition is empty: use bucket 1
-        let bucket = when(count_f.clone().eq(lit(0.0)))
-            .then(lit(1.0))
-            .otherwise((rank_f * n_expr / count_f).ceil());
+        // Avoid division by zero when partition is empty: use bucket 1.
+        // PySpark parity: ntile(n) uses floor((rank - 1) * n / count) + 1 so that
+        // the first buckets get the extra rows when count % n != 0.
+        let bucket = when(count_f.clone().eq(lit(0.0))).then(lit(1.0)).otherwise(
+            ((rank_f.clone() - lit(1.0)) * n_expr.clone() / count_f.clone()).floor() + lit(1.0),
+        );
         let clamped = bucket.clip(lit(1.0), lit(n as f64));
         Self::from_expr(clamped.cast(DataType::Int32), None)
     }
