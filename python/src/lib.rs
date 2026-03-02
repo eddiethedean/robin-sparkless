@@ -3019,24 +3019,15 @@ impl PyDataFrame {
         self.inner.count().map_err(to_py_err)
     }
 
-    /// PySpark parity: head() returns first Row (or None); head(n) returns list of first n rows.
+    /// PySpark-inspired head(): return a small DataFrame that can be collected.
+    /// For robin-sparkless, head() and head(n) both return a DataFrame limited to the
+    /// first `n` rows so tests can call `.collect()` on the result (issue #413/#1077).
     #[pyo3(signature = (n=None))]
     fn head(&self, py: Python<'_>, n: Option<usize>) -> PyResult<PyObject> {
         let k = n.unwrap_or(1);
         let limited = self.inner.limit(k).map_err(to_py_err)?;
         let limited_py = PyDataFrame { inner: limited };
-        let rows = limited_py.collect(py)?;
-        if n.is_none() {
-            // head() without arg: single Row or None
-            Ok(rows
-                .into_iter()
-                .next()
-                .map(|r| r.into_py(py))
-                .unwrap_or_else(|| py.None().into_py(py)))
-        } else {
-            // head(n): list of rows
-            Ok(PyList::new_bound(py, rows).into_py(py))
-        }
+        Ok(limited_py.into_py(py))
     }
 
     #[getter]
