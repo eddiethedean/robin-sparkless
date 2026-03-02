@@ -200,10 +200,16 @@ pub fn join(
     let coalesce = if keys_differ {
         JoinCoalesce::KeepColumns
     } else if coalesce_same_name_keys
-        && matches!(how, JoinType::Inner | JoinType::Left | JoinType::Right | JoinType::Outer)
+        && matches!(
+            how,
+            JoinType::Inner | JoinType::Left | JoinType::Right | JoinType::Outer
+        )
     {
         JoinCoalesce::CoalesceColumns
-    } else if matches!(how, JoinType::Inner | JoinType::Left | JoinType::Right | JoinType::Outer) {
+    } else if matches!(
+        how,
+        JoinType::Inner | JoinType::Left | JoinType::Right | JoinType::Outer
+    ) {
         JoinCoalesce::KeepColumns
     } else {
         JoinCoalesce::CoalesceColumns
@@ -354,7 +360,16 @@ mod tests {
     fn left_join() {
         let left = left_df();
         let right = right_df();
-        let out = join(&left, &right, vec!["id"], vec!["id"], JoinType::Left, false, false).unwrap();
+        let out = join(
+            &left,
+            &right,
+            vec!["id"],
+            vec!["id"],
+            JoinType::Left,
+            false,
+            false,
+        )
+        .unwrap();
         assert_eq!(out.count().unwrap(), 2);
     }
 
