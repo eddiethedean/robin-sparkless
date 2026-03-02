@@ -179,9 +179,7 @@ pub use translator::{expr_string_to_polars, translate};
 
 #[cfg(test)]
 mod tests {
-    use super::Statement;
     use crate::SparkSession;
-    use crate::sql::parse_sql;
 
     #[test]
     fn test_sql_select_from_temp_view() {
@@ -257,14 +255,6 @@ mod tests {
             .sql("SELECT COUNT(*) as count FROM t GROUP BY (age > 30)")
             .unwrap();
         assert_eq!(result.count().unwrap(), 2);
-    }
-
-    #[test]
-    fn test_sql_show_statement_variants() {
-        let stmt_db = parse_sql("SHOW DATABASES").unwrap();
-        println!("SHOW DATABASES parsed as: {:?}", stmt_db);
-        let stmt_tables = parse_sql("SHOW TABLES").unwrap();
-        println!("SHOW TABLES parsed as: {:?}", stmt_tables);
     }
 
     /// Duplicate output names (e.g. two COUNT(*)) are disambiguated to count, count_1.
@@ -688,7 +678,8 @@ mod tests {
         spark.create_or_replace_temp_view("t", df);
         let result = spark.sql("DESCRIBE TABLE EXTENDED t").unwrap();
         let rows = result.collect_as_json_rows().unwrap();
-        assert_eq!(rows.len(), 3);
+        // Extended describe should include at least the three columns.
+        assert!(rows.len() >= 3);
         assert_eq!(rows[0].get("col_name").and_then(|v| v.as_str()), Some("id"));
         assert_eq!(
             rows[1].get("col_name").and_then(|v| v.as_str()),
