@@ -2390,7 +2390,7 @@ fn resolve_join_keys_with_aliases(
     }
     /// For "alias.col" when alias is None, use suffix so "b.code" matches "code" (#374).
     fn suffix_if_dot(key: &str) -> Option<&str> {
-        key.split('.').last().filter(|s| !s.is_empty())
+        key.split('.').next_back().filter(|s| !s.is_empty())
     }
     fn get_matching(name: &str, set: &std::collections::HashSet<String>) -> Option<String> {
         set.iter().find(|c| c.eq_ignore_ascii_case(name)).cloned()
