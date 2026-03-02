@@ -63,5 +63,9 @@ _build/
 artifacts/
 artifact/
 
+# Build artifacts (native lib debug symbols, etc.)
+*.dSYM/
+*.dSYM
+
 # Extractor clone
 .spark_clone/
