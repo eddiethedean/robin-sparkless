@@ -2701,13 +2701,16 @@ impl Column {
 
     /// Add or replace a struct field (PySpark Column.withField), returning an error if the
     /// column is not a struct type. Uses a map_many UDF so we don't rely on Polars "*" wildcard
-    /// (removed in 0.53).
+    /// (removed in 0.53). Schema callback returns the extended struct so collected rows include
+    /// the new field (issue #1066).
     pub fn try_with_field(
         &self,
         name: &str,
         value: &Column,
     ) -> Result<Column, polars::error::PolarsError> {
+        use polars::prelude::PlSmallStr;
         let field_name = name.to_string();
+        let field_name_schema = field_name.clone();
         let args = [value.expr().clone()];
         let expr = self.expr().clone().map_many(
             move |cols| {
@@ -2719,7 +2722,45 @@ impl Column {
                 ))
             },
             &args,
-            |_schema, fields| Ok(fields[0].clone()),
+            move |_schema, fields| {
+                let struct_field = &fields[0];
+                let struct_dtype = struct_field.dtype();
+                let inner: &[Field] = match struct_dtype {
+                    DataType::Struct(f) => f.as_ref(),
+                    _ => return Ok(struct_field.clone()),
+                };
+                let value_dtype = fields[1].dtype().clone();
+                let known_value_dtype = if value_dtype.is_known() {
+                    value_dtype
+                } else if let DataType::Unknown(uk) = &value_dtype {
+                    uk.materialize().unwrap_or(DataType::String)
+                } else {
+                    DataType::String
+                };
+                let mut new_fields: Vec<Field> = inner.to_vec();
+                let mut replaced = false;
+                for f in &mut new_fields {
+                    if f.name.as_str() == field_name_schema {
+                        // When replacing, keep existing field's dtype so literals don't force String (#1066).
+                        let dtype = if f.dtype.is_known() {
+                            f.dtype.clone()
+                        } else {
+                            known_value_dtype.clone()
+                        };
+                        *f = Field::new(PlSmallStr::from(f.name.as_str()), dtype);
+                        replaced = true;
+                        break;
+                    }
+                }
+                if !replaced {
+                    new_fields.push(Field::new(
+                        PlSmallStr::from(field_name_schema.as_str()),
+                        known_value_dtype,
+                    ));
+                }
+                let out_dtype = DataType::Struct(new_fields.into());
+                Ok(Field::new(struct_field.name().clone(), out_dtype))
+            },
         );
         Ok(Self::from_expr(expr, None))
     }
