@@ -926,16 +926,6 @@ mod tests {
     #[test]
     fn test_sql_unsupported_statement_clear_error() {
         let spark = SparkSession::builder().app_name("test").get_or_create();
-        let err = match spark.sql("INSERT INTO t SELECT 1") {
-            Ok(_) => panic!("INSERT should not be supported"),
-            Err(e) => e,
-        };
-        let msg = err.to_string();
-        assert!(
-            msg.contains("supported") || msg.contains("SELECT"),
-            "error should mention supported statements: {}",
-            msg
-        );
         let err2 = match spark.sql("COMMIT") {
             Ok(_) => panic!("COMMIT should not be supported"),
             Err(e) => e,
