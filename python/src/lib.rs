@@ -2498,6 +2498,30 @@ impl PyDataFrame {
                 .map_err(to_py_err)?;
             return Ok(df);
         }
+        // F.expr(...) in filter: handle PyExprStr SQL expression strings.
+        if let Ok(py_expr_str) = condition.downcast::<PyExprStr>() {
+            let session = THREAD_ACTIVE_SESSIONS
+                .with(|cell| cell.borrow().last().map(|s| s.clone_ref(py)))
+                .ok_or_else(|| {
+                    PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
+                        "filter with F.expr() requires an active SparkSession",
+                    )
+                })?;
+            let session_ref = session.bind(py).downcast::<PySparkSession>().map_err(|_| {
+                PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected SparkSession")
+            })?;
+            let expr = robin_sparkless::sql::expr_string_to_polars(
+                &py_expr_str.borrow().sql,
+                &session_ref.borrow().inner,
+                &slf.inner,
+            )
+            .map_err(to_py_err)?;
+            return slf
+                .inner
+                .filter(expr)
+                .map(|df| PyDataFrame { inner: df })
+                .map_err(to_py_err);
+        }
         if let Ok(expr_str) = condition.extract::<String>() {
             let session = THREAD_ACTIVE_SESSIONS
                 .with(|cell| cell.borrow().last().map(|s| s.clone_ref(py)))
