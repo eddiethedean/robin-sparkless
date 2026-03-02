@@ -192,12 +192,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Install Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
       - name: Install Rust
         uses: dtolnay/rust-toolchain@master
         with:
           toolchain: 1.93.1
-      - name: Install maturin
-        run: pip install maturin
       - name: Cache cargo
         uses: actions/cache@v4
         with:
@@ -210,11 +212,13 @@ jobs:
             ${{ runner.os }}-cargo-
       - name: Build and test sparkless
         run: |
-          cd python && maturin develop
-          python -c "from sparkless.sql import SparkSession; from sparkless.sql.functions import col, lit_i64; s = SparkSession.builder.app_name('ci').get_or_create(); df = s.create_dataframe([(1, 2, 'a')], ['x', 'y', 'z']); assert df.count() == 1; print('sparkless OK')"
+          python -m venv .venv
+          .venv/bin/pip install --upgrade pip maturin
+          cd python && ../.venv/bin/maturin develop
+          ../.venv/bin/python -c "from sparkless.sql import SparkSession; from sparkless.sql.functions import col, lit_i64; s = SparkSession.builder.app_name('ci').get_or_create(); df = s.create_dataframe([(1, 2, 'a')], ['x', 'y', 'z']); assert df.count() == 1; print('sparkless OK')"
       - name: Install pytest and run vendored upstream tests (fast subset)
         run: |
-          pip install pytest pytest-xdist hypothesis pytest-timeout
-          python -m pytest tests/upstream_sparkless -m "not delta and not integration" -v --tb=short
+          .venv/bin/pip install pytest pytest-xdist hypothesis pytest-timeout
+          .venv/bin/python -m pytest tests/upstream_sparkless -m "not delta and not integration" -v --tb=short
         timeout-minutes: 15
         continue-on-error: true  # Many tests import upstream-internal modules; burn down over time
