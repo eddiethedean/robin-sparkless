@@ -1103,26 +1103,56 @@ pub fn apply_get(columns: &mut [Column]) -> PolarsResult<Option<Column>> {
     let name = columns[0].field().into_owned().name;
     let mut map_series = std::mem::take(&mut columns[0]).take_materialized_series();
     let key_series = std::mem::take(&mut columns[1]).take_materialized_series();
-    let key_str = key_series.cast(&DataType::String)?;
-    let key_vec: Vec<String> = (0..key_str.len())
-        .map(|i| key_str.get(i).map(|av| av.to_string()).unwrap_or_default())
-        .collect();
-    let key_len = key_vec.len();
+    // Work with keys as Utf8 so we can compare string values without extra quotes.
+    let key_str_series = key_series
+        .cast(&DataType::String)
+        .map_err(|e| compute_err("get cast key to string", e))?;
+    let key_utf8 = key_str_series
+        .str()
+        .map_err(|e| compute_err("get key utf8", e))?;
+    let key_len = key_utf8.len();
     let map_len = map_series.len();
-    if matches!(map_series.dtype(), DataType::Struct(_)) {
-        let st = map_series.struct_().map_err(|e| compute_err("get struct", e))?;
+    if let DataType::Struct(field_metas) = map_series.dtype() {
+        // Global map semantics for struct-typed maps: treat each struct field as a map key
+        // and use the first non-null value per field as the canonical value for that key.
+        let st = map_series
+            .struct_()
+            .map_err(|e| compute_err("get struct", e))?;
+        let fields_series = st.fields_as_series();
+        use std::collections::HashMap;
+        let mut key_to_field_and_row: HashMap<String, (usize, usize)> = HashMap::new();
+        for (field_idx, meta) in field_metas.iter().enumerate() {
+            let series = &fields_series[field_idx];
+            for row_idx in 0..series.len() {
+                if let Ok(av) = series.get(row_idx) {
+                    if !matches!(av, polars::prelude::AnyValue::Null) {
+                        key_to_field_and_row
+                            .entry(meta.name.to_string())
+                            .or_insert((field_idx, row_idx));
+                        break;
+                    }
+                }
+            }
+        }
+        let value_dtype = field_metas
+            .get(0)
+            .map(|f| f.dtype.clone())
+            .unwrap_or(DataType::String);
         let out_len = map_len.max(key_len);
         let mut result_series: Vec<Series> = Vec::with_capacity(out_len);
         for i in 0..out_len {
-            let map_idx = if map_len == 1 { 0 } else { i };
             let key_idx = if key_len == 1 { 0 } else { i };
-            let key_name = key_vec
-                .get(key_idx)
-                .map(|s| s.as_str())
-                .unwrap_or("");
-            let one_series = match st.field_by_name(key_name) {
-                Ok(field_series) => field_series.slice(map_idx as i64, 1),
-                Err(_) => Series::full_null(PlSmallStr::EMPTY, 1, &DataType::String),
+            let key_name = key_utf8.get(key_idx).unwrap_or("");
+            let one_series = if let Some((field_idx, rep_row)) =
+                key_to_field_and_row.get(key_name).copied()
+            {
+                let series = &fields_series[field_idx];
+                let av = series
+                    .get(rep_row)
+                    .unwrap_or(polars::prelude::AnyValue::Null);
+                any_value_to_single_series(av, &value_dtype)?
+            } else {
+                Series::full_null(PlSmallStr::EMPTY, 1, &value_dtype)
             };
             result_series.push(one_series);
         }
@@ -1152,10 +1182,8 @@ pub fn apply_get(columns: &mut [Column]) -> PolarsResult<Option<Column>> {
     };
     let mut result_series: Vec<Series> = Vec::with_capacity(map_len);
     for (i, opt_amort) in map_ca.amortized_iter().enumerate() {
-        let target = key_vec
-            .get(if key_len == 1 { 0 } else { i })
-            .map(|s| s.as_str())
-            .unwrap_or("");
+        let key_idx = if key_len == 1 { 0 } else { i };
+        let target = key_utf8.get(key_idx).unwrap_or("");
         let target_trim = target.trim();
         let mut found: Option<Series> = None;
         if let Some(amort) = opt_amort {
@@ -1164,8 +1192,14 @@ pub fn apply_get(columns: &mut [Column]) -> PolarsResult<Option<Column>> {
                 let s = elem.deep_clone();
                 if let Ok(st) = s.struct_() {
                     if let Ok(k) = st.field_by_name("key") {
-                        let k_str: String =
-                            k.get(0).ok().map(|av| av.to_string()).unwrap_or_default();
+                        let k_str: String = k
+                            .get(0)
+                            .ok()
+                            .map(|av| match av {
+                                polars::prelude::AnyValue::String(s) => s.to_string(),
+                                _ => av.to_string(),
+                            })
+                            .unwrap_or_default();
                         if k_str.trim() == target_trim {
                             if let Ok(v) = st.field_by_name("value") {
                                 found = Some(v);

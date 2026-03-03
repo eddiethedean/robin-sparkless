@@ -2094,9 +2094,7 @@ mod tests {
     }
 
     /// Issue #1111: with_column(map_col[col("Value")]) must resolve "Value" so map lookup works.
-    /// Ignored: literal map + column key broadcast path returns null for first row (apply_get take expansion).
     #[test]
-    #[ignore]
     fn with_column_map_get_with_column_key_resolves_key() {
         use polars::prelude::{NamedFrom, Series};
         let spark = SparkSession::builder()

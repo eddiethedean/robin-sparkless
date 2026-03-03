@@ -3314,7 +3314,8 @@ impl Column {
             |cols| expect_col(crate::udfs::apply_get(cols)),
             &args,
             |_schema, fields| {
-                let value_dtype = match &fields[0].dtype {
+                let dtype = &fields[0].dtype;
+                let value_dtype = match dtype {
                     DataType::List(inner) => match inner.as_ref() {
                         DataType::Struct(struct_fields) => struct_fields
                             .iter()
@@ -3323,6 +3324,10 @@ impl Column {
                             .unwrap_or(DataType::String),
                         _ => DataType::String,
                     },
+                    DataType::Struct(struct_fields) => struct_fields
+                        .get(0)
+                        .map(|f| f.dtype.clone())
+                        .unwrap_or(DataType::String),
                     _ => DataType::String,
                 };
                 Ok(Field::new(fields[0].name().clone(), value_dtype))
