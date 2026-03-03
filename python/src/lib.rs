@@ -4781,6 +4781,12 @@ impl PyColumn {
         self.is_null()
     }
 
+    /// PySpark-style snake_case alias for isNull() (used in some upstream tests).
+    #[pyo3(name = "isnull")]
+    fn is_null_snake(&self) -> PyColumn {
+        self.is_null()
+    }
+
     #[pyo3(name = "getItem")]
     fn get_item_camel(&self, index_or_key: &Bound<'_, PyAny>) -> PyResult<PyColumn> {
         if let Ok(i) = index_or_key.extract::<i64>() {
@@ -4891,6 +4897,12 @@ impl PyColumn {
 
     #[pyo3(name = "isNotNull")]
     fn is_not_null_camel(&self) -> PyColumn {
+        self.is_not_null()
+    }
+
+    /// PySpark-style snake_case alias for isNotNull() (used in some upstream tests).
+    #[pyo3(name = "isnotnull")]
+    fn is_not_null_snake(&self) -> PyColumn {
         self.is_not_null()
     }
 

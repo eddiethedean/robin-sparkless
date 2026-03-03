@@ -5050,6 +5050,10 @@ pub fn apply_string_to_int(
             out_series
         }
         _ => {
+            // For other dtypes, when `strict` is true, keep existing error behavior.
+            // When `strict` is false (used by the int/long cast path), fall back to a
+            // regular cast so engine-generated numeric expressions (e.g. row_number(),
+            // rank(), dense_rank()) can be cast to int/long instead of producing all-null.
             if strict {
                 return Err(PolarsError::ComputeError(
                     format!(
@@ -5060,7 +5064,7 @@ pub fn apply_string_to_int(
                     .into(),
                 ));
             }
-            Series::new_null(name.clone(), series.len()).cast(&target)?
+            series.cast(&target)?
         }
     };
     Ok(Some(Column::new(name, out)))
