@@ -2258,8 +2258,14 @@ mod tests {
         )
         .unwrap();
         // Simulate Python: col("full_id") == "rec1_cust1" -> Column.into_expr() is Alias(BinaryExpr(...))
-        let condition = Column::new("full_id".to_string()).eq(lit("rec1_cust1")).into_expr();
+        let condition = Column::new("full_id".to_string())
+            .eq(lit("rec1_cust1"))
+            .into_expr();
         let result = filter(&transformed, condition, false).unwrap();
-        assert_eq!(result.count().unwrap(), 1, "#1105: filter on string column must return 1 row");
+        assert_eq!(
+            result.count().unwrap(),
+            1,
+            "#1105: filter on string column must return 1 row"
+        );
     }
 }
