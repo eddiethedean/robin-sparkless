@@ -851,7 +851,7 @@ fn translate_select_from(
     if let Some(ref prefix) = left_alias_opt {
         df = df_prefix_columns(&df, prefix)?;
     }
-    let mut current_left_alias = left_alias_opt.as_deref();
+    let current_left_alias = left_alias_opt.as_deref();
     for join_spec in &first_tj.joins {
         let mut right_df = resolve_table_factor(session, &join_spec.relation)?;
         let right_alias_opt = table_alias_from_factor(&join_spec.relation);
@@ -1909,8 +1909,7 @@ fn projection_to_agg_exprs(
                             .collect::<Vec<_>>()
                             .join("_");
                         let last = parts.last().map(|i| i.value.as_str()).unwrap_or("");
-                        let in_group =
-                            group_cols.iter().any(|c| c == &qualified || c == last);
+                        let in_group = group_cols.iter().any(|c| c == &qualified || c == last);
                         if !in_group {
                             return Err(PolarsError::InvalidOperation(
                                 format!(

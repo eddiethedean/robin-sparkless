@@ -118,9 +118,10 @@ pub fn join(
             })
         })
         .collect::<Result<_, _>>()?;
-    // For outer joins, add temp copies of left join keys so we can restore them as canonical keys
-    // after the join (PySpark parity for grouping/selection on join keys).
-    if matches!(how, JoinType::Outer) {
+    // For outer joins invoked via column-name based join (coalesce_same_name_keys = true),
+    // add temp copies of left join keys so we can restore them as canonical keys after the join
+    // (PySpark parity for grouping/selection on join keys when using join(on=...)).
+    if matches!(how, JoinType::Outer) && coalesce_same_name_keys {
         use polars::prelude::col;
         let mut copy_exprs: Vec<Expr> = Vec::new();
         for name in &left_key_names {
@@ -132,21 +133,24 @@ pub fn join(
             left_lf = left_lf.with_columns(copy_exprs);
         }
     }
-    // For full outer joins where left/right use the same key names, rename right keys to
-    // a suffixed form (e.g. key -> key_right) so that we preserve both columns and can
-    // treat the left key as the canonical join key (PySpark parity for outer join).
-    if matches!(how, JoinType::Outer) && left_key_names == right_key_names {
-        use std::collections::HashMap;
+    // For full outer joins (via join(on=...)) where left/right use the same key names,
+    // rename right keys to a suffixed form (e.g. key -> key_right) so that we preserve
+    // both columns internally while building the join, but then drop the suffixed right
+    // key columns from the final result so the public schema matches PySpark (single
+    // join key column). Condition-based joins (on=Column) keep both key columns.
+    let mut outer_same_name_keys = false;
+    if matches!(how, JoinType::Outer)
+        && coalesce_same_name_keys
+        && left_key_names == right_key_names
+    {
         use polars::prelude::col;
+        use std::collections::HashMap;
         let mut rename_map: HashMap<String, String> = HashMap::new();
         for name in &right_key_names {
             rename_map.insert(name.clone(), format!("{name}_right"));
         }
         if !rename_map.is_empty() {
-            let current_names: Vec<String> = right
-                .columns()?
-                .into_iter()
-                .collect();
+            let current_names: Vec<String> = right.columns()?.into_iter().collect();
             let exprs: Vec<Expr> = current_names
                 .iter()
                 .map(|n| {
@@ -164,6 +168,7 @@ pub fn join(
                     *rk = new_name.clone();
                 }
             }
+            outer_same_name_keys = true;
         }
     }
 
@@ -271,16 +276,14 @@ pub fn join(
         for i in 0..left_key_names.len() {
             let left_name = &left_key_names[i];
             let right_name = &right_key_names[i];
-            let left_dtype = left
-                .get_column_dtype(left_name.as_str())
-                .ok_or_else(|| {
-                    PolarsError::ComputeError(
-                        format!("join key '{}' not found on left", left_name).into(),
-                    )
-                })?;
+            let left_dtype = left.get_column_dtype(left_name.as_str()).ok_or_else(|| {
+                PolarsError::ComputeError(
+                    format!("join key '{}' not found on left", left_name).into(),
+                )
+            })?;
             let right_dtype = right_schema
                 .get(right_name.as_str())
-                .map(|dt| dt.clone())
+                .cloned()
                 .ok_or_else(|| {
                     PolarsError::ComputeError(
                         format!("join key '{}' not found on right", right_name).into(),
@@ -338,8 +341,10 @@ pub fn join(
         // Drop the temp columns from the result.
         let schema = joined.collect_schema()?;
         let all_names: Vec<String> = schema.iter_names().map(|n| n.to_string()).collect();
-        let temp_set: std::collections::HashSet<&str> =
-            outer_left_key_copies.iter().map(|(_, t)| t.as_str()).collect();
+        let temp_set: std::collections::HashSet<&str> = outer_left_key_copies
+            .iter()
+            .map(|(_, t)| t.as_str())
+            .collect();
         let keep_exprs: Vec<Expr> = all_names
             .iter()
             .filter(|n| !temp_set.contains(n.as_str()))
@@ -349,7 +354,21 @@ pub fn join(
     }
 
     let result_schema = joined.collect_schema()?;
-    let names: Vec<String> = result_schema.iter_names().map(|s| s.to_string()).collect();
+    let mut names: Vec<String> = result_schema.iter_names().map(|s| s.to_string()).collect();
+    // For outer joins with same-named keys, drop the suffixed right key columns (e.g. key_right)
+    // so the public schema exposes a single join key column, matching PySpark parity fixtures.
+    if matches!(how, JoinType::Outer) && coalesce_same_name_keys && outer_same_name_keys {
+        let drop_set: std::collections::HashSet<&str> =
+            right_key_names.iter().map(|s| s.as_str()).collect();
+        let keep_exprs: Vec<Expr> = names
+            .iter()
+            .filter(|n| !drop_set.contains(n.as_str()))
+            .map(|n| col(n.as_str()))
+            .collect();
+        joined = joined.select(&keep_exprs);
+        let result_schema = joined.collect_schema()?;
+        names = result_schema.iter_names().map(|s| s.to_string()).collect();
+    }
     let mut seen = std::collections::HashSet::new();
     let mut unique_order: Vec<String> = Vec::new();
     for n in &names {
@@ -658,8 +677,14 @@ mod tests {
             .app_name("outer_join_groupby_tests")
             .get_or_create();
 
-        let left_tuples = vec![(1i64, 0i64, "L1".to_string()), (3i64, 0i64, "L3".to_string())];
-        let right_tuples = vec![(1i64, 0i64, "R1".to_string()), (2i64, 0i64, "R2".to_string())];
+        let left_tuples = vec![
+            (1i64, 0i64, "L1".to_string()),
+            (3i64, 0i64, "L3".to_string()),
+        ];
+        let right_tuples = vec![
+            (1i64, 0i64, "R1".to_string()),
+            (2i64, 0i64, "R2".to_string()),
+        ];
 
         let left = spark
             .create_dataframe(left_tuples, vec!["key", "extra_left", "left_val"])
