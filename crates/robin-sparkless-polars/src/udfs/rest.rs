@@ -3897,12 +3897,16 @@ pub fn apply_to_timestamp_format(
     let chrono_fmt = format
         .map(pyspark_format_to_chrono)
         .unwrap_or_else(|| "%Y-%m-%d %H:%M:%S".to_string());
+    // #1101: Polars casts Datetime to String with space (e.g. "2024-01-15 10:30:00"); try space variant if T-format fails.
+    let chrono_fmt_alt = chrono_fmt.replace('T', " ");
     let ca = series.str().map_err(|e| compute_err("to_timestamp", e))?;
     let out = Int64Chunked::from_iter_options(
         name.as_str().into(),
         ca.into_iter().map(|opt_s| {
             opt_s.and_then(|s| {
-                NaiveDateTime::parse_from_str(s.trim(), &chrono_fmt)
+                let s = s.trim();
+                NaiveDateTime::parse_from_str(s, &chrono_fmt)
+                    .or_else(|_| NaiveDateTime::parse_from_str(s, &chrono_fmt_alt))
                     .ok()
                     .map(|ndt| ndt.and_utc().timestamp_micros())
             })
