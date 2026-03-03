@@ -900,6 +900,13 @@ impl Column {
         Self::from_expr(expr, None)
     }
 
+    /// Logical NOT of a boolean expression column (PySpark `~` on boolean predicates).
+    /// Implemented as `expr == false` so it flows through expr_coerce_to_boolean like other comparisons.
+    pub fn logical_not(&self) -> Column {
+        let expr = self.expr().clone().eq(lit(false));
+        Self::from_expr(expr, None)
+    }
+
     /// Parse string to map (PySpark str_to_map). "k1:v1,k2:v2" -> map.
     pub fn str_to_map(&self, pair_delim: &str, key_value_delim: &str) -> Column {
         let pair_delim = pair_delim.to_string();
