@@ -1968,6 +1968,16 @@ fn infer_type_from_py_value(v: &Bound<'_, PyAny>) -> String {
     if v.downcast::<PyBytes>().is_ok() {
         return "binary".to_string();
     }
+    // #1103: Preserve date/timestamp from Python so createDataFrame([{"d": date(2026,1,1), "s": "2025-06-15"}])
+    // infers d as date and s as string; string column stays string in filter result.
+    if let Ok(dt) = v.getattr("isoformat") {
+        if dt.is_callable() {
+            if v.getattr("hour").is_ok() {
+                return "timestamp".to_string();
+            }
+            return "date".to_string();
+        }
+    }
     "string".to_string()
 }
 

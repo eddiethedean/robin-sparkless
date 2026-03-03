@@ -1705,23 +1705,12 @@ impl SparkSession {
                     Some("double".to_string())
                 }
             }
-            JsonValue::String(s) => {
-                // #1084: Only infer date when string strictly matches YYYY-MM-DD (e.g. 10 chars,
-                // two-digit month/day) so "2024-01-2" stays string and comparisons remain lexicographic.
-                let s = s.trim();
-                if s.len() == 10
-                    && s.as_bytes().get(4) == Some(&b'-')
-                    && s.as_bytes().get(7) == Some(&b'-')
-                    && chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").is_ok()
-                {
-                    Some("date".to_string())
-                } else if chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S%.f").is_ok()
-                    || chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S").is_ok()
-                {
-                    Some("timestamp".to_string())
-                } else {
-                    Some("string".to_string())
-                }
+            JsonValue::String(_) => {
+                // #1103: Keep string columns as string in createDataFrame so that e.g.
+                // filter(date_col > string_col) only casts the string in the predicate and the
+                // result row still has the string column as string (PySpark parity). Do not infer
+                // date/timestamp from date-like strings; user can pass explicit schema if needed.
+                Some("string".to_string())
             }
             JsonValue::Array(_) => Some("array".to_string()),
             JsonValue::Object(_) => None, // struct type is inferred in infer_schema_from_json_rows from object keys
