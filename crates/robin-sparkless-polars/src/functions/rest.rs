@@ -1396,34 +1396,20 @@ pub fn expr_coerce_to_boolean(expr: Expr) -> Expr {
     }
 }
 
-/// Canonical display name for cast target type in column names (e.g. CAST(avg(x) AS STRING)).
-fn cast_display_type(dtype: &DataType, raw_type_name: &str) -> String {
-    match dtype {
-        DataType::Int32 => "INT".to_string(),
-        DataType::Int64 => "LONG".to_string(),
-        DataType::Float64 => "DOUBLE".to_string(),
-        DataType::Float32 => "FLOAT".to_string(),
-        DataType::String => "STRING".to_string(),
-        _ => raw_type_name.to_uppercase(),
-    }
-}
-
 fn cast_impl(column: &Column, type_name: &str, strict: bool) -> Result<Column, String> {
     let dtype = parse_type_name(type_name)?;
-    let display_type = cast_display_type(&dtype, type_name);
-    let base_name = column.name();
-    let cast_name = format!("CAST({} AS {})", base_name, display_type);
+    let base_name = column.name().to_string();
 
     if dtype == DataType::Boolean {
-        let out_name = base_name.to_string();
+        let out_name = base_name.clone();
         let expr = column.expr().clone().map(
             move |col| crate::column::expect_col(crate::udfs::apply_string_to_boolean(col, strict)),
             move |_schema, _field| Ok(Field::new(out_name.clone().into(), DataType::Boolean)),
         );
-        // PySpark: col("x").cast("boolean") keeps output column name "x".
+        // PySpark: col("x").cast("boolean") and alias("y").cast(...) keep output column name.
         return Ok(Column::from_expr(
-            expr.alias(base_name),
-            Some(base_name.to_string()),
+            expr.alias(&base_name),
+            Some(base_name),
         ));
     }
     if dtype == DataType::Date {
@@ -1431,7 +1417,7 @@ fn cast_impl(column: &Column, type_name: &str, strict: bool) -> Result<Column, S
             move |col| crate::column::expect_col(crate::udfs::apply_string_to_date(col, strict)),
             |_schema, field| Ok(Field::new(field.name().clone(), DataType::Date)),
         );
-        return Ok(Column::from_expr(expr.alias(&cast_name), Some(cast_name)));
+        return Ok(Column::from_expr(expr.alias(&base_name), Some(base_name)));
     }
     if matches!(dtype, DataType::Datetime(_, _)) {
         use polars::datatypes::TimeUnit;
@@ -1446,7 +1432,7 @@ fn cast_impl(column: &Column, type_name: &str, strict: bool) -> Result<Column, S
                 ))
             },
         );
-        return Ok(Column::from_expr(expr.alias(&cast_name), Some(cast_name)));
+        return Ok(Column::from_expr(expr.alias(&base_name), Some(base_name)));
     }
     if dtype == DataType::Int32 || dtype == DataType::Int64 {
         // PySpark parity (#1048): cast(string -> int/long) returns NULL for invalid strings, not error.
@@ -1461,21 +1447,22 @@ fn cast_impl(column: &Column, type_name: &str, strict: bool) -> Result<Column, S
             },
             move |_schema, field| Ok(Field::new(field.name().clone(), dtype.clone())),
         );
-        return Ok(Column::from_expr(expr.alias(&cast_name), Some(cast_name)));
+        return Ok(Column::from_expr(expr.alias(&base_name), Some(base_name)));
     }
     if dtype == DataType::Float64 {
         let expr = column.expr().clone().map(
             move |col| crate::column::expect_col(crate::udfs::apply_string_to_double(col, strict)),
             |_schema, field| Ok(Field::new(field.name().clone(), DataType::Float64)),
         );
-        return Ok(Column::from_expr(expr.alias(&cast_name), Some(cast_name)));
+        return Ok(Column::from_expr(expr.alias(&base_name), Some(base_name)));
     }
     let expr = if strict {
         column.expr().clone().strict_cast(dtype)
     } else {
         column.expr().clone().cast(dtype)
     };
-    Ok(Column::from_expr(expr.alias(&cast_name), Some(cast_name)))
+    // PySpark / #1110: preserve column name (or alias) after cast so filter/select on alias work.
+    Ok(Column::from_expr(expr.alias(&base_name), Some(base_name)))
 }
 
 /// Cast column to the given type (PySpark cast).

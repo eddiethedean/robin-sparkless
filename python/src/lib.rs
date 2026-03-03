@@ -2913,9 +2913,11 @@ impl PyDataFrame {
             .map_err(|_| PyErr::new::<pyo3::exceptions::PyAttributeError, _>(name.to_string()))
     }
 
-    #[pyo3(signature = (n=None))]
-    fn show(&self, n: Option<usize>) -> PyResult<()> {
-        self.inner.show(n).map_err(to_py_err)
+    #[pyo3(signature = (n=20, truncate=true))]
+    fn show(&self, n: usize, truncate: bool) -> PyResult<()> {
+        // truncate: PySpark parity (e.g. show(truncate=False)); display layer may use it later
+        let _ = truncate;
+        self.inner.show(Some(n)).map_err(to_py_err)
     }
 
     #[getter]
