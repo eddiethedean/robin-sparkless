@@ -1,4 +1,5 @@
 .PHONY: build build-release build-all-features test test-rust check check-full check-crate fmt fmt-check clippy audit outdated deny \
+	lint-python \
 	clean \
 	build-python test-python test-python-upstream test-python-upstream-full \
 	test-parity-phase-a test-parity-phase-b test-parity-phase-c test-parity-phase-d \
@@ -58,7 +59,13 @@ check-crate:
 	cargo test -p $(CRATE) --all-features
 	@echo "check-crate ($(CRATE)): format, clippy, audit, deny, tests passed"
 
-# Backwards-compatible alias for full check suite (historically included Python).
+# Python lint and type-check: ruff format (check), ruff check, mypy. No Java/PySpark required.
+lint-python:
+	ruff format --check .
+	ruff check .
+	mypy .
+
+# Backwards-compatible alias for full check suite (Rust + Python lint).
 # With CRATE set, runs checks for that package only (faster when editing one crate).
 # Usage: make check-full  OR  make check-full CRATE=spark-sql-parser
 check-full:
@@ -67,7 +74,8 @@ check-full:
 	  echo "check-full (crate $(CRATE)): format, clippy, audit, deny, tests"; \
 	else \
 	  $(MAKE) check; \
-	  echo "check-full (Rust-only): format, clippy, audit, deny, tests"; \
+	  $(MAKE) lint-python; \
+	  echo "check-full: format, clippy, audit, deny, tests, ruff, mypy"; \
 	fi
 
 # Format code
