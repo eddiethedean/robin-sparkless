@@ -1561,12 +1561,24 @@ impl Column {
     }
 
     /// Add with PySpark-style string/number coercion (used by Python Column operators).
+    /// Schema: when both inputs are string, output is String (so filter col("x") == "y" after
+    /// withColumn(string + string) is not coerced to numeric by coerce_string_numeric_comparisons).
     pub fn add_pyspark(&self, other: &Column) -> Column {
         let args = [other.expr().clone()];
         let expr = self.expr().clone().map_many(
             |cols| expect_col(crate::udfs::apply_pyspark_add(cols)),
             &args,
-            |_schema, fields| Ok(Field::new(fields[0].name().clone(), DataType::Float64)),
+            |_schema, fields| {
+                let out_dtype = if fields.len() >= 2
+                    && fields[0].dtype == DataType::String
+                    && fields[1].dtype == DataType::String
+                {
+                    DataType::String
+                } else {
+                    DataType::Float64
+                };
+                Ok(Field::new(fields[0].name().clone(), out_dtype))
+            },
         );
         Self::from_expr(expr, None)
     }
