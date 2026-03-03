@@ -1407,10 +1407,7 @@ fn cast_impl(column: &Column, type_name: &str, strict: bool) -> Result<Column, S
             move |_schema, _field| Ok(Field::new(out_name.clone().into(), DataType::Boolean)),
         );
         // PySpark: col("x").cast("boolean") and alias("y").cast(...) keep output column name.
-        return Ok(Column::from_expr(
-            expr.alias(&base_name),
-            Some(base_name),
-        ));
+        return Ok(Column::from_expr(expr.alias(&base_name), Some(base_name)));
     }
     if dtype == DataType::Date {
         let expr = column.expr().clone().map(
