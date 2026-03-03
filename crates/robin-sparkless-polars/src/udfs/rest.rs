@@ -5117,6 +5117,10 @@ pub fn apply_string_to_boolean(column: Column, strict: bool) -> PolarsResult<Opt
                 ca.into_iter().map(|o| o.map(|v| v != 0.0)),
             )
         }
+        DataType::Null => {
+            // PySpark parity (#1109): lit(None).cast(BooleanType()) yields typed null column.
+            BooleanChunked::from_iter_options(name.as_str().into(), (0..series.len()).map(|_| None))
+        }
         _ => {
             if strict {
                 return Err(PolarsError::ComputeError(

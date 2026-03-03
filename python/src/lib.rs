@@ -3118,15 +3118,25 @@ impl PyDataFrame {
         self.inner.count().map_err(to_py_err)
     }
 
-    /// PySpark-inspired head(): return a small DataFrame that can be collected.
-    /// For robin-sparkless, head() and head(n) both return a DataFrame limited to the
-    /// first `n` rows so tests can call `.collect()` on the result (issue #413/#1077).
+    /// PySpark parity: head() returns a DataFrame (so .collect() works); head(n) returns list of Row.
+    /// (issue #413/#1077, #1109 delta schema evolution tests)
     #[pyo3(signature = (n=None))]
     fn head(&self, py: Python<'_>, n: Option<usize>) -> PyResult<PyObject> {
         let k = n.unwrap_or(1);
         let limited = self.inner.limit(k).map_err(to_py_err)?;
-        let limited_py = PyDataFrame { inner: limited };
-        Ok(limited_py.into_py(py))
+        match n {
+            Some(_) => {
+                // head(n) -> list of Row (PySpark parity for upstream tests e.g. test_delta_lake_schema_evolution)
+                let limited_py = PyDataFrame { inner: limited };
+                let rows = limited_py.collect(py)?;
+                Ok(PyList::new_bound(py, rows).into_py(py))
+            }
+            None => {
+                // head() -> DataFrame so .collect() can be called (issue #413)
+                let limited_py = PyDataFrame { inner: limited };
+                Ok(limited_py.into_py(py))
+            }
+        }
     }
 
     #[getter]
@@ -4322,7 +4332,7 @@ impl PyDataFrameWriter {
         inner
             .inner
             .write()
-            .save_as_table(&active, name, save_mode)
+            .save_as_table_with_options(&active, name, save_mode, &self.options)
             .map_err(to_py_err)
     }
 
