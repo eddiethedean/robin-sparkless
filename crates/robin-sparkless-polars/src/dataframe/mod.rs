@@ -361,6 +361,20 @@ impl DataFrame {
             Expr::Alias(inner, name) => (inner.as_ref().clone(), Some(name.clone())),
             _ => (expr.clone(), None),
         };
+        // #1102: Recursively coerce both sides of And/Or so (col("dt") >= "a") & (col("dt") <= "b")
+        // gets datetime-vs-string coercion in each comparison (plan sends string literals).
+        let expr_to_coerce = match &expr_to_coerce {
+            Expr::BinaryExpr { left, op, right } if matches!(op, Operator::And | Operator::Or) => {
+                let left_c = self.coerce_string_numeric_comparisons((**left).clone())?;
+                let right_c = self.coerce_string_numeric_comparisons((**right).clone())?;
+                Expr::BinaryExpr {
+                    left: Arc::new(left_c),
+                    op: *op,
+                    right: Arc::new(right_c),
+                }
+            }
+            _ => expr_to_coerce,
+        };
         fn wrap_expr_with_alias(
             expr: Expr,
             alias_name: Option<&polars::prelude::PlSmallStr>,

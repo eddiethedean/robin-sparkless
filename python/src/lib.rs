@@ -4318,6 +4318,17 @@ fn py_any_to_column(other: &Bound<'_, PyAny>) -> PyResult<Column> {
             return Ok(robin_sparkless::functions::lit_str(&format!("{:?}", vals)));
         }
     }
+    // datetime.date / datetime.datetime: convert to ISO string so plan gets string literal;
+    // backend coercion then casts to timestamp for col-vs-string comparison (#1102).
+    if let Ok(isoformat) = other.getattr("isoformat") {
+        if isoformat.is_callable() {
+            if let Ok(s) = isoformat.call0() {
+                if let Ok(iso) = s.extract::<String>() {
+                    return Ok(robin_sparkless::functions::lit_str(&iso));
+                }
+            }
+        }
+    }
     // Best effort: treat as string
     if let Ok(s) = other.str() {
         return Ok(robin_sparkless::functions::lit_str(&s.to_string()));
