@@ -3313,7 +3313,20 @@ impl Column {
         let expr = self.expr().clone().map_many(
             |cols| expect_col(crate::udfs::apply_get(cols)),
             &args,
-            |_schema, fields| Ok(fields[0].clone()),
+            |_schema, fields| {
+                let value_dtype = match &fields[0].dtype {
+                    DataType::List(inner) => match inner.as_ref() {
+                        DataType::Struct(struct_fields) => struct_fields
+                            .iter()
+                            .find(|f| f.name == "value")
+                            .map(|f| f.dtype.clone())
+                            .unwrap_or(DataType::String),
+                        _ => DataType::String,
+                    },
+                    _ => DataType::String,
+                };
+                Ok(Field::new(fields[0].name().clone(), value_dtype))
+            },
         );
         Self::from_expr(expr, None)
     }
