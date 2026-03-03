@@ -425,29 +425,46 @@ impl DataFrame {
                     && ((left_is_col && right_is_string_lit)
                         || (right_is_col && left_is_string_lit));
                 if root_is_col_vs_numeric {
+                    // If we can see the column dtype, use it so numeric columns (e.g. hour())
+                    // are compared numerically. Only fall back to string-like coercion when the
+                    // column is String (or dtype is unknown).
                     let (new_left, new_right) = if left_is_col && right_is_numeric_lit {
+                        let col_name = if let Expr::Column(n) = left_inner {
+                            n.as_str()
+                        } else {
+                            unreachable!()
+                        };
+                        let col_ty = self.get_column_dtype(col_name);
                         let lit_ty = match right_inner {
                             Expr::Literal(lv) => literal_dtype(lv),
                             _ => DataType::Float64,
                         };
+                        let left_ty = col_ty.filter(is_numeric_public).unwrap_or(DataType::String);
                         coerce_for_pyspark_comparison(
                             left_inner.clone(),
                             right_inner.clone(),
-                            &DataType::String,
+                            &left_ty,
                             &lit_ty,
                             op,
                         )
                         .map_err(|e| PolarsError::ComputeError(e.to_string().into()))?
                     } else {
+                        let col_name = if let Expr::Column(n) = right_inner {
+                            n.as_str()
+                        } else {
+                            unreachable!()
+                        };
+                        let col_ty = self.get_column_dtype(col_name);
                         let lit_ty = match left_inner {
                             Expr::Literal(lv) => literal_dtype(lv),
                             _ => DataType::Float64,
                         };
+                        let right_ty = col_ty.filter(is_numeric_public).unwrap_or(DataType::String);
                         coerce_for_pyspark_comparison(
                             left_inner.clone(),
                             right_inner.clone(),
                             &lit_ty,
-                            &DataType::String,
+                            &right_ty,
                             op,
                         )
                         .map_err(|e| PolarsError::ComputeError(e.to_string().into()))?
@@ -560,6 +577,7 @@ impl DataFrame {
         let expr = wrap_expr_with_alias(expr, alias_after.as_ref());
 
         // Then walk the tree for nested comparisons (e.g. (col("a")==1) & (col("b")==2)).
+        let get_col_dtype = |name: &str| self.get_column_dtype(name);
         let expr = expr.try_map_expr(move |e| {
             if let Expr::BinaryExpr { left, op, right } = e {
                 let is_comparison_op = matches!(
@@ -595,10 +613,16 @@ impl DataFrame {
                         Expr::Literal(lv) => literal_dtype(lv),
                         _ => DataType::Float64,
                     };
+                    let col_ty = if let Expr::Column(n) = &*left {
+                        get_col_dtype(n.as_str())
+                    } else {
+                        None
+                    };
+                    let left_ty = col_ty.filter(is_numeric_public).unwrap_or(DataType::String);
                     coerce_for_pyspark_comparison(
                         (*left).clone(),
                         (*right).clone(),
-                        &DataType::String,
+                        &left_ty,
                         &lit_ty,
                         &op,
                     )
@@ -608,11 +632,17 @@ impl DataFrame {
                         Expr::Literal(lv) => literal_dtype(lv),
                         _ => DataType::Float64,
                     };
+                    let col_ty = if let Expr::Column(n) = &*right {
+                        get_col_dtype(n.as_str())
+                    } else {
+                        None
+                    };
+                    let right_ty = col_ty.filter(is_numeric_public).unwrap_or(DataType::String);
                     coerce_for_pyspark_comparison(
                         (*left).clone(),
                         (*right).clone(),
                         &lit_ty,
-                        &DataType::String,
+                        &right_ty,
                         &op,
                     )
                     .map_err(|e| PolarsError::ComputeError(e.to_string().into()))?
