@@ -163,7 +163,9 @@ fn json_type_str_to_polars(type_str: &str) -> Option<DataType> {
         ]));
     }
     match s.as_str() {
-        "int" | "integer" | "bigint" | "long" => Some(DataType::Int64),
+        // Preserve distinction between IntegerType (32-bit) and LongType (64-bit) for explicit schemas.
+        "int" | "integer" => Some(DataType::Int32),
+        "bigint" | "long" => Some(DataType::Int64),
         "double" | "float" | "double_precision" => Some(DataType::Float64),
         "string" | "str" | "varchar" => Some(DataType::String),
         "boolean" | "bool" => Some(DataType::Boolean),

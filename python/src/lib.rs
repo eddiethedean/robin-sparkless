@@ -2186,6 +2186,53 @@ fn normalize_subset(subset: Option<&Bound<'_, PyAny>>) -> PyResult<Option<Vec<St
     ))
 }
 
+enum FillValueKind {
+    Int,
+    Float,
+    String,
+    Bool,
+    Other,
+}
+
+fn classify_fill_value_kind(value: &Bound<'_, PyAny>) -> FillValueKind {
+    if value.is_none() {
+        return FillValueKind::Other;
+    }
+    if value.extract::<bool>().is_ok() {
+        return FillValueKind::Bool;
+    }
+    if value.extract::<i64>().is_ok() {
+        return FillValueKind::Int;
+    }
+    if value.extract::<f64>().is_ok() {
+        return FillValueKind::Float;
+    }
+    if value.extract::<String>().is_ok() {
+        return FillValueKind::String;
+    }
+    FillValueKind::Other
+}
+
+fn is_fill_compatible_with_schema_dtype(
+    dt: &robin_sparkless::schema::DataType,
+    kind: &FillValueKind,
+) -> bool {
+    use robin_sparkless::schema::DataType as SchemaDataType;
+    match kind {
+        // Integers and floats can fill numeric columns (int/long/double).
+        FillValueKind::Int | FillValueKind::Float => matches!(
+            dt,
+            SchemaDataType::Integer | SchemaDataType::Long | SchemaDataType::Double
+        ),
+        // Strings fill string-like columns only.
+        FillValueKind::String => matches!(dt, SchemaDataType::String),
+        // Booleans fill boolean columns only.
+        FillValueKind::Bool => matches!(dt, SchemaDataType::Boolean),
+        // For other kinds (e.g. complex expressions), defer to engine behavior.
+        FillValueKind::Other => true,
+    }
+}
+
 /// Resolve cast type argument: string as-is, or type object's simpleString() or typeName() (e.g. IntegerType()).
 fn resolve_cast_type_name(value: &Bound<'_, PyAny>) -> PyResult<String> {
     if let Ok(s) = value.extract::<String>() {
@@ -3716,10 +3763,28 @@ impl PyDataFrame {
             return Ok(PyDataFrame { inner: df });
         }
         let value_expr = py_any_to_column(value)?.into_expr();
+        let kind = classify_fill_value_kind(value);
         let sub_vec = normalize_subset(subset)?;
-        let sub: Option<Vec<&str>> = sub_vec
-            .as_ref()
-            .map(|v| v.iter().map(|s| s.as_str()).collect());
+        // Candidate columns: explicit subset or all columns when subset is None.
+        let candidates: Vec<String> = match sub_vec {
+            Some(cols) => cols,
+            None => self.inner.columns().map_err(to_py_err)?,
+        };
+        let mut effective: Vec<&str> = Vec::new();
+        for name in &candidates {
+            match self.inner.get_column_data_type(name) {
+                Some(dt) => {
+                    if is_fill_compatible_with_schema_dtype(&dt, &kind) {
+                        effective.push(name.as_str());
+                    }
+                }
+                None => {
+                    // Non-existent column: keep so engine raises ColumnNotFoundException as before.
+                    effective.push(name.as_str());
+                }
+            }
+        }
+        let sub: Option<Vec<&str>> = Some(effective);
         self.inner
             .fillna(value_expr, sub)
             .map(|df| PyDataFrame { inner: df })
@@ -5295,11 +5360,45 @@ impl PyDataFrameNaFunctions {
             .downcast::<PyDataFrame>()
             .map_err(|_| PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected DataFrame"))?
             .borrow();
+        // PySpark: na.fill(scalar, subset=...) or na.fill({col: value, ...}, subset=ignored).
+        // Dict value: iterate keys and apply column-specific fills; subset is ignored.
+        if let Ok(dict) = value.downcast::<PyDict>() {
+            let mut current = df_ref.inner.clone();
+            for (k, v) in dict.iter() {
+                let col_name: String = k.extract().map_err(|_| {
+                    PyErr::new::<pyo3::exceptions::PyTypeError, _>("na.fill dict keys must be str")
+                })?;
+                let val_expr = py_any_to_column(&v)?.into_expr();
+                current = current
+                    .na()
+                    .fill(val_expr, Some(vec![col_name.as_str()]))
+                    .map_err(to_py_err)?;
+            }
+            return Ok(PyDataFrame { inner: current });
+        }
+
         let value_col = py_any_to_column(value)?;
+        let kind = classify_fill_value_kind(value);
         let sub_vec = normalize_subset(subset)?;
-        let subset_refs: Option<Vec<&str>> = sub_vec
-            .as_ref()
-            .map(|v| v.iter().map(|s| s.as_str()).collect());
+        let candidates: Vec<String> = match sub_vec {
+            Some(cols) => cols,
+            None => df_ref.inner.columns().map_err(to_py_err)?,
+        };
+        let mut subset_refs_vec: Vec<&str> = Vec::new();
+        for name in &candidates {
+            match df_ref.inner.get_column_data_type(name) {
+                Some(dt) => {
+                    if is_fill_compatible_with_schema_dtype(&dt, &kind) {
+                        subset_refs_vec.push(name.as_str());
+                    }
+                }
+                None => {
+                    // Non-existent column: keep so engine raises ColumnNotFoundException as before.
+                    subset_refs_vec.push(name.as_str());
+                }
+            }
+        }
+        let subset_refs: Option<Vec<&str>> = Some(subset_refs_vec);
         let na = df_ref.inner.na();
         na.fill(value_col.into_expr(), subset_refs)
             .map(|df| PyDataFrame { inner: df })
@@ -5310,7 +5409,7 @@ impl PyDataFrameNaFunctions {
     fn drop(
         &self,
         py: Python<'_>,
-        subset: Option<Vec<String>>,
+        subset: Option<&Bound<'_, PyAny>>,
         how: &str,
         thresh: Option<usize>,
     ) -> PyResult<PyDataFrame> {
@@ -5320,7 +5419,8 @@ impl PyDataFrameNaFunctions {
             .downcast::<PyDataFrame>()
             .map_err(|_| PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected DataFrame"))?
             .borrow();
-        let subset_refs: Option<Vec<&str>> = subset
+        let sub_vec = normalize_subset(subset)?;
+        let subset_refs: Option<Vec<&str>> = sub_vec
             .as_ref()
             .map(|v| v.iter().map(|s| s.as_str()).collect());
         let na = df_ref.inner.na();
