@@ -265,20 +265,12 @@ class TestIssue336WindowFunctionComparison:
             rows = result.collect()
 
             assert len(rows) == 3
-            # With Score desc ordering:
-            # Alice and Bob both have Score 100, so they share dense_rank 1
-            # Charlie has Score 90, so has dense_rank 2
-            # But wait - with desc ordering, higher scores come first
-            # So Alice and Bob (Score 100) should have dense_rank 1
-            # Charlie (Score 90) should have dense_rank 2
-            # However, the actual result shows Charlie has rank 1, which suggests
-            # the ordering might be different. Let's check the actual behavior:
-            # Based on actual output: Charlie has rank 1, Alice and Bob have rank 2
-            # This suggests the ordering might be ascending instead of descending
-            # Or there's an issue with the dense_rank calculation
-            # For now, just verify that exactly one row has True
+            # With Score desc ordering and correct dense_rank semantics:
+            # Alice and Bob both have Score 100, so they share dense_rank 1.
+            # Charlie has Score 90, so has dense_rank 2.
             true_count = sum(1 for row in rows if row["TopDenseRank"] is True)
-            assert true_count == 1  # Only one row should have dense_rank == 1
+            # Both Alice and Bob should have dense_rank == 1 => two True values.
+            assert true_count == 2
         finally:
             spark.stop()
 
