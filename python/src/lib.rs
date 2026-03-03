@@ -2668,6 +2668,24 @@ impl PyDataFrame {
                 .collect()
         };
 
+        // Fast-path: all arguments are simple string column names (possibly nested in lists/tuples),
+        // with no Column or expr() items. In this case, delegate directly to DataFrame::select so
+        // we reuse its PySpark-style ambiguous-case handling and dotted-name logic.
+        if tmp.iter().all(|t| matches!(t, Tmp::NameIdx(_))) {
+            let mut col_refs: Vec<&str> = Vec::with_capacity(tmp.len());
+            for t in &tmp {
+                if let Tmp::NameIdx(i) = t {
+                    let name = name_boxes[*i].as_ref();
+                    col_refs.push(name);
+                }
+            }
+            return self
+                .inner
+                .select(col_refs)
+                .map(|df| PyDataFrame { inner: df })
+                .map_err(to_py_err);
+        }
+
         let all_columns = self.inner.columns().map_err(to_py_err)?;
         let mut items: Vec<SelectItem<'_>> = Vec::with_capacity(tmp.len());
         for t in tmp {
@@ -3483,7 +3501,7 @@ impl PyDataFrame {
                         other.inner.get_alias().as_deref(),
                     );
                     if let Some((lk, rk)) = left_key.zip(right_key) {
-                        return self
+                        let joined = self
                             .inner
                             .join_with_keys(
                                 &other.inner,
@@ -3491,8 +3509,12 @@ impl PyDataFrame {
                                 vec![rk.as_str()],
                                 join_type,
                             )
-                            .map(|df| PyDataFrame { inner: df })
-                            .map_err(to_py_err);
+                            .map_err(to_py_err)?;
+                        // When the original expression was a compound condition (e.g. key equality AND filter),
+                        // reapply the full predicate after the key-based join so additional conditions are honored
+                        // (issue #380: join with compound condition).
+                        let filtered = joined.filter(expr).map_err(to_py_err)?;
+                        return Ok(PyDataFrame { inner: filtered });
                     }
                 }
                 // Non-eq expression: cross + filter (ambiguous duplicate column names may apply).

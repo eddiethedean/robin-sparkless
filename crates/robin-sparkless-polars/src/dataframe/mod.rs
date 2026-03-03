@@ -783,6 +783,13 @@ impl DataFrame {
                 return Ok(name.to_string());
             }
         } else {
+            // In case-insensitive mode, prefer an exact-case match when it exists
+            // (e.g. select(\"NAME\") should use physical column \"NAME\" when both
+            // \"name\" and \"NAME\" are present), then fall back to the first
+            // case-insensitive match for PySpark-style resolution.
+            if let Some(exact) = names.iter().find(|n| n.as_str() == name) {
+                return Ok(exact.clone());
+            }
             let name_lower = name.to_lowercase();
             for n in &names {
                 if n.to_lowercase() == name_lower {
@@ -1084,21 +1091,30 @@ impl DataFrame {
                 .collect::<Result<Vec<_>, PolarsError>>()?;
             return transformations::select_with_exprs(self, exprs, self.case_sensitive);
         }
-        let resolved: Vec<String> = cols
-            .iter()
-            .map(|c| self.resolve_column_name(c))
-            .collect::<Result<Vec<_>, _>>()?;
-        let refs: Vec<&str> = resolved.iter().map(|s| s.as_str()).collect();
-        let mut result = transformations::select(self, refs, self.case_sensitive)?;
-        // When case-insensitive, PySpark returns column names in requested (e.g. lowercase) form.
-        if !self.case_sensitive {
-            for (requested, res) in cols.iter().zip(resolved.iter()) {
-                if *requested != res.as_str() {
-                    result = result.with_column_renamed(res, requested)?;
-                }
+        // Non-dotted names: build explicit expressions so we can implement PySpark-like
+        // ambiguous-case handling. When multiple physical columns differ only by case
+        // (e.g. "name" and "NAME"), we coalesce them so selects like select("NaMe")
+        // see the first non-null value across all.
+        let all_cols = self.columns()?;
+        let mut exprs: Vec<Expr> = Vec::with_capacity(cols.len());
+        for requested in &cols {
+            let requested_lower = requested.to_lowercase();
+            let matches: Vec<String> = all_cols
+                .iter()
+                .filter(|c| c.to_lowercase() == requested_lower)
+                .cloned()
+                .collect();
+            if matches.len() > 1 {
+                use polars::prelude::coalesce as pl_coalesce;
+                let parts: Vec<Expr> = matches.iter().map(|m| col(m.as_str())).collect();
+                let coalesced = pl_coalesce(&parts);
+                exprs.push(coalesced.alias(*requested));
+                continue;
             }
+            let resolved = self.resolve_column_name(requested)?;
+            exprs.push(col(resolved.as_str()).alias(*requested));
         }
-        Ok(result)
+        transformations::select_with_exprs(self, exprs, self.case_sensitive)
     }
 
     /// Build an expression for a column name, including dotted struct field access (e.g. "outer.inner.leaf").

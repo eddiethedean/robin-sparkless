@@ -738,8 +738,17 @@ fn translate_select_body(
                         (col(resolved.as_str()), resolved)
                     }
                     SqlExpr::CompoundIdentifier(parts) => {
-                        let name = parts.last().map(|i| i.value.as_str()).unwrap_or("");
-                        let resolved = df.resolve_column_name(name)?;
+                        // Qualified column (e.g. d.dept_name): mirror sql_expr_to_polars behavior
+                        // and try alias_column form (d_dept_name) first, then bare column.
+                        let qualified = parts
+                            .iter()
+                            .map(|i| i.value.as_str())
+                            .collect::<Vec<_>>()
+                            .join("_");
+                        let last = parts.last().map(|i| i.value.as_str()).unwrap_or("");
+                        let resolved = df
+                            .resolve_column_name(&qualified)
+                            .or_else(|_| df.resolve_column_name(last))?;
                         (col(resolved.as_str()), resolved)
                     }
                     _ => {
@@ -842,7 +851,7 @@ fn translate_select_from(
     if let Some(ref prefix) = left_alias_opt {
         df = df_prefix_columns(&df, prefix)?;
     }
-    let mut current_left_alias = left_alias_opt.as_deref();
+    let current_left_alias = left_alias_opt.as_deref();
     for join_spec in &first_tj.joins {
         let mut right_df = resolve_table_factor(session, &join_spec.relation)?;
         let right_alias_opt = table_alias_from_factor(&join_spec.relation);
@@ -894,8 +903,10 @@ fn translate_select_from(
                 )?;
             }
         }
-        // After joining, "left" for the next join is the current result; we don't support chained alias for the merged result, so clear.
-        current_left_alias = None;
+        // After joining, "left" for the next join is the current result. Keep the original
+        // table alias (e.g. "e" for employees e) so that qualified references like e.project_id
+        // continue to resolve to prefixed column names (e_project_id) across multiple JOINs
+        // (issue #376 / robust 3-join SQL tests).
     }
     Ok(df)
 }
@@ -1037,11 +1048,28 @@ fn sql_expr_to_polars(
             Ok(col(resolved.as_str()))
         }
         SqlExpr::CompoundIdentifier(parts) => {
-            let name = parts.last().map(|i| i.value.as_str()).unwrap_or("");
+            // Qualified column (e.g. e.salary): try alias_column form (e_salary) first for aliased
+            // joins, then fall back to bare column name (salary). This matches the projection logic
+            // in apply_projection and is required for table-prefixed SQL in WHERE / JOIN / GROUP BY.
+            let qualified = parts
+                .iter()
+                .map(|i| i.value.as_str())
+                .collect::<Vec<_>>()
+                .join("_");
+            let last = parts.last().map(|i| i.value.as_str()).unwrap_or("");
             let resolved = df
-                .map(|d| d.resolve_column_name(name))
+                .map(|d| {
+                    d.resolve_column_name(&qualified)
+                        .or_else(|_| d.resolve_column_name(last))
+                })
                 .transpose()?
-                .unwrap_or_else(|| name.to_string());
+                .unwrap_or_else(|| {
+                    if !qualified.is_empty() {
+                        qualified.clone()
+                    } else {
+                        last.to_string()
+                    }
+                });
             Ok(col(resolved.as_str()))
         }
         SqlExpr::Value(ValueWithSpan { value: Value::Number(s, _), .. }) => {
@@ -1835,13 +1863,21 @@ fn projection_to_agg_exprs(
                 }
             }
             SelectItem::UnnamedExpr(SqlExpr::CompoundIdentifier(parts)) => {
-                let name = parts.last().map(|i| i.value.as_str()).unwrap_or("");
-                let resolved = df.resolve_column_name(name)?;
-                if !group_cols.iter().any(|c| c == &resolved) {
+                // Qualified column (e.g. d.dept_name): treat as grouped when either the fully
+                // qualified name (d_dept_name) or the simple name (dept_name) appears in
+                // the grouping columns, matching the resolution used in translate_select_body.
+                let qualified = parts
+                    .iter()
+                    .map(|i| i.value.as_str())
+                    .collect::<Vec<_>>()
+                    .join("_");
+                let last = parts.last().map(|i| i.value.as_str()).unwrap_or("");
+                let in_group = group_cols.iter().any(|c| c == &qualified || c == last);
+                if !in_group {
                     return Err(PolarsError::InvalidOperation(
                         format!(
                             "SQL: non-aggregated column '{}' must appear in GROUP BY.",
-                            name
+                            last
                         )
                         .into(),
                     ));
@@ -1867,13 +1903,18 @@ fn projection_to_agg_exprs(
                         // Group column with alias (e.g. grp AS g): validation only; result keeps group column name from frame.
                     }
                     SqlExpr::CompoundIdentifier(parts) => {
-                        let name = parts.last().map(|i| i.value.as_str()).unwrap_or("");
-                        let resolved = df.resolve_column_name(name)?;
-                        if !group_cols.iter().any(|c| c == &resolved) {
+                        let qualified = parts
+                            .iter()
+                            .map(|i| i.value.as_str())
+                            .collect::<Vec<_>>()
+                            .join("_");
+                        let last = parts.last().map(|i| i.value.as_str()).unwrap_or("");
+                        let in_group = group_cols.iter().any(|c| c == &qualified || c == last);
+                        if !in_group {
                             return Err(PolarsError::InvalidOperation(
                                 format!(
                                     "SQL: non-aggregated column '{}' must appear in GROUP BY.",
-                                    name
+                                    last
                                 )
                                 .into(),
                             ));

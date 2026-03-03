@@ -290,6 +290,28 @@ pub fn select_items(
     for item in items {
         match item {
             SelectItem::ColumnName(name) => {
+                // When multiple physical columns match by lowercase name (e.g. "name" and "NAME"
+                // after a join), we need PySpark-like behavior for ambiguous selects such as
+                // select("NaMe") (#297). We coalesce all matching physical columns and expose
+                // the result under the requested name so that:
+                // - rows that exist only on one side (e.g. right-join-only rows) still have a value, and
+                // - original physical columns remain accessible by their own names.
+                if let Ok(cols) = df.columns() {
+                    let name_lower = name.to_lowercase();
+                    let matches: Vec<String> = cols
+                        .iter()
+                        .filter(|c| c.to_lowercase() == name_lower)
+                        .cloned()
+                        .collect();
+                    if matches.len() > 1 {
+                        use polars::prelude::coalesce as pl_coalesce;
+                        let coalesce_exprs: Vec<Expr> =
+                            matches.iter().map(|m| col(m.as_str())).collect();
+                        let coalesced = pl_coalesce(&coalesce_exprs);
+                        exprs.push(coalesced.alias(name));
+                        continue;
+                    }
+                }
                 // #1055, #1076: Dot notation (e.g. "StructValue.e1") is struct field access.
                 // PySpark: select("StructValue.e1") yields output column "e1" (last segment), not full dotted name.
                 if name.contains('.') {
@@ -2109,6 +2131,38 @@ mod tests {
         assert!(cols.iter().any(|c| c == "Name"));
         assert!(cols.iter().any(|c| c == "Value"));
         assert!(cols.iter().any(|c| c == "ExplodedValue"));
+    }
+
+    /// Issue #297: selecting an ambiguous column name with different casing (e.g. "NaMe")
+    /// after a join where both "name" and "NAME" exist should:
+    /// - pick the first matching physical column (left side of the join), and
+    /// - expose it under the requested spelling ("NaMe").
+    #[test]
+    fn select_items_ambiguous_case_prefers_first_match_and_uses_requested_name() {
+        use polars::prelude::df;
+
+        let spark = SparkSession::builder()
+            .app_name("select_ambiguous_case")
+            .get_or_create();
+        let left_pl = df!("name" => &["Alice"], "value" => &[1i64]).unwrap();
+        let right_pl = df!("NAME" => &["Bob"], "other" => &[2i64]).unwrap();
+        let left = spark.create_dataframe_from_polars(left_pl);
+        let right = spark.create_dataframe_from_polars(right_pl);
+        // Join on "Name" so both "name" and "NAME" columns are present after the join.
+        let joined = left
+            .join(&right, vec!["Name"], crate::dataframe::JoinType::Left)
+            .unwrap();
+
+        let out = select_items(&joined, vec![SelectItem::ColumnName("NaMe")], false).unwrap();
+        let cols = out.columns().unwrap();
+        assert!(
+            cols.contains(&"NaMe".to_string()),
+            "ambiguous select must expose requested spelling"
+        );
+
+        let pl = out.collect().unwrap();
+        let name_series = pl.column("NaMe").unwrap().str().unwrap();
+        assert_eq!(name_series.get(0).unwrap(), "Alice");
     }
 
     #[test]
