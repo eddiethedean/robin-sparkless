@@ -1844,6 +1844,70 @@ pub enum WriteFormat {
     Json,
 }
 
+/// Align two DataFrames to a merged column order (existing first, then new columns not in existing).
+/// Adds null columns for missing columns. Used for saveAsTable append with mergeSchema (issue #1109).
+fn align_to_merged_schema_inline(
+    existing: &PlDataFrame,
+    new_df: &PlDataFrame,
+) -> Result<(PlDataFrame, PlDataFrame), PolarsError> {
+    use polars::prelude::*;
+    let existing_names: Vec<String> = existing
+        .get_column_names()
+        .iter()
+        .map(|s| s.as_str().to_string())
+        .collect();
+    let new_names: Vec<String> = new_df
+        .get_column_names()
+        .iter()
+        .map(|s| s.as_str().to_string())
+        .collect();
+    let existing_set: HashSet<&str> = existing_names.iter().map(String::as_str).collect();
+    let mut merged: Vec<String> = existing_names.clone();
+    for n in &new_names {
+        if !existing_set.contains(n.as_str()) {
+            merged.push(n.clone());
+        }
+    }
+    let n_existing = existing.height();
+    let n_new = new_df.height();
+    let schema_existing = existing.schema();
+    let schema_new = new_df.schema();
+    let name_into = |n: &String| n.as_str().into();
+    let mut cols_existing: Vec<polars::prelude::Column> = Vec::with_capacity(merged.len());
+    let mut cols_new: Vec<polars::prelude::Column> = Vec::with_capacity(merged.len());
+    for name in &merged {
+        if let Some(dtype) = schema_existing.get(name) {
+            if let Some(idx) = existing.get_column_index(name) {
+                cols_existing.push(existing.columns()[idx].clone());
+            } else {
+                cols_existing.push(Series::full_null(name_into(name), n_existing, dtype).into());
+            }
+        } else if let Some(dtype) = schema_new.get(name) {
+            cols_existing.push(Series::full_null(name_into(name), n_existing, dtype).into());
+        } else {
+            cols_existing.push(
+                Series::full_null(name_into(name), n_existing, &DataType::String).into(),
+            );
+        }
+        if let Some(dtype) = schema_new.get(name) {
+            if let Some(idx) = new_df.get_column_index(name) {
+                cols_new.push(new_df.columns()[idx].clone());
+            } else {
+                cols_new.push(Series::full_null(name_into(name), n_new, dtype).into());
+            }
+        } else if let Some(dtype) = schema_existing.get(name) {
+            cols_new.push(Series::full_null(name_into(name), n_new, dtype).into());
+        } else {
+            cols_new.push(
+                Series::full_null(name_into(name), n_new, &DataType::String).into(),
+            );
+        }
+    }
+    let aligned_existing = PlDataFrame::new_infer_height(cols_existing)?;
+    let aligned_new = PlDataFrame::new_infer_height(cols_new)?;
+    Ok((aligned_existing, aligned_new))
+}
+
 /// Builder for writing DataFrame to path (PySpark DataFrameWriter).
 pub struct DataFrameWriter<'a> {
     df: &'a DataFrame,
@@ -1885,15 +1949,61 @@ impl<'a> DataFrameWriter<'a> {
     }
 
     /// Save the DataFrame as a table (PySpark: saveAsTable). In-memory by default; when spark.sql.warehouse.dir is set, persists to disk for cross-session access.
+    /// Writer options (e.g. mergeSchema) are applied when set via option()/options(). Issue #1109.
     pub fn save_as_table(
         &self,
         session: &SparkSession,
         name: &str,
         mode: SaveMode,
     ) -> Result<(), PolarsError> {
+        let opts: Vec<(String, String)> = self
+            .options
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+        let options = if opts.is_empty() {
+            None
+        } else {
+            Some(opts.as_slice())
+        };
+        self.save_as_table_impl(session, name, mode, options)
+    }
+
+    /// Same as save_as_table but with options passed explicitly (e.g. from Python writer). Issue #1109.
+    pub fn save_as_table_with_options(
+        &self,
+        session: &SparkSession,
+        name: &str,
+        mode: SaveMode,
+        options: &[(String, String)],
+    ) -> Result<(), PolarsError> {
+        self.save_as_table_impl(
+            session,
+            name,
+            mode,
+            if options.is_empty() {
+                None
+            } else {
+                Some(options)
+            },
+        )
+    }
+
+    fn save_as_table_impl(
+        &self,
+        session: &SparkSession,
+        name: &str,
+        mode: SaveMode,
+        options: Option<&[(String, String)]>,
+    ) -> Result<(), PolarsError> {
         use polars::prelude::*;
         use std::fs;
         use std::path::Path;
+
+        let merge_schema = options.map_or(false, |opts| {
+            opts.iter()
+                .any(|(k, v)| k.eq_ignore_ascii_case("mergeSchema") && v.eq_ignore_ascii_case("true"))
+        });
 
         let warehouse_path = session.warehouse_dir().map(|w| Path::new(w).join(name));
         let warehouse_exists = warehouse_path.as_ref().is_some_and(|p| p.is_dir());
@@ -1973,32 +2083,40 @@ impl<'a> DataFrameWriter<'a> {
                     return Ok(());
                 };
                 let new_pl = self.df.collect_inner()?.as_ref().clone();
-                let existing_cols: Vec<&str> = existing_pl
-                    .get_column_names()
-                    .iter()
-                    .map(|s| s.as_str())
-                    .collect();
-                let new_cols = new_pl.get_column_names();
-                let missing: Vec<_> = existing_cols
-                    .iter()
-                    .filter(|c| !new_cols.iter().any(|n| n.as_str() == **c))
-                    .collect();
-                if !missing.is_empty() {
-                    return Err(PolarsError::InvalidOperation(
-                        format!(
-                            "saveAsTable append: new DataFrame missing columns: {:?}",
-                            missing
-                        )
-                        .into(),
-                    ));
-                }
-                let new_ordered = new_pl.select(existing_cols.iter().copied())?;
-                let mut combined = existing_pl;
-                combined.vstack_mut(&new_ordered)?;
-                let merged = crate::dataframe::DataFrame::from_polars_with_options(
-                    combined,
-                    self.df.case_sensitive,
-                );
+                let merged = if merge_schema {
+                    let (aligned_existing, aligned_new) =
+                        align_to_merged_schema_inline(&existing_pl, &new_pl)?;
+                    let mut out = aligned_existing;
+                    out.vstack_mut(&aligned_new)?;
+                    crate::dataframe::DataFrame::from_polars_with_options(out, self.df.case_sensitive)
+                } else {
+                    let existing_cols: Vec<&str> = existing_pl
+                        .get_column_names()
+                        .iter()
+                        .map(|s| s.as_str())
+                        .collect();
+                    let new_cols = new_pl.get_column_names();
+                    let missing: Vec<_> = existing_cols
+                        .iter()
+                        .filter(|c| !new_cols.iter().any(|n| n.as_str() == **c))
+                        .collect();
+                    if !missing.is_empty() {
+                        return Err(PolarsError::InvalidOperation(
+                            format!(
+                                "saveAsTable append: new DataFrame missing columns: {:?}",
+                                missing
+                            )
+                            .into(),
+                        ));
+                    }
+                    let new_ordered = new_pl.select(existing_cols.iter().copied())?;
+                    let mut combined = existing_pl;
+                    combined.vstack_mut(&new_ordered)?;
+                    crate::dataframe::DataFrame::from_polars_with_options(
+                        combined,
+                        self.df.case_sensitive,
+                    )
+                };
                 if let Some(ref p) = warehouse_path {
                     let _ = fs::remove_dir_all(p);
                     persist_to_warehouse(&merged, p)?;

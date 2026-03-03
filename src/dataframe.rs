@@ -744,6 +744,18 @@ impl<'a> DataFrameWriter<'a> {
         self.inner.save_as_table(&session.0, name, mode)
     }
 
+    /// Save the DataFrame as a table with writer options (e.g. mergeSchema=true). Used by Python bindings.
+    pub fn save_as_table_with_options(
+        &self,
+        session: &crate::session::SparkSession,
+        name: &str,
+        mode: SaveMode,
+        options: &[(String, String)],
+    ) -> Result<(), PolarsError> {
+        self.inner
+            .save_as_table_with_options(&session.0, name, mode, options)
+    }
+
     pub fn save(&self, path: impl AsRef<Path>) -> Result<(), PolarsError> {
         self.inner.save(path)
     }

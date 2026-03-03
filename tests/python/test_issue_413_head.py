@@ -23,11 +23,10 @@ def test_head_default_one_row() -> None:
 
 
 def test_head_n() -> None:
-    """df.head(n) returns first n rows."""
+    """df.head(n) returns first n rows as list of Row (PySpark parity)."""
     spark = _spark()
     df = spark.createDataFrame([{"x": 1}, {"x": 2}, {"x": 3}])
-    out = df.head(2)
-    rows = out.collect()
+    rows = df.head(2)
     assert len(rows) == 2
-    assert rows[0] == {"x": 1}
-    assert rows[1] == {"x": 2}
+    assert rows[0]["x"] == 1
+    assert rows[1]["x"] == 2
