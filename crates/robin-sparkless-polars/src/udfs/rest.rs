@@ -1135,7 +1135,7 @@ pub fn apply_get(columns: &mut [Column]) -> PolarsResult<Option<Column>> {
             }
         }
         let value_dtype = field_metas
-            .get(0)
+            .first()
             .map(|f| f.dtype.clone())
             .unwrap_or(DataType::String);
         let out_len = map_len.max(key_len);
@@ -1143,17 +1143,16 @@ pub fn apply_get(columns: &mut [Column]) -> PolarsResult<Option<Column>> {
         for i in 0..out_len {
             let key_idx = if key_len == 1 { 0 } else { i };
             let key_name = key_utf8.get(key_idx).unwrap_or("");
-            let one_series = if let Some((field_idx, rep_row)) =
-                key_to_field_and_row.get(key_name).copied()
-            {
-                let series = &fields_series[field_idx];
-                let av = series
-                    .get(rep_row)
-                    .unwrap_or(polars::prelude::AnyValue::Null);
-                any_value_to_single_series(av, &value_dtype)?
-            } else {
-                Series::full_null(PlSmallStr::EMPTY, 1, &value_dtype)
-            };
+            let one_series =
+                if let Some((field_idx, rep_row)) = key_to_field_and_row.get(key_name).copied() {
+                    let series = &fields_series[field_idx];
+                    let av = series
+                        .get(rep_row)
+                        .unwrap_or(polars::prelude::AnyValue::Null);
+                    any_value_to_single_series(av, &value_dtype)?
+                } else {
+                    Series::full_null(PlSmallStr::EMPTY, 1, &value_dtype)
+                };
             result_series.push(one_series);
         }
         let mut out = result_series.remove(0);

@@ -3325,7 +3325,7 @@ impl Column {
                         _ => DataType::String,
                     },
                     DataType::Struct(struct_fields) => struct_fields
-                        .get(0)
+                        .first()
                         .map(|f| f.dtype.clone())
                         .unwrap_or(DataType::String),
                     _ => DataType::String,
