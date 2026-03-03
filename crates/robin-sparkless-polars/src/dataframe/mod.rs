@@ -312,6 +312,19 @@ impl DataFrame {
                     }
                 }
             }
+            // Recurse into Function inputs so map_col[key_col] (map_many) and similar get key column resolved (#1111).
+            if let Expr::Function { input, function } = &e {
+                let resolved_inputs: Result<Vec<Expr>, _> = input
+                    .iter()
+                    .map(|arg| df.resolve_expr_column_names(arg.clone()))
+                    .collect();
+                if let Ok(resolved) = resolved_inputs {
+                    return Ok(Expr::Function {
+                        input: resolved,
+                        function: function.clone(),
+                    });
+                }
+            }
             Ok(e)
         })
     }

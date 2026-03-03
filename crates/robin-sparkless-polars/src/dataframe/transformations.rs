@@ -2093,6 +2093,35 @@ mod tests {
         assert!(cols.iter().any(|c| c == "ExplodedValue"));
     }
 
+    /// Issue #1111: with_column(map_col[col("Value")]) must resolve "Value" so map lookup works.
+    #[test]
+    fn with_column_map_get_with_column_key_resolves_key() {
+        use polars::prelude::{NamedFrom, Series};
+        let spark = SparkSession::builder()
+            .app_name("map_get_test")
+            .get_or_create();
+        let names = Series::new("Name".into(), &["Alice", "Bob"]);
+        let values = Series::new("Value".into(), [1i64, 3i64]);
+        let pl = polars::prelude::DataFrame::new_infer_height(vec![names.into(), values.into()])
+            .unwrap();
+        let df = spark.create_dataframe_from_polars(pl);
+        let mapping = functions::create_map(&[
+            &functions::lit_i64(1),
+            &functions::lit_str("Small"),
+            &functions::lit_i64(2),
+            &functions::lit_str("Medium"),
+            &functions::lit_i64(3),
+            &functions::lit_str("Large"),
+        ])
+        .unwrap();
+        let size_col = mapping.get(&functions::col("Value"));
+        let out = with_column(&df, "Size", &size_col, false).unwrap();
+        let rows = out.collect_as_json_rows().unwrap();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].get("Size").and_then(|v| v.as_str()), Some("Small"));
+        assert_eq!(rows[1].get("Size").and_then(|v| v.as_str()), Some("Large"));
+    }
+
     /// Issue #1054: select(Name, Value, explode(Value).alias("ExplodedValue")) must preserve list column and expand rows.
     #[test]
     fn select_with_explode_alias_preserves_list_column() {

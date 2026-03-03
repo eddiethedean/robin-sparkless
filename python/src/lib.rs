@@ -4647,9 +4647,8 @@ impl PyColumn {
             });
         }
         if let Ok(py_col) = key.downcast::<PyColumn>() {
-            let name = py_col.borrow().inner.name().to_string();
             return Ok(PyColumn {
-                inner: self.inner.get_field(&name),
+                inner: self.inner.get(&py_col.borrow().inner),
             });
         }
         Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(

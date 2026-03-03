@@ -1093,6 +1093,7 @@ pub fn apply_map_contains_key(columns: &mut [Column]) -> PolarsResult<Option<Col
 }
 
 /// Get value for key from map, or null (PySpark get).
+/// Handles both List(Struct{key,value}) (create_map) and Struct (createDataFrame dict column).
 pub fn apply_get(columns: &mut [Column]) -> PolarsResult<Option<Column>> {
     if columns.len() < 2 {
         return Err(PolarsError::ComputeError(
@@ -1100,14 +1101,76 @@ pub fn apply_get(columns: &mut [Column]) -> PolarsResult<Option<Column>> {
         ));
     }
     let name = columns[0].field().into_owned().name;
-    let map_series = std::mem::take(&mut columns[0]).take_materialized_series();
+    let mut map_series = std::mem::take(&mut columns[0]).take_materialized_series();
     let key_series = std::mem::take(&mut columns[1]).take_materialized_series();
+    // Work with keys as Utf8 so we can compare string values without extra quotes.
+    let key_str_series = key_series
+        .cast(&DataType::String)
+        .map_err(|e| compute_err("get cast key to string", e))?;
+    let key_utf8 = key_str_series
+        .str()
+        .map_err(|e| compute_err("get key utf8", e))?;
+    let key_len = key_utf8.len();
+    let map_len = map_series.len();
+    if let DataType::Struct(field_metas) = map_series.dtype() {
+        // Global map semantics for struct-typed maps: treat each struct field as a map key
+        // and use the first non-null value per field as the canonical value for that key.
+        let st = map_series
+            .struct_()
+            .map_err(|e| compute_err("get struct", e))?;
+        let fields_series = st.fields_as_series();
+        use std::collections::HashMap;
+        let mut key_to_field_and_row: HashMap<String, (usize, usize)> = HashMap::new();
+        for (field_idx, meta) in field_metas.iter().enumerate() {
+            let series = &fields_series[field_idx];
+            for row_idx in 0..series.len() {
+                if let Ok(av) = series.get(row_idx) {
+                    if !matches!(av, polars::prelude::AnyValue::Null) {
+                        key_to_field_and_row
+                            .entry(meta.name.to_string())
+                            .or_insert((field_idx, row_idx));
+                        break;
+                    }
+                }
+            }
+        }
+        let value_dtype = field_metas
+            .first()
+            .map(|f| f.dtype.clone())
+            .unwrap_or(DataType::String);
+        let out_len = map_len.max(key_len);
+        let mut result_series: Vec<Series> = Vec::with_capacity(out_len);
+        for i in 0..out_len {
+            let key_idx = if key_len == 1 { 0 } else { i };
+            let key_name = key_utf8.get(key_idx).unwrap_or("");
+            let one_series =
+                if let Some((field_idx, rep_row)) = key_to_field_and_row.get(key_name).copied() {
+                    let series = &fields_series[field_idx];
+                    let av = series
+                        .get(rep_row)
+                        .unwrap_or(polars::prelude::AnyValue::Null);
+                    any_value_to_single_series(av, &value_dtype)?
+                } else {
+                    Series::full_null(PlSmallStr::EMPTY, 1, &value_dtype)
+                };
+            result_series.push(one_series);
+        }
+        let mut out = result_series.remove(0);
+        for s in result_series {
+            out.extend(&s)?;
+        }
+        return Ok(Some(Column::new(name, out)));
+    }
+    let map_len_initial = map_len;
+    if map_len_initial == 1 && key_len > 1 {
+        let indices: Vec<u32> = (0..key_len).map(|_| 0u32).collect();
+        let idx_ca = UInt32Chunked::from_vec("".into(), indices);
+        map_series = map_series
+            .take(&idx_ca)
+            .map_err(|e| compute_err("get broadcast map", e))?;
+    }
     let map_ca = map_series.list().map_err(|e| compute_err("get", e))?;
-    let key_str = key_series.cast(&DataType::String)?;
-    let key_vec: Vec<String> = (0..key_str.len())
-        .map(|i| key_str.get(i).map(|av| av.to_string()).unwrap_or_default())
-        .collect();
-    let key_len = key_vec.len();
+    let map_len = map_ca.len();
     let value_dtype = match map_ca.inner_dtype() {
         DataType::Struct(fields) => fields
             .iter()
@@ -1116,12 +1179,11 @@ pub fn apply_get(columns: &mut [Column]) -> PolarsResult<Option<Column>> {
             .unwrap_or(DataType::String),
         _ => DataType::String,
     };
-    let mut result_series: Vec<Series> = Vec::with_capacity(map_ca.len());
+    let mut result_series: Vec<Series> = Vec::with_capacity(map_len);
     for (i, opt_amort) in map_ca.amortized_iter().enumerate() {
-        let target = key_vec
-            .get(if key_len == 1 { 0 } else { i })
-            .map(|s| s.as_str())
-            .unwrap_or("");
+        let key_idx = if key_len == 1 { 0 } else { i };
+        let target = key_utf8.get(key_idx).unwrap_or("");
+        let target_trim = target.trim();
         let mut found: Option<Series> = None;
         if let Some(amort) = opt_amort {
             let list_s = amort.as_ref().as_list();
@@ -1129,9 +1191,15 @@ pub fn apply_get(columns: &mut [Column]) -> PolarsResult<Option<Column>> {
                 let s = elem.deep_clone();
                 if let Ok(st) = s.struct_() {
                     if let Ok(k) = st.field_by_name("key") {
-                        let k_str: String =
-                            k.get(0).ok().map(|av| av.to_string()).unwrap_or_default();
-                        if k_str == target {
+                        let k_str: String = k
+                            .get(0)
+                            .ok()
+                            .map(|av| match av {
+                                polars::prelude::AnyValue::String(s) => s.to_string(),
+                                _ => av.to_string(),
+                            })
+                            .unwrap_or_default();
+                        if k_str.trim() == target_trim {
                             if let Ok(v) = st.field_by_name("value") {
                                 found = Some(v);
                             }
