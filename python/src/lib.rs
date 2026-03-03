@@ -4631,7 +4631,9 @@ impl PyColumn {
 
     fn __invert__(&self) -> PyColumn {
         PyColumn {
-            inner: self.inner.bitwise_not(),
+            // For boolean expressions (e.g. ~(df.a == 20)), behave like logical NOT.
+            // Numeric bitwise NOT is exposed via F.bitwise_not(...) instead.
+            inner: self.inner.logical_not(),
         }
     }
 
