@@ -55,7 +55,8 @@ pub fn parse_sql(query: &str) -> Result<Statement, ParseError> {
             object_type:
                 sqlparser::ast::ObjectType::Table
                 | sqlparser::ast::ObjectType::View
-                | sqlparser::ast::ObjectType::Schema,
+                | sqlparser::ast::ObjectType::Schema
+                | sqlparser::ast::ObjectType::Database,
             ..
         } => {}
         Statement::DropFunction(_) => {}

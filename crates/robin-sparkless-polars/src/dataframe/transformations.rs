@@ -290,13 +290,15 @@ pub fn select_items(
     for item in items {
         match item {
             SelectItem::ColumnName(name) => {
-                // #1055: Dot notation (e.g. "StructValue.E1") is struct field access. Preserve full name as output (PySpark: col("StructValue.E1") yields column "StructValue.E1").
+                // #1055, #1076: Dot notation (e.g. "StructValue.e1") is struct field access.
+                // PySpark: select("StructValue.e1") yields output column "e1" (last segment), not full dotted name.
                 if name.contains('.') {
                     let e = col(name);
                     let resolved = df.resolve_expr_column_names(e)?;
                     let coerced = df.coerce_string_numeric_comparisons(resolved)?;
                     let safe = struct_field_safe_alias(name);
-                    rename_after.push((safe.clone(), name.to_string()));
+                    let last_segment = name.split('.').next_back().unwrap_or(name);
+                    rename_after.push((safe.clone(), last_segment.to_string()));
                     exprs.push(coerced.alias(safe));
                 } else {
                     let resolved = df.resolve_column_name(name)?;
@@ -325,7 +327,8 @@ pub fn select_items(
                 let coerced = df.coerce_string_numeric_comparisons(resolved)?;
                 if let Some(name) = name_for_alias {
                     let safe = struct_field_safe_alias(&name);
-                    rename_after.push((safe.clone(), name));
+                    let last_segment = name.split('.').next_back().unwrap_or(&name).to_string();
+                    rename_after.push((safe.clone(), last_segment));
                     exprs.push(coerced.alias(safe));
                 } else {
                     exprs.push(coerced);
@@ -340,6 +343,10 @@ pub fn select_items(
     Ok(result)
 }
 
+/// Filter rows using a Polars expression. Preserves case_sensitive on result.
+/// Column names in the condition are resolved per df's case sensitivity (PySpark parity).
+/// #646: Coerce predicate to Boolean so Polars never receives a non-Boolean filter (e.g. string-involving predicates).
+/// Uses expr_coerce_to_boolean so string columns cast via "true"/"false"/"1"/"0" (PySpark parity).
 /// Filter rows using a Polars expression. Preserves case_sensitive on result.
 /// Column names in the condition are resolved per df's case sensitivity (PySpark parity).
 /// #646: Coerce predicate to Boolean so Polars never receives a non-Boolean filter (e.g. string-involving predicates).
@@ -923,11 +930,17 @@ pub fn with_column_renamed(
     new_name: &str,
     case_sensitive: bool,
 ) -> Result<DataFrame, PolarsError> {
-    let resolved = df.resolve_column_name(old_name)?;
-    let lf = df
-        .lazy_frame()
-        .rename([resolved.as_str()], [new_name], true);
-    Ok(super::DataFrame::from_lazy_with_options(lf, case_sensitive))
+    match df.resolve_column_name(old_name) {
+        Ok(resolved) => {
+            let lf = df
+                .lazy_frame()
+                .rename([resolved.as_str()], [new_name], true);
+            Ok(super::DataFrame::from_lazy_with_options(lf, case_sensitive))
+        }
+        // PySpark parity: renaming a non-existent column is a no-op.
+        Err(PolarsError::ColumnNotFound(_)) => Ok(df.clone()),
+        Err(e) => Err(e),
+    }
 }
 
 /// Replace values in a column: where column == old_value, use new_value. PySpark replace (single column).
@@ -1627,14 +1640,25 @@ pub fn with_columns_renamed(
     renames: &[(String, String)],
     case_sensitive: bool,
 ) -> Result<DataFrame, PolarsError> {
-    let mut mapping = Vec::new();
-    for (old_name, new_name) in renames {
-        let resolved = df.resolve_column_name(old_name)?;
-        mapping.push((resolved, new_name.clone()));
-    }
+    // Apply renames one by one; skip columns that do not exist (no-op for missing),
+    // matching PySpark withColumnsRenamed behavior for non-existent columns.
     let mut lf = df.lazy_frame();
-    for (old, new) in mapping {
-        lf = lf.rename([old.as_str()], [new.as_str()], true);
+    let mut applied_any = false;
+    for (old_name, new_name) in renames {
+        match df.resolve_column_name(old_name) {
+            Ok(resolved) => {
+                lf = lf.rename([resolved.as_str()], [new_name.as_str()], true);
+                applied_any = true;
+            }
+            Err(PolarsError::ColumnNotFound(_)) => {
+                // Non-existent column: leave DataFrame unchanged for this entry.
+                continue;
+            }
+            Err(e) => return Err(e),
+        }
+    }
+    if !applied_any {
+        return Ok(df.clone());
     }
     Ok(super::DataFrame::from_lazy_with_options(lf, case_sensitive))
 }
@@ -1934,11 +1958,13 @@ pub fn intersect_all(
 #[cfg(test)]
 mod tests {
     use super::{
-        SelectItem, distinct, drop, dropna, first, head, limit, offset, order_by, select_items,
-        union, union_by_name, with_column,
+        SelectItem, distinct, drop, dropna, filter, first, head, limit, offset, order_by,
+        select_items, union, union_by_name, with_column,
     };
+    use crate::column::Column;
     use crate::functions;
     use crate::{DataFrame, SparkSession};
+    use polars::prelude::{col, concat_str, lit};
     use serde_json::json;
 
     fn test_df() -> DataFrame {
@@ -2197,5 +2223,49 @@ mod tests {
             ),
             Ok(_) => panic!("expected error for dropna with non-existent subset column"),
         }
+    }
+
+    /// #1105: filter(col("full_id") == "rec1_cust1") after withColumn(full_id) must return 1 row.
+    /// Condition is passed as Column.into_expr() (Alias(BinaryExpr(...))); expr_coerce_to_boolean must not coerce comparison operands.
+    #[test]
+    fn filter_string_equality_after_with_column() {
+        let spark = SparkSession::builder()
+            .app_name("filter_string_eq_test")
+            .get_or_create();
+        let pl = polars::prelude::df!["record_id" => &["rec1"], "cust_id" => &["cust1"]].unwrap();
+        let df = spark.create_dataframe_from_polars(pl);
+        let transformed = df
+            .with_column_renamed("record_id", "id")
+            .unwrap()
+            .with_column_renamed("cust_id", "customer_id")
+            .unwrap();
+        let full_id_expr = concat_str(&[col("id"), col("customer_id")], "_", false);
+        let transformed = with_column(
+            &transformed,
+            "full_id",
+            &Column::from_expr(full_id_expr, None),
+            false,
+        )
+        .unwrap();
+        let transformed = select_items(
+            &transformed,
+            vec![
+                SelectItem::Expr(col("id")),
+                SelectItem::Expr(col("customer_id")),
+                SelectItem::Expr(col("full_id")),
+            ],
+            false,
+        )
+        .unwrap();
+        // Simulate Python: col("full_id") == "rec1_cust1" -> Column.into_expr() is Alias(BinaryExpr(...))
+        let condition = Column::new("full_id".to_string())
+            .eq(lit("rec1_cust1"))
+            .into_expr();
+        let result = filter(&transformed, condition, false).unwrap();
+        assert_eq!(
+            result.count().unwrap(),
+            1,
+            "#1105: filter on string column must return 1 row"
+        );
     }
 }

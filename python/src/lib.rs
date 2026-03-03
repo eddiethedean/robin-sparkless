@@ -14,7 +14,7 @@ use robin_sparkless::dataframe::{
 use robin_sparkless::functions::{self, asc_from_name, SortOrder, ThenBuilder, WhenBuilder};
 use robin_sparkless::{
     Column, CubeRollupData, DataFrame, DataType, GroupBySpec, GroupedData, SelectItem,
-    SparkSession, SparkSessionBuilder,
+    SparkSession, SparkSessionBuilder, StructField,
 };
 use serde_json::Value as JsonValue;
 use std::cell::RefCell;
@@ -37,6 +37,14 @@ fn to_py_err(e: impl std::fmt::Display) -> PyErr {
     // create_dataframe_from_rows with verify_schema: type mismatch -> TypeError (PySpark parity)
     if (msg.contains("Row ") || msg.contains("row ")) && msg.contains("expected type") {
         return pyo3::exceptions::PyTypeError::new_err(msg);
+    }
+    // Int subscript on struct column: PySpark/issue #339 expects TypeError (string keys for struct field access).
+    if (msg.contains("expected List") || msg.contains("list operation"))
+        && (msg.contains("Struct") || msg.contains("struct"))
+    {
+        return pyo3::exceptions::PyTypeError::new_err(
+            "Struct field subscript access requires string keys, not int",
+        );
     }
     // Ensure column-not-found errors contain "cannot resolve" (PySpark parity; Polars may emit "unable to find column").
     let msg = if !msg.to_lowercase().contains("cannot resolve")
@@ -97,7 +105,21 @@ fn json_to_py(value: &JsonValue, py: Python<'_>) -> PyResult<PyObject> {
         JsonValue::Object(obj) => {
             let dict = PyDict::new_bound(py);
             for (k, v) in obj {
-                dict.set_item(k, json_to_py(v, py)?)?;
+                let py_v = match v {
+                    JsonValue::String(s) if s.trim_start().starts_with('{') => {
+                        if let Ok(parsed) = serde_json::from_str::<JsonValue>(s) {
+                            if parsed.is_object() {
+                                json_to_py(&parsed, py)?
+                            } else {
+                                s.clone().into_py(py)
+                            }
+                        } else {
+                            s.clone().into_py(py)
+                        }
+                    }
+                    _ => json_to_py(v, py)?,
+                };
+                dict.set_item(k, py_v)?;
             }
             Ok(dict.into_py(py))
         }
@@ -124,6 +146,158 @@ fn try_coerce_string_to_numeric_or_bool(py: Python<'_>, s: &str) -> Option<PyObj
         return Some(f.into_py(py));
     }
     None
+}
+
+/// #1066: Parse a stringified struct value (e.g. Polars debug "{10}" or "10, \"test\"") into
+/// a JSON object using the schema, so nested structs in collect() become dicts.
+fn parse_struct_string_to_json(s: &str, fields: &[StructField]) -> Option<JsonValue> {
+    use serde_json::Map;
+    if fields.is_empty() {
+        return None;
+    }
+    let trimmed = s.trim();
+    let inner = trimmed
+        .strip_prefix('{')
+        .and_then(|t| t.strip_suffix('}'))
+        .map(|t| t.trim())
+        .unwrap_or(trimmed);
+    let mut obj = Map::new();
+    if fields.len() == 1 {
+        let f = &fields[0];
+        let val = match &f.data_type {
+            DataType::Integer | DataType::Long => inner
+                .parse::<i64>()
+                .ok()
+                .map(serde_json::Number::from)
+                .map(JsonValue::Number),
+            DataType::Double => inner
+                .parse::<f64>()
+                .ok()
+                .filter(|f| f.is_finite())
+                .and_then(|f| serde_json::Number::from_f64(f).map(JsonValue::Number)),
+            DataType::String => Some(JsonValue::String(
+                inner
+                    .strip_prefix('"')
+                    .and_then(|t| t.strip_suffix('"'))
+                    .unwrap_or(inner)
+                    .to_string(),
+            )),
+            DataType::Boolean => {
+                if inner.eq_ignore_ascii_case("true") {
+                    Some(JsonValue::Bool(true))
+                } else if inner.eq_ignore_ascii_case("false") {
+                    Some(JsonValue::Bool(false))
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        }?;
+        obj.insert(f.name.clone(), val);
+        return Some(JsonValue::Object(obj));
+    }
+    // Try "name: value, name: value" format first (order-independent).
+    let mut by_name: Map<String, JsonValue> = Map::new();
+    for segment in inner.split(", ") {
+        let segment = segment.trim();
+        if let Some((k, v)) = segment.split_once(':') {
+            let k = k.trim().trim_matches('"').to_string();
+            let v = v.trim();
+            for f in fields.iter() {
+                if f.name == k {
+                    let part_unescaped = v
+                        .strip_prefix('"')
+                        .and_then(|t| t.strip_suffix('"'))
+                        .unwrap_or(v);
+                    let val = match &f.data_type {
+                        DataType::Integer | DataType::Long => v
+                            .parse::<i64>()
+                            .ok()
+                            .map(serde_json::Number::from)
+                            .map(JsonValue::Number)
+                            .unwrap_or(JsonValue::Null),
+                        DataType::Double => v
+                            .parse::<f64>()
+                            .ok()
+                            .filter(|x| x.is_finite())
+                            .and_then(serde_json::Number::from_f64)
+                            .map(JsonValue::Number)
+                            .unwrap_or(JsonValue::Null),
+                        DataType::String => JsonValue::String(part_unescaped.to_string()),
+                        DataType::Boolean => {
+                            if v.eq_ignore_ascii_case("true") {
+                                JsonValue::Bool(true)
+                            } else if v.eq_ignore_ascii_case("false") {
+                                JsonValue::Bool(false)
+                            } else {
+                                JsonValue::Null
+                            }
+                        }
+                        _ => JsonValue::Null,
+                    };
+                    by_name.insert(k, val);
+                    break;
+                }
+            }
+        }
+    }
+    if !by_name.is_empty() {
+        for f in fields {
+            by_name.entry(f.name.clone()).or_insert(JsonValue::Null);
+        }
+        return Some(JsonValue::Object(by_name));
+    }
+    // Fallback: positional split. Match each part to a field by type (order-agnostic) so
+    // "test, 10" or "test,10" still yields inner_value=10, inner_string="test" for [Integer, String].
+    let parts: Vec<&str> = inner
+        .split(',')
+        .map(|p| p.trim())
+        .filter(|p| !p.is_empty())
+        .collect();
+    let mut used = vec![false; parts.len()];
+    for f in fields.iter() {
+        let mut val = JsonValue::Null;
+        for (i, part) in parts.iter().enumerate() {
+            if used[i] {
+                continue;
+            }
+            let part_unescaped = part
+                .strip_prefix('"')
+                .and_then(|t| t.strip_suffix('"'))
+                .unwrap_or(part);
+            let matched = match &f.data_type {
+                DataType::Integer | DataType::Long => part
+                    .parse::<i64>()
+                    .ok()
+                    .map(serde_json::Number::from)
+                    .map(JsonValue::Number),
+                DataType::Double => part
+                    .parse::<f64>()
+                    .ok()
+                    .filter(|x| x.is_finite())
+                    .and_then(serde_json::Number::from_f64)
+                    .map(JsonValue::Number),
+                DataType::String => Some(JsonValue::String(part_unescaped.to_string())),
+                DataType::Boolean => {
+                    if part.eq_ignore_ascii_case("true") {
+                        Some(JsonValue::Bool(true))
+                    } else if part.eq_ignore_ascii_case("false") {
+                        Some(JsonValue::Bool(false))
+                    } else {
+                        None
+                    }
+                }
+                _ => None,
+            };
+            if let Some(v) = matched {
+                val = v;
+                used[i] = true;
+                break;
+            }
+        }
+        obj.insert(f.name.clone(), val);
+    }
+    Some(JsonValue::Object(obj))
 }
 
 /// Convert JSON value to Python with optional schema-based coercion so that numeric/boolean
@@ -173,14 +347,27 @@ fn json_value_to_py_with_schema(
                 s.clone().into_py(py)
             }
         }
-        // Schema says String: preserve string in Row (do not coerce "123" -> 123; tests expect '100' not 100).
-        (Some(DataType::String), JsonValue::String(s)) => s.clone().into_py(py),
+        // Schema says String: preserve string in Row. #1066: if value is stringified JSON object, parse to dict.
+        (Some(DataType::String), JsonValue::String(s)) => {
+            if let Ok(parsed) = serde_json::from_str::<JsonValue>(s) {
+                if parsed.is_object() {
+                    return json_to_py(&parsed, py);
+                }
+            }
+            s.clone().into_py(py)
+        }
         // Schema says String but engine sent number (e.g. cast to string, inference): emit string.
         (Some(DataType::String), JsonValue::Number(n)) => n.to_string().into_py(py),
         // Schema says String but engine sent bool: emit "True"/"False".
         (Some(DataType::String), JsonValue::Bool(b)) => b.to_string().into_py(py),
         // No schema (e.g. coalesce output): best-effort parse string to int/float/bool for PySpark parity.
+        // #1066: If string looks like JSON object/array, parse so nested structs work.
         (None, JsonValue::String(s)) => {
+            if let Ok(parsed) = serde_json::from_str::<JsonValue>(s) {
+                if parsed.is_object() || parsed.is_array() {
+                    return json_to_py(&parsed, py);
+                }
+            }
             let s = s.trim();
             if let Ok(i) = s.parse::<i64>() {
                 i.into_py(py)
@@ -241,6 +428,40 @@ fn json_value_to_py_with_schema(
                 dict.set_item(&f.name, py_v)?;
             }
             dict.into_py(py)
+        }
+        // #1066: Struct (top-level or nested) may be stringified; parse so row["my_struct"]["nested"] is dict.
+        (Some(DataType::Struct(fields)), JsonValue::String(s)) => {
+            if let Ok(JsonValue::Object(obj)) = serde_json::from_str::<JsonValue>(s) {
+                let dict = PyDict::new_bound(py);
+                for f in fields {
+                    let v = obj.get(&f.name).unwrap_or(&JsonValue::Null);
+                    let py_v = json_value_to_py_with_schema(
+                        py,
+                        v,
+                        Some(&f.data_type),
+                        datetime_cls,
+                        date_cls,
+                    )?;
+                    dict.set_item(&f.name, py_v)?;
+                }
+                return Ok(dict.into_py(py));
+            }
+            if let Some(obj) = parse_struct_string_to_json(s, fields) {
+                let dict = PyDict::new_bound(py);
+                for f in fields {
+                    let v = obj.get(&f.name).unwrap_or(&JsonValue::Null);
+                    let py_v = json_value_to_py_with_schema(
+                        py,
+                        v,
+                        Some(&f.data_type),
+                        datetime_cls,
+                        date_cls,
+                    )?;
+                    dict.set_item(&f.name, py_v)?;
+                }
+                return Ok(dict.into_py(py));
+            }
+            s.clone().into_py(py)
         }
         _ => json_to_py(value, py)?,
     })
@@ -1420,6 +1641,12 @@ fn python_data_and_schema(
     let list = data.downcast::<PyList>().map_err(|_| {
         PyErr::new::<pyo3::exceptions::PyTypeError, _>("data must be a list (or pandas.DataFrame)")
     })?;
+    // PySpark parity: createDataFrame([]) without explicit schema raises ValueError.
+    if list.is_empty() && schema.is_none() {
+        return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
+            "can not infer schema from empty dataset",
+        ));
+    }
     // Parse explicit schema first so we can use its field order when building rows from dicts (Phase 7 / issue_247).
     let schema_names_only: bool = schema
         .and_then(|s| s.downcast::<PyList>().ok())
@@ -1429,9 +1656,31 @@ fn python_data_and_schema(
         .map(|s| parse_schema_from_py(py, s))
         .transpose()?
         .and_then(|o| o);
-    let column_order: Option<Vec<String>> = schema_res
+    // Scalar rows (e.g. [1,2,3]) are only allowed when there is an explicit single-column schema
+    // such as "bigint" or DateType() (PySpark parity for single-type createDataFrame).
+    let allow_scalar_single_column: bool =
+        schema_res.as_ref().map(|s| s.len() == 1).unwrap_or(false);
+    // Column order for dict rows: prefer explicit schema order; otherwise, for dict-only data,
+    // use union of all keys across rows sorted alphabetically so sparse rows still include all keys.
+    let mut column_order: Option<Vec<String>> = schema_res
         .as_ref()
         .map(|s| s.iter().map(|(n, _)| n.clone()).collect());
+    if column_order.is_none() && schema_res.is_none() && !list.is_empty() {
+        use std::collections::BTreeSet;
+        let mut keys_union: BTreeSet<String> = BTreeSet::new();
+        for item in list.iter() {
+            if let Ok(dict) = item.downcast::<PyDict>() {
+                for (k, _) in dict.iter() {
+                    if let Ok(name) = k.extract::<String>() {
+                        keys_union.insert(name);
+                    }
+                }
+            }
+        }
+        if !keys_union.is_empty() {
+            column_order = Some(keys_union.into_iter().collect());
+        }
+    }
 
     let mut rows: Vec<Vec<JsonValue>> = Vec::with_capacity(list.len());
     let mut inferred_schema: Option<Vec<(String, String)>> = None;
@@ -1460,8 +1709,17 @@ fn python_data_and_schema(
         } else {
             row_kind = Some(kind);
         }
-        let row = python_row_to_json(py, &item, idx, column_order.as_deref(), from_pandas)?;
-        if inferred_schema.is_none() && schema_res.is_none() && !row.is_empty() {
+        let row = python_row_to_json(
+            py,
+            &item,
+            idx,
+            column_order.as_deref(),
+            from_pandas,
+            allow_scalar_single_column,
+        )?;
+        // For dict rows without explicit schema, infer full schema from all rows/keys later so we
+        // can include sparse keys (issue #372). For other row kinds, infer from the first row.
+        if inferred_schema.is_none() && schema_res.is_none() && kind != "dict" && !row.is_empty() {
             if let Some(cols) = infer_schema_from_first_row(py, &item, from_pandas) {
                 inferred_schema = Some(cols);
             }
@@ -1471,15 +1729,46 @@ fn python_data_and_schema(
 
     // Names-only list schema should still infer types from data (PySpark parity).
     let schema_was_inferred = schema_res.is_none() || schema_names_only;
-    let mut schema = schema_res.or(inferred_schema).unwrap_or_else(|| {
-        rows.first()
-            .map(|r| {
-                (0..r.len())
-                    .map(|i| (format!("_{}", i + 1), "string".to_string()))
-                    .collect()
-            })
-            .unwrap_or_default()
-    });
+    // When schema is not explicit and rows are dicts, build schema from the union of keys so
+    // sparse rows (different keys) still include all columns, ordered alphabetically, and infer
+    // types from the underlying Python values (so bytes -> BinaryType, etc.).
+    let mut schema = if schema_res.is_none() && matches!(row_kind, Some("dict")) {
+        let names: Vec<String> = if let Some(order) = &column_order {
+            order.clone()
+        } else {
+            rows.first()
+                .map(|r| {
+                    (0..r.len())
+                        .map(|i| format!("_{}", i + 1))
+                        .collect::<Vec<String>>()
+                })
+                .unwrap_or_default()
+        };
+        let mut out: Vec<(String, String)> = Vec::with_capacity(names.len());
+        for name in &names {
+            let mut dtype = "string".to_string();
+            for item in list.iter() {
+                if let Ok(dict) = item.downcast::<PyDict>() {
+                    if let Ok(Some(v)) = dict.get_item(name) {
+                        dtype = infer_type_from_py_value(&v);
+                        break;
+                    }
+                }
+            }
+            out.push((name.clone(), dtype));
+        }
+        out
+    } else {
+        schema_res.or(inferred_schema).unwrap_or_else(|| {
+            rows.first()
+                .map(|r| {
+                    (0..r.len())
+                        .map(|i| (format!("_{}", i + 1), "string".to_string()))
+                        .collect()
+                })
+                .unwrap_or_default()
+        })
+    };
     if let (Some(first_row), true) = (rows.first(), schema.iter().all(|(_, t)| t == "string")) {
         if first_row.len() == schema.len() {
             schema = schema
@@ -1500,7 +1789,16 @@ fn python_data_and_schema(
                     .filter_map(|r| r.get(i))
                     .find(|v| !matches!(v, JsonValue::Null))
                     .map(infer_type_from_json_value);
-                let final_typ = better.unwrap_or_else(|| typ.clone());
+                // Only refine columns that were originally inferred as string-like; keep
+                // explicit non-string types such as binary/boolean/numeric unchanged.
+                let final_typ = if typ.eq_ignore_ascii_case("string")
+                    || typ.eq_ignore_ascii_case("str")
+                    || typ.eq_ignore_ascii_case("varchar")
+                {
+                    better.unwrap_or_else(|| typ.clone())
+                } else {
+                    typ.clone()
+                };
                 (name.clone(), final_typ)
             })
             .collect();
@@ -1515,6 +1813,7 @@ fn python_row_to_json(
     row_idx: usize,
     column_order: Option<&[String]>,
     from_pandas: bool,
+    allow_scalar_single_column: bool,
 ) -> PyResult<Vec<JsonValue>> {
     if let Ok(dict) = item.downcast::<PyDict>() {
         let mut keys: Vec<String> = if let Some(order) = column_order {
@@ -1553,7 +1852,7 @@ fn python_row_to_json(
         return Ok(values);
     }
     // Scalar row: allow when schema is explicit single-column (e.g. createDataFrame([1,2,3], "bigint")).
-    if column_order.map(|o| o.len() == 1).unwrap_or(false) {
+    if allow_scalar_single_column && column_order.map(|o| o.len() == 1).unwrap_or(false) {
         return Ok(vec![py_any_to_json(py, item)?]);
     }
     Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(format!(
@@ -1668,6 +1967,16 @@ fn infer_type_from_py_value(v: &Bound<'_, PyAny>) -> String {
     }
     if v.downcast::<PyBytes>().is_ok() {
         return "binary".to_string();
+    }
+    // #1103: Preserve date/timestamp from Python so createDataFrame([{"d": date(2026,1,1), "s": "2025-06-15"}])
+    // infers d as date and s as string; string column stays string in filter result.
+    if let Ok(dt) = v.getattr("isoformat") {
+        if dt.is_callable() {
+            if v.getattr("hour").is_ok() {
+                return "timestamp".to_string();
+            }
+            return "date".to_string();
+        }
     }
     "string".to_string()
 }
@@ -1983,6 +2292,17 @@ impl PyDataFrameReader {
             .map_err(|_| PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected SparkSession"))?
             .borrow();
         let mut reader = session.inner.read();
+        // PySpark parity: spark.read.csv() defaults to inferSchema=False (all strings) unless
+        // the user explicitly sets inferSchema. Core Robin Sparkless defaults to inferring
+        // types, so we override here at the Python binding layer only when no inferSchema
+        // option has been provided.
+        let has_infer_schema = self
+            .options
+            .iter()
+            .any(|(k, _)| k.eq_ignore_ascii_case("inferSchema"));
+        if !has_infer_schema {
+            reader = reader.option("inferSchema", "false");
+        }
         for (k, v) in &self.options {
             reader = reader.option(k.clone(), v.clone());
         }
@@ -2080,7 +2400,7 @@ fn resolve_join_keys_with_aliases(
     }
     /// For "alias.col" when alias is None, use suffix so "b.code" matches "code" (#374).
     fn suffix_if_dot(key: &str) -> Option<&str> {
-        key.split('.').last().filter(|s| !s.is_empty())
+        key.split('.').next_back().filter(|s| !s.is_empty())
     }
     fn get_matching(name: &str, set: &std::collections::HashSet<String>) -> Option<String> {
         set.iter().find(|c| c.eq_ignore_ascii_case(name)).cloned()
@@ -2187,6 +2507,30 @@ impl PyDataFrame {
                 .map(|df| PyDataFrame { inner: df })
                 .map_err(to_py_err)?;
             return Ok(df);
+        }
+        // F.expr(...) in filter: handle PyExprStr SQL expression strings.
+        if let Ok(py_expr_str) = condition.downcast::<PyExprStr>() {
+            let session = THREAD_ACTIVE_SESSIONS
+                .with(|cell| cell.borrow().last().map(|s| s.clone_ref(py)))
+                .ok_or_else(|| {
+                    PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
+                        "filter with F.expr() requires an active SparkSession",
+                    )
+                })?;
+            let session_ref = session.bind(py).downcast::<PySparkSession>().map_err(|_| {
+                PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected SparkSession")
+            })?;
+            let expr = robin_sparkless::sql::expr_string_to_polars(
+                &py_expr_str.borrow().sql,
+                &session_ref.borrow().inner,
+                &slf.inner,
+            )
+            .map_err(to_py_err)?;
+            return slf
+                .inner
+                .filter(expr)
+                .map(|df| PyDataFrame { inner: df })
+                .map_err(to_py_err);
         }
         if let Ok(expr_str) = condition.extract::<String>() {
             let session = THREAD_ACTIVE_SESSIONS
@@ -2709,24 +3053,15 @@ impl PyDataFrame {
         self.inner.count().map_err(to_py_err)
     }
 
-    /// PySpark parity: head() returns first Row (or None); head(n) returns list of first n rows.
+    /// PySpark-inspired head(): return a small DataFrame that can be collected.
+    /// For robin-sparkless, head() and head(n) both return a DataFrame limited to the
+    /// first `n` rows so tests can call `.collect()` on the result (issue #413/#1077).
     #[pyo3(signature = (n=None))]
     fn head(&self, py: Python<'_>, n: Option<usize>) -> PyResult<PyObject> {
         let k = n.unwrap_or(1);
         let limited = self.inner.limit(k).map_err(to_py_err)?;
         let limited_py = PyDataFrame { inner: limited };
-        let rows = limited_py.collect(py)?;
-        if n.is_none() {
-            // head() without arg: single Row or None
-            Ok(rows
-                .into_iter()
-                .next()
-                .map(|r| r.into_py(py))
-                .unwrap_or_else(|| py.None().into_py(py)))
-        } else {
-            // head(n): list of rows
-            Ok(PyList::new_bound(py, rows).into_py(py))
-        }
+        Ok(limited_py.into_py(py))
     }
 
     #[getter]
@@ -2926,9 +3261,11 @@ impl PyDataFrame {
         for (i, item) in flat.iter().enumerate() {
             let asc = asc_vec.get(i).copied().unwrap_or(true);
             if let Ok(ps) = item.downcast::<PySortOrder>() {
+                // Explicit SortOrder (e.g. col("x").desc()), use as-is.
                 sort_orders.push(ps.borrow().inner.clone());
                 all_strings = false;
             } else if let Ok(pc) = item.downcast::<PyColumn>() {
+                // Bare Column: apply ascending/descending from asc_vec.
                 let so = if asc {
                     pc.borrow().inner.asc_nulls_last()
                 } else {
@@ -2936,10 +3273,26 @@ impl PyDataFrame {
                 };
                 sort_orders.push(so);
                 all_strings = false;
+            } else if let (Ok(name_attr), Ok(asc_attr)) =
+                (item.getattr("name"), item.getattr("ascending"))
+            {
+                // Sort-key object from sparkless.sql.functions.desc/asc: has .name and .ascending.
+                let name: String = name_attr.extract()?;
+                let ascending_flag: bool = asc_attr.extract()?;
+                let col = Column::new(name.clone());
+                let so = if ascending_flag {
+                    functions::asc(&col)
+                } else {
+                    functions::desc(&col)
+                };
+                sort_orders.push(so);
+                all_strings = false;
             } else if let Ok(s) = item.extract::<String>() {
+                // Plain column name string.
                 sort_orders.push(asc_from_name(&s));
                 names_only.push(s);
             } else {
+                // Fallback: give up on mixed types; try pure string path below.
                 sort_orders.clear();
                 names_only.clear();
                 all_strings = false;
@@ -3665,7 +4018,22 @@ impl PyDataFrame {
         Ok(schema
             .fields()
             .iter()
-            .map(|f| (f.name.clone(), format!("{:?}", f.data_type)))
+            .map(|f| {
+                let ty = match &f.data_type {
+                    DataType::String => "string",
+                    DataType::Integer => "int",
+                    DataType::Long => "long",
+                    DataType::Double => "double",
+                    DataType::Boolean => "boolean",
+                    DataType::Date => "date",
+                    DataType::Timestamp => "timestamp",
+                    DataType::Binary => "binary",
+                    DataType::Array(_) => "array",
+                    DataType::Map(_, _) => "map",
+                    DataType::Struct(_) => "struct",
+                };
+                (f.name.clone(), ty.to_string())
+            })
             .collect())
     }
 
@@ -3960,6 +4328,17 @@ fn py_any_to_column(other: &Bound<'_, PyAny>) -> PyResult<Column> {
             return Ok(robin_sparkless::functions::lit_str(&format!("{:?}", vals)));
         }
     }
+    // datetime.date / datetime.datetime: convert to ISO string so plan gets string literal;
+    // backend coercion then casts to timestamp for col-vs-string comparison (#1102).
+    if let Ok(isoformat) = other.getattr("isoformat") {
+        if isoformat.is_callable() {
+            if let Ok(s) = isoformat.call0() {
+                if let Ok(iso) = s.extract::<String>() {
+                    return Ok(robin_sparkless::functions::lit_str(&iso));
+                }
+            }
+        }
+    }
     // Best effort: treat as string
     if let Ok(s) = other.str() {
         return Ok(robin_sparkless::functions::lit_str(&s.to_string()));
@@ -4074,6 +4453,19 @@ impl PyColumn {
         Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
             "pow exponent must be int or float",
         ))
+    }
+
+    fn __rpow__(
+        &self,
+        other: &Bound<'_, PyAny>,
+        _modulo: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<PyColumn> {
+        // Support Python scalar ** PyColumn, e.g. 2.0 ** (-col("Value")) (issue #291/#1082).
+        // Treat the Python value as the base column and this PyColumn as the exponent.
+        let base_col = py_any_to_column(other)?;
+        Ok(PyColumn {
+            inner: base_col.pow_with(&self.inner),
+        })
     }
 
     fn __truediv__(&self, other: &Bound<'_, PyAny>) -> PyResult<PyColumn> {
@@ -4312,16 +4704,27 @@ impl PyColumn {
         ))
     }
 
-    /// Get struct field by name (PySpark Column.getField).
-    fn get_field(&self, name: &str) -> PyColumn {
-        PyColumn {
-            inner: self.inner.get_field(name),
+    /// Get struct field by name or array element by index (PySpark Column.getField).
+    /// Accepts int (array index, 0-based) or str (struct field name). Issue #1066.
+    fn get_field(&self, name_or_index: &Bound<'_, PyAny>) -> PyResult<PyColumn> {
+        if let Ok(i) = name_or_index.extract::<i64>() {
+            return Ok(PyColumn {
+                inner: self.inner.get_item(i),
+            });
         }
+        if let Ok(name) = name_or_index.extract::<String>() {
+            return Ok(PyColumn {
+                inner: self.inner.get_field(&name),
+            });
+        }
+        Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+            "getField expects int (array index) or str (struct field name)",
+        ))
     }
 
     #[pyo3(name = "getField")]
-    fn get_field_camel(&self, name: &str) -> PyColumn {
-        self.get_field(name)
+    fn get_field_camel(&self, name_or_index: &Bound<'_, PyAny>) -> PyResult<PyColumn> {
+        self.get_field(name_or_index)
     }
 
     /// String column contains substring (PySpark Column.contains).

@@ -267,7 +267,14 @@ pub fn coerce_for_pyspark_comparison(
     }
 
     // Date/datetime vs string: cast string side to the temporal type (PySpark implicit cast).
+    // #1084: For literals use direct cast so filter(col("dt") >= "2024-01-12 00:00:00") works
+    // when the plan sends string literals; try_cast uses map() which may not handle literals.
     fn wrap_try_to_temporal(expr: Expr, target: &DataType) -> Result<Expr, PolarsError> {
+        if matches!(target, DataType::Date | DataType::Datetime(_, _)) {
+            if matches!(&expr, Expr::Literal(_)) {
+                return Ok(expr.cast(target.clone()));
+            }
+        }
         let col = Column::from_expr(expr, None);
         let type_name = match target {
             DataType::Date => "date",

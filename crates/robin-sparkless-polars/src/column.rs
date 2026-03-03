@@ -749,34 +749,29 @@ impl Column {
         )
     }
 
-    /// Trim leading and trailing whitespace (PySpark trim)
+    /// Trim leading and trailing whitespace (PySpark trim). Default behavior trims ASCII space only
+    /// so tabs are preserved when using nested LTRIM/RTRIM (issue #434 / #1078).
     pub fn trim(&self) -> Column {
         use polars::prelude::*;
-        Self::from_expr(self.expr().clone().str().strip_chars(lit(" \t\n\r")), None)
+        Self::from_expr(self.expr().clone().str().strip_chars(lit(" ")), None)
     }
 
     /// Trim leading whitespace (PySpark ltrim)
     pub fn ltrim(&self) -> Column {
         use polars::prelude::*;
-        Self::from_expr(
-            self.expr().clone().str().strip_chars_start(lit(" \t\n\r")),
-            None,
-        )
+        Self::from_expr(self.expr().clone().str().strip_chars_start(lit(" ")), None)
     }
 
     /// Trim trailing whitespace (PySpark rtrim)
     pub fn rtrim(&self) -> Column {
         use polars::prelude::*;
-        Self::from_expr(
-            self.expr().clone().str().strip_chars_end(lit(" \t\n\r")),
-            None,
-        )
+        Self::from_expr(self.expr().clone().str().strip_chars_end(lit(" ")), None)
     }
 
     /// Trim leading and trailing characters (PySpark btrim). trim_str defaults to whitespace.
     pub fn btrim(&self, trim_str: Option<&str>) -> Column {
         use polars::prelude::*;
-        let chars = trim_str.unwrap_or(" \t\n\r");
+        let chars = trim_str.unwrap_or(" ");
         Self::from_expr(self.expr().clone().str().strip_chars(lit(chars)), None)
     }
 
@@ -1566,12 +1561,24 @@ impl Column {
     }
 
     /// Add with PySpark-style string/number coercion (used by Python Column operators).
+    /// Schema: when both inputs are string, output is String (so filter col("x") == "y" after
+    /// withColumn(string + string) is not coerced to numeric by coerce_string_numeric_comparisons).
     pub fn add_pyspark(&self, other: &Column) -> Column {
         let args = [other.expr().clone()];
         let expr = self.expr().clone().map_many(
             |cols| expect_col(crate::udfs::apply_pyspark_add(cols)),
             &args,
-            |_schema, fields| Ok(Field::new(fields[0].name().clone(), DataType::Float64)),
+            |_schema, fields| {
+                let out_dtype = if fields.len() >= 2
+                    && fields[0].dtype == DataType::String
+                    && fields[1].dtype == DataType::String
+                {
+                    DataType::String
+                } else {
+                    DataType::Float64
+                };
+                Ok(Field::new(fields[0].name().clone(), out_dtype))
+            },
         );
         Self::from_expr(expr, None)
     }
@@ -2590,10 +2597,12 @@ impl Column {
         let n_expr = lit(n as f64);
         let rank_f = rank_expr.cast(DataType::Float64);
         let count_f = count_expr.cast(DataType::Float64);
-        // Avoid division by zero when partition is empty: use bucket 1
-        let bucket = when(count_f.clone().eq(lit(0.0)))
-            .then(lit(1.0))
-            .otherwise((rank_f * n_expr / count_f).ceil());
+        // Avoid division by zero when partition is empty: use bucket 1.
+        // PySpark parity: ntile(n) uses floor((rank - 1) * n / count) + 1 so that
+        // the first buckets get the extra rows when count % n != 0.
+        let bucket = when(count_f.clone().eq(lit(0.0))).then(lit(1.0)).otherwise(
+            ((rank_f.clone() - lit(1.0)) * n_expr.clone() / count_f.clone()).floor() + lit(1.0),
+        );
         let clamped = bucket.clip(lit(1.0), lit(n as f64));
         Self::from_expr(clamped.cast(DataType::Int32), None)
     }
@@ -2701,13 +2710,16 @@ impl Column {
 
     /// Add or replace a struct field (PySpark Column.withField), returning an error if the
     /// column is not a struct type. Uses a map_many UDF so we don't rely on Polars "*" wildcard
-    /// (removed in 0.53).
+    /// (removed in 0.53). Schema callback returns the extended struct so collected rows include
+    /// the new field (issue #1066).
     pub fn try_with_field(
         &self,
         name: &str,
         value: &Column,
     ) -> Result<Column, polars::error::PolarsError> {
-        let name = name.to_string();
+        use polars::prelude::PlSmallStr;
+        let field_name = name.to_string();
+        let field_name_schema = field_name.clone();
         let args = [value.expr().clone()];
         let expr = self.expr().clone().map_many(
             move |cols| {
@@ -2715,11 +2727,49 @@ impl Column {
                 expect_col(crate::udfs::apply_struct_with_field(
                     cols[0].clone(),
                     cols[1].clone(),
-                    &name,
+                    &field_name,
                 ))
             },
             &args,
-            |_schema, fields| Ok(fields[0].clone()),
+            move |_schema, fields| {
+                let struct_field = &fields[0];
+                let struct_dtype = struct_field.dtype();
+                let inner: &[Field] = match struct_dtype {
+                    DataType::Struct(f) => f.as_ref(),
+                    _ => return Ok(struct_field.clone()),
+                };
+                let value_dtype = fields[1].dtype().clone();
+                let known_value_dtype = if value_dtype.is_known() {
+                    value_dtype
+                } else if let DataType::Unknown(uk) = &value_dtype {
+                    uk.materialize().unwrap_or(DataType::String)
+                } else {
+                    DataType::String
+                };
+                let mut new_fields: Vec<Field> = inner.to_vec();
+                let mut replaced = false;
+                for f in &mut new_fields {
+                    if f.name.as_str() == field_name_schema {
+                        // When replacing, keep existing field's dtype so literals don't force String (#1066).
+                        let dtype = if f.dtype.is_known() {
+                            f.dtype.clone()
+                        } else {
+                            known_value_dtype.clone()
+                        };
+                        *f = Field::new(PlSmallStr::from(f.name.as_str()), dtype);
+                        replaced = true;
+                        break;
+                    }
+                }
+                if !replaced {
+                    new_fields.push(Field::new(
+                        PlSmallStr::from(field_name_schema.as_str()),
+                        known_value_dtype,
+                    ));
+                }
+                let out_dtype = DataType::Struct(new_fields);
+                Ok(Field::new(struct_field.name().clone(), out_dtype))
+            },
         );
         Ok(Self::from_expr(expr, None))
     }
@@ -2798,26 +2848,35 @@ impl Column {
     }
 
     /// Posexplode with null preservation (PySpark posexplode_outer).
+    ///
+    /// Implementation detail:
+    /// - Build a list of structs per row: [{pos, col}, {pos, col}, ...].
+    /// - Explode that single list column once, then project struct fields "pos" and "col".
+    ///   This avoids applying two separate explode() expressions on the same list column,
+    ///   which can lead to length mismatches when both position and value are selected
+    ///   in the same DataFrame.select call.
     pub fn posexplode_outer(&self) -> (Column, Column) {
-        use polars::prelude::{DataType, ExplodeOptions, Field};
+        use polars::prelude::{ExplodeOptions, as_struct};
+
         let opts = ExplodeOptions {
             empty_as_null: true,
             keep_nulls: true,
         };
-        let pos_expr = self
-            .expr()
-            .clone()
-            .map(
-                |col| expect_col(crate::udfs::apply_posexplode_positions(col)),
-                |_schema, field| {
-                    Ok(Field::new(
-                        field.name().clone(),
-                        DataType::List(Box::new(DataType::Int64)),
-                    ))
-                },
-            )
-            .explode(opts);
-        let val_expr = self.expr().clone().explode(opts);
+
+        // In list.eval context, col("") is the current list element. cum_count(false)
+        // yields 1-based positions, so subtract 1 for 0-based PySpark posexplode parity.
+        let pos_inner = (col("").cum_count(false) - lit(1i64)).alias("pos");
+        let val_inner = col("").alias("col");
+        let struct_expr = as_struct(vec![pos_inner, val_inner]);
+
+        // list of structs [{pos, col}, ...] per input row
+        let list_struct_expr = self.expr().clone().list().eval(struct_expr);
+        // explode once to get a struct column with one row per element (or null/empty handling via opts)
+        let struct_exploded = list_struct_expr.explode(opts);
+
+        let pos_expr = struct_exploded.clone().struct_().field_by_name("pos");
+        let val_expr = struct_exploded.struct_().field_by_name("col");
+
         (
             Self::from_expr(pos_expr, Some("pos".to_string())),
             Self::from_expr(val_expr, Some("col".to_string())),
@@ -3071,27 +3130,35 @@ impl Column {
     }
 
     /// Explode list with position (PySpark posexplode). Returns (pos_col, value_col).
-    /// pos is 0-based; implemented via UDF to avoid list.eval limitations on i64.
+    ///
+    /// Implementation detail:
+    /// - Build a list of structs per row: [{pos, col}, {pos, col}, ...].
+    /// - Explode that single list column once, then project struct fields "pos" and "col".
+    ///   This ensures that selecting both position and value in the same DataFrame.select
+    ///   call yields a single exploded DataFrame (matching PySpark posexplode semantics)
+    ///   instead of attempting two independent explode() calls on the same list column.
     pub fn posexplode(&self) -> (Column, Column) {
-        use polars::prelude::{DataType, ExplodeOptions, Field};
+        use polars::prelude::{ExplodeOptions, as_struct};
+
         let opts = ExplodeOptions {
             empty_as_null: false,
             keep_nulls: false,
         };
-        let pos_expr = self
-            .expr()
-            .clone()
-            .map(
-                |col| expect_col(crate::udfs::apply_posexplode_positions(col)),
-                |_schema, field| {
-                    Ok(Field::new(
-                        field.name().clone(),
-                        DataType::List(Box::new(DataType::Int64)),
-                    ))
-                },
-            )
-            .explode(opts);
-        let val_expr = self.expr().clone().explode(opts);
+
+        // In list.eval context, col("") is the current list element. cum_count(false)
+        // yields 1-based positions, so subtract 1 for 0-based PySpark posexplode parity.
+        let pos_inner = (col("").cum_count(false) - lit(1i64)).alias("pos");
+        let val_inner = col("").alias("col");
+        let struct_expr = as_struct(vec![pos_inner, val_inner]);
+
+        // list of structs [{pos, col}, ...] per input row
+        let list_struct_expr = self.expr().clone().list().eval(struct_expr);
+        // explode once to get a struct column with one row per element
+        let struct_exploded = list_struct_expr.explode(opts);
+
+        let pos_expr = struct_exploded.clone().struct_().field_by_name("pos");
+        let val_expr = struct_exploded.struct_().field_by_name("col");
+
         (
             Self::from_expr(pos_expr, Some("pos".to_string())),
             Self::from_expr(val_expr, Some("col".to_string())),

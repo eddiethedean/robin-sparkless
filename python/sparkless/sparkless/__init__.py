@@ -239,23 +239,64 @@ least = _mod.least
 array_distinct = _mod.array_distinct
 
 
+class _PosexplodeResult(tuple):
+    """Wrapper for posexplode result.
+
+    Behaves like a 2-tuple of Columns (pos, val) so df.select(F.posexplode(...))
+    is accepted, and stores alias metadata for SchemaManager-style consumers:
+    - _alias_name: first alias name when alias() is called
+    - _alias_names: (pos_name, val_name) tuple
+    """
+
+    def __new__(cls, pos, val, alias_names=None):
+        obj = super().__new__(cls, (pos, val))
+        if alias_names is not None and len(alias_names) >= 1:
+            obj._alias_name = alias_names[0]  # type: ignore[attr-defined]
+            obj._alias_names = tuple(alias_names)  # type: ignore[attr-defined]
+        return obj
+
+    @property
+    def _pos(self):
+        return self[0]
+
+    @property
+    def _val(self):
+        return self[1]
+
+    def alias(self, *names):
+        """Alias the two output columns.
+
+        PySpark: posexplode(col).alias("pos", "val") – two-name alias.
+        Sparkless extension: posexplode(col).alias("Value1") – second name defaults to "col".
+        """
+        if not names:
+            raise ValueError("alias() requires at least one name")
+        if len(names) == 1:
+            pos_name = names[0]
+            val_name = "col"
+        elif len(names) == 2:
+            pos_name, val_name = names
+        else:
+            raise ValueError("posexplode().alias() accepts at most two names")
+
+        pos_col = self._pos.alias(pos_name)
+        val_col = self._val.alias(val_name)
+        # Return another _PosexplodeResult so tests can inspect _alias_name/_alias_names
+        return _PosexplodeResult(pos_col, val_col, (pos_name, val_name))
+
+
 def posexplode(col_or_name):
-    """Explode array with position. Accepts column name (str) or Column. Returns (pos_col, val_col) or wrapper with .alias(pos_name, val_name) for select."""
+    """Explode array with position (PySpark posexplode).
+
+    Accepts column name (str) or Column. Returns a tuple-like object of (pos_col, val_col)
+    that:
+    - can be unpacked: pos_col, val_col = posexplode(...)
+    - can be passed directly to select(): df.select(\"id\", posexplode(\"arr\"), \"b\")
+    - supports alias(\"pos\"), alias(\"pos\", \"val\") with metadata for tests.
+    """
     if isinstance(col_or_name, str):
         col_or_name = column(col_or_name)
     pos_col, val_col = _mod.posexplode(col_or_name)
-
-    class _PosexplodeResult:
-        def __init__(self, pos, val):
-            self._pos = pos
-            self._val = val
-
-        def alias(self, pos_name, val_name):
-            return (self._pos.alias(pos_name), self._val.alias(val_name))
-
-        def __iter__(self):
-            return iter((self._pos, self._val))
-
     return _PosexplodeResult(pos_col, val_col)
 
 

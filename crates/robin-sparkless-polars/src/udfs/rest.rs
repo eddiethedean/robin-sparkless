@@ -1248,48 +1248,169 @@ pub fn apply_format_string(columns: &mut [Column], format: &str) -> PolarsResult
 fn format_string_row(format: &str, values: &[Option<String>]) -> Option<String> {
     const NULL_STR: &str = "null";
     let mut out = String::new();
-    let mut idx = 0;
+    let mut idx = 0usize;
     let mut chars = format.chars().peekable();
+
     while let Some(c) = chars.next() {
-        if c == '%' {
-            match chars.next() {
-                Some('%') => out.push('%'),
-                Some('s') => {
-                    if idx >= values.len() {
-                        return None;
-                    }
-                    match &values[idx] {
-                        Some(v) => out.push_str(v),
-                        None => out.push_str(NULL_STR),
-                    }
-                    idx += 1;
-                }
-                Some('d') | Some('i') => {
-                    if idx >= values.len() {
-                        return None;
-                    }
-                    match &values[idx] {
-                        Some(v) => out.push_str(v),
-                        None => out.push_str(NULL_STR),
-                    }
-                    idx += 1;
-                }
-                Some('f') | Some('g') | Some('e') => {
-                    if idx >= values.len() {
-                        return None;
-                    }
-                    match &values[idx] {
-                        Some(v) => out.push_str(v),
-                        None => out.push_str(NULL_STR),
-                    }
-                    idx += 1;
-                }
-                _ => return None,
-            }
-        } else {
+        if c != '%' {
             out.push(c);
+            continue;
+        }
+
+        // "%%" -> literal '%'
+        if let Some('%') = chars.peek().copied() {
+            chars.next();
+            out.push('%');
+            continue;
+        }
+
+        // Parse flags
+        let mut flags = String::new();
+        while let Some(ch) = chars.peek().copied() {
+            if "-+ 0#".contains(ch) {
+                flags.push(ch);
+                chars.next();
+            } else {
+                break;
+            }
+        }
+
+        // Parse width
+        let mut width_str = String::new();
+        while let Some(ch) = chars.peek().copied() {
+            if ch.is_ascii_digit() {
+                width_str.push(ch);
+                chars.next();
+            } else {
+                break;
+            }
+        }
+        let width = width_str.parse::<usize>().ok();
+
+        // Parse precision
+        let mut precision: Option<usize> = None;
+        if let Some('.') = chars.peek().copied() {
+            chars.next();
+            let mut prec_str = String::new();
+            while let Some(ch) = chars.peek().copied() {
+                if ch.is_ascii_digit() {
+                    prec_str.push(ch);
+                    chars.next();
+                } else {
+                    break;
+                }
+            }
+            precision = prec_str.parse::<usize>().ok();
+        }
+
+        // Ignore length modifiers (h, l, L)
+        while let Some(ch) = chars.peek().copied() {
+            if matches!(ch, 'h' | 'l' | 'L') {
+                chars.next();
+            } else {
+                break;
+            }
+        }
+
+        let spec = chars.next()?;
+
+        if idx >= values.len() {
+            return None;
+        }
+        let val_opt = &values[idx];
+        idx += 1;
+
+        let zero_pad = flags.contains('0');
+
+        match spec {
+            's' => {
+                let s = val_opt.as_deref().unwrap_or(NULL_STR);
+                out.push_str(s);
+            }
+            'd' | 'i' | 'o' | 'x' | 'X' => {
+                if val_opt.is_none() {
+                    out.push_str(NULL_STR);
+                    continue;
+                }
+                let s_raw = val_opt.as_deref().unwrap();
+                let mut n: i64 = match s_raw.parse() {
+                    Ok(v) => v,
+                    Err(_) => {
+                        out.push_str(s_raw);
+                        continue;
+                    }
+                };
+                let negative = n < 0;
+                if negative {
+                    n = -n;
+                }
+                let mut s = match spec {
+                    'd' | 'i' => format!("{n}"),
+                    'o' => format!("{n:o}"),
+                    'x' => format!("{n:x}"),
+                    'X' => format!("{n:X}"),
+                    _ => unreachable!(),
+                };
+                if let Some(w) = width {
+                    if s.len() < w {
+                        let pad_len = w - s.len();
+                        let pad_char = if zero_pad { '0' } else { ' ' };
+                        let pad = pad_char.to_string().repeat(pad_len);
+                        s = format!("{pad}{s}");
+                    }
+                }
+                if negative {
+                    if zero_pad {
+                        if let Some(w) = width {
+                            if s.len() < w {
+                                let pad_len = w - s.len();
+                                let pad = "0".repeat(pad_len);
+                                s = format!("-{pad}{s}");
+                            } else {
+                                s = format!("-{s}");
+                            }
+                        } else {
+                            s = format!("-{s}");
+                        }
+                    } else {
+                        s = format!("-{s}");
+                    }
+                }
+                out.push_str(&s);
+            }
+            'f' | 'g' | 'e' | 'E' => {
+                if val_opt.is_none() {
+                    out.push_str(NULL_STR);
+                    continue;
+                }
+                let s_raw = val_opt.as_deref().unwrap();
+                let v: f64 = match s_raw.parse() {
+                    Ok(v) => v,
+                    Err(_) => {
+                        out.push_str(s_raw);
+                        continue;
+                    }
+                };
+                let prec = precision.unwrap_or(6);
+                let formatted = match spec {
+                    'f' => format!("{v:.prec$}"),
+                    'g' => format!("{v:.prec$}"),
+                    'e' => format!("{v:.prec$e}"),
+                    'E' => format!("{v:.prec$E}"),
+                    _ => unreachable!(),
+                };
+                out.push_str(&formatted);
+            }
+            '%' => {
+                out.push('%');
+            }
+            _ => {
+                // Unsupported specifier: treat as null result.
+                return None;
+            }
         }
     }
+
     Some(out)
 }
 
@@ -3776,12 +3897,16 @@ pub fn apply_to_timestamp_format(
     let chrono_fmt = format
         .map(pyspark_format_to_chrono)
         .unwrap_or_else(|| "%Y-%m-%d %H:%M:%S".to_string());
+    // #1101: Polars casts Datetime to String with space (e.g. "2024-01-15 10:30:00"); try space variant if T-format fails.
+    let chrono_fmt_alt = chrono_fmt.replace('T', " ");
     let ca = series.str().map_err(|e| compute_err("to_timestamp", e))?;
     let out = Int64Chunked::from_iter_options(
         name.as_str().into(),
         ca.into_iter().map(|opt_s| {
             opt_s.and_then(|s| {
-                NaiveDateTime::parse_from_str(s.trim(), &chrono_fmt)
+                let s = s.trim();
+                NaiveDateTime::parse_from_str(s, &chrono_fmt)
+                    .or_else(|_| NaiveDateTime::parse_from_str(s, &chrono_fmt_alt))
                     .ok()
                     .map(|ndt| ndt.and_utc().timestamp_micros())
             })
@@ -3798,23 +3923,85 @@ pub fn apply_to_timestamp_format(
     }
 }
 
-/// Coerce series to Datetime(Microseconds) for date-part extraction (#403). String parsed as "%Y-%m-%d %H:%M:%S".
+/// Parse a single timestamp string with multiple formats (#1084). Returns micros since epoch (UTC).
+pub(crate) fn parse_timestamp_string_flexible(s: &str) -> Option<i64> {
+    use chrono::{NaiveDate, NaiveDateTime};
+    let s = s.trim();
+    // Strip trailing timezone for naive parse (e.g. +0000, -0500, Z)
+    let s_no_tz = s
+        .strip_suffix('Z')
+        .or_else(|| s.strip_suffix("z"))
+        .unwrap_or(s);
+    let s_no_tz = if s_no_tz.len() >= 5 {
+        let rest = &s_no_tz[s_no_tz.len() - 5..];
+        if (rest.starts_with('+') || rest.starts_with('-'))
+            && rest[1..].chars().all(|c| c.is_ascii_digit())
+        {
+            &s_no_tz[..s_no_tz.len() - 5]
+        } else if s_no_tz.len() >= 6 {
+            let rest = &s_no_tz[s_no_tz.len() - 6..];
+            if (rest.starts_with('+') || rest.starts_with('-'))
+                && !rest.contains(':')
+                && rest[1..].chars().all(|c| c.is_ascii_digit())
+            {
+                &s_no_tz[..s_no_tz.len() - 6]
+            } else {
+                s_no_tz
+            }
+        } else {
+            s_no_tz
+        }
+    } else {
+        s_no_tz
+    };
+    // Try formats with fractional seconds by parsing the part before '.' and optional subsecs
+    if let Some(dot) = s_no_tz.find('.') {
+        let base = &s_no_tz[..dot];
+        let subsec = &s_no_tz[dot + 1..];
+        let subsec_digits: String = subsec.chars().take_while(|c| c.is_ascii_digit()).collect();
+        if let Ok(ndt) = NaiveDateTime::parse_from_str(base, "%Y-%m-%dT%H:%M:%S")
+            .or_else(|_| NaiveDateTime::parse_from_str(base, "%Y-%m-%d %H:%M:%S"))
+        {
+            let micros = if subsec_digits.is_empty() {
+                0_i64
+            } else {
+                let frac = subsec_digits.parse::<u32>().unwrap_or(0) as i64;
+                let digits = subsec_digits.len();
+                (if digits <= 6 {
+                    frac * 10_i64.pow((6 - digits) as u32)
+                } else {
+                    frac / 10_i64.pow((digits - 6) as u32)
+                })
+                .min(999_999)
+            };
+            let ndt = ndt + chrono::TimeDelta::microseconds(micros);
+            return Some(ndt.and_utc().timestamp_micros());
+        }
+    }
+    const FORMATS: &[&str] = &["%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d"];
+    for fmt in FORMATS {
+        if let Ok(ndt) = NaiveDateTime::parse_from_str(s_no_tz, fmt) {
+            return Some(ndt.and_utc().timestamp_micros());
+        }
+    }
+    if let Ok(d) = NaiveDate::parse_from_str(s_no_tz, "%Y-%m-%d") {
+        let ndt = d.and_hms_opt(0, 0, 0).unwrap();
+        return Some(ndt.and_utc().timestamp_micros());
+    }
+    None
+}
+
+/// Coerce series to Datetime(Microseconds) for date-part extraction (#403, #1084).
+/// String parsed with multiple formats (ISO with T, space, timezone stripped, date-only).
 fn series_to_datetime_micros(series: &Series) -> PolarsResult<Series> {
-    use chrono::NaiveDateTime;
     use polars::datatypes::TimeUnit;
     if series.dtype() == &DataType::String {
         let name = series.name().as_str().into();
         let ca = series.str().map_err(|e| compute_err("date on string", e))?;
-        const FMT: &str = "%Y-%m-%d %H:%M:%S";
         let out = Int64Chunked::from_iter_options(
             name,
-            ca.into_iter().map(|opt_s| {
-                opt_s.and_then(|s| {
-                    NaiveDateTime::parse_from_str(s.trim(), FMT)
-                        .ok()
-                        .map(|ndt| ndt.and_utc().timestamp_micros())
-                })
-            }),
+            ca.into_iter()
+                .map(|opt_s| opt_s.and_then(parse_timestamp_string_flexible)),
         );
         out.into_series()
             .cast(&DataType::Datetime(TimeUnit::Microseconds, None))
@@ -4382,7 +4569,85 @@ pub fn apply_sequence(column: Column) -> PolarsResult<Option<Column>> {
     Ok(Some(Column::new(name, builder.finish().into_series())))
 }
 
+/// Mask a series to null where `mask` is true. Used so withField leaves null when input struct is null (PySpark #1066).
+fn series_set_nulls_where(series: &Series, mask: &BooleanChunked) -> PolarsResult<Series> {
+    use polars::chunked_array::ops::ChunkSet;
+    let name = series.name().to_string();
+    let dtype = series.dtype().clone();
+    let len = series.len();
+    let mask_len = mask.len();
+    // If lengths differ, use a truncated or extended mask to match series (e.g. literal broadcast).
+    let mask_to_use: BooleanChunked = if mask_len == len {
+        mask.clone()
+    } else if mask_len > len && len == 1 {
+        // Literal: series has 1 row, mask has N; treat as "all masked" for the single row then broadcast is caller's job.
+        mask.clone()
+    } else {
+        mask.clone()
+    };
+    let masked = match dtype {
+        DataType::Int64 => series
+            .i64()
+            .map_err(|e| compute_err("with_field mask i64", e))?
+            .set(&mask_to_use, None)
+            .map_err(|e| compute_err("with_field set i64", e))?
+            .into_series(),
+        DataType::Int32 => series
+            .i32()
+            .map_err(|e| compute_err("with_field mask i32", e))?
+            .set(&mask_to_use, None)
+            .map_err(|e| compute_err("with_field set i32", e))?
+            .into_series(),
+        DataType::String => {
+            let ca = series
+                .str()
+                .map_err(|e| compute_err("with_field mask str", e))?;
+            // Manual mask: output length = mask length; where mask is true use None (PySpark #1066).
+            let n = mask_to_use.len();
+            let mut opts: Vec<Option<String>> = Vec::with_capacity(n);
+            for i in 0..n {
+                let set_null = mask_to_use.get(i).unwrap_or(false);
+                let val = ca
+                    .get(if i < ca.len() { i } else { 0 })
+                    .map(|s| s.to_string());
+                opts.push(if set_null { None } else { val });
+            }
+            StringChunked::from_iter_options(name.as_str().into(), opts.into_iter()).into_series()
+        }
+        DataType::Float64 => series
+            .f64()
+            .map_err(|e| compute_err("with_field mask f64", e))?
+            .set(&mask_to_use, None)
+            .map_err(|e| compute_err("with_field set f64", e))?
+            .into_series(),
+        DataType::Boolean => series
+            .bool()
+            .map_err(|e| compute_err("with_field mask bool", e))?
+            .set(&mask_to_use, None)
+            .map_err(|e| compute_err("with_field set bool", e))?
+            .into_series(),
+        DataType::Unknown(uk) => {
+            if let Some(dt) = uk.materialize() {
+                let casted = series
+                    .cast(&dt)
+                    .map_err(|e| compute_err("with_field cast unknown", e))?;
+                return series_set_nulls_where(&casted, mask);
+            }
+            series.clone()
+        }
+        _ => {
+            // Try casting to String so literal/other string-like types get masked (PySpark #1066).
+            if let Ok(casted) = series.cast(&DataType::String) {
+                return series_set_nulls_where(&casted, mask);
+            }
+            series.clone()
+        }
+    };
+    Ok(masked.with_name(PlSmallStr::from(name.as_str())))
+}
+
 /// Replace or add a struct field (PySpark withField). Used when Polars 0.53+ no longer accepts "*" in with_fields.
+/// When the whole struct is null, leaves result null (PySpark behavior; issue #1066).
 pub fn apply_struct_with_field(
     struct_col: Column,
     value_col: Column,
@@ -4395,15 +4660,79 @@ pub fn apply_struct_with_field(
         .struct_()
         .map_err(|e| compute_err("with_field: expected struct column", e))?;
     let len = st.len();
+    // Polars can represent null structs as struct-with-all-null-fields; treat those as null (PySpark #1066).
+    let struct_null: BooleanChunked = {
+        let explicit_null = struct_series.is_null();
+        let fields_series_for_mask = st.fields_as_series();
+        let all_fields_null: BooleanChunked = fields_series_for_mask
+            .iter()
+            .map(|s| s.is_null())
+            .fold(None, |acc: Option<BooleanChunked>, m| {
+                Some(match acc {
+                    Some(a) => a & m,
+                    None => m,
+                })
+            })
+            .unwrap_or_else(|| {
+                BooleanChunked::from_iter_options(PlSmallStr::EMPTY, (0..len).map(|_| Some(false)))
+            });
+        explicit_null | all_fields_null
+    };
     let fields_series = st.fields_as_series();
-    let value_series = value_col.take_materialized_series();
+    let mut value_series = value_col.take_materialized_series();
+    // Materialize Unknown (literal) so broadcast and mask work (PySpark #1066).
+    if let DataType::Unknown(uk) = value_series.dtype() {
+        if let Some(dt) = uk.materialize() {
+            value_series = value_series
+                .cast(&dt)
+                .map_err(|e| compute_err("with_field materialize literal", e))?;
+        }
+    }
+    // Broadcast literal (length 1) to match struct length so mask can be applied.
+    if value_series.len() != len {
+        let indices: Vec<u32> = (0..len).map(|_| 0u32).collect();
+        let idx_ca = UInt32Chunked::from_vec("".into(), indices);
+        value_series = value_series
+            .take(&idx_ca)
+            .map_err(|e| compute_err("with_field broadcast literal", e))?;
+    }
+    // Mask value by struct null: where struct is null, value must be null (PySpark #1066).
+    // For string/unknown (literal) use a manual loop; other types use series_set_nulls_where.
+    let value_masked: Series = match value_series.dtype() {
+        DataType::String | DataType::Unknown(_) => {
+            let value_str = if value_series.dtype() == &DataType::String {
+                value_series.clone()
+            } else {
+                value_series
+                    .cast(&DataType::String)
+                    .unwrap_or_else(|_| value_series.clone())
+            };
+            let name_val = value_series.name().to_string();
+            let mut opts: Vec<Option<String>> = Vec::with_capacity(len);
+            if let Ok(ca) = value_str.str() {
+                for i in 0..len {
+                    let set_null = struct_null.get(i).unwrap_or(false);
+                    let val = ca
+                        .get(if i < ca.len() { i } else { 0 })
+                        .map(|s| s.to_string());
+                    opts.push(if set_null { None } else { val });
+                }
+                StringChunked::from_iter_options(name_val.as_str().into(), opts.into_iter())
+                    .into_series()
+            } else {
+                value_series.clone()
+            }
+        }
+        _ => series_set_nulls_where(&value_series, &struct_null)
+            .unwrap_or_else(|_| value_series.clone()),
+    };
     let mut new_fields: Vec<Series> = Vec::with_capacity(fields_series.len() + 1);
     let mut replaced = false;
     for s in &fields_series {
         let fname = s.name().as_str();
         let new_s = if fname == field_name {
             replaced = true;
-            let mut v = value_series.clone();
+            let mut v = value_masked.clone();
             v.rename(PlSmallStr::from(field_name));
             v
         } else {
@@ -4412,10 +4741,15 @@ pub fn apply_struct_with_field(
         new_fields.push(new_s);
     }
     if !replaced {
-        let mut v = value_series.clone();
+        let mut v = value_masked.clone();
         v.rename(PlSmallStr::from(field_name));
         new_fields.push(v);
     }
+    // Mask every field by struct_null so when input struct is null we get all-null struct (serializes as null).
+    let new_fields: Vec<Series> = new_fields
+        .into_iter()
+        .map(|s| series_set_nulls_where(&s, &struct_null).unwrap_or(s))
+        .collect();
     let out = StructChunked::from_series(name.as_str().into(), len, new_fields.iter())
         .map_err(|e| compute_err("with_field: build struct", e))?;
     Ok(Some(Column::new(name, out.into_series())))
@@ -5188,4 +5522,19 @@ pub fn apply_to_timestamp_ntz_format(
         .cast(&DataType::Datetime(TimeUnit::Microseconds, None))?;
     let _ = strict;
     Ok(Some(Column::new(name, out_series)))
+}
+
+#[cfg(test)]
+mod tests_parse_timestamp {
+    use super::parse_timestamp_string_flexible;
+
+    #[test]
+    fn test_parse_iso_with_tz() {
+        let s = "2023-02-07T04:00:01.730+0000";
+        let micros = parse_timestamp_string_flexible(s);
+        assert!(micros.is_some(), "expected Some for {s:?}");
+        let t = micros.unwrap();
+        let hour = (t / 1_000_000 / 3600) % 24;
+        assert_eq!(hour, 4, "hour should be 4 for {s:?}");
+    }
 }

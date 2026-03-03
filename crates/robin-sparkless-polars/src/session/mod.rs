@@ -134,7 +134,8 @@ fn string_to_json_object(s: &str) -> Option<serde_json::Map<String, JsonValue>> 
 /// #976: Nested array (e.g. array<array<long>>) recurses; elem_type "array<long>" maps to List(Int64).
 /// Array element types timestamp, date, struct<...>, map<...> supported for create_dataframe_from_rows parity.
 fn json_type_str_to_polars(type_str: &str) -> Option<DataType> {
-    let s = type_str.trim().to_lowercase();
+    let trimmed = type_str.trim();
+    let s = trimmed.to_lowercase();
     if is_decimal_type_str(&s) {
         return Some(DataType::Float64);
     }
@@ -142,7 +143,8 @@ fn json_type_str_to_polars(type_str: &str) -> Option<DataType> {
         let inner = json_type_str_to_polars(elem_type.trim())?;
         return Some(DataType::List(Box::new(inner)));
     }
-    if let Some(fields) = parse_struct_fields(&s) {
+    // Preserve struct field name casing (e.g. "Inner", "E1") for subscript resolution (#339, #1066).
+    if let Some(fields) = parse_struct_fields(trimmed) {
         let polars_fields: Vec<Field> = fields
             .into_iter()
             .map(|(name, typ)| {
@@ -666,7 +668,32 @@ fn json_value_to_series_single(
 ) -> Result<Series, PolarsError> {
     use chrono::NaiveDate;
     let epoch = date_utils::epoch_naive_date();
-    match (value, type_str.trim().to_lowercase().as_str()) {
+    let type_lower = type_str.trim().to_lowercase();
+    // #1066: Nested array (e.g. createDataFrame with {"matrix": [[1,2,3],[4,5,6]]}) when type is array<...>.
+    if let (JsonValue::Array(arr), Some(elem_type)) = (value, parse_array_element_type(&type_lower))
+    {
+        let inner_dtype = json_type_str_to_polars(&elem_type).ok_or_else(|| {
+            PolarsError::ComputeError(
+                format!("array element type '{elem_type}' not supported").into(),
+            )
+        })?;
+        let elem_series: Vec<Series> = if parse_array_element_type(&elem_type).is_some() {
+            arr.iter()
+                .map(|e| json_values_to_series(&[Some(e.clone())], &elem_type, "elem"))
+                .collect::<Result<Vec<_>, _>>()?
+        } else {
+            arr.iter()
+                .map(|e| json_value_to_series_single(e, &elem_type, "elem"))
+                .collect::<Result<Vec<_>, _>>()?
+        };
+        let vals: Vec<_> = elem_series.iter().filter_map(|s| s.get(0).ok()).collect();
+        let s = Series::from_any_values_and_dtype(PlSmallStr::EMPTY, &vals, &inner_dtype, false)
+            .map_err(|e| PolarsError::ComputeError(format!("array elem: {e}").into()))?;
+        let mut builder = get_list_builder(&inner_dtype, 64, 1, name.into());
+        builder.append_series(&s)?;
+        return Ok(builder.finish().into_series());
+    }
+    match (value, type_lower.as_str()) {
         (JsonValue::Null, _) => Ok(Series::new_null(name.into(), 1)),
         (JsonValue::Number(n), "int" | "integer" | "bigint" | "long" | "smallint" | "tinyint") => {
             Ok(Series::new(name.into(), vec![n.as_i64()]))
@@ -1678,25 +1705,104 @@ impl SparkSession {
                     Some("double".to_string())
                 }
             }
-            JsonValue::String(s) => {
-                if chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").is_ok() {
-                    Some("date".to_string())
-                } else if chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S%.f").is_ok()
-                    || chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S").is_ok()
-                {
-                    Some("timestamp".to_string())
-                } else {
-                    Some("string".to_string())
-                }
+            JsonValue::String(_) => {
+                // #1103: Keep string columns as string in createDataFrame so that e.g.
+                // filter(date_col > string_col) only casts the string in the predicate and the
+                // result row still has the string column as string (PySpark parity). Do not infer
+                // date/timestamp from date-like strings; user can pass explicit schema if needed.
+                Some("string".to_string())
             }
             JsonValue::Array(_) => Some("array".to_string()),
             JsonValue::Object(_) => None, // struct type is inferred in infer_schema_from_json_rows from object keys
         }
     }
 
-    /// Infer schema (name, dtype_str) from JSON rows by scanning the first non-null value per column.
+    /// Infer a struct type string from a JSON object (for nested struct inference in createDataFrame).
+    fn infer_struct_dtype_from_json_object(obj: &serde_json::Map<String, JsonValue>) -> String {
+        let mut keys: Vec<&str> = obj.keys().map(|k| k.as_str()).collect();
+        keys.sort();
+        keys.iter()
+            .map(|k| {
+                let field_typ = obj
+                    .get(*k)
+                    .map(|v| match v {
+                        JsonValue::Object(inner_obj) => {
+                            format!(
+                                "struct<{}>",
+                                Self::infer_struct_dtype_from_json_object(inner_obj)
+                            )
+                        }
+                        _ => Self::infer_dtype_from_json_value(v)
+                            .unwrap_or_else(|| "string".to_string()),
+                    })
+                    .unwrap_or_else(|| "string".to_string());
+                format!("{}:{}", k, field_typ)
+            })
+            .collect::<Vec<_>>()
+            .join(",")
+    }
+
+    /// Infer struct type from a column of objects by using the first non-null value per key across all rows.
+    /// Fixes E2 when row0 has E2=null and row1 has E2=4 so E2 is inferred as bigint (#339 null_field).
+    fn infer_struct_dtype_from_json_rows(
+        rows: &[Vec<JsonValue>],
+        col_idx: usize,
+    ) -> Option<String> {
+        let mut all_keys: std::collections::HashSet<String> = std::collections::HashSet::new();
+        for row in rows {
+            if let Some(JsonValue::Object(obj)) = row.get(col_idx) {
+                for k in obj.keys() {
+                    all_keys.insert(k.clone());
+                }
+            }
+        }
+        let mut key_to_first_non_null: std::collections::HashMap<String, JsonValue> =
+            std::collections::HashMap::new();
+        for row in rows {
+            let Some(JsonValue::Object(obj)) = row.get(col_idx) else {
+                continue; // skip null or non-object rows so struct type is inferred from object rows
+            };
+            for k in &all_keys {
+                if key_to_first_non_null.contains_key(k) {
+                    continue;
+                }
+                if let Some(val) = obj.get(k) {
+                    if !matches!(val, JsonValue::Null) {
+                        key_to_first_non_null.insert(k.clone(), val.clone());
+                    }
+                }
+            }
+        }
+        let mut keys: Vec<&String> = all_keys.iter().collect();
+        keys.sort();
+        let inner = keys
+            .iter()
+            .map(|k| {
+                let field_typ = key_to_first_non_null
+                    .get(*k)
+                    .map(|val| match val {
+                        JsonValue::Object(inner_obj) => {
+                            format!(
+                                "struct<{}>",
+                                Self::infer_struct_dtype_from_json_object(inner_obj)
+                            )
+                        }
+                        _ => Self::infer_dtype_from_json_value(val)
+                            .unwrap_or_else(|| "string".to_string()),
+                    })
+                    .unwrap_or_else(|| "string".to_string());
+                format!("{}:{}", k.as_str(), field_typ)
+            })
+            .collect::<Vec<_>>()
+            .join(",");
+        Some(format!("struct<{}>", inner))
+    }
+
+    /// Infer schema (name, dtype_str) from JSON rows by scanning values per column.
     /// Used by createDataFrame(data, schema=None) when schema is omitted or only column names given.
-    /// When the first non-null value is a JSON object, infers struct<k1:string,k2:string,...> (PR13 / struct parity).
+    /// When the first non-null value is a JSON object, infers struct (PR13 / struct parity).
+    /// #1084: If any value in a column infers as string (e.g. "2024-01-2" with single-digit day),
+    /// use string for the column so date-like strings stay string and comparisons remain lexicographic.
     pub fn infer_schema_from_json_rows(
         rows: &[Vec<JsonValue>],
         names: &[String],
@@ -1709,29 +1815,28 @@ impl SparkSession {
             .map(|n| (n.clone(), "string".to_string()))
             .collect();
         for (col_idx, (_, dtype_str)) in schema.iter_mut().enumerate() {
+            let mut first_non_string: Option<String> = None;
+            let mut has_string = false;
             for row in rows {
                 let v = row.get(col_idx).unwrap_or(&JsonValue::Null);
-                if let JsonValue::Object(obj) = v {
-                    let mut keys: Vec<&str> = obj.keys().map(|k| k.as_str()).collect();
-                    keys.sort();
-                    let inner = keys
-                        .iter()
-                        .map(|k| {
-                            let field_typ = obj
-                                .get(*k)
-                                .and_then(Self::infer_dtype_from_json_value)
-                                .unwrap_or_else(|| "string".to_string());
-                            format!("{}:{}", k, field_typ)
-                        })
-                        .collect::<Vec<_>>()
-                        .join(",");
-                    *dtype_str = format!("struct<{}>", inner);
+                if let JsonValue::Object(_) = v {
+                    if let Some(ty) = Self::infer_struct_dtype_from_json_rows(rows, col_idx) {
+                        *dtype_str = ty;
+                    }
                     break;
                 }
                 if let Some(dtype) = Self::infer_dtype_from_json_value(v) {
-                    *dtype_str = dtype;
-                    break;
+                    if dtype == "string" {
+                        has_string = true;
+                        break;
+                    }
+                    first_non_string.get_or_insert(dtype);
                 }
+            }
+            if has_string {
+                *dtype_str = "string".to_string();
+            } else if let Some(d) = first_non_string {
+                *dtype_str = d;
             }
         }
         schema
@@ -1799,6 +1904,8 @@ impl SparkSession {
                 let mut has_null_only = true;
                 let mut has_int = false;
                 let mut has_float = false;
+                let mut has_non_number = false;
+                let mut first_non_number: Option<&JsonValue> = None;
                 for row in &rows {
                     let v = row.get(col_idx).unwrap_or(&JsonValue::Null);
                     match v {
@@ -1811,8 +1918,31 @@ impl SparkSession {
                                 has_float = true;
                             }
                         }
+                        JsonValue::String(s) => {
+                            has_null_only = false;
+                            // Treat textual inf/-inf/nan/NaN/Infinity as numeric (DoubleType)
+                            // for validation, so createDataFrame with float("inf") / NaN passes.
+                            let lower = s.to_ascii_lowercase();
+                            if lower == "inf"
+                                || lower == "+inf"
+                                || lower == "-inf"
+                                || lower == "infinity"
+                                || lower == "+infinity"
+                                || lower == "-infinity"
+                                || lower == "nan"
+                            {
+                                has_float = true;
+                            } else if !has_non_number {
+                                has_non_number = true;
+                                first_non_number = Some(v);
+                            }
+                        }
                         _ => {
                             has_null_only = false;
+                            if !has_non_number {
+                                has_non_number = true;
+                                first_non_number = Some(v);
+                            }
                         }
                     }
                 }
@@ -1833,12 +1963,41 @@ impl SparkSession {
                         "Can not merge type DoubleType and LongType. Use explicit schema or consistent types.".into(),
                     ));
                 }
+                // PySpark parity: when schema is inferred as numeric but data mixes numeric
+                // values with non-numeric (e.g. int and string), raise a TypeError-style
+                // message "Can not merge type ..." instead of silently coercing.
+                if is_numeric && (has_int || has_float) && has_non_number {
+                    let numeric_type =
+                        if type_lower.as_str() == "double" || type_lower.as_str() == "float" {
+                            "DoubleType"
+                        } else {
+                            "LongType"
+                        };
+                    let other_type = first_non_number
+                        .map(value_type_name)
+                        .unwrap_or("non-numeric");
+                    return Err(PolarsError::InvalidOperation(
+                        format!(
+                            "Can not merge type {numeric} and {other}. Use explicit schema or consistent types.",
+                            numeric = numeric_type,
+                            other = match other_type {
+                                "string" => "StringType",
+                                "boolean" => "BooleanType",
+                                "array" => "ArrayType",
+                                "object" => "StructType",
+                                "null" => "NullType",
+                                other => other,
+                            }
+                        )
+                        .into(),
+                    ));
+                }
             }
         }
 
         if schema.is_empty() {
             if rows.is_empty() {
-                return Ok(DataFrame::from_polars_with_options(
+                return Ok(DataFrame::from_eager_with_options(
                     PlDataFrame::new(0, vec![])?,
                     self.is_case_sensitive(),
                 ));
@@ -2289,7 +2448,8 @@ impl SparkSession {
         }
 
         let pl_df = PlDataFrame::new_infer_height(cols.iter().map(|s| s.clone().into()).collect())?;
-        Ok(DataFrame::from_polars_with_options(
+        // Keep eager so schema (including struct types) is available for dotted select (#1076).
+        Ok(DataFrame::from_eager_with_options(
             pl_df,
             self.is_case_sensitive(),
         ))

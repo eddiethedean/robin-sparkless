@@ -23,7 +23,7 @@ use crate::session::SparkSession;
 use crate::type_coercion::{coerce_for_pyspark_comparison, is_numeric_public};
 use polars::datatypes::TimeUnit;
 use polars::prelude::{
-    AnyValue, DataFrame as PlDataFrame, DataType, Expr, IntoLazy, LazyFrame, PlSmallStr,
+    AnyValue, DataFrame as PlDataFrame, DataType, Expr, Field, IntoLazy, LazyFrame, PlSmallStr,
     PolarsError, Schema, SchemaNamesAndDtypes, UnknownKind, col, lit,
 };
 use serde_json::Value as JsonValue;
@@ -103,6 +103,17 @@ impl DataFrame {
         let lf = df.lazy();
         DataFrame {
             inner: DataFrameInner::Lazy(lf),
+            case_sensitive,
+            alias: None,
+        }
+    }
+
+    /// Create a DataFrame from an eager Polars DataFrame without converting to Lazy.
+    /// Used by create_dataframe_from_rows so schema (including struct types) is immediately
+    /// available for dotted column resolution (e.g. select("StructValue.e1")) (#1076).
+    pub(crate) fn from_eager_with_options(df: PlDataFrame, case_sensitive: bool) -> Self {
+        DataFrame {
+            inner: DataFrameInner::Eager(Arc::new(df)),
             case_sensitive,
             alias: None,
         }
@@ -282,6 +293,25 @@ impl DataFrame {
                 let resolved = df.resolve_column_name(name_str)?;
                 return Ok(Expr::Column(PlSmallStr::from(resolved.as_str())));
             }
+            // Resolve struct field names in chained subscript (e.g. F.col("Outer")["Inner"]["E1"]) (#339, #1066).
+            if let Expr::Function {
+                input,
+                function:
+                    polars::prelude::FunctionExpr::StructExpr(
+                        polars::prelude::StructFunction::FieldByName(name),
+                    ),
+            } = &e
+            {
+                if input.len() == 1 {
+                    if let Some(input_dt) = df.get_expr_output_dtype(&input[0]) {
+                        if let Ok((resolved_name, _)) =
+                            df.resolve_struct_field_from_type(&input_dt, name.as_str(), "struct")
+                        {
+                            return Ok(input[0].clone().struct_().field_by_name(&resolved_name));
+                        }
+                    }
+                }
+            }
             Ok(e)
         })
     }
@@ -330,6 +360,20 @@ impl DataFrame {
         let (expr_to_coerce, alias_after) = match &expr {
             Expr::Alias(inner, name) => (inner.as_ref().clone(), Some(name.clone())),
             _ => (expr.clone(), None),
+        };
+        // #1102: Recursively coerce both sides of And/Or so (col("dt") >= "a") & (col("dt") <= "b")
+        // gets datetime-vs-string coercion in each comparison (plan sends string literals).
+        let expr_to_coerce = match &expr_to_coerce {
+            Expr::BinaryExpr { left, op, right } if matches!(op, Operator::And | Operator::Or) => {
+                let left_c = self.coerce_string_numeric_comparisons((**left).clone())?;
+                let right_c = self.coerce_string_numeric_comparisons((**right).clone())?;
+                Expr::BinaryExpr {
+                    left: Arc::new(left_c),
+                    op: *op,
+                    right: Arc::new(right_c),
+                }
+            }
+            _ => expr_to_coerce,
         };
         fn wrap_expr_with_alias(
             expr: Expr,
@@ -381,29 +425,46 @@ impl DataFrame {
                     && ((left_is_col && right_is_string_lit)
                         || (right_is_col && left_is_string_lit));
                 if root_is_col_vs_numeric {
+                    // If we can see the column dtype, use it so numeric columns (e.g. hour())
+                    // are compared numerically. Only fall back to string-like coercion when the
+                    // column is String (or dtype is unknown).
                     let (new_left, new_right) = if left_is_col && right_is_numeric_lit {
+                        let col_name = if let Expr::Column(n) = left_inner {
+                            n.as_str()
+                        } else {
+                            unreachable!()
+                        };
+                        let col_ty = self.get_column_dtype(col_name);
                         let lit_ty = match right_inner {
                             Expr::Literal(lv) => literal_dtype(lv),
                             _ => DataType::Float64,
                         };
+                        let left_ty = col_ty.filter(is_numeric_public).unwrap_or(DataType::String);
                         coerce_for_pyspark_comparison(
                             left_inner.clone(),
                             right_inner.clone(),
-                            &DataType::String,
+                            &left_ty,
                             &lit_ty,
                             op,
                         )
                         .map_err(|e| PolarsError::ComputeError(e.to_string().into()))?
                     } else {
+                        let col_name = if let Expr::Column(n) = right_inner {
+                            n.as_str()
+                        } else {
+                            unreachable!()
+                        };
+                        let col_ty = self.get_column_dtype(col_name);
                         let lit_ty = match left_inner {
                             Expr::Literal(lv) => literal_dtype(lv),
                             _ => DataType::Float64,
                         };
+                        let right_ty = col_ty.filter(is_numeric_public).unwrap_or(DataType::String);
                         coerce_for_pyspark_comparison(
                             left_inner.clone(),
                             right_inner.clone(),
                             &lit_ty,
-                            &DataType::String,
+                            &right_ty,
                             op,
                         )
                         .map_err(|e| PolarsError::ComputeError(e.to_string().into()))?
@@ -516,6 +577,7 @@ impl DataFrame {
         let expr = wrap_expr_with_alias(expr, alias_after.as_ref());
 
         // Then walk the tree for nested comparisons (e.g. (col("a")==1) & (col("b")==2)).
+        let get_col_dtype = |name: &str| self.get_column_dtype(name);
         let expr = expr.try_map_expr(move |e| {
             if let Expr::BinaryExpr { left, op, right } = e {
                 let is_comparison_op = matches!(
@@ -551,10 +613,16 @@ impl DataFrame {
                         Expr::Literal(lv) => literal_dtype(lv),
                         _ => DataType::Float64,
                     };
+                    let col_ty = if let Expr::Column(n) = &*left {
+                        get_col_dtype(n.as_str())
+                    } else {
+                        None
+                    };
+                    let left_ty = col_ty.filter(is_numeric_public).unwrap_or(DataType::String);
                     coerce_for_pyspark_comparison(
                         (*left).clone(),
                         (*right).clone(),
-                        &DataType::String,
+                        &left_ty,
                         &lit_ty,
                         &op,
                     )
@@ -564,11 +632,17 @@ impl DataFrame {
                         Expr::Literal(lv) => literal_dtype(lv),
                         _ => DataType::Float64,
                     };
+                    let col_ty = if let Expr::Column(n) = &*right {
+                        get_col_dtype(n.as_str())
+                    } else {
+                        None
+                    };
+                    let right_ty = col_ty.filter(is_numeric_public).unwrap_or(DataType::String);
                     coerce_for_pyspark_comparison(
                         (*left).clone(),
                         (*right).clone(),
                         &lit_ty,
-                        &DataType::String,
+                        &right_ty,
                         &op,
                     )
                     .map_err(|e| PolarsError::ComputeError(e.to_string().into()))?
@@ -865,6 +939,28 @@ impl DataFrame {
         }
         self.resolve_struct_field_from_type(&dt, field_name, struct_col_name)
             .map(|(name, _)| name)
+    }
+
+    /// Return the output DataType of an expression when evaluated against this DataFrame's schema.
+    /// Used to resolve struct field names in chained subscript (e.g. col("Outer")["Inner"]["E1"]).
+    fn get_expr_output_dtype(&self, expr: &Expr) -> Option<DataType> {
+        use polars::prelude::{FunctionExpr, StructFunction};
+        match expr {
+            Expr::Column(name) => self.get_column_dtype(name.as_str()),
+            Expr::Function { input, function } => {
+                if let FunctionExpr::StructExpr(StructFunction::FieldByName(name)) = function {
+                    if let Some(first) = input.first() {
+                        let input_dt = self.get_expr_output_dtype(first)?;
+                        let (_, field_dt) = self
+                            .resolve_struct_field_from_type(&input_dt, name.as_str(), "?")
+                            .ok()?;
+                        return Some(field_dt);
+                    }
+                }
+                None
+            }
+            _ => None,
+        }
     }
 
     /// Get the column type as robin-sparkless schema type (Polars-free). Returns None if column not found.
@@ -2332,6 +2428,102 @@ fn datetime_anyvalue_to_json_iso(val: i64, unit: &TimeUnit) -> JsonValue {
         .unwrap_or(JsonValue::Null)
 }
 
+/// #1066: When a struct-typed column is stringified (e.g. Polars debug "{10}"), try to parse
+/// it into a JSON object so nested structs work in collect. Handles one-field and multi-field structs.
+fn struct_string_to_json_object(s: &str, fields: &[Field]) -> Option<JsonValue> {
+    use serde_json::Map;
+    if fields.is_empty() {
+        return None;
+    }
+    let trimmed = s.trim();
+    let inner = trimmed
+        .strip_prefix('{')
+        .and_then(|t| t.strip_suffix('}'))
+        .map(|t| t.trim())
+        .unwrap_or(trimmed);
+    let mut obj = Map::new();
+    if fields.len() == 1 {
+        let f = &fields[0];
+        let val = match &f.dtype {
+            DataType::Int8 | DataType::Int16 | DataType::Int32 | DataType::Int64 => inner
+                .parse::<i64>()
+                .ok()
+                .map(serde_json::Number::from)
+                .map(JsonValue::Number),
+            DataType::UInt8 | DataType::UInt16 | DataType::UInt32 | DataType::UInt64 => inner
+                .parse::<u64>()
+                .ok()
+                .map(serde_json::Number::from)
+                .map(JsonValue::Number),
+            DataType::Float32 | DataType::Float64 => inner
+                .parse::<f64>()
+                .ok()
+                .filter(|f| f.is_finite())
+                .and_then(|f| serde_json::Number::from_f64(f).map(JsonValue::Number)),
+            DataType::String => Some(JsonValue::String(
+                inner
+                    .strip_prefix('"')
+                    .and_then(|t| t.strip_suffix('"'))
+                    .unwrap_or(inner)
+                    .to_string(),
+            )),
+            DataType::Boolean => {
+                if inner.eq_ignore_ascii_case("true") {
+                    Some(JsonValue::Bool(true))
+                } else if inner.eq_ignore_ascii_case("false") {
+                    Some(JsonValue::Bool(false))
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        }?;
+        obj.insert(f.name.to_string(), val);
+        return Some(JsonValue::Object(obj));
+    }
+    // Multi-field: split by ", " and parse each segment (simple; quoted commas not handled).
+    let parts: Vec<&str> = inner.splitn(fields.len(), ", ").map(|p| p.trim()).collect();
+    for (i, f) in fields.iter().enumerate() {
+        let part = parts.get(i).unwrap_or(&"").trim();
+        let part_unescaped = part
+            .strip_prefix('"')
+            .and_then(|t| t.strip_suffix('"'))
+            .unwrap_or(part);
+        let val = if part.is_empty() || (part_unescaped.is_empty() && part != "\"\"") {
+            JsonValue::Null
+        } else {
+            match &f.dtype {
+                DataType::Int8 | DataType::Int16 | DataType::Int32 | DataType::Int64 => part
+                    .parse::<i64>()
+                    .ok()
+                    .map(serde_json::Number::from)
+                    .map(JsonValue::Number)
+                    .unwrap_or(JsonValue::Null),
+                DataType::Float32 | DataType::Float64 => part
+                    .parse::<f64>()
+                    .ok()
+                    .filter(|x| x.is_finite())
+                    .and_then(serde_json::Number::from_f64)
+                    .map(JsonValue::Number)
+                    .unwrap_or(JsonValue::Null),
+                DataType::String => JsonValue::String(part_unescaped.to_string()),
+                DataType::Boolean => {
+                    if part.eq_ignore_ascii_case("true") {
+                        JsonValue::Bool(true)
+                    } else if part.eq_ignore_ascii_case("false") {
+                        JsonValue::Bool(false)
+                    } else {
+                        JsonValue::Null
+                    }
+                }
+                _ => JsonValue::Null,
+            }
+        };
+        obj.insert(f.name.to_string(), val);
+    }
+    Some(JsonValue::Object(obj))
+}
+
 /// Convert Polars AnyValue to serde_json::Value for language bindings (Node, etc.).
 /// Handles List and Struct so that create_map() with no args yields {} not null (#578).
 /// Float values close to integers are rounded for collect parity (#747, #748).
@@ -2373,6 +2565,17 @@ fn any_value_to_json(av: &AnyValue<'_>, dtype: &DataType) -> JsonValue {
                     }
                 }
             }
+            // #1066: Struct column may be stringified in some paths; parse back to object so nested structs work.
+            if let DataType::Struct(fields) = dtype {
+                if let Ok(parsed) = serde_json::from_str::<JsonValue>(s) {
+                    if parsed.is_object() {
+                        return parsed;
+                    }
+                }
+                if let Some(obj) = struct_string_to_json_object(s, fields) {
+                    return obj;
+                }
+            }
             JsonValue::String(s.to_string())
         }
         AnyValue::StringOwned(s) => {
@@ -2381,6 +2584,16 @@ fn any_value_to_json(av: &AnyValue<'_>, dtype: &DataType) -> JsonValue {
                     if parsed.is_array() {
                         return parsed;
                     }
+                }
+            }
+            if let DataType::Struct(fields) = dtype {
+                if let Ok(parsed) = serde_json::from_str::<JsonValue>(s.as_ref()) {
+                    if parsed.is_object() {
+                        return parsed;
+                    }
+                }
+                if let Some(obj) = struct_string_to_json_object(s.as_ref(), fields) {
+                    return obj;
                 }
             }
             JsonValue::String(s.to_string())
@@ -2460,19 +2673,36 @@ fn any_value_to_json(av: &AnyValue<'_>, dtype: &DataType) -> JsonValue {
             }
         }
         AnyValue::Struct(_, _, fields) => {
-            let mut obj = Map::new();
+            let mut vals: Vec<JsonValue> = Vec::with_capacity(fields.len());
             for (fld_av, fld) in av._iter_struct_av().zip(fields.iter()) {
-                obj.insert(fld.name.to_string(), any_value_to_json(&fld_av, &fld.dtype));
+                vals.push(any_value_to_json(&fld_av, &fld.dtype));
             }
-            JsonValue::Object(obj)
+            if vals.iter().all(|v| matches!(v, JsonValue::Null)) {
+                JsonValue::Null
+            } else {
+                let mut obj = Map::new();
+                for (fld, v) in fields.iter().zip(vals) {
+                    obj.insert(fld.name.to_string(), v);
+                }
+                JsonValue::Object(obj)
+            }
         }
         AnyValue::StructOwned(payload) => {
             let (values, fields) = &**payload;
-            let mut obj = Map::new();
-            for (fld_av, fld) in values.iter().zip(fields.iter()) {
-                obj.insert(fld.name.to_string(), any_value_to_json(fld_av, &fld.dtype));
+            let vals: Vec<JsonValue> = values
+                .iter()
+                .zip(fields.iter())
+                .map(|(fld_av, fld)| any_value_to_json(fld_av, &fld.dtype))
+                .collect();
+            if vals.iter().all(|v| matches!(v, JsonValue::Null)) {
+                JsonValue::Null
+            } else {
+                let mut obj = Map::new();
+                for (fld, v) in fields.iter().zip(vals) {
+                    obj.insert(fld.name.to_string(), v);
+                }
+                JsonValue::Object(obj)
             }
-            JsonValue::Object(obj)
         }
         AnyValue::Date(days) => date_days_to_json(*days),
         AnyValue::Datetime(val, unit, _) => datetime_anyvalue_to_json_iso(*val, unit),

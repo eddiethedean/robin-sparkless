@@ -1318,11 +1318,82 @@ pub fn sign(column: &Column) -> Column {
 /// Coerce expression to Boolean (PySpark semantics). String -> boolean via "true"/"false"/"1"/"0";
 /// numeric -> boolean (0/0.0 false, else true); already Boolean passed through.
 /// Use for filter predicates and when/not conditions so string columns never hit Polars' unsupported Utf8->Boolean cast.
+///
+/// #1105: Do not recurse into comparison operands (e.g. col("x") == "y"). Comparisons already yield
+/// boolean; applying string-to-boolean to their operands would turn string columns/literals into
+/// boolean and break the predicate (e.g. filter(col("full_id") == "rec1_cust1") would become false).
+/// Unwrap Alias(Literal, _) on operands so Python lit_str (Column.into_expr() -> Alias(Literal, "<expr>"))
+/// does not leave a literal wrapped in Alias in the filter (which can be misinterpreted).
+/// Recursively unwrap so Alias(Alias(Literal, _), _) becomes Literal.
+fn unwrap_alias_literal(expr: &Expr) -> Expr {
+    let mut e = expr.clone();
+    while let Expr::Alias(inner, _) = &e {
+        if matches!(inner.as_ref(), Expr::Literal(_)) {
+            e = (**inner).clone();
+        } else {
+            break;
+        }
+    }
+    e
+}
+
 pub fn expr_coerce_to_boolean(expr: Expr) -> Expr {
-    expr.map(
-        move |col| crate::column::expect_col(crate::udfs::apply_string_to_boolean(col, false)),
-        |_schema, field| Ok(Field::new(field.name().clone(), DataType::Boolean)),
-    )
+    use polars::prelude::Operator;
+    use std::sync::Arc;
+    match &expr {
+        Expr::BinaryExpr { left, op, right }
+            if matches!(
+                op,
+                Operator::Eq
+                    | Operator::NotEq
+                    | Operator::Lt
+                    | Operator::LtEq
+                    | Operator::Gt
+                    | Operator::GtEq
+            ) =>
+        {
+            // Comparison already yields boolean; do not recurse into operands.
+            // Unwrap Alias(Literal, _) so Python col("x") == "y" (right = lit_str.into_expr()) works.
+            Expr::BinaryExpr {
+                left: Arc::new(unwrap_alias_literal(left)),
+                op: *op,
+                right: Arc::new(unwrap_alias_literal(right)),
+            }
+        }
+        Expr::BinaryExpr { left, op, right } if matches!(op, Operator::And | Operator::Or) => {
+            let left_c = expr_coerce_to_boolean((**left).clone());
+            let right_c = expr_coerce_to_boolean((**right).clone());
+            Expr::BinaryExpr {
+                left: std::sync::Arc::new(left_c),
+                op: *op,
+                right: std::sync::Arc::new(right_c),
+            }
+        }
+        Expr::Alias(inner, _name) => {
+            let coerced = expr_coerce_to_boolean((**inner).clone());
+            // #1105: For filter, pass through a bare comparison so Polars does not treat the alias as a column name.
+            if matches!(
+                &coerced,
+                Expr::BinaryExpr { op, .. } if matches!(
+                    op,
+                    Operator::Eq
+                        | Operator::NotEq
+                        | Operator::Lt
+                        | Operator::LtEq
+                        | Operator::Gt
+                        | Operator::GtEq
+                )
+            ) {
+                coerced
+            } else {
+                Expr::Alias(Arc::new(coerced), _name.clone())
+            }
+        }
+        _ => expr.map(
+            move |col| crate::column::expect_col(crate::udfs::apply_string_to_boolean(col, false)),
+            |_schema, field| Ok(Field::new(field.name().clone(), DataType::Boolean)),
+        ),
+    }
 }
 
 /// Canonical display name for cast target type in column names (e.g. CAST(avg(x) AS STRING)).
@@ -1344,11 +1415,16 @@ fn cast_impl(column: &Column, type_name: &str, strict: bool) -> Result<Column, S
     let cast_name = format!("CAST({} AS {})", base_name, display_type);
 
     if dtype == DataType::Boolean {
+        let out_name = base_name.to_string();
         let expr = column.expr().clone().map(
             move |col| crate::column::expect_col(crate::udfs::apply_string_to_boolean(col, strict)),
-            |_schema, field| Ok(Field::new(field.name().clone(), DataType::Boolean)),
+            move |_schema, _field| Ok(Field::new(out_name.clone().into(), DataType::Boolean)),
         );
-        return Ok(Column::from_expr(expr.alias(&cast_name), Some(cast_name)));
+        // PySpark: col("x").cast("boolean") keeps output column name "x".
+        return Ok(Column::from_expr(
+            expr.alias(base_name),
+            Some(base_name.to_string()),
+        ));
     }
     if dtype == DataType::Date {
         let expr = column.expr().clone().map(

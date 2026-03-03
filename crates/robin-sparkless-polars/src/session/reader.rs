@@ -143,11 +143,14 @@ impl DataFrameReader {
         let reader = if self.options.is_empty() {
             reader
                 .with_has_header(true)
+                // Default: inferSchema enabled with a reasonable sample size (PySpark parity tests rely on this).
                 .with_infer_schema_length(Some(100))
         } else {
             self.apply_csv_options(
                 reader
                     .with_has_header(true)
+                    // When options are present but inferSchema/inferSchemaLength are not,
+                    // keep the same default inference length as the no-options path.
                     .with_infer_schema_length(Some(100)),
             )
         };
