@@ -1885,9 +1885,8 @@ fn align_to_merged_schema_inline(
         } else if let Some(dtype) = schema_new.get(name) {
             cols_existing.push(Series::full_null(name_into(name), n_existing, dtype).into());
         } else {
-            cols_existing.push(
-                Series::full_null(name_into(name), n_existing, &DataType::String).into(),
-            );
+            cols_existing
+                .push(Series::full_null(name_into(name), n_existing, &DataType::String).into());
         }
         if let Some(dtype) = schema_new.get(name) {
             if let Some(idx) = new_df.get_column_index(name) {
@@ -1898,9 +1897,7 @@ fn align_to_merged_schema_inline(
         } else if let Some(dtype) = schema_existing.get(name) {
             cols_new.push(Series::full_null(name_into(name), n_new, dtype).into());
         } else {
-            cols_new.push(
-                Series::full_null(name_into(name), n_new, &DataType::String).into(),
-            );
+            cols_new.push(Series::full_null(name_into(name), n_new, &DataType::String).into());
         }
     }
     let aligned_existing = PlDataFrame::new_infer_height(cols_existing)?;
@@ -2000,9 +1997,10 @@ impl<'a> DataFrameWriter<'a> {
         use std::fs;
         use std::path::Path;
 
-        let merge_schema = options.map_or(false, |opts| {
-            opts.iter()
-                .any(|(k, v)| k.eq_ignore_ascii_case("mergeSchema") && v.eq_ignore_ascii_case("true"))
+        let merge_schema = options.is_some_and(|opts| {
+            opts.iter().any(|(k, v)| {
+                k.eq_ignore_ascii_case("mergeSchema") && v.eq_ignore_ascii_case("true")
+            })
         });
 
         let warehouse_path = session.warehouse_dir().map(|w| Path::new(w).join(name));
@@ -2088,7 +2086,10 @@ impl<'a> DataFrameWriter<'a> {
                         align_to_merged_schema_inline(&existing_pl, &new_pl)?;
                     let mut out = aligned_existing;
                     out.vstack_mut(&aligned_new)?;
-                    crate::dataframe::DataFrame::from_polars_with_options(out, self.df.case_sensitive)
+                    crate::dataframe::DataFrame::from_polars_with_options(
+                        out,
+                        self.df.case_sensitive,
+                    )
                 } else {
                     let existing_cols: Vec<&str> = existing_pl
                         .get_column_names()

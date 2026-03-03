@@ -795,8 +795,7 @@ fn translate_select_body(
         }
         // PySpark parity: output only columns in the SELECT list; order by first group key
         // descending so boolean groups match (e.g. (age > 30) true then false -> count 1, 2).
-        let out_names =
-            projection_output_names_for_group_by(&body.projection, &group_cols, &df)?;
+        let out_names = projection_output_names_for_group_by(&body.projection, &group_cols, &df)?;
         let result_cols = df.columns()?;
         let keep: Vec<&str> = out_names
             .iter()
@@ -1921,31 +1920,29 @@ fn projection_output_names_for_group_by(
             SelectItem::UnnamedExpr(SqlExpr::Function(f)) => {
                 out.push(default_agg_alias(f)?);
             }
-            SelectItem::ExprWithAlias { expr, alias } => {
-                match expr {
-                    SqlExpr::Identifier(ident) => {
-                        let resolved = df.resolve_column_name(ident.value.as_str())?;
-                        if group_cols.iter().any(|c| c == &resolved) {
-                            out.push(resolved);
-                        }
+            SelectItem::ExprWithAlias { expr, alias } => match expr {
+                SqlExpr::Identifier(ident) => {
+                    let resolved = df.resolve_column_name(ident.value.as_str())?;
+                    if group_cols.iter().any(|c| c == &resolved) {
+                        out.push(resolved);
                     }
-                    SqlExpr::CompoundIdentifier(parts) => {
-                        let qualified = parts
-                            .iter()
-                            .map(|i| i.value.as_str())
-                            .collect::<Vec<_>>()
-                            .join("_");
-                        let last = parts.last().map(|i| i.value.as_str()).unwrap_or("");
-                        if let Some(c) = group_cols.iter().find(|c| *c == &qualified || *c == last) {
-                            out.push(c.clone());
-                        }
-                    }
-                    SqlExpr::Function(_f) => {
-                        out.push(alias.value.to_string());
-                    }
-                    _ => {}
                 }
-            }
+                SqlExpr::CompoundIdentifier(parts) => {
+                    let qualified = parts
+                        .iter()
+                        .map(|i| i.value.as_str())
+                        .collect::<Vec<_>>()
+                        .join("_");
+                    let last = parts.last().map(|i| i.value.as_str()).unwrap_or("");
+                    if let Some(c) = group_cols.iter().find(|c| *c == &qualified || *c == last) {
+                        out.push(c.clone());
+                    }
+                }
+                SqlExpr::Function(_f) => {
+                    out.push(alias.value.to_string());
+                }
+                _ => {}
+            },
             _ => {}
         }
     }
