@@ -13,9 +13,9 @@ use polars_plan::dsl::functions::nth;
 use serde_json::Value as JsonValue;
 use sqlparser::ast::{
     AssignmentTarget, BinaryOperator, Expr as SqlExpr, FromTable, Function, FunctionArg,
-    FunctionArgExpr, FunctionArguments, GroupByExpr, JoinConstraint, JoinOperator, ObjectType,
-    OrderByKind, Query, Select, SelectItem, SetExpr, SetOperator, Statement, TableAlias,
-    TableFactor, TableObject, Value, ValueWithSpan,
+    FunctionArgExpr, FunctionArguments, GroupByExpr, JoinConstraint, JoinOperator, LimitClause,
+    ObjectType, OrderByKind, Query, Select, SelectItem, SetExpr, SetOperator, Statement,
+    TableAlias, TableFactor, TableObject, Value, ValueWithSpan,
 };
 
 /// Parsed SQL number literal: integer or float.
@@ -783,6 +783,36 @@ fn translate_select_body(
         } else {
             df = grouped.agg(agg_exprs)?;
         }
+        // Apply HAVING before projecting away columns (HAVING may reference __having_0 etc.).
+        if let Some(having_expr) = &body.having {
+            let having_polars = sql_expr_to_polars(
+                having_expr,
+                session,
+                Some(&df),
+                Some(&having_agg_map).filter(|m| !m.is_empty()),
+            )?;
+            df = df.filter(having_polars)?;
+        }
+        // PySpark parity: output only columns in the SELECT list; order by first group key
+        // descending so boolean groups match (e.g. (age > 30) true then false -> count 1, 2).
+        let out_names =
+            projection_output_names_for_group_by(&body.projection, &group_cols, &df)?;
+        let result_cols = df.columns()?;
+        let keep: Vec<&str> = out_names
+            .iter()
+            .filter(|n| result_cols.iter().any(|c| c == *n))
+            .map(|s| s.as_str())
+            .collect();
+        if keep.len() < result_cols.len() && !group_cols.is_empty() {
+            // Order by first group column descending so (age > 30) true comes first (issue #1108).
+            let first_group = &group_cols[0];
+            if result_cols.iter().any(|c| c == first_group) {
+                df = df.order_by(vec![first_group.as_str()], vec![false])?;
+            }
+        }
+        if !keep.is_empty() {
+            df = df.select(keep)?;
+        }
     } else if projection_is_scalar_aggregate(&body.projection) {
         // SELECT AVG(salary) FROM t (no GROUP BY) — scalar aggregation (issue #587).
         let agg_exprs = projection_to_agg_exprs(&body.projection, &[], &df)?;
@@ -792,14 +822,17 @@ fn translate_select_body(
     } else {
         df = apply_projection(&df, &body.projection, session)?;
     }
+    // HAVING without GROUP BY (e.g. scalar aggregate with HAVING); already applied above when has_group_by.
     if let Some(having_expr) = &body.having {
-        let having_polars = sql_expr_to_polars(
-            having_expr,
-            session,
-            Some(&df),
-            Some(&having_agg_map).filter(|m| !m.is_empty()),
-        )?;
-        df = df.filter(having_polars)?;
+        if !has_group_by {
+            let having_polars = sql_expr_to_polars(
+                having_expr,
+                session,
+                Some(&df),
+                Some(&having_agg_map).filter(|m| !m.is_empty()),
+            )?;
+            df = df.filter(having_polars)?;
+        }
     }
     Ok(df)
 }
@@ -827,12 +860,28 @@ fn translate_query(
             }
         }
     }
-    let limit_expr = query.fetch.as_ref().and_then(|f| f.quantity.as_ref());
+    // LIMIT: sqlparser parses "LIMIT n" as limit_clause (LimitOffset) or FETCH (standard SQL).
+    let limit_expr = query
+        .limit_clause
+        .as_ref()
+        .and_then(|lc| limit_clause_to_expr(lc))
+        .or_else(|| query.fetch.as_ref().and_then(|f| f.quantity.as_ref()));
     if let Some(limit_expr) = limit_expr {
         let n = sql_limit_to_usize(limit_expr)?;
         df = df.limit(n)?;
     }
     Ok(df)
+}
+
+/// Extract the limit expression from LimitClause for LIMIT n (no OFFSET handling here).
+fn limit_clause_to_expr(lc: &LimitClause) -> Option<&SqlExpr> {
+    match lc {
+        LimitClause::LimitOffset {
+            limit: Some(expr), ..
+        } => Some(expr),
+        LimitClause::LimitOffset { limit: None, .. } => None,
+        LimitClause::OffsetCommaLimit { limit, .. } => Some(limit),
+    }
 }
 
 fn translate_select_from(
@@ -1840,6 +1889,127 @@ fn extract_having_agg_calls(expr: &SqlExpr) -> Vec<(Function, String)> {
     }
     walk(expr, &mut seen, &mut list);
     list
+}
+
+/// Output column names for a GROUP BY projection (SELECT list order). Used to project
+/// only requested columns and match PySpark (e.g. SELECT COUNT(*) as count -> ["count"]).
+fn projection_output_names_for_group_by(
+    projection: &[SelectItem],
+    group_cols: &[String],
+    df: &DataFrame,
+) -> Result<Vec<String>, PolarsError> {
+    let mut out = Vec::new();
+    for item in projection {
+        match item {
+            SelectItem::UnnamedExpr(SqlExpr::Identifier(ident)) => {
+                let resolved = df.resolve_column_name(ident.value.as_str())?;
+                if group_cols.iter().any(|c| c == &resolved) {
+                    out.push(resolved);
+                }
+            }
+            SelectItem::UnnamedExpr(SqlExpr::CompoundIdentifier(parts)) => {
+                let qualified = parts
+                    .iter()
+                    .map(|i| i.value.as_str())
+                    .collect::<Vec<_>>()
+                    .join("_");
+                let last = parts.last().map(|i| i.value.as_str()).unwrap_or("");
+                if let Some(c) = group_cols.iter().find(|c| *c == &qualified || *c == last) {
+                    out.push(c.clone());
+                }
+            }
+            SelectItem::UnnamedExpr(SqlExpr::Function(f)) => {
+                out.push(default_agg_alias(f)?);
+            }
+            SelectItem::ExprWithAlias { expr, alias } => {
+                match expr {
+                    SqlExpr::Identifier(ident) => {
+                        let resolved = df.resolve_column_name(ident.value.as_str())?;
+                        if group_cols.iter().any(|c| c == &resolved) {
+                            out.push(resolved);
+                        }
+                    }
+                    SqlExpr::CompoundIdentifier(parts) => {
+                        let qualified = parts
+                            .iter()
+                            .map(|i| i.value.as_str())
+                            .collect::<Vec<_>>()
+                            .join("_");
+                        let last = parts.last().map(|i| i.value.as_str()).unwrap_or("");
+                        if let Some(c) = group_cols.iter().find(|c| *c == &qualified || *c == last) {
+                            out.push(c.clone());
+                        }
+                    }
+                    SqlExpr::Function(_f) => {
+                        out.push(alias.value.to_string());
+                    }
+                    _ => {}
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok(out)
+}
+
+fn default_agg_alias(func: &Function) -> Result<String, PolarsError> {
+    let args = function_args_slice(&func.args);
+    let name = func
+        .name
+        .0
+        .last()
+        .and_then(|p| p.as_ident())
+        .map(|i| i.value.as_str())
+        .unwrap_or("");
+    let s = match name.to_uppercase().as_str() {
+        "COUNT" => "count".to_string(),
+        "SUM" => {
+            if let Some(sqlparser::ast::FunctionArg::Unnamed(
+                sqlparser::ast::FunctionArgExpr::Expr(SqlExpr::Identifier(ident)),
+            )) = args.first()
+            {
+                format!("sum({})", ident.value)
+            } else {
+                "sum".to_string()
+            }
+        }
+        "AVG" | "MEAN" => {
+            if let Some(sqlparser::ast::FunctionArg::Unnamed(
+                sqlparser::ast::FunctionArgExpr::Expr(SqlExpr::Identifier(ident)),
+            )) = args.first()
+            {
+                format!("avg({})", ident.value)
+            } else {
+                "avg".to_string()
+            }
+        }
+        "MIN" => {
+            if let Some(sqlparser::ast::FunctionArg::Unnamed(
+                sqlparser::ast::FunctionArgExpr::Expr(SqlExpr::Identifier(ident)),
+            )) = args.first()
+            {
+                format!("min({})", ident.value)
+            } else {
+                "min".to_string()
+            }
+        }
+        "MAX" => {
+            if let Some(sqlparser::ast::FunctionArg::Unnamed(
+                sqlparser::ast::FunctionArgExpr::Expr(SqlExpr::Identifier(ident)),
+            )) = args.first()
+            {
+                format!("max({})", ident.value)
+            } else {
+                "max".to_string()
+            }
+        }
+        _ => {
+            return Err(PolarsError::InvalidOperation(
+                format!("SQL: unsupported aggregate in SELECT: {name}.").into(),
+            ));
+        }
+    };
+    Ok(s)
 }
 
 fn projection_to_agg_exprs(
