@@ -55,46 +55,86 @@ class TestSessionValidation:
         assert lit_expr is not None
 
     def test_expr_requires_active_session(self):
-        """Test that expr() does NOT require active session (PySpark behavior: builds expression)."""
+        """Test that expr() requires active SparkSession (raises when no session)."""
         SparkSession._active_sessions.clear()
         SparkSession._singleton_session = None
 
-        # PySpark: expr() builds an expression without needing active session
-        col_expr = F.expr("id + 1")
-        assert col_expr is not None
+        with pytest.raises(Exception, match="No active SparkSession"):
+            F.expr("id + 1")
+
+        # With active session, expr() works
+        spark = SparkSession("test")
+        try:
+            col_expr = F.expr("id + 1")
+            assert col_expr is not None
+        finally:
+            spark.stop()
 
     def test_when_requires_active_session(self):
-        """Test that when() does NOT require active session (PySpark behavior: builds expression)."""
+        """Test that when() requires active SparkSession (raises when no session)."""
         SparkSession._active_sessions.clear()
         SparkSession._singleton_session = None
 
-        # PySpark: when() builds an expression without needing active session
-        when_expr = F.when(F.col("x") > 0, 1)
-        assert when_expr is not None
+        with pytest.raises(Exception, match="No active SparkSession"):
+            F.when(F.col("x") > 0, 1)
 
-    def test_aggregate_functions_do_not_require_session(self):
-        """Test that aggregate functions do NOT require active session (PySpark: they build expressions)."""
+        # With active session, when() works
+        spark = SparkSession("test")
+        try:
+            when_expr = F.when(F.col("x") > 0, 1)
+            assert when_expr is not None
+        finally:
+            spark.stop()
+
+    def test_aggregate_functions_require_session(self):
+        """Test that aggregate functions require active SparkSession (raise when no session)."""
         SparkSession._active_sessions.clear()
         SparkSession._singleton_session = None
 
-        # PySpark: count(), sum(), avg() build column expressions without needing active session
-        c1 = F.count("id")
-        c2 = F.sum("value")
-        c3 = F.avg("value")
-        assert c1 is not None
-        assert c2 is not None
-        assert c3 is not None
+        with pytest.raises(Exception, match="No active SparkSession"):
+            F.count("id")
+        SparkSession._active_sessions.clear()
+        SparkSession._singleton_session = None
+        with pytest.raises(Exception, match="No active SparkSession"):
+            F.sum("value")
+        SparkSession._active_sessions.clear()
+        SparkSession._singleton_session = None
+        with pytest.raises(Exception, match="No active SparkSession"):
+            F.avg("value")
+
+        # With active session, aggregate functions work
+        spark = SparkSession("test")
+        try:
+            c1 = F.count("id")
+            c2 = F.sum("value")
+            c3 = F.avg("value")
+            assert c1 is not None
+            assert c2 is not None
+            assert c3 is not None
+        finally:
+            spark.stop()
 
     def test_window_functions_require_session(self):
-        """Test that window functions do NOT require active session (PySpark: they build expressions)."""
+        """Test that window functions require active SparkSession (raise when no session)."""
         SparkSession._active_sessions.clear()
         SparkSession._singleton_session = None
 
-        # PySpark: row_number(), rank() build expressions without needing active session
-        rn = F.row_number()
-        rk = F.rank()
-        assert rn is not None
-        assert rk is not None
+        with pytest.raises(Exception, match="No active SparkSession"):
+            F.row_number()
+        SparkSession._active_sessions.clear()
+        SparkSession._singleton_session = None
+        with pytest.raises(Exception, match="No active SparkSession"):
+            F.rank()
+
+        # With active session, window functions work
+        spark = SparkSession("test")
+        try:
+            rn = F.row_number()
+            rk = F.rank()
+            assert rn is not None
+            assert rk is not None
+        finally:
+            spark.stop()
 
     def test_datetime_functions_do_not_require_session(self):
         """Test that datetime functions do NOT require active session (PySpark: they build expressions)."""
