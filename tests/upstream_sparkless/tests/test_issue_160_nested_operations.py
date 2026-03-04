@@ -1,29 +1,26 @@
 """
 Test to reproduce issue #160 by testing nested operations and lazy frame reuse.
 
-The bug might occur when:
-1. Operations create a lazy DataFrame
-2. Columns are dropped via select
-3. The execution plan still references the dropped columns
-4. When operations are chained, the frame is reused and fails
+Uses get_spark_imports from fixture only.
 """
 
 import os
 import pytest
-from sparkless import SparkSession, functions as F
+
+from tests.fixtures.spark_imports import get_spark_imports
+
+_imports = get_spark_imports()
+SparkSession = _imports.SparkSession
+F = _imports.F
 
 
 @pytest.fixture
 def enable_cache():
-    """Enable expression translation cache."""
+    """Enable expression translation cache (env var only; no sparkless config)."""
     os.environ["SPARKLESS_FEATURE_ENABLE_EXPRESSION_TRANSLATION_CACHE"] = "1"
-    from sparkless import config
-
-    config._load_feature_flag_overrides.cache_clear()
     yield
     if "SPARKLESS_FEATURE_enable_expression_translation_cache" in os.environ:
         del os.environ["SPARKLESS_FEATURE_ENABLE_EXPRESSION_TRANSLATION_CACHE"]
-    config._load_feature_flag_overrides.cache_clear()
 
 
 def test_nested_operations_with_drop(enable_cache):

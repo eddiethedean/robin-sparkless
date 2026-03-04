@@ -1,13 +1,17 @@
 """
-Test for issue #137: Validation rules fail on datetime columns.
-
-Issue #137 reports that when applying validation rules to dataframes containing
-datetime columns created from string dates, all rows are marked as invalid
-(0.0% valid rate) even though they should pass validation.
+Test for issue #137: Validation rules fail on datetime columns. Uses get_spark_imports from fixture only.
 """
 
-from sparkless import SparkSession
-from sparkless.functions import col, to_date, datediff, current_date, floor
+from tests.fixtures.spark_imports import get_spark_imports
+
+_imports = get_spark_imports()
+SparkSession = _imports.SparkSession
+F = _imports.F
+col = F.col
+to_date = F.to_date
+datediff = F.datediff
+current_date = F.current_date
+floor = F.floor
 
 
 class TestIssue137DatetimeValidation:

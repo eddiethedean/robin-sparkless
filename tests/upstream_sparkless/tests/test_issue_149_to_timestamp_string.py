@@ -1,13 +1,15 @@
 """
-Test for issue #149: to_timestamp() returns String when Datetime expected.
-
-Issue #149 reports that to_timestamp() operations return String columns when
-sparkless expects Datetime('μs') in validation and type-checking contexts.
-This occurs when using to_timestamp() with regexp_replace().cast("string").
+Test for issue #149: to_timestamp() string type detection. Uses get_spark_imports from fixture only.
 """
 
-from sparkless import SparkSession
-from sparkless.functions import col, to_timestamp, regexp_replace
+from tests.fixtures.spark_imports import get_spark_imports
+
+_imports = get_spark_imports()
+SparkSession = _imports.SparkSession
+F = _imports.F
+col = F.col
+to_timestamp = F.to_timestamp
+regexp_replace = F.regexp_replace
 
 
 class TestIssue149ToTimestampString:

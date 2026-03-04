@@ -1,8 +1,13 @@
-"""Test for issue #145: Explicit string cast() still creates datetime[μs] type."""
+"""Test for issue #145: Explicit string cast() still creates datetime[μs] type. Uses get_spark_imports from fixture only."""
 
-from sparkless.sql import SparkSession
-from sparkless.functions import col, to_timestamp, to_date
-from sparkless.spark_types import StringType
+from tests.fixtures.spark_imports import get_spark_imports
+
+_imports = get_spark_imports()
+SparkSession = _imports.SparkSession
+col = _imports.F.col
+to_timestamp = _imports.F.to_timestamp
+to_date = _imports.F.to_date
+StringType = _imports.StringType
 
 
 def test_string_cast_schema_is_string_type():

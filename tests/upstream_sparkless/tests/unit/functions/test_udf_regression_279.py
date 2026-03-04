@@ -1,6 +1,9 @@
-import sparkless.sql.functions as F
-import sparkless.sql.types as T
-from sparkless.sql import SparkSession
+from tests.fixtures.spark_imports import get_spark_imports
+
+_imports = get_spark_imports()
+SparkSession = _imports.SparkSession
+F = _imports.F
+T = _imports
 
 
 def test_udf_with_withColumn_regression_279():

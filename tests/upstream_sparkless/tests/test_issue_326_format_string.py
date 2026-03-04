@@ -1,11 +1,17 @@
 """Test issue #326: format_string function support.
 
-This test verifies that F.format_string() correctly formats strings using
-printf-style placeholders with column values.
+This test verifies that F.format_string() correctly formats strings.
+Uses get_spark_imports from fixture only.
 """
 
-from sparkless.sql import SparkSession
-import sparkless.sql.functions as F
+from tests.fixtures.spark_imports import get_spark_imports
+
+_imports = get_spark_imports()
+SparkSession = _imports.SparkSession
+F = _imports.F
+StructType = _imports.StructType
+StructField = _imports.StructField
+StringType = _imports.StringType
 
 
 class TestIssue326FormatString:
@@ -394,7 +400,6 @@ class TestIssue326FormatString:
     def test_format_string_all_null(self):
         """Test format_string when all columns are null."""
         import inspect
-        from sparkless.sql.types import StructType, StructField, StringType
 
         test_name = inspect.stack()[1].function
         spark = SparkSession.builder.appName(

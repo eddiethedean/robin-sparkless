@@ -1,8 +1,6 @@
 """Tests for issue #259: datetime/date/Timestamp vs string comparisons.
 
-Issue #259 reports that comparing datetime.date, datetime.datetime, or Timestamp
-columns against string columns raises a TypeError in Sparkless, while PySpark
-supports these cross-type comparisons.
+Uses get_spark_imports from fixture only.
 """
 
 from datetime import date, datetime
@@ -10,7 +8,11 @@ from typing import Iterable, List, Tuple
 
 import pytest
 
-from sparkless import SparkSession, functions as F
+from tests.fixtures.spark_imports import get_spark_imports
+
+_imports = get_spark_imports()
+SparkSession = _imports.SparkSession
+F = _imports.F
 
 
 class TestIssue259DatetimeStringComparison:
@@ -18,7 +20,7 @@ class TestIssue259DatetimeStringComparison:
 
     def test_date_column_vs_string_column_filter(self) -> None:
         """Exact repro from GitHub issue #259 using date vs string columns."""
-        spark = SparkSession("Example")
+        spark = SparkSession.builder.appName("Example").getOrCreate()
         try:
             df = spark.createDataFrame(
                 [
@@ -71,7 +73,7 @@ class TestIssue259DatetimeStringComparison:
         self, op: str, expected_names: Iterable[str]
     ) -> None:
         """Verify all comparison operators match PySpark semantics for date vs string columns."""
-        spark = SparkSession("Example")
+        spark = SparkSession.builder.appName("Example").getOrCreate()
         try:
             df = spark.createDataFrame(
                 [
@@ -116,7 +118,7 @@ class TestIssue259DatetimeStringComparison:
 
     def test_datetime_column_vs_string_column_filter(self) -> None:
         """Test datetime.datetime column compared to ISO datetime string column."""
-        spark = SparkSession("Example")
+        spark = SparkSession.builder.appName("Example").getOrCreate()
         try:
             df = spark.createDataFrame(
                 [
@@ -149,7 +151,7 @@ class TestIssue259DatetimeStringComparison:
 
     def test_datetime_column_vs_string_column_all_operators(self) -> None:
         """Verify all comparison operators for datetime vs string columns behave like PySpark."""
-        spark = SparkSession("Example")
+        spark = SparkSession.builder.appName("Example").getOrCreate()
         try:
             base = datetime(2025, 1, 1, 12, 0, 0)
             df = spark.createDataFrame(
@@ -192,7 +194,7 @@ class TestIssue259DatetimeStringComparison:
 
     def test_date_column_vs_string_literal(self) -> None:
         """Test comparisons between date column and string literal thresholds."""
-        spark = SparkSession("Example")
+        spark = SparkSession.builder.appName("Example").getOrCreate()
         try:
             df = spark.createDataFrame(
                 [
@@ -216,7 +218,7 @@ class TestIssue259DatetimeStringComparison:
 
     def test_string_column_vs_date_literal_all_operators(self) -> None:
         """Ensure string column compared to date literal behaves like PySpark (coercion on string side)."""
-        spark = SparkSession("Example")
+        spark = SparkSession.builder.appName("Example").getOrCreate()
         try:
             df = spark.createDataFrame(
                 [
@@ -260,7 +262,7 @@ class TestIssue259DatetimeStringComparison:
 
     def test_invalid_or_null_date_strings_do_not_raise(self) -> None:
         """Invalid or null date strings should not raise and should behave like null comparisons."""
-        spark = SparkSession("Example")
+        spark = SparkSession.builder.appName("Example").getOrCreate()
         try:
             df = spark.createDataFrame(
                 [
@@ -293,7 +295,7 @@ class TestIssue259DatetimeStringComparison:
 
     def test_string_values_that_look_like_dates_but_both_sides_string(self) -> None:
         """When both sides are strings, comparisons should remain lexicographic (no coercion)."""
-        spark = SparkSession("Example")
+        spark = SparkSession.builder.appName("Example").getOrCreate()
         try:
             df = spark.createDataFrame(
                 [

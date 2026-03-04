@@ -1,9 +1,13 @@
-"""Unit tests for approx_count_distinct with rsd parameter (Issue #266)."""
+"""Unit tests for approx_count_distinct with rsd parameter. Uses get_spark_imports from fixture only."""
 
 import pytest
-from sparkless.sql import SparkSession
-import sparkless.sql.functions as F
-from sparkless.window import Window
+
+from tests.fixtures.spark_imports import get_spark_imports
+
+_imports = get_spark_imports()
+SparkSession = _imports.SparkSession
+F = _imports.F
+Window = _imports.Window
 
 
 class TestApproxCountDistinctRsd:

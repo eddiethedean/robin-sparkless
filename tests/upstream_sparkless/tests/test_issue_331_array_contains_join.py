@@ -1,11 +1,19 @@
 """
-Unit tests for Issue #331: Join doesn't support array_contains() condition.
-
-Tests that join operations work correctly with expression-based conditions like array_contains.
+Unit tests for Issue #331: array_contains() join condition. Uses get_spark_imports from fixture only.
 """
 
-from sparkless.sql import SparkSession
-from sparkless import functions as F
+from tests.fixtures.spark_imports import get_spark_imports
+
+_imports = get_spark_imports()
+SparkSession = _imports.SparkSession
+F = _imports.F
+Window = _imports.Window
+StringType = _imports.StringType
+StructType = _imports.StructType
+StructField = _imports.StructField
+IntegerType = _imports.IntegerType
+LongType = _imports.LongType
+ArrayType = _imports.ArrayType
 
 
 class TestIssue331ArrayContainsJoin:
@@ -373,14 +381,6 @@ class TestIssue331ArrayContainsJoin:
         """Test array_contains join with empty DataFrames."""
         spark = SparkSession.builder.appName("issue-331").getOrCreate()
         try:
-            from sparkless.spark_types import (
-                StructType,
-                StructField,
-                StringType,
-                ArrayType,
-                IntegerType,
-            )
-
             schema1 = StructType(
                 [
                     StructField("Name", StringType(), True),
@@ -647,8 +647,6 @@ class TestIssue331ArrayContainsJoin:
         """Test array_contains join with window functions."""
         spark = SparkSession.builder.appName("issue-331").getOrCreate()
         try:
-            from sparkless.window import Window
-
             df1 = spark.createDataFrame(
                 [
                     {"Name": "Alice", "IDs": [1, 2, 3], "Score": 100},
@@ -906,8 +904,6 @@ class TestIssue331ArrayContainsJoin:
         """Test array_contains join with cast operations."""
         spark = SparkSession.builder.appName("issue-331").getOrCreate()
         try:
-            from sparkless.spark_types import StringType
-
             df1 = spark.createDataFrame(
                 [
                     {"Name": "Alice", "IDs": [1, 2, 3]},

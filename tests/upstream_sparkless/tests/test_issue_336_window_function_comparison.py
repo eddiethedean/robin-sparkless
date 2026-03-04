@@ -1,13 +1,20 @@
 """
-Unit tests for Issue #336: WindowFunction comparison operators.
-
-Tests that WindowFunction supports comparison operations (>, <, >=, <=, ==, !=, eqNullSafe)
-matching PySpark behavior.
+Unit tests for Issue #336: WindowFunction comparison operators. Uses get_spark_imports from fixture only.
 """
 
-from sparkless.sql import SparkSession
-from sparkless import functions as F
-from sparkless.window import Window
+from tests.fixtures.spark_imports import get_spark_imports
+
+_imports = get_spark_imports()
+SparkSession = _imports.SparkSession
+F = _imports.F
+Window = _imports.Window
+StructType = _imports.StructType
+StructField = _imports.StructField
+StringType = _imports.StringType
+IntegerType = _imports.IntegerType
+LongType = _imports.LongType
+DoubleType = _imports.DoubleType
+BooleanType = _imports.BooleanType
 
 
 class TestIssue336WindowFunctionComparison:
@@ -1556,13 +1563,6 @@ class TestIssue336WindowFunctionComparison:
         spark = SparkSession.builder.appName("issue-336").getOrCreate()
         try:
             # Use explicit schema to avoid inference issues with all nulls
-            from sparkless.spark_types import (
-                StructType,
-                StructField,
-                StringType,
-                IntegerType,
-            )
-
             schema = StructType(
                 [
                     StructField("Name", StringType(), True),

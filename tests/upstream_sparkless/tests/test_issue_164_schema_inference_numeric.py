@@ -1,12 +1,14 @@
 """
 Test for issue #164: Type comparison error: 'cannot compare string with numeric type (i32)'
 
-Issue #164 reports that sparkless treats numeric columns as strings, causing type comparison
-errors when comparing numeric columns with numbers. The root cause is that schema inference
-defaults all columns to StringType when column names are provided, even when the values are numeric.
+Uses get_spark_imports from fixture only.
 """
 
-from sparkless import SparkSession, functions as F
+from tests.fixtures.spark_imports import get_spark_imports
+
+_imports = get_spark_imports()
+SparkSession = _imports.SparkSession
+F = _imports.F
 
 
 class TestIssue164SchemaInferenceNumeric:

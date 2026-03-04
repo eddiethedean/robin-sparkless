@@ -4,35 +4,15 @@ from __future__ import annotations
 
 import pytest
 
-from tests.conftest import is_pyspark_backend
 from tests.fixtures.spark_imports import get_spark_imports
 
 
 _imports = get_spark_imports()
 SparkSession = _imports.SparkSession
 F = _imports.F
-
-pytestmark = pytest.mark.skipif(
-    is_pyspark_backend(),
-    reason="cast DataType object helpers are Sparkless-only",
-)
-
-
-class IntegerType:
-    """Minimal DataType-like: PySpark IntegerType() has typeName() -> 'int'."""
-
-    def typeName(self) -> str:
-        return "int"
-
-
-class StringType:
-    def typeName(self) -> str:
-        return "string"
-
-
-class LongType:
-    def typeName(self) -> str:
-        return "long"
+IntegerType = _imports.IntegerType
+StringType = _imports.StringType
+LongType = _imports.LongType
 
 
 def test_cast_string_unchanged() -> None:

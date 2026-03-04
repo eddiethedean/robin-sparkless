@@ -1,14 +1,18 @@
 """
-Test for issue #128: Columns from empty aggregated DataFrames are lost after second left join.
-
-This test reproduces the bug where columns from empty aggregated DataFrames disappear
-after a second left join, and columns from the first join are duplicated.
+Test for issue #128: double join with empty aggregated DataFrames. Uses get_spark_imports from fixture only.
 """
 
 import pytest
-from sparkless import SparkSession
-from sparkless import functions as F
-from sparkless.spark_types import StructType, StructField, StringType, BooleanType
+
+from tests.fixtures.spark_imports import get_spark_imports
+
+_imports = get_spark_imports()
+SparkSession = _imports.SparkSession
+F = _imports.F
+StructType = _imports.StructType
+StructField = _imports.StructField
+StringType = _imports.StringType
+BooleanType = _imports.BooleanType
 
 
 class TestDoubleJoinEmptyAggregated:

@@ -2,11 +2,14 @@
 Tests for issue #286: AggregateFunction arithmetic operations.
 
 PySpark allows arithmetic operations on aggregate functions (e.g., F.countDistinct() - 1).
-This test verifies that Sparkless supports the same operations.
+Uses get_spark_imports from fixture only.
 """
 
-from sparkless.sql import SparkSession
-import sparkless.sql.functions as F
+from tests.fixtures.spark_imports import get_spark_imports
+
+_imports = get_spark_imports()
+SparkSession = _imports.SparkSession
+F = _imports.F
 
 
 class TestIssue286AggregateFunctionArithmetic:

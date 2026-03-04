@@ -1,19 +1,16 @@
 """
 Test to reproduce issue #160: cannot resolve error when execution plan references dropped columns.
 
-This test uses the exact reproduction code from the issue comment.
-The bug occurs when:
-1. A column is used in transformations (e.g., F.regexp_replace(F.col("impression_date"), ...))
-2. That column is dropped via .select()
-3. Materialization is triggered (count(), collect(), cache(), etc.)
-4. During materialization, validation checks column references in expressions
-5. It tries to validate the dropped column which no longer exists
-
-The bug ONLY occurs with 150+ rows, NOT with 2 rows.
+Uses get_spark_imports from fixture only.
 """
 
-from sparkless import SparkSession, functions as F
 from datetime import datetime, timedelta
+
+from tests.fixtures.spark_imports import get_spark_imports
+
+_imports = get_spark_imports()
+SparkSession = _imports.SparkSession
+F = _imports.F
 
 
 class TestIssue160ReproduceBug:

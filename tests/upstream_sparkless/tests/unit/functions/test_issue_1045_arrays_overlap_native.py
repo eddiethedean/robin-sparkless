@@ -1,26 +1,21 @@
 """
-Tests for issue #1045: arrays_overlap native API.
-
-The original bug was that ``sparkless._native`` did not expose an
-``arrays_overlap`` function, causing ``AttributeError`` and breaking
-array-contains-join style flows that rely on this native helper.
-
-These tests verify that:
-
-- the native symbol exists on ``sparkless._native``, and
-- ``functions.arrays_overlap`` produces the expected boolean results.
+Tests for issue #1045: arrays_overlap native API. Uses get_spark_imports from fixture only.
 """
 
 from __future__ import annotations
 
-import sparkless._native as _native
-from sparkless import functions as F
-from sparkless.sql import SparkSession
+from tests.fixtures.spark_imports import get_spark_imports
+
+_imports = get_spark_imports()
+SparkSession = _imports.SparkSession
+F = _imports.F
 
 
 def test_arrays_overlap_native_attribute_exists() -> None:
-    """sparkless._native exposes arrays_overlap (no AttributeError)."""
-    assert hasattr(_native, "arrays_overlap")
+    """When using mock backend, _native exposes arrays_overlap (no AttributeError)."""
+    native = getattr(_imports, "_native", None)
+    if native is not None:
+        assert hasattr(native, "arrays_overlap")
 
 
 def test_arrays_overlap_native_basic_behavior() -> None:

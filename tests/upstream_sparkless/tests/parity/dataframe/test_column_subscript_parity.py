@@ -2,30 +2,14 @@
 PySpark parity tests for Issue #339: Column subscript notation for struct access.
 
 Tests that Column subscript notation (e.g., F.col("StructVal")["E1"]) matches PySpark behavior.
+Uses get_spark_imports from fixture only; same logic for both backends.
 """
 
-import os
-import pytest
+from tests.fixtures.spark_imports import get_spark_imports
 
-pytestmark = pytest.mark.skipif(
-    os.getenv("MOCK_SPARK_TEST_BACKEND") != "pyspark",
-    reason="PySpark parity test - only run with MOCK_SPARK_TEST_BACKEND=pyspark",
-)
-
-
-def get_spark_imports():
-    """Get Spark imports based on backend."""
-    backend = os.getenv("MOCK_SPARK_TEST_BACKEND", "sparkless")
-    if backend == "pyspark":
-        from pyspark.sql import SparkSession
-        import pyspark.sql.functions as F
-
-        return SparkSession, F
-    else:
-        from sparkless.sql import SparkSession
-        from sparkless import functions as F
-
-        return SparkSession, F
+_imports = get_spark_imports()
+SparkSession = _imports.SparkSession
+F = _imports.F
 
 
 class TestColumnSubscriptParity:
@@ -33,7 +17,6 @@ class TestColumnSubscriptParity:
 
     def test_column_subscript_single_field_parity(self):
         """Test that Column subscript notation matches PySpark for single field."""
-        SparkSession, F = get_spark_imports()
         spark = SparkSession.builder.appName("issue-339-parity").getOrCreate()
         try:
             df = spark.createDataFrame(
@@ -58,7 +41,6 @@ class TestColumnSubscriptParity:
 
     def test_column_subscript_multiple_fields_parity(self):
         """Test that Column subscript notation matches PySpark for multiple fields."""
-        SparkSession, F = get_spark_imports()
         spark = SparkSession.builder.appName("issue-339-parity").getOrCreate()
         try:
             df = spark.createDataFrame(
@@ -86,7 +68,6 @@ class TestColumnSubscriptParity:
 
     def test_column_subscript_equals_dot_notation_parity(self):
         """Test that subscript notation produces same results as dot notation in PySpark."""
-        SparkSession, F = get_spark_imports()
         spark = SparkSession.builder.appName("issue-339-parity").getOrCreate()
         try:
             df = spark.createDataFrame(

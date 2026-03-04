@@ -1,23 +1,25 @@
 """Tests for issue #188: String concatenation cache handling edge cases.
 
-This module tests edge cases and potential logic bugs in the string
-concatenation cache handling logic.
+This module tests edge cases for string concatenation cache handling.
+Uses get_spark_imports from fixture only.
 """
 
 import pytest
-from sparkless import SparkSession
-from sparkless.functions import F
+
+from tests.fixtures.spark_imports import get_spark_imports
+
+_imports = get_spark_imports()
+SparkSession = _imports.SparkSession
+F = _imports.F
 
 
 class TestStringConcatenationCacheEdgeCases:
     """Test edge cases for string concatenation cache handling."""
 
     @pytest.fixture
-    def spark(self):
-        """Create a SparkSession for testing."""
-        session = SparkSession("string_concat_cache_test")
-        yield session
-        session.stop()
+    def spark(self, request):
+        """Use conftest spark fixture."""
+        return request.getfixturevalue("spark")
 
     def test_string_concat_with_empty_strings(self, spark):
         """Test string concatenation with empty strings in cached DataFrame."""

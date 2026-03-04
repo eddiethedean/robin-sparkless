@@ -8,20 +8,10 @@ expected outputs from PySpark, replacing the runtime comparison approach.
 from __future__ import annotations
 
 import math
-import os
 import datetime as dt
 from decimal import Decimal
 from typing import Any, Dict, List, Sequence, Tuple
 from dataclasses import dataclass
-
-
-def _is_pyspark_backend() -> bool:
-    """True when test run uses PySpark as backend. In that case we use actual result as expected (parity passes)."""
-    return (
-        os.getenv("MOCK_SPARK_TEST_BACKEND")
-        or os.getenv("SPARKLESS_TEST_BACKEND")
-        or ""
-    ).strip().lower() == "pyspark"
 
 
 def _schema_field_type_name(dtype: Any) -> str:
@@ -120,10 +110,6 @@ def compare_dataframes(
         ComparisonResult with comparison details
     """
     result = ComparisonResult()
-
-    # When backend is PySpark, expected output is the actual result (so parity test passes).
-    if _is_pyspark_backend():
-        expected_output = _dataframe_to_expected_output(mock_df)
 
     try:
         # Get expected data

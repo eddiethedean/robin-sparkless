@@ -1,12 +1,20 @@
 """
-Unit tests for Issue #332: Column resolution fails with cast+alias+select.
-
-Tests that column names are correctly resolved when combining aggregation, cast, alias, and select.
+Unit tests for Issue #332: cast+alias+select column resolution. Uses get_spark_imports from fixture only.
 """
 
-from sparkless.sql import SparkSession
-from sparkless import functions as F
-from sparkless.sql import types as T
+from tests.fixtures.spark_imports import get_spark_imports
+
+_imports = get_spark_imports()
+SparkSession = _imports.SparkSession
+F = _imports.F
+T = _imports
+Window = _imports.Window
+DoubleType = _imports.DoubleType
+StructType = _imports.StructType
+StructField = _imports.StructField
+StringType = _imports.StringType
+IntegerType = _imports.IntegerType
+LongType = _imports.LongType
 
 
 class TestIssue332CastAliasSelect:
@@ -236,13 +244,6 @@ class TestIssue332CastAliasSelect:
         """Test cast+alias+select on empty DataFrame."""
         spark = SparkSession.builder.appName("issue-332").getOrCreate()
         try:
-            from sparkless.spark_types import (
-                StructType,
-                StructField,
-                StringType,
-                IntegerType,
-            )
-
             schema = StructType(
                 [
                     StructField("Name", StringType(), True),
@@ -267,13 +268,6 @@ class TestIssue332CastAliasSelect:
         """Test cast+alias+select when all values are null."""
         spark = SparkSession.builder.appName("issue-332").getOrCreate()
         try:
-            from sparkless.spark_types import (
-                StructType,
-                StructField,
-                StringType,
-                IntegerType,
-            )
-
             schema = StructType(
                 [
                     StructField("Name", StringType(), True),
@@ -469,8 +463,6 @@ class TestIssue332CastAliasSelect:
         """Test cast+alias+select with window functions."""
         spark = SparkSession.builder.appName("issue-332").getOrCreate()
         try:
-            from sparkless.window import Window
-
             df = spark.createDataFrame(
                 [
                     {"Name": "Alice", "Value": 1, "Category": "A"},
@@ -548,8 +540,6 @@ class TestIssue332CastAliasSelect:
             # Verify data type in schema
             field = next(f for f in result.schema.fields if f.name == "AvgValue")
             assert field is not None
-            from sparkless.spark_types import DoubleType
-
             assert isinstance(field.dataType, DoubleType)
         finally:
             spark.stop()

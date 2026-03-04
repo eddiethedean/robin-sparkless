@@ -9,7 +9,6 @@ Set MOCK_SPARK_TEST_BACKEND=pyspark to run with real PySpark.
 
 import pytest
 
-from tests.fixtures.spark_backend import BackendType, get_backend_type
 from tests.fixtures.spark_imports import get_spark_imports
 
 imports = get_spark_imports()
@@ -198,19 +197,9 @@ class TestIssue189StringFunctionsRobust:
             ]
         )
 
-        backend = get_backend_type()
-        if backend == BackendType.ROBIN:
-            from sparkless.core.exceptions.operation import (
-                SparkUnsupportedOperationError,
-            )
-
-            with pytest.raises(SparkUnsupportedOperationError):
-                df.select(F.regexp_extract_all("s", r"\d+", 0).alias("m")).collect()
-            return
-        # In PySpark, the regexp argument is treated as a column unless it is a literal.
-        # Sparkless expects a Python string. Use backend-appropriate form.
-        pattern_digits = F.lit(r"\d+") if backend == BackendType.PYSPARK else r"\d+"
-        pattern_group = F.lit(r"(\d+)") if backend == BackendType.PYSPARK else r"(\d+)"
+        # PySpark-style: use F.lit() for regex pattern so it is a column literal.
+        pattern_digits = F.lit(r"\d+")
+        pattern_group = F.lit(r"(\d+)")
 
         rows0 = df.select(
             F.regexp_extract_all("s", pattern_digits, 0).alias("m")

@@ -12,18 +12,14 @@ Then run with Sparkless to verify parity:
 All 8 tests pass with PySpark. With Sparkless, some tests may fail until
 remaining executor/join/select resolution gaps are addressed (self-join,
 multi-JOIN, compound join condition, select t1.id resolution).
+
+Uses get_spark_imports from fixture only.
 """
 
+from tests.fixtures.spark_imports import get_spark_imports
 
-def _get_functions(spark):
-    """Return functions module for the active backend (PySpark or Sparkless)."""
-    if "pyspark" in type(spark).__module__:
-        from pyspark.sql import functions as F
-
-        return F
-    import sparkless.sql.functions as F
-
-    return F
+_imports = get_spark_imports()
+F = _imports.F
 
 
 def _val(row, *keys):
@@ -53,7 +49,6 @@ def _columns_set(df):
 
 def test_robust_round_string_with_whitespace(spark):
     """#378: F.round() on string column with leading/trailing whitespace."""
-    F = _get_functions(spark)
 
     # Use 10.6 and 20.7 to avoid banker's rounding ambiguity (10.5 -> 10 in Python)
     df = spark.createDataFrame(
@@ -70,7 +65,6 @@ def test_robust_round_string_with_whitespace(spark):
 
 def test_robust_round_string_with_decimals_and_whitespace(spark):
     """#378: F.round(string_col, 2) with whitespace."""
-    F = _get_functions(spark)
 
     df = spark.createDataFrame([("  3.14159  ",), (" 2.71828 ",)], ["val"])
     df = df.withColumn("r", F.round("val", 2))
@@ -86,7 +80,6 @@ def test_robust_round_string_with_decimals_and_whitespace(spark):
 
 def test_robust_select_table_prefixed_after_join(spark):
     """#379: df.select('t1.id', 't2.name') after join with aliases t1, t2."""
-    F = _get_functions(spark)
 
     left = spark.createDataFrame([(1, "a"), (2, "b")], ["id", "name"]).alias("t1")
     right = spark.createDataFrame([(1, "x"), (2, "y")], ["id", "label"]).alias("t2")
@@ -162,7 +155,6 @@ def test_robust_self_join_manager_column_and_row_count(spark):
 
 def test_robust_join_compound_condition(spark):
     """#380: Join with (a.id == b.id) & (a.amount > 30)."""
-    F = _get_functions(spark)
 
     orders = spark.createDataFrame(
         [(1, 10, 25.0), (2, 10, 35.0), (3, 20, 45.0)],

@@ -1,15 +1,15 @@
 """
-Tests for issue #290: UDF support for multiple arguments.
-
-PySpark supports UDFs with multiple positional arguments. This test verifies
-that Sparkless supports the same.
+Tests for issue #290: UDF support for multiple arguments. Uses get_spark_imports from fixture only.
 """
 
 import pytest
 
-from sparkless.sql import SparkSession
-import sparkless.sql.functions as F
-import sparkless.sql.types as T
+from tests.fixtures.spark_imports import get_spark_imports
+
+_imports = get_spark_imports()
+SparkSession = _imports.SparkSession
+F = _imports.F
+T = _imports
 
 
 class TestIssue290UdfMultipleArguments:
@@ -297,12 +297,10 @@ class TestIssue290UdfMultipleArguments:
         """Test UDF with multiple arguments on empty DataFrame."""
         spark = SparkSession.builder.appName("issue-290").getOrCreate()
         try:
-            from sparkless.spark_types import StructType, StructField, IntegerType
-
-            schema = StructType(
+            schema = _imports.StructType(
                 [
-                    StructField("a", IntegerType(), True),
-                    StructField("b", IntegerType(), True),
+                    _imports.StructField("a", _imports.IntegerType(), True),
+                    _imports.StructField("b", _imports.IntegerType(), True),
                 ]
             )
             df = spark.createDataFrame([], schema)

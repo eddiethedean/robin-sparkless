@@ -12,53 +12,24 @@ due to differences in table management and schema evolution behavior.
 import pytest
 
 from tests.fixtures.spark_backend import get_backend_type, BackendType
+from tests.fixtures.spark_imports import get_spark_imports
+
+_imports = get_spark_imports()
+F = _imports.F
+StringType = _imports.StringType
+IntegerType = _imports.IntegerType
+DoubleType = _imports.DoubleType
+LongType = _imports.LongType
+TimestampType = _imports.TimestampType
+DateType = _imports.DateType
+BooleanType = _imports.BooleanType
+StructField = _imports.StructField
 
 
 def _is_sparkless_mode() -> bool:
     """Check if running in sparkless mode."""
     backend = get_backend_type()
     return backend == BackendType.MOCK
-
-
-# Import appropriate types and functions based on backend
-_backend = get_backend_type()
-if _backend == BackendType.PYSPARK:
-    try:
-        from pyspark.sql import functions as F
-        from pyspark.sql.types import (
-            StringType,
-            IntegerType,
-            DoubleType,
-            LongType,
-            TimestampType,
-            DateType,
-            BooleanType,
-            StructField,
-        )
-    except ImportError:
-        from sparkless import functions as F
-        from sparkless import (
-            StringType,
-            IntegerType,
-            DoubleType,
-            LongType,
-            TimestampType,
-            DateType,
-            BooleanType,
-            StructField,
-        )
-else:
-    from sparkless import functions as F
-    from sparkless import (
-        StringType,
-        IntegerType,
-        DoubleType,
-        LongType,
-        TimestampType,
-        DateType,
-        BooleanType,
-        StructField,
-    )
 
 
 @pytest.mark.xdist_group(name="delta_serial")

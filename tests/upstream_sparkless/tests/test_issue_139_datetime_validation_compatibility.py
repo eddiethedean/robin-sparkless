@@ -1,19 +1,18 @@
 """
-Test for issue #139: Validation system incompatible with datetime column operations.
-
-Issue #139 reports that the validation system has compatibility issues when working
-with datetime columns, causing validation failures even when data is valid. This
-includes:
-- Validation rules that reference datetime columns fail
-- All rows marked as invalid (0.0% valid rate) when datetime columns are involved
-- Validation sees wrong column structure when datetime transformations are applied
-
-This may be related to issues #135, #136, #137 which have already been fixed.
+Test for issue #139: datetime validation compatibility. Uses get_spark_imports from fixture only.
 """
 
-from sparkless import SparkSession
-from sparkless.functions import col, to_timestamp, to_date, current_date
-from datetime import datetime, date
+from datetime import date, datetime
+
+from tests.fixtures.spark_imports import get_spark_imports
+
+_imports = get_spark_imports()
+SparkSession = _imports.SparkSession
+F = _imports.F
+col = F.col
+to_timestamp = F.to_timestamp
+to_date = F.to_date
+current_date = F.current_date
 
 
 class TestIssue139DatetimeValidationCompatibility:

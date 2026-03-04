@@ -1,19 +1,16 @@
 """
-Test for issue #169: 'NoneType' object has no attribute 'collect' after transform with to_timestamp().
+Test for issue #169: to_timestamp() + drop + materialize.
 
-This test reproduces the exact scenario from issue #169 where:
-1. A DataFrame is created with timestamp strings
-2. regexp_replace is used to clean the timestamp
-3. to_timestamp() is applied in a withColumn
-4. The intermediate column is dropped
-5. The DataFrame is materialized (count/collect)
-
-The bug occurred because the drop operation didn't check for df_materialized
-before calling lazy_df.collect(), causing an AttributeError when lazy_df was None.
+Uses get_spark_imports from fixture only.
 """
 
-from sparkless import SparkSession, functions as F
 from datetime import datetime, timedelta
+
+from tests.fixtures.spark_imports import get_spark_imports
+
+_imports = get_spark_imports()
+SparkSession = _imports.SparkSession
+F = _imports.F
 
 
 class TestIssue169ToTimestampDropError:
@@ -21,7 +18,7 @@ class TestIssue169ToTimestampDropError:
 
     def test_to_timestamp_drop_materialize_basic(self):
         """Test the basic reproduction case from issue #169."""
-        spark = SparkSession("test_issue_169")
+        spark = SparkSession.builder.appName("test_issue_169").getOrCreate()
         try:
             # Create test data with timestamp strings
             data = []

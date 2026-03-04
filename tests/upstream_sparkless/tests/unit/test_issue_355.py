@@ -1,12 +1,13 @@
 """
-Test for issue #355: unionByName produces incorrect results when same DataFrame
-is used in two join branches (diamond dependency).
-
-https://github.com/eddiethedean/sparkless/issues/355
+Test for issue #355: unionByName diamond dependency. Uses get_spark_imports from fixture only.
 """
 
-from sparkless.sql import SparkSession
-from sparkless import functions as F
+from tests.fixtures.spark_imports import get_spark_imports
+
+_imports = get_spark_imports()
+SparkSession = _imports.SparkSession
+F = _imports.F
+Window = _imports.Window
 
 
 class TestIssue355DiamondDependency:
@@ -20,7 +21,7 @@ class TestIssue355DiamondDependency:
         combined via unionByName, sparkless should produce the correct result
         without duplicating rows.
         """
-        spark = SparkSession("test")
+        spark = SparkSession.builder.appName("test").getOrCreate()
 
         existing = spark.createDataFrame(
             [(1, "a", 100), (2, "b", 200), (3, "c", 300)],
@@ -73,7 +74,7 @@ class TestIssue355DiamondDependency:
 
     def test_unionByName_diamond_dependency_with_filters(self):
         """Test diamond dependency with filter operations in branches."""
-        spark = SparkSession("test")
+        spark = SparkSession.builder.appName("test").getOrCreate()
 
         base = spark.createDataFrame(
             [(1, "a", 10), (2, "b", 20), (3, "c", 30), (4, "d", 40)],
@@ -96,7 +97,7 @@ class TestIssue355DiamondDependency:
 
     def test_unionByName_diamond_dependency_with_select(self):
         """Test diamond dependency with select operations in branches."""
-        spark = SparkSession("test")
+        spark = SparkSession.builder.appName("test").getOrCreate()
 
         base = spark.createDataFrame(
             [(1, "a", 100), (2, "b", 200), (3, "c", 300)],
@@ -129,7 +130,7 @@ class TestIssue355DiamondDependency:
 
     def test_unionByName_diamond_dependency_with_withColumn(self):
         """Test diamond dependency with withColumn operations in branches."""
-        spark = SparkSession("test")
+        spark = SparkSession.builder.appName("test").getOrCreate()
 
         base = spark.createDataFrame(
             [(1, 10), (2, 20), (3, 30)],
@@ -165,7 +166,7 @@ class TestIssue355DiamondDependency:
 
     def test_unionByName_diamond_dependency_three_branches(self):
         """Test diamond dependency with three branches."""
-        spark = SparkSession("test")
+        spark = SparkSession.builder.appName("test").getOrCreate()
 
         base = spark.createDataFrame(
             [(1, "a"), (2, "b"), (3, "c"), (4, "d")],
@@ -191,7 +192,7 @@ class TestIssue355DiamondDependency:
 
     def test_unionByName_diamond_dependency_nested_transformations(self):
         """Test diamond dependency with nested/chain transformations."""
-        spark = SparkSession("test")
+        spark = SparkSession.builder.appName("test").getOrCreate()
 
         base = spark.createDataFrame(
             [(1, "a", 10), (2, "b", 20), (3, "c", 30)],
@@ -235,7 +236,7 @@ class TestIssue355DiamondDependency:
 
     def test_unionByName_diamond_dependency_with_aggregations(self):
         """Test diamond dependency where branches perform aggregations."""
-        spark = SparkSession("test")
+        spark = SparkSession.builder.appName("test").getOrCreate()
 
         base = spark.createDataFrame(
             [(1, "A", 10), (1, "A", 20), (2, "B", 30), (2, "B", 40)],
@@ -278,7 +279,7 @@ class TestIssue355DiamondDependency:
 
     def test_unionByName_diamond_dependency_empty_branch(self):
         """Test diamond dependency where one branch is empty."""
-        spark = SparkSession("test")
+        spark = SparkSession.builder.appName("test").getOrCreate()
 
         base = spark.createDataFrame(
             [(1, "a"), (2, "b"), (3, "c")],
@@ -301,7 +302,7 @@ class TestIssue355DiamondDependency:
 
     def test_unionByName_diamond_dependency_single_row(self):
         """Test diamond dependency with single row DataFrame."""
-        spark = SparkSession("test")
+        spark = SparkSession.builder.appName("test").getOrCreate()
 
         base = spark.createDataFrame([(1, "a", 100)], ["id", "name", "value"])
 
@@ -321,7 +322,7 @@ class TestIssue355DiamondDependency:
 
     def test_unionByName_diamond_dependency_complex_expressions(self):
         """Test diamond dependency with complex column expressions."""
-        spark = SparkSession("test")
+        spark = SparkSession.builder.appName("test").getOrCreate()
 
         base = spark.createDataFrame(
             [(1, 10, 5), (2, 20, 10), (3, 30, 15)],
@@ -354,7 +355,7 @@ class TestIssue355DiamondDependency:
 
     def test_unionByName_diamond_dependency_with_drop(self):
         """Test diamond dependency with drop operations in branches."""
-        spark = SparkSession("test")
+        spark = SparkSession.builder.appName("test").getOrCreate()
 
         base = spark.createDataFrame(
             [(1, "a", 10, "x"), (2, "b", 20, "y"), (3, "c", 30, "z")],
@@ -379,7 +380,7 @@ class TestIssue355DiamondDependency:
 
     def test_unionByName_diamond_dependency_multiple_unions(self):
         """Test diamond dependency with multiple union operations."""
-        spark = SparkSession("test")
+        spark = SparkSession.builder.appName("test").getOrCreate()
 
         base = spark.createDataFrame(
             [(1, "a"), (2, "b"), (3, "c"), (4, "d")],
@@ -408,7 +409,7 @@ class TestIssue355DiamondDependency:
 
     def test_unionByName_diamond_dependency_with_window_functions(self):
         """Test diamond dependency with window functions in branches."""
-        spark = SparkSession("test")
+        spark = SparkSession.builder.appName("test").getOrCreate()
 
         base = spark.createDataFrame(
             [(1, "A", 10), (1, "A", 20), (2, "B", 30), (2, "B", 40)],
@@ -416,8 +417,6 @@ class TestIssue355DiamondDependency:
         )
 
         # Branch A: Window function - row_number
-        from sparkless.window import Window
-
         branch_a = base.withColumn(
             "row_num", F.row_number().over(Window.partitionBy("id").orderBy("value"))
         )
@@ -439,7 +438,7 @@ class TestIssue355DiamondDependency:
 
     def test_unionByName_diamond_dependency_preserves_original_data(self):
         """Test that original DataFrame is not modified by union operations."""
-        spark = SparkSession("test")
+        spark = SparkSession.builder.appName("test").getOrCreate()
 
         base = spark.createDataFrame(
             [(1, "a", 100), (2, "b", 200)],

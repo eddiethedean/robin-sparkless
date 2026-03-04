@@ -1,18 +1,17 @@
 """
 Test for Issue #212: DataFrame.select() with list of Column objects.
 
-This test verifies that df.select([psf.col("name"), psf.col("dept")]) works correctly.
+This test verifies that df.select([F.col("name"), F.col("dept")]) works correctly.
+Uses get_spark_imports from fixture only.
 """
 
 import pytest
-from sparkless.sql import SparkSession
-import sparkless.sql.functions as psf
 
+from tests.fixtures.spark_imports import get_spark_imports
 
-@pytest.fixture
-def spark():
-    """Create a SparkSession for testing."""
-    return SparkSession.builder.appName("Example").getOrCreate()
+_imports = get_spark_imports()
+SparkSession = _imports.SparkSession
+psf = _imports.F
 
 
 def test_select_with_list_of_column_objects(spark):

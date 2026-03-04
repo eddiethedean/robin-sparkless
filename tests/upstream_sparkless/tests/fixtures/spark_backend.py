@@ -147,8 +147,9 @@ class SparkBackend:
         Returns:
             mock-spark SparkSession instance.
         """
-        from sparkless import SparkSession
+        from tests.fixtures.spark_imports import get_spark_imports
 
+        SparkSession = get_spark_imports(BackendType.MOCK).SparkSession
         return SparkSession(app_name, **kwargs)
 
     @staticmethod
@@ -262,11 +263,13 @@ class SparkBackend:
             os.environ["PATH"] = f"{java_bin}:{os.environ.get('PATH', '')}"
 
         try:
-            from pyspark.sql import SparkSession as PySparkSession
-        except ImportError:
+            from tests.fixtures.spark_imports import get_spark_imports
+
+            PySparkSession = get_spark_imports(BackendType.PYSPARK).SparkSession
+        except ImportError as e:
             raise ImportError(
                 "PySpark is not available. Install with: pip install pyspark"
-            )
+            ) from e
 
         try:
             import uuid
@@ -318,7 +321,7 @@ class SparkBackend:
             # This helps ensure a fresh session is created
             # PySpark maintains a global context registry that can cause session reuse
             try:
-                from pyspark import SparkContext
+                SparkContext = get_spark_imports(BackendType.PYSPARK).SparkContext
 
                 # Stop all active contexts to force new ones
                 if hasattr(SparkContext, "_active_spark_context"):
@@ -349,7 +352,7 @@ class SparkBackend:
                     # CRITICAL: Stop ALL existing SparkContexts BEFORE creating Delta session
                     # We must ensure no context exists so Delta JARs are loaded into a fresh context
                     try:
-                        from pyspark import SparkContext
+                        SparkContext = get_spark_imports(BackendType.PYSPARK).SparkContext
 
                         # Stop all active contexts FIRST
                         if hasattr(SparkContext, "_active_spark_context"):
@@ -457,7 +460,7 @@ class SparkBackend:
                         setattr(PySparkSession, "_instantiatedSession", None)
                         # Stop the SparkContext to force a new one
                         try:
-                            from pyspark import SparkContext
+                            SparkContext = get_spark_imports(BackendType.PYSPARK).SparkContext
 
                             if hasattr(SparkContext, "_active_spark_context"):
                                 ctx = SparkContext._active_spark_context
@@ -517,7 +520,7 @@ class SparkBackend:
                         session.stop()
                         setattr(PySparkSession, "_instantiatedSession", None)
                         try:
-                            from pyspark import SparkContext
+                            SparkContext = get_spark_imports(BackendType.PYSPARK).SparkContext
 
                             if hasattr(SparkContext, "_active_spark_context"):
                                 ctx = SparkContext._active_spark_context
@@ -593,7 +596,7 @@ class SparkBackend:
                     session.stop()
                     setattr(PySparkSession, "_instantiatedSession", None)
                     try:
-                        from pyspark import SparkContext
+                        SparkContext = get_spark_imports(BackendType.PYSPARK).SparkContext
 
                         if hasattr(SparkContext, "_active_spark_context"):
                             ctx = SparkContext._active_spark_context

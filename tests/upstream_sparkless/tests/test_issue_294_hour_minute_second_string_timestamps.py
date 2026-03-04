@@ -1,11 +1,10 @@
-"""Test issue #294: hour/minute/second functions with string timestamps.
+"""Test issue #294: hour/minute/second with string timestamps. Uses get_spark_imports from fixture only."""
 
-This test verifies that F.hour(), F.minute(), and F.second() correctly
-extract time components from string columns containing timestamp values.
-"""
+from tests.fixtures.spark_imports import get_spark_imports
 
-from sparkless.sql import SparkSession
-import sparkless.sql.functions as F
+_imports = get_spark_imports()
+SparkSession = _imports.SparkSession
+F = _imports.F
 
 
 class TestIssue294HourMinuteSecondStringTimestamps:

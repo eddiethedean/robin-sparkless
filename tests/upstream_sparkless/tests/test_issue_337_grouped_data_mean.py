@@ -1,11 +1,19 @@
 """
-Unit tests for Issue #337: GroupedData.mean() method.
-
-Tests that GroupedData supports mean() method matching PySpark behavior.
+Unit tests for Issue #337: GroupedData.mean() method. Uses get_spark_imports from fixture only.
 """
 
-from sparkless.sql import SparkSession
-from sparkless import functions as F
+from tests.fixtures.spark_imports import get_spark_imports
+
+_imports = get_spark_imports()
+SparkSession = _imports.SparkSession
+F = _imports.F
+StructType = _imports.StructType
+StructField = _imports.StructField
+StringType = _imports.StringType
+IntegerType = _imports.IntegerType
+LongType = _imports.LongType
+DoubleType = _imports.DoubleType
+Window = _imports.Window
 
 
 class TestIssue337GroupedDataMean:
@@ -473,13 +481,6 @@ class TestIssue337GroupedDataMean:
         """Test GroupedData.mean() with mixed integer and float values."""
         spark = SparkSession.builder.appName("issue-337").getOrCreate()
         try:
-            from sparkless.spark_types import (
-                StructType,
-                StructField,
-                StringType,
-                DoubleType,
-            )
-
             # Use explicit schema to avoid type merging issues
             schema = StructType(
                 [
@@ -818,8 +819,6 @@ class TestIssue337GroupedDataMean:
         """Test GroupedData.mean() with window functions."""
         spark = SparkSession.builder.appName("issue-337").getOrCreate()
         try:
-            from sparkless.window import Window
-
             df = spark.createDataFrame(
                 [
                     {"Name": "Alice", "Value": 1},

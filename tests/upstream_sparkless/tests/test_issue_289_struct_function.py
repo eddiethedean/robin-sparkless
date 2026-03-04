@@ -1,12 +1,19 @@
 """
 Tests for issue #289: struct function support.
 
-PySpark supports the struct function for creating struct-type columns
-from multiple columns. This test verifies that Sparkless supports the same.
+PySpark supports the struct function for creating struct-type columns.
+Uses get_spark_imports from fixture only.
 """
 
-from sparkless.sql import SparkSession
-import sparkless.sql.functions as F
+from tests.fixtures.spark_imports import get_spark_imports
+
+_imports = get_spark_imports()
+SparkSession = _imports.SparkSession
+F = _imports.F
+StructType = _imports.StructType
+StructField = _imports.StructField
+StringType = _imports.StringType
+IntegerType = _imports.IntegerType
 
 
 class TestIssue289StructFunction:
@@ -397,13 +404,6 @@ class TestIssue289StructFunction:
         """Test struct function with empty DataFrame."""
         spark = SparkSession.builder.appName("issue-289").getOrCreate()
         try:
-            from sparkless.spark_types import (
-                StructType,
-                StructField,
-                StringType,
-                IntegerType,
-            )
-
             schema = StructType(
                 [
                     StructField("Name", StringType(), True),

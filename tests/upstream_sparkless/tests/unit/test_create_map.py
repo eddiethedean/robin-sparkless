@@ -1,13 +1,16 @@
-"""Tests for F.create_map() function.
-
-This module tests the create_map() function which creates a MapType column
-from key-value pairs.
-"""
+"""Tests for F.create_map() function. Uses get_spark_imports from fixture only."""
 
 import pytest
 
-from sparkless import SparkSession
-from sparkless.functions import F
+from tests.fixtures.spark_imports import get_spark_imports
+
+_imports = get_spark_imports()
+SparkSession = _imports.SparkSession
+F = _imports.F
+StructType = _imports.StructType
+StructField = _imports.StructField
+StringType = _imports.StringType
+Window = _imports.Window
 
 
 @pytest.fixture
@@ -74,8 +77,6 @@ class TestCreateMap:
 
     def test_create_map_with_null_values(self, spark):
         """Test create_map handles null values correctly."""
-        from sparkless.spark_types import StructType, StructField, StringType
-
         schema = StructType(
             [
                 StructField("val1", StringType()),
@@ -403,8 +404,6 @@ class TestCreateMap:
         assert result3.collect()[0]["meta"] == {}
 
         # Test with null column
-        from sparkless.spark_types import StructType, StructField, StringType
-
         schema = StructType([StructField("val", StringType(), True)])
         df4 = spark.createDataFrame([{"val": None}], schema=schema)
         result4 = df4.withColumn("meta", F.create_map())
@@ -463,8 +462,6 @@ class TestCreateMap:
 
     def test_create_map_empty_with_window_functions(self, spark):
         """Test create_map() empty map works with window functions."""
-        from sparkless.window import Window
-
         df = spark.createDataFrame(
             [
                 {"id": 1, "value": 10},
@@ -499,8 +496,6 @@ class TestCreateMap:
 
     def test_create_map_empty_with_null_handling(self, spark):
         """Test create_map() empty map with null handling functions."""
-        from sparkless.spark_types import StructType, StructField, StringType
-
         schema = StructType([StructField("val", StringType(), True)])
         df = spark.createDataFrame([{"val": None}, {"val": "test"}], schema=schema)
         result = df.withColumn("meta", F.create_map()).withColumn(
@@ -606,8 +601,6 @@ class TestCreateMap:
         assert df3.withColumn("meta", F.create_map([])).collect()[0]["meta"] == {}
 
         # All-null column requires explicit schema for inference
-        from sparkless.spark_types import StructType, StructField, StringType
-
         schema = StructType([StructField("val", StringType(), True)])
         df4 = spark.createDataFrame([{"val": None}], schema=schema)
         assert df4.withColumn("meta", F.create_map([])).collect()[0]["meta"] == {}

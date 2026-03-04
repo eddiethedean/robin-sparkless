@@ -1,12 +1,16 @@
 """
-Test for issue #163: Validation fails with 'cannot resolve' when validating after transform that drops columns
+Test for issue #163: Validation fails with 'cannot resolve' when validating after transform that drops columns.
 
-Issue #163 reports that when validating a DataFrame after a transform that uses a column and then drops it,
-sparkless tries to resolve the dropped column during validation, causing a "cannot resolve" error.
+Uses get_spark_imports from fixture only.
 """
 
-from sparkless import SparkSession, functions as F
 from datetime import datetime, timedelta
+
+from tests.fixtures.spark_imports import get_spark_imports
+
+_imports = get_spark_imports()
+SparkSession = _imports.SparkSession
+F = _imports.F
 
 
 class TestIssue163ValidationAfterDrop:

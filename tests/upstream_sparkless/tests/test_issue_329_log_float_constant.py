@@ -1,7 +1,6 @@
 """Test issue #329: log() function with float constants as base.
 
-This test verifies that F.log() correctly supports float constants as the base
-argument, matching PySpark's behavior.
+Uses PySpark APIs only: F.log(base: float, column) and F.log(column) for natural log.
 """
 
 from tests.fixtures.spark_imports import get_spark_imports
@@ -72,8 +71,8 @@ class TestIssue329LogFloatConstant:
                 ]
             )
 
-            # log base 2
-            result = df.select(F.log(2, F.col("Value")).alias("Log2"))
+            # log base 2 (PySpark log(base, col) requires float base)
+            result = df.select(F.log(2.0, F.col("Value")).alias("Log2"))
 
             rows = result.collect()
             assert len(rows) == 1
@@ -140,31 +139,6 @@ class TestIssue329LogFloatConstant:
             assert abs(row["Log2"] - 6.644) < 0.01
             # log3(100) ≈ 4.192
             assert abs(row["Log3"] - 4.192) < 0.01
-        finally:
-            spark.stop()
-
-    def test_log_with_column_base(self):
-        """Test log with Column as base (existing behavior)."""
-        import inspect
-
-        test_name = inspect.stack()[1].function
-        spark = SparkSession.builder.appName(
-            self._get_unique_app_name(test_name)
-        ).getOrCreate()
-        try:
-            df = spark.createDataFrame(
-                [
-                    {"Value": 100.0, "Base": 10.0},
-                ]
-            )
-
-            # log with column base
-            result = df.select(F.log(F.col("Base"), F.col("Value")).alias("LogBase"))
-
-            rows = result.collect()
-            assert len(rows) == 1
-            # log10(100) = 2.0
-            assert abs(rows[0]["LogBase"] - 2.0) < 0.0001
         finally:
             spark.stop()
 

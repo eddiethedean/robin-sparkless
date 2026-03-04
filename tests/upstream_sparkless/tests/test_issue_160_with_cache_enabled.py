@@ -2,14 +2,17 @@
 Test to reproduce issue #160 with expression cache enabled.
 
 The bug occurs when the expression cache is enabled and cached expressions
-reference dropped columns. This test enables the cache and tries to reproduce
-the bug.
+reference dropped columns. Uses get_spark_imports from fixture only.
 """
 
 import os
 import pytest
-from sparkless import SparkSession, functions as F
-from sparkless.core.exceptions.operation import SparkColumnNotFoundError
+
+from tests.fixtures.spark_imports import get_spark_imports
+
+_imports = get_spark_imports()
+SparkSession = _imports.SparkSession
+F = _imports.F
 
 
 @pytest.fixture
@@ -73,11 +76,11 @@ def test_bug_with_cache_enabled(enable_cache):
     try:
         count = silver_df.count()
         assert count == 200
-    except SparkColumnNotFoundError as e:
+    except Exception as e:
         error_msg = str(e).lower()
         if "impression_date" in error_msg and "cannot resolve" in error_msg:
             pytest.fail(
-                f"Bug reproduced with cache enabled! Got SparkColumnNotFoundError for dropped column 'impression_date': {e}"
+                f"Bug reproduced with cache enabled! Got error for dropped column 'impression_date': {e}"
             )
         raise
 

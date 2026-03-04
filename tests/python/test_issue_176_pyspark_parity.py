@@ -11,7 +11,6 @@ from typing import Any
 
 import pytest
 
-from tests.conftest import is_pyspark_backend
 from tests.fixtures.spark_imports import get_spark_imports
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -21,12 +20,6 @@ from utils import assert_rows_equal
 _imports = get_spark_imports()
 SparkSession = _imports.SparkSession
 F = _imports.F
-
-pytestmark = pytest.mark.skipif(
-    is_pyspark_backend(),
-    reason="regexp_extract_all and try_add are Sparkless-only helpers",
-)
-
 
 def _spark() -> SparkSession:
     return SparkSession.builder.appName("test_176").getOrCreate()

@@ -10,18 +10,14 @@ Run with PySpark first to establish baseline:
 
 Then run with Sparkless to verify parity:
   MOCK_SPARK_TEST_BACKEND=mock pytest tests/test_issue_421_join_column_names.py -v
+
+Uses get_spark_imports from fixture only.
 """
 
+from tests.fixtures.spark_imports import get_spark_imports
 
-def _get_functions(spark):
-    """Return functions module for the active backend (PySpark or Sparkless)."""
-    if "pyspark" in type(spark).__module__:
-        from pyspark.sql import functions as F
-
-        return F
-    import sparkless.sql.functions as F
-
-    return F
+_imports = get_spark_imports()
+F = _imports.F
 
 
 def _val(row, *keys):
@@ -44,7 +40,6 @@ class TestIssue421JoinColumnNames:
 
     def test_join_different_column_names_exact_issue(self, spark):
         """Exact scenario from issue #421 - F.col('Key') == F.col('Name')."""
-        F = _get_functions(spark)
         df1 = spark.createDataFrame(
             [{"Name": "Alice", "Value1": 5}, {"Name": "Bob", "Value1": 7}]
         )
@@ -62,7 +57,6 @@ class TestIssue421JoinColumnNames:
 
     def test_join_different_column_names_reverse_order(self, spark):
         """F.col('Name') == F.col('Key') - reverse order of columns."""
-        F = _get_functions(spark)
         df1 = spark.createDataFrame([{"Name": "Alice"}, {"Name": "Bob"}])
         df2 = spark.createDataFrame([{"Key": "Alice"}, {"Key": "Bob"}])
         df = df1.join(df2, F.col("Name") == F.col("Key"), "inner")
@@ -75,7 +69,6 @@ class TestIssue421JoinColumnNames:
 
     def test_join_different_column_names_left_no_match(self, spark):
         """Left join: left row with no right match yields nulls in right columns."""
-        F = _get_functions(spark)
         df1 = spark.createDataFrame(
             [{"Name": "Alice", "V1": 1}, {"Name": "Charlie", "V1": 3}]
         )
@@ -92,7 +85,6 @@ class TestIssue421JoinColumnNames:
 
     def test_join_different_column_names_inner(self, spark):
         """Inner join with F.col() on different column names."""
-        F = _get_functions(spark)
         df1 = spark.createDataFrame(
             [{"id_l": 1, "x": 10}, {"id_l": 2, "x": 20}, {"id_l": 3, "x": 30}]
         )
@@ -105,7 +97,6 @@ class TestIssue421JoinColumnNames:
 
     def test_join_different_column_names_right(self, spark):
         """Right join with F.col() on different column names."""
-        F = _get_functions(spark)
         df1 = spark.createDataFrame([{"a": 1, "x": 10}])  # only id 1
         df2 = spark.createDataFrame([{"b": 1, "y": 100}, {"b": 2, "y": 200}])
         df = df1.join(df2, F.col("b") == F.col("a"), "right")
@@ -122,7 +113,6 @@ class TestIssue421JoinColumnNames:
 
     def test_join_different_column_names_outer(self, spark):
         """Full outer join with F.col() on different column names."""
-        F = _get_functions(spark)
         df1 = spark.createDataFrame(
             [{"left_id": 1, "lval": "L1"}, {"left_id": 2, "lval": "L2"}]
         )
@@ -146,7 +136,6 @@ class TestIssue421JoinColumnNames:
 
     def test_join_different_column_names_with_show(self, spark):
         """Join then show() - exercises full pipeline (issue stack trace used show)."""
-        F = _get_functions(spark)
         df1 = spark.createDataFrame(
             [{"Name": "Alice", "Value1": 5}, {"Name": "Bob", "Value1": 7}]
         )
@@ -160,7 +149,6 @@ class TestIssue421JoinColumnNames:
 
     def test_join_different_column_names_with_select(self, spark):
         """Join then select - verifies column resolution in downstream ops."""
-        F = _get_functions(spark)
         df1 = spark.createDataFrame(
             [{"Name": "Alice", "Value1": 5}, {"Name": "Bob", "Value1": 7}]
         )

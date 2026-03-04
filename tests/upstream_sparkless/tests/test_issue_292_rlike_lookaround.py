@@ -1,13 +1,15 @@
 """
-Tests for issue #292: Look-around regex support in rlike().
-
-PySpark supports look-ahead and look-behind assertions in regex patterns for rlike().
-This test verifies that Sparkless supports the same via Python fallback when Polars
-doesn't support these patterns.
+Tests for issue #292: Look-around regex support in rlike(). Uses get_spark_imports from fixture only.
 """
 
-from sparkless.sql import SparkSession
-import sparkless.sql.functions as F
+from tests.fixtures.spark_imports import get_spark_imports
+
+_imports = get_spark_imports()
+SparkSession = _imports.SparkSession
+F = _imports.F
+StructType = _imports.StructType
+StructField = _imports.StructField
+StringType = _imports.StringType
 
 
 class TestIssue292RlikeLookaround:
@@ -321,8 +323,6 @@ class TestIssue292RlikeLookaround:
             self._get_unique_app_name(test_name)
         ).getOrCreate()
         try:
-            from sparkless.spark_types import StructType, StructField, StringType
-
             schema = StructType(
                 [
                     StructField("Name", StringType(), True),

@@ -1,12 +1,15 @@
 """
-Comprehensive tests for UDF functionality in Sparkless.
-
-Tests cover various data types, operations, edge cases, and usage patterns.
+Comprehensive tests for UDF functionality. Uses get_spark_imports from fixture only.
 """
 
-import sparkless.sql.functions as F
-import sparkless.sql.types as T
-from sparkless.sql import SparkSession
+from tests.fixtures.spark_imports import get_spark_imports
+
+_imports = get_spark_imports()
+SparkSession = _imports.SparkSession
+F = _imports.F
+T = _imports
+StructType = _imports.StructType
+StructField = _imports.StructField
 
 
 class TestUDFBasicOperations:
@@ -79,8 +82,6 @@ class TestUDFMultiArgument:
 
     def test_udf_two_arguments(self):
         """Test UDF with two column arguments."""
-        from sparkless.functions.udf import UserDefinedFunction
-
         spark = SparkSession.builder.appName("test").getOrCreate()
         try:
             df = spark.createDataFrame(
@@ -90,7 +91,7 @@ class TestUDFMultiArgument:
                 ]
             )
 
-            concat_udf = UserDefinedFunction(lambda x, y: f"{x}_{y}", T.StringType())
+            concat_udf = F.udf(lambda x, y: f"{x}_{y}", T.StringType())
             result = df.withColumn(
                 "combined", concat_udf(F.col("first"), F.col("second"))
             ).collect()
@@ -103,8 +104,6 @@ class TestUDFMultiArgument:
 
     def test_udf_three_arguments(self):
         """Test UDF with three column arguments."""
-        from sparkless.functions.udf import UserDefinedFunction
-
         spark = SparkSession.builder.appName("test").getOrCreate()
         try:
             df = spark.createDataFrame(
@@ -114,7 +113,7 @@ class TestUDFMultiArgument:
                 ]
             )
 
-            sum_udf = UserDefinedFunction(lambda x, y, z: x + y + z, T.IntegerType())
+            sum_udf = F.udf(lambda x, y, z: x + y + z, T.IntegerType())
             result = df.withColumn(
                 "total", sum_udf(F.col("a"), F.col("b"), F.col("c"))
             ).collect()
@@ -127,8 +126,6 @@ class TestUDFMultiArgument:
 
     def test_udf_mixed_types(self):
         """Test UDF with mixed input types."""
-        from sparkless.functions.udf import UserDefinedFunction
-
         spark = SparkSession.builder.appName("test").getOrCreate()
         try:
             df = spark.createDataFrame(
@@ -138,7 +135,7 @@ class TestUDFMultiArgument:
                 ]
             )
 
-            format_udf = UserDefinedFunction(
+            format_udf = F.udf(
                 lambda name, age: f"{name} is {age} years old", T.StringType()
             )
             result = df.withColumn(
@@ -289,8 +286,6 @@ class TestUDFEdgeCases:
 
     def test_udf_empty_dataframe(self):
         """Test UDF with empty DataFrame."""
-        from sparkless.spark_types import StructType, StructField
-
         spark = SparkSession.builder.appName("test").getOrCreate()
         try:
             schema = StructType([StructField("value", T.StringType())])
@@ -391,13 +386,11 @@ class TestUDFComplexScenarios:
 
     def test_udf_with_literal(self):
         """Test UDF combined with literals."""
-        from sparkless.functions.udf import UserDefinedFunction
-
         spark = SparkSession.builder.appName("test").getOrCreate()
         try:
             df = spark.createDataFrame([{"name": "Alice"}])
 
-            format_udf = UserDefinedFunction(
+            format_udf = F.udf(
                 lambda name, prefix: f"{prefix}_{name}", T.StringType()
             )
             result = df.withColumn(
@@ -492,16 +485,12 @@ class TestUDFCustomName:
     """Test UDF with custom names."""
 
     def test_udf_with_custom_name(self):
-        """Test UDF with custom function name."""
+        """Test UDF with custom function name (PySpark-style F.udf)."""
         spark = SparkSession.builder.appName("test").getOrCreate()
         try:
-            from sparkless.functions.udf import UserDefinedFunction
-
             df = spark.createDataFrame([{"value": "test"}])
 
-            upper_udf = UserDefinedFunction(
-                lambda x: x.upper(), T.StringType(), name="my_upper"
-            )
+            upper_udf = F.udf(lambda x: x.upper(), T.StringType())
             result = df.withColumn("upper", upper_udf(F.col("value"))).collect()
 
             assert result[0]["upper"] == "TEST"

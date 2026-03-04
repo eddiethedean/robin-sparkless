@@ -1,9 +1,12 @@
-"""Debug script: run with python tests/debug_posexplode.py"""
+"""Debug script: run with python tests/debug_posexplode.py. Uses get_spark_imports from fixture only."""
 
-from sparkless.sql import SparkSession
-from sparkless.sql import functions as F
+from tests.fixtures.spark_imports import get_spark_imports
 
-spark = SparkSession("test")
+_imports = get_spark_imports()
+SparkSession = _imports.SparkSession
+F = _imports.F
+
+spark = SparkSession.builder.appName("test").getOrCreate()
 df = spark.createDataFrame([{"x": [1, 2], "y": "ok"}])
 col = F.posexplode("x").alias("pos", "val")  # type: ignore[operator]
 print("Column operation:", getattr(col, "operation", None))

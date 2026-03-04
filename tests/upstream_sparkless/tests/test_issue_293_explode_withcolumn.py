@@ -2,11 +2,14 @@
 Tests for issue #293: explode does not explode lists as expected in withColumn.
 
 PySpark's explode function creates a new row for each element in an array.
-This test verifies that Sparkless supports the same behavior.
+Uses get_spark_imports from fixture only.
 """
 
-from sparkless.sql import SparkSession
-import sparkless.sql.functions as F
+from tests.fixtures.spark_imports import get_spark_imports
+
+_imports = get_spark_imports()
+SparkSession = _imports.SparkSession
+F = _imports.F
 
 
 class TestIssue293ExplodeWithColumn:

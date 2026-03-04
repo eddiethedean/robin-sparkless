@@ -1,5 +1,5 @@
+import pytest
 from tests.fixtures.spark_imports import get_spark_imports
-from tests.upstream_sparkless.tests.conftest import is_pyspark_backend
 
 _imports = get_spark_imports()
 SparkSession = _imports.SparkSession
@@ -66,9 +66,10 @@ class TestIssue202SelectWithList:
         assert rows[2].name == "Charlie"
         assert rows[2].dept == "IT"
 
-    def test_select_with_tuple_of_column_names(self, spark):
+    def test_select_with_tuple_of_column_names_raises(self, spark):
         """
-        Test that select() also handles a tuple of column names.
+        PySpark select() does not accept a tuple of column names; it raises.
+        Use a list for multiple columns: select(["name", "salary"]).
         """
         df = spark.createDataFrame(
             [
@@ -79,31 +80,8 @@ class TestIssue202SelectWithList:
 
         columns_to_select = ("name", "salary")
 
-        if is_pyspark_backend():
-            import pytest
-
-            with pytest.raises(Exception):
-                df.select(columns_to_select).collect()
-        else:
-            result = df.select(columns_to_select)
-
-            # Verify schema (engine may infer IntegerType or LongType for int literals)
-            expected_schema = StructType(
-                [
-                    StructField("name", StringType(), True),
-                    StructField("salary", LongType(), True),
-                ]
-            )
-            _assert_schema_consistent(result.schema, expected_schema)
-            assert len(result.schema.fields) == 2
-
-            # Verify data
-            assert result.count() == 2
-            rows = result.collect()
-            assert rows[0].name == "Alice"
-            assert rows[0].salary == 50000
-            assert rows[1].name == "Bob"
-            assert rows[1].salary == 60000
+        with pytest.raises(Exception):
+            df.select(columns_to_select).collect()
 
     def test_select_with_single_column_list(self, spark):
         """

@@ -1,12 +1,17 @@
 """
-Integration tests for case sensitivity configuration.
-
-Tests that spark.sql.caseSensitive configuration works correctly
-across all DataFrame operations.
+Integration tests for case sensitivity configuration. Uses get_spark_imports from fixture only.
 """
 
 import pytest
-from sparkless.sql import SparkSession, functions as F
+
+from tests.fixtures.spark_imports import get_spark_imports
+
+_imports = get_spark_imports()
+SparkSession = _imports.SparkSession
+F = _imports.F
+StructType = _imports.StructType
+StructField = _imports.StructField
+StringType = _imports.StringType
 
 
 class TestCaseSensitivityConfiguration:
@@ -14,7 +19,7 @@ class TestCaseSensitivityConfiguration:
 
     def test_default_case_insensitive(self):
         """Test that default behavior is case-insensitive."""
-        spark = SparkSession("TestApp")
+        spark = SparkSession.builder.appName("TestApp").getOrCreate()
         assert spark.conf.is_case_sensitive() is False
 
         df = spark.createDataFrame([{"Name": "Alice", "Age": 25}])
@@ -378,8 +383,6 @@ class TestCaseSensitivityConfiguration:
         # it should be detected during resolution
         # Actually, Python dicts can't have duplicate keys, so this is tricky
         # Let's test with schema instead
-        from sparkless.spark_types import StructType, StructField, StringType
-
         schema = StructType(
             [
                 StructField("Name", StringType()),

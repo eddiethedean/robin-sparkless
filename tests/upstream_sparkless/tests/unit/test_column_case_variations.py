@@ -5,19 +5,9 @@ Tests all different ways to refer to columns with various case combinations
 to ensure case-insensitive resolution works correctly across all operations.
 """
 
-import os
-
 import pytest
 
 from tests.fixtures.spark_imports import get_spark_imports
-
-
-def _is_pyspark_backend():
-    return (
-        os.getenv("MOCK_SPARK_TEST_BACKEND")
-        or os.getenv("SPARKLESS_TEST_BACKEND")
-        or ""
-    ).strip().lower() == "pyspark"
 
 
 def _backend_imports():
@@ -26,7 +16,7 @@ def _backend_imports():
     return imp
 
 
-# Use backend-appropriate F and types so PySpark gets pyspark.sql.functions
+# Use backend-appropriate F and types (PySpark or sparkless via get_spark_imports)
 _imp = _backend_imports()
 F = _imp.F
 StructType = _imp.StructType
@@ -34,19 +24,14 @@ StructField = _imp.StructField
 StringType = _imp.StringType
 IntegerType = _imp.IntegerType
 
-# SparkSession only used when not PySpark (conftest provides spark when PySpark)
-from sparkless.sql import SparkSession  # noqa: E402
-
 
 class TestColumnCaseVariations:
     """Test all different ways to refer to columns with wrong case."""
 
     @pytest.fixture
     def spark(self, request):
-        """Create SparkSession for testing; use conftest spark when PySpark backend."""
-        if _is_pyspark_backend():
-            return request.getfixturevalue("spark")
-        return SparkSession("TestApp")
+        """Use conftest spark fixture (same backend for all tests)."""
+        return request.getfixturevalue("spark")
 
     @pytest.fixture
     def sample_df(self, spark):
@@ -1023,25 +1008,19 @@ class TestColumnCaseVariations:
         df = spark.createDataFrame(data)
         name_col = next((c for c in df.columns if c.lower() == "name"), "name")
 
-        # PySpark unpivot requires variableColumnName and valueColumnName
-        if _is_pyspark_backend():
-            result = df.unpivot(
-                ids=[name_col],
-                values=["Q1", "Q2"],
-                variableColumnName="quarter",
-                valueColumnName="sales",
-            ).collect()
-        else:
-            result = df.unpivot(ids=["name"], values=["Q1", "Q2"]).collect()
+        # unpivot with variableColumnName and valueColumnName (PySpark-style API)
+        result = df.unpivot(
+            ids=[name_col],
+            values=["Q1", "Q2"],
+            variableColumnName="quarter",
+            valueColumnName="sales",
+        ).collect()
         assert len(result) >= 1
 
-        if _is_pyspark_backend():
-            result = df.unpivot(
-                ids=[name_col],
-                values=["Q1", "Q2"],
-                variableColumnName="quarter",
-                valueColumnName="sales",
-            ).collect()
-        else:
-            result = df.unpivot(ids=["NAME"], values=["Q1", "Q2"]).collect()
+        result = df.unpivot(
+            ids=[name_col],
+            values=["Q1", "Q2"],
+            variableColumnName="quarter",
+            valueColumnName="sales",
+        ).collect()
         assert len(result) >= 1

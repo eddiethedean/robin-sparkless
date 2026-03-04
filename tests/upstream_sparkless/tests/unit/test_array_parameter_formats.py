@@ -12,7 +12,6 @@ Uses conftest spark fixture so PySpark mode gets correct backend (type coercion 
 from tests.fixtures.spark_imports import get_spark_imports
 
 import pytest
-from tests.upstream_sparkless.tests.conftest import is_pyspark_backend
 
 # Backend-appropriate imports (spark from fixture; PySpark or Robin API)
 imports = get_spark_imports()
@@ -126,18 +125,9 @@ class TestArrayParameterFormats:
             ]
         )
 
-        # PySpark: array(name, age, active) with mixed dtypes raises AnalysisException.
-        # Sparkless may coerce to a common type and succeed.
-        if is_pyspark_backend():
-            with pytest.raises(Exception):
-                df.withColumn("info", F.array("name", "age", "active")).collect()
-        else:
-            result = df.withColumn("info", F.array("name", "age", "active"))
-            rows = result.collect()
-
-            assert len(rows) == 2
-            assert rows[0]["info"] == ["Alice", 25, True]
-            assert rows[1]["info"] == ["Bob", 30, False]
+        # array(name, age, active) with mixed dtypes raises (PySpark rejects; same behavior).
+        with pytest.raises(Exception):
+            df.withColumn("info", F.array("name", "age", "active")).collect()
 
     def test_array_with_single_column(self, spark):
         """Test array() with a single column."""
@@ -280,21 +270,11 @@ class TestArrayParameterFormats:
             ]
         )
 
-        if is_pyspark_backend():
-            # Mixed dtypes in array() are rejected in PySpark.
-            with pytest.raises(Exception):
-                df.withColumn(
-                    "mixed", F.array("str_val", "int_val", "float_val", "bool_val")
-                ).collect()
-        else:
-            result = df.withColumn(
+        # Mixed dtypes in array() are rejected (same behavior for both backends).
+        with pytest.raises(Exception):
+            df.withColumn(
                 "mixed", F.array("str_val", "int_val", "float_val", "bool_val")
-            )
-            rows = result.collect()
-
-            assert len(rows) == 2
-            assert rows[0]["mixed"] == ["Alice", 25, 3.14, True]
-            assert rows[1]["mixed"] == ["Bob", 30, 2.71, False]
+            ).collect()
 
     def test_array_in_select_statement(self, spark):
         """Test array() in select statement with all formats."""
@@ -510,55 +490,29 @@ class TestArrayParameterFormats:
             ]
         )
 
-        if is_pyspark_backend():
-            # Mixed dtypes: PySpark array() rejects these combinations.
-            with pytest.raises(Exception):
-                (
-                    df.withColumn("format1", F.array("name", "age", "active", "score"))
-                    .withColumn("format2", F.array(["name", "age", "active", "score"]))
-                    .withColumn(
-                        "format3",
-                        F.array(
-                            F.col("name"),
-                            F.col("age"),
-                            F.col("active"),
-                            F.col("score"),
-                        ),
-                    )
-                    .withColumn(
-                        "format4",
-                        F.array(
-                            [
-                                F.col("name"),
-                                F.col("age"),
-                                F.col("active"),
-                                F.col("score"),
-                            ]
-                        ),
-                    )
-                ).collect()
-        else:
-            result = (
+        # Mixed dtypes: array() rejects these combinations (same behavior for both backends).
+        with pytest.raises(Exception):
+            (
                 df.withColumn("format1", F.array("name", "age", "active", "score"))
                 .withColumn("format2", F.array(["name", "age", "active", "score"]))
                 .withColumn(
                     "format3",
                     F.array(
-                        F.col("name"), F.col("age"), F.col("active"), F.col("score")
+                        F.col("name"),
+                        F.col("age"),
+                        F.col("active"),
+                        F.col("score"),
                     ),
                 )
                 .withColumn(
                     "format4",
                     F.array(
-                        [F.col("name"), F.col("age"), F.col("active"), F.col("score")]
+                        [
+                            F.col("name"),
+                            F.col("age"),
+                            F.col("active"),
+                            F.col("score"),
+                        ]
                     ),
                 )
-            )
-            rows = result.collect()
-
-            assert len(rows) == 1
-            expected = ["Alice", 25, True, 3.14]
-            assert rows[0]["format1"] == expected
-            assert rows[0]["format2"] == expected
-            assert rows[0]["format3"] == expected
-            assert rows[0]["format4"] == expected
+            ).collect()

@@ -1,30 +1,18 @@
 """
-PySpark parity tests for SparkSession operations.
-
-Tests validate that Sparkless SparkSession operations behave identically to PySpark.
+PySpark parity tests for SparkSession operations. Uses get_spark_imports from fixture only.
 """
 
 from tests.fixtures.parity_base import ParityTestBase
+from tests.fixtures.spark_imports import get_spark_imports
 
 
 def _schema_for_spark(spark):
-    """Return StructType/StructField/StringType/IntegerType for the given session (PySpark or sparkless)."""
-    if type(spark).__module__.startswith("pyspark"):
-        from pyspark.sql.types import (
-            StructType as PyStructType,
-            StructField as PyStructField,
-            StringType as PyStringType,
-            IntegerType as PyIntegerType,
-        )
-
-        return PyStructType(
-            [
-                PyStructField("name", PyStringType(), True),
-                PyStructField("age", PyIntegerType(), True),
-            ]
-        ), PyStructType([])
-    from sparkless.spark_types import StructType, StructField, StringType, IntegerType
-
+    """Return StructType/StructField schema for the current backend."""
+    _imports = get_spark_imports()
+    StructType = _imports.StructType
+    StructField = _imports.StructField
+    StringType = _imports.StringType
+    IntegerType = _imports.IntegerType
     return StructType(
         [
             StructField("name", StringType(), True),

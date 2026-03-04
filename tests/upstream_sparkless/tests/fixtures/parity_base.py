@@ -6,7 +6,8 @@ Sparkless behavior against pre-generated PySpark expected outputs.
 """
 
 from typing import Any, Dict, List, Optional, Tuple
-from sparkless import SparkSession
+
+from tests.fixtures.spark_imports import get_spark_imports
 from tests.tools.output_loader import load_expected_output
 from tests.tools.comparison_utils import assert_dataframes_equal, compare_dataframes
 
@@ -88,7 +89,7 @@ class ParityTestBase:
             return False, "\n".join(result.errors)
 
 
-def create_test_dataframe(spark: SparkSession, data: List[Dict[str, Any]]) -> Any:
+def create_test_dataframe(spark, data: List[Dict[str, Any]]) -> Any:
     """Create a DataFrame from test data.
 
     This is a convenience function for creating DataFrames in tests.

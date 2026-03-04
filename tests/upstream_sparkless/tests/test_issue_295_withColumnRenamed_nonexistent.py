@@ -1,11 +1,18 @@
 """
-Tests for issue #295: withColumnRenamed should treat non-existent columns as no-op.
-
-In PySpark, renaming a non-existent column is treated as a no-op (no error,
-statement is ignored). This test verifies that Sparkless matches this behavior.
+Tests for issue #295: withColumnRenamed non-existent column no-op. Uses get_spark_imports from fixture only.
 """
 
-from sparkless.sql import SparkSession
+from tests.fixtures.spark_imports import get_spark_imports
+
+_imports = get_spark_imports()
+SparkSession = _imports.SparkSession
+F = _imports.F
+StructType = _imports.StructType
+StructField = _imports.StructField
+StringType = _imports.StringType
+IntegerType = _imports.IntegerType
+LongType = _imports.LongType
+DoubleType = _imports.DoubleType
 
 
 class TestIssue295WithColumnRenamedNonexistent:
@@ -225,13 +232,6 @@ class TestIssue295WithColumnRenamedNonexistent:
         """Test withColumnRenamed with non-existent column on empty DataFrame."""
         spark = SparkSession.builder.appName("issue-295").getOrCreate()
         try:
-            from sparkless.spark_types import (
-                StructType,
-                StructField,
-                StringType,
-                IntegerType,
-            )
-
             # Create empty DataFrame with schema
             schema = StructType(
                 [
@@ -416,8 +416,6 @@ class TestIssue295WithColumnRenamedNonexistent:
         """Test withColumnRenamed with non-existent column after groupBy operation."""
         spark = SparkSession.builder.appName("issue-295").getOrCreate()
         try:
-            from sparkless.sql import functions as F
-
             df = spark.createDataFrame(
                 [
                     {"dept": "IT", "salary": 50000},
@@ -619,8 +617,6 @@ class TestIssue295WithColumnRenamedNonexistent:
         """Test withColumnRenamed with non-existent column after withColumn operation."""
         spark = SparkSession.builder.appName("issue-295").getOrCreate()
         try:
-            from sparkless.sql import functions as F
-
             df = spark.createDataFrame([{"name": "Alice", "age": 25}])
 
             # Add column, then try to rename non-existent column
@@ -679,8 +675,6 @@ class TestIssue295WithColumnRenamedNonexistent:
         """Test withColumnRenamed with non-existent column after complex nested operations."""
         spark = SparkSession.builder.appName("issue-295").getOrCreate()
         try:
-            from sparkless.sql import functions as F
-
             df = spark.createDataFrame(
                 [
                     {"name": "Alice", "age": 25, "salary": 50000},

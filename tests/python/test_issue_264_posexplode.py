@@ -7,7 +7,6 @@ Robin now exposes module-level posexplode and column.posexplode(); F.posexplode(
 
 from __future__ import annotations
 
-from tests.conftest import is_pyspark_backend
 from tests.fixtures.spark_imports import get_spark_imports
 
 
@@ -40,10 +39,6 @@ def test_posexplode_returns_two_columns() -> None:
         exploded = df.select(F.posexplode("Values").alias("pos", "val"))
         rows = exploded.collect()
         assert len(rows) >= 1
-    # Column method form (sparkless-only)
-    if not is_pyspark_backend():
-        pos2, val2 = F.col("Values").posexplode()
-        assert pos2 is not None and val2 is not None
 
 
 def test_explode_module_exists() -> None:

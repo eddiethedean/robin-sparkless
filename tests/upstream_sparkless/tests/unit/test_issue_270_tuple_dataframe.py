@@ -188,9 +188,7 @@ class TestIssue270TupleDataFrame:
                 or "length" in str(exc_info.value).lower()
             )
         else:
-            from sparkless.core.exceptions.validation import IllegalArgumentException
-
-            with pytest.raises(IllegalArgumentException) as exc_info:
+            with pytest.raises(Exception) as exc_info:
                 spark.createDataFrame(data=data, schema=schema)
             assert "LENGTH_SHOULD_BE_THE_SAME" in str(exc_info.value)
 

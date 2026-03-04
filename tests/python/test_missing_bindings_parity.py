@@ -9,19 +9,12 @@ from __future__ import annotations
 
 import pytest
 
-from tests.conftest import is_pyspark_backend
 from tests.fixtures.spark_imports import get_spark_imports
 
 
 _imports = get_spark_imports()
 SparkSession = _imports.SparkSession
 F = _imports.F
-
-pytestmark = pytest.mark.skipif(
-    is_pyspark_backend(),
-    reason="binding parity checks rely on sparkless-specific Column methods",
-)
-
 
 def _spark_and_df():
     spark = SparkSession.builder.appName("bindings").getOrCreate()

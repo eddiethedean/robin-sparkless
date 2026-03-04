@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import pytest
 
-from tests.conftest import is_pyspark_backend
 from tests.fixtures.spark_imports import get_spark_imports
 
 
@@ -22,17 +21,12 @@ def _spark() -> SparkSession:
     return SparkSession.builder.appName("issue_415").getOrCreate()
 
 
-@pytest.mark.skipif(
-    is_pyspark_backend(),
-    reason='"list" schema alias is sparkless-specific; PySpark uses array<...> types',
-)
 def test_array_distinct_string_list() -> None:
     """array_distinct on list of strings: ["a","b","a"] -> ["a","b"]."""
     spark = _spark()
-    create_df = getattr(spark, "create_dataframe_from_rows", spark.createDataFrame)
-    df = create_df(
+    df = spark.createDataFrame(
         [{"arr": ["a", "b", "a"]}],
-        [("arr", "list")],
+        "arr array<string>",
     )
     out = df.select(F.array_distinct(F.col("arr")).alias("arr")).collect()
     assert len(out) == 1

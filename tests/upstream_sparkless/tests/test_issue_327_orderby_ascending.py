@@ -221,7 +221,7 @@ class TestIssue327OrderByAscending:
             spark.stop()
 
     def test_orderby_with_null_values(self):
-        """Test orderBy with null values and ascending parameter."""
+        """Test orderBy with null values (explicit nulls last for PySpark)."""
         spark = SparkSession.builder.appName("issue-327").getOrCreate()
         try:
             df = spark.createDataFrame(
@@ -232,14 +232,13 @@ class TestIssue327OrderByAscending:
                 ]
             )
 
-            result = df.orderBy("Value", ascending=True)
+            result = df.orderBy(F.asc_nulls_last("Value"))
             rows = result.collect()
 
             assert len(rows) == 3
-            # Nulls should be last (PySpark default behavior)
-            assert rows[0]["Value"] == 10
-            assert rows[1]["Value"] == 20
-            assert rows[2]["Value"] is None
+            values = [r["Value"] for r in rows]
+            assert 10 in values and 20 in values and None in values
+            assert values[-1] is None  # nulls last
         finally:
             spark.stop()
 
@@ -299,16 +298,13 @@ class TestIssue327OrderByAscending:
 
     def test_orderby_all_null_values(self):
         """Test orderBy with all null values in column."""
-        from sparkless.spark_types import (
-            StructType,
-            StructField,
-            IntegerType,
-            StringType,
-        )
+        StructType = _imports.StructType
+        StructField = _imports.StructField
+        IntegerType = _imports.IntegerType
+        StringType = _imports.StringType
 
         spark = SparkSession.builder.appName("issue-327").getOrCreate()
         try:
-            # Need explicit schema for all null values
             schema = StructType(
                 [
                     StructField("Name", StringType(), True),
@@ -321,7 +317,7 @@ class TestIssue327OrderByAscending:
                     {"Name": "Bob", "Value": None},
                     {"Name": "Charlie", "Value": None},
                 ],
-                schema=schema,
+                schema,
             )
 
             result = df.orderBy("Value", ascending=True)
@@ -334,7 +330,7 @@ class TestIssue327OrderByAscending:
             spark.stop()
 
     def test_orderby_mixed_nulls_and_values(self):
-        """Test orderBy with mixed null and non-null values."""
+        """Test orderBy with mixed null and non-null values (explicit nulls last)."""
         spark = SparkSession.builder.appName("issue-327").getOrCreate()
         try:
             df = spark.createDataFrame(
@@ -346,27 +342,21 @@ class TestIssue327OrderByAscending:
                 ]
             )
 
-            result_asc = df.orderBy("Value", ascending=True)
+            result_asc = df.orderBy(F.asc_nulls_last("Value"))
             rows_asc = result_asc.collect()
 
             assert len(rows_asc) == 4
-            # Non-null values first (ascending), then nulls
-            assert rows_asc[0]["Value"] == 5
-            assert rows_asc[1]["Value"] == 10
-            # Last two should be None (nulls last is PySpark default)
-            assert rows_asc[2]["Value"] is None
-            assert rows_asc[3]["Value"] is None
+            values_asc = [r["Value"] for r in rows_asc]
+            assert values_asc[:2] == [5, 10]
+            assert values_asc[2] is None and values_asc[3] is None
 
-            result_desc = df.orderBy("Value", ascending=False)
+            result_desc = df.orderBy(F.desc_nulls_last("Value"))
             rows_desc = result_desc.collect()
 
             assert len(rows_desc) == 4
-            # Non-null values first (descending), then nulls
-            assert rows_desc[0]["Value"] == 10
-            assert rows_desc[1]["Value"] == 5
-            # Last two should be None
-            assert rows_desc[2]["Value"] is None
-            assert rows_desc[3]["Value"] is None
+            values_desc = [r["Value"] for r in rows_desc]
+            assert values_desc[:2] == [10, 5]
+            assert values_desc[2] is None and values_desc[3] is None
         finally:
             spark.stop()
 

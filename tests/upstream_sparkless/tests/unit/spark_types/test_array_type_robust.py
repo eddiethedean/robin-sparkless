@@ -439,124 +439,57 @@ class TestArrayTypeRobust:
         assert rows[2]["values"] == [4, 5]
 
     def test_array_type_elementtype_pyspark_parity_simple(self, spark):
-        """Test basic elementType usage matches PySpark behavior."""
+        """Test basic elementType usage (run with PySpark for parity)."""
         if not _is_pyspark_mode():
             pytest.skip(
                 "PySpark parity test - run with MOCK_SPARK_TEST_BACKEND=pyspark"
             )
 
-        from pyspark.sql import SparkSession as PySparkSession
-        from pyspark.sql.types import (
-            StructType as PySparkStructType,
-            StructField as PySparkStructField,
-            ArrayType as PySparkArrayType,
-            StringType as PySparkStringType,
-            IntegerType as PySparkIntegerType,
-        )
-
-        pyspark_session = PySparkSession.builder.appName("Parity").getOrCreate()
-
-        # Create schema with elementType in PySpark
-        pyspark_schema = PySparkStructType(
-            [
-                PySparkStructField(
-                    "arr", PySparkArrayType(elementType=PySparkStringType()), True
-                ),
-                PySparkStructField(
-                    "nums", PySparkArrayType(elementType=PySparkIntegerType()), True
-                ),
-            ]
-        )
-
-        pyspark_df = pyspark_session.createDataFrame(
-            [{"arr": ["a", "b", "c"], "nums": [1, 2, 3]}], schema=pyspark_schema
-        )
-
-        # Create same schema with elementType in sparkless
-        sparkless_schema = StructType(
+        schema = StructType(
             [
                 StructField("arr", ArrayType(elementType=StringType()), True),
                 StructField("nums", ArrayType(elementType=IntegerType()), True),
             ]
         )
 
-        sparkless_df = spark.createDataFrame(
-            [{"arr": ["a", "b", "c"], "nums": [1, 2, 3]}], schema=sparkless_schema
+        df = spark.createDataFrame(
+            [{"arr": ["a", "b", "c"], "nums": [1, 2, 3]}], schema=schema
         )
 
-        # Verify schemas match
-        pyspark_fields = pyspark_df.schema.fields
-        sparkless_fields = sparkless_df.schema.fields
+        fields = df.schema.fields
+        assert len(fields) == 2
+        assert fields[0].name == "arr"
+        assert fields[1].name == "nums"
 
-        assert len(pyspark_fields) == len(sparkless_fields)
-        assert pyspark_fields[0].name == sparkless_fields[0].name
-        assert pyspark_fields[1].name == sparkless_fields[1].name
-
-        # Verify data matches
-        pyspark_rows = pyspark_df.collect()
-        sparkless_rows = sparkless_df.collect()
-
-        assert pyspark_rows[0]["arr"] == sparkless_rows[0]["arr"]
-        assert pyspark_rows[0]["nums"] == sparkless_rows[0]["nums"]
-
-        pyspark_session.stop()
+        rows = df.collect()
+        assert rows[0]["arr"] == ["a", "b", "c"]
+        assert rows[0]["nums"] == [1, 2, 3]
 
     def test_array_type_elementtype_pyspark_parity_complex(self, spark):
-        """Test complex nested elementType usage matches PySpark behavior."""
+        """Test complex nested elementType usage (run with PySpark for parity)."""
         if not _is_pyspark_mode():
             pytest.skip(
                 "PySpark parity test - run with MOCK_SPARK_TEST_BACKEND=pyspark"
             )
 
-        from pyspark.sql import SparkSession as PySparkSession
-        from pyspark.sql.types import (
-            StructType as PySparkStructType,
-            StructField as PySparkStructField,
-            ArrayType as PySparkArrayType,
-            StringType as PySparkStringType,
-        )
-
-        pyspark_session = PySparkSession.builder.appName("Parity").getOrCreate()
-
-        # Nested array with elementType in PySpark
-        pyspark_schema = PySparkStructType(
+        schema = StructType(
             [
-                PySparkStructField(
+                StructField(
                     "nested",
-                    PySparkArrayType(
-                        elementType=PySparkArrayType(elementType=PySparkStringType())
+                    ArrayType(
+                        elementType=ArrayType(elementType=StringType())
                     ),
                     True,
                 )
             ]
         )
 
-        pyspark_df = pyspark_session.createDataFrame(
-            [{"nested": [["a", "b"], ["c", "d"]]}], schema=pyspark_schema
+        df = spark.createDataFrame(
+            [{"nested": [["a", "b"], ["c", "d"]]}], schema=schema
         )
 
-        # Same in sparkless
-        sparkless_schema = StructType(
-            [
-                StructField(
-                    "nested",
-                    ArrayType(elementType=ArrayType(elementType=StringType())),
-                    True,
-                )
-            ]
-        )
-
-        sparkless_df = spark.createDataFrame(
-            [{"nested": [["a", "b"], ["c", "d"]]}], schema=sparkless_schema
-        )
-
-        # Verify data matches
-        pyspark_rows = pyspark_df.collect()
-        sparkless_rows = sparkless_df.collect()
-
-        assert pyspark_rows[0]["nested"] == sparkless_rows[0]["nested"]
-
-        pyspark_session.stop()
+        rows = df.collect()
+        assert rows[0]["nested"] == [["a", "b"], ["c", "d"]]
 
     def test_array_type_elementtype_with_date_type(self, spark):
         """Test ArrayType with elementType as DateType."""

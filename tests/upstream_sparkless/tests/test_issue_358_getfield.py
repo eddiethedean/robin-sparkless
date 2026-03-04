@@ -1,11 +1,18 @@
 """Test issue #358: Column.getField for array index (PySpark API parity).
 
 PySpark supports F.col("ArrayVal").getField(0) for array element access.
-This test verifies getField(int) matches getItem(int) and getField(str) for struct.
+Uses get_spark_imports from fixture only.
 """
 
-from sparkless.sql import SparkSession
-import sparkless.sql.functions as F
+from tests.fixtures.spark_imports import get_spark_imports
+
+_imports = get_spark_imports()
+SparkSession = _imports.SparkSession
+F = _imports.F
+StructType = _imports.StructType
+StructField = _imports.StructField
+StringType = _imports.StringType
+IntegerType = _imports.IntegerType
 
 
 class TestIssue358GetField:
@@ -71,13 +78,6 @@ class TestIssue358GetField:
             self._get_unique_app_name(test_name)
         ).getOrCreate()
         try:
-            from sparkless.sql.types import (
-                StructType,
-                StructField,
-                StringType,
-                IntegerType,
-            )
-
             schema = StructType(
                 [
                     StructField("id", IntegerType(), True),

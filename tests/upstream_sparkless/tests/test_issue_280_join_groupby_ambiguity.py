@@ -1,12 +1,15 @@
 """
 Comprehensive tests for issue #280: join then groupBy ambiguous column fix.
 
-Tests verify that joins on column names (single or multiple) followed by
-operations on those join keys work without ambiguous column errors.
+Tests verify that joins followed by operations on join keys work without ambiguity.
+Uses get_spark_imports from fixture only.
 """
 
-from sparkless.sql import SparkSession
-import sparkless.sql.functions as F
+from tests.fixtures.spark_imports import get_spark_imports
+
+_imports = get_spark_imports()
+SparkSession = _imports.SparkSession
+F = _imports.F
 
 
 class TestJoinThenGroupByNoAmbiguity:

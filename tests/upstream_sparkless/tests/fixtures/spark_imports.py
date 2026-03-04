@@ -53,8 +53,10 @@ class SparkImports:
             )
             from pyspark.sql import Window
             from pyspark.sql import DataFrameReader
+            from pyspark import SparkContext
 
             self.SparkSession = SparkSession
+            self.SparkContext = SparkContext
             self.F = F
             self.StructType = StructType
             self.StructField = StructField
@@ -72,6 +74,7 @@ class SparkImports:
             self.Row = Row
             self.Window = Window
             self.DataFrameReader = DataFrameReader
+            self._native = None  # PySpark has no sparkless _native
 
         except ImportError as e:
             raise ImportError(
@@ -118,6 +121,8 @@ class SparkImports:
         self.Row = Row
         self.Window = Window
         self.DataFrameReader = DataFrameReader
+        import sparkless._native as _native
+        self._native = _native
 
 
 def get_spark_imports(backend: Optional[BackendType] = None) -> SparkImports:

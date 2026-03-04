@@ -1,13 +1,18 @@
 """
-Test for issue #126: F.to_date() fails to parse 'YYYY-MM-DD' format dates.
-
-This test reproduces the exact scenario from issue #126 to ensure it's fixed.
+Test for issue #126: F.to_date() format dates. Uses get_spark_imports from fixture only.
 """
 
 import pytest
-from sparkless import SparkSession
-from sparkless.spark_types import StructType, StructField, StringType
-from sparkless import functions as F
+
+from tests.fixtures.spark_imports import get_spark_imports
+
+_imports = get_spark_imports()
+SparkSession = _imports.SparkSession
+F = _imports.F
+StructType = _imports.StructType
+StructField = _imports.StructField
+StringType = _imports.StringType
+DateType = _imports.DateType
 
 
 class TestToDateIssue126:
@@ -58,8 +63,6 @@ class TestToDateIssue126:
         schema_dict = {
             field.name: field.dataType for field in df_with_date.schema.fields
         }
-        from sparkless.spark_types import DateType
-
         assert isinstance(schema_dict["birth_date"], DateType), (
             f"birth_date should be DateType, got {type(schema_dict['birth_date'])}"
         )

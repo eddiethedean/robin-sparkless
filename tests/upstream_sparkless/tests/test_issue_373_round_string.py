@@ -1,11 +1,14 @@
 """Test issue #373: F.round() on string column (PySpark implicit cast).
 
 PySpark supports F.round() on string columns that contain numeric values.
-Sparkless should cast to numeric before rounding to match PySpark.
+Uses get_spark_imports from fixture only.
 """
 
-from sparkless.sql import SparkSession
-import sparkless.sql.functions as F
+from tests.fixtures.spark_imports import get_spark_imports
+
+_imports = get_spark_imports()
+SparkSession = _imports.SparkSession
+F = _imports.F
 
 
 class TestIssue373RoundString:

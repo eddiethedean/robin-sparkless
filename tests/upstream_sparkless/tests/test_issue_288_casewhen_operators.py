@@ -1,9 +1,8 @@
 """
 Tests for issue #288: CaseWhen arithmetic and logical operators.
 
-PySpark supports arithmetic and logical operations on CaseWhen expressions
-(e.g., F.when(...).otherwise(...) - F.when(...).otherwise(...)).
-This test verifies that Sparkless supports the same operations.
+Uses PySpark APIs only: when().otherwise(), arithmetic (+, -, *, /, %).
+PySpark & | ~ on Column are boolean; bitwise tests on numeric CaseWhen removed.
 """
 
 from tests.fixtures.spark_imports import get_spark_imports
@@ -194,75 +193,6 @@ class TestIssue288CaseWhenOperators:
             bob_row = next((r for r in rows if r["Name"] == "Bob"), None)
             assert bob_row is not None
             assert bob_row["result"] == 7
-        finally:
-            spark.stop()
-
-    def test_casewhen_bitwise_or(self):
-        """Test bitwise OR operation on two CaseWhen expressions."""
-        spark = SparkSession.builder.appName("issue-288").getOrCreate()
-        try:
-            df = spark.createDataFrame(
-                [
-                    {"Name": "Alice", "Value1": 5, "Value2": 3},
-                    {"Name": "Bob", "Value1": 10, "Value2": 6},
-                ]
-            )
-
-            result = df.withColumn(
-                "result",
-                F.when(F.col("Name") == "Alice", F.col("Value1")).otherwise(
-                    F.col("Value2")
-                )
-                | F.when(F.col("Name") == "Alice", F.col("Value2")).otherwise(
-                    F.col("Value1")
-                ),
-            )
-
-            rows = result.collect()
-            assert len(rows) == 2
-
-            # Alice: Value1 (5) | Value2 (3) = 7
-            # 5 = 101, 3 = 011, 5 | 3 = 111 = 7
-            alice_row = next((r for r in rows if r["Name"] == "Alice"), None)
-            assert alice_row is not None
-            assert alice_row["result"] == 7
-
-            # Bob: Value2 (6) | Value1 (10) = 14
-            # 6 = 110, 10 = 1010, 6 | 10 = 1110 = 14
-            bob_row = next((r for r in rows if r["Name"] == "Bob"), None)
-            assert bob_row is not None
-            assert bob_row["result"] == 14
-        finally:
-            spark.stop()
-
-    def test_casewhen_bitwise_not(self):
-        """Test bitwise NOT operation (unary ~) on CaseWhen expression."""
-        spark = SparkSession.builder.appName("issue-288").getOrCreate()
-        try:
-            df = spark.createDataFrame(
-                [
-                    {"Name": "Alice", "Value1": 5},
-                    {"Name": "Bob", "Value1": 10},
-                ]
-            )
-
-            result = df.withColumn(
-                "result",
-                ~F.when(F.col("Name") == "Alice", F.col("Value1")).otherwise(F.lit(0)),
-            )
-
-            rows = result.collect()
-            assert len(rows) == 2
-
-            # Alice: ~Value1 (5) = ~5 = -6 (in two's complement)
-            alice_row = next((r for r in rows if r["Name"] == "Alice"), None)
-            assert alice_row is not None
-            assert alice_row["result"] == -6
-
-            # Bob: ~0 = -1
-            bob_row = next((r for r in rows if r["Name"] == "Bob"), None)
-            assert bob_row is not None
-            assert bob_row["result"] == -1
         finally:
             spark.stop()
 
@@ -635,44 +565,6 @@ class TestIssue288CaseWhenOperators:
             bob_row = next((r for r in rows if r["Name"] == "Bob"), None)
             assert bob_row is not None
             assert bob_row["result"] == 7
-        finally:
-            spark.stop()
-
-    def test_casewhen_bitwise_and(self):
-        """Test bitwise AND operation on two CaseWhen expressions."""
-        spark = SparkSession.builder.appName("issue-288").getOrCreate()
-        try:
-            df = spark.createDataFrame(
-                [
-                    {"Name": "Alice", "Value1": 5, "Value2": 3},
-                    {"Name": "Bob", "Value1": 10, "Value2": 6},
-                ]
-            )
-
-            result = df.withColumn(
-                "result",
-                F.when(F.col("Name") == "Alice", F.col("Value1")).otherwise(
-                    F.col("Value2")
-                )
-                & F.when(F.col("Name") == "Alice", F.col("Value2")).otherwise(
-                    F.col("Value1")
-                ),
-            )
-
-            rows = result.collect()
-            assert len(rows) == 2
-
-            # Alice: Value1 (5) & Value2 (3) = 1
-            # 5 = 101, 3 = 011, 5 & 3 = 001 = 1
-            alice_row = next((r for r in rows if r["Name"] == "Alice"), None)
-            assert alice_row is not None
-            assert alice_row["result"] == 1
-
-            # Bob: Value2 (6) & Value1 (10) = 2
-            # 6 = 110, 10 = 1010, 6 & 10 = 0010 = 2
-            bob_row = next((r for r in rows if r["Name"] == "Bob"), None)
-            assert bob_row is not None
-            assert bob_row["result"] == 2
         finally:
             spark.stop()
 

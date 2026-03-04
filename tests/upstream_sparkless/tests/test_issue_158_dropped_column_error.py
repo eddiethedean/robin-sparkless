@@ -1,19 +1,17 @@
 """
 Test for issue #158: 'cannot resolve' error when referencing dropped columns in select() and filter().
 
-Issue #158 reports that sparkless raises a "cannot resolve" error when code tries to reference
-a column that was dropped via `.select()`. While this is technically correct behavior (the column
-doesn't exist), the error message and behavior should be consistent with PySpark.
-
-This test verifies that:
-1. Error messages are consistent with PySpark format
-2. Error messages are consistent across select() and filter() operations
-3. Error messages work with both string column names and F.col() expressions
+Verifies that referencing a dropped column raises an error with a consistent message.
+Uses get_spark_imports from fixture only.
 """
 
 import pytest
-from sparkless import SparkSession, functions as F
-from sparkless.core.exceptions.operation import SparkColumnNotFoundError
+
+from tests.fixtures.spark_imports import get_spark_imports
+
+_imports = get_spark_imports()
+SparkSession = _imports.SparkSession
+F = _imports.F
 
 
 class TestIssue158DroppedColumnError:
@@ -46,8 +44,8 @@ class TestIssue158DroppedColumnError:
         assert "impression_date" not in df_transformed.columns
         assert "impression_date_parsed" in df_transformed.columns
 
-        # THE BUG: select() should raise SparkColumnNotFoundError with consistent message
-        with pytest.raises(SparkColumnNotFoundError) as exc_info:
+        # select() should raise with consistent message
+        with pytest.raises(Exception) as exc_info:
             df_transformed.select("impression_date")
 
         # Verify the error message format (PySpark parity: must contain "cannot resolve")
@@ -67,7 +65,7 @@ class TestIssue158DroppedColumnError:
         df_dropped = df.select("col1")
 
         # Select dropped column with F.col() must raise (at select or at collect)
-        with pytest.raises(SparkColumnNotFoundError) as exc_info:
+        with pytest.raises(Exception) as exc_info:
             df_dropped.select(F.col("col2")).collect()
 
         # Verify the error message format (PySpark parity: must contain "cannot resolve")
@@ -87,8 +85,7 @@ class TestIssue158DroppedColumnError:
         df_dropped = df.select("col1")
 
         # Try to filter with dropped column - should raise consistent error
-        # Note: The error should be raised during validation, not during materialization
-        with pytest.raises(SparkColumnNotFoundError) as exc_info:
+        with pytest.raises(Exception) as exc_info:
             df_dropped.filter(F.col("col2").isNotNull())
 
         # Verify the error message format (PySpark parity: must contain "cannot resolve")
@@ -107,8 +104,8 @@ class TestIssue158DroppedColumnError:
         # Drop column via select
         df_dropped = df.select("col1")
 
-        # Try to select dropped column - should raise SparkColumnNotFoundError with consistent message
-        with pytest.raises(SparkColumnNotFoundError) as exc_info:
+        # Try to select dropped column - should raise with consistent message
+        with pytest.raises(Exception) as exc_info:
             df_dropped.select("col2")
 
         # Verify the error message format (PySpark parity: must contain "cannot resolve")

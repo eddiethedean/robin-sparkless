@@ -2,17 +2,15 @@
 Test for list unpacking issues in groupBy, rollup, and cube methods.
 
 This test verifies that df.groupBy(["col1", "col2"]), df.rollup(["col1", "col2"]),
-and df.cube(["col1", "col2"]) work correctly, similar to fixes for issues #212 and #214.
+and df.cube(["col1", "col2"]) work correctly. Uses get_spark_imports from fixture only.
 """
 
 import pytest
-from sparkless.sql import SparkSession
 
+from tests.fixtures.spark_imports import get_spark_imports
 
-@pytest.fixture
-def spark():
-    """Create a SparkSession for testing."""
-    return SparkSession.builder.appName("test").getOrCreate()
+_imports = get_spark_imports()
+SparkSession = _imports.SparkSession
 
 
 @pytest.fixture

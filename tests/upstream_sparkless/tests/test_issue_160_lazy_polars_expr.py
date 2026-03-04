@@ -1,17 +1,16 @@
 """
 Test to reproduce issue #160 by testing lazy Polars expression behavior.
 
-The bug might occur when:
-1. Lazy Polars expressions are created that reference columns
-2. Those columns are dropped
-3. The lazy expressions are evaluated and try to reference the dropped columns
-
-This is different from the cache approach - it's about how Polars lazy expressions
-are built up and evaluated.
+Uses get_spark_imports from fixture only.
 """
 
 import pytest
-from sparkless import SparkSession, functions as F
+
+from tests.fixtures.spark_imports import get_spark_imports
+
+_imports = get_spark_imports()
+SparkSession = _imports.SparkSession
+F = _imports.F
 
 
 def test_lazy_polars_expression_after_column_drop():

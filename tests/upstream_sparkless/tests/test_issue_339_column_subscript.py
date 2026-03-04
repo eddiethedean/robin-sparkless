@@ -2,25 +2,15 @@
 Unit tests for Issue #339: Column subscript notation for struct access.
 
 Tests that Column supports subscript notation (e.g., F.col("StructVal")["E1"])
-matching PySpark behavior.
+matching PySpark behavior. Uses get_spark_imports from fixture only.
 """
 
-import os
+from tests.fixtures.spark_imports import get_spark_imports
 
-
-def get_spark_imports():
-    """Get Spark imports based on backend."""
-    backend = os.getenv("MOCK_SPARK_TEST_BACKEND", "sparkless")
-    if backend == "pyspark":
-        from pyspark.sql import SparkSession
-        import pyspark.sql.functions as F
-
-        return SparkSession, F
-    else:
-        from sparkless.sql import SparkSession
-        from sparkless import functions as F
-
-        return SparkSession, F
+_imports = get_spark_imports()
+SparkSession = _imports.SparkSession
+F = _imports.F
+Window = _imports.Window
 
 
 class TestIssue339ColumnSubscript:
@@ -28,7 +18,6 @@ class TestIssue339ColumnSubscript:
 
     def test_column_subscript_single_field(self):
         """Test Column subscript notation with single struct field."""
-        SparkSession, F = get_spark_imports()
         spark = SparkSession.builder.appName("issue-339").getOrCreate()
         try:
             df = spark.createDataFrame(
@@ -52,7 +41,6 @@ class TestIssue339ColumnSubscript:
 
     def test_column_subscript_multiple_fields(self):
         """Test Column subscript notation with multiple struct fields."""
-        SparkSession, F = get_spark_imports()
         spark = SparkSession.builder.appName("issue-339").getOrCreate()
         try:
             df = spark.createDataFrame(
@@ -80,7 +68,6 @@ class TestIssue339ColumnSubscript:
 
     def test_column_subscript_in_select(self):
         """Test Column subscript notation in select operation."""
-        SparkSession, F = get_spark_imports()
         spark = SparkSession.builder.appName("issue-339").getOrCreate()
         try:
             df = spark.createDataFrame(
@@ -101,7 +88,6 @@ class TestIssue339ColumnSubscript:
 
     def test_column_subscript_in_filter(self):
         """Test Column subscript notation in filter operation."""
-        SparkSession, F = get_spark_imports()
         spark = SparkSession.builder.appName("issue-339").getOrCreate()
         try:
             df = spark.createDataFrame(
@@ -121,7 +107,6 @@ class TestIssue339ColumnSubscript:
 
     def test_column_subscript_equals_dot_notation(self):
         """Test that subscript notation produces same results as dot notation."""
-        SparkSession, F = get_spark_imports()
         spark = SparkSession.builder.appName("issue-339").getOrCreate()
         try:
             df = spark.createDataFrame(
@@ -146,7 +131,6 @@ class TestIssue339ColumnSubscript:
 
     def test_column_subscript_with_nested_struct(self):
         """Test Column subscript notation with nested struct."""
-        SparkSession, F = get_spark_imports()
         spark = SparkSession.builder.appName("issue-339").getOrCreate()
         try:
             df = spark.createDataFrame(
@@ -174,7 +158,6 @@ class TestIssue339ColumnSubscript:
 
     def test_column_subscript_with_alias(self):
         """Test Column subscript notation with column alias."""
-        SparkSession, F = get_spark_imports()
         spark = SparkSession.builder.appName("issue-339").getOrCreate()
         try:
             df = spark.createDataFrame(
@@ -197,7 +180,6 @@ class TestIssue339ColumnSubscript:
 
     def test_column_subscript_with_null_struct(self):
         """Test Column subscript notation with null struct values."""
-        SparkSession, F = get_spark_imports()
         spark = SparkSession.builder.appName("issue-339").getOrCreate()
         try:
             df = spark.createDataFrame(
@@ -220,7 +202,6 @@ class TestIssue339ColumnSubscript:
 
     def test_column_subscript_with_null_field(self):
         """Test Column subscript notation when struct field is null."""
-        SparkSession, F = get_spark_imports()
         spark = SparkSession.builder.appName("issue-339").getOrCreate()
         try:
             df = spark.createDataFrame(
@@ -243,7 +224,6 @@ class TestIssue339ColumnSubscript:
 
     def test_column_subscript_with_orderBy(self):
         """Test Column subscript notation with orderBy operation."""
-        SparkSession, F = get_spark_imports()
         spark = SparkSession.builder.appName("issue-339").getOrCreate()
         try:
             df = spark.createDataFrame(
@@ -267,7 +247,6 @@ class TestIssue339ColumnSubscript:
 
     def test_column_subscript_with_groupBy(self):
         """Test Column subscript notation with groupBy operation."""
-        SparkSession, F = get_spark_imports()
         spark = SparkSession.builder.appName("issue-339").getOrCreate()
         try:
             df = spark.createDataFrame(
@@ -296,7 +275,6 @@ class TestIssue339ColumnSubscript:
 
     def test_column_subscript_with_join(self):
         """Test Column subscript notation with join operations."""
-        SparkSession, F = get_spark_imports()
         spark = SparkSession.builder.appName("issue-339").getOrCreate()
         try:
             df1 = spark.createDataFrame(
@@ -328,7 +306,6 @@ class TestIssue339ColumnSubscript:
 
     def test_column_subscript_with_case_when(self):
         """Test Column subscript notation with case/when operations."""
-        SparkSession, F = get_spark_imports()
         spark = SparkSession.builder.appName("issue-339").getOrCreate()
         try:
             df = spark.createDataFrame(
@@ -354,7 +331,6 @@ class TestIssue339ColumnSubscript:
 
     def test_column_subscript_with_comparison(self):
         """Test Column subscript notation with comparison operations."""
-        SparkSession, F = get_spark_imports()
         spark = SparkSession.builder.appName("issue-339").getOrCreate()
         try:
             df = spark.createDataFrame(
@@ -377,7 +353,6 @@ class TestIssue339ColumnSubscript:
 
     def test_column_subscript_with_arithmetic(self):
         """Test Column subscript notation with arithmetic operations."""
-        SparkSession, F = get_spark_imports()
         spark = SparkSession.builder.appName("issue-339").getOrCreate()
         try:
             df = spark.createDataFrame(
@@ -402,7 +377,6 @@ class TestIssue339ColumnSubscript:
 
     def test_column_subscript_error_non_string_key(self):
         """Test that Column subscript raises error for non-string keys."""
-        SparkSession, F = get_spark_imports()
         spark = SparkSession.builder.appName("issue-339").getOrCreate()
         try:
             df = spark.createDataFrame(
@@ -436,7 +410,6 @@ class TestIssue339ColumnSubscript:
 
     def test_column_subscript_schema_verification(self):
         """Test that Column subscript produces correct schema."""
-        SparkSession, F = get_spark_imports()
         spark = SparkSession.builder.appName("issue-339").getOrCreate()
         try:
             df = spark.createDataFrame(
@@ -458,7 +431,6 @@ class TestIssue339ColumnSubscript:
 
     def test_column_subscript_with_multiple_struct_columns(self):
         """Test Column subscript notation with multiple struct columns."""
-        SparkSession, F = get_spark_imports()
         spark = SparkSession.builder.appName("issue-339").getOrCreate()
         try:
             df = spark.createDataFrame(
@@ -490,7 +462,6 @@ class TestIssue339ColumnSubscript:
 
     def test_column_subscript_with_computed_column(self):
         """Test Column subscript notation on computed columns."""
-        SparkSession, F = get_spark_imports()
         spark = SparkSession.builder.appName("issue-339").getOrCreate()
         try:
             df = spark.createDataFrame(
@@ -514,7 +485,6 @@ class TestIssue339ColumnSubscript:
 
     def test_column_subscript_deeply_nested_struct(self):
         """Test Column subscript notation with deeply nested struct (3+ levels)."""
-        SparkSession, F = get_spark_imports()
         spark = SparkSession.builder.appName("issue-339").getOrCreate()
         try:
             df = spark.createDataFrame(
@@ -551,7 +521,6 @@ class TestIssue339ColumnSubscript:
 
     def test_column_subscript_with_union(self):
         """Test Column subscript notation with union operations."""
-        SparkSession, F = get_spark_imports()
         spark = SparkSession.builder.appName("issue-339").getOrCreate()
         try:
             df1 = spark.createDataFrame(
@@ -580,7 +549,6 @@ class TestIssue339ColumnSubscript:
 
     def test_column_subscript_with_distinct(self):
         """Test Column subscript notation with distinct operations."""
-        SparkSession, F = get_spark_imports()
         spark = SparkSession.builder.appName("issue-339").getOrCreate()
         try:
             df = spark.createDataFrame(
@@ -607,7 +575,6 @@ class TestIssue339ColumnSubscript:
 
     def test_column_subscript_with_cast(self):
         """Test Column subscript notation with cast operations."""
-        SparkSession, F = get_spark_imports()
         spark = SparkSession.builder.appName("issue-339").getOrCreate()
         try:
             df = spark.createDataFrame(
@@ -630,15 +597,8 @@ class TestIssue339ColumnSubscript:
 
     def test_column_subscript_with_window_function(self):
         """Test Column subscript notation with window functions."""
-        SparkSession, F = get_spark_imports()
         spark = SparkSession.builder.appName("issue-339").getOrCreate()
         try:
-            backend = os.getenv("MOCK_SPARK_TEST_BACKEND", "sparkless")
-            if backend == "pyspark":
-                from pyspark.sql.window import Window
-            else:
-                from sparkless.window import Window
-
             df = spark.createDataFrame(
                 [
                     {"Name": "Alice", "Type": "A", "StructVal": {"E1": 1, "E2": 2}},
@@ -664,7 +624,6 @@ class TestIssue339ColumnSubscript:
 
     def test_column_subscript_with_multiple_aggregations(self):
         """Test Column subscript notation with multiple aggregations."""
-        SparkSession, F = get_spark_imports()
         spark = SparkSession.builder.appName("issue-339").getOrCreate()
         try:
             df = spark.createDataFrame(
@@ -696,7 +655,6 @@ class TestIssue339ColumnSubscript:
 
     def test_column_subscript_with_coalesce(self):
         """Test Column subscript notation with coalesce operations."""
-        SparkSession, F = get_spark_imports()
         spark = SparkSession.builder.appName("issue-339").getOrCreate()
         try:
             df = spark.createDataFrame(
@@ -729,7 +687,6 @@ class TestIssue339ColumnSubscript:
 
     def test_column_subscript_with_when_otherwise_nested(self):
         """Test Column subscript notation with nested when/otherwise."""
-        SparkSession, F = get_spark_imports()
         spark = SparkSession.builder.appName("issue-339").getOrCreate()
         try:
             df = spark.createDataFrame(
@@ -760,7 +717,6 @@ class TestIssue339ColumnSubscript:
 
     def test_column_subscript_with_string_operations(self):
         """Test Column subscript notation with string operations."""
-        SparkSession, F = get_spark_imports()
         spark = SparkSession.builder.appName("issue-339").getOrCreate()
         try:
             df = spark.createDataFrame(
@@ -784,7 +740,6 @@ class TestIssue339ColumnSubscript:
 
     def test_column_subscript_with_limit(self):
         """Test Column subscript notation with limit operations."""
-        SparkSession, F = get_spark_imports()
         spark = SparkSession.builder.appName("issue-339").getOrCreate()
         try:
             df = spark.createDataFrame(
@@ -811,7 +766,6 @@ class TestIssue339ColumnSubscript:
 
     def test_column_subscript_chained_operations(self):
         """Test Column subscript notation with complex chained operations."""
-        SparkSession, F = get_spark_imports()
         spark = SparkSession.builder.appName("issue-339").getOrCreate()
         try:
             df = spark.createDataFrame(

@@ -1,21 +1,17 @@
 """
-Test for issue #136: Column rename/transform not reflected in validation.
-
-Issue #136 reports that when renaming columns and creating new columns with
-transformations, sparkless validation sees the old column structure instead of
-the transformed one, causing `unable to find column` errors.
-
-FIXED:
-- Schema tracking: Added withColumnRenamed handling to SchemaManager
-  and materializer schema tracking.
-- Materialization fix: Fixed withColumnRenamed to materialize the DataFrame
-  before accessing data, ensuring queued operations (like withColumn) are
-  applied before renaming columns.
+Test for issue #136: Column rename/transform validation. Uses get_spark_imports from fixture only.
 """
 
-from sparkless import SparkSession
-from sparkless.functions import col, to_timestamp, regexp_replace
 from datetime import datetime
+
+from tests.fixtures.spark_imports import get_spark_imports
+
+_imports = get_spark_imports()
+SparkSession = _imports.SparkSession
+F = _imports.F
+col = F.col
+to_timestamp = F.to_timestamp
+regexp_replace = F.regexp_replace
 
 
 class TestIssue136ColumnRenameValidation:

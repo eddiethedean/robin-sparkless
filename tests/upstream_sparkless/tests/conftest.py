@@ -82,8 +82,10 @@ def _ensure_robin_backend_type(session):
 @pytest.fixture
 def mock_spark_session():
     """Create a SparkSession with automatic cleanup."""
-    from sparkless import SparkSession
+    from tests.fixtures.spark_backend import BackendType
+    from tests.fixtures.spark_imports import get_spark_imports
 
+    SparkSession = get_spark_imports(BackendType.MOCK).SparkSession
     session = SparkSession("test_app")
     _ensure_robin_backend_type(session)
     # When robin mode is requested, ensure we did not silently get polars
@@ -104,9 +106,12 @@ def mock_spark_session():
 @pytest.fixture
 def isolated_session():
     """Create an isolated SparkSession for tests requiring isolation."""
-    from sparkless import SparkSession
     import uuid
 
+    from tests.fixtures.spark_backend import BackendType
+    from tests.fixtures.spark_imports import get_spark_imports
+
+    SparkSession = get_spark_imports(BackendType.MOCK).SparkSession
     # Use unique name to ensure isolation
     session_name = f"test_isolated_{uuid.uuid4().hex[:8]}"
     session = SparkSession(session_name)
@@ -222,15 +227,6 @@ def spark(request):
     gc.collect()
 
 
-def is_pyspark_backend() -> bool:
-    """True when test run uses PySpark as backend (MOCK_SPARK_TEST_BACKEND=pyspark). Used to skip sparkless-specific tests."""
-    return (
-        os.getenv("MOCK_SPARK_TEST_BACKEND")
-        or os.getenv("SPARKLESS_TEST_BACKEND")
-        or ""
-    ).strip().lower() == "pyspark"
-
-
 @pytest.fixture
 def spark_backend(request):
     """Get the current backend type being used.
@@ -270,8 +266,10 @@ def pyspark_session(request):
 @pytest.fixture
 def mock_spark():
     """Provide mock spark session for compatibility tests."""
-    from sparkless import SparkSession
+    from tests.fixtures.spark_backend import BackendType
+    from tests.fixtures.spark_imports import get_spark_imports
 
+    SparkSession = get_spark_imports(BackendType.MOCK).SparkSession
     session = SparkSession("test_app")
     _ensure_robin_backend_type(session)
     if (

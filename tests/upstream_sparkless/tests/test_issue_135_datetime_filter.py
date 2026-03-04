@@ -1,14 +1,20 @@
 """
-Test for issue #135: Datetime columns cause SchemaError when filtering.
-
-Issue #135 reports that when creating datetime columns using to_timestamp()
-and then attempting to validate or filter on those columns, sparkless raises
-a SchemaError: expected String, got datetime[μs].
+Test for issue #135: Datetime column filtering. Uses get_spark_imports from fixture only.
 """
 
-from sparkless import SparkSession
-from sparkless.functions import col, to_timestamp, regexp_replace
 from datetime import datetime
+
+from tests.fixtures.spark_imports import get_spark_imports
+
+_imports = get_spark_imports()
+SparkSession = _imports.SparkSession
+F = _imports.F
+col = F.col
+to_timestamp = F.to_timestamp
+regexp_replace = F.regexp_replace
+StructType = _imports.StructType
+StructField = _imports.StructField
+StringType = _imports.StringType
 
 
 class TestIssue135DatetimeFilter:
@@ -50,8 +56,6 @@ class TestIssue135DatetimeFilter:
         """Test that filtering for null datetime columns works."""
         spark = SparkSession.builder.appName("BugRepro").getOrCreate()
         try:
-            from sparkless.spark_types import StringType, StructType, StructField
-
             # Use explicit schema to avoid type inference issues with None values
             schema = StructType(
                 [
@@ -133,8 +137,6 @@ class TestIssue135DatetimeFilter:
         """Test that filtering works after multiple operations involving to_timestamp."""
         spark = SparkSession.builder.appName("BugRepro").getOrCreate()
         try:
-            from sparkless.spark_types import StringType, StructType, StructField
-
             # Use explicit schema with StringType
             schema = StructType(
                 [

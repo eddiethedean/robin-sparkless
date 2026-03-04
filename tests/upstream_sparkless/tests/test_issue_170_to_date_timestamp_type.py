@@ -1,18 +1,16 @@
 """
-Test for issue #170: to_date() on TimestampType fails with 'NoneType' object has no attribute 'collect'.
+Test for issue #170: to_date() on TimestampType + materialize.
 
-This test reproduces the exact scenario from issue #170 where:
-1. A DataFrame is created with timestamp strings
-2. to_timestamp() is used to parse the timestamp (creates TimestampType column)
-3. to_date() is applied on the TimestampType column
-4. The DataFrame is materialized (e.g., groupBy + agg + collect)
-
-The bug occurred because to_date() on TimestampType might set lazy_df = None
-and the subsequent operations don't check for df_materialized.
+Uses get_spark_imports from fixture only.
 """
 
-from sparkless import SparkSession, functions as F
 from datetime import datetime
+
+from tests.fixtures.spark_imports import get_spark_imports
+
+_imports = get_spark_imports()
+SparkSession = _imports.SparkSession
+F = _imports.F
 
 
 class TestIssue170ToDateTimestampType:
@@ -20,7 +18,7 @@ class TestIssue170ToDateTimestampType:
 
     def test_to_date_on_timestamp_type_basic(self):
         """Test the basic reproduction case from issue #170."""
-        spark = SparkSession("test_issue_170")
+        spark = SparkSession.builder.appName("test_issue_170").getOrCreate()
         try:
             # Create test data
             data = []

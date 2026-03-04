@@ -1,14 +1,17 @@
 """
-Test for issue #138: Column reference error after drop().
-
-Issue #138 reports that after transforming a column (e.g., snapshot_date ->
-snapshot_date_parsed) and dropping the original column, sparkless may still try
-to reference the original column name internally, causing an AttributeError.
+Test for issue #138: Column reference error after drop(). Uses get_spark_imports from fixture only.
 """
 
-from sparkless import SparkSession
-from sparkless.functions import col, to_timestamp, regexp_replace
 from datetime import datetime
+
+from tests.fixtures.spark_imports import get_spark_imports
+
+_imports = get_spark_imports()
+SparkSession = _imports.SparkSession
+F = _imports.F
+col = F.col
+to_timestamp = F.to_timestamp
+regexp_replace = F.regexp_replace
 
 
 class TestIssue138ColumnDropReference:

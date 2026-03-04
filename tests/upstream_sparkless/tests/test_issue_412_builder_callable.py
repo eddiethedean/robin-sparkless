@@ -1,16 +1,14 @@
 """Tests for issue #412: SparkSession.builder() callable compatibility.
 
 Issue #412 reports that SparkSession.builder() (with parentheses) raises
-TypeError in Sparkless because builder is a non-callable attribute. Some
-PySpark users or code generators use builder() as a factory method.
-
-These tests verify that:
-- SparkSession.builder() returns the same builder instance as SparkSession.builder
-- SparkSession.builder().appName(...).getOrCreate() works identically to the
-  property form
+TypeError in Sparkless because builder is a non-callable attribute.
+Uses get_spark_imports from fixture only.
 """
 
-from sparkless.sql import SparkSession
+from tests.fixtures.spark_imports import get_spark_imports
+
+_imports = get_spark_imports()
+SparkSession = _imports.SparkSession
 
 
 class TestIssue412BuilderCallable:

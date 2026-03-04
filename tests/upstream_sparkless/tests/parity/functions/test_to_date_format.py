@@ -1,14 +1,17 @@
 """
-Test to_date function with format strings for issue #126.
-
-This test validates that F.to_date() correctly parses date strings with format strings,
-matching PySpark behavior for various date formats.
+Test to_date function with format strings. Uses get_spark_imports from fixture only.
 """
 
 import pytest
-from sparkless import SparkSession
-from sparkless.spark_types import StructType, StructField, StringType
-from sparkless import functions as F
+
+from tests.fixtures.spark_imports import get_spark_imports
+
+_imports = get_spark_imports()
+SparkSession = _imports.SparkSession
+F = _imports.F
+StructType = _imports.StructType
+StructField = _imports.StructField
+StringType = _imports.StringType
 
 
 class TestToDateWithFormat:

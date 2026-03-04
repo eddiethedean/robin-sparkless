@@ -1,11 +1,5 @@
 """
-Tests for inferSchema parity between PySpark and Sparkless.
-
-These tests ensure that:
-1. CSV reading defaults to inferSchema=False (all columns as strings)
-2. Explicit inferSchema=False works correctly
-3. Explicit inferSchema=True infers types correctly
-4. Type inference matches PySpark behavior
+Tests for inferSchema parity. Uses get_spark_imports from fixture only.
 """
 
 import tempfile
@@ -13,8 +7,17 @@ from pathlib import Path
 
 import pytest
 
-from sparkless.sql import SparkSession
-from sparkless.spark_types import StringType, LongType, DoubleType, BooleanType
+from tests.fixtures.spark_imports import get_spark_imports
+
+_imports = get_spark_imports()
+SparkSession = _imports.SparkSession
+StringType = _imports.StringType
+LongType = _imports.LongType
+DoubleType = _imports.DoubleType
+BooleanType = _imports.BooleanType
+StructType = _imports.StructType
+StructField = _imports.StructField
+BinaryType = _imports.BinaryType
 
 
 class TestInferSchemaParity:
@@ -23,7 +26,7 @@ class TestInferSchemaParity:
     @pytest.fixture
     def spark(self):
         """Create a SparkSession for testing."""
-        spark = SparkSession("InferSchemaTest")
+        spark = SparkSession.builder.appName("InferSchemaTest").getOrCreate()
         yield spark
         spark.stop()
 
@@ -797,8 +800,6 @@ Alice,25,95.5"""
 
     def test_create_dataframe_empty_list(self, spark):
         """Test creating DataFrame from empty list."""
-        from sparkless.spark_types import StructType, StructField, StringType
-
         # Empty list with schema should work
         schema = StructType(
             [StructField("name", StringType()), StructField("age", LongType())]
@@ -1237,8 +1238,6 @@ abc
 
         assert isinstance(field_dict["name"], StringType), "name should be StringType"
         # Bytes should be inferred as BinaryType
-        from sparkless.spark_types import BinaryType
-
         assert isinstance(field_dict["data"], BinaryType), "data should be BinaryType"
 
     def test_csv_with_tab_delimiter(self, spark):

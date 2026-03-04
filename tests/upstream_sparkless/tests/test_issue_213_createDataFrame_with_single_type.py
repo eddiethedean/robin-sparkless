@@ -1,15 +1,15 @@
 """
-Test for Issue #213: createDataFrame().toDF() with single DataType schema.
-
-This test verifies that createDataFrame(date_list, T.DateType()).toDF("dates") works correctly.
+Test for Issue #213: createDataFrame().toDF() with single DataType schema. Uses get_spark_imports from fixture only.
 """
 
-import pytest
 import datetime
-from sparkless.sql import SparkSession
-from sparkless.sql import types as T
 
+import pytest
 
+from tests.fixtures.spark_imports import get_spark_imports
+
+_imports = get_spark_imports()
+SparkSession = _imports.SparkSession
 @pytest.fixture
 def spark():
     """Create a SparkSession for testing."""
@@ -25,7 +25,7 @@ def test_createDataFrame_with_single_date_type(spark):
     ]
 
     # This should work without PySparkValueError
-    df_dates = spark.createDataFrame(date_list, T.DateType()).toDF("dates")
+    df_dates = spark.createDataFrame(date_list, _imports.DateType()).toDF("dates")
     df_dates.show(999)
 
     # Verify the DataFrame was created correctly
@@ -50,7 +50,7 @@ def test_createDataFrame_with_single_string_type(spark):
     """Test that createDataFrame with single StringType and toDF() works."""
     string_list = ["value1", "value2", "value3"]
 
-    df_strings = spark.createDataFrame(string_list, T.StringType()).toDF("names")
+    df_strings = spark.createDataFrame(string_list, _imports.StringType()).toDF("names")
 
     rows = df_strings.collect()
     assert len(rows) == 3
@@ -64,7 +64,7 @@ def test_createDataFrame_with_single_integer_type(spark):
     """Test that createDataFrame with single IntegerType and toDF() works."""
     int_list = [1, 2, 3]
 
-    df_ints = spark.createDataFrame(int_list, T.IntegerType()).toDF("numbers")
+    df_ints = spark.createDataFrame(int_list, _imports.IntegerType()).toDF("numbers")
 
     rows = df_ints.collect()
     assert len(rows) == 3

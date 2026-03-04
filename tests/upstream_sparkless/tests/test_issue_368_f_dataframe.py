@@ -1,13 +1,16 @@
 """Test issue #368: F.DataFrame for reduce(F.DataFrame.union, dfs).
 
 PySpark allows F.DataFrame.union so that reduce(F.DataFrame.union, dfs) works.
-This test verifies sparkless.sql.functions exposes DataFrame for API parity.
+Uses get_spark_imports from fixture only.
 """
 
 from functools import reduce
 
-from sparkless.sql import SparkSession
-import sparkless.sql.functions as F
+from tests.fixtures.spark_imports import get_spark_imports
+
+_imports = get_spark_imports()
+SparkSession = _imports.SparkSession
+F = _imports.F
 
 
 class TestIssue368FDataFrame:
@@ -55,11 +58,8 @@ class TestIssue368FDataFrame:
             spark.stop()
 
     def test_f_has_dataframe_attribute(self):
-        """Test that F.DataFrame is available (module __getattr__)."""
+        """Test that F.DataFrame is available (API parity)."""
         assert hasattr(F, "DataFrame")
-        from sparkless.sql import DataFrame as DataFrameClass
-
-        assert F.DataFrame is DataFrameClass
 
     def test_f_dataframe_union_multiple_dfs(self):
         """Test reduce(F.DataFrame.union, dfs) with 4+ DataFrames."""

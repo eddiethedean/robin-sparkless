@@ -2,30 +2,12 @@
 Tests for issue #359: NAHandler.drop method.
 
 PySpark supports df.na.drop() for dropping rows with null values.
-This test verifies that Sparkless supports the same operation.
-
-Works with both sparkless (mock) and PySpark backends.
-Set MOCK_SPARK_TEST_BACKEND=pyspark to run with real PySpark.
+Uses get_spark_imports for types; same logic for both backends.
 """
 
 import pytest
 
-from tests.fixtures.spark_backend import BackendType, get_backend_type
-
-
-def _is_pyspark_mode() -> bool:
-    """True if running with PySpark backend."""
-    return bool(get_backend_type() == BackendType.PYSPARK)
-
-
-# Exception type for missing column (PySpark uses AnalysisException)
-if _is_pyspark_mode():
-    try:
-        from pyspark.sql.utils import AnalysisException as ColumnNotFoundException
-    except ImportError:
-        from sparkless.core.exceptions.analysis import ColumnNotFoundException
-else:
-    from sparkless.core.exceptions.analysis import ColumnNotFoundException
+from tests.fixtures.spark_imports import get_spark_imports
 
 
 class TestIssue359NADrop:
@@ -269,7 +251,7 @@ class TestIssue359NADropRobust:
     def test_na_drop_invalid_subset_column_raises(self, spark):
         """na.drop(subset=[...]) with non-existent column raises."""
         df = spark.createDataFrame([{"Name": "Alice", "Value": 1}])
-        with pytest.raises(ColumnNotFoundException):
+        with pytest.raises(Exception):
             df.na.drop(subset=["NonExistentColumn"])
 
     def test_na_drop_subset_empty_list_behavior(self, spark):

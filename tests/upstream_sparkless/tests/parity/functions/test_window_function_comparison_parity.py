@@ -1,14 +1,17 @@
 """
-PySpark parity tests for Issue #336: WindowFunction comparison operators.
-
-Tests that sparkless WindowFunction comparison operations match PySpark behavior.
+PySpark parity tests for Issue #336: WindowFunction comparison. Uses get_spark_imports from fixture only.
 """
 
 import os
+
 import pytest
-from sparkless.sql import SparkSession
-from sparkless import functions as F
-from sparkless.window import Window
+
+from tests.fixtures.spark_imports import get_spark_imports
+
+_imports = get_spark_imports()
+SparkSession = _imports.SparkSession
+F = _imports.F
+Window = _imports.Window
 
 
 class TestWindowFunctionComparisonParity:

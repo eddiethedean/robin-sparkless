@@ -1,5 +1,10 @@
-from sparkless import SparkSession
-from sparkless.spark_types import StringType, LongType
+from tests.fixtures.spark_imports import get_spark_imports
+
+_imports = get_spark_imports()
+SparkSession = _imports.SparkSession
+F = _imports.F
+StringType = _imports.StringType
+LongType = _imports.LongType
 
 
 class TestIssue203FilterWithString:
@@ -10,7 +15,7 @@ class TestIssue203FilterWithString:
         Test that filter() correctly handles string SQL expressions,
         matching PySpark's behavior.
         """
-        spark = SparkSession("test_app")
+        spark = SparkSession.builder.appName("test_app").getOrCreate()
         df = spark.createDataFrame(
             [
                 {"name": "Alice", "dept": "IT", "salary": 50000},
@@ -45,7 +50,7 @@ class TestIssue203FilterWithString:
         """
         Test filter with string equality expression.
         """
-        spark = SparkSession("test_app")
+        spark = SparkSession.builder.appName("test_app").getOrCreate()
         df = spark.createDataFrame(
             [
                 {"name": "Alice", "dept": "IT", "salary": 50000},
@@ -67,7 +72,7 @@ class TestIssue203FilterWithString:
         """
         Test that where() (alias for filter()) also accepts string expressions.
         """
-        spark = SparkSession("test_app")
+        spark = SparkSession.builder.appName("test_app").getOrCreate()
         df = spark.createDataFrame(
             [
                 {"name": "Alice", "dept": "IT", "salary": 50000},
@@ -88,7 +93,7 @@ class TestIssue203FilterWithString:
         Ensure that existing behavior of filter() with Column expressions
         is not regressed.
         """
-        spark = SparkSession("test_app")
+        spark = SparkSession.builder.appName("test_app").getOrCreate()
         df = spark.createDataFrame(
             [
                 {"name": "Alice", "dept": "IT", "salary": 50000},
@@ -109,9 +114,7 @@ class TestIssue203FilterWithString:
         """
         Ensure that filter() with F.col() expressions still works.
         """
-        from sparkless.functions import F
-
-        spark = SparkSession("test_app")
+        spark = SparkSession.builder.appName("test_app").getOrCreate()
         df = spark.createDataFrame(
             [
                 {"name": "Alice", "dept": "IT", "salary": 50000},
@@ -132,7 +135,7 @@ class TestIssue203FilterWithString:
         """
         Test filter with string expression using AND condition.
         """
-        spark = SparkSession("test_app")
+        spark = SparkSession.builder.appName("test_app").getOrCreate()
         df = spark.createDataFrame(
             [
                 {"name": "Alice", "dept": "IT", "salary": 50000},

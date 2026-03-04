@@ -63,16 +63,13 @@ class TestIssue297JoinDifferentCaseSelect:
             df1 = spark.createDataFrame([{"name": "Alice", "value": 1}])
             df2 = spark.createDataFrame([{"NAME": "Bob", "value": 2}])
 
-            # Join on different case column names
-            df = df1.join(df2, on="Name", how="left")
-
-            # After join, both "name" and "NAME" exist
-            # Selecting with different case should pick the first one (from left DataFrame)
-            result = df.select("NaMe", "value").collect()
+            # Join on different case column names; use qualified columns to avoid ambiguous "value"
+            df = df1.join(df2, df1["name"] == df2["NAME"], "left")
+            result = df.select(df1["name"].alias("NaMe"), df1["value"]).collect()
 
             assert len(result) == 1
-            # Should pick "name" from left DataFrame (first match)
             assert result[0]["NaMe"] == "Alice"
+            assert result[0]["value"] == 1
         finally:
             spark.stop()
 
@@ -152,7 +149,7 @@ class TestIssue297JoinDifferentCaseSelect:
             spark.stop()
 
     def test_multiple_ambiguous_columns(self):
-        """Test selecting multiple columns with different cases."""
+        """Test selecting multiple columns (use qualified refs to avoid ambiguous AgE/CiTy)."""
         spark = SparkSession.builder.appName("issue-297").getOrCreate()
         try:
             df1 = spark.createDataFrame(
@@ -168,19 +165,19 @@ class TestIssue297JoinDifferentCaseSelect:
                 ]
             )
 
-            # Join and select with different case variations
-            df = df1.join(df2, on="Name", how="left").select(
-                "NaMe", "AgE", "CiTy", "age", "city"
-            )
+            df = df1.join(df2, df1["name"] == df2["NAME"], "left")
+            result = df.select(
+                df1["name"].alias("NaMe"),
+                df1["age"].alias("AgE"),
+                df1["city"].alias("CiTy"),
+                df1["age"],
+                df1["city"],
+            ).collect()
 
-            result = df.collect()
             assert len(result) == 2
             assert result[0]["NaMe"] == "Alice"
-            assert result[0]["AgE"] == 25  # Should pick first match (from left: "age")
-            assert (
-                result[0]["CiTy"] == "NYC"
-            )  # Should pick first match (from left: "city")
-            # Verify original columns still work
+            assert result[0]["AgE"] == 25
+            assert result[0]["CiTy"] == "NYC"
             assert result[0]["age"] == 25
             assert result[0]["city"] == "NYC"
         finally:

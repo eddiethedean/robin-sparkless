@@ -1,23 +1,24 @@
 """
-Tests for to_timestamp() compatibility with multiple input types.
-
-This test suite verifies that to_timestamp() accepts all input types
-that PySpark supports, matching PySpark's behavior exactly.
-
-Issue #131: to_timestamp() should accept TimestampType input for PySpark compatibility
+Tests for to_timestamp() compatibility. Uses get_spark_imports from fixture only.
 """
 
+from datetime import date, datetime
+
 import pytest
-from sparkless import SparkSession, functions as F
-from datetime import datetime, date
-from sparkless.spark_types import (
-    IntegerType,
-    LongType,
-    DateType,
-    DoubleType,
-    StructType,
-    StructField,
-)
+
+from tests.fixtures.spark_imports import get_spark_imports
+
+_imports = get_spark_imports()
+SparkSession = _imports.SparkSession
+F = _imports.F
+IntegerType = _imports.IntegerType
+LongType = _imports.LongType
+DateType = _imports.DateType
+DoubleType = _imports.DoubleType
+StructType = _imports.StructType
+StructField = _imports.StructField
+BooleanType = _imports.BooleanType
+StringType = _imports.StringType
 
 
 class TestToTimestampCompatibility:
@@ -28,7 +29,7 @@ class TestToTimestampCompatibility:
 
         This is the exact scenario from issue #131.
         """
-        spark = SparkSession("test")
+        spark = SparkSession.builder.appName("test").getOrCreate()
         try:
             # Create DataFrame with timestamp string
             data = [("2024-01-01T10:00:00", "test")]
@@ -56,7 +57,7 @@ class TestToTimestampCompatibility:
 
     def test_to_timestamp_string_type_with_format(self):
         """Test that to_timestamp() works with StringType input and format string."""
-        spark = SparkSession("test")
+        spark = SparkSession.builder.appName("test").getOrCreate()
         try:
             data = [("2024-01-01T10:00:00",)]
             df = spark.createDataFrame(data, ["timestamp_str"])
@@ -74,7 +75,7 @@ class TestToTimestampCompatibility:
 
     def test_to_timestamp_string_type_without_format(self):
         """Test that to_timestamp() works with StringType input without format."""
-        spark = SparkSession("test")
+        spark = SparkSession.builder.appName("test").getOrCreate()
         try:
             data = [("2024-01-01 10:00:00",)]
             df = spark.createDataFrame(data, ["timestamp_str"])
@@ -89,7 +90,7 @@ class TestToTimestampCompatibility:
 
     def test_to_timestamp_integer_type_unix_timestamp(self):
         """Test that to_timestamp() accepts IntegerType input (Unix timestamp in seconds)."""
-        spark = SparkSession("test")
+        spark = SparkSession.builder.appName("test").getOrCreate()
         try:
             # Unix timestamp for 2024-01-01 10:00:00 UTC
             unix_ts = 1704110400
@@ -106,7 +107,7 @@ class TestToTimestampCompatibility:
 
     def test_to_timestamp_long_type_unix_timestamp(self):
         """Test that to_timestamp() accepts LongType input (Unix timestamp in seconds)."""
-        spark = SparkSession("test")
+        spark = SparkSession.builder.appName("test").getOrCreate()
         try:
             # Unix timestamp for 2024-01-01 10:00:00 UTC
             unix_ts = 1704110400
@@ -123,7 +124,7 @@ class TestToTimestampCompatibility:
 
     def test_to_timestamp_date_type_conversion(self):
         """Test that to_timestamp() accepts DateType input (converts Date to Timestamp)."""
-        spark = SparkSession("test")
+        spark = SparkSession.builder.appName("test").getOrCreate()
         try:
             schema = StructType([StructField("date_col", DateType(), True)])
             df = spark.createDataFrame([{"date_col": date(2024, 1, 1)}], schema=schema)
@@ -140,7 +141,7 @@ class TestToTimestampCompatibility:
 
     def test_to_timestamp_double_type_unix_timestamp(self):
         """Test that to_timestamp() accepts DoubleType input (Unix timestamp with decimal seconds)."""
-        spark = SparkSession("test")
+        spark = SparkSession.builder.appName("test").getOrCreate()
         try:
             # Unix timestamp with decimals for 2024-01-01 10:00:00.5 UTC
             unix_ts = 1704110400.5
@@ -157,9 +158,8 @@ class TestToTimestampCompatibility:
 
     def test_to_timestamp_rejects_unsupported_type(self):
         """Test that to_timestamp() rejects unsupported input types."""
-        spark = SparkSession("test")
+        spark = SparkSession.builder.appName("test").getOrCreate()
         try:
-            from sparkless.spark_types import BooleanType
 
             schema = StructType([StructField("bool_col", BooleanType(), True)])
             df = spark.createDataFrame([{"bool_col": True}], schema=schema)
@@ -178,9 +178,8 @@ class TestToTimestampCompatibility:
         This test verifies the fix for issue #133 where to_timestamp() would fail
         with SchemaError when used on a column created by regexp_replace.
         """
-        spark = SparkSession("test")
+        spark = SparkSession.builder.appName("test").getOrCreate()
         try:
-            from sparkless.spark_types import StringType, StructType, StructField
             from datetime import datetime, timedelta
 
             # Create test data with ISO 8601 formatted timestamps (with microseconds)

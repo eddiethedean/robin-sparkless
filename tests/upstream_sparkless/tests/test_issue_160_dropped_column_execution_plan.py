@@ -1,19 +1,15 @@
 """
 Test for issue #160: cannot resolve error when execution plan references dropped columns.
 
-Issue #160 reports that when a DataFrame operation drops a column via `.select()`, but the
-execution plan still contains references to that column from earlier operations, sparkless
-fails with a `cannot resolve` error during plan evaluation (materialization, validation, or write operations).
-
-The root cause is that the expression cache stores Polars expressions that reference column
-names directly. When columns are dropped, these cached expressions become invalid, but they're
-still used during plan evaluation.
-
-These tests verify that the fix works correctly - they ensure that materialization succeeds
-even when columns are used in transformations and then dropped via select().
+These tests verify that materialization succeeds when columns are used and then dropped via select().
+Uses get_spark_imports from fixture only.
 """
 
-from sparkless import SparkSession, functions as F
+from tests.fixtures.spark_imports import get_spark_imports
+
+_imports = get_spark_imports()
+SparkSession = _imports.SparkSession
+F = _imports.F
 
 
 class TestIssue160DroppedColumnExecutionPlan:

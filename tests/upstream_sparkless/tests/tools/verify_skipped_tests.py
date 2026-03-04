@@ -13,13 +13,18 @@ from pathlib import Path
 project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
-from sparkless import SparkSession, F  # noqa: E402
+from tests.fixtures.spark_imports import get_spark_imports  # noqa: E402
+
+_imports = get_spark_imports()
+SparkSession = _imports.SparkSession
+F = _imports.F
+Window = _imports.Window
 
 
 def test_left_join():
     """Test if left join works."""
     try:
-        spark = SparkSession("test")
+        spark = SparkSession.builder.appName("test").getOrCreate()
         df1 = spark.createDataFrame([{"id": 1, "name": "A"}, {"id": 2, "name": "B"}])
         df2 = spark.createDataFrame([{"id": 1, "val": "X"}])
         result = df1.join(df2, df1.id == df2.id, "left")
@@ -32,7 +37,7 @@ def test_left_join():
 def test_right_join():
     """Test if right join works."""
     try:
-        spark = SparkSession("test")
+        spark = SparkSession.builder.appName("test").getOrCreate()
         df1 = spark.createDataFrame([{"id": 1, "name": "A"}])
         df2 = spark.createDataFrame([{"id": 1, "val": "X"}, {"id": 2, "val": "Y"}])
         result = df1.join(df2, df1.id == df2.id, "right")
@@ -45,7 +50,7 @@ def test_right_join():
 def test_outer_join():
     """Test if outer join works."""
     try:
-        spark = SparkSession("test")
+        spark = SparkSession.builder.appName("test").getOrCreate()
         df1 = spark.createDataFrame([{"id": 1, "name": "A"}, {"id": 2, "name": "B"}])
         df2 = spark.createDataFrame([{"id": 1, "val": "X"}, {"id": 3, "val": "Z"}])
         result = df1.join(df2, df1.id == df2.id, "outer")
@@ -58,7 +63,7 @@ def test_outer_join():
 def test_day_function():
     """Test if day function works."""
     try:
-        spark = SparkSession("test")
+        spark = SparkSession.builder.appName("test").getOrCreate()
         df = spark.createDataFrame([{"date": "2020-01-15"}])
         result = df.select(F.day(df.date))
         rows = result.collect()
@@ -72,9 +77,7 @@ def test_day_function():
 def test_window_functions():
     """Test if window functions work."""
     try:
-        from sparkless.window import Window
-
-        spark = SparkSession("test")
+        spark = SparkSession.builder.appName("test").getOrCreate()
         df = spark.createDataFrame(
             [
                 {"id": 1, "name": "Alice", "dept": "IT", "salary": 50000},
@@ -92,7 +95,7 @@ def test_window_functions():
 def test_select_with_alias():
     """Test if select with alias works."""
     try:
-        spark = SparkSession("test")
+        spark = SparkSession.builder.appName("test").getOrCreate()
         df = spark.createDataFrame([{"id": 1, "name": "A"}])
         result = df.select(df.id.alias("employee_id"), df.name.alias("employee_name"))
         rows = result.collect()
@@ -104,7 +107,7 @@ def test_select_with_alias():
 def test_filter_with_boolean():
     """Test if filter with boolean works."""
     try:
-        spark = SparkSession("test")
+        spark = SparkSession.builder.appName("test").getOrCreate()
         df = spark.createDataFrame(
             [
                 {"age": 30, "department": "IT"},
@@ -121,7 +124,7 @@ def test_filter_with_boolean():
 def test_drop_column():
     """Test if drop column works."""
     try:
-        spark = SparkSession("test")
+        spark = SparkSession.builder.appName("test").getOrCreate()
         df = spark.createDataFrame([{"id": 1, "name": "A", "age": 30}])
         result = df.drop("age")
         rows = result.collect()
