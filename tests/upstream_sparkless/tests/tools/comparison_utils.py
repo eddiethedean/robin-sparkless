@@ -18,11 +18,10 @@ from dataclasses import dataclass
 def _is_pyspark_backend() -> bool:
     """True when test run uses PySpark as backend. In that case we use actual result as expected (parity passes)."""
     return (
-        (os.getenv("MOCK_SPARK_TEST_BACKEND") or os.getenv("SPARKLESS_TEST_BACKEND") or "")
-        .strip()
-        .lower()
-        == "pyspark"
-    )
+        os.getenv("MOCK_SPARK_TEST_BACKEND")
+        or os.getenv("SPARKLESS_TEST_BACKEND")
+        or ""
+    ).strip().lower() == "pyspark"
 
 
 def _schema_field_type_name(dtype: Any) -> str:
@@ -59,7 +58,11 @@ def _dataframe_to_expected_output(df: Any) -> Dict[str, Any]:
     if schema is not None and hasattr(schema, "fields"):
         field_types = [_schema_field_type_name(f.dataType) for f in schema.fields]
         fields = [
-            {"name": f.name, "type": _schema_field_type_name(f.dataType), "nullable": getattr(f, "nullable", True)}
+            {
+                "name": f.name,
+                "type": _schema_field_type_name(f.dataType),
+                "nullable": getattr(f, "nullable", True),
+            }
             for f in schema.fields
         ]
     else:

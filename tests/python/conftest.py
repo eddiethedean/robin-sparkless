@@ -22,15 +22,16 @@ import sys
 
 import pytest
 
+
 # Decide mode early so we can avoid importing sparkless in PySpark mode.
 def _is_pyspark_mode() -> bool:
     """True when tests should run with real PySpark (no sparkless)."""
     return (
-        (os.getenv("MOCK_SPARK_TEST_BACKEND") or os.getenv("SPARKLESS_TEST_BACKEND") or "")
-        .strip()
-        .lower()
-        == "pyspark"
-    )
+        os.getenv("MOCK_SPARK_TEST_BACKEND")
+        or os.getenv("SPARKLESS_TEST_BACKEND")
+        or ""
+    ).strip().lower() == "pyspark"
+
 
 # Ensure PySpark workers use the same Python as the driver when PySpark backend is used
 if "PYSPARK_PYTHON" not in os.environ:

@@ -18,7 +18,15 @@ from tests.fixtures.spark_imports import get_spark_imports
 
 def _table_format_and_options(spark):
     """Use parquet when PySpark backend (no Delta); otherwise delta."""
-    backend = (os.getenv("MOCK_SPARK_TEST_BACKEND") or os.getenv("SPARKLESS_TEST_BACKEND") or "").strip().lower()
+    backend = (
+        (
+            os.getenv("MOCK_SPARK_TEST_BACKEND")
+            or os.getenv("SPARKLESS_TEST_BACKEND")
+            or ""
+        )
+        .strip()
+        .lower()
+    )
     if backend == "pyspark":
         return "parquet", {}
     return "delta", {"overwriteSchema": "true"}

@@ -19,7 +19,11 @@ class TestSQLShowDescribeParity(ParityTestBase):
         result = spark.sql("SHOW DATABASES")
         rows = result.collect()
         cols = result.columns
-        db_col = "databaseName" if "databaseName" in cols else ("namespace" if "namespace" in cols else (cols[0] if cols else None))
+        db_col = (
+            "databaseName"
+            if "databaseName" in cols
+            else ("namespace" if "namespace" in cols else (cols[0] if cols else None))
+        )
         if db_col is None:
             db_names = []
         else:

@@ -498,13 +498,7 @@ class TestColumnAstype:
         assert rows[3]["as_int"] == -2  # -2.7 -> -2
 
     def test_astype_string_to_boolean(self, spark):
-        """Test astype from string to boolean.
-
-        Note: String to boolean conversion uses Python's bool() behavior:
-        - Non-empty strings -> True (because bool("any_string") = True)
-        - Empty strings -> False
-        - This matches Python's behavior where any non-empty string is truthy.
-        """
+        """Test astype from string to boolean (PySpark: "true"->True, "false"->False, ""->False)."""
         schema = StructType([StructField("bool_str", StringType(), True)])
         df = spark.createDataFrame(
             [
@@ -519,17 +513,9 @@ class TestColumnAstype:
         rows = result.collect()
 
         assert len(rows) == 3
-        # Python bool() behavior: non-empty strings are True, empty strings are False
-        # Note: bool("true") = True, bool("false") = True (both are non-empty strings)
-        assert (
-            rows[0]["as_bool"] is True or rows[0]["as_bool"] == "true"
-        )  # "true" (non-empty) -> True
-        assert (
-            rows[1]["as_bool"] is True or rows[1]["as_bool"] == "false"
-        )  # "false" (non-empty) -> True
-        assert (
-            rows[2]["as_bool"] is False or rows[2]["as_bool"] == ""
-        )  # "" (empty) -> False
+        assert rows[0]["as_bool"] is True
+        assert rows[1]["as_bool"] is False
+        assert rows[2]["as_bool"] is False or rows[2]["as_bool"] is None
 
     def test_astype_in_orderBy(self, spark):
         """Test astype in orderBy operation."""

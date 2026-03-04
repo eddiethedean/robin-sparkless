@@ -510,10 +510,14 @@ class TestDeltaLakeSchemaEvolution:
             except Exception:
                 pass
             try:
-                spark.createDataFrame([(1,)]).write.format("delta").mode("overwrite").saveAsTable("_delta_probe")
+                spark.createDataFrame([(1,)]).write.format("delta").mode(
+                    "overwrite"
+                ).saveAsTable("_delta_probe")
                 spark.sql("DROP TABLE IF EXISTS _delta_probe")
             except Exception:
-                pytest.skip("Delta not available in this PySpark session; mergeSchema test requires Delta")
+                pytest.skip(
+                    "Delta not available in this PySpark session; mergeSchema test requires Delta"
+                )
 
         table_suffix = str(uuid.uuid4()).replace("-", "_")[:8]
         schema_name = f"test_schema_{table_suffix}"
@@ -561,10 +565,14 @@ class TestDeltaLakeSchemaEvolution:
         # When PySpark session has no Delta, skip (mergeSchema requires Delta)
         if _backend == BackendType.PYSPARK:
             try:
-                spark.createDataFrame([(1,)]).write.format("delta").mode("overwrite").saveAsTable("_delta_probe")
+                spark.createDataFrame([(1,)]).write.format("delta").mode(
+                    "overwrite"
+                ).saveAsTable("_delta_probe")
                 spark.sql("DROP TABLE IF EXISTS _delta_probe")
             except Exception:
-                pytest.skip("Delta not available in this PySpark session; mergeSchema test requires Delta")
+                pytest.skip(
+                    "Delta not available in this PySpark session; mergeSchema test requires Delta"
+                )
 
         table_suffix = str(uuid.uuid4()).replace("-", "_")[:8]
         schema_name = f"test_schema_{table_suffix}"

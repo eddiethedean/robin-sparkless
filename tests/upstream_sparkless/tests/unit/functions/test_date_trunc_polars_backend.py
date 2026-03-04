@@ -1,9 +1,8 @@
 """
-Tests for date_trunc when using the Polars backend.
+Tests for date_trunc (PySpark API).
 
-These tests focus on the runtime behavior that previously raised
-``ValueError: Unsupported function: date_trunc`` in the Polars
-expression translator (see GitHub issue #465).
+Asserts PySpark behavior: date_trunc('month', date_column) works and returns
+truncated date/datetime. Any backend must match this behavior.
 """
 
 from __future__ import annotations
@@ -18,33 +17,19 @@ F = imports.F
 
 
 class TestDateTruncPolarsBackend:
-    """Tests for F.date_trunc with backend_type='polars'."""
+    """Tests for F.date_trunc (PySpark API)."""
 
-    def test_date_trunc_month_on_date_column(self) -> None:
-        """date_trunc('month', to_date(col)) should materialize without error.
-
-        This mirrors the repro from issue #465:
-
-            df = spark.createDataFrame([('2024-03-15',)], ['d'])
-            df = df.withColumn('d', F.to_date('d')).withColumn(
-                'month', F.date_trunc('month', F.col('d'))
-            )
-            df.show()
-        """
-
-        spark = SparkSession("test-date-trunc-polars", backend_type="polars")
+    def test_date_trunc_month_on_date_column(self, spark) -> None:
+        """date_trunc('month', to_date(col)) should materialize without error (PySpark behavior)."""
         df = spark.createDataFrame([("2024-03-15",)], ["d"])
-
-        df_truncated = df.withColumn("d", F.to_date("d")).withColumn(
+        df = df.withColumn("d", F.to_date("d")).withColumn(
             "month", F.date_trunc("month", F.col("d"))
         )
 
-        rows = df_truncated.collect()
+        rows = df.collect()
         assert len(rows) == 1
 
         month_value = rows[0]["month"]
-
-        # Accept both date and datetime with the correct truncated date.
         assert isinstance(month_value, (_dt.date, _dt.datetime))
         if isinstance(month_value, _dt.datetime):
             assert month_value.date() == _dt.date(2024, 3, 1)

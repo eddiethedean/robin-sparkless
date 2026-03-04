@@ -22,6 +22,8 @@ classifiers = [
 
 [project.optional-dependencies]
 dev = ["pytest", "pandas", "pytest-xdist", "hypothesis", "pytest-timeout", "polars"]
+# Run Python tests with real PySpark (MOCK_SPARK_TEST_BACKEND=pyspark); requires Java.
+pyspark = ["pyspark>=3.5,<3.6", "delta-spark>=3.0,<4"]
 
 [build-system]
 requires = ["maturin>=1.4,<2"]

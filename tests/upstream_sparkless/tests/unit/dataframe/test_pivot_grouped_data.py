@@ -1,17 +1,11 @@
 """Unit tests for PivotGroupedData aggregate methods (Issue #267)."""
 
 import pytest
-from sparkless.sql import SparkSession
 import sparkless.sql.functions as F
 
 
 class TestPivotGroupedData:
-    """Test PivotGroupedData convenience methods."""
-
-    @pytest.fixture
-    def spark(self):
-        """Create a SparkSession for testing."""
-        return SparkSession.builder.appName("test").getOrCreate()
+    """Test PivotGroupedData convenience methods. Uses conftest spark fixture (Robin or PySpark)."""
 
     @pytest.fixture
     def sample_data(self):
