@@ -7,13 +7,17 @@ This test verifies that robin-sparkless exposes concat/concat_ws with the same u
 
 from __future__ import annotations
 
+from tests.fixtures.spark_imports import get_spark_imports
+
+
+_imports = get_spark_imports()
+SparkSession = _imports.SparkSession
+F = _imports.F
+
 
 def test_concat_with_literal_separator_in_with_column() -> None:
     """F.concat(col1, lit(" "), col2) builds full_name as in PySpark."""
-    import robin_sparkless as rs
-
-    F = rs
-    spark = F.SparkSession.builder().app_name("concat_api_repro").get_or_create()
+    spark = SparkSession.builder.appName("concat_api_repro").getOrCreate()
     df = spark.createDataFrame(
         [
             {"first_name": "Alice", "last_name": "Smith"},
@@ -36,10 +40,7 @@ def test_concat_with_literal_separator_in_with_column() -> None:
 
 def test_concat_ws_matches_concat_for_space_separator() -> None:
     """concat_ws(" ", ...) behaves like concat(col1, lit(" "), col2)."""
-    import robin_sparkless as rs
-
-    F = rs
-    spark = F.SparkSession.builder().app_name("concat_ws_api_repro").get_or_create()
+    spark = SparkSession.builder.appName("concat_ws_api_repro").getOrCreate()
     df = spark.createDataFrame(
         [
             {"first_name": "Alice", "last_name": "Smith"},

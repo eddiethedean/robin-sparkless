@@ -5,9 +5,12 @@ Tests that Window().orderBy() and Window().partitionBy() accept lists of column 
 matching PySpark behavior.
 """
 
-from sparkless.sql import SparkSession
-from sparkless import functions as F
-from sparkless.window import Window
+from tests.fixtures.spark_imports import get_spark_imports
+
+_imports = get_spark_imports()
+SparkSession = _imports.SparkSession
+F = _imports.F
+Window = _imports.Window
 
 
 class TestIssue335WindowOrderByList:

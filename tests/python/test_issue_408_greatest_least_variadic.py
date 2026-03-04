@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
-import robin_sparkless as rs
+from tests.fixtures.spark_imports import get_spark_imports
+
+
+_imports = get_spark_imports()
+SparkSession = _imports.SparkSession
+F = _imports.F
 
 
 def _spark():
-    return rs.SparkSession.builder().app_name("issue_408").get_or_create()
+    return SparkSession.builder.appName("issue_408").getOrCreate()
 
 
 def test_greatest_variadic() -> None:
@@ -17,7 +22,7 @@ def test_greatest_variadic() -> None:
         schema=[("a", "int"), ("b", "int"), ("c", "int")],
     )
     out = df.select(
-        rs.greatest(rs.col("a"), rs.col("b"), rs.col("c")).alias("m")
+        F.greatest(F.col("a"), F.col("b"), F.col("c")).alias("m")
     ).collect()
     rows = list(out)
     assert len(rows) == 2
@@ -33,7 +38,7 @@ def test_least_variadic() -> None:
         schema=[("a", "int"), ("b", "int"), ("c", "int")],
     )
     out = df.select(
-        rs.least(rs.col("a"), rs.col("b"), rs.col("c")).alias("m")
+        F.least(F.col("a"), F.col("b"), F.col("c")).alias("m")
     ).collect()
     rows = list(out)
     assert len(rows) == 2

@@ -7,9 +7,13 @@ Robin now exposes module-level posexplode and column.posexplode(); F.posexplode(
 
 from __future__ import annotations
 
-import robin_sparkless as rs
+from tests.conftest import is_pyspark_backend
+from tests.fixtures.spark_imports import get_spark_imports
 
-F = rs
+
+_imports = get_spark_imports()
+SparkSession = _imports.SparkSession
+F = _imports.F
 
 
 def test_posexplode_module_exists() -> None:
@@ -20,7 +24,7 @@ def test_posexplode_module_exists() -> None:
 
 def test_posexplode_returns_two_columns() -> None:
     """F.posexplode(column) returns (pos_column, value_column); both support .alias()."""
-    spark = F.SparkSession.builder().app_name("test_264").get_or_create()
+    spark = SparkSession.builder.appName("test_264").getOrCreate()
     _ = spark.createDataFrame(
         [{"Name": "Alice", "Values": [10, 20]}, {"Name": "Bob", "Values": [30, 40]}],
         [("Name", "string"), ("Values", "list")],
@@ -30,9 +34,10 @@ def test_posexplode_returns_two_columns() -> None:
     # Both support .alias() for use in select/with_column
     pos_col.alias("pos")
     val_col.alias("val")
-    # Column method form also works
-    pos2, val2 = F.col("Values").posexplode()
-    assert pos2 is not None and val2 is not None
+    # Column method form also works (sparkless-only; not available in PySpark backend)
+    if not is_pyspark_backend():
+        pos2, val2 = F.col("Values").posexplode()
+        assert pos2 is not None and val2 is not None
 
 
 def test_explode_module_exists() -> None:

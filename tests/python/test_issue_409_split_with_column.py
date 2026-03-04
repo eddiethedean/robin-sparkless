@@ -6,18 +6,23 @@ withColumn(name, split(...)) should add one column whose values are arrays (one 
 
 from __future__ import annotations
 
-import robin_sparkless as rs
+from tests.fixtures.spark_imports import get_spark_imports
 
 
-def _spark() -> rs.SparkSession:
-    return rs.SparkSession.builder().app_name("issue_409").get_or_create()
+_imports = get_spark_imports()
+SparkSession = _imports.SparkSession
+F = _imports.F
+
+
+def _spark() -> SparkSession:
+    return SparkSession.builder.appName("issue_409").getOrCreate()
 
 
 def test_split_with_column_one_array_per_row() -> None:
     """with_column(\"arr\", split(col(\"s\"), \",\")) adds one array column per row."""
     spark = _spark()
     df = spark.createDataFrame([{"s": "A,B,C"}], [("s", "str")])
-    out = df.with_column("arr", rs.split(rs.col("s"), ","))
+    out = df.with_column("arr", F.split(F.col("s"), ","))
     rows = out.collect()
     assert len(rows) == 1
     assert rows[0]["s"] == "A,B,C"

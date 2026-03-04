@@ -2,6 +2,11 @@
 
 import pytest
 import robin_sparkless as rs
+from tests.fixtures.spark_imports import get_spark_imports
+
+
+_imports = get_spark_imports()
+F = _imports.F
 
 
 def test_user_guide_filter() -> None:
@@ -25,12 +30,12 @@ def test_user_guide_when_then_otherwise() -> None:
     )
     df2 = df.with_column(
         "category",
-        rs.when(rs.col("age") >= 65)
-        .then(rs.lit("senior"))
+        F.when(F.col("age") >= F.lit(65))
+        .then(F.lit("senior"))
         .otherwise(
-            rs.when(rs.col("age") >= 18)
-            .then(rs.lit("adult"))
-            .otherwise(rs.lit("minor"))
+            F.when(F.col("age") >= F.lit(18))
+            .then(F.lit("adult"))
+            .otherwise(F.lit("minor"))
         ),
     )
     rows = df2.collect()

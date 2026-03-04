@@ -4,8 +4,11 @@ Unit tests for Issue #330: Struct field selection with alias fails.
 Tests that struct field extraction works correctly when combined with alias.
 """
 
-from sparkless.sql import SparkSession
-from sparkless import functions as F
+from tests.fixtures.spark_imports import get_spark_imports
+
+_imports = get_spark_imports()
+SparkSession = _imports.SparkSession
+F = _imports.F
 
 
 class TestIssue330StructFieldAlias:

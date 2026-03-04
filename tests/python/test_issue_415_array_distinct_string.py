@@ -7,11 +7,16 @@ Robin-sparkless now infers list element type when schema is "list"/"array", so l
 
 from __future__ import annotations
 
-import robin_sparkless as rs
+from tests.fixtures.spark_imports import get_spark_imports
 
 
-def _spark() -> rs.SparkSession:
-    return rs.SparkSession.builder().app_name("issue_415").get_or_create()
+_imports = get_spark_imports()
+SparkSession = _imports.SparkSession
+F = _imports.F
+
+
+def _spark() -> SparkSession:
+    return SparkSession.builder.appName("issue_415").getOrCreate()
 
 
 def test_array_distinct_string_list() -> None:
@@ -22,7 +27,7 @@ def test_array_distinct_string_list() -> None:
         [{"arr": ["a", "b", "a"]}],
         [("arr", "list")],
     )
-    out = df.select(rs.array_distinct(rs.col("arr")).alias("arr")).collect()
+    out = df.select(F.array_distinct(F.col("arr")).alias("arr")).collect()
     assert len(out) == 1
     assert out[0]["arr"] == ["a", "b"]
 
@@ -34,7 +39,7 @@ def test_array_distinct_with_array_string_schema() -> None:
         [{"arr": ["x", "y", "x"]}, {"arr": ["p", "q", "q", "p"]}],
         [("arr", "array<string>")],
     )
-    out = df.select(rs.array_distinct(rs.col("arr")).alias("arr")).collect()
+    out = df.select(F.array_distinct(F.col("arr")).alias("arr")).collect()
     assert len(out) == 2
     assert out[0]["arr"] == ["x", "y"]
     assert out[1]["arr"] == ["p", "q"]

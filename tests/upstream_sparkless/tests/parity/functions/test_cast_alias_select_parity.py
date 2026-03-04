@@ -34,7 +34,7 @@ class TestCastAliasSelectParity:
                 .select("Name", "AvgValue")
             )
 
-            rows = result.collect()
+            rows = sorted(result.collect(), key=lambda r: r["Name"])
             assert len(rows) == 2
             assert rows[0]["Name"] == "Alice"
             # PySpark returns float for DoubleType, but may be string in some cases
@@ -82,7 +82,7 @@ class TestCastAliasSelectParity:
                 .select("Name", "AvgValue", "TotalScore")
             )
 
-            rows = result.collect()
+            rows = sorted(result.collect(), key=lambda r: r["Name"])
             assert len(rows) == 2
             assert rows[0]["Name"] == "Alice"
             # PySpark returns float for DoubleType, but may be string in some cases

@@ -6,7 +6,11 @@ This test verifies that Sparkless supports the same operation.
 """
 
 import pytest
-from sparkless.sql import SparkSession
+from tests.fixtures.spark_imports import get_spark_imports
+from tests.conftest import is_pyspark_backend
+
+_imports = get_spark_imports()
+SparkSession = _imports.SparkSession
 
 
 class TestIssue287NAReplace:
@@ -665,10 +669,14 @@ class TestIssue287NAReplace:
             )
 
             # Invalid column should raise error
-            from sparkless.core.exceptions.analysis import ColumnNotFoundException
+            if is_pyspark_backend():
+                with pytest.raises(Exception):
+                    df.na.replace(1, 99, subset=["NonExistentColumn"]).collect()
+            else:
+                from sparkless.core.exceptions.analysis import ColumnNotFoundException
 
-            with pytest.raises(ColumnNotFoundException):
-                df.na.replace(1, 99, subset=["NonExistentColumn"])
+                with pytest.raises(ColumnNotFoundException):
+                    df.na.replace(1, 99, subset=["NonExistentColumn"])
         finally:
             spark.stop()
 
@@ -683,10 +691,14 @@ class TestIssue287NAReplace:
             )
 
             # Mismatched lengths should raise error
-            from sparkless.core.exceptions import PySparkValueError
+            if is_pyspark_backend():
+                with pytest.raises(Exception):
+                    df.na.replace([1, 2], [10], subset=["Value"]).collect()
+            else:
+                from sparkless.core.exceptions import PySparkValueError
 
-            with pytest.raises(PySparkValueError):
-                df.na.replace([1, 2], [10], subset=["Value"])
+                with pytest.raises(PySparkValueError):
+                    df.na.replace([1, 2], [10], subset=["Value"])
         finally:
             spark.stop()
 
@@ -701,10 +713,14 @@ class TestIssue287NAReplace:
             )
 
             # None value with scalar to_replace should raise error
-            from sparkless.core.exceptions import PySparkValueError
+            if is_pyspark_backend():
+                with pytest.raises(Exception):
+                    df.na.replace(1, None, subset=["Value"]).collect()
+            else:
+                from sparkless.core.exceptions import PySparkValueError
 
-            with pytest.raises(PySparkValueError):
-                df.na.replace(1, None, subset=["Value"])
+                with pytest.raises(PySparkValueError):
+                    df.na.replace(1, None, subset=["Value"])
         finally:
             spark.stop()
 
@@ -719,10 +735,14 @@ class TestIssue287NAReplace:
             )
 
             # None value with list to_replace should raise error
-            from sparkless.core.exceptions import PySparkValueError
+            if is_pyspark_backend():
+                with pytest.raises(Exception):
+                    df.na.replace([1, 2], None, subset=["Value"]).collect()
+            else:
+                from sparkless.core.exceptions import PySparkValueError
 
-            with pytest.raises(PySparkValueError):
-                df.na.replace([1, 2], None, subset=["Value"])
+                with pytest.raises(PySparkValueError):
+                    df.na.replace([1, 2], None, subset=["Value"])
         finally:
             spark.stop()
 

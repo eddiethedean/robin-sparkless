@@ -80,9 +80,13 @@ class TestUnifiedInfrastructure:
             pyspark_F.sum("value").alias("total")
         )
 
-        # Compare with tolerance for floating point
+        # Compare with tolerance for floating point; allow schema differences (e.g. int vs long).
         assert_dataframes_equal(
-            mock_result, pyspark_result, tolerance=1e-6, check_order=False
+            mock_result,
+            pyspark_result,
+            tolerance=1e-6,
+            check_schema=False,
+            check_order=False,
         )
 
     def test_with_backend_info(self, spark, spark_backend):

@@ -4,11 +4,16 @@ Tests for #411: posexplode().alias("pos", "val") for select (PySpark parity).
 
 from __future__ import annotations
 
-import robin_sparkless as rs
+from tests.fixtures.spark_imports import get_spark_imports
 
 
-def _spark() -> rs.SparkSession:
-    return rs.SparkSession.builder().app_name("issue_411").get_or_create()
+_imports = get_spark_imports()
+SparkSession = _imports.SparkSession
+F = _imports.F
+
+
+def _spark() -> SparkSession:
+    return SparkSession.builder.appName("issue_411").getOrCreate()
 
 
 def test_posexplode_alias_in_select() -> None:
@@ -19,7 +24,7 @@ def test_posexplode_alias_in_select() -> None:
         schema=[("id", "bigint"), ("arr", "array<bigint>")],
     )
     # Select only posexplode result (two columns); no mixing with id to avoid row-length mismatch.
-    out = df.select(rs.posexplode("arr").alias("pos", "val"))
+    out = df.select(F.posexplode("arr").alias("pos", "val"))
     rows = out.collect()
     schema = out.schema
     col_names = [f.name for f in schema.fields]

@@ -1,18 +1,20 @@
 """
 Unit tests for ArrayType elementType keyword argument support.
 
-Tests validate PySpark compatibility for ArrayType initialization with elementType
-keyword argument, while maintaining backward compatibility with element_type.
+Uses get_spark_imports() so types match the backend (PySpark or Robin).
+Tests use only public API (elementType) so they run in both backends.
 """
 
 import pytest
-from sparkless.spark_types import (
-    ArrayType,
-    StringType,
-    IntegerType,
-    LongType,
-    DoubleType,
-)
+
+from tests.fixtures.spark_imports import get_spark_imports
+
+_imports = get_spark_imports()
+ArrayType = _imports.ArrayType
+StringType = _imports.StringType
+IntegerType = _imports.IntegerType
+LongType = _imports.LongType
+DoubleType = _imports.DoubleType
 
 
 @pytest.mark.unit
@@ -22,61 +24,60 @@ class TestArrayTypeKeywords:
     def test_array_type_with_elementtype_keyword(self):
         """Test ArrayType with elementType keyword (PySpark convention)."""
         at = ArrayType(elementType=StringType())
-        assert isinstance(at.element_type, StringType)
+        assert isinstance(at.elementType, StringType)
 
     def test_array_type_with_element_type_keyword(self):
-        """Test ArrayType with element_type keyword (backward compatibility)."""
-        at = ArrayType(element_type=StringType())
-        assert isinstance(at.element_type, StringType)
+        """Test ArrayType with elementType keyword (public API, works in PySpark and Robin)."""
+        at = ArrayType(elementType=StringType())
+        assert isinstance(at.elementType, StringType)
 
     def test_array_type_positional(self):
         """Test ArrayType with positional argument (existing behavior)."""
         at = ArrayType(StringType())
-        assert isinstance(at.element_type, StringType)
+        assert isinstance(at.elementType, StringType)
 
     def test_array_type_both_keywords_error(self):
-        """Test that specifying both elementType and element_type raises TypeError."""
-        with pytest.raises(TypeError, match="Cannot specify both"):
-            ArrayType(elementType=StringType(), element_type=LongType())
+        """Test that specifying both elementType and _element_type raises TypeError (both backends)."""
+        with pytest.raises(TypeError):
+            ArrayType(elementType=StringType(), _element_type=LongType())
 
     def test_array_type_missing_argument(self):
-        """Test that missing both arguments raises TypeError."""
-        with pytest.raises(TypeError, match="elementType or element_type is required"):
+        """Test that missing required argument raises TypeError."""
+        with pytest.raises(TypeError):
             ArrayType()
 
     def test_array_type_elementtype_with_nullable(self):
-        """Test ArrayType with elementType keyword and nullable parameter."""
-        at = ArrayType(elementType=StringType(), nullable=False)
-        assert isinstance(at.element_type, StringType)
-        assert not at.nullable
+        """Test ArrayType with elementType and containsNull (positional for both backends)."""
+        at = ArrayType(StringType(), False)
+        assert isinstance(at.elementType, StringType)
+        # PySpark uses containsNull, Sparkless uses nullable
+        assert getattr(at, "nullable", getattr(at, "containsNull", True)) is False
 
     def test_array_type_elementtype_with_different_types(self):
         """Test ArrayType with elementType keyword using different element types."""
         # Test with IntegerType
         at_int = ArrayType(elementType=IntegerType())
-        assert isinstance(at_int.element_type, IntegerType)
+        assert isinstance(at_int.elementType, IntegerType)
 
         # Test with DoubleType
         at_double = ArrayType(elementType=DoubleType())
-        assert isinstance(at_double.element_type, DoubleType)
+        assert isinstance(at_double.elementType, DoubleType)
 
         # Test with LongType
         at_long = ArrayType(elementType=LongType())
-        assert isinstance(at_long.element_type, LongType)
+        assert isinstance(at_long.elementType, LongType)
 
     def test_array_type_nested_with_elementtype(self):
         """Test nested ArrayType with elementType keyword."""
         inner = ArrayType(elementType=StringType())
         outer = ArrayType(elementType=inner)
-        assert isinstance(outer.element_type, ArrayType)
-        assert isinstance(outer.element_type.element_type, StringType)
+        assert isinstance(outer.elementType, ArrayType)
+        assert isinstance(outer.elementType.elementType, StringType)
 
-    def test_array_type_in_schema_with_elementtype(self):
+    def test_array_type_in_schema_with_elementtype(self, spark):
         """Test ArrayType with elementType keyword in schema definition."""
-        from sparkless.sql import SparkSession
-        from sparkless.sql.types import StructType, StructField, StringType
-
-        spark = SparkSession.builder.appName("Test").getOrCreate()
+        StructType = _imports.StructType
+        StructField = _imports.StructField
 
         schema = StructType(
             [
@@ -85,20 +86,12 @@ class TestArrayTypeKeywords:
         )
 
         df = spark.createDataFrame([{"arr": ["a", "b"]}], schema=schema)
-        assert df.schema.fields[0].dataType.element_type == StringType()
+        assert df.schema.fields[0].dataType.elementType == StringType()
 
-    def test_array_type_issue_247_example(self):
+    def test_array_type_issue_247_example(self, spark):
         """Test the exact example from issue #247."""
-        from sparkless.sql import SparkSession
-        from sparkless.sql.types import (
-            StructType,
-            StructField,
-            ArrayType,
-            StringType,
-            DoubleType,
-        )
-
-        spark = SparkSession.builder.appName("Example").getOrCreate()
+        StructType = _imports.StructType
+        StructField = _imports.StructField
 
         # Define a schema which contains array types using elementType
         schema = StructType(
@@ -135,11 +128,11 @@ class TestArrayTypeKeywords:
         assert len(df.schema.fields) == 2
         assert df.schema.fields[0].name == "Value_ArrayType_StringType"
         assert isinstance(df.schema.fields[0].dataType, ArrayType)
-        assert df.schema.fields[0].dataType.element_type == StringType()
+        assert df.schema.fields[0].dataType.elementType == StringType()
 
         assert df.schema.fields[1].name == "Value_ArrayType_DoubleType"
         assert isinstance(df.schema.fields[1].dataType, ArrayType)
-        assert df.schema.fields[1].dataType.element_type == DoubleType()
+        assert df.schema.fields[1].dataType.elementType == DoubleType()
 
         # Verify data
         rows = df.collect()

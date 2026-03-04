@@ -812,21 +812,31 @@ pub struct PivotedGroupedData {
     pub(crate) case_sensitive: bool,
 }
 
-/// Extract column name from an expr that may be Column(name) or Cast(Column(name), _) (e.g. sum casts to Float64 for string cols).
+/// Extract column name from an expr that may be Column(name), Cast(Column, _), or nested (e.g. Function for unique().implode()).
 fn pivot_agg_input_column_name(input_expr: &Expr) -> Option<String> {
     match input_expr {
         Expr::Column(name) => Some(name.as_str().to_string()),
         Expr::Cast { expr: inner, .. } => pivot_agg_input_column_name(inner.as_ref()),
+        Expr::Function { input, .. } => {
+            let first = input.first()?;
+            pivot_agg_input_column_name(first)
+        }
         _ => None,
     }
 }
 
-/// Parse a simple pivot agg expr: Alias(Agg(Sum/Mean/Min/Max(Column(name) or Cast(Column, _))), alias) or bare Agg(...) -> (alias, agg_kind, value_col).
+/// Parse a simple pivot agg expr: Alias(Agg(...), alias) or bare Agg(...) or Cast(Agg(...), _) -> (alias, agg_kind, value_col).
+/// Supports sum, avg, min, max, count_distinct, first, last, collect_list, stddev, variance (PySpark pivot.agg parity).
 /// When no alias is present, use a default like "sum(salary)" (PySpark parity).
 fn parse_pivot_agg_expr(expr: &Expr) -> Option<(String, &'static str, String)> {
     let (inner, alias_opt) = match expr {
         Expr::Alias(inner, name) => (inner.as_ref(), Some(name.as_str().to_string())),
         other => (other, None),
+    };
+    // Unwrap Cast so we see Agg (e.g. count_distinct returns Cast(NUnique(...), Int64))
+    let inner = match inner {
+        Expr::Cast { expr: e, .. } => e.as_ref(),
+        other => other,
     };
     let (agg_kind, input_expr) = match inner {
         Expr::Agg(agg) => match agg {
@@ -834,6 +844,20 @@ fn parse_pivot_agg_expr(expr: &Expr) -> Option<(String, &'static str, String)> {
             AggExpr::Mean(e) => ("avg", e.as_ref()),
             AggExpr::Min { input: e, .. } => ("min", e.as_ref()),
             AggExpr::Max { input: e, .. } => ("max", e.as_ref()),
+            AggExpr::NUnique(e) => ("count_distinct", e.as_ref()),
+            AggExpr::First(e) => ("first", e.as_ref()),
+            AggExpr::Last(e) => ("last", e.as_ref()),
+            AggExpr::Implode(e) => {
+                // collect_list is Implode(Column). collect_set is unique().implode() (alias often "collect_set").
+                let kind = if alias_opt.as_ref().map_or(false, |a| a.contains("collect_set")) {
+                    "collect_set"
+                } else {
+                    "collect_list"
+                };
+                (kind, e.as_ref())
+            }
+            AggExpr::Std(e, _) => ("stddev", e.as_ref()),
+            AggExpr::Var(e, _) => ("variance", e.as_ref()),
             _ => return None,
         },
         _ => return None,
@@ -1028,30 +1052,30 @@ impl PivotedGroupedData {
         ))
     }
 
-    /// Pivot then count distinct (PySpark: groupBy(...).pivot(...).count_distinct(column)).
-    pub fn count_distinct(&self, value_col: &str) -> Result<DataFrame, PolarsError> {
+    /// Internal: pivot then count distinct (not in PySpark pivot API; use .agg(F.count_distinct(...))).
+    pub fn _count_distinct(&self, value_col: &str) -> Result<DataFrame, PolarsError> {
         use polars::prelude::*;
         self.pivot_agg(value_col, Expr::n_unique)
     }
 
-    /// Pivot then first (PySpark: groupBy(...).pivot(...).first(column)).
-    pub fn first(&self, value_col: &str) -> Result<DataFrame, PolarsError> {
+    /// Internal: pivot then first (not in PySpark pivot API).
+    pub fn _first(&self, value_col: &str) -> Result<DataFrame, PolarsError> {
         use polars::prelude::*;
         self.pivot_agg(value_col, Expr::first)
     }
 
-    /// Pivot then last (PySpark: groupBy(...).pivot(...).last(column)).
-    pub fn last(&self, value_col: &str) -> Result<DataFrame, PolarsError> {
+    /// Internal: pivot then last (not in PySpark pivot API).
+    pub fn _last(&self, value_col: &str) -> Result<DataFrame, PolarsError> {
         self.pivot_agg(value_col, Expr::last)
     }
 
-    /// Pivot then stddev (PySpark: groupBy(...).pivot(...).stddev(column)). Sample std (ddof=1).
-    pub fn stddev(&self, value_col: &str) -> Result<DataFrame, PolarsError> {
+    /// Internal: pivot then stddev (not in PySpark pivot API). Sample std (ddof=1).
+    pub fn _stddev(&self, value_col: &str) -> Result<DataFrame, PolarsError> {
         self.pivot_agg(value_col, |e| e.std(1))
     }
 
-    /// Pivot then variance (PySpark: groupBy(...).pivot(...).variance(column)). Sample var (ddof=1).
-    pub fn variance(&self, value_col: &str) -> Result<DataFrame, PolarsError> {
+    /// Internal: pivot then variance (not in PySpark pivot API). Sample var (ddof=1).
+    pub fn _variance(&self, value_col: &str) -> Result<DataFrame, PolarsError> {
         self.pivot_agg(value_col, |e| e.var(1))
     }
 
@@ -1079,9 +1103,20 @@ impl PivotedGroupedData {
         let pivot_resolved = self.resolve_column(&self.pivot_col)?;
         let pivot_vals = self.pivot_values()?;
 
-        // PySpark: single expression with alias → one column named by alias (no pivot split).
+        // PySpark: single expression → pivot columns (A, B) when agg is per-pivot; or one column when sum/avg/min/max with alias.
         if parsed.len() == 1 {
             let (alias, agg_kind, value_col) = &parsed[0];
+            match *agg_kind {
+                "count_distinct" => return self._count_distinct(value_col),
+                "first" => return self._first(value_col),
+                "last" => return self._last(value_col),
+                "collect_list" => return self._collect_list(value_col),
+                "collect_set" => return self._collect_set(value_col),
+                "stddev" => return self._stddev(value_col),
+                "variance" => return self._variance(value_col),
+                _ => {}
+            }
+            // sum, avg, min, max: one column named by alias (no pivot split)
             let value_resolved = self.resolve_column(value_col)?;
             let col_expr = col(value_resolved.as_str());
             let agg_expr = match *agg_kind {
@@ -1162,8 +1197,8 @@ impl PivotedGroupedData {
         ))
     }
 
-    /// Pivot then collect_list: list of values per pivot value (filter-based).
-    pub fn collect_list(&self, value_col: &str) -> Result<DataFrame, PolarsError> {
+    /// Internal: pivot then collect_list (not in PySpark pivot API; use .agg(F.collect_list(...))).
+    pub fn _collect_list(&self, value_col: &str) -> Result<DataFrame, PolarsError> {
         use polars::prelude::*;
         let pivot_resolved = self.resolve_column(&self.pivot_col)?;
         let value_resolved = self.resolve_column(value_col)?;
@@ -1206,8 +1241,8 @@ impl PivotedGroupedData {
         ))
     }
 
-    /// Pivot then collect_set: distinct values as list per pivot value (filter-based).
-    pub fn collect_set(&self, value_col: &str) -> Result<DataFrame, PolarsError> {
+    /// Internal: pivot then collect_set (not in PySpark pivot API; use .agg(F.collect_set(...))).
+    pub fn _collect_set(&self, value_col: &str) -> Result<DataFrame, PolarsError> {
         use polars::prelude::*;
         let pivot_resolved = self.resolve_column(&self.pivot_col)?;
         let value_resolved = self.resolve_column(value_col)?;

@@ -835,32 +835,39 @@ impl PivotedGroupedData {
         self.0.max(value_col).map(DataFrame)
     }
 
-    pub fn count_distinct(&self, value_col: &str) -> Result<DataFrame, PolarsError> {
-        self.0.count_distinct(value_col).map(DataFrame)
+    /// Internal: not in PySpark pivot API; use .agg(F.count_distinct(...)).
+    pub fn _count_distinct(&self, value_col: &str) -> Result<DataFrame, PolarsError> {
+        self.0._count_distinct(value_col).map(DataFrame)
     }
 
-    pub fn collect_list(&self, value_col: &str) -> Result<DataFrame, PolarsError> {
-        self.0.collect_list(value_col).map(DataFrame)
+    /// Internal: not in PySpark pivot API; use .agg(F.collect_list(...)).
+    pub fn _collect_list(&self, value_col: &str) -> Result<DataFrame, PolarsError> {
+        self.0._collect_list(value_col).map(DataFrame)
     }
 
-    pub fn collect_set(&self, value_col: &str) -> Result<DataFrame, PolarsError> {
-        self.0.collect_set(value_col).map(DataFrame)
+    /// Internal: not in PySpark pivot API; use .agg(F.collect_set(...)).
+    pub fn _collect_set(&self, value_col: &str) -> Result<DataFrame, PolarsError> {
+        self.0._collect_set(value_col).map(DataFrame)
     }
 
-    pub fn first(&self, value_col: &str) -> Result<DataFrame, PolarsError> {
-        self.0.first(value_col).map(DataFrame)
+    /// Internal: not in PySpark pivot API.
+    pub fn _first(&self, value_col: &str) -> Result<DataFrame, PolarsError> {
+        self.0._first(value_col).map(DataFrame)
     }
 
-    pub fn last(&self, value_col: &str) -> Result<DataFrame, PolarsError> {
-        self.0.last(value_col).map(DataFrame)
+    /// Internal: not in PySpark pivot API.
+    pub fn _last(&self, value_col: &str) -> Result<DataFrame, PolarsError> {
+        self.0._last(value_col).map(DataFrame)
     }
 
-    pub fn stddev(&self, value_col: &str) -> Result<DataFrame, PolarsError> {
-        self.0.stddev(value_col).map(DataFrame)
+    /// Internal: not in PySpark pivot API.
+    pub fn _stddev(&self, value_col: &str) -> Result<DataFrame, PolarsError> {
+        self.0._stddev(value_col).map(DataFrame)
     }
 
-    pub fn variance(&self, value_col: &str) -> Result<DataFrame, PolarsError> {
-        self.0.variance(value_col).map(DataFrame)
+    /// Internal: not in PySpark pivot API.
+    pub fn _variance(&self, value_col: &str) -> Result<DataFrame, PolarsError> {
+        self.0._variance(value_col).map(DataFrame)
     }
 
     pub fn mean(&self, value_col: &str) -> Result<DataFrame, PolarsError> {

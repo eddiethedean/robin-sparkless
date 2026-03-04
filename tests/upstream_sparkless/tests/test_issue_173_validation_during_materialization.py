@@ -7,7 +7,11 @@ This issue occurs when:
 4. Validation uses the final schema (after select) instead of the schema at queue time
 """
 
-from sparkless import SparkSession, functions as F
+from tests.fixtures.spark_imports import get_spark_imports
+
+_imports = get_spark_imports()
+SparkSession = _imports.SparkSession
+F = _imports.F
 from datetime import datetime, timedelta
 
 
@@ -31,9 +35,10 @@ class TestIssue173ValidationDuringMaterialization:
                 data.append(
                     {
                         "id": f"ID-{i:08d}",
+                        # Use a timestamp format that both PySpark 3.5+ and Sparkless parse consistently.
                         "timestamp_str": (
                             datetime.now() - timedelta(days=i % 365)
-                        ).isoformat(),
+                        ).strftime("%Y-%m-%dT%H:%M:%S"),
                         "value": i * 10,
                     }
                 )

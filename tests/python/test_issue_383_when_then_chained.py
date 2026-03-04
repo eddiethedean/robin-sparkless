@@ -2,24 +2,29 @@
 
 from __future__ import annotations
 
-import robin_sparkless as rs
+from tests.fixtures.spark_imports import get_spark_imports
+
+
+_imports = get_spark_imports()
+SparkSession = _imports.SparkSession
+F = _imports.F
 
 
 def test_when_then_when_then_otherwise() -> None:
     """when(a).then(x).when(b).then(y).otherwise(z) evaluates first match."""
-    spark = rs.SparkSession.builder().app_name("issue_383").get_or_create()
+    spark = SparkSession.builder.appName("issue_383").getOrCreate()
     df = spark.createDataFrame(
         [(1, "a"), (2, "b"), (3, "c"), (4, "d")], ["id", "label"]
     )
     out = df.with_column(
         "tier",
-        rs.when(rs.col("id").eq(rs.lit(1)))
-        .then(rs.lit("first"))
-        .when(rs.col("id").eq(rs.lit(2)))
-        .then(rs.lit("second"))
-        .when(rs.col("id").eq(rs.lit(3)))
-        .then(rs.lit("third"))
-        .otherwise(rs.lit("other")),
+        F.when(F.col("id") == F.lit(1))
+        .then(F.lit("first"))
+        .when(F.col("id") == F.lit(2))
+        .then(F.lit("second"))
+        .when(F.col("id") == F.lit(3))
+        .then(F.lit("third"))
+        .otherwise(F.lit("other")),
     )
     rows = out.collect()
     assert len(rows) == 4
@@ -32,13 +37,13 @@ def test_when_then_when_then_otherwise() -> None:
 
 def test_when_then_otherwise_single_branch_unchanged() -> None:
     """Single when().then().otherwise() still works as before."""
-    spark = rs.SparkSession.builder().app_name("issue_383").get_or_create()
+    spark = SparkSession.builder.appName("issue_383").getOrCreate()
     df = spark.createDataFrame([(10,), (25,)], ["age"])
     out = df.with_column(
         "group",
-        rs.when(rs.col("age").gt(rs.lit(18)))
-        .then(rs.lit("adult"))
-        .otherwise(rs.lit("minor")),
+        F.when(F.col("age") > F.lit(18))
+        .then(F.lit("adult"))
+        .otherwise(F.lit("minor")),
     )
     rows = out.collect()
     assert len(rows) == 2
@@ -48,15 +53,15 @@ def test_when_then_otherwise_single_branch_unchanged() -> None:
 
 def test_chained_when_in_select() -> None:
     """Chained when/then in select()."""
-    spark = rs.SparkSession.builder().app_name("issue_383").get_or_create()
+    spark = SparkSession.builder.appName("issue_383").getOrCreate()
     df = spark.createDataFrame([(1,), (2,), (3,)], ["x"])
     out = df.select(
-        rs.col("x"),
-        rs.when(rs.col("x").eq(rs.lit(1)))
-        .then(rs.lit("one"))
-        .when(rs.col("x").eq(rs.lit(2)))
-        .then(rs.lit("two"))
-        .otherwise(rs.lit("many"))
+        F.col("x"),
+        F.when(F.col("x") == F.lit(1))
+        .then(F.lit("one"))
+        .when(F.col("x") == F.lit(2))
+        .then(F.lit("two"))
+        .otherwise(F.lit("many"))
         .alias("word"),
     )
     rows = out.collect()

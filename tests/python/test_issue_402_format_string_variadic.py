@@ -4,11 +4,16 @@ Tests for #402: format_string accepts variadic columns (PySpark parity).
 
 from __future__ import annotations
 
-import robin_sparkless as rs
+from tests.fixtures.spark_imports import get_spark_imports
 
 
-def _spark() -> rs.SparkSession:
-    return rs.SparkSession.builder().app_name("issue_402").get_or_create()
+_imports = get_spark_imports()
+SparkSession = _imports.SparkSession
+F = _imports.F
+
+
+def _spark() -> SparkSession:
+    return SparkSession.builder.appName("issue_402").getOrCreate()
 
 
 def test_format_string_variadic_columns() -> None:
@@ -19,7 +24,7 @@ def test_format_string_variadic_columns() -> None:
         schema=[("a", "int"), ("b", "int")],
     )
     result = df.select(
-        rs.format_string("a=%d b=%d", rs.col("a"), rs.col("b")).alias("fmt")
+        F.format_string("a=%d b=%d", F.col("a"), F.col("b")).alias("fmt")
     ).collect()
     assert len(result) == 2
     assert result[0]["fmt"] == "a=1 b=2"
@@ -34,7 +39,7 @@ def test_printf_variadic_columns() -> None:
         schema=[("x", "string"), ("y", "int")],
     )
     result = df.select(
-        rs.printf("%s: %d", rs.col("x"), rs.col("y")).alias("out")
+        F.printf("%s: %d", F.col("x"), F.col("y")).alias("out")
     ).collect()
     assert len(result) == 1
     assert result[0]["out"] == "hello: 42"

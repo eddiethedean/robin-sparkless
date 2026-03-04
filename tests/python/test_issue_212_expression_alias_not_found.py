@@ -4,20 +4,26 @@ Alias output names (when().otherwise().alias('result'), rank().over([]).alias('r
 etc.) must not be resolved as input columns; they are preserved by resolve_expr_column_names (see #200).
 """
 
-import robin_sparkless as rs
+from tests.fixtures.spark_imports import get_spark_imports
+
+
+_imports = get_spark_imports()
+SparkSession = _imports.SparkSession
+F = _imports.F
+Window = _imports.Window
 
 
 def test_select_when_otherwise_alias() -> None:
     """Select with when().then().otherwise().alias('result') should not raise 'not found: result'."""
-    spark = rs.SparkSession.builder().app_name("test").get_or_create()
+    spark = SparkSession.builder.appName("test_212").getOrCreate()
     df = spark.createDataFrame(
         [{"x": 1}, {"x": 2}],
         [("x", "bigint")],
     )
     result = df.select(
-        rs.when(rs.col("x") > 1)
-        .then(rs.lit("yes"))
-        .otherwise(rs.lit("no"))
+        F.when(F.col("x") > F.lit(1))
+        .then(F.lit("yes"))
+        .otherwise(F.lit("no"))
         .alias("result")
     )
     rows = result.collect()
@@ -27,14 +33,15 @@ def test_select_when_otherwise_alias() -> None:
 
 
 def test_select_window_rank_alias() -> None:
-    """Select with col().rank().over([...]).alias('rank') should not raise 'not found: rank'."""
-    spark = rs.SparkSession.builder().app_name("test").get_or_create()
+    """Select with rank().over(Window.partitionBy('x')).alias('rank') should not raise 'not found: rank'."""
+    spark = SparkSession.builder.appName("test_212").getOrCreate()
     df = spark.createDataFrame(
         [{"x": 10}, {"x": 20}, {"x": 20}],
         [("x", "bigint")],
     )
     # Partition by x so over() has at least one key; alias "rank" must not be resolved as input column.
-    result = df.select(rs.col("x").rank(False).over(["x"]).alias("rank"))
+    window = Window.partitionBy("x")
+    result = df.select(F.rank().over(window).alias("rank"))
     rows = result.collect()
     assert len(rows) == 3
     assert all("rank" in r for r in rows)

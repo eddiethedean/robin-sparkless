@@ -5,7 +5,11 @@ PySpark allows selecting columns with a different case when multiple columns
 with different cases exist after a join. It picks the first matching column.
 """
 
-from sparkless.sql import SparkSession, functions as F
+from tests.fixtures.spark_imports import get_spark_imports
+
+_imports = get_spark_imports()
+SparkSession = _imports.SparkSession
+F = _imports.F
 
 
 class TestIssue297JoinDifferentCaseSelect:
@@ -311,12 +315,10 @@ class TestIssue297JoinDifferentCaseSelect:
         """Test that the fix works with empty DataFrames."""
         spark = SparkSession.builder.appName("issue-297").getOrCreate()
         try:
-            from sparkless.spark_types import (
-                StructType,
-                StructField,
-                StringType,
-                IntegerType,
-            )
+            StructType = _imports.StructType
+            StructField = _imports.StructField
+            StringType = _imports.StringType
+            IntegerType = _imports.IntegerType
 
             schema1 = StructType(
                 [

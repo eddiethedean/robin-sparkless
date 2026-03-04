@@ -28,7 +28,7 @@ class TestWindowOrderByListParity:
 
             w = Window().partitionBy("Type").orderBy(["Name", "Type"])
             result = df.withColumn("Rank", F.row_number().over(w))
-            rows = result.collect()
+            rows = sorted(result.collect(), key=lambda r: r["Name"])
 
             assert len(rows) == 2
             assert rows[0]["Name"] == "Alice"

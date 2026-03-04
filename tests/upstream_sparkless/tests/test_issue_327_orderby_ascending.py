@@ -4,8 +4,11 @@ Unit tests for Issue #327: orderBy() missing ascending parameter.
 Tests the orderBy() method with ascending parameter support.
 """
 
-from sparkless.sql import SparkSession
-from sparkless import functions as F
+from tests.fixtures.spark_imports import get_spark_imports
+
+_imports = get_spark_imports()
+SparkSession = _imports.SparkSession
+F = _imports.F
 
 
 class TestIssue327OrderByAscending:

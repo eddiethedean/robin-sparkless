@@ -29,7 +29,7 @@ class DataType:
         return "string"
 
     def __eq__(self, other: object) -> bool:
-        """Phase 7: type equality so ArrayType().element_type == StringType() in tests."""
+        """Phase 7: type equality so ArrayType().elementType == StringType() in tests."""
         if type(self) is not type(other):
             return False
         # Simple types (StringType, LongType, etc.) have no instance attrs to compare
@@ -135,22 +135,22 @@ class ArrayType(DataType):
         elementType: Optional[DataType] = None,
         containsNull: bool = True,
         *,
-        element_type: Optional[DataType] = None,
+        _element_type: Optional[DataType] = None,
         nullable: Optional[bool] = None,
     ) -> None:
-        if elementType is not None and element_type is not None:
-            raise TypeError("Cannot specify both elementType and element_type")
-        elem = elementType if elementType is not None else element_type
+        if elementType is not None and _element_type is not None:
+            raise TypeError("Cannot specify both elementType and _element_type")
+        elem = elementType if elementType is not None else _element_type
         if elem is None:
-            raise TypeError("elementType or element_type is required")
+            raise TypeError("elementType is required")
         self.elementType = elem
         self.containsNull = containsNull if nullable is None else nullable
         # PySpark alias: nullable as property
         self.nullable = self.containsNull
 
     @property
-    def element_type(self) -> DataType:
-        """PySpark parity: element type of array (alias for elementType)."""
+    def _element_type(self) -> DataType:
+        """Internal: element type of array (use elementType for PySpark parity)."""
         return self.elementType
 
     def simpleString(self) -> str:

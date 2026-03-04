@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
-import robin_sparkless as rs
+from tests.fixtures.spark_imports import get_spark_imports
+
+
+_imports = get_spark_imports()
+SparkSession = _imports.SparkSession
+F = _imports.F
 
 
 def test_select_expr_sql_expressions() -> None:
     """selectExpr accepts SQL expressions (e.g. 'Name', 'upper(Name) as u')."""
-    spark = rs.SparkSession.builder().app_name("issue_396").get_or_create()
+    spark = SparkSession.builder.appName("issue_396").getOrCreate()
     df = spark.createDataFrame([("Alice",), ("Bob",)], ["Name"])
     out = df.selectExpr("Name", "upper(Name) as u")
     rows = out.collect()
@@ -19,9 +24,9 @@ def test_select_expr_sql_expressions() -> None:
 
 def test_expr_in_select() -> None:
     """expr(sql_string) returns ExprStr that resolves in select()."""
-    spark = rs.SparkSession.builder().app_name("issue_396").get_or_create()
+    spark = SparkSession.builder.appName("issue_396").getOrCreate()
     df = spark.createDataFrame([("a",), ("b",)], ["x"])
-    out = df.select(rs.expr("upper(x) as up"))
+    out = df.select(F.expr("upper(x) as up"))
     rows = out.collect()
     assert len(rows) == 2
     assert rows[0]["up"] == "A"
@@ -30,7 +35,7 @@ def test_expr_in_select() -> None:
 
 def test_select_expr_column_name_and_alias() -> None:
     """selectExpr with simple column and 'col as alias'."""
-    spark = rs.SparkSession.builder().app_name("issue_396").get_or_create()
+    spark = SparkSession.builder.appName("issue_396").getOrCreate()
     df = spark.createDataFrame([(1, 2)], ["a", "b"])
     out = df.selectExpr("a", "b as b_col")
     row = out.collect()[0]

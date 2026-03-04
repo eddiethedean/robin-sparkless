@@ -4,8 +4,11 @@ This test verifies that F.log() correctly supports float constants as the base
 argument, matching PySpark's behavior.
 """
 
-from sparkless.sql import SparkSession
-import sparkless.sql.functions as F
+from tests.fixtures.spark_imports import get_spark_imports
+
+_imports = get_spark_imports()
+SparkSession = _imports.SparkSession
+F = _imports.F
 
 
 class TestIssue329LogFloatConstant:

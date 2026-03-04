@@ -6,11 +6,16 @@ PySpark df.cube("dept", "year") and df.cube(*cols) accept multiple column names.
 
 from __future__ import annotations
 
-import robin_sparkless as rs
+from tests.fixtures.spark_imports import get_spark_imports
 
 
-def _spark() -> rs.SparkSession:
-    return rs.SparkSession.builder().app_name("issue_412").get_or_create()
+_imports = get_spark_imports()
+SparkSession = _imports.SparkSession
+F = _imports.F
+
+
+def _spark() -> SparkSession:
+    return SparkSession.builder.appName("issue_412").getOrCreate()
 
 
 def test_cube_two_columns_variadic() -> None:
@@ -21,7 +26,7 @@ def test_cube_two_columns_variadic() -> None:
         [("dept", "str"), ("year", "int")],
     )
     out = (
-        df.cube("dept", "year").agg([rs.count(rs.col("dept")).alias("count")]).collect()
+        df.cube("dept", "year").agg([F.count(F.col("dept")).alias("count")]).collect()
     )
     assert len(out) >= 1
     assert all("count" in r for r in out)
@@ -36,7 +41,7 @@ def test_cube_single_list() -> None:
     )
     out = (
         df.cube(["dept", "year"])
-        .agg([rs.count(rs.col("dept")).alias("count")])
+        .agg([F.count(F.col("dept")).alias("count")])
         .collect()
     )
     assert len(out) >= 1

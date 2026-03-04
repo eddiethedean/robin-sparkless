@@ -5810,51 +5810,51 @@ impl PyPivotedGroupedData {
             .map_err(to_py_err)
     }
 
-    fn count_distinct(&self, value_col: &str) -> PyResult<PyDataFrame> {
+    fn _count_distinct(&self, value_col: &str) -> PyResult<PyDataFrame> {
         self.inner
-            .count_distinct(value_col)
+            ._count_distinct(value_col)
             .map(|df| PyDataFrame { inner: df })
             .map_err(to_py_err)
     }
 
-    fn collect_list(&self, value_col: &str) -> PyResult<PyDataFrame> {
+    fn _collect_list(&self, value_col: &str) -> PyResult<PyDataFrame> {
         self.inner
-            .collect_list(value_col)
+            ._collect_list(value_col)
             .map(|df| PyDataFrame { inner: df })
             .map_err(to_py_err)
     }
 
-    fn collect_set(&self, value_col: &str) -> PyResult<PyDataFrame> {
+    fn _collect_set(&self, value_col: &str) -> PyResult<PyDataFrame> {
         self.inner
-            .collect_set(value_col)
+            ._collect_set(value_col)
             .map(|df| PyDataFrame { inner: df })
             .map_err(to_py_err)
     }
 
-    fn first(&self, value_col: &str) -> PyResult<PyDataFrame> {
+    fn _first(&self, value_col: &str) -> PyResult<PyDataFrame> {
         self.inner
-            .first(value_col)
+            ._first(value_col)
             .map(|df| PyDataFrame { inner: df })
             .map_err(to_py_err)
     }
 
-    fn last(&self, value_col: &str) -> PyResult<PyDataFrame> {
+    fn _last(&self, value_col: &str) -> PyResult<PyDataFrame> {
         self.inner
-            .last(value_col)
+            ._last(value_col)
             .map(|df| PyDataFrame { inner: df })
             .map_err(to_py_err)
     }
 
-    fn stddev(&self, value_col: &str) -> PyResult<PyDataFrame> {
+    fn _stddev(&self, value_col: &str) -> PyResult<PyDataFrame> {
         self.inner
-            .stddev(value_col)
+            ._stddev(value_col)
             .map(|df| PyDataFrame { inner: df })
             .map_err(to_py_err)
     }
 
-    fn variance(&self, value_col: &str) -> PyResult<PyDataFrame> {
+    fn _variance(&self, value_col: &str) -> PyResult<PyDataFrame> {
         self.inner
-            .variance(value_col)
+            ._variance(value_col)
             .map(|df| PyDataFrame { inner: df })
             .map_err(to_py_err)
     }

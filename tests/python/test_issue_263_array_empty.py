@@ -7,14 +7,17 @@ Robin previously raised RuntimeError: array requires at least one column.
 
 from __future__ import annotations
 
-import robin_sparkless as rs
+from tests.fixtures.spark_imports import get_spark_imports
 
-F = rs
+
+_imports = get_spark_imports()
+SparkSession = _imports.SparkSession
+F = _imports.F
 
 
 def test_array_empty_returns_empty_array_column() -> None:
     """with_column with F.array() (no args) succeeds and yields empty list per row."""
-    spark = F.SparkSession.builder().app_name("test_263").get_or_create()
+    spark = SparkSession.builder.appName("test_263").getOrCreate()
     df = spark.createDataFrame(
         [{"Name": "Alice"}, {"Name": "Bob"}],
         [("Name", "string")],
@@ -30,7 +33,7 @@ def test_array_empty_returns_empty_array_column() -> None:
 
 def test_array_empty_with_other_columns() -> None:
     """F.array() with no args works alongside other with_column expressions."""
-    spark = F.SparkSession.builder().app_name("test_263").get_or_create()
+    spark = SparkSession.builder.appName("test_263").getOrCreate()
     df = spark.createDataFrame([{"x": 1}, {"x": 2}], [("x", "int")])
     df = df.with_column("empty_arr", F.array()).with_column("double", F.col("x") * 2)
     out = df.collect()

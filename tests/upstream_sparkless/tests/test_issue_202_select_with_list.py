@@ -1,5 +1,11 @@
-from sparkless import SparkSession
-from sparkless.spark_types import StructType, StructField, StringType, LongType
+from tests.fixtures.spark_imports import get_spark_imports
+
+_imports = get_spark_imports()
+SparkSession = _imports.SparkSession
+StructType = _imports.StructType
+StructField = _imports.StructField
+StringType = _imports.StringType
+LongType = _imports.LongType
 
 
 def _assert_schema_consistent(result_schema, expected_schema, allow_int_long_swap=True):
@@ -36,28 +42,36 @@ class TestIssue202SelectWithList:
         )
 
         columns_to_select = ["name", "dept"]
-        result = df.select(columns_to_select)
+        # PySpark: df.select(list) is invalid; requires individual args or *list.
+        # Sparkless extends select() to accept a list directly.
+        if is_pyspark_backend():
+            import pytest
 
-        # Verify schema (allow IntegerType/LongType for inferred int columns)
-        expected_schema = StructType(
-            [
-                StructField("name", StringType(), True),
-                StructField("dept", StringType(), True),
-            ]
-        )
-        _assert_schema_consistent(result.schema, expected_schema)
-        assert len(result.schema.fields) == 2
+            with pytest.raises(Exception):
+                df.select(columns_to_select).collect()
+        else:
+            result = df.select(columns_to_select)
 
-        # Verify data
-        assert result.count() == 3
-        rows = result.collect()
-        assert len(rows) == 3
-        assert rows[0].name == "Alice"
-        assert rows[0].dept == "IT"
-        assert rows[1].name == "Bob"
-        assert rows[1].dept == "HR"
-        assert rows[2].name == "Charlie"
-        assert rows[2].dept == "IT"
+            # Verify schema (allow IntegerType/LongType for inferred int columns)
+            expected_schema = StructType(
+                [
+                    StructField("name", StringType(), True),
+                    StructField("dept", StringType(), True),
+                ]
+            )
+            _assert_schema_consistent(result.schema, expected_schema)
+            assert len(result.schema.fields) == 2
+
+            # Verify data
+            assert result.count() == 3
+            rows = result.collect()
+            assert len(rows) == 3
+            assert rows[0].name == "Alice"
+            assert rows[0].dept == "IT"
+            assert rows[1].name == "Bob"
+            assert rows[1].dept == "HR"
+            assert rows[2].name == "Charlie"
+            assert rows[2].dept == "IT"
 
     def test_select_with_tuple_of_column_names(self):
         """
@@ -72,25 +86,32 @@ class TestIssue202SelectWithList:
         )
 
         columns_to_select = ("name", "salary")
-        result = df.select(columns_to_select)
+        # PySpark: df.select(tuple) is invalid; requires individual args.
+        if is_pyspark_backend():
+            import pytest
 
-        # Verify schema (engine may infer IntegerType or LongType for int literals)
-        expected_schema = StructType(
-            [
-                StructField("name", StringType(), True),
-                StructField("salary", LongType(), True),
-            ]
-        )
-        _assert_schema_consistent(result.schema, expected_schema)
-        assert len(result.schema.fields) == 2
+            with pytest.raises(Exception):
+                df.select(columns_to_select).collect()
+        else:
+            result = df.select(columns_to_select)
 
-        # Verify data
-        assert result.count() == 2
-        rows = result.collect()
-        assert rows[0].name == "Alice"
-        assert rows[0].salary == 50000
-        assert rows[1].name == "Bob"
-        assert rows[1].salary == 60000
+            # Verify schema (engine may infer IntegerType or LongType for int literals)
+            expected_schema = StructType(
+                [
+                    StructField("name", StringType(), True),
+                    StructField("salary", LongType(), True),
+                ]
+            )
+            _assert_schema_consistent(result.schema, expected_schema)
+            assert len(result.schema.fields) == 2
+
+            # Verify data
+            assert result.count() == 2
+            rows = result.collect()
+            assert rows[0].name == "Alice"
+            assert rows[0].salary == 50000
+            assert rows[1].name == "Bob"
+            assert rows[1].salary == 60000
 
     def test_select_with_single_column_list(self):
         """
@@ -104,18 +125,24 @@ class TestIssue202SelectWithList:
             ]
         )
 
-        result = df.select(["name"])
+        if is_pyspark_backend():
+            import pytest
 
-        # Verify schema
-        expected_schema = StructType([StructField("name", StringType(), True)])
-        _assert_schema_consistent(result.schema, expected_schema)
-        assert len(result.schema.fields) == 1
+            with pytest.raises(Exception):
+                df.select(["name"]).collect()
+        else:
+            result = df.select(["name"])
 
-        # Verify data
-        assert result.count() == 2
-        rows = result.collect()
-        assert rows[0].name == "Alice"
-        assert rows[1].name == "Bob"
+            # Verify schema
+            expected_schema = StructType([StructField("name", StringType(), True)])
+            _assert_schema_consistent(result.schema, expected_schema)
+            assert len(result.schema.fields) == 1
+
+            # Verify data
+            assert result.count() == 2
+            rows = result.collect()
+            assert rows[0].name == "Alice"
+            assert rows[1].name == "Bob"
 
     def test_select_with_multiple_args_still_works(self):
         """
@@ -153,8 +180,15 @@ class TestIssue202SelectWithList:
             ]
         )
 
-        # When list contains "*", it should be treated as selecting all columns
-        result = df.select(["*"])
+        # When list contains "*", Sparkless treats it as selecting all columns.
+        # PySpark raises, since select(list) is not supported.
+        if is_pyspark_backend():
+            import pytest
 
-        assert len(result.schema.fields) == 2
-        assert result.count() == 2
+            with pytest.raises(Exception):
+                df.select(["*"]).collect()
+        else:
+            result = df.select(["*"])
+
+            assert len(result.schema.fields) == 2
+            assert result.count() == 2

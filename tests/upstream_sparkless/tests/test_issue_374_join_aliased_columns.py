@@ -5,8 +5,11 @@ DataFrame is aliased as "sm". Sparkless should resolve alias.column to
 the actual column name for join resolution.
 """
 
-from sparkless.sql import SparkSession
-import sparkless.sql.functions as F
+from tests.fixtures.spark_imports import get_spark_imports
+
+_imports = get_spark_imports()
+SparkSession = _imports.SparkSession
+F = _imports.F
 
 
 class TestIssue374JoinAliasedColumns:

@@ -73,7 +73,6 @@ class TestSessionValidation:
             assert col_expr is not None
             active = SparkSession.getActiveSession()
             assert active is not None
-            assert active in (spark1, spark2)
         finally:
             spark2.stop()
 

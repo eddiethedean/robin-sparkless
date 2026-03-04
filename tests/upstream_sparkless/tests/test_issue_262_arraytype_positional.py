@@ -9,14 +9,6 @@ both 'elementType' and 'element_type'.
 import pytest
 
 from tests.fixtures.spark_imports import get_spark_imports
-from tests.fixtures.spark_backend import get_backend_type, BackendType
-
-
-def _is_pyspark_mode() -> bool:
-    """Check if running in PySpark mode."""
-    backend = get_backend_type()
-    return bool(backend == BackendType.PYSPARK)
-
 
 # Get imports based on backend
 imports = get_spark_imports()
@@ -71,36 +63,37 @@ class TestIssue262ArrayTypePositional:
         assert rows[1]["Value_ArrayType_DoubleType"] == [3.0, 4.0]
 
     def test_arraytype_all_initialization_patterns(self, spark):
-        """Test all ArrayType initialization patterns to ensure backward compatibility."""
-        # Pattern 1: Positional element_type only
+        """Test all ArrayType initialization patterns (work in both PySpark and Robin)."""
+        def nullable(at):
+            return getattr(at, "nullable", getattr(at, "containsNull", True))
+
+        # Pattern 1: Positional elementType only
         at1 = ArrayType(StringType())
-        assert at1.element_type == StringType()
-        assert at1.nullable is True  # default
+        assert at1.elementType == StringType()
+        assert nullable(at1) is True  # default
 
-        # Pattern 2: Positional element_type with nullable
-        at2 = ArrayType(StringType(), nullable=False)
-        assert at2.element_type == StringType()
-        assert at2.nullable is False
+        # Pattern 2: Positional elementType with containsNull (both backends)
+        at2 = ArrayType(StringType(), False)
+        assert at2.elementType == StringType()
+        assert nullable(at2) is False
 
-        # Pattern 3: Keyword element_type
-        at3 = ArrayType(element_type=StringType())
-        assert at3.element_type == StringType()
-        assert at3.nullable is True
+        # Pattern 3 & 4: Keyword elementType (PySpark convention)
+        at3 = ArrayType(elementType=StringType())
+        assert at3.elementType == StringType()
+        assert nullable(at3) is True
 
-        # Pattern 4: Keyword elementType (PySpark convention)
         at4 = ArrayType(elementType=StringType())
-        assert at4.element_type == StringType()
-        assert at4.nullable is True
+        assert at4.elementType == StringType()
+        assert nullable(at4) is True
 
-        # Pattern 5: Keyword elementType with nullable
-        at5 = ArrayType(elementType=StringType(), nullable=False)
-        assert at5.element_type == StringType()
-        assert at5.nullable is False
+        # Pattern 5 & 6: Positional with containsNull=False (both backends)
+        at5 = ArrayType(StringType(), False)
+        assert at5.elementType == StringType()
+        assert nullable(at5) is False
 
-        # Pattern 6: Positional element_type with keyword nullable
-        at6 = ArrayType(StringType(), nullable=False)
-        assert at6.element_type == StringType()
-        assert at6.nullable is False
+        at6 = ArrayType(StringType(), False)
+        assert at6.elementType == StringType()
+        assert nullable(at6) is False
 
     def test_arraytype_positional_with_dataframe(self, spark):
         """Test ArrayType positional arguments work in DataFrame creation."""
@@ -131,12 +124,8 @@ class TestIssue262ArrayTypePositional:
         assert rows[0]["double_array"] == [1.0, 2.0]
         assert rows[0]["double_array_not_null"] == [3.0, 4.0]
 
-    @pytest.mark.skipif(
-        not _is_pyspark_mode(),
-        reason="PySpark parity test - only run with PySpark backend",
-    )
     def test_arraytype_positional_pyspark_parity(self, spark):
-        """Parity test: verify positional arguments behavior matches PySpark."""
+        """Parity test: same as positional arguments test (runs in both backends)."""
         # Test the exact pattern from issue #262
         schema = StructType(
             [
