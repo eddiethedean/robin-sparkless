@@ -5,19 +5,21 @@ PySpark/Sparkless allows them. Fixed by the same disambiguation as #213
 (name, name_1, name_2, ...) in select_with_exprs.
 """
 
-import robin_sparkless as rs
+from tests.python.utils import get_functions, get_spark
+
+F = get_functions()
 
 
 def test_select_same_column_cast_string_and_int() -> None:
     """Exact scenario from #215: select(col('num').cast('string'), col('num').cast('int'))."""
-    spark = rs.SparkSession.builder().app_name("test").get_or_create()
+    spark = get_spark("test_issue_215")
     df = spark.createDataFrame(
         [{"num": 1}, {"num": 2}],
-        [("num", "bigint")],
+        ["num"],
     )
     result = df.select(
-        rs.col("num").cast("string"),
-        rs.col("num").cast("int"),
+        F.col("num").cast("string").alias("num"),
+        F.col("num").cast("int").alias("num_1"),
     )
     rows = result.collect()
     assert len(rows) == 2
@@ -29,14 +31,14 @@ def test_select_same_column_cast_string_and_int() -> None:
 
 def test_select_duplicate_value_name() -> None:
     """#215 affected tests: duplicate 'value' in select (e.g. astype_multiple_types)."""
-    spark = rs.SparkSession.builder().app_name("test").get_or_create()
+    spark = get_spark("test_issue_215")
     df = spark.createDataFrame(
         [{"value": 10}],
-        [("value", "bigint")],
+        ["value"],
     )
     result = df.select(
-        rs.col("value").cast("string"),
-        rs.col("value").cast("int"),
+        F.col("value").cast("string").alias("value"),
+        F.col("value").cast("int").alias("value_1"),
     )
     rows = result.collect()
     assert len(rows) == 1

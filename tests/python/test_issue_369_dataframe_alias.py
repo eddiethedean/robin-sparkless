@@ -1,11 +1,13 @@
 """Tests for issue #369: DataFrame.alias() for subqueries (PySpark parity)."""
 
-import robin_sparkless as rs
+from tests.python.utils import get_functions, get_spark
+
+F = get_functions()
 
 
 def test_dataframe_alias_returns_dataframe() -> None:
     """df.alias('t') returns a DataFrame (no AttributeError)."""
-    spark = rs.SparkSession.builder().app_name("repro").get_or_create()
+    spark = get_spark("issue_369")
     df = spark.createDataFrame([(1, 10)], ["id", "v"])
     aliased = df.alias("t")
     assert aliased is not None
@@ -18,9 +20,9 @@ def test_dataframe_alias_returns_dataframe() -> None:
 
 def test_dataframe_alias_chaining() -> None:
     """df.alias('t').filter(...) works (alias is preserved/cloned)."""
-    spark = rs.SparkSession.builder().app_name("repro").get_or_create()
+    spark = get_spark("issue_369")
     df = spark.createDataFrame([(1, 10), (2, 20)], ["id", "v"])
-    filtered = df.alias("t").filter(rs.col("id") > 1)
+    filtered = df.alias("t").filter(F.col("id") > 1)
     rows = filtered.collect()
     assert len(rows) == 1
     assert rows[0]["id"] == 2

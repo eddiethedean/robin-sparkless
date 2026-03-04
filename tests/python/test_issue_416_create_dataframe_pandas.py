@@ -8,20 +8,13 @@ from __future__ import annotations
 
 import pytest
 
-import robin_sparkless as rs
+from tests.python.utils import get_spark
 
 pandas = pytest.importorskip("pandas")
 
 
-def _spark() -> rs.SparkSession:
-    try:
-        return rs.SparkSession("issue_416")
-    except TypeError:
-        pass
-    builder = rs.SparkSession.builder
-    if callable(builder):
-        builder = builder()
-    return builder.app_name("issue_416").get_or_create()
+def _spark():
+    return get_spark("issue_416")
 
 
 def test_create_dataframe_from_pandas() -> None:

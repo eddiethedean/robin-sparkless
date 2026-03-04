@@ -6,22 +6,22 @@ PySpark: df.na.replace(to_replace, value, subset=None). Robin-sparkless: df.na()
 
 from __future__ import annotations
 
-import robin_sparkless as rs
+from tests.python.utils import get_spark
 
 
-def _spark() -> rs.SparkSession:
-    return rs.SparkSession.builder().app_name("issue_360").get_or_create()
+def _spark():
+    return get_spark("issue_360")
 
 
 def test_na_replace_issue_repro() -> None:
-    """df.na.replace("a", "A", subset=["x"]).collect() (issue repro)."""
+    """df.na.replace(\"a\", \"A\", subset=[\"x\"]).collect() (issue repro)."""
     spark = _spark()
     create_df = getattr(spark, "create_dataframe_from_rows", spark.createDataFrame)
     df = create_df(
         [{"x": "a"}, {"x": "b"}],
-        [("x", "string")],
+        ["x"],
     )
-    rows = df.na().replace("a", "A", subset=["x"]).collect()
+    rows = df.na.replace("a", "A", subset=["x"]).collect()
     assert len(rows) == 2
     assert rows[0]["x"] == "A"
     assert rows[1]["x"] == "b"
@@ -33,9 +33,9 @@ def test_na_replace_without_subset() -> None:
     create_df = getattr(spark, "create_dataframe_from_rows", spark.createDataFrame)
     df = create_df(
         [{"a": "x", "b": "x"}, {"a": "y", "b": "y"}],
-        [("a", "string"), ("b", "string")],
+        ["a", "b"],
     )
-    rows = df.na().replace("x", "X").collect()
+    rows = df.na.replace("x", "X").collect()
     assert len(rows) == 2
     assert rows[0]["a"] == "X" and rows[0]["b"] == "X"
     assert rows[1]["a"] == "y" and rows[1]["b"] == "y"
@@ -47,9 +47,9 @@ def test_na_replace_subset_one_column() -> None:
     create_df = getattr(spark, "create_dataframe_from_rows", spark.createDataFrame)
     df = create_df(
         [{"a": 1, "b": 1}, {"a": 2, "b": 1}],
-        [("a", "int"), ("b", "int")],
+        ["a", "b"],
     )
-    rows = df.na().replace(1, 10, subset=["a"]).collect()
+    rows = df.na.replace(1, 10, subset=["a"]).collect()
     assert rows[0]["a"] == 10 and rows[0]["b"] == 1
     assert rows[1]["a"] == 2 and rows[1]["b"] == 1
 
@@ -60,9 +60,9 @@ def test_na_replace_with_none() -> None:
     create_df = getattr(spark, "create_dataframe_from_rows", spark.createDataFrame)
     df = create_df(
         [{"x": "a"}, {"x": "b"}],
-        [("x", "string")],
+        ["x"],
     )
-    rows = df.na().replace("a", None, subset=["x"]).collect()
+    rows = df.na.replace("a", None, subset=["x"]).collect()
     assert len(rows) == 2
     assert rows[0]["x"] is None
     assert rows[1]["x"] == "b"

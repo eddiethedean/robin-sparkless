@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-import robin_sparkless as rs
+from tests.python.utils import get_spark
 
 
 def _spark():
-    return rs.SparkSession.builder().app_name("issue_406").get_or_create()
+    return get_spark("issue_406")
 
 
 def test_na_fill_subset_list_of_str() -> None:
@@ -14,9 +14,9 @@ def test_na_fill_subset_list_of_str() -> None:
     spark = _spark()
     df = spark.createDataFrame(
         [{"a": 1, "b": None}, {"a": None, "b": 2}],
-        schema=[("a", "int"), ("b", "int")],
+        schema=["a", "b"],
     )
-    result = df.na().fill(0, subset=["b"]).collect()
+    result = df.na.fill(0, subset=["b"]).collect()
     rows = list(result)
     assert len(rows) == 2
     # First row: a=1, b was null -> filled with 0

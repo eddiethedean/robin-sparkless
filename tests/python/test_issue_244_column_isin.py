@@ -7,26 +7,26 @@ PySpark supports col.isin([]) (empty list yields 0 rows). We now expose isin on 
 
 from __future__ import annotations
 
-import robin_sparkless as rs
+from tests.python.utils import get_spark, get_functions
 
 
 def test_column_isin_empty_list_returns_zero_rows() -> None:
     """col("id").isin([]) filters to 0 rows (PySpark parity)."""
-    spark = rs.SparkSession.builder().app_name("isin_empty").get_or_create()
+    spark = get_spark("issue_244_isin_empty")
+    F = get_functions()
     data = [{"id": 1}, {"id": 2}, {"id": 3}]
-    schema = [("id", "int")]
-    df = spark.createDataFrame(data, schema)
-    out = df.filter(rs.col("id").isin([])).collect()
+    df = spark.createDataFrame(data, ["id"])
+    out = df.filter(F.col("id").isin([])).collect()
     assert len(out) == 0
 
 
 def test_column_isin_non_empty_int_list() -> None:
     """col("id").isin([1, 3]) keeps matching rows."""
-    spark = rs.SparkSession.builder().app_name("isin_int").get_or_create()
+    spark = get_spark("issue_244_isin_int")
+    F = get_functions()
     data = [{"id": 1}, {"id": 2}, {"id": 3}]
-    schema = [("id", "int")]
-    df = spark.createDataFrame(data, schema)
-    out = df.filter(rs.col("id").isin([1, 3])).collect()
+    df = spark.createDataFrame(data, ["id"])
+    out = df.filter(F.col("id").isin([1, 3])).collect()
     assert len(out) == 2
     ids = {r["id"] for r in out}
     assert ids == {1, 3}
@@ -34,11 +34,11 @@ def test_column_isin_non_empty_int_list() -> None:
 
 def test_column_isin_string_list() -> None:
     """col("name").isin(list of str) works."""
-    spark = rs.SparkSession.builder().app_name("isin_str").get_or_create()
+    spark = get_spark("issue_244_isin_str")
+    F = get_functions()
     data = [{"name": "a"}, {"name": "b"}, {"name": "c"}]
-    schema = [("name", "string")]
-    df = spark.createDataFrame(data, schema)
-    out = df.filter(rs.col("name").isin(["a", "c"])).collect()
+    df = spark.createDataFrame(data, ["name"])
+    out = df.filter(F.col("name").isin(["a", "c"])).collect()
     assert len(out) == 2
     names = {r["name"] for r in out}
     assert names == {"a", "c"}

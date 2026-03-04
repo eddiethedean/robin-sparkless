@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-import robin_sparkless as rs
+from tests.python.utils import get_spark
 
 
 def _spark():
-    return rs.SparkSession.builder().app_name("issue_418").get_or_create()
+    return get_spark("issue_418")
 
 
 def test_nested_ddl_struct_and_array() -> None:
@@ -21,7 +21,7 @@ def test_nested_ddl_struct_and_array() -> None:
         ],
         schema=schema_ddl,
     )
-    names = df.columns()
+    names = df.columns if isinstance(getattr(df, "columns", None), list) else df.columns()
     assert "addr" in names
     assert "tags" in names
     rows = df.collect()

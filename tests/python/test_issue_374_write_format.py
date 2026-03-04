@@ -5,17 +5,17 @@ from __future__ import annotations
 import os
 import tempfile
 
-import robin_sparkless as rs
+from tests.python.utils import get_spark
 
 
 def _spark():
-    return rs.SparkSession.builder().app_name("issue_374").get_or_create()
+    return get_spark("issue_374")
 
 
 def test_write_as_property_format_mode_save() -> None:
     """df.write (property) has .format(), .mode(), .save() - no parentheses on write."""
     spark = _spark()
-    df = spark.createDataFrame([{"id": 1}, {"id": 2}], schema=[("id", "int")])
+    df = spark.createDataFrame([{"id": 1}, {"id": 2}], schema=["id"])
     with tempfile.TemporaryDirectory() as d:
         path = os.path.join(d, "out")
         # PySpark style: df.write.format(...).mode(...).save(path)
@@ -28,7 +28,7 @@ def test_write_as_property_format_mode_save() -> None:
 def test_write_parquet_shortcut() -> None:
     """df.write.parquet(path) works."""
     spark = _spark()
-    df = spark.createDataFrame([{"x": 1}], schema=[("x", "int")])
+    df = spark.createDataFrame([{"x": 1}], schema=["x"])
     with tempfile.TemporaryDirectory() as d:
         path = os.path.join(d, "p.parquet")
         df.write.parquet(path)

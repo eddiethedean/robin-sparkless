@@ -19,10 +19,10 @@ def _spark() -> SparkSession:
 
 
 def test_split_with_column_one_array_per_row() -> None:
-    """with_column(\"arr\", split(col(\"s\"), \",\")) adds one array column per row."""
+    """withColumn(\"arr\", split(col(\"s\"), \",\")) adds one array column per row."""
     spark = _spark()
-    df = spark.createDataFrame([{"s": "A,B,C"}], [("s", "str")])
-    out = df.with_column("arr", F.split(F.col("s"), ","))
+    df = spark.createDataFrame([{"s": "A,B,C"}])
+    out = df.withColumn("arr", F.split(F.col("s"), ","))
     rows = out.collect()
     assert len(rows) == 1
     assert rows[0]["s"] == "A,B,C"

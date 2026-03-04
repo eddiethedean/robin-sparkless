@@ -20,9 +20,9 @@ def test_array_empty_returns_empty_array_column() -> None:
     spark = SparkSession.builder.appName("test_263").getOrCreate()
     df = spark.createDataFrame(
         [{"Name": "Alice"}, {"Name": "Bob"}],
-        [("Name", "string")],
+        ["Name"],
     )
-    df = df.with_column("NewArray", F.array())
+    df = df.withColumn("NewArray", F.array())
     out = df.collect()
     assert len(out) == 2
     assert out[0]["Name"] == "Alice"
@@ -34,8 +34,8 @@ def test_array_empty_returns_empty_array_column() -> None:
 def test_array_empty_with_other_columns() -> None:
     """F.array() with no args works alongside other with_column expressions."""
     spark = SparkSession.builder.appName("test_263").getOrCreate()
-    df = spark.createDataFrame([{"x": 1}, {"x": 2}], [("x", "int")])
-    df = df.with_column("empty_arr", F.array()).with_column("double", F.col("x") * 2)
+    df = spark.createDataFrame([{"x": 1}, {"x": 2}], ["x"])
+    df = df.withColumn("empty_arr", F.array()).withColumn("double", F.col("x") * 2)
     out = df.collect()
     assert [r["empty_arr"] for r in out] == [[], []]
     assert [r["double"] for r in out] == [2, 4]

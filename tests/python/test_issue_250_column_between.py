@@ -7,32 +7,33 @@ now exposes between so df.filter(col("v").between(lit(20), lit(30))) works.
 
 from __future__ import annotations
 
-import robin_sparkless as rs
+from tests.python.utils import get_spark, get_functions
 
 
 def test_column_has_between() -> None:
     """Column has between method (PySpark parity)."""
-    c = rs.col("v")
+    F = get_functions()
+    c = F.col("v")
     assert hasattr(c, "between")
 
 
 def test_filter_between_returns_matching_row() -> None:
     """df.filter(col("v").between(lit(20), lit(30))) returns only the row where v is in [20, 30]."""
-    spark = rs.SparkSession.builder().app_name("between").get_or_create()
+    spark = get_spark("issue_250_between")
+    F = get_functions()
     data = [{"v": 10}, {"v": 25}, {"v": 50}]
-    schema = [("v", "int")]
-    df = spark.createDataFrame(data, schema)
-    out = df.filter(rs.col("v").between(rs.lit(20), rs.lit(30))).collect()
+    df = spark.createDataFrame(data, ["v"])
+    out = df.filter(F.col("v").between(F.lit(20), F.lit(30))).collect()
     assert len(out) == 1
     assert out[0]["v"] == 25
 
 
 def test_filter_between_inclusive_boundaries() -> None:
     """between is inclusive: v between 10 and 10 returns the row with v=10."""
-    spark = rs.SparkSession.builder().app_name("between").get_or_create()
+    spark = get_spark("issue_250_between")
+    F = get_functions()
     data = [{"v": 10}, {"v": 20}]
-    schema = [("v", "int")]
-    df = spark.createDataFrame(data, schema)
-    out = df.filter(rs.col("v").between(rs.lit(10), rs.lit(10))).collect()
+    df = spark.createDataFrame(data, ["v"])
+    out = df.filter(F.col("v").between(F.lit(10), F.lit(10))).collect()
     assert len(out) == 1
     assert out[0]["v"] == 10

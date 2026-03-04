@@ -7,11 +7,14 @@ Robin-sparkless now provides Window() (no-arg) and partitionBy/orderBy already a
 
 from __future__ import annotations
 
-import robin_sparkless as rs
+from tests.python.utils import get_functions, get_spark, get_window_cls
+
+F = get_functions()
+Window = get_window_cls()
 
 
-def _spark() -> rs.SparkSession:
-    return rs.SparkSession.builder().app_name("issue_357").get_or_create()
+def _spark():
+    return get_spark("issue_357")
 
 
 def test_window_no_arg_constructor() -> None:
@@ -19,10 +22,10 @@ def test_window_no_arg_constructor() -> None:
     spark = _spark()
     df = spark.createDataFrame(
         [{"dept": "A", "salary": 100}, {"dept": "A", "salary": 200}],
-        [("dept", "string"), ("salary", "int")],
+        ["dept", "salary"],
     )
-    w = rs.Window().partitionBy("dept").orderBy("salary")
-    out = df.select("dept", "salary", rs.row_number().over(w).alias("rn")).collect()
+    w = Window().partitionBy("dept").orderBy("salary")
+    out = df.select("dept", "salary", F.row_number().over(w).alias("rn")).collect()
     assert len(out) == 2
     assert out[0]["dept"] == "A" and out[0]["salary"] == 100 and out[0]["rn"] == 1
     assert out[1]["dept"] == "A" and out[1]["salary"] == 200 and out[1]["rn"] == 2
@@ -35,8 +38,8 @@ def test_window_partition_by_order_by_strings_classmethod() -> None:
         [(1, 100, "A"), (2, 200, "A"), (3, 150, "B")],
         ["id", "salary", "dept"],
     )
-    w = rs.Window.partitionBy("dept").orderBy("salary")
-    out = df.with_column("rn", rs.row_number().over(w)).order_by(["id"]).collect()
+    w = Window.partitionBy("dept").orderBy("salary")
+    out = df.withColumn("rn", F.row_number().over(w)).orderBy(["id"]).collect()
     assert len(out) == 3
     by_id = {r["id"]: r["rn"] for r in out}
     assert by_id[1] == 1 and by_id[2] == 2 and by_id[3] == 1

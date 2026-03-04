@@ -6,11 +6,13 @@ PySpark F.coalesce(col1, col2, ...) accepts multiple Column arguments.
 
 from __future__ import annotations
 
-import robin_sparkless as rs
+from tests.python.utils import get_functions, get_spark
+
+F = get_functions()
 
 
-def _spark() -> rs.SparkSession:
-    return rs.SparkSession.builder().app_name("issue_407").get_or_create()
+def _spark():
+    return get_spark("issue_407")
 
 
 def test_coalesce_two_columns() -> None:
@@ -18,7 +20,7 @@ def test_coalesce_two_columns() -> None:
     spark = _spark()
     df = spark.createDataFrame([(None,), (100,)], ["salary"])
     out = df.select(
-        rs.coalesce(rs.col("salary"), rs.lit(0)).alias("coalesced")
+        F.coalesce(F.col("salary"), F.lit(0)).alias("coalesced")
     ).collect()
     assert len(out) == 2
     assert out[0]["coalesced"] == 0
@@ -33,6 +35,6 @@ def test_coalesce_three_arguments() -> None:
         ["a", "b", "c"],
     )
     out = df.select(
-        rs.coalesce(rs.col("a"), rs.col("b"), rs.col("c")).alias("first")
+        F.coalesce(F.col("a"), F.col("b"), F.col("c")).alias("first")
     ).collect()
     assert [r["first"] for r in out] == [3, 2, 1]

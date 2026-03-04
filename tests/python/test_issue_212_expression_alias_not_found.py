@@ -16,13 +16,9 @@ Window = _imports.Window
 def test_select_when_otherwise_alias() -> None:
     """Select with when().then().otherwise().alias('result') should not raise 'not found: result'."""
     spark = SparkSession.builder.appName("test_212").getOrCreate()
-    df = spark.createDataFrame(
-        [{"x": 1}, {"x": 2}],
-        [("x", "bigint")],
-    )
+    df = spark.createDataFrame([{"x": 1}, {"x": 2}])
     result = df.select(
-        F.when(F.col("x") > F.lit(1))
-        .then(F.lit("yes"))
+        F.when(F.col("x") > F.lit(1), F.lit("yes"))
         .otherwise(F.lit("no"))
         .alias("result")
     )
@@ -35,12 +31,9 @@ def test_select_when_otherwise_alias() -> None:
 def test_select_window_rank_alias() -> None:
     """Select with rank().over(Window.partitionBy('x')).alias('rank') should not raise 'not found: rank'."""
     spark = SparkSession.builder.appName("test_212").getOrCreate()
-    df = spark.createDataFrame(
-        [{"x": 10}, {"x": 20}, {"x": 20}],
-        [("x", "bigint")],
-    )
-    # Partition by x so over() has at least one key; alias "rank" must not be resolved as input column.
-    window = Window.partitionBy("x")
+    df = spark.createDataFrame([{"x": 10}, {"x": 20}, {"x": 20}])
+    # Partition by and order by x so over() has a valid window; alias "rank" must not be resolved as input column.
+    window = Window.partitionBy("x").orderBy("x")
     result = df.select(F.rank().over(window).alias("rank"))
     rows = result.collect()
     assert len(rows) == 3

@@ -6,11 +6,11 @@ from __future__ import annotations
 
 import collections
 
-import robin_sparkless as rs
+from tests.python.utils import get_spark
 
 
-def _spark() -> rs.SparkSession:
-    return rs.SparkSession.builder().app_name("issue_417").get_or_create()
+def _spark():
+    return get_spark("issue_417")
 
 
 def test_create_dataframe_from_namedtuple() -> None:
@@ -21,8 +21,8 @@ def test_create_dataframe_from_namedtuple() -> None:
     df = spark.createDataFrame(rows)
     out = df.collect()
     assert len(out) == 2
-    assert out[0] == {"a": 1, "b": 3}
-    assert out[1] == {"a": 2, "b": 4}
+    assert out[0]["a"] == 1 and out[0]["b"] == 3
+    assert out[1]["a"] == 2 and out[1]["b"] == 4
 
 
 def test_create_dataframe_from_row_like_with_schema() -> None:
@@ -30,8 +30,8 @@ def test_create_dataframe_from_row_like_with_schema() -> None:
     spark = _spark()
     RowLike = collections.namedtuple("RowLike", "x y")
     rows = [RowLike(10, "foo"), RowLike(20, "bar")]
-    df = spark.createDataFrame(rows, schema=[("x", "bigint"), ("y", "string")])
+    df = spark.createDataFrame(rows, schema=["x", "y"])
     out = df.collect()
     assert len(out) == 2
-    assert out[0] == {"x": 10, "y": "foo"}
-    assert out[1] == {"x": 20, "y": "bar"}
+    assert out[0]["x"] == 10 and out[0]["y"] == "foo"
+    assert out[1]["x"] == 20 and out[1]["y"] == "bar"

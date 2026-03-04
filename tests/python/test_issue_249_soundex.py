@@ -24,9 +24,8 @@ def test_with_column_soundex_returns_three_rows() -> None:
     """df.with_column("snd", F.soundex(F.col("name"))) returns 3 rows with snd column."""
     spark = SparkSession.builder.appName("soundex").getOrCreate()
     data = [{"name": "Alice"}, {"name": "Bob"}, {"name": "Robert"}]
-    schema = [("name", "string")]
-    df = spark.createDataFrame(data, schema)
-    out = df.with_column("snd", F.soundex(F.col("name"))).collect()
+    df = spark.createDataFrame(data, ["name"])
+    out = df.withColumn("snd", F.soundex(F.col("name"))).collect()
     assert len(out) == 3
     for row in out:
         assert "name" in row
@@ -39,9 +38,8 @@ def test_soundex_phonetic_codes() -> None:
     """Soundex produces expected phonetic codes (Alice->A420, Robert->R163)."""
     spark = SparkSession.builder.appName("soundex").getOrCreate()
     data = [{"name": "Alice"}, {"name": "Robert"}]
-    schema = [("name", "string")]
-    df = spark.createDataFrame(data, schema)
-    out = df.with_column("snd", F.soundex(F.col("name"))).collect()
+    df = spark.createDataFrame(data, ["name"])
+    out = df.withColumn("snd", F.soundex(F.col("name"))).collect()
     names_to_snd = {r["name"]: r["snd"] for r in out}
     assert names_to_snd["Alice"] == "A420"
     assert names_to_snd["Robert"] == "R163"

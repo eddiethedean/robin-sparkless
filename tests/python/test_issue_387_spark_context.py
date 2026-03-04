@@ -4,11 +4,11 @@ Tests for #387: SparkSession.sparkContext (PySpark parity stub).
 
 from __future__ import annotations
 
-import robin_sparkless as rs
+from tests.python.utils import get_spark
 
 
-def _spark() -> rs.SparkSession:
-    return rs.SparkSession.builder().app_name("issue_387").get_or_create()
+def _spark():
+    return get_spark("issue_387")
 
 
 def test_spark_context_exists() -> None:

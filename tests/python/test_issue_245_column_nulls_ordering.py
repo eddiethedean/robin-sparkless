@@ -8,12 +8,13 @@ PySpark supports these for controlling null placement in orderBy.
 
 from __future__ import annotations
 
-import robin_sparkless as rs
+from tests.python.utils import get_spark, get_functions
 
 
 def test_column_has_desc_nulls_last() -> None:
     """Column has desc_nulls_last method (PySpark parity)."""
-    c = rs.col("value")
+    F = get_functions()
+    c = F.col("value")
     assert hasattr(c, "desc_nulls_last")
     assert hasattr(c, "desc_nulls_first")
     assert hasattr(c, "asc_nulls_last")
@@ -22,11 +23,11 @@ def test_column_has_desc_nulls_last() -> None:
 
 def test_order_by_desc_nulls_last() -> None:
     """order_by_exprs with col().desc_nulls_last() puts nulls last."""
-    spark = rs.SparkSession.builder().app_name("nulls_order").get_or_create()
+    spark = get_spark("issue_245_nulls_order")
+    F = get_functions()
     data = [{"value": "A"}, {"value": "B"}, {"value": None}, {"value": "C"}]
-    schema = [("value", "string")]
-    df = spark.createDataFrame(data, schema)
-    out = df.order_by_exprs([rs.col("value").desc_nulls_last()]).collect()
+    df = spark.createDataFrame(data, ["value"])
+    out = df.orderBy(F.col("value").desc_nulls_last()).collect()
     assert len(out) == 4
     # Desc with nulls last: C, B, A, null
     values = [r["value"] for r in out]
@@ -38,11 +39,11 @@ def test_order_by_desc_nulls_last() -> None:
 
 def test_order_by_asc_nulls_first() -> None:
     """order_by_exprs with col().asc_nulls_first() puts nulls first."""
-    spark = rs.SparkSession.builder().app_name("nulls_order").get_or_create()
+    spark = get_spark("issue_245_nulls_order")
+    F = get_functions()
     data = [{"value": "A"}, {"value": "B"}, {"value": None}, {"value": "C"}]
-    schema = [("value", "string")]
-    df = spark.createDataFrame(data, schema)
-    out = df.order_by_exprs([rs.col("value").asc_nulls_first()]).collect()
+    df = spark.createDataFrame(data, ["value"])
+    out = df.orderBy(F.col("value").asc_nulls_first()).collect()
     assert len(out) == 4
     # Asc with nulls first: null, A, B, C
     values = [r["value"] for r in out]

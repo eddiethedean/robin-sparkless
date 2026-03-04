@@ -7,24 +7,26 @@ Robin-sparkless now implements withField.
 
 from __future__ import annotations
 
-import robin_sparkless as rs
+from tests.python.utils import get_functions, get_spark, _row_to_dict
+
+F = get_functions()
 
 
-def _spark() -> rs.SparkSession:
-    return rs.SparkSession.builder().app_name("issue_370").get_or_create()
+def _spark():
+    return get_spark("issue_370")
 
 
 def test_column_with_field_add_struct_field() -> None:
-    """col("s").withField("c", lit(3)) adds field c to struct (issue repro)."""
+    """col(\"s\").withField(\"c\", lit(3)) adds field c to struct (issue repro)."""
     spark = _spark()
     create_df = getattr(spark, "create_dataframe_from_rows", spark.createDataFrame)
-    df = create_df([{"s": {"a": 1, "b": 2}}], [("s", "struct<a:int,b:int>")])
-    out = df.select(rs.col("s").withField("c", rs.lit(3)).alias("s")).collect()
+    df = create_df([{"s": {"a": 1, "b": 2}}], "s struct<a:int,b:int>")
+    out = df.select(F.col("s").withField("c", F.lit(3)).alias("s")).collect()
     assert len(out) == 1
     row = out[0]
     assert "s" in row
     s = row["s"]
-    assert s == {"a": 1, "b": 2, "c": 3}
+    assert _row_to_dict(s) == {"a": 1, "b": 2, "c": 3}
 
 
 def test_column_with_field_replace_struct_field() -> None:
@@ -32,11 +34,11 @@ def test_column_with_field_replace_struct_field() -> None:
     spark = _spark()
     df = spark.createDataFrame(
         [{"s": {"a": 1, "b": 2}}],
-        [("s", "struct<a:bigint,b:bigint>")],
+        "s struct<a:bigint,b:bigint>",
     )
-    out = df.select(rs.col("s").withField("b", rs.lit(99)).alias("s")).collect()
+    out = df.select(F.col("s").withField("b", F.lit(99)).alias("s")).collect()
     assert len(out) == 1
-    assert out[0]["s"] == {"a": 1, "b": 99}
+    assert _row_to_dict(out[0]["s"]) == {"a": 1, "b": 99}
 
 
 def test_column_with_field_literal_value() -> None:
@@ -44,7 +46,7 @@ def test_column_with_field_literal_value() -> None:
     spark = _spark()
     df = spark.createDataFrame(
         [{"s": {"x": "hello"}}],
-        [("s", "struct<x:string>")],
+        "s struct<x:string>",
     )
-    out = df.select(rs.col("s").withField("y", rs.lit(42)).alias("s")).collect()
-    assert out[0]["s"] == {"x": "hello", "y": 42}
+    out = df.select(F.col("s").withField("y", F.lit(42)).alias("s")).collect()
+    assert _row_to_dict(out[0]["s"]) == {"x": "hello", "y": 42}

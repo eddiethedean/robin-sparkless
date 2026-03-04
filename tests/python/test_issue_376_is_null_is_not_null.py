@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-import robin_sparkless as rs
-from robin_sparkless import col
+from tests.python.utils import get_functions, get_spark
+
+F = get_functions()
 
 
 def _spark():
-    return rs.SparkSession.builder().app_name("issue_376").get_or_create()
+    return get_spark("issue_376")
 
 
 def test_is_null_and_is_not_null_snake() -> None:
@@ -15,13 +16,13 @@ def test_is_null_and_is_not_null_snake() -> None:
     spark = _spark()
     df = spark.createDataFrame(
         [{"a": 1, "b": "x"}, {"a": None, "b": "y"}, {"a": 3, "b": None}],
-        schema=[("a", "int"), ("b", "string")],
+        schema="a int, b string",
     )
-    null_a = df.filter(col("a").is_null())
+    null_a = df.filter(F.col("a").isNull())
     rows = null_a.collect()
     assert len(rows) == 1
     assert rows[0]["a"] is None
-    non_null_a = df.filter(col("a").is_not_null())
+    non_null_a = df.filter(F.col("a").isNotNull())
     assert len(non_null_a.collect()) == 2
 
 
@@ -30,9 +31,9 @@ def test_is_null_and_is_not_null_camel() -> None:
     spark = _spark()
     df = spark.createDataFrame(
         [{"a": 1}, {"a": None}],
-        schema=[("a", "int")],
+        schema=["a"],
     )
-    null_a = df.filter(col("a").isNull())
+    null_a = df.filter(F.col("a").isNull())
     assert len(null_a.collect()) == 1
-    non_null_a = df.filter(col("a").isNotNull())
+    non_null_a = df.filter(F.col("a").isNotNull())
     assert len(non_null_a.collect()) == 1

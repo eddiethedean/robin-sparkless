@@ -59,16 +59,18 @@ EXPECTED_WHEN_THEN_LIT_DATE = [
 
 def test_lit_date_and_datetime_with_column_pyspark_parity() -> None:
     """with_column lit(date) and lit(datetime) matches expected from PySpark (#186)."""
-    import robin_sparkless as rs
+    from tests.python.utils import get_functions
+
+    F = get_functions()
 
     spark = get_session()
     df = spark.createDataFrame(
         [(1, 10, "a"), (2, 20, "b"), (3, 30, "c")], ["id", "x", "name"]
     )
-    df = df.with_column("const_date", rs.lit(datetime.date(2025, 6, 15)))
-    df = df.with_column(
+    df = df.withColumn("const_date", F.lit(datetime.date(2025, 6, 15)))
+    df = df.withColumn(
         "const_ts",
-        rs.lit(datetime.datetime(2025, 6, 15, 12, 30, 45, 123456)),
+        F.lit(datetime.datetime(2025, 6, 15, 12, 30, 45, 123456)),
     )
     actual = df.collect()
     assert_rows_equal(actual, EXPECTED_LIT_DATE_DATETIME, order_matters=True)
@@ -76,43 +78,49 @@ def test_lit_date_and_datetime_with_column_pyspark_parity() -> None:
 
 def test_filter_date_lt_lit_pyspark_parity() -> None:
     """filter(col('d') < lit(date)) matches expected from PySpark (#186)."""
-    import robin_sparkless as rs
+    from tests.python.utils import get_functions
+
+    F = get_functions()
 
     spark = get_session()
     df = spark.createDataFrame(
         [(1, 10, "a"), (2, 20, "b"), (3, 30, "c")], ["id", "x", "name"]
     )
-    df = df.with_column("d", rs.lit(datetime.date(2025, 5, 15)))
-    actual = df.filter(rs.col("d").lt(rs.lit(datetime.date(2026, 1, 1)))).collect()
+    df = df.withColumn("d", F.lit(datetime.date(2025, 5, 15)))
+    actual = df.filter(F.col("d") < F.lit(datetime.date(2026, 1, 1))).collect()
     assert_rows_equal(actual, EXPECTED_FILTER_DATE_LT_LIT, order_matters=True)
 
 
 def test_filter_date_eq_lit_pyspark_parity() -> None:
     """filter(col('d') == lit(date)) matches expected from PySpark (#186)."""
-    import robin_sparkless as rs
+    from tests.python.utils import get_functions
+
+    F = get_functions()
 
     spark = get_session()
     df = spark.createDataFrame(
         [(1, 10, "a"), (2, 20, "b"), (3, 30, "c")], ["id", "x", "name"]
     )
-    df = df.with_column("d", rs.lit(datetime.date(2025, 5, 15)))
-    actual = df.filter(rs.col("d").eq(rs.lit(datetime.date(2025, 5, 15)))).collect()
+    df = df.withColumn("d", F.lit(datetime.date(2025, 5, 15)))
+    actual = df.filter(F.col("d") == F.lit(datetime.date(2025, 5, 15))).collect()
     assert_rows_equal(actual, EXPECTED_FILTER_DATE_EQ_LIT, order_matters=True)
 
 
 def test_when_then_lit_date_otherwise_pyspark_parity() -> None:
     """when(x < 5).then(lit(date)).otherwise(lit(date)) matches expected from PySpark (#186)."""
-    import robin_sparkless as rs
+    from tests.python.utils import get_functions
+
+    F = get_functions()
 
     spark = get_session()
     df = spark.createDataFrame(
         [(1, 1, "a"), (2, 2, "b"), (3, 10, "c")], ["id", "x", "name"]
     )
-    df = df.with_column(
+    df = df.withColumn(
         "bucket",
-        rs.when(rs.col("x").lt(rs.lit(5)))
-        .then(rs.lit(datetime.date(2025, 1, 1)))
-        .otherwise(rs.lit(datetime.date(2025, 12, 31))),
+        F.when(F.col("x") < 5, datetime.date(2025, 1, 1)).otherwise(
+            datetime.date(2025, 12, 31)
+        ),
     )
     actual = df.collect()
     assert_rows_equal(actual, EXPECTED_WHEN_THEN_LIT_DATE, order_matters=True)

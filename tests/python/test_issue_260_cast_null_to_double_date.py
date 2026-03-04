@@ -7,38 +7,33 @@ Robin (Polars) previously raised RuntimeError; we now support it.
 
 from __future__ import annotations
 
-import robin_sparkless as rs
-
-F = rs
+from pyspark.sql import functions as F
 
 
-def test_lit_none_cast_double() -> None:
-    """with_column with F.lit(None).cast('double') succeeds and yields null double column."""
-    spark = F.SparkSession.builder().app_name("test_260").get_or_create()
-    df = spark.createDataFrame([{"a": 1}], [("a", "int")])
-    df = df.with_column("null_double", F.lit(None).cast("double"))
+def test_lit_none_cast_double(spark) -> None:
+    """withColumn with F.lit(None).cast('double') succeeds and yields null double column."""
+    df = spark.createDataFrame([{"a": 1}], schema=["a"])
+    df = df.withColumn("null_double", F.lit(None).cast("double"))
     out = df.collect()
     assert len(out) == 1
     assert out[0]["a"] == 1
     assert out[0]["null_double"] is None
 
 
-def test_lit_none_cast_date() -> None:
-    """with_column with F.lit(None).cast('date') succeeds and yields null date column."""
-    spark = F.SparkSession.builder().app_name("test_260").get_or_create()
-    df = spark.createDataFrame([{"a": 1}], [("a", "int")])
-    df = df.with_column("null_date", F.lit(None).cast("date"))
+def test_lit_none_cast_date(spark) -> None:
+    """withColumn with F.lit(None).cast('date') succeeds and yields null date column."""
+    df = spark.createDataFrame([{"a": 1}], schema=["a"])
+    df = df.withColumn("null_date", F.lit(None).cast("date"))
     out = df.collect()
     assert len(out) == 1
     assert out[0]["a"] == 1
     assert out[0]["null_date"] is None
 
 
-def test_lit_none_cast_double_and_date() -> None:
+def test_lit_none_cast_double_and_date(spark) -> None:
     """Multiple null casts (double and date) in one DataFrame."""
-    spark = F.SparkSession.builder().app_name("test_260").get_or_create()
-    df = spark.createDataFrame([{"id": 1}, {"id": 2}], [("id", "bigint")])
-    df = df.with_column("nd", F.lit(None).cast("double")).with_column(
+    df = spark.createDataFrame([{"id": 1}, {"id": 2}], schema=["id"])
+    df = df.withColumn("nd", F.lit(None).cast("double")).withColumn(
         "ndate", F.lit(None).cast("date")
     )
     out = df.collect()

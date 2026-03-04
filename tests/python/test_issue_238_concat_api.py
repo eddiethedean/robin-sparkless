@@ -23,19 +23,19 @@ def test_concat_with_literal_separator_in_with_column() -> None:
             {"first_name": "Alice", "last_name": "Smith"},
             {"first_name": "Bob", "last_name": "Jones"},
         ],
-        [("first_name", "string"), ("last_name", "string")],
+        ["first_name", "last_name"],
     )
 
-    df = df.with_column(
+    df = df.withColumn(
         "full_name",
         F.concat(F.col("first_name"), F.lit(" "), F.col("last_name")),
     )
-    out = df.order_by(["first_name"]).collect()
-
-    assert out == [
+    out = df.orderBy(["first_name"]).collect()
+    from tests.python.utils import _row_to_dict, assert_rows_equal
+    assert_rows_equal([_row_to_dict(r) for r in out], [
         {"first_name": "Alice", "last_name": "Smith", "full_name": "Alice Smith"},
         {"first_name": "Bob", "last_name": "Jones", "full_name": "Bob Jones"},
-    ]
+    ])
 
 
 def test_concat_ws_matches_concat_for_space_separator() -> None:
@@ -46,16 +46,16 @@ def test_concat_ws_matches_concat_for_space_separator() -> None:
             {"first_name": "Alice", "last_name": "Smith"},
             {"first_name": "Bob", "last_name": "Jones"},
         ],
-        [("first_name", "string"), ("last_name", "string")],
+        ["first_name", "last_name"],
     )
 
-    df = df.with_column(
+    df = df.withColumn(
         "full_name",
         F.concat_ws(" ", F.col("first_name"), F.col("last_name")),
     )
-    out = df.order_by(["first_name"]).collect()
-
-    assert out == [
+    out = df.orderBy(["first_name"]).collect()
+    from tests.python.utils import _row_to_dict, assert_rows_equal
+    assert_rows_equal([_row_to_dict(r) for r in out], [
         {"first_name": "Alice", "last_name": "Smith", "full_name": "Alice Smith"},
         {"first_name": "Bob", "last_name": "Jones", "full_name": "Bob Jones"},
-    ]
+    ])

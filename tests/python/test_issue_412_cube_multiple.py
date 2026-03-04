@@ -23,10 +23,10 @@ def test_cube_two_columns_variadic() -> None:
     spark = _spark()
     df = spark.createDataFrame(
         [{"dept": "A", "year": 2023}, {"dept": "B", "year": 2023}],
-        [("dept", "str"), ("year", "int")],
+        ["dept", "year"],
     )
     out = (
-        df.cube("dept", "year").agg([F.count(F.col("dept")).alias("count")]).collect()
+        df.cube("dept", "year").agg(F.count(F.col("dept")).alias("count")).collect()
     )
     assert len(out) >= 1
     assert all("count" in r for r in out)
@@ -37,11 +37,11 @@ def test_cube_single_list() -> None:
     spark = _spark()
     df = spark.createDataFrame(
         [{"dept": "A", "year": 2023}],
-        [("dept", "str"), ("year", "int")],
+        ["dept", "year"],
     )
     out = (
         df.cube(["dept", "year"])
-        .agg([F.count(F.col("dept")).alias("count")])
+        .agg(F.count(F.col("dept")).alias("count"))
         .collect()
     )
     assert len(out) >= 1

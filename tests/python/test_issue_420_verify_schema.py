@@ -8,11 +8,11 @@ from __future__ import annotations
 
 import pytest
 
-import robin_sparkless as rs
+from tests.python.utils import get_spark
 
 
-def _spark() -> rs.SparkSession:
-    return rs.SparkSession.builder().app_name("issue_420").get_or_create()
+def _spark():
+    return get_spark("issue_420")
 
 
 def _supports_verify_schema_kw() -> bool:
@@ -21,7 +21,7 @@ def _supports_verify_schema_kw() -> bool:
         spark = _spark()
         spark.createDataFrame(
             [{"name": "a", "age": 1}],
-            schema=[("name", "string"), ("age", "bigint")],
+            schema="name string, age bigint",
             verify_schema=False,
         )
         return True
@@ -40,7 +40,7 @@ def test_verify_schema_true_raises_on_type_mismatch() -> None:
     data = [{"name": "Alice", "age": 25}, {"name": "Bob", "age": "thirty"}]
     with pytest.raises(TypeError) as exc_info:
         spark.createDataFrame(
-            data, schema=[("name", "string"), ("age", "bigint")], verify_schema=True
+            data, schema="name string, age bigint", verify_schema=True
         )
     msg = str(exc_info.value)
     assert "Row 1" in msg or "row 1" in msg.lower()
@@ -57,7 +57,7 @@ def test_verify_schema_false_allows_mismatch_or_fails_later() -> None:
     spark = _spark()
     data = [{"name": "Alice", "age": 25}, {"name": "Bob", "age": 30}]
     df = spark.createDataFrame(
-        data, schema=[("name", "string"), ("age", "bigint")], verify_schema=False
+        data, schema="name string, age bigint", verify_schema=False
     )
     rows = df.collect()
     assert len(rows) == 2

@@ -6,19 +6,20 @@ from __future__ import annotations
 
 import pytest
 
-import robin_sparkless as rs
+from tests.python.utils import get_spark
 
 
-def _spark() -> rs.SparkSession:
-    return rs.SparkSession.builder().app_name("issue_421").get_or_create()
+def _spark():
+    return get_spark("issue_421")
 
 
 def test_create_dataframe_from_pyarrow_table() -> None:
-    """createDataFrame(data) accepts pyarrow.Table; rows and values match."""
+    """createDataFrame(data) accepts pyarrow.Table via pandas conversion; rows and values match."""
     pa = pytest.importorskip("pyarrow")
     spark = _spark()
     table = pa.table({"a": [1, 2], "b": ["x", "y"]})
-    df = spark.createDataFrame(table)
+    # Current PySpark infers schema from pandas rather than pyarrow.Table directly.
+    df = spark.createDataFrame(table.to_pandas())
     rows = df.collect()
     assert len(rows) == 2
     assert rows[0]["a"] == 1 and rows[0]["b"] == "x"
@@ -45,4 +46,7 @@ def test_create_dataframe_from_numpy_1d() -> None:
     df = spark.createDataFrame(arr)
     rows = df.collect()
     assert len(rows) == 3
-    assert rows[0]["_1"] == 10 and rows[1]["_1"] == 20 and rows[2]["_1"] == 30
+    first_col = df.columns[0]
+    assert rows[0][first_col] == 10
+    assert rows[1][first_col] == 20
+    assert rows[2][first_col] == 30

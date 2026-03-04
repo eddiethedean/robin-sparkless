@@ -2,45 +2,48 @@
 
 from __future__ import annotations
 
-import robin_sparkless as rs
+from tests.python.utils import get_spark, _row_to_dict
 
 
 def test_describe_returns_dataframe() -> None:
     """describe() returns a DataFrame with summary stats (count, mean, stddev, min, max)."""
-    spark = rs.SparkSession.builder().app_name("issue_384").get_or_create()
+    spark = get_spark("issue_384")
     df = spark.createDataFrame([(1, 10.0), (2, 20.0), (3, 30.0)], ["a", "b"])
     desc = df.describe()
     assert desc is not None
     rows = desc.collect()
     assert len(rows) >= 1
-    # First column is summary (stat name)
-    names = [r for r in rows[0].keys()]
+    names = list(_row_to_dict(rows[0]).keys())
     assert "summary" in names or any("a" in k or "b" in k for k in names)
 
 
 def test_summary_alias_for_describe() -> None:
-    """summary() is alias for describe(); returns same shape."""
-    spark = rs.SparkSession.builder().app_name("issue_384").get_or_create()
+    """summary() is alias for describe(); both return summary stats (row count may differ by backend)."""
+    spark = get_spark("issue_384")
     df = spark.createDataFrame([(1, "x"), (2, "y")], ["id", "label"])
     desc = df.describe()
     summ = df.summary()
-    assert len(desc.collect()) == len(summ.collect())
+    desc_rows = desc.collect()
+    summ_rows = summ.collect()
+    assert len(desc_rows) >= 1 and len(summ_rows) >= 1
+    # Same columns (summary is alias for describe)
+    assert set(_row_to_dict(desc_rows[0]).keys()) == set(_row_to_dict(summ_rows[0]).keys())
 
 
 def test_show_no_error() -> None:
     """show() and show(n) run without error."""
-    spark = rs.SparkSession.builder().app_name("issue_384").get_or_create()
+    spark = get_spark("issue_384")
     df = spark.createDataFrame([(1,), (2,)], ["x"])
     df.show()
     df.show(1)
 
 
 def test_explain_accepts_mode() -> None:
-    """explain() and explain(mode=...) return a string (mode accepted for API parity)."""
-    spark = rs.SparkSession.builder().app_name("issue_384").get_or_create()
+    """explain() runs; explain(extended=True) accepted (PySpark uses extended=, not mode=)."""
+    spark = get_spark("issue_384")
     df = spark.createDataFrame([(1,)], ["x"])
     s = df.explain()
-    assert isinstance(s, str)
-    assert len(s) > 0
-    s2 = df.explain(mode="extended")
-    assert isinstance(s2, str)
+    # PySpark explain() returns None (prints to stdout); some backends return str
+    assert s is None or (isinstance(s, str) and len(s) > 0)
+    s2 = df.explain(extended=True)
+    assert s2 is None or isinstance(s2, str)

@@ -7,22 +7,23 @@ spark.table("schema.table"). Robin-sparkless must resolve schema.table in the sa
 
 from __future__ import annotations
 
-import robin_sparkless as rs
+from tests.python.utils import get_spark
 
 
-def _spark() -> rs.SparkSession:
-    return rs.SparkSession.builder().app_name("issue_1024").get_or_create()
+def _spark():
+    return get_spark("issue_1024")
 
 
 def test_schema_qualified_table_resolution() -> None:
-    """CREATE SCHEMA IF NOT EXISTS test_schema; saveAsTable('test_schema.test_table'); table('test_schema.test_table')."""
+    """CREATE SCHEMA; saveAsTable('schema.table'); table('schema.table')."""
     spark = _spark()
-    spark.sql("CREATE SCHEMA IF NOT EXISTS test_schema")
+    schema, table = "test_schema_resolution", "test_table"
+    spark.sql(f"DROP SCHEMA IF EXISTS {schema} CASCADE")
+    spark.sql(f"CREATE SCHEMA IF NOT EXISTS {schema}")
     data = [{"id": 1, "name": "a"}]
-    schema = [("id", "int"), ("name", "string")]
-    df = spark.createDataFrame(data, schema)
-    df.write.mode("overwrite").saveAsTable("test_schema.test_table")
-    result = spark.table("test_schema.test_table")
+    df = spark.createDataFrame(data, ["id", "name"])
+    df.write.mode("overwrite").saveAsTable(f"{schema}.{table}")
+    result = spark.table(f"{schema}.{table}")
     assert result.count() == 1
     row = result.collect()[0]
     assert row["id"] == 1
@@ -32,14 +33,12 @@ def test_schema_qualified_table_resolution() -> None:
 def test_schema_qualified_table_append_then_read() -> None:
     """saveAsTable(schema.table) overwrite then append; table(schema.table) sees both."""
     spark = _spark()
-    spark.sql("CREATE SCHEMA IF NOT EXISTS test_schema")
-    df1 = spark.createDataFrame(
-        [{"id": 1, "name": "x"}], [("id", "int"), ("name", "string")]
-    )
-    df1.write.mode("overwrite").saveAsTable("test_schema.test_table")
-    df2 = spark.createDataFrame(
-        [{"id": 2, "name": "y"}], [("id", "int"), ("name", "string")]
-    )
-    df2.write.mode("append").saveAsTable("test_schema.test_table")
-    result = spark.table("test_schema.test_table")
+    schema, table = "test_schema_append", "test_table"
+    spark.sql(f"DROP SCHEMA IF EXISTS {schema} CASCADE")
+    spark.sql(f"CREATE SCHEMA IF NOT EXISTS {schema}")
+    df1 = spark.createDataFrame([{"id": 1, "name": "x"}], ["id", "name"])
+    df1.write.mode("overwrite").saveAsTable(f"{schema}.{table}")
+    df2 = spark.createDataFrame([{"id": 2, "name": "y"}], ["id", "name"])
+    df2.write.mode("append").saveAsTable(f"{schema}.{table}")
+    result = spark.table(f"{schema}.{table}")
     assert result.count() == 2

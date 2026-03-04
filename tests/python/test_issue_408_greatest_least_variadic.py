@@ -19,7 +19,7 @@ def test_greatest_variadic() -> None:
     spark = _spark()
     df = spark.createDataFrame(
         [{"a": 1, "b": 5, "c": 3}, {"a": 10, "b": 2, "c": 8}],
-        schema=[("a", "int"), ("b", "int"), ("c", "int")],
+        schema=["a", "b", "c"],
     )
     out = df.select(
         F.greatest(F.col("a"), F.col("b"), F.col("c")).alias("m")
@@ -35,7 +35,7 @@ def test_least_variadic() -> None:
     spark = _spark()
     df = spark.createDataFrame(
         [{"a": 1, "b": 5, "c": 3}, {"a": 10, "b": 2, "c": 8}],
-        schema=[("a", "int"), ("b", "int"), ("c", "int")],
+        schema=["a", "b", "c"],
     )
     out = df.select(
         F.least(F.col("a"), F.col("b"), F.col("c")).alias("m")

@@ -1,15 +1,15 @@
 """
-Shared helpers for robin_sparkless Python tests.
+Shared helpers for Spark DataFrame tests.
 
 Use assert_rows_equal() to compare collect() output to PySpark-derived expected
-(list of dicts). Use get_session() for a SparkSession when not using the pytest
-fixture from conftest.py.
+(list of dicts). Prefer the `spark` fixture from conftest.py for SparkSession
+creation in tests.
 """
 
 from __future__ import annotations
 
 from datetime import date, datetime
-
+import os
 
 def _is_date_like(v: object) -> bool:
     """True if v is a date, datetime, or string that looks like a date/datetime."""
@@ -39,10 +39,10 @@ def assert_rows_equal(
     expected: list[dict],
     order_matters: bool = True,
 ) -> None:
-    """Compare two lists of row dicts (e.g. from df.collect()).
+    """Compare two lists of row-like objects (dicts or Rows).
 
     Args:
-        actual: Result from robin_sparkless DataFrame.collect().
+        actual: Result from DataFrame.collect() (any backend).
         expected: Expected rows (e.g. from PySpark or precomputed).
         order_matters: If False, sort both by a canonical key before comparing
             (e.g. for groupBy/join where order may differ).
@@ -50,12 +50,19 @@ def assert_rows_equal(
     Raises:
         AssertionError: If lengths differ or any row differs.
     """
-    if len(actual) != len(expected):
+    actual_dicts = [
+        _row_to_dict(r) if not isinstance(r, dict) else r for r in actual
+    ]
+    expected_dicts = [
+        _row_to_dict(r) if not isinstance(r, dict) else r for r in expected
+    ]
+
+    if len(actual_dicts) != len(expected_dicts):
         raise AssertionError(
-            f"Row count mismatch: got {len(actual)}, expected {len(expected)}"
+            f"Row count mismatch: got {len(actual_dicts)}, expected {len(expected_dicts)}"
         )
     if order_matters:
-        for i, (a, e) in enumerate(zip(actual, expected)):
+        for i, (a, e) in enumerate(zip(actual_dicts, expected_dicts)):
             _assert_row_equal(a, e, index=i)
     else:
         # Sort by stringified row for stable comparison. Use _sort_key_val so we never
@@ -63,8 +70,8 @@ def assert_rows_equal(
         def key_fn(r: dict) -> str:
             return str(sorted((k, _sort_key_val(v)) for k, v in r.items()))
 
-        actual_sorted = sorted(actual, key=key_fn)
-        expected_sorted = sorted(expected, key=key_fn)
+        actual_sorted = sorted(actual_dicts, key=key_fn)
+        expected_sorted = sorted(expected_dicts, key=key_fn)
         for i, (a, e) in enumerate(zip(actual_sorted, expected_sorted)):
             _assert_row_equal(a, e, index=i)
 
@@ -106,15 +113,6 @@ def _assert_row_equal(actual: dict, expected: dict, index: int = 0) -> None:
                 raise AssertionError(f"Row {index} key '{k}': {a!r} != {e!r}")
         elif a != e:
             raise AssertionError(f"Row {index} key '{k}': {a!r} != {e!r}")
-
-
-def get_session():
-    """Return a robin_sparkless SparkSession for programmatic tests."""
-    import robin_sparkless as rs
-
-    return rs.SparkSession.builder().app_name("test").get_or_create()
-
-
 def _row_to_dict(r) -> dict:
     """Convert PySpark Row to plain Python dict (handles asDict, Java list->list)."""
     d = r.asDict() if hasattr(r, "asDict") else dict(r)
@@ -163,3 +161,75 @@ def run_with_pyspark_expected(
         except Exception:
             pass
     return fallback_expected
+
+
+def get_functions():
+    """Return PySpark-style functions module for the current backend.
+
+    In PySpark mode (MOCK_SPARK_TEST_BACKEND=SPARKLESS_TEST_BACKEND=pyspark), this
+    imports pyspark.sql.functions. Otherwise it imports sparkless.sql.functions.
+    """
+    backend = (
+        os.getenv("MOCK_SPARK_TEST_BACKEND")
+        or os.getenv("SPARKLESS_TEST_BACKEND")
+        or ""
+    ).strip().lower()
+    if backend == "pyspark":
+        from pyspark.sql import functions as F  # type: ignore[import-not-found]
+    else:
+        from sparkless.sql import functions as F  # type: ignore[import-not-found]
+    return F
+
+
+def get_spark(app_name: str = "test"):
+    """Return a SparkSession for the current backend.
+
+    In PySpark mode, this creates a pyspark.sql.SparkSession; otherwise it
+    creates a sparkless.sql.SparkSession. This mirrors the backend selection
+    logic used by the shared ``spark`` fixture.
+    """
+    backend = (
+        os.getenv("MOCK_SPARK_TEST_BACKEND")
+        or os.getenv("SPARKLESS_TEST_BACKEND")
+        or ""
+    ).strip().lower()
+    if backend == "pyspark":
+        from pyspark.sql import SparkSession as PySparkSession  # type: ignore[import-not-found]
+
+        return (
+            PySparkSession.builder.appName(app_name)
+            .config("spark.driver.bindAddress", "127.0.0.1")
+            .getOrCreate()
+        )
+    else:
+        from sparkless.sql import SparkSession  # type: ignore[import-not-found]
+
+        builder = getattr(
+            SparkSession.builder, "__call__", lambda: SparkSession.builder
+        )()
+        return builder.app_name(app_name).get_or_create()
+
+
+def get_session(app_name: str = "test"):
+    """Backward-compatible alias used by some parity tests.
+
+    Returns a backend-aware SparkSession, matching get_spark().
+    """
+    return get_spark(app_name)
+
+
+def get_window_cls():
+    """Return the Window class appropriate for the current backend.
+
+    This mirrors the backend selection used by get_spark() / get_functions().
+    """
+    backend = (
+        os.getenv("MOCK_SPARK_TEST_BACKEND")
+        or os.getenv("SPARKLESS_TEST_BACKEND")
+        or ""
+    ).strip().lower()
+    if backend == "pyspark":
+        from pyspark.sql.window import Window  # type: ignore[import-not-found]
+    else:
+        from sparkless.sql.window import Window  # type: ignore[import-not-found]
+    return Window

@@ -22,11 +22,9 @@ def test_posexplode_accepts_column_name_string() -> None:
         {"Name": "Alice", "Values": [10, 20]},
         {"Name": "Bob", "Values": [30, 40]},
     ]
-    df = spark.createDataFrame(data, [("Name", "string"), ("Values", "array")])
-    pos_col, val_col = F.posexplode("Values")
-    assert pos_col is not None and val_col is not None
-    # Use exploded columns in select; result has 4 rows (2 rows x 2 elements)
-    out = df.select(pos_col.alias("pos"), val_col.alias("val")).collect()
+    df = spark.createDataFrame(data, ["Name", "Values"])
+    # PySpark posexplode returns a single Column; alias assigns output column names.
+    out = df.select(F.posexplode("Values").alias("pos", "val")).collect()
     assert len(out) == 4
     assert all("pos" in r and "val" in r for r in out)
     vals = [r["val"] for r in out]
@@ -37,8 +35,7 @@ def test_posexplode_column_still_works() -> None:
     """posexplode(F.col("Values")) still works."""
     spark = SparkSession.builder.appName("test_280").getOrCreate()
     data = [{"Name": "Alice", "Values": [1, 2, 3]}]
-    df = spark.createDataFrame(data, [("Name", "string"), ("Values", "array")])
-    pos_col, val_col = F.posexplode(F.col("Values"))
-    out = df.select(pos_col.alias("pos"), val_col.alias("val")).collect()
+    df = spark.createDataFrame(data, ["Name", "Values"])
+    out = df.select(F.posexplode(F.col("Values")).alias("pos", "val")).collect()
     assert len(out) == 3
     assert [r["val"] for r in out] == [1, 2, 3]

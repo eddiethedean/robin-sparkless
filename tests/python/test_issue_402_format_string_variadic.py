@@ -21,7 +21,7 @@ def test_format_string_variadic_columns() -> None:
     spark = _spark()
     df = spark.createDataFrame(
         [{"a": 1, "b": 2}, {"a": 10, "b": 20}],
-        schema=[("a", "int"), ("b", "int")],
+        schema=["a", "b"],
     )
     result = df.select(
         F.format_string("a=%d b=%d", F.col("a"), F.col("b")).alias("fmt")
@@ -31,15 +31,15 @@ def test_format_string_variadic_columns() -> None:
     assert result[1]["fmt"] == "a=10 b=20"
 
 
-def test_printf_variadic_columns() -> None:
-    """printf(format, col1, col2, ...) also accepts variadic columns."""
+def test_format_string_string_int() -> None:
+    """format_string with %s and %d (PySpark format_string supports variadic columns)."""
     spark = _spark()
     df = spark.createDataFrame(
         [{"x": "hello", "y": 42}],
-        schema=[("x", "string"), ("y", "int")],
+        schema=["x", "y"],
     )
     result = df.select(
-        F.printf("%s: %d", F.col("x"), F.col("y")).alias("out")
+        F.format_string("%s: %d", F.col("x"), F.col("y")).alias("out")
     ).collect()
     assert len(result) == 1
     assert result[0]["out"] == "hello: 42"

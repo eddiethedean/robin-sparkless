@@ -10,54 +10,86 @@ from __future__ import annotations
 
 
 def test_string_plus_numeric_with_column_no_cast() -> None:
-    """with_column('x', col('a') + col('b')) with a=string, b=bigint works (issue #201)."""
-    import robin_sparkless as rs
+    """withColumn('x', col('a') + col('b')) with a=string, b=bigint works (issue #201)."""
+    from tests.python.utils import get_functions, get_spark, _row_to_dict, assert_rows_equal
 
-    spark = rs.SparkSession.builder().app_name("test").get_or_create()
+    F = get_functions()
+
+    spark = get_spark("issue_201")
     df = spark.createDataFrame(
         [{"a": "10", "b": 2}],
-        [("a", "string"), ("b", "bigint")],
+        ["a", "b"],
     )
-    result = df.with_column("x", rs.col("a") + rs.col("b"))
-    rows = result.collect()
-    assert rows == [{"a": "10", "b": 2, "x": 12.0}]
+    result = df.withColumn("x", F.col("a") + F.col("b"))
+    rows = [_row_to_dict(r) for r in result.collect()]
+    assert_rows_equal(rows, [{"a": "10", "b": 2, "x": 12.0}], order_matters=True)
 
 
 def test_string_arithmetic_ops_implicit_coercion() -> None:
     """All arithmetic ops coerce string to numeric (add, sub, mul, div)."""
-    import robin_sparkless as rs
+    from tests.python.utils import (
+        get_functions,
+        get_spark,
+        _row_to_dict,
+        assert_rows_equal,
+    )
 
-    spark = rs.SparkSession.builder().app_name("test").get_or_create()
+    F = get_functions()
+
+    spark = get_spark("issue_201")
     df = spark.createDataFrame(
         [{"a": "10", "b": 2}, {"a": "20", "b": 3}],
-        [("a", "string"), ("b", "bigint")],
+        ["a", "b"],
     )
-    assert df.with_column("x", rs.col("a") + rs.col("b")).collect() == [
-        {"a": "10", "b": 2, "x": 12.0},
-        {"a": "20", "b": 3, "x": 23.0},
+    rows_add = [
+        _row_to_dict(r) for r in df.withColumn("x", F.col("a") + F.col("b")).collect()
     ]
-    assert df.with_column("x", rs.col("a") - rs.col("b")).collect() == [
-        {"a": "10", "b": 2, "x": 8.0},
-        {"a": "20", "b": 3, "x": 17.0},
+    assert_rows_equal(
+        rows_add,
+        [
+            {"a": "10", "b": 2, "x": 12.0},
+            {"a": "20", "b": 3, "x": 23.0},
+        ],
+        order_matters=True,
+    )
+    rows_sub = [
+        _row_to_dict(r) for r in df.withColumn("x", F.col("a") - F.col("b")).collect()
     ]
-    assert df.with_column("x", rs.col("a") * rs.col("b")).collect() == [
-        {"a": "10", "b": 2, "x": 20.0},
-        {"a": "20", "b": 3, "x": 60.0},
+    assert_rows_equal(
+        rows_sub,
+        [
+            {"a": "10", "b": 2, "x": 8.0},
+            {"a": "20", "b": 3, "x": 17.0},
+        ],
+        order_matters=True,
+    )
+    rows_mul = [
+        _row_to_dict(r) for r in df.withColumn("x", F.col("a") * F.col("b")).collect()
     ]
-    rows_div = df.with_column("x", rs.col("a") / rs.col("b")).collect()
+    assert_rows_equal(
+        rows_mul,
+        [
+            {"a": "10", "b": 2, "x": 20.0},
+            {"a": "20", "b": 3, "x": 60.0},
+        ],
+        order_matters=True,
+    )
+    rows_div = df.withColumn("x", F.col("a") / F.col("b")).collect()
     assert rows_div[0]["x"] == 5.0 and rows_div[1]["x"] == 20.0 / 3.0
 
 
 def test_invalid_string_becomes_null() -> None:
     """Invalid numeric strings in arithmetic yield null (PySpark semantics)."""
-    import robin_sparkless as rs
+    from tests.python.utils import get_functions, get_spark
 
-    spark = rs.SparkSession.builder().app_name("test").get_or_create()
+    F = get_functions()
+
+    spark = get_spark("issue_201")
     df = spark.createDataFrame(
         [{"s": "10"}, {"s": "bad"}, {"s": "5"}],
-        [("s", "string")],
+        ["s"],
     )
-    result = df.with_column("x", rs.col("s") + rs.lit(1)).collect()
+    result = df.withColumn("x", F.col("s") + F.lit(1)).collect()
     assert result[0]["x"] == 11.0
     assert result[1]["x"] is None
     assert result[2]["x"] == 6.0

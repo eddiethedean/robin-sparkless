@@ -10,11 +10,11 @@ from __future__ import annotations
 
 import pytest
 
-import robin_sparkless as rs
+from tests.python.utils import get_spark
 
 
-def _spark() -> rs.SparkSession:
-    return rs.SparkSession.builder().app_name("issue_419").get_or_create()
+def _spark():
+    return get_spark("issue_419")
 
 
 def _supports_single_column_schema() -> bool:
@@ -37,7 +37,8 @@ def test_single_column_schema_bigint() -> None:
     df = spark.createDataFrame([1, 2, 3], "bigint")
     out = df.collect()
     assert len(out) == 3
-    assert list(out[0].keys()) == ["value"]
+    from tests.python.utils import _row_to_dict
+    assert list(_row_to_dict(out[0]).keys()) == ["value"]
     assert [r["value"] for r in out] == [1, 2, 3]
 
 

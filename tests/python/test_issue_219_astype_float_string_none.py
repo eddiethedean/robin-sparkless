@@ -1,20 +1,19 @@
-"""Tests for issue #219: TypeError NoneType in astype float/string conversions.
+"""Tests for issue #219: TypeError NoneType in astype float/string conversions (PySpark parity).
 
 Float/string cast with nulls must not raise TypeError. Nulls are returned as None
 in collect(); callers should check 'value is None' before using 'x in value'.
 """
 
-import robin_sparkless as rs
+from pyspark.sql import functions as F
 
 
-def test_float_to_string_with_nulls() -> None:
+def test_float_to_string_with_nulls(spark) -> None:
     """Exact scenario from #219: float column with None, cast to string, collect."""
-    spark = rs.SparkSession.builder().app_name("test").get_or_create()
     df = spark.createDataFrame(
         [{"f": 1.5}, {"f": None}, {"f": 2.0}],
-        [("f", "double")],
+        schema=["f"],
     )
-    result = df.with_column("s", rs.col("f").cast("string"))
+    result = df.withColumn("s", F.col("f").cast("string"))
     rows = result.collect()
     assert len(rows) == 3
     assert rows[0]["f"] == 1.5 and rows[0]["s"] == "1.5"
@@ -22,14 +21,13 @@ def test_float_to_string_with_nulls() -> None:
     assert rows[2]["f"] == 2.0 and rows[2]["s"] == "2.0"
 
 
-def test_string_to_float_with_nulls() -> None:
+def test_string_to_float_with_nulls(spark) -> None:
     """String column with nulls cast to double; nulls stay None."""
-    spark = rs.SparkSession.builder().app_name("test").get_or_create()
     df = spark.createDataFrame(
         [{"s": "1.5"}, {"s": None}, {"s": "2.0"}],
-        [("s", "string")],
+        schema=["s"],
     )
-    result = df.with_column("f", rs.col("s").cast("double"))
+    result = df.withColumn("f", F.col("s").cast("double"))
     rows = result.collect()
     assert len(rows) == 3
     assert rows[0]["s"] == "1.5" and rows[0]["f"] == 1.5
@@ -37,18 +35,16 @@ def test_string_to_float_with_nulls() -> None:
     assert rows[2]["s"] == "2.0" and rows[2]["f"] == 2.0
 
 
-def test_collect_null_safe_iteration() -> None:
+def test_collect_null_safe_iteration(spark) -> None:
     """Iterating over rows and keys/values must not raise when values are None."""
-    spark = rs.SparkSession.builder().app_name("test").get_or_create()
     df = spark.createDataFrame(
         [{"f": 1.0}, {"f": None}],
-        [("f", "double")],
+        schema=["f"],
     )
-    result = df.with_column("s", rs.col("f").cast("string"))
+    result = df.withColumn("s", F.col("f").cast("string"))
     rows = result.collect()
     for row in rows:
-        for key in row:
-            val = row[key]
+        for key, val in row.asDict().items():
             # Safe: do not use 'x in val' when val may be None
             if val is not None:
                 assert isinstance(val, (str, float, int))

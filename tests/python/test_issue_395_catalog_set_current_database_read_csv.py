@@ -5,30 +5,24 @@ from __future__ import annotations
 import tempfile
 from pathlib import Path
 
-import robin_sparkless as rs
 
-
-def test_catalog_set_current_database() -> None:
+def test_catalog_set_current_database(spark) -> None:
     """spark.catalog.setCurrentDatabase(name) exists and runs (no-op for default)."""
-    spark = rs.SparkSession.builder().app_name("issue_395").get_or_create()
     spark.catalog.setCurrentDatabase("default")
     assert spark.catalog.currentDatabase() == "default"
 
 
-def test_read_csv() -> None:
+def test_read_csv(spark) -> None:
     """spark.read.csv(path) reads a CSV file (PySpark parity)."""
-    spark = rs.SparkSession.builder().app_name("issue_395").get_or_create()
     with tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False) as f:
         f.write("a,b\n1,2\n3,4\n")
         path = f.name
     try:
-        df = spark.read.csv(path)
+        # In PySpark, header must be specified explicitly to avoid reading the header row as data.
+        df = spark.read.option("header", True).csv(path)
         rows = df.collect()
         assert len(rows) == 2
-        assert list(rows[0].keys()) == ["a", "b"] or list(rows[0].keys()) == [
-            "column_1",
-            "column_2",
-        ]
+        assert list(rows[0].asDict().keys()) == ["a", "b"]
         # With header, columns are a,b (CSV may infer string or int depending on backend)
         if "a" in rows[0]:
             a_val, b_val = rows[0]["a"], rows[0]["b"]
@@ -37,9 +31,8 @@ def test_read_csv() -> None:
         Path(path).unlink(missing_ok=True)
 
 
-def test_read_csv_via_format_load() -> None:
+def test_read_csv_via_format_load(spark) -> None:
     """spark.read.format('csv').load(path) also works."""
-    spark = rs.SparkSession.builder().app_name("issue_395").get_or_create()
     with tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False) as f:
         f.write("x,y\n10,20\n")
         path = f.name

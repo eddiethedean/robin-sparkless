@@ -1,23 +1,23 @@
 """Tests for issue #368: duplicate column names in groupBy().agg() result (PySpark parity)."""
 
-import robin_sparkless as rs
+from tests.python.utils import get_functions, get_spark
+
+F = get_functions()
 
 
 def test_group_by_agg_sum_avg_same_column_no_duplicate_error() -> None:
     """groupBy('g').agg(sum('value'), avg('value')) no longer raises duplicate column name."""
-    spark = rs.SparkSession.builder().app_name("repro").get_or_create()
+    spark = get_spark("issue_368")
     # PySpark-style: createDataFrame with list of dicts + schema, or list of rows + names
     df = spark.createDataFrame(
         [("a", 10), ("a", 20)],
         ["g", "value"],
     )
     result = (
-        df.group_by("g")
+        df.groupBy("g")
         .agg(
-            [
-                rs.sum(rs.col("value")),
-                rs.avg(rs.col("value")),
-            ]
+            F.sum(F.col("value")).alias("sum(value)"),
+            F.avg(F.col("value")).alias("avg(value)"),
         )
         .collect()
     )
@@ -39,10 +39,14 @@ def test_group_by_agg_sum_avg_same_column_no_duplicate_error() -> None:
 
 def test_global_agg_duplicate_names() -> None:
     """df.agg(sum('x'), avg('x')) with duplicate output names is disambiguated."""
-    spark = rs.SparkSession.builder().app_name("repro").get_or_create()
+    spark = get_spark("issue_368")
     df = spark.createDataFrame([(10,), (20,)], ["x"])
-    result = df.agg([rs.sum(rs.col("x")), rs.avg(rs.col("x"))]).collect()
+    result = df.agg(
+        F.sum(F.col("x")).alias("sum(x)"),
+        F.avg(F.col("x")).alias("avg(x)"),
+    ).collect()
     assert len(result) == 1
-    row = result[0]
+    from tests.python.utils import _row_to_dict
+    row = _row_to_dict(result[0])
     assert 30 in row.values()  # sum
     assert 15.0 in row.values() or 15 in row.values()  # avg

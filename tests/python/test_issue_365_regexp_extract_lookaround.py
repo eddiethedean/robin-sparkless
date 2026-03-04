@@ -18,7 +18,7 @@ F = _imports.F
 def test_regexp_extract_lookbehind_issue_repro() -> None:
     """Lookbehind (?<=hello )\\w+ extracts 'world' from 'hello world' (issue repro)."""
     spark = SparkSession.builder.appName("issue_365").getOrCreate()
-    df = spark.createDataFrame([{"s": "hello world"}], [("s", "string")])
+    df = spark.createDataFrame([{"s": "hello world"}], ["s"])
     rows = df.select(
         F.regexp_extract(F.col("s"), r"(?<=hello )\w+", 0).alias("extracted")
     ).collect()
@@ -28,7 +28,7 @@ def test_regexp_extract_lookbehind_issue_repro() -> None:
 def test_regexp_extract_lookahead() -> None:
     """Lookahead: digits followed by 'y' -> capture group 1 gives '42'."""
     spark = SparkSession.builder.appName("issue_365").getOrCreate()
-    df = spark.createDataFrame([{"s": "x42y"}], [("s", "string")])
+    df = spark.createDataFrame([{"s": "x42y"}], ["s"])
     # (\d+)(?=y) = digits followed by 'y' (positive lookahead); group 1 = "42"
     rows = df.select(
         F.regexp_extract(F.col("s"), r"(\d+)(?=y)", 1).alias("extracted")
@@ -39,7 +39,7 @@ def test_regexp_extract_lookahead() -> None:
 def test_regexp_extract_lookbehind_digits() -> None:
     """Lookbehind: digits after space (?<=\\s)\\d+."""
     spark = SparkSession.builder.appName("issue_365").getOrCreate()
-    df = spark.createDataFrame([{"s": "price 99"}], [("s", "string")])
+    df = spark.createDataFrame([{"s": "price 99"}], ["s"])
     rows = df.select(
         F.regexp_extract(F.col("s"), r"(?<=\s)\d+", 0).alias("extracted")
     ).collect()
@@ -49,7 +49,7 @@ def test_regexp_extract_lookbehind_digits() -> None:
 def test_regexp_extract_without_lookaround_unchanged() -> None:
     """Patterns without lookaround still use Polars path (no regression)."""
     spark = SparkSession.builder.appName("issue_365").getOrCreate()
-    df = spark.createDataFrame([{"s": "a1b2c3"}], [("s", "string")])
+    df = spark.createDataFrame([{"s": "a1b2c3"}], ["s"])
     rows = df.select(
         F.regexp_extract(F.col("s"), r"\d+", 0).alias("extracted")
     ).collect()

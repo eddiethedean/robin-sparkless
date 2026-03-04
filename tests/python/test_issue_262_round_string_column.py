@@ -20,9 +20,9 @@ def test_round_string_column_implicit_cast() -> None:
     spark = SparkSession.builder.appName("test_262").getOrCreate()
     df = spark.createDataFrame(
         [{"val": "10.4"}, {"val": "9.6"}],
-        [("val", "string")],
+        ["val"],
     )
-    df = df.with_column("rounded", F.round(F.col("val")))
+    df = df.withColumn("rounded", F.round(F.col("val")))
     out = df.collect()
     assert len(out) == 2
     assert out[0]["val"] == "10.4"
@@ -36,9 +36,9 @@ def test_round_string_column_with_scale() -> None:
     spark = SparkSession.builder.appName("test_262").getOrCreate()
     df = spark.createDataFrame(
         [{"val": "10.44"}, {"val": "9.66"}],
-        [("val", "string")],
+        ["val"],
     )
-    df = df.with_column("rounded", F.round(F.col("val"), 1))
+    df = df.withColumn("rounded", F.round(F.col("val"), 1))
     out = df.collect()
     assert len(out) == 2
     assert out[0]["rounded"] == 10.4
@@ -50,9 +50,9 @@ def test_round_string_column_strips_whitespace() -> None:
     spark = SparkSession.builder.appName("test_272").getOrCreate()
     df = spark.createDataFrame(
         [{"val": "  10.6  "}, {"val": "\t20.7"}],
-        [("val", "string")],
+        ["val"],
     )
-    df = df.with_column("rounded", F.round(F.col("val")))
+    df = df.withColumn("rounded", F.round(F.col("val")))
     out = df.collect()
     assert len(out) == 2
     assert out[0]["rounded"] == 11.0

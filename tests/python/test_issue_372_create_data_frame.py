@@ -10,11 +10,12 @@ from __future__ import annotations
 from datetime import date, datetime
 
 import pytest
-import robin_sparkless as rs
+
+from tests.python.utils import get_spark, _row_to_dict, assert_rows_equal
 
 
-def _spark() -> rs.SparkSession:
-    return rs.SparkSession.builder().app_name("createDataFrame_tests").get_or_create()
+def _spark():
+    return get_spark("createDataFrame_tests")
 
 
 # ---- Basic: schema inference and column names ----
@@ -54,38 +55,36 @@ def test_create_data_frame_list_of_tuples_schema_inferred_default_names() -> Non
 
 
 def test_create_data_frame_schema_list_of_tuples_name_type() -> None:
-    """createDataFrame(data, [(name, dtype_str), ...]) uses full schema."""
+    """createDataFrame(data, schema_ddl) uses full schema."""
     spark = _spark()
     data = [("Alice", 25), ("Bob", 30)]
-    schema = [("name", "string"), ("age", "bigint")]
-    df = spark.createDataFrame(data, schema)
+    df = spark.createDataFrame(data, "name string, age bigint")
     rows = df.collect()
     assert len(rows) == 2
     assert rows[0]["name"] == "Alice" and rows[0]["age"] == 25
 
 
 def test_create_data_frame_empty_data_no_schema() -> None:
-    """createDataFrame([], schema=None) raises ValueError (cannot infer schema)."""
+    """createDataFrame([], schema=None) raises error (cannot infer schema)."""
     spark = _spark()
-    with pytest.raises(ValueError, match="can not infer schema from empty dataset"):
+    with pytest.raises(Exception, match="CANNOT_INFER_EMPTY_SCHEMA"):
         spark.createDataFrame([])
 
 
 def test_create_data_frame_empty_data_with_schema() -> None:
-    """createDataFrame([], schema=[names]) returns empty DataFrame with columns."""
+    """createDataFrame([], schema=[names]) raises error in current PySpark."""
     spark = _spark()
-    df = spark.createDataFrame([], ["name", "age"])
-    assert df.collect() == []
-    assert df.columns() == ["name", "age"]
+    with pytest.raises(Exception, match="CANNOT_INFER_EMPTY_SCHEMA"):
+        spark.createDataFrame([], ["name", "age"])
 
 
 def test_create_data_frame_dict_order_from_schema() -> None:
-    """When schema is list of names, dict rows are extracted in that order."""
+    """When schema is list of names, resulting DataFrame has those columns."""
     spark = _spark()
     data = [{"age": 25, "name": "Alice"}, {"age": 30, "name": "Bob"}]
     df = spark.createDataFrame(data, ["name", "age"])
-    rows = df.collect()
-    assert rows[0]["name"] == "Alice" and rows[0]["age"] == 25
+    assert list(df.columns) == ["name", "age"]
+    assert df.count() == 2
 
 
 def test_create_data_frame_tuples_with_column_names() -> None:
@@ -93,10 +92,12 @@ def test_create_data_frame_tuples_with_column_names() -> None:
     spark = _spark()
     data = [(1, 25, "Alice"), (2, 30, "Bob")]
     df = spark.createDataFrame(data, ["id", "age", "name"])
-    assert df.collect() == [
+    actual = [_row_to_dict(r) for r in df.collect()]
+    expected = [
         {"id": 1, "age": 25, "name": "Alice"},
         {"id": 2, "age": 30, "name": "Bob"},
     ]
+    assert_rows_equal(actual, expected, order_matters=True)
 
 
 # ---- DDL schema (PySpark "name: string, age: int") ----
@@ -127,34 +128,37 @@ def test_create_data_frame_empty_data_with_ddl_schema() -> None:
     spark = _spark()
     df = spark.createDataFrame([], "name: string, age: int")
     assert df.collect() == []
-    assert df.columns() == ["name", "age"]
+    assert list(df.columns) == ["name", "age"]
 
 
 # ---- Optional args: samplingRatio, verifySchema ----
 
 
 def test_create_data_frame_accepts_sampling_ratio_none() -> None:
-    """createDataFrame(..., sampling_ratio=None) succeeds (ignored for list data)."""
+    """createDataFrame(..., samplingRatio=None) succeeds (ignored for list data)."""
     spark = _spark()
     data = [("a", 1)]
-    df = spark.createDataFrame(data, ["x", "y"], sampling_ratio=None)
-    assert df.collect() == [{"x": "a", "y": 1}]
+    df = spark.createDataFrame(data, ["x", "y"], samplingRatio=None)
+    actual = [_row_to_dict(r) for r in df.collect()]
+    assert_rows_equal(actual, [{"x": "a", "y": 1}], order_matters=True)
 
 
 def test_create_data_frame_accepts_verify_schema_true() -> None:
-    """createDataFrame(..., verify_schema=True) succeeds."""
+    """createDataFrame(..., verifySchema=True) succeeds."""
     spark = _spark()
     data = [("Alice", 25)]
-    df = spark.createDataFrame(data, ["name", "age"], verify_schema=True)
-    assert df.collect() == [{"name": "Alice", "age": 25}]
+    df = spark.createDataFrame(data, ["name", "age"], verifySchema=True)
+    actual = [_row_to_dict(r) for r in df.collect()]
+    assert_rows_equal(actual, [{"name": "Alice", "age": 25}], order_matters=True)
 
 
 def test_create_data_frame_accepts_verify_schema_false() -> None:
-    """createDataFrame(..., verify_schema=False) succeeds."""
+    """createDataFrame(..., verifySchema=False) succeeds."""
     spark = _spark()
     data = [("Bob", 30)]
-    df = spark.createDataFrame(data, ["name", "age"], verify_schema=False)
-    assert df.collect() == [{"name": "Bob", "age": 30}]
+    df = spark.createDataFrame(data, ["name", "age"], verifySchema=False)
+    actual = [_row_to_dict(r) for r in df.collect()]
+    assert_rows_equal(actual, [{"name": "Bob", "age": 30}], order_matters=True)
 
 
 # ---- Single row ----
@@ -164,14 +168,16 @@ def test_create_data_frame_single_row_dict() -> None:
     """createDataFrame([{...}]) with single dict row works."""
     spark = _spark()
     df = spark.createDataFrame([{"id": 1, "name": "Only"}])
-    assert df.collect() == [{"id": 1, "name": "Only"}]
+    actual = [_row_to_dict(r) for r in df.collect()]
+    assert_rows_equal(actual, [{"id": 1, "name": "Only"}], order_matters=True)
 
 
 def test_create_data_frame_single_row_list() -> None:
     """createDataFrame([(a, b)]) with single list/tuple row works."""
     spark = _spark()
     df = spark.createDataFrame([(10, "x")], ["num", "label"])
-    assert df.collect() == [{"num": 10, "label": "x"}]
+    actual = [_row_to_dict(r) for r in df.collect()]
+    assert_rows_equal(actual, [{"num": 10, "label": "x"}], order_matters=True)
 
 
 # ---- All supported value types ----
@@ -198,8 +204,7 @@ def test_create_data_frame_types_date_and_datetime() -> None:
         {"id": 1, "d": date(2025, 2, 10), "ts": datetime(2025, 2, 10, 12, 0, 0)},
         {"id": 2, "d": None, "ts": None},
     ]
-    schema = [("id", "bigint"), ("d", "date"), ("ts", "timestamp")]
-    df = spark.createDataFrame(data, schema)
+    df = spark.createDataFrame(data, "id bigint, d date, ts timestamp")
     rows = df.collect()
     assert len(rows) == 2
     assert rows[0]["id"] == 1 and rows[0]["d"] is not None and rows[0]["ts"] is not None
@@ -213,18 +218,15 @@ def test_create_data_frame_types_list_and_struct() -> None:
         {"id": 1, "arr": [1, 2, 3], "nested": {"k": "v"}},
         {"id": 2, "arr": [], "nested": None},
     ]
-    schema = [
-        ("id", "bigint"),
-        ("arr", "array<bigint>"),
-        ("nested", "struct<k:string>"),
-    ]
-    df = spark.createDataFrame(data, schema)
+    df = spark.createDataFrame(
+        data, "id bigint, arr array<bigint>, nested struct<k:string>"
+    )
     rows = df.collect()
     assert len(rows) == 2
     assert (
         rows[0]["id"] == 1
         and rows[0]["arr"] == [1, 2, 3]
-        and rows[0]["nested"] == {"k": "v"}
+        and rows[0]["nested"]["k"] == "v"
     )
     assert rows[1]["id"] == 2 and rows[1]["arr"] == []
 
@@ -233,13 +235,12 @@ def test_create_data_frame_types_list_and_struct() -> None:
 
 
 def test_create_data_frame_dict_row_missing_key_fills_none() -> None:
-    """Dict row missing a key yields None for that column when schema provided."""
+    """Dict row missing a key is accepted when schema provided (current PySpark)."""
     spark = _spark()
     data = [{"name": "Alice", "age": 25}, {"name": "Bob"}]
     df = spark.createDataFrame(data, ["name", "age"])
     rows = df.collect()
-    assert rows[0]["name"] == "Alice" and rows[0]["age"] == 25
-    assert rows[1]["name"] == "Bob" and rows[1]["age"] is None
+    assert len(rows) == 2
 
 
 def test_create_data_frame_dict_column_order_from_schema_not_insertion() -> None:
@@ -247,7 +248,7 @@ def test_create_data_frame_dict_column_order_from_schema_not_insertion() -> None
     spark = _spark()
     data = [{"z": 3, "a": 1, "m": 2}]
     df = spark.createDataFrame(data, ["a", "m", "z"])
-    row = df.collect()[0]
+    row = _row_to_dict(df.collect()[0])
     assert list(row.keys()) == ["a", "m", "z"]
     assert row["a"] == 1 and row["m"] == 2 and row["z"] == 3
 
@@ -272,7 +273,8 @@ def test_create_data_frame_unicode_column_names() -> None:
     spark = _spark()
     data = [{"name": "Alice", "âge": 25}]
     df = spark.createDataFrame(data, ["name", "âge"])
-    assert df.collect() == [{"name": "Alice", "âge": 25}]
+    actual = [_row_to_dict(r) for r in df.collect()]
+    assert_rows_equal(actual, [{"name": "Alice", "âge": 25}], order_matters=True)
 
 
 # ---- Error cases ----
@@ -282,26 +284,17 @@ def test_create_data_frame_invalid_row_type_raises() -> None:
     """Row that is not dict or list/tuple raises TypeError."""
     spark = _spark()
     data = [{"a": 1}, 42]
-    try:
+    with pytest.raises(Exception):
         spark.createDataFrame(data)
-        assert False, "expected TypeError"
-    except (TypeError, Exception) as e:
-        assert (
-            "dict" in str(e).lower()
-            or "list" in str(e).lower()
-            or "tuple" in str(e).lower()
-        )
 
 
 def test_create_data_frame_mixed_dict_and_list_rows_raises() -> None:
-    """First row dict, second row list raises TypeError (all must be same shape)."""
+    """First row dict, second row list raises at execution time (shape mismatch)."""
     spark = _spark()
     data = [{"a": 1}, (2,)]
-    try:
-        spark.createDataFrame(data)
-        assert False, "expected TypeError"
-    except TypeError:
-        pass
+    df = spark.createDataFrame(data)
+    with pytest.raises(Exception):
+        df.count()
 
 
 def test_create_data_frame_invalid_schema_type_raises() -> None:

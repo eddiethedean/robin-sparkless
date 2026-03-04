@@ -7,37 +7,41 @@ eq_null_safe(other) so filter expressions using null-safe equality work.
 
 from __future__ import annotations
 
-import robin_sparkless as rs
+from tests.python.utils import get_functions, get_spark
+
+F = get_functions()
 
 
 def test_column_has_eq_null_safe() -> None:
-    """Column has eq_null_safe method (PySpark parity)."""
-    c = rs.col("a")
-    assert hasattr(c, "eq_null_safe")
+    """Column has eqNullSafe / eq_null_safe (PySpark parity)."""
+    c = F.col("a")
+    assert hasattr(c, "eqNullSafe") or hasattr(c, "eq_null_safe")
 
 
 def test_filter_eq_null_safe_lit_none_returns_null_row() -> None:
     """df.filter(col("a").eq_null_safe(lit(None))) returns only the row where a is null."""
-    spark = rs.SparkSession.builder().app_name("eq_null_safe").get_or_create()
+    spark = get_spark("eq_null_safe")
     data = [{"a": 1}, {"a": None}, {"a": 3}]
-    schema = [("a", "int")]
-    df = spark.createDataFrame(data, schema)
-    out = df.filter(rs.col("a").eq_null_safe(rs.lit(None))).collect()
+    df = spark.createDataFrame(data, ["a"])
+    col_a = F.col("a")
+    eq_safe = getattr(col_a, "eqNullSafe", None) or getattr(col_a, "eq_null_safe")
+    out = df.filter(eq_safe(F.lit(None))).collect()
     assert len(out) == 1
     assert out[0]["a"] is None
 
 
 def test_filter_eq_null_safe_column_both_null_true() -> None:
     """Two columns: where both are null, eq_null_safe is true."""
-    spark = rs.SparkSession.builder().app_name("eq_null_safe").get_or_create()
+    spark = get_spark("eq_null_safe")
     data = [
         {"a": 1, "b": 2},
         {"a": None, "b": None},
         {"a": 3, "b": 4},
     ]
-    schema = [("a", "int"), ("b", "int")]
-    df = spark.createDataFrame(data, schema)
-    out = df.filter(rs.col("a").eq_null_safe(rs.col("b"))).collect()
+    df = spark.createDataFrame(data, ["a", "b"])
+    col_a = F.col("a")
+    eq_safe = getattr(col_a, "eqNullSafe", None) or getattr(col_a, "eq_null_safe")
+    out = df.filter(eq_safe(F.col("b"))).collect()
     # Rows where a and b are equal (including both null): (1,2) no, (null,null) yes, (3,4) no
     assert len(out) == 1
     assert out[0]["a"] is None and out[0]["b"] is None

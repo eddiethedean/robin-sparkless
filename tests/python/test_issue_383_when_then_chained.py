@@ -16,15 +16,12 @@ def test_when_then_when_then_otherwise() -> None:
     df = spark.createDataFrame(
         [(1, "a"), (2, "b"), (3, "c"), (4, "d")], ["id", "label"]
     )
-    out = df.with_column(
+    out = df.withColumn(
         "tier",
-        F.when(F.col("id") == F.lit(1))
-        .then(F.lit("first"))
-        .when(F.col("id") == F.lit(2))
-        .then(F.lit("second"))
-        .when(F.col("id") == F.lit(3))
-        .then(F.lit("third"))
-        .otherwise(F.lit("other")),
+        F.when(F.col("id") == 1, "first")
+        .when(F.col("id") == 2, "second")
+        .when(F.col("id") == 3, "third")
+        .otherwise("other"),
     )
     rows = out.collect()
     assert len(rows) == 4
@@ -39,11 +36,9 @@ def test_when_then_otherwise_single_branch_unchanged() -> None:
     """Single when().then().otherwise() still works as before."""
     spark = SparkSession.builder.appName("issue_383").getOrCreate()
     df = spark.createDataFrame([(10,), (25,)], ["age"])
-    out = df.with_column(
+    out = df.withColumn(
         "group",
-        F.when(F.col("age") > F.lit(18))
-        .then(F.lit("adult"))
-        .otherwise(F.lit("minor")),
+        F.when(F.col("age") > 18, "adult").otherwise("minor"),
     )
     rows = out.collect()
     assert len(rows) == 2
@@ -57,11 +52,9 @@ def test_chained_when_in_select() -> None:
     df = spark.createDataFrame([(1,), (2,), (3,)], ["x"])
     out = df.select(
         F.col("x"),
-        F.when(F.col("x") == F.lit(1))
-        .then(F.lit("one"))
-        .when(F.col("x") == F.lit(2))
-        .then(F.lit("two"))
-        .otherwise(F.lit("many"))
+        F.when(F.col("x") == 1, "one")
+        .when(F.col("x") == 2, "two")
+        .otherwise("many")
         .alias("word"),
     )
     rows = out.collect()

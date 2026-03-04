@@ -1,5 +1,5 @@
 """
-Pytest fixtures for robin_sparkless Python tests.
+Pytest fixtures for Spark DataFrame tests.
 
 Use the `spark` fixture in ported tests so session creation is shared and
 tests can assume a single SparkSession. For expected results from PySpark,
@@ -10,9 +10,9 @@ Multiprocessing / pytest-xdist: When using pytest-xdist (pytest -n N), call
 _configure_for_multiprocessing() early to reduce worker crashes. This conftest
 does so automatically.
 
-Compatibility: If the sparkless package (4.x) is installed, it is registered
-as robin_sparkless so existing tests that "import robin_sparkless" run
-unchanged. Sparkless uses .builder or .builder() and .app_name() (snake_case).
+Compatibility: When the sparkless package (4.x) is installed and the tests are
+run in non-PySpark mode, it is used directly as the backend. Sparkless uses
+.builder or .builder() and .app_name() (snake_case).
 """
 
 from __future__ import annotations
@@ -39,27 +39,23 @@ if "PYSPARK_PYTHON" not in os.environ:
 if "PYSPARK_DRIVER_PYTHON" not in os.environ:
     os.environ["PYSPARK_DRIVER_PYTHON"] = sys.executable
 
-# In PySpark mode, do not import or alias sparkless/robin_sparkless at all.
+# In PySpark mode, do not import or touch sparkless at all. In non-PySpark mode,
+# configure the real sparkless package directly (no robin_sparkless aliasing).
 if not _is_pyspark_mode():
-    # Compatibility: use sparkless package as robin_sparkless when available
     try:
-        import sparkless
-
-        sys.modules["robin_sparkless"] = sparkless
+        import sparkless as _rs  # type: ignore[import-not-found]
     except ImportError:
-        pass
+        _rs = None  # type: ignore[assignment]
 
     # Limit Polars to single thread for fork-safety with pytest-xdist (issue #178).
     # Must run before any SparkSession/DataFrame operations.
-    import robin_sparkless as _rs  # noqa: F401
-
-    if getattr(_rs, "_configure_for_multiprocessing", None) is not None:
+    if _rs is not None and getattr(_rs, "_configure_for_multiprocessing", None) is not None:
         _rs._configure_for_multiprocessing()
 
 
 @pytest.fixture
 def spark():
-    """Yield a SparkSession: PySpark when MOCK_SPARK_TEST_BACKEND=pyspark, else robin_sparkless."""
+    """Yield a SparkSession: PySpark when MOCK_SPARK_TEST_BACKEND=pyspark, else sparkless."""
     if _is_pyspark_mode():
         from pyspark.sql import SparkSession as PySparkSession
 
@@ -70,7 +66,7 @@ def spark():
         )
         yield session
         return
-    import robin_sparkless as rs
+    import sparkless as rs  # type: ignore[import-not-found]
 
     # .builder() supported by sparkless 4.x (classattr with __call__); else .builder
     b = getattr(rs.SparkSession.builder, "__call__", lambda: rs.SparkSession.builder)()

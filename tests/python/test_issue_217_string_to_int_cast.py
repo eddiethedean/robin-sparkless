@@ -1,20 +1,18 @@
-"""Tests for issue #217: String-to-int cast empty/invalid strings.
+"""Tests for issue #217: String-to-int cast empty/invalid strings (PySpark parity).
 
-Casting empty or invalid strings to int should yield null (Spark/Sparkless parity),
-not raise RuntimeError. Polars strict conversion is replaced by custom parsing.
+Casting empty or invalid strings to int should yield null, not raise.
 """
 
-import robin_sparkless as rs
+from pyspark.sql import functions as F
 
 
-def test_cast_empty_and_whitespace_string_to_int() -> None:
+def test_cast_empty_and_whitespace_string_to_int(spark) -> None:
     """Exact scenario from #217: cast('') and cast(' ') -> null."""
-    spark = rs.SparkSession.builder().app_name("test").get_or_create()
     df = spark.createDataFrame(
         [{"text": ""}, {"text": " "}],
-        [("text", "string")],
+        schema=["text"],
     )
-    result = df.with_column("n", rs.col("text").cast("int"))
+    result = df.withColumn("n", F.col("text").cast("int"))
     rows = result.collect()
     assert len(rows) == 2
     assert rows[0]["text"] == ""
@@ -23,14 +21,13 @@ def test_cast_empty_and_whitespace_string_to_int() -> None:
     assert rows[1]["n"] is None
 
 
-def test_cast_invalid_strings_to_int_null() -> None:
+def test_cast_invalid_strings_to_int_null(spark) -> None:
     """#217 affected: hello, abc123, '' -> null."""
-    spark = rs.SparkSession.builder().app_name("test").get_or_create()
     df = spark.createDataFrame(
         [{"s": "hello"}, {"s": "abc123"}, {"s": ""}, {"s": "42"}],
-        [("s", "string")],
+        schema=["s"],
     )
-    result = df.with_column("n", rs.col("s").cast("int"))
+    result = df.withColumn("n", F.col("s").cast("int"))
     rows = result.collect()
     assert len(rows) == 4
     assert rows[0]["n"] is None
@@ -39,27 +36,25 @@ def test_cast_invalid_strings_to_int_null() -> None:
     assert rows[3]["n"] == 42
 
 
-def test_try_cast_invalid_to_int_null() -> None:
+def test_try_cast_invalid_to_int_null(spark) -> None:
     """try_cast also yields null for invalid."""
-    spark = rs.SparkSession.builder().app_name("test").get_or_create()
     df = spark.createDataFrame(
         [{"s": "1"}, {"s": "x"}],
-        [("s", "string")],
+        schema=["s"],
     )
-    result = df.with_column("n", rs.try_cast(rs.col("s"), "int"))
+    result = df.withColumn("n", F.col("s").cast("int"))
     rows = result.collect()
     assert rows[0]["n"] == 1
     assert rows[1]["n"] is None
 
 
-def test_cast_valid_string_to_long() -> None:
+def test_cast_valid_string_to_long(spark) -> None:
     """cast to long/bigint works; invalid -> null."""
-    spark = rs.SparkSession.builder().app_name("test").get_or_create()
     df = spark.createDataFrame(
         [{"s": "9999999999"}, {"s": "bad"}],
-        [("s", "string")],
+        schema=["s"],
     )
-    result = df.with_column("n", rs.col("s").cast("long"))
+    result = df.withColumn("n", F.col("s").cast("long"))
     rows = result.collect()
     assert rows[0]["n"] == 9999999999
     assert rows[1]["n"] is None

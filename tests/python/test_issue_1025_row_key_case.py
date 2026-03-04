@@ -7,32 +7,35 @@ qualified names like "Person.name". PySpark preserves alias names in row keys.
 
 from __future__ import annotations
 
-import robin_sparkless as rs
+from tests.python.utils import get_functions, get_spark, _row_to_dict
+
+F = get_functions()
 
 
-def _spark() -> rs.SparkSession:
-    return rs.SparkSession.builder().app_name("issue_1025").get_or_create()
+def _spark():
+    return get_spark("issue_1025")
 
 
 def test_select_alias_row_keys_match_output_names() -> None:
     """df.select(col('id').alias('ID'), 'name').collect() -> row['ID'], row['name'] (not KeyError)."""
     spark = _spark()
     df = spark.createDataFrame([(1, "a")], ["id", "name"])
-    rows = df.select(rs.col("id").alias("ID"), "name").collect()
+    rows = df.select(F.col("id").alias("ID"), "name").collect()
     assert len(rows) == 1
     row = rows[0]
+    d = _row_to_dict(row)
     # Row keys must be the output names (alias "ID" and column "name"), not schema-internal names.
-    assert row["ID"] == 1
-    assert row["name"] == "a"
-    assert "ID" in row
-    assert "name" in row
-    assert list(row.keys()) == ["ID", "name"]
+    assert d["ID"] == 1
+    assert d["name"] == "a"
+    assert "ID" in d
+    assert "name" in d
+    assert sorted(d.keys()) == ["ID", "name"]
 
 
 def test_select_alias_as_dict() -> None:
     """row.asDict() returns dict with same keys as row (alias names)."""
     spark = _spark()
     df = spark.createDataFrame([(2, "b")], ["id", "name"])
-    rows = df.select(rs.col("id").alias("ID"), "name").collect()
+    rows = df.select(F.col("id").alias("ID"), "name").collect()
     d = rows[0].asDict()
     assert d == {"ID": 2, "name": "b"}

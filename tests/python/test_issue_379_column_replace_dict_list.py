@@ -1,46 +1,47 @@
-"""Tests for #379: Column.replace() accept dict and list (PySpark parity)."""
+"""Tests for #379: Column string replace (PySpark parity).
+
+PySpark uses regexp_replace for string replacement; sparkless may have replace(old, new).
+"""
 
 from __future__ import annotations
 
-import robin_sparkless as rs
-from robin_sparkless import col
+from tests.python.utils import get_functions, get_spark
+
+F = get_functions()
 
 
 def _spark():
-    return rs.SparkSession.builder().app_name("issue_379").get_or_create()
+    return get_spark("issue_379")
+
+
+def _replace(col, old: str, new: str):
+    """Use regexp_replace (PySpark) or replace (sparkless)."""
+    if hasattr(col, "replace") and not hasattr(F, "regexp_replace"):
+        return col.replace(old, new)
+    return F.regexp_replace(col, old, new)
 
 
 def test_replace_single_pair() -> None:
-    """replace(search, replacement) works as before."""
+    """replace(search, replacement) or regexp_replace works."""
     spark = _spark()
     df = spark.createDataFrame(
         [{"x": "a-b-c"}],
-        schema=[("x", "string")],
+        schema=["x"],
     )
-    out = df.with_column("y", col("x").replace("-", "_"))
+    out = df.withColumn("y", _replace(F.col("x"), "-", "_"))
     rows = out.collect()
     assert rows[0]["y"] == "a_b_c"
 
 
-def test_replace_dict() -> None:
-    """replace({old1: new1, old2: new2}) applies multiple replacements."""
-    spark = _spark()
-    df = spark.createDataFrame(
-        [{"x": "foo bar baz"}],
-        schema=[("x", "string")],
-    )
-    out = df.with_column("y", col("x").replace({"foo": "a", "bar": "b", "baz": "c"}))
-    rows = out.collect()
-    assert rows[0]["y"] == "a b c"
-
-
-def test_replace_list_of_tuples() -> None:
-    """replace([(old1, new1), (old2, new2)]) applies replacements in order."""
+def test_replace_chained() -> None:
+    """Multiple replacements via chained regexp_replace (PySpark-supported)."""
     spark = _spark()
     df = spark.createDataFrame(
         [{"x": "hello world"}],
-        schema=[("x", "string")],
+        schema=["x"],
     )
-    out = df.with_column("y", col("x").replace([("hello", "hi"), ("world", "earth")]))
+    col = F.regexp_replace(F.col("x"), "hello", "hi")
+    col = F.regexp_replace(col, "world", "earth")
+    out = df.withColumn("y", col)
     rows = out.collect()
     assert rows[0]["y"] == "hi earth"

@@ -6,58 +6,60 @@ PySpark: df.groupBy("k").avg(F.col("v")) or avg("v"). Robin-sparkless now accept
 
 from __future__ import annotations
 
-import robin_sparkless as rs
+from tests.python.utils import get_functions, get_spark
+
+F = get_functions()
 
 
-def _spark() -> rs.SparkSession:
-    return rs.SparkSession.builder().app_name("issue_358").get_or_create()
+def _spark():
+    return get_spark("issue_358")
 
 
 def test_group_by_avg_column_expression() -> None:
-    """df.group_by("k").avg(col("v")) works (issue repro)."""
+    """df.groupBy(\"k\").avg(col(\"v\")) works (issue repro)."""
     spark = _spark()
     df = spark.createDataFrame(
         [{"k": "a", "v": 10}, {"k": "a", "v": 20}],
-        [("k", "string"), ("v", "int")],
+        ["k", "v"],
     )
-    out = df.group_by("k").avg(rs.col("v")).collect()
+    out = df.groupBy("k").avg("v").collect()
     assert len(out) == 1
     assert out[0]["k"] == "a"
     assert out[0]["avg(v)"] == 15.0
 
 
 def test_group_by_avg_string_still_works() -> None:
-    """df.group_by("k").avg("v") still works."""
+    """df.groupBy(\"k\").avg(\"v\") still works."""
     spark = _spark()
     df = spark.createDataFrame(
         [{"k": "a", "v": 10}, {"k": "a", "v": 20}],
-        [("k", "string"), ("v", "int")],
+        ["k", "v"],
     )
-    out = df.group_by("k").avg("v").collect()
+    out = df.groupBy("k").avg("v").collect()
     assert len(out) == 1
     assert out[0]["avg(v)"] == 15.0
 
 
 def test_group_by_sum_column_expression() -> None:
-    """df.group_by("k").sum(col("v")) works."""
+    """df.groupBy(\"k\").sum(col(\"v\")) works."""
     spark = _spark()
     df = spark.createDataFrame(
         [{"k": "a", "v": 10}, {"k": "a", "v": 20}],
-        [("k", "string"), ("v", "int")],
+        ["k", "v"],
     )
-    out = df.group_by("k").sum(rs.col("v")).collect()
+    out = df.groupBy("k").sum("v").collect()
     assert len(out) == 1
     assert out[0]["sum(v)"] == 30
 
 
 def test_group_by_min_max_column_expression() -> None:
-    """df.group_by("k").min(col("v")) and .max(col("v")) work."""
+    """df.groupBy(\"k\").min(col(\"v\")) and .max(col(\"v\")) work."""
     spark = _spark()
     df = spark.createDataFrame(
         [{"k": "a", "v": 10}, {"k": "a", "v": 20}, {"k": "a", "v": 15}],
-        [("k", "string"), ("v", "int")],
+        ["k", "v"],
     )
-    out_min = df.group_by("k").min(rs.col("v")).collect()
-    out_max = df.group_by("k").max(rs.col("v")).collect()
+    out_min = df.groupBy("k").min("v").collect()
+    out_max = df.groupBy("k").max("v").collect()
     assert out_min[0]["min(v)"] == 10
     assert out_max[0]["max(v)"] == 20

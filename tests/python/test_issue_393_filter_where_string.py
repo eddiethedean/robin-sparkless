@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
-import robin_sparkless as rs
+from tests.python.utils import get_functions, get_spark
+
+F = get_functions()
 
 
 def test_filter_string_sql() -> None:
     """filter with SQL expression string (e.g. 'age > 18') filters rows."""
-    spark = rs.SparkSession.builder().app_name("issue_393").get_or_create()
+    spark = get_spark("issue_393")
     df = spark.createDataFrame(
         [(1, 17, "a"), (2, 18, "b"), (3, 19, "c")],
         ["id", "age", "name"],
@@ -21,7 +23,7 @@ def test_filter_string_sql() -> None:
 
 def test_where_string_sql() -> None:
     """where() is alias for filter(); accepts same SQL string."""
-    spark = rs.SparkSession.builder().app_name("issue_393").get_or_create()
+    spark = get_spark("issue_393")
     df = spark.createDataFrame(
         [(1, "x"), (2, "y"), (3, "x")],
         ["id", "label"],
@@ -34,9 +36,9 @@ def test_where_string_sql() -> None:
 
 def test_filter_column_unchanged() -> None:
     """filter with Column still works (e.g. col('age') > 18)."""
-    spark = rs.SparkSession.builder().app_name("issue_393").get_or_create()
+    spark = get_spark("issue_393")
     df = spark.createDataFrame([(1, 10), (2, 20)], ["a", "b"])
-    out = df.filter(rs.col("b") > 15)
+    out = df.filter(F.col("b") > 15)
     rows = out.collect()
     assert len(rows) == 1
     assert rows[0]["b"] == 20

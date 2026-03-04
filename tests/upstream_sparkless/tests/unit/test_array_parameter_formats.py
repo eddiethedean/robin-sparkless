@@ -12,7 +12,7 @@ Uses conftest spark fixture so PySpark mode gets correct backend (type coercion 
 from tests.fixtures.spark_imports import get_spark_imports
 
 import pytest
-from tests.conftest import is_pyspark_backend
+from tests.upstream_sparkless.tests.conftest import is_pyspark_backend
 
 # Backend-appropriate imports (spark from fixture; PySpark or Robin API)
 imports = get_spark_imports()

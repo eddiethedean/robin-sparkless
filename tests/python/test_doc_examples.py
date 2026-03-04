@@ -1,8 +1,9 @@
 """Verify that code examples from the documentation run correctly."""
 
 import pytest
-import robin_sparkless as rs
+
 from tests.fixtures.spark_imports import get_spark_imports
+from tests.python.utils import get_spark
 
 
 _imports = get_spark_imports()
@@ -11,11 +12,11 @@ F = _imports.F
 
 def test_user_guide_filter() -> None:
     """USER_GUIDE: Filter example."""
-    spark = rs.SparkSession.builder().app_name("doc_test").get_or_create()
+    spark = get_spark("doc_test")
     df = spark.createDataFrame(
         [(1, 25, "Alice"), (2, 30, "Bob"), (3, 35, "Charlie")], ["id", "age", "name"]
     )
-    adults = df.filter(rs.col("age") > rs.lit(25))
+    adults = df.filter(F.col("age") > F.lit(25))
     rows = adults.collect()
     assert len(rows) == 2
     assert rows[0]["age"] == 30
@@ -24,19 +25,15 @@ def test_user_guide_filter() -> None:
 
 def test_user_guide_when_then_otherwise() -> None:
     """USER_GUIDE: when/then/otherwise nested example."""
-    spark = rs.SparkSession.builder().app_name("doc_test").get_or_create()
+    spark = get_spark("doc_test")
     df = spark.createDataFrame(
         [(1, 10, "a"), (2, 25, "b"), (3, 70, "c")], ["id", "age", "name"]
     )
-    df2 = df.with_column(
+    df2 = df.withColumn(
         "category",
-        F.when(F.col("age") >= F.lit(65))
-        .then(F.lit("senior"))
-        .otherwise(
-            F.when(F.col("age") >= F.lit(18))
-            .then(F.lit("adult"))
-            .otherwise(F.lit("minor"))
-        ),
+        F.when(F.col("age") >= 65, "senior")
+        .when(F.col("age") >= 18, "adult")
+        .otherwise("minor"),
     )
     rows = df2.collect()
     assert len(rows) == 3
@@ -47,23 +44,23 @@ def test_user_guide_when_then_otherwise() -> None:
 
 def test_user_guide_na_fill_drop() -> None:
     """USER_GUIDE: na().fill() and na().drop()."""
-    spark = rs.SparkSession.builder().app_name("doc_test").get_or_create()
+    spark = get_spark("doc_test")
     df = spark.createDataFrame(
         [{"x": 1, "y": None}, {"x": 2, "y": 5}, {"x": None, "y": 7}],
-        [("x", "bigint"), ("y", "bigint")],
+        ["x", "y"],
     )
-    filled = df.na().fill(rs.lit(0))
+    filled = df.na.fill(0)
     rows = filled.collect()
     assert rows[0]["y"] == 0
     assert rows[2]["x"] == 0
-    dropped = df.na().drop(subset=["x"])  # Drop rows with null in "x" (removes row 2)
+    dropped = df.na.drop(subset=["x"])  # Drop rows with null in "x" (removes row 2)
     assert len(dropped.collect()) == 2
 
 
 def test_user_guide_create_dataframe_from_rows() -> None:
     """USER_GUIDE: _create_dataframe_from_rows."""
-    spark = rs.SparkSession.builder().app_name("doc_test").get_or_create()
-    schema = [("id", "bigint"), ("name", "string"), ("score", "double")]
+    spark = get_spark("doc_test")
+    schema = ["id", "name", "score"]
     rows = [
         {"id": 1, "name": "Alice", "score": 95.5},
         {"id": 2, "name": "Bob", "score": 87.0},
@@ -77,7 +74,7 @@ def test_user_guide_create_dataframe_from_rows() -> None:
 
 def test_user_guide_persistence_temp_view() -> None:
     """USER_GUIDE: createOrReplaceTempView."""
-    spark = rs.SparkSession.builder().app_name("doc_test").get_or_create()
+    spark = get_spark("doc_test")
     df = spark.createDataFrame([(1, 25, "Alice")], ["id", "age", "name"])
     try:
         df.createOrReplaceTempView("people")
@@ -91,14 +88,18 @@ def test_user_guide_persistence_temp_view() -> None:
 
 def test_readme_python_quickstart() -> None:
     """README: Python quick start example (runs both main README and README-Python)."""
-    spark = rs.SparkSession.builder().app_name("demo").get_or_create()
+    spark = get_spark("demo")
+    from tests.python.utils import _row_to_dict, assert_rows_equal
+
     df = spark.createDataFrame(
         [(1, 25, "Alice"), (2, 30, "Bob"), (3, 35, "Charlie")],
         ["id", "age", "name"],
     )
-    filtered = df.filter(rs.col("age") > rs.lit(26))
+    filtered = df.filter(F.col("age") > F.lit(26))
     rows = filtered.collect()
-    assert rows == [
+    actual = [_row_to_dict(r) for r in rows]
+    expected = [
         {"id": 2, "age": 30, "name": "Bob"},
         {"id": 3, "age": 35, "name": "Charlie"},
     ]
+    assert_rows_equal(actual, expected, order_matters=True)

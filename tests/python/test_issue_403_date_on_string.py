@@ -4,11 +4,13 @@ Tests for #403: date functions (hour, minute, etc.) on string timestamp column (
 
 from __future__ import annotations
 
-import robin_sparkless as rs
+from tests.python.utils import get_functions, get_spark
+
+F = get_functions()
 
 
-def _spark() -> rs.SparkSession:
-    return rs.SparkSession.builder().app_name("issue_403").get_or_create()
+def _spark():
+    return get_spark("issue_403")
 
 
 def test_hour_on_string_timestamp() -> None:
@@ -16,9 +18,9 @@ def test_hour_on_string_timestamp() -> None:
     spark = _spark()
     df = spark.createDataFrame(
         [{"ts": "2024-01-15 14:30:00"}],
-        schema=[("ts", "string")],
+        schema=["ts"],
     )
-    result = df.select(rs.hour(rs.col("ts")).alias("h")).collect()
+    result = df.select(F.hour(F.col("ts")).alias("h")).collect()
     assert len(result) == 1
     assert result[0]["h"] == 14
 
@@ -28,11 +30,11 @@ def test_minute_second_on_string_timestamp() -> None:
     spark = _spark()
     df = spark.createDataFrame(
         [{"ts": "2024-06-10 09:45:30"}],
-        schema=[("ts", "string")],
+        schema=["ts"],
     )
     result = df.select(
-        rs.minute(rs.col("ts")).alias("m"),
-        rs.second(rs.col("ts")).alias("s"),
+        F.minute(F.col("ts")).alias("m"),
+        F.second(F.col("ts")).alias("s"),
     ).collect()
     assert len(result) == 1
     assert result[0]["m"] == 45

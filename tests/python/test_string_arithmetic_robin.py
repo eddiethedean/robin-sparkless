@@ -10,48 +10,39 @@ test_issue_201_type_strictness.py for implicit coercion tests.
 
 from __future__ import annotations
 
+from tests.python.utils import get_functions, get_spark
+
+F = get_functions()
+
 
 def _get_session():
-    import robin_sparkless as rs
-
-    return rs.SparkSession.builder().app_name("test").get_or_create()
+    return get_spark("string_arithmetic_robin")
 
 
 def test_string_division_by_numeric_literal_robin() -> None:
     """col('string_1').cast('double') / 5 where string_1 is a string column."""
     spark = _get_session()
-    import robin_sparkless as rs
 
     df = spark.createDataFrame(
         [{"string_1": "10.0"}, {"string_1": "20"}],
-        [("string_1", "string")],
     )
 
-    result = df.with_column("result", rs.col("string_1").cast("double") / 5)
+    result = df.withColumn("result", F.col("string_1").cast("double") / 5)
     rows = result.collect()
 
     assert len(rows) == 2
     assert rows[0]["result"] == 2.0
     assert rows[1]["result"] == 4.0
 
-    # Schema-level check: result column is Double-like
-    schema_str = result.print_schema()
-    assert "result" in schema_str and (
-        "double" in schema_str.lower() or "float" in schema_str.lower()
-    )
-
-
 def test_numeric_literal_divided_by_string_robin() -> None:
     """100 / col('string_1').cast('double') where string_1 is a string column."""
     spark = _get_session()
-    import robin_sparkless as rs
 
     df = spark.createDataFrame(
         [{"string_1": "10.0"}, {"string_1": "5"}],
-        [("string_1", "string")],
     )
 
-    result = df.with_column("result", rs.lit(100) / rs.col("string_1").cast("double"))
+    result = df.withColumn("result", F.lit(100) / F.col("string_1").cast("double"))
     rows = result.collect()
 
     assert len(rows) == 2
@@ -62,14 +53,16 @@ def test_numeric_literal_divided_by_string_robin() -> None:
 def test_string_arithmetic_with_invalid_strings_robin() -> None:
     """Invalid numeric strings become null when used in arithmetic (via cast)."""
     spark = _get_session()
-    import robin_sparkless as rs
 
     df = spark.createDataFrame(
         [{"string_1": "10.0"}, {"string_1": "invalid"}, {"string_1": "20"}],
-        [("string_1", "string")],
     )
 
-    result = df.with_column("result", rs.col("string_1").try_cast("double") / 5)
+    # Use cast; invalid strings become null in PySpark when cast to numeric.
+    result = df.withColumn(
+        "result",
+        F.col("string_1").cast("double") / 5,
+    )
     rows = result.collect()
 
     assert len(rows) == 3

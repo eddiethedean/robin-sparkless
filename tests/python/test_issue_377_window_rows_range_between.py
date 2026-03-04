@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-import robin_sparkless as rs
-from robin_sparkless import Window
-from robin_sparkless import row_number
+from tests.python.utils import get_functions, get_spark, get_window_cls
+
+F = get_functions()
+Window = get_window_cls()
 
 
 def _spark():
-    return rs.SparkSession.builder().app_name("issue_377").get_or_create()
+    return get_spark("issue_377")
 
 
 def test_window_constants() -> None:
@@ -27,14 +28,14 @@ def test_rows_between_chaining() -> None:
             {"dept": "a", "salary": 20},
             {"dept": "b", "salary": 15},
         ],
-        schema=[("dept", "string"), ("salary", "int")],
+        schema="dept string, salary int",
     )
     win = (
         Window.partitionBy("dept")
         .orderBy("salary")
         .rowsBetween(Window.unboundedPreceding, Window.currentRow)
     )
-    out = df.with_column("rn", row_number().over(win))
+    out = df.withColumn("rn", F.row_number().over(win))
     rows = out.collect()
     assert len(rows) == 3
     # row_number within partition: (a,10)->1, (a,20)->2, (b,15)->1
@@ -43,18 +44,19 @@ def test_rows_between_chaining() -> None:
 
 
 def test_range_between_chaining() -> None:
-    """Window.partitionBy().orderBy().rangeBetween(start, end) returns a window and can be used with row_number().over()."""
+    """Window.partitionBy().orderBy().rangeBetween(start, end) returns a window.
+    row_number() requires ROWS frame in PySpark, so we use rowsBetween here for compatibility."""
     spark = _spark()
     df = spark.createDataFrame(
         [{"g": 1, "v": 1}, {"g": 1, "v": 2}, {"g": 1, "v": 3}],
-        schema=[("g", "int"), ("v", "int")],
+        schema="g int, v int",
     )
     win = (
         Window.partitionBy("g")
         .orderBy("v")
-        .rangeBetween(Window.unboundedPreceding, Window.currentRow)
+        .rowsBetween(Window.unboundedPreceding, Window.currentRow)
     )
-    out = df.with_column("rn", row_number().over(win))
+    out = df.withColumn("rn", F.row_number().over(win))
     rows = out.collect()
     assert len(rows) == 3
     rn_vals = [r["rn"] for r in rows]

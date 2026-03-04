@@ -7,21 +7,19 @@ Robin previously raised: RuntimeError: datatypes of join keys don't match.
 
 from __future__ import annotations
 
-import robin_sparkless as rs
-
-F = rs
+from tests.python.utils import get_spark
 
 
 def test_join_str_key_left_int_key_right() -> None:
     """Join on 'id': left id is str, right id is int; keys are coerced to common type."""
-    spark = F.SparkSession.builder().app_name("test_274").get_or_create()
+    spark = get_spark("test_274")
     df1 = spark.createDataFrame(
         [{"id": "1", "label": "a"}],
-        [("id", "str"), ("label", "str")],
+        ["id", "label"],
     )
     df2 = spark.createDataFrame(
         [{"id": 1, "x": 10}],
-        [("id", "int"), ("x", "int")],
+        ["id", "x"],
     )
     joined = df1.join(df2, on=["id"], how="inner")
     rows = joined.collect()

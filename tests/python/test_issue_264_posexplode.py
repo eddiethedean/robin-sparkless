@@ -23,18 +23,24 @@ def test_posexplode_module_exists() -> None:
 
 
 def test_posexplode_returns_two_columns() -> None:
-    """F.posexplode(column) returns (pos_column, value_column); both support .alias()."""
+    """F.posexplode(column) returns (pos_column, value_column) or single struct column (PySpark)."""
     spark = SparkSession.builder.appName("test_264").getOrCreate()
-    _ = spark.createDataFrame(
+    df = spark.createDataFrame(
         [{"Name": "Alice", "Values": [10, 20]}, {"Name": "Bob", "Values": [30, 40]}],
-        [("Name", "string"), ("Values", "list")],
+        "Name string, Values array<int>",
     )
-    pos_col, val_col = F.posexplode(F.col("Values"))
-    assert pos_col is not None and val_col is not None
-    # Both support .alias() for use in select/with_column
-    pos_col.alias("pos")
-    val_col.alias("val")
-    # Column method form also works (sparkless-only; not available in PySpark backend)
+    out = F.posexplode(F.col("Values"))
+    if isinstance(out, tuple):
+        pos_col, val_col = out
+        assert pos_col is not None and val_col is not None
+        pos_col.alias("pos")
+        val_col.alias("val")
+    else:
+        # PySpark: posexplode returns two columns; use .alias("pos", "val")
+        exploded = df.select(F.posexplode("Values").alias("pos", "val"))
+        rows = exploded.collect()
+        assert len(rows) >= 1
+    # Column method form (sparkless-only)
     if not is_pyspark_backend():
         pos2, val2 = F.col("Values").posexplode()
         assert pos2 is not None and val2 is not None

@@ -12,6 +12,7 @@ import pytest
 
 from tests.conftest import is_pyspark_backend
 from tests.fixtures.spark_imports import get_spark_imports
+from tests.python.utils import _row_to_dict
 
 
 _imports = get_spark_imports()
@@ -22,11 +23,10 @@ F = _imports.F
 def test_split_with_limit_two_parts() -> None:
     """F.split(col('s'), ',', 2) on 'a,b,c' yields ['a', 'b,c']."""
     spark = SparkSession.builder.appName("split_limit").getOrCreate()
-    df = spark.createDataFrame([{"s": "a,b,c"}], [("s", "string")])
+    df = spark.createDataFrame([{"s": "a,b,c"}], ["s"])
     out = df.select(F.split(F.col("s"), ",", 2)).collect()
     assert len(out) == 1
-    row = out[0]
-    # Use items() for Row/dict compatibility
+    row = _row_to_dict(out[0])
     parts = [v for _, v in row.items() if isinstance(v, list)]
     assert len(parts) == 1
     assert parts[0] == ["a", "b,c"]
@@ -35,10 +35,11 @@ def test_split_with_limit_two_parts() -> None:
 def test_split_without_limit_unchanged() -> None:
     """F.split(col('s'), ',') without limit yields all parts."""
     spark = SparkSession.builder.appName("split_limit").getOrCreate()
-    df = spark.createDataFrame([{"s": "a,b,c"}], [("s", "string")])
+    df = spark.createDataFrame([{"s": "a,b,c"}], ["s"])
     out = df.select(F.split(F.col("s"), ",")).collect()
     assert len(out) == 1
-    parts = [v for _, v in out[0].items() if isinstance(v, list)]
+    row = _row_to_dict(out[0])
+    parts = [v for _, v in row.items() if isinstance(v, list)]
     assert len(parts) == 1
     assert parts[0] == ["a", "b", "c"]
 
@@ -47,7 +48,7 @@ def test_split_without_limit_unchanged() -> None:
 def test_column_split_with_limit() -> None:
     """col('s').split(',', 2) yields ['a', 'b,c'] for 'a,b,c'."""
     spark = SparkSession.builder.appName("split_limit").getOrCreate()
-    df = spark.createDataFrame([{"s": "a,b,c"}], [("s", "string")])
+    df = spark.createDataFrame([{"s": "a,b,c"}], ["s"])
     out = df.select(F.col("s").split(",", 2)).collect()
     assert len(out) == 1
     parts = [v for _, v in out[0].items() if isinstance(v, list)]

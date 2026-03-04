@@ -12,35 +12,27 @@ from __future__ import annotations
 from datetime import datetime, date
 
 
-def test_create_dataframe_from_rows_accepts_datetime_and_none() -> None:
+def test_create_dataframe_from_rows_accepts_datetime_and_none(spark) -> None:
     """Row with datetime and None for timestamp column works (PySpark parity)."""
-    import robin_sparkless as rs
-
-    spark = rs.SparkSession.builder().app_name("datetime_row").get_or_create()
     data = [
         {"id": 1, "ts": datetime(2025, 2, 10, 12, 0, 0)},
         {"id": 2, "ts": None},
     ]
-    schema = [("id", "int"), ("ts", "timestamp")]
-    df = spark.createDataFrame(data, schema)
-    out = df.order_by(["id"]).collect()
+    df = spark.createDataFrame(data, schema=["id", "ts"])
+    out = df.orderBy(["id"]).collect()
     assert len(out) == 2
     assert out[0]["id"] == 1 and out[0]["ts"] is not None
     assert out[1]["id"] == 2 and out[1]["ts"] is None
 
 
-def test_create_dataframe_from_rows_accepts_date() -> None:
+def test_create_dataframe_from_rows_accepts_date(spark) -> None:
     """Row with datetime.date for date column works."""
-    import robin_sparkless as rs
-
-    spark = rs.SparkSession.builder().app_name("date_row").get_or_create()
     data = [
-        {"id": 1, "d": date(2025, 2, 10)},
-        {"id": 2, "d": None},
+        (1, date(2025, 2, 10)),
+        (2, None),
     ]
-    schema = [("id", "int"), ("d", "date")]
-    df = spark.createDataFrame(data, schema)
-    out = df.order_by(["id"]).collect()
+    df = spark.createDataFrame(data, schema=["id", "d"])
+    out = df.orderBy(["id"]).collect()
     assert len(out) == 2
     assert out[0]["id"] == 1 and out[0]["d"] is not None
     assert out[1]["id"] == 2 and out[1]["d"] is None

@@ -21,7 +21,7 @@ def test_posexplode_alias_in_select() -> None:
     spark = _spark()
     df = spark.createDataFrame(
         [{"id": 1, "arr": [10, 20]}],
-        schema=[("id", "bigint"), ("arr", "array<bigint>")],
+        schema="id bigint, arr array<bigint>",
     )
     # Select only posexplode result (two columns); no mixing with id to avoid row-length mismatch.
     out = df.select(F.posexplode("arr").alias("pos", "val"))

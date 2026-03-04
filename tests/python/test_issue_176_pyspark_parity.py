@@ -139,7 +139,7 @@ def test_select_expression_and_column_name_pyspark_parity() -> None:
 def test_select_list_of_column_names_still_works() -> None:
     """select(['a','b']) continues to work (backward compatibility)."""
 
-    spark = get_session()
+    spark = _spark()
     data = [{"a": 1, "b": 2}, {"a": 3, "b": 4}]
     schema = [("a", "bigint"), ("b", "bigint")]
     df = spark.createDataFrame(data, schema)
@@ -151,7 +151,7 @@ def test_select_list_of_column_names_still_works() -> None:
 def test_select_varargs_column_names_still_works() -> None:
     """select('a', 'b') continues to work (backward compatibility)."""
 
-    spark = get_session()
+    spark = _spark()
     data = [{"a": 1, "b": 2}, {"a": 3, "b": 4}]
     schema = [("a", "bigint"), ("b", "bigint")]
     df = spark.createDataFrame(data, schema)
