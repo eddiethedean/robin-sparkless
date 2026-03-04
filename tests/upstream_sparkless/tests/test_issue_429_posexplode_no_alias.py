@@ -9,32 +9,26 @@ when _alias_names was explicitly None (posexplode without alias), causing len(No
 https://github.com/eddiethedean/sparkless/issues/429
 """
 
-from sparkless.sql import SparkSession
-import sparkless.sql.functions as F
-
 from tests.fixtures.spark_backend import BackendType
 from tests.fixtures.spark_imports import get_spark_imports
 
 
-def test_posexplode_without_alias_no_type_error():
-    """posexplode() without alias must not raise TypeError (#429)."""
-    spark = SparkSession.builder.appName("test_429").getOrCreate()
-    try:
-        df = spark.createDataFrame(
-            [
-                {"Name": "Alice", "Values": [10, 20]},
-                {"Name": "Bob", "Values": [30, 40]},
-            ]
-        )
-        # Without alias - previously raised TypeError in schema projection
-        result = df.select("Name", F.posexplode("Values"))
-        # Must not raise; schema should have pos and col (PySpark default names)
-        assert "pos" in result.columns
-        assert "col" in result.columns
-        assert "Name" in result.columns
-        result.show()  # Previously failed here
-    finally:
-        spark.stop()
+def test_posexplode_without_alias_no_type_error(spark, spark_backend):
+    """posexplode() without alias must not raise TypeError (#429). Uses session fixture."""
+    F_backend = get_spark_imports(spark_backend).F
+    df = spark.createDataFrame(
+        [
+            {"Name": "Alice", "Values": [10, 20]},
+            {"Name": "Bob", "Values": [30, 40]},
+        ]
+    )
+    # Without alias - previously raised TypeError in schema projection
+    result = df.select("Name", F_backend.posexplode("Values"))
+    # Must not raise; schema should have pos and col (PySpark default names)
+    assert "pos" in result.columns
+    assert "col" in result.columns
+    assert "Name" in result.columns
+    result.show()  # Previously failed here
 
 
 def test_posexplode_without_alias_schema_projection(spark, spark_backend):

@@ -60,10 +60,11 @@ check-crate:
 	@echo "check-crate ($(CRATE)): format, clippy, audit, deny, tests passed"
 
 # Python lint and type-check: ruff format (check), ruff check, mypy. No Java/PySpark required.
+# Use .venv/bin/ruff and .venv/bin/mypy when present so check-full works without ruff/mypy on PATH.
 lint-python:
-	ruff format --check .
-	ruff check .
-	mypy .
+	@RUFF=$$(test -f .venv/bin/ruff && echo .venv/bin/ruff || echo ruff); \
+	MYPY=$$(test -f .venv/bin/mypy && echo .venv/bin/mypy || echo mypy); \
+	$$RUFF format --check . && $$RUFF check . && $$MYPY .
 
 # Backwards-compatible alias for full check suite (Rust + Python lint).
 # With CRATE set, runs checks for that package only (faster when editing one crate).

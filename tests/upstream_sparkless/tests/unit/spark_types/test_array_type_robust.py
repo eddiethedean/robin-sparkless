@@ -190,12 +190,13 @@ class TestArrayTypeRobust:
         assert rows[0]["arr"] == ["a", None, "b", None, "c"]
 
     def test_array_type_elementtype_with_non_nullable_array(self, spark):
-        """Test ArrayType with elementType and nullable=False."""
+        """Test ArrayType with elementType and containsNull=False (PySpark API)."""
+        # PySpark: ArrayType(elementType, containsNull=True)
         schema = StructType(
             [
                 StructField(
                     "arr",
-                    ArrayType(elementType=StringType(), nullable=False),
+                    ArrayType(elementType=StringType(), containsNull=False),
                     True,
                 )
             ]
@@ -205,7 +206,10 @@ class TestArrayTypeRobust:
 
         arr_type = df.schema.fields[0].dataType
         assert isinstance(arr_type, ArrayType)
-        assert not arr_type.nullable
+        assert (
+            getattr(arr_type, "containsNull", getattr(arr_type, "nullable", True))
+            is False
+        )
 
     def test_array_type_elementtype_in_complex_schema(self, spark):
         """Test ArrayType with elementType in a complex schema with multiple fields."""
