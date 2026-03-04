@@ -7,7 +7,9 @@ Robin (Polars) previously raised RuntimeError; we now support it.
 
 from __future__ import annotations
 
-from pyspark.sql import functions as F
+from tests.python.utils import get_functions
+
+F = get_functions()
 
 
 def test_lit_none_cast_double(spark) -> None:

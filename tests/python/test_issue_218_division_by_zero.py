@@ -4,7 +4,9 @@ PySpark returns null for division by zero; these tests assert that behavior
 directly against a real PySpark session via the ``spark`` fixture.
 """
 
-from pyspark.sql import functions as F
+from tests.python.utils import get_functions
+
+F = get_functions()
 
 
 def test_division_by_zero_literal_over_column(spark) -> None:

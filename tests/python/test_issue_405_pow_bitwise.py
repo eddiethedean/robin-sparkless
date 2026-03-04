@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import pytest
-from pyspark.sql import functions as F
+
+from tests.python.utils import get_functions
+
+F = get_functions()
 
 
 def test_pow_column_literal(spark) -> None:
@@ -26,9 +29,7 @@ def test_bitwise_not(spark) -> None:
     df = spark.createDataFrame([(0,), (1,), (5,)], ["x"])
 
     # In PySpark, `~` on a Column maps to boolean NOT, so ints are a type error.
-    from pyspark.errors.exceptions.captured import AnalysisException
-
-    with pytest.raises(AnalysisException):
+    with pytest.raises(Exception):
         df.select((~F.col("x")).alias("inv")).collect()
 
     # Bitwise NOT for integers is available via SQL expression.

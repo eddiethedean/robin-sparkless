@@ -6,7 +6,9 @@ datetime strings and truncates to date.
 
 import datetime
 
-from pyspark.sql import functions as F
+from tests.python.utils import get_functions
+
+F = get_functions()
 
 
 def test_cast_datetime_string_to_date(spark) -> None:

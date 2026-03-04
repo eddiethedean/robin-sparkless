@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from pyspark.sql import functions as F
+from tests.python.utils import get_functions
+
+F = get_functions()
 
 
 def test_empty_create_map_collects_as_dict(spark) -> None:

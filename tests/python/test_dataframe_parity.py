@@ -7,14 +7,9 @@ tests/parity/dataframe (expected_outputs from PySpark). Run with robin_sparkless
 
 from __future__ import annotations
 
-import sys
-from pathlib import Path
+from tests.python.utils import assert_rows_equal, get_functions
 
-# Allow importing utils when running pytest from project root
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-from utils import assert_rows_equal
-
-from pyspark.sql import functions as F
+F = get_functions()
 
 
 # Shared input data (from Sparkless expected_outputs dataframe_operations)

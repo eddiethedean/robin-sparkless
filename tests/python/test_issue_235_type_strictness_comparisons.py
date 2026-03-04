@@ -2,12 +2,14 @@
 Tests for issue #235: Type strictness in string vs numeric comparisons.
 
 These tests now assert native PySpark behavior directly using the ``spark``
-fixture and ``pyspark.sql.functions`` APIs.
+fixture and backend-agnostic get_functions().
 """
 
 from __future__ import annotations
 
-from pyspark.sql import functions as F
+from tests.python.utils import get_functions
+
+F = get_functions()
 
 
 def test_string_eq_numeric_literal_in_filter(spark) -> None:

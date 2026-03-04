@@ -4,7 +4,9 @@ Float/string cast with nulls must not raise TypeError. Nulls are returned as Non
 in collect(); callers should check 'value is None' before using 'x in value'.
 """
 
-from pyspark.sql import functions as F
+from tests.python.utils import get_functions
+
+F = get_functions()
 
 
 def test_float_to_string_with_nulls(spark) -> None:

@@ -1,6 +1,8 @@
 """Repro for issue #211: astype/cast returns None instead of expected value (PySpark parity)."""
 
-from pyspark.sql import functions as F
+from tests.python.utils import get_functions
+
+F = get_functions()
 
 
 def test_cast_int_to_string_in_with_column(spark) -> None:

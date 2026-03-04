@@ -56,19 +56,7 @@ if not _is_pyspark_mode():
 @pytest.fixture
 def spark():
     """Yield a SparkSession: PySpark when MOCK_SPARK_TEST_BACKEND=pyspark, else sparkless."""
-    if _is_pyspark_mode():
-        from pyspark.sql import SparkSession as PySparkSession
+    from tests.python.utils import get_spark
 
-        session = (
-            PySparkSession.builder.appName("test")
-            .config("spark.driver.bindAddress", "127.0.0.1")
-            .getOrCreate()
-        )
-        yield session
-        return
-    import sparkless as rs  # type: ignore[import-not-found]
-
-    # .builder() supported by sparkless 4.x (classattr with __call__); else .builder
-    b = getattr(rs.SparkSession.builder, "__call__", lambda: rs.SparkSession.builder)()
-    session = b.app_name("test").get_or_create()
+    session = get_spark("test")
     yield session

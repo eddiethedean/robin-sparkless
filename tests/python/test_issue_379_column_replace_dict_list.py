@@ -15,9 +15,7 @@ def _spark():
 
 
 def _replace(col, old: str, new: str):
-    """Use regexp_replace (PySpark) or replace (sparkless)."""
-    if hasattr(col, "replace") and not hasattr(F, "regexp_replace"):
-        return col.replace(old, new)
+    """Use regexp_replace (PySpark API)."""
     return F.regexp_replace(col, old, new)
 
 

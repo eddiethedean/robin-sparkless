@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from pyspark.sql import functions as F
+from tests.python.utils import get_functions
+
+F = get_functions()
 
 
 def test_agg_multiple_positional_args(spark) -> None:

@@ -3,7 +3,9 @@
 Casting empty or invalid strings to int should yield null, not raise.
 """
 
-from pyspark.sql import functions as F
+from tests.python.utils import get_functions
+
+F = get_functions()
 
 
 def test_cast_empty_and_whitespace_string_to_int(spark) -> None:
