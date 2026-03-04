@@ -14,6 +14,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from utils import assert_rows_equal
 
+from pyspark.sql import functions as F
+
 
 # Shared input data (from Sparkless expected_outputs dataframe_operations)
 INPUT_EMPLOYEES = [
@@ -22,22 +24,26 @@ INPUT_EMPLOYEES = [
     {"id": 3, "name": "Charlie", "age": 35, "salary": 70000, "department": "IT"},
     {"id": 4, "name": "David", "age": 40, "salary": 80000, "department": "Finance"},
 ]
+INPUT_EMPLOYEES_TUPLES = [
+    (1, "Alice", 25, 50000, "IT"),
+    (2, "Bob", 30, 60000, "HR"),
+    (3, "Charlie", 35, 70000, "IT"),
+    (4, "David", 40, 80000, "Finance"),
+]
 SCHEMA_EMPLOYEES = [
-    ("id", "bigint"),
-    ("name", "string"),
-    ("age", "bigint"),
-    ("salary", "double"),
-    ("department", "string"),
+    "id",
+    "name",
+    "age",
+    "salary",
+    "department",
 ]
 
 
 def test_filter_salary_gt_60000(spark) -> None:
     """Ported from Sparkless test_filter_with_boolean: filter(salary > 60000)."""
-    import robin_sparkless as rs
-
-    df = spark.createDataFrame(INPUT_EMPLOYEES, SCHEMA_EMPLOYEES)
-    result = df.filter(rs.col("salary").gt(rs.lit(60000)))
-    rows = result.collect()
+    df = spark.createDataFrame(INPUT_EMPLOYEES_TUPLES, SCHEMA_EMPLOYEES)
+    result = df.filter(F.col("salary") > F.lit(60000))
+    rows = [r.asDict() for r in result.collect()]
     expected = [
         {"age": 35, "department": "IT", "id": 3, "name": "Charlie", "salary": 70000},
         {"age": 40, "department": "Finance", "id": 4, "name": "David", "salary": 80000},
@@ -47,14 +53,10 @@ def test_filter_salary_gt_60000(spark) -> None:
 
 def test_filter_and_operator(spark) -> None:
     """Ported from Sparkless test_filter_with_and_operator: (a > 1) & (b > 1)."""
-    import robin_sparkless as rs
-
     data = [{"a": 1, "b": 2}, {"a": 2, "b": 3}, {"a": 3, "b": 1}]
-    schema = [("a", "bigint"), ("b", "bigint")]
+    schema = ["a", "b"]
     df = spark.createDataFrame(data, schema)
-    expr1 = rs.col("a").gt(rs.lit(1))
-    expr2 = rs.col("b").gt(rs.lit(1))
-    result = df.filter(expr1.and_(expr2))
+    result = df.filter((F.col("a") > F.lit(1)) & (F.col("b") > F.lit(1)))
     rows = result.collect()
     assert len(rows) == 1
     assert rows[0]["a"] == 2 and rows[0]["b"] == 3
@@ -62,23 +64,19 @@ def test_filter_and_operator(spark) -> None:
 
 def test_filter_or_operator(spark) -> None:
     """Ported from Sparkless test_filter_with_or_operator: (a > 1) | (b > 1)."""
-    import robin_sparkless as rs
-
     data = [{"a": 1, "b": 2}, {"a": 2, "b": 3}, {"a": 3, "b": 1}]
-    schema = [("a", "bigint"), ("b", "bigint")]
+    schema = ["a", "b"]
     df = spark.createDataFrame(data, schema)
-    expr1 = rs.col("a").gt(rs.lit(1))
-    expr2 = rs.col("b").gt(rs.lit(1))
-    result = df.filter(expr1.or_(expr2))
+    result = df.filter((F.col("a") > F.lit(1)) | (F.col("b") > F.lit(1)))
     rows = result.collect()
     assert len(rows) == 3
 
 
 def test_basic_select(spark) -> None:
     """Ported from Sparkless test_basic_select: select id, name, age."""
-    df = spark.createDataFrame(INPUT_EMPLOYEES, SCHEMA_EMPLOYEES)
-    result = df.select(["id", "name", "age"])
-    rows = result.collect()
+    df = spark.createDataFrame(INPUT_EMPLOYEES_TUPLES, SCHEMA_EMPLOYEES)
+    result = df.select("id", "name", "age")
+    rows = [r.asDict() for r in result.collect()]
     expected = [
         {"id": 1, "name": "Alice", "age": 25},
         {"id": 2, "name": "Bob", "age": 30},
@@ -90,16 +88,9 @@ def test_basic_select(spark) -> None:
 
 def test_select_with_alias(spark) -> None:
     """Ported from Sparkless test_select_with_alias: select id as user_id, name as full_name."""
-    import robin_sparkless as rs
-
-    df = spark.createDataFrame(INPUT_EMPLOYEES, SCHEMA_EMPLOYEES)
-    # Robin select() takes column names; use with_column + select for aliasing
-    result = (
-        df.with_column("user_id", rs.col("id"))
-        .with_column("full_name", rs.col("name"))
-        .select(["user_id", "full_name"])
-    )
-    rows = result.collect()
+    df = spark.createDataFrame(INPUT_EMPLOYEES_TUPLES, SCHEMA_EMPLOYEES)
+    result = df.select(F.col("id").alias("user_id"), F.col("name").alias("full_name"))
+    rows = [r.asDict() for r in result.collect()]
     expected = [
         {"user_id": 1, "full_name": "Alice"},
         {"user_id": 2, "full_name": "Bob"},
@@ -111,17 +102,12 @@ def test_select_with_alias(spark) -> None:
 
 def test_aggregation_avg_count(spark) -> None:
     """Ported from Sparkless test_aggregation: groupBy(department).agg(avg(salary), count(id))."""
-    import robin_sparkless as rs
-
-    df = spark.createDataFrame(INPUT_EMPLOYEES, SCHEMA_EMPLOYEES)
-    grouped = df.group_by(["department"])
-    result = grouped.agg(
-        [
-            rs.avg(rs.col("salary")).alias("avg_salary"),
-            rs.count(rs.col("id")).alias("count"),
-        ]
+    df = spark.createDataFrame(INPUT_EMPLOYEES_TUPLES, SCHEMA_EMPLOYEES)
+    result = df.groupBy("department").agg(
+        F.avg("salary").alias("avg_salary"),
+        F.count("id").alias("count"),
     )
-    rows = result.collect()
+    rows = [r.asDict() for r in result.collect()]
     expected = [
         {"department": "Finance", "avg_salary": 80000.0, "count": 1},
         {"department": "HR", "avg_salary": 60000.0, "count": 1},
@@ -133,26 +119,26 @@ def test_aggregation_avg_count(spark) -> None:
 def test_inner_join(spark) -> None:
     """Ported from Sparkless test_inner_join: employees join departments on dept_id."""
     employees_data = [
-        {"id": 1, "name": "Alice", "dept_id": 10, "salary": 50000},
-        {"id": 2, "name": "Bob", "dept_id": 20, "salary": 60000},
-        {"id": 3, "name": "Charlie", "dept_id": 10, "salary": 70000},
-        {"id": 4, "name": "David", "dept_id": 30, "salary": 55000},
+        (1, "Alice", 10, 50000),
+        (2, "Bob", 20, 60000),
+        (3, "Charlie", 10, 70000),
+        (4, "David", 30, 55000),
     ]
     departments_data = [
-        {"dept_id": 10, "name": "IT", "location": "NYC"},
-        {"dept_id": 20, "name": "HR", "location": "LA"},
-        {"dept_id": 40, "name": "Finance", "location": "Chicago"},
+        (10, "IT", "NYC"),
+        (20, "HR", "LA"),
+        (40, "Finance", "Chicago"),
     ]
     emp_schema = [
-        ("id", "bigint"),
-        ("name", "string"),
-        ("dept_id", "bigint"),
-        ("salary", "bigint"),
+        "id",
+        "name",
+        "dept_id",
+        "salary",
     ]
-    dept_schema = [("dept_id", "bigint"), ("name", "string"), ("location", "string")]
+    dept_schema = ["dept_id", "name", "location"]
     emp_df = spark.createDataFrame(employees_data, emp_schema)
     dept_df = spark.createDataFrame(departments_data, dept_schema)
-    result = emp_df.join(dept_df, ["dept_id"], "inner")
+    result = emp_df.join(dept_df, on="dept_id", how="inner")
     rows = result.collect()
     # Expected: 3 rows (dept_id 10 x2, 20 x1). Column order may differ; compare as set of rows.
     assert len(rows) == 3

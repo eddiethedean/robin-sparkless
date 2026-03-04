@@ -1,21 +1,13 @@
-"""Tests for #404: select("*") and select("*", col) expand to all columns."""
+"""Tests for #404: select("*") and select("*", col) expand to all columns (PySpark)."""
 
 from __future__ import annotations
 
-import robin_sparkless as rs
+from pyspark.sql import functions as F
 
 
-def _spark():
-    return rs.SparkSession.builder().app_name("issue_404").get_or_create()
-
-
-def test_select_star() -> None:
+def test_select_star(spark) -> None:
     """df.select("*") returns all columns."""
-    spark = _spark()
-    df = spark.createDataFrame(
-        [{"a": 1, "b": 2, "c": 3}],
-        schema=[("a", "int"), ("b", "int"), ("c", "int")],
-    )
+    df = spark.createDataFrame([(1, 2, 3)], ["a", "b", "c"])
     result = df.select("*").collect()
     rows = list(result)
     assert len(rows) == 1
@@ -29,13 +21,9 @@ def test_select_star() -> None:
     assert names == ["a", "b", "c"]
 
 
-def test_select_star_plus_column() -> None:
+def test_select_star_plus_column(spark) -> None:
     """df.select("*", "a") expands "*" then adds the extra column (duplicate a)."""
-    spark = _spark()
-    df = spark.createDataFrame(
-        [{"a": 10, "b": 20}],
-        schema=[("a", "int"), ("b", "int")],
-    )
+    df = spark.createDataFrame([(10, 20)], ["a", "b"])
     result = df.select("*", "a").collect()
     rows = list(result)
     assert len(rows) == 1

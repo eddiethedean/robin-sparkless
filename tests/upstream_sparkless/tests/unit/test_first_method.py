@@ -6,8 +6,11 @@ Uses conftest's spark fixture for backend-aware execution (mock/PySpark).
 
 import pytest
 
-from sparkless import functions as F
-from sparkless.spark_types import StructType, StructField, StringType
+from tests.fixtures.spark_imports import get_spark_imports
+
+
+def _imports():
+    return get_spark_imports()
 
 
 class TestDataFrameFirst:
@@ -25,8 +28,13 @@ class TestDataFrameFirst:
 
     def test_first_empty_dataframe_returns_none(self, spark):
         """Test that first() returns None for empty DataFrame."""
-        schema = StructType([StructField("name", StringType())])
-        df = spark.createDataFrame([], schema=schema)
+        imp = _imports()
+        schema = imp.StructType([imp.StructField("name", imp.StringType())])
+        # PySpark: createDataFrame(data, schema); sparkless: createDataFrame([], schema=schema)
+        try:
+            df = spark.createDataFrame([], schema=schema)
+        except TypeError:
+            df = spark.createDataFrame([], schema)
         result = df.first()
 
         assert result is None
@@ -80,9 +88,9 @@ class TestDataFrameFirst:
         result = selected.first()
 
         assert result["name"] == "Alice"
-        # age should not be in the result
-        with pytest.raises(KeyError):
-            _ = result["age"]
+        # age should not be in the result (KeyError or backend-specific)
+        row_dict = result.asDict() if hasattr(result, "asDict") else dict(result)
+        assert "age" not in row_dict
 
     def test_first_vs_head_difference(self, spark):
         """Test that first() and head() have different return types.
@@ -169,29 +177,26 @@ class TestDataFrameFirst:
 
     def test_first_with_nested_struct(self, spark):
         """Test first() with nested struct types."""
-        from sparkless.spark_types import (
-            StructType,
-            StructField,
-            StringType,
-            IntegerType,
-        )
-
-        schema = StructType(
+        imp = _imports()
+        schema = imp.StructType(
             [
-                StructField("name", StringType()),
-                StructField(
+                imp.StructField("name", imp.StringType()),
+                imp.StructField(
                     "address",
-                    StructType(
+                    imp.StructType(
                         [
-                            StructField("city", StringType()),
-                            StructField("zip", IntegerType()),
+                            imp.StructField("city", imp.StringType()),
+                            imp.StructField("zip", imp.IntegerType()),
                         ]
                     ),
                 ),
             ]
         )
         data = [{"name": "Alice", "address": {"city": "NYC", "zip": 10001}}]
-        df = spark.createDataFrame(data, schema=schema)
+        try:
+            df = spark.createDataFrame(data, schema=schema)
+        except TypeError:
+            df = spark.createDataFrame(data, schema)
         result = df.first()
 
         assert result is not None
@@ -201,22 +206,18 @@ class TestDataFrameFirst:
 
     def test_first_with_array_column(self, spark):
         """Test first() with array column."""
-        from sparkless.spark_types import (
-            StructType,
-            StructField,
-            StringType,
-            ArrayType,
-            IntegerType,
-        )
-
-        schema = StructType(
+        imp = _imports()
+        schema = imp.StructType(
             [
-                StructField("name", StringType()),
-                StructField("scores", ArrayType(IntegerType())),
+                imp.StructField("name", imp.StringType()),
+                imp.StructField("scores", imp.ArrayType(imp.IntegerType())),
             ]
         )
         data = [{"name": "Alice", "scores": [85, 90, 95]}]
-        df = spark.createDataFrame(data, schema=schema)
+        try:
+            df = spark.createDataFrame(data, schema=schema)
+        except TypeError:
+            df = spark.createDataFrame(data, schema)
         result = df.first()
 
         assert result is not None
@@ -225,6 +226,8 @@ class TestDataFrameFirst:
 
     def test_first_after_multiple_transformations(self, spark):
         """Test first() after multiple chained transformations."""
+        imp = _imports()
+        F = imp.F
         data = [
             {"name": "Alice", "age": 25, "score": 85},
             {"name": "Bob", "age": 30, "score": 90},
@@ -248,21 +251,13 @@ class TestDataFrameFirst:
 
     def test_first_with_different_data_types(self, spark):
         """Test first() with various data types."""
-        from sparkless.spark_types import (
-            StructType,
-            StructField,
-            StringType,
-            IntegerType,
-            DoubleType,
-            BooleanType,
-        )
-
-        schema = StructType(
+        imp = _imports()
+        schema = imp.StructType(
             [
-                StructField("str_col", StringType()),
-                StructField("int_col", IntegerType()),
-                StructField("double_col", DoubleType()),
-                StructField("bool_col", BooleanType()),
+                imp.StructField("str_col", imp.StringType()),
+                imp.StructField("int_col", imp.IntegerType()),
+                imp.StructField("double_col", imp.DoubleType()),
+                imp.StructField("bool_col", imp.BooleanType()),
             ]
         )
         data = [
@@ -273,7 +268,10 @@ class TestDataFrameFirst:
                 "bool_col": True,
             }
         ]
-        df = spark.createDataFrame(data, schema=schema)
+        try:
+            df = spark.createDataFrame(data, schema=schema)
+        except TypeError:
+            df = spark.createDataFrame(data, schema)
         result = df.first()
 
         assert result is not None
@@ -298,21 +296,18 @@ class TestDataFrameFirst:
 
     def test_first_with_all_nulls(self, spark):
         """Test first() when all columns are null."""
-        from sparkless.spark_types import (
-            StructType,
-            StructField,
-            StringType,
-            IntegerType,
-        )
-
-        schema = StructType(
+        imp = _imports()
+        schema = imp.StructType(
             [
-                StructField("name", StringType()),
-                StructField("age", IntegerType()),
+                imp.StructField("name", imp.StringType()),
+                imp.StructField("age", imp.IntegerType()),
             ]
         )
         data = [{"name": None, "age": None}]
-        df = spark.createDataFrame(data, schema=schema)
+        try:
+            df = spark.createDataFrame(data, schema=schema)
+        except TypeError:
+            df = spark.createDataFrame(data, schema)
         result = df.first()
 
         assert result is not None

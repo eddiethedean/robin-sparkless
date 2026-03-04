@@ -1103,26 +1103,13 @@ def datediff(end, start):
     return _datediff(_as_col(end), _as_col(start))
 
 
-def _require_session_for_datetime():
-    """Raise RuntimeError if no active SparkSession (PySpark parity for datetime functions)."""
-    from sparkless.sql import SparkSession
-
-    sess = None
-    if hasattr(SparkSession, "getActiveSession"):
-        sess = SparkSession.getActiveSession()
-    if sess is None:
-        sess = getattr(SparkSession, "_singleton_session", None)
-    if sess is None:
-        raise RuntimeError("No active SparkSession found")
-
-
 def current_date():
-    _require_session_for_datetime()
+    """Return current date as column expression (PySpark parity: no session required at build time)."""
     return _current_date()
 
 
 def current_timestamp():
-    _require_session_for_datetime()
+    """Return current timestamp as column expression (PySpark parity: no session required at build time)."""
     return _current_timestamp()  # noqa: F821 - _current_timestamp from sparkless import
 
 

@@ -10,6 +10,12 @@ Conftest for vendored upstream sparkless tests.
 import os
 import sys
 
+# Ensure PySpark workers use the same Python as the driver (avoids PYTHON_VERSION_MISMATCH)
+if "PYSPARK_PYTHON" not in os.environ:
+    os.environ["PYSPARK_PYTHON"] = sys.executable
+if "PYSPARK_DRIVER_PYTHON" not in os.environ:
+    os.environ["PYSPARK_DRIVER_PYTHON"] = sys.executable
+
 # Ensure vendored "tests" package is found (tests/upstream_sparkless/tests/)
 _UPSTREAM_ROOT = os.path.abspath(os.path.dirname(__file__))
 if _UPSTREAM_ROOT not in sys.path:

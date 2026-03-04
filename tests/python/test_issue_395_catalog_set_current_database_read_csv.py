@@ -29,9 +29,10 @@ def test_read_csv() -> None:
             "column_1",
             "column_2",
         ]
-        # With header, columns are a,b
+        # With header, columns are a,b (CSV may infer string or int depending on backend)
         if "a" in rows[0]:
-            assert rows[0]["a"] == 1 and rows[0]["b"] == 2
+            a_val, b_val = rows[0]["a"], rows[0]["b"]
+            assert a_val in (1, "1") and b_val in (2, "2")
     finally:
         Path(path).unlink(missing_ok=True)
 

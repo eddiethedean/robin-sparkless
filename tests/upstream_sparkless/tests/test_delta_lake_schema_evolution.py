@@ -503,6 +503,18 @@ class TestDeltaLakeSchemaEvolution:
         """Test mergeSchema with append mode for all table types."""
         import uuid
 
+        # When PySpark session has no Delta, skip (mergeSchema with append requires Delta)
+        if _backend == BackendType.PYSPARK:
+            try:
+                spark.conf.get("spark.sql.catalog.spark_catalog")
+            except Exception:
+                pass
+            try:
+                spark.createDataFrame([(1,)]).write.format("delta").mode("overwrite").saveAsTable("_delta_probe")
+                spark.sql("DROP TABLE IF EXISTS _delta_probe")
+            except Exception:
+                pytest.skip("Delta not available in this PySpark session; mergeSchema test requires Delta")
+
         table_suffix = str(uuid.uuid4()).replace("-", "_")[:8]
         schema_name = f"test_schema_{table_suffix}"
         table_name = f"{schema_name}.people_{table_suffix}"
@@ -545,6 +557,14 @@ class TestDeltaLakeSchemaEvolution:
     def test_merge_schema_bidirectional(self, spark):
         """Test mergeSchema handles bidirectional merging."""
         import uuid
+
+        # When PySpark session has no Delta, skip (mergeSchema requires Delta)
+        if _backend == BackendType.PYSPARK:
+            try:
+                spark.createDataFrame([(1,)]).write.format("delta").mode("overwrite").saveAsTable("_delta_probe")
+                spark.sql("DROP TABLE IF EXISTS _delta_probe")
+            except Exception:
+                pytest.skip("Delta not available in this PySpark session; mergeSchema test requires Delta")
 
         table_suffix = str(uuid.uuid4()).replace("-", "_")[:8]
         schema_name = f"test_schema_{table_suffix}"

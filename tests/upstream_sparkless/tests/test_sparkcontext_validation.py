@@ -55,66 +55,57 @@ class TestSessionValidation:
         assert lit_expr is not None
 
     def test_expr_requires_active_session(self):
-        """Test that expr() requires active session."""
+        """Test that expr() does NOT require active session (PySpark behavior: builds expression)."""
         SparkSession._active_sessions.clear()
         SparkSession._singleton_session = None
 
-        with pytest.raises(RuntimeError, match="No active SparkSession found"):
-            F.expr("id + 1")
+        # PySpark: expr() builds an expression without needing active session
+        col_expr = F.expr("id + 1")
+        assert col_expr is not None
 
     def test_when_requires_active_session(self):
-        """Test that when() requires active session."""
+        """Test that when() does NOT require active session (PySpark behavior: builds expression)."""
         SparkSession._active_sessions.clear()
         SparkSession._singleton_session = None
 
-        with pytest.raises(RuntimeError, match="No active SparkSession found"):
-            F.when(F.col("x") > 0, 1)
+        # PySpark: when() builds an expression without needing active session
+        when_expr = F.when(F.col("x") > 0, 1)
+        assert when_expr is not None
 
-    def test_aggregate_functions_require_session(self):
-        """Test that aggregate functions require active session."""
-        # In PySpark mode, aggregate functions don't require session check
-        # They're called on DataFrames that already have sessions
-        # Skip this test in PySpark mode as it's Sparkless-specific validation
-        import os
-
-        if os.getenv("MOCK_SPARK_TEST_BACKEND") == "pyspark":
-            pytest.skip(
-                "This test is Sparkless-specific and doesn't apply to PySpark mode"
-            )
-
+    def test_aggregate_functions_do_not_require_session(self):
+        """Test that aggregate functions do NOT require active session (PySpark: they build expressions)."""
         SparkSession._active_sessions.clear()
         SparkSession._singleton_session = None
 
-        with pytest.raises(RuntimeError, match="No active SparkSession found"):
-            F.count("id")
-
-        with pytest.raises(RuntimeError, match="No active SparkSession found"):
-            F.sum("value")
-
-        with pytest.raises(RuntimeError, match="No active SparkSession found"):
-            F.avg("value")
+        # PySpark: count(), sum(), avg() build column expressions without needing active session
+        c1 = F.count("id")
+        c2 = F.sum("value")
+        c3 = F.avg("value")
+        assert c1 is not None
+        assert c2 is not None
+        assert c3 is not None
 
     def test_window_functions_require_session(self):
-        """Test that window functions require active session."""
+        """Test that window functions do NOT require active session (PySpark: they build expressions)."""
         SparkSession._active_sessions.clear()
         SparkSession._singleton_session = None
 
-        with pytest.raises(RuntimeError, match="No active SparkSession found"):
-            F.row_number()
+        # PySpark: row_number(), rank() build expressions without needing active session
+        rn = F.row_number()
+        rk = F.rank()
+        assert rn is not None
+        assert rk is not None
 
-        with pytest.raises(RuntimeError, match="No active SparkSession found"):
-            F.rank()
-
-    def test_datetime_functions_require_session(self):
-        """Test that datetime functions require active session."""
+    def test_datetime_functions_do_not_require_session(self):
+        """Test that datetime functions do NOT require active session (PySpark: they build expressions)."""
         SparkSession._active_sessions.clear()
         SparkSession._singleton_session = None
 
-        with pytest.raises(RuntimeError, match="No active SparkSession found"):
-            F.current_date()
-
-        with pytest.raises(RuntimeError, match="No active SparkSession found"):
-            F.current_timestamp()
+        # PySpark: current_date(), current_timestamp() build expressions without needing active session
+        d = F.current_date()
+        t = F.current_timestamp()
+        assert d is not None
+        assert t is not None
 
     def test_multiple_sessions(self):
         """Test session tracking with multiple sessions."""

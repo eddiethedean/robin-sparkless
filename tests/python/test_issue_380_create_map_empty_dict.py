@@ -2,19 +2,13 @@
 
 from __future__ import annotations
 
-import robin_sparkless as rs
-from robin_sparkless import create_map, col
+from pyspark.sql import functions as F
 
 
-def _spark():
-    return rs.SparkSession.builder().app_name("issue_380").get_or_create()
-
-
-def test_empty_create_map_collects_as_dict() -> None:
+def test_empty_create_map_collects_as_dict(spark) -> None:
     """create_map() with no args: collected row value is {} (dict), not [] (list)."""
-    spark = _spark()
-    df = spark.createDataFrame([{"id": 1}, {"id": 2}], schema=[("id", "int")])
-    out = df.with_column("m", create_map())
+    df = spark.createDataFrame([(1,), (2,)], ["id"])
+    out = df.withColumn("m", F.create_map())
     rows = out.collect()
     assert len(rows) == 2
     for r in rows:
@@ -23,14 +17,10 @@ def test_empty_create_map_collects_as_dict() -> None:
         assert m == {}, f"expected {{}}, got {m}"
 
 
-def test_non_empty_create_map_collects_as_dict() -> None:
+def test_non_empty_create_map_collects_as_dict(spark) -> None:
     """create_map(col, col) collects to Python dict {key: value}."""
-    spark = _spark()
-    df = spark.createDataFrame(
-        [{"k": "a", "v": 1}, {"k": "b", "v": 2}],
-        schema=[("k", "string"), ("v", "int")],
-    )
-    out = df.with_column("m", create_map(col("k"), col("v")))
+    df = spark.createDataFrame([("a", 1), ("b", 2)], ["k", "v"])
+    out = df.withColumn("m", F.create_map(F.col("k"), F.col("v")))
     rows = out.collect()
     assert len(rows) == 2
     assert rows[0]["m"] == {"a": 1}

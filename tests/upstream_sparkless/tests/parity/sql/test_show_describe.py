@@ -15,9 +15,21 @@ class TestSQLShowDescribeParity(ParityTestBase):
         # Create a test database
         spark.sql("CREATE DATABASE IF NOT EXISTS show_test_db")
 
-        # Show databases
+        # Show databases (column may be databaseName or namespace depending on Spark version)
         result = spark.sql("SHOW DATABASES")
-        db_names = [row["databaseName"] for row in result.collect()]
+        rows = result.collect()
+        cols = result.columns
+        db_col = "databaseName" if "databaseName" in cols else ("namespace" if "namespace" in cols else (cols[0] if cols else None))
+        if db_col is None:
+            db_names = []
+        else:
+            db_names = []
+            for row in rows:
+                try:
+                    v = getattr(row, db_col, None) or row[db_col]
+                except (KeyError, TypeError):
+                    v = row[0]
+                db_names.append(v)
 
         # Should contain default and our test database
         assert "default" in db_names

@@ -8,10 +8,17 @@ Supports both mock-spark and PySpark backends for unified testing.
 import contextlib
 import gc
 import os
+import sys
 import pytest
 
 # Prevent numpy crashes on macOS ARM chips with Python 3.9
 os.environ["VECLIB_MAXIMUM_THREADS"] = "1"
+
+# Ensure PySpark workers use the same Python as the driver (avoids PYTHON_VERSION_MISMATCH)
+if "PYSPARK_PYTHON" not in os.environ:
+    os.environ["PYSPARK_PYTHON"] = sys.executable
+if "PYSPARK_DRIVER_PYTHON" not in os.environ:
+    os.environ["PYSPARK_DRIVER_PYTHON"] = sys.executable
 
 # Set JAVA_HOME for PySpark if not already set - must be done before any PySpark imports
 # Resolve to actual Java installation path (not symlink) for better compatibility
@@ -213,6 +220,13 @@ def spark(request):
     with contextlib.suppress(BaseException):
         session.stop()
     gc.collect()
+
+
+def is_pyspark_backend() -> bool:
+    """True when test run uses PySpark as backend (MOCK_SPARK_TEST_BACKEND=pyspark). Used to skip sparkless-specific tests."""
+    return (
+        os.getenv("MOCK_SPARK_TEST_BACKEND") or os.getenv("SPARKLESS_TEST_BACKEND") or ""
+    ).strip().lower() == "pyspark"
 
 
 @pytest.fixture

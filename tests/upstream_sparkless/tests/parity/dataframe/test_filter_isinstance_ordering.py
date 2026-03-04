@@ -10,8 +10,18 @@ other ColumnOperations are incorrectly handled because isinstance(expr, Column)
 returns True for ColumnOperation objects when checked before ColumnOperation.
 """
 
+import os
+
 from tests.fixtures.parity_base import ParityTestBase
 from tests.fixtures.spark_imports import get_spark_imports
+
+
+def _table_format_and_options(spark):
+    """Use parquet when PySpark backend (no Delta); otherwise delta."""
+    backend = (os.getenv("MOCK_SPARK_TEST_BACKEND") or os.getenv("SPARKLESS_TEST_BACKEND") or "").strip().lower()
+    if backend == "pyspark":
+        return "parquet", {}
+    return "delta", {"overwriteSchema": "true"}
 
 
 class TestIsInstanceOrdering(ParityTestBase):
@@ -80,11 +90,13 @@ class TestIsInstanceOrdering(ParityTestBase):
         ]
         df = spark.createDataFrame(data)
 
-        # Write to table
+        # Write to table (parquet when PySpark without Delta)
         table_fqn = f"{schema_name}.test_table"
-        df.write.format("delta").mode("overwrite").option(
-            "overwriteSchema", "true"
-        ).saveAsTable(table_fqn)
+        fmt, opts = _table_format_and_options(spark)
+        w = df.write.format(fmt).mode("overwrite")
+        for k, v in opts.items():
+            w = w.option(k, str(v))
+        w.saveAsTable(table_fqn)
 
         # Read back
         read_df = spark.table(table_fqn)
@@ -156,9 +168,11 @@ class TestIsInstanceOrdering(ParityTestBase):
         schema_name = "test_schema"
         spark.sql(f"CREATE SCHEMA IF NOT EXISTS {schema_name}")
         table_fqn = f"{schema_name}.test_table"
-        df.write.format("delta").mode("overwrite").option(
-            "overwriteSchema", "true"
-        ).saveAsTable(table_fqn)
+        fmt, opts = _table_format_and_options(spark)
+        w = df.write.format(fmt).mode("overwrite")
+        for k, v in opts.items():
+            w = w.option(k, str(v))
+        w.saveAsTable(table_fqn)
         read_df = spark.table(table_fqn)
 
         result5 = read_df.filter(read_df.a + read_df.b > 25)
@@ -190,9 +204,11 @@ class TestIsInstanceOrdering(ParityTestBase):
         schema_name = "test_schema"
         spark.sql(f"CREATE SCHEMA IF NOT EXISTS {schema_name}")
         table_fqn = f"{schema_name}.test_table"
-        df.write.format("delta").mode("overwrite").option(
-            "overwriteSchema", "true"
-        ).saveAsTable(table_fqn)
+        fmt, opts = _table_format_and_options(spark)
+        w = df.write.format(fmt).mode("overwrite")
+        for k, v in opts.items():
+            w = w.option(k, str(v))
+        w.saveAsTable(table_fqn)
         read_df = spark.table(table_fqn)
 
         result3 = read_df.filter((read_df.x + read_df.y) > read_df.z)
@@ -224,9 +240,11 @@ class TestIsInstanceOrdering(ParityTestBase):
         schema_name = "test_schema"
         spark.sql(f"CREATE SCHEMA IF NOT EXISTS {schema_name}")
         table_fqn = f"{schema_name}.test_table"
-        df.write.format("delta").mode("overwrite").option(
-            "overwriteSchema", "true"
-        ).saveAsTable(table_fqn)
+        fmt, opts = _table_format_and_options(spark)
+        w = df.write.format(fmt).mode("overwrite")
+        for k, v in opts.items():
+            w = w.option(k, str(v))
+        w.saveAsTable(table_fqn)
         read_df = spark.table(table_fqn)
 
         result3 = read_df.filter(read_df.name.startswith("A"))
@@ -261,9 +279,11 @@ class TestIsInstanceOrdering(ParityTestBase):
         schema_name = "test_schema"
         spark.sql(f"CREATE SCHEMA IF NOT EXISTS {schema_name}")
         table_fqn = f"{schema_name}.test_table"
-        df.write.format("delta").mode("overwrite").option(
-            "overwriteSchema", "true"
-        ).saveAsTable(table_fqn)
+        fmt, opts = _table_format_and_options(spark)
+        w = df.write.format(fmt).mode("overwrite")
+        for k, v in opts.items():
+            w = w.option(k, str(v))
+        w.saveAsTable(table_fqn)
         read_df = spark.table(table_fqn)
 
         result4 = read_df.filter((read_df.a > 15) & (read_df.b > 15))
