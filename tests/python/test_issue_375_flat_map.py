@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from pyspark.sql import functions as F
-
 
 def test_flat_map(spark) -> None:
     """PySpark: use RDD.flatMap for row expansion."""

@@ -6,9 +6,12 @@ PySpark: df.groupBy("year").pivot("region").sum("sales"). Robin-sparkless now su
 
 from __future__ import annotations
 
+
 def test_group_by_pivot_sum_issue_repro(spark) -> None:
     """groupBy("year").pivot("region").sum("sales").collect()."""
-    df = spark.createDataFrame([("N", 2023, 100), ("S", 2023, 200)], ["region", "year", "sales"])
+    df = spark.createDataFrame(
+        [("N", 2023, 100), ("S", 2023, 200)], ["region", "year", "sales"]
+    )
     rows = df.groupBy("year").pivot("region").sum("sales").collect()
     assert len(rows) == 1
     row = rows[0]
@@ -32,7 +35,9 @@ def test_group_by_pivot_sum_multiple_years(spark) -> None:
 
 def test_group_by_pivot_avg(spark) -> None:
     """Pivot then avg (PySpark: groupBy(...).pivot(...).avg(column))."""
-    df = spark.createDataFrame([("A", 1, 10), ("A", 1, 20), ("B", 1, 30)], ["r", "k", "v"])
+    df = spark.createDataFrame(
+        [("A", 1, 10), ("A", 1, 20), ("B", 1, 30)], ["r", "k", "v"]
+    )
     rows = df.groupBy("k").pivot("r").avg("v").collect()
     assert len(rows) == 1
     assert rows[0]["k"] == 1
@@ -77,7 +82,9 @@ def test_group_by_pivot_column_order_from_values(spark) -> None:
 
 def test_group_by_pivot_numeric_pivot_column(spark) -> None:
     """PySpark: pivot column can be numeric; column names are string representation."""
-    df = spark.createDataFrame([(1, 10, 100), (1, 20, 200), (2, 10, 150)], ["k", "p", "v"])
+    df = spark.createDataFrame(
+        [(1, 10, 100), (1, 20, 200), (2, 10, 150)], ["k", "p", "v"]
+    )
     rows = df.groupBy("k").pivot("p").sum("v").collect()
     assert len(rows) == 2
     by_k = {r["k"]: r for r in rows}

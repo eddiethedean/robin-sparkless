@@ -971,7 +971,8 @@ __all__ = [
 
 
 def when(condition, value=None):
-    """PySpark-compatible when(). Accepts Column or str condition, optional value."""
+    """PySpark-compatible when(). Accepts Column or str condition, optional value. Requires active SparkSession."""
+    _active_session()
     cond = _as_col(condition)
     if value is not None:
         val = (
@@ -989,22 +990,27 @@ def concat(*columns):
 
 
 def count(c="*"):
+    _active_session()
     return _count(_as_col(c)) if c != "*" else _count(col("*"))
 
 
 def sum(c):
+    _active_session()
     return _sum(_as_col(c))
 
 
 def avg(c):
+    _active_session()
     return _avg(_as_col(c))
 
 
 def min(c):
+    _active_session()
     return _min(_as_col(c))
 
 
 def max(c):
+    _active_session()
     return _max(_as_col(c))
 
 
@@ -1076,7 +1082,9 @@ def expr(sql_expr: str):
     F.expr() support: SQL expression string resolved in select() context (PySpark parity).
     - REGEXP/RLIKE: "col REGEXP 'pat'" -> col(col).rlike(pat)
     - Other expressions (e.g. "upper(x) as up") -> expr_str; resolved when used in df.select().
+    Requires active SparkSession.
     """
+    _active_session()
     import re
 
     m = re.match(
@@ -1424,7 +1432,8 @@ class _RowNumberExpr:
 
 
 def row_number():
-    """Window row_number() expression; use with .over(Window.partitionBy(...).orderBy(...))."""
+    """Window row_number() expression; use with .over(Window.partitionBy(...).orderBy(...)). Requires active SparkSession."""
+    _active_session()
     return _RowNumberExpr()
 
 
@@ -1437,7 +1446,8 @@ class _PercentRankExpr:
 
 
 def percent_rank():
-    """Window percent_rank() expression; use with .over(Window.partitionBy(...).orderBy(...))."""
+    """Window percent_rank() expression; use with .over(Window.partitionBy(...).orderBy(...)). Requires active SparkSession."""
+    _active_session()
     return _PercentRankExpr()
 
 
@@ -1450,7 +1460,8 @@ class _RankExpr:
 
 
 def rank():
-    """Window rank() expression; use with .over(Window.partitionBy(...).orderBy(...))."""
+    """Window rank() expression; use with .over(Window.partitionBy(...).orderBy(...)). Requires active SparkSession."""
+    _active_session()
     return _RankExpr()
 
 
@@ -1463,7 +1474,8 @@ class _DenseRankExpr:
 
 
 def dense_rank():
-    """Window dense_rank() expression; use with .over(Window.partitionBy(...).orderBy(...))."""
+    """Window dense_rank() expression; use with .over(Window.partitionBy(...).orderBy(...)). Requires active SparkSession."""
+    _active_session()
     return _DenseRankExpr()
 
 
@@ -1476,7 +1488,8 @@ class _CumeDistExpr:
 
 
 def cume_dist():
-    """Window cume_dist() expression; use with .over(Window.partitionBy(...).orderBy(...))."""
+    """Window cume_dist() expression; use with .over(Window.partitionBy(...).orderBy(...)). Requires active SparkSession."""
+    _active_session()
     return _CumeDistExpr()
 
 
@@ -1492,7 +1505,8 @@ class _NtileExpr:
 
 
 def ntile(n):
-    """Window ntile(n) expression; use with .over(Window.partitionBy(...).orderBy(...))."""
+    """Window ntile(n) expression; use with .over(Window.partitionBy(...).orderBy(...)). Requires active SparkSession."""
+    _active_session()
     return _NtileExpr(n)
 
 

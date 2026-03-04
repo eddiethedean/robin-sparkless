@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from pyspark.sql import functions as F
-
 
 def test_select_star(spark) -> None:
     """df.select("*") returns all columns."""

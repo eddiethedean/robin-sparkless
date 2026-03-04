@@ -16,15 +16,21 @@ def _schema_for_spark(spark):
             StringType as PyStringType,
             IntegerType as PyIntegerType,
         )
-        return PyStructType([
-            PyStructField("name", PyStringType(), True),
-            PyStructField("age", PyIntegerType(), True),
-        ]), PyStructType([])
+
+        return PyStructType(
+            [
+                PyStructField("name", PyStringType(), True),
+                PyStructField("age", PyIntegerType(), True),
+            ]
+        ), PyStructType([])
     from sparkless.spark_types import StructType, StructField, StringType, IntegerType
-    return StructType([
-        StructField("name", StringType(), True),
-        StructField("age", IntegerType(), True),
-    ]), StructType([])
+
+    return StructType(
+        [
+            StructField("name", StringType(), True),
+            StructField("age", IntegerType(), True),
+        ]
+    ), StructType([])
 
 
 class TestSessionParity(ParityTestBase):
@@ -65,7 +71,12 @@ class TestSessionParity(ParityTestBase):
         assert list(df.schema.fieldNames()) == ["name", "age"]
         # Type comparison: allow different type objects (sparkless vs pyspark) that represent string/int
         assert df.schema.fields[0].dataType.__class__.__name__ in ("StringType", "str")
-        assert df.schema.fields[1].dataType.__class__.__name__ in ("IntegerType", "LongType", "int", "long")
+        assert df.schema.fields[1].dataType.__class__.__name__ in (
+            "IntegerType",
+            "LongType",
+            "int",
+            "long",
+        )
 
     def test_createDataFrame_empty(self, spark):
         """Test createDataFrame with empty data matches PySpark behavior."""

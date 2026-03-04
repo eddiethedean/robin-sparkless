@@ -4,8 +4,6 @@ This module tests the first() method which returns the first row of a DataFrame.
 Uses conftest's spark fixture for backend-aware execution (mock/PySpark).
 """
 
-import pytest
-
 from tests.fixtures.spark_imports import get_spark_imports
 
 

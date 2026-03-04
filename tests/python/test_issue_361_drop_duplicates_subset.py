@@ -6,6 +6,7 @@ PySpark: df.dropDuplicates(subset=None) / df.dropDuplicates(subset=[...]).
 
 from __future__ import annotations
 
+
 def test_drop_duplicates_subset_issue_repro(spark) -> None:
     """df.dropDuplicates(subset=["a"]).collect() keeps one row per a."""
     df = spark.createDataFrame([(1, 1), (1, 2), (2, 1)], ["a", "b"])

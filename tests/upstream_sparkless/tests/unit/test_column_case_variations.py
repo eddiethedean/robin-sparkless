@@ -13,7 +13,11 @@ from tests.fixtures.spark_imports import get_spark_imports
 
 
 def _is_pyspark_backend():
-    return (os.getenv("MOCK_SPARK_TEST_BACKEND") or os.getenv("SPARKLESS_TEST_BACKEND") or "").strip().lower() == "pyspark"
+    return (
+        os.getenv("MOCK_SPARK_TEST_BACKEND")
+        or os.getenv("SPARKLESS_TEST_BACKEND")
+        or ""
+    ).strip().lower() == "pyspark"
 
 
 def _backend_imports():
@@ -95,7 +99,15 @@ class TestColumnCaseVariations:
         # Multiple columns with different cases
         result = sample_df.select("name", "AGE", "Salary").collect()
         assert len(result) == 3
-        field_names = getattr(result[0], "_schema", None) and [f.name for f in result[0]._schema.fields] or list(result[0].asDict().keys()) if hasattr(result[0], "asDict") else list(result[0].keys()) if hasattr(result[0], "keys") else []
+        field_names = (
+            getattr(result[0], "_schema", None)
+            and [f.name for f in result[0]._schema.fields]
+            or list(result[0].asDict().keys())
+            if hasattr(result[0], "asDict")
+            else list(result[0].keys())
+            if hasattr(result[0], "keys")
+            else []
+        )
         for col in ["Name", "name", "Age", "age", "Salary", "salary"]:
             if col in field_names:
                 break
@@ -1014,8 +1026,10 @@ class TestColumnCaseVariations:
         # PySpark unpivot requires variableColumnName and valueColumnName
         if _is_pyspark_backend():
             result = df.unpivot(
-                ids=[name_col], values=["Q1", "Q2"],
-                variableColumnName="quarter", valueColumnName="sales"
+                ids=[name_col],
+                values=["Q1", "Q2"],
+                variableColumnName="quarter",
+                valueColumnName="sales",
             ).collect()
         else:
             result = df.unpivot(ids=["name"], values=["Q1", "Q2"]).collect()
@@ -1023,8 +1037,10 @@ class TestColumnCaseVariations:
 
         if _is_pyspark_backend():
             result = df.unpivot(
-                ids=[name_col], values=["Q1", "Q2"],
-                variableColumnName="quarter", valueColumnName="sales"
+                ids=[name_col],
+                values=["Q1", "Q2"],
+                variableColumnName="quarter",
+                valueColumnName="sales",
             ).collect()
         else:
             result = df.unpivot(ids=["NAME"], values=["Q1", "Q2"]).collect()

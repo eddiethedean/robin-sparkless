@@ -1,0 +1,7 @@
+# PySpark 3.5 and Delta Lake for running Python tests in PySpark mode.
+# Install: pip install -r tests/requirements-pyspark.txt
+# Run tests: MOCK_SPARK_TEST_BACKEND=pyspark pytest tests/python tests/upstream_sparkless -v
+# Requires Java (e.g. OpenJDK 11 or 17) on PATH for PySpark.
+
+pyspark>=3.5,<3.6
+delta-spark>=3.0,<4

@@ -225,7 +225,9 @@ def spark(request):
 def is_pyspark_backend() -> bool:
     """True when test run uses PySpark as backend (MOCK_SPARK_TEST_BACKEND=pyspark). Used to skip sparkless-specific tests."""
     return (
-        os.getenv("MOCK_SPARK_TEST_BACKEND") or os.getenv("SPARKLESS_TEST_BACKEND") or ""
+        os.getenv("MOCK_SPARK_TEST_BACKEND")
+        or os.getenv("SPARKLESS_TEST_BACKEND")
+        or ""
     ).strip().lower() == "pyspark"
 
 

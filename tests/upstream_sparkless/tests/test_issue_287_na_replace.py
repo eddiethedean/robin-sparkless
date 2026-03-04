@@ -834,25 +834,21 @@ class TestIssue287NAReplace:
         finally:
             spark.stop()
 
-    def test_na_replace_case_insensitive_column_name(self):
-        """Test na.replace with case-insensitive column names."""
-        spark = SparkSession.builder.appName("issue-287").getOrCreate()
-        try:
-            df = spark.createDataFrame(
-                [
-                    {"Name": "Alice", "Value": 1},
-                    {"Name": "Bob", "Value": 2},
-                ]
-            )
+    def test_na_replace_case_insensitive_column_name(self, spark):
+        """Test na.replace with case-insensitive column names (uses session fixture for PySpark)."""
+        df = spark.createDataFrame(
+            [
+                {"Name": "Alice", "Value": 1},
+                {"Name": "Bob", "Value": 2},
+            ]
+        )
 
-            # Use different case for column name
-            result = df.na.replace(1, 99, subset=["value"])  # lowercase
+        # Use different case for column name (PySpark is case-insensitive; Sparkless may require exact case)
+        result = df.na.replace(1, 99, subset=["value"])  # lowercase
 
-            rows = result.collect()
-            assert len(rows) == 2
+        rows = result.collect()
+        assert len(rows) == 2
 
-            alice_row = next((r for r in rows if r["Name"] == "Alice"), None)
-            assert alice_row is not None
-            assert alice_row["Value"] == 99
-        finally:
-            spark.stop()
+        alice_row = next((r for r in rows if r["Name"] == "Alice"), None)
+        assert alice_row is not None
+        assert alice_row["Value"] == 99

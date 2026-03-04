@@ -5,18 +5,20 @@ This module tests that array() function accepts all parameter formats that PySpa
 - F.array(["Name", "Type"]) - list of string column names
 - F.array(F.col("Name"), F.col("Type")) - Column objects
 - F.array([F.col("Name"), F.col("Type")]) - list of Column objects
+
+Uses conftest spark fixture so PySpark mode gets correct backend (type coercion may differ).
 """
 
-import pytest
+from tests.fixtures.spark_imports import get_spark_imports
 
-from sparkless import SparkSession
-from sparkless.functions import F
-
-
-@pytest.fixture
-def spark():
-    """Create a SparkSession for testing."""
-    return SparkSession.builder.appName("test_array_formats").getOrCreate()
+# Backend-appropriate imports (spark from fixture; PySpark API)
+imports = get_spark_imports()
+F = imports.F
+StructType = imports.StructType
+StructField = imports.StructField
+StringType = imports.StringType
+IntegerType = imports.IntegerType
+Window = imports.Window
 
 
 class TestArrayParameterFormats:
@@ -181,14 +183,7 @@ class TestArrayParameterFormats:
         assert rows[0]["computed"] == [8, 2]
 
     def test_array_with_null_values(self, spark):
-        """Test array() with columns containing null values."""
-        from sparkless.spark_types import (
-            StructType,
-            StructField,
-            StringType,
-            IntegerType,
-        )
-
+        """Test array() with columns containing null values (PySpark API)."""
         schema = StructType(
             [
                 StructField("name", StringType(), True),
@@ -212,9 +207,7 @@ class TestArrayParameterFormats:
         assert 25 in rows[1]["info"]
 
     def test_array_with_all_null_columns(self, spark):
-        """Test array() with all null columns."""
-        from sparkless.spark_types import StructType, StructField, StringType
-
+        """Test array() with all null columns (PySpark API)."""
         schema = StructType(
             [
                 StructField("val1", StringType(), True),
@@ -353,8 +346,6 @@ class TestArrayParameterFormats:
 
     def test_array_with_window_functions(self, spark):
         """Test array() works with window functions."""
-        from sparkless.window import Window
-
         df = spark.createDataFrame(
             [
                 {"id": 1, "value": 10},
