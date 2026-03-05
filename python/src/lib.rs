@@ -824,14 +824,14 @@ impl PySparkSession {
     fn table(&self, name: &str) -> PyResult<PyDataFrame> {
         self.inner
             .table(name)
-            .map(|df| PyDataFrame { inner: df })
+            .map(PyDataFrame::wrap)
             .map_err(to_py_err)
     }
 
     fn sql(&self, query: &str) -> PyResult<PyDataFrame> {
         self.inner
             .sql(query)
-            .map(|df| PyDataFrame { inner: df })
+            .map(PyDataFrame::wrap)
             .map_err(to_py_err)
     }
 
@@ -843,7 +843,7 @@ impl PySparkSession {
         let names: Vec<&str> = column_names.iter().map(|s| s.as_str()).collect();
         self.inner
             .create_dataframe(data, names)
-            .map(|df| PyDataFrame { inner: df })
+            .map(PyDataFrame::wrap)
             .map_err(to_py_err)
     }
 
@@ -863,12 +863,18 @@ impl PySparkSession {
     ) -> PyResult<PyDataFrame> {
         let _ = sampling_ratio; // no-op for list/dict data; PySpark uses for CSV inference
         let (data, from_pandas) = normalize_create_dataframe_input(py, data)?;
-        let (rows, schema, schema_was_inferred) =
+        let schema_cache = schema
+            .and_then(|s| s.getattr("fields").ok().map(|_| s.clone().unbind()));
+        let (rows, schema_pairs, schema_was_inferred) =
             python_data_and_schema(py, &data, schema, from_pandas)?;
-        self.inner
-            .create_dataframe_from_rows(rows, schema, verify_schema, schema_was_inferred)
-            .map(|df| PyDataFrame { inner: df })
-            .map_err(to_py_err)
+        let df = self
+            .inner
+            .create_dataframe_from_rows(rows, schema_pairs, verify_schema, schema_was_inferred)
+            .map_err(to_py_err)?;
+        Ok(PyDataFrame {
+            inner: df,
+            schema_cache,
+        })
     }
 
     /// PySpark alias: createDataFrame -> create_dataframe_from_rows
@@ -887,28 +893,28 @@ impl PySparkSession {
     fn range(&self, start: i64, end: i64, step: i64) -> PyResult<PyDataFrame> {
         self.inner
             .range(start, end, step)
-            .map(|df| PyDataFrame { inner: df })
+            .map(PyDataFrame::wrap)
             .map_err(to_py_err)
     }
 
     fn read_csv(&self, path: &str) -> PyResult<PyDataFrame> {
         self.inner
             .read_csv(Path::new(path))
-            .map(|df| PyDataFrame { inner: df })
+            .map(PyDataFrame::wrap)
             .map_err(to_py_err)
     }
 
     fn read_parquet(&self, path: &str) -> PyResult<PyDataFrame> {
         self.inner
             .read_parquet(Path::new(path))
-            .map(|df| PyDataFrame { inner: df })
+            .map(PyDataFrame::wrap)
             .map_err(to_py_err)
     }
 
     fn read_json(&self, path: &str) -> PyResult<PyDataFrame> {
         self.inner
             .read_json(Path::new(path))
-            .map(|df| PyDataFrame { inner: df })
+            .map(PyDataFrame::wrap)
             .map_err(to_py_err)
     }
 
@@ -916,7 +922,7 @@ impl PySparkSession {
     fn read_delta(&self, name_or_path: &str) -> PyResult<PyDataFrame> {
         self.inner
             .read_delta(name_or_path)
-            .map(|df| PyDataFrame { inner: df })
+            .map(PyDataFrame::wrap)
             .map_err(to_py_err)
     }
 
@@ -929,7 +935,7 @@ impl PySparkSession {
     ) -> PyResult<PyDataFrame> {
         self.inner
             .read_delta_with_version(name_or_path, version)
-            .map(|df| PyDataFrame { inner: df })
+            .map(PyDataFrame::wrap)
             .map_err(to_py_err)
     }
 
@@ -2349,7 +2355,7 @@ impl PyDataFrameReader {
         }
         reader
             .load(Path::new(path))
-            .map(|df| PyDataFrame { inner: df })
+            .map(PyDataFrame::wrap)
             .map_err(to_py_err)
     }
 
@@ -2377,7 +2383,7 @@ impl PyDataFrameReader {
         }
         reader
             .csv(Path::new(path))
-            .map(|df| PyDataFrame { inner: df })
+            .map(PyDataFrame::wrap)
             .map_err(to_py_err)
     }
 
@@ -2394,7 +2400,7 @@ impl PyDataFrameReader {
         }
         reader
             .parquet(Path::new(path))
-            .map(|df| PyDataFrame { inner: df })
+            .map(PyDataFrame::wrap)
             .map_err(to_py_err)
     }
 
@@ -2411,7 +2417,7 @@ impl PyDataFrameReader {
         }
         reader
             .json(Path::new(path))
-            .map(|df| PyDataFrame { inner: df })
+            .map(PyDataFrame::wrap)
             .map_err(to_py_err)
     }
 
@@ -2425,7 +2431,7 @@ impl PyDataFrameReader {
         session
             .inner
             .table(name)
-            .map(|df| PyDataFrame { inner: df })
+            .map(PyDataFrame::wrap)
             .map_err(to_py_err)
     }
 
@@ -2441,7 +2447,7 @@ impl PyDataFrameReader {
             .inner
             .read()
             .delta(Path::new(path))
-            .map(|df| PyDataFrame { inner: df })
+            .map(PyDataFrame::wrap)
             .map_err(to_py_err)
     }
 }
@@ -2518,6 +2524,17 @@ fn resolve_join_keys_with_aliases(
 #[pyclass]
 struct PyDataFrame {
     inner: DataFrame,
+    /// When set, df.schema returns this (preserves ArrayType.containsNull etc. from createDataFrame(schema=StructType(...))).
+    schema_cache: Option<Py<PyAny>>,
+}
+
+impl PyDataFrame {
+    fn wrap(df: DataFrame) -> Self {
+        PyDataFrame {
+            inner: df,
+            schema_cache: None,
+        }
+    }
 }
 
 #[pymethods]
@@ -2559,21 +2576,19 @@ impl PyDataFrame {
                             literals_py,
                         ))?;
                         let py_df = result.downcast::<PyDataFrame>()?;
-                        Ok(Some(PyDataFrame {
-                            inner: py_df.borrow().inner.clone(),
-                        }))
+                        Ok(Some(PyDataFrame::wrap(py_df.borrow().inner.clone())))
                     })?
                 {
                     let filter_expr = robin_sparkless::Column::new(temp_name.clone()).into_expr();
                     let filtered = df_with_col.inner.filter(filter_expr).map_err(to_py_err)?;
                     let out = filtered.drop(vec![temp_name.as_str()]).map_err(to_py_err)?;
-                    return Ok(PyDataFrame { inner: out });
+                    return Ok(PyDataFrame::wrap(out));
                 }
             }
             let df = slf
                 .inner
                 .filter(col_ref.inner.clone().into_expr())
-                .map(|df| PyDataFrame { inner: df })
+                .map(PyDataFrame::wrap)
                 .map_err(to_py_err)?;
             return Ok(df);
         }
@@ -2598,7 +2613,7 @@ impl PyDataFrame {
             return slf
                 .inner
                 .filter(expr)
-                .map(|df| PyDataFrame { inner: df })
+                .map(PyDataFrame::wrap)
                 .map_err(to_py_err);
         }
         if let Ok(expr_str) = condition.extract::<String>() {
@@ -2621,7 +2636,7 @@ impl PyDataFrame {
             return slf
                 .inner
                 .filter(expr)
-                .map(|df| PyDataFrame { inner: df })
+                .map(PyDataFrame::wrap)
                 .map_err(to_py_err);
         }
         Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
@@ -2751,7 +2766,7 @@ impl PyDataFrame {
             return self
                 .inner
                 .select(col_refs)
-                .map(|df| PyDataFrame { inner: df })
+                .map(PyDataFrame::wrap)
                 .map_err(to_py_err);
         }
 
@@ -2775,7 +2790,7 @@ impl PyDataFrame {
 
         self.inner
             .select_items(items)
-            .map(|df| PyDataFrame { inner: df })
+            .map(PyDataFrame::wrap)
             .map_err(to_py_err)
     }
 
@@ -2817,9 +2832,7 @@ impl PyDataFrame {
                             literals_py,
                         ))?;
                         let py_df = result.downcast::<PyDataFrame>()?;
-                        Ok(Some(PyDataFrame {
-                            inner: py_df.borrow().inner.clone(),
-                        }))
+                        Ok(Some(PyDataFrame::wrap(py_df.borrow().inner.clone())))
                     })?
                 {
                     return Ok(result_df);
@@ -2842,7 +2855,7 @@ impl PyDataFrame {
                     to_py_err(msg)
                 }
             })?;
-            return Ok(PyDataFrame { inner: df });
+            return Ok(PyDataFrame::wrap(df));
         }
 
         // Case 2: expr-string from F.expr(...)
@@ -2889,7 +2902,7 @@ impl PyDataFrame {
                     to_py_err(msg)
                 }
             })?;
-            return Ok(PyDataFrame { inner: df });
+            return Ok(PyDataFrame::wrap(df));
         }
 
         Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
@@ -2911,7 +2924,7 @@ impl PyDataFrame {
     fn with_column_renamed(&self, old_name: &str, new_name: &str) -> PyResult<PyDataFrame> {
         self.inner
             .with_column_renamed(old_name, new_name)
-            .map(|df| PyDataFrame { inner: df })
+            .map(PyDataFrame::wrap)
             .map_err(to_py_err)
     }
 
@@ -2944,6 +2957,9 @@ impl PyDataFrame {
 
     #[getter]
     fn schema(&self, py: Python<'_>) -> PyResult<PyObject> {
+        if let Some(ref cached) = self.schema_cache {
+            return Ok(cached.clone_ref(py).into_py(py));
+        }
         let schema = self.inner.schema_engine().map_err(to_py_err)?;
         let types_mod = PyModule::import_bound(py, "sparkless.sql.types")?;
         let struct_type_cls = types_mod.getattr("StructType")?;
@@ -3151,13 +3167,13 @@ impl PyDataFrame {
         match n {
             Some(_) => {
                 // head(n) -> list of Row (PySpark parity for upstream tests e.g. test_delta_lake_schema_evolution)
-                let limited_py = PyDataFrame { inner: limited };
+                let limited_py = PyDataFrame::wrap(limited);
                 let rows = limited_py.collect(py)?;
                 Ok(PyList::new_bound(py, rows).into_py(py))
             }
             None => {
                 // head() -> DataFrame so .collect() can be called (issue #413)
-                let limited_py = PyDataFrame { inner: limited };
+                let limited_py = PyDataFrame::wrap(limited);
                 Ok(limited_py.into_py(py))
             }
         }
@@ -3172,9 +3188,7 @@ impl PyDataFrame {
     }
 
     fn alias(&self, name: &str) -> PyDataFrame {
-        PyDataFrame {
-            inner: self.inner.alias(name),
-        }
+        PyDataFrame::wrap(self.inner.alias(name))
     }
 
     #[pyo3(signature = (*exprs))]
@@ -3210,14 +3224,14 @@ impl PyDataFrame {
         }
         self.inner
             .agg(rust_exprs)
-            .map(|df| PyDataFrame { inner: df })
+            .map(PyDataFrame::wrap)
             .map_err(to_py_err)
     }
 
     fn cache(&self) -> PyResult<PyDataFrame> {
         self.inner
             .cache()
-            .map(|df| PyDataFrame { inner: df })
+            .map(PyDataFrame::wrap)
             .map_err(to_py_err)
     }
 
@@ -3306,7 +3320,7 @@ impl PyDataFrame {
         asc.truncate(refs.len());
         self.inner
             .order_by(refs, asc)
-            .map(|df| PyDataFrame { inner: df })
+            .map(PyDataFrame::wrap)
             .map_err(to_py_err)
     }
 
@@ -3406,7 +3420,7 @@ impl PyDataFrame {
             return self
                 .inner
                 .order_by_exprs(sort_orders)
-                .map(|df| PyDataFrame { inner: df })
+                .map(PyDataFrame::wrap)
                 .map_err(to_py_err);
         }
 
@@ -3446,7 +3460,7 @@ impl PyDataFrame {
         }
         self.inner
             .order_by_exprs(sort_orders)
-            .map(|df| PyDataFrame { inner: df })
+            .map(PyDataFrame::wrap)
             .map_err(to_py_err)
     }
 
@@ -3471,7 +3485,7 @@ impl PyDataFrame {
     fn limit(&self, n: usize) -> PyResult<PyDataFrame> {
         self.inner
             .limit(n)
-            .map(|df| PyDataFrame { inner: df })
+            .map(PyDataFrame::wrap)
             .map_err(to_py_err)
     }
 
@@ -3481,7 +3495,7 @@ impl PyDataFrame {
         let refs: Vec<&str> = col_names.iter().map(|s| s.as_str()).collect();
         self.inner
             .drop(refs)
-            .map(|df| PyDataFrame { inner: df })
+            .map(PyDataFrame::wrap)
             .map_err(to_py_err)
     }
 
@@ -3492,7 +3506,7 @@ impl PyDataFrame {
             .map(|v| v.iter().map(|s| s.as_str()).collect());
         self.inner
             .distinct(sub)
-            .map(|df| PyDataFrame { inner: df })
+            .map(PyDataFrame::wrap)
             .map_err(to_py_err)
     }
 
@@ -3520,7 +3534,7 @@ impl PyDataFrame {
             return self
                 .inner
                 .cross_join(&other.inner)
-                .map(|df| PyDataFrame { inner: df })
+                .map(PyDataFrame::wrap)
                 .map_err(to_py_err);
         }
         let join_type = match how_lower.as_str() {
@@ -3540,7 +3554,7 @@ impl PyDataFrame {
             let right_refs: Vec<&str> = right_vec.iter().map(|s| s.as_str()).collect();
             self.inner
                 .join_with_keys(&other.inner, left_refs, right_refs, join_type)
-                .map(|df| PyDataFrame { inner: df })
+                .map(PyDataFrame::wrap)
                 .map_err(to_py_err)
         } else if let Some(on_arg) = on {
             // Try to use normal join when on is simple column name(s) (PySpark parity: one key column in result).
@@ -3552,7 +3566,7 @@ impl PyDataFrame {
                     return self
                         .inner
                         .join(&other.inner, on_refs, join_type)
-                        .map(|df| PyDataFrame { inner: df })
+                        .map(PyDataFrame::wrap)
                         .map_err(to_py_err);
                 }
             }
@@ -3595,7 +3609,7 @@ impl PyDataFrame {
                         // reapply the full predicate after the key-based join so additional conditions are honored
                         // (issue #380: join with compound condition).
                         let filtered = joined.filter(expr).map_err(to_py_err)?;
-                        return Ok(PyDataFrame { inner: filtered });
+                        return Ok(PyDataFrame::wrap(filtered));
                     }
                 }
                 // Non-eq expression: cross + filter (ambiguous duplicate column names may apply).
@@ -3643,15 +3657,15 @@ impl PyDataFrame {
                     let all_refs: Vec<&str> = all_cols.iter().map(|s| s.as_str()).collect();
                     let augmented = augmented.select(all_refs).map_err(to_py_err)?;
                     let all = filtered.union(&augmented).map_err(to_py_err)?;
-                    return Ok(PyDataFrame { inner: all });
+                    return Ok(PyDataFrame::wrap(all));
                 }
-                return Ok(PyDataFrame { inner: filtered });
+                return Ok(PyDataFrame::wrap(filtered));
             }
             let on_vec = py_join_on_to_vec(on_arg)?;
             let on_refs: Vec<&str> = on_vec.iter().map(|s| s.as_str()).collect();
             self.inner
                 .join(&other.inner, on_refs, join_type)
-                .map(|df| PyDataFrame { inner: df })
+                .map(PyDataFrame::wrap)
                 .map_err(to_py_err)
         } else {
             Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
@@ -3664,14 +3678,14 @@ impl PyDataFrame {
     fn cross_join(&self, other: &PyDataFrame) -> PyResult<PyDataFrame> {
         self.inner
             .cross_join(&other.inner)
-            .map(|df| PyDataFrame { inner: df })
+            .map(PyDataFrame::wrap)
             .map_err(to_py_err)
     }
 
     fn intersect(&self, other: &PyDataFrame) -> PyResult<PyDataFrame> {
         self.inner
             .intersect(&other.inner)
-            .map(|df| PyDataFrame { inner: df })
+            .map(PyDataFrame::wrap)
             .map_err(to_py_err)
     }
 
@@ -3679,7 +3693,7 @@ impl PyDataFrame {
     fn except_all(&self, other: &PyDataFrame) -> PyResult<PyDataFrame> {
         self.inner
             .except_all(&other.inner)
-            .map(|df| PyDataFrame { inner: df })
+            .map(PyDataFrame::wrap)
             .map_err(to_py_err)
     }
 
@@ -3687,7 +3701,7 @@ impl PyDataFrame {
         let other_inner = py_any_to_dataframe_inner(other)?;
         self.inner
             .union(&other_inner)
-            .map(|df| PyDataFrame { inner: df })
+            .map(PyDataFrame::wrap)
             .map_err(to_py_err)
     }
 
@@ -3695,7 +3709,7 @@ impl PyDataFrame {
         let other_inner = py_any_to_dataframe_inner(other)?;
         self.inner
             .union_all(&other_inner)
-            .map(|df| PyDataFrame { inner: df })
+            .map(PyDataFrame::wrap)
             .map_err(to_py_err)
     }
 
@@ -3714,7 +3728,7 @@ impl PyDataFrame {
         let other_inner = py_any_to_dataframe_inner(other)?;
         self.inner
             .union_by_name(&other_inner, allow)
-            .map(|df| PyDataFrame { inner: df })
+            .map(PyDataFrame::wrap)
             .map_err(to_py_err)
     }
 
@@ -3733,13 +3747,13 @@ impl PyDataFrame {
                     .inner
                     .select_expr_with_session(&session_ref.borrow().inner, &exprs_vec)
                 {
-                    return Ok(PyDataFrame { inner: df });
+                    return Ok(PyDataFrame::wrap(df));
                 }
             }
         }
         self.inner
             .select_expr(&exprs_vec)
-            .map(|df| PyDataFrame { inner: df })
+            .map(PyDataFrame::wrap)
             .map_err(to_py_err)
     }
 
@@ -3772,7 +3786,7 @@ impl PyDataFrame {
             .map(|v| v.iter().map(|s| s.as_str()).collect());
         self.inner
             .dropna(sub, how_str, thresh)
-            .map(|df| PyDataFrame { inner: df })
+            .map(PyDataFrame::wrap)
             .map_err(to_py_err)
     }
 
@@ -3794,7 +3808,7 @@ impl PyDataFrame {
                     .fillna(val_expr, Some(vec![col_name.as_str()]))
                     .map_err(to_py_err)?;
             }
-            return Ok(PyDataFrame { inner: df });
+            return Ok(PyDataFrame::wrap(df));
         }
         let value_expr = py_any_to_column(value)?.into_expr();
         let kind = classify_fill_value_kind(value);
@@ -3821,7 +3835,7 @@ impl PyDataFrame {
         let sub: Option<Vec<&str>> = Some(effective);
         self.inner
             .fillna(value_expr, sub)
-            .map(|df| PyDataFrame { inner: df })
+            .map(PyDataFrame::wrap)
             .map_err(to_py_err)
     }
 
@@ -3850,7 +3864,7 @@ impl PyDataFrame {
                         .replace(old_expr, new_expr, sub.as_ref().map(|v| v.to_vec()))
                         .map_err(to_py_err)?;
                 }
-                return Ok(PyDataFrame { inner: current });
+                return Ok(PyDataFrame::wrap(current));
             }
             // PySpark: na.replace("a", None) replaces "a" with null.
             let null_expr = robin_sparkless::functions::lit_null("string")
@@ -3861,7 +3875,7 @@ impl PyDataFrame {
                 .inner
                 .na()
                 .replace(old_expr, null_expr, sub.as_ref().map(|v| v.to_vec()))
-                .map(|df| PyDataFrame { inner: df })
+                .map(PyDataFrame::wrap)
                 .map_err(to_py_err);
         }
 
@@ -3871,14 +3885,14 @@ impl PyDataFrame {
         self.inner
             .na()
             .replace(old_expr, new_expr, sub.as_ref().map(|v| v.to_vec()))
-            .map(|df| PyDataFrame { inner: df })
+            .map(PyDataFrame::wrap)
             .map_err(to_py_err)
     }
 
     /// Return the first row as a Row, or None if empty (Phase 7.8 / PySpark first() semantics).
     fn first(&self, py: Python<'_>) -> PyResult<Option<PyObject>> {
         let one = self.inner.first().map_err(to_py_err)?;
-        let wrapper = PyDataFrame { inner: one };
+        let wrapper = PyDataFrame::wrap(one);
         let rows = wrapper.collect(py)?;
         Ok(rows.into_iter().next())
     }
@@ -3886,7 +3900,7 @@ impl PyDataFrame {
     fn describe(&self) -> PyResult<PyDataFrame> {
         self.inner
             .describe()
-            .map(|df| PyDataFrame { inner: df })
+            .map(PyDataFrame::wrap)
             .map_err(to_py_err)
     }
 
@@ -3914,14 +3928,14 @@ impl PyDataFrame {
     fn persist(&self) -> PyResult<PyDataFrame> {
         self.inner
             .persist()
-            .map(|df| PyDataFrame { inner: df })
+            .map(PyDataFrame::wrap)
             .map_err(to_py_err)
     }
 
     fn subtract(&self, other: &PyDataFrame) -> PyResult<PyDataFrame> {
         self.inner
             .subtract(&other.inner)
-            .map(|df| PyDataFrame { inner: df })
+            .map(PyDataFrame::wrap)
             .map_err(to_py_err)
     }
 
@@ -3946,14 +3960,14 @@ impl PyDataFrame {
         }
         self.inner
             .sample_by(col, &fracs, seed)
-            .map(|df| PyDataFrame { inner: df })
+            .map(PyDataFrame::wrap)
             .map_err(to_py_err)
     }
 
     fn crosstab(&self, col1: &str, col2: &str) -> PyResult<PyDataFrame> {
         self.inner
             .crosstab(col1, col2)
-            .map(|df| PyDataFrame { inner: df })
+            .map(PyDataFrame::wrap)
             .map_err(to_py_err)
     }
 
@@ -3962,7 +3976,7 @@ impl PyDataFrame {
         let cols: Vec<&str> = columns.iter().map(|s| s.as_str()).collect();
         self.inner
             .freq_items(&cols, support)
-            .map(|df| PyDataFrame { inner: df })
+            .map(PyDataFrame::wrap)
             .map_err(to_py_err)
     }
 
@@ -3971,7 +3985,7 @@ impl PyDataFrame {
         let vals: Vec<&str> = value_vars.iter().map(|s| s.as_str()).collect();
         self.inner
             .melt(&ids, &vals)
-            .map(|df| PyDataFrame { inner: df })
+            .map(PyDataFrame::wrap)
             .map_err(to_py_err)
     }
 
@@ -3988,7 +4002,7 @@ impl PyDataFrame {
         let mut df = self
             .inner
             .unpivot(&id_refs, &val_refs)
-            .map(|inner| PyDataFrame { inner })
+            .map(PyDataFrame::wrap)
             .map_err(to_py_err)?;
         if let Some(ref name) = variableColumnName {
             df = df.with_column_renamed("variable", name)?;
@@ -4026,7 +4040,7 @@ impl PyDataFrame {
             .inner
             .create_dataframe_from_rows(rows_data, schema, false, schema_was_inferred)
             .map_err(to_py_err)?;
-        Ok(PyDataFrame { inner: df })
+        Ok(PyDataFrame::wrap(df))
     }
 
     #[pyo3(name = "flat_map")]
@@ -4048,7 +4062,7 @@ impl PyDataFrame {
         }
         self.inner
             .with_columns_renamed(&renames)
-            .map(|df| PyDataFrame { inner: df })
+            .map(PyDataFrame::wrap)
             .map_err(to_py_err)
     }
 
@@ -4072,7 +4086,7 @@ impl PyDataFrame {
         }
         self.inner
             .with_columns(&exprs)
-            .map(|df| PyDataFrame { inner: df })
+            .map(PyDataFrame::wrap)
             .map_err(to_py_err)
     }
 
@@ -4113,9 +4127,7 @@ impl PyDataFrame {
     #[pyo3(name = "toDF", signature = (*col_names))]
     fn to_df(&self, col_names: &Bound<'_, PyTuple>) -> PyResult<PyDataFrame> {
         if col_names.is_empty() {
-            return Ok(PyDataFrame {
-                inner: self.inner.clone(),
-            });
+            return Ok(PyDataFrame::wrap(self.inner.clone()));
         }
         let mut df = self.inner.clone();
         let current = df.columns().map_err(to_py_err)?;
@@ -4128,7 +4140,7 @@ impl PyDataFrame {
                 .with_column_renamed(&current[i], &new_name)
                 .map_err(to_py_err)?;
         }
-        Ok(PyDataFrame { inner: df })
+        Ok(PyDataFrame::wrap(df))
     }
 
     #[pyo3(name = "toPandas")]
@@ -4175,15 +4187,11 @@ impl PyDataFrame {
     }
 
     fn coalesce(&self, _n: usize) -> PyResult<PyDataFrame> {
-        Ok(PyDataFrame {
-            inner: self.inner.clone(),
-        })
+        Ok(PyDataFrame::wrap(self.inner.clone()))
     }
 
     fn repartition(&self, _n: usize) -> PyResult<PyDataFrame> {
-        Ok(PyDataFrame {
-            inner: self.inner.clone(),
-        })
+        Ok(PyDataFrame::wrap(self.inner.clone()))
     }
 
     #[pyo3(name = "isEmpty")]
@@ -4193,7 +4201,7 @@ impl PyDataFrame {
 
     fn take(&self, py: Python<'_>, n: usize) -> PyResult<Vec<PyObject>> {
         let limited = self.inner.limit(n).map_err(to_py_err)?;
-        let df = PyDataFrame { inner: limited };
+        let df = PyDataFrame::wrap(limited);
         df.collect(py)
     }
 
@@ -5437,7 +5445,7 @@ impl PyDataFrameNaFunctions {
                     .fill(val_expr, Some(vec![col_name.as_str()]))
                     .map_err(to_py_err)?;
             }
-            return Ok(PyDataFrame { inner: current });
+            return Ok(PyDataFrame::wrap(current));
         }
 
         let value_col = py_any_to_column(value)?;
@@ -5464,7 +5472,7 @@ impl PyDataFrameNaFunctions {
         let subset_refs: Option<Vec<&str>> = Some(subset_refs_vec);
         let na = df_ref.inner.na();
         na.fill(value_col.into_expr(), subset_refs)
-            .map(|df| PyDataFrame { inner: df })
+            .map(PyDataFrame::wrap)
             .map_err(to_py_err)
     }
 
@@ -5488,7 +5496,7 @@ impl PyDataFrameNaFunctions {
             .map(|v| v.iter().map(|s| s.as_str()).collect());
         let na = df_ref.inner.na();
         na.drop(subset_refs, how, thresh)
-            .map(|df| PyDataFrame { inner: df })
+            .map(PyDataFrame::wrap)
             .map_err(to_py_err)
     }
 
@@ -5523,7 +5531,7 @@ impl PyDataFrameNaFunctions {
                         .replace(old_expr, new_expr, subset_refs.as_ref().map(|v| v.to_vec()))
                         .map_err(to_py_err)?;
                 }
-                return Ok(PyDataFrame { inner: current });
+                return Ok(PyDataFrame::wrap(current));
             }
             // PySpark: replace("a", None) works (replace with null); replace(1, None) or replace([1,2], None) raises
             if to_replace.downcast::<PyList>().is_ok() {
@@ -5547,7 +5555,7 @@ impl PyDataFrameNaFunctions {
                     null_expr,
                     subset_refs.as_ref().map(|v| v.to_vec()),
                 )
-                .map(|df| PyDataFrame { inner: df })
+                .map(PyDataFrame::wrap)
                 .map_err(to_py_err);
         }
 
@@ -5560,7 +5568,7 @@ impl PyDataFrameNaFunctions {
                 .inner
                 .na()
                 .fill(value_col.into_expr(), subset_refs)
-                .map(|df| PyDataFrame { inner: df })
+                .map(PyDataFrame::wrap)
                 .map_err(to_py_err);
         }
 
@@ -5587,7 +5595,7 @@ impl PyDataFrameNaFunctions {
                     .replace(old_expr, new_expr, subset_refs.as_ref().map(|v| v.to_vec()))
                     .map_err(to_py_err)?;
             }
-            return Ok(PyDataFrame { inner: current });
+            return Ok(PyDataFrame::wrap(current));
         }
 
         // to_replace is list and value is scalar: replace each old with value
@@ -5606,7 +5614,7 @@ impl PyDataFrameNaFunctions {
                     )
                     .map_err(to_py_err)?;
             }
-            return Ok(PyDataFrame { inner: current });
+            return Ok(PyDataFrame::wrap(current));
         }
 
         // Single scalar/scalar replace
@@ -5616,7 +5624,7 @@ impl PyDataFrameNaFunctions {
             .inner
             .na()
             .replace(old_expr, new_expr, subset_refs)
-            .map(|df| PyDataFrame { inner: df })
+            .map(PyDataFrame::wrap)
             .map_err(to_py_err)
     }
 }
@@ -5631,7 +5639,7 @@ impl PyCubeRollupData {
     fn count(&self) -> PyResult<PyDataFrame> {
         self.inner
             .count()
-            .map(|df| PyDataFrame { inner: df })
+            .map(PyDataFrame::wrap)
             .map_err(to_py_err)
     }
 
@@ -5668,7 +5676,7 @@ impl PyCubeRollupData {
         }
         self.inner
             .agg(rust_exprs)
-            .map(|df| PyDataFrame { inner: df })
+            .map(PyDataFrame::wrap)
             .map_err(to_py_err)
     }
 }
@@ -5683,7 +5691,7 @@ impl PyGroupedData {
     fn count(&self) -> PyResult<PyDataFrame> {
         self.inner
             .count()
-            .map(|df| PyDataFrame { inner: df })
+            .map(PyDataFrame::wrap)
             .map_err(to_py_err)
     }
 
@@ -5691,7 +5699,7 @@ impl PyGroupedData {
         let name = py_col_to_name(col_name)?;
         self.inner
             .sum(&name)
-            .map(|df| PyDataFrame { inner: df })
+            .map(PyDataFrame::wrap)
             .map_err(to_py_err)
     }
 
@@ -5709,7 +5717,7 @@ impl PyGroupedData {
         let refs: Vec<&str> = names.iter().map(|s| s.as_str()).collect();
         self.inner
             .avg(&refs)
-            .map(|df| PyDataFrame { inner: df })
+            .map(PyDataFrame::wrap)
             .map_err(to_py_err)
     }
 
@@ -5723,7 +5731,7 @@ impl PyGroupedData {
         let name = py_col_to_name(col_name)?;
         self.inner
             .min(&name)
-            .map(|df| PyDataFrame { inner: df })
+            .map(PyDataFrame::wrap)
             .map_err(to_py_err)
     }
 
@@ -5731,7 +5739,7 @@ impl PyGroupedData {
         let name = py_col_to_name(col_name)?;
         self.inner
             .max(&name)
-            .map(|df| PyDataFrame { inner: df })
+            .map(PyDataFrame::wrap)
             .map_err(to_py_err)
     }
 
@@ -5794,7 +5802,7 @@ impl PyGroupedData {
         }
         self.inner
             .agg(rust_exprs)
-            .map(|df| PyDataFrame { inner: df })
+            .map(PyDataFrame::wrap)
             .map_err(to_py_err)
     }
 
@@ -5816,91 +5824,91 @@ impl PyPivotedGroupedData {
     fn sum(&self, value_col: &str) -> PyResult<PyDataFrame> {
         self.inner
             .sum(value_col)
-            .map(|df| PyDataFrame { inner: df })
+            .map(PyDataFrame::wrap)
             .map_err(to_py_err)
     }
 
     fn avg(&self, value_col: &str) -> PyResult<PyDataFrame> {
         self.inner
             .avg(value_col)
-            .map(|df| PyDataFrame { inner: df })
+            .map(PyDataFrame::wrap)
             .map_err(to_py_err)
     }
 
     fn min(&self, value_col: &str) -> PyResult<PyDataFrame> {
         self.inner
             .min(value_col)
-            .map(|df| PyDataFrame { inner: df })
+            .map(PyDataFrame::wrap)
             .map_err(to_py_err)
     }
 
     fn max(&self, value_col: &str) -> PyResult<PyDataFrame> {
         self.inner
             .max(value_col)
-            .map(|df| PyDataFrame { inner: df })
+            .map(PyDataFrame::wrap)
             .map_err(to_py_err)
     }
 
     fn count(&self) -> PyResult<PyDataFrame> {
         self.inner
             .count()
-            .map(|df| PyDataFrame { inner: df })
+            .map(PyDataFrame::wrap)
             .map_err(to_py_err)
     }
 
     fn _count_distinct(&self, value_col: &str) -> PyResult<PyDataFrame> {
         self.inner
             ._count_distinct(value_col)
-            .map(|df| PyDataFrame { inner: df })
+            .map(PyDataFrame::wrap)
             .map_err(to_py_err)
     }
 
     fn _collect_list(&self, value_col: &str) -> PyResult<PyDataFrame> {
         self.inner
             ._collect_list(value_col)
-            .map(|df| PyDataFrame { inner: df })
+            .map(PyDataFrame::wrap)
             .map_err(to_py_err)
     }
 
     fn _collect_set(&self, value_col: &str) -> PyResult<PyDataFrame> {
         self.inner
             ._collect_set(value_col)
-            .map(|df| PyDataFrame { inner: df })
+            .map(PyDataFrame::wrap)
             .map_err(to_py_err)
     }
 
     fn _first(&self, value_col: &str) -> PyResult<PyDataFrame> {
         self.inner
             ._first(value_col)
-            .map(|df| PyDataFrame { inner: df })
+            .map(PyDataFrame::wrap)
             .map_err(to_py_err)
     }
 
     fn _last(&self, value_col: &str) -> PyResult<PyDataFrame> {
         self.inner
             ._last(value_col)
-            .map(|df| PyDataFrame { inner: df })
+            .map(PyDataFrame::wrap)
             .map_err(to_py_err)
     }
 
     fn _stddev(&self, value_col: &str) -> PyResult<PyDataFrame> {
         self.inner
             ._stddev(value_col)
-            .map(|df| PyDataFrame { inner: df })
+            .map(PyDataFrame::wrap)
             .map_err(to_py_err)
     }
 
     fn _variance(&self, value_col: &str) -> PyResult<PyDataFrame> {
         self.inner
             ._variance(value_col)
-            .map(|df| PyDataFrame { inner: df })
+            .map(PyDataFrame::wrap)
             .map_err(to_py_err)
     }
 
     fn mean(&self, value_col: &str) -> PyResult<PyDataFrame> {
         self.inner
             .mean(value_col)
-            .map(|df| PyDataFrame { inner: df })
+            .map(PyDataFrame::wrap)
             .map_err(to_py_err)
     }
 
@@ -5941,7 +5949,7 @@ impl PyPivotedGroupedData {
         }
         self.inner
             .agg(rust_exprs)
-            .map(|df| PyDataFrame { inner: df })
+            .map(PyDataFrame::wrap)
             .map_err(to_py_err)
     }
 }
