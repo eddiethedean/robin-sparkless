@@ -851,7 +851,7 @@ fn parse_pivot_agg_expr(expr: &Expr) -> Option<(String, &'static str, String)> {
                 // collect_list is Implode(Column). collect_set is unique().implode() (alias often "collect_set").
                 let kind = if alias_opt
                     .as_ref()
-                    .map_or(false, |a| a.contains("collect_set"))
+                    .is_some_and(|a| a.contains("collect_set"))
                 {
                     "collect_set"
                 } else {

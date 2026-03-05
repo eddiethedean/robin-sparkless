@@ -840,7 +840,7 @@ class TestIssue335WindowOrderByList:
 
             assert len(rows) == 3
             # With orderBy, window frame is range-based: first row has Max=Min=80, last has Max=100 Min=80
-            by_score = sorted(rows, key=lambda r: (r["Score"] or 0))
+            by_score = sorted(rows, key=lambda r: r["Score"] or 0)
             assert by_score[0]["MinScore"] == 80
             assert by_score[-1]["MaxScore"] == 100
             assert by_score[-1]["MinScore"] == 80

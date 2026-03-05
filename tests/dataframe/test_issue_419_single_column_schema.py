@@ -13,11 +13,18 @@ import pytest
 
 def _supports_single_column_schema() -> bool:
     """True if the binding accepts createDataFrame([1,2,3], 'bigint') (single type as schema)."""
+    from tests.fixtures.spark_imports import get_spark_imports
+
+    _imports = get_spark_imports()
+    _session = _imports.SparkSession.builder.appName("single_col_check").getOrCreate()
     try:
-        spark.createDataFrame([1, 2, 3], "bigint")
-        return True
-    except (TypeError, Exception):
-        return False
+        try:
+            _session.createDataFrame([1, 2, 3], "bigint")
+            return True
+        except (TypeError, Exception):
+            return False
+    finally:
+        _session.stop()
 
 
 @pytest.mark.skipif(

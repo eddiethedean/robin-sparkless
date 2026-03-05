@@ -29,7 +29,6 @@ class TestIssue374JoinAliasedColumns:
     def test_join_aliased_column_refs(self):
         """Test join with F.col('sm.brand_id') == F.col('b.code') (issue example)."""
         import inspect
-        import pytest
 
         test_name = inspect.stack()[1].function
         spark = SparkSession.builder.appName(

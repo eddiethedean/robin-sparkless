@@ -5,7 +5,6 @@ This test verifies that df.select([F.col("name"), F.col("dept")]) works correctl
 Uses get_spark_imports from fixture only.
 """
 
-import pytest
 
 from tests.fixtures.spark_imports import get_spark_imports
 

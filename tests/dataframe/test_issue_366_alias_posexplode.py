@@ -4,7 +4,6 @@ PySpark posexplode().alias("Value1", "Value2") names both columns.
 Uses get_spark_imports only; same logic for both backends.
 """
 
-import pytest
 
 from tests.fixtures.spark_imports import get_spark_imports
 

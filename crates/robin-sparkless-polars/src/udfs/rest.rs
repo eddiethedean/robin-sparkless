@@ -4022,7 +4022,7 @@ fn parse_timestamp_string_with_offset(s: &str) -> Option<i64> {
     use chrono::DateTime;
     let s = s.trim();
     let s_normalized = if s.ends_with('Z') || s.ends_with("z") {
-        format!("{}+0000", s.trim_end_matches(|c| c == 'Z' || c == 'z'))
+        format!("{}+0000", s.trim_end_matches(['Z', 'z']))
     } else {
         s.to_string()
     };
@@ -4040,6 +4040,7 @@ fn parse_timestamp_string_with_offset(s: &str) -> Option<i64> {
 /// Parse a single timestamp string with multiple formats (#1084, #1154). Returns micros since epoch (UTC).
 /// When the string has a timezone offset (Z, +0000, -0500), it is respected. When it has none, the string
 /// is interpreted in session_tz (default UTC).
+#[allow(dead_code)]
 pub(crate) fn parse_timestamp_string_flexible(s: &str) -> Option<i64> {
     parse_timestamp_string_flexible_with_tz(s, None)
 }
@@ -4142,8 +4143,7 @@ fn series_to_datetime_micros(series: &Series) -> PolarsResult<Series> {
         let out = Int64Chunked::from_iter_options(
             name,
             ca.into_iter().map(|opt_s| {
-                opt_s
-                    .and_then(|s| parse_timestamp_string_flexible_with_tz(s.as_ref(), Some(tz_ref)))
+                opt_s.and_then(|s| parse_timestamp_string_flexible_with_tz(s, Some(tz_ref)))
             }),
         );
         out.into_series()

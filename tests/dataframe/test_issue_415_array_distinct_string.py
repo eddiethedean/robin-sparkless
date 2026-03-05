@@ -7,7 +7,6 @@ Robin-sparkless now infers list element type when schema is "list"/"array", so l
 
 from __future__ import annotations
 
-import pytest
 
 from tests.fixtures.spark_imports import get_spark_imports
 

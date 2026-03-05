@@ -6,7 +6,6 @@ like ArrayType(DoubleType(), True) without raising a TypeError about specifying
 both 'elementType' and 'element_type'.
 """
 
-import pytest
 
 from tests.fixtures.spark_imports import get_spark_imports
 

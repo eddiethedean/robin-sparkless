@@ -132,7 +132,7 @@ class TestUnifiedImports:
         """Example: SparkImports() and spark fixture; no manual session creation."""
         from tests.fixtures.spark_imports import get_spark_imports
 
-        imports = get_spark_imports()
+        _ = get_spark_imports()
         # Session from fixture; use imports for F/StructType when needed
         df = spark.createDataFrame([{"id": 1}])
         assert df.count() == 1
