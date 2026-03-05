@@ -46,13 +46,15 @@ fn to_py_err(e: impl std::fmt::Display) -> PyErr {
             "Struct field subscript access requires string keys, not int",
         );
     }
-    // Ensure column-not-found errors contain "cannot resolve" (PySpark parity; Polars may emit "unable to find column").
-    let msg = if !msg.to_lowercase().contains("cannot resolve")
+    // Ensure column-not-found errors contain "cannot be resolved" and "unresolved_column" (PySpark parity; issue #158).
+    let msg = if !msg.to_lowercase().contains("cannot be resolved")
         && (msg.contains("unable to find column")
             || (msg.contains("not found") && msg.to_lowercase().contains("column"))
             || msg.contains("valid columns"))
     {
-        format!("cannot resolve: {msg}")
+        format!("unresolved_column: cannot be resolved: {msg}")
+    } else if !msg.to_lowercase().contains("cannot be resolved") && msg.to_lowercase().contains("cannot resolve") {
+        msg.replace("cannot resolve", "cannot be resolved")
     } else {
         msg
     };
@@ -963,7 +965,14 @@ impl PyRuntimeConfig {
         slf.into_py(py)
     }
 
-    fn get(&self, py: Python<'_>, key: &str) -> PyResult<Option<String>> {
+    /// PySpark: spark.conf.get(key, default=None) returns value or default as string.
+    #[pyo3(signature = (key, default=None))]
+    fn get(
+        &self,
+        py: Python<'_>,
+        key: &str,
+        default: Option<&str>,
+    ) -> PyResult<String> {
         let session = self
             .session
             .bind(py)
@@ -971,7 +980,23 @@ impl PyRuntimeConfig {
             .map_err(|_| PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected SparkSession"))?;
         let sess = session.borrow();
         let config = sess.inner.get_config();
-        Ok(config.get(key).cloned())
+        Ok(config
+            .get(key)
+            .cloned()
+            .or_else(|| default.map(String::from))
+            .unwrap_or_default())
+    }
+
+    /// PySpark: spark.conf.set(key, value).
+    fn set(&self, py: Python<'_>, key: &str, value: &str) -> PyResult<()> {
+        let session = self
+            .session
+            .bind(py)
+            .downcast::<PySparkSession>()
+            .map_err(|_| PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected SparkSession"))?;
+        let mut sess = session.borrow_mut();
+        sess.inner.set_config(key, value);
+        Ok(())
     }
 
     fn is_case_sensitive(&self, py: Python<'_>) -> PyResult<bool> {
@@ -3952,13 +3977,28 @@ impl PyDataFrame {
             .map_err(to_py_err)
     }
 
-    fn unpivot(&self, ids: Vec<String>, values: Vec<String>) -> PyResult<PyDataFrame> {
+    #[pyo3(signature = (ids, values, *, variableColumnName=None, valueColumnName=None))]
+    fn unpivot(
+        &self,
+        ids: Vec<String>,
+        values: Vec<String>,
+        variableColumnName: Option<String>,
+        valueColumnName: Option<String>,
+    ) -> PyResult<PyDataFrame> {
         let id_refs: Vec<&str> = ids.iter().map(|s| s.as_str()).collect();
         let val_refs: Vec<&str> = values.iter().map(|s| s.as_str()).collect();
-        self.inner
+        let mut df = self
+            .inner
             .unpivot(&id_refs, &val_refs)
-            .map(|df| PyDataFrame { inner: df })
-            .map_err(to_py_err)
+            .map(|inner| PyDataFrame { inner })
+            .map_err(to_py_err)?;
+        if let Some(ref name) = variableColumnName {
+            df = df.with_column_renamed("variable", name)?;
+        }
+        if let Some(ref name) = valueColumnName {
+            df = df.with_column_renamed("value", name)?;
+        }
+        Ok(df)
     }
 
     #[pyo3(name = "flatMap")]

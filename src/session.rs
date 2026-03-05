@@ -175,6 +175,10 @@ impl SparkSession {
         self.0.get_config()
     }
 
+    pub fn set_config(&mut self, key: impl Into<String>, value: impl Into<String>) {
+        self.0.set_config(key, value);
+    }
+
     pub fn is_case_sensitive(&self) -> bool {
         self.0.is_case_sensitive()
     }

@@ -1,10 +1,9 @@
 # sparkless: PySpark-like DataFrame API in Python, no JVM. Backed by robin-sparkless (Rust/Polars).
 __version__ = "4.0.0"
 
-try:
-    _mod = __import__(
-        "sparkless._native",
-        fromlist=[
+_mod = __import__(
+    "sparkless._native",
+    fromlist=[
             "SparklessError",
             "PySparkSession",
             "PySparkSessionBuilder",
@@ -97,8 +96,8 @@ try:
             "size",
             "array_contains",
             "explode",
-        ],
-    )
+    ],
+)
 
 SparklessError = _mod.SparklessError
 _SparkSession = _mod.PySparkSession

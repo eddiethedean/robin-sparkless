@@ -1608,6 +1608,11 @@ impl SparkSession {
         &self.config
     }
 
+    /// Set a config key at runtime (PySpark: spark.conf.set(key, value)).
+    pub fn set_config(&mut self, key: impl Into<String>, value: impl Into<String>) {
+        self.config.insert(key.into(), value.into());
+    }
+
     /// Whether column names are case-sensitive (PySpark: spark.sql.caseSensitive).
     /// Default is false (case-insensitive matching).
     pub fn is_case_sensitive(&self) -> bool {
