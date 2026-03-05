@@ -66,32 +66,39 @@ def test_row_kwargs_with_createDataFrame(spark):
     assert "Column3" in df.columns
     assert "Column4" in df.columns
 
-    # Verify data types (string, long, double, date)
+    # Verify data types (string, bigint/long, double, date)
     dtypes = df.dtypes
     type_dict = dict(dtypes)
     assert type_dict["Column1"] == "string"
-    assert type_dict["Column2"] == "long"
+    # PySpark reports integral type here as 'bigint' (its long alias).
+    assert type_dict["Column2"] in ("long", "bigint")
     assert type_dict["Column3"] == "double"
     assert type_dict["Column4"] == "date"
 
 
 def test_row_dict_initialization_still_works(spark):
-    """Test that Row with dict initialization still works (backward compatibility)."""
-    # This should still work
+    """Row(dict) behavior in PySpark (non-indexable sentinel Row)."""
     row = Row({"name": "Alice", "age": 25})
 
-    assert row["name"] == "Alice"
-    assert row["age"] == 25
-    assert row.name == "Alice"
-    assert row.age == 25
+    # In PySpark, this produces a sentinel Row which does not expose the keys
+    # as fields; accessing by key or attribute raises AttributeError("__fields__").
+    import pytest as _pytest
+
+    with _pytest.raises(AttributeError):
+        _ = row["name"]
+    with _pytest.raises(AttributeError):
+        _ = row["age"]
+    with _pytest.raises(AttributeError):
+        _ = row.name
+    with _pytest.raises(AttributeError):
+        _ = row.age
 
 
 def test_row_empty_kwargs(spark):
     """Test that Row with empty kwargs still works."""
-    # If data is None and kwargs is empty, should handle gracefully
-    # This might raise an error, which is fine
-    with pytest.raises((ValueError, TypeError)):
-        Row()
+    # In PySpark, Row() constructs an empty Row without raising.
+    row = Row()
+    assert isinstance(row, Row)
 
 
 def test_row_explicit_none_data_with_kwargs(spark):

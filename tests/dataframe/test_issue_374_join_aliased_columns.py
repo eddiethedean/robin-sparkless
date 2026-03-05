@@ -5,6 +5,8 @@ DataFrame is aliased as "sm". Sparkless should resolve alias.column to
 the actual column name for join resolution.
 """
 
+import pytest
+
 from tests.fixtures.spark_imports import get_spark_imports
 
 _imports = get_spark_imports()
@@ -27,6 +29,7 @@ class TestIssue374JoinAliasedColumns:
     def test_join_aliased_column_refs(self):
         """Test join with F.col('sm.brand_id') == F.col('b.code') (issue example)."""
         import inspect
+        import pytest
 
         test_name = inspect.stack()[1].function
         spark = SparkSession.builder.appName(
@@ -58,16 +61,17 @@ class TestIssue374JoinAliasedColumns:
                 )
                 .select(
                     F.col("brand_uuid"),
-                    F.col("sm.taxonomy_id"),
-                    F.col("sm.confidence"),
+                    F.col("taxonomy_id"),
+                    F.col("confidence"),
                 )
             )
             rows = result.collect()
             assert len(rows) == 1
             assert rows[0]["brand_uuid"] == "uuid-001"
-            # Select uses alias-prefixed names; result columns keep that (sm.taxonomy_id, sm.confidence)
-            assert rows[0]["sm.taxonomy_id"] == "TAX001"
-            assert rows[0]["sm.confidence"] == 0.95
+            # In PySpark, the output columns use the underlying field names,
+            # not the alias-prefixed form (\"sm.taxonomy_id\").
+            assert rows[0]["taxonomy_id"] == "TAX001"
+            assert rows[0]["confidence"] == 0.95
         finally:
             spark.stop()
 
@@ -111,7 +115,7 @@ class TestIssue374JoinAliasedColumns:
             spark.stop()
 
     def test_join_aliased_column_without_prefix(self):
-        """Test that unaliased columns still work after aliasing DataFrame."""
+        """Unaliased column names after aliasing can be ambiguous (PySpark parity)."""
         import inspect
 
         test_name = inspect.stack()[1].function
@@ -122,15 +126,18 @@ class TestIssue374JoinAliasedColumns:
             df1 = spark.createDataFrame([(1, "a"), (2, "b")], ["id", "val"])
             df2 = spark.createDataFrame([(1, "x"), (2, "y")], ["id", "data"])
 
-            # After join, columns might be id, val, data (no prefix)
-            result = (
-                df1.alias("t1")
-                .join(df2.alias("t2"), F.col("t1.id") == F.col("t2.id"))
-                .select("id", "val", "data")  # Use unprefixed names
-            )
+            # In PySpark, selecting unqualified \"id\" here is ambiguous and
+            # raises AnalysisException[AMBIGUOUS_REFERENCE].
+            with pytest.raises(Exception) as exc_info:
+                (
+                    df1.alias("t1")
+                    .join(df2.alias("t2"), F.col("t1.id") == F.col("t2.id"))
+                    .select("id", "val", "data")
+                    .collect()
+                )
 
-            rows = result.collect()
-            assert len(rows) == 2
+            msg = str(exc_info.value)
+            assert "AMBIGUOUS_REFERENCE" in msg or "Reference `id` is ambiguous" in msg
         finally:
             spark.stop()
 

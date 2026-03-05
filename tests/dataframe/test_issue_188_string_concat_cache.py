@@ -34,9 +34,10 @@ class TestStringConcatenationCacheEdgeCases:
 
         results = df2_cached.collect()
 
-        # String concat with empty strings: ""+""="", "a"+""="a", ""+"b"="b" (correct behavior)
-        assert [result["concat"] for result in results] == ["", "a", "b"], (
-            "String concatenation with empty strings when cached"
+        # In PySpark, using + with string columns attempts numeric addition;
+        # non-numeric strings are cast to null, so all results are None.
+        assert [result["concat"] for result in results] == [None, None, None], (
+            "String-like addition with + yields nulls for non-numeric strings when cached"
         )
 
     def test_string_concat_with_none_values(self, spark):
@@ -74,8 +75,9 @@ class TestStringConcatenationCacheEdgeCases:
 
         result = df2_cached.collect()[0]
 
-        # Nested string concat (col1+col2)+col3 => "abc"
-        assert result["concat"] == "abc", "Nested string concatenation when cached"
+        # In PySpark, nested + on string columns still performs numeric-style
+        # addition; here it yields null.
+        assert result["concat"] is None, "Nested string addition yields null in PySpark"
 
     def test_string_concat_vs_numeric_addition(self, spark):
         """Test that numeric addition is NOT treated as string concatenation."""
@@ -112,9 +114,10 @@ class TestStringConcatenationCacheEdgeCases:
 
         result = df2_cached.collect()[0]
 
-        # String concat with literal: "John" + " Doe" => "John Doe"
-        assert result["greeting"] == "John Doe", (
-            "String concatenation with literal when cached"
+        # In PySpark, string + literal also attempts numeric addition and
+        # produces null for non-numeric strings.
+        assert result["greeting"] is None, (
+            "String + literal yields null for non-numeric strings in PySpark"
         )
 
     def test_multiple_string_concat_columns(self, spark):
@@ -134,9 +137,9 @@ class TestStringConcatenationCacheEdgeCases:
 
         result = df2_cached.collect()[0]
 
-        # Multiple string concat columns: "ab" and "cd"
-        assert result["concat1"] == "ab", "First string concat column when cached"
-        assert result["concat2"] == "cd", "Second string concat column when cached"
+        # Multiple string concat columns are all null when using + on strings.
+        assert result["concat1"] is None, "First string concat column yields null"
+        assert result["concat2"] is None, "Second string concat column yields null"
 
     def test_string_concat_with_select(self, spark):
         """Test string concatenation followed by select in cached DataFrame."""
@@ -154,8 +157,8 @@ class TestStringConcatenationCacheEdgeCases:
 
         result = df3_cached.collect()[0]
 
-        # String concat in select when cached still returns "ab"
-        assert result["concat"] == "ab", "String concatenation in select when cached"
+        # String concat in select yields null when using + on strings.
+        assert result["concat"] is None, "String addition in select yields null"
 
     def test_string_concat_chained_operations(self, spark):
         """Test string concatenation with chained operations in cached DataFrame."""
@@ -174,12 +177,9 @@ class TestStringConcatenationCacheEdgeCases:
 
         results = df2_cached.collect()
 
-        # Chained concat: col1+col2="ab", then "ab"+col3="abc"
-        if results:
-            assert results[0]["concat"] == "ab", "Chained string concat when cached"
-            assert results[0]["full"] == "abc", (
-                "Nested string concat in chain when cached"
-            )
+        # With PySpark semantics, the initial + on strings yields null, so the
+        # filter on isNotNull() drops all rows.
+        assert results == [], "Chained operations yield no rows under PySpark + semantics"
 
     def test_string_concat_without_caching(self, spark):
         """Test that string concatenation works normally without caching."""
@@ -190,9 +190,10 @@ class TestStringConcatenationCacheEdgeCases:
 
         result = df2.collect()[0]
 
-        # Should work normally without caching
-        assert result["concat"] == "ab", (
-            "String concatenation should work normally without caching"
+        # Even without caching, + on string columns behaves as numeric addition
+        # and yields null for non-numeric strings.
+        assert result["concat"] is None, (
+            "String addition with + yields null for non-numeric strings without caching"
         )
 
     def test_concat_function_with_caching(self, spark):

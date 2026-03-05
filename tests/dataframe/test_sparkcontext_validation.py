@@ -65,7 +65,7 @@ class TestSessionValidation:
         assert t is not None
 
     def test_multiple_sessions(self, spark):
-        """getActiveSession() returns one of the active sessions."""
+        """getActiveSession() returns one of the active sessions; col() fails after all are stopped (PySpark)."""
         spark1 = spark
         spark2 = SparkSession.builder.appName("test2").getOrCreate()
         try:
@@ -75,6 +75,9 @@ class TestSessionValidation:
             assert active is not None
         finally:
             spark2.stop()
+        # After stopping the singleton SparkSession in PySpark, there is no
+        # active SparkContext and expression builders like col() assert.
+        import pytest
 
-        col_expr = F.col("id")
-        assert col_expr is not None
+        with pytest.raises(AssertionError):
+            F.col("id")

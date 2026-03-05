@@ -25,6 +25,8 @@ DateType = _imports.DateType
 BooleanType = _imports.BooleanType
 StructField = _imports.StructField
 
+_backend = get_backend_type()
+
 
 def _is_sparkless_mode() -> bool:
     """Check if running in sparkless mode."""

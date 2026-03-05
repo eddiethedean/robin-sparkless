@@ -5,13 +5,9 @@ tests do not execute PySpark at runtime.
 
 from __future__ import annotations
 
-import sys
-from pathlib import Path
 from typing import Any
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-from utils import assert_rows_equal, get_session
-from tests.utils import get_functions
+from tests.utils import assert_rows_equal, get_session, get_functions
 
 F = get_functions()
 

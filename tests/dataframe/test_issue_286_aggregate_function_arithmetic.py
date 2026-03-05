@@ -290,10 +290,11 @@ class TestIssue286AggregateFunctionArithmetic:
             rows = result.collect()
             assert len(rows) == 2
 
-            # Alice: 2 rows (both with null), so count + 1 = 3
+            # In PySpark, count(\"Value\") counts non-null values only. For Alice
+            # (two nulls) count = 0, so count + 1 = 1.
             alice_row = next((r for r in rows if r["Name"] == "Alice"), None)
             assert alice_row is not None
-            assert alice_row["count_plus_one"] == 3
+            assert alice_row["count_plus_one"] == 1
 
             # Bob: 1 row with value, so count + 1 = 2
             bob_row = next((r for r in rows if r["Name"] == "Bob"), None)

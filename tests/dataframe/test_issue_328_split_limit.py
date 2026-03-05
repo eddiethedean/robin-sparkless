@@ -328,7 +328,8 @@ class TestIssue328SplitLimit:
                 ]
             )
 
-            df = df.withColumn("Array", F.split(F.col("Value"), ".", 3))
+            # Use escaped dot so split treats '.' as a literal (PySpark regex).
+            df = df.withColumn("Array", F.split(F.col("Value"), "\\.", 3))
             df = df.withColumn("Array", F.explode(F.col("Array")))
 
             rows = df.collect()
@@ -461,7 +462,8 @@ class TestIssue328SplitLimit:
                 ]
             )
 
-            df = df.withColumn("Array", F.split(F.col("Value"), "|", 2))
+            # Escape '|' so it is treated as a literal, not regex alternation.
+            df = df.withColumn("Array", F.split(F.col("Value"), "\\|", 2))
             df = df.withColumn("Array", F.explode(F.col("Array")))
 
             rows = df.collect()

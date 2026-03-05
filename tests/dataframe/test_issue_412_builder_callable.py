@@ -15,38 +15,41 @@ class TestIssue412BuilderCallable:
     """Regression tests for SparkSession.builder() callable form (issue #412)."""
 
     def test_builder_callable_returns_self(self) -> None:
-        """builder() should return the same builder instance (for method chaining)."""
+        """builder is a non-callable Builder object (PySpark parity)."""
         builder = SparkSession.builder
         assert builder is not None
-        builder_from_property = builder
-        builder_from_call = builder()
-        assert builder_from_call is builder_from_property
+        # In PySpark, builder is a Builder instance and not callable.
+        import pytest
+
+        with pytest.raises(TypeError):
+            builder()
 
     def test_builder_callable_full_chain(self) -> None:
-        """Exact reproduction: SparkSession.builder().appName(...).getOrCreate() should work."""
+        """SparkSession.builder() callable form raises TypeError (PySpark parity)."""
         builder = SparkSession.builder
         assert builder is not None
-        spark = builder().appName("my_app").getOrCreate()
-        try:
-            assert spark.app_name == "my_app"
-            df = spark.createDataFrame([{"id": 1, "name": "test"}])
-            assert df.count() == 1
-        finally:
-            spark.stop()
+
+        import pytest
+
+        with pytest.raises(TypeError):
+            # In PySpark this raises \"'Builder' object is not callable\".
+            builder().appName("my_app").getOrCreate()
 
     def test_builder_property_and_call_equivalent(self) -> None:
-        """Both builder and builder() should produce equivalent sessions."""
+        """Property-style builder works; callable form raises TypeError (PySpark parity)."""
         builder = SparkSession.builder
         assert builder is not None
         # Clear singleton so we get fresh sessions
         SparkSession._singleton_session = None
 
         spark1 = builder.appName("prop_form").getOrCreate()
-        spark1.stop()
-        SparkSession._singleton_session = None
-
-        spark2 = builder().appName("call_form").getOrCreate()
         try:
-            assert spark2.app_name == "call_form"
+            assert spark1 is not None
         finally:
-            spark2.stop()
+            spark1.stop()
+            SparkSession._singleton_session = None
+
+        import pytest
+
+        with pytest.raises(TypeError):
+            builder().appName("call_form").getOrCreate()

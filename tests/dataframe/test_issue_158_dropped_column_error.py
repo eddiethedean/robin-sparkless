@@ -48,9 +48,11 @@ class TestIssue158DroppedColumnError:
         with pytest.raises(Exception) as exc_info:
             df_transformed.select("impression_date")
 
-        # Verify the error message format (PySpark parity: must contain "cannot resolve")
+        # PySpark error message includes unresolved_column.with_suggestion and
+        # the phrase "cannot be resolved".
         error_msg = str(exc_info.value).lower()
-        assert "cannot resolve" in error_msg
+        assert "cannot be resolved" in error_msg
+        assert "unresolved_column" in error_msg
         assert "impression_date" in error_msg
         assert "impression_id" in error_msg or "campaign_id" in error_msg
 
@@ -68,14 +70,16 @@ class TestIssue158DroppedColumnError:
         with pytest.raises(Exception) as exc_info:
             df_dropped.select(F.col("col2")).collect()
 
-        # Verify the error message format (PySpark parity: must contain "cannot resolve")
+        # PySpark error message includes unresolved_column.with_suggestion and
+        # the phrase "cannot be resolved".
         error_msg = str(exc_info.value).lower()
-        assert "cannot resolve" in error_msg
+        assert "cannot be resolved" in error_msg
+        assert "unresolved_column" in error_msg
         assert "col2" in error_msg
         assert "col1" in error_msg
 
-    def test_filter_dropped_column_raises_consistent_error(self):
-        """Test that filtering with a dropped column raises consistent error."""
+    def test_filter_dropped_column_behavior_matches_pyspark(self):
+        """Test filtering with a dropped column matches PySpark behavior."""
         spark = SparkSession.builder.appName("test").getOrCreate()
 
         # Create DataFrame
@@ -84,15 +88,15 @@ class TestIssue158DroppedColumnError:
         # Drop column via select
         df_dropped = df.select("col1")
 
-        # Try to filter with dropped column - should raise consistent error
-        with pytest.raises(Exception) as exc_info:
-            df_dropped.filter(F.col("col2").isNotNull())
+        # In PySpark, applying a filter that references a previously-dropped
+        # column is still allowed: the filter is pushed below the projection
+        # and the result retains only the projected columns.
+        result = df_dropped.filter(F.col("col2").isNotNull())
+        rows = result.collect()
 
-        # Verify the error message format (PySpark parity: must contain "cannot resolve")
-        error_msg = str(exc_info.value).lower()
-        assert "cannot resolve" in error_msg
-        assert "col2" in error_msg
-        assert "col1" in error_msg
+        assert result.columns == ["col1"]
+        assert len(rows) == 1
+        assert rows[0]["col1"] == "a"
 
     def test_minimal_reproduction(self):
         """Minimal reproduction of the bug."""
@@ -108,8 +112,10 @@ class TestIssue158DroppedColumnError:
         with pytest.raises(Exception) as exc_info:
             df_dropped.select("col2")
 
-        # Verify the error message format (PySpark parity: must contain "cannot resolve")
+        # PySpark error message includes unresolved_column.with_suggestion and
+        # the phrase "cannot be resolved".
         error_msg = str(exc_info.value).lower()
-        assert "cannot resolve" in error_msg
+        assert "cannot be resolved" in error_msg
+        assert "unresolved_column" in error_msg
         assert "col2" in error_msg
         assert "col1" in error_msg

@@ -102,7 +102,10 @@ class TestIssue136ColumnRenameValidation:
             transformed = (
                 df.withColumnRenamed("record_id", "id")
                 .withColumnRenamed("cust_id", "customer_id")
-                .withColumn("full_id", col("id") + "_" + col("customer_id"))
+                .withColumn(
+                    "full_id",
+                    F.concat(col("id"), F.lit("_"), col("customer_id")),
+                )
                 .select("id", "customer_id", "full_id")
             )
 

@@ -108,10 +108,13 @@ class TestIssue366AliasPosexplode:
         assert "Name" in keys and "Value1" in keys
 
     def test_alias_empty_raises(self, spark):
-        """alias() with no arguments raises ValueError."""
+        """alias() with no arguments works (PySpark behavior: keeps default names)."""
         df = spark.createDataFrame([{"Values": [1, 2]}])
-        with pytest.raises(ValueError, match="at least one name"):
-            df.select(F.posexplode("Values").alias()).collect()
+        result = df.select(F.posexplode("Values").alias())
+        rows = result.collect()
+        assert len(rows) == 2
+        # Default column names are 'pos' and 'col' in PySpark.
+        assert result.columns == ["pos", "col"]
 
     def test_explode_alias_single_name(self, spark):
         """explode().alias('num') works."""

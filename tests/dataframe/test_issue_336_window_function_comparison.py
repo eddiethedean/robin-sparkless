@@ -2,6 +2,8 @@
 Unit tests for Issue #336: WindowFunction comparison operators. Uses get_spark_imports from fixture only.
 """
 
+import pytest
+
 from tests.fixtures.spark_imports import get_spark_imports
 
 _imports = get_spark_imports()
@@ -173,7 +175,7 @@ class TestIssue336WindowFunctionComparison:
             spark.stop()
 
     def test_window_function_comparison_with_filter(self):
-        """Test WindowFunction comparison in filter."""
+        """Window functions in filter are not allowed (PySpark parity)."""
         spark = SparkSession.builder.appName("issue-336").getOrCreate()
         try:
             df = spark.createDataFrame(
@@ -185,14 +187,17 @@ class TestIssue336WindowFunctionComparison:
             )
 
             w = Window().partitionBy("Type").orderBy(F.col("Score").desc())
-            # Filter using window function comparison directly
-            result = df.filter(F.row_number().over(w) == 1).select(
-                "Name", "Type", "Score"
-            )
-            rows = result.collect()
+            # In PySpark this raises AnalysisException: it is not allowed to use
+            # window functions inside WHERE clause.
+            with pytest.raises(Exception) as exc_info:
+                (
+                    df.filter(F.row_number().over(w) == 1)
+                    .select("Name", "Type", "Score")
+                    .collect()
+                )
 
-            assert len(rows) == 1
-            assert rows[0]["Name"] == "Alice"
+            msg = str(exc_info.value)
+            assert "window functions inside WHERE clause" in msg
         finally:
             spark.stop()
 
@@ -406,7 +411,7 @@ class TestIssue336WindowFunctionComparison:
             spark.stop()
 
     def test_window_function_comparison_direct_filter(self):
-        """Test WindowFunction comparison used directly in filter (not in when)."""
+        """Window functions used directly in filter raise (PySpark parity)."""
         spark = SparkSession.builder.appName("issue-336").getOrCreate()
         try:
             df = spark.createDataFrame(
@@ -418,13 +423,15 @@ class TestIssue336WindowFunctionComparison:
             )
 
             w = Window().partitionBy("Type").orderBy(F.col("Score").desc())
-            result = df.filter(F.row_number().over(w) == 1).select(
-                "Name", "Type", "Score"
-            )
-            rows = result.collect()
+            with pytest.raises(Exception) as exc_info:
+                (
+                    df.filter(F.row_number().over(w) == 1)
+                    .select("Name", "Type", "Score")
+                    .collect()
+                )
 
-            assert len(rows) == 1
-            assert rows[0]["Name"] == "Alice"
+            msg = str(exc_info.value)
+            assert "window functions inside WHERE clause" in msg
         finally:
             spark.stop()
 
@@ -455,7 +462,7 @@ class TestIssue336WindowFunctionComparison:
             spark.stop()
 
     def test_window_function_comparison_with_isnotnull(self):
-        """Test WindowFunction isnotnull() method."""
+        """Test WindowFunction isnotnull() semantics (via F.isnotnull)."""
         spark = SparkSession.builder.appName("issue-336").getOrCreate()
         try:
             df = spark.createDataFrame(
@@ -469,9 +476,9 @@ class TestIssue336WindowFunctionComparison:
             w = Window().partitionBy("Type").orderBy(F.col("Score").desc())
             result = df.withColumn(
                 "HasNext",
-                F.when(F.lead("Score", 1).over(w).isnotnull(), F.lit(True)).otherwise(
-                    F.lit(False)
-                ),
+                F.when(
+                    F.isnotnull(F.lead("Score", 1).over(w)), F.lit(True)
+                ).otherwise(F.lit(False)),
             )
             rows = result.collect()
 
@@ -501,9 +508,9 @@ class TestIssue336WindowFunctionComparison:
             w = Window().partitionBy("Type").orderBy(F.col("Score").desc())
             result = df.withColumn(
                 "HasPrevious",
-                F.when(F.lag("Score", 1).over(w).isnull(), F.lit("NoPrev")).otherwise(
-                    F.lit("HasPrev")
-                ),
+                F.when(
+                    F.isnull(F.lag("Score", 1).over(w)), F.lit("NoPrev")
+                ).otherwise(F.lit("HasPrev")),
             )
             rows = result.collect()
 
@@ -1068,7 +1075,7 @@ class TestIssue336WindowFunctionComparison:
             spark.stop()
 
     def test_window_function_comparison_with_count(self):
-        """Test WindowFunction comparison with count() window function."""
+        """Test WindowFunction comparison with count() window function (PySpark semantics)."""
         spark = SparkSession.builder.appName("issue-336").getOrCreate()
         try:
             df = spark.createDataFrame(
@@ -1089,8 +1096,12 @@ class TestIssue336WindowFunctionComparison:
             rows = result.collect()
 
             assert len(rows) == 3
-            # All should be True (count is 3)
-            for row in rows:
+            # In PySpark, the running count in this window is [1, 2, 3] for
+            # [Alice, Bob, Charlie], so HasMultiple is [False, True, True].
+            alice_row = next(row for row in rows if row["Name"] == "Alice")
+            other_rows = [row for row in rows if row["Name"] != "Alice"]
+            assert alice_row["HasMultiple"] is False
+            for row in other_rows:
                 assert row["HasMultiple"] is True
         finally:
             spark.stop()
@@ -1208,7 +1219,7 @@ class TestIssue336WindowFunctionComparison:
             spark.stop()
 
     def test_window_function_comparison_with_countDistinct(self):
-        """Test WindowFunction comparison with countDistinct() window function."""
+        """Distinct window aggregates are not supported in PySpark."""
         spark = SparkSession.builder.appName("issue-336").getOrCreate()
         try:
             df = spark.createDataFrame(
@@ -1220,18 +1231,18 @@ class TestIssue336WindowFunctionComparison:
             )
 
             w = Window().partitionBy("Type").orderBy(F.col("Score").desc())
-            result = df.withColumn(
-                "HasMultipleDistinct",
-                F.when(F.countDistinct("Score").over(w) > 1, F.lit(True)).otherwise(
-                    F.lit(False)
-                ),
-            )
-            rows = result.collect()
+            with pytest.raises(Exception) as exc_info:
+                df.withColumn(
+                    "HasMultipleDistinct",
+                    F.when(
+                        F.countDistinct("Score").over(w) > 1, F.lit(True)
+                    ).otherwise(F.lit(False)),
+                ).collect()
 
-            assert len(rows) == 3
-            # All should see 2 distinct scores (100 and 90)
-            for row in rows:
-                assert row["HasMultipleDistinct"] is True
+            msg = str(exc_info.value)
+            assert "Distinct window functions are not supported" in msg or (
+                "DISTINCT_WINDOW_FUNCTION_UNSUPPORTED" in msg
+            )
         finally:
             spark.stop()
 
@@ -1714,7 +1725,7 @@ class TestIssue336WindowFunctionComparison:
             spark.stop()
 
     def test_window_function_comparison_with_chained_filters(self):
-        """Test WindowFunction comparison with chained filter operations."""
+        """Window function in chained filters raises (PySpark parity)."""
         spark = SparkSession.builder.appName("issue-336").getOrCreate()
         try:
             df = spark.createDataFrame(
@@ -1727,15 +1738,16 @@ class TestIssue336WindowFunctionComparison:
             )
 
             w = Window().partitionBy("Type").orderBy(F.col("Score").desc())
-            result = (
-                df.filter(F.row_number().over(w) == 1)
-                .filter(F.col("Type") == "A")
-                .select("Name", "Type", "Score")
-            )
-            rows = result.collect()
+            with pytest.raises(Exception) as exc_info:
+                (
+                    df.filter(F.row_number().over(w) == 1)
+                    .filter(F.col("Type") == "A")
+                    .select("Name", "Type", "Score")
+                    .collect()
+                )
 
-            assert len(rows) == 1
-            assert rows[0]["Name"] == "Alice"
+            msg = str(exc_info.value)
+            assert "window functions inside WHERE clause" in msg
         finally:
             spark.stop()
 

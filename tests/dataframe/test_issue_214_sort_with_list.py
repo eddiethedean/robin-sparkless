@@ -81,7 +81,7 @@ def test_sort_with_explicit_column_list(spark):
 
 
 def test_sort_with_tuple(spark):
-    """Test that sort() works with a tuple of column names."""
+    """Tuple input to sort() raises clear error in PySpark (NOT_COLUMN_OR_STR)."""
     df = spark.createDataFrame(
         [
             {"name": "Alice", "dept": "IT", "salary": 50000},
@@ -90,9 +90,12 @@ def test_sort_with_tuple(spark):
         ]
     )
 
-    # Tuple should also work
+    # Tuple is not accepted by PySpark; it expects Column or str.
     columns_to_sort = ("dept", "name")
-    result = df.sort(columns_to_sort)
+    import pytest
 
-    rows = result.collect()
-    assert len(rows) == 3
+    with pytest.raises(Exception) as exc_info:
+        df.sort(columns_to_sort).collect()
+
+    msg = str(exc_info.value)
+    assert "NOT_COLUMN_OR_STR" in msg or "Argument `col` should be a Column or str" in msg

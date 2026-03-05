@@ -6,11 +6,8 @@ tests do not execute PySpark at runtime.
 from __future__ import annotations
 
 import datetime
-import sys
-from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-from utils import assert_rows_equal, get_session
+from tests.utils import assert_rows_equal, get_session
 
 
 # Expected outputs (from prior PySpark 3.5 run)

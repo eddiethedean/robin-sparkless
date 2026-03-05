@@ -1,22 +1,8 @@
-"""
-Test for issue #200: createDataFrame accepts list rows (not just tuples) with column schema.
-
-Uses get_spark_imports from fixture only.
-"""
-
-from tests.fixtures.spark_imports import get_spark_imports
-
-_imports = get_spark_imports()
-SparkSession = _imports.SparkSession
-
-
 class TestIssue200ListRowsWithColumnSchema:
     """Test cases for issue #200: list rows with column name schema."""
 
-    def test_createDataFrame_list_rows_with_column_schema(self):
+    def test_createDataFrame_list_rows_with_column_schema(self, spark):
         """Test that createDataFrame accepts list rows (not just tuples) with column schema."""
-        spark = SparkSession.builder.appName("test").getOrCreate()
-
         # Exact reproduction from issue #200
         df = spark.createDataFrame(
             [
@@ -36,12 +22,8 @@ class TestIssue200ListRowsWithColumnSchema:
         assert rows[1]["column2"] == "value2B"
         assert rows[1]["column3"] == "value3B"
 
-        spark.stop()
-
-    def test_createDataFrame_tuple_rows_still_work(self):
+    def test_createDataFrame_tuple_rows_still_work(self, spark):
         """Regression test: ensure tuple rows still work as before."""
-        spark = SparkSession.builder.appName("test").getOrCreate()
-
         # Existing tuple-based code should continue to work
         df = spark.createDataFrame(
             [("value1A", "value2A", "value3A"), ("value1B", "value2B", "value3B")],
@@ -54,12 +36,8 @@ class TestIssue200ListRowsWithColumnSchema:
         assert rows[0]["column1"] == "value1A"
         assert rows[1]["column1"] == "value1B"
 
-        spark.stop()
-
-    def test_createDataFrame_mixed_list_and_tuple_rows(self):
+    def test_createDataFrame_mixed_list_and_tuple_rows(self, spark):
         """Test that mixed list and tuple rows work together."""
-        spark = SparkSession.builder.appName("test").getOrCreate()
-
         # Mix of lists and tuples should work
         df = spark.createDataFrame(
             [
@@ -77,12 +55,8 @@ class TestIssue200ListRowsWithColumnSchema:
         assert rows[1]["column1"] == "value1B"
         assert rows[2]["column1"] == "value1C"
 
-        spark.stop()
-
-    def test_createDataFrame_list_rows_with_different_data_types(self):
+    def test_createDataFrame_list_rows_with_different_data_types(self, spark):
         """Test list rows with various data types."""
-        spark = SparkSession.builder.appName("test").getOrCreate()
-
         df = spark.createDataFrame(
             [
                 ["Alice", 25, 50000.5, True],
@@ -100,12 +74,8 @@ class TestIssue200ListRowsWithColumnSchema:
         assert rows[1]["name"] == "Bob"
         assert rows[1]["age"] == 30
 
-        spark.stop()
-
-    def test_createDataFrame_single_list_row(self):
+    def test_createDataFrame_single_list_row(self, spark):
         """Test with a single list row."""
-        spark = SparkSession.builder.appName("test").getOrCreate()
-
         df = spark.createDataFrame([["Alice", 25]], ["name", "age"])
 
         assert df.count() == 1
@@ -113,12 +83,8 @@ class TestIssue200ListRowsWithColumnSchema:
         assert rows[0]["name"] == "Alice"
         assert rows[0]["age"] == 25
 
-        spark.stop()
-
-    def test_createDataFrame_list_rows_with_none_values(self):
+    def test_createDataFrame_list_rows_with_none_values(self, spark):
         """Test list rows with None values."""
-        spark = SparkSession.builder.appName("test").getOrCreate()
-
         df = spark.createDataFrame(
             [
                 ["Alice", 25, None],
@@ -137,5 +103,3 @@ class TestIssue200ListRowsWithColumnSchema:
         assert rows[1]["age"] is None
         assert rows[1]["salary"] == 60000.0
         assert rows[2]["name"] is None
-
-        spark.stop()

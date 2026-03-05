@@ -47,13 +47,13 @@ def test_groupBy_with_list(sample_df):
 
 
 def test_groupBy_with_tuple(sample_df):
-    """Test that groupBy() works with a tuple of column names."""
-    result = sample_df.groupBy(("dept", "year")).count()
+    """Test that groupBy() with a tuple of column names raises a clear error (PySpark parity)."""
+    with pytest.raises(Exception) as exc_info:
+        sample_df.groupBy(("dept", "year")).count()
 
-    assert len(result.collect()) == 4
-    assert "dept" in result.columns
-    assert "year" in result.columns
-    assert "count" in result.columns
+    # PySpark raises PySparkTypeError[NOT_COLUMN_OR_STR] for tuple inputs.
+    error_msg = str(exc_info.value)
+    assert "NOT_COLUMN_OR_STR" in error_msg or "Argument `col` should be a Column or str" in error_msg
 
 
 def test_groupBy_with_df_columns(sample_df):
@@ -94,13 +94,13 @@ def test_rollup_with_list(sample_df):
 
 
 def test_rollup_with_tuple(sample_df):
-    """Test that rollup() works with a tuple of column names."""
-    result = sample_df.rollup(("dept", "year")).count()
+    """Test that rollup() with a tuple of column names raises a clear error (PySpark parity)."""
+    with pytest.raises(Exception) as exc_info:
+        sample_df.rollup(("dept", "year")).count()
 
-    assert len(result.collect()) > 0
-    assert "dept" in result.columns
-    assert "year" in result.columns
-    assert "count" in result.columns
+    # PySpark raises PySparkTypeError[NOT_COLUMN_OR_STR] for tuple inputs.
+    error_msg = str(exc_info.value)
+    assert "NOT_COLUMN_OR_STR" in error_msg or "Argument `col` should be a Column or str" in error_msg
 
 
 def test_rollup_backward_compatibility(sample_df):
@@ -126,13 +126,13 @@ def test_cube_with_list(sample_df):
 
 
 def test_cube_with_tuple(sample_df):
-    """Test that cube() works with a tuple of column names."""
-    result = sample_df.cube(("dept", "year")).count()
+    """Test that cube() with a tuple of column names raises a clear error (PySpark parity)."""
+    with pytest.raises(Exception) as exc_info:
+        sample_df.cube(("dept", "year")).count()
 
-    assert len(result.collect()) > 0
-    assert "dept" in result.columns
-    assert "year" in result.columns
-    assert "count" in result.columns
+    # PySpark raises PySparkTypeError[NOT_COLUMN_OR_STR] for tuple inputs.
+    error_msg = str(exc_info.value)
+    assert "NOT_COLUMN_OR_STR" in error_msg or "Argument `col` should be a Column or str" in error_msg
 
 
 def test_cube_backward_compatibility(sample_df):

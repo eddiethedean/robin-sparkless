@@ -107,9 +107,10 @@ class TestJoinThenGroupByNoAmbiguity:
             result = df.groupBy("key").count().collect()
 
             result_dict = {r["key"]: r["count"] for r in result}
-            # Outer join: matched keys (1, 3) and unmatched right rows get None for join key
-            # (PySpark behavior: join key column comes from left side)
-            assert result_dict == {1: 1, None: 1, 3: 1}
+            # In PySpark, the join key column in an outer join comes from the
+            # left side, so unmatched rows from the right keep their original
+            # key values rather than becoming null.
+            assert result_dict == {1: 1, 2: 1, 3: 1}
         finally:
             spark.stop()
 

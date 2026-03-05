@@ -64,7 +64,7 @@ class TestIssue169ToTimestampDropError:
 
     def test_to_timestamp_drop_multiple_columns(self):
         """Test to_timestamp() followed by dropping multiple columns."""
-        spark = SparkSession("test_issue_169_multiple_drops")
+        spark = SparkSession.builder.appName("test_issue_169_multiple_drops").getOrCreate()
         try:
             data = [
                 {
@@ -107,7 +107,7 @@ class TestIssue169ToTimestampDropError:
 
     def test_to_timestamp_drop_with_select(self):
         """Test to_timestamp() + drop() + select() chain."""
-        spark = SparkSession("test_issue_169_select")
+        spark = SparkSession.builder.appName("test_issue_169_select").getOrCreate()
         try:
             data = [
                 {"id": 1, "ts_str": "2024-01-01T10:00:00"},
@@ -135,7 +135,7 @@ class TestIssue169ToTimestampDropError:
 
     def test_to_timestamp_drop_with_filter(self):
         """Test to_timestamp() + drop() + filter() chain."""
-        spark = SparkSession("test_issue_169_filter")
+        spark = SparkSession.builder.appName("test_issue_169_filter").getOrCreate()
         try:
             data = [
                 {"id": 1, "ts_str": "2024-01-01T10:00:00"},
