@@ -7,7 +7,6 @@ to run against both sparkless (mock) and the real PySpark backend.
 Set MOCK_SPARK_TEST_BACKEND=pyspark to run with real PySpark.
 """
 
-
 from tests.fixtures.spark_imports import get_spark_imports
 
 imports = get_spark_imports()
