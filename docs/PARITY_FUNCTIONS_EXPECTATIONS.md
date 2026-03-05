@@ -2,7 +2,7 @@
 
 ## Test expectations match PySpark
 
-Expected outputs under `tests/upstream_sparkless/tests/expected_outputs/` are generated from **PySpark** via `tests/tools/generate_expected_outputs.py`. They reflect PySpark behavior and are the source of truth for parity.
+Expected outputs under `tests/expected_outputs/` are generated from **PySpark** via `tests/tools/generate_expected_outputs.py`. They reflect PySpark behavior and are the source of truth for parity.
 
 ## Engine fixes applied (parity/functions)
 

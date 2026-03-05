@@ -1,3 +1,0 @@
-"""
-Mock Spark tests package.
-"""

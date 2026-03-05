@@ -1,9 +1,7 @@
 """
-Compatibility shim for ``tests.fixtures`` imports when running pytest from the
-repository root.
+Shared fixtures for unified Python tests.
 
-The real fixture implementations live under
-``tests/upstream_sparkless/tests/fixtures``; this package simply re-exports
-them so imports like ``tests.fixtures.spark_imports`` continue to work.
+Provides spark_imports, spark_backend, parity_base, comparison, difference_handlers,
+result_capture for backend-agnostic testing.
 """
 

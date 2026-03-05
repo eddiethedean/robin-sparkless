@@ -1,6 +1,6 @@
 # Ported Test Expectations
 
-Expected outputs for the ported Sparkless parity tests in `tests/python/test_dataframe_parity.py`. Ground truth is PySpark; these were derived from Sparkless expected_outputs / PySpark behavior.
+Expected outputs for the ported Sparkless parity tests in `tests/dataframe/test_dataframe_parity.py`. Ground truth is PySpark; these were derived from Sparkless expected_outputs / PySpark behavior.
 
 ---
 
@@ -114,4 +114,4 @@ Expected outputs for the ported Sparkless parity tests in `tests/python/test_dat
 
 ---
 
-See [SPARKLESS_PYTHON_TEST_PORT.md](SPARKLESS_PYTHON_TEST_PORT.md) for port tracker and [test_dataframe_parity.py](../tests/python/test_dataframe_parity.py) for the actual tests.
+See [SPARKLESS_PYTHON_TEST_PORT.md](SPARKLESS_PYTHON_TEST_PORT.md) for port tracker and [test_dataframe_parity.py](../tests/dataframe/test_dataframe_parity.py) for the actual tests.

@@ -1,6 +1,6 @@
 # Test Failure Checklist
 
-**Last run:** `pytest tests/python tests/upstream_sparkless -n 10` (after `maturin develop --release`)  
+**Last run:** `pytest tests -n 10` (after `maturin develop --release`)  
 **Result:** 656 failed, 2150 passed, 25 skipped (2831 total)
 
 This checklist tracks fixes needed to reduce test failures. Items are grouped by category and ordered by estimated impact.
@@ -58,7 +58,7 @@ This checklist tracks fixes needed to reduce test failures. Items are grouped by
 - [x] Relax schema comparison when field count matches but names differ (e.g. mock `age` vs expected `POWER(age, 2.0)`).
 - [x] In `compare_schemas`, do not fail on name mismatch; allow position-based data comparison in `compare_dataframes`.
 - **Affected:** ~44 parity tests (math, string, null handling, etc.)
-- **Change:** `tests/upstream_sparkless/tests/tools/comparison_utils.py`
+- **Change:** `tests/tools/comparison_utils.py`
 
 ### 4c. Window/rank: return int not string
 - [x] Map Polars UInt32/UInt64 to Integer/Long in `polars_type_to_data_type` so rank/row_number/dense_rank columns have numeric schema; collect then emits Python int.

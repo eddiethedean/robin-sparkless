@@ -1,7 +1,8 @@
 """
 Test package root for robin-sparkless.
 
-Having this file ensures that absolute imports like `tests.python.utils`
-work reliably when running pytest from the repository root.
+Unified Python tests live under tests/ (dataframe/, functions/, sql/, window/, io/,
+parity/, unit/, integration/, examples/). Use `tests.utils` and `tests.fixtures`
+for shared helpers.
 """
 

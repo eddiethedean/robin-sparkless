@@ -41,7 +41,7 @@ make test-parity-phases    # All phases
 
 - **Converted fixtures:** Run `python tests/regenerate_expected_from_pyspark.py tests/fixtures/converted --include-skipped` to process fixtures with `skip: true`. On success, skip is removed. Requires PySpark and Java 17+ (e.g. `export JAVA_HOME=/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home`).
 
-- **Python tests:** Tests in `tests/python/test_robin_sparkless.py` and `test_dataframe_parity.py` assert behaviour that matches PySpark. Expectations are predetermined (no PySpark at test runtime). For example, `test_create_dataframe_from_rows_schema_pyspark_parity` compares Robin output to a fixed expected list derived from PySpark 3.5.
+- **Python tests:** Tests in `tests/dataframe/test_dataframe_parity.py` (and other tests under `tests/`) assert behaviour that matches PySpark. Expectations are predetermined (no PySpark at test runtime). For example, `test_create_dataframe_from_rows_schema_pyspark_parity` compares Robin output to a fixed expected list derived from PySpark 3.5.
 
 - **CI:** A CI job can run the regenerator in `--dry-run` and fail if current expected ≠ PySpark result (requires PySpark and Java 17+ in the environment).
 

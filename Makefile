@@ -149,15 +149,15 @@ test-python:
 	@PYTHON=$$(test -f .venv/bin/python && echo .venv/bin/python || echo python); \
 	$$PYTHON -c "from sparkless.sql import SparkSession; from sparkless.sql.functions import col, lit_i64; s = SparkSession.builder.app_name('test').get_or_create(); df = s.create_dataframe([(1, 2, 'a')], ['x', 'y', 'z']); assert df.count() == 1; print('sparkless OK')"
 
-# Vendored upstream sparkless tests: fast subset (excludes delta and integration by default)
+# Unified Python tests: fast subset (excludes delta and integration by default)
 test-python-upstream:
 	@PYTHON=$$(test -f .venv/bin/python && echo .venv/bin/python || echo python); \
-	$$PYTHON -m pytest tests/upstream_sparkless -m "not delta and not integration" -v --tb=short
+	$$PYTHON -m pytest tests -m "not delta and not integration" -v --tb=short
 
-# Vendored upstream sparkless tests: full suite (includes delta, integration; best-effort)
+# Unified Python tests: full suite (includes delta, integration; best-effort)
 test-python-upstream-full:
 	@PYTHON=$$(test -f .venv/bin/python && echo .venv/bin/python || echo python); \
-	$$PYTHON -m pytest tests/upstream_sparkless -v --tb=short
+	$$PYTHON -m pytest tests -v --tb=short
 
 # Run everything: format, lint, security, deny, tests
 all: check

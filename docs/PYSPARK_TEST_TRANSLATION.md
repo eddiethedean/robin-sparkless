@@ -14,7 +14,7 @@ scripts/extract_pyspark_tests.py
     │         │
     │         └── regenerate_expected_from_pyspark.py --include-skipped
     │
-    └──► tests/python/test_pyspark_port_extracted.py  (error/API pytest stubs)
+    └──► tests/dataframe/test_pyspark_port_extracted.py  (error/API pytest stubs)
 ```
 
 ## Extraction Pipeline
@@ -81,7 +81,7 @@ The regenerator script (`regenerate_expected_from_pyspark.py`) uses `apply_opera
 
 ## Python Test Stubs
 
-Pytest stubs in `tests/python/test_pyspark_port_extracted.py` are initially skipped. Implement with `robin_sparkless` and remove the skip when ready:
+Pytest stubs in `tests/dataframe/test_pyspark_port_extracted.py` are initially skipped. Implement with `robin_sparkless` and remove the skip when ready:
 
 ```python
 def test_cov() -> None:
