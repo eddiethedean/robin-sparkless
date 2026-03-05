@@ -23,8 +23,8 @@ use crate::session::SparkSession;
 use crate::type_coercion::{coerce_for_pyspark_comparison, is_numeric_public};
 use polars::datatypes::TimeUnit;
 use polars::prelude::{
-    AnyValue, DataFrame as PlDataFrame, DataType, Expr, Field, IntoLazy, LazyFrame, PlSmallStr,
-    PolarsError, Schema, SchemaNamesAndDtypes, UnknownKind, col, lit,
+    AnyValue, DataFrame as PlDataFrame, DataType, Expr, Field, IntoLazy, LazyFrame, NULL,
+    PlSmallStr, PolarsError, Schema, SchemaNamesAndDtypes, UnknownKind, col, lit,
 };
 use serde_json::Value as JsonValue;
 use std::collections::{HashMap, HashSet};
@@ -266,12 +266,18 @@ impl DataFrame {
                                 })?;
                             let mut context_name = resolved.to_string();
                             for field in rest {
-                                let (resolved_field, field_dtype) = df
+                                let (resolved_field, field_dtype) = match df
                                     .resolve_struct_field_from_type(
                                         &current_dtype,
                                         field,
                                         &context_name,
-                                    )?;
+                                    ) {
+                                    Ok(t) => t,
+                                    Err(_) => {
+                                        // #1150: Inferred struct may omit fields (e.g. E2); return null for missing field.
+                                        return Ok(lit(NULL).alias(PlSmallStr::from(name_str)));
+                                    }
+                                };
                                 expr = expr.struct_().field_by_name(&resolved_field);
                                 context_name = format!("{}.{}", context_name, resolved_field);
                                 current_dtype = field_dtype;
@@ -304,10 +310,18 @@ impl DataFrame {
             {
                 if input.len() == 1 {
                     if let Some(input_dt) = df.get_expr_output_dtype(&input[0]) {
-                        if let Ok((resolved_name, _)) =
-                            df.resolve_struct_field_from_type(&input_dt, name.as_str(), "struct")
+                        match df.resolve_struct_field_from_type(&input_dt, name.as_str(), "struct")
                         {
-                            return Ok(input[0].clone().struct_().field_by_name(&resolved_name));
+                            Ok((resolved_name, _)) => {
+                                return Ok(input[0]
+                                    .clone()
+                                    .struct_()
+                                    .field_by_name(&resolved_name));
+                            }
+                            Err(_) => {
+                                // #1150: Inferred struct may omit fields; getField("E2") yields null.
+                                return Ok(lit(NULL));
+                            }
                         }
                     }
                 }

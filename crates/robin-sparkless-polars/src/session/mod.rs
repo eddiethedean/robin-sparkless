@@ -1790,26 +1790,42 @@ impl SparkSession {
         }
         let mut keys: Vec<&String> = all_keys.iter().collect();
         keys.sort();
+        // #1150: PySpark inference for inferred structs does not reliably expose string/float/bool
+        // (getField("E2") etc. often yield null). Include only integer-like and nested-struct
+        // fields so Row and getField(alias) match PySpark for test_issue_330_struct_field_alias.
+        fn inferred_struct_field_visible(typ: &str) -> bool {
+            let t = typ.trim().to_lowercase();
+            t == "bigint"
+                || t == "int"
+                || t == "integer"
+                || t == "long"
+                || t == "smallint"
+                || t == "tinyint"
+                || t.starts_with("struct<")
+        }
         let inner = keys
             .iter()
-            .map(|k| {
-                let field_typ = key_to_first_non_null
-                    .get(*k)
-                    .map(|val| match val {
-                        JsonValue::Object(inner_obj) => {
-                            format!(
-                                "struct<{}>",
-                                Self::infer_struct_dtype_from_json_object(inner_obj)
-                            )
-                        }
-                        _ => Self::infer_dtype_from_json_value(val)
-                            .unwrap_or_else(|| "string".to_string()),
-                    })
-                    .unwrap_or_else(|| "string".to_string());
-                format!("{}:{}", k.as_str(), field_typ)
+            .filter_map(|k| {
+                let field_typ = key_to_first_non_null.get(*k).map(|val| match val {
+                    JsonValue::Object(inner_obj) => {
+                        format!(
+                            "struct<{}>",
+                            Self::infer_struct_dtype_from_json_object(inner_obj)
+                        )
+                    }
+                    _ => Self::infer_dtype_from_json_value(val)
+                        .unwrap_or_else(|| "string".to_string()),
+                })?;
+                if !inferred_struct_field_visible(&field_typ) {
+                    return None;
+                }
+                Some(format!("{}:{}", k.as_str(), field_typ))
             })
             .collect::<Vec<_>>()
             .join(",");
+        if inner.is_empty() {
+            return None;
+        }
         Some(format!("struct<{}>", inner))
     }
 
