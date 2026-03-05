@@ -23,8 +23,8 @@ use crate::session::SparkSession;
 use crate::type_coercion::{coerce_for_pyspark_comparison, is_numeric_public};
 use polars::datatypes::TimeUnit;
 use polars::prelude::{
-    AnyValue, DataFrame as PlDataFrame, DataType, Expr, Field, IntoLazy, LazyFrame, PlSmallStr,
-    PolarsError, Schema, SchemaNamesAndDtypes, UnknownKind, col, lit, NULL,
+    AnyValue, DataFrame as PlDataFrame, DataType, Expr, Field, IntoLazy, LazyFrame, NULL,
+    PlSmallStr, PolarsError, Schema, SchemaNamesAndDtypes, UnknownKind, col, lit,
 };
 use serde_json::Value as JsonValue;
 use std::collections::{HashMap, HashSet};
@@ -310,9 +310,13 @@ impl DataFrame {
             {
                 if input.len() == 1 {
                     if let Some(input_dt) = df.get_expr_output_dtype(&input[0]) {
-                        match df.resolve_struct_field_from_type(&input_dt, name.as_str(), "struct") {
+                        match df.resolve_struct_field_from_type(&input_dt, name.as_str(), "struct")
+                        {
                             Ok((resolved_name, _)) => {
-                                return Ok(input[0].clone().struct_().field_by_name(&resolved_name));
+                                return Ok(input[0]
+                                    .clone()
+                                    .struct_()
+                                    .field_by_name(&resolved_name));
                             }
                             Err(_) => {
                                 // #1150: Inferred struct may omit fields; getField("E2") yields null.

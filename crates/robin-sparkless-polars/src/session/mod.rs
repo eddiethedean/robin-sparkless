@@ -1806,17 +1806,15 @@ impl SparkSession {
         let inner = keys
             .iter()
             .filter_map(|k| {
-                let field_typ = key_to_first_non_null.get(*k).map(|val| {
-                    match val {
-                        JsonValue::Object(inner_obj) => {
-                            format!(
-                                "struct<{}>",
-                                Self::infer_struct_dtype_from_json_object(inner_obj)
-                            )
-                        }
-                        _ => Self::infer_dtype_from_json_value(val)
-                            .unwrap_or_else(|| "string".to_string()),
+                let field_typ = key_to_first_non_null.get(*k).map(|val| match val {
+                    JsonValue::Object(inner_obj) => {
+                        format!(
+                            "struct<{}>",
+                            Self::infer_struct_dtype_from_json_object(inner_obj)
+                        )
                     }
+                    _ => Self::infer_dtype_from_json_value(val)
+                        .unwrap_or_else(|| "string".to_string()),
                 })?;
                 if !inferred_struct_field_visible(&field_typ) {
                     return None;
