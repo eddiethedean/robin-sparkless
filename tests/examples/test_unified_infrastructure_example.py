@@ -2,10 +2,20 @@
 Example tests demonstrating the unified test infrastructure.
 
 This module shows how to write tests that work with both PySpark and mock-spark.
+When running with SPARKLESS_TEST_BACKEND=pyspark, mock-only and both-backend
+tests are skipped (they require sparkless/mock session).
 """
+
+import os
 
 import pytest
 from tests.fixtures.comparison import assert_dataframes_equal
+
+# Skip mock-only or both-backend tests when running in PySpark-only mode (no mock session).
+_skip_if_pyspark_only = pytest.mark.skipif(
+    (os.environ.get("SPARKLESS_TEST_BACKEND") or "").strip().lower() == "pyspark",
+    reason="Requires mock/both backends; skipped in PySpark-only run",
+)
 
 
 class TestUnifiedInfrastructure:
@@ -22,6 +32,7 @@ class TestUnifiedInfrastructure:
         assert df.columns == ["id", "name"]
 
     @pytest.mark.backend("mock")
+    @_skip_if_pyspark_only
     def test_mock_only(self, spark):
         """Test that only runs with mock-spark."""
         # This test will be skipped if backend is PySpark
@@ -38,6 +49,7 @@ class TestUnifiedInfrastructure:
         assert df.count() == 1
 
     @pytest.mark.backend("both")
+    @_skip_if_pyspark_only
     def test_comparison(self, mock_spark_session, pyspark_session):
         """Test that compares results from both backends.
 
@@ -58,6 +70,7 @@ class TestUnifiedInfrastructure:
         assert_dataframes_equal(mock_filtered, pyspark_filtered)
 
     @pytest.mark.backend("both")
+    @_skip_if_pyspark_only
     def test_aggregation_comparison(self, mock_spark_session, pyspark_session):
         """Compare aggregation results between backends."""
         from tests.fixtures.spark_backend import BackendType
@@ -104,43 +117,22 @@ class TestUnifiedInfrastructure:
 
 
 class TestUnifiedImports:
-    """Examples of using unified imports."""
+    """Examples of using unified imports with shared spark fixture."""
 
-    def test_with_unified_imports(self):
-        """Example using unified import abstraction."""
-        from tests.fixtures.spark_imports import get_imports, get_backend_type
-        from tests.fixtures.spark_backend import BackendType
+    def test_with_unified_imports(self, spark):
+        """Example: get_imports() provides SparkSession, F, StructType; use spark fixture for session."""
+        from tests.fixtures.spark_imports import get_imports
 
         SparkSession, F, StructType = get_imports()
-        backend = get_backend_type()
+        # Session comes from conftest spark fixture (backend from env/markers)
+        df = spark.createDataFrame([{"id": 1}])
+        assert df.count() == 1
 
-        # Backend is determined automatically from environment
-        # PySpark requires builder pattern, mock-spark supports direct instantiation
-        if backend == BackendType.PYSPARK:
-            spark = SparkSession.builder.appName("test_app").getOrCreate()
-        else:
-            spark = SparkSession("test_app")
-        try:
-            df = spark.createDataFrame([{"id": 1}])
-            assert df.count() == 1
-        finally:
-            spark.stop()
+    def test_with_full_imports_object(self, spark):
+        """Example: SparkImports() and spark fixture; no manual session creation."""
+        from tests.fixtures.spark_imports import get_spark_imports
 
-    def test_with_full_imports_object(self):
-        """Example using full imports object."""
-        from tests.fixtures.spark_imports import SparkImports, get_backend_type
-        from tests.fixtures.spark_backend import BackendType
-
-        imports = SparkImports()
-        backend = get_backend_type()
-
-        # PySpark requires builder pattern, mock-spark supports direct instantiation
-        if backend == BackendType.PYSPARK:
-            spark = imports.SparkSession.builder.appName("test_app").getOrCreate()
-        else:
-            spark = imports.SparkSession("test_app")
-        try:
-            df = spark.createDataFrame([{"id": 1}])
-            assert df.count() == 1
-        finally:
-            spark.stop()
+        imports = get_spark_imports()
+        # Session from fixture; use imports for F/StructType when needed
+        df = spark.createDataFrame([{"id": 1}])
+        assert df.count() == 1

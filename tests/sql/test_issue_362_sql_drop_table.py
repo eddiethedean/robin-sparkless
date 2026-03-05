@@ -2,18 +2,16 @@
 Tests for #362: SQL DROP TABLE support (PySpark parity).
 
 PySpark: spark.sql("DROP TABLE IF EXISTS my_schema.my_table"). Robin-sparkless now supports DROP TABLE / DROP VIEW.
+Uses shared spark fixture.
 """
 
 from __future__ import annotations
 
 import pytest
 
-from tests.utils import get_spark
 
-
-def test_sql_drop_table_if_exists_issue_repro() -> None:
+def test_sql_drop_table_if_exists_issue_repro(spark) -> None:
     """spark.sql(\"DROP TABLE IF EXISTS my_schema.my_table\") (issue repro)."""
-    spark = get_spark("issue_362")
     try:
         out = spark.sql("DROP TABLE IF EXISTS my_schema.my_table")
         assert out.count() == 0
@@ -23,9 +21,8 @@ def test_sql_drop_table_if_exists_issue_repro() -> None:
         raise
 
 
-def test_sql_drop_table_removes_temp_view() -> None:
+def test_sql_drop_table_removes_temp_view(spark) -> None:
     """After creating a temp view, DROP TABLE removes it."""
-    spark = get_spark("issue_362")
     try:
         df = spark.createDataFrame([(1, "a"), (2, "b")], ["id", "x"])
         df.createOrReplaceTempView("t_to_drop")
@@ -39,9 +36,8 @@ def test_sql_drop_table_removes_temp_view() -> None:
         raise
 
 
-def test_sql_drop_view_removes_temp_view() -> None:
+def test_sql_drop_view_removes_temp_view(spark) -> None:
     """DROP VIEW also removes a temp view (same as DROP TABLE in-memory)."""
-    spark = get_spark("issue_362")
     try:
         df = spark.createDataFrame([(1,)], ["v"])
         df.createOrReplaceTempView("v_to_drop")

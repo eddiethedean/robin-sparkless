@@ -152,12 +152,12 @@ test-python:
 # Unified Python tests: fast subset (excludes delta and integration by default)
 test-python-upstream:
 	@PYTHON=$$(test -f .venv/bin/python && echo .venv/bin/python || echo python); \
-	$$PYTHON -m pytest tests -m "not delta and not integration" -v --tb=short
+	$$PYTHON -m pytest tests -m "not delta and not integration" -n 10 -v --tb=short
 
 # Unified Python tests: full suite (includes delta, integration; best-effort)
 test-python-upstream-full:
 	@PYTHON=$$(test -f .venv/bin/python && echo .venv/bin/python || echo python); \
-	$$PYTHON -m pytest tests -v --tb=short
+	$$PYTHON -m pytest tests -n 10 -v --tb=short
 
 # Run everything: format, lint, security, deny, tests
 all: check

@@ -3,23 +3,20 @@ Tests for #357: Window constructor and partitionBy/orderBy accept string column 
 
 PySpark: Window(), Window.partitionBy("col").orderBy("col") with strings.
 Robin-sparkless now provides Window() (no-arg) and partitionBy/orderBy already accept str or Column.
+Uses shared spark fixture and get_spark_imports().
 """
 
 from __future__ import annotations
 
-from tests.utils import get_functions, get_spark, get_window_cls
+from tests.fixtures.spark_imports import get_spark_imports
 
-F = get_functions()
-Window = get_window_cls()
-
-
-def _spark():
-    return get_spark("issue_357")
+_imports = get_spark_imports()
+F = _imports.F
+Window = _imports.Window
 
 
-def test_window_no_arg_constructor() -> None:
+def test_window_no_arg_constructor(spark) -> None:
     """Window() creates unbounded window; can chain partitionBy/orderBy (issue repro)."""
-    spark = _spark()
     df = spark.createDataFrame(
         [{"dept": "A", "salary": 100}, {"dept": "A", "salary": 200}],
         ["dept", "salary"],
@@ -31,9 +28,8 @@ def test_window_no_arg_constructor() -> None:
     assert out[1]["dept"] == "A" and out[1]["salary"] == 200 and out[1]["rn"] == 2
 
 
-def test_window_partition_by_order_by_strings_classmethod() -> None:
+def test_window_partition_by_order_by_strings_classmethod(spark) -> None:
     """Window.partitionBy("dept").orderBy("salary") with strings (no Window() call)."""
-    spark = _spark()
     df = spark.createDataFrame(
         [(1, 100, "A"), (2, 200, "A"), (3, 150, "B")],
         ["id", "salary", "dept"],

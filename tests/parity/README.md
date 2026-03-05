@@ -18,7 +18,7 @@ parity/
 
 ```bash
 # From project root
-pytest tests/parity/
+pytest tests/parity/ -n 10
 
 # Or use the dedicated script
 ./tests/run_parity_tests.sh
@@ -27,9 +27,9 @@ pytest tests/parity/
 ### Run Specific Category
 
 ```bash
-pytest tests/parity/dataframe/
-pytest tests/parity/functions/
-pytest tests/parity/sql/
+pytest tests/parity/dataframe/ -n 10
+pytest tests/parity/functions/ -n 10
+pytest tests/parity/sql/ -n 10
 ```
 
 ### Run Specific Test

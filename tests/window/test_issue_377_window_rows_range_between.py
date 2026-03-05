@@ -1,15 +1,12 @@
-"""Tests for #377: WindowSpec.rowsBetween() and rangeBetween() (PySpark parity)."""
+"""Tests for #377: WindowSpec.rowsBetween() and rangeBetween() (PySpark parity). Uses shared spark fixture and get_spark_imports()."""
 
 from __future__ import annotations
 
-from tests.utils import get_functions, get_spark, get_window_cls
+from tests.fixtures.spark_imports import get_spark_imports
 
-F = get_functions()
-Window = get_window_cls()
-
-
-def _spark():
-    return get_spark("issue_377")
+_imports = get_spark_imports()
+F = _imports.F
+Window = _imports.Window
 
 
 def test_window_constants() -> None:
@@ -19,9 +16,8 @@ def test_window_constants() -> None:
     assert getattr(Window, "unboundedFollowing") == 2**63 - 1
 
 
-def test_rows_between_chaining() -> None:
+def test_rows_between_chaining(spark) -> None:
     """Window.partitionBy().orderBy().rowsBetween(start, end) returns a window and can be used with row_number().over()."""
-    spark = _spark()
     df = spark.createDataFrame(
         [
             {"dept": "a", "salary": 10},
@@ -43,10 +39,9 @@ def test_rows_between_chaining() -> None:
     assert 1 in rn_vals and 2 in rn_vals
 
 
-def test_range_between_chaining() -> None:
+def test_range_between_chaining(spark) -> None:
     """Window.partitionBy().orderBy().rangeBetween(start, end) returns a window.
     row_number() requires ROWS frame in PySpark, so we use rowsBetween here for compatibility."""
-    spark = _spark()
     df = spark.createDataFrame(
         [{"g": 1, "v": 1}, {"g": 1, "v": 2}, {"g": 1, "v": 3}],
         schema="g int, v int",

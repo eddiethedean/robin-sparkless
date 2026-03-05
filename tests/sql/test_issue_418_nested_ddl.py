@@ -1,17 +1,10 @@
-"""Tests for #418: createDataFrame with full nested DDL schema."""
+"""Tests for #418: createDataFrame with full nested DDL schema. Uses shared spark fixture."""
 
 from __future__ import annotations
 
-from tests.utils import get_spark
 
-
-def _spark():
-    return get_spark("issue_418")
-
-
-def test_nested_ddl_struct_and_array() -> None:
+def test_nested_ddl_struct_and_array(spark) -> None:
     """createDataFrame(..., schema='addr struct<city:string>, tags array<string>') parses and creates schema."""
-    spark = _spark()
     # DDL with nested types: comma inside struct<> and array<> must not split top-level fields.
     schema_ddl = "addr struct<city:string>, tags array<string>"
     df = spark.createDataFrame(

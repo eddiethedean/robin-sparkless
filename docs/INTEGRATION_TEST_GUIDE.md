@@ -64,16 +64,16 @@ When behavior differs by backend (e.g. PySpark raises `AMBIGUOUS_REFERENCE` for 
 - **PySpark backend** (parity / expectation updates):
 
   ```bash
-  SPARKLESS_TEST_BACKEND=pyspark pytest tests/integration -v
+  SPARKLESS_TEST_BACKEND=pyspark pytest tests/integration -n 10 -v
   ```
 
 - **Robin backend** (default):
 
   ```bash
-  pytest tests/integration -v
+  pytest tests/integration -n 10 -v
   ```
 
-Use a 10-minute timeout for full runs if needed. Run without `-n` (or with care) if tests rely on per-test or custom session lifecycle.
+Use a 15-minute timeout for full runs if needed.
 
 ---
 

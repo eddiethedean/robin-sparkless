@@ -1,29 +1,20 @@
 """
 Window API parity tests (#187). Expected outputs are from a prior PySpark 3.5 run;
-tests do not execute PySpark at runtime. We compare robin-sparkless results to
-these recorded expectations.
+tests compare backend results to these recorded expectations.
+Uses shared spark fixture and get_spark_imports().
 """
 
 from __future__ import annotations
 
-import sys
-from pathlib import Path
+from tests.fixtures.spark_imports import get_spark_imports
+from tests.utils import _row_to_dict, assert_rows_equal
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-from utils import (
-    assert_rows_equal,
-    get_spark,
-    get_functions,
-    get_window_cls,
-    _row_to_dict,
-)
+_imports = get_spark_imports()
+F = _imports.F
+Window = _imports.Window
 
 
-F = get_functions()
-Window = get_window_cls()
-
-
-# Shared data: id, salary, dept (dept \"a\" has 100, 90; dept \"b\" has 80)
+# Shared data: id, salary, dept (dept "a" has 100, 90; dept "b" has 80)
 _WINDOW_DATA = [(1, 100, "a"), (2, 90, "a"), (3, 80, "b")]
 _WINDOW_COLUMNS = ["id", "salary", "dept"]
 
@@ -67,18 +58,16 @@ EXPECTED_FIRST_LAST = [
     {"id": 3, "salary": 80, "dept": "b", "first_sal": 80, "last_sal": 80},
 ]
 
-
-def _robin_df():
-    spark = get_spark("window_parity")
-    return spark.createDataFrame(_WINDOW_DATA, _WINDOW_COLUMNS)
-
-
-# --- Parity tests ---
+EXPECTED_COUNT_OVER = [
+    {"id": 1, "salary": 100, "dept": "a", "cnt": 2},
+    {"id": 2, "salary": 90, "dept": "a", "cnt": 2},
+    {"id": 3, "salary": 80, "dept": "b", "cnt": 1},
+]
 
 
-def test_window_row_number_pyspark_parity() -> None:
+def test_window_row_number_pyspark_parity(spark) -> None:
     """row_number().over(partition) matches PySpark (#187)."""
-    df = _robin_df()
+    df = spark.createDataFrame(_WINDOW_DATA, _WINDOW_COLUMNS)
     win = Window.partitionBy("dept").orderBy(F.col("salary").desc())
     df = df.withColumn("rn", F.row_number().over(win))
     df = df.orderBy(["id"])
@@ -86,9 +75,9 @@ def test_window_row_number_pyspark_parity() -> None:
     assert_rows_equal(actual, EXPECTED_ROW_NUMBER, order_matters=True)
 
 
-def test_window_rank_pyspark_parity() -> None:
+def test_window_rank_pyspark_parity(spark) -> None:
     """rank().over(partition) matches PySpark (#187)."""
-    df = _robin_df()
+    df = spark.createDataFrame(_WINDOW_DATA, _WINDOW_COLUMNS)
     win = Window.partitionBy("dept").orderBy(F.col("salary").desc())
     df = df.withColumn("rk", F.rank().over(win))
     df = df.orderBy(["id"])
@@ -96,9 +85,9 @@ def test_window_rank_pyspark_parity() -> None:
     assert_rows_equal(actual, EXPECTED_RANK, order_matters=True)
 
 
-def test_window_dense_rank_pyspark_parity() -> None:
+def test_window_dense_rank_pyspark_parity(spark) -> None:
     """dense_rank().over(partition) matches PySpark (#187)."""
-    df = _robin_df()
+    df = spark.createDataFrame(_WINDOW_DATA, _WINDOW_COLUMNS)
     win = Window.partitionBy("dept").orderBy(F.col("salary").desc())
     df = df.withColumn("dr", F.dense_rank().over(win))
     df = df.orderBy(["id"])
@@ -106,9 +95,9 @@ def test_window_dense_rank_pyspark_parity() -> None:
     assert_rows_equal(actual, EXPECTED_DENSE_RANK, order_matters=True)
 
 
-def test_window_lag_lead_pyspark_parity() -> None:
+def test_window_lag_lead_pyspark_parity(spark) -> None:
     """lag(1) and lead(1).over(partition) match PySpark (#187)."""
-    df = _robin_df()
+    df = spark.createDataFrame(_WINDOW_DATA, _WINDOW_COLUMNS)
     win = Window.partitionBy("dept").orderBy("id")
     df = df.withColumn("prev", F.lag(F.col("salary"), 1).over(win))
     df = df.withColumn("nxt", F.lead(F.col("salary"), 1).over(win))
@@ -117,9 +106,9 @@ def test_window_lag_lead_pyspark_parity() -> None:
     assert_rows_equal(actual, EXPECTED_LAG_LEAD, order_matters=True)
 
 
-def test_window_sum_over_pyspark_parity() -> None:
+def test_window_sum_over_pyspark_parity(spark) -> None:
     """sum(col).over(partition) matches PySpark (#187)."""
-    df = _robin_df()
+    df = spark.createDataFrame(_WINDOW_DATA, _WINDOW_COLUMNS)
     win = Window.partitionBy("dept")
     df = df.withColumn(
         "total_by_dept",
@@ -130,9 +119,9 @@ def test_window_sum_over_pyspark_parity() -> None:
     assert_rows_equal(actual, EXPECTED_SUM_OVER, order_matters=True)
 
 
-def test_window_first_last_pyspark_parity() -> None:
+def test_window_first_last_pyspark_parity(spark) -> None:
     """first_value() and last_value().over(partition) match PySpark (#187)."""
-    df = _robin_df()
+    df = spark.createDataFrame(_WINDOW_DATA, _WINDOW_COLUMNS)
     win = (
         Window.partitionBy("dept")
         .orderBy("id")
@@ -148,20 +137,12 @@ def test_window_first_last_pyspark_parity() -> None:
     )
     df = df.orderBy(["id"])
     actual = [_row_to_dict(r) for r in df.collect()]
-    expected = EXPECTED_FIRST_LAST
-    assert_rows_equal(actual, expected, order_matters=True)
+    assert_rows_equal(actual, EXPECTED_FIRST_LAST, order_matters=True)
 
 
-EXPECTED_COUNT_OVER = [
-    {"id": 1, "salary": 100, "dept": "a", "cnt": 2},
-    {"id": 2, "salary": 90, "dept": "a", "cnt": 2},
-    {"id": 3, "salary": 80, "dept": "b", "cnt": 1},
-]
-
-
-def test_window_count_over_pyspark_parity() -> None:
+def test_window_count_over_pyspark_parity(spark) -> None:
     """count(col).over(partition) matches PySpark (#187)."""
-    df = _robin_df()
+    df = spark.createDataFrame(_WINDOW_DATA, _WINDOW_COLUMNS)
     win = Window.partitionBy("dept")
     df = df.withColumn(
         "cnt",
@@ -172,24 +153,17 @@ def test_window_count_over_pyspark_parity() -> None:
     assert_rows_equal(actual, EXPECTED_COUNT_OVER, order_matters=True)
 
 
-def test_window_rank_with_ties_pyspark_parity() -> None:
+def test_window_rank_with_ties_pyspark_parity(spark) -> None:
     """rank() with ties: same salary in partition gets same rank (expected from prior PySpark run)."""
-
-    # Data with tie: two 100 in dept \"a\", one 80 in \"b\"
     data_tie = [(1, 100, "a"), (2, 100, "a"), (3, 80, "b")]
     expected = [
         {"id": 1, "salary": 100, "dept": "a", "rk": 1},
         {"id": 2, "salary": 100, "dept": "a", "rk": 1},
         {"id": 3, "salary": 80, "dept": "b", "rk": 1},
     ]
-
-    spark = get_spark("window_parity_ties")
     df = spark.createDataFrame(data_tie, _WINDOW_COLUMNS)
     win = Window.partitionBy("dept").orderBy(F.col("salary").desc())
-    df = df.withColumn(
-        "rk",
-        F.rank().over(win),
-    )
+    df = df.withColumn("rk", F.rank().over(win))
     df = df.orderBy(["id"])
     actual = [_row_to_dict(r) for r in df.collect()]
     assert_rows_equal(actual, expected, order_matters=True)
