@@ -1090,15 +1090,27 @@ impl DataFrame {
 
     /// Select columns by name (returns a new DataFrame).
     /// Column names are resolved according to case sensitivity.
+    /// "*" expands to all columns (PySpark parity #1134); select("*", "a") => all columns then "a" again.
     /// Dotted names (e.g. "outer.inner.leaf") select nested struct fields (PySpark parity).
     pub fn select(&self, cols: Vec<&str>) -> Result<DataFrame, PolarsError> {
-        let has_dots = cols.iter().any(|c| c.contains('.'));
+        let all_cols = self.columns()?;
+        let expanded: Vec<String> = cols
+            .iter()
+            .flat_map(|c| {
+                if *c == "*" {
+                    all_cols.clone()
+                } else {
+                    vec![(*c).to_string()]
+                }
+            })
+            .collect();
+        let has_dots = expanded.iter().any(|c| c.contains('.'));
         if has_dots {
-            let exprs: Vec<Expr> = cols
+            let exprs: Vec<Expr> = expanded
                 .iter()
                 .map(|c| {
                     let e = self.column_name_to_expr(c)?;
-                    let last_part = c.split('.').next_back().unwrap_or(c);
+                    let last_part = c.split('.').next_back().unwrap_or(c.as_str());
                     Ok::<Expr, PolarsError>(e.alias(last_part))
                 })
                 .collect::<Result<Vec<_>, PolarsError>>()?;
@@ -1108,9 +1120,9 @@ impl DataFrame {
         // ambiguous-case handling. When multiple physical columns differ only by case
         // (e.g. "name" and "NAME"), we coalesce them so selects like select("NaMe")
         // see the first non-null value across all.
-        let all_cols = self.columns()?;
-        let mut exprs: Vec<Expr> = Vec::with_capacity(cols.len());
-        for requested in &cols {
+        let mut exprs: Vec<Expr> = Vec::with_capacity(expanded.len());
+        for requested in &expanded {
+            let requested_str = requested.as_str();
             let requested_lower = requested.to_lowercase();
             let matches: Vec<String> = all_cols
                 .iter()
@@ -1121,11 +1133,11 @@ impl DataFrame {
                 use polars::prelude::coalesce as pl_coalesce;
                 let parts: Vec<Expr> = matches.iter().map(|m| col(m.as_str())).collect();
                 let coalesced = pl_coalesce(&parts);
-                exprs.push(coalesced.alias(*requested));
+                exprs.push(coalesced.alias(requested_str));
                 continue;
             }
-            let resolved = self.resolve_column_name(requested)?;
-            exprs.push(col(resolved.as_str()).alias(*requested));
+            let resolved = self.resolve_column_name(requested_str)?;
+            exprs.push(col(resolved.as_str()).alias(requested_str));
         }
         transformations::select_with_exprs(self, exprs, self.case_sensitive)
     }
