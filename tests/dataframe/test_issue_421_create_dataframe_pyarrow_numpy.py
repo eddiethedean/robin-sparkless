@@ -7,7 +7,6 @@ from __future__ import annotations
 import pytest
 
 
-
 def test_create_dataframe_from_pyarrow_table(spark) -> None:
     """createDataFrame(data) accepts pyarrow.Table via pandas conversion; rows and values match."""
     pa = pytest.importorskip("pyarrow")

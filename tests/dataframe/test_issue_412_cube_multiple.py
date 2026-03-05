@@ -25,9 +25,7 @@ def test_cube_two_columns_variadic() -> None:
         [{"dept": "A", "year": 2023}, {"dept": "B", "year": 2023}],
         ["dept", "year"],
     )
-    out = (
-        df.cube("dept", "year").agg(F.count(F.col("dept")).alias("count")).collect()
-    )
+    out = df.cube("dept", "year").agg(F.count(F.col("dept")).alias("count")).collect()
     assert len(out) >= 1
     assert all("count" in r for r in out)
 
@@ -39,9 +37,5 @@ def test_cube_single_list() -> None:
         [{"dept": "A", "year": 2023}],
         ["dept", "year"],
     )
-    out = (
-        df.cube(["dept", "year"])
-        .agg(F.count(F.col("dept")).alias("count"))
-        .collect()
-    )
+    out = df.cube(["dept", "year"]).agg(F.count(F.col("dept")).alias("count")).collect()
     assert len(out) >= 1

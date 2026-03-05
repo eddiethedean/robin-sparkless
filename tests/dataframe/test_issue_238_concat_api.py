@@ -32,10 +32,14 @@ def test_concat_with_literal_separator_in_with_column() -> None:
     )
     out = df.orderBy(["first_name"]).collect()
     from tests.utils import _row_to_dict, assert_rows_equal
-    assert_rows_equal([_row_to_dict(r) for r in out], [
-        {"first_name": "Alice", "last_name": "Smith", "full_name": "Alice Smith"},
-        {"first_name": "Bob", "last_name": "Jones", "full_name": "Bob Jones"},
-    ])
+
+    assert_rows_equal(
+        [_row_to_dict(r) for r in out],
+        [
+            {"first_name": "Alice", "last_name": "Smith", "full_name": "Alice Smith"},
+            {"first_name": "Bob", "last_name": "Jones", "full_name": "Bob Jones"},
+        ],
+    )
 
 
 def test_concat_ws_matches_concat_for_space_separator() -> None:
@@ -55,7 +59,11 @@ def test_concat_ws_matches_concat_for_space_separator() -> None:
     )
     out = df.orderBy(["first_name"]).collect()
     from tests.utils import _row_to_dict, assert_rows_equal
-    assert_rows_equal([_row_to_dict(r) for r in out], [
-        {"first_name": "Alice", "last_name": "Smith", "full_name": "Alice Smith"},
-        {"first_name": "Bob", "last_name": "Jones", "full_name": "Bob Jones"},
-    ])
+
+    assert_rows_equal(
+        [_row_to_dict(r) for r in out],
+        [
+            {"first_name": "Alice", "last_name": "Smith", "full_name": "Alice Smith"},
+            {"first_name": "Bob", "last_name": "Jones", "full_name": "Bob Jones"},
+        ],
+    )

@@ -7,7 +7,6 @@ from __future__ import annotations
 import collections
 
 
-
 def test_create_dataframe_from_namedtuple(spark) -> None:
     """spark.createDataFrame(list of namedtuple) works."""
     RowLike = collections.namedtuple("RowLike", "a b")

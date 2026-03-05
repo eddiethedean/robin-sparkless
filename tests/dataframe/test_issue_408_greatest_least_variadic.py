@@ -21,9 +21,7 @@ def test_greatest_variadic() -> None:
         [{"a": 1, "b": 5, "c": 3}, {"a": 10, "b": 2, "c": 8}],
         schema=["a", "b", "c"],
     )
-    out = df.select(
-        F.greatest(F.col("a"), F.col("b"), F.col("c")).alias("m")
-    ).collect()
+    out = df.select(F.greatest(F.col("a"), F.col("b"), F.col("c")).alias("m")).collect()
     rows = list(out)
     assert len(rows) == 2
     assert rows[0]["m"] == 5
@@ -37,9 +35,7 @@ def test_least_variadic() -> None:
         [{"a": 1, "b": 5, "c": 3}, {"a": 10, "b": 2, "c": 8}],
         schema=["a", "b", "c"],
     )
-    out = df.select(
-        F.least(F.col("a"), F.col("b"), F.col("c")).alias("m")
-    ).collect()
+    out = df.select(F.least(F.col("a"), F.col("b"), F.col("c")).alias("m")).collect()
     rows = list(out)
     assert len(rows) == 2
     assert rows[0]["m"] == 1

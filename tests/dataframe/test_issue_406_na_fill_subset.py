@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 
-
 def test_na_fill_subset_list_of_str(spark) -> None:
     """df.na.fill(0, subset=["b"]) fills nulls only in "b", leaves "a" unchanged."""
     df = spark.createDataFrame(

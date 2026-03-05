@@ -6,7 +6,6 @@ Uses .config() which PySpark supports; sparkless may support .option() or .confi
 from __future__ import annotations
 
 
-
 def _builder(spark, app_name: str):
     """Return a SparkSession builder for the current backend."""
     spark_cls = type(spark)

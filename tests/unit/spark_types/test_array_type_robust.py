@@ -459,9 +459,7 @@ class TestArrayTypeRobust:
             [
                 StructField(
                     "nested",
-                    ArrayType(
-                        elementType=ArrayType(elementType=StringType())
-                    ),
+                    ArrayType(elementType=ArrayType(elementType=StringType())),
                     True,
                 )
             ]

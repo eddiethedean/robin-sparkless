@@ -53,7 +53,9 @@ fn to_py_err(e: impl std::fmt::Display) -> PyErr {
             || msg.contains("valid columns"))
     {
         format!("unresolved_column: cannot be resolved: {msg}")
-    } else if !msg.to_lowercase().contains("cannot be resolved") && msg.to_lowercase().contains("cannot resolve") {
+    } else if !msg.to_lowercase().contains("cannot be resolved")
+        && msg.to_lowercase().contains("cannot resolve")
+    {
         msg.replace("cannot resolve", "cannot be resolved")
     } else {
         msg
@@ -967,12 +969,7 @@ impl PyRuntimeConfig {
 
     /// PySpark: spark.conf.get(key, default=None) returns value or default as string.
     #[pyo3(signature = (key, default=None))]
-    fn get(
-        &self,
-        py: Python<'_>,
-        key: &str,
-        default: Option<&str>,
-    ) -> PyResult<String> {
+    fn get(&self, py: Python<'_>, key: &str, default: Option<&str>) -> PyResult<String> {
         let session = self
             .session
             .bind(py)

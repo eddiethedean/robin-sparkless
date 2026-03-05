@@ -211,7 +211,11 @@ class TestIssue330StructFieldAlias:
             key = (
                 "StructValue[E1]"
                 if "StructValue[E1]" in cols
-                else ("e1" if "e1" in cols else ("E1" if "E1" in cols else "StructValue.E1"))
+                else (
+                    "e1"
+                    if "e1" in cols
+                    else ("E1" if "E1" in cols else "StructValue.E1")
+                )
             )
             assert rows[0][key] == 1
             assert rows[1][key] == 2
@@ -300,7 +304,9 @@ class TestIssue330StructFieldAlias:
             # When all structs are null, field extraction may not work
             # This test verifies the behavior (may return None or raise error)
             try:
-                result = df.select(F.col("StructValue").getField("E1").alias("E1-Extract"))
+                result = df.select(
+                    F.col("StructValue").getField("E1").alias("E1-Extract")
+                )
                 rows = result.collect()
 
                 assert len(rows) == 2
@@ -417,7 +423,9 @@ class TestIssue330StructFieldAlias:
 
             # Note: Field names with special characters may not work in all cases
             # This test verifies basic functionality
-            result = df.select(F.col("StructValue").getField("field_name").alias("FieldAlias"))
+            result = df.select(
+                F.col("StructValue").getField("field_name").alias("FieldAlias")
+            )
             rows = result.collect()
 
             assert len(rows) == 1
@@ -444,7 +452,9 @@ class TestIssue330StructFieldAlias:
             )
 
             result = (
-                df1.select("ID", F.col("StructValue").getField("E1").alias("E1-Extract"))
+                df1.select(
+                    "ID", F.col("StructValue").getField("E1").alias("E1-Extract")
+                )
                 .join(df2, on="ID", how="inner")
                 .select("Name", "E1-Extract")
             )
@@ -472,8 +482,12 @@ class TestIssue330StructFieldAlias:
                 ]
             )
 
-            result1 = df1.select("Name", F.col("StructValue").getField("E1").alias("E1-Extract"))
-            result2 = df2.select("Name", F.col("StructValue").getField("E1").alias("E1-Extract"))
+            result1 = df1.select(
+                "Name", F.col("StructValue").getField("E1").alias("E1-Extract")
+            )
+            result2 = df2.select(
+                "Name", F.col("StructValue").getField("E1").alias("E1-Extract")
+            )
 
             union_result = result1.union(result2)
             rows = union_result.collect()
@@ -503,7 +517,9 @@ class TestIssue330StructFieldAlias:
             )
 
             result = (
-                df.select("Category", F.col("StructValue").getField("E1").alias("E1-Extract"))
+                df.select(
+                    "Category", F.col("StructValue").getField("E1").alias("E1-Extract")
+                )
                 .groupBy("Category")
                 .agg(F.sum("E1-Extract").alias("TotalE1"))
             )

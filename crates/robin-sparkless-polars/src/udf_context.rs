@@ -41,7 +41,9 @@ pub fn set_thread_udf_context_with_tz(
 /// Get the thread-local UDF context for call_udf.
 pub fn get_thread_udf_context() -> Option<(Arc<UdfRegistry>, bool)> {
     THREAD_UDF_CONTEXT.with(|cell| {
-        cell.borrow().clone().map(|ctx| (ctx.registry, ctx.case_sensitive))
+        cell.borrow()
+            .clone()
+            .map(|ctx| (ctx.registry, ctx.case_sensitive))
     })
 }
 

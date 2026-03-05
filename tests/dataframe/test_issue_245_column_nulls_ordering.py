@@ -14,7 +14,6 @@ _imports = get_spark_imports()
 F = _imports.F
 
 
-
 def test_column_has_desc_nulls_last(spark) -> None:
     """Column has desc_nulls_last method (PySpark parity)."""
     c = F.col("value")

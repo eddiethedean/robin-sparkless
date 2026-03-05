@@ -352,7 +352,9 @@ class SparkBackend:
                     # CRITICAL: Stop ALL existing SparkContexts BEFORE creating Delta session
                     # We must ensure no context exists so Delta JARs are loaded into a fresh context
                     try:
-                        SparkContext = get_spark_imports(BackendType.PYSPARK).SparkContext
+                        SparkContext = get_spark_imports(
+                            BackendType.PYSPARK
+                        ).SparkContext
 
                         # Stop all active contexts FIRST
                         if hasattr(SparkContext, "_active_spark_context"):
@@ -460,7 +462,9 @@ class SparkBackend:
                         setattr(PySparkSession, "_instantiatedSession", None)
                         # Stop the SparkContext to force a new one
                         try:
-                            SparkContext = get_spark_imports(BackendType.PYSPARK).SparkContext
+                            SparkContext = get_spark_imports(
+                                BackendType.PYSPARK
+                            ).SparkContext
 
                             if hasattr(SparkContext, "_active_spark_context"):
                                 ctx = SparkContext._active_spark_context
@@ -520,7 +524,9 @@ class SparkBackend:
                         session.stop()
                         setattr(PySparkSession, "_instantiatedSession", None)
                         try:
-                            SparkContext = get_spark_imports(BackendType.PYSPARK).SparkContext
+                            SparkContext = get_spark_imports(
+                                BackendType.PYSPARK
+                            ).SparkContext
 
                             if hasattr(SparkContext, "_active_spark_context"):
                                 ctx = SparkContext._active_spark_context
@@ -596,7 +602,9 @@ class SparkBackend:
                     session.stop()
                     setattr(PySparkSession, "_instantiatedSession", None)
                     try:
-                        SparkContext = get_spark_imports(BackendType.PYSPARK).SparkContext
+                        SparkContext = get_spark_imports(
+                            BackendType.PYSPARK
+                        ).SparkContext
 
                         if hasattr(SparkContext, "_active_spark_context"):
                             ctx = SparkContext._active_spark_context

@@ -10,7 +10,6 @@ from __future__ import annotations
 from decimal import Decimal
 
 
-
 def test_decimal_schema_create_dataframe(spark) -> None:
     """createDataFrame with Decimal(10,2) schema works (issue repro)."""
     create_df = getattr(spark, "create_dataframe_from_rows", spark.createDataFrame)

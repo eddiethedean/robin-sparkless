@@ -179,7 +179,9 @@ class TestStringConcatenationCacheEdgeCases:
 
         # With PySpark semantics, the initial + on strings yields null, so the
         # filter on isNotNull() drops all rows.
-        assert results == [], "Chained operations yield no rows under PySpark + semantics"
+        assert results == [], (
+            "Chained operations yield no rows under PySpark + semantics"
+        )
 
     def test_string_concat_without_caching(self, spark):
         """Test that string concatenation works normally without caching."""

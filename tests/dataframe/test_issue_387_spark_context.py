@@ -5,7 +5,6 @@ Tests for #387: SparkSession.sparkContext (PySpark parity stub).
 from __future__ import annotations
 
 
-
 def test_spark_context_exists(spark) -> None:
     """spark.sparkContext returns a SparkContext stub."""
     ctx = spark.sparkContext

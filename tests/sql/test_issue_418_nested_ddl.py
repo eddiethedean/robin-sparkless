@@ -14,7 +14,9 @@ def test_nested_ddl_struct_and_array(spark) -> None:
         ],
         schema=schema_ddl,
     )
-    names = df.columns if isinstance(getattr(df, "columns", None), list) else df.columns()
+    names = (
+        df.columns if isinstance(getattr(df, "columns", None), list) else df.columns()
+    )
     assert "addr" in names
     assert "tags" in names
     rows = df.collect()

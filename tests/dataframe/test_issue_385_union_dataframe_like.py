@@ -6,7 +6,6 @@ PySpark union/unionAll require real DataFrames; custom DataFrame-like wrappers a
 from __future__ import annotations
 
 
-
 def test_union_accepts_dataframe(spark) -> None:
     """union(other) with a plain DataFrame works."""
     a = spark.createDataFrame([(1, "x")], ["id", "label"])

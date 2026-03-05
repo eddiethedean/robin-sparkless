@@ -64,7 +64,9 @@ class TestIssue169ToTimestampDropError:
 
     def test_to_timestamp_drop_multiple_columns(self):
         """Test to_timestamp() followed by dropping multiple columns."""
-        spark = SparkSession.builder.appName("test_issue_169_multiple_drops").getOrCreate()
+        spark = SparkSession.builder.appName(
+            "test_issue_169_multiple_drops"
+        ).getOrCreate()
         try:
             data = [
                 {

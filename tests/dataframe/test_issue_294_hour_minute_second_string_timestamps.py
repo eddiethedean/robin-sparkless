@@ -42,26 +42,16 @@ class TestIssue294HourMinuteSecondStringTimestamps:
 
         # Verify Alice: 2023-02-07T04:00:01.730+0000 -> hour=4, minute=0, second=1
         assert row_alice["hour"] == 4, f"Expected hour=4, got {row_alice['hour']}"
-        assert row_alice["minute"] == 0, (
-            f"Expected minute=0, got {row_alice['minute']}"
-        )
-        assert row_alice["second"] == 1, (
-            f"Expected second=1, got {row_alice['second']}"
-        )
+        assert row_alice["minute"] == 0, f"Expected minute=0, got {row_alice['minute']}"
+        assert row_alice["second"] == 1, f"Expected second=1, got {row_alice['second']}"
 
         # Verify Bob: 2023-02-07T12:30:32.730+0000 -> hour=12, minute=30, second=32
         assert row_bob["hour"] == 12, f"Expected hour=12, got {row_bob['hour']}"
-        assert row_bob["minute"] == 30, (
-            f"Expected minute=30, got {row_bob['minute']}"
-        )
-        assert row_bob["second"] == 32, (
-            f"Expected second=32, got {row_bob['second']}"
-        )
+        assert row_bob["minute"] == 30, f"Expected minute=30, got {row_bob['minute']}"
+        assert row_bob["second"] == 32, f"Expected second=32, got {row_bob['second']}"
 
         # Verify Charlie: 2023-02-07T23:59:59.730+0000 -> hour=23, minute=59, second=59
-        assert row_charlie["hour"] == 23, (
-            f"Expected hour=23, got {row_charlie['hour']}"
-        )
+        assert row_charlie["hour"] == 23, f"Expected hour=23, got {row_charlie['hour']}"
         assert row_charlie["minute"] == 59, (
             f"Expected minute=59, got {row_charlie['minute']}"
         )

@@ -13,7 +13,6 @@ _imports = get_spark_imports()
 F = _imports.F
 
 
-
 def test_column_isin_empty_list_returns_zero_rows(spark) -> None:
     """col("id").isin([]) filters to 0 rows (PySpark parity)."""
     data = [{"id": 1}, {"id": 2}, {"id": 3}]

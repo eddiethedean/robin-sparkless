@@ -9,7 +9,6 @@ Robin's create_dataframe_from_rows now accepts schema dtype "list" or "array" fo
 from __future__ import annotations
 
 
-
 def test_create_dataframe_from_rows_schema_list(spark) -> None:
     """create_dataframe_from_rows with (\"vals\", \"list\") succeeds and vals is list column."""
     data = [{"name": "a", "vals": [1, 2, 3]}]

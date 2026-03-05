@@ -126,6 +126,7 @@ class SparkImports:
         self.Window = Window
         self.DataFrameReader = DataFrameReader
         import sparkless._native as _native
+
         self._native = _native
 
 

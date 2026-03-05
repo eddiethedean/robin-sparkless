@@ -16,6 +16,7 @@ _imports = get_spark_imports()
 SparkSession = _imports.SparkSession
 F = _imports.F
 
+
 def _spark_and_df():
     spark = SparkSession.builder.appName("bindings").getOrCreate()
     data = [

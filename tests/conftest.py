@@ -41,7 +41,10 @@ if not _is_pyspark_mode():
         import sparkless as _rs  # type: ignore[import-not-found]
     except ImportError:
         _rs = None  # type: ignore[assignment]
-    if _rs is not None and getattr(_rs, "_configure_for_multiprocessing", None) is not None:
+    if (
+        _rs is not None
+        and getattr(_rs, "_configure_for_multiprocessing", None) is not None
+    ):
         _rs._configure_for_multiprocessing()
 
 # Set JAVA_HOME for PySpark if not already set - must be done before any PySpark imports
@@ -129,7 +132,11 @@ class _SharedSessionWrapper:
 
 def _use_shared_session() -> bool:
     """Use a single session per worker/run for Robin backend. PySpark uses per-test sessions so each test gets a valid session (avoids None/sc issues with xdist)."""
-    if os.environ.get("SPARKLESS_SHARED_SESSION", "1").strip().lower() in ("0", "false", "no"):
+    if os.environ.get("SPARKLESS_SHARED_SESSION", "1").strip().lower() in (
+        "0",
+        "false",
+        "no",
+    ):
         return False
     # Only use shared session for Robin; PySpark per-test sessions are more reliable with xdist
     return not _is_pyspark_mode()
@@ -138,14 +145,20 @@ def _use_shared_session() -> bool:
 @pytest.fixture(scope="session")
 def _shared_robin_session():
     """One SparkSession for the whole test run (Robin backend). Speeds tests; table names must be unique per test via table_prefix."""
-    from tests.fixtures.spark_backend import SparkBackend, BackendType, get_backend_from_env
+    from tests.fixtures.spark_backend import (
+        SparkBackend,
+        BackendType,
+        get_backend_from_env,
+    )
 
     if not _use_shared_session():
         pytest.skip("shared session disabled")
     env_backend = get_backend_from_env()
     if env_backend not in (None, BackendType.ROBIN):
         pytest.skip("shared session only for Robin backend")
-    session = SparkBackend.create_mock_spark_session("shared_robin_test", backend_type="robin")
+    session = SparkBackend.create_mock_spark_session(
+        "shared_robin_test", backend_type="robin"
+    )
     _ensure_robin_backend_type(session)
     yield session
     with contextlib.suppress(BaseException):
@@ -156,7 +169,11 @@ def _shared_robin_session():
 @pytest.fixture(scope="session")
 def _shared_pyspark_session():
     """One PySpark SparkSession per worker (session scope). Speeds PySpark tests; use table_prefix for any tables/views."""
-    from tests.fixtures.spark_backend import SparkBackend, BackendType, get_backend_from_env
+    from tests.fixtures.spark_backend import (
+        SparkBackend,
+        BackendType,
+        get_backend_from_env,
+    )
 
     if not _use_shared_session():
         pytest.skip("shared session disabled")
@@ -222,12 +239,17 @@ def spark(request):
     except ImportError:
         # Fallback: no fixtures, create session from env (pyspark vs sparkless)
         _backend = (
-            (os.getenv("MOCK_SPARK_TEST_BACKEND") or os.getenv("SPARKLESS_TEST_BACKEND") or "")
+            (
+                os.getenv("MOCK_SPARK_TEST_BACKEND")
+                or os.getenv("SPARKLESS_TEST_BACKEND")
+                or ""
+            )
             .strip()
             .lower()
         )
         if _backend == "pyspark":
             from pyspark.sql import SparkSession as _PySparkSession  # type: ignore[import-not-found]
+
             session = (
                 _PySparkSession.builder.appName("test")
                 .config("spark.driver.bindAddress", "127.0.0.1")
@@ -235,8 +257,10 @@ def spark(request):
             )
         else:
             from sparkless.sql import SparkSession as _SparklessSession  # type: ignore[import-not-found]
+
             _builder = getattr(
-                _SparklessSession.builder, "__call__",
+                _SparklessSession.builder,
+                "__call__",
                 lambda: _SparklessSession.builder,
             )()
             session = _builder.app_name("test").get_or_create()
@@ -250,6 +274,7 @@ def spark(request):
         backend = get_backend_type(request)
     except (AttributeError, TypeError):
         from tests.fixtures.spark_backend import BackendType
+
         backend = BackendType.ROBIN
 
     if backend == BackendType.BOTH:
@@ -324,6 +349,7 @@ def spark_backend(request):
         return get_backend_type(request)
     except (AttributeError, TypeError):
         from tests.fixtures.spark_backend import BackendType
+
         return BackendType.MOCK
 
 

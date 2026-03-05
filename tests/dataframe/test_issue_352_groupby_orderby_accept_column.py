@@ -49,6 +49,7 @@ def test_group_by_single_str_still_works(spark) -> None:
     df = spark.createDataFrame(data)
     gd1 = df.groupBy("dept")
     from tests.utils import _row_to_dict, assert_rows_equal
+
     rows1 = [_row_to_dict(r) for r in gd1.agg(F.sum(F.col("n")).alias("s")).collect()]
     assert_rows_equal(rows1, [{"dept": "A", "s": 3}], order_matters=True)
     gd2 = df.groupBy(["dept"])

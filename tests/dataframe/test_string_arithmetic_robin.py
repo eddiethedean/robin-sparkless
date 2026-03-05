@@ -29,6 +29,7 @@ def test_string_division_by_numeric_literal_robin(spark) -> None:
     assert rows[0]["result"] == 2.0
     assert rows[1]["result"] == 4.0
 
+
 def test_numeric_literal_divided_by_string_robin(spark) -> None:
     """100 / col('string_1').cast('double') where string_1 is a string column."""
     df = spark.createDataFrame(

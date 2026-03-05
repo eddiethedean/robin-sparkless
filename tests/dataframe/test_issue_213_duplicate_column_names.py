@@ -11,7 +11,6 @@ _imports = get_spark_imports()
 F = _imports.F
 
 
-
 def test_select_same_column_cast_twice(spark) -> None:
     """Select same column cast to different types (duplicate output names) should not error."""
     df = spark.createDataFrame(

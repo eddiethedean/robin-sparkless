@@ -3999,13 +3999,18 @@ fn has_tz_offset(s: &str) -> bool {
     }
     if s.len() >= 5 {
         let rest = &s[s.len() - 5..];
-        if (rest.starts_with('+') || rest.starts_with('-')) && rest[1..].chars().all(|c| c.is_ascii_digit()) {
+        if (rest.starts_with('+') || rest.starts_with('-'))
+            && rest[1..].chars().all(|c| c.is_ascii_digit())
+        {
             return true;
         }
     }
     if s.len() >= 6 {
         let rest = &s[s.len() - 6..];
-        if (rest.starts_with('+') || rest.starts_with('-')) && !rest.contains(':') && rest[1..].chars().all(|c| c.is_ascii_digit()) {
+        if (rest.starts_with('+') || rest.starts_with('-'))
+            && !rest.contains(':')
+            && rest[1..].chars().all(|c| c.is_ascii_digit())
+        {
             return true;
         }
     }
@@ -4040,7 +4045,10 @@ pub(crate) fn parse_timestamp_string_flexible(s: &str) -> Option<i64> {
 }
 
 /// Same as parse_timestamp_string_flexible but with optional session timezone for no-offset strings (#1154).
-pub(crate) fn parse_timestamp_string_flexible_with_tz(s: &str, session_tz: Option<&str>) -> Option<i64> {
+pub(crate) fn parse_timestamp_string_flexible_with_tz(
+    s: &str,
+    session_tz: Option<&str>,
+) -> Option<i64> {
     use chrono::{NaiveDate, NaiveDateTime, TimeZone};
     let s = s.trim();
     if has_tz_offset(s) {
@@ -4054,11 +4062,16 @@ pub(crate) fn parse_timestamp_string_flexible_with_tz(s: &str, session_tz: Optio
         .unwrap_or(s);
     let s_no_tz = if s_no_tz.len() >= 5 {
         let rest = &s_no_tz[s_no_tz.len() - 5..];
-        if (rest.starts_with('+') || rest.starts_with('-')) && rest[1..].chars().all(|c| c.is_ascii_digit()) {
+        if (rest.starts_with('+') || rest.starts_with('-'))
+            && rest[1..].chars().all(|c| c.is_ascii_digit())
+        {
             &s_no_tz[..s_no_tz.len() - 5]
         } else if s_no_tz.len() >= 6 {
             let rest = &s_no_tz[s_no_tz.len() - 6..];
-            if (rest.starts_with('+') || rest.starts_with('-')) && !rest.contains(':') && rest[1..].chars().all(|c| c.is_ascii_digit()) {
+            if (rest.starts_with('+') || rest.starts_with('-'))
+                && !rest.contains(':')
+                && rest[1..].chars().all(|c| c.is_ascii_digit())
+            {
                 &s_no_tz[..s_no_tz.len() - 6]
             } else {
                 s_no_tz
@@ -4075,7 +4088,9 @@ pub(crate) fn parse_timestamp_string_flexible_with_tz(s: &str, session_tz: Optio
             Some(ndt.and_utc().timestamp_micros())
         } else {
             tz_str.parse::<Tz>().ok().and_then(|tz| {
-                tz.from_local_datetime(&ndt).single().map(|dt| dt.with_timezone(&chrono::Utc).timestamp_micros())
+                tz.from_local_datetime(&ndt)
+                    .single()
+                    .map(|dt| dt.with_timezone(&chrono::Utc).timestamp_micros())
             })
         }
     };
@@ -4126,8 +4141,10 @@ fn series_to_datetime_micros(series: &Series) -> PolarsResult<Series> {
         let ca = series.str().map_err(|e| compute_err("date on string", e))?;
         let out = Int64Chunked::from_iter_options(
             name,
-            ca.into_iter()
-                .map(|opt_s| opt_s.and_then(|s| parse_timestamp_string_flexible_with_tz(s.as_ref(), Some(tz_ref)))),
+            ca.into_iter().map(|opt_s| {
+                opt_s
+                    .and_then(|s| parse_timestamp_string_flexible_with_tz(s.as_ref(), Some(tz_ref)))
+            }),
         );
         out.into_series()
             .cast(&DataType::Datetime(TimeUnit::Microseconds, None))
@@ -4194,7 +4211,9 @@ pub fn apply_hour(column: Column) -> PolarsResult<Option<Column>> {
     let tz_str = session_tz.as_str();
     let out = Int32Chunked::from_iter_options(
         name.as_str().into(),
-        ca.phys.iter().map(|opt| opt.and_then(|t_us| utc_micros_to_hour_in_tz(t_us, tz_str))),
+        ca.phys
+            .iter()
+            .map(|opt| opt.and_then(|t_us| utc_micros_to_hour_in_tz(t_us, tz_str))),
     )
     .into_series();
     Ok(Some(Column::new(name, out)))
@@ -4210,7 +4229,9 @@ pub fn apply_minute(column: Column) -> PolarsResult<Option<Column>> {
     let tz_str = session_tz.as_str();
     let out = Int32Chunked::from_iter_options(
         name.as_str().into(),
-        ca.phys.iter().map(|opt| opt.and_then(|t_us| utc_micros_to_minute_in_tz(t_us, tz_str))),
+        ca.phys
+            .iter()
+            .map(|opt| opt.and_then(|t_us| utc_micros_to_minute_in_tz(t_us, tz_str))),
     )
     .into_series();
     Ok(Some(Column::new(name, out)))
@@ -4226,7 +4247,9 @@ pub fn apply_second(column: Column) -> PolarsResult<Option<Column>> {
     let tz_str = session_tz.as_str();
     let out = Int32Chunked::from_iter_options(
         name.as_str().into(),
-        ca.phys.iter().map(|opt| opt.and_then(|t_us| utc_micros_to_second_in_tz(t_us, tz_str))),
+        ca.phys
+            .iter()
+            .map(|opt| opt.and_then(|t_us| utc_micros_to_second_in_tz(t_us, tz_str))),
     )
     .into_series();
     Ok(Some(Column::new(name, out)))

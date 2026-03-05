@@ -7,7 +7,6 @@ PySpark allows SparkSession.builder() (with parentheses); Robin should accept bo
 from __future__ import annotations
 
 
-
 def test_builder_callable_returns_session(spark) -> None:
     """SparkSession.builder().app_name(\"x\").get_or_create() works."""
     # Use the class of a backend-aware spark session to access the builder.

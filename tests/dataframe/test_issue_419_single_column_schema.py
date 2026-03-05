@@ -11,7 +11,6 @@ from __future__ import annotations
 import pytest
 
 
-
 def _supports_single_column_schema() -> bool:
     """True if the binding accepts createDataFrame([1,2,3], 'bigint') (single type as schema)."""
     try:
@@ -31,6 +30,7 @@ def test_single_column_schema_bigint(spark) -> None:
     out = df.collect()
     assert len(out) == 3
     from tests.utils import _row_to_dict
+
     assert list(_row_to_dict(out[0]).keys()) == ["value"]
     assert [r["value"] for r in out] == [1, 2, 3]
 

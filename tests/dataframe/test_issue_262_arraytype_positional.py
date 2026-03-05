@@ -64,6 +64,7 @@ class TestIssue262ArrayTypePositional:
 
     def test_arraytype_all_initialization_patterns(self, spark):
         """Test all ArrayType initialization patterns (work in both PySpark and Robin)."""
+
         def nullable(at):
             return getattr(at, "nullable", getattr(at, "containsNull", True))
 

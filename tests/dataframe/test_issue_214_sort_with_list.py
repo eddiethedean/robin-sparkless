@@ -98,4 +98,6 @@ def test_sort_with_tuple(spark):
         df.sort(columns_to_sort).collect()
 
     msg = str(exc_info.value)
-    assert "NOT_COLUMN_OR_STR" in msg or "Argument `col` should be a Column or str" in msg
+    assert (
+        "NOT_COLUMN_OR_STR" in msg or "Argument `col` should be a Column or str" in msg
+    )

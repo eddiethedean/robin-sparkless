@@ -53,7 +53,10 @@ def test_groupBy_with_tuple(sample_df):
 
     # PySpark raises PySparkTypeError[NOT_COLUMN_OR_STR] for tuple inputs.
     error_msg = str(exc_info.value)
-    assert "NOT_COLUMN_OR_STR" in error_msg or "Argument `col` should be a Column or str" in error_msg
+    assert (
+        "NOT_COLUMN_OR_STR" in error_msg
+        or "Argument `col` should be a Column or str" in error_msg
+    )
 
 
 def test_groupBy_with_df_columns(sample_df):
@@ -100,7 +103,10 @@ def test_rollup_with_tuple(sample_df):
 
     # PySpark raises PySparkTypeError[NOT_COLUMN_OR_STR] for tuple inputs.
     error_msg = str(exc_info.value)
-    assert "NOT_COLUMN_OR_STR" in error_msg or "Argument `col` should be a Column or str" in error_msg
+    assert (
+        "NOT_COLUMN_OR_STR" in error_msg
+        or "Argument `col` should be a Column or str" in error_msg
+    )
 
 
 def test_rollup_backward_compatibility(sample_df):
@@ -132,7 +138,10 @@ def test_cube_with_tuple(sample_df):
 
     # PySpark raises PySparkTypeError[NOT_COLUMN_OR_STR] for tuple inputs.
     error_msg = str(exc_info.value)
-    assert "NOT_COLUMN_OR_STR" in error_msg or "Argument `col` should be a Column or str" in error_msg
+    assert (
+        "NOT_COLUMN_OR_STR" in error_msg
+        or "Argument `col` should be a Column or str" in error_msg
+    )
 
 
 def test_cube_backward_compatibility(sample_df):

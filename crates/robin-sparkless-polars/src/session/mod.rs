@@ -971,10 +971,7 @@ thread_local! {
 
 /// Set the thread-local session for UDF resolution (call_udf). Used by get_or_create.
 pub(crate) fn set_thread_udf_session(session: SparkSession) {
-    let session_tz = session
-        .config
-        .get("spark.sql.session.timeZone")
-        .cloned();
+    let session_tz = session.config.get("spark.sql.session.timeZone").cloned();
     crate::set_thread_udf_context_with_tz(
         Arc::new(session.udf_registry.clone()),
         session.is_case_sensitive(),

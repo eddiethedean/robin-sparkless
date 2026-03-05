@@ -46,6 +46,7 @@ def test_global_agg_duplicate_names(spark) -> None:
     ).collect()
     assert len(result) == 1
     from tests.utils import _row_to_dict
+
     row = _row_to_dict(result[0])
     assert 30 in row.values()  # sum
     assert 15.0 in row.values() or 15 in row.values()  # avg

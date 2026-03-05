@@ -22,9 +22,7 @@ class TestToTimestampCompatibility:
         )
 
         # Try to_timestamp on TimestampType column - should work now
-        result = df.withColumn(
-            "ts2", F.to_timestamp(df["ts"], "yyyy-MM-dd'T'HH:mm:ss")
-        )
+        result = df.withColumn("ts2", F.to_timestamp(df["ts"], "yyyy-MM-dd'T'HH:mm:ss"))
 
         # Verify both columns are TimestampType
         rows = result.collect()

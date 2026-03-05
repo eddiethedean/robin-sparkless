@@ -70,9 +70,7 @@ class TestIssue170ToDateTimestampType:
         result = (
             df.withColumn(
                 "ts",
-                F.to_timestamp(
-                    F.col("ts_str").cast("string"), "yyyy-MM-dd'T'HH:mm:ss"
-                ),
+                F.to_timestamp(F.col("ts_str").cast("string"), "yyyy-MM-dd'T'HH:mm:ss"),
             )
             .withColumn("date", F.to_date(F.col("ts")))
             .drop("ts_str")
@@ -102,9 +100,7 @@ class TestIssue170ToDateTimestampType:
         result = (
             df.withColumn(
                 "ts",
-                F.to_timestamp(
-                    F.col("ts_str").cast("string"), "yyyy-MM-dd'T'HH:mm:ss"
-                ),
+                F.to_timestamp(F.col("ts_str").cast("string"), "yyyy-MM-dd'T'HH:mm:ss"),
             )
             .withColumn("date", F.to_date(F.col("ts")))
             .select("id", "date")
@@ -131,9 +127,7 @@ class TestIssue170ToDateTimestampType:
         result = (
             df.withColumn(
                 "ts",
-                F.to_timestamp(
-                    F.col("ts_str").cast("string"), "yyyy-MM-dd'T'HH:mm:ss"
-                ),
+                F.to_timestamp(F.col("ts_str").cast("string"), "yyyy-MM-dd'T'HH:mm:ss"),
             )
             .withColumn("date", F.to_date(F.col("ts")))
             .filter(F.col("id") > 1)

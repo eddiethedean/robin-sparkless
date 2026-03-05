@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Convert test files from legacy harness (get_spark, get_functions, get_session, get_window_cls)
 to new harness (spark fixture + get_spark_imports). Run from repo root."""
+
 from __future__ import annotations
 
 import re
@@ -56,7 +57,11 @@ def convert(path: Path) -> bool:
     # 3) Remove F = get_functions() and Window = get_window_cls()
     text = re.sub(r"^F = get_functions\(\)\s*\n", "", text, flags=re.MULTILINE)
     text = re.sub(r"^Window = get_window_cls\(\)\s*\n", "", text, flags=re.MULTILINE)
-    text = re.sub(r"    from tests\.utils import get_functions\n\s*F = get_functions\(\)\s*\n", "", text)
+    text = re.sub(
+        r"    from tests\.utils import get_functions\n\s*F = get_functions\(\)\s*\n",
+        "",
+        text,
+    )
     text = re.sub(r"    F = get_functions\(\)\s*\n", "", text)
 
     # 4) Remove spark = get_spark(...), spark = get_session(), spark = _spark()
@@ -74,11 +79,19 @@ def convert(path: Path) -> bool:
             return f"{pre}def {name}(self, spark){rest}"
         return f"{pre}def {name}(spark){rest}"
 
-    text = re.sub(r"^(\s*)def (test_\w+)\((self)?\)(.*)$", add_spark, text, flags=re.MULTILINE)
+    text = re.sub(
+        r"^(\s*)def (test_\w+)\((self)?\)(.*)$", add_spark, text, flags=re.MULTILINE
+    )
 
     # 6) Remove def _spark(): return get_spark(...) blocks
-    text = re.sub(r"\ndef _spark\(\)[^:]*:\s*\n\s*return get_spark\([^)]+\)\s*\n", "\n", text)
-    text = re.sub(r"\ndef _get_session\(\)[^:]*:\s*\n\s*return get_spark\([^)]+\)\s*\n", "\n", text)
+    text = re.sub(
+        r"\ndef _spark\(\)[^:]*:\s*\n\s*return get_spark\([^)]+\)\s*\n", "\n", text
+    )
+    text = re.sub(
+        r"\ndef _get_session\(\)[^:]*:\s*\n\s*return get_spark\([^)]+\)\s*\n",
+        "\n",
+        text,
+    )
 
     if text != orig:
         path.write_text(text)

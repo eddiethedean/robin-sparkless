@@ -21,7 +21,7 @@ def test_when_cond_val_otherwise_returns_column(spark) -> None:
     df = spark.createDataFrame(data, ["a"])
 
     expr = F.when(F.col("a") > F.lit(0), F.lit(1)).otherwise(F.lit(0))
-    out = [ _row_to_dict(r) for r in df.withColumn("x", expr).collect() ]
+    out = [_row_to_dict(r) for r in df.withColumn("x", expr).collect()]
 
     assert out == [
         {"a": 1, "x": 1},
@@ -35,7 +35,7 @@ def test_when_cond_val_otherwise_operator_syntax(spark) -> None:
     data = [{"a": 1}, {"a": -1}, {"a": 0}]
     df = spark.createDataFrame(data, ["a"])
     expr = F.when(F.col("a") > F.lit(0), F.lit(1)).otherwise(F.lit(0))
-    out = [ _row_to_dict(r) for r in df.withColumn("x", expr).collect() ]
+    out = [_row_to_dict(r) for r in df.withColumn("x", expr).collect()]
 
     assert out == [
         {"a": 1, "x": 1},

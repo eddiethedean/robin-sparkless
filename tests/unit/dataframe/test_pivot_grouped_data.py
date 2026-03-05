@@ -134,7 +134,9 @@ class TestPivotGroupedData:
             {"type": "B", "value": 5},
         ]
         df = spark.createDataFrame(data)
-        result = df.groupBy("type").pivot("type", ["A", "B"]).agg(F.count_distinct("value"))
+        result = (
+            df.groupBy("type").pivot("type", ["A", "B"]).agg(F.count_distinct("value"))
+        )
         rows = result.collect()
 
         assert len(rows) == 2
@@ -158,7 +160,9 @@ class TestPivotGroupedData:
             {"type": "B", "value": 5},
         ]
         df = spark.createDataFrame(data)
-        result = df.groupBy("type").pivot("type", ["A", "B"]).agg(F.collect_list("value"))
+        result = (
+            df.groupBy("type").pivot("type", ["A", "B"]).agg(F.collect_list("value"))
+        )
         rows = result.collect()
 
         assert len(rows) == 2
@@ -183,7 +187,9 @@ class TestPivotGroupedData:
             {"type": "B", "value": 5},
         ]
         df = spark.createDataFrame(data)
-        result = df.groupBy("type").pivot("type", ["A", "B"]).agg(F.collect_set("value"))
+        result = (
+            df.groupBy("type").pivot("type", ["A", "B"]).agg(F.collect_set("value"))
+        )
         rows = result.collect()
 
         assert len(rows) == 2
