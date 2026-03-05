@@ -862,12 +862,16 @@ impl PySparkSession {
         sampling_ratio: Option<f64>,
     ) -> PyResult<PyDataFrame> {
         let _ = sampling_ratio; // no-op for list/dict data; PySpark uses for CSV inference
-        let (data, from_pandas, pandas_column_order) =
-            normalize_create_dataframe_input(py, data)?;
+        let (data, from_pandas, pandas_column_order) = normalize_create_dataframe_input(py, data)?;
         let schema_cache =
             schema.and_then(|s| s.getattr("fields").ok().map(|_| s.clone().unbind()));
-        let (rows, schema_pairs, schema_was_inferred) =
-            python_data_and_schema(py, &data, schema, from_pandas, pandas_column_order.as_deref())?;
+        let (rows, schema_pairs, schema_was_inferred) = python_data_and_schema(
+            py,
+            &data,
+            schema,
+            from_pandas,
+            pandas_column_order.as_deref(),
+        )?;
         let df = self
             .inner
             .create_dataframe_from_rows(rows, schema_pairs, verify_schema, schema_was_inferred)
