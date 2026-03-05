@@ -863,8 +863,8 @@ impl PySparkSession {
     ) -> PyResult<PyDataFrame> {
         let _ = sampling_ratio; // no-op for list/dict data; PySpark uses for CSV inference
         let (data, from_pandas) = normalize_create_dataframe_input(py, data)?;
-        let schema_cache = schema
-            .and_then(|s| s.getattr("fields").ok().map(|_| s.clone().unbind()));
+        let schema_cache =
+            schema.and_then(|s| s.getattr("fields").ok().map(|_| s.clone().unbind()));
         let (rows, schema_pairs, schema_was_inferred) =
             python_data_and_schema(py, &data, schema, from_pandas)?;
         let df = self
@@ -3229,10 +3229,7 @@ impl PyDataFrame {
     }
 
     fn cache(&self) -> PyResult<PyDataFrame> {
-        self.inner
-            .cache()
-            .map(PyDataFrame::wrap)
-            .map_err(to_py_err)
+        self.inner.cache().map(PyDataFrame::wrap).map_err(to_py_err)
     }
 
     #[pyo3(signature = (*cols))]
@@ -5637,10 +5634,7 @@ struct PyCubeRollupData {
 #[pymethods]
 impl PyCubeRollupData {
     fn count(&self) -> PyResult<PyDataFrame> {
-        self.inner
-            .count()
-            .map(PyDataFrame::wrap)
-            .map_err(to_py_err)
+        self.inner.count().map(PyDataFrame::wrap).map_err(to_py_err)
     }
 
     #[pyo3(signature = (*exprs))]
@@ -5689,10 +5683,7 @@ struct PyGroupedData {
 #[pymethods]
 impl PyGroupedData {
     fn count(&self) -> PyResult<PyDataFrame> {
-        self.inner
-            .count()
-            .map(PyDataFrame::wrap)
-            .map_err(to_py_err)
+        self.inner.count().map(PyDataFrame::wrap).map_err(to_py_err)
     }
 
     fn sum(&self, col_name: &Bound<'_, PyAny>) -> PyResult<PyDataFrame> {
@@ -5850,10 +5841,7 @@ impl PyPivotedGroupedData {
     }
 
     fn count(&self) -> PyResult<PyDataFrame> {
-        self.inner
-            .count()
-            .map(PyDataFrame::wrap)
-            .map_err(to_py_err)
+        self.inner.count().map(PyDataFrame::wrap).map_err(to_py_err)
     }
 
     fn _count_distinct(&self, value_col: &str) -> PyResult<PyDataFrame> {
