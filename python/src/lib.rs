@@ -862,11 +862,16 @@ impl PySparkSession {
         sampling_ratio: Option<f64>,
     ) -> PyResult<PyDataFrame> {
         let _ = sampling_ratio; // no-op for list/dict data; PySpark uses for CSV inference
-        let (data, from_pandas) = normalize_create_dataframe_input(py, data)?;
+        let (data, from_pandas, pandas_column_order) = normalize_create_dataframe_input(py, data)?;
         let schema_cache =
             schema.and_then(|s| s.getattr("fields").ok().map(|_| s.clone().unbind()));
-        let (rows, schema_pairs, schema_was_inferred) =
-            python_data_and_schema(py, &data, schema, from_pandas)?;
+        let (rows, schema_pairs, schema_was_inferred) = python_data_and_schema(
+            py,
+            &data,
+            schema,
+            from_pandas,
+            pandas_column_order.as_deref(),
+        )?;
         let df = self
             .inner
             .create_dataframe_from_rows(rows, schema_pairs, verify_schema, schema_was_inferred)
@@ -1588,17 +1593,17 @@ fn infer_type_from_json_value(v: &JsonValue) -> String {
 }
 
 /// Normalize createDataFrame input: convert pandas, PyArrow Table, or NumPy ndarray to list.
-/// Returns (converted list or original data, from_pandas flag for column order).
+/// Returns (converted list or original data, from_pandas flag, pandas column order if from pandas).
 fn normalize_create_dataframe_input<'py>(
     py: Python<'py>,
     data: &Bound<'py, PyAny>,
-) -> PyResult<(Bound<'py, PyAny>, bool)> {
+) -> PyResult<(Bound<'py, PyAny>, bool, Option<Vec<String>>)> {
     // 1. PyArrow Table: to_pylist() returns list of dicts
     if let Ok(to_pylist) = data.getattr("to_pylist") {
         if to_pylist.is_callable() {
             let list = to_pylist.call0()?;
             if list.downcast::<PyList>().is_ok() {
-                return Ok((list, true));
+                return Ok((list, true, None));
             }
         }
     }
@@ -1621,41 +1626,47 @@ fn normalize_create_dataframe_input<'py>(
                             row.append(item)?;
                             out.append(row)?;
                         }
-                        return Ok((out.into_any(), false));
+                        return Ok((out.into_any(), false, None));
                     }
                     if ndim == 2 && list.downcast::<PyList>().is_ok() {
-                        return Ok((list, false));
+                        return Ok((list, false, None));
                     }
                 }
             }
         }
     }
 
-    // 3. Pandas DataFrame: to_dict("records")
+    // 3. Pandas DataFrame: to_dict("records"); preserve column order (#1151).
     maybe_convert_pandas_to_list(py, data)
 }
 
 /// If data is a pandas DataFrame, convert to list of dicts via to_dict("records").
-/// Returns (converted list or original data, true if from pandas).
+/// Returns (converted list, true, Some(column_names_in_order)) when from pandas (#1151).
 fn maybe_convert_pandas_to_list<'py>(
     _py: Python<'py>,
     data: &Bound<'py, PyAny>,
-) -> PyResult<(Bound<'py, PyAny>, bool)> {
+) -> PyResult<(Bound<'py, PyAny>, bool, Option<Vec<String>>)> {
     let to_dict = match data.getattr("to_dict") {
         Ok(attr) => attr,
-        Err(_) => return Ok((data.clone(), false)),
+        Err(_) => return Ok((data.clone(), false, None)),
     };
     if !to_dict.is_callable() {
-        return Ok((data.clone(), false));
+        return Ok((data.clone(), false, None));
     }
+    // Preserve column order from pandas DataFrame (PySpark parity; #1151).
+    let pandas_columns: Option<Vec<String>> = data
+        .getattr("columns")
+        .ok()
+        .and_then(|cols| cols.call_method0("tolist").ok())
+        .and_then(|list| list.extract::<Vec<String>>().ok());
     let records = match to_dict.call1(("records",)) {
         Ok(r) => r,
-        Err(_) => return Ok((data.clone(), false)),
+        Err(_) => return Ok((data.clone(), false, None)),
     };
     if records.downcast::<PyList>().is_ok() {
-        Ok((records, true))
+        Ok((records, true, pandas_columns))
     } else {
-        Ok((data.clone(), false))
+        Ok((data.clone(), false, None))
     }
 }
 
@@ -1665,6 +1676,7 @@ fn python_data_and_schema(
     data: &Bound<'_, PyAny>,
     schema: Option<&Bound<'_, PyAny>>,
     from_pandas: bool,
+    pandas_column_order: Option<&[String]>,
 ) -> PyResult<(Vec<Vec<JsonValue>>, Vec<(String, String)>, bool)> {
     let list = data.downcast::<PyList>().map_err(|_| {
         PyErr::new::<pyo3::exceptions::PyTypeError, _>("data must be a list (or pandas.DataFrame)")
@@ -1688,11 +1700,13 @@ fn python_data_and_schema(
     // such as "bigint" or DateType() (PySpark parity for single-type createDataFrame).
     let allow_scalar_single_column: bool =
         schema_res.as_ref().map(|s| s.len() == 1).unwrap_or(false);
-    // Column order for dict rows: prefer explicit schema order; otherwise, for dict-only data,
-    // use union of all keys across rows sorted alphabetically so sparse rows still include all keys.
-    let mut column_order: Option<Vec<String>> = schema_res
-        .as_ref()
-        .map(|s| s.iter().map(|(n, _)| n.clone()).collect());
+    // Column order for dict rows: pandas order (#1151), else explicit schema order, else alphabetical.
+    let mut column_order: Option<Vec<String>> =
+        pandas_column_order.map(|s| s.to_vec()).or_else(|| {
+            schema_res
+                .as_ref()
+                .map(|s| s.iter().map(|(n, _)| n.clone()).collect())
+        });
     if column_order.is_none() && schema_res.is_none() && !list.is_empty() {
         use std::collections::BTreeSet;
         let mut keys_union: BTreeSet<String> = BTreeSet::new();
@@ -4031,7 +4045,7 @@ impl PyDataFrame {
             .map_err(|_| PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected SparkSession"))?;
         let list = PyList::new_bound(py, out_rows);
         let (rows_data, schema, schema_was_inferred) =
-            python_data_and_schema(py, list.as_ref(), None, false)?;
+            python_data_and_schema(py, list.as_ref(), None, false, None)?;
         let df = session_ref
             .borrow()
             .inner
