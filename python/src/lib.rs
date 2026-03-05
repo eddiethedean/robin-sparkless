@@ -1848,7 +1848,11 @@ fn python_data_and_schema(
     }
     // #1149: PySpark createDataFrame(list_of_dicts, [col names]) infers first column as Long/Double
     // and later numeric columns as String. Apply only for dict rows; list/tuple rows keep normal inference.
-    if schema_was_inferred && schema_names_only && matches!(row_kind, Some("dict")) && !schema.is_empty() {
+    if schema_was_inferred
+        && schema_names_only
+        && matches!(row_kind, Some("dict"))
+        && !schema.is_empty()
+    {
         let inferred: Vec<String> = (0..schema.len())
             .map(|i| {
                 rows.iter()
@@ -1859,7 +1863,10 @@ fn python_data_and_schema(
             })
             .collect();
         let first_is_long = schema.len() == 2
-            && inferred.get(1).map(|t| t.eq_ignore_ascii_case("long")).unwrap_or(false);
+            && inferred
+                .get(1)
+                .map(|t| t.eq_ignore_ascii_case("long"))
+                .unwrap_or(false);
         // Second column in 2-col schema becomes String; in 3+ cols only double becomes String (long stays).
         let two_cols = schema.len() == 2;
         schema = schema
