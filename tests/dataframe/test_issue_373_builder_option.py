@@ -7,7 +7,7 @@ from __future__ import annotations
 
 
 
-def _builder(app_name: str):
+def _builder(spark, app_name: str):
     """Return a SparkSession builder for the current backend."""
     spark_cls = type(spark)
     builder = spark_cls.builder
@@ -40,17 +40,17 @@ def _conf_get(spark, key: str) -> str:
 
 def test_builder_config(spark) -> None:
     """builder().config(key, value) stores config; spark.conf.get(key) returns value."""
-    spark = _get_or_create(
-        _set_conf(_builder("issue_373"), "spark.sql.shuffle.partitions", "2")
+    session = _get_or_create(
+        _set_conf(_builder(spark, "issue_373"), "spark.sql.shuffle.partitions", "2")
     )
-    assert _conf_get(spark, "spark.sql.shuffle.partitions") == "2"
+    assert _conf_get(session, "spark.sql.shuffle.partitions") == "2"
 
 
 def test_builder_config_chain(spark) -> None:
     """builder() can chain .config() before get_or_create()."""
-    b = _builder("issue_373_chain")
+    b = _builder(spark, "issue_373_chain")
     b = _set_conf(b, "a", "1")
     b = _set_conf(b, "b", "2")
-    spark = _get_or_create(b)
-    assert _conf_get(spark, "a") == "1"
-    assert _conf_get(spark, "b") == "2"
+    session = _get_or_create(b)
+    assert _conf_get(session, "a") == "1"
+    assert _conf_get(session, "b") == "2"
