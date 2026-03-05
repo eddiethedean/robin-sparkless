@@ -16,6 +16,7 @@ _imports = get_spark_imports()
 SparkSession = _imports.SparkSession
 F = _imports.F
 
+
 def _spark_and_df():
     spark = SparkSession.builder.appName("bindings").getOrCreate()
     data = [
@@ -35,7 +36,6 @@ def test_length_module_and_method() -> None:
     # In current PySpark, Column does not expose a .length() method; attempting
     # to call it results in TypeError(\"Column object is not callable\").
     # We assert on this behavior so that sparkless matches PySpark.
-    import pytest
 
     with pytest.raises(TypeError):
         df.select(F.col("s").length()).collect()

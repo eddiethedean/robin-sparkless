@@ -15,6 +15,7 @@ F = _imports.F
 
 from tests.utils import _row_to_dict, assert_rows_equal
 
+
 def test_substr_alias_select_collect(spark) -> None:
     """select(col('name').substr(1, 3).alias('partial')) returns column 'partial' (Sparkless parity)."""
     df = spark.createDataFrame(
@@ -23,7 +24,11 @@ def test_substr_alias_select_collect(spark) -> None:
     )
     result = df.select(F.col("name").substr(1, 3).alias("partial"))
     rows = result.collect()
-    cols = result.columns if isinstance(getattr(result, "columns", None), list) else result.columns()
+    cols = (
+        result.columns
+        if isinstance(getattr(result, "columns", None), list)
+        else result.columns()
+    )
     assert cols == ["partial"]
     assert_rows_equal([_row_to_dict(r) for r in rows], [{"partial": "hel"}])
 
@@ -35,7 +40,10 @@ def test_substr_alias_multiple_rows(spark) -> None:
         ["name"],
     )
     rows = df.select(F.col("name").substr(1, 2).alias("partial")).collect()
-    assert_rows_equal([_row_to_dict(r) for r in rows], [{"partial": "ab"}, {"partial": "xy"}, {"partial": "hi"}])
+    assert_rows_equal(
+        [_row_to_dict(r) for r in rows],
+        [{"partial": "ab"}, {"partial": "xy"}, {"partial": "hi"}],
+    )
 
 
 def test_substr_alias_chained_with_other_expr(spark) -> None:

@@ -7,7 +7,6 @@ Sparkless behavior against pre-generated PySpark expected outputs.
 
 from typing import Any, Dict, List, Optional, Tuple
 
-from tests.fixtures.spark_imports import get_spark_imports
 from tests.tools.output_loader import load_expected_output
 from tests.tools.comparison_utils import assert_dataframes_equal, compare_dataframes
 

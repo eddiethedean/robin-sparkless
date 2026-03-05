@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 
-
 def test_intersect(spark) -> None:
     """intersect(other) returns rows that appear in both DataFrames (distinct)."""
     left = spark.createDataFrame([(1, "a"), (2, "b"), (2, "b")], ["id", "x"])

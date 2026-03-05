@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 
-
 def test_union_by_name_case_insensitive_matching(spark) -> None:
     """When session is case-insensitive, union_by_name matches 'ID' with 'id' and produces one column."""
     # Default is case-insensitive; left has "ID", right has "id"
@@ -15,6 +14,7 @@ def test_union_by_name_case_insensitive_matching(spark) -> None:
     # Result should have one column (name from left, "ID")
     assert len(rows[0]) == 1
     from tests.utils import _row_to_dict
+
     names = list(_row_to_dict(rows[0]).keys())
     assert names == ["ID"] or names == ["id"]
     assert rows[0][names[0]] == 1 and rows[1][names[0]] == 2

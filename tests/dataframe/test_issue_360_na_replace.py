@@ -7,7 +7,6 @@ PySpark: df.na.replace(to_replace, value, subset=None). Robin-sparkless: df.na()
 from __future__ import annotations
 
 
-
 def test_na_replace_issue_repro(spark) -> None:
     """df.na.replace(\"a\", \"A\", subset=[\"x\"]).collect() (issue repro)."""
     create_df = getattr(spark, "create_dataframe_from_rows", spark.createDataFrame)

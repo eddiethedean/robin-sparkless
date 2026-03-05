@@ -476,9 +476,9 @@ class TestIssue336WindowFunctionComparison:
             w = Window().partitionBy("Type").orderBy(F.col("Score").desc())
             result = df.withColumn(
                 "HasNext",
-                F.when(
-                    F.isnotnull(F.lead("Score", 1).over(w)), F.lit(True)
-                ).otherwise(F.lit(False)),
+                F.when(F.isnotnull(F.lead("Score", 1).over(w)), F.lit(True)).otherwise(
+                    F.lit(False)
+                ),
             )
             rows = result.collect()
 
@@ -508,9 +508,9 @@ class TestIssue336WindowFunctionComparison:
             w = Window().partitionBy("Type").orderBy(F.col("Score").desc())
             result = df.withColumn(
                 "HasPrevious",
-                F.when(
-                    F.isnull(F.lag("Score", 1).over(w)), F.lit("NoPrev")
-                ).otherwise(F.lit("HasPrev")),
+                F.when(F.isnull(F.lag("Score", 1).over(w)), F.lit("NoPrev")).otherwise(
+                    F.lit("HasPrev")
+                ),
             )
             rows = result.collect()
 
@@ -1234,9 +1234,9 @@ class TestIssue336WindowFunctionComparison:
             with pytest.raises(Exception) as exc_info:
                 df.withColumn(
                     "HasMultipleDistinct",
-                    F.when(
-                        F.countDistinct("Score").over(w) > 1, F.lit(True)
-                    ).otherwise(F.lit(False)),
+                    F.when(F.countDistinct("Score").over(w) > 1, F.lit(True)).otherwise(
+                        F.lit(False)
+                    ),
                 ).collect()
 
             msg = str(exc_info.value)

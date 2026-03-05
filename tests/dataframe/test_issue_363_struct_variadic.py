@@ -43,9 +43,7 @@ def test_struct_three_columns() -> None:
 
     spark = SparkSession.builder.appName("issue_363").getOrCreate()
     df = spark.createDataFrame([(1, "a", 3.0)], ["i", "s", "f"])
-    rows = df.select(
-        F.struct(F.col("i"), F.col("s"), F.col("f")).alias("s")
-    ).collect()
+    rows = df.select(F.struct(F.col("i"), F.col("s"), F.col("f")).alias("s")).collect()
     nested = rows[0]["s"]
     d = _row_to_dict(nested) if not isinstance(nested, dict) else nested
     assert d["i"] == 1 and d["s"] == "a" and d["f"] == 3.0

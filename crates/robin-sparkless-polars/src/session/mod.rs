@@ -971,9 +971,11 @@ thread_local! {
 
 /// Set the thread-local session for UDF resolution (call_udf). Used by get_or_create.
 pub(crate) fn set_thread_udf_session(session: SparkSession) {
-    crate::set_thread_udf_context(
+    let session_tz = session.config.get("spark.sql.session.timeZone").cloned();
+    crate::set_thread_udf_context_with_tz(
         Arc::new(session.udf_registry.clone()),
         session.is_case_sensitive(),
+        session_tz,
     );
     THREAD_UDF_SESSION.with(|cell| *cell.borrow_mut() = Some(session));
 }
@@ -1609,8 +1611,14 @@ impl SparkSession {
     }
 
     /// Set a config key at runtime (PySpark: spark.conf.set(key, value)).
+    /// When key is spark.sql.session.timeZone, also updates the thread UDF context so hour/minute/second use it (#1154).
     pub fn set_config(&mut self, key: impl Into<String>, value: impl Into<String>) {
-        self.config.insert(key.into(), value.into());
+        let key = key.into();
+        let value = value.into();
+        if key == "spark.sql.session.timeZone" {
+            crate::update_thread_session_time_zone(Some(value.clone()));
+        }
+        self.config.insert(key, value);
     }
 
     /// Whether column names are case-sensitive (PySpark: spark.sql.caseSensitive).

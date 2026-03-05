@@ -6,7 +6,6 @@ like ArrayType(DoubleType(), True) without raising a TypeError about specifying
 both 'elementType' and 'element_type'.
 """
 
-import pytest
 
 from tests.fixtures.spark_imports import get_spark_imports
 
@@ -64,6 +63,7 @@ class TestIssue262ArrayTypePositional:
 
     def test_arraytype_all_initialization_patterns(self, spark):
         """Test all ArrayType initialization patterns (work in both PySpark and Robin)."""
+
         def nullable(at):
             return getattr(at, "nullable", getattr(at, "containsNull", True))
 

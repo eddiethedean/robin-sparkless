@@ -9,6 +9,7 @@ F = _imports.F
 
 from tests.utils import _row_to_dict, assert_rows_equal
 
+
 def test_filter_column_gt_literal(spark) -> None:
     """df.filter(col('x') > 1) - PySpark accepts Column expression."""
     df = spark.createDataFrame([(1,), (2,)], ["x"])

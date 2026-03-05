@@ -34,7 +34,9 @@ def test_select_window_rank_alias(spark) -> None:
         [{"x": 10}, {"x": 20}, {"x": 20}],
         ["x"],
     )
-    result = df.select(F.rank().over(Window.partitionBy("x").orderBy(F.lit(1))).alias("rank"))
+    result = df.select(
+        F.rank().over(Window.partitionBy("x").orderBy(F.lit(1))).alias("rank")
+    )
     rows = result.collect()
     assert len(rows) == 3
     assert all("rank" in r for r in rows)

@@ -151,7 +151,9 @@ Bob,30,60000"""
         assert isinstance(field_dict["name"], StringType), "name should be StringType"
 
         # age should be LongType (Python int → LongType)
-        assert isinstance(field_dict["age"], (IntegerType, LongType)), "age should be LongType"
+        assert isinstance(field_dict["age"], (IntegerType, LongType)), (
+            "age should be LongType"
+        )
 
         # score should be DoubleType (Python float → DoubleType)
         assert isinstance(field_dict["score"], DoubleType), "score should be DoubleType"
@@ -313,7 +315,9 @@ false,true"""
             schema_inferred = df_inferred.schema
             field_dict = {f.name: f.dataType for f in schema_inferred.fields}
 
-            assert isinstance(field_dict["value"], (IntegerType, LongType)), "value should be LongType"
+            assert isinstance(field_dict["value"], (IntegerType, LongType)), (
+                "value should be LongType"
+            )
             assert isinstance(field_dict["temperature"], DoubleType), (
                 "temperature should be DoubleType"
             )
@@ -438,11 +442,15 @@ Bob,200,false"""
             schema_inferred = df_inferred.schema
             field_dict = {f.name: f.dataType for f in schema_inferred.fields}
 
-            assert isinstance(field_dict["id"], (IntegerType, LongType)), "id should be LongType"
+            assert isinstance(field_dict["id"], (IntegerType, LongType)), (
+                "id should be LongType"
+            )
             assert isinstance(field_dict["name"], StringType), (
                 "name should be StringType"
             )
-            assert isinstance(field_dict["age"], (IntegerType, LongType)), "age should be LongType"
+            assert isinstance(field_dict["age"], (IntegerType, LongType)), (
+                "age should be LongType"
+            )
         finally:
             Path(temp_path).unlink(missing_ok=True)
 
@@ -726,7 +734,9 @@ true,false,yes"""
 
             # If code has mixed numeric/non-numeric, it should be StringType
             # id might be inferred as LongType if all values are numeric
-            assert isinstance(field_dict["id"], (IntegerType, LongType)), "id should be LongType"
+            assert isinstance(field_dict["id"], (IntegerType, LongType)), (
+                "id should be LongType"
+            )
             # code should be StringType because it has non-numeric values
             assert isinstance(field_dict["code"], StringType), (
                 "code should be StringType (mixed)"
@@ -785,7 +795,9 @@ Alice,25,95.5"""
             assert isinstance(field_dict["name"], StringType), (
                 "name should be StringType"
             )
-            assert isinstance(field_dict["age"], (IntegerType, LongType)), "age should be LongType"
+            assert isinstance(field_dict["age"], (IntegerType, LongType)), (
+                "age should be LongType"
+            )
             assert isinstance(field_dict["score"], DoubleType), (
                 "score should be DoubleType"
             )
@@ -828,7 +840,9 @@ Alice,25,95.5"""
 
         # Check types
         assert isinstance(field_dict["name"], StringType), "name should be StringType"
-        assert isinstance(field_dict["age"], (IntegerType, LongType)), "age should be LongType"
+        assert isinstance(field_dict["age"], (IntegerType, LongType)), (
+            "age should be LongType"
+        )
         assert isinstance(field_dict["score"], DoubleType), "score should be DoubleType"
 
     def test_create_dataframe_type_conflict_raises_error(self, spark):
@@ -915,7 +929,9 @@ Bob|30|87.0"""
             assert isinstance(field_dict["name"], StringType), (
                 "name should be StringType"
             )
-            assert isinstance(field_dict["age"], (IntegerType, LongType)), "age should be LongType"
+            assert isinstance(field_dict["age"], (IntegerType, LongType)), (
+                "age should be LongType"
+            )
             assert isinstance(field_dict["score"], DoubleType), (
                 "score should be DoubleType"
             )
@@ -934,7 +950,9 @@ Bob|30|87.0"""
         schema = df.schema
         field_dict = {f.name: f.dataType for f in schema.fields}
 
-        assert isinstance(field_dict["int_val"], (IntegerType, LongType)), "int_val should be LongType"
+        assert isinstance(field_dict["int_val"], (IntegerType, LongType)), (
+            "int_val should be LongType"
+        )
         assert isinstance(field_dict["float_val"], DoubleType), (
             "float_val should be DoubleType"
         )
@@ -1049,7 +1067,9 @@ false"""
         schema = df.schema
         field_dict = {f.name: f.dataType for f in schema.fields}
 
-        assert isinstance(field_dict["id"], (IntegerType, LongType)), "id should be LongType"
+        assert isinstance(field_dict["id"], (IntegerType, LongType)), (
+            "id should be LongType"
+        )
         assert isinstance(field_dict["value"], DoubleType), "value should be DoubleType"
         assert isinstance(field_dict["name"], StringType), "name should be StringType"
 
@@ -1271,7 +1291,9 @@ Bob\t30\t87.0"""
             assert isinstance(field_dict["name"], StringType), (
                 "name should be StringType"
             )
-            assert isinstance(field_dict["age"], (IntegerType, LongType)), "age should be LongType"
+            assert isinstance(field_dict["age"], (IntegerType, LongType)), (
+                "age should be LongType"
+            )
             assert isinstance(field_dict["score"], DoubleType), (
                 "score should be DoubleType"
             )
@@ -1312,7 +1334,9 @@ Bob;30;87.0"""
         field_dict = {f.name: f.dataType for f in schema.fields}
 
         assert isinstance(field_dict["name"], StringType), "name should be StringType"
-        assert isinstance(field_dict["age"], (IntegerType, LongType)), "age should be LongType"
+        assert isinstance(field_dict["age"], (IntegerType, LongType)), (
+            "age should be LongType"
+        )
         assert isinstance(field_dict["score"], DoubleType), "score should be DoubleType"
 
         # Verify None values are preserved
@@ -1381,7 +1405,9 @@ Bob,"Say ""Hi"" there"'''
         schema = df.schema
         field_dict = {f.name: f.dataType for f in schema.fields}
 
-        assert isinstance(field_dict["id"], (IntegerType, LongType)), "id should be LongType"
+        assert isinstance(field_dict["id"], (IntegerType, LongType)), (
+            "id should be LongType"
+        )
         assert isinstance(field_dict["text"], StringType), "text should be StringType"
 
         rows = df.collect()
@@ -1423,7 +1449,9 @@ Bob,30"""
         field_dict = {f.name: f.dataType for f in schema.fields}
 
         assert isinstance(field_dict["flag"], BooleanType), "flag should be BooleanType"
-        assert isinstance(field_dict["value"], (IntegerType, LongType)), "value should be LongType"
+        assert isinstance(field_dict["value"], (IntegerType, LongType)), (
+            "value should be LongType"
+        )
 
     def test_csv_with_only_zeros(self, spark):
         """Test CSV with only zero values."""
@@ -1607,7 +1635,9 @@ Bob,"Single line"'''
         schema = df.schema
         field_dict = {f.name: f.dataType for f in schema.fields}
 
-        assert isinstance(field_dict["id"], (IntegerType, LongType)), "id should be LongType"
+        assert isinstance(field_dict["id"], (IntegerType, LongType)), (
+            "id should be LongType"
+        )
 
     def test_csv_with_currency_symbols(self, spark):
         """Test CSV with currency symbols."""
@@ -1849,7 +1879,9 @@ Dinner,18:00:00"""
             schema_inferred = df_inferred.schema
             field_dict = {f.name: f.dataType for f in schema_inferred.fields}
 
-            assert isinstance(field_dict["value"], (IntegerType, LongType)), "value should be LongType"
+            assert isinstance(field_dict["value"], (IntegerType, LongType)), (
+                "value should be LongType"
+            )
             assert isinstance(field_dict["hex"], StringType), (
                 "hex should be StringType (hex format)"
             )
@@ -1938,7 +1970,9 @@ Charlie,
             schema_inferred = df_inferred.schema
             field_dict = {f.name: f.dataType for f in schema_inferred.fields}
 
-            assert isinstance(field_dict["id"], (IntegerType, LongType)), "id should be LongType"
+            assert isinstance(field_dict["id"], (IntegerType, LongType)), (
+                "id should be LongType"
+            )
             assert isinstance(field_dict["code"], StringType), (
                 "code should be StringType"
             )
@@ -2240,7 +2274,9 @@ Infinity
         schema = df.schema
         field_dict = {f.name: f.dataType for f in schema.fields}
 
-        assert isinstance(field_dict["value"], (IntegerType, LongType)), "value should be LongType"
+        assert isinstance(field_dict["value"], (IntegerType, LongType)), (
+            "value should be LongType"
+        )
 
     def test_csv_with_all_integer_zeros(self, spark):
         """Test CSV with all zero integer values."""
@@ -2445,7 +2481,9 @@ F"""
             schema_inferred = df_inferred.schema
             field_dict = {f.name: f.dataType for f in schema_inferred.fields}
 
-            assert isinstance(field_dict["id"], (IntegerType, LongType)), "id should be LongType"
+            assert isinstance(field_dict["id"], (IntegerType, LongType)), (
+                "id should be LongType"
+            )
             assert isinstance(field_dict["code"], StringType), (
                 "code should be StringType"
             )
@@ -2655,7 +2693,9 @@ Bob,Bob"""
         field_dict = {f.name: f.dataType for f in schema.fields}
 
         assert isinstance(field_dict["name"], StringType), "name should be StringType"
-        assert isinstance(field_dict["age"], (IntegerType, LongType)), "age should be LongType"
+        assert isinstance(field_dict["age"], (IntegerType, LongType)), (
+            "age should be LongType"
+        )
         assert isinstance(field_dict["score"], DoubleType), "score should be DoubleType"
 
     def test_csv_with_only_one_row(self, spark):
@@ -2689,7 +2729,9 @@ Alice,25,95.5"""
             assert isinstance(field_dict["name"], StringType), (
                 "name should be StringType"
             )
-            assert isinstance(field_dict["age"], (IntegerType, LongType)), "age should be LongType"
+            assert isinstance(field_dict["age"], (IntegerType, LongType)), (
+                "age should be LongType"
+            )
             assert isinstance(field_dict["score"], DoubleType), (
                 "score should be DoubleType"
             )

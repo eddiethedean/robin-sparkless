@@ -3991,11 +3991,72 @@ pub fn apply_to_timestamp_format(
     }
 }
 
-/// Parse a single timestamp string with multiple formats (#1084). Returns micros since epoch (UTC).
-pub(crate) fn parse_timestamp_string_flexible(s: &str) -> Option<i64> {
-    use chrono::{NaiveDate, NaiveDateTime};
+/// Detect if the string has a trailing timezone (Z, +0000, -0500, etc.).
+fn has_tz_offset(s: &str) -> bool {
     let s = s.trim();
-    // Strip trailing timezone for naive parse (e.g. +0000, -0500, Z)
+    if s.ends_with('Z') || s.ends_with('z') {
+        return true;
+    }
+    if s.len() >= 5 {
+        let rest = &s[s.len() - 5..];
+        if (rest.starts_with('+') || rest.starts_with('-'))
+            && rest[1..].chars().all(|c| c.is_ascii_digit())
+        {
+            return true;
+        }
+    }
+    if s.len() >= 6 {
+        let rest = &s[s.len() - 6..];
+        if (rest.starts_with('+') || rest.starts_with('-'))
+            && !rest.contains(':')
+            && rest[1..].chars().all(|c| c.is_ascii_digit())
+        {
+            return true;
+        }
+    }
+    false
+}
+
+/// Parse a single timestamp string that has a timezone offset; returns UTC micros (#1154).
+fn parse_timestamp_string_with_offset(s: &str) -> Option<i64> {
+    use chrono::DateTime;
+    let s = s.trim();
+    let s_normalized = if s.ends_with('Z') || s.ends_with("z") {
+        format!("{}+0000", s.trim_end_matches(['Z', 'z']))
+    } else {
+        s.to_string()
+    };
+    let s_ref = s_normalized.as_str();
+    let with_tz = DateTime::parse_from_str(s_ref, "%Y-%m-%dT%H:%M:%S%.f%z")
+        .or_else(|_| DateTime::parse_from_str(s_ref, "%Y-%m-%dT%H:%M:%S%z"))
+        .or_else(|_| DateTime::parse_from_str(s_ref, "%Y-%m-%d %H:%M:%S%.f%z"))
+        .or_else(|_| DateTime::parse_from_str(s_ref, "%Y-%m-%d %H:%M:%S%z"));
+    if let Ok(dt_offset) = with_tz {
+        return Some(dt_offset.with_timezone(&chrono::Utc).timestamp_micros());
+    }
+    None
+}
+
+/// Parse a single timestamp string with multiple formats (#1084, #1154). Returns micros since epoch (UTC).
+/// When the string has a timezone offset (Z, +0000, -0500), it is respected. When it has none, the string
+/// is interpreted in session_tz (default UTC).
+#[allow(dead_code)]
+pub(crate) fn parse_timestamp_string_flexible(s: &str) -> Option<i64> {
+    parse_timestamp_string_flexible_with_tz(s, None)
+}
+
+/// Same as parse_timestamp_string_flexible but with optional session timezone for no-offset strings (#1154).
+pub(crate) fn parse_timestamp_string_flexible_with_tz(
+    s: &str,
+    session_tz: Option<&str>,
+) -> Option<i64> {
+    use chrono::{NaiveDate, NaiveDateTime, TimeZone};
+    let s = s.trim();
+    if has_tz_offset(s) {
+        if let Some(utc_micros) = parse_timestamp_string_with_offset(s) {
+            return Some(utc_micros);
+        }
+    }
     let s_no_tz = s
         .strip_suffix('Z')
         .or_else(|| s.strip_suffix("z"))
@@ -4022,7 +4083,18 @@ pub(crate) fn parse_timestamp_string_flexible(s: &str) -> Option<i64> {
     } else {
         s_no_tz
     };
-    // Try formats with fractional seconds by parsing the part before '.' and optional subsecs
+    let to_utc_micros = |ndt: NaiveDateTime| {
+        let tz_str = session_tz.unwrap_or("UTC");
+        if tz_str.eq_ignore_ascii_case("UTC") {
+            Some(ndt.and_utc().timestamp_micros())
+        } else {
+            tz_str.parse::<Tz>().ok().and_then(|tz| {
+                tz.from_local_datetime(&ndt)
+                    .single()
+                    .map(|dt| dt.with_timezone(&chrono::Utc).timestamp_micros())
+            })
+        }
+    };
     if let Some(dot) = s_no_tz.find('.') {
         let base = &s_no_tz[..dot];
         let subsec = &s_no_tz[dot + 1..];
@@ -4043,33 +4115,36 @@ pub(crate) fn parse_timestamp_string_flexible(s: &str) -> Option<i64> {
                 .min(999_999)
             };
             let ndt = ndt + chrono::TimeDelta::microseconds(micros);
-            return Some(ndt.and_utc().timestamp_micros());
+            return to_utc_micros(ndt);
         }
     }
     const FORMATS: &[&str] = &["%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d"];
     for fmt in FORMATS {
         if let Ok(ndt) = NaiveDateTime::parse_from_str(s_no_tz, fmt) {
-            return Some(ndt.and_utc().timestamp_micros());
+            return to_utc_micros(ndt);
         }
     }
     if let Ok(d) = NaiveDate::parse_from_str(s_no_tz, "%Y-%m-%d") {
         let ndt = d.and_hms_opt(0, 0, 0).unwrap();
-        return Some(ndt.and_utc().timestamp_micros());
+        return to_utc_micros(ndt);
     }
     None
 }
 
-/// Coerce series to Datetime(Microseconds) for date-part extraction (#403, #1084).
-/// String parsed with multiple formats (ISO with T, space, timezone stripped, date-only).
+/// Coerce series to Datetime(Microseconds) for date-part extraction (#403, #1084, #1154).
+/// String parsed with multiple formats; when string has no TZ, session_tz is used (default UTC).
 fn series_to_datetime_micros(series: &Series) -> PolarsResult<Series> {
     use polars::datatypes::TimeUnit;
     if series.dtype() == &DataType::String {
         let name = series.name().as_str().into();
+        let session_tz = crate::get_thread_session_time_zone();
+        let tz_ref = session_tz.as_str();
         let ca = series.str().map_err(|e| compute_err("date on string", e))?;
         let out = Int64Chunked::from_iter_options(
             name,
-            ca.into_iter()
-                .map(|opt_s| opt_s.and_then(parse_timestamp_string_flexible)),
+            ca.into_iter().map(|opt_s| {
+                opt_s.and_then(|s| parse_timestamp_string_flexible_with_tz(s, Some(tz_ref)))
+            }),
         );
         out.into_series()
             .cast(&DataType::Datetime(TimeUnit::Microseconds, None))
@@ -4078,33 +4153,105 @@ fn series_to_datetime_micros(series: &Series) -> PolarsResult<Series> {
     }
 }
 
-/// hour(column) - extract hour (0-23). Accepts string timestamp column (#403).
+/// Convert UTC micros to hour (0-23) in the given timezone (#1154).
+fn utc_micros_to_hour_in_tz(micros: i64, tz_str: &str) -> Option<i32> {
+    use chrono::Timelike;
+    if tz_str.eq_ignore_ascii_case("UTC") {
+        return chrono::Utc
+            .timestamp_micros(micros)
+            .single()
+            .map(|dt: chrono::DateTime<chrono::Utc>| dt.hour() as i32);
+    }
+    let tz: Tz = tz_str.parse().ok()?;
+    chrono::Utc
+        .timestamp_micros(micros)
+        .single()
+        .map(|dt_utc: chrono::DateTime<chrono::Utc>| dt_utc.with_timezone(&tz).hour() as i32)
+}
+
+/// Convert UTC micros to minute in the given timezone (#1154).
+fn utc_micros_to_minute_in_tz(micros: i64, tz_str: &str) -> Option<i32> {
+    use chrono::Timelike;
+    if tz_str.eq_ignore_ascii_case("UTC") {
+        return chrono::Utc
+            .timestamp_micros(micros)
+            .single()
+            .map(|dt: chrono::DateTime<chrono::Utc>| dt.minute() as i32);
+    }
+    let tz: Tz = tz_str.parse().ok()?;
+    chrono::Utc
+        .timestamp_micros(micros)
+        .single()
+        .map(|dt_utc: chrono::DateTime<chrono::Utc>| dt_utc.with_timezone(&tz).minute() as i32)
+}
+
+/// Convert UTC micros to second in the given timezone (#1154).
+fn utc_micros_to_second_in_tz(micros: i64, tz_str: &str) -> Option<i32> {
+    use chrono::Timelike;
+    if tz_str.eq_ignore_ascii_case("UTC") {
+        return chrono::Utc
+            .timestamp_micros(micros)
+            .single()
+            .map(|dt: chrono::DateTime<chrono::Utc>| dt.second() as i32);
+    }
+    let tz: Tz = tz_str.parse().ok()?;
+    chrono::Utc
+        .timestamp_micros(micros)
+        .single()
+        .map(|dt_utc: chrono::DateTime<chrono::Utc>| dt_utc.with_timezone(&tz).second() as i32)
+}
+
+/// hour(column) - extract hour (0-23) in session timezone (#403, #1154).
 pub fn apply_hour(column: Column) -> PolarsResult<Option<Column>> {
     let name = column.field().into_owned().name;
     let series = column.take_materialized_series();
     let dt_series = series_to_datetime_micros(&series)?;
     let ca = dt_series.datetime().map_err(|e| compute_err("hour", e))?;
-    let out = ca.hour().into_series();
+    let session_tz = crate::get_thread_session_time_zone();
+    let tz_str = session_tz.as_str();
+    let out = Int32Chunked::from_iter_options(
+        name.as_str().into(),
+        ca.phys
+            .iter()
+            .map(|opt| opt.and_then(|t_us| utc_micros_to_hour_in_tz(t_us, tz_str))),
+    )
+    .into_series();
     Ok(Some(Column::new(name, out)))
 }
 
-/// minute(column) - extract minute. Accepts string timestamp column (#403).
+/// minute(column) - extract minute in session timezone (#403, #1154).
 pub fn apply_minute(column: Column) -> PolarsResult<Option<Column>> {
     let name = column.field().into_owned().name;
     let series = column.take_materialized_series();
     let dt_series = series_to_datetime_micros(&series)?;
     let ca = dt_series.datetime().map_err(|e| compute_err("minute", e))?;
-    let out = ca.minute().into_series();
+    let session_tz = crate::get_thread_session_time_zone();
+    let tz_str = session_tz.as_str();
+    let out = Int32Chunked::from_iter_options(
+        name.as_str().into(),
+        ca.phys
+            .iter()
+            .map(|opt| opt.and_then(|t_us| utc_micros_to_minute_in_tz(t_us, tz_str))),
+    )
+    .into_series();
     Ok(Some(Column::new(name, out)))
 }
 
-/// second(column) - extract second. Accepts string timestamp column (#403).
+/// second(column) - extract second in session timezone (#403, #1154).
 pub fn apply_second(column: Column) -> PolarsResult<Option<Column>> {
     let name = column.field().into_owned().name;
     let series = column.take_materialized_series();
     let dt_series = series_to_datetime_micros(&series)?;
     let ca = dt_series.datetime().map_err(|e| compute_err("second", e))?;
-    let out = ca.second().into_series();
+    let session_tz = crate::get_thread_session_time_zone();
+    let tz_str = session_tz.as_str();
+    let out = Int32Chunked::from_iter_options(
+        name.as_str().into(),
+        ca.phys
+            .iter()
+            .map(|opt| opt.and_then(|t_us| utc_micros_to_second_in_tz(t_us, tz_str))),
+    )
+    .into_series();
     Ok(Some(Column::new(name, out)))
 }
 

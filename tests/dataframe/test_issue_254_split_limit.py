@@ -39,5 +39,3 @@ def test_split_without_limit_unchanged() -> None:
     parts = [v for _, v in row.items() if isinstance(v, list)]
     assert len(parts) == 1
     assert parts[0] == ["a", "b", "c"]
-
-

@@ -66,7 +66,6 @@ class TestSessionValidation:
 
     def test_multiple_sessions(self, spark):
         """getActiveSession() returns one of the active sessions; col() fails after all are stopped (PySpark)."""
-        spark1 = spark
         spark2 = SparkSession.builder.appName("test2").getOrCreate()
         try:
             col_expr = F.col("id")

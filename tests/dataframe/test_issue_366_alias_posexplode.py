@@ -4,7 +4,6 @@ PySpark posexplode().alias("Value1", "Value2") names both columns.
 Uses get_spark_imports only; same logic for both backends.
 """
 
-import pytest
 
 from tests.fixtures.spark_imports import get_spark_imports
 
@@ -32,9 +31,7 @@ class TestIssue366AliasPosexplode:
                 {"Name": "Bob", "Values": [30, 40]},
             ]
         )
-        result = df.select(
-            "Name", F.posexplode("Values").alias("Value1", "Value2")
-        )
+        result = df.select("Name", F.posexplode("Values").alias("Value1", "Value2"))
         rows = result.collect()
         assert len(rows) == 4
         keys = list(rows[0].asDict().keys()) if rows else []
@@ -99,9 +96,7 @@ class TestIssue366AliasPosexplode:
                 {"Name": "Bob", "Values": [30, 40]},
             ]
         )
-        result = df.select(
-            "Name", F.posexplode("Values").alias("Value1", "col")
-        )
+        result = df.select("Name", F.posexplode("Values").alias("Value1", "col"))
         rows = result.collect()
         assert len(rows) >= 1
         keys = list(rows[0].asDict().keys()) if rows else []

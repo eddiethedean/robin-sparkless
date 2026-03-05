@@ -53,5 +53,8 @@ pub use traits::{FromRobinDf, IntoRobinDf};
 pub use type_coercion::{
     CompareOp, coerce_for_pyspark_comparison, coerce_for_pyspark_eq_null_safe, find_common_type,
 };
-pub use udf_context::{get_thread_udf_context, set_thread_udf_context};
+pub use udf_context::{
+    get_thread_session_time_zone, get_thread_udf_context, set_thread_udf_context,
+    set_thread_udf_context_with_tz, update_thread_session_time_zone,
+};
 pub use udf_registry::{RustUdf, UdfRegistry};

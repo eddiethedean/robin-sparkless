@@ -161,7 +161,6 @@ class TestIssue359NADropRobust:
 
     def test_na_drop_thresh_one_keeps_rows_with_at_least_one_non_null(self, spark):
         """na.drop(thresh=1) keeps rows with >= 1 non-null value."""
-        from tests.fixtures.spark_imports import get_spark_imports
 
         imports = get_spark_imports()
         StructType = imports.StructType
@@ -201,7 +200,6 @@ class TestIssue359NADropRobust:
 
     def test_na_drop_after_filter(self, spark):
         """na.drop() after filter drops nulls in remaining rows."""
-        from tests.fixtures.spark_imports import get_spark_imports
 
         F = get_spark_imports().F
         df = spark.createDataFrame(
@@ -269,7 +267,6 @@ class TestIssue359NADropRobust:
 
     def test_na_drop_preserves_schema(self, spark):
         """na.drop() preserves DataFrame schema."""
-        from tests.fixtures.spark_imports import get_spark_imports
 
         imports = get_spark_imports()
         StructType = imports.StructType

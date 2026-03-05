@@ -15,9 +15,7 @@ F = _imports.F
 def test_coalesce_two_columns(spark) -> None:
     """coalesce(col("salary"), lit(0)) returns first non-null."""
     df = spark.createDataFrame([(None,), (100,)], ["salary"])
-    out = df.select(
-        F.coalesce(F.col("salary"), F.lit(0)).alias("coalesced")
-    ).collect()
+    out = df.select(F.coalesce(F.col("salary"), F.lit(0)).alias("coalesced")).collect()
     assert len(out) == 2
     assert out[0]["coalesced"] == 0
     assert out[1]["coalesced"] == 100

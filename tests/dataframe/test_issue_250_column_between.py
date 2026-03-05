@@ -13,7 +13,6 @@ _imports = get_spark_imports()
 F = _imports.F
 
 
-
 def test_column_has_between(spark) -> None:
     """Column has between method (PySpark parity)."""
     c = F.col("v")

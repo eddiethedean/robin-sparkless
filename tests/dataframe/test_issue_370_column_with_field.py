@@ -14,6 +14,7 @@ F = _imports.F
 
 from tests.utils import _row_to_dict
 
+
 def test_column_with_field_add_struct_field(spark) -> None:
     """col(\"s\").withField(\"c\", lit(3)) adds field c to struct (issue repro)."""
     create_df = getattr(spark, "create_dataframe_from_rows", spark.createDataFrame)

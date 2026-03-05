@@ -61,6 +61,9 @@ class TestFixtureCompatibility:
         spark = SparkSession.builder.appName("test").getOrCreate()
         try:
             assert spark.sparkContext is not None
-            assert spark.sparkContext.appName == "test" or getattr(spark.sparkContext, "app_name", None) == "test"
+            assert (
+                spark.sparkContext.appName == "test"
+                or getattr(spark.sparkContext, "app_name", None) == "test"
+            )
         finally:
             spark.stop()

@@ -12,6 +12,9 @@ def test_update_table_basic(spark, table_prefix) -> None:
         # PySpark without Hive: UPDATE TABLE is not supported
         with pytest.raises(Exception) as exc_info:
             spark.sql(f"UPDATE {tbl} SET age = 26 WHERE name = 'Alice'")
-        assert "UPDATE" in str(exc_info.value) or "not supported" in str(exc_info.value).lower()
+        assert (
+            "UPDATE" in str(exc_info.value)
+            or "not supported" in str(exc_info.value).lower()
+        )
     finally:
         spark.sql(f"DROP TABLE IF EXISTS {tbl}")

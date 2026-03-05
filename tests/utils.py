@@ -50,9 +50,7 @@ def assert_rows_equal(
     Raises:
         AssertionError: If lengths differ or any row differs.
     """
-    actual_dicts = [
-        _row_to_dict(r) if not isinstance(r, dict) else r for r in actual
-    ]
+    actual_dicts = [_row_to_dict(r) if not isinstance(r, dict) else r for r in actual]
     expected_dicts = [
         _row_to_dict(r) if not isinstance(r, dict) else r for r in expected
     ]
@@ -113,6 +111,8 @@ def _assert_row_equal(actual: dict, expected: dict, index: int = 0) -> None:
                 raise AssertionError(f"Row {index} key '{k}': {a!r} != {e!r}")
         elif a != e:
             raise AssertionError(f"Row {index} key '{k}': {a!r} != {e!r}")
+
+
 def _row_to_dict(r) -> dict:
     """Convert PySpark Row to plain Python dict (handles asDict, Java list->list)."""
     d = r.asDict() if hasattr(r, "asDict") else dict(r)
@@ -161,5 +161,3 @@ def run_with_pyspark_expected(
         except Exception:
             pass
     return fallback_expected
-
-

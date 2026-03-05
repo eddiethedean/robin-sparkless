@@ -35,7 +35,9 @@ class TestIssue164SchemaInferenceNumeric:
         schema = df.schema
         field_map = {f.name: f for f in schema.fields}
         assert field_map["id"].dataType.__class__.__name__ == "DoubleType"
-        assert field_map["cost_per_impression"].dataType.__class__.__name__ == "StringType"
+        assert (
+            field_map["cost_per_impression"].dataType.__class__.__name__ == "StringType"
+        )
 
         # Comparing the string-typed numeric column to a number yields zero rows
         # but does not raise an error.

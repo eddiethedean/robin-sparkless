@@ -14,9 +14,7 @@ F = get_spark_imports().F
 
 def _join_result_with_aliases(emp_df, dept_df, join_type):
     """Join and select with dept_id_right/name_right so schema matches expected_output."""
-    result = emp_df.join(
-        dept_df, emp_df.dept_id == dept_df.dept_id, join_type
-    ).select(
+    result = emp_df.join(dept_df, emp_df.dept_id == dept_df.dept_id, join_type).select(
         emp_df.dept_id,
         emp_df.id,
         emp_df.name,
@@ -81,15 +79,19 @@ class TestJoinParity(ParityTestBase):
         expected = self.load_expected("joins", "cross_join")
         emp_df, dept_df = _employees_and_departments(spark)
         # Match expected schema column order: dept_id, name, id, salary, dept_id_right, name_right, location
-        result = emp_df.crossJoin(dept_df).select(
-            emp_df.dept_id,
-            emp_df.name,
-            emp_df.id,
-            emp_df.salary,
-            dept_df.dept_id.alias("dept_id_right"),
-            dept_df.name.alias("name_right"),
-            dept_df.location,
-        ).orderBy("id", "dept_id_right")
+        result = (
+            emp_df.crossJoin(dept_df)
+            .select(
+                emp_df.dept_id,
+                emp_df.name,
+                emp_df.id,
+                emp_df.salary,
+                dept_df.dept_id.alias("dept_id_right"),
+                dept_df.name.alias("name_right"),
+                dept_df.location,
+            )
+            .orderBy("id", "dept_id_right")
+        )
         self.assert_parity(result, expected)
 
     def test_semi_join(self, spark):

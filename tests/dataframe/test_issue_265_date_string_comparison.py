@@ -22,7 +22,9 @@ def test_filter_date_column_equals_string_literal(spark) -> None:
     )
     out = df.filter(F.col("dt") == "2025-01-01").collect()
     assert len(out) == 1
-    assert out[0]["dt"] == date(2025, 1, 1) or str(out[0]["dt"]).startswith("2025-01-01")
+    assert out[0]["dt"] == date(2025, 1, 1) or str(out[0]["dt"]).startswith(
+        "2025-01-01"
+    )
 
 
 def test_filter_date_column_not_equals_string_literal(spark) -> None:
@@ -33,4 +35,6 @@ def test_filter_date_column_not_equals_string_literal(spark) -> None:
     )
     out = df.filter(F.col("dt") != "2025-01-01").collect()
     assert len(out) == 1
-    assert out[0]["dt"] == date(2025, 1, 2) or str(out[0]["dt"]).startswith("2025-01-02")
+    assert out[0]["dt"] == date(2025, 1, 2) or str(out[0]["dt"]).startswith(
+        "2025-01-02"
+    )

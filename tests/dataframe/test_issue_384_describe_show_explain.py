@@ -25,7 +25,9 @@ def test_summary_alias_for_describe(spark) -> None:
     summ_rows = summ.collect()
     assert len(desc_rows) >= 1 and len(summ_rows) >= 1
     # Same columns (summary is alias for describe)
-    assert set(_row_to_dict(desc_rows[0]).keys()) == set(_row_to_dict(summ_rows[0]).keys())
+    assert set(_row_to_dict(desc_rows[0]).keys()) == set(
+        _row_to_dict(summ_rows[0]).keys()
+    )
 
 
 def test_show_no_error(spark) -> None:

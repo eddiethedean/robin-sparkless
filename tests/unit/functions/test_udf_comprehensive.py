@@ -92,7 +92,7 @@ class TestUDFMultiArgument:
 
         sum_udf = F.udf(lambda x, y, z: x + y + z, T.IntegerType())
         result = df.withColumn(
-        "total", sum_udf(F.col("a"), F.col("b"), F.col("c"))
+            "total", sum_udf(F.col("a"), F.col("b"), F.col("c"))
         ).collect()
 
         assert len(result) == 2
@@ -109,10 +109,10 @@ class TestUDFMultiArgument:
         )
 
         format_udf = F.udf(
-        lambda name, age: f"{name} is {age} years old", T.StringType()
+            lambda name, age: f"{name} is {age} years old", T.StringType()
         )
         result = df.withColumn(
-        "description", format_udf(F.col("name"), F.col("age"))
+            "description", format_udf(F.col("name"), F.col("age"))
         ).collect()
 
         assert len(result) == 2
@@ -130,9 +130,7 @@ class TestUDFInDifferentOperations:
         upper_udf = F.udf(lambda x: x.upper(), T.StringType())
         # Use withColumn first, then select to ensure UDF works in both contexts
         result = (
-        df.withColumn("upper", upper_udf(F.col("value")))
-        .select("upper")
-        .collect()
+            df.withColumn("upper", upper_udf(F.col("value"))).select("upper").collect()
         )
 
         assert result[0]["upper"] == "TEST"
@@ -217,9 +215,7 @@ class TestUDFNullHandling:
         """Test UDF that returns null for certain inputs."""
         df = spark.createDataFrame([{"value": 0}, {"value": 5}, {"value": 10}])
 
-        safe_divide_udf = F.udf(
-            lambda x: 100 / x if x != 0 else None, T.DoubleType()
-        )
+        safe_divide_udf = F.udf(lambda x: 100 / x if x != 0 else None, T.DoubleType())
         result = df.withColumn("result", safe_divide_udf(F.col("value"))).collect()
 
         assert len(result) == 3
@@ -311,9 +307,7 @@ class TestUDFComplexScenarios:
         """Test UDF combined with literals."""
         df = spark.createDataFrame([{"name": "Alice"}])
 
-        format_udf = F.udf(
-            lambda name, prefix: f"{prefix}_{name}", T.StringType()
-        )
+        format_udf = F.udf(lambda name, prefix: f"{prefix}_{name}", T.StringType())
         result = df.withColumn(
             "formatted", format_udf(F.col("name"), F.lit("USER"))
         ).collect()
@@ -403,8 +397,8 @@ class TestUDFRegression279:
     def test_udf_with_withColumn_regression_279(self, spark):
         """Exact reproduction of issue #279."""
         data = [
-        {"Name": "Alice", "Value": "abc"},
-        {"Name": "Bob", "Value": "def"},
+            {"Name": "Alice", "Value": "abc"},
+            {"Name": "Bob", "Value": "def"},
         ]
         df = spark.createDataFrame(data=data)
         my_udf = F.udf(lambda x: x.upper(), T.StringType())

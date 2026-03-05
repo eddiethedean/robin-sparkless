@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 
-
 def test_sample_by(spark) -> None:
     """sampleBy(col, fractions, seed) stratified sample by column value."""
     # col "x" values 1,2,3; sample 100% of 1, 50% of 2, 0% of 3
@@ -22,6 +21,7 @@ def test_sample_by(spark) -> None:
 def test_crosstab(spark) -> None:
     """crosstab(col1, col2) returns col1, col2, count."""
     from tests.utils import _row_to_dict
+
     df = spark.createDataFrame(
         [("a", "x"), ("a", "x"), ("a", "y"), ("b", "x")],
         ["c1", "c2"],
@@ -42,5 +42,6 @@ def test_freq_items(spark) -> None:
     assert len(rows) == 1
     # Columns should be x_freqItems, y_freqItems (or similar)
     from tests.utils import _row_to_dict
+
     keys = list(_row_to_dict(rows[0]).keys())
     assert any("freqItems" in k for k in keys)

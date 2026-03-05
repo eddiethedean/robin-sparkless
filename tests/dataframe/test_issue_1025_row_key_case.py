@@ -14,6 +14,7 @@ F = _imports.F
 
 from tests.utils import _row_to_dict
 
+
 def test_select_alias_row_keys_match_output_names(spark) -> None:
     """df.select(col('id').alias('ID'), 'name').collect() -> row['ID'], row['name'] (not KeyError)."""
     df = spark.createDataFrame([(1, "a")], ["id", "name"])

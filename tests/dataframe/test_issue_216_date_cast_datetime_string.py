@@ -49,4 +49,3 @@ def test_try_cast_datetime_string_to_date_invalid_null(spark) -> None:
     assert len(rows) == 2
     assert rows[0]["d"] == datetime.date(2025, 1, 1)
     assert rows[1]["d"] is None
-

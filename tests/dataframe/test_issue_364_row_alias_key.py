@@ -14,6 +14,7 @@ F = _imports.F
 
 from tests.utils import _row_to_dict
 
+
 def test_row_uses_alias_as_key_issue_repro(spark) -> None:
     """rows[0]['map_col'] works when select(lit(42).alias('map_col')) (issue repro)."""
     df = spark.createDataFrame([{"x": 1}], ["x"])

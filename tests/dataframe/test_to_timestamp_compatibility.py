@@ -22,9 +22,7 @@ class TestToTimestampCompatibility:
         )
 
         # Try to_timestamp on TimestampType column - should work now
-        result = df.withColumn(
-            "ts2", F.to_timestamp(df["ts"], "yyyy-MM-dd'T'HH:mm:ss")
-        )
+        result = df.withColumn("ts2", F.to_timestamp(df["ts"], "yyyy-MM-dd'T'HH:mm:ss"))
 
         # Verify both columns are TimestampType
         rows = result.collect()
@@ -161,7 +159,6 @@ class TestToTimestampCompatibility:
 
     def test_to_timestamp_rejects_unsupported_type(self, spark):
         """Test that to_timestamp() rejects unsupported input types."""
-        import pytest
         from tests.fixtures.spark_imports import get_spark_imports
 
         imports = get_spark_imports()

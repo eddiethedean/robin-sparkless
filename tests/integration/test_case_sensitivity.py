@@ -43,9 +43,9 @@ def _is_case_sensitive(spark):
 @pytest.fixture
 def spark_case_sensitive(request):
     """Session with spark.sql.caseSensitive=true; created and stopped per use."""
-    from tests.fixtures.spark_backend import BackendType, get_backend_type
+    from tests.fixtures.spark_backend import get_backend_type
 
-    backend = get_backend_type(request)
+    _ = get_backend_type(request)
     app_name = f"integration_case_sensitive_{uuid.uuid4().hex[:8]}"
     session = (
         SparkSession.builder.appName(app_name)
@@ -158,7 +158,9 @@ class TestCaseSensitivityConfiguration:
         result = df.select("Name").collect()
         assert len(result) == 1
 
-    def test_case_sensitive_withColumn_fails_with_wrong_case(self, spark_case_sensitive):
+    def test_case_sensitive_withColumn_fails_with_wrong_case(
+        self, spark_case_sensitive
+    ):
         """Test that withColumn fails with wrong case in case-sensitive mode."""
         spark = spark_case_sensitive
         # Issue #264 scenario - but in case-sensitive mode
@@ -279,7 +281,9 @@ class TestCaseSensitivityConfiguration:
         result = df1.join(df3, "ID", "inner").collect()
         assert len(result) == 0  # No matching IDs
 
-    def test_case_sensitive_attribute_access_requires_exact_case(self, spark_case_sensitive):
+    def test_case_sensitive_attribute_access_requires_exact_case(
+        self, spark_case_sensitive
+    ):
         """Test that attribute access requires exact case in case-sensitive mode."""
         spark = spark_case_sensitive
         df = spark.createDataFrame([{"Name": "Alice", "Age": 25}])
