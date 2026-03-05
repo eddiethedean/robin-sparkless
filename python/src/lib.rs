@@ -1846,6 +1846,50 @@ fn python_data_and_schema(
             .collect();
         schema = refined;
     }
+    // #1149: PySpark createDataFrame(list_of_dicts, [col names]) infers first column as Long/Double
+    // and later numeric columns as String. Apply only for dict rows; list/tuple rows keep normal inference.
+    if schema_was_inferred
+        && schema_names_only
+        && matches!(row_kind, Some("dict"))
+        && !schema.is_empty()
+    {
+        let inferred: Vec<String> = (0..schema.len())
+            .map(|i| {
+                rows.iter()
+                    .filter_map(|r| r.get(i))
+                    .find(|v| !matches!(v, JsonValue::Null))
+                    .map(|v| infer_type_from_json_value(v))
+                    .unwrap_or_else(|| "string".to_string())
+            })
+            .collect();
+        let first_is_long = schema.len() == 2
+            && inferred
+                .get(1)
+                .map(|t| t.eq_ignore_ascii_case("long"))
+                .unwrap_or(false);
+        // Second column in 2-col schema becomes String; in 3+ cols only double becomes String (long stays).
+        let two_cols = schema.len() == 2;
+        schema = schema
+            .into_iter()
+            .enumerate()
+            .map(|(i, (name, _))| {
+                let t = inferred.get(i).map(|s| s.as_str()).unwrap_or("string");
+                let typ = match i {
+                    0 => {
+                        if first_is_long {
+                            "long".to_string()
+                        } else {
+                            "double".to_string()
+                        }
+                    }
+                    _ if t.eq_ignore_ascii_case("double") => "string".to_string(),
+                    _ if two_cols && i == 1 => "string".to_string(),
+                    _ => t.to_string(),
+                };
+                (name, typ)
+            })
+            .collect();
+    }
     Ok((rows, schema, schema_was_inferred))
 }
 

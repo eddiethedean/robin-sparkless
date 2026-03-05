@@ -452,15 +452,25 @@ impl DataFrame {
                     && ((left_is_col && right_is_string_lit)
                         || (right_is_col && left_is_string_lit));
                 if root_is_col_vs_numeric {
+                    // #1149: String column vs numeric literal -> no rows match (PySpark createDataFrame names-only parity).
+                    let col_name = if left_is_col {
+                        if let Expr::Column(n) = left_inner {
+                            n.as_str()
+                        } else {
+                            unreachable!()
+                        }
+                    } else if let Expr::Column(n) = right_inner {
+                        n.as_str()
+                    } else {
+                        unreachable!()
+                    };
+                    if self.get_column_dtype(col_name).as_ref() == Some(&DataType::String) {
+                        return Ok(wrap_expr_with_alias(lit(false), alias_after.as_ref()));
+                    }
                     // If we can see the column dtype, use it so numeric columns (e.g. hour())
                     // are compared numerically. Only fall back to string-like coercion when the
                     // column is String (or dtype is unknown).
                     let (new_left, new_right) = if left_is_col && right_is_numeric_lit {
-                        let col_name = if let Expr::Column(n) = left_inner {
-                            n.as_str()
-                        } else {
-                            unreachable!()
-                        };
                         let col_ty = self.get_column_dtype(col_name);
                         let lit_ty = match right_inner {
                             Expr::Literal(lv) => literal_dtype(lv),
@@ -476,11 +486,6 @@ impl DataFrame {
                         )
                         .map_err(|e| PolarsError::ComputeError(e.to_string().into()))?
                     } else {
-                        let col_name = if let Expr::Column(n) = right_inner {
-                            n.as_str()
-                        } else {
-                            unreachable!()
-                        };
                         let col_ty = self.get_column_dtype(col_name);
                         let lit_ty = match left_inner {
                             Expr::Literal(lv) => literal_dtype(lv),
@@ -635,15 +640,19 @@ impl DataFrame {
                 // Heuristic: for column-vs-numeric-literal, treat the column as "string-like"
                 // and the literal as numeric, so coerce_for_pyspark_comparison will route
                 // the column through try_to_number and compare as doubles.
+                // #1149: String column vs numeric literal -> false (no rows match).
                 let (new_left, new_right) = if left_is_col && right_is_numeric_lit {
-                    let lit_ty = match &*right {
-                        Expr::Literal(lv) => literal_dtype(lv),
-                        _ => DataType::Float64,
-                    };
                     let col_ty = if let Expr::Column(n) = &*left {
                         get_col_dtype(n.as_str())
                     } else {
                         None
+                    };
+                    if col_ty.as_ref() == Some(&DataType::String) {
+                        return Ok(lit(false));
+                    }
+                    let lit_ty = match &*right {
+                        Expr::Literal(lv) => literal_dtype(lv),
+                        _ => DataType::Float64,
                     };
                     let left_ty = col_ty.filter(is_numeric_public).unwrap_or(DataType::String);
                     coerce_for_pyspark_comparison(
@@ -655,14 +664,17 @@ impl DataFrame {
                     )
                     .map_err(|e| PolarsError::ComputeError(e.to_string().into()))?
                 } else if right_is_col && left_is_numeric_lit {
-                    let lit_ty = match &*left {
-                        Expr::Literal(lv) => literal_dtype(lv),
-                        _ => DataType::Float64,
-                    };
                     let col_ty = if let Expr::Column(n) = &*right {
                         get_col_dtype(n.as_str())
                     } else {
                         None
+                    };
+                    if col_ty.as_ref() == Some(&DataType::String) {
+                        return Ok(lit(false));
+                    }
+                    let lit_ty = match &*left {
+                        Expr::Literal(lv) => literal_dtype(lv),
+                        _ => DataType::Float64,
                     };
                     let right_ty = col_ty.filter(is_numeric_public).unwrap_or(DataType::String);
                     coerce_for_pyspark_comparison(
