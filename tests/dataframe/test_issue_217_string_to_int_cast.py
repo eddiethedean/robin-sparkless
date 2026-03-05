@@ -1,11 +1,12 @@
+from tests.fixtures.spark_imports import get_spark_imports
+
+_imports = get_spark_imports()
+F = _imports.F
+
 """Tests for issue #217: String-to-int cast empty/invalid strings (PySpark parity).
 
 Casting empty or invalid strings to int should yield null, not raise.
 """
-
-from tests.utils import get_functions
-
-F = get_functions()
 
 
 def test_cast_empty_and_whitespace_string_to_int(spark) -> None:

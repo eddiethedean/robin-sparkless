@@ -6,18 +6,14 @@ PySpark's DataFrame.join(other, on=...) accepts on as a Column or list of column
 
 from __future__ import annotations
 
-from tests.utils import get_functions, get_spark
+from tests.fixtures.spark_imports import get_spark_imports
 
-F = get_functions()
-
-
-def _spark():
-    return get_spark("issue_353")
+_imports = get_spark_imports()
+F = _imports.F
 
 
-def test_join_on_column() -> None:
+def test_join_on_column(spark) -> None:
     """left.join(right, col(\"id\")) works (PySpark parity)."""
-    spark = _spark()
     left = spark.createDataFrame([{"id": 1, "v": 10}], ["id", "v"])
     right = spark.createDataFrame([{"id": 1, "w": 20}], ["id", "w"])
     from tests.utils import _row_to_dict, assert_rows_equal
@@ -26,9 +22,8 @@ def test_join_on_column() -> None:
     assert_rows_equal([_row_to_dict(r) for r in result], [{"id": 1, "v": 10, "w": 20}], order_matters=True)
 
 
-def test_join_on_list_of_columns() -> None:
+def test_join_on_list_of_columns(spark) -> None:
     """left.join(right, [col(\"a\"), col(\"b\")]) works."""
-    spark = _spark()
     left = spark.createDataFrame([{"a": 1, "b": 2, "v": 10}], ["a", "b", "v"])
     right = spark.createDataFrame([{"a": 1, "b": 2, "w": 20}], ["a", "b", "w"])
     from tests.utils import _row_to_dict, assert_rows_equal
@@ -37,9 +32,8 @@ def test_join_on_list_of_columns() -> None:
     assert_rows_equal([_row_to_dict(r) for r in result], [{"a": 1, "b": 2, "v": 10, "w": 20}], order_matters=True)
 
 
-def test_join_on_str_still_works() -> None:
+def test_join_on_str_still_works(spark) -> None:
     """join(right, "id") and join(right, ["id"]) still work."""
-    spark = _spark()
     left = spark.createDataFrame([{"id": 1, "v": 10}], ["id", "v"])
     right = spark.createDataFrame([{"id": 1, "w": 20}], ["id", "w"])
     from tests.utils import _row_to_dict, assert_rows_equal

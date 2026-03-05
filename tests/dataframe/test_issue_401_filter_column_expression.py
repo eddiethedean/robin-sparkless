@@ -2,30 +2,29 @@
 
 from __future__ import annotations
 
-from tests.utils import get_functions, get_spark, _row_to_dict, assert_rows_equal
+from tests.fixtures.spark_imports import get_spark_imports
 
-F = get_functions()
+_imports = get_spark_imports()
+F = _imports.F
 
+from tests.utils import _row_to_dict, assert_rows_equal
 
-def test_filter_column_gt_literal() -> None:
+def test_filter_column_gt_literal(spark) -> None:
     """df.filter(col('x') > 1) - PySpark accepts Column expression."""
-    spark = get_spark("issue_401")
     df = spark.createDataFrame([(1,), (2,)], ["x"])
     result = df.filter(F.col("x") > 1).collect()
     assert_rows_equal([_row_to_dict(r) for r in result], [{"x": 2}], order_matters=True)
 
 
-def test_filter_column_lt_literal() -> None:
+def test_filter_column_lt_literal(spark) -> None:
     """df.filter(col('x') < 2)."""
-    spark = get_spark("issue_401")
     df = spark.createDataFrame([(1,), (2,)], ["x"])
     result = df.filter(F.col("x") < 2).collect()
     assert_rows_equal([_row_to_dict(r) for r in result], [{"x": 1}], order_matters=True)
 
 
-def test_filter_column_eq_literal() -> None:
+def test_filter_column_eq_literal(spark) -> None:
     """df.filter(col('x') == 2)."""
-    spark = get_spark("issue_401")
     df = spark.createDataFrame([(1,), (2,)], ["x"])
     result = df.filter(F.col("x") == 2).collect()
     assert_rows_equal([_row_to_dict(r) for r in result], [{"x": 2}], order_matters=True)

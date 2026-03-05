@@ -7,7 +7,11 @@ from __future__ import annotations
 
 import datetime
 
-from tests.utils import assert_rows_equal, get_session
+from tests.fixtures.spark_imports import get_spark_imports
+from tests.utils import assert_rows_equal
+
+_imports = get_spark_imports()
+F = _imports.F
 
 
 # Expected outputs (from prior PySpark 3.5 run)
@@ -54,13 +58,8 @@ EXPECTED_WHEN_THEN_LIT_DATE = [
 ]
 
 
-def test_lit_date_and_datetime_with_column_pyspark_parity() -> None:
+def test_lit_date_and_datetime_with_column_pyspark_parity(spark) -> None:
     """with_column lit(date) and lit(datetime) matches expected from PySpark (#186)."""
-    from tests.utils import get_functions
-
-    F = get_functions()
-
-    spark = get_session()
     df = spark.createDataFrame(
         [(1, 10, "a"), (2, 20, "b"), (3, 30, "c")], ["id", "x", "name"]
     )
@@ -73,13 +72,8 @@ def test_lit_date_and_datetime_with_column_pyspark_parity() -> None:
     assert_rows_equal(actual, EXPECTED_LIT_DATE_DATETIME, order_matters=True)
 
 
-def test_filter_date_lt_lit_pyspark_parity() -> None:
+def test_filter_date_lt_lit_pyspark_parity(spark) -> None:
     """filter(col('d') < lit(date)) matches expected from PySpark (#186)."""
-    from tests.utils import get_functions
-
-    F = get_functions()
-
-    spark = get_session()
     df = spark.createDataFrame(
         [(1, 10, "a"), (2, 20, "b"), (3, 30, "c")], ["id", "x", "name"]
     )
@@ -88,13 +82,8 @@ def test_filter_date_lt_lit_pyspark_parity() -> None:
     assert_rows_equal(actual, EXPECTED_FILTER_DATE_LT_LIT, order_matters=True)
 
 
-def test_filter_date_eq_lit_pyspark_parity() -> None:
+def test_filter_date_eq_lit_pyspark_parity(spark) -> None:
     """filter(col('d') == lit(date)) matches expected from PySpark (#186)."""
-    from tests.utils import get_functions
-
-    F = get_functions()
-
-    spark = get_session()
     df = spark.createDataFrame(
         [(1, 10, "a"), (2, 20, "b"), (3, 30, "c")], ["id", "x", "name"]
     )
@@ -103,13 +92,8 @@ def test_filter_date_eq_lit_pyspark_parity() -> None:
     assert_rows_equal(actual, EXPECTED_FILTER_DATE_EQ_LIT, order_matters=True)
 
 
-def test_when_then_lit_date_otherwise_pyspark_parity() -> None:
+def test_when_then_lit_date_otherwise_pyspark_parity(spark) -> None:
     """when(x < 5).then(lit(date)).otherwise(lit(date)) matches expected from PySpark (#186)."""
-    from tests.utils import get_functions
-
-    F = get_functions()
-
-    spark = get_session()
     df = spark.createDataFrame(
         [(1, 1, "a"), (2, 2, "b"), (3, 10, "c")], ["id", "x", "name"]
     )

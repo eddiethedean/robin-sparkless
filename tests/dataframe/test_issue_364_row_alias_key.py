@@ -7,14 +7,15 @@ as the key so row["map_col"] works. PySpark uses output column names (aliases) a
 
 from __future__ import annotations
 
-from tests.utils import get_functions, get_spark, _row_to_dict
+from tests.fixtures.spark_imports import get_spark_imports
 
-F = get_functions()
+_imports = get_spark_imports()
+F = _imports.F
 
+from tests.utils import _row_to_dict
 
-def test_row_uses_alias_as_key_issue_repro() -> None:
+def test_row_uses_alias_as_key_issue_repro(spark) -> None:
     """rows[0]['map_col'] works when select(lit(42).alias('map_col')) (issue repro)."""
-    spark = get_spark("issue_364")
     df = spark.createDataFrame([{"x": 1}], ["x"])
     rows = df.select(F.lit(42).alias("map_col")).collect()
     row_dict = _row_to_dict(rows[0])
@@ -22,9 +23,8 @@ def test_row_uses_alias_as_key_issue_repro() -> None:
     assert row_dict["map_col"] == 42
 
 
-def test_row_keys_match_select_aliases() -> None:
+def test_row_keys_match_select_aliases(spark) -> None:
     """Multiple aliased columns: row keys are the aliases."""
-    spark = get_spark("issue_364")
     df = spark.createDataFrame([(1, "a")], ["id", "name"])
     rows = df.select(
         F.col("id").alias("k"),

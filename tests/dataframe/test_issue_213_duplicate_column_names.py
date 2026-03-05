@@ -4,13 +4,16 @@ Polars raises 'duplicate: the name X is duplicate' when select produces columns
 with the same name. We disambiguate with _1, _2, ... (PySpark/Sparkless parity).
 """
 
-from tests.utils import get_spark, get_functions, _row_to_dict
+from tests.utils import _row_to_dict
+from tests.fixtures.spark_imports import get_spark_imports
+
+_imports = get_spark_imports()
+F = _imports.F
 
 
-def test_select_same_column_cast_twice() -> None:
+
+def test_select_same_column_cast_twice(spark) -> None:
     """Select same column cast to different types (duplicate output names) should not error."""
-    spark = get_spark("issue_213")
-    F = get_functions()
     df = spark.createDataFrame(
         [{"num": 1}, {"num": 2}],
         ["num"],
@@ -29,10 +32,8 @@ def test_select_same_column_cast_twice() -> None:
     assert rows[1]["num_1"] == 2
 
 
-def test_select_three_same_name() -> None:
+def test_select_three_same_name(spark) -> None:
     """Three expressions with same output name become name, name_1, name_2."""
-    spark = get_spark("issue_213")
-    F = get_functions()
     df = spark.createDataFrame(
         [{"x": 10}],
         ["x"],

@@ -146,7 +146,24 @@ SPARKLESS_TEST_BACKEND=pyspark pytest tests/dataframe/test_issue_170_to_date_tim
 
 ---
 
-### 7. Where to look for examples
+### 7. Harness verification (sparkless vs robin mode)
+
+Tests use the **proper harness** when they:
+
+- **Session:** Use the `spark` fixture (e.g. `def test_foo(self, spark):`) or, when the fixture cannot be used, `get_spark(...)` / `get_session(...)` from `tests.utils`. Never construct a session with `SparkSession.builder.appName(...).getOrCreate()`.
+- **Imports:** Use `get_spark_imports()` from `tests.fixtures.spark_imports` for `F`, types, `Window`, etc., or the legacy `get_functions()` / `get_window_cls()` from `tests.utils`. Never `import pyspark` or `import sparkless` in test files.
+
+To find tests that still create sessions manually:
+
+```bash
+rg 'SparkSession\.builder\.appName|SparkSession\.builder\.getOrCreate' tests --glob 'test_*.py' -l
+```
+
+Fix them by taking `spark` as a fixture argument and removing manual session creation (and any `spark.stop()` calls).
+
+---
+
+### 8. Where to look for examples
 
 - Harness & fixtures:
   - `tests/conftest.py`

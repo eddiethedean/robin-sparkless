@@ -6,18 +6,14 @@ PySpark df.rollup("a", "b") and df.rollup(*cols) accept multiple column names.
 
 from __future__ import annotations
 
-from tests.utils import get_functions, get_spark
+from tests.fixtures.spark_imports import get_spark_imports
 
-F = get_functions()
-
-
-def _spark():
-    return get_spark("issue_398")
+_imports = get_spark_imports()
+F = _imports.F
 
 
-def test_rollup_two_columns_variadic() -> None:
+def test_rollup_two_columns_variadic(spark) -> None:
     """df.rollup(\"a\", \"b\").count() works with variadic args."""
-    spark = _spark()
     df = spark.createDataFrame(
         [{"a": 1, "b": 2, "v": 10}, {"a": 1, "b": 2, "v": 20}],
         ["a", "b", "v"],
@@ -27,9 +23,8 @@ def test_rollup_two_columns_variadic() -> None:
     assert all("count" in r for r in out)
 
 
-def test_rollup_single_list() -> None:
+def test_rollup_single_list(spark) -> None:
     """df.rollup([\"a\", \"b\"]) still works."""
-    spark = _spark()
     df = spark.createDataFrame(
         [{"a": 1, "b": 2, "v": 10}],
         ["a", "b", "v"],

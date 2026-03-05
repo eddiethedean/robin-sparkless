@@ -7,18 +7,15 @@ qualified names like "Person.name". PySpark preserves alias names in row keys.
 
 from __future__ import annotations
 
-from tests.utils import get_functions, get_spark, _row_to_dict
+from tests.fixtures.spark_imports import get_spark_imports
 
-F = get_functions()
+_imports = get_spark_imports()
+F = _imports.F
 
+from tests.utils import _row_to_dict
 
-def _spark():
-    return get_spark("issue_1025")
-
-
-def test_select_alias_row_keys_match_output_names() -> None:
+def test_select_alias_row_keys_match_output_names(spark) -> None:
     """df.select(col('id').alias('ID'), 'name').collect() -> row['ID'], row['name'] (not KeyError)."""
-    spark = _spark()
     df = spark.createDataFrame([(1, "a")], ["id", "name"])
     rows = df.select(F.col("id").alias("ID"), "name").collect()
     assert len(rows) == 1
@@ -32,9 +29,8 @@ def test_select_alias_row_keys_match_output_names() -> None:
     assert sorted(d.keys()) == ["ID", "name"]
 
 
-def test_select_alias_as_dict() -> None:
+def test_select_alias_as_dict(spark) -> None:
     """row.asDict() returns dict with same keys as row (alias names)."""
-    spark = _spark()
     df = spark.createDataFrame([(2, "b")], ["id", "name"])
     rows = df.select(F.col("id").alias("ID"), "name").collect()
     d = rows[0].asDict()

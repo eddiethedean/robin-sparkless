@@ -10,19 +10,14 @@ test_issue_201_type_strictness.py for implicit coercion tests.
 
 from __future__ import annotations
 
-from tests.utils import get_functions, get_spark
+from tests.fixtures.spark_imports import get_spark_imports
 
-F = get_functions()
-
-
-def _get_session():
-    return get_spark("string_arithmetic_robin")
+_imports = get_spark_imports()
+F = _imports.F
 
 
-def test_string_division_by_numeric_literal_robin() -> None:
+def test_string_division_by_numeric_literal_robin(spark) -> None:
     """col('string_1').cast('double') / 5 where string_1 is a string column."""
-    spark = _get_session()
-
     df = spark.createDataFrame(
         [{"string_1": "10.0"}, {"string_1": "20"}],
     )
@@ -34,10 +29,8 @@ def test_string_division_by_numeric_literal_robin() -> None:
     assert rows[0]["result"] == 2.0
     assert rows[1]["result"] == 4.0
 
-def test_numeric_literal_divided_by_string_robin() -> None:
+def test_numeric_literal_divided_by_string_robin(spark) -> None:
     """100 / col('string_1').cast('double') where string_1 is a string column."""
-    spark = _get_session()
-
     df = spark.createDataFrame(
         [{"string_1": "10.0"}, {"string_1": "5"}],
     )
@@ -50,10 +43,8 @@ def test_numeric_literal_divided_by_string_robin() -> None:
     assert rows[1]["result"] == 20.0
 
 
-def test_string_arithmetic_with_invalid_strings_robin() -> None:
+def test_string_arithmetic_with_invalid_strings_robin(spark) -> None:
     """Invalid numeric strings become null when used in arithmetic (via cast)."""
-    spark = _get_session()
-
     df = spark.createDataFrame(
         [{"string_1": "10.0"}, {"string_1": "invalid"}, {"string_1": "20"}],
     )

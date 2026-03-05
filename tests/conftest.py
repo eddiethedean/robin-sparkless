@@ -220,10 +220,30 @@ def spark(request):
             get_backend_type,
         )
     except ImportError:
-        # Fallback: no fixtures, use tests.utils (e.g. when only tests/python was ported)
-        from tests.utils import get_spark as _get_spark
-        session = _get_spark("test")
+        # Fallback: no fixtures, create session from env (pyspark vs sparkless)
+        _backend = (
+            (os.getenv("MOCK_SPARK_TEST_BACKEND") or os.getenv("SPARKLESS_TEST_BACKEND") or "")
+            .strip()
+            .lower()
+        )
+        if _backend == "pyspark":
+            from pyspark.sql import SparkSession as _PySparkSession  # type: ignore[import-not-found]
+            session = (
+                _PySparkSession.builder.appName("test")
+                .config("spark.driver.bindAddress", "127.0.0.1")
+                .getOrCreate()
+            )
+        else:
+            from sparkless.sql import SparkSession as _SparklessSession  # type: ignore[import-not-found]
+            _builder = getattr(
+                _SparklessSession.builder, "__call__",
+                lambda: _SparklessSession.builder,
+            )()
+            session = _builder.app_name("test").get_or_create()
         yield session
+        with contextlib.suppress(BaseException):
+            session.stop()
+        gc.collect()
         return
 
     try:

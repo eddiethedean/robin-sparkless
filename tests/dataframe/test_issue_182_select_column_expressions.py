@@ -10,14 +10,15 @@ and produces the correct computed columns.
 
 from __future__ import annotations
 
+from tests.fixtures.spark_imports import get_spark_imports
+from tests.utils import _row_to_dict
 
-def test_select_expression_literal_plus_column() -> None:
+_imports = get_spark_imports()
+F = _imports.F
+
+
+def test_select_expression_literal_plus_column(spark) -> None:
     """select(lit(2) + col('x')) evaluates expression; plus_two = [12, 22] for x=[10, 20]."""
-    from tests.utils import get_functions, get_spark, _row_to_dict
-
-    F = get_functions()
-
-    spark = get_spark("issue_182")
     df = spark.createDataFrame([{"x": 10}, {"x": 20}], ["x"])
 
     # Without alias: one column, values 12 and 22 (column name is engine-defined)
@@ -31,13 +32,8 @@ def test_select_expression_literal_plus_column() -> None:
     assert as_dicts == [{"plus_two": 12}, {"plus_two": 22}]
 
 
-def test_select_expression_literal_times_column() -> None:
+def test_select_expression_literal_times_column(spark) -> None:
     """select(lit(3) * col('x')) evaluates expression; tripled = [30, 60] for x=[10, 20]."""
-    from tests.utils import get_functions, get_spark, _row_to_dict
-
-    F = get_functions()
-
-    spark = get_spark("issue_182")
     df = spark.createDataFrame([{"x": 10}, {"x": 20}], ["x"])
 
     result = df.select((F.lit(3) * F.col("x")).alias("tripled")).collect()
@@ -45,13 +41,8 @@ def test_select_expression_literal_times_column() -> None:
     assert as_dicts == [{"tripled": 30}, {"tripled": 60}]
 
 
-def test_select_expression_aliased() -> None:
+def test_select_expression_aliased(spark) -> None:
     """select((col('a') * 2).alias('doubled')) evaluates expression; doubled = [2, 4, 6] for a=[1,2,3]."""
-    from tests.utils import get_functions, get_spark, _row_to_dict
-
-    F = get_functions()
-
-    spark = get_spark("issue_182")
     df = spark.createDataFrame([{"a": 1}, {"a": 2}, {"a": 3}], ["a"])
 
     result = df.select((F.col("a") * 2).alias("doubled")).collect()
@@ -59,13 +50,8 @@ def test_select_expression_aliased() -> None:
     assert as_dicts == [{"doubled": 2}, {"doubled": 4}, {"doubled": 6}]
 
 
-def test_select_mixed_column_names_and_expressions() -> None:
+def test_select_mixed_column_names_and_expressions(spark) -> None:
     """select('x', lit(2) + col('x')) returns original column and computed column."""
-    from tests.utils import get_functions, get_spark, _row_to_dict
-
-    F = get_functions()
-
-    spark = get_spark("issue_182")
     df = spark.createDataFrame([{"x": 10}, {"x": 20}], ["x"])
 
     result = df.select("x", (F.lit(2) + F.col("x")).alias("plus_two")).collect()
@@ -73,13 +59,8 @@ def test_select_mixed_column_names_and_expressions() -> None:
     assert as_dicts == [{"x": 10, "plus_two": 12}, {"x": 20, "plus_two": 22}]
 
 
-def test_select_list_of_expressions() -> None:
+def test_select_list_of_expressions(spark) -> None:
     """select([expr1, expr2]) with list of Column expressions works."""
-    from tests.utils import get_functions, get_spark, _row_to_dict
-
-    F = get_functions()
-
-    spark = get_spark("issue_182")
     df = spark.createDataFrame(
         [{"a": 1, "b": 10}, {"a": 2, "b": 20}],
         ["a", "b"],
@@ -98,13 +79,8 @@ def test_select_list_of_expressions() -> None:
     ]
 
 
-def test_select_varargs_expressions() -> None:
+def test_select_varargs_expressions(spark) -> None:
     """select(expr1, expr2) with varargs Column expressions works."""
-    from tests.utils import get_functions, get_spark, _row_to_dict
-
-    F = get_functions()
-
-    spark = get_spark("issue_182")
     df = spark.createDataFrame([{"x": 5}, {"x": 7}], ["x"])
 
     result = df.select(
@@ -119,11 +95,8 @@ def test_select_varargs_expressions() -> None:
     ]
 
 
-def test_select_string_column_names_still_work() -> None:
+def test_select_string_column_names_still_work(spark) -> None:
     """select('a', 'b') and select(['a', 'b']) still resolve by name (backward compatibility)."""
-    from tests.utils import get_spark, _row_to_dict
-
-    spark = get_spark("issue_182")
     df = spark.createDataFrame(
         [{"a": 1, "b": 2, "c": 3}, {"a": 4, "b": 5, "c": 6}],
         ["a", "b", "c"],
@@ -138,13 +111,8 @@ def test_select_string_column_names_still_work() -> None:
     assert as_dicts_varargs == [{"a": 1, "b": 2}, {"a": 4, "b": 5}]
 
 
-def test_select_mixed_strings_and_expressions() -> None:
+def test_select_mixed_strings_and_expressions(spark) -> None:
     """select('a', col('b') * 2, 'c') mixes column names and expressions."""
-    from tests.utils import get_functions, get_spark, _row_to_dict
-
-    F = get_functions()
-
-    spark = get_spark("issue_182")
     df = spark.createDataFrame(
         [{"a": 1, "b": 10, "c": 100}, {"a": 2, "b": 20, "c": 200}],
         ["a", "b", "c"],
@@ -162,13 +130,8 @@ def test_select_mixed_strings_and_expressions() -> None:
     ]
 
 
-def test_select_expression_with_multiply_literal_left() -> None:
+def test_select_expression_with_multiply_literal_left(spark) -> None:
     """select(3 * col('x')) - literal on left (issue #182 repro)."""
-    from tests.utils import get_functions, get_spark, _row_to_dict
-
-    F = get_functions()
-
-    spark = get_spark("issue_182")
     df = spark.createDataFrame([{"x": 10}, {"x": 20}], ["x"])
 
     result = df.select((3 * F.col("x")).alias("tripled")).collect()
@@ -176,13 +139,8 @@ def test_select_expression_with_multiply_literal_left() -> None:
     assert as_dicts == [{"tripled": 30}, {"tripled": 60}]
 
 
-def test_select_complex_expression() -> None:
+def test_select_complex_expression(spark) -> None:
     """select((col('a') + col('b')) * col('c')) - chained expression."""
-    from tests.utils import get_functions, get_spark, _row_to_dict
-
-    F = get_functions()
-
-    spark = get_spark("issue_182")
     df = spark.createDataFrame(
         [{"a": 1, "b": 2, "c": 3}, {"a": 4, "b": 5, "c": 6}],
         ["a", "b", "c"],
@@ -195,13 +153,8 @@ def test_select_complex_expression() -> None:
     assert as_dicts == [{"product": 9}, {"product": 54}]
 
 
-def test_select_single_expression_no_alias() -> None:
+def test_select_single_expression_no_alias(spark) -> None:
     """select(expr) with one expression and no alias gets default name (e.g. 'literal')."""
-    from tests.utils import get_functions, get_spark, _row_to_dict
-
-    F = get_functions()
-
-    spark = get_spark("issue_182")
     df = spark.createDataFrame([{"x": 1}], ["x"])
 
     result = df.select(F.col("x") + F.lit(10)).collect()

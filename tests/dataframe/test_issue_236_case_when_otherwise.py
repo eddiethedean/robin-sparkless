@@ -7,12 +7,16 @@ AttributeError: 'builtins.Column' object has no attribute 'otherwise'.
 
 from __future__ import annotations
 
-from tests.utils import _row_to_dict, get_functions
+from tests.fixtures.spark_imports import get_spark_imports
+
+_imports = get_spark_imports()
+F = _imports.F
+
+from tests.utils import _row_to_dict
 
 
 def test_when_cond_val_otherwise_returns_column(spark) -> None:
     """when(cond, val).otherwise(default) returns a Column and works in with_column (PySpark parity)."""
-    F = get_functions()
     data = [{"a": 1}, {"a": -1}, {"a": 0}]
     df = spark.createDataFrame(data, ["a"])
 
@@ -28,7 +32,6 @@ def test_when_cond_val_otherwise_returns_column(spark) -> None:
 
 def test_when_cond_val_otherwise_operator_syntax(spark) -> None:
     """when(cond, val).otherwise(default) works with Column __gt__ (F.col('a') > F.lit(0))."""
-    F = get_functions()
     data = [{"a": 1}, {"a": -1}, {"a": 0}]
     df = spark.createDataFrame(data, ["a"])
     expr = F.when(F.col("a") > F.lit(0), F.lit(1)).otherwise(F.lit(0))

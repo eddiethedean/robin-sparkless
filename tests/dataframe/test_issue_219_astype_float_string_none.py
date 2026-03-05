@@ -1,12 +1,13 @@
+from tests.fixtures.spark_imports import get_spark_imports
+
+_imports = get_spark_imports()
+F = _imports.F
+
 """Tests for issue #219: TypeError NoneType in astype float/string conversions (PySpark parity).
 
 Float/string cast with nulls must not raise TypeError. Nulls are returned as None
 in collect(); callers should check 'value is None' before using 'x in value'.
 """
-
-from tests.utils import get_functions
-
-F = get_functions()
 
 
 def test_float_to_string_with_nulls(spark) -> None:

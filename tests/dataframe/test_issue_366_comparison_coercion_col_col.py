@@ -9,14 +9,14 @@ in filter use coerce_for_pyspark_comparison when types differ.
 
 from __future__ import annotations
 
-from tests.utils import get_functions, get_spark
+from tests.fixtures.spark_imports import get_spark_imports
 
-F = get_functions()
+_imports = get_spark_imports()
+F = _imports.F
 
 
-def test_col_col_string_numeric_issue_repro() -> None:
+def test_col_col_string_numeric_issue_repro(spark) -> None:
     """col('id') == col('label') where id is int, label is string (issue repro)."""
-    spark = get_spark("issue_366")
     df = spark.createDataFrame(
         [{"id": 1, "label": "1"}],
         ["id", "label"],
@@ -27,9 +27,8 @@ def test_col_col_string_numeric_issue_repro() -> None:
     assert rows[0]["label"] == "1"
 
 
-def test_col_col_string_numeric_no_match() -> None:
+def test_col_col_string_numeric_no_match(spark) -> None:
     """col('n') == col('s') when s is non-numeric string: no match."""
-    spark = get_spark("issue_366")
     df = spark.createDataFrame(
         [{"n": 42, "s": "abc"}, {"n": 1, "s": "1"}],
         ["n", "s"],
@@ -40,9 +39,8 @@ def test_col_col_string_numeric_no_match() -> None:
     assert rows[0]["s"] == "1"
 
 
-def test_col_col_numeric_string_reversed() -> None:
+def test_col_col_numeric_string_reversed(spark) -> None:
     """col('label') == col('id') (string col first) also coerces."""
-    spark = get_spark("issue_366")
     df = spark.createDataFrame(
         [{"id": 99, "label": "99"}],
         ["id", "label"],

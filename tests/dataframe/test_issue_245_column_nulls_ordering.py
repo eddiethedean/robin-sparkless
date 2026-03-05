@@ -8,12 +8,15 @@ PySpark supports these for controlling null placement in orderBy.
 
 from __future__ import annotations
 
-from tests.utils import get_spark, get_functions
+from tests.fixtures.spark_imports import get_spark_imports
+
+_imports = get_spark_imports()
+F = _imports.F
 
 
-def test_column_has_desc_nulls_last() -> None:
+
+def test_column_has_desc_nulls_last(spark) -> None:
     """Column has desc_nulls_last method (PySpark parity)."""
-    F = get_functions()
     c = F.col("value")
     assert hasattr(c, "desc_nulls_last")
     assert hasattr(c, "desc_nulls_first")
@@ -21,10 +24,8 @@ def test_column_has_desc_nulls_last() -> None:
     assert hasattr(c, "asc_nulls_first")
 
 
-def test_order_by_desc_nulls_last() -> None:
+def test_order_by_desc_nulls_last(spark) -> None:
     """order_by_exprs with col().desc_nulls_last() puts nulls last."""
-    spark = get_spark("issue_245_nulls_order")
-    F = get_functions()
     data = [{"value": "A"}, {"value": "B"}, {"value": None}, {"value": "C"}]
     df = spark.createDataFrame(data, ["value"])
     out = df.orderBy(F.col("value").desc_nulls_last()).collect()
@@ -37,10 +38,8 @@ def test_order_by_desc_nulls_last() -> None:
     assert values[3] is None
 
 
-def test_order_by_asc_nulls_first() -> None:
+def test_order_by_asc_nulls_first(spark) -> None:
     """order_by_exprs with col().asc_nulls_first() puts nulls first."""
-    spark = get_spark("issue_245_nulls_order")
-    F = get_functions()
     data = [{"value": "A"}, {"value": "B"}, {"value": None}, {"value": "C"}]
     df = spark.createDataFrame(data, ["value"])
     out = df.orderBy(F.col("value").asc_nulls_first()).collect()

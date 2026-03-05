@@ -8,14 +8,15 @@ not an input column to resolve.
 
 from __future__ import annotations
 
-from tests.utils import get_functions, get_spark, _row_to_dict, assert_rows_equal
+from tests.fixtures.spark_imports import get_spark_imports
 
-F = get_functions()
+_imports = get_spark_imports()
+F = _imports.F
 
+from tests.utils import _row_to_dict, assert_rows_equal
 
-def test_substr_alias_select_collect() -> None:
+def test_substr_alias_select_collect(spark) -> None:
     """select(col('name').substr(1, 3).alias('partial')) returns column 'partial' (Sparkless parity)."""
-    spark = get_spark("test_issue_200")
     df = spark.createDataFrame(
         [{"name": "hello"}],
         ["name"],
@@ -27,9 +28,8 @@ def test_substr_alias_select_collect() -> None:
     assert_rows_equal([_row_to_dict(r) for r in rows], [{"partial": "hel"}])
 
 
-def test_substr_alias_multiple_rows() -> None:
+def test_substr_alias_multiple_rows(spark) -> None:
     """substr with alias over multiple rows."""
-    spark = get_spark("test_issue_200")
     df = spark.createDataFrame(
         [{"name": "abc"}, {"name": "xyz"}, {"name": "hi"}],
         ["name"],
@@ -38,9 +38,8 @@ def test_substr_alias_multiple_rows() -> None:
     assert_rows_equal([_row_to_dict(r) for r in rows], [{"partial": "ab"}, {"partial": "xy"}, {"partial": "hi"}])
 
 
-def test_substr_alias_chained_with_other_expr() -> None:
+def test_substr_alias_chained_with_other_expr(spark) -> None:
     """select with substr alias and another column (chained operations)."""
-    spark = get_spark("test_issue_200")
     df = spark.createDataFrame(
         [("hello", 1)],
         ["s", "n"],

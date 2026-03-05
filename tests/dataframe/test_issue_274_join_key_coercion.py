@@ -7,12 +7,8 @@ Robin previously raised: RuntimeError: datatypes of join keys don't match.
 
 from __future__ import annotations
 
-from tests.utils import get_spark
-
-
-def test_join_str_key_left_int_key_right() -> None:
+def test_join_str_key_left_int_key_right(spark) -> None:
     """Join on 'id': left id is str, right id is int; keys are coerced to common type."""
-    spark = get_spark("test_274")
     df1 = spark.createDataFrame(
         [{"id": "1", "label": "a"}],
         ["id", "label"],

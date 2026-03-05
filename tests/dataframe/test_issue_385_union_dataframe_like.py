@@ -5,12 +5,10 @@ PySpark union/unionAll require real DataFrames; custom DataFrame-like wrappers a
 
 from __future__ import annotations
 
-from tests.utils import get_spark
 
 
-def test_union_accepts_dataframe() -> None:
+def test_union_accepts_dataframe(spark) -> None:
     """union(other) with a plain DataFrame works."""
-    spark = get_spark("issue_385")
     a = spark.createDataFrame([(1, "x")], ["id", "label"])
     b = spark.createDataFrame([(2, "y")], ["id", "label"])
     out = a.union(b)
@@ -20,9 +18,8 @@ def test_union_accepts_dataframe() -> None:
     assert rows[1]["id"] == 2 and rows[1]["label"] == "y"
 
 
-def test_union_all_accepts_dataframe() -> None:
+def test_union_all_accepts_dataframe(spark) -> None:
     """unionAll(other) with a plain DataFrame works."""
-    spark = get_spark("issue_385")
     a = spark.createDataFrame([(1,)], ["v"])
     b = spark.createDataFrame([(2,)], ["v"])
     out = a.unionAll(b)

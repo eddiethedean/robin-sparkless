@@ -8,18 +8,14 @@ struct field names in the schema, so we use lowercase field names in tests.
 
 from __future__ import annotations
 
-from tests.utils import get_functions, get_spark
+from tests.fixtures.spark_imports import get_spark_imports
 
-F = get_functions()
-
-
-def _spark():
-    return get_spark("issue_397")
+_imports = get_spark_imports()
+F = _imports.F
 
 
-def test_select_struct_field_dot_notation_string() -> None:
+def test_select_struct_field_dot_notation_string(spark) -> None:
     """select("StructValue.e1") selects struct field (issue repro)."""
-    spark = _spark()
     df = spark.createDataFrame(
         [
             {"StructValue": {"e1": 42, "e2": "a"}},
@@ -33,9 +29,8 @@ def test_select_struct_field_dot_notation_string() -> None:
     assert out[1]["e1"] == 10
 
 
-def test_select_struct_field_dot_notation_col() -> None:
+def test_select_struct_field_dot_notation_col(spark) -> None:
     """select(col(\"StructValue.e1\")) works like string form."""
-    spark = _spark()
     df = spark.createDataFrame(
         [{"StructValue": {"e1": 100, "e2": "x"}}],
         "StructValue struct<e1:int,e2:string>",
@@ -45,9 +40,8 @@ def test_select_struct_field_dot_notation_col() -> None:
     assert out[0]["e1"] == 100
 
 
-def test_select_struct_field_multiple_dots() -> None:
+def test_select_struct_field_multiple_dots(spark) -> None:
     """select("outer.inner.leaf") for nested struct."""
-    spark = _spark()
     # Nested struct: outer has field inner which is struct<leaf:int>
     df = spark.createDataFrame(
         [{"outer": {"inner": {"leaf": 7}}}],

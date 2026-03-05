@@ -5,12 +5,10 @@ Uses .config() which PySpark supports; sparkless may support .option() or .confi
 
 from __future__ import annotations
 
-from tests.utils import get_spark
 
 
 def _builder(app_name: str):
     """Return a SparkSession builder for the current backend."""
-    spark = get_spark(app_name)
     spark_cls = type(spark)
     builder = spark_cls.builder
     builder = getattr(builder, "__call__", lambda: builder)()
@@ -40,7 +38,7 @@ def _conf_get(spark, key: str) -> str:
     return conf.get(key)
 
 
-def test_builder_config() -> None:
+def test_builder_config(spark) -> None:
     """builder().config(key, value) stores config; spark.conf.get(key) returns value."""
     spark = _get_or_create(
         _set_conf(_builder("issue_373"), "spark.sql.shuffle.partitions", "2")
@@ -48,7 +46,7 @@ def test_builder_config() -> None:
     assert _conf_get(spark, "spark.sql.shuffle.partitions") == "2"
 
 
-def test_builder_config_chain() -> None:
+def test_builder_config_chain(spark) -> None:
     """builder() can chain .config() before get_or_create()."""
     b = _builder("issue_373_chain")
     b = _set_conf(b, "a", "1")

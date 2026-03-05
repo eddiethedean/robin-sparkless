@@ -6,18 +6,14 @@ PySpark accepts both str and Column for groupBy(), orderBy(), and agg column arg
 
 from __future__ import annotations
 
-from tests.utils import get_functions, get_spark
+from tests.fixtures.spark_imports import get_spark_imports
 
-F = get_functions()
-
-
-def _spark():
-    return get_spark("issue_352")
+_imports = get_spark_imports()
+F = _imports.F
 
 
-def test_group_by_column_then_agg_sum() -> None:
+def test_group_by_column_then_agg_sum(spark) -> None:
     """group_by(col(\"dept\")) and agg(sum(col(\"salary\"))) works (PySpark parity)."""
-    spark = _spark()
     data = [
         {"dept": "A", "salary": 100},
         {"dept": "A", "salary": 200},
@@ -32,9 +28,8 @@ def test_group_by_column_then_agg_sum() -> None:
     assert result[1]["dept"] == "B" and result[1]["total"] == 150
 
 
-def test_group_by_list_of_columns() -> None:
+def test_group_by_list_of_columns(spark) -> None:
     """group_by([col(\"a\"), col(\"b\")]) works."""
-    spark = _spark()
     data = [
         {"a": 1, "b": 10, "v": 100},
         {"a": 1, "b": 10, "v": 200},
@@ -48,9 +43,8 @@ def test_group_by_list_of_columns() -> None:
     assert totals[(1, 10)] == 300 and totals[(1, 20)] == 50
 
 
-def test_group_by_single_str_still_works() -> None:
+def test_group_by_single_str_still_works(spark) -> None:
     """group_by(\"dept\") and group_by([\"dept\"]) still work."""
-    spark = _spark()
     data = [{"dept": "A", "n": 1}, {"dept": "A", "n": 2}]
     df = spark.createDataFrame(data)
     gd1 = df.groupBy("dept")
@@ -62,18 +56,16 @@ def test_group_by_single_str_still_works() -> None:
     assert_rows_equal(rows2, [{"dept": "A", "s": 3}], order_matters=True)
 
 
-def test_order_by_column_ascending() -> None:
+def test_order_by_column_ascending(spark) -> None:
     """order_by(col(\"x\")) sorts by x ascending (PySpark orderBy(col(\"x\")) parity)."""
-    spark = _spark()
     data = [{"x": 3}, {"x": 1}, {"x": 2}]
     df = spark.createDataFrame(data)
     out = df.orderBy(F.col("x")).collect()
     assert [r["x"] for r in out] == [1, 2, 3]
 
 
-def test_order_by_list_of_columns() -> None:
+def test_order_by_list_of_columns(spark) -> None:
     """order_by([col(\"a\"), col(\"b\")]) sorts by a then b ascending."""
-    spark = _spark()
     data = [{"a": 2, "b": 1}, {"a": 1, "b": 2}, {"a": 1, "b": 1}]
     df = spark.createDataFrame(data)
     out = df.orderBy([F.col("a"), F.col("b")]).collect()

@@ -7,7 +7,12 @@ Robin previously raised: TypeError: py_create_map() missing 1 required positiona
 
 from __future__ import annotations
 
-from tests.utils import get_functions, _row_to_dict
+from tests.fixtures.spark_imports import get_spark_imports
+
+_imports = get_spark_imports()
+F = _imports.F
+
+from tests.utils import _row_to_dict
 
 
 def test_create_map_no_args(spark) -> None:
@@ -15,7 +20,6 @@ def test_create_map_no_args(spark) -> None:
     data = [{"id": 1}]
     df = spark.createDataFrame(data, ["id"])
 
-    F = get_functions()
     df = df.withColumn("m", F.create_map())
     rows = [_row_to_dict(r) for r in df.collect()]
     assert len(rows) == 1
@@ -29,7 +33,6 @@ def test_create_map_empty_list(spark) -> None:
     data = [{"id": 1}, {"id": 2}]
     df = spark.createDataFrame(data, ["id"])
 
-    F = get_functions()
     df = df.withColumn("m", F.create_map())  # no args
     rows = [_row_to_dict(r) for r in df.collect()]
     assert len(rows) == 2

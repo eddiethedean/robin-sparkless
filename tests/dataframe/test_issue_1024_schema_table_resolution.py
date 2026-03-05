@@ -7,17 +7,11 @@ spark.table("schema.table"). Robin-sparkless must resolve schema.table in the sa
 
 from __future__ import annotations
 
-from tests.utils import get_spark
 import uuid
 
 
-def _spark():
-    return get_spark("issue_1024")
-
-
-def test_schema_qualified_table_resolution() -> None:
+def test_schema_qualified_table_resolution(spark) -> None:
     """CREATE SCHEMA; saveAsTable('schema.table'); table('schema.table')."""
-    spark = _spark()
     schema = "test_schema_resolution"
     table = f"test_table_{uuid.uuid4().hex[:8]}"
     spark.sql(f"DROP SCHEMA IF EXISTS {schema} CASCADE")
@@ -32,9 +26,8 @@ def test_schema_qualified_table_resolution() -> None:
     assert row["name"] == "a"
 
 
-def test_schema_qualified_table_append_then_read() -> None:
+def test_schema_qualified_table_append_then_read(spark) -> None:
     """saveAsTable(schema.table) overwrite then append; table(schema.table) sees both."""
-    spark = _spark()
     schema = "test_schema_append"
     table = f"test_table_{uuid.uuid4().hex[:8]}"
     spark.sql(f"DROP SCHEMA IF EXISTS {schema} CASCADE")

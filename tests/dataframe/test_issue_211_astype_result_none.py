@@ -1,8 +1,9 @@
+from tests.fixtures.spark_imports import get_spark_imports
+
+_imports = get_spark_imports()
+F = _imports.F
+
 """Repro for issue #211: astype/cast returns None instead of expected value (PySpark parity)."""
-
-from tests.utils import get_functions
-
-F = get_functions()
 
 
 def test_cast_int_to_string_in_with_column(spark) -> None:

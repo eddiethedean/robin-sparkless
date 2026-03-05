@@ -7,9 +7,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from tests.utils import assert_rows_equal, get_session, get_functions
+from tests.fixtures.spark_imports import get_spark_imports
+from tests.utils import assert_rows_equal
 
-F = get_functions()
+_imports = get_spark_imports()
+F = _imports.F
 
 
 # Expected outputs (from prior PySpark 3.5 run)
@@ -50,9 +52,8 @@ EXPECTED_FILTER_A_NEQ_B_ALL: list[dict[str, Any]] = [
 ]
 
 
-def test_filter_col_gt_col_pyspark_parity() -> None:
+def test_filter_col_gt_col_pyspark_parity(spark) -> None:
     """filter(col('a') > col('b')) matches PySpark (#184)."""
-    spark = get_session()
     data = [[1, 5], [2, 4], [3, 1], [4, 2], [5, 1]]
     schema = ["a", "b"]
     df = spark.createDataFrame(data, schema)
@@ -60,9 +61,8 @@ def test_filter_col_gt_col_pyspark_parity() -> None:
     assert_rows_equal(actual, EXPECTED_FILTER_A_GT_B, order_matters=True)
 
 
-def test_filter_col_lt_col_pyspark_parity() -> None:
+def test_filter_col_lt_col_pyspark_parity(spark) -> None:
     """filter(col('a') < col('b')) matches PySpark (#184)."""
-    spark = get_session()
     data = [[1, 5], [2, 4], [3, 1], [4, 2], [5, 1]]
     schema = ["a", "b"]
     df = spark.createDataFrame(data, schema)
@@ -70,9 +70,8 @@ def test_filter_col_lt_col_pyspark_parity() -> None:
     assert_rows_equal(actual, EXPECTED_FILTER_A_LT_B, order_matters=True)
 
 
-def test_filter_col_eq_col_pyspark_parity() -> None:
+def test_filter_col_eq_col_pyspark_parity(spark) -> None:
     """filter(col('x') == col('y')) matches PySpark (#184)."""
-    spark = get_session()
     data = [[3, 1], [1, 3], [2, 2], [0, 5]]
     schema = ["x", "y"]
     df = spark.createDataFrame(data, schema)
@@ -80,9 +79,8 @@ def test_filter_col_eq_col_pyspark_parity() -> None:
     assert_rows_equal(actual, EXPECTED_FILTER_X_EQ_Y, order_matters=True)
 
 
-def test_filter_col_neq_col_pyspark_parity() -> None:
+def test_filter_col_neq_col_pyspark_parity(spark) -> None:
     """filter(col('x') != col('y')) matches PySpark (#184)."""
-    spark = get_session()
     data = [[3, 1], [1, 3], [2, 2], [0, 5]]
     schema = ["x", "y"]
     df = spark.createDataFrame(data, schema)
@@ -90,9 +88,8 @@ def test_filter_col_neq_col_pyspark_parity() -> None:
     assert_rows_equal(actual, EXPECTED_FILTER_X_NEQ_Y, order_matters=False)
 
 
-def test_filter_combined_col_col_and_literal_pyspark_parity() -> None:
+def test_filter_combined_col_col_and_literal_pyspark_parity(spark) -> None:
     """filter((col('a')>col('b')) & (col('a')>2)) matches PySpark (#184)."""
-    spark = get_session()
     data = [[1, 5], [2, 4], [3, 1], [4, 2], [5, 1]]
     schema = ["a", "b"]
     df = spark.createDataFrame(data, schema)
@@ -100,9 +97,8 @@ def test_filter_combined_col_col_and_literal_pyspark_parity() -> None:
     assert_rows_equal(actual, EXPECTED_FILTER_COMBINED, order_matters=True)
 
 
-def test_with_column_col_gt_col_pyspark_parity() -> None:
+def test_with_column_col_gt_col_pyspark_parity(spark) -> None:
     """with_column('p_gt_q', col('p') > col('q')) matches PySpark (#184)."""
-    spark = get_session()
     data = [[10, 5], [3, 7], [0, 0]]
     schema = ["p", "q"]
     df = spark.createDataFrame(data, schema)
@@ -110,9 +106,8 @@ def test_with_column_col_gt_col_pyspark_parity() -> None:
     assert_rows_equal(actual, EXPECTED_WITH_COLUMN_P_GT_Q, order_matters=True)
 
 
-def test_filter_col_gt_col_strings_pyspark_parity() -> None:
+def test_filter_col_gt_col_strings_pyspark_parity(spark) -> None:
     """filter(col('s1') > col('s2')) on strings matches PySpark (#184)."""
-    spark = get_session()
     data = [["apple", "banana"], ["banana", "apple"], ["x", "x"]]
     schema = ["s1", "s2"]
     df = spark.createDataFrame(data, schema)
@@ -120,9 +115,8 @@ def test_filter_col_gt_col_strings_pyspark_parity() -> None:
     assert_rows_equal(actual, EXPECTED_FILTER_S1_GT_S2_STRINGS, order_matters=True)
 
 
-def test_filter_col_eq_col_empty_pyspark_parity() -> None:
+def test_filter_col_eq_col_empty_pyspark_parity(spark) -> None:
     """filter(col('a')==col('b')) with no matches returns [] like PySpark (#184)."""
-    spark = get_session()
     data = [[1, 2], [3, 4]]
     schema = ["a", "b"]
     df = spark.createDataFrame(data, schema)
@@ -130,9 +124,8 @@ def test_filter_col_eq_col_empty_pyspark_parity() -> None:
     assert_rows_equal(actual, EXPECTED_FILTER_A_EQ_B_EMPTY, order_matters=True)
 
 
-def test_filter_col_neq_col_all_match_pyspark_parity() -> None:
+def test_filter_col_neq_col_all_match_pyspark_parity(spark) -> None:
     """filter(col('a')!=col('b')) with all matching matches PySpark (#184)."""
-    spark = get_session()
     data = [[1, 2], [3, 4]]
     schema = ["a", "b"]
     df = spark.createDataFrame(data, schema)

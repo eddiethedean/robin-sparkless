@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-from tests.utils import get_spark, _row_to_dict
+from tests.utils import _row_to_dict
 
 
-def test_describe_returns_dataframe() -> None:
+def test_describe_returns_dataframe(spark) -> None:
     """describe() returns a DataFrame with summary stats (count, mean, stddev, min, max)."""
-    spark = get_spark("issue_384")
     df = spark.createDataFrame([(1, 10.0), (2, 20.0), (3, 30.0)], ["a", "b"])
     desc = df.describe()
     assert desc is not None
@@ -17,9 +16,8 @@ def test_describe_returns_dataframe() -> None:
     assert "summary" in names or any("a" in k or "b" in k for k in names)
 
 
-def test_summary_alias_for_describe() -> None:
+def test_summary_alias_for_describe(spark) -> None:
     """summary() is alias for describe(); both return summary stats (row count may differ by backend)."""
-    spark = get_spark("issue_384")
     df = spark.createDataFrame([(1, "x"), (2, "y")], ["id", "label"])
     desc = df.describe()
     summ = df.summary()
@@ -30,17 +28,15 @@ def test_summary_alias_for_describe() -> None:
     assert set(_row_to_dict(desc_rows[0]).keys()) == set(_row_to_dict(summ_rows[0]).keys())
 
 
-def test_show_no_error() -> None:
+def test_show_no_error(spark) -> None:
     """show() and show(n) run without error."""
-    spark = get_spark("issue_384")
     df = spark.createDataFrame([(1,), (2,)], ["x"])
     df.show()
     df.show(1)
 
 
-def test_explain_accepts_mode() -> None:
+def test_explain_accepts_mode(spark) -> None:
     """explain() runs; explain(extended=True) accepted (PySpark uses extended=, not mode=)."""
-    spark = get_spark("issue_384")
     df = spark.createDataFrame([(1,)], ["x"])
     s = df.explain()
     # PySpark explain() returns None (prints to stdout); some backends return str

@@ -6,16 +6,10 @@ PySpark: df.na.replace(to_replace, value, subset=None). Robin-sparkless: df.na()
 
 from __future__ import annotations
 
-from tests.utils import get_spark
 
 
-def _spark():
-    return get_spark("issue_360")
-
-
-def test_na_replace_issue_repro() -> None:
+def test_na_replace_issue_repro(spark) -> None:
     """df.na.replace(\"a\", \"A\", subset=[\"x\"]).collect() (issue repro)."""
-    spark = _spark()
     create_df = getattr(spark, "create_dataframe_from_rows", spark.createDataFrame)
     df = create_df(
         [{"x": "a"}, {"x": "b"}],
@@ -27,9 +21,8 @@ def test_na_replace_issue_repro() -> None:
     assert rows[1]["x"] == "b"
 
 
-def test_na_replace_without_subset() -> None:
+def test_na_replace_without_subset(spark) -> None:
     """na.replace applies to all columns when subset is None."""
-    spark = _spark()
     create_df = getattr(spark, "create_dataframe_from_rows", spark.createDataFrame)
     df = create_df(
         [{"a": "x", "b": "x"}, {"a": "y", "b": "y"}],
@@ -41,9 +34,8 @@ def test_na_replace_without_subset() -> None:
     assert rows[1]["a"] == "y" and rows[1]["b"] == "y"
 
 
-def test_na_replace_subset_one_column() -> None:
+def test_na_replace_subset_one_column(spark) -> None:
     """na.replace with subset only touches specified columns."""
-    spark = _spark()
     create_df = getattr(spark, "create_dataframe_from_rows", spark.createDataFrame)
     df = create_df(
         [{"a": 1, "b": 1}, {"a": 2, "b": 1}],
@@ -54,9 +46,8 @@ def test_na_replace_subset_one_column() -> None:
     assert rows[1]["a"] == 2 and rows[1]["b"] == 1
 
 
-def test_na_replace_with_none() -> None:
+def test_na_replace_with_none(spark) -> None:
     """na.replace can replace with None (null)."""
-    spark = _spark()
     create_df = getattr(spark, "create_dataframe_from_rows", spark.createDataFrame)
     df = create_df(
         [{"x": "a"}, {"x": "b"}],

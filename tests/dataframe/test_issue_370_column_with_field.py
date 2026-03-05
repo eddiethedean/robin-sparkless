@@ -7,18 +7,15 @@ Robin-sparkless now implements withField.
 
 from __future__ import annotations
 
-from tests.utils import get_functions, get_spark, _row_to_dict
+from tests.fixtures.spark_imports import get_spark_imports
 
-F = get_functions()
+_imports = get_spark_imports()
+F = _imports.F
 
+from tests.utils import _row_to_dict
 
-def _spark():
-    return get_spark("issue_370")
-
-
-def test_column_with_field_add_struct_field() -> None:
+def test_column_with_field_add_struct_field(spark) -> None:
     """col(\"s\").withField(\"c\", lit(3)) adds field c to struct (issue repro)."""
-    spark = _spark()
     create_df = getattr(spark, "create_dataframe_from_rows", spark.createDataFrame)
     df = create_df([{"s": {"a": 1, "b": 2}}], "s struct<a:int,b:int>")
     out = df.select(F.col("s").withField("c", F.lit(3)).alias("s")).collect()
@@ -29,9 +26,8 @@ def test_column_with_field_add_struct_field() -> None:
     assert _row_to_dict(s) == {"a": 1, "b": 2, "c": 3}
 
 
-def test_column_with_field_replace_struct_field() -> None:
+def test_column_with_field_replace_struct_field(spark) -> None:
     """withField with existing name replaces that field."""
-    spark = _spark()
     df = spark.createDataFrame(
         [{"s": {"a": 1, "b": 2}}],
         "s struct<a:bigint,b:bigint>",
@@ -41,9 +37,8 @@ def test_column_with_field_replace_struct_field() -> None:
     assert _row_to_dict(out[0]["s"]) == {"a": 1, "b": 99}
 
 
-def test_column_with_field_literal_value() -> None:
+def test_column_with_field_literal_value(spark) -> None:
     """withField accepts lit( value ) for the new field."""
-    spark = _spark()
     df = spark.createDataFrame(
         [{"s": {"x": "hello"}}],
         "s struct<x:string>",

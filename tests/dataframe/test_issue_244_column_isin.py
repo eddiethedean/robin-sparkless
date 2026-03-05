@@ -7,23 +7,23 @@ PySpark supports col.isin([]) (empty list yields 0 rows). We now expose isin on 
 
 from __future__ import annotations
 
-from tests.utils import get_spark, get_functions
+from tests.fixtures.spark_imports import get_spark_imports
+
+_imports = get_spark_imports()
+F = _imports.F
 
 
-def test_column_isin_empty_list_returns_zero_rows() -> None:
+
+def test_column_isin_empty_list_returns_zero_rows(spark) -> None:
     """col("id").isin([]) filters to 0 rows (PySpark parity)."""
-    spark = get_spark("issue_244_isin_empty")
-    F = get_functions()
     data = [{"id": 1}, {"id": 2}, {"id": 3}]
     df = spark.createDataFrame(data, ["id"])
     out = df.filter(F.col("id").isin([])).collect()
     assert len(out) == 0
 
 
-def test_column_isin_non_empty_int_list() -> None:
+def test_column_isin_non_empty_int_list(spark) -> None:
     """col("id").isin([1, 3]) keeps matching rows."""
-    spark = get_spark("issue_244_isin_int")
-    F = get_functions()
     data = [{"id": 1}, {"id": 2}, {"id": 3}]
     df = spark.createDataFrame(data, ["id"])
     out = df.filter(F.col("id").isin([1, 3])).collect()
@@ -32,10 +32,8 @@ def test_column_isin_non_empty_int_list() -> None:
     assert ids == {1, 3}
 
 
-def test_column_isin_string_list() -> None:
+def test_column_isin_string_list(spark) -> None:
     """col("name").isin(list of str) works."""
-    spark = get_spark("issue_244_isin_str")
-    F = get_functions()
     data = [{"name": "a"}, {"name": "b"}, {"name": "c"}]
     df = spark.createDataFrame(data, ["name"])
     out = df.filter(F.col("name").isin(["a", "c"])).collect()

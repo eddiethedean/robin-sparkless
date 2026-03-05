@@ -8,12 +8,10 @@ Robin's create_dataframe_from_rows now accepts schema dtype "list" or "array" fo
 
 from __future__ import annotations
 
-from tests.utils import get_spark
 
 
-def test_create_dataframe_from_rows_schema_list() -> None:
+def test_create_dataframe_from_rows_schema_list(spark) -> None:
     """create_dataframe_from_rows with (\"vals\", \"list\") succeeds and vals is list column."""
-    spark = get_spark("test_256")
     data = [{"name": "a", "vals": [1, 2, 3]}]
     df = spark.createDataFrame(data, "name string, vals array<int>")
     out = df.collect()
@@ -22,9 +20,8 @@ def test_create_dataframe_from_rows_schema_list() -> None:
     assert out[0]["vals"] == [1, 2, 3]
 
 
-def test_create_dataframe_from_rows_schema_array() -> None:
+def test_create_dataframe_from_rows_schema_array(spark) -> None:
     """create_dataframe_from_rows with (\"vals\", \"array\") succeeds and vals is list column."""
-    spark = get_spark("test_256")
     data = [{"name": "b", "vals": [10, 20]}]
     df = spark.createDataFrame(data, "name string, vals array<int>")
     out = df.collect()
@@ -33,9 +30,8 @@ def test_create_dataframe_from_rows_schema_array() -> None:
     assert out[0]["vals"] == [10, 20]
 
 
-def test_create_dataframe_from_rows_list_null_and_multiple_rows() -> None:
+def test_create_dataframe_from_rows_list_null_and_multiple_rows(spark) -> None:
     """list/array column supports null and multiple rows."""
-    spark = get_spark("test_256")
     data = [
         {"id": 1, "vals": [1, 2]},
         {"id": 2, "vals": None},

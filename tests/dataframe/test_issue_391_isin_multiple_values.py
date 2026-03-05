@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-from tests.utils import get_functions, get_spark
+from tests.fixtures.spark_imports import get_spark_imports
 
-F = get_functions()
+_imports = get_spark_imports()
+F = _imports.F
 
 
-def test_isin_list() -> None:
+def test_isin_list(spark) -> None:
     """col.isin([1, 2, 3]) works as before."""
-    spark = get_spark("issue_391")
     df = spark.createDataFrame([(1,), (2,), (3,), (4,)], ["x"])
     out = df.filter(F.col("x").isin([1, 2, 3]))
     rows = out.collect()
@@ -17,9 +17,8 @@ def test_isin_list() -> None:
     assert {r["x"] for r in rows} == {1, 2, 3}
 
 
-def test_isin_variadic() -> None:
+def test_isin_variadic(spark) -> None:
     """col.isin(1, 2, 3) works (PySpark *values)."""
-    spark = get_spark("issue_391")
     df = spark.createDataFrame([(1,), (2,), (3,), (4,)], ["x"])
     out = df.filter(F.col("x").isin(1, 2, 3))
     rows = out.collect()
@@ -27,9 +26,8 @@ def test_isin_variadic() -> None:
     assert {r["x"] for r in rows} == {1, 2, 3}
 
 
-def test_isin_single_value() -> None:
+def test_isin_single_value(spark) -> None:
     """col.isin(2) returns rows where x == 2."""
-    spark = get_spark("issue_391")
     df = spark.createDataFrame([(1,), (2,), (2,)], ["x"])
     out = df.filter(F.col("x").isin(2))
     rows = out.collect()
@@ -37,9 +35,8 @@ def test_isin_single_value() -> None:
     assert all(r["x"] == 2 for r in rows)
 
 
-def test_isin_str_list_and_variadic() -> None:
+def test_isin_str_list_and_variadic(spark) -> None:
     """col.isin with strings: list and variadic."""
-    spark = get_spark("issue_391")
     df = spark.createDataFrame([("a",), ("b",), ("c",)], ["label"])
     out = df.filter(F.col("label").isin("a", "c"))
     rows = out.collect()

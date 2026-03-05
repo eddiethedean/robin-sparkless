@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-from tests.utils import get_functions, get_spark
+from tests.fixtures.spark_imports import get_spark_imports
 
-F = get_functions()
+_imports = get_spark_imports()
+F = _imports.F
 
 
-def test_filter_string_sql() -> None:
+def test_filter_string_sql(spark) -> None:
     """filter with SQL expression string (e.g. 'age > 18') filters rows."""
-    spark = get_spark("issue_393")
     df = spark.createDataFrame(
         [(1, 17, "a"), (2, 18, "b"), (3, 19, "c")],
         ["id", "age", "name"],
@@ -21,9 +21,8 @@ def test_filter_string_sql() -> None:
     assert rows[0]["name"] == "c"
 
 
-def test_where_string_sql() -> None:
+def test_where_string_sql(spark) -> None:
     """where() is alias for filter(); accepts same SQL string."""
-    spark = get_spark("issue_393")
     df = spark.createDataFrame(
         [(1, "x"), (2, "y"), (3, "x")],
         ["id", "label"],
@@ -34,9 +33,8 @@ def test_where_string_sql() -> None:
     assert {r["id"] for r in rows} == {1, 3}
 
 
-def test_filter_column_unchanged() -> None:
+def test_filter_column_unchanged(spark) -> None:
     """filter with Column still works (e.g. col('age') > 18)."""
-    spark = get_spark("issue_393")
     df = spark.createDataFrame([(1, 10), (2, 20)], ["a", "b"])
     out = df.filter(F.col("b") > 15)
     rows = out.collect()

@@ -7,18 +7,14 @@ and col[key] / col[i] subscript. Robin-sparkless now implements these.
 
 from __future__ import annotations
 
-from tests.utils import get_functions, get_spark
+from tests.fixtures.spark_imports import get_spark_imports
 
-F = get_functions()
-
-
-def _spark():
-    return get_spark("issue_356")
+_imports = get_spark_imports()
+F = _imports.F
 
 
-def test_column_getItem_array_index() -> None:
+def test_column_getItem_array_index(spark) -> None:
     """col(\"arr\").getItem(0) returns first element (issue repro)."""
-    spark = _spark()
     df = spark.createDataFrame(
         [{"arr": [1, 2, 3]}, {"arr": [10, 20]}],
         "arr array<bigint>",
@@ -29,9 +25,8 @@ def test_column_getItem_array_index() -> None:
     assert out[1]["first"] == 10
 
 
-def test_column_getItem_out_of_bounds_null() -> None:
+def test_column_getItem_out_of_bounds_null(spark) -> None:
     """getItem out of bounds returns null."""
-    spark = _spark()
     df = spark.createDataFrame(
         [{"arr": [1, 2, 3]}],
         "arr array<bigint>",
@@ -41,9 +36,8 @@ def test_column_getItem_out_of_bounds_null() -> None:
     assert out[0]["x"] is None
 
 
-def test_column_getField_struct() -> None:
+def test_column_getField_struct(spark) -> None:
     """col(\"s\").getField(\"f\") extracts struct field."""
-    spark = _spark()
     df = spark.createDataFrame(
         [{"s": {"f": "hello", "g": 42}}, {"s": {"f": "world", "g": 0}}],
         "s struct<f:string,g:bigint>",
@@ -54,9 +48,8 @@ def test_column_getField_struct() -> None:
     assert out[1]["f_val"] == "world"
 
 
-def test_column_subscript_int_getItem() -> None:
+def test_column_subscript_int_getItem(spark) -> None:
     """col[i] behaves like getItem(i)."""
-    spark = _spark()
     df = spark.createDataFrame(
         [{"arr": [1, 2, 3]}],
         "arr array<bigint>",
@@ -65,9 +58,8 @@ def test_column_subscript_int_getItem() -> None:
     assert out[0]["first"] == 1
 
 
-def test_column_subscript_str_getField() -> None:
+def test_column_subscript_str_getField(spark) -> None:
     """col[\"name\"] behaves like getField(\"name\")."""
-    spark = _spark()
     df = spark.createDataFrame(
         [{"s": {"x": 100}}],
         "s struct<x:bigint>",

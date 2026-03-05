@@ -3,16 +3,14 @@
 import pytest
 
 from tests.fixtures.spark_imports import get_spark_imports
-from tests.utils import get_spark
 
 
 _imports = get_spark_imports()
 F = _imports.F
 
 
-def test_user_guide_filter() -> None:
+def test_user_guide_filter(spark) -> None:
     """USER_GUIDE: Filter example."""
-    spark = get_spark("doc_test")
     df = spark.createDataFrame(
         [(1, 25, "Alice"), (2, 30, "Bob"), (3, 35, "Charlie")], ["id", "age", "name"]
     )
@@ -23,9 +21,8 @@ def test_user_guide_filter() -> None:
     assert rows[1]["age"] == 35
 
 
-def test_user_guide_when_then_otherwise() -> None:
+def test_user_guide_when_then_otherwise(spark) -> None:
     """USER_GUIDE: when/then/otherwise nested example."""
-    spark = get_spark("doc_test")
     df = spark.createDataFrame(
         [(1, 10, "a"), (2, 25, "b"), (3, 70, "c")], ["id", "age", "name"]
     )
@@ -42,9 +39,8 @@ def test_user_guide_when_then_otherwise() -> None:
     assert rows[2]["category"] == "senior"
 
 
-def test_user_guide_na_fill_drop() -> None:
+def test_user_guide_na_fill_drop(spark) -> None:
     """USER_GUIDE: na().fill() and na().drop()."""
-    spark = get_spark("doc_test")
     df = spark.createDataFrame(
         [{"x": 1, "y": None}, {"x": 2, "y": 5}, {"x": None, "y": 7}],
         ["x", "y"],
@@ -57,9 +53,8 @@ def test_user_guide_na_fill_drop() -> None:
     assert len(dropped.collect()) == 2
 
 
-def test_user_guide_create_dataframe_from_rows() -> None:
+def test_user_guide_create_dataframe_from_rows(spark) -> None:
     """USER_GUIDE: _create_dataframe_from_rows."""
-    spark = get_spark("doc_test")
     schema = ["id", "name", "score"]
     rows = [
         {"id": 1, "name": "Alice", "score": 95.5},
@@ -72,9 +67,8 @@ def test_user_guide_create_dataframe_from_rows() -> None:
     assert result[1]["score"] == 87.0
 
 
-def test_user_guide_persistence_temp_view() -> None:
+def test_user_guide_persistence_temp_view(spark) -> None:
     """USER_GUIDE: createOrReplaceTempView."""
-    spark = get_spark("doc_test")
     df = spark.createDataFrame([(1, 25, "Alice")], ["id", "age", "name"])
     try:
         df.createOrReplaceTempView("people")
@@ -86,9 +80,8 @@ def test_user_guide_persistence_temp_view() -> None:
     assert rows[0]["name"] == "Alice"
 
 
-def test_readme_python_quickstart() -> None:
+def test_readme_python_quickstart(spark) -> None:
     """README: Python quick start example (runs both main README and README-Python)."""
-    spark = get_spark("demo")
     from tests.utils import _row_to_dict, assert_rows_equal
 
     df = spark.createDataFrame(

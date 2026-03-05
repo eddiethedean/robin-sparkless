@@ -2,12 +2,10 @@
 
 from __future__ import annotations
 
-from tests.utils import get_spark
 
 
-def test_sample_by() -> None:
+def test_sample_by(spark) -> None:
     """sampleBy(col, fractions, seed) stratified sample by column value."""
-    spark = get_spark("issue_390")
     # col "x" values 1,2,3; sample 100% of 1, 50% of 2, 0% of 3
     df = spark.createDataFrame(
         [(1, "a"), (1, "b"), (2, "c"), (2, "d"), (3, "e")], ["x", "y"]
@@ -21,11 +19,9 @@ def test_sample_by() -> None:
     assert all(x in (1, 2) for x in xs)
 
 
-def test_crosstab() -> None:
+def test_crosstab(spark) -> None:
     """crosstab(col1, col2) returns col1, col2, count."""
     from tests.utils import _row_to_dict
-
-    spark = get_spark("issue_390")
     df = spark.createDataFrame(
         [("a", "x"), ("a", "x"), ("a", "y"), ("b", "x")],
         ["c1", "c2"],
@@ -38,9 +34,8 @@ def test_crosstab() -> None:
     assert len(names) >= 2
 
 
-def test_freq_items() -> None:
+def test_freq_items(spark) -> None:
     """freqItems(columns, support) returns one row with {col}_freqItems arrays."""
-    spark = get_spark("issue_390")
     df = spark.createDataFrame([(1, "a"), (1, "a"), (2, "b")], ["x", "y"])
     out = df.freqItems(["x", "y"], support=0.3)
     rows = out.collect()

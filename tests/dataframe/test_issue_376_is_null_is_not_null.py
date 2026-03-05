@@ -2,18 +2,14 @@
 
 from __future__ import annotations
 
-from tests.utils import get_functions, get_spark
+from tests.fixtures.spark_imports import get_spark_imports
 
-F = get_functions()
-
-
-def _spark():
-    return get_spark("issue_376")
+_imports = get_spark_imports()
+F = _imports.F
 
 
-def test_is_null_and_is_not_null_snake() -> None:
+def test_is_null_and_is_not_null_snake(spark) -> None:
     """is_null() and is_not_null() work and can be used in filter."""
-    spark = _spark()
     df = spark.createDataFrame(
         [{"a": 1, "b": "x"}, {"a": None, "b": "y"}, {"a": 3, "b": None}],
         schema="a int, b string",
@@ -26,9 +22,8 @@ def test_is_null_and_is_not_null_snake() -> None:
     assert len(non_null_a.collect()) == 2
 
 
-def test_is_null_and_is_not_null_camel() -> None:
+def test_is_null_and_is_not_null_camel(spark) -> None:
     """isNull() and isNotNull() (PySpark naming) work the same."""
-    spark = _spark()
     df = spark.createDataFrame(
         [{"a": 1}, {"a": None}],
         schema=["a"],

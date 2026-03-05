@@ -6,18 +6,14 @@ PySpark: df.groupBy("k").avg(F.col("v")) or avg("v"). Robin-sparkless now accept
 
 from __future__ import annotations
 
-from tests.utils import get_functions, get_spark
+from tests.fixtures.spark_imports import get_spark_imports
 
-F = get_functions()
-
-
-def _spark():
-    return get_spark("issue_358")
+_imports = get_spark_imports()
+F = _imports.F
 
 
-def test_group_by_avg_column_expression() -> None:
+def test_group_by_avg_column_expression(spark) -> None:
     """df.groupBy(\"k\").avg(col(\"v\")) works (issue repro)."""
-    spark = _spark()
     df = spark.createDataFrame(
         [{"k": "a", "v": 10}, {"k": "a", "v": 20}],
         ["k", "v"],
@@ -28,9 +24,8 @@ def test_group_by_avg_column_expression() -> None:
     assert out[0]["avg(v)"] == 15.0
 
 
-def test_group_by_avg_string_still_works() -> None:
+def test_group_by_avg_string_still_works(spark) -> None:
     """df.groupBy(\"k\").avg(\"v\") still works."""
-    spark = _spark()
     df = spark.createDataFrame(
         [{"k": "a", "v": 10}, {"k": "a", "v": 20}],
         ["k", "v"],
@@ -40,9 +35,8 @@ def test_group_by_avg_string_still_works() -> None:
     assert out[0]["avg(v)"] == 15.0
 
 
-def test_group_by_sum_column_expression() -> None:
+def test_group_by_sum_column_expression(spark) -> None:
     """df.groupBy(\"k\").sum(col(\"v\")) works."""
-    spark = _spark()
     df = spark.createDataFrame(
         [{"k": "a", "v": 10}, {"k": "a", "v": 20}],
         ["k", "v"],
@@ -52,9 +46,8 @@ def test_group_by_sum_column_expression() -> None:
     assert out[0]["sum(v)"] == 30
 
 
-def test_group_by_min_max_column_expression() -> None:
+def test_group_by_min_max_column_expression(spark) -> None:
     """df.groupBy(\"k\").min(col(\"v\")) and .max(col(\"v\")) work."""
-    spark = _spark()
     df = spark.createDataFrame(
         [{"k": "a", "v": 10}, {"k": "a", "v": 20}, {"k": "a", "v": 15}],
         ["k", "v"],

@@ -2,12 +2,10 @@
 
 from __future__ import annotations
 
-from tests.utils import get_spark
 
 
-def test_intersect() -> None:
+def test_intersect(spark) -> None:
     """intersect(other) returns rows that appear in both DataFrames (distinct)."""
-    spark = get_spark("issue_389")
     left = spark.createDataFrame([(1, "a"), (2, "b"), (2, "b")], ["id", "x"])
     right = spark.createDataFrame([(2, "b"), (3, "c")], ["id", "x"])
     out = left.intersect(right)
@@ -16,9 +14,8 @@ def test_intersect() -> None:
     assert rows[0]["id"] == 2 and rows[0]["x"] == "b"
 
 
-def test_except_all() -> None:
+def test_except_all(spark) -> None:
     """exceptAll(other) returns rows in self not in other (API parity; current impl same as subtract)."""
-    spark = get_spark("issue_389")
     left = spark.createDataFrame([(1, "a"), (2, "b"), (3, "c")], ["id", "x"])
     right = spark.createDataFrame([(2, "b")], ["id", "x"])
     out = left.exceptAll(right)

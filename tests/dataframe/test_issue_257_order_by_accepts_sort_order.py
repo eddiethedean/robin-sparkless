@@ -7,14 +7,14 @@ only accepted list[str]; it now accepts a single SortOrder or list of SortOrder 
 
 from __future__ import annotations
 
-from tests.utils import get_functions, get_spark
+from tests.fixtures.spark_imports import get_spark_imports
 
-F = get_functions()
+_imports = get_spark_imports()
+F = _imports.F
 
 
-def test_order_by_single_desc_nulls_last() -> None:
+def test_order_by_single_desc_nulls_last(spark) -> None:
     """df.order_by(col("value").desc_nulls_last()) works and puts nulls last (PySpark parity)."""
-    spark = get_spark("order_by_sort_order")
     data = [
         {"value": "A"},
         {"value": "B"},
@@ -30,9 +30,8 @@ def test_order_by_single_desc_nulls_last() -> None:
     assert values == ["D", "C", "B", "A", None]
 
 
-def test_order_by_list_of_sort_orders() -> None:
+def test_order_by_list_of_sort_orders(spark) -> None:
     """df.order_by([col("a").asc(), col("b").desc_nulls_last()]) works."""
-    spark = get_spark("order_by_sort_order")
     data = [{"a": 1, "b": 10}, {"a": 1, "b": 20}, {"a": 2, "b": 5}]
     df = spark.createDataFrame(data, ["a", "b"])
     out = df.orderBy([F.col("a").asc(), F.col("b").desc_nulls_last()]).collect()
@@ -42,9 +41,8 @@ def test_order_by_list_of_sort_orders() -> None:
     assert [r["b"] for r in out] == [20, 10, 5]
 
 
-def test_order_by_column_names_unchanged() -> None:
+def test_order_by_column_names_unchanged(spark) -> None:
     """df.order_by([\"col1\", \"col2\"]) and order_by(list, ascending) still work."""
-    spark = get_spark("order_by_sort_order")
     data = [{"x": 3}, {"x": 1}, {"x": 2}]
     df = spark.createDataFrame(data, ["x"])
     out = df.orderBy(["x"]).collect()

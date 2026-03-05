@@ -7,9 +7,10 @@ Robin (Polars) previously raised RuntimeError; we now support it.
 
 from __future__ import annotations
 
-from tests.utils import get_functions
+from tests.fixtures.spark_imports import get_spark_imports
 
-F = get_functions()
+_imports = get_spark_imports()
+F = _imports.F
 
 
 def test_lit_none_cast_double(spark) -> None:

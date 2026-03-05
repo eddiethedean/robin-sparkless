@@ -6,14 +6,14 @@ PySpark Column has .eqNullSafe(other) for null-safe equality.
 
 from __future__ import annotations
 
-from tests.utils import get_functions, get_spark
+from tests.fixtures.spark_imports import get_spark_imports
 
-F = get_functions()
+_imports = get_spark_imports()
+F = _imports.F
 
 
-def test_column_eqNullSafe_select_lit() -> None:
+def test_column_eqNullSafe_select_lit(spark) -> None:
     """df.select(col(\"a\").eqNullSafe(lit(1))) returns boolean column."""
-    spark = get_spark("issue_355")
     df = spark.createDataFrame([{"a": 1}, {"a": None}], ["a"])
     out = df.select(F.col("a").eqNullSafe(F.lit(1)).alias("eq")).collect()
     assert len(out) == 2

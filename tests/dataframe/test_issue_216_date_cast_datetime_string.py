@@ -1,3 +1,8 @@
+from tests.fixtures.spark_imports import get_spark_imports
+
+_imports = get_spark_imports()
+F = _imports.F
+
 """Tests for issue #216: Date cast from datetime string (PySpark parity).
 
 Casting a string like '2025-01-01 10:30:00' to date must work; PySpark accepts
@@ -5,10 +10,6 @@ datetime strings and truncates to date.
 """
 
 import datetime
-
-from tests.utils import get_functions
-
-F = get_functions()
 
 
 def test_cast_datetime_string_to_date(spark) -> None:

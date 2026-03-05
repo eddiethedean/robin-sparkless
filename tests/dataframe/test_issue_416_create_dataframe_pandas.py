@@ -8,18 +8,12 @@ from __future__ import annotations
 
 import pytest
 
-from tests.utils import get_spark
 
 pandas = pytest.importorskip("pandas")
 
 
-def _spark():
-    return get_spark("issue_416")
-
-
-def test_create_dataframe_from_pandas() -> None:
+def test_create_dataframe_from_pandas(spark) -> None:
     """spark.createDataFrame(pandas.DataFrame) works."""
-    spark = _spark()
     pdf = pandas.DataFrame({"a": [1, 2], "b": [3, 4]})
     df = spark.createDataFrame(pdf)
     out = df.collect()

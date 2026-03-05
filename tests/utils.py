@@ -9,7 +9,7 @@ creation in tests.
 from __future__ import annotations
 
 from datetime import date, datetime
-import os
+
 
 def _is_date_like(v: object) -> bool:
     """True if v is a date, datetime, or string that looks like a date/datetime."""
@@ -163,73 +163,3 @@ def run_with_pyspark_expected(
     return fallback_expected
 
 
-def get_functions():
-    """Return PySpark-style functions module for the current backend.
-
-    In PySpark mode (MOCK_SPARK_TEST_BACKEND=SPARKLESS_TEST_BACKEND=pyspark), this
-    imports pyspark.sql.functions. Otherwise it imports sparkless.sql.functions.
-    """
-    backend = (
-        os.getenv("MOCK_SPARK_TEST_BACKEND")
-        or os.getenv("SPARKLESS_TEST_BACKEND")
-        or ""
-    ).strip().lower()
-    if backend == "pyspark":
-        from pyspark.sql import functions as F  # type: ignore[import-not-found]
-    else:
-        from sparkless.sql import functions as F  # type: ignore[import-not-found]
-    return F
-
-
-def get_spark(app_name: str = "test"):
-    """Return a SparkSession for the current backend.
-
-    In PySpark mode, this creates a pyspark.sql.SparkSession; otherwise it
-    creates a sparkless.sql.SparkSession. This mirrors the backend selection
-    logic used by the shared ``spark`` fixture.
-    """
-    backend = (
-        os.getenv("MOCK_SPARK_TEST_BACKEND")
-        or os.getenv("SPARKLESS_TEST_BACKEND")
-        or ""
-    ).strip().lower()
-    if backend == "pyspark":
-        from pyspark.sql import SparkSession as PySparkSession  # type: ignore[import-not-found]
-
-        return (
-            PySparkSession.builder.appName(app_name)
-            .config("spark.driver.bindAddress", "127.0.0.1")
-            .getOrCreate()
-        )
-    else:
-        from sparkless.sql import SparkSession  # type: ignore[import-not-found]
-
-        builder = getattr(
-            SparkSession.builder, "__call__", lambda: SparkSession.builder
-        )()
-        return builder.app_name(app_name).get_or_create()
-
-
-def get_session(app_name: str = "test"):
-    """Backward-compatible alias used by some parity tests.
-
-    Returns a backend-aware SparkSession, matching get_spark().
-    """
-    return get_spark(app_name)
-
-
-def get_window_cls():
-    """Return the Window class appropriate for the current backend.
-
-    This mirrors the backend selection used by get_spark() / get_functions().
-    """
-    backend = (
-        os.getenv("MOCK_SPARK_TEST_BACKEND")
-        or os.getenv("SPARKLESS_TEST_BACKEND")
-        or ""
-    ).strip().lower()
-    if backend == "pyspark":
-        from pyspark.sql.window import Window  # type: ignore[import-not-found]
-    else:
-        from sparkless.sql.window import Window  # type: ignore[import-not-found]
-    return Window

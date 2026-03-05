@@ -7,14 +7,14 @@ Robin previously raised RuntimeError: cannot compare string with numeric type (i
 
 from __future__ import annotations
 
-from tests.utils import get_functions, get_spark
+from tests.fixtures.spark_imports import get_spark_imports
 
-F = get_functions()
+_imports = get_spark_imports()
+F = _imports.F
 
 
-def test_eqnullsafe_string_column_eq_int_literal() -> None:
+def test_eqnullsafe_string_column_eq_int_literal(spark) -> None:
     """select(col('str_col').eq_null_safe(lit(123))) with string column returns True/False per row."""
-    spark = get_spark("test_266")
     df = spark.createDataFrame(
         [
             {"str_col": "123", "other": 1},
@@ -29,9 +29,8 @@ def test_eqnullsafe_string_column_eq_int_literal() -> None:
     assert out[1]["eq"] is False
 
 
-def test_eqnullsafe_string_column_eq_int_literal_no_match() -> None:
+def test_eqnullsafe_string_column_eq_int_literal_no_match(spark) -> None:
     """eq_null_safe with non-numeric string yields False (coerced to null, not equal)."""
-    spark = get_spark("test_266")
     df = spark.createDataFrame(
         [{"str_col": "abc"}, {"str_col": "123"}],
         ["str_col"],

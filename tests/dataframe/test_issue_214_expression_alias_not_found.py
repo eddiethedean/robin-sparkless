@@ -5,15 +5,15 @@ window functions, chained arithmetic) must not raise RuntimeError: not found: <a
 Fixed by the same resolve_expr_column_names behavior as #212 (#200).
 """
 
-from tests.utils import get_functions, get_spark, get_window_cls
+from tests.fixtures.spark_imports import get_spark_imports
 
-F = get_functions()
-Window = get_window_cls()
+_imports = get_spark_imports()
+F = _imports.F
+Window = _imports.Window
 
 
-def test_select_when_otherwise_alias_result() -> None:
+def test_select_when_otherwise_alias_result(spark) -> None:
     """Exact scenario from #214: when().then().otherwise().alias('result') then collect()."""
-    spark = get_spark("issue_214")
     df = spark.createDataFrame(
         [{"x": 1}, {"x": 2}],
         ["x"],
@@ -28,9 +28,8 @@ def test_select_when_otherwise_alias_result() -> None:
     assert rows[1]["result"] == "yes"
 
 
-def test_select_window_rank_alias() -> None:
+def test_select_window_rank_alias(spark) -> None:
     """#214: window function with alias('rank') must not raise 'not found: rank' (PySpark: F.rank().over())."""
-    spark = get_spark("issue_214")
     df = spark.createDataFrame(
         [{"x": 10}, {"x": 20}, {"x": 20}],
         ["x"],

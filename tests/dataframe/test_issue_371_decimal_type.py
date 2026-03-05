@@ -9,12 +9,10 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from tests.utils import get_spark
 
 
-def test_decimal_schema_create_dataframe() -> None:
+def test_decimal_schema_create_dataframe(spark) -> None:
     """createDataFrame with Decimal(10,2) schema works (issue repro)."""
-    spark = get_spark("issue_371")
     create_df = getattr(spark, "create_dataframe_from_rows", spark.createDataFrame)
     df = create_df([{"d": Decimal("1.5")}], "d decimal(10,2)")
     out = df.collect()
@@ -24,9 +22,8 @@ def test_decimal_schema_create_dataframe() -> None:
     assert float(val) == 1.5
 
 
-def test_decimal_schema_lowercase() -> None:
+def test_decimal_schema_lowercase(spark) -> None:
     """decimal(10,0) (lowercase) is accepted."""
-    spark = get_spark("issue_371")
     df = spark.createDataFrame([{"x": Decimal("42")}], "x decimal(10,0)")
     rows = df.collect()
     val = rows[0]["x"]
@@ -34,9 +31,8 @@ def test_decimal_schema_lowercase() -> None:
     assert float(val) == 42.0
 
 
-def test_decimal_multiple_rows() -> None:
+def test_decimal_multiple_rows(spark) -> None:
     """Decimal column with multiple rows."""
-    spark = get_spark("issue_371")
     df = spark.createDataFrame(
         [{"d": Decimal("1.5")}, {"d": Decimal("2.25")}, {"d": None}],
         "d decimal(10,2)",

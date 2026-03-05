@@ -5,13 +5,10 @@ PySpark uses regexp_replace for string replacement; sparkless may have replace(o
 
 from __future__ import annotations
 
-from tests.utils import get_functions, get_spark
+from tests.fixtures.spark_imports import get_spark_imports
 
-F = get_functions()
-
-
-def _spark():
-    return get_spark("issue_379")
+_imports = get_spark_imports()
+F = _imports.F
 
 
 def _replace(col, old: str, new: str):
@@ -19,9 +16,8 @@ def _replace(col, old: str, new: str):
     return F.regexp_replace(col, old, new)
 
 
-def test_replace_single_pair() -> None:
+def test_replace_single_pair(spark) -> None:
     """replace(search, replacement) or regexp_replace works."""
-    spark = _spark()
     df = spark.createDataFrame(
         [{"x": "a-b-c"}],
         schema=["x"],
@@ -31,9 +27,8 @@ def test_replace_single_pair() -> None:
     assert rows[0]["y"] == "a_b_c"
 
 
-def test_replace_chained() -> None:
+def test_replace_chained(spark) -> None:
     """Multiple replacements via chained regexp_replace (PySpark-supported)."""
-    spark = _spark()
     df = spark.createDataFrame(
         [{"x": "hello world"}],
         schema=["x"],

@@ -1,12 +1,13 @@
+from tests.fixtures.spark_imports import get_spark_imports
+
+_imports = get_spark_imports()
+F = _imports.F
+
 """Tests for issue #218: Division by zero returns null (PySpark parity).
 
 PySpark returns null for division by zero; these tests assert that behavior
 directly against a real PySpark session via the ``spark`` fixture.
 """
-
-from tests.utils import get_functions
-
-F = get_functions()
 
 
 def test_division_by_zero_literal_over_column(spark) -> None:

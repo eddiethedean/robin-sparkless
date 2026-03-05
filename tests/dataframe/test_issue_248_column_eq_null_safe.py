@@ -7,20 +7,20 @@ eq_null_safe(other) so filter expressions using null-safe equality work.
 
 from __future__ import annotations
 
-from tests.utils import get_functions, get_spark
+from tests.fixtures.spark_imports import get_spark_imports
 
-F = get_functions()
+_imports = get_spark_imports()
+F = _imports.F
 
 
-def test_column_has_eq_null_safe() -> None:
+def test_column_has_eq_null_safe(spark) -> None:
     """Column has eqNullSafe / eq_null_safe (PySpark parity)."""
     c = F.col("a")
     assert hasattr(c, "eqNullSafe") or hasattr(c, "eq_null_safe")
 
 
-def test_filter_eq_null_safe_lit_none_returns_null_row() -> None:
+def test_filter_eq_null_safe_lit_none_returns_null_row(spark) -> None:
     """df.filter(col("a").eq_null_safe(lit(None))) returns only the row where a is null."""
-    spark = get_spark("eq_null_safe")
     data = [{"a": 1}, {"a": None}, {"a": 3}]
     df = spark.createDataFrame(data, ["a"])
     col_a = F.col("a")
@@ -30,9 +30,8 @@ def test_filter_eq_null_safe_lit_none_returns_null_row() -> None:
     assert out[0]["a"] is None
 
 
-def test_filter_eq_null_safe_column_both_null_true() -> None:
+def test_filter_eq_null_safe_column_both_null_true(spark) -> None:
     """Two columns: where both are null, eq_null_safe is true."""
-    spark = get_spark("eq_null_safe")
     data = [
         {"a": 1, "b": 2},
         {"a": None, "b": None},

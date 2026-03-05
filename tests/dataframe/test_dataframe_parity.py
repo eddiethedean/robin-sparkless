@@ -7,9 +7,11 @@ tests/parity/dataframe (expected_outputs from PySpark). Run with robin_sparkless
 
 from __future__ import annotations
 
-from tests.utils import assert_rows_equal, get_functions
+from tests.fixtures.spark_imports import get_spark_imports
+from tests.utils import assert_rows_equal
 
-F = get_functions()
+_imports = get_spark_imports()
+F = _imports.F
 
 
 # Shared input data (from Sparkless expected_outputs dataframe_operations)

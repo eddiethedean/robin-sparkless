@@ -2,16 +2,10 @@
 
 from __future__ import annotations
 
-from tests.utils import get_spark
 
 
-def _spark():
-    return get_spark("issue_406")
-
-
-def test_na_fill_subset_list_of_str() -> None:
+def test_na_fill_subset_list_of_str(spark) -> None:
     """df.na.fill(0, subset=["b"]) fills nulls only in "b", leaves "a" unchanged."""
-    spark = _spark()
     df = spark.createDataFrame(
         [{"a": 1, "b": None}, {"a": None, "b": 2}],
         schema=["a", "b"],

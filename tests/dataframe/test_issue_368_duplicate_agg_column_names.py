@@ -1,13 +1,13 @@
+from tests.fixtures.spark_imports import get_spark_imports
+
+_imports = get_spark_imports()
+F = _imports.F
+
 """Tests for issue #368: duplicate column names in groupBy().agg() result (PySpark parity)."""
 
-from tests.utils import get_functions, get_spark
 
-F = get_functions()
-
-
-def test_group_by_agg_sum_avg_same_column_no_duplicate_error() -> None:
+def test_group_by_agg_sum_avg_same_column_no_duplicate_error(spark) -> None:
     """groupBy('g').agg(sum('value'), avg('value')) no longer raises duplicate column name."""
-    spark = get_spark("issue_368")
     # PySpark-style: createDataFrame with list of dicts + schema, or list of rows + names
     df = spark.createDataFrame(
         [("a", 10), ("a", 20)],
@@ -37,9 +37,8 @@ def test_group_by_agg_sum_avg_same_column_no_duplicate_error() -> None:
         assert 15.0 in vals or 15 in vals
 
 
-def test_global_agg_duplicate_names() -> None:
+def test_global_agg_duplicate_names(spark) -> None:
     """df.agg(sum('x'), avg('x')) with duplicate output names is disambiguated."""
-    spark = get_spark("issue_368")
     df = spark.createDataFrame([(10,), (20,)], ["x"])
     result = df.agg(
         F.sum(F.col("x")).alias("sum(x)"),
