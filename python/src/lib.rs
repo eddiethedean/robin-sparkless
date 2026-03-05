@@ -3895,9 +3895,10 @@ impl PyDataFrame {
         self.describe()
     }
 
-    #[pyo3(signature = (mode=None))]
-    fn explain(&self, mode: Option<&str>) -> PyResult<String> {
-        let _ = mode; // accepted for API parity; not yet used
+    /// PySpark: explain() and explain(extended=True) (mode= accepted for parity; #1152).
+    #[pyo3(signature = (extended=None))]
+    fn explain(&self, extended: Option<bool>) -> PyResult<String> {
+        let _ = extended; // accepted for API parity; not yet used
         Ok(self.inner.explain())
     }
 
