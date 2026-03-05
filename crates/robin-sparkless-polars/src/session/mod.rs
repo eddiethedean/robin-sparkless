@@ -1914,7 +1914,9 @@ impl SparkSession {
         };
         // When schema was not all-string (e.g. ID:bigint, StructValue:string), still upgrade any "string"
         // column that has Object in the data to struct (so createDataFrame([{"ID":1,"StructValue":{...}}]) gets struct).
-        if !schema_inferred_in_rust && !rows.is_empty() {
+        // #1149: When schema_was_inferred (e.g. names-only from Python), do not upgrade: Python already set
+        // first column to Long/Double and later numeric columns to String for PySpark parity.
+        if !schema_inferred_in_rust && !schema_was_inferred && !rows.is_empty() {
             let names: Vec<String> = schema.iter().map(|(n, _)| n.clone()).collect();
             let inferred = Self::infer_schema_from_json_rows(&rows, &names);
             for (col_idx, (_, dtype_str)) in schema.iter_mut().enumerate() {
@@ -2065,7 +2067,9 @@ impl SparkSession {
             }
         }
         // #420: When verify_schema is true, validate each cell type before building.
-        if verify_schema {
+        // #1149: When schema was inferred (e.g. names-only), skip verification so string-in-numeric
+        // columns are coerced to null during build (PySpark parity for createDataFrame(data, [names])).
+        if verify_schema && !schema_was_inferred {
             for (row_idx, row) in rows.iter().enumerate() {
                 for (col_idx, (name, type_str)) in schema.iter().enumerate() {
                     let v = row.get(col_idx).unwrap_or(&JsonValue::Null);
