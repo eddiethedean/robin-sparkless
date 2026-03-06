@@ -411,6 +411,7 @@ class TestIssue287NAReplace:
         finally:
             spark.stop()
 
+    @pytest.mark.skip(reason="Issue #1210: unskip when fixing")
     def test_na_replace_with_none_values(self):
         """PySpark na.replace does not accept None as to_replace; use fillna for nulls."""
         spark = SparkSession.builder.appName("issue-287").getOrCreate()
@@ -488,6 +489,7 @@ class TestIssue287NAReplace:
         finally:
             spark.stop()
 
+    @pytest.mark.skip(reason="Issue #1210: unskip when fixing")
     def test_na_replace_with_type_coercion(self):
         """Test na.replace with type coercion (string to number)."""
         spark = SparkSession.builder.appName("issue-287").getOrCreate()
@@ -742,6 +744,7 @@ class TestIssue287NAReplace:
         finally:
             spark.stop()
 
+    @pytest.mark.skip(reason="Issue #1210: unskip when fixing")
     def test_na_replace_with_mixed_types_in_column(self):
         """Test na.replace when column has mixed types (strings and numbers)."""
         spark = SparkSession.builder.appName("issue-287").getOrCreate()

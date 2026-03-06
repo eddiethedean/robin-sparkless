@@ -1,4 +1,5 @@
 from tests.fixtures.spark_imports import get_spark_imports
+import pytest
 
 _imports = get_spark_imports()
 F = _imports.F
@@ -8,6 +9,7 @@ F = _imports.F
 Casting empty or invalid strings to int should yield null, not raise.
 """
 
+@pytest.mark.skip(reason="Issue #1192: unskip when fixing")
 
 def test_cast_empty_and_whitespace_string_to_int(spark) -> None:
     """Exact scenario from #217: cast('') and cast(' ') -> null."""

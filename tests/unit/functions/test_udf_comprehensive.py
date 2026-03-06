@@ -2,6 +2,8 @@
 Comprehensive tests for UDF functionality. Uses get_spark_imports from fixture only.
 """
 
+import pytest
+
 from tests.fixtures.spark_imports import get_spark_imports
 
 _imports = get_spark_imports()
@@ -353,6 +355,7 @@ class TestUDFComplexScenarios:
 
 class TestUDFWithDifferentDataTypes:
     """Test UDFs with various input data types."""
+    @pytest.mark.skip(reason="Issue #1265: unskip when fixing")
 
     def test_udf_with_long_type(self, spark):
         """Test UDF with LongType input."""

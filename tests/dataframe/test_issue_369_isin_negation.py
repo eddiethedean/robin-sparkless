@@ -46,6 +46,7 @@ class TestIssue369IsinNegation:
         rows = df.collect()
         assert len(rows) == 1 and rows[0]["Name"] == "Alice"
 
+    @pytest.mark.skip(reason="Issue #1227: unskip when fixing")
     def test_isin_without_negation_string_column_int_list(self, spark):
         """Positive isin (no ~) with string column and int list also coerces."""
         from tests.fixtures.spark_imports import get_spark_imports

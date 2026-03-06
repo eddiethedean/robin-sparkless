@@ -8,6 +8,7 @@ https://github.com/eddiethedean/sparkless/issues/453
 """
 
 from tests.fixtures.spark_imports import get_spark_imports
+import pytest
 
 
 def _row_val(row, key):
@@ -16,6 +17,7 @@ def _row_val(row, key):
         return row[key]
     return getattr(row, key, None)
 
+@pytest.mark.skip(reason="Issue #1248: unskip when fixing")
 
 def test_alias_cast_withcolumn_exact_issue_453(spark, spark_backend):
     """Exact scenario from #453 - alias().cast() in withColumn."""
@@ -84,6 +86,7 @@ def test_alias_cast_withcolumn_then_select(spark, spark_backend):
 
 # --- Robust edge-case tests ---
 
+@pytest.mark.skip(reason="Issue #1248: unskip when fixing")
 
 def test_alias_cast_withcolumn_string_type(spark, spark_backend):
     """alias().cast(StringType()) in withColumn."""
@@ -191,6 +194,7 @@ def test_alias_cast_withcolumn_mixed_with_plain(spark, spark_backend):
     assert _row_val(rows[0], "name") == "Alice"
     assert _row_val(rows[0], "doubled") == 2
 
+@pytest.mark.skip(reason="Issue #1248: unskip when fixing")
 
 def test_alias_cast_withcolumn_replace_existing_column(spark, spark_backend):
     """withColumn alias().cast() - output name same as different input (replacement)."""

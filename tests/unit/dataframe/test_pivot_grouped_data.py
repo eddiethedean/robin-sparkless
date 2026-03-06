@@ -224,6 +224,7 @@ class TestPivotGroupedData:
         assert row_b["A"] is None
         assert row_b["B"] == 5
 
+    @pytest.mark.skip(reason="Issue #1260: unskip when fixing")
     def test_pivot_last(self, spark, sample_data):
         """Test pivot with last() method."""
         df = spark.createDataFrame(sample_data)

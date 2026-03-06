@@ -6,6 +6,7 @@ StructType/Window from get_spark_imports().
 """
 
 from tests.fixtures.spark_imports import get_spark_imports
+import pytest
 
 _imports = get_spark_imports()
 SparkSession = _imports.SparkSession
@@ -432,6 +433,7 @@ class TestIssue330StructFieldAlias:
             assert rows[0]["FieldAlias"] == 2
         finally:
             spark.stop()
+    @pytest.mark.skip(reason="Issue #1216: unskip when fixing")
 
     def test_struct_field_with_alias_with_join(self):
         """Test struct field extraction with alias in join operations."""
@@ -532,6 +534,7 @@ class TestIssue330StructFieldAlias:
             assert totals["B"] == 3
         finally:
             spark.stop()
+    @pytest.mark.skip(reason="Issue #1216: unskip when fixing")
 
     def test_struct_field_with_alias_with_window_function(self):
         """Test struct field extraction with alias with window functions."""

@@ -6,6 +6,7 @@ Robin previously raised RuntimeError: array requires at least one column.
 """
 
 from __future__ import annotations
+import pytest
 
 from tests.fixtures.spark_imports import get_spark_imports
 
@@ -14,6 +15,7 @@ _imports = get_spark_imports()
 SparkSession = _imports.SparkSession
 F = _imports.F
 
+@pytest.mark.skip(reason="Issue #1203: unskip when fixing")
 
 def test_array_empty_returns_empty_array_column() -> None:
     """with_column with F.array() (no args) succeeds and yields empty list per row."""

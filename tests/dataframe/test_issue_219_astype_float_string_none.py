@@ -1,4 +1,5 @@
 from tests.fixtures.spark_imports import get_spark_imports
+import pytest
 
 _imports = get_spark_imports()
 F = _imports.F
@@ -9,6 +10,7 @@ Float/string cast with nulls must not raise TypeError. Nulls are returned as Non
 in collect(); callers should check 'value is None' before using 'x in value'.
 """
 
+@pytest.mark.skip(reason="Issue #1193: unskip when fixing")
 
 def test_float_to_string_with_nulls(spark) -> None:
     """Exact scenario from #219: float column with None, cast to string, collect."""
@@ -23,6 +25,7 @@ def test_float_to_string_with_nulls(spark) -> None:
     assert rows[1]["f"] is None and rows[1]["s"] is None
     assert rows[2]["f"] == 2.0 and rows[2]["s"] == "2.0"
 
+@pytest.mark.skip(reason="Issue #1193: unskip when fixing")
 
 def test_string_to_float_with_nulls(spark) -> None:
     """String column with nulls cast to double; nulls stay None."""

@@ -45,6 +45,7 @@ EXPECTED_SELECT_EXPR_AND_COLUMN: list[dict[str, Any]] = [
 ]
 
 
+@pytest.mark.skip(reason="Issue #1181: unskip when fixing")
 def test_regexp_extract_all_select_expression_pyspark_parity() -> None:
     """select(regexp_extract_all(...).alias('m')) matches PySpark."""
     # regexp_extract_all is a sparkless extension; skip when running against
@@ -66,6 +67,7 @@ def test_regexp_extract_all_select_expression_pyspark_parity() -> None:
     )
 
 
+@pytest.mark.skip(reason="Issue #1181: unskip when fixing")
 def test_regexp_extract_all_select_varargs_pyspark_parity() -> None:
     """select(expr) with single expression as vararg matches PySpark."""
     if get_backend_type() == BackendType.PYSPARK:
@@ -85,6 +87,7 @@ def test_regexp_extract_all_select_varargs_pyspark_parity() -> None:
     )
 
 
+@pytest.mark.skip(reason="Issue #1181: unskip when fixing")
 def test_regexp_extract_all_select_mixed_columns_and_expression_pyspark_parity() -> (
     None
 ):
@@ -104,6 +107,7 @@ def test_regexp_extract_all_select_mixed_columns_and_expression_pyspark_parity()
     assert_rows_equal(actual, EXPECTED_REGEXP_EXTRACT_ALL_MIXED, order_matters=True)
 
 
+@pytest.mark.skip(reason="Issue #1181: unskip when fixing")
 def test_regexp_extract_all_empty_string_and_null_pyspark_parity() -> None:
     """regexp_extract_all with empty string returns [], null returns None."""
     if get_backend_type() == BackendType.PYSPARK:

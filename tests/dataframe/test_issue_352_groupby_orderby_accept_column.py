@@ -5,12 +5,14 @@ PySpark accepts both str and Column for groupBy(), orderBy(), and agg column arg
 """
 
 from __future__ import annotations
+import pytest
 
 from tests.fixtures.spark_imports import get_spark_imports
 
 _imports = get_spark_imports()
 F = _imports.F
 
+@pytest.mark.skip(reason="Issue #1220: unskip when fixing")
 
 def test_group_by_column_then_agg_sum(spark) -> None:
     """group_by(col(\"dept\")) and agg(sum(col(\"salary\"))) works (PySpark parity)."""

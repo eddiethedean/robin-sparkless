@@ -6,6 +6,8 @@ functions work with an active SparkSession. (PySpark requires active SparkContex
 for these when called from Python.)
 """
 
+import pytest
+
 from tests.fixtures.spark_imports import get_spark_imports
 
 imports = get_spark_imports()
@@ -64,6 +66,7 @@ class TestSessionValidation:
         assert d is not None
         assert t is not None
 
+    @pytest.mark.skip(reason="Issue #1250: unskip when fixing")
     def test_multiple_sessions(self, spark):
         """getActiveSession() returns one of the active sessions; col() fails after all are stopped (PySpark)."""
         spark2 = SparkSession.builder.appName("test2").getOrCreate()

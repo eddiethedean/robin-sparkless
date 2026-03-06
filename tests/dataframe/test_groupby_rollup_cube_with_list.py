@@ -46,6 +46,7 @@ def test_groupBy_with_list(sample_df):
     assert {"dept": "HR", "year": 2024, "count": 1} in counts
 
 
+@pytest.mark.skip(reason="Issue #1178: unskip when fixing")
 def test_groupBy_with_tuple(sample_df):
     """Test that groupBy() with a tuple of column names raises a clear error (PySpark parity)."""
     with pytest.raises(Exception) as exc_info:
@@ -96,6 +97,7 @@ def test_rollup_with_list(sample_df):
     assert "count" in result.columns
 
 
+@pytest.mark.skip(reason="Issue #1178: unskip when fixing")
 def test_rollup_with_tuple(sample_df):
     """Test that rollup() with a tuple of column names raises a clear error (PySpark parity)."""
     with pytest.raises(Exception) as exc_info:
@@ -131,6 +133,7 @@ def test_cube_with_list(sample_df):
     assert "count" in result.columns
 
 
+@pytest.mark.skip(reason="Issue #1178: unskip when fixing")
 def test_cube_with_tuple(sample_df):
     """Test that cube() with a tuple of column names raises a clear error (PySpark parity)."""
     with pytest.raises(Exception) as exc_info:

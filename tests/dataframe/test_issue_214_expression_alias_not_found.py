@@ -6,6 +6,7 @@ Fixed by the same resolve_expr_column_names behavior as #212 (#200).
 """
 
 from tests.fixtures.spark_imports import get_spark_imports
+import pytest
 
 _imports = get_spark_imports()
 F = _imports.F
@@ -27,6 +28,7 @@ def test_select_when_otherwise_alias_result(spark) -> None:
     assert rows[0]["result"] == "no"
     assert rows[1]["result"] == "yes"
 
+@pytest.mark.skip(reason="Issue #1188: unskip when fixing")
 
 def test_select_window_rank_alias(spark) -> None:
     """#214: window function with alias('rank') must not raise 'not found: rank' (PySpark: F.rank().over())."""

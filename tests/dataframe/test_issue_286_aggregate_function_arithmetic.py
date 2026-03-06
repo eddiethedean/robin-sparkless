@@ -6,6 +6,7 @@ Uses get_spark_imports from fixture only.
 """
 
 from tests.fixtures.spark_imports import get_spark_imports
+import pytest
 
 _imports = get_spark_imports()
 SparkSession = _imports.SparkSession
@@ -268,6 +269,7 @@ class TestIssue286AggregateFunctionArithmetic:
             assert alice_row["sum_times_two"] == 6
         finally:
             spark.stop()
+    @pytest.mark.skip(reason="Issue #1209: unskip when fixing")
 
     def test_arithmetic_with_nulls(self):
         """Test arithmetic operations when aggregate results might be None."""

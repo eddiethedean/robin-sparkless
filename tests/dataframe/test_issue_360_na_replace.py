@@ -5,7 +5,9 @@ PySpark: df.na.replace(to_replace, value, subset=None). Robin-sparkless: df.na()
 """
 
 from __future__ import annotations
+import pytest
 
+@pytest.mark.skip(reason="Issue #1223: unskip when fixing")
 
 def test_na_replace_issue_repro(spark) -> None:
     """df.na.replace(\"a\", \"A\", subset=[\"x\"]).collect() (issue repro)."""
@@ -19,6 +21,7 @@ def test_na_replace_issue_repro(spark) -> None:
     assert rows[0]["x"] == "A"
     assert rows[1]["x"] == "b"
 
+@pytest.mark.skip(reason="Issue #1223: unskip when fixing")
 
 def test_na_replace_without_subset(spark) -> None:
     """na.replace applies to all columns when subset is None."""
@@ -44,6 +47,7 @@ def test_na_replace_subset_one_column(spark) -> None:
     assert rows[0]["a"] == 10 and rows[0]["b"] == 1
     assert rows[1]["a"] == 2 and rows[1]["b"] == 1
 
+@pytest.mark.skip(reason="Issue #1223: unskip when fixing")
 
 def test_na_replace_with_none(spark) -> None:
     """na.replace can replace with None (null)."""

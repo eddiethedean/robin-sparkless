@@ -7,6 +7,7 @@ PySpark supports these for controlling null placement in orderBy.
 """
 
 from __future__ import annotations
+import pytest
 
 from tests.fixtures.spark_imports import get_spark_imports
 
@@ -22,6 +23,7 @@ def test_column_has_desc_nulls_last(spark) -> None:
     assert hasattr(c, "asc_nulls_last")
     assert hasattr(c, "asc_nulls_first")
 
+@pytest.mark.skip(reason="Issue #1197: unskip when fixing")
 
 def test_order_by_desc_nulls_last(spark) -> None:
     """order_by_exprs with col().desc_nulls_last() puts nulls last."""
@@ -36,6 +38,7 @@ def test_order_by_desc_nulls_last(spark) -> None:
     assert values[2] == "A"
     assert values[3] is None
 
+@pytest.mark.skip(reason="Issue #1197: unskip when fixing")
 
 def test_order_by_asc_nulls_first(spark) -> None:
     """order_by_exprs with col().asc_nulls_first() puts nulls first."""

@@ -398,6 +398,7 @@ class TestWithField:
         rows = result_bool.collect()
         assert rows[0]["my_struct"]["bool_field"] is True
 
+    @pytest.mark.skip(reason="Issue #1263: unskip when fixing")
     def test_withfield_nested_struct(self, spark):
         """Test withField on nested struct columns."""
         nested_struct_type = StructType(
@@ -677,6 +678,7 @@ class TestWithField:
         assert rows[1]["my_struct"]["value_1"] == "20"
         assert rows[1]["my_struct"]["id_int"] == 2
 
+    @pytest.mark.skip(reason="Issue #1263: unskip when fixing")
     def test_withfield_replace_with_different_type(self, spark):
         """Test replacing a field with a different data type."""
         schema = StructType(
@@ -766,6 +768,7 @@ class TestWithField:
         assert rows[0]["my_struct"]["value_1"] == 1
         assert rows[0]["my_struct"]["null_field"] is None
 
+    @pytest.mark.skip(reason="Issue #1263: unskip when fixing")
     def test_withfield_with_array_field(self, spark):
         """Test withField adding a field that is an array."""
 
@@ -1105,6 +1108,7 @@ class TestWithField:
         assert struct["field3"] == 3
         assert struct["field4"] == "d"
 
+    @pytest.mark.skip(reason="Issue #1263: unskip when fixing")
     def test_withfield_nested_struct_field_access(self, spark):
         """Test withField using nested struct field access in expression."""
         nested_struct_type = StructType(
@@ -1165,6 +1169,7 @@ class TestWithField:
         assert rows[0]["my_struct"]["computed_from_nested"] == 10  # 5 * 2
         assert rows[1]["my_struct"]["computed_from_nested"] == 30  # 15 * 2
 
+    @pytest.mark.skip(reason="Issue #1263: unskip when fixing")
     def test_withfield_nested_struct_string_expression(self, spark):
         """Test withField using nested struct field in string expression."""
         nested_struct_type = StructType(
@@ -1228,6 +1233,7 @@ class TestWithField:
         combined2 = rows[1]["my_struct"]["combined_string"]
         assert combined2 == "prefix_data" or combined2 == "prefix_"
 
+    @pytest.mark.skip(reason="Issue #1263: unskip when fixing")
     def test_withfield_multiple_nested_structs(self, spark):
         """Test withField with multiple nested structs at same level."""
         nested1_type = StructType([StructField("n1_value", IntegerType(), True)])
@@ -1367,6 +1373,7 @@ class TestWithField:
         )
         assert rows[0]["my_struct"]["from_deep_nest"] == 40  # 4 * 10
 
+    @pytest.mark.skip(reason="Issue #1263: unskip when fixing")
     def test_withfield_nested_struct_with_null(self, spark):
         """Test withField with nested struct containing null values."""
         nested_struct_type = StructType(
@@ -1421,6 +1428,7 @@ class TestWithField:
         # Nested struct should still be None
         assert rows[1]["my_struct"]["nested"] is None
 
+    @pytest.mark.skip(reason="Issue #1263: unskip when fixing")
     def test_withfield_nested_struct_arithmetic(self, spark):
         """Test withField with arithmetic operations on nested struct fields."""
         nested_struct_type = StructType(

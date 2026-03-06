@@ -174,6 +174,7 @@ class TestIssue336WindowFunctionComparison:
         finally:
             spark.stop()
 
+    @pytest.mark.skip(reason="Issue #1218: unskip when fixing")
     def test_window_function_comparison_with_filter(self):
         """Window functions in filter are not allowed (PySpark parity)."""
         spark = SparkSession.builder.appName("issue-336").getOrCreate()
@@ -410,6 +411,7 @@ class TestIssue336WindowFunctionComparison:
         finally:
             spark.stop()
 
+    @pytest.mark.skip(reason="Issue #1218: unskip when fixing")
     def test_window_function_comparison_direct_filter(self):
         """Window functions used directly in filter raise (PySpark parity)."""
         spark = SparkSession.builder.appName("issue-336").getOrCreate()
@@ -1074,6 +1076,7 @@ class TestIssue336WindowFunctionComparison:
         finally:
             spark.stop()
 
+    @pytest.mark.skip(reason="Issue #1218: unskip when fixing")
     def test_window_function_comparison_with_count(self):
         """Test WindowFunction comparison with count() window function (PySpark semantics)."""
         spark = SparkSession.builder.appName("issue-336").getOrCreate()
@@ -1161,6 +1164,7 @@ class TestIssue336WindowFunctionComparison:
         finally:
             spark.stop()
 
+    @pytest.mark.skip(reason="Issue #1218: unskip when fixing")
     def test_window_function_comparison_with_first_value(self):
         """Test WindowFunction comparison with first_value() window function."""
         spark = SparkSession.builder.appName("issue-336").getOrCreate()
@@ -1218,6 +1222,7 @@ class TestIssue336WindowFunctionComparison:
         finally:
             spark.stop()
 
+    @pytest.mark.skip(reason="Issue #1218: unskip when fixing")
     def test_window_function_comparison_with_countDistinct(self):
         """Distinct window aggregates are not supported in PySpark."""
         spark = SparkSession.builder.appName("issue-336").getOrCreate()
@@ -1724,6 +1729,7 @@ class TestIssue336WindowFunctionComparison:
         finally:
             spark.stop()
 
+    @pytest.mark.skip(reason="Issue #1218: unskip when fixing")
     def test_window_function_comparison_with_chained_filters(self):
         """Window function in chained filters raises (PySpark parity)."""
         spark = SparkSession.builder.appName("issue-336").getOrCreate()

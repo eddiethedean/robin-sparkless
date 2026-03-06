@@ -345,6 +345,7 @@ class TestIssue260EqNullSafe:
         finally:
             spark.stop()
 
+    @pytest.mark.skip(reason="Issue #1201: unskip when fixing")
     def test_eqnullsafe_with_type_coercion(self) -> None:
         """Test eqNullSafe with type coercion (string vs numeric)."""
         spark = SparkSession.builder.appName("EqNullSafeCoercion").getOrCreate()

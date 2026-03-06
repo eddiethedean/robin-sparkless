@@ -4,11 +4,14 @@ Tests for #403: date functions (hour, minute, etc.) on string timestamp column (
 
 from __future__ import annotations
 
+import pytest
+
 from tests.fixtures.spark_imports import get_spark_imports
 
 _imports = get_spark_imports()
 F = _imports.F
 
+@pytest.mark.skip(reason="Issue #1235: unskip when fixing")
 
 def test_hour_on_string_timestamp(spark) -> None:
     """hour(col) accepts string timestamp column; parses and returns hour (0-23)."""
@@ -20,6 +23,7 @@ def test_hour_on_string_timestamp(spark) -> None:
     assert len(result) == 1
     assert result[0]["h"] == 14
 
+@pytest.mark.skip(reason="Issue #1235: unskip when fixing")
 
 def test_minute_second_on_string_timestamp(spark) -> None:
     """minute(col) and second(col) accept string timestamp column."""

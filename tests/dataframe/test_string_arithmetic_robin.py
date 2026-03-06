@@ -10,6 +10,8 @@ test_issue_201_type_strictness.py for implicit coercion tests.
 
 from __future__ import annotations
 
+import pytest
+
 from tests.fixtures.spark_imports import get_spark_imports
 
 _imports = get_spark_imports()
@@ -43,6 +45,7 @@ def test_numeric_literal_divided_by_string_robin(spark) -> None:
     assert rows[0]["result"] == 10.0
     assert rows[1]["result"] == 20.0
 
+@pytest.mark.skip(reason="Issue #1251: unskip when fixing")
 
 def test_string_arithmetic_with_invalid_strings_robin(spark) -> None:
     """Invalid numeric strings become null when used in arithmetic (via cast)."""

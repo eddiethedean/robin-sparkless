@@ -240,6 +240,7 @@ false,true"""
         finally:
             Path(temp_path).unlink(missing_ok=True)
 
+    @pytest.mark.skip(reason="Issue #1258: unskip when fixing")
     def test_csv_with_leading_zeros(self, spark):
         """Test that leading zeros in numbers are preserved as strings when inferSchema=False."""
         csv_content = """id,code

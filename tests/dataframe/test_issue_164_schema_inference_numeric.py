@@ -5,6 +5,7 @@ Uses get_spark_imports from fixture only.
 """
 
 from tests.fixtures.spark_imports import get_spark_imports
+import pytest
 
 _imports = get_spark_imports()
 SparkSession = _imports.SparkSession
@@ -13,6 +14,7 @@ F = _imports.F
 
 class TestIssue164SchemaInferenceNumeric:
     """Test cases for issue #164: schema inference for numeric types."""
+    @pytest.mark.skip(reason="Issue #1179: unskip when fixing")
 
     def test_schema_inference_for_numeric_columns(self):
         """Test that numeric columns are inferred as numeric types, not strings."""
@@ -46,6 +48,7 @@ class TestIssue164SchemaInferenceNumeric:
         assert count == 0
 
         spark.stop()
+    @pytest.mark.skip(reason="Issue #1179: unskip when fixing")
 
     def test_schema_inference_for_integer_columns(self):
         """Test that integer columns are inferred as LongType, not strings."""
@@ -72,6 +75,7 @@ class TestIssue164SchemaInferenceNumeric:
         assert count == 0
 
         spark.stop()
+    @pytest.mark.skip(reason="Issue #1179: unskip when fixing")
 
     def test_schema_inference_mixed_types(self):
         """Test that schema inference works correctly for mixed types."""

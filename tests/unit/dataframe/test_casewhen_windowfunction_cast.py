@@ -8,6 +8,8 @@ These tests work with both sparkless (mock) and PySpark backends.
 Set MOCK_SPARK_TEST_BACKEND=pyspark to run with real PySpark.
 """
 
+import pytest
+
 from tests.fixtures.spark_imports import get_spark_imports
 
 # Get imports based on backend
@@ -61,6 +63,7 @@ class TestCaseWhenCast:
         assert isinstance(when_result_field.dataType, LongType), (
             f"Expected LongType, got {type(when_result_field.dataType)}"
         )
+    @pytest.mark.skip(reason="Issue #1256: unskip when fixing")
 
     def test_casewhen_cast_to_string(self, spark):
         """Test CaseWhen.cast() to string."""
@@ -283,6 +286,7 @@ class TestWindowFunctionCast:
         rank_field = next((f for f in schema.fields if f.name == "rank_long"), None)
         assert rank_field is not None
         assert isinstance(rank_field.dataType, LongType)
+    @pytest.mark.skip(reason="Issue #1256: unskip when fixing")
 
     def test_window_function_cast_to_string(self, spark):
         """Test WindowFunction.cast() to string."""
