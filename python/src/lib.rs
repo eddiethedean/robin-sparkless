@@ -9,7 +9,7 @@ use pyo3::create_exception;
 use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyDict, PyList, PyTuple};
 use robin_sparkless::dataframe::{
-    try_extract_join_eq_columns, JoinType, PivotedGroupedData, SaveMode, WriteFormat, WriteMode,
+    try_extract_join_eq_columns_all, JoinType, PivotedGroupedData, SaveMode, WriteFormat, WriteMode,
 };
 use robin_sparkless::functions::{self, asc_from_name, SortOrder, ThenBuilder, WhenBuilder};
 use robin_sparkless::{
@@ -3753,11 +3753,11 @@ impl PyDataFrame {
                         .map_err(to_py_err);
                 }
             }
-            // Complex expression (e.g. left.dept_id == right.dept_id): try key-based join first (#1049).
+            // Complex expression (e.g. left.dept_id == right.dept_id): try key-based join first (#1049, #1148).
             if let Ok(condition) = on_arg.downcast::<PyColumn>() {
                 let expr = condition.borrow().inner.clone().into_expr();
-                if let Some((key_a, key_b)) = try_extract_join_eq_columns(&expr) {
-                    // Resolve which key belongs to left vs right (issue #421: F.col("Key") == F.col("Name") with Key on right).
+                let pairs = try_extract_join_eq_columns_all(&expr);
+                if !pairs.is_empty() {
                     let left_cols: std::collections::HashSet<String> = self
                         .inner
                         .columns()
@@ -3770,23 +3770,28 @@ impl PyDataFrame {
                         .map_err(to_py_err)?
                         .into_iter()
                         .collect();
-                    let (left_key, right_key) = resolve_join_keys_with_aliases(
-                        &key_a,
-                        &key_b,
-                        &left_cols,
-                        &right_cols,
-                        self.inner.get_alias().as_deref(),
-                        other.inner.get_alias().as_deref(),
-                    );
-                    if let Some((lk, rk)) = left_key.zip(right_key) {
+                    let mut left_refs: Vec<String> = Vec::with_capacity(pairs.len());
+                    let mut right_refs: Vec<String> = Vec::with_capacity(pairs.len());
+                    for (key_a, key_b) in &pairs {
+                        let (left_key, right_key) = resolve_join_keys_with_aliases(
+                            key_a,
+                            key_b,
+                            &left_cols,
+                            &right_cols,
+                            self.inner.get_alias().as_deref(),
+                            other.inner.get_alias().as_deref(),
+                        );
+                        if let (Some(lk), Some(rk)) = (left_key, right_key) {
+                            left_refs.push(lk);
+                            right_refs.push(rk);
+                        }
+                    }
+                    if left_refs.len() == pairs.len() {
+                        let left_refs: Vec<&str> = left_refs.iter().map(|s| s.as_str()).collect();
+                        let right_refs: Vec<&str> = right_refs.iter().map(|s| s.as_str()).collect();
                         let joined = self
                             .inner
-                            .join_with_keys(
-                                &other.inner,
-                                vec![lk.as_str()],
-                                vec![rk.as_str()],
-                                join_type,
-                            )
+                            .join_with_keys(&other.inner, left_refs, right_refs, join_type)
                             .map_err(to_py_err)?;
                         // When the original expression was a compound condition (e.g. key equality AND filter),
                         // reapply the full predicate after the key-based join so additional conditions are honored

@@ -23,9 +23,15 @@ fn expr_to_column_name(expr: &Expr) -> Option<String> {
 /// compound conditions like (a.id == b.id) & (a.amount > 30) still yield the key pair.
 /// Used for PySpark parity (#1049, #380).
 pub fn try_extract_join_eq_columns(expr: &Expr) -> Option<(String, String)> {
+    try_extract_join_eq_columns_all(expr).into_iter().next()
+}
+
+/// Collects all (left_col, right_col) equality pairs from an expression (e.g. AND of (a.id == b.id) & (a.x == b.x)).
+/// Used so condition joins on multiple keys use a single join with all keys (#1148).
+pub fn try_extract_join_eq_columns_all(expr: &Expr) -> Vec<(String, String)> {
     use polars::prelude::Expr as PlExpr;
 
-    fn inner_extract(e: &Expr) -> Option<(String, String)> {
+    fn inner_extract_all(e: &Expr, out: &mut Vec<(String, String)>) {
         let mut current = e;
         while let PlExpr::Alias(inner, _) = current {
             current = inner.as_ref();
@@ -36,23 +42,28 @@ pub fn try_extract_join_eq_columns(expr: &Expr) -> Option<(String, String)> {
                 op: Operator::Eq | Operator::EqValidity,
                 right,
             } => {
-                let left_name = expr_to_column_name(left.as_ref())?;
-                let right_name = expr_to_column_name(right.as_ref())?;
-                Some((left_name, right_name))
+                if let (Some(l), Some(r)) = (
+                    expr_to_column_name(left.as_ref()),
+                    expr_to_column_name(right.as_ref()),
+                ) {
+                    out.push((l, r));
+                }
             }
             PlExpr::BinaryExpr {
                 left,
                 op: Operator::And,
                 right,
             } => {
-                // Look for an equality on either side of the AND.
-                inner_extract(left.as_ref()).or_else(|| inner_extract(right.as_ref()))
+                inner_extract_all(left.as_ref(), out);
+                inner_extract_all(right.as_ref(), out);
             }
-            _ => None,
+            _ => {}
         }
     }
 
-    inner_extract(expr)
+    let mut pairs = Vec::new();
+    inner_extract_all(expr, &mut pairs);
+    pairs
 }
 
 /// Join type for DataFrame joins (PySpark-compatible)
@@ -303,20 +314,14 @@ pub fn join(
         right_on_exprs = right_key_names.iter().map(|n| col(n.as_str())).collect();
     }
 
-    // When coalesce_same_name_keys (join(right, "id")), coalesce so result has one key column (#1049, #353).
-    // When condition join (left.x == right.x), keep both columns for parity fixture.
+    // When same-named keys (e.g. join on "id" or left.id == right.id), coalesce so result has one
+    // key column and no _right in row keys (PySpark parity #1049, #353, #1148).
+    // Outer joins keep separate key columns so canonical key comes from left (issue #280).
     let coalesce = if keys_differ {
         JoinCoalesce::KeepColumns
-    } else if coalesce_same_name_keys
-        && matches!(how, JoinType::Inner | JoinType::Left | JoinType::Right)
-    {
-        // NOTE: Outer joins keep separate key columns so the canonical key column comes from the left
-        // and unmatched right rows have null key (PySpark parity for outer join on key, issue #280).
+    } else if matches!(how, JoinType::Inner | JoinType::Left | JoinType::Right) {
         JoinCoalesce::CoalesceColumns
-    } else if matches!(
-        how,
-        JoinType::Inner | JoinType::Left | JoinType::Right | JoinType::Outer
-    ) {
+    } else if matches!(how, JoinType::Outer) {
         JoinCoalesce::KeepColumns
     } else {
         JoinCoalesce::CoalesceColumns
@@ -368,6 +373,51 @@ pub fn join(
         joined = joined.select(&keep_exprs);
         let result_schema = joined.collect_schema()?;
         names = result_schema.iter_names().map(|s| s.to_string()).collect();
+    }
+    // When same-named keys and Inner/Left/Right, select exactly: keys (once), left non-keys,
+    // right non-keys (with _right for overlap). Polars join may output key_right or duplicate
+    // key names; selecting by this list yields one column per key (#1148).
+    if !keys_differ && matches!(how, JoinType::Inner | JoinType::Left | JoinType::Right) {
+        let left_names: Vec<String> = left.columns()?.into_iter().collect();
+        let right_names: Vec<String> = right.columns()?.into_iter().collect();
+        let key_set: std::collections::HashSet<&str> =
+            left_key_names.iter().map(|s| s.as_str()).collect();
+        let left_set: std::collections::HashSet<&str> =
+            left_names.iter().map(|s| s.as_str()).collect();
+        let mut desired: Vec<String> = left_key_names.clone();
+        for n in &left_names {
+            if !key_set.contains(n.as_str()) {
+                desired.push(n.clone());
+            }
+        }
+        for n in &right_names {
+            if key_set.contains(n.as_str()) {
+                continue;
+            }
+            let use_name = if left_set.contains(n.as_str()) {
+                format!("{n}_right")
+            } else {
+                n.clone()
+            };
+            desired.push(use_name);
+        }
+        // Select only desired columns; this drops key_right columns. Filter to names that
+        // exist in the join result (schema may list unique names only, so we still select).
+        let result_schema_ref = joined.collect_schema()?;
+        let result_names: std::collections::HashSet<String> = result_schema_ref
+            .iter_names()
+            .map(|s| s.to_string())
+            .collect();
+        let keep: Vec<String> = desired
+            .into_iter()
+            .filter(|n| result_names.contains(n))
+            .collect();
+        if !keep.is_empty() {
+            let exprs: Vec<Expr> = keep.iter().map(|n| col(n.as_str())).collect();
+            joined = joined.select(&exprs);
+            let result_schema = joined.collect_schema()?;
+            names = result_schema.iter_names().map(|s| s.to_string()).collect();
+        }
     }
     let mut seen = std::collections::HashSet::new();
     let mut unique_order: Vec<String> = Vec::new();
@@ -430,7 +480,7 @@ pub fn join(
 
 #[cfg(test)]
 mod tests {
-    use super::{JoinType, join, try_extract_join_eq_columns};
+    use super::{JoinType, join, try_extract_join_eq_columns, try_extract_join_eq_columns_all};
     use crate::functions::col;
     use crate::{DataFrame, SparkSession};
     use std::collections::HashMap;
@@ -443,6 +493,21 @@ mod tests {
         let expr = eq_expr.into_expr();
         let out = try_extract_join_eq_columns(&expr);
         assert_eq!(out, Some(("dept_id".to_string(), "dept_id".to_string())));
+    }
+
+    #[test]
+    fn extract_join_eq_columns_all_from_and_of_equalities() {
+        // (a == a) & (b == b) yields both pairs (#1148).
+        let right = col("b").eq(col("b").into_expr());
+        let expr = col("a").eq(col("a").into_expr()).and_(&right).into_expr();
+        let out = try_extract_join_eq_columns_all(&expr);
+        assert_eq!(
+            out,
+            vec![
+                ("a".to_string(), "a".to_string()),
+                ("b".to_string(), "b".to_string()),
+            ]
+        );
     }
 
     #[test]
