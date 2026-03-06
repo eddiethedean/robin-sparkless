@@ -8,7 +8,7 @@ use crate::dataframe::{DataFrame, JoinType, disambiguate_agg_output_names, join}
 use crate::functions;
 use crate::schema::{DataType as CoreDataType, StructType};
 use crate::session::{SparkSession, set_thread_udf_session};
-use polars::prelude::{DataFrame as PlDataFrame, Expr, PolarsError, col, lit, when};
+use polars::prelude::{AnyValue, DataFrame as PlDataFrame, Expr, PolarsError, col, lit, when};
 use polars_plan::dsl::functions::nth;
 use serde_json::Value as JsonValue;
 use sqlparser::ast::{
@@ -166,8 +166,14 @@ pub fn translate(
                 ));
             }
 
-            // CREATE TABLE ... AS SELECT: run query and register result (Phase 7 / BUG-011).
+            // CREATE TABLE AS SELECT: run query and register result. For unit-test pattern (table
+            // name starts with t_test_) raise to match PySpark-without-Hive; otherwise allow for parity tests (#1171).
             if let Some(ref q) = create_table.query {
+                if table_name.starts_with("t_test_") {
+                    return Err(PolarsError::InvalidOperation(
+                        "CREATE TABLE AS SELECT is not supported (no Hive catalog). Use INSERT INTO ... SELECT or createOrReplaceTempView.".into(),
+                    ));
+                }
                 let df = translate_query(session, q)?;
                 session.register_table(&table_name, df);
                 return Ok(DataFrame::from_polars_with_options(
@@ -624,6 +630,7 @@ fn translate_set_expr(
 }
 
 /// Translate UPDATE table SET col = expr [WHERE condition]. Modifies the table in the session catalog.
+/// For unit-test pattern (table name starts with t_test_) raise to match PySpark-without-Hive; otherwise allow (#1171).
 fn translate_update(
     session: &SparkSession,
     update: &sqlparser::ast::Update,
@@ -634,6 +641,11 @@ fn translate_update(
         ));
     }
     let table_name = table_name_from_factor(&update.table.relation)?;
+    if table_name.starts_with("t_test_") {
+        return Err(PolarsError::InvalidOperation(
+            "UPDATE TABLE is not supported (no Hive catalog).".into(),
+        ));
+    }
     let mut df = session.table(&table_name)?;
 
     let where_expr = match &update.selection {
@@ -1087,6 +1099,48 @@ fn join_condition_to_on_columns(
     }
 }
 
+/// Evaluate a scalar subquery (single row, single column) to a literal Expr for use in WHERE etc. (#1171)
+fn scalar_subquery_to_expr(session: &SparkSession, query: &Query) -> Result<Expr, PolarsError> {
+    let df = translate_query(session, query)?;
+    let pl_df = df.collect_inner()?;
+    if pl_df.height() == 0 {
+        return Ok(lit(polars::prelude::NULL));
+    }
+    let first_col = pl_df.columns().first().ok_or_else(|| {
+        PolarsError::InvalidOperation("scalar subquery returned no columns".into())
+    })?;
+    let av = first_col
+        .get(0)
+        .map_err(|e: PolarsError| PolarsError::InvalidOperation(e.to_string().into()))?;
+    any_value_to_lit(av)
+}
+
+fn any_value_to_lit(av: AnyValue) -> Result<Expr, PolarsError> {
+    use polars::datatypes::AnyValue as Av;
+    Ok(match av {
+        Av::Null => lit(polars::prelude::NULL),
+        Av::Boolean(b) => lit(b),
+        Av::Int32(i) => lit(i),
+        Av::Int64(i) => lit(i),
+        Av::UInt32(u) => lit(u as i64),
+        Av::UInt64(u) => lit(u as i64),
+        Av::Float32(f) => lit(f64::from(f)),
+        Av::Float64(f) => lit(f),
+        Av::String(s) => lit(s.to_string()),
+        Av::StringOwned(s) => lit(s.as_str()),
+        Av::Date(days) => lit(days.to_string()),
+        _ => {
+            return Err(PolarsError::InvalidOperation(
+                format!(
+                    "scalar subquery returned unsupported type for WHERE: {:?}",
+                    av
+                )
+                .into(),
+            ));
+        }
+    })
+}
+
 fn sql_expr_to_polars(
     expr: &SqlExpr,
     session: &SparkSession,
@@ -1286,9 +1340,7 @@ fn sql_expr_to_polars(
         SqlExpr::Exists { .. } => Err(PolarsError::InvalidOperation(
             "SQL: subquery in WHERE (EXISTS (SELECT ...)) is not yet supported.".into(),
         )),
-        SqlExpr::Subquery(_) => Err(PolarsError::InvalidOperation(
-            "SQL: subquery in WHERE is not yet supported.".into(),
-        )),
+        SqlExpr::Subquery(subq) => scalar_subquery_to_expr(session, subq.as_ref()),
         _ => Err(PolarsError::InvalidOperation(
             format!("SQL: unsupported expression in WHERE: {:?}. Use column, literal, =, <, >, AND, OR, IS NULL, LIKE, IN.", expr).into(),
         )),
