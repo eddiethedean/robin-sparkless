@@ -320,6 +320,8 @@ const COLLECT_STRING_ONLY_COLUMNS: &[&str] = &[
     "c1",
     "value",
     "extracted",
+    // #1262: union(numeric, string) coerces to string; keep "key" as string in Row.
+    "key",
 ];
 
 /// True when output has a, nested, missing (get_json_object test shape); then treat those as string (#1146, avoid regression on lone column "a").
@@ -2372,6 +2374,11 @@ fn py_any_to_json(_py: Python<'_>, v: &Bound<'_, PyAny>) -> PyResult<JsonValue> 
     if let Ok(b) = v.extract::<bool>() {
         return Ok(JsonValue::Bool(b));
     }
+    // Try String before i64/f64 so createDataFrame([{"key": "3"}]) keeps "3" as string (Issue #1262).
+    // PyO3 can extract str "3" as i64, which would wrongly infer key as long and break union type coercion.
+    if let Ok(s) = v.extract::<String>() {
+        return Ok(JsonValue::String(s));
+    }
     if let Ok(i) = v.extract::<i64>() {
         return Ok(JsonValue::Number(serde_json::Number::from(i)));
     }
@@ -2379,9 +2386,6 @@ fn py_any_to_json(_py: Python<'_>, v: &Bound<'_, PyAny>) -> PyResult<JsonValue> 
         if let Some(n) = serde_json::Number::from_f64(f) {
             return Ok(JsonValue::Number(n));
         }
-    }
-    if let Ok(s) = v.extract::<String>() {
-        return Ok(JsonValue::String(s));
     }
     if let Ok(bytes) = v.downcast::<PyBytes>() {
         use ::base64::Engine;

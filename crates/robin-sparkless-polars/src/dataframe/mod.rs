@@ -1136,7 +1136,8 @@ impl DataFrame {
                 } else {
                     match s.cast(&dtype) {
                         Ok(casted) => Ok((casted, dtype)),
-                        Err(_) => Ok((s.clone(), s.dtype().clone())),
+                        // Keep target dtype for serialization so any_value_to_json emits string when plan says String (Issue #1262).
+                        Err(_) => Ok((s.clone(), dtype)),
                     }
                 }
             })
@@ -1154,6 +1155,17 @@ impl DataFrame {
                 row.insert(name.clone(), jv);
             }
             rows.push(row);
+        }
+        if std::env::var("SPARKLESS_DEBUG_UNION").as_deref() == Ok("1") {
+            if let Some((key_idx, _)) = names.iter().enumerate().find(|(_, n)| n.as_str() == "key")
+            {
+                let key_dtype = effective_dtypes.get(key_idx);
+                let first_key = rows.first().and_then(|r| r.get("key"));
+                eprintln!(
+                    "[union #1262 collect] key effective_dtype={:?} first_row key={:?}",
+                    key_dtype, first_key
+                );
+            }
         }
         Ok((names, rows, schema))
     }
