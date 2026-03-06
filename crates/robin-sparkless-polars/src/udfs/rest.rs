@@ -3970,6 +3970,11 @@ pub fn apply_to_timestamp_format(
     let chrono_fmt = format
         .map(pyspark_format_to_chrono)
         .unwrap_or_else(|| "%Y-%m-%d %H:%M:%S".to_string());
+    // PySpark parity #168: for "yyyy-MM-dd'T'HH:mm:ss", only parse when string has no fractional seconds
+    // (Spark SQL regex escaping can leave fractional part, so to_timestamp returns null).
+    let strict_iso_no_fraction = format
+        .map(|f| f.trim() == "yyyy-MM-dd'T'HH:mm:ss")
+        .unwrap_or(false);
     // #1101: Polars casts Datetime to String with space (e.g. "2024-01-15 10:30:00"); try space variant if T-format fails.
     let chrono_fmt_alt = chrono_fmt.replace('T', " ");
     let ca = series.str().map_err(|e| compute_err("to_timestamp", e))?;
@@ -3978,6 +3983,9 @@ pub fn apply_to_timestamp_format(
         ca.into_iter().map(|opt_s| {
             opt_s.and_then(|s| {
                 let s = s.trim();
+                if strict_iso_no_fraction && (s.len() != 19 || s.contains('.')) {
+                    return None;
+                }
                 NaiveDateTime::parse_from_str(s, &chrono_fmt)
                     .or_else(|_| NaiveDateTime::parse_from_str(s, &chrono_fmt_alt))
                     .ok()

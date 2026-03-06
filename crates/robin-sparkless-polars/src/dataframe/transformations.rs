@@ -261,7 +261,18 @@ pub fn select_with_exprs(
     } else {
         lf.select(&exprs)
     };
-    Ok(super::DataFrame::from_lazy_with_options(lf, case_sensitive))
+    // When input is Eager (e.g. createDataFrame), return Eager result so collect() uses
+    // schema order that matches columns (#1267). List-of-dicts createDataFrame first column
+    // null is fixed in Python binding (python_row_to_json).
+    if df.is_eager() {
+        let pl_df = lf.collect()?;
+        Ok(super::DataFrame::from_eager_with_options(
+            pl_df,
+            case_sensitive,
+        ))
+    } else {
+        Ok(super::DataFrame::from_lazy_with_options(lf, case_sensitive))
+    }
 }
 
 /// Select item: either a column name (str) or an expression (PySpark parity: select("a", col("b").alias("x"))).
@@ -324,7 +335,8 @@ pub fn select_items(
                     exprs.push(coerced.alias(safe));
                 } else {
                     let resolved = df.resolve_column_name(name)?;
-                    exprs.push(col(resolved));
+                    // Explicit alias so output name is stable when mixed with window exprs (#1267).
+                    exprs.push(col(resolved).alias(name));
                 }
             }
             SelectItem::Expr(e) => {
@@ -2166,6 +2178,48 @@ mod tests {
     /// after a join where both "name" and "NAME" exist should:
     /// - pick the first matching physical column (left side of the join), and
     /// - expose it under the requested spelling ("NaMe").
+    ///   #1267: select("dept", "salary", row_number().over(w)) must preserve dept/salary values.
+    #[test]
+    fn select_items_with_window_preserves_column_values() {
+        let spark = SparkSession::builder()
+            .app_name("select_window_1267")
+            .get_or_create();
+        let rows = vec![vec![json!("A"), json!(100)], vec![json!("A"), json!(200)]];
+        let schema = vec![
+            ("dept".to_string(), "string".to_string()),
+            ("salary".to_string(), "bigint".to_string()),
+        ];
+        let df = spark
+            .create_dataframe_from_rows(rows, schema, false, false)
+            .unwrap();
+        let rank_col = Column::row_number_over(&["dept"], &["salary".to_string()]).unwrap();
+        let rank_expr = rank_col.into_expr().alias("rn");
+        let items = vec![
+            SelectItem::ColumnName("dept"),
+            SelectItem::ColumnName("salary"),
+            SelectItem::Expr(rank_expr),
+        ];
+        let out = select_items(&df, items, false).unwrap();
+        let rows_out = out.collect_as_json_rows().unwrap();
+        assert_eq!(rows_out.len(), 2, "expected 2 rows");
+        let first = &rows_out[0];
+        assert_eq!(
+            first.get("dept").and_then(|v| v.as_str()),
+            Some("A"),
+            "first row dept must be A (#1267)"
+        );
+        assert_eq!(
+            first.get("salary").and_then(|v| v.as_i64()),
+            Some(100),
+            "first row salary must be 100"
+        );
+        assert_eq!(
+            first.get("rn").and_then(|v| v.as_i64()),
+            Some(1),
+            "first row rn must be 1"
+        );
+    }
+
     #[test]
     fn select_items_ambiguous_case_prefers_first_match_and_uses_requested_name() {
         use polars::prelude::df;

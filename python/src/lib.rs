@@ -18,6 +18,7 @@ use robin_sparkless::{
 };
 use serde_json::Value as JsonValue;
 use std::cell::RefCell;
+use std::env;
 use std::path::Path;
 use std::thread_local;
 
@@ -1831,45 +1832,244 @@ fn python_data_and_schema(
     let mut inferred_schema: Option<Vec<(String, String)>> = None;
     let mut row_kind: Option<&'static str> = None;
 
-    for (idx, item) in list.iter().enumerate() {
-        let kind = if item.downcast::<PyDict>().is_ok() {
-            "dict"
-        } else if item.downcast::<PyList>().is_ok()
-            || item.downcast::<pyo3::types::PyTuple>().is_ok()
-        {
-            "seq"
-        } else {
-            "scalar"
+    // #1267: when we have column order, build rows in Python so dict.get(k) runs in Python
+    // and keys are found correctly (avoids PyO3 dict lookup issues).
+    if !list.is_empty() && column_order.is_some() {
+        let keys = column_order.as_ref().unwrap();
+        let keys_py = PyList::empty_bound(py);
+        for k in keys {
+            keys_py.append(k.as_str())?;
+        }
+        // Normalize to list of plain dicts so d.get(k) finds keys regardless of key type (#357, #1267).
+        let data_for_batch: Bound<'_, PyList> = (|| {
+            let out = PyList::empty_bound(py);
+            let builtins = py.import_bound("builtins").ok()?;
+            let dict_fn = builtins.getattr("dict").ok()?;
+            for item in list.iter() {
+                let normalized = dict_fn.call1((item,)).ok()?;
+                out.append(normalized).ok()?;
+            }
+            Some(out)
+        })()
+        .unwrap_or_else(|| list.clone());
+        // Prefer dict_rows_to_column_order from Python (load _cdf_helpers then get from sys.modules); then eval.
+        let try_helper = || -> PyResult<Option<Bound<'_, PyList>>> {
+            let _ = py.import_bound("sparkless._cdf_helpers").ok(); // ensure loaded
+            let sys = py.import_bound("sys")?;
+            let modules = sys.getattr("modules")?;
+            let mod_ = modules.get_item("sparkless._cdf_helpers").map_err(|_| {
+                PyErr::new::<pyo3::exceptions::PyImportError, _>(
+                    "sparkless._cdf_helpers not in sys.modules",
+                )
+            })?;
+            let func = mod_.getattr("dict_rows_to_column_order")?;
+            let result = func.call1((data_for_batch.as_ref(), &keys_py))?;
+            let list: Bound<'_, PyList> = result.downcast_into()?;
+            Ok(Some(list))
         };
-        if let Some(first) = row_kind {
-            // Disallow mixing dict and seq rows when schema is not explicit (PySpark parity).
-            // When schema is explicit (StructType/DDL/pairs), allow mixing: tuple rows are positional, dict rows use schema order.
-            if schema_res.is_none()
-                && ((first == "dict" && kind == "seq") || (first == "seq" && kind == "dict"))
+        let rows_py = try_helper().ok().flatten().or_else(|| {
+            let globals = PyDict::new_bound(py);
+            if globals.set_item("_cdf_d", &data_for_batch).is_err() {
+                return None;
+            }
+            if globals.set_item("_cdf_k", &keys_py).is_err() {
+                return None;
+            }
+            let builtins = py.import_bound("builtins").ok()?;
+            if globals.set_item("__builtins__", &builtins).is_err() {
+                return None;
+            }
+            let code = "[[d.get(k) for k in _cdf_k] for d in _cdf_d]";
+            let result = builtins
+                .getattr("eval")
+                .ok()?
+                .call1((code, &globals))
+                .ok()?;
+            result.downcast_into::<PyList>().ok()
+        });
+        if let Some(rows_py) = rows_py {
+            if rows_py.len() == list.len() {
+                let mut parsed = Vec::with_capacity(rows_py.len());
+                for row_py in rows_py.iter() {
+                    if let Ok(row_list) = row_py.downcast::<PyList>() {
+                        let mut row = Vec::with_capacity(row_list.len());
+                        for v in row_list.iter() {
+                            row.push(py_any_to_json(py, &v)?);
+                        }
+                        parsed.push(row);
+                    } else {
+                        break;
+                    }
+                }
+                // Only use batch result if first column is present (avoid wrong lookup from eval/helper).
+                if parsed.len() == list.len()
+                    && parsed
+                        .first()
+                        .and_then(|r| r.first())
+                        .map(|v| !matches!(v, JsonValue::Null))
+                        .unwrap_or(false)
+                {
+                    rows.extend(parsed);
+                    row_kind = Some("dict");
+                }
+            }
+        }
+    }
+    // Per-row lambda for dict-like rows when batch lambda failed: [row.get(k) for k in keys].
+    let per_row_fn = if column_order.is_some() {
+        let keys = column_order.as_ref().unwrap();
+        let kpy = PyList::empty_bound(py);
+        for k in keys {
+            let _ = kpy.append(k.as_str());
+        }
+        let g = PyDict::new_bound(py);
+        if let Ok(builtins) = py.import_bound("builtins") {
+            let _ = g.set_item("__builtins__", &builtins);
+        }
+        let code = "(lambda row, keys: [row.get(k) for k in keys])";
+        let f = py
+            .import_bound("builtins")
+            .ok()
+            .and_then(|b| b.getattr("eval").ok())
+            .and_then(|ev| ev.call1((code, &g)).ok());
+        f.map(|func| (func, kpy))
+    } else {
+        None
+    };
+    if row_kind.is_none() {
+        for (idx, item) in list.iter().enumerate() {
+            let kind = if item.downcast::<PyDict>().is_ok() {
+                "dict"
+            } else if item.downcast::<PyList>().is_ok()
+                || item.downcast::<pyo3::types::PyTuple>().is_ok()
             {
-                return Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
-                    "createDataFrame: all rows must be the same shape (dict rows or list/tuple rows)",
-                ));
+                "seq"
+            } else {
+                "scalar"
+            };
+            if let Some(first) = row_kind {
+                // Disallow mixing dict and seq rows when schema is not explicit (PySpark parity).
+                // When schema is explicit (StructType/DDL/pairs), allow mixing: tuple rows are positional, dict rows use schema order.
+                if schema_res.is_none()
+                    && ((first == "dict" && kind == "seq") || (first == "seq" && kind == "dict"))
+                {
+                    return Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+                        "createDataFrame: all rows must be the same shape (dict rows or list/tuple rows)",
+                    ));
+                }
+            } else {
+                row_kind = Some(kind);
             }
-        } else {
-            row_kind = Some(kind);
-        }
-        let row = python_row_to_json(
-            py,
-            &item,
-            idx,
-            column_order.as_deref(),
-            from_pandas,
-            allow_scalar_single_column,
-        )?;
-        // For dict rows without explicit schema, infer full schema from all rows/keys later so we
-        // can include sparse keys (issue #372). For other row kinds, infer from the first row.
-        if inferred_schema.is_none() && schema_res.is_none() && kind != "dict" && !row.is_empty() {
-            if let Some(cols) = infer_schema_from_first_row(py, &item, from_pandas) {
-                inferred_schema = Some(cols);
+            // For native dicts with column_order: get each value in Python via row.get(k) (#1267).
+            let row = if item.downcast::<PyDict>().is_ok() && column_order.is_some() {
+                let order = column_order.as_ref().unwrap();
+                let from_eval: Option<Vec<JsonValue>> = (|| {
+                    let builtins = py.import_bound("builtins").ok()?;
+                    let eval_fn = builtins.getattr("eval").ok()?;
+                    let globals = PyDict::new_bound(py);
+                    globals.set_item("_row", &item).ok()?;
+                    globals.set_item("__builtins__", &builtins).ok()?;
+                    let mut values = Vec::with_capacity(order.len());
+                    for k in order {
+                        let py_k = pyo3::types::PyString::new_bound(py, k.as_str());
+                        globals.set_item("_k", &py_k).ok()?;
+                        let result = eval_fn.call1(("_row.get(_k)", &globals)).ok()?;
+                        let v = py_any_to_json(py, &result).ok().unwrap_or(JsonValue::Null);
+                        values.push(v);
+                    }
+                    Some(values)
+                })();
+                if let Some(values) = from_eval {
+                    values
+                } else {
+                    python_row_to_json(
+                        py,
+                        &item,
+                        idx,
+                        column_order.as_deref(),
+                        from_pandas,
+                        allow_scalar_single_column,
+                    )?
+                }
+            } else if item.downcast::<PyDict>().is_ok() {
+                python_row_to_json(
+                    py,
+                    &item,
+                    idx,
+                    column_order.as_deref(),
+                    from_pandas,
+                    allow_scalar_single_column,
+                )?
+            } else if let Some((ref row_fn, ref kpy)) = per_row_fn {
+                if item
+                    .getattr("get")
+                    .map(|g| g.is_callable())
+                    .unwrap_or(false)
+                {
+                    if let Ok(row_py) = row_fn.call1((&item, kpy)) {
+                        if let Ok(row_list) = row_py.downcast::<PyList>() {
+                            let mut r = Vec::with_capacity(row_list.len());
+                            for v in row_list.iter() {
+                                if let Ok(j) = py_any_to_json(py, &v) {
+                                    r.push(j);
+                                } else {
+                                    r.push(JsonValue::Null);
+                                }
+                            }
+                            r
+                        } else {
+                            python_row_to_json(
+                                py,
+                                &item,
+                                idx,
+                                column_order.as_deref(),
+                                from_pandas,
+                                allow_scalar_single_column,
+                            )?
+                        }
+                    } else {
+                        python_row_to_json(
+                            py,
+                            &item,
+                            idx,
+                            column_order.as_deref(),
+                            from_pandas,
+                            allow_scalar_single_column,
+                        )?
+                    }
+                } else {
+                    python_row_to_json(
+                        py,
+                        &item,
+                        idx,
+                        column_order.as_deref(),
+                        from_pandas,
+                        allow_scalar_single_column,
+                    )?
+                }
+            } else {
+                python_row_to_json(
+                    py,
+                    &item,
+                    idx,
+                    column_order.as_deref(),
+                    from_pandas,
+                    allow_scalar_single_column,
+                )?
+            };
+            // For dict rows without explicit schema, infer full schema from all rows/keys later so we
+            // can include sparse keys (issue #372). For other row kinds, infer from the first row.
+            if inferred_schema.is_none()
+                && schema_res.is_none()
+                && kind != "dict"
+                && !row.is_empty()
+            {
+                if let Some(cols) = infer_schema_from_first_row(py, &item, from_pandas) {
+                    inferred_schema = Some(cols);
+                }
             }
+            rows.push(row);
         }
-        rows.push(row);
     }
 
     // Names-only list schema should still infer types from data (PySpark parity).
@@ -1951,6 +2151,8 @@ fn python_data_and_schema(
     }
     // #1149: PySpark createDataFrame(list_of_dicts, [col names]) infers first column as Long/Double
     // and later numeric columns as String. Apply only for dict rows; list/tuple rows keep normal inference.
+    // #1267/#357: Only apply when the first column actually inferred as numeric; otherwise keep
+    // first column as string (e.g. dept="A", salary=100 with ["dept","salary"]).
     if schema_was_inferred
         && schema_names_only
         && matches!(row_kind, Some("dict"))
@@ -1965,7 +2167,12 @@ fn python_data_and_schema(
                     .unwrap_or_else(|| "string".to_string())
             })
             .collect();
+        let first_inferred_numeric = inferred
+            .get(0)
+            .map(|t| t.eq_ignore_ascii_case("long") || t.eq_ignore_ascii_case("double"))
+            .unwrap_or(false);
         let first_is_long = schema.len() == 2
+            && first_inferred_numeric
             && inferred
                 .get(1)
                 .map(|t| t.eq_ignore_ascii_case("long"))
@@ -1981,8 +2188,10 @@ fn python_data_and_schema(
                     0 => {
                         if first_is_long {
                             "long".to_string()
-                        } else {
+                        } else if first_inferred_numeric {
                             "double".to_string()
+                        } else {
+                            t.to_string()
                         }
                     }
                     _ if t.eq_ignore_ascii_case("double") => "string".to_string(),
@@ -2004,27 +2213,120 @@ fn python_row_to_json(
     from_pandas: bool,
     allow_scalar_single_column: bool,
 ) -> PyResult<Vec<JsonValue>> {
-    if let Ok(dict) = item.downcast::<PyDict>() {
-        let mut keys: Vec<String> = if let Some(order) = column_order {
-            order.to_vec()
-        } else {
-            dict.keys()
-                .iter()
-                .map(|k| k.extract::<String>().unwrap_or_default())
-                .collect()
-        };
-        if column_order.is_none() && !from_pandas {
-            keys.sort();
-        }
-        let mut values = Vec::with_capacity(keys.len());
-        for k in &keys {
-            match dict.get_item(k.as_str()) {
-                Ok(Some(v)) => values.push(py_any_to_json(py, &v)?),
-                Ok(None) => values.push(JsonValue::Null),
-                Err(e) => return Err(e),
+    // When column_order is given: use Python items() so key/value come from Python (#1267).
+    if let Some(order) = column_order {
+        if let Ok(items_view) = item.call_method0("items") {
+            if let Ok(list_fn) = py.import_bound("builtins").and_then(|b| b.getattr("list")) {
+                let list_result = list_fn.call1((items_view,));
+                if let Ok(any_list) = list_result {
+                    if let Ok(pairs) = any_list.downcast::<PyList>() {
+                        let mut map: Vec<(String, JsonValue)> = Vec::with_capacity(pairs.len());
+                        for pair in pairs.iter() {
+                            if let Ok(tup) = pair.downcast::<PyTuple>() {
+                                if tup.len() == 2 {
+                                    let key_str = tup
+                                        .get_item(0)
+                                        .ok()
+                                        .and_then(|pk| pk.extract::<String>().ok())
+                                        .unwrap_or_else(|| {
+                                            tup.get_item(0)
+                                                .map(|pk| pk.to_string())
+                                                .unwrap_or_default()
+                                        });
+                                    // Normalize key: PyO3 to_string() can return repr form (e.g. 'dept') so lookup by "dept" fails (#1267, #357).
+                                    let key_str = key_str
+                                        .strip_prefix('\'')
+                                        .and_then(|s| s.strip_suffix('\''))
+                                        .map(|s| s.to_string())
+                                        .unwrap_or(key_str);
+                                    let v = tup
+                                        .get_item(1)
+                                        .ok()
+                                        .and_then(|pv| py_any_to_json(py, &pv).ok())
+                                        .unwrap_or(JsonValue::Null);
+                                    map.push((key_str, v));
+                                }
+                            }
+                        }
+                        if !map.is_empty() {
+                            let mut values = Vec::with_capacity(order.len());
+                            for k in order {
+                                let val = map
+                                    .iter()
+                                    .find(|(key, _)| key == k || key.eq_ignore_ascii_case(k))
+                                    .map(|(_, v)| v.clone());
+                                values.push(val.unwrap_or(JsonValue::Null));
+                            }
+                            return Ok(values);
+                        }
+                    }
+                }
             }
         }
-        return Ok(values);
+        if let Ok(dict) = item.downcast::<PyDict>() {
+            let mut values = Vec::with_capacity(order.len());
+            for k in order {
+                let py_k = pyo3::types::PyString::new_bound(py, k.as_str());
+                // Use Python equality for key match so dict lookup works regardless of key type (#1267).
+                let val = dict
+                    .iter()
+                    .find(|(pk, _)| pk.eq(py_k.as_ref()).unwrap_or(false))
+                    .and_then(|(_, pv)| py_any_to_json(py, &pv).ok());
+                let val = val.or_else(|| {
+                    dict.iter()
+                        .find(|(pk, _)| {
+                            pk.extract::<String>()
+                                .map(|s| s == *k || s.eq_ignore_ascii_case(k))
+                                .unwrap_or(false)
+                        })
+                        .and_then(|(_, pv)| py_any_to_json(py, &pv).ok())
+                });
+                values.push(val.unwrap_or(JsonValue::Null));
+            }
+            return Ok(values);
+        }
+        if let Ok(get_fn) = item.getattr("get") {
+            if get_fn.is_callable() {
+                let mut values = Vec::with_capacity(order.len());
+                for k in order {
+                    let py_key = pyo3::types::PyString::new_bound(py, k.as_str());
+                    let v = item
+                        .call_method1("get", (py_key,))
+                        .ok()
+                        .and_then(|pv| py_any_to_json(py, &pv).ok());
+                    values.push(v.unwrap_or(JsonValue::Null));
+                }
+                return Ok(values);
+            }
+        }
+    }
+    if let Ok(dict) = item.downcast::<PyDict>() {
+        // No column order: build key -> value map from iter(), then sort keys (or preserve pandas order).
+        // (When column_order is Some we already returned above via get().)
+        let mut map: Vec<(String, JsonValue)> = Vec::with_capacity(dict.len());
+        for (pk, pv) in dict.iter() {
+            let key_str = pk.extract::<String>().unwrap_or_else(|_| {
+                pk.to_string()
+                    .trim_matches('"')
+                    .trim_matches('\'')
+                    .to_string()
+            });
+            map.push((key_str, py_any_to_json(py, &pv)?));
+        }
+        let mut keys: Vec<String> = map.iter().map(|(s, _)| s.clone()).collect();
+        if !from_pandas {
+            keys.sort();
+        }
+        let mut ordered = Vec::with_capacity(keys.len());
+        for k in &keys {
+            let v = map
+                .iter()
+                .find(|(key, _)| key == k || key.eq_ignore_ascii_case(k))
+                .map(|(_, val)| val.clone())
+                .unwrap_or(JsonValue::Null);
+            ordered.push(v);
+        }
+        return Ok(ordered);
     }
     if let Ok(seq) = item.downcast::<PyList>() {
         let mut values = Vec::with_capacity(seq.len());
@@ -8019,5 +8321,15 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(array_contains, m)?)?;
     m.add_function(wrap_pyfunction!(arrays_overlap, m)?)?;
     m.add_function(wrap_pyfunction!(explode, m)?)?;
+    // #1267: define Python helper in this module so createDataFrame list-of-dicts can convert in Python.
+    let py = m.py();
+    let code = "def _cdf_dict_rows_to_lists(data, keys):\n    return [[d.get(k) for k in keys] for d in data]";
+    if let Ok(builtins) = py.import_bound("builtins") {
+        if let Ok(globals) = m.getattr("__dict__") {
+            let _ = builtins
+                .getattr("exec")
+                .and_then(|e| e.call1((code, &globals)));
+        }
+    }
     Ok(())
 }

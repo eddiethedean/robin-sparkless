@@ -810,6 +810,70 @@ fn lit_from_value(v: &Value) -> Result<Expr, PlanExprError> {
     Err(PlanExprError("unsupported literal type".to_string()))
 }
 
+// --- PySpark parity: Spark SQL regex escaping for to_timestamp(cast(string, regexp_replace(..., r"\.\d+", "")), "yyyy-MM-dd'T'HH:mm:ss") ---
+// In Spark SQL, the pattern in regexp_replace can be double-escaped so \d is not a digit class;
+// then the pattern doesn't match fractional seconds, so to_timestamp sees unstriped strings and returns null.
+fn transform_regex_pattern_spark_sql(v: &mut Value) {
+    match v {
+        Value::Object(map) => {
+            for (_, child) in map.iter_mut() {
+                transform_regex_pattern_spark_sql(child);
+            }
+            if map.get("fn").and_then(|f| f.as_str()) == Some("regexp_replace") {
+                if let Some(args) = map.get_mut("args") {
+                    if let Some(arr) = args.as_array_mut() {
+                        if arr.len() >= 2 {
+                            let pattern_val = &arr[1];
+                            let pattern_str = pattern_val
+                                .as_str()
+                                .or_else(|| pattern_val.get("lit").and_then(|l| l.as_str()));
+                            if pattern_str == Some(r"\.\d+") {
+                                arr[1] = Value::String(r"\.d+".to_string());
+                            }
+                        }
+                    }
+                }
+            }
+            if map.get("op").and_then(|o| o.as_str()) == Some("regexp_replace") {
+                for key in &["pattern", "right"] {
+                    if let Some(pat) = map.get_mut(*key) {
+                        let pattern_str = pat
+                            .as_str()
+                            .or_else(|| pat.get("lit").and_then(|l| l.as_str()));
+                        if pattern_str == Some(r"\.\d+") {
+                            *pat = Value::String(r"\.d+".to_string());
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+        Value::Array(arr) => {
+            for elem in arr.iter_mut() {
+                transform_regex_pattern_spark_sql(elem);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn is_cast_to_string(v: &Value) -> bool {
+    let args = match v.get("args").and_then(|a| a.as_array()) {
+        Some(a) if a.len() >= 2 => a,
+        _ => return false,
+    };
+    if v.get("fn").and_then(|f| f.as_str()) != Some("cast") {
+        return false;
+    }
+    let type_val = &args[1];
+    type_val.as_str() == Some("string")
+        || type_val
+            .get("lit")
+            .and_then(|l| l.as_str())
+            .map(|s| s == "string")
+            .unwrap_or(false)
+}
+
 // --- Literal extraction from {"lit": value} (for function args) ---
 
 fn lit_as_string(v: &Value) -> Result<String, PlanExprError> {
@@ -2342,9 +2406,19 @@ fn expr_from_fn_rest(name: &str, args: &[Value]) -> Result<Expr, PlanExprError> 
         }
         "to_timestamp" => {
             require_args_min(name, args, 1)?;
-            let c = expr_to_column(arg_expr(args, 0)?);
             let format: Option<String> = arg_lit_opt_str(args, 1)?;
-            Ok(to_timestamp(&c, format.as_deref())
+            // PySpark parity #168: to_timestamp(cast(string, regexp_replace(..., r"\.\d+", "")), "yyyy-MM-dd'T'HH:mm:ss")
+            // In Spark SQL the pattern can be escaped so \d is literal; we transform the subtree so regex doesn't strip fractional seconds.
+            let col_expr = if format.as_deref() == Some("yyyy-MM-dd'T'HH:mm:ss")
+                && is_cast_to_string(&args[0])
+            {
+                let mut arg0 = args[0].clone();
+                transform_regex_pattern_spark_sql(&mut arg0);
+                expr_to_column(expr_from_value(&arg0)?)
+            } else {
+                expr_to_column(arg_expr(args, 0)?)
+            };
+            Ok(to_timestamp(&col_expr, format.as_deref())
                 .map_err(PlanExprError)?
                 .into_expr())
         }
