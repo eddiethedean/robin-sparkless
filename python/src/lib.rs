@@ -675,6 +675,37 @@ fn register_active_session(
     Ok(())
 }
 
+/// Get the session to use for operations that need an "active" session (e.g. createOrReplaceTempView).
+/// Tries thread-local first; if empty (e.g. pytest-xdist runs test in a different thread than the
+/// fixture), falls back to process-wide _active_sessions so the fixture session is found (#1144).
+fn get_session_for_operation(py: Python<'_>) -> PyResult<Option<Py<PySparkSession>>> {
+    let thread_session = THREAD_ACTIVE_SESSIONS.with(|cell| cell.borrow().last().map(|s| s.clone_ref(py)));
+    if thread_session.is_some() {
+        return Ok(thread_session);
+    }
+    // Fallback: use process-wide list (same process, different thread under pytest-xdist).
+    let ty = py.get_type_bound::<PySparkSession>();
+    if let Ok(list_any) = ty.getattr("_active_sessions") {
+        if let Ok(list) = list_any.downcast::<PyList>() {
+            if !list.is_empty() {
+                if let Ok(last) = list.get_item(list.len() - 1) {
+                    if let Ok(sess) = last.extract::<Py<PySparkSession>>() {
+                        return Ok(Some(sess));
+                    }
+                }
+            }
+        }
+    }
+    if let Ok(singleton) = ty.getattr("_singleton_session") {
+        if !singleton.is_none() {
+            if let Ok(sess) = singleton.extract::<Py<PySparkSession>>() {
+                return Ok(Some(sess));
+            }
+        }
+    }
+    Ok(None)
+}
+
 fn unregister_active_session_by_ptr(py: Python<'_>, ptr: *mut pyo3::ffi::PyObject) -> PyResult<()> {
     THREAD_ACTIVE_SESSIONS.with(|cell| {
         let mut v = cell.borrow_mut();
@@ -805,8 +836,7 @@ impl PySparkSession {
             }
         }
 
-        let top = THREAD_ACTIVE_SESSIONS.with(|cell| cell.borrow().last().map(|s| s.clone_ref(py)));
-        Ok(top)
+        get_session_for_operation(py)
     }
 
     #[pyo3(name = "newSession")]
@@ -2856,8 +2886,7 @@ impl PyDataFrame {
         }
         // F.expr(...) in filter: handle PyExprStr SQL expression strings.
         if let Ok(py_expr_str) = condition.downcast::<PyExprStr>() {
-            let session = THREAD_ACTIVE_SESSIONS
-                .with(|cell| cell.borrow().last().map(|s| s.clone_ref(py)))
+            let session = get_session_for_operation(py)?
                 .ok_or_else(|| {
                     PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
                         "filter with F.expr() requires an active SparkSession",
@@ -2879,8 +2908,7 @@ impl PyDataFrame {
                 .map_err(to_py_err);
         }
         if let Ok(expr_str) = condition.extract::<String>() {
-            let session = THREAD_ACTIVE_SESSIONS
-                .with(|cell| cell.borrow().last().map(|s| s.clone_ref(py)))
+            let session = get_session_for_operation(py)?
                 .ok_or_else(|| {
                     PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
                         "filter with string expression requires an active SparkSession",
@@ -2974,8 +3002,7 @@ impl PyDataFrame {
         }
 
         let tmp: Vec<Tmp> = if raw.iter().any(|x| matches!(x, ItemOrExprStr::ExprStr(_))) {
-            let session = THREAD_ACTIVE_SESSIONS
-                .with(|cell| cell.borrow().last().map(|s| s.clone_ref(py)))
+            let session = get_session_for_operation(py)?
                 .ok_or_else(|| {
                     PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
                         "select() with expr() requires an active SparkSession",
@@ -3122,8 +3149,7 @@ impl PyDataFrame {
 
         // Case 2: expr-string from F.expr(...)
         if let Ok(py_expr_str) = col_any.downcast::<PyExprStr>() {
-            let session = THREAD_ACTIVE_SESSIONS
-                .with(|cell| cell.borrow().last().map(|s| s.clone_ref(py)))
+            let session = get_session_for_operation(py)?
                 .ok_or_else(|| {
                     PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
                         "withColumn(expr) requires an active SparkSession",
@@ -4002,8 +4028,7 @@ impl PyDataFrame {
             exprs_vec.push(item.extract::<String>()?);
         }
         // Prefer SQL-based parsing when session is available (e.g. "upper(Name) as u").
-        let session_opt =
-            THREAD_ACTIVE_SESSIONS.with(|cell| cell.borrow().last().map(|s| s.clone_ref(py)));
+        let session_opt = get_session_for_operation(py)?;
         if let Some(session) = session_opt {
             if let Ok(session_ref) = session.bind(py).downcast::<PySparkSession>() {
                 if let Ok(df) = self
@@ -4022,8 +4047,7 @@ impl PyDataFrame {
 
     #[pyo3(name = "createOrReplaceTempView")]
     fn create_or_replace_temp_view_camel(&self, py: Python<'_>, name: &str) -> PyResult<()> {
-        let session = THREAD_ACTIVE_SESSIONS
-            .with(|cell| cell.borrow().last().map(|s| s.clone_ref(py)))
+        let session = get_session_for_operation(py)?
             .ok_or_else(|| to_py_err("No active SparkSession for createOrReplaceTempView"))?;
         let session_ref = session
             .bind(py)
@@ -4288,8 +4312,7 @@ impl PyDataFrame {
                 out_rows.push(item.into_py(py));
             }
         }
-        let session = THREAD_ACTIVE_SESSIONS
-            .with(|cell| cell.borrow().last().map(|s| s.clone_ref(py)))
+        let session = get_session_for_operation(py)?
             .ok_or_else(|| to_py_err("No active SparkSession for flatMap"))?;
         let session_ref = session
             .bind(py)
@@ -4623,17 +4646,13 @@ impl PyDataFrameWriter {
                         .inner
                         .clone()
                 } else {
-                    let top = THREAD_ACTIVE_SESSIONS
-                        .with(|cell| cell.borrow().last().map(|s| s.clone_ref(py)));
-                    match top {
+                    match get_session_for_operation(py)? {
                         Some(s) => s.bind(py).borrow().inner.clone(),
                         None => return Err(to_py_err("No active SparkSession")),
                     }
                 }
             } else {
-                let top = THREAD_ACTIVE_SESSIONS
-                    .with(|cell| cell.borrow().last().map(|s| s.clone_ref(py)));
-                match top {
+                match get_session_for_operation(py)? {
                     Some(s) => s.bind(py).borrow().inner.clone(),
                     None => return Err(to_py_err("No active SparkSession")),
                 }
