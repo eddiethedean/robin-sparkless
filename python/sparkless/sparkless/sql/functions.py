@@ -380,12 +380,10 @@ def first(col_or_name: ColumnOrName, ignorenulls: bool = False) -> _ColumnType:
 def last(col_or_name: ColumnOrName, ignorenulls: bool = False) -> _ColumnType:
     """Last value aggregate/window function (PySpark last).
 
-    GroupBy: use in df.groupBy().agg(F.last("col")) – implemented via last_value semantics.
-    Window: use with .over(Window.partitionBy(...).orderBy(...)) and optional frame; when
-    orderBy is present, default RANGE UNBOUNDED PRECEDING..CURRENT ROW makes last() == current row.
+    GroupBy: use in df.groupBy().agg(F.last("col")) – use native last for agg, last_value for window.
+    Pivot: .pivot().agg(F.last("col")) is handled via pivot.agg() detecting _LastValueExpr and calling _last.
+    Window: use with .over(Window.partitionBy(...).orderBy(...)); last_value semantics.
     """
-    # For window usage, reuse last_value() expression helper so
-    # F.last(\"salary\").over(window_spec) matches last_value semantics.
     return _col_result(last_value(col_or_name))
 
 
@@ -1569,6 +1567,11 @@ def first_value(col_or_name):
 class _LastValueExpr:
     def __init__(self, col_or_name):
         self._col_or_name = col_or_name
+
+    @property
+    def _pivot_last_column(self) -> str:
+        """Column name for pivot.agg(F.last(\"col\")); used by native pivot.agg()."""
+        return _col_name(self._col_or_name)
 
     def over(self, window):
         import sparkless._native as _native

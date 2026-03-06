@@ -70,6 +70,12 @@ pub fn first(col: &Column, ignorenulls: bool) -> Column {
     Column::from_expr(expr, None)
 }
 
+/// Last value in group (PySpark last). Use in groupBy.agg() and pivot().agg(). ignorenulls reserved for API compatibility (Polars last takes last in group order).
+pub fn last(col: &Column, ignorenulls: bool) -> Column {
+    let _ = ignorenulls;
+    Column::from_expr(col.expr().clone().last(), None)
+}
+
 /// Any value from the group (PySpark any_value). Use in groupBy.agg(). ignorenulls reserved for API compatibility.
 pub fn any_value(col: &Column, ignorenulls: bool) -> Column {
     let _ = ignorenulls;
