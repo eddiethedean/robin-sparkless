@@ -33,7 +33,6 @@ F = imports.F  # Functions module for backend-appropriate F.col() etc.
 class TestColumnAstype:
     """Test Column.astype() method."""
 
-    @pytest.mark.skip(reason="Issue #1257: unskip when fixing")
     def test_basic_astype_string(self, spark):
         """Test basic astype with string type name."""
         schema = StructType([StructField("num", IntegerType(), True)])
@@ -118,7 +117,6 @@ class TestColumnAstype:
         assert "final_date" in rows[0]
         assert rows[0]["final_date"] is not None
 
-    @pytest.mark.skip(reason="Issue #1257: unskip when fixing")
     def test_astype_with_datatype_object(self, spark):
         """Test astype with DataType object instead of string."""
         schema = StructType([StructField("num", IntegerType(), True)])
@@ -158,7 +156,6 @@ class TestColumnAstype:
         assert rows_astype[0]["num_str"] == rows_cast[0]["num_str"]
         assert rows_astype[1]["num_str"] == rows_cast[1]["num_str"]
 
-    @pytest.mark.skip(reason="Issue #1257: unskip when fixing")
     def test_astype_in_select(self, spark):
         """Test astype in select operation."""
         schema = StructType(
@@ -206,7 +203,6 @@ class TestColumnAstype:
         assert rows[0]["value_int"] == 1
         assert rows[1]["value_int"] == 2
 
-    @pytest.mark.skip(reason="Issue #1257: unskip when fixing")
     def test_astype_in_filter(self, spark):
         """Test astype in filter condition."""
         schema = StructType([StructField("num_str", StringType(), True)])
@@ -227,7 +223,6 @@ class TestColumnAstype:
         assert rows[0]["num_str"] == "2"
         assert rows[1]["num_str"] == "3"
 
-    @pytest.mark.skip(reason="Issue #1257: unskip when fixing")
     def test_astype_with_null(self, spark):
         """Test astype with null values."""
         schema = StructType([StructField("num", IntegerType(), True)])
@@ -294,7 +289,6 @@ class TestColumnAstype:
         assert rows[1]["value_bool"] != 0 or rows[1]["value_bool"] is True  # 1 -> True
         assert rows[2]["value_bool"] != 0 or rows[2]["value_bool"] is True  # 5 -> True
 
-    @pytest.mark.skip(reason="Issue #1257: unskip when fixing")
     def test_astype_chained_operations(self, spark):
         """Test astype with chained column operations."""
         schema = StructType([StructField("num", IntegerType(), True)])
@@ -315,7 +309,6 @@ class TestColumnAstype:
         assert rows[0]["doubled_str"] in ["2", "2.0"]
         assert rows[1]["doubled_str"] in ["4", "4.0"]
 
-    @pytest.mark.skip(reason="Issue #1257: unskip when fixing")
     def test_astype_on_literal(self, spark):
         """Test astype on literal values."""
         schema = StructType([StructField("id", IntegerType(), True)])
@@ -372,7 +365,6 @@ class TestColumnAstype:
         assert rows[0]["date_col"] is not None
         assert rows[1]["date_col"] is not None
 
-    @pytest.mark.skip(reason="Issue #1257: unskip when fixing")
     def test_astype_multiple_types(self, spark):
         """Test astype with various type conversions."""
         schema = StructType([StructField("value", StringType(), True)])
@@ -415,7 +407,6 @@ class TestColumnAstype:
         # The column name should be preserved (cast operations keep original name)
         assert "num" in rows[0]
 
-    @pytest.mark.skip(reason="Issue #1257: unskip when fixing")
     def test_astype_with_alias(self, spark):
         """Test astype with alias."""
         schema = StructType([StructField("num", IntegerType(), True)])
@@ -433,7 +424,6 @@ class TestColumnAstype:
         assert "num_as_string" in rows[0]
         assert rows[0]["num_as_string"] == "1"
 
-    @pytest.mark.skip(reason="Issue #1257: unskip when fixing")
     def test_astype_on_complex_expressions(self, spark):
         """Test astype on complex column expressions."""
         schema = StructType(
@@ -528,7 +518,6 @@ class TestColumnAstype:
         assert rows[1]["as_bool"] is False
         assert rows[2]["as_bool"] is False or rows[2]["as_bool"] is None
 
-    @pytest.mark.skip(reason="Issue #1257: unskip when fixing")
     def test_astype_in_orderBy(self, spark):
         """Test astype in orderBy operation."""
         schema = StructType([StructField("num_str", StringType(), True)])
@@ -584,7 +573,6 @@ class TestColumnAstype:
         assert totals.get(1) == 30
         assert totals.get(2) == 30
 
-    @pytest.mark.skip(reason="Issue #1257: unskip when fixing")
     def test_astype_multiple_chained(self, spark):
         """Test multiple astype operations chained together."""
         schema = StructType([StructField("num", IntegerType(), True)])
@@ -605,7 +593,6 @@ class TestColumnAstype:
         # Should work (string to string is idempotent)
         assert rows[0]["result"] == "123"
 
-    @pytest.mark.skip(reason="Issue #1257: unskip when fixing")
     def test_astype_on_all_column_operations(self, spark):
         """Test astype on various column operations (upper, lower, length, etc.)."""
         schema = StructType([StructField("text", StringType(), True)])
@@ -654,7 +641,6 @@ class TestColumnAstype:
                 or hasattr(date_val, "year")
             )
 
-    @pytest.mark.skip(reason="Issue #1257: unskip when fixing")
     def test_astype_zero_and_negative(self, spark):
         """Test astype with zero and negative values."""
         schema = StructType([StructField("num", IntegerType(), True)])
@@ -692,7 +678,6 @@ class TestColumnAstype:
             bool_val_2 != 0 or bool_val_2 is True or bool(bool_val_2)
         )  # -100 -> True (non-zero)
 
-    @pytest.mark.skip(reason="Issue #1257: unskip when fixing")
     def test_astype_float_string_conversions(self, spark):
         """Test astype between float/double and string."""
         schema = StructType(
@@ -786,7 +771,6 @@ class TestColumnAstype:
                     f"cast={row_cast['result']!r}"
                 )
 
-    @pytest.mark.skip(reason="Issue #1257: unskip when fixing")
     def test_astype_after_when_otherwise(self, spark):
         """Test astype on column operations that can be chained.
 
@@ -857,7 +841,6 @@ class TestColumnAstype:
         assert rows[0]["as_long"] == 1
         assert rows[1]["as_long"] == 2147483647
 
-    @pytest.mark.skip(reason="Issue #1257: unskip when fixing")
     def test_astype_string_type_aliases(self, spark):
         """Test astype with different string type aliases."""
         schema = StructType([StructField("num", IntegerType(), True)])
