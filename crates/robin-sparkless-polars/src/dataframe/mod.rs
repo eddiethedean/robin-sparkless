@@ -1390,6 +1390,8 @@ impl DataFrame {
             .collect::<Result<Vec<_>, _>>()?;
         let left_refs: Vec<&str> = left_resolved.iter().map(|s| s.as_str()).collect();
         let right_refs: Vec<&str> = right_resolved.iter().map(|s| s.as_str()).collect();
+        // When same-named keys (e.g. left.id == right.id), coalesce so result has one key column (#353, #1148, #1165).
+        let coalesce_same_name_keys = left_resolved == right_resolved;
         join(
             self,
             other,
@@ -1397,7 +1399,7 @@ impl DataFrame {
             right_refs,
             how,
             self.case_sensitive,
-            false, // keep both key columns for condition join (parity fixture)
+            coalesce_same_name_keys,
         )
     }
 

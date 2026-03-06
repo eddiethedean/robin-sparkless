@@ -2,7 +2,10 @@
 
 use super::DataFrame;
 use crate::type_coercion::coerce_expr_pair_for_join;
-use polars::prelude::{Expr, JoinType as PlJoinType, Operator, PolarsError};
+use polars::prelude::{
+    DataType as PlDataType, Expr, JoinType as PlJoinType, Operator, PolarsError,
+    SchemaNamesAndDtypes,
+};
 use polars_plan::dsl::functions::nth;
 
 fn expr_to_column_name(expr: &Expr) -> Option<String> {
@@ -413,8 +416,27 @@ pub fn join(
             .filter(|n| result_names.contains(n))
             .collect();
         if !keep.is_empty() {
-            let exprs: Vec<Expr> = keep.iter().map(|n| col(n.as_str())).collect();
-            joined = joined.select(&exprs);
+            // Cast each column to the expected dtype from left/right so collect() returns correct
+            // types for non-key columns (#1165). Polars join coalesce can lose type in schema.
+            let cast_exprs: Vec<Expr> = keep
+                .iter()
+                .map(|n| {
+                    let dtype = if key_set.contains(n.as_str()) {
+                        left.get_column_dtype(n.as_str())
+                    } else if let Some(base) = n.strip_suffix("_right") {
+                        right.get_column_dtype(base)
+                    } else if left_set.contains(n.as_str()) {
+                        left.get_column_dtype(n.as_str())
+                    } else {
+                        right.get_column_dtype(n.as_str())
+                    };
+                    match dtype {
+                        Some(dt) => col(n.as_str()).cast(dt).alias(n.as_str()),
+                        None => col(n.as_str()),
+                    }
+                })
+                .collect();
+            joined = joined.select(&cast_exprs);
             let result_schema = joined.collect_schema()?;
             names = result_schema.iter_names().map(|s| s.to_string()).collect();
         }
@@ -427,11 +449,24 @@ pub fn join(
         }
     }
     if unique_order.len() < names.len() {
+        // Preserve column dtypes when deduplicating by position (#1165). nth(idx) can lose
+        // type in the logical schema; cast to the join result dtype so collect() returns
+        // correct types (e.g. v=10, w=20 as int, not string).
+        let schema_before_nth = joined.collect_schema()?;
+        let dtypes_by_index: Vec<PlDataType> = schema_before_nth
+            .iter_names_and_dtypes()
+            .map(|(_name, dt): (_, &PlDataType)| dt.clone())
+            .collect();
         let exprs: Vec<Expr> = unique_order
             .iter()
             .map(|name| {
                 let idx = names.iter().position(|n| n == name).unwrap();
-                nth(idx as i64).as_expr().alias(name.as_str())
+                let e = nth(idx as i64).as_expr();
+                if let Some(dt) = dtypes_by_index.get(idx) {
+                    e.cast(dt.clone()).alias(name.as_str())
+                } else {
+                    e.alias(name.as_str())
+                }
             })
             .collect();
         joined = joined.select(&exprs);
@@ -565,6 +600,35 @@ mod tests {
         assert_eq!(out.count().unwrap(), 1);
         let cols = out.columns().unwrap();
         assert!(cols.iter().any(|c| c == "id" || c.ends_with("_right")));
+    }
+
+    /// #1165: Join with same-named keys and coalesce: non-key columns keep correct dtypes in schema and collect.
+    #[test]
+    fn join_coalesce_preserves_non_key_column_types() {
+        use robin_sparkless_core::DataType as CoreDataType;
+        let left = left_df();
+        let right = right_df();
+        let out = join(
+            &left,
+            &right,
+            vec!["id"],
+            vec!["id"],
+            JoinType::Inner,
+            false,
+            true, // coalesce_same_name_keys
+        )
+        .unwrap();
+        assert_eq!(out.count().unwrap(), 1);
+        let schema = out.schema().unwrap();
+        let v_field = schema.fields().iter().find(|f| f.name == "v");
+        let w_field = schema.fields().iter().find(|f| f.name == "w");
+        assert!(matches!(v_field.map(|f| &f.data_type), Some(CoreDataType::Long)), "v should be Long");
+        assert!(matches!(w_field.map(|f| &f.data_type), Some(CoreDataType::Long)), "w should be Long");
+        let rows = out.collect_as_json_rows().unwrap();
+        assert_eq!(rows.len(), 1);
+        let row = &rows[0];
+        assert!(row.get("v").and_then(|v| v.as_i64()).is_some(), "v should be number in JSON");
+        assert!(row.get("w").and_then(|v| v.as_i64()).is_some(), "w should be number in JSON");
     }
 
     #[test]
