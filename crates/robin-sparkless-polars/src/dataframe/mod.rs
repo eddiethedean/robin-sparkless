@@ -1115,6 +1115,7 @@ impl DataFrame {
         );
         let schema = StructType::from_polars_schema(&schema_override);
         // Resolve columns by name so order matches plan schema regardless of collected frame order.
+        // When cast fails (e.g. struct with List field vs plan String), use column as-is (Issue #1263).
         let columns_cast: Vec<_> = names
             .iter()
             .enumerate()
@@ -1126,27 +1127,28 @@ impl DataFrame {
                     )
                 })?;
                 let s = &collected.columns()[idx];
-                let dtype = effective_dtypes.get(col_idx).unwrap_or_else(|| s.dtype());
-                if dtype == s.dtype() {
-                    Ok(s.clone())
+                let dtype = effective_dtypes
+                    .get(col_idx)
+                    .unwrap_or_else(|| s.dtype())
+                    .clone();
+                if dtype == *s.dtype() {
+                    Ok((s.clone(), dtype))
                 } else {
-                    s.cast(dtype).map_err(|e| {
-                        PolarsError::ComputeError(
-                            format!("collect_as_json_rows_with_names cast: {e}").into(),
-                        )
-                    })
+                    match s.cast(&dtype) {
+                        Ok(casted) => Ok((casted, dtype)),
+                        Err(_) => Ok((s.clone(), s.dtype().clone())),
+                    }
                 }
             })
-            .collect::<Result<Vec<_>, _>>()?;
+            .collect::<Result<Vec<(polars::prelude::Column, DataType)>, PolarsError>>()?;
         let nrows = collected.height();
         let mut rows = Vec::with_capacity(nrows);
         for i in 0..nrows {
             let mut row = HashMap::with_capacity(names.len());
             for (col_idx, name) in names.iter().enumerate() {
-                let s = columns_cast
+                let (s, dtype) = columns_cast
                     .get(col_idx)
                     .ok_or_else(|| PolarsError::ComputeError("column index out of range".into()))?;
-                let dtype = effective_dtypes.get(col_idx).unwrap_or_else(|| s.dtype());
                 let av = s.get(i)?;
                 let jv = any_value_to_json(&av, dtype);
                 row.insert(name.clone(), jv);

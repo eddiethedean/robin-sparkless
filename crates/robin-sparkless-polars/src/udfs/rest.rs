@@ -4942,6 +4942,26 @@ fn series_set_nulls_where(series: &Series, mask: &BooleanChunked) -> PolarsResul
             }
             series.clone()
         }
+        DataType::Struct(_) => {
+            // Preserve nested structs: mask each field recursively and rebuild (Issue #1263).
+            use polars::chunked_array::StructChunked;
+            let st = series
+                .struct_()
+                .map_err(|e| compute_err("with_field mask struct", e))?;
+            let len = st.len();
+            let fields_series = st.fields_as_series();
+            let masked_fields: Vec<Series> = fields_series
+                .iter()
+                .map(|s| series_set_nulls_where(s, mask).unwrap_or_else(|_| s.clone()))
+                .collect();
+            let out = StructChunked::from_series(name.as_str().into(), len, masked_fields.iter())
+                .map_err(|e| compute_err("with_field rebuild struct", e))?;
+            out.into_series()
+        }
+        DataType::List(_) => {
+            // Preserve list type: do not cast to String; clone so nulls are not masked per-element.
+            series.clone()
+        }
         _ => {
             // Try casting to String so literal/other string-like types get masked (PySpark #1066).
             if let Ok(casted) = series.cast(&DataType::String) {
