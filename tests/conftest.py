@@ -131,15 +131,21 @@ class _SharedSessionWrapper:
 
 
 def _use_shared_session() -> bool:
-    """Use a single session per worker/run for Robin backend. PySpark uses per-test sessions so each test gets a valid session (avoids None/sc issues with xdist)."""
-    if os.environ.get("SPARKLESS_SHARED_SESSION", "1").strip().lower() in (
-        "0",
-        "false",
-        "no",
+    """Use a single session per worker/run for Robin backend.
+
+    Default is per-test sessions so sequential and parallel (-n N) runs have the same
+    pass/fail set and no cross-test catalog pollution. Set SPARKLESS_SHARED_SESSION=1
+    to use one session per run (faster but requires unique table names via table_prefix).
+    """
+    if os.environ.get("SPARKLESS_SHARED_SESSION", "0").strip().lower() in (
+        "1",
+        "true",
+        "yes",
     ):
-        return False
-    # Only use shared session for Robin; PySpark per-test sessions are more reliable with xdist
-    return not _is_pyspark_mode()
+        if os.environ.get("PYTEST_XDIST_WORKER"):
+            return False
+        return not _is_pyspark_mode()
+    return False
 
 
 @pytest.fixture(scope="session")
@@ -425,21 +431,3 @@ def pytest_configure(config):
         "markers",
         "backend(mock|pyspark|both|robin): mark test to run with specific backend(s)",
     )
-    config.addinivalue_line(
-        "markers",
-        "xdist_group(name): pytest-xdist: run tests with the same group name on one worker (use --dist loadgroup)",
-    )
-
-
-def pytest_collection_modifyitems(config, items):
-    """When running with pytest-xdist (-n N), keep SQL/temp-view tests on one worker (fixes #1144).
-    Use: pytest tests/parity/sql tests/unit/session -n N --dist loadgroup
-    so the sql_views group runs on a single worker and the session catalog is shared."""
-    numprocesses = getattr(config.option, "numprocesses", None)
-    if not numprocesses or numprocesses <= 1:
-        return
-    sql_group = pytest.mark.xdist_group(name="sql_views")
-    for item in items:
-        path_str = os.fspath(getattr(item, "fspath", ""))
-        if "parity/sql" in path_str or "unit/session" in path_str:
-            item.add_marker(sql_group)
