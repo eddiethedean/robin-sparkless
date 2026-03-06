@@ -1879,7 +1879,7 @@ fn python_data_and_schema(
                 rows.iter()
                     .filter_map(|r| r.get(i))
                     .find(|v| !matches!(v, JsonValue::Null))
-                    .map(|v| infer_type_from_json_value(v))
+                    .map(infer_type_from_json_value)
                     .unwrap_or_else(|| "string".to_string())
             })
             .collect();
@@ -2623,37 +2623,26 @@ impl PyRDD {
             .collect_as_json_rows_with_names()
             .map_err(to_py_err)?;
         // call_method1(..., (py_names,)) passes a tuple to Python; unwrap single-element tuple.
-        let (names, use_preferred_keys): (Vec<String>, bool) =
-            if let Some(arg) = preferred_names {
-                let lst_opt: Option<Bound<'py, PyList>> =
-                    if let Ok(lst) = arg.downcast::<PyList>() {
-                        Some(lst.clone())
-                    } else if let Ok(tup) = arg.downcast::<pyo3::types::PyTuple>() {
-                        (tup.len() == 1).then(|| tup.get_item(0).ok()).flatten().and_then(
-                            |item| item.downcast_into::<PyList>().ok(),
-                        )
-                    } else {
-                        None
-                    };
-                if let Some(lst) = lst_opt {
-                    let n: Vec<String> = lst
-                        .iter()
-                        .filter_map(|it| it.extract::<String>().ok())
-                        .collect();
-                    if n.is_empty() {
-                        (col_names.clone(), false)
-                    } else {
-                        (n, true)
-                    }
+        let (names, use_preferred_keys): (Vec<String>, bool) = if let Some(arg) = preferred_names {
+            let lst_opt: Option<Bound<'py, PyList>> = if let Ok(lst) = arg.downcast::<PyList>() {
+                Some(lst.clone())
+            } else if let Ok(tup) = arg.downcast::<pyo3::types::PyTuple>() {
+                (tup.len() == 1)
+                    .then(|| tup.get_item(0).ok())
+                    .flatten()
+                    .and_then(|item| item.downcast_into::<PyList>().ok())
+            } else {
+                None
+            };
+            if let Some(lst) = lst_opt {
+                let n: Vec<String> = lst
+                    .iter()
+                    .filter_map(|it| it.extract::<String>().ok())
+                    .collect();
+                if n.is_empty() {
+                    (col_names.clone(), false)
                 } else {
-                    (
-                        self.inner
-                            .schema()
-                            .ok()
-                            .map(|s| s.fields().iter().map(|f| f.name.clone()).collect())
-                            .unwrap_or_else(|| col_names.clone()),
-                        false,
-                    )
+                    (n, true)
                 }
             } else {
                 (
@@ -2664,7 +2653,17 @@ impl PyRDD {
                         .unwrap_or_else(|| col_names.clone()),
                     false,
                 )
-            };
+            }
+        } else {
+            (
+                self.inner
+                    .schema()
+                    .ok()
+                    .map(|s| s.fields().iter().map(|f| f.name.clone()).collect())
+                    .unwrap_or_else(|| col_names.clone()),
+                false,
+            )
+        };
         let out = PyList::empty_bound(py);
         for row in rows {
             if use_preferred_keys {
