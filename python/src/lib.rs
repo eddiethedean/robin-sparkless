@@ -6655,6 +6655,27 @@ fn coerce_to_column(v: &Bound<'_, PyAny>) -> PyResult<Column> {
     ))
 }
 
+/// Extract pattern string from PyAny: str or a Column that is a string literal (e.g. F.lit(r"\\d+")). #1264
+fn pattern_str_from_pyany(pattern: &Bound<'_, PyAny>) -> PyResult<String> {
+    if let Ok(s) = pattern.extract::<String>() {
+        return Ok(s);
+    }
+    if let Ok(py_col) = pattern.downcast::<PyColumn>() {
+        let col = py_col.borrow().inner.clone();
+        if let Some(json_str) = col.literal_as_json_string() {
+            if let Ok(JsonValue::String(s)) = serde_json::from_str::<JsonValue>(&json_str) {
+                return Ok(s);
+            }
+        }
+        return Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+            "regexp_extract_all: pattern must be a string or a literal Column (e.g. F.lit(\"pattern\"))",
+        ));
+    }
+    Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+        "regexp_extract_all: pattern must be str or Column",
+    ))
+}
+
 #[pyfunction]
 fn upper(col: &Bound<'_, PyAny>) -> PyResult<PyColumn> {
     let c = coerce_to_column(col)?;
@@ -7110,17 +7131,18 @@ fn regexp_replace(
 #[pyo3(signature = (column, pattern, group_index=0))]
 fn regexp_extract_all(
     column: &Bound<'_, PyAny>,
-    pattern: &str,
+    pattern: &Bound<'_, PyAny>,
     group_index: usize,
 ) -> PyResult<PyColumn> {
     let c = coerce_to_column(column)?;
+    let pattern_str = pattern_str_from_pyany(pattern)?;
     if group_index == 0 {
         Ok(PyColumn {
-            inner: functions::regexp_extract_all(&c, pattern),
+            inner: functions::regexp_extract_all(&c, &pattern_str),
         })
     } else {
         Ok(PyColumn {
-            inner: c.regexp_extract_all_group(pattern, group_index),
+            inner: c.regexp_extract_all_group(&pattern_str, group_index),
         })
     }
 }
