@@ -425,3 +425,21 @@ def pytest_configure(config):
         "markers",
         "backend(mock|pyspark|both|robin): mark test to run with specific backend(s)",
     )
+    config.addinivalue_line(
+        "markers",
+        "xdist_group(name): pytest-xdist: run tests with the same group name on one worker (use --dist loadgroup)",
+    )
+
+
+def pytest_collection_modifyitems(config, items):
+    """When running with pytest-xdist (-n N), keep SQL/temp-view tests on one worker (fixes #1144).
+    Use: pytest tests/parity/sql tests/unit/session -n N --dist loadgroup
+    so the sql_views group runs on a single worker and the session catalog is shared."""
+    numprocesses = getattr(config.option, "numprocesses", None)
+    if not numprocesses or numprocesses <= 1:
+        return
+    sql_group = pytest.mark.xdist_group(name="sql_views")
+    for item in items:
+        path_str = os.fspath(getattr(item, "fspath", ""))
+        if "parity/sql" in path_str or "unit/session" in path_str:
+            item.add_marker(sql_group)
