@@ -1,5 +1,4 @@
 from tests.fixtures.spark_imports import get_spark_imports
-import pytest
 
 _imports = get_spark_imports()
 F = _imports.F
