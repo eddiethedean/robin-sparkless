@@ -32,9 +32,6 @@ def test_order_by_single_desc_nulls_last(spark) -> None:
     assert values == ["D", "C", "B", "A", None]
 
 
-@pytest.mark.skip(
-    reason="Issue #1274: unskip when fixing collect String schema semantics"
-)
 def test_order_by_list_of_sort_orders(spark) -> None:
     """df.order_by([col("a").asc(), col("b").desc_nulls_last()]) works."""
     data = [{"a": 1, "b": 10}, {"a": 1, "b": 20}, {"a": 2, "b": 5}]

@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from tests.fixtures.spark_imports import get_spark_imports
 
 _imports = get_spark_imports()
@@ -34,9 +32,6 @@ def test_agg_single_expr_unchanged(spark) -> None:
     assert list(rows[0].asDict().values()) == [3]
 
 
-@pytest.mark.skip(
-    reason="Issue #1274: unskip when fixing collect String schema semantics"
-)
 def test_agg_list_unchanged(spark) -> None:
     """df.agg([expr1, expr2]) still works."""
     df = spark.createDataFrame([{"a": 1, "b": 10}], schema=["a", "b"])

@@ -141,9 +141,6 @@ def test_select_expression_and_column_name_pyspark_parity() -> None:
     assert_rows_equal(actual, EXPECTED_SELECT_EXPR_AND_COLUMN, order_matters=True)
 
 
-@pytest.mark.skip(
-    reason="Issue #1274: unskip when fixing collect String schema semantics"
-)
 def test_select_list_of_column_names_still_works() -> None:
     """select(['a','b']) continues to work (backward compatibility)."""
 
@@ -156,9 +153,6 @@ def test_select_list_of_column_names_still_works() -> None:
     assert [r.asDict() for r in rows] == [{"a": 1, "b": 2}, {"a": 3, "b": 4}]
 
 
-@pytest.mark.skip(
-    reason="Issue #1274: unskip when fixing collect String schema semantics"
-)
 def test_select_varargs_column_names_still_works() -> None:
     """select('a', 'b') continues to work (backward compatibility)."""
 
