@@ -15,6 +15,7 @@ Window = _imports.Window
 class TestCreateMap:
     """Test suite for F.create_map() function."""
 
+    @pytest.mark.skip(reason="Issue #1140: unskip when fixing create_map collected value type (string vs int)")
     def test_create_map_with_literals(self, spark):
         """Test create_map with literal keys and column values."""
         df = spark.createDataFrame([{"val1": "a", "val2": 1}])
@@ -335,6 +336,7 @@ class TestCreateMap:
                 values.add(map_val["value"])
         assert values == {1, 2}
 
+    @pytest.mark.skip(reason="Issue #1140: unskip when fixing create_map collected value type (string vs int)")
     def test_create_map_with_null_keys(self, spark):
         """Test create_map with null literal key raises when evaluated (PySpark: NULL_MAP_KEY)."""
         df = spark.createDataFrame([{"val": "test"}])

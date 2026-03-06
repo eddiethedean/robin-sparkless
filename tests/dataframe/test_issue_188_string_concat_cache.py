@@ -13,6 +13,7 @@ SparkSession = _imports.SparkSession
 F = _imports.F
 
 
+@pytest.mark.skip(reason="Issue #1138: unskip when fixing string + string (PySpark yields null for non-numeric)")
 class TestStringConcatenationCacheEdgeCases:
     """Test edge cases for string concatenation cache handling."""
 

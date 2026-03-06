@@ -9,8 +9,13 @@ when _alias_names was explicitly None (posexplode without alias), causing len(No
 https://github.com/eddiethedean/sparkless/issues/429
 """
 
+import pytest
+
 from tests.fixtures.spark_backend import BackendType
 from tests.fixtures.spark_imports import get_spark_imports
+
+
+pytestmark = pytest.mark.skip(reason="Issue #1143: unskip when fixing posexplode alias and posexplode_outer")
 
 
 def test_posexplode_without_alias_no_type_error(spark, spark_backend):

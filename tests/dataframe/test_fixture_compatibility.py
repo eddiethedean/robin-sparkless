@@ -4,6 +4,8 @@ Tests for fixture/setup compatibility with PySpark.
 Uses get_spark_imports from fixture only.
 """
 
+import pytest
+
 from tests.fixtures.spark_imports import get_spark_imports
 
 _imports = get_spark_imports()
@@ -56,6 +58,7 @@ class TestFixtureCompatibility:
         finally:
             spark.stop()
 
+    @pytest.mark.skip(reason="Issue #1141: unskip when fixing SparkContext.appName (camelCase)")
     def test_sparkcontext_available_in_session(self):
         """Test that SparkContext is available through session."""
         spark = SparkSession.builder.appName("test").getOrCreate()

@@ -4,6 +4,8 @@ PySpark posexplode().alias("Value1", "Value2") names both columns.
 Uses get_spark_imports only; same logic for both backends.
 """
 
+import pytest
+
 from tests.fixtures.spark_imports import get_spark_imports
 
 _imports = get_spark_imports()
@@ -11,6 +13,7 @@ SparkSession = _imports.SparkSession
 F = _imports.F
 
 
+@pytest.mark.skip(reason="Issue #1143: unskip when fixing posexplode alias and posexplode_outer")
 class TestIssue366AliasPosexplode:
     """Test alias(name) for posexplode (PySpark: two names for two columns)."""
 

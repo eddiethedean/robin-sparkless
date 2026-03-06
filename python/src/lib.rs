@@ -959,17 +959,17 @@ impl PySparkSession {
         })
     }
 
-    /// PySpark alias: createDataFrame -> create_dataframe_from_rows
-    #[pyo3(name = "createDataFrame", signature = (data, schema=None, verify_schema=true, sampling_ratio=None))]
+    /// PySpark alias: createDataFrame -> create_dataframe_from_rows (camelCase kwargs for PySpark parity).
+    #[pyo3(name = "createDataFrame", signature = (data, schema=None, verifySchema=true, samplingRatio=None))]
     fn create_data_frame_camel(
         &self,
         py: Python<'_>,
         data: &Bound<'_, PyAny>,
         schema: Option<&Bound<'_, PyAny>>,
-        verify_schema: bool,
-        sampling_ratio: Option<f64>,
+        verifySchema: bool,
+        samplingRatio: Option<f64>,
     ) -> PyResult<PyDataFrame> {
-        self.create_dataframe_from_rows(py, data, schema, verify_schema, sampling_ratio)
+        self.create_dataframe_from_rows(py, data, schema, verifySchema, samplingRatio)
     }
 
     fn range(&self, start: i64, end: i64, step: i64) -> PyResult<PyDataFrame> {
@@ -1778,10 +1778,10 @@ fn python_data_and_schema(
     let list = data.downcast::<PyList>().map_err(|_| {
         PyErr::new::<pyo3::exceptions::PyTypeError, _>("data must be a list (or pandas.DataFrame)")
     })?;
-    // PySpark parity: createDataFrame([]) without explicit schema raises ValueError.
+    // PySpark parity: createDataFrame([]) without explicit schema raises (test expects match CANNOT_INFER_EMPTY_SCHEMA).
     if list.is_empty() && schema.is_none() {
         return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
-            "can not infer schema from empty dataset",
+            "[CANNOT_INFER_EMPTY_SCHEMA] Can not infer schema from empty dataset.",
         ));
     }
     // Parse explicit schema first so we can use its field order when building rows from dicts (Phase 7 / issue_247).
@@ -1789,6 +1789,12 @@ fn python_data_and_schema(
         .and_then(|s| s.downcast::<PyList>().ok())
         .map(|l| l.iter().all(|it| it.extract::<String>().is_ok()))
         .unwrap_or(false);
+    // PySpark parity: createDataFrame([], [column names]) also raises (test_issue_372).
+    if list.is_empty() && schema_names_only {
+        return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
+            "[CANNOT_INFER_EMPTY_SCHEMA] Can not infer schema from empty dataset.",
+        ));
+    }
     let schema_res: Option<Vec<(String, String)>> = schema
         .map(|s| parse_schema_from_py(py, s))
         .transpose()?

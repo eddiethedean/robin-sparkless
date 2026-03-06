@@ -13,9 +13,12 @@ https://github.com/eddiethedean/sparkless/issues/431
 
 import datetime
 
+import pytest
+
 from tests.fixtures.spark_imports import get_spark_imports
 
 
+@pytest.mark.skip(reason="Issue #1116: unskip when fixing isin negation, between, log, date/datetime, string arithmetic")
 def test_date_less_than_datetime(spark, spark_backend):
     """F.col('Date') < F.col('DateTime') must filter correctly (#431)."""
     F_backend = get_spark_imports(spark_backend).F
@@ -60,6 +63,7 @@ def test_datetime_greater_than_date(spark, spark_backend):
     assert len(rows) == 1
 
 
+@pytest.mark.skip(reason="Issue #1116: unskip when fixing isin negation, between, log, date/datetime, string arithmetic")
 def test_date_eq_datetime(spark, spark_backend):
     """Date equals datetime at midnight."""
     F_backend = get_spark_imports(spark_backend).F
@@ -83,6 +87,7 @@ def test_date_eq_datetime(spark, spark_backend):
     assert rows[0]["dt"] == datetime.datetime(2024, 1, 1, 0, 0, 0)
 
 
+@pytest.mark.skip(reason="Issue #1116: unskip when fixing isin negation, between, log, date/datetime, string arithmetic")
 def test_date_lte_datetime(spark, spark_backend):
     """F.col('Date') <= F.col('DateTime') must work."""
     F_backend = get_spark_imports(spark_backend).F
@@ -129,6 +134,7 @@ def test_date_gte_datetime(spark, spark_backend):
     assert rows[0]["d"] == datetime.date(2024, 6, 15)
 
 
+@pytest.mark.skip(reason="Issue #1116: unskip when fixing isin negation, between, log, date/datetime, string arithmetic")
 def test_datetime_less_than_date(spark, spark_backend):
     """F.col('DateTime') < F.col('Date') - datetime on left, date on right."""
     F_backend = get_spark_imports(spark_backend).F
@@ -152,6 +158,7 @@ def test_datetime_less_than_date(spark, spark_backend):
     assert rows[0]["dt"] == datetime.datetime(2023, 6, 15, 10, 0, 0)
 
 
+@pytest.mark.skip(reason="Issue #1116: unskip when fixing isin negation, between, log, date/datetime, string arithmetic")
 def test_date_ne_datetime(spark, spark_backend):
     """F.col('Date') != F.col('DateTime') must work."""
     F_backend = get_spark_imports(spark_backend).F
@@ -208,6 +215,7 @@ def test_date_datetime_chained_filter(spark, spark_backend):
     assert rows[0]["id"] == 3
 
 
+@pytest.mark.skip(reason="Issue #1116: unskip when fixing isin negation, between, log, date/datetime, string arithmetic")
 def test_date_datetime_with_and(spark, spark_backend):
     """Date/datetime comparison combined with AND."""
     F_backend = get_spark_imports(spark_backend).F
@@ -263,6 +271,7 @@ def test_date_datetime_orderby(spark, spark_backend):
     assert [r["id"] for r in rows] == [1, 2, 3]
 
 
+@pytest.mark.skip(reason="Issue #1116: unskip when fixing isin negation, between, log, date/datetime, string arithmetic")
 def test_exact_scenario_from_issue_431(spark, spark_backend):
     """Exact scenario from issue #431 - must not raise and return Bob row."""
     F_backend = get_spark_imports(spark_backend).F

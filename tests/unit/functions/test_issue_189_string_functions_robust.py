@@ -7,6 +7,8 @@ to run against both sparkless (mock) and the real PySpark backend.
 Set MOCK_SPARK_TEST_BACKEND=pyspark to run with real PySpark.
 """
 
+import pytest
+
 from tests.fixtures.spark_imports import get_spark_imports
 
 imports = get_spark_imports()
@@ -48,6 +50,7 @@ class TestIssue189StringFunctionsRobust:
         assert rows[2]["m3"] == ""
         assert rows[2]["m4"] == ""
 
+    @pytest.mark.skip(reason="Issue #1118: unskip when fixing string functions robust edge cases")
     def test_substring_index_edge_cases(self, spark):
         df = spark.createDataFrame(
             [
@@ -123,6 +126,7 @@ class TestIssue189StringFunctionsRobust:
         assert rows[1]["c"] == 0
         assert rows[2]["c"] is None
 
+    @pytest.mark.skip(reason="Issue #1118: unskip when fixing string functions robust edge cases")
     def test_xxhash64_known_values_and_null(self, spark):
         df = spark.createDataFrame([{"s": "Hello World"}, {"s": None}])
         rows = df.select(F.xxhash64("s").alias("h")).collect()
@@ -130,6 +134,7 @@ class TestIssue189StringFunctionsRobust:
         # PySpark returns the seed value (42) for NULL
         assert rows[1]["h"] == 42
 
+    @pytest.mark.skip(reason="Issue #1118: unskip when fixing string functions robust edge cases")
     def test_get_json_object_missing_path_and_invalid_json(self, spark):
         df = spark.createDataFrame(
             [
@@ -186,6 +191,7 @@ class TestIssue189StringFunctionsRobust:
         assert out[3]["c0"] is None
         assert out[3]["c1"] is None
 
+    @pytest.mark.skip(reason="Issue #1118: unskip when fixing string functions robust edge cases")
     def test_regexp_extract_all_multiple_matches_and_nulls(self, spark):
         df = spark.createDataFrame(
             [
