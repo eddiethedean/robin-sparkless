@@ -2834,11 +2834,14 @@ impl Column {
                 let mut replaced = false;
                 for f in &mut new_fields {
                     if f.name.as_str() == field_name_schema {
-                        // When replacing, keep existing field's dtype so literals don't force String (#1066).
-                        let dtype = if f.dtype.is_known() {
+                        // When replacing, use value's dtype so type changes (e.g. int -> string) and
+                        // new complex types (e.g. array) are reflected in schema (Issue #1263).
+                        let dtype = if known_value_dtype.is_known() {
+                            known_value_dtype.clone()
+                        } else if f.dtype.is_known() {
                             f.dtype.clone()
                         } else {
-                            known_value_dtype.clone()
+                            DataType::String
                         };
                         *f = Field::new(PlSmallStr::from(f.name.as_str()), dtype);
                         replaced = true;
