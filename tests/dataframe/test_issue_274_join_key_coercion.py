@@ -10,7 +10,9 @@ from __future__ import annotations
 import pytest
 
 
-@pytest.mark.skip(reason="Issue #1274: unskip when fixing collect String schema semantics")
+@pytest.mark.skip(
+    reason="Issue #1274: unskip when fixing collect String schema semantics"
+)
 def test_join_str_key_left_int_key_right(spark) -> None:
     """Join on 'id': left id is str, right id is int; keys are coerced to common type."""
     df1 = spark.createDataFrame(

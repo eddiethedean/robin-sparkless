@@ -36,7 +36,9 @@ def test_na_replace_without_subset(spark) -> None:
     assert rows[1]["a"] == "y" and rows[1]["b"] == "y"
 
 
-@pytest.mark.skip(reason="Issue #1274: unskip when fixing collect String schema semantics")
+@pytest.mark.skip(
+    reason="Issue #1274: unskip when fixing collect String schema semantics"
+)
 def test_na_replace_subset_one_column(spark) -> None:
     """na.replace with subset only touches specified columns."""
     create_df = getattr(spark, "create_dataframe_from_rows", spark.createDataFrame)

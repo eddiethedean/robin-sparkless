@@ -54,7 +54,9 @@ def test_user_guide_na_fill_drop(spark) -> None:
     assert len(dropped.collect()) == 2
 
 
-@pytest.mark.skip(reason="Issue #1274: unskip when fixing collect String schema semantics")
+@pytest.mark.skip(
+    reason="Issue #1274: unskip when fixing collect String schema semantics"
+)
 def test_user_guide_create_dataframe_from_rows(spark) -> None:
     """USER_GUIDE: _create_dataframe_from_rows."""
     schema = ["id", "name", "score"]

@@ -49,7 +49,9 @@ def test_filter_salary_gt_60000(spark) -> None:
     assert_rows_equal(rows, expected, order_matters=False)
 
 
-@pytest.mark.skip(reason="Issue #1274: unskip when fixing collect String schema semantics")
+@pytest.mark.skip(
+    reason="Issue #1274: unskip when fixing collect String schema semantics"
+)
 def test_filter_and_operator(spark) -> None:
     """Ported from Sparkless test_filter_with_and_operator: (a > 1) & (b > 1)."""
     data = [{"a": 1, "b": 2}, {"a": 2, "b": 3}, {"a": 3, "b": 1}]
