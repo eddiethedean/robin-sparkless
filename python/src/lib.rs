@@ -6407,6 +6407,15 @@ impl PyPivotedGroupedData {
                 out.push(c.borrow().inner.clone().into_expr());
                 return Ok(());
             }
+            // F.last("col") returns _LastValueExpr (window helper); pivot.agg() supports it via _pivot_last_column.
+            if let Ok(name) = item.getattr("_pivot_last_column") {
+                if let Ok(col_name) = name.extract::<String>() {
+                    let col = robin_sparkless::functions::col(&col_name);
+                    let last_col = robin_sparkless::functions::last(&col, false);
+                    out.push(last_col.into_expr());
+                    return Ok(());
+                }
+            }
             if let Ok(list) = item.downcast::<PyList>() {
                 for sub in list.iter() {
                     push_expr(&sub, out)?;
@@ -7988,6 +7997,14 @@ fn first(col: &PyColumn, ignorenulls: bool) -> PyColumn {
 }
 
 #[pyfunction]
+#[pyo3(signature = (col, ignorenulls=false))]
+fn last(col: &PyColumn, ignorenulls: bool) -> PyColumn {
+    PyColumn {
+        inner: functions::last(&col.inner, ignorenulls),
+    }
+}
+
+#[pyfunction]
 fn translate(column: &PyColumn, from_str: &str, to_str: &str) -> PyColumn {
     PyColumn {
         inner: functions::translate(&column.inner, from_str, to_str),
@@ -8256,6 +8273,7 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(approx_count_distinct, m)?)?;
     m.add_function(wrap_pyfunction!(date_trunc, m)?)?;
     m.add_function(wrap_pyfunction!(first, m)?)?;
+    m.add_function(wrap_pyfunction!(last, m)?)?;
     m.add_function(wrap_pyfunction!(translate, m)?)?;
     m.add_function(wrap_pyfunction!(substring_index, m)?)?;
     m.add_function(wrap_pyfunction!(crc32, m)?)?;
