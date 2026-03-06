@@ -305,25 +305,6 @@ fn parse_struct_string_to_json(s: &str, fields: &[StructField]) -> Option<JsonVa
     Some(JsonValue::Object(obj))
 }
 
-/// Convert JSON value to Python with optional schema-based coercion so that numeric/boolean
-/// Column names that are always treated as string in collect() (#1165 fix must not coerce these).
-/// #1146: c0, c1 from json_tuple always string. a/nested/missing only when output has all three (get_json_object shape).
-/// #1266: value, extracted preserved as string (filter string column "value", regexp_extract alias "extracted").
-const COLLECT_STRING_ONLY_COLUMNS: &[&str] = &[
-    "Period",
-    "Name",
-    "Value1",
-    "Value2",
-    "Value2Renamed",
-    "ExtraColumn",
-    "c0",
-    "c1",
-    "value",
-    "extracted",
-    // #1262: union(numeric, string) coerces to string; keep "key" as string in Row.
-    "key",
-];
-
 /// True when output has a, nested, missing (get_json_object test shape); then treat those as string (#1146, avoid regression on lone column "a").
 fn is_get_json_object_shape(output_names: Option<&[String]>) -> bool {
     match output_names {
@@ -336,19 +317,9 @@ fn is_get_json_object_shape(output_names: Option<&[String]>) -> bool {
     }
 }
 
-/// True when output has both key and value (key-value shape); then treat "value" as string so "2" stays string (#1146 na_fill test).
-fn is_key_value_shape(output_names: Option<&[String]>) -> bool {
-    match output_names {
-        Some(n) => n.iter().any(|s| s == "key") && n.iter().any(|s| s == "value"),
-        None => false,
-    }
-}
-
 /// types are preserved even when the engine sent a string (e.g. string-inferred schema).
 /// Recurses for Array and Struct so nested values are coerced too.
-/// When schema is String, best-effort coerces to int/float/bool when the value looks like one
-/// (e.g. coalesce() results or mixed-type array elements stringified by the engine).
-/// column_name: when Some (top-level collect), coerce numeric strings except for COLLECT_STRING_ONLY_COLUMNS (#1165).
+/// When schema is String, value is preserved as string (#1261 PySpark parity).
 /// output_column_names: when Some (top-level collect), used to treat a/nested/missing as string only when all three present (#1146).
 fn json_value_to_py_with_schema(
     py: Python<'_>,
