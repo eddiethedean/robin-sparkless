@@ -2411,8 +2411,9 @@ impl Column {
                 let cond_col = Self::from_expr(rank_expr.eq(lit(1i64)), None);
                 let value_col = Self::from_expr(fl.value_expr.clone(), None);
                 let null_col = Self::from_expr(lit(polars::prelude::NULL), None);
-                let when_col =
-                    crate::functions::when(&cond_col).then(&value_col).otherwise(&null_col);
+                let when_col = crate::functions::when(&cond_col)
+                    .then(&value_col)
+                    .otherwise(&null_col);
                 let expr = when_col.expr().clone().max().over(partition_exprs);
                 return Ok(Self::from_expr(expr, None));
             }
