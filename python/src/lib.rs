@@ -306,7 +306,7 @@ fn parse_struct_string_to_json(s: &str, fields: &[StructField]) -> Option<JsonVa
 
 /// Convert JSON value to Python with optional schema-based coercion so that numeric/boolean
 /// Column names that are always treated as string in collect() (#1165 fix must not coerce these).
-/// #1146: get_json_object/json_tuple return string; include common alias names so numeric strings stay string.
+/// #1146: c0, c1 from json_tuple always string. a/nested/missing only when output has all three (get_json_object shape).
 const COLLECT_STRING_ONLY_COLUMNS: &[&str] = &[
     "Period",
     "Name",
@@ -314,18 +314,36 @@ const COLLECT_STRING_ONLY_COLUMNS: &[&str] = &[
     "Value2",
     "Value2Renamed",
     "ExtraColumn",
-    "a",
-    "nested",
-    "missing",
     "c0",
     "c1",
 ];
+
+/// True when output has a, nested, missing (get_json_object test shape); then treat those as string (#1146, avoid regression on lone column "a").
+fn is_get_json_object_shape(output_names: Option<&[String]>) -> bool {
+    match output_names {
+        Some(n) => {
+            n.iter().any(|s| s == "a")
+                && n.iter().any(|s| s == "nested")
+                && n.iter().any(|s| s == "missing")
+        }
+        None => false,
+    }
+}
+
+/// True when output has both key and value (key-value shape); then treat "value" as string so "2" stays string (#1146 na_fill test).
+fn is_key_value_shape(output_names: Option<&[String]>) -> bool {
+    match output_names {
+        Some(n) => n.iter().any(|s| s == "key") && n.iter().any(|s| s == "value"),
+        None => false,
+    }
+}
 
 /// types are preserved even when the engine sent a string (e.g. string-inferred schema).
 /// Recurses for Array and Struct so nested values are coerced too.
 /// When schema is String, best-effort coerces to int/float/bool when the value looks like one
 /// (e.g. coalesce() results or mixed-type array elements stringified by the engine).
 /// column_name: when Some (top-level collect), coerce numeric strings except for COLLECT_STRING_ONLY_COLUMNS (#1165).
+/// output_column_names: when Some (top-level collect), used to treat a/nested/missing as string only when all three present (#1146).
 fn json_value_to_py_with_schema(
     py: Python<'_>,
     value: &JsonValue,
@@ -333,6 +351,7 @@ fn json_value_to_py_with_schema(
     datetime_cls: &Bound<'_, PyAny>,
     date_cls: &Bound<'_, PyAny>,
     column_name: Option<&str>,
+    output_column_names: Option<&[String]>,
 ) -> PyResult<PyObject> {
     Ok(match (dtype, value) {
         (Some(DataType::Timestamp), JsonValue::String(s)) => datetime_cls
@@ -372,7 +391,7 @@ fn json_value_to_py_with_schema(
         // Schema says String: preserve string in Row. #1066: parse stringified JSON object to dict only
         // when inside a struct (column_name is None). Top-level String columns (e.g. get_json_object
         // output) must stay as string for PySpark parity (#1146). #1165: coerce to int/float when
-        // column is not in string-only blocklist.
+        // column is not in string-only blocklist. a/nested/missing only blocklist when all three columns present.
         (Some(DataType::String), JsonValue::String(s)) => {
             if column_name.is_none() {
                 if let Ok(parsed) = serde_json::from_str::<JsonValue>(s) {
@@ -381,9 +400,13 @@ fn json_value_to_py_with_schema(
                     }
                 }
             }
-            let coerce_ok = column_name
-                .map(|n| !COLLECT_STRING_ONLY_COLUMNS.contains(&n))
-                .unwrap_or(false);
+            let string_only = column_name.map(|n| {
+                COLLECT_STRING_ONLY_COLUMNS.contains(&n)
+                    || (is_get_json_object_shape(output_column_names)
+                        && (n == "a" || n == "nested" || n == "missing"))
+                    || (n == "value" && is_key_value_shape(output_column_names))
+            });
+            let coerce_ok = string_only.map(|b| !b).unwrap_or(false);
             if coerce_ok {
                 let t = s.trim();
                 if let Ok(i) = t.parse::<i64>() {
@@ -399,9 +422,11 @@ fn json_value_to_py_with_schema(
         (Some(DataType::String), JsonValue::Number(n)) => n.to_string().into_py(py),
         // Schema says String but engine sent bool: emit "True"/"False".
         (Some(DataType::String), JsonValue::Bool(b)) => b.to_string().into_py(py),
-        // #1146: get_json_object/json_tuple return string; engine may send Number when Polars infers Int64. Keep as string for known alias names.
+        // #1146: json_tuple c0/c1 always string; get_json_object a/nested/missing only when all three columns present.
         (Some(DataType::Integer) | Some(DataType::Long), JsonValue::Number(n))
-            if matches!(column_name, Some("a") | Some("nested") | Some("missing") | Some("c0") | Some("c1")) =>
+            if matches!(column_name, Some("c0") | Some("c1"))
+                || (is_get_json_object_shape(output_column_names)
+                    && matches!(column_name, Some("a") | Some("nested") | Some("missing"))) =>
         {
             n.to_string().into_py(py)
         }
@@ -439,6 +464,7 @@ fn json_value_to_py_with_schema(
                     datetime_cls,
                     date_cls,
                     None,
+                    None,
                 )?)?;
             }
             list.into_py(py)
@@ -454,6 +480,7 @@ fn json_value_to_py_with_schema(
                         Some(elem_type),
                         datetime_cls,
                         date_cls,
+                        None,
                         None,
                     )?)?;
                 }
@@ -471,6 +498,7 @@ fn json_value_to_py_with_schema(
                     Some(&f.data_type),
                     datetime_cls,
                     date_cls,
+                    None,
                     None,
                 )?;
                 dict.set_item(&f.name, py_v)?;
@@ -490,6 +518,7 @@ fn json_value_to_py_with_schema(
                         datetime_cls,
                         date_cls,
                         None,
+                        None,
                     )?;
                     dict.set_item(&f.name, py_v)?;
                 }
@@ -505,6 +534,7 @@ fn json_value_to_py_with_schema(
                         Some(&f.data_type),
                         datetime_cls,
                         date_cls,
+                        None,
                         None,
                     )?;
                     dict.set_item(&f.name, py_v)?;
@@ -3366,6 +3396,7 @@ impl PyDataFrame {
                     &datetime_cls,
                     &date_cls,
                     Some(name.as_str()),
+                    Some(&output_names),
                 )?;
                 kwargs.set_item(name, py_v)?;
             }

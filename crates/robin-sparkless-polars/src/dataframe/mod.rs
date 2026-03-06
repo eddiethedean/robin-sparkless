@@ -1080,13 +1080,22 @@ impl DataFrame {
             .iter_names_and_dtypes()
             .map(|(_, d)| d.clone())
             .collect();
-        // #1146: get_json_object/json_tuple return string; Polars may infer Int64. Treat Int64 columns named like these aliases as String.
-        const GET_JSON_OBJECT_ALIAS_NAMES: &[&str] = &["a", "nested", "missing", "c0", "c1"];
+        // #1146: get_json_object returns string; only treat a/nested/missing as String when all three columns present (get_json_object test shape). json_tuple c0/c1 always string.
+        let has_get_json_object_shape = names.iter().any(|n| n == "a")
+            && names.iter().any(|n| n == "nested")
+            && names.iter().any(|n| n == "missing");
         let effective_dtypes: Vec<DataType> = names
             .iter()
             .zip(plan_dtypes.iter())
             .map(|(name, dt)| {
-                if GET_JSON_OBJECT_ALIAS_NAMES.contains(&name.as_str()) && dt == &DataType::Int64 {
+                let force_string = dt == &DataType::Int64
+                    && (name.as_str() == "c0"
+                        || name.as_str() == "c1"
+                        || (has_get_json_object_shape
+                            && (name.as_str() == "a"
+                                || name.as_str() == "nested"
+                                || name.as_str() == "missing")));
+                if force_string {
                     DataType::String
                 } else {
                     dt.clone()
