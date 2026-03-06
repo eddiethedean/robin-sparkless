@@ -25,7 +25,6 @@ F = imports.F
 class TestNaFill:
     """Test .na.fill() syntax for DataFrame."""
 
-    @pytest.mark.skip(reason="Issue #1259: unskip when fixing")
     def test_na_fill_scalar(self, spark):
         """Test .na.fill() with scalar value fills all nulls."""
         # Use strings to avoid type compatibility issues
@@ -101,7 +100,6 @@ class TestNaFill:
         assert rows[1]["value"] == "FILLED"  # Was null, now filled
         assert rows[1]["other"] is None  # Not in subset, unchanged
 
-    @pytest.mark.skip(reason="Issue #1259: unskip when fixing")
     def test_na_fill_after_join(self, spark):
         """Test .na.fill() after join operation (exact scenario from issue #245)."""
         # Use integers for the exact scenario from issue #245
@@ -254,7 +252,6 @@ class TestNaFill:
         assert rows[1]["age"] is None  # Not filled
         assert rows[1]["city"] == "NYC"  # Not null, unchanged
 
-    @pytest.mark.skip(reason="Issue #1259: unskip when fixing")
     def test_na_fill_pyspark_parity(self, spark):
         """Test .na.fill() matches PySpark behavior exactly."""
         df = spark.createDataFrame(
