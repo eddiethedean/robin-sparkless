@@ -1687,8 +1687,8 @@ fn push_agg_function(
     alias_override: Option<&str>,
     agg: &mut Vec<Expr>,
 ) -> Result<(), PolarsError> {
-    use sqlparser::ast::FunctionArgExpr;
     use polars::prelude::len;
+    use sqlparser::ast::FunctionArgExpr;
 
     let func_name = name
         .0
@@ -1742,7 +1742,8 @@ fn push_agg_function(
                 (inner.sum(), default)
             } else {
                 return Err(PolarsError::InvalidOperation(
-                    "SQL: SUM requires one expression argument (e.g. SUM(column) or SUM(a * b)).".into(),
+                    "SQL: SUM requires one expression argument (e.g. SUM(column) or SUM(a * b))."
+                        .into(),
                 ));
             }
         }
@@ -1758,7 +1759,8 @@ fn push_agg_function(
                 (inner.mean(), default)
             } else {
                 return Err(PolarsError::InvalidOperation(
-                    "SQL: AVG requires one expression argument (e.g. AVG(column) or AVG(a * b)).".into(),
+                    "SQL: AVG requires one expression argument (e.g. AVG(column) or AVG(a * b))."
+                        .into(),
                 ));
             }
         }
