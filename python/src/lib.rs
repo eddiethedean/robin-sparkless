@@ -1841,84 +1841,84 @@ fn python_data_and_schema(
     // and keys are found correctly (avoids PyO3 dict lookup issues).
     if !list.is_empty() {
         if let Some(keys) = column_order.as_ref() {
-        let keys_py = PyList::empty_bound(py);
-        for k in keys {
-            keys_py.append(k.as_str())?;
-        }
-        // Normalize to list of plain dicts so d.get(k) finds keys regardless of key type (#357, #1267).
-        let data_for_batch: Bound<'_, PyList> = (|| {
-            let out = PyList::empty_bound(py);
-            let builtins = py.import_bound("builtins").ok()?;
-            let dict_fn = builtins.getattr("dict").ok()?;
-            for item in list.iter() {
-                let normalized = dict_fn.call1((item,)).ok()?;
-                out.append(normalized).ok()?;
+            let keys_py = PyList::empty_bound(py);
+            for k in keys {
+                keys_py.append(k.as_str())?;
             }
-            Some(out)
-        })()
-        .unwrap_or_else(|| list.clone());
-        // Prefer dict_rows_to_column_order from Python (load _cdf_helpers then get from sys.modules); then eval.
-        let try_helper = || -> PyResult<Option<Bound<'_, PyList>>> {
-            let _ = py.import_bound("sparkless._cdf_helpers").ok(); // ensure loaded
-            let sys = py.import_bound("sys")?;
-            let modules = sys.getattr("modules")?;
-            let mod_ = modules.get_item("sparkless._cdf_helpers").map_err(|_| {
-                PyErr::new::<pyo3::exceptions::PyImportError, _>(
-                    "sparkless._cdf_helpers not in sys.modules",
-                )
-            })?;
-            let func = mod_.getattr("dict_rows_to_column_order")?;
-            let result = func.call1((data_for_batch.as_ref(), &keys_py))?;
-            let list: Bound<'_, PyList> = result.downcast_into()?;
-            Ok(Some(list))
-        };
-        let rows_py = try_helper().ok().flatten().or_else(|| {
-            let globals = PyDict::new_bound(py);
-            if globals.set_item("_cdf_d", &data_for_batch).is_err() {
-                return None;
-            }
-            if globals.set_item("_cdf_k", &keys_py).is_err() {
-                return None;
-            }
-            let builtins = py.import_bound("builtins").ok()?;
-            if globals.set_item("__builtins__", &builtins).is_err() {
-                return None;
-            }
-            let code = "[[d.get(k) for k in _cdf_k] for d in _cdf_d]";
-            let result = builtins
-                .getattr("eval")
-                .ok()?
-                .call1((code, &globals))
-                .ok()?;
-            result.downcast_into::<PyList>().ok()
-        });
-        if let Some(rows_py) = rows_py {
-            if rows_py.len() == list.len() {
-                let mut parsed = Vec::with_capacity(rows_py.len());
-                for row_py in rows_py.iter() {
-                    if let Ok(row_list) = row_py.downcast::<PyList>() {
-                        let mut row = Vec::with_capacity(row_list.len());
-                        for v in row_list.iter() {
-                            row.push(py_any_to_json(py, &v)?);
+            // Normalize to list of plain dicts so d.get(k) finds keys regardless of key type (#357, #1267).
+            let data_for_batch: Bound<'_, PyList> = (|| {
+                let out = PyList::empty_bound(py);
+                let builtins = py.import_bound("builtins").ok()?;
+                let dict_fn = builtins.getattr("dict").ok()?;
+                for item in list.iter() {
+                    let normalized = dict_fn.call1((item,)).ok()?;
+                    out.append(normalized).ok()?;
+                }
+                Some(out)
+            })()
+            .unwrap_or_else(|| list.clone());
+            // Prefer dict_rows_to_column_order from Python (load _cdf_helpers then get from sys.modules); then eval.
+            let try_helper = || -> PyResult<Option<Bound<'_, PyList>>> {
+                let _ = py.import_bound("sparkless._cdf_helpers").ok(); // ensure loaded
+                let sys = py.import_bound("sys")?;
+                let modules = sys.getattr("modules")?;
+                let mod_ = modules.get_item("sparkless._cdf_helpers").map_err(|_| {
+                    PyErr::new::<pyo3::exceptions::PyImportError, _>(
+                        "sparkless._cdf_helpers not in sys.modules",
+                    )
+                })?;
+                let func = mod_.getattr("dict_rows_to_column_order")?;
+                let result = func.call1((data_for_batch.as_ref(), &keys_py))?;
+                let list: Bound<'_, PyList> = result.downcast_into()?;
+                Ok(Some(list))
+            };
+            let rows_py = try_helper().ok().flatten().or_else(|| {
+                let globals = PyDict::new_bound(py);
+                if globals.set_item("_cdf_d", &data_for_batch).is_err() {
+                    return None;
+                }
+                if globals.set_item("_cdf_k", &keys_py).is_err() {
+                    return None;
+                }
+                let builtins = py.import_bound("builtins").ok()?;
+                if globals.set_item("__builtins__", &builtins).is_err() {
+                    return None;
+                }
+                let code = "[[d.get(k) for k in _cdf_k] for d in _cdf_d]";
+                let result = builtins
+                    .getattr("eval")
+                    .ok()?
+                    .call1((code, &globals))
+                    .ok()?;
+                result.downcast_into::<PyList>().ok()
+            });
+            if let Some(rows_py) = rows_py {
+                if rows_py.len() == list.len() {
+                    let mut parsed = Vec::with_capacity(rows_py.len());
+                    for row_py in rows_py.iter() {
+                        if let Ok(row_list) = row_py.downcast::<PyList>() {
+                            let mut row = Vec::with_capacity(row_list.len());
+                            for v in row_list.iter() {
+                                row.push(py_any_to_json(py, &v)?);
+                            }
+                            parsed.push(row);
+                        } else {
+                            break;
                         }
-                        parsed.push(row);
-                    } else {
-                        break;
+                    }
+                    // Only use batch result if first column is present (avoid wrong lookup from eval/helper).
+                    if parsed.len() == list.len()
+                        && parsed
+                            .first()
+                            .and_then(|r| r.first())
+                            .map(|v| !matches!(v, JsonValue::Null))
+                            .unwrap_or(false)
+                    {
+                        rows.extend(parsed);
+                        row_kind = Some("dict");
                     }
                 }
-                // Only use batch result if first column is present (avoid wrong lookup from eval/helper).
-                if parsed.len() == list.len()
-                    && parsed
-                        .first()
-                        .and_then(|r| r.first())
-                        .map(|v| !matches!(v, JsonValue::Null))
-                        .unwrap_or(false)
-                {
-                    rows.extend(parsed);
-                    row_kind = Some("dict");
-                }
             }
-        }
         }
     }
     // Per-row lambda for dict-like rows when batch lambda failed: [row.get(k) for k in keys].
@@ -1968,34 +1968,34 @@ fn python_data_and_schema(
             // For native dicts with column_order: get each value in Python via row.get(k) (#1267).
             let row = if item.downcast::<PyDict>().is_ok() {
                 if let Some(order) = column_order.as_ref() {
-                let from_eval: Option<Vec<JsonValue>> = (|| {
-                    let builtins = py.import_bound("builtins").ok()?;
-                    let eval_fn = builtins.getattr("eval").ok()?;
-                    let globals = PyDict::new_bound(py);
-                    globals.set_item("_row", &item).ok()?;
-                    globals.set_item("__builtins__", &builtins).ok()?;
-                    let mut values = Vec::with_capacity(order.len());
-                    for k in order {
-                        let py_k = pyo3::types::PyString::new_bound(py, k.as_str());
-                        globals.set_item("_k", &py_k).ok()?;
-                        let result = eval_fn.call1(("_row.get(_k)", &globals)).ok()?;
-                        let v = py_any_to_json(py, &result).ok().unwrap_or(JsonValue::Null);
-                        values.push(v);
+                    let from_eval: Option<Vec<JsonValue>> = (|| {
+                        let builtins = py.import_bound("builtins").ok()?;
+                        let eval_fn = builtins.getattr("eval").ok()?;
+                        let globals = PyDict::new_bound(py);
+                        globals.set_item("_row", &item).ok()?;
+                        globals.set_item("__builtins__", &builtins).ok()?;
+                        let mut values = Vec::with_capacity(order.len());
+                        for k in order {
+                            let py_k = pyo3::types::PyString::new_bound(py, k.as_str());
+                            globals.set_item("_k", &py_k).ok()?;
+                            let result = eval_fn.call1(("_row.get(_k)", &globals)).ok()?;
+                            let v = py_any_to_json(py, &result).ok().unwrap_or(JsonValue::Null);
+                            values.push(v);
+                        }
+                        Some(values)
+                    })();
+                    if let Some(values) = from_eval {
+                        values
+                    } else {
+                        python_row_to_json(
+                            py,
+                            &item,
+                            idx,
+                            column_order.as_deref(),
+                            from_pandas,
+                            allow_scalar_single_column,
+                        )?
                     }
-                    Some(values)
-                })();
-                if let Some(values) = from_eval {
-                    values
-                } else {
-                    python_row_to_json(
-                        py,
-                        &item,
-                        idx,
-                        column_order.as_deref(),
-                        from_pandas,
-                        allow_scalar_single_column,
-                    )?
-                }
                 } else {
                     python_row_to_json(
                         py,

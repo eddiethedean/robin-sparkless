@@ -10,7 +10,7 @@ use crate::type_coercion::{coerce_expr_pair, find_common_type, is_numeric_public
 use crate::udfs;
 use polars::prelude::{
     DataType, Expr, Float64Chunked, IntoLazy, IntoSeries, NamedFrom, PlSmallStr, PolarsError,
-    SchemaNamesAndDtypes, Selector, Series, UnionArgs, UniqueKeepStrategy, col, len, lit, repeat,
+    SchemaNamesAndDtypes, Selector, Series, UniqueKeepStrategy, col, len, lit, repeat,
 };
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
@@ -738,7 +738,10 @@ pub fn union(
             out.schema().iter_names_and_dtypes().collect::<Vec<_>>()
         );
     }
-    Ok(super::DataFrame::from_eager_with_options(out, case_sensitive))
+    Ok(super::DataFrame::from_eager_with_options(
+        out,
+        case_sensitive,
+    ))
 }
 
 /// Union by name: stack vertically, aligning columns by name.
@@ -2339,10 +2342,16 @@ mod tests {
         // #1262: collected rows must have id as string (PySpark union coerces numeric+string to string).
         let (_names, rows, schema) = out.collect_as_json_rows_with_names().unwrap();
         let id_field = schema.fields().iter().find(|f| f.name == "id").unwrap();
-        assert!(matches!(id_field.data_type, robin_sparkless_core::DataType::String));
+        assert!(matches!(
+            id_field.data_type,
+            robin_sparkless_core::DataType::String
+        ));
         for row in &rows {
             let id_val = row.get("id").unwrap();
-            assert!(matches!(id_val, serde_json::Value::String(_)), "id should be string, got {id_val:?}");
+            assert!(
+                matches!(id_val, serde_json::Value::String(_)),
+                "id should be string, got {id_val:?}"
+            );
         }
     }
 
