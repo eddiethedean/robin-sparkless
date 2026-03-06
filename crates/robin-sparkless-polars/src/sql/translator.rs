@@ -123,7 +123,7 @@ pub fn expr_string_to_polars(
             ));
         }
     };
-    let expr = sql_expr_to_polars(&sql_expr, session, Some(df), None)?;
+    let expr = sql_expr_to_polars(&sql_expr, session, Some(df), None, None)?;
     Ok(match alias {
         Some(a) => expr.alias(a),
         // Default output name for expr() is the original SQL expression string so tests
@@ -637,7 +637,7 @@ fn translate_update(
     let mut df = session.table(&table_name)?;
 
     let where_expr = match &update.selection {
-        Some(sel) => sql_expr_to_polars(sel, session, Some(&df), None)?,
+        Some(sel) => sql_expr_to_polars(sel, session, Some(&df), None, None)?,
         None => lit(true),
     };
 
@@ -645,7 +645,7 @@ fn translate_update(
         let (col_name, value_expr) = match &assign.target {
             AssignmentTarget::ColumnName(name) => {
                 let cn = table_name_from_object_name(name);
-                let value = sql_expr_to_polars(&assign.value, session, Some(&df), None)?;
+                let value = sql_expr_to_polars(&assign.value, session, Some(&df), None, None)?;
                 (cn, value)
             }
             AssignmentTarget::Tuple(_) => {
@@ -690,7 +690,7 @@ fn translate_delete(
 
     let keep_condition = match &delete.selection {
         Some(sel) => {
-            let pred = sql_expr_to_polars(sel, session, Some(&df), None)?;
+            let pred = sql_expr_to_polars(sel, session, Some(&df), None, None)?;
             pred.not()
         }
         None => lit(false),
@@ -712,7 +712,7 @@ fn translate_select_body(
 ) -> Result<crate::dataframe::DataFrame, PolarsError> {
     let mut df = translate_select_from(session, body)?;
     if let Some(selection) = &body.selection {
-        let expr = sql_expr_to_polars(selection, session, Some(&df), None)?;
+        let expr = sql_expr_to_polars(selection, session, Some(&df), None, None)?;
         df = df.filter(expr)?;
     }
     let group_exprs: &[SqlExpr] = match &body.group_by {
@@ -725,6 +725,11 @@ fn translate_select_body(
     };
     let has_group_by = !group_exprs.is_empty();
     let mut having_agg_map: HashMap<(String, String), String> = HashMap::new();
+    let having_list: Vec<(Function, String)> = body
+        .having
+        .as_ref()
+        .map(|e| extract_having_agg_calls(e))
+        .unwrap_or_default();
     if has_group_by {
         // Support GROUP BY column name or expression, e.g. GROUP BY age or GROUP BY (age > 30) (issue #588).
         let pairs: Vec<(Expr, String)> = group_exprs
@@ -752,7 +757,7 @@ fn translate_select_body(
                         (col(resolved.as_str()), resolved)
                     }
                     _ => {
-                        let expr = sql_expr_to_polars(e, session, Some(&df), None)?;
+                        let expr = sql_expr_to_polars(e, session, Some(&df), None, None)?;
                         let name = format!("group_{}", i);
                         (expr.alias(&name), name)
                     }
@@ -761,21 +766,21 @@ fn translate_select_body(
             .collect::<Result<Vec<_>, PolarsError>>()?;
         let (group_exprs_polars, group_cols): (Vec<Expr>, Vec<String>) = pairs.into_iter().unzip();
         let grouped = df.group_by_exprs(group_exprs_polars, group_cols.clone())?;
-        let mut agg_exprs = projection_to_agg_exprs(&body.projection, &group_cols, &df)?;
-        if let Some(having_expr) = &body.having {
-            let having_list = extract_having_agg_calls(having_expr);
+        let mut agg_exprs = projection_to_agg_exprs(&body.projection, &group_cols, session, &df)?;
+        if let Some(_having_expr) = &body.having {
             for (func, alias) in &having_list {
                 push_agg_function(
                     &func.name,
                     function_args_slice(&func.args),
+                    session,
                     &df,
                     Some(alias.as_str()),
                     &mut agg_exprs,
                 )?;
             }
             having_agg_map = having_list
-                .into_iter()
-                .filter_map(|(f, alias)| agg_function_key(&f).map(|k| (k, alias)))
+                .iter()
+                .filter_map(|(f, alias)| agg_function_key(f).map(|k| (k, alias.clone())))
                 .collect();
         }
         if agg_exprs.is_empty() {
@@ -790,6 +795,7 @@ fn translate_select_body(
                 session,
                 Some(&df),
                 Some(&having_agg_map).filter(|m| !m.is_empty()),
+                Some(having_list.as_slice()),
             )?;
             df = df.filter(having_polars)?;
         }
@@ -814,7 +820,7 @@ fn translate_select_body(
         }
     } else if projection_is_scalar_aggregate(&body.projection) {
         // SELECT AVG(salary) FROM t (no GROUP BY) — scalar aggregation (issue #587).
-        let agg_exprs = projection_to_agg_exprs(&body.projection, &[], &df)?;
+        let agg_exprs = projection_to_agg_exprs(&body.projection, &[], session, &df)?;
         let agg_exprs = disambiguate_agg_output_names(agg_exprs);
         let pl_df = df.lazy_frame().select(agg_exprs).collect()?;
         df = DataFrame::from_polars_with_options(pl_df, df.case_sensitive);
@@ -829,6 +835,7 @@ fn translate_select_body(
                 session,
                 Some(&df),
                 Some(&having_agg_map).filter(|m| !m.is_empty()),
+                Some(having_list.as_slice()),
             )?;
             df = df.filter(having_polars)?;
         }
@@ -1085,6 +1092,7 @@ fn sql_expr_to_polars(
     session: &SparkSession,
     df: Option<&DataFrame>,
     having_agg_map: Option<&HashMap<(String, String), String>>,
+    having_agg_list: Option<&[(Function, String)]>,
 ) -> Result<Expr, PolarsError> {
     match expr {
         SqlExpr::Identifier(ident) => {
@@ -1127,8 +1135,8 @@ fn sql_expr_to_polars(
         SqlExpr::Value(ValueWithSpan { value: Value::Boolean(b), .. }) => Ok(lit(*b)),
         SqlExpr::Value(ValueWithSpan { value: Value::Null, .. }) => Ok(lit(polars::prelude::NULL)),
         SqlExpr::BinaryOp { left, op, right } => {
-            let l = sql_expr_to_polars(left, session, df, having_agg_map)?;
-            let r = sql_expr_to_polars(right, session, df, having_agg_map)?;
+            let l = sql_expr_to_polars(left, session, df, having_agg_map, having_agg_list)?;
+            let r = sql_expr_to_polars(right, session, df, having_agg_map, having_agg_list)?;
             match op {
                 BinaryOperator::Eq => Ok(l.eq(r)),
                 BinaryOperator::NotEq => Ok(l.eq(r).not()),
@@ -1138,16 +1146,20 @@ fn sql_expr_to_polars(
                 BinaryOperator::LtEq => Ok(l.lt_eq(r)),
                 BinaryOperator::And => Ok(l.and(r)),
                 BinaryOperator::Or => Ok(l.or(r)),
+                BinaryOperator::Plus => Ok(l + r),
+                BinaryOperator::Minus => Ok(l - r),
+                BinaryOperator::Multiply => Ok(l * r),
+                BinaryOperator::Divide => Ok(l / r),
                 _ => Err(PolarsError::InvalidOperation(
-                    format!("SQL: unsupported operator in WHERE: {:?}. Use =, <>, <, <=, >, >=, AND, OR.", op).into(),
+                    format!("SQL: unsupported operator in WHERE: {:?}. Use =, <>, <, <=, >, >=, AND, OR, +, -, *, /.", op).into(),
                 )),
             }
         }
-        SqlExpr::Nested(inner) => sql_expr_to_polars(inner, session, df, having_agg_map),
-        SqlExpr::IsNull(expr) => Ok(sql_expr_to_polars(expr, session, df, having_agg_map)?.is_null()),
-        SqlExpr::IsNotNull(expr) => Ok(sql_expr_to_polars(expr, session, df, having_agg_map)?.is_not_null()),
+        SqlExpr::Nested(inner) => sql_expr_to_polars(inner, session, df, having_agg_map, having_agg_list),
+        SqlExpr::IsNull(expr) => Ok(sql_expr_to_polars(expr, session, df, having_agg_map, having_agg_list)?.is_null()),
+        SqlExpr::IsNotNull(expr) => Ok(sql_expr_to_polars(expr, session, df, having_agg_map, having_agg_list)?.is_not_null()),
         SqlExpr::UnaryOp { op, expr } => {
-            let e = sql_expr_to_polars(expr, session, df, having_agg_map)?;
+            let e = sql_expr_to_polars(expr, session, df, having_agg_map, having_agg_list)?;
             match op {
                 sqlparser::ast::UnaryOperator::Not => Ok(e.not()),
                 _ => Err(PolarsError::InvalidOperation(
@@ -1164,7 +1176,7 @@ fn sql_expr_to_polars(
             // Support TRIM(expr) used in F.expr() and SELECT. PySpark-style TRIM with no
             // extra arguments trims leading and trailing spaces only.
             if trim_where.is_none() && trim_what.is_none() && trim_characters.is_none() {
-                let inner_expr = sql_expr_to_polars(inner, session, df, having_agg_map)?;
+                let inner_expr = sql_expr_to_polars(inner, session, df, having_agg_map, having_agg_list)?;
                 let col = Column::from_expr(inner_expr, None);
                 Ok(functions::trim(&col).expr().clone())
             } else {
@@ -1181,6 +1193,16 @@ fn sql_expr_to_polars(
                     }
                 }
             }
+            // Aggregate with expression arg (e.g. SUM(quantity * price)) in HAVING: resolve by list match.
+            if let Some(list) = having_agg_list {
+                if is_agg_function_name(func) {
+                    for (f, alias) in list.iter() {
+                        if f.name == func.name && f.args == func.args {
+                            return Ok(col(alias.as_str()));
+                        }
+                    }
+                }
+            }
             sql_function_to_expr(func, session, df)
         }
         SqlExpr::Like {
@@ -1190,7 +1212,7 @@ fn sql_expr_to_polars(
             escape_char,
             any: _,
         } => {
-            let col_expr = sql_expr_to_polars(left.as_ref(), session, df, having_agg_map)?;
+            let col_expr = sql_expr_to_polars(left.as_ref(), session, df, having_agg_map, having_agg_list)?;
             let pattern_str = sql_expr_to_string_literal(pattern.as_ref())?;
             let col_col = crate::column::Column::from_expr(col_expr, None);
             let escape: Option<char> = escape_char.as_ref().and_then(|v| match v {
@@ -1209,7 +1231,7 @@ fn sql_expr_to_polars(
             list,
             negated,
         } => {
-            let col_expr = sql_expr_to_polars(left.as_ref(), session, df, having_agg_map)?;
+            let col_expr = sql_expr_to_polars(left.as_ref(), session, df, having_agg_map, having_agg_list)?;
             if list.is_empty() {
                 return Ok(lit(false));
             }
@@ -1221,9 +1243,9 @@ fn sql_expr_to_polars(
             let mut iter = list.iter();
             let first = iter.next().unwrap();
             let mut in_expr =
-                col_expr.clone().eq(sql_expr_to_polars(first, session, df, having_agg_map)?);
+                col_expr.clone().eq(sql_expr_to_polars(first, session, df, having_agg_map, having_agg_list)?);
             for e in iter {
-                let rhs = sql_expr_to_polars(e, session, df, having_agg_map)?;
+                let rhs = sql_expr_to_polars(e, session, df, having_agg_map, having_agg_list)?;
                 in_expr = in_expr.or(col_expr.clone().eq(rhs));
             }
 
@@ -1242,18 +1264,18 @@ fn sql_expr_to_polars(
             // Simple CASE: CASE x WHEN a THEN b -> when(x.eq(a)).then(b). Searched CASE: CASE WHEN p THEN b -> when(p).then(b).
             // Build from the end so we stay in Expr type: else_e = else; for (cond, res) in reverse, else_e = when(cond).then(res).otherwise(else_e).
             let else_e = match else_result {
-                Some(e) => sql_expr_to_polars(e.as_ref(), session, df, having_agg_map)?,
+                Some(e) => sql_expr_to_polars(e.as_ref(), session, df, having_agg_map, having_agg_list)?,
                 None => lit(polars::prelude::NULL),
             };
             let mut expr = else_e;
             for cw in conditions.iter().rev() {
                 let cond = if let Some(op) = &operand {
-                    sql_expr_to_polars(op.as_ref(), session, df, having_agg_map)?
-                        .eq(sql_expr_to_polars(&cw.condition, session, df, having_agg_map)?)
+                    sql_expr_to_polars(op.as_ref(), session, df, having_agg_map, having_agg_list)?
+                        .eq(sql_expr_to_polars(&cw.condition, session, df, having_agg_map, having_agg_list)?)
                 } else {
-                    sql_expr_to_polars(&cw.condition, session, df, having_agg_map)?
+                    sql_expr_to_polars(&cw.condition, session, df, having_agg_map, having_agg_list)?
                 };
-                let res = sql_expr_to_polars(&cw.result, session, df, having_agg_map)?;
+                let res = sql_expr_to_polars(&cw.result, session, df, having_agg_map, having_agg_list)?;
                 expr = when(cond).then(res).otherwise(expr);
             }
             Ok(expr)
@@ -1331,7 +1353,7 @@ fn sql_function_args_to_columns(
     let mut cols = Vec::new();
     for arg in function_args_slice(&func.args) {
         if let FunctionArg::Unnamed(FunctionArgExpr::Expr(expr)) = arg {
-            let e = sql_expr_to_polars(expr, session, df, None)?;
+            let e = sql_expr_to_polars(expr, session, df, None, None)?;
             cols.push(Column::from_expr(e, None));
         } else {
             return Err(PolarsError::InvalidOperation(
@@ -1506,7 +1528,7 @@ fn apply_projection(
                     }
                     SqlExpr::Case { .. } => {
                         // CASE ... END AS alias (#776)
-                        let e = sql_expr_to_polars(expr, session, Some(df), None)?;
+                        let e = sql_expr_to_polars(expr, session, Some(df), None, None)?;
                         ProjItem::Expr(e, alias_str)
                     }
                     _ => {
@@ -1656,13 +1678,16 @@ fn projection_function_to_item(
 }
 
 /// Push one aggregate expression from a SQL function. `alias_override`: when Some (e.g. AS cnt), use it; when None use default (count, sum(col), etc).
+/// SUM/AVG/MIN/MAX accept any expression (e.g. SUM(quantity * price)); COUNT accepts * or column only.
 fn push_agg_function(
     name: &sqlparser::ast::ObjectName,
     args: &[sqlparser::ast::FunctionArg],
+    session: &SparkSession,
     df: &DataFrame,
     alias_override: Option<&str>,
     agg: &mut Vec<Expr>,
 ) -> Result<(), PolarsError> {
+    use sqlparser::ast::FunctionArgExpr;
     use polars::prelude::len;
 
     let func_name = name
@@ -1676,7 +1701,6 @@ fn push_agg_function(
             let e = if args.is_empty() {
                 len()
             } else if args.len() == 1 {
-                use sqlparser::ast::FunctionArgExpr;
                 match &args[0] {
                     sqlparser::ast::FunctionArg::Unnamed(FunctionArgExpr::Wildcard) => len(),
                     sqlparser::ast::FunctionArg::Unnamed(FunctionArgExpr::Expr(e)) => {
@@ -1707,66 +1731,66 @@ fn push_agg_function(
             (e, "count".to_string())
         }
         "SUM" => {
-            if let Some(sqlparser::ast::FunctionArg::Unnamed(
-                sqlparser::ast::FunctionArgExpr::Expr(SqlExpr::Identifier(ident)),
-            )) = args.first()
+            if let Some(sqlparser::ast::FunctionArg::Unnamed(FunctionArgExpr::Expr(arg_expr))) =
+                args.first()
             {
-                let resolved = df.resolve_column_name(ident.value.as_str())?;
-                (
-                    col(resolved.as_str()).sum(),
-                    format!("sum({})", ident.value),
-                )
+                let inner = sql_expr_to_polars(arg_expr, session, Some(df), None, None)?;
+                let default = match arg_expr {
+                    SqlExpr::Identifier(ident) => format!("sum({})", ident.value),
+                    _ => "sum".to_string(),
+                };
+                (inner.sum(), default)
             } else {
                 return Err(PolarsError::InvalidOperation(
-                    "SQL: SUM(column) only.".into(),
+                    "SQL: SUM requires one expression argument (e.g. SUM(column) or SUM(a * b)).".into(),
                 ));
             }
         }
         "AVG" | "MEAN" => {
-            if let Some(sqlparser::ast::FunctionArg::Unnamed(
-                sqlparser::ast::FunctionArgExpr::Expr(SqlExpr::Identifier(ident)),
-            )) = args.first()
+            if let Some(sqlparser::ast::FunctionArg::Unnamed(FunctionArgExpr::Expr(arg_expr))) =
+                args.first()
             {
-                let resolved = df.resolve_column_name(ident.value.as_str())?;
-                (
-                    col(resolved.as_str()).mean(),
-                    format!("avg({})", ident.value),
-                )
+                let inner = sql_expr_to_polars(arg_expr, session, Some(df), None, None)?;
+                let default = match arg_expr {
+                    SqlExpr::Identifier(ident) => format!("avg({})", ident.value),
+                    _ => "avg".to_string(),
+                };
+                (inner.mean(), default)
             } else {
                 return Err(PolarsError::InvalidOperation(
-                    "SQL: AVG(column) only.".into(),
+                    "SQL: AVG requires one expression argument (e.g. AVG(column) or AVG(a * b)).".into(),
                 ));
             }
         }
         "MIN" => {
-            if let Some(sqlparser::ast::FunctionArg::Unnamed(
-                sqlparser::ast::FunctionArgExpr::Expr(SqlExpr::Identifier(ident)),
-            )) = args.first()
+            if let Some(sqlparser::ast::FunctionArg::Unnamed(FunctionArgExpr::Expr(arg_expr))) =
+                args.first()
             {
-                let resolved = df.resolve_column_name(ident.value.as_str())?;
-                (
-                    col(resolved.as_str()).min(),
-                    format!("min({})", ident.value),
-                )
+                let inner = sql_expr_to_polars(arg_expr, session, Some(df), None, None)?;
+                let default = match arg_expr {
+                    SqlExpr::Identifier(ident) => format!("min({})", ident.value),
+                    _ => "min".to_string(),
+                };
+                (inner.min(), default)
             } else {
                 return Err(PolarsError::InvalidOperation(
-                    "SQL: MIN(column) only.".into(),
+                    "SQL: MIN requires one expression argument.".into(),
                 ));
             }
         }
         "MAX" => {
-            if let Some(sqlparser::ast::FunctionArg::Unnamed(
-                sqlparser::ast::FunctionArgExpr::Expr(SqlExpr::Identifier(ident)),
-            )) = args.first()
+            if let Some(sqlparser::ast::FunctionArg::Unnamed(FunctionArgExpr::Expr(arg_expr))) =
+                args.first()
             {
-                let resolved = df.resolve_column_name(ident.value.as_str())?;
-                (
-                    col(resolved.as_str()).max(),
-                    format!("max({})", ident.value),
-                )
+                let inner = sql_expr_to_polars(arg_expr, session, Some(df), None, None)?;
+                let default = match arg_expr {
+                    SqlExpr::Identifier(ident) => format!("max({})", ident.value),
+                    _ => "max".to_string(),
+                };
+                (inner.max(), default)
             } else {
                 return Err(PolarsError::InvalidOperation(
-                    "SQL: MAX(column) only.".into(),
+                    "SQL: MAX requires one expression argument.".into(),
                 ));
             }
         }
@@ -1860,12 +1884,18 @@ fn extract_having_agg_calls(expr: &SqlExpr) -> Vec<(Function, String)> {
         list: &mut Vec<(Function, String)>,
     ) {
         if let SqlExpr::Function(f) = e {
-            if let Some(key) = agg_function_key(f) {
-                if !seen.contains_key(&key) {
-                    let alias = format!("__having_{}", list.len());
-                    seen.insert(key.clone(), alias.clone());
-                    list.push((f.clone(), alias));
+            if is_agg_function_name(f) {
+                if let Some(key) = agg_function_key(f) {
+                    if !seen.contains_key(&key) {
+                        let alias = format!("__having_{}", list.len());
+                        seen.insert(key.clone(), alias.clone());
+                        list.push((f.clone(), alias));
+                    }
+                    return;
                 }
+                // Aggregate with expression arg (e.g. SUM(quantity * price)); no key for dedup, add once.
+                let alias = format!("__having_{}", list.len());
+                list.push((f.clone(), alias));
                 return;
             }
         }
@@ -2012,6 +2042,7 @@ fn default_agg_alias(func: &Function) -> Result<String, PolarsError> {
 fn projection_to_agg_exprs(
     projection: &[SelectItem],
     group_cols: &[String],
+    session: &SparkSession,
     df: &DataFrame,
 ) -> Result<Vec<Expr>, PolarsError> {
     let mut agg = Vec::new();
@@ -2051,7 +2082,7 @@ fn projection_to_agg_exprs(
                 }
             }
             SelectItem::UnnamedExpr(SqlExpr::Function(Function { name, args, .. })) => {
-                push_agg_function(name, function_args_slice(args), df, None, &mut agg)?;
+                push_agg_function(name, function_args_slice(args), session, df, None, &mut agg)?;
             }
             SelectItem::ExprWithAlias { expr, alias } => {
                 let alias_str = alias.value.as_str();
@@ -2091,6 +2122,7 @@ fn projection_to_agg_exprs(
                         push_agg_function(
                             name,
                             function_args_slice(args),
+                            session,
                             df,
                             Some(alias_str),
                             &mut agg,
