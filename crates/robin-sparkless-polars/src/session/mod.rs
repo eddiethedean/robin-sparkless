@@ -186,7 +186,7 @@ fn verify_json_value_for_type(v: &JsonValue, type_str: &str) -> Result<(), Strin
     }
     match t.as_str() {
         "int" | "integer" | "bigint" | "long" | "smallint" | "tinyint" => match v {
-            JsonValue::Number(n) if n.as_i64().is_some() => Ok(()),
+            JsonValue::Number(_) => Ok(()), // #1265: accept any number (e.g. 10^18 from UDF); build uses i64 or f64
             JsonValue::String(s) if s.parse::<i64>().is_ok() => Ok(()),
             _ => Err(format!(
                 "expected bigint/number, got {}",
@@ -2093,19 +2093,44 @@ impl SparkSession {
             let type_lower = type_str.trim().to_lowercase();
             let s = match type_lower.as_str() {
                 "int" | "integer" | "bigint" | "long" | "smallint" | "tinyint" => {
-                    let vals: Vec<Option<i64>> = rows
+                    // #1265: values may exceed i64 (e.g. UDF returns 10^18); use Float64 when any value doesn't fit.
+                    let mut needs_f64 = false;
+                    let i64_vals: Vec<Option<i64>> = rows
                         .iter()
                         .map(|row| {
                             let v = row.get(col_idx).cloned().unwrap_or(JsonValue::Null);
                             match v {
-                                JsonValue::Number(n) => n.as_i64(),
+                                JsonValue::Number(ref n) => {
+                                    if let Some(i) = n.as_i64() {
+                                        Some(i)
+                                    } else {
+                                        needs_f64 = true;
+                                        n.as_f64().map(|f| f as i64) // placeholder; we'll use f64 column
+                                    }
+                                }
                                 JsonValue::String(s) => s.parse::<i64>().ok(),
                                 JsonValue::Null => None,
                                 _ => None,
                             }
                         })
                         .collect();
-                    Series::new(name.as_str().into(), vals)
+                    if needs_f64 {
+                        let f64_vals: Vec<Option<f64>> = rows
+                            .iter()
+                            .map(|row| {
+                                let v = row.get(col_idx).cloned().unwrap_or(JsonValue::Null);
+                                match v {
+                                    JsonValue::Number(n) => n.as_i64().map(|i| i as f64).or_else(|| n.as_f64()),
+                                    JsonValue::String(s) => s.parse::<i64>().ok().map(|i| i as f64),
+                                    JsonValue::Null => None,
+                                    _ => None,
+                                }
+                            })
+                            .collect();
+                        Series::new(name.as_str().into(), f64_vals)
+                    } else {
+                        Series::new(name.as_str().into(), i64_vals)
+                    }
                 }
                 "double" | "float" | "double_precision" => {
                     let vals: Vec<Option<f64>> = rows
