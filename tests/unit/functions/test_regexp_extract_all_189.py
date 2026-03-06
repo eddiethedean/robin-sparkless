@@ -5,7 +5,6 @@ _imports = get_spark_imports()
 F = _imports.F
 
 
-@pytest.mark.skip(reason="Issue #1264: unskip when fixing")
 def test_regexp_extract_all_basic_groups(spark):
     df = spark.createDataFrame(
         [
