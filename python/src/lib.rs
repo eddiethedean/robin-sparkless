@@ -679,7 +679,8 @@ fn register_active_session(
 /// Tries thread-local first; if empty (e.g. pytest-xdist runs test in a different thread than the
 /// fixture), falls back to process-wide _active_sessions so the fixture session is found (#1144).
 fn get_session_for_operation(py: Python<'_>) -> PyResult<Option<Py<PySparkSession>>> {
-    let thread_session = THREAD_ACTIVE_SESSIONS.with(|cell| cell.borrow().last().map(|s| s.clone_ref(py)));
+    let thread_session =
+        THREAD_ACTIVE_SESSIONS.with(|cell| cell.borrow().last().map(|s| s.clone_ref(py)));
     if thread_session.is_some() {
         return Ok(thread_session);
     }
@@ -2886,12 +2887,11 @@ impl PyDataFrame {
         }
         // F.expr(...) in filter: handle PyExprStr SQL expression strings.
         if let Ok(py_expr_str) = condition.downcast::<PyExprStr>() {
-            let session = get_session_for_operation(py)?
-                .ok_or_else(|| {
-                    PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
-                        "filter with F.expr() requires an active SparkSession",
-                    )
-                })?;
+            let session = get_session_for_operation(py)?.ok_or_else(|| {
+                PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
+                    "filter with F.expr() requires an active SparkSession",
+                )
+            })?;
             let session_ref = session.bind(py).downcast::<PySparkSession>().map_err(|_| {
                 PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected SparkSession")
             })?;
@@ -2908,12 +2908,11 @@ impl PyDataFrame {
                 .map_err(to_py_err);
         }
         if let Ok(expr_str) = condition.extract::<String>() {
-            let session = get_session_for_operation(py)?
-                .ok_or_else(|| {
-                    PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
-                        "filter with string expression requires an active SparkSession",
-                    )
-                })?;
+            let session = get_session_for_operation(py)?.ok_or_else(|| {
+                PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
+                    "filter with string expression requires an active SparkSession",
+                )
+            })?;
             let session_ref = session.bind(py).downcast::<PySparkSession>().map_err(|_| {
                 PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected SparkSession")
             })?;
@@ -3002,12 +3001,11 @@ impl PyDataFrame {
         }
 
         let tmp: Vec<Tmp> = if raw.iter().any(|x| matches!(x, ItemOrExprStr::ExprStr(_))) {
-            let session = get_session_for_operation(py)?
-                .ok_or_else(|| {
-                    PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
-                        "select() with expr() requires an active SparkSession",
-                    )
-                })?;
+            let session = get_session_for_operation(py)?.ok_or_else(|| {
+                PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
+                    "select() with expr() requires an active SparkSession",
+                )
+            })?;
             let session_ref = session.bind(py).downcast::<PySparkSession>().map_err(|_| {
                 PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected SparkSession")
             })?;
@@ -3149,12 +3147,11 @@ impl PyDataFrame {
 
         // Case 2: expr-string from F.expr(...)
         if let Ok(py_expr_str) = col_any.downcast::<PyExprStr>() {
-            let session = get_session_for_operation(py)?
-                .ok_or_else(|| {
-                    PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
-                        "withColumn(expr) requires an active SparkSession",
-                    )
-                })?;
+            let session = get_session_for_operation(py)?.ok_or_else(|| {
+                PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
+                    "withColumn(expr) requires an active SparkSession",
+                )
+            })?;
             let session_ref = session.bind(py).downcast::<PySparkSession>().map_err(|_| {
                 PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected SparkSession")
             })?;
