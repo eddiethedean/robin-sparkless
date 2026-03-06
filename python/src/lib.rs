@@ -305,6 +305,8 @@ fn parse_struct_string_to_json(s: &str, fields: &[StructField]) -> Option<JsonVa
     Some(JsonValue::Object(obj))
 }
 
+/// Column names that must stay string in collect() when schema is String (#1165, #1261).
+/// For other String columns, numeric-looking values are coerced to int/float.
 /// True when output has a, nested, missing (get_json_object test shape); then treat those as string (#1146, avoid regression on lone column "a").
 fn is_get_json_object_shape(output_names: Option<&[String]>) -> bool {
     match output_names {
@@ -365,10 +367,8 @@ fn json_value_to_py_with_schema(
                 s.clone().into_py(py)
             }
         }
-        // Schema says String: preserve string in Row. #1066: parse stringified JSON object to dict only
-        // when inside a struct (column_name is None). Top-level String columns (e.g. get_json_object
-        // output) must stay as string for PySpark parity (#1146). #1261: PySpark preserves StringType
-        // in collect(); do not coerce numeric-looking strings to int/float so string_1 remains "20" etc.
+        // Schema says String: preserve string (PySpark parity). Do not coerce to int/float by column name.
+        // Tests that expect numeric from inferred String schema are skipped; see GitHub #1274.
         (Some(DataType::String), JsonValue::String(s)) => {
             if column_name.is_none() {
                 if let Ok(parsed) = serde_json::from_str::<JsonValue>(s) {
@@ -376,6 +376,7 @@ fn json_value_to_py_with_schema(
                         return json_to_py(&parsed, py);
                     }
                 }
+                return Ok(s.clone().into_py(py));
             }
             s.clone().into_py(py)
         }
