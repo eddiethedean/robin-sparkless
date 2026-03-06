@@ -379,8 +379,8 @@ pub fn join(
         names = result_schema.iter_names().map(|s| s.to_string()).collect();
     }
     // When same-named keys and Inner/Left/Right, select exactly: keys (once), left non-keys,
-    // right non-keys (with _right for overlap). Polars join may output key_right or duplicate
-    // key names; selecting by this list yields one column per key (#1148).
+    // Column order: left columns in original order, then right non-keys with _right for overlap
+    // (PySpark parity: same as fixture join_inner_dept_issue510 / join_on_string_issue513).
     if !keys_differ && matches!(how, JoinType::Inner | JoinType::Left | JoinType::Right) {
         let left_names: Vec<String> = left.columns()?.into_iter().collect();
         let right_names: Vec<String> = right.columns()?.into_iter().collect();
@@ -388,11 +388,9 @@ pub fn join(
             left_key_names.iter().map(|s| s.as_str()).collect();
         let left_set: std::collections::HashSet<&str> =
             left_names.iter().map(|s| s.as_str()).collect();
-        let mut desired: Vec<String> = left_key_names.clone();
+        let mut desired: Vec<String> = Vec::new();
         for n in &left_names {
-            if !key_set.contains(n.as_str()) {
-                desired.push(n.clone());
-            }
+            desired.push(n.clone());
         }
         for n in &right_names {
             if key_set.contains(n.as_str()) {
@@ -659,13 +657,25 @@ mod tests {
         let schema = out.schema().unwrap();
         let v_field = schema.fields().iter().find(|f| f.name == "v");
         let w_field = schema.fields().iter().find(|f| f.name == "w");
-        assert!(matches!(v_field.map(|f| &f.data_type), Some(CoreDataType::Long)), "v should be Long");
-        assert!(matches!(w_field.map(|f| &f.data_type), Some(CoreDataType::Long)), "w should be Long");
+        assert!(
+            matches!(v_field.map(|f| &f.data_type), Some(CoreDataType::Long)),
+            "v should be Long"
+        );
+        assert!(
+            matches!(w_field.map(|f| &f.data_type), Some(CoreDataType::Long)),
+            "w should be Long"
+        );
         let rows = out.collect_as_json_rows().unwrap();
         assert_eq!(rows.len(), 1);
         let row = &rows[0];
-        assert!(row.get("v").and_then(|v| v.as_i64()).is_some(), "v should be number in JSON");
-        assert!(row.get("w").and_then(|v| v.as_i64()).is_some(), "w should be number in JSON");
+        assert!(
+            row.get("v").and_then(|v| v.as_i64()).is_some(),
+            "v should be number in JSON"
+        );
+        assert!(
+            row.get("w").and_then(|v| v.as_i64()).is_some(),
+            "w should be number in JSON"
+        );
     }
 
     #[test]

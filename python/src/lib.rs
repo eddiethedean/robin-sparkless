@@ -307,7 +307,12 @@ fn parse_struct_string_to_json(s: &str, fields: &[StructField]) -> Option<JsonVa
 /// Convert JSON value to Python with optional schema-based coercion so that numeric/boolean
 /// Column names that are always treated as string in collect() (#1165 fix must not coerce these).
 const COLLECT_STRING_ONLY_COLUMNS: &[&str] = &[
-    "Period", "Name", "Value1", "Value2", "Value2Renamed", "ExtraColumn",
+    "Period",
+    "Name",
+    "Value1",
+    "Value2",
+    "Value2Renamed",
+    "ExtraColumn",
 ];
 
 /// types are preserved even when the engine sent a string (e.g. string-inferred schema).
@@ -366,7 +371,9 @@ fn json_value_to_py_with_schema(
                     return json_to_py(&parsed, py);
                 }
             }
-            let coerce_ok = column_name.map(|n| !COLLECT_STRING_ONLY_COLUMNS.contains(&n)).unwrap_or(false);
+            let coerce_ok = column_name
+                .map(|n| !COLLECT_STRING_ONLY_COLUMNS.contains(&n))
+                .unwrap_or(false);
             if coerce_ok {
                 let t = s.trim();
                 if let Ok(i) = t.parse::<i64>() {
