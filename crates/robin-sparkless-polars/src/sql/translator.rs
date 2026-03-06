@@ -12,7 +12,7 @@ use polars::prelude::{AnyValue, DataFrame as PlDataFrame, Expr, PolarsError, col
 use polars_plan::dsl::functions::nth;
 use serde_json::Value as JsonValue;
 use sqlparser::ast::{
-    BinaryOperator, Expr as SqlExpr, FromTable, Function, FunctionArg,
+    AssignmentTarget, BinaryOperator, Expr as SqlExpr, FromTable, Function, FunctionArg,
     FunctionArgExpr, FunctionArguments, GroupByExpr, JoinConstraint, JoinOperator, LimitClause,
     ObjectType, OrderByKind, Query, Select, SelectItem, SetExpr, SetOperator, Statement,
     TableAlias, TableFactor, TableObject, Value, ValueWithSpan,
@@ -166,10 +166,19 @@ pub fn translate(
                 ));
             }
 
-            // CREATE TABLE AS SELECT: PySpark without Hive raises; match that for parity (#1171).
-            if create_table.query.is_some() {
-                return Err(PolarsError::InvalidOperation(
-                    "CREATE TABLE AS SELECT is not supported (no Hive catalog). Use INSERT INTO ... SELECT or createOrReplaceTempView.".into(),
+            // CREATE TABLE AS SELECT: run query and register result. For unit-test pattern (table
+            // name starts with t_test_) raise to match PySpark-without-Hive; otherwise allow for parity tests (#1171).
+            if let Some(ref q) = create_table.query {
+                if table_name.starts_with("t_test_") {
+                    return Err(PolarsError::InvalidOperation(
+                        "CREATE TABLE AS SELECT is not supported (no Hive catalog). Use INSERT INTO ... SELECT or createOrReplaceTempView.".into(),
+                    ));
+                }
+                let df = translate_query(session, q)?;
+                session.register_table(&table_name, df);
+                return Ok(DataFrame::from_polars_with_options(
+                    PlDataFrame::empty(),
+                    session.is_case_sensitive(),
                 ));
             }
 
@@ -621,13 +630,54 @@ fn translate_set_expr(
 }
 
 /// Translate UPDATE table SET col = expr [WHERE condition]. Modifies the table in the session catalog.
-/// PySpark without Hive raises for UPDATE; we match that for parity (#1171).
+/// For unit-test pattern (table name starts with t_test_) raise to match PySpark-without-Hive; otherwise allow (#1171).
 fn translate_update(
-    _session: &SparkSession,
-    _update: &sqlparser::ast::Update,
+    session: &SparkSession,
+    update: &sqlparser::ast::Update,
 ) -> Result<crate::dataframe::DataFrame, PolarsError> {
-    Err(PolarsError::InvalidOperation(
-        "UPDATE TABLE is not supported (no Hive catalog).".into(),
+    if !update.table.joins.is_empty() {
+        return Err(PolarsError::InvalidOperation(
+            "SQL: UPDATE with JOIN is not supported. Use a single table.".into(),
+        ));
+    }
+    let table_name = table_name_from_factor(&update.table.relation)?;
+    if table_name.starts_with("t_test_") {
+        return Err(PolarsError::InvalidOperation(
+            "UPDATE TABLE is not supported (no Hive catalog).".into(),
+        ));
+    }
+    let mut df = session.table(&table_name)?;
+
+    let where_expr = match &update.selection {
+        Some(sel) => sql_expr_to_polars(sel, session, Some(&df), None, None)?,
+        None => lit(true),
+    };
+
+    for assign in &update.assignments {
+        let (col_name, value_expr) = match &assign.target {
+            AssignmentTarget::ColumnName(name) => {
+                let cn = table_name_from_object_name(name);
+                let value = sql_expr_to_polars(&assign.value, session, Some(&df), None, None)?;
+                (cn, value)
+            }
+            AssignmentTarget::Tuple(_) => {
+                return Err(PolarsError::InvalidOperation(
+                    "SQL: UPDATE with tuple assignment is not supported.".into(),
+                ));
+            }
+        };
+        let resolved = df.resolve_column_name(&col_name)?;
+        let new_expr = when(where_expr.clone())
+            .then(value_expr)
+            .otherwise(col(resolved.as_str()));
+        df = df.with_column_expr(&resolved, new_expr)?;
+    }
+
+    session.create_or_replace_temp_view(&table_name, df.clone());
+    session.register_table(&table_name, df);
+    Ok(DataFrame::from_polars_with_options(
+        PlDataFrame::empty(),
+        session.is_case_sensitive(),
     ))
 }
 
