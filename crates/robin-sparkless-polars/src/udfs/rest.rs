@@ -169,14 +169,15 @@ pub fn apply_xxhash64(column: Column) -> PolarsResult<Option<Column>> {
     let name = column.field().into_owned().name;
     let series = column.take_materialized_series();
     let ca = series.str().map_err(|e| compute_err("xxhash64", e))?;
+    // PySpark xxhash64 returns seed (42) for NULL input (#1146).
     let out = Int64Chunked::from_iter_options(
         name.as_str().into(),
         ca.into_iter().map(|opt_s| {
-            opt_s.map(|s| {
+            Some(opt_s.map(|s| {
                 let mut hasher = XxHash64::with_seed(XXH64_SEED);
                 hasher.write(s.as_bytes());
                 hasher.finish() as i64
-            })
+            }).unwrap_or(42))
         }),
     );
     Ok(Some(Column::new(name, out.into_series())))
@@ -4523,6 +4524,80 @@ pub fn apply_shift_right_unsigned(column: Column, n: i32) -> PolarsResult<Option
             .map(|opt_v| opt_v.map(|v| ((v as u64) >> u) as i64)),
     );
     Ok(Some(Column::new(name, out.into_series())))
+}
+
+/// get_json_object(json_str, path) - extract JSON path as string (PySpark get_json_object). Always returns String (#1146).
+fn get_json_object_walk(v: &serde_json::Value, path_steps: &[(String, Option<usize>)]) -> Option<serde_json::Value> {
+    let mut current: &serde_json::Value = v;
+    for (key, idx) in path_steps {
+        if !key.is_empty() {
+            current = current.get(key)?;
+        }
+        if let Some(i) = idx {
+            current = current.as_array()?.get(*i)?;
+        }
+    }
+    Some(current.clone())
+}
+
+fn get_json_object_value_to_string(v: &serde_json::Value) -> Option<String> {
+    match v {
+        serde_json::Value::Null => None,
+        serde_json::Value::String(s) => Some(s.clone()),
+        serde_json::Value::Number(n) => Some(n.to_string()),
+        serde_json::Value::Bool(b) => Some(b.to_string()),
+        serde_json::Value::Object(_) | serde_json::Value::Array(_) => serde_json::to_string(v).ok(),
+    }
+}
+
+/// Parse path like "$.a", "$.a.b[0].c" into steps (key, optional_index).
+fn parse_json_path(path: &str) -> Vec<(String, Option<usize>)> {
+    let path = path.trim_start_matches('$').trim_start_matches('.');
+    if path.is_empty() {
+        return vec![];
+    }
+    let mut steps = Vec::new();
+    for part in path.split('.') {
+        let part = part.trim();
+        if let Some(bracket) = part.find('[') {
+            let key = part[..bracket].to_string();
+            let rest = &part[bracket..];
+            if !key.is_empty() {
+                steps.push((key, None));
+            }
+            if let Some(idx_str) = rest.strip_prefix('[').and_then(|s| s.strip_suffix(']')) {
+                if let Ok(i) = idx_str.parse::<usize>() {
+                    steps.push((String::new(), Some(i)));
+                }
+            }
+        } else {
+            steps.push((part.to_string(), None));
+        }
+    }
+    steps
+}
+
+/// get_json_object(json_str, path) - extract JSON path; returns string (PySpark parity #1146).
+pub fn apply_get_json_object(column: Column, path: &str) -> PolarsResult<Option<Column>> {
+    use polars::prelude::DataType;
+    let name = column.field().into_owned().name;
+    let series = column.take_materialized_series();
+    let ca = series.str().map_err(|e| compute_err("get_json_object", e))?;
+    let path_steps = parse_json_path(path);
+    let out = StringChunked::from_iter_options(
+        name.as_str().into(),
+        ca.into_iter().map(|opt_s| {
+            opt_s.and_then(|s| {
+                let v: serde_json::Value = serde_json::from_str(s).ok()?;
+                let val = get_json_object_walk(&v, &path_steps)?;
+                get_json_object_value_to_string(&val)
+            })
+        }),
+    );
+    let s = out.into_series();
+    // Force String dtype so collect schema is string (PySpark get_json_object returns string; #1146).
+    let s = s.cast(&DataType::String)?;
+    Ok(Some(Column::new(name, s)))
 }
 
 /// json_array_length(json_str, path) - length of JSON array at path (PySpark json_array_length).

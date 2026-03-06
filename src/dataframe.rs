@@ -180,11 +180,11 @@ impl DataFrame {
         self.0.collect_as_json_rows()
     }
 
-    /// Returns (output_column_names, rows). Use output names for Row keys (PySpark parity #1025).
+    /// Returns (output_column_names, rows, collected_schema). Use output names for Row keys; use collected schema for dtype so get_json_object etc. are string (#1146).
     #[allow(clippy::type_complexity)]
     pub fn collect_as_json_rows_with_names(
         &self,
-    ) -> Result<(Vec<String>, Vec<HashMap<String, JsonValue>>), PolarsError> {
+    ) -> Result<(Vec<String>, Vec<HashMap<String, JsonValue>>, StructType), PolarsError> {
         self.0.collect_as_json_rows_with_names()
     }
 

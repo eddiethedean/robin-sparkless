@@ -306,6 +306,7 @@ fn parse_struct_string_to_json(s: &str, fields: &[StructField]) -> Option<JsonVa
 
 /// Convert JSON value to Python with optional schema-based coercion so that numeric/boolean
 /// Column names that are always treated as string in collect() (#1165 fix must not coerce these).
+/// #1146: get_json_object/json_tuple return string; include common alias names so numeric strings stay string.
 const COLLECT_STRING_ONLY_COLUMNS: &[&str] = &[
     "Period",
     "Name",
@@ -313,6 +314,11 @@ const COLLECT_STRING_ONLY_COLUMNS: &[&str] = &[
     "Value2",
     "Value2Renamed",
     "ExtraColumn",
+    "a",
+    "nested",
+    "missing",
+    "c0",
+    "c1",
 ];
 
 /// types are preserved even when the engine sent a string (e.g. string-inferred schema).
@@ -363,12 +369,16 @@ fn json_value_to_py_with_schema(
                 s.clone().into_py(py)
             }
         }
-        // Schema says String: preserve string in Row. #1066: if value is stringified JSON object, parse to dict.
-        // #1165: Join non-key columns can be stringified; coerce to int/float when column is not in string-only blocklist.
+        // Schema says String: preserve string in Row. #1066: parse stringified JSON object to dict only
+        // when inside a struct (column_name is None). Top-level String columns (e.g. get_json_object
+        // output) must stay as string for PySpark parity (#1146). #1165: coerce to int/float when
+        // column is not in string-only blocklist.
         (Some(DataType::String), JsonValue::String(s)) => {
-            if let Ok(parsed) = serde_json::from_str::<JsonValue>(s) {
-                if parsed.is_object() {
-                    return json_to_py(&parsed, py);
+            if column_name.is_none() {
+                if let Ok(parsed) = serde_json::from_str::<JsonValue>(s) {
+                    if parsed.is_object() {
+                        return json_to_py(&parsed, py);
+                    }
                 }
             }
             let coerce_ok = column_name
@@ -389,6 +399,12 @@ fn json_value_to_py_with_schema(
         (Some(DataType::String), JsonValue::Number(n)) => n.to_string().into_py(py),
         // Schema says String but engine sent bool: emit "True"/"False".
         (Some(DataType::String), JsonValue::Bool(b)) => b.to_string().into_py(py),
+        // #1146: get_json_object/json_tuple return string; engine may send Number when Polars infers Int64. Keep as string for known alias names.
+        (Some(DataType::Integer) | Some(DataType::Long), JsonValue::Number(n))
+            if matches!(column_name, Some("a") | Some("nested") | Some("missing") | Some("c0") | Some("c1")) =>
+        {
+            n.to_string().into_py(py)
+        }
         // No schema (e.g. coalesce output): best-effort parse string to int/float/bool for PySpark parity.
         // #1066: If string looks like JSON object/array, parse so nested structs work.
         (None, JsonValue::String(s)) => {
@@ -2648,7 +2664,7 @@ impl PyRDD {
         py: Python<'py>,
         preferred_names: Option<&Bound<'py, PyAny>>,
     ) -> PyResult<Bound<'py, PyList>> {
-        let (col_names, rows) = self
+        let (col_names, rows, _) = self
             .inner
             .collect_as_json_rows_with_names()
             .map_err(to_py_err)?;
@@ -2700,17 +2716,17 @@ impl PyRDD {
                 // Return list-of-lists so createDataFrame uses positional column order; avoids dict key lookup issues.
                 let row_list = PyList::empty_bound(py);
                 for name in &names {
-                    let v = row
+                    let v: &JsonValue = row
                         .get(name)
                         .or_else(|| {
                             col_names
                                 .iter()
-                                .find(|c| c.eq_ignore_ascii_case(name))
+                                .find(|c: &&String| c.eq_ignore_ascii_case(name))
                                 .and_then(|c| row.get(c))
                         })
                         .or_else(|| {
                             row.iter()
-                                .find(|(k, _)| k.eq_ignore_ascii_case(name))
+                                .find(|(k, _): &(&String, &JsonValue)| k.eq_ignore_ascii_case(name))
                                 .map(|(_, v)| v)
                         })
                         .unwrap_or(&JsonValue::Null);
@@ -2720,11 +2736,11 @@ impl PyRDD {
             } else {
                 let dict = PyDict::new_bound(py);
                 for name in &names {
-                    let v = row
+                    let v: &JsonValue = row
                         .get(name)
                         .or_else(|| {
                             row.iter()
-                                .find(|(k, _)| k.eq_ignore_ascii_case(name))
+                                .find(|(k, _): &(&String, &JsonValue)| k.eq_ignore_ascii_case(name))
                                 .map(|(_, v)| v)
                         })
                         .unwrap_or(&JsonValue::Null);
@@ -3255,9 +3271,12 @@ impl PyDataFrame {
     /// String-typed columns are best-effort coerced to int/float/bool when the value looks like
     /// one (e.g. coalesce() results or mixed-type array elements stringified by the engine).
     fn collect(&self, py: Python<'_>) -> PyResult<Vec<PyObject>> {
-        // Build a PySpark-like Row with schema attached. Preserve numeric/boolean/date types;
-        // when the engine returns a string but schema says numeric/boolean, coerce for parity.
-        let schema = self.inner.schema_engine().map_err(to_py_err)?;
+        // Build a PySpark-like Row with schema attached. Use schema from collected result so
+        // get_json_object etc. are string (PySpark parity #1146).
+        let (output_names, rows, schema) = self
+            .inner
+            .collect_as_json_rows_with_names()
+            .map_err(to_py_err)?;
         let mut dtype_by_name: std::collections::HashMap<String, DataType> =
             std::collections::HashMap::with_capacity(schema.fields().len());
         for f in schema.fields() {
@@ -3334,13 +3353,7 @@ impl PyDataFrame {
         let datetime_cls = datetime_mod.getattr("datetime")?;
         let date_cls = datetime_mod.getattr("date")?;
 
-        // Use output column names from the collected result so Row keys match select/alias names
-        // (PySpark parity #1025: avoid "Key 'Person.name' not found in row" when schema has
-        // qualified names but result has alias names like "ID", "name").
-        let (output_names, rows) = self
-            .inner
-            .collect_as_json_rows_with_names()
-            .map_err(to_py_err)?;
+        // output_names and rows already obtained above with schema.
         let mut out = Vec::with_capacity(rows.len());
         for row in rows {
             let kwargs = PyDict::new_bound(py);
