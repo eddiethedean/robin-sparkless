@@ -2120,7 +2120,9 @@ impl SparkSession {
                             .map(|row| {
                                 let v = row.get(col_idx).cloned().unwrap_or(JsonValue::Null);
                                 match v {
-                                    JsonValue::Number(n) => n.as_i64().map(|i| i as f64).or_else(|| n.as_f64()),
+                                    JsonValue::Number(n) => {
+                                        n.as_i64().map(|i| i as f64).or_else(|| n.as_f64())
+                                    }
                                     JsonValue::String(s) => s.parse::<i64>().ok().map(|i| i as f64),
                                     JsonValue::Null => None,
                                     _ => None,
