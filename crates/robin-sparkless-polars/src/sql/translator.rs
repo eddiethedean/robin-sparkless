@@ -1106,10 +1106,9 @@ fn scalar_subquery_to_expr(session: &SparkSession, query: &Query) -> Result<Expr
     if pl_df.height() == 0 {
         return Ok(lit(polars::prelude::NULL));
     }
-    let first_col = pl_df
-        .columns()
-        .first()
-        .ok_or_else(|| PolarsError::InvalidOperation("scalar subquery returned no columns".into()))?;
+    let first_col = pl_df.columns().first().ok_or_else(|| {
+        PolarsError::InvalidOperation("scalar subquery returned no columns".into())
+    })?;
     let av = first_col
         .get(0)
         .map_err(|e: PolarsError| PolarsError::InvalidOperation(e.to_string().into()))?;
@@ -1132,7 +1131,11 @@ fn any_value_to_lit(av: AnyValue) -> Result<Expr, PolarsError> {
         Av::Date(days) => lit(days.to_string()),
         _ => {
             return Err(PolarsError::InvalidOperation(
-                format!("scalar subquery returned unsupported type for WHERE: {:?}", av).into(),
+                format!(
+                    "scalar subquery returned unsupported type for WHERE: {:?}",
+                    av
+                )
+                .into(),
             ));
         }
     })
