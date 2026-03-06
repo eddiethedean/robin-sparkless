@@ -76,6 +76,10 @@ def get_backend_from_env() -> Optional[BackendType]:
     if not backend_str:
         return None
 
+    # Alias so MOCK_SPARK_TEST_BACKEND=sparkless uses native backend (same as robin/mock).
+    if backend_str == "sparkless":
+        return BackendType.ROBIN
+
     try:
         return BackendType(backend_str)
     except ValueError:

@@ -84,11 +84,11 @@ fmt:
 	cargo fmt
 	@echo "Formatted"
 
-# Check format without modifying (workspace is formatted as a whole from root)
+# Check format without modifying (workspace is formatted as a whole from root; includes python crate).
 fmt-check:
 	cargo fmt --check
 
-# Lint with Clippy. Use --workspace to match CI and include python (sparkless-native).
+# Lint with Clippy. Use --workspace to match CI and include Python Rust code (sparkless-native).
 clippy:
 	cargo clippy --workspace --all-features --all-targets -- -D warnings
 

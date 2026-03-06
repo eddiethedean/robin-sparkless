@@ -6,11 +6,11 @@
 use super::DataFrame;
 use crate::column::expect_col;
 use crate::functions::SortOrder;
-use crate::type_coercion::{coerce_expr_pair, find_common_type};
+use crate::type_coercion::{coerce_expr_pair, find_common_type, is_numeric_public};
 use crate::udfs;
 use polars::prelude::{
     DataType, Expr, Float64Chunked, IntoLazy, IntoSeries, NamedFrom, PlSmallStr, PolarsError,
-    Selector, Series, UnionArgs, UniqueKeepStrategy, col, len, lit, repeat,
+    SchemaNamesAndDtypes, Selector, Series, UniqueKeepStrategy, col, len, lit, repeat,
 };
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
@@ -627,6 +627,7 @@ pub fn union(
         right_names_set.contains(&key)
     });
 
+    let debug_union = std::env::var("SPARKLESS_DEBUG_UNION").as_deref() == Ok("1");
     let (left_exprs, right_exprs) = if names_match {
         // Same set of names: use left's order for both sides (reorder right by name).
         let mut left_exprs = Vec::with_capacity(left_names.len());
@@ -636,22 +637,36 @@ pub fn union(
             let resolved_right = right.resolve_column_name(name)?;
             let left_dtype = left.get_column_dtype(name).unwrap_or(DataType::Null);
             let right_dtype = right.get_column_dtype(name).unwrap_or(DataType::Null);
-            let target = if left_dtype == DataType::Null {
+            let mut target = if left_dtype == DataType::Null {
                 right_dtype.clone()
             } else if right_dtype == DataType::Null || left_dtype == right_dtype {
                 left_dtype.clone()
             } else {
                 find_common_type(&left_dtype, &right_dtype)?
             };
-            let left_expr = if left_dtype == target {
-                col(resolved_left.as_str())
-            } else {
+            // Issue #1262: when one side is String and the other numeric, coerce to String
+            // (PySpark union behavior); ensure we cast even if get_column_dtype disagrees.
+            if (left_dtype == DataType::String && is_numeric_public(&right_dtype))
+                || (right_dtype == DataType::String && is_numeric_public(&left_dtype))
+            {
+                target = DataType::String;
+            }
+            let need_coerce = left_dtype != target || right_dtype != target;
+            if debug_union {
+                eprintln!(
+                    "[union #1262] name={:?} left_dtype={:?} right_dtype={:?} target={:?} need_coerce={}",
+                    name, left_dtype, right_dtype, target, need_coerce
+                );
+            }
+            let left_expr = if need_coerce {
                 col(resolved_left.as_str()).cast(target.clone())
-            };
-            let right_expr = if right_dtype == target {
-                col(resolved_right.as_str())
             } else {
+                col(resolved_left.as_str())
+            };
+            let right_expr = if need_coerce {
                 col(resolved_right.as_str()).cast(target)
+            } else {
+                col(resolved_right.as_str())
             };
             left_exprs.push(left_expr.alias(name.as_str()));
             right_exprs.push(right_expr.alias(name.as_str()));
@@ -669,22 +684,34 @@ pub fn union(
             let resolved_right = right.resolve_column_name(right_name)?;
             let left_dtype = left.get_column_dtype(left_name).unwrap_or(DataType::Null);
             let right_dtype = right.get_column_dtype(right_name).unwrap_or(DataType::Null);
-            let target = if left_dtype == DataType::Null {
+            let mut target = if left_dtype == DataType::Null {
                 right_dtype.clone()
             } else if right_dtype == DataType::Null || left_dtype == right_dtype {
                 left_dtype.clone()
             } else {
                 find_common_type(&left_dtype, &right_dtype)?
             };
-            let left_expr = if left_dtype == target {
-                col(resolved_left.as_str())
-            } else {
+            if (left_dtype == DataType::String && is_numeric_public(&right_dtype))
+                || (right_dtype == DataType::String && is_numeric_public(&left_dtype))
+            {
+                target = DataType::String;
+            }
+            let need_coerce = left_dtype != target || right_dtype != target;
+            if debug_union {
+                eprintln!(
+                    "[union #1262] left_name={:?} right_name={:?} left_dtype={:?} right_dtype={:?} target={:?} need_coerce={}",
+                    left_name, right_name, left_dtype, right_dtype, target, need_coerce
+                );
+            }
+            let left_expr = if need_coerce {
                 col(resolved_left.as_str()).cast(target.clone())
-            };
-            let right_expr = if right_dtype == target {
-                col(resolved_right.as_str())
             } else {
+                col(resolved_left.as_str())
+            };
+            let right_expr = if need_coerce {
                 col(resolved_right.as_str()).cast(target)
+            } else {
+                col(resolved_right.as_str())
             };
             left_exprs.push(left_expr.alias(left_name.as_str()));
             right_exprs.push(right_expr.alias(left_name.as_str()));
@@ -694,8 +721,24 @@ pub fn union(
 
     let lf1 = left.lazy_frame().select(&left_exprs);
     let lf2 = right.lazy_frame().select(&right_exprs);
-    let out = polars::prelude::concat([lf1, lf2], UnionArgs::default())?;
-    Ok(super::DataFrame::from_lazy_with_options(
+    // Collect then vstack so result schema is the coerced schema (Issue #1262: LazyFrame concat
+    // can yield wrong schema for collect_schema(); eager vstack preserves cast result).
+    let mut out = lf1.collect()?;
+    let df2 = lf2.collect()?;
+    if debug_union {
+        eprintln!(
+            "[union #1262] after lf1.collect() schema: {:?}",
+            out.schema().iter_names_and_dtypes().collect::<Vec<_>>()
+        );
+    }
+    out.vstack_mut(&df2)?;
+    if debug_union {
+        eprintln!(
+            "[union #1262] after vstack schema: {:?}",
+            out.schema().iter_names_and_dtypes().collect::<Vec<_>>()
+        );
+    }
+    Ok(super::DataFrame::from_eager_with_options(
         out,
         case_sensitive,
     ))
@@ -2296,6 +2339,20 @@ mod tests {
         assert_eq!(cols.len(), 2);
         assert!(cols.contains(&"id".to_string()));
         assert!(cols.contains(&"name".to_string()));
+        // #1262: collected rows must have id as string (PySpark union coerces numeric+string to string).
+        let (_names, rows, schema) = out.collect_as_json_rows_with_names().unwrap();
+        let id_field = schema.fields().iter().find(|f| f.name == "id").unwrap();
+        assert!(matches!(
+            id_field.data_type,
+            robin_sparkless_core::DataType::String
+        ));
+        for row in &rows {
+            let id_val = row.get("id").unwrap();
+            assert!(
+                matches!(id_val, serde_json::Value::String(_)),
+                "id should be string, got {id_val:?}"
+            );
+        }
     }
 
     /// Union with same column names in different order: right reordered to left's order (PR1).
