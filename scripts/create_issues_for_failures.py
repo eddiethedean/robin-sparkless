@@ -11,7 +11,7 @@ UNSKIP_NOTE = "\n\nThe tests referenced in this issue are currently **skipped** 
 
 def main():
     with open("/tmp/failing_tests.txt") as f:
-        lines = [l.strip() for l in f if l.strip()]
+        lines = [line.strip() for line in f if line.strip()]
 
     by_file = defaultdict(list)
     for line in lines:

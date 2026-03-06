@@ -1858,7 +1858,9 @@ fn python_data_and_schema(
             let sys = py.import_bound("sys")?;
             let modules = sys.getattr("modules")?;
             let mod_ = modules.get_item("sparkless._cdf_helpers").map_err(|_| {
-                PyErr::new::<pyo3::exceptions::PyImportError, _>("sparkless._cdf_helpers not in sys.modules")
+                PyErr::new::<pyo3::exceptions::PyImportError, _>(
+                    "sparkless._cdf_helpers not in sys.modules",
+                )
             })?;
             let func = mod_.getattr("dict_rows_to_column_order")?;
             let result = func.call1((data_for_batch.as_ref(), &keys_py))?;
@@ -1878,7 +1880,11 @@ fn python_data_and_schema(
                 return None;
             }
             let code = "[[d.get(k) for k in _cdf_k] for d in _cdf_d]";
-            let result = builtins.getattr("eval").ok()?.call1((code, &globals)).ok()?;
+            let result = builtins
+                .getattr("eval")
+                .ok()?
+                .call1((code, &globals))
+                .ok()?;
             result.downcast_into::<PyList>().ok()
         });
         if let Some(rows_py) = rows_py {
@@ -1891,10 +1897,10 @@ fn python_data_and_schema(
                             row.push(py_any_to_json(py, &v)?);
                         }
                         parsed.push(row);
-                } else {
-                    break;
+                    } else {
+                        break;
+                    }
                 }
-            }
                 // Only use batch result if first column is present (avoid wrong lookup from eval/helper).
                 if parsed.len() == list.len()
                     && parsed
@@ -1995,7 +2001,11 @@ fn python_data_and_schema(
                     allow_scalar_single_column,
                 )?
             } else if let Some((ref row_fn, ref kpy)) = per_row_fn {
-                if item.getattr("get").map(|g| g.is_callable()).unwrap_or(false) {
+                if item
+                    .getattr("get")
+                    .map(|g| g.is_callable())
+                    .unwrap_or(false)
+                {
                     if let Ok(row_py) = row_fn.call1((&item, kpy)) {
                         if let Ok(row_list) = row_py.downcast::<PyList>() {
                             let mut r = Vec::with_capacity(row_list.len());
@@ -2049,7 +2059,11 @@ fn python_data_and_schema(
             };
             // For dict rows without explicit schema, infer full schema from all rows/keys later so we
             // can include sparse keys (issue #372). For other row kinds, infer from the first row.
-            if inferred_schema.is_none() && schema_res.is_none() && kind != "dict" && !row.is_empty() {
+            if inferred_schema.is_none()
+                && schema_res.is_none()
+                && kind != "dict"
+                && !row.is_empty()
+            {
                 if let Some(cols) = infer_schema_from_first_row(py, &item, from_pandas) {
                     inferred_schema = Some(cols);
                 }
@@ -2155,9 +2169,7 @@ fn python_data_and_schema(
             .collect();
         let first_inferred_numeric = inferred
             .get(0)
-            .map(|t| {
-                t.eq_ignore_ascii_case("long") || t.eq_ignore_ascii_case("double")
-            })
+            .map(|t| t.eq_ignore_ascii_case("long") || t.eq_ignore_ascii_case("double"))
             .unwrap_or(false);
         let first_is_long = schema.len() == 2
             && first_inferred_numeric
@@ -2293,9 +2305,12 @@ fn python_row_to_json(
         // (When column_order is Some we already returned above via get().)
         let mut map: Vec<(String, JsonValue)> = Vec::with_capacity(dict.len());
         for (pk, pv) in dict.iter() {
-            let key_str = pk
-                .extract::<String>()
-                .unwrap_or_else(|_| pk.to_string().trim_matches('"').trim_matches('\'').to_string());
+            let key_str = pk.extract::<String>().unwrap_or_else(|_| {
+                pk.to_string()
+                    .trim_matches('"')
+                    .trim_matches('\'')
+                    .to_string()
+            });
             map.push((key_str, py_any_to_json(py, &pv)?));
         }
         let mut keys: Vec<String> = map.iter().map(|(s, _)| s.clone()).collect();
@@ -8311,7 +8326,9 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     let code = "def _cdf_dict_rows_to_lists(data, keys):\n    return [[d.get(k) for k in keys] for d in data]";
     if let Ok(builtins) = py.import_bound("builtins") {
         if let Ok(globals) = m.getattr("__dict__") {
-            let _ = builtins.getattr("exec").and_then(|e| e.call1((code, &globals)));
+            let _ = builtins
+                .getattr("exec")
+                .and_then(|e| e.call1((code, &globals)));
         }
     }
     Ok(())

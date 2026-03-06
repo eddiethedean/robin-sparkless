@@ -1541,7 +1541,9 @@ fn transform_expr_regex_pattern_under_cast_string(expr: Expr) -> Expr {
                         // When the column is retained (e.g. date_string in issue #153), do not
                         // transform so the regex still strips fractional seconds and parsing succeeds.
                         let source_col_name = match &input[0] {
-                            Expr::Cast { expr: cast_inner, .. } => {
+                            Expr::Cast {
+                                expr: cast_inner, ..
+                            } => {
                                 if let Expr::Column(name) = cast_inner.as_ref() {
                                     Some(name.as_str())
                                 } else {
@@ -1550,20 +1552,20 @@ fn transform_expr_regex_pattern_under_cast_string(expr: Expr) -> Expr {
                             }
                             _ => None,
                         };
-                        let apply_escaping = source_col_name.is_some_and(|n| {
-                            n == "impression_date" || n == "created_at"
-                        });
+                        let apply_escaping = source_col_name
+                            .is_some_and(|n| n == "impression_date" || n == "created_at");
                         let pat_expr = &input[1];
-                        let is_target_pattern = if let Expr::Literal(LiteralValue::Scalar(s)) = pat_expr {
-                            let av = s.as_any_value();
-                            match av {
-                                AnyValue::String(st) => st == r"\.\d+",
-                                AnyValue::StringOwned(st) => st.as_str() == r"\.\d+",
-                                _ => false,
-                            }
-                        } else {
-                            false
-                        };
+                        let is_target_pattern =
+                            if let Expr::Literal(LiteralValue::Scalar(s)) = pat_expr {
+                                let av = s.as_any_value();
+                                match av {
+                                    AnyValue::String(st) => st == r"\.\d+",
+                                    AnyValue::StringOwned(st) => st.as_str() == r"\.\d+",
+                                    _ => false,
+                                }
+                            } else {
+                                false
+                            };
                         if is_target_pattern && apply_escaping {
                             let mut new_input = input.clone();
                             new_input[1] = lit(r"\.d+");

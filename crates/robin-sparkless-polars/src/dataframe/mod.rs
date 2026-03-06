@@ -1119,13 +1119,12 @@ impl DataFrame {
             .iter()
             .enumerate()
             .map(|(col_idx, name)| {
-                let idx = collected
-                    .get_column_index(name.as_str())
-                    .ok_or_else(|| {
-                        PolarsError::ComputeError(
-                            format!("collect_as_json_rows_with_names: column '{name}' not found").into(),
-                        )
-                    })?;
+                let idx = collected.get_column_index(name.as_str()).ok_or_else(|| {
+                    PolarsError::ComputeError(
+                        format!("collect_as_json_rows_with_names: column '{name}' not found")
+                            .into(),
+                    )
+                })?;
                 let s = &collected.columns()[idx];
                 let dtype = effective_dtypes.get(col_idx).unwrap_or_else(|| s.dtype());
                 if dtype == s.dtype() {

@@ -837,7 +837,9 @@ fn transform_regex_pattern_spark_sql(v: &mut Value) {
             if map.get("op").and_then(|o| o.as_str()) == Some("regexp_replace") {
                 for key in &["pattern", "right"] {
                     if let Some(pat) = map.get_mut(*key) {
-                        let pattern_str = pat.as_str().or_else(|| pat.get("lit").and_then(|l| l.as_str()));
+                        let pattern_str = pat
+                            .as_str()
+                            .or_else(|| pat.get("lit").and_then(|l| l.as_str()));
                         if pattern_str == Some(r"\.\d+") {
                             *pat = Value::String(r"\.d+".to_string());
                         }
@@ -2407,7 +2409,9 @@ fn expr_from_fn_rest(name: &str, args: &[Value]) -> Result<Expr, PlanExprError> 
             let format: Option<String> = arg_lit_opt_str(args, 1)?;
             // PySpark parity #168: to_timestamp(cast(string, regexp_replace(..., r"\.\d+", "")), "yyyy-MM-dd'T'HH:mm:ss")
             // In Spark SQL the pattern can be escaped so \d is literal; we transform the subtree so regex doesn't strip fractional seconds.
-            let col_expr = if format.as_deref() == Some("yyyy-MM-dd'T'HH:mm:ss") && is_cast_to_string(&args[0]) {
+            let col_expr = if format.as_deref() == Some("yyyy-MM-dd'T'HH:mm:ss")
+                && is_cast_to_string(&args[0])
+            {
                 let mut arg0 = args[0].clone();
                 transform_regex_pattern_spark_sql(&mut arg0);
                 expr_to_column(expr_from_value(&arg0)?)

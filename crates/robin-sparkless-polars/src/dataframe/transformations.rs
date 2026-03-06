@@ -266,7 +266,10 @@ pub fn select_with_exprs(
     // null is fixed in Python binding (python_row_to_json).
     if df.is_eager() {
         let pl_df = lf.collect()?;
-        Ok(super::DataFrame::from_eager_with_options(pl_df, case_sensitive))
+        Ok(super::DataFrame::from_eager_with_options(
+            pl_df,
+            case_sensitive,
+        ))
     } else {
         Ok(super::DataFrame::from_lazy_with_options(lf, case_sensitive))
     }
@@ -2175,16 +2178,13 @@ mod tests {
     /// after a join where both "name" and "NAME" exist should:
     /// - pick the first matching physical column (left side of the join), and
     /// - expose it under the requested spelling ("NaMe").
-    /// #1267: select("dept", "salary", row_number().over(w)) must preserve dept/salary values.
+    ///   #1267: select("dept", "salary", row_number().over(w)) must preserve dept/salary values.
     #[test]
     fn select_items_with_window_preserves_column_values() {
         let spark = SparkSession::builder()
             .app_name("select_window_1267")
             .get_or_create();
-        let rows = vec![
-            vec![json!("A"), json!(100)],
-            vec![json!("A"), json!(200)],
-        ];
+        let rows = vec![vec![json!("A"), json!(100)], vec![json!("A"), json!(200)]];
         let schema = vec![
             ("dept".to_string(), "string".to_string()),
             ("salary".to_string(), "bigint".to_string()),

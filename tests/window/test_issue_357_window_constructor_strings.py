@@ -8,8 +8,6 @@ Uses shared spark fixture and get_spark_imports().
 
 from __future__ import annotations
 
-import pytest
-
 from tests.fixtures.spark_imports import get_spark_imports
 
 _imports = get_spark_imports()
