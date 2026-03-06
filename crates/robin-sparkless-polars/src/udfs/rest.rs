@@ -173,11 +173,15 @@ pub fn apply_xxhash64(column: Column) -> PolarsResult<Option<Column>> {
     let out = Int64Chunked::from_iter_options(
         name.as_str().into(),
         ca.into_iter().map(|opt_s| {
-            Some(opt_s.map(|s| {
-                let mut hasher = XxHash64::with_seed(XXH64_SEED);
-                hasher.write(s.as_bytes());
-                hasher.finish() as i64
-            }).unwrap_or(42))
+            Some(
+                opt_s
+                    .map(|s| {
+                        let mut hasher = XxHash64::with_seed(XXH64_SEED);
+                        hasher.write(s.as_bytes());
+                        hasher.finish() as i64
+                    })
+                    .unwrap_or(42),
+            )
         }),
     );
     Ok(Some(Column::new(name, out.into_series())))
@@ -4527,7 +4531,10 @@ pub fn apply_shift_right_unsigned(column: Column, n: i32) -> PolarsResult<Option
 }
 
 /// get_json_object(json_str, path) - extract JSON path as string (PySpark get_json_object). Always returns String (#1146).
-fn get_json_object_walk(v: &serde_json::Value, path_steps: &[(String, Option<usize>)]) -> Option<serde_json::Value> {
+fn get_json_object_walk(
+    v: &serde_json::Value,
+    path_steps: &[(String, Option<usize>)],
+) -> Option<serde_json::Value> {
     let mut current: &serde_json::Value = v;
     for (key, idx) in path_steps {
         if !key.is_empty() {
@@ -4582,7 +4589,9 @@ pub fn apply_get_json_object(column: Column, path: &str) -> PolarsResult<Option<
     use polars::prelude::DataType;
     let name = column.field().into_owned().name;
     let series = column.take_materialized_series();
-    let ca = series.str().map_err(|e| compute_err("get_json_object", e))?;
+    let ca = series
+        .str()
+        .map_err(|e| compute_err("get_json_object", e))?;
     let path_steps = parse_json_path(path);
     let out = StringChunked::from_iter_options(
         name.as_str().into(),

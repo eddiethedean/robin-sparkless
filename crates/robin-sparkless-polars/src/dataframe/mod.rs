@@ -1120,7 +1120,9 @@ impl DataFrame {
                     Ok(s.clone())
                 } else {
                     s.cast(dtype).map_err(|e| {
-                        PolarsError::ComputeError(format!("collect_as_json_rows_with_names cast: {e}").into())
+                        PolarsError::ComputeError(
+                            format!("collect_as_json_rows_with_names cast: {e}").into(),
+                        )
                     })
                 }
             })
