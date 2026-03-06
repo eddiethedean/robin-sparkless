@@ -1,6 +1,7 @@
 //! Join operations for DataFrame.
 
 use super::DataFrame;
+use crate::schema_conv::data_type_to_polars_type;
 use crate::type_coercion::coerce_expr_pair_for_join;
 use polars::prelude::{
     DataType as PlDataType, Expr, JoinType as PlJoinType, Operator, PolarsError,
@@ -418,17 +419,53 @@ pub fn join(
         if !keep.is_empty() {
             // Cast each column to the expected dtype from left/right so collect() returns correct
             // types for non-key columns (#1165). Polars join coalesce can lose type in schema.
+            // Prefer get_column_dtype; fall back to StructType from .schema() for Python-created
+            // DataFrames where Polars schema lookup can differ.
+            let left_struct = left.schema().ok();
+            let right_struct = right.schema().ok();
             let cast_exprs: Vec<Expr> = keep
                 .iter()
                 .map(|n| {
                     let dtype = if key_set.contains(n.as_str()) {
-                        left.get_column_dtype(n.as_str())
+                        left_struct
+                            .as_ref()
+                            .and_then(|s| {
+                                s.fields()
+                                    .iter()
+                                    .find(|f| f.name.as_str() == n.as_str())
+                                    .map(|f| data_type_to_polars_type(&f.data_type))
+                            })
+                            .or_else(|| left.get_column_dtype(n.as_str()))
                     } else if let Some(base) = n.strip_suffix("_right") {
-                        right.get_column_dtype(base)
+                        right_struct
+                            .as_ref()
+                            .and_then(|s| {
+                                s.fields()
+                                    .iter()
+                                    .find(|f| f.name.as_str() == base)
+                                    .map(|f| data_type_to_polars_type(&f.data_type))
+                            })
+                            .or_else(|| right.get_column_dtype(base))
                     } else if left_set.contains(n.as_str()) {
-                        left.get_column_dtype(n.as_str())
+                        left_struct
+                            .as_ref()
+                            .and_then(|s| {
+                                s.fields()
+                                    .iter()
+                                    .find(|f| f.name.as_str() == n.as_str())
+                                    .map(|f| data_type_to_polars_type(&f.data_type))
+                            })
+                            .or_else(|| left.get_column_dtype(n.as_str()))
                     } else {
-                        right.get_column_dtype(n.as_str())
+                        right_struct
+                            .as_ref()
+                            .and_then(|s| {
+                                s.fields()
+                                    .iter()
+                                    .find(|f| f.name.as_str() == n.as_str())
+                                    .map(|f| data_type_to_polars_type(&f.data_type))
+                            })
+                            .or_else(|| right.get_column_dtype(n.as_str()))
                     };
                     match dtype {
                         Some(dt) => col(n.as_str()).cast(dt).alias(n.as_str()),
