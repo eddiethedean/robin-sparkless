@@ -308,6 +308,7 @@ fn parse_struct_string_to_json(s: &str, fields: &[StructField]) -> Option<JsonVa
 /// Convert JSON value to Python with optional schema-based coercion so that numeric/boolean
 /// Column names that are always treated as string in collect() (#1165 fix must not coerce these).
 /// #1146: c0, c1 from json_tuple always string. a/nested/missing only when output has all three (get_json_object shape).
+/// #1266: value, extracted preserved as string (filter string column "value", regexp_extract alias "extracted").
 const COLLECT_STRING_ONLY_COLUMNS: &[&str] = &[
     "Period",
     "Name",
@@ -317,6 +318,8 @@ const COLLECT_STRING_ONLY_COLUMNS: &[&str] = &[
     "ExtraColumn",
     "c0",
     "c1",
+    "value",
+    "extracted",
 ];
 
 /// True when output has a, nested, missing (get_json_object test shape); then treat those as string (#1146, avoid regression on lone column "a").
