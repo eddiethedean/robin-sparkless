@@ -1837,8 +1837,8 @@ fn python_data_and_schema(
 
     // #1267: when we have column order, build rows in Python so dict.get(k) runs in Python
     // and keys are found correctly (avoids PyO3 dict lookup issues).
-    if !list.is_empty() && column_order.is_some() {
-        let keys = column_order.as_ref().unwrap();
+    if !list.is_empty() {
+        if let Some(keys) = column_order.as_ref() {
         let keys_py = PyList::empty_bound(py);
         for k in keys {
             keys_py.append(k.as_str())?;
@@ -1917,10 +1917,10 @@ fn python_data_and_schema(
                 }
             }
         }
+        }
     }
     // Per-row lambda for dict-like rows when batch lambda failed: [row.get(k) for k in keys].
-    let per_row_fn = if column_order.is_some() {
-        let keys = column_order.as_ref().unwrap();
+    let per_row_fn = if let Some(keys) = &column_order {
         let kpy = PyList::empty_bound(py);
         for k in keys {
             let _ = kpy.append(k.as_str());
@@ -1964,8 +1964,8 @@ fn python_data_and_schema(
                 row_kind = Some(kind);
             }
             // For native dicts with column_order: get each value in Python via row.get(k) (#1267).
-            let row = if item.downcast::<PyDict>().is_ok() && column_order.is_some() {
-                let order = column_order.as_ref().unwrap();
+            let row = if item.downcast::<PyDict>().is_ok() {
+                if let Some(order) = column_order.as_ref() {
                 let from_eval: Option<Vec<JsonValue>> = (|| {
                     let builtins = py.import_bound("builtins").ok()?;
                     let eval_fn = builtins.getattr("eval").ok()?;
@@ -1984,6 +1984,16 @@ fn python_data_and_schema(
                 })();
                 if let Some(values) = from_eval {
                     values
+                } else {
+                    python_row_to_json(
+                        py,
+                        &item,
+                        idx,
+                        column_order.as_deref(),
+                        from_pandas,
+                        allow_scalar_single_column,
+                    )?
+                }
                 } else {
                     python_row_to_json(
                         py,
@@ -2171,7 +2181,7 @@ fn python_data_and_schema(
             })
             .collect();
         let first_inferred_numeric = inferred
-            .get(0)
+            .first()
             .map(|t| t.eq_ignore_ascii_case("long") || t.eq_ignore_ascii_case("double"))
             .unwrap_or(false);
         let first_is_long = schema.len() == 2

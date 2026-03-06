@@ -88,9 +88,9 @@ fmt:
 fmt-check:
 	cargo fmt --check
 
-# Lint with Clippy (Rust crates only; sparkless-native has PyO3 bindings with different lint conventions)
+# Lint with Clippy. Use --workspace to match CI and include python (sparkless-native).
 clippy:
-	cargo clippy -p robin-sparkless -p robin-sparkless-core -p robin-sparkless-polars -p spark-sql-parser --all-features --all-targets -- -D warnings
+	cargo clippy --workspace --all-features --all-targets -- -D warnings
 
 # Security: scan for known vulnerabilities
 audit:
