@@ -3791,12 +3791,7 @@ impl PyDataFrame {
                         let right_refs: Vec<&str> = right_refs.iter().map(|s| s.as_str()).collect();
                         let joined = self
                             .inner
-                            .join_with_keys(
-                                &other.inner,
-                                left_refs,
-                                right_refs,
-                                join_type,
-                            )
+                            .join_with_keys(&other.inner, left_refs, right_refs, join_type)
                             .map_err(to_py_err)?;
                         // When the original expression was a compound condition (e.g. key equality AND filter),
                         // reapply the full predicate after the key-based join so additional conditions are honored

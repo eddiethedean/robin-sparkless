@@ -499,10 +499,7 @@ mod tests {
     fn extract_join_eq_columns_all_from_and_of_equalities() {
         // (a == a) & (b == b) yields both pairs (#1148).
         let right = col("b").eq(col("b").into_expr());
-        let expr = col("a")
-            .eq(col("a").into_expr())
-            .and_(&right)
-            .into_expr();
+        let expr = col("a").eq(col("a").into_expr()).and_(&right).into_expr();
         let out = try_extract_join_eq_columns_all(&expr);
         assert_eq!(
             out,
