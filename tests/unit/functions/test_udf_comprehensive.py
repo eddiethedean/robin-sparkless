@@ -356,7 +356,6 @@ class TestUDFComplexScenarios:
 class TestUDFWithDifferentDataTypes:
     """Test UDFs with various input data types."""
 
-    @pytest.mark.skip(reason="Issue #1265: unskip when fixing")
     def test_udf_with_long_type(self, spark):
         """Test UDF with LongType input."""
         df = spark.createDataFrame([{"value": 1000000000}], schema=["value"])
