@@ -8,7 +8,6 @@ Set MOCK_SPARK_TEST_BACKEND=pyspark to run with real PySpark.
 """
 
 from tests.fixtures.spark_imports import get_spark_imports
-import pytest
 
 # Get imports based on backend
 imports = get_spark_imports()

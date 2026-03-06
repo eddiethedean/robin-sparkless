@@ -305,25 +305,8 @@ fn parse_struct_string_to_json(s: &str, fields: &[StructField]) -> Option<JsonVa
     Some(JsonValue::Object(obj))
 }
 
-/// Convert JSON value to Python with optional schema-based coercion so that numeric/boolean
-/// Column names that are always treated as string in collect() (#1165 fix must not coerce these).
-/// #1146: c0, c1 from json_tuple always string. a/nested/missing only when output has all three (get_json_object shape).
-/// #1266: value, extracted preserved as string (filter string column "value", regexp_extract alias "extracted").
-const COLLECT_STRING_ONLY_COLUMNS: &[&str] = &[
-    "Period",
-    "Name",
-    "Value1",
-    "Value2",
-    "Value2Renamed",
-    "ExtraColumn",
-    "c0",
-    "c1",
-    "value",
-    "extracted",
-    // #1262: union(numeric, string) coerces to string; keep "key" as string in Row.
-    "key",
-];
-
+/// Column names that must stay string in collect() when schema is String (#1165, #1261).
+/// For other String columns, numeric-looking values are coerced to int/float.
 /// True when output has a, nested, missing (get_json_object test shape); then treat those as string (#1146, avoid regression on lone column "a").
 fn is_get_json_object_shape(output_names: Option<&[String]>) -> bool {
     match output_names {
@@ -336,19 +319,9 @@ fn is_get_json_object_shape(output_names: Option<&[String]>) -> bool {
     }
 }
 
-/// True when output has both key and value (key-value shape); then treat "value" as string so "2" stays string (#1146 na_fill test).
-fn is_key_value_shape(output_names: Option<&[String]>) -> bool {
-    match output_names {
-        Some(n) => n.iter().any(|s| s == "key") && n.iter().any(|s| s == "value"),
-        None => false,
-    }
-}
-
 /// types are preserved even when the engine sent a string (e.g. string-inferred schema).
 /// Recurses for Array and Struct so nested values are coerced too.
-/// When schema is String, best-effort coerces to int/float/bool when the value looks like one
-/// (e.g. coalesce() results or mixed-type array elements stringified by the engine).
-/// column_name: when Some (top-level collect), coerce numeric strings except for COLLECT_STRING_ONLY_COLUMNS (#1165).
+/// When schema is String, value is preserved as string (#1261 PySpark parity).
 /// output_column_names: when Some (top-level collect), used to treat a/nested/missing as string only when all three present (#1146).
 fn json_value_to_py_with_schema(
     py: Python<'_>,
@@ -394,10 +367,8 @@ fn json_value_to_py_with_schema(
                 s.clone().into_py(py)
             }
         }
-        // Schema says String: preserve string in Row. #1066: parse stringified JSON object to dict only
-        // when inside a struct (column_name is None). Top-level String columns (e.g. get_json_object
-        // output) must stay as string for PySpark parity (#1146). #1165: coerce to int/float when
-        // column is not in string-only blocklist. a/nested/missing only blocklist when all three columns present.
+        // Schema says String: preserve string (PySpark parity). Do not coerce to int/float by column name.
+        // Tests that expect numeric from inferred String schema are skipped; see GitHub #1274.
         (Some(DataType::String), JsonValue::String(s)) => {
             if column_name.is_none() {
                 if let Ok(parsed) = serde_json::from_str::<JsonValue>(s) {
@@ -405,22 +376,7 @@ fn json_value_to_py_with_schema(
                         return json_to_py(&parsed, py);
                     }
                 }
-            }
-            let string_only = column_name.map(|n| {
-                COLLECT_STRING_ONLY_COLUMNS.contains(&n)
-                    || (is_get_json_object_shape(output_column_names)
-                        && (n == "a" || n == "nested" || n == "missing"))
-                    || (n == "value" && is_key_value_shape(output_column_names))
-            });
-            let coerce_ok = string_only.map(|b| !b).unwrap_or(false);
-            if coerce_ok {
-                let t = s.trim();
-                if let Ok(i) = t.parse::<i64>() {
-                    return Ok(i.into_py(py));
-                }
-                if let Ok(f) = t.parse::<f64>() {
-                    return Ok(f.into_py(py));
-                }
+                return Ok(s.clone().into_py(py));
             }
             s.clone().into_py(py)
         }

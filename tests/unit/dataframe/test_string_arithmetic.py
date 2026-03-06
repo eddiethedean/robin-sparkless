@@ -427,7 +427,6 @@ class TestStringArithmetic:
         assert rows[0]["result"] == 2.0
         assert rows[1]["result"] == 4.0
 
-    @pytest.mark.skip(reason="Issue #1261: unskip when fixing")
     def test_string_arithmetic_with_filter(self, spark):
         """Test string arithmetic in filter conditions."""
         schema = StructType([StructField("string_1", StringType(), True)])
@@ -615,7 +614,6 @@ class TestStringArithmetic:
         # ((10 + 5) * 2 - 10) / 5 = (30 - 10) / 5 = 20 / 5 = 4.0
         assert rows[0]["result"] == 4.0
 
-    @pytest.mark.skip(reason="Issue #1261: unskip when fixing")
     def test_string_arithmetic_with_orderby(self, spark):
         """Test string arithmetic in orderBy operations."""
         schema = StructType([StructField("string_1", StringType(), True)])

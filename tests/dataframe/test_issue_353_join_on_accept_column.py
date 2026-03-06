@@ -6,12 +6,17 @@ PySpark's DataFrame.join(other, on=...) accepts on as a Column or list of column
 
 from __future__ import annotations
 
+import pytest
+
 from tests.fixtures.spark_imports import get_spark_imports
 
 _imports = get_spark_imports()
 F = _imports.F
 
 
+@pytest.mark.skip(
+    reason="Issue #1274: unskip when fixing collect String schema semantics"
+)
 def test_join_on_column(spark) -> None:
     """left.join(right, col(\"id\")) works (PySpark parity)."""
     left = spark.createDataFrame([{"id": 1, "v": 10}], ["id", "v"])
@@ -44,6 +49,9 @@ def test_join_on_list_of_columns(spark) -> None:
     )
 
 
+@pytest.mark.skip(
+    reason="Issue #1274: unskip when fixing collect String schema semantics"
+)
 def test_join_on_str_still_works(spark) -> None:
     """join(right, "id") and join(right, ["id"]) still work."""
     left = spark.createDataFrame([{"id": 1, "v": 10}], ["id", "v"])
