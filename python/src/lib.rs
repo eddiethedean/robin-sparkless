@@ -862,7 +862,8 @@ impl PySparkSession {
         sampling_ratio: Option<f64>,
     ) -> PyResult<PyDataFrame> {
         let _ = sampling_ratio; // no-op for list/dict data; PySpark uses for CSV inference
-        let (data, from_pandas, pandas_column_order) = normalize_create_dataframe_input(py, data)?;
+        let (data, from_pandas, pandas_column_order) =
+            normalize_create_dataframe_input(py, data, schema)?;
         let schema_cache =
             schema.and_then(|s| s.getattr("fields").ok().map(|_| s.clone().unbind()));
         let (rows, schema_pairs, schema_was_inferred) = python_data_and_schema(
@@ -1592,12 +1593,32 @@ fn infer_type_from_json_value(v: &JsonValue) -> String {
     }
 }
 
-/// Normalize createDataFrame input: convert pandas, PyArrow Table, or NumPy ndarray to list.
+/// Normalize createDataFrame input: convert pandas, PyArrow Table, NumPy ndarray, or RDD to list.
 /// Returns (converted list or original data, from_pandas flag, pandas column order if from pandas).
 fn normalize_create_dataframe_input<'py>(
     py: Python<'py>,
     data: &Bound<'py, PyAny>,
+    schema: Option<&Bound<'py, PyAny>>,
 ) -> PyResult<(Bound<'py, PyAny>, bool, Option<Vec<String>>)> {
+    // 0. RDD (df.rdd): collect to list of dicts for createDataFrame(rdd, schema) (#1147 / #361).
+    // When schema is provided, pass its column names so dict keys match (e.g. "Name", "Value").
+    if let Ok(rdd) = data.downcast::<PyRDD>() {
+        let preferred_names: Option<Vec<String>> = schema
+            .and_then(|s| parse_schema_from_py(py, s).ok().flatten())
+            .map(|pairs| pairs.into_iter().map(|(n, _)| n).collect());
+        let list = if let Some(names) = preferred_names {
+            let py_names = PyList::empty_bound(py);
+            for n in &names {
+                py_names.append(n)?;
+            }
+            rdd.call_method1("_to_pylist", (py_names,))?
+        } else {
+            rdd.call_method0("_to_pylist")?
+        };
+        // Return list directly so downstream uses our dicts; no need to re-normalize.
+        return Ok((list, false, None));
+    }
+
     // 1. PyArrow Table: to_pylist() returns list of dicts
     if let Ok(to_pylist) = data.getattr("to_pylist") {
         if to_pylist.is_callable() {
@@ -2579,6 +2600,114 @@ fn resolve_join_keys_with_aliases(
     (left_key, right_key)
 }
 
+/// RDD-like wrapper for createDataFrame(df.rdd, schema) (issue #1147 / #361).
+/// Holds the source DataFrame; createDataFrame(rdd, schema) collects it to rows and builds a new DataFrame.
+#[pyclass]
+struct PyRDD {
+    inner: DataFrame,
+}
+
+#[pymethods]
+impl PyRDD {
+    /// Return collected rows as list of dicts for createDataFrame(rdd, schema). Used internally by normalize.
+    /// When preferred_names is given (e.g. from createDataFrame(rdd, schema=["Name", "Value"])), use those
+    /// as dict keys so the downstream createDataFrame finds them by name.
+    #[pyo3(name = "_to_pylist", signature = (preferred_names=None))]
+    fn to_pylist<'py>(
+        &self,
+        py: Python<'py>,
+        preferred_names: Option<&Bound<'py, PyAny>>,
+    ) -> PyResult<Bound<'py, PyList>> {
+        let (col_names, rows) = self
+            .inner
+            .collect_as_json_rows_with_names()
+            .map_err(to_py_err)?;
+        // call_method1(..., (py_names,)) passes a tuple to Python; unwrap single-element tuple.
+        let (names, use_preferred_keys): (Vec<String>, bool) =
+            if let Some(arg) = preferred_names {
+                let lst_opt: Option<Bound<'py, PyList>> =
+                    if let Ok(lst) = arg.downcast::<PyList>() {
+                        Some(lst.clone())
+                    } else if let Ok(tup) = arg.downcast::<pyo3::types::PyTuple>() {
+                        (tup.len() == 1).then(|| tup.get_item(0).ok()).flatten().and_then(
+                            |item| item.downcast_into::<PyList>().ok(),
+                        )
+                    } else {
+                        None
+                    };
+                if let Some(lst) = lst_opt {
+                    let n: Vec<String> = lst
+                        .iter()
+                        .filter_map(|it| it.extract::<String>().ok())
+                        .collect();
+                    if n.is_empty() {
+                        (col_names.clone(), false)
+                    } else {
+                        (n, true)
+                    }
+                } else {
+                    (
+                        self.inner
+                            .schema()
+                            .ok()
+                            .map(|s| s.fields().iter().map(|f| f.name.clone()).collect())
+                            .unwrap_or_else(|| col_names.clone()),
+                        false,
+                    )
+                }
+            } else {
+                (
+                    self.inner
+                        .schema()
+                        .ok()
+                        .map(|s| s.fields().iter().map(|f| f.name.clone()).collect())
+                        .unwrap_or_else(|| col_names.clone()),
+                    false,
+                )
+            };
+        let out = PyList::empty_bound(py);
+        for row in rows {
+            if use_preferred_keys {
+                // Return list-of-lists so createDataFrame uses positional column order; avoids dict key lookup issues.
+                let row_list = PyList::empty_bound(py);
+                for name in &names {
+                    let v = row
+                        .get(name)
+                        .or_else(|| {
+                            col_names
+                                .iter()
+                                .find(|c| c.eq_ignore_ascii_case(name))
+                                .and_then(|c| row.get(c))
+                        })
+                        .or_else(|| {
+                            row.iter()
+                                .find(|(k, _)| k.eq_ignore_ascii_case(name))
+                                .map(|(_, v)| v)
+                        })
+                        .unwrap_or(&JsonValue::Null);
+                    row_list.append(json_to_py(v, py)?)?;
+                }
+                out.append(row_list)?;
+            } else {
+                let dict = PyDict::new_bound(py);
+                for name in &names {
+                    let v = row
+                        .get(name)
+                        .or_else(|| {
+                            row.iter()
+                                .find(|(k, _)| k.eq_ignore_ascii_case(name))
+                                .map(|(_, v)| v)
+                        })
+                        .unwrap_or(&JsonValue::Null);
+                    dict.set_item(name, json_to_py(v, py)?)?;
+                }
+                out.append(dict)?;
+            }
+        }
+        Ok(out)
+    }
+}
+
 #[pyclass]
 struct PyDataFrame {
     inner: DataFrame,
@@ -3315,10 +3444,10 @@ impl PyDataFrame {
     }
 
     #[getter]
-    fn rdd(&self) -> PyResult<PyDataFrame> {
-        Err(PyErr::new::<pyo3::exceptions::PyNotImplementedError, _>(
-            "rdd is not yet implemented in robin-sparkless",
-        ))
+    fn rdd(slf: PyRef<Self>) -> PyRDD {
+        PyRDD {
+            inner: slf.inner.clone(),
+        }
     }
 
     #[getter]
@@ -7630,6 +7759,7 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PySparkSession>()?;
     m.add_class::<PyDataFrameReader>()?;
     m.add_class::<PyDataFrame>()?;
+    m.add_class::<PyRDD>()?;
     m.add_class::<PyDataFrameWriter>()?;
     m.add_class::<PyColumn>()?;
     m.add_class::<PySortOrder>()?;
