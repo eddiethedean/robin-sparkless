@@ -156,6 +156,11 @@ impl DataFrame {
         }
     }
 
+    /// True if this DataFrame is backed by an eager Polars DataFrame (e.g. from create_dataframe_from_rows).
+    pub(crate) fn is_eager(&self) -> bool {
+        matches!(&self.inner, DataFrameInner::Eager(_))
+    }
+
     /// Return the LazyFrame for plan extension. For Eager, converts via .lazy(); for Lazy, clones.
     pub(crate) fn lazy_frame(&self) -> LazyFrame {
         match &self.inner {
@@ -1063,7 +1068,7 @@ impl DataFrame {
     pub fn collect_as_json_rows_with_names(
         &self,
     ) -> Result<(Vec<String>, Vec<HashMap<String, JsonValue>>, StructType), PolarsError> {
-        let (collected, schema_for_types) = match &self.inner {
+        let (collected, plan_schema) = match &self.inner {
             DataFrameInner::Eager(df) => (df.as_ref().clone(), df.schema().as_ref().clone()),
             DataFrameInner::Lazy(lf) => {
                 let plan_schema = lf.clone().collect_schema()?.as_ref().clone();
@@ -1071,15 +1076,15 @@ impl DataFrame {
                 (pl_df, plan_schema)
             }
         };
-        let names: Vec<String> = collected
-            .get_column_names()
-            .iter()
-            .map(|s| s.to_string())
-            .collect();
-        let plan_dtypes: Vec<DataType> = schema_for_types
+        // Use plan schema order so select("dept", "salary", row_number()...) yields rows with
+        // dept/salary/rn in that order; Polars collect() may return columns in a different order
+        // (#1267, #357).
+        let names_and_dtypes: Vec<(String, DataType)> = plan_schema
             .iter_names_and_dtypes()
-            .map(|(_, d)| d.clone())
+            .map(|(n, d)| (n.to_string(), d.clone()))
             .collect();
+        let names: Vec<String> = names_and_dtypes.iter().map(|(n, _)| n.clone()).collect();
+        let plan_dtypes: Vec<DataType> = names_and_dtypes.iter().map(|(_, d)| d.clone()).collect();
         // #1146: get_json_object returns string; only treat a/nested/missing as String when all three columns present (get_json_object test shape). json_tuple c0/c1 always string.
         let has_get_json_object_shape = names.iter().any(|n| n == "a")
             && names.iter().any(|n| n == "nested")
@@ -1109,12 +1114,19 @@ impl DataFrame {
                 .map(|(n, d)| Field::new(n.as_str().into(), d.clone())),
         );
         let schema = StructType::from_polars_schema(&schema_override);
-        // Cast each column to effective type so get_json_object etc. are string in Row (#1146).
-        let columns_cast: Vec<_> = collected
-            .columns()
+        // Resolve columns by name so order matches plan schema regardless of collected frame order.
+        let columns_cast: Vec<_> = names
             .iter()
             .enumerate()
-            .map(|(col_idx, s)| {
+            .map(|(col_idx, name)| {
+                let idx = collected
+                    .get_column_index(name.as_str())
+                    .ok_or_else(|| {
+                        PolarsError::ComputeError(
+                            format!("collect_as_json_rows_with_names: column '{name}' not found").into(),
+                        )
+                    })?;
+                let s = &collected.columns()[idx];
                 let dtype = effective_dtypes.get(col_idx).unwrap_or_else(|| s.dtype());
                 if dtype == s.dtype() {
                     Ok(s.clone())
