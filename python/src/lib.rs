@@ -305,16 +305,28 @@ fn parse_struct_string_to_json(s: &str, fields: &[StructField]) -> Option<JsonVa
 }
 
 /// Convert JSON value to Python with optional schema-based coercion so that numeric/boolean
+/// Column names that are always treated as string in collect() (#1165 fix must not coerce these).
+const COLLECT_STRING_ONLY_COLUMNS: &[&str] = &[
+    "Period",
+    "Name",
+    "Value1",
+    "Value2",
+    "Value2Renamed",
+    "ExtraColumn",
+];
+
 /// types are preserved even when the engine sent a string (e.g. string-inferred schema).
 /// Recurses for Array and Struct so nested values are coerced too.
 /// When schema is String, best-effort coerces to int/float/bool when the value looks like one
 /// (e.g. coalesce() results or mixed-type array elements stringified by the engine).
+/// column_name: when Some (top-level collect), coerce numeric strings except for COLLECT_STRING_ONLY_COLUMNS (#1165).
 fn json_value_to_py_with_schema(
     py: Python<'_>,
     value: &JsonValue,
     dtype: Option<&DataType>,
     datetime_cls: &Bound<'_, PyAny>,
     date_cls: &Bound<'_, PyAny>,
+    column_name: Option<&str>,
 ) -> PyResult<PyObject> {
     Ok(match (dtype, value) {
         (Some(DataType::Timestamp), JsonValue::String(s)) => datetime_cls
@@ -352,10 +364,23 @@ fn json_value_to_py_with_schema(
             }
         }
         // Schema says String: preserve string in Row. #1066: if value is stringified JSON object, parse to dict.
+        // #1165: Join non-key columns can be stringified; coerce to int/float when column is not in string-only blocklist.
         (Some(DataType::String), JsonValue::String(s)) => {
             if let Ok(parsed) = serde_json::from_str::<JsonValue>(s) {
                 if parsed.is_object() {
                     return json_to_py(&parsed, py);
+                }
+            }
+            let coerce_ok = column_name
+                .map(|n| !COLLECT_STRING_ONLY_COLUMNS.contains(&n))
+                .unwrap_or(false);
+            if coerce_ok {
+                let t = s.trim();
+                if let Ok(i) = t.parse::<i64>() {
+                    return Ok(i.into_py(py));
+                }
+                if let Ok(f) = t.parse::<f64>() {
+                    return Ok(f.into_py(py));
                 }
             }
             s.clone().into_py(py)
@@ -397,6 +422,7 @@ fn json_value_to_py_with_schema(
                     Some(elem_type),
                     datetime_cls,
                     date_cls,
+                    None,
                 )?)?;
             }
             list.into_py(py)
@@ -412,6 +438,7 @@ fn json_value_to_py_with_schema(
                         Some(elem_type),
                         datetime_cls,
                         date_cls,
+                        None,
                     )?)?;
                 }
                 return Ok(list.into_py(py));
@@ -428,6 +455,7 @@ fn json_value_to_py_with_schema(
                     Some(&f.data_type),
                     datetime_cls,
                     date_cls,
+                    None,
                 )?;
                 dict.set_item(&f.name, py_v)?;
             }
@@ -445,6 +473,7 @@ fn json_value_to_py_with_schema(
                         Some(&f.data_type),
                         datetime_cls,
                         date_cls,
+                        None,
                     )?;
                     dict.set_item(&f.name, py_v)?;
                 }
@@ -460,6 +489,7 @@ fn json_value_to_py_with_schema(
                         Some(&f.data_type),
                         datetime_cls,
                         date_cls,
+                        None,
                     )?;
                     dict.set_item(&f.name, py_v)?;
                 }
@@ -3322,6 +3352,7 @@ impl PyDataFrame {
                     dtype_by_name.get(name),
                     &datetime_cls,
                     &date_cls,
+                    Some(name.as_str()),
                 )?;
                 kwargs.set_item(name, py_v)?;
             }
