@@ -8,11 +8,11 @@ use crate::dataframe::{DataFrame, JoinType, disambiguate_agg_output_names, join}
 use crate::functions;
 use crate::schema::{DataType as CoreDataType, StructType};
 use crate::session::{SparkSession, set_thread_udf_session};
-use polars::prelude::{DataFrame as PlDataFrame, Expr, PolarsError, col, lit, when};
+use polars::prelude::{AnyValue, DataFrame as PlDataFrame, Expr, PolarsError, col, lit, when};
 use polars_plan::dsl::functions::nth;
 use serde_json::Value as JsonValue;
 use sqlparser::ast::{
-    AssignmentTarget, BinaryOperator, Expr as SqlExpr, FromTable, Function, FunctionArg,
+    BinaryOperator, Expr as SqlExpr, FromTable, Function, FunctionArg,
     FunctionArgExpr, FunctionArguments, GroupByExpr, JoinConstraint, JoinOperator, LimitClause,
     ObjectType, OrderByKind, Query, Select, SelectItem, SetExpr, SetOperator, Statement,
     TableAlias, TableFactor, TableObject, Value, ValueWithSpan,
@@ -166,13 +166,10 @@ pub fn translate(
                 ));
             }
 
-            // CREATE TABLE ... AS SELECT: run query and register result (Phase 7 / BUG-011).
-            if let Some(ref q) = create_table.query {
-                let df = translate_query(session, q)?;
-                session.register_table(&table_name, df);
-                return Ok(DataFrame::from_polars_with_options(
-                    PlDataFrame::empty(),
-                    session.is_case_sensitive(),
+            // CREATE TABLE AS SELECT: PySpark without Hive raises; match that for parity (#1171).
+            if create_table.query.is_some() {
+                return Err(PolarsError::InvalidOperation(
+                    "CREATE TABLE AS SELECT is not supported (no Hive catalog). Use INSERT INTO ... SELECT or createOrReplaceTempView.".into(),
                 ));
             }
 
@@ -624,48 +621,13 @@ fn translate_set_expr(
 }
 
 /// Translate UPDATE table SET col = expr [WHERE condition]. Modifies the table in the session catalog.
+/// PySpark without Hive raises for UPDATE; we match that for parity (#1171).
 fn translate_update(
-    session: &SparkSession,
-    update: &sqlparser::ast::Update,
+    _session: &SparkSession,
+    _update: &sqlparser::ast::Update,
 ) -> Result<crate::dataframe::DataFrame, PolarsError> {
-    if !update.table.joins.is_empty() {
-        return Err(PolarsError::InvalidOperation(
-            "SQL: UPDATE with JOIN is not supported. Use a single table.".into(),
-        ));
-    }
-    let table_name = table_name_from_factor(&update.table.relation)?;
-    let mut df = session.table(&table_name)?;
-
-    let where_expr = match &update.selection {
-        Some(sel) => sql_expr_to_polars(sel, session, Some(&df), None, None)?,
-        None => lit(true),
-    };
-
-    for assign in &update.assignments {
-        let (col_name, value_expr) = match &assign.target {
-            AssignmentTarget::ColumnName(name) => {
-                let cn = table_name_from_object_name(name);
-                let value = sql_expr_to_polars(&assign.value, session, Some(&df), None, None)?;
-                (cn, value)
-            }
-            AssignmentTarget::Tuple(_) => {
-                return Err(PolarsError::InvalidOperation(
-                    "SQL: UPDATE with tuple assignment is not supported.".into(),
-                ));
-            }
-        };
-        let resolved = df.resolve_column_name(&col_name)?;
-        let new_expr = when(where_expr.clone())
-            .then(value_expr)
-            .otherwise(col(resolved.as_str()));
-        df = df.with_column_expr(&resolved, new_expr)?;
-    }
-
-    session.create_or_replace_temp_view(&table_name, df.clone());
-    session.register_table(&table_name, df);
-    Ok(DataFrame::from_polars_with_options(
-        PlDataFrame::empty(),
-        session.is_case_sensitive(),
+    Err(PolarsError::InvalidOperation(
+        "UPDATE TABLE is not supported (no Hive catalog).".into(),
     ))
 }
 
@@ -1087,6 +1049,45 @@ fn join_condition_to_on_columns(
     }
 }
 
+/// Evaluate a scalar subquery (single row, single column) to a literal Expr for use in WHERE etc. (#1171)
+fn scalar_subquery_to_expr(session: &SparkSession, query: &Query) -> Result<Expr, PolarsError> {
+    let df = translate_query(session, query)?;
+    let pl_df = df.collect_inner()?;
+    if pl_df.height() == 0 {
+        return Ok(lit(polars::prelude::NULL));
+    }
+    let first_col = pl_df
+        .columns()
+        .first()
+        .ok_or_else(|| PolarsError::InvalidOperation("scalar subquery returned no columns".into()))?;
+    let av = first_col
+        .get(0)
+        .map_err(|e: PolarsError| PolarsError::InvalidOperation(e.to_string().into()))?;
+    any_value_to_lit(av)
+}
+
+fn any_value_to_lit(av: AnyValue) -> Result<Expr, PolarsError> {
+    use polars::datatypes::AnyValue as Av;
+    Ok(match av {
+        Av::Null => lit(polars::prelude::NULL),
+        Av::Boolean(b) => lit(b),
+        Av::Int32(i) => lit(i),
+        Av::Int64(i) => lit(i),
+        Av::UInt32(u) => lit(u as i64),
+        Av::UInt64(u) => lit(u as i64),
+        Av::Float32(f) => lit(f64::from(f)),
+        Av::Float64(f) => lit(f),
+        Av::String(s) => lit(s.to_string()),
+        Av::StringOwned(s) => lit(s.as_str()),
+        Av::Date(days) => lit(days.to_string()),
+        _ => {
+            return Err(PolarsError::InvalidOperation(
+                format!("scalar subquery returned unsupported type for WHERE: {:?}", av).into(),
+            ));
+        }
+    })
+}
+
 fn sql_expr_to_polars(
     expr: &SqlExpr,
     session: &SparkSession,
@@ -1286,9 +1287,7 @@ fn sql_expr_to_polars(
         SqlExpr::Exists { .. } => Err(PolarsError::InvalidOperation(
             "SQL: subquery in WHERE (EXISTS (SELECT ...)) is not yet supported.".into(),
         )),
-        SqlExpr::Subquery(_) => Err(PolarsError::InvalidOperation(
-            "SQL: subquery in WHERE is not yet supported.".into(),
-        )),
+        SqlExpr::Subquery(subq) => scalar_subquery_to_expr(session, subq.as_ref()),
         _ => Err(PolarsError::InvalidOperation(
             format!("SQL: unsupported expression in WHERE: {:?}. Use column, literal, =, <, >, AND, OR, IS NULL, LIKE, IN.", expr).into(),
         )),
