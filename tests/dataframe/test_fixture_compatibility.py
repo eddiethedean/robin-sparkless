@@ -58,7 +58,9 @@ class TestFixtureCompatibility:
         finally:
             spark.stop()
 
-    @pytest.mark.skip(reason="Issue #1141: unskip when fixing SparkContext.appName (camelCase)")
+    @pytest.mark.skip(
+        reason="Issue #1141: unskip when fixing SparkContext.appName (camelCase)"
+    )
     def test_sparkcontext_available_in_session(self):
         """Test that SparkContext is available through session."""
         spark = SparkSession.builder.appName("test").getOrCreate()

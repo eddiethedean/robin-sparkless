@@ -18,8 +18,8 @@ from datetime import datetime, timedelta
 
 class TestIssue173ValidationDuringMaterialization:
     """Test cases for issue #173: validation during materialization replay."""
-    @pytest.mark.skip(reason="Issue #1180: unskip when fixing")
 
+    @pytest.mark.skip(reason="Issue #1180: unskip when fixing")
     def test_validation_during_materialization_with_dropped_columns(self):
         """Test that validation works during materialization when columns are dropped.
 

@@ -20,8 +20,8 @@ def test_soundex_module_exists() -> None:
     """Module exposes soundex function."""
     assert hasattr(F, "soundex")
 
-@pytest.mark.skip(reason="Issue #1198: unskip when fixing")
 
+@pytest.mark.skip(reason="Issue #1198: unskip when fixing")
 def test_with_column_soundex_returns_three_rows() -> None:
     """df.with_column("snd", F.soundex(F.col("name"))) returns 3 rows with snd column."""
     spark = SparkSession.builder.appName("soundex").getOrCreate()
@@ -35,8 +35,8 @@ def test_with_column_soundex_returns_three_rows() -> None:
         assert isinstance(row["snd"], str)
         assert len(row["snd"]) == 4  # American Soundex is 4 chars
 
-@pytest.mark.skip(reason="Issue #1198: unskip when fixing")
 
+@pytest.mark.skip(reason="Issue #1198: unskip when fixing")
 def test_soundex_phonetic_codes() -> None:
     """Soundex produces expected phonetic codes (Alice->A420, Robert->R163)."""
     spark = SparkSession.builder.appName("soundex").getOrCreate()

@@ -312,8 +312,8 @@ class TestIssue328SplitLimit:
             assert "B::C::D" in values
         finally:
             spark.stop()
-    @pytest.mark.skip(reason="Issue #1215: unskip when fixing")
 
+    @pytest.mark.skip(reason="Issue #1215: unskip when fixing")
     def test_split_special_regex_characters(self):
         """Test split with special regex characters in delimiter."""
         import inspect
@@ -448,8 +448,8 @@ class TestIssue328SplitLimit:
             assert "D" in values
         finally:
             spark.stop()
-    @pytest.mark.skip(reason="Issue #1215: unskip when fixing")
 
+    @pytest.mark.skip(reason="Issue #1215: unskip when fixing")
     def test_split_unicode_characters(self):
         """Test split with Unicode characters."""
         import inspect

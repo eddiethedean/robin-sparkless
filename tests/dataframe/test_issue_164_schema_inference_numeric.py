@@ -14,8 +14,8 @@ F = _imports.F
 
 class TestIssue164SchemaInferenceNumeric:
     """Test cases for issue #164: schema inference for numeric types."""
-    @pytest.mark.skip(reason="Issue #1179: unskip when fixing")
 
+    @pytest.mark.skip(reason="Issue #1179: unskip when fixing")
     def test_schema_inference_for_numeric_columns(self):
         """Test that numeric columns are inferred as numeric types, not strings."""
         spark = SparkSession.builder.appName("test").getOrCreate()
@@ -48,8 +48,8 @@ class TestIssue164SchemaInferenceNumeric:
         assert count == 0
 
         spark.stop()
-    @pytest.mark.skip(reason="Issue #1179: unskip when fixing")
 
+    @pytest.mark.skip(reason="Issue #1179: unskip when fixing")
     def test_schema_inference_for_integer_columns(self):
         """Test that integer columns are inferred as LongType, not strings."""
         spark = SparkSession.builder.appName("test").getOrCreate()
@@ -75,8 +75,8 @@ class TestIssue164SchemaInferenceNumeric:
         assert count == 0
 
         spark.stop()
-    @pytest.mark.skip(reason="Issue #1179: unskip when fixing")
 
+    @pytest.mark.skip(reason="Issue #1179: unskip when fixing")
     def test_schema_inference_mixed_types(self):
         """Test that schema inference works correctly for mixed types."""
         spark = SparkSession.builder.appName("test").getOrCreate()

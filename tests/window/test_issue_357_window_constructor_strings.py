@@ -16,8 +16,8 @@ _imports = get_spark_imports()
 F = _imports.F
 Window = _imports.Window
 
-@pytest.mark.skip(reason="Issue #1267: unskip when fixing")
 
+@pytest.mark.skip(reason="Issue #1267: unskip when fixing")
 def test_window_no_arg_constructor(spark) -> None:
     """Window() creates unbounded window; can chain partitionBy/orderBy (issue repro)."""
     df = spark.createDataFrame(

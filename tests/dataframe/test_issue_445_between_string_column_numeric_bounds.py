@@ -264,7 +264,9 @@ def test_between_string_column_in_when_otherwise(spark, spark_backend):
     assert tier_map[3] == "high"
 
 
-@pytest.mark.skip(reason="Issue #1116: unskip when fixing isin negation, between, log, date/datetime, string arithmetic")
+@pytest.mark.skip(
+    reason="Issue #1116: unskip when fixing isin negation, between, log, date/datetime, string arithmetic"
+)
 def test_between_string_column_not_between(spark, spark_backend):
     """~between (NOT between) filters inverse."""
     F = get_spark_imports(spark_backend).F

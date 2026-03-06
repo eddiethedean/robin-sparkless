@@ -15,8 +15,8 @@ _imports = get_spark_imports()
 SparkSession = _imports.SparkSession
 F = _imports.F
 
-@pytest.mark.skip(reason="Issue #1195: unskip when fixing")
 
+@pytest.mark.skip(reason="Issue #1195: unskip when fixing")
 def test_concat_with_literal_separator_in_with_column() -> None:
     """F.concat(col1, lit(" "), col2) builds full_name as in PySpark."""
     spark = SparkSession.builder.appName("concat_api_repro").getOrCreate()
@@ -43,8 +43,8 @@ def test_concat_with_literal_separator_in_with_column() -> None:
         ],
     )
 
-@pytest.mark.skip(reason="Issue #1195: unskip when fixing")
 
+@pytest.mark.skip(reason="Issue #1195: unskip when fixing")
 def test_concat_ws_matches_concat_for_space_separator() -> None:
     """concat_ws(" ", ...) behaves like concat(col1, lit(" "), col2)."""
     spark = SparkSession.builder.appName("concat_ws_api_repro").getOrCreate()

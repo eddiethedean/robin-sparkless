@@ -13,7 +13,9 @@ SparkSession = _imports.SparkSession
 F = _imports.F
 
 
-@pytest.mark.skip(reason="Issue #1143: unskip when fixing posexplode alias and posexplode_outer")
+@pytest.mark.skip(
+    reason="Issue #1143: unskip when fixing posexplode alias and posexplode_outer"
+)
 class TestIssue366AliasPosexplode:
     """Test alias(name) for posexplode (PySpark: two names for two columns)."""
 

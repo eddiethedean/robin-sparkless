@@ -177,8 +177,8 @@ class TestIssue413UnionCreateDataFrame:
         rows = result.collect()
         assert len(rows) == 3
         assert [r["id"] for r in rows] == [1, 2, 3]
-    @pytest.mark.skip(reason="Issue #1240: unskip when fixing")
 
+    @pytest.mark.skip(reason="Issue #1240: unskip when fixing")
     def test_union_many_columns_different_names(self, spark) -> None:
         """Union with many columns and different names by position."""
         cols_left = ["c1", "c2", "c3", "c4", "c5"]

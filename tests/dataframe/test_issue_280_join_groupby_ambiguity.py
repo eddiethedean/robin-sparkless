@@ -92,8 +92,8 @@ class TestJoinThenGroupByNoAmbiguity:
             assert result_dict == {1: 1, 2: 1}
         finally:
             spark.stop()
-    @pytest.mark.skip(reason="Issue #1207: unskip when fixing")
 
+    @pytest.mark.skip(reason="Issue #1207: unskip when fixing")
     def test_outer_join_then_groupby(self):
         """Test outer join followed by groupBy."""
         spark = SparkSession.builder.appName("issue-280").getOrCreate()

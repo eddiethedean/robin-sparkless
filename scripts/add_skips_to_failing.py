@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """Add @pytest.mark.skip(reason=\"Issue #N: unskip when fixing\") to each failing test."""
+
 import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+
 
 def load_mapping():
     mapping = {}
@@ -15,6 +17,7 @@ def load_mapping():
             filepath, num = line.split("\t")
             mapping[filepath] = int(num)
     return mapping
+
 
 def load_failing():
     by_file = {}
@@ -28,6 +31,7 @@ def load_failing():
                 by_file[filepath] = []
             by_file[filepath].append(rest)  # "test_foo" or "TestClass::test_foo"
     return by_file
+
 
 def find_test_locations(content):
     """Return list of (line_ix_0based, def_name, class_name or None)."""
@@ -51,12 +55,14 @@ def find_test_locations(content):
                 locations.append((i, name, loc_class))
     return locations, lines
 
+
 def test_id_matches(test_spec, def_name, class_name):
     """test_spec is either 'test_foo' or 'TestClass::test_foo'."""
     if "::" in test_spec:
         c, m = test_spec.split("::", 1)
         return m == def_name and c == (class_name or "")
     return test_spec == def_name and (class_name is None or class_name == "")
+
 
 def already_has_skip(lines, def_line_ix):
     """Check if the line before def_line_ix is already a skip."""
@@ -71,6 +77,7 @@ def already_has_skip(lines, def_line_ix):
                 return False
     return False
 
+
 def add_skip_to_file(filepath, tests_to_skip, issue_num):
     path = ROOT / filepath
     if not path.exists():
@@ -80,7 +87,7 @@ def add_skip_to_file(filepath, tests_to_skip, issue_num):
     locations, lines = find_test_locations(content)
     # Which line indices to add skip to (set of line numbers)
     to_skip_at = set()
-    for (line_ix, def_name, class_name) in locations:
+    for line_ix, def_name, class_name in locations:
         for spec in tests_to_skip:
             if test_id_matches(spec, def_name, class_name):
                 to_skip_at.add(line_ix)
@@ -103,7 +110,10 @@ def add_skip_to_file(filepath, tests_to_skip, issue_num):
         # Insert before this def
         lines.insert(line_ix, skip_line)
     path.write_text("\n".join(lines) + "\n")
-    print(f"Updated {filepath}: added skip for {len(to_skip_at)} test(s) (Issue #{issue_num})")
+    print(
+        f"Updated {filepath}: added skip for {len(to_skip_at)} test(s) (Issue #{issue_num})"
+    )
+
 
 def main():
     mapping = load_mapping()
@@ -113,6 +123,7 @@ def main():
         if not issue_num:
             continue
         add_skip_to_file(filepath, tests, issue_num)
+
 
 if __name__ == "__main__":
     main()

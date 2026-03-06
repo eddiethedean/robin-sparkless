@@ -10,8 +10,8 @@ import pytest
 
 class TestIssue370FilterInString:
     """Test filter with string condition containing IN (literal list)."""
-    @pytest.mark.skip(reason="Issue #1228: unskip when fixing")
 
+    @pytest.mark.skip(reason="Issue #1228: unskip when fixing")
     def test_filter_values_in_string_literal(self, spark):
         """Exact scenario from issue #370: df.filter(\"Values in ('20')\")."""
         df = spark.createDataFrame(
@@ -24,8 +24,8 @@ class TestIssue370FilterInString:
         rows = df1.collect()
         assert len(rows) == 1
         assert rows[0]["Name"] == "Bob" and rows[0]["Values"] == "20"
-    @pytest.mark.skip(reason="Issue #1228: unskip when fixing")
 
+    @pytest.mark.skip(reason="Issue #1228: unskip when fixing")
     def test_filter_values_in_numeric_literal(self, spark):
         """df.filter('Values in (20)') - numeric literal (PySpark coerces to string column)."""
         df = spark.createDataFrame(

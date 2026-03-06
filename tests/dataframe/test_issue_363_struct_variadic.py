@@ -15,8 +15,8 @@ _imports = get_spark_imports()
 SparkSession = _imports.SparkSession
 F = _imports.F
 
-@pytest.mark.skip(reason="Issue #1224: unskip when fixing")
 
+@pytest.mark.skip(reason="Issue #1224: unskip when fixing")
 def test_struct_multiple_columns_issue_repro() -> None:
     """struct(col("a"), col("b")) works (issue repro)."""
     from tests.utils import _row_to_dict

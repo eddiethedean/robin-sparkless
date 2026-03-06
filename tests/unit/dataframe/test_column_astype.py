@@ -395,7 +395,9 @@ class TestColumnAstype:
         assert rows[0]["as_double"] == 123.0
         assert rows[0]["as_string"] == "123"
 
-    @pytest.mark.skip(reason="Issue #1115: unskip when fixing types and strictness (array, astype, to_date)")
+    @pytest.mark.skip(
+        reason="Issue #1115: unskip when fixing types and strictness (array, astype, to_date)"
+    )
     def test_astype_preserves_column_name(self, spark):
         """Test that astype preserves the column name correctly."""
         schema = StructType([StructField("num", IntegerType(), True)])
@@ -503,7 +505,9 @@ class TestColumnAstype:
         assert rows[2]["as_int"] == 10  # 10.0 -> 10
         assert rows[3]["as_int"] == -2  # -2.7 -> -2
 
-    @pytest.mark.skip(reason="Issue #1115: unskip when fixing types and strictness (array, astype, to_date)")
+    @pytest.mark.skip(
+        reason="Issue #1115: unskip when fixing types and strictness (array, astype, to_date)"
+    )
     def test_astype_string_to_boolean(self, spark):
         """Test astype from string to boolean (PySpark: "true"->True, "false"->False, ""->False)."""
         schema = StructType([StructField("bool_str", StringType(), True)])

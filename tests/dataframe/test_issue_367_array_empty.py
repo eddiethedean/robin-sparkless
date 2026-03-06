@@ -116,7 +116,9 @@ class TestIssue367ArrayEmpty:
         for row in rows:
             assert row["arr"] == []
 
-    @pytest.mark.skip(reason="Issue #1115: unskip when fixing types and strictness (array, astype, to_date)")
+    @pytest.mark.skip(
+        reason="Issue #1115: unskip when fixing types and strictness (array, astype, to_date)"
+    )
     def test_array_empty_tuple_raises_like_pyspark(self, spark):
         """F.array(()) raises in Sparkless (matches PySpark, which rejects tuple)."""
         from tests.fixtures.spark_imports import get_spark_imports

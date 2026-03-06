@@ -11,8 +11,8 @@ PySpark/Sparkless allows them. Fixed by the same disambiguation as #213
 (name, name_1, name_2, ...) in select_with_exprs.
 """
 
-@pytest.mark.skip(reason="Issue #1190: unskip when fixing")
 
+@pytest.mark.skip(reason="Issue #1190: unskip when fixing")
 def test_select_same_column_cast_string_and_int(spark) -> None:
     """Exact scenario from #215: select(col('num').cast('string'), col('num').cast('int'))."""
     df = spark.createDataFrame(
@@ -30,8 +30,8 @@ def test_select_same_column_cast_string_and_int(spark) -> None:
     assert rows[1]["num"] == "2"
     assert rows[1]["num_1"] == 2
 
-@pytest.mark.skip(reason="Issue #1190: unskip when fixing")
 
+@pytest.mark.skip(reason="Issue #1190: unskip when fixing")
 def test_select_duplicate_value_name(spark) -> None:
     """#215 affected tests: duplicate 'value' in select (e.g. astype_multiple_types)."""
     df = spark.createDataFrame(

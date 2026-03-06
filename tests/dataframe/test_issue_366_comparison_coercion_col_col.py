@@ -15,8 +15,8 @@ from tests.fixtures.spark_imports import get_spark_imports
 _imports = get_spark_imports()
 F = _imports.F
 
-@pytest.mark.skip(reason="Issue #1226: unskip when fixing")
 
+@pytest.mark.skip(reason="Issue #1226: unskip when fixing")
 def test_col_col_string_numeric_issue_repro(spark) -> None:
     """col('id') == col('label') where id is int, label is string (issue repro)."""
     df = spark.createDataFrame(
@@ -28,8 +28,8 @@ def test_col_col_string_numeric_issue_repro(spark) -> None:
     assert rows[0]["id"] == 1
     assert rows[0]["label"] == "1"
 
-@pytest.mark.skip(reason="Issue #1226: unskip when fixing")
 
+@pytest.mark.skip(reason="Issue #1226: unskip when fixing")
 def test_col_col_string_numeric_no_match(spark) -> None:
     """col('n') == col('s') when s is non-numeric string: no match."""
     df = spark.createDataFrame(

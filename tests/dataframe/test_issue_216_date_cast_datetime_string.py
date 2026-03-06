@@ -42,7 +42,9 @@ def test_cast_date_only_string_to_date(spark) -> None:
     assert rows[0]["d"] == datetime.date(2025, 1, 1)
 
 
-@pytest.mark.skip(reason="Issue #1137: unskip when fixing try_cast invalid string to date returns null")
+@pytest.mark.skip(
+    reason="Issue #1137: unskip when fixing try_cast invalid string to date returns null"
+)
 def test_try_cast_datetime_string_to_date_invalid_null(spark) -> None:
     """Invalid datetime string cast to date yields null."""
     df = spark.createDataFrame(

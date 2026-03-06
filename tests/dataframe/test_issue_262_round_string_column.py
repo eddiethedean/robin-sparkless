@@ -15,8 +15,8 @@ _imports = get_spark_imports()
 SparkSession = _imports.SparkSession
 F = _imports.F
 
-@pytest.mark.skip(reason="Issue #1202: unskip when fixing")
 
+@pytest.mark.skip(reason="Issue #1202: unskip when fixing")
 def test_round_string_column_implicit_cast() -> None:
     """with_column with F.round(F.col('val')) on string column succeeds; matches PySpark [10.0, 10.0]."""
     spark = SparkSession.builder.appName("test_262").getOrCreate()
@@ -46,8 +46,8 @@ def test_round_string_column_with_scale() -> None:
     assert out[0]["rounded"] == 10.4
     assert out[1]["rounded"] == 9.7
 
-@pytest.mark.skip(reason="Issue #1202: unskip when fixing")
 
+@pytest.mark.skip(reason="Issue #1202: unskip when fixing")
 def test_round_string_column_strips_whitespace() -> None:
     """round on string column with leading/trailing whitespace (PySpark strips then casts). #272."""
     spark = SparkSession.builder.appName("test_272").getOrCreate()

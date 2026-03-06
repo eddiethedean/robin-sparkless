@@ -740,7 +740,7 @@ fn translate_select_body(
     let having_list: Vec<(Function, String)> = body
         .having
         .as_ref()
-        .map(|e| extract_having_agg_calls(e))
+        .map(extract_having_agg_calls)
         .unwrap_or_default();
     if has_group_by {
         // Support GROUP BY column name or expression, e.g. GROUP BY age or GROUP BY (age > 30) (issue #588).
@@ -1469,7 +1469,7 @@ fn sql_expr_to_string_literal(expr: &SqlExpr) -> Result<String, PolarsError> {
 /// Projection item: either a plain Expr (built-in, Rust UDF, identifier) or Python UDF Column.
 enum ProjItem {
     Expr(Expr, String),
-    PythonUdf(Column, String),
+    PythonUdf(Box<Column>, String),
 }
 
 impl ProjItem {
@@ -1574,7 +1574,7 @@ fn apply_projection(
                         // Override alias with AS alias
                         item = match item {
                             ProjItem::Expr(e, _) => ProjItem::Expr(e, alias_str),
-                            ProjItem::PythonUdf(c, _) => ProjItem::PythonUdf(c, alias_str),
+                            ProjItem::PythonUdf(c, _) => ProjItem::PythonUdf(c.clone(), alias_str),
                         };
                         item
                     }
@@ -1621,7 +1621,7 @@ fn apply_projection(
         // Add Python UDF columns first (with disambiguated names), then select all in order
         for (i, item) in items.iter().enumerate() {
             if let ProjItem::PythonUdf(col, _) = item {
-                df = df.with_column(&final_aliases[i], col)?;
+                df = df.with_column(&final_aliases[i], col.as_ref())?;
             }
         }
         let exprs: Vec<Expr> = items
@@ -1715,7 +1715,7 @@ fn projection_function_to_item(
     if session.udf_registry.has_udf(func_name, case_sensitive)? {
         let col = functions::call_udf(func_name, &args)?;
         if col.udf_call.is_some() {
-            return Ok(ProjItem::PythonUdf(col, alias));
+            return Ok(ProjItem::PythonUdf(Box::new(col), alias));
         }
         return Ok(ProjItem::Expr(col.expr().clone().alias(&alias), alias));
     }

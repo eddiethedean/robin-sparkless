@@ -16,8 +16,8 @@ F = _imports.F
 
 from tests.utils import _row_to_dict, assert_rows_equal
 
-@pytest.mark.skip(reason="Issue #1183: unskip when fixing")
 
+@pytest.mark.skip(reason="Issue #1183: unskip when fixing")
 def test_substr_alias_select_collect(spark) -> None:
     """select(col('name').substr(1, 3).alias('partial')) returns column 'partial' (Sparkless parity)."""
     df = spark.createDataFrame(
@@ -34,8 +34,8 @@ def test_substr_alias_select_collect(spark) -> None:
     assert cols == ["partial"]
     assert_rows_equal([_row_to_dict(r) for r in rows], [{"partial": "hel"}])
 
-@pytest.mark.skip(reason="Issue #1183: unskip when fixing")
 
+@pytest.mark.skip(reason="Issue #1183: unskip when fixing")
 def test_substr_alias_multiple_rows(spark) -> None:
     """substr with alias over multiple rows."""
     df = spark.createDataFrame(

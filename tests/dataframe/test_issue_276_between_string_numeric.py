@@ -26,8 +26,8 @@ def test_between_string_column_numeric_bounds_with_column(spark) -> None:
     assert rows[1]["between"] is True
     assert rows[2]["between"] is True
 
-@pytest.mark.skip(reason="Issue #1206: unskip when fixing")
 
+@pytest.mark.skip(reason="Issue #1206: unskip when fixing")
 def test_between_string_column_numeric_bounds_filter(spark) -> None:
     """df.filter(col(\"col\").between(1, 20)) when col is string also coerces."""
     data = [{"col": "5"}, {"col": "10"}, {"col": "25"}]

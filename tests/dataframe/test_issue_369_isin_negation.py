@@ -12,7 +12,9 @@ import pytest
 class TestIssue369IsinNegation:
     """Test ~col.isin([...]) with string column and int list (issue #369)."""
 
-    @pytest.mark.skip(reason="Issue #1116: unskip when fixing isin negation, between, log, date/datetime, string arithmetic")
+    @pytest.mark.skip(
+        reason="Issue #1116: unskip when fixing isin negation, between, log, date/datetime, string arithmetic"
+    )
     def test_negation_isin_string_column_int_list(self, spark):
         """Exact scenario from issue #369: filter with ~col.isin([int, int]) on string column."""
         from tests.fixtures.spark_imports import get_spark_imports
@@ -29,7 +31,9 @@ class TestIssue369IsinNegation:
         assert len(rows) == 1
         assert rows[0]["Name"] == "Alice" and rows[0]["Values"] == "10"
 
-    @pytest.mark.skip(reason="Issue #1116: unskip when fixing isin negation, between, log, date/datetime, string arithmetic")
+    @pytest.mark.skip(
+        reason="Issue #1116: unskip when fixing isin negation, between, log, date/datetime, string arithmetic"
+    )
     def test_negation_isin_show(self, spark):
         """Exact issue scenario: filter + show() (issue #369)."""
         from tests.fixtures.spark_imports import get_spark_imports
@@ -63,7 +67,9 @@ class TestIssue369IsinNegation:
         assert len(rows) == 1
         assert rows[0]["Name"] == "Bob" and rows[0]["Values"] == "20"
 
-    @pytest.mark.skip(reason="Issue #1116: unskip when fixing isin negation, between, log, date/datetime, string arithmetic")
+    @pytest.mark.skip(
+        reason="Issue #1116: unskip when fixing isin negation, between, log, date/datetime, string arithmetic"
+    )
     def test_negation_isin_string_to_string(self, spark):
         """~col.isin([str, str]) on string column (types match) still works."""
         from tests.fixtures.spark_imports import get_spark_imports

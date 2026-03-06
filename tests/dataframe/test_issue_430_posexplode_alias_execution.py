@@ -15,8 +15,8 @@ from tests.fixtures.spark_backend import BackendType
 import pytest
 from tests.fixtures.spark_imports import get_spark_imports
 
-@pytest.mark.skip(reason="Issue #1243: unskip when fixing")
 
+@pytest.mark.skip(reason="Issue #1243: unskip when fixing")
 def test_posexplode_alias_two_names_returns_exploded_rows(spark, spark_backend):
     """posexplode().alias('Value1', 'Value2') must return 4 rows with correct values (#430)."""
     F_backend = get_spark_imports(spark_backend).F
@@ -44,8 +44,8 @@ def test_posexplode_alias_two_names_returns_exploded_rows(spark, spark_backend):
     assert by_name["Alice"] == [(0, 10), (1, 20)]
     assert by_name["Bob"] == [(0, 30), (1, 40)]
 
-@pytest.mark.skip(reason="Issue #1243: unskip when fixing")
 
+@pytest.mark.skip(reason="Issue #1243: unskip when fixing")
 def test_posexplode_alias_no_none_values(spark, spark_backend):
     """posexplode().alias() must not return None in exploded columns (#430)."""
     F_backend = get_spark_imports(spark_backend).F
@@ -63,8 +63,8 @@ def test_posexplode_alias_no_none_values(spark, spark_backend):
         assert r["val"] is not None, f"val must not be None: {r}"
     assert [(r["pos"], r["val"]) for r in rows] == [(0, 1), (1, 2), (2, 3)]
 
-@pytest.mark.skip(reason="Issue #1243: unskip when fixing")
 
+@pytest.mark.skip(reason="Issue #1243: unskip when fixing")
 def test_posexplode_alias_chained_filter_orderby(spark, spark_backend):
     """posexplode().alias() in chained select/filter/orderBy/limit returns correct rows."""
     F_backend = get_spark_imports(spark_backend).F
@@ -129,8 +129,8 @@ def test_posexplode_alias_single_element(spark, spark_backend):
     assert rows[0]["pos"] == 0 and rows[0]["val"] == 99
     assert rows[0]["pos"] is not None and rows[0]["val"] is not None
 
-@pytest.mark.skip(reason="Issue #1243: unskip when fixing")
 
+@pytest.mark.skip(reason="Issue #1243: unskip when fixing")
 def test_posexplode_alias_mixed_columns(spark, spark_backend):
     """select(a, posexplode(arr).alias(...), b) preserves column order."""
     F_backend = get_spark_imports(spark_backend).F
@@ -144,8 +144,8 @@ def test_posexplode_alias_mixed_columns(spark, spark_backend):
         assert rows[0]["pos"] == 0 and rows[0]["val"] == 1
         assert rows[1]["pos"] == 1 and rows[1]["val"] == 2
 
-@pytest.mark.skip(reason="Issue #1243: unskip when fixing")
 
+@pytest.mark.skip(reason="Issue #1243: unskip when fixing")
 def test_posexplode_outer_alias_returns_exploded_rows(spark, spark_backend):
     """posexplode_outer().alias() returns exploded rows; null array yields one row."""
     F_backend = get_spark_imports(spark_backend).F
@@ -164,8 +164,8 @@ def test_posexplode_outer_alias_returns_exploded_rows(spark, spark_backend):
         assert (0, 10) in by_id[1] and (1, 20) in by_id[1]
         assert 2 in by_id
 
-@pytest.mark.skip(reason="Issue #1243: unskip when fixing")
 
+@pytest.mark.skip(reason="Issue #1243: unskip when fixing")
 def test_posexplode_alias_string_array(spark, spark_backend):
     """posexplode on string array returns correct values."""
     F_backend = get_spark_imports(spark_backend).F
@@ -185,8 +185,8 @@ def test_posexplode_alias_column_object(spark, spark_backend):
     assert len(rows) == 2
     assert [(r["idx"], r["elem"]) for r in rows] == [(0, 100), (1, 200)]
 
-@pytest.mark.skip(reason="Issue #1243: unskip when fixing")
 
+@pytest.mark.skip(reason="Issue #1243: unskip when fixing")
 def test_posexplode_alias_show_no_none(spark, spark_backend):
     """Regression: show() on posexplode result must not display None for exploded cols."""
     F_backend = get_spark_imports(spark_backend).F

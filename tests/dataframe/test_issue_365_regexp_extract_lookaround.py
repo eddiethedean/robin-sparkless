@@ -15,8 +15,8 @@ _imports = get_spark_imports()
 SparkSession = _imports.SparkSession
 F = _imports.F
 
-@pytest.mark.skip(reason="Issue #1225: unskip when fixing")
 
+@pytest.mark.skip(reason="Issue #1225: unskip when fixing")
 def test_regexp_extract_lookbehind_issue_repro() -> None:
     """Lookbehind (?<=hello )\\w+ extracts 'world' from 'hello world' (issue repro)."""
     spark = SparkSession.builder.appName("issue_365").getOrCreate()
@@ -26,8 +26,8 @@ def test_regexp_extract_lookbehind_issue_repro() -> None:
     ).collect()
     assert rows[0]["extracted"] == "world"
 
-@pytest.mark.skip(reason="Issue #1225: unskip when fixing")
 
+@pytest.mark.skip(reason="Issue #1225: unskip when fixing")
 def test_regexp_extract_lookahead() -> None:
     """Lookahead: digits followed by 'y' -> capture group 1 gives '42'."""
     spark = SparkSession.builder.appName("issue_365").getOrCreate()
@@ -38,8 +38,8 @@ def test_regexp_extract_lookahead() -> None:
     ).collect()
     assert rows[0]["extracted"] == "42"
 
-@pytest.mark.skip(reason="Issue #1225: unskip when fixing")
 
+@pytest.mark.skip(reason="Issue #1225: unskip when fixing")
 def test_regexp_extract_lookbehind_digits() -> None:
     """Lookbehind: digits after space (?<=\\s)\\d+."""
     spark = SparkSession.builder.appName("issue_365").getOrCreate()
@@ -49,8 +49,8 @@ def test_regexp_extract_lookbehind_digits() -> None:
     ).collect()
     assert rows[0]["extracted"] == "99"
 
-@pytest.mark.skip(reason="Issue #1225: unskip when fixing")
 
+@pytest.mark.skip(reason="Issue #1225: unskip when fixing")
 def test_regexp_extract_without_lookaround_unchanged() -> None:
     """Patterns without lookaround still use Polars path (no regression)."""
     spark = SparkSession.builder.appName("issue_365").getOrCreate()

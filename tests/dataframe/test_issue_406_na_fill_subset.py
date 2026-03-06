@@ -3,8 +3,8 @@
 from __future__ import annotations
 import pytest
 
-@pytest.mark.skip(reason="Issue #1237: unskip when fixing")
 
+@pytest.mark.skip(reason="Issue #1237: unskip when fixing")
 def test_na_fill_subset_list_of_str(spark) -> None:
     """df.na.fill(0, subset=["b"]) fills nulls only in "b", leaves "a" unchanged."""
     df = spark.createDataFrame(

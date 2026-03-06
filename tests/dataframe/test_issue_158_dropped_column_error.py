@@ -78,7 +78,9 @@ class TestIssue158DroppedColumnError:
         assert "col2" in error_msg
         assert "col1" in error_msg
 
-    @pytest.mark.skip(reason="Issue #1135: unskip when fixing filter with dropped column push-down")
+    @pytest.mark.skip(
+        reason="Issue #1135: unskip when fixing filter with dropped column push-down"
+    )
     def test_filter_dropped_column_behavior_matches_pyspark(self):
         """Test filtering with a dropped column matches PySpark behavior."""
         spark = SparkSession.builder.appName("test").getOrCreate()

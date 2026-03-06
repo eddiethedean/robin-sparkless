@@ -45,8 +45,8 @@ def test_numeric_literal_divided_by_string_robin(spark) -> None:
     assert rows[0]["result"] == 10.0
     assert rows[1]["result"] == 20.0
 
-@pytest.mark.skip(reason="Issue #1251: unskip when fixing")
 
+@pytest.mark.skip(reason="Issue #1251: unskip when fixing")
 def test_string_arithmetic_with_invalid_strings_robin(spark) -> None:
     """Invalid numeric strings become null when used in arithmetic (via cast)."""
     df = spark.createDataFrame(
