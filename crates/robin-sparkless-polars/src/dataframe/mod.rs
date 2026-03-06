@@ -7,7 +7,7 @@ mod transformations;
 
 pub(crate) use aggregations::disambiguate_agg_output_names;
 pub use aggregations::{CubeRollupData, GroupedData, PivotedGroupedData};
-pub use joins::{JoinType, join, try_extract_join_eq_columns};
+pub use joins::{JoinType, join, try_extract_join_eq_columns, try_extract_join_eq_columns_all};
 pub use stats::DataFrameStat;
 pub(crate) use transformations::literal_value_to_serde_value;
 pub use transformations::{
