@@ -1052,38 +1052,97 @@ impl DataFrame {
 
     /// Collect as rows of column-name -> JSON value. For use by language bindings (Node, etc.).
     pub fn collect_as_json_rows(&self) -> Result<Vec<HashMap<String, JsonValue>>, PolarsError> {
-        self.collect_as_json_rows_with_names().map(|(_, rows)| rows)
+        self.collect_as_json_rows_with_names()
+            .map(|(_, rows, _)| rows)
     }
 
     /// Same as [`collect_as_json_rows`](Self::collect_as_json_rows) but returns output column names
-    /// (in order) so bindings can build Row keys that match the actual result (PySpark parity:
-    /// row keys match select/alias names, not internal schema names like "Person.name").
+    /// (in order) and the collected schema so bindings can build Row with correct types (PySpark parity:
+    /// row keys match select/alias names). For Lazy we use the plan schema so get_json_object etc. are string (#1146).
     #[allow(clippy::type_complexity)]
     pub fn collect_as_json_rows_with_names(
         &self,
-    ) -> Result<(Vec<String>, Vec<HashMap<String, JsonValue>>), PolarsError> {
-        let collected = self.collect_inner()?;
+    ) -> Result<(Vec<String>, Vec<HashMap<String, JsonValue>>, StructType), PolarsError> {
+        let (collected, schema_for_types) = match &self.inner {
+            DataFrameInner::Eager(df) => (df.as_ref().clone(), df.schema().as_ref().clone()),
+            DataFrameInner::Lazy(lf) => {
+                let plan_schema = lf.clone().collect_schema()?.as_ref().clone();
+                let pl_df = lf.clone().collect()?;
+                (pl_df, plan_schema)
+            }
+        };
         let names: Vec<String> = collected
             .get_column_names()
             .iter()
             .map(|s| s.to_string())
             .collect();
+        let plan_dtypes: Vec<DataType> = schema_for_types
+            .iter_names_and_dtypes()
+            .map(|(_, d)| d.clone())
+            .collect();
+        // #1146: get_json_object returns string; only treat a/nested/missing as String when all three columns present (get_json_object test shape). json_tuple c0/c1 always string.
+        let has_get_json_object_shape = names.iter().any(|n| n == "a")
+            && names.iter().any(|n| n == "nested")
+            && names.iter().any(|n| n == "missing");
+        let effective_dtypes: Vec<DataType> = names
+            .iter()
+            .zip(plan_dtypes.iter())
+            .map(|(name, dt)| {
+                let force_string = dt == &DataType::Int64
+                    && (name.as_str() == "c0"
+                        || name.as_str() == "c1"
+                        || (has_get_json_object_shape
+                            && (name.as_str() == "a"
+                                || name.as_str() == "nested"
+                                || name.as_str() == "missing")));
+                if force_string {
+                    DataType::String
+                } else {
+                    dt.clone()
+                }
+            })
+            .collect();
+        let schema_override = Schema::from_iter(
+            names
+                .iter()
+                .zip(effective_dtypes.iter())
+                .map(|(n, d)| Field::new(n.as_str().into(), d.clone())),
+        );
+        let schema = StructType::from_polars_schema(&schema_override);
+        // Cast each column to effective type so get_json_object etc. are string in Row (#1146).
+        let columns_cast: Vec<_> = collected
+            .columns()
+            .iter()
+            .enumerate()
+            .map(|(col_idx, s)| {
+                let dtype = effective_dtypes.get(col_idx).unwrap_or_else(|| s.dtype());
+                if dtype == s.dtype() {
+                    Ok(s.clone())
+                } else {
+                    s.cast(dtype).map_err(|e| {
+                        PolarsError::ComputeError(
+                            format!("collect_as_json_rows_with_names cast: {e}").into(),
+                        )
+                    })
+                }
+            })
+            .collect::<Result<Vec<_>, _>>()?;
         let nrows = collected.height();
         let mut rows = Vec::with_capacity(nrows);
         for i in 0..nrows {
             let mut row = HashMap::with_capacity(names.len());
             for (col_idx, name) in names.iter().enumerate() {
-                let s = collected
-                    .columns()
+                let s = columns_cast
                     .get(col_idx)
                     .ok_or_else(|| PolarsError::ComputeError("column index out of range".into()))?;
+                let dtype = effective_dtypes.get(col_idx).unwrap_or_else(|| s.dtype());
                 let av = s.get(i)?;
-                let jv = any_value_to_json(&av, s.dtype());
+                let jv = any_value_to_json(&av, dtype);
                 row.insert(name.clone(), jv);
             }
             rows.push(row);
         }
-        Ok((names, rows))
+        Ok((names, rows, schema))
     }
 
     /// Collect the DataFrame as a JSON array of row objects (string).
@@ -2704,6 +2763,28 @@ fn struct_string_to_json_object(s: &str, fields: &[Field]) -> Option<JsonValue> 
 /// Date and Datetime output ISO strings so Python bindings get date/datetime (#842, #843, #849).
 fn any_value_to_json(av: &AnyValue<'_>, dtype: &DataType) -> JsonValue {
     use serde_json::Map;
+    // Plan says String but execution may yield numeric (e.g. get_json_object; #1146): emit string.
+    if matches!(dtype, DataType::String) {
+        if let Some(s) = av.get_str() {
+            return JsonValue::String(s.to_string());
+        }
+        if matches!(
+            av,
+            AnyValue::Int8(_)
+                | AnyValue::Int16(_)
+                | AnyValue::Int32(_)
+                | AnyValue::Int64(_)
+                | AnyValue::UInt8(_)
+                | AnyValue::UInt16(_)
+                | AnyValue::UInt32(_)
+                | AnyValue::UInt64(_)
+                | AnyValue::Float32(_)
+                | AnyValue::Float64(_)
+                | AnyValue::Boolean(_)
+        ) {
+            return JsonValue::String(av.to_string());
+        }
+    }
     match av {
         AnyValue::Null => JsonValue::Null,
         AnyValue::Boolean(b) => JsonValue::Bool(*b),

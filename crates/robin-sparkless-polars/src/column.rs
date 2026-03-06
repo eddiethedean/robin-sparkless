@@ -3343,11 +3343,18 @@ impl Column {
         Self::from_expr(expr, None)
     }
 
-    /// Extract JSON path from string column (PySpark get_json_object). Uses Polars str().json_path_match.
+    /// Extract JSON path from string column (PySpark get_json_object). UDF returns string always (#1146).
     pub fn get_json_object(&self, path: &str) -> Column {
-        let path_expr = polars::prelude::lit(path.to_string());
-        let out = self.expr().clone().str().json_path_match(path_expr);
-        Self::from_expr(out, None)
+        let path = path.to_string();
+        let expr = self
+            .expr()
+            .clone()
+            .map(
+                move |s| expect_col(crate::udfs::apply_get_json_object(s, &path)),
+                |_schema, field| Ok(Field::new(field.name().clone(), DataType::String)),
+            )
+            .cast(DataType::String);
+        Self::from_expr(expr, None)
     }
 
     /// Parse string column as JSON into struct (PySpark from_json). Uses Polars str().json_decode.
