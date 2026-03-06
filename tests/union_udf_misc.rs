@@ -112,7 +112,10 @@ fn register_and_call_rust_udf_success() {
     let rows = df2.collect_as_json_rows().unwrap();
     assert_eq!(rows.len(), 3);
     // Rust UDF output is typed as String (PySpark default), so value may be number or string
-    let as_i64 = |v: &serde_json::Value| v.as_i64().or_else(|| v.as_str().and_then(|s| s.parse::<i64>().ok()));
+    let as_i64 = |v: &serde_json::Value| {
+        v.as_i64()
+            .or_else(|| v.as_str().and_then(|s| s.parse::<i64>().ok()))
+    };
     assert_eq!(as_i64(&rows[0]["c"]), Some(11));
     assert_eq!(as_i64(&rows[1]["c"]), Some(22));
     assert_eq!(as_i64(&rows[2]["c"]), Some(33));
@@ -145,7 +148,10 @@ fn issue_545_plan_udf_op_rust_udf() {
     let rows = df.collect_as_json_rows().unwrap();
     assert_eq!(rows.len(), 2);
     // Rust UDF output is typed as String (PySpark default), so value may be number or string
-    let as_i64 = |v: &serde_json::Value| v.as_i64().or_else(|| v.as_str().and_then(|s| s.parse::<i64>().ok()));
+    let as_i64 = |v: &serde_json::Value| {
+        v.as_i64()
+            .or_else(|| v.as_str().and_then(|s| s.parse::<i64>().ok()))
+    };
     assert_eq!(
         rows[0].get("x_plus_one").and_then(as_i64),
         Some(2),
