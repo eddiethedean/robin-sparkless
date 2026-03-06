@@ -396,30 +396,14 @@ fn json_value_to_py_with_schema(
         }
         // Schema says String: preserve string in Row. #1066: parse stringified JSON object to dict only
         // when inside a struct (column_name is None). Top-level String columns (e.g. get_json_object
-        // output) must stay as string for PySpark parity (#1146). #1165: coerce to int/float when
-        // column is not in string-only blocklist. a/nested/missing only blocklist when all three columns present.
+        // output) must stay as string for PySpark parity (#1146). #1261: PySpark preserves StringType
+        // in collect(); do not coerce numeric-looking strings to int/float so string_1 remains "20" etc.
         (Some(DataType::String), JsonValue::String(s)) => {
             if column_name.is_none() {
                 if let Ok(parsed) = serde_json::from_str::<JsonValue>(s) {
                     if parsed.is_object() {
                         return json_to_py(&parsed, py);
                     }
-                }
-            }
-            let string_only = column_name.map(|n| {
-                COLLECT_STRING_ONLY_COLUMNS.contains(&n)
-                    || (is_get_json_object_shape(output_column_names)
-                        && (n == "a" || n == "nested" || n == "missing"))
-                    || (n == "value" && is_key_value_shape(output_column_names))
-            });
-            let coerce_ok = string_only.map(|b| !b).unwrap_or(false);
-            if coerce_ok {
-                let t = s.trim();
-                if let Ok(i) = t.parse::<i64>() {
-                    return Ok(i.into_py(py));
-                }
-                if let Ok(f) = t.parse::<f64>() {
-                    return Ok(f.into_py(py));
                 }
             }
             s.clone().into_py(py)

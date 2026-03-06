@@ -566,7 +566,8 @@ pub fn order_by(
 
 /// Order by sort expressions (asc/desc with nulls_first/last). Preserves case_sensitive on result.
 /// Column names in sort expressions are resolved per df's case sensitivity (PySpark parity).
-/// Note: String sort columns are not coerced to numeric (see order_by) to avoid breaking string sort.
+/// #1261: Coerce string–numeric in sort expressions (e.g. orderBy(col("s") / 10)) so string columns
+/// used in arithmetic are cast to numeric for sorting.
 pub fn order_by_exprs(
     df: &DataFrame,
     sort_orders: Vec<SortOrder>,
@@ -581,7 +582,10 @@ pub fn order_by_exprs(
     }
     let exprs: Vec<Expr> = sort_orders
         .iter()
-        .map(|s| df.resolve_expr_column_names(s.expr().clone()))
+        .map(|s| {
+            let e = df.resolve_expr_column_names(s.expr().clone())?;
+            df.coerce_string_numeric_comparisons(e)
+        })
         .collect::<Result<Vec<_>, _>>()?;
     let descending: Vec<bool> = sort_orders.iter().map(|s| s.descending).collect();
     let nulls_last: Vec<bool> = sort_orders.iter().map(|s| s.nulls_last).collect();
