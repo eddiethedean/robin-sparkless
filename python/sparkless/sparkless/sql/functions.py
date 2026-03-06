@@ -1576,11 +1576,6 @@ class _LastValueExpr:
         partition_by, order_by, _ = _window_spec_to_partition_order(
             window, require_order=False
         )
-        # With orderBy, PySpark default frame is RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW,
-        # so last_value = current row's value. Use column value over ordered window (issue #1052).
-        if order_by:
-            name = _col_name(self._col_or_name)
-            return _native.column_value_over_window(name, partition_by, order_by)
         from sparkless import column as col
 
         c = (
@@ -1588,6 +1583,13 @@ class _LastValueExpr:
             if isinstance(self._col_or_name, str)
             else self._col_or_name
         )
+        # Full partition frame (unbounded to unbounded): last = value at last row in order (#1145).
+        if order_by and _is_full_partition_frame(window):
+            return c.last_value().over(window)
+        # With orderBy and default frame, last_value = current row (issue #1052).
+        if order_by:
+            name = _col_name(self._col_or_name)
+            return _native.column_value_over_window(name, partition_by, order_by)
         return c.last_value().over(window)
 
 
@@ -1614,6 +1616,19 @@ def _col_name(arg):
     if hasattr(arg, "column_name"):
         return arg.column_name
     raise TypeError(f"Unsupported sort key: {type(arg)!r}")
+
+
+def _is_full_partition_frame(window):
+    """True if window frame is UNBOUNDED PRECEDING to UNBOUNDED FOLLOWING (whole partition).
+    In that case first_value/last_value mean first/last by window order (#1145).
+    """
+    frame = getattr(window, "_frame", None)
+    if frame is None:
+        return False
+    from sparkless.sql.window import Window
+
+    _kind, start, end = frame
+    return start == Window.unboundedPreceding and end == Window.unboundedFollowing
 
 
 def _window_spec_to_partition_order(window, require_order=True):

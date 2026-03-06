@@ -67,6 +67,15 @@ pub enum DeferredRandom {
     Randn(Option<u64>),
 }
 
+/// Marker for order-sensitive first_value/last_value (PySpark semantics: first/last by window order).
+#[derive(Debug, Clone)]
+pub struct FirstLastValue {
+    /// The expression whose value we take (e.g. col("salary")).
+    pub value_expr: Expr,
+    /// false = first in order, true = last in order.
+    pub is_last: bool,
+}
+
 /// Column - represents a column in a DataFrame, used for building expressions
 /// Thin wrapper around Polars `Expr`. May carry a DeferredRandom for rand/randn so with_column can produce one value per row.
 /// May carry UdfCall for Python UDFs (eager execution at with_column).
@@ -80,6 +89,8 @@ pub struct Column {
     pub udf_call: Option<(String, Vec<Column>)>,
     /// When Some, this aggregate (e.g. sum) can use cum_sum for running window when orderBy differs from partitionBy.
     pub source_for_running: Option<String>,
+    /// When Some, over_window uses order-sensitive first/last (PySpark first_value/last_value semantics; #1145).
+    pub first_last_value: Option<FirstLastValue>,
 }
 
 impl Column {
@@ -91,6 +102,7 @@ impl Column {
             deferred: None,
             udf_call: None,
             source_for_running: None,
+            first_last_value: None,
         }
     }
 
@@ -103,6 +115,7 @@ impl Column {
             deferred: None,
             udf_call: None,
             source_for_running: None,
+            first_last_value: None,
         }
     }
 
@@ -114,6 +127,7 @@ impl Column {
             deferred: None,
             udf_call: Some((name, args)),
             source_for_running: None,
+            first_last_value: None,
         }
     }
 
@@ -129,6 +143,7 @@ impl Column {
             deferred: Some(DeferredRandom::Rand(seed)),
             udf_call: None,
             source_for_running: None,
+            first_last_value: None,
         }
     }
 
@@ -144,6 +159,7 @@ impl Column {
             deferred: Some(DeferredRandom::Randn(seed)),
             udf_call: None,
             source_for_running: None,
+            first_last_value: None,
         }
     }
 
@@ -203,6 +219,7 @@ impl Column {
             deferred: self.deferred,
             udf_call: self.udf_call.clone(),
             source_for_running: self.source_for_running.clone(),
+            first_last_value: self.first_last_value.clone(),
         }
     }
 
@@ -244,6 +261,7 @@ impl Column {
             deferred: None,
             udf_call: None,
             source_for_running: None,
+            first_last_value: None,
         }
     }
 
@@ -255,6 +273,7 @@ impl Column {
             deferred: None,
             udf_call: None,
             source_for_running: None,
+            first_last_value: None,
         }
     }
 
@@ -2355,6 +2374,7 @@ impl Column {
     /// Apply window with optional order-by for running aggregates (e.g. sum, count).
     /// `order_by_encoded`: e.g. ["value"] for asc, ["-value"] for desc.
     /// When `use_running_aggregate` is true and we have `source_for_running`, use cum_sum for running semantics.
+    /// When `first_last_value` is Some and order is present, use order-sensitive first/last (PySpark #1145).
     pub fn over_window(
         &self,
         partition_by: &[&str],
@@ -2366,6 +2386,38 @@ impl Column {
         } else {
             partition_by.iter().map(|s| col(*s)).collect()
         };
+
+        // Order-sensitive first_value/last_value (PySpark semantics: first/last by window order; #1145).
+        if let Some(ref fl) = self.first_last_value {
+            if !order_by_encoded.is_empty() {
+                let mut order_exprs: Vec<Expr> = Vec::with_capacity(order_by_encoded.len());
+                let mut descending_multi: Vec<bool> = Vec::with_capacity(order_by_encoded.len());
+                for s in order_by_encoded.iter() {
+                    let (name, descending) = if let Some(stripped) = s.strip_prefix('-') {
+                        (stripped, true)
+                    } else {
+                        (s.as_str(), false)
+                    };
+                    order_exprs.push(col(name));
+                    descending_multi.push(descending);
+                }
+                let descending = fl.is_last; // last = rank desc so "last" row gets rank 1
+                let opts = RankOptions {
+                    method: RankMethod::Ordinal,
+                    descending,
+                };
+                let order_col = order_exprs[0].clone();
+                let rank_expr = order_col.rank(opts, None).over(partition_exprs.clone());
+                let cond_col = Self::from_expr(rank_expr.eq(lit(1i64)), None);
+                let value_col = Self::from_expr(fl.value_expr.clone(), None);
+                let null_col = Self::from_expr(lit(polars::prelude::NULL), None);
+                let when_col =
+                    crate::functions::when(&cond_col).then(&value_col).otherwise(&null_col);
+                let expr = when_col.expr().clone().max().over(partition_exprs);
+                return Ok(Self::from_expr(expr, None));
+            }
+        }
+
         let base_expr = if use_running_aggregate {
             if let Some(ref src) = self.source_for_running {
                 // Cast to Float64 so string columns work (PySpark parity, issue #393).
@@ -2528,13 +2580,37 @@ impl Column {
     }
 
     /// First value in partition (PySpark first_value). Use with `.over(partition_by)`.
+    /// When the window has orderBy, over_window uses order-sensitive semantics (#1145).
     pub fn first_value(&self) -> Column {
-        Self::from_expr(self.expr().clone().first(), None)
+        let value_expr = self.expr().clone();
+        Column {
+            name: "first_value".to_string(),
+            expr: value_expr.clone().first(),
+            deferred: None,
+            udf_call: None,
+            source_for_running: None,
+            first_last_value: Some(FirstLastValue {
+                value_expr,
+                is_last: false,
+            }),
+        }
     }
 
     /// Last value in partition (PySpark last_value). Use with `.over(partition_by)`.
+    /// When the window has orderBy, over_window uses order-sensitive semantics (#1145).
     pub fn last_value(&self) -> Column {
-        Self::from_expr(self.expr().clone().last(), None)
+        let value_expr = self.expr().clone();
+        Column {
+            name: "last_value".to_string(),
+            expr: value_expr.clone().last(),
+            deferred: None,
+            udf_call: None,
+            source_for_running: None,
+            first_last_value: Some(FirstLastValue {
+                value_expr,
+                is_last: true,
+            }),
+        }
     }
 
     /// Percent rank in partition: (rank - 1) / (count - 1). Window is applied; do not call .over() again.
