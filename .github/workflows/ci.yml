@@ -216,9 +216,9 @@ jobs:
           .venv/bin/pip install --upgrade pip maturin
           cd python && ../.venv/bin/maturin develop
           ../.venv/bin/python -c "from sparkless.sql import SparkSession; from sparkless.sql.functions import col, lit_i64; s = SparkSession.builder.app_name('ci').get_or_create(); df = s.create_dataframe([(1, 2, 'a')], ['x', 'y', 'z']); assert df.count() == 1; print('sparkless OK')"
-      - name: Install pytest and run vendored upstream tests (fast subset)
+      - name: Install pytest and run tests (fast subset)
         run: |
           .venv/bin/pip install pytest pytest-xdist hypothesis pytest-timeout
-          .venv/bin/python -m pytest tests/upstream_sparkless -m "not delta and not integration" -v --tb=short
+          .venv/bin/python -m pytest tests -m "not delta and not integration" -n 4 -v --tb=short
         timeout-minutes: 15
-        continue-on-error: true  # Many tests import upstream-internal modules; burn down over time
+        # Job fails if pytest exits non-zero (no continue-on-error)
