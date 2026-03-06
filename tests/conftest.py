@@ -131,15 +131,21 @@ class _SharedSessionWrapper:
 
 
 def _use_shared_session() -> bool:
-    """Use a single session per worker/run for Robin backend. PySpark uses per-test sessions so each test gets a valid session (avoids None/sc issues with xdist)."""
-    if os.environ.get("SPARKLESS_SHARED_SESSION", "1").strip().lower() in (
-        "0",
-        "false",
-        "no",
+    """Use a single session per worker/run for Robin backend.
+
+    Default is per-test sessions so sequential and parallel (-n N) runs have the same
+    pass/fail set and no cross-test catalog pollution. Set SPARKLESS_SHARED_SESSION=1
+    to use one session per run (faster but requires unique table names via table_prefix).
+    """
+    if os.environ.get("SPARKLESS_SHARED_SESSION", "0").strip().lower() in (
+        "1",
+        "true",
+        "yes",
     ):
-        return False
-    # Only use shared session for Robin; PySpark per-test sessions are more reliable with xdist
-    return not _is_pyspark_mode()
+        if os.environ.get("PYTEST_XDIST_WORKER"):
+            return False
+        return not _is_pyspark_mode()
+    return False
 
 
 @pytest.fixture(scope="session")
