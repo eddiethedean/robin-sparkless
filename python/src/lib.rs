@@ -5614,10 +5614,11 @@ impl PyColumn {
         }
     }
 
-    fn length(&self) -> PyColumn {
-        PyColumn {
-            inner: self.inner.length(),
-        }
+    /// PySpark parity #1249: Column has .length attribute but it is not callable; use F.length(col) instead.
+    /// Returning self so that col.length() raises TypeError (column not callable).
+    #[getter]
+    fn length(slf: PyRef<Self>) -> PyRef<Self> {
+        slf
     }
 
     /// Split string by delimiter. PySpark split. limit=-1 means no limit.
