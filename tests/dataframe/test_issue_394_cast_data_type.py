@@ -31,6 +31,8 @@ def test_cast_data_type_object() -> None:
     out = df.select(F.col("x").cast(IntegerType()).alias("x"))
     row = out.collect()[0]
     assert row["x"] == 42
+
+
 @pytest.mark.skip(reason="Issue #1233: unskip when fixing")
 def test_cast_string_type_and_try_cast() -> None:
     """Document current PySpark behavior for try_cast / astype (not yet supported)."""

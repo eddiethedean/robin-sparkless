@@ -8,12 +8,13 @@ in filter use coerce_for_pyspark_comparison when types differ.
 """
 
 from __future__ import annotations
-import pytest
 
 from tests.fixtures.spark_imports import get_spark_imports
 
 _imports = get_spark_imports()
 F = _imports.F
+
+
 def test_col_col_string_numeric_issue_repro(spark) -> None:
     """col('id') == col('label') where id is int, label is string (issue repro)."""
     df = spark.createDataFrame(
@@ -24,6 +25,8 @@ def test_col_col_string_numeric_issue_repro(spark) -> None:
     assert len(rows) == 1
     assert rows[0]["id"] == 1
     assert rows[0]["label"] == "1"
+
+
 def test_col_col_string_numeric_no_match(spark) -> None:
     """col('n') == col('s') when s is non-numeric string: no match."""
     df = spark.createDataFrame(

@@ -8,7 +8,6 @@ https://github.com/eddiethedean/sparkless/issues/435
 """
 
 from tests.fixtures.spark_imports import get_spark_imports
-import pytest
 
 
 def test_alias_cast_select_exact_issue_435(spark, spark_backend):
@@ -56,6 +55,8 @@ def test_cast_without_alias_still_works(spark, spark_backend):
     rows = result.collect()
     assert len(rows) == 1
     assert rows[0]["s"] == 123
+
+
 def test_alias_cast_string_type(spark, spark_backend):
     """alias().cast(StringType()) in select."""
     imports = get_spark_imports(spark_backend)

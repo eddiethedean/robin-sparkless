@@ -580,6 +580,7 @@ class TestIssue339ColumnSubscript:
             assert extract_values == {1, 3}
         finally:
             spark.stop()
+
     @pytest.mark.skip(reason="Issue #1219: unskip when fixing")
     def test_column_subscript_with_cast(self):
         """Test Column subscript notation with cast operations."""
@@ -722,6 +723,7 @@ class TestIssue339ColumnSubscript:
             assert charlie_row["Category"] == "High"
         finally:
             spark.stop()
+
     @pytest.mark.skip(reason="Issue #1219: unskip when fixing")
     def test_column_subscript_with_string_operations(self):
         """Test Column subscript notation with string operations."""

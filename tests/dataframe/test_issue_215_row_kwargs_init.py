@@ -41,6 +41,8 @@ def test_row_kwargs_initialization(spark):
     assert row_dict["Column2"] == 2
     assert row_dict["Column3"] == 3.0
     assert row_dict["Column4"] == date(2026, 1, 1)
+
+
 def test_row_kwargs_with_createDataFrame(spark):
     """Test that Row with kwargs-style initialization works with createDataFrame."""
     # Create DataFrame using Row with kwargs-style initialization
@@ -72,6 +74,8 @@ def test_row_kwargs_with_createDataFrame(spark):
     assert type_dict["Column2"] in ("long", "bigint")
     assert type_dict["Column3"] == "double"
     assert type_dict["Column4"] == "date"
+
+
 @pytest.mark.skip(reason="Issue #1136: unskip when fixing")
 def test_row_dict_initialization_still_works(spark):
     """Row(dict) behavior in PySpark (non-indexable sentinel Row)."""
@@ -89,6 +93,8 @@ def test_row_dict_initialization_still_works(spark):
         _ = row.name
     with _pytest.raises(AttributeError):
         _ = row.age
+
+
 @pytest.mark.skip(reason="Issue #1136: unskip when fixing")
 def test_row_empty_kwargs(spark):
     """Test that Row with empty kwargs still works."""

@@ -1097,8 +1097,51 @@ pub fn apply_map_contains_key(columns: &mut [Column]) -> PolarsResult<Option<Col
     Ok(Some(Column::new(name, out.into_series())))
 }
 
+/// Parse string as JSON object; supports one level of string encoding (e.g. "\"{\"k\":1}\"").
+fn parse_json_object_str(s: &str) -> Option<serde_json::Map<String, serde_json::Value>> {
+    let s = s.trim();
+    let v: serde_json::Value = serde_json::from_str(s).ok()?;
+    if let Some(obj) = v.as_object() {
+        return Some(obj.clone());
+    }
+    if let Some(inner) = v.as_str() {
+        return parse_json_object_str(inner);
+    }
+    None
+}
+
+/// Convert JSON value to Option<String> for get() result (null -> None, string -> Some, else to_string).
+fn json_value_to_option_string(v: &serde_json::Value) -> Option<String> {
+    match v {
+        serde_json::Value::Null => None,
+        serde_json::Value::String(s) => Some(s.clone()),
+        other => Some(other.to_string()),
+    }
+}
+
+/// Infer Polars dtype from first non-null JSON value in a slice (for get() on string map column).
+fn infer_dtype_from_json_values(values: &[Option<serde_json::Value>]) -> DataType {
+    for j in values.iter().flatten() {
+        return match j {
+            serde_json::Value::Null => continue,
+            serde_json::Value::Number(n) => {
+                if n.is_i64() {
+                    DataType::Int64
+                } else {
+                    DataType::Float64
+                }
+            }
+            serde_json::Value::Bool(_) => DataType::Boolean,
+            serde_json::Value::String(_) => DataType::String,
+            serde_json::Value::Array(_) | serde_json::Value::Object(_) => DataType::String,
+        };
+    }
+    DataType::String
+}
+
 /// Get value for key from map, or null (PySpark get).
 /// Handles both List(Struct{key,value}) (create_map) and Struct (createDataFrame dict column).
+/// Also handles String column (JSON object per row) when createDataFrame infers dict as string (#1245).
 pub fn apply_get(columns: &mut [Column]) -> PolarsResult<Option<Column>> {
     if columns.len() < 2 {
         return Err(PolarsError::ComputeError(
@@ -1173,6 +1216,48 @@ pub fn apply_get(columns: &mut [Column]) -> PolarsResult<Option<Column>> {
         map_series = map_series
             .take(&idx_ca)
             .map_err(|e| compute_err("get broadcast map", e))?;
+    }
+    // createDataFrame with dict column infers type "string" and stores JSON object string per row (#1245).
+    if map_series.dtype() == &DataType::String {
+        let map_ca = map_series
+            .str()
+            .map_err(|e| compute_err("get map str", e))?;
+        let out_len = map_ca.len();
+        let values: Vec<Option<serde_json::Value>> = (0..out_len)
+            .map(|i| {
+                let key_idx = if key_len == 1 { 0 } else { i };
+                let key = key_utf8.get(key_idx).unwrap_or("");
+                let map_s = map_ca.get(i).unwrap_or("");
+                let obj = parse_json_object_str(map_s);
+                obj.and_then(|m| m.get(key).or(m.get(key.trim())).cloned())
+            })
+            .collect();
+        let value_dtype = infer_dtype_from_json_values(&values);
+        let out_series: Series = match &value_dtype {
+            DataType::Int64 => Int64Chunked::from_iter_options(
+                name.as_str().into(),
+                values.iter().map(|v| v.as_ref().and_then(|j| j.as_i64())),
+            )
+            .into_series(),
+            DataType::Float64 => Float64Chunked::from_iter_options(
+                name.as_str().into(),
+                values.iter().map(|v| v.as_ref().and_then(|j| j.as_f64())),
+            )
+            .into_series(),
+            DataType::Boolean => BooleanChunked::from_iter_options(
+                name.as_str().into(),
+                values.iter().map(|v| v.as_ref().and_then(|j| j.as_bool())),
+            )
+            .into_series(),
+            _ => StringChunked::from_iter_options(
+                name.as_str().into(),
+                values
+                    .iter()
+                    .map(|v| v.as_ref().and_then(json_value_to_option_string)),
+            )
+            .into_series(),
+        };
+        return Ok(Some(Column::new(name, out_series)));
     }
     let map_ca = map_series.list().map_err(|e| compute_err("get", e))?;
     let map_len = map_ca.len();

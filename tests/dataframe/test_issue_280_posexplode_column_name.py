@@ -6,7 +6,6 @@ Robin previously required Column only; now accepts string column name.
 """
 
 from __future__ import annotations
-import pytest
 
 from tests.fixtures.spark_imports import get_spark_imports
 
@@ -14,6 +13,8 @@ from tests.fixtures.spark_imports import get_spark_imports
 _imports = get_spark_imports()
 SparkSession = _imports.SparkSession
 F = _imports.F
+
+
 def test_posexplode_accepts_column_name_string() -> None:
     """posexplode("Values") with string column name works (PySpark parity)."""
     spark = SparkSession.builder.appName("test_280").getOrCreate()
@@ -28,6 +29,8 @@ def test_posexplode_accepts_column_name_string() -> None:
     assert all("pos" in r and "val" in r for r in out)
     vals = [r["val"] for r in out]
     assert vals == [10, 20, 30, 40]
+
+
 def test_posexplode_column_still_works() -> None:
     """posexplode(F.col("Values")) still works."""
     spark = SparkSession.builder.appName("test_280").getOrCreate()

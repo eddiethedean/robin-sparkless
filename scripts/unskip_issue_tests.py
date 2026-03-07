@@ -1,41 +1,29 @@
 #!/usr/bin/env python3
 """Unskip tests marked with Issue #N, record mapping, run tests, report and optionally re-skip failures."""
 
+from __future__ import annotations
+
 import json
 import re
-import subprocess
 import sys
 from pathlib import Path
+from typing import Dict, List, Optional, Tuple
 
 TESTS_DIR = Path(__file__).resolve().parent.parent / "tests"
 
 
-def extract_issue_number(reason: str) -> int | None:
+def extract_issue_number(reason: str) -> Optional[int]:
     m = re.search(r"Issue #(\d+)", reason)
     return int(m.group(1)) if m else None
 
 
-def unskip_file(path: Path) -> list[tuple[str, int]]:
+def unskip_file(path: Path) -> List[Tuple[str, int]]:
     """Remove @pytest.mark.skip(reason=\"Issue #N...\") from file. Return list of (test_name, issue_num)."""
     text = path.read_text()
-    mapping: list[tuple[str, int]] = []
-
-    # Multiline: @pytest.mark.skip(\n    reason="Issue #N..."
-    def repl_multiline(m: re.Match) -> str:
-        reason = m.group(1)
-        issue = extract_issue_number(reason)
-        # Next line should be "def test_xxx" - we don't have test name here, will infer from context
-        return ""
-
-    # Single line
-    def repl_single(m: re.Match) -> str:
-        reason = m.group(1)
-        issue = extract_issue_number(reason)
-        return ""
+    mapping: List[Tuple[str, int]] = []
 
     # Find all skip decorators and the test name that follows
     # Pattern: optional other decorators, then @pytest.mark.skip(...), then def test_xxx
-    remaining = text
     out_parts = []
     last_end = 0
 
@@ -83,9 +71,9 @@ def unskip_file(path: Path) -> list[tuple[str, int]]:
     return mapping
 
 
-def find_and_unskip_all() -> dict[int, list[str]]:
+def find_and_unskip_all() -> Dict[int, List[str]]:
     """Unskip all Issue #N marked tests; return issue_num -> list of test full ids."""
-    issue_to_tests: dict[int, list[str]] = {}
+    issue_to_tests: Dict[int, List[str]] = {}
     for path in TESTS_DIR.rglob("*.py"):
         try:
             mapping = unskip_file(path)
@@ -99,17 +87,28 @@ def find_and_unskip_all() -> dict[int, list[str]]:
 
 def main():
     import argparse
+
     ap = argparse.ArgumentParser()
-    ap.add_argument("--dry-run", action="store_true", help="Only report, do not modify files")
-    ap.add_argument("--run-tests", action="store_true", help="Run pytest and report pass/fail")
-    ap.add_argument("--close-issues", action="store_true", help="Close GitHub issues where all tests passed")
+    ap.add_argument(
+        "--dry-run", action="store_true", help="Only report, do not modify files"
+    )
+    ap.add_argument(
+        "--run-tests", action="store_true", help="Run pytest and report pass/fail"
+    )
+    ap.add_argument(
+        "--close-issues",
+        action="store_true",
+        help="Close GitHub issues where all tests passed",
+    )
     args = ap.parse_args()
 
     if args.dry_run:
         # Just list what would be unskipped
         for path in TESTS_DIR.rglob("*.py"):
             text = path.read_text()
-            for m in re.finditer(r'@pytest\.mark\.skip\([^)]*reason="(Issue #\d+[^"]*)"', text, re.DOTALL):
+            for m in re.finditer(
+                r'@pytest\.mark\.skip\([^)]*reason="(Issue #\d+[^"]*)"', text, re.DOTALL
+            ):
                 print(path, m.group(1))
         return
 

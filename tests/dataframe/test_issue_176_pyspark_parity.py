@@ -43,6 +43,8 @@ EXPECTED_SELECT_EXPR_AND_COLUMN: list[dict[str, Any]] = [
     {"a": 1, "sum_ab": 3},
     {"a": 3, "sum_ab": 7},
 ]
+
+
 def test_regexp_extract_all_select_expression_pyspark_parity() -> None:
     """select(regexp_extract_all(...).alias('m')) matches PySpark."""
     # regexp_extract_all is a sparkless extension; skip when running against
@@ -62,6 +64,8 @@ def test_regexp_extract_all_select_expression_pyspark_parity() -> None:
     assert_rows_equal(
         actual, EXPECTED_REGEXP_EXTRACT_ALL_SELECT_EXPR, order_matters=True
     )
+
+
 def test_regexp_extract_all_select_varargs_pyspark_parity() -> None:
     """select(expr) with single expression as vararg matches PySpark."""
     if get_backend_type() == BackendType.PYSPARK:
@@ -79,6 +83,8 @@ def test_regexp_extract_all_select_varargs_pyspark_parity() -> None:
     assert_rows_equal(
         actual, EXPECTED_REGEXP_EXTRACT_ALL_SELECT_EXPR, order_matters=True
     )
+
+
 def test_regexp_extract_all_select_mixed_columns_and_expression_pyspark_parity() -> (
     None
 ):
@@ -96,6 +102,8 @@ def test_regexp_extract_all_select_mixed_columns_and_expression_pyspark_parity()
     result = df.select("s", F.regexp_extract_all(F.col("s"), r"\d+", 0).alias("m"))
     actual = result.collect()
     assert_rows_equal(actual, EXPECTED_REGEXP_EXTRACT_ALL_MIXED, order_matters=True)
+
+
 def test_regexp_extract_all_empty_string_and_null_pyspark_parity() -> None:
     """regexp_extract_all with empty string returns [], null returns None."""
     if get_backend_type() == BackendType.PYSPARK:

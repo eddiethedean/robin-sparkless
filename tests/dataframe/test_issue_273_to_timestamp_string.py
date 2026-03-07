@@ -8,12 +8,13 @@ Robin previously failed without format or returned None with format.
 
 from __future__ import annotations
 
-import pytest
 
 from tests.fixtures.spark_imports import get_spark_imports
 
 _imports = get_spark_imports()
 F = _imports.F
+
+
 def test_to_timestamp_string_no_format(spark) -> None:
     """to_timestamp(col('ts_str')) without format parses 'YYYY-MM-DD HH:MM:SS'."""
     df = spark.createDataFrame(
@@ -26,6 +27,8 @@ def test_to_timestamp_string_no_format(spark) -> None:
     assert rows[0]["ts"] is not None
     ts = rows[0]["ts"]
     assert "2024-01-01" in str(ts) and "10:00:00" in str(ts)
+
+
 def test_to_timestamp_string_with_format(spark) -> None:
     """to_timestamp(col('ts_str'), \"yyyy-MM-dd'T'HH:mm:ss\") parses ISO-like strings."""
     df = spark.createDataFrame(

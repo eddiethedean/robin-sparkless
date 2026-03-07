@@ -11,6 +11,8 @@ from tests.fixtures.spark_imports import get_spark_imports
 _imports = get_spark_imports()
 SparkSession = _imports.SparkSession
 F = _imports.F
+
+
 class TestStringConcatenationCacheEdgeCases:
     """Test edge cases for string concatenation cache handling."""
 
@@ -19,7 +21,9 @@ class TestStringConcatenationCacheEdgeCases:
         """Use conftest spark fixture."""
         return request.getfixturevalue("spark")
 
-    @pytest.mark.skip(reason="Issue #1138: unskip when fixing string + string (PySpark yields null for non-numeric)")
+    @pytest.mark.skip(
+        reason="Issue #1138: unskip when fixing string + string (PySpark yields null for non-numeric)"
+    )
     def test_string_concat_with_empty_strings(self, spark):
         """Test string concatenation with empty strings in cached DataFrame."""
         df = spark.createDataFrame([("", ""), ("a", ""), ("", "b")], ["col1", "col2"])
@@ -61,7 +65,9 @@ class TestStringConcatenationCacheEdgeCases:
             and results[2]["concat"] is None
         ), "String concatenation with None values when cached"
 
-    @pytest.mark.skip(reason="Issue #1138: unskip when fixing string + string (PySpark yields null for non-numeric)")
+    @pytest.mark.skip(
+        reason="Issue #1138: unskip when fixing string + string (PySpark yields null for non-numeric)"
+    )
     def test_nested_string_concat(self, spark):
         """Test nested string concatenation operations in cached DataFrame."""
         df = spark.createDataFrame([("a", "b", "c")], ["col1", "col2", "col3"])
@@ -101,7 +107,9 @@ class TestStringConcatenationCacheEdgeCases:
             "Numeric addition should not be affected by cache"
         )
 
-    @pytest.mark.skip(reason="Issue #1138: unskip when fixing string + string (PySpark yields null for non-numeric)")
+    @pytest.mark.skip(
+        reason="Issue #1138: unskip when fixing string + string (PySpark yields null for non-numeric)"
+    )
     def test_string_concat_with_literal(self, spark):
         """Test string concatenation with literal strings in cached DataFrame."""
         df = spark.createDataFrame([("John",)], ["name"])
@@ -121,7 +129,9 @@ class TestStringConcatenationCacheEdgeCases:
             "String + literal yields null for non-numeric strings in PySpark"
         )
 
-    @pytest.mark.skip(reason="Issue #1138: unskip when fixing string + string (PySpark yields null for non-numeric)")
+    @pytest.mark.skip(
+        reason="Issue #1138: unskip when fixing string + string (PySpark yields null for non-numeric)"
+    )
     def test_multiple_string_concat_columns(self, spark):
         """Test multiple string concatenation columns in cached DataFrame."""
         df = spark.createDataFrame(
@@ -143,7 +153,9 @@ class TestStringConcatenationCacheEdgeCases:
         assert result["concat1"] is None, "First string concat column yields null"
         assert result["concat2"] is None, "Second string concat column yields null"
 
-    @pytest.mark.skip(reason="Issue #1138: unskip when fixing string + string (PySpark yields null for non-numeric)")
+    @pytest.mark.skip(
+        reason="Issue #1138: unskip when fixing string + string (PySpark yields null for non-numeric)"
+    )
     def test_string_concat_with_select(self, spark):
         """Test string concatenation followed by select in cached DataFrame."""
         df = spark.createDataFrame([("a", "b")], ["col1", "col2"])
@@ -163,7 +175,9 @@ class TestStringConcatenationCacheEdgeCases:
         # String concat in select yields null when using + on strings.
         assert result["concat"] is None, "String addition in select yields null"
 
-    @pytest.mark.skip(reason="Issue #1138: unskip when fixing string + string (PySpark yields null for non-numeric)")
+    @pytest.mark.skip(
+        reason="Issue #1138: unskip when fixing string + string (PySpark yields null for non-numeric)"
+    )
     def test_string_concat_chained_operations(self, spark):
         """Test string concatenation with chained operations in cached DataFrame."""
         df = spark.createDataFrame([("a", "b", "c")], ["col1", "col2", "col3"])
@@ -187,7 +201,9 @@ class TestStringConcatenationCacheEdgeCases:
             "Chained operations yield no rows under PySpark + semantics"
         )
 
-    @pytest.mark.skip(reason="Issue #1138: unskip when fixing string + string (PySpark yields null for non-numeric)")
+    @pytest.mark.skip(
+        reason="Issue #1138: unskip when fixing string + string (PySpark yields null for non-numeric)"
+    )
     def test_string_concat_without_caching(self, spark):
         """Test that string concatenation works normally without caching."""
         df = spark.createDataFrame([("a", "b")], ["col1", "col2"])

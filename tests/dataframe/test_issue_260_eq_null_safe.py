@@ -344,6 +344,7 @@ class TestIssue260EqNullSafe:
             assert (None, None) in keys
         finally:
             spark.stop()
+
     def test_eqnullsafe_with_type_coercion(self) -> None:
         """Test eqNullSafe with type coercion (string vs numeric)."""
         spark = SparkSession.builder.appName("EqNullSafeCoercion").getOrCreate()

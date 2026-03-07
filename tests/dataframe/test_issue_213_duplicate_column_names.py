@@ -5,11 +5,12 @@ with the same name. We disambiguate with _1, _2, ... (PySpark/Sparkless parity).
 """
 
 from tests.utils import _row_to_dict
-import pytest
 from tests.fixtures.spark_imports import get_spark_imports
 
 _imports = get_spark_imports()
 F = _imports.F
+
+
 def test_select_same_column_cast_twice(spark) -> None:
     """Select same column cast to different types (duplicate output names) should not error."""
     df = spark.createDataFrame(

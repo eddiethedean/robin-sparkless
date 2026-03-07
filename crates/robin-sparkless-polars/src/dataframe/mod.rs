@@ -1107,10 +1107,41 @@ impl DataFrame {
                 }
             })
             .collect();
+        // Compute per-column serialization dtype (plan dtype, or actual when plan String but series is numeric #1245).
+        let serialization_dtypes: Vec<DataType> = names
+            .iter()
+            .enumerate()
+            .map(|(col_idx, name)| {
+                let idx = match collected.get_column_index(name.as_str()) {
+                    Some(i) => i,
+                    None => {
+                        return effective_dtypes
+                            .get(col_idx)
+                            .cloned()
+                            .unwrap_or(DataType::String);
+                    }
+                };
+                let s = &collected.columns()[idx];
+                let plan_dtype = effective_dtypes
+                    .get(col_idx)
+                    .unwrap_or_else(|| s.dtype())
+                    .clone();
+                if plan_dtype == DataType::String
+                    && matches!(
+                        s.dtype(),
+                        DataType::Int64 | DataType::Float64 | DataType::Boolean
+                    )
+                {
+                    s.dtype().clone()
+                } else {
+                    plan_dtype
+                }
+            })
+            .collect();
         let schema_override = Schema::from_iter(
             names
                 .iter()
-                .zip(effective_dtypes.iter())
+                .zip(serialization_dtypes.iter())
                 .map(|(n, d)| Field::new(n.as_str().into(), d.clone())),
         );
         let schema = StructType::from_polars_schema(&schema_override);
@@ -1127,7 +1158,7 @@ impl DataFrame {
                     )
                 })?;
                 let s = &collected.columns()[idx];
-                let dtype = effective_dtypes
+                let dtype = serialization_dtypes
                     .get(col_idx)
                     .unwrap_or_else(|| s.dtype())
                     .clone();

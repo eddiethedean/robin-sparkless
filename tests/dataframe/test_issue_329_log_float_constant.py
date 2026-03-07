@@ -3,7 +3,6 @@
 Uses PySpark APIs only: F.log(base: float, column) and F.log(column) for natural log.
 """
 
-import pytest
 
 from tests.fixtures.spark_imports import get_spark_imports
 
@@ -23,6 +22,7 @@ class TestIssue329LogFloatConstant:
         thread_id = threading.current_thread().ident
         process_id = os.getpid()
         return f"{test_name}_{process_id}_{thread_id}"
+
     def test_log_with_float_base(self):
         """Test log with float constant as base (issue example)."""
         import inspect

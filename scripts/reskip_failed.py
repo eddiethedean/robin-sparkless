@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Re-add @pytest.mark.skip for tests that failed (from unskip_report.json)."""
+
 import json
 from pathlib import Path
 
@@ -17,7 +18,9 @@ def main():
             to_reskip.append((test_id, issue_num))
     # test_id is "tests.dataframe.test_foo::TestClass::test_bar" or "tests.dataframe.test_foo::test_bar"
     # -> file tests/dataframe/test_foo.py, def test_bar
-    edits: dict[Path, list[tuple[int, int, str]]] = {}  # file -> [(line_0, issue_num, indent)]
+    edits: dict[
+        Path, list[tuple[int, int, str]]
+    ] = {}  # file -> [(line_0, issue_num, indent)]
     for test_id, issue_num in to_reskip:
         parts = test_id.split("::")
         module = parts[0]  # tests.dataframe.test_foo
@@ -32,7 +35,10 @@ def main():
             if line.strip().startswith("def " + test_name + "("):
                 # Find indent of this def
                 indent = len(line) - len(line.lstrip())
-                decorator = " " * indent + f'@pytest.mark.skip(reason="Issue #{issue_num}: unskip when fixing")\n'
+                decorator = (
+                    " " * indent
+                    + f'@pytest.mark.skip(reason="Issue #{issue_num}: unskip when fixing")\n'
+                )
                 if i > 0 and "pytest.mark.skip" in lines[i - 1]:
                     continue  # already has skip
                 edits.setdefault(file_path, []).append((i, issue_num, " " * indent))
@@ -42,7 +48,10 @@ def main():
         lines = file_path.read_text().splitlines()
         # Sort by line desc so we insert from bottom
         for line_idx, issue_num, indent in sorted(items, key=lambda x: -x[0]):
-            decorator = indent + f'@pytest.mark.skip(reason="Issue #{issue_num}: unskip when fixing")'
+            decorator = (
+                indent
+                + f'@pytest.mark.skip(reason="Issue #{issue_num}: unskip when fixing")'
+            )
             lines.insert(line_idx, decorator)
         file_path.write_text("\n".join(lines) + "\n")
     print("Re-skipped", len(to_reskip), "tests in", len(edits), "files")

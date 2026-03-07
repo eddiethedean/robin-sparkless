@@ -112,6 +112,7 @@ class TestIssue374JoinAliasedColumns:
             assert "NYC" in str(alice)
         finally:
             spark.stop()
+
     @pytest.mark.skip(reason="Issue #1230: unskip when fixing")
     def test_join_aliased_column_without_prefix(self):
         """Unaliased column names after aliasing can be ambiguous (PySpark parity)."""
@@ -139,6 +140,7 @@ class TestIssue374JoinAliasedColumns:
             assert "AMBIGUOUS_REFERENCE" in msg or "Reference `id` is ambiguous" in msg
         finally:
             spark.stop()
+
     @pytest.mark.skip(reason="Issue #1230: unskip when fixing")
     def test_join_aliased_self_join(self):
         """Test self-join with different aliases."""

@@ -6,7 +6,6 @@ tests/parity/dataframe (expected_outputs from PySpark). Run with robin_sparkless
 """
 
 from __future__ import annotations
-import pytest
 
 from tests.fixtures.spark_imports import get_spark_imports
 from tests.utils import assert_rows_equal
@@ -58,6 +57,8 @@ def test_filter_and_operator(spark) -> None:
     rows = result.collect()
     assert len(rows) == 1
     assert rows[0]["a"] == 2 and rows[0]["b"] == 3
+
+
 def test_filter_or_operator(spark) -> None:
     """Ported from Sparkless test_filter_with_or_operator: (a > 1) | (b > 1)."""
     data = [{"a": 1, "b": 2}, {"a": 2, "b": 3}, {"a": 3, "b": 1}]

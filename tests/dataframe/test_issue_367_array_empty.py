@@ -115,6 +115,7 @@ class TestIssue367ArrayEmpty:
         assert len(rows) == 2
         for row in rows:
             assert row["arr"] == []
+
     @pytest.mark.skip(reason="Issue #1115: unskip when fixing")
     def test_array_empty_tuple_raises_like_pyspark(self, spark):
         """F.array(()) raises in Sparkless (matches PySpark, which rejects tuple)."""

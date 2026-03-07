@@ -3,7 +3,6 @@ Tests for issue #296: UDF decorator interface support. Uses get_spark_imports fr
 """
 
 from tests.fixtures.spark_imports import get_spark_imports
-import pytest
 
 _imports = get_spark_imports()
 SparkSession = _imports.SparkSession
@@ -858,6 +857,7 @@ class TestIssue296UdfDecorator:
             assert rows[1]["handled"] is None or rows[1]["handled"] == "DEFAULT"
         finally:
             spark.stop()
+
     def test_udf_decorator_with_mixed_types_in_udf(self):
         """Test UDF decorator that handles mixed input types (all as strings)."""
         spark = SparkSession.builder.appName("issue-296").getOrCreate()

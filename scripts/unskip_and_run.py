@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Unskip tests with Issue #N, run pytest, report which issues have all tests passing."""
+
 import json
 import re
 import subprocess
@@ -11,7 +12,9 @@ TESTS_DIR = ROOT / "tests"
 
 def main():
     # 1) Build mapping: (file_path, issue_num) -> test_name by parsing files
-    issue_tests: dict[int, list[str]] = {}  # issue -> list of "path::class::test" or "path::test"
+    issue_tests: dict[
+        int, list[str]
+    ] = {}  # issue -> list of "path::class::test" or "path::test"
     files_changed: list[Path] = []
 
     for path in sorted(TESTS_DIR.rglob("*.py")):
@@ -71,12 +74,25 @@ def main():
             path.write_text(text)
             files_changed.append(path)
 
-    print("Unskipped", sum(len(v) for v in issue_tests.values()), "tests across", len(issue_tests), "issues")
+    print(
+        "Unskipped",
+        sum(len(v) for v in issue_tests.values()),
+        "tests across",
+        len(issue_tests),
+        "issues",
+    )
     print("Modified", len(files_changed), "files")
 
     # 3) Run pytest -v, capture output
     result = subprocess.run(
-        [str(ROOT / ".venv" / "bin" / "python"), "-m", "pytest", "tests", "-v", "--tb=no"],
+        [
+            str(ROOT / ".venv" / "bin" / "python"),
+            "-m",
+            "pytest",
+            "tests",
+            "-v",
+            "--tb=no",
+        ],
         cwd=ROOT,
         capture_output=True,
         text=True,
@@ -114,7 +130,9 @@ def main():
         if all(t in passed for t in normalized):
             issues_all_passed.append(issue_num)
         else:
-            issues_some_failed.append((issue_num, [t for t in normalized if t in failed]))
+            issues_some_failed.append(
+                (issue_num, [t for t in normalized if t in failed])
+            )
 
     # Write report
     report = ROOT / "scripts" / "unskip_report.json"
@@ -133,7 +151,9 @@ def main():
     print("Report written to", report)
     print("Issues with ALL tests passing:", issues_all_passed)
     if issues_some_failed:
-        print("Issues with some failures:", [i for i, _ in issues_some_failed[:10]], "...")
+        print(
+            "Issues with some failures:", [i for i, _ in issues_some_failed[:10]], "..."
+        )
     return issues_all_passed
 
 
