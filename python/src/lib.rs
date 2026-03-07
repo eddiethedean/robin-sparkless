@@ -22,6 +22,11 @@ use std::env;
 use std::path::Path;
 use std::thread_local;
 
+// When row_number().over(window) is used with no partition, set this so select() sorts result by window order (#1241).
+thread_local! {
+    static WINDOW_ORDER_SORT_HINT: RefCell<Option<(Vec<String>, Vec<bool>)>> = RefCell::new(None);
+}
+
 /// Convert EngineError or PolarsError to Python exception (SparklessError or TypeError for known validation errors).
 /// Column-not-found messages are normalized to include "cannot resolve" for PySpark parity (issue #1058).
 fn to_py_err(e: impl std::fmt::Display) -> PyErr {
@@ -3306,10 +3311,29 @@ impl PyDataFrame {
             }
         }
 
-        self.inner
-            .select_items(items)
-            .map(PyDataFrame::wrap)
-            .map_err(to_py_err)
+        let df = self.inner.select_items(items).map_err(to_py_err)?;
+        let out = WINDOW_ORDER_SORT_HINT.with(|cell| {
+            if let Some((cols, desc)) = cell.borrow_mut().take() {
+                // Only apply sort if this select's result has the hint columns (from row_number with no partition).
+                // Otherwise the hint is stale from a previous test/select and we must not sort.
+                let col_refs: Vec<&str> = cols.iter().map(|s| s.as_str()).collect();
+                let all_present = match df.columns() {
+                    Ok(result_names) => col_refs.iter().all(|c| {
+                        result_names.iter().any(|n| n.eq_ignore_ascii_case(c))
+                    }),
+                    Err(_) => false,
+                };
+                if all_present {
+                    let ascending: Vec<bool> = desc.iter().map(|&d| !d).collect();
+                    df.order_by(col_refs, ascending).map(PyDataFrame::wrap)
+                } else {
+                    Ok(PyDataFrame::wrap(df))
+                }
+            } else {
+                Ok(PyDataFrame::wrap(df))
+            }
+        });
+        out.map_err(to_py_err)
     }
 
     fn with_column(
@@ -6923,6 +6947,20 @@ fn row_number_window(partition_by: Vec<String>, order_by: Vec<String>) -> PyResu
         return Err(SparklessError::new_err(
             "row_number_window: order_by cannot be empty",
         ));
+    }
+    if partition_by.is_empty() {
+        let mut cols: Vec<String> = Vec::with_capacity(order_by.len());
+        let mut desc: Vec<bool> = Vec::with_capacity(order_by.len());
+        for s in &order_by {
+            let s = s.trim();
+            desc.push(s.starts_with('-'));
+            cols.push(if s.starts_with('-') {
+                s.trim_start_matches('-').trim().to_string()
+            } else {
+                s.to_string()
+            });
+        }
+        WINDOW_ORDER_SORT_HINT.with(|cell| *cell.borrow_mut() = Some((cols, desc)));
     }
     let parts: Vec<&str> = partition_by.iter().map(|s| s.as_str()).collect();
     let windowed = Column::row_number_over(&parts[..], &order_by).map_err(to_py_err)?;

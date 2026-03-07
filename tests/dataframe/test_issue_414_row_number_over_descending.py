@@ -50,7 +50,6 @@ class TestIssue414RowNumberOverDescending:
         assert b_rows[2] == 1
         assert b_rows[1] == 2
 
-    @pytest.mark.skip(reason="Issue #1241: unskip when fixing")
     def test_row_number_over_order_desc_no_partition(self, spark):
         """row_number().over(orderBy(F.desc)) without partition must not raise."""
         imports = get_spark_imports()
@@ -159,7 +158,6 @@ class TestIssue414RowNumberOverDescending:
             else:
                 assert _norm(r["first_val"]) == 10
 
-    @pytest.mark.skip(reason="Issue #1241: unskip when fixing")
     def test_mixed_order_asc_desc(self, spark):
         """orderBy(F.asc(a), F.desc(b)) - mixed directions must not raise."""
         imports = get_spark_imports()
@@ -195,7 +193,6 @@ class TestIssue414RowNumberOverDescending:
         for r in result:
             assert _norm(r["rn"]) == 1
 
-    @pytest.mark.skip(reason="Issue #1241: unskip when fixing")
     def test_avg_over_partition_order_desc(self, spark):
         """avg().over(partitionBy, orderBy(F.desc)) - running average descending."""
         imports = get_spark_imports()
