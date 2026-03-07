@@ -1121,22 +1121,20 @@ fn json_value_to_option_string(v: &serde_json::Value) -> Option<String> {
 
 /// Infer Polars dtype from first non-null JSON value in a slice (for get() on string map column).
 fn infer_dtype_from_json_values(values: &[Option<serde_json::Value>]) -> DataType {
-    for v in values {
-        if let Some(j) = v {
-            return match j {
-                serde_json::Value::Null => continue,
-                serde_json::Value::Number(n) => {
-                    if n.is_i64() {
-                        DataType::Int64
-                    } else {
-                        DataType::Float64
-                    }
+    for j in values.iter().flatten() {
+        return match j {
+            serde_json::Value::Null => continue,
+            serde_json::Value::Number(n) => {
+                if n.is_i64() {
+                    DataType::Int64
+                } else {
+                    DataType::Float64
                 }
-                serde_json::Value::Bool(_) => DataType::Boolean,
-                serde_json::Value::String(_) => DataType::String,
-                serde_json::Value::Array(_) | serde_json::Value::Object(_) => DataType::String,
-            };
-        }
+            }
+            serde_json::Value::Bool(_) => DataType::Boolean,
+            serde_json::Value::String(_) => DataType::String,
+            serde_json::Value::Array(_) | serde_json::Value::Object(_) => DataType::String,
+        };
     }
     DataType::String
 }
@@ -1221,7 +1219,9 @@ pub fn apply_get(columns: &mut [Column]) -> PolarsResult<Option<Column>> {
     }
     // createDataFrame with dict column infers type "string" and stores JSON object string per row (#1245).
     if map_series.dtype() == &DataType::String {
-        let map_ca = map_series.str().map_err(|e| compute_err("get map str", e))?;
+        let map_ca = map_series
+            .str()
+            .map_err(|e| compute_err("get map str", e))?;
         let out_len = map_ca.len();
         let values: Vec<Option<serde_json::Value>> = (0..out_len)
             .map(|i| {

@@ -6,7 +6,6 @@ Robin-sparkless struct() now accepts the same: struct(col1, col2, ...).
 """
 
 from __future__ import annotations
-import pytest
 
 from tests.fixtures.spark_imports import get_spark_imports
 
@@ -14,6 +13,8 @@ from tests.fixtures.spark_imports import get_spark_imports
 _imports = get_spark_imports()
 SparkSession = _imports.SparkSession
 F = _imports.F
+
+
 def test_struct_multiple_columns_issue_repro() -> None:
     """struct(col("a"), col("b")) works (issue repro)."""
     from tests.utils import _row_to_dict

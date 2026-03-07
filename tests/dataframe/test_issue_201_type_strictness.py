@@ -7,13 +7,14 @@ operators (+, -, *, /) and plan interpreter add/subtract/multiply/divide.
 """
 
 from __future__ import annotations
-import pytest
 
 from tests.fixtures.spark_imports import get_spark_imports
 from tests.utils import _row_to_dict, assert_rows_equal
 
 _imports = get_spark_imports()
 F = _imports.F
+
+
 def test_string_plus_numeric_with_column_no_cast(spark) -> None:
     """withColumn('x', col('a') + col('b')) with a=string, b=bigint works (issue #201)."""
     df = spark.createDataFrame(
@@ -23,6 +24,8 @@ def test_string_plus_numeric_with_column_no_cast(spark) -> None:
     result = df.withColumn("x", F.col("a") + F.col("b"))
     rows = [_row_to_dict(r) for r in result.collect()]
     assert_rows_equal(rows, [{"a": "10", "b": 2, "x": 12.0}], order_matters=True)
+
+
 def test_string_arithmetic_ops_implicit_coercion(spark) -> None:
     """All arithmetic ops coerce string to numeric (add, sub, mul, div)."""
     df = spark.createDataFrame(

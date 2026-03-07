@@ -8,7 +8,6 @@ https://github.com/eddiethedean/sparkless/issues/453
 """
 
 from tests.fixtures.spark_imports import get_spark_imports
-import pytest
 
 
 def _row_val(row, key):
@@ -16,6 +15,8 @@ def _row_val(row, key):
     if hasattr(row, "__getitem__"):
         return row[key]
     return getattr(row, key, None)
+
+
 def test_alias_cast_withcolumn_exact_issue_453(spark, spark_backend):
     """Exact scenario from #453 - alias().cast() in withColumn."""
     imports = get_spark_imports(spark_backend)
@@ -187,6 +188,8 @@ def test_alias_cast_withcolumn_mixed_with_plain(spark, spark_backend):
     assert _row_val(rows[0], "score_int") == 100
     assert _row_val(rows[0], "name") == "Alice"
     assert _row_val(rows[0], "doubled") == 2
+
+
 def test_alias_cast_withcolumn_replace_existing_column(spark, spark_backend):
     """withColumn alias().cast() - output name same as different input (replacement)."""
     imports = get_spark_imports(spark_backend)

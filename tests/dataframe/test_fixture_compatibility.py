@@ -57,6 +57,7 @@ class TestFixtureCompatibility:
             spark.createDataFrame([{"x": 1}]).collect()
         finally:
             spark.stop()
+
     @pytest.mark.skip(reason="Issue #1141: unskip when fixing")
     def test_sparkcontext_available_in_session(self):
         """Test that SparkContext is available through session."""

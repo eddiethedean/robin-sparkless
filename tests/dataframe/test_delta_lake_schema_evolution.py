@@ -54,6 +54,7 @@ class TestDeltaLakeSchemaEvolution:
         rows = result2.select("null_str").collect()
         assert len(rows) == 1
         assert rows[0]["null_str"] is None
+
     def test_type_casting_works(self, spark):
         """Test that type casting works without JVM."""
         df = spark.createDataFrame([(1, "test")], ["id", "name"])

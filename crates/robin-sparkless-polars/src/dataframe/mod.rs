@@ -1114,7 +1114,12 @@ impl DataFrame {
             .map(|(col_idx, name)| {
                 let idx = match collected.get_column_index(name.as_str()) {
                     Some(i) => i,
-                    None => return effective_dtypes.get(col_idx).cloned().unwrap_or(DataType::String),
+                    None => {
+                        return effective_dtypes
+                            .get(col_idx)
+                            .cloned()
+                            .unwrap_or(DataType::String);
+                    }
                 };
                 let s = &collected.columns()[idx];
                 let plan_dtype = effective_dtypes
@@ -1122,7 +1127,10 @@ impl DataFrame {
                     .unwrap_or_else(|| s.dtype())
                     .clone();
                 if plan_dtype == DataType::String
-                    && matches!(s.dtype(), DataType::Int64 | DataType::Float64 | DataType::Boolean)
+                    && matches!(
+                        s.dtype(),
+                        DataType::Int64 | DataType::Float64 | DataType::Boolean
+                    )
                 {
                     s.dtype().clone()
                 } else {

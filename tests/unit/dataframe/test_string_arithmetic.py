@@ -136,6 +136,7 @@ class TestStringArithmetic:
         assert len(rows) == 2
         assert rows[0]["result"] == 1.0  # 10 % 3
         assert rows[1]["result"] == 1.0  # 7 % 3
+
     @pytest.mark.skip(reason="Issue #1116: unskip when fixing")
     def test_string_arithmetic_with_string_column(self, spark):
         """Test arithmetic operations between two string columns."""
@@ -227,6 +228,7 @@ class TestStringArithmetic:
         # Check schema - result should be DoubleType
         result_field = next(f for f in result.schema.fields if f.name == "result")
         assert isinstance(result_field.dataType, DoubleType)
+
     @pytest.mark.skip(reason="Issue #1116: unskip when fixing")
     def test_string_arithmetic_chained_operations(self, spark):
         """Test chained arithmetic operations with string columns."""
@@ -578,6 +580,7 @@ class TestStringArithmetic:
         rows = result.collect()
         assert rows[0]["result"] == 5.0  # -0 + 5
         assert rows[1]["result"] == 5.0  # -0.0 + 5
+
     @pytest.mark.skip(reason="Issue #1116: unskip when fixing")
     def test_string_arithmetic_complex_expression(self, spark):
         """Test complex nested arithmetic expressions with strings."""

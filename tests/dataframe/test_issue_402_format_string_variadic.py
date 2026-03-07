@@ -4,7 +4,6 @@ Tests for #402: format_string accepts variadic columns (PySpark parity).
 
 from __future__ import annotations
 
-import pytest
 
 from tests.fixtures.spark_imports import get_spark_imports
 
@@ -31,6 +30,8 @@ def test_format_string_variadic_columns() -> None:
     assert len(result) == 2
     assert result[0]["fmt"] == "a=1 b=2"
     assert result[1]["fmt"] == "a=10 b=20"
+
+
 def test_format_string_string_int() -> None:
     """format_string with %s and %d (PySpark format_string supports variadic columns)."""
     spark = _spark()

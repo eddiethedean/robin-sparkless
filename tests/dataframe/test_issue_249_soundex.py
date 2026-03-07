@@ -6,7 +6,6 @@ so parity tests and with_column(snd, F.soundex(F.col("name"))) work.
 """
 
 from __future__ import annotations
-import pytest
 
 from tests.fixtures.spark_imports import get_spark_imports
 
@@ -19,6 +18,8 @@ F = _imports.F
 def test_soundex_module_exists() -> None:
     """Module exposes soundex function."""
     assert hasattr(F, "soundex")
+
+
 def test_with_column_soundex_returns_three_rows() -> None:
     """df.with_column("snd", F.soundex(F.col("name"))) returns 3 rows with snd column."""
     spark = SparkSession.builder.appName("soundex").getOrCreate()
@@ -31,6 +32,8 @@ def test_with_column_soundex_returns_three_rows() -> None:
         assert "snd" in row
         assert isinstance(row["snd"], str)
         assert len(row["snd"]) == 4  # American Soundex is 4 chars
+
+
 def test_soundex_phonetic_codes() -> None:
     """Soundex produces expected phonetic codes (Alice->A420, Robert->R163)."""
     spark = SparkSession.builder.appName("soundex").getOrCreate()

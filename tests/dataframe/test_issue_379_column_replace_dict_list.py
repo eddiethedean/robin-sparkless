@@ -15,6 +15,8 @@ F = _imports.F
 def _replace(col, old: str, new: str):
     """Use regexp_replace (PySpark API)."""
     return F.regexp_replace(col, old, new)
+
+
 @pytest.mark.skip(reason="Issue #1232: unskip when fixing")
 def test_replace_single_pair(spark) -> None:
     """replace(search, replacement) or regexp_replace works."""
@@ -25,6 +27,8 @@ def test_replace_single_pair(spark) -> None:
     out = df.withColumn("y", _replace(F.col("x"), "-", "_"))
     rows = out.collect()
     assert rows[0]["y"] == "a_b_c"
+
+
 def test_replace_chained(spark) -> None:
     """Multiple replacements via chained regexp_replace (PySpark-supported)."""
     df = spark.createDataFrame(

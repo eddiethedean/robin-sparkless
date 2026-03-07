@@ -15,6 +15,7 @@ SparkSession = _imports.SparkSession
 
 class TestIssue412BuilderCallable:
     """Regression tests for SparkSession.builder() callable form (issue #412)."""
+
     @pytest.mark.skip(reason="Issue #1239: unskip when fixing")
     def test_builder_callable_returns_self(self) -> None:
         """builder is a non-callable Builder object (PySpark parity)."""
@@ -25,6 +26,7 @@ class TestIssue412BuilderCallable:
 
         with pytest.raises(TypeError):
             builder()
+
     @pytest.mark.skip(reason="Issue #1239: unskip when fixing")
     def test_builder_callable_full_chain(self) -> None:
         """SparkSession.builder() callable form raises TypeError (PySpark parity)."""
@@ -36,6 +38,7 @@ class TestIssue412BuilderCallable:
         with pytest.raises(TypeError):
             # In PySpark this raises \"'Builder' object is not callable\".
             builder().appName("my_app").getOrCreate()
+
     @pytest.mark.skip(reason="Issue #1239: unskip when fixing")
     def test_builder_property_and_call_equivalent(self) -> None:
         """Property-style builder works; callable form raises TypeError (PySpark parity)."""

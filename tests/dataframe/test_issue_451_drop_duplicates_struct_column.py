@@ -13,7 +13,6 @@ https://github.com/eddiethedean/sparkless/issues/451
 """
 
 from tests.fixtures.spark_imports import get_spark_imports
-import pytest
 
 
 def _row_val(row, key):
@@ -21,6 +20,8 @@ def _row_val(row, key):
     if hasattr(row, "__getitem__"):
         return row[key]
     return getattr(row, key, None)
+
+
 def test_drop_duplicates_struct_column_after_materialization_exact_issue_451(
     spark, spark_backend
 ):
@@ -52,6 +53,8 @@ def test_drop_duplicates_struct_column_after_materialization_exact_issue_451(
     for r in rows:
         struct_val = _row_val(r, "structInfo")
         assert struct_val is not None
+
+
 def test_drop_duplicates_struct_column_before_materialization(spark, spark_backend):
     """dropDuplicates before materialization (workaround from issue - should still work)."""
     F = get_spark_imports(spark_backend).F
@@ -92,6 +95,8 @@ def test_distinct_struct_column_after_materialization(spark, spark_backend):
     rows = result.collect()
     assert len(rows) == 2
     assert {_row_val(r, "id") for r in rows} == {1, 2}
+
+
 def test_drop_duplicates_subset_with_struct_column(spark, spark_backend):
     """dropDuplicates(subset) when struct column exists but subset excludes it."""
     F = get_spark_imports(spark_backend).F

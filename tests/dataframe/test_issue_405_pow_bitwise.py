@@ -8,6 +8,8 @@ _imports = get_spark_imports()
 F = _imports.F
 
 import pytest
+
+
 @pytest.mark.skip(reason="Issue #1236: unskip when fixing")
 def test_pow_column_literal(spark) -> None:
     """col("x") ** 2 and pow(col("x"), 2) give squared values."""
@@ -22,6 +24,8 @@ def test_pow_column_literal(spark) -> None:
     rows2 = list(out2)
     assert rows2[0]["sq"] == 9
     assert rows2[1]["sq"] == 25
+
+
 @pytest.mark.skip(reason="Issue #1236: unskip when fixing")
 def test_bitwise_not(spark) -> None:
     """PySpark: `~col` is boolean NOT; use SQL `~` for bitwise."""

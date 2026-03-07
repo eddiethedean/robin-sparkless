@@ -4,12 +4,13 @@ Tests for #403: date functions (hour, minute, etc.) on string timestamp column (
 
 from __future__ import annotations
 
-import pytest
 
 from tests.fixtures.spark_imports import get_spark_imports
 
 _imports = get_spark_imports()
 F = _imports.F
+
+
 def test_hour_on_string_timestamp(spark) -> None:
     """hour(col) accepts string timestamp column; parses and returns hour (0-23)."""
     df = spark.createDataFrame(
@@ -19,6 +20,8 @@ def test_hour_on_string_timestamp(spark) -> None:
     result = df.select(F.hour(F.col("ts")).alias("h")).collect()
     assert len(result) == 1
     assert result[0]["h"] == 14
+
+
 def test_minute_second_on_string_timestamp(spark) -> None:
     """minute(col) and second(col) accept string timestamp column."""
     df = spark.createDataFrame(

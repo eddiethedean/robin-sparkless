@@ -1,7 +1,8 @@
 """Tests for #406: na.fill(value, subset=[list of str])."""
 
 from __future__ import annotations
-import pytest
+
+
 def test_na_fill_subset_list_of_str(spark) -> None:
     """df.na.fill(0, subset=["b"]) fills nulls only in "b", leaves "a" unchanged."""
     df = spark.createDataFrame(
