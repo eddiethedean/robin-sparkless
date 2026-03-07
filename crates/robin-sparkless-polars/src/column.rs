@@ -1,3 +1,4 @@
+use std::ops::Neg;
 use polars::prelude::{
     DataType, Expr, Field, PolarsError, PolarsResult, RankMethod, RankOptions, SortOptions,
     TimeUnit, WindowMapping, col, lit,
@@ -89,6 +90,8 @@ pub struct Column {
     pub udf_call: Option<(String, Vec<Column>)>,
     /// When Some, this aggregate (e.g. sum) can use cum_sum for running window when orderBy differs from partitionBy.
     pub source_for_running: Option<String>,
+    /// When Some, over_window uses running mean (cum_sum/cum_count) when orderBy is present (#1241).
+    pub source_for_running_mean: Option<String>,
     /// When Some, over_window uses order-sensitive first/last (PySpark first_value/last_value semantics; #1145).
     pub first_last_value: Option<FirstLastValue>,
 }
@@ -102,6 +105,7 @@ impl Column {
             deferred: None,
             udf_call: None,
             source_for_running: None,
+            source_for_running_mean: None,
             first_last_value: None,
         }
     }
@@ -115,6 +119,7 @@ impl Column {
             deferred: None,
             udf_call: None,
             source_for_running: None,
+            source_for_running_mean: None,
             first_last_value: None,
         }
     }
@@ -127,6 +132,7 @@ impl Column {
             deferred: None,
             udf_call: Some((name, args)),
             source_for_running: None,
+            source_for_running_mean: None,
             first_last_value: None,
         }
     }
@@ -143,6 +149,7 @@ impl Column {
             deferred: Some(DeferredRandom::Rand(seed)),
             udf_call: None,
             source_for_running: None,
+            source_for_running_mean: None,
             first_last_value: None,
         }
     }
@@ -159,6 +166,7 @@ impl Column {
             deferred: Some(DeferredRandom::Randn(seed)),
             udf_call: None,
             source_for_running: None,
+            source_for_running_mean: None,
             first_last_value: None,
         }
     }
@@ -219,6 +227,7 @@ impl Column {
             deferred: self.deferred,
             udf_call: self.udf_call.clone(),
             source_for_running: self.source_for_running.clone(),
+            source_for_running_mean: self.source_for_running_mean.clone(),
             first_last_value: self.first_last_value.clone(),
         }
     }
@@ -261,6 +270,7 @@ impl Column {
             deferred: None,
             udf_call: None,
             source_for_running: None,
+            source_for_running_mean: None,
             first_last_value: None,
         }
     }
@@ -273,6 +283,7 @@ impl Column {
             deferred: None,
             udf_call: None,
             source_for_running: None,
+            source_for_running_mean: None,
             first_last_value: None,
         }
     }
@@ -2420,7 +2431,12 @@ impl Column {
         }
 
         let base_expr = if use_running_aggregate {
-            if let Some(ref src) = self.source_for_running {
+            if let Some(ref src) = self.source_for_running_mean {
+                // Running mean in window order: cum_sum / cum_count on same column so order applies (#1241).
+                let sum_expr = col(src).cast(DataType::Float64).cum_sum(false);
+                let count_expr = col(src).cum_count(false).cast(DataType::Float64);
+                sum_expr / count_expr
+            } else if let Some(ref src) = self.source_for_running {
                 // Cast to Float64 so string columns work (PySpark parity, issue #393).
                 col(src).cast(DataType::Float64).cum_sum(false)
             } else {
@@ -2437,10 +2453,11 @@ impl Column {
             let mut order_exprs: Vec<Expr> = Vec::with_capacity(order_by_encoded.len());
             let mut descending_multi: Vec<bool> = Vec::with_capacity(order_by_encoded.len());
             for s in order_by_encoded.iter() {
+                let s = s.trim();
                 let (name, descending) = if let Some(stripped) = s.strip_prefix('-') {
-                    (stripped, true)
+                    (stripped.trim(), true)
                 } else {
-                    (s.as_str(), false)
+                    (s, false)
                 };
                 order_exprs.push(col(name));
                 descending_multi.push(descending);
@@ -2517,54 +2534,70 @@ impl Column {
         } else {
             partition_by.iter().map(|s| col(*s)).collect()
         };
-        let all_asc = order_by_encoded.iter().all(|s| !s.starts_with('-'));
-        // Row number = ordinal rank of the order key within partition. For multi-column all-asc, rank the struct so (Type, Score, Name) order is respected.
-        let rank_expr = if order_by_encoded.len() == 1 {
-            let (first_name, first_desc) =
-                if let Some(stripped) = order_by_encoded[0].strip_prefix('-') {
-                    (stripped, true)
-                } else {
-                    (order_by_encoded[0].as_str(), false)
-                };
-            let opts = RankOptions {
-                method: RankMethod::Ordinal,
-                descending: first_desc,
+        // Parse encoded order: "-col" = descending, "col" = ascending. Trim whitespace (#1241).
+        fn parse_order_key(s: &str) -> (&str, bool) {
+            let s = s.trim();
+            let descending = s.starts_with('-');
+            let name = if descending {
+                s.trim_start_matches('-').trim()
+            } else {
+                s
             };
-            col(first_name)
+            (name, descending)
+        }
+        let all_asc = order_by_encoded
+            .iter()
+            .all(|s| !s.trim().starts_with('-'));
+        // Row number = ordinal rank of the order key within partition. For multi-column mixed asc/desc, use struct with negated desc columns (#1241).
+        let rank_expr = if order_by_encoded.len() == 1 {
+            let (first_name, first_desc) = parse_order_key(order_by_encoded[0].trim());
+            // For descending, rank by -col so ascending rank gives high values rank 1 (#1241).
+            let order_col = col(first_name)
                 .cast(DataType::Float64)
                 .fill_null(lit(if first_desc {
                     f64::NEG_INFINITY
                 } else {
                     f64::INFINITY
-                }))
-                .rank(opts, None)
+                }));
+            let rank_input = if first_desc {
+                order_col.neg()
+            } else {
+                order_col
+            };
+            let opts = RankOptions {
+                method: RankMethod::Ordinal,
+                descending: false,
+            };
+            rank_input.rank(opts, None)
         } else if all_asc {
-            let struct_fields: Vec<Expr> =
-                order_by_encoded.iter().map(|s| col(s.as_str())).collect();
+            let struct_fields: Vec<Expr> = order_by_encoded
+                .iter()
+                .map(|s| col(parse_order_key(s).0))
+                .collect();
             let opts = RankOptions {
                 method: RankMethod::Ordinal,
                 descending: false,
             };
             as_struct(struct_fields).rank(opts, None)
         } else {
-            let (first_name, first_desc) =
-                if let Some(stripped) = order_by_encoded[0].strip_prefix('-') {
-                    (stripped, true)
-                } else {
-                    (order_by_encoded[0].as_str(), false)
-                };
+            // Mixed asc/desc: rank by struct with desc columns negated so ascending struct sort gives correct order (#1241).
+            let struct_fields: Vec<Expr> = order_by_encoded
+                .iter()
+                .map(|s| {
+                    let (name, desc) = parse_order_key(s);
+                    if desc {
+                        (col(name).cast(DataType::Float64).fill_null(lit(f64::NEG_INFINITY)))
+                            .neg()
+                    } else {
+                        col(name).cast(DataType::Float64).fill_null(lit(f64::INFINITY))
+                    }
+                })
+                .collect();
             let opts = RankOptions {
                 method: RankMethod::Ordinal,
-                descending: first_desc,
+                descending: false,
             };
-            col(first_name)
-                .cast(DataType::Float64)
-                .fill_null(lit(if first_desc {
-                    f64::NEG_INFINITY
-                } else {
-                    f64::INFINITY
-                }))
-                .rank(opts, None)
+            as_struct(struct_fields).rank(opts, None)
         };
         let expr = rank_expr.over(partition_exprs);
         Ok(Self::from_expr(expr, None))
@@ -2590,6 +2623,7 @@ impl Column {
             deferred: None,
             udf_call: None,
             source_for_running: None,
+            source_for_running_mean: None,
             first_last_value: Some(FirstLastValue {
                 value_expr,
                 is_last: false,
@@ -2607,6 +2641,7 @@ impl Column {
             deferred: None,
             udf_call: None,
             source_for_running: None,
+            source_for_running_mean: None,
             first_last_value: Some(FirstLastValue {
                 value_expr,
                 is_last: true,

@@ -35,12 +35,15 @@ pub fn sum(col: &Column) -> Column {
 
 /// Average aggregation. Output name PySpark-style avg(column_name).
 /// String columns are cast to Float64 before mean (PySpark parity, issue #437).
+/// Carries source column for running-window conversion when orderBy differs from partitionBy (#1241).
 pub fn avg(col: &Column) -> Column {
     let name = format!("avg({})", col.name());
-    Column::from_expr(
+    let mut c = Column::from_expr(
         col.expr().clone().cast(DataType::Float64).mean(),
         Some(name),
-    )
+    );
+    c.source_for_running_mean = Some(col.name().to_string());
+    c
 }
 
 /// Alias for avg (PySpark mean).
