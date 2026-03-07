@@ -70,6 +70,36 @@ pub fn try_extract_join_eq_columns_all(expr: &Expr) -> Vec<(String, String)> {
     pairs
 }
 
+/// Returns true if the expression is only AND and Eq (column refs). When true, a key-based join
+/// already enforces the condition, so we must not filter after the join (left/right/outer would
+/// otherwise lose unmatched rows). Used for PySpark parity (#1242).
+pub fn expr_contains_only_join_key_equalities(expr: &Expr) -> bool {
+    use polars::prelude::Expr as PlExpr;
+    fn only_join_equalities(e: &Expr) -> bool {
+        let mut current = e;
+        while let PlExpr::Alias(inner, _) = current {
+            current = inner.as_ref();
+        }
+        match current {
+            PlExpr::BinaryExpr {
+                left,
+                op: Operator::Eq | Operator::EqValidity,
+                right,
+            } => {
+                expr_to_column_name(left.as_ref()).is_some()
+                    && expr_to_column_name(right.as_ref()).is_some()
+            }
+            PlExpr::BinaryExpr {
+                left,
+                op: Operator::And,
+                right,
+            } => only_join_equalities(left.as_ref()) && only_join_equalities(right.as_ref()),
+            _ => false,
+        }
+    }
+    only_join_equalities(expr)
+}
+
 /// Join type for DataFrame joins (PySpark-compatible)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum JoinType {
@@ -550,7 +580,10 @@ pub fn join(
 
 #[cfg(test)]
 mod tests {
-    use super::{JoinType, join, try_extract_join_eq_columns, try_extract_join_eq_columns_all};
+    use super::{
+        expr_contains_only_join_key_equalities, join, try_extract_join_eq_columns,
+        try_extract_join_eq_columns_all, JoinType,
+    };
     use crate::functions::col;
     use crate::{DataFrame, SparkSession};
     use std::collections::HashMap;
@@ -586,6 +619,24 @@ mod tests {
         let expr = eq_expr.into_expr(); // adds Alias(..., "<expr>")
         let out = try_extract_join_eq_columns(&expr);
         assert_eq!(out, Some(("a".to_string(), "b".to_string())));
+    }
+
+    #[test]
+    fn expr_contains_only_join_key_equalities_simple_and_compound() {
+        // Only key equalities -> true (so we skip post-join filter for left/right/outer #1242).
+        let eq_expr = col("Key").eq(col("Name").into_expr()).into_expr();
+        assert!(expr_contains_only_join_key_equalities(&eq_expr));
+        let and_expr = col("a")
+            .eq(col("b").into_expr())
+            .and_(&col("c").eq(col("d").into_expr()))
+            .into_expr();
+        assert!(expr_contains_only_join_key_equalities(&and_expr));
+        // Compound (equality + other) -> false so we still apply filter (#380).
+        let gt_expr = col("a")
+            .eq(col("b").into_expr())
+            .and_(&col("x").gt(col("y").into_expr()))
+            .into_expr();
+        assert!(!expr_contains_only_join_key_equalities(&gt_expr));
     }
 
     fn left_df() -> DataFrame {

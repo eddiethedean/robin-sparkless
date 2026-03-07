@@ -9,7 +9,7 @@ use pyo3::create_exception;
 use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyDict, PyList, PyTuple};
 use robin_sparkless::dataframe::{
-    try_extract_join_eq_columns_all, JoinType, PivotedGroupedData, SaveMode, WriteFormat, WriteMode,
+    expr_contains_only_join_key_equalities, try_extract_join_eq_columns_all, JoinType, PivotedGroupedData, SaveMode, WriteFormat, WriteMode,
 };
 use robin_sparkless::functions::{self, asc_from_name, SortOrder, ThenBuilder, WhenBuilder};
 use robin_sparkless::{
@@ -4124,11 +4124,16 @@ impl PyDataFrame {
                             .inner
                             .join_with_keys(&other.inner, left_refs, right_refs, join_type)
                             .map_err(to_py_err)?;
-                        // When the original expression was a compound condition (e.g. key equality AND filter),
-                        // reapply the full predicate after the key-based join so additional conditions are honored
-                        // (issue #380: join with compound condition).
-                        let filtered = joined.filter(expr).map_err(to_py_err)?;
-                        return Ok(PyDataFrame::wrap(filtered));
+                        // When the expression is only key equalities, the join already enforces them;
+                        // do not filter afterward or left/right/outer would lose unmatched rows (#1242).
+                        // When the expression is compound (e.g. key equality AND filter), reapply the
+                        // full predicate after the key-based join (issue #380).
+                        let result = if expr_contains_only_join_key_equalities(&expr) {
+                            joined
+                        } else {
+                            joined.filter(expr).map_err(to_py_err)?
+                        };
+                        return Ok(PyDataFrame::wrap(result));
                     }
                 }
                 // Non-eq expression: cross + filter (ambiguous duplicate column names may apply).
