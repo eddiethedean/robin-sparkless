@@ -1463,8 +1463,14 @@ fn cast_impl(column: &Column, type_name: &str, strict: bool) -> Result<Column, S
         return Ok(Column::from_expr(expr.alias(&base_name), Some(base_name)));
     }
     if dtype == DataType::Float64 {
+        // PySpark parity (#1048, #1251): string cast to double returns NULL for invalid strings.
         let expr = column.expr().clone().map(
-            move |col| crate::column::expect_col(crate::udfs::apply_string_to_double(col, strict)),
+            move |col| {
+                crate::column::expect_col(crate::udfs::apply_string_to_double(
+                    col,
+                    false, // null on invalid for string->double (Spark semantics)
+                ))
+            },
             |_schema, field| Ok(Field::new(field.name().clone(), DataType::Float64)),
         );
         return Ok(Column::from_expr(expr.alias(&base_name), Some(base_name)));
