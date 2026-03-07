@@ -1,7 +1,6 @@
 """PySpark parity test for aggregate function cast (Issue #265)."""
 
 from tests.fixtures.parity_base import ParityTestBase
-import pytest
 from tests.fixtures.spark_imports import get_spark_imports
 
 
