@@ -1310,13 +1310,29 @@ impl DataFrame {
 
     /// Group by columns (returns GroupedData for aggregation).
     /// Column names are resolved according to case sensitivity.
+    /// When schema has both "key" and "key_right" (same-name join keys), group by coalesce(key, key_right) so right-only rows contribute (#280, #1254).
     pub fn group_by(&self, column_names: Vec<&str>) -> Result<GroupedData, PolarsError> {
         use polars::prelude::*;
         let resolved: Vec<String> = column_names
             .iter()
             .map(|c| self.resolve_column_name(c))
             .collect::<Result<Vec<_>, _>>()?;
-        let exprs: Vec<Expr> = resolved.iter().map(|name| col(name.as_str())).collect();
+        let schema_names: std::collections::HashSet<String> = self
+            .columns()?
+            .into_iter()
+            .collect();
+        let exprs: Vec<Expr> = resolved
+            .iter()
+            .map(|name| {
+                let right_name = format!("{}_right", name);
+                if schema_names.contains(&right_name) {
+                    coalesce(&[col(name.as_str()), col(right_name.as_str())])
+                        .alias(name.as_str())
+                } else {
+                    col(name.as_str())
+                }
+            })
+            .collect();
         let lf = self.lazy_frame();
         let lazy_grouped = lf.clone().group_by(exprs);
         Ok(GroupedData {
@@ -1472,8 +1488,9 @@ impl DataFrame {
             .collect::<Result<Vec<_>, _>>()?;
         let left_refs: Vec<&str> = left_resolved.iter().map(|s| s.as_str()).collect();
         let right_refs: Vec<&str> = right_resolved.iter().map(|s| s.as_str()).collect();
-        // When same-named keys (e.g. left.id == right.id), coalesce so result has one key column (#353, #1148, #1165).
-        let coalesce_same_name_keys = left_resolved == right_resolved;
+        // Keep both key and key_right so select(left.key, right.key.alias("key_right")) has correct nulls (#1254 parity).
+        // groupBy("key") uses coalesce(key, key_right) when both exist (see group_by).
+        let coalesce_same_name_keys = false;
         join(
             self,
             other,

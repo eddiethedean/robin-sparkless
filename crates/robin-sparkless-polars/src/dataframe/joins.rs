@@ -399,6 +399,49 @@ pub fn join(
         joined = joined.select(&keep_exprs);
     }
 
+    // When same-named keys were renamed to key_right, coalesce so result has one key column
+    // (PySpark parity #353, #1049; right/outer get correct key for right-only rows #280, type coercion test).
+    // Skip for semi/anti: Polars returns only left columns, so key_right is not in the result.
+    if coalesce_same_name_keys
+        && keys_differ
+        && !matches!(how, JoinType::LeftSemi | JoinType::LeftAnti)
+    {
+        use polars::prelude::coalesce as pl_coalesce;
+        use crate::type_coercion::find_common_type_for_join;
+        for i in 0..left_key_names.len() {
+            let left_k = &left_key_names[i];
+            let right_k = &right_key_names[i];
+            let coalesced =
+                pl_coalesce(&[col(left_k.as_str()), col(right_k.as_str())]);
+            // Cast to common type so join key is numeric when one side is numeric (type coercion parity).
+            let left_dtype = left.get_column_dtype(left_k.as_str()).ok();
+            let right_dtype = right
+                .get_column_dtype(left_k.as_str())
+                .or_else(|| right.get_column_dtype(right_k.strip_suffix("_right").unwrap_or(right_k)))
+                .ok();
+            let coalesced = match (left_dtype, right_dtype) {
+                (Some(l), Some(r)) if l != r => {
+                    find_common_type_for_join(&l, &r)
+                        .map(|common| coalesced.cast(common))
+                        .unwrap_or(coalesced)
+                }
+                _ => coalesced,
+            };
+            joined = joined.with_column(coalesced.alias(left_k.as_str()));
+        }
+        let drop_set: std::collections::HashSet<&str> =
+            right_key_names.iter().map(|s| s.as_str()).collect();
+        let schema_after = joined.collect_schema()?;
+        let names_after: Vec<String> =
+            schema_after.iter_names().map(|s| s.to_string()).collect();
+        let keep_exprs: Vec<Expr> = names_after
+            .iter()
+            .filter(|n| !drop_set.contains(n.as_str()))
+            .map(|n| col(n.as_str()))
+            .collect();
+        joined = joined.select(&keep_exprs);
+    }
+
     let result_schema = joined.collect_schema()?;
     let mut names: Vec<String> = result_schema.iter_names().map(|s| s.to_string()).collect();
     // For outer joins with same-named keys, drop the suffixed right key columns (e.g. key_right)
