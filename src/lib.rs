@@ -78,7 +78,7 @@ pub use robin_sparkless_polars::{
 pub use dataframe::{
     CubeRollupData, DataFrame, DataFrameNa, DataFrameStat, DataFrameWriter, GroupBySpec,
     GroupedData, JoinType, PivotedGroupedData, SaveMode, SelectItem, WriteFormat, WriteMode,
-    try_extract_join_eq_columns, try_extract_join_eq_columns_all,
+    expr_contains_only_join_key_equalities, try_extract_join_eq_columns, try_extract_join_eq_columns_all,
 };
 pub use session::{DataFrameReader, SparkSession, SparkSessionBuilder};
 

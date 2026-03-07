@@ -69,7 +69,6 @@ class TestIssue421JoinColumnNames:
         alice_row = next(r for r in rows if _val(r, "Name") == "Alice")
         assert _val(alice_row, "Key") == "Alice"
 
-    @pytest.mark.skip(reason="Issue #1242: unskip when fixing")
     def test_join_different_column_names_left_no_match(self, spark):
         """Left join: left row with no right match yields nulls in right columns."""
         df1 = spark.createDataFrame(
@@ -98,7 +97,6 @@ class TestIssue421JoinColumnNames:
         assert _val(rows[0], "id_l") == 1 and _val(rows[0], "y") == 100
         assert _val(rows[1], "id_l") == 2 and _val(rows[1], "y") == 200
 
-    @pytest.mark.skip(reason="Issue #1242: unskip when fixing")
     def test_join_different_column_names_right(self, spark):
         """Right join with F.col() on different column names."""
         df1 = spark.createDataFrame([{"a": 1, "x": 10}])  # only id 1
@@ -115,7 +113,6 @@ class TestIssue421JoinColumnNames:
         assert _val(r2, "x") is None
         assert _val(r2, "y") == 200
 
-    @pytest.mark.skip(reason="Issue #1242: unskip when fixing")
     def test_join_different_column_names_outer(self, spark):
         """Full outer join with F.col() on different column names."""
         df1 = spark.createDataFrame(
