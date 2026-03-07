@@ -98,6 +98,11 @@ impl DataFrame {
         self.0.get_alias()
     }
 
+    /// Set the table alias (e.g. for join right operand so select(right.name) resolves to name_right). Used by Python join() (#1254).
+    pub fn set_alias(&self, name: Option<&str>) {
+        self.0.set_alias(name);
+    }
+
     /// Filter rows using an engine-agnostic expression (ExprIr).
     pub fn filter_expr_ir(&self, condition: &ExprIr) -> Result<DataFrame, EngineError> {
         downcast_df(DataFrameBackend::filter(&self.0, condition)?)

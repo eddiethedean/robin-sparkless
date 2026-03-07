@@ -187,11 +187,16 @@ pub fn join(
         }
     }
 
-    let keys_differ = left_key_names != right_key_names;
+    let mut keys_differ = left_key_names != right_key_names;
 
     if !keys_differ {
         // #1009, #1019: When aliasing right key to left name, right may already have a column with that name (e.g. self-join).
+        let left_names: Vec<String> = left.columns()?.into_iter().collect();
         let right_names: Vec<String> = right.columns()?.into_iter().collect();
+        let key_set: std::collections::HashSet<&str> =
+            left_key_names.iter().map(|s| s.as_str()).collect();
+        let left_set: std::collections::HashSet<&str> =
+            left_names.iter().map(|s| s.as_str()).collect();
         let mut renames: std::collections::HashMap<String, String> =
             std::collections::HashMap::new();
         for (i, _) in left_on.iter().enumerate() {
@@ -199,6 +204,27 @@ pub fn join(
             let right_key = &right_key_names[i];
             if target_name != right_key && right_names.iter().any(|n| n == target_name) {
                 renames.insert(target_name.clone(), format!("{}_right", target_name));
+            }
+        }
+        // #1254: Rename same-named keys to key_right so result has both columns and left/right/outer get nulls for unmatched rows.
+        let mut same_key_renamed = false;
+        for (i, _) in left_on.iter().enumerate() {
+            if left_key_names[i] == right_key_names[i] {
+                renames.insert(
+                    right_key_names[i].clone(),
+                    format!("{}_right", right_key_names[i]),
+                );
+                same_key_renamed = true;
+            }
+        }
+        // #1254: Rename right non-key columns that conflict with left (e.g. both have "name")
+        // to "{name}_right" so join result has distinct columns and select(dept_df.name.alias("name_right")) resolves.
+        for n in &right_names {
+            if key_set.contains(n.as_str()) {
+                continue;
+            }
+            if left_set.contains(n.as_str()) {
+                renames.insert(n.clone(), format!("{n}_right"));
             }
         }
         if !renames.is_empty() {
@@ -213,9 +239,16 @@ pub fn join(
                 })
                 .collect();
             right_lf = right_lf.select(&exprs);
+            for rk in right_key_names.iter_mut() {
+                if let Some(new_name) = renames.get(rk) {
+                    *rk = new_name.clone();
+                }
+            }
         }
 
         // Coerce join keys to a common type when left/right dtypes differ (PySpark #274).
+        // Skip when we renamed same-named keys to key_right (right_lf already has new names).
+        if !same_key_renamed {
         // Alias right keys to left key names so result has one key column name (#604, #743).
         let mut left_casts: Vec<Expr> = Vec::new();
         let mut right_casts: Vec<Expr> = Vec::new();
@@ -266,6 +299,10 @@ pub fn join(
                 let keep: Vec<Expr> = keep_names.iter().map(|s| col(*s)).collect();
                 right_lf = right_lf.select(&keep);
             }
+        }
+        }
+        if same_key_renamed {
+            keys_differ = true;
         }
     }
 
@@ -357,6 +394,49 @@ pub fn join(
         let keep_exprs: Vec<Expr> = all_names
             .iter()
             .filter(|n| !temp_set.contains(n.as_str()))
+            .map(|n| col(n.as_str()))
+            .collect();
+        joined = joined.select(&keep_exprs);
+    }
+
+    // When same-named keys were renamed to key_right, coalesce so result has one key column
+    // (PySpark parity #353, #1049; right/outer get correct key for right-only rows #280, type coercion test).
+    // Skip for semi/anti: Polars returns only left columns, so key_right is not in the result.
+    if coalesce_same_name_keys
+        && keys_differ
+        && !matches!(how, JoinType::LeftSemi | JoinType::LeftAnti)
+    {
+        use polars::prelude::coalesce as pl_coalesce;
+        use crate::type_coercion::find_common_type_for_join;
+        for i in 0..left_key_names.len() {
+            let left_k = &left_key_names[i];
+            let right_k = &right_key_names[i];
+            let coalesced =
+                pl_coalesce(&[col(left_k.as_str()), col(right_k.as_str())]);
+            // Cast to common type so join key is numeric when one side is numeric (type coercion parity).
+            let left_dtype = left.get_column_dtype(left_k.as_str()).ok();
+            let right_dtype = right
+                .get_column_dtype(left_k.as_str())
+                .or_else(|| right.get_column_dtype(right_k.strip_suffix("_right").unwrap_or(right_k)))
+                .ok();
+            let coalesced = match (left_dtype, right_dtype) {
+                (Some(l), Some(r)) if l != r => {
+                    find_common_type_for_join(&l, &r)
+                        .map(|common| coalesced.cast(common))
+                        .unwrap_or(coalesced)
+                }
+                _ => coalesced,
+            };
+            joined = joined.with_column(coalesced.alias(left_k.as_str()));
+        }
+        let drop_set: std::collections::HashSet<&str> =
+            right_key_names.iter().map(|s| s.as_str()).collect();
+        let schema_after = joined.collect_schema()?;
+        let names_after: Vec<String> =
+            schema_after.iter_names().map(|s| s.to_string()).collect();
+        let keep_exprs: Vec<Expr> = names_after
+            .iter()
+            .filter(|n| !drop_set.contains(n.as_str()))
             .map(|n| col(n.as_str()))
             .collect();
         joined = joined.select(&keep_exprs);

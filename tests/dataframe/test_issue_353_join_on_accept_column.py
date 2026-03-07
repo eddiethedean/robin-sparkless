@@ -18,8 +18,13 @@ def test_join_on_column(spark) -> None:
     right = spark.createDataFrame([{"id": 1, "w": 20}], ["id", "w"])
     from tests.utils import _row_to_dict, assert_rows_equal
 
-    # Use qualified columns to avoid ambiguous reference (left.id == right.id)
-    result = left.join(right, left["id"] == right["id"]).collect()
+    # Use qualified columns to avoid ambiguous reference (left.id == right.id).
+    # Select id, v, w so result has one key column (condition join keeps id and id_right).
+    result = (
+        left.join(right, left["id"] == right["id"])
+        .select("id", "v", "w")
+        .collect()
+    )
     assert_rows_equal(
         [_row_to_dict(r) for r in result],
         [{"id": 1, "v": 10, "w": 20}],
