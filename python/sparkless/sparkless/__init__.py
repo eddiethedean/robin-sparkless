@@ -201,6 +201,14 @@ def posexplode(col_or_name):
     return _PosexplodeResult(pos_col, val_col)
 
 
+def posexplode_outer(col_or_name):
+    """Explode array with position; null/empty yields one row (PySpark posexplode_outer)."""
+    if isinstance(col_or_name, str):
+        col_or_name = column(col_or_name)
+    pos_col, val_col = _mod.posexplode_outer(col_or_name)
+    return _PosexplodeResult(pos_col, val_col)
+
+
 to_timestamp = _mod.to_timestamp
 to_date = _mod.to_date
 current_date = _mod.current_date

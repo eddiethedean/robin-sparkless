@@ -32,6 +32,27 @@ fn expr_refs_column(expr: &Expr, column_name: &str) -> bool {
     expr_referenced_columns(expr).contains(column_name)
 }
 
+/// If the expression contains an Explode node, return its input and options (for posexplode detection).
+fn find_explode_in_expr(expr: &Expr) -> Option<(Arc<Expr>, polars::prelude::ExplodeOptions)> {
+    if let Expr::Explode { input, options } = expr {
+        return Some((input.clone(), *options));
+    }
+    if let Expr::Alias(inner, _) = expr {
+        return find_explode_in_expr(inner.as_ref());
+    }
+    // Recurse into common wrappers so we find Explode inside StructField etc.
+    let out = RefCell::new(None);
+    let _ = expr.clone().try_map_expr(|e| {
+        if out.borrow().is_none() {
+            if let Expr::Explode { input, options } = &e {
+                out.borrow_mut().replace((input.clone(), *options));
+            }
+        }
+        Ok(e)
+    });
+    out.into_inner()
+}
+
 /// Replace a pure literal expr with a column-referencing expr so Polars produces correct row count.
 /// Polars lit() in select-only or empty-df contexts yields 1 row; we need N rows (or 0 for empty).
 fn expand_pure_literal_to_rows(expr: Expr, first_col: Option<&str>) -> Result<Expr, PolarsError> {
@@ -115,10 +136,64 @@ pub fn select_with_exprs(
         .map(|e| expand_pure_literal_to_rows(e.clone(), first_col).unwrap_or(e))
         .collect();
 
+    // Detect posexplode: two exprs that each contain Explode(list.eval(...)) with same single list column (#1243).
+    type PosexplodeTarget = (
+        PlSmallStr,
+        polars::prelude::ExplodeOptions,
+        [(PlSmallStr, usize); 2], // (alias_pos, idx_pos), (alias_col, idx_col)
+    );
+    let posexplode_target: Option<PosexplodeTarget> = {
+        let mut by_col: HashMap<
+            String,
+            Vec<(polars::prelude::ExplodeOptions, String, usize)>,
+        > = HashMap::new();
+        for (i, e) in exprs.iter().enumerate() {
+            let (inner, alias_name) = match e {
+                Expr::Alias(inner, name) => (inner.as_ref(), name.as_str().to_string()),
+                _ => continue,
+            };
+            if let Some((input, options)) = find_explode_in_expr(inner) {
+                let refs = expr_referenced_columns(input.as_ref());
+                // List.eval uses col("") for element context; only consider columns that exist in the frame.
+                let frame_refs: Vec<String> = refs
+                    .intersection(&df_columns)
+                    .cloned()
+                    .collect();
+                if frame_refs.len() == 1 {
+                    let list_col = frame_refs.into_iter().next().unwrap();
+                    by_col
+                        .entry(list_col.clone())
+                        .or_default()
+                        .push((options, alias_name, i));
+                }
+            }
+        }
+        by_col
+            .into_iter()
+            .find(|(_, v)| v.len() == 2)
+            .map(|(list_col, mut v)| {
+                v.sort_by_key(|(_, _, i)| *i);
+                let list_col = PlSmallStr::from(list_col.as_str());
+                let options = v[0].0;
+                (
+                    list_col,
+                    options,
+                    [
+                        (PlSmallStr::from(v[0].1.as_str()), v[0].2),
+                        (PlSmallStr::from(v[1].1.as_str()), v[1].2),
+                    ],
+                )
+            })
+    };
+
     // Detect simple explode expressions (e.g. F.explode(col(\"scores\")).alias(\"score\"))
     // and rewrite to use LazyFrame.explode. When alias != source column, add a copy then explode
     // so the original list column is preserved (PySpark select(Name, Value, explode(Value).alias("ExplodedValue"))).
     // Python Column.into_expr() does expr.alias(name), so explode(col).alias("x") becomes Alias(Alias(Explode(...), "x"), "x"); peel one more Alias.
+    let posexplode_pe_col = posexplode_target
+        .as_ref()
+        .map(|(lc, _, _)| format!("__pe_{}", lc.as_str()));
+
     type ExplodeTarget = (
         PlSmallStr,
         Option<PlSmallStr>,
@@ -127,7 +202,23 @@ pub fn select_with_exprs(
     let mut explode_target: Option<ExplodeTarget> = None;
     let exprs: Vec<Expr> = exprs
         .into_iter()
-        .map(|e| match e {
+        .enumerate()
+        .map(|(i, e)| {
+            if let (Some(pt), Some(pe_col)) = (&posexplode_target, &posexplode_pe_col) {
+                if i == pt.2[0].1 {
+                    return col(pe_col.as_str())
+                        .struct_()
+                        .field_by_name("pos")
+                        .alias(pt.2[0].0.as_str());
+                }
+                if i == pt.2[1].1 {
+                    return col(pe_col.as_str())
+                        .struct_()
+                        .field_by_name("col")
+                        .alias(pt.2[1].0.as_str());
+                }
+            }
+            match e {
             Expr::Alias(inner, name) => {
                 let inner_ref = inner.as_ref();
                 let (explode_input, options): (Option<Arc<Expr>>, polars::prelude::ExplodeOptions) =
@@ -189,6 +280,7 @@ pub fn select_with_exprs(
                 }
             }
             other => other,
+        }
         })
         .collect();
     let mut name_count: HashMap<String, u32> = HashMap::new();
@@ -218,7 +310,7 @@ pub fn select_with_exprs(
     // When every expression references no column from the frame, Polars select yields 1 row.
     // Cross-join with a single key column to get N rows (PySpark parity).
     let mut lf = df.lazy_frame();
-    let had_explode = explode_target.is_some();
+    let had_explode = explode_target.is_some() || posexplode_target.is_some();
 
     // If we saw an explode expression on a single column, apply frame-level explode first so
     // non-exploded columns are replicated correctly (PySpark explode parity).
@@ -239,6 +331,22 @@ pub fn select_with_exprs(
             };
             lf = lf.explode(selector, options);
         }
+    }
+    // Posexplode: add list-of-structs column and explode so non-exploded columns replicate (#1243).
+    if let Some((list_col, options, _)) = &posexplode_target {
+        let pe_col = format!("__pe_{}", list_col.as_str());
+        use polars::prelude::as_struct;
+        let pos_inner = (col("").cum_count(false) - lit(1i64)).alias("pos");
+        let val_inner = col("").alias("col");
+        let list_struct = col(list_col.as_str())
+            .list()
+            .eval(as_struct(vec![pos_inner, val_inner]));
+        lf = lf.with_column(list_struct.alias(pe_col.as_str()));
+        let selector = Selector::ByName {
+            names: Arc::from([PlSmallStr::from(pe_col.as_str())]),
+            strict: true,
+        };
+        lf = lf.explode(selector, *options);
     }
     // When we applied explode, the frame was already expanded; rewritten exprs may reference only
     // the new column (e.g. "x"), so we must not use the no-col-refs cross_join path (it would

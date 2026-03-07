@@ -20,6 +20,7 @@ from sparkless import (
     least as _least,
     array_distinct as _array_distinct,
     posexplode as _posexplode,
+    posexplode_outer as _posexplode_outer,
     upper,
     lower,
     substring,
@@ -347,7 +348,9 @@ def posexplode(col_or_name: ColumnOrName) -> _ColumnType:
     return _col_result(_native_fn("posexplode")(_as_col(col_or_name)))
 
 
-posexplode_outer = _ni("posexplode_outer")
+def posexplode_outer(col_or_name: ColumnOrName) -> _ColumnType:
+    """Explode array with position; null/empty yields one row (PySpark posexplode_outer)."""
+    return _col_result(_posexplode_outer(col_or_name))
 
 
 def flatten(col_or_name: ColumnOrName) -> _ColumnType:
