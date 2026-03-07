@@ -57,8 +57,6 @@ def test_group_by_pivot_with_values(spark) -> None:
     assert "C" in rows[0]
     # PySpark parity: pivot value with no matching rows → null
     assert rows[0]["C"] is None
-
-
 @pytest.mark.skip(reason="Issue #1222: unskip when fixing")
 def test_group_by_pivot_column_order_from_values(spark) -> None:
     """PySpark: when values= is provided, column order follows the values list."""
@@ -92,8 +90,6 @@ def test_group_by_pivot_numeric_pivot_column(spark) -> None:
     by_k = {r["k"]: r for r in rows}
     assert by_k[1]["10"] == 100 and by_k[1]["20"] == 200
     assert by_k[2]["10"] == 150 and by_k[2]["20"] is None
-
-
 @pytest.mark.skip(reason="Issue #1222: unskip when fixing")
 def test_group_by_pivot_null_in_pivot_column(spark) -> None:
     """PySpark: null in pivot_col becomes a column named 'null'."""

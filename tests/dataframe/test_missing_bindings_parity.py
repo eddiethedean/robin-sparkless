@@ -27,8 +27,6 @@ def _spark_and_df():
     # inferred from data (double for n, string for s/t), matching real PySpark.
     schema = ["s", "n", "t"]
     return spark, spark.createDataFrame(data, schema)
-
-
 @pytest.mark.skip(reason="Issue #1249: unskip when fixing")
 def test_length_module_and_method() -> None:
     _, df = _spark_and_df()
@@ -40,9 +38,6 @@ def test_length_module_and_method() -> None:
 
     with pytest.raises(TypeError):
         df.select(F.col("s").length()).collect()
-
-
-@pytest.mark.skip(reason="Issue #1249: unskip when fixing")
 def test_trim_ltrim_rtrim_module_and_method() -> None:
     _, df = _spark_and_df()
     df.select(F.trim(F.col("s"))).collect()
@@ -50,9 +45,6 @@ def test_trim_ltrim_rtrim_module_and_method() -> None:
     # via functions module. We only assert the module-level bindings work.
     df.select(F.ltrim(F.col("s"))).collect()
     df.select(F.rtrim(F.col("s"))).collect()
-
-
-@pytest.mark.skip(reason="Issue #1249: unskip when fixing")
 def test_repeat_reverse_initcap_module_and_method() -> None:
     _, df = _spark_and_df()
     df.select(F.repeat(F.col("s"), 2)).collect()
@@ -64,17 +56,11 @@ def test_regexp_extract_replace_module_and_method() -> None:
     _, df = _spark_and_df()
     df.select(F.regexp_extract(F.col("s"), r"\w+", 0)).collect()
     df.select(F.regexp_replace(F.col("s"), r"\s", "-")).collect()
-
-
-@pytest.mark.skip(reason="Issue #1249: unskip when fixing")
 def test_floor_round_exp_module_and_method() -> None:
     _, df = _spark_and_df()
     df.select(F.floor(F.col("n"))).collect()
     df.select(F.round(F.col("n"), 0)).collect()
     df.select(F.exp(F.col("n"))).collect()
-
-
-@pytest.mark.skip(reason="Issue #1249: unskip when fixing")
 def test_levenshtein_crc32_xxhash64_module_and_method() -> None:
     _, df = _spark_and_df()
     df.select(F.levenshtein(F.col("s"), F.col("t"))).collect()

@@ -36,8 +36,6 @@ class TestIssue372PandasColumnOrder:
         assert rows[0]["ZZZ-FirstColumn"] == "12"
         assert rows[0]["AAA-SecondColumn"] == 10
         assert rows[0]["PPP-ThirdColumn"] == "ab"
-
-    @pytest.mark.skip(reason="Issue #1229: unskip when fixing")
     def test_create_dataframe_from_list_of_dicts_alphabetical(self, spark):
         """List of dicts: columns sorted alphabetically (PySpark behavior)."""
         data = [

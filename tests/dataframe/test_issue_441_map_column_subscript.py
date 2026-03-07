@@ -16,8 +16,6 @@ import pytest
 
 from tests.fixtures.spark_backend import BackendType
 from tests.fixtures.spark_imports import get_spark_imports
-
-
 @pytest.mark.skip(reason="Issue #1245: unskip when fixing")
 def test_map_column_subscript_with_column_key_exact_issue_441(spark, spark_backend):
     """Exact scenario from #441 - map in column, lookup key from another column."""
@@ -54,8 +52,6 @@ def test_map_column_subscript_key_not_found(spark, spark_backend):
 
     assert rows[0]["v"] == 1
     assert rows[1]["v"] is None
-
-
 @pytest.mark.skip(reason="Issue #1245: unskip when fixing")
 def test_map_column_subscript_in_select(spark, spark_backend):
     """map_col[key_col] works in select."""
@@ -93,8 +89,6 @@ def test_map_column_subscript_exact_issue_441_with_int_keys_pyspark(
     assert rows[0]["Size"] == "Small"
     assert rows[1]["Name"] == "Bob"
     assert rows[1]["Size"] == "Medium"
-
-
 @pytest.mark.skip(reason="Issue #1245: unskip when fixing")
 def test_map_column_subscript_then_filter(spark, spark_backend):
     """map_col[key_col] then filter on result."""
@@ -168,8 +162,6 @@ def test_map_column_subscript_multiple_in_select(spark, spark_backend):
 
     assert rows[0]["v1"] == 10
     assert rows[0]["v2"] == 20
-
-
 @pytest.mark.skip(reason="Issue #1245: unskip when fixing")
 def test_map_column_subscript_orderby_result(spark, spark_backend):
     """orderBy on map lookup result."""
@@ -188,8 +180,6 @@ def test_map_column_subscript_orderby_result(spark, spark_backend):
 
     assert [r["id"] for r in rows] == [2, 3, 1]
     assert [r["v"] for r in rows] == [1, 2, 3]
-
-
 @pytest.mark.skip(reason="Issue #1245: unskip when fixing")
 def test_map_column_subscript_when_otherwise(spark, spark_backend):
     """map lookup in when/otherwise expression."""

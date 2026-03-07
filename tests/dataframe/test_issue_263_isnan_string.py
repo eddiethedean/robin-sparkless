@@ -38,7 +38,6 @@ class TestIssue263IsnanString:
 
         result = df.filter(F.isnan(F.col("Value")))
         assert result.collect() == []
-
     @pytest.mark.skip(reason="Issue #1204: unskip when fixing")
     def test_isnan_on_numeric_column_true_only_for_nan(self, spark):
         df = spark.createDataFrame(
@@ -71,7 +70,6 @@ class TestIssue263IsnanString:
         assert rows[0]["one"] is False
         assert rows[0]["none"] is False
         assert rows[0]["nan"] == math.isnan(float("nan"))
-
     @pytest.mark.skip(reason="Issue #1204: unskip when fixing")
     def test_isnan_on_string_and_numeric_columns_in_select(self, spark):
         """Ensure isnan() behaves correctly on both string and numeric columns."""
@@ -104,8 +102,6 @@ class TestIssue263IsnanString:
         assert by_id[2][1] is False  # 0.0
         assert by_id[3][1] is False  # 1.5
         assert by_id[4][1] is False  # None
-
-    @pytest.mark.skip(reason="Issue #1204: unskip when fixing")
     def test_isnan_in_when_otherwise_expression(self, spark):
         """Use isnan() inside when/otherwise to bucket values."""
         df = spark.createDataFrame(

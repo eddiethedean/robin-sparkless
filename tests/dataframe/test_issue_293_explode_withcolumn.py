@@ -22,8 +22,6 @@ class TestIssue293ExplodeWithColumn:
         import uuid
 
         return f"issue-293-{test_name}-{uuid.uuid4().hex[:8]}"
-
-    @pytest.mark.skip(reason="Issue #1211: unskip when fixing")
     def test_explode_in_withcolumn(self):
         """Test explode in withColumn (from issue example)."""
         import inspect
@@ -70,8 +68,6 @@ class TestIssue293ExplodeWithColumn:
             assert all(r["Value"] == ["4", "5"] for r in charlie_rows)
         finally:
             spark.stop()
-
-    @pytest.mark.skip(reason="Issue #1211: unskip when fixing")
     def test_explode_in_select(self):
         """Test explode in select statement."""
         import inspect
@@ -252,8 +248,6 @@ class TestIssue293ExplodeWithColumn:
             assert all(r["Name"] == "Alice" for r in alice_rows)
         finally:
             spark.stop()
-
-    @pytest.mark.skip(reason="Issue #1211: unskip when fixing")
     def test_explode_chained_operations(self):
         """Test explode with chained operations."""
         import inspect
@@ -334,8 +328,6 @@ class TestIssue293ExplodeWithColumn:
             assert {r["ExplodedFlag"] for r in alice_rows} == {True, False}
         finally:
             spark.stop()
-
-    @pytest.mark.skip(reason="Issue #1211: unskip when fixing")
     def test_explode_with_mixed_types(self):
         """Test explode with arrays containing mixed types (strings only, as Polars requires homogeneous types)."""
         import inspect

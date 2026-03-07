@@ -12,9 +12,6 @@ datetime strings and truncates to date.
 """
 
 import datetime
-
-
-@pytest.mark.skip(reason="Issue #1191: unskip when fixing")
 def test_cast_datetime_string_to_date(spark) -> None:
     """Exact scenario from #216: withColumn('d', col('date_str').cast('date'))."""
     df = spark.createDataFrame(
@@ -27,9 +24,6 @@ def test_cast_datetime_string_to_date(spark) -> None:
     assert rows[0]["date_str"] == "2025-01-01 10:30:00"
     # PySpark returns datetime.date for DateType columns
     assert rows[0]["d"] == datetime.date(2025, 1, 1)
-
-
-@pytest.mark.skip(reason="Issue #1191: unskip when fixing")
 def test_cast_date_only_string_to_date(spark) -> None:
     """Date-only string still works."""
     df = spark.createDataFrame(
@@ -40,11 +34,7 @@ def test_cast_date_only_string_to_date(spark) -> None:
     rows = result.collect()
     assert len(rows) == 1
     assert rows[0]["d"] == datetime.date(2025, 1, 1)
-
-
-@pytest.mark.skip(
-    reason="Issue #1137: unskip when fixing try_cast invalid string to date returns null"
-)
+@pytest.mark.skip(reason="Issue #1137: unskip when fixing")
 def test_try_cast_datetime_string_to_date_invalid_null(spark) -> None:
     """Invalid datetime string cast to date yields null."""
     df = spark.createDataFrame(

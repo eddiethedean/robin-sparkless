@@ -11,11 +11,6 @@ from tests.fixtures.spark_imports import get_spark_imports
 _imports = get_spark_imports()
 SparkSession = _imports.SparkSession
 F = _imports.F
-
-
-@pytest.mark.skip(
-    reason="Issue #1143: unskip when fixing posexplode alias and posexplode_outer"
-)
 class TestIssue366AliasPosexplode:
     """Test alias(name) for posexplode (PySpark: two names for two columns)."""
 
@@ -27,6 +22,7 @@ class TestIssue366AliasPosexplode:
         process_id = os.getpid()
         return f"{test_name}_{process_id}_{thread_id}"
 
+    @pytest.mark.skip(reason="Issue #366: unskip when fixing posexplode alias")
     def test_posexplode_alias_two_names_select(self, spark):
         """Select with posexplode().alias('Value1', 'Value2') names both columns (PySpark API)."""
         df = spark.createDataFrame(
@@ -46,6 +42,7 @@ class TestIssue366AliasPosexplode:
         assert by_name["Alice"] == [(0, 10), (1, 20)]
         assert by_name["Bob"] == [(0, 30), (1, 40)]
 
+    @pytest.mark.skip(reason="Issue #366: unskip when fixing posexplode alias")
     def test_posexplode_alias_two_names_no_type_error(self, spark):
         """posexplode().alias('pos', 'val') must not raise TypeError (PySpark API)."""
         df = spark.createDataFrame([{"x": [1, 2], "y": "ok"}])
@@ -64,6 +61,7 @@ class TestIssue366AliasPosexplode:
         assert rows[0]["id"] == 1
         assert rows[0]["idx"] == 0 and rows[0]["elem"] == 42
 
+    @pytest.mark.skip(reason="Issue #366: unskip when fixing posexplode alias")
     def test_posexplode_alias_two_names_empty_array(self, spark):
         """Row with empty array yields 0 rows; row with values explodes."""
         df = spark.createDataFrame([{"id": 1, "arr": []}, {"id": 2, "arr": [10, 20]}])
@@ -76,6 +74,7 @@ class TestIssue366AliasPosexplode:
         assert 2 in by_id
         assert by_id[2] == [(0, 10), (1, 20)]
 
+    @pytest.mark.skip(reason="Issue #366: unskip when fixing posexplode alias")
     def test_posexplode_outer_alias_two_names(self, spark):
         """posexplode_outer with two-name alias; null array row produces one row."""
         df = spark.createDataFrame(
@@ -92,6 +91,7 @@ class TestIssue366AliasPosexplode:
         assert (0, 10) in by_id[1] and (1, 20) in by_id[1]
         assert 2 in by_id
 
+    @pytest.mark.skip(reason="Issue #366: unskip when fixing posexplode alias")
     def test_posexplode_alias_select_two_names(self, spark):
         """Select with posexplode().alias('Value1', 'col') runs (PySpark requires 2 aliases)."""
         df = spark.createDataFrame(
@@ -106,6 +106,7 @@ class TestIssue366AliasPosexplode:
         keys = list(rows[0].asDict().keys()) if rows else []
         assert "Name" in keys and "Value1" in keys
 
+    @pytest.mark.skip(reason="Issue #366: unskip when fixing posexplode alias")
     def test_alias_empty_raises(self, spark):
         """alias() with no arguments works (PySpark behavior: keeps default names)."""
         df = spark.createDataFrame([{"Values": [1, 2]}])

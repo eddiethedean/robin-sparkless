@@ -23,10 +23,6 @@ class TestIssue329LogFloatConstant:
         thread_id = threading.current_thread().ident
         process_id = os.getpid()
         return f"{test_name}_{process_id}_{thread_id}"
-
-    @pytest.mark.skip(
-        reason="Issue #1116: unskip when fixing isin negation, between, log, date/datetime, string arithmetic"
-    )
     def test_log_with_float_base(self):
         """Test log with float constant as base (issue example)."""
         import inspect

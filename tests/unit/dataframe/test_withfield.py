@@ -506,8 +506,6 @@ class TestWithField:
         assert rows[0]["my_struct"]["value_1"] == 999  # Replaced
         assert rows[0]["my_struct"]["value_2"] == "x"  # Unchanged
         assert rows[0]["my_struct"]["value_3"] == "NEW"  # Added
-
-    @pytest.mark.skip(reason="Issue #1119: unskip when fixing withField nested structs")
     def test_withfield_deeply_nested_struct(self, spark):
         """Test withField on deeply nested struct columns."""
         nested_inner = StructType([StructField("inner_value", IntegerType(), True)])
@@ -1285,8 +1283,6 @@ class TestWithField:
             "combined" in rows[0]["my_struct"]
             or rows[0]["my_struct"].get("combined") is not None
         )
-
-    @pytest.mark.skip(reason="Issue #1119: unskip when fixing withField nested structs")
     def test_withfield_very_deeply_nested_struct(self, spark):
         """Test withField with very deeply nested struct (4+ levels)."""
         level4 = StructType([StructField("l4_value", IntegerType(), True)])
@@ -1564,8 +1560,6 @@ class TestWithField:
         rows = result.collect()
         assert rows[0]["my_struct"]["combined"] == 30  # 3 * 10
         assert rows[1]["my_struct"]["combined"] == 80  # 4 * 20
-
-    @pytest.mark.skip(reason="Issue #1119: unskip when fixing withField nested structs")
     def test_withfield_nested_struct_chained_operations(self, spark):
         """Test withField with chained operations on nested struct."""
         nested_struct_type = StructType(

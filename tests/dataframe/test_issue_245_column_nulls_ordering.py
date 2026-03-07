@@ -22,9 +22,6 @@ def test_column_has_desc_nulls_last(spark) -> None:
     assert hasattr(c, "desc_nulls_first")
     assert hasattr(c, "asc_nulls_last")
     assert hasattr(c, "asc_nulls_first")
-
-
-@pytest.mark.skip(reason="Issue #1197: unskip when fixing")
 def test_order_by_desc_nulls_last(spark) -> None:
     """order_by_exprs with col().desc_nulls_last() puts nulls last."""
     data = [{"value": "A"}, {"value": "B"}, {"value": None}, {"value": "C"}]
@@ -37,9 +34,6 @@ def test_order_by_desc_nulls_last(spark) -> None:
     assert values[1] == "B"
     assert values[2] == "A"
     assert values[3] is None
-
-
-@pytest.mark.skip(reason="Issue #1197: unskip when fixing")
 def test_order_by_asc_nulls_first(spark) -> None:
     """order_by_exprs with col().asc_nulls_first() puts nulls first."""
     data = [{"value": "A"}, {"value": "B"}, {"value": None}, {"value": "C"}]

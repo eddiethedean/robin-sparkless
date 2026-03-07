@@ -310,8 +310,7 @@ class TestPivotGroupedData:
         assert row_a["B"] is None
         assert row_b["A"] is None
         assert row_b["B"] == 5.0
-
-    @pytest.mark.skip(reason="Issue #1117: unskip when fixing pivot aggregates/alias")
+    @pytest.mark.skip(reason="Issue #1117: unskip when fixing")
     def test_pivot_multiple_aggregates(self, spark, sample_data):
         """Test pivot with multiple aggregate expressions."""
         df = spark.createDataFrame(sample_data)
@@ -331,8 +330,7 @@ class TestPivotGroupedData:
         assert "A_avg_val" in schema_names
         assert "B_total" in schema_names
         assert "B_avg_val" in schema_names
-
-    @pytest.mark.skip(reason="Issue #1117: unskip when fixing pivot aggregates/alias")
+    @pytest.mark.skip(reason="Issue #1117: unskip when fixing")
     def test_pivot_single_aggregate_with_alias(self, spark, sample_data):
         """Test pivot with single aggregate expression with alias."""
         df = spark.createDataFrame(sample_data)

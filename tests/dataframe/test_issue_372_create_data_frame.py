@@ -229,11 +229,7 @@ def test_create_data_frame_dict_column_order_from_schema_not_insertion(spark) ->
 
 
 # ---- Many columns and unicode ----
-
-
-@pytest.mark.skip(
-    reason="Issue #1142: unskip when fixing createDataFrame kwargs/behavior"
-)
+@pytest.mark.skip(reason="Issue #1142: unskip when fixing")
 def test_create_data_frame_many_columns(spark) -> None:
     """createDataFrame with many columns (e.g. 15) works."""
     n = 15
@@ -243,11 +239,6 @@ def test_create_data_frame_many_columns(spark) -> None:
     out = df.collect()[0]
     for i in range(n):
         assert out[names[i]] == i
-
-
-@pytest.mark.skip(
-    reason="Issue #1142: unskip when fixing createDataFrame kwargs/behavior"
-)
 def test_create_data_frame_unicode_column_names(spark) -> None:
     """createDataFrame with unicode in column names works."""
     data = [{"name": "Alice", "âge": 25}]
@@ -264,11 +255,7 @@ def test_create_data_frame_invalid_row_type_raises(spark) -> None:
     data = [{"a": 1}, 42]
     with pytest.raises(Exception):
         spark.createDataFrame(data)
-
-
-@pytest.mark.skip(
-    reason="Issue #1142: unskip when fixing createDataFrame kwargs/behavior"
-)
+@pytest.mark.skip(reason="Issue #1142: unskip when fixing")
 def test_create_data_frame_mixed_dict_and_list_rows_raises(spark) -> None:
     """First row dict, second row list raises at execution time (shape mismatch)."""
     data = [{"a": 1}, (2,)]

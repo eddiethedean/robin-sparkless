@@ -11,9 +11,6 @@ from tests.fixtures.spark_imports import get_spark_imports
 
 _imports = get_spark_imports()
 F = _imports.F
-
-
-@pytest.mark.skip(reason="Issue #1221: unskip when fixing")
 def test_group_by_avg_column_expression(spark) -> None:
     """df.groupBy(\"k\").avg(col(\"v\")) works (issue repro)."""
     df = spark.createDataFrame(
@@ -24,9 +21,6 @@ def test_group_by_avg_column_expression(spark) -> None:
     assert len(out) == 1
     assert out[0]["k"] == "a"
     assert out[0]["avg(v)"] == 15.0
-
-
-@pytest.mark.skip(reason="Issue #1221: unskip when fixing")
 def test_group_by_avg_string_still_works(spark) -> None:
     """df.groupBy(\"k\").avg(\"v\") still works."""
     df = spark.createDataFrame(
@@ -36,9 +30,6 @@ def test_group_by_avg_string_still_works(spark) -> None:
     out = df.groupBy("k").avg("v").collect()
     assert len(out) == 1
     assert out[0]["avg(v)"] == 15.0
-
-
-@pytest.mark.skip(reason="Issue #1221: unskip when fixing")
 def test_group_by_sum_column_expression(spark) -> None:
     """df.groupBy(\"k\").sum(col(\"v\")) works."""
     df = spark.createDataFrame(

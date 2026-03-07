@@ -221,10 +221,7 @@ class TestIssue327OrderByAscending:
             assert rows[2]["StringValue"] == "AAA"
         finally:
             spark.stop()
-
-    @pytest.mark.skip(
-        reason="Issue #1139: unskip when fixing asc_nulls_last / orderBy null ordering"
-    )
+    @pytest.mark.skip(reason="Issue #1139: unskip when fixing")
     def test_orderby_with_null_values(self):
         """Test orderBy with null values (explicit nulls last for PySpark)."""
         spark = SparkSession.builder.appName("issue-327").getOrCreate()
@@ -333,10 +330,7 @@ class TestIssue327OrderByAscending:
             assert all(row["Value"] is None for row in rows)
         finally:
             spark.stop()
-
-    @pytest.mark.skip(
-        reason="Issue #1139: unskip when fixing asc_nulls_last / orderBy null ordering"
-    )
+    @pytest.mark.skip(reason="Issue #1139: unskip when fixing")
     def test_orderby_mixed_nulls_and_values(self):
         """Test orderBy with mixed null and non-null values (explicit nulls last)."""
         spark = SparkSession.builder.appName("issue-327").getOrCreate()

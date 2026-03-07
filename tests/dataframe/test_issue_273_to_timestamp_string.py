@@ -14,9 +14,6 @@ from tests.fixtures.spark_imports import get_spark_imports
 
 _imports = get_spark_imports()
 F = _imports.F
-
-
-@pytest.mark.skip(reason="Issue #1205: unskip when fixing")
 def test_to_timestamp_string_no_format(spark) -> None:
     """to_timestamp(col('ts_str')) without format parses 'YYYY-MM-DD HH:MM:SS'."""
     df = spark.createDataFrame(
@@ -29,9 +26,6 @@ def test_to_timestamp_string_no_format(spark) -> None:
     assert rows[0]["ts"] is not None
     ts = rows[0]["ts"]
     assert "2024-01-01" in str(ts) and "10:00:00" in str(ts)
-
-
-@pytest.mark.skip(reason="Issue #1205: unskip when fixing")
 def test_to_timestamp_string_with_format(spark) -> None:
     """to_timestamp(col('ts_str'), \"yyyy-MM-dd'T'HH:mm:ss\") parses ISO-like strings."""
     df = spark.createDataFrame(

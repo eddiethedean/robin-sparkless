@@ -17,9 +17,6 @@ https://github.com/eddiethedean/sparkless/issues/445
 import pytest
 
 from tests.fixtures.spark_imports import get_spark_imports
-
-
-@pytest.mark.skip(reason="Issue #1246: unskip when fixing")
 def test_between_string_column_numeric_bounds_exact_issue_445(spark, spark_backend):
     """Exact scenario from #445 - string column with numeric bounds."""
     F = get_spark_imports(spark_backend).F
@@ -68,9 +65,6 @@ def test_between_string_column_numeric_bounds_none_in_range(spark, spark_backend
     rows = result.collect()
 
     assert len(rows) == 0
-
-
-@pytest.mark.skip(reason="Issue #1246: unskip when fixing")
 def test_between_string_column_float_bounds(spark, spark_backend):
     """String column with float bounds."""
     F = get_spark_imports(spark_backend).F
@@ -86,9 +80,6 @@ def test_between_string_column_float_bounds(spark, spark_backend):
 
     assert len(rows) == 1
     assert rows[0]["val"] == "3.5"
-
-
-@pytest.mark.skip(reason="Issue #1246: unskip when fixing")
 def test_between_string_column_invalid_numeric_returns_null(spark, spark_backend):
     """String that can't parse as number -> null -> excluded from filter."""
     F = get_spark_imports(spark_backend).F
@@ -122,9 +113,6 @@ def test_between_integer_column_numeric_bounds_unchanged(spark, spark_backend):
 
     assert len(rows) == 1
     assert rows[0]["val"] == 5
-
-
-@pytest.mark.skip(reason="Issue #1246: unskip when fixing")
 def test_between_string_column_with_lit_bounds(spark, spark_backend):
     """between with F.lit() for bounds."""
     F = get_spark_imports(spark_backend).F
@@ -161,9 +149,6 @@ def test_between_string_column_in_select_expression(spark, spark_backend):
 
     assert rows[0]["in_range"] is True
     assert rows[1]["in_range"] is False
-
-
-@pytest.mark.skip(reason="Issue #1246: unskip when fixing")
 def test_between_string_column_inclusive_boundaries(spark, spark_backend):
     """String values equal to lower/upper bound are included."""
     F = get_spark_imports(spark_backend).F
@@ -199,9 +184,6 @@ def test_between_string_column_null_excluded(spark, spark_backend):
 
     assert len(rows) == 1
     assert rows[0]["id"] == 1
-
-
-@pytest.mark.skip(reason="Issue #1246: unskip when fixing")
 def test_between_string_column_negative_numbers(spark, spark_backend):
     """String column with negative numbers."""
     F = get_spark_imports(spark_backend).F
@@ -218,9 +200,6 @@ def test_between_string_column_negative_numbers(spark, spark_backend):
 
     assert len(rows) == 1
     assert rows[0]["val"] == "-5"
-
-
-@pytest.mark.skip(reason="Issue #1246: unskip when fixing")
 def test_between_string_column_then_orderby(spark, spark_backend):
     """Filter with between then orderBy."""
     F = get_spark_imports(spark_backend).F
@@ -262,11 +241,6 @@ def test_between_string_column_in_when_otherwise(spark, spark_backend):
     assert tier_map[1] == "low"
     assert tier_map[2] == "mid"
     assert tier_map[3] == "high"
-
-
-@pytest.mark.skip(
-    reason="Issue #1116: unskip when fixing isin negation, between, log, date/datetime, string arithmetic"
-)
 def test_between_string_column_not_between(spark, spark_backend):
     """~between (NOT between) filters inverse."""
     F = get_spark_imports(spark_backend).F
@@ -282,9 +256,6 @@ def test_between_string_column_not_between(spark, spark_backend):
 
     assert len(rows) == 1
     assert rows[0]["val"] == "15"
-
-
-@pytest.mark.skip(reason="Issue #1246: unskip when fixing")
 def test_between_string_column_chained_with_select(spark, spark_backend):
     """filter + select + filter chain with string column between."""
     F = get_spark_imports(spark_backend).F
@@ -305,9 +276,6 @@ def test_between_string_column_chained_with_select(spark, spark_backend):
 
     assert len(rows) == 1
     assert rows[0]["val"] == "7"
-
-
-@pytest.mark.skip(reason="Issue #1246: unskip when fixing")
 def test_between_string_column_zero_bounds(spark, spark_backend):
     """between with zero in bounds."""
     F = get_spark_imports(spark_backend).F

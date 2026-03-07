@@ -213,8 +213,6 @@ class TestIssue326FormatString:
             assert "Age: 30" in row_bob["Info"]
         finally:
             spark.stop()
-
-    @pytest.mark.skip(reason="Issue #1214: unskip when fixing")
     def test_format_string_empty_strings(self):
         """Test format_string with empty strings."""
         import inspect
@@ -478,8 +476,6 @@ class TestIssue326FormatString:
             assert "True" in result or "true" in result
         finally:
             spark.stop()
-
-    @pytest.mark.skip(reason="Issue #1214: unskip when fixing")
     def test_format_string_format_specifiers(self):
         """Test format_string with various format specifiers (%x, %o, %e, etc.)."""
         import inspect
@@ -513,8 +509,6 @@ class TestIssue326FormatString:
             assert rows[0]["OctResult"] == "100"
         finally:
             spark.stop()
-
-    @pytest.mark.skip(reason="Issue #1214: unskip when fixing")
     def test_format_string_precision_formatting(self):
         """Test format_string with precision formatting (%.3f, %05d, etc.)."""
         import inspect

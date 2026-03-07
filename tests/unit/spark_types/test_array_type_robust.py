@@ -107,10 +107,7 @@ class TestArrayTypeRobust:
 
         rows = df.collect()
         assert rows[0]["triple"] == [[[1, 2], [3, 4]], [[5, 6], [7, 8]]]
-
-    @pytest.mark.skip(
-        reason="Issue #1115: unskip when fixing types and strictness (array, astype, to_date)"
-    )
+    @pytest.mark.skip(reason="Issue #1115: unskip when fixing")
     def test_array_type_elementtype_with_map_type(self, spark):
         """Test ArrayType with elementType as MapType."""
         schema = StructType(
@@ -132,10 +129,7 @@ class TestArrayTypeRobust:
         assert len(rows[0]["map_array"]) == 2
         assert rows[0]["map_array"][0]["key1"] == 1
         assert rows[0]["map_array"][1]["key3"] == 3
-
-    @pytest.mark.skip(
-        reason="Issue #1115: unskip when fixing types and strictness (array, astype, to_date)"
-    )
+    @pytest.mark.skip(reason="Issue #1115: unskip when fixing")
     def test_array_type_elementtype_with_struct_type(self, spark):
         """Test ArrayType with elementType as StructType."""
         element_struct = StructType(
@@ -187,10 +181,6 @@ class TestArrayTypeRobust:
 
         rows = df.collect()
         assert rows[0]["arr"] == ["a", None, "b", None, "c"]
-
-    @pytest.mark.skip(
-        reason="Issue #1115: unskip when fixing types and strictness (array, astype, to_date)"
-    )
     def test_array_type_elementtype_with_non_nullable_array(self, spark):
         """Test ArrayType with elementType and containsNull=False (PySpark API)."""
         # PySpark: ArrayType(elementType, containsNull=True)
@@ -278,10 +268,7 @@ class TestArrayTypeRobust:
         result2 = df.select(F.size("values").alias("size"))
         rows2 = result2.collect()
         assert rows2[0]["size"] == 5
-
-    @pytest.mark.skip(
-        reason="Issue #1115: unskip when fixing types and strictness (array, astype, to_date)"
-    )
+    @pytest.mark.skip(reason="Issue #1115: unskip when fixing")
     def test_array_type_elementtype_with_filter_operation(self, spark):
         """Test ArrayType with elementType in filter operations."""
         schema = StructType(

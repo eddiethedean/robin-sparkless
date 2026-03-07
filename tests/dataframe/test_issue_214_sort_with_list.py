@@ -80,8 +80,6 @@ def test_sort_with_explicit_column_list(spark):
 
     rows = result.collect()
     assert len(rows) == 3
-
-
 @pytest.mark.skip(reason="Issue #1189: unskip when fixing")
 def test_sort_with_tuple(spark):
     """Tuple input to sort() raises clear error in PySpark (NOT_COLUMN_OR_STR)."""

@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 import pytest
-
-
 @pytest.mark.skip(reason="Issue #1238: unskip when fixing")
 def test_rdd_flatmap_words(spark) -> None:
     """Reproduce issue #408: df.rdd.flatMap splits lines into words."""
@@ -21,24 +19,18 @@ def test_rdd_flatmap_words(spark) -> None:
         "is",
         "useful",
     ]
-
-
 @pytest.mark.skip(reason="Issue #1238: unskip when fixing")
 def test_rdd_flatmap_empty_iterable(spark) -> None:
     """flatMap with func that sometimes returns empty iterable."""
     df = spark.createDataFrame([(1,), (0,), (2,)], ["x"])
     rdd = df.rdd.flatMap(lambda row: range(row["x"]) if row["x"] > 0 else [])
     assert rdd.collect() == [0, 0, 1]
-
-
 @pytest.mark.skip(reason="Issue #1238: unskip when fixing")
 def test_rdd_flatmap_then_map(spark) -> None:
     """flatMap then map (chaining)."""
     df = spark.createDataFrame([("a b",), ("c",)], ["line"])
     rdd = df.rdd.flatMap(lambda row: row["line"].split()).map(lambda s: s.upper())
     assert rdd.collect() == ["A", "B", "C"]
-
-
 @pytest.mark.skip(reason="Issue #1238: unskip when fixing")
 def test_rdd_flatmap_empty_rdd(spark) -> None:
     """flatMap on empty DataFrame yields empty RDD."""
@@ -51,16 +43,12 @@ def test_rdd_flatmap_empty_rdd(spark) -> None:
     rdd = df.rdd.flatMap(lambda row: row["line"].split())
     assert rdd.collect() == []
     assert rdd.count() == 0
-
-
 @pytest.mark.skip(reason="Issue #1238: unskip when fixing")
 def test_rdd_flatmap_one_element_per_row(spark) -> None:
     """flatMap with each row mapping to a single-element iterable."""
     df = spark.createDataFrame([(1,), (2,), (3,)], ["x"])
     rdd = df.rdd.flatMap(lambda row: (row["x"] * 10,))
     assert rdd.collect() == [10, 20, 30]
-
-
 @pytest.mark.skip(reason="Issue #1238: unskip when fixing")
 def test_rdd_flatmap_tuples_for_pair_ops(spark) -> None:
     """flatMap to (key, value) pairs (e.g. for word count style)."""
@@ -68,8 +56,6 @@ def test_rdd_flatmap_tuples_for_pair_ops(spark) -> None:
     rdd = df.rdd.flatMap(lambda row: ((word, 1) for word in row["line"].split()))
     collected = sorted(rdd.collect())
     assert collected == [("a", 1), ("a", 1), ("b", 1), ("c", 1)]
-
-
 @pytest.mark.skip(reason="Issue #1238: unskip when fixing")
 def test_rdd_flatmap_then_filter(spark) -> None:
     """flatMap then filter."""
@@ -79,8 +65,6 @@ def test_rdd_flatmap_then_filter(spark) -> None:
     )
     # isupper(): ONE, TWO, THREE; len > 3: "three" (lowercase)
     assert sorted(rdd.collect()) == ["ONE", "THREE", "TWO", "three"]
-
-
 @pytest.mark.skip(reason="Issue #1238: unskip when fixing")
 def test_rdd_flatmap_then_count_take_first(spark) -> None:
     """flatMap then count(), take(), first()."""
@@ -90,16 +74,12 @@ def test_rdd_flatmap_then_count_take_first(spark) -> None:
     assert len(rdd.take(2)) == 2
     assert rdd.take(2) == ["x", "y"]
     assert rdd.first() == "x"
-
-
 @pytest.mark.skip(reason="Issue #1238: unskip when fixing")
 def test_rdd_flatmap_empty_string_split(spark) -> None:
     """flatMap with empty string split yields no elements for that row."""
     df = spark.createDataFrame([("a b",), ("",), ("c",)], ["line"])
     rdd = df.rdd.flatMap(lambda row: row["line"].split())
     assert rdd.collect() == ["a", "b", "c"]
-
-
 @pytest.mark.skip(reason="Issue #1238: unskip when fixing")
 def test_rdd_flatmap_then_reduce(spark) -> None:
     """flatMap then reduce (e.g. sum of all numbers)."""
@@ -107,8 +87,6 @@ def test_rdd_flatmap_then_reduce(spark) -> None:
     rdd = df.rdd.flatMap(lambda row: (row["x"], row["x"] + 1))
     total = rdd.reduce(lambda a, b: a + b)
     assert total == (1 + 2 + 2 + 3 + 3 + 4)  # 1,2,2,3,3,4
-
-
 @pytest.mark.skip(reason="Issue #1238: unskip when fixing")
 def test_rdd_flatmap_chain_double_flatmap(spark) -> None:
     """Chained flatMaps: split then each word -> [word, word.upper()]."""
@@ -118,8 +96,6 @@ def test_rdd_flatmap_chain_double_flatmap(spark) -> None:
     )
     # Default sort: uppercase before lowercase
     assert sorted(rdd.collect()) == sorted(["ab", "AB", "cd", "CD"])
-
-
 @pytest.mark.skip(reason="Issue #1238: unskip when fixing")
 def test_rdd_flatmap_preserves_order(spark) -> None:
     """flatMap preserves order: row order then element order within each row."""

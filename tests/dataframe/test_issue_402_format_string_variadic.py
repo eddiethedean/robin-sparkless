@@ -31,9 +31,6 @@ def test_format_string_variadic_columns() -> None:
     assert len(result) == 2
     assert result[0]["fmt"] == "a=1 b=2"
     assert result[1]["fmt"] == "a=10 b=20"
-
-
-@pytest.mark.skip(reason="Issue #1234: unskip when fixing")
 def test_format_string_string_int() -> None:
     """format_string with %s and %d (PySpark format_string supports variadic columns)."""
     spark = _spark()

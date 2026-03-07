@@ -37,9 +37,6 @@ def test_user_guide_when_then_otherwise(spark) -> None:
     assert rows[0]["category"] == "minor"
     assert rows[1]["category"] == "adult"
     assert rows[2]["category"] == "senior"
-
-
-@pytest.mark.skip(reason="Issue #1176: unskip when fixing")
 def test_user_guide_na_fill_drop(spark) -> None:
     """USER_GUIDE: na().fill() and na().drop()."""
     df = spark.createDataFrame(

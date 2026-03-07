@@ -56,9 +56,6 @@ def test_cast_without_alias_still_works(spark, spark_backend):
     rows = result.collect()
     assert len(rows) == 1
     assert rows[0]["s"] == 123
-
-
-@pytest.mark.skip(reason="Issue #1244: unskip when fixing")
 def test_alias_cast_string_type(spark, spark_backend):
     """alias().cast(StringType()) in select."""
     imports = get_spark_imports(spark_backend)

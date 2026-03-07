@@ -9,9 +9,6 @@ F = _imports.F
 Float/string cast with nulls must not raise TypeError. Nulls are returned as None
 in collect(); callers should check 'value is None' before using 'x in value'.
 """
-
-
-@pytest.mark.skip(reason="Issue #1193: unskip when fixing")
 def test_float_to_string_with_nulls(spark) -> None:
     """Exact scenario from #219: float column with None, cast to string, collect."""
     df = spark.createDataFrame(
@@ -24,9 +21,6 @@ def test_float_to_string_with_nulls(spark) -> None:
     assert rows[0]["f"] == 1.5 and rows[0]["s"] == "1.5"
     assert rows[1]["f"] is None and rows[1]["s"] is None
     assert rows[2]["f"] == 2.0 and rows[2]["s"] == "2.0"
-
-
-@pytest.mark.skip(reason="Issue #1193: unskip when fixing")
 def test_string_to_float_with_nulls(spark) -> None:
     """String column with nulls cast to double; nulls stay None."""
     df = spark.createDataFrame(

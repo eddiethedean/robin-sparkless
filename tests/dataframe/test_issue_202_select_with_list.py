@@ -65,7 +65,6 @@ class TestIssue202SelectWithList:
         assert rows[1].dept == "HR"
         assert rows[2].name == "Charlie"
         assert rows[2].dept == "IT"
-
     @pytest.mark.skip(reason="Issue #1185: unskip when fixing")
     def test_select_with_tuple_of_column_names_raises(self, spark):
         """
