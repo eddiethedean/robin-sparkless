@@ -26,7 +26,6 @@ DateType = imports.DateType
 class TestTypeStrictness:
     """Test type checking in functions (PySpark behavior)."""
 
-    @pytest.mark.skip(reason="Issue #1253: unskip when fixing")
     def test_to_timestamp_accepts_multiple_types(self, spark):
         """to_timestamp accepts StringType, TimestampType, IntegerType, LongType, DateType, DoubleType (PySpark)."""
         df_str = spark.createDataFrame(

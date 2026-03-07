@@ -2121,6 +2121,59 @@ mod tests {
         );
     }
 
+    /// Issue #1253: to_timestamp accepts StringType, TimestampType, IntegerType, LongType, DateType, DoubleType (PySpark).
+    #[test]
+    fn with_column_to_timestamp_accepts_multiple_types() {
+        let spark = SparkSession::builder()
+            .app_name("to_timestamp_types_test")
+            .get_or_create();
+
+        // IntegerType (int) -> unix seconds
+        let rows_int = vec![vec![json!(1672574400)]];
+        let schema_int = vec![("unix_ts".to_string(), "int".to_string())];
+        let df_int = spark
+            .create_dataframe_from_rows(rows_int, schema_int, false, false)
+            .unwrap();
+        let col_ts = functions::to_timestamp(&df_int.column("unix_ts").unwrap(), None).unwrap();
+        let out_int = with_column(&df_int, "parsed", &col_ts, false).unwrap();
+        let rows_out = out_int.collect_as_json_rows().unwrap();
+        assert_eq!(rows_out.len(), 1);
+        assert!(rows_out[0].get("parsed").and_then(|v| v.as_str()).is_some());
+
+        // LongType (long) -> unix seconds
+        let rows_long = vec![vec![json!(1672574400)]];
+        let schema_long = vec![("unix_ts".to_string(), "long".to_string())];
+        let df_long = spark
+            .create_dataframe_from_rows(rows_long, schema_long, false, false)
+            .unwrap();
+        let col_ts_long =
+            functions::to_timestamp(&df_long.column("unix_ts").unwrap(), None).unwrap();
+        let out_long = with_column(&df_long, "parsed", &col_ts_long, false).unwrap();
+        assert_eq!(out_long.collect_as_json_rows().unwrap().len(), 1);
+
+        // DateType (date) -> date to timestamp
+        let rows_date = vec![vec![json!("2023-01-01")]];
+        let schema_date = vec![("date_col".to_string(), "date".to_string())];
+        let df_date = spark
+            .create_dataframe_from_rows(rows_date, schema_date, false, false)
+            .unwrap();
+        let col_ts_date =
+            functions::to_timestamp(&df_date.column("date_col").unwrap(), None).unwrap();
+        let out_date = with_column(&df_date, "parsed", &col_ts_date, false).unwrap();
+        assert_eq!(out_date.collect_as_json_rows().unwrap().len(), 1);
+
+        // DoubleType (double) -> unix seconds with fraction
+        let rows_double = vec![vec![json!(1672574400.5)]];
+        let schema_double = vec![("unix_ts".to_string(), "double".to_string())];
+        let df_double = spark
+            .create_dataframe_from_rows(rows_double, schema_double, false, false)
+            .unwrap();
+        let col_ts_double =
+            functions::to_timestamp(&df_double.column("unix_ts").unwrap(), None).unwrap();
+        let out_double = with_column(&df_double, "parsed", &col_ts_double, false).unwrap();
+        assert_eq!(out_double.collect_as_json_rows().unwrap().len(), 1);
+    }
+
     /// Issue #1054 / #293: with_column(explode(col)) must expand rows and preserve original list column.
     #[test]
     fn with_column_explode_adds_column_and_expands_rows() {
