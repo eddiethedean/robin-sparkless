@@ -4020,6 +4020,8 @@ impl PyDataFrame {
     ) -> PyResult<PyDataFrame> {
         let how_lower = how.to_lowercase();
         if how_lower == "cross" {
+            // #1254: Set right df alias so select(right.name) on result resolves to name_right.
+            other.inner.set_alias(Some("__right"));
             return self
                 .inner
                 .cross_join(&other.inner)
@@ -4095,15 +4097,22 @@ impl PyDataFrame {
                     if left_refs.len() == pairs.len() {
                         let left_refs: Vec<&str> = left_refs.iter().map(|s| s.as_str()).collect();
                         let right_refs: Vec<&str> = right_refs.iter().map(|s| s.as_str()).collect();
+                        // #1254: Set right df alias so select(right.name) on joined df resolves to name_right.
+                        other.inner.set_alias(Some("__right"));
                         let joined = self
                             .inner
                             .join_with_keys(&other.inner, left_refs, right_refs, join_type)
                             .map_err(to_py_err)?;
                         // When the original expression was a compound condition (e.g. key equality AND filter),
                         // reapply the full predicate after the key-based join so additional conditions are honored
-                        // (issue #380: join with compound condition).
-                        let filtered = joined.filter(expr).map_err(to_py_err)?;
-                        return Ok(PyDataFrame::wrap(filtered));
+                        // (issue #380: join with compound condition). Skip for Right/Outer so unmatched right rows
+                        // are not filtered out (#1254).
+                        let result = if matches!(join_type, JoinType::Right | JoinType::Outer) {
+                            joined
+                        } else {
+                            joined.filter(expr).map_err(to_py_err)?
+                        };
+                        return Ok(PyDataFrame::wrap(result));
                     }
                 }
                 // Non-eq expression: cross + filter (ambiguous duplicate column names may apply).
@@ -4170,6 +4179,8 @@ impl PyDataFrame {
 
     #[pyo3(name = "crossJoin")]
     fn cross_join(&self, other: &PyDataFrame) -> PyResult<PyDataFrame> {
+        // #1254: Set right df alias so select(right.name) on result resolves to name_right.
+        other.inner.set_alias(Some("__right"));
         self.inner
             .cross_join(&other.inner)
             .map(PyDataFrame::wrap)

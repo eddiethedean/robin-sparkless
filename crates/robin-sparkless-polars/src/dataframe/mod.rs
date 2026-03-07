@@ -17,6 +17,7 @@ pub use transformations::{
 
 use crate::column::Column;
 use crate::error::{EngineError, polars_to_core_error};
+use std::sync::RwLock;
 use crate::functions::SortOrder;
 use crate::schema::{StructType, StructTypePolarsExt};
 use crate::session::SparkSession;
@@ -73,8 +74,8 @@ pub struct DataFrame {
     pub(crate) inner: DataFrameInner,
     /// When false (default), column names are matched case-insensitively (PySpark behavior).
     pub(crate) case_sensitive: bool,
-    /// Optional alias for subquery/join (PySpark: df.alias("t")).
-    pub(crate) alias: Option<String>,
+    /// Optional alias for subquery/join (PySpark: df.alias("t")). RwLock so join() can set right df alias for column resolution (#1254).
+    pub(crate) alias: RwLock<Option<String>>,
 }
 
 /// Spec for groupBy: either a column name (str) or a Column expression (e.g. col("a").alias("x")).
@@ -93,7 +94,7 @@ impl DataFrame {
         DataFrame {
             inner: DataFrameInner::Lazy(lf),
             case_sensitive: DEFAULT_CASE_SENSITIVE,
-            alias: None,
+            alias: RwLock::new(None),
         }
     }
 
@@ -104,7 +105,7 @@ impl DataFrame {
         DataFrame {
             inner: DataFrameInner::Lazy(lf),
             case_sensitive,
-            alias: None,
+            alias: RwLock::new(None),
         }
     }
 
@@ -115,7 +116,7 @@ impl DataFrame {
         DataFrame {
             inner: DataFrameInner::Eager(Arc::new(df)),
             case_sensitive,
-            alias: None,
+            alias: RwLock::new(None),
         }
     }
 
@@ -124,7 +125,7 @@ impl DataFrame {
         DataFrame {
             inner: DataFrameInner::Lazy(lf),
             case_sensitive: DEFAULT_CASE_SENSITIVE,
-            alias: None,
+            alias: RwLock::new(None),
         }
     }
 
@@ -133,7 +134,7 @@ impl DataFrame {
         DataFrame {
             inner: DataFrameInner::Lazy(lf),
             case_sensitive,
-            alias: None,
+            alias: RwLock::new(None),
         }
     }
 
@@ -143,7 +144,7 @@ impl DataFrame {
         DataFrame {
             inner: self.inner,
             case_sensitive: false,
-            alias: self.alias,
+            alias: RwLock::new(self.alias.read().unwrap().clone()),
         }
     }
 
@@ -152,7 +153,7 @@ impl DataFrame {
         DataFrame {
             inner: DataFrameInner::Lazy(PlDataFrame::empty().lazy()),
             case_sensitive: DEFAULT_CASE_SENSITIVE,
-            alias: None,
+            alias: RwLock::new(None),
         }
     }
 
@@ -184,13 +185,18 @@ impl DataFrame {
         DataFrame {
             inner: DataFrameInner::Lazy(lf),
             case_sensitive: self.case_sensitive,
-            alias: Some(name.to_string()),
+            alias: RwLock::new(Some(name.to_string())),
         }
     }
 
     /// Return the table alias if set (e.g. from df.alias("t")). Used for join condition resolution (#374).
     pub fn get_alias(&self) -> Option<String> {
-        self.alias.clone()
+        self.alias.read().unwrap().clone()
+    }
+
+    /// Set the table alias (e.g. for join right operand so select(right.name) resolves to name_right). Used by Python join() (#1254).
+    pub fn set_alias(&self, name: Option<&str>) {
+        *self.alias.write().unwrap() = name.map(str::to_string);
     }
 
     /// Resolve column names in a Polars expression against this DataFrame's schema.
@@ -1265,9 +1271,15 @@ impl DataFrame {
 
     /// Get a column reference by name (for building expressions).
     /// Respects case sensitivity: when false, "Age" resolves to column "age" if present.
+    /// When this DataFrame has an alias (e.g. right operand after join), returns a qualified reference
+    /// (e.g. "__right.name") so select on the joined DataFrame resolves to the right table's column (#1254).
     pub fn column(&self, name: &str) -> Result<Column, PolarsError> {
-        let resolved = self.resolve_column_name(name)?;
-        Ok(Column::new(resolved))
+        if let Some(alias) = self.alias.read().unwrap().as_deref() {
+            Ok(Column::new(format!("{}.{}", alias, name)))
+        } else {
+            let resolved = self.resolve_column_name(name)?;
+            Ok(Column::new(resolved))
+        }
     }
 
     /// Add or replace a column. Use a [`Column`] (e.g. from `col("x")`, `rand(42)`, `randn(42)`).
@@ -2555,7 +2567,7 @@ impl Clone for DataFrame {
                 DataFrameInner::Lazy(lf) => DataFrameInner::Lazy(lf.clone()),
             },
             case_sensitive: self.case_sensitive,
-            alias: self.alias.clone(),
+            alias: RwLock::new(self.alias.read().unwrap().clone()),
         }
     }
 }

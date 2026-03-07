@@ -48,7 +48,6 @@ def _employees_and_departments(spark):
 class TestJoinParity(ParityTestBase):
     """Test DataFrame join operations parity with PySpark."""
 
-    @pytest.mark.skip(reason="Issue #1254: unskip when fixing")
     def test_inner_join(self, spark):
         """Test inner join matches PySpark behavior."""
         expected = self.load_expected("joins", "inner_join")
@@ -56,7 +55,6 @@ class TestJoinParity(ParityTestBase):
         result = _join_result_with_aliases(emp_df, dept_df, "inner")
         self.assert_parity(result, expected)
 
-    @pytest.mark.skip(reason="Issue #1254: unskip when fixing")
     def test_left_join(self, spark):
         """Test left join matches PySpark behavior."""
         expected = self.load_expected("joins", "left_join")
@@ -64,7 +62,6 @@ class TestJoinParity(ParityTestBase):
         result = _join_result_with_aliases(emp_df, dept_df, "left")
         self.assert_parity(result, expected)
 
-    @pytest.mark.skip(reason="Issue #1254: unskip when fixing")
     def test_right_join(self, spark):
         """Test right join matches PySpark behavior."""
         expected = self.load_expected("joins", "right_join")
@@ -72,7 +69,7 @@ class TestJoinParity(ParityTestBase):
         result = _join_result_with_aliases(emp_df, dept_df, "right")
         self.assert_parity(result, expected)
 
-    @pytest.mark.skip(reason="Issue #1254: unskip when fixing")
+    @pytest.mark.skip(reason="Issue #1254: full outer join right-only/left-only row values differ; inner/left/right/cross fixed")
     def test_outer_join(self, spark):
         """Test outer join matches PySpark behavior."""
         expected = self.load_expected("joins", "outer_join")
@@ -80,7 +77,6 @@ class TestJoinParity(ParityTestBase):
         result = _join_result_with_aliases(emp_df, dept_df, "outer")
         self.assert_parity(result, expected)
 
-    @pytest.mark.skip(reason="Issue #1254: unskip when fixing")
     def test_cross_join(self, spark):
         """Test cross join matches PySpark behavior."""
         expected = self.load_expected("joins", "cross_join")
