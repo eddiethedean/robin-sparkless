@@ -567,12 +567,17 @@ impl PySparkSessionBuilder {
     }
 
     fn get_or_create(&self, py: Python<'_>) -> PyResult<Py<PySparkSession>> {
-        // PySpark parity #1250: return existing singleton so test_multiple_sessions sees one session.
+        // PySpark parity #1250: return existing singleton when builder config is compatible,
+        // so test_multiple_sessions sees one session; #373: create new when builder has extra config.
         let ty = py.get_type_bound::<PySparkSession>();
         if let Ok(singleton) = ty.getattr("_singleton_session") {
             if !singleton.is_none() {
                 if let Ok(sess) = singleton.extract::<Py<PySparkSession>>() {
-                    return Ok(sess);
+                    let sess_ref = sess.bind(py).downcast::<PySparkSession>()?;
+                    let sess_guard = sess_ref.borrow();
+                    if sess_guard.builder_config_compatible(&self.inner) {
+                        return Ok(sess);
+                    }
                 }
             }
         }
@@ -603,6 +608,17 @@ struct PySparkSession {
     inner: SparkSession,
     /// Writable from Python so conftest/fixtures can set backend_type = "robin" (e.g. under pytest-xdist).
     backend_type: RefCell<String>,
+}
+
+impl PySparkSession {
+    /// Returns true if the builder's config is a subset of this session's config (for getOrCreate singleton check).
+    fn builder_config_compatible(&self, builder: &SparkSessionBuilder) -> bool {
+        let existing = self.inner.get_config();
+        let builder_config = builder.get_config();
+        builder_config
+            .iter()
+            .all(|(k, v)| existing.get(k).map(|s| s.as_str()) == Some(v.as_str()))
+    }
 }
 
 thread_local! {
@@ -6465,9 +6481,14 @@ fn spark_session_builder() -> PySparkSessionBuilder {
 }
 
 #[pyfunction]
-fn column(_py: Python<'_>, name: &str) -> PyResult<PyColumn> {
+fn column(py: Python<'_>, name: &str) -> PyResult<PyColumn> {
     // PySpark parity #1250: col() raises AssertionError when no active SparkSession.
-    let has_session = THREAD_ACTIVE_SESSIONS.with(|cell| !cell.borrow().is_empty());
+    // Use class-level singleton so we raise after stop() even when fixture ran in another thread (e.g. pytest-xdist).
+    let has_session = py
+        .get_type_bound::<PySparkSession>()
+        .getattr("_singleton_session")
+        .map(|s| !s.is_none())
+        .unwrap_or(false);
     if !has_session {
         return Err(pyo3::exceptions::PyAssertionError::new_err(
             "col() requires an active SparkSession",

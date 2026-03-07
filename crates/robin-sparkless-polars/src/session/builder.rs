@@ -44,6 +44,11 @@ impl SparkSessionBuilder {
         self
     }
 
+    /// Config key-value pairs set on the builder (for singleton compatibility check).
+    pub fn get_config(&self) -> &HashMap<String, String> {
+        &self.config
+    }
+
     pub fn get_or_create(self) -> SparkSession {
         let mut config = self.config;
         // Batch 8 / #789: spark.conf().get("spark.app.name") should return the app name.

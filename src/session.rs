@@ -39,6 +39,11 @@ impl SparkSessionBuilder {
         SparkSessionBuilder(self.0.config(key, value))
     }
 
+    /// Config key-value pairs set on the builder (for singleton compatibility check).
+    pub fn get_config(&self) -> &HashMap<String, String> {
+        self.0.get_config()
+    }
+
     pub fn get_or_create(self) -> SparkSession {
         SparkSession(self.0.get_or_create())
     }
