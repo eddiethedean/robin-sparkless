@@ -324,6 +324,14 @@ fn is_get_json_object_shape(output_names: Option<&[String]>) -> bool {
     }
 }
 
+/// True when output has both c0 and c1 (json_tuple shape). Used so we only force c0/c1 to string in that context (#1240: union result columns c1..c5 must stay numeric).
+fn is_json_tuple_shape(output_names: Option<&[String]>) -> bool {
+    match output_names {
+        Some(n) => n.iter().any(|s| s == "c0") && n.iter().any(|s| s == "c1"),
+        None => false,
+    }
+}
+
 /// types are preserved even when the engine sent a string (e.g. string-inferred schema).
 /// Recurses for Array and Struct so nested values are coerced too.
 /// When schema is String, value is preserved as string (#1261 PySpark parity).
@@ -389,9 +397,10 @@ fn json_value_to_py_with_schema(
         (Some(DataType::String), JsonValue::Number(n)) => n.to_string().into_py(py),
         // Schema says String but engine sent bool: emit "True"/"False".
         (Some(DataType::String), JsonValue::Bool(b)) => b.to_string().into_py(py),
-        // #1146: json_tuple c0/c1 always string; get_json_object a/nested/missing only when all three columns present.
+        // #1146: json_tuple c0/c1 always string when both present; get_json_object a/nested/missing only when all three columns present. #1240: do not force c1 to string when columns are e.g. c1..c5.
         (Some(DataType::Integer) | Some(DataType::Long), JsonValue::Number(n))
-            if matches!(column_name, Some("c0") | Some("c1"))
+            if (is_json_tuple_shape(output_column_names)
+                && matches!(column_name, Some("c0") | Some("c1")))
                 || (is_get_json_object_shape(output_column_names)
                     && matches!(column_name, Some("a") | Some("nested") | Some("missing"))) =>
         {

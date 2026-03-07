@@ -1118,17 +1118,18 @@ impl DataFrame {
             .collect();
         let names: Vec<String> = names_and_dtypes.iter().map(|(n, _)| n.clone()).collect();
         let plan_dtypes: Vec<DataType> = names_and_dtypes.iter().map(|(_, d)| d.clone()).collect();
-        // #1146: get_json_object returns string; only treat a/nested/missing as String when all three columns present (get_json_object test shape). json_tuple c0/c1 always string.
+        // #1146: get_json_object returns string; only treat a/nested/missing as String when all three columns present (get_json_object test shape). json_tuple c0/c1 always string when both present (#1240: do not force c1 to string when columns are e.g. c1..c5).
         let has_get_json_object_shape = names.iter().any(|n| n == "a")
             && names.iter().any(|n| n == "nested")
             && names.iter().any(|n| n == "missing");
+        let has_json_tuple_shape = names.iter().any(|n| n == "c0") && names.iter().any(|n| n == "c1");
         let effective_dtypes: Vec<DataType> = names
             .iter()
             .zip(plan_dtypes.iter())
             .map(|(name, dt)| {
                 let force_string = dt == &DataType::Int64
-                    && (name.as_str() == "c0"
-                        || name.as_str() == "c1"
+                    && ((has_json_tuple_shape
+                        && (name.as_str() == "c0" || name.as_str() == "c1"))
                         || (has_get_json_object_shape
                             && (name.as_str() == "a"
                                 || name.as_str() == "nested"
