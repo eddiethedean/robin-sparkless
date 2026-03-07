@@ -27,7 +27,6 @@ def _spark_and_df():
     # inferred from data (double for n, string for s/t), matching real PySpark.
     schema = ["s", "n", "t"]
     return spark, spark.createDataFrame(data, schema)
-@pytest.mark.skip(reason="Issue #1249: unskip when fixing")
 def test_length_module_and_method() -> None:
     _, df = _spark_and_df()
     out = df.select(F.length(F.col("s"))).collect()
