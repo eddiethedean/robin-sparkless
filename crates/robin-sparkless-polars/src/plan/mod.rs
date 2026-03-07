@@ -684,6 +684,15 @@ fn parse_aggs(aggs: &[Value], df: &DataFrame) -> Result<Vec<polars::prelude::Exp
         let obj = a
             .as_object()
             .ok_or_else(|| PlanError::InvalidPlan("each agg must be an object".into()))?;
+        // Full expression tree (e.g. cast+alias from Sparkless); issue #1255 / #332.
+        if let Some(expr_val) = obj.get("expr") {
+            let expr = expr_from_value(expr_val).map_err(PlanError::Expr)?;
+            let resolved = df
+                .resolve_expr_column_names(expr)
+                .map_err(PlanError::Session)?;
+            out.push(resolved);
+            continue;
+        }
         // Sparkless may send "func" instead of "agg" (e.g. groupby_first_last; fixes #828–#838).
         let agg = obj
             .get("agg")
@@ -754,6 +763,16 @@ fn parse_aggs(aggs: &[Value], df: &DataFrame) -> Result<Vec<polars::prelude::Exp
             _ => return Err(PlanError::InvalidPlan(format!("unsupported agg: {agg}"))),
         };
         let mut expr = col_expr.into_expr();
+        // Optional cast (e.g. {"agg": "sum", "column": "Score", "alias": "TotalScore", "cast": "int"}); #1255, #332.
+        if let Some(cast_type) = obj
+            .get("cast")
+            .or_else(|| obj.get("cast_type"))
+            .and_then(Value::as_str)
+        {
+            let dtype =
+                crate::functions::parse_type_name(cast_type).map_err(PlanError::InvalidPlan)?;
+            expr = expr.strict_cast(dtype);
+        }
         // #672, #791: PySpark-style result column names (e.g. avg(Value)) when plan does not set alias.
         // #777: Deduplicate aliases so multiple count() etc. get count, count_1, count_2, ...
         // Accept "name" as fallback for "alias" (Sparkless may send either).
