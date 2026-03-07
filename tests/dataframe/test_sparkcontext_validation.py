@@ -78,7 +78,5 @@ class TestSessionValidation:
             spark2.stop()
         # After stopping the singleton SparkSession in PySpark, there is no
         # active SparkContext and expression builders like col() assert.
-        import pytest
-
         with pytest.raises(AssertionError):
             F.col("id")
