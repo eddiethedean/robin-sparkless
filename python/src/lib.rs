@@ -7260,6 +7260,12 @@ fn posexplode(column: &PyColumn) -> (PyColumn, PyColumn) {
 }
 
 #[pyfunction]
+fn posexplode_outer(column: &PyColumn) -> (PyColumn, PyColumn) {
+    let (pos, val) = functions::posexplode_outer(&column.inner);
+    (PyColumn { inner: pos }, PyColumn { inner: val })
+}
+
+#[pyfunction]
 fn regexp_like(column: &PyColumn, pattern: &str) -> PyColumn {
     PyColumn {
         inner: functions::regexp_like(&column.inner, pattern),
@@ -8209,6 +8215,7 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(least, m)?)?;
     m.add_function(wrap_pyfunction!(array_distinct, m)?)?;
     m.add_function(wrap_pyfunction!(posexplode, m)?)?;
+    m.add_function(wrap_pyfunction!(posexplode_outer, m)?)?;
     m.add_function(wrap_pyfunction!(to_timestamp, m)?)?;
     m.add_function(wrap_pyfunction!(to_date, m)?)?;
     m.add_function(wrap_pyfunction!(current_date, m)?)?;
