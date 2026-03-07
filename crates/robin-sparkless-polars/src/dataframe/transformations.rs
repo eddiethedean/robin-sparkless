@@ -2146,7 +2146,8 @@ mod tests {
         let df_long = spark
             .create_dataframe_from_rows(rows_long, schema_long, false, false)
             .unwrap();
-        let col_ts_long = functions::to_timestamp(&df_long.column("unix_ts").unwrap(), None).unwrap();
+        let col_ts_long =
+            functions::to_timestamp(&df_long.column("unix_ts").unwrap(), None).unwrap();
         let out_long = with_column(&df_long, "parsed", &col_ts_long, false).unwrap();
         assert_eq!(out_long.collect_as_json_rows().unwrap().len(), 1);
 
@@ -2156,7 +2157,8 @@ mod tests {
         let df_date = spark
             .create_dataframe_from_rows(rows_date, schema_date, false, false)
             .unwrap();
-        let col_ts_date = functions::to_timestamp(&df_date.column("date_col").unwrap(), None).unwrap();
+        let col_ts_date =
+            functions::to_timestamp(&df_date.column("date_col").unwrap(), None).unwrap();
         let out_date = with_column(&df_date, "parsed", &col_ts_date, false).unwrap();
         assert_eq!(out_date.collect_as_json_rows().unwrap().len(), 1);
 
