@@ -567,6 +567,15 @@ impl PySparkSessionBuilder {
     }
 
     fn get_or_create(&self, py: Python<'_>) -> PyResult<Py<PySparkSession>> {
+        // PySpark parity #1250: return existing singleton so test_multiple_sessions sees one session.
+        let ty = py.get_type_bound::<PySparkSession>();
+        if let Ok(singleton) = ty.getattr("_singleton_session") {
+            if !singleton.is_none() {
+                if let Ok(sess) = singleton.extract::<Py<PySparkSession>>() {
+                    return Ok(sess);
+                }
+            }
+        }
         let session = self.inner.clone().get_or_create();
         let obj = Py::new(
             py,
@@ -6456,10 +6465,17 @@ fn spark_session_builder() -> PySparkSessionBuilder {
 }
 
 #[pyfunction]
-fn column(name: &str) -> PyColumn {
-    PyColumn {
-        inner: robin_sparkless::functions::col(name),
+fn column(_py: Python<'_>, name: &str) -> PyResult<PyColumn> {
+    // PySpark parity #1250: col() raises AssertionError when no active SparkSession.
+    let has_session = THREAD_ACTIVE_SESSIONS.with(|cell| !cell.borrow().is_empty());
+    if !has_session {
+        return Err(pyo3::exceptions::PyAssertionError::new_err(
+            "col() requires an active SparkSession",
+        ));
     }
+    Ok(PyColumn {
+        inner: robin_sparkless::functions::col(name),
+    })
 }
 
 /// Create an expr-string for use in select() (e.g. expr("upper(x) as up")). Resolved when the DataFrame is selected. PySpark F.expr() parity.
