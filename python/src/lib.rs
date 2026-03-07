@@ -537,10 +537,8 @@ impl PySparkSessionBuilder {
         }
     }
 
-    /// PySpark: SparkSession.builder() returns the builder; allow () for compatibility.
-    fn __call__(slf: PyRef<Self>, py: Python<'_>) -> Py<PyAny> {
-        slf.into_py(py)
-    }
+    /// PySpark parity (#412, #1239): Builder is not callable; SparkSession.builder.appName(...) works,
+    /// builder() raises TypeError. We do not implement __call__ so that builder() raises as in PySpark.
 
     fn app_name<'a>(mut slf: PyRefMut<'a, Self>, name: &str) -> PyRefMut<'a, Self> {
         let old = std::mem::replace(&mut slf.inner, SparkSessionBuilder::new());
@@ -756,9 +754,7 @@ impl PySparkSession {
         Ok(obj)
     }
 
-    /// PySpark: SparkSession.builder returns a builder instance.
-    /// We expose it as a class attribute so both `SparkSession.builder.appName(...)`
-    /// and `SparkSession.builder().appName(...)` work (the builder itself is callable).
+    /// PySpark: SparkSession.builder returns a builder instance (not callable; builder() raises TypeError).
     #[classattr]
     fn builder(_py: Python<'_>) -> PySparkSessionBuilder {
         PySparkSessionBuilder {
