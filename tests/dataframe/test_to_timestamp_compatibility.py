@@ -1,6 +1,3 @@
-import pytest
-
-
 class TestToTimestampCompatibility:
     """Test to_timestamp() compatibility with PySpark."""
 

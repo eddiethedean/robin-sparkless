@@ -431,3 +431,7 @@ def pytest_configure(config):
         "markers",
         "backend(mock|pyspark|both|robin): mark test to run with specific backend(s)",
     )
+    config.addinivalue_line(
+        "markers",
+        "integration: mark test as integration test (may require external setup)",
+    )

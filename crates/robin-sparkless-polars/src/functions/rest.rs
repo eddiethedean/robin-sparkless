@@ -1467,8 +1467,7 @@ fn cast_impl(column: &Column, type_name: &str, strict: bool) -> Result<Column, S
         let expr = column.expr().clone().map(
             move |col| {
                 crate::column::expect_col(crate::udfs::apply_string_to_double(
-                    col,
-                    false, // null on invalid for string->double (Spark semantics)
+                    col, false, // null on invalid for string->double (Spark semantics)
                 ))
             },
             |_schema, field| Ok(Field::new(field.name().clone(), DataType::Float64)),
