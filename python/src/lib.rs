@@ -2942,11 +2942,16 @@ fn resolve_join_keys_with_aliases(
     (left_key, right_key)
 }
 
-/// RDD-like wrapper for createDataFrame(df.rdd, schema) (issue #1147 / #361).
-/// Holds the source DataFrame; createDataFrame(rdd, schema) collects it to rows and builds a new DataFrame.
+/// RDD-like wrapper for createDataFrame(df.rdd, schema) (issue #1147 / #361) and df.rdd.flatMap (issue #408 / #1238).
+/// When from df.rdd: holds source_df and inner (DataFrame). When from flatMap/map/filter: holds elements (materialized list).
 #[pyclass]
 struct PyRDD {
-    inner: DataFrame,
+    /// When from df.rdd: the DataFrame as PyDataFrame for collect() to get Row objects.
+    source_df: Option<Py<PyDataFrame>>,
+    /// When from df.rdd: same DataFrame for _to_pylist (collect_as_json_rows).
+    inner: Option<DataFrame>,
+    /// When from flatMap/map/filter: materialized list of Python objects.
+    elements: Option<Vec<PyObject>>,
 }
 
 #[pymethods]
@@ -2960,8 +2965,45 @@ impl PyRDD {
         py: Python<'py>,
         preferred_names: Option<&Bound<'py, PyAny>>,
     ) -> PyResult<Bound<'py, PyList>> {
-        let (col_names, rows, _) = self
-            .inner
+        let Some(ref inner) = self.inner else {
+            // Materialized RDD (from flatMap/map): return list of single-key dicts for createDataFrame(rdd, schema).
+            let Some(ref elements) = self.elements else {
+                return Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>("RDD has no source"));
+            };
+            let (names, _use_preferred_keys): (Vec<String>, bool) = if let Some(arg) = preferred_names {
+                let lst_opt: Option<Bound<'py, PyList>> = if let Ok(lst) = arg.downcast::<PyList>() {
+                    Some(lst.clone())
+                } else if let Ok(tup) = arg.downcast::<pyo3::types::PyTuple>() {
+                    (tup.len() == 1)
+                        .then(|| tup.get_item(0).ok())
+                        .flatten()
+                        .and_then(|item| item.downcast_into::<PyList>().ok())
+                } else {
+                    None
+                };
+                if let Some(lst) = lst_opt {
+                    let n: Vec<String> = lst.iter().filter_map(|it| it.extract::<String>().ok()).collect();
+                    if n.is_empty() {
+                        (vec!["_1".to_string()], false)
+                    } else {
+                        (n, true)
+                    }
+                } else {
+                    (vec!["_1".to_string()], false)
+                }
+            } else {
+                (vec!["_1".to_string()], false)
+            };
+            let out = PyList::empty_bound(py);
+            let key = names.first().map(|s| s.as_str()).unwrap_or("_1");
+            for elem in elements {
+                let dict = PyDict::new_bound(py);
+                dict.set_item(key, elem.bind(py))?;
+                out.append(dict)?;
+            }
+            return Ok(out);
+        };
+        let (col_names, rows, _) = inner
             .collect_as_json_rows_with_names()
             .map_err(to_py_err)?;
         // call_method1(..., (py_names,)) passes a tuple to Python; unwrap single-element tuple.
@@ -2988,7 +3030,7 @@ impl PyRDD {
                 }
             } else {
                 (
-                    self.inner
+                    inner
                         .schema()
                         .ok()
                         .map(|s| s.fields().iter().map(|f| f.name.clone()).collect())
@@ -2998,7 +3040,7 @@ impl PyRDD {
             }
         } else {
             (
-                self.inner
+                inner
                     .schema()
                     .ok()
                     .map(|s| s.fields().iter().map(|f| f.name.clone()).collect())
@@ -3046,6 +3088,114 @@ impl PyRDD {
             }
         }
         Ok(out)
+    }
+
+    /// Collect elements (rows when from df.rdd, or materialized list).
+    fn collect_elements(&self, py: Python<'_>) -> PyResult<Vec<PyObject>> {
+        if let Some(ref elements) = self.elements {
+            return Ok(elements.iter().map(|o| o.clone_ref(py)).collect());
+        }
+        let Some(ref source_df) = self.source_df else {
+            return Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>("RDD has no source"));
+        };
+        let df = source_df.bind(py).downcast::<PyDataFrame>()?;
+        let list_obj = df.call_method0("collect")?;
+        let list = list_obj.downcast::<PyList>()?;
+        let mut vec = Vec::with_capacity(list.len());
+        for item in list.iter() {
+            vec.push(item.into_py(py));
+        }
+        Ok(vec)
+    }
+
+    #[pyo3(name = "flatMap")]
+    fn flat_map(slf: PyRef<Self>, py: Python<'_>, func: &Bound<'_, PyAny>) -> PyResult<PyRDD> {
+        let elements = slf.collect_elements(py)?;
+        let mut out: Vec<PyObject> = Vec::new();
+        for item in elements {
+            let item_bound = item.bind(py);
+            let result = func.call1((item_bound,))?;
+            for x in result.iter()? {
+                let x: Bound<'_, PyAny> = x?;
+                out.push(x.into_py(py));
+            }
+        }
+        Ok(PyRDD {
+            source_df: None,
+            inner: None,
+            elements: Some(out),
+        })
+    }
+
+    fn map(slf: PyRef<Self>, py: Python<'_>, func: &Bound<'_, PyAny>) -> PyResult<PyRDD> {
+        let elements = slf.collect_elements(py)?;
+        let mut out: Vec<PyObject> = Vec::with_capacity(elements.len());
+        for item in elements {
+            let item_bound = item.bind(py);
+            let mapped = func.call1((item_bound,))?;
+            out.push(mapped.into_py(py));
+        }
+        Ok(PyRDD {
+            source_df: None,
+            inner: None,
+            elements: Some(out),
+        })
+    }
+
+    fn filter(slf: PyRef<Self>, py: Python<'_>, func: &Bound<'_, PyAny>) -> PyResult<PyRDD> {
+        let elements = slf.collect_elements(py)?;
+        let mut out: Vec<PyObject> = Vec::new();
+        for item in elements {
+            let item_bound = item.bind(py);
+            let keep = func.call1((item_bound,))?.is_truthy()?;
+            if keep {
+                out.push(item);
+            }
+        }
+        Ok(PyRDD {
+            source_df: None,
+            inner: None,
+            elements: Some(out),
+        })
+    }
+
+    fn collect(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let elements = self.collect_elements(py)?;
+        let list = PyList::new_bound(py, elements.iter().map(|o| o.bind(py)));
+        Ok(list.into_py(py))
+    }
+
+    fn count(&self, py: Python<'_>) -> PyResult<usize> {
+        self.collect_elements(py).map(|e| e.len())
+    }
+
+    fn take(&self, py: Python<'_>, n: usize) -> PyResult<PyObject> {
+        let elements = self.collect_elements(py)?;
+        let n = n.min(elements.len());
+        let list = PyList::new_bound(py, elements.iter().take(n).map(|o| o.bind(py)));
+        Ok(list.into_py(py))
+    }
+
+    fn first(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let elements = self.collect_elements(py)?;
+        let first = elements.first().ok_or_else(|| {
+            PyErr::new::<pyo3::exceptions::PyValueError, _>("RDD is empty")
+        })?;
+        Ok(first.clone_ref(py))
+    }
+
+    fn reduce(&self, py: Python<'_>, func: &Bound<'_, PyAny>) -> PyResult<PyObject> {
+        let elements = self.collect_elements(py)?;
+        if elements.is_empty() {
+            return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
+                "Cannot reduce empty RDD",
+            ));
+        }
+        let mut acc = elements[0].clone_ref(py);
+        for item in elements.iter().skip(1) {
+            acc = func.call1((acc.bind(py), item.bind(py)))?.into_py(py);
+        }
+        Ok(acc)
     }
 }
 
@@ -3804,8 +3954,14 @@ impl PyDataFrame {
 
     #[getter]
     fn rdd(slf: PyRef<Self>) -> PyRDD {
+        let inner = slf.inner.clone();
+        let py = slf.py();
+        let any = slf.into_py(py);
+        let source_df: Py<PyDataFrame> = any.downcast_bound(py).unwrap().clone().unbind();
         PyRDD {
-            inner: slf.inner.clone(),
+            source_df: Some(source_df),
+            inner: Some(inner),
+            elements: None,
         }
     }
 
