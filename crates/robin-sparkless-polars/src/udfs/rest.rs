@@ -3959,6 +3959,18 @@ pub fn apply_to_timestamp_format(
                     .cast(&DataType::Datetime(TimeUnit::Microseconds, None))?;
                 return Ok(Some(Column::new(name, out_series)));
             }
+            // BooleanType: unsupported for conversion; return null timestamp column (PySpark parity #1252).
+            DataType::Boolean => {
+                let len = series.len();
+                let out = Int64Chunked::from_iter_options(
+                    name.as_str().into(),
+                    (0..len).map(|_| None::<i64>),
+                );
+                let out_series = out
+                    .into_series()
+                    .cast(&DataType::Datetime(TimeUnit::Microseconds, None))?;
+                return Ok(Some(Column::new(name, out_series)));
+            }
             _ => {
                 return Err(PolarsError::ComputeError(
                     "to_timestamp requires StringType, TimestampType, IntegerType, LongType, DateType, or DoubleType"

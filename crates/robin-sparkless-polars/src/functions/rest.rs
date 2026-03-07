@@ -1636,7 +1636,8 @@ pub fn to_timestamp(column: &Column, format: Option<&str>) -> Result<Column, Str
                 | DataType::Datetime(_, _)
                 | DataType::Int32
                 | DataType::Int64
-                | DataType::Float64 => Ok(Field::new(
+                | DataType::Float64
+                | DataType::Boolean => Ok(Field::new(
                     out_name2.clone().into(),
                     DataType::Datetime(TimeUnit::Microseconds, None),
                 )),

@@ -160,7 +160,6 @@ class TestToTimestampCompatibility:
         assert len(rows) == 1
         assert isinstance(rows[0]["ts"], datetime)
 
-    @pytest.mark.skip(reason="Issue #1252: unskip when fixing")
     def test_to_timestamp_rejects_unsupported_type(self, spark):
         """Test that to_timestamp() rejects unsupported input types."""
         from tests.fixtures.spark_imports import get_spark_imports
