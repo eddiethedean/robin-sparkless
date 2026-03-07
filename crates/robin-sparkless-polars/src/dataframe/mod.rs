@@ -347,6 +347,36 @@ impl DataFrame {
                     });
                 }
             }
+            // Recurse into Over (window) so partition_by and order_by column names are resolved against input schema (#1241).
+            if let Expr::Over {
+                function,
+                partition_by,
+                order_by,
+                mapping,
+            } = &e
+            {
+                let resolved_function = df.resolve_expr_column_names(function.as_ref().clone())?;
+                let resolved_partition_by: Result<Vec<Expr>, _> = partition_by
+                    .iter()
+                    .map(|p| df.resolve_expr_column_names(p.clone()))
+                    .collect();
+                let resolved_partition_by = resolved_partition_by?;
+                let resolved_order_by = order_by.as_ref().map(|(ob, opts)| {
+                    df.resolve_expr_column_names(ob.as_ref().clone())
+                        .map(|r| (Arc::new(r), opts.clone()))
+                });
+                let resolved_order_by = match resolved_order_by {
+                    Some(Ok((r, opts))) => Some((r, opts)),
+                    Some(Err(e)) => return Err(e),
+                    None => None,
+                };
+                return Ok(Expr::Over {
+                    function: Arc::new(resolved_function),
+                    partition_by: resolved_partition_by,
+                    order_by: resolved_order_by,
+                    mapping: mapping.clone(),
+                });
+            }
             Ok(e)
         })
     }

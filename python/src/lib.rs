@@ -3314,9 +3314,21 @@ impl PyDataFrame {
         let df = self.inner.select_items(items).map_err(to_py_err)?;
         let out = WINDOW_ORDER_SORT_HINT.with(|cell| {
             if let Some((cols, desc)) = cell.borrow_mut().take() {
+                // Only apply sort if this select's result has the hint columns (from row_number with no partition).
+                // Otherwise the hint is stale from a previous test/select and we must not sort.
                 let col_refs: Vec<&str> = cols.iter().map(|s| s.as_str()).collect();
-                let ascending: Vec<bool> = desc.iter().map(|&d| !d).collect();
-                df.order_by(col_refs, ascending).map(PyDataFrame::wrap)
+                let all_present = match df.columns() {
+                    Ok(result_names) => col_refs.iter().all(|c| {
+                        result_names.iter().any(|n| n.eq_ignore_ascii_case(c))
+                    }),
+                    Err(_) => false,
+                };
+                if all_present {
+                    let ascending: Vec<bool> = desc.iter().map(|&d| !d).collect();
+                    df.order_by(col_refs, ascending).map(PyDataFrame::wrap)
+                } else {
+                    Ok(PyDataFrame::wrap(df))
+                }
             } else {
                 Ok(PyDataFrame::wrap(df))
             }
