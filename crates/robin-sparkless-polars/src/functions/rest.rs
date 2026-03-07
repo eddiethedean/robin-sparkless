@@ -1439,7 +1439,18 @@ fn cast_impl(column: &Column, type_name: &str, strict: bool) -> Result<Column, S
         return Ok(Column::from_expr(expr.alias(&base_name), Some(base_name)));
     }
     if dtype == DataType::Int32 || dtype == DataType::Int64 {
-        // PySpark parity (#1048): cast(string -> int/long) returns NULL for invalid strings, not error.
+        // Use strict_cast when expr is not a plain column (e.g. aggregate) so we get a Cast node
+        // and PySpark-style column name "CAST(sum(value) AS INT)" in groupby agg (issue #1255).
+        // PySpark parity (#1048): for plain string columns, cast returns NULL for invalid strings.
+        let is_plain_column = matches!(column.expr(), Expr::Column(_));
+        if !is_plain_column {
+            let expr = column
+                .expr()
+                .clone()
+                .strict_cast(dtype)
+                .alias(&base_name);
+            return Ok(Column::from_expr(expr, Some(base_name)));
+        }
         let target = dtype.clone();
         let expr = column.expr().clone().map(
             move |col| {

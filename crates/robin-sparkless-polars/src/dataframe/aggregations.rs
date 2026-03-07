@@ -9,28 +9,70 @@ use polars::prelude::{
 use polars_plan::dsl::AggExpr;
 use std::collections::HashMap;
 
+/// PySpark-style name for Cast expressions in agg (e.g. "CAST(avg(value) AS STRING)").
+/// Issue #1255: aggregate cast column names must match PySpark format for parity tests.
+/// Unwrap outer Alias(es) so we detect Cast when expr is Alias(Alias(Cast(...), _), _) or Alias(Cast(...), _).
+fn pyspark_style_cast_agg_name(expr: &Expr) -> Option<String> {
+    let mut top: &Expr = expr;
+    while let Expr::Alias(e, _) = top {
+        top = e.as_ref();
+    }
+    let Expr::Cast {
+        expr: cast_inner,
+        dtype,
+        ..
+    } = top
+    else {
+        return None;
+    };
+    // Use PySpark-style agg name (e.g. "avg(value)") when cast wraps an aggregation; otherwise expr_output_name.
+    let inner_name = parse_pivot_agg_expr(cast_inner.as_ref())
+        .map(|(alias, _, _)| alias)
+        .unwrap_or_else(|| {
+            polars_plan::utils::expr_output_name(cast_inner.as_ref())
+                .map(|s| s.to_string())
+                .unwrap_or_else(|_| "?".to_string())
+        });
+    let type_str = match dtype.as_literal() {
+        Some(DataType::String) => "STRING",
+        Some(DataType::Int32) => "INT",
+        Some(DataType::Int64) => "LONG",
+        Some(DataType::Float32) => "FLOAT",
+        Some(DataType::Float64) => "DOUBLE",
+        Some(DataType::Boolean) => "BOOLEAN",
+        _ => return None,
+    };
+    Some(format!("CAST({inner_name} AS {type_str})"))
+}
+
 /// Disambiguate duplicate output names in aggregation expressions (PySpark parity: issue #368).
 /// When multiple aggs produce the same name (e.g. sum("value"), avg("value") both "value"),
 /// suffix with _1, _2, ... so Polars does not error.
+/// For Cast expressions, use PySpark-style name "CAST(agg(col) AS TYPE)" (issue #1255).
 pub(crate) fn disambiguate_agg_output_names(aggregations: Vec<Expr>) -> Vec<Expr> {
     let mut name_count: HashMap<String, u32> = HashMap::new();
     aggregations
         .into_iter()
         .map(|e| {
-            let base_name = polars_plan::utils::expr_output_name(&e)
-                .map(|s| s.to_string())
-                .unwrap_or_else(|_| "_".to_string());
+            let base_name = pyspark_style_cast_agg_name(&e)
+                .unwrap_or_else(|| {
+                    polars_plan::utils::expr_output_name(&e)
+                        .map(|s| s.to_string())
+                        .unwrap_or_else(|_| "_".to_string())
+                });
             let count = name_count.entry(base_name.clone()).or_insert(0);
             *count += 1;
             let final_name = if *count == 1 {
-                base_name
+                base_name.clone()
             } else {
                 format!("{}_{}", base_name, *count - 1)
             };
-            if *count == 1 {
-                e
-            } else {
+            // Always alias Cast exprs so schema shows PySpark-style name (issue #1255).
+            let needs_alias = pyspark_style_cast_agg_name(&e).is_some() || *count > 1;
+            if needs_alias {
                 e.alias(final_name.as_str())
+            } else {
+                e
             }
         })
         .collect()

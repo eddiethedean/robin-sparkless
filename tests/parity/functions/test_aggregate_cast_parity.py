@@ -8,7 +8,6 @@ from tests.fixtures.spark_imports import get_spark_imports
 class TestAggregateCastParity(ParityTestBase):
     """Test aggregate function cast parity with PySpark (Issue #265)."""
 
-    @pytest.mark.skip(reason="Issue #1255: unskip when fixing")
     def test_mean_cast_string_issue_265(self, spark):
         """Test F.mean().cast("string") matches PySpark behavior (Issue #265).
 
@@ -53,7 +52,6 @@ class TestAggregateCastParity(ParityTestBase):
             elif row["type"] == "B":
                 assert value in ["5.0", "5.00", "5"]  # Allow for formatting differences
 
-    @pytest.mark.skip(reason="Issue #1255: unskip when fixing")
     def test_all_aggregate_functions_with_string_cast(self, spark):
         """Test all major aggregate functions with string cast."""
         imports = get_spark_imports()
@@ -271,7 +269,6 @@ class TestAggregateCastParity(ParityTestBase):
             # Count should be "0" or "0.0" as string
             assert isinstance(row_b[count_col], str)
 
-    @pytest.mark.skip(reason="Issue #1255: unskip when fixing")
     def test_cast_column_name_format(self, spark):
         """Test that cast column names match PySpark format exactly."""
         imports = get_spark_imports()
