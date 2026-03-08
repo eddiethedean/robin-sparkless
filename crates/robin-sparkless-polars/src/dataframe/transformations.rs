@@ -15,6 +15,19 @@ use polars::prelude::{
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 
+/// Returns true if the expression tree contains a window expression (Expr::Over).
+/// Used to reject window functions in filter/WHERE (PySpark parity: AnalysisException).
+fn expr_contains_over(expr: &Expr) -> bool {
+    let found = RefCell::new(false);
+    let _ = expr.clone().try_map_expr(|e| {
+        if matches!(&e, Expr::Over { .. }) {
+            *found.borrow_mut() = true;
+        }
+        Ok(e)
+    });
+    found.into_inner()
+}
+
 /// Returns the set of column names referenced in the expression tree.
 fn expr_referenced_columns(expr: &Expr) -> HashSet<String> {
     let refs = RefCell::new(HashSet::<String>::new());
@@ -500,11 +513,17 @@ pub fn select_items(
 /// Column names in the condition are resolved per df's case sensitivity (PySpark parity).
 /// #646: Coerce predicate to Boolean so Polars never receives a non-Boolean filter (e.g. string-involving predicates).
 /// Uses expr_coerce_to_boolean so string columns cast via "true"/"false"/"1"/"0" (PySpark parity).
+/// Rejects window expressions in the condition (PySpark parity: "window functions inside WHERE clause").
 pub fn filter(
     df: &DataFrame,
     condition: Expr,
     case_sensitive: bool,
 ) -> Result<DataFrame, PolarsError> {
+    if expr_contains_over(&condition) {
+        return Err(PolarsError::InvalidOperation(
+            "it is not allowed to use window functions inside WHERE clause".into(),
+        ));
+    }
     let condition = df.resolve_expr_column_names(condition)?;
     let condition = df.coerce_string_numeric_comparisons(condition)?;
     // #972: expr_coerce_to_boolean already yields Boolean (and handles string via apply_string_to_boolean).

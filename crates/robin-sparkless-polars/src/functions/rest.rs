@@ -9,6 +9,7 @@ use polars::prelude::*;
 /// Count aggregation (PySpark LongType; cast to Int64 for schema parity #734).
 /// Use len() so we count all rows (including nulls), matching test_arithmetic_with_nulls
 /// and row["count(Value)"] semantics. When the input is "*", output name is "count(1)" for parity.
+/// Carries source column for running-window conversion when orderBy is present (#1218).
 pub fn count(col: &Column) -> Column {
     use polars::prelude::len;
 
@@ -18,7 +19,9 @@ pub fn count(col: &Column) -> Column {
     } else {
         format!("count({})", col.name())
     };
-    Column::from_expr(expr, Some(name))
+    let mut c = Column::from_expr(expr, Some(name));
+    c.source_for_running_count = Some(col.name().to_string());
+    c
 }
 
 /// Sum aggregation. Carries source column for running-window conversion when orderBy differs from partitionBy.
