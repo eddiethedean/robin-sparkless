@@ -5911,11 +5911,11 @@ impl PyColumn {
         }
     }
 
-    fn try_cast(&self, type_name: &str) -> PyResult<PyColumn> {
-        self.inner
-            .try_cast_to(type_name)
-            .map(|c| PyColumn { inner: c })
-            .map_err(to_py_err)
+    /// PySpark parity (#1233): Column.try_cast is not supported; raises TypeError like PySpark.
+    fn try_cast(&self, _type_name: &str) -> PyResult<PyColumn> {
+        Err(pyo3::exceptions::PyTypeError::new_err(
+            "Column object is not callable",
+        ))
     }
 
     /// Add or replace a struct field. PySpark withField.
