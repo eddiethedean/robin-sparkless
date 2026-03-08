@@ -1790,20 +1790,24 @@ impl SparkSession {
         }
         let mut keys: Vec<&String> = all_keys.iter().collect();
         keys.sort();
-        // #1150: PySpark inference for inferred structs does not reliably expose string/float/bool
-        // (getField("E2") etc. often yield null). Include only integer-like and nested-struct
-        // fields so Row and getField(alias) match PySpark for test_issue_330_struct_field_alias.
-        fn inferred_struct_field_visible(typ: &str) -> bool {
+        fn is_int_like(typ: &str) -> bool {
             let t = typ.trim().to_lowercase();
-            t == "bigint"
-                || t == "int"
-                || t == "integer"
-                || t == "long"
-                || t == "smallint"
-                || t == "tinyint"
-                || t.starts_with("struct<")
+            matches!(t.as_str(), "bigint" | "int" | "integer" | "long" | "smallint" | "tinyint")
         }
-        let inner = keys
+        // #1150: When struct has any int-like field, only expose int-like and nested-struct so
+        // getField("E2") yields null for string fields (PySpark parity, test_issue_330_struct_field_alias).
+        fn strict_visible(typ: &str) -> bool {
+            let t = typ.trim().to_lowercase();
+            is_int_like(&t) || t.starts_with("struct<")
+        }
+        // #1219: When struct has no int-like fields (e.g. all string), expose string/double/float/bool
+        // so col("StructVal")["E1"] works for .cast("int") or upper() on struct field.
+        fn extended_visible(typ: &str) -> bool {
+            let t = typ.trim().to_lowercase();
+            strict_visible(typ)
+                || matches!(t.as_str(), "string" | "str" | "varchar" | "double" | "float" | "boolean" | "bool")
+        }
+        let field_types: Vec<(String, String)> = keys
             .iter()
             .filter_map(|k| {
                 let field_typ = key_to_first_non_null.get(*k).map(|val| match val {
@@ -1816,7 +1820,23 @@ impl SparkSession {
                     _ => Self::infer_dtype_from_json_value(val)
                         .unwrap_or_else(|| "string".to_string()),
                 })?;
-                if !inferred_struct_field_visible(&field_typ) {
+                Some(((*k).to_string(), field_typ))
+            })
+            .collect();
+        // Use strict visibility when any field is int-like or nested struct (PySpark parity:
+        // test_issue_330_struct_field_alias nested case expects getField("E2") None when top-level has Nested struct + E2 string).
+        let has_int_like = field_types
+            .iter()
+            .any(|(_, typ)| is_int_like(typ) || typ.starts_with("struct<"));
+        let inner = field_types
+            .into_iter()
+            .filter_map(|(k, field_typ)| {
+                let ok = if has_int_like {
+                    strict_visible(&field_typ)
+                } else {
+                    extended_visible(&field_typ)
+                };
+                if !ok {
                     return None;
                 }
                 Some(format!("{}:{}", k.as_str(), field_typ))

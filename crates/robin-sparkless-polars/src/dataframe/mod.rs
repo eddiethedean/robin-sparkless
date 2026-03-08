@@ -255,6 +255,20 @@ impl DataFrame {
                 let new_inner = df.resolve_expr_column_names(inner.as_ref().clone())?;
                 return Ok(Expr::Alias(Arc::new(new_inner), name.clone()));
             }
+            // Recurse into Cast so F.col("StructVal")["E1"].cast("int") has the struct field resolved (#1219).
+            if let Expr::Cast {
+                ref expr,
+                ref dtype,
+                ref options,
+            } = e
+            {
+                let resolved_inner = df.resolve_expr_column_names(expr.as_ref().clone())?;
+                return Ok(Expr::Cast {
+                    expr: Arc::new(resolved_inner),
+                    dtype: dtype.clone(),
+                    options: options.clone(),
+                });
+            }
             if let Expr::Column(name) = &e {
                 let name_str = name.as_str();
                 // Skip resolution only when this name is an alias output and not a schema column (case-insensitive).
