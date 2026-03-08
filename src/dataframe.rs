@@ -290,9 +290,10 @@ impl DataFrame {
         left_on: Vec<&str>,
         right_on: Vec<&str>,
         how: JoinType,
+        only_key_equalities: bool,
     ) -> Result<DataFrame, PolarsError> {
         self.0
-            .join_with_keys(&other.0, left_on, right_on, how)
+            .join_with_keys(&other.0, left_on, right_on, how, only_key_equalities)
             .map(DataFrame)
     }
 

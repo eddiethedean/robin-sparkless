@@ -4252,7 +4252,13 @@ impl PyDataFrame {
             let left_refs: Vec<&str> = left_vec.iter().map(|s| s.as_str()).collect();
             let right_refs: Vec<&str> = right_vec.iter().map(|s| s.as_str()).collect();
             self.inner
-                .join_with_keys(&other.inner, left_refs, right_refs, join_type)
+                .join_with_keys(
+                    &other.inner,
+                    left_refs,
+                    right_refs,
+                    join_type,
+                    false, // left_on/right_on: do not mark join keys ambiguous
+                )
                 .map(PyDataFrame::wrap)
                 .map_err(to_py_err)
         } else if let Some(on_arg) = on {
@@ -4305,9 +4311,16 @@ impl PyDataFrame {
                     if left_refs.len() == pairs.len() {
                         let left_refs: Vec<&str> = left_refs.iter().map(|s| s.as_str()).collect();
                         let right_refs: Vec<&str> = right_refs.iter().map(|s| s.as_str()).collect();
+                        let only_key_equalities = expr_contains_only_join_key_equalities(&expr);
                         let joined = self
                             .inner
-                            .join_with_keys(&other.inner, left_refs, right_refs, join_type)
+                            .join_with_keys(
+                                &other.inner,
+                                left_refs,
+                                right_refs,
+                                join_type,
+                                only_key_equalities,
+                            )
                             .map_err(to_py_err)?;
                         // When the expression is only key equalities, the join already enforces them;
                         // do not filter afterward or left/right/outer would lose unmatched rows (#1242).
