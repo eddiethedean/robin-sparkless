@@ -1013,7 +1013,7 @@ impl Column {
         }
     }
 
-    /// Replace first match of regex pattern (PySpark regexp_replace). literal=false for regex.
+    /// Replace all matches of regex pattern (PySpark regexp_replace: global replace).
     pub fn regexp_replace(&self, pattern: &str, replacement: &str) -> Column {
         use polars::prelude::*;
         let pat = pattern.to_string();
@@ -1024,7 +1024,7 @@ impl Column {
                 .clone()
                 .cast(DataType::String)
                 .str()
-                .replace(lit(pat), lit(rep), false),
+                .replace_all(lit(pat), lit(rep), false),
             None,
         )
     }

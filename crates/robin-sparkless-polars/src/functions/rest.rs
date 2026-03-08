@@ -932,7 +932,7 @@ pub fn regexp_extract(column: &Column, pattern: &str, group_index: usize) -> Col
     column.clone().regexp_extract(pattern, group_index)
 }
 
-/// Replace first match of regex (PySpark regexp_replace)
+/// Replace all matches of regex (PySpark regexp_replace: global replace)
 pub fn regexp_replace(column: &Column, pattern: &str, replacement: &str) -> Column {
     column.clone().regexp_replace(pattern, replacement)
 }

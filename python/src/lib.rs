@@ -5720,7 +5720,7 @@ impl PyColumn {
         }
     }
 
-    /// Replace first match of regex pattern. PySpark regexp_replace.
+    /// Replace all matches of regex pattern. PySpark regexp_replace (global replace).
     fn regexp_replace(&self, pattern: &str, replacement: &str) -> PyColumn {
         PyColumn {
             inner: self.inner.regexp_replace(pattern, replacement),
