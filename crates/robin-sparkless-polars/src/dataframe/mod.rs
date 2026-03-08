@@ -863,27 +863,38 @@ impl DataFrame {
     /// When case_sensitive is false, matches case-insensitively.
     /// When the name is in ambiguous_columns (join same-name keys) or multiple physical columns
     /// match, returns an error with AMBIGUOUS_REFERENCE (PySpark parity #374 / #1230).
-    pub fn resolve_column_name(&self, name: &str) -> Result<String, PolarsError> {
-        // Unqualified name: check join ambiguous_columns (same key name on both sides).
-        if !name.contains('.') {
-            if let Some(ref ambig) = self.ambiguous_columns {
-                let found = if self.case_sensitive {
-                    ambig.contains(name)
-                } else {
-                    let name_lower = name.to_lowercase();
-                    ambig.iter().any(|a| a.to_lowercase() == name_lower)
-                };
-                if found {
-                    return Err(PolarsError::ColumnNotFound(
-                        format!(
-                            "Reference `{}` is ambiguous. AMBIGUOUS_REFERENCE",
-                            name
-                        )
-                        .into(),
-                    ));
-                }
+    /// Fail if name is an unqualified user-requested column that is ambiguous (#1230). Call at
+    /// select/select_items boundary for bare column names only; do not use inside resolve_column_name
+    /// so that qualified refs (e.g. df1["name"]) and dotted select ("t1.id") still resolve (#297).
+    pub fn check_ambiguous_unqualified(&self, name: &str) -> Result<(), PolarsError> {
+        if name.contains('.') {
+            return Ok(());
+        }
+        if let Some(ref ambig) = self.ambiguous_columns {
+            let found = if self.case_sensitive {
+                ambig.contains(name)
+            } else {
+                let name_lower = name.to_lowercase();
+                ambig.iter().any(|a| a.to_lowercase() == name_lower)
+            };
+            if found {
+                return Err(PolarsError::ColumnNotFound(
+                    format!(
+                        "Reference `{}` is ambiguous. AMBIGUOUS_REFERENCE",
+                        name
+                    )
+                    .into(),
+                ));
             }
         }
+        Ok(())
+    }
+
+    /// Resolve a logical column name to the actual column name in the schema.
+    /// When case_sensitive is false, matches case-insensitively.
+    /// When multiple physical columns match, returns AMBIGUOUS_REFERENCE. For join ambiguous_columns,
+    /// use check_ambiguous_unqualified at the select/select_items boundary for bare names (#1230, #297).
+    pub fn resolve_column_name(&self, name: &str) -> Result<String, PolarsError> {
         let schema = self.schema_or_collect()?;
         let names: Vec<String> = schema
             .iter_names_and_dtypes()
@@ -1315,7 +1326,7 @@ impl DataFrame {
     /// Accepts either column names (strings) or Column expressions (e.g. from regexp_extract_all(...).alias("m")).
     /// Column names are resolved according to case sensitivity.
     pub fn select_exprs(&self, exprs: Vec<Expr>) -> Result<DataFrame, PolarsError> {
-        transformations::select_with_exprs(self, exprs, self.case_sensitive)
+        transformations::select_with_exprs(self, exprs, self.case_sensitive, false)
     }
 
     /// Select columns by name (returns a new DataFrame).
@@ -1344,7 +1355,8 @@ impl DataFrame {
                     Ok::<Expr, PolarsError>(e.alias(last_part))
                 })
                 .collect::<Result<Vec<_>, PolarsError>>()?;
-            return transformations::select_with_exprs(self, exprs, self.case_sensitive);
+            // Exprs already resolved by column_name_to_expr (e.g. "t1.id" -> col("id")); skip re-resolve to avoid ambiguous on col("id") (#1230).
+            return transformations::select_with_exprs(self, exprs, self.case_sensitive, true);
         }
         // Non-dotted names: build explicit expressions so we can implement PySpark-like
         // ambiguous-case handling. When multiple physical columns differ only by case
@@ -1353,6 +1365,7 @@ impl DataFrame {
         let mut exprs: Vec<Expr> = Vec::with_capacity(expanded.len());
         for requested in &expanded {
             let requested_str = requested.as_str();
+            self.check_ambiguous_unqualified(requested_str)?;
             let requested_lower = requested.to_lowercase();
             let matches: Vec<String> = all_cols
                 .iter()
@@ -1369,7 +1382,7 @@ impl DataFrame {
             let resolved = self.resolve_column_name(requested_str)?;
             exprs.push(col(resolved.as_str()).alias(requested_str));
         }
-        transformations::select_with_exprs(self, exprs, self.case_sensitive)
+        transformations::select_with_exprs(self, exprs, self.case_sensitive, false)
     }
 
     /// Build an expression for a column name, including dotted struct field access (e.g. "outer.inner.leaf").
@@ -1572,17 +1585,20 @@ impl DataFrame {
             on_refs,
             how,
             self.case_sensitive,
-            true, // coalesce so join(right, "id") yields one key column (#1049, #353)
+            true,  // coalesce so join(right, "id") yields one key column (#1049, #353)
+            false, // named join: unqualified key name is not ambiguous
         )
     }
 
     /// Join with different column names on left and right (PySpark left_on/right_on).
+    /// When `only_key_equalities` is true and key names match, unqualified key names are treated as ambiguous (#1230).
     pub fn join_with_keys(
         &self,
         other: &DataFrame,
         left_on: Vec<&str>,
         right_on: Vec<&str>,
         how: JoinType,
+        only_key_equalities: bool,
     ) -> Result<DataFrame, PolarsError> {
         let left_resolved: Vec<String> = left_on
             .iter()
@@ -1594,8 +1610,14 @@ impl DataFrame {
             .collect::<Result<Vec<_>, _>>()?;
         let left_refs: Vec<&str> = left_resolved.iter().map(|s| s.as_str()).collect();
         let right_refs: Vec<&str> = right_resolved.iter().map(|s| s.as_str()).collect();
-        // When same-named keys (e.g. left.id == right.id), coalesce so result has one key column (#353, #1148, #1165).
-        let coalesce_same_name_keys = left_resolved == right_resolved;
+        // When same-named keys (e.g. left.id == right.id), or key names match case-insensitively (name/NAME), coalesce (#297, #353, #1148, #1165).
+        let coalesce_same_name_keys = left_resolved.len() == right_resolved.len()
+            && left_resolved
+                .iter()
+                .zip(right_resolved.iter())
+                .all(|(a, b)| a.eq_ignore_ascii_case(b));
+        // Only mark keys ambiguous when condition was purely key equalities; otherwise filter will reference them (#1230).
+        let mark_join_keys_ambiguous = coalesce_same_name_keys && only_key_equalities;
         join(
             self,
             other,
@@ -1604,6 +1626,7 @@ impl DataFrame {
             how,
             self.case_sensitive,
             coalesce_same_name_keys,
+            mark_join_keys_ambiguous,
         )
     }
 

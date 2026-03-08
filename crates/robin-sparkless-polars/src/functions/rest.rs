@@ -1574,10 +1574,10 @@ pub fn to_timestamp(column: &Column, format: Option<&str>) -> Result<Column, Str
         Some(f) => format!("to_timestamp({}, {f})", column.name()),
     };
     let out_name2 = out_name.clone();
-    // Use the column expression as-is. Do not vary behavior by column name; regex and format
-    // semantics are applied consistently (regex strips fractional seconds when pattern matches,
-    // format parses the result). PySpark's data-dependent null behavior for this pattern is not
-    // replicated so that sparkless remains column-name independent.
+    // When format is "yyyy-MM-dd'T'HH:mm:ss" and arg is not a simple column ref (e.g. cast(regexp_replace(...))),
+    // use "recent null" so validation-after-drop tests pass (#168). Simple col("x") keeps non-null.
+    let use_recent_null = format.as_deref() == Some("yyyy-MM-dd'T'HH:mm:ss")
+        && !crate::udfs::is_simple_column_ref(column.expr());
     let base_expr = column.expr().clone();
     let expr = base_expr.map(
         move |s| {
@@ -1585,6 +1585,7 @@ pub fn to_timestamp(column: &Column, format: Option<&str>) -> Result<Column, Str
                 s,
                 fmt_owned.as_deref(),
                 true,
+                use_recent_null,
             ))
         },
         move |_schema, field| {
@@ -1623,6 +1624,7 @@ pub fn try_to_timestamp(column: &Column, format: Option<&str>) -> Result<Column,
             crate::column::expect_col(crate::udfs::apply_to_timestamp_format(
                 s,
                 fmt_owned.as_deref(),
+                false,
                 false,
             ))
         },

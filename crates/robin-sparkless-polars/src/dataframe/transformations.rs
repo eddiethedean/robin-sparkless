@@ -112,15 +112,21 @@ pub fn select(
 /// Select using column expressions (e.g. F.regexp_extract_all(...).alias("m")). Preserves case_sensitive.
 /// Column names in expressions are resolved per df's case sensitivity (PySpark parity).
 /// Duplicate output names are disambiguated with _1, _2, ... so select(col("num").cast("string"), col("num").cast("int")) works (issue #213).
+/// When exprs_already_resolved is true, skip resolve_expr_column_names (e.g. exprs from dotted select like "t1.id" -> col("id")) (#1230).
 pub fn select_with_exprs(
     df: &DataFrame,
     exprs: Vec<Expr>,
     case_sensitive: bool,
+    exprs_already_resolved: bool,
 ) -> Result<DataFrame, PolarsError> {
-    let exprs: Vec<Expr> = exprs
-        .into_iter()
-        .map(|e| df.resolve_expr_column_names(e))
-        .collect::<Result<Vec<_>, _>>()?;
+    let exprs: Vec<Expr> = if exprs_already_resolved {
+        exprs
+    } else {
+        exprs
+            .into_iter()
+            .map(|e| df.resolve_expr_column_names(e))
+            .collect::<Result<Vec<_>, _>>()?
+    };
     let exprs: Vec<Expr> = exprs
         .into_iter()
         .map(|e| df.coerce_string_numeric_comparisons(e))
@@ -442,6 +448,7 @@ pub fn select_items(
                     rename_after.push((safe.clone(), last_segment.to_string()));
                     exprs.push(coerced.alias(safe));
                 } else {
+                    df.check_ambiguous_unqualified(name)?;
                     let resolved = df.resolve_column_name(name)?;
                     // Explicit alias so output name is stable when mixed with window exprs (#1267).
                     exprs.push(col(resolved).alias(name));
@@ -478,7 +485,7 @@ pub fn select_items(
             }
         }
     }
-    let mut result = select_with_exprs(df, exprs, case_sensitive)?;
+    let mut result = select_with_exprs(df, exprs, case_sensitive, false)?;
     for (from, to) in rename_after {
         result = result.with_column_renamed(&from, &to)?;
     }
@@ -1783,7 +1790,7 @@ pub fn select_expr(
             select_exprs.push(col(resolved.as_str()));
         }
     }
-    select_with_exprs(df, select_exprs, case_sensitive)
+    select_with_exprs(df, select_exprs, case_sensitive, false)
 }
 
 /// Select columns whose names match the regex pattern. PySpark colRegex.

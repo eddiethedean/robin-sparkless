@@ -967,6 +967,7 @@ fn translate_select_from(
                     join_type,
                     session.is_case_sensitive(),
                     false, // SQL join condition: keep both key columns
+                    false, // SQL: do not mark join keys ambiguous
                 )?;
             }
         }
