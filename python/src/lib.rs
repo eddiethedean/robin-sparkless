@@ -3837,6 +3837,7 @@ impl PyDataFrame {
             }
             let py_row = row_cls.call((), Some(&kwargs))?;
             py_row.setattr("_fields", output_names.clone())?;
+            py_row.setattr("__fields__", output_names.clone())?;
             py_row.setattr("_schema", py_schema.clone_ref(py))?;
             // PySpark parity: Row has _data_dict for dict-like access in tests (e.g. "full_name" in result[0].__dict__["_data_dict"]).
             py_row.setattr("_data_dict", kwargs.clone())?;
@@ -6524,10 +6525,24 @@ impl PyGroupedData {
     }
 
     #[pyo3(signature = (pivot_col, values=None))]
-    fn pivot(&self, pivot_col: &str, values: Option<Vec<String>>) -> PyPivotedGroupedData {
-        PyPivotedGroupedData {
-            inner: self.inner.pivot(pivot_col, values),
-        }
+    fn pivot(&self, pivot_col: &str, values: Option<&Bound<'_, PyAny>>) -> PyResult<PyPivotedGroupedData> {
+        let rust_values = if let Some(seq) = values {
+            let mut v = Vec::new();
+            for item in seq.iter()? {
+                let item = item?;
+                if item.is_none() {
+                    v.push("null".to_string());
+                } else {
+                    v.push(item.extract::<String>()?);
+                }
+            }
+            Some(v)
+        } else {
+            None
+        };
+        Ok(PyPivotedGroupedData {
+            inner: self.inner.pivot(pivot_col, rust_values),
+        })
     }
 }
 

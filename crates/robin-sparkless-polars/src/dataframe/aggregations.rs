@@ -1042,6 +1042,8 @@ impl PivotedGroupedData {
         let lf = self.lf.clone().group_by(by).agg(agg_exprs);
         let mut pl_df = lf.collect()?;
         pl_df = reorder_groupby_columns(&mut pl_df, &self.grouping_cols)?;
+        // PySpark: when values= was provided, column order follows values list (#1222).
+        pl_df = reorder_pivot_columns(&pl_df, &self.grouping_cols, &pivot_vals)?;
         Ok(super::DataFrame::from_polars_with_options(
             pl_df,
             self.case_sensitive,
@@ -1109,6 +1111,7 @@ impl PivotedGroupedData {
         let lf = self.lf.clone().group_by(by).agg(agg_exprs);
         let mut pl_df = lf.collect()?;
         pl_df = reorder_groupby_columns(&mut pl_df, &self.grouping_cols)?;
+        pl_df = reorder_pivot_columns(&pl_df, &self.grouping_cols, &pivot_vals)?;
         Ok(super::DataFrame::from_polars_with_options(
             pl_df,
             self.case_sensitive,
@@ -1484,6 +1487,35 @@ fn null_series_for_dtype(name: &str, n: usize, dtype: &DataType) -> Result<Serie
         _ => Series::new(name, vec![None::<i64>; n]).cast(dtype)?,
     };
     Ok(s)
+}
+
+/// After pivot, ensure columns are grouping_cols then pivot_vals order (PySpark: when values= provided, column order follows values list; #1222).
+fn reorder_pivot_columns(
+    pl_df: &PlDataFrame,
+    grouping_cols: &[String],
+    pivot_vals: &[String],
+) -> Result<PlDataFrame, PolarsError> {
+    let all_cols: std::collections::HashSet<String> = pl_df
+        .get_column_names()
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+    let mut order: Vec<&str> = Vec::new();
+    for gc in grouping_cols {
+        if all_cols.contains(gc) {
+            order.push(gc);
+        }
+    }
+    for pv in pivot_vals {
+        if all_cols.contains(pv) {
+            order.push(pv);
+        }
+    }
+    if order.len() == all_cols.len() {
+        pl_df.select(order)
+    } else {
+        Ok(pl_df.clone())
+    }
 }
 
 /// Reorder columns after groupBy to match PySpark order: grouping columns first, then aggregations
