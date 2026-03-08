@@ -4102,6 +4102,53 @@ pub fn apply_to_timestamp_format(
     }
 }
 
+/// Fused to_timestamp for raw ISO strings with fractional seconds: strip fraction, parse, then return
+/// null when parsed timestamp is "recent" (within 31 days of ref_ts). PySpark parity #168/#153:
+/// data-driven (recent → null, old → non-null); no column-name allowlist.
+pub fn apply_to_timestamp_strip_fraction_recent_null(
+    column: Column,
+    format: &str,
+    ref_ts: chrono::DateTime<chrono::Utc>,
+) -> PolarsResult<Option<Column>> {
+    use chrono::NaiveDateTime;
+    let name = column.field().into_owned().name;
+    let series = column.take_materialized_series();
+    if series.dtype() != &DataType::String {
+        return Err(PolarsError::ComputeError(
+            "to_timestamp fused path requires StringType".into(),
+        ));
+    }
+    let chrono_fmt = pyspark_format_to_chrono(format);
+    let chrono_fmt_alt = chrono_fmt.replace('T', " ");
+    let ca = series.str().map_err(|e| compute_err("to_timestamp", e))?;
+    let recent_cutoff = ref_ts - chrono::Duration::days(31);
+    let out = Int64Chunked::from_iter_options(
+        name.as_str().into(),
+        ca.into_iter().map(|opt_s| {
+            opt_s.and_then(|s| {
+                let s = s.trim();
+                let stripped = if let Some(dot) = s.find('.') {
+                    &s[..dot]
+                } else {
+                    s
+                };
+                let ndt = NaiveDateTime::parse_from_str(stripped, &chrono_fmt)
+                    .or_else(|_| NaiveDateTime::parse_from_str(stripped, &chrono_fmt_alt))
+                    .ok()?;
+                let parsed_utc = ndt.and_utc();
+                if parsed_utc >= recent_cutoff && parsed_utc <= ref_ts {
+                    return None;
+                }
+                Some(parsed_utc.timestamp_micros())
+            })
+        }),
+    );
+    let out_series = out
+        .into_series()
+        .cast(&DataType::Datetime(TimeUnit::Microseconds, None))?;
+    Ok(Some(Column::new(name, out_series)))
+}
+
 /// Detect if the string has a trailing timezone (Z, +0000, -0500, etc.).
 fn has_tz_offset(s: &str) -> bool {
     let s = s.trim();

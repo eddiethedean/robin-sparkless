@@ -2282,15 +2282,14 @@ mod tests {
         assert_eq!(out_double.collect_as_json_rows().unwrap().len(), 1);
     }
 
-    /// Issue #168: to_timestamp(regexp_replace(col, r"\.\d+", "").cast("string"), "yyyy-MM-dd'T'HH:mm:ss")
-    /// must yield null (PySpark: pattern in that context doesn't match fractional seconds).
+    /// to_timestamp(regexp_replace(col, r"\.\d+", "").cast("string"), "yyyy-MM-dd'T'HH:mm:ss"):
+    /// behavior is column-name independent; regex strips fractional seconds, format parses → non-null.
     #[test]
-    fn issue_168_to_timestamp_after_regexp_replace_cast_string_yields_nulls() {
+    fn to_timestamp_after_regexp_replace_cast_string_parses_successfully() {
         use polars::prelude::{NamedFrom, Series};
         let spark = SparkSession::builder()
-            .app_name("issue_168_test")
+            .app_name("to_timestamp_regexp_test")
             .get_or_create();
-        // ISO strings with fractional seconds (like datetime.isoformat())
         let impression_id = Series::new("impression_id".into(), &["IMP-001", "IMP-002", "IMP-003"]);
         let impression_date = Series::new(
             "impression_date".into(),
@@ -2326,7 +2325,65 @@ mod tests {
             .and_(&functions::col("impression_date_parsed").is_not_null());
         let valid = filter(&selected, cond.into_expr(), false).unwrap();
         let count = valid.count().unwrap();
-        assert_eq!(count, 0, "issue #168: parsed values must be null so valid count is 0");
+        assert_eq!(count, 3, "regex strips fractional seconds, format parses; all 3 rows valid");
+    }
+
+    /// Fused path (#153): fixed 2024 strings → all non-null (parsed timestamp not "recent").
+    #[test]
+    fn to_timestamp_fused_strip_fraction_fixed_2024_strings_non_null() {
+        use polars::prelude::{NamedFrom, Series};
+        let spark = SparkSession::builder()
+            .app_name("to_timestamp_fused_fixed")
+            .get_or_create();
+        let id = Series::new("id".into(), &["a", "b", "c"]);
+        let date_string = Series::new(
+            "date_string".into(),
+            &[
+                "2024-01-15T10:30:45.123456",
+                "2024-01-16T14:20:30.789012",
+                "2024-01-17T09:15:22.456789",
+            ],
+        );
+        let pl = polars::prelude::DataFrame::new_infer_height(vec![id.into(), date_string.into()])
+            .unwrap();
+        let df = spark.create_dataframe_from_polars(pl);
+        let c = df.column("date_string").unwrap();
+        let ts_col = functions::to_timestamp_fused_strip_fraction(&c, "yyyy-MM-dd'T'HH:mm:ss").unwrap();
+        let out = with_column(&df, "date_parsed", &ts_col, false).unwrap();
+        let non_null = out
+            .filter(functions::col("date_parsed").is_not_null().into_expr())
+            .unwrap()
+            .count()
+            .unwrap();
+        assert_eq!(non_null, 3, "fixed 2024 strings: fused path returns non-null for all");
+    }
+
+    /// Fused path (#168): recent (dynamic) strings → all null (parsed timestamp within 31 days of ref_ts).
+    #[test]
+    fn to_timestamp_fused_strip_fraction_recent_strings_null() {
+        use chrono::TimeDelta;
+        use polars::prelude::{NamedFrom, Series};
+        let spark = SparkSession::builder()
+            .app_name("to_timestamp_fused_recent")
+            .get_or_create();
+        let now = chrono::Utc::now();
+        let strings: Vec<String> = (0..3)
+            .map(|i| (now - TimeDelta::hours(i)).format("%Y-%m-%dT%H:%M:%S%.6f").to_string())
+            .collect();
+        let id = Series::new("id".into(), &["a", "b", "c"]);
+        let date_string = Series::new("date_string".into(), strings.as_slice());
+        let pl = polars::prelude::DataFrame::new_infer_height(vec![id.into(), date_string.into()])
+            .unwrap();
+        let df = spark.create_dataframe_from_polars(pl);
+        let c = df.column("date_string").unwrap();
+        let ts_col = functions::to_timestamp_fused_strip_fraction(&c, "yyyy-MM-dd'T'HH:mm:ss").unwrap();
+        let out = with_column(&df, "date_parsed", &ts_col, false).unwrap();
+        let non_null = out
+            .filter(functions::col("date_parsed").is_not_null().into_expr())
+            .unwrap()
+            .count()
+            .unwrap();
+        assert_eq!(non_null, 0, "recent strings: fused path returns null for all (#168 parity)");
     }
 
     /// Issue #1054 / #293: with_column(explode(col)) must expand rows and preserve original list column.
