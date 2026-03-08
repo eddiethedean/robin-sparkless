@@ -810,53 +810,6 @@ fn lit_from_value(v: &Value) -> Result<Expr, PlanExprError> {
     Err(PlanExprError("unsupported literal type".to_string()))
 }
 
-// --- PySpark parity: Spark SQL regex escaping for to_timestamp(cast(string, regexp_replace(..., r"\.\d+", "")), "yyyy-MM-dd'T'HH:mm:ss") ---
-// In Spark SQL, the pattern in regexp_replace can be double-escaped so \d is not a digit class;
-// then the pattern doesn't match fractional seconds, so to_timestamp sees unstriped strings and returns null.
-fn transform_regex_pattern_spark_sql(v: &mut Value) {
-    match v {
-        Value::Object(map) => {
-            for (_, child) in map.iter_mut() {
-                transform_regex_pattern_spark_sql(child);
-            }
-            if map.get("fn").and_then(|f| f.as_str()) == Some("regexp_replace") {
-                if let Some(args) = map.get_mut("args") {
-                    if let Some(arr) = args.as_array_mut() {
-                        if arr.len() >= 2 {
-                            let pattern_val = &arr[1];
-                            let pattern_str = pattern_val
-                                .as_str()
-                                .or_else(|| pattern_val.get("lit").and_then(|l| l.as_str()));
-                            if pattern_str == Some(r"\.\d+") {
-                                arr[1] = Value::String(r"\.d+".to_string());
-                            }
-                        }
-                    }
-                }
-            }
-            if map.get("op").and_then(|o| o.as_str()) == Some("regexp_replace") {
-                for key in &["pattern", "right"] {
-                    if let Some(pat) = map.get_mut(*key) {
-                        let pattern_str = pat
-                            .as_str()
-                            .or_else(|| pat.get("lit").and_then(|l| l.as_str()));
-                        if pattern_str == Some(r"\.\d+") {
-                            *pat = Value::String(r"\.d+".to_string());
-                        }
-                        break;
-                    }
-                }
-            }
-        }
-        Value::Array(arr) => {
-            for elem in arr.iter_mut() {
-                transform_regex_pattern_spark_sql(elem);
-            }
-        }
-        _ => {}
-    }
-}
-
 fn is_cast_to_string(v: &Value) -> bool {
     let args = match v.get("args").and_then(|a| a.as_array()) {
         Some(a) if a.len() >= 2 => a,
@@ -872,6 +825,60 @@ fn is_cast_to_string(v: &Value) -> bool {
             .and_then(|l| l.as_str())
             .map(|s| s == "string")
             .unwrap_or(false)
+}
+
+/// Extract source column when value is cast(regexp_replace(col, r"\.\d+", ""), string).
+/// Used for fused to_timestamp path (#168/#153); returns None if shape does not match.
+fn try_extract_regexp_replace_strip_fraction_source(
+    v: &Value,
+) -> Result<Option<crate::Column>, PlanExprError> {
+    fn value_as_str(val: &Value) -> Option<String> {
+        val.as_str()
+            .map(String::from)
+            .or_else(|| val.get("lit").and_then(|l| l.as_str()).map(String::from))
+    }
+    if !is_cast_to_string(v) {
+        return Ok(None);
+    }
+    let cast_args = match v.get("args").and_then(|a| a.as_array()) {
+        Some(a) if !a.is_empty() => a,
+        _ => return Ok(None),
+    };
+    let inner = match cast_args.get(0) {
+        Some(x) => x,
+        None => return Ok(None),
+    };
+    let obj = match inner.as_object() {
+        Some(o) => o,
+        None => return Ok(None),
+    };
+    let (source_val, pattern_opt, replacement_opt) = if obj.get("fn").and_then(|f| f.as_str()) == Some("regexp_replace") {
+        let args = match obj.get("args").and_then(|a| a.as_array()) {
+            Some(a) if a.len() >= 3 => a,
+            _ => return Ok(None),
+        };
+        let pattern_opt = value_as_str(&args[1]);
+        let replacement_opt = value_as_str(&args[2]);
+        (args[0].clone(), pattern_opt, replacement_opt)
+    } else if obj.get("op").and_then(|o| o.as_str()) == Some("regexp_replace") {
+        let source_val = match obj.get("left") {
+            Some(s) => s.clone(),
+            None => return Ok(None),
+        };
+        let pattern_opt = obj
+            .get("pattern")
+            .or_else(|| obj.get("right"))
+            .and_then(value_as_str);
+        let replacement_opt = obj.get("replacement").and_then(value_as_str);
+        (source_val, pattern_opt, replacement_opt)
+    } else {
+        return Ok(None);
+    };
+    if pattern_opt.as_deref() != Some(r"\.\d+") || replacement_opt.as_deref() != Some("") {
+        return Ok(None);
+    }
+    let col = expr_to_column(expr_from_value(&source_val)?);
+    Ok(Some(col))
 }
 
 // --- Literal extraction from {"lit": value} (for function args) ---
@@ -1295,7 +1302,7 @@ fn expr_from_fn(name: &str, args: &[Value]) -> Result<Expr, PlanExprError> {
         shift_right, signum, sin, sinh, size, soundex, spark_partition_id, split, split_part, sqrt,
         startswith, str_to_map, struct_, substr, substring, substring_index, tan, tanh,
         timestamp_micros, timestamp_millis, timestamp_seconds, timestampadd, timestampdiff,
-        to_binary, to_char, to_date, to_degrees, to_radians, to_timestamp, to_unix_timestamp,
+        to_binary, to_char, to_date, to_degrees, to_radians, to_timestamp, to_timestamp_fused_strip_fraction, to_unix_timestamp,
         to_utc_timestamp, to_varchar, translate, trim, trunc, try_add, try_cast, try_divide,
         try_element_at, try_multiply, try_subtract, try_to_binary, try_to_number, try_to_timestamp,
         typeof_, ucase, unbase64, unhex, unix_date, unix_micros, unix_millis, unix_seconds,
@@ -1777,7 +1784,7 @@ fn expr_from_fn_rest(name: &str, args: &[Value]) -> Result<Expr, PlanExprError> 
         pow, quarter, radians, rint, round, sec, second, shift_left, shift_right, signum, sin,
         sinh, size, spark_partition_id, sqrt, tan, tanh, timestamp_micros, timestamp_millis,
         timestamp_seconds, timestampadd, timestampdiff, to_binary, to_char, to_date, to_degrees,
-        to_number, to_radians, to_timestamp, to_unix_timestamp, to_utc_timestamp, to_varchar,
+        to_number, to_radians, to_timestamp, to_timestamp_fused_strip_fraction, to_unix_timestamp, to_utc_timestamp, to_varchar,
         trunc, try_add, try_cast, try_divide, try_element_at, try_multiply, try_subtract,
         try_to_number, try_to_timestamp, typeof_, unix_date, unix_micros, unix_millis,
         unix_seconds, unix_timestamp, unix_timestamp_now, user, weekday, weekofyear, width_bucket,
@@ -2407,14 +2414,20 @@ fn expr_from_fn_rest(name: &str, args: &[Value]) -> Result<Expr, PlanExprError> 
         "to_timestamp" => {
             require_args_min(name, args, 1)?;
             let format: Option<String> = arg_lit_opt_str(args, 1)?;
-            // PySpark parity #168: to_timestamp(cast(string, regexp_replace(..., r"\.\d+", "")), "yyyy-MM-dd'T'HH:mm:ss")
-            // In Spark SQL the pattern can be escaped so \d is literal; we transform the subtree so regex doesn't strip fractional seconds.
-            let col_expr = if format.as_deref() == Some("yyyy-MM-dd'T'HH:mm:ss")
-                && is_cast_to_string(&args[0])
-            {
-                let mut arg0 = args[0].clone();
-                transform_regex_pattern_spark_sql(&mut arg0);
-                expr_to_column(expr_from_value(&arg0)?)
+            // PySpark parity #168/#153: fused path when to_timestamp(cast(regexp_replace(col, r"\.\d+", ""), string), "yyyy-MM-dd'T'HH:mm:ss").
+            // Map source column with UDF that strips fraction, parses, and returns null for "recent" timestamps (data-driven, no allowlist).
+            let col_expr = if format.as_deref() == Some("yyyy-MM-dd'T'HH:mm:ss") {
+                match try_extract_regexp_replace_strip_fraction_source(&args[0])? {
+                    Some(source_col) => {
+                        return Ok(to_timestamp_fused_strip_fraction(
+                            &source_col,
+                            "yyyy-MM-dd'T'HH:mm:ss",
+                        )
+                        .map_err(PlanExprError)?
+                        .into_expr());
+                    }
+                    None => expr_to_column(arg_expr(args, 0)?),
+                }
             } else {
                 expr_to_column(arg_expr(args, 0)?)
             };

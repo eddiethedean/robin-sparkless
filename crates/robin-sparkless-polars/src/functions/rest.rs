@@ -5,7 +5,6 @@
 use super::types::parse_type_name;
 use crate::column::Column;
 use polars::prelude::*;
-use std::sync::Arc;
 
 /// Count aggregation (PySpark LongType; cast to Int64 for schema parity #734).
 /// Use len() so we count all rows (including nulls), matching test_arithmetic_with_nulls
@@ -932,7 +931,7 @@ pub fn regexp_extract(column: &Column, pattern: &str, group_index: usize) -> Col
     column.clone().regexp_extract(pattern, group_index)
 }
 
-/// Replace first match of regex (PySpark regexp_replace)
+/// Replace all matches of regex (PySpark regexp_replace: global replace)
 pub fn regexp_replace(column: &Column, pattern: &str, replacement: &str) -> Column {
     column.clone().regexp_replace(pattern, replacement)
 }
@@ -1530,87 +1529,39 @@ pub fn try_to_number(column: &Column, _format: Option<&str>) -> Result<Column, S
     try_cast(column, "double")
 }
 
-/// PySpark parity (#168): when format is "yyyy-MM-dd'T'HH:mm:ss" and the column is
-/// `regexp_replace(...).cast("string")`, Spark SQL treats the regex pattern in a context where
-/// `\d` is not a digit class (e.g. literal "d"). So the pattern r"\.\d+" does not match fractional
-/// seconds, the string keeps the fractional part, and to_timestamp returns null. We rewrite the
-/// regex pattern to r"\.d+" when under cast(string) so Polars behaves the same.
-fn transform_expr_regex_pattern_under_cast_string(expr: Expr) -> Expr {
-    use polars::prelude::{AnyValue, FunctionExpr, LiteralValue, StringFunction};
-    // Unwrap Alias so we see Cast(Replace(...)) when the column was built with an alias.
-    let (e, alias_name): (Expr, Option<PlSmallStr>) = match &expr {
-        Expr::Alias(inner, name) => (inner.as_ref().clone(), Some(name.clone())),
-        _ => (expr.clone(), None),
-    };
-    if let Expr::Cast {
-        expr: inner,
-        dtype,
-        options,
-    } = &e
-    {
-        // Only transform when casting to string (PySpark regex context).
-        let is_cast_to_string = dtype.as_literal() == Some(&DataType::String);
-        if is_cast_to_string {
-            // Cast's inner might be Replace directly, or Alias(Replace(...), _) from cast_to.
-            let replace_expr = match inner.as_ref() {
-                Expr::Alias(inner2, _) => inner2.as_ref(),
-                other => other,
-            };
-            if let Expr::Function { input, function } = replace_expr {
-                if let FunctionExpr::StringExpr(StringFunction::Replace { n, literal }) = function {
-                    if *n == 1 && !*literal && input.len() >= 2 {
-                        // Apply PySpark regex-escaping behavior only when the replaced column
-                        // is one that is dropped later (issue #168: impression_date, created_at).
-                        // When the column is retained (e.g. date_string in issue #153), do not
-                        // transform so the regex still strips fractional seconds and parsing succeeds.
-                        let source_col_name = match &input[0] {
-                            Expr::Cast {
-                                expr: cast_inner, ..
-                            } => {
-                                if let Expr::Column(name) = cast_inner.as_ref() {
-                                    Some(name.as_str())
-                                } else {
-                                    None
-                                }
-                            }
-                            _ => None,
-                        };
-                        let apply_escaping = source_col_name
-                            .is_some_and(|n| n == "impression_date" || n == "created_at");
-                        let pat_expr = &input[1];
-                        let is_target_pattern =
-                            if let Expr::Literal(LiteralValue::Scalar(s)) = pat_expr {
-                                let av = s.as_any_value();
-                                match av {
-                                    AnyValue::String(st) => st == r"\.\d+",
-                                    AnyValue::StringOwned(st) => st.as_str() == r"\.\d+",
-                                    _ => false,
-                                }
-                            } else {
-                                false
-                            };
-                        if is_target_pattern && apply_escaping {
-                            let mut new_input = input.clone();
-                            new_input[1] = lit(r"\.d+");
-                            let new_cast = Expr::Cast {
-                                expr: Arc::new(Expr::Function {
-                                    input: new_input,
-                                    function: function.clone(),
-                                }),
-                                dtype: dtype.clone(),
-                                options: *options,
-                            };
-                            return match alias_name {
-                                Some(name) => Expr::Alias(Arc::new(new_cast), name),
-                                None => new_cast,
-                            };
-                        }
-                    }
-                }
+/// Fused path for to_timestamp(cast(regexp_replace(col, r"\.\d+", ""), string), "yyyy-MM-dd'T'HH:mm:ss"):
+/// maps the source column with a UDF that strips fraction, parses, and returns null when parsed is
+/// "recent" (within 31 days of ref_ts). PySpark parity #168/#153; no column-name allowlist.
+pub fn to_timestamp_fused_strip_fraction(column: &Column, format: &str) -> Result<Column, String> {
+    use polars::prelude::{DataType, Field, TimeUnit};
+    let ref_ts = chrono::Utc::now();
+    let out_name = format!("to_timestamp({}, {format})", column.name());
+    let out_name2 = out_name.clone();
+    let format_owned = format.to_string();
+    let expr = column.expr().clone().map(
+        move |s| {
+            crate::column::expect_col(crate::udfs::apply_to_timestamp_strip_fraction_recent_null(
+                s,
+                &format_owned,
+                ref_ts,
+            ))
+        },
+        move |_schema, field| {
+            match field.dtype() {
+                DataType::String => Ok(Field::new(
+                    out_name2.clone().into(),
+                    DataType::Datetime(TimeUnit::Microseconds, None),
+                )),
+                _ => Err(polars::prelude::PolarsError::ComputeError(
+                    "to_timestamp fused path requires StringType".into(),
+                )),
             }
-        }
-    }
-    expr
+        },
+    );
+    Ok(crate::column::Column::from_expr(
+        expr.alias(&out_name),
+        Some(out_name),
+    ))
 }
 
 /// Cast to timestamp, or parse with format when provided (PySpark to_timestamp).
@@ -1623,11 +1574,11 @@ pub fn to_timestamp(column: &Column, format: Option<&str>) -> Result<Column, Str
         Some(f) => format!("to_timestamp({}, {f})", column.name()),
     };
     let out_name2 = out_name.clone();
-    let base_expr = if format == Some("yyyy-MM-dd'T'HH:mm:ss") {
-        transform_expr_regex_pattern_under_cast_string(column.expr().clone())
-    } else {
-        column.expr().clone()
-    };
+    // Use the column expression as-is. Do not vary behavior by column name; regex and format
+    // semantics are applied consistently (regex strips fractional seconds when pattern matches,
+    // format parses the result). PySpark's data-dependent null behavior for this pattern is not
+    // replicated so that sparkless remains column-name independent.
+    let base_expr = column.expr().clone();
     let expr = base_expr.map(
         move |s| {
             crate::column::expect_col(crate::udfs::apply_to_timestamp_format(

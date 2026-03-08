@@ -17,7 +17,6 @@ def _replace(col, old: str, new: str):
     return F.regexp_replace(col, old, new)
 
 
-@pytest.mark.skip(reason="Issue #1232: unskip when fixing")
 def test_replace_single_pair(spark) -> None:
     """replace(search, replacement) or regexp_replace works."""
     df = spark.createDataFrame(
