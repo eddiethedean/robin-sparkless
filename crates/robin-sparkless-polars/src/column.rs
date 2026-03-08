@@ -930,10 +930,21 @@ impl Column {
         Self::from_expr(expr, None)
     }
 
-    /// Logical NOT of a boolean expression column (PySpark `~` on boolean predicates).
-    /// Implemented as `expr == false` so it flows through expr_coerce_to_boolean like other comparisons.
+    /// Logical NOT of a boolean column (PySpark `~` on Column = boolean NOT).
+    /// Fails at execution time if column is not Boolean (#405, #1236); use F.expr("~x") for bitwise NOT on integers.
     pub fn logical_not(&self) -> Column {
-        let expr = self.expr().clone().eq(lit(false));
+        let expr = self.expr().clone().map(
+            move |col| expect_col(crate::udfs::apply_logical_not_boolean_only(col)),
+            |_schema, field| {
+                if field.dtype() == &DataType::Boolean {
+                    Ok(field.clone())
+                } else {
+                    Err(PolarsError::ComputeError(
+                        "logical NOT (~) requires boolean type".into(),
+                    ))
+                }
+            },
+        );
         Self::from_expr(expr, None)
     }
 

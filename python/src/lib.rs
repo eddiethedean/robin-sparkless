@@ -7648,6 +7648,11 @@ fn exp(column: &PyColumn) -> PyColumn {
 
 #[pyfunction]
 fn pow(column: &PyColumn, exp: &Bound<'_, PyAny>) -> PyResult<PyColumn> {
+    if let Ok(exp_col) = exp.downcast::<PyColumn>() {
+        return Ok(PyColumn {
+            inner: column.inner.pow_with(&exp_col.borrow().inner),
+        });
+    }
     if let Ok(exp_i) = exp.extract::<i64>() {
         return Ok(PyColumn {
             inner: functions::pow(&column.inner, exp_i),
@@ -7665,7 +7670,7 @@ fn pow(column: &PyColumn, exp: &Bound<'_, PyAny>) -> PyResult<PyColumn> {
         });
     }
     Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
-        "pow exponent must be int or float",
+        "pow exponent must be int, float, or Column",
     ))
 }
 
