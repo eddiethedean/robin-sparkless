@@ -1,5 +1,7 @@
 //! Join operations for DataFrame.
 
+use std::collections::HashSet;
+
 use super::DataFrame;
 use crate::schema_conv::data_type_to_polars_type;
 use crate::type_coercion::coerce_expr_pair_for_join;
@@ -572,9 +574,15 @@ pub fn join(
     } else {
         joined
     };
-    Ok(super::DataFrame::from_lazy_with_options(
+    let ambiguous_columns = if !keys_differ {
+        Some(left_key_names.iter().cloned().collect::<HashSet<String>>())
+    } else {
+        None
+    };
+    Ok(super::DataFrame::from_lazy_with_options_and_ambiguous(
         result_lf,
         case_sensitive,
+        ambiguous_columns,
     ))
 }
 

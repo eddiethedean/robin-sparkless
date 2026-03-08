@@ -78,6 +78,9 @@ pub struct DataFrame {
     pub(crate) case_sensitive: bool,
     /// Optional alias for subquery/join (PySpark: df.alias("t")).
     pub(crate) alias: Option<String>,
+    /// Column names that are ambiguous after a join (same name on both sides). Selecting them
+    /// unqualified raises AMBIGUOUS_REFERENCE (PySpark parity #374 / #1230).
+    pub(crate) ambiguous_columns: Option<HashSet<String>>,
 }
 
 /// Spec for groupBy: either a column name (str) or a Column expression (e.g. col("a").alias("x")).
@@ -97,6 +100,7 @@ impl DataFrame {
             inner: DataFrameInner::Lazy(lf),
             case_sensitive: DEFAULT_CASE_SENSITIVE,
             alias: None,
+            ambiguous_columns: None,
         }
     }
 
@@ -108,6 +112,7 @@ impl DataFrame {
             inner: DataFrameInner::Lazy(lf),
             case_sensitive,
             alias: None,
+            ambiguous_columns: None,
         }
     }
 
@@ -119,6 +124,7 @@ impl DataFrame {
             inner: DataFrameInner::Eager(Arc::new(df)),
             case_sensitive,
             alias: None,
+            ambiguous_columns: None,
         }
     }
 
@@ -128,6 +134,7 @@ impl DataFrame {
             inner: DataFrameInner::Lazy(lf),
             case_sensitive: DEFAULT_CASE_SENSITIVE,
             alias: None,
+            ambiguous_columns: None,
         }
     }
 
@@ -137,6 +144,22 @@ impl DataFrame {
             inner: DataFrameInner::Lazy(lf),
             case_sensitive,
             alias: None,
+            ambiguous_columns: None,
+        }
+    }
+
+    /// Create a DataFrame from a LazyFrame with optional ambiguous column names (join same-name keys).
+    /// When set, resolve_column_name returns AMBIGUOUS_REFERENCE for unqualified references to those names.
+    pub(crate) fn from_lazy_with_options_and_ambiguous(
+        lf: LazyFrame,
+        case_sensitive: bool,
+        ambiguous_columns: Option<HashSet<String>>,
+    ) -> Self {
+        DataFrame {
+            inner: DataFrameInner::Lazy(lf),
+            case_sensitive,
+            alias: None,
+            ambiguous_columns,
         }
     }
 
@@ -147,6 +170,7 @@ impl DataFrame {
             inner: self.inner,
             case_sensitive: false,
             alias: self.alias,
+            ambiguous_columns: self.ambiguous_columns,
         }
     }
 
@@ -156,6 +180,7 @@ impl DataFrame {
             inner: DataFrameInner::Lazy(PlDataFrame::empty().lazy()),
             case_sensitive: DEFAULT_CASE_SENSITIVE,
             alias: None,
+            ambiguous_columns: None,
         }
     }
 
@@ -188,6 +213,7 @@ impl DataFrame {
             inner: DataFrameInner::Lazy(lf),
             case_sensitive: self.case_sensitive,
             alias: Some(name.to_string()),
+            ambiguous_columns: self.ambiguous_columns.clone(),
         }
     }
 
@@ -835,12 +861,55 @@ impl DataFrame {
 
     /// Resolve a logical column name to the actual column name in the schema.
     /// When case_sensitive is false, matches case-insensitively.
+    /// When the name is in ambiguous_columns (join same-name keys) or multiple physical columns
+    /// match, returns an error with AMBIGUOUS_REFERENCE (PySpark parity #374 / #1230).
     pub fn resolve_column_name(&self, name: &str) -> Result<String, PolarsError> {
+        // Unqualified name: check join ambiguous_columns (same key name on both sides).
+        if !name.contains('.') {
+            if let Some(ref ambig) = self.ambiguous_columns {
+                let found = if self.case_sensitive {
+                    ambig.contains(name)
+                } else {
+                    let name_lower = name.to_lowercase();
+                    ambig.iter().any(|a| a.to_lowercase() == name_lower)
+                };
+                if found {
+                    return Err(PolarsError::ColumnNotFound(
+                        format!(
+                            "Reference `{}` is ambiguous. AMBIGUOUS_REFERENCE",
+                            name
+                        )
+                        .into(),
+                    ));
+                }
+            }
+        }
         let schema = self.schema_or_collect()?;
         let names: Vec<String> = schema
             .iter_names_and_dtypes()
             .map(|(n, _)| n.to_string())
             .collect();
+        // Unqualified name: check for multiple physical columns (e.g. duplicate "id" in schema).
+        if !name.contains('.') {
+            let matches: Vec<&String> = if self.case_sensitive {
+                names.iter().filter(|n| n.as_str() == name).collect()
+            } else {
+                let name_lower = name.to_lowercase();
+                names
+                    .iter()
+                    .filter(|n| n.to_lowercase() == name_lower)
+                    .collect()
+            };
+            if matches.len() > 1 {
+                return Err(PolarsError::ColumnNotFound(
+                    format!(
+                        "Reference `{}` is ambiguous. AMBIGUOUS_REFERENCE",
+                        name
+                    )
+                    .into(),
+                ));
+            }
+        }
         if self.case_sensitive {
             if names.iter().any(|n| n == name) {
                 return Ok(name.to_string());
@@ -2621,6 +2690,7 @@ impl Clone for DataFrame {
             },
             case_sensitive: self.case_sensitive,
             alias: self.alias.clone(),
+            ambiguous_columns: self.ambiguous_columns.clone(),
         }
     }
 }
