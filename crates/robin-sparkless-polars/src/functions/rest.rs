@@ -932,7 +932,7 @@ pub fn regexp_extract(column: &Column, pattern: &str, group_index: usize) -> Col
     column.clone().regexp_extract(pattern, group_index)
 }
 
-/// Replace first match of regex (PySpark regexp_replace)
+/// Replace all matches of regex (PySpark regexp_replace: global replace)
 pub fn regexp_replace(column: &Column, pattern: &str, replacement: &str) -> Column {
     column.clone().regexp_replace(pattern, replacement)
 }
@@ -1537,10 +1537,14 @@ pub fn try_to_number(column: &Column, _format: Option<&str>) -> Result<Column, S
 /// regex pattern to r"\.d+" when under cast(string) so Polars behaves the same.
 fn transform_expr_regex_pattern_under_cast_string(expr: Expr) -> Expr {
     use polars::prelude::{AnyValue, FunctionExpr, LiteralValue, StringFunction};
-    // Unwrap Alias so we see Cast(Replace(...)) when the column was built with an alias.
+    // Unwrap one or two levels of Alias so we see Cast(Replace(...)) when the column was built with alias.
     let (e, alias_name): (Expr, Option<PlSmallStr>) = match &expr {
         Expr::Alias(inner, name) => (inner.as_ref().clone(), Some(name.clone())),
         _ => (expr.clone(), None),
+    };
+    let e = match &e {
+        Expr::Alias(inner, _) => inner.as_ref().clone(),
+        _ => e,
     };
     if let Expr::Cast {
         expr: inner,
@@ -1549,7 +1553,9 @@ fn transform_expr_regex_pattern_under_cast_string(expr: Expr) -> Expr {
     } = &e
     {
         // Only transform when casting to string (PySpark regex context).
-        let is_cast_to_string = dtype.as_literal() == Some(&DataType::String);
+        let is_cast_to_string = dtype
+            .as_literal()
+            .is_some_and(|dt| dt == &DataType::String);
         if is_cast_to_string {
             // Cast's inner might be Replace directly, or Alias(Replace(...), _) from cast_to.
             let replace_expr = match inner.as_ref() {
@@ -1557,39 +1563,30 @@ fn transform_expr_regex_pattern_under_cast_string(expr: Expr) -> Expr {
                 other => other,
             };
             if let Expr::Function { input, function } = replace_expr {
-                if let FunctionExpr::StringExpr(StringFunction::Replace { n, literal }) = function {
-                    if *n == 1 && !*literal && input.len() >= 2 {
-                        // Apply PySpark regex-escaping behavior only when the replaced column
-                        // is one that is dropped later (issue #168: impression_date, created_at).
-                        // When the column is retained (e.g. date_string in issue #153), do not
-                        // transform so the regex still strips fractional seconds and parsing succeeds.
-                        let source_col_name = match &input[0] {
-                            Expr::Cast {
-                                expr: cast_inner, ..
-                            } => {
-                                if let Expr::Column(name) = cast_inner.as_ref() {
-                                    Some(name.as_str())
-                                } else {
-                                    None
-                                }
-                            }
-                            _ => None,
-                        };
-                        let apply_escaping = source_col_name
-                            .is_some_and(|n| n == "impression_date" || n == "created_at");
+                if let FunctionExpr::StringExpr(StringFunction::Replace { literal, .. }) = function {
+                    if !*literal && input.len() >= 2 {
+                        // Apply PySpark regex-escaping: when to_timestamp(cast(string, regexp_replace(..., r"\.\d+", "")), format)
+                        // we rewrite pattern to r"\.d+" so fractional seconds are not stripped and to_timestamp returns null (#168).
+                        let is_direct_replace = matches!(&input[0], Expr::Column(_) | Expr::Cast { .. });
                         let pat_expr = &input[1];
                         let is_target_pattern =
                             if let Expr::Literal(LiteralValue::Scalar(s)) = pat_expr {
                                 let av = s.as_any_value();
-                                match av {
-                                    AnyValue::String(st) => st == r"\.\d+",
-                                    AnyValue::StringOwned(st) => st.as_str() == r"\.\d+",
+                                let pat_ok = match av {
+                                    AnyValue::String(st) => {
+                                        st == r"\.\d+" || st.contains(r"\.\d")
+                                    }
+                                    AnyValue::StringOwned(st) => {
+                                        let p = st.as_str();
+                                        p == r"\.\d+" || p.contains(r"\.\d")
+                                    }
                                     _ => false,
-                                }
+                                };
+                                pat_ok
                             } else {
                                 false
                             };
-                        if is_target_pattern && apply_escaping {
+                        if is_target_pattern && is_direct_replace {
                             let mut new_input = input.clone();
                             new_input[1] = lit(r"\.d+");
                             let new_cast = Expr::Cast {
