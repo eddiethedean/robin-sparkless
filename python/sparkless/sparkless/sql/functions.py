@@ -189,8 +189,9 @@ def exp(c: ColumnOrName) -> _ColumnType:
     return _col_result(_native_fn("exp")(_as_col(c)))
 
 
-def pow(col1: ColumnOrName, col2: Union[int, float]) -> _ColumnType:
-    return _col_result(_native_fn("pow")(_as_col(col1), int(col2)))
+def pow(col1: ColumnOrName, col2: Union[int, float, _ColumnType]) -> _ColumnType:
+    """Power: col1 ** col2. col2 can be int, float, or Column (e.g. F.lit(2))."""
+    return _col_result(_native_fn("pow")(_as_col(col1), col2))
 
 
 power = pow

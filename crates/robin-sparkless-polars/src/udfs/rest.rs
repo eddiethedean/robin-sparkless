@@ -1,6 +1,7 @@
 //! UDF implementations (string, array, map, encoding, date, math, bit, etc.).
 use super::compute_err;
 use chrono::{Datelike, TimeZone};
+use std::ops::Not;
 use chrono_tz::Tz;
 use polars::prelude::*;
 use regex::Regex;
@@ -5440,6 +5441,21 @@ fn parse_str_to_bool(s: &str, strict: bool) -> Option<bool> {
         _ if strict => None, // will error
         _ => None,
     }
+}
+
+/// Logical NOT for boolean columns only (PySpark: ~ on Column is boolean NOT).
+/// Fails with a clear error for numeric/integer columns; use F.expr("~x") for bitwise NOT (#405, #1236).
+pub fn apply_logical_not_boolean_only(column: Column) -> PolarsResult<Option<Column>> {
+    let name = column.field().into_owned().name;
+    let series = column.take_materialized_series();
+    if series.dtype() != &DataType::Boolean {
+        return Err(PolarsError::ComputeError(
+            "PySpark: '~' on Column is boolean NOT; cannot apply to numeric/integer columns. Use F.expr(\"~x\") for bitwise NOT.".into(),
+        ));
+    }
+    let ca = series.bool().map_err(|e| compute_err("logical_not", e))?;
+    let not_ca = ca.not();
+    Ok(Some(Column::new(name, not_ca.into_series())))
 }
 
 /// Apply string-to-boolean cast. Handles string columns; passes through boolean; numeric types

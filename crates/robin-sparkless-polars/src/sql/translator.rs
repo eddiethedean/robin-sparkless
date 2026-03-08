@@ -1216,6 +1216,10 @@ fn sql_expr_to_polars(
             let e = sql_expr_to_polars(expr, session, df, having_agg_map, having_agg_list)?;
             match op {
                 sqlparser::ast::UnaryOperator::Not => Ok(e.not()),
+                sqlparser::ast::UnaryOperator::BitwiseNot => {
+                    let col = Column::from_expr(e, None);
+                    Ok(functions::bitwise_not(&col).expr().clone())
+                }
                 _ => Err(PolarsError::InvalidOperation(
                     format!("SQL: unsupported unary operator in WHERE: {:?}", op).into(),
                 )),
