@@ -3526,10 +3526,56 @@ impl PyDataFrame {
         }
 
         let all_columns = self.inner.columns().map_err(to_py_err)?;
+        // For join/crossJoin parity: when the user writes dept_df.name.alias("name_right")
+        // and the current DataFrame already has a column named "name_right" (produced by
+        // the join logic for duplicate right-side columns), we must resolve the alias to
+        // that existing right-side column instead of re-aliasing the left "name" column.
+        // We implement this as a light-weight Expr rewrite for the specific pattern
+        // Alias(Column(base), alias) where alias == base + "_right" and alias exists
+        // in the current DataFrame schema.
+        use std::collections::HashSet;
+        use robin_sparkless::{Column as RsColumn, Expr as RsExpr};
+        let all_column_set: HashSet<&str> =
+            all_columns.iter().map(|s| s.as_str()).collect();
+
+        fn rewrite_join_right_alias(expr: RsExpr, all_column_set: &HashSet<&str>) -> RsExpr {
+            match expr {
+                RsExpr::Alias(inner, alias_name) => {
+                    let alias_str = alias_name.as_str();
+                    // Temporary debug: print alias patterns seen in select for joins.
+                    // eprintln!("select alias expr: alias='{}'", alias_str);
+                    if all_column_set.contains(alias_str) {
+                        // Look for the specific pattern Column(base) AS "${base}_right",
+                        // possibly wrapped in one or more Alias layers from Column::alias()
+                        // and Column::into_expr().
+                        let mut base_expr: &RsExpr = inner.as_ref();
+                        while let RsExpr::Alias(inner2, _) = base_expr {
+                            base_expr = inner2.as_ref();
+                        }
+                        if let RsExpr::Column(col_name) = base_expr {
+                            let base = col_name.as_str();
+                            let expected_alias = format!("{base}_right");
+                            if expected_alias == alias_str {
+                                // Rewrite to use the existing right-side column as the source,
+                                // so we select dept_id_right/name_right from the joined frame.
+                                let col = RsColumn::new(alias_str.to_string());
+                                return col.into_expr();
+                            }
+                        }
+                    }
+                    RsExpr::Alias(inner, alias_name)
+                }
+                other => other,
+            }
+        }
+
         let mut items: Vec<SelectItem<'_>> = Vec::with_capacity(tmp.len());
         for t in tmp {
             match t {
-                Tmp::Expr(e) => items.push(SelectItem::Expr(e)),
+                Tmp::Expr(e) => {
+                    let rewritten = rewrite_join_right_alias(e, &all_column_set);
+                    items.push(SelectItem::Expr(rewritten));
+                }
                 Tmp::NameIdx(i) => {
                     let name = name_boxes[i].as_ref();
                     if name == "*" {
@@ -4459,29 +4505,84 @@ impl PyDataFrame {
                         }
                     }
                     if left_refs.len() == pairs.len() {
+                        // Preserve resolved key names as owned Strings for later filtering decisions.
+                        let left_keys: Vec<String> = left_refs.clone();
+                        let right_keys: Vec<String> = right_refs.clone();
                         let left_refs: Vec<&str> = left_refs.iter().map(|s| s.as_str()).collect();
                         let right_refs: Vec<&str> = right_refs.iter().map(|s| s.as_str()).collect();
                         let only_key_equalities = expr_contains_only_join_key_equalities(&expr);
-                        let joined = self
+
+                        // When joining on equal same-named keys (e.g. emp.dept_id == dept.dept_id),
+                        // implement LEFT/RIGHT joins via a FULL OUTER join plus a filter so that:
+                        // - LEFT keeps all left rows, with right-only rows dropped.
+                        // - RIGHT keeps all right rows, with left-only rows dropped.
+                        // This matches the parity fixtures in tests/parity/dataframe/test_join.py,
+                        // which expose both key columns as (dept_id, dept_id_right).
+                        let same_named_keys = left_keys.len() == right_keys.len()
+                            && left_keys
+                                .iter()
+                                .zip(right_keys.iter())
+                                .all(|(l, r)| l.eq_ignore_ascii_case(r));
+
+                        let engine_join_type = if only_key_equalities
+                            && same_named_keys
+                            && matches!(join_type, JoinType::Left | JoinType::Right)
+                        {
+                            JoinType::Outer
+                        } else {
+                            join_type
+                        };
+
+                        let mut joined = self
                             .inner
                             .join_with_keys(
                                 &other.inner,
                                 left_refs,
                                 right_refs,
-                                join_type,
+                                engine_join_type,
                                 only_key_equalities,
                             )
                             .map_err(to_py_err)?;
+
                         // When the expression is only key equalities, the join already enforces them;
-                        // do not filter afterward or left/right/outer would lose unmatched rows (#1242).
+                        // do not filter afterward or left/right/outer would lose unmatched rows (#1242),
+                        // except for the LEFT/RIGHT-as-OUTER case handled below.
                         // When the expression is compound (e.g. key equality AND filter), reapply the
                         // full predicate after the key-based join (issue #380).
-                        let result = if expr_contains_only_join_key_equalities(&expr) {
-                            joined
-                        } else {
-                            joined.filter(expr).map_err(to_py_err)?
-                        };
-                        return Ok(PyDataFrame::wrap(result));
+                        if !expr_contains_only_join_key_equalities(&expr) {
+                            joined = joined.filter(expr).map_err(to_py_err)?;
+                        }
+
+                        // For LEFT / RIGHT joins implemented via FULL OUTER on same-named keys,
+                        // filter the OUTER result to restore LEFT / RIGHT semantics.
+                        if only_key_equalities && same_named_keys {
+                            use robin_sparkless::functions;
+                            match join_type {
+                                JoinType::Left => {
+                                    if let Some(left_key) = left_keys.get(0) {
+                                        let cond =
+                                            functions::col(left_key.as_str()).is_not_null();
+                                        joined = joined
+                                            .filter(cond.into_expr())
+                                            .map_err(to_py_err)?;
+                                    }
+                                }
+                                JoinType::Right => {
+                                    if let Some(right_key) = right_keys.get(0) {
+                                        let right_col_name =
+                                            format!("{}_right", right_key.as_str());
+                                        let cond =
+                                            functions::col(right_col_name.as_str()).is_not_null();
+                                        joined = joined
+                                            .filter(cond.into_expr())
+                                            .map_err(to_py_err)?;
+                                    }
+                                }
+                                _ => {}
+                            }
+                        }
+
+                        return Ok(PyDataFrame::wrap(joined));
                     }
                 }
                 // Non-eq expression: cross + filter (ambiguous duplicate column names may apply).
