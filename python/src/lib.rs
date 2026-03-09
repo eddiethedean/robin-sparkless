@@ -1115,6 +1115,13 @@ impl PySparkContext {
             .unwrap_or_else(|| "sparkless".to_string()))
     }
 
+    /// PySpark parity: SparkContext.appName camelCase alias for app_name.
+    #[getter]
+    #[pyo3(name = "appName")]
+    fn app_name_camel(&self, py: Python<'_>) -> PyResult<String> {
+        self.app_name(py)
+    }
+
     /// PySpark parity: version is a property (read-only string), not a method.
     #[getter]
     fn version(&self) -> String {
