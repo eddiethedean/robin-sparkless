@@ -39,7 +39,6 @@ class TestIssue263IsnanString:
         result = df.filter(F.isnan(F.col("Value")))
         assert result.collect() == []
 
-    @pytest.mark.skip(reason="Issue #1204: unskip when fixing")
     def test_isnan_on_numeric_column_true_only_for_nan(self, spark):
         df = spark.createDataFrame(
             [
@@ -72,7 +71,6 @@ class TestIssue263IsnanString:
         assert rows[0]["none"] is False
         assert rows[0]["nan"] == math.isnan(float("nan"))
 
-    @pytest.mark.skip(reason="Issue #1204: unskip when fixing")
     def test_isnan_on_string_and_numeric_columns_in_select(self, spark):
         """Ensure isnan() behaves correctly on both string and numeric columns."""
         df = spark.createDataFrame(
