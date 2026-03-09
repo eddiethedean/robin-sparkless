@@ -1801,14 +1801,21 @@ fn python_data_and_schema(
     // such as "bigint" or DateType() (PySpark parity for single-type createDataFrame).
     let allow_scalar_single_column: bool =
         schema_res.as_ref().map(|s| s.len() == 1).unwrap_or(false);
-    // Column order for dict rows: pandas order (#1151), else explicit schema order, else alphabetical.
+    // Column order for dict rows: pandas order (#1151), else:
+    // - For explicit typed schema (StructType/DDL), use schema field order
+    // - For "names only" schema or no schema, use union-of-keys alphabetical (PySpark dict+names parity, issue #164/#1179).
     let mut column_order: Option<Vec<String>> =
         pandas_column_order.map(|s| s.to_vec()).or_else(|| {
-            schema_res
-                .as_ref()
-                .map(|s| s.iter().map(|(n, _)| n.clone()).collect())
+            schema_res.as_ref().and_then(|s| {
+                if schema_names_only {
+                    // Names-only list: do not force schema order here; let dict keys drive order.
+                    None
+                } else {
+                    Some(s.iter().map(|(n, _)| n.clone()).collect())
+                }
+            })
         });
-    if column_order.is_none() && schema_res.is_none() && !list.is_empty() {
+    if column_order.is_none() && !list.is_empty() {
         use std::collections::BTreeSet;
         let mut keys_union: BTreeSet<String> = BTreeSet::new();
         for item in list.iter() {
