@@ -260,7 +260,6 @@ class TestIsInstanceOrdering(ParityTestBase):
         result3 = read_df.filter(read_df.name.startswith("A"))
         assert result3.count() == 1, "String operations should work on table DataFrames"
 
-    @pytest.mark.skip(reason="Tracked in issue #1326; unskip when fixed.")
     def test_logical_operations_in_filters(self, spark):
         """Test that logical operations (AND, OR) work correctly.
 
