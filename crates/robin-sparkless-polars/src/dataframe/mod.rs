@@ -8,8 +8,8 @@ mod transformations;
 pub(crate) use aggregations::disambiguate_agg_output_names;
 pub use aggregations::{CubeRollupData, GroupedData, PivotedGroupedData};
 pub use joins::{
-    JoinType, expr_contains_only_join_key_equalities, join, try_extract_join_eq_columns,
-    try_extract_join_eq_columns_all,
+    JoinOptions, JoinType, expr_contains_only_join_key_equalities, join,
+    try_extract_join_eq_columns, try_extract_join_eq_columns_all,
 };
 pub use stats::DataFrameStat;
 pub(crate) use transformations::literal_value_to_serde_value;
@@ -1591,9 +1591,11 @@ impl DataFrame {
             on_refs.clone(),
             on_refs,
             how,
-            self.case_sensitive,
-            true,  // coalesce so join(right, "id") yields one key column (#1049, #353)
-            false, // named join: unqualified key name is not ambiguous
+            JoinOptions {
+                case_sensitive: self.case_sensitive,
+                coalesce_same_name_keys: true, // join(right, "id") yields one key column (#1049, #353)
+                mark_join_keys_ambiguous: false,
+            },
         )
     }
 
@@ -1631,9 +1633,11 @@ impl DataFrame {
             left_refs,
             right_refs,
             how,
-            self.case_sensitive,
-            coalesce_same_name_keys,
-            mark_join_keys_ambiguous,
+            JoinOptions {
+                case_sensitive: self.case_sensitive,
+                coalesce_same_name_keys,
+                mark_join_keys_ambiguous,
+            },
         )
     }
 

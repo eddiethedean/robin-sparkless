@@ -4,7 +4,7 @@
 use std::collections::HashMap;
 
 use crate::column::Column;
-use crate::dataframe::{DataFrame, JoinType, disambiguate_agg_output_names, join};
+use crate::dataframe::{DataFrame, JoinOptions, JoinType, disambiguate_agg_output_names, join};
 use crate::functions;
 use crate::schema::{DataType as CoreDataType, StructType};
 use crate::session::{SparkSession, set_thread_udf_session};
@@ -965,9 +965,11 @@ fn translate_select_from(
                     left_refs,
                     right_refs,
                     join_type,
-                    session.is_case_sensitive(),
-                    false, // SQL join condition: keep both key columns
-                    false, // SQL: do not mark join keys ambiguous
+                    JoinOptions {
+                        case_sensitive: session.is_case_sensitive(),
+                        coalesce_same_name_keys: false, // SQL: keep both key columns
+                        mark_join_keys_ambiguous: false,
+                    },
                 )?;
             }
         }

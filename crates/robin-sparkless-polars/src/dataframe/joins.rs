@@ -115,6 +115,14 @@ pub enum JoinType {
     LeftAnti,
 }
 
+/// Options for join (case sensitivity, key coalescing, ambiguity marking).
+#[derive(Debug, Clone)]
+pub struct JoinOptions {
+    pub case_sensitive: bool,
+    pub coalesce_same_name_keys: bool,
+    pub mark_join_keys_ambiguous: bool,
+}
+
 /// Join with another DataFrame on the given columns. Preserves case_sensitive on result.
 /// When join key types differ (e.g. str vs int), coerces both sides to a common type (PySpark parity #274).
 /// When both tables have the same join key column name(s), renames the right's keys to temp names and
@@ -128,18 +136,21 @@ pub enum JoinType {
 /// key columns are coalesced into one so the result has a single key column (PySpark parity #1049, #353).
 /// When false (e.g. condition join left.x == right.x), both key columns are kept (dept_id, dept_id_right).
 ///
-/// When `mark_join_keys_ambiguous` is true and left/right key names are the same, unqualified references
-/// to those key names are treated as ambiguous (PySpark parity for condition join: #1230).
+/// When `options.mark_join_keys_ambiguous` is true and left/right key names are the same, unqualified
+/// references to those key names are treated as ambiguous (PySpark parity for condition join: #1230).
 pub fn join(
     left: &DataFrame,
     right: &DataFrame,
     left_on: Vec<&str>,
     right_on: Vec<&str>,
     how: JoinType,
-    case_sensitive: bool,
-    coalesce_same_name_keys: bool,
-    mark_join_keys_ambiguous: bool,
+    options: JoinOptions,
 ) -> Result<DataFrame, PolarsError> {
+    let JoinOptions {
+        case_sensitive,
+        coalesce_same_name_keys,
+        mark_join_keys_ambiguous,
+    } = options;
     use polars::prelude::{JoinBuilder, JoinCoalesce, col};
     if left_on.len() != right_on.len() {
         return Err(PolarsError::ComputeError(
@@ -550,8 +561,7 @@ pub fn join(
                 .iter_names_and_dtypes()
                 .map(|(_name, dt): (_, &PlDataType)| dt.clone())
                 .collect();
-            let mut seen: std::collections::HashSet<String> =
-                std::collections::HashSet::new();
+            let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
             let desired: Vec<String> = result_names_vec
                 .iter()
                 .map(|name| {
@@ -704,8 +714,8 @@ pub fn join(
 #[cfg(test)]
 mod tests {
     use super::{
-        JoinType, expr_contains_only_join_key_equalities, join, try_extract_join_eq_columns,
-        try_extract_join_eq_columns_all,
+        JoinOptions, JoinType, expr_contains_only_join_key_equalities, join,
+        try_extract_join_eq_columns, try_extract_join_eq_columns_all,
     };
     use crate::functions::col;
     use crate::{DataFrame, SparkSession};
@@ -802,9 +812,11 @@ mod tests {
             vec!["id"],
             vec!["id"],
             JoinType::Inner,
-            false,
-            false,
-            false,
+            JoinOptions {
+                case_sensitive: false,
+                coalesce_same_name_keys: false,
+                mark_join_keys_ambiguous: false,
+            },
         )
         .unwrap();
         assert_eq!(out.count().unwrap(), 1);
@@ -824,9 +836,11 @@ mod tests {
             vec!["id"],
             vec!["id"],
             JoinType::Inner,
-            false,
-            true, // coalesce_same_name_keys
-            false,
+            JoinOptions {
+                case_sensitive: false,
+                coalesce_same_name_keys: true,
+                mark_join_keys_ambiguous: false,
+            },
         )
         .unwrap();
         assert_eq!(out.count().unwrap(), 1);
@@ -864,9 +878,11 @@ mod tests {
             vec!["id"],
             vec!["id"],
             JoinType::Left,
-            false,
-            false,
-            false,
+            JoinOptions {
+                case_sensitive: false,
+                coalesce_same_name_keys: false,
+                mark_join_keys_ambiguous: false,
+            },
         )
         .unwrap();
         assert_eq!(out.count().unwrap(), 2);
@@ -882,9 +898,11 @@ mod tests {
             vec!["id"],
             vec!["id"],
             JoinType::Right,
-            false,
-            false,
-            false,
+            JoinOptions {
+                case_sensitive: false,
+                coalesce_same_name_keys: false,
+                mark_join_keys_ambiguous: false,
+            },
         )
         .unwrap();
         assert_eq!(out.count().unwrap(), 2); // right has id 1,3; left matches 1
@@ -900,9 +918,11 @@ mod tests {
             vec!["id"],
             vec!["id"],
             JoinType::Outer,
-            false,
-            false,
-            false,
+            JoinOptions {
+                case_sensitive: false,
+                coalesce_same_name_keys: false,
+                mark_join_keys_ambiguous: false,
+            },
         )
         .unwrap();
         assert_eq!(out.count().unwrap(), 3);
@@ -918,9 +938,11 @@ mod tests {
             vec!["id"],
             vec!["id"],
             JoinType::LeftSemi,
-            false,
-            false,
-            false,
+            JoinOptions {
+                case_sensitive: false,
+                coalesce_same_name_keys: false,
+                mark_join_keys_ambiguous: false,
+            },
         )
         .unwrap();
         assert_eq!(out.count().unwrap(), 1); // left rows with match in right (id 1)
@@ -936,9 +958,11 @@ mod tests {
             vec!["id"],
             vec!["id"],
             JoinType::LeftAnti,
-            false,
-            false,
-            false,
+            JoinOptions {
+                case_sensitive: false,
+                coalesce_same_name_keys: false,
+                mark_join_keys_ambiguous: false,
+            },
         )
         .unwrap();
         assert_eq!(out.count().unwrap(), 1); // left rows with no match (id 2)
@@ -959,9 +983,11 @@ mod tests {
             vec!["id"],
             vec!["id"],
             JoinType::Inner,
-            false,
-            false,
-            false,
+            JoinOptions {
+                case_sensitive: false,
+                coalesce_same_name_keys: false,
+                mark_join_keys_ambiguous: false,
+            },
         )
         .unwrap();
         assert_eq!(out.count().unwrap(), 0);
@@ -984,9 +1010,11 @@ mod tests {
             vec!["id"],
             vec!["id"],
             JoinType::Inner,
-            false,
-            false,
-            false,
+            JoinOptions {
+                case_sensitive: false,
+                coalesce_same_name_keys: false,
+                mark_join_keys_ambiguous: false,
+            },
         )
         .unwrap();
         assert_eq!(out.count().unwrap(), 1);
@@ -1014,9 +1042,11 @@ mod tests {
             vec!["id"],
             vec!["id"],
             JoinType::Inner,
-            false,
-            false,
-            false,
+            JoinOptions {
+                case_sensitive: false,
+                coalesce_same_name_keys: false,
+                mark_join_keys_ambiguous: false,
+            },
         )
         .unwrap();
         assert_eq!(out.count().unwrap(), 1, "inner join on id: 1 match (id=1)");
@@ -1059,9 +1089,11 @@ mod tests {
             vec!["key"],
             vec!["key"],
             JoinType::Outer,
-            false,
-            false,
-            false,
+            JoinOptions {
+                case_sensitive: false,
+                coalesce_same_name_keys: false,
+                mark_join_keys_ambiguous: false,
+            },
         )
         .unwrap();
 
@@ -1103,9 +1135,11 @@ mod tests {
             vec!["id"],
             vec!["id"],
             JoinType::Inner,
-            false,
-            false,
-            false,
+            JoinOptions {
+                case_sensitive: false,
+                coalesce_same_name_keys: false,
+                mark_join_keys_ambiguous: false,
+            },
         )
         .expect("issue #604: join on id/ID must succeed");
         assert_eq!(out.count().unwrap(), 1);
