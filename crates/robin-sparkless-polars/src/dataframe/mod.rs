@@ -1364,7 +1364,7 @@ impl DataFrame {
                 })
                 .collect::<Result<Vec<_>, PolarsError>>()?;
             // Exprs already resolved by column_name_to_expr (e.g. "t1.id" -> col("id")); skip re-resolve to avoid ambiguous on col("id") (#1230).
-            return transformations::select_with_exprs(self, exprs, self.case_sensitive, true);
+            return self.select_exprs(exprs);
         }
         // Non-dotted names: build explicit expressions so we can implement PySpark-like
         // ambiguous-case handling. When multiple physical columns differ only by case
@@ -1390,7 +1390,7 @@ impl DataFrame {
             let resolved = self.resolve_column_name(requested_str)?;
             exprs.push(col(resolved.as_str()).alias(requested_str));
         }
-        transformations::select_with_exprs(self, exprs, self.case_sensitive, false)
+        self.select_exprs(exprs)
     }
 
     /// Build an expression for a column name, including dotted struct field access (e.g. "outer.inner.leaf").

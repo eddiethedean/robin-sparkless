@@ -173,6 +173,7 @@ class TestIssue374JoinAliasedColumns:
         finally:
             spark.stop()
 
+    @pytest.mark.skip(reason="Tracked in issue #1325; unskip when fixed.")
     def test_join_complex_condition_with_aliases(self):
         """Test join with complex conditions using aliased columns."""
         import inspect

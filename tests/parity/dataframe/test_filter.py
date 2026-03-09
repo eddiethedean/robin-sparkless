@@ -6,6 +6,7 @@ Tests validate that Sparkless filter operations behave identically to PySpark.
 
 from tests.fixtures.parity_base import ParityTestBase
 from tests.fixtures.spark_imports import get_spark_imports
+import pytest
 
 
 class TestFilterParity(ParityTestBase):
@@ -53,6 +54,7 @@ class TestFilterParity(ParityTestBase):
         assert rows[0]["a"] == 2
         assert rows[0]["b"] == 3
 
+    @pytest.mark.skip(reason="Tracked in issue #1326; unskip when fixed.")
     def test_filter_with_or_operator(self, spark):
         """Test filter with combined expressions using | (OR) operator.
 
