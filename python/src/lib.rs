@@ -3273,6 +3273,79 @@ impl PyDataFrame {
         py: Python<'_>,
         condition: &Bound<'_, PyAny>,
     ) -> PyResult<PyDataFrame> {
+        // (UDF column op literal): add UDF result column, filter by (temp op literal), drop temp.
+        if let Ok(udf_filter) = condition.downcast::<PyUdfFilterColumn>() {
+            let udf_column_py: Py<PyColumn> = udf_filter.getattr("udf_column")?.extract()?;
+            let other_json: String = udf_filter.getattr("other_json")?.extract()?;
+            let col_ref = udf_column_py.bind(py).borrow();
+            let (udf_name, mut arg_names, literal_jsons): (String, Vec<String>, Vec<Option<String>>) =
+                match col_ref.inner.udf_call_info_with_literals() {
+                    Some(x) => x,
+                    None => {
+                        return Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+                            "UdfFilterColumn requires a UDF column",
+                        ));
+                    }
+                };
+            let mut df_for_udf = slf.inner.clone();
+            if let Some((_, args)) = col_ref.inner.udf_call_with_args() {
+                for (i, arg) in args.iter().enumerate() {
+                    if literal_jsons.get(i).and_then(|o: &Option<String>| o.as_ref()).is_some() {
+                        continue;
+                    }
+                    let columns = df_for_udf.columns().map_err(to_py_err)?;
+                    let name_in_df = columns
+                        .iter()
+                        .any(|c| c.eq_ignore_ascii_case(arg_names[i].as_str()));
+                    if !name_in_df {
+                        let temp_name = format!("__udf_arg_{}", i);
+                        let resolved = df_for_udf
+                            .resolve_expr_column_names(arg.expr().clone())
+                            .map_err(to_py_err)?;
+                        df_for_udf = df_for_udf
+                            .with_column_expr(&temp_name, resolved)
+                            .map_err(to_py_err)?;
+                        arg_names[i] = temp_name;
+                    }
+                }
+            }
+            let temp_name = format!("_udf_filter_{}", uuid::Uuid::new_v4().simple());
+            let arg_names_py = PyList::new_bound(py, arg_names.iter());
+            let literals_py = PyList::empty_bound(py);
+            for opt in &literal_jsons {
+                let item: Bound<'_, PyAny> = match opt {
+                    Some(s) => pyo3::types::PyString::new_bound(py, s.as_str()).into_any(),
+                    None => py.None().into_bound(py),
+                };
+                literals_py.append(item)?;
+            }
+            let df_for_callback = PyDataFrame::wrap(df_for_udf);
+            let df_with_col = PYTHON_UDF_EXECUTOR
+                .with(|cell| -> PyResult<PyDataFrame> {
+                    let cb = cell.borrow();
+                    let callback = cb.as_ref().ok_or_else(|| {
+                        PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
+                            "UDF filter requires Python UDF executor (active session)",
+                        )
+                    })?;
+                    let result = callback.bind(py).call1((
+                        df_for_callback,
+                        &temp_name,
+                        udf_name,
+                        arg_names_py,
+                        literals_py,
+                    ))?;
+                    let py_df = result.downcast::<PyDataFrame>()?;
+                    Ok(PyDataFrame::wrap(py_df.borrow().inner.clone()))
+                })?;
+            let lit_expr = json_str_to_lit_expr(&other_json)?;
+            let filter_expr = robin_sparkless::Column::new(temp_name.clone())
+                .gt(lit_expr)
+                .into_expr();
+            let filtered = df_with_col.inner.filter(filter_expr).map_err(to_py_err)?;
+            let out = filtered.drop(vec![temp_name.as_str()]).map_err(to_py_err)?;
+            return Ok(PyDataFrame::wrap(out));
+        }
         if let Ok(py_col) = condition.downcast::<PyColumn>() {
             let col_ref = py_col.borrow();
             if let Some((udf_name, arg_names, literal_jsons)) =
@@ -3622,9 +3695,32 @@ impl PyDataFrame {
         // Case 1: regular Column (including Python UDF columns)
         if let Ok(py_col) = col_any.downcast::<PyColumn>() {
             let col = py_col.borrow();
-            if let Some((udf_name, arg_names, literal_jsons)) =
+            if let Some((udf_name, mut arg_names, literal_jsons)) =
                 col.inner.udf_call_info_with_literals()
             {
+                // Materialize expression args (e.g. F.col('x')*2) as temp columns so the executor can read them from the row.
+                let mut df_for_udf = slf.inner.clone();
+                if let Some((_, args)) = col.inner.udf_call_with_args() {
+                    for (i, arg) in args.iter().enumerate() {
+                        if literal_jsons.get(i).and_then(|o| o.as_ref()).is_some() {
+                            continue;
+                        }
+                        let columns = df_for_udf.columns().map_err(to_py_err)?;
+                        let name_in_df = columns
+                            .iter()
+                            .any(|c| c.eq_ignore_ascii_case(arg_names[i].as_str()));
+                        if !name_in_df {
+                            let temp_name = format!("__udf_arg_{}", i);
+                            let resolved = df_for_udf
+                                .resolve_expr_column_names(arg.expr().clone())
+                                .map_err(to_py_err)?;
+                            df_for_udf = df_for_udf
+                                .with_column_expr(&temp_name, resolved)
+                                .map_err(to_py_err)?;
+                            arg_names[i] = temp_name;
+                        }
+                    }
+                }
                 let arg_names_py = PyList::new_bound(py, arg_names.iter());
                 let literals_py = PyList::empty_bound(py);
                 for opt in &literal_jsons {
@@ -3634,6 +3730,7 @@ impl PyDataFrame {
                     };
                     literals_py.append(item)?;
                 }
+                let df_for_callback = PyDataFrame::wrap(df_for_udf);
                 if let Some(result_df) =
                     PYTHON_UDF_EXECUTOR.with(|cell| -> PyResult<Option<PyDataFrame>> {
                         let cb = cell.borrow();
@@ -3641,10 +3738,8 @@ impl PyDataFrame {
                             Some(c) => c,
                             None => return Ok(None),
                         };
-                        let df_obj: Bound<'_, PyAny> =
-                            unsafe { Bound::from_borrowed_ptr(py, slf.as_ptr()) };
                         let result = callback.bind(py).call1((
-                            df_obj,
+                            df_for_callback,
                             name,
                             udf_name,
                             arg_names_py,
@@ -5419,6 +5514,56 @@ fn extract_string_list_from_on(on: Option<&Bound<'_, PyAny>>) -> PyResult<Vec<St
     ))
 }
 
+/// Convert a JSON string (from PyUdfFilterColumn) to a literal Expr for filter (e.g. col(temp).gt(lit)).
+fn json_str_to_lit_expr(s: &str) -> PyResult<robin_sparkless::Expr> {
+    use robin_sparkless::functions::{lit_bool, lit_f64, lit_i64, lit_null_untyped, lit_str};
+    let v: JsonValue = serde_json::from_str(s).map_err(|e| {
+        pyo3::exceptions::PyValueError::new_err(format!("filter literal JSON: {e}"))
+    })?;
+    Ok(match v {
+        JsonValue::Number(n) => {
+            if let Some(i) = n.as_i64() {
+                lit_i64(i).into_expr()
+            } else {
+                lit_f64(n.as_f64().unwrap_or(0.0)).into_expr()
+            }
+        }
+        JsonValue::String(st) => lit_str(&st).into_expr(),
+        JsonValue::Bool(b) => lit_bool(b).into_expr(),
+        JsonValue::Null => lit_null_untyped().into_expr(),
+        _ => {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "filter literal must be number, string, bool, or null",
+            ));
+        }
+    })
+}
+
+/// Serialize a simple Python value to JSON for UDF filter (e.g. my_udf("x","y") > 20).
+fn py_any_to_json_string(other: &Bound<'_, PyAny>) -> PyResult<String> {
+    if other.is_none() {
+        return Ok("null".to_string());
+    }
+    if let Ok(b) = other.extract::<bool>() {
+        return Ok(serde_json::to_string(&b).unwrap());
+    }
+    if let Ok(i) = other.extract::<i64>() {
+        return Ok(serde_json::to_string(&i).unwrap());
+    }
+    if let Ok(i) = other.extract::<i32>() {
+        return Ok(serde_json::to_string(&i).unwrap());
+    }
+    if let Ok(f) = other.extract::<f64>() {
+        return Ok(serde_json::to_string(&f).unwrap());
+    }
+    if let Ok(s) = other.extract::<String>() {
+        return Ok(serde_json::to_string(&s).unwrap());
+    }
+    Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+        "UDF filter comparison rhs must be int, float, str, bool, or None",
+    ))
+}
+
 /// Convert Python value (int, float, str, bool, None, list) or PyColumn to robin_sparkless Column.
 fn py_any_to_column(other: &Bound<'_, PyAny>) -> PyResult<Column> {
     if let Ok(py_col) = other.downcast::<PyColumn>() {
@@ -5485,6 +5630,30 @@ fn py_any_to_dataframe_inner(other: &Bound<'_, PyAny>) -> PyResult<DataFrame> {
     Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
         "argument 'other': expected DataFrame or object with .inner DataFrame",
     ))
+}
+
+/// Wrapper for (udf_column op literal) so filter() can expand to withColumn(UDF) then filter(temp op literal).
+#[pyclass]
+struct PyUdfFilterColumn {
+    udf_column: Py<PyColumn>,
+    op: String,
+    other_json: String,
+}
+
+#[pymethods]
+impl PyUdfFilterColumn {
+    #[getter]
+    fn udf_column(&self, py: Python<'_>) -> Py<PyColumn> {
+        self.udf_column.clone_ref(py)
+    }
+    #[getter]
+    fn op(&self) -> &str {
+        &self.op
+    }
+    #[getter]
+    fn other_json(&self) -> &str {
+        &self.other_json
+    }
 }
 
 #[pyclass]
@@ -5752,12 +5921,23 @@ impl PyColumn {
         })
     }
 
-    /// Python: col("x") > 1
-    fn __gt__(&self, other: &Bound<'_, PyAny>) -> PyResult<PyColumn> {
+    /// Python: col("x") > 1. When self is a UDF column, return PyUdfFilterColumn so filter() can expand (UDF op literal).
+    fn __gt__(slf: PyRef<Self>, py: Python<'_>, other: &Bound<'_, PyAny>) -> PyResult<PyObject> {
+        if slf.inner.udf_call_info().is_some() {
+            let other_json = py_any_to_json_string(other)?;
+            let udf_column = Py::new(py, PyColumn { inner: slf.inner.clone() })?;
+            return Ok(PyUdfFilterColumn {
+                udf_column,
+                op: "gt".to_string(),
+                other_json,
+            }
+            .into_py(py));
+        }
         let other_col = py_any_to_column(other)?;
         Ok(PyColumn {
-            inner: self.inner.gt(other_col.into_expr()),
-        })
+            inner: slf.inner.gt(other_col.into_expr()),
+        }
+        .into_py(py))
     }
 
     fn __ge__(&self, other: &Bound<'_, PyAny>) -> PyResult<PyColumn> {
@@ -8668,6 +8848,7 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyRDD>()?;
     m.add_class::<PyDataFrameWriter>()?;
     m.add_class::<PyColumn>()?;
+    m.add_class::<PyUdfFilterColumn>()?;
     m.add_class::<PySortOrder>()?;
     m.add_class::<PyGroupedData>()?;
     m.add_class::<PyPivotedGroupedData>()?;

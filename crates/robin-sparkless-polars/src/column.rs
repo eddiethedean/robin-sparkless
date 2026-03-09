@@ -223,6 +223,13 @@ impl Column {
         })
     }
 
+    /// If this column is a Python UDF call, return (udf_name, args slice). Used to materialize expression args before calling the executor.
+    pub fn udf_call_with_args(&self) -> Option<(&str, &[Column])> {
+        self.udf_call
+            .as_ref()
+            .map(|(name, args)| (name.as_str(), args.as_slice()))
+    }
+
     /// If this column is a literal expression, return its value as JSON string for Python UDF executor (literal args).
     pub fn literal_as_json_string(&self) -> Option<String> {
         match &self.expr {
