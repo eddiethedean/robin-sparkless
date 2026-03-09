@@ -3,6 +3,7 @@
 //! See [LOGICAL_PLAN_FORMAT.md](../../../docs/LOGICAL_PLAN_FORMAT.md) for the plan and expression schema.
 
 mod expr;
+mod logical;
 
 use crate::dataframe::{DataFrame, JoinType, disambiguate_agg_output_names};
 use crate::functions::{
@@ -11,6 +12,7 @@ use crate::functions::{
 use crate::plan::expr::{expr_from_value, try_column_from_udf_value};
 use crate::session::{SparkSession, set_thread_udf_session};
 pub use expr::PlanExprError;
+pub use logical::LogicalPlan;
 use polars::prelude::PolarsError;
 use serde_json::Value;
 

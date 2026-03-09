@@ -81,6 +81,10 @@ pub struct DataFrame {
     /// Column names that are ambiguous after a join (same name on both sides). Selecting them
     /// unqualified raises AMBIGUOUS_REFERENCE (PySpark parity #374 / #1230).
     pub(crate) ambiguous_columns: Option<HashSet<String>>,
+    /// Optional logical plan used for higher-level optimizations (e.g. filter pushdown across
+    /// projections) before compiling to a Polars `LazyFrame`. When `None`, `inner` contains the
+    /// full lazy plan as before.
+    pub(crate) logical_plan: Option<crate::plan::LogicalPlan>,
 }
 
 /// Spec for groupBy: either a column name (str) or a Column expression (e.g. col("a").alias("x")).
@@ -101,6 +105,7 @@ impl DataFrame {
             case_sensitive: DEFAULT_CASE_SENSITIVE,
             alias: None,
             ambiguous_columns: None,
+            logical_plan: None,
         }
     }
 
@@ -113,6 +118,7 @@ impl DataFrame {
             case_sensitive,
             alias: None,
             ambiguous_columns: None,
+             logical_plan: None,
         }
     }
 
@@ -125,6 +131,7 @@ impl DataFrame {
             case_sensitive,
             alias: None,
             ambiguous_columns: None,
+            logical_plan: None,
         }
     }
 
@@ -135,6 +142,7 @@ impl DataFrame {
             case_sensitive: DEFAULT_CASE_SENSITIVE,
             alias: None,
             ambiguous_columns: None,
+            logical_plan: None,
         }
     }
 
@@ -145,6 +153,7 @@ impl DataFrame {
             case_sensitive,
             alias: None,
             ambiguous_columns: None,
+            logical_plan: None,
         }
     }
 
@@ -160,6 +169,7 @@ impl DataFrame {
             case_sensitive,
             alias: None,
             ambiguous_columns,
+            logical_plan: None,
         }
     }
 
@@ -171,6 +181,7 @@ impl DataFrame {
             case_sensitive: false,
             alias: self.alias,
             ambiguous_columns: self.ambiguous_columns,
+            logical_plan: self.logical_plan,
         }
     }
 
@@ -181,6 +192,7 @@ impl DataFrame {
             case_sensitive: DEFAULT_CASE_SENSITIVE,
             alias: None,
             ambiguous_columns: None,
+            logical_plan: None,
         }
     }
 
@@ -191,6 +203,11 @@ impl DataFrame {
 
     /// Return the LazyFrame for plan extension. For Eager, converts via .lazy(); for Lazy, clones.
     pub(crate) fn lazy_frame(&self) -> LazyFrame {
+        if let Some(plan) = &self.logical_plan {
+            // Use the optimized logical plan when available so that higher-level rewrites
+            // (e.g. filter pushdown across projections) take effect before execution.
+            return plan.optimize().to_lazy();
+        }
         match &self.inner {
             DataFrameInner::Eager(df) => df.as_ref().clone().lazy(),
             DataFrameInner::Lazy(lf) => lf.clone(),
@@ -199,6 +216,10 @@ impl DataFrame {
 
     /// Materialize the plan. Single point of collect for all actions.
     pub(crate) fn collect_inner(&self) -> Result<Arc<PlDataFrame>, PolarsError> {
+        if let Some(plan) = &self.logical_plan {
+            let lf = plan.optimize().to_lazy();
+            return Ok(Arc::new(lf.collect()?));
+        }
         match &self.inner {
             DataFrameInner::Eager(df) => Ok(df.clone()),
             DataFrameInner::Lazy(lf) => Ok(Arc::new(lf.clone().collect()?)),
@@ -214,6 +235,7 @@ impl DataFrame {
             case_sensitive: self.case_sensitive,
             alias: Some(name.to_string()),
             ambiguous_columns: self.ambiguous_columns.clone(),
+            logical_plan: self.logical_plan.clone(),
         }
     }
 
@@ -1334,7 +1356,21 @@ impl DataFrame {
     /// Accepts either column names (strings) or Column expressions (e.g. from regexp_extract_all(...).alias("m")).
     /// Column names are resolved according to case sensitivity.
     pub fn select_exprs(&self, exprs: Vec<Expr>) -> Result<DataFrame, PolarsError> {
-        transformations::select_with_exprs(self, exprs, self.case_sensitive, false)
+        // Keep existing behavior by delegating to the transformation helper, but also
+        // build a LogicalPlan node so higher-level optimizations (e.g. filter pushdown)
+        // can operate on a logical representation before compiling to LazyFrame.
+        let exprs_for_plan = exprs.clone();
+        let mut out = transformations::select_with_exprs(self, exprs, self.case_sensitive, false)?;
+        let base_plan = match &self.logical_plan {
+            Some(p) => p.clone(),
+            None => crate::plan::LogicalPlan::from_lazy(self.lazy_frame()),
+        };
+        let project_plan = crate::plan::LogicalPlan::Project {
+            exprs: exprs_for_plan,
+            input: Box::new(base_plan),
+        };
+        out.logical_plan = Some(project_plan);
+        Ok(out)
     }
 
     /// Select columns by name (returns a new DataFrame).
@@ -1364,7 +1400,7 @@ impl DataFrame {
                 })
                 .collect::<Result<Vec<_>, PolarsError>>()?;
             // Exprs already resolved by column_name_to_expr (e.g. "t1.id" -> col("id")); skip re-resolve to avoid ambiguous on col("id") (#1230).
-            return transformations::select_with_exprs(self, exprs, self.case_sensitive, true);
+            return self.select_exprs(exprs);
         }
         // Non-dotted names: build explicit expressions so we can implement PySpark-like
         // ambiguous-case handling. When multiple physical columns differ only by case
@@ -1390,7 +1426,7 @@ impl DataFrame {
             let resolved = self.resolve_column_name(requested_str)?;
             exprs.push(col(resolved.as_str()).alias(requested_str));
         }
-        transformations::select_with_exprs(self, exprs, self.case_sensitive, false)
+        self.select_exprs(exprs)
     }
 
     /// Build an expression for a column name, including dotted struct field access (e.g. "outer.inner.leaf").
@@ -1410,7 +1446,21 @@ impl DataFrame {
 
     /// Filter rows using a Polars expression.
     pub fn filter(&self, condition: Expr) -> Result<DataFrame, PolarsError> {
-        transformations::filter(self, condition, self.case_sensitive)
+        // Preserve current behavior by delegating to transformations::filter, but also
+        // build a LogicalPlan::Filter node on top of any existing logical plan so
+        // optimizations can reason about filter/project ordering.
+        let predicate_for_plan = condition.clone();
+        let mut out = transformations::filter(self, condition, self.case_sensitive)?;
+        let base_plan = match &self.logical_plan {
+            Some(p) => p.clone(),
+            None => crate::plan::LogicalPlan::from_lazy(self.lazy_frame()),
+        };
+        let filter_plan = crate::plan::LogicalPlan::Filter {
+            predicate: predicate_for_plan,
+            input: Box::new(base_plan),
+        };
+        out.logical_plan = Some(filter_plan);
+        Ok(out)
     }
 
     /// Same as [`filter`](Self::filter) but returns [`EngineError`]. Use in bindings to avoid Polars.
@@ -2744,6 +2794,7 @@ impl Clone for DataFrame {
             case_sensitive: self.case_sensitive,
             alias: self.alias.clone(),
             ambiguous_columns: self.ambiguous_columns.clone(),
+            logical_plan: self.logical_plan.clone(),
         }
     }
 }
