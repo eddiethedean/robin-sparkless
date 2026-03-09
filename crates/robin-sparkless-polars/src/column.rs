@@ -3,6 +3,7 @@ use polars::prelude::{
     DataType, Expr, Field, PolarsError, PolarsResult, RankMethod, RankOptions, SortOptions,
     TimeUnit, WindowMapping, col, lit,
 };
+use polars_plan::dsl::AggExpr;
 
 /// Unwrap UDF result to Column (map() expects Result<Column>, UDFs return Result<Option<Column>>).
 #[inline]
@@ -94,6 +95,18 @@ pub struct Column {
     pub source_for_running_mean: Option<String>,
     /// When Some, over_window uses order-sensitive first/last (PySpark first_value/last_value semantics; #1145).
     pub first_last_value: Option<FirstLastValue>,
+    /// When Some, over_window uses cum_count for running count semantics (PySpark count().over(order); #1218).
+    pub source_for_running_count: Option<String>,
+}
+
+/// True if the expression is or contains a count_distinct/n_unique aggregate (PySpark rejects distinct window functions).
+fn expr_is_or_contains_n_unique(expr: &Expr) -> bool {
+    match expr {
+        Expr::Agg(agg) if matches!(agg, AggExpr::NUnique(_)) => true,
+        Expr::Cast { expr: inner, .. } => expr_is_or_contains_n_unique(inner.as_ref()),
+        Expr::Alias(inner, _) => expr_is_or_contains_n_unique(inner.as_ref()),
+        _ => false,
+    }
 }
 
 impl Column {
@@ -107,6 +120,7 @@ impl Column {
             source_for_running: None,
             source_for_running_mean: None,
             first_last_value: None,
+            source_for_running_count: None,
         }
     }
 
@@ -121,6 +135,7 @@ impl Column {
             source_for_running: None,
             source_for_running_mean: None,
             first_last_value: None,
+            source_for_running_count: None,
         }
     }
 
@@ -134,6 +149,7 @@ impl Column {
             source_for_running: None,
             source_for_running_mean: None,
             first_last_value: None,
+            source_for_running_count: None,
         }
     }
 
@@ -151,6 +167,7 @@ impl Column {
             source_for_running: None,
             source_for_running_mean: None,
             first_last_value: None,
+            source_for_running_count: None,
         }
     }
 
@@ -168,6 +185,7 @@ impl Column {
             source_for_running: None,
             source_for_running_mean: None,
             first_last_value: None,
+            source_for_running_count: None,
         }
     }
 
@@ -229,6 +247,7 @@ impl Column {
             source_for_running: self.source_for_running.clone(),
             source_for_running_mean: self.source_for_running_mean.clone(),
             first_last_value: self.first_last_value.clone(),
+            source_for_running_count: self.source_for_running_count.clone(),
         }
     }
 
@@ -272,6 +291,7 @@ impl Column {
             source_for_running: None,
             source_for_running_mean: None,
             first_last_value: None,
+            source_for_running_count: None,
         }
     }
 
@@ -285,6 +305,7 @@ impl Column {
             source_for_running: None,
             source_for_running_mean: None,
             first_last_value: None,
+            source_for_running_count: None,
         }
     }
 
@@ -2403,6 +2424,14 @@ impl Column {
         order_by_encoded: &[String],
         use_running_aggregate: bool,
     ) -> Result<Column, PolarsError> {
+        // PySpark does not support countDistinct().over(); approx_count_distinct().over() is allowed (#1218).
+        if expr_is_or_contains_n_unique(self.expr())
+            && self.name.starts_with("count_distinct(")
+        {
+            return Err(PolarsError::InvalidOperation(
+                "Distinct window functions are not supported".into(),
+            ));
+        }
         let partition_exprs: Vec<Expr> = if partition_by.is_empty() {
             vec![lit(1i32)]
         } else {
@@ -2423,7 +2452,10 @@ impl Column {
                     order_exprs.push(col(name));
                     descending_multi.push(descending);
                 }
-                let descending = fl.is_last; // last = rank desc so "last" row gets rank 1
+                // first_value: first row in window order gets rank 1 → use window order direction.
+                // last_value: last row in window order gets rank 1 → use opposite of window order.
+                let order_desc = descending_multi.first().copied().unwrap_or(false);
+                let descending = if fl.is_last { !order_desc } else { order_desc };
                 let opts = RankOptions {
                     method: RankMethod::Ordinal,
                     descending,
@@ -2450,6 +2482,9 @@ impl Column {
             } else if let Some(ref src) = self.source_for_running {
                 // Cast to Float64 so string columns work (PySpark parity, issue #393).
                 col(src).cast(DataType::Float64).cum_sum(false)
+            } else if let Some(ref src) = self.source_for_running_count {
+                // Running count in window order (PySpark count().over(order); #1218).
+                col(src).cum_count(false).cast(DataType::Int64)
             } else {
                 self.expr().clone()
             }
@@ -2639,6 +2674,7 @@ impl Column {
                 value_expr,
                 is_last: false,
             }),
+            source_for_running_count: None,
         }
     }
 
@@ -2657,6 +2693,7 @@ impl Column {
                 value_expr,
                 is_last: true,
             }),
+            source_for_running_count: None,
         }
     }
 
