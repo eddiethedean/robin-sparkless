@@ -398,15 +398,27 @@ pub fn join(
         .coalesce(coalesce)
         .finish();
 
-    // For full outer joins with same-named keys, set the canonical join key to the left
-    // key only. This matches the parity fixtures used in tests/parity/dataframe/test_join.py,
-    // where the left key column (e.g. dept_id) is null for rows that exist only on the right
-    // side, and a separate right-side key column (e.g. dept_id_right) is used for the
-    // right DataFrame's key values.
+    // For full outer joins with same-named keys, set the canonical join key column
+    // differently depending on how the join was invoked:
+    // - Column-name joins (on = "key") keep coalesce(left_key, right_key) semantics so
+    //   unmatched right rows keep their key (issue #280).
+    // - Condition joins (on = Column) with same-named keys and mark_join_keys_ambiguous = true
+    //   use the left key only as the canonical key, while keeping a separate *_right column
+    //   for the right key (parity fixtures in tests/parity/dataframe/test_join.py).
     if matches!(how, JoinType::Outer) && !outer_left_key_copies.is_empty() {
         use polars::prelude::col;
-        for (_i, (left_name, temp)) in outer_left_key_copies.iter().enumerate() {
-            let expr = col(temp.as_str());
+        for (i, (left_name, temp)) in outer_left_key_copies.iter().enumerate() {
+            let right_key_name = right_key_names.get(i).map(|s| s.as_str()).unwrap_or("");
+            let expr = if mark_join_keys_ambiguous {
+                // Condition join parity: canonical key comes from the left side only.
+                col(temp.as_str())
+            } else if right_key_name.is_empty() {
+                col(temp.as_str())
+            } else {
+                // Column-name outer join: coalesce(left_key_copy, right_key) so right-only
+                // rows keep their key instead of becoming null (issue #280).
+                pl_coalesce(&[col(temp.as_str()), col(right_key_name)])
+            };
             joined = joined.with_column(expr.alias(left_name.as_str()));
         }
         // Drop the temp columns from the result.
