@@ -8452,6 +8452,13 @@ fn array(columns: &Bound<'_, PyTuple>) -> PyResult<PyColumn> {
                 cols.push(array_item_to_column(&sub)?);
             }
         } else if let Ok(tup) = item.downcast::<PyTuple>() {
+            // Issue #1115 / test_array_empty_tuple_raises_like_pyspark:
+            // F.array(()) must raise (PySpark rejects bare empty tuple); F.array([]) remains valid.
+            if tup.len() == 0 {
+                return Err(to_py_err(
+                    "array() does not accept an empty tuple; use [] instead",
+                ));
+            }
             for sub in tup.iter() {
                 cols.push(array_item_to_column(&sub)?);
             }

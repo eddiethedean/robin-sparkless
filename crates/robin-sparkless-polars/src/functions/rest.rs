@@ -1889,7 +1889,7 @@ pub fn to_date(column: &Column, format: Option<&str>) -> Result<Column, String> 
             crate::column::expect_col(crate::udfs::apply_string_to_date_format(
                 col,
                 fmt.as_deref(),
-                false,
+                true, // strict type checking: reject non-string/non-timestamp/non-date inputs (#1115)
             ))
         },
         move |_schema, _field| Ok(Field::new(out_name2.clone().into(), DataType::Date)),
@@ -2581,7 +2581,9 @@ pub fn array(columns: &[&Column]) -> Result<crate::column::Column, PolarsError> 
     let exprs: Vec<Expr> = columns.iter().map(|c| c.expr().clone()).collect();
     let expr = concat_list(exprs)
         .map_err(|e| PolarsError::ComputeError(format!("array concat_list: {e}").into()))?;
-    Ok(crate::column::Column::from_expr(expr, None))
+    let mut col = crate::column::Column::from_expr(expr, None);
+    col.is_array_expr = true;
+    Ok(col)
 }
 
 /// Number of elements in list (PySpark size / array_size). Returns Int32.

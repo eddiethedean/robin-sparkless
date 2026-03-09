@@ -85,6 +85,9 @@ pub struct FirstLastValue {
 pub struct Column {
     name: String,
     expr: Expr, // Polars expression for lazy evaluation
+    /// True when this Column was constructed via array() so DataFrame-level logic
+    /// can apply PySpark-specific type strictness (e.g., mixed bool + non-bool arrays; issue #1115).
+    pub(crate) is_array_expr: bool,
     /// When Some, with_column generates a full-length random series instead of using expr (PySpark-like per-row rand/randn).
     pub deferred: Option<DeferredRandom>,
     /// When Some, with_column executes Python UDF eagerly (name, arg columns).
@@ -115,6 +118,7 @@ impl Column {
         Column {
             name: name.clone(),
             expr: col(&name),
+            is_array_expr: false,
             deferred: None,
             udf_call: None,
             source_for_running: None,
@@ -130,6 +134,7 @@ impl Column {
         Column {
             name: display_name,
             expr,
+            is_array_expr: false,
             deferred: None,
             udf_call: None,
             source_for_running: None,
@@ -144,6 +149,7 @@ impl Column {
         Column {
             name: format!("{name}()"),
             expr: lit(0i32), // dummy, never used
+            is_array_expr: false,
             deferred: None,
             udf_call: Some((name, args)),
             source_for_running: None,
@@ -162,6 +168,7 @@ impl Column {
         Column {
             name: "rand".to_string(),
             expr,
+            is_array_expr: false,
             deferred: Some(DeferredRandom::Rand(seed)),
             udf_call: None,
             source_for_running: None,
@@ -180,6 +187,7 @@ impl Column {
         Column {
             name: "randn".to_string(),
             expr,
+            is_array_expr: false,
             deferred: Some(DeferredRandom::Randn(seed)),
             udf_call: None,
             source_for_running: None,
@@ -242,6 +250,7 @@ impl Column {
         Column {
             name: name.to_string(),
             expr: self.expr.clone().alias(name),
+            is_array_expr: self.is_array_expr,
             deferred: self.deferred,
             udf_call: self.udf_call.clone(),
             source_for_running: self.source_for_running.clone(),
@@ -286,6 +295,7 @@ impl Column {
         Column {
             name: format!("({} IS NULL)", self.name),
             expr: self.expr.clone().is_null(),
+            is_array_expr: false,
             deferred: None,
             udf_call: None,
             source_for_running: None,
@@ -300,6 +310,7 @@ impl Column {
         Column {
             name: format!("({} IS NOT NULL)", self.name),
             expr: self.expr.clone().is_not_null(),
+            is_array_expr: false,
             deferred: None,
             udf_call: None,
             source_for_running: None,
@@ -2668,6 +2679,7 @@ impl Column {
         Column {
             name: "first_value".to_string(),
             expr: value_expr.clone().first(),
+            is_array_expr: false,
             deferred: None,
             udf_call: None,
             source_for_running: None,
@@ -2687,6 +2699,7 @@ impl Column {
         Column {
             name: "last_value".to_string(),
             expr: value_expr.clone().last(),
+            is_array_expr: false,
             deferred: None,
             udf_call: None,
             source_for_running: None,
