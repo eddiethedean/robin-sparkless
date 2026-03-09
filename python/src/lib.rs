@@ -3997,6 +3997,25 @@ impl PyDataFrame {
 
     #[pyo3(signature = (*cols))]
     fn rollup(&self, cols: &Bound<'_, PyTuple>) -> PyResult<PyCubeRollupData> {
+        // PySpark: rollup(("a", "b")) is invalid – a bare tuple of column-name
+        // strings is not accepted. It raises PySparkTypeError[NOT_COLUMN_OR_STR].
+        if cols.len() == 1 {
+            let item0 = cols.get_item(0)?;
+            if let Ok(tup) = item0.downcast::<PyTuple>() {
+                let mut all_strings = true;
+                for sub in tup.iter() {
+                    if sub.extract::<String>().is_err() {
+                        all_strings = false;
+                        break;
+                    }
+                }
+                if all_strings {
+                    return Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+                        "Argument `col` should be a Column or str (NOT_COLUMN_OR_STR: tuple is not allowed; use a list of columns instead)",
+                    ));
+                }
+            }
+        }
         let names = py_tuple_or_single_to_vec_string(cols)?;
         let refs: Vec<&str> = names.iter().map(|s| s.as_str()).collect();
         self.inner
@@ -4041,6 +4060,25 @@ impl PyDataFrame {
 
     #[pyo3(signature = (*cols))]
     fn cube(&self, cols: &Bound<'_, PyTuple>) -> PyResult<PyCubeRollupData> {
+        // PySpark: cube(("a", "b")) is invalid – a bare tuple of column-name
+        // strings is not accepted. It raises PySparkTypeError[NOT_COLUMN_OR_STR].
+        if cols.len() == 1 {
+            let item0 = cols.get_item(0)?;
+            if let Ok(tup) = item0.downcast::<PyTuple>() {
+                let mut all_strings = true;
+                for sub in tup.iter() {
+                    if sub.extract::<String>().is_err() {
+                        all_strings = false;
+                        break;
+                    }
+                }
+                if all_strings {
+                    return Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+                        "Argument `col` should be a Column or str (NOT_COLUMN_OR_STR: tuple is not allowed; use a list of columns instead)",
+                    ));
+                }
+            }
+        }
         let names = py_tuple_or_single_to_vec_string(cols)?;
         let refs: Vec<&str> = names.iter().map(|s| s.as_str()).collect();
         self.inner
@@ -4061,6 +4099,30 @@ impl PyDataFrame {
 
     #[pyo3(name = "groupBy", signature = (*cols))]
     fn group_by_camel(&self, cols: &Bound<'_, PyTuple>) -> PyResult<PyGroupedData> {
+        // PySpark: groupBy(("a", "b")) is invalid – a bare tuple of column-name
+        // strings is not accepted and raises NOT_COLUMN_OR_STR. Lists (["a","b"])
+        // and tuples/lists of Columns are allowed.
+        if cols.len() == 1 {
+            let item0 = cols.get_item(0)?;
+            if let Ok(tup) = item0.downcast::<PyTuple>() {
+                let mut all_strings = true;
+                for sub in tup.iter() {
+                    if sub.downcast::<PyColumn>().is_ok() || sub.downcast::<PyExprStr>().is_ok() {
+                        all_strings = false;
+                        break;
+                    }
+                    if sub.extract::<String>().is_err() {
+                        all_strings = false;
+                        break;
+                    }
+                }
+                if all_strings {
+                    return Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+                        "Argument `col` should be a Column or str (NOT_COLUMN_OR_STR: tuple is not allowed; use a list of columns instead)",
+                    ));
+                }
+            }
+        }
         let mut specs: Vec<GroupBySpec> = Vec::with_capacity(cols.len());
         for item in cols.iter() {
             for spec in py_group_by_specs(&item)? {
