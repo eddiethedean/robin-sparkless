@@ -1209,9 +1209,8 @@ impl DataFrame {
         let has_get_json_object_shape = names.iter().any(|n| n == "a")
             && names.iter().any(|n| n == "nested")
             && names.iter().any(|n| n == "missing");
-        let has_json_tuple_shape = names.len() == 2
-            && names.iter().any(|n| n == "c0")
-            && names.iter().any(|n| n == "c1");
+        let has_json_tuple_shape =
+            names.len() == 2 && names.iter().any(|n| n == "c0") && names.iter().any(|n| n == "c1");
         let effective_dtypes: Vec<DataType> = names
             .iter()
             .zip(plan_dtypes.iter())
@@ -3121,7 +3120,7 @@ fn any_value_to_json(av: &AnyValue<'_>, dtype: &DataType) -> JsonValue {
                             }
                             _ => (None, None),
                         };
-                        if let (Some(key), Some(mut val)) = (k, v) {
+                        if let (Some(key), Some(val)) = (k, v) {
                             if matches!(val, JsonValue::String(_)) {
                                 has_string_value = true;
                             } else if matches!(val, JsonValue::Number(_) | JsonValue::Bool(_)) {

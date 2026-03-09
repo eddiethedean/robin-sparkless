@@ -162,6 +162,9 @@ pub fn join(
     // For full outer joins we preserve the left-side join key values in temporary columns so we
     // can use them as the canonical join key after the join (unmatched right rows get null key).
     let mut outer_left_key_copies: Vec<(String, String)> = Vec::new();
+    // Track any right-side join keys we renamed for outer joins so we can drop the suffixed
+    // key columns from the final result schema (PySpark parity for outer join keys).
+    let mut outer_join_renamed_right_keys: Vec<String> = Vec::new();
 
     // Resolve key names on both sides so we can alias right keys to left names (#604, #743).
     let left_key_names: Vec<String> = left_on
@@ -200,7 +203,6 @@ pub fn join(
     // both columns internally while building the join, but then drop the suffixed right
     // key columns from the final result so the public schema matches PySpark (single
     // join key column). Condition-based joins (on=Column) keep both key columns.
-    let mut outer_same_name_keys = false;
     if matches!(how, JoinType::Outer)
         && coalesce_same_name_keys
         && left_key_names == right_key_names
@@ -224,13 +226,14 @@ pub fn join(
                 })
                 .collect();
             right_lf = right_lf.select(&exprs);
-            // Update right_key_names to the new suffixed names.
+            // Update right_key_names to the new suffixed names and remember them so we can
+            // drop the suffixed right key columns from the final result schema.
             for rk in &mut right_key_names {
                 if let Some(new_name) = rename_map.get(rk) {
                     *rk = new_name.clone();
                 }
             }
-            outer_same_name_keys = true;
+            outer_join_renamed_right_keys = right_key_names.clone();
         }
     }
 
@@ -389,7 +392,6 @@ pub fn join(
     } else {
         JoinCoalesce::CoalesceColumns
     };
-    let mut did_coalesce_same_name_columns = false;
     let mut joined = JoinBuilder::new(left_lf)
         .with(right_lf)
         .how(polars_how)
@@ -434,6 +436,24 @@ pub fn join(
             .map(|n| col(n.as_str()))
             .collect();
         joined = joined.select(&keep_exprs);
+
+        // For outer joins invoked via column-name based join (coalesce_same_name_keys = true),
+        // drop the suffixed right-side key columns (e.g. dept_id_right) so the public schema
+        // has a single join key column, matching PySpark and the parity fixtures.
+        if !outer_join_renamed_right_keys.is_empty() {
+            let schema = joined.collect_schema()?;
+            let all_names: Vec<String> = schema.iter_names().map(|n| n.to_string()).collect();
+            let drop_right_keys: std::collections::HashSet<&str> = outer_join_renamed_right_keys
+                .iter()
+                .map(|s| s.as_str())
+                .collect();
+            let keep_exprs: Vec<Expr> = all_names
+                .iter()
+                .filter(|n| !drop_right_keys.contains(n.as_str()))
+                .map(|n| col(n.as_str()))
+                .collect();
+            joined = joined.select(&keep_exprs);
+        }
     }
 
     let result_schema = joined.collect_schema()?;
@@ -442,7 +462,6 @@ pub fn join(
     // Column order: left columns in original order, then right non-keys with _right for overlap
     // (PySpark parity: same as fixture join_inner_dept_issue510 / join_on_string_issue513). Use
     // keys_match_for_coalesce so case-insensitive key match (e.g. name/NAME) gets single key (#297).
-    let mut any_duplicate_coalesced = false;
     if keys_match_for_coalesce && matches!(how, JoinType::Inner | JoinType::Left | JoinType::Right)
     {
         let left_names: Vec<String> = left.columns()?.into_iter().collect();
@@ -457,8 +476,8 @@ pub fn join(
         let result_names_set: std::collections::HashSet<String> =
             result_names_vec.iter().cloned().collect();
         // When !case_sensitive, coalesce columns that match case-insensitively (e.g. age + AGE) so
-        // select("age") and df1["age"] resolve to one column (#297). Only set did_coalesce_same_name_columns
-        // when we actually merge duplicates (matches.len() > 1); same-case keys (id/id) alone stay ambiguous (#374).
+        // select("age") and df1["age"] resolve to one column (#297). Same-case keys (id/id) alone
+        // stay ambiguous (#374).
         let cast_exprs: Vec<Expr> = if !case_sensitive {
             let left_struct = left.schema().ok();
             let right_struct = right.schema().ok();
@@ -470,9 +489,6 @@ pub fn join(
                     .collect();
                 if matches.is_empty() {
                     continue;
-                }
-                if matches.len() > 1 {
-                    any_duplicate_coalesced = true;
                 }
                 let dtype = key_set
                     .contains(left_name.as_str())
@@ -629,7 +645,6 @@ pub fn join(
             joined = joined.select(&cast_exprs);
             let result_schema = joined.collect_schema()?;
             names = result_schema.iter_names().map(|s| s.to_string()).collect();
-            did_coalesce_same_name_columns = any_duplicate_coalesced;
         }
     }
     let mut seen = std::collections::HashSet::new();
@@ -704,8 +719,7 @@ pub fn join(
     let result_lf = if !case_sensitive {
         let schema = result_lf.collect_schema()?;
         let result_names: Vec<String> = schema.iter_names().map(|s| s.to_string()).collect();
-        let mut seen_lower: std::collections::HashSet<String> =
-            std::collections::HashSet::new();
+        let mut seen_lower: std::collections::HashSet<String> = std::collections::HashSet::new();
         let mut need_rename = false;
         let aliases: Vec<String> = result_names
             .iter()

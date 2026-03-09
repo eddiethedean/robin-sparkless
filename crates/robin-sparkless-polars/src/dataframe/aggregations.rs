@@ -894,14 +894,9 @@ fn parse_pivot_agg_expr(expr: &Expr) -> Option<(String, &'static str, String)> {
     // top of a default alias like \"sum(v)\" from the underlying expression).
     let mut inner = expr;
     let mut alias_opt: Option<String> = None;
-    loop {
-        match inner {
-            Expr::Alias(e, name) => {
-                alias_opt = Some(name.as_str().to_string());
-                inner = e.as_ref();
-            }
-            _ => break,
-        }
+    while let Expr::Alias(e, name) = inner {
+        alias_opt = Some(name.as_str().to_string());
+        inner = e.as_ref();
     }
     // Unwrap Cast so we see Agg (e.g. count_distinct returns Cast(NUnique(...), Int64))
     let inner = match inner {

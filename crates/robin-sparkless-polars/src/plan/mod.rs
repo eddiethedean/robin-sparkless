@@ -581,13 +581,12 @@ fn apply_op(
                 .collect();
             let schema_names: Vec<String> = schema_vec.iter().map(|(n, _)| n.clone()).collect();
             let rows = other_data_to_rows(other_data, &schema_names);
-            let other_df = session
+            let mut other_df = session
                 .create_dataframe_from_rows(rows, schema_vec, false, false)
                 .map_err(PlanError::Session)?;
 
             let on_keys_left = parse_join_on(on, &df)?;
             // Align right join key column names to left's (e.g. left "Dept_Id" vs right "dept_id" -> rename right to "Dept_Id") (#552).
-            let mut other_df = other_df;
             let on_keys_right = parse_join_on(on, &other_df)?;
             for (i, left_name) in on_keys_left.iter().enumerate() {
                 if let Some(right_name) = on_keys_right.get(i) {
@@ -598,7 +597,11 @@ fn apply_op(
                     }
                 }
             }
-            let on_refs: Vec<&str> = on_keys_left.iter().map(|s| s.as_str()).collect();
+            // After renaming, left and right join key names align; treat this like an equality-based
+            // join on the same key columns so that outer join key semantics match PySpark and the
+            // parity fixtures (e.g. case_outer_join in gen_pyspark_cases.py).
+            let left_refs: Vec<&str> = on_keys_left.iter().map(|s| s.as_str()).collect();
+            let right_refs: Vec<&str> = on_keys_left.iter().map(|s| s.as_str()).collect();
             let join_type = match how {
                 "left" => JoinType::Left,
                 "right" => JoinType::Right,
@@ -607,7 +610,7 @@ fn apply_op(
                 "left_anti" | "leftanti" | "anti" => JoinType::LeftAnti,
                 _ => JoinType::Inner,
             };
-            df.join(&other_df, on_refs, join_type)
+            df.join_with_keys(&other_df, left_refs, right_refs, join_type, true)
                 .map_err(PlanError::Session)
         }
         "union" => {

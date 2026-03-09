@@ -529,8 +529,7 @@ pub fn filter(
     // (issue #1325).
     if !case_sensitive {
         if let Ok(cols) = df.columns() {
-            let df_cols: HashSet<String> =
-                cols.into_iter().map(|c| c.to_lowercase()).collect();
+            let df_cols: HashSet<String> = cols.into_iter().map(|c| c.to_lowercase()).collect();
             let referenced = expr_referenced_columns(&condition);
             if !referenced.is_empty() {
                 let all_missing = referenced.iter().all(|name| {

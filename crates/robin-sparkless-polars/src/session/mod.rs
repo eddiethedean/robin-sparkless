@@ -150,7 +150,9 @@ fn json_type_str_to_polars(type_str: &str) -> Option<DataType> {
                 Field::new("key".into(), key_dtype),
                 Field::new("value".into(), value_dtype),
             ]);
-            return Some(DataType::List(Box::new(DataType::List(Box::new(map_struct)))));
+            return Some(DataType::List(Box::new(DataType::List(Box::new(
+                map_struct,
+            )))));
         }
         let inner = json_type_str_to_polars(elem_type.trim())?;
         return Some(DataType::List(Box::new(inner)));
@@ -687,8 +689,7 @@ fn json_value_to_series_single(
     let type_trimmed = type_str.trim();
     let type_lower = type_trimmed.to_lowercase();
     // #1066: Nested array (e.g. createDataFrame with {"matrix": [[1,2,3],[4,5,6]]}) when type is array<...>.
-    if let (JsonValue::Array(arr), Some(elem_type)) =
-        (value, parse_array_element_type(&type_lower))
+    if let (JsonValue::Array(arr), Some(elem_type)) = (value, parse_array_element_type(&type_lower))
     {
         let inner_dtype = json_type_str_to_polars(&elem_type).ok_or_else(|| {
             PolarsError::ComputeError(

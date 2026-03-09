@@ -1339,8 +1339,9 @@ fn apply_operations(
                         ));
                     }
                 };
-                let on_refs: Vec<&str> = on.iter().map(|s| s.as_str()).collect();
-                df = df.join(&right_df, on_refs, join_type)?;
+                let left_refs: Vec<&str> = on.iter().map(|s| s.as_str()).collect();
+                let right_refs = left_refs.clone();
+                df = df.join_with_keys(&right_df, left_refs, right_refs, join_type, true)?;
             }
             Operation::WithColumn { column, expr } => {
                 // Parse the expression and apply withColumn

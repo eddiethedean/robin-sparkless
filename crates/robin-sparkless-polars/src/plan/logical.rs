@@ -64,7 +64,10 @@ impl LogicalPlan {
                     }
                     LogicalPlan::Filter {
                         predicate: predicate.clone(),
-                        input: Box::new(LogicalPlan::Project { exprs, input: project_child }),
+                        input: Box::new(LogicalPlan::Project {
+                            exprs,
+                            input: project_child,
+                        }),
                     }
                 } else {
                     LogicalPlan::Filter {
@@ -134,4 +137,3 @@ fn expr_referenced_columns(expr: &Expr) -> HashSet<String> {
     });
     refs
 }
-

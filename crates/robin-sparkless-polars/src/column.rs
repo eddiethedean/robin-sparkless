@@ -1655,12 +1655,7 @@ impl Column {
         let expr = self.expr().clone().map_many(
             |cols| expect_col(crate::udfs::apply_pyspark_add(cols)),
             &args,
-            |_schema, fields| {
-                Ok(Field::new(
-                    fields[0].name().clone(),
-                    DataType::Float64,
-                ))
-            },
+            |_schema, fields| Ok(Field::new(fields[0].name().clone(), DataType::Float64)),
         );
         Self::from_expr(expr, None)
     }

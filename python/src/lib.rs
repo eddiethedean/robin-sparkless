@@ -25,7 +25,8 @@ use std::thread_local;
 
 // When row_number().over(window) is used with no partition, set this so select() sorts result by window order (#1241).
 thread_local! {
-    static WINDOW_ORDER_SORT_HINT: RefCell<Option<(Vec<String>, Vec<bool>)>> = RefCell::new(None);
+    static WINDOW_ORDER_SORT_HINT: RefCell<Option<(Vec<String>, Vec<bool>)>> =
+        const { RefCell::new(None) };
 }
 
 /// Convert EngineError or PolarsError to Python exception (SparklessError or TypeError for known validation errors).
@@ -330,9 +331,7 @@ fn is_get_json_object_shape(output_names: Option<&[String]>) -> bool {
 /// or generic c0..cN from createDataFrame must stay numeric).
 fn is_json_tuple_shape(output_names: Option<&[String]>) -> bool {
     match output_names {
-        Some(n) => {
-            n.len() == 2 && n.iter().any(|s| s == "c0") && n.iter().any(|s| s == "c1")
-        }
+        Some(n) => n.len() == 2 && n.iter().any(|s| s == "c0") && n.iter().any(|s| s == "c1"),
         None => false,
     }
 }
@@ -542,6 +541,7 @@ impl PySparkSessionBuilder {
         }
     }
 
+    #[allow(clippy::empty_line_after_outer_attr)]
     /// PySpark parity (#412, #1239): Builder is not callable; SparkSession.builder.appName(...) works,
     /// builder() raises TypeError. We do not implement __call__ so that builder() raises as in PySpark.
 
@@ -3533,10 +3533,9 @@ impl PyDataFrame {
         // We implement this as a light-weight Expr rewrite for the specific pattern
         // Alias(Column(base), alias) where alias == base + "_right" and alias exists
         // in the current DataFrame schema.
-        use std::collections::HashSet;
         use robin_sparkless::{Column as RsColumn, Expr as RsExpr};
-        let all_column_set: HashSet<&str> =
-            all_columns.iter().map(|s| s.as_str()).collect();
+        use std::collections::HashSet;
+        let all_column_set: HashSet<&str> = all_columns.iter().map(|s| s.as_str()).collect();
 
         fn rewrite_join_right_alias(expr: RsExpr, all_column_set: &HashSet<&str>) -> RsExpr {
             match expr {
@@ -4563,23 +4562,20 @@ impl PyDataFrame {
                             use robin_sparkless::functions;
                             match join_type {
                                 JoinType::Left => {
-                                    if let Some(left_key) = left_keys.get(0) {
-                                        let cond =
-                                            functions::col(left_key.as_str()).is_not_null();
-                                        joined = joined
-                                            .filter(cond.into_expr())
-                                            .map_err(to_py_err)?;
+                                    if let Some(left_key) = left_keys.first() {
+                                        let cond = functions::col(left_key.as_str()).is_not_null();
+                                        joined =
+                                            joined.filter(cond.into_expr()).map_err(to_py_err)?;
                                     }
                                 }
                                 JoinType::Right => {
-                                    if let Some(right_key) = right_keys.get(0) {
+                                    if let Some(right_key) = right_keys.first() {
                                         let right_col_name =
                                             format!("{}_right", right_key.as_str());
                                         let cond =
                                             functions::col(right_col_name.as_str()).is_not_null();
-                                        joined = joined
-                                            .filter(cond.into_expr())
-                                            .map_err(to_py_err)?;
+                                        joined =
+                                            joined.filter(cond.into_expr()).map_err(to_py_err)?;
                                     }
                                 }
                                 _ => {}
@@ -7454,7 +7450,7 @@ fn rank_window(partition_by: Vec<String>, order_by: Vec<String>) -> PyResult<PyC
     // To mirror PySpark behavior, when the sort key is the synthetic "<expr>" name,
     // fall back to ordering by the first partition column (if any).
     let order_col = if name == "<expr>" {
-        if let Some(first_part) = partition_by.get(0) {
+        if let Some(first_part) = partition_by.first() {
             Column::new(first_part.clone())
         } else {
             Column::new(name)
