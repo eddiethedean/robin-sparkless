@@ -5,6 +5,7 @@ with both #168-style data (impression_date, many rows) and #153-style data (date
 Phase 1: Dump logical and optimized plan for both data styles (same expr, same column name) before collect.
 Phase 2: Trace runtime (regexp_replace output only, then full pipeline).
 """
+
 from datetime import datetime, timedelta
 
 # Use PySpark directly so we're not tied to test fixtures
@@ -25,7 +26,9 @@ def dump_plans(spark):
         {"id": i, "value": (datetime.now() - timedelta(hours=i)).isoformat()}
         for i in range(3)
     ]
-    df_dynamic = spark.createDataFrame(data_dynamic, ["id", "value"]).withColumn("parsed", expr)
+    df_dynamic = spark.createDataFrame(data_dynamic, ["id", "value"]).withColumn(
+        "parsed", expr
+    )
 
     # #153-style: 3 rows, fixed strings
     data_fixed = [
@@ -33,7 +36,9 @@ def dump_plans(spark):
         (2, "2024-01-16T14:20:30.789012"),
         (3, "2024-01-17T09:15:22.456789"),
     ]
-    df_fixed = spark.createDataFrame(data_fixed, ["id", "value"]).withColumn("parsed", expr)
+    df_fixed = spark.createDataFrame(data_fixed, ["id", "value"]).withColumn(
+        "parsed", expr
+    )
 
     # Trigger planning (no collect); get plan strings
     def plan_strings(df):
@@ -68,15 +73,17 @@ def trace_runtime(spark):
 
     # Dynamic data
     data_dynamic = [
-        {"value": (datetime.now() - timedelta(hours=i)).isoformat()}
-        for i in range(3)
+        {"value": (datetime.now() - timedelta(hours=i)).isoformat()} for i in range(3)
     ]
     df_dyn = spark.createDataFrame(data_dynamic, ["value"])
     df_dyn_replaced = df_dyn.withColumn("after_regex", expr_replace_only)
     df_dyn_full = df_dyn.withColumn("parsed", expr_full)
 
     # Fixed data
-    data_fixed = [{"value": "2024-01-15T10:30:45.123456"}, {"value": "2024-01-16T14:20:30.789012"}]
+    data_fixed = [
+        {"value": "2024-01-15T10:30:45.123456"},
+        {"value": "2024-01-16T14:20:30.789012"},
+    ]
     df_fix = spark.createDataFrame(data_fixed, ["value"])
     df_fix_replaced = df_fix.withColumn("after_regex", expr_replace_only)
     df_fix_full = df_fix.withColumn("parsed", expr_full)
@@ -108,7 +115,12 @@ def main():
 
         # --- #168 style: 150 rows, column "impression_date" (exact test setup) ---
         data_168 = [
-            {"impression_id": f"IMP-{i:08d}", "impression_date": (datetime.now() - timedelta(hours=i % 720)).isoformat()}
+            {
+                "impression_id": f"IMP-{i:08d}",
+                "impression_date": (
+                    datetime.now() - timedelta(hours=i % 720)
+                ).isoformat(),
+            }
             for i in range(150)
         ]
         df_168 = spark.createDataFrame(data_168, ["impression_id", "impression_date"])
@@ -124,10 +136,15 @@ def main():
 
         # --- Same as #168 but only 3 rows to see if row count matters ---
         data_168_small = [
-            {"impression_id": f"IMP-{i:08d}", "impression_date": (datetime.now() - timedelta(hours=i)).isoformat()}
+            {
+                "impression_id": f"IMP-{i:08d}",
+                "impression_date": (datetime.now() - timedelta(hours=i)).isoformat(),
+            }
             for i in range(3)
         ]
-        df_168_small = spark.createDataFrame(data_168_small, ["impression_id", "impression_date"])
+        df_168_small = spark.createDataFrame(
+            data_168_small, ["impression_id", "impression_date"]
+        )
         df_168_small = df_168_small.withColumn("parsed", expr_168)
         null_168_small = df_168_small.filter(F.col("parsed").isNull()).count()
         non_null_168_small = df_168_small.filter(F.col("parsed").isNotNull()).count()
@@ -140,7 +157,10 @@ def main():
             fmt,
         )
         data_swap = [
-            {"id": f"imp_{i:03d}", "date_string": (datetime.now() - timedelta(hours=i)).isoformat()}
+            {
+                "id": f"imp_{i:03d}",
+                "date_string": (datetime.now() - timedelta(hours=i)).isoformat(),
+            }
             for i in range(3)
         ]
         df_swap = spark.createDataFrame(data_swap, ["id", "date_string"])
@@ -165,26 +185,42 @@ def main():
 
         # Summary
         print("\nConclusion:")
-        print(f"  #168 (150 rows, impression_date): null={null_168}, non_null={non_null_168}")
-        print(f"  #168 small (3 rows, impression_date): null={null_168_small}, non_null={non_null_168_small}")
-        print(f"  swap (3 rows, date_string, now()-timedelta): null={null_swap}, non_null={non_null_swap}")
-        print(f"  #153 (3 rows, date_string, fixed strings): null={null_153}, non_null={non_null_153}")
+        print(
+            f"  #168 (150 rows, impression_date): null={null_168}, non_null={non_null_168}"
+        )
+        print(
+            f"  #168 small (3 rows, impression_date): null={null_168_small}, non_null={non_null_168_small}"
+        )
+        print(
+            f"  swap (3 rows, date_string, now()-timedelta): null={null_swap}, non_null={non_null_swap}"
+        )
+        print(
+            f"  #153 (3 rows, date_string, fixed strings): null={null_153}, non_null={non_null_153}"
+        )
         if null_swap == 0 and non_null_swap == 3:
-            print("  -> Column name drives behavior (impression_date => null, date_string => non-null).")
+            print(
+                "  -> Column name drives behavior (impression_date => null, date_string => non-null)."
+            )
         elif null_swap == 3:
-            print("  -> Data drives behavior (now()-timedelta => null, fixed strings => non-null).")
+            print(
+                "  -> Data drives behavior (now()-timedelta => null, fixed strings => non-null)."
+            )
 
         # Sample strings to compare
         import re
+
         pat = r"\.\d+"
         sample_dynamic = (datetime.now() - timedelta(hours=0)).isoformat()
         sample_fixed = "2024-01-15T10:30:45.123456"
         print("\nSample string comparison:")
         print(f"  now()-timedelta: {sample_dynamic!r} (len={len(sample_dynamic)})")
         print(f"  fixed:           {sample_fixed!r} (len={len(sample_fixed)})")
-        print(f"  after regex strip: dynamic -> {repr(re.sub(pat, '', sample_dynamic))}; fixed -> {repr(re.sub(pat, '', sample_fixed))}")
+        print(
+            f"  after regex strip: dynamic -> {repr(re.sub(pat, '', sample_dynamic))}; fixed -> {repr(re.sub(pat, '', sample_fixed))}"
+        )
     finally:
         spark.stop()
+
 
 if __name__ == "__main__":
     main()

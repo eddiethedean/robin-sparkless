@@ -162,10 +162,8 @@ pub fn select_with_exprs(
         [(PlSmallStr, usize); 2], // (alias_pos, idx_pos), (alias_col, idx_col)
     );
     let posexplode_target: Option<PosexplodeTarget> = {
-        let mut by_col: HashMap<
-            String,
-            Vec<(polars::prelude::ExplodeOptions, String, usize)>,
-        > = HashMap::new();
+        let mut by_col: HashMap<String, Vec<(polars::prelude::ExplodeOptions, String, usize)>> =
+            HashMap::new();
         for (i, e) in exprs.iter().enumerate() {
             let (inner, alias_name) = match e {
                 Expr::Alias(inner, name) => (inner.as_ref(), name.as_str().to_string()),
@@ -174,10 +172,7 @@ pub fn select_with_exprs(
             if let Some((input, options)) = find_explode_in_expr(inner) {
                 let refs = expr_referenced_columns(input.as_ref());
                 // List.eval uses col("") for element context; only consider columns that exist in the frame.
-                let frame_refs: Vec<String> = refs
-                    .intersection(&df_columns)
-                    .cloned()
-                    .collect();
+                let frame_refs: Vec<String> = refs.intersection(&df_columns).cloned().collect();
                 if frame_refs.len() == 1 {
                     let list_col = frame_refs.into_iter().next().unwrap();
                     by_col
@@ -238,10 +233,12 @@ pub fn select_with_exprs(
                 }
             }
             match e {
-            Expr::Alias(inner, name) => {
-                let inner_ref = inner.as_ref();
-                let (explode_input, options): (Option<Arc<Expr>>, polars::prelude::ExplodeOptions) =
-                    if let Expr::Explode { input, options } = inner_ref {
+                Expr::Alias(inner, name) => {
+                    let inner_ref = inner.as_ref();
+                    let (explode_input, options): (
+                        Option<Arc<Expr>>,
+                        polars::prelude::ExplodeOptions,
+                    ) = if let Expr::Explode { input, options } = inner_ref {
                         (Some(input.clone()), *options)
                     } else if let Expr::Alias(inner2, _) = inner_ref {
                         if let Expr::Explode { input, options } = inner2.as_ref() {
@@ -264,42 +261,42 @@ pub fn select_with_exprs(
                             },
                         )
                     };
-                if let (Some(input), options) = (explode_input, options) {
-                    if let Expr::Column(col_name) = input.as_ref() {
-                        if explode_target.is_none() {
-                            let alias_name = if col_name.as_str() != name.as_str() {
-                                Some(name.clone())
-                            } else {
-                                None
-                            };
-                            explode_target = Some((col_name.clone(), alias_name, options));
+                    if let (Some(input), options) = (explode_input, options) {
+                        if let Expr::Column(col_name) = input.as_ref() {
+                            if explode_target.is_none() {
+                                let alias_name = if col_name.as_str() != name.as_str() {
+                                    Some(name.clone())
+                                } else {
+                                    None
+                                };
+                                explode_target = Some((col_name.clone(), alias_name, options));
+                            }
+                            let out_col = explode_target
+                                .as_ref()
+                                .and_then(|(_, a, _)| a.clone())
+                                .unwrap_or_else(|| col_name.clone());
+                            Expr::Alias(Arc::new(Expr::Column(out_col)), name)
+                        } else {
+                            Expr::Alias(inner, name)
                         }
-                        let out_col = explode_target
-                            .as_ref()
-                            .and_then(|(_, a, _)| a.clone())
-                            .unwrap_or_else(|| col_name.clone());
-                        Expr::Alias(Arc::new(Expr::Column(out_col)), name)
                     } else {
                         Expr::Alias(inner, name)
                     }
-                } else {
-                    Expr::Alias(inner, name)
                 }
-            }
-            Expr::Explode { input, options } => {
-                if let Expr::Column(col_name) = input.as_ref() {
-                    if explode_target.is_none() {
-                        explode_target = Some((col_name.clone(), None, options));
+                Expr::Explode { input, options } => {
+                    if let Expr::Column(col_name) = input.as_ref() {
+                        if explode_target.is_none() {
+                            explode_target = Some((col_name.clone(), None, options));
+                        }
+                        let (_, alias_name, _) = explode_target.as_ref().unwrap();
+                        let out_col = alias_name.clone().unwrap_or_else(|| col_name.clone());
+                        Expr::Column(out_col)
+                    } else {
+                        Expr::Explode { input, options }
                     }
-                    let (_, alias_name, _) = explode_target.as_ref().unwrap();
-                    let out_col = alias_name.clone().unwrap_or_else(|| col_name.clone());
-                    Expr::Column(out_col)
-                } else {
-                    Expr::Explode { input, options }
                 }
+                other => other,
             }
-            other => other,
-        }
         })
         .collect();
     let mut name_count: HashMap<String, u32> = HashMap::new();
@@ -2334,8 +2331,7 @@ mod tests {
         let c = df.column("impression_date").unwrap();
         let replaced = functions::regexp_replace(&c, r"\.\d+", "");
         let casted = replaced.cast_to("string").unwrap();
-        let ts_col =
-            functions::to_timestamp(&casted, Some("yyyy-MM-dd'T'HH:mm:ss")).unwrap();
+        let ts_col = functions::to_timestamp(&casted, Some("yyyy-MM-dd'T'HH:mm:ss")).unwrap();
         let silver = with_column(&df, "impression_date_parsed", &ts_col, false).unwrap();
         let selected = select_items(
             &silver,
@@ -2351,7 +2347,10 @@ mod tests {
             .and_(&functions::col("impression_date_parsed").is_not_null());
         let valid = filter(&selected, cond.into_expr(), false).unwrap();
         let count = valid.count().unwrap();
-        assert_eq!(count, 3, "regex strips fractional seconds, format parses; all 3 rows valid");
+        assert_eq!(
+            count, 3,
+            "regex strips fractional seconds, format parses; all 3 rows valid"
+        );
     }
 
     /// Fused path (#153): fixed 2024 strings → all non-null (parsed timestamp not "recent").
@@ -2374,14 +2373,18 @@ mod tests {
             .unwrap();
         let df = spark.create_dataframe_from_polars(pl);
         let c = df.column("date_string").unwrap();
-        let ts_col = functions::to_timestamp_fused_strip_fraction(&c, "yyyy-MM-dd'T'HH:mm:ss").unwrap();
+        let ts_col =
+            functions::to_timestamp_fused_strip_fraction(&c, "yyyy-MM-dd'T'HH:mm:ss").unwrap();
         let out = with_column(&df, "date_parsed", &ts_col, false).unwrap();
         let non_null = out
             .filter(functions::col("date_parsed").is_not_null().into_expr())
             .unwrap()
             .count()
             .unwrap();
-        assert_eq!(non_null, 3, "fixed 2024 strings: fused path returns non-null for all");
+        assert_eq!(
+            non_null, 3,
+            "fixed 2024 strings: fused path returns non-null for all"
+        );
     }
 
     /// Fused path (#168): recent (dynamic) strings → all null (parsed timestamp within 31 days of ref_ts).
@@ -2394,7 +2397,11 @@ mod tests {
             .get_or_create();
         let now = chrono::Utc::now();
         let strings: Vec<String> = (0..3)
-            .map(|i| (now - TimeDelta::hours(i)).format("%Y-%m-%dT%H:%M:%S%.6f").to_string())
+            .map(|i| {
+                (now - TimeDelta::hours(i))
+                    .format("%Y-%m-%dT%H:%M:%S%.6f")
+                    .to_string()
+            })
             .collect();
         let id = Series::new("id".into(), &["a", "b", "c"]);
         let date_string = Series::new("date_string".into(), strings.as_slice());
@@ -2402,14 +2409,18 @@ mod tests {
             .unwrap();
         let df = spark.create_dataframe_from_polars(pl);
         let c = df.column("date_string").unwrap();
-        let ts_col = functions::to_timestamp_fused_strip_fraction(&c, "yyyy-MM-dd'T'HH:mm:ss").unwrap();
+        let ts_col =
+            functions::to_timestamp_fused_strip_fraction(&c, "yyyy-MM-dd'T'HH:mm:ss").unwrap();
         let out = with_column(&df, "date_parsed", &ts_col, false).unwrap();
         let non_null = out
             .filter(functions::col("date_parsed").is_not_null().into_expr())
             .unwrap()
             .count()
             .unwrap();
-        assert_eq!(non_null, 0, "recent strings: fused path returns null for all (#168 parity)");
+        assert_eq!(
+            non_null, 0,
+            "recent strings: fused path returns null for all (#168 parity)"
+        );
     }
 
     /// Issue #1054 / #293: with_column(explode(col)) must expand rows and preserve original list column.

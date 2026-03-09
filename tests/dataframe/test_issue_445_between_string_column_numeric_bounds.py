@@ -14,7 +14,6 @@ Run in PySpark mode first, then mock mode:
 https://github.com/eddiethedean/sparkless/issues/445
 """
 
-
 from tests.fixtures.spark_imports import get_spark_imports
 
 

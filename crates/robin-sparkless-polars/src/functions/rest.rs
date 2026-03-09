@@ -1549,16 +1549,14 @@ pub fn to_timestamp_fused_strip_fraction(column: &Column, format: &str) -> Resul
                 ref_ts,
             ))
         },
-        move |_schema, field| {
-            match field.dtype() {
-                DataType::String => Ok(Field::new(
-                    out_name2.clone().into(),
-                    DataType::Datetime(TimeUnit::Microseconds, None),
-                )),
-                _ => Err(polars::prelude::PolarsError::ComputeError(
-                    "to_timestamp fused path requires StringType".into(),
-                )),
-            }
+        move |_schema, field| match field.dtype() {
+            DataType::String => Ok(Field::new(
+                out_name2.clone().into(),
+                DataType::Datetime(TimeUnit::Microseconds, None),
+            )),
+            _ => Err(polars::prelude::PolarsError::ComputeError(
+                "to_timestamp fused path requires StringType".into(),
+            )),
         },
     );
     Ok(crate::column::Column::from_expr(
@@ -1579,7 +1577,7 @@ pub fn to_timestamp(column: &Column, format: Option<&str>) -> Result<Column, Str
     let out_name2 = out_name.clone();
     // When format is "yyyy-MM-dd'T'HH:mm:ss" and arg is not a simple column ref (e.g. cast(regexp_replace(...))),
     // use "recent null" so validation-after-drop tests pass (#168). Simple col("x") keeps non-null.
-    let use_recent_null = format.as_deref() == Some("yyyy-MM-dd'T'HH:mm:ss")
+    let use_recent_null = format == Some("yyyy-MM-dd'T'HH:mm:ss")
         && !crate::udfs::is_simple_column_ref(column.expr());
     let base_expr = column.expr().clone();
     let expr = base_expr.map(

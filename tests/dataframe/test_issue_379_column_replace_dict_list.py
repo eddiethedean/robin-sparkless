@@ -4,7 +4,6 @@ PySpark uses regexp_replace for string replacement; sparkless may have replace(o
 """
 
 from __future__ import annotations
-import pytest
 
 from tests.fixtures.spark_imports import get_spark_imports
 

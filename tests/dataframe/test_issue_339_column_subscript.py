@@ -7,7 +7,6 @@ matching PySpark behavior. Uses get_spark_imports from fixture only.
 
 import os
 
-import pytest
 
 from tests.fixtures.spark_imports import get_spark_imports
 

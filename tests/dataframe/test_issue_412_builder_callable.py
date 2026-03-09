@@ -21,7 +21,6 @@ class TestIssue412BuilderCallable:
         builder = SparkSession.builder
         assert builder is not None
         # In PySpark, builder is a Builder instance and not callable.
-        import pytest
 
         with pytest.raises(TypeError):
             builder()
@@ -30,8 +29,6 @@ class TestIssue412BuilderCallable:
         """SparkSession.builder() callable form raises TypeError (PySpark parity)."""
         builder = SparkSession.builder
         assert builder is not None
-
-        import pytest
 
         with pytest.raises(TypeError):
             # In PySpark this raises \"'Builder' object is not callable\".
@@ -50,8 +47,6 @@ class TestIssue412BuilderCallable:
         finally:
             spark1.stop()
             SparkSession._singleton_session = None
-
-        import pytest
 
         with pytest.raises(TypeError):
             builder().appName("call_form").getOrCreate()
