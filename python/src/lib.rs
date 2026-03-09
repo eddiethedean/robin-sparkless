@@ -3391,6 +3391,16 @@ impl PyDataFrame {
             ))
         }
 
+        if cols.len() == 1 {
+            // PySpark: df.select(("a", "b")) is invalid – a tuple of names is not accepted.
+            // Only lists/tuples nested inside are allowed when they contain valid column refs.
+            if let Ok(_tup) = cols.get_item(0)?.downcast::<PyTuple>() {
+                return Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+                    "select() with a single tuple of column names is not supported; use a list instead (e.g. select(['a', 'b']))",
+                ));
+            }
+        }
+
         let mut raw: Vec<ItemOrExprStr> = Vec::with_capacity(cols.len());
         let mut name_boxes: Vec<Box<str>> = Vec::new();
         for item in cols.iter() {
