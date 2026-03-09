@@ -1303,7 +1303,7 @@ impl DataFrame {
                     .get(col_idx)
                     .ok_or_else(|| PolarsError::ComputeError("column index out of range".into()))?;
                 let av = s.get(i)?;
-                let jv = any_value_to_json(&av, dtype);
+                let jv = any_value_to_json(&av, dtype)?;
                 row.insert(name.clone(), jv);
             }
             rows.push(row);
@@ -2977,12 +2977,13 @@ fn struct_string_to_json_object(s: &str, fields: &[Field]) -> Option<JsonValue> 
 /// Handles List and Struct so that create_map() with no args yields {} not null (#578).
 /// Float values close to integers are rounded for collect parity (#747, #748).
 /// Date and Datetime output ISO strings so Python bindings get date/datetime (#842, #843, #849).
-fn any_value_to_json(av: &AnyValue<'_>, dtype: &DataType) -> JsonValue {
+/// Returns Err when map has null key (PySpark NULL_MAP_KEY parity, #1140).
+fn any_value_to_json(av: &AnyValue<'_>, dtype: &DataType) -> Result<JsonValue, PolarsError> {
     use serde_json::Map;
     // Plan says String but execution may yield numeric (e.g. get_json_object; #1146): emit string.
     if matches!(dtype, DataType::String) {
         if let Some(s) = av.get_str() {
-            return JsonValue::String(s.to_string());
+            return Ok(JsonValue::String(s.to_string()));
         }
         if matches!(
             av,
@@ -2998,10 +2999,10 @@ fn any_value_to_json(av: &AnyValue<'_>, dtype: &DataType) -> JsonValue {
                 | AnyValue::Float64(_)
                 | AnyValue::Boolean(_)
         ) {
-            return JsonValue::String(av.to_string());
+            return Ok(JsonValue::String(av.to_string()));
         }
     }
-    match av {
+    Ok(match av {
         AnyValue::Null => JsonValue::Null,
         AnyValue::Boolean(b) => JsonValue::Bool(*b),
         // Date/Datetime columns may appear as Int32/Int64 from plan; serialize as ISO strings (#849, #841, #840, #839).
@@ -3032,42 +3033,60 @@ fn any_value_to_json(av: &AnyValue<'_>, dtype: &DataType) -> JsonValue {
             if matches!(dtype, DataType::List(_)) {
                 if let Ok(parsed) = serde_json::from_str::<JsonValue>(s) {
                     if parsed.is_array() {
-                        return parsed;
+                        parsed
+                    } else {
+                        JsonValue::String(s.to_string())
                     }
+                } else {
+                    JsonValue::String(s.to_string())
                 }
-            }
-            // #1066: Struct column may be stringified in some paths; parse back to object so nested structs work.
-            if let DataType::Struct(fields) = dtype {
+            } else if let DataType::Struct(fields) = dtype {
                 if let Ok(parsed) = serde_json::from_str::<JsonValue>(s) {
                     if parsed.is_object() {
-                        return parsed;
+                        parsed
+                    } else if let Some(obj) = struct_string_to_json_object(s, fields) {
+                        obj
+                    } else {
+                        JsonValue::String(s.to_string())
                     }
+                } else if let Some(obj) = struct_string_to_json_object(s, fields) {
+                    obj
+                } else {
+                    JsonValue::String(s.to_string())
                 }
-                if let Some(obj) = struct_string_to_json_object(s, fields) {
-                    return obj;
-                }
+            } else {
+                JsonValue::String(s.to_string())
             }
-            JsonValue::String(s.to_string())
         }
         AnyValue::StringOwned(s) => {
+            let s_ref = s.as_ref();
             if matches!(dtype, DataType::List(_)) {
-                if let Ok(parsed) = serde_json::from_str::<JsonValue>(s.as_ref()) {
+                if let Ok(parsed) = serde_json::from_str::<JsonValue>(s_ref) {
                     if parsed.is_array() {
-                        return parsed;
+                        parsed
+                    } else {
+                        JsonValue::String(s_ref.to_string())
                     }
+                } else {
+                    JsonValue::String(s_ref.to_string())
                 }
-            }
-            if let DataType::Struct(fields) = dtype {
-                if let Ok(parsed) = serde_json::from_str::<JsonValue>(s.as_ref()) {
+            } else if let DataType::Struct(fields) = dtype {
+                if let Ok(parsed) = serde_json::from_str::<JsonValue>(s_ref) {
                     if parsed.is_object() {
-                        return parsed;
+                        parsed
+                    } else if let Some(obj) = struct_string_to_json_object(s_ref, fields) {
+                        obj
+                    } else {
+                        JsonValue::String(s_ref.to_string())
                     }
+                } else if let Some(obj) = struct_string_to_json_object(s_ref, fields) {
+                    obj
+                } else {
+                    JsonValue::String(s_ref.to_string())
                 }
-                if let Some(obj) = struct_string_to_json_object(s.as_ref(), fields) {
-                    return obj;
-                }
+            } else {
+                JsonValue::String(s_ref.to_string())
             }
-            JsonValue::String(s.to_string())
         }
         AnyValue::List(s) => {
             if is_map_format(dtype) {
@@ -3085,6 +3104,11 @@ fn any_value_to_json(av: &AnyValue<'_>, dtype: &DataType) -> JsonValue {
                                 let mut v = None;
                                 for (fld_av, fld) in elem._iter_struct_av().zip(fields.iter()) {
                                     if fld.name == "key" {
+                                        if matches!(fld_av, AnyValue::Null) {
+                                            return Err(PolarsError::ComputeError(
+                                                "Cannot create map with null key (PySpark: NULL_MAP_KEY)".into(),
+                                            ));
+                                        }
                                         k = fld_av
                                             .get_str()
                                             .map(|s| s.to_string())
@@ -3094,10 +3118,10 @@ fn any_value_to_json(av: &AnyValue<'_>, dtype: &DataType) -> JsonValue {
                                             if let Some(s) = fld_av.get_str() {
                                                 map_value_string_to_json(s)
                                             } else {
-                                                any_value_to_json(&fld_av, &fld.dtype)
+                                                any_value_to_json(&fld_av, &fld.dtype)?
                                             }
                                         } else {
-                                            any_value_to_json(&fld_av, &fld.dtype)
+                                            any_value_to_json(&fld_av, &fld.dtype)?
                                         });
                                     }
                                 }
@@ -3109,6 +3133,11 @@ fn any_value_to_json(av: &AnyValue<'_>, dtype: &DataType) -> JsonValue {
                                 let mut v = None;
                                 for (fld_av, fld) in values.iter().zip(fields.iter()) {
                                     if fld.name == "key" {
+                                        if matches!(fld_av, AnyValue::Null) {
+                                            return Err(PolarsError::ComputeError(
+                                                "Cannot create map with null key (PySpark: NULL_MAP_KEY)".into(),
+                                            ));
+                                        }
                                         k = fld_av
                                             .get_str()
                                             .map(|s| s.to_string())
@@ -3118,10 +3147,10 @@ fn any_value_to_json(av: &AnyValue<'_>, dtype: &DataType) -> JsonValue {
                                             if let Some(s) = fld_av.get_str() {
                                                 map_value_string_to_json(s)
                                             } else {
-                                                any_value_to_json(fld_av, &fld.dtype)
+                                                any_value_to_json(fld_av, &fld.dtype)?
                                             }
                                         } else {
-                                            any_value_to_json(fld_av, &fld.dtype)
+                                            any_value_to_json(fld_av, &fld.dtype)?
                                         });
                                     }
                                 }
@@ -3165,14 +3194,14 @@ fn any_value_to_json(av: &AnyValue<'_>, dtype: &DataType) -> JsonValue {
                 let arr: Vec<JsonValue> = (0..s.len())
                     .filter_map(|i| s.get(i).ok())
                     .map(|a| any_value_to_json(&a, inner_dtype))
-                    .collect();
+                    .collect::<Result<Vec<_>, _>>()?;
                 JsonValue::Array(arr)
             }
         }
         AnyValue::Struct(_, _, fields) => {
             let mut vals: Vec<JsonValue> = Vec::with_capacity(fields.len());
             for (fld_av, fld) in av._iter_struct_av().zip(fields.iter()) {
-                vals.push(any_value_to_json(&fld_av, &fld.dtype));
+                vals.push(any_value_to_json(&fld_av, &fld.dtype)?);
             }
             if vals.iter().all(|v| matches!(v, JsonValue::Null)) {
                 JsonValue::Null
@@ -3190,7 +3219,7 @@ fn any_value_to_json(av: &AnyValue<'_>, dtype: &DataType) -> JsonValue {
                 .iter()
                 .zip(fields.iter())
                 .map(|(fld_av, fld)| any_value_to_json(fld_av, &fld.dtype))
-                .collect();
+                .collect::<Result<Vec<_>, _>>()?;
             if vals.iter().all(|v| matches!(v, JsonValue::Null)) {
                 JsonValue::Null
             } else {
@@ -3205,7 +3234,7 @@ fn any_value_to_json(av: &AnyValue<'_>, dtype: &DataType) -> JsonValue {
         AnyValue::Datetime(val, unit, _) => datetime_anyvalue_to_json_iso(*val, unit),
         AnyValue::DatetimeOwned(val, unit, _) => datetime_anyvalue_to_json_iso(*val, unit),
         _ => JsonValue::Null,
-    }
+    })
 }
 
 /// Broadcast hint - no-op that returns the same DataFrame (PySpark broadcast).

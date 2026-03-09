@@ -597,8 +597,8 @@ pub fn with_column(
     }
     let mut expr = df.resolve_expr_column_names(column.expr().clone())?;
     expr = df.coerce_string_numeric_comparisons(expr)?;
-    // Issue #1115: array() with mixed BooleanType and non-Boolean element types must raise,
-    // matching PySpark's behavior for arrays built from heterogeneous (bool + other) columns.
+    // Issue #1115: array() with mixed Boolean and other types must raise (PySpark rejects bool + other).
+    // Reject only bool + (string or numeric); allow string+numeric (PySpark coerces) and numeric mix.
     if column.is_array_expr {
         let refs = expr_referenced_columns(&expr);
         if refs.len() >= 2 {

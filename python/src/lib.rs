@@ -85,6 +85,36 @@ fn extract_allow_missing_columns(kwargs: Option<&Bound<'_, PyDict>>) -> PyResult
     Ok(false)
 }
 
+/// Extract verify_schema or verifySchema from kwargs for createDataFrame (default true).
+fn extract_verify_schema(kwargs: Option<&Bound<'_, PyDict>>) -> PyResult<bool> {
+    let Some(kw) = kwargs else {
+        return Ok(true);
+    };
+    if let Some(v) = kw.get_item("verify_schema")? {
+        return v.extract::<bool>();
+    }
+    if let Some(v) = kw.get_item("verifySchema")? {
+        return v.extract::<bool>();
+    }
+    Ok(true)
+}
+
+/// Extract sampling_ratio or samplingRatio from kwargs for createDataFrame (default None).
+fn extract_sampling_ratio(kwargs: Option<&Bound<'_, PyDict>>) -> PyResult<Option<f64>> {
+    let Some(kw) = kwargs else {
+        return Ok(None);
+    };
+    for key in ["sampling_ratio", "samplingRatio"] {
+        if let Some(v) = kw.get_item(key)? {
+            if v.is_none() {
+                return Ok(None);
+            }
+            return Ok(Some(v.extract::<f64>()?));
+        }
+    }
+    Ok(None)
+}
+
 create_exception!(
     _native,
     SparklessError,
@@ -962,17 +992,18 @@ impl PySparkSession {
         })
     }
 
-    /// PySpark alias: createDataFrame -> create_dataframe_from_rows (camelCase kwargs for PySpark parity).
-    #[pyo3(name = "createDataFrame", signature = (data, schema=None, verifySchema=true, samplingRatio=None))]
+    /// PySpark alias: createDataFrame -> create_dataframe_from_rows. Accepts verify_schema or verifySchema, sampling_ratio or samplingRatio.
+    #[pyo3(name = "createDataFrame", signature = (data, schema=None, **kwargs))]
     fn create_data_frame_camel(
         &self,
         py: Python<'_>,
         data: &Bound<'_, PyAny>,
         schema: Option<&Bound<'_, PyAny>>,
-        verifySchema: bool,
-        samplingRatio: Option<f64>,
+        kwargs: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<PyDataFrame> {
-        self.create_dataframe_from_rows(py, data, schema, verifySchema, samplingRatio)
+        let verify_schema = extract_verify_schema(kwargs)?;
+        let sampling_ratio = extract_sampling_ratio(kwargs)?;
+        self.create_dataframe_from_rows(py, data, schema, verify_schema, sampling_ratio)
     }
 
     fn range(&self, start: i64, end: i64, step: i64) -> PyResult<PyDataFrame> {

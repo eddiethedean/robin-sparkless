@@ -335,7 +335,6 @@ class TestCreateMap:
                 values.add(map_val["value"])
         assert values == {1, 2}
 
-    @pytest.mark.skip(reason="Issue #1140: unskip when fixing")
     def test_create_map_with_null_keys(self, spark):
         """Test create_map with null literal key raises when evaluated (PySpark: NULL_MAP_KEY)."""
         df = spark.createDataFrame([{"val": "test"}])
