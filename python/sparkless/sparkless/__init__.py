@@ -275,9 +275,10 @@ GroupedData = _GroupedData
 DataFrameReader = _DataFrameReader
 DataFrameWriter = _DataFrameWriter
 
-# Keep a reference to the native DataFrame.sort implementation so we can wrap it
-# without causing recursion when calling via the Python alias.
+# Keep references to native DataFrame methods so we can wrap them
+# without causing recursion when calling via the Python aliases.
 _native_dataframe_sort = _DataFrame.sort
+_native_dataframe_select = _DataFrame.select
 
 
 def _dataframe_sort(self, *cols, ascending=None):
@@ -297,6 +298,27 @@ def _dataframe_sort(self, *cols, ascending=None):
 
 # Attach wrapper so tests calling df.sort(...) go through the PySpark-compatible logic.
 setattr(DataFrame, "sort", _dataframe_sort)
+
+
+def _dataframe_select(self, *cols):
+    """PySpark-compatible DataFrame.select wrapper.
+
+    PySpark does not accept a bare tuple of column names as the first/only argument:
+    df.select((\"a\", \"b\")) raises PySparkTypeError[NOT_COLUMN_OR_STR]. Lists are accepted.
+    """
+    if len(cols) == 1 and isinstance(cols[0], tuple):
+        first = cols[0]
+        # Only reject when this is clearly a tuple of column *names* (strings).
+        # Tuples of Column objects (e.g. posexplode/json_tuple results) are accepted in PySpark.
+        if all(isinstance(item, str) for item in first):
+            raise TypeError(
+                "Argument `col` should be a Column or str "
+                "(NOT_COLUMN_OR_STR: tuple is not allowed; use a list of column names instead)"
+            )
+    return _native_dataframe_select(self, *cols)
+
+
+setattr(DataFrame, "select", _dataframe_select)
 
 
 # PySpark-style: from sparkless import F, functions, StringType, ...
