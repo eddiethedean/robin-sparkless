@@ -140,6 +140,18 @@ fn json_type_str_to_polars(type_str: &str) -> Option<DataType> {
         return Some(DataType::Float64);
     }
     if let Some(elem_type) = parse_array_element_type(&s) {
+        // Special case: array<map<key_type,value_type>> – represented as
+        // List(List(Struct{key, value})) so each array element is its own map
+        // (list-of-{key,value} pairs) and collect() yields a list of dicts.
+        if let Some((key_type, value_type)) = parse_map_key_value_types(elem_type.trim()) {
+            let key_dtype = json_type_str_to_polars(key_type.trim())?;
+            let value_dtype = json_type_str_to_polars(value_type.trim())?;
+            let map_struct = DataType::Struct(vec![
+                Field::new("key".into(), key_dtype),
+                Field::new("value".into(), value_dtype),
+            ]);
+            return Some(DataType::List(Box::new(DataType::List(Box::new(map_struct)))));
+        }
         let inner = json_type_str_to_polars(elem_type.trim())?;
         return Some(DataType::List(Box::new(inner)));
     }
@@ -669,10 +681,14 @@ fn json_value_to_series_single(
     name: &str,
 ) -> Result<Series, PolarsError> {
     use chrono::NaiveDate;
+    use polars::datatypes::ListChunked;
+    use polars::prelude::{DataType, Field};
     let epoch = date_utils::epoch_naive_date();
-    let type_lower = type_str.trim().to_lowercase();
+    let type_trimmed = type_str.trim();
+    let type_lower = type_trimmed.to_lowercase();
     // #1066: Nested array (e.g. createDataFrame with {"matrix": [[1,2,3],[4,5,6]]}) when type is array<...>.
-    if let (JsonValue::Array(arr), Some(elem_type)) = (value, parse_array_element_type(&type_lower))
+    if let (JsonValue::Array(arr), Some(elem_type)) =
+        (value, parse_array_element_type(&type_lower))
     {
         let inner_dtype = json_type_str_to_polars(&elem_type).ok_or_else(|| {
             PolarsError::ComputeError(
@@ -694,6 +710,62 @@ fn json_value_to_series_single(
         let mut builder = get_list_builder(&inner_dtype, 64, 1, name.into());
         builder.append_series(&s)?;
         return Ok(builder.finish().into_series());
+    }
+    // Struct element type (e.g. array<struct<name:string,age:int>>)
+    if let Some(fields) = parse_struct_fields(type_trimmed) {
+        if let Some(st) = json_object_or_array_to_struct_series(value, &fields, name)? {
+            return Ok(st);
+        }
+        // Null value: build a single null struct of the appropriate dtype.
+        if let Some(dtype) = json_type_str_to_polars(type_trimmed) {
+            let s = Series::new_null(name.into(), 1).cast(&dtype)?;
+            return Ok(s);
+        }
+    }
+    // Map element type (e.g. array<map<string,int>> where elem_type is "map<string,int>")
+    if let Some((key_type, value_type)) = parse_map_key_value_types(&type_lower) {
+        let key_dtype = json_type_str_to_polars(key_type.trim()).ok_or_else(|| {
+            PolarsError::ComputeError(
+                format!("array element key type '{key_type}' not supported").into(),
+            )
+        })?;
+        let value_dtype = json_type_str_to_polars(value_type.trim()).ok_or_else(|| {
+            PolarsError::ComputeError(
+                format!("array element value type '{value_type}' not supported").into(),
+            )
+        })?;
+        // Null map: represent as a null list-of-struct (one element, null).
+        if matches!(value, JsonValue::Null) {
+            let struct_dtype = DataType::Struct(vec![
+                Field::new("key".into(), key_dtype.clone()),
+                Field::new("value".into(), value_dtype.clone()),
+            ]);
+            let lc = ListChunked::full_null_with_dtype(name.into(), 1, &struct_dtype);
+            return Ok(lc.into_series());
+        }
+        // Object map or string that parses to JSON/Python dict repr.
+        let obj_opt = match value {
+            JsonValue::Object(obj) => Some(obj.clone()),
+            JsonValue::String(s) => string_to_json_object(s),
+            _ => None,
+        };
+        if let Some(obj) = obj_opt {
+            let st = json_object_to_map_struct_series(
+                &obj,
+                &key_type,
+                &value_type,
+                &key_dtype,
+                &value_dtype,
+                name,
+            )?;
+            let struct_dtype = st.dtype().clone();
+            let mut builder = get_list_builder(&struct_dtype, st.len(), 1, name.into());
+            builder.append_series(&st)?;
+            return Ok(builder.finish().into_series());
+        }
+        return Err(PolarsError::ComputeError(
+            format!("json_value_to_series: unsupported {type_str} for {value:?}").into(),
+        ));
     }
     match (value, type_lower.as_str()) {
         (JsonValue::Null, _) => Ok(Series::new_null(name.into(), 1)),
@@ -2366,15 +2438,42 @@ impl SparkSession {
                     let elem_type = parse_array_element_type(&type_lower).unwrap_or_else(|| {
                         unreachable!("guard above ensures parse_array_element_type returned Some")
                     });
-                    let inner_dtype = json_type_str_to_polars(&elem_type)
-                        .ok_or_else(|| {
+                    // Special case: array<map<k,v>> – inner dtype is List(Struct{key,value})
+                    // so each array element is its own map (list-of-{key,value} pairs).
+                    let inner_dtype = if let Some((key_type, value_type)) =
+                        parse_map_key_value_types(&elem_type)
+                    {
+                        let key_dtype = json_type_str_to_polars(key_type.trim()).ok_or_else(|| {
+                            PolarsError::ComputeError(
+                                format!(
+                                    "create_dataframe_from_rows: array map key type '{key_type}' not supported"
+                                )
+                                .into(),
+                            )
+                        })?;
+                        let value_dtype =
+                            json_type_str_to_polars(value_type.trim()).ok_or_else(|| {
+                                PolarsError::ComputeError(
+                                    format!(
+                                        "create_dataframe_from_rows: array map value type '{value_type}' not supported"
+                                    )
+                                    .into(),
+                                )
+                            })?;
+                        DataType::List(Box::new(DataType::Struct(vec![
+                            Field::new("key".into(), key_dtype),
+                            Field::new("value".into(), value_dtype),
+                        ])))
+                    } else {
+                        json_type_str_to_polars(&elem_type).ok_or_else(|| {
                             PolarsError::ComputeError(
                                 format!(
                                     "create_dataframe_from_rows: array element type '{elem_type}' not supported"
                                 )
                                 .into(),
                             )
-                        })?;
+                        })?
+                    };
                     let n = rows.len();
                     let mut builder = get_list_builder(&inner_dtype, 64, n, name.as_str().into());
                     for row in rows.iter() {

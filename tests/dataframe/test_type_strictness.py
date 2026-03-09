@@ -91,7 +91,6 @@ class TestTypeStrictness:
         result = df.withColumn("parsed", F.to_timestamp(F.col("date_str")))
         assert result is not None
 
-    @pytest.mark.skip(reason="Issue #1115: unskip when fixing")
     def test_to_date_requires_string_or_date(self, spark):
         """to_date with IntegerType column must raise (PySpark: unsupported type)."""
         schema = StructType([StructField("date", IntegerType(), True)])

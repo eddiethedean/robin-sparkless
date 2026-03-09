@@ -566,6 +566,28 @@ pub fn with_column(
     }
     let mut expr = df.resolve_expr_column_names(column.expr().clone())?;
     expr = df.coerce_string_numeric_comparisons(expr)?;
+    // Issue #1115: array() with mixed BooleanType and non-Boolean element types must raise,
+    // matching PySpark's behavior for arrays built from heterogeneous (bool + other) columns.
+    if column.is_array_expr {
+        let refs = expr_referenced_columns(&expr);
+        if refs.len() >= 2 {
+            let mut has_bool = false;
+            let mut has_non_bool = false;
+            for name in refs.iter() {
+                if let Some(dt) = df.get_column_dtype(name) {
+                    match dt {
+                        DataType::Boolean => has_bool = true,
+                        _ => has_non_bool = true,
+                    }
+                }
+            }
+            if has_bool && has_non_bool {
+                return Err(PolarsError::ComputeError(
+                    "array() does not support mixed BooleanType with other element types; cast columns to a common type first".into(),
+                ));
+            }
+        }
+    }
     if let Ok(cols) = df.columns() {
         let first_col = cols.into_iter().next();
         if let Ok(expanded) = expand_pure_literal_to_rows(expr.clone(), first_col.as_deref()) {

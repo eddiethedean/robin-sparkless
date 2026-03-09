@@ -1375,15 +1375,17 @@ def size(column):
 
 
 def array_contains(column, value):
-    """True if array contains value (PySpark array_contains). value can be column name, Column, or literal."""
-    if isinstance(value, str):
-        v = col(value)
-        return _array_contains(_as_col(column), v)
-    if isinstance(value, _Column):  # Column argument, e.g. join condition
-        # Implement via arrays_overlap(array_col, array(value_col)) so we avoid list.eval on named columns.
+    """True if array contains value (PySpark array_contains).
+
+    - Literal values (int/float/bool/str) are compared directly to array elements.
+    - Column arguments (Column) use arrays_overlap(array_col, array(value_col)) so join
+      conditions like df.filter(F.array_contains(\"tags\", other_col)) work.
+    """
+    # Column argument (e.g. join condition)
+    if isinstance(value, _Column):
         return arrays_overlap(_as_col(column), array(value))
-    # Literal value
-    v = lit(value)
+    # Literal or column name: follow PySpark and treat plain strings as literals here.
+    v = _as_col(value) if not isinstance(value, (int, float, bool, str)) else lit(value)
     return _array_contains(_as_col(column), v)
 
 

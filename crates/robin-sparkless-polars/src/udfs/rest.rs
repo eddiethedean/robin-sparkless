@@ -5846,19 +5846,6 @@ pub fn apply_string_to_date_format(
                     };
                     parsed.map(|d| (d.signed_duration_since(epoch).num_days()) as i32)
                 });
-                if strict {
-                    if let Some(s) = opt_s {
-                        if v.is_none() {
-                            return Err(PolarsError::ComputeError(
-                                format!(
-                                    "to_date failed in column '{}' for value \"{s}\"",
-                                    name.as_str()
-                                )
-                                .into(),
-                            ));
-                        }
-                    }
-                }
                 results.push(v);
             }
             let chunked =
