@@ -389,10 +389,6 @@ class TestColumnCaseVariations:
 
     def test_chained_operations_all_cases(self, sample_df):
         """Test chained operations with various case combinations."""
-        import pytest
-
-        pytest.skip("Tracked in issue #1325; unskip when fixed.")
-
         # Filter -> Select
         result = sample_df.filter(F.col("age") > 25).select("name", "salary").collect()
         assert len(result) == 2

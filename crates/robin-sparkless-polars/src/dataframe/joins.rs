@@ -744,11 +744,12 @@ pub fn join(
     } else {
         result_lf
     };
-    // When we coalesced same-named columns, result has one column per logical name; do not mark
-    // any as ambiguous so select(df1["age"]) works (#297).
-    let ambiguous_columns = if did_coalesce_same_name_columns {
-        None
-    } else if keys_match_for_coalesce && mark_join_keys_ambiguous {
+    // When mark_join_keys_ambiguous is true (condition join on same-named keys), unqualified
+    // references to those key names must be treated as ambiguous (PySpark parity #1230 /
+    // issue #374), regardless of whether we coalesced the physical columns. Column-name
+    // joins (on = "id") never set mark_join_keys_ambiguous, so df1["age"] continues to work
+    // after coalescing same-named columns (#297).
+    let ambiguous_columns = if mark_join_keys_ambiguous {
         Some(left_key_names.iter().cloned().collect::<HashSet<String>>())
     } else {
         None
