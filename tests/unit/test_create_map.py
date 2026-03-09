@@ -15,7 +15,6 @@ Window = _imports.Window
 class TestCreateMap:
     """Test suite for F.create_map() function."""
 
-    @pytest.mark.skip(reason="Issue #1140: unskip when fixing")
     def test_create_map_with_literals(self, spark):
         """Test create_map with literal keys and column values."""
         df = spark.createDataFrame([{"val1": "a", "val2": 1}])
