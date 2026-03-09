@@ -4544,12 +4544,16 @@ impl PyDataFrame {
                             )
                             .map_err(to_py_err)?;
 
-                        // When the expression is only key equalities, the join already enforces them;
-                        // do not filter afterward or left/right/outer would lose unmatched rows (#1242),
-                        // except for the LEFT/RIGHT-as-OUTER case handled below.
-                        // When the expression is compound (e.g. key equality AND filter), reapply the
-                        // full predicate after the key-based join (issue #380).
-                        if !expr_contains_only_join_key_equalities(&expr) {
+                        // When the expression is only key equalities, the join itself already
+                        // enforces the predicate; applying filter(expr) would be redundant and,
+                        // for LEFT/RIGHT/OUTER joins, would drop unmatched rows and break join
+                        // semantics (#1242). For compound predicates (e.g. key equality AND an
+                        // additional filter like amount > 30, issue #380), we must reapply the
+                        // full predicate after the key-based join.
+                        let expr_has_only_key_equalities =
+                            expr_contains_only_join_key_equalities(&expr);
+                        let should_apply_filter = !expr_has_only_key_equalities;
+                        if should_apply_filter {
                             joined = joined.filter(expr).map_err(to_py_err)?;
                         }
 

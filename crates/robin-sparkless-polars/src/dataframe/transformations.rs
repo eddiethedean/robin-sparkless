@@ -522,15 +522,26 @@ pub fn filter(
     // the predicate is effectively pushed below the projection while the visible columns stay
     // unchanged (issue #1135 / #158). In case-sensitive mode we keep raising unresolved_column
     // so wrong-case filters continue to fail as expected.
+    //
+    // Do not treat alias-qualified or dotted names (e.g. "o.amount", "t1.id", "struct.field")
+    // as missing here: those may still resolve via suffix/struct-field logic in
+    // resolve_expr_column_names and are required for join alias and case-insensitive parity
+    // (issue #1325).
     if !case_sensitive {
         if let Ok(cols) = df.columns() {
             let df_cols: HashSet<String> =
                 cols.into_iter().map(|c| c.to_lowercase()).collect();
             let referenced = expr_referenced_columns(&condition);
             if !referenced.is_empty() {
-                let all_missing = referenced
-                    .iter()
-                    .all(|name| !df_cols.contains(&name.to_lowercase()));
+                let all_missing = referenced.iter().all(|name| {
+                    if name.contains('.') {
+                        // Alias-qualified or dotted reference: let resolve_expr_column_names
+                        // attempt to resolve it (join aliases, struct fields, etc.).
+                        false
+                    } else {
+                        !df_cols.contains(&name.to_lowercase())
+                    }
+                });
                 if all_missing {
                     return Ok(df.clone());
                 }
