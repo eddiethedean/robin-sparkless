@@ -1613,6 +1613,7 @@ impl DataFrame {
                 case_sensitive: self.case_sensitive,
                 coalesce_same_name_keys: true, // join(right, "id") yields one key column (#1049, #353)
                 mark_join_keys_ambiguous: false,
+                origin: crate::dataframe::joins::JoinOrigin::ColumnOn,
             },
         )
     }
@@ -1637,14 +1638,21 @@ impl DataFrame {
             .collect::<Result<Vec<_>, _>>()?;
         let left_refs: Vec<&str> = left_resolved.iter().map(|s| s.as_str()).collect();
         let right_refs: Vec<&str> = right_resolved.iter().map(|s| s.as_str()).collect();
-        // When same-named keys (e.g. left.id == right.id), or key names match case-insensitively (name/NAME), coalesce (#297, #353, #1148, #1165).
-        let coalesce_same_name_keys = left_resolved.len() == right_resolved.len()
+        // When same-named keys (e.g. left.id == right.id), or key names match case-insensitively (name/NAME),
+        // decide whether to coalesce duplicate key columns or keep them separate:
+        // - Column-name joins (only_key_equalities = false) coalesce so the result has a single key column
+        //   (PySpark parity for join(on=...) #1049, #353, #1148, #1165).
+        // - Expression-based joins (only_key_equalities = true) keep both key columns so left/right
+        //   keys remain addressable separately (dept_id, dept_id_right) — matches condition joins
+        //   used by the Python API and parity tests.
+        let same_named_keys = left_resolved.len() == right_resolved.len()
             && left_resolved
                 .iter()
                 .zip(right_resolved.iter())
                 .all(|(a, b)| a.eq_ignore_ascii_case(b));
+        let coalesce_same_name_keys = same_named_keys && !only_key_equalities;
         // Only mark keys ambiguous when condition was purely key equalities; otherwise filter will reference them (#1230).
-        let mark_join_keys_ambiguous = coalesce_same_name_keys && only_key_equalities;
+        let mark_join_keys_ambiguous = same_named_keys && only_key_equalities;
         join(
             self,
             other,
@@ -1655,6 +1663,7 @@ impl DataFrame {
                 case_sensitive: self.case_sensitive,
                 coalesce_same_name_keys,
                 mark_join_keys_ambiguous,
+                origin: crate::dataframe::joins::JoinOrigin::Condition,
             },
         )
     }

@@ -115,12 +115,21 @@ pub enum JoinType {
     LeftAnti,
 }
 
-/// Options for join (case sensitivity, key coalescing, ambiguity marking).
-#[derive(Debug, Clone)]
+/// Origin for a join: column-name based vs condition-based.
+#[derive(Debug, Clone, Copy)]
+pub enum JoinOrigin {
+    /// join(on = [...]) style joins (column-name based)
+    ColumnOn,
+    /// Condition-based joins (e.g. left.col == right.col) where both key sides
+    /// must remain addressable separately (dept_id, dept_id_right).
+    Condition,
+}
+
 pub struct JoinOptions {
     pub case_sensitive: bool,
     pub coalesce_same_name_keys: bool,
     pub mark_join_keys_ambiguous: bool,
+    pub origin: JoinOrigin,
 }
 
 /// Join with another DataFrame on the given columns. Preserves case_sensitive on result.
@@ -150,6 +159,7 @@ pub fn join(
         case_sensitive,
         coalesce_same_name_keys,
         mark_join_keys_ambiguous,
+        origin,
     } = options;
     use polars::prelude::{JoinBuilder, JoinCoalesce, col};
     if left_on.len() != right_on.len() {
@@ -186,7 +196,10 @@ pub fn join(
     // For outer joins invoked via column-name based join (coalesce_same_name_keys = true),
     // add temp copies of left join keys so we can restore them as canonical keys after the join
     // (PySpark parity for grouping/selection on join keys when using join(on=...)).
-    if matches!(how, JoinType::Outer) && coalesce_same_name_keys {
+    if matches!(how, JoinType::Outer)
+        && coalesce_same_name_keys
+        && matches!(origin, JoinOrigin::ColumnOn)
+    {
         use polars::prelude::col;
         let mut copy_exprs: Vec<Expr> = Vec::new();
         for name in &left_key_names {
@@ -198,6 +211,43 @@ pub fn join(
             left_lf = left_lf.with_columns(copy_exprs);
         }
     }
+    // For condition-based joins on same-named keys, always keep both key columns by
+    // renaming the right-side keys to a suffixed form (e.g. dept_id -> dept_id_right)
+    // so that left/right keys remain addressable separately (dept_id, dept_id_right).
+    if matches!(origin, JoinOrigin::Condition)
+        && left_key_names.len() == right_key_names.len()
+        && left_key_names
+            .iter()
+            .zip(right_key_names.iter())
+            .all(|(a, b)| a.eq_ignore_ascii_case(b))
+    {
+        use polars::prelude::col;
+        use std::collections::HashMap;
+        let mut rename_map: HashMap<String, String> = HashMap::new();
+        for name in &right_key_names {
+            rename_map.insert(name.clone(), format!("{name}_right"));
+        }
+        if !rename_map.is_empty() {
+            let current_names: Vec<String> = right.columns()?.into_iter().collect();
+            let exprs: Vec<Expr> = current_names
+                .iter()
+                .map(|n| {
+                    if let Some(new_name) = rename_map.get(n) {
+                        col(n.as_str()).alias(new_name.as_str())
+                    } else {
+                        col(n.as_str())
+                    }
+                })
+                .collect();
+            right_lf = right_lf.select(&exprs);
+            for rk in &mut right_key_names {
+                if let Some(new_name) = rename_map.get(rk) {
+                    *rk = new_name.clone();
+                }
+            }
+        }
+    }
+
     // For full outer joins (via join(on=...)) where left/right use the same key names,
     // rename right keys to a suffixed form (e.g. key -> key_right) so that we preserve
     // both columns internally while building the join, but then drop the suffixed right
@@ -206,6 +256,7 @@ pub fn join(
     if matches!(how, JoinType::Outer)
         && coalesce_same_name_keys
         && left_key_names == right_key_names
+        && matches!(origin, JoinOrigin::ColumnOn)
     {
         use polars::prelude::col;
         use std::collections::HashMap;
@@ -400,19 +451,34 @@ pub fn join(
         .coalesce(coalesce)
         .finish();
 
-    // For full outer joins with same-named keys, set the canonical join key column
-    // differently depending on how the join was invoked:
-    // - Column-name joins (on = "key") keep coalesce(left_key, right_key) semantics so
-    //   unmatched right rows keep their key (issue #280).
-    // - Condition joins (on = Column) with same-named keys and mark_join_keys_ambiguous = true
-    //   use the left key only as the canonical key, while keeping a separate *_right column
-    //   for the right key (parity fixtures in tests/parity/dataframe/test_join.py).
     if matches!(how, JoinType::Outer) && !outer_left_key_copies.is_empty() {
         use polars::prelude::col;
+        // For full outer joins with same-named keys, set the canonical join key column
+        // differently depending on how the join was invoked and whether there are
+        // overlapping non-key column names:
+        // - Column-name joins (on = "key") without non-key overlaps keep
+        //   coalesce(left_key, right_key) semantics so unmatched right rows keep
+        //   their key (issue #280, outer_join_then_groupby tests).
+        // - When there are overlapping non-key columns (e.g. "name" on both sides
+        //   in the employees/departments joins), or when we explicitly mark join
+        //   keys as ambiguous (expression-based joins), the canonical key should
+        //   come from the left side only so that condition-based parity fixtures
+        //   (outer_join / left_join / right_join) and Python join parity tests
+        //   see the expected left-key/null pattern.
+        let left_names_full: Vec<String> = left.columns()?.into_iter().collect();
+        let right_names_full: Vec<String> = right.columns()?.into_iter().collect();
+        let has_non_key_overlap = left_names_full.iter().any(|ln| {
+            !on_set.contains(ln.as_str())
+                && right_names_full
+                    .iter()
+                    .any(|rn| rn.eq_ignore_ascii_case(ln.as_str()))
+        });
         for (i, (left_name, temp)) in outer_left_key_copies.iter().enumerate() {
             let right_key_name = right_key_names.get(i).map(|s| s.as_str()).unwrap_or("");
-            let expr = if mark_join_keys_ambiguous {
-                // Condition join parity: canonical key comes from the left side only.
+            let expr = if mark_join_keys_ambiguous || has_non_key_overlap {
+                // Expression / condition-style joins or joins with overlapping
+                // non-key column names: canonical key comes from the left side
+                // only; right key is exposed via the *_right column.
                 col(temp.as_str())
             } else if right_key_name.is_empty() {
                 col(temp.as_str())
@@ -437,10 +503,14 @@ pub fn join(
             .collect();
         joined = joined.select(&keep_exprs);
 
-        // For outer joins invoked via column-name based join (coalesce_same_name_keys = true),
+        // For outer joins invoked via column-name based join (coalesce_same_name_keys = true)
+        // where join keys came from an explicit `on = ...` (not an expression-based join),
         // drop the suffixed right-side key columns (e.g. dept_id_right) so the public schema
         // has a single join key column, matching PySpark and the parity fixtures.
-        if !outer_join_renamed_right_keys.is_empty() {
+        //
+        // Expression-based joins (where we mark join keys ambiguous) keep both key columns so
+        // that Python-level code can alias the right key separately (tests/parity/dataframe/test_join.py).
+        if !outer_join_renamed_right_keys.is_empty() && !mark_join_keys_ambiguous {
             let schema = joined.collect_schema()?;
             let all_names: Vec<String> = schema.iter_names().map(|n| n.to_string()).collect();
             let drop_right_keys: std::collections::HashSet<&str> = outer_join_renamed_right_keys
@@ -778,7 +848,7 @@ pub fn join(
 #[cfg(test)]
 mod tests {
     use super::{
-        JoinOptions, JoinType, expr_contains_only_join_key_equalities, join,
+        JoinOptions, JoinOrigin, JoinType, expr_contains_only_join_key_equalities, join,
         try_extract_join_eq_columns, try_extract_join_eq_columns_all,
     };
     use crate::functions::col;
@@ -880,6 +950,7 @@ mod tests {
                 case_sensitive: false,
                 coalesce_same_name_keys: false,
                 mark_join_keys_ambiguous: false,
+                origin: JoinOrigin::ColumnOn,
             },
         )
         .unwrap();
@@ -904,6 +975,7 @@ mod tests {
                 case_sensitive: false,
                 coalesce_same_name_keys: true,
                 mark_join_keys_ambiguous: false,
+                origin: JoinOrigin::ColumnOn,
             },
         )
         .unwrap();
@@ -946,6 +1018,7 @@ mod tests {
                 case_sensitive: false,
                 coalesce_same_name_keys: false,
                 mark_join_keys_ambiguous: false,
+                origin: JoinOrigin::ColumnOn,
             },
         )
         .unwrap();
@@ -966,6 +1039,7 @@ mod tests {
                 case_sensitive: false,
                 coalesce_same_name_keys: false,
                 mark_join_keys_ambiguous: false,
+                origin: JoinOrigin::ColumnOn,
             },
         )
         .unwrap();
@@ -986,6 +1060,7 @@ mod tests {
                 case_sensitive: false,
                 coalesce_same_name_keys: false,
                 mark_join_keys_ambiguous: false,
+                origin: JoinOrigin::ColumnOn,
             },
         )
         .unwrap();
@@ -1006,6 +1081,7 @@ mod tests {
                 case_sensitive: false,
                 coalesce_same_name_keys: false,
                 mark_join_keys_ambiguous: false,
+                origin: JoinOrigin::ColumnOn,
             },
         )
         .unwrap();
@@ -1026,6 +1102,7 @@ mod tests {
                 case_sensitive: false,
                 coalesce_same_name_keys: false,
                 mark_join_keys_ambiguous: false,
+                origin: JoinOrigin::ColumnOn,
             },
         )
         .unwrap();
@@ -1051,6 +1128,7 @@ mod tests {
                 case_sensitive: false,
                 coalesce_same_name_keys: false,
                 mark_join_keys_ambiguous: false,
+                origin: JoinOrigin::ColumnOn,
             },
         )
         .unwrap();
@@ -1078,6 +1156,7 @@ mod tests {
                 case_sensitive: false,
                 coalesce_same_name_keys: false,
                 mark_join_keys_ambiguous: false,
+                origin: JoinOrigin::ColumnOn,
             },
         )
         .unwrap();
@@ -1110,6 +1189,7 @@ mod tests {
                 case_sensitive: false,
                 coalesce_same_name_keys: false,
                 mark_join_keys_ambiguous: false,
+                origin: JoinOrigin::ColumnOn,
             },
         )
         .unwrap();
@@ -1156,6 +1236,7 @@ mod tests {
                 case_sensitive: false,
                 coalesce_same_name_keys: true,
                 mark_join_keys_ambiguous: false,
+                origin: JoinOrigin::ColumnOn,
             },
         )
         .unwrap();
@@ -1202,6 +1283,7 @@ mod tests {
                 case_sensitive: false,
                 coalesce_same_name_keys: false,
                 mark_join_keys_ambiguous: false,
+                origin: JoinOrigin::ColumnOn,
             },
         )
         .expect("issue #604: join on id/ID must succeed");

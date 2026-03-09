@@ -610,7 +610,7 @@ fn apply_op(
                 "left_anti" | "leftanti" | "anti" => JoinType::LeftAnti,
                 _ => JoinType::Inner,
             };
-            df.join_with_keys(&other_df, left_refs, right_refs, join_type, true)
+            df.join_with_keys(&other_df, left_refs, right_refs, join_type, false)
                 .map_err(PlanError::Session)
         }
         "union" => {

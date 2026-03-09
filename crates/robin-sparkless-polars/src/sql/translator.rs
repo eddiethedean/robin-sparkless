@@ -969,6 +969,7 @@ fn translate_select_from(
                         case_sensitive: session.is_case_sensitive(),
                         coalesce_same_name_keys: false, // SQL: keep both key columns
                         mark_join_keys_ambiguous: false,
+                        origin: crate::dataframe::joins::JoinOrigin::ColumnOn,
                     },
                 )?;
             }
