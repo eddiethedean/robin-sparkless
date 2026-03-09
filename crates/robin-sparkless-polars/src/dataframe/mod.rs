@@ -2823,15 +2823,10 @@ fn is_map_format(dtype: &DataType) -> bool {
     false
 }
 
-/// When map value was unified to String by concat_list, try to recover number/bool by parsing as JSON (#3.6).
+/// When map value was unified to String by concat_list, keep it as a JSON string.
+/// PySpark create_map often stringifies column-derived values when collected, so
+/// we avoid re-interpreting numeric-looking strings as numbers here (issue #1140).
 fn map_value_string_to_json(s: &str) -> JsonValue {
-    if let Ok(parsed) = serde_json::from_str::<JsonValue>(s) {
-        match &parsed {
-            JsonValue::Number(_) | JsonValue::Bool(_) => return parsed,
-            JsonValue::String(_) => return parsed,
-            _ => {}
-        }
-    }
     JsonValue::String(s.to_string())
 }
 
@@ -3069,7 +3064,11 @@ fn any_value_to_json(av: &AnyValue<'_>, dtype: &DataType) -> JsonValue {
         AnyValue::List(s) => {
             if is_map_format(dtype) {
                 // List(Struct{key, value}) -> JSON object {} (PySpark empty map #578).
-                let mut obj = Map::new();
+                // For mixed string + numeric/boolean map values, coerce numeric/boolean values to strings
+                // so collected maps match PySpark behavior (issue #1140).
+                let mut entries: Vec<(String, JsonValue)> = Vec::new();
+                let mut has_string_value = false;
+                let mut has_numeric_or_bool_value = false;
                 for i in 0..s.len() {
                     if let Ok(elem) = s.get(i) {
                         let (k, v) = match &elem {
@@ -3122,10 +3121,32 @@ fn any_value_to_json(av: &AnyValue<'_>, dtype: &DataType) -> JsonValue {
                             }
                             _ => (None, None),
                         };
-                        if let (Some(key), Some(val)) = (k, v) {
-                            obj.insert(key, val);
+                        if let (Some(key), Some(mut val)) = (k, v) {
+                            if matches!(val, JsonValue::String(_)) {
+                                has_string_value = true;
+                            } else if matches!(val, JsonValue::Number(_) | JsonValue::Bool(_)) {
+                                has_numeric_or_bool_value = true;
+                            }
+                            entries.push((key, val));
                         }
                     }
+                }
+                if has_string_value && has_numeric_or_bool_value {
+                    for (_, v) in entries.iter_mut() {
+                        match v {
+                            JsonValue::Number(n) => {
+                                *v = JsonValue::String(n.to_string());
+                            }
+                            JsonValue::Bool(b) => {
+                                *v = JsonValue::String(b.to_string());
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                let mut obj = Map::new();
+                for (key, val) in entries {
+                    obj.insert(key, val);
                 }
                 JsonValue::Object(obj)
             } else {
