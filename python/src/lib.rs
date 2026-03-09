@@ -325,10 +325,14 @@ fn is_get_json_object_shape(output_names: Option<&[String]>) -> bool {
     }
 }
 
-/// True when output has both c0 and c1 (json_tuple shape). Used so we only force c0/c1 to string in that context (#1240: union result columns c1..c5 must stay numeric).
+/// True when output has exactly the json_tuple shape: both c0 and c1 present as the only two columns.
+/// Used so we only force c0/c1 to string in that narrow context (#1240: union result columns c1..c5
+/// or generic c0..cN from createDataFrame must stay numeric).
 fn is_json_tuple_shape(output_names: Option<&[String]>) -> bool {
     match output_names {
-        Some(n) => n.iter().any(|s| s == "c0") && n.iter().any(|s| s == "c1"),
+        Some(n) => {
+            n.len() == 2 && n.iter().any(|s| s == "c0") && n.iter().any(|s| s == "c1")
+        }
         None => false,
     }
 }
@@ -940,7 +944,7 @@ impl PySparkSession {
             normalize_create_dataframe_input(py, data, schema)?;
         let schema_cache =
             schema.and_then(|s| s.getattr("fields").ok().map(|_| s.clone().unbind()));
-        let (rows, schema_pairs, schema_was_inferred) = python_data_and_schema(
+        let (rows, schema_pairs, schema_was_inferred, mixed_row_kinds) = python_data_and_schema(
             py,
             &data,
             schema,
@@ -954,6 +958,7 @@ impl PySparkSession {
         Ok(PyDataFrame {
             inner: df,
             schema_cache,
+            mixed_row_shape_error_on_collect: mixed_row_kinds && schema.is_none(),
         })
     }
 
@@ -1113,6 +1118,13 @@ impl PySparkContext {
             .inner
             .app_name()
             .unwrap_or_else(|| "sparkless".to_string()))
+    }
+
+    /// PySpark parity: SparkContext.appName camelCase alias for app_name.
+    #[getter]
+    #[pyo3(name = "appName")]
+    fn app_name_camel(&self, py: Python<'_>) -> PyResult<String> {
+        self.app_name(py)
     }
 
     /// PySpark parity: version is a property (read-only string), not a method.
@@ -1772,7 +1784,7 @@ fn python_data_and_schema(
     schema: Option<&Bound<'_, PyAny>>,
     from_pandas: bool,
     pandas_column_order: Option<&[String]>,
-) -> PyResult<(Vec<Vec<JsonValue>>, Vec<(String, String)>, bool)> {
+) -> PyResult<(Vec<Vec<JsonValue>>, Vec<(String, String)>, bool, bool)> {
     let list = data.downcast::<PyList>().map_err(|_| {
         PyErr::new::<pyo3::exceptions::PyTypeError, _>("data must be a list (or pandas.DataFrame)")
     })?;
@@ -1835,6 +1847,7 @@ fn python_data_and_schema(
     let mut rows: Vec<Vec<JsonValue>> = Vec::with_capacity(list.len());
     let mut inferred_schema: Option<Vec<(String, String)>> = None;
     let mut row_kind: Option<&'static str> = None;
+    let mut mixed_row_kinds: bool = false;
 
     // #1267: when we have column order, build rows in Python so dict.get(k) runs in Python
     // and keys are found correctly (avoids PyO3 dict lookup issues).
@@ -1952,14 +1965,8 @@ fn python_data_and_schema(
                 "scalar"
             };
             if let Some(first) = row_kind {
-                // Disallow mixing dict and seq rows when schema is not explicit (PySpark parity).
-                // When schema is explicit (StructType/DDL/pairs), allow mixing: tuple rows are positional, dict rows use schema order.
-                if schema_res.is_none()
-                    && ((first == "dict" && kind == "seq") || (first == "seq" && kind == "dict"))
-                {
-                    return Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
-                        "createDataFrame: all rows must be the same shape (dict rows or list/tuple rows)",
-                    ));
+                if first != kind {
+                    mixed_row_kinds = true;
                 }
             } else {
                 row_kind = Some(kind);
@@ -2191,7 +2198,7 @@ fn python_data_and_schema(
         }
     }
 
-    Ok((rows, schema, schema_was_inferred))
+    Ok((rows, schema, schema_was_inferred, mixed_row_kinds))
 }
 
 fn python_row_to_json(
@@ -3244,6 +3251,9 @@ struct PyDataFrame {
     inner: DataFrame,
     /// When set, df.schema returns this (preserves ArrayType.containsNull etc. from createDataFrame(schema=StructType(...))).
     schema_cache: Option<Py<PyAny>>,
+    /// When true, count()/collect() should raise an error due to mixed dict/list row shapes in
+    /// schema inference (PySpark-style behavior for createDataFrame([{...}, (...)]) with no schema).
+    mixed_row_shape_error_on_collect: bool,
 }
 
 impl PyDataFrame {
@@ -3251,6 +3261,7 @@ impl PyDataFrame {
         PyDataFrame {
             inner: df,
             schema_cache: None,
+            mixed_row_shape_error_on_collect: false,
         }
     }
 }
@@ -3913,6 +3924,11 @@ impl PyDataFrame {
     }
 
     fn count(&self) -> PyResult<usize> {
+        if self.mixed_row_shape_error_on_collect {
+            return Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+                "createDataFrame: all rows must be the same shape (dict rows or list/tuple rows)",
+            ));
+        }
         self.inner.count().map_err(to_py_err)
     }
 
@@ -4895,7 +4911,7 @@ impl PyDataFrame {
             .downcast::<PySparkSession>()
             .map_err(|_| PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected SparkSession"))?;
         let list = PyList::new_bound(py, out_rows);
-        let (rows_data, schema, schema_was_inferred) =
+        let (rows_data, schema, schema_was_inferred, _mixed_row_kinds) =
             python_data_and_schema(py, list.as_ref(), None, false, None)?;
         let df = session_ref
             .borrow()
