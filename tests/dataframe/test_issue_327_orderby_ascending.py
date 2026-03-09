@@ -222,7 +222,6 @@ class TestIssue327OrderByAscending:
         finally:
             spark.stop()
 
-    @pytest.mark.skip(reason="Issue #1139: unskip when fixing")
     def test_orderby_with_null_values(self):
         """Test orderBy with null values (explicit nulls last for PySpark)."""
         spark = SparkSession.builder.appName("issue-327").getOrCreate()
@@ -332,7 +331,6 @@ class TestIssue327OrderByAscending:
         finally:
             spark.stop()
 
-    @pytest.mark.skip(reason="Issue #1139: unskip when fixing")
     def test_orderby_mixed_nulls_and_values(self):
         """Test orderBy with mixed null and non-null values (explicit nulls last)."""
         spark = SparkSession.builder.appName("issue-327").getOrCreate()

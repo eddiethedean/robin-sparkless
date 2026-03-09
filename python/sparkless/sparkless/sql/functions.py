@@ -249,6 +249,21 @@ def log10(c: ColumnOrName) -> _ColumnType:
     return _col_result(_native_fn("log10")(_as_col(c)))
 
 
+def asc_nulls_last(c: ColumnOrName) -> _ColumnType:
+    """Ascending sort order with nulls last (PySpark functions.asc_nulls_last)."""
+    return _as_col(c).asc_nulls_last()
+
+
+def desc_nulls_first(c: ColumnOrName) -> _ColumnType:
+    """Descending sort order with nulls first (PySpark functions.desc_nulls_first)."""
+    return _as_col(c).desc_nulls_first()
+
+
+def desc_nulls_last(c: ColumnOrName) -> _ColumnType:
+    """Descending sort order with nulls last (PySpark functions.desc_nulls_last)."""
+    return _as_col(c).desc_nulls_last()
+
+
 def greatest(*cols: ColumnOrName) -> _ColumnType:
     return _col_result(_native_fn("greatest")(tuple([_as_col(c) for c in cols])))
 
