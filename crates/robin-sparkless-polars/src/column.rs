@@ -1403,6 +1403,14 @@ impl Column {
     /// Substring before/after nth delimiter (PySpark substring_index). count > 0: before nth from left; count < 0: after nth from right.
     pub fn substring_index(&self, delimiter: &str, count: i64) -> Column {
         use polars::prelude::*;
+        // PySpark edge case: empty delimiter always yields empty string for non-null input,
+        // and null when the input is null.
+        if delimiter.is_empty() {
+            let expr = when(self.expr().clone().is_null())
+                .then(lit(NULL))
+                .otherwise(lit("").cast(DataType::String));
+            return Self::from_expr(expr, None);
+        }
         let delim = delimiter.to_string();
         let split_expr = self.expr().clone().str().split(lit(delim.clone()));
         let n = count.unsigned_abs() as i64;
