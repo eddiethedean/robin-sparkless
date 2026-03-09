@@ -116,7 +116,6 @@ class TestArrayParameterFormats:
         assert rows[1]["Array-Field-3"] == expected
         assert rows[1]["Array-Field-4"] == expected
 
-    @pytest.mark.skip(reason="Issue #1115: unskip when fixing")
     def test_array_with_mixed_types(self, spark):
         """Test array() with columns of different types."""
         df = spark.createDataFrame(
@@ -252,7 +251,6 @@ class TestArrayParameterFormats:
         assert len(rows) == 1
         assert rows[0]["flags"] == [True, False]
 
-    @pytest.mark.skip(reason="Issue #1115: unskip when fixing")
     def test_array_with_mixed_types_comprehensive(self, spark):
         """Test array() with comprehensive mixed type combinations."""
         df = spark.createDataFrame(
@@ -484,7 +482,6 @@ class TestArrayParameterFormats:
         assert len(rows) == 1
         assert rows[0]["numbers"] == [0, -5, 10]
 
-    @pytest.mark.skip(reason="Issue #1115: unskip when fixing")
     def test_array_all_formats_with_mixed_types(self, spark):
         """Test all array() parameter formats with mixed data types."""
         df = spark.createDataFrame(

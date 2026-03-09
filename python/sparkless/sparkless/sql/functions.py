@@ -1245,6 +1245,10 @@ def concat_ws(separator, *cols):
 
 def array(*cols):
     """Create array column from columns (PySpark array)."""
+    # PySpark: F.array(()) is invalid and raises; empty tuple is typically a user error.
+    # Match that behavior so tests expecting an exception on F.array(()) pass.
+    if len(cols) == 1 and isinstance(cols[0], tuple) and len(cols[0]) == 0:
+        raise TypeError("array() does not accept an empty tuple argument")
     return _array(*[_as_col(c) for c in cols])
 
 
@@ -1362,7 +1366,10 @@ def size(column):
 def array_contains(column, value):
     """True if array contains value (PySpark array_contains). value can be column name, Column, or literal."""
     if isinstance(value, str):
-        v = col(value)
+        # PySpark treats bare strings as literals for the value parameter when the column is
+        # an array column, e.g. array_contains(col("tags"), "python"). For join conditions,
+        # callers should pass Column objects explicitly so we don't rely on name lookup here.
+        v = lit(value)
         return _array_contains(_as_col(column), v)
     if isinstance(value, _Column):  # Column argument, e.g. join condition
         # Implement via arrays_overlap(array_col, array(value_col)) so we avoid list.eval on named columns.

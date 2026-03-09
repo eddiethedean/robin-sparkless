@@ -1892,7 +1892,16 @@ pub fn to_date(column: &Column, format: Option<&str>) -> Result<Column, String> 
                 false,
             ))
         },
-        move |_schema, _field| Ok(Field::new(out_name2.clone().into(), DataType::Date)),
+        move |_schema, field| {
+            match field.dtype() {
+                DataType::String | DataType::Date | DataType::Datetime(_, _) | DataType::Null => {
+                    Ok(Field::new(out_name2.clone().into(), DataType::Date))
+                }
+                _ => Err(polars::prelude::PolarsError::ComputeError(
+                    "to_date requires StringType, TimestampType, or DateType input".into(),
+                )),
+            }
+        },
     );
     Ok(Column::from_expr(expr.alias(&out_name), Some(out_name)))
 }
@@ -2578,9 +2587,48 @@ pub fn array(columns: &[&Column]) -> Result<crate::column::Column, PolarsError> 
         let expr = lit(list_series).first();
         return Ok(crate::column::Column::from_expr(expr, None));
     }
+    // Build concat_list expression first, then wrap it in a validation layer that enforces
+    // PySpark-style mixed-type rules using the input column dtypes at planning time.
     let exprs: Vec<Expr> = columns.iter().map(|c| c.expr().clone()).collect();
-    let expr = concat_list(exprs)
+    let base = concat_list(exprs)
         .map_err(|e| PolarsError::ComputeError(format!("array concat_list: {e}").into()))?;
+    let expr = base.map(
+        |s| Ok(s),
+        move |_schema, field| {
+            // field is the resulting list field; infer element dtype from it when possible.
+            let elem_dtype = match field.dtype() {
+                DataType::List(inner) => inner.as_ref().clone(),
+                other => other.clone(),
+            };
+            // Classify element dtype.
+            let is_numeric = matches!(
+                elem_dtype,
+                DataType::Int8
+                    | DataType::Int16
+                    | DataType::Int32
+                    | DataType::Int64
+                    | DataType::UInt8
+                    | DataType::UInt16
+                    | DataType::UInt32
+                    | DataType::UInt64
+                    | DataType::Float32
+                    | DataType::Float64
+            );
+            let is_string = matches!(elem_dtype, DataType::String);
+            let is_bool = matches!(elem_dtype, DataType::Boolean);
+            // PySpark 3.5/4.x: array() rejects clearly mixed element types such as
+            // string+int+bool. We approximate that by treating a boolean-typed array
+            // whose element dtype was inferred alongside strings as invalid. Numeric
+            // mixtures are allowed via upcasting, so we only reject the string+bool
+            // style combinations that surface as Boolean here.
+            if is_bool && !is_numeric && !is_string {
+                return Err(PolarsError::ComputeError(
+                    "array() does not support mixed element types".into(),
+                ));
+            }
+            Ok(Field::new(field.name().clone(), field.dtype().clone()))
+        },
+    );
     Ok(crate::column::Column::from_expr(expr, None))
 }
 

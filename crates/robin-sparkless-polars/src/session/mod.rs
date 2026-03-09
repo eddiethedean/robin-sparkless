@@ -787,6 +787,31 @@ fn json_value_to_series_single(
                 .cast(&DataType::Datetime(TimeUnit::Microseconds, None))?;
             Ok(s)
         }
+        // MapType element: map<key_type,value_type> where value is a JSON object.
+        (JsonValue::Object(obj), t) if parse_map_key_value_types(t).is_some() => {
+            let (key_type, value_type) =
+                parse_map_key_value_types(t).expect("guard ensures Some");
+            let key_dtype = json_type_str_to_polars(&key_type).ok_or_else(|| {
+                PolarsError::ComputeError(
+                    format!("map key type '{key_type}' not supported").into(),
+                )
+            })?;
+            let value_dtype = json_type_str_to_polars(&value_type).ok_or_else(|| {
+                PolarsError::ComputeError(
+                    format!("map value type '{value_type}' not supported").into(),
+                )
+            })?;
+            json_object_to_map_struct_series(obj, &key_type, &value_type, &key_dtype, &value_dtype, name)
+        }
+        // StructType element: struct<field1:type1,...> where value is JSON object/array.
+        (JsonValue::Object(_) | JsonValue::Array(_), t) if parse_struct_fields(t).is_some() => {
+            let fields = parse_struct_fields(t).expect("guard ensures Some");
+            // json_object_or_array_to_struct_series returns Option<Series>; None means null.
+            match json_object_or_array_to_struct_series(value, &fields, name)? {
+                Some(s) => Ok(s),
+                None => Ok(Series::new_null(name.into(), 1)),
+            }
+        }
         _ => Err(PolarsError::ComputeError(
             format!("json_value_to_series: unsupported {type_str} for {value:?}").into(),
         )),
