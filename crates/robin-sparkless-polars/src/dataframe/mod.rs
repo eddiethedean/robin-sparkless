@@ -1209,8 +1209,9 @@ impl DataFrame {
         let has_get_json_object_shape = names.iter().any(|n| n == "a")
             && names.iter().any(|n| n == "nested")
             && names.iter().any(|n| n == "missing");
-        let has_json_tuple_shape =
-            names.iter().any(|n| n == "c0") && names.iter().any(|n| n == "c1");
+        let has_json_tuple_shape = names.len() == 2
+            && names.iter().any(|n| n == "c0")
+            && names.iter().any(|n| n == "c1");
         let effective_dtypes: Vec<DataType> = names
             .iter()
             .zip(plan_dtypes.iter())
