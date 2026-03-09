@@ -411,7 +411,6 @@ class TestIssue287NAReplace:
         finally:
             spark.stop()
 
-    @pytest.mark.skip(reason="Issue #1210: unskip when fixing")
     def test_na_replace_with_none_values(self):
         """PySpark na.replace does not accept None as to_replace; use fillna for nulls."""
         spark = SparkSession.builder.appName("issue-287").getOrCreate()

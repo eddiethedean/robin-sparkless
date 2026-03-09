@@ -4611,6 +4611,12 @@ impl PyDataFrame {
         }
 
         let value = value.unwrap();
+        // PySpark: na.replace does not accept None as to_replace; use fillna for nulls (#1210).
+        if to_replace.is_none() {
+            return Err(to_py_err(
+                "na.replace does not accept None as to_replace; use fillna for nulls",
+            ));
+        }
         let old_expr = py_any_to_column(to_replace)?.into_expr();
         let new_expr = py_any_to_column(value)?.into_expr();
         self.inner
@@ -6293,15 +6299,11 @@ impl PyDataFrameNaFunctions {
 
         let value = value.unwrap();
 
-        // to_replace is None: replace null with value (fillna)
+        // PySpark: na.replace does not accept None as to_replace; use fillna for nulls (#1210).
         if to_replace.is_none() {
-            let value_col = py_any_to_column(value)?;
-            return df_ref
-                .inner
-                .na()
-                .fill(value_col.into_expr(), subset_refs)
-                .map(PyDataFrame::wrap)
-                .map_err(to_py_err);
+            return Err(to_py_err(
+                "na.replace does not accept None as to_replace; use fillna for nulls",
+            ));
         }
 
         // to_replace is list and value is list: replace each pair in order
