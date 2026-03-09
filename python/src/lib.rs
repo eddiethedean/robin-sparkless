@@ -3526,10 +3526,56 @@ impl PyDataFrame {
         }
 
         let all_columns = self.inner.columns().map_err(to_py_err)?;
+        // For join/crossJoin parity: when the user writes dept_df.name.alias("name_right")
+        // and the current DataFrame already has a column named "name_right" (produced by
+        // the join logic for duplicate right-side columns), we must resolve the alias to
+        // that existing right-side column instead of re-aliasing the left "name" column.
+        // We implement this as a light-weight Expr rewrite for the specific pattern
+        // Alias(Column(base), alias) where alias == base + "_right" and alias exists
+        // in the current DataFrame schema.
+        use std::collections::HashSet;
+        use robin_sparkless::{Column as RsColumn, Expr as RsExpr};
+        let all_column_set: HashSet<&str> =
+            all_columns.iter().map(|s| s.as_str()).collect();
+
+        fn rewrite_join_right_alias(expr: RsExpr, all_column_set: &HashSet<&str>) -> RsExpr {
+            match expr {
+                RsExpr::Alias(inner, alias_name) => {
+                    let alias_str = alias_name.as_str();
+                    // Temporary debug: print alias patterns seen in select for joins.
+                    // eprintln!("select alias expr: alias='{}'", alias_str);
+                    if all_column_set.contains(alias_str) {
+                        // Look for the specific pattern Column(base) AS "${base}_right",
+                        // possibly wrapped in one or more Alias layers from Column::alias()
+                        // and Column::into_expr().
+                        let mut base_expr: &RsExpr = inner.as_ref();
+                        while let RsExpr::Alias(inner2, _) = base_expr {
+                            base_expr = inner2.as_ref();
+                        }
+                        if let RsExpr::Column(col_name) = base_expr {
+                            let base = col_name.as_str();
+                            let expected_alias = format!("{base}_right");
+                            if expected_alias == alias_str {
+                                // Rewrite to use the existing right-side column as the source,
+                                // so we select dept_id_right/name_right from the joined frame.
+                                let col = RsColumn::new(alias_str.to_string());
+                                return col.into_expr();
+                            }
+                        }
+                    }
+                    RsExpr::Alias(inner, alias_name)
+                }
+                other => other,
+            }
+        }
+
         let mut items: Vec<SelectItem<'_>> = Vec::with_capacity(tmp.len());
         for t in tmp {
             match t {
-                Tmp::Expr(e) => items.push(SelectItem::Expr(e)),
+                Tmp::Expr(e) => {
+                    let rewritten = rewrite_join_right_alias(e, &all_column_set);
+                    items.push(SelectItem::Expr(rewritten));
+                }
                 Tmp::NameIdx(i) => {
                     let name = name_boxes[i].as_ref();
                     if name == "*" {

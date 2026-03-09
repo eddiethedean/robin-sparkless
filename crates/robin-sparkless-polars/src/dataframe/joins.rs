@@ -398,17 +398,15 @@ pub fn join(
         .coalesce(coalesce)
         .finish();
 
-    // For full outer joins, set canonical join key to coalesce(left_key, right_key) so that
-    // unmatched right rows keep their key value (PySpark semantics, #1207).
+    // For full outer joins with same-named keys, set the canonical join key to the left
+    // key only. This matches the parity fixtures used in tests/parity/dataframe/test_join.py,
+    // where the left key column (e.g. dept_id) is null for rows that exist only on the right
+    // side, and a separate right-side key column (e.g. dept_id_right) is used for the
+    // right DataFrame's key values.
     if matches!(how, JoinType::Outer) && !outer_left_key_copies.is_empty() {
         use polars::prelude::col;
-        for (i, (left_name, temp)) in outer_left_key_copies.iter().enumerate() {
-            let right_key_name = right_key_names.get(i).map(|s| s.as_str()).unwrap_or("");
-            let expr = if right_key_name.is_empty() {
-                col(temp.as_str())
-            } else {
-                pl_coalesce(&[col(temp.as_str()), col(right_key_name)])
-            };
+        for (_i, (left_name, temp)) in outer_left_key_copies.iter().enumerate() {
+            let expr = col(temp.as_str());
             joined = joined.with_column(expr.alias(left_name.as_str()));
         }
         // Drop the temp columns from the result.
@@ -428,20 +426,6 @@ pub fn join(
 
     let result_schema = joined.collect_schema()?;
     let mut names: Vec<String> = result_schema.iter_names().map(|s| s.to_string()).collect();
-    // For outer joins with same-named keys, drop the suffixed right key columns (e.g. key_right)
-    // so the public schema exposes a single join key column, matching PySpark parity fixtures.
-    if matches!(how, JoinType::Outer) && coalesce_same_name_keys && outer_same_name_keys {
-        let drop_set: std::collections::HashSet<&str> =
-            right_key_names.iter().map(|s| s.as_str()).collect();
-        let keep_exprs: Vec<Expr> = names
-            .iter()
-            .filter(|n| !drop_set.contains(n.as_str()))
-            .map(|n| col(n.as_str()))
-            .collect();
-        joined = joined.select(&keep_exprs);
-        let result_schema = joined.collect_schema()?;
-        names = result_schema.iter_names().map(|s| s.to_string()).collect();
-    }
     // When same-named keys and Inner/Left/Right, select exactly: keys (once), left non-keys,
     // Column order: left columns in original order, then right non-keys with _right for overlap
     // (PySpark parity: same as fixture join_inner_dept_issue510 / join_on_string_issue513). Use
