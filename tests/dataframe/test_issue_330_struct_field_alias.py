@@ -434,7 +434,6 @@ class TestIssue330StructFieldAlias:
         finally:
             spark.stop()
 
-    @pytest.mark.skip(reason="Issue #1216: unskip when fixing")
     def test_struct_field_with_alias_with_join(self):
         """Test struct field extraction with alias in join operations."""
         spark = SparkSession.builder.appName("issue-330").getOrCreate()
@@ -535,7 +534,6 @@ class TestIssue330StructFieldAlias:
         finally:
             spark.stop()
 
-    @pytest.mark.skip(reason="Issue #1216: unskip when fixing")
     def test_struct_field_with_alias_with_window_function(self):
         """Test struct field extraction with alias with window functions."""
         spark = SparkSession.builder.appName("issue-330").getOrCreate()

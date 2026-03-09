@@ -1934,9 +1934,11 @@ impl SparkSession {
         };
         // When schema was not all-string (e.g. ID:bigint, StructValue:string), still upgrade any "string"
         // column that has Object in the data to struct (so createDataFrame([{"ID":1,"StructValue":{...}}]) gets struct).
-        // #1149: When schema_was_inferred (e.g. names-only from Python), do not upgrade: Python already set
-        // first column to Long/Double and later numeric columns to String for PySpark parity.
-        if !schema_inferred_in_rust && !schema_was_inferred && !rows.is_empty() {
+        // #1149: When schema_was_inferred (e.g. names-only from Python), do not upgrade numeric/string
+        // so Python's first-col Long and later String stay (PySpark parity). But when Python inferred
+        // "string" for a dict column (infer_type_from_py_value has no dict case), upgrade to struct
+        // so getField("E1") works (#1216).
+        if !rows.is_empty() {
             let names: Vec<String> = schema.iter().map(|(n, _)| n.clone()).collect();
             let inferred = Self::infer_schema_from_json_rows(&rows, &names);
             for (col_idx, (_, dtype_str)) in schema.iter_mut().enumerate() {
@@ -1944,7 +1946,14 @@ impl SparkSession {
                     && inferred.get(col_idx).map(|(_, t)| t) != Some(&"string".to_string())
                 {
                     if let Some((_, inferred_type)) = inferred.get(col_idx) {
-                        *dtype_str = inferred_type.clone();
+                        // Only upgrade when Rust inference says struct/map: avoid overwriting
+                        // Python's intentional string for non-dict columns (#1149).
+                        let inferred_trimmed = inferred_type.trim();
+                        if inferred_trimmed.to_lowercase().starts_with("struct<")
+                            || inferred_trimmed.to_lowercase().starts_with("map<")
+                        {
+                            *dtype_str = inferred_type.clone();
+                        }
                     }
                 }
             }

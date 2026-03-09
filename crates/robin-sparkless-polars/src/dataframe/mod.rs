@@ -357,12 +357,12 @@ impl DataFrame {
             } = &e
             {
                 if input.len() == 1 {
-                    if let Some(input_dt) = df.get_expr_output_dtype(&input[0]) {
+                    let input_expr = input[0].clone();
+                    if let Some(input_dt) = df.get_expr_output_dtype(&input_expr) {
                         match df.resolve_struct_field_from_type(&input_dt, name.as_str(), "struct")
                         {
                             Ok((resolved_name, _)) => {
-                                return Ok(input[0]
-                                    .clone()
+                                return Ok(input_expr
                                     .struct_()
                                     .field_by_name(&resolved_name));
                             }
@@ -372,6 +372,9 @@ impl DataFrame {
                             }
                         }
                     }
+                    // #1216: When schema is unavailable (e.g. lazy join result), preserve struct
+                    // field access with the requested name so Polars can resolve at execution time.
+                    return Ok(input_expr.struct_().field_by_name(name));
                 }
             }
             // Recurse into Function inputs so map_col[key_col] (map_many) and similar get key column resolved (#1111).
