@@ -50,7 +50,6 @@ class TestIssue189StringFunctionsRobust:
         assert rows[2]["m3"] == ""
         assert rows[2]["m4"] == ""
 
-    @pytest.mark.skip(reason="Issue #1118: unskip when fixing")
     def test_substring_index_edge_cases(self, spark):
         df = spark.createDataFrame(
             [
