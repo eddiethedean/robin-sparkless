@@ -2424,8 +2424,10 @@ impl Column {
         order_by_encoded: &[String],
         use_running_aggregate: bool,
     ) -> Result<Column, PolarsError> {
-        // PySpark does not support distinct window functions (countDistinct().over(); #1218).
-        if expr_is_or_contains_n_unique(self.expr()) {
+        // PySpark does not support countDistinct().over(); approx_count_distinct().over() is allowed (#1218).
+        if expr_is_or_contains_n_unique(self.expr())
+            && self.name.starts_with("count_distinct(")
+        {
             return Err(PolarsError::InvalidOperation(
                 "Distinct window functions are not supported".into(),
             ));
@@ -2450,9 +2452,10 @@ impl Column {
                     order_exprs.push(col(name));
                     descending_multi.push(descending);
                 }
-                // first_value: first row in window order gets rank 1 → descending = true (highest first).
-                // last_value: last row in window order gets rank 1 → descending = false (lowest first).
-                let descending = !fl.is_last;
+                // first_value: first row in window order gets rank 1 → use window order direction.
+                // last_value: last row in window order gets rank 1 → use opposite of window order.
+                let order_desc = descending_multi.first().copied().unwrap_or(false);
+                let descending = if fl.is_last { !order_desc } else { order_desc };
                 let opts = RankOptions {
                     method: RankMethod::Ordinal,
                     descending,
