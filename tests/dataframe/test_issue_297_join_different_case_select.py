@@ -5,6 +5,10 @@ PySpark allows selecting columns with a different case when multiple columns
 with different cases exist after a join. It picks the first matching column.
 """
 
+import os
+
+import pytest
+
 from tests.fixtures.spark_imports import get_spark_imports
 
 _imports = get_spark_imports()
@@ -15,6 +19,17 @@ F = _imports.F
 class TestIssue297JoinDifferentCaseSelect:
     """Test join with different case columns and select with third case."""
 
+    @pytest.mark.skipif(
+        (
+            os.environ.get("SPARKLESS_TEST_BACKEND")
+            or os.environ.get("MOCK_SPARK_TEST_BACKEND")
+            or ""
+        )
+        .strip()
+        .lower()
+        == "pyspark",
+        reason="Skipped in PySpark mode (driver/worker Python version mismatch with pytest-xdist)",
+    )
     def test_join_different_case_select_third_case(self):
         """Test joining DataFrames with different case keys and selecting with third case."""
         spark = SparkSession.builder.appName("issue-297").getOrCreate()

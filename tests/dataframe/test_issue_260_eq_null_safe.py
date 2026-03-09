@@ -15,6 +15,7 @@ These tests verify that:
 from datetime import date, datetime
 from typing import Iterable
 
+import os
 import pytest
 
 from tests.fixtures.spark_imports import get_spark_imports
@@ -310,6 +311,17 @@ class TestIssue260EqNullSafe:
         finally:
             spark.stop()
 
+    @pytest.mark.skipif(
+        (
+            os.environ.get("SPARKLESS_TEST_BACKEND")
+            or os.environ.get("MOCK_SPARK_TEST_BACKEND")
+            or ""
+        )
+        .strip()
+        .lower()
+        == "pyspark",
+        reason="Skipped in PySpark mode (driver/worker Python version mismatch with pytest-xdist)",
+    )
     def test_eqnullsafe_in_join_condition(self) -> None:
         """Test eqNullSafe used in join-like scenarios via cross join and filter."""
         spark = SparkSession.builder.appName("EqNullSafeJoin").getOrCreate()

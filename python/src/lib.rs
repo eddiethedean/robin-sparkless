@@ -3309,19 +3309,26 @@ impl PyDataFrame {
             let udf_column_py: Py<PyColumn> = udf_filter.getattr("udf_column")?.extract()?;
             let other_json: String = udf_filter.getattr("other_json")?.extract()?;
             let col_ref = udf_column_py.bind(py).borrow();
-            let (udf_name, mut arg_names, literal_jsons): (String, Vec<String>, Vec<Option<String>>) =
-                match col_ref.inner.udf_call_info_with_literals() {
-                    Some(x) => x,
-                    None => {
-                        return Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
-                            "UdfFilterColumn requires a UDF column",
-                        ));
-                    }
-                };
+            let (udf_name, mut arg_names, literal_jsons): (
+                String,
+                Vec<String>,
+                Vec<Option<String>>,
+            ) = match col_ref.inner.udf_call_info_with_literals() {
+                Some(x) => x,
+                None => {
+                    return Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+                        "UdfFilterColumn requires a UDF column",
+                    ));
+                }
+            };
             let mut df_for_udf = slf.inner.clone();
             if let Some((_, args)) = col_ref.inner.udf_call_with_args() {
                 for (i, arg) in args.iter().enumerate() {
-                    if literal_jsons.get(i).and_then(|o: &Option<String>| o.as_ref()).is_some() {
+                    if literal_jsons
+                        .get(i)
+                        .and_then(|o: &Option<String>| o.as_ref())
+                        .is_some()
+                    {
                         continue;
                     }
                     let columns = df_for_udf.columns().map_err(to_py_err)?;
@@ -3351,24 +3358,23 @@ impl PyDataFrame {
                 literals_py.append(item)?;
             }
             let df_for_callback = PyDataFrame::wrap(df_for_udf);
-            let df_with_col = PYTHON_UDF_EXECUTOR
-                .with(|cell| -> PyResult<PyDataFrame> {
-                    let cb = cell.borrow();
-                    let callback = cb.as_ref().ok_or_else(|| {
-                        PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
-                            "UDF filter requires Python UDF executor (active session)",
-                        )
-                    })?;
-                    let result = callback.bind(py).call1((
-                        df_for_callback,
-                        &temp_name,
-                        udf_name,
-                        arg_names_py,
-                        literals_py,
-                    ))?;
-                    let py_df = result.downcast::<PyDataFrame>()?;
-                    Ok(PyDataFrame::wrap(py_df.borrow().inner.clone()))
+            let df_with_col = PYTHON_UDF_EXECUTOR.with(|cell| -> PyResult<PyDataFrame> {
+                let cb = cell.borrow();
+                let callback = cb.as_ref().ok_or_else(|| {
+                    PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
+                        "UDF filter requires Python UDF executor (active session)",
+                    )
                 })?;
+                let result = callback.bind(py).call1((
+                    df_for_callback,
+                    &temp_name,
+                    udf_name,
+                    arg_names_py,
+                    literals_py,
+                ))?;
+                let py_df = result.downcast::<PyDataFrame>()?;
+                Ok(PyDataFrame::wrap(py_df.borrow().inner.clone()))
+            })?;
             let lit_expr = json_str_to_lit_expr(&other_json)?;
             let filter_expr = robin_sparkless::Column::new(temp_name.clone())
                 .gt(lit_expr)
@@ -5956,7 +5962,12 @@ impl PyColumn {
     fn __gt__(slf: PyRef<Self>, py: Python<'_>, other: &Bound<'_, PyAny>) -> PyResult<PyObject> {
         if slf.inner.udf_call_info().is_some() {
             let other_json = py_any_to_json_string(other)?;
-            let udf_column = Py::new(py, PyColumn { inner: slf.inner.clone() })?;
+            let udf_column = Py::new(
+                py,
+                PyColumn {
+                    inner: slf.inner.clone(),
+                },
+            )?;
             return Ok(PyUdfFilterColumn {
                 udf_column,
                 op: "gt".to_string(),

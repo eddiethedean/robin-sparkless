@@ -4,6 +4,10 @@ Test for issue #164: Type comparison error: 'cannot compare string with numeric 
 Uses get_spark_imports from fixture only.
 """
 
+import os
+
+import pytest
+
 from tests.fixtures.spark_imports import get_spark_imports
 
 _imports = get_spark_imports()
@@ -73,6 +77,17 @@ class TestIssue164SchemaInferenceNumeric:
 
         spark.stop()
 
+    @pytest.mark.skipif(
+        (
+            os.environ.get("SPARKLESS_TEST_BACKEND")
+            or os.environ.get("MOCK_SPARK_TEST_BACKEND")
+            or ""
+        )
+        .strip()
+        .lower()
+        == "pyspark",
+        reason="Skipped in PySpark mode (driver/worker Python version mismatch with pytest-xdist)",
+    )
     def test_schema_inference_mixed_types(self):
         """Test that schema inference works correctly for mixed types."""
         spark = SparkSession.builder.appName("test").getOrCreate()
