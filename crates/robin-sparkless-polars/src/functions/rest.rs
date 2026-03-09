@@ -7,17 +7,19 @@ use crate::column::Column;
 use polars::prelude::*;
 
 /// Count aggregation (PySpark LongType; cast to Int64 for schema parity #734).
-/// Use len() so we count all rows (including nulls), matching test_arithmetic_with_nulls
-/// and row["count(Value)"] semantics. When the input is "*", output name is "count(1)" for parity.
+/// count(column): count non-null values in that column (PySpark parity, #1209).
+/// count(*): use len() to count all rows per group.
 /// Carries source column for running-window conversion when orderBy is present (#1218).
 pub fn count(col: &Column) -> Column {
     use polars::prelude::len;
 
-    let expr = len().cast(DataType::Int64);
-    let name = if col.name() == "*" {
-        "count(1)".to_string()
+    let (expr, name) = if col.name() == "*" {
+        (len().cast(DataType::Int64), "count(1)".to_string())
     } else {
-        format!("count({})", col.name())
+        (
+            col.expr().clone().count().cast(DataType::Int64),
+            format!("count({})", col.name()),
+        )
     };
     let mut c = Column::from_expr(expr, Some(name));
     c.source_for_running_count = Some(col.name().to_string());

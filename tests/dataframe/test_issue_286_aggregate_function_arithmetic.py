@@ -270,7 +270,6 @@ class TestIssue286AggregateFunctionArithmetic:
         finally:
             spark.stop()
 
-    @pytest.mark.skip(reason="Issue #1209: unskip when fixing")
     def test_arithmetic_with_nulls(self):
         """Test arithmetic operations when aggregate results might be None."""
         spark = SparkSession.builder.appName("issue-286").getOrCreate()
