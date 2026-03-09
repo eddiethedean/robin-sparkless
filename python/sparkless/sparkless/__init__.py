@@ -168,11 +168,12 @@ class _PosexplodeResult(tuple):
         """Alias the two output columns.
 
         PySpark: posexplode(col).alias("pos", "val") – two-name alias.
+        PySpark: posexplode(col).alias() – keeps default names "pos" and "col".
         Sparkless extension: posexplode(col).alias("Value1") – second name defaults to "col".
         """
-        if not names:
-            raise ValueError("alias() requires at least one name")
-        if len(names) == 1:
+        if len(names) == 0:
+            pos_name, val_name = "pos", "col"
+        elif len(names) == 1:
             pos_name = names[0]
             val_name = "col"
         elif len(names) == 2:
