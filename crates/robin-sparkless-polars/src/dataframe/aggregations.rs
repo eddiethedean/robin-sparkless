@@ -889,10 +889,20 @@ fn pivot_agg_input_column_name(input_expr: &Expr) -> Option<String> {
 /// Supports sum, avg, min, max, count_distinct, first, last, collect_list, stddev, variance (PySpark pivot.agg parity).
 /// When no alias is present, use a default like "sum(salary)" (PySpark parity).
 fn parse_pivot_agg_expr(expr: &Expr) -> Option<(String, &'static str, String)> {
-    let (inner, alias_opt) = match expr {
-        Expr::Alias(inner, name) => (inner.as_ref(), Some(name.as_str().to_string())),
-        other => (other, None),
-    };
+    // Unwrap one or more Alias layers so we see the underlying Agg, keeping the
+    // outermost alias name (PySpark: F.sum(\"v\").alias(\"total\") is often built on
+    // top of a default alias like \"sum(v)\" from the underlying expression).
+    let mut inner = expr;
+    let mut alias_opt: Option<String> = None;
+    loop {
+        match inner {
+            Expr::Alias(e, name) => {
+                alias_opt = Some(name.as_str().to_string());
+                inner = e.as_ref();
+            }
+            _ => break,
+        }
+    }
     // Unwrap Cast so we see Agg (e.g. count_distinct returns Cast(NUnique(...), Int64))
     let inner = match inner {
         Expr::Cast { expr: e, .. } => e.as_ref(),
