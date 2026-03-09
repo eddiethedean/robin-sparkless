@@ -7,8 +7,33 @@ use polars::prelude::*;
 use regex::Regex;
 use std::borrow::Cow;
 
+/// Split string by regex pattern with at most `limit` parts (PySpark split uses regex).
+/// When limit <= 0, splits without limit. Empty delimiter: literal split (existing behavior).
+fn split_str_by_regex_limit(s: &str, re: &Regex, limit: usize) -> Vec<String> {
+    if limit == 1 {
+        return vec![s.to_string()];
+    }
+    if limit == 0 || limit >= usize::MAX {
+        return re.split(s).map(|p| p.to_string()).collect();
+    }
+    let mut result = Vec::with_capacity(limit);
+    let mut last_end = 0;
+    let mut count = 0;
+    for mat in re.find_iter(s) {
+        if count >= limit - 1 {
+            break;
+        }
+        result.push(s[last_end..mat.start()].to_string());
+        last_end = mat.end();
+        count += 1;
+    }
+    result.push(s[last_end..].to_string());
+    result
+}
+
 /// Split string by delimiter with at most `limit` parts; remainder in last part (PySpark split with limit).
 /// Returns List(String). When limit <= 0, splits without limit.
+/// Uses regex for non-empty pattern so "\\.\" and "\\|" work as in PySpark (#1215).
 pub fn apply_split_with_limit(
     column: Column,
     delimiter: &str,
@@ -24,6 +49,11 @@ pub fn apply_split_with_limit(
     } else {
         limit as usize
     };
+    let re = if delimiter.is_empty() {
+        None
+    } else {
+        Some(Regex::new(delimiter).map_err(|e| compute_err("split_with_limit pattern", e))?)
+    };
     let values_capacity = ca.len().saturating_mul(64);
     let mut builder =
         ListStringChunkedBuilder::new(name.as_str().into(), ca.len(), values_capacity);
@@ -31,10 +61,10 @@ pub fn apply_split_with_limit(
         match opt_s {
             Some(s) => {
                 if delimiter.is_empty() {
-                    // Empty delimiter: treat as no limit (split to chars would need different handling)
                     builder.append_values_iter(s.split(delimiter));
                 } else {
-                    builder.append_values_iter(s.splitn(n, delimiter));
+                    let parts = split_str_by_regex_limit(s, re.as_ref().unwrap(), n);
+                    builder.append_values_iter(parts.iter().map(String::as_str));
                 }
             }
             None => builder.append_null(),
