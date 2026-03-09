@@ -2577,6 +2577,7 @@ pub fn isnotnull(column: &Column) -> Column {
 /// With no arguments, returns a column of empty arrays (one per row); PySpark parity.
 pub fn array(columns: &[&Column]) -> Result<crate::column::Column, PolarsError> {
     use polars::prelude::*;
+    use std::collections::HashSet;
     if columns.is_empty() {
         // PySpark F.array() with no args: one empty list per row (broadcast literal).
         // Use .first() so the single-row literal is treated as a scalar and broadcasts to frame height.
@@ -2587,6 +2588,8 @@ pub fn array(columns: &[&Column]) -> Result<crate::column::Column, PolarsError> 
         let expr = lit(list_series).first();
         return Ok(crate::column::Column::from_expr(expr, None));
     }
+    // Capture input column names so we can inspect their dtypes in the schema callback.
+    let input_names: Vec<String> = columns.iter().map(|c| c.name().to_string()).collect();
     // Build concat_list expression first, then wrap it in a validation layer that enforces
     // PySpark-style mixed-type rules using the input column dtypes at planning time.
     let exprs: Vec<Expr> = columns.iter().map(|c| c.expr().clone()).collect();
@@ -2594,34 +2597,55 @@ pub fn array(columns: &[&Column]) -> Result<crate::column::Column, PolarsError> 
         .map_err(|e| PolarsError::ComputeError(format!("array concat_list: {e}").into()))?;
     let expr = base.map(
         |s| Ok(s),
-        move |_schema, field| {
-            // field is the resulting list field; infer element dtype from it when possible.
-            let elem_dtype = match field.dtype() {
-                DataType::List(inner) => inner.as_ref().clone(),
-                other => other.clone(),
+        move |schema, field| {
+            // Derive categories from the input column dtypes. We ignore literals/expressions
+            // that don't appear in the schema so F.array(F.lit(...)) continues to work.
+            let mut cats: HashSet<&'static str> = HashSet::new();
+            for name in &input_names {
+                if let Some(f) = schema.get(name.as_str()) {
+                    let dt = f.data_type();
+                    let cat = match dt {
+                        DataType::Int8
+                        | DataType::Int16
+                        | DataType::Int32
+                        | DataType::Int64
+                        | DataType::UInt8
+                        | DataType::UInt16
+                        | DataType::UInt32
+                        | DataType::UInt64
+                        | DataType::Float32
+                        | DataType::Float64 => "numeric",
+                        DataType::String => "string",
+                        DataType::Boolean => "bool",
+                        DataType::Date => "date",
+                        DataType::Datetime(_, _) => "ts",
+                        _ => "other",
+                    };
+                    cats.insert(cat);
+                }
+            }
+            // If we couldn't resolve any input types (e.g. all literals/expressions), fall back
+            // to existing behavior and trust concat_list/Polars upcasting.
+            if cats.is_empty() {
+                return Ok(Field::new(field.name().clone(), field.dtype().clone()));
+            }
+            // Normalize categories: treat Null as absent (not inserted above), and allow
+            // specific combinations:
+            // - Single-category arrays: numeric, string, bool, date, ts
+            // - Date+timestamp together (temporal)
+            // Everything else is considered a mixed-type error (PySpark parity).
+            let mut cat_vec: Vec<&'static str> = cats.iter().copied().collect();
+            cat_vec.sort_unstable();
+            let allowed = match cat_vec.as_slice() {
+                ["bool"] => true,
+                ["date"] => true,
+                ["numeric"] => true,
+                ["string"] => true,
+                ["ts"] => true,
+                ["date", "ts"] => true,
+                _ => false,
             };
-            // Classify element dtype.
-            let is_numeric = matches!(
-                elem_dtype,
-                DataType::Int8
-                    | DataType::Int16
-                    | DataType::Int32
-                    | DataType::Int64
-                    | DataType::UInt8
-                    | DataType::UInt16
-                    | DataType::UInt32
-                    | DataType::UInt64
-                    | DataType::Float32
-                    | DataType::Float64
-            );
-            let is_string = matches!(elem_dtype, DataType::String);
-            let is_bool = matches!(elem_dtype, DataType::Boolean);
-            // PySpark 3.5/4.x: array() rejects clearly mixed element types such as
-            // string+int+bool. We approximate that by treating a boolean-typed array
-            // whose element dtype was inferred alongside strings as invalid. Numeric
-            // mixtures are allowed via upcasting, so we only reject the string+bool
-            // style combinations that surface as Boolean here.
-            if is_bool && !is_numeric && !is_string {
+            if !allowed {
                 return Err(PolarsError::ComputeError(
                     "array() does not support mixed element types".into(),
                 ));
