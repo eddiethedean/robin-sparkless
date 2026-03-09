@@ -1452,19 +1452,31 @@ impl DataFrame {
 
     /// Group by columns (returns GroupedData for aggregation).
     /// Column names are resolved according to case sensitivity.
+    ///
+    /// PySpark parity: df.groupBy() with no arguments is allowed and treated as a
+    /// global aggregation (one group over all rows). We implement this by creating
+    /// a synthetic grouping key column with a constant value and grouping by it.
     pub fn group_by(&self, column_names: Vec<&str>) -> Result<GroupedData, PolarsError> {
         use polars::prelude::*;
-        let resolved: Vec<String> = column_names
-            .iter()
-            .map(|c| self.resolve_column_name(c))
-            .collect::<Result<Vec<_>, _>>()?;
-        let exprs: Vec<Expr> = resolved.iter().map(|name| col(name.as_str())).collect();
         let lf = self.lazy_frame();
-        let lazy_grouped = lf.clone().group_by(exprs);
+        let (lazy_grouped, grouping_cols) = if column_names.is_empty() {
+            // Global group: add a temporary constant column and group by it.
+            let tmp_name = "_gb_global";
+            let lf_with_key = lf.clone().with_column(lit(1i32).alias(tmp_name));
+            let grouped = lf_with_key.clone().group_by([col(tmp_name)]);
+            (grouped, vec![tmp_name.to_string()])
+        } else {
+            let resolved: Vec<String> = column_names
+                .iter()
+                .map(|c| self.resolve_column_name(c))
+                .collect::<Result<Vec<_>, _>>()?;
+            let exprs: Vec<Expr> = resolved.iter().map(|name| col(name.as_str())).collect();
+            (lf.clone().group_by(exprs), resolved)
+        };
         Ok(GroupedData {
             lf,
             lazy_grouped,
-            grouping_cols: resolved,
+            grouping_cols,
             case_sensitive: self.case_sensitive,
         })
     }
@@ -1509,6 +1521,12 @@ impl DataFrame {
     /// Group by mixed specs (names and/or Column expressions). Use when groupBy receives F.col("x").alias("y").
     pub fn group_by_specs(&self, specs: Vec<GroupBySpec>) -> Result<GroupedData, PolarsError> {
         use polars::prelude::*;
+        // PySpark: df.groupBy() with no arguments is allowed and treated as a global
+        // aggregation (one group over all rows). When specs is empty, delegate to
+        // group_by([]) so the DataFrame-level global-group handling is reused.
+        if specs.is_empty() {
+            return self.group_by(Vec::new());
+        }
         let mut exprs = Vec::with_capacity(specs.len());
         let mut names = Vec::with_capacity(specs.len());
         for spec in specs {
