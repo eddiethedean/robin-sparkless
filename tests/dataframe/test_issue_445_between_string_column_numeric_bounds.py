@@ -16,8 +16,6 @@ https://github.com/eddiethedean/sparkless/issues/445
 
 from tests.fixtures.spark_imports import get_spark_imports
 
-import pytest
-
 
 def test_between_string_column_numeric_bounds_exact_issue_445(spark, spark_backend):
     """Exact scenario from #445 - string column with numeric bounds."""

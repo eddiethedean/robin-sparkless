@@ -120,8 +120,6 @@ class TestIssue367ArrayEmpty:
         """F.array(()) raises in Sparkless (matches PySpark, which rejects tuple)."""
         from tests.fixtures.spark_imports import get_spark_imports
 
-        import pytest
-
         F = get_spark_imports().F
         with pytest.raises(
             Exception

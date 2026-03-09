@@ -8,8 +8,6 @@ Root cause: _split_logical_operator was adding parentheses twice (in the paren
 branch and again at the end of the loop), causing malformed OR parts.
 """
 
-import pytest
-
 
 class TestIssue419FilterInOrParseException:
     """Test filter with IN + OR no longer raises ParseException."""

@@ -6,7 +6,6 @@ Fixed by the same resolve_expr_column_names behavior as #212 (#200).
 """
 
 from tests.fixtures.spark_imports import get_spark_imports
-import pytest
 
 _imports = get_spark_imports()
 F = _imports.F

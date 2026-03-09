@@ -6,7 +6,6 @@ Tests validate that Sparkless filter operations behave identically to PySpark.
 
 from tests.fixtures.parity_base import ParityTestBase
 from tests.fixtures.spark_imports import get_spark_imports
-import pytest
 
 
 class TestFilterParity(ParityTestBase):

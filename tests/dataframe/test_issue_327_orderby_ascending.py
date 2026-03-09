@@ -4,8 +4,6 @@ Unit tests for Issue #327: orderBy() missing ascending parameter.
 Tests the orderBy() method with ascending parameter support.
 """
 
-import pytest
-
 from tests.fixtures.spark_imports import get_spark_imports
 
 _imports = get_spark_imports()

@@ -6,8 +6,6 @@ Expected outputs use aliased right-side columns (dept_id_right, name_right) for
 unique names; we select with those aliases and orderBy id for stable comparison.
 """
 
-import pytest
-
 from tests.fixtures.parity_base import ParityTestBase
 from tests.fixtures.spark_imports import get_spark_imports
 

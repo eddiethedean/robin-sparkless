@@ -9,8 +9,6 @@ when _alias_names was explicitly None (posexplode without alias), causing len(No
 https://github.com/eddiethedean/sparkless/issues/429
 """
 
-import pytest
-
 from tests.fixtures.spark_backend import BackendType
 from tests.fixtures.spark_imports import get_spark_imports
 

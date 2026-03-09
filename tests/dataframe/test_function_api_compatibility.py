@@ -6,7 +6,6 @@ class TestFunctionAPIs:
 
     def test_current_date_is_function_not_method(self, spark):
         """Test that current_date is a function, not DataFrame method."""
-        import pytest
         from tests.fixtures.spark_imports import get_spark_imports
 
         imports = get_spark_imports()
@@ -24,7 +23,6 @@ class TestFunctionAPIs:
 
     def test_current_timestamp_is_function_not_method(self, spark):
         """Test that current_timestamp is a function, not DataFrame method."""
-        import pytest
         from tests.fixtures.spark_imports import get_spark_imports
 
         imports = get_spark_imports()

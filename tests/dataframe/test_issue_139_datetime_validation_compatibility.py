@@ -4,7 +4,6 @@ Test for issue #139: datetime validation compatibility. Uses get_spark_imports f
 
 from datetime import date, datetime
 
-import pytest
 
 from tests.fixtures.spark_imports import get_spark_imports
 

@@ -1503,7 +1503,10 @@ class _RankExpr:
                     flat.extend(k)
                 else:
                     flat.append(k)
-            if flat and all(isinstance(k, _Column) and getattr(k, "name", None) == "<expr>" for k in flat):
+            if flat and all(
+                isinstance(k, _Column) and getattr(k, "name", None) == "<expr>"
+                for k in flat
+            ):
                 window = Window.partitionBy(*part_keys).orderBy(*part_keys)
 
         partition_by, encoded, _ = _window_spec_to_partition_order(window)

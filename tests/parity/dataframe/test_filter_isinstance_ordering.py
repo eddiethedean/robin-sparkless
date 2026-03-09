@@ -12,7 +12,6 @@ returns True for ColumnOperation objects when checked before ColumnOperation.
 
 import os
 
-import pytest
 
 from tests.fixtures.parity_base import ParityTestBase
 from tests.fixtures.spark_imports import get_spark_imports
