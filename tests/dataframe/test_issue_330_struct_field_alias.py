@@ -6,7 +6,6 @@ StructType/Window from get_spark_imports().
 """
 
 from tests.fixtures.spark_imports import get_spark_imports
-import pytest
 
 _imports = get_spark_imports()
 SparkSession = _imports.SparkSession

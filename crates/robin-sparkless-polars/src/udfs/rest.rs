@@ -1,11 +1,11 @@
 //! UDF implementations (string, array, map, encoding, date, math, bit, etc.).
 use super::compute_err;
 use chrono::{Datelike, TimeZone};
-use std::ops::Not;
 use chrono_tz::Tz;
 use polars::prelude::*;
 use regex::Regex;
 use std::borrow::Cow;
+use std::ops::Not;
 
 /// Split string by regex pattern with at most `limit` parts (PySpark split uses regex).
 /// When limit <= 0, splits without limit. Empty delimiter: literal split (existing behavior).
@@ -13,19 +13,17 @@ fn split_str_by_regex_limit(s: &str, re: &Regex, limit: usize) -> Vec<String> {
     if limit == 1 {
         return vec![s.to_string()];
     }
-    if limit == 0 || limit >= usize::MAX {
+    if limit == 0 || limit == usize::MAX {
         return re.split(s).map(|p| p.to_string()).collect();
     }
     let mut result = Vec::with_capacity(limit);
     let mut last_end = 0;
-    let mut count = 0;
-    for mat in re.find_iter(s) {
+    for (count, mat) in re.find_iter(s).enumerate() {
         if count >= limit - 1 {
             break;
         }
         result.push(s[last_end..mat.start()].to_string());
         last_end = mat.end();
-        count += 1;
     }
     result.push(s[last_end..].to_string());
     result
@@ -4135,10 +4133,7 @@ pub fn apply_to_timestamp_format(
                     .or_else(|_| NaiveDateTime::parse_from_str(s, &chrono_fmt_alt))
                     .ok()?;
                 let parsed_utc = ndt.and_utc();
-                if use_recent_null
-                    && parsed_utc >= recent_cutoff
-                    && parsed_utc <= ref_ts
-                {
+                if use_recent_null && parsed_utc >= recent_cutoff && parsed_utc <= ref_ts {
                     return None;
                 }
                 Some(parsed_utc.timestamp_micros())

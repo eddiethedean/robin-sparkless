@@ -1792,7 +1792,10 @@ impl SparkSession {
         keys.sort();
         fn is_int_like(typ: &str) -> bool {
             let t = typ.trim().to_lowercase();
-            matches!(t.as_str(), "bigint" | "int" | "integer" | "long" | "smallint" | "tinyint")
+            matches!(
+                t.as_str(),
+                "bigint" | "int" | "integer" | "long" | "smallint" | "tinyint"
+            )
         }
         // #1150: When struct has any int-like field, only expose int-like and nested-struct so
         // getField("E2") yields null for string fields (PySpark parity, test_issue_330_struct_field_alias).
@@ -1805,7 +1808,10 @@ impl SparkSession {
         fn extended_visible(typ: &str) -> bool {
             let t = typ.trim().to_lowercase();
             strict_visible(typ)
-                || matches!(t.as_str(), "string" | "str" | "varchar" | "double" | "float" | "boolean" | "bool")
+                || matches!(
+                    t.as_str(),
+                    "string" | "str" | "varchar" | "double" | "float" | "boolean" | "bool"
+                )
         }
         let field_types: Vec<(String, String)> = keys
             .iter()

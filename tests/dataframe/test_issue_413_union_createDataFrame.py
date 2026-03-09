@@ -10,7 +10,6 @@ These tests verify that:
 """
 
 from tests.fixtures.spark_imports import get_spark_imports
-import pytest
 
 imports = get_spark_imports()
 StructType = imports.StructType

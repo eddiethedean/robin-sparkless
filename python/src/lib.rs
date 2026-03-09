@@ -9,7 +9,8 @@ use pyo3::create_exception;
 use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyDict, PyList, PyTuple};
 use robin_sparkless::dataframe::{
-    expr_contains_only_join_key_equalities, try_extract_join_eq_columns_all, JoinType, PivotedGroupedData, SaveMode, WriteFormat, WriteMode,
+    expr_contains_only_join_key_equalities, try_extract_join_eq_columns_all, JoinType,
+    PivotedGroupedData, SaveMode, WriteFormat, WriteMode,
 };
 use robin_sparkless::functions::{self, asc_from_name, SortOrder, ThenBuilder, WhenBuilder};
 use robin_sparkless::{
@@ -2968,32 +2969,39 @@ impl PyRDD {
         let Some(ref inner) = self.inner else {
             // Materialized RDD (from flatMap/map): return list of single-key dicts for createDataFrame(rdd, schema).
             let Some(ref elements) = self.elements else {
-                return Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>("RDD has no source"));
+                return Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
+                    "RDD has no source",
+                ));
             };
-            let (names, _use_preferred_keys): (Vec<String>, bool) = if let Some(arg) = preferred_names {
-                let lst_opt: Option<Bound<'py, PyList>> = if let Ok(lst) = arg.downcast::<PyList>() {
-                    Some(lst.clone())
-                } else if let Ok(tup) = arg.downcast::<pyo3::types::PyTuple>() {
-                    (tup.len() == 1)
-                        .then(|| tup.get_item(0).ok())
-                        .flatten()
-                        .and_then(|item| item.downcast_into::<PyList>().ok())
-                } else {
-                    None
-                };
-                if let Some(lst) = lst_opt {
-                    let n: Vec<String> = lst.iter().filter_map(|it| it.extract::<String>().ok()).collect();
-                    if n.is_empty() {
-                        (vec!["_1".to_string()], false)
+            let (names, _use_preferred_keys): (Vec<String>, bool) =
+                if let Some(arg) = preferred_names {
+                    let lst_opt: Option<Bound<'py, PyList>> =
+                        if let Ok(lst) = arg.downcast::<PyList>() {
+                            Some(lst.clone())
+                        } else if let Ok(tup) = arg.downcast::<pyo3::types::PyTuple>() {
+                            (tup.len() == 1)
+                                .then(|| tup.get_item(0).ok())
+                                .flatten()
+                                .and_then(|item| item.downcast_into::<PyList>().ok())
+                        } else {
+                            None
+                        };
+                    if let Some(lst) = lst_opt {
+                        let n: Vec<String> = lst
+                            .iter()
+                            .filter_map(|it| it.extract::<String>().ok())
+                            .collect();
+                        if n.is_empty() {
+                            (vec!["_1".to_string()], false)
+                        } else {
+                            (n, true)
+                        }
                     } else {
-                        (n, true)
+                        (vec!["_1".to_string()], false)
                     }
                 } else {
                     (vec!["_1".to_string()], false)
-                }
-            } else {
-                (vec!["_1".to_string()], false)
-            };
+                };
             let out = PyList::empty_bound(py);
             let key = names.first().map(|s| s.as_str()).unwrap_or("_1");
             for elem in elements {
@@ -3003,9 +3011,7 @@ impl PyRDD {
             }
             return Ok(out);
         };
-        let (col_names, rows, _) = inner
-            .collect_as_json_rows_with_names()
-            .map_err(to_py_err)?;
+        let (col_names, rows, _) = inner.collect_as_json_rows_with_names().map_err(to_py_err)?;
         // call_method1(..., (py_names,)) passes a tuple to Python; unwrap single-element tuple.
         let (names, use_preferred_keys): (Vec<String>, bool) = if let Some(arg) = preferred_names {
             let lst_opt: Option<Bound<'py, PyList>> = if let Ok(lst) = arg.downcast::<PyList>() {
@@ -3096,7 +3102,9 @@ impl PyRDD {
             return Ok(elements.iter().map(|o| o.clone_ref(py)).collect());
         }
         let Some(ref source_df) = self.source_df else {
-            return Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>("RDD has no source"));
+            return Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
+                "RDD has no source",
+            ));
         };
         let df = source_df.bind(py).downcast::<PyDataFrame>()?;
         let list_obj = df.call_method0("collect")?;
@@ -3178,9 +3186,9 @@ impl PyRDD {
 
     fn first(&self, py: Python<'_>) -> PyResult<PyObject> {
         let elements = self.collect_elements(py)?;
-        let first = elements.first().ok_or_else(|| {
-            PyErr::new::<pyo3::exceptions::PyValueError, _>("RDD is empty")
-        })?;
+        let first = elements
+            .first()
+            .ok_or_else(|| PyErr::new::<pyo3::exceptions::PyValueError, _>("RDD is empty"))?;
         Ok(first.clone_ref(py))
     }
 
@@ -3473,9 +3481,9 @@ impl PyDataFrame {
                 // Otherwise the hint is stale from a previous test/select and we must not sort.
                 let col_refs: Vec<&str> = cols.iter().map(|s| s.as_str()).collect();
                 let all_present = match df.columns() {
-                    Ok(result_names) => col_refs.iter().all(|c| {
-                        result_names.iter().any(|n| n.eq_ignore_ascii_case(c))
-                    }),
+                    Ok(result_names) => col_refs
+                        .iter()
+                        .all(|c| result_names.iter().any(|n| n.eq_ignore_ascii_case(c))),
                     Err(_) => false,
                 };
                 if all_present {
@@ -6525,7 +6533,11 @@ impl PyGroupedData {
     }
 
     #[pyo3(signature = (pivot_col, values=None))]
-    fn pivot(&self, pivot_col: &str, values: Option<&Bound<'_, PyAny>>) -> PyResult<PyPivotedGroupedData> {
+    fn pivot(
+        &self,
+        pivot_col: &str,
+        values: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<PyPivotedGroupedData> {
         let rust_values = if let Some(seq) = values {
             let mut v = Vec::new();
             for item in seq.iter()? {

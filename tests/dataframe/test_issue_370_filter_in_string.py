@@ -6,7 +6,6 @@ PySpark supports literal list values inside string conditions; Sparkless now par
 """
 
 
-
 class TestIssue370FilterInString:
     """Test filter with string condition containing IN (literal list)."""
 

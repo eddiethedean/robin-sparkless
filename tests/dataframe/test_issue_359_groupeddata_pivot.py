@@ -5,7 +5,6 @@ PySpark: df.groupBy("year").pivot("region").sum("sales"). Robin-sparkless now su
 """
 
 from __future__ import annotations
-import pytest
 
 
 def test_group_by_pivot_sum_issue_repro(spark) -> None:

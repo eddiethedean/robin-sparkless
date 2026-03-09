@@ -8,7 +8,7 @@ mod transformations;
 pub(crate) use aggregations::disambiguate_agg_output_names;
 pub use aggregations::{CubeRollupData, GroupedData, PivotedGroupedData};
 pub use joins::{
-    expr_contains_only_join_key_equalities, join, JoinType, try_extract_join_eq_columns,
+    JoinType, expr_contains_only_join_key_equalities, join, try_extract_join_eq_columns,
     try_extract_join_eq_columns_all,
 };
 pub use stats::DataFrameStat;
@@ -266,7 +266,7 @@ impl DataFrame {
                 return Ok(Expr::Cast {
                     expr: Arc::new(resolved_inner),
                     dtype: dtype.clone(),
-                    options: options.clone(),
+                    options: *options,
                 });
             }
             if let Expr::Column(name) = &e {
@@ -362,9 +362,7 @@ impl DataFrame {
                         match df.resolve_struct_field_from_type(&input_dt, name.as_str(), "struct")
                         {
                             Ok((resolved_name, _)) => {
-                                return Ok(input_expr
-                                    .struct_()
-                                    .field_by_name(&resolved_name));
+                                return Ok(input_expr.struct_().field_by_name(&resolved_name));
                             }
                             Err(_) => {
                                 // #1150: Inferred struct may omit fields; getField("E2") yields null.
@@ -406,7 +404,7 @@ impl DataFrame {
                 let resolved_partition_by = resolved_partition_by?;
                 let resolved_order_by = order_by.as_ref().map(|(ob, opts)| {
                     df.resolve_expr_column_names(ob.as_ref().clone())
-                        .map(|r| (Arc::new(r), opts.clone()))
+                        .map(|r| (Arc::new(r), *opts))
                 });
                 let resolved_order_by = match resolved_order_by {
                     Some(Ok((r, opts))) => Some((r, opts)),
@@ -417,7 +415,7 @@ impl DataFrame {
                     function: Arc::new(resolved_function),
                     partition_by: resolved_partition_by,
                     order_by: resolved_order_by,
-                    mapping: mapping.clone(),
+                    mapping: *mapping,
                 });
             }
             Ok(e)
@@ -896,11 +894,7 @@ impl DataFrame {
             };
             if found {
                 return Err(PolarsError::ColumnNotFound(
-                    format!(
-                        "Reference `{}` is ambiguous. AMBIGUOUS_REFERENCE",
-                        name
-                    )
-                    .into(),
+                    format!("Reference `{}` is ambiguous. AMBIGUOUS_REFERENCE", name).into(),
                 ));
             }
         }
@@ -930,11 +924,7 @@ impl DataFrame {
             };
             if matches.len() > 1 {
                 return Err(PolarsError::ColumnNotFound(
-                    format!(
-                        "Reference `{}` is ambiguous. AMBIGUOUS_REFERENCE",
-                        name
-                    )
-                    .into(),
+                    format!("Reference `{}` is ambiguous. AMBIGUOUS_REFERENCE", name).into(),
                 ));
             }
         }
@@ -1219,14 +1209,14 @@ impl DataFrame {
         let has_get_json_object_shape = names.iter().any(|n| n == "a")
             && names.iter().any(|n| n == "nested")
             && names.iter().any(|n| n == "missing");
-        let has_json_tuple_shape = names.iter().any(|n| n == "c0") && names.iter().any(|n| n == "c1");
+        let has_json_tuple_shape =
+            names.iter().any(|n| n == "c0") && names.iter().any(|n| n == "c1");
         let effective_dtypes: Vec<DataType> = names
             .iter()
             .zip(plan_dtypes.iter())
             .map(|(name, dt)| {
                 let force_string = dt == &DataType::Int64
-                    && ((has_json_tuple_shape
-                        && (name.as_str() == "c0" || name.as_str() == "c1"))
+                    && ((has_json_tuple_shape && (name.as_str() == "c0" || name.as_str() == "c1"))
                         || (has_get_json_object_shape
                             && (name.as_str() == "a"
                                 || name.as_str() == "nested"

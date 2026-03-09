@@ -10,8 +10,6 @@ Uses get_spark_imports() for backend-aware F/Window - runs with both
 sparkless and PySpark (MOCK_SPARK_TEST_BACKEND=pyspark).
 """
 
-import pytest
-
 from tests.fixtures.spark_imports import get_spark_imports
 
 

@@ -12,7 +12,6 @@ https://github.com/eddiethedean/sparkless/issues/430
 """
 
 from tests.fixtures.spark_backend import BackendType
-import pytest
 from tests.fixtures.spark_imports import get_spark_imports
 
 

@@ -14,8 +14,6 @@ Then run with Sparkless to verify parity:
 Uses get_spark_imports from fixture only.
 """
 
-import pytest
-
 from tests.fixtures.spark_imports import get_spark_imports
 
 _imports = get_spark_imports()

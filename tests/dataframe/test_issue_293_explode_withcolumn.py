@@ -5,7 +5,6 @@ PySpark's explode function creates a new row for each element in an array.
 Uses get_spark_imports from fixture only.
 """
 
-
 from tests.fixtures.spark_imports import get_spark_imports
 
 _imports = get_spark_imports()

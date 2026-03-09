@@ -6,8 +6,8 @@ use super::DataFrame;
 use crate::schema_conv::data_type_to_polars_type;
 use crate::type_coercion::coerce_expr_pair_for_join;
 use polars::prelude::{
-    coalesce as pl_coalesce, DataType as PlDataType, Expr, JoinType as PlJoinType, Operator,
-    PolarsError, SchemaNamesAndDtypes,
+    DataType as PlDataType, Expr, JoinType as PlJoinType, Operator, PolarsError,
+    SchemaNamesAndDtypes, coalesce as pl_coalesce,
 };
 use polars_plan::dsl::functions::nth;
 
@@ -432,7 +432,8 @@ pub fn join(
     // (PySpark parity: same as fixture join_inner_dept_issue510 / join_on_string_issue513). Use
     // keys_match_for_coalesce so case-insensitive key match (e.g. name/NAME) gets single key (#297).
     let mut any_duplicate_coalesced = false;
-    if keys_match_for_coalesce && matches!(how, JoinType::Inner | JoinType::Left | JoinType::Right) {
+    if keys_match_for_coalesce && matches!(how, JoinType::Inner | JoinType::Left | JoinType::Right)
+    {
         let left_names: Vec<String> = left.columns()?.into_iter().collect();
         let right_names: Vec<String> = right.columns()?.into_iter().collect();
         let key_set: std::collections::HashSet<&str> =
@@ -489,6 +490,7 @@ pub fn join(
                 };
                 exprs.push(e.alias(left_name.as_str()));
             }
+            let mut right_non_key_pos = 0_usize;
             for right_name in &right_names {
                 if key_set.contains(right_name.as_str()) {
                     continue;
@@ -497,6 +499,27 @@ pub fn join(
                     .iter()
                     .any(|l| l.eq_ignore_ascii_case(right_name));
                 if matches_left {
+                    // Include right column by position only when it exists (join may coalesce keys).
+                    let result_idx = left_names.len() + right_non_key_pos;
+                    if result_idx < result_names_vec.len() {
+                        let dtype = right_struct
+                            .as_ref()
+                            .and_then(|s| {
+                                s.fields()
+                                    .iter()
+                                    .find(|f| f.name.as_str() == right_name.as_str())
+                                    .map(|f| data_type_to_polars_type(&f.data_type))
+                            })
+                            .or_else(|| right.get_column_dtype(right_name.as_str()));
+                        let alias_name = format!("{}_right", right_name);
+                        let e = nth(result_idx as i64).as_expr();
+                        let e = match dtype {
+                            Some(dt) => e.cast(dt),
+                            None => e,
+                        };
+                        exprs.push(e.alias(alias_name.as_str()));
+                    }
+                    right_non_key_pos += 1;
                     continue;
                 }
                 if !result_names_set.contains(right_name) {
@@ -516,42 +539,49 @@ pub fn join(
                     None => col(right_name.as_str()),
                 };
                 exprs.push(e.alias(right_name.as_str()));
+                right_non_key_pos += 1;
             }
-            exprs
+            Ok(exprs)
         } else {
-            let left_set: std::collections::HashSet<&str> =
-                left_names.iter().map(|s| s.as_str()).collect();
-            let mut desired: Vec<String> = left_names.clone();
-            for n in &right_names {
-                if key_set.contains(n.as_str()) {
-                    continue;
-                }
-                let use_name = if left_set.contains(n.as_str()) {
-                    format!("{n}_right")
-                } else {
-                    n.clone()
-                };
-                desired.push(use_name);
-            }
-            let keep: Vec<String> = desired
-                .into_iter()
-                .filter(|n| result_names_set.contains(n))
+            // Build desired from actual result schema so we never request a column index that
+            // doesn't exist (join may coalesce keys and produce fewer columns than left+right).
+            let schema_before = joined.collect_schema()?;
+            let dtypes_by_index: Vec<PlDataType> = schema_before
+                .iter_names_and_dtypes()
+                .map(|(_name, dt): (_, &PlDataType)| dt.clone())
+                .collect();
+            let mut seen: std::collections::HashSet<String> =
+                std::collections::HashSet::new();
+            let desired: Vec<String> = result_names_vec
+                .iter()
+                .map(|name| {
+                    let alias = if seen.contains(name) {
+                        format!("{}_right", name)
+                    } else {
+                        seen.insert(name.clone());
+                        name.clone()
+                    };
+                    alias
+                })
                 .collect();
             let left_struct = left.schema().ok();
             let right_struct = right.schema().ok();
-            keep.iter()
-                .map(|n| {
-                    let dtype = if key_set.contains(n.as_str()) {
+            let exprs: Vec<Expr> = desired
+                .iter()
+                .enumerate()
+                .map(|(idx, alias_name)| {
+                    let result_name = &result_names_vec[idx];
+                    let dtype = if idx < left_names.len() {
                         left_struct
                             .as_ref()
                             .and_then(|s| {
                                 s.fields()
                                     .iter()
-                                    .find(|f| f.name.as_str() == n.as_str())
+                                    .find(|f| f.name.as_str() == result_name.as_str())
                                     .map(|f| data_type_to_polars_type(&f.data_type))
                             })
-                            .or_else(|| left.get_column_dtype(n.as_str()))
-                    } else if let Some(base) = n.strip_suffix("_right") {
+                            .or_else(|| left.get_column_dtype(result_name.as_str()))
+                    } else if let Some(base) = alias_name.strip_suffix("_right") {
                         right_struct
                             .as_ref()
                             .and_then(|s| {
@@ -561,34 +591,27 @@ pub fn join(
                                     .map(|f| data_type_to_polars_type(&f.data_type))
                             })
                             .or_else(|| right.get_column_dtype(base))
-                    } else if left_names.iter().any(|l| l.as_str() == n.as_str()) {
-                        left_struct
-                            .as_ref()
-                            .and_then(|s| {
-                                s.fields()
-                                    .iter()
-                                    .find(|f| f.name.as_str() == n.as_str())
-                                    .map(|f| data_type_to_polars_type(&f.data_type))
-                            })
-                            .or_else(|| left.get_column_dtype(n.as_str()))
                     } else {
                         right_struct
                             .as_ref()
                             .and_then(|s| {
                                 s.fields()
                                     .iter()
-                                    .find(|f| f.name.as_str() == n.as_str())
+                                    .find(|f| f.name.as_str() == result_name.as_str())
                                     .map(|f| data_type_to_polars_type(&f.data_type))
                             })
-                            .or_else(|| right.get_column_dtype(n.as_str()))
+                            .or_else(|| right.get_column_dtype(result_name.as_str()))
                     };
-                    match dtype {
-                        Some(dt) => col(n.as_str()).cast(dt).alias(n.as_str()),
-                        None => col(n.as_str()),
+                    let e = nth(idx as i64).as_expr();
+                    match (dtype, dtypes_by_index.get(idx)) {
+                        (Some(dt), _) => e.cast(dt).alias(alias_name.as_str()),
+                        (_, Some(dt)) => e.cast(dt.clone()).alias(alias_name.as_str()),
+                        _ => e.alias(alias_name.as_str()),
                     }
                 })
-                .collect()
-        };
+                .collect();
+            Ok::<_, PolarsError>(exprs)
+        }?;
         if !cast_exprs.is_empty() {
             joined = joined.select(&cast_exprs);
             let result_schema = joined.collect_schema()?;
@@ -681,8 +704,8 @@ pub fn join(
 #[cfg(test)]
 mod tests {
     use super::{
-        expr_contains_only_join_key_equalities, join, try_extract_join_eq_columns,
-        try_extract_join_eq_columns_all, JoinType,
+        JoinType, expr_contains_only_join_key_equalities, join, try_extract_join_eq_columns,
+        try_extract_join_eq_columns_all,
     };
     use crate::functions::col;
     use crate::{DataFrame, SparkSession};

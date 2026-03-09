@@ -1,7 +1,6 @@
 """Tests for Issue #408: MockRDD.flatMap support."""
 
 from __future__ import annotations
-import pytest
 
 
 def test_rdd_flatmap_words(spark) -> None:

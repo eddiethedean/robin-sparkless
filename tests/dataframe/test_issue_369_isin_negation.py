@@ -7,7 +7,6 @@ Sparkless now coerces the list to the column type so ~col.isin([...]) works.
 """
 
 
-
 class TestIssue369IsinNegation:
     """Test ~col.isin([...]) with string column and int list (issue #369)."""
 

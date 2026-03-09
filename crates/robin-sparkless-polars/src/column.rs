@@ -1,9 +1,9 @@
-use std::ops::Neg;
 use polars::prelude::{
     DataType, Expr, Field, PolarsError, PolarsResult, RankMethod, RankOptions, SortOptions,
     TimeUnit, WindowMapping, col, lit,
 };
 use polars_plan::dsl::AggExpr;
+use std::ops::Neg;
 
 /// Unwrap UDF result to Column (map() expects Result<Column>, UDFs return Result<Option<Column>>).
 #[inline]
@@ -102,7 +102,7 @@ pub struct Column {
 /// True if the expression is or contains a count_distinct/n_unique aggregate (PySpark rejects distinct window functions).
 fn expr_is_or_contains_n_unique(expr: &Expr) -> bool {
     match expr {
-        Expr::Agg(agg) if matches!(agg, AggExpr::NUnique(_)) => true,
+        Expr::Agg(AggExpr::NUnique(_)) => true,
         Expr::Cast { expr: inner, .. } => expr_is_or_contains_n_unique(inner.as_ref()),
         Expr::Alias(inner, _) => expr_is_or_contains_n_unique(inner.as_ref()),
         _ => false,
@@ -2425,9 +2425,7 @@ impl Column {
         use_running_aggregate: bool,
     ) -> Result<Column, PolarsError> {
         // PySpark does not support countDistinct().over(); approx_count_distinct().over() is allowed (#1218).
-        if expr_is_or_contains_n_unique(self.expr())
-            && self.name.starts_with("count_distinct(")
-        {
+        if expr_is_or_contains_n_unique(self.expr()) && self.name.starts_with("count_distinct(") {
             return Err(PolarsError::InvalidOperation(
                 "Distinct window functions are not supported".into(),
             ));
@@ -2591,9 +2589,7 @@ impl Column {
             };
             (name, descending)
         }
-        let all_asc = order_by_encoded
-            .iter()
-            .all(|s| !s.trim().starts_with('-'));
+        let all_asc = order_by_encoded.iter().all(|s| !s.trim().starts_with('-'));
         // Row number = ordinal rank of the order key within partition. For multi-column mixed asc/desc, use struct with negated desc columns (#1241).
         let rank_expr = if order_by_encoded.len() == 1 {
             let (first_name, first_desc) = parse_order_key(order_by_encoded[0].trim());
@@ -2632,10 +2628,14 @@ impl Column {
                 .map(|s| {
                     let (name, desc) = parse_order_key(s);
                     if desc {
-                        (col(name).cast(DataType::Float64).fill_null(lit(f64::NEG_INFINITY)))
-                            .neg()
+                        (col(name)
+                            .cast(DataType::Float64)
+                            .fill_null(lit(f64::NEG_INFINITY)))
+                        .neg()
                     } else {
-                        col(name).cast(DataType::Float64).fill_null(lit(f64::INFINITY))
+                        col(name)
+                            .cast(DataType::Float64)
+                            .fill_null(lit(f64::INFINITY))
                     }
                 })
                 .collect();
