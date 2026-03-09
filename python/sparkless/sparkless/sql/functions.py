@@ -267,8 +267,19 @@ def nanvl(col1: ColumnOrName, col2: ColumnOrName) -> _ColumnType:
 
 
 def isnan(c: ColumnOrName) -> _ColumnType:
-    """True where the float value is NaN. PySpark: F.isnan(col)."""
-    return _col_result(_native_fn("isnan")(_as_col(c)))
+    """True where the float value is NaN. PySpark: F.isnan(col).
+
+    PySpark semantics:
+    - Numeric columns: only real NaN => True; None/null => False.
+    - String columns: \"NaN\" (any case/whitespace) => True; other strings/None => False.
+    - Other types: always False.
+
+    The native implementation follows these rules but can still yield nulls in some edge
+    paths; coalesce with False to ensure the result is always non-null (matches PySpark).
+    """
+    base = _native_fn("isnan")(_as_col(c))
+    # _coalesce is sparkless.coalesce imported above; lit_bool(False) is a native bool literal.
+    return _col_result(_coalesce(base, lit_bool(False)))
 
 
 # isnull defined above (before __all__)
