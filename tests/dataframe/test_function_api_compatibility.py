@@ -60,7 +60,6 @@ class TestFunctionAPIs:
         row_num = F.row_number()
         assert row_num is not None
 
-    @pytest.mark.skip(reason="Issue #1177: unskip when fixing")
     def test_function_signatures_match_pyspark(self, spark):
         """Test that function signatures match PySpark patterns."""
         from tests.fixtures.spark_imports import get_spark_imports
