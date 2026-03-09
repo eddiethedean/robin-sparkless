@@ -166,7 +166,6 @@ class TestIssue419FilterInOrParseException:
         codes = {r["Code"] for r in rows}
         assert codes == {"A", "B", "C"}
 
-    @pytest.mark.skip(reason="Tracked in issue #1324; unskip when fixed.")
     def test_filter_in_or_with_show(self, spark):
         """IN + OR with show() - regression for full pipeline."""
         df = spark.createDataFrame(
