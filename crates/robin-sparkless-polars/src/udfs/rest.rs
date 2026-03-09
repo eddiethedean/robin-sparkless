@@ -131,10 +131,17 @@ pub fn apply_isnan_pyspark_parity(column: Column) -> PolarsResult<Option<Column>
     let name = column.field().into_owned().name;
     let series = column.take_materialized_series();
     let out = match series.dtype() {
-        DataType::Float32 | DataType::Float64 => series
-            .is_nan()
-            .map_err(|e| compute_err("isnan", e))?
-            .into_series(),
+        DataType::Float32 | DataType::Float64 => {
+            // For numeric columns, PySpark treats only real NaN values as True; None/null is False.
+            let bool_ca = series
+                .is_nan()
+                .map_err(|e| compute_err("isnan", e))?;
+            let out = BooleanChunked::from_iter_options(
+                name.as_str().into(),
+                bool_ca.into_iter().map(|opt_b| Some(opt_b.unwrap_or(false))),
+            );
+            out.into_series()
+        }
         // PySpark special case: string "NaN" is treated as NaN (true), all other strings false.
         // This also covers our JSON serialization path where float NaN becomes the string "nan".
         DataType::String => {
