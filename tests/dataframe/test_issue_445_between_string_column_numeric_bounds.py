@@ -19,7 +19,6 @@ from tests.fixtures.spark_imports import get_spark_imports
 import pytest
 
 
-@pytest.mark.skip(reason="Tracked in issue #1324; unskip when fixed.")
 def test_between_string_column_numeric_bounds_exact_issue_445(spark, spark_backend):
     """Exact scenario from #445 - string column with numeric bounds."""
     F = get_spark_imports(spark_backend).F
@@ -215,7 +214,6 @@ def test_between_string_column_negative_numbers(spark, spark_backend):
     assert rows[0]["val"] == "-5"
 
 
-@pytest.mark.skip(reason="Tracked in issue #1324; unskip when fixed.")
 def test_between_string_column_then_orderby(spark, spark_backend):
     """Filter with between then orderBy."""
     F = get_spark_imports(spark_backend).F

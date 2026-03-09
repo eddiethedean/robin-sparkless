@@ -83,7 +83,6 @@ class TestIssue139DatetimeValidationCompatibility:
         finally:
             spark.stop()
 
-    @pytest.mark.skip(reason="Tracked in issue #1324; unskip when fixed.")
     def test_validation_with_datetime_comparison(self):
         """Test validation with datetime column comparisons."""
         spark = SparkSession.builder.appName("BugRepro").getOrCreate()
