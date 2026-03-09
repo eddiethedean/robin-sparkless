@@ -516,6 +516,27 @@ pub fn filter(
     condition: Expr,
     case_sensitive: bool,
 ) -> Result<DataFrame, PolarsError> {
+    // Case-insensitive mode (default): when a predicate only references columns that are no
+    // longer present on this DataFrame (e.g. df.select("col1").filter(col("col2").isNotNull())),
+    // treat the filter as a no-op on the projected schema. This matches PySpark behavior where
+    // the predicate is effectively pushed below the projection while the visible columns stay
+    // unchanged (issue #1135 / #158). In case-sensitive mode we keep raising unresolved_column
+    // so wrong-case filters continue to fail as expected.
+    if !case_sensitive {
+        if let Ok(cols) = df.columns() {
+            let df_cols: HashSet<String> =
+                cols.into_iter().map(|c| c.to_lowercase()).collect();
+            let referenced = expr_referenced_columns(&condition);
+            if !referenced.is_empty() {
+                let all_missing = referenced
+                    .iter()
+                    .all(|name| !df_cols.contains(&name.to_lowercase()));
+                if all_missing {
+                    return Ok(df.clone());
+                }
+            }
+        }
+    }
     if expr_contains_over(&condition) {
         return Err(PolarsError::InvalidOperation(
             "it is not allowed to use window functions inside WHERE clause".into(),

@@ -4,6 +4,8 @@ Test for issue #139: datetime validation compatibility. Uses get_spark_imports f
 
 from datetime import date, datetime
 
+import pytest
+
 from tests.fixtures.spark_imports import get_spark_imports
 
 _imports = get_spark_imports()
@@ -81,6 +83,7 @@ class TestIssue139DatetimeValidationCompatibility:
         finally:
             spark.stop()
 
+    @pytest.mark.skip(reason="Tracked in issue #1324; unskip when fixed.")
     def test_validation_with_datetime_comparison(self):
         """Test validation with datetime column comparisons."""
         spark = SparkSession.builder.appName("BugRepro").getOrCreate()

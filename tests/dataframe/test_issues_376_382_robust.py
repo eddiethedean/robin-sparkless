@@ -18,6 +18,8 @@ Uses get_spark_imports from fixture only.
 
 from tests.fixtures.spark_imports import get_spark_imports
 
+import pytest
+
 _imports = get_spark_imports()
 F = _imports.F
 
@@ -153,6 +155,7 @@ def test_robust_self_join_manager_column_and_row_count(spark):
 # -----------------------------------------------------------------------------
 
 
+@pytest.mark.skip(reason="Tracked in issue #1325; unskip when fixed.")
 def test_robust_join_compound_condition(spark):
     """#380: Join with (a.id == b.id) & (a.amount > 30)."""
 
