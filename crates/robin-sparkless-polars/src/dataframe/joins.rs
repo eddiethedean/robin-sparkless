@@ -398,14 +398,18 @@ pub fn join(
         .coalesce(coalesce)
         .finish();
 
-    // For full outer joins, restore canonical left join key values from the temporary copies we
-    // added before the join so that grouping/selecting on the join key matches PySpark semantics
-    // (unmatched right rows have null key).
+    // For full outer joins, set canonical join key to coalesce(left_key, right_key) so that
+    // unmatched right rows keep their key value (PySpark semantics, #1207).
     if matches!(how, JoinType::Outer) && !outer_left_key_copies.is_empty() {
         use polars::prelude::col;
-        // Overwrite the public key columns with the temp copies.
-        for (left_name, temp) in &outer_left_key_copies {
-            joined = joined.with_column(col(temp.as_str()).alias(left_name.as_str()));
+        for (i, (left_name, temp)) in outer_left_key_copies.iter().enumerate() {
+            let right_key_name = right_key_names.get(i).map(|s| s.as_str()).unwrap_or("");
+            let expr = if right_key_name.is_empty() {
+                col(temp.as_str())
+            } else {
+                pl_coalesce(&[col(temp.as_str()), col(right_key_name)])
+            };
+            joined = joined.with_column(expr.alias(left_name.as_str()));
         }
         // Drop the temp columns from the result.
         let schema = joined.collect_schema()?;
@@ -1109,9 +1113,8 @@ mod tests {
     #[test]
     fn outer_join_then_groupby_on_key_matches_pyspark_semantics() {
         // Mirror tests/test_issue_280_join_groupby_ambiguity.py::test_outer_join_then_groupby:
-        // left keys: 1, 3; right keys: 1, 2. Canonical join key must come from the left side
-        // so grouping on "key" yields {1: 1, 3: 1, None: 1} and the unmatched right row uses
-        // null for the join key (not 2) for PySpark parity.
+        // left keys: 1, 3; right keys: 1, 2. Canonical join key is coalesce(left, right) so
+        // grouping on "key" yields {1: 1, 2: 1, 3: 1} (unmatched right row keeps key=2; #1207).
         let spark = SparkSession::builder()
             .app_name("outer_join_groupby_tests")
             .get_or_create();
@@ -1140,7 +1143,7 @@ mod tests {
             JoinType::Outer,
             JoinOptions {
                 case_sensitive: false,
-                coalesce_same_name_keys: false,
+                coalesce_same_name_keys: true,
                 mark_join_keys_ambiguous: false,
             },
         )
@@ -1160,11 +1163,11 @@ mod tests {
             by_key.insert(key, cnt);
         }
 
-        // Expect exactly three groups: key=1, key=3, and key=None for the unmatched right row.
+        // Expect exactly three groups: key=1, key=2, key=3 (coalesce(left, right) so right-only row keeps 2).
         assert_eq!(by_key.len(), 3);
         assert_eq!(by_key.get(&Some(1)).copied(), Some(1));
+        assert_eq!(by_key.get(&Some(2)).copied(), Some(1));
         assert_eq!(by_key.get(&Some(3)).copied(), Some(1));
-        assert_eq!(by_key.get(&None).copied(), Some(1));
     }
 
     /// Issue #604: join when key names differ in case (left "id", right "ID"); collect must not fail with "not found: ID".
