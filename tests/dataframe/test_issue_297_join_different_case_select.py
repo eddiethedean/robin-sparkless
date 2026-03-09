@@ -57,7 +57,6 @@ class TestIssue297JoinDifferentCaseSelect:
         finally:
             spark.stop()
 
-    @pytest.mark.skip(reason="Issue #1213: unskip when fixing")
     def test_join_different_case_select_left_column(self):
         """Test that selecting with different case picks the left DataFrame's column."""
         spark = SparkSession.builder.appName("issue-297").getOrCreate()
