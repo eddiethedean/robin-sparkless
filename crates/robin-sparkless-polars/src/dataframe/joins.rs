@@ -561,14 +561,17 @@ pub fn join(
                 .iter_names_and_dtypes()
                 .map(|(_name, dt): (_, &PlDataType)| dt.clone())
                 .collect();
-            let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+            // Case-insensitive dedup so "id" and "ID" → "id", "ID_right" (#604 resolve_column_name).
+            let mut seen_lower: std::collections::HashSet<String> =
+                std::collections::HashSet::new();
             let desired: Vec<String> = result_names_vec
                 .iter()
                 .map(|name| {
-                    let alias = if seen.contains(name) {
+                    let name_lower = name.to_lowercase();
+                    let alias = if seen_lower.contains(&name_lower) {
                         format!("{}_right", name)
                     } else {
-                        seen.insert(name.clone());
+                        seen_lower.insert(name_lower);
                         name.clone()
                     };
                     alias
@@ -660,7 +663,7 @@ pub fn join(
         joined = joined.select(&exprs);
     }
     // For Right/Outer, reorder columns: keys, left non-keys, right non-keys (PySpark order).
-    let result_lf = if matches!(how, JoinType::Right | JoinType::Outer) {
+    let mut result_lf = if matches!(how, JoinType::Right | JoinType::Outer) {
         let left_names = left.columns()?;
         let right_names = right.columns()?;
         let result_schema = joined.collect_schema()?;
@@ -694,6 +697,52 @@ pub fn join(
         }
     } else {
         joined
+    };
+    // When !case_sensitive and we didn't run the coalesce/select block (keys_match_for_coalesce was
+    // false), the raw join can have both "id" and "ID"; rename duplicates to _right so
+    // resolve_column_name("ID") returns one column (#604).
+    let result_lf = if !case_sensitive {
+        let schema = result_lf.collect_schema()?;
+        let result_names: Vec<String> = schema.iter_names().map(|s| s.to_string()).collect();
+        let mut seen_lower: std::collections::HashSet<String> =
+            std::collections::HashSet::new();
+        let mut need_rename = false;
+        let aliases: Vec<String> = result_names
+            .iter()
+            .map(|name| {
+                let name_lower = name.to_lowercase();
+                if seen_lower.contains(&name_lower) {
+                    need_rename = true;
+                    format!("{}_right", name)
+                } else {
+                    seen_lower.insert(name_lower);
+                    name.clone()
+                }
+            })
+            .collect();
+        if need_rename {
+            let dtypes: Vec<PlDataType> = schema
+                .iter_names_and_dtypes()
+                .map(|(_, dt)| dt.clone())
+                .collect();
+            let exprs: Vec<Expr> = aliases
+                .iter()
+                .enumerate()
+                .map(|(idx, alias)| {
+                    let e = nth(idx as i64).as_expr();
+                    if let Some(dt) = dtypes.get(idx) {
+                        e.cast(dt.clone()).alias(alias.as_str())
+                    } else {
+                        e.alias(alias.as_str())
+                    }
+                })
+                .collect();
+            result_lf.select(&exprs)
+        } else {
+            result_lf
+        }
+    } else {
+        result_lf
     };
     // When we coalesced same-named columns, result has one column per logical name; do not mark
     // any as ambiguous so select(df1["age"]) works (#297).
