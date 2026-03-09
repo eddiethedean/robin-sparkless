@@ -4038,17 +4038,22 @@ impl PyDataFrame {
         cols: &Bound<'_, PyTuple>,
         ascending: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<PyDataFrame> {
-        // Flatten: single item may be list/tuple of columns
+        // Flatten: single item may be a list of columns.
+        // IMPORTANT: We intentionally do NOT flatten tuples here.
+        // In PySpark, a bare tuple passed to sort/orderBy (e.g. df.sort(("a", "b")))
+        // raises PySparkTypeError[NOT_COLUMN_OR_STR] instead of being treated like a list.
+        // To match that behavior, tuples are treated as invalid inputs below rather than
+        // silently flattened.
         let mut flat: Vec<Bound<'_, PyAny>> = Vec::new();
         for item in cols.iter() {
             if let Ok(list) = item.downcast::<PyList>() {
                 for sub in list.iter() {
                     flat.push(sub.clone());
                 }
-            } else if let Ok(tup) = item.downcast::<PyTuple>() {
-                for sub in tup.iter() {
-                    flat.push(sub.clone());
-                }
+            } else if item.downcast::<PyTuple>().is_ok() {
+                return Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+                    "Argument `col` should be a Column or str (NOT_COLUMN_OR_STR: tuple is not allowed; use a list of columns instead)",
+                ));
             } else {
                 flat.push(item.clone());
             }

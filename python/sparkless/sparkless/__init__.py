@@ -275,6 +275,29 @@ GroupedData = _GroupedData
 DataFrameReader = _DataFrameReader
 DataFrameWriter = _DataFrameWriter
 
+# Keep a reference to the native DataFrame.sort implementation so we can wrap it
+# without causing recursion when calling via the Python alias.
+_native_dataframe_sort = _DataFrame.sort
+
+
+def _dataframe_sort(self, *cols, ascending=None):
+    """PySpark-compatible DataFrame.sort wrapper.
+
+    PySpark treats a bare tuple of columns passed to sort/orderBy as invalid and raises
+    PySparkTypeError[NOT_COLUMN_OR_STR]. Lists (including df.columns) are accepted.
+    """
+    if len(cols) == 1 and isinstance(cols[0], tuple):
+        # Match PySpark error text used in tests (Issue #1189).
+        raise TypeError(
+            "Argument `col` should be a Column or str (NOT_COLUMN_OR_STR: tuple is not allowed; use a list of columns instead)"
+        )
+    # Delegate everything else to the native implementation (handles lists, *cols, Column, SortOrder, etc.).
+    return _native_dataframe_sort(self, *cols, ascending=ascending)
+
+
+# Attach wrapper so tests calling df.sort(...) go through the PySpark-compatible logic.
+setattr(DataFrame, "sort", _dataframe_sort)
+
 
 # PySpark-style: from sparkless import F, functions, StringType, ...
 def __getattr__(name):
