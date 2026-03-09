@@ -76,7 +76,6 @@ def test_row_kwargs_with_createDataFrame(spark):
     assert type_dict["Column4"] == "date"
 
 
-@pytest.mark.skip(reason="Issue #1136: unskip when fixing")
 def test_row_dict_initialization_still_works(spark):
     """Row(dict) behavior in PySpark (non-indexable sentinel Row)."""
     row = Row({"name": "Alice", "age": 25})
@@ -95,7 +94,6 @@ def test_row_dict_initialization_still_works(spark):
         _ = row.age
 
 
-@pytest.mark.skip(reason="Issue #1136: unskip when fixing")
 def test_row_empty_kwargs(spark):
     """Test that Row with empty kwargs still works."""
     # In PySpark, Row() constructs an empty Row without raising.
