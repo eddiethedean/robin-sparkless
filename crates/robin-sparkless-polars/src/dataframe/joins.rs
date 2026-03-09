@@ -211,10 +211,14 @@ pub fn join(
             left_lf = left_lf.with_columns(copy_exprs);
         }
     }
-    // For condition-based joins on same-named keys, always keep both key columns by
+    // For condition-based full outer joins on same-named keys, keep both key columns by
     // renaming the right-side keys to a suffixed form (e.g. dept_id -> dept_id_right)
     // so that left/right keys remain addressable separately (dept_id, dept_id_right).
+    // Inner/left/right condition joins keep the original column-name join semantics
+    // (single key column) so tests like issue #353 that use `on` as a Column do not
+    // see extra *_right key columns.
     if matches!(origin, JoinOrigin::Condition)
+        && matches!(how, JoinType::Outer)
         && left_key_names.len() == right_key_names.len()
         && left_key_names
             .iter()

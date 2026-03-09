@@ -1,7 +1,7 @@
 //! DataFrame module: main tabular type and submodules for transformations, aggregations, joins, stats.
 
 mod aggregations;
-mod joins;
+pub mod joins;
 mod stats;
 mod transformations;
 
