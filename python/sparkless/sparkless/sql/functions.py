@@ -1456,6 +1456,27 @@ def percent_rank():
 class _RankExpr:
     def over(self, window):
         import sparkless._native as _native
+        from sparkless import Column as _Column
+        from sparkless.sql.window import Window
+
+        # Special-case Window.orderBy(F.lit(1)) and similar literal-only sort keys.
+        # In PySpark this is accepted (order is arbitrary but defined). In our engine,
+        # literals become anonymous Columns named "<expr>", which should not be resolved
+        # as input columns. When the window's order_by consists only of such anonymous
+        # literal expressions and we have a partition key, rewrite the WindowSpec to
+        # order by the partition column(s) instead. This gives a stable, schema-backed
+        # sort key and avoids "not found: <expr>" resolution errors.
+        part_keys = getattr(window, "_partition_by", None) or []
+        order_keys = list(getattr(window, "_order_by", []) or [])
+        if part_keys and order_keys:
+            flat: list[object] = []
+            for k in order_keys:
+                if isinstance(k, (list, tuple)):
+                    flat.extend(k)
+                else:
+                    flat.append(k)
+            if flat and all(isinstance(k, _Column) and getattr(k, "name", None) == "<expr>" for k in flat):
+                window = Window.partitionBy(*part_keys).orderBy(*part_keys)
 
         partition_by, encoded, _ = _window_spec_to_partition_order(window)
         return _native.rank_window(partition_by, encoded)
@@ -1677,6 +1698,15 @@ def _window_spec_to_partition_order(window, require_order=True):
         else:
             name = _col_name(k)
             ascending = True
+        # Window.orderBy(F.lit(1)) and similar literal-only sort keys produce a synthetic
+        # Column name "<expr>" (default display name for anonymous expressions).
+        # PySpark accepts literal sort keys for window order (order is arbitrary but defined),
+        # and does not attempt to resolve "<expr>" as an input column. To avoid spurious
+        # "not found: <expr>" errors when building window specs, map such anonymous sort
+        # keys onto the first partition column (if any) so the native backend sees a real
+        # column name.
+        if name == "<expr>" and partition_names:
+            name = partition_names[0]
         order_col_names.append(name)
         encoded.append(name if ascending else f"-{name}")
     use_running = not all(oc in partition_names for oc in order_col_names)

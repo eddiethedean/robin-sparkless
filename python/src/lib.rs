@@ -7217,7 +7217,20 @@ fn rank_window(partition_by: Vec<String>, order_by: Vec<String>) -> PyResult<PyC
     } else {
         (first.clone(), false)
     };
-    let order_col = Column::new(name);
+    // Window.orderBy(F.lit(1)) encodes the literal as a synthetic "<expr>" sort key.
+    // PySpark accepts this (order is arbitrary but defined); we must not try to resolve
+    // "<expr>" as an input column, which would fail with "not found: <expr>".
+    // To mirror PySpark behavior, when the sort key is the synthetic "<expr>" name,
+    // fall back to ordering by the first partition column (if any).
+    let order_col = if name == "<expr>" {
+        if let Some(first_part) = partition_by.get(0) {
+            Column::new(first_part.clone())
+        } else {
+            Column::new(name)
+        }
+    } else {
+        Column::new(name)
+    };
     let base = order_col.rank(descending);
     let parts: Vec<&str> = partition_by.iter().map(|s| s.as_str()).collect();
     let windowed = base.over(&parts[..]);
