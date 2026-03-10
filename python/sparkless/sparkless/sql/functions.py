@@ -410,11 +410,11 @@ def first(col_or_name: ColumnOrName, ignorenulls: bool = False) -> _ColumnType:
 def last(col_or_name: ColumnOrName, ignorenulls: bool = False) -> _ColumnType:
     """Last value aggregate/window function (PySpark last).
 
-    GroupBy: use in df.groupBy().agg(F.last("col")) – use native last for agg, last_value for window.
-    Pivot: .pivot().agg(F.last("col")) is handled via pivot.agg() detecting _LastValueExpr and calling _last.
-    Window: use with .over(Window.partitionBy(...).orderBy(...)); last_value semantics.
+    Returns a Column that supports .alias() and .over() for parity with PySpark.
+    GroupBy: df.groupBy().agg(F.last("col").alias("last_touch")).
+    Window: F.last("col").over(Window.partitionBy(...).orderBy(...)).
     """
-    return _col_result(last_value(col_or_name))
+    return _col_result(_native_fn("last")(_as_col(col_or_name), ignorenulls))
 
 
 def collect_list(col_or_name: ColumnOrName) -> _ColumnType:

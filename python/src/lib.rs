@@ -7129,7 +7129,7 @@ impl PyPivotedGroupedData {
                 out.push(c.borrow().inner.clone().into_expr());
                 return Ok(());
             }
-            // F.last("col") returns _LastValueExpr (window helper); pivot.agg() supports it via _pivot_last_column.
+            // last_value("col") returns _LastValueExpr (window helper); pivot.agg() supports it via _pivot_last_column. F.last("col") returns Column (issue #1348).
             if let Ok(name) = item.getattr("_pivot_last_column") {
                 if let Ok(col_name) = name.extract::<String>() {
                     let col = robin_sparkless::functions::col(&col_name);
