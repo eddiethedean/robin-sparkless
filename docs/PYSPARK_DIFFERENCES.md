@@ -89,7 +89,7 @@ This document lists **intentional or known divergences** from PySpark semantics 
 - **Robin-sparkless (Rust)** — **`create_dataframe(data, column_names)`** accepts only 3-tuples `(i64, i64, String)` and three column names. For arbitrary schemas use **`create_dataframe_from_rows(rows, schema)`** (Rust).
 - **Column name case (#786, #785)**: Column names from the schema are preserved as returned by `columns()` and in collect row keys. Pass the exact case you need (e.g. `NaMe`) in the schema so `'NaMe' in df.columns` succeeds.
 
-## JVM / runtime stubs
+## JVM / runtime stubs { #jvm--runtime-stubs }
 
 The following JVM- or runtime-related functions are implemented as **stubs for API compatibility**, not full equivalents of PySpark behavior:
 

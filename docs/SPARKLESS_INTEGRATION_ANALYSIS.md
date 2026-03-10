@@ -297,7 +297,7 @@ If the FFI bindings are not available and the user selects the robin backend, `B
 
 ## 8. Related Documentation
 
-- [README.md](../README.md) – Project overview and Sparkless integration goal
+- [README.md](https://github.com/eddiethedean/robin-sparkless/blob/main/README.md) – Project overview and Sparkless integration goal
 - [ROADMAP.md](ROADMAP.md) – Development roadmap including integration phases
 - [PARITY_STATUS.md](PARITY_STATUS.md) – Parity matrix and Sparkless test conversion
 - [TEST_CREATION_GUIDE.md](TEST_CREATION_GUIDE.md) – How to add parity tests; §7 covers Sparkless fixture conversion

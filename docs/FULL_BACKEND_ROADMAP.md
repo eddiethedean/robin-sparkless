@@ -166,7 +166,7 @@ This document plans the path for **robin-sparkless** to become a complete backen
 - [ ] When "robin" selected, Sparkless delegates to robin-sparkless via PyO3
 - [ ] Fallback: if robin-sparkless doesn't support an op, raise or fall back to Python Polars
 
-See [PYTHON_API.md](PYTHON_API.md) for the API contract Sparkless maintainers need.
+See [EMBEDDING.md](EMBEDDING.md) for the API surface and bindings contract Sparkless maintainers need.
 
 ### 4.4 Risks
 

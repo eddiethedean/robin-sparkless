@@ -40,7 +40,7 @@ Search **library** code (exclude `tests/`, `examples/`, `benches/`):
 - **`panic!` / `unreachable!()`** — Must match documented API contracts (e.g. in `lib.rs`).
 - **Unchecked indexing** — e.g. `row[idx]`, `args[n]` in plan/udf code; validate length/arity first.
 
-Past fixes include `PyDataFrameWriter` lock handling in [src/python/dataframe.rs](src/python/dataframe.rs) (poisoned lock fallback) and type-conversion functions in [src/functions.rs](src/functions.rs) (to_char, to_number, etc.) now returning `Result` instead of panicking.
+Past fixes include `PyDataFrameWriter` lock handling in [src/python/dataframe.rs](https://github.com/eddiethedean/robin-sparkless/blob/main/crates/robin-sparkless-polars/src/dataframe/mod.rs) (poisoned lock fallback; Python bindings are now out-of-tree) and type-conversion functions in [src/functions.rs](https://github.com/eddiethedean/robin-sparkless/blob/main/crates/robin-sparkless-polars/src/functions/mod.rs) (to_char, to_number, etc.) now returning `Result` instead of panicking.
 
 ### A4. Error handling at boundaries
 
@@ -100,7 +100,7 @@ Check that invalid input (wrong schema, missing columns, bad plan JSON) produces
 - **Duplication**: Same logic in Rust and Python (e.g. option handling); consider helpers or codegen.
 - **Complexity**: Long functions in `plan/expr.rs`, `functions.rs`, or Python bindings; split or document.
 - **Tests**: New behavior should have a unit, integration, or parity test; document in [TEST_CREATION_GUIDE.md](TEST_CREATION_GUIDE.md).
-- **Docs**: Public API docs, `lib.rs` panic/behavior notes, and user-facing docs ([QUICKSTART.md](QUICKSTART.md), [PYTHON_API.md](PYTHON_API.md)) up to date.
+- **Docs**: Public API docs, `lib.rs` panic/behavior notes, and user-facing docs ([QUICKSTART.md](QUICKSTART.md), [EMBEDDING.md](EMBEDDING.md)) up to date.
 
 ### B5. Sparkless integration (Phase 27)
 

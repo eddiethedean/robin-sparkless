@@ -44,7 +44,7 @@ Where a method still returns `PolarsError`, convert with **`robin_sparkless::to_
 
 ## Examples
 
-- **[examples/embed_basic.rs](../examples/embed_basic.rs)** — Uses the ExprIr API: `create_dataframe_engine`, `filter_expr_ir`, `group_by_engine`, `agg_expr_ir`. Creates a session from config, runs a simple pipeline (filter + groupBy + agg), and prints schema and JSON rows. Run with: `cargo run --example embed_basic`.
+- **[examples/embed_basic.rs](https://github.com/eddiethedean/robin-sparkless/blob/main/examples/embed_basic.rs)** — Uses the ExprIr API: `create_dataframe_engine`, `filter_expr_ir`, `group_by_engine`, `agg_expr_ir`. Creates a session from config, runs a simple pipeline (filter + groupBy + agg), and prints schema and JSON rows. Run with: `cargo run --example embed_basic`.
 
   Example output (key order in JSON may vary):
 
@@ -53,7 +53,7 @@ Where a method still returns `PolarsError`, convert with **`robin_sparkless::to_
   Rows (JSON): [{"score_1":300,"id":3,"score":1},{"score_1":200,"id":2,"score":1}]
   ```
 
-- **[examples/embed_readme.rs](../examples/embed_readme.rs)** — Matches the README embedding snippet using ExprIr: `create_dataframe_engine`, `filter_expr_ir(&gt(col("id"), lit_i64(1)))`, then `to_json_rows`. Run with: `cargo run --example embed_readme`. Example output: `[{"label":"b","value":20,"id":2},{"id":3,"value":30,"label":"c"}]` (key order may vary).
+- **[examples/embed_readme.rs](https://github.com/eddiethedean/robin-sparkless/blob/main/examples/embed_readme.rs)** — Matches the README embedding snippet using ExprIr: `create_dataframe_engine`, `filter_expr_ir(&gt(col("id"), lit_i64(1)))`, then `to_json_rows`. Run with: `cargo run --example embed_readme`. Example output: `[{"label":"b","value":20,"id":2},{"id":3,"value":30,"label":"c"}]` (key order may vary).
 
 ## Traits (optional)
 

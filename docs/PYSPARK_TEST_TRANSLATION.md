@@ -116,4 +116,4 @@ python scripts/batch_regenerate_extracted.py [--dry-run]
 
 - [TEST_CREATION_GUIDE.md](TEST_CREATION_GUIDE.md) — Fixture format, generator scripts
 - [SPARKLESS_PARITY_STATUS.md](SPARKLESS_PARITY_STATUS.md) — Pass/fail counts, failure reasons
-- [regenerate_expected_from_pyspark.py](../tests/regenerate_expected_from_pyspark.py) — Fixture expected regeneration
+- [regenerate_expected_from_pyspark.py](https://github.com/eddiethedean/robin-sparkless/blob/main/tests/regenerate_expected_from_pyspark.py) — Fixture expected regeneration

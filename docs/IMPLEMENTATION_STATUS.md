@@ -59,10 +59,10 @@ Robin-sparkless is designed to **replace the backend logic** of [Sparkless](http
 5. **Window functions** ✅ **COMPLETED**
    - ✅ `Column::rank()`, `row_number()`, `dense_rank()`, `lag()`, `lead()` with `.over(partition_by)`
    - ✅ Parity fixtures: `row_number_window`, `rank_window`, `lag_lead_window`
-   - ✅ `SparkSession::sql()` implemented (optional `sql` feature); temp views and in-memory saved tables (`saveAsTable`, `write_delta_table`); catalog `listTables`, `tableExists`, `dropTempView`, `dropTable`; see [QUICKSTART.md](QUICKSTART.md), [PYTHON_API.md](PYTHON_API.md).
+   - ✅ `SparkSession::sql()` implemented (optional `sql` feature); temp views and in-memory saved tables (`saveAsTable`, `write_delta_table`); catalog `listTables`, `tableExists`, `dropTempView`, `dropTable`; see [QUICKSTART.md](QUICKSTART.md), [EMBEDDING.md](EMBEDDING.md).
 
 6. **Language bindings** (out-of-tree)
-   - Python bindings and PyO3 bridge have been removed from this repo. Sparkless (or another host) maintains bindings that call the Rust crate via FFI. See [EMBEDDING.md](EMBEDDING.md) and [PYTHON_API.md](PYTHON_API.md) (historical contract).
+   - Python bindings and PyO3 bridge have been removed from this repo. Sparkless (or another host) maintains bindings that call the Rust crate via FFI. See [EMBEDDING.md](EMBEDDING.md) for the API surface and bindings contract.
 
 7. **Phase 5 Test Conversion** ✅ **COMPLETED**
    - Fixture converter maps Sparkless `expected_outputs` to robin-sparkless format (join, window, withColumn, union, distinct, drop, dropna, fillna, limit, withColumnRenamed, etc.).

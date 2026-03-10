@@ -164,7 +164,7 @@ We know we're on track if:
 - ✅ String functions: `upper()`, `lower()`, `substring()`, `concat()`, `concat_ws()`, `length`, `trim`, `regexp_extract`, `regexp_replace`, `regexp_extract_all`, `regexp_like`, `split`
 - ✅ Datetime: `year()`, `month()`, `day()`, `to_date()`, `date_format(format)` (chrono strftime)
 - ✅ DataFrame methods: `union`, `union_by_name`, `distinct`, `drop`, `dropna`, `fillna`, `limit`, `with_column_renamed`
-- ✅ **Rust API for bindings**: Full surface for Sparkless or other hosts: `SparkSession`, `create_dataframe_from_rows`, `create_dataframe_from_single_column` (single-column schema, verify_schema), `execute_plan`, `DataFrame::collect_as_json_rows`, etc. Python bindings are maintained out-of-tree (e.g. in Sparkless). See [EMBEDDING.md](EMBEDDING.md) and [PYTHON_API.md](PYTHON_API.md) (historical contract).
+- ✅ **Rust API for bindings**: Full surface for Sparkless or other hosts: `SparkSession`, `create_dataframe_from_rows`, `create_dataframe_from_single_column` (single-column schema, verify_schema), `execute_plan`, `DataFrame::collect_as_json_rows`, etc. Python bindings are maintained out-of-tree (e.g. in Sparkless). See [EMBEDDING.md](EMBEDDING.md).
 - ✅ **Phase 9** (high-value functions & DataFrame methods): Datetime (`current_date`, `current_timestamp`, `date_add`, `date_sub`, `hour`, `minute`, `second`, `datediff`, `last_day`, `trunc`); string (`repeat`, `reverse`, `instr`, `lpad`, `rpad`); math (`sqrt`, `pow`, `exp`, `log`); conditional (`nvl`/`ifnull`, `nullif`, `nanvl`); GroupedData (`first`, `last`, `approx_count_distinct`); DataFrame (`replace`, `cross_join`, `describe`, `cache`/`persist`/`unpersist`, `subtract`, `intersect`).
 - ✅ Parity test harness with 159 passing fixtures:
   - `filter_age_gt_30`: filter + select + orderBy
@@ -271,10 +271,10 @@ To reach **full Sparkless parity** (robin-sparkless as a complete backend replac
 
 **Goal**: Grow parity coverage and integrate Sparkless test conversion into CI.
 
-- **Parity harness**: Date/datetime and boolean column support in fixture input ([tests/parity.rs](tests/parity.rs)); `dtype_to_string` and `collect_to_simple_format` for Date/Datetime/Int8; `types_compatible` for date/timestamp.
+- **Parity harness**: Date/datetime and boolean column support in fixture input ([tests/parity.rs](https://github.com/eddiethedean/robin-sparkless/blob/main/tests/parity.rs)); `dtype_to_string` and `collect_to_simple_format` for Date/Datetime/Int8; `types_compatible` for date/timestamp.
 - **Fixture growth**: 73 → 80 (Phase 11) → 82 (Phase 12–13) → 88 (Phase 14–15) → **93** (Phase 16) fixtures (Phase 16: regexp_count, regexp_substr, regexp_instr, split_part, find_in_set, format_string; array_distinct skipped).
-- **Converter**: Date/timestamp type mapping added in [tests/convert_sparkless_fixtures.py](tests/convert_sparkless_fixtures.py).
-- **CI**: [.github/workflows/ci.yml](.github/workflows/ci.yml) runs format, clippy, audit, deny, and Rust tests (including `pyspark_parity_fixtures`). Locally: `make check-full` (Rust-only). Python tests and bindings live out-of-tree.
+- **Converter**: Date/timestamp type mapping added in [tests/convert_sparkless_fixtures.py](https://github.com/eddiethedean/robin-sparkless/blob/main/tests/convert_sparkless_fixtures.py).
+- **CI**: [.github/workflows/ci.yml](https://github.com/eddiethedean/robin-sparkless/blob/main/.github/workflows/ci.yml) runs format, clippy, audit, deny, and Rust tests (including `pyspark_parity_fixtures`). Locally: `make check-full` (Rust-only). Python tests and bindings live out-of-tree.
 - **Docs**: [TEST_CREATION_GUIDE.md](TEST_CREATION_GUIDE.md) documents date/timestamp fixture format; [SPARKLESS_PARITY_STATUS.md](SPARKLESS_PARITY_STATUS.md) updated with CI note.
 
 **Outcome**: 93 parity fixtures passing; CI runs parity; SPARKLESS_PARITY_STATUS kept current.

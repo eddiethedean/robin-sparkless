@@ -2,17 +2,29 @@
 
 This page is the **legacy doc index**. The full documentation is built with [MkDocs](https://www.mkdocs.org/) and published on [Read the Docs](https://robin-sparkless.readthedocs.io/). To build locally: `pip install -r docs/requirements.txt` then `mkdocs serve`.
 
+## Python (Sparkless 4.0)
+
+Documentation for the Python package mirrors the [Sparkless](https://sparkless.readthedocs.io/) readthedocs structure:
+
+| Document | Description |
+|----------|-------------|
+| [Python getting started](python_getting_started.md) | Installation, quick start, core features (DataFrame, SQL, windows), testing, lazy evaluation, next steps |
+| [Package README](https://github.com/eddiethedean/robin-sparkless/blob/main/python/README.md) | Why Sparkless 4.0, Sparkless 3 vs 4.0, installation, API overview, backend, known limitations |
+| [Migration (PySpark / Sparkless 3)](python_migration.md) | Switching from PySpark or Sparkless 3.x; Sparkless 3 vs 4.0 table |
+| [PySpark differences](PYSPARK_DIFFERENCES.md) | Known divergences and caveats (applies to both Rust and Python usage) |
+
+## Rust and general
+
 | Document | Description |
 |----------|-------------|
 | [QUICKSTART](QUICKSTART.md) | Build, install, basic usage, optional features (SQL, Delta), troubleshooting, benchmarks |
 | [EMBEDDING](EMBEDDING.md) | Embedding and bindings: prelude::embed, *_engine() API, schema helpers, traits; minimal FFI surface |
 | [ROADMAP](ROADMAP.md) | Development roadmap and Sparkless integration phases |
 | [RELEASING](RELEASING.md) | How to cut a release (version bump, tag, crates.io publish) |
-| [CHANGELOG](../CHANGELOG.md) | Version history and release notes |
+| [CHANGELOG](https://github.com/eddiethedean/robin-sparkless/blob/main/CHANGELOG.md) | Version history and release notes |
 | [PARITY_STATUS](PARITY_STATUS.md) | PySpark parity coverage matrix (159 fixtures; 3 plan fixtures; Phases 12–25 + signature alignment + gap closure) |
 | [PYSPARK_DIFFERENCES](PYSPARK_DIFFERENCES.md) | Known divergences from PySpark (window, SQL, Delta, rand/randn semantics; DataFrame cube/rollup/write/saveAsTable and stubs; in-memory tables and catalog; Phase 8 + gap closure) |
 | [ROBIN_SPARKLESS_MISSING](ROBIN_SPARKLESS_MISSING.md) | What Sparkless has and robin-sparkless does not (or stub only); XML/XPath/sentences deferred |
-| [PYTHON_API](PYTHON_API.md) | Historical Python API contract for the now-removed in-tree PyO3 bridge; kept for reference only |
 | [SIGNATURE_GAP_ANALYSIS](SIGNATURE_GAP_ANALYSIS.md) | PySpark vs robin-sparkless signature gap analysis (params, types, defaults) and recommendations |
 | [SIGNATURE_ALIGNMENT_TASKS](SIGNATURE_ALIGNMENT_TASKS.md) | Checklist to align Python param names to PySpark (historical, for the previous Python bindings) |
 | [CONVERTER_STATUS](CONVERTER_STATUS.md) | Sparkless → robin-sparkless fixture converter |

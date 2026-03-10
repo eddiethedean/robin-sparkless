@@ -36,6 +36,7 @@ plugins:
   - search
 
 markdown_extensions:
+  - attr_list
   - admonition
   - pymdownx.superfences
   - pymdownx.highlight:
@@ -45,6 +46,10 @@ markdown_extensions:
 
 nav:
   - Home: index.md
+  - Doc index: DOC_INDEX.md
+  - Python (Sparkless 4.0):
+    - Getting started: python_getting_started.md
+    - Migration (PySpark / Sparkless 3): python_migration.md
   - Getting started:
     - User guide: USER_GUIDE.md
     - Quickstart: QUICKSTART.md
@@ -75,3 +80,28 @@ nav:
     - Sparkless 3.28 API snapshot: SPARKLESS_3.28_API_SNAPSHOT.md
     - Sparkless parity issues reported: SPARKLESS_PARITY_ISSUES_REPORTED.md
     - Implementation status: IMPLEMENTATION_STATUS.md
+  - More:
+    - Bugs and improvements plan: BUGS_AND_IMPROVEMENTS_PLAN.md
+    - Closed issues test coverage: CLOSED_ISSUES_TEST_COVERAGE.md
+    - CreateDataFrame gaps: CREATEDATAFRAME_GAPS.md
+    - DataFrame test guide: DATAFRAME_TEST_GUIDE.md
+    - Deferred scope: DEFERRED_SCOPE.md
+    - Full parity roadmap: FULL_PARITY_ROADMAP.md
+    - Gap analysis (PySpark repo): GAP_ANALYSIS_PYSPARK_REPO.md
+    - Integration test guide: INTEGRATION_TEST_GUIDE.md
+    - Lazy backend plan: LAZY_BACKEND_PLAN.md
+    - Migration status: MIGRATION_STATUS.md
+    - Parity functions expectations: PARITY_FUNCTIONS_EXPECTATIONS.md
+    - Persistence between sessions: PERSISTENCE_BETWEEN_SESSIONS.md
+    - Polars crate isolation: POLARS_CRATE_ISOLATION.md
+    - Ported test expectations: PORTED_TEST_EXPECTATIONS.md
+    - PySpark mode test failures: PYSPARK_MODE_TEST_FAILURES.md
+    - PySpark test translation: PYSPARK_TEST_TRANSLATION.md
+    - PySpark version notes: PYSPARK_VERSION_NOTES.md
+    - Rust-first testing: RUST_FIRST_TESTING.md
+    - Sparkless Python test port: SPARKLESS_PYTHON_TEST_PORT.md
+    - Subcrate split plan: SUBCRATE_SPLIT_PLAN.md
+    - Test failure checklist: TEST_FAILURE_CHECKLIST.md
+    - TODO Spark DDL parser Rust: TODO_SPARK_DDL_PARSER_RUST.md
+    - UDF guide: UDF_GUIDE.md
+    - Test failure categories: test_failure_categories.md

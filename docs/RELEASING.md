@@ -8,7 +8,7 @@ The repository is a **Cargo workspace** with members: `robin-sparkless` (root, m
 
 So that local development and CI use the same toolchains and tools:
 
-- **Rust**: [rust-toolchain.toml](../rust-toolchain.toml) pins the Rust version (e.g. 1.89.0). CI uses the same `toolchain` value in `.github/workflows/ci.yml` and `.github/workflows/release.yml`.
+- **Rust**: [rust-toolchain.toml](https://github.com/eddiethedean/robin-sparkless/blob/main/rust-toolchain.toml) pins the Rust version (e.g. 1.89.0). CI uses the same `toolchain` value in [.github/workflows/ci.yml](https://github.com/eddiethedean/robin-sparkless/blob/main/.github/workflows/ci.yml) and [.github/workflows/release.yml](https://github.com/eddiethedean/robin-sparkless/blob/main/.github/workflows/release.yml).
 - **cargo-nextest**: CI installs a fixed version (e.g. 0.9.92) in the workflow. Use the same version locally if you use nextest.
 
 ## Prerequisites
@@ -19,10 +19,10 @@ So that local development and CI use the same toolchains and tools:
 ## Release steps
 
 1. **Bump the version** in all four `Cargo.toml` files so they stay in sync:
-   - [Cargo.toml](../Cargo.toml) (root, `robin-sparkless`)
-   - [crates/robin-sparkless-core/Cargo.toml](../crates/robin-sparkless-core/Cargo.toml)
-   - [crates/robin-sparkless-polars/Cargo.toml](../crates/robin-sparkless-polars/Cargo.toml)
-   - [crates/spark-sql-parser/Cargo.toml](../crates/spark-sql-parser/Cargo.toml)
+   - [Cargo.toml](https://github.com/eddiethedean/robin-sparkless/blob/main/Cargo.toml) (root, `robin-sparkless`)
+   - [crates/robin-sparkless-core/Cargo.toml](https://github.com/eddiethedean/robin-sparkless/blob/main/crates/robin-sparkless-core/Cargo.toml)
+   - [crates/robin-sparkless-polars/Cargo.toml](https://github.com/eddiethedean/robin-sparkless/blob/main/crates/robin-sparkless-polars/Cargo.toml)
+   - [crates/spark-sql-parser/Cargo.toml](https://github.com/eddiethedean/robin-sparkless/blob/main/crates/spark-sql-parser/Cargo.toml)
    Use the same version for the three robin-sparkless crates (e.g. `0.17.0`). `spark-sql-parser` can use the same version or its own (e.g. `0.2.0`). Update the `version` in root and in the crates; if you publish the subcrates, also update the dependency version in root (e.g. `robin-sparkless-core = { version = "0.17", path = "..." }`, `robin-sparkless-polars = { version = "0.17", path = "..." }`). Commit and push to `main`.
 
 2. **Create and push a tag** matching the version with a `v` prefix:
@@ -31,7 +31,7 @@ So that local development and CI use the same toolchains and tools:
    git push origin v0.17.0
    ```
 
-3. **CI runs automatically** on the tag push (see [.github/workflows/release.yml](../.github/workflows/release.yml)):
+3. **CI runs automatically** on the tag push (see [.github/workflows/release.yml](https://github.com/eddiethedean/robin-sparkless/blob/main/.github/workflows/release.yml)):
    - Format check, Clippy (workspace), `cargo audit`, `cargo deny`, build and tests (workspace), and `cargo doc --workspace` must pass.
    - Then the workflow publishes to crates.io **in dependency order**:
      1. `spark-sql-parser`
