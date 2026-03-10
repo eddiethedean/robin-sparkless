@@ -152,8 +152,8 @@ class _PosexplodeResult(tuple):
     def __new__(cls, pos, val, alias_names=None):
         obj = super().__new__(cls, (pos, val))
         if alias_names is not None and len(alias_names) >= 1:
-            obj._alias_name = alias_names[0]  # type: ignore[attr-defined]
-            obj._alias_names = tuple(alias_names)  # type: ignore[attr-defined]
+            obj._alias_name = alias_names[0]
+            obj._alias_names = tuple(alias_names)
         return obj
 
     @property

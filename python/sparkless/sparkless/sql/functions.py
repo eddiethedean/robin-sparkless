@@ -1663,17 +1663,17 @@ class _SortKey:
         self.ascending = ascending
 
 
-def _col_name(arg):
+def _col_name(arg: object) -> str:
     from sparkless import Column as _Column
 
     if isinstance(arg, str):
         return arg
     if isinstance(arg, _Column):
-        return arg.name
+        return str(arg.name)
     if hasattr(arg, "name") and hasattr(arg, "ascending"):
-        return arg.name
+        return str(getattr(arg, "name"))
     if hasattr(arg, "column_name"):
-        return arg.column_name
+        return str(getattr(arg, "column_name"))
     raise TypeError(f"Unsupported sort key: {type(arg)!r}")
 
 

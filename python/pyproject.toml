@@ -35,7 +35,7 @@ python-source = "sparkless"
 manifest-path = "Cargo.toml"
 
 [tool.mypy]
-python_version = "3.8"
+python_version = "3.9"
 warn_return_any = true
 warn_unused_ignores = true
 exclude = ["tests/", ".*/tests/", "upstream_sparkless/"]
