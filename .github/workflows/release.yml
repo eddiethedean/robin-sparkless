@@ -13,9 +13,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@master
+        uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: 1.93.1
           components: rustfmt
       - name: Cache cargo
         uses: actions/cache@v4
@@ -36,9 +35,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@master
+        uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: 1.93.1
           components: clippy
       - name: Cache cargo
         uses: actions/cache@v4
@@ -59,9 +57,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: 1.93.1
+        uses: dtolnay/rust-toolchain@stable
       - name: Install cargo-audit
         run: cargo install cargo-audit
       - name: Cache cargo
@@ -83,9 +79,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: 1.93.1
+        uses: dtolnay/rust-toolchain@stable
       - name: Install cargo-deny
         run: cargo install cargo-deny
       - name: Cache cargo
@@ -107,9 +101,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: 1.93.1
+        uses: dtolnay/rust-toolchain@stable
       - name: Cache cargo
         uses: actions/cache@v4
         with:
@@ -131,9 +123,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: 1.93.1
+        uses: dtolnay/rust-toolchain@stable
       - name: Cache cargo
         uses: actions/cache@v4
         with:
@@ -155,9 +145,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: 1.93.1
+        uses: dtolnay/rust-toolchain@stable
       - name: Cache cargo
         uses: actions/cache@v4
         with:
@@ -220,9 +208,8 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@master
+        uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: 1.93.1
           components: clippy, rustfmt
       - name: Cache cargo
         uses: actions/cache@v4
@@ -270,7 +257,7 @@ jobs:
           working-directory: python
           target: x86_64-unknown-linux-gnu
           command: publish
-          args: --zig --skip-existing
+          args: -i 3.8 --zig --skip-existing
           manylinux: "2_17"
           container: off
 
@@ -288,7 +275,7 @@ jobs:
           working-directory: python
           target: aarch64-unknown-linux-gnu
           command: publish
-          args: --zig --skip-existing
+          args: -i 3.8 --zig --skip-existing
           manylinux: "2_28"
           container: off
 
@@ -310,7 +297,7 @@ jobs:
           working-directory: python
           target: ${{ matrix.target }}
           command: publish
-          args: --skip-existing
+          args: -i 3.8 --skip-existing
 
   publish-pypi-musllinux-x86_64:
     name: PyPI musllinux x86_64
@@ -318,10 +305,10 @@ jobs:
     needs: [format, clippy, audit, deny, build, test, python-lint, python-tests]
     steps:
       - uses: actions/checkout@v4
-      - name: Set up Python
+      - name: Set up Python 3.8
         uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: "3.8"
       - name: Publish to PyPI (maturin)
         uses: messense/maturin-action@v1
         env:
@@ -330,7 +317,7 @@ jobs:
           working-directory: python
           target: x86_64-unknown-linux-musl
           command: publish
-          args: --zig --compatibility musllinux_1_2 -i 3.12 --skip-existing
+          args: -i 3.8 --zig --compatibility musllinux_1_2 --skip-existing
 
   publish-pypi-musllinux-aarch64:
     name: PyPI musllinux aarch64
@@ -338,10 +325,10 @@ jobs:
     needs: [format, clippy, audit, deny, build, test, python-lint, python-tests]
     steps:
       - uses: actions/checkout@v4
-      - name: Set up Python
+      - name: Set up Python 3.8
         uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: "3.8"
       - name: Publish to PyPI (maturin)
         uses: messense/maturin-action@v1
         env:
@@ -350,7 +337,7 @@ jobs:
           working-directory: python
           target: aarch64-unknown-linux-musl
           command: publish
-          args: --zig --compatibility musllinux_1_2 -i 3.12 --skip-existing
+          args: -i 3.8 --zig --compatibility musllinux_1_2 --skip-existing
 
   publish-pypi-windows-x86_64:
     name: PyPI Windows x86_64
@@ -366,7 +353,7 @@ jobs:
           working-directory: python
           target: x86_64-pc-windows-msvc
           command: publish
-          args: --skip-existing
+          args: -i 3.8 --skip-existing
 
   publish-pypi-windows-arm64:
     name: PyPI Windows aarch64
@@ -382,4 +369,4 @@ jobs:
           working-directory: python
           target: aarch64-pc-windows-msvc
           command: publish
-          args: --skip-existing
+          args: -i 3.8 --skip-existing
