@@ -193,6 +193,10 @@ def _shared_pyspark_session():
             enable_delta=False,
         )
         yield session
+    except ImportError as e:
+        if "pyspark" in str(e).lower() or "PySpark is not available" in str(e):
+            pytest.skip(f"PySpark not installed: {e}")
+        raise
     finally:
         if session is not None:
             with contextlib.suppress(BaseException):
@@ -335,6 +339,8 @@ def spark(request):
             or "pickle" in error_msg.lower()
             or "Java gateway" in error_msg
             or "Failed to create PySpark session" in error_msg
+            or "PySpark is not available" in error_msg
+            or "No module named 'pyspark'" in error_msg
         ):
             pytest.skip(f"PySpark session creation failed: {e}")
         raise
