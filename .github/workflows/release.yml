@@ -233,6 +233,7 @@ jobs:
   python-tests:
     name: Python tests - ${{ matrix.os }} py${{ matrix.python-version }}
     runs-on: ${{ matrix.os }}
+    needs: [python-build]
     strategy:
       fail-fast: false
       matrix:
