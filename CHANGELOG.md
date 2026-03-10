@@ -15,6 +15,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 (none yet)
 
+## [4.0.0] - 2026-03-09
+
+### Added
+
+- **Sparkless 4.0 (Python)** — Python package `sparkless` 4.0.0 in this repo: PySpark-like API backed by robin-sparkless (Rust). No JVM, no Polars Python at runtime. Install with `pip install ./python`. See [python/README.md](python/README.md).
+- **Rust 4.0.0** — robin-sparkless, robin-sparkless-core, and robin-sparkless-polars version alignment at 4.0.0 for the unified release.
+- **CI and release** — Rust tests run in CI and release workflow; release Python tests use `tests` (same subset as CI).
+
+### Changed
+
+- **Documentation** — Python docs mirror Sparkless readthedocs (getting started, migration); main README links to Python package; MkDocs warnings fixed.
+- **Release workflow** — Python tests run from `tests` with `-m "not delta and not integration"`; timeouts added for Rust and Python test steps.
+
 ## [0.17.0] - 2026-02-24
 
 ### Fixed
