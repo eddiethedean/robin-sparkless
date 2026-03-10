@@ -40,7 +40,7 @@ aead = { git = "https://github.com/RustCrypto/traits", tag = "aead-v0.5.2" }
 aes = { git = "https://github.com/RustCrypto/block-ciphers", tag = "aes-v0.8.4" }
 alloc-no-stdlib = { git = "https://github.com/dropbox/rust-alloc-no-stdlib", branch = "master" }
 alloc-stdlib = { git = "https://github.com/dropbox/rust-alloc-no-stdlib", branch = "master" }
-anes = { path = "vendor/anes" }
+anes = { git = "https://github.com/zrzka/anes-rs", tag = "v0.1.6" }
 
 [dev-dependencies]
 chrono = "0.4"
