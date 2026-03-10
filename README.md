@@ -206,7 +206,7 @@ CI runs format, clippy, audit, deny, Rust tests, and parity tests on push/PR (se
 
 | Resource | Description |
 |----------|-------------|
-| [**Python package**](python/README.md) | **Sparkless 4.0** — install (`pip install ./python`), quick start, Sparkless 3 vs 4.0, API overview |
+| [**Python package**](python/README.md) | **Sparkless 4.0** — install from PyPI (`pip install sparkless`) or `pip install ./python`, quick start, Sparkless 3 vs 4.0, API overview |
 | [**Read the Docs**](https://robin-sparkless.readthedocs.io/) | Full docs: quickstart, Rust usage, Python getting started, Sparkless integration (MkDocs) |
 | [**docs.rs**](https://docs.rs/robin-sparkless) | Rust API reference |
 | [QUICKSTART](docs/QUICKSTART.md) | Build, usage, optional features, benchmarks |
@@ -215,7 +215,7 @@ CI runs format, clippy, audit, deny, Rust tests, and parity tests on push/PR (se
 | [UDF Guide](docs/UDF_GUIDE.md) | Scalar, vectorized, and grouped UDFs |
 | [PySpark Differences](docs/PYSPARK_DIFFERENCES.md) | Known divergences |
 | [Roadmap](docs/ROADMAP.md) | Development phases, Sparkless integration |
-| [RELEASING](docs/RELEASING.md) | Publishing to crates.io |
+| [RELEASING](docs/RELEASING.md) | Publishing to crates.io and PyPI |
 
 See [CHANGELOG.md](CHANGELOG.md) for version history.
 
