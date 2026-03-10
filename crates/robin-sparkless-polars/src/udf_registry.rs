@@ -97,3 +97,51 @@ impl UdfRegistry {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use polars::prelude::Series;
+
+    #[test]
+    fn udf_registry_register_and_get_case_sensitive() -> Result<(), PolarsError> {
+        let reg = UdfRegistry::new();
+        reg.register_rust_udf("double", |cols: &[Series]| {
+            Ok(cols[0].clone() * 2)
+        })?;
+        assert!(reg.get_rust_udf("double", true)?.is_some());
+        assert!(reg.get_rust_udf("Double", true)?.is_none());
+        assert!(reg.has_udf("double", true)?);
+        assert!(!reg.has_udf("other", true)?);
+        Ok(())
+    }
+
+    #[test]
+    fn udf_registry_get_case_insensitive() -> Result<(), PolarsError> {
+        let reg = UdfRegistry::new();
+        reg.register_rust_udf("MyUdf", |cols: &[Series]| Ok(cols[0].clone()))?;
+        assert!(reg.get_rust_udf("myudf", false)?.is_some());
+        assert!(reg.get_rust_udf("MYUDF", false)?.is_some());
+        assert!(reg.has_udf("MyUdf", false)?);
+        Ok(())
+    }
+
+    #[test]
+    fn udf_registry_clear() -> Result<(), PolarsError> {
+        let reg = UdfRegistry::new();
+        reg.register_rust_udf("x", |cols: &[Series]| Ok(cols[0].clone()))?;
+        assert!(reg.has_udf("x", true)?);
+        reg.clear()?;
+        assert!(!reg.has_udf("x", true)?);
+        assert!(reg.get_rust_udf("x", true)?.is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn udf_registry_default_and_new() {
+        let reg = UdfRegistry::default();
+        assert!(!reg.has_udf("any", true).unwrap());
+        let reg2 = UdfRegistry::new();
+        assert!(!reg2.has_udf("any", true).unwrap());
+    }
+}

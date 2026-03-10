@@ -1,6 +1,6 @@
 # Robin Sparkless
 
-**PySpark-style DataFrames in Rust—no JVM.** A DataFrame library that mirrors PySpark’s API and semantics while using [Polars](https://www.pola.rs/) as the execution engine.
+**PySpark-style DataFrames in Rust—no JVM.** A DataFrame library that mirrors PySpark’s API and semantics while using [Polars](https://www.pola.rs/) as the execution engine. The same engine powers the **Python package** [sparkless 4.0](python/README.md) (`pip install ./python`) — a drop-in PySpark replacement with no JVM.
 
 [![CI](https://github.com/eddiethedean/robin-sparkless/actions/workflows/ci.yml/badge.svg)](https://github.com/eddiethedean/robin-sparkless/actions/workflows/ci.yml)
 [![crates.io](https://img.shields.io/crates/v/robin-sparkless.svg)](https://crates.io/crates/robin-sparkless)
@@ -198,7 +198,8 @@ CI runs format, clippy, audit, deny, Rust tests, and parity tests on push/PR (se
 
 | Resource | Description |
 |----------|-------------|
-| [**Read the Docs**](https://robin-sparkless.readthedocs.io/) | Full docs: quickstart, Rust usage, Sparkless integration (MkDocs) |
+| [**Python package**](python/README.md) | **Sparkless 4.0** — install (`pip install ./python`), quick start, Sparkless 3 vs 4.0, API overview |
+| [**Read the Docs**](https://robin-sparkless.readthedocs.io/) | Full docs: quickstart, Rust usage, Python getting started, Sparkless integration (MkDocs) |
 | [**docs.rs**](https://docs.rs/robin-sparkless) | Rust API reference |
 | [QUICKSTART](docs/QUICKSTART.md) | Build, usage, optional features, benchmarks |
 | [User Guide](docs/USER_GUIDE.md) | Everyday usage (Rust) |

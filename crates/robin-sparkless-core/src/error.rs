@@ -54,3 +54,49 @@ impl From<std::io::Error> for EngineError {
         EngineError::Io(e.to_string())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn engine_error_display() {
+        assert_eq!(
+            EngineError::User("bad input".into()).to_string(),
+            "user error: bad input"
+        );
+        assert_eq!(
+            EngineError::Internal("panic".into()).to_string(),
+            "internal error: panic"
+        );
+        assert_eq!(
+            EngineError::Io("file not found".into()).to_string(),
+            "io error: file not found"
+        );
+        assert_eq!(
+            EngineError::Sql("parse error".into()).to_string(),
+            "sql error: parse error"
+        );
+        assert_eq!(
+            EngineError::NotFound("column x".into()).to_string(),
+            "not found: column x"
+        );
+        assert_eq!(EngineError::Other("misc".into()).to_string(), "misc");
+    }
+
+    #[test]
+    fn engine_error_from_io() {
+        let e = std::io::Error::new(std::io::ErrorKind::NotFound, "file missing");
+        let err: EngineError = e.into();
+        assert!(err.to_string().contains("file missing"));
+        assert!(err.to_string().contains("io error"));
+    }
+
+    #[test]
+    fn engine_error_from_serde_json() {
+        let bad = b"\x80";
+        let e: Result<(), _> = serde_json::from_slice(bad);
+        let err: EngineError = e.unwrap_err().into();
+        assert!(err.to_string().contains("internal error"));
+    }
+}

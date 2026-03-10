@@ -74,3 +74,44 @@ impl SparklessConfig {
         m
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn config_default() {
+        let c = SparklessConfig::default();
+        assert!(c.warehouse_dir.is_none());
+        assert!(c.temp_dir.is_none());
+        assert!(!c.case_sensitive);
+        assert!(c.extra.is_empty());
+    }
+
+    #[test]
+    fn to_session_config_empty() {
+        let c = SparklessConfig::default();
+        let m = c.to_session_config();
+        assert_eq!(m.get("spark.sql.caseSensitive").unwrap(), "false");
+        assert!(!m.contains_key("spark.sql.warehouse.dir"));
+    }
+
+    #[test]
+    fn to_session_config_warehouse_and_case_sensitive() {
+        let mut c = SparklessConfig::default();
+        c.warehouse_dir = Some(PathBuf::from("/tmp/wh"));
+        c.case_sensitive = true;
+        let m = c.to_session_config();
+        assert_eq!(m.get("spark.sql.warehouse.dir").unwrap(), "/tmp/wh");
+        assert_eq!(m.get("spark.sql.caseSensitive").unwrap(), "true");
+    }
+
+    #[test]
+    fn to_session_config_extra_preserved() {
+        let mut c = SparklessConfig::default();
+        c.extra.insert("spark.app.name".to_string(), "MyApp".to_string());
+        let m = c.to_session_config();
+        assert_eq!(m.get("spark.app.name").unwrap(), "MyApp");
+        assert_eq!(m.get("spark.sql.caseSensitive").unwrap(), "false");
+    }
+}

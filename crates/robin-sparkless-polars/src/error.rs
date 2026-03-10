@@ -35,3 +35,44 @@ pub fn polars_to_core_error(e: PolarsError) -> robin_sparkless_core::EngineError
         _ => Core::Other(msg),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn polars_invalid_operation_maps_to_user() {
+        let e = PolarsError::InvalidOperation("invalid".into());
+        let core = polars_to_core_error(e);
+        assert!(matches!(core, robin_sparkless_core::EngineError::User(s) if s == "invalid"));
+    }
+
+    #[test]
+    fn polars_compute_error_maps_to_internal() {
+        let e = PolarsError::ComputeError("compute failed".into());
+        let core = polars_to_core_error(e);
+        assert!(matches!(
+            core,
+            robin_sparkless_core::EngineError::Internal(s) if s == "compute failed"
+        ));
+    }
+
+    #[test]
+    fn polars_column_not_found_adds_cannot_resolve() {
+        let e = PolarsError::ColumnNotFound("x".into());
+        let core = polars_to_core_error(e);
+        assert!(matches!(core, robin_sparkless_core::EngineError::NotFound(s) if s.contains("cannot resolve")));
+    }
+
+    #[test]
+    fn polars_column_not_found_preserves_existing_cannot_resolve() {
+        let e = PolarsError::ColumnNotFound("cannot resolve: col y".into());
+        let core = polars_to_core_error(e);
+        match &core {
+            robin_sparkless_core::EngineError::NotFound(s) => {
+                assert!(s.contains("cannot resolve"), "expected 'cannot resolve' in {s:?}");
+            }
+            _ => panic!("expected NotFound, got {core:?}"),
+        }
+    }
+}

@@ -392,3 +392,85 @@ pub fn alias(expr: ExprIr, name: &str) -> ExprIr {
         args: vec![expr, lit_str(name)],
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn col_builds_column_expr() {
+        let e = col("x");
+        assert!(matches!(e, ExprIr::Column(s) if s == "x"));
+    }
+
+    #[test]
+    fn lit_builders() {
+        assert!(matches!(lit_i64(42), ExprIr::Lit(LiteralValue::I64(42))));
+        assert!(matches!(lit_i32(1), ExprIr::Lit(LiteralValue::I32(1))));
+        assert!(matches!(lit_f64(1.5), ExprIr::Lit(LiteralValue::F64(x)) if (x - 1.5).abs() < 1e-9));
+        assert!(matches!(lit_str("a"), ExprIr::Lit(LiteralValue::Str(s)) if s == "a"));
+        assert!(matches!(lit_bool(true), ExprIr::Lit(LiteralValue::Bool(true))));
+        assert!(matches!(lit_null(), ExprIr::Lit(LiteralValue::Null)));
+    }
+
+    #[test]
+    fn call_builds_call_expr() {
+        let e = call("upper", vec![col("name")]);
+        match &e {
+            ExprIr::Call { name, args } => {
+                assert_eq!(name, "upper");
+                assert_eq!(args.len(), 1);
+                assert!(matches!(&args[0], ExprIr::Column(s) if s == "name"));
+            }
+            _ => panic!("expected Call"),
+        }
+    }
+
+    #[test]
+    fn when_then_otherwise_builds_when_expr() {
+        let e = when(col("a")).then(lit_i64(1)).otherwise(lit_i64(0));
+        match &e {
+            ExprIr::When { condition, then_expr, otherwise } => {
+                assert!(matches!(condition.as_ref(), ExprIr::Column(s) if s == "a"));
+                assert!(matches!(then_expr.as_ref(), ExprIr::Lit(LiteralValue::I64(1))));
+                assert!(matches!(otherwise.as_ref(), ExprIr::Lit(LiteralValue::I64(0))));
+            }
+            _ => panic!("expected When"),
+        }
+    }
+
+    #[test]
+    fn binary_ops_build_correct_variants() {
+        let a = col("a");
+        let b = lit_i64(2);
+        assert!(matches!(eq(a.clone(), b.clone()), ExprIr::Eq(_, _)));
+        assert!(matches!(gt(a.clone(), b.clone()), ExprIr::Gt(_, _)));
+        assert!(matches!(and_(a.clone(), b.clone()), ExprIr::And(_, _)));
+        assert!(matches!(or_(a.clone(), b.clone()), ExprIr::Or(_, _)));
+        assert!(matches!(not_(a.clone()), ExprIr::Not(_)));
+        assert!(matches!(is_null(a.clone()), ExprIr::IsNull(_)));
+    }
+
+    #[test]
+    fn between_builds_between_expr() {
+        let e = between(col("x"), lit_i64(0), lit_i64(10));
+        match &e {
+            ExprIr::Between { left, lower, upper } => {
+                assert!(matches!(left.as_ref(), ExprIr::Column(s) if s == "x"));
+                assert!(matches!(lower.as_ref(), ExprIr::Lit(LiteralValue::I64(0))));
+                assert!(matches!(upper.as_ref(), ExprIr::Lit(LiteralValue::I64(10))));
+            }
+            _ => panic!("expected Between"),
+        }
+    }
+
+    #[test]
+    fn agg_builders_build_call() {
+        let e = sum(col("v"));
+        assert!(matches!(e, ExprIr::Call { name, .. } if name == "sum"));
+        let e = count(col("v"));
+        assert!(matches!(e, ExprIr::Call { name, .. } if name == "count"));
+        let e = alias(col("x"), "my_col");
+        assert!(matches!(e, ExprIr::Call { name, args } if name == "alias" && args.len() == 2));
+    }
+}
