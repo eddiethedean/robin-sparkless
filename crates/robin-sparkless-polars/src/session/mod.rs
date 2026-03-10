@@ -2148,13 +2148,13 @@ impl SparkSession {
                     .into(),
             ));
         }
-        // PR17: PySpark raises when schema has duplicate column names.
+        // #1347: Robin-sparkless rejects duplicate field names in schema; PySpark allows them. See PYSPARK_DIFFERENCES.md.
         let mut seen = std::collections::HashSet::new();
         for (name, _) in &schema {
             if !seen.insert(name.clone()) {
                 return Err(PolarsError::InvalidOperation(
                     format!(
-                        "create_dataframe_from_rows: duplicate column name '{name}' in schema (PySpark raises)"
+                        "create_dataframe_from_rows: duplicate column name '{name}' in schema (robin-sparkless rejects duplicate field names; see PYSPARK_DIFFERENCES.md)"
                     )
                     .into(),
                 ));
@@ -3288,7 +3288,7 @@ mod tests {
         assert_eq!(nested.get("b"), Some(&json!("y")));
     }
 
-    /// PR17: create_dataframe_from_rows raises when schema has duplicate column names (PySpark parity).
+    /// #1347: create_dataframe_from_rows raises when schema has duplicate column names (stricter than PySpark).
     #[test]
     fn test_create_dataframe_from_rows_duplicate_column_names_raises() {
         use serde_json::json;

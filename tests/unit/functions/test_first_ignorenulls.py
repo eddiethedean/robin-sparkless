@@ -619,3 +619,17 @@ class TestFirstIgnoreNulls:
         user3 = next((r for r in rows if r["user_id"] == 3), None)
         assert user3 is not None
         assert user3["first_status"] is None
+
+    def test_first_last_alias_parity_issue_1348(self, spark):
+        """F.first() and F.last() support .alias() for parity with PySpark (issue #1348)."""
+        df = spark.createDataFrame([(1, "a"), (2, "b")], ["id", "channel"])
+        result = df.groupBy().agg(
+            F.first("channel").alias("first_touch_channel"),
+            F.last("channel").alias("last_touch_channel"),
+        )
+        rows = result.collect()
+        assert len(rows) == 1
+        assert rows[0]["first_touch_channel"] == "a"
+        assert rows[0]["last_touch_channel"] == "b"
+        assert "first_touch_channel" in [f.name for f in result.schema.fields]
+        assert "last_touch_channel" in [f.name for f in result.schema.fields]
