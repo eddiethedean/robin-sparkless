@@ -239,7 +239,7 @@ jobs:
       - name: Smoke test
         run: $PY -c "from sparkless.sql import SparkSession; from sparkless.sql.functions import col; s = SparkSession.builder.app_name('test').get_or_create(); df = s.create_dataframe([(1, 2, 'a')], ['x', 'y', 'z']); assert df.count() == 1; print('sparkless OK')"
       - name: Run Python tests (same subset as CI)
-        run: $PY -m pytest tests -m "not delta and not integration" -v --tb=short --timeout 90
+        run: $PY -m pytest tests -m "not delta and not integration" -n 4 -v --tb=short --timeout 90
         timeout-minutes: 20
 
   # PyPI: build and publish wheels (Python 3.8+), after all checks pass
