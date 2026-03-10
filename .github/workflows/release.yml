@@ -226,9 +226,9 @@ jobs:
       - name: Set Python path
         run: |
           if [ "$RUNNER_OS" = "Windows" ]; then
-            echo "PY=.venv/Scripts/python" >> $GITHUB_ENV
+            echo "PY=$GITHUB_WORKSPACE/.venv/Scripts/python" >> $GITHUB_ENV
           else
-            echo "PY=.venv/bin/python" >> $GITHUB_ENV
+            echo "PY=$GITHUB_WORKSPACE/.venv/bin/python" >> $GITHUB_ENV
           fi
       - name: Install maturin and test deps
         run: $PY -m pip install maturin && $PY -m pip install pytest pytest-xdist hypothesis pytest-timeout
