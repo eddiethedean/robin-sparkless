@@ -171,9 +171,35 @@ jobs:
           elif [ "$spark_exit" -ne 0 ]; then
             exit "$spark_exit"
           fi
+          set +e
           cargo publish -p robin-sparkless-core --token "$CARGO_REGISTRY_TOKEN"
+          core_exit=$?
+          set -e
+          if [ "$core_exit" -eq 101 ]; then
+            echo "robin-sparkless-core version already on crates.io, skipping"
+          elif [ "$core_exit" -ne 0 ]; then
+            exit "$core_exit"
+          fi
+
+          set +e
           cargo publish -p robin-sparkless-polars --token "$CARGO_REGISTRY_TOKEN"
+          polars_exit=$?
+          set -e
+          if [ "$polars_exit" -eq 101 ]; then
+            echo "robin-sparkless-polars version already on crates.io, skipping"
+          elif [ "$polars_exit" -ne 0 ]; then
+            exit "$polars_exit"
+          fi
+
+          set +e
           cargo publish -p robin-sparkless --token "$CARGO_REGISTRY_TOKEN"
+          main_exit=$?
+          set -e
+          if [ "$main_exit" -eq 101 ]; then
+            echo "robin-sparkless version already on crates.io, skipping"
+          elif [ "$main_exit" -ne 0 ]; then
+            exit "$main_exit"
+          fi
 
   # --- Python (lint + tests, then PyPI publish for 3.8+) ---
   python-lint:
@@ -228,7 +254,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: sparkless-wheel-${{ runner.os }}
-          path: python/target/wheels/*.whl
+          path: target/wheels/*.whl
 
   python-tests:
     name: Python tests - ${{ matrix.os }} py${{ matrix.python-version }}
