@@ -39,7 +39,7 @@ serde_json = "1.0"
 aead = { git = "https://github.com/RustCrypto/traits", tag = "aead-v0.5.2" }
 aes = { git = "https://github.com/RustCrypto/block-ciphers", tag = "aes-v0.8.4" }
 alloc-no-stdlib = { git = "https://github.com/dropbox/rust-alloc-no-stdlib", branch = "master" }
-alloc-stdlib = { path = "vendor/alloc-stdlib" }
+alloc-stdlib = { git = "https://github.com/dropbox/rust-alloc-no-stdlib", branch = "master" }
 anes = { path = "vendor/anes" }
 
 [dev-dependencies]
