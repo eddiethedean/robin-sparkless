@@ -190,6 +190,46 @@ jobs:
       - name: Mypy
         run: cd python && mypy sparkless
 
+  python-build:
+    name: Python build extension - ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-py-build-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-py-build-
+      - name: Install maturin
+        run: pip install maturin
+      - name: Build wheel (abi3, Python 3.8+)
+        run: cd python && maturin build --release -i 3.8
+      - name: Upload wheel artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sparkless-wheel-${{ runner.os }}
+          path: python/target/wheels/*.whl
+
   python-tests:
     name: Python tests - ${{ matrix.os }} py${{ matrix.python-version }}
     runs-on: ${{ matrix.os }}
@@ -207,20 +247,6 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy, rustfmt
-      - name: Cache cargo
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-py-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-py-
       - name: Create venv
         run: python -m venv .venv
       - name: Set Python path
@@ -230,12 +256,15 @@ jobs:
           else
             echo "PY=$GITHUB_WORKSPACE/.venv/bin/python" >> $GITHUB_ENV
           fi
-      - name: Install maturin and test deps
-        run: $PY -m pip install maturin && $PY -m pip install pytest pytest-xdist hypothesis pytest-timeout
-      - name: Build and install extension
-        run: cd python && $PY -m maturin develop --release
-        env:
-          VIRTUAL_ENV: ${{ github.workspace }}/.venv
+      - name: Download built wheel
+        uses: actions/download-artifact@v4
+        with:
+          name: sparkless-wheel-${{ runner.os }}
+          path: dist
+      - name: Install wheel and test deps
+        run: |
+          $PY -m pip install dist/*.whl
+          $PY -m pip install pytest pytest-xdist hypothesis pytest-timeout
       - name: Smoke test
         run: $PY -c "from sparkless.sql import SparkSession; from sparkless.sql.functions import col; s = SparkSession.builder.app_name('test').get_or_create(); df = s.create_dataframe([(1, 2, 'a')], ['x', 'y', 'z']); assert df.count() == 1; print('sparkless OK')"
       - name: Run Python tests (same subset as CI)
