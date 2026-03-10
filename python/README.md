@@ -57,6 +57,18 @@ from sparkless.sql import SparkSession
 
 ## Installation
 
+### From PyPI (recommended)
+
+Install the published `sparkless` package:
+
+```bash
+pip install sparkless==4.0.0
+```
+
+This installs the Python API and the prebuilt native extension wheels (when available for your platform).
+
+### From this repo (developing against robin-sparkless)
+
 From the repo root (after cloning [robin-sparkless](https://github.com/eddiethedean/robin-sparkless)):
 
 ```bash

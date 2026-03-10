@@ -1,8 +1,11 @@
 # Releasing robin-sparkless
 
-This document describes how to cut a release and publish the crate to [crates.io](https://crates.io).
+This document describes how to cut a release and publish:
 
-The repository is a **Cargo workspace** with members: `robin-sparkless` (root, main facade), `crates/robin-sparkless-core`, `crates/robin-sparkless-polars`, and `crates/spark-sql-parser`. The primary dependency for users is **robin-sparkless**; `robin-sparkless-core`, `robin-sparkless-polars`, and `spark-sql-parser` may be published for advanced or minimal-use cases. `make check` and CI build the whole workspace (`cargo build --workspace --all-features`, `cargo test --workspace --all-features`).
+- Rust crates to [crates.io](https://crates.io) and
+- The Python package **sparkless** (Sparkless 4.0) to [PyPI](https://pypi.org/project/sparkless/).
+
+The repository is a **Cargo workspace** with members: `robin-sparkless` (root, main facade), `crates/robin-sparkless-core`, `crates/robin-sparkless-polars`, `crates/spark-sql-parser`, and the Python extension crate under `python/`. The primary Rust dependency for users is **robin-sparkless**; the subcrates may be published for advanced or minimal-use cases. `make check` and CI build the whole workspace (`cargo build --workspace --all-features`, `cargo test --workspace --all-features`).
 
 ## Version pinning (CI and local)
 
@@ -23,32 +26,63 @@ So that local development and CI use the same toolchains and tools:
 ## Prerequisites
 
 - The repository must have a GitHub Actions secret named **`CARGO_REGISTRY_TOKEN`** set to a crates.io API token.
-- Create a token at [crates.io/settings/tokens](https://crates.io/settings/tokens) (requires a crates.io account). Store it as a repo secret in GitHub under Settings → Secrets and variables → Actions.
+- The repository must have a GitHub Actions secret named **`PYPI_API_TOKEN`** set to a PyPI API token for the `sparkless` project.
+  - Create a token at [crates.io/settings/tokens](https://crates.io/settings/tokens) (requires a crates.io account). Store it as a repo secret in GitHub under Settings → Secrets and variables → Actions.
+  - Create a PyPI token at [pypi.org/manage/account/token](https://pypi.org/manage/account/token/) and store it as `PYPI_API_TOKEN` under the same GitHub settings.
 
 ## Release steps
 
-1. **Bump the version** in all four `Cargo.toml` files so they stay in sync:
+1. **Bump the version** in all Rust and Python manifests so they stay in sync:
    - [Cargo.toml](https://github.com/eddiethedean/robin-sparkless/blob/main/Cargo.toml) (root, `robin-sparkless`)
    - [crates/robin-sparkless-core/Cargo.toml](https://github.com/eddiethedean/robin-sparkless/blob/main/crates/robin-sparkless-core/Cargo.toml)
    - [crates/robin-sparkless-polars/Cargo.toml](https://github.com/eddiethedean/robin-sparkless/blob/main/crates/robin-sparkless-polars/Cargo.toml)
    - [crates/spark-sql-parser/Cargo.toml](https://github.com/eddiethedean/robin-sparkless/blob/main/crates/spark-sql-parser/Cargo.toml)
-   Use the same version for the three robin-sparkless crates (e.g. `4.0.0`). `spark-sql-parser` can use the same version or its own (e.g. `0.3.0`). Update the `version` in root and in the crates; if you publish the subcrates, also update the dependency version in root (e.g. `robin-sparkless-core = { version = "4.0", path = "..." }`, `robin-sparkless-polars = { version = "4.0", path = "..." }`). Commit and push to `main`.
+   - [python/pyproject.toml](https://github.com/eddiethedean/robin-sparkless/blob/main/python/pyproject.toml) (Python package metadata)
+   - [python/Cargo.toml](https://github.com/eddiethedean/robin-sparkless/blob/main/python/Cargo.toml) (native extension crate)
+
+   Use the same version for the three robin-sparkless crates and the Python package (e.g. `4.0.0`). `spark-sql-parser` can use the same version or its own (e.g. `0.3.0`). Update the `version` in root and the crates; if you publish the subcrates, also update the dependency version in root (e.g. `robin-sparkless-core = { version = "4.0", path = "..." }`, `robin-sparkless-polars = { version = "4.0", path = "..." }`). Commit and push to `main`.
 
 2. **Create and push a tag** matching the version with a `v` prefix:
+
    ```bash
    git tag v4.0.0
    git push origin v4.0.0
    ```
 
-3. **CI runs automatically** on the tag push (see [.github/workflows/release.yml](https://github.com/eddiethedean/robin-sparkless/blob/main/.github/workflows/release.yml)):
-   - Format check, Clippy (workspace), `cargo audit`, `cargo deny`, build and tests (workspace), and `cargo doc --workspace` must pass.
-   - Then the workflow publishes to crates.io **in dependency order**:
+3. **Release workflow runs automatically** on the tag push (see [.github/workflows/release.yml](https://github.com/eddiethedean/robin-sparkless/blob/main/.github/workflows/release.yml)):
+
+   - Rust checks:
+     - Format check, Clippy (workspace), `cargo audit`, `cargo deny`
+     - Build and tests for the whole workspace
+     - `cargo doc --workspace`
+   - Crates.io publish (Rust) in dependency order:
      1. `spark-sql-parser`
      2. `robin-sparkless-core`
      3. `robin-sparkless-polars`
      4. `robin-sparkless`
+   - Python checks:
+     - Mypy over the Python sources
+     - Build per-OS wheels for the native extension (Ubuntu, macOS, Windows)
+     - Python smoke tests + fast pytest subset against the built wheel across a Python version/OS matrix
+   - PyPI publish (Python):
+     - `sparkless` wheels and sdist are published to PyPI for:
+       - manylinux x86_64 + sdist
+       - manylinux aarch64
+       - musllinux x86_64
+       - musllinux aarch64
+       - macOS (x86_64-apple-darwin, aarch64-apple-darwin)
+       - Windows (x86_64, aarch64)
 
-4. **Verify**: Check [crates.io/crates/robin-sparkless](https://crates.io/crates/robin-sparkless), [robin-sparkless-core](https://crates.io/crates/robin-sparkless-core), [robin-sparkless-polars](https://crates.io/crates/robin-sparkless-polars), [spark-sql-parser](https://crates.io/crates/spark-sql-parser), and their docs on docs.rs after the workflow completes.
+4. **Verify**:
+   - Rust:
+     - [crates.io/crates/robin-sparkless](https://crates.io/crates/robin-sparkless)
+     - [robin-sparkless-core](https://crates.io/crates/robin-sparkless-core)
+     - [robin-sparkless-polars](https://crates.io/crates/robin-sparkless-polars)
+     - [spark-sql-parser](https://crates.io/crates/spark-sql-parser)
+     - Their docs on docs.rs after the workflow completes.
+   - Python:
+     - [pypi.org/project/sparkless](https://pypi.org/project/sparkless/)
+     - `pip install sparkless==X.Y.Z` in a clean virtualenv and a quick `from sparkless.sql import SparkSession` smoke test.
 
 ## Version policy
 
@@ -69,6 +103,8 @@ cargo publish -p robin-sparkless --token <CRATES_IO_TOKEN>
 
 Ensure the version in each crate’s `Cargo.toml` is bumped and that dependency `version` fields in root match the versions you are publishing.
 
-## Optional: Other language bindings
+## Notes on the Python package
 
-Phase 26 leaves non-Rust bindings as optional. If you decide to add Python or other language bindings in the future, publish them from a separate repository that depends on this crate via FFI, with their own release workflows and package registries.
+- The Python package `sparkless` (4.0+) is published from this repository’s `python/` directory.
+- Wheels are built using [maturin](https://github.com/PyO3/maturin) with a `pyo3`-based native extension crate (`sparkless-native`) that links against `robin-sparkless`.
+- The package exposes `from sparkless.sql import SparkSession` and uses a private `sparkless._native` module for the Rust bindings. The legacy `sparkless_robin` module name is no longer used.

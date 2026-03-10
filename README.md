@@ -43,7 +43,15 @@
 
 ### Python (sparkless 4.0.0)
 
-A Python package **sparkless** provides a PySpark-like API with no JVM, backed by robin-sparkless:
+A Python package **sparkless** provides a PySpark-like API with no JVM, backed by robin-sparkless.
+
+Install from **PyPI**:
+
+```bash
+pip install sparkless==4.0.0
+```
+
+Or from this repo (for developing the Rust backend alongside Python):
 
 ```bash
 pip install ./python
