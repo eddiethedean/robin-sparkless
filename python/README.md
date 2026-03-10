@@ -4,7 +4,7 @@
 
 Python 3.8+ · PySpark 3.2–3.5 compatible · License: MIT
 
-**Current release:** 4.0.0
+**Current release:** 4.0.1
 
 _No JVM · PySpark-like API · Rust/Polars engine · Fast local tests_
 
