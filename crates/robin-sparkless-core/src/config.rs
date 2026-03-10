@@ -98,9 +98,11 @@ mod tests {
 
     #[test]
     fn to_session_config_warehouse_and_case_sensitive() {
-        let mut c = SparklessConfig::default();
-        c.warehouse_dir = Some(PathBuf::from("/tmp/wh"));
-        c.case_sensitive = true;
+        let c = SparklessConfig {
+            warehouse_dir: Some(PathBuf::from("/tmp/wh")),
+            case_sensitive: true,
+            ..Default::default()
+        };
         let m = c.to_session_config();
         assert_eq!(m.get("spark.sql.warehouse.dir").unwrap(), "/tmp/wh");
         assert_eq!(m.get("spark.sql.caseSensitive").unwrap(), "true");
@@ -108,8 +110,12 @@ mod tests {
 
     #[test]
     fn to_session_config_extra_preserved() {
-        let mut c = SparklessConfig::default();
-        c.extra.insert("spark.app.name".to_string(), "MyApp".to_string());
+        let mut extra = std::collections::HashMap::new();
+        extra.insert("spark.app.name".to_string(), "MyApp".to_string());
+        let c = SparklessConfig {
+            extra,
+            ..Default::default()
+        };
         let m = c.to_session_config();
         assert_eq!(m.get("spark.app.name").unwrap(), "MyApp");
         assert_eq!(m.get("spark.sql.caseSensitive").unwrap(), "false");

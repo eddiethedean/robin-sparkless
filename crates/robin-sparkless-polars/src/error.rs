@@ -61,7 +61,9 @@ mod tests {
     fn polars_column_not_found_adds_cannot_resolve() {
         let e = PolarsError::ColumnNotFound("x".into());
         let core = polars_to_core_error(e);
-        assert!(matches!(core, robin_sparkless_core::EngineError::NotFound(s) if s.contains("cannot resolve")));
+        assert!(
+            matches!(core, robin_sparkless_core::EngineError::NotFound(s) if s.contains("cannot resolve"))
+        );
     }
 
     #[test]
@@ -70,7 +72,10 @@ mod tests {
         let core = polars_to_core_error(e);
         match &core {
             robin_sparkless_core::EngineError::NotFound(s) => {
-                assert!(s.contains("cannot resolve"), "expected 'cannot resolve' in {s:?}");
+                assert!(
+                    s.contains("cannot resolve"),
+                    "expected 'cannot resolve' in {s:?}"
+                );
             }
             _ => panic!("expected NotFound, got {core:?}"),
         }

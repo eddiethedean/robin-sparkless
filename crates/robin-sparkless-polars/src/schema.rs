@@ -20,9 +20,15 @@ mod tests {
         let schema = schema_from_json(json).unwrap();
         assert_eq!(schema.fields().len(), 2);
         assert_eq!(schema.fields()[0].name, "id");
-        assert!(matches!(schema.fields()[0].data_type, robin_sparkless_core::DataType::Long));
+        assert!(matches!(
+            schema.fields()[0].data_type,
+            robin_sparkless_core::DataType::Long
+        ));
         assert_eq!(schema.fields()[1].name, "name");
-        assert!(matches!(schema.fields()[1].data_type, robin_sparkless_core::DataType::String));
+        assert!(matches!(
+            schema.fields()[1].data_type,
+            robin_sparkless_core::DataType::String
+        ));
     }
 
     #[test]

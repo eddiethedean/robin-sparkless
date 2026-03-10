@@ -106,9 +106,7 @@ mod tests {
     #[test]
     fn udf_registry_register_and_get_case_sensitive() -> Result<(), PolarsError> {
         let reg = UdfRegistry::new();
-        reg.register_rust_udf("double", |cols: &[Series]| {
-            Ok(cols[0].clone() * 2)
-        })?;
+        reg.register_rust_udf("double", |cols: &[Series]| Ok(cols[0].clone() * 2))?;
         assert!(reg.get_rust_udf("double", true)?.is_some());
         assert!(reg.get_rust_udf("Double", true)?.is_none());
         assert!(reg.has_udf("double", true)?);

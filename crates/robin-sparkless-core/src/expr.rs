@@ -407,9 +407,14 @@ mod tests {
     fn lit_builders() {
         assert!(matches!(lit_i64(42), ExprIr::Lit(LiteralValue::I64(42))));
         assert!(matches!(lit_i32(1), ExprIr::Lit(LiteralValue::I32(1))));
-        assert!(matches!(lit_f64(1.5), ExprIr::Lit(LiteralValue::F64(x)) if (x - 1.5).abs() < 1e-9));
+        assert!(
+            matches!(lit_f64(1.5), ExprIr::Lit(LiteralValue::F64(x)) if (x - 1.5).abs() < 1e-9)
+        );
         assert!(matches!(lit_str("a"), ExprIr::Lit(LiteralValue::Str(s)) if s == "a"));
-        assert!(matches!(lit_bool(true), ExprIr::Lit(LiteralValue::Bool(true))));
+        assert!(matches!(
+            lit_bool(true),
+            ExprIr::Lit(LiteralValue::Bool(true))
+        ));
         assert!(matches!(lit_null(), ExprIr::Lit(LiteralValue::Null)));
     }
 
@@ -430,10 +435,20 @@ mod tests {
     fn when_then_otherwise_builds_when_expr() {
         let e = when(col("a")).then(lit_i64(1)).otherwise(lit_i64(0));
         match &e {
-            ExprIr::When { condition, then_expr, otherwise } => {
+            ExprIr::When {
+                condition,
+                then_expr,
+                otherwise,
+            } => {
                 assert!(matches!(condition.as_ref(), ExprIr::Column(s) if s == "a"));
-                assert!(matches!(then_expr.as_ref(), ExprIr::Lit(LiteralValue::I64(1))));
-                assert!(matches!(otherwise.as_ref(), ExprIr::Lit(LiteralValue::I64(0))));
+                assert!(matches!(
+                    then_expr.as_ref(),
+                    ExprIr::Lit(LiteralValue::I64(1))
+                ));
+                assert!(matches!(
+                    otherwise.as_ref(),
+                    ExprIr::Lit(LiteralValue::I64(0))
+                ));
             }
             _ => panic!("expected When"),
         }
