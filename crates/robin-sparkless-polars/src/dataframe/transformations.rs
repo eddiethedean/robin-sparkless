@@ -73,23 +73,62 @@ fn expand_pure_literal_to_rows(expr: Expr, first_col: Option<&str>) -> Result<Ex
         Expr::Alias(e, name) => (e.as_ref().clone(), Some(name.clone())),
         _ => (expr.clone(), None),
     };
-    let (lit_val, out_dtype): (String, DataType) = match &inner {
+    // Expand string literals and typed null list literals so Polars produces correct row count.
+    let expanded: Option<Expr> = match &inner {
         Expr::Literal(lv) if lv.get_datatype() == DataType::String => {
-            let s = lv.extract_str().unwrap_or("");
-            (s.to_string(), DataType::String)
+            let lit_val = lv.extract_str().unwrap_or("").to_string();
+            let out_dtype = DataType::String;
+            Some(if let Some(fc) = first_col {
+                let fc = fc.to_string();
+                use polars::datatypes::Field;
+                col(PlSmallStr::from(fc.as_str())).map(
+                    move |c| expect_col(udfs::apply_literal_string_repeat(c, &lit_val)),
+                    move |_schema, _field| Ok(Field::new("literal".into(), out_dtype.clone())),
+                )
+            } else {
+                // No columns (e.g. empty schema): use repeat(lit(""), len()) so empty df yields 0 rows
+                repeat(lit(lit_val), len().cast(DataType::UInt32))
+            })
         }
-        _ => return Ok(expr),
+        Expr::Cast { expr: e, dtype, .. } => {
+            // Special-case: cast(NULL as array<...>) should produce N null lists, not a single empty list.
+            if matches!(e.as_ref(), Expr::Literal(lv) if lv.is_null()) {
+                let out_dtype = match dtype {
+                    polars::prelude::DataTypeExpr::Literal(dt) if matches!(dt, DataType::List(_)) => {
+                        dt.clone()
+                    }
+                    _ => return Ok(expr),
+                };
+                Some(if let Some(fc) = first_col {
+                    let fc = fc.to_string();
+                    let out_dtype_for_apply = out_dtype.clone();
+                    let out_dtype_for_field = out_dtype.clone();
+                    use polars::datatypes::Field;
+                    col(PlSmallStr::from(fc.as_str())).map(
+                        move |c| {
+                            expect_col(udfs::apply_literal_null_list_repeat(
+                                c,
+                                &out_dtype_for_apply,
+                            ))
+                        },
+                        move |_schema, _field| {
+                            Ok(Field::new("literal".into(), out_dtype_for_field.clone()))
+                        },
+                    )
+                } else {
+                    // No columns: best-effort; scalar NULL list is fine here.
+                    inner.clone()
+                })
+            } else {
+                None
+            }
+        }
+        _ => None,
     };
-    let expanded = if let Some(fc) = first_col {
-        let fc = fc.to_string();
-        use polars::datatypes::Field;
-        col(PlSmallStr::from(fc.as_str())).map(
-            move |c| expect_col(udfs::apply_literal_string_repeat(c, &lit_val)),
-            move |_schema, _field| Ok(Field::new("literal".into(), out_dtype.clone())),
-        )
-    } else {
-        // No columns (e.g. empty schema): use repeat(lit(""), len()) so empty df yields 0 rows
-        repeat(lit(lit_val), len().cast(DataType::UInt32))
+
+    let expanded = match expanded {
+        Some(e) => e,
+        None => return Ok(expr),
     };
     Ok(if let Some(name) = alias {
         expanded.alias(name.as_str())

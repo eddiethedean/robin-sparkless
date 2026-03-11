@@ -9,6 +9,13 @@ pub fn parse_type_name(name: &str) -> Result<DataType, String> {
     if s.starts_with("decimal(") && s.contains(')') {
         return Ok(DataType::Float64);
     }
+    if let Some(inner) = s
+        .strip_prefix("array<")
+        .and_then(|rest| rest.strip_suffix('>'))
+    {
+        let inner_dt = parse_type_name(inner)?;
+        return Ok(DataType::List(Box::new(inner_dt)));
+    }
     Ok(match s.as_str() {
         "int" | "integer" => DataType::Int32,
         "long" | "bigint" => DataType::Int64,
@@ -69,6 +76,18 @@ mod tests {
         ));
         assert!(parse_type_name("unknown_type").is_err());
         assert!(parse_type_name("").is_err());
+    }
+
+    #[test]
+    fn parse_type_name_array() {
+        assert!(matches!(
+            parse_type_name("array<string>"),
+            Ok(DataType::List(_))
+        ));
+        assert!(matches!(
+            parse_type_name("array<long>"),
+            Ok(DataType::List(_))
+        ));
     }
 
     #[test]
