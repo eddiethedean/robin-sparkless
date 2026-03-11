@@ -1687,10 +1687,58 @@ pub fn apply_regexp_extract_lookaround(
     let out = StringChunked::from_iter_options(
         name.as_str().into(),
         ca.into_iter().map(|opt_s| {
-            opt_s.and_then(|s| {
-                let caps = re.captures(s).ok().flatten()?;
-                let m = caps.get(group_index)?;
-                Some(m.as_str().to_string())
+            // Null input stays null; no-match yields empty string (PySpark parity).
+            opt_s.map(|s| {
+                let caps_opt = re.captures(s).ok().flatten();
+                if let Some(caps) = caps_opt {
+                    if let Some(m) = caps.get(group_index) {
+                        return m.as_str().to_string();
+                    }
+                }
+                String::new()
+            })
+        }),
+    );
+    Ok(Some(Column::new(name, out.into_series())))
+}
+
+/// regexp_extract using regex crate (no lookaround). PySpark semantics:
+/// - null input -> null
+/// - non-null, no match -> empty string
+/// - non-null, match -> captured group (or full match for group 0).
+pub fn apply_regexp_extract(
+    column: Column,
+    pattern: &str,
+    group_index: usize,
+) -> PolarsResult<Option<Column>> {
+    use regex::Regex;
+    use polars::prelude::*;
+    let name = column.field().into_owned().name;
+    let series = column.take_materialized_series();
+    let casted = if series.dtype() == &DataType::String {
+        series
+    } else {
+        series
+            .cast(&DataType::String)
+            .map_err(|e| compute_err("regexp_extract cast", e))?
+    };
+    let ca = casted
+        .str()
+        .map_err(|e| compute_err("regexp_extract", e))?;
+    let re = Regex::new(pattern)
+        .map_err(|e| compute_err(&format!("regexp_extract invalid regex '{pattern}'"), e))?;
+    let out = StringChunked::from_iter_options(
+        name.as_str().into(),
+        ca.into_iter().map(|opt_s| {
+            // Null input stays null; no-match yields empty string (PySpark parity).
+            opt_s.map(|s| {
+                let caps_opt = re.captures(s);
+                if let Some(caps) = caps_opt {
+                    if let Some(m) = caps.get(group_index) {
+                        return m.as_str().to_string();
+                    }
+                }
+                String::new()
             })
         }),
     );
