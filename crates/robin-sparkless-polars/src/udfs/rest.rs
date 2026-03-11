@@ -398,11 +398,14 @@ pub fn apply_array_contains(columns: &mut [Column]) -> PolarsResult<Option<Colum
     let inner_dtype = list_ca.inner_dtype().clone();
     let value_casted = value_series.cast(&inner_dtype)?;
     let elem_len = value_casted.len();
-    let elem_vec: Vec<Option<AnyValue>> = (0..elem_len).map(|i| value_casted.get(i).ok()).collect();
-    let mut results: Vec<bool> = Vec::with_capacity(list_ca.len());
+    let elem_vec: Vec<Option<AnyValue>> =
+        (0..elem_len).map(|i| value_casted.get(i).ok()).collect();
+    let mut results: Vec<Option<bool>> = Vec::with_capacity(list_ca.len());
     for (row_idx, opt_list) in list_ca.amortized_iter().enumerate() {
         let ei = if elem_len == 1 { 0 } else { row_idx };
         let contains = match (opt_list, elem_vec.get(ei)) {
+            // PySpark: when the array itself is null, array_contains returns null.
+            (None, _) => None,
             (Some(amort), Some(Some(av))) => {
                 let val_series = any_value_to_single_series(av.clone(), &inner_dtype)?;
                 let val_key = series_to_set_key(&val_series);
@@ -415,14 +418,14 @@ pub fn apply_array_contains(columns: &mut [Column]) -> PolarsResult<Option<Colum
                         break;
                     }
                 }
-                found
+                Some(found)
             }
-            _ => false,
+            // Non-null array but null/missing value → PySpark returns False.
+            _ => Some(false),
         };
         results.push(contains);
     }
-    let out =
-        BooleanChunked::from_iter_options(name.as_str().into(), results.into_iter().map(Some));
+    let out = BooleanChunked::from_iter_options(name.as_str().into(), results.into_iter());
     Ok(Some(Column::new(name, out.into_series())))
 }
 
