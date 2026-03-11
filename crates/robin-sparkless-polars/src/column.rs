@@ -2510,9 +2510,9 @@ impl Column {
                 let count_expr = col(src).cum_count(false).cast(DataType::Float64);
                 sum_expr / count_expr
             } else if let Some(ref src) = self.source_for_running {
-                // Running sum in window order. Prefer native dtype so integer inputs yield BIGINT
-                // (PySpark parity, issue #1414). String inputs are not supported here.
-                col(src).cum_sum(false)
+                // Running sum in window order. Cast to Float64 so string columns work
+                // (PySpark parity, issue #393). Non-running sums still use native dtype.
+                col(src).cast(DataType::Float64).cum_sum(false)
             } else if let Some(ref src) = self.source_for_running_count {
                 // Running count in window order (PySpark count().over(order); #1218).
                 col(src).cum_count(false).cast(DataType::Int64)
@@ -2520,13 +2520,10 @@ impl Column {
                 self.expr().clone()
             }
         } else {
-            // Non-running aggregates over a window. For sum, prefer native dtype so integer inputs
-            // yield BIGINT (PySpark parity, issue #1414).
-            if let Some(ref src) = self.source_for_running {
-                col(src).sum()
-            } else {
-                self.expr().clone()
-            }
+            // Non-running aggregates over a window: use the aggregate expression as-is.
+            // For sum() on string columns, this expression already includes a cast to Float64
+            // (PySpark parity, issue #393).
+            self.expr().clone()
         };
         let expr = if order_by_encoded.is_empty() {
             base_expr.over(partition_exprs)
