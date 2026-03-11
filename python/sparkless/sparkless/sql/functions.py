@@ -702,7 +702,9 @@ def weekofyear(col_or_name):
     return _native.native_weekofyear(_as_col(col_or_name))
 
 
-make_date = _ni("make_date")
+def make_date(year, month, day):
+    """Build date from year, month, day (PySpark make_date)."""
+    return _native.make_date(_as_col(year), _as_col(month), _as_col(day))
 typeof = _ni("typeof")
 
 
