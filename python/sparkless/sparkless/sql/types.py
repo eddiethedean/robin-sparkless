@@ -245,7 +245,7 @@ class StructType(DataType):
     def jsonValue(self) -> dict:
         """Return a JSON-serializable dict describing the schema (PySpark-style)."""
 
-        def _dtype_json(dt: DataType):
+        def _dtype_json(dt: DataType | None):
             # Primitive types map to simple strings (e.g. \"string\").
             from sparkless.sql.types import (  # avoid cycles
                 ArrayType as _ArrayType,
@@ -263,7 +263,10 @@ class StructType(DataType):
                 # ArrayType: {"type": "array", "elementType": <inner>, "containsNull": bool}
                 if isinstance(dt, _ArrayType):
                     inner = getattr(dt, "elementType", None)
-                    inner_json = _dtype_json(inner) if inner is not None else "string"
+                    inner_dt: DataType = (
+                        inner if isinstance(inner, DataType) else StringType()
+                    )
+                    inner_json = _dtype_json(inner_dt)
                     contains_null = getattr(
                         dt, "containsNull", getattr(dt, "nullable", True)
                     )
@@ -274,8 +277,14 @@ class StructType(DataType):
                     }
                 # MapType: {"type": "map", "keyType": ..., "valueType": ..., "valueContainsNull": bool}
                 if isinstance(dt, _MapType):
-                    key_json = _dtype_json(getattr(dt, "keyType", None))
-                    value_json = _dtype_json(getattr(dt, "valueType", None))
+                    key_dt = getattr(dt, "keyType", None)
+                    value_dt = getattr(dt, "valueType", None)
+                    key_json = _dtype_json(
+                        key_dt if isinstance(key_dt, DataType) else StringType()
+                    )
+                    value_json = _dtype_json(
+                        value_dt if isinstance(value_dt, DataType) else StringType()
+                    )
                     value_contains_null = getattr(dt, "valueContainsNull", True)
                     return {
                         "type": "map",

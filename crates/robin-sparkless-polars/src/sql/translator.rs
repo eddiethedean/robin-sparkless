@@ -912,7 +912,11 @@ fn translate_select_from(
         //
         // We intentionally do NOT support "SELECT * WHERE ..." without FROM because there is no
         // source schema to expand '*' against.
-        if select.projection.iter().any(|p| matches!(p, SelectItem::Wildcard(_))) {
+        if select
+            .projection
+            .iter()
+            .any(|p| matches!(p, SelectItem::Wildcard(_)))
+        {
             return Err(PolarsError::InvalidOperation(
                 "SQL: SELECT * without FROM is not supported.".into(),
             ));

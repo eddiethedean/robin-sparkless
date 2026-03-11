@@ -1013,12 +1013,7 @@ impl PySparkSession {
     /// - range(start, end)
     /// - range(start, end, step)
     #[pyo3(signature = (start, end=None, step=None))]
-    fn range(
-        &self,
-        start: i64,
-        end: Option<i64>,
-        step: Option<i64>,
-    ) -> PyResult<PyDataFrame> {
+    fn range(&self, start: i64, end: Option<i64>, step: Option<i64>) -> PyResult<PyDataFrame> {
         let (start, end, step) = match (end, step) {
             (None, None) => (0, start, 1),
             (Some(e), None) => (start, e, 1),

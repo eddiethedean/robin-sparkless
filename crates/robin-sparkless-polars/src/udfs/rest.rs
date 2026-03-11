@@ -399,8 +399,7 @@ pub fn apply_array_contains(columns: &mut [Column]) -> PolarsResult<Option<Colum
     let inner_dtype = list_ca.inner_dtype().clone();
     let value_casted = value_series.cast(&inner_dtype)?;
     let elem_len = value_casted.len();
-    let elem_vec: Vec<Option<AnyValue>> =
-        (0..elem_len).map(|i| value_casted.get(i).ok()).collect();
+    let elem_vec: Vec<Option<AnyValue>> = (0..elem_len).map(|i| value_casted.get(i).ok()).collect();
     let mut results: Vec<Option<bool>> = Vec::with_capacity(list_ca.len());
     for (row_idx, opt_list) in list_ca.amortized_iter().enumerate() {
         // PySpark: when the array itself is null, array_contains returns null.
@@ -438,11 +437,14 @@ pub fn apply_array_contains(columns: &mut [Column]) -> PolarsResult<Option<Colum
 
 /// Create a per-row typed NULL list column.
 /// Used to expand `cast(NULL as array<...>)` into N rows (rather than a single empty list).
-pub fn apply_literal_null_list_repeat(column: Column, dtype: &DataType) -> PolarsResult<Option<Column>> {
+pub fn apply_literal_null_list_repeat(
+    column: Column,
+    dtype: &DataType,
+) -> PolarsResult<Option<Column>> {
     use polars::prelude::Series;
     let name = column.field().into_owned().name;
     let len = column.len();
-    let out = Series::full_null(name.clone().into(), len, dtype);
+    let out = Series::full_null(name.clone(), len, dtype);
     Ok(Some(Column::new(name, out)))
 }
 
@@ -1711,8 +1713,8 @@ pub fn apply_regexp_extract(
     pattern: &str,
     group_index: usize,
 ) -> PolarsResult<Option<Column>> {
-    use regex::Regex;
     use polars::prelude::*;
+    use regex::Regex;
     let name = column.field().into_owned().name;
     let series = column.take_materialized_series();
     let casted = if series.dtype() == &DataType::String {
@@ -1722,9 +1724,7 @@ pub fn apply_regexp_extract(
             .cast(&DataType::String)
             .map_err(|e| compute_err("regexp_extract cast", e))?
     };
-    let ca = casted
-        .str()
-        .map_err(|e| compute_err("regexp_extract", e))?;
+    let ca = casted.str().map_err(|e| compute_err("regexp_extract", e))?;
     let re = Regex::new(pattern)
         .map_err(|e| compute_err(&format!("regexp_extract invalid regex '{pattern}'"), e))?;
     let out = StringChunked::from_iter_options(

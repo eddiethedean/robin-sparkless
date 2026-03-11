@@ -1627,11 +1627,7 @@ impl Column {
         use polars::prelude::*;
         // PySpark ceil returns an integral (bigint) type. Cast the ceil result
         // to Int64 so the schema reflects LongType/bigint instead of double.
-        let expr = self
-            .expr()
-            .clone()
-            .ceil()
-            .cast(DataType::Int64);
+        let expr = self.expr().clone().ceil().cast(DataType::Int64);
         Self::from_expr(expr, None)
     }
 
@@ -1645,11 +1641,7 @@ impl Column {
         use polars::prelude::*;
         // PySpark floor returns an integral (bigint) type. Cast the floor result
         // to Int64 so the schema reflects LongType/bigint instead of double.
-        let expr = self
-            .expr()
-            .clone()
-            .floor()
-            .cast(DataType::Int64);
+        let expr = self.expr().clone().floor().cast(DataType::Int64);
         Self::from_expr(expr, None)
     }
 

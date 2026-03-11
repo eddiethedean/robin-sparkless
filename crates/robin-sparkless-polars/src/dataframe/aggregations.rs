@@ -114,7 +114,11 @@ impl GroupedData {
     }
 
     /// Same as resolve_column but uses a pre-collected schema to avoid repeated collect_schema() calls (performance).
-    fn resolve_column_with_schema(&self, name: &str, schema: &Schema) -> Result<String, PolarsError> {
+    fn resolve_column_with_schema(
+        &self,
+        name: &str,
+        schema: &Schema,
+    ) -> Result<String, PolarsError> {
         // Grouping columns by output name (e.g. "Key" after alias) are valid for agg/sort (issue #397).
         if self.case_sensitive {
             if self.grouping_cols.iter().any(|g| g == name) {

@@ -94,7 +94,9 @@ fn expand_pure_literal_to_rows(expr: Expr, first_col: Option<&str>) -> Result<Ex
             // Special-case: cast(NULL as array<...>) should produce N null lists, not a single empty list.
             if matches!(e.as_ref(), Expr::Literal(lv) if lv.is_null()) {
                 let out_dtype = match dtype {
-                    polars::prelude::DataTypeExpr::Literal(dt) if matches!(dt, DataType::List(_)) => {
+                    polars::prelude::DataTypeExpr::Literal(dt)
+                        if matches!(dt, DataType::List(_)) =>
+                    {
                         dt.clone()
                     }
                     _ => return Ok(expr),

@@ -6,6 +6,7 @@ Usage (from repo root, with sparkless installed):
   python scripts/run_window_benchmark.py [--rows 100000] [--groups 1000] [--repetitions 5]
   make bench-window
 """
+
 import sys
 from pathlib import Path
 
@@ -14,7 +15,7 @@ repo_root = Path(__file__).resolve().parent.parent
 if str(repo_root) not in sys.path:
     sys.path.insert(0, str(repo_root))
 
-from tests.benchmarks.window_like_benchmark import main, run_benchmark
+from tests.benchmarks.window_like_benchmark import main  # noqa: E402
 
 if __name__ == "__main__":
     main()
