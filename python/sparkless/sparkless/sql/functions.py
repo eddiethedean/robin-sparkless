@@ -494,7 +494,9 @@ def size(col_or_name: ColumnOrName) -> _ColumnType:
     return _col_result(_native_fn("size")(_as_col(col_or_name)))
 
 
-slice = _ni("slice")
+def slice(col_or_name: ColumnOrName, start: int, length: int) -> _ColumnType:
+    """Slice array from 1-based start with given length (PySpark slice)."""
+    return _col_result(_native_fn("array_slice")(_as_col(col_or_name), start, length))
 
 
 def sort_array(col_or_name: ColumnOrName, asc: bool = True) -> _ColumnType:

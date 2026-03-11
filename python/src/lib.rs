@@ -8400,6 +8400,14 @@ fn array_sort(column: &PyColumn) -> PyColumn {
 }
 
 #[pyfunction]
+#[pyo3(signature = (column, start, length=None))]
+fn array_slice(column: &PyColumn, start: i64, length: Option<i64>) -> PyColumn {
+    PyColumn {
+        inner: functions::array_slice(&column.inner, start, length),
+    }
+}
+
+#[pyfunction]
 #[pyo3(signature = (column, separator))]
 fn array_join(column: &PyColumn, separator: &str) -> PyColumn {
     PyColumn {
@@ -9043,6 +9051,7 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(explode_outer, m)?)?;
     m.add_function(wrap_pyfunction!(element_at, m)?)?;
     m.add_function(wrap_pyfunction!(array_sort, m)?)?;
+    m.add_function(wrap_pyfunction!(array_slice, m)?)?;
     m.add_function(wrap_pyfunction!(array_join, m)?)?;
     m.add_function(wrap_pyfunction!(array_max, m)?)?;
     m.add_function(wrap_pyfunction!(array_min, m)?)?;
