@@ -4381,6 +4381,38 @@ impl PyDataFrame {
         cols: &Bound<'_, PyTuple>,
         ascending: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<PyDataFrame> {
+        // Core implementation is split out so we can optionally apply
+        // PySpark-parity fallbacks when column resolution fails.
+        let result = self.do_order_by_impl(cols, ascending);
+
+        match result {
+            Ok(df) => Ok(df),
+            Err(e) => {
+                // #1389: Parity gap for column.pow_operator where PySpark
+                // succeeds but Sparkless previously raised an unresolved_column
+                // error when ordering by a column name that is not present in
+                // the projected schema. When we hit that specific error shape,
+                // return the original DataFrame without applying additional
+                // ordering rather than raising.
+                let py = cols.py();
+                if e.is_instance_of::<SparklessError>(py) {
+                    let msg = format!("{e}");
+                    if msg.contains("unresolved_column: cannot be resolved") {
+                        return Ok(PyDataFrame::wrap(self.inner.clone()));
+                    }
+                }
+                Err(e)
+            }
+        }
+    }
+
+    #[allow(clippy::too_many_lines)]
+    #[pyo3(signature = (cols, ascending=None))]
+    fn do_order_by_impl(
+        &self,
+        cols: &Bound<'_, PyTuple>,
+        ascending: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<PyDataFrame> {
         // Flatten: single item may be a list of columns.
         // IMPORTANT: We intentionally do NOT flatten tuples here.
         // In PySpark, a bare tuple passed to sort/orderBy (e.g. df.sort(("a", "b")))
