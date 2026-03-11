@@ -331,17 +331,26 @@ pub fn join(
 
         // Coerce join keys to a common type when left/right dtypes differ (PySpark #274).
         // Alias right keys to left key names so result has one key column name (#604, #743).
+        // Collect each side's schema once to avoid repeated schema_or_collect in get_column_dtype (performance, e.g. #1430).
+        let left_schema = left.polars_schema()?;
+        let right_schema = right.polars_schema()?;
         let mut left_casts: Vec<Expr> = Vec::new();
         let mut right_casts: Vec<Expr> = Vec::new();
         for (i, key) in left_on.iter().enumerate() {
             let left_name = &left_key_names[i];
             let right_name = &right_key_names[i];
-            let left_dtype = left.get_column_dtype(left_name.as_str()).ok_or_else(|| {
-                PolarsError::ComputeError(format!("join key '{key}' not found on left").into())
-            })?;
-            let right_dtype = right.get_column_dtype(right_name.as_str()).ok_or_else(|| {
-                PolarsError::ComputeError(format!("join key '{key}' not found on right").into())
-            })?;
+            let left_dtype = left_schema
+                .get(left_name.as_str())
+                .cloned()
+                .ok_or_else(|| {
+                    PolarsError::ComputeError(format!("join key '{key}' not found on left").into())
+                })?;
+            let right_dtype = right_schema
+                .get(right_name.as_str())
+                .cloned()
+                .ok_or_else(|| {
+                    PolarsError::ComputeError(format!("join key '{key}' not found on right").into())
+                })?;
             let target_name = left_name.as_str();
             if left_dtype != right_dtype {
                 let (l, r) = coerce_expr_pair_for_join(
