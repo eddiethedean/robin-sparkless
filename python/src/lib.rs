@@ -4398,12 +4398,7 @@ impl PyDataFrame {
                 if e.is_instance_of::<SparklessError>(py) {
                     let msg = format!("{e}");
                     if msg.contains("unresolved_column: cannot be resolved") {
-                        return Ok(PyDataFrame {
-                            inner: self.inner.clone(),
-                            schema_cache: self.schema_cache.clone(),
-                            mixed_row_shape_error_on_collect: self
-                                .mixed_row_shape_error_on_collect,
-                        });
+                        return Ok(PyDataFrame::wrap(self.inner.clone()));
                     }
                 }
                 Err(e)
@@ -4412,6 +4407,7 @@ impl PyDataFrame {
     }
 
     #[allow(clippy::too_many_lines)]
+    #[pyo3(signature = (cols, ascending=None))]
     fn do_order_by_impl(
         &self,
         cols: &Bound<'_, PyTuple>,
