@@ -1008,7 +1008,27 @@ impl PySparkSession {
         self.create_dataframe_from_rows(py, data, schema, verify_schema, sampling_ratio)
     }
 
-    fn range(&self, start: i64, end: i64, step: i64) -> PyResult<PyDataFrame> {
+    /// PySpark-compatible range:
+    /// - range(end)
+    /// - range(start, end)
+    /// - range(start, end, step)
+    #[pyo3(signature = (start, end=None, step=None))]
+    fn range(
+        &self,
+        start: i64,
+        end: Option<i64>,
+        step: Option<i64>,
+    ) -> PyResult<PyDataFrame> {
+        let (start, end, step) = match (end, step) {
+            (None, None) => (0, start, 1),
+            (Some(e), None) => (start, e, 1),
+            (Some(e), Some(s)) => (start, e, s),
+            (None, Some(_)) => {
+                return Err(pyo3::exceptions::PyTypeError::new_err(
+                    "range(end, step) is not supported; use range(start, end, step)",
+                ))
+            }
+        };
         self.inner
             .range(start, end, step)
             .map(PyDataFrame::wrap)
