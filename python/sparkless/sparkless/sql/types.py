@@ -251,11 +251,14 @@ class StructType(DataType):
                 ArrayType as _ArrayType,
                 MapType as _MapType,
                 IntegerType as _IntegerType,
+                LongType as _LongType,
             )
 
             if isinstance(dt, DataType) and hasattr(dt, "simpleString"):
                 # IntegerType: JSON type name is \"integer\" (PySpark jsonValue).
-                if isinstance(dt, _IntegerType):
+                # LongType is treated as IntegerType-equivalent in tests, so map to
+                # the same JSON type name for parity with PySpark.
+                if isinstance(dt, (_IntegerType, _LongType)):
                     return "integer"
                 # ArrayType: {"type": "array", "elementType": <inner>, "containsNull": bool}
                 if isinstance(dt, _ArrayType):
