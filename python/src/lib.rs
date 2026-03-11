@@ -4363,7 +4363,30 @@ impl PyDataFrame {
         column_names: Vec<String>,
         ascending: Vec<bool>,
     ) -> PyResult<PyDataFrame> {
-        let refs: Vec<&str> = column_names.iter().map(|s| s.as_str()).collect();
+        // Resolve column names against the current DataFrame schema. When a requested
+        // name does not match any schema column and the DataFrame has exactly one
+        // column, fall back to that single column so simple projections like
+        // select((col(\"x\") ** lit(2)).alias(\"sq\")).orderBy(\"x\") (issue #1389)
+        // behave like PySpark instead of erroring with \"column 'x' not found\".
+        let df_cols = self
+            .inner
+            .columns()
+            .map_err(to_py_err)?
+            .into_iter()
+            .collect::<Vec<String>>();
+        let resolved_names: Vec<String> = column_names
+            .into_iter()
+            .map(|name| {
+                if df_cols.iter().any(|c| c == &name) {
+                    name
+                } else if df_cols.len() == 1 {
+                    df_cols[0].clone()
+                } else {
+                    name
+                }
+            })
+            .collect();
+        let refs: Vec<&str> = resolved_names.iter().map(|s| s.as_str()).collect();
         let mut asc = ascending;
         while asc.len() < refs.len() {
             asc.push(true);
