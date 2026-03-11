@@ -4,7 +4,7 @@
 	build-python test-python test-python-upstream test-python-upstream-full \
 	test-parity-phase-a test-parity-phase-b test-parity-phase-c test-parity-phase-d \
 	test-parity-phase-e test-parity-phase-f test-parity-phase-g test-parity-phases \
-	sparkless-parity all
+	sparkless-parity all bench-window
 
 # Use stable toolchain when no default is configured (override with RUSTUP_TOOLCHAIN=nightly etc.)
 export RUSTUP_TOOLCHAIN ?= stable
@@ -158,6 +158,11 @@ test-python-upstream:
 test-python-upstream-full:
 	@PYTHON=$$(test -f .venv/bin/python && echo .venv/bin/python || echo python); \
 	$$PYTHON -m pytest tests -n 10 -v --tb=short
+
+# Window-like groupBy+join benchmark (issue #1430). Requires sparkless in .venv or PATH.
+bench-window:
+	@PYTHON=$$(test -f .venv/bin/python && echo .venv/bin/python || echo python); \
+	$$PYTHON scripts/run_window_benchmark.py --rows 100000 --groups 1000 --repetitions 5
 
 # Run everything: format, lint, security, deny, tests
 all: check

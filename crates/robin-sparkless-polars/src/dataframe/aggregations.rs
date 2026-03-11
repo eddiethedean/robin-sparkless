@@ -4,7 +4,7 @@ use super::DataFrame;
 use crate::column::Column;
 use polars::prelude::{
     DataFrame as PlDataFrame, DataType, Expr, LazyFrame, LazyGroupBy, NULL, NamedFrom, PlSmallStr,
-    PolarsError, SchemaNamesAndDtypes, Series, col, len, lit, when,
+    PolarsError, Schema, SchemaNamesAndDtypes, Series, col, len, lit, when,
 };
 use polars_plan::dsl::AggExpr;
 use std::collections::HashMap;
@@ -109,6 +109,12 @@ impl GroupedData {
     /// Resolve aggregation column name against LazyFrame schema (case-sensitive or -insensitive).
     /// Grouping output names (e.g. from groupBy(col("Name").alias("Key"))) are valid even when not in the input schema.
     fn resolve_column(&self, name: &str) -> Result<String, PolarsError> {
+        let schema = self.lf.clone().collect_schema()?;
+        self.resolve_column_with_schema(name, &schema)
+    }
+
+    /// Same as resolve_column but uses a pre-collected schema to avoid repeated collect_schema() calls (performance).
+    fn resolve_column_with_schema(&self, name: &str, schema: &Schema) -> Result<String, PolarsError> {
         // Grouping columns by output name (e.g. "Key" after alias) are valid for agg/sort (issue #397).
         if self.case_sensitive {
             if self.grouping_cols.iter().any(|g| g == name) {
@@ -122,7 +128,6 @@ impl GroupedData {
                 }
             }
         }
-        let schema = self.lf.clone().collect_schema()?;
         let names: Vec<String> = schema
             .iter_names_and_dtypes()
             .map(|(n, _)| n.to_string())
@@ -151,7 +156,19 @@ impl GroupedData {
 
     /// Resolve column names in an expression against the grouped schema (case-sensitive or -insensitive).
     /// Mirrors DataFrame::resolve_expr_column_names for agg expressions.
+    /// Kept for callers that do not have a pre-collected schema; agg() uses _with_schema for performance.
+    #[allow(dead_code)]
     fn resolve_expr_column_names(&self, expr: Expr) -> Result<Expr, PolarsError> {
+        let schema = self.lf.clone().collect_schema()?;
+        self.resolve_expr_column_names_with_schema(expr, &schema)
+    }
+
+    /// Same as resolve_expr_column_names but uses a pre-collected schema (avoids repeated collect_schema in agg).
+    fn resolve_expr_column_names_with_schema(
+        &self,
+        expr: Expr,
+        schema: &Schema,
+    ) -> Result<Expr, PolarsError> {
         use std::collections::HashSet;
         let mut alias_output_names: HashSet<String> = HashSet::new();
         let _ = expr.clone().try_map_expr(|e| {
@@ -161,6 +178,7 @@ impl GroupedData {
             Ok(e)
         })?;
         let gd = self;
+        let schema = schema.clone();
         expr.try_map_expr(move |e| {
             if let Expr::Column(name) = &e {
                 let name_str = name.as_str();
@@ -183,14 +201,14 @@ impl GroupedData {
                             .into(),
                         ));
                     }
-                    let resolved = gd.resolve_column(first)?;
+                    let resolved = gd.resolve_column_with_schema(first, &schema)?;
                     let mut expr = col(PlSmallStr::from(resolved.as_str()));
                     for field in rest {
                         expr = expr.struct_().field_by_name(field);
                     }
                     return Ok(expr);
                 }
-                let resolved = gd.resolve_column(name_str)?;
+                let resolved = gd.resolve_column_with_schema(name_str, &schema)?;
                 return Ok(Expr::Column(PlSmallStr::from(resolved.as_str())));
             }
             Ok(e)
@@ -812,9 +830,10 @@ impl GroupedData {
     /// Duplicate output names are disambiguated with _1, _2, ... (PySpark parity, issue #368).
     /// Column names in expressions are resolved case-insensitively when spark.sql.caseSensitive is false.
     pub fn agg(&self, aggregations: Vec<Expr>) -> Result<DataFrame, PolarsError> {
+        let schema = self.lf.clone().collect_schema()?;
         let resolved: Vec<Expr> = aggregations
             .into_iter()
-            .map(|e| self.resolve_expr_column_names(e))
+            .map(|e| self.resolve_expr_column_names_with_schema(e, &schema))
             .collect::<Result<Vec<_>, _>>()?;
         let disambiguated = disambiguate_agg_output_names(resolved);
         use polars::prelude::*;

@@ -874,6 +874,11 @@ impl DataFrame {
         }
     }
 
+    /// Polars schema for use in join/coercion to avoid repeated collect_schema per key (performance).
+    pub(crate) fn polars_schema(&self) -> Result<Arc<Schema>, PolarsError> {
+        self.schema_or_collect()
+    }
+
     /// Resolve a logical column name to the actual column name in the schema.
     /// When case_sensitive is false, matches case-insensitively.
     /// When the name is in ambiguous_columns (join same-name keys) or multiple physical columns
