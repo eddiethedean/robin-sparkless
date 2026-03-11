@@ -1634,7 +1634,15 @@ impl Column {
 
     /// Floor (PySpark floor)
     pub fn floor(&self) -> Column {
-        Self::from_expr(self.expr().clone().floor(), None)
+        use polars::prelude::*;
+        // PySpark floor returns an integral (bigint) type. Cast the floor result
+        // to Int64 so the schema reflects LongType/bigint instead of double.
+        let expr = self
+            .expr()
+            .clone()
+            .floor()
+            .cast(DataType::Int64);
+        Self::from_expr(expr, None)
     }
 
     /// Round to given decimal places (PySpark round). scale can be negative (e.g. -3 rounds to thousands).
