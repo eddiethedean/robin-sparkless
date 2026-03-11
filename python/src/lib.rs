@@ -1816,8 +1816,16 @@ fn python_data_and_schema(
     from_pandas: bool,
     pandas_column_order: Option<&[String]>,
 ) -> PyResult<(Vec<Vec<JsonValue>>, Vec<(String, String)>, bool, bool)> {
+    // #1346: PySpark raises PySparkTypeError [CANNOT_ACCEPT_OBJECT_IN_TYPE]; match type and message.
+    let type_name: String = data
+        .get_type()
+        .name()
+        .map(|s| s.to_string())
+        .unwrap_or_else(|_| "unknown".to_string());
     let list = data.downcast::<PyList>().map_err(|_| {
-        PyErr::new::<pyo3::exceptions::PyTypeError, _>("data must be a list (or pandas.DataFrame)")
+        SparklessError::new_err(format!(
+            "[CANNOT_ACCEPT_OBJECT_IN_TYPE] `StructType` can not accept object in type `{type_name}`."
+        ))
     })?;
     // PySpark parity: createDataFrame([]) without explicit schema raises (test expects match CANNOT_INFER_EMPTY_SCHEMA).
     if list.is_empty() && schema.is_none() {
