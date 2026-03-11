@@ -17,4 +17,3 @@ def test_array_struct_in_array_with_range(spark):
     assert len(arr) == 1
     assert arr[0]["x"] == 1
     assert arr[0]["s"] == "a"
-

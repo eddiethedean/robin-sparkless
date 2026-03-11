@@ -7,7 +7,9 @@ from tests.fixtures.spark_imports import get_spark_imports
 def test_add_months_parity():
     imports = get_spark_imports(BackendType.ROBIN)
     F = imports.F
-    spark = SparkBackend.create_mock_spark_session("add_months_1405", backend_type="robin")
+    spark = SparkBackend.create_mock_spark_session(
+        "add_months_1405", backend_type="robin"
+    )
 
     df = spark.createDataFrame(
         [("2020-01-31",), ("2020-02-29",), (None,)],
@@ -25,4 +27,3 @@ def test_add_months_parity():
     assert vals[0].strftime("%Y-%m-%d") == "2020-02-29"
     assert vals[1].strftime("%Y-%m-%d") == "2020-03-29"
     assert vals[2] is None
-

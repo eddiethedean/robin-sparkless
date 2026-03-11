@@ -24,7 +24,9 @@ from sparkless.sql.types import LongType
 
 
 def test_issue_1398_numeric_floor_schema_is_long() -> None:
-    spark = SparkSession.builder.appName("issue_1398_numeric_floor_schema").getOrCreate()
+    spark = SparkSession.builder.appName(
+        "issue_1398_numeric_floor_schema"
+    ).getOrCreate()
     try:
         df = spark.createDataFrame(
             [(1.9,), (-1.1,), (None,)],
@@ -43,4 +45,3 @@ def test_issue_1398_numeric_floor_schema_is_long() -> None:
         assert isinstance(field.dataType, LongType)
     finally:
         spark.stop()
-

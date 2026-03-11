@@ -15,7 +15,7 @@ This test exercises the same scenario against sparkless, ensuring that:
 - The default null sort order (ascending) places NULL values first.
 """
 
-from sparkless.sql import SparkSession, functions as F
+from sparkless.sql import SparkSession
 
 
 def test_issue_1383_orderby_null_default_schema_ui_and_data() -> None:
@@ -46,4 +46,3 @@ def test_issue_1383_orderby_null_default_schema_ui_and_data() -> None:
         assert non_null == sorted(non_null)
     finally:
         spark.stop()
-

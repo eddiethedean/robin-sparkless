@@ -19,7 +19,9 @@ from sparkless.sql import SparkSession, functions as F
 
 
 def test_issue_1396_string_regexp_extract_null_and_no_match() -> None:
-    spark = SparkSession.builder.appName("issue_1396_string_regexp_extract").getOrCreate()
+    spark = SparkSession.builder.appName(
+        "issue_1396_string_regexp_extract"
+    ).getOrCreate()
     try:
         df = spark.createDataFrame(
             [("abc123",), ("zzz",), (None,)],
@@ -34,4 +36,3 @@ def test_issue_1396_string_regexp_extract_null_and_no_match() -> None:
         assert rows == ["123", "", None]
     finally:
         spark.stop()
-

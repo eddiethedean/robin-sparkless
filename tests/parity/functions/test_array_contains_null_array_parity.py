@@ -9,7 +9,9 @@ def test_array_contains_null_array_matches_pyspark():
     imports = get_spark_imports(BackendType.ROBIN)
     F = imports.F
 
-    spark = SparkBackend.create_mock_spark_session("array_contains_null_array_1408", backend_type="robin")
+    spark = SparkBackend.create_mock_spark_session(
+        "array_contains_null_array_1408", backend_type="robin"
+    )
     try:
         base = spark.range(0, 3).select(
             F.col("id"),
@@ -34,13 +36,23 @@ def test_array_contains_null_array_matches_pyspark():
             pyspark_F.lit(None).cast("array<string>").alias("null_arr"),
         )
         df = base.select(
-            pyspark_F.when(pyspark_F.col("id") == pyspark_F.lit(0), pyspark_F.array(pyspark_F.lit("a"), pyspark_F.lit("b")))
-            .when(pyspark_F.col("id") == pyspark_F.lit(1), pyspark_F.array(pyspark_F.lit("x")))
+            pyspark_F.when(
+                pyspark_F.col("id") == pyspark_F.lit(0),
+                pyspark_F.array(pyspark_F.lit("a"), pyspark_F.lit("b")),
+            )
+            .when(
+                pyspark_F.col("id") == pyspark_F.lit(1),
+                pyspark_F.array(pyspark_F.lit("x")),
+            )
             .otherwise(pyspark_F.col("null_arr"))
             .alias("arr")
         )
         df2 = df.select(pyspark_F.col("arr"), pyspark_F.lit("a").alias("v"))
-        return df2.select(pyspark_F.array_contains(pyspark_F.col("arr"), pyspark_F.col("v")).alias("out")).collect()
+        return df2.select(
+            pyspark_F.array_contains(pyspark_F.col("arr"), pyspark_F.col("v")).alias(
+                "out"
+            )
+        ).collect()
 
     expected_rows = run_with_pyspark_expected(
         pyspark_fn,
@@ -48,4 +60,3 @@ def test_array_contains_null_array_matches_pyspark():
     )
 
     assert_rows_equal(actual_rows, expected_rows, order_matters=True)
-

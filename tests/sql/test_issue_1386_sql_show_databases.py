@@ -39,4 +39,3 @@ def test_issue_1386_sql_show_databases_schema_data_and_explain() -> None:
         assert plan.strip() != ""
     finally:
         spark.stop()
-

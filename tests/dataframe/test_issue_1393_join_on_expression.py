@@ -18,7 +18,7 @@ from __future__ import annotations
 import pytest
 
 from sparkless.errors import SparklessError
-from sparkless.sql import SparkSession, functions as F
+from sparkless.sql import SparkSession
 
 
 def _scenario_join_on_expression(session: SparkSession):
@@ -43,4 +43,3 @@ def test_issue_1393_join_on_expression_ambiguous_order_by_raises() -> None:
         assert "id" in msg
     finally:
         spark.stop()
-

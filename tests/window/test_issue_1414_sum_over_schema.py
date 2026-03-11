@@ -24,4 +24,3 @@ def test_window_sum_over_schema_bigint(spark) -> None:
         "DoubleType",
         "double",
     )
-

@@ -13,4 +13,3 @@ def test_array_literal_after_range(spark):
     assert len(rows) == 1
     arr = rows[0]["arr"]
     assert arr == ["a", "b"]
-

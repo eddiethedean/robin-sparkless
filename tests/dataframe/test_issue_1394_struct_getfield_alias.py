@@ -40,7 +40,9 @@ from sparkless.sql.types import StructType, StructField, StringType, IntegerType
 
 
 def test_issue_1394_struct_getfield_alias_schema_and_explain() -> None:
-    spark = SparkSession.builder.appName("issue_1394_struct_getfield_alias").getOrCreate()
+    spark = SparkSession.builder.appName(
+        "issue_1394_struct_getfield_alias"
+    ).getOrCreate()
     try:
         schema = StructType(
             [
@@ -83,4 +85,3 @@ def test_issue_1394_struct_getfield_alias_schema_and_explain() -> None:
         assert explain_str.strip() != ""
     finally:
         spark.stop()
-

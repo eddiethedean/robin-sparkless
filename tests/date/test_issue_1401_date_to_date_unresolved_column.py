@@ -43,4 +43,3 @@ def test_issue_1401_date_to_date_no_unresolved_column() -> None:
         assert values[2] is None
     finally:
         spark.stop()
-

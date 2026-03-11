@@ -39,4 +39,3 @@ def test_issue_1385_errors_missing_column_message() -> None:
         assert "Available columns: [x]" in msg
     finally:
         spark.stop()
-

@@ -44,4 +44,3 @@ def test_issue_1388_sql_describe_extended_schema_data_and_explain() -> None:
         assert plan.strip() != ""
     finally:
         spark.stop()
-

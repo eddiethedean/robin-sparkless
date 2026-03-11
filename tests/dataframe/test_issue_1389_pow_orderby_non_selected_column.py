@@ -32,4 +32,3 @@ def test_issue_1389_pow_orderby_non_selected_column() -> None:
         assert [r["sq"] for r in rows] == [9, 25]
     finally:
         spark.stop()
-

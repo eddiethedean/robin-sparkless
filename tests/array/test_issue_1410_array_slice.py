@@ -20,4 +20,3 @@ def test_array_slice_parity(spark):
     assert rows[0]["sliced"] == ["b", "c"]
     assert rows[1]["sliced"] == []
     assert rows[2]["sliced"] is None
-

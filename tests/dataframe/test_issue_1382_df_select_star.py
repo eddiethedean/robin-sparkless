@@ -39,4 +39,3 @@ def test_issue_1382_select_star_schema_and_explain() -> None:
         result.show()
     finally:
         spark.stop()
-

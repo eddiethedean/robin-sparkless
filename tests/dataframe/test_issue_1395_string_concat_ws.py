@@ -46,4 +46,3 @@ def test_issue_1395_string_concat_ws_null_handling() -> None:
         ]
     finally:
         spark.stop()
-

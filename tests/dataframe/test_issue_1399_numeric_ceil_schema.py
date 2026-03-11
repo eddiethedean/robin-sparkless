@@ -41,4 +41,3 @@ def test_issue_1399_numeric_ceil_schema_is_long() -> None:
         assert isinstance(field.dataType, LongType)
     finally:
         spark.stop()
-

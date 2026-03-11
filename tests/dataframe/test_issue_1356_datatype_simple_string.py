@@ -6,8 +6,6 @@ simpleString() returning the same strings as PySpark (e.g. 'int', 'long', 'strin
 
 from __future__ import annotations
 
-import pytest
-
 # Use sparkless types so we test the implementation under test
 from sparkless.sql import types as T
 

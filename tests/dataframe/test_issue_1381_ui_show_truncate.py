@@ -37,4 +37,3 @@ def test_issue_1381_show_truncate_schema_and_explain() -> None:
         assert plan.strip() != ""
     finally:
         spark.stop()
-

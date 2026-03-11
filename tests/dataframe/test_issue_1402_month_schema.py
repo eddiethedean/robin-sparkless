@@ -5,8 +5,6 @@ PySpark: struct<m:int>, data [{'m': None}, {'m': 12}]
 Sparkless (before fix): struct<m:string>, data [{'m': '12'}, {'m': None}]
 """
 
-import pytest
-
 from sparkless.sql import SparkSession, functions as F
 
 
@@ -38,4 +36,3 @@ def test_month_returns_integer_type_not_string():
             )
     finally:
         spark.stop()
-

@@ -5,8 +5,6 @@ PySpark: struct<d:int>, data [{'d': None}, {'d': 2}]
 Sparkless (before fix): struct<d:string>, data [{'d': '2'}, {'d': None}]
 """
 
-import pytest
-
 from sparkless.sql import SparkSession, functions as F
 
 

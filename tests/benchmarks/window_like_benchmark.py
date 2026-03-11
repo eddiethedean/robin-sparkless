@@ -15,10 +15,7 @@ def _build_spark() -> SparkSession:
     rather than on session configuration.
     """
 
-    return (
-        SparkSession.builder.appName("window_like_benchmark")
-        .getOrCreate()
-    )
+    return SparkSession.builder.appName("window_like_benchmark").getOrCreate()
 
 
 def _generate_data(rows: int, groups: int) -> List[Dict[str, Any]]:
@@ -47,7 +44,9 @@ def _generate_data(rows: int, groups: int) -> List[Dict[str, Any]]:
     return data
 
 
-def _run_single_workload(spark: SparkSession, rows: int, groups: int) -> Dict[str, float]:
+def _run_single_workload(
+    spark: SparkSession, rows: int, groups: int
+) -> Dict[str, float]:
     """
     Run a single instance of the window-like workload and return per-step timings.
 
@@ -185,4 +184,3 @@ def main(argv: List[str] | None = None) -> None:
 
 if __name__ == "__main__":
     main()
-

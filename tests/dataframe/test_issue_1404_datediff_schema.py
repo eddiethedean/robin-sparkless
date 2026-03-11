@@ -5,8 +5,6 @@ PySpark: struct<dd:int>
 Sparkless (before fix): struct<dd:long>
 """
 
-import pytest
-
 from sparkless.sql import SparkSession, functions as F
 
 

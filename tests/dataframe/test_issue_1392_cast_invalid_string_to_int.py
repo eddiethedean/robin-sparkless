@@ -24,7 +24,9 @@ from sparkless.sql import SparkSession, functions as F
 
 
 def test_issue_1392_cast_invalid_string_to_int_schema_and_explain() -> None:
-    spark = SparkSession.builder.appName("issue_1392_cast_invalid_string_to_int").getOrCreate()
+    spark = SparkSession.builder.appName(
+        "issue_1392_cast_invalid_string_to_int"
+    ).getOrCreate()
     try:
         df = spark.createDataFrame([("nope",)], ["s"])
         out = df.select(F.col("s").cast("int").alias("i"))
@@ -53,4 +55,3 @@ def test_issue_1392_cast_invalid_string_to_int_schema_and_explain() -> None:
         assert explain_str.strip() != ""
     finally:
         spark.stop()
-

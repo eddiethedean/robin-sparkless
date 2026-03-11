@@ -7,4 +7,3 @@ def test_df_limit_after_range_with_default_step(spark):
 
     assert len(rows) == 2
     assert [r.id for r in rows] == [0, 1]
-

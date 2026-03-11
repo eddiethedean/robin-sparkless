@@ -63,4 +63,6 @@ def test_conf_get_spark_app_name(spark) -> None:
     assert app_name, "conf should expose spark.app.name for PySpark parity (#1358)"
     # Session may be singleton (fixture); app_name should match session.app_name() when available.
     if hasattr(session, "app_name") and callable(session.app_name):
-        assert app_name == session.app_name(), "conf.get('spark.app.name') should match session.app_name()"
+        assert app_name == session.app_name(), (
+            "conf.get('spark.app.name') should match session.app_name()"
+        )

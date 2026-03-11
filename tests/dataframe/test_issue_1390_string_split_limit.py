@@ -18,9 +18,6 @@ This test locks in Sparkless behavior for:
 
 from __future__ import annotations
 
-import contextlib
-import io
-
 from sparkless.sql import SparkSession, functions as F
 
 
@@ -52,4 +49,3 @@ def test_issue_1390_split_limit_schema_and_explain() -> None:
         assert explain_str.strip() != ""
     finally:
         spark.stop()
-

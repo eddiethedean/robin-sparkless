@@ -54,4 +54,3 @@ def test_issue_1391_session_conf_app_name_schema_and_explain() -> None:
         assert explain_str.strip() != ""
     finally:
         spark.stop()
-

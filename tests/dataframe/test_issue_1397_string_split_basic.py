@@ -34,4 +34,3 @@ def test_issue_1397_string_split_basic_no_unresolved_column_error() -> None:
         assert out.schema.simpleString() == "struct<arr:array<string>>"
     finally:
         spark.stop()
-

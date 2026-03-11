@@ -35,4 +35,3 @@ def test_issue_1400_numeric_pmod_values() -> None:
         assert rows == [1, 2, None]
     finally:
         spark.stop()
-

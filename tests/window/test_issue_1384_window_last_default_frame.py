@@ -61,4 +61,3 @@ def test_issue_1384_window_last_default_frame_schema_ui_and_data() -> None:
         ]
     finally:
         spark.stop()
-
