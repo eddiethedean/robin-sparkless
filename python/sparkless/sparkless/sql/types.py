@@ -241,6 +241,65 @@ class StructType(DataType):
             parts.append(f"{f.name}:{dt_s}")
         return "struct<" + ",".join(parts) + ">"
 
+    # PySpark parity: schema.jsonValue() / schema.json()
+    def jsonValue(self) -> dict:
+        """Return a JSON-serializable dict describing the schema (PySpark-style)."""
+
+        def _dtype_json(dt: DataType):
+            # Primitive types map to simple strings (e.g. \"string\").
+            from sparkless.sql.types import ArrayType as _ArrayType, MapType as _MapType  # avoid cycles
+
+            if isinstance(dt, DataType) and hasattr(dt, "simpleString"):
+                # ArrayType: {"type": "array", "elementType": <inner>, "containsNull": bool}
+                if isinstance(dt, _ArrayType):
+                    inner = getattr(dt, "elementType", None)
+                    inner_json = _dtype_json(inner) if inner is not None else "string"
+                    contains_null = getattr(
+                        dt, "containsNull", getattr(dt, "nullable", True)
+                    )
+                    return {
+                        "type": "array",
+                        "elementType": inner_json,
+                        "containsNull": bool(contains_null),
+                    }
+                # MapType: {"type": "map", "keyType": ..., "valueType": ..., "valueContainsNull": bool}
+                if isinstance(dt, _MapType):
+                    key_json = _dtype_json(getattr(dt, "keyType", None))
+                    value_json = _dtype_json(getattr(dt, "valueType", None))
+                    value_contains_null = getattr(dt, "valueContainsNull", True)
+                    return {
+                        "type": "map",
+                        "keyType": key_json,
+                        "valueType": value_json,
+                        "valueContainsNull": bool(value_contains_null),
+                    }
+                # Other DataType subclasses: use simpleString().
+                try:
+                    return dt.simpleString()
+                except Exception:
+                    return "string"
+            # Fallback: treat as string type description.
+            return "string"
+
+        fields = []
+        for f in self.fields:
+            dt = getattr(f, "dataType", None)
+            fields.append(
+                {
+                    "name": f.name,
+                    "type": _dtype_json(dt),
+                    "nullable": bool(getattr(f, "nullable", True)),
+                    "metadata": getattr(f, "metadata", {}) or {},
+                }
+            )
+        return {"fields": fields, "type": "struct"}
+
+    def json(self) -> str:
+        """Return schema JSON string (PySpark parity wrapper for jsonValue())."""
+        import json as _json
+
+        return _json.dumps(self.jsonValue())
+
 
 class Row(tuple):
     """PySpark-like Row type returned by DataFrame.collect().
