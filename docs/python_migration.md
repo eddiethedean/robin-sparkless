@@ -1,10 +1,10 @@
-# Migration Guide (Python — Sparkless 4.0)
+# Migration Guide (Python — Sparkless 4.1)
 
-This page helps you switch to **Sparkless 4.0** (Rust backend) from **PySpark** or from **Sparkless 3.x** (Polars Python backend).
+This page helps you switch to **Sparkless 4.1** (Rust backend) from **PySpark** or from **Sparkless 3.x** (Polars Python backend).
 
-## Sparkless 3.x → 4.0
+## Sparkless 3.x → 4.1
 
-| Aspect        | Sparkless 3.x              | Sparkless 4.0                    |
+| Aspect        | Sparkless 3.x              | Sparkless 4.1                    |
 | ------------- | -------------------------- | --------------------------------- |
 | **Backend**   | Polars **Python** package   | **Rust** crate (robin-sparkless)  |
 | **Install**   | `pip install sparkless`    | `pip install ./python` (this repo) |
@@ -14,14 +14,14 @@ This page helps you switch to **Sparkless 4.0** (Rust backend) from **PySpark** 
 
 **What to do:**
 
-1. Install the 4.0 package from the [robin-sparkless](https://github.com/eddiethedean/robin-sparkless) repo: `pip install ./python` (or from a built wheel).
+1. Install the 4.1 package from the [robin-sparkless](https://github.com/eddiethedean/robin-sparkless) repo: `pip install ./python` (or from a built wheel).
 2. Keep your existing `from sparkless.sql import SparkSession, functions as F` and DataFrame code.
-3. Use `SparkSession.builder.app_name("...").get_or_create()` if you already do; 4.0 supports the same builder API.
+3. Use `SparkSession.builder.app_name("...").get_or_create()` if you already do; 4.1 supports the same builder API.
 4. See [PySpark differences](PYSPARK_DIFFERENCES.md) for any behavioral differences from PySpark (and thus from Sparkless 3.x where it matches PySpark).
 
 No code changes are required for typical tests and pipelines; the main difference is the execution engine (Rust instead of Polars Python).
 
-## PySpark → Sparkless 4.0
+## PySpark → Sparkless 4.1
 
 ### Quick swap
 
@@ -29,7 +29,7 @@ No code changes are required for typical tests and pipelines; the main differenc
 # Before (PySpark)
 from pyspark.sql import SparkSession, functions as F
 
-# After (Sparkless 4.0)
+# After (Sparkless 4.1)
 from sparkless.sql import SparkSession, functions as F
 ```
 
@@ -53,10 +53,10 @@ See [PySpark differences](PYSPARK_DIFFERENCES.md) for the full list. Summary:
 
 ### Testing both backends
 
-You can run the same test suite against PySpark or Sparkless 4.0:
+You can run the same test suite against PySpark or Sparkless 4.1:
 
 ```bash
-# Sparkless 4.0 (default in this repo)
+# Sparkless 4.1 (default in this repo)
 pytest tests -v
 
 # Real PySpark (requires Java + pyspark)
@@ -67,4 +67,4 @@ SPARKLESS_TEST_BACKEND=pyspark pytest tests -v
 
 - [Getting started (Python)](python_getting_started.md)
 - [PySpark differences](PYSPARK_DIFFERENCES.md)
-- [Package README](https://github.com/eddiethedean/robin-sparkless/blob/main/python/README.md) — Sparkless 3 vs 4.0, installation, API overview
+- [Package README](https://github.com/eddiethedean/robin-sparkless/blob/main/python/README.md) — Sparkless 3 vs 4.x, installation, API overview

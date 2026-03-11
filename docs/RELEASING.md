@@ -3,7 +3,7 @@
 This document describes how to cut a release and publish:
 
 - Rust crates to [crates.io](https://crates.io) and
-- The Python package **sparkless** (Sparkless 4.0) to [PyPI](https://pypi.org/project/sparkless/).
+- The Python package **sparkless** (Sparkless 4.1) to [PyPI](https://pypi.org/project/sparkless/).
 
 The repository is a **Cargo workspace** with members: `robin-sparkless` (root, main facade), `crates/robin-sparkless-core`, `crates/robin-sparkless-polars`, `crates/spark-sql-parser`, and the Python extension crate under `python/`. The primary Rust dependency for users is **robin-sparkless**; the subcrates may be published for advanced or minimal-use cases. `make check` and CI build the whole workspace (`cargo build --workspace --all-features`, `cargo test --workspace --all-features`).
 
@@ -45,8 +45,8 @@ So that local development and CI use the same toolchains and tools:
 2. **Create and push a tag** matching the version with a `v` prefix:
 
    ```bash
-   git tag v4.0.0
-   git push origin v4.0.0
+   git tag v4.1.0
+   git push origin v4.1.0
    ```
 
 3. **Release workflow runs automatically** on the tag push (see [.github/workflows/release.yml](https://github.com/eddiethedean/robin-sparkless/blob/main/.github/workflows/release.yml)):
@@ -105,6 +105,6 @@ Ensure the version in each crate’s `Cargo.toml` is bumped and that dependency 
 
 ## Notes on the Python package
 
-- The Python package `sparkless` (4.0+) is published from this repository’s `python/` directory.
+- The Python package `sparkless` (4.1+) is published from this repository’s `python/` directory.
 - Wheels are built using [maturin](https://github.com/PyO3/maturin) with a `pyo3`-based native extension crate (`sparkless-native`) that links against `robin-sparkless`.
 - The package exposes `from sparkless.sql import SparkSession` and uses a private `sparkless._native` module for the Rust bindings. The legacy `sparkless_robin` module name is no longer used.

@@ -1,6 +1,6 @@
-# Getting Started (Python — Sparkless 4.0)
+# Getting Started (Python — Sparkless 4.1)
 
-This guide is for the **Sparkless 4.0** Python package: a PySpark-like API backed by the [robin-sparkless](https://github.com/eddiethedean/robin-sparkless) Rust engine. Sparkless 3.x uses the Polars **Python** package; 4.0 uses the **Rust** crate (no Polars Python at runtime).
+This guide is for the **Sparkless 4.1** Python package: a PySpark-like API backed by the [robin-sparkless](https://github.com/eddiethedean/robin-sparkless) Rust engine. Sparkless 3.x uses the Polars **Python** package; 4.x uses the **Rust** crate (no Polars Python at runtime).
 
 ## Installation
 
@@ -56,13 +56,13 @@ spark.stop()
 
 ### Drop-in PySpark Replacement
 
-Sparkless 4.0 is designed to be a drop-in replacement for PySpark in tests and local workflows:
+Sparkless 4.1 is designed to be a drop-in replacement for PySpark in tests and local workflows:
 
 ```python
 # Before (PySpark)
 from pyspark.sql import SparkSession
 
-# After (Sparkless 4.0)
+# After (Sparkless 4.1)
 from sparkless.sql import SparkSession
 ```
 
@@ -112,7 +112,7 @@ result.show()
 
 Transformations (filter, select, join, etc.) are queued; execution happens on **actions** (`collect()`, `count()`, `show()`, `write`), matching PySpark’s model.
 
-## Testing with Sparkless 4.0
+## Testing with Sparkless 4.1
 
 ### Unit Test Example
 
@@ -147,9 +147,9 @@ SPARKLESS_TEST_BACKEND=pyspark pytest tests -v
 
 ## Performance
 
-Sparkless 4.0 uses the Rust engine (Polars in Rust). There is no JVM and no Polars Python dependency at runtime.
+Sparkless 4.1 uses the Rust engine (Polars in Rust). There is no JVM and no Polars Python dependency at runtime.
 
-| Operation         | PySpark | Sparkless 4.0 |
+| Operation         | PySpark | Sparkless 4.1 |
 | ----------------- | ------- | ------------- |
 | Session creation  | 30–45s  | &lt; 1s       |
 | Simple query      | 2–5s    | &lt; 0.1s     |
@@ -157,7 +157,7 @@ Sparkless 4.0 uses the Rust engine (Polars in Rust). There is no JVM and no Pola
 
 ## Next Steps
 
-- [Package README](https://github.com/eddiethedean/robin-sparkless/blob/main/python/README.md) — Installation, Sparkless 3 vs 4.0, API overview, backend
+- [Package README](https://github.com/eddiethedean/robin-sparkless/blob/main/python/README.md) — Installation, Sparkless 3 vs 4.x, API overview, backend
 - [PySpark differences](PYSPARK_DIFFERENCES.md) — Known divergences and caveats
 - [Migration (PySpark / Sparkless 3)](python_migration.md) — Switching from PySpark or Sparkless 3.x
 - [Parity status](PARITY_STATUS.md) — Coverage and fixture status
