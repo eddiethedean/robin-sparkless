@@ -78,9 +78,10 @@ pub fn first(col: &Column, ignorenulls: bool) -> Column {
 }
 
 /// Last value in group (PySpark last). Use in groupBy.agg() and pivot().agg(). ignorenulls reserved for API compatibility (Polars last takes last in group order).
+/// When used with .over(window) and orderBy, over_window uses first_last_value so last = current row (PySpark default frame).
 pub fn last(col: &Column, ignorenulls: bool) -> Column {
     let _ = ignorenulls;
-    Column::from_expr(col.expr().clone().last(), None)
+    Column::from_last_agg(col)
 }
 
 /// Any value from the group (PySpark any_value). Use in groupBy.agg(). ignorenulls reserved for API compatibility.

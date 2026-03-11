@@ -144,6 +144,27 @@ impl Column {
         }
     }
 
+    /// Last aggregate for groupBy.agg() and for .over(window). When used with .over() and orderBy,
+    /// over_window uses first_last_value so "last" = current row (PySpark default frame parity).
+    pub fn from_last_agg(col: &Column) -> Self {
+        let value_expr = col.expr().clone();
+        let expr = value_expr.clone().last();
+        Column {
+            name: "last".to_string(),
+            expr,
+            is_array_expr: false,
+            deferred: None,
+            udf_call: None,
+            source_for_running: None,
+            source_for_running_mean: None,
+            first_last_value: Some(FirstLastValue {
+                value_expr,
+                is_last: true,
+            }),
+            source_for_running_count: None,
+        }
+    }
+
     /// Create a Column for Python UDF call (eager execution at with_column).
     pub fn from_udf_call(name: String, args: Vec<Column>) -> Self {
         Column {
@@ -2433,11 +2454,13 @@ impl Column {
     /// `order_by_encoded`: e.g. ["value"] for asc, ["-value"] for desc.
     /// When `use_running_aggregate` is true and we have `source_for_running`, use cum_sum for running semantics.
     /// When `first_last_value` is Some and order is present, use order-sensitive first/last (PySpark #1145).
+    /// When `is_full_partition_frame` is false and we have last_value (first_last_value.is_last), use current-row semantics (PySpark default frame).
     pub fn over_window(
         &self,
         partition_by: &[&str],
         order_by_encoded: &[String],
         use_running_aggregate: bool,
+        is_full_partition_frame: bool,
     ) -> Result<Column, PolarsError> {
         // PySpark does not support countDistinct().over(); approx_count_distinct().over() is allowed (#1218).
         if expr_is_or_contains_n_unique(self.expr()) && self.name.starts_with("count_distinct(") {
@@ -2451,37 +2474,31 @@ impl Column {
             partition_by.iter().map(|s| col(*s)).collect()
         };
 
-        // Order-sensitive first_value/last_value (PySpark semantics: first/last by window order; #1145).
+        // last_value (or F.last().over()) with orderBy and default frame: "last" = current row (PySpark default frame).
         if let Some(ref fl) = self.first_last_value {
-            if !order_by_encoded.is_empty() {
+            if fl.is_last && !order_by_encoded.is_empty() && !is_full_partition_frame {
                 let mut order_exprs: Vec<Expr> = Vec::with_capacity(order_by_encoded.len());
                 let mut descending_multi: Vec<bool> = Vec::with_capacity(order_by_encoded.len());
                 for s in order_by_encoded.iter() {
+                    let s = s.trim();
                     let (name, descending) = if let Some(stripped) = s.strip_prefix('-') {
-                        (stripped, true)
+                        (stripped.trim(), true)
                     } else {
-                        (s.as_str(), false)
+                        (s.trim(), false)
                     };
                     order_exprs.push(col(name));
                     descending_multi.push(descending);
                 }
-                // first_value: first row in window order gets rank 1 → use window order direction.
-                // last_value: last row in window order gets rank 1 → use opposite of window order.
-                let order_desc = descending_multi.first().copied().unwrap_or(false);
-                let descending = if fl.is_last { !order_desc } else { order_desc };
-                let opts = RankOptions {
-                    method: RankMethod::Ordinal,
-                    descending,
+                let default_opts = SortOptions {
+                    descending: descending_multi.first().copied().unwrap_or(false),
+                    nulls_last: descending_multi.first().copied().unwrap_or(false),
+                    ..Default::default()
                 };
-                let order_col = order_exprs[0].clone();
-                let rank_expr = order_col.rank(opts, None).over(partition_exprs.clone());
-                let cond_col = Self::from_expr(rank_expr.eq(lit(1i64)), None);
-                let value_col = Self::from_expr(fl.value_expr.clone(), None);
-                let null_col = Self::from_expr(lit(polars::prelude::NULL), None);
-                let when_col = crate::functions::when(&cond_col)
-                    .then(&value_col)
-                    .otherwise(&null_col);
-                let expr = when_col.expr().clone().max().over(partition_exprs);
+                let expr = fl.value_expr.clone().over_with_options(
+                    Some(partition_exprs),
+                    Some((order_exprs, default_opts)),
+                    WindowMapping::default(),
+                )?;
                 return Ok(Self::from_expr(expr, None));
             }
         }

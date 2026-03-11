@@ -6570,11 +6570,20 @@ impl PyColumn {
         let funcs = PyModule::import_bound(py, "sparkless.sql.functions")?;
         let extract = funcs.getattr("_window_spec_to_partition_order")?;
         let result = extract.call1((window, false))?;
-        let (partition_by, order_by, use_running_aggregate): (Vec<String>, Vec<String>, bool) =
-            result.extract()?;
+        let (partition_by, order_by, use_running_aggregate, is_full_partition_frame): (
+            Vec<String>,
+            Vec<String>,
+            bool,
+            bool,
+        ) = result.extract()?;
         let partition_strs: Vec<&str> = partition_by.iter().map(|s| s.as_str()).collect();
         self.inner
-            .over_window(&partition_strs[..], &order_by, use_running_aggregate)
+            .over_window(
+                &partition_strs[..],
+                &order_by,
+                use_running_aggregate,
+                is_full_partition_frame,
+            )
             .map(|c| PyColumn { inner: c })
             .map_err(to_py_err)
     }
@@ -7613,7 +7622,7 @@ fn column_over_window(
     }
     let use_running = true;
     agg_col
-        .over_window(&partition_strs, &order_by, use_running)
+        .over_window(&partition_strs, &order_by, use_running, false)
         .map(|c| PyColumn { inner: c })
         .map_err(to_py_err)
 }
@@ -7769,7 +7778,7 @@ fn column_value_over_window(
     let col_expr = Column::new(column_name);
     let parts: Vec<&str> = partition_by.iter().map(|s| s.as_str()).collect();
     let windowed = col_expr
-        .over_window(&parts[..], &order_by, false)
+        .over_window(&parts[..], &order_by, false, false)
         .map_err(to_py_err)?;
     Ok(PyColumn { inner: windowed })
 }
@@ -7790,7 +7799,7 @@ fn lag_window(
     let lagged = col_expr.lag(offset);
     let parts: Vec<&str> = partition_by.iter().map(|s| s.as_str()).collect();
     let windowed = lagged
-        .over_window(&parts[..], &order_by, false)
+        .over_window(&parts[..], &order_by, false, false)
         .map_err(to_py_err)?;
     Ok(PyColumn { inner: windowed })
 }
@@ -7811,7 +7820,7 @@ fn lead_window(
     let led = col_expr.lead(offset);
     let parts: Vec<&str> = partition_by.iter().map(|s| s.as_str()).collect();
     let windowed = led
-        .over_window(&parts[..], &order_by, false)
+        .over_window(&parts[..], &order_by, false, false)
         .map_err(to_py_err)?;
     Ok(PyColumn { inner: windowed })
 }

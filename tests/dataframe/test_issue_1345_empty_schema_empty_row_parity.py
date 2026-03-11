@@ -6,8 +6,6 @@ PySpark accepts both; sparkless now matches (empty schema + empty row -> 1 row, 
 
 from __future__ import annotations
 
-import pytest
-
 from tests.fixtures.spark_imports import get_spark_imports
 
 imports = get_spark_imports()

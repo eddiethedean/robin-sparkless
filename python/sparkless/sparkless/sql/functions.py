@@ -1457,7 +1457,7 @@ class _RowNumberExpr:
     def over(self, window):
         import sparkless._native as _native
 
-        partition_by, encoded, _ = _window_spec_to_partition_order(window)
+        partition_by, encoded, _, _ = _window_spec_to_partition_order(window)
         return _native.row_number_window(partition_by, encoded)
 
 
@@ -1471,7 +1471,7 @@ class _PercentRankExpr:
     def over(self, window):
         import sparkless._native as _native
 
-        partition_by, encoded, _ = _window_spec_to_partition_order(window)
+        partition_by, encoded, _, _ = _window_spec_to_partition_order(window)
         return _native.percent_rank_window(partition_by, encoded)
 
 
@@ -1509,7 +1509,7 @@ class _RankExpr:
             ):
                 window = Window.partitionBy(*part_keys).orderBy(*part_keys)
 
-        partition_by, encoded, _ = _window_spec_to_partition_order(window)
+        partition_by, encoded, _, _ = _window_spec_to_partition_order(window)
         return _native.rank_window(partition_by, encoded)
 
 
@@ -1523,7 +1523,7 @@ class _DenseRankExpr:
     def over(self, window):
         import sparkless._native as _native
 
-        partition_by, encoded, _ = _window_spec_to_partition_order(window)
+        partition_by, encoded, _, _ = _window_spec_to_partition_order(window)
         return _native.dense_rank_window(partition_by, encoded)
 
 
@@ -1537,7 +1537,7 @@ class _CumeDistExpr:
     def over(self, window):
         import sparkless._native as _native
 
-        partition_by, encoded, _ = _window_spec_to_partition_order(window)
+        partition_by, encoded, _, _ = _window_spec_to_partition_order(window)
         return _native.cume_dist_window(partition_by, encoded)
 
 
@@ -1554,7 +1554,7 @@ class _NtileExpr:
     def over(self, window):
         import sparkless._native as _native
 
-        partition_by, encoded, _ = _window_spec_to_partition_order(window)
+        partition_by, encoded, _, _ = _window_spec_to_partition_order(window)
         return _native.ntile_window(self._n, partition_by, encoded)
 
 
@@ -1572,7 +1572,7 @@ class _LagExpr:
     def over(self, window):
         import sparkless._native as _native
 
-        partition_by, encoded, _ = _window_spec_to_partition_order(window)
+        partition_by, encoded, _, _ = _window_spec_to_partition_order(window)
         name = _col_name(self._col_or_name)
         return _native.lag_window(name, self._offset, partition_by, encoded)
 
@@ -1590,7 +1590,7 @@ class _LeadExpr:
     def over(self, window):
         import sparkless._native as _native
 
-        partition_by, encoded, _ = _window_spec_to_partition_order(window)
+        partition_by, encoded, _, _ = _window_spec_to_partition_order(window)
         name = _col_name(self._col_or_name)
         return _native.lead_window(name, self._offset, partition_by, encoded)
 
@@ -1632,7 +1632,7 @@ class _LastValueExpr:
     def over(self, window):
         import sparkless._native as _native
 
-        partition_by, order_by, _ = _window_spec_to_partition_order(
+        partition_by, order_by, _, _ = _window_spec_to_partition_order(
             window, require_order=False
         )
         from sparkless import column as col
@@ -1697,7 +1697,7 @@ def _window_spec_to_partition_order(window, require_order=True):
     """
     if isinstance(window, (list, tuple)):
         partition_names = [c if isinstance(c, str) else _col_name(c) for c in window]
-        return partition_names, [], False
+        return partition_names, [], False, False
     if not hasattr(window, "_partition_by") or not hasattr(window, "_order_by"):
         raise PySparkValueError("window function .over() expects a WindowSpec")
     partition_by = list(getattr(window, "_partition_by", []) or [])
@@ -1716,7 +1716,7 @@ def _window_spec_to_partition_order(window, require_order=True):
         else:
             flat_keys.append(k)
     if not flat_keys:
-        return partition_names, [], False
+        return partition_names, [], False, False
     order_col_names = []
     encoded = []
     for k in flat_keys:
@@ -1741,7 +1741,12 @@ def _window_spec_to_partition_order(window, require_order=True):
         order_col_names.append(name)
         encoded.append(name if ascending else f"-{name}")
     use_running = not all(oc in partition_names for oc in order_col_names)
-    return partition_names, encoded, use_running
+    is_full_partition_frame = (
+        _is_full_partition_frame(window)
+        if getattr(window, "_frame", None) is not None
+        else False
+    )
+    return partition_names, encoded, use_running, is_full_partition_frame
 
 
 def desc(col_or_name):
