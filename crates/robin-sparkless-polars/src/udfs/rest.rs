@@ -392,6 +392,7 @@ pub fn apply_array_contains(columns: &mut [Column]) -> PolarsResult<Option<Colum
     let name = columns[0].field().into_owned().name;
     let list_series = std::mem::take(&mut columns[0]).take_materialized_series();
     let value_series = std::mem::take(&mut columns[1]).take_materialized_series();
+    let list_nulls = list_series.is_null();
     let list_ca = list_series
         .list()
         .map_err(|e| compute_err("array_contains", e))?;
@@ -402,10 +403,16 @@ pub fn apply_array_contains(columns: &mut [Column]) -> PolarsResult<Option<Colum
         (0..elem_len).map(|i| value_casted.get(i).ok()).collect();
     let mut results: Vec<Option<bool>> = Vec::with_capacity(list_ca.len());
     for (row_idx, opt_list) in list_ca.amortized_iter().enumerate() {
+        // PySpark: when the array itself is null, array_contains returns null.
+        // Note: some list backends may yield a non-None amortized value even when the row is null,
+        // so also consult the null bitmap.
+        let row_is_null = list_nulls.get(row_idx).unwrap_or(false);
+        if opt_list.is_none() || row_is_null {
+            results.push(None);
+            continue;
+        }
         let ei = if elem_len == 1 { 0 } else { row_idx };
         let contains = match (opt_list, elem_vec.get(ei)) {
-            // PySpark: when the array itself is null, array_contains returns null.
-            (None, _) => None,
             (Some(amort), Some(Some(av))) => {
                 let val_series = any_value_to_single_series(av.clone(), &inner_dtype)?;
                 let val_key = series_to_set_key(&val_series);
@@ -427,6 +434,16 @@ pub fn apply_array_contains(columns: &mut [Column]) -> PolarsResult<Option<Colum
     }
     let out = BooleanChunked::from_iter_options(name.as_str().into(), results.into_iter());
     Ok(Some(Column::new(name, out.into_series())))
+}
+
+/// Create a per-row typed NULL list column.
+/// Used to expand `cast(NULL as array<...>)` into N rows (rather than a single empty list).
+pub fn apply_literal_null_list_repeat(column: Column, dtype: &DataType) -> PolarsResult<Option<Column>> {
+    use polars::prelude::Series;
+    let name = column.field().into_owned().name;
+    let len = column.len();
+    let out = Series::full_null(name.clone().into(), len, dtype);
+    Ok(Some(Column::new(name, out)))
 }
 
 /// Repeat each element n times (PySpark array_repeat).

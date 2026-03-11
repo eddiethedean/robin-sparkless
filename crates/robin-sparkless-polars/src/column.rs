@@ -2246,7 +2246,9 @@ impl Column {
         use polars::prelude::*;
         let start = self.expr().clone().cast(DataType::Date);
         let end = other.expr().clone().cast(DataType::Date);
-        Self::from_expr((end - start).dt().total_days(false), None)
+        // Cast to Int32 so schema maps to PySpark IntegerType instead of LongType.
+        let expr = (end - start).dt().total_days(false).cast(DataType::Int32);
+        Self::from_expr(expr, None)
     }
 
     /// Last day of the month for date/datetime column (PySpark last_day).
@@ -2852,12 +2854,19 @@ impl Column {
 
     /// Check if list contains value (PySpark array_contains).
     pub fn array_contains(&self, value: Expr) -> Column {
+        use polars::prelude::*;
         let args = [value];
-        let expr = self.expr().clone().map_many(
+        let base_expr = self.expr().clone().map_many(
             |cols| expect_col(crate::udfs::apply_array_contains(cols)),
             &args,
             |_schema, fields| Ok(Field::new(fields[0].name().clone(), DataType::Boolean)),
         );
+        // Ensure PySpark parity for null arrays: array_contains(null, x) -> null.
+        let is_null = self.expr().clone().is_null();
+        let expr = when(is_null)
+            .then(lit(NULL))
+            .otherwise(base_expr)
+            .cast(DataType::Boolean);
         Self::from_expr(expr, None)
     }
 
@@ -3104,12 +3113,27 @@ impl Column {
 
     /// True if two arrays have any element in common (PySpark arrays_overlap).
     pub fn arrays_overlap(&self, other: &Column) -> Column {
+        use polars::prelude::*;
+
         let args = [other.expr().clone()];
-        let expr = self.expr().clone().map_many(
+        let base_expr = self.expr().clone().map_many(
             |cols| expect_col(crate::udfs::apply_arrays_overlap(cols)),
             &args,
             |_schema, fields| Ok(Field::new(fields[0].name().clone(), DataType::Boolean)),
         );
+
+        // PySpark parity: arrays_overlap(null_array, other) and arrays_overlap(array, null_array)
+        // both yield null, not false. This also drives Column-arg array_contains.
+        let is_null = self
+            .expr()
+            .clone()
+            .is_null()
+            .or(other.expr().clone().is_null());
+        let expr = polars::prelude::when(is_null)
+            .then(lit(NULL))
+            .otherwise(base_expr)
+            .cast(DataType::Boolean);
+
         Self::from_expr(expr, None)
     }
 
