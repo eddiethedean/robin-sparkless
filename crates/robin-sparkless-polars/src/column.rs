@@ -1062,12 +1062,12 @@ impl Column {
         } else {
             let pat = pattern.to_string();
             Self::from_expr(
-                // PySpark implicitly casts non-string inputs to string for regex functions.
-                self.expr()
-                    .clone()
-                    .cast(DataType::String)
-                    .str()
-                    .extract(lit(pat), group_index),
+                // PySpark implicitly casts non-string inputs to string for regex functions,
+                // returns empty string for no-match, and null only for null input.
+                self.expr().clone().map(
+                    move |s| expect_col(crate::udfs::apply_regexp_extract(s, &pat, group_index)),
+                    |_schema, field| Ok(Field::new(field.name().clone(), DataType::String)),
+                ),
                 None,
             )
         }
