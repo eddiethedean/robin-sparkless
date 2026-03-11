@@ -229,6 +229,11 @@ def atan(c: ColumnOrName) -> _ColumnType:
     return _col_result(_native_fn("atan")(_as_col(c)))
 
 
+def pmod(dividend: ColumnOrName, divisor: ColumnOrName) -> _ColumnType:
+    """Positive modulus (PySpark pmod)."""
+    return _col_result(_native_fn("pmod")(_as_col(dividend), _as_col(divisor)))
+
+
 def atan2(y: ColumnOrName, x: ColumnOrName) -> _ColumnType:
     return _col_result(_native_fn("atan2")(_as_col(y), _as_col(x)))
 

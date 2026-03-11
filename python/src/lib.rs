@@ -8300,6 +8300,13 @@ fn signum(column: &PyColumn) -> PyColumn {
 }
 
 #[pyfunction]
+fn pmod(dividend: &PyColumn, divisor: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: functions::pmod(&dividend.inner, &divisor.inner),
+    }
+}
+
+#[pyfunction]
 fn sin(column: &PyColumn) -> PyColumn {
     PyColumn {
         inner: functions::sin(&column.inner),
@@ -9086,6 +9093,7 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(exp, m)?)?;
     m.add_function(wrap_pyfunction!(pow, m)?)?;
     m.add_function(wrap_pyfunction!(signum, m)?)?;
+    m.add_function(wrap_pyfunction!(pmod, m)?)?;
     m.add_function(wrap_pyfunction!(sin, m)?)?;
     m.add_function(wrap_pyfunction!(cos, m)?)?;
     m.add_function(wrap_pyfunction!(tan, m)?)?;
