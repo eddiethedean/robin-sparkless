@@ -92,6 +92,10 @@ This document lists **intentional or known divergences** from PySpark semantics 
 - **Invalid data type (#1346)**: When `data` is not a list, RDD, or pandas DataFrame, robin-sparkless raises **SparklessError** (PySparkTypeError) with message `[CANNOT_ACCEPT_OBJECT_IN_TYPE] \`StructType\` can not accept object in type \`<type>\`.` to match PySpark.
 - **Empty schema + empty rows (#1345)**: `createDataFrame([{}], StructType([]))` (or `[]` with empty schema) is supported: produces 1 row, 0 columns, matching PySpark.
 
+## SparkSession type / engine detection (#1344)
+
+- **`type(spark).__module__`**: Sparkless sets `SparkSession` and `SparkSessionBuilder` to `__module__ = "sparkless.sql.session"` (PyO3 `#[pyclass(module = "...")]`) so code that checks the session type for engine detection can use `"sparkless" in type(spark).__module__` or `type(spark).__module__ == "sparkless.sql.session"`. PySpark reports `pyspark.sql.session`.
+
 ## JVM / runtime stubs { #jvm--runtime-stubs }
 
 The following JVM- or runtime-related functions are implemented as **stubs for API compatibility**, not full equivalents of PySpark behavior:
