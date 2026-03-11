@@ -89,6 +89,7 @@ This document lists **intentional or known divergences** from PySpark semantics 
 - **Robin-sparkless (Rust)** — **`create_dataframe(data, column_names)`** accepts only 3-tuples `(i64, i64, String)` and three column names. For arbitrary schemas use **`create_dataframe_from_rows(rows, schema)`** (Rust).
 - **Column name case (#786, #785)**: Column names from the schema are preserved as returned by `columns()` and in collect row keys. Pass the exact case you need (e.g. `NaMe`) in the schema so `'NaMe' in df.columns` succeeds.
 - **Duplicate field names in StructType (#1347)**: PySpark allows duplicate field names in a schema (e.g. two fields both named `id`). Robin-sparkless **rejects** them and raises an error: `create_dataframe_from_rows: duplicate column name '…' in schema`. Use unique field names when creating DataFrames with an explicit schema so tests and pipelines work under both.
+- **Invalid data type (#1346)**: When `data` is not a list, RDD, or pandas DataFrame, robin-sparkless raises **SparklessError** (PySparkTypeError) with message `[CANNOT_ACCEPT_OBJECT_IN_TYPE] \`StructType\` can not accept object in type \`<type>\`.` to match PySpark.
 
 ## JVM / runtime stubs { #jvm--runtime-stubs }
 
