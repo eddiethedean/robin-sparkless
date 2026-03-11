@@ -53,3 +53,14 @@ def test_builder_config_chain(spark) -> None:
     session = _get_or_create(b)
     assert _conf_get(session, "a") == "1"
     assert _conf_get(session, "b") == "2"
+
+
+def test_conf_get_spark_app_name(spark) -> None:
+    """PySpark parity (#1358): spark.conf.get('spark.app.name') returns app name."""
+    session = _get_or_create(_builder(spark, "my_app_1358"))
+    conf = session.conf() if callable(session.conf) else session.conf
+    app_name = conf.get("spark.app.name")
+    assert app_name, "conf should expose spark.app.name for PySpark parity (#1358)"
+    # Session may be singleton (fixture); app_name should match session.app_name() when available.
+    if hasattr(session, "app_name") and callable(session.app_name):
+        assert app_name == session.app_name(), "conf.get('spark.app.name') should match session.app_name()"
