@@ -247,9 +247,16 @@ class StructType(DataType):
 
         def _dtype_json(dt: DataType):
             # Primitive types map to simple strings (e.g. \"string\").
-            from sparkless.sql.types import ArrayType as _ArrayType, MapType as _MapType  # avoid cycles
+            from sparkless.sql.types import (  # avoid cycles
+                ArrayType as _ArrayType,
+                MapType as _MapType,
+                IntegerType as _IntegerType,
+            )
 
             if isinstance(dt, DataType) and hasattr(dt, "simpleString"):
+                # IntegerType: JSON type name is \"integer\" (PySpark jsonValue).
+                if isinstance(dt, _IntegerType):
+                    return "integer"
                 # ArrayType: {"type": "array", "elementType": <inner>, "containsNull": bool}
                 if isinstance(dt, _ArrayType):
                     inner = getattr(dt, "elementType", None)
