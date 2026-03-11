@@ -196,6 +196,16 @@ mod tests {
     }
 
     #[test]
+    fn test_sql_simple_select_without_from() {
+        // Spark parity: allow selecting literals without a FROM clause (issue #1416).
+        let spark = SparkSession::builder().app_name("test").get_or_create();
+
+        let df = spark.sql("SELECT 1 AS x, 'a' AS s").unwrap();
+        assert_eq!(df.columns().unwrap(), vec!["x", "s"]);
+        assert_eq!(df.count().unwrap(), 1);
+    }
+
+    #[test]
     fn test_sql_select_from_temp_view() {
         let spark = SparkSession::builder().app_name("test").get_or_create();
         let df = spark
