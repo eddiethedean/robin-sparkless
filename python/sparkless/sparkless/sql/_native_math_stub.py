@@ -1,6 +1,6 @@
 from typing import Any
 
-from sparkless._native import pmod as _pmod  # type: ignore[attr-defined]
+from sparkless._native import pmod as _pmod
 
 
 def pmod(dividend: Any, divisor: Any) -> Any:
