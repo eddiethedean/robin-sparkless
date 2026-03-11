@@ -770,6 +770,12 @@ pub fn order_by(
         asc.push(true);
     }
     asc.truncate(column_names.len());
+    // Before resolving column names, enforce ambiguous-column semantics for
+    // unqualified user-facing orderBy references, just like select/select_items
+    // do via check_ambiguous_unqualified (#1393).
+    for name in &column_names {
+        df.check_ambiguous_unqualified(name)?;
+    }
     let resolved: Vec<String> = column_names
         .iter()
         .map(|c| df.resolve_column_name(c))
