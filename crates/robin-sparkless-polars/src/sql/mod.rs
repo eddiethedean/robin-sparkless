@@ -182,6 +182,20 @@ mod tests {
     use crate::SparkSession;
 
     #[test]
+    fn test_sql_select_where_without_from() {
+        // Spark parity: allow "SELECT ... WHERE ..." without a FROM clause (issue #1417).
+        let spark = SparkSession::builder().app_name("test").get_or_create();
+
+        let df = spark.sql("SELECT 1 AS x WHERE 1 = 1").unwrap();
+        assert_eq!(df.columns().unwrap(), vec!["x"]);
+        assert_eq!(df.count().unwrap(), 1);
+
+        let df2 = spark.sql("SELECT 1 AS x WHERE 1 = 0").unwrap();
+        assert_eq!(df2.columns().unwrap(), vec!["x"]);
+        assert_eq!(df2.count().unwrap(), 0);
+    }
+
+    #[test]
     fn test_sql_select_from_temp_view() {
         let spark = SparkSession::builder().app_name("test").get_or_create();
         let df = spark

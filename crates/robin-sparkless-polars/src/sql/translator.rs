@@ -907,9 +907,29 @@ fn translate_select_from(
     select: &Select,
 ) -> Result<crate::dataframe::DataFrame, PolarsError> {
     if select.from.is_empty() {
-        return Err(PolarsError::InvalidOperation(
-            "SQL: FROM clause is required. Register a table with create_or_replace_temp_view."
-                .into(),
+        // Spark allows "SELECT 1 AS x WHERE 1 = 1" (no FROM). We model this as a single-row
+        // relation with a dummy column that is not projected unless explicitly selected.
+        //
+        // We intentionally do NOT support "SELECT * WHERE ..." without FROM because there is no
+        // source schema to expand '*' against.
+        if select.projection.iter().any(|p| matches!(p, SelectItem::Wildcard(_))) {
+            return Err(PolarsError::InvalidOperation(
+                "SQL: SELECT * without FROM is not supported.".into(),
+            ));
+        }
+
+        use polars::prelude::{Column as PlColumn, DataFrame as PlDataFrame, NamedFrom, Series};
+        // Keep a single dummy column so Polars preserves row counts when projecting literals
+        // over an empty relation (e.g. WHERE filters all rows out).
+        const DUMMY_COL: &str = "__sparkless_dummy__";
+        let s = Series::new(DUMMY_COL.into(), &[1i32]);
+        let pl_df = PlDataFrame::new(1, vec![PlColumn::new(DUMMY_COL.into(), s)]).map_err(|e| {
+            PolarsError::InvalidOperation(format!("SQL: failed to create dummy frame: {e}").into())
+        })?;
+
+        return Ok(DataFrame::from_polars_with_options(
+            pl_df,
+            session.is_case_sensitive(),
         ));
     }
     let first_tj = &select.from[0];
@@ -1592,9 +1612,10 @@ fn apply_projection(
                         ProjItem::Expr(e, alias_str)
                     }
                     _ => {
-                        return Err(PolarsError::InvalidOperation(
-                            format!("SQL: unsupported expression with alias: {:?}", expr).into(),
-                        ));
+                        // Fall back to the general expression translator for literals and
+                        // other supported expressions (e.g. `SELECT 1 AS x`, issue #1417).
+                        let e = sql_expr_to_polars(expr, session, Some(df), None, None)?;
+                        ProjItem::Expr(e, alias_str)
                     }
                 }
             }
