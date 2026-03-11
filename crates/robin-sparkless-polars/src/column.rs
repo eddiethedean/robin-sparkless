@@ -2070,7 +2070,7 @@ impl Column {
         Self::from_expr(self.expr().clone().dt().day(), None)
     }
 
-    /// Alias for day. PySpark dayofmonth.
+    /// Alias for day. PySpark dayofmonth. Returns IntegerType (int) for schema parity (#1403).
     pub fn dayofmonth(&self) -> Column {
         let name = format!("dayofmonth({})", self.name());
         use polars::prelude::*;
@@ -2078,7 +2078,8 @@ impl Column {
             |s| expect_col(crate::udfs::apply_string_to_date_format(s, None, false)),
             |_schema, field| Ok(Field::new(field.name().clone(), DataType::Date)),
         );
-        Self::from_expr(parsed.dt().day().alias(&name), Some(name))
+        let day_expr = parsed.dt().day().cast(DataType::Int32);
+        Self::from_expr(day_expr.alias(&name), Some(name))
     }
 
     /// Extract quarter (1-4) from date/datetime column (PySpark quarter).
