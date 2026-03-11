@@ -1250,9 +1250,9 @@ mod tests {
         let pl_df = out.collect().unwrap();
 
         let key_col = pl_df.column("key").unwrap().i64().unwrap();
-        let count_col = pl_df.column("count").unwrap().u32().unwrap();
+        let count_col = pl_df.column("count").unwrap().i64().unwrap();
 
-        let mut by_key: HashMap<Option<i64>, u32> = HashMap::new();
+        let mut by_key: HashMap<Option<i64>, i64> = HashMap::new();
         for idx in 0..key_col.len() {
             let key = key_col.get(idx);
             let cnt = count_col.get(idx).unwrap_or(0);
