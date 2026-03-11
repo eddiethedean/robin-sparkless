@@ -5768,12 +5768,17 @@ impl PyColumn {
         })
     }
 
-    /// col ** 2 (PySpark pow). Supports int and float exponent. Ignores modulo (PySpark has no modulo for pow).
+    /// col ** 2 (PySpark pow). Supports int, float, or Column exponent. Ignores modulo (PySpark has no modulo for pow).
     fn __pow__(
         &self,
         other: &Bound<'_, PyAny>,
         _modulo: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<PyColumn> {
+        if let Ok(py_col) = other.downcast::<PyColumn>() {
+            return Ok(PyColumn {
+                inner: self.inner.pow_with(&py_col.borrow().inner),
+            });
+        }
         if let Ok(exp_i) = other.extract::<i64>() {
             return Ok(PyColumn {
                 inner: self.inner.pow(exp_i),
@@ -5791,7 +5796,7 @@ impl PyColumn {
             });
         }
         Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
-            "pow exponent must be int or float",
+            "pow exponent must be int, float, or Column",
         ))
     }
 
