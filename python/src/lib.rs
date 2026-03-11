@@ -3967,7 +3967,11 @@ impl PyDataFrame {
                     let elem_py = dtype_to_py(py, types_mod, elem)?;
                     Ok(types_mod
                         .getattr("ArrayType")?
-                        .call1((elem_py, true))?
+                        // PySpark: many array-returning functions (including split) use
+                        // containsNull=False for elementType=string. We default to False
+                        // here so schema.jsonValue() matches PySpark parity for cases
+                        // like string.split_limit (issue #1390).
+                        .call1((elem_py, false))?
                         .into_py(py))
                 }
                 DataType::Map(k, v) => {
@@ -5086,7 +5090,11 @@ impl PyDataFrame {
     #[pyo3(signature = (extended=None))]
     fn explain(&self, extended: Option<bool>) -> PyResult<String> {
         let _ = extended; // accepted for API parity; not yet used
-        Ok(self.inner.explain())
+        let plan = self.inner.explain();
+        // PySpark prints explain() output to stdout; return the string for tests
+        // while also printing for UI parity (capturable via redirect_stdout).
+        println!("{}", plan);
+        Ok(plan)
     }
 
     fn print_schema(&self) -> PyResult<String> {
