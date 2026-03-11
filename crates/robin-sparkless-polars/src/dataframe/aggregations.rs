@@ -200,7 +200,8 @@ impl GroupedData {
     /// Count rows in each group
     pub fn count(&self) -> Result<DataFrame, PolarsError> {
         use polars::prelude::*;
-        let agg_expr = vec![len().alias("count")];
+        // PySpark parity: groupBy(...).count() returns BIGINT (i64), not int.
+        let agg_expr = vec![len().cast(DataType::Int64).alias("count")];
         let lf = self.lazy_grouped.clone().agg(agg_expr);
         let mut pl_df = lf.collect()?;
         pl_df = reorder_groupby_columns(&mut pl_df, &self.grouping_cols)?;
@@ -1369,7 +1370,8 @@ impl CubeRollupData {
     /// Count rows per grouping set (PySpark cube/rollup .count()).
     pub fn count(&self) -> Result<DataFrame, PolarsError> {
         use polars::prelude::*;
-        self.agg(vec![len().alias("count")])
+        // PySpark parity: count is BIGINT (i64).
+        self.agg(vec![len().cast(DataType::Int64).alias("count")])
     }
 
     /// Run aggregation on each grouping set and union results. Missing keys become null.
