@@ -2330,7 +2330,10 @@ pub fn concat_ws(separator: &str, columns: &[&Column]) -> Column {
         .iter()
         .map(|c| c.expr().clone().cast(DataType::String))
         .collect();
-    crate::column::Column::from_expr(concat_str(&exprs, separator, false), None)
+    // PySpark semantics: concat_ws ignores nulls across all arguments, and returns
+    // null only when all inputs are null. Polars' concat_str with ignore_nulls=true
+    // implements the same behavior.
+    crate::column::Column::from_expr(concat_str(&exprs, separator, true), None)
 }
 
 /// Row number window function (1, 2, 3 by order within partition).
