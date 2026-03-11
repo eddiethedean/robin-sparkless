@@ -8175,6 +8175,14 @@ fn ceil(column: &PyColumn) -> PyColumn {
 }
 
 #[pyfunction]
+#[pyo3(name = "native_add_months")]
+fn native_add_months(column: &PyColumn, months: i32) -> PyColumn {
+    PyColumn {
+        inner: functions::add_months(&column.inner, months),
+    }
+}
+
+#[pyfunction]
 fn make_date(year: &PyColumn, month: &PyColumn, day: &PyColumn) -> PyColumn {
     PyColumn {
         inner: functions::make_date(&year.inner, &month.inner, &day.inner),
@@ -9029,6 +9037,7 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(length, m)?)?;
     m.add_function(wrap_pyfunction!(floor, m)?)?;
     m.add_function(wrap_pyfunction!(ceil, m)?)?;
+    m.add_function(wrap_pyfunction!(native_add_months, m)?)?;
     m.add_function(wrap_pyfunction!(make_date, m)?)?;
     m.add_function(wrap_pyfunction!(abs, m)?)?;
     m.add_function(wrap_pyfunction!(sqrt, m)?)?;
