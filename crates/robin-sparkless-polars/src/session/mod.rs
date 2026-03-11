@@ -1987,16 +1987,20 @@ impl SparkSession {
         verify_schema: bool,
         schema_was_inferred: bool,
     ) -> Result<DataFrame, PolarsError> {
-        // When schema is explicitly empty and rows are not, fail with LENGTH_SHOULD_BE_THE_SAME (Phase 6 / PySpark parity).
+        // #1345: Empty schema + rows with 0 fields each is valid (PySpark: createDataFrame([{}], StructType([])) -> 1 row, 0 cols).
+        // Only fail when a row has more than 0 fields (LENGTH_SHOULD_BE_THE_SAME).
         if schema.is_empty() && !rows.is_empty() {
-            let got = rows[0].len();
-            return Err(PolarsError::InvalidOperation(
-                format!(
-                    "create_dataframe_from_rows: LENGTH_SHOULD_BE_THE_SAME. Expected 0 fields, got {} (row index 0).",
-                    got
-                )
-                    .into(),
-            ));
+            for (row_idx, row) in rows.iter().enumerate() {
+                if !row.is_empty() {
+                    return Err(PolarsError::InvalidOperation(
+                        format!(
+                            "create_dataframe_from_rows: LENGTH_SHOULD_BE_THE_SAME. Expected 0 fields, got {} (row index {}).",
+                            row.len(), row_idx
+                        )
+                            .into(),
+                    ));
+                }
+            }
         }
         // #624: When schema is only column names (all "string"), infer from data (PySpark parity).
         // #731, #769, #772: createDataFrame(rows, ["name", "age"]) yields int/double/bool columns.
@@ -2140,6 +2144,13 @@ impl SparkSession {
             if rows.is_empty() {
                 return Ok(DataFrame::from_eager_with_options(
                     PlDataFrame::new(0, vec![])?,
+                    self.is_case_sensitive(),
+                ));
+            }
+            // #1345: PySpark allows createDataFrame([{}], StructType([])) -> 1 row, 0 cols.
+            if rows.iter().all(|r| r.is_empty()) {
+                return Ok(DataFrame::from_eager_with_options(
+                    PlDataFrame::new(rows.len(), vec![])?,
                     self.is_case_sensitive(),
                 ));
             }
@@ -3081,22 +3092,26 @@ mod tests {
         assert!(result.is_err());
     }
 
+    /// #1345: Empty schema + rows with 0 fields each succeeds (PySpark: createDataFrame([{}], StructType([]))).
     #[test]
     fn test_create_dataframe_from_rows_empty_schema_with_rows_returns_error() {
         let spark = SparkSession::builder().app_name("test").get_or_create();
         let rows: Vec<Vec<JsonValue>> = vec![vec![]];
         let schema: Vec<(String, String)> = vec![];
         let result = spark.create_dataframe_from_rows(rows, schema, false, false);
-        match &result {
-            Err(e) => assert!(
-                e.to_string().contains("LENGTH_SHOULD_BE_THE_SAME")
-                    || e.to_string().contains("Expected 0 fields")
-                    || e.to_string().contains("schema must not be empty"),
-                "expected error for empty schema with non-empty rows: {}",
-                e
-            ),
-            Ok(_) => panic!("expected error for empty schema with non-empty rows"),
-        }
+        let df = result.expect("#1345: empty schema + empty row(s) should succeed");
+        assert_eq!(df.count().unwrap(), 1);
+        assert_eq!(df.columns().unwrap().len(), 0);
+        // Empty schema + row with >0 fields still errors
+        let rows_bad: Vec<Vec<JsonValue>> = vec![vec![JsonValue::Null]];
+        let result_bad = spark.create_dataframe_from_rows(rows_bad, vec![], false, false);
+        let err_msg = match &result_bad {
+            Err(e) => e.to_string(),
+            Ok(_) => panic!("expected error for empty schema with row containing 1 field"),
+        };
+        assert!(
+            err_msg.contains("LENGTH_SHOULD_BE_THE_SAME") || err_msg.contains("Expected 0 fields")
+        );
     }
 
     #[test]
@@ -3674,6 +3689,19 @@ mod tests {
             ),
             Ok(_) => panic!("expected error for empty schema with non-empty rows"),
         }
+    }
+
+    /// #1345: Empty schema + rows with 0 fields each is valid (PySpark: createDataFrame([{}], StructType([])) -> 1 row, 0 cols).
+    #[test]
+    fn test_issue_1345_empty_schema_empty_rows_parity() {
+        let spark = SparkSession::builder().app_name("test").get_or_create();
+        let schema: Vec<(String, String)> = vec![];
+        let rows: Vec<Vec<JsonValue>> = vec![vec![]];
+        let df = spark
+            .create_dataframe_from_rows(rows, schema, false, false)
+            .expect("#1345: empty schema + empty row should succeed");
+        assert_eq!(df.count().unwrap(), 1);
+        assert_eq!(df.columns().unwrap().len(), 0);
     }
 
     /// #627: create_dataframe_from_rows accepts map column (dict/object). PySpark MapType parity.
