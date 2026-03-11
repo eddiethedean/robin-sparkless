@@ -1624,7 +1624,15 @@ impl Column {
 
     /// Ceiling (PySpark ceil)
     pub fn ceil(&self) -> Column {
-        Self::from_expr(self.expr().clone().ceil(), None)
+        use polars::prelude::*;
+        // PySpark ceil returns an integral (bigint) type. Cast the ceil result
+        // to Int64 so the schema reflects LongType/bigint instead of double.
+        let expr = self
+            .expr()
+            .clone()
+            .ceil()
+            .cast(DataType::Int64);
+        Self::from_expr(expr, None)
     }
 
     /// Alias for ceil. PySpark ceiling.
