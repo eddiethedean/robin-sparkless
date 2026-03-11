@@ -41,14 +41,14 @@
 
 ## Installation
 
-### Python (sparkless 4.0.1)
+### Python (sparkless 4.1.0)
 
 A Python package **sparkless** provides a PySpark-like API with no JVM, backed by robin-sparkless.
 
 Install from **PyPI**:
 
 ```bash
-pip install sparkless==4.0.1
+pip install sparkless==4.1.0
 ```
 
 Or from this repo (for developing the Rust backend alongside Python):
@@ -65,14 +65,14 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-robin-sparkless = "4.0.0"
+robin-sparkless = "4.1.0"
 ```
 
 Optional features:
 
 ```toml
-robin-sparkless = { version = "4.0.0", features = ["sql"] }   # spark.sql(), temp views
-robin-sparkless = { version = "4.0.0", features = ["delta"] }  # Delta Lake read/write
+robin-sparkless = { version = "4.1.0", features = ["sql"] }   # spark.sql(), temp views
+robin-sparkless = { version = "4.1.0", features = ["delta"] }  # Delta Lake read/write
 ```
 
 ## Quick start
@@ -143,7 +143,7 @@ Use the **engine-agnostic ExprIr API** and `*_engine()` methods so your public s
 
 ```toml
 [dependencies]
-robin-sparkless = "4.0.0"
+robin-sparkless = "4.1.0"
 ```
 
 ```rust
@@ -206,7 +206,7 @@ CI runs format, clippy, audit, deny, Rust tests, and parity tests on push/PR (se
 
 | Resource | Description |
 |----------|-------------|
-| [**Python package**](python/README.md) | **Sparkless 4.0** — install from PyPI (`pip install sparkless`) or `pip install ./python`, quick start, Sparkless 3 vs 4.0, API overview |
+| [**Python package**](python/README.md) | **Sparkless 4.1** — install from PyPI (`pip install sparkless`) or `pip install ./python`, quick start, Sparkless 3 vs 4.x, API overview |
 | [**Read the Docs**](https://robin-sparkless.readthedocs.io/) | Full docs: quickstart, Rust usage, Python getting started, Sparkless integration (MkDocs) |
 | [**docs.rs**](https://docs.rs/robin-sparkless) | Rust API reference |
 | [QUICKSTART](docs/QUICKSTART.md) | Build, usage, optional features, benchmarks |
