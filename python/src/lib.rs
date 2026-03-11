@@ -557,7 +557,8 @@ fn json_value_to_py_with_schema(
     })
 }
 
-#[pyclass]
+/// #1344: module = "sparkless.sql.session" so type(spark).__module__ identifies engine (not builtins).
+#[pyclass(module = "sparkless.sql.session")]
 struct PySparkSessionBuilder {
     inner: SparkSessionBuilder,
 }
@@ -650,7 +651,8 @@ impl PySparkSessionBuilder {
 /// Default backend type so tests that read session.backend_type always get a value (e.g. "robin").
 const DEFAULT_BACKEND_TYPE: &str = "robin";
 
-#[pyclass]
+/// #1344: module = "sparkless.sql.session" so type(spark).__module__ identifies engine (not builtins).
+#[pyclass(module = "sparkless.sql.session")]
 struct PySparkSession {
     inner: SparkSession,
     /// Writable from Python so conftest/fixtures can set backend_type = "robin" (e.g. under pytest-xdist).
