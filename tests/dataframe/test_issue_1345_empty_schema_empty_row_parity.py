@@ -1,5 +1,5 @@
 """
-Tests for #1345: createDataFrame([], StructType([])) and createDataFrame([{}], StructType([])) parity.
+Tests for #1345 / #1343: createDataFrame([], StructType([])) and createDataFrame([{}], StructType([])) parity.
 
 PySpark accepts both; sparkless now matches (empty schema + empty row -> 1 row, 0 cols).
 """
@@ -24,7 +24,7 @@ def test_empty_schema_empty_list(spark):
 
 
 def test_empty_schema_single_empty_dict(spark):
-    """createDataFrame([{}], StructType([])) -> 1 row, 0 cols (#1345 PySpark parity)."""
+    """createDataFrame([{}], StructType([])) -> 1 row, 0 cols (#1345, #1343 PySpark parity)."""
     schema = StructType([])
     df = spark.createDataFrame([{}], schema)
     assert df.count() == 1
