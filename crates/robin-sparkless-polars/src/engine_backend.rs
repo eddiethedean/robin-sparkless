@@ -1,4 +1,15 @@
-//! Implementations of robin-sparkless-core engine traits for the Polars backend.
+//! Implementations of `robin-sparkless-core` engine traits for the Polars backend.
+//!
+//! This module is the **Polars adapter layer**: it implements the engine-agnostic
+//! traits defined in `robin-sparkless-core::engine` (`SparkSessionBackend`,
+//! `DataFrameReaderBackend`, `DataFrameBackend`, `GroupedDataBackend`) in terms of
+//! the concrete Polars-backed types from this crate (`SparkSession`, `DataFrame`,
+//! `GroupedData`, `DataFrameReader`).
+//!
+//! High-level code in the root crate should depend on these traits (via
+//! `robin-sparkless-core::engine`) rather than on Polars directly; this keeps
+//! the execution engine swappable while the public expression IR and engine
+//! interfaces remain stable.
 
 use crate::dataframe::{DataFrame, GroupedData, JoinType as PlJoinType};
 use crate::error::polars_to_core_error;

@@ -166,34 +166,57 @@ fn lit_to_f64(ir: &ExprIr) -> Result<f64, EngineError> {
 }
 
 fn call_to_expr(name: &str, args: &[ExprIr]) -> Result<Expr, EngineError> {
-    match (name, args) {
-        // --- Aggregations ---
-        ("sum", [a]) => Ok(expr_ir_to_expr(a)?.sum()),
-        ("count", [a]) => Ok(expr_ir_to_expr(a)?.count()),
-        ("min", [a]) => Ok(expr_ir_to_expr(a)?.min()),
-        ("max", [a]) => Ok(expr_ir_to_expr(a)?.max()),
-        ("mean" | "avg", [a]) => Ok(expr_ir_to_expr(a)?.mean()),
-        ("first", [a]) => Ok(expr_ir_to_expr(a)?.first()),
-        ("last", [a]) => Ok(expr_ir_to_expr(a)?.last()),
-        ("try_sum", [a]) => Ok(expr_ir_to_expr(a)?.sum()),
-        ("try_avg", [a]) => Ok(expr_ir_to_expr(a)?.mean()),
-        ("stddev" | "std" | "stddev_samp", [a]) => Ok(expr_ir_to_expr(a)?.std(1)),
-        ("stddev_pop", [a]) => Ok(expr_ir_to_expr(a)?.std(0)),
-        ("variance" | "var_samp", [a]) => Ok(expr_ir_to_expr(a)?.var(1)),
-        ("var_pop", [a]) => Ok(expr_ir_to_expr(a)?.var(0)),
+    if let Some(expr) = agg_call_to_expr(name, args)? {
+        return Ok(expr);
+    }
+    if let Some(expr) = cast_call_to_expr(name, args)? {
+        return Ok(expr);
+    }
+    if let Some(expr) = string_call_to_expr(name, args)? {
+        return Ok(expr);
+    }
+    if let Some(expr) = coalesce_call_to_expr(name, args)? {
+        return Ok(expr);
+    }
+
+    Err(EngineError::Internal(format!(
+        "ExprIr::Call '{name}' not yet implemented in expr_ir_to_expr"
+    )))
+}
+
+/// Aggregation-style calls (sum, count, avg, percentiles, etc.).
+fn agg_call_to_expr(name: &str, args: &[ExprIr]) -> Result<Option<Expr>, EngineError> {
+    let out = match (name, args) {
+        ("sum", [a]) => Some(expr_ir_to_expr(a)?.sum()),
+        ("count", [a]) => Some(expr_ir_to_expr(a)?.count()),
+        ("min", [a]) => Some(expr_ir_to_expr(a)?.min()),
+        ("max", [a]) => Some(expr_ir_to_expr(a)?.max()),
+        ("mean" | "avg", [a]) => Some(expr_ir_to_expr(a)?.mean()),
+        ("first", [a]) => Some(expr_ir_to_expr(a)?.first()),
+        ("last", [a]) => Some(expr_ir_to_expr(a)?.last()),
+        ("try_sum", [a]) => Some(expr_ir_to_expr(a)?.sum()),
+        ("try_avg", [a]) => Some(expr_ir_to_expr(a)?.mean()),
+        ("stddev" | "std" | "stddev_samp", [a]) => Some(expr_ir_to_expr(a)?.std(1)),
+        ("stddev_pop", [a]) => Some(expr_ir_to_expr(a)?.std(0)),
+        ("variance" | "var_samp", [a]) => Some(expr_ir_to_expr(a)?.var(1)),
+        ("var_pop", [a]) => Some(expr_ir_to_expr(a)?.var(0)),
         ("count_distinct" | "approx_count_distinct", [a]) => {
-            Ok(expr_ir_to_expr(a)?.n_unique().cast(DataType::Int64))
+            Some(expr_ir_to_expr(a)?.n_unique().cast(DataType::Int64))
         }
-        ("collect_list", [a]) => Ok(expr_ir_to_expr(a)?.implode()),
-        ("collect_set", [a]) => Ok(expr_ir_to_expr(a)?.unique().implode()),
+        ("collect_list", [a]) => Some(expr_ir_to_expr(a)?.implode()),
+        ("collect_set", [a]) => Some(expr_ir_to_expr(a)?.unique().implode()),
         ("bool_and" | "every", [a]) => {
             // #980: Polars .all() requires Boolean; coerce so string/i64 etc. never passed.
-            Ok(crate::functions::expr_coerce_to_boolean(expr_ir_to_expr(a)?).all(true))
+            Some(
+                crate::functions::expr_coerce_to_boolean(expr_ir_to_expr(a)?).all(true),
+            )
         }
-        ("median", [a]) => Ok(expr_ir_to_expr(a)?.quantile(lit(0.5), QuantileMethod::Linear)),
+        ("median", [a]) => {
+            Some(expr_ir_to_expr(a)?.quantile(lit(0.5), QuantileMethod::Linear))
+        }
         ("count_if", [a]) => {
             // #981: count_if counts where condition is true; Polars cast(Int64) on Boolean; coerce condition to Boolean.
-            Ok(
+            Some(
                 crate::functions::expr_coerce_to_boolean(expr_ir_to_expr(a)?)
                     .cast(DataType::Int64)
                     .sum(),
@@ -202,22 +225,32 @@ fn call_to_expr(name: &str, args: &[ExprIr]) -> Result<Expr, EngineError> {
         ("mode", [a]) => {
             let e = expr_ir_to_expr(a)?;
             let col = crate::column::Column::from_expr(e, None);
-            Ok(col.mode().into_expr())
+            Some(col.mode().into_expr())
         }
-        ("kurtosis", [a]) => Ok(expr_ir_to_expr(a)?
-            .cast(DataType::Float64)
-            .kurtosis(true, true)),
-        ("skewness", [a]) => Ok(expr_ir_to_expr(a)?.cast(DataType::Float64).skew(true)),
+        ("kurtosis", [a]) => Some(
+            expr_ir_to_expr(a)?
+                .cast(DataType::Float64)
+                .kurtosis(true, true),
+        ),
+        ("skewness", [a]) => {
+            Some(expr_ir_to_expr(a)?.cast(DataType::Float64).skew(true))
+        }
         ("approx_percentile" | "percentile_approx", [a, b]) => {
             let e = expr_ir_to_expr(a)?;
             let p = lit_to_f64(b)?;
-            Ok(e.quantile(lit(p), QuantileMethod::Linear))
+            Some(e.quantile(lit(p), QuantileMethod::Linear))
         }
+        _ => None,
+    };
+    Ok(out)
+}
 
-        // --- Alias ---
+/// Alias and cast-style calls.
+fn cast_call_to_expr(name: &str, args: &[ExprIr]) -> Result<Option<Expr>, EngineError> {
+    let out = match (name, args) {
         ("alias", [a, _b]) => {
             let e = expr_ir_to_expr(a)?;
-            let name = match &args[1] {
+            let alias = match &args[1] {
                 ExprIr::Lit(LiteralValue::Str(s)) => s.as_str(),
                 _ => {
                     return Err(EngineError::User(
@@ -225,10 +258,8 @@ fn call_to_expr(name: &str, args: &[ExprIr]) -> Result<Expr, EngineError> {
                     ));
                 }
             };
-            Ok(e.alias(name))
+            Some(e.alias(alias))
         }
-
-        // --- Cast ---
         ("cast", [a, _b]) => {
             let type_name = match &args[1] {
                 ExprIr::Lit(LiteralValue::Str(s)) => s.as_str(),
@@ -241,7 +272,7 @@ fn call_to_expr(name: &str, args: &[ExprIr]) -> Result<Expr, EngineError> {
             let e = expr_ir_to_expr(a)?;
             let col = crate::column::Column::from_expr(e, None);
             let out = crate::functions::cast(&col, type_name).map_err(EngineError::User)?;
-            Ok(out.into_expr())
+            Some(out.into_expr())
         }
         ("try_cast", [a, _b]) => {
             let type_name = match &args[1] {
@@ -254,33 +285,52 @@ fn call_to_expr(name: &str, args: &[ExprIr]) -> Result<Expr, EngineError> {
             };
             let e = expr_ir_to_expr(a)?;
             let col = crate::column::Column::from_expr(e, None);
-            let out = crate::functions::try_cast(&col, type_name).map_err(EngineError::User)?;
-            Ok(out.into_expr())
+            let out =
+                crate::functions::try_cast(&col, type_name).map_err(EngineError::User)?;
+            Some(out.into_expr())
         }
+        _ => None,
+    };
+    Ok(out)
+}
 
-        // --- String (unary) ---
-        ("upper", [a]) => Ok(expr_ir_to_expr(a)?.str().to_uppercase()),
-        ("lower", [a]) => Ok(expr_ir_to_expr(a)?.str().to_lowercase()),
-        ("length", [a]) => Ok(expr_ir_to_expr(a)?.str().len_chars()),
-        ("trim", [a]) => Ok(expr_ir_to_expr(a)?.str().strip_chars(lit(" \t\n\r"))),
-        ("ltrim", [a]) => Ok(expr_ir_to_expr(a)?.str().strip_chars_start(lit(" \t\n\r"))),
-        ("rtrim", [a]) => Ok(expr_ir_to_expr(a)?.str().strip_chars_end(lit(" \t\n\r"))),
+/// String and substring-style calls.
+fn string_call_to_expr(name: &str, args: &[ExprIr]) -> Result<Option<Expr>, EngineError> {
+    let out = match (name, args) {
+        ("upper", [a]) => Some(expr_ir_to_expr(a)?.str().to_uppercase()),
+        ("lower", [a]) => Some(expr_ir_to_expr(a)?.str().to_lowercase()),
+        ("length", [a]) => Some(expr_ir_to_expr(a)?.str().len_chars()),
+        ("trim", [a]) => Some(expr_ir_to_expr(a)?.str().strip_chars(lit(" \t\n\r"))),
+        ("ltrim", [a]) => Some(
+            expr_ir_to_expr(a)?
+                .str()
+                .strip_chars_start(lit(" \t\n\r")),
+        ),
+        ("rtrim", [a]) => Some(
+            expr_ir_to_expr(a)?
+                .str()
+                .strip_chars_end(lit(" \t\n\r")),
+        ),
         ("substring" | "substr", args) if args.len() >= 2 => {
             let col_expr = expr_ir_to_expr(&args[0])?;
             let start = lit_to_i64(&args[1])?;
             let length = args.get(2).map(lit_to_i64).transpose()?;
             let col = crate::column::Column::from_expr(col_expr, None);
-            Ok(col.substr(start, length).into_expr())
+            Some(col.substr(start, length).into_expr())
         }
+        _ => None,
+    };
+    Ok(out)
+}
 
-        // --- Coalesce / nvl ---
+/// Coalesce / nvl-style calls.
+fn coalesce_call_to_expr(name: &str, args: &[ExprIr]) -> Result<Option<Expr>, EngineError> {
+    let out = match (name, args) {
         ("coalesce" | "nvl", args) if !args.is_empty() => {
             let exprs: Result<Vec<Expr>, _> = args.iter().map(expr_ir_to_expr).collect();
-            Ok(coalesce(&exprs?))
+            Some(coalesce(&exprs?))
         }
-
-        _ => Err(EngineError::Internal(format!(
-            "ExprIr::Call '{name}' not yet implemented in expr_ir_to_expr"
-        ))),
-    }
+        _ => None,
+    };
+    Ok(out)
 }

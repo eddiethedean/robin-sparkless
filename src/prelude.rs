@@ -12,13 +12,13 @@
 
 pub mod embed;
 
-pub use crate::column::Column;
+pub use crate::polars::Column;
 pub use crate::config::SparklessConfig;
 pub use crate::dataframe::{
     CubeRollupData, DataFrame, GroupedData, JoinType, PivotedGroupedData, SaveMode, WriteFormat,
     WriteMode,
 };
-pub use crate::functions::{
+pub use crate::polars::functions::{
     SortOrder, asc, asc_nulls_first, asc_nulls_last, avg, coalesce, col, count, count_distinct,
     desc, desc_nulls_first, desc_nulls_last, first, length, lit_bool, lit_f64, lit_i32, lit_i64,
     lit_str, lower, max, mean, min, substring, sum, trim, upper, when,

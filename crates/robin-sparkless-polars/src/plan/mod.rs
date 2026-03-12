@@ -11,6 +11,8 @@ use crate::functions::{
 };
 use crate::plan::expr::{expr_from_value, try_column_from_udf_value};
 use crate::session::{SparkSession, set_thread_udf_session};
+use robin_sparkless_core::engine::{DataFrameBackend, PlanExecutor as CorePlanExecutor};
+use robin_sparkless_core::error::EngineError;
 pub use expr::PlanExprError;
 pub use logical::LogicalPlan;
 use polars::prelude::PolarsError;
@@ -54,6 +56,27 @@ pub fn execute_plan(
     }
 
     Ok(df)
+}
+
+/// Polars-backed implementation of the core [`PlanExecutor`] trait.
+///
+/// This adapter allows high-level code (e.g. the root crate) to execute JSON plans using
+/// the engine-agnostic [`DataFrameBackend`] and [`EngineError`] types, while reusing the
+/// existing Polars plan interpreter.
+pub struct PolarsPlanExecutor;
+
+impl CorePlanExecutor<SparkSession> for PolarsPlanExecutor {
+    fn execute_plan(
+        session: &SparkSession,
+        data: Vec<Vec<Value>>,
+        schema: Vec<(String, String)>,
+        plan: &[Value],
+    ) -> Result<Box<dyn DataFrameBackend>, EngineError> {
+        // Delegate to the existing JSON plan interpreter and then box the backend DataFrame.
+        let df = execute_plan(session, data, schema, plan)
+            .map_err(|e| EngineError::Internal(e.to_string()))?;
+        Ok(Box::new(df))
+    }
 }
 
 /// Errors from plan execution.
@@ -562,109 +585,10 @@ fn apply_op(
                 )),
             }
         }
-        "join" => {
-            let other_data = get_other_data(&payload)
-                .ok_or_else(|| PlanError::InvalidPlan("join must have 'other_data'".into()))?;
-            let other_schema = get_other_schema(&payload)
-                .ok_or_else(|| PlanError::InvalidPlan("join must have 'other_schema'".into()))?;
-            let on = payload.get("on").ok_or_else(|| {
-                PlanError::InvalidPlan("join must have 'on' array or string".into())
-            })?;
-            let how = payload
-                .get("how")
-                .and_then(Value::as_str)
-                .unwrap_or("inner");
-
-            let schema_vec: Vec<(String, String)> = other_schema
-                .iter()
-                .filter_map(schema_field_to_pair)
-                .collect();
-            let schema_names: Vec<String> = schema_vec.iter().map(|(n, _)| n.clone()).collect();
-            let rows = other_data_to_rows(other_data, &schema_names);
-            let mut other_df = session
-                .create_dataframe_from_rows(rows, schema_vec, false, false)
-                .map_err(PlanError::Session)?;
-
-            let on_keys_left = parse_join_on(on, &df)?;
-            // Align right join key column names to left's (e.g. left "Dept_Id" vs right "dept_id" -> rename right to "Dept_Id") (#552).
-            let on_keys_right = parse_join_on(on, &other_df)?;
-            for (i, left_name) in on_keys_left.iter().enumerate() {
-                if let Some(right_name) = on_keys_right.get(i) {
-                    if left_name != right_name {
-                        other_df = other_df
-                            .with_column_renamed(right_name, left_name)
-                            .map_err(PlanError::Session)?;
-                    }
-                }
-            }
-            // After renaming, left and right join key names align; treat this like an equality-based
-            // join on the same key columns so that outer join key semantics match PySpark and the
-            // parity fixtures (e.g. case_outer_join in gen_pyspark_cases.py).
-            let left_refs: Vec<&str> = on_keys_left.iter().map(|s| s.as_str()).collect();
-            let right_refs: Vec<&str> = on_keys_left.iter().map(|s| s.as_str()).collect();
-            let join_type = match how {
-                "left" => JoinType::Left,
-                "right" => JoinType::Right,
-                "outer" => JoinType::Outer,
-                "left_semi" | "leftsemi" | "semi" => JoinType::LeftSemi,
-                "left_anti" | "leftanti" | "anti" => JoinType::LeftAnti,
-                _ => JoinType::Inner,
-            };
-            df.join_with_keys(&other_df, left_refs, right_refs, join_type, false)
-                .map_err(PlanError::Session)
-        }
-        "union" => {
-            let other_data = get_other_data(&payload)
-                .ok_or_else(|| PlanError::InvalidPlan("union must have 'other_data'".into()))?;
-            let other_schema = get_other_schema(&payload)
-                .ok_or_else(|| PlanError::InvalidPlan("union must have 'other_schema'".into()))?;
-            let schema_vec: Vec<(String, String)> = other_schema
-                .iter()
-                .filter_map(schema_field_to_pair)
-                .collect();
-            let schema_names: Vec<String> = schema_vec.iter().map(|(n, _)| n.clone()).collect();
-            let rows = other_data_to_rows(other_data, &schema_names);
-            let other_df = session
-                .create_dataframe_from_rows(rows, schema_vec, false, false)
-                .map_err(PlanError::Session)?;
-            df.union(&other_df).map_err(PlanError::Session)
-        }
-        "unionByName" => {
-            let other_data = get_other_data(&payload).ok_or_else(|| {
-                PlanError::InvalidPlan("unionByName must have 'other_data'".into())
-            })?;
-            let other_schema = get_other_schema(&payload).ok_or_else(|| {
-                PlanError::InvalidPlan("unionByName must have 'other_schema'".into())
-            })?;
-            let schema_vec: Vec<(String, String)> = other_schema
-                .iter()
-                .filter_map(schema_field_to_pair)
-                .collect();
-            let schema_names: Vec<String> = schema_vec.iter().map(|(n, _)| n.clone()).collect();
-            let rows = other_data_to_rows(other_data, &schema_names);
-            let other_df = session
-                .create_dataframe_from_rows(rows, schema_vec, false, false)
-                .map_err(PlanError::Session)?;
-            df.union_by_name(&other_df, true)
-                .map_err(PlanError::Session)
-        }
-        "crossJoin" | "cross_join" => {
-            let other_data = get_other_data(&payload)
-                .ok_or_else(|| PlanError::InvalidPlan("crossJoin must have 'other_data'".into()))?;
-            let other_schema = get_other_schema(&payload).ok_or_else(|| {
-                PlanError::InvalidPlan("crossJoin must have 'other_schema'".into())
-            })?;
-            let schema_vec: Vec<(String, String)> = other_schema
-                .iter()
-                .filter_map(schema_field_to_pair)
-                .collect();
-            let schema_names: Vec<String> = schema_vec.iter().map(|(n, _)| n.clone()).collect();
-            let rows = other_data_to_rows(other_data, &schema_names);
-            let other_df = session
-                .create_dataframe_from_rows(rows, schema_vec, false, false)
-                .map_err(PlanError::Session)?;
-            df.cross_join(&other_df).map_err(PlanError::Session)
-        }
+        "join" => handle_join_op(session, df, payload),
+        "union" => handle_union_op(session, df, payload),
+        "unionByName" => handle_union_by_name_op(session, df, payload),
+        "crossJoin" | "cross_join" => handle_cross_join_op(session, df, payload),
         "rollup" => Err(PlanError::UnsupportedOp(
             "Plan op 'rollup' is not yet supported. Use groupBy for now. See docs for supported operations.".into(),
         )),
@@ -675,6 +599,126 @@ fn apply_op(
             "Plan op '{op_name}' is not supported. See docs for supported operations (e.g. select, filter, groupBy, join, orderBy, limit)."
         ))),
     }
+}
+
+fn handle_join_op(
+    session: &SparkSession,
+    df: DataFrame,
+    payload: Value,
+) -> Result<DataFrame, PlanError> {
+    let other_data = get_other_data(&payload)
+        .ok_or_else(|| PlanError::InvalidPlan("join must have 'other_data'".into()))?;
+    let other_schema = get_other_schema(&payload)
+        .ok_or_else(|| PlanError::InvalidPlan("join must have 'other_schema'".into()))?;
+    let on = payload.get("on").ok_or_else(|| {
+        PlanError::InvalidPlan("join must have 'on' array or string".into())
+    })?;
+    let how = payload
+        .get("how")
+        .and_then(Value::as_str)
+        .unwrap_or("inner");
+
+    let schema_vec: Vec<(String, String)> = other_schema
+        .iter()
+        .filter_map(schema_field_to_pair)
+        .collect();
+    let schema_names: Vec<String> = schema_vec.iter().map(|(n, _)| n.clone()).collect();
+    let rows = other_data_to_rows(other_data, &schema_names);
+    let mut other_df = session
+        .create_dataframe_from_rows(rows, schema_vec, false, false)
+        .map_err(PlanError::Session)?;
+
+    let on_keys_left = parse_join_on(on, &df)?;
+    // Align right join key column names to left's (e.g. left "Dept_Id" vs right "dept_id" -> rename right to "Dept_Id") (#552).
+    let on_keys_right = parse_join_on(on, &other_df)?;
+    for (i, left_name) in on_keys_left.iter().enumerate() {
+        if let Some(right_name) = on_keys_right.get(i) {
+            if left_name != right_name {
+                other_df = other_df
+                    .with_column_renamed(right_name, left_name)
+                    .map_err(PlanError::Session)?;
+            }
+        }
+    }
+    // After renaming, left and right join key names align; treat this like an equality-based
+    // join on the same key columns so that outer join key semantics match PySpark and the
+    // parity fixtures (e.g. case_outer_join in gen_pyspark_cases.py).
+    let left_refs: Vec<&str> = on_keys_left.iter().map(|s| s.as_str()).collect();
+    let right_refs: Vec<&str> = on_keys_left.iter().map(|s| s.as_str()).collect();
+    let join_type = match how {
+        "left" => JoinType::Left,
+        "right" => JoinType::Right,
+        "outer" => JoinType::Outer,
+        "left_semi" | "leftsemi" | "semi" => JoinType::LeftSemi,
+        "left_anti" | "leftanti" | "anti" => JoinType::LeftAnti,
+        _ => JoinType::Inner,
+    };
+    df.join_with_keys(&other_df, left_refs, right_refs, join_type, false)
+        .map_err(PlanError::Session)
+}
+
+fn handle_union_op(
+    session: &SparkSession,
+    df: DataFrame,
+    payload: Value,
+) -> Result<DataFrame, PlanError> {
+    let other_data = get_other_data(&payload)
+        .ok_or_else(|| PlanError::InvalidPlan("union must have 'other_data'".into()))?;
+    let other_schema = get_other_schema(&payload)
+        .ok_or_else(|| PlanError::InvalidPlan("union must have 'other_schema'".into()))?;
+    let schema_vec: Vec<(String, String)> = other_schema
+        .iter()
+        .filter_map(schema_field_to_pair)
+        .collect();
+    let schema_names: Vec<String> = schema_vec.iter().map(|(n, _)| n.clone()).collect();
+    let rows = other_data_to_rows(other_data, &schema_names);
+    let other_df = session
+        .create_dataframe_from_rows(rows, schema_vec, false, false)
+        .map_err(PlanError::Session)?;
+    df.union(&other_df).map_err(PlanError::Session)
+}
+
+fn handle_union_by_name_op(
+    session: &SparkSession,
+    df: DataFrame,
+    payload: Value,
+) -> Result<DataFrame, PlanError> {
+    let other_data = get_other_data(&payload)
+        .ok_or_else(|| PlanError::InvalidPlan("unionByName must have 'other_data'".into()))?;
+    let other_schema = get_other_schema(&payload)
+        .ok_or_else(|| PlanError::InvalidPlan("unionByName must have 'other_schema'".into()))?;
+    let schema_vec: Vec<(String, String)> = other_schema
+        .iter()
+        .filter_map(schema_field_to_pair)
+        .collect();
+    let schema_names: Vec<String> = schema_vec.iter().map(|(n, _)| n.clone()).collect();
+    let rows = other_data_to_rows(other_data, &schema_names);
+    let other_df = session
+        .create_dataframe_from_rows(rows, schema_vec, false, false)
+        .map_err(PlanError::Session)?;
+    df.union_by_name(&other_df, true)
+        .map_err(PlanError::Session)
+}
+
+fn handle_cross_join_op(
+    session: &SparkSession,
+    df: DataFrame,
+    payload: Value,
+) -> Result<DataFrame, PlanError> {
+    let other_data = get_other_data(&payload)
+        .ok_or_else(|| PlanError::InvalidPlan("crossJoin must have 'other_data'".into()))?;
+    let other_schema = get_other_schema(&payload)
+        .ok_or_else(|| PlanError::InvalidPlan("crossJoin must have 'other_schema'".into()))?;
+    let schema_vec: Vec<(String, String)> = other_schema
+        .iter()
+        .filter_map(schema_field_to_pair)
+        .collect();
+    let schema_names: Vec<String> = schema_vec.iter().map(|(n, _)| n.clone()).collect();
+    let rows = other_data_to_rows(other_data, &schema_names);
+    let other_df = session
+        .create_dataframe_from_rows(rows, schema_vec, false, false)
+        .map_err(PlanError::Session)?;
+    df.cross_join(&other_df).map_err(PlanError::Session)
 }
 
 fn parse_aggs(aggs: &[Value], df: &DataFrame) -> Result<Vec<polars::prelude::Expr>, PlanError> {
@@ -1012,5 +1056,37 @@ mod tests {
         let rows = df.collect_as_json_rows().unwrap();
         assert_eq!(rows[0].get("value"), Some(&serde_json::Value::Null));
         assert_eq!(rows[1].get("name"), Some(&serde_json::Value::Null));
+    }
+
+    /// Ensure the core PlanExecutor trait implementation stays in sync with execute_plan.
+    #[test]
+    fn test_plan_executor_trait_matches_execute_plan() {
+        use robin_sparkless_core::engine::PlanExecutor as _;
+
+        let session = crate::session::SparkSession::builder()
+            .app_name("plan_executor_trait")
+            .get_or_create();
+        let data = vec![vec![json!(1)], vec![json!(2)]];
+        let schema = vec![("x".to_string(), "bigint".to_string())];
+        let plan = vec![json!({
+            "op": "filter",
+            "payload": {"op": "gt", "left": {"col": "x"}, "right": {"lit": 1}}
+        })];
+
+        // Direct call.
+        let df_direct = execute_plan(&session, data.clone(), schema.clone(), &plan).unwrap();
+
+        // Trait-based call returns boxed backend; downcast to DataFrame and compare.
+        let boxed = PolarsPlanExecutor::execute_plan(&session, data, schema, &plan).unwrap();
+        let backend_df = boxed
+            .as_any()
+            .downcast_ref::<crate::dataframe::DataFrame>()
+            .expect("expected Polars DataFrame backend")
+            .clone();
+
+        assert_eq!(
+            df_direct.collect_inner().unwrap(),
+            backend_df.collect_inner().unwrap()
+        );
     }
 }

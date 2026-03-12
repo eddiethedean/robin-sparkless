@@ -50,29 +50,52 @@ pub mod schema;
 pub mod session;
 pub mod traits;
 
-// Re-export backend modules (column, functions, etc.) for internal use and backward compat.
-pub use robin_sparkless_polars::{column, error, functions, type_coercion};
-
-pub use robin_sparkless_polars::functions::{SortOrder, *};
-/// Plan execution; use [`execute_plan`] for root session/DataFrame. Re-exports plan error types.
-pub mod plan {
-    pub use crate::execute_plan;
-    pub use robin_sparkless_polars::plan::{PlanError, PlanExprError};
+/// Engine-agnostic types, traits, and expression IR re-exported from `robin-sparkless-core`.
+/// Prefer these for engine-generic code and embeddings that should not depend on Polars.
+pub mod engine {
+    pub use robin_sparkless_core::engine::{
+        CollectedRows, DataFrameBackend, DataFrameReaderBackend, GroupedDataBackend, JoinType,
+        PlanExecutor, SparkSessionBackend,
+    };
+    pub use robin_sparkless_core::expr::{
+        ExprIr, LiteralValue, WhenBuilder, WhenThenBuilder, alias, and_, approx_count_distinct,
+        between, bool_and, call, col, collect_list, collect_set, count, count_distinct, count_if,
+        eq, every, first, ge, gt, is_in, is_null, kurtosis, le, lit_bool, lit_f64, lit_i32,
+        lit_i64, lit_null, lit_str, lt, max, mean, median, min, mode, ne, not_, or_, skewness,
+        std, stddev, stddev_pop, stddev_samp, sum, try_avg, try_sum, var_pop, var_samp, variance,
+        when,
+    };
+    pub use robin_sparkless_core::{DataType, EngineError, StructField, StructType};
 }
-// Engine-agnostic types and expression IR from core (no Polars in public API).
-pub use robin_sparkless_core::engine::CollectedRows;
-pub use robin_sparkless_core::expr::{
-    ExprIr, LiteralValue, WhenBuilder, WhenThenBuilder, alias, and_, approx_count_distinct,
-    between, bool_and, call, col, collect_list, collect_set, count, count_distinct, count_if, eq,
-    every, first, ge, gt, is_in, is_null, kurtosis, le, lit_bool, lit_f64, lit_i32, lit_i64,
-    lit_null, lit_str, lt, max, mean, median, min, mode, ne, not_, or_, skewness, std, stddev,
-    stddev_pop, stddev_samp, sum, try_avg, try_sum, var_pop, var_samp, variance, when,
+
+/// Polars-backed types and helper functions re-exported from `robin-sparkless-polars`.
+/// These are useful when you explicitly want access to Polars-level APIs from Rust.
+pub mod polars {
+    pub use robin_sparkless_polars::{column, error, functions, type_coercion};
+    pub use robin_sparkless_polars::functions::{SortOrder, *};
+    pub use robin_sparkless_polars::{
+        Column, Expr, PlDataFrame, PlDataType, PolarsError, RustUdf, StructTypePolarsExt,
+        UdfRegistry, broadcast, expression, schema_from_json,
+    };
+}
+
+// Backward-compatible re-exports at the crate root. New code should prefer the
+// `engine` and `polars` modules above for clearer boundaries, but we keep these
+// for existing users.
+pub use engine::CollectedRows;
+pub use engine::{
+    DataType, EngineError, ExprIr, LiteralValue, StructField, StructType, WhenBuilder,
+    WhenThenBuilder, alias, and_, approx_count_distinct, between, bool_and, call, col,
+    collect_list, collect_set, count, count_distinct, count_if, eq, every, first, ge, gt, is_in,
+    is_null, kurtosis, le, lit_bool, lit_f64, lit_i32, lit_i64, lit_null, lit_str, lt, max, mean,
+    median, min, mode, ne, not_, or_, skewness, std, stddev, stddev_pop, stddev_samp, sum,
+    try_avg, try_sum, var_pop, var_samp, variance, when,
 };
-pub use robin_sparkless_core::{DataType, EngineError, StructField, StructType};
-pub use robin_sparkless_polars::{
+pub use polars::{
     Column, Expr, PolarsError, RustUdf, StructTypePolarsExt, UdfRegistry, broadcast, expression,
     schema_from_json,
 };
+pub use robin_sparkless_polars::functions::{SortOrder, *};
 
 // Root-owned entry-point types (delegate to robin-sparkless-polars).
 pub use dataframe::{
@@ -94,7 +117,18 @@ pub fn execute_plan(
     schema: Vec<(String, String)>,
     plan: &[serde_json::Value],
 ) -> Result<DataFrame, PlanError> {
-    robin_sparkless_polars::plan::execute_plan(&session.0, data, schema, plan).map(DataFrame)
+    use robin_sparkless_core::engine::PlanExecutor as _;
+
+    // Execute via the engine-generic PlanExecutor trait implemented by the Polars backend.
+    let boxed = robin_sparkless_polars::plan::PolarsPlanExecutor::execute_plan(
+        &session.0,
+        data,
+        schema,
+        plan,
+    )
+    .map_err(|e| PlanError::InvalidPlan(e.to_string()))?;
+
+    crate::dataframe::from_backend(boxed).map_err(|e| PlanError::InvalidPlan(e.to_string()))
 }
 
 pub use config::SparklessConfig;

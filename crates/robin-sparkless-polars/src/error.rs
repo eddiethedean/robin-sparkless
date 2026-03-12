@@ -1,4 +1,8 @@
 //! Engine error type for embedders (Polars conversion in this crate).
+//!
+//! All public engine traits in `robin-sparkless-core` use [`robin_sparkless_core::EngineError`]
+//! instead of Polars errors. This module centralizes conversion from [`PolarsError`] so that
+//! higher-level APIs and bindings can depend on engine errors and traits, not on Polars types.
 
 use polars::error::PolarsError;
 
