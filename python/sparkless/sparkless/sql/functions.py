@@ -90,7 +90,11 @@ from sparkless import (
 )
 from sparkless.errors import PySparkValueError
 from sparkless import DataFrame
-from typing import Any, Callable, Dict, Optional, Tuple, Union, cast
+from typing import TYPE_CHECKING, Any, Callable, Dict, Optional, Tuple, Union, cast
+
+if TYPE_CHECKING:
+    # Window spec used by window expressions (partitionBy/orderBy/rowsBetween/rangeBetween).
+    from sparkless.sql.window import WindowSpec as _WindowSpec
 
 # Column or column name (str); used for function params that accept either.
 ColumnOrName = Union[_ColumnType, str]
@@ -1465,35 +1469,35 @@ def create_map(*cols):
 
 
 class _RowNumberExpr:
-    def over(self, window):
+    def over(self, window: _WindowSpec) -> _ColumnType:
         import sparkless._native as _native
 
         partition_by, encoded, _, _ = _window_spec_to_partition_order(window)
         return _native.row_number_window(partition_by, encoded)
 
 
-def row_number():
+def row_number() -> _RowNumberExpr:
     """Window row_number() expression; use with .over(Window.partitionBy(...).orderBy(...)). Requires active SparkSession."""
     _active_session()
     return _RowNumberExpr()
 
 
 class _PercentRankExpr:
-    def over(self, window):
+    def over(self, window: _WindowSpec) -> _ColumnType:
         import sparkless._native as _native
 
         partition_by, encoded, _, _ = _window_spec_to_partition_order(window)
         return _native.percent_rank_window(partition_by, encoded)
 
 
-def percent_rank():
+def percent_rank() -> _PercentRankExpr:
     """Window percent_rank() expression; use with .over(Window.partitionBy(...).orderBy(...)). Requires active SparkSession."""
     _active_session()
     return _PercentRankExpr()
 
 
 class _RankExpr:
-    def over(self, window):
+    def over(self, window: _WindowSpec) -> _ColumnType:
         import sparkless._native as _native
         from sparkless import Column as _Column
         from sparkless.sql.window import Window
@@ -1524,52 +1528,52 @@ class _RankExpr:
         return _native.rank_window(partition_by, encoded)
 
 
-def rank():
+def rank() -> _RankExpr:
     """Window rank() expression; use with .over(Window.partitionBy(...).orderBy(...)). Requires active SparkSession."""
     _active_session()
     return _RankExpr()
 
 
 class _DenseRankExpr:
-    def over(self, window):
+    def over(self, window: _WindowSpec) -> _ColumnType:
         import sparkless._native as _native
 
         partition_by, encoded, _, _ = _window_spec_to_partition_order(window)
         return _native.dense_rank_window(partition_by, encoded)
 
 
-def dense_rank():
+def dense_rank() -> _DenseRankExpr:
     """Window dense_rank() expression; use with .over(Window.partitionBy(...).orderBy(...)). Requires active SparkSession."""
     _active_session()
     return _DenseRankExpr()
 
 
 class _CumeDistExpr:
-    def over(self, window):
+    def over(self, window: _WindowSpec) -> _ColumnType:
         import sparkless._native as _native
 
         partition_by, encoded, _, _ = _window_spec_to_partition_order(window)
         return _native.cume_dist_window(partition_by, encoded)
 
 
-def cume_dist():
+def cume_dist() -> _CumeDistExpr:
     """Window cume_dist() expression; use with .over(Window.partitionBy(...).orderBy(...)). Requires active SparkSession."""
     _active_session()
     return _CumeDistExpr()
 
 
 class _NtileExpr:
-    def __init__(self, n):
+    def __init__(self, n: int) -> None:
         self._n = n
 
-    def over(self, window):
+    def over(self, window: _WindowSpec) -> _ColumnType:
         import sparkless._native as _native
 
         partition_by, encoded, _, _ = _window_spec_to_partition_order(window)
         return _native.ntile_window(self._n, partition_by, encoded)
 
 
-def ntile(n):
+def ntile(n: int) -> _NtileExpr:
     """Window ntile(n) expression; use with .over(Window.partitionBy(...).orderBy(...)). Requires active SparkSession."""
     _active_session()
     return _NtileExpr(n)

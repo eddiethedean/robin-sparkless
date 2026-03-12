@@ -8,7 +8,7 @@ ROOT = Path(__file__).resolve().parent.parent
 REPORT = ROOT / "scripts" / "unskip_report.json"
 
 
-def main():
+def main() -> None:
     with open(REPORT) as f:
         data = json.load(f)
     # Build (test_id, issue_num) for each failed test

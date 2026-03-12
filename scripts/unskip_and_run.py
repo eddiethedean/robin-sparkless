@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parent.parent
 TESTS_DIR = ROOT / "tests"
 
 
-def main():
+def main() -> list[int]:
     # 1) Build mapping: (file_path, issue_num) -> test_name by parsing files
     issue_tests: dict[
         int, list[str]

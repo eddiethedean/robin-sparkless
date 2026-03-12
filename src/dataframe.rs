@@ -917,8 +917,6 @@ impl PivotedGroupedData {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     /// Smoke test for EngineDataFrame: ensure filter_expr_ir + collect_rows round-trips a simple filter.
     #[test]
     fn engine_dataframe_filter_and_collect_rows() {
@@ -937,6 +935,9 @@ mod tests {
         let cond = gt(col("x"), col("x")); // always false; expect zero rows
         let filtered = df.filter_expr_ir(&cond).unwrap();
         let rows = filtered.collect_rows().unwrap();
-        assert!(rows.is_empty(), "expected no rows after always-false filter");
+        assert!(
+            rows.is_empty(),
+            "expected no rows after always-false filter"
+        );
     }
 }

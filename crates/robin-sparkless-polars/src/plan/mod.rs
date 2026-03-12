@@ -11,11 +11,11 @@ use crate::functions::{
 };
 use crate::plan::expr::{expr_from_value, try_column_from_udf_value};
 use crate::session::{SparkSession, set_thread_udf_session};
-use robin_sparkless_core::engine::{DataFrameBackend, PlanExecutor as CorePlanExecutor};
-use robin_sparkless_core::error::EngineError;
 pub use expr::PlanExprError;
 pub use logical::LogicalPlan;
 use polars::prelude::PolarsError;
+use robin_sparkless_core::engine::{DataFrameBackend, PlanExecutor as CorePlanExecutor};
+use robin_sparkless_core::error::EngineError;
 use serde_json::Value;
 
 /// Execute a logical plan: build initial DataFrame from (data, schema), then apply each op in sequence.
@@ -610,9 +610,9 @@ fn handle_join_op(
         .ok_or_else(|| PlanError::InvalidPlan("join must have 'other_data'".into()))?;
     let other_schema = get_other_schema(&payload)
         .ok_or_else(|| PlanError::InvalidPlan("join must have 'other_schema'".into()))?;
-    let on = payload.get("on").ok_or_else(|| {
-        PlanError::InvalidPlan("join must have 'on' array or string".into())
-    })?;
+    let on = payload
+        .get("on")
+        .ok_or_else(|| PlanError::InvalidPlan("join must have 'on' array or string".into()))?;
     let how = payload
         .get("how")
         .and_then(Value::as_str)

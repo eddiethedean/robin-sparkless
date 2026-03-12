@@ -61,9 +61,8 @@ pub mod engine {
         ExprIr, LiteralValue, WhenBuilder, WhenThenBuilder, alias, and_, approx_count_distinct,
         between, bool_and, call, col, collect_list, collect_set, count, count_distinct, count_if,
         eq, every, first, ge, gt, is_in, is_null, kurtosis, le, lit_bool, lit_f64, lit_i32,
-        lit_i64, lit_null, lit_str, lt, max, mean, median, min, mode, ne, not_, or_, skewness,
-        std, stddev, stddev_pop, stddev_samp, sum, try_avg, try_sum, var_pop, var_samp, variance,
-        when,
+        lit_i64, lit_null, lit_str, lt, max, mean, median, min, mode, ne, not_, or_, skewness, std,
+        stddev, stddev_pop, stddev_samp, sum, try_avg, try_sum, var_pop, var_samp, variance, when,
     };
     pub use robin_sparkless_core::{DataType, EngineError, StructField, StructType};
 }
@@ -71,12 +70,12 @@ pub mod engine {
 /// Polars-backed types and helper functions re-exported from `robin-sparkless-polars`.
 /// These are useful when you explicitly want access to Polars-level APIs from Rust.
 pub mod polars {
-    pub use robin_sparkless_polars::{column, error, functions, type_coercion};
     pub use robin_sparkless_polars::functions::{SortOrder, *};
     pub use robin_sparkless_polars::{
         Column, Expr, PlDataFrame, PlDataType, PolarsError, RustUdf, StructTypePolarsExt,
         UdfRegistry, broadcast, expression, schema_from_json,
     };
+    pub use robin_sparkless_polars::{column, error, functions, type_coercion};
 }
 
 // Backward-compatible re-exports at the crate root. New code should prefer the
@@ -88,16 +87,16 @@ pub use engine::{
     WhenThenBuilder, alias, and_, approx_count_distinct, between, bool_and, call, col,
     collect_list, collect_set, count, count_distinct, count_if, eq, every, first, ge, gt, is_in,
     is_null, kurtosis, le, lit_bool, lit_f64, lit_i32, lit_i64, lit_null, lit_str, lt, max, mean,
-    median, min, mode, ne, not_, or_, skewness, std, stddev, stddev_pop, stddev_samp, sum,
-    try_avg, try_sum, var_pop, var_samp, variance, when,
+    median, min, mode, ne, not_, or_, skewness, std, stddev, stddev_pop, stddev_samp, sum, try_avg,
+    try_sum, var_pop, var_samp, variance, when,
 };
 pub use polars::{
     Column, Expr, PolarsError, RustUdf, StructTypePolarsExt, UdfRegistry, broadcast, expression,
     schema_from_json,
 };
-pub use robin_sparkless_polars::functions::{SortOrder, *};
 /// Backwards-compatible module re-export so `robin_sparkless::functions::*` continues to work.
-pub use robin_sparkless_polars::functions as functions;
+pub use robin_sparkless_polars::functions;
+pub use robin_sparkless_polars::functions::{SortOrder, *};
 
 // Root-owned entry-point types (delegate to robin-sparkless-polars).
 pub use dataframe::{
@@ -123,10 +122,7 @@ pub fn execute_plan(
 
     // Execute via the engine-generic PlanExecutor trait implemented by the Polars backend.
     let boxed = robin_sparkless_polars::plan::PolarsPlanExecutor::execute_plan(
-        &session.0,
-        data,
-        schema,
-        plan,
+        &session.0, data, schema, plan,
     )
     .map_err(|e| PlanError::InvalidPlan(e.to_string()))?;
 
