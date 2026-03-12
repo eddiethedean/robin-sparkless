@@ -2,6 +2,9 @@
 # All jobs use --workspace so every crate is built, formatted, and tested.
 name: CI
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 on:
   push:
     branches: [main, master]
