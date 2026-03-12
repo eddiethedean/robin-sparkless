@@ -7,6 +7,8 @@ description = "Native extension for sparkless Python package (robin-sparkless ba
 [features]
 default = ["delta"]
 delta = ["robin-sparkless/delta"]
+jdbc = ["robin-sparkless/jdbc"]
+sqlite = ["robin-sparkless/sqlite"]
 
 [dependencies]
 robin-sparkless = { path = "..", features = ["sql"] }

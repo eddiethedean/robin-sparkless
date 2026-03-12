@@ -15,7 +15,7 @@ Rust/Polars with no JVM dependency.
 """
 from __future__ import annotations
 
-from typing import List, Sequence, Tuple, Union, cast as _cast
+from typing import Dict, List, Sequence, Tuple, Union, cast as _cast
 
 from sparkless._native import PyColumn as _ColumnType
 
@@ -244,6 +244,20 @@ def posexplode_outer(col_or_name: Union[str, _ColumnType]) -> _PosexplodeResult:
         Tuple[_ColumnType, _ColumnType], _mod.posexplode_outer(col_or_name)
     )
     return _PosexplodeResult(pos_col, val_col)
+
+
+def _ensure_str_dict(properties: Dict[str, object] | None) -> Dict[str, str]:
+    """Convert a dict-like to Dict[str, str] for JDBC properties."""
+    if properties is None:
+        return {}
+    out: Dict[str, str] = {}
+    for k, v in properties.items():
+        key = str(k)
+        if isinstance(v, str):
+            out[key] = v
+        else:
+            out[key] = str(v)
+    return out
 
 
 to_timestamp = _mod.to_timestamp

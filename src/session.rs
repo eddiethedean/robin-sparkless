@@ -375,4 +375,19 @@ impl DataFrameReader {
     pub fn delta(&self, path: impl AsRef<Path>) -> Result<DataFrame, PolarsError> {
         self.0.delta(path).map(DataFrame)
     }
+
+    /// JDBC read: load a table from an external database (e.g. PostgreSQL).
+    /// Requires the `jdbc` or `sqlite` feature. Mirror of PySpark's spark.read.jdbc(url, table, properties).
+    #[cfg(any(feature = "jdbc", feature = "sqlite"))]
+    pub fn jdbc(
+        &self,
+        url: &str,
+        table: &str,
+        properties: &HashMap<String, String>,
+    ) -> Result<DataFrame, PolarsError> {
+        self.0
+            .jdbc_with_properties(url, table, properties)
+            .map(DataFrame)
+            .map_err(|e| PolarsError::ComputeError(e.to_string().into()))
+    }
 }

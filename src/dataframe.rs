@@ -795,6 +795,18 @@ impl<'a> DataFrameWriter<'a> {
     pub fn save(&self, path: impl AsRef<Path>) -> Result<(), PolarsError> {
         self.inner.save(path)
     }
+
+    /// JDBC write convenience mirroring PySpark's df.write.jdbc(url, table, properties).
+    #[cfg(any(feature = "jdbc", feature = "sqlite"))]
+    pub fn jdbc(
+        &self,
+        url: &str,
+        table: &str,
+        properties: &[(String, String)],
+        mode: SaveMode,
+    ) -> Result<(), robin_sparkless_core::EngineError> {
+        self.inner.jdbc(url, table, properties, mode)
+    }
 }
 
 impl GroupedData {

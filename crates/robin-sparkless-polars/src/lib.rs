@@ -25,6 +25,8 @@ pub mod udfs;
 pub mod delta;
 #[cfg(feature = "sql")]
 pub mod sql;
+#[cfg(any(feature = "jdbc", feature = "sqlite"))]
+pub mod jdbc;
 
 pub type Expr = polars::prelude::Expr;
 pub type LiteralValue = polars::prelude::LiteralValue;

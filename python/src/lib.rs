@@ -5517,6 +5517,54 @@ impl PyDataFrameWriter {
         w.save(Path::new(path)).map_err(to_py_err)
     }
 
+    /// PySpark: jdbc(url, table, properties). Properties is a dict of string -> string.
+    #[pyo3(signature = (url, table, properties, mode=None))]
+    fn jdbc(
+        &self,
+        py: Python<'_>,
+        url: &str,
+        table: &str,
+        properties: &Bound<'_, PyDict>,
+        mode: Option<&str>,
+    ) -> PyResult<()> {
+        #[cfg(not(any(feature = "jdbc", feature = "sqlite")))]
+        {
+            let _ = (py, url, table, properties, mode);
+            return Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
+                "JDBC/SQLite support requires building robin-sparkless with the 'jdbc' or 'sqlite' feature.",
+            ));
+        }
+
+        #[cfg(any(feature = "jdbc", feature = "sqlite"))]
+        {
+            let df =
+                self.df
+                    .bind(py)
+                    .downcast::<PyDataFrame>()
+                    .map_err(|_| {
+                        PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected DataFrame")
+                    })?;
+            let inner = df.borrow();
+
+            let mut props: Vec<(String, String)> = self.options.clone();
+            for (k, v) in properties {
+                let key: String = k.extract()?;
+                let val: String = v.extract()?;
+                props.push((key, val));
+            }
+
+            let save_mode = mode
+                .map(save_mode_from_str)
+                .unwrap_or_else(|| save_mode_from_str(&self.mode));
+
+            inner
+                .inner
+                .write()
+                .jdbc(url, table, &props, save_mode)
+                .map_err(to_py_err)
+        }
+    }
+
     /// PySpark: saveAsTable(name). mode: "error"|"overwrite"|"append"|"ignore".
     #[pyo3(signature = (name, mode=None))]
     fn save_as_table(&self, py: Python<'_>, name: &str, mode: Option<&str>) -> PyResult<()> {

@@ -27,6 +27,8 @@ crate-type = ["rlib"]
 default = []
 sql = ["robin-sparkless-polars/sql"]
 delta = ["robin-sparkless-polars/delta"]
+jdbc = ["robin-sparkless-polars/jdbc"]
+sqlite = ["robin-sparkless-polars/sqlite"]
 
 [dependencies]
 robin-sparkless-core = { version = "4.2", path = "crates/robin-sparkless-core" }

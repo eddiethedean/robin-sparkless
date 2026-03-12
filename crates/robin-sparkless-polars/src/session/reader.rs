@@ -6,6 +6,8 @@ use std::path::Path;
 use polars::prelude::PolarsError;
 
 use crate::dataframe::DataFrame;
+#[cfg(any(feature = "jdbc", feature = "sqlite"))]
+use crate::jdbc::JdbcOptions;
 
 use super::SparkSession;
 
@@ -65,6 +67,19 @@ impl DataFrameReader {
             Some("json") | Some("jsonl") => self.json(path),
             #[cfg(feature = "delta")]
             Some("delta") => self.session.read_delta_from_path(path),
+            #[cfg(any(feature = "jdbc", feature = "sqlite"))]
+            Some("jdbc") => {
+                let opts = JdbcOptions::from_options_map(&self.options).map_err(|e| {
+                    PolarsError::ComputeError(format!("jdbc load: invalid options: {e}").into())
+                })?;
+                let pl_df = crate::jdbc::read_jdbc_to_polars(&opts).map_err(|e| {
+                    PolarsError::ComputeError(format!("jdbc load: {e}").into())
+                })?;
+                Ok(DataFrame::from_polars_with_options(
+                    pl_df,
+                    self.session.is_case_sensitive(),
+                ))
+            }
             _ => Err(PolarsError::ComputeError(
                 format!(
                     "load: could not infer format for path '{}'. Use format('parquet'|'csv'|'json') before load.",
@@ -78,6 +93,26 @@ impl DataFrameReader {
     /// Return the named table/view (PySpark: table(name)).
     pub fn table(&self, name: &str) -> Result<DataFrame, PolarsError> {
         self.session.table(name)
+    }
+
+    /// JDBC convenience: read using explicit url, dbtable, and properties map.
+    ///
+    /// This mirrors PySpark's `spark.read.jdbc(url, table, properties)` shape
+    /// but is currently only used internally by higher-level APIs.
+    #[cfg(any(feature = "jdbc", feature = "sqlite"))]
+    pub fn jdbc_with_properties(
+        &self,
+        url: &str,
+        table: &str,
+        properties: &HashMap<String, String>,
+    ) -> Result<DataFrame, crate::error::EngineError> {
+        let opts =
+            JdbcOptions::from_url_dbtable_and_properties(url.to_string(), table.to_string(), properties)?;
+        let pl_df = crate::jdbc::read_jdbc_to_polars(&opts)?;
+        Ok(DataFrame::from_polars_with_options(
+            pl_df,
+            self.session.is_case_sensitive(),
+        ))
     }
 
     fn apply_csv_options(

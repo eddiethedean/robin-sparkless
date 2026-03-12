@@ -37,6 +37,8 @@ Optional features:
 ```toml
 robin-sparkless = { version = "0.15.0", features = ["sql"] }   # spark.sql(), temp views
 robin-sparkless = { version = "0.15.0", features = ["delta"] }  # Delta Lake read/write
+robin-sparkless = { version = "0.15.0", features = ["jdbc"] }  # PostgreSQL read/write
+robin-sparkless = { version = "0.15.0", features = ["sqlite"] } # SQLite read/write (file-based)
 ```
 
 ---
@@ -117,6 +119,58 @@ Group and aggregate with `group_by` and `GroupedData` methods such as `count`, `
 ## Reading and Writing Data
 
 Use `SparkSession::read_csv`, `read_parquet`, and `read_json` to read data, and `DataFrame::write` (writer API) to write Parquet/CSV/JSON.
+
+### JDBC / External Databases (PostgreSQL and SQLite)
+
+With the optional `jdbc` feature (PostgreSQL) or `sqlite` feature, you can read from and write to databases using a PySpark-style API. Use **PostgreSQL** for a server-backed DB and **SQLite** for a single file (e.g. `jdbc:sqlite:/path/to/db.db`).
+
+Add the feature in your `Cargo.toml`:
+
+```toml
+robin-sparkless = { version = "4.2.1", features = ["jdbc"] }   # PostgreSQL
+robin-sparkless = { version = "4.2.1", features = ["sqlite"] }  # SQLite (file-based)
+```
+
+Rust example:
+
+```rust
+use robin_sparkless::{DataFrame, SaveMode, SparkSession};
+
+let spark = SparkSession::builder().app_name("jdbc_demo").get_or_create();
+
+// Read from a PostgreSQL table
+let url = "postgres://user:password@localhost:5432/mydb";
+let mut props = std::collections::HashMap::new();
+props.insert("user".to_string(), "user".to_string());
+props.insert("password".to_string(), "password".to_string());
+
+// Equivalent to spark.read.format("jdbc").option("url", url).option("dbtable", "public.my_table").load()
+let df: DataFrame = spark
+    .read()
+    .format("jdbc")
+    .option("url", url)
+    .option("dbtable", "public.my_table")
+    .load(".")?;
+
+// Write back to a JDBC table (append mode)
+let props_vec: Vec<(String, String)> = props.into_iter().collect();
+df.write().jdbc(url, "public.my_table_copy", &props_vec, SaveMode::Append)?;
+```
+
+Python example:
+
+```python
+url = "postgres://user:password@localhost:5432/mydb"
+props = {"user": "user", "password": "password"}
+
+# Read
+df = spark.read.jdbc(url=url, table="public.my_table", properties=props)
+
+# Write (append)
+df.write.jdbc(url=url, table="public.my_table_copy", properties=props, mode="append")
+```
+
+JDBC/SQLite integration is optional: enable the `jdbc` or `sqlite` feature. For Postgres, set `SPARKLESS_TEST_JDBC_URL` (and optionally user/password) when running integration tests.
 
 ---
 

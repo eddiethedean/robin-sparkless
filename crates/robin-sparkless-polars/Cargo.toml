@@ -10,6 +10,8 @@ repository = "https://github.com/eddiethedean/robin-sparkless"
 default = []
 sql = ["dep:spark-sql-parser"]
 delta = ["dep:deltalake", "dep:tokio"]
+jdbc = ["dep:postgres"]
+sqlite = ["dep:rusqlite"]
 
 [dependencies]
 robin-sparkless-core = { version = "4.2", path = "../robin-sparkless-core" }
@@ -40,6 +42,8 @@ aes-gcm = "0.10"
 spark-sql-parser = { version = "0.4", path = "../spark-sql-parser", optional = true }
 deltalake = { version = "0.31", optional = true }
 tokio = { version = "1", optional = true, features = ["rt", "rt-multi-thread", "fs", "io-util"] }
+postgres = { version = "0.19", optional = true }
+rusqlite = { version = "0.32", optional = true }
 
 [dev-dependencies]
 tempfile = "3"

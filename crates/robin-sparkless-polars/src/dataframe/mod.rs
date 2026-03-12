@@ -2309,6 +2309,31 @@ impl<'a> DataFrameWriter<'a> {
         )
     }
 
+    /// JDBC write (PySpark-style). Requires the `jdbc` or `sqlite` feature.
+    #[cfg(any(feature = "jdbc", feature = "sqlite"))]
+    pub fn jdbc(
+        &self,
+        url: &str,
+        table: &str,
+        properties: &[(String, String)],
+        mode: SaveMode,
+    ) -> Result<(), crate::error::EngineError> {
+        use std::collections::HashMap;
+        use crate::jdbc::{write_jdbc_from_polars, JdbcOptions};
+
+        let mut props_map = HashMap::new();
+        for (k, v) in properties {
+            props_map.insert(k.clone(), v.clone());
+        }
+        let opts = JdbcOptions::from_url_dbtable_and_properties(
+            url.to_string(),
+            table.to_string(),
+            &props_map,
+        )?;
+        let pl_df = self.df.collect_inner().map_err(crate::polars_to_core_error)?;
+        write_jdbc_from_polars(pl_df.as_ref(), &opts, mode)
+    }
+
     fn save_as_table_impl(
         &self,
         session: &SparkSession,
