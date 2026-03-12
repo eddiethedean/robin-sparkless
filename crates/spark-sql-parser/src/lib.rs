@@ -40,7 +40,7 @@ pub use sqlparser::ast;
 #[derive(Debug, Clone, PartialEq)]
 pub enum SparkStatement {
     /// A statement parsed by upstream `sqlparser`.
-    Sqlparser(Statement),
+    Sqlparser(Box<Statement>),
     /// `DESCRIBE DETAIL <table>` (Delta Lake; Spark command).
     DescribeDetail { table: ObjectName },
     /// `SHOW DATABASES` (Spark command).
@@ -75,7 +75,9 @@ fn parse_one_statement_raw(query: &str) -> Result<Statement, ParseError> {
 fn parse_object_name(name: &str) -> Result<ObjectName, ParseError> {
     let s = name.trim();
     if s.is_empty() {
-        return Err(ParseError("SQL: expected an object name, got empty string.".to_string()));
+        return Err(ParseError(
+            "SQL: expected an object name, got empty string.".to_string(),
+        ));
     }
     // Minimal support for Spark-style qualified names like `schema.table` and `global_temp.gv`.
     // Backtick quoting is intentionally not handled yet (can be added later).
@@ -112,12 +114,18 @@ pub fn parse_spark_sql(query: &str) -> Result<SparkStatement, ParseError> {
 
     // Tokenize for Spark-only command matching.
     let toks = tokenize_ws(q);
-    if toks.len() >= 2 && toks[0].eq_ignore_ascii_case("SHOW") && toks[1].eq_ignore_ascii_case("DATABASES") {
+    if toks.len() >= 2
+        && toks[0].eq_ignore_ascii_case("SHOW")
+        && toks[1].eq_ignore_ascii_case("DATABASES")
+    {
         return Ok(SparkStatement::ShowDatabases);
     }
 
     // SHOW TABLES [IN|FROM db]
-    if toks.len() >= 2 && toks[0].eq_ignore_ascii_case("SHOW") && toks[1].eq_ignore_ascii_case("TABLES") {
+    if toks.len() >= 2
+        && toks[0].eq_ignore_ascii_case("SHOW")
+        && toks[1].eq_ignore_ascii_case("TABLES")
+    {
         let db = if toks.len() >= 4
             && (toks[2].eq_ignore_ascii_case("IN") || toks[2].eq_ignore_ascii_case("FROM"))
         {
@@ -138,13 +146,18 @@ pub fn parse_spark_sql(query: &str) -> Result<SparkStatement, ParseError> {
     }
 
     // DESC DETAIL is a synonym for DESCRIBE DETAIL in Spark; treat it the same.
-    if toks.len() >= 3 && toks[0].eq_ignore_ascii_case("DESC") && toks[1].eq_ignore_ascii_case("DETAIL") {
+    if toks.len() >= 3
+        && toks[0].eq_ignore_ascii_case("DESC")
+        && toks[1].eq_ignore_ascii_case("DETAIL")
+    {
         let table = parse_object_name(&toks[2..].join(" "))?;
         return Ok(SparkStatement::DescribeDetail { table });
     }
 
     // DESCRIBE/DESC [TABLE] [EXTENDED] <table> [<col>]
-    if !toks.is_empty() && (toks[0].eq_ignore_ascii_case("DESCRIBE") || toks[0].eq_ignore_ascii_case("DESC")) {
+    if !toks.is_empty()
+        && (toks[0].eq_ignore_ascii_case("DESCRIBE") || toks[0].eq_ignore_ascii_case("DESC"))
+    {
         // Exclude DETAIL which is handled above.
         if toks.len() >= 2 && toks[1].eq_ignore_ascii_case("DETAIL") {
             // already handled above; fallthrough defensive.
@@ -153,9 +166,9 @@ pub fn parse_spark_sql(query: &str) -> Result<SparkStatement, ParseError> {
             if !rest.is_empty() {
                 let extended = rest.iter().any(|t| t.eq_ignore_ascii_case("EXTENDED"));
                 // Find the first token that is not TABLE/EXTENDED => table name token.
-                let idx = rest
-                    .iter()
-                    .position(|t| !t.eq_ignore_ascii_case("TABLE") && !t.eq_ignore_ascii_case("EXTENDED"));
+                let idx = rest.iter().position(|t| {
+                    !t.eq_ignore_ascii_case("TABLE") && !t.eq_ignore_ascii_case("EXTENDED")
+                });
                 if let Some(i) = idx {
                     let table_tok = rest.get(i).copied().unwrap_or("");
                     if !table_tok.is_empty() {
@@ -174,7 +187,7 @@ pub fn parse_spark_sql(query: &str) -> Result<SparkStatement, ParseError> {
 
     // Fall back to upstream parsing for everything else.
     let stmt = parse_one_statement_raw(query)?;
-    Ok(SparkStatement::Sqlparser(stmt))
+    Ok(SparkStatement::Sqlparser(Box::new(stmt)))
 }
 
 /// Parse a single SQL expression string (optionally with an alias) into `sqlparser` expression AST.
@@ -643,7 +656,10 @@ mod tests {
     fn spark_show_databases_case_insensitive() {
         for sql in ["show databases", "Show Databases", "SHOW DATABASES"] {
             let s = parse_spark_sql(sql).unwrap();
-            assert!(matches!(s, SparkStatement::ShowDatabases), "failed for: {sql}");
+            assert!(
+                matches!(s, SparkStatement::ShowDatabases),
+                "failed for: {sql}"
+            );
         }
     }
 
@@ -787,7 +803,7 @@ mod tests {
     fn spark_parse_spark_sql_fallback_select() {
         let s = parse_spark_sql("SELECT 1 AS x").unwrap();
         match s {
-            SparkStatement::Sqlparser(Statement::Query(_)) => {}
+            SparkStatement::Sqlparser(stmt) if matches!(stmt.as_ref(), Statement::Query(_)) => {}
             other => panic!("expected Sqlparser(Query), got {other:?}"),
         }
     }
@@ -796,7 +812,8 @@ mod tests {
     fn spark_parse_spark_sql_fallback_create_schema() {
         let s = parse_spark_sql("CREATE SCHEMA foo").unwrap();
         match s {
-            SparkStatement::Sqlparser(Statement::CreateSchema { .. }) => {}
+            SparkStatement::Sqlparser(stmt)
+                if matches!(stmt.as_ref(), Statement::CreateSchema { .. }) => {}
             other => panic!("expected Sqlparser(CreateSchema), got {other:?}"),
         }
     }
@@ -805,7 +822,7 @@ mod tests {
     fn spark_parse_spark_sql_fallback_drop_table() {
         let s = parse_spark_sql("DROP TABLE IF EXISTS t").unwrap();
         match s {
-            SparkStatement::Sqlparser(Statement::Drop { .. }) => {}
+            SparkStatement::Sqlparser(stmt) if matches!(stmt.as_ref(), Statement::Drop { .. }) => {}
             other => panic!("expected Sqlparser(Drop), got {other:?}"),
         }
     }

@@ -64,13 +64,13 @@ pub fn execute_sql(session: &SparkSession, query: &str) -> Result<DataFrame, Pol
                         .into(),
                     ));
                 }
-                return Err(PolarsError::InvalidOperation(
+                Err(PolarsError::InvalidOperation(
                     format!(
                         "Table or view '{table_name}' not found. Register it with create_or_replace_temp_view or saveAsTable. \
                         (Schema-qualified names like 'schema.table' are supported.)"
                     )
                     .into(),
-                ));
+                ))
             }
             #[cfg(not(feature = "delta"))]
             {
@@ -85,7 +85,11 @@ pub fn execute_sql(session: &SparkSession, query: &str) -> Result<DataFrame, Pol
             let db_str = db.as_ref().map(|n| n.to_string());
             translator::translate_show_tables(session, db_str.as_deref())
         }
-        SparkStatement::Describe { table, col, extended } => {
+        SparkStatement::Describe {
+            table,
+            col,
+            extended,
+        } => {
             let table_name = table.to_string();
             let col_name = col.as_ref().map(|c| c.value.as_str());
             if extended && col_name.is_none() {
@@ -98,7 +102,7 @@ pub fn execute_sql(session: &SparkSession, query: &str) -> Result<DataFrame, Pol
                 )
             }
         }
-        SparkStatement::Sqlparser(stmt) => translator::translate(session, &stmt),
+        SparkStatement::Sqlparser(stmt) => translator::translate(session, stmt.as_ref()),
     }
 }
 

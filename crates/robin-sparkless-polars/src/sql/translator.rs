@@ -588,7 +588,10 @@ fn translate_set_expr(
             let right_df = translate_set_expr(session, right.as_ref())?;
             let mut df = left_df.union(&right_df)?;
             // DISTINCT (default for UNION) => drop duplicates; ALL => keep all rows.
-            let is_distinct = matches!(set_quantifier, spark_sql_parser::ast::SetQuantifier::Distinct);
+            let is_distinct = matches!(
+                set_quantifier,
+                spark_sql_parser::ast::SetQuantifier::Distinct
+            );
             if is_distinct {
                 df = df.distinct(None)?;
             }
@@ -1787,8 +1790,9 @@ fn push_agg_function(
             (e, "count".to_string())
         }
         "SUM" => {
-            if let Some(spark_sql_parser::ast::FunctionArg::Unnamed(FunctionArgExpr::Expr(arg_expr))) =
-                args.first()
+            if let Some(spark_sql_parser::ast::FunctionArg::Unnamed(FunctionArgExpr::Expr(
+                arg_expr,
+            ))) = args.first()
             {
                 let inner = sql_expr_to_polars(arg_expr, session, Some(df), None, None)?;
                 let default = match arg_expr {
@@ -1804,8 +1808,9 @@ fn push_agg_function(
             }
         }
         "AVG" | "MEAN" => {
-            if let Some(spark_sql_parser::ast::FunctionArg::Unnamed(FunctionArgExpr::Expr(arg_expr))) =
-                args.first()
+            if let Some(spark_sql_parser::ast::FunctionArg::Unnamed(FunctionArgExpr::Expr(
+                arg_expr,
+            ))) = args.first()
             {
                 let inner = sql_expr_to_polars(arg_expr, session, Some(df), None, None)?;
                 let default = match arg_expr {
@@ -1821,8 +1826,9 @@ fn push_agg_function(
             }
         }
         "MIN" => {
-            if let Some(spark_sql_parser::ast::FunctionArg::Unnamed(FunctionArgExpr::Expr(arg_expr))) =
-                args.first()
+            if let Some(spark_sql_parser::ast::FunctionArg::Unnamed(FunctionArgExpr::Expr(
+                arg_expr,
+            ))) = args.first()
             {
                 let inner = sql_expr_to_polars(arg_expr, session, Some(df), None, None)?;
                 let default = match arg_expr {
@@ -1837,8 +1843,9 @@ fn push_agg_function(
             }
         }
         "MAX" => {
-            if let Some(spark_sql_parser::ast::FunctionArg::Unnamed(FunctionArgExpr::Expr(arg_expr))) =
-                args.first()
+            if let Some(spark_sql_parser::ast::FunctionArg::Unnamed(FunctionArgExpr::Expr(
+                arg_expr,
+            ))) = args.first()
             {
                 let inner = sql_expr_to_polars(arg_expr, session, Some(df), None, None)?;
                 let default = match arg_expr {
@@ -1921,12 +1928,12 @@ fn agg_function_key(func: &Function) -> Option<(String, String)> {
     }
     let arg_desc = match function_args_slice(&func.args).first() {
         None => "*".to_string(),
-        Some(spark_sql_parser::ast::FunctionArg::Unnamed(spark_sql_parser::ast::FunctionArgExpr::Expr(
-            SqlExpr::Identifier(ident),
-        ))) => ident.value.to_string(),
-        Some(spark_sql_parser::ast::FunctionArg::Unnamed(spark_sql_parser::ast::FunctionArgExpr::Expr(
-            SqlExpr::Wildcard(_),
-        ))) => "*".to_string(),
+        Some(spark_sql_parser::ast::FunctionArg::Unnamed(
+            spark_sql_parser::ast::FunctionArgExpr::Expr(SqlExpr::Identifier(ident)),
+        )) => ident.value.to_string(),
+        Some(spark_sql_parser::ast::FunctionArg::Unnamed(
+            spark_sql_parser::ast::FunctionArgExpr::Expr(SqlExpr::Wildcard(_)),
+        )) => "*".to_string(),
         _ => return None,
     };
     Some((name.to_uppercase(), arg_desc))

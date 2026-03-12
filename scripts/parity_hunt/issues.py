@@ -3,7 +3,6 @@ from __future__ import annotations
 import inspect
 import subprocess
 from pathlib import Path
-from textwrap import dedent
 from typing import Optional
 
 from parity_hunt.diff import Comparison
