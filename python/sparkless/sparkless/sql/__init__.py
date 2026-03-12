@@ -1,4 +1,14 @@
-# PySpark-style: from sparkless.sql import SparkSession, DataFrame, Column, Row, etc.
+"""PySpark-style SQL entrypoint: `from sparkless.sql import SparkSession, DataFrame, Column, Row`.
+
+This module wires the high-level SQL namespace used by tests and user code:
+
+* Re-exports core classes from `sparkless` (`SparkSession`, `DataFrame`, `Column`,
+  `GroupedData`, readers/writers, and `SparklessError`).
+* Exposes the `Row` type from `sparkless.sql.types`.
+* Ensures the `SparkSession` class has mutable `_active_sessions` and
+  `_singleton_session` attributes for compatibility with upstream logic.
+"""
+
 from sparkless import (
     SparkSession,
     SparkSessionBuilder,

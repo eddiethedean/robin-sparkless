@@ -1,3 +1,15 @@
+"""Implementation of PySpark-style window specifications.
+
+`WindowSpec` describes a logical window over which window functions operate:
+
+* `Window.partitionBy(...).orderBy(...)`
+* `.rowsBetween(...)` / `.rangeBetween(...)`
+
+This module is used internally by `sparkless.sql.functions` and re-exported
+via `sparkless.window` so that user code can construct window expressions
+in the same way as with PySpark.
+"""
+
 from __future__ import annotations
 
 from typing import List, Optional, Sequence, Tuple, Union

@@ -1,4 +1,17 @@
-# from sparkless.functions import col, F, ... -> use sql.functions
+"""Compatibility layer for `sparkless.functions`.
+
+PySpark and upstream Sparkless support patterns like:
+
+* `from sparkless.functions import col, lit`
+* `from sparkless import functions as F`
+* `from sparkless.functions.udf import UserDefinedFunction`
+
+This module re-exports everything from `sparkless.sql.functions`, exposes
+`F` and a `Functions` helper class, and installs a lightweight
+`sparkless.functions.udf` submodule for tests and user code that import the
+UDF class directly.
+"""
+
 from __future__ import annotations
 
 import sys

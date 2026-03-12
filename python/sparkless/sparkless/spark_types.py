@@ -1,4 +1,15 @@
-# Alias for "from sparkless.spark_types import StructType, ..." (upstream style).
+"""Top-level schema/type aliases mirroring PySpark `pyspark.sql.types`.
+
+This module allows imports such as:
+
+* `from sparkless.spark_types import StructType, StructField`
+* `from sparkless import StringType, IntegerType`
+
+All concrete implementations live in `sparkless.sql.types` and are
+re-exported here for convenience and compatibility with upstream
+Sparkless and PySpark examples.
+"""
+
 from sparkless.sql.types import (
     StructType,
     StructField,

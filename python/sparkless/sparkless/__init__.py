@@ -1,4 +1,18 @@
-# sparkless: PySpark-like DataFrame API in Python, no JVM. Backed by robin-sparkless (Rust/Polars).
+"""PySpark-like DataFrame API with a Rust/Polars engine.
+
+This module exposes the top-level `sparkless` namespace:
+
+- PySpark-compatible classes such as `SparkSession`, `DataFrame`, `Column`,
+  `GroupedData`, `DataFrameReader`, and `DataFrameWriter`.
+- A selection of built-in scalar and aggregate functions (e.g. `col`, `lit`,
+  `posexplode`, `to_date`, `current_timestamp`) backed by the native
+  `sparkless._native` extension.
+- Convenience imports such as `F`/`functions`, `Window`, and schema types
+  via `__getattr__`.
+
+The goal is to match PySpark semantics closely while running entirely in
+Rust/Polars with no JVM dependency.
+"""
 from __future__ import annotations
 
 from typing import List, Sequence, Tuple, Union, cast as _cast
