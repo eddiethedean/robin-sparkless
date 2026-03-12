@@ -96,6 +96,8 @@ pub use polars::{
     schema_from_json,
 };
 pub use robin_sparkless_polars::functions::{SortOrder, *};
+/// Backwards-compatible module re-export so `robin_sparkless::functions::*` continues to work.
+pub use robin_sparkless_polars::functions as functions;
 
 // Root-owned entry-point types (delegate to robin-sparkless-polars).
 pub use dataframe::{
