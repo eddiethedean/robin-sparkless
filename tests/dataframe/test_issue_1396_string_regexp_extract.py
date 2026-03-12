@@ -1,4 +1,4 @@
-"""Regression test for issue #1396: string.regexp_extract parity.
+r"""Regression test for issue #1396: string.regexp_extract parity.
 
 Scenario (paraphrased from the issue):
 

@@ -1,3 +1,6 @@
+[tool.pytest.ini_options]
+asyncio_default_fixture_loop_scope = "function"
+
 [tool.ruff.lint.per-file-ignores]
 # Tests often import get_spark_imports() first so the right backend is loaded, then other imports.
 "tests/**" = ["E402"]
