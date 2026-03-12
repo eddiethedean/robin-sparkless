@@ -1,5 +1,5 @@
 # sparkless: PySpark-like DataFrame API in Python, no JVM. Backed by robin-sparkless (Rust/Polars).
-__version__ = "4.1.0"
+__version__ = "4.2.0"
 
 _mod = __import__(
     "sparkless._native",

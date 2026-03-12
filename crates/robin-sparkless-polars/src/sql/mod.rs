@@ -7,8 +7,9 @@ mod translator;
 use crate::dataframe::DataFrame;
 use crate::session::SparkSession;
 use polars::prelude::PolarsError;
+use spark_sql_parser::SparkStatement;
 /// SQL AST statement type; re-exported for API consumers (e.g. root crate).
-pub use sqlparser::ast::Statement;
+pub use spark_sql_parser::ast::Statement;
 
 /// Parse a single SQL statement using [spark_sql_parser]. Returns PolarsError for compatibility with session/translator.
 /// On parse failure, error message includes supported statements (#706, #701).
@@ -19,6 +20,14 @@ fn parse_sql_to_statement(query: &str) -> Result<Statement, PolarsError> {
         PolarsError::InvalidOperation(
             format!("{msg}{hint}").into(),
         )
+    })
+}
+
+/// Parse Spark/PySpark SQL into a SparkStatement. Used by execute_sql.
+fn parse_spark_statement(query: &str) -> Result<SparkStatement, PolarsError> {
+    spark_sql_parser::parse_spark_sql(query).map_err(|e| {
+        let msg = e.to_string();
+        PolarsError::InvalidOperation(msg.into())
     })
 }
 
@@ -33,126 +42,64 @@ pub fn parse_sql(query: &str) -> Result<Statement, PolarsError> {
 /// WHERE (basic predicates), GROUP BY + aggregates, ORDER BY, LIMIT,
 /// DESCRIBE DETAIL table_name (Delta Lake; requires delta feature).
 pub fn execute_sql(session: &SparkSession, query: &str) -> Result<DataFrame, PolarsError> {
-    // Handle DESCRIBE DETAIL before parsing so we return Delta/table-not-found errors, not SQL parse error (#768, #773).
-    const PREFIX: &str = "DESCRIBE DETAIL ";
-    let q = query.trim();
-    if q.len() > PREFIX.len()
-        && q.get(..PREFIX.len())
-            .map(|s| s.eq_ignore_ascii_case(PREFIX))
-            == Some(true)
-    {
-        let table_name = q[PREFIX.len()..].trim();
-        if table_name.is_empty() {
-            return Err(PolarsError::InvalidOperation(
-                "DESCRIBE DETAIL requires a table name.".into(),
-            ));
-        }
-        #[cfg(feature = "delta")]
-        {
-            if let Some(path) = session.resolve_delta_table_path(table_name) {
-                return crate::delta::describe_delta_detail(
-                    path,
-                    Some(table_name),
-                    session.is_case_sensitive(),
-                );
-            }
-            if session.table(table_name).is_ok() {
+    match parse_spark_statement(query)? {
+        SparkStatement::DescribeDetail { table } => {
+            // Preserve Delta/table-not-found error precedence (#768, #773).
+            let table_name = table.to_string();
+            #[cfg(feature = "delta")]
+            {
+                if let Some(path) = session.resolve_delta_table_path(&table_name) {
+                    return crate::delta::describe_delta_detail(
+                        path,
+                        Some(table_name.as_str()),
+                        session.is_case_sensitive(),
+                    );
+                }
+                if session.table(&table_name).is_ok() {
+                    return Err(PolarsError::InvalidOperation(
+                        format!(
+                            "DESCRIBE DETAIL: table '{table_name}' is not a Delta table in the warehouse. \
+                             Set spark.sql.warehouse.dir and use a Delta table at {{warehouse}}/{table_name}."
+                        )
+                        .into(),
+                    ));
+                }
                 return Err(PolarsError::InvalidOperation(
                     format!(
-                        "DESCRIBE DETAIL: table '{table_name}' is not a Delta table in the warehouse. \
-                         Set spark.sql.warehouse.dir and use a Delta table at {{warehouse}}/{table_name}."
+                        "Table or view '{table_name}' not found. Register it with create_or_replace_temp_view or saveAsTable. \
+                        (Schema-qualified names like 'schema.table' are supported.)"
                     )
                     .into(),
                 ));
             }
-            return Err(PolarsError::InvalidOperation(
-                format!(
-                    "Table or view '{table_name}' not found. Register it with create_or_replace_temp_view or saveAsTable. \
-                    (Schema-qualified names like 'schema.table' are supported.)"
-                )
-                .into(),
-            ));
-        }
-        #[cfg(not(feature = "delta"))]
-        {
-            return Err(PolarsError::InvalidOperation(
-                "DESCRIBE DETAIL requires the delta feature.".into(),
-            ));
-        }
-    }
-
-    // SHOW DATABASES / SHOW TABLES [IN db] (PySpark parity; issue #1046).
-    let q_upper = q.to_ascii_uppercase();
-    const SHOW_DATABASES_PREFIX: &str = "SHOW DATABASES";
-    if q_upper.len() >= SHOW_DATABASES_PREFIX.len()
-        && q_upper.get(..SHOW_DATABASES_PREFIX.len()) == Some(SHOW_DATABASES_PREFIX)
-    {
-        return translator::translate_show_databases(session);
-    }
-    const SHOW_TABLES_PREFIX: &str = "SHOW TABLES";
-    if q_upper.len() >= SHOW_TABLES_PREFIX.len()
-        && q_upper.get(..SHOW_TABLES_PREFIX.len()) == Some(SHOW_TABLES_PREFIX)
-    {
-        let rest = q[SHOW_TABLES_PREFIX.len()..].trim();
-        let mut db: Option<&str> = None;
-        if !rest.is_empty() {
-            let parts: Vec<&str> = rest.split_whitespace().collect();
-            if parts.len() >= 2
-                && (parts[0].eq_ignore_ascii_case("IN") || parts[0].eq_ignore_ascii_case("FROM"))
+            #[cfg(not(feature = "delta"))]
             {
-                db = Some(parts[1]);
+                let _ = table_name;
+                return Err(PolarsError::InvalidOperation(
+                    "DESCRIBE DETAIL requires the delta feature.".into(),
+                ));
             }
         }
-        return translator::translate_show_tables(session, db);
-    }
-
-    // DESCRIBE table_name [col_name] (PySpark 3.5: optional column). Parser only accepts "DESCRIBE t".
-    const DESCRIBE_PREFIX: &str = "DESCRIBE ";
-    const DESC_PREFIX: &str = "DESC ";
-    const DESC_DETAIL_PREFIX: &str = "DESC DETAIL ";
-    let is_describe = q.len() >= DESCRIBE_PREFIX.len()
-        && q.get(..DESCRIBE_PREFIX.len())
-            .map(|s| s.eq_ignore_ascii_case(DESCRIBE_PREFIX))
-            == Some(true)
-        && q.get(..PREFIX.len())
-            .map(|s| s.eq_ignore_ascii_case(PREFIX))
-            != Some(true);
-    let is_desc = q.len() >= DESC_PREFIX.len()
-        && q.get(..DESC_PREFIX.len())
-            .map(|s| s.eq_ignore_ascii_case(DESC_PREFIX))
-            == Some(true)
-        && (q.len() < DESC_DETAIL_PREFIX.len()
-            || q.get(..DESC_DETAIL_PREFIX.len())
-                .map(|s| s.eq_ignore_ascii_case(DESC_DETAIL_PREFIX))
-                != Some(true));
-    let rest = if is_describe {
-        q[DESCRIBE_PREFIX.len()..].trim()
-    } else if is_desc {
-        q[DESC_PREFIX.len()..].trim()
-    } else {
-        ""
-    };
-    if !rest.is_empty() && (is_describe || is_desc) {
-        let parts: Vec<&str> = rest.split_whitespace().collect();
-        // #1013: DESCRIBE [TABLE] [EXTENDED] table_name [col_name] — skip TABLE/EXTENDED to get table name.
-        let has_extended = parts.iter().any(|p| p.eq_ignore_ascii_case("EXTENDED"));
-        let idx = parts
-            .iter()
-            .position(|p| !p.eq_ignore_ascii_case("TABLE") && !p.eq_ignore_ascii_case("EXTENDED"));
-        let table_name = idx.and_then(|i| parts.get(i)).copied().unwrap_or("");
-        let col_name = idx.and_then(|i| parts.get(i + 1)).copied();
-        if !table_name.is_empty() {
-            if has_extended && col_name.is_none() {
-                return translator::translate_describe_table_extended(session, table_name);
-            }
-            return translator::translate_describe_table_optional_col(
-                session, table_name, col_name,
-            );
+        SparkStatement::ShowDatabases => translator::translate_show_databases(session),
+        SparkStatement::ShowTables { db } => {
+            let db_str = db.as_ref().map(|n| n.to_string());
+            translator::translate_show_tables(session, db_str.as_deref())
         }
+        SparkStatement::Describe { table, col, extended } => {
+            let table_name = table.to_string();
+            let col_name = col.as_ref().map(|c| c.value.as_str());
+            if extended && col_name.is_none() {
+                translator::translate_describe_table_extended(session, table_name.as_str())
+            } else {
+                translator::translate_describe_table_optional_col(
+                    session,
+                    table_name.as_str(),
+                    col_name,
+                )
+            }
+        }
+        SparkStatement::Sqlparser(stmt) => translator::translate(session, &stmt),
     }
-
-    let stmt = parse_sql_to_statement(query)?;
-    translator::translate(session, &stmt)
 }
 
 /// Parse multiple selectExpr strings via SQL (e.g. "upper(Name) as u"). Registers df as __selectexpr_t, parses each expr, then drops the temp view. PySpark selectExpr parity.

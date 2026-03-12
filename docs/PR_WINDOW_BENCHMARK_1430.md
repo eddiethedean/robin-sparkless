@@ -2,7 +2,7 @@
 
 ## Summary
 
-Improves Sparkless 4.0 performance on the window-like **groupBy + join + orderBy** workload described in #1430 by reducing redundant schema work in the engine.
+Improves Sparkless v4 performance on the window-like **groupBy + join + orderBy** workload described in #1430 by reducing redundant schema work in the engine.
 
 ## Changes
 

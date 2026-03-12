@@ -4,7 +4,7 @@
 
 Python 3.8+ · PySpark 3.2–3.5 compatible · License: MIT
 
-**Current release:** 4.1.0
+**Current major release:** v4
 
 _No JVM · PySpark-like API · Rust/Polars engine · Fast local tests_
 
@@ -25,7 +25,7 @@ _No JVM · PySpark-like API · Rust/Polars engine · Fast local tests_
 
 **Tired of waiting for Spark to initialize in every test?**
 
-This package (Sparkless 4.1) provides a PySpark-like API that runs **without the JVM**, using the [robin-sparkless](https://github.com/eddiethedean/robin-sparkless) Rust crate as the execution engine. Use the same patterns as PySpark—just swap the import.
+This package (Sparkless v4) provides a PySpark-like API that runs **without the JVM**, using the [robin-sparkless](https://github.com/eddiethedean/robin-sparkless) Rust crate as the execution engine. Use the same patterns as PySpark—just swap the import.
 
 ```python
 # Before (PySpark)
@@ -62,7 +62,7 @@ from sparkless.sql import SparkSession
 Install the published `sparkless` package:
 
 ```bash
-pip install sparkless==4.1.0
+pip install "sparkless>=4,<5"
 ```
 
 This installs the Python API and the prebuilt native extension wheels (when available for your platform).

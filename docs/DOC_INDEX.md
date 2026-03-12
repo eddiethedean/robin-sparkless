@@ -2,14 +2,14 @@
 
 This page is the **legacy doc index**. The full documentation is built with [MkDocs](https://www.mkdocs.org/) and published on [Read the Docs](https://robin-sparkless.readthedocs.io/). To build locally: `pip install -r docs/requirements.txt` then `mkdocs serve`.
 
-## Python (Sparkless 4.1)
+## Python (Sparkless v4)
 
 Documentation for the Python package mirrors the [Sparkless](https://sparkless.readthedocs.io/) readthedocs structure:
 
 | Document | Description |
 |----------|-------------|
 | [Python getting started](python_getting_started.md) | Installation, quick start, core features (DataFrame, SQL, windows), testing, lazy evaluation, next steps |
-| [Package README](https://github.com/eddiethedean/robin-sparkless/blob/main/python/README.md) | Why Sparkless 4.1, Sparkless 3 vs 4.x, installation, API overview, backend, known limitations |
+| [Package README](https://github.com/eddiethedean/robin-sparkless/blob/main/python/README.md) | Why Sparkless v4, Sparkless 3 vs 4.x, installation, API overview, backend, known limitations |
 | [Migration (PySpark / Sparkless 3)](python_migration.md) | Switching from PySpark or Sparkless 3.x; Sparkless 3 vs 4.x table |
 | [PySpark differences](PYSPARK_DIFFERENCES.md) | Known divergences and caveats (applies to both Rust and Python usage) |
 

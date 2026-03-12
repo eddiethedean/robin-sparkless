@@ -47,7 +47,7 @@ markdown_extensions:
 nav:
   - Home: index.md
   - Doc index: DOC_INDEX.md
-  - Python (Sparkless 4.0):
+  - Python (Sparkless v4):
     - Getting started: python_getting_started.md
     - Migration (PySpark / Sparkless 3): python_migration.md
   - Getting started:

@@ -11,7 +11,7 @@ use crate::session::{SparkSession, set_thread_udf_session};
 use polars::prelude::{AnyValue, DataFrame as PlDataFrame, Expr, PolarsError, col, lit, when};
 use polars_plan::dsl::functions::nth;
 use serde_json::Value as JsonValue;
-use sqlparser::ast::{
+use spark_sql_parser::ast::{
     AssignmentTarget, BinaryOperator, Expr as SqlExpr, FromTable, Function, FunctionArg,
     FunctionArgExpr, FunctionArguments, GroupByExpr, JoinConstraint, JoinOperator, LimitClause,
     ObjectType, OrderByKind, Query, Select, SelectItem, SetExpr, SetOperator, Statement,
@@ -91,41 +91,12 @@ pub fn expr_string_to_polars(
     session: &SparkSession,
     df: &DataFrame,
 ) -> Result<Expr, PolarsError> {
-    let query = format!("SELECT {} FROM __selectexpr_t", expr_str);
-    let stmt = spark_sql_parser::parse_sql(&query)
+    let (sql_expr, alias) = spark_sql_parser::parse_select_expr(expr_str)
         .map_err(|e| PolarsError::InvalidOperation(e.to_string().into()))?;
-    let query_ast = match &stmt {
-        Statement::Query(q) => q.as_ref(),
-        _ => {
-            return Err(PolarsError::InvalidOperation(
-                "expr_string_to_polars: expected SELECT statement".into(),
-            ));
-        }
-    };
-    let body = match query_ast.body.as_ref() {
-        SetExpr::Select(s) => s.as_ref(),
-        _ => {
-            return Err(PolarsError::InvalidOperation(
-                "expr_string_to_polars: expected SELECT".into(),
-            ));
-        }
-    };
-    let first = body.projection.first().ok_or_else(|| {
-        PolarsError::InvalidOperation("expr_string_to_polars: empty SELECT list".into())
-    })?;
     set_thread_udf_session(session.clone());
-    let (sql_expr, alias) = match first {
-        SelectItem::UnnamedExpr(e) => ((*e).clone(), None),
-        SelectItem::ExprWithAlias { expr, alias: a } => ((*expr).clone(), Some(a.value.as_str())),
-        _ => {
-            return Err(PolarsError::InvalidOperation(
-                format!("expr_string_to_polars: unsupported select item {:?}", first).into(),
-            ));
-        }
-    };
     let expr = sql_expr_to_polars(&sql_expr, session, Some(df), None, None)?;
     Ok(match alias {
-        Some(a) => expr.alias(a),
+        Some(a) => expr.alias(a.value.as_str()),
         // Default output name for expr() is the original SQL expression string so tests
         // can access columns by that name (e.g. "ltrim(rtrim(Value))") irrespective of
         // internal expression output names.
@@ -182,7 +153,7 @@ pub fn translate(
                 ));
             }
 
-            fn dtype_to_schema_str(dt: &sqlparser::ast::DataType) -> String {
+            fn dtype_to_schema_str(dt: &spark_sql_parser::ast::DataType) -> String {
                 let s = dt.to_string().to_lowercase();
                 if s.starts_with("int") || s.starts_with("integer") || s == "int4" {
                     "int".to_string()
@@ -317,7 +288,7 @@ pub fn translate(
 /// INSERT INTO table SELECT ... . Appends rows to an existing catalog table.
 fn translate_insert(
     session: &SparkSession,
-    insert: &sqlparser::ast::Insert,
+    insert: &spark_sql_parser::ast::Insert,
 ) -> Result<crate::dataframe::DataFrame, PolarsError> {
     // Only support INSERT INTO <table_name> ... (no TABLE FUNCTION targets).
     let table_name = match &insert.table {
@@ -583,7 +554,7 @@ pub(crate) fn translate_show_tables(
 /// DESCRIBE table_name (parsed form): delegate to optional-col form.
 fn translate_describe_table(
     session: &SparkSession,
-    table_name: &sqlparser::ast::ObjectName,
+    table_name: &spark_sql_parser::ast::ObjectName,
 ) -> Result<crate::dataframe::DataFrame, PolarsError> {
     let name = table_name_from_object_name(table_name);
     translate_describe_table_optional_col(session, &name, None)
@@ -617,7 +588,7 @@ fn translate_set_expr(
             let right_df = translate_set_expr(session, right.as_ref())?;
             let mut df = left_df.union(&right_df)?;
             // DISTINCT (default for UNION) => drop duplicates; ALL => keep all rows.
-            let is_distinct = matches!(set_quantifier, sqlparser::ast::SetQuantifier::Distinct);
+            let is_distinct = matches!(set_quantifier, spark_sql_parser::ast::SetQuantifier::Distinct);
             if is_distinct {
                 df = df.distinct(None)?;
             }
@@ -633,7 +604,7 @@ fn translate_set_expr(
 /// For unit-test pattern (table name starts with t_test_) raise to match PySpark-without-Hive; otherwise allow (#1171).
 fn translate_update(
     session: &SparkSession,
-    update: &sqlparser::ast::Update,
+    update: &spark_sql_parser::ast::Update,
 ) -> Result<crate::dataframe::DataFrame, PolarsError> {
     if !update.table.joins.is_empty() {
         return Err(PolarsError::InvalidOperation(
@@ -684,7 +655,7 @@ fn translate_update(
 /// Translate DELETE FROM table [WHERE condition]. Removes matching rows from the table in the session catalog.
 fn translate_delete(
     session: &SparkSession,
-    delete: &sqlparser::ast::Delete,
+    delete: &spark_sql_parser::ast::Delete,
 ) -> Result<crate::dataframe::DataFrame, PolarsError> {
     let tables = match &delete.from {
         FromTable::WithFromKeyword(t) | FromTable::WithoutKeyword(t) => t,
@@ -1006,7 +977,7 @@ fn translate_select_from(
     Ok(df)
 }
 
-fn table_name_from_object_name(name: &sqlparser::ast::ObjectName) -> String {
+fn table_name_from_object_name(name: &spark_sql_parser::ast::ObjectName) -> String {
     if name.0.len() >= 2 {
         let parts: Vec<String> = name
             .0
@@ -1243,8 +1214,8 @@ fn sql_expr_to_polars(
         SqlExpr::UnaryOp { op, expr } => {
             let e = sql_expr_to_polars(expr, session, df, having_agg_map, having_agg_list)?;
             match op {
-                sqlparser::ast::UnaryOperator::Not => Ok(e.not()),
-                sqlparser::ast::UnaryOperator::BitwiseNot => {
+                spark_sql_parser::ast::UnaryOperator::Not => Ok(e.not()),
+                spark_sql_parser::ast::UnaryOperator::BitwiseNot => {
                     let col = Column::from_expr(e, None);
                     Ok(functions::bitwise_not(&col).expr().clone())
                 }
@@ -1765,15 +1736,15 @@ fn projection_function_to_item(
 /// Push one aggregate expression from a SQL function. `alias_override`: when Some (e.g. AS cnt), use it; when None use default (count, sum(col), etc).
 /// SUM/AVG/MIN/MAX accept any expression (e.g. SUM(quantity * price)); COUNT accepts * or column only.
 fn push_agg_function(
-    name: &sqlparser::ast::ObjectName,
-    args: &[sqlparser::ast::FunctionArg],
+    name: &spark_sql_parser::ast::ObjectName,
+    args: &[spark_sql_parser::ast::FunctionArg],
     session: &SparkSession,
     df: &DataFrame,
     alias_override: Option<&str>,
     agg: &mut Vec<Expr>,
 ) -> Result<(), PolarsError> {
     use polars::prelude::len;
-    use sqlparser::ast::FunctionArgExpr;
+    use spark_sql_parser::ast::FunctionArgExpr;
 
     let func_name = name
         .0
@@ -1787,8 +1758,8 @@ fn push_agg_function(
                 len()
             } else if args.len() == 1 {
                 match &args[0] {
-                    sqlparser::ast::FunctionArg::Unnamed(FunctionArgExpr::Wildcard) => len(),
-                    sqlparser::ast::FunctionArg::Unnamed(FunctionArgExpr::Expr(e)) => {
+                    spark_sql_parser::ast::FunctionArg::Unnamed(FunctionArgExpr::Wildcard) => len(),
+                    spark_sql_parser::ast::FunctionArg::Unnamed(FunctionArgExpr::Expr(e)) => {
                         let expr = match e {
                             SqlExpr::Nested(inner) => inner.as_ref(),
                             other => other,
@@ -1816,7 +1787,7 @@ fn push_agg_function(
             (e, "count".to_string())
         }
         "SUM" => {
-            if let Some(sqlparser::ast::FunctionArg::Unnamed(FunctionArgExpr::Expr(arg_expr))) =
+            if let Some(spark_sql_parser::ast::FunctionArg::Unnamed(FunctionArgExpr::Expr(arg_expr))) =
                 args.first()
             {
                 let inner = sql_expr_to_polars(arg_expr, session, Some(df), None, None)?;
@@ -1833,7 +1804,7 @@ fn push_agg_function(
             }
         }
         "AVG" | "MEAN" => {
-            if let Some(sqlparser::ast::FunctionArg::Unnamed(FunctionArgExpr::Expr(arg_expr))) =
+            if let Some(spark_sql_parser::ast::FunctionArg::Unnamed(FunctionArgExpr::Expr(arg_expr))) =
                 args.first()
             {
                 let inner = sql_expr_to_polars(arg_expr, session, Some(df), None, None)?;
@@ -1850,7 +1821,7 @@ fn push_agg_function(
             }
         }
         "MIN" => {
-            if let Some(sqlparser::ast::FunctionArg::Unnamed(FunctionArgExpr::Expr(arg_expr))) =
+            if let Some(spark_sql_parser::ast::FunctionArg::Unnamed(FunctionArgExpr::Expr(arg_expr))) =
                 args.first()
             {
                 let inner = sql_expr_to_polars(arg_expr, session, Some(df), None, None)?;
@@ -1866,7 +1837,7 @@ fn push_agg_function(
             }
         }
         "MAX" => {
-            if let Some(sqlparser::ast::FunctionArg::Unnamed(FunctionArgExpr::Expr(arg_expr))) =
+            if let Some(spark_sql_parser::ast::FunctionArg::Unnamed(FunctionArgExpr::Expr(arg_expr))) =
                 args.first()
             {
                 let inner = sql_expr_to_polars(arg_expr, session, Some(df), None, None)?;
@@ -1899,7 +1870,7 @@ fn push_agg_function(
 /// True if the projection contains only aggregate function calls (COUNT, SUM, AVG, MIN, MAX).
 /// Used for scalar aggregation: SELECT AVG(salary) FROM t (issue #587).
 fn projection_is_scalar_aggregate(projection: &[SelectItem]) -> bool {
-    use sqlparser::ast::SelectItem;
+    use spark_sql_parser::ast::SelectItem;
     if projection.is_empty() {
         return false;
     }
@@ -1950,10 +1921,10 @@ fn agg_function_key(func: &Function) -> Option<(String, String)> {
     }
     let arg_desc = match function_args_slice(&func.args).first() {
         None => "*".to_string(),
-        Some(sqlparser::ast::FunctionArg::Unnamed(sqlparser::ast::FunctionArgExpr::Expr(
+        Some(spark_sql_parser::ast::FunctionArg::Unnamed(spark_sql_parser::ast::FunctionArgExpr::Expr(
             SqlExpr::Identifier(ident),
         ))) => ident.value.to_string(),
-        Some(sqlparser::ast::FunctionArg::Unnamed(sqlparser::ast::FunctionArgExpr::Expr(
+        Some(spark_sql_parser::ast::FunctionArg::Unnamed(spark_sql_parser::ast::FunctionArgExpr::Expr(
             SqlExpr::Wildcard(_),
         ))) => "*".to_string(),
         _ => return None,
@@ -2078,8 +2049,8 @@ fn default_agg_alias(func: &Function) -> Result<String, PolarsError> {
     let s = match name.to_uppercase().as_str() {
         "COUNT" => "count".to_string(),
         "SUM" => {
-            if let Some(sqlparser::ast::FunctionArg::Unnamed(
-                sqlparser::ast::FunctionArgExpr::Expr(SqlExpr::Identifier(ident)),
+            if let Some(spark_sql_parser::ast::FunctionArg::Unnamed(
+                spark_sql_parser::ast::FunctionArgExpr::Expr(SqlExpr::Identifier(ident)),
             )) = args.first()
             {
                 format!("sum({})", ident.value)
@@ -2088,8 +2059,8 @@ fn default_agg_alias(func: &Function) -> Result<String, PolarsError> {
             }
         }
         "AVG" | "MEAN" => {
-            if let Some(sqlparser::ast::FunctionArg::Unnamed(
-                sqlparser::ast::FunctionArgExpr::Expr(SqlExpr::Identifier(ident)),
+            if let Some(spark_sql_parser::ast::FunctionArg::Unnamed(
+                spark_sql_parser::ast::FunctionArgExpr::Expr(SqlExpr::Identifier(ident)),
             )) = args.first()
             {
                 format!("avg({})", ident.value)
@@ -2098,8 +2069,8 @@ fn default_agg_alias(func: &Function) -> Result<String, PolarsError> {
             }
         }
         "MIN" => {
-            if let Some(sqlparser::ast::FunctionArg::Unnamed(
-                sqlparser::ast::FunctionArgExpr::Expr(SqlExpr::Identifier(ident)),
+            if let Some(spark_sql_parser::ast::FunctionArg::Unnamed(
+                spark_sql_parser::ast::FunctionArgExpr::Expr(SqlExpr::Identifier(ident)),
             )) = args.first()
             {
                 format!("min({})", ident.value)
@@ -2108,8 +2079,8 @@ fn default_agg_alias(func: &Function) -> Result<String, PolarsError> {
             }
         }
         "MAX" => {
-            if let Some(sqlparser::ast::FunctionArg::Unnamed(
-                sqlparser::ast::FunctionArgExpr::Expr(SqlExpr::Identifier(ident)),
+            if let Some(spark_sql_parser::ast::FunctionArg::Unnamed(
+                spark_sql_parser::ast::FunctionArgExpr::Expr(SqlExpr::Identifier(ident)),
             )) = args.first()
             {
                 format!("max({})", ident.value)
