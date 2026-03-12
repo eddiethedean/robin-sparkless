@@ -17,7 +17,7 @@ Robin-sparkless is designed to **replace the backend logic** of [Sparkless](http
 
 ### 1. Rust Core (default build)
 - Default build is pure Rust. Library exposes a Rust API.
-- Earlier phases included an optional PyO3 bridge and Python bindings, which have since been removed. Any future language bindings are expected to live out-of-tree and call the Rust crate via FFI.
+- Earlier phases included an optional `robin_sparkless` Python module. That historical module is gone, but this repo now ships the **Sparkless v4** Python package under `python/` (PyO3-based native extension crate `sparkless-native` + Python wrapper package `sparkless`). Other language bindings may live out-of-tree and call the Rust crate via FFI.
 
 ### 2. Polars Integration
 - `DataFrame` uses Polars `LazyFrame` internally (#438): transformations extend the lazy plan; only actions (`collect`, `show`, `count`, `write`, etc.) trigger materialization. Data sources (`read_csv`, `read_parquet`, `read_json`) return lazy DataFrames.
@@ -62,7 +62,7 @@ Robin-sparkless is designed to **replace the backend logic** of [Sparkless](http
    - ✅ `SparkSession::sql()` implemented (optional `sql` feature); temp views and in-memory saved tables (`saveAsTable`, `write_delta_table`); catalog `listTables`, `tableExists`, `dropTempView`, `dropTable`; see [QUICKSTART.md](QUICKSTART.md), [EMBEDDING.md](EMBEDDING.md).
 
 6. **Language bindings** (out-of-tree)
-   - Python bindings and PyO3 bridge have been removed from this repo. Sparkless (or another host) maintains bindings that call the Rust crate via FFI. See [EMBEDDING.md](EMBEDDING.md) for the API surface and bindings contract.
+   - The legacy `robin_sparkless` Python module is removed. The supported Python integration for v4 is the in-repo `python/` package (`sparkless` + `sparkless-native`). Other language bindings may live out-of-tree and call the Rust crate via FFI; see [EMBEDDING.md](EMBEDDING.md).
 
 7. **Phase 5 Test Conversion** ✅ **COMPLETED**
    - Fixture converter maps Sparkless `expected_outputs` to robin-sparkless format (join, window, withColumn, union, distinct, drop, dropna, fillna, limit, withColumnRenamed, etc.).

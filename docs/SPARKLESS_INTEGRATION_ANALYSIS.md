@@ -1,6 +1,6 @@
 # Sparkless → Robin-Sparkless Integration Analysis
 
-This document analyzes the [Sparkless](https://github.com/eddiethedean/sparkless) Python project and how **robin-sparkless** (Rust) can eventually replace its backend logic. It covers architecture, structural learnings, and test conversion strategy.
+This document analyzes the historical [Sparkless](https://github.com/eddiethedean/sparkless) Python project (v3.x: Polars-Python backend) and how **robin-sparkless** (Rust) can replace backend logic. It covers architecture, structural learnings, and test conversion strategy.
 
 ---
 
@@ -9,11 +9,11 @@ This document analyzes the [Sparkless](https://github.com/eddiethedean/sparkless
 | Aspect | Sparkless (Python) | Robin-Sparkless (Rust) |
 |--------|-------------------|------------------------|
 | **Role** | PySpark drop-in replacement for testing | Pure Rust engine (no JVM) |
-| **Backend** | Polars (Python) via `backend/polars/` | Polars (Rust) directly |
+| **Backend** | Polars (Python) via `backend/polars/` (Sparkless v3.x) | Polars (Rust) directly |
 | **API** | `from sparkless.sql import SparkSession` | `robin_sparkless::{SparkSession, DataFrame}` |
 | **Goal** | Run existing PySpark tests 10x faster | **Become the execution backend** for Sparkless |
 
-**Integration path**: Sparkless (Python) would use FFI to call robin-sparkless for DataFrame execution. Robin-sparkless implements the Polars-backed engine; Sparkless keeps the PySpark API surface, schema parsing, and Python compatibility. The focus of this repo is now the Rust engine and its parity fixtures; Python bindings live out-of-tree.
+**Integration path**: Sparkless (Python) would use FFI to call robin-sparkless for DataFrame execution. Robin-sparkless implements the Polars-backed engine; Sparkless keeps the PySpark API surface, schema parsing, and Python compatibility.\n+\n+Note: this repository also ships **Sparkless v4** (Rust backend) under `python/` as a first-class Python package + native extension; the sections below that reference `sparkless/backend/polars/` describe Sparkless v3.x.
 
 ---
 

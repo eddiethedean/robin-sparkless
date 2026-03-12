@@ -1,6 +1,6 @@
 .PHONY: build build-release build-all-features test test-rust check check-full check-crate fmt fmt-check clippy audit outdated deny \
 	lint-python \
-	clean \
+	clean clean-generated \
 	build-python test-python test-python-upstream test-python-upstream-full \
 	test-parity-phase-a test-parity-phase-b test-parity-phase-c test-parity-phase-d \
 	test-parity-phase-e test-parity-phase-f test-parity-phase-g test-parity-phases \
@@ -46,6 +46,10 @@ check: clean
 # check-full runs (incremental + debug + all-features + all-targets). Next build will be a full rebuild.
 clean:
 	cargo clean
+
+# Remove local/generated non-Rust outputs (best-effort).
+clean-generated:
+	rm -rf tmp spark-warehouse site docs/_build _build
 
 # Run checks for a single crate only (faster when editing one crate).
 # Usage: make check-crate CRATE=spark-sql-parser

@@ -59,7 +59,7 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
       - name: Install cargo-audit
-        run: cargo install cargo-audit
+        run: cargo install cargo-audit --locked --version 0.22.1
       - name: Cache cargo
         uses: actions/cache@v4
         with:
@@ -81,7 +81,7 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
       - name: Install cargo-deny
-        run: cargo install cargo-deny
+        run: cargo install cargo-deny --locked --version 0.19.0
       - name: Cache cargo
         uses: actions/cache@v4
         with:
@@ -253,7 +253,7 @@ jobs:
       - name: Upload wheel artifact
         uses: actions/upload-artifact@v4
         with:
-          name: sparkless-wheel-${{ runner.os }}
+          name: sparkless-wheel-${{ matrix.os }}
           path: target/wheels/*.whl
 
   python-tests:
@@ -286,7 +286,7 @@ jobs:
       - name: Download built wheel
         uses: actions/download-artifact@v4
         with:
-          name: sparkless-wheel-${{ runner.os }}
+          name: sparkless-wheel-${{ matrix.os }}
           path: dist
       - name: Install wheel and test deps
         run: |

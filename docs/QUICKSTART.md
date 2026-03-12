@@ -5,7 +5,7 @@ Robin-sparkless is a PySpark-like DataFrame library in Rust, with Polars as the 
 ## Building the Project
 
 ### Prerequisites
-- Rust (latest stable)
+- Rust (use the repo-pinned toolchain via `rust-toolchain.toml`)
 
 ### Build (Rust only)
 
@@ -21,7 +21,7 @@ In your own crate:
 
 ```toml
 [dependencies]
-robin-sparkless = "0.15.0"
+robin-sparkless = "4"
 ```
 
 ## Basic Usage

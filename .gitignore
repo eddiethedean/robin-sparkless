@@ -60,9 +60,15 @@ site/
 docs/_build/
 _build/
 
+# Local scratch outputs (reports, benchmarks, etc.)
+tmp/
+
 # Artifacts
 artifacts/
 artifact/
+
+# Spark runtime outputs (should not be committed)
+spark-warehouse/
 
 # Build artifacts (native lib debug symbols, etc.)
 *.dSYM/

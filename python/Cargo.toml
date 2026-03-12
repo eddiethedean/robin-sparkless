@@ -10,7 +10,7 @@ delta = ["robin-sparkless/delta"]
 
 [dependencies]
 robin-sparkless = { path = "..", features = ["sql"] }
-pyo3 = { version = "0.22", features = ["extension-module", "abi3", "generate-import-lib"] }
+pyo3 = { version = "0.22", features = ["extension-module", "abi3-py38", "generate-import-lib"] }
 serde_json = "1.0"
 base64 = "0.22"
 uuid = { version = "1", features = ["v4"] }

@@ -187,7 +187,7 @@ SPARKLESS_TEST_BACKEND=pyspark pytest tests -v
 Optional dev dependencies:
 
 ```bash
-pip install -e ".[dev]"
+pip install -e "./python[dev]"
 ```
 
 Packaging: `maturin build` in the `python/` directory produces wheels. See the main repo [README](https://github.com/eddiethedean/robin-sparkless) and [docs](https://github.com/eddiethedean/robin-sparkless/tree/main/docs) for Rust development, UDFs, and embedding.

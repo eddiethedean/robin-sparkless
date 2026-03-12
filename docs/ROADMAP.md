@@ -93,7 +93,7 @@ The path to full backend replacement is planned in [FULL_BACKEND_ROADMAP.md](FUL
 
 9. **Historical PyO3 Bridge** (Phase 4) ✅ **COMPLETED**
    - Earlier phases included an optional `pyo3` feature and `robin_sparkless` Python module with SparkSession, DataFrame, Column, and GroupedData.
-   - That bridge and associated packaging have been removed from this repository; robin-sparkless is now Rust-only. Future Sparkless integration is expected to call the Rust crate via FFI, with bindings living in the Sparkless repo or another host.
+   - That historical module is gone. The current supported Python integration for **Sparkless v4** lives in this repository under `python/` (native extension crate `sparkless-native` + Python wrapper package `sparkless`). Other bindings can still live out-of-tree and call the Rust crate via FFI.
 
 10. **Performance & Robustness** (Phase 7) ✅ **COMPLETED**
     - Benchmarks: `cargo bench` compares robin-sparkless vs plain Polars (filter → select → groupBy).

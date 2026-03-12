@@ -25,8 +25,8 @@ cd python && maturin develop
 Optional dependencies:
 
 ```bash
-pip install -e ".[dev]"    # pytest, pandas, pytest-xdist, etc.
-pip install -e ".[pyspark]" # run tests with real PySpark (requires Java)
+pip install -e "./python[dev]"     # pytest, pandas, pytest-xdist, etc.
+pip install -e "./python[pyspark]" # run tests with real PySpark (requires Java)
 ```
 
 ## Quick Start
