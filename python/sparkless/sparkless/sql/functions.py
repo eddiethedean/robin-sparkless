@@ -713,7 +713,8 @@ def weekofyear(col_or_name):
 
 def make_date(year, month, day):
     """Build date from year, month, day (PySpark make_date)."""
-    return _native.make_date(_as_col(year), _as_col(month), _as_col(day))
+    fn = getattr(_native, "make_date")
+    return _col_result(fn(_as_col(year), _as_col(month), _as_col(day)))
 
 
 typeof = _ni("typeof")
@@ -729,6 +730,7 @@ def _python_udf_executor(df, column_name, udf_name, arg_names, arg_literal_jsons
     if udf_name not in _PYTHON_UDF_REGISTRY:
         raise PySparkValueError(f"Unknown UDF name: {udf_name}")
     func, return_type = _PYTHON_UDF_REGISTRY[udf_name]
+    rt = cast("T.DataType", return_type)
     session = _active_session()
     rows = df.collect()
     if not rows:
@@ -738,14 +740,14 @@ def _python_udf_executor(df, column_name, udf_name, arg_names, arg_literal_jsons
             extended_fields = [
                 T.StructField(
                     f.name,
-                    return_type if f.name == column_name else f.dataType,
+                    rt if f.name == column_name else f.dataType,
                     f.nullable if f.name != column_name else True,
                 )
                 for f in df.schema.fields
             ]
         else:
             extended_fields = list(df.schema.fields) + [
-                T.StructField(column_name, return_type, True)
+                T.StructField(column_name, rt, True)
             ]
         extended_schema = T.StructType(extended_fields)
         return session.createDataFrame([], schema=extended_schema)
@@ -779,14 +781,14 @@ def _python_udf_executor(df, column_name, udf_name, arg_names, arg_literal_jsons
         extended_fields = [
             T.StructField(
                 f.name,
-                return_type if f.name == column_name else f.dataType,
+                rt if f.name == column_name else f.dataType,
                 f.nullable if f.name != column_name else True,
             )
             for f in df.schema.fields
         ]
     else:
         extended_fields = list(df.schema.fields) + [
-            T.StructField(column_name, return_type, True)
+            T.StructField(column_name, rt, True)
         ]
     extended_schema = T.StructType(extended_fields)
     # Pass rows as list-of-lists in schema order so createDataFrame does not reorder by sorted dict keys.
@@ -875,12 +877,15 @@ def udf(f=None, returnType=None):
 
 def isnull(col_or_name):
     """Return a boolean column that is true when the column is null. PySpark: F.isnull(col)."""
-    return _as_col(col_or_name).isNull()
+    col = _as_col(col_or_name)
+    # Use getattr to avoid relying on stubbed attributes on PyColumn.
+    return _col_result(getattr(col, "isNull")())
 
 
 def isnotnull(col_or_name):
     """Return a boolean column that is true when the column is not null. PySpark: F.isnotnull(col)."""
-    return _as_col(col_or_name).isNotNull()
+    col = _as_col(col_or_name)
+    return _col_result(getattr(col, "isNotNull")())
 
 
 def nvl(col_or_name, replacement):
@@ -1372,12 +1377,12 @@ def json_tuple(column, *keys):
     """
     if not keys:
         raise ValueError("json_tuple requires at least one key")
-    cols = []
+    cols: list[_ColumnType] = []
     for idx, key in enumerate(keys):
         # Use get_json_object to extract each key as a separate string column, then
         # alias to PySpark-style c0, c1, ... so df.select(F.json_tuple(...)) yields
         # the expected unnamed columns.
-        c = get_json_object(column, f"$.{key}")
+        c = cast(_ColumnType, get_json_object(column, f"$.{key}"))
         cols.append(c.alias(f"c{idx}"))
     # df.select() flattens tuples/lists of Columns, so returning a tuple here
     # produces multiple top-level columns matching PySpark's json_tuple behavior.
@@ -1454,7 +1459,7 @@ def create_map(*cols):
     import sparkless._native as _native
 
     # PySpark: create_map() or create_map([]) -> empty map
-    expanded = []
+    expanded: list[object] = []
     for c in cols:
         if isinstance(c, (list, tuple)):
             expanded.extend(c)
@@ -1464,7 +1469,7 @@ def create_map(*cols):
         raise ValueError(
             "create_map requires an even number of arguments (key-value pairs)"
         )
-    key_values = [_as_col(x) for x in expanded]
+    key_values = [_as_col(cast(ColumnOrName, c)) for c in expanded]
     return _native.create_map(key_values)
 
 
@@ -1724,7 +1729,7 @@ def _window_spec_to_partition_order(window, require_order=True):
     partition_names = [
         _col_name(c) if not isinstance(c, str) else c for c in partition_by
     ]
-    flat_keys = []
+    flat_keys: list[object] = []
     for k in order_keys:
         if isinstance(k, (list, tuple)):
             flat_keys.extend(k)

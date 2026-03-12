@@ -1,5 +1,12 @@
 # sparkless: PySpark-like DataFrame API in Python, no JVM. Backed by robin-sparkless (Rust/Polars).
+from __future__ import annotations
+
+from typing import List, Sequence, Tuple, Union, cast as _cast
+
+from sparkless._native import PyColumn as _ColumnType
+
 __version__ = "4.2.0"
+
 
 _mod = __import__(
     "sparkless._native",
@@ -149,22 +156,33 @@ class _PosexplodeResult(tuple):
     - _alias_names: (pos_name, val_name) tuple
     """
 
-    def __new__(cls, pos, val, alias_names=None):
+    # Attributes set by alias(); annotated for type checkers.
+    _alias_name: str
+    _alias_names: Tuple[str, str]
+
+    def __new__(
+        cls,
+        pos: _ColumnType,
+        val: _ColumnType,
+        alias_names: Sequence[str] | None = None,
+    ) -> "_PosexplodeResult":
         obj = super().__new__(cls, (pos, val))
         if alias_names is not None and len(alias_names) >= 1:
             obj._alias_name = alias_names[0]
-            obj._alias_names = tuple(alias_names)
+            # Store at most two names for (pos, val); default val alias is \"col\".
+            second = alias_names[1] if len(alias_names) > 1 else "col"
+            obj._alias_names = (alias_names[0], second)
         return obj
 
     @property
-    def _pos(self):
-        return self[0]
+    def _pos(self) -> _ColumnType:
+        return _cast(_ColumnType, self[0])
 
     @property
-    def _val(self):
-        return self[1]
+    def _val(self) -> _ColumnType:
+        return _cast(_ColumnType, self[1])
 
-    def alias(self, *names):
+    def alias(self, *names: str) -> "_PosexplodeResult":
         """Alias the two output columns.
 
         PySpark: posexplode(col).alias("pos", "val") – two-name alias.
@@ -181,13 +199,13 @@ class _PosexplodeResult(tuple):
         else:
             raise ValueError("posexplode().alias() accepts at most two names")
 
-        pos_col = self._pos.alias(pos_name)
-        val_col = self._val.alias(val_name)
+        pos_col: _ColumnType = self._pos.alias(pos_name)
+        val_col: _ColumnType = self._val.alias(val_name)
         # Return another _PosexplodeResult so tests can inspect _alias_name/_alias_names
         return _PosexplodeResult(pos_col, val_col, (pos_name, val_name))
 
 
-def posexplode(col_or_name):
+def posexplode(col_or_name: Union[str, _ColumnType]) -> _PosexplodeResult:
     """Explode array with position (PySpark posexplode).
 
     Accepts column name (str) or Column. Returns a tuple-like object of (pos_col, val_col)
@@ -198,15 +216,19 @@ def posexplode(col_or_name):
     """
     if isinstance(col_or_name, str):
         col_or_name = column(col_or_name)
-    pos_col, val_col = _mod.posexplode(col_or_name)
+    pos_col, val_col = _cast(
+        Tuple[_ColumnType, _ColumnType], _mod.posexplode(col_or_name)
+    )
     return _PosexplodeResult(pos_col, val_col)
 
 
-def posexplode_outer(col_or_name):
+def posexplode_outer(col_or_name: Union[str, _ColumnType]) -> _PosexplodeResult:
     """Explode array with position; null/empty yields one row (PySpark posexplode_outer)."""
     if isinstance(col_or_name, str):
         col_or_name = column(col_or_name)
-    pos_col, val_col = _mod.posexplode_outer(col_or_name)
+    pos_col, val_col = _cast(
+        Tuple[_ColumnType, _ColumnType], _mod.posexplode_outer(col_or_name)
+    )
     return _PosexplodeResult(pos_col, val_col)
 
 
@@ -322,7 +344,7 @@ setattr(DataFrame, "select", _dataframe_select)
 
 
 # PySpark-style: from sparkless import F, functions, StringType, ...
-def __getattr__(name):
+def __getattr__(name: str) -> object:
     if name in ("F", "functions"):
         import sparkless.sql.functions as f
 
@@ -413,7 +435,7 @@ def __getattr__(name):
 
 
 # PySpark-style: from sparkless.sql import SparkSession
-__all__ = [
+__all__: List[str] = [
     "SparklessError",
     "sql",
     "col",
@@ -434,18 +456,20 @@ __all__ = [
 ]
 
 
-def when(condition, value=None):
+def when(
+    condition: Union[str, _ColumnType], value: object | None = None
+) -> _ColumnType:
     """PySpark-compatible when(). Accepts Column or str condition, optional value."""
     from sparkless.sql.functions import when as _when
 
-    return _when(condition, value)
+    return _cast(_ColumnType, _when(condition, value))
 
 
-def create_map(*cols):
+def create_map(*cols: object) -> _ColumnType:
     """Top-level create_map for robin_sparkless tests."""
     from sparkless.sql import functions as f
 
-    return f.create_map(*cols)
+    return _cast(_ColumnType, f.create_map(*cols))
 
 
 class _SQLModule:

@@ -3,24 +3,34 @@
 
 import json
 from pathlib import Path
+from typing import Dict, Iterable, List, Tuple
 
 ROOT = Path(__file__).resolve().parent.parent
 REPORT = ROOT / "scripts" / "unskip_report.json"
 
+IssueId = int
+TestId = str
+TestIdWithIssue = Tuple[TestId, IssueId]
 
-def main() -> None:
+
+def _load_report() -> Dict[str, object]:
     with open(REPORT) as f:
-        data = json.load(f)
+        return json.load(f)
+
+
+def _iter_failed_tests(data: Dict[str, object]) -> Iterable[TestIdWithIssue]:
     # Build (test_id, issue_num) for each failed test
-    to_reskip: list[tuple[str, int]] = []
     for issue_num, failed_list in data["issues_some_failed"]:
         for test_id in failed_list:
-            to_reskip.append((test_id, issue_num))
+            yield TestId(test_id), IssueId(issue_num)
+
+
+def main() -> None:
+    data = _load_report()
+    to_reskip: List[TestIdWithIssue] = list(_iter_failed_tests(data))
     # test_id is "tests.dataframe.test_foo::TestClass::test_bar" or "tests.dataframe.test_foo::test_bar"
     # -> file tests/dataframe/test_foo.py, def test_bar
-    edits: dict[
-        Path, list[tuple[int, int, str]]
-    ] = {}  # file -> [(line_0, issue_num, indent)]
+    edits: Dict[Path, List[Tuple[int, IssueId, str]]] = {}
     for test_id, issue_num in to_reskip:
         parts = test_id.split("::")
         module = parts[0]  # tests.dataframe.test_foo

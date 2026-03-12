@@ -197,6 +197,7 @@ This repository is a **Cargo workspace**. The main library is **robin-sparkless*
 | `make sparkless-parity` | When `SPARKLESS_EXPECTED_OUTPUTS` is set and PySpark/Java are available, convert Sparkless fixtures, regenerate expected from PySpark, and run Rust parity tests. |
 | `cargo bench` | Benchmarks (robin-sparkless vs Polars) |
 | `cargo doc --open` | Build and open API docs |
+| `scripts/typecheck_strict.sh` | Run strict mypy for the Python `sparkless` package (checks `python/sparkless/sparkless` with `--check-untyped-defs`). |
 
 CI runs format, clippy, audit, deny, Rust tests, and parity tests on push/PR (see [.github/workflows/ci.yml](.github/workflows/ci.yml)).
 

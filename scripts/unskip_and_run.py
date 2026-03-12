@@ -5,17 +5,19 @@ import json
 import re
 import subprocess
 from pathlib import Path
+from typing import Dict, List, Set, Tuple
 
 ROOT = Path(__file__).resolve().parent.parent
 TESTS_DIR = ROOT / "tests"
 
+IssueId = int
+TestId = str
 
-def main() -> list[int]:
+
+def main() -> List[IssueId]:
     # 1) Build mapping: (file_path, issue_num) -> test_name by parsing files
-    issue_tests: dict[
-        int, list[str]
-    ] = {}  # issue -> list of "path::class::test" or "path::test"
-    files_changed: list[Path] = []
+    issue_tests: Dict[IssueId, List[TestId]] = {}
+    files_changed: List[Path] = []
 
     for path in sorted(TESTS_DIR.rglob("*.py")):
         content = path.read_text()
@@ -101,8 +103,8 @@ def main() -> list[int]:
     stdout = result.stdout + result.stderr
 
     # 4) Parse PASSED / FAILED from "path::test PASSED [ 33%]" or "path::Class::test FAILED"
-    passed = set()
-    failed = set()
+    passed: Set[TestId] = set()
+    failed: Set[TestId] = set()
     for line in stdout.splitlines():
         if " PASSED " in line and "::" in line:
             tid = line.split(" PASSED ")[0].strip()
@@ -122,8 +124,8 @@ def main() -> list[int]:
     failed = {norm(f) for f in failed}
 
     # 5) For each issue, check if all its tests passed
-    issues_all_passed = []
-    issues_some_failed = []
+    issues_all_passed: List[IssueId] = []
+    issues_some_failed: List[Tuple[IssueId, List[TestId]]] = []
     for issue_num in sorted(issue_tests.keys()):
         tests = issue_tests[issue_num]
         normalized = [norm(t) for t in tests]
