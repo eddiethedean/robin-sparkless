@@ -46,6 +46,7 @@ Thumbs.db
 # Testing
 .pytest_cache/
 .coverage
+.coverage.*
 htmlcov/
 
 # Linting / type checking
@@ -60,8 +61,19 @@ site/
 docs/_build/
 _build/
 
+# Environments / tooling
+.env
+.python-version
+.nox/
+.tox/
+__pypackages__/
+
+# Jupyter
+.ipynb_checkpoints/
+
 # Local scratch outputs (reports, benchmarks, etc.)
 tmp/
+.benchmarks/
 
 # Artifacts
 artifacts/
@@ -73,6 +85,7 @@ spark-warehouse/
 # Build artifacts (native lib debug symbols, etc.)
 *.dSYM/
 *.dSYM
+.cargo/
 
 # Extractor clone
 .spark_clone/
