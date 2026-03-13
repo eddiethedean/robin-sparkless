@@ -663,7 +663,6 @@ class TestIssue230CaseInsensitiveColumnMatching:
         assert "Alice" in names
         assert "Bob" in names
 
-    @pytest.mark.skip(reason="Blocked by #1464: unionByName not matching columns case-insensitively")
     def test_unionByName_case_insensitive(self, spark):
         """Test unionByName with case-insensitive column names."""
         data1 = [{"Name": "Alice", "Age": 25}]

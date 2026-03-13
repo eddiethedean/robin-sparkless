@@ -352,7 +352,7 @@ class TestCaseSensitivityConfiguration:
         assert len(result) == 3
         assert result[0]["key_upper"] == "ALICE"
 
-    @pytest.mark.skip(reason="Blocked by #1464: unionByName not matching columns case-insensitively")
+    @pytest.mark.skip(reason="Test isolation issue: case sensitivity settings bleed from prior tests")
     def test_case_insensitive_unionByName(self, spark):
         """Test unionByName with case-insensitive matching."""
         df1 = spark.createDataFrame([{"Name": "Alice", "Age": 25}])
