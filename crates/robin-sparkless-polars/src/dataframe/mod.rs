@@ -2310,7 +2310,15 @@ impl<'a> DataFrameWriter<'a> {
     }
 
     /// JDBC write (PySpark-style). Requires the `jdbc` or `sqlite` feature.
-    #[cfg(any(feature = "jdbc", feature = "sqlite"))]
+    #[cfg(any(
+        feature = "jdbc",
+        feature = "jdbc_mysql",
+        feature = "jdbc_mariadb",
+        feature = "jdbc_mssql",
+        feature = "jdbc_oracle",
+        feature = "jdbc_db2",
+        feature = "sqlite"
+    ))]
     pub fn jdbc(
         &self,
         url: &str,

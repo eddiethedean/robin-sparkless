@@ -11,6 +11,11 @@ default = []
 sql = ["dep:spark-sql-parser"]
 delta = ["dep:deltalake", "dep:tokio"]
 jdbc = ["dep:postgres"]
+jdbc_mysql = ["dep:mysql"]
+jdbc_mariadb = ["dep:mysql"]
+jdbc_mssql = ["dep:tiberius", "dep:tokio", "dep:tokio-util", "dep:futures-util"]
+jdbc_oracle = ["dep:oracle-rs", "dep:tokio"]
+jdbc_db2 = ["dep:odbc-api"]
 sqlite = ["dep:rusqlite"]
 
 [dependencies]
@@ -44,6 +49,12 @@ deltalake = { version = "0.31", optional = true }
 tokio = { version = "1", optional = true, features = ["rt", "rt-multi-thread", "fs", "io-util"] }
 postgres = { version = "0.19", optional = true }
 rusqlite = { version = "0.32", optional = true }
+mysql = { version = "27.0.0", optional = true }
+tiberius = { version = "0.12.3", optional = true, default-features = false, features = ["tds73", "rustls", "chrono", "tokio", "sql-browser-tokio"] }
+tokio-util = { version = "0.7", optional = true, features = ["compat"] }
+futures-util = { version = "0.3", optional = true }
+oracle-rs = { version = "0.1.5", package = "oracle-rs", optional = true }
+odbc-api = { version = "21.0", optional = true }
 
 [dev-dependencies]
 tempfile = "3"

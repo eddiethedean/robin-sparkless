@@ -8,6 +8,11 @@ description = "Native extension for sparkless Python package (robin-sparkless ba
 default = ["delta"]
 delta = ["robin-sparkless/delta"]
 jdbc = ["robin-sparkless/jdbc"]
+jdbc_mysql = ["robin-sparkless/jdbc_mysql"]
+jdbc_mariadb = ["robin-sparkless/jdbc_mariadb"]
+jdbc_mssql = ["robin-sparkless/jdbc_mssql"]
+jdbc_oracle = ["robin-sparkless/jdbc_oracle"]
+jdbc_db2 = ["robin-sparkless/jdbc_db2"]
 sqlite = ["robin-sparkless/sqlite"]
 
 [dependencies]

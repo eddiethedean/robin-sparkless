@@ -378,7 +378,15 @@ impl DataFrameReader {
 
     /// JDBC read: load a table from an external database (e.g. PostgreSQL).
     /// Requires the `jdbc` or `sqlite` feature. Mirror of PySpark's spark.read.jdbc(url, table, properties).
-    #[cfg(any(feature = "jdbc", feature = "sqlite"))]
+    #[cfg(any(
+        feature = "jdbc",
+        feature = "jdbc_mysql",
+        feature = "jdbc_mariadb",
+        feature = "jdbc_mssql",
+        feature = "jdbc_oracle",
+        feature = "jdbc_db2",
+        feature = "sqlite"
+    ))]
     pub fn jdbc(
         &self,
         url: &str,

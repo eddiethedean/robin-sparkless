@@ -797,7 +797,15 @@ impl<'a> DataFrameWriter<'a> {
     }
 
     /// JDBC write convenience mirroring PySpark's df.write.jdbc(url, table, properties).
-    #[cfg(any(feature = "jdbc", feature = "sqlite"))]
+    #[cfg(any(
+        feature = "jdbc",
+        feature = "jdbc_mysql",
+        feature = "jdbc_mariadb",
+        feature = "jdbc_mssql",
+        feature = "jdbc_oracle",
+        feature = "jdbc_db2",
+        feature = "sqlite"
+    ))]
     pub fn jdbc(
         &self,
         url: &str,

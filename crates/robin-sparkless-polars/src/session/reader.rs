@@ -6,7 +6,15 @@ use std::path::Path;
 use polars::prelude::PolarsError;
 
 use crate::dataframe::DataFrame;
-#[cfg(any(feature = "jdbc", feature = "sqlite"))]
+#[cfg(any(
+    feature = "jdbc",
+    feature = "jdbc_mysql",
+    feature = "jdbc_mariadb",
+    feature = "jdbc_mssql",
+    feature = "jdbc_oracle",
+    feature = "jdbc_db2",
+    feature = "sqlite"
+))]
 use crate::jdbc::JdbcOptions;
 
 use super::SparkSession;
@@ -67,7 +75,15 @@ impl DataFrameReader {
             Some("json") | Some("jsonl") => self.json(path),
             #[cfg(feature = "delta")]
             Some("delta") => self.session.read_delta_from_path(path),
-            #[cfg(any(feature = "jdbc", feature = "sqlite"))]
+            #[cfg(any(
+                feature = "jdbc",
+                feature = "jdbc_mysql",
+                feature = "jdbc_mariadb",
+                feature = "jdbc_mssql",
+                feature = "jdbc_oracle",
+                feature = "jdbc_db2",
+                feature = "sqlite"
+            ))]
             Some("jdbc") => {
                 let opts = JdbcOptions::from_options_map(&self.options).map_err(|e| {
                     PolarsError::ComputeError(format!("jdbc load: invalid options: {e}").into())
@@ -99,7 +115,15 @@ impl DataFrameReader {
     ///
     /// This mirrors PySpark's `spark.read.jdbc(url, table, properties)` shape
     /// but is currently only used internally by higher-level APIs.
-    #[cfg(any(feature = "jdbc", feature = "sqlite"))]
+    #[cfg(any(
+        feature = "jdbc",
+        feature = "jdbc_mysql",
+        feature = "jdbc_mariadb",
+        feature = "jdbc_mssql",
+        feature = "jdbc_oracle",
+        feature = "jdbc_db2",
+        feature = "sqlite"
+    ))]
     pub fn jdbc_with_properties(
         &self,
         url: &str,

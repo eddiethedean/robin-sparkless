@@ -5527,15 +5527,31 @@ impl PyDataFrameWriter {
         properties: &Bound<'_, PyDict>,
         mode: Option<&str>,
     ) -> PyResult<()> {
-        #[cfg(not(any(feature = "jdbc", feature = "sqlite")))]
+        #[cfg(not(any(
+            feature = "jdbc",
+            feature = "jdbc_mysql",
+            feature = "jdbc_mariadb",
+            feature = "jdbc_mssql",
+            feature = "jdbc_oracle",
+            feature = "jdbc_db2",
+            feature = "sqlite"
+        )))]
         {
             let _ = (py, url, table, properties, mode);
             return Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
-                "JDBC/SQLite support requires building robin-sparkless with the 'jdbc' or 'sqlite' feature.",
+                "JDBC/SQLite support requires building robin-sparkless with a JDBC/SQLite feature enabled (e.g. 'jdbc', 'jdbc_mysql', 'sqlite').",
             ));
         }
 
-        #[cfg(any(feature = "jdbc", feature = "sqlite"))]
+        #[cfg(any(
+            feature = "jdbc",
+            feature = "jdbc_mysql",
+            feature = "jdbc_mariadb",
+            feature = "jdbc_mssql",
+            feature = "jdbc_oracle",
+            feature = "jdbc_db2",
+            feature = "sqlite"
+        ))]
         {
             let df =
                 self.df
