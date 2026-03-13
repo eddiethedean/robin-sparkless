@@ -129,6 +129,31 @@ pub(crate) fn read_jdbc_mssql(opts: &JdbcOptions) -> Result<PlDataFrame, EngineE
     with_runtime(async move {
         let mut client = connect_async(opts).await?;
 
+        // Execute session initialization statement if provided
+        if let Some(init_sql) = &opts.session_init_statement {
+            client
+                .execute(init_sql.as_str(), &[])
+                .await
+                .map_err(|e| EngineError::Sql(format!("JDBC read (SQL Server): sessionInitStatement failed: {e}")))?;
+        }
+
+        // Set query timeout if provided (SQL Server uses SET LOCK_TIMEOUT in milliseconds)
+        if let Some(timeout_secs) = opts.query_timeout {
+            let timeout_ms = timeout_secs * 1000;
+            client
+                .execute(format!("SET LOCK_TIMEOUT {timeout_ms}").as_str(), &[])
+                .await
+                .map_err(|e| EngineError::Sql(format!("JDBC read (SQL Server): failed to set queryTimeout: {e}")))?;
+        }
+
+        // Execute prepare query if provided
+        if let Some(prep_sql) = &opts.prepare_query {
+            client
+                .execute(prep_sql.as_str(), &[])
+                .await
+                .map_err(|e| EngineError::Sql(format!("JDBC read (SQL Server): prepareQuery failed: {e}")))?;
+        }
+
         let mut stream = client
             .query(sql, &[])
             .await
@@ -262,38 +287,98 @@ pub(crate) fn write_jdbc_mssql(
     with_runtime(async move {
         let mut client = connect_async(opts).await?;
 
+        // Execute session initialization statement if provided
+        if let Some(init_sql) = &opts.session_init_statement {
+            client
+                .execute(init_sql.as_str(), &[])
+                .await
+                .map_err(|e| EngineError::Sql(format!("JDBC write (SQL Server): sessionInitStatement failed: {e}")))?;
+        }
+
         match mode {
-            Sm::Overwrite => {
-                let _ = client.execute(format!("TRUNCATE TABLE {table}"), &[]).await;
+            Sm::ErrorIfExists => {
+                let mut stream = client
+                    .query(format!("SELECT COUNT(*) FROM {table}"), &[])
+                    .await
+                    .map_err(|e| EngineError::Sql(format!("JDBC write (SQL Server): check table: {e}")))?;
+                let mut count: i64 = 0;
+                while let Some(item) = stream.try_next().await.ok().flatten() {
+                    if let QueryItem::Row(row) = item {
+                        count = row.get::<i64, _>(0).unwrap_or(0);
+                    }
+                }
+                if count > 0 {
+                    return Err(EngineError::User(format!(
+                        "Table '{table}' already has data. SaveMode is ErrorIfExists."
+                    )));
+                }
             }
-            Sm::ErrorIfExists | Sm::Append | Sm::Ignore => {}
+            Sm::Ignore => {
+                let mut stream = client
+                    .query(format!("SELECT COUNT(*) FROM {table}"), &[])
+                    .await
+                    .map_err(|e| EngineError::Sql(format!("JDBC write (SQL Server): check table: {e}")))?;
+                let mut count: i64 = 0;
+                while let Some(item) = stream.try_next().await.ok().flatten() {
+                    if let QueryItem::Row(row) = item {
+                        count = row.get::<i64, _>(0).unwrap_or(0);
+                    }
+                }
+                if count > 0 {
+                    return Ok(());
+                }
+            }
+            Sm::Overwrite => {
+                let use_truncate = opts.truncate.unwrap_or(true);
+                if use_truncate {
+                    let _ = client.execute(format!("TRUNCATE TABLE {table}"), &[]).await;
+                } else {
+                    let _ = client.execute(format!("DELETE FROM {table}"), &[]).await;
+                }
+            }
+            Sm::Append => {}
         }
 
         if df.height() == 0 {
             return Ok(());
         }
 
-        for row_idx in 0..df.height() {
-            let mut q = Query::new(insert_sql.as_str());
-            for col in df.columns() {
-                let v = col
-                    .get(row_idx)
-                    .map_err(|e| EngineError::Internal(format!("JDBC write: get cell: {e}")))?;
-                match v {
-                    polars::prelude::AnyValue::Null => q.bind(Option::<String>::None),
-                    polars::prelude::AnyValue::Boolean(b) => q.bind(b),
-                    polars::prelude::AnyValue::Int64(i) => q.bind(i),
-                    polars::prelude::AnyValue::Int32(i) => q.bind(i as i64),
-                    polars::prelude::AnyValue::Float64(f) => q.bind(f),
-                    polars::prelude::AnyValue::Float32(f) => q.bind(f as f64),
-                    polars::prelude::AnyValue::String(s) => q.bind(s.to_string()),
-                    polars::prelude::AnyValue::StringOwned(ref s) => q.bind(s.as_str().to_string()),
-                    other => q.bind(other.to_string()),
-                };
+        let batch_size = opts.batch_size.unwrap_or(1000) as usize;
+        let total_rows = df.height();
+
+        for batch_start in (0..total_rows).step_by(batch_size) {
+            let batch_end = (batch_start + batch_size).min(total_rows);
+            
+            // Start a transaction for this batch
+            client.execute("BEGIN TRANSACTION", &[]).await
+                .map_err(|e| EngineError::Sql(format!("JDBC write (SQL Server): begin transaction: {e}")))?;
+
+            for row_idx in batch_start..batch_end {
+                let mut q = Query::new(insert_sql.as_str());
+                for col in df.columns() {
+                    let v = col
+                        .get(row_idx)
+                        .map_err(|e| EngineError::Internal(format!("JDBC write: get cell: {e}")))?;
+                    match v {
+                        polars::prelude::AnyValue::Null => q.bind(Option::<String>::None),
+                        polars::prelude::AnyValue::Boolean(b) => q.bind(b),
+                        polars::prelude::AnyValue::Int64(i) => q.bind(i),
+                        polars::prelude::AnyValue::Int32(i) => q.bind(i as i64),
+                        polars::prelude::AnyValue::Float64(f) => q.bind(f),
+                        polars::prelude::AnyValue::Float32(f) => q.bind(f as f64),
+                        polars::prelude::AnyValue::String(s) => q.bind(s.to_string()),
+                        polars::prelude::AnyValue::StringOwned(ref s) => q.bind(s.as_str().to_string()),
+                        other => q.bind(other.to_string()),
+                    };
+                }
+                q.execute(&mut client).await.map_err(|e| {
+                    EngineError::Sql(format!("JDBC write (SQL Server): insert failed: {e}"))
+                })?;
             }
-            q.execute(&mut client).await.map_err(|e| {
-                EngineError::Sql(format!("JDBC write (SQL Server): insert failed: {e}"))
-            })?;
+            
+            // Commit this batch
+            client.execute("COMMIT", &[]).await
+                .map_err(|e| EngineError::Sql(format!("JDBC write (SQL Server): commit batch: {e}")))?;
         }
         Ok(())
     })
@@ -327,6 +412,15 @@ mod tests {
             num_partitions: None,
             fetch_size: None,
             batch_size: None,
+            session_init_statement: None,
+            query_timeout: None,
+            prepare_query: None,
+            custom_schema: None,
+            truncate: None,
+            cascade_truncate: None,
+            isolation_level: None,
+            create_table_options: None,
+            create_table_column_types: None,
             raw_options: HashMap::new(),
         };
 

@@ -16,6 +16,72 @@ This document describes how to run JDBC tests for all supported database backend
 
 Enable one or more features via Cargo (e.g. `--features jdbc,sqlite,jdbc_mysql`).
 
+## PySpark-Compatible JDBC Options
+
+The following PySpark JDBC options are supported:
+
+### Connection & Query Options
+
+| Option | Type | Description |
+|--------|------|-------------|
+| `url` | String | **Required.** JDBC connection URL |
+| `dbtable` | String | Table name to read/write |
+| `query` | String | SQL query for reads (alternative to `dbtable`) |
+| `user` | String | Database username |
+| `password` | String | Database password |
+| `driver` | String | Driver class hint (for disambiguation) |
+
+### Read Options
+
+| Option | Type | Description |
+|--------|------|-------------|
+| `sessionInitStatement` | String | SQL to execute after connection (e.g., `SET timezone='UTC'`) |
+| `queryTimeout` | Integer | Query timeout in seconds (backend-specific implementation) |
+| `prepareQuery` | String | SQL to execute before main query (for CTEs, temp tables) |
+| `fetchsize` | Integer | Number of rows to fetch per round trip |
+| `partitionColumn` | String | Column for partitioned reads |
+| `lowerBound` | Long | Lower bound for partitioning |
+| `upperBound` | Long | Upper bound for partitioning |
+| `numPartitions` | Integer | Number of partitions |
+
+### Write Options
+
+| Option | Type | Description |
+|--------|------|-------------|
+| `batchsize` | Integer | Rows per batch/transaction (default: 1000) |
+| `truncate` | Boolean | Use `TRUNCATE` vs `DELETE` for Overwrite mode |
+| `cascadeTruncate` | Boolean | Add CASCADE to TRUNCATE (Postgres/Oracle only) |
+
+### SaveMode Behavior
+
+| Mode | Behavior |
+|------|----------|
+| `Append` | Insert rows into existing table |
+| `Overwrite` | Truncate/delete existing data, then insert |
+| `ErrorIfExists` | Error if table has any existing rows |
+| `Ignore` | Do nothing if table has existing rows |
+
+### Usage Examples
+
+```python
+# Read with session initialization
+df = spark.read.format("jdbc") \
+    .option("url", "jdbc:postgresql://localhost/db") \
+    .option("dbtable", "users") \
+    .option("sessionInitStatement", "SET timezone='UTC'") \
+    .option("queryTimeout", "30") \
+    .load()
+
+# Write with batching
+df.write.format("jdbc") \
+    .option("url", "jdbc:mysql://localhost/db") \
+    .option("dbtable", "results") \
+    .option("batchsize", "5000") \
+    .option("truncate", "true") \
+    .mode("overwrite") \
+    .save()
+```
+
 ## Quick Reference
 
 | What | Command | Requires |

@@ -27,11 +27,47 @@ pub(crate) fn write_jdbc_postgres(
     let mut client = Client::connect(&url, NoTls)
         .map_err(|e| EngineError::Io(format!("JDBC write: failed to connect: {e}")))?;
 
+    // Execute session initialization statement if provided
+    if let Some(init_sql) = &opts.session_init_statement {
+        client
+            .batch_execute(init_sql)
+            .map_err(|e| EngineError::Sql(format!("JDBC write: sessionInitStatement failed: {e}")))?;
+    }
+
     match mode {
-        Sm::Overwrite => {
-            let _ = client.execute(&format!("TRUNCATE TABLE {table}"), &[]);
+        Sm::ErrorIfExists => {
+            let row = client
+                .query_one(&format!("SELECT COUNT(*) FROM {table}"), &[])
+                .map_err(|e| EngineError::Sql(format!("JDBC write: check table: {e}")))?;
+            let count: i64 = row.get(0);
+            if count > 0 {
+                return Err(EngineError::User(format!(
+                    "Table '{table}' already has data. SaveMode is ErrorIfExists."
+                )));
+            }
         }
-        Sm::ErrorIfExists | Sm::Append | Sm::Ignore => {}
+        Sm::Ignore => {
+            let row = client
+                .query_one(&format!("SELECT COUNT(*) FROM {table}"), &[])
+                .map_err(|e| EngineError::Sql(format!("JDBC write: check table: {e}")))?;
+            let count: i64 = row.get(0);
+            if count > 0 {
+                return Ok(());
+            }
+        }
+        Sm::Overwrite => {
+            let use_truncate = opts.truncate.unwrap_or(true);
+            if use_truncate {
+                if opts.cascade_truncate.unwrap_or(false) {
+                    let _ = client.execute(&format!("TRUNCATE TABLE ONLY {table} CASCADE"), &[]);
+                } else {
+                    let _ = client.execute(&format!("TRUNCATE TABLE {table}"), &[]);
+                }
+            } else {
+                let _ = client.execute(&format!("DELETE FROM {table}"), &[]);
+            }
+        }
+        Sm::Append => {}
     }
 
     if df.height() == 0 {
@@ -50,36 +86,53 @@ pub(crate) fn write_jdbc_postgres(
         vals = placeholders.join(", ")
     );
 
-    for row_idx in 0..df.height() {
-        let mut params: Vec<Box<dyn postgres::types::ToSql + Sync>> =
-            Vec::with_capacity(col_names.len());
-        for col in df.columns() {
-            let v = col
-                .get(row_idx)
-                .map_err(|e| EngineError::Internal(format!("JDBC write: get cell: {e}")))?;
-            let boxed: Box<dyn postgres::types::ToSql + Sync> = match v {
-                polars::prelude::AnyValue::Null => Box::new(Option::<i32>::None),
-                polars::prelude::AnyValue::Boolean(b) => Box::new(Some(b)),
-                polars::prelude::AnyValue::Int64(i) => Box::new(Some(i)),
-                polars::prelude::AnyValue::Int32(i) => Box::new(Some(i)),
-                polars::prelude::AnyValue::Float64(f) => Box::new(Some(f)),
-                polars::prelude::AnyValue::Float32(f) => Box::new(Some(f as f64)),
-                polars::prelude::AnyValue::String(s) => Box::new(Some(s.to_string())),
-                polars::prelude::AnyValue::StringOwned(ref s) => {
-                    Box::new(Some(s.as_str().to_string()))
-                }
-                other => Box::new(Some(other.to_string())),
-            };
-            params.push(boxed);
-        }
-        let mut param_refs: Vec<&(dyn postgres::types::ToSql + Sync)> =
-            Vec::with_capacity(params.len());
-        for p in &params {
-            param_refs.push(p.as_ref());
-        }
+    let batch_size = opts.batch_size.unwrap_or(1000) as usize;
+    let total_rows = df.height();
+    
+    for batch_start in (0..total_rows).step_by(batch_size) {
+        let batch_end = (batch_start + batch_size).min(total_rows);
+        
+        // Start a transaction for this batch
         client
-            .execute(&insert_sql, &param_refs)
-            .map_err(|e| EngineError::Sql(format!("JDBC write: insert failed: {e}")))?;
+            .batch_execute("BEGIN")
+            .map_err(|e| EngineError::Sql(format!("JDBC write: begin transaction: {e}")))?;
+        
+        for row_idx in batch_start..batch_end {
+            let mut params: Vec<Box<dyn postgres::types::ToSql + Sync>> =
+                Vec::with_capacity(col_names.len());
+            for col in df.columns() {
+                let v = col
+                    .get(row_idx)
+                    .map_err(|e| EngineError::Internal(format!("JDBC write: get cell: {e}")))?;
+                let boxed: Box<dyn postgres::types::ToSql + Sync> = match v {
+                    polars::prelude::AnyValue::Null => Box::new(Option::<i32>::None),
+                    polars::prelude::AnyValue::Boolean(b) => Box::new(Some(b)),
+                    polars::prelude::AnyValue::Int64(i) => Box::new(Some(i)),
+                    polars::prelude::AnyValue::Int32(i) => Box::new(Some(i)),
+                    polars::prelude::AnyValue::Float64(f) => Box::new(Some(f)),
+                    polars::prelude::AnyValue::Float32(f) => Box::new(Some(f as f64)),
+                    polars::prelude::AnyValue::String(s) => Box::new(Some(s.to_string())),
+                    polars::prelude::AnyValue::StringOwned(ref s) => {
+                        Box::new(Some(s.as_str().to_string()))
+                    }
+                    other => Box::new(Some(other.to_string())),
+                };
+                params.push(boxed);
+            }
+            let mut param_refs: Vec<&(dyn postgres::types::ToSql + Sync)> =
+                Vec::with_capacity(params.len());
+            for p in &params {
+                param_refs.push(p.as_ref());
+            }
+            client
+                .execute(&insert_sql, &param_refs)
+                .map_err(|e| EngineError::Sql(format!("JDBC write: insert failed: {e}")))?;
+        }
+        
+        // Commit this batch
+        client
+            .batch_execute("COMMIT")
+            .map_err(|e| EngineError::Sql(format!("JDBC write: commit batch: {e}")))?;
     }
     Ok(())
 }
@@ -103,12 +156,34 @@ pub(crate) fn read_jdbc_postgres(opts: &JdbcOptions) -> Result<PlDataFrame, Engi
     let mut client = Client::connect(&url, NoTls)
         .map_err(|e| EngineError::Io(format!("JDBC read: failed to connect: {e}")))?;
 
+    // Execute session initialization statement if provided
+    if let Some(init_sql) = &opts.session_init_statement {
+        client
+            .batch_execute(init_sql)
+            .map_err(|e| EngineError::Sql(format!("JDBC read: sessionInitStatement failed: {e}")))?;
+    }
+
+    // Set query timeout if provided (PostgreSQL uses milliseconds)
+    if let Some(timeout_secs) = opts.query_timeout {
+        let timeout_ms = timeout_secs * 1000;
+        client
+            .batch_execute(&format!("SET statement_timeout = {timeout_ms}"))
+            .map_err(|e| EngineError::Sql(format!("JDBC read: failed to set queryTimeout: {e}")))?;
+    }
+
     if let Some(fetch) = opts.fetch_size {
         client
             .simple_query(&format!("SET SESSION FETCH_COUNT = {fetch}"))
             .map_err(|e| {
                 EngineError::Other(format!("JDBC read: failed to set fetchsize: {e}"))
             })?;
+    }
+
+    // Execute prepare query if provided (for CTEs, temp tables, etc.)
+    if let Some(prep_sql) = &opts.prepare_query {
+        client
+            .batch_execute(prep_sql)
+            .map_err(|e| EngineError::Sql(format!("JDBC read: prepareQuery failed: {e}")))?;
     }
 
     let rows = client

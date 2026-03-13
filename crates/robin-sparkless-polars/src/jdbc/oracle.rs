@@ -61,6 +61,29 @@ pub(crate) fn read_jdbc_oracle(opts: &JdbcOptions) -> Result<PlDataFrame, Engine
 
     with_runtime(async move {
         let conn = connect_async(opts).await?;
+
+        // Execute session initialization statement if provided
+        if let Some(init_sql) = &opts.session_init_statement {
+            conn.execute(init_sql, &[])
+                .await
+                .map_err(|e| EngineError::Sql(format!("JDBC read (Oracle): sessionInitStatement failed: {e}")))?;
+        }
+
+        // Set query timeout if provided (Oracle uses DBMS_SESSION.SET_SQL_TIMEOUT in seconds)
+        // Note: This requires elevated privileges; fall back to doing nothing if it fails.
+        if let Some(timeout_secs) = opts.query_timeout {
+            let _ = conn
+                .execute(&format!("BEGIN DBMS_SESSION.SET_SQL_TIMEOUT({timeout_secs}); END;"), &[])
+                .await;
+        }
+
+        // Execute prepare query if provided
+        if let Some(prep_sql) = &opts.prepare_query {
+            conn.execute(prep_sql, &[])
+                .await
+                .map_err(|e| EngineError::Sql(format!("JDBC read (Oracle): prepareQuery failed: {e}")))?;
+        }
+
         let result = conn
             .query(&sql, &[])
             .await
@@ -148,14 +171,50 @@ pub(crate) fn write_jdbc_oracle(
     with_runtime(async move {
         let conn = connect_async(opts).await?;
 
+        // Execute session initialization statement if provided
+        if let Some(init_sql) = &opts.session_init_statement {
+            conn.execute(init_sql, &[])
+                .await
+                .map_err(|e| EngineError::Sql(format!("JDBC write (Oracle): sessionInitStatement failed: {e}")))?;
+        }
+
         match mode {
+            Sm::ErrorIfExists => {
+                let result = conn
+                    .query(&format!("SELECT COUNT(*) FROM {table}"), &[])
+                    .await
+                    .map_err(|e| EngineError::Sql(format!("JDBC write (Oracle): check table: {e}")))?;
+                let count = result.rows.first().and_then(|r| r.get(0)).and_then(|v| v.as_i64()).unwrap_or(0);
+                if count > 0 {
+                    return Err(EngineError::User(format!(
+                        "Table '{table}' already has data. SaveMode is ErrorIfExists."
+                    )));
+                }
+            }
+            Sm::Ignore => {
+                let result = conn
+                    .query(&format!("SELECT COUNT(*) FROM {table}"), &[])
+                    .await
+                    .map_err(|e| EngineError::Sql(format!("JDBC write (Oracle): check table: {e}")))?;
+                let count = result.rows.first().and_then(|r| r.get(0)).and_then(|v| v.as_i64()).unwrap_or(0);
+                if count > 0 {
+                    return Ok(());
+                }
+            }
             Sm::Overwrite => {
-                let _ = conn
-                    .execute(&format!("DELETE FROM {table}"), &[])
-                    .await;
+                let use_truncate = opts.truncate.unwrap_or(false); // Oracle default: use DELETE
+                if use_truncate {
+                    if opts.cascade_truncate.unwrap_or(false) {
+                        let _ = conn.execute(&format!("TRUNCATE TABLE {table} CASCADE"), &[]).await;
+                    } else {
+                        let _ = conn.execute(&format!("TRUNCATE TABLE {table}"), &[]).await;
+                    }
+                } else {
+                    let _ = conn.execute(&format!("DELETE FROM {table}"), &[]).await;
+                }
                 conn.commit().await.ok();
             }
-            Sm::ErrorIfExists | Sm::Append | Sm::Ignore => {}
+            Sm::Append => {}
         }
 
         if df.height() == 0 {
@@ -177,30 +236,39 @@ pub(crate) fn write_jdbc_oracle(
             vals = placeholders
         );
 
-        for row_idx in 0..df.height() {
-            let mut params: Vec<Value> = Vec::with_capacity(col_names.len());
-            for col in df.columns() {
-                let v = col
-                    .get(row_idx)
-                    .map_err(|e| EngineError::Internal(format!("JDBC write: get cell: {e}")))?;
-                let oracle_v = match v {
-                    polars::prelude::AnyValue::Null => Value::Null,
-                    polars::prelude::AnyValue::Boolean(b) => b.into(),
-                    polars::prelude::AnyValue::Int64(i) => i.into(),
-                    polars::prelude::AnyValue::Int32(i) => (i as i64).into(),
-                    polars::prelude::AnyValue::Float64(f) => f.into(),
-                    polars::prelude::AnyValue::Float32(f) => (f as f64).into(),
-                    polars::prelude::AnyValue::String(s) => s.to_string().into(),
-                    polars::prelude::AnyValue::StringOwned(ref s) => s.as_str().to_string().into(),
-                    other => other.to_string().into(),
-                };
-                params.push(oracle_v);
+        let batch_size = opts.batch_size.unwrap_or(1000) as usize;
+        let total_rows = df.height();
+
+        for batch_start in (0..total_rows).step_by(batch_size) {
+            let batch_end = (batch_start + batch_size).min(total_rows);
+
+            for row_idx in batch_start..batch_end {
+                let mut params: Vec<Value> = Vec::with_capacity(col_names.len());
+                for col in df.columns() {
+                    let v = col
+                        .get(row_idx)
+                        .map_err(|e| EngineError::Internal(format!("JDBC write: get cell: {e}")))?;
+                    let oracle_v = match v {
+                        polars::prelude::AnyValue::Null => Value::Null,
+                        polars::prelude::AnyValue::Boolean(b) => b.into(),
+                        polars::prelude::AnyValue::Int64(i) => i.into(),
+                        polars::prelude::AnyValue::Int32(i) => (i as i64).into(),
+                        polars::prelude::AnyValue::Float64(f) => f.into(),
+                        polars::prelude::AnyValue::Float32(f) => (f as f64).into(),
+                        polars::prelude::AnyValue::String(s) => s.to_string().into(),
+                        polars::prelude::AnyValue::StringOwned(ref s) => s.as_str().to_string().into(),
+                        other => other.to_string().into(),
+                    };
+                    params.push(oracle_v);
+                }
+                conn.execute(&insert_sql, &params)
+                    .await
+                    .map_err(|e| EngineError::Sql(format!("JDBC write (Oracle): insert failed: {e}")))?;
             }
-            conn.execute(&insert_sql, &params)
-                .await
-                .map_err(|e| EngineError::Sql(format!("JDBC write (Oracle): insert failed: {e}")))?;
+            
+            // Commit this batch
+            conn.commit().await.ok();
         }
-        conn.commit().await.ok();
         Ok(())
     })
 }
@@ -232,6 +300,15 @@ mod tests {
             num_partitions: None,
             fetch_size: None,
             batch_size: None,
+            session_init_statement: None,
+            query_timeout: None,
+            prepare_query: None,
+            custom_schema: None,
+            truncate: None,
+            cascade_truncate: None,
+            isolation_level: None,
+            create_table_options: None,
+            create_table_column_types: None,
             raw_options: std::collections::HashMap::new(),
         };
 

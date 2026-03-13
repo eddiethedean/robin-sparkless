@@ -76,6 +76,36 @@ pub struct JdbcOptions {
     /// Batch size for writes (PySpark: `batchsize`).
     pub batch_size: Option<i32>,
 
+    // --- New PySpark JDBC options ---
+
+    /// SQL to execute after opening connection (PySpark: `sessionInitStatement`).
+    pub session_init_statement: Option<String>,
+
+    /// Query timeout in seconds (PySpark: `queryTimeout`).
+    pub query_timeout: Option<i32>,
+
+    /// SQL to execute before the main query, e.g. CTEs or temp tables (PySpark: `prepareQuery`).
+    pub prepare_query: Option<String>,
+
+    /// Custom schema for reads, e.g. "id DECIMAL(38,0), name STRING" (PySpark: `customSchema`).
+    pub custom_schema: Option<String>,
+
+    /// Use TRUNCATE instead of DELETE for Overwrite mode (PySpark: `truncate`).
+    pub truncate: Option<bool>,
+
+    /// Use CASCADE with TRUNCATE (PySpark: `cascadeTruncate`).
+    pub cascade_truncate: Option<bool>,
+
+    /// Transaction isolation level: NONE, READ_UNCOMMITTED, READ_COMMITTED,
+    /// REPEATABLE_READ, SERIALIZABLE (PySpark: `isolationLevel`).
+    pub isolation_level: Option<String>,
+
+    /// Extra options for CREATE TABLE, e.g. "ENGINE=InnoDB" (PySpark: `createTableOptions`).
+    pub create_table_options: Option<String>,
+
+    /// Column types for CREATE TABLE, e.g. "name CHAR(64)" (PySpark: `createTableColumnTypes`).
+    pub create_table_column_types: Option<String>,
+
     /// Raw options map so implementations can inspect additional keys without
     /// round-tripping through this struct.
     pub raw_options: HashMap<String, String>,
@@ -134,6 +164,10 @@ impl JdbcOptions {
             }
         }
 
+        fn parse_bool_opt(options: &HashMap<String, String>, key: &str) -> Option<bool> {
+            options.get(key).map(|v| v.eq_ignore_ascii_case("true"))
+        }
+
         let dbtable = options.get("dbtable").cloned();
         let query = options.get("query").cloned();
         let user = options.get("user").cloned();
@@ -146,6 +180,17 @@ impl JdbcOptions {
         let num_partitions = parse_i32_opt(options, "numPartitions")?;
         let fetch_size = parse_i32_opt(options, "fetchsize")?;
         let batch_size = parse_i32_opt(options, "batchsize")?;
+
+        // New PySpark JDBC options
+        let session_init_statement = options.get("sessionInitStatement").cloned();
+        let query_timeout = parse_i32_opt(options, "queryTimeout")?;
+        let prepare_query = options.get("prepareQuery").cloned();
+        let custom_schema = options.get("customSchema").cloned();
+        let truncate = parse_bool_opt(options, "truncate");
+        let cascade_truncate = parse_bool_opt(options, "cascadeTruncate");
+        let isolation_level = options.get("isolationLevel").cloned();
+        let create_table_options = options.get("createTableOptions").cloned();
+        let create_table_column_types = options.get("createTableColumnTypes").cloned();
 
         Ok(JdbcOptions {
             url,
@@ -160,6 +205,15 @@ impl JdbcOptions {
             num_partitions,
             fetch_size,
             batch_size,
+            session_init_statement,
+            query_timeout,
+            prepare_query,
+            custom_schema,
+            truncate,
+            cascade_truncate,
+            isolation_level,
+            create_table_options,
+            create_table_column_types,
             raw_options: options.clone(),
         })
     }
@@ -553,6 +607,85 @@ mod tests {
     }
 
     #[test]
+    fn jdbc_options_parses_new_pyspark_options() {
+        let mut m = HashMap::new();
+        m.insert("url".to_string(), "postgres://localhost/db".to_string());
+        m.insert("dbtable".to_string(), "t".to_string());
+        m.insert(
+            "sessionInitStatement".to_string(),
+            "SET timezone='UTC'".to_string(),
+        );
+        m.insert("queryTimeout".to_string(), "30".to_string());
+        m.insert("prepareQuery".to_string(), "WITH cte AS (SELECT 1)".to_string());
+        m.insert(
+            "customSchema".to_string(),
+            "id DECIMAL(38,0), name STRING".to_string(),
+        );
+        m.insert("truncate".to_string(), "true".to_string());
+        m.insert("cascadeTruncate".to_string(), "false".to_string());
+        m.insert("isolationLevel".to_string(), "READ_COMMITTED".to_string());
+        m.insert("createTableOptions".to_string(), "ENGINE=InnoDB".to_string());
+        m.insert(
+            "createTableColumnTypes".to_string(),
+            "name CHAR(64)".to_string(),
+        );
+
+        let opts = JdbcOptions::from_options_map(&m).unwrap();
+        assert_eq!(
+            opts.session_init_statement.as_deref(),
+            Some("SET timezone='UTC'")
+        );
+        assert_eq!(opts.query_timeout, Some(30));
+        assert_eq!(
+            opts.prepare_query.as_deref(),
+            Some("WITH cte AS (SELECT 1)")
+        );
+        assert_eq!(
+            opts.custom_schema.as_deref(),
+            Some("id DECIMAL(38,0), name STRING")
+        );
+        assert_eq!(opts.truncate, Some(true));
+        assert_eq!(opts.cascade_truncate, Some(false));
+        assert_eq!(opts.isolation_level.as_deref(), Some("READ_COMMITTED"));
+        assert_eq!(opts.create_table_options.as_deref(), Some("ENGINE=InnoDB"));
+        assert_eq!(
+            opts.create_table_column_types.as_deref(),
+            Some("name CHAR(64)")
+        );
+    }
+
+    #[test]
+    fn jdbc_options_truncate_parses_case_insensitive() {
+        let mut m = HashMap::new();
+        m.insert("url".to_string(), "postgres://localhost/db".to_string());
+        m.insert("truncate".to_string(), "TRUE".to_string());
+        let opts = JdbcOptions::from_options_map(&m).unwrap();
+        assert_eq!(opts.truncate, Some(true));
+
+        let mut m2 = HashMap::new();
+        m2.insert("url".to_string(), "postgres://localhost/db".to_string());
+        m2.insert("truncate".to_string(), "False".to_string());
+        let opts2 = JdbcOptions::from_options_map(&m2).unwrap();
+        assert_eq!(opts2.truncate, Some(false));
+    }
+
+    #[test]
+    fn jdbc_options_new_fields_default_to_none() {
+        let mut m = HashMap::new();
+        m.insert("url".to_string(), "postgres://localhost/db".to_string());
+        let opts = JdbcOptions::from_options_map(&m).unwrap();
+        assert!(opts.session_init_statement.is_none());
+        assert!(opts.query_timeout.is_none());
+        assert!(opts.prepare_query.is_none());
+        assert!(opts.custom_schema.is_none());
+        assert!(opts.truncate.is_none());
+        assert!(opts.cascade_truncate.is_none());
+        assert!(opts.isolation_level.is_none());
+        assert!(opts.create_table_options.is_none());
+        assert!(opts.create_table_column_types.is_none());
+    }
+
+    #[test]
     fn routing_detects_jdbc_schemes() {
         assert!(is_mysql_url("jdbc:mysql://localhost:3306/db"));
         assert!(is_mariadb_url("jdbc:mariadb://localhost:3306/db"));
@@ -585,6 +718,15 @@ mod tests {
                 num_partitions: None,
                 fetch_size: None,
                 batch_size: None,
+                session_init_statement: None,
+                query_timeout: None,
+                prepare_query: None,
+                custom_schema: None,
+                truncate: None,
+                cascade_truncate: None,
+                isolation_level: None,
+                create_table_options: None,
+                create_table_column_types: None,
                 raw_options: HashMap::new(),
             };
             let err = read_jdbc_to_polars(&opts).unwrap_err().to_string();
@@ -628,6 +770,15 @@ mod tests {
             num_partitions: None,
             fetch_size: None,
             batch_size: None,
+            session_init_statement: None,
+            query_timeout: None,
+            prepare_query: None,
+            custom_schema: None,
+            truncate: None,
+            cascade_truncate: None,
+            isolation_level: None,
+            create_table_options: None,
+            create_table_column_types: None,
             raw_options: HashMap::new(),
         };
         super::write_jdbc_from_polars(&df, &opts, SaveMode::Append).unwrap();
@@ -670,6 +821,15 @@ mod tests {
             num_partitions: None,
             fetch_size: None,
             batch_size: None,
+            session_init_statement: None,
+            query_timeout: None,
+            prepare_query: None,
+            custom_schema: None,
+            truncate: None,
+            cascade_truncate: None,
+            isolation_level: None,
+            create_table_options: None,
+            create_table_column_types: None,
             raw_options: HashMap::new(),
         };
 
@@ -735,6 +895,15 @@ mod tests {
             num_partitions: None,
             fetch_size: None,
             batch_size: None,
+            session_init_statement: None,
+            query_timeout: None,
+            prepare_query: None,
+            custom_schema: None,
+            truncate: None,
+            cascade_truncate: None,
+            isolation_level: None,
+            create_table_options: None,
+            create_table_column_types: None,
             raw_options: HashMap::new(),
         };
         let read_df = super::read_jdbc_to_polars(&opts).unwrap();
@@ -772,6 +941,15 @@ mod tests {
             num_partitions: None,
             fetch_size: None,
             batch_size: None,
+            session_init_statement: None,
+            query_timeout: None,
+            prepare_query: None,
+            custom_schema: None,
+            truncate: None,
+            cascade_truncate: None,
+            isolation_level: None,
+            create_table_options: None,
+            create_table_column_types: None,
             raw_options: HashMap::new(),
         };
         let read_df = super::read_jdbc_to_polars(&opts).unwrap();
@@ -819,6 +997,15 @@ mod tests {
             num_partitions: None,
             fetch_size: None,
             batch_size: None,
+            session_init_statement: None,
+            query_timeout: None,
+            prepare_query: None,
+            custom_schema: None,
+            truncate: None,
+            cascade_truncate: None,
+            isolation_level: None,
+            create_table_options: None,
+            create_table_column_types: None,
             raw_options: HashMap::new(),
         };
         let read_df = super::read_jdbc_to_polars(&opts).unwrap();
@@ -875,6 +1062,15 @@ mod tests {
             num_partitions: None,
             fetch_size: None,
             batch_size: None,
+            session_init_statement: None,
+            query_timeout: None,
+            prepare_query: None,
+            custom_schema: None,
+            truncate: None,
+            cascade_truncate: None,
+            isolation_level: None,
+            create_table_options: None,
+            create_table_column_types: None,
             raw_options: HashMap::new(),
         };
 
@@ -901,6 +1097,15 @@ mod tests {
             num_partitions: None,
             fetch_size: None,
             batch_size: None,
+            session_init_statement: None,
+            query_timeout: None,
+            prepare_query: None,
+            custom_schema: None,
+            truncate: None,
+            cascade_truncate: None,
+            isolation_level: None,
+            create_table_options: None,
+            create_table_column_types: None,
             raw_options: HashMap::new(),
         };
         let r = super::read_jdbc_to_polars(&opts);
@@ -911,6 +1116,677 @@ mod tests {
             "{}",
             err
         );
+    }
+
+    #[cfg(feature = "sqlite")]
+    #[test]
+    fn sqlite_error_if_exists_with_empty_table() {
+        use crate::dataframe::SaveMode;
+        use polars::prelude::{NamedFrom, Series};
+
+        let tmp = tempfile::Builder::new().suffix(".db").tempfile().unwrap();
+        let db_path = tmp.path();
+        let url = format!("jdbc:sqlite:{}", db_path.display());
+
+        let conn = rusqlite::Connection::open(&db_path).unwrap();
+        conn.execute("CREATE TABLE t (id INTEGER, name TEXT)", [])
+            .unwrap();
+        drop(conn);
+
+        let df = PlDataFrame::new_infer_height(vec![
+            Series::new("id".into(), vec![1i64]).into(),
+            Series::new("name".into(), vec!["test"]).into(),
+        ])
+        .unwrap();
+
+        let opts = JdbcOptions {
+            url: url.clone(),
+            dbtable: Some("t".to_string()),
+            query: None,
+            user: None,
+            password: None,
+            driver: None,
+            partition_column: None,
+            lower_bound: None,
+            upper_bound: None,
+            num_partitions: None,
+            fetch_size: None,
+            batch_size: None,
+            session_init_statement: None,
+            query_timeout: None,
+            prepare_query: None,
+            custom_schema: None,
+            truncate: None,
+            cascade_truncate: None,
+            isolation_level: None,
+            create_table_options: None,
+            create_table_column_types: None,
+            raw_options: HashMap::new(),
+        };
+
+        // ErrorIfExists should succeed on empty table
+        let result = super::write_jdbc_from_polars(&df, &opts, SaveMode::ErrorIfExists);
+        assert!(result.is_ok(), "ErrorIfExists should succeed on empty table");
+
+        let read_df = super::read_jdbc_to_polars(&opts).unwrap();
+        assert_eq!(read_df.height(), 1);
+    }
+
+    #[cfg(feature = "sqlite")]
+    #[test]
+    fn sqlite_error_if_exists_with_data_fails() {
+        use crate::dataframe::SaveMode;
+        use polars::prelude::{NamedFrom, Series};
+
+        let tmp = tempfile::Builder::new().suffix(".db").tempfile().unwrap();
+        let db_path = tmp.path();
+        let url = format!("jdbc:sqlite:{}", db_path.display());
+
+        let conn = rusqlite::Connection::open(&db_path).unwrap();
+        conn.execute("CREATE TABLE t (id INTEGER, name TEXT)", [])
+            .unwrap();
+        conn.execute("INSERT INTO t (id, name) VALUES (1, 'existing')", [])
+            .unwrap();
+        drop(conn);
+
+        let df = PlDataFrame::new_infer_height(vec![
+            Series::new("id".into(), vec![2i64]).into(),
+            Series::new("name".into(), vec!["new"]).into(),
+        ])
+        .unwrap();
+
+        let opts = JdbcOptions {
+            url: url.clone(),
+            dbtable: Some("t".to_string()),
+            query: None,
+            user: None,
+            password: None,
+            driver: None,
+            partition_column: None,
+            lower_bound: None,
+            upper_bound: None,
+            num_partitions: None,
+            fetch_size: None,
+            batch_size: None,
+            session_init_statement: None,
+            query_timeout: None,
+            prepare_query: None,
+            custom_schema: None,
+            truncate: None,
+            cascade_truncate: None,
+            isolation_level: None,
+            create_table_options: None,
+            create_table_column_types: None,
+            raw_options: HashMap::new(),
+        };
+
+        // ErrorIfExists should fail when table has data
+        let result = super::write_jdbc_from_polars(&df, &opts, SaveMode::ErrorIfExists);
+        assert!(result.is_err(), "ErrorIfExists should fail when table has data");
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("ErrorIfExists") || err.contains("already has data"),
+            "Error should mention ErrorIfExists: {err}"
+        );
+    }
+
+    #[cfg(feature = "sqlite")]
+    #[test]
+    fn sqlite_ignore_mode_does_nothing_with_existing_data() {
+        use crate::dataframe::SaveMode;
+        use polars::prelude::{NamedFrom, Series};
+
+        let tmp = tempfile::Builder::new().suffix(".db").tempfile().unwrap();
+        let db_path = tmp.path();
+        let url = format!("jdbc:sqlite:{}", db_path.display());
+
+        let conn = rusqlite::Connection::open(&db_path).unwrap();
+        conn.execute("CREATE TABLE t (id INTEGER, name TEXT)", [])
+            .unwrap();
+        conn.execute("INSERT INTO t (id, name) VALUES (1, 'existing')", [])
+            .unwrap();
+        drop(conn);
+
+        let df = PlDataFrame::new_infer_height(vec![
+            Series::new("id".into(), vec![2i64]).into(),
+            Series::new("name".into(), vec!["new"]).into(),
+        ])
+        .unwrap();
+
+        let opts = JdbcOptions {
+            url: url.clone(),
+            dbtable: Some("t".to_string()),
+            query: None,
+            user: None,
+            password: None,
+            driver: None,
+            partition_column: None,
+            lower_bound: None,
+            upper_bound: None,
+            num_partitions: None,
+            fetch_size: None,
+            batch_size: None,
+            session_init_statement: None,
+            query_timeout: None,
+            prepare_query: None,
+            custom_schema: None,
+            truncate: None,
+            cascade_truncate: None,
+            isolation_level: None,
+            create_table_options: None,
+            create_table_column_types: None,
+            raw_options: HashMap::new(),
+        };
+
+        // Ignore mode should succeed silently without changing data
+        let result = super::write_jdbc_from_polars(&df, &opts, SaveMode::Ignore);
+        assert!(result.is_ok(), "Ignore mode should succeed");
+
+        let read_df = super::read_jdbc_to_polars(&opts).unwrap();
+        assert_eq!(read_df.height(), 1, "Ignore mode should not add new rows");
+        
+        let id_val: i64 = read_df
+            .column("id")
+            .unwrap()
+            .get(0)
+            .unwrap()
+            .try_extract::<i64>()
+            .unwrap();
+        assert_eq!(id_val, 1, "Original data should be unchanged");
+    }
+
+    #[cfg(feature = "sqlite")]
+    #[test]
+    fn sqlite_ignore_mode_writes_to_empty_table() {
+        use crate::dataframe::SaveMode;
+        use polars::prelude::{NamedFrom, Series};
+
+        let tmp = tempfile::Builder::new().suffix(".db").tempfile().unwrap();
+        let db_path = tmp.path();
+        let url = format!("jdbc:sqlite:{}", db_path.display());
+
+        let conn = rusqlite::Connection::open(&db_path).unwrap();
+        conn.execute("CREATE TABLE t (id INTEGER, name TEXT)", [])
+            .unwrap();
+        drop(conn);
+
+        let df = PlDataFrame::new_infer_height(vec![
+            Series::new("id".into(), vec![1i64]).into(),
+            Series::new("name".into(), vec!["new"]).into(),
+        ])
+        .unwrap();
+
+        let opts = JdbcOptions {
+            url: url.clone(),
+            dbtable: Some("t".to_string()),
+            query: None,
+            user: None,
+            password: None,
+            driver: None,
+            partition_column: None,
+            lower_bound: None,
+            upper_bound: None,
+            num_partitions: None,
+            fetch_size: None,
+            batch_size: None,
+            session_init_statement: None,
+            query_timeout: None,
+            prepare_query: None,
+            custom_schema: None,
+            truncate: None,
+            cascade_truncate: None,
+            isolation_level: None,
+            create_table_options: None,
+            create_table_column_types: None,
+            raw_options: HashMap::new(),
+        };
+
+        // Ignore mode should write to empty table
+        let result = super::write_jdbc_from_polars(&df, &opts, SaveMode::Ignore);
+        assert!(result.is_ok(), "Ignore mode should succeed on empty table");
+
+        let read_df = super::read_jdbc_to_polars(&opts).unwrap();
+        assert_eq!(read_df.height(), 1, "Ignore mode should insert into empty table");
+    }
+
+    #[cfg(feature = "sqlite")]
+    #[test]
+    fn sqlite_session_init_statement_executes() {
+        let tmp = tempfile::Builder::new().suffix(".db").tempfile().unwrap();
+        let db_path = tmp.path();
+        let url = format!("jdbc:sqlite:{}", db_path.display());
+
+        let conn = rusqlite::Connection::open(&db_path).unwrap();
+        conn.execute("CREATE TABLE t (id INTEGER)", []).unwrap();
+        conn.execute("INSERT INTO t (id) VALUES (1), (2)", []).unwrap();
+        drop(conn);
+
+        let opts = JdbcOptions {
+            url: url.clone(),
+            dbtable: Some("t".to_string()),
+            query: None,
+            user: None,
+            password: None,
+            driver: None,
+            partition_column: None,
+            lower_bound: None,
+            upper_bound: None,
+            num_partitions: None,
+            fetch_size: None,
+            batch_size: None,
+            session_init_statement: Some("PRAGMA busy_timeout = 5000".to_string()),
+            query_timeout: None,
+            prepare_query: None,
+            custom_schema: None,
+            truncate: None,
+            cascade_truncate: None,
+            isolation_level: None,
+            create_table_options: None,
+            create_table_column_types: None,
+            raw_options: HashMap::new(),
+        };
+
+        // Should succeed with session init statement
+        let result = super::read_jdbc_to_polars(&opts);
+        assert!(result.is_ok(), "Read with sessionInitStatement should succeed");
+        assert_eq!(result.unwrap().height(), 2);
+    }
+
+    #[cfg(feature = "sqlite")]
+    #[test]
+    fn sqlite_prepare_query_creates_temp_table() {
+        let tmp = tempfile::Builder::new().suffix(".db").tempfile().unwrap();
+        let db_path = tmp.path();
+        let url = format!("jdbc:sqlite:{}", db_path.display());
+
+        let conn = rusqlite::Connection::open(&db_path).unwrap();
+        conn.execute("CREATE TABLE source (id INTEGER, val TEXT)", []).unwrap();
+        conn.execute("INSERT INTO source (id, val) VALUES (1, 'a'), (2, 'b'), (3, 'c')", []).unwrap();
+        drop(conn);
+
+        let opts = JdbcOptions {
+            url: url.clone(),
+            dbtable: None,
+            query: Some("SELECT * FROM temp_view WHERE id > 1".to_string()),
+            user: None,
+            password: None,
+            driver: None,
+            partition_column: None,
+            lower_bound: None,
+            upper_bound: None,
+            num_partitions: None,
+            fetch_size: None,
+            batch_size: None,
+            session_init_statement: None,
+            query_timeout: None,
+            prepare_query: Some("CREATE TEMPORARY VIEW temp_view AS SELECT * FROM source".to_string()),
+            custom_schema: None,
+            truncate: None,
+            cascade_truncate: None,
+            isolation_level: None,
+            create_table_options: None,
+            create_table_column_types: None,
+            raw_options: HashMap::new(),
+        };
+
+        let result = super::read_jdbc_to_polars(&opts);
+        assert!(result.is_ok(), "Read with prepareQuery should succeed: {:?}", result.err());
+        let df = result.unwrap();
+        assert_eq!(df.height(), 2, "Should return rows where id > 1");
+    }
+
+    #[cfg(feature = "sqlite")]
+    #[test]
+    fn sqlite_batchsize_handles_large_data() {
+        use crate::dataframe::SaveMode;
+        use polars::prelude::{NamedFrom, Series};
+
+        let tmp = tempfile::Builder::new().suffix(".db").tempfile().unwrap();
+        let db_path = tmp.path();
+        let url = format!("jdbc:sqlite:{}", db_path.display());
+
+        let conn = rusqlite::Connection::open(&db_path).unwrap();
+        conn.execute("CREATE TABLE t (id INTEGER, name TEXT)", []).unwrap();
+        drop(conn);
+
+        // Create a DataFrame with 2500 rows to test batch boundaries
+        let ids: Vec<i64> = (0..2500).collect();
+        let names: Vec<String> = (0..2500).map(|i| format!("name_{i}")).collect();
+        let df = PlDataFrame::new_infer_height(vec![
+            Series::new("id".into(), ids).into(),
+            Series::new("name".into(), names).into(),
+        ])
+        .unwrap();
+
+        let opts = JdbcOptions {
+            url: url.clone(),
+            dbtable: Some("t".to_string()),
+            query: None,
+            user: None,
+            password: None,
+            driver: None,
+            partition_column: None,
+            lower_bound: None,
+            upper_bound: None,
+            num_partitions: None,
+            fetch_size: None,
+            batch_size: Some(500), // Use small batch size to test multiple batches
+            session_init_statement: None,
+            query_timeout: None,
+            prepare_query: None,
+            custom_schema: None,
+            truncate: None,
+            cascade_truncate: None,
+            isolation_level: None,
+            create_table_options: None,
+            create_table_column_types: None,
+            raw_options: HashMap::new(),
+        };
+
+        let result = super::write_jdbc_from_polars(&df, &opts, SaveMode::Append);
+        assert!(result.is_ok(), "Write with batchsize should succeed: {:?}", result.err());
+
+        let read_df = super::read_jdbc_to_polars(&opts).unwrap();
+        assert_eq!(read_df.height(), 2500, "All 2500 rows should be written");
+    }
+
+    #[cfg(feature = "sqlite")]
+    #[test]
+    fn sqlite_append_mode_adds_to_existing() {
+        use crate::dataframe::SaveMode;
+        use polars::prelude::{NamedFrom, Series};
+
+        let tmp = tempfile::Builder::new().suffix(".db").tempfile().unwrap();
+        let db_path = tmp.path();
+        let url = format!("jdbc:sqlite:{}", db_path.display());
+
+        let conn = rusqlite::Connection::open(&db_path).unwrap();
+        conn.execute("CREATE TABLE t (id INTEGER)", []).unwrap();
+        conn.execute("INSERT INTO t (id) VALUES (1), (2)", []).unwrap();
+        drop(conn);
+
+        let df = PlDataFrame::new_infer_height(vec![
+            Series::new("id".into(), vec![3i64, 4i64]).into(),
+        ])
+        .unwrap();
+
+        let opts = JdbcOptions {
+            url: url.clone(),
+            dbtable: Some("t".to_string()),
+            query: None,
+            user: None,
+            password: None,
+            driver: None,
+            partition_column: None,
+            lower_bound: None,
+            upper_bound: None,
+            num_partitions: None,
+            fetch_size: None,
+            batch_size: None,
+            session_init_statement: None,
+            query_timeout: None,
+            prepare_query: None,
+            custom_schema: None,
+            truncate: None,
+            cascade_truncate: None,
+            isolation_level: None,
+            create_table_options: None,
+            create_table_column_types: None,
+            raw_options: HashMap::new(),
+        };
+
+        super::write_jdbc_from_polars(&df, &opts, SaveMode::Append).unwrap();
+
+        let read_df = super::read_jdbc_to_polars(&opts).unwrap();
+        assert_eq!(read_df.height(), 4, "Append should add to existing data");
+    }
+
+    #[cfg(feature = "sqlite")]
+    #[test]
+    fn sqlite_boolean_values_roundtrip() {
+        use crate::dataframe::SaveMode;
+        use polars::prelude::{NamedFrom, Series};
+
+        let tmp = tempfile::Builder::new().suffix(".db").tempfile().unwrap();
+        let db_path = tmp.path();
+        let url = format!("jdbc:sqlite:{}", db_path.display());
+
+        let conn = rusqlite::Connection::open(&db_path).unwrap();
+        conn.execute("CREATE TABLE t (id INTEGER, flag INTEGER)", []).unwrap();
+        drop(conn);
+
+        let df = PlDataFrame::new_infer_height(vec![
+            Series::new("id".into(), vec![1i64, 2i64]).into(),
+            Series::new("flag".into(), vec![true, false]).into(),
+        ])
+        .unwrap();
+
+        let opts = JdbcOptions {
+            url: url.clone(),
+            dbtable: Some("t".to_string()),
+            query: None,
+            user: None,
+            password: None,
+            driver: None,
+            partition_column: None,
+            lower_bound: None,
+            upper_bound: None,
+            num_partitions: None,
+            fetch_size: None,
+            batch_size: None,
+            session_init_statement: None,
+            query_timeout: None,
+            prepare_query: None,
+            custom_schema: None,
+            truncate: None,
+            cascade_truncate: None,
+            isolation_level: None,
+            create_table_options: None,
+            create_table_column_types: None,
+            raw_options: HashMap::new(),
+        };
+
+        super::write_jdbc_from_polars(&df, &opts, SaveMode::Append).unwrap();
+
+        let read_df = super::read_jdbc_to_polars(&opts).unwrap();
+        assert_eq!(read_df.height(), 2);
+        
+        let flag_col = read_df.column("flag").unwrap();
+        let val1: i64 = flag_col.get(0).unwrap().try_extract().unwrap();
+        let val2: i64 = flag_col.get(1).unwrap().try_extract().unwrap();
+        assert_eq!(val1, 1, "true should be stored as 1");
+        assert_eq!(val2, 0, "false should be stored as 0");
+    }
+
+    #[cfg(feature = "sqlite")]
+    #[test]
+    fn sqlite_float_precision_maintained() {
+        use crate::dataframe::SaveMode;
+        use polars::prelude::{NamedFrom, Series};
+
+        let tmp = tempfile::Builder::new().suffix(".db").tempfile().unwrap();
+        let db_path = tmp.path();
+        let url = format!("jdbc:sqlite:{}", db_path.display());
+
+        let conn = rusqlite::Connection::open(&db_path).unwrap();
+        conn.execute("CREATE TABLE t (val REAL)", []).unwrap();
+        drop(conn);
+
+        let df = PlDataFrame::new_infer_height(vec![
+            Series::new("val".into(), vec![3.14159265359f64, -273.15f64, 1e-10f64]).into(),
+        ])
+        .unwrap();
+
+        let opts = JdbcOptions {
+            url: url.clone(),
+            dbtable: Some("t".to_string()),
+            query: None,
+            user: None,
+            password: None,
+            driver: None,
+            partition_column: None,
+            lower_bound: None,
+            upper_bound: None,
+            num_partitions: None,
+            fetch_size: None,
+            batch_size: None,
+            session_init_statement: None,
+            query_timeout: None,
+            prepare_query: None,
+            custom_schema: None,
+            truncate: None,
+            cascade_truncate: None,
+            isolation_level: None,
+            create_table_options: None,
+            create_table_column_types: None,
+            raw_options: HashMap::new(),
+        };
+
+        super::write_jdbc_from_polars(&df, &opts, SaveMode::Append).unwrap();
+
+        let read_df = super::read_jdbc_to_polars(&opts).unwrap();
+        let val_col = read_df.column("val").unwrap();
+        
+        let v1: f64 = val_col.get(0).unwrap().try_extract().unwrap();
+        let v2: f64 = val_col.get(1).unwrap().try_extract().unwrap();
+        let v3: f64 = val_col.get(2).unwrap().try_extract().unwrap();
+        
+        assert!((v1 - 3.14159265359).abs() < 1e-10, "Pi should be preserved: {v1}");
+        assert!((v2 - (-273.15)).abs() < 1e-10, "Negative float should be preserved: {v2}");
+        assert!((v3 - 1e-10).abs() < 1e-15, "Small float should be preserved: {v3}");
+    }
+
+    #[cfg(feature = "sqlite")]
+    #[test]
+    fn sqlite_special_characters_in_strings() {
+        use crate::dataframe::SaveMode;
+        use polars::prelude::{NamedFrom, Series};
+
+        let tmp = tempfile::Builder::new().suffix(".db").tempfile().unwrap();
+        let db_path = tmp.path();
+        let url = format!("jdbc:sqlite:{}", db_path.display());
+
+        let conn = rusqlite::Connection::open(&db_path).unwrap();
+        conn.execute("CREATE TABLE t (text TEXT)", []).unwrap();
+        drop(conn);
+
+        let df = PlDataFrame::new_infer_height(vec![
+            Series::new("text".into(), vec![
+                "Hello 'World'",
+                "Line1\nLine2",
+                "Tab\there",
+                "Unicode: 日本語 émoji 🎉",
+                "",
+            ]).into(),
+        ])
+        .unwrap();
+
+        let opts = JdbcOptions {
+            url: url.clone(),
+            dbtable: Some("t".to_string()),
+            query: None,
+            user: None,
+            password: None,
+            driver: None,
+            partition_column: None,
+            lower_bound: None,
+            upper_bound: None,
+            num_partitions: None,
+            fetch_size: None,
+            batch_size: None,
+            session_init_statement: None,
+            query_timeout: None,
+            prepare_query: None,
+            custom_schema: None,
+            truncate: None,
+            cascade_truncate: None,
+            isolation_level: None,
+            create_table_options: None,
+            create_table_column_types: None,
+            raw_options: HashMap::new(),
+        };
+
+        super::write_jdbc_from_polars(&df, &opts, SaveMode::Append).unwrap();
+
+        let read_df = super::read_jdbc_to_polars(&opts).unwrap();
+        assert_eq!(read_df.height(), 5);
+        
+        let text_col = read_df.column("text").unwrap();
+        
+        // Check quotes are preserved
+        let v0 = text_col.get(0).unwrap().to_string();
+        assert!(v0.contains("'World'"), "Single quotes should be preserved");
+        
+        // Check unicode is preserved
+        let v3 = text_col.get(3).unwrap().to_string();
+        assert!(v3.contains("日本語"), "Unicode should be preserved");
+    }
+
+    #[test]
+    fn jdbc_options_query_timeout_validation() {
+        let mut m = HashMap::new();
+        m.insert("url".to_string(), "postgres://localhost/db".to_string());
+        m.insert("queryTimeout".to_string(), "not_a_number".to_string());
+        
+        let result = JdbcOptions::from_options_map(&m);
+        assert!(result.is_err(), "Invalid queryTimeout should fail");
+        let err = result.unwrap_err().to_string();
+        assert!(err.to_lowercase().contains("querytimeout"), "Error should mention queryTimeout: {err}");
+    }
+
+    #[test]
+    fn jdbc_options_batch_size_validation() {
+        let mut m = HashMap::new();
+        m.insert("url".to_string(), "postgres://localhost/db".to_string());
+        m.insert("batchsize".to_string(), "abc".to_string());
+        
+        let result = JdbcOptions::from_options_map(&m);
+        assert!(result.is_err(), "Invalid batchsize should fail");
+    }
+
+    #[test]
+    fn jdbc_options_partition_bounds_validation() {
+        let mut m = HashMap::new();
+        m.insert("url".to_string(), "postgres://localhost/db".to_string());
+        m.insert("lowerBound".to_string(), "0".to_string());
+        m.insert("upperBound".to_string(), "not_a_number".to_string());
+        
+        let result = JdbcOptions::from_options_map(&m);
+        assert!(result.is_err(), "Invalid upperBound should fail");
+    }
+
+    #[test]
+    fn jdbc_options_combined_read_write_options() {
+        let mut m = HashMap::new();
+        m.insert("url".to_string(), "postgres://localhost/db".to_string());
+        m.insert("dbtable".to_string(), "users".to_string());
+        m.insert("user".to_string(), "admin".to_string());
+        m.insert("password".to_string(), "secret".to_string());
+        m.insert("sessionInitStatement".to_string(), "SET search_path TO myschema".to_string());
+        m.insert("queryTimeout".to_string(), "60".to_string());
+        m.insert("fetchsize".to_string(), "1000".to_string());
+        m.insert("batchsize".to_string(), "500".to_string());
+        m.insert("truncate".to_string(), "false".to_string());
+        m.insert("partitionColumn".to_string(), "id".to_string());
+        m.insert("lowerBound".to_string(), "0".to_string());
+        m.insert("upperBound".to_string(), "1000000".to_string());
+        m.insert("numPartitions".to_string(), "10".to_string());
+        
+        let opts = JdbcOptions::from_options_map(&m).unwrap();
+        
+        assert_eq!(opts.url, "postgres://localhost/db");
+        assert_eq!(opts.dbtable.as_deref(), Some("users"));
+        assert_eq!(opts.user.as_deref(), Some("admin"));
+        assert_eq!(opts.password.as_deref(), Some("secret"));
+        assert_eq!(opts.session_init_statement.as_deref(), Some("SET search_path TO myschema"));
+        assert_eq!(opts.query_timeout, Some(60));
+        assert_eq!(opts.fetch_size, Some(1000));
+        assert_eq!(opts.batch_size, Some(500));
+        assert_eq!(opts.truncate, Some(false));
+        assert_eq!(opts.partition_column.as_deref(), Some("id"));
+        assert_eq!(opts.lower_bound, Some(0));
+        assert_eq!(opts.upper_bound, Some(1000000));
+        assert_eq!(opts.num_partitions, Some(10));
     }
 }
 

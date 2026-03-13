@@ -60,11 +60,40 @@ pub(crate) fn write_jdbc_mysql(
 
     let mut conn = connect(opts)?;
 
+    // Execute session initialization statement if provided
+    if let Some(init_sql) = &opts.session_init_statement {
+        conn.query_drop(init_sql)
+            .map_err(|e| EngineError::Sql(format!("JDBC write (MySQL): sessionInitStatement failed: {e}")))?;
+    }
+
     match mode {
-        Sm::Overwrite => {
-            let _ = conn.query_drop(format!("TRUNCATE TABLE {table}"));
+        Sm::ErrorIfExists => {
+            let count: Option<i64> = conn
+                .query_first(format!("SELECT COUNT(*) FROM {table}"))
+                .map_err(|e| EngineError::Sql(format!("JDBC write (MySQL): check table: {e}")))?;
+            if count.unwrap_or(0) > 0 {
+                return Err(EngineError::User(format!(
+                    "Table '{table}' already has data. SaveMode is ErrorIfExists."
+                )));
+            }
         }
-        Sm::ErrorIfExists | Sm::Append | Sm::Ignore => {}
+        Sm::Ignore => {
+            let count: Option<i64> = conn
+                .query_first(format!("SELECT COUNT(*) FROM {table}"))
+                .map_err(|e| EngineError::Sql(format!("JDBC write (MySQL): check table: {e}")))?;
+            if count.unwrap_or(0) > 0 {
+                return Ok(());
+            }
+        }
+        Sm::Overwrite => {
+            let use_truncate = opts.truncate.unwrap_or(true);
+            if use_truncate {
+                let _ = conn.query_drop(format!("TRUNCATE TABLE {table}"));
+            } else {
+                let _ = conn.query_drop(format!("DELETE FROM {table}"));
+            }
+        }
+        Sm::Append => {}
     }
 
     if df.height() == 0 {
@@ -86,29 +115,44 @@ pub(crate) fn write_jdbc_mysql(
         vals = placeholders
     );
 
-    for row_idx in 0..df.height() {
-        let mut params: Vec<Value> = Vec::with_capacity(col_names.len());
-        for col in df.columns() {
-            let v = col
-                .get(row_idx)
-                .map_err(|e| EngineError::Internal(format!("JDBC write: get cell: {e}")))?;
-            let mysql_v = match v {
-                polars::prelude::AnyValue::Null => Value::NULL,
-                polars::prelude::AnyValue::Boolean(b) => Value::Int(if b { 1 } else { 0 }),
-                polars::prelude::AnyValue::Int64(i) => Value::Int(i),
-                polars::prelude::AnyValue::Int32(i) => Value::Int(i as i64),
-                polars::prelude::AnyValue::Float64(f) => Value::Double(f),
-                polars::prelude::AnyValue::Float32(f) => Value::Double(f as f64),
-                polars::prelude::AnyValue::String(s) => Value::Bytes(s.as_bytes().to_vec()),
-                polars::prelude::AnyValue::StringOwned(ref s) => {
-                    Value::Bytes(s.as_bytes().to_vec())
-                }
-                other => Value::Bytes(other.to_string().into_bytes()),
-            };
-            params.push(mysql_v);
+    let batch_size = opts.batch_size.unwrap_or(1000) as usize;
+    let total_rows = df.height();
+
+    for batch_start in (0..total_rows).step_by(batch_size) {
+        let batch_end = (batch_start + batch_size).min(total_rows);
+        
+        // Start a transaction for this batch
+        conn.query_drop("START TRANSACTION")
+            .map_err(|e| EngineError::Sql(format!("JDBC write (MySQL): start transaction: {e}")))?;
+
+        for row_idx in batch_start..batch_end {
+            let mut params: Vec<Value> = Vec::with_capacity(col_names.len());
+            for col in df.columns() {
+                let v = col
+                    .get(row_idx)
+                    .map_err(|e| EngineError::Internal(format!("JDBC write: get cell: {e}")))?;
+                let mysql_v = match v {
+                    polars::prelude::AnyValue::Null => Value::NULL,
+                    polars::prelude::AnyValue::Boolean(b) => Value::Int(if b { 1 } else { 0 }),
+                    polars::prelude::AnyValue::Int64(i) => Value::Int(i),
+                    polars::prelude::AnyValue::Int32(i) => Value::Int(i as i64),
+                    polars::prelude::AnyValue::Float64(f) => Value::Double(f),
+                    polars::prelude::AnyValue::Float32(f) => Value::Double(f as f64),
+                    polars::prelude::AnyValue::String(s) => Value::Bytes(s.as_bytes().to_vec()),
+                    polars::prelude::AnyValue::StringOwned(ref s) => {
+                        Value::Bytes(s.as_bytes().to_vec())
+                    }
+                    other => Value::Bytes(other.to_string().into_bytes()),
+                };
+                params.push(mysql_v);
+            }
+            conn.exec_drop(&insert_sql, Params::Positional(params))
+                .map_err(|e| EngineError::Sql(format!("JDBC write (MySQL): insert failed: {e}")))?;
         }
-        conn.exec_drop(&insert_sql, Params::Positional(params))
-            .map_err(|e| EngineError::Sql(format!("JDBC write (MySQL): insert failed: {e}")))?;
+        
+        // Commit this batch
+        conn.query_drop("COMMIT")
+            .map_err(|e| EngineError::Sql(format!("JDBC write (MySQL): commit batch: {e}")))?;
     }
     Ok(())
 }
@@ -125,6 +169,25 @@ pub(crate) fn read_jdbc_mysql(opts: &JdbcOptions) -> Result<PlDataFrame, EngineE
     };
 
     let mut conn = connect(opts)?;
+
+    // Execute session initialization statement if provided
+    if let Some(init_sql) = &opts.session_init_statement {
+        conn.query_drop(init_sql)
+            .map_err(|e| EngineError::Sql(format!("JDBC read (MySQL): sessionInitStatement failed: {e}")))?;
+    }
+
+    // Set query timeout if provided (MySQL uses milliseconds for max_execution_time)
+    if let Some(timeout_secs) = opts.query_timeout {
+        let timeout_ms = timeout_secs * 1000;
+        conn.query_drop(format!("SET max_execution_time = {timeout_ms}"))
+            .map_err(|e| EngineError::Sql(format!("JDBC read (MySQL): failed to set queryTimeout: {e}")))?;
+    }
+
+    // Execute prepare query if provided
+    if let Some(prep_sql) = &opts.prepare_query {
+        conn.query_drop(prep_sql)
+            .map_err(|e| EngineError::Sql(format!("JDBC read (MySQL): prepareQuery failed: {e}")))?;
+    }
 
     let result = conn
         .query_iter(sql)
@@ -260,6 +323,15 @@ mod tests {
             num_partitions: None,
             fetch_size: None,
             batch_size: None,
+            session_init_statement: None,
+            query_timeout: None,
+            prepare_query: None,
+            custom_schema: None,
+            truncate: None,
+            cascade_truncate: None,
+            isolation_level: None,
+            create_table_options: None,
+            create_table_column_types: None,
             raw_options: std::collections::HashMap::new(),
         };
 
