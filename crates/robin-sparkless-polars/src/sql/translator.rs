@@ -829,7 +829,7 @@ fn translate_select_body(
     Ok(df)
 }
 
-fn translate_query(
+pub(crate) fn translate_query(
     session: &SparkSession,
     query: &Query,
 ) -> Result<crate::dataframe::DataFrame, PolarsError> {

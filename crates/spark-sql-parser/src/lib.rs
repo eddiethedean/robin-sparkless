@@ -53,6 +53,13 @@ pub enum SparkStatement {
         col: Option<Ident>,
         extended: bool,
     },
+    /// `CREATE OR REPLACE TABLE <table> USING <format> AS SELECT ...` (Spark/Delta Lake).
+    /// This syntax is not supported by upstream sqlparser GenericDialect.
+    CreateOrReplaceTableAs {
+        table: ObjectName,
+        format: String,
+        query: Box<Query>,
+    },
 }
 
 fn parse_one_statement_raw(query: &str) -> Result<Statement, ParseError> {
@@ -99,6 +106,193 @@ fn tokenize_ws(s: &str) -> Vec<&str> {
     s.split_whitespace().collect()
 }
 
+/// Try to parse `CREATE OR REPLACE TABLE <table> USING <format> AS SELECT ...`.
+/// Returns None if the pattern doesn't match, Some(SparkStatement) if it does.
+fn try_parse_create_or_replace_table_as(
+    query: &str,
+    toks: &[&str],
+) -> Result<Option<SparkStatement>, ParseError> {
+    // Minimum tokens: CREATE OR REPLACE TABLE <name> USING <format> AS SELECT ...
+    // That's at least 8 tokens before the SELECT part
+    if toks.len() < 8 {
+        return Ok(None);
+    }
+
+    // Check for CREATE OR REPLACE TABLE pattern
+    if !(toks[0].eq_ignore_ascii_case("CREATE")
+        && toks[1].eq_ignore_ascii_case("OR")
+        && toks[2].eq_ignore_ascii_case("REPLACE")
+        && toks[3].eq_ignore_ascii_case("TABLE"))
+    {
+        return Ok(None);
+    }
+
+    // Find USING keyword position (table name is between TABLE and USING)
+    let using_pos = toks[4..]
+        .iter()
+        .position(|t| t.eq_ignore_ascii_case("USING"))
+        .map(|i| i + 4);
+
+    let using_pos = match using_pos {
+        Some(pos) => pos,
+        None => return Ok(None), // No USING keyword, let upstream handle it
+    };
+
+    // Table name is tokens 4..using_pos, joined with dots for qualified names
+    let table_tokens = &toks[4..using_pos];
+    if table_tokens.is_empty() {
+        return Err(ParseError(
+            "SQL: CREATE OR REPLACE TABLE requires a table name.".to_string(),
+        ));
+    }
+
+    // Reconstruct table name (handle qualified names like schema.table)
+    // The tokenizer splits on whitespace, so "schema.table" stays as one token
+    let table_name_str = table_tokens.join(" ");
+    let table = parse_object_name(&table_name_str)?;
+
+    // Format is the token after USING
+    if using_pos + 1 >= toks.len() {
+        return Err(ParseError(
+            "SQL: CREATE OR REPLACE TABLE ... USING requires a format (e.g., delta, parquet)."
+                .to_string(),
+        ));
+    }
+    let format = toks[using_pos + 1].to_string();
+
+    // Find AS keyword position (must be after USING <format>)
+    let as_pos = toks[using_pos + 2..]
+        .iter()
+        .position(|t| t.eq_ignore_ascii_case("AS"))
+        .map(|i| i + using_pos + 2);
+
+    let as_pos = match as_pos {
+        Some(pos) => pos,
+        None => {
+            return Err(ParseError(
+                "SQL: CREATE OR REPLACE TABLE ... USING <format> requires AS SELECT ..."
+                    .to_string(),
+            ));
+        }
+    };
+
+    // Reconstruct the subquery from tokens after AS
+    // This is more reliable than byte-position searching for multiline queries
+    let subquery_tokens = &toks[as_pos + 1..];
+    if subquery_tokens.is_empty() {
+        return Err(ParseError(
+            "SQL: CREATE OR REPLACE TABLE ... AS requires a SELECT query.".to_string(),
+        ));
+    }
+
+    // For complex queries with expressions, we need to extract from original string
+    // Find the AS keyword in original query after the format token
+    let format_token = &toks[using_pos + 1];
+    let query_lower = query.to_lowercase();
+
+    // Find the format token position first
+    let format_byte_pos = query_lower.find(&format_token.to_lowercase()).unwrap_or(0);
+
+    // Then find " AS " or "\nAS " etc. after the format token
+    let search_start = format_byte_pos + format_token.len();
+    let remaining = &query[search_start..];
+    let remaining_lower = remaining.to_lowercase();
+
+    // Look for AS as a standalone word (surrounded by whitespace)
+    let as_offset = find_standalone_as(&remaining_lower);
+
+    let as_offset = match as_offset {
+        Some(offset) => offset,
+        None => {
+            return Err(ParseError(
+                "SQL: Could not locate AS keyword in CREATE OR REPLACE TABLE statement."
+                    .to_string(),
+            ));
+        }
+    };
+
+    // Skip past "AS" and any following whitespace
+    let after_as = &remaining[as_offset..];
+
+    // Find the "AS" keyword and skip past it
+    let as_lower = after_as.to_lowercase();
+    let as_keyword_pos = as_lower.find("as").unwrap_or(0);
+    let after_as_keyword = &after_as[as_keyword_pos + 2..];
+
+    // Find where the actual SELECT starts (skip whitespace after AS)
+    let subquery_str = after_as_keyword.trim_start();
+
+    if subquery_str.is_empty() {
+        return Err(ParseError(
+            "SQL: CREATE OR REPLACE TABLE ... AS requires a SELECT query.".to_string(),
+        ));
+    }
+
+    // Parse the subquery using upstream parser
+    let dialect = GenericDialect {};
+    let stmts = Parser::parse_sql(&dialect, subquery_str).map_err(|e| {
+        ParseError(format!(
+            "SQL parse error in CREATE OR REPLACE TABLE subquery: {}",
+            e
+        ))
+    })?;
+
+    if stmts.len() != 1 {
+        return Err(ParseError(format!(
+            "SQL: CREATE OR REPLACE TABLE subquery must be a single SELECT statement, got {} statements.",
+            stmts.len()
+        )));
+    }
+
+    let stmt = stmts.into_iter().next().expect("len == 1");
+    let query_ast = match stmt {
+        Statement::Query(q) => q,
+        _ => {
+            return Err(ParseError(
+                "SQL: CREATE OR REPLACE TABLE ... AS requires a SELECT query.".to_string(),
+            ));
+        }
+    };
+
+    Ok(Some(SparkStatement::CreateOrReplaceTableAs {
+        table,
+        format,
+        query: query_ast,
+    }))
+}
+
+/// Find the position of standalone "AS" keyword (surrounded by whitespace).
+fn find_standalone_as(s: &str) -> Option<usize> {
+    let bytes = s.as_bytes();
+    let len = bytes.len();
+
+    for i in 0..len {
+        // Check if we're at a whitespace character
+        if !bytes[i].is_ascii_whitespace() {
+            continue;
+        }
+
+        // Look for "as" after whitespace
+        if i + 3 <= len {
+            let candidate = &s[i + 1..i + 3];
+            if candidate.eq_ignore_ascii_case("as") {
+                // Check if followed by whitespace or end of string
+                if i + 3 == len || bytes[i + 3].is_ascii_whitespace() {
+                    return Some(i);
+                }
+            }
+        }
+    }
+
+    // Also check if string starts with "as"
+    if len >= 2 && s[..2].eq_ignore_ascii_case("as") && (len == 2 || bytes[2].is_ascii_whitespace())
+    {
+        return Some(0);
+    }
+
+    None
+}
+
 /// Parse a Spark/PySpark-compatible SQL string.
 ///
 /// - First, fast-path Spark-only command variants (e.g. `DESCRIBE DETAIL`, `SHOW TABLES IN db`,
@@ -114,6 +308,13 @@ pub fn parse_spark_sql(query: &str) -> Result<SparkStatement, ParseError> {
 
     // Tokenize for Spark-only command matching.
     let toks = tokenize_ws(q);
+
+    // CREATE OR REPLACE TABLE <table> USING <format> AS SELECT ...
+    // This Spark-specific syntax is not supported by upstream sqlparser GenericDialect.
+    if let Some(stmt) = try_parse_create_or_replace_table_as(q, &toks)? {
+        return Ok(stmt);
+    }
+
     if toks.len() >= 2
         && toks[0].eq_ignore_ascii_case("SHOW")
         && toks[1].eq_ignore_ascii_case("DATABASES")
@@ -915,5 +1116,92 @@ mod tests {
         // Unmatched parenthesis or invalid token sequence should yield a parse error.
         let err = parse_select_expr("( unclosed").unwrap_err();
         assert!(!err.0.is_empty());
+    }
+
+    // ========== CREATE OR REPLACE TABLE ... USING <format> AS SELECT tests (#1462) ==========
+
+    #[test]
+    fn spark_create_or_replace_table_using_delta_as_select() {
+        let sql = "CREATE OR REPLACE TABLE my_table USING delta AS SELECT id, name FROM source";
+        let s = parse_spark_sql(sql).unwrap();
+        match s {
+            SparkStatement::CreateOrReplaceTableAs {
+                table,
+                format,
+                query,
+            } => {
+                assert_eq!(table.to_string(), "my_table");
+                assert_eq!(format.to_lowercase(), "delta");
+                // Verify query is a Query
+                assert!(matches!(query.body.as_ref(), SetExpr::Select(_)));
+            }
+            other => panic!("expected CreateOrReplaceTableAs, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn spark_create_or_replace_table_qualified_name() {
+        let sql =
+            "CREATE OR REPLACE TABLE schema1.my_table USING parquet AS SELECT * FROM other_table";
+        let s = parse_spark_sql(sql).unwrap();
+        match s {
+            SparkStatement::CreateOrReplaceTableAs {
+                table,
+                format,
+                query: _,
+            } => {
+                assert_eq!(table.to_string(), "schema1.my_table");
+                assert_eq!(format.to_lowercase(), "parquet");
+            }
+            other => panic!("expected CreateOrReplaceTableAs, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn spark_create_or_replace_table_multiline() {
+        let sql = r#"
+            CREATE OR REPLACE TABLE clean_events
+            USING delta AS
+            SELECT user_id, name, value, '2025-01-01' AS processed_at
+            FROM raw_events
+        "#;
+        let s = parse_spark_sql(sql).unwrap();
+        match s {
+            SparkStatement::CreateOrReplaceTableAs {
+                table,
+                format,
+                query: _,
+            } => {
+                assert_eq!(table.to_string(), "clean_events");
+                assert_eq!(format.to_lowercase(), "delta");
+            }
+            other => panic!("expected CreateOrReplaceTableAs, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn spark_create_or_replace_table_case_insensitive() {
+        let sql = "create or replace table T using DELTA as select 1";
+        let s = parse_spark_sql(sql).unwrap();
+        match s {
+            SparkStatement::CreateOrReplaceTableAs { table, format, .. } => {
+                assert_eq!(table.to_string(), "T");
+                assert_eq!(format.to_uppercase(), "DELTA");
+            }
+            other => panic!("expected CreateOrReplaceTableAs, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn spark_create_table_without_or_replace_falls_through() {
+        // Regular CREATE TABLE should fall through to upstream parser
+        let sql = "CREATE TABLE t (id INT)";
+        let s = parse_spark_sql(sql).unwrap();
+        match s {
+            SparkStatement::Sqlparser(stmt) => {
+                assert!(matches!(stmt.as_ref(), Statement::CreateTable(_)));
+            }
+            other => panic!("expected Sqlparser(CreateTable), got {other:?}"),
+        }
     }
 }

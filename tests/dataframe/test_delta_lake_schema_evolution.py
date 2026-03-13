@@ -240,7 +240,6 @@ class TestDeltaLakeSchemaEvolution:
         except Exception:
             pass
 
-    @pytest.mark.skip(reason="Blocked by #1462: SQL parser missing CREATE OR REPLACE TABLE ... USING <format> syntax")
     def test_delta_create_or_replace_table_as_select(self, spark):
         """CTAS with OR REPLACE should allow schema evolution for Delta tables."""
         if _backend != Mode.SPARKLESS:

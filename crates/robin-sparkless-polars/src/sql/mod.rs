@@ -75,9 +75,9 @@ pub fn execute_sql(session: &SparkSession, query: &str) -> Result<DataFrame, Pol
             #[cfg(not(feature = "delta"))]
             {
                 let _ = table_name;
-                return Err(PolarsError::InvalidOperation(
+                Err(PolarsError::InvalidOperation(
                     "DESCRIBE DETAIL requires the delta feature.".into(),
-                ));
+                ))
             }
         }
         SparkStatement::ShowDatabases => translator::translate_show_databases(session),
@@ -100,6 +100,75 @@ pub fn execute_sql(session: &SparkSession, query: &str) -> Result<DataFrame, Pol
                     table_name.as_str(),
                     col_name,
                 )
+            }
+        }
+        SparkStatement::CreateOrReplaceTableAs {
+            table,
+            format,
+            query,
+        } => {
+            let table_name = table.to_string();
+            let format_lower = format.to_lowercase();
+
+            // Execute the SELECT query to get the result DataFrame
+            let result_df = translator::translate_query(session, query.as_ref())?;
+
+            // Write the result as a table with the specified format
+            match format_lower.as_str() {
+                #[cfg(feature = "delta")]
+                "delta" => {
+                    // For Delta format, use Delta Lake write with overwrite mode
+                    let warehouse_dir = session.warehouse_dir();
+                    let table_path = if let Some(ref wh) = warehouse_dir {
+                        std::path::PathBuf::from(wh).join(&table_name)
+                    } else {
+                        return Err(PolarsError::InvalidOperation(
+                            "CREATE OR REPLACE TABLE with USING delta requires spark.sql.warehouse.dir to be set. \
+                             Use SparkSession.builder().config(\"spark.sql.warehouse.dir\", \"/path/to/warehouse\")."
+                                .into(),
+                        ));
+                    };
+
+                    // Collect the DataFrame and write as Delta
+                    let pl_df = result_df.collect_inner()?;
+                    crate::delta::write_delta(
+                        pl_df.as_ref(),
+                        &table_path,
+                        true,  // overwrite
+                        false, // not append
+                    )?;
+
+                    // Register the table in the catalog so it can be queried
+                    let loaded_df = crate::delta::read_delta(&table_path, session.is_case_sensitive())?;
+                    session.register_table(&table_name, loaded_df);
+
+                    Ok(DataFrame::from_polars_with_options(
+                        polars::prelude::DataFrame::empty(),
+                        session.is_case_sensitive(),
+                    ))
+                }
+                #[cfg(not(feature = "delta"))]
+                "delta" => Err(PolarsError::InvalidOperation(
+                    "CREATE OR REPLACE TABLE ... USING delta requires the delta feature to be enabled.".into(),
+                )),
+                "parquet" | "csv" | "json" => {
+                    // For other formats, register as a temp table (in-memory replacement)
+                    // Note: Full file-based persistence for non-Delta formats could be added later
+                    session.drop_table(&table_name);
+                    session.drop_temp_view(&table_name);
+                    session.register_table(&table_name, result_df);
+                    Ok(DataFrame::from_polars_with_options(
+                        polars::prelude::DataFrame::empty(),
+                        session.is_case_sensitive(),
+                    ))
+                }
+                _ => Err(PolarsError::InvalidOperation(
+                    format!(
+                        "CREATE OR REPLACE TABLE ... USING {format}: unsupported format. \
+                         Supported formats: delta (with delta feature), parquet, csv, json."
+                    )
+                    .into(),
+                )),
             }
         }
         SparkStatement::Sqlparser(stmt) => translator::translate(session, stmt.as_ref()),
@@ -911,5 +980,49 @@ mod tests {
             "error should mention supported/not supported: {}",
             msg2
         );
+    }
+
+    /// #1462: CREATE OR REPLACE TABLE ... USING <format> AS SELECT (non-Delta: in-memory table replacement)
+    #[test]
+    fn test_sql_create_or_replace_table_parquet_in_memory() {
+        let spark = SparkSession::builder().app_name("test").get_or_create();
+
+        // Create initial data
+        let df = spark
+            .create_dataframe(
+                vec![
+                    (1i64, 100i64, "Alice".to_string()),
+                    (2i64, 200i64, "Bob".to_string()),
+                ],
+                vec!["user_id", "value", "name"],
+            )
+            .unwrap();
+        spark.create_or_replace_temp_view("initial_data", df);
+
+        // Create the source table
+        spark
+            .sql("CREATE OR REPLACE TABLE my_table USING parquet AS SELECT * FROM initial_data")
+            .unwrap();
+
+        // Verify the table exists with initial data
+        let result1 = spark
+            .sql("SELECT * FROM my_table ORDER BY user_id")
+            .unwrap();
+        assert_eq!(result1.count().unwrap(), 2);
+
+        // Now replace with a modified query
+        spark
+            .sql("CREATE OR REPLACE TABLE my_table USING parquet AS SELECT user_id, name, value, 'processed' AS status FROM my_table")
+            .unwrap();
+
+        // Verify the replaced table has the new column
+        let result2 = spark.table("my_table").unwrap();
+        let cols = result2.columns().unwrap();
+        assert!(
+            cols.contains(&"status".to_string()),
+            "Should have 'status' column: {:?}",
+            cols
+        );
+        assert_eq!(result2.count().unwrap(), 2);
     }
 }

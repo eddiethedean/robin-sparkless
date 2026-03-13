@@ -1683,6 +1683,11 @@ impl SparkSession {
         &self.config
     }
 
+    /// Return a reference to the UDF registry. Used for thread context management.
+    pub fn udf_registry(&self) -> &UdfRegistry {
+        &self.udf_registry
+    }
+
     /// Set a config key at runtime (PySpark: spark.conf.set(key, value)).
     /// When key is spark.sql.session.timeZone, also updates the thread UDF context so hour/minute/second use it (#1154).
     pub fn set_config(&mut self, key: impl Into<String>, value: impl Into<String>) {
@@ -2969,6 +2974,7 @@ impl SparkSession {
         }
         let _ = self.udf_registry.clear();
         clear_thread_udf_session();
+        crate::clear_thread_udf_context();
     }
 }
 

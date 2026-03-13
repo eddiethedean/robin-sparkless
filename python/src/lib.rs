@@ -614,7 +614,7 @@ impl PySparkSessionBuilder {
         Ok(slf)
     }
 
-    fn get_or_create(&self, py: Python<'_>) -> PyResult<Py<PySparkSession>> {
+    fn get_or_create(mut slf: PyRefMut<'_, Self>, py: Python<'_>) -> PyResult<Py<PySparkSession>> {
         // PySpark parity #1250: return existing singleton when builder config is compatible,
         // so test_multiple_sessions sees one session; #373: create new when builder has extra config.
         let ty = py.get_type_bound::<PySparkSession>();
@@ -623,13 +623,24 @@ impl PySparkSessionBuilder {
                 if let Ok(sess) = singleton.extract::<Py<PySparkSession>>() {
                     let sess_ref = sess.bind(py).downcast::<PySparkSession>()?;
                     let sess_guard = sess_ref.borrow();
-                    if sess_guard.builder_config_compatible(&self.inner) {
+                    if sess_guard.builder_config_compatible(&slf.inner) {
+                        // Ensure thread UDF context is set when returning existing singleton
+                        // This fixes test isolation issues where context was cleared but singleton reused
+                        robin_sparkless::set_thread_udf_context_with_tz(
+                            std::sync::Arc::new(sess_guard.inner.udf_registry().clone()),
+                            sess_guard.inner.is_case_sensitive(),
+                            sess_guard.inner.get_config().get("spark.sql.session.timeZone").cloned(),
+                        );
+                        // Reset builder to avoid config pollution between tests
+                        slf.inner = SparkSessionBuilder::new();
                         return Ok(sess);
                     }
                 }
             }
         }
-        let session = self.inner.clone().get_or_create();
+        let session = slf.inner.clone().get_or_create();
+        // Reset builder to avoid config pollution between tests
+        slf.inner = SparkSessionBuilder::new();
         let obj = Py::new(
             py,
             PySparkSession {
@@ -643,8 +654,8 @@ impl PySparkSessionBuilder {
 
     /// PySpark camelCase alias for get_or_create
     #[pyo3(name = "getOrCreate")]
-    fn get_or_create_camel(&self, py: Python<'_>) -> PyResult<Py<PySparkSession>> {
-        self.get_or_create(py)
+    fn get_or_create_camel(slf: PyRefMut<'_, Self>, py: Python<'_>) -> PyResult<Py<PySparkSession>> {
+        Self::get_or_create(slf, py)
     }
 }
 
@@ -791,7 +802,9 @@ impl PySparkSession {
         Ok(obj)
     }
 
-    /// PySpark: SparkSession.builder returns a builder instance (not callable; builder() raises TypeError).
+    /// PySpark: SparkSession.builder returns a builder instance.
+    /// Note: The builder is cached as a class attribute, but get_or_create() resets
+    /// its config to avoid state pollution between tests.
     #[classattr]
     fn builder(_py: Python<'_>) -> PySparkSessionBuilder {
         PySparkSessionBuilder {
