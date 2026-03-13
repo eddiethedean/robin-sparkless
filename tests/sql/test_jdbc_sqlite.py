@@ -11,6 +11,13 @@ import os
 
 import pytest
 
+from tests.sql.conftest import jdbc_available
+
+pytestmark = pytest.mark.skipif(
+    not jdbc_available(),
+    reason="JDBC/SQLite support not enabled in this build",
+)
+
 
 def test_read_jdbc_sqlite_basic(spark) -> None:
     """spark.read.jdbc() works with SQLite file database."""

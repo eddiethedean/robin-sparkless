@@ -14,6 +14,44 @@ from typing import Generator, NamedTuple
 import pytest
 
 
+def is_jdbc_available() -> bool:
+    """Check if JDBC support is available in this build.
+
+    Returns True if the sparkless package was built with JDBC features enabled.
+    Used to skip JDBC tests when running CI without JDBC features.
+    """
+    try:
+        from sparkless.sql import SparkSession
+
+        spark = SparkSession.builder.app_name("jdbc_check").get_or_create()
+        # Try a minimal JDBC read - check for "feature not enabled" error
+        try:
+            spark.read.jdbc(url="jdbc:sqlite::memory:", table="dummy", properties={})
+        except RuntimeError as e:
+            if "feature enabled" in str(e).lower():
+                return False
+            # Other errors (like "table not found") mean JDBC is available
+            return True
+        except Exception:
+            # Any other exception means JDBC is available (just failed for other reasons)
+            return True
+        return True
+    except Exception:
+        return False
+
+
+# Cache the result to avoid repeated checks
+_JDBC_AVAILABLE: bool | None = None
+
+
+def jdbc_available() -> bool:
+    """Cached check for JDBC availability."""
+    global _JDBC_AVAILABLE
+    if _JDBC_AVAILABLE is None:
+        _JDBC_AVAILABLE = is_jdbc_available()
+    return _JDBC_AVAILABLE
+
+
 class JdbcConnection(NamedTuple):
     """JDBC connection details."""
 

@@ -14,6 +14,13 @@ import os
 
 import pytest
 
+from tests.sql.conftest import jdbc_available
+
+pytestmark = pytest.mark.skipif(
+    not jdbc_available(),
+    reason="JDBC support not enabled in this build",
+)
+
 _HAS_ENV_URL = "SPARKLESS_TEST_JDBC_MYSQL_URL" in os.environ
 
 
