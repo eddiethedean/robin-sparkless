@@ -2,7 +2,7 @@ import argparse
 import json
 import statistics
 import time
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from sparkless.sql import SparkSession, functions as F
 
@@ -158,7 +158,7 @@ def run_benchmark(rows: int, groups: int, repetitions: int) -> Dict[str, Any]:
         spark.stop()
 
 
-def main(argv: List[str] | None = None) -> None:
+def main(argv: Optional[List[str]] = None) -> None:
     parser = argparse.ArgumentParser(
         description="Window-like groupBy+join benchmark for Sparkless 4.x."
     )
