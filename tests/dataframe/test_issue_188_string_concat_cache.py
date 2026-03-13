@@ -4,8 +4,6 @@ This module tests edge cases for string concatenation cache handling.
 Uses get_imports from fixture only.
 """
 
-import pytest
-
 from sparkless.testing import get_imports
 
 _imports = get_imports()

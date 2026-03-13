@@ -5,8 +5,6 @@ This test suite verifies that columns created in transforms require
 materialization before they can be accessed, matching PySpark behavior.
 """
 
-import pytest
-
 from sparkless.testing import get_imports, Mode, get_mode
 
 

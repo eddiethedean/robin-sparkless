@@ -9,7 +9,7 @@ when _alias_names was explicitly None (posexplode without alias), causing len(No
 https://github.com/eddiethedean/sparkless/issues/429
 """
 
-from sparkless.testing import Mode, get_mode, is_pyspark_mode, create_session
+from sparkless.testing import Mode
 from sparkless.testing import get_imports
 
 

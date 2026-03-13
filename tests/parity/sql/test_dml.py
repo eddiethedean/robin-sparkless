@@ -6,7 +6,7 @@ Tests validate that Sparkless SQL DML statements behave identically to PySpark.
 
 import pytest
 from tests.tools.parity_base import ParityTestBase
-from sparkless.testing import Mode, get_mode, is_pyspark_mode, create_session
+from sparkless.testing import Mode, get_mode
 
 
 def _is_pyspark_mode() -> bool:

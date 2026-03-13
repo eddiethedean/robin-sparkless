@@ -8,8 +8,6 @@ Set SPARKLESS_TEST_MODE=pyspark to run tests with PySpark backend.
 import pytest
 from sparkless.testing import (
     Mode,
-    get_mode,
-    is_pyspark_mode,
     get_imports,
     assert_dataframes_equal,
 )
@@ -86,10 +84,12 @@ class TestUnifiedImports:
         """Example: using data types from get_imports()."""
         imports = get_imports()
 
-        schema = imports.StructType([
-            imports.StructField("id", imports.IntegerType(), True),
-            imports.StructField("name", imports.StringType(), True),
-        ])
+        schema = imports.StructType(
+            [
+                imports.StructField("id", imports.IntegerType(), True),
+                imports.StructField("name", imports.StringType(), True),
+            ]
+        )
 
         df = spark.createDataFrame([{"id": 1, "name": "Alice"}], schema=schema)
         assert df.count() == 1
@@ -120,40 +120,52 @@ class TestDataFrameComparison:
 
     def test_dataframe_comparison(self, spark):
         """Example: comparing DataFrames."""
-        df1 = spark.createDataFrame([
-            {"id": 1, "value": 10.0},
-            {"id": 2, "value": 20.0},
-        ])
-        df2 = spark.createDataFrame([
-            {"id": 1, "value": 10.0},
-            {"id": 2, "value": 20.0},
-        ])
+        df1 = spark.createDataFrame(
+            [
+                {"id": 1, "value": 10.0},
+                {"id": 2, "value": 20.0},
+            ]
+        )
+        df2 = spark.createDataFrame(
+            [
+                {"id": 1, "value": 10.0},
+                {"id": 2, "value": 20.0},
+            ]
+        )
 
         # These should be equal
         assert_dataframes_equal(df1, df2)
 
     def test_comparison_with_tolerance(self, spark):
         """Example: comparing DataFrames with floating point tolerance."""
-        df1 = spark.createDataFrame([
-            {"id": 1, "value": 10.0000001},
-        ])
-        df2 = spark.createDataFrame([
-            {"id": 1, "value": 10.0},
-        ])
+        df1 = spark.createDataFrame(
+            [
+                {"id": 1, "value": 10.0000001},
+            ]
+        )
+        df2 = spark.createDataFrame(
+            [
+                {"id": 1, "value": 10.0},
+            ]
+        )
 
         # Should be equal within tolerance
         assert_dataframes_equal(df1, df2, tolerance=1e-6)
 
     def test_comparison_ignore_order(self, spark):
         """Example: comparing DataFrames ignoring row order."""
-        df1 = spark.createDataFrame([
-            {"id": 1, "value": 10},
-            {"id": 2, "value": 20},
-        ])
-        df2 = spark.createDataFrame([
-            {"id": 2, "value": 20},
-            {"id": 1, "value": 10},
-        ])
+        df1 = spark.createDataFrame(
+            [
+                {"id": 1, "value": 10},
+                {"id": 2, "value": 20},
+            ]
+        )
+        df2 = spark.createDataFrame(
+            [
+                {"id": 2, "value": 20},
+                {"id": 1, "value": 10},
+            ]
+        )
 
         # Should be equal when ignoring order
         assert_dataframes_equal(df1, df2, check_order=False)

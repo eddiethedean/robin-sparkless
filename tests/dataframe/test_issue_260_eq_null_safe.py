@@ -19,7 +19,7 @@ import os
 import pytest
 
 from sparkless.testing import get_imports
-from sparkless.testing import Mode, get_mode, is_pyspark_mode, create_session
+from sparkless.testing import Mode, get_mode
 
 
 imports = get_imports()
@@ -572,9 +572,7 @@ class TestIssue260EqNullSafeParity:
     def test_eqnullsafe_parity_with_pyspark(self) -> None:
         """Run the issue #260 example against real PySpark when available."""
         if not _is_pyspark_mode():
-            pytest.skip(
-                "PySpark parity test - run with SPARKLESS_TEST_MODE=pyspark"
-            )
+            pytest.skip("PySpark parity test - run with SPARKLESS_TEST_MODE=pyspark")
 
         spark = SparkSession.builder.appName("EqNullSafeParity").getOrCreate()
         try:

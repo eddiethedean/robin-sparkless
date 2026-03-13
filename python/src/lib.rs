@@ -629,7 +629,11 @@ impl PySparkSessionBuilder {
                         robin_sparkless::set_thread_udf_context_with_tz(
                             std::sync::Arc::new(sess_guard.inner.udf_registry().clone()),
                             sess_guard.inner.is_case_sensitive(),
-                            sess_guard.inner.get_config().get("spark.sql.session.timeZone").cloned(),
+                            sess_guard
+                                .inner
+                                .get_config()
+                                .get("spark.sql.session.timeZone")
+                                .cloned(),
                         );
                         // Reset builder to avoid config pollution between tests
                         slf.inner = SparkSessionBuilder::new();
@@ -654,7 +658,10 @@ impl PySparkSessionBuilder {
 
     /// PySpark camelCase alias for get_or_create
     #[pyo3(name = "getOrCreate")]
-    fn get_or_create_camel(slf: PyRefMut<'_, Self>, py: Python<'_>) -> PyResult<Py<PySparkSession>> {
+    fn get_or_create_camel(
+        slf: PyRefMut<'_, Self>,
+        py: Python<'_>,
+    ) -> PyResult<Py<PySparkSession>> {
         Self::get_or_create(slf, py)
     }
 }

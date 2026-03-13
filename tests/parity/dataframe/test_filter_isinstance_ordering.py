@@ -20,11 +20,7 @@ from sparkless.testing import get_imports
 def _table_format_and_options(spark):
     """Use parquet when PySpark backend (no Delta); otherwise delta."""
     backend = (
-        (
-            os.getenv("SPARKLESS_TEST_MODE")
-            or os.getenv("SPARKLESS_TEST_MODE")
-            or ""
-        )
+        (os.getenv("SPARKLESS_TEST_MODE") or os.getenv("SPARKLESS_TEST_MODE") or "")
         .strip()
         .lower()
     )

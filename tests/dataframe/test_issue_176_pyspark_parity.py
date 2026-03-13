@@ -11,7 +11,7 @@ import pytest
 
 from sparkless.testing import get_imports
 from tests.utils import assert_rows_equal
-from sparkless.testing import Mode, get_mode, is_pyspark_mode, create_session
+from sparkless.testing import Mode, get_mode
 
 
 _imports = get_imports()

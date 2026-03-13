@@ -15,7 +15,7 @@ https://github.com/eddiethedean/sparkless/issues/448
 import pytest
 
 from sparkless.testing import get_imports
-from sparkless.testing import Mode, get_mode, is_pyspark_mode, create_session
+from sparkless.testing import Mode
 
 
 def _row_val(row, key):

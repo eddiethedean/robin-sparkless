@@ -8,7 +8,9 @@ def test_array_contains_null_array_matches_pyspark():
     imports = get_imports(Mode.SPARKLESS)
     F = imports.F
 
-    spark = create_session(app_name="array_contains_null_array_1408", mode=Mode.SPARKLESS)
+    spark = create_session(
+        app_name="array_contains_null_array_1408", mode=Mode.SPARKLESS
+    )
     try:
         base = spark.range(0, 3).select(
             F.col("id"),

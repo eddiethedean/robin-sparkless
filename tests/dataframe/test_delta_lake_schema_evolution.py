@@ -11,7 +11,7 @@ due to differences in table management and schema evolution behavior.
 
 import pytest
 
-from sparkless.testing import Mode, get_mode, is_pyspark_mode, create_session
+from sparkless.testing import Mode, get_mode, create_session
 from sparkless.testing import get_imports
 
 _imports = get_imports()

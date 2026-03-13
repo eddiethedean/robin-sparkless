@@ -17,7 +17,7 @@ from datetime import date
 import pytest
 
 from sparkless.testing import get_imports
-from sparkless.testing import Mode, get_mode, is_pyspark_mode, create_session
+from sparkless.testing import Mode, get_mode
 
 
 imports = get_imports()

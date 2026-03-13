@@ -764,7 +764,6 @@ class TestFixtures:
     def test_table_prefix_fixture_unique(self, table_prefix, request):
         """The table_prefix fixture generates unique prefixes."""
         import re
-        import uuid as uuid_module
 
         # Extract the UUID part
         match = re.search(r"_([a-f0-9]{6})$", table_prefix)

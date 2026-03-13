@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-from sparkless.testing import Mode, get_mode, is_pyspark_mode, create_session
+from sparkless.testing import Mode, get_mode
 from sparkless.testing import get_imports
 
 imports = get_imports()
