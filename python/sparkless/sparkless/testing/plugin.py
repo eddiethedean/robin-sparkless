@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import pytest
 
-from .mode import Mode, ENV_VAR_NAME
+from .mode import Mode
 
 
 # Import fixtures to register them with pytest

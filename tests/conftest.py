@@ -47,7 +47,10 @@ if not is_pyspark_mode():
         import sparkless as _rs
     except ImportError:
         _rs = None  # type: ignore[assignment]
-    if _rs is not None and getattr(_rs, "_configure_for_multiprocessing", None) is not None:
+    if (
+        _rs is not None
+        and getattr(_rs, "_configure_for_multiprocessing", None) is not None
+    ):
         _rs._configure_for_multiprocessing()
 
 
@@ -94,7 +97,11 @@ def _use_shared_session() -> bool:
     Default is per-test sessions. Set SPARKLESS_SHARED_SESSION=1 to use
     one session per run (faster but requires unique table names via table_prefix).
     """
-    if os.environ.get("SPARKLESS_SHARED_SESSION", "0").strip().lower() in ("1", "true", "yes"):
+    if os.environ.get("SPARKLESS_SHARED_SESSION", "0").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+    ):
         if os.environ.get("PYTEST_XDIST_WORKER"):
             return False
         return not is_pyspark_mode()

@@ -227,7 +227,7 @@ def _ensure_java_home() -> None:
         pass
 
 
-def _stop_existing_pyspark_session(PySparkSession: type) -> None:
+def _stop_existing_pyspark_session(PySparkSession: Any) -> None:
     """Stop any existing PySpark session for clean configuration."""
     import time
 

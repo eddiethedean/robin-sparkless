@@ -7,12 +7,9 @@ test mode.
 
 from __future__ import annotations
 
-from typing import Any, Optional, TYPE_CHECKING
+from typing import Any, Optional
 
 from .mode import Mode, get_mode
-
-if TYPE_CHECKING:
-    from types import ModuleType
 
 
 class SparkImports:
@@ -38,6 +35,28 @@ class SparkImports:
         >>> df = spark.createDataFrame([(1, "a")], ["id", "val"])
         >>> df.select(imports.F.upper("val")).show()
     """
+
+    SparkSession: Any
+    F: Any
+    functions: Any
+    Window: Any
+    DataFrameReader: Any
+    Row: Any
+    StructType: Any
+    StructField: Any
+    StringType: Any
+    IntegerType: Any
+    LongType: Any
+    DoubleType: Any
+    FloatType: Any
+    BooleanType: Any
+    DateType: Any
+    TimestampType: Any
+    ArrayType: Any
+    MapType: Any
+    DecimalType: Any
+    BinaryType: Any
+    _native: Any
 
     def __init__(self, mode: Optional[Mode] = None):
         """Initialize imports for the given mode.
@@ -164,6 +183,7 @@ class SparkImports:
 
         # Sparkless native module
         import sparkless._native as _native
+
         self._native = _native
 
 

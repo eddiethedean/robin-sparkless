@@ -10,7 +10,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, field
 from datetime import date, datetime
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple
 
 
 @dataclass
@@ -329,7 +329,9 @@ def _is_date_like(value: Any) -> bool:
         return True
     if isinstance(value, str) and len(value) >= 10:
         if value[4:5] == "-" and value[7:8] == "-":
-            return value[:4].isdigit() and value[5:7].isdigit() and value[8:10].isdigit()
+            return (
+                value[:4].isdigit() and value[5:7].isdigit() and value[8:10].isdigit()
+            )
     return False
 
 
