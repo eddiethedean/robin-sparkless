@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use crate::error::EngineError;
 use crate::jdbc::JdbcOptions;
 
@@ -281,6 +279,7 @@ pub(crate) fn write_jdbc_db2(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashMap;
 
     #[test]
     fn db2_smoke_if_env() {

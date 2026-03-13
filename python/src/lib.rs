@@ -2967,6 +2967,81 @@ impl PyDataFrameReader {
             .map(PyDataFrame::wrap)
             .map_err(to_py_err)
     }
+
+    /// PySpark: jdbc(url, table, properties=None, ...). Reads from a JDBC data source.
+    ///
+    /// Supports PySpark-compatible options:
+    /// - sessionInitStatement: SQL to execute after connecting
+    /// - queryTimeout: Query timeout in seconds
+    /// - prepareQuery: SQL to execute before main query
+    /// - fetchsize: Number of rows to fetch per round trip
+    /// - partitionColumn, lowerBound, upperBound, numPartitions: For partitioned reads
+    #[pyo3(signature = (url, table, properties=None))]
+    fn jdbc(
+        &self,
+        py: Python<'_>,
+        url: &str,
+        table: &str,
+        properties: Option<&Bound<'_, PyDict>>,
+    ) -> PyResult<PyDataFrame> {
+        #[cfg(not(any(
+            feature = "jdbc",
+            feature = "jdbc_mysql",
+            feature = "jdbc_mariadb",
+            feature = "jdbc_mssql",
+            feature = "jdbc_oracle",
+            feature = "jdbc_db2",
+            feature = "sqlite"
+        )))]
+        {
+            let _ = (py, url, table, properties);
+            return Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
+                "JDBC support requires building robin-sparkless with a JDBC feature enabled (e.g. 'jdbc', 'jdbc_mysql', 'sqlite').",
+            ));
+        }
+
+        #[cfg(any(
+            feature = "jdbc",
+            feature = "jdbc_mysql",
+            feature = "jdbc_mariadb",
+            feature = "jdbc_mssql",
+            feature = "jdbc_oracle",
+            feature = "jdbc_db2",
+            feature = "sqlite"
+        ))]
+        {
+            let session = self
+                .session
+                .bind(py)
+                .downcast::<PySparkSession>()
+                .map_err(|_| PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected SparkSession"))?
+                .borrow();
+
+            // Build properties map from options + explicit properties dict
+            let mut props: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+            
+            // Add options set via .option() / .options()
+            for (k, v) in &self.options {
+                props.insert(k.clone(), v.clone());
+            }
+            
+            // Add explicit properties dict (overrides options)
+            if let Some(dict) = properties {
+                for (k, v) in dict.iter() {
+                    let key = k.extract::<String>()?;
+                    let value = option_value_to_string(&v)?;
+                    props.insert(key, value);
+                }
+            }
+
+            session
+                .inner
+                .read()
+                .jdbc(url, table, &props)
+                .map(PyDataFrame::wrap)
+                .map_err(to_py_err)
+        }
+    }
 }
 
 /// Resolve (key_a, key_b) from join condition to (left_on, right_on). Strips alias prefix (e.g. "sm.brand_id" -> "brand_id") and assigns by which side has the column (#374, #421).
