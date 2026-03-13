@@ -609,7 +609,6 @@ class TestIssue230CaseInsensitiveColumnMatching:
         assert hasattr(result[0], "Years")
         assert result[0].Years == 25
 
-    @pytest.mark.skip(reason="Blocked by #1465: withColumnsRenamed not matching columns case-insensitively")
     def test_withColumnsRenamed_case_insensitive(self, spark):
         """Test withColumnsRenamed with case-insensitive column names."""
         data = [{"Name": "Alice", "Age": 25, "City": "NYC"}]
