@@ -114,16 +114,23 @@ Transformations (filter, select, join, etc.) are queued; execution happens on **
 
 ## Testing with Sparkless v4
 
+The `sparkless.testing` module provides a unified framework for writing tests that run against both sparkless and PySpark backends.
+
+### Quick Setup
+
+Add to your `conftest.py`:
+
+```python
+pytest_plugins = ["sparkless.testing"]
+```
+
 ### Unit Test Example
 
 ```python
-import pytest
-from sparkless.sql import SparkSession, functions as F
-
-def test_data_transformation():
-    """Test DataFrame logic without a Spark cluster."""
-    spark = SparkSession.builder.app_name("TestApp").get_or_create()
-
+def test_data_transformation(spark, spark_imports):
+    """Test DataFrame logic against sparkless or PySpark."""
+    F = spark_imports.F
+    
     data = [{"value": 10}, {"value": 20}, {"value": 30}]
     df = spark.createDataFrame(data)
 
@@ -133,17 +140,25 @@ def test_data_transformation():
     rows = result.collect()
     assert rows[0]["value"] == 20
     assert rows[1]["value"] == 30
-
-    spark.stop()
 ```
 
-Run tests from the repo root:
+### Running Tests
 
 ```bash
+# Fast local tests (sparkless backend)
 pytest tests -v
-# With real PySpark (requires Java):
-SPARKLESS_TEST_BACKEND=pyspark pytest tests -v
+
+# Validate against PySpark (requires Java)
+SPARKLESS_TEST_MODE=pyspark pytest tests -v
 ```
+
+### Key Features
+
+- **Fixtures:** `spark`, `spark_mode`, `spark_imports`, `isolated_session`, `table_prefix`
+- **Markers:** `@pytest.mark.sparkless_only`, `@pytest.mark.pyspark_only`
+- **Comparison utilities:** `assert_dataframes_equal()`, `compare_dataframes()`
+
+For the complete guide, see [Testing Guide](TESTING_GUIDE.md).
 
 ## Performance
 
@@ -157,6 +172,7 @@ Sparkless v4 uses the Rust engine (Polars in Rust). There is no JVM and no Polar
 
 ## Next Steps
 
+- [Testing Guide](TESTING_GUIDE.md) — Full guide to `sparkless.testing` (dual-mode testing, fixtures, comparison utilities)
 - [Package README](https://github.com/eddiethedean/robin-sparkless/blob/main/python/README.md) — Installation, Sparkless 3 vs 4.x, API overview, backend
 - [PySpark differences](PYSPARK_DIFFERENCES.md) — Known divergences and caveats
 - [Migration (PySpark / Sparkless 3)](python_migration.md) — Switching from PySpark or Sparkless 3.x

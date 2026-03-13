@@ -218,6 +218,7 @@ CI runs format, clippy, audit, deny, Rust tests, and parity tests on push/PR (se
 | [User Guide](docs/USER_GUIDE.md) | Everyday usage (Rust) |
 | [Persistence Guide](docs/PERSISTENCE_GUIDE.md) | Global temp views, disk-backed saveAsTable |
 | [UDF Guide](docs/UDF_GUIDE.md) | Scalar, vectorized, and grouped UDFs |
+| [Testing Guide](docs/TESTING_GUIDE.md) | Dual-mode testing with `sparkless.testing` |
 | [PySpark Differences](docs/PYSPARK_DIFFERENCES.md) | Known divergences |
 | [Roadmap](docs/ROADMAP.md) | Development phases, Sparkless integration |
 | [RELEASING](docs/RELEASING.md) | Publishing to crates.io and PyPI |

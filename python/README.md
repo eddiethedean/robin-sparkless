@@ -205,6 +205,51 @@ Sparkless 4.x is the **Python face** of the [robin-sparkless](https://github.com
 
 ---
 
+## Testing with sparkless.testing
+
+The `sparkless.testing` module provides a unified framework for writing tests that run against both sparkless and PySpark backends.
+
+### Quick Setup
+
+```python
+# conftest.py
+pytest_plugins = ["sparkless.testing"]
+```
+
+### Write Tests
+
+```python
+def test_filter(spark):
+    df = spark.createDataFrame([{"id": 1}, {"id": 2}])
+    assert df.filter(df.id > 1).count() == 1
+
+def test_with_functions(spark, spark_imports):
+    F = spark_imports.F
+    df = spark.createDataFrame([{"name": "alice"}])
+    result = df.select(F.upper("name")).collect()
+    assert result[0][0] == "ALICE"
+```
+
+### Run Tests
+
+```bash
+# Fast local tests (sparkless backend)
+pytest tests/ -v
+
+# Validate against PySpark
+SPARKLESS_TEST_MODE=pyspark pytest tests/ -v
+```
+
+### Features
+
+- **Fixtures:** `spark`, `spark_mode`, `spark_imports`, `isolated_session`, `table_prefix`
+- **Markers:** `@pytest.mark.sparkless_only`, `@pytest.mark.pyspark_only`
+- **Comparison:** `assert_dataframes_equal()`, `compare_dataframes()`
+
+See the full [Testing Guide](https://github.com/eddiethedean/robin-sparkless/blob/main/docs/TESTING_GUIDE.md) for complete documentation.
+
+---
+
 ## Development
 
 ```bash
@@ -215,7 +260,7 @@ maturin develop
 pytest tests -v
 
 # With PySpark backend (requires Java + pyspark)
-SPARKLESS_TEST_BACKEND=pyspark pytest tests -v
+SPARKLESS_TEST_MODE=pyspark pytest tests -v
 ```
 
 Optional dev dependencies:

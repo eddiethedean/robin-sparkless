@@ -9,6 +9,7 @@ Documentation for the Python package mirrors the [Sparkless](https://sparkless.r
 | Document | Description |
 |----------|-------------|
 | [Python getting started](python_getting_started.md) | Installation, quick start, core features (DataFrame, SQL, windows), testing, lazy evaluation, next steps |
+| [**Testing Guide**](TESTING_GUIDE.md) | `sparkless.testing` module: dual-mode testing (sparkless + PySpark), fixtures, markers, DataFrame comparison utilities, CI configuration |
 | [Package README](https://github.com/eddiethedean/robin-sparkless/blob/main/python/README.md) | Why Sparkless v4, Sparkless 3 vs 4.x, installation, API overview, backend, known limitations |
 | [Migration (PySpark / Sparkless 3)](python_migration.md) | Switching from PySpark or Sparkless 3.x; Sparkless 3 vs 4.x table |
 | [PySpark differences](PYSPARK_DIFFERENCES.md) | Known divergences and caveats (applies to both Rust and Python usage) |
