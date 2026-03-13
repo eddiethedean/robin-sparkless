@@ -1250,6 +1250,6 @@ class TestPluginEdgeCases:
 
     def test_plugin_env_var_name(self):
         """Plugin uses correct ENV_VAR_NAME."""
-        from sparkless.testing.plugin import ENV_VAR_NAME
+        from sparkless.testing import ENV_VAR_NAME
 
         assert ENV_VAR_NAME == "SPARKLESS_TEST_MODE"
