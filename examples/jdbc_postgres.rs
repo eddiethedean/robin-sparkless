@@ -66,7 +66,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             vec![json!(100_i64), json!("from_rust")],
             vec![json!(101_i64), json!("jdbc_example")],
         ],
-        vec![("id".to_string(), "bigint".to_string()), ("name".to_string(), "string".to_string())],
+        vec![
+            ("id".to_string(), "bigint".to_string()),
+            ("name".to_string(), "string".to_string()),
+        ],
         false,
         false,
     )?;

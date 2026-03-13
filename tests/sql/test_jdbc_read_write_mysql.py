@@ -85,7 +85,9 @@ def test_write_jdbc_append(spark) -> None:
     url = _jdbc_url()
     props = _jdbc_props()
 
-    df = spark.createDataFrame([(100, "append_a"), (101, "append_b")], schema="id bigint, name string")
+    df = spark.createDataFrame(
+        [(100, "append_a"), (101, "append_b")], schema="id bigint, name string"
+    )
     df.write.jdbc(url=url, table="sparkless_jdbc_test", properties=props, mode="append")
 
     read_df = spark.read.jdbc(url=url, table="sparkless_jdbc_test", properties=props)
@@ -117,4 +119,3 @@ def test_write_then_read_back(spark) -> None:
     names = {r["name"] for r in rows}
     assert ids == {10, 20}
     assert names == {"ten", "twenty"}
-

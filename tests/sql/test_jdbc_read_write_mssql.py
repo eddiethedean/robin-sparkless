@@ -75,4 +75,3 @@ def test_write_then_read_back(spark) -> None:
     assert len(rows) == 2
     names = {r["name"] for r in rows}
     assert names == {"ten", "twenty"}
-

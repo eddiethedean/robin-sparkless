@@ -3,7 +3,7 @@
 
 import json
 from pathlib import Path
-from typing import Dict, Iterable, List, Tuple
+from typing import Any, Dict, Iterable, List, Tuple
 
 ROOT = Path(__file__).resolve().parent.parent
 REPORT = ROOT / "scripts" / "unskip_report.json"
@@ -13,14 +13,15 @@ TestId = str
 TestIdWithIssue = Tuple[TestId, IssueId]
 
 
-def _load_report() -> Dict[str, object]:
+def _load_report() -> Dict[str, Any]:
     with open(REPORT) as f:
         return json.load(f)
 
 
-def _iter_failed_tests(data: Dict[str, object]) -> Iterable[TestIdWithIssue]:
+def _iter_failed_tests(data: Dict[str, Any]) -> Iterable[TestIdWithIssue]:
     # Build (test_id, issue_num) for each failed test
-    for issue_num, failed_list in data["issues_some_failed"]:
+    issues_some_failed: List[Tuple[int, List[str]]] = data["issues_some_failed"]
+    for issue_num, failed_list in issues_some_failed:
         for test_id in failed_list:
             yield TestId(test_id), IssueId(issue_num)
 
@@ -57,10 +58,13 @@ def main() -> None:
     for file_path, items in edits.items():
         lines = file_path.read_text().splitlines()
         # Sort by line desc so we insert from bottom
-        for line_idx, issue_num, indent in sorted(items, key=lambda x: -x[0]):
+        sorted_items: List[Tuple[int, IssueId, str]] = sorted(
+            items, key=lambda x: -x[0]
+        )
+        for line_idx, issue_id, indent_str in sorted_items:
             decorator = (
-                indent
-                + f'@pytest.mark.skip(reason="Issue #{issue_num}: unskip when fixing")'
+                indent_str
+                + f'@pytest.mark.skip(reason="Issue #{issue_id}: unskip when fixing")'
             )
             lines.insert(line_idx, decorator)
         file_path.write_text("\n".join(lines) + "\n")

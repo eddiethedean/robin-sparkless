@@ -2326,8 +2326,8 @@ impl<'a> DataFrameWriter<'a> {
         properties: &[(String, String)],
         mode: SaveMode,
     ) -> Result<(), crate::error::EngineError> {
+        use crate::jdbc::{JdbcOptions, write_jdbc_from_polars};
         use std::collections::HashMap;
-        use crate::jdbc::{write_jdbc_from_polars, JdbcOptions};
 
         let mut props_map = HashMap::new();
         for (k, v) in properties {
@@ -2338,7 +2338,10 @@ impl<'a> DataFrameWriter<'a> {
             table.to_string(),
             &props_map,
         )?;
-        let pl_df = self.df.collect_inner().map_err(crate::polars_to_core_error)?;
+        let pl_df = self
+            .df
+            .collect_inner()
+            .map_err(crate::polars_to_core_error)?;
         write_jdbc_from_polars(pl_df.as_ref(), &opts, mode)
     }
 

@@ -130,8 +130,11 @@ impl DataFrameReader {
         table: &str,
         properties: &HashMap<String, String>,
     ) -> Result<DataFrame, crate::error::EngineError> {
-        let opts =
-            JdbcOptions::from_url_dbtable_and_properties(url.to_string(), table.to_string(), properties)?;
+        let opts = JdbcOptions::from_url_dbtable_and_properties(
+            url.to_string(),
+            table.to_string(),
+            properties,
+        )?;
         let pl_df = crate::jdbc::read_jdbc_to_polars(&opts)?;
         Ok(DataFrame::from_polars_with_options(
             pl_df,

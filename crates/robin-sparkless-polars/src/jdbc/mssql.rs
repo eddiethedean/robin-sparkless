@@ -39,9 +39,9 @@ fn parse_sqlserver_jdbc_url(url: &str) -> Result<(String, u16, Option<String>), 
 
     let (host_port, params) = rest.split_once(';').unwrap_or((rest, ""));
     let (host, port) = if let Some((h, p)) = host_port.rsplit_once(':') {
-        let port = p.parse::<u16>().map_err(|e| {
-            EngineError::User(format!("JDBC SQL Server: invalid port '{p}': {e}"))
-        })?;
+        let port = p
+            .parse::<u16>()
+            .map_err(|e| EngineError::User(format!("JDBC SQL Server: invalid port '{p}': {e}")))?;
         (h.to_string(), port)
     } else {
         (host_port.to_string(), 1433)
@@ -131,10 +131,11 @@ pub(crate) fn read_jdbc_mssql(opts: &JdbcOptions) -> Result<PlDataFrame, EngineE
 
         // Execute session initialization statement if provided
         if let Some(init_sql) = &opts.session_init_statement {
-            client
-                .execute(init_sql.as_str(), &[])
-                .await
-                .map_err(|e| EngineError::Sql(format!("JDBC read (SQL Server): sessionInitStatement failed: {e}")))?;
+            client.execute(init_sql.as_str(), &[]).await.map_err(|e| {
+                EngineError::Sql(format!(
+                    "JDBC read (SQL Server): sessionInitStatement failed: {e}"
+                ))
+            })?;
         }
 
         // Set query timeout if provided (SQL Server uses SET LOCK_TIMEOUT in milliseconds)
@@ -143,15 +144,18 @@ pub(crate) fn read_jdbc_mssql(opts: &JdbcOptions) -> Result<PlDataFrame, EngineE
             client
                 .execute(format!("SET LOCK_TIMEOUT {timeout_ms}").as_str(), &[])
                 .await
-                .map_err(|e| EngineError::Sql(format!("JDBC read (SQL Server): failed to set queryTimeout: {e}")))?;
+                .map_err(|e| {
+                    EngineError::Sql(format!(
+                        "JDBC read (SQL Server): failed to set queryTimeout: {e}"
+                    ))
+                })?;
         }
 
         // Execute prepare query if provided
         if let Some(prep_sql) = &opts.prepare_query {
-            client
-                .execute(prep_sql.as_str(), &[])
-                .await
-                .map_err(|e| EngineError::Sql(format!("JDBC read (SQL Server): prepareQuery failed: {e}")))?;
+            client.execute(prep_sql.as_str(), &[]).await.map_err(|e| {
+                EngineError::Sql(format!("JDBC read (SQL Server): prepareQuery failed: {e}"))
+            })?;
         }
 
         let mut stream = client
@@ -206,8 +210,9 @@ pub(crate) fn read_jdbc_mssql(opts: &JdbcOptions) -> Result<PlDataFrame, EngineE
             series_vec.push(cells_to_series(name, &columns_data[idx]));
         }
         let cols: Vec<polars::prelude::Column> = series_vec.into_iter().map(|s| s.into()).collect();
-        PlDataFrame::new_infer_height(cols)
-            .map_err(|e| EngineError::Internal(format!("JDBC read (SQL Server): build DataFrame: {e}")))
+        PlDataFrame::new_infer_height(cols).map_err(|e| {
+            EngineError::Internal(format!("JDBC read (SQL Server): build DataFrame: {e}"))
+        })
     })
 }
 
@@ -289,10 +294,11 @@ pub(crate) fn write_jdbc_mssql(
 
         // Execute session initialization statement if provided
         if let Some(init_sql) = &opts.session_init_statement {
-            client
-                .execute(init_sql.as_str(), &[])
-                .await
-                .map_err(|e| EngineError::Sql(format!("JDBC write (SQL Server): sessionInitStatement failed: {e}")))?;
+            client.execute(init_sql.as_str(), &[]).await.map_err(|e| {
+                EngineError::Sql(format!(
+                    "JDBC write (SQL Server): sessionInitStatement failed: {e}"
+                ))
+            })?;
         }
 
         match mode {
@@ -300,7 +306,9 @@ pub(crate) fn write_jdbc_mssql(
                 let mut stream = client
                     .query(format!("SELECT COUNT(*) FROM {table}"), &[])
                     .await
-                    .map_err(|e| EngineError::Sql(format!("JDBC write (SQL Server): check table: {e}")))?;
+                    .map_err(|e| {
+                        EngineError::Sql(format!("JDBC write (SQL Server): check table: {e}"))
+                    })?;
                 let mut count: i64 = 0;
                 while let Some(item) = stream.try_next().await.ok().flatten() {
                     if let QueryItem::Row(row) = item {
@@ -317,7 +325,9 @@ pub(crate) fn write_jdbc_mssql(
                 let mut stream = client
                     .query(format!("SELECT COUNT(*) FROM {table}"), &[])
                     .await
-                    .map_err(|e| EngineError::Sql(format!("JDBC write (SQL Server): check table: {e}")))?;
+                    .map_err(|e| {
+                        EngineError::Sql(format!("JDBC write (SQL Server): check table: {e}"))
+                    })?;
                 let mut count: i64 = 0;
                 while let Some(item) = stream.try_next().await.ok().flatten() {
                     if let QueryItem::Row(row) = item {
@@ -348,10 +358,14 @@ pub(crate) fn write_jdbc_mssql(
 
         for batch_start in (0..total_rows).step_by(batch_size) {
             let batch_end = (batch_start + batch_size).min(total_rows);
-            
+
             // Start a transaction for this batch
-            client.execute("BEGIN TRANSACTION", &[]).await
-                .map_err(|e| EngineError::Sql(format!("JDBC write (SQL Server): begin transaction: {e}")))?;
+            client
+                .execute("BEGIN TRANSACTION", &[])
+                .await
+                .map_err(|e| {
+                    EngineError::Sql(format!("JDBC write (SQL Server): begin transaction: {e}"))
+                })?;
 
             for row_idx in batch_start..batch_end {
                 let mut q = Query::new(insert_sql.as_str());
@@ -367,7 +381,9 @@ pub(crate) fn write_jdbc_mssql(
                         polars::prelude::AnyValue::Float64(f) => q.bind(f),
                         polars::prelude::AnyValue::Float32(f) => q.bind(f as f64),
                         polars::prelude::AnyValue::String(s) => q.bind(s.to_string()),
-                        polars::prelude::AnyValue::StringOwned(ref s) => q.bind(s.as_str().to_string()),
+                        polars::prelude::AnyValue::StringOwned(ref s) => {
+                            q.bind(s.as_str().to_string())
+                        }
                         other => q.bind(other.to_string()),
                     };
                 }
@@ -375,10 +391,11 @@ pub(crate) fn write_jdbc_mssql(
                     EngineError::Sql(format!("JDBC write (SQL Server): insert failed: {e}"))
                 })?;
             }
-            
+
             // Commit this batch
-            client.execute("COMMIT", &[]).await
-                .map_err(|e| EngineError::Sql(format!("JDBC write (SQL Server): commit batch: {e}")))?;
+            client.execute("COMMIT", &[]).await.map_err(|e| {
+                EngineError::Sql(format!("JDBC write (SQL Server): commit batch: {e}"))
+            })?;
         }
         Ok(())
     })
@@ -397,7 +414,8 @@ mod tests {
             Err(_) => return,
         };
         let user = std::env::var("ROBIN_SPARKLESS_TEST_JDBC_MSSQL_USER").unwrap_or_default();
-        let password = std::env::var("ROBIN_SPARKLESS_TEST_JDBC_MSSQL_PASSWORD").unwrap_or_default();
+        let password =
+            std::env::var("ROBIN_SPARKLESS_TEST_JDBC_MSSQL_PASSWORD").unwrap_or_default();
 
         let mut opts = JdbcOptions {
             url,
@@ -450,11 +468,14 @@ mod tests {
         .unwrap();
         let mut write_opts = opts.clone();
         write_opts.dbtable = Some("sparkless_jdbc_writeread_test".to_string());
-        crate::jdbc::write_jdbc_from_polars(&write_df, &write_opts, crate::dataframe::SaveMode::Overwrite)
-            .unwrap();
+        crate::jdbc::write_jdbc_from_polars(
+            &write_df,
+            &write_opts,
+            crate::dataframe::SaveMode::Overwrite,
+        )
+        .unwrap();
 
         let read_df = crate::jdbc::read_jdbc_to_polars(&write_opts).unwrap();
         assert_eq!(read_df.height(), 2);
     }
 }
-

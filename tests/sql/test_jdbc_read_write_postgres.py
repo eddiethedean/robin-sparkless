@@ -88,7 +88,9 @@ def test_write_jdbc_append(spark) -> None:
     url = _jdbc_url()
     props = _jdbc_props()
 
-    df = spark.createDataFrame([(100, "append_a"), (101, "append_b")], schema="id bigint, name string")
+    df = spark.createDataFrame(
+        [(100, "append_a"), (101, "append_b")], schema="id bigint, name string"
+    )
     df.write.jdbc(url=url, table="sparkless_jdbc_test", properties=props, mode="append")
 
     read_df = spark.read.jdbc(url=url, table="sparkless_jdbc_test", properties=props)
@@ -102,6 +104,7 @@ def _norm_id(val) -> int | None:
     if isinstance(val, str) and val.isdigit():
         return int(val)
     return int(val)
+
 
 def test_write_then_read_back(spark) -> None:
     """Write to a dedicated table with overwrite, then read back and assert content."""
@@ -131,10 +134,12 @@ def test_write_jdbc_overwrite_replaces_content(spark) -> None:
     # First write
     df1 = spark.createDataFrame([(1, "first")], schema="id bigint, name string")
     df1.write.jdbc(url=url, table=table, properties=props, mode="overwrite")
-    count_after_first = spark.read.jdbc(url=url, table=table, properties=props).count()
+    _ = spark.read.jdbc(url=url, table=table, properties=props).count()
 
     # Overwrite with different data
-    df2 = spark.createDataFrame([(2, "second"), (3, "third")], schema="id bigint, name string")
+    df2 = spark.createDataFrame(
+        [(2, "second"), (3, "third")], schema="id bigint, name string"
+    )
     df2.write.jdbc(url=url, table=table, properties=props, mode="overwrite")
     rows = spark.read.jdbc(url=url, table=table, properties=props).collect()
     assert len(rows) == 2
@@ -156,4 +161,3 @@ def test_jdbc_empty_properties_allowed(spark) -> None:
     df = spark.read.jdbc(url=url, table="sparkless_jdbc_test", properties={})
     rows = df.collect()
     assert isinstance(rows, list)
-

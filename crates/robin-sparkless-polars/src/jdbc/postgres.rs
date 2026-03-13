@@ -29,9 +29,9 @@ pub(crate) fn write_jdbc_postgres(
 
     // Execute session initialization statement if provided
     if let Some(init_sql) = &opts.session_init_statement {
-        client
-            .batch_execute(init_sql)
-            .map_err(|e| EngineError::Sql(format!("JDBC write: sessionInitStatement failed: {e}")))?;
+        client.batch_execute(init_sql).map_err(|e| {
+            EngineError::Sql(format!("JDBC write: sessionInitStatement failed: {e}"))
+        })?;
     }
 
     match mode {
@@ -88,15 +88,15 @@ pub(crate) fn write_jdbc_postgres(
 
     let batch_size = opts.batch_size.unwrap_or(1000) as usize;
     let total_rows = df.height();
-    
+
     for batch_start in (0..total_rows).step_by(batch_size) {
         let batch_end = (batch_start + batch_size).min(total_rows);
-        
+
         // Start a transaction for this batch
         client
             .batch_execute("BEGIN")
             .map_err(|e| EngineError::Sql(format!("JDBC write: begin transaction: {e}")))?;
-        
+
         for row_idx in batch_start..batch_end {
             let mut params: Vec<Box<dyn postgres::types::ToSql + Sync>> =
                 Vec::with_capacity(col_names.len());
@@ -128,7 +128,7 @@ pub(crate) fn write_jdbc_postgres(
                 .execute(&insert_sql, &param_refs)
                 .map_err(|e| EngineError::Sql(format!("JDBC write: insert failed: {e}")))?;
         }
-        
+
         // Commit this batch
         client
             .batch_execute("COMMIT")
@@ -158,9 +158,9 @@ pub(crate) fn read_jdbc_postgres(opts: &JdbcOptions) -> Result<PlDataFrame, Engi
 
     // Execute session initialization statement if provided
     if let Some(init_sql) = &opts.session_init_statement {
-        client
-            .batch_execute(init_sql)
-            .map_err(|e| EngineError::Sql(format!("JDBC read: sessionInitStatement failed: {e}")))?;
+        client.batch_execute(init_sql).map_err(|e| {
+            EngineError::Sql(format!("JDBC read: sessionInitStatement failed: {e}"))
+        })?;
     }
 
     // Set query timeout if provided (PostgreSQL uses milliseconds)
@@ -174,9 +174,7 @@ pub(crate) fn read_jdbc_postgres(opts: &JdbcOptions) -> Result<PlDataFrame, Engi
     if let Some(fetch) = opts.fetch_size {
         client
             .simple_query(&format!("SET SESSION FETCH_COUNT = {fetch}"))
-            .map_err(|e| {
-                EngineError::Other(format!("JDBC read: failed to set fetchsize: {e}"))
-            })?;
+            .map_err(|e| EngineError::Other(format!("JDBC read: failed to set fetchsize: {e}")))?;
     }
 
     // Execute prepare query if provided (for CTEs, temp tables, etc.)
@@ -279,9 +277,9 @@ fn build_series_for_column(
         PgType::TEXT | PgType::VARCHAR | PgType::BPCHAR | PgType::NAME => {
             let mut vals: Vec<Option<String>> = Vec::with_capacity(rows.len());
             for row in rows {
-                let v: Option<String> = row.try_get(index).map_err(|e| {
-                    Other(format!("JDBC read: text-like column '{name}': {e}"))
-                })?;
+                let v: Option<String> = row
+                    .try_get(index)
+                    .map_err(|e| Other(format!("JDBC read: text-like column '{name}': {e}")))?;
                 vals.push(v);
             }
             Ok(Series::new(name.into(), vals))
@@ -289,9 +287,9 @@ fn build_series_for_column(
         PgType::TIMESTAMP | PgType::TIMESTAMPTZ => {
             let mut vals: Vec<Option<chrono::NaiveDateTime>> = Vec::with_capacity(rows.len());
             for row in rows {
-                let s: Option<String> = row.try_get(index).map_err(|e| {
-                    Other(format!("JDBC read: timestamp column '{name}': {e}"))
-                })?;
+                let s: Option<String> = row
+                    .try_get(index)
+                    .map_err(|e| Other(format!("JDBC read: timestamp column '{name}': {e}")))?;
                 let v = s.and_then(|s| {
                     chrono::NaiveDateTime::parse_from_str(&s, "%Y-%m-%d %H:%M:%S%.f")
                         .ok()
@@ -319,9 +317,9 @@ fn build_series_for_column(
         PgType::NUMERIC => {
             let mut vals: Vec<Option<f64>> = Vec::with_capacity(rows.len());
             for row in rows {
-                let s: Option<String> = row.try_get(index).map_err(|e| {
-                    Other(format!("JDBC read: numeric column '{name}': {e}"))
-                })?;
+                let s: Option<String> = row
+                    .try_get(index)
+                    .map_err(|e| Other(format!("JDBC read: numeric column '{name}': {e}")))?;
                 let f = s.and_then(|s| s.parse::<f64>().ok());
                 vals.push(f);
             }
@@ -336,7 +334,7 @@ fn build_series_for_column(
                     Err(e) => {
                         return Err(Other(format!(
                             "JDBC read: unsupported column '{name}' type {ty:?}: {e}"
-                        )))
+                        )));
                     }
                 }
             }
@@ -344,4 +342,3 @@ fn build_series_for_column(
         }
     }
 }
-

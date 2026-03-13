@@ -17,4 +17,3 @@ pub(crate) fn write_jdbc_mariadb(
 pub(crate) fn read_jdbc_mariadb(opts: &JdbcOptions) -> Result<PlDataFrame, EngineError> {
     super::mysql::read_jdbc_mysql(opts)
 }
-

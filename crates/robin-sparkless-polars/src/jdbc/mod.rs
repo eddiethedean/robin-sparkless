@@ -25,16 +25,16 @@ mod postgres;
 #[cfg(feature = "sqlite")]
 mod sqlite;
 
-#[cfg(any(feature = "jdbc_mysql", feature = "jdbc_mariadb"))]
-mod mysql;
+#[cfg(feature = "jdbc_db2")]
+mod db2;
 #[cfg(feature = "jdbc_mariadb")]
 mod mariadb;
 #[cfg(feature = "jdbc_mssql")]
 mod mssql;
+#[cfg(any(feature = "jdbc_mysql", feature = "jdbc_mariadb"))]
+mod mysql;
 #[cfg(feature = "jdbc_oracle")]
 mod oracle;
-#[cfg(feature = "jdbc_db2")]
-mod db2;
 
 /// JDBC-style options modeled after PySpark's JDBC DataSource V1 options.
 #[derive(Debug, Clone)]
@@ -77,7 +77,6 @@ pub struct JdbcOptions {
     pub batch_size: Option<i32>,
 
     // --- New PySpark JDBC options ---
-
     /// SQL to execute after opening connection (PySpark: `sessionInitStatement`).
     pub session_init_statement: Option<String>,
 
@@ -133,14 +132,12 @@ impl JdbcOptions {
             key: &str,
         ) -> Result<Option<i64>, EngineError> {
             if let Some(v) = options.get(key) {
-                v.parse::<i64>()
-                    .map(Some)
-                    .map_err(|e| {
-                        EngineError::User(format!(
-                            "JDBC options: could not parse '{key}'='{}' as i64: {e}",
-                            v
-                        ))
-                    })
+                v.parse::<i64>().map(Some).map_err(|e| {
+                    EngineError::User(format!(
+                        "JDBC options: could not parse '{key}'='{}' as i64: {e}",
+                        v
+                    ))
+                })
             } else {
                 Ok(None)
             }
@@ -151,14 +148,12 @@ impl JdbcOptions {
             key: &str,
         ) -> Result<Option<i32>, EngineError> {
             if let Some(v) = options.get(key) {
-                v.parse::<i32>()
-                    .map(Some)
-                    .map_err(|e| {
-                        EngineError::User(format!(
-                            "JDBC options: could not parse '{key}'='{}' as i32: {e}",
-                            v
-                        ))
-                    })
+                v.parse::<i32>().map(Some).map_err(|e| {
+                    EngineError::User(format!(
+                        "JDBC options: could not parse '{key}'='{}' as i32: {e}",
+                        v
+                    ))
+                })
             } else {
                 Ok(None)
             }
@@ -616,7 +611,10 @@ mod tests {
             "SET timezone='UTC'".to_string(),
         );
         m.insert("queryTimeout".to_string(), "30".to_string());
-        m.insert("prepareQuery".to_string(), "WITH cte AS (SELECT 1)".to_string());
+        m.insert(
+            "prepareQuery".to_string(),
+            "WITH cte AS (SELECT 1)".to_string(),
+        );
         m.insert(
             "customSchema".to_string(),
             "id DECIMAL(38,0), name STRING".to_string(),
@@ -624,7 +622,10 @@ mod tests {
         m.insert("truncate".to_string(), "true".to_string());
         m.insert("cascadeTruncate".to_string(), "false".to_string());
         m.insert("isolationLevel".to_string(), "READ_COMMITTED".to_string());
-        m.insert("createTableOptions".to_string(), "ENGINE=InnoDB".to_string());
+        m.insert(
+            "createTableOptions".to_string(),
+            "ENGINE=InnoDB".to_string(),
+        );
         m.insert(
             "createTableColumnTypes".to_string(),
             "name CHAR(64)".to_string(),
@@ -689,24 +690,29 @@ mod tests {
     fn routing_detects_jdbc_schemes() {
         assert!(is_mysql_url("jdbc:mysql://localhost:3306/db"));
         assert!(is_mariadb_url("jdbc:mariadb://localhost:3306/db"));
-        assert!(is_mssql_url("jdbc:sqlserver://localhost:1433;databaseName=db"));
+        assert!(is_mssql_url(
+            "jdbc:sqlserver://localhost:1433;databaseName=db"
+        ));
         assert!(is_oracle_url("jdbc:oracle:thin:@//localhost:1521/XEPDB1"));
         assert!(is_db2_url("jdbc:db2://localhost:50000/db"));
     }
 
     #[test]
+    #[cfg(not(all(
+        feature = "jdbc_mysql",
+        feature = "jdbc_mariadb",
+        feature = "jdbc_mssql",
+        feature = "jdbc_oracle",
+        feature = "jdbc_db2"
+    )))]
     fn routing_errors_for_missing_backend_features() {
         // These should fail with a clear message when the specific backend feature
         // is not enabled (we run this test suite with only jdbc/sqlite enabled).
-        for (url, expected_feature) in [
-            ("jdbc:mysql://localhost/db", "jdbc_mysql"),
-            ("jdbc:mariadb://localhost/db", "jdbc_mariadb"),
-            ("jdbc:sqlserver://localhost;databaseName=db", "jdbc_mssql"),
-            ("jdbc:oracle:thin:@//localhost:1521/XEPDB1", "jdbc_oracle"),
-            ("jdbc:db2://localhost:50000/db", "jdbc_db2"),
-        ] {
+        // This test is skipped when all backend features are enabled.
+        #[cfg(not(feature = "jdbc_mysql"))]
+        {
             let opts = JdbcOptions {
-                url: url.to_string(),
+                url: "jdbc:mysql://localhost/db".to_string(),
                 dbtable: Some("t".to_string()),
                 query: None,
                 user: None,
@@ -731,8 +737,136 @@ mod tests {
             };
             let err = read_jdbc_to_polars(&opts).unwrap_err().to_string();
             assert!(
-                err.contains(expected_feature),
-                "expected error to mention {expected_feature}, got: {err}"
+                err.contains("jdbc_mysql"),
+                "expected error to mention jdbc_mysql, got: {err}"
+            );
+        }
+        #[cfg(not(feature = "jdbc_mariadb"))]
+        {
+            let opts = JdbcOptions {
+                url: "jdbc:mariadb://localhost/db".to_string(),
+                dbtable: Some("t".to_string()),
+                query: None,
+                user: None,
+                password: None,
+                driver: None,
+                partition_column: None,
+                lower_bound: None,
+                upper_bound: None,
+                num_partitions: None,
+                fetch_size: None,
+                batch_size: None,
+                session_init_statement: None,
+                query_timeout: None,
+                prepare_query: None,
+                custom_schema: None,
+                truncate: None,
+                cascade_truncate: None,
+                isolation_level: None,
+                create_table_options: None,
+                create_table_column_types: None,
+                raw_options: HashMap::new(),
+            };
+            let err = read_jdbc_to_polars(&opts).unwrap_err().to_string();
+            assert!(
+                err.contains("jdbc_mariadb"),
+                "expected error to mention jdbc_mariadb, got: {err}"
+            );
+        }
+        #[cfg(not(feature = "jdbc_mssql"))]
+        {
+            let opts = JdbcOptions {
+                url: "jdbc:sqlserver://localhost;databaseName=db".to_string(),
+                dbtable: Some("t".to_string()),
+                query: None,
+                user: None,
+                password: None,
+                driver: None,
+                partition_column: None,
+                lower_bound: None,
+                upper_bound: None,
+                num_partitions: None,
+                fetch_size: None,
+                batch_size: None,
+                session_init_statement: None,
+                query_timeout: None,
+                prepare_query: None,
+                custom_schema: None,
+                truncate: None,
+                cascade_truncate: None,
+                isolation_level: None,
+                create_table_options: None,
+                create_table_column_types: None,
+                raw_options: HashMap::new(),
+            };
+            let err = read_jdbc_to_polars(&opts).unwrap_err().to_string();
+            assert!(
+                err.contains("jdbc_mssql"),
+                "expected error to mention jdbc_mssql, got: {err}"
+            );
+        }
+        #[cfg(not(feature = "jdbc_oracle"))]
+        {
+            let opts = JdbcOptions {
+                url: "jdbc:oracle:thin:@//localhost:1521/XEPDB1".to_string(),
+                dbtable: Some("t".to_string()),
+                query: None,
+                user: None,
+                password: None,
+                driver: None,
+                partition_column: None,
+                lower_bound: None,
+                upper_bound: None,
+                num_partitions: None,
+                fetch_size: None,
+                batch_size: None,
+                session_init_statement: None,
+                query_timeout: None,
+                prepare_query: None,
+                custom_schema: None,
+                truncate: None,
+                cascade_truncate: None,
+                isolation_level: None,
+                create_table_options: None,
+                create_table_column_types: None,
+                raw_options: HashMap::new(),
+            };
+            let err = read_jdbc_to_polars(&opts).unwrap_err().to_string();
+            assert!(
+                err.contains("jdbc_oracle"),
+                "expected error to mention jdbc_oracle, got: {err}"
+            );
+        }
+        #[cfg(not(feature = "jdbc_db2"))]
+        {
+            let opts = JdbcOptions {
+                url: "jdbc:db2://localhost:50000/db".to_string(),
+                dbtable: Some("t".to_string()),
+                query: None,
+                user: None,
+                password: None,
+                driver: None,
+                partition_column: None,
+                lower_bound: None,
+                upper_bound: None,
+                num_partitions: None,
+                fetch_size: None,
+                batch_size: None,
+                session_init_statement: None,
+                query_timeout: None,
+                prepare_query: None,
+                custom_schema: None,
+                truncate: None,
+                cascade_truncate: None,
+                isolation_level: None,
+                create_table_options: None,
+                create_table_column_types: None,
+                raw_options: HashMap::new(),
+            };
+            let err = read_jdbc_to_polars(&opts).unwrap_err().to_string();
+            assert!(
+                err.contains("jdbc_db2"),
+                "expected error to mention jdbc_db2, got: {err}"
             );
         }
     }
@@ -748,7 +882,7 @@ mod tests {
         let db_path = tmp.path();
         let url = format!("jdbc:sqlite:{}", db_path.display());
 
-        let conn = rusqlite::Connection::open(&db_path).unwrap();
+        let conn = rusqlite::Connection::open(db_path).unwrap();
         conn.execute("CREATE TABLE t (id INTEGER, name TEXT)", [])
             .unwrap();
         drop(conn);
@@ -803,7 +937,7 @@ mod tests {
         let db_path = tmp.path();
         let url = format!("jdbc:sqlite:{}", db_path.display());
 
-        let conn = rusqlite::Connection::open(&db_path).unwrap();
+        let conn = rusqlite::Connection::open(db_path).unwrap();
         conn.execute("CREATE TABLE t (id INTEGER, name TEXT)", [])
             .unwrap();
         drop(conn);
@@ -872,7 +1006,7 @@ mod tests {
         let db_path = tmp.path();
         let url = format!("jdbc:sqlite:{}", db_path.display());
 
-        let conn = rusqlite::Connection::open(&db_path).unwrap();
+        let conn = rusqlite::Connection::open(db_path).unwrap();
         conn.execute("CREATE TABLE t (id INTEGER, name TEXT)", [])
             .unwrap();
         conn.execute(
@@ -923,7 +1057,7 @@ mod tests {
         let db_path = tmp.path();
         let url = format!("jdbc:sqlite:{}", db_path.display());
 
-        let conn = rusqlite::Connection::open(&db_path).unwrap();
+        let conn = rusqlite::Connection::open(db_path).unwrap();
         conn.execute("CREATE TABLE empty_t (a INTEGER, b TEXT)", [])
             .unwrap();
         drop(conn);
@@ -971,14 +1105,14 @@ mod tests {
         let db_path = tmp.path();
         let url = format!("jdbc:sqlite:{}", db_path.display());
 
-        let conn = rusqlite::Connection::open(&db_path).unwrap();
+        let conn = rusqlite::Connection::open(db_path).unwrap();
         conn.execute(
             "CREATE TABLE types_t (id INTEGER, score REAL, label TEXT)",
             [],
         )
         .unwrap();
         conn.execute(
-            "INSERT INTO types_t (id, score, label) VALUES (1, 3.14, 'pi'), (2, NULL, 'no_score'), (3, 0.5, NULL)",
+            "INSERT INTO types_t (id, score, label) VALUES (1, 3.125, 'test'), (2, NULL, 'no_score'), (3, 0.5, NULL)",
             [],
         )
         .unwrap();
@@ -1021,15 +1155,11 @@ mod tests {
         assert_eq!(id_col.get(1).unwrap().try_extract::<i64>().unwrap(), 2);
         assert_eq!(id_col.get(2).unwrap().try_extract::<i64>().unwrap(), 3);
         let score_col = read_df.column("score").unwrap();
-        assert!(
-            (score_col.get(0).unwrap().try_extract::<f64>().unwrap() - 3.14).abs() < 1e-6
-        );
+        assert!((score_col.get(0).unwrap().try_extract::<f64>().unwrap() - 3.125).abs() < 1e-6);
         assert!(score_col.get(1).unwrap().is_null());
-        assert!(
-            (score_col.get(2).unwrap().try_extract::<f64>().unwrap() - 0.5).abs() < 1e-6
-        );
+        assert!((score_col.get(2).unwrap().try_extract::<f64>().unwrap() - 0.5).abs() < 1e-6);
         let label_col = read_df.column("label").unwrap();
-        assert_eq!(label_col.get(0).unwrap().to_string(), "\"pi\"");
+        assert_eq!(label_col.get(0).unwrap().to_string(), "\"test\"");
         assert_eq!(label_col.get(1).unwrap().to_string(), "\"no_score\"");
         assert!(label_col.get(2).unwrap().is_null());
     }
@@ -1044,7 +1174,7 @@ mod tests {
         let db_path = tmp.path();
         let url = format!("jdbc:sqlite:{}", db_path.display());
 
-        let conn = rusqlite::Connection::open(&db_path).unwrap();
+        let conn = rusqlite::Connection::open(db_path).unwrap();
         conn.execute("CREATE TABLE t (id INTEGER)", []).unwrap();
         conn.execute("INSERT INTO t (id) VALUES (1)", []).unwrap();
         drop(conn);
@@ -1074,16 +1204,24 @@ mod tests {
             raw_options: HashMap::new(),
         };
 
-        let empty_df = PlDataFrame::new_infer_height(vec![Series::new("id".into(), Vec::<i64>::new()).into()]).unwrap();
+        let empty_df =
+            PlDataFrame::new_infer_height(vec![Series::new("id".into(), Vec::<i64>::new()).into()])
+                .unwrap();
         super::write_jdbc_from_polars(&empty_df, &opts, SaveMode::Append).unwrap();
 
         let read_df = super::read_jdbc_to_polars(&opts).unwrap();
-        assert_eq!(read_df.height(), 1, "empty write should not remove existing row");
+        assert_eq!(
+            read_df.height(),
+            1,
+            "empty write should not remove existing row"
+        );
     }
 
-    #[cfg(feature = "sqlite")]
+    #[cfg(all(feature = "sqlite", not(feature = "jdbc_mysql")))]
     #[test]
     fn sqlite_unsupported_url_returns_clear_error() {
+        // This test checks that a MySQL URL returns an unsupported error
+        // when the jdbc_mysql feature is not enabled.
         let opts = JdbcOptions {
             url: "jdbc:mysql://localhost/db".to_string(),
             dbtable: Some("t".to_string()),
@@ -1128,7 +1266,7 @@ mod tests {
         let db_path = tmp.path();
         let url = format!("jdbc:sqlite:{}", db_path.display());
 
-        let conn = rusqlite::Connection::open(&db_path).unwrap();
+        let conn = rusqlite::Connection::open(db_path).unwrap();
         conn.execute("CREATE TABLE t (id INTEGER, name TEXT)", [])
             .unwrap();
         drop(conn);
@@ -1166,7 +1304,10 @@ mod tests {
 
         // ErrorIfExists should succeed on empty table
         let result = super::write_jdbc_from_polars(&df, &opts, SaveMode::ErrorIfExists);
-        assert!(result.is_ok(), "ErrorIfExists should succeed on empty table");
+        assert!(
+            result.is_ok(),
+            "ErrorIfExists should succeed on empty table"
+        );
 
         let read_df = super::read_jdbc_to_polars(&opts).unwrap();
         assert_eq!(read_df.height(), 1);
@@ -1182,7 +1323,7 @@ mod tests {
         let db_path = tmp.path();
         let url = format!("jdbc:sqlite:{}", db_path.display());
 
-        let conn = rusqlite::Connection::open(&db_path).unwrap();
+        let conn = rusqlite::Connection::open(db_path).unwrap();
         conn.execute("CREATE TABLE t (id INTEGER, name TEXT)", [])
             .unwrap();
         conn.execute("INSERT INTO t (id, name) VALUES (1, 'existing')", [])
@@ -1222,7 +1363,10 @@ mod tests {
 
         // ErrorIfExists should fail when table has data
         let result = super::write_jdbc_from_polars(&df, &opts, SaveMode::ErrorIfExists);
-        assert!(result.is_err(), "ErrorIfExists should fail when table has data");
+        assert!(
+            result.is_err(),
+            "ErrorIfExists should fail when table has data"
+        );
         let err = result.unwrap_err().to_string();
         assert!(
             err.contains("ErrorIfExists") || err.contains("already has data"),
@@ -1240,7 +1384,7 @@ mod tests {
         let db_path = tmp.path();
         let url = format!("jdbc:sqlite:{}", db_path.display());
 
-        let conn = rusqlite::Connection::open(&db_path).unwrap();
+        let conn = rusqlite::Connection::open(db_path).unwrap();
         conn.execute("CREATE TABLE t (id INTEGER, name TEXT)", [])
             .unwrap();
         conn.execute("INSERT INTO t (id, name) VALUES (1, 'existing')", [])
@@ -1284,7 +1428,7 @@ mod tests {
 
         let read_df = super::read_jdbc_to_polars(&opts).unwrap();
         assert_eq!(read_df.height(), 1, "Ignore mode should not add new rows");
-        
+
         let id_val: i64 = read_df
             .column("id")
             .unwrap()
@@ -1305,7 +1449,7 @@ mod tests {
         let db_path = tmp.path();
         let url = format!("jdbc:sqlite:{}", db_path.display());
 
-        let conn = rusqlite::Connection::open(&db_path).unwrap();
+        let conn = rusqlite::Connection::open(db_path).unwrap();
         conn.execute("CREATE TABLE t (id INTEGER, name TEXT)", [])
             .unwrap();
         drop(conn);
@@ -1346,7 +1490,11 @@ mod tests {
         assert!(result.is_ok(), "Ignore mode should succeed on empty table");
 
         let read_df = super::read_jdbc_to_polars(&opts).unwrap();
-        assert_eq!(read_df.height(), 1, "Ignore mode should insert into empty table");
+        assert_eq!(
+            read_df.height(),
+            1,
+            "Ignore mode should insert into empty table"
+        );
     }
 
     #[cfg(feature = "sqlite")]
@@ -1356,9 +1504,10 @@ mod tests {
         let db_path = tmp.path();
         let url = format!("jdbc:sqlite:{}", db_path.display());
 
-        let conn = rusqlite::Connection::open(&db_path).unwrap();
+        let conn = rusqlite::Connection::open(db_path).unwrap();
         conn.execute("CREATE TABLE t (id INTEGER)", []).unwrap();
-        conn.execute("INSERT INTO t (id) VALUES (1), (2)", []).unwrap();
+        conn.execute("INSERT INTO t (id) VALUES (1), (2)", [])
+            .unwrap();
         drop(conn);
 
         let opts = JdbcOptions {
@@ -1388,7 +1537,10 @@ mod tests {
 
         // Should succeed with session init statement
         let result = super::read_jdbc_to_polars(&opts);
-        assert!(result.is_ok(), "Read with sessionInitStatement should succeed");
+        assert!(
+            result.is_ok(),
+            "Read with sessionInitStatement should succeed"
+        );
         assert_eq!(result.unwrap().height(), 2);
     }
 
@@ -1399,9 +1551,14 @@ mod tests {
         let db_path = tmp.path();
         let url = format!("jdbc:sqlite:{}", db_path.display());
 
-        let conn = rusqlite::Connection::open(&db_path).unwrap();
-        conn.execute("CREATE TABLE source (id INTEGER, val TEXT)", []).unwrap();
-        conn.execute("INSERT INTO source (id, val) VALUES (1, 'a'), (2, 'b'), (3, 'c')", []).unwrap();
+        let conn = rusqlite::Connection::open(db_path).unwrap();
+        conn.execute("CREATE TABLE source (id INTEGER, val TEXT)", [])
+            .unwrap();
+        conn.execute(
+            "INSERT INTO source (id, val) VALUES (1, 'a'), (2, 'b'), (3, 'c')",
+            [],
+        )
+        .unwrap();
         drop(conn);
 
         let opts = JdbcOptions {
@@ -1419,7 +1576,9 @@ mod tests {
             batch_size: None,
             session_init_statement: None,
             query_timeout: None,
-            prepare_query: Some("CREATE TEMPORARY VIEW temp_view AS SELECT * FROM source".to_string()),
+            prepare_query: Some(
+                "CREATE TEMPORARY VIEW temp_view AS SELECT * FROM source".to_string(),
+            ),
             custom_schema: None,
             truncate: None,
             cascade_truncate: None,
@@ -1430,7 +1589,11 @@ mod tests {
         };
 
         let result = super::read_jdbc_to_polars(&opts);
-        assert!(result.is_ok(), "Read with prepareQuery should succeed: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "Read with prepareQuery should succeed: {:?}",
+            result.err()
+        );
         let df = result.unwrap();
         assert_eq!(df.height(), 2, "Should return rows where id > 1");
     }
@@ -1445,8 +1608,9 @@ mod tests {
         let db_path = tmp.path();
         let url = format!("jdbc:sqlite:{}", db_path.display());
 
-        let conn = rusqlite::Connection::open(&db_path).unwrap();
-        conn.execute("CREATE TABLE t (id INTEGER, name TEXT)", []).unwrap();
+        let conn = rusqlite::Connection::open(db_path).unwrap();
+        conn.execute("CREATE TABLE t (id INTEGER, name TEXT)", [])
+            .unwrap();
         drop(conn);
 
         // Create a DataFrame with 2500 rows to test batch boundaries
@@ -1484,7 +1648,11 @@ mod tests {
         };
 
         let result = super::write_jdbc_from_polars(&df, &opts, SaveMode::Append);
-        assert!(result.is_ok(), "Write with batchsize should succeed: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "Write with batchsize should succeed: {:?}",
+            result.err()
+        );
 
         let read_df = super::read_jdbc_to_polars(&opts).unwrap();
         assert_eq!(read_df.height(), 2500, "All 2500 rows should be written");
@@ -1500,15 +1668,15 @@ mod tests {
         let db_path = tmp.path();
         let url = format!("jdbc:sqlite:{}", db_path.display());
 
-        let conn = rusqlite::Connection::open(&db_path).unwrap();
+        let conn = rusqlite::Connection::open(db_path).unwrap();
         conn.execute("CREATE TABLE t (id INTEGER)", []).unwrap();
-        conn.execute("INSERT INTO t (id) VALUES (1), (2)", []).unwrap();
+        conn.execute("INSERT INTO t (id) VALUES (1), (2)", [])
+            .unwrap();
         drop(conn);
 
-        let df = PlDataFrame::new_infer_height(vec![
-            Series::new("id".into(), vec![3i64, 4i64]).into(),
-        ])
-        .unwrap();
+        let df =
+            PlDataFrame::new_infer_height(vec![Series::new("id".into(), vec![3i64, 4i64]).into()])
+                .unwrap();
 
         let opts = JdbcOptions {
             url: url.clone(),
@@ -1551,8 +1719,9 @@ mod tests {
         let db_path = tmp.path();
         let url = format!("jdbc:sqlite:{}", db_path.display());
 
-        let conn = rusqlite::Connection::open(&db_path).unwrap();
-        conn.execute("CREATE TABLE t (id INTEGER, flag INTEGER)", []).unwrap();
+        let conn = rusqlite::Connection::open(db_path).unwrap();
+        conn.execute("CREATE TABLE t (id INTEGER, flag INTEGER)", [])
+            .unwrap();
         drop(conn);
 
         let df = PlDataFrame::new_infer_height(vec![
@@ -1590,7 +1759,7 @@ mod tests {
 
         let read_df = super::read_jdbc_to_polars(&opts).unwrap();
         assert_eq!(read_df.height(), 2);
-        
+
         let flag_col = read_df.column("flag").unwrap();
         let val1: i64 = flag_col.get(0).unwrap().try_extract().unwrap();
         let val2: i64 = flag_col.get(1).unwrap().try_extract().unwrap();
@@ -1608,12 +1777,12 @@ mod tests {
         let db_path = tmp.path();
         let url = format!("jdbc:sqlite:{}", db_path.display());
 
-        let conn = rusqlite::Connection::open(&db_path).unwrap();
+        let conn = rusqlite::Connection::open(db_path).unwrap();
         conn.execute("CREATE TABLE t (val REAL)", []).unwrap();
         drop(conn);
 
         let df = PlDataFrame::new_infer_height(vec![
-            Series::new("val".into(), vec![3.14159265359f64, -273.15f64, 1e-10f64]).into(),
+            Series::new("val".into(), vec![1.23456789012f64, -273.15f64, 1e-10f64]).into(),
         ])
         .unwrap();
 
@@ -1646,14 +1815,23 @@ mod tests {
 
         let read_df = super::read_jdbc_to_polars(&opts).unwrap();
         let val_col = read_df.column("val").unwrap();
-        
+
         let v1: f64 = val_col.get(0).unwrap().try_extract().unwrap();
         let v2: f64 = val_col.get(1).unwrap().try_extract().unwrap();
         let v3: f64 = val_col.get(2).unwrap().try_extract().unwrap();
-        
-        assert!((v1 - 3.14159265359).abs() < 1e-10, "Pi should be preserved: {v1}");
-        assert!((v2 - (-273.15)).abs() < 1e-10, "Negative float should be preserved: {v2}");
-        assert!((v3 - 1e-10).abs() < 1e-15, "Small float should be preserved: {v3}");
+
+        assert!(
+            (v1 - 1.23456789012).abs() < 1e-10,
+            "Float precision should be preserved: {v1}"
+        );
+        assert!(
+            (v2 - (-273.15)).abs() < 1e-10,
+            "Negative float should be preserved: {v2}"
+        );
+        assert!(
+            (v3 - 1e-10).abs() < 1e-15,
+            "Small float should be preserved: {v3}"
+        );
     }
 
     #[cfg(feature = "sqlite")]
@@ -1666,18 +1844,22 @@ mod tests {
         let db_path = tmp.path();
         let url = format!("jdbc:sqlite:{}", db_path.display());
 
-        let conn = rusqlite::Connection::open(&db_path).unwrap();
+        let conn = rusqlite::Connection::open(db_path).unwrap();
         conn.execute("CREATE TABLE t (text TEXT)", []).unwrap();
         drop(conn);
 
         let df = PlDataFrame::new_infer_height(vec![
-            Series::new("text".into(), vec![
-                "Hello 'World'",
-                "Line1\nLine2",
-                "Tab\there",
-                "Unicode: 日本語 émoji 🎉",
-                "",
-            ]).into(),
+            Series::new(
+                "text".into(),
+                vec![
+                    "Hello 'World'",
+                    "Line1\nLine2",
+                    "Tab\there",
+                    "Unicode: 日本語 émoji 🎉",
+                    "",
+                ],
+            )
+            .into(),
         ])
         .unwrap();
 
@@ -1710,13 +1892,13 @@ mod tests {
 
         let read_df = super::read_jdbc_to_polars(&opts).unwrap();
         assert_eq!(read_df.height(), 5);
-        
+
         let text_col = read_df.column("text").unwrap();
-        
+
         // Check quotes are preserved
         let v0 = text_col.get(0).unwrap().to_string();
         assert!(v0.contains("'World'"), "Single quotes should be preserved");
-        
+
         // Check unicode is preserved
         let v3 = text_col.get(3).unwrap().to_string();
         assert!(v3.contains("日本語"), "Unicode should be preserved");
@@ -1727,11 +1909,14 @@ mod tests {
         let mut m = HashMap::new();
         m.insert("url".to_string(), "postgres://localhost/db".to_string());
         m.insert("queryTimeout".to_string(), "not_a_number".to_string());
-        
+
         let result = JdbcOptions::from_options_map(&m);
         assert!(result.is_err(), "Invalid queryTimeout should fail");
         let err = result.unwrap_err().to_string();
-        assert!(err.to_lowercase().contains("querytimeout"), "Error should mention queryTimeout: {err}");
+        assert!(
+            err.to_lowercase().contains("querytimeout"),
+            "Error should mention queryTimeout: {err}"
+        );
     }
 
     #[test]
@@ -1739,7 +1924,7 @@ mod tests {
         let mut m = HashMap::new();
         m.insert("url".to_string(), "postgres://localhost/db".to_string());
         m.insert("batchsize".to_string(), "abc".to_string());
-        
+
         let result = JdbcOptions::from_options_map(&m);
         assert!(result.is_err(), "Invalid batchsize should fail");
     }
@@ -1750,7 +1935,7 @@ mod tests {
         m.insert("url".to_string(), "postgres://localhost/db".to_string());
         m.insert("lowerBound".to_string(), "0".to_string());
         m.insert("upperBound".to_string(), "not_a_number".to_string());
-        
+
         let result = JdbcOptions::from_options_map(&m);
         assert!(result.is_err(), "Invalid upperBound should fail");
     }
@@ -1762,7 +1947,10 @@ mod tests {
         m.insert("dbtable".to_string(), "users".to_string());
         m.insert("user".to_string(), "admin".to_string());
         m.insert("password".to_string(), "secret".to_string());
-        m.insert("sessionInitStatement".to_string(), "SET search_path TO myschema".to_string());
+        m.insert(
+            "sessionInitStatement".to_string(),
+            "SET search_path TO myschema".to_string(),
+        );
         m.insert("queryTimeout".to_string(), "60".to_string());
         m.insert("fetchsize".to_string(), "1000".to_string());
         m.insert("batchsize".to_string(), "500".to_string());
@@ -1771,14 +1959,17 @@ mod tests {
         m.insert("lowerBound".to_string(), "0".to_string());
         m.insert("upperBound".to_string(), "1000000".to_string());
         m.insert("numPartitions".to_string(), "10".to_string());
-        
+
         let opts = JdbcOptions::from_options_map(&m).unwrap();
-        
+
         assert_eq!(opts.url, "postgres://localhost/db");
         assert_eq!(opts.dbtable.as_deref(), Some("users"));
         assert_eq!(opts.user.as_deref(), Some("admin"));
         assert_eq!(opts.password.as_deref(), Some("secret"));
-        assert_eq!(opts.session_init_statement.as_deref(), Some("SET search_path TO myschema"));
+        assert_eq!(
+            opts.session_init_statement.as_deref(),
+            Some("SET search_path TO myschema")
+        );
         assert_eq!(opts.query_timeout, Some(60));
         assert_eq!(opts.fetch_size, Some(1000));
         assert_eq!(opts.batch_size, Some(500));
@@ -1789,4 +1980,3 @@ mod tests {
         assert_eq!(opts.num_partitions, Some(10));
     }
 }
-

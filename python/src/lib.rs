@@ -3014,17 +3014,20 @@ impl PyDataFrameReader {
                 .session
                 .bind(py)
                 .downcast::<PySparkSession>()
-                .map_err(|_| PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected SparkSession"))?
+                .map_err(|_| {
+                    PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected SparkSession")
+                })?
                 .borrow();
 
             // Build properties map from options + explicit properties dict
-            let mut props: std::collections::HashMap<String, String> = std::collections::HashMap::new();
-            
+            let mut props: std::collections::HashMap<String, String> =
+                std::collections::HashMap::new();
+
             // Add options set via .option() / .options()
             for (k, v) in &self.options {
                 props.insert(k.clone(), v.clone());
             }
-            
+
             // Add explicit properties dict (overrides options)
             if let Some(dict) = properties {
                 for (k, v) in dict.iter() {
@@ -5628,13 +5631,9 @@ impl PyDataFrameWriter {
             feature = "sqlite"
         ))]
         {
-            let df =
-                self.df
-                    .bind(py)
-                    .downcast::<PyDataFrame>()
-                    .map_err(|_| {
-                        PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected DataFrame")
-                    })?;
+            let df = self.df.bind(py).downcast::<PyDataFrame>().map_err(|_| {
+                PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected DataFrame")
+            })?;
             let inner = df.borrow();
 
             let mut props: Vec<(String, String)> = self.options.clone();

@@ -22,14 +22,19 @@ pub(crate) fn write_jdbc_sqlite(
 
     // Execute session initialization statement if provided
     if let Some(init_sql) = &opts.session_init_statement {
-        conn.execute_batch(init_sql)
-            .map_err(|e| EngineError::Sql(format!("JDBC write (SQLite): sessionInitStatement failed: {e}")))?;
+        conn.execute_batch(init_sql).map_err(|e| {
+            EngineError::Sql(format!(
+                "JDBC write (SQLite): sessionInitStatement failed: {e}"
+            ))
+        })?;
     }
 
     match mode {
         Sm::ErrorIfExists => {
             let count: i64 = conn
-                .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| row.get(0))
+                .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                    row.get(0)
+                })
                 .map_err(|e| EngineError::Sql(format!("JDBC write (SQLite): check table: {e}")))?;
             if count > 0 {
                 return Err(EngineError::User(format!(
@@ -39,7 +44,9 @@ pub(crate) fn write_jdbc_sqlite(
         }
         Sm::Ignore => {
             let count: i64 = conn
-                .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| row.get(0))
+                .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                    row.get(0)
+                })
                 .map_err(|e| EngineError::Sql(format!("JDBC write (SQLite): check table: {e}")))?;
             if count > 0 {
                 return Ok(());
@@ -76,10 +83,11 @@ pub(crate) fn write_jdbc_sqlite(
 
     for batch_start in (0..total_rows).step_by(batch_size) {
         let batch_end = (batch_start + batch_size).min(total_rows);
-        
+
         // Start a transaction for this batch
-        conn.execute_batch("BEGIN TRANSACTION")
-            .map_err(|e| EngineError::Sql(format!("JDBC write (SQLite): begin transaction: {e}")))?;
+        conn.execute_batch("BEGIN TRANSACTION").map_err(|e| {
+            EngineError::Sql(format!("JDBC write (SQLite): begin transaction: {e}"))
+        })?;
 
         let mut stmt = conn
             .prepare(&insert_sql)
@@ -99,18 +107,21 @@ pub(crate) fn write_jdbc_sqlite(
                     polars::prelude::AnyValue::Float64(f) => Box::new(f),
                     polars::prelude::AnyValue::Float32(f) => Box::new(f as f64),
                     polars::prelude::AnyValue::String(s) => Box::new(s.to_string()),
-                    polars::prelude::AnyValue::StringOwned(ref s) => Box::new(s.as_str().to_string()),
+                    polars::prelude::AnyValue::StringOwned(ref s) => {
+                        Box::new(s.as_str().to_string())
+                    }
                     other => Box::new(other.to_string()),
                 };
                 params.push(boxed);
             }
             let refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p.as_ref()).collect();
-            stmt.execute(refs.as_slice())
-                .map_err(|e| EngineError::Sql(format!("JDBC write (SQLite): insert failed: {e}")))?;
+            stmt.execute(refs.as_slice()).map_err(|e| {
+                EngineError::Sql(format!("JDBC write (SQLite): insert failed: {e}"))
+            })?;
         }
-        
+
         drop(stmt); // Release the statement before commit
-        
+
         // Commit this batch
         conn.execute_batch("COMMIT")
             .map_err(|e| EngineError::Sql(format!("JDBC write (SQLite): commit batch: {e}")))?;
@@ -137,20 +148,28 @@ pub(crate) fn read_jdbc_sqlite(opts: &JdbcOptions) -> Result<PlDataFrame, Engine
 
     // Execute session initialization statement if provided
     if let Some(init_sql) = &opts.session_init_statement {
-        conn.execute_batch(init_sql)
-            .map_err(|e| EngineError::Sql(format!("JDBC read (SQLite): sessionInitStatement failed: {e}")))?;
+        conn.execute_batch(init_sql).map_err(|e| {
+            EngineError::Sql(format!(
+                "JDBC read (SQLite): sessionInitStatement failed: {e}"
+            ))
+        })?;
     }
 
     // Set busy timeout if queryTimeout is provided (SQLite uses milliseconds)
     if let Some(timeout_secs) = opts.query_timeout {
         conn.busy_timeout(std::time::Duration::from_secs(timeout_secs as u64))
-            .map_err(|e| EngineError::Sql(format!("JDBC read (SQLite): failed to set queryTimeout: {e}")))?;
+            .map_err(|e| {
+                EngineError::Sql(format!(
+                    "JDBC read (SQLite): failed to set queryTimeout: {e}"
+                ))
+            })?;
     }
 
     // Execute prepare query if provided
     if let Some(prep_sql) = &opts.prepare_query {
-        conn.execute_batch(prep_sql)
-            .map_err(|e| EngineError::Sql(format!("JDBC read (SQLite): prepareQuery failed: {e}")))?;
+        conn.execute_batch(prep_sql).map_err(|e| {
+            EngineError::Sql(format!("JDBC read (SQLite): prepareQuery failed: {e}"))
+        })?;
     }
 
     let mut stmt = conn
@@ -265,4 +284,3 @@ fn sqlite_values_to_series(
         .collect();
     Ok(Series::new(name.into(), vals))
 }
-

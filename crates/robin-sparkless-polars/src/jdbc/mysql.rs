@@ -62,8 +62,11 @@ pub(crate) fn write_jdbc_mysql(
 
     // Execute session initialization statement if provided
     if let Some(init_sql) = &opts.session_init_statement {
-        conn.query_drop(init_sql)
-            .map_err(|e| EngineError::Sql(format!("JDBC write (MySQL): sessionInitStatement failed: {e}")))?;
+        conn.query_drop(init_sql).map_err(|e| {
+            EngineError::Sql(format!(
+                "JDBC write (MySQL): sessionInitStatement failed: {e}"
+            ))
+        })?;
     }
 
     match mode {
@@ -120,7 +123,7 @@ pub(crate) fn write_jdbc_mysql(
 
     for batch_start in (0..total_rows).step_by(batch_size) {
         let batch_end = (batch_start + batch_size).min(total_rows);
-        
+
         // Start a transaction for this batch
         conn.query_drop("START TRANSACTION")
             .map_err(|e| EngineError::Sql(format!("JDBC write (MySQL): start transaction: {e}")))?;
@@ -149,7 +152,7 @@ pub(crate) fn write_jdbc_mysql(
             conn.exec_drop(&insert_sql, Params::Positional(params))
                 .map_err(|e| EngineError::Sql(format!("JDBC write (MySQL): insert failed: {e}")))?;
         }
-        
+
         // Commit this batch
         conn.query_drop("COMMIT")
             .map_err(|e| EngineError::Sql(format!("JDBC write (MySQL): commit batch: {e}")))?;
@@ -172,21 +175,29 @@ pub(crate) fn read_jdbc_mysql(opts: &JdbcOptions) -> Result<PlDataFrame, EngineE
 
     // Execute session initialization statement if provided
     if let Some(init_sql) = &opts.session_init_statement {
-        conn.query_drop(init_sql)
-            .map_err(|e| EngineError::Sql(format!("JDBC read (MySQL): sessionInitStatement failed: {e}")))?;
+        conn.query_drop(init_sql).map_err(|e| {
+            EngineError::Sql(format!(
+                "JDBC read (MySQL): sessionInitStatement failed: {e}"
+            ))
+        })?;
     }
 
     // Set query timeout if provided (MySQL uses milliseconds for max_execution_time)
     if let Some(timeout_secs) = opts.query_timeout {
         let timeout_ms = timeout_secs * 1000;
         conn.query_drop(format!("SET max_execution_time = {timeout_ms}"))
-            .map_err(|e| EngineError::Sql(format!("JDBC read (MySQL): failed to set queryTimeout: {e}")))?;
+            .map_err(|e| {
+                EngineError::Sql(format!(
+                    "JDBC read (MySQL): failed to set queryTimeout: {e}"
+                ))
+            })?;
     }
 
     // Execute prepare query if provided
     if let Some(prep_sql) = &opts.prepare_query {
-        conn.query_drop(prep_sql)
-            .map_err(|e| EngineError::Sql(format!("JDBC read (MySQL): prepareQuery failed: {e}")))?;
+        conn.query_drop(prep_sql).map_err(|e| {
+            EngineError::Sql(format!("JDBC read (MySQL): prepareQuery failed: {e}"))
+        })?;
     }
 
     let result = conn
@@ -204,8 +215,8 @@ pub(crate) fn read_jdbc_mysql(opts: &JdbcOptions) -> Result<PlDataFrame, EngineE
     let mut columns_data: Vec<Vec<Option<Value>>> = (0..ncols).map(|_| Vec::new()).collect();
 
     for row_res in result {
-        let row: mysql::Row = row_res
-            .map_err(|e| EngineError::Other(format!("JDBC read (MySQL): row: {e}")))?;
+        let row: mysql::Row =
+            row_res.map_err(|e| EngineError::Other(format!("JDBC read (MySQL): row: {e}")))?;
         for (idx, col_data) in columns_data.iter_mut().enumerate() {
             let v: Option<Value> = row.get(idx);
             col_data.push(v);
@@ -358,11 +369,14 @@ mod tests {
         .unwrap();
         let mut write_opts = opts.clone();
         write_opts.dbtable = Some("sparkless_jdbc_writeread_test".to_string());
-        crate::jdbc::write_jdbc_from_polars(&write_df, &write_opts, crate::dataframe::SaveMode::Overwrite)
-            .unwrap();
+        crate::jdbc::write_jdbc_from_polars(
+            &write_df,
+            &write_opts,
+            crate::dataframe::SaveMode::Overwrite,
+        )
+        .unwrap();
 
         let read_df = crate::jdbc::read_jdbc_to_polars(&write_opts).unwrap();
         assert_eq!(read_df.height(), 2);
     }
 }
-
