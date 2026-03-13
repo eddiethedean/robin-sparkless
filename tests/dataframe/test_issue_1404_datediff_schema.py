@@ -5,6 +5,7 @@ PySpark: struct<dd:int>
 Sparkless (before fix): struct<dd:long>
 """
 
+
 def test_datediff_returns_integer_type_not_long(spark, spark_imports):
     """Exact repro from issue #1404: datediff result schema must be int, not long."""
     F = spark_imports.F

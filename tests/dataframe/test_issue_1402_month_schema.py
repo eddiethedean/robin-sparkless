@@ -5,6 +5,7 @@ PySpark: struct<m:int>, data [{'m': None}, {'m': 12}]
 Sparkless (before fix): struct<m:string>, data [{'m': '12'}, {'m': None}]
 """
 
+
 def test_month_returns_integer_type_not_string(spark, spark_imports):
     """Exact repro from issue #1402: month result schema and data must be int, not string."""
     F = spark_imports.F

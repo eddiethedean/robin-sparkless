@@ -36,7 +36,9 @@ This test locks in Sparkless behavior for:
 from __future__ import annotations
 
 
-def test_issue_1394_struct_getfield_alias_schema_and_explain(spark, spark_imports) -> None:
+def test_issue_1394_struct_getfield_alias_schema_and_explain(
+    spark, spark_imports
+) -> None:
     F = spark_imports.F
     StructType = spark_imports.StructType
     StructField = spark_imports.StructField

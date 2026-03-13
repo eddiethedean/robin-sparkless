@@ -15,6 +15,7 @@ This test exercises the same scenario against sparkless, ensuring that:
 - ``df.explain()`` returns a non-empty plan string (no blank UI).
 """
 
+
 def test_issue_1381_show_truncate_schema_and_explain(spark) -> None:
     """ui.show_truncate: show + schema + explain should behave sensibly (issue #1381)."""
     df = spark.createDataFrame([("x" * 200,)], ["s"])

@@ -21,7 +21,9 @@ This test locks in Sparkless behavior for:
 from __future__ import annotations
 
 
-def test_issue_1392_cast_invalid_string_to_int_schema_and_explain(spark, spark_imports) -> None:
+def test_issue_1392_cast_invalid_string_to_int_schema_and_explain(
+    spark, spark_imports
+) -> None:
     F = spark_imports.F
     df = spark.createDataFrame([("nope",)], ["s"])
     out = df.select(F.col("s").cast("int").alias("i"))

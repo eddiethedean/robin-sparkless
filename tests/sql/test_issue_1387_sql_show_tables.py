@@ -26,9 +26,7 @@ def test_issue_1387_sql_show_tables_schema_data_and_explain(spark) -> None:
     # Schema simpleString should match the current struct representation.
     # Sparkless today uses `database` rather than PySpark's `namespace`.
     schema_str = df.schema.simpleString()
-    assert (
-        schema_str == "struct<database:string,tableName:string,isTemporary:boolean>"
-    )
+    assert schema_str == "struct<database:string,tableName:string,isTemporary:boolean>"
 
     # Data: content may vary by environment (e.g., empty catalog vs. pre-populated),
     # so we only assert that the query returns a DataFrame and do not require a
