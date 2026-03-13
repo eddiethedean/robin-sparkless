@@ -43,9 +43,6 @@ def _is_case_sensitive(spark):
 @pytest.fixture
 def spark_case_sensitive(request):
     """Session with spark.sql.caseSensitive=true; created and stopped per use."""
-    from sparkless.testing import Mode, get_mode, is_pyspark_mode, create_session
-
-    _ = get_backend_type(request)
     app_name = f"integration_case_sensitive_{uuid.uuid4().hex[:8]}"
     session = (
         SparkSession.builder.appName(app_name)
