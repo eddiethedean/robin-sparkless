@@ -350,7 +350,17 @@ def mssql_jdbc(mssql_container: JdbcConnection) -> JdbcConnection:
 # Oracle fixture
 @pytest.fixture(scope="session")
 def oracle_container() -> Generator[JdbcConnection, None, None]:
-    """Start an Oracle container for testing."""
+    """Start an Oracle container for testing.
+    
+    NOTE: Oracle containers take 2-3+ minutes to start, which exceeds normal
+    test timeouts. Set SPARKLESS_TEST_ORACLE=1 to enable Oracle tests.
+    """
+    if not os.environ.get("SPARKLESS_TEST_ORACLE"):
+        pytest.skip(
+            "Oracle tests disabled by default (slow container startup). "
+            "Set SPARKLESS_TEST_ORACLE=1 to enable."
+        )
+
     if not _is_docker_available():
         pytest.skip("Docker is not available")
 
@@ -369,8 +379,8 @@ def oracle_container() -> Generator[JdbcConnection, None, None]:
         host = oracle.get_container_host_ip()
         port = oracle.get_exposed_port(1521)
 
-        # Oracle takes a while to start - retry connection
-        for attempt in range(30):
+        # Oracle takes a while to start - retry connection (up to 3 minutes)
+        for attempt in range(36):
             try:
                 conn = oracledb.connect(
                     user="system",
@@ -379,7 +389,7 @@ def oracle_container() -> Generator[JdbcConnection, None, None]:
                 )
                 break
             except Exception:
-                if attempt == 29:
+                if attempt == 35:
                     pytest.skip("Oracle container failed to start")
                 time.sleep(5)
 
