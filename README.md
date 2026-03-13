@@ -33,6 +33,7 @@
 | **Datetime & math** | Date/time extractors and arithmetic, `year`/`month`/`day`, math (`sin`, `cos`, `sqrt`, `pow`, …) |
 | **Optional SQL** | `spark.sql("SELECT ...")` with temp views, global temp views (cross-session), and tables: `createOrReplaceTempView`, `createOrReplaceGlobalTempView`, `table(name)`, `table("global_temp.name")`, `df.write().saveAsTable(name, mode=...)`, `spark.catalog().listTables()` — enable with `--features sql` |
 | **Optional Delta** | `read_delta(path)` or `read_delta(table_name)`, `read_delta_with_version`, `write_delta`, `write_delta_table(name)` — enable with `--features delta` (path I/O); table-by-name works with `sql` only |
+| **Optional JDBC** | Read/write external databases (PostgreSQL, MySQL, MariaDB, SQL Server, Oracle, DB2, SQLite) with PySpark-compatible API: `spark.read.jdbc(url, table, properties)`, `df.write.jdbc(...)`. Supports `sessionInitStatement`, `queryTimeout`, `batchsize`, `truncate`, all save modes. Enable with `--features jdbc` (Postgres), `--features sqlite`, `--features jdbc_mysql`, etc. See [docs/JDBC_TESTING.md](docs/JDBC_TESTING.md) |
 | **UDFs** | Pure-Rust UDFs registered in a session-scoped registry; see `docs/UDF_GUIDE.md` |
 
 **Parity:** 200+ fixtures validated against PySpark. Known differences from PySpark are documented in [docs/PYSPARK_DIFFERENCES.md](docs/PYSPARK_DIFFERENCES.md). Out-of-scope items (XML, UDTF, streaming, RDD) are in [docs/DEFERRED_SCOPE.md](docs/DEFERRED_SCOPE.md). Full parity status: [docs/PARITY_STATUS.md](docs/PARITY_STATUS.md).
@@ -71,8 +72,11 @@ robin-sparkless = "4"
 Optional features:
 
 ```toml
-robin-sparkless = { version = "4", features = ["sql"] }   # spark.sql(), temp views
-robin-sparkless = { version = "4", features = ["delta"] }  # Delta Lake read/write
+robin-sparkless = { version = "4", features = ["sql"] }      # spark.sql(), temp views
+robin-sparkless = { version = "4", features = ["delta"] }    # Delta Lake read/write
+robin-sparkless = { version = "4", features = ["jdbc"] }     # PostgreSQL JDBC
+robin-sparkless = { version = "4", features = ["sqlite"] }   # SQLite JDBC
+robin-sparkless = { version = "4", features = ["jdbc_mysql"] } # MySQL/MariaDB JDBC
 ```
 
 ## Quick start

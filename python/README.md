@@ -144,7 +144,8 @@ def test_data_pipeline():
 | **DataFrame**  | `filter`, `select`, `with_column` / `withColumn`, `show`, `collect`, `count`, `group_by`, `order_by`, `limit`, `drop`, `distinct`, `join`, `union`, `union_all`, `write`, `create_or_replace_temp_view`, `columns` |
 | **Column**     | `alias`, `gt`, `ge`, `lt`, `le`, `eq`, `is_null`, `is_not_null`, `asc`, `desc`, `upper`, `lower`, `substr`, `length`, `trim`, `cast`; and `col("x") > 1`, `col("x") == 2` |
 | **GroupedData** | `count`, `sum`, `avg`, `min`, `max`, `agg`, `pivot`                            |
-| **Reader/Writer** | `option`, `options`, `format`, `load`, `parquet`, `csv`, `json`, `table`, `delta`; `mode`, `partition_by`, `save`, `save_as_table` |
+| **Reader/Writer** | `option`, `options`, `format`, `load`, `parquet`, `csv`, `json`, `table`, `delta`, `jdbc`; `mode`, `partition_by`, `save`, `save_as_table` |
+| **JDBC** | Read/write external databases: `spark.read.jdbc(url, table, properties)`, `df.write.jdbc(...)`. Supports PostgreSQL, SQLite, MySQL, MariaDB, SQL Server, Oracle, DB2. PySpark-compatible options: `sessionInitStatement`, `queryTimeout`, `batchsize`, `truncate`, all save modes |
 | **Functions**  | `col`, `lit`, `when`/`then`/`otherwise`, `upper`, `lower`, `substring`, `trim`, `cast`, `count`, `sum`, `avg`, `min`, `max`, and many more in `sparkless.sql.functions` |
 
 Full parity status and known differences from PySpark are documented in the main repo: [PYSPARK_DIFFERENCES.md](https://github.com/eddiethedean/robin-sparkless/blob/main/docs/PYSPARK_DIFFERENCES.md) and [PARITY_STATUS.md](https://github.com/eddiethedean/robin-sparkless/blob/main/docs/PARITY_STATUS.md).
@@ -158,6 +159,39 @@ df.createOrReplaceTempView("employees")
 result = spark.sql("SELECT name, salary FROM employees WHERE salary > 50000")
 result.show()
 ```
+
+### JDBC / Database Support
+
+Read from and write to external databases using PySpark-compatible JDBC API:
+
+```python
+# Read from PostgreSQL
+url = "jdbc:postgresql://localhost:5432/mydb"
+props = {"user": "admin", "password": "secret"}
+df = spark.read.jdbc(url=url, table="users", properties=props)
+
+# Or use the format API with options
+df = (spark.read
+    .format("jdbc")
+    .option("url", url)
+    .option("dbtable", "users")
+    .option("sessionInitStatement", "SET timezone='UTC'")
+    .options(props)
+    .load("."))
+
+# Write back with batching
+df.write.jdbc(
+    url=url,
+    table="users_backup",
+    properties={"batchsize": "5000", **props},
+    mode="overwrite"
+)
+
+# SQLite (file-based, no server required)
+df = spark.read.jdbc(url="jdbc:sqlite:/path/to/db.sqlite", table="my_table", properties={})
+```
+
+Supported databases: PostgreSQL, SQLite, MySQL, MariaDB, SQL Server, Oracle, DB2.
 
 ### Lazy Evaluation
 

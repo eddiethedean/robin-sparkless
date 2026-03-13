@@ -17,7 +17,8 @@ Documentation for the Python package mirrors the [Sparkless](https://sparkless.r
 
 | Document | Description |
 |----------|-------------|
-| [QUICKSTART](QUICKSTART.md) | Build, install, basic usage, optional features (SQL, Delta), troubleshooting, benchmarks |
+| [QUICKSTART](QUICKSTART.md) | Build, install, basic usage, optional features (SQL, Delta, JDBC), troubleshooting, benchmarks |
+| [JDBC_TESTING](JDBC_TESTING.md) | JDBC setup for all backends (PostgreSQL, SQLite, MySQL, MariaDB, SQL Server, Oracle, DB2), Docker Compose, env vars, PySpark-compatible options |
 | [EMBEDDING](EMBEDDING.md) | Embedding and bindings: prelude::embed, *_engine() API, schema helpers, traits; minimal FFI surface |
 | [ROADMAP](ROADMAP.md) | Development roadmap and Sparkless integration phases |
 | [RELEASING](RELEASING.md) | How to cut a release (version bump, tag, crates.io publish) |

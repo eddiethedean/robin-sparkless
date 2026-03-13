@@ -87,6 +87,7 @@ df.write.format("jdbc") \
 | What | Command | Requires |
 |------|---------|----------|
 | **Rust unit tests** (URL routing, options) | `cargo test -p robin-sparkless-polars jdbc --features "jdbc,sqlite"` | Nothing |
+| **Python SQLite tests** (no server) | `pytest tests/sql/test_jdbc_sqlite.py -v` | Nothing (uses temp files) |
 | **Python integration** (Postgres) | `pytest tests/sql/test_jdbc_read_write_postgres.py -v` | Postgres + env vars |
 | **Python integration** (MySQL) | `pytest tests/sql/test_jdbc_read_write_mysql.py -v` | MySQL + env vars |
 | **Python integration** (MariaDB) | `pytest tests/sql/test_jdbc_read_write_mariadb.py -v` | MariaDB + env vars |
@@ -94,7 +95,26 @@ df.write.format("jdbc") \
 | **Python integration** (Oracle) | `pytest tests/sql/test_jdbc_read_write_oracle.py -v` | Oracle + env vars |
 | **Python integration** (DB2) | `pytest tests/sql/test_jdbc_read_write_db2.py -v` | DB2 + ODBC + env vars |
 
-All Python integration tests are **skipped** if the corresponding env var is not set.
+All Python integration tests (except SQLite) are **skipped** if the corresponding env var is not set.
+
+### SQLite Tests (No External Dependencies)
+
+The `test_jdbc_sqlite.py` test suite uses temporary SQLite database files and requires **no external server or environment variables**. It provides comprehensive coverage of JDBC functionality:
+
+```bash
+# Run SQLite JDBC tests (32 tests)
+pytest tests/sql/test_jdbc_sqlite.py -v
+
+# Run with parallel workers
+pytest tests/sql/test_jdbc_sqlite.py -n 12
+```
+
+These tests cover:
+- Basic read/write operations with all save modes (append, overwrite, error, ignore)
+- PySpark-compatible options: `sessionInitStatement`, `batchsize`, `truncate`, `prepareQuery`
+- Data type roundtrips: integers, floats, nulls, special characters, booleans, large strings
+- DataFrame operations after JDBC read: filter, select, groupBy, orderBy, count
+- Multiple API patterns: `.option()`, `.options()`, properties dict
 
 ## Environment Variables
 

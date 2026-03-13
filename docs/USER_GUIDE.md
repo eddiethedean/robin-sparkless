@@ -29,16 +29,17 @@ Add to `Cargo.toml`:
 
 ```toml
 [dependencies]
-robin-sparkless = "0.15.0"
+robin-sparkless = "4"
 ```
 
 Optional features:
 
 ```toml
-robin-sparkless = { version = "0.15.0", features = ["sql"] }   # spark.sql(), temp views
-robin-sparkless = { version = "0.15.0", features = ["delta"] }  # Delta Lake read/write
-robin-sparkless = { version = "0.15.0", features = ["jdbc"] }  # PostgreSQL read/write
-robin-sparkless = { version = "0.15.0", features = ["sqlite"] } # SQLite read/write (file-based)
+robin-sparkless = { version = "4", features = ["sql"] }        # spark.sql(), temp views
+robin-sparkless = { version = "4", features = ["delta"] }      # Delta Lake read/write
+robin-sparkless = { version = "4", features = ["jdbc"] }       # PostgreSQL read/write
+robin-sparkless = { version = "4", features = ["sqlite"] }     # SQLite read/write
+robin-sparkless = { version = "4", features = ["jdbc_mysql"] } # MySQL/MariaDB
 ```
 
 ---
@@ -120,57 +121,82 @@ Group and aggregate with `group_by` and `GroupedData` methods such as `count`, `
 
 Use `SparkSession::read_csv`, `read_parquet`, and `read_json` to read data, and `DataFrame::write` (writer API) to write Parquet/CSV/JSON.
 
-### JDBC / External Databases (PostgreSQL and SQLite)
+### JDBC / External Databases
 
-With the optional `jdbc` feature (PostgreSQL) or `sqlite` feature, you can read from and write to databases using a PySpark-style API. Use **PostgreSQL** for a server-backed DB and **SQLite** for a single file (e.g. `jdbc:sqlite:/path/to/db.db`).
+Read from and write to external databases using a PySpark-compatible JDBC API. Supported backends:
+
+| Backend | Feature | URL Example |
+|---------|---------|-------------|
+| PostgreSQL | `jdbc` | `jdbc:postgresql://localhost:5432/mydb` |
+| SQLite | `sqlite` | `jdbc:sqlite:/path/to/db.db` |
+| MySQL | `jdbc_mysql` | `jdbc:mysql://localhost:3306/mydb` |
+| MariaDB | `jdbc_mariadb` | `jdbc:mariadb://localhost:3307/mydb` |
+| SQL Server | `jdbc_mssql` | `jdbc:sqlserver://localhost:1433;databaseName=mydb` |
+| Oracle | `jdbc_oracle` | `jdbc:oracle:thin:@//localhost:1521/ORCL` |
+| DB2 | `jdbc_db2` | `jdbc:db2://localhost:50000/mydb` |
 
 Add the feature in your `Cargo.toml`:
 
 ```toml
-robin-sparkless = { version = "4.2.1", features = ["jdbc"] }   # PostgreSQL
-robin-sparkless = { version = "4.2.1", features = ["sqlite"] }  # SQLite (file-based)
+robin-sparkless = { version = "4", features = ["jdbc"] }       # PostgreSQL
+robin-sparkless = { version = "4", features = ["sqlite"] }     # SQLite (file-based)
+robin-sparkless = { version = "4", features = ["jdbc_mysql"] } # MySQL
 ```
 
-Rust example:
-
-```rust
-use robin_sparkless::{DataFrame, SaveMode, SparkSession};
-
-let spark = SparkSession::builder().app_name("jdbc_demo").get_or_create();
-
-// Read from a PostgreSQL table
-let url = "postgres://user:password@localhost:5432/mydb";
-let mut props = std::collections::HashMap::new();
-props.insert("user".to_string(), "user".to_string());
-props.insert("password".to_string(), "password".to_string());
-
-// Equivalent to spark.read.format("jdbc").option("url", url).option("dbtable", "public.my_table").load()
-let df: DataFrame = spark
-    .read()
-    .format("jdbc")
-    .option("url", url)
-    .option("dbtable", "public.my_table")
-    .load(".")?;
-
-// Write back to a JDBC table (append mode)
-let props_vec: Vec<(String, String)> = props.into_iter().collect();
-df.write().jdbc(url, "public.my_table_copy", &props_vec, SaveMode::Append)?;
-```
-
-Python example:
+#### Python Example
 
 ```python
-url = "postgres://user:password@localhost:5432/mydb"
-props = {"user": "user", "password": "password"}
+url = "jdbc:postgresql://localhost:5432/mydb"
+props = {"user": "admin", "password": "secret"}
 
-# Read
-df = spark.read.jdbc(url=url, table="public.my_table", properties=props)
+# Basic read
+df = spark.read.jdbc(url=url, table="users", properties=props)
 
-# Write (append)
-df.write.jdbc(url=url, table="public.my_table_copy", properties=props, mode="append")
+# Read with options (PySpark-compatible)
+df = (spark.read
+    .format("jdbc")
+    .option("url", url)
+    .option("dbtable", "users")
+    .option("sessionInitStatement", "SET timezone='UTC'")
+    .option("queryTimeout", "30")
+    .options(props)
+    .load("."))
+
+# Write with batching and truncate
+df.write.jdbc(
+    url=url,
+    table="users_backup",
+    properties={"batchsize": "5000", "truncate": "true", **props},
+    mode="overwrite"
+)
+
+# SQLite (no server required)
+df = spark.read.jdbc(url="jdbc:sqlite:/tmp/test.db", table="my_table", properties={})
+df.write.jdbc(url="jdbc:sqlite:/tmp/test.db", table="results", properties={}, mode="append")
 ```
 
-JDBC/SQLite integration is optional: enable the `jdbc` or `sqlite` feature. For Postgres, set `SPARKLESS_TEST_JDBC_URL` (and optionally user/password) when running integration tests.
+#### Supported Options
+
+| Option | Type | Description |
+|--------|------|-------------|
+| `sessionInitStatement` | String | SQL to execute after connection (e.g., `SET timezone='UTC'`) |
+| `queryTimeout` | Integer | Query timeout in seconds |
+| `prepareQuery` | String | SQL to execute before main query (for CTEs, temp tables) |
+| `fetchsize` | Integer | Rows per fetch |
+| `batchsize` | Integer | Rows per batch/transaction on write (default: 1000) |
+| `truncate` | Boolean | Use `TRUNCATE` vs `DELETE` for Overwrite mode |
+| `cascadeTruncate` | Boolean | Add CASCADE to TRUNCATE (PostgreSQL/Oracle) |
+
+#### Save Modes
+
+| Mode | Behavior |
+|------|----------|
+| `append` | Insert rows into existing table |
+| `overwrite` | Truncate/delete existing data, then insert |
+| `error` | Error if table has any existing rows |
+| `ignore` | Do nothing if table has existing rows |
+
+See [JDBC_TESTING.md](JDBC_TESTING.md) for setup, Docker Compose files, and CI configuration.
 
 ---
 
