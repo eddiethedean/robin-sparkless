@@ -15,6 +15,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 (none yet)
 
+## [4.3.0] - 2026-03-12
+
+### Added
+
+- **JDBC support** — Full PySpark-compatible JDBC read/write for PostgreSQL, MySQL, MariaDB, SQL Server, Oracle, and IBM DB2. Enable with Cargo features: `jdbc`, `sqlite`, `jdbc_mysql`, `jdbc_mariadb`, `jdbc_mssql`, `jdbc_oracle`, `jdbc_db2`.
+- **PySpark JDBC options** — Support for `sessionInitStatement`, `queryTimeout`, `prepareQuery`, `fetchsize`, `batchsize`, `truncate`, `cascadeTruncate`, partitioning options (`partitionColumn`, `lowerBound`, `upperBound`, `numPartitions`), and all standard connection options.
+- **Python JDBC API** — `spark.read.format("jdbc").option(...).load()` and `df.write.format("jdbc").option(...).save()` work identically to PySpark.
+- **SQLite JDBC tests** — Comprehensive test suite (32 tests) using temporary SQLite databases, requiring no external servers.
+- **testcontainers integration** — Python tests automatically spin up Docker containers for PostgreSQL, MySQL, MariaDB, and SQL Server. No manual database setup required.
+
+### Fixed
+
+- **Pandas null handling** — `createDataFrame` from pandas now correctly handles `None` in string columns (previously converted to the string `'nan'`).
+- **MSSQL transaction bug** — Resolved transaction count mismatch error in SQL Server writes by removing explicit transaction management.
+- **Clippy warnings** — Fixed `needless_borrows_for_generic_args`, `approx_constant`, `needless_range_loop`, `map_flatten`, and `len_zero` warnings in JDBC modules.
+
+### Changed
+
+- **Docker Compose consolidation** — Merged 6 separate `docker-compose.jdbc.*.yml` files into a single `docker-compose.yml`. Start individual services with `docker compose up postgres -d`.
+- **Oracle tests opt-in** — Oracle container tests disabled by default (slow startup). Enable with `SPARKLESS_TEST_ORACLE=1`.
+
 ## [4.0.0] - 2026-03-09
 
 ### Added
