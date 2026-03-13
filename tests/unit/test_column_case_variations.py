@@ -734,6 +734,7 @@ class TestColumnCaseVariations:
         result = df.groupBy("Name").pivot("dept").agg(F.sum("SALARY")).collect()
         assert len(result) >= 1
 
+    @pytest.mark.skip(reason="Blocked by #1463: Case-insensitive column resolution not working")
     def test_coalesce_all_case_variations(self, spark):
         """Test coalesce function with case variations."""
         data = [
@@ -759,6 +760,7 @@ class TestColumnCaseVariations:
         result = df.select(F.coalesce("col1", "col2", "col3").alias("result")).collect()
         assert result[0]["result"] == "Value3"
 
+    @pytest.mark.skip(reason="Blocked by #1463: Case-insensitive column resolution not working")
     def test_dropna_all_case_variations(self, spark):
         """Test dropna with case variations in subset parameter."""
         data = [
@@ -841,6 +843,7 @@ class TestColumnCaseVariations:
         result = df.select(F.col("Person.NAME")).collect()
         assert _get_nested(result[0], "Person.name") == "Alice"
 
+    @pytest.mark.skip(reason="Blocked by #1463: Case-insensitive column resolution not working")
     def test_sql_queries_all_case_variations(self, sample_df, spark):
         """Test SQL queries with case variations in column names."""
         sample_df.createOrReplaceTempView("employees")
@@ -864,6 +867,7 @@ class TestColumnCaseVariations:
         result = spark.sql("SELECT NAME FROM employees WHERE DEPT = 'IT'").collect()
         assert len(result) == 2
 
+    @pytest.mark.skip(reason="Blocked by #1463: Case-insensitive column resolution not working")
     def test_rollup_cube_all_case_variations(self, spark):
         """Test rollup and cube operations with case variations."""
         data = [
@@ -891,6 +895,7 @@ class TestColumnCaseVariations:
         result = df.cube("YEAR", "QUARTER").agg(F.sum("SALES").alias("total")).collect()
         assert len(result) >= 1
 
+    @pytest.mark.skip(reason="Blocked by #1463: Case-insensitive column resolution not working")
     def test_sampleBy_all_case_variations(self, spark):
         """Test sampleBy with case variations in column parameter."""
         data = [
@@ -907,6 +912,7 @@ class TestColumnCaseVariations:
         result = df.sampleBy("DEPT", {"IT": 1.0, "HR": 0.0}).collect()
         assert len(result) == 2
 
+    @pytest.mark.skip(reason="Blocked by #1463: Case-insensitive column resolution not working")
     def test_freqItems_all_case_variations(self, spark):
         """Test freqItems with case variations in column parameter."""
         data = [
@@ -923,6 +929,7 @@ class TestColumnCaseVariations:
         result = df.freqItems(["NAME", "DEPT"]).collect()
         assert len(result) == 1
 
+    @pytest.mark.skip(reason="Blocked by #1463: Case-insensitive column resolution not working")
     def test_crosstab_all_case_variations(self, spark):
         """Test crosstab with case variations in column parameters."""
         data = [

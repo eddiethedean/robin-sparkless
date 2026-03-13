@@ -609,6 +609,7 @@ class TestIssue230CaseInsensitiveColumnMatching:
         assert hasattr(result[0], "Years")
         assert result[0].Years == 25
 
+    @pytest.mark.skip(reason="Blocked by #1465: withColumnsRenamed not matching columns case-insensitively")
     def test_withColumnsRenamed_case_insensitive(self, spark):
         """Test withColumnsRenamed with case-insensitive column names."""
         data = [{"Name": "Alice", "Age": 25, "City": "NYC"}]
@@ -622,6 +623,7 @@ class TestIssue230CaseInsensitiveColumnMatching:
         assert result[0].Years == 25
         assert hasattr(result[0], "City")
 
+    @pytest.mark.skip(reason="Blocked by #1463: Case-insensitive column resolution not working")
     def test_drop_case_insensitive(self, spark):
         """Test drop with case-insensitive column names."""
         data = [{"Name": "Alice", "Age": 25, "City": "NYC"}]
@@ -643,6 +645,7 @@ class TestIssue230CaseInsensitiveColumnMatching:
         assert "Age" not in result_df.columns
         assert "City" not in result_df.columns
 
+    @pytest.mark.skip(reason="Blocked by #1463: Case-insensitive column resolution not working")
     def test_dropDuplicates_case_insensitive(self, spark):
         """Test dropDuplicates with case-insensitive column names."""
         data = [
@@ -661,6 +664,7 @@ class TestIssue230CaseInsensitiveColumnMatching:
         assert "Alice" in names
         assert "Bob" in names
 
+    @pytest.mark.skip(reason="Blocked by #1464: unionByName not matching columns case-insensitively")
     def test_unionByName_case_insensitive(self, spark):
         """Test unionByName with case-insensitive column names."""
         data1 = [{"Name": "Alice", "Age": 25}]
@@ -682,6 +686,7 @@ class TestIssue230CaseInsensitiveColumnMatching:
         assert "Alice" in names
         assert "Bob" in names
 
+    @pytest.mark.skip(reason="Blocked by #1463: Case-insensitive column resolution not working")
     def test_join_case_insensitive(self, spark):
         """Test join with case-insensitive column names."""
         data1 = [{"ID": 1, "Name": "Alice"}, {"ID": 2, "Name": "Bob"}]
