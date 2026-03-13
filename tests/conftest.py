@@ -1,8 +1,9 @@
 """
 Global pytest configuration for unified Python tests.
 
-Merge of tests/python and tests/upstream_sparkless conftests.
-Backend selection: pytest marker, then MOCK_SPARK_TEST_BACKEND / SPARKLESS_TEST_BACKEND.
+Uses sparkless.testing as the primary testing framework. For backward
+compatibility, legacy environment variables (MOCK_SPARK_TEST_BACKEND,
+SPARKLESS_TEST_BACKEND) are mapped to SPARKLESS_TEST_MODE.
 """
 
 from __future__ import annotations
@@ -17,7 +18,7 @@ import uuid
 import pytest
 
 # Prevent numpy crashes on macOS ARM chips with Python 3.9
-os.environ["VECLIB_MAXIMUM_THREADS"] = "1"
+os.environ.setdefault("VECLIB_MAXIMUM_THREADS", "1")
 
 # Ensure PySpark workers use the same Python as the driver (avoids PYTHON_VERSION_MISMATCH)
 if "PYSPARK_PYTHON" not in os.environ:
@@ -26,17 +27,73 @@ if "PYSPARK_DRIVER_PYTHON" not in os.environ:
     os.environ["PYSPARK_DRIVER_PYTHON"] = sys.executable
 
 
-def _is_pyspark_mode() -> bool:
-    """True when tests should run with real PySpark (no sparkless)."""
-    return (
+# --- Legacy Environment Variable Mapping ---
+# Map old env vars to the new SPARKLESS_TEST_MODE for backward compatibility.
+# This allows existing test commands to continue working.
+def _map_legacy_env_vars() -> None:
+    """Map legacy env vars to SPARKLESS_TEST_MODE."""
+    if "SPARKLESS_TEST_MODE" in os.environ:
+        return  # New var takes precedence
+
+    legacy_value = (
         os.getenv("MOCK_SPARK_TEST_BACKEND")
         or os.getenv("SPARKLESS_TEST_BACKEND")
         or ""
-    ).strip().lower() == "pyspark"
+    ).strip().lower()
+
+    if legacy_value == "pyspark":
+        os.environ["SPARKLESS_TEST_MODE"] = "pyspark"
+    elif legacy_value in ("mock", "robin", "sparkless", ""):
+        os.environ["SPARKLESS_TEST_MODE"] = "sparkless"
+
+
+_map_legacy_env_vars()
+
+
+# --- Import sparkless.testing ---
+# After mapping env vars, import from sparkless.testing
+try:
+    from sparkless.testing import (
+        Mode,
+        get_mode,
+        is_pyspark_mode,
+        create_session,
+        get_imports,
+        SparkImports,
+    )
+    from sparkless.testing.fixtures import _SharedSessionWrapper
+
+    _HAS_SPARKLESS_TESTING = True
+except ImportError:
+    _HAS_SPARKLESS_TESTING = False
+    # Fallback definitions for when sparkless.testing is not available
+    from enum import Enum
+
+    class Mode(Enum):  # type: ignore[no-redef]
+        SPARKLESS = "sparkless"
+        PYSPARK = "pyspark"
+
+    def get_mode() -> Mode:  # type: ignore[no-redef]
+        return Mode.PYSPARK if os.getenv("SPARKLESS_TEST_MODE") == "pyspark" else Mode.SPARKLESS
+
+    def is_pyspark_mode() -> bool:  # type: ignore[no-redef]
+        return get_mode() == Mode.PYSPARK
+
+    class _SharedSessionWrapper:  # type: ignore[no-redef]
+        __slots__ = ("_session",)
+
+        def __init__(self, session):
+            self._session = session
+
+        def stop(self):
+            pass
+
+        def __getattr__(self, name):
+            return getattr(self._session, name)
 
 
 # In non-PySpark mode, configure sparkless for multiprocessing (pytest-xdist).
-if not _is_pyspark_mode():
+if not is_pyspark_mode():
     try:
         import sparkless as _rs  # type: ignore[import-not-found]
     except ImportError:
@@ -46,6 +103,7 @@ if not _is_pyspark_mode():
         and getattr(_rs, "_configure_for_multiprocessing", None) is not None
     ):
         _rs._configure_for_multiprocessing()
+
 
 # Set JAVA_HOME for PySpark if not already set - must be done before any PySpark imports
 if "JAVA_HOME" not in os.environ:
@@ -84,54 +142,8 @@ def cleanup_after_each_test():
     gc.collect()
 
 
-def _ensure_robin_backend_type(session):
-    """Set backend_type='robin' on session when SPARKLESS_TEST_BACKEND=robin."""
-    if (os.environ.get("SPARKLESS_TEST_BACKEND") or "").strip().lower() == "robin":
-        try:
-            setattr(session, "backend_type", "robin")
-        except AttributeError:
-            pass
-
-
-@pytest.fixture
-def mock_spark_session():
-    """Create a SparkSession with automatic cleanup."""
-    from tests.fixtures.spark_backend import BackendType
-    from tests.fixtures.spark_imports import get_spark_imports
-
-    SparkSession = get_spark_imports(BackendType.MOCK).SparkSession
-    session = SparkSession("test_app")
-    _ensure_robin_backend_type(session)
-    if (
-        os.environ.get("SPARKLESS_TEST_BACKEND") or ""
-    ).strip().lower() == "robin" and getattr(session, "backend_type", None) != "robin":
-        raise RuntimeError(
-            f"Robin mode was requested but mock_spark_session has backend_type={getattr(session, 'backend_type', None)!r}. "
-            "SPARKLESS_BACKEND should be set by conftest."
-        )
-    yield session
-    with contextlib.suppress(BaseException):
-        session.stop()
-    gc.collect()
-
-
-class _SharedSessionWrapper:
-    """Wraps a shared SparkSession so stop() is a no-op (prevents one test from killing the session for others)."""
-
-    __slots__ = ("_session",)
-
-    def __init__(self, session):
-        self._session = session
-
-    def stop(self):
-        pass  # no-op so shared session is not stopped by individual tests
-
-    def __getattr__(self, name):
-        return getattr(self._session, name)
-
-
 def _use_shared_session() -> bool:
-    """Use a single session per worker/run for Robin backend.
+    """Use a single session per worker/run for sparkless backend.
 
     Default is per-test sessions so sequential and parallel (-n N) runs have the same
     pass/fail set and no cross-test catalog pollution. Set SPARKLESS_SHARED_SESSION=1
@@ -144,28 +156,24 @@ def _use_shared_session() -> bool:
     ):
         if os.environ.get("PYTEST_XDIST_WORKER"):
             return False
-        return not _is_pyspark_mode()
+        return not is_pyspark_mode()
     return False
 
 
 @pytest.fixture(scope="session")
-def _shared_robin_session():
-    """One SparkSession for the whole test run (Robin backend). Speeds tests; table names must be unique per test via table_prefix."""
-    from tests.fixtures.spark_backend import (
-        SparkBackend,
-        BackendType,
-        get_backend_from_env,
-    )
-
+def _shared_sparkless_session():
+    """One SparkSession for the whole test run (sparkless backend). Speeds tests; table names must be unique per test via table_prefix."""
     if not _use_shared_session():
         pytest.skip("shared session disabled")
-    env_backend = get_backend_from_env()
-    if env_backend not in (None, BackendType.ROBIN):
-        pytest.skip("shared session only for Robin backend")
-    session = SparkBackend.create_mock_spark_session(
-        "shared_robin_test", backend_type="robin"
-    )
-    _ensure_robin_backend_type(session)
+    if is_pyspark_mode():
+        pytest.skip("shared session only for sparkless backend")
+
+    if _HAS_SPARKLESS_TESTING:
+        session = create_session(app_name="shared_sparkless_test", mode=Mode.SPARKLESS)
+    else:
+        from sparkless.sql import SparkSession
+        session = SparkSession.builder.app_name("shared_sparkless_test").get_or_create()
+
     yield session
     with contextlib.suppress(BaseException):
         session.stop()
@@ -175,23 +183,24 @@ def _shared_robin_session():
 @pytest.fixture(scope="session")
 def _shared_pyspark_session():
     """One PySpark SparkSession per worker (session scope). Speeds PySpark tests; use table_prefix for any tables/views."""
-    from tests.fixtures.spark_backend import (
-        SparkBackend,
-        BackendType,
-        get_backend_from_env,
-    )
-
     if not _use_shared_session():
         pytest.skip("shared session disabled")
-    env_backend = get_backend_from_env()
-    if env_backend != BackendType.PYSPARK:
+    if not is_pyspark_mode():
         pytest.skip("shared PySpark session only for PySpark backend")
+
     session = None
     try:
-        session = SparkBackend.create_pyspark_session(
-            "shared_pyspark_worker",
-            enable_delta=False,
-        )
+        if _HAS_SPARKLESS_TESTING:
+            session = create_session(app_name="shared_pyspark_worker", mode=Mode.PYSPARK)
+        else:
+            from pyspark.sql import SparkSession as PySparkSession
+            session = (
+                PySparkSession.builder
+                .master("local[1]")
+                .appName("shared_pyspark_worker")
+                .config("spark.driver.bindAddress", "127.0.0.1")
+                .getOrCreate()
+            )
         yield session
     except ImportError as e:
         if "pyspark" in str(e).lower() or "PySpark is not available" in str(e):
@@ -206,30 +215,83 @@ def _shared_pyspark_session():
 
 @pytest.fixture
 def table_prefix(request: pytest.FixtureRequest) -> str:
-    """Unique prefix for table/view names when using the shared session (Robin or PySpark). Use e.g. saveAsTable(f'{table_prefix}_mytable')."""
+    """Unique prefix for table/view names when using the shared session. Use e.g. saveAsTable(f'{table_prefix}_mytable')."""
     name = getattr(request.node, "name", "test")[:40]
     safe = re.sub(r"[^a-zA-Z0-9_]", "_", name)
     return f"t_{safe}_{uuid.uuid4().hex[:6]}"
 
 
 @pytest.fixture
-def isolated_session():
+def spark_mode() -> Mode:
+    """Get the current test mode (SPARKLESS or PYSPARK)."""
+    return get_mode()
+
+
+@pytest.fixture
+def spark_imports() -> SparkImports:
+    """Get mode-appropriate Spark imports."""
+    if _HAS_SPARKLESS_TESTING:
+        return get_imports()
+    # Fallback
+    if is_pyspark_mode():
+        from pyspark.sql import SparkSession, functions as F
+        from pyspark.sql import Window
+        from pyspark.sql.types import Row
+
+        class _Imports:
+            pass
+
+        imports = _Imports()
+        imports.SparkSession = SparkSession  # type: ignore[attr-defined]
+        imports.F = F  # type: ignore[attr-defined]
+        imports.functions = F  # type: ignore[attr-defined]
+        imports.Window = Window  # type: ignore[attr-defined]
+        imports.Row = Row  # type: ignore[attr-defined]
+        return imports  # type: ignore[return-value]
+    else:
+        from sparkless.sql import SparkSession, functions as F
+        from sparkless.sql.window import Window
+        from sparkless.sql.types import Row
+
+        class _Imports:
+            pass
+
+        imports = _Imports()
+        imports.SparkSession = SparkSession  # type: ignore[attr-defined]
+        imports.F = F  # type: ignore[attr-defined]
+        imports.functions = F  # type: ignore[attr-defined]
+        imports.Window = Window  # type: ignore[attr-defined]
+        imports.Row = Row  # type: ignore[attr-defined]
+        return imports  # type: ignore[return-value]
+
+
+@pytest.fixture
+def isolated_session(request: pytest.FixtureRequest):
     """Create an isolated SparkSession for tests requiring isolation."""
-    import uuid
-
-    from tests.fixtures.spark_backend import BackendType
-    from tests.fixtures.spark_imports import get_spark_imports
-
-    SparkSession = get_spark_imports(BackendType.MOCK).SparkSession
+    mode = get_mode()
     session_name = f"test_isolated_{uuid.uuid4().hex[:8]}"
-    session = SparkSession(session_name)
-    _ensure_robin_backend_type(session)
-    if (
-        os.environ.get("SPARKLESS_TEST_BACKEND") or ""
-    ).strip().lower() == "robin" and getattr(session, "backend_type", None) != "robin":
-        raise RuntimeError(
-            f"Robin mode was requested but isolated_session has backend_type={getattr(session, 'backend_type', None)!r}."
-        )
+
+    try:
+        if _HAS_SPARKLESS_TESTING:
+            session = create_session(app_name=session_name, mode=mode)
+        elif mode == Mode.PYSPARK:
+            from pyspark.sql import SparkSession as PySparkSession
+            session = (
+                PySparkSession.builder
+                .master("local[1]")
+                .appName(session_name)
+                .config("spark.driver.bindAddress", "127.0.0.1")
+                .getOrCreate()
+            )
+        else:
+            from sparkless.sql import SparkSession
+            session = SparkSession.builder.app_name(session_name).get_or_create()
+    except (ImportError, RuntimeError) as e:
+        error_msg = str(e)
+        if "pyspark" in error_msg.lower() or "Java" in error_msg:
+            pytest.skip(f"Session creation failed: {e}")
+        raise
+
     yield session
     with contextlib.suppress(BaseException):
         session.stop()
@@ -237,101 +299,51 @@ def isolated_session():
 
 
 @pytest.fixture
-def spark(request):
-    """Unified SparkSession fixture. Uses tests.utils.get_spark when only env-based backend is needed."""
-    # When running from tests/python-style (no fixtures.spark_backend), use tests.utils.get_spark
-    try:
-        from tests.fixtures.spark_backend import (
-            SparkBackend,
-            BackendType,
-            get_backend_type,
-        )
-    except ImportError:
-        # Fallback: no fixtures, create session from env (pyspark vs sparkless)
-        _backend = (
-            (
-                os.getenv("MOCK_SPARK_TEST_BACKEND")
-                or os.getenv("SPARKLESS_TEST_BACKEND")
-                or ""
-            )
-            .strip()
-            .lower()
-        )
-        if _backend == "pyspark":
-            from pyspark.sql import SparkSession as _PySparkSession  # type: ignore[import-not-found]
+def spark(request: pytest.FixtureRequest):
+    """Unified SparkSession fixture. Uses SPARKLESS_TEST_MODE to select backend."""
+    mode = get_mode()
 
-            session = (
-                _PySparkSession.builder.appName("test")
-                .config("spark.driver.bindAddress", "127.0.0.1")
-                .getOrCreate()
-            )
-        else:
-            from sparkless.sql import SparkSession as _SparklessSession  # type: ignore[import-not-found]
+    # Check for @pytest.mark.backend marker (legacy support)
+    marker = request.node.get_closest_marker("backend")
+    if marker and marker.args:
+        marker_backend = marker.args[0].lower()
+        if marker_backend == "pyspark":
+            mode = Mode.PYSPARK
+        elif marker_backend in ("mock", "robin", "sparkless"):
+            mode = Mode.SPARKLESS
 
-            _builder = getattr(
-                _SparklessSession.builder,
-                "__call__",
-                lambda: _SparklessSession.builder,
-            )()
-            session = _builder.app_name("test").get_or_create()
-        yield session
-        with contextlib.suppress(BaseException):
-            session.stop()
-        gc.collect()
-        return
-
-    try:
-        backend = get_backend_type(request)
-    except (AttributeError, TypeError):
-        from tests.fixtures.spark_backend import BackendType
-
-        backend = BackendType.ROBIN
-
-    if backend == BackendType.BOTH:
-        backend = BackendType.MOCK
-
-    # Use one shared session per worker/run to speed test runs (table names must be unique via table_prefix)
-    if backend == BackendType.ROBIN and _use_shared_session():
-        session = request.getfixturevalue("_shared_robin_session")
-        if getattr(session, "backend_type", None) != "robin":
-            raise RuntimeError(
-                "Robin mode was requested but shared session has wrong backend_type."
-            )
+    # Use shared session if enabled
+    if mode == Mode.SPARKLESS and _use_shared_session():
+        session = request.getfixturevalue("_shared_sparkless_session")
         yield _SharedSessionWrapper(session)
         return
-    if backend == BackendType.PYSPARK and _use_shared_session():
+    if mode == Mode.PYSPARK and _use_shared_session():
         session = request.getfixturevalue("_shared_pyspark_session")
         yield _SharedSessionWrapper(session)
         return
 
+    # Create a new session
     test_name = "test_app"
     if hasattr(request, "node") and hasattr(request.node, "name"):
         test_name = f"test_{request.node.name[:50]}"
 
     try:
-        kwargs = {}
-        if backend == BackendType.PYSPARK:
-            kwargs["enable_delta"] = False
-        session = SparkBackend.create_session(
-            app_name=test_name,
-            backend=backend,
-            request=request if hasattr(request, "node") else None,
-            **kwargs,
-        )
-        if backend == BackendType.ROBIN:
-            try:
-                setattr(session, "backend_type", "robin")
-            except AttributeError:
-                pass
-        if backend == BackendType.ROBIN:
-            actual = getattr(session, "backend_type", None)
-            if actual != "robin":
-                raise RuntimeError(
-                    f"Robin mode was requested but session has backend_type={actual!r}. "
-                    "Tests must not silently run in polars/mock when SPARKLESS_TEST_BACKEND=robin."
-                )
-    except ValueError:
-        raise
+        if _HAS_SPARKLESS_TESTING:
+            session = create_session(app_name=test_name, mode=mode)
+        elif mode == Mode.PYSPARK:
+            from pyspark.sql import SparkSession as PySparkSession
+            session = (
+                PySparkSession.builder
+                .master("local[1]")
+                .appName(test_name)
+                .config("spark.driver.bindAddress", "127.0.0.1")
+                .config("spark.driver.host", "127.0.0.1")
+                .config("spark.ui.enabled", "false")
+                .getOrCreate()
+            )
+        else:
+            from sparkless.sql import SparkSession
+            session = SparkSession.builder.app_name(test_name).get_or_create()
     except (ImportError, RuntimeError) as e:
         error_msg = str(e)
         if (
@@ -352,53 +364,65 @@ def spark(request):
     gc.collect()
 
 
+# --- Legacy fixtures for backward compatibility ---
+
 @pytest.fixture
-def spark_backend(request):
-    """Get the current backend type being used."""
-    from tests.fixtures.spark_backend import get_backend_type
-
-    try:
-        return get_backend_type(request)
-    except (AttributeError, TypeError):
-        from tests.fixtures.spark_backend import BackendType
-
-        return BackendType.MOCK
+def spark_backend(request: pytest.FixtureRequest):
+    """Get the current backend type being used (legacy, returns Mode now)."""
+    return get_mode()
 
 
 @pytest.fixture
-def pyspark_session(request):
+def mock_spark_session(request: pytest.FixtureRequest):
+    """Create a sparkless SparkSession with automatic cleanup (legacy name)."""
+    if _HAS_SPARKLESS_TESTING:
+        session = create_session(app_name="test_app", mode=Mode.SPARKLESS)
+    else:
+        from sparkless.sql import SparkSession
+        session = SparkSession.builder.app_name("test_app").get_or_create()
+
+    yield session
+    with contextlib.suppress(BaseException):
+        session.stop()
+    gc.collect()
+
+
+@pytest.fixture
+def mock_spark(request: pytest.FixtureRequest):
+    """Provide sparkless session for compatibility tests (legacy name)."""
+    if _HAS_SPARKLESS_TESTING:
+        session = create_session(app_name="test_app", mode=Mode.SPARKLESS)
+    else:
+        from sparkless.sql import SparkSession
+        session = SparkSession.builder.app_name("test_app").get_or_create()
+
+    yield session
+    with contextlib.suppress(BaseException):
+        session.stop()
+    gc.collect()
+
+
+@pytest.fixture
+def pyspark_session(request: pytest.FixtureRequest):
     """Create a PySpark SparkSession for comparison testing."""
-    from tests.fixtures.spark_backend import SparkBackend
-
     try:
-        session = SparkBackend.create_pyspark_session("test_app", enable_delta=False)
+        if _HAS_SPARKLESS_TESTING:
+            session = create_session(app_name="test_app", mode=Mode.PYSPARK)
+        else:
+            from pyspark.sql import SparkSession as PySparkSession
+            session = (
+                PySparkSession.builder
+                .master("local[1]")
+                .appName("test_app")
+                .config("spark.driver.bindAddress", "127.0.0.1")
+                .getOrCreate()
+            )
         yield session
         with contextlib.suppress(BaseException):
             session.stop()
         gc.collect()
     except (ImportError, RuntimeError) as e:
         pytest.skip(f"PySpark not available: {e}")
-
-
-@pytest.fixture
-def mock_spark():
-    """Provide mock spark session for compatibility tests."""
-    from tests.fixtures.spark_backend import BackendType
-    from tests.fixtures.spark_imports import get_spark_imports
-
-    SparkSession = get_spark_imports(BackendType.MOCK).SparkSession
-    session = SparkSession("test_app")
-    _ensure_robin_backend_type(session)
-    if (
-        os.environ.get("SPARKLESS_TEST_BACKEND") or ""
-    ).strip().lower() == "robin" and getattr(session, "backend_type", None) != "robin":
-        raise RuntimeError(
-            f"Robin mode was requested but mock_spark has backend_type={getattr(session, 'backend_type', None)!r}."
-        )
-    yield session
-    with contextlib.suppress(BaseException):
-        session.stop()
-    gc.collect()
 
 
 @pytest.fixture
@@ -411,12 +435,9 @@ def temp_file_storage_path():
         yield storage_path
 
 
-def pytest_configure(config):
+def pytest_configure(config: pytest.Config) -> None:
     """Configure pytest with custom markers."""
-    _test_backend = (os.environ.get("SPARKLESS_TEST_BACKEND") or "").strip().lower()
-    if _test_backend in ("", "robin"):
-        os.environ["SPARKLESS_BACKEND"] = "robin"
-
+    # Register markers
     config.addinivalue_line(
         "markers", "delta: mark test as requiring Delta Lake (may be skipped)"
     )
@@ -435,9 +456,44 @@ def pytest_configure(config):
     )
     config.addinivalue_line(
         "markers",
-        "backend(mock|pyspark|both|robin): mark test to run with specific backend(s)",
+        "backend(sparkless|pyspark): mark test to run with specific backend",
+    )
+    config.addinivalue_line(
+        "markers",
+        "sparkless_only: mark test to run only in sparkless mode",
+    )
+    config.addinivalue_line(
+        "markers",
+        "pyspark_only: mark test to run only in PySpark mode",
     )
     config.addinivalue_line(
         "markers",
         "integration: mark test as integration test (may require external setup)",
     )
+
+
+def pytest_collection_modifyitems(
+    config: pytest.Config,
+    items: list[pytest.Item],
+) -> None:
+    """Skip tests based on mode markers."""
+    mode = get_mode()
+
+    skip_sparkless = pytest.mark.skip(
+        reason="Test marked sparkless_only, running in PySpark mode"
+    )
+    skip_pyspark = pytest.mark.skip(
+        reason="Test marked pyspark_only, running in sparkless mode"
+    )
+
+    for item in items:
+        if mode == Mode.PYSPARK and "sparkless_only" in item.keywords:
+            item.add_marker(skip_sparkless)
+        elif mode == Mode.SPARKLESS and "pyspark_only" in item.keywords:
+            item.add_marker(skip_pyspark)
+
+
+def pytest_report_header(config: pytest.Config) -> list[str]:
+    """Add sparkless testing info to pytest header."""
+    mode = get_mode()
+    return [f"sparkless.testing mode: {mode.value}"]
