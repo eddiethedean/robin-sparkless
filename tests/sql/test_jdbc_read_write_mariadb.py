@@ -1,9 +1,9 @@
 """JDBC read/write tests against MariaDB.
 
-These tests are feature-gated at runtime via SPARKLESS_TEST_JDBC_MARIADB_URL to avoid
-requiring a running MariaDB instance for all developers/CI jobs.
+These tests use testcontainers to automatically start a MariaDB container,
+or fall back to SPARKLESS_TEST_JDBC_MARIADB_URL environment variable if set.
 
-Required tables (see tests/sql/ddl/mariadb.sql):
+Required tables (created automatically by testcontainers fixture):
   - sparkless_jdbc_test (id BIGINT PRIMARY KEY, name TEXT) — for read/append
   - sparkless_jdbc_writeread_test (id BIGINT, name TEXT) — for overwrite/read-back
 """
@@ -14,30 +14,43 @@ import os
 
 import pytest
 
-
-pytestmark = pytest.mark.skipif(
-    "SPARKLESS_TEST_JDBC_MARIADB_URL" not in os.environ,
-    reason="SPARKLESS_TEST_JDBC_MARIADB_URL is not set; skipping JDBC MariaDB integration tests.",
-)
+_HAS_ENV_URL = "SPARKLESS_TEST_JDBC_MARIADB_URL" in os.environ
 
 
-def _jdbc_url() -> str:
-    return os.environ["SPARKLESS_TEST_JDBC_MARIADB_URL"]
+def _use_env_url() -> bool:
+    return _HAS_ENV_URL
 
 
-def _jdbc_props() -> dict[str, str]:
-    return {
-        "user": os.getenv("SPARKLESS_TEST_JDBC_MARIADB_USER", ""),
-        "password": os.getenv("SPARKLESS_TEST_JDBC_MARIADB_PASSWORD", ""),
-        "driver": "org.mariadb.jdbc.Driver",
-    }
+@pytest.fixture
+def jdbc_url(request, spark):
+    """Get JDBC URL - from env var or testcontainers fixture."""
+    if _use_env_url():
+        return os.environ["SPARKLESS_TEST_JDBC_MARIADB_URL"]
+    try:
+        conn = request.getfixturevalue("mariadb_jdbc")
+        return conn.url
+    except pytest.FixtureLookupError:
+        pytest.skip("MariaDB container not available and SPARKLESS_TEST_JDBC_MARIADB_URL not set")
 
 
-def test_read_jdbc_table_round_trip(spark) -> None:
-    url = _jdbc_url()
-    props = _jdbc_props()
+@pytest.fixture
+def jdbc_props(request):
+    """Get JDBC properties - from env var or testcontainers fixture."""
+    if _use_env_url():
+        return {
+            "user": os.getenv("SPARKLESS_TEST_JDBC_MARIADB_USER", ""),
+            "password": os.getenv("SPARKLESS_TEST_JDBC_MARIADB_PASSWORD", ""),
+            "driver": "org.mariadb.jdbc.Driver",
+        }
+    try:
+        conn = request.getfixturevalue("mariadb_jdbc")
+        return conn.properties
+    except pytest.FixtureLookupError:
+        return {"driver": "org.mariadb.jdbc.Driver"}
 
-    df = spark.read.jdbc(url=url, table="sparkless_jdbc_test", properties=props)
+
+def test_read_jdbc_table_round_trip(spark, jdbc_url, jdbc_props) -> None:
+    df = spark.read.jdbc(url=jdbc_url, table="sparkless_jdbc_test", properties=jdbc_props)
     rows = df.collect()
     assert isinstance(rows, list)
     assert len(rows) >= 2
@@ -45,15 +58,12 @@ def test_read_jdbc_table_round_trip(spark) -> None:
     assert "id" in schema_names and "name" in schema_names
 
 
-def test_read_jdbc_via_format_options_load(spark) -> None:
-    url = _jdbc_url()
-    props = _jdbc_props()
-
+def test_read_jdbc_via_format_options_load(spark, jdbc_url, jdbc_props) -> None:
     df = (
         spark.read.format("jdbc")
-        .option("url", url)
+        .option("url", jdbc_url)
         .option("dbtable", "sparkless_jdbc_test")
-        .options(props)
+        .options(jdbc_props)
         .load(".")
     )
     rows = df.collect()
@@ -61,15 +71,12 @@ def test_read_jdbc_via_format_options_load(spark) -> None:
     assert len(rows) >= 2
 
 
-def test_read_jdbc_with_query_option(spark) -> None:
-    url = _jdbc_url()
-    props = _jdbc_props()
-
+def test_read_jdbc_with_query_option(spark, jdbc_url, jdbc_props) -> None:
     df = (
         spark.read.format("jdbc")
-        .option("url", url)
+        .option("url", jdbc_url)
         .option("query", "SELECT id, name FROM sparkless_jdbc_test WHERE id = 1")
-        .options(props)
+        .options(jdbc_props)
         .load(".")
     )
     rows = df.collect()
@@ -80,16 +87,13 @@ def test_read_jdbc_with_query_option(spark) -> None:
         assert row["id"] == 1 or row["id"] == "1"
 
 
-def test_write_jdbc_append(spark) -> None:
-    url = _jdbc_url()
-    props = _jdbc_props()
-
+def test_write_jdbc_append(spark, jdbc_url, jdbc_props) -> None:
     df = spark.createDataFrame(
         [(100, "append_a"), (101, "append_b")], schema="id bigint, name string"
     )
-    df.write.jdbc(url=url, table="sparkless_jdbc_test", properties=props, mode="append")
+    df.write.jdbc(url=jdbc_url, table="sparkless_jdbc_test", properties=jdbc_props, mode="append")
 
-    read_df = spark.read.jdbc(url=url, table="sparkless_jdbc_test", properties=props)
+    read_df = spark.read.jdbc(url=jdbc_url, table="sparkless_jdbc_test", properties=jdbc_props)
     rows = read_df.collect()
     assert len(rows) >= 2
 
@@ -102,16 +106,14 @@ def _norm_id(val) -> int | None:
     return int(val)
 
 
-def test_write_then_read_back(spark) -> None:
-    url = _jdbc_url()
-    props = _jdbc_props()
+def test_write_then_read_back(spark, jdbc_url, jdbc_props) -> None:
     table = "sparkless_jdbc_writeread_test"
 
     data = [(10, "ten"), (20, "twenty")]
     df = spark.createDataFrame(data, schema="id bigint, name string")
-    df.write.jdbc(url=url, table=table, properties=props, mode="overwrite")
+    df.write.jdbc(url=jdbc_url, table=table, properties=jdbc_props, mode="overwrite")
 
-    read_df = spark.read.jdbc(url=url, table=table, properties=props)
+    read_df = spark.read.jdbc(url=jdbc_url, table=table, properties=jdbc_props)
     rows = read_df.collect()
     assert len(rows) == 2
     ids = {_norm_id(r["id"]) for r in rows}

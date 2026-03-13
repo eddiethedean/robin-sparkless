@@ -1798,7 +1798,7 @@ fn normalize_create_dataframe_input<'py>(
 /// If data is a pandas DataFrame, convert to list of dicts via to_dict("records").
 /// Returns (converted list, true, Some(column_names_in_order)) when from pandas (#1151).
 fn maybe_convert_pandas_to_list<'py>(
-    _py: Python<'py>,
+    py: Python<'py>,
     data: &Bound<'py, PyAny>,
 ) -> PyResult<(Bound<'py, PyAny>, bool, Option<Vec<String>>)> {
     let to_dict = match data.getattr("to_dict") {
@@ -1819,10 +1819,47 @@ fn maybe_convert_pandas_to_list<'py>(
         Err(_) => return Ok((data.clone(), false, None)),
     };
     if records.downcast::<PyList>().is_ok() {
-        Ok((records, true, pandas_columns))
+        // pandas uses NaN for missing values in object (string) columns.
+        // Replace NaN values with None so they become null in the DataFrame.
+        // This fixes the issue where str(float('nan')) == 'nan' instead of None.
+        let cleaned = replace_nan_with_none_in_records(py, &records)?;
+        Ok((cleaned, true, pandas_columns))
     } else {
         Ok((data.clone(), false, None))
     }
+}
+
+/// Replace float NaN values with None in a list of dicts (pandas records).
+/// This is needed because pandas uses NaN for missing values in object columns.
+fn replace_nan_with_none_in_records<'py>(
+    py: Python<'py>,
+    records: &Bound<'py, PyAny>,
+) -> PyResult<Bound<'py, PyAny>> {
+    let list = records.downcast::<PyList>()?;
+    let result = PyList::empty_bound(py);
+
+    for record in list.iter() {
+        if let Ok(dict) = record.downcast::<PyDict>() {
+            let new_dict = PyDict::new_bound(py);
+            for (k, v) in dict.iter() {
+                // Check if value is a float NaN
+                let is_nan = if let Ok(f) = v.extract::<f64>() {
+                    f.is_nan()
+                } else {
+                    false
+                };
+                if is_nan {
+                    new_dict.set_item(k, py.None())?;
+                } else {
+                    new_dict.set_item(k, v)?;
+                }
+            }
+            result.append(new_dict)?;
+        } else {
+            result.append(record)?;
+        }
+    }
+    Ok(result.into_any())
 }
 
 #[allow(clippy::type_complexity)]
@@ -2406,6 +2443,16 @@ fn python_row_to_json(
 
 fn py_any_to_json(_py: Python<'_>, v: &Bound<'_, PyAny>) -> PyResult<JsonValue> {
     if v.is_none() {
+        return Ok(JsonValue::Null);
+    }
+    // Check for pandas NA/NaT (pd.NA, pd.NaT) which should be treated as null.
+    // These have a type name containing "NA" or "NaT" and are not extractable as normal types.
+    let type_name = v
+        .get_type()
+        .name()
+        .map(|s| s.to_string())
+        .unwrap_or_default();
+    if type_name == "NAType" || type_name == "NaTType" {
         return Ok(JsonValue::Null);
     }
     if let Ok(b) = v.extract::<bool>() {

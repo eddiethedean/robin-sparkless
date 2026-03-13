@@ -21,7 +21,23 @@ classifiers = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest", "pandas", "pytest-xdist", "hypothesis", "pytest-timeout", "polars"]
+dev = [
+    "pytest",
+    "pandas",
+    "pytest-xdist",
+    "hypothesis",
+    "pytest-timeout",
+    "polars",
+    "pyarrow",
+]
+# JDBC integration tests using testcontainers (requires Docker)
+jdbc = [
+    "testcontainers",
+    "psycopg2-binary",  # PostgreSQL
+    "pymysql",          # MySQL/MariaDB
+    "pymssql",          # SQL Server
+    "oracledb",         # Oracle
+]
 # Run Python tests with real PySpark (SPARKLESS_TEST_BACKEND=pyspark or MOCK_SPARK_TEST_BACKEND=pyspark); requires Java.
 pyspark = ["pyspark>=3.5,<3.6", "delta-spark>=3.0,<4"]
 
