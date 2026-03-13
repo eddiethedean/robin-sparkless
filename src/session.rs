@@ -332,6 +332,11 @@ impl SparkSession {
     pub fn stop(&self) {
         self.0.stop()
     }
+
+    /// Get the UDF registry. Used internally for thread context management.
+    pub fn udf_registry(&self) -> &robin_sparkless_polars::UdfRegistry {
+        self.0.udf_registry()
+    }
 }
 
 impl DataFrameReader {

@@ -66,3 +66,8 @@ pub fn update_thread_session_time_zone(tz: Option<String>) {
         }
     });
 }
+
+/// Clear the thread-local UDF context. Called when session.stop() is invoked.
+pub fn clear_thread_udf_context() {
+    THREAD_UDF_CONTEXT.with(|cell| *cell.borrow_mut() = None);
+}

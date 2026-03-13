@@ -136,6 +136,11 @@ pub fn to_engine_error(e: PolarsError) -> EngineError {
     robin_sparkless_polars::polars_to_core_error(e)
 }
 
+// Re-export thread UDF context functions for test isolation fix
+pub use robin_sparkless_polars::{
+    clear_thread_udf_context, set_thread_udf_context, set_thread_udf_context_with_tz,
+};
+
 #[cfg(feature = "sql")]
 pub mod sql {
     //! SQL parsing and execution; returns root-owned DataFrame.

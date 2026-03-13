@@ -16,11 +16,6 @@ F = _imports.F
 class TestStringConcatenationCacheEdgeCases:
     """Test edge cases for string concatenation cache handling."""
 
-    @pytest.fixture
-    def spark(self, request):
-        """Use conftest spark fixture."""
-        return request.getfixturevalue("spark")
-
     def test_string_concat_with_empty_strings(self, spark):
         """Test string concatenation with empty strings in cached DataFrame."""
         df = spark.createDataFrame([("", ""), ("a", ""), ("", "b")], ["col1", "col2"])
