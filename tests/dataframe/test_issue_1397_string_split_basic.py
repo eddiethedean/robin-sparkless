@@ -17,20 +17,19 @@ DataFrame with an array<string> column.
 
 from __future__ import annotations
 
-from sparkless.sql import SparkSession, functions as F
+import pytest
+
+from sparkless.sql import functions as F
 
 
-def test_issue_1397_string_split_basic_no_unresolved_column_error() -> None:
-    spark = SparkSession.builder.appName("issue_1397_string_split_basic").getOrCreate()
-    try:
-        df = spark.createDataFrame(
-            [("a,b,c",), ("a",), (None,)],
-            ["s"],
-        )
-        out = df.select(F.split("s", ",").alias("arr")).orderBy("s")
+@pytest.mark.sparkless_only
+def test_issue_1397_string_split_basic_no_unresolved_column_error(spark) -> None:
+    df = spark.createDataFrame(
+        [("a,b,c",), ("a",), (None,)],
+        ["s"],
+    )
+    out = df.select(F.split("s", ",").alias("arr")).orderBy("s")
 
-        rows = list(out.collect())
-        assert len(rows) == 3
-        assert out.schema.simpleString() == "struct<arr:array<string>>"
-    finally:
-        spark.stop()
+    rows = list(out.collect())
+    assert len(rows) == 3
+    assert out.schema.simpleString() == "struct<arr:array<string>>"

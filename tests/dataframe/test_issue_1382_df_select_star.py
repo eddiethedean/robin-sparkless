@@ -14,28 +14,25 @@ This test exercises the same scenario against sparkless, ensuring that:
 - ``df.explain()`` on the selected DataFrame returns a non-empty plan string.
 """
 
-from sparkless.sql import SparkSession
+import pytest
 
 
-def test_issue_1382_select_star_schema_and_explain() -> None:
+@pytest.mark.sparkless_only
+def test_issue_1382_select_star_schema_and_explain(spark) -> None:
     """df.select_star: select(\"*\") + schema + explain should behave sensibly (issue #1382)."""
-    spark = SparkSession.builder.appName("issue_1382").getOrCreate()
-    try:
-        df = spark.createDataFrame([(1, 2, 3)], ["a", "b", "c"])
+    df = spark.createDataFrame([(1, 2, 3)], ["a", "b", "c"])
 
-        # select("*") should not raise and should preserve all columns.
-        result = df.select("*")
+    # select("*") should not raise and should preserve all columns.
+    result = df.select("*")
 
-        # Schema simpleString should match the existing struct<long> representation.
-        schema_str = result.schema.simpleString()
-        assert schema_str == "struct<a:long,b:long,c:long>"
+    # Schema simpleString should match the existing struct<long> representation.
+    schema_str = result.schema.simpleString()
+    assert schema_str == "struct<a:long,b:long,c:long>"
 
-        # explain() should produce a non-empty plan string (no blank UI).
-        plan = result.explain()
-        assert isinstance(plan, str)
-        assert plan.strip() != ""
+    # explain() should produce a non-empty plan string (no blank UI).
+    plan = result.explain()
+    assert isinstance(plan, str)
+    assert plan.strip() != ""
 
-        # show() should also work without raising for completeness.
-        result.show()
-    finally:
-        spark.stop()
+    # show() should also work without raising for completeness.
+    result.show()

@@ -19,16 +19,15 @@ produce the squared values.
 
 from __future__ import annotations
 
-from sparkless.sql import SparkSession, functions as F
+import pytest
+
+from sparkless.sql import functions as F
 
 
-def test_issue_1389_pow_orderby_non_selected_column() -> None:
-    spark = SparkSession.builder.appName("issue_1389_pow_orderby").getOrCreate()
-    try:
-        df = spark.createDataFrame([(3,), (5,)], ["x"])
-        out = df.select((F.col("x") ** F.lit(2)).alias("sq")).orderBy("x")
+@pytest.mark.sparkless_only
+def test_issue_1389_pow_orderby_non_selected_column(spark) -> None:
+    df = spark.createDataFrame([(3,), (5,)], ["x"])
+    out = df.select((F.col("x") ** F.lit(2)).alias("sq")).orderBy("x")
 
-        rows = list(out.collect())
-        assert [r["sq"] for r in rows] == [9, 25]
-    finally:
-        spark.stop()
+    rows = list(out.collect())
+    assert [r["sq"] for r in rows] == [9, 25]

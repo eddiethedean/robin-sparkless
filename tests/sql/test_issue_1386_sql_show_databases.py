@@ -14,28 +14,25 @@ This test exercises the same scenario against sparkless, ensuring that:
 - ``explain()`` returns a non-empty plan string (no blank UI).
 """
 
-from sparkless.sql import SparkSession
+import pytest
 
 
-def test_issue_1386_sql_show_databases_schema_data_and_explain() -> None:
+@pytest.mark.sparkless_only
+def test_issue_1386_sql_show_databases_schema_data_and_explain(spark) -> None:
     """sql.show_databases: schema, data, and explain behavior (issue #1386)."""
-    spark = SparkSession.builder.appName("issue_1386").getOrCreate()
-    try:
-        df = spark.sql("SHOW DATABASES")
+    df = spark.sql("SHOW DATABASES")
 
-        # Schema simpleString should match the current struct representation.
-        schema_str = df.schema.simpleString()
-        assert schema_str == "struct<databaseName:string>"
+    # Schema simpleString should match the current struct representation.
+    schema_str = df.schema.simpleString()
+    assert schema_str == "struct<databaseName:string>"
 
-        # Data should include both default and global_temp namespaces.
-        rows = df.collect()
-        names = [row["databaseName"] for row in rows]
-        assert "default" in names
-        assert "global_temp" in names
+    # Data should include both default and global_temp namespaces.
+    rows = df.collect()
+    names = [row["databaseName"] for row in rows]
+    assert "default" in names
+    assert "global_temp" in names
 
-        # explain() should produce a non-empty plan string.
-        plan = df.explain()
-        assert isinstance(plan, str)
-        assert plan.strip() != ""
-    finally:
-        spark.stop()
+    # explain() should produce a non-empty plan string.
+    plan = df.explain()
+    assert isinstance(plan, str)
+    assert plan.strip() != ""

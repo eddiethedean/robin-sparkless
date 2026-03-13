@@ -15,24 +15,21 @@ This test locks in that behavior for Sparkless.
 
 from __future__ import annotations
 
-from sparkless.sql import SparkSession, functions as F
+import pytest
+
+from sparkless.sql import functions as F
 
 
-def test_issue_1396_string_regexp_extract_null_and_no_match() -> None:
-    spark = SparkSession.builder.appName(
-        "issue_1396_string_regexp_extract"
-    ).getOrCreate()
-    try:
-        df = spark.createDataFrame(
-            [("abc123",), ("zzz",), (None,)],
-            ["s"],
-        )
-        out = df.select(F.regexp_extract("s", r"(\d+)$", 1).alias("out"))
+@pytest.mark.sparkless_only
+def test_issue_1396_string_regexp_extract_null_and_no_match(spark) -> None:
+    df = spark.createDataFrame(
+        [("abc123",), ("zzz",), (None,)],
+        ["s"],
+    )
+    out = df.select(F.regexp_extract("s", r"(\d+)$", 1).alias("out"))
 
-        # Preserve input order to make expectations clear.
-        rows = [r["out"] for r in out.collect()]
-        # Match expected PySpark behavior for this pattern: non-matching input
-        # yields empty string; null input yields null.
-        assert rows == ["123", "", None]
-    finally:
-        spark.stop()
+    # Preserve input order to make expectations clear.
+    rows = [r["out"] for r in out.collect()]
+    # Match expected PySpark behavior for this pattern: non-matching input
+    # yields empty string; null input yields null.
+    assert rows == ["123", "", None]

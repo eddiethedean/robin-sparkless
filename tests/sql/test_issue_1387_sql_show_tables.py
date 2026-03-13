@@ -15,31 +15,28 @@ This test exercises the same scenario against sparkless, ensuring that:
 - ``explain()`` returns a non-empty plan string (no blank UI).
 """
 
-from sparkless.sql import SparkSession
+import pytest
 
 
-def test_issue_1387_sql_show_tables_schema_data_and_explain() -> None:
+@pytest.mark.sparkless_only
+def test_issue_1387_sql_show_tables_schema_data_and_explain(spark) -> None:
     """sql.show_tables: schema, basic data, and explain behavior (issue #1387)."""
-    spark = SparkSession.builder.appName("issue_1387").getOrCreate()
-    try:
-        df = spark.sql("SHOW TABLES")
+    df = spark.sql("SHOW TABLES")
 
-        # Schema simpleString should match the current struct representation.
-        # Sparkless today uses `database` rather than PySpark's `namespace`.
-        schema_str = df.schema.simpleString()
-        assert (
-            schema_str == "struct<database:string,tableName:string,isTemporary:boolean>"
-        )
+    # Schema simpleString should match the current struct representation.
+    # Sparkless today uses `database` rather than PySpark's `namespace`.
+    schema_str = df.schema.simpleString()
+    assert (
+        schema_str == "struct<database:string,tableName:string,isTemporary:boolean>"
+    )
 
-        # Data: content may vary by environment (e.g., empty catalog vs. pre-populated),
-        # so we only assert that the query returns a DataFrame and do not require a
-        # specific database name.
-        rows = df.collect()
-        assert isinstance(rows, list)
+    # Data: content may vary by environment (e.g., empty catalog vs. pre-populated),
+    # so we only assert that the query returns a DataFrame and do not require a
+    # specific database name.
+    rows = df.collect()
+    assert isinstance(rows, list)
 
-        # explain() should produce a non-empty plan string.
-        plan = df.explain()
-        assert isinstance(plan, str)
-        assert plan.strip() != ""
-    finally:
-        spark.stop()
+    # explain() should produce a non-empty plan string.
+    plan = df.explain()
+    assert isinstance(plan, str)
+    assert plan.strip() != ""

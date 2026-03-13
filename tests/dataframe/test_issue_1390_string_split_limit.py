@@ -18,34 +18,33 @@ This test locks in Sparkless behavior for:
 
 from __future__ import annotations
 
-from sparkless.sql import SparkSession, functions as F
+import pytest
+
+from sparkless.sql import functions as F
 
 
-def test_issue_1390_split_limit_schema_and_explain() -> None:
-    spark = SparkSession.builder.appName("issue_1390_split_limit").getOrCreate()
-    try:
-        df = spark.createDataFrame([("a,b,c,d",)], ["s"])
-        out = df.select(F.split(F.col("s"), ",", 2).alias("arr"))
+@pytest.mark.sparkless_only
+def test_issue_1390_split_limit_schema_and_explain(spark) -> None:
+    df = spark.createDataFrame([("a,b,c,d",)], ["s"])
+    out = df.select(F.split(F.col("s"), ",", 2).alias("arr"))
 
-        # Schema simpleString parity (existing behavior)
-        assert out.schema.simpleString() == "struct<arr:array<string>>"
+    # Schema simpleString parity (existing behavior)
+    assert out.schema.simpleString() == "struct<arr:array<string>>"
 
-        # Schema JSON parity: ArrayType(elementType=string, containsNull=False)
-        schema_json = out.schema.jsonValue()
-        assert schema_json["type"] == "struct"
-        assert len(schema_json["fields"]) == 1
-        field = schema_json["fields"][0]
-        assert field["name"] == "arr"
-        assert field["nullable"] is True
-        assert field["metadata"] == {}
-        field_type = field["type"]
-        assert field_type["type"] == "array"
-        assert field_type["elementType"] == "string"
-        assert field_type["containsNull"] is False
+    # Schema JSON parity: ArrayType(elementType=string, containsNull=False)
+    schema_json = out.schema.jsonValue()
+    assert schema_json["type"] == "struct"
+    assert len(schema_json["fields"]) == 1
+    field = schema_json["fields"][0]
+    assert field["name"] == "arr"
+    assert field["nullable"] is True
+    assert field["metadata"] == {}
+    field_type = field["type"]
+    assert field_type["type"] == "array"
+    assert field_type["elementType"] == "string"
+    assert field_type["containsNull"] is False
 
-        # UI / explain parity: explain() should emit a non-empty description (return value).
-        explain_str = out.explain(True)
-        assert isinstance(explain_str, str)
-        assert explain_str.strip() != ""
-    finally:
-        spark.stop()
+    # UI / explain parity: explain() should emit a non-empty description (return value).
+    explain_str = out.explain(True)
+    assert isinstance(explain_str, str)
+    assert explain_str.strip() != ""

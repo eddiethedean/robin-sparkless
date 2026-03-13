@@ -19,19 +19,18 @@ This test locks in three expectations:
 
 from __future__ import annotations
 
-from sparkless.sql import SparkSession, functions as F
+import pytest
+
+from sparkless.sql import functions as F
 
 
-def test_issue_1400_numeric_pmod_values() -> None:
-    spark = SparkSession.builder.appName("issue_1400_numeric_pmod").getOrCreate()
-    try:
-        df = spark.createDataFrame(
-            [(-5, 3), (5, 3), (None, 3)],
-            ["a", "b"],
-        )
-        out = df.select(F.pmod("a", "b").alias("out"))
+@pytest.mark.sparkless_only
+def test_issue_1400_numeric_pmod_values(spark) -> None:
+    df = spark.createDataFrame(
+        [(-5, 3), (5, 3), (None, 3)],
+        ["a", "b"],
+    )
+    out = df.select(F.pmod("a", "b").alias("out"))
 
-        rows = [r["out"] for r in out.collect()]
-        assert rows == [1, 2, None]
-    finally:
-        spark.stop()
+    rows = [r["out"] for r in out.collect()]
+    assert rows == [1, 2, None]

@@ -15,25 +15,22 @@ This test exercises the same scenario against sparkless, ensuring that:
 - ``df.explain()`` returns a non-empty plan string (no blank UI).
 """
 
-from sparkless.sql import SparkSession
+import pytest
 
 
-def test_issue_1381_show_truncate_schema_and_explain() -> None:
+@pytest.mark.sparkless_only
+def test_issue_1381_show_truncate_schema_and_explain(spark) -> None:
     """ui.show_truncate: show + schema + explain should behave sensibly (issue #1381)."""
-    spark = SparkSession.builder.appName("issue_1381").getOrCreate()
-    try:
-        df = spark.createDataFrame([("x" * 200,)], ["s"])
+    df = spark.createDataFrame([("x" * 200,)], ["s"])
 
-        # show() should not raise, even with long strings.
-        df.show()
+    # show() should not raise, even with long strings.
+    df.show()
 
-        # Schema simpleString should match the existing struct<string> representation.
-        schema_str = df.schema.simpleString()
-        assert schema_str == "struct<s:string>"
+    # Schema simpleString should match the existing struct<string> representation.
+    schema_str = df.schema.simpleString()
+    assert schema_str == "struct<s:string>"
 
-        # explain() should produce a non-empty plan string (no blank UI).
-        plan = df.explain()
-        assert isinstance(plan, str)
-        assert plan.strip() != ""
-    finally:
-        spark.stop()
+    # explain() should produce a non-empty plan string (no blank UI).
+    plan = df.explain()
+    assert isinstance(plan, str)
+    assert plan.strip() != ""

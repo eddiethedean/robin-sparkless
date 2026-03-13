@@ -19,29 +19,26 @@ an integral type (bigint in PySpark, LongType in Sparkless).
 
 from __future__ import annotations
 
-from sparkless.sql import SparkSession, functions as F
+import pytest
+
+from sparkless.sql import functions as F
 from sparkless.sql.types import LongType
 
 
-def test_issue_1398_numeric_floor_schema_is_long() -> None:
-    spark = SparkSession.builder.appName(
-        "issue_1398_numeric_floor_schema"
-    ).getOrCreate()
-    try:
-        df = spark.createDataFrame(
-            [(1.9,), (-1.1,), (None,)],
-            ["x"],
-        )
-        out = df.select(F.floor("x").alias("out"))
+@pytest.mark.sparkless_only
+def test_issue_1398_numeric_floor_schema_is_long(spark) -> None:
+    df = spark.createDataFrame(
+        [(1.9,), (-1.1,), (None,)],
+        ["x"],
+    )
+    out = df.select(F.floor("x").alias("out"))
 
-        # Value semantics: floor matches PySpark (sanity check).
-        rows = [r["out"] for r in out.collect()]
-        assert rows == [1, -2, None]
+    # Value semantics: floor matches PySpark (sanity check).
+    rows = [r["out"] for r in out.collect()]
+    assert rows == [1, -2, None]
 
-        # Schema parity: floor outputs an integral type. Sparkless uses LongType()
-        # with simpleString \"long\"; PySpark reports bigint. We assert LongType
-        # here, and higher-level parity harness can remap \"long\" vs \"bigint\".
-        field = out.schema.fields[0]
-        assert isinstance(field.dataType, LongType)
-    finally:
-        spark.stop()
+    # Schema parity: floor outputs an integral type. Sparkless uses LongType()
+    # with simpleString \"long\"; PySpark reports bigint. We assert LongType
+    # here, and higher-level parity harness can remap \"long\" vs \"bigint\".
+    field = out.schema.fields[0]
+    assert isinstance(field.dataType, LongType)

@@ -26,23 +26,22 @@ This test locks in the PySpark semantics:
 
 from __future__ import annotations
 
-from sparkless.sql import SparkSession, functions as F
+import pytest
+
+from sparkless.sql import functions as F
 
 
-def test_issue_1395_string_concat_ws_null_handling() -> None:
-    spark = SparkSession.builder.appName("issue_1395_string_concat_ws").getOrCreate()
-    try:
-        df = spark.createDataFrame(
-            [("a", "b"), ("a", None), (None, "c")],
-            ["a", "b"],
-        )
-        out = df.select(F.concat_ws("-", "a", "b").alias("out"))
+@pytest.mark.sparkless_only
+def test_issue_1395_string_concat_ws_null_handling(spark) -> None:
+    df = spark.createDataFrame(
+        [("a", "b"), ("a", None), (None, "c")],
+        ["a", "b"],
+    )
+    out = df.select(F.concat_ws("-", "a", "b").alias("out"))
 
-        rows = [{k: v for k, v in r.asDict().items()} for r in out.collect()]
-        assert rows == [
-            {"out": "a-b"},
-            {"out": "a"},
-            {"out": "c"},
-        ]
-    finally:
-        spark.stop()
+    rows = [{k: v for k, v in r.asDict().items()} for r in out.collect()]
+    assert rows == [
+        {"out": "a-b"},
+        {"out": "a"},
+        {"out": "c"},
+    ]
