@@ -59,7 +59,7 @@ def _create_sparkless_session(app_name: str = "test", **config: Any) -> Any:
 
     Args:
         app_name: Application name for the session.
-        **config: Additional configuration (currently unused for sparkless).
+        **config: Additional Spark configuration key-value pairs.
 
     Returns:
         SparkSession: A sparkless SparkSession instance.
@@ -67,6 +67,11 @@ def _create_sparkless_session(app_name: str = "test", **config: Any) -> Any:
     from sparkless.sql import SparkSession
 
     builder = SparkSession.builder.app_name(app_name)
+
+    # Apply additional config
+    for key, value in config.items():
+        builder = builder.config(key, str(value))
+
     return builder.get_or_create()
 
 

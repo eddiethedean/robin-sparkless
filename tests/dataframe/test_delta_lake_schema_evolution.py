@@ -240,7 +240,7 @@ class TestDeltaLakeSchemaEvolution:
         except Exception:
             pass
 
-    def test_delta_create_or_replace_table_as_select(self, spark):
+    def test_delta_create_or_replace_table_as_select(self):
         """CTAS with OR REPLACE should allow schema evolution for Delta tables."""
         if _backend != Mode.SPARKLESS:
             pytest.skip(
@@ -248,40 +248,53 @@ class TestDeltaLakeSchemaEvolution:
             )
 
         import uuid
+        import tempfile
+        import shutil
 
-        table_suffix = str(uuid.uuid4()).replace("-", "_")[:8]
-        schema_name = f"ctas_schema_{table_suffix}"
-        table_name = f"{schema_name}.clean_events"
-
-        spark.sql(f"CREATE SCHEMA IF NOT EXISTS {schema_name}")
-
-        base_df = spark.createDataFrame(
-            [("u1", "Alice", 100), ("u2", "Bob", 200)],
-            ["user_id", "name", "value"],
-        )
-        base_df.write.format("delta").mode("overwrite").saveAsTable(table_name)
-
-        spark.sql(
-            f"""
-            CREATE OR REPLACE TABLE {table_name}
-            USING delta AS
-            SELECT user_id, name, value, '2025-01-01' AS processed_at
-            FROM {table_name}
-            """
-        )
-
-        result = spark.table(table_name)
-        assert set(result.columns) == {"user_id", "name", "value", "processed_at"}
-        rows = {r["user_id"]: r for r in result.collect()}
-        assert rows["u1"]["processed_at"] == "2025-01-01"
-        assert rows["u2"]["processed_at"] == "2025-01-01"
-        assert result.count() == 2
+        # Create a temporary warehouse directory for this test
+        warehouse_dir = tempfile.mkdtemp(prefix="delta_ctas_test_")
 
         try:
-            spark.sql(f"DROP TABLE IF EXISTS {table_name}")
-            spark.sql(f"DROP SCHEMA IF EXISTS {schema_name}")
-        except Exception:
-            pass
+            # Create a session with warehouse directory configured
+            session_config = {"spark.sql.warehouse.dir": warehouse_dir}
+            spark = create_session(app_name="delta_ctas_test", **session_config)
+
+            table_suffix = str(uuid.uuid4()).replace("-", "_")[:8]
+            schema_name = f"ctas_schema_{table_suffix}"
+            table_name = f"{schema_name}.clean_events"
+
+            spark.sql(f"CREATE SCHEMA IF NOT EXISTS {schema_name}")
+
+            base_df = spark.createDataFrame(
+                [("u1", "Alice", 100), ("u2", "Bob", 200)],
+                ["user_id", "name", "value"],
+            )
+            base_df.write.format("delta").mode("overwrite").saveAsTable(table_name)
+
+            spark.sql(
+                f"""
+                CREATE OR REPLACE TABLE {table_name}
+                USING delta AS
+                SELECT user_id, name, value, '2025-01-01' AS processed_at
+                FROM {table_name}
+                """
+            )
+
+            result = spark.table(table_name)
+            assert set(result.columns) == {"user_id", "name", "value", "processed_at"}
+            rows = {r["user_id"]: r for r in result.collect()}
+            assert rows["u1"]["processed_at"] == "2025-01-01"
+            assert rows["u2"]["processed_at"] == "2025-01-01"
+            assert result.count() == 2
+
+            try:
+                spark.sql(f"DROP TABLE IF EXISTS {table_name}")
+                spark.sql(f"DROP SCHEMA IF EXISTS {schema_name}")
+            except Exception:
+                pass
+        finally:
+            # Clean up the temporary warehouse directory
+            shutil.rmtree(warehouse_dir, ignore_errors=True)
 
     def test_immediate_table_access(self, spark):
         """Test that table is immediately accessible after saveAsTable."""
