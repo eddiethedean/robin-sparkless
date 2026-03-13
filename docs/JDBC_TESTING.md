@@ -131,40 +131,35 @@ Each backend uses its own `SPARKLESS_TEST_JDBC_<DB>_URL`, `_USER`, `_PASSWORD`:
 
 ## Local Setup with Docker
 
-Each backend has its own Docker Compose file under the repo root:
+**NOTE:** Tests use `testcontainers` by default, which automatically starts Docker containers. Manual setup is only needed for debugging or when testcontainers isn't available.
 
-| Backend | Compose File | DDL Script |
-|---------|--------------|------------|
-| PostgreSQL | `docker-compose.jdbc.yml` | SQL in this doc |
-| MySQL | `docker-compose.jdbc.mysql.yml` | `tests/sql/ddl/mysql.sql` |
-| MariaDB | `docker-compose.jdbc.mariadb.yml` | `tests/sql/ddl/mariadb.sql` |
-| SQL Server | `docker-compose.jdbc.mssql.yml` | `tests/sql/ddl/mssql.sql` |
-| Oracle | `docker-compose.jdbc.oracle.yml` | `tests/sql/ddl/oracle.sql` |
-| DB2 | `docker-compose.jdbc.db2.yml` | `tests/sql/ddl/db2.sql` |
-
-### PostgreSQL (default)
+All database services are defined in a single `docker-compose.yml`:
 
 ```bash
-# Start
-docker compose -f docker-compose.jdbc.yml up -d
+# Start individual services
+docker compose up postgres -d
+docker compose up mysql mariadb -d
 
-# Create tables
-PGPASSWORD=sparkless psql -h localhost -U sparkless -d sparkless -c "
-CREATE TABLE IF NOT EXISTS sparkless_jdbc_test (id BIGINT PRIMARY KEY, name TEXT);
-INSERT INTO sparkless_jdbc_test (id, name) VALUES (1, 'a'), (2, 'b') ON CONFLICT DO NOTHING;
-CREATE TABLE IF NOT EXISTS sparkless_jdbc_writeread_test (id BIGINT, name TEXT);
-"
+# Start all services
+docker compose up -d
 
-# Env
+# Stop all services
+docker compose down
+```
+
+### PostgreSQL (port 5432)
+
+```bash
+docker compose up postgres -d
 export SPARKLESS_TEST_JDBC_URL="postgres://sparkless:sparkless@localhost:5432/sparkless"
 export SPARKLESS_TEST_JDBC_USER=sparkless
 export SPARKLESS_TEST_JDBC_PASSWORD=sparkless
 ```
 
-### MySQL
+### MySQL (port 3306)
 
 ```bash
-docker compose -f docker-compose.jdbc.mysql.yml up -d
+docker compose up mysql -d
 docker exec -i sparkless-mysql mysql -usparkless -psparkless sparkless < tests/sql/ddl/mysql.sql
 
 export SPARKLESS_TEST_JDBC_MYSQL_URL="jdbc:mysql://localhost:3306/sparkless"
@@ -172,10 +167,10 @@ export SPARKLESS_TEST_JDBC_MYSQL_USER=sparkless
 export SPARKLESS_TEST_JDBC_MYSQL_PASSWORD=sparkless
 ```
 
-### MariaDB
+### MariaDB (port 3307)
 
 ```bash
-docker compose -f docker-compose.jdbc.mariadb.yml up -d
+docker compose up mariadb -d
 docker exec -i sparkless-mariadb mariadb -usparkless -psparkless sparkless < tests/sql/ddl/mariadb.sql
 
 export SPARKLESS_TEST_JDBC_MARIADB_URL="jdbc:mariadb://localhost:3307/sparkless"
@@ -183,10 +178,10 @@ export SPARKLESS_TEST_JDBC_MARIADB_USER=sparkless
 export SPARKLESS_TEST_JDBC_MARIADB_PASSWORD=sparkless
 ```
 
-### SQL Server
+### SQL Server (port 1433)
 
 ```bash
-docker compose -f docker-compose.jdbc.mssql.yml up -d
+docker compose up mssql -d
 # Wait for health check, then create tables
 docker exec -i sparkless-mssql /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P "Sparkless123!" -C -i /dev/stdin < tests/sql/ddl/mssql.sql
 
@@ -195,11 +190,11 @@ export SPARKLESS_TEST_JDBC_MSSQL_USER=sa
 export SPARKLESS_TEST_JDBC_MSSQL_PASSWORD="Sparkless123!"
 ```
 
-### Oracle
+### Oracle (port 1521)
 
 ```bash
-docker compose -f docker-compose.jdbc.oracle.yml up -d
-# Wait ~1-2 minutes for startup, then:
+docker compose up oracle -d
+# Wait ~2-3 minutes for startup, then:
 docker exec -i sparkless-oracle sqlplus system/oracle@FREEPDB1 < tests/sql/ddl/oracle.sql
 
 export SPARKLESS_TEST_JDBC_ORACLE_URL="jdbc:oracle:thin:@//localhost:1521/FREEPDB1"
@@ -207,12 +202,12 @@ export SPARKLESS_TEST_JDBC_ORACLE_USER=system
 export SPARKLESS_TEST_JDBC_ORACLE_PASSWORD=oracle
 ```
 
-### DB2
+### DB2 (port 50000)
 
-DB2 requires ODBC driver manager (`brew install unixodbc` on macOS, `apt install unixodbc-dev` on Linux) and the IBM DB2 ODBC driver.
+DB2 requires ODBC driver manager (`brew install unixodbc` on macOS, `apt install unixodbc-dev` on Linux).
 
 ```bash
-docker compose -f docker-compose.jdbc.db2.yml up -d
+docker compose up db2 -d
 # Wait several minutes for first startup, then:
 docker exec -i sparkless-db2 su - db2inst1 -c "db2 connect to SPARKDB && db2 -tvf /dev/stdin" < tests/sql/ddl/db2.sql
 

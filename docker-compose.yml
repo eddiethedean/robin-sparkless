@@ -1,0 +1,122 @@
+# Database services for local JDBC integration tests.
+#
+# Usage:
+#   docker compose up postgres          # Start only PostgreSQL
+#   docker compose up mysql mariadb     # Start MySQL and MariaDB
+#   docker compose up -d                # Start all services in background
+#   docker compose down                 # Stop all services
+#
+# NOTE: Tests use testcontainers by default (auto-starts Docker containers).
+# These services are for manual testing, debugging, or when testcontainers isn't available.
+
+services:
+  # PostgreSQL - Port 5432
+  # ENV: SPARKLESS_TEST_JDBC_URL="postgres://sparkless:sparkless@localhost:5432/sparkless"
+  postgres:
+    image: postgres:16-alpine
+    container_name: sparkless-postgres
+    environment:
+      POSTGRES_USER: sparkless
+      POSTGRES_PASSWORD: sparkless
+      POSTGRES_DB: sparkless
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sparkless -d sparkless"]
+      interval: 2s
+      timeout: 5s
+      retries: 10
+
+  # MySQL - Port 3306
+  # ENV: SPARKLESS_TEST_JDBC_MYSQL_URL="jdbc:mysql://localhost:3306/sparkless"
+  mysql:
+    image: mysql:8.0
+    container_name: sparkless-mysql
+    environment:
+      MYSQL_DATABASE: sparkless
+      MYSQL_USER: sparkless
+      MYSQL_PASSWORD: sparkless
+      MYSQL_ROOT_PASSWORD: root
+    ports:
+      - "3306:3306"
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -proot --silent"]
+      interval: 2s
+      timeout: 5s
+      retries: 20
+
+  # MariaDB - Port 3307 (offset to avoid MySQL conflict)
+  # ENV: SPARKLESS_TEST_JDBC_MARIADB_URL="jdbc:mariadb://localhost:3307/sparkless"
+  mariadb:
+    image: mariadb:10.11
+    container_name: sparkless-mariadb
+    environment:
+      MARIADB_DATABASE: sparkless
+      MARIADB_USER: sparkless
+      MARIADB_PASSWORD: sparkless
+      MARIADB_ROOT_PASSWORD: root
+    ports:
+      - "3307:3306"
+    healthcheck:
+      test: ["CMD-SHELL", "mariadb-admin ping -h 127.0.0.1 -uroot -proot --silent"]
+      interval: 2s
+      timeout: 5s
+      retries: 20
+
+  # SQL Server - Port 1433
+  # ENV: SPARKLESS_TEST_JDBC_MSSQL_URL="jdbc:sqlserver://localhost:1433;databaseName=sparkless;encrypt=false;trustServerCertificate=true"
+  mssql:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: sparkless-mssql
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: "Sparkless123!"
+      MSSQL_PID: "Developer"
+    ports:
+      - "1433:1433"
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P \"Sparkless123!\" -C -Q \"SELECT 1\" 1>/dev/null || exit 1",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  # Oracle XE - Port 1521 (slow to start, ~2-3 minutes)
+  # ENV: SPARKLESS_TEST_JDBC_ORACLE_URL="jdbc:oracle:thin:@//localhost:1521/FREEPDB1"
+  oracle:
+    image: gvenzl/oracle-free:23-slim-faststart
+    container_name: sparkless-oracle
+    environment:
+      ORACLE_PASSWORD: oracle
+    ports:
+      - "1521:1521"
+    healthcheck:
+      test: ["CMD-SHELL", "healthcheck.sh"]
+      interval: 10s
+      timeout: 10s
+      retries: 30
+
+  # IBM DB2 - Port 50000 (requires privileged mode, slow to start)
+  # ENV: SPARKLESS_TEST_JDBC_DB2_URL="jdbc:db2://localhost:50000/SPARKDB"
+  # NOTE: Requires ODBC driver manager (brew install unixodbc / apt install unixodbc-dev)
+  db2:
+    image: ibmcom/db2:11.5.8.0
+    container_name: sparkless-db2
+    privileged: true
+    environment:
+      LICENSE: accept
+      DB2INSTANCE: db2inst1
+      DB2INST1_PASSWORD: password
+      DBNAME: SPARKDB
+      ARCHIVE_LOGS: "false"
+      AUTOCONFIG: "false"
+    ports:
+      - "50000:50000"
+    healthcheck:
+      test: ["CMD-SHELL", "su - db2inst1 -c 'db2 connect to SPARKDB'"]
+      interval: 30s
+      timeout: 30s
+      retries: 20
