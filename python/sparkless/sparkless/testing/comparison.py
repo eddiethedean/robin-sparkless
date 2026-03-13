@@ -320,7 +320,7 @@ def _values_equal(actual: Any, expected: Any, tolerance: float = 1e-6) -> bool:
         )
 
     # Default comparison
-    return actual == expected
+    return bool(actual == expected)
 
 
 def _is_date_like(value: Any) -> bool:
@@ -401,4 +401,4 @@ def _compare_types(actual_type: Any, expected_type: Any) -> bool:
 
     actual_name = actual_type.__class__.__name__
     expected_name = expected_type.__class__.__name__
-    return actual_name == expected_name
+    return bool(actual_name == expected_name)
